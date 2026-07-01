@@ -9,7 +9,8 @@ Ausgeliefert als [copier](https://copier.readthedocs.io)-Template. Adapter für
 
 > **Status:** SP1 (Foundation) + SP2 (Architektur-Onboarding) + SP3
 > (feature-registry, github-issues, contracts-drift) + SP4 (git-hooks,
-> contract-first, parity, security-floor) ausgeliefert, Tag `v0.9.0`.
+> contract-first, parity, security-floor) + Capstone (command-adapters)
+> ausgeliefert, Tag `v1.0.0` — das volle Kenni-Command-Set, harness-nativ.
 > Setup: [`BOOTSTRAP.md`](BOOTSTRAP.md) · Design: [`docs/design/`](docs/design/).
 
 ---
@@ -59,6 +60,13 @@ Test-Traceability), `github-issues` (EARS-Templates + Issue-Ref-Gate) und
 `contract-first` (geteiltes Capability-Interface im committeten Spec deklariert, bevor eine Surface darauf baut),
 `parity` (Capability×Surface-Matrix, die jede bewusste Lücke an ein Tracking-Issue bindet — gegen stillen Capability-Verlust)
 und `security-floor` (der grep-bare Teil der Security-Invarianten als blockierendes Gate — verbotene Regex-Muster über git-getrackte Dateien).
+
+**Harness-native Commands:** Der Zyklus (`brainstorm plan execute review quick
+debug commit prime`) liegt als dünne Slash-Commands je aktivem Harness
+(`.claude/commands/`, `.github/prompts/`, plus eine AGENTS.md-Sektion), die auf
+die neutralen `docs/process/`-Phasen zeigen. Sie sind harness-Ergonomie, kein
+Modul — und werden vom `doc-drift-gate` mitgeprüft, sodass ein toter
+Command-Pointer die CI failt.
 
 ## Architektur als geprüfter Contract (SP2)
 
@@ -115,3 +123,4 @@ der Rest ist self-contained beschrieben.
 | **SP2** Architektur-Onboarding | Architektur-Interview + Verifikation gegen echten Code | ✅ ausgeliefert |
 | **SP3** Prozess-Vervollständigung (Multi-Repo/-Mensch) | feature-registry · github-issues · contracts-drift | ✅ Slices 1–3 |
 | **SP4** Prozess-Vervollständigung II | git-hooks (lokale Enforcement-Säule) · contract-first (Interface-declared-first-Gate) · parity (Capability×Surface-Matrix, Gap→Issue) · security-floor (Pattern-Floor über git-getrackte Dateien) | ✅ ausgeliefert |
+| **Capstone** command-adapters | Harness-native Slash-Commands (Claude / Copilot / AGENTS.md), dünn auf `docs/process/` zeigend, vom doc-drift-gate mitgeprüft — schließt das „vollständig wie Kenni"-Programm bei `v1.0.0` | ✅ ausgeliefert |
