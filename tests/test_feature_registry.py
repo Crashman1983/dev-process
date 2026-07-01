@@ -137,3 +137,52 @@ def test_empty_acceptance_text_is_hard(render, tmp_path):
     r = _run(out)
     assert r.returncode == 1
     assert "acceptance[0]" in r.stdout
+
+
+def test_missing_test_path_is_hard(render, tmp_path):
+    out = _render(render, tmp_path)
+    _write_story(out, "STORY-0012.json", {**VALID, "tests": ["tests/nope/test_absent.py"]})
+    r = _run(out)
+    assert r.returncode == 1
+    assert "test path does not exist" in r.stdout
+
+
+def test_done_without_tests_is_hard(render, tmp_path):
+    out = _render(render, tmp_path)
+    story = {**VALID, "status": "done"}
+    story.pop("tests")
+    _write_story(out, "STORY-0013.json", story)
+    r = _run(out)
+    assert r.returncode == 1
+    assert "requires at least one test" in r.stdout
+
+
+def test_test_path_with_node_selector_resolves(render, tmp_path):
+    out = _render(render, tmp_path)
+    (out / "tests/billing").mkdir(parents=True, exist_ok=True)
+    (out / "tests/billing/test_post.py").write_text("def test_x():\n    pass\n")
+    story = {**VALID, "tests": ["tests/billing/test_post.py::test_x"]}
+    _write_story(out, "STORY-0014.json", story)
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+
+
+def test_missing_adr_is_hard(render, tmp_path):
+    out = _render(render, tmp_path)
+    (out / "tests/billing").mkdir(parents=True, exist_ok=True)
+    (out / "tests/billing/test_post.py").write_text("def test_x():\n    pass\n")
+    _write_story(out, "STORY-0015.json", {**VALID, "adr": "ADR-0099"})
+    r = _run(out)
+    assert r.returncode == 1
+    assert "adr link" in r.stdout
+
+
+def test_present_adr_passes(render, tmp_path):
+    out = _render(render, tmp_path)
+    (out / "tests/billing").mkdir(parents=True, exist_ok=True)
+    (out / "tests/billing/test_post.py").write_text("def test_x():\n    pass\n")
+    (out / "docs/process/adr").mkdir(parents=True, exist_ok=True)
+    (out / "docs/process/adr/adr-0005-billing.md").write_text("# ADR 5\n")
+    _write_story(out, "STORY-0016.json", {**VALID, "adr": "ADR-0005"})
+    r = _run(out)
+    assert r.returncode == 0, r.stdout

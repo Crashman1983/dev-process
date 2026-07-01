@@ -71,6 +71,25 @@ def _check_story(root: Path, path: Path, seen_ids: dict) -> tuple[list[str], lis
             if not isinstance(ac, dict) or not str(ac.get("text", "")).strip():
                 hard.append(f"{rel}: acceptance[{i}] has empty 'text'")
 
+    tests = data.get("tests") or []
+    if not isinstance(tests, list):
+        hard.append(f"{rel}: 'tests' must be a list")
+        tests = []
+    n_tests = 0
+    for t in tests:
+        file_part = str(t).split("::", 1)[0]  # strip a pytest ::node selector
+        if not (root / file_part).is_file():
+            hard.append(f"{rel}: test path does not exist: {t}")
+        else:
+            n_tests += 1
+
+    if data.get("status") == "done" and not tests:
+        hard.append(f"{rel}: status 'done' requires at least one test")
+
+    adr = data.get("adr")
+    if adr and not _adr_exists(root, adr):
+        hard.append(f"{rel}: adr link {adr!r} has no file under {ADR_DIR}/")
+
     return hard, soft
 
 
