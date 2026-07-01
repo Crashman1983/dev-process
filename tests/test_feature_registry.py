@@ -186,3 +186,43 @@ def test_present_adr_passes(render, tmp_path):
     _write_story(out, "STORY-0016.json", {**VALID, "adr": "ADR-0005"})
     r = _run(out)
     assert r.returncode == 0, r.stdout
+
+
+def test_acceptance_without_test_is_soft(render, tmp_path):
+    out = _render(render, tmp_path)
+    (out / "tests/billing").mkdir(parents=True, exist_ok=True)
+    (out / "tests/billing/test_post.py").write_text("def test_x():\n    pass\n")
+    story = {
+        **VALID,
+        "status": "in-progress",
+        "acceptance": [
+            {"id": "AC1", "text": "one"},
+            {"id": "AC2", "text": "two"},
+        ],
+        "tests": ["tests/billing/test_post.py"],
+    }
+    _write_story(out, "STORY-0017.json", story)
+    r = _run(out)
+    assert r.returncode == 0, r.stdout          # soft: does not fail the build
+    assert "coverage unverified" in r.stdout
+
+
+def test_unknown_field_ignored(render, tmp_path):
+    out = _render(render, tmp_path)
+    (out / "tests/billing").mkdir(parents=True, exist_ok=True)
+    (out / "tests/billing/test_post.py").write_text("def test_x():\n    pass\n")
+    story = {**VALID, "surface": "web", "owner": "team-a", "links": ["x"]}
+    _write_story(out, "STORY-0018.json", story)
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+    assert "registry-gate: OK" in r.stdout
+
+
+def test_example_file_not_validated(render, tmp_path):
+    out = _render(render, tmp_path)
+    # a broken *.example.json must be ignored even though it is malformed
+    (out / REG).mkdir(parents=True, exist_ok=True)
+    (out / REG / "STORY-9999.example.json").write_text("{ not json", encoding="utf-8")
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+    assert "no stories yet" in r.stdout

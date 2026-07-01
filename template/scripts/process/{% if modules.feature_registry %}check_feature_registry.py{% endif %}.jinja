@@ -64,9 +64,11 @@ def _check_story(root: Path, path: Path, seen_ids: dict) -> tuple[list[str], lis
         hard.append(f"{rel}: 'status' must be one of {sorted(STATUSES)}, got {data.get('status')!r}")
 
     acceptance = data.get("acceptance")
+    n_acc = 0
     if not isinstance(acceptance, list) or not acceptance:
         hard.append(f"{rel}: 'acceptance' must be a non-empty list")
     else:
+        n_acc = len(acceptance)
         for i, ac in enumerate(acceptance):
             if not isinstance(ac, dict) or not str(ac.get("text", "")).strip():
                 hard.append(f"{rel}: acceptance[{i}] has empty 'text'")
@@ -89,6 +91,9 @@ def _check_story(root: Path, path: Path, seen_ids: dict) -> tuple[list[str], lis
     adr = data.get("adr")
     if adr and not _adr_exists(root, adr):
         hard.append(f"{rel}: adr link {adr!r} has no file under {ADR_DIR}/")
+
+    if data.get("status") in ("in-progress", "done") and n_acc > n_tests:
+        soft.append(f"{rel}: {n_acc} acceptance criteria but {n_tests} mapped test(s) — coverage unverified")
 
     return hard, soft
 
