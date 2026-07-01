@@ -9,7 +9,7 @@ Ausgeliefert als [copier](https://copier.readthedocs.io)-Template. Adapter für
 
 > **Status:** SP1 (Foundation) + SP2 (Architektur-Onboarding) + SP3
 > (feature-registry, github-issues, contracts-drift) + SP4 (git-hooks,
-> contract-first, parity) ausgeliefert, Tag `v0.8.0`.
+> contract-first, parity, security-floor) ausgeliefert, Tag `v0.9.0`.
 > Setup: [`BOOTSTRAP.md`](BOOTSTRAP.md) · Design: [`docs/design/`](docs/design/).
 
 ---
@@ -56,8 +56,9 @@ Module heute: `doc-drift-gate` (tote Pfad-Referenzen in Docs), `arch-onboarding`
 Test-Traceability), `github-issues` (EARS-Templates + Issue-Ref-Gate) und
 `contracts-drift` (Kopplung-als-Contract, Pin-Drift-Ratchet + best-effort-Konformität),
 `git-hooks` (lokale pre-commit/pre-push/post-commit-Durchsetzung, an den gate_runner delegiert),
-`contract-first` (geteiltes Capability-Interface im committeten Spec deklariert, bevor eine Surface darauf baut)
-und `parity` (Capability×Surface-Matrix, die jede bewusste Lücke an ein Tracking-Issue bindet — gegen stillen Capability-Verlust).
+`contract-first` (geteiltes Capability-Interface im committeten Spec deklariert, bevor eine Surface darauf baut),
+`parity` (Capability×Surface-Matrix, die jede bewusste Lücke an ein Tracking-Issue bindet — gegen stillen Capability-Verlust)
+und `security-floor` (der grep-bare Teil der Security-Invarianten als blockierendes Gate — verbotene Regex-Muster über git-getrackte Dateien).
 
 ## Architektur als geprüfter Contract (SP2)
 
@@ -113,4 +114,4 @@ der Rest ist self-contained beschrieben.
 | **SP1** Foundation | Kern + Adapter + copier-Init + additiver Brownfield-Drop-in | ✅ ausgeliefert |
 | **SP2** Architektur-Onboarding | Architektur-Interview + Verifikation gegen echten Code | ✅ ausgeliefert |
 | **SP3** Prozess-Vervollständigung (Multi-Repo/-Mensch) | feature-registry · github-issues · contracts-drift | ✅ Slices 1–3 |
-| **SP4** Prozess-Vervollständigung II | git-hooks (lokale Enforcement-Säule) · contract-first (Interface-declared-first-Gate) · parity (Capability×Surface-Matrix, Gap→Issue) | ✅ ausgeliefert |
+| **SP4** Prozess-Vervollständigung II | git-hooks (lokale Enforcement-Säule) · contract-first (Interface-declared-first-Gate) · parity (Capability×Surface-Matrix, Gap→Issue) · security-floor (Pattern-Floor über git-getrackte Dateien) | ✅ ausgeliefert |
