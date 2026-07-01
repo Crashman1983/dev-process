@@ -19,3 +19,12 @@ modules:
     doc_drift_gate: false
     arch_onboarding: false
     feature_registry: false
+    github_issues: false
+
+github_repo:
+  type: str
+  help: >-
+    GitHub repo as OWNER/REPO for issue tracking (optional — leave blank to skip
+    the best-effort issue-existence check; issue-ref format is still enforced).
+  default: ""
+  when: "{{ modules.github_issues }}"

@@ -1,0 +1,85 @@
+#!/usr/bin/env python3
+"""github-issues gate: validate the `issue` field on feature-registry stories.
+
+Issue-ref FORMAT is hard-guaranteed (CI exit 1). Issue EXISTENCE on GitHub is
+best-effort and entirely advisory (never exit 1). Stdlib only in this half;
+existence (added by the github-issues module) reads the copier answers."""
+from __future__ import annotations
+
+import json
+import re
+import sys
+from pathlib import Path
+
+REGISTRY_DIR = "docs/process/feature-registry"
+TRACKED = ("in-progress", "done")  # statuses that ought to carry an issue link
+
+_BARE = re.compile(r"^#(\d+)$")
+_CROSS = re.compile(r"^([\w.-]+/[\w.-]+)#(\d+)$")
+_URL = re.compile(r"^https://github\.com/([\w.-]+/[\w.-]+)/issues/(\d+)$")
+
+
+def _story_files(root: Path) -> list[Path]:
+    reg = root / REGISTRY_DIR
+    if not reg.is_dir():
+        return []
+    return sorted(p for p in reg.glob("*.json") if not p.name.endswith(".example.json"))
+
+
+def parse_issue_ref(ref: str) -> tuple[str | None, int] | None:
+    """(repo_or_None, number) for a well-formed ref, else None. repo is None
+    only for the bare `#N` form, which resolves against the configured repo."""
+    for pat, has_repo in ((_BARE, False), (_CROSS, True), (_URL, True)):
+        m = pat.match(ref)
+        if m:
+            return (m.group(1), int(m.group(2))) if has_repo else (None, int(m.group(1)))
+    return None
+
+
+def check(root: Path) -> tuple[list[str], list[str]]:
+    stories = _story_files(root)
+    if not stories:
+        return [], ["no stories to check (feature-registry empty or absent)"]
+    hard: list[str] = []
+    soft: list[str] = []
+    for path in stories:
+        rel = path.relative_to(root)
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            continue  # the feature-registry gate owns JSON validity
+        if not isinstance(data, dict):
+            continue
+        issue = data.get("issue")
+        status = data.get("status")
+        if not issue:
+            if status in TRACKED:
+                soft.append(f"{rel}: status {status!r} but no issue link — unverified")
+            continue
+        if not isinstance(issue, str):
+            hard.append(f"{rel}: 'issue' must be a string, got {type(issue).__name__}")
+            continue
+        if parse_issue_ref(issue.strip()) is None:
+            hard.append(
+                f"{rel}: malformed issue ref {issue!r} "
+                "(want '#N', 'owner/repo#N', or a github issue URL)"
+            )
+    return hard, soft
+
+
+def main() -> int:
+    root = Path(sys.argv[1] if len(sys.argv) > 1 else ".").resolve()
+    hard, soft = check(root)
+    for note in soft:
+        print(f"issues-gate: note: {note}")
+    if hard:
+        print("issues-gate: FAILED:")
+        for h in hard:
+            print(f"  - {h}")
+        return 1
+    print("issues-gate: OK")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
