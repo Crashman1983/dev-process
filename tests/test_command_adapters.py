@@ -1,3 +1,4 @@
+import re
 import subprocess
 import sys
 
@@ -86,6 +87,38 @@ def test_agents_md_lists_commands(render, tmp_path):
     assert "## Process commands" in text
     for name in COMMANDS:
         assert name in text, name
+
+
+def test_each_command_surface_ref_is_enforced(render, tmp_path):
+    # Durability of the v1.0.0 claim "command pointers are drift-checked".
+    # test_shipped_commands_drift_clean (exit 0) is green whether the refs
+    # resolve OR there are zero checkable refs — so it cannot notice a file
+    # regressing to a bare `workflow.md` (no slash => _is_local_path skips it,
+    # silently un-checked). Prove the guarantee directly: break each shipped
+    # surface's real docs/process ref and assert the gate catches THAT file.
+    out = render(
+        tmp_path,
+        {
+            "project_name": "d",
+            "modules": {"doc_drift_gate": True},
+            "harnesses": {"copilot": True, "agents_md": True},
+        },
+    )
+    files = list((out / ".claude/commands").glob("*.md"))
+    files += list((out / ".github/prompts").glob("*.prompt.md"))
+    files.append(out / "AGENTS.md")
+    assert _run_gate(out).returncode == 0, "baseline tree should be drift-clean"
+    # break a real file ref (docs/process/<name>.md), not the bare directory
+    # reference — the gate only checks refs carrying an extension.
+    ref = re.compile(r"docs/process/[a-z-]+\.md")
+    for f in files:
+        original = f.read_text()
+        assert ref.search(original), f"{f.name}: no enforceable docs/process/*.md ref"
+        f.write_text(ref.sub("docs/process/missing.md", original, count=1))
+        r = _run_gate(out)
+        f.write_text(original)  # restore before next iteration
+        assert r.returncode == 1, f"{f.name}: gate did not catch a broken ref"
+        assert f.name in (r.stdout + r.stderr), f"{f.name}: gate did not name the file"
 
 
 def test_commands_are_neutral(render, tmp_path):
