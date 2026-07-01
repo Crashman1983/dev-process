@@ -8,6 +8,8 @@ Only an exact ```arch fence is read — an inert ```arch-example seed is ignored
 from __future__ import annotations
 
 import re
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -28,6 +30,43 @@ def extract_block(md: str) -> str | None:
             return "\n".join(out)
         out.append(line)
     return None
+
+
+def _has_importlinter(root: Path) -> bool:
+    if (root / ".importlinter").is_file():
+        return True
+    cfg = root / "setup.cfg"
+    return cfg.is_file() and "[importlinter]" in cfg.read_text(encoding="utf-8")
+
+
+def _has_depcruise(root: Path) -> bool:
+    return any(
+        (root / f).is_file()
+        for f in (".dependency-cruiser.js", ".dependency-cruiser.json", ".dependency-cruiser.cjs")
+    )
+
+
+def _conformance(root: Path, rules: list) -> tuple[list[str], list[str]]:
+    hard: list[str] = []
+    soft: list[str] = []
+    ran = False
+    linters = []
+    if _has_importlinter(root):
+        linters.append(("lint-imports", ["lint-imports"]))
+    if _has_depcruise(root):
+        linters.append(("depcruise", ["depcruise", "--validate"]))
+    for label, cmd in linters:
+        binary = shutil.which(cmd[0])
+        if binary is None:
+            soft.append(f"arch-linter '{label}' configured but not installed — conformance unverified")
+            continue
+        ran = True
+        if subprocess.run([binary, *cmd[1:]], cwd=root).returncode != 0:
+            hard.append(f"arch-linter '{label}' reported layering violations")
+    if not ran and not hard:
+        for rule in rules:
+            soft.append(f"conformance not machine-verified (no arch-linter): review 'forbid {rule.get('forbid')}' manually")
+    return hard, soft
 
 
 def check(root: Path) -> tuple[list[str], list[str]]:
@@ -71,7 +110,9 @@ def check(root: Path) -> tuple[list[str], list[str]]:
                 if layer not in layers:
                     hard.append(f"rule references unknown layer '{layer}' in {forbid!r}")
 
-    return hard, []
+    rules = data.get("rules", []) or []
+    hard_c, soft = _conformance(root, rules) if rules else ([], [])
+    return hard + hard_c, soft
 
 
 def main() -> int:

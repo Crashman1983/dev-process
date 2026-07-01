@@ -125,3 +125,45 @@ def test_forward_compat_unknown_key_ignored(render, tmp_path):
     _write_arch(out, block)
     r = _run(out)
     assert r.returncode == 0, r.stdout
+
+
+def _stub(bindir: Path, name: str, code: int):
+    bindir.mkdir(parents=True, exist_ok=True)
+    p = bindir / name
+    p.write_text(f"#!/bin/sh\nexit {code}\n")
+    p.chmod(0o755)
+
+
+RULE_BLOCK = CLEAN_BLOCK + "rules:\n  - {forbid: domain -> infra}\n"
+
+
+def test_conformance_no_linter_checklist(render, tmp_path):
+    out = _render(render, tmp_path)
+    _seed_code(out)
+    _write_arch(out, RULE_BLOCK)
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+    assert "review" in r.stdout.lower()
+
+
+def test_conformance_linter_fail(render, tmp_path):
+    out = _render(render, tmp_path)
+    _seed_code(out)
+    (out / ".importlinter").write_text("[importlinter]\n")
+    _write_arch(out, RULE_BLOCK)
+    bindir = tmp_path / "bin"
+    _stub(bindir, "lint-imports", 1)
+    r = _run(out, extra_path=str(bindir))
+    assert r.returncode == 1
+    assert "lint-imports" in r.stdout
+
+
+def test_conformance_linter_pass(render, tmp_path):
+    out = _render(render, tmp_path)
+    _seed_code(out)
+    (out / ".importlinter").write_text("[importlinter]\n")
+    _write_arch(out, RULE_BLOCK)
+    bindir = tmp_path / "bin"
+    _stub(bindir, "lint-imports", 0)
+    r = _run(out, extra_path=str(bindir))
+    assert r.returncode == 0, r.stdout
