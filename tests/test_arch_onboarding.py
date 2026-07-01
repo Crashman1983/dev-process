@@ -231,3 +231,104 @@ def test_docdrift_scans_architecture_md(render, tmp_path):
     )
     assert r.returncode == 1
     assert "ARCHITECTURE.md" in r.stdout
+
+
+# --- review-driven hardening (SP2 gate) ---
+
+
+def _stub_capture(bindir: Path, name: str, argfile: str, code: int = 0):
+    bindir.mkdir(parents=True, exist_ok=True)
+    p = bindir / name
+    p.write_text(f'#!/bin/sh\nprintf "%s" "$*" > "{argfile}"\nexit {code}\n')
+    p.chmod(0o755)
+
+
+def test_invalid_yaml_block_clean_fail(render, tmp_path):
+    out = _render(render, tmp_path)
+    _seed_code(out)
+    _write_arch(out, "key: [unclosed\n")
+    r = _run(out)
+    assert r.returncode == 1
+    assert "Traceback" not in r.stderr
+    assert "YAML" in r.stdout
+
+
+def test_non_dict_block_clean_fail(render, tmp_path):
+    out = _render(render, tmp_path)
+    _seed_code(out)
+    _write_arch(out, "- just\n- a\n- list\n")
+    r = _run(out)
+    assert r.returncode == 1
+    assert "Traceback" not in r.stderr
+    assert "mapping" in r.stdout
+
+
+def test_adr_as_integer_no_crash(render, tmp_path):
+    out = _render(render, tmp_path)
+    _seed_code(out)
+    _write_arch(out, CLEAN_BLOCK + "rules:\n  - {forbid: domain -> infra, adr: 7}\n")
+    r = _run(out)
+    assert r.returncode == 1  # no adr-0007-*.md -> clean hard-fail, not a TypeError
+    assert "Traceback" not in r.stderr
+
+
+def test_interface_without_name_flagged(render, tmp_path):
+    out = _render(render, tmp_path)
+    _seed_code(out)
+    block = (
+        "code_roots: [src]\n"
+        "layers:\n  domain: {path: src/domain}\n"
+        "interfaces:\n  - {path: src/domain/ports.py}\n"
+    )
+    _write_arch(out, block)
+    r = _run(out)
+    assert r.returncode == 1
+    assert "name" in r.stdout
+
+
+def test_importlinter_pyproject_detected(render, tmp_path):
+    out = _render(render, tmp_path)
+    _seed_code(out)
+    (out / "pyproject.toml").write_text("[tool.importlinter]\nroot_package = x\n")
+    _write_arch(out, RULE_BLOCK)
+    bindir = tmp_path / "bin"
+    _stub(bindir, "lint-imports", 1)
+    r = _run(out, extra_path=str(bindir))
+    assert r.returncode == 1
+    assert "lint-imports" in r.stdout
+
+
+def test_depcruise_yaml_config_detected(render, tmp_path):
+    out = _render(render, tmp_path)
+    _seed_code(out)
+    (out / ".dependency-cruiser.yaml").write_text("forbidden: []\n")
+    _write_arch(out, RULE_BLOCK)
+    bindir = tmp_path / "bin"
+    _stub(bindir, "depcruise", 1)
+    r = _run(out, extra_path=str(bindir))
+    assert r.returncode == 1
+    assert "depcruise" in r.stdout
+
+
+def test_depcruise_receives_code_roots(render, tmp_path):
+    out = _render(render, tmp_path)
+    _seed_code(out)
+    (out / ".dependency-cruiser.json").write_text("{}\n")
+    _write_arch(out, RULE_BLOCK)
+    bindir = tmp_path / "bin"
+    argfile = out / "dc-args.txt"
+    _stub_capture(bindir, "depcruise", str(argfile), code=0)
+    r = _run(out, extra_path=str(bindir))
+    assert r.returncode == 0, r.stdout
+    assert "src" in argfile.read_text()  # code_roots forwarded as scan sources
+
+
+def test_conformance_configured_but_uninstalled_no_double_note(render, tmp_path):
+    out = _render(render, tmp_path)
+    _seed_code(out)
+    (out / ".importlinter").write_text("[importlinter]\n")
+    _write_arch(out, RULE_BLOCK)  # linter configured, but no stub on PATH -> absent
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+    assert "not installed" in r.stdout
+    assert "no arch-linter" not in r.stdout  # redundant checklist suppressed

@@ -32,8 +32,8 @@ def extract_block(md: str) -> str | None:
     return None
 
 
-def _adr_exists(root: Path, adr: str) -> bool:
-    m = re.search(r"\d+", adr)
+def _adr_exists(root: Path, adr: object) -> bool:
+    m = re.search(r"\d+", str(adr))
     if not m:
         return False
     return bool(list((root / ADR_DIR).glob(f"adr-{int(m.group()):04d}-*.md")))
@@ -42,35 +42,54 @@ def _adr_exists(root: Path, adr: str) -> bool:
 def _has_importlinter(root: Path) -> bool:
     if (root / ".importlinter").is_file():
         return True
-    cfg = root / "setup.cfg"
-    return cfg.is_file() and "[importlinter]" in cfg.read_text(encoding="utf-8")
+    for cfg_name, marker in (("setup.cfg", "[importlinter]"), ("pyproject.toml", "[tool.importlinter]")):
+        cfg = root / cfg_name
+        if cfg.is_file() and marker in cfg.read_text(encoding="utf-8"):
+            return True
+    return False
 
 
 def _has_depcruise(root: Path) -> bool:
     return any(
         (root / f).is_file()
-        for f in (".dependency-cruiser.js", ".dependency-cruiser.json", ".dependency-cruiser.cjs")
+        for f in (
+            ".dependency-cruiser.js",
+            ".dependency-cruiser.cjs",
+            ".dependency-cruiser.mjs",
+            ".dependency-cruiser.json",
+            ".dependency-cruiser.yaml",
+            ".dependency-cruiser.yml",
+        )
     )
 
 
-def _conformance(root: Path, rules: list) -> tuple[list[str], list[str]]:
+def _conformance(root: Path, rules: list, code_roots: list) -> tuple[list[str], list[str]]:
     hard: list[str] = []
     soft: list[str] = []
     ran = False
+    configured_missing = False
     linters = []
     if _has_importlinter(root):
+        # import-linter reads its contracts and source package from its own config.
         linters.append(("lint-imports", ["lint-imports"]))
     if _has_depcruise(root):
-        linters.append(("depcruise", ["depcruise", "--validate"]))
+        # dependency-cruiser needs the source paths to scan as positional args;
+        # without them it cannot analyze anything. Take them from code_roots.
+        if code_roots:
+            linters.append(("depcruise", ["depcruise", "--validate", *(str(c) for c in code_roots)]))
+        else:
+            soft.append("arch-linter 'depcruise' configured but manifest has no code_roots to scan")
+            configured_missing = True
     for label, cmd in linters:
         binary = shutil.which(cmd[0])
         if binary is None:
             soft.append(f"arch-linter '{label}' configured but not installed — conformance unverified")
+            configured_missing = True
             continue
         ran = True
         if subprocess.run([binary, *cmd[1:]], cwd=root).returncode != 0:
             hard.append(f"arch-linter '{label}' reported layering violations")
-    if not ran and not hard:
+    if not ran and not hard and not configured_missing:
         for rule in rules:
             soft.append(f"conformance not machine-verified (no arch-linter): review 'forbid {rule.get('forbid')}' manually")
     return hard, soft
@@ -84,30 +103,52 @@ def check(root: Path) -> tuple[list[str], list[str]]:
     if block is None:
         return [], ["architecture not onboarded yet (no ```arch block)"]
 
-    data = yaml.safe_load(block) or {}
-    hard: list[str] = []
+    try:
+        data = yaml.safe_load(block)
+    except yaml.YAMLError as exc:
+        return [f"arch block is not valid YAML: {exc}"], []
+    if data is None:
+        data = {}
+    if not isinstance(data, dict):
+        return [f"arch block must be a YAML mapping, got {type(data).__name__}"], []
 
-    for r in data.get("code_roots", []) or []:
-        if not (root / r).exists():
+    hard: list[str] = []
+    code_roots = data.get("code_roots", []) or []
+
+    for r in code_roots:
+        if not (root / str(r)).exists():
             hard.append(f"code_root missing: {r}")
 
     layers = data.get("layers", {}) or {}
+    if not isinstance(layers, dict):
+        hard.append(f"'layers' must be a mapping, got {type(layers).__name__}")
+        layers = {}
     for name, spec in layers.items():
-        path = (spec or {}).get("path")
+        path = spec.get("path") if isinstance(spec, dict) else None
         if not path:
             hard.append(f"layer '{name}' has no path")
         elif not (root / path).exists():
             hard.append(f"layer '{name}' path missing: {path}")
 
     for iface in data.get("interfaces", []) or []:
+        if not isinstance(iface, dict):
+            hard.append(f"interface entry is not a mapping: {iface!r}")
+            continue
         name, path = iface.get("name"), iface.get("path")
+        if not name:
+            hard.append(f"interface entry missing 'name' (path: {path})")
+            continue
         target = root / path if path else None
         if not target or not target.is_file():
             hard.append(f"interface '{name}' file missing: {path}")
-        elif name and not re.search(rf"\b{re.escape(name)}\b", target.read_text(encoding="utf-8")):
+        elif not re.search(rf"\b{re.escape(str(name))}\b", target.read_text(encoding="utf-8")):
             hard.append(f"interface symbol '{name}' not found in {path}")
 
-    for rule in data.get("rules", []) or []:
+    rules = data.get("rules", []) or []
+    for rule in rules:
+        if not isinstance(rule, dict):
+            hard.append(f"rule entry is not a mapping: {rule!r}")
+            continue
         forbid = rule.get("forbid", "")
         m = re.match(r"\s*([\w-]+)\s*->\s*([\w-]+)\s*$", str(forbid))
         if not m:
@@ -120,8 +161,8 @@ def check(root: Path) -> tuple[list[str], list[str]]:
         if adr and not _adr_exists(root, adr):
             hard.append(f"rule adr link '{adr}' has no file under {ADR_DIR}/")
 
-    rules = data.get("rules", []) or []
-    hard_c, soft = _conformance(root, rules) if rules else ([], [])
+    valid_rules = [r for r in rules if isinstance(r, dict)]
+    hard_c, soft = _conformance(root, valid_rules, code_roots) if valid_rules else ([], [])
     return hard + hard_c, soft
 
 
