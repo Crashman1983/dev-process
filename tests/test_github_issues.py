@@ -226,3 +226,66 @@ def test_runner_skips_issues_when_off(render, tmp_path):
     r = _runner_list(out)
     assert r.returncode == 0, r.stderr
     assert "github-issues" not in r.stdout
+
+
+def test_artifacts_present_when_on(render, tmp_path):
+    out = _render(render, tmp_path)
+    assert (out / ".github/ISSUE_TEMPLATE/feature.md").is_file()
+    assert (out / ".github/ISSUE_TEMPLATE/bug.md").is_file()
+    assert (out / "scripts/process/new_issue.sh").is_file()
+    assert (out / "docs/process/modules/github-issues.md").is_file()
+
+
+def test_artifacts_absent_when_off(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d"})
+    assert not (out / ".github/ISSUE_TEMPLATE/feature.md").exists()
+    assert not (out / "scripts/process/new_issue.sh").exists()
+    assert not (out / "docs/process/modules/github-issues.md").exists()
+
+
+def test_artifacts_neutral(render, tmp_path):
+    out = _render(render, tmp_path)
+    for rel in [
+        ".github/ISSUE_TEMPLATE/feature.md",
+        ".github/ISSUE_TEMPLATE/bug.md",
+        "docs/process/modules/github-issues.md",
+        "scripts/process/new_issue.sh",
+    ]:
+        text = (out / rel).read_text()
+        for k in KENNI:
+            assert k not in text, f"{k} leaked in {rel}"
+
+
+def test_feature_template_has_ears_and_story(render, tmp_path):
+    out = _render(render, tmp_path)
+    t = (out / ".github/ISSUE_TEMPLATE/feature.md").read_text()
+    assert "User story" in t
+    assert "shall" in t  # EARS phrasing
+    assert "<role>" in t
+
+
+def test_seed_script_strips_frontmatter(render, tmp_path):
+    out = _render(render, tmp_path)
+    r = subprocess.run(
+        ["bash", str(out / "scripts/process/new_issue.sh"), "feature"],
+        cwd=out, capture_output=True, text=True,
+    )
+    assert r.returncode == 0, r.stderr
+    body_path = Path(r.stdout.strip())
+    assert body_path.is_file()
+    body = body_path.read_text()
+    assert "User story" in body
+    assert "labels:" not in body  # YAML frontmatter removed
+    assert not body.lstrip().startswith("---")
+
+
+def test_docdrift_resolves_module_doc_refs(render, tmp_path):
+    out = render(
+        tmp_path,
+        {"project_name": "d", "modules": {"doc_drift_gate": True, "github_issues": True}},
+    )
+    r = subprocess.run(
+        [sys.executable, str(out / "scripts/process/check_doc_drift.py"), str(out)],
+        capture_output=True, text=True,
+    )
+    assert r.returncode == 0, r.stdout  # module-doc refs resolve; feature_registry off
