@@ -41,3 +41,11 @@ def test_risk_tiers_matrix(render, tmp_path):
     text = (out / "docs/process/risk-tiers.md").read_text()
     for t in ["Tier 0", "Tier 1", "Tier 2", "Tier 3", "Tier 4"]:
         assert t in text, t
+
+
+def test_adr_template_has_intent_axis(render, tmp_path):
+    out = render(tmp_path, {"project_name": "demo"})
+    text = (out / "docs/process/adr/template.md").read_text()
+    assert "## Intent" in text
+    for v in ["keep", "change-planned", "tolerated"]:
+        assert v in text, v

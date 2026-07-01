@@ -4,6 +4,14 @@
 
 Proposed | Accepted | Superseded by ADR-MMMM
 
+## Intent
+
+keep | change-planned | tolerated
+
+Endorsement, independent of lifecycle status. `keep` = deliberately endorsed;
+`change-planned` = current reality, migration intended (link the follow-up);
+`tolerated` = accepted debt, not endorsed, no active migration.
+
 ## Context
 
 What forces are at play — technical, product, organizational? What makes this decision
