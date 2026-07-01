@@ -1,0 +1,122 @@
+#!/usr/bin/env python3
+"""contract-first gate: a declared cross-surface capability must reference
+interface symbols that already exist in the committed shared spec — the
+"declared first" of Rule 3. Structure, an in-repo committed spec, and
+symbol presence are hard-guaranteed (CI exit 1). Whether the named surfaces
+actually consume the capability is not machine-checkable across arbitrary
+codebases and is advisory only, never faked as verified. Python stdlib only."""
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+CONTRACTS_DIR = "docs/process/capability-contracts"
+
+
+def _contract_files(root: Path) -> list[Path]:
+    d = root / CONTRACTS_DIR
+    if not d.is_dir():
+        return []
+    return sorted(p for p in d.glob("*.json") if not p.name.endswith(".example.json"))
+
+
+def _spec_path(root: Path, spec: str) -> Path | None:
+    resolved = (root / spec).resolve()
+    if root.resolve() not in resolved.parents:
+        return None
+    return resolved
+
+
+def _nonempty_str_list(val) -> bool:
+    return (
+        isinstance(val, list)
+        and len(val) > 0
+        and all(isinstance(x, str) and x.strip() for x in val)
+    )
+
+
+def _check(root: Path, path: Path) -> tuple[list[str], list[str]]:
+    hard: list[str] = []
+    soft: list[str] = []
+    rel = path.relative_to(root)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        return [f"{rel}: invalid JSON: {exc}"], []
+    except UnicodeDecodeError as exc:
+        return [f"{rel}: not valid UTF-8: {exc}"], []
+    if not isinstance(data, dict):
+        return [f"{rel}: contract must be a JSON object, got {type(data).__name__}"], []
+
+    cap = data.get("capability")
+    if not isinstance(cap, str) or not cap.strip():
+        hard.append(f"{rel}: 'capability' must be a non-empty string")
+    spec = data.get("spec")
+    if not isinstance(spec, str) or not spec.strip():
+        hard.append(f"{rel}: 'spec' must be a non-empty string")
+    if not _nonempty_str_list(data.get("surfaces")):
+        hard.append(f"{rel}: 'surfaces' must be a non-empty list of non-empty strings")
+    if not _nonempty_str_list(data.get("symbols")):
+        hard.append(f"{rel}: 'symbols' must be a non-empty list of non-empty strings")
+    if hard:
+        return hard, soft
+
+    if cap.strip() != path.stem:
+        hard.append(f"{rel}: 'capability' {cap.strip()!r} must equal the filename stem {path.stem!r}")
+
+    apath = _spec_path(root, spec.strip())
+    if apath is None:
+        hard.append(f"{rel}: spec path {spec.strip()!r} escapes the repo root")
+        return hard, soft
+    if not apath.is_file():
+        hard.append(f"{rel}: spec not committed / does not exist: {spec.strip()}")
+        return hard, soft
+
+    try:
+        spec_text = apath.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        spec_text = apath.read_bytes().decode("utf-8", "replace")
+    for sym in data["symbols"]:
+        if sym not in spec_text:
+            hard.append(
+                f"{rel}: symbol {sym!r} not found in spec {spec.strip()} — "
+                "declare the interface in the spec before building the surface (Rule 3)"
+            )
+
+    soft.append(
+        f"{rel}: surface consumption of {cap.strip()!r} by {data['surfaces']} "
+        "not machine-verified"
+    )
+    return hard, soft
+
+
+def check(root: Path) -> tuple[list[str], list[str]]:
+    files = _contract_files(root)
+    if not files:
+        return [], ["no capability contracts yet (dir empty or absent)"]
+    hard: list[str] = []
+    soft: list[str] = []
+    for path in files:
+        h, s = _check(root, path)
+        hard += h
+        soft += s
+    return hard, soft
+
+
+def main() -> int:
+    root = Path(sys.argv[1] if len(sys.argv) > 1 else ".").resolve()
+    hard, soft = check(root)
+    for note in soft:
+        print(f"contract-first: note: {note}")
+    if hard:
+        print("contract-first: FAILED:")
+        for h in hard:
+            print(f"  - {h}")
+        return 1
+    print("contract-first: OK")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

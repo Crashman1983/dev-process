@@ -1,0 +1,7 @@
+{
+  "capability": "example-capability",
+  "surfaces": ["web", "mobile"],
+  "spec": "docs/api/openapi.json",
+  "symbols": ["ExampleDTO"],
+  "notes": "Illustrative only — the gate ignores *.example.json. Copy to <capability>.json (filename stem == capability) and point spec/symbols at your committed shared interface."
+}

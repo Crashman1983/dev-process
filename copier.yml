@@ -22,6 +22,7 @@ modules:
     github_issues: false
     contracts_drift: false
     git_hooks: false
+    contract_first: false
 
 github_repo:
   type: str
