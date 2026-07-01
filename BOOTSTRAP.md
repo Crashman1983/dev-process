@@ -13,6 +13,9 @@ additive; it will not overwrite your files without asking).
 ## Do this
 
 1. Ensure `uv` is available (https://docs.astral.sh/uv/). No other dependency.
+   If the template repo is **private**, git needs a credential once —
+   `gh auth setup-git` (GitHub CLI) or any git credential helper. Public repos
+   need nothing.
 2. From the target repository root, run:
 
        uvx copier copy gh:Crashman1983/dev-process .
@@ -35,4 +38,6 @@ additive; it will not overwrite your files without asking).
 ## Later
 
 Add a module or pull an updated process version: re-answer (or edit
-`.copier-answers.yml`) and run `uvx copier update`.
+`.copier-answers.yml`) and run `uvx copier update`. `update` checks out the
+latest **tagged** template release by default and preserves your local edits,
+flagging conflicts inline.
