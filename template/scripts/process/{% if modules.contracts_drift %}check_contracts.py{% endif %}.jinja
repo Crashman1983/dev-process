@@ -14,10 +14,13 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import shlex
+import subprocess
 import sys
 from pathlib import Path
 
 CONTRACTS_DIR = "docs/process/contracts"
+VERIFY_TIMEOUT_S = 30  # cap a hung verify command so it cannot wedge CI
 REQUIRED = ("id", "kind", "artifact", "pin")
 _HASH_RE = re.compile(r"^(sha256|sha512|sha1):([0-9a-fA-F]+)$")
 
@@ -41,6 +44,22 @@ def _artifact_path(root: Path, artifact: str) -> Path | None:
 def _pin_hash(pin: str) -> tuple[str, str] | None:
     m = _HASH_RE.match(pin)
     return (m.group(1), m.group(2).lower()) if m else None
+
+
+def _run_verify(command: str) -> str | None:
+    """Run a project-supplied verify command as argv (no shell). Returns None
+    on conformance (exit 0), else an advisory note. Never raises, never
+    hard-fails — a verify reaching an external system must not gate CI."""
+    try:
+        r = subprocess.run(
+            shlex.split(command),
+            capture_output=True, text=True, timeout=VERIFY_TIMEOUT_S,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return "could not run verify command"
+    if r.returncode != 0:
+        return "verify reported possible nonconformance"
+    return None
 
 
 def _check_contract(root: Path, path: Path) -> tuple[list[str], list[str]]:
@@ -88,6 +107,14 @@ def _check_contract(root: Path, path: Path) -> tuple[list[str], list[str]]:
                 f"{rel}: artifact changed but pin not updated "
                 f"({algo} {actual} != {expected}) — re-pin deliberately"
             )
+
+    verify = data.get("verify")
+    if isinstance(verify, str) and verify.strip():
+        note = _run_verify(verify.strip())
+        if note:
+            soft.append(f"{rel}: {note}")
+    else:
+        soft.append(f"{rel}: conformance not machine-verified — no verify command")
 
     return hard, soft
 

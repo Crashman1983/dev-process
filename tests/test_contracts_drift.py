@@ -138,3 +138,49 @@ def test_sha512_pin_match_is_clean(render, tmp_path):
     r = _run(out)
     assert r.returncode == 0, r.stdout
     assert "opaque pin" not in r.stdout
+
+
+def _stub_cmd(bindir: Path, name: str, code: int):
+    bindir.mkdir(parents=True, exist_ok=True)
+    p = bindir / name
+    p.write_text(f"#!/bin/sh\nexit {code}\n")
+    p.chmod(0o755)
+
+
+def test_verify_absent_notes(render, tmp_path):
+    out = _render(render, tmp_path)
+    _contract(out, pin=_sha256(b"{}"), artifact_bytes=b"{}")  # clean pin, no verify
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+    assert "no verify command" in r.stdout
+
+
+def test_verify_zero_no_note(render, tmp_path):
+    out = _render(render, tmp_path)
+    _contract(out, pin=_sha256(b"{}"), artifact_bytes=b"{}", verify="okcheck")
+    bindir = tmp_path / "bin"
+    _stub_cmd(bindir, "okcheck", 0)
+    r = _run(out, prepend=str(bindir))
+    assert r.returncode == 0, r.stdout
+    assert "no verify command" not in r.stdout
+    assert "nonconformance" not in r.stdout
+
+
+def test_verify_nonzero_is_soft(render, tmp_path):
+    # load-bearing must-not-hard-fail guard: a verify that reports drift -> note, exit 0
+    out = _render(render, tmp_path)
+    _contract(out, pin=_sha256(b"{}"), artifact_bytes=b"{}", verify="failcheck")
+    bindir = tmp_path / "bin"
+    _stub_cmd(bindir, "failcheck", 1)
+    r = _run(out, prepend=str(bindir))
+    assert r.returncode == 0, r.stdout
+    assert "nonconformance" in r.stdout
+
+
+def test_verify_unlaunchable_is_soft(render, tmp_path):
+    # load-bearing must-not-hard-fail guard: a command not on PATH -> note, exit 0
+    out = _render(render, tmp_path)
+    _contract(out, pin=_sha256(b"{}"), artifact_bytes=b"{}", verify="definitely-not-a-real-cmd-xyz")
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+    assert "could not run verify" in r.stdout
