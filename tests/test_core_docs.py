@@ -5,6 +5,7 @@ CORE = [
     "risk-tiers.md",
     "workflow.md",
     "commits.md",
+    "code-craft.md",
     "journal-state-plans.md",
     "adr/README.md",
     "adr/template.md",
@@ -32,6 +33,7 @@ def test_mandatory_rules_required_headings(render, tmp_path):
         "One owner per behavior",
         "Root cause before symptom",
         "Atomic commits",
+        "Code is written to be read",
     ]:
         assert h in text, h
 

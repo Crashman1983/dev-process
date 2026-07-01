@@ -10,3 +10,4 @@ Binding. Earlier rules outrank later ones; check them in order.
 6. **Root cause before symptom.** Max two diagnostic attempts at a symptom, then stop and do a root-cause analysis. Ask "why does this happen?", not "how do I suppress it?".
 7. **Review gate before merge to the main branch.** Merge only after the review required by the tier (`risk-tiers.md`) has run.
 8. **Atomic commits, documented exceptions.** One logical change per commit, imperative Conventional-Commit subject. A skipped gate or dropped scope is named in the commit body.
+9. **Code is written to be read.** Code is read far more often than it is written — optimize for the next human. Prefer intention-revealing names for variables, functions, and types; keep units small and single-purpose; name constants instead of embedding magic numbers; let comments explain *why*, not *what*. Not mechanically checkable — enforced at the review gate. Concrete practices: `docs/process/code-craft.md`.
