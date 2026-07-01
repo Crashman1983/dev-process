@@ -156,6 +156,24 @@ def test_installer_idempotent(render, tmp_path):
     assert "dev-process-managed-hook" in (out / ".git/hooks/pre-commit").read_text()
 
 
+def test_installer_from_subdir_lands_in_real_hookdir(render, tmp_path):
+    """Run from a subdir of an ordinary checkout: hooks must land in the real
+    .git/hooks and actually enforce — not a spurious <subdir>/.git/hooks with a
+    false '✓ installed' (git --git-path returns a CWD-relative path)."""
+    out = _render(render, tmp_path)
+    _init_repo(out, install=False)
+    sub = out / "pkg" / "nested"
+    sub.mkdir(parents=True)
+    script = out / "scripts/process/install-hooks.sh"
+    r = subprocess.run(["bash", str(script)], cwd=sub, capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    assert (out / ".git/hooks/pre-commit").exists(), r.stdout
+    assert not (sub / ".git").exists(), "hooks written into a spurious subdir .git"
+    blocked = _git(out, "commit", "--allow-empty", "-m", "x", env=_hook_env())
+    assert blocked.returncode != 0
+    assert "blocked" in blocked.stderr
+
+
 def test_installer_absent_when_module_off(render, tmp_path):
     out = render(tmp_path, {"project_name": "d"})
     assert not (out / "scripts/process/install-hooks.sh").exists()

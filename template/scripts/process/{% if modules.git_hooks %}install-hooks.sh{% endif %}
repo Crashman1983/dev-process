@@ -8,7 +8,8 @@ REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {
   echo "✗ not a git repository — run this from inside your repo." >&2
   exit 1
 }
-HOOK_DIR="$(git -C "$REPO_ROOT" rev-parse --git-path hooks)"
+cd "$REPO_ROOT"  # --git-path returns a CWD-relative path; anchor it at the root
+HOOK_DIR="$(git rev-parse --git-path hooks)"
 mkdir -p "$HOOK_DIR"
 
 # 0 = safe to (over)write our hook; 1 = a foreign hook is present, skip it.
