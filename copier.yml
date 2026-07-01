@@ -1,0 +1,19 @@
+_subdirectory: template
+_answers_file: .copier-answers.yml
+
+project_name:
+  type: str
+  help: "Human-readable project name"
+
+harnesses:
+  type: yaml
+  help: "Which harness adapters to install (Claude Code is always installed)"
+  default:
+    copilot: false
+    agents_md: false
+
+modules:
+  type: yaml
+  help: "Which opt-in process modules to install"
+  default:
+    doc_drift_gate: false
