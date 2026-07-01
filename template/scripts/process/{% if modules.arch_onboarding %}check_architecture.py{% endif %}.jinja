@@ -7,8 +7,11 @@ Existence/location is hard-guaranteed; layering conformance is best-effort
 Only an exact ```arch fence is read — an inert ```arch-example seed is ignored."""
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
+
+import yaml
 
 ADR_DIR = "docs/process/adr"
 
@@ -34,7 +37,41 @@ def check(root: Path) -> tuple[list[str], list[str]]:
     block = extract_block(arch.read_text(encoding="utf-8"))
     if block is None:
         return [], ["architecture not onboarded yet (no ```arch block)"]
-    return [], []  # existence/conformance/adr checks added in Tasks 2-4
+
+    data = yaml.safe_load(block) or {}
+    hard: list[str] = []
+
+    for r in data.get("code_roots", []) or []:
+        if not (root / r).exists():
+            hard.append(f"code_root missing: {r}")
+
+    layers = data.get("layers", {}) or {}
+    for name, spec in layers.items():
+        path = (spec or {}).get("path")
+        if not path:
+            hard.append(f"layer '{name}' has no path")
+        elif not (root / path).exists():
+            hard.append(f"layer '{name}' path missing: {path}")
+
+    for iface in data.get("interfaces", []) or []:
+        name, path = iface.get("name"), iface.get("path")
+        target = root / path if path else None
+        if not target or not target.is_file():
+            hard.append(f"interface '{name}' file missing: {path}")
+        elif name and not re.search(rf"\b{re.escape(name)}\b", target.read_text(encoding="utf-8")):
+            hard.append(f"interface symbol '{name}' not found in {path}")
+
+    for rule in data.get("rules", []) or []:
+        forbid = rule.get("forbid", "")
+        m = re.match(r"\s*([\w-]+)\s*->\s*([\w-]+)\s*$", str(forbid))
+        if not m:
+            hard.append(f"malformed rule forbid: {forbid!r}")
+        else:
+            for layer in (m.group(1), m.group(2)):
+                if layer not in layers:
+                    hard.append(f"rule references unknown layer '{layer}' in {forbid!r}")
+
+    return hard, []
 
 
 def main() -> int:

@@ -61,3 +61,67 @@ def test_no_arch_block(render, tmp_path):
     r = _run(out)
     assert r.returncode == 0
     assert "not onboarded" in r.stdout
+
+
+CLEAN_BLOCK = """\
+code_roots: [src]
+layers:
+  domain: {path: src/domain}
+  infra:  {path: src/infra}
+interfaces:
+  - {name: OrderPort, path: src/domain/ports.py}
+"""
+
+
+def _seed_code(out: Path):
+    (out / "src/domain").mkdir(parents=True, exist_ok=True)
+    (out / "src/infra").mkdir(parents=True, exist_ok=True)
+    (out / "src/domain/ports.py").write_text("class OrderPort:\n    ...\n")
+
+
+def test_existence_pass(render, tmp_path):
+    out = _render(render, tmp_path)
+    _seed_code(out)
+    _write_arch(out, CLEAN_BLOCK)
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+    assert "OK" in r.stdout
+
+
+def test_layer_path_missing(render, tmp_path):
+    out = _render(render, tmp_path)
+    _seed_code(out)
+    (out / "src/infra").rmdir()
+    _write_arch(out, CLEAN_BLOCK)
+    r = _run(out)
+    assert r.returncode == 1
+    assert "infra" in r.stdout
+
+
+def test_interface_symbol_missing(render, tmp_path):
+    out = _render(render, tmp_path)
+    _seed_code(out)
+    (out / "src/domain/ports.py").write_text("class Something:\n    ...\n")
+    _write_arch(out, CLEAN_BLOCK)
+    r = _run(out)
+    assert r.returncode == 1
+    assert "OrderPort" in r.stdout
+
+
+def test_rule_unknown_layer(render, tmp_path):
+    out = _render(render, tmp_path)
+    _seed_code(out)
+    block = CLEAN_BLOCK + "rules:\n  - {forbid: domain -> nope}\n"
+    _write_arch(out, block)
+    r = _run(out)
+    assert r.returncode == 1
+    assert "nope" in r.stdout
+
+
+def test_forward_compat_unknown_key_ignored(render, tmp_path):
+    out = _render(render, tmp_path)
+    _seed_code(out)
+    block = CLEAN_BLOCK + "external:\n  repos: [{name: billing, url: 'gh:o/billing'}]\n"
+    _write_arch(out, block)
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
