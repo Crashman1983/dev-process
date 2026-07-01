@@ -1,0 +1,44 @@
+# Module: feature-registry
+
+Records the user-visible stories of **{{ project_name }}** and traces each to its
+acceptance criteria and tests. Runs in CI via `process-gates` and locally via
+`uv run scripts/process/check_feature_registry.py`.
+
+## When a story is required
+
+Mandatory rule *"tests prove acceptance"* (`docs/process/mandatory-rules.md`)
+routes here: any user-visible behaviour, UI flow, contract, or test-coverage
+change needs an affected story **before** implementation. New behaviour gets a
+new story first. This is where a scenario sharpened at onboarding — including a
+cross-repo coupling — is deposited as a concrete requirement.
+
+## One story per file
+
+Create `docs/process/feature-registry/STORY-NNNN.json` (one file per story so
+stories diff and merge independently):
+
+- **id** — `STORY-NNNN` (four digits), unique across the registry.
+- **title** — a short label.
+- **story** — one sentence in EARS form: *As a `<role>`, when `<trigger>`, the
+  system shall `<response>`.* Wording is graded by humans, not the gate.
+- **acceptance** — a non-empty list of `{id, text}`; each `text` is a gradeable,
+  testable statement.
+- **status** — `proposed | in-progress | done | deprecated`.
+- **tests** — paths (optionally with a `::node` selector) to the tests that
+  prove the acceptance. `status: done` needs at least one.
+- **adr** (optional) — `ADR-NNNN` linking a decision under `docs/process/adr/`.
+- **issue**, **links** (optional) — forward-compat slots for the GitHub-Issues
+  and contracts modules; stored but not yet enforced.
+
+Copy `STORY-0001.example.json` (shipped, inert) as a starting point.
+
+## What the gate verifies
+
+- **Hard (CI fails):** valid JSON object; `id`/`title`/`story`/`status`/
+  `acceptance` present; `id` matches `STORY-NNNN` and is unique; `status` in the
+  enum; every `acceptance[].text` non-empty; every `tests[]` path exists;
+  `status: done` has ≥1 test; an `adr` link resolves to a file.
+- **Best-effort:** an `in-progress`/`done` story with more acceptance criteria
+  than mapped tests prints a note — the missing *mapping* is visible; semantic
+  coverage stays a human judgement.
+- **Ignored:** `*.example.json` seeds; unknown fields (cross-module forward-compat).

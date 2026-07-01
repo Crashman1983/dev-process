@@ -23,7 +23,7 @@ def _template_src(tmp_path_factory):
 def _copy(src: Path, dst: Path, data: dict) -> Path:
     full = {
         "harnesses": {"copilot": False, "agents_md": False},
-        "modules": {"doc_drift_gate": False, "arch_onboarding": False},
+        "modules": {"doc_drift_gate": False, "arch_onboarding": False, "feature_registry": False},
     }
     full.update(data)
     copier.run_copy(str(src), str(dst), data=full, defaults=True, unsafe=True, quiet=True)

@@ -13,6 +13,7 @@ import yaml
 GATES = {
     "doc-drift-gate": ("doc_drift_gate", [sys.executable, "scripts/process/check_doc_drift.py", "."]),
     "arch-onboarding": ("arch_onboarding", [sys.executable, "scripts/process/check_architecture.py", "."]),
+    "feature-registry": ("feature_registry", [sys.executable, "scripts/process/check_feature_registry.py", "."]),
 }
 
 

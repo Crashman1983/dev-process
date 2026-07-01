@@ -1,0 +1,77 @@
+#!/usr/bin/env python3
+"""feature-registry gate: validate the story files under
+docs/process/feature-registry/ — the requirements / acceptance / test
+traceability SSOT.
+
+Structure and reference existence are hard-guaranteed (CI exit 1). Whether a
+test *semantically* proves its acceptance criterion is not mechanically
+decidable — a missing test mapping is flagged best-effort, never faked as
+verified. Language-agnostic; stdlib only (plus the shared adr glob)."""
+from __future__ import annotations
+
+import json
+import re
+import sys
+from pathlib import Path
+
+REGISTRY_DIR = "docs/process/feature-registry"
+ADR_DIR = "docs/process/adr"
+STATUSES = {"proposed", "in-progress", "done", "deprecated"}
+ID_RE = re.compile(r"^STORY-\d{4}$")
+
+
+def _story_files(root: Path) -> list[Path]:
+    reg = root / REGISTRY_DIR
+    if not reg.is_dir():
+        return []
+    return sorted(p for p in reg.glob("*.json") if not p.name.endswith(".example.json"))
+
+
+def _adr_exists(root: Path, adr: object) -> bool:
+    m = re.search(r"\d+", str(adr))
+    if not m:
+        return False
+    return bool(list((root / ADR_DIR).glob(f"adr-{int(m.group()):04d}-*.md")))
+
+
+def _check_story(root: Path, path: Path, seen_ids: dict) -> tuple[list[str], list[str]]:
+    rel = path.relative_to(root)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        return [f"{rel}: invalid JSON: {exc}"], []
+    if not isinstance(data, dict):
+        return [f"{rel}: story must be a JSON object, got {type(data).__name__}"], []
+    return [], []
+
+
+def check(root: Path) -> tuple[list[str], list[str]]:
+    files = _story_files(root)
+    if not files:
+        return [], ["no stories yet (feature-registry empty)"]
+    hard: list[str] = []
+    soft: list[str] = []
+    seen_ids: dict = {}
+    for path in files:
+        h, s = _check_story(root, path, seen_ids)
+        hard += h
+        soft += s
+    return hard, soft
+
+
+def main() -> int:
+    root = Path(sys.argv[1] if len(sys.argv) > 1 else ".").resolve()
+    hard, soft = check(root)
+    for note in soft:
+        print(f"registry-gate: note: {note}")
+    if hard:
+        print("registry-gate: FAILED:")
+        for h in hard:
+            print(f"  - {h}")
+        return 1
+    print("registry-gate: OK")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

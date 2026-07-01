@@ -18,3 +18,4 @@ modules:
   default:
     doc_drift_gate: false
     arch_onboarding: false
+    feature_registry: false
