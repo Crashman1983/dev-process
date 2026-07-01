@@ -7,7 +7,7 @@ einspielbar in **neue (Greenfield)** und **bestehende (Brownfield)** Projekte.
 Ausgeliefert als [copier](https://copier.readthedocs.io)-Template. Adapter für
 **Claude Code**, **GitHub Copilot** und **AGENTS.md** (Codex / Gemini CLI / Aider …).
 
-> **Status:** In Design. SP1 (Foundation) ist spezifiziert, noch nicht implementiert.
+> **Status:** SP1 (Foundation) implementiert. Setup-Anleitung: [`BOOTSTRAP.md`](BOOTSTRAP.md).
 > Design: [`docs/design/2026-07-01-foundation-design.md`](docs/design/2026-07-01-foundation-design.md).
 
 ---
@@ -41,6 +41,6 @@ der Rest ist self-contained beschrieben.
 
 | Sub-Projekt | Inhalt | Status |
 |---|---|---|
-| **SP1** Foundation | Kern + Adapter + copier-Init + additiver Brownfield-Drop-in | 📐 Design |
+| **SP1** Foundation | Kern + Adapter + copier-Init + additiver Brownfield-Drop-in | ✅ implementiert |
 | **SP2** Brownfield-Architektur-Discovery | Architektur-Interview + Verifikation gegen echten Code | 🔜 geplant |
 | **SP3** Multi-Repo / Multi-Mensch | Upstream-Governance + Cross-Repo-Contracts + Koordination | 🔜 geplant |
