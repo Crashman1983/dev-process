@@ -8,8 +8,8 @@ Ausgeliefert als [copier](https://copier.readthedocs.io)-Template. Adapter für
 **Claude Code**, **GitHub Copilot** und **AGENTS.md** (Codex / Gemini CLI / Aider …).
 
 > **Status:** SP1 (Foundation) + SP2 (Architektur-Onboarding) + SP3
-> (feature-registry, github-issues, contracts-drift) + SP4 (git-hooks)
-> ausgeliefert, Tag `v0.6.0`.
+> (feature-registry, github-issues, contracts-drift) + SP4 (git-hooks,
+> contract-first) ausgeliefert, Tag `v0.7.0`.
 > Setup: [`BOOTSTRAP.md`](BOOTSTRAP.md) · Design: [`docs/design/`](docs/design/).
 
 ---
@@ -54,8 +54,9 @@ und fährt in CI nur die *aktiven* Module. git-Hooks sichern lokal ab. Zuschaltb
 Module heute: `doc-drift-gate` (tote Pfad-Referenzen in Docs), `arch-onboarding`
 (Architektur gegen echten Code), `feature-registry` (User-Story-/Akzeptanz-/
 Test-Traceability), `github-issues` (EARS-Templates + Issue-Ref-Gate) und
-`contracts-drift` (Kopplung-als-Contract, Pin-Drift-Ratchet + best-effort-Konformität)
-und `git-hooks` (lokale pre-commit/pre-push/post-commit-Durchsetzung, an den gate_runner delegiert).
+`contracts-drift` (Kopplung-als-Contract, Pin-Drift-Ratchet + best-effort-Konformität),
+`git-hooks` (lokale pre-commit/pre-push/post-commit-Durchsetzung, an den gate_runner delegiert)
+und `contract-first` (geteiltes Capability-Interface im committeten Spec deklariert, bevor eine Surface darauf baut).
 
 ## Architektur als geprüfter Contract (SP2)
 
@@ -111,4 +112,4 @@ der Rest ist self-contained beschrieben.
 | **SP1** Foundation | Kern + Adapter + copier-Init + additiver Brownfield-Drop-in | ✅ ausgeliefert |
 | **SP2** Architektur-Onboarding | Architektur-Interview + Verifikation gegen echten Code | ✅ ausgeliefert |
 | **SP3** Prozess-Vervollständigung (Multi-Repo/-Mensch) | feature-registry · github-issues · contracts-drift | ✅ Slices 1–3 |
-| **SP4** Prozess-Vervollständigung II | git-hooks (lokale Enforcement-Säule) | ✅ ausgeliefert |
+| **SP4** Prozess-Vervollständigung II | git-hooks (lokale Enforcement-Säule) · contract-first (Interface-declared-first-Gate) | ✅ ausgeliefert |
