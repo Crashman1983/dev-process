@@ -184,6 +184,15 @@ def test_no_declared_surfaces_skips_coverage(render, tmp_path):
     assert "parity: OK" in r.stdout
 
 
+def test_declared_surfaces_non_string_element_no_crash(render, tmp_path):
+    # a hand-edited manifest could carry a non-string element; set(declared) would
+    # raise TypeError. A malformed list must disable coverage, never crash.
+    out = _render(render, tmp_path, surfaces=["web", {"a": "b"}])
+    _write(out, "chat.json", {"capability": "chat", "surfaces": {"web": "complete"}})
+    r = _run(out)
+    assert r.returncode == 0, r.stdout + r.stderr
+
+
 def test_example_seed_ignored(render, tmp_path):
     out = _render(render, tmp_path)
     d = out / PARITY

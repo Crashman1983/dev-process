@@ -35,7 +35,11 @@ def _declared_surfaces(root: Path) -> list[str] | None:
     except yaml.YAMLError:
         return None
     surf = ans.get("parity_surfaces")
-    return surf if isinstance(surf, list) and surf else None
+    # require a non-empty list of strings — a non-string element would raise on
+    # set(declared) later; a malformed answer disables coverage rather than crash.
+    if isinstance(surf, list) and surf and all(isinstance(x, str) for x in surf):
+        return surf
+    return None
 
 
 def _parity_files(root: Path) -> list[Path]:
