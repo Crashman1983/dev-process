@@ -167,3 +167,32 @@ def test_conformance_linter_pass(render, tmp_path):
     _stub(bindir, "lint-imports", 0)
     r = _run(out, extra_path=str(bindir))
     assert r.returncode == 0, r.stdout
+
+
+ADR_RULE_BLOCK = CLEAN_BLOCK + "rules:\n  - {forbid: domain -> infra, adr: ADR-0007}\n"
+
+
+def test_adr_link_missing(render, tmp_path):
+    out = _render(render, tmp_path)
+    _seed_code(out)
+    _write_arch(out, ADR_RULE_BLOCK)
+    r = _run(out)
+    assert r.returncode == 1
+    assert "ADR-0007" in r.stdout
+
+
+def test_adr_link_present(render, tmp_path):
+    out = _render(render, tmp_path)
+    _seed_code(out)
+    (out / "docs/process/adr/adr-0007-layering.md").write_text("# ADR-0007\n")
+    _write_arch(out, ADR_RULE_BLOCK)
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+
+
+def test_rule_without_adr_not_checked(render, tmp_path):
+    out = _render(render, tmp_path)
+    _seed_code(out)
+    _write_arch(out, RULE_BLOCK)  # no adr key
+    r = _run(out)
+    assert r.returncode == 0, r.stdout

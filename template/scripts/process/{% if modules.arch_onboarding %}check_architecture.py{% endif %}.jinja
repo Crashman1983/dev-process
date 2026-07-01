@@ -32,6 +32,13 @@ def extract_block(md: str) -> str | None:
     return None
 
 
+def _adr_exists(root: Path, adr: str) -> bool:
+    m = re.search(r"\d+", adr)
+    if not m:
+        return False
+    return bool(list((root / ADR_DIR).glob(f"adr-{int(m.group()):04d}-*.md")))
+
+
 def _has_importlinter(root: Path) -> bool:
     if (root / ".importlinter").is_file():
         return True
@@ -109,6 +116,9 @@ def check(root: Path) -> tuple[list[str], list[str]]:
             for layer in (m.group(1), m.group(2)):
                 if layer not in layers:
                     hard.append(f"rule references unknown layer '{layer}' in {forbid!r}")
+        adr = rule.get("adr")
+        if adr and not _adr_exists(root, adr):
+            hard.append(f"rule adr link '{adr}' has no file under {ADR_DIR}/")
 
     rules = data.get("rules", []) or []
     hard_c, soft = _conformance(root, rules) if rules else ([], [])
