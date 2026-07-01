@@ -139,6 +139,26 @@ def test_empty_acceptance_text_is_hard(render, tmp_path):
     assert "acceptance[0]" in r.stdout
 
 
+def test_acceptance_text_null_is_hard(render, tmp_path):
+    out = _render(render, tmp_path)
+    bad = {**VALID, "status": "proposed", "acceptance": [{"id": "AC1", "text": None}]}
+    bad.pop("tests")  # isolate the failure signal to the acceptance check
+    _write_story(out, "STORY-0019.json", bad)
+    r = _run(out)
+    assert r.returncode == 1
+    assert "acceptance[0]" in r.stdout
+
+
+def test_acceptance_text_nonstring_is_hard(render, tmp_path):
+    out = _render(render, tmp_path)
+    bad = {**VALID, "status": "proposed", "acceptance": [{"id": "AC1", "text": [1, 2, 3]}]}
+    bad.pop("tests")  # isolate the failure signal to the acceptance check
+    _write_story(out, "STORY-0020.json", bad)
+    r = _run(out)
+    assert r.returncode == 1
+    assert "acceptance[0]" in r.stdout
+
+
 def test_missing_test_path_is_hard(render, tmp_path):
     out = _render(render, tmp_path)
     _write_story(out, "STORY-0012.json", {**VALID, "tests": ["tests/nope/test_absent.py"]})

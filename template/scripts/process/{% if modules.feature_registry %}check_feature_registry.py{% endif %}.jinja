@@ -70,8 +70,9 @@ def _check_story(root: Path, path: Path, seen_ids: dict) -> tuple[list[str], lis
     else:
         n_acc = len(acceptance)
         for i, ac in enumerate(acceptance):
-            if not isinstance(ac, dict) or not str(ac.get("text", "")).strip():
-                hard.append(f"{rel}: acceptance[{i}] has empty 'text'")
+            text = ac.get("text") if isinstance(ac, dict) else None
+            if not isinstance(text, str) or not text.strip():
+                hard.append(f"{rel}: acceptance[{i}] 'text' must be a non-empty string")
 
     tests = data.get("tests") or []
     if not isinstance(tests, list):
