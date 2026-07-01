@@ -205,3 +205,55 @@ def test_runner_skips_contracts_when_off(render, tmp_path):
     r = _runner_list(out)
     assert r.returncode == 0, r.stderr
     assert "contracts-drift" not in r.stdout
+
+
+def test_artifacts_present_when_on(render, tmp_path):
+    out = _render(render, tmp_path)
+    assert (out / "docs/process/contracts/rest-orders.example.json").is_file()
+    assert (out / "docs/process/contracts/kafka-order-events.example.json").is_file()
+    assert (out / "docs/process/modules/contracts-drift.md").is_file()
+
+
+def test_artifacts_absent_when_off(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d"})
+    assert not (out / "docs/process/contracts/rest-orders.example.json").exists()
+    assert not (out / "docs/process/modules/contracts-drift.md").exists()
+
+
+def test_seeds_are_skipped_by_gate(render, tmp_path):
+    # only the inert *.example.json seeds are present -> gate sees no real contracts
+    out = _render(render, tmp_path)
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+    assert "no contracts yet" in r.stdout
+
+
+def test_example_seeds_are_valid_json(render, tmp_path):
+    out = _render(render, tmp_path)
+    for name in ("rest-orders.example.json", "kafka-order-events.example.json"):
+        data = json.loads((out / "docs/process/contracts" / name).read_text())
+        assert set(("id", "kind", "artifact", "pin")) <= set(data)
+
+
+def test_artifacts_neutral(render, tmp_path):
+    out = _render(render, tmp_path)
+    for rel in [
+        "docs/process/contracts/rest-orders.example.json",
+        "docs/process/contracts/kafka-order-events.example.json",
+        "docs/process/modules/contracts-drift.md",
+    ]:
+        text = (out / rel).read_text()
+        for k in KENNI:
+            assert k not in text, f"{k} leaked in {rel}"
+
+
+def test_docdrift_resolves_module_doc_refs(render, tmp_path):
+    out = render(
+        tmp_path,
+        {"project_name": "d", "modules": {"doc_drift_gate": True, "contracts_drift": True}},
+    )
+    r = subprocess.run(
+        [sys.executable, str(out / "scripts/process/check_doc_drift.py"), str(out)],
+        capture_output=True, text=True,
+    )
+    assert r.returncode == 0, r.stdout  # module-doc refs resolve

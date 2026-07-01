@@ -7,8 +7,8 @@ durchgesetzten**, KI-gestützten Entwicklungsprozess — einspielbar in **neue
 Ausgeliefert als [copier](https://copier.readthedocs.io)-Template. Adapter für
 **Claude Code**, **GitHub Copilot** und **AGENTS.md** (Codex / Gemini CLI / Aider …).
 
-> **Status:** SP1 (Foundation) + SP2 (Architektur-Onboarding) + SP3-Slices
-> (feature-registry, github-issues) ausgeliefert, Tag `v0.4.0`.
+> **Status:** SP1 (Foundation) + SP2 (Architektur-Onboarding) + SP3
+> (feature-registry, github-issues, contracts-drift) ausgeliefert, Tag `v0.5.0`.
 > Setup: [`BOOTSTRAP.md`](BOOTSTRAP.md) · Design: [`docs/design/`](docs/design/).
 
 ---
@@ -52,7 +52,8 @@ fest, das das git-log nicht zeigt.
 und fährt in CI nur die *aktiven* Module. git-Hooks sichern lokal ab. Zuschaltbare
 Module heute: `doc-drift-gate` (tote Pfad-Referenzen in Docs), `arch-onboarding`
 (Architektur gegen echten Code), `feature-registry` (User-Story-/Akzeptanz-/
-Test-Traceability) und `github-issues` (EARS-Templates + Issue-Ref-Gate).
+Test-Traceability), `github-issues` (EARS-Templates + Issue-Ref-Gate) und
+`contracts-drift` (Kopplung-als-Contract, Pin-Drift-Ratchet + best-effort-Konformität).
 
 ## Architektur als geprüfter Contract (SP2)
 
@@ -107,4 +108,4 @@ der Rest ist self-contained beschrieben.
 |---|---|---|
 | **SP1** Foundation | Kern + Adapter + copier-Init + additiver Brownfield-Drop-in | ✅ ausgeliefert |
 | **SP2** Architektur-Onboarding | Architektur-Interview + Verifikation gegen echten Code | ✅ ausgeliefert |
-| **SP3** Prozess-Vervollständigung (Multi-Repo/-Mensch) | feature-registry · github-issues · contracts-drift | 🔨 Slice 1–2 ✅, contracts-drift 🔜 |
+| **SP3** Prozess-Vervollständigung (Multi-Repo/-Mensch) | feature-registry · github-issues · contracts-drift | ✅ Slices 1–3 |

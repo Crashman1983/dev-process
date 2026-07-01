@@ -1,0 +1,9 @@
+{
+  "id": "rest-orders",
+  "kind": "rest",
+  "artifact": "contracts/orders.openapi.json",
+  "pin": "sha256:REPLACE_WITH_THE_ARTIFACT_SHA256",
+  "verify": "sh -c 'npx --yes openapi-diff contracts/orders.openapi.json \"$ORDERS_LIVE_URL\"'",
+  "consumers": ["billing", "shipping"],
+  "notes": "A committed OpenAPI snapshot pinned by content hash. Editing the spec without re-pinning fails CI (the drift ratchet). Re-pin deliberately when the contract changes."
+}

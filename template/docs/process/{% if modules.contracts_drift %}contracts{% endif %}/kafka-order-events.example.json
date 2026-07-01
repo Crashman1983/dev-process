@@ -1,0 +1,9 @@
+{
+  "id": "kafka-order-events",
+  "kind": "kafka",
+  "artifact": "contracts/order-created.avsc",
+  "pin": "registry:v3",
+  "verify": "sh -c 'python scripts/schema_compat.py order-created contracts/order-created.avsc'",
+  "consumers": ["fulfilment"],
+  "notes": "A committed Avro snapshot whose pin is an opaque schema-registry version (integrity degrades to a note). Backward/forward compatibility is delegated to the project verify command against the registry."
+}
