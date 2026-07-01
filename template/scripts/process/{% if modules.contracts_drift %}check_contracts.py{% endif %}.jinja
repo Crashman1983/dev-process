@@ -55,7 +55,9 @@ def _run_verify(command: str) -> str | None:
             shlex.split(command),
             capture_output=True, text=True, timeout=VERIFY_TIMEOUT_S,
         )
-    except (subprocess.TimeoutExpired, OSError):
+    except (subprocess.TimeoutExpired, OSError, ValueError):
+        # ValueError: shlex.split on an unbalanced quote — still a soft note,
+        # never a hard fail (an unlaunchable verify must not gate CI).
         return "could not run verify command"
     if r.returncode != 0:
         return "verify reported possible nonconformance"
@@ -70,6 +72,8 @@ def _check_contract(root: Path, path: Path) -> tuple[list[str], list[str]]:
         data = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
         return [f"{rel}: invalid JSON: {exc}"], []
+    except UnicodeDecodeError as exc:
+        return [f"{rel}: not valid UTF-8: {exc}"], []
     if not isinstance(data, dict):
         return [f"{rel}: contract must be a JSON object, got {type(data).__name__}"], []
 

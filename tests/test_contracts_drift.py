@@ -80,6 +80,19 @@ def test_malformed_json_is_hard(render, tmp_path):
     assert "invalid JSON" in r.stdout
 
 
+def test_non_utf8_contract_is_clean_hard(render, tmp_path):
+    # a non-UTF-8 contract file makes read_text raise UnicodeDecodeError (a
+    # ValueError subclass) -> must fail cleanly (hard message), not crash
+    out = _render(render, tmp_path)
+    reg = out / "docs/process/contracts"
+    reg.mkdir(parents=True, exist_ok=True)
+    (reg / "binary.json").write_bytes(b"\xff\xfe not utf8")
+    r = _run(out)
+    assert r.returncode == 1
+    assert "binary.json" in r.stdout  # clean gate message names the file
+    assert "Traceback" not in r.stderr
+
+
 def test_id_must_equal_filename_stem(render, tmp_path):
     out = _render(render, tmp_path)
     _contract(out, cid="not-the-stem", fname="orders-api")
@@ -184,6 +197,17 @@ def test_verify_unlaunchable_is_soft(render, tmp_path):
     r = _run(out)
     assert r.returncode == 0, r.stdout
     assert "could not run verify" in r.stdout
+
+
+def test_verify_malformed_quote_is_soft(render, tmp_path):
+    # load-bearing must-not-hard-fail guard: an unbalanced quote makes shlex.split
+    # raise ValueError -> the gate must degrade to a note, not crash with a traceback
+    out = _render(render, tmp_path)
+    _contract(out, pin=_sha256(b"{}"), artifact_bytes=b"{}", verify="sh -c 'oops")
+    r = _run(out)
+    assert r.returncode == 0, (r.stdout, r.stderr)
+    assert "could not run verify" in r.stdout
+    assert "Traceback" not in r.stderr
 
 
 def _runner_list(out: Path):
