@@ -68,3 +68,11 @@ def test_shipped_commands_drift_clean(render, tmp_path):
     )
     r = _run_gate(out)
     assert r.returncode == 0, r.stdout + r.stderr
+
+
+def test_copilot_prompts_gated(render, tmp_path):
+    off = render(tmp_path / "off", {"project_name": "d"})
+    assert not (off / ".github/prompts").exists()
+    on = render(tmp_path / "on", {"project_name": "d", "harnesses": {"copilot": True}})
+    for name in COMMANDS:
+        assert (on / ".github/prompts" / f"{name}.prompt.md").is_file(), name
