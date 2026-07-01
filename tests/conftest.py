@@ -1,3 +1,4 @@
+import shutil
 from pathlib import Path
 
 import copier
@@ -19,3 +20,12 @@ def _copy(dst: Path, data: dict) -> Path:
 @pytest.fixture
 def render():
     return _copy
+
+
+@pytest.fixture
+def render_into():
+    def _f(dst: Path, seed: Path, data: dict) -> Path:
+        shutil.copytree(seed, dst, dirs_exist_ok=True)
+        return _copy(dst, data)
+
+    return _f
