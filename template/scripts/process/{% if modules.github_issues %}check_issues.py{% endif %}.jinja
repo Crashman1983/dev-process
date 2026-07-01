@@ -2,16 +2,24 @@
 """github-issues gate: validate the `issue` field on feature-registry stories.
 
 Issue-ref FORMAT is hard-guaranteed (CI exit 1). Issue EXISTENCE on GitHub is
-best-effort and entirely advisory (never exit 1). Stdlib only in this half;
-existence (added by the github-issues module) reads the copier answers."""
+best-effort and entirely advisory (never exit 1): a definitive 404 stays a
+note, because this cannot distinguish a deleted issue from one an
+unauthenticated or cross-repo token cannot see. Stdlib + PyYAML (a gate dep,
+used to read the copier answers)."""
 from __future__ import annotations
 
 import json
 import re
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
+import yaml
+
 REGISTRY_DIR = "docs/process/feature-registry"
+ANSWERS_FILE = ".copier-answers.yml"
+GH_TIMEOUT_S = 10  # cap a hung `gh` so it cannot wedge CI
 TRACKED = ("in-progress", "done")  # statuses that ought to carry an issue link
 
 _BARE = re.compile(r"^#(\d+)$")
@@ -26,6 +34,15 @@ def _story_files(root: Path) -> list[Path]:
     return sorted(p for p in reg.glob("*.json") if not p.name.endswith(".example.json"))
 
 
+def _default_repo(root: Path) -> str | None:
+    f = root / ANSWERS_FILE
+    if not f.is_file():
+        return None
+    data = yaml.safe_load(f.read_text(encoding="utf-8")) or {}
+    repo = data.get("github_repo")
+    return repo.strip() if isinstance(repo, str) and repo.strip() else None
+
+
 def parse_issue_ref(ref: str) -> tuple[str | None, int] | None:
     """(repo_or_None, number) for a well-formed ref, else None. repo is None
     only for the bare `#N` form, which resolves against the configured repo."""
@@ -36,12 +53,28 @@ def parse_issue_ref(ref: str) -> tuple[str | None, int] | None:
     return None
 
 
+def _issue_exists(gh: str, repo: str, number: int) -> bool:
+    """Best-effort. False also means 'could not determine' — the caller treats
+    any False as an advisory note, never a hard failure."""
+    try:
+        r = subprocess.run(
+            [gh, "issue", "view", str(number), "--repo", repo, "--json", "number"],
+            capture_output=True, text=True, timeout=GH_TIMEOUT_S,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return False
+    return r.returncode == 0
+
+
 def check(root: Path) -> tuple[list[str], list[str]]:
     stories = _story_files(root)
     if not stories:
         return [], ["no stories to check (feature-registry empty or absent)"]
+    default_repo = _default_repo(root)
+    gh = shutil.which("gh")
     hard: list[str] = []
     soft: list[str] = []
+    gh_absent_noted = False
     for path in stories:
         rel = path.relative_to(root)
         try:
@@ -59,11 +92,25 @@ def check(root: Path) -> tuple[list[str], list[str]]:
         if not isinstance(issue, str):
             hard.append(f"{rel}: 'issue' must be a string, got {type(issue).__name__}")
             continue
-        if parse_issue_ref(issue.strip()) is None:
+        parsed = parse_issue_ref(issue.strip())
+        if parsed is None:
             hard.append(
                 f"{rel}: malformed issue ref {issue!r} "
                 "(want '#N', 'owner/repo#N', or a github issue URL)"
             )
+            continue
+        repo, number = parsed
+        target = repo or default_repo
+        if not gh:
+            if not gh_absent_noted:
+                soft.append("gh not on PATH — skipping issue-existence checks")
+                gh_absent_noted = True
+            continue
+        if not target:
+            soft.append(f"{rel}: {issue} — no github_repo configured, cannot check existence")
+            continue
+        if not _issue_exists(gh, target, number):
+            soft.append(f"{rel}: could not confirm {target}#{number} exists")
     return hard, soft
 
 

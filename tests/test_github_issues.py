@@ -125,3 +125,83 @@ def test_no_stories_note(render, tmp_path):
     r = _run(out)
     assert r.returncode == 0, r.stdout
     assert "no stories" in r.stdout
+
+
+def _stub_gh(bindir: Path, code: int, stdout: str = ""):
+    bindir.mkdir(parents=True, exist_ok=True)
+    p = bindir / "gh"
+    p.write_text(f'#!/bin/sh\nprintf "%s" "{stdout}"\nexit {code}\n')
+    p.chmod(0o755)
+
+
+def _stub_gh_capture(bindir: Path, argfile: Path, code: int = 0):
+    bindir.mkdir(parents=True, exist_ok=True)
+    p = bindir / "gh"
+    p.write_text(f'#!/bin/sh\nprintf "%s" "$*" > "{argfile}"\nexit {code}\n')
+    p.chmod(0o755)
+
+
+def test_existence_gh_absent_is_soft(render, tmp_path):
+    # must-not-hard-fail guard: gh not on PATH -> note, exit 0
+    out = _render(render, tmp_path, repo="octo/api")
+    _story(out, issue="#412")
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    r = _run(out, path=str(empty))
+    assert r.returncode == 0, r.stdout
+    assert "gh not on PATH" in r.stdout
+
+
+def test_existence_ok_no_note(render, tmp_path):
+    out = _render(render, tmp_path, repo="octo/api")
+    _story(out, issue="#412")
+    bindir = tmp_path / "bin"
+    _stub_gh(bindir, 0)
+    r = _run(out, prepend=str(bindir))
+    assert r.returncode == 0, r.stdout
+    assert "could not confirm" not in r.stdout
+
+
+def test_existence_404_is_soft(render, tmp_path):
+    # must-not-hard-fail guard: a non-zero gh (404 / not visible) -> note, exit 0
+    out = _render(render, tmp_path, repo="octo/api")
+    _story(out, issue="#412")
+    bindir = tmp_path / "bin"
+    _stub_gh(bindir, 1)
+    r = _run(out, prepend=str(bindir))
+    assert r.returncode == 0, r.stdout
+    assert "could not confirm" in r.stdout
+
+
+def test_existence_forwards_configured_repo(render, tmp_path):
+    out = _render(render, tmp_path, repo="octo/api")
+    _story(out, issue="#412")
+    bindir = tmp_path / "bin"
+    argfile = out / "gh-args.txt"
+    _stub_gh_capture(bindir, argfile, code=0)
+    r = _run(out, prepend=str(bindir))
+    assert r.returncode == 0, r.stdout
+    args = argfile.read_text()
+    assert "--repo octo/api" in args
+    assert "412" in args
+
+
+def test_existence_bare_without_repo_notes(render, tmp_path):
+    out = _render(render, tmp_path)  # no github_repo configured
+    _story(out, issue="#412")
+    bindir = tmp_path / "bin"
+    _stub_gh(bindir, 0)
+    r = _run(out, prepend=str(bindir))
+    assert r.returncode == 0, r.stdout
+    assert "no github_repo configured" in r.stdout
+
+
+def test_existence_crossrepo_uses_own_repo(render, tmp_path):
+    out = _render(render, tmp_path)  # no default repo, ref carries its own
+    _story(out, issue="octo/billing#77")
+    bindir = tmp_path / "bin"
+    argfile = out / "gh-args.txt"
+    _stub_gh_capture(bindir, argfile, code=0)
+    r = _run(out, prepend=str(bindir))
+    assert r.returncode == 0, r.stdout
+    assert "--repo octo/billing" in argfile.read_text()
