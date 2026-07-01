@@ -17,5 +17,6 @@ behaviors is not. A skipped gate or deliberately dropped scope is named in the b
 
 No direct commits to the main branch. Light work goes on a feature branch; heavy or
 parallel work goes in an isolated worktree. Merge fast-forward-only after the tier's
-review gate has passed: fetch → rebase → gate → `merge --ff-only` → push. A git
-`pre-commit` hook guards the main branch and is bypassable for automation.
+review gate has passed: fetch → rebase → gate → `merge --ff-only` → push. When
+the optional `git-hooks` module is installed, a `pre-commit` hook enforces this
+locally (bypassable for automation via `ALLOW_MAIN_COMMIT=1`).

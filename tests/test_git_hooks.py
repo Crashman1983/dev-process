@@ -159,3 +159,34 @@ def test_installer_idempotent(render, tmp_path):
 def test_installer_absent_when_module_off(render, tmp_path):
     out = render(tmp_path, {"project_name": "d"})
     assert not (out / "scripts/process/install-hooks.sh").exists()
+
+
+def test_module_doc_present_and_neutral(render, tmp_path):
+    out = _render(render, tmp_path)
+    doc = out / "docs/process/modules/git-hooks.md"
+    assert doc.is_file()
+    text = doc.read_text()
+    for k in KENNI:
+        assert k not in text, f"{k} leaked in git-hooks.md"
+
+
+def test_module_doc_absent_when_off(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d"})
+    assert not (out / "docs/process/modules/git-hooks.md").exists()
+
+
+def test_docdrift_green_with_module_doc(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d",
+                            "modules": {"doc_drift_gate": True, "git_hooks": True}})
+    r = subprocess.run(
+        [sys.executable, str(out / "scripts/process/check_doc_drift.py"), str(out)],
+        capture_output=True, text=True,
+    )
+    assert r.returncode == 0, r.stdout
+
+
+def test_commits_md_no_unconditional_hook_promise(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d"})  # module OFF
+    commits = (out / "docs/process/commits.md").read_text()
+    assert "git-hooks" in commits
+    assert "modules/git-hooks.md" not in commits

@@ -41,3 +41,8 @@ Add a module or pull an updated process version: re-answer (or edit
 `.copier-answers.yml`) and run `uvx copier update`. `update` checks out the
 latest **tagged** template release by default and preserves your local edits,
 flagging conflicts inline.
+
+If you enabled the `git-hooks` module, install the hooks once per clone (they
+live in host-local `.git/hooks`, not version control):
+
+    bash scripts/process/install-hooks.sh
