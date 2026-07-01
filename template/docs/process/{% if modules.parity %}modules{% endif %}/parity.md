@@ -1,6 +1,6 @@
 # Module: parity
 
-Opt-in. Enforces the machine-checkable core of Rule 4 (parity): a living
+Opt-in. Enforces surface parity: a living
 capability×surface matrix that prevents **silent capability loss** — the failure
 mode where a UI shell is rewritten and features quietly disappear because no
 artifact tracked which surface was supposed to have them. The gate fails CI when
@@ -40,15 +40,16 @@ Each surface carries exactly one status: `complete` (implemented and visible),
 no surface yet), `gap` (a deliberate, tracked absence) or `na` (not applicable to
 this surface). A `gap` — and only a `gap` — needs a matching entry in `issues`
 whose value is a valid issue reference: one of `#N`, `owner/repo#N`, or a GitHub
-issue URL. This mechanizes Rule 4's "every deliberate gap links to an issue".
+issue URL. This mechanizes the discipline that every deliberate gap links to a
+tracking issue.
 
 ## Declared surfaces (exact coverage)
 
 The optional `parity_surfaces` answer (a copier question, e.g. `[web, mobile,
 cli]`) is the project's canonical surface list. When it is a non-empty list, every
 capability file's `surfaces` keys must cover **exactly** that set: a missing
-surface is a silent omission (the precise Rule-4 failure), an unknown surface is a
-typo. When `parity_surfaces` is empty (the default), coverage is not enforced —
+surface is a silent omission (the precise failure this module prevents), an
+unknown surface is a typo. When `parity_surfaces` is empty (the default), coverage is not enforced —
 surfaces are free-form and only status/gap validity applies. The gate reads the
 answer from `.copier-answers.yml` at runtime.
 
@@ -66,7 +67,7 @@ whether a capability is truly implemented, visible and complete across an
 arbitrary codebase is not mechanizable. Issue *existence* is not checked (format
 only). An empty or absent registry yields "no parity entries yet".
 
-## Rule 5 — one owner per behavior
+## One owner per behavior (Rule 4)
 
 This module owns only the capability×surface matrix and its gap-linking. It is
 distinct from `feature-registry` (story → acceptance → tests) and `contract-first`

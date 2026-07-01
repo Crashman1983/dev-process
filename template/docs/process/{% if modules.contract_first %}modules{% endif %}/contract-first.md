@@ -57,7 +57,7 @@ name that is a common substring can therefore match spuriously; the gate
 enforces *declaration order*, not precise structural conformance. Choose
 distinctive symbol names.
 
-## Rule 5 — one owner per behavior
+## One owner per behavior (Rule 4)
 
 This module owns only symbol-presence. It does **not** check artifact drift (a
 committed spec matching a freshly generated one) — that is the job of the
