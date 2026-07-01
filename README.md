@@ -1,27 +1,87 @@
 # dev-process
 
-Ein **portables, harness-agnostisches, modulares Muster** für einen stark
-automatisierten KI-gestützten Entwicklungsprozess — destilliert aus KenniNext,
-einspielbar in **neue (Greenfield)** und **bestehende (Brownfield)** Projekte.
+Ein portables, harness-agnostisches, modulares Fundament für einen **maschinell
+durchgesetzten**, KI-gestützten Entwicklungsprozess — einspielbar in **neue
+(Greenfield)** wie **bestehende (Brownfield)** Projekte.
 
 Ausgeliefert als [copier](https://copier.readthedocs.io)-Template. Adapter für
 **Claude Code**, **GitHub Copilot** und **AGENTS.md** (Codex / Gemini CLI / Aider …).
 
-> **Status:** SP1 (Foundation) implementiert. Setup-Anleitung: [`BOOTSTRAP.md`](BOOTSTRAP.md).
-> Design: [`docs/design/2026-07-01-foundation-design.md`](docs/design/2026-07-01-foundation-design.md).
+> **Status:** SP1 (Foundation) + SP2 (Architektur-Onboarding) ausgeliefert, Tag `v0.2.0`.
+> Setup: [`BOOTSTRAP.md`](BOOTSTRAP.md) · Design: [`docs/design/`](docs/design/).
 
 ---
 
-## Idee in einem Absatz
+## Die Idee in einem Absatz
 
-Der Wert eines Entwicklungsprozesses steckt in seiner **Methodik** (Regeln, Risiko-Tiers,
-Zyklus, ADRs, Journal) und seiner **harten Durchsetzung** (CI-Gates, git-Hooks) — beides
-ist reines Markdown + git und damit tool-unabhängig. Nur die **aktive Automatisierung**
-(Slash-Commands, Skills, Subagents, Hooks) ist harness-spezifisch. `dev-process` legt die
-Methodik als neutrale SSOT (`docs/process/`) ab, erzwingt sie über CI, und liefert dünne
-Adapter je Harness — die schweren Prozess-Bausteine sind zuschaltbare Module.
+Der Wert eines Entwicklungsprozesses steckt in drei Schichten, die üblicherweise
+vermischt werden. Die **Methodik** (Regeln, Risiko-Tiers, Zyklus, ADRs, Journal)
+ist reines Markdown + git und damit tool-unabhängig. Die **Durchsetzung**
+(CI-Gates, git-Hooks) ist die eigentliche Garantie — sie hält auch dann, wenn
+niemand hinsieht. Nur die **aktive Automatisierung** (Slash-Commands, Skills,
+Subagents) ist harness-spezifisch und degradiert kontrolliert, wenn man das Tool
+wechselt. `dev-process` legt die Methodik als neutrale SSOT (`docs/process/`) ab,
+erzwingt sie über CI, und liefert dünne Adapter je Harness — die schweren
+Bausteine sind zuschaltbare Module.
 
-## Geplante Nutzung (SP1)
+## Der Prozess — Eckpunkte
+
+**Risiko-Tiers (0–4)** routen jede Aufgabe: der *Umfang* bestimmt den Tier, nicht
+die Diff-Größe. User-sichtbar, komponentenübergreifend, API/Contract, Auth oder
+Persistenz ⇒ Tier 3+ auch bei winzigem Diff. Ein `flow`-Label ist Boden, nie Decke.
+
+**Acht bindende Regeln** (Reihenfolge = Priorität):
+
+1. Verifikation vor Behauptung (Tool-Call oder Confidence-Tag).
+2. Plan vor substanzieller Arbeit (Tier aus echtem Umfang ableiten).
+3. Contract/Interface zuerst bei geteiltem Verhalten.
+4. Ein Owner pro Verhalten — strukturell statt additiv (keine parallelen Efforts).
+5. Tests beweisen Akzeptanz.
+6. Root-Cause vor Symptom (max. 2 Symptom-Versuche).
+7. Review-Gate vor Merge in den Main-Branch.
+8. Atomare Commits, dokumentierte Ausnahmen.
+
+**Zyklus:** Brainstorm → Plan → Execute → Review, plus Quick (kleine Änderungen)
+und Debug. **ADRs** tragen zwei Achsen — `Status` (Proposed/Accepted/Superseded)
+und `Intent` (keep/change-planned/tolerated), damit „so ist es" von „so soll es
+werden" getrennt bleibt. **Journal, Branch-State und Pläne** halten das *Warum*
+fest, das das git-log nicht zeigt.
+
+**Durchsetzung:** ein manifest-bewusster `gate_runner` liest `.copier-answers.yml`
+und fährt in CI nur die *aktiven* Module. git-Hooks sichern lokal ab. Zuschaltbare
+Module heute: `doc-drift-gate` (tote Pfad-Referenzen in Docs) und `arch-onboarding`.
+
+## Architektur als geprüfter Contract (SP2)
+
+Die meisten Frameworks dokumentieren Architektur in Prosa, die verrottet.
+`arch-onboarding` erfasst sie stattdessen als maschinen-prüfbaren Block in
+`ARCHITECTURE.md` und verifiziert die Aussagen bei **jedem** CI-Lauf gegen echten
+Code — ehrlich getrennt nach dem, was mechanisch garantierbar ist, und dem, was
+nicht:
+
+- **Hart (CI schlägt fehl):** `code_roots` und Layer-Pfade existieren, Interface-
+  Symbole liegen in ihrer Datei, ein `rules[].adr`-Link löst auf eine ADR auf.
+- **Best-effort:** Layering-Konformität fährt einen vorhandenen Arch-Linter
+  (import-linter / dependency-cruiser) und schlägt bei Verstößen fehl; ohne Linter
+  bleibt eine Manual-Review-Checkliste. Konformität wird nie *vorgetäuscht*.
+
+## Mehrwert gegenüber Standard-Ansätzen
+
+|  | Prosa-Playbook | Scaffolding (cookiecutter) | reines CI-Linting | **dev-process** |
+|---|:---:|:---:|:---:|:---:|
+| durchgesetzt, nicht nur dokumentiert | ✗ | ✗ | nur Stil | ✓ Gates + Hooks |
+| nachträglich aktualisierbar | ✗ | ✗ (one-shot) | – | ✓ `copier update` |
+| tool-/harness-unabhängig | – | – | – | ✓ Kernel byte-identisch |
+| Architektur gegen echten Code geprüft | ✗ | ✗ | ✗ | ✓ arch-onboarding |
+| Brownfield-additiv (überschreibt nichts) | ✗ | ✗ | – | ✓ |
+| ehrliche Decke (hart vs. best-effort) | – | – | – | ✓ kein False-Green |
+
+Kurz: Ein Playbook beschreibt, erzwingt aber nichts und altert; Scaffolding ist
+ein einmaliger Abwurf ohne Update-Pfad; CI-Linting sichert Stil, nicht Prozess,
+Architektur oder Entscheidungen. `dev-process` liefert die Methodik **mit** ihrer
+Durchsetzung, harness-übergreifend und über `copier update` versionierbar.
+
+## Nutzung
 
 **Greenfield oder Brownfield — derselbe Befehl:**
 
@@ -29,9 +89,10 @@ Adapter je Harness — die schweren Prozess-Bausteine sind zuschaltbare Module.
 uvx copier copy gh:Crashman1983/dev-process .
 ```
 
-copier fragt die gewünschten **Module** und **Harnesses** ab und rendert nur diese.
-Bestehende Dateien werden **nicht** überschrieben (additiver Brownfield-Drop-in).
-Ein Modul später nachrüsten: Antwort in `.copier-answers.yml` ändern → `copier update`.
+copier fragt **Module** und **Harnesses** ab und rendert nur diese. Bestehende
+Dateien werden **nicht** überschrieben (additiver Drop-in). Ein Modul später
+nachrüsten oder eine neuere Prozess-Version ziehen: Antwort in
+`.copier-answers.yml` ändern → `uvx copier update`.
 
 **Pull-Mode** (ein KI-Agent richtet es ein): dem Agenten im Zielrepo sagen
 *„richte den Entwicklungsprozess aus diesem Repo ein, folge dessen `BOOTSTRAP.md`"* —
@@ -41,6 +102,6 @@ der Rest ist self-contained beschrieben.
 
 | Sub-Projekt | Inhalt | Status |
 |---|---|---|
-| **SP1** Foundation | Kern + Adapter + copier-Init + additiver Brownfield-Drop-in | ✅ implementiert |
-| **SP2** Brownfield-Architektur-Discovery | Architektur-Interview + Verifikation gegen echten Code | 🔜 geplant |
+| **SP1** Foundation | Kern + Adapter + copier-Init + additiver Brownfield-Drop-in | ✅ ausgeliefert |
+| **SP2** Architektur-Onboarding | Architektur-Interview + Verifikation gegen echten Code | ✅ ausgeliefert |
 | **SP3** Multi-Repo / Multi-Mensch | Upstream-Governance + Cross-Repo-Contracts + Koordination | 🔜 geplant |
