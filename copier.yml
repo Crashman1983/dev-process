@@ -21,6 +21,7 @@ modules:
     feature_registry: false
     github_issues: false
     contracts_drift: false
+    git_hooks: false
 
 github_repo:
   type: str

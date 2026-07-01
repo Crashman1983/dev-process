@@ -37,6 +37,7 @@ def main() -> int:
         for g in active:
             print(g)
         return 0
+    warn = "--warn" in sys.argv
     failed = []
     for name in active:
         _key, cmd = GATES[name]
@@ -44,6 +45,9 @@ def main() -> int:
         if subprocess.run(cmd, cwd=root).returncode != 0:
             failed.append(name)
     if failed:
+        if warn:
+            print(f"⚠ gate warnings (not blocking): {', '.join(failed)}")
+            return 0
         print(f"FAILED gates: {', '.join(failed)}")
         return 1
     print(f"all {len(active)} active gate(s) passed")
