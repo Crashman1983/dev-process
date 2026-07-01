@@ -11,12 +11,15 @@ optional project-supplied verify command yield notes, never a failure.
 Language-agnostic; Python stdlib only."""
 from __future__ import annotations
 
+import hashlib
 import json
+import re
 import sys
 from pathlib import Path
 
 CONTRACTS_DIR = "docs/process/contracts"
 REQUIRED = ("id", "kind", "artifact", "pin")
+_HASH_RE = re.compile(r"^(sha256|sha512|sha1):([0-9a-fA-F]+)$")
 
 
 def _contract_files(root: Path) -> list[Path]:
@@ -33,6 +36,11 @@ def _artifact_path(root: Path, artifact: str) -> Path | None:
     if root_resolved not in resolved.parents:
         return None
     return resolved
+
+
+def _pin_hash(pin: str) -> tuple[str, str] | None:
+    m = _HASH_RE.match(pin)
+    return (m.group(1), m.group(2).lower()) if m else None
 
 
 def _check_contract(root: Path, path: Path) -> tuple[list[str], list[str]]:
@@ -64,6 +72,22 @@ def _check_contract(root: Path, path: Path) -> tuple[list[str], list[str]]:
     if not apath.is_file():
         hard.append(f"{rel}: artifact not committed / does not exist: {artifact}")
         return hard, soft
+
+    pin = data["pin"].strip()
+    parsed = _pin_hash(pin)
+    if parsed is None:
+        soft.append(
+            f"{rel}: opaque pin {pin!r} — integrity not machine-checkable; "
+            "use a sha256: pin or a verify command"
+        )
+    else:
+        algo, expected = parsed
+        actual = hashlib.new(algo, apath.read_bytes()).hexdigest()
+        if actual != expected:
+            hard.append(
+                f"{rel}: artifact changed but pin not updated "
+                f"({algo} {actual} != {expected}) — re-pin deliberately"
+            )
 
     return hard, soft
 

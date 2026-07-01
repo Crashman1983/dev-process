@@ -102,3 +102,39 @@ def test_artifact_escaping_repo_is_hard(render, tmp_path):
     r = _run(out)
     assert r.returncode == 1
     assert "escapes" in r.stdout
+
+
+def test_sha256_pin_match_is_clean(render, tmp_path):
+    out = _render(render, tmp_path)
+    body = b'{"openapi": "3.1.0"}'
+    _contract(out, pin=_sha256(body), artifact_bytes=body)
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+    assert "opaque pin" not in r.stdout
+    assert "changed but pin" not in r.stdout
+
+
+def test_sha256_pin_mismatch_is_hard(render, tmp_path):
+    out = _render(render, tmp_path)
+    _contract(out, pin=_sha256(b"OLD"), artifact_bytes=b"NEW-the-artifact-was-edited")
+    r = _run(out)
+    assert r.returncode == 1
+    assert "changed but pin not updated" in r.stdout
+
+
+def test_opaque_pin_is_soft(render, tmp_path):
+    out = _render(render, tmp_path)
+    _contract(out, pin="registry:v3")
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+    assert "opaque pin" in r.stdout
+
+
+def test_sha512_pin_match_is_clean(render, tmp_path):
+    out = _render(render, tmp_path)
+    body = b"schema-bytes"
+    pin = "sha512:" + hashlib.sha512(body).hexdigest()
+    _contract(out, pin=pin, artifact_bytes=body)
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+    assert "opaque pin" not in r.stdout
