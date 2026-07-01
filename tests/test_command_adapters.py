@@ -44,3 +44,27 @@ def test_doc_drift_scans_copilot_prompts(render, tmp_path):
     r = _run_gate(out)
     assert r.returncode == 1
     assert "does-not-exist.md" in (r.stdout + r.stderr)
+
+
+# --- ship-set behaviour ---
+
+
+def test_claude_commands_always_ship(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d"})  # every module + harness off
+    for name in COMMANDS:
+        assert (out / ".claude/commands" / f"{name}.md").is_file(), name
+
+
+def test_shipped_commands_drift_clean(render, tmp_path):
+    # render everything; every real slash-ref in every shipped command file
+    # (and the AGENTS.md section) must resolve, so the gate exits 0.
+    out = render(
+        tmp_path,
+        {
+            "project_name": "d",
+            "modules": {"doc_drift_gate": True},
+            "harnesses": {"copilot": True, "agents_md": True},
+        },
+    )
+    r = _run_gate(out)
+    assert r.returncode == 0, r.stdout + r.stderr
