@@ -84,3 +84,56 @@ def test_runner_omits_gate_when_module_off(render, tmp_path):
     )
     assert r.returncode == 0, r.stderr
     assert "feature-registry" not in r.stdout
+
+
+def test_valid_story_ok(render, tmp_path):
+    out = _render(render, tmp_path)
+    _write_story(out, "STORY-0007.json", VALID)
+    (out / "tests/billing").mkdir(parents=True, exist_ok=True)
+    (out / "tests/billing/test_post.py").write_text("def test_x():\n    pass\n")
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+    assert "registry-gate: OK" in r.stdout
+
+
+def test_missing_required_field_is_hard(render, tmp_path):
+    out = _render(render, tmp_path)
+    broken = {k: v for k, v in VALID.items() if k != "title"}
+    _write_story(out, "STORY-0008.json", broken)
+    r = _run(out)
+    assert r.returncode == 1
+    assert "missing 'title'" in r.stdout
+
+
+def test_bad_id_format_is_hard(render, tmp_path):
+    out = _render(render, tmp_path)
+    _write_story(out, "story7.json", {**VALID, "id": "STORY-7"})
+    r = _run(out)
+    assert r.returncode == 1
+    assert "STORY-NNNN" in r.stdout
+
+
+def test_duplicate_id_is_hard(render, tmp_path):
+    out = _render(render, tmp_path)
+    _write_story(out, "a.json", {**VALID, "id": "STORY-0009"})
+    _write_story(out, "b.json", {**VALID, "id": "STORY-0009"})
+    r = _run(out)
+    assert r.returncode == 1
+    assert "duplicate id" in r.stdout
+
+
+def test_bad_status_is_hard(render, tmp_path):
+    out = _render(render, tmp_path)
+    _write_story(out, "STORY-0010.json", {**VALID, "status": "shipped"})
+    r = _run(out)
+    assert r.returncode == 1
+    assert "status" in r.stdout
+
+
+def test_empty_acceptance_text_is_hard(render, tmp_path):
+    out = _render(render, tmp_path)
+    bad = {**VALID, "acceptance": [{"id": "AC1", "text": "   "}]}
+    _write_story(out, "STORY-0011.json", bad)
+    r = _run(out)
+    assert r.returncode == 1
+    assert "acceptance[0]" in r.stdout

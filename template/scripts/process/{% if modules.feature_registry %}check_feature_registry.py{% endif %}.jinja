@@ -35,6 +35,8 @@ def _adr_exists(root: Path, adr: object) -> bool:
 
 
 def _check_story(root: Path, path: Path, seen_ids: dict) -> tuple[list[str], list[str]]:
+    hard: list[str] = []
+    soft: list[str] = []
     rel = path.relative_to(root)
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -42,7 +44,34 @@ def _check_story(root: Path, path: Path, seen_ids: dict) -> tuple[list[str], lis
         return [f"{rel}: invalid JSON: {exc}"], []
     if not isinstance(data, dict):
         return [f"{rel}: story must be a JSON object, got {type(data).__name__}"], []
-    return [], []
+
+    sid = data.get("id")
+    if not isinstance(sid, str) or not sid:
+        hard.append(f"{rel}: missing or non-string 'id'")
+    elif not ID_RE.match(sid):
+        hard.append(f"{rel}: 'id' must match STORY-NNNN, got {sid!r}")
+    elif sid in seen_ids:
+        hard.append(f"{rel}: duplicate id {sid!r} (also in {seen_ids[sid]})")
+    else:
+        seen_ids[sid] = str(rel)
+
+    if not data.get("title"):
+        hard.append(f"{rel}: missing 'title'")
+    if not data.get("story"):
+        hard.append(f"{rel}: missing 'story'")
+
+    if data.get("status") not in STATUSES:
+        hard.append(f"{rel}: 'status' must be one of {sorted(STATUSES)}, got {data.get('status')!r}")
+
+    acceptance = data.get("acceptance")
+    if not isinstance(acceptance, list) or not acceptance:
+        hard.append(f"{rel}: 'acceptance' must be a non-empty list")
+    else:
+        for i, ac in enumerate(acceptance):
+            if not isinstance(ac, dict) or not str(ac.get("text", "")).strip():
+                hard.append(f"{rel}: acceptance[{i}] has empty 'text'")
+
+    return hard, soft
 
 
 def check(root: Path) -> tuple[list[str], list[str]]:
