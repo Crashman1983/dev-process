@@ -205,3 +205,24 @@ def test_existence_crossrepo_uses_own_repo(render, tmp_path):
     r = _run(out, prepend=str(bindir))
     assert r.returncode == 0, r.stdout
     assert "--repo octo/billing" in argfile.read_text()
+
+
+def _runner_list(out: Path):
+    return subprocess.run(
+        [sys.executable, str(out / "scripts/process/gate_runner.py"), "--list"],
+        cwd=out, capture_output=True, text=True,
+    )
+
+
+def test_runner_lists_issues_when_on(render, tmp_path):
+    out = _render(render, tmp_path)
+    r = _runner_list(out)
+    assert r.returncode == 0, r.stderr
+    assert "github-issues" in r.stdout
+
+
+def test_runner_skips_issues_when_off(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d"})
+    r = _runner_list(out)
+    assert r.returncode == 0, r.stderr
+    assert "github-issues" not in r.stdout
