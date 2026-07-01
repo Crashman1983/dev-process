@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+# Installs dev-process git hooks into .git/hooks (host-local, not versioned;
+# THIS script is the source of truth). Brownfield-safe: a pre-existing hook not
+# managed by dev-process is left untouched. Idempotent — re-run any time.
+set -e
+MARKER="# dev-process-managed-hook"
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {
+  echo "✗ not a git repository — run this from inside your repo." >&2
+  exit 1
+}
+HOOK_DIR="$(git -C "$REPO_ROOT" rev-parse --git-path hooks)"
+mkdir -p "$HOOK_DIR"
+
+# 0 = safe to (over)write our hook; 1 = a foreign hook is present, skip it.
+can_write() {
+  target="$HOOK_DIR/$1"
+  if [ -e "$target" ] && ! grep -q "$MARKER" "$target" 2>/dev/null; then
+    echo "⚠ $1 exists and is not dev-process-managed — leaving it untouched." >&2
+    echo "  Merge the dev-process $1 manually if you want its checks." >&2
+    return 1
+  fi
+  return 0
+}
+
+if can_write pre-commit; then
+cat > "$HOOK_DIR/pre-commit" << 'EOF'
+#!/usr/bin/env bash
+# dev-process-managed-hook
+# Blocks direct commits to main/master. Feature branch + ff-only merge to main.
+# Automation escape: ALLOW_MAIN_COMMIT=1.
+branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null)"
+if { [ "$branch" = "main" ] || [ "$branch" = "master" ]; } && [ "${ALLOW_MAIN_COMMIT:-0}" != "1" ]; then
+  echo "✗ Direct commit to '$branch' blocked. Use a feature branch; ff-only merge to main." >&2
+  echo "  Automation: ALLOW_MAIN_COMMIT=1 git commit ..." >&2
+  exit 1
+fi
+exit 0
+EOF
+chmod +x "$HOOK_DIR/pre-commit"
+echo "✓ installed pre-commit"
+fi
+
+if can_write pre-push; then
+cat > "$HOOK_DIR/pre-push" << 'EOF'
+#!/usr/bin/env bash
+# dev-process-managed-hook
+# Local mirror of the CI merge gates: runs the manifest-aware gate runner over
+# all active modules. Bypass: git push --no-verify, or SKIP_PUSH_GATE=1.
+[ "${SKIP_PUSH_GATE:-0}" = "1" ] && { echo "⚠ pre-push gate skipped (SKIP_PUSH_GATE=1)." >&2; exit 0; }
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+cd "$REPO_ROOT" || exit 0
+[ -f scripts/process/gate_runner.py ] || exit 0
+python3 scripts/process/gate_runner.py
+EOF
+chmod +x "$HOOK_DIR/pre-push"
+echo "✓ installed pre-push"
+fi
+
+if can_write post-commit; then
+cat > "$HOOK_DIR/post-commit" << 'EOF'
+#!/usr/bin/env bash
+# dev-process-managed-hook
+# Warn-only drift feedback after each commit (never blocks).
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+cd "$REPO_ROOT" || exit 0
+[ -f scripts/process/gate_runner.py ] || exit 0
+python3 scripts/process/gate_runner.py --warn || true
+EOF
+chmod +x "$HOOK_DIR/post-commit"
+echo "✓ installed post-commit"
+fi
+
+echo "Done. Bypass: ALLOW_MAIN_COMMIT=1 (pre-commit); SKIP_PUSH_GATE=1 or --no-verify (pre-push)."
