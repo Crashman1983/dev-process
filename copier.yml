@@ -24,6 +24,7 @@ modules:
     git_hooks: false
     contract_first: false
     parity: false
+    security_floor: false
 
 github_repo:
   type: str

@@ -1,0 +1,9 @@
+{
+  "rules": [
+    { "id": "no-shell-true", "pattern": "shell\\s*=\\s*True",
+      "applies_to": ["*.py"], "message": "use a subprocess argv list, not shell=True" },
+    { "id": "no-committed-private-key", "pattern": "-----BEGIN [A-Z ]*PRIVATE KEY-----",
+      "message": "private key material must not be committed" }
+  ],
+  "exclude": ["*test_*", "tests/*"]
+}

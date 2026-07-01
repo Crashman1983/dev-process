@@ -1,0 +1,145 @@
+#!/usr/bin/env python3
+"""security-floor gate: the grep-able subset of a project's security invariants,
+enforced as a blocking gate. The project declares forbidden regex patterns in
+docs/process/security-floor.json; the gate scans git-tracked files and fails CI
+(exit 1) on a match. A present-but-broken config also fails. Enumeration needs
+git; if git is unavailable the scan is skipped with an advisory note, never faked
+as a pass. Bypass: SKIP_SECURITY_FLOOR=1. Python stdlib only."""
+from __future__ import annotations
+
+import fnmatch
+import json
+import os
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+CONFIG = "docs/process/security-floor.json"
+# never scan the policy file itself (it holds the patterns) or the gate script.
+SELF_EXCLUDE = {CONFIG, "scripts/process/check_security_floor.py"}
+
+
+def _tracked_files(root: Path) -> list[str] | None:
+    try:
+        r = subprocess.run(
+            ["git", "-C", str(root), "ls-files", "-z"],
+            capture_output=True, timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if r.returncode != 0:
+        return None
+    return [p for p in r.stdout.decode("utf-8", "replace").split("\0") if p]
+
+
+def _matches_any(rel: str, globs: list[str]) -> bool:
+    base = rel.rsplit("/", 1)[-1]
+    return any(fnmatch.fnmatch(rel, g) or fnmatch.fnmatch(base, g) for g in globs)
+
+
+def _load_config(root: Path) -> tuple[dict | None, list[str]]:
+    p = root / CONFIG
+    if not p.is_file():
+        return None, []
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        return None, [f"{CONFIG}: invalid JSON: {exc}"]
+    except UnicodeDecodeError as exc:
+        return None, [f"{CONFIG}: not valid UTF-8: {exc}"]
+    if not isinstance(data, dict):
+        return None, [f"{CONFIG}: must be a JSON object"]
+    return data, []
+
+
+def _validate(cfg: dict) -> tuple[list[dict], list[str], list[str]]:
+    hard: list[str] = []
+    rules_raw = cfg.get("rules")
+    if not isinstance(rules_raw, list):
+        return [], [], [f"{CONFIG}: 'rules' must be a list"]
+    exclude = cfg.get("exclude") if isinstance(cfg.get("exclude"), list) else []
+    exclude = [g for g in exclude if isinstance(g, str)]
+    compiled: list[dict] = []
+    for i, rule in enumerate(rules_raw):
+        if not isinstance(rule, dict):
+            hard.append(f"{CONFIG}: rule #{i} must be an object")
+            continue
+        rid = rule.get("id")
+        pattern = rule.get("pattern")
+        message = rule.get("message")
+        applies = rule.get("applies_to")
+        if not isinstance(rid, str) or not rid.strip():
+            hard.append(f"{CONFIG}: rule #{i} 'id' must be a non-empty string")
+        if not isinstance(message, str) or not message.strip():
+            hard.append(f"{CONFIG}: rule {rid!r} 'message' must be a non-empty string")
+        if applies is not None and not (isinstance(applies, list) and all(isinstance(g, str) for g in applies)):
+            hard.append(f"{CONFIG}: rule {rid!r} 'applies_to' must be a list of glob strings")
+            applies = None
+        if not isinstance(pattern, str) or not pattern:
+            hard.append(f"{CONFIG}: rule {rid!r} 'pattern' must be a non-empty string")
+            continue
+        try:
+            regex = re.compile(pattern)
+        except re.error as exc:
+            hard.append(f"{CONFIG}: rule {rid!r} pattern is not a valid regex: {exc}")
+            continue
+        compiled.append({"id": rid, "regex": regex, "applies_to": applies, "message": message})
+    return compiled, exclude, hard
+
+
+def check(root: Path) -> tuple[list[str], list[str]]:
+    cfg, errs = _load_config(root)
+    if errs:
+        return errs, []
+    if cfg is None:
+        return [], [f"no security-floor config yet ({CONFIG} absent)"]
+    rules, exclude, hard = _validate(cfg)
+    if hard:
+        return hard, []
+    if not rules:
+        return [], ["security-floor config has no rules"]
+    files = _tracked_files(root)
+    if files is None:
+        return [], ["could not list tracked files (git unavailable); scan skipped"]
+
+    findings: list[str] = []
+    for rel in files:
+        if rel in SELF_EXCLUDE:
+            continue
+        if exclude and _matches_any(rel, exclude):
+            continue
+        applicable = [r for r in rules if r["applies_to"] is None or _matches_any(rel, r["applies_to"])]
+        if not applicable:
+            continue
+        try:
+            text = (root / rel).read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue  # binary / unreadable — cannot scan
+        for lineno, line in enumerate(text.splitlines(), 1):
+            for r in applicable:
+                if r["regex"].search(line):
+                    findings.append(f"{rel}:{lineno}: {r['message']} [{r['id']}]")
+    return findings, []
+
+
+def main() -> int:
+    if os.environ.get("SKIP_SECURITY_FLOOR") == "1":
+        print("security-floor: skipped (SKIP_SECURITY_FLOOR=1)")
+        return 0
+    root = Path(sys.argv[1] if len(sys.argv) > 1 else ".").resolve()
+    hard, soft = check(root)
+    for note in soft:
+        print(f"security-floor: note: {note}")
+    if hard:
+        print("security-floor: FAILED:")
+        for h in hard:
+            print(f"  - {h}")
+        print("  → fix, or bypass with SKIP_SECURITY_FLOOR=1 (and say why in the commit).")
+        return 1
+    print("security-floor: OK")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
