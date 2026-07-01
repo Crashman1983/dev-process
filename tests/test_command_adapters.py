@@ -74,6 +74,10 @@ def test_shipped_commands_drift_clean(render, tmp_path):
 def test_copilot_prompts_gated(render, tmp_path):
     off = render(tmp_path / "off", {"project_name": "d"})
     assert not (off / ".github/prompts").exists()
+    # dir-absence alone would stay green if copier ever collapsed the empty
+    # path segment and leaked the files into .github/ directly — assert the
+    # stronger property: no prompt file anywhere when copilot is off.
+    assert not list(off.rglob("*.prompt.md")), "prompt files leaked with copilot off"
     on = render(tmp_path / "on", {"project_name": "d", "harnesses": {"copilot": True}})
     for name in COMMANDS:
         assert (on / ".github/prompts" / f"{name}.prompt.md").is_file(), name
