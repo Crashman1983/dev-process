@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """doc-drift-gate: verify that repo-relative path references in docs/process/
-and the harness adapters actually resolve. Portable, language-agnostic.
+and the harness adapters (CLAUDE.md/AGENTS.md/instructions plus the
+.claude/commands and .github/prompts command files) actually resolve.
+Portable, language-agnostic.
 
 Only references that contain a slash (repo-relative paths) are checked; bare
 filenames and obvious placeholders (<...>, YYYY, NNNN, *) are ignored to avoid
@@ -14,7 +16,7 @@ from pathlib import Path
 LINK = re.compile(r"\[[^\]]+\]\(([^)]+)\)")          # markdown links
 BACKTICK = re.compile(r"`([^`]+\.[a-z]{1,5})`")      # `path/to/file.ext`
 PLACEHOLDER = re.compile(r"[<>*]|YYYY|NNNN")         # illustrative, not literal
-SCAN_DIRS = ["docs/process"]
+SCAN_DIRS = ["docs/process", ".claude/commands", ".github/prompts"]
 SCAN_FILES = ["CLAUDE.md", "AGENTS.md", ".github/copilot-instructions.md", "ARCHITECTURE.md"]
 
 
