@@ -12,6 +12,7 @@ import yaml
 # gate-name -> (module answer key, command relative to repo root)
 GATES = {
     "doc-drift-gate": ("doc_drift_gate", [sys.executable, "scripts/process/check_doc_drift.py", "."]),
+    "arch-onboarding": ("arch_onboarding", [sys.executable, "scripts/process/check_architecture.py", "."]),
 }
 
 

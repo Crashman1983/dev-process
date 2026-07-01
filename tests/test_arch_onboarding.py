@@ -196,3 +196,38 @@ def test_rule_without_adr_not_checked(render, tmp_path):
     _write_arch(out, RULE_BLOCK)  # no adr key
     r = _run(out)
     assert r.returncode == 0, r.stdout
+
+
+def _runner_list(out: Path):
+    return subprocess.run(
+        [sys.executable, str(out / "scripts/process/gate_runner.py"), "--list"],
+        cwd=out, capture_output=True, text=True,
+    )
+
+
+def test_runner_lists_arch_when_on(render, tmp_path):
+    out = _render(render, tmp_path)
+    r = _runner_list(out)
+    assert r.returncode == 0, r.stderr
+    assert "arch-onboarding" in r.stdout
+
+
+def test_runner_skips_arch_when_off(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d"})
+    r = _runner_list(out)
+    assert r.returncode == 0, r.stderr
+    assert "arch-onboarding" not in r.stdout
+
+
+def test_docdrift_scans_architecture_md(render, tmp_path):
+    out = render(
+        tmp_path,
+        {"project_name": "d", "modules": {"doc_drift_gate": True, "arch_onboarding": True}},
+    )
+    (out / "ARCHITECTURE.md").write_text("# Architecture\n\nSee [x](does/not/exist.py).\n")
+    r = subprocess.run(
+        [sys.executable, str(out / "scripts/process/check_doc_drift.py"), str(out)],
+        capture_output=True, text=True,
+    )
+    assert r.returncode == 1
+    assert "ARCHITECTURE.md" in r.stdout

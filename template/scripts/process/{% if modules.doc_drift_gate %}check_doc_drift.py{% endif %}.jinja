@@ -15,7 +15,7 @@ LINK = re.compile(r"\[[^\]]+\]\(([^)]+)\)")          # markdown links
 BACKTICK = re.compile(r"`([^`]+\.[a-z]{1,5})`")      # `path/to/file.ext`
 PLACEHOLDER = re.compile(r"[<>*]|YYYY|NNNN")         # illustrative, not literal
 SCAN_DIRS = ["docs/process"]
-SCAN_FILES = ["CLAUDE.md", "AGENTS.md", ".github/copilot-instructions.md"]
+SCAN_FILES = ["CLAUDE.md", "AGENTS.md", ".github/copilot-instructions.md", "ARCHITECTURE.md"]
 
 
 def _candidates(text: str):
