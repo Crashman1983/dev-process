@@ -1,0 +1,18 @@
+# Architecture — {{ project_name }}
+
+Run the onboarding interview (`docs/process/modules/arch-onboarding.md`), then
+replace the inert `arch-example` block below with a real `arch` block. The
+arch-gate reads only an exact ` ```arch ` fence, so this seed never fails CI.
+
+<Describe the layers, the boundaries, and the key invariants here.>
+
+```arch-example
+code_roots: [src]
+layers:
+  domain: {path: src/<domain>}
+  infra:  {path: src/<infra>}
+rules:
+  - {forbid: domain -> infra, adr: ADR-0002}
+interfaces:
+  - {name: ExamplePort, path: src/<domain>/ports.py}
+```

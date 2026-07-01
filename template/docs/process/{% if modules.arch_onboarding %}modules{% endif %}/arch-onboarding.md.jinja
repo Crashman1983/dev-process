@@ -1,0 +1,53 @@
+# Module: arch-onboarding
+
+Captures the architecture of **{{ project_name }}** and verifies it against the
+real code. Runs in CI via `process-gates` and locally via
+`uv run scripts/process/check_architecture.py`.
+
+## Interview (run this with a human)
+
+Fill an ` ```arch ` block in `ARCHITECTURE.md` by answering, one at a time:
+
+1. **code_roots** — which directories hold this repo's own code?
+2. **layers** — name each architectural layer and its path (e.g. `domain`,
+   `app`, `infra`). Example path form: `src/<layer>`.
+3. **invariants (rules)** — which dependencies are forbidden? Express as
+   `forbid: A -> B` using layer names. Each rule the human confirms as a real
+   decision earns an ADR (below) and links it via `adr:`.
+4. **interfaces** — the key contract symbols in this repo and the file each
+   lives in (e.g. `<PortName>` in `src/<domain>/ports.py`).
+
+Then write the block into `ARCHITECTURE.md`:
+
+```
+code_roots: [src]
+layers:
+  domain: {path: src/<domain>}
+  infra:  {path: src/<infra>}
+rules:
+  - {forbid: domain -> infra, adr: ADR-NNNN}
+interfaces:
+  - {name: <PortName>, path: src/<domain>/ports.py}
+```
+
+## What the gate verifies
+
+- **Hard (CI fails):** every `code_roots` / `layers.*.path` exists; every
+  `interfaces[].path` file exists and contains its `name`; a `rules[].adr`
+  link resolves to a file; rule layer names are known; manifest is well-formed.
+- **Best-effort:** layering conformance runs a present arch-linter
+  (import-linter via `lint-imports`, dependency-cruiser via `depcruise`) and
+  fails on violations; with no linter it prints a manual-review checklist and
+  stays green. Conformance is **delegated to the linter's own contracts**
+  (`.importlinter`, `.dependency-cruiser.*`) — keep those in sync with the
+  `rules` here, or a green linter can silently pass a rule it never enforces.
+- **Ignored:** unknown top-level keys (reserved for later cross-repo work).
+
+## Decisions → ADRs
+
+Each confirmed invariant becomes an ADR under `docs/process/adr/` named
+`adr-NNNN-<slug>.md` (see `docs/process/adr/template.md`). Record two axes:
+
+- **Status:** Proposed | Accepted | Superseded.
+- **Intent:** keep | change-planned | tolerated — endorsed vs. documented-but-
+  migrating vs. accepted-debt. Link the rule to the ADR via `rules[].adr`.

@@ -17,3 +17,4 @@ modules:
   help: "Which opt-in process modules to install"
   default:
     doc_drift_gate: false
+    arch_onboarding: false
