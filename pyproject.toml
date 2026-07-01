@@ -1,6 +1,6 @@
 [project]
 name = "dev-process"
-version = "0.6.0"
+version = "0.7.0"
 description = "Portable, harness-agnostic AI-assisted development process (copier template)"
 requires-python = ">=3.11"
 
