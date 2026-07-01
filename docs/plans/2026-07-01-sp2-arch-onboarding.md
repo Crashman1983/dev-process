@@ -265,7 +265,9 @@ interfaces:
 - **Best-effort:** layering conformance runs a present arch-linter
   (import-linter via `lint-imports`, dependency-cruiser via `depcruise`) and
   fails on violations; with no linter it prints a manual-review checklist and
-  stays green.
+  stays green. Conformance is **delegated to the linter's own contracts**
+  (`.importlinter`, `.dependency-cruiser.*`) — keep those in sync with the
+  `rules` here, or a green linter can silently pass a rule it never enforces.
 - **Ignored:** unknown top-level keys (reserved for later cross-repo work).
 
 ## Decisions → ADRs
