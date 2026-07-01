@@ -23,6 +23,7 @@ modules:
     contracts_drift: false
     git_hooks: false
     contract_first: false
+    parity: false
 
 github_repo:
   type: str
@@ -31,3 +32,11 @@ github_repo:
     the best-effort issue-existence check; issue-ref format is still enforced).
   default: ""
   when: "{{ modules.github_issues }}"
+
+parity_surfaces:
+  type: yaml
+  help: >-
+    Canonical surface list for the parity matrix (e.g. [web, mobile, cli]).
+    Leave empty to skip exact-coverage enforcement (statuses are still checked).
+  default: []
+  when: "{{ modules.parity }}"

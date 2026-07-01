@@ -1,0 +1,134 @@
+#!/usr/bin/env python3
+"""parity gate: a capability x surface matrix where every deliberate gap links
+to a tracking issue - Rule 4 (prevent silent capability loss). Structure, a
+valid status per surface, and a valid issue reference for every gap are hard
+(CI exit 1). When the project declares its surfaces (parity_surfaces answer),
+exact coverage is hard too. Whether a 'complete' surface truly has code proof
+is review-enforced, not machine-checkable, and is advisory only. Python stdlib
+plus PyYAML (already a template dependency)."""
+from __future__ import annotations
+
+import json
+import re
+import sys
+from pathlib import Path
+
+import yaml
+
+PARITY_DIR = "docs/process/parity"
+STATUSES = {"complete", "view", "code", "gap", "na"}
+_BARE = re.compile(r"^#(\d+)$")
+_CROSS = re.compile(r"^([\w.-]+/[\w.-]+)#(\d+)$")
+_URL = re.compile(r"^https://github\.com/([\w.-]+/[\w.-]+)/issues/(\d+)$")
+
+
+def _is_issue_ref(s: str) -> bool:
+    return bool(_BARE.match(s) or _CROSS.match(s) or _URL.match(s))
+
+
+def _declared_surfaces(root: Path) -> list[str] | None:
+    f = root / ".copier-answers.yml"
+    if not f.is_file():
+        return None
+    try:
+        ans = yaml.safe_load(f.read_text(encoding="utf-8")) or {}
+    except yaml.YAMLError:
+        return None
+    surf = ans.get("parity_surfaces")
+    return surf if isinstance(surf, list) and surf else None
+
+
+def _parity_files(root: Path) -> list[Path]:
+    d = root / PARITY_DIR
+    if not d.is_dir():
+        return []
+    return sorted(p for p in d.glob("*.json") if not p.name.endswith(".example.json"))
+
+
+def _check(root: Path, path: Path, declared: list[str] | None) -> tuple[list[str], list[str]]:
+    hard: list[str] = []
+    soft: list[str] = []
+    rel = path.relative_to(root)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        return [f"{rel}: invalid JSON: {exc}"], []
+    except UnicodeDecodeError as exc:
+        return [f"{rel}: not valid UTF-8: {exc}"], []
+    if not isinstance(data, dict):
+        return [f"{rel}: parity entry must be a JSON object, got {type(data).__name__}"], []
+
+    cap = data.get("capability")
+    if not isinstance(cap, str) or not cap.strip():
+        hard.append(f"{rel}: 'capability' must be a non-empty string")
+    surfaces = data.get("surfaces")
+    if not isinstance(surfaces, dict) or not surfaces:
+        hard.append(f"{rel}: 'surfaces' must be a non-empty object of surface->status")
+    if hard:
+        return hard, soft
+
+    if cap.strip() != path.stem:
+        hard.append(f"{rel}: 'capability' {cap.strip()!r} must equal the filename stem {path.stem!r}")
+
+    raw_issues = data.get("issues")
+    issues = raw_issues if isinstance(raw_issues, dict) else {}
+    for surface, status in surfaces.items():
+        if not isinstance(status, str) or status not in STATUSES:
+            hard.append(f"{rel}: surface {surface!r} status {status!r} not in {sorted(STATUSES)}")
+            continue
+        if status == "gap":
+            ref = issues.get(surface)
+            if not (isinstance(ref, str) and _is_issue_ref(ref.strip())):
+                hard.append(
+                    f"{rel}: surface {surface!r} is a gap but has no valid issue ref in "
+                    "'issues' (want '#N', 'owner/repo#N', or a github issue URL)"
+                )
+        elif status == "complete":
+            soft.append(
+                f"{rel}: surface {surface!r} 'complete' claimed — code proof is "
+                "review-enforced, not machine-checked"
+            )
+
+    if declared is not None:
+        keys = set(surfaces.keys())
+        want = set(declared)
+        missing = want - keys
+        extra = keys - want
+        if missing:
+            hard.append(f"{rel}: missing status for declared surface(s) {sorted(missing)} — a silent omission (Rule 4)")
+        if extra:
+            hard.append(f"{rel}: unknown surface(s) {sorted(extra)} not in declared parity_surfaces {sorted(want)}")
+
+    return hard, soft
+
+
+def check(root: Path) -> tuple[list[str], list[str]]:
+    files = _parity_files(root)
+    if not files:
+        return [], ["no parity entries yet (dir empty or absent)"]
+    declared = _declared_surfaces(root)
+    hard: list[str] = []
+    soft: list[str] = []
+    for path in files:
+        h, s = _check(root, path, declared)
+        hard += h
+        soft += s
+    return hard, soft
+
+
+def main() -> int:
+    root = Path(sys.argv[1] if len(sys.argv) > 1 else ".").resolve()
+    hard, soft = check(root)
+    for note in soft:
+        print(f"parity: note: {note}")
+    if hard:
+        print("parity: FAILED:")
+        for h in hard:
+            print(f"  - {h}")
+        return 1
+    print("parity: OK")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

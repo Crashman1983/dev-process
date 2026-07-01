@@ -1,0 +1,6 @@
+{
+  "capability": "example-capability",
+  "surfaces": { "web": "complete", "mobile": "gap", "cli": "na" },
+  "issues": { "mobile": "#1" },
+  "notes": "Illustrative only — the gate ignores *.example.json. Copy to <capability>.json (stem == capability). Statuses: complete|view|code|gap|na; a 'gap' surface needs an issue ref in 'issues'."
+}
