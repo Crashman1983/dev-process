@@ -16,8 +16,13 @@ import sys
 from pathlib import Path
 
 CONFIG = "docs/process/security-floor.json"
-# never scan the policy file itself (it holds the patterns) or the gate script.
-SELF_EXCLUDE = {CONFIG, "scripts/process/check_security_floor.py"}
+# never scan the policy file itself (it holds the patterns), the shipped seed the
+# doc says to copy, or the gate script — a rule must not flag its own tooling.
+SELF_EXCLUDE = {
+    CONFIG,
+    "docs/process/security-floor.example.json",
+    "scripts/process/check_security_floor.py",
+}
 
 
 def _tracked_files(root: Path) -> list[str] | None:
@@ -48,6 +53,8 @@ def _load_config(root: Path) -> tuple[dict | None, list[str]]:
         return None, [f"{CONFIG}: invalid JSON: {exc}"]
     except UnicodeDecodeError as exc:
         return None, [f"{CONFIG}: not valid UTF-8: {exc}"]
+    except OSError as exc:
+        return None, [f"{CONFIG}: could not read: {exc}"]
     if not isinstance(data, dict):
         return None, [f"{CONFIG}: must be a JSON object"]
     return data, []
@@ -58,8 +65,15 @@ def _validate(cfg: dict) -> tuple[list[dict], list[str], list[str]]:
     rules_raw = cfg.get("rules")
     if not isinstance(rules_raw, list):
         return [], [], [f"{CONFIG}: 'rules' must be a list"]
-    exclude = cfg.get("exclude") if isinstance(cfg.get("exclude"), list) else []
-    exclude = [g for g in exclude if isinstance(g, str)]
+    # a present-but-malformed 'exclude' is a broken policy (silently dropping it
+    # would discard the author's intent), so it is hard — absent stays the default.
+    raw_exclude = cfg.get("exclude")
+    exclude: list[str] = []
+    if raw_exclude is not None:
+        if isinstance(raw_exclude, list) and all(isinstance(g, str) for g in raw_exclude):
+            exclude = raw_exclude
+        else:
+            hard.append(f"{CONFIG}: 'exclude' must be a list of glob strings")
     compiled: list[dict] = []
     for i, rule in enumerate(rules_raw):
         if not isinstance(rule, dict):
@@ -69,20 +83,29 @@ def _validate(cfg: dict) -> tuple[list[dict], list[str], list[str]]:
         pattern = rule.get("pattern")
         message = rule.get("message")
         applies = rule.get("applies_to")
+        # label the rule by id when it is usable, else by index — never "rule None".
+        label = rid if isinstance(rid, str) and rid.strip() else f"#{i}"
         if not isinstance(rid, str) or not rid.strip():
             hard.append(f"{CONFIG}: rule #{i} 'id' must be a non-empty string")
         if not isinstance(message, str) or not message.strip():
-            hard.append(f"{CONFIG}: rule {rid!r} 'message' must be a non-empty string")
-        if applies is not None and not (isinstance(applies, list) and all(isinstance(g, str) for g in applies)):
-            hard.append(f"{CONFIG}: rule {rid!r} 'applies_to' must be a list of glob strings")
+            hard.append(f"{CONFIG}: rule {label!r} 'message' must be a non-empty string")
+        # an empty applies_to passes an is-list check but scans zero files — the
+        # rule would look active while checking nothing, so it is hard.
+        if applies is not None and not (
+            isinstance(applies, list) and applies and all(isinstance(g, str) for g in applies)
+        ):
+            hard.append(
+                f"{CONFIG}: rule {label!r} 'applies_to' must be a non-empty list of "
+                "glob strings (omit it to scan all files)"
+            )
             applies = None
         if not isinstance(pattern, str) or not pattern:
-            hard.append(f"{CONFIG}: rule {rid!r} 'pattern' must be a non-empty string")
+            hard.append(f"{CONFIG}: rule {label!r} 'pattern' must be a non-empty string")
             continue
         try:
             regex = re.compile(pattern)
         except re.error as exc:
-            hard.append(f"{CONFIG}: rule {rid!r} pattern is not a valid regex: {exc}")
+            hard.append(f"{CONFIG}: rule {label!r} pattern is not a valid regex: {exc}")
             continue
         compiled.append({"id": rid, "regex": regex, "applies_to": applies, "message": message})
     return compiled, exclude, hard

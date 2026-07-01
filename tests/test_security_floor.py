@@ -262,6 +262,96 @@ def test_invalid_regex_hard_fails(render, tmp_path):
     assert "not a valid regex" in r.stdout
 
 
+# --- degraded-policy hardening: a rule that is structurally accepted but checks
+#     nothing, or a broken sub-field silently dropped, is a broken policy — it
+#     must fail loudly, not print OK (post-review nits) -------------------------
+
+def test_applies_to_empty_hard_fails(render, tmp_path):
+    # applies_to: [] passes an is-list check but scans zero files — the rule looks
+    # active while checking nothing. A broken policy must fail loudly, not no-op.
+    out = _render(render, tmp_path)
+    d = tmp_path / "d"
+    _write_config(d, {"rules": [
+        {"id": "x", "pattern": "anything", "applies_to": [], "message": "m"},
+    ]})
+    r = _run(out, d)
+    assert r.returncode == 1, r.stdout
+    assert "applies_to" in r.stdout
+    assert "non-empty" in r.stdout
+
+
+def test_malformed_exclude_hard_fails(render, tmp_path):
+    # 'exclude' as a string is a broken policy: silently coercing it to "no
+    # exclusions" drops the author's intent without a word.
+    out = _render(render, tmp_path)
+    d = tmp_path / "d"
+    _write_config(d, {**SHELL_RULE, "exclude": "vendor/*"})
+    r = _run(out, d)
+    assert r.returncode == 1, r.stdout
+    assert "exclude" in r.stdout
+
+
+def test_absent_exclude_is_fine(render, tmp_path):
+    # no 'exclude' key at all stays valid (default: no exclusions).
+    out = _render(render, tmp_path)
+    repo = tmp_path / "repo"
+    _git_repo(repo)
+    _write_config(repo, SHELL_RULE)  # no exclude key
+    (repo / "x.py").write_text("subprocess.run(cmd)\n", encoding="utf-8")
+    _track(repo)
+    r = _run(out, repo)
+    assert r.returncode == 0, r.stdout
+    assert "security-floor: OK" in r.stdout
+
+
+def test_seed_self_excluded(render, tmp_path):
+    # the shipped seed lives at docs/process/security-floor.example.json; a broad
+    # user rule must not flag the example file the doc tells them to keep as a copy.
+    out = _render(render, tmp_path)
+    repo = tmp_path / "repo"
+    _git_repo(repo)
+    _write_config(repo, {"rules": [
+        {"id": "broad", "pattern": "shell", "message": "m"},
+    ]})
+    seed = repo / SEED
+    seed.parent.mkdir(parents=True, exist_ok=True)
+    seed.write_text('{"rules": [{"pattern": "shell=True"}]}\n', encoding="utf-8")
+    _track(repo)
+    r = _run(out, repo)
+    assert r.returncode == 0, r.stdout
+    assert "security-floor.example.json" not in r.stdout
+
+
+def test_unreadable_config_is_clean_hard(render, tmp_path):
+    # a present-but-unreadable config must fail with a clean message, not a traceback.
+    import os
+    if os.geteuid() == 0:
+        import pytest
+        pytest.skip("chmod 000 does not deny root")
+    out = _render(render, tmp_path)
+    d = tmp_path / "d"
+    _write_config(d, SHELL_RULE)
+    (d / CONFIG).chmod(0o000)
+    try:
+        r = _run(out, d)
+    finally:
+        (d / CONFIG).chmod(0o644)
+    assert r.returncode == 1, r.stdout
+    assert "could not read" in r.stdout
+    assert "Traceback" not in r.stderr
+
+
+def test_invalid_id_error_uses_index_not_none(render, tmp_path):
+    # when a rule's id is itself invalid, downstream field errors must reference
+    # the rule index, not print "rule None ...".
+    out = _render(render, tmp_path)
+    d = tmp_path / "d"
+    _write_config(d, {"rules": [{"pattern": "([bad", "message": ""}]})
+    r = _run(out, d)
+    assert r.returncode == 1, r.stdout
+    assert "rule None" not in r.stdout
+
+
 # --- neutrality + doc-drift ---------------------------------------------------
 
 def test_neutral_no_kenni_terms(render, tmp_path):
