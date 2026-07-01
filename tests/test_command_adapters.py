@@ -76,3 +76,27 @@ def test_copilot_prompts_gated(render, tmp_path):
     on = render(tmp_path / "on", {"project_name": "d", "harnesses": {"copilot": True}})
     for name in COMMANDS:
         assert (on / ".github/prompts" / f"{name}.prompt.md").is_file(), name
+
+
+def test_agents_md_lists_commands(render, tmp_path):
+    off = render(tmp_path / "off", {"project_name": "d"})
+    assert not (off / "AGENTS.md").exists()
+    on = render(tmp_path / "on", {"project_name": "d", "harnesses": {"agents_md": True}})
+    text = (on / "AGENTS.md").read_text()
+    assert "## Process commands" in text
+    for name in COMMANDS:
+        assert name in text, name
+
+
+def test_commands_are_neutral(render, tmp_path):
+    out = render(
+        tmp_path,
+        {"project_name": "d", "harnesses": {"copilot": True, "agents_md": True}},
+    )
+    files = list((out / ".claude/commands").glob("*.md"))
+    files += list((out / ".github/prompts").glob("*.prompt.md"))
+    files.append(out / "AGENTS.md")
+    for f in files:
+        text = f.read_text()
+        for term in KENNI + KENNI_STRUCTURAL:
+            assert term not in text, f"{f.name}: leaked {term!r}"
