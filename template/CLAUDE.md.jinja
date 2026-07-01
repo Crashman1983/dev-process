@@ -1,0 +1,20 @@
+# {{ project_name }} — Claude Code anchor
+
+This file is a thin adapter. The **authoritative** development process lives in
+`docs/process/` (the neutral SSOT). Read it before substantive work:
+`docs/process/mandatory-rules.md`, `risk-tiers.md`, `workflow.md`, `commits.md`.
+
+<!-- KERNEL:START -->
+## Always-on kernel
+
+**Mandatory rules (full text: `docs/process/mandatory-rules.md`):**
+1. Verify before asserting. 2. Plan before substantive work. 3. Contract/interface first.
+4. One owner per behavior. 5. Tests prove acceptance. 6. Root cause before symptom.
+7. Review gate before merge. 8. Atomic commits.
+
+**Tier routing (full matrix: `docs/process/risk-tiers.md`):**
+Tier 0 -> direct commit. Tier 1-2 -> quick flow. Tier 3+ -> plan -> execute -> review.
+Scope, not diff size, sets the tier.
+<!-- KERNEL:END -->
+
+For Claude Code specifics (skills, subagents), see `docs/process/workflow.md`.
