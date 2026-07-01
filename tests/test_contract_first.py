@@ -54,6 +54,8 @@ def test_module_off_ships_neither(render, tmp_path):
     out = render(tmp_path, {"project_name": "d"})
     assert not (out / "scripts/process/check_capability_contracts.py").exists()
     assert not (out / "docs/process/modules/contract-first.md").exists()
+    # module OFF ships nothing — not even the seed dir (mirror the sibling modules)
+    assert not (out / CONTRACTS).exists()
 
 
 def test_answers_records_contract_first(render, tmp_path):
