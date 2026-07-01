@@ -17,7 +17,8 @@ def test_runner_skips_gate_when_module_off(render, tmp_path):
         [sys.executable, str(out / "scripts/process/gate_runner.py"), "--list"],
         cwd=out, capture_output=True, text=True,
     )
-    assert "doc-drift-gate" not in r.stdout
+    assert r.returncode == 0, r.stderr   # runner ran cleanly...
+    assert "doc-drift-gate" not in r.stdout  # ...and simply listed no active gate
 
 
 def test_runner_runs_and_passes_clean_tree(render, tmp_path):
