@@ -1,0 +1,9 @@
+# Module: doc-drift-gate
+
+Verifies that repo-relative path references in `docs/process/` and the harness
+adapters resolve to real files. Runs in CI via `process-gates` and locally via
+`uv run scripts/process/check_doc_drift.py`.
+
+Installed for **{{ project_name }}**. Rationale: anchors that name files or paths
+must stay true as code moves (mandatory rule 1). Only slash-containing references
+are checked; bare filenames and placeholders are ignored to avoid false positives.
