@@ -184,3 +184,24 @@ def test_verify_unlaunchable_is_soft(render, tmp_path):
     r = _run(out)
     assert r.returncode == 0, r.stdout
     assert "could not run verify" in r.stdout
+
+
+def _runner_list(out: Path):
+    return subprocess.run(
+        [sys.executable, str(out / "scripts/process/gate_runner.py"), "--list"],
+        cwd=out, capture_output=True, text=True,
+    )
+
+
+def test_runner_lists_contracts_when_on(render, tmp_path):
+    out = _render(render, tmp_path)
+    r = _runner_list(out)
+    assert r.returncode == 0, r.stderr
+    assert "contracts-drift" in r.stdout
+
+
+def test_runner_skips_contracts_when_off(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d"})
+    r = _runner_list(out)
+    assert r.returncode == 0, r.stderr
+    assert "contracts-drift" not in r.stdout
