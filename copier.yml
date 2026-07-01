@@ -20,6 +20,7 @@ modules:
     arch_onboarding: false
     feature_registry: false
     github_issues: false
+    contracts_drift: false
 
 github_repo:
   type: str
