@@ -1,0 +1,7 @@
+# Manifest-aware process gates: gate_runner.py reads .copier-answers.yml and
+# runs only the modules this repo enabled. Mirrors .github/workflows/process-gates.yml.
+process-gates:
+  image: python:3.11
+  script:
+    - pip install pyyaml
+    - python scripts/process/gate_runner.py

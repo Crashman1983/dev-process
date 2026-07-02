@@ -24,6 +24,7 @@ def _copy(src: Path, dst: Path, data: dict, **kwargs) -> Path:
     full = {
         "harnesses": {"copilot": False, "agents_md": False},
         "modules": {"doc_drift_gate": False, "arch_onboarding": False, "feature_registry": False, "github_issues": False, "contracts_drift": False, "git_hooks": False, "contract_first": False, "parity": False, "security_floor": False},
+        "ci": {"github": True, "gitlab": False},
     }
     full.update(data)
     copier.run_copy(str(src), str(dst), data=full, defaults=True, unsafe=True, quiet=True, **kwargs)
