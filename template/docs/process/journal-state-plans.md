@@ -14,7 +14,8 @@ constraints. Write it as decisions are made, not at the end. Convert relative da
 
 `.process-work/state/<branch-slug>.md` is per-branch working memory: active work,
 open risks, the next concrete action. It is the primary signal when restoring context
-after a break. One file per branch; other agents' state files are read-only to you.
+after a break. One file per branch. Wherever other efforts' state files are visible
+(shared checkout, worktrees, or after a merge), treat them as read-only.
 
 ## Plans
 
