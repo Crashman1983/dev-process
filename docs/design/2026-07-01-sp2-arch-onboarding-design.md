@@ -8,7 +8,7 @@
 
 SP1 shipped a portable process (neutral SSOT + CI enforcement + thin harness adapters).
 It deliberately does *not* capture or verify a brownfield project's architecture — the
-part Seb flagged as the hard, missing piece: "Architekturvorgaben gezielt abgefragt und
+part the maintainer flagged as the hard, missing piece: "Architekturvorgaben gezielt abgefragt und
 gegen echten Code geprüft."
 
 SP2 adds one opt-in module, **`arch-onboarding`**, that:

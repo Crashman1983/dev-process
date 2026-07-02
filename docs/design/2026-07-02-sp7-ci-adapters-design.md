@@ -1,7 +1,7 @@
 # Design: ci-adapters (SP7) + install fallbacks
 
 **Date:** 2026-07-02
-**Status:** approved (scope agreed with Seb: review items 4 + 5)
+**Status:** approved (scope agreed with the maintainer: review items 4 + 5)
 **Slice:** GitLab CI as a second enforcement transport, honest degradation
 without any CI, and installation fallbacks for environments without `uv`.
 

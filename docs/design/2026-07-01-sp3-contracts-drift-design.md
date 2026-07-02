@@ -219,9 +219,9 @@ to dev-process would be a separate, later choice.)
 ## 12. Open decisions (resolved)
 
 - **Conformance verify hard-vs-soft** → **soft/advisory** (§5). External
-  systems must not gate CI; integrity/pin carries the hard teeth. (Seb, "ok".)
+  systems must not gate CI; integrity/pin carries the hard teeth. (maintainer, "ok".)
 - **`artifact` required** → yes; a contract is a committed snapshot + pin
   (§4). A registry-only contract still commits a snapshot `.avsc`/spec.
 - **`kind` enum** → no; open domain for universality (§4).
 - **Contract home** → standalone `contracts_drift` module, not feature-registry
-  `links` nor an arch `external:` slot (§3). (Seb, chosen.)
+  `links` nor an arch `external:` slot (§3). (maintainer, chosen.)
