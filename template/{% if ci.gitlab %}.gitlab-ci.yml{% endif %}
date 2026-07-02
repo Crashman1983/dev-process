@@ -1,0 +1,4 @@
+# Greenfield shim. Brownfield repos with an existing .gitlab-ci.yml keep
+# theirs and add this one include line instead (see BOOTSTRAP.md).
+include:
+  - local: .gitlab/ci/process-gates.gitlab-ci.yml
