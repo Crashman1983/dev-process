@@ -11,7 +11,9 @@ Ausgeliefert als [copier](https://copier.readthedocs.io)-Template. Adapter für
 > (feature-registry, github-issues, contracts-drift) + SP4 (git-hooks,
 > contract-first, parity, security-floor) + Capstone (command-adapters)
 > ausgeliefert, Tag `v1.0.0` — das volle Kenni-Command-Set, harness-nativ.
-> Setup: [`BOOTSTRAP.md`](BOOTSTRAP.md) · Design: [`docs/design/`](docs/design/).
+> Setup: [`BOOTSTRAP.md`](BOOTSTRAP.md) · Systemumgebung:
+> [`docs/SYSTEM-REQUIREMENTS.md`](docs/SYSTEM-REQUIREMENTS.md) · SBOM:
+> [`docs/SBOM.md`](docs/SBOM.md) · Design: [`docs/design/`](docs/design/).
 
 ---
 

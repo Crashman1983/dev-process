@@ -1,7 +1,9 @@
----
-description: Record one atomic, conventional commit.
----
-Read `docs/process/commits.md`. Use `type: imperative subject` (under 72
-characters); one logical change per commit; name any skipped gate or dropped
-scope in the body. No direct commits to the main branch — work on a feature
-branch and merge fast-forward-only after the review gate.
+# commit
+
+**Deutsch:** Erstelle einen atomaren Conventional Commit nach
+`docs/process/commits.md`. Ein logischer Change pro Commit, keine direkten
+Commits auf `main`, uebersprungene Gates oder entfallenen Scope im Body nennen.
+
+**English:** Create one atomic conventional commit following
+`docs/process/commits.md`. One logical change per commit, no direct commits to
+`main`, and name skipped gates or dropped scope in the body.

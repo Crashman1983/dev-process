@@ -1,6 +1,9 @@
----
-description: Root-cause a bug before fixing it (mandatory rule 6).
----
-Read `docs/process/workflow.md` (Debug). After two failed attempts at a symptom,
-stop patching and investigate why it happens; produce a root-cause analysis and
-fix the cause, not the symptom.
+# debug
+
+**Deutsch:** Klaere die Root Cause vor dem Fix. Lies
+`docs/process/workflow.md` (Debug), stoppe nach zwei Symptomversuchen und
+dokumentiere Ursache und Fix-Ansatz.
+
+**English:** Find the root cause before fixing. Read
+`docs/process/workflow.md` (Debug), stop after two symptom attempts, and record
+the cause and fix approach.

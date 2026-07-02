@@ -1,7 +1,9 @@
----
-description: Turn an approved design into a zero-context task plan.
----
-Read `docs/process/workflow.md` (Plan) and `docs/process/journal-state-plans.md`
-for where the plan file lives. Produce bite-sized, independently testable tasks
-with exact files, code, and test commands. Required for every Tier 3+ change
-(`docs/process/risk-tiers.md`). Next: `/execute`.
+# plan
+
+**Deutsch:** Verwandle ein freigegebenes Design in einen testbaren Aufgabenplan.
+Lies `docs/process/workflow.md` (Plan) und
+`docs/process/journal-state-plans.md`. Pflicht fuer Tier 3+.
+
+**English:** Turn an approved design into a testable task breakdown. Read
+`docs/process/workflow.md` (Plan) and `docs/process/journal-state-plans.md`.
+Required for Tier 3+.

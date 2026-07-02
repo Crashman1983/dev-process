@@ -1,7 +1,9 @@
----
-description: The Tier 1-2 shortcut for a small, isolated change.
----
-Read `docs/process/workflow.md` (Quick). State the goal, the touched files, and
-the risk before editing; add a test for Tier 2. Escalate to `/plan` if
-persistence, auth, contracts, or external integrations turn out to be in scope
-(`docs/process/risk-tiers.md`).
+# quick
+
+**Deutsch:** Nutze den Tier-1/2-Kurzweg fuer kleine, isolierte Aenderungen.
+Lies `docs/process/workflow.md` (Quick). Nenne Ziel, beruehrte Dateien und
+Risiko vor dem Editieren; Tier 2 braucht einen Test.
+
+**English:** Use the Tier 1/2 shortcut for small, isolated changes. Read
+`docs/process/workflow.md` (Quick). State goal, touched files, and risk before
+editing; Tier 2 needs a test.

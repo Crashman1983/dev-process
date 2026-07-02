@@ -1,6 +1,14 @@
 # {{ project_name }} — agent instructions
 
-Authoritative process: `docs/process/` (neutral SSOT). This file is an adapter.
+## Einstieg / Start
+
+**Deutsch:** Der verbindliche Prozess lebt in `docs/process/`. Wenn dieses
+Repository gerade eingerichtet wurde, starte mit `docs/process/start-here.md`
+und fuehre den Anwender dialogisch durch Greenfield oder Brownfield.
+
+**English:** The authoritative process lives in `docs/process/`. If this
+repository has just been initialized, start with `docs/process/start-here.md`
+and guide the user through Greenfield or Brownfield as a dialogue.
 
 <!-- KERNEL:START -->
 ## Always-on kernel
@@ -15,18 +23,19 @@ Tier 0 -> direct commit. Tier 1-2 -> quick flow. Tier 3+ -> plan -> execute -> r
 Scope, not diff size, sets the tier.
 <!-- KERNEL:END -->
 
-Unlike Claude Code, most AGENTS.md readers do not auto-load nested files — read docs/process/ explicitly.
+## Prozesskommandos / Process commands
 
-## Process commands
+**Deutsch:** Harnesses ohne natives Command-Menue rufen eine Phase auf, indem
+sie die genannte Prozessdatei lesen.
 
-For harnesses without a native command menu: invoke a phase by reading the
-section named below.
+**English:** Harnesses without a native command menu invoke a phase by reading
+the named process file.
 
-- **brainstorm** — idea → approved design (`docs/process/workflow.md`, Brainstorm)
-- **plan** — design → zero-context task plan (`docs/process/workflow.md`, Plan)
-- **execute** — build the plan test-driven (`docs/process/workflow.md`, Execute)
-- **review** — the merge gate, depth by tier (`docs/process/workflow.md`, Review)
-- **quick** — Tier 1–2 shortcut (`docs/process/workflow.md`, Quick)
-- **debug** — root-cause before fixing (`docs/process/workflow.md`, Debug)
-- **commit** — one atomic conventional commit (`docs/process/commits.md`)
-- **prime** — restore working context (`docs/process/journal-state-plans.md`)
+- **brainstorm** — Idee -> freigegebenes Design / idea -> approved design (`docs/process/workflow.md`)
+- **plan** — Design -> Aufgabenplan / design -> task plan (`docs/process/workflow.md`)
+- **execute** — Plan testgetrieben bauen / build the plan test-driven (`docs/process/workflow.md`)
+- **review** — Merge-Gate / merge gate (`docs/process/workflow.md`)
+- **quick** — Tier-1/2-Abkuerzung / Tier 1/2 shortcut (`docs/process/workflow.md`)
+- **debug** — Root Cause vor Fix / root cause before fix (`docs/process/workflow.md`)
+- **commit** — atomarer Conventional Commit / atomic conventional commit (`docs/process/commits.md`)
+- **prime** — Kontext wiederherstellen / restore context (`docs/process/journal-state-plans.md`)

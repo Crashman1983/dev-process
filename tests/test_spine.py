@@ -11,3 +11,14 @@ def test_subdirectory_scope_excludes_repo_meta(render, tmp_path):
     assert not (out / "copier.yml").exists()   # template-only via _subdirectory
     assert not (out / "tests").exists()
     assert not (out / "docs/design").exists()
+
+
+def test_process_work_structure_rendered(render, tmp_path):
+    out = render(tmp_path, {"project_name": "demo"})
+    for rel in [
+        ".process-work/README.md",
+        ".process-work/journal/.gitkeep",
+        ".process-work/plans/.gitkeep",
+        ".process-work/state/.gitkeep",
+    ]:
+        assert (out / rel).is_file(), rel

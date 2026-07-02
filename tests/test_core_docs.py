@@ -1,6 +1,7 @@
 import re
 
 CORE = [
+    "start-here.md",
     "mandatory-rules.md",
     "risk-tiers.md",
     "workflow.md",
@@ -43,6 +44,30 @@ def test_risk_tiers_matrix(render, tmp_path):
     text = (out / "docs/process/risk-tiers.md").read_text()
     for t in ["Tier 0", "Tier 1", "Tier 2", "Tier 3", "Tier 4"]:
         assert t in text, t
+
+
+def test_start_here_guides_greenfield_and_brownfield(render, tmp_path):
+    out = render(tmp_path, {"project_name": "demo"})
+    text = (out / "docs/process/start-here.md").read_text()
+    for required in [
+        "## Erste Ausfuehrung / First run",
+        "## LLM-gefuehrtes Onboarding / LLM-guided onboarding",
+        "## Greenfield-Start / Greenfield start",
+        "## Brownfield-Start / Brownfield start",
+        "Deutsch",
+        "English",
+        "Frage",
+        "Question",
+        "Fragekompass",
+        "Question compass",
+        "nicht erfinden",
+        "do not invent",
+        "ARCHITECTURE.md",
+        "docs/process/feature-registry/",
+        "scripts/process/gate_runner.py",
+        ".process-work/",
+    ]:
+        assert required in text, required
 
 
 def test_adr_template_has_intent_axis(render, tmp_path):

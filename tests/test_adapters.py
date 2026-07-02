@@ -46,3 +46,13 @@ def test_kernel_identical_across_adapters(render, tmp_path):
         for f in ["CLAUDE.md", ".github/copilot-instructions.md", "AGENTS.md"]
     ]
     assert blocks[0] and blocks.count(blocks[0]) == 3, "kernel must be byte-identical across adapters"
+
+
+def test_adapters_point_to_start_here(render, tmp_path):
+    out = render(
+        tmp_path,
+        {"project_name": "d", "harnesses": {"copilot": True, "agents_md": True}},
+    )
+    for rel in ["CLAUDE.md", ".github/copilot-instructions.md", "AGENTS.md"]:
+        text = (out / rel).read_text()
+        assert "docs/process/start-here.md" in text
