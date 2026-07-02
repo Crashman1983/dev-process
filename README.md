@@ -12,8 +12,9 @@ Ausgeliefert als [copier](https://copier.readthedocs.io)-Template. Adapter für
 > contract-first, parity, security-floor) + Capstone (command-adapters,
 > `v1.0.0` — das volle Kenni-Command-Set, harness-nativ) + SP7 (ci-adapters:
 > GitLab CI + Install-Fallbacks) + SP8 (english-canon + ehrliche Ökonomie) +
-> SP9 (audit-fixes: False-Greens geschlossen, Failure-Modes sprechen)
-> ausgeliefert, `v1.3.0`.
+> SP9 (audit-fixes: False-Greens geschlossen, Failure-Modes sprechen) +
+> SP10 (telemetry: GRADE-Trace + KPI-Cockpit, Effizienz messbar)
+> ausgeliefert, `v1.4.0`.
 > Setup: [`BOOTSTRAP.md`](BOOTSTRAP.md) · Systemumgebung:
 > [`docs/SYSTEM-REQUIREMENTS.md`](docs/SYSTEM-REQUIREMENTS.md) · SBOM:
 > [`docs/SBOM.md`](docs/SBOM.md) · Design: [`docs/design/`](docs/design/).
@@ -68,8 +69,9 @@ Test-Traceability), `github-issues` (EARS-Templates + Issue-Ref-Gate),
 `contracts-drift` (Kopplung-als-Contract, Pin-Drift-Ratchet + best-effort-Konformität),
 `git-hooks` (lokale pre-commit/pre-push/post-commit-Durchsetzung, an den gate_runner delegiert),
 `contract-first` (geteiltes Capability-Interface im committeten Spec deklariert, bevor eine Surface darauf baut),
-`parity` (Capability×Surface-Matrix, die jede bewusste Lücke an ein Tracking-Issue bindet — gegen stillen Capability-Verlust)
-und `security-floor` (der grep-bare Teil der Security-Invarianten als blockierendes Gate — verbotene Regex-Muster über git-getrackte Dateien).
+`parity` (Capability×Surface-Matrix, die jede bewusste Lücke an ein Tracking-Issue bindet — gegen stillen Capability-Verlust),
+`security-floor` (der grep-bare Teil der Security-Invarianten als blockierendes Gate — verbotene Regex-Muster über git-getrackte Dateien)
+und `telemetry` (Effizienz-Messung: `GRADE`-Trace-Zeilen im Journal als Gate-gesichertes Format plus read-only KPI-Cockpit — Wirksamkeit, Konvergenz, Kalibrier-Suite, Tempo, Kosten, DORA-CFR; jede Zahl mit Konfidenz + Maßnahme).
 
 **Harness-native Commands:** Der Zyklus (`brainstorm plan execute review quick
 debug commit prime`) liegt als dünne Slash-Commands je aktivem Harness
@@ -156,3 +158,4 @@ Pflicht-Verifikation über den `gate_runner`.
 | **SP7** ci-adapters | GitLab CI als zweiter Enforcement-Transport (`ci`-Namespace, includable Job + Root-Shim) · dokumentierte No-CI-Degradation · Install-Fallbacks ohne `uv` (pipx / venv+pip / lokaler Clone) | ✅ ausgeliefert |
 | **SP8** english-canon | Alle Artefakte englisch (halbiert die Doku-Token je Session) · Kernel-Regel „Dialog in Nutzersprache" · „Wann lohnt es nicht"-Ehrlichkeit · Journal-Pflicht erst ab Tier 2 | ✅ ausgeliefert |
 | **SP9** audit-fixes | Drei-Achsen-Audit: alle bestätigten False-Greens geschlossen (Manifest load-bearing, arch-Fence, unborn-main-Hook, hooksPath-Guard) · Failure-Modes mit Diagnose statt Traceback · doc-drift versteht dokument-relative Links · Doku-Drift bereinigt | ✅ ausgeliefert |
+| **SP10** telemetry | Effizienz messbar (Audit-Finding, aus Kenni generalisiert): `GRADE`-Trace-Konvention im Journal · Gate lintet das Trace-Format (kein stiller Telemetrie-Verlust) · read-only KPI-Cockpit (`process_kpis.py`: effectiveness/convergence/suite/tempo/cost/cfr) · Grader-Kalibrier-Suite mit den drei Vertrauens-Schwellen (≥20/≥5 · 0 False-PASS · ≥90 % ≤2 Runden) | ✅ ausgeliefert |
