@@ -1,5 +1,13 @@
 name: ci
-on: [push, pull_request]
+# push only on main: PR branches are covered by the pull_request trigger,
+# otherwise every PR push runs the suite twice (same pattern as the rendered
+# process-gates workflow).
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
 jobs:
   test:
     runs-on: ubuntu-latest

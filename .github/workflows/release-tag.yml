@@ -28,6 +28,8 @@ jobs:
           TAG: ${{ inputs.tag }}
           SHA: ${{ inputs.sha }}
         run: |
+          # validate the input: a tag starting with '-' would parse as an option
+          case "$TAG" in v[0-9]*) ;; *) echo "tag must look like vX.Y.Z"; exit 1;; esac
           target="${SHA:-$(git rev-parse HEAD)}"
           git tag "$TAG" "$target"
           git push origin "refs/tags/$TAG"
