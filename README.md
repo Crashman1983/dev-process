@@ -9,8 +9,9 @@ Ausgeliefert als [copier](https://copier.readthedocs.io)-Template. Adapter für
 
 > **Status:** SP1 (Foundation) + SP2 (Architektur-Onboarding) + SP3
 > (feature-registry, github-issues, contracts-drift) + SP4 (git-hooks,
-> contract-first, parity, security-floor) + Capstone (command-adapters)
-> ausgeliefert, Tag `v1.0.0` — das volle Kenni-Command-Set, harness-nativ.
+> contract-first, parity, security-floor) + Capstone (command-adapters,
+> `v1.0.0` — das volle Kenni-Command-Set, harness-nativ) + SP7 (ci-adapters:
+> GitLab CI + Install-Fallbacks) ausgeliefert, `v1.1.0`.
 > Setup: [`BOOTSTRAP.md`](BOOTSTRAP.md) · Systemumgebung:
 > [`docs/SYSTEM-REQUIREMENTS.md`](docs/SYSTEM-REQUIREMENTS.md) · SBOM:
 > [`docs/SBOM.md`](docs/SBOM.md) · Design: [`docs/design/`](docs/design/).
@@ -53,7 +54,11 @@ werden" getrennt bleibt. **Journal, Branch-State und Pläne** halten das *Warum*
 fest, das das git-log nicht zeigt.
 
 **Durchsetzung:** ein manifest-bewusster `gate_runner` liest `.copier-answers.yml`
-und fährt in CI nur die *aktiven* Module. git-Hooks sichern lokal ab. Zuschaltbare
+und fährt in CI nur die *aktiven* Module — als GitHub-Actions-Workflow und/oder
+GitLab-CI-Job (`ci`-Frage; GitLab: includable Job-Datei plus dünner
+Root-Shim, kollisionsfrei für Brownfield). git-Hooks sichern lokal ab.
+**Ehrliche Degradation:** ohne GitHub *und* GitLab bleibt das `git-hooks`-Modul
+die einzige Enforcement-Säule — und ohne dieses erzwingt nichts die Gates. Zuschaltbare
 Module heute: `doc-drift-gate` (tote Pfad-Referenzen in Docs), `arch-onboarding`
 (Architektur gegen echten Code), `feature-registry` (User-Story-/Akzeptanz-/
 Test-Traceability), `github-issues` (EARS-Templates + Issue-Ref-Gate) und
@@ -108,7 +113,8 @@ Durchsetzung, harness-übergreifend und über `copier update` versionierbar.
 uvx copier copy gh:Crashman1983/dev-process .
 ```
 
-copier fragt **Module** und **Harnesses** ab und rendert nur diese. Bestehende
+copier fragt **Module**, **Harnesses** und **CI-Adapter** ab und rendert nur
+diese. Bestehende
 Dateien werden **nicht** überschrieben (additiver Drop-in). Ein Modul später
 nachrüsten oder eine neuere Prozess-Version ziehen:
 `uvx copier update --defaults --data 'modules={…}'` mit dem vollständigen
@@ -131,3 +137,4 @@ Pflicht-Verifikation über den `gate_runner`.
 | **SP3** Prozess-Vervollständigung (Multi-Repo/-Mensch) | feature-registry · github-issues · contracts-drift | ✅ Slices 1–3 |
 | **SP4** Prozess-Vervollständigung II | git-hooks (lokale Enforcement-Säule) · contract-first (Interface-declared-first-Gate) · parity (Capability×Surface-Matrix, Gap→Issue) · security-floor (Pattern-Floor über git-getrackte Dateien) | ✅ ausgeliefert |
 | **Capstone** command-adapters | Harness-native Slash-Commands (Claude / Copilot / AGENTS.md), dünn auf `docs/process/` zeigend, vom doc-drift-gate mitgeprüft — schließt das „vollständig wie Kenni"-Programm bei `v1.0.0` | ✅ ausgeliefert |
+| **SP7** ci-adapters | GitLab CI als zweiter Enforcement-Transport (`ci`-Namespace, includable Job + Root-Shim) · dokumentierte No-CI-Degradation · Install-Fallbacks ohne `uv` (pipx / venv+pip / lokaler Clone) | ✅ ausgeliefert |
