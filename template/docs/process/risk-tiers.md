@@ -4,7 +4,7 @@ Scope — not code volume — sets the tier. User-visible, cross-component, API/
 
 | Tier | Scope | Route |
 |---|---|---|
-| **Tier 0** | No behavior change (docs, formatting, comments) | Direct commit |
+| **Tier 0** | No behavior change (docs, formatting, comments) | Direct commit — no plan/review cycle; the branching rules (`commits.md`) still apply |
 | **Tier 1** | Local, isolated, reversible; single file/function | Quick flow: state goal + touched files + risk, then edit |
 | **Tier 2** | Small feature/fix, no contract/persistence/auth impact | Quick flow + a test |
 | **Tier 3** | User-visible, cross-component, or touches an interface/contract | Plan → execute → review before merge |

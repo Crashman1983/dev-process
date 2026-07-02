@@ -59,6 +59,10 @@ contract/persistence/auth-touching work.
      workflow, default on; `gitlab`: includable job + root `.gitlab-ci.yml`
      shim). **With both off, nothing enforces the gates remotely** — local git
      hooks (`git_hooks` module) become the only enforcement pillar.
+   - Two modules add conditional prompts: `github_issues` asks for
+     `github_repo` (OWNER/REPO, optional) and `parity` asks for
+     `parity_surfaces` (canonical surface list). Headless: pass them via
+     `--data` like the others.
 4. Commit the result. Then let the LLM guide the Greenfield or Brownfield setup
    through `docs/process/start-here.md` before further work.
 
@@ -99,6 +103,9 @@ a pointer to `docs/process/start-here.md`.
 
     python scripts/process/gate_runner.py   # must exit 0
     git status --porcelain                  # brownfield: added files only
+
+The gate runner needs `PyYAML>=6` importable (`pip install pyyaml`); without
+it, it exits with a one-line install hint.
 
 ## Recommended order
 
@@ -144,6 +151,10 @@ Add a module or pull an updated process version — with a clean working tree
 `--data` expects the **complete** `modules` dictionary with the new values,
 not just the changed keys. `update` checks out the latest **tagged** template
 release by default, preserves your local edits, and flags conflicts inline.
+
+Disabling works the same way (flag back to `false`): `copier update` then
+**removes** that module's rendered files (gate script, module doc) and the
+gate stops running — check the diff before committing.
 
 **Important:** Do not hand-edit `.copier-answers.yml` to enable a module.
 `copier update` reads that file as the *old* state: after a hand edit, the old

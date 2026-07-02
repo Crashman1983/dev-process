@@ -11,7 +11,7 @@ JavaScript-, Container- oder Systempaket-Lockfiles aus.
 
 | Komponente | Version | Quelle |
 |---|---:|---|
-| `dev-process` | `1.0.0` | lokales Repository |
+| `dev-process` | `1.3.0` | lokales Repository |
 
 ## Direkte Python-Abhaengigkeiten
 
@@ -56,7 +56,7 @@ Diese Liste ist aus `uv.lock` abgeleitet. Alle Pakete stammen aus
 | `pyyaml` | `6.0.3` | ja | - |
 | `questionary` | `2.1.1` | nein | `prompt-toolkit` |
 | `ruff` | `0.15.20` | ja | - |
-| `typing-extensions` | `4.15.0` | nein | - |
+| `typing-extensions` | `4.16.0` | nein | - |
 | `typing-inspection` | `0.4.2` | nein | `typing-extensions` |
 | `wcwidth` | `0.8.2` | nein | - |
 

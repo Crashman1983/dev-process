@@ -1,5 +1,10 @@
 name: process-gates
-on: [push, pull_request]
+# push only on main: PR branches already run via pull_request; [push, pull_request]
+# would run every PR push twice.
+on:
+  push:
+    branches: [main]
+  pull_request:
 jobs:
   gates:
     runs-on: ubuntu-latest

@@ -66,11 +66,13 @@ Optionen sind:
 ```bash
 python3 -m venv .venv
 .venv/bin/python -m pip install 'PyYAML>=6'
-PATH="$PWD/.venv/bin:$PATH" bash scripts/process/install-hooks.sh
 ```
 
-oder eine projektweite Python-Umgebung, in der `PyYAML>=6` bereits installiert
-ist.
+Wichtig: Die Hooks rufen `python3` **zum Commit-/Push-Zeitpunkt** auf — das
+venv muss dann auf dem PATH liegen (Shell-Aktivierung o. ae.); ein PATH-Prefix
+nur waehrend der Hook-Installation wirkt nicht. Alternativ eine projektweite
+Python-Umgebung, in der `PyYAML>=6` bereits installiert ist. Fehlt PyYAML,
+bricht der gate_runner mit einem einzeiligen Installationshinweis ab.
 
 ## Modulbezogene Hinweise
 
@@ -79,7 +81,7 @@ ist.
 | `doc-drift-gate` | Python-Stdlib reicht |
 | `arch-onboarding` | `PyYAML`; optional `import-linter` oder `dependency-cruiser`, wenn das Zielrepo Layering maschinell pruefen will |
 | `feature-registry` | Python-Stdlib reicht |
-| `github-issues` | Python-Stdlib reicht; optional `gh` fuer best-effort Remote-Checks |
+| `github-issues` | `PyYAML` (liest `.copier-answers.yml`); optional `gh` fuer best-effort Remote-Checks |
 | `contracts-drift` | Python-Stdlib reicht; Contract-spezifische Verify-Kommandos koennen projektspezifische Tools brauchen |
 | `git-hooks` | `git`, `bash`, Python mit `PyYAML` fuer die Hooks |
 | `contract-first` | Python-Stdlib reicht |

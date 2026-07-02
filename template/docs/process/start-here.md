@@ -23,7 +23,8 @@ touching contracts, persistence, or auth.
 2. Initialize Git if this is a new repository.
 3. Install local hooks if the `git-hooks` module is active:
    `bash scripts/process/install-hooks.sh`.
-4. Run the gates: `python scripts/process/gate_runner.py`.
+4. Run the gates: `python scripts/process/gate_runner.py` (use `python3` if
+   `python` is not on PATH; needs `PyYAML>=6`).
 5. Read `docs/process/mandatory-rules.md` and `docs/process/risk-tiers.md`.
 6. Create a process-baseline commit before product work starts.
 
@@ -104,7 +105,8 @@ After the dialogue, the LLM records at least:
 - initial stack per layer (frontend, backend, storage, API/communication,
   deployment) and source layout — each layer decided,
   proposed-and-confirmed, or a documented open question;
-- whether `ARCHITECTURE.md` can already receive a real `arch` block;
+- whether `ARCHITECTURE.md` (if `arch-onboarding` is active) can already
+  receive a real `arch` block;
 - whether real entries under docs/process/feature-registry/ are needed;
 - whether contracts, parity, or security floor need real artifacts now or stay
   intentionally inert.
@@ -120,8 +122,9 @@ Use this path when no product code exists yet.
    architecture can be described truthfully, and record fundamental stack
    decisions as ADRs.
 3. Create source directories and interface files only then.
-4. Replace the inert `arch-example` in `ARCHITECTURE.md` with a real `arch`
-   block only when the referenced paths exist.
+4. If `arch-onboarding` is active, replace the inert `arch-example` in
+   `ARCHITECTURE.md` with a real `arch` block only when the referenced paths
+   exist.
 5. If `feature-registry` is active, copy the seed under
    docs/process/feature-registry/ and remove `.example` from the filename once
    the first real user story is known.
@@ -157,8 +160,8 @@ The project is ready for normal process-driven development when:
 
 - the process baseline is committed;
 - Greenfield or Brownfield is recorded in `.process-work/`;
-- `ARCHITECTURE.md` either honestly remains "not onboarded yet" or contains a
-  real `arch` block with existing paths;
+- if `arch-onboarding` is active: `ARCHITECTURE.md` either honestly remains
+  "not onboarded yet" or contains a real `arch` block with existing paths;
 - each active optional module either intentionally stays inert or has at least
   one real project artifact;
 - `scripts/process/gate_runner.py` runs and all notes are understood as known
