@@ -1,5 +1,12 @@
 # dev-process
 
+> **English:** A portable, harness-agnostic, modular foundation for a
+> **machine-enforced**, AI-assisted development process — installable into new
+> and existing repositories via `uvx copier copy gh:Crashman1983/dev-process .`.
+> This README is German by choice; everything the template installs (process
+> docs, adapters, commands) is English — start with
+> [`BOOTSTRAP.md`](BOOTSTRAP.md).
+
 Ein portables, harness-agnostisches, modulares Fundament für einen **maschinell
 durchgesetzten**, KI-gestützten Entwicklungsprozess — einspielbar in **neue
 (Greenfield)** wie **bestehende (Brownfield)** Projekte.
@@ -20,6 +27,12 @@ Ausgeliefert als [copier](https://copier.readthedocs.io)-Template. Adapter für
 > [`docs/SBOM.md`](docs/SBOM.md) · Design: [`docs/design/`](docs/design/).
 
 ---
+
+> **Herkunft:** Generalisiert aus *Kenni*, einem privaten Projekt, in dem
+> dieser Prozess entwickelt und erprobt wurde. Verweise auf Kenni-Interna
+> (Issue-Nummern, Spec-Abschnitte) in `docs/design/` und `docs/plans/` sind
+> Projektgeschichte und öffentlich nicht auflösbar; alles, was das Template
+> ausliefert, ist davon unabhängig und neutral.
 
 ## Die Idee in einem Absatz
 
