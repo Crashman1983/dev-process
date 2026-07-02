@@ -38,7 +38,12 @@ def _default_repo(root: Path) -> str | None:
     f = root / ANSWERS_FILE
     if not f.is_file():
         return None
-    data = yaml.safe_load(f.read_text(encoding="utf-8")) or {}
+    try:
+        data = yaml.safe_load(f.read_text(encoding="utf-8")) or {}
+    except (yaml.YAMLError, UnicodeDecodeError):
+        return None  # the gate_runner owns manifest validity
+    if not isinstance(data, dict):
+        return None
     repo = data.get("github_repo")
     return repo.strip() if isinstance(repo, str) and repo.strip() else None
 
@@ -79,7 +84,7 @@ def check(root: Path) -> tuple[list[str], list[str]]:
         rel = path.relative_to(root)
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, UnicodeDecodeError):
             continue  # the feature-registry gate owns JSON validity
         if not isinstance(data, dict):
             continue

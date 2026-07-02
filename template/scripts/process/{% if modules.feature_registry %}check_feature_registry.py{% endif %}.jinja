@@ -40,7 +40,7 @@ def _check_story(root: Path, path: Path, seen_ids: dict) -> tuple[list[str], lis
     rel = path.relative_to(root)
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
         return [f"{rel}: invalid JSON: {exc}"], []
     if not isinstance(data, dict):
         return [f"{rel}: story must be a JSON object, got {type(data).__name__}"], []
