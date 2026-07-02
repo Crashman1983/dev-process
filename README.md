@@ -24,7 +24,7 @@ Ausgeliefert als [copier](https://copier.readthedocs.io)-Template. Adapter für
 > SP9 (audit-fixes: False-Greens geschlossen, Failure-Modes sprechen) +
 > SP10 (telemetry: GRADE-Trace + KPI-Cockpit, Effizienz messbar) +
 > SP11 (Re-Audit + Public-Readiness)
-> ausgeliefert, `v1.4.1`.
+> ausgeliefert, `v1.4.2`.
 > Setup: [`BOOTSTRAP.md`](BOOTSTRAP.md) · Systemumgebung:
 > [`docs/SYSTEM-REQUIREMENTS.md`](docs/SYSTEM-REQUIREMENTS.md) · SBOM:
 > [`docs/SBOM.md`](docs/SBOM.md) · Design: [`docs/design/`](docs/design/).
