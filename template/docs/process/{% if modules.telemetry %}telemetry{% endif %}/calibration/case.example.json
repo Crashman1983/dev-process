@@ -1,0 +1,9 @@
+{
+  "id": "case.example",
+  "source": "issue #NNN / commit SHA — how the diff can be regenerated",
+  "surface": "free-form: which part of the system the case exercises",
+  "danger_direction": true,
+  "ground_truth": { "AC-1": "not_satisfied" },
+  "grader_verdict": null,
+  "note": "danger-direction seed shape: a pre-fix state of a real bug; the later fix commit is the ground truth. grader_verdict stays null until a real grader run fills it."
+}

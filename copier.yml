@@ -26,6 +26,7 @@ modules:
     contract_first: false
     parity: false
     security_floor: false
+    telemetry: false
 
 ci:
   type: yaml
