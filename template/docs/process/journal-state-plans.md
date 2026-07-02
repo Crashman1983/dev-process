@@ -10,6 +10,10 @@ root-cause findings, why an approach was chosen over alternatives, non-obvious
 constraints. Write it as decisions are made, not at the end. Convert relative dates
 ("yesterday") to absolute ones.
 
+Journal duty scales with the tier: entries are expected from Tier 2 upward, or
+whenever a non-obvious decision was made. Tier 0-1 changes need none — the
+commit message carries them.
+
 ## Branch-scoped state
 
 `.process-work/state/<branch-slug>.md` is per-branch working memory: active work,

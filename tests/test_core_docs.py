@@ -50,17 +50,12 @@ def test_start_here_guides_greenfield_and_brownfield(render, tmp_path):
     out = render(tmp_path, {"project_name": "demo"})
     text = (out / "docs/process/start-here.md").read_text()
     for required in [
-        "## Erste Ausfuehrung / First run",
-        "## LLM-gefuehrtes Onboarding / LLM-guided onboarding",
-        "## Greenfield-Start / Greenfield start",
-        "## Brownfield-Start / Brownfield start",
-        "Deutsch",
-        "English",
-        "Frage",
+        "## First run",
+        "## LLM-guided onboarding",
+        "## Greenfield start",
+        "## Brownfield start",
         "Question",
-        "Fragekompass",
         "Question compass",
-        "nicht erfinden",
         "do not invent",
         "ARCHITECTURE.md",
         "docs/process/feature-registry/",
@@ -78,14 +73,10 @@ def test_start_here_stack_compass_covers_layers_and_proposal_mode(render, tmp_pa
     out = render(tmp_path, {"project_name": "demo"})
     text = (out / "docs/process/start-here.md").read_text()
     for required in [
-        # the four layers, both languages
-        "Frontend", "Backend", "Storage",
-        "API/Kommunikation", "API/communication",
-        "Deployment",
+        # the stack layers
+        "Frontend", "Backend", "Storage", "API/communication", "Deployment",
         # proposal mode: derive options, name trade-offs, confirm
-        "Vorschlagsmodus", "proposal mode",
-        "Trade-offs", "trade-offs",
-        "Empfehlung", "recommendation",
+        "proposal mode", "trade-offs", "recommendation",
         # the API answer feeds the module heuristic
         "contract-first", "contracts-drift",
         # confirmed fundamentals land in the existing decision mechanics
