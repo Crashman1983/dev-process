@@ -77,7 +77,8 @@ question or assumption; do not invent it.
   involved?
 - Surfaces: Is this web, mobile, CLI, API-only, or multiple target surfaces?
 - Quality: Which tests, gates, performance, or operations requirements matter
-  from the beginning?
+  from the beginning? Should the process measure what its gates catch and
+  cost (`telemetry`)?
 - Organization: Are there issues, labels, release rules, review duties, or
   multiple agents/humans?
 
@@ -131,9 +132,9 @@ Use this path when no product code exists yet.
 6. If `security-floor` is active, copy the file security-floor.example.json to
    a policy file named security-floor.json once real forbidden patterns are
    known.
-7. Keep optional examples for `parity`, `contract-first`, and
-   `contracts-drift` inert until real capabilities, interfaces, or external
-   contracts exist.
+7. Keep optional examples for `parity`, `contract-first`, `contracts-drift`,
+   and the `telemetry` calibration seed inert until real capabilities,
+   interfaces, external contracts, or graded work exist.
 8. Start new work through tier routing: Tier 1-2 uses Quick; Tier 3+ uses
    Brainstorm -> Plan -> Execute -> Review.
 

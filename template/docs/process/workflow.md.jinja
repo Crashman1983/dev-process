@@ -16,11 +16,11 @@ Turns an approved design into a zero-context task breakdown. Enters: the design/
 
 ## Execute
 
-Implements the plan task by task. Enters: the plan. Produces: committed, tested code — one atomic commit per task (`commits.md`), following test-driven development (write the failing test, watch it fail, implement, watch it pass, commit). Use as the build phase; keep tasks isolated so each is independently reviewable.
+Implements the plan task by task. Enters: the plan. Produces: committed, tested code — one atomic commit per task (`commits.md`), following test-driven development (write the failing test, watch it fail, implement, watch it pass, commit). Use as the build phase; keep tasks isolated so each is independently reviewable.{% if modules.telemetry %} When grading acceptance criteria at checkpoints, append one `GRADE` line per criterion per round to the journal (`docs/process/modules/telemetry.md`).{% endif %}
 
 ## Review
 
-The gate before merge to the main branch. Enters: the branch diff plus the plan/spec. Produces: a pass/fail judgment on functional completeness, correctness, and adherence to these rules. The required depth scales with the tier (`risk-tiers.md`). Use before every merge that the tier gates; fixes loop back through execute + review until clean.
+The gate before merge to the main branch. Enters: the branch diff plus the plan/spec. Produces: a pass/fail judgment on functional completeness, correctness, and adherence to these rules. The required depth scales with the tier (`risk-tiers.md`). Use before every merge that the tier gates; fixes loop back through execute + review until clean.{% if modules.telemetry %} Record the per-criterion verdicts as `GRADE` lines with `source=review` in the journal (`docs/process/modules/telemetry.md`).{% endif %}
 
 ## Quick
 

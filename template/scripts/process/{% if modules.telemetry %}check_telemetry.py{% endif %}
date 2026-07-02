@@ -1,0 +1,162 @@
+#!/usr/bin/env python3
+"""Telemetry gate: keeps the GRADE trace machine-readable.
+
+Owns the GRADE line grammar (the cockpit `process_kpis.py` imports the parser
+from here — one owner). A GRADE line that does not parse is silent telemetry
+loss: the grade was written, the cockpit reads nothing, and the most important
+episode can vanish unnoticed. This gate hard-fails malformed lines instead.
+
+Zero GRADE lines repo-wide is a soft note, never a failure — the trace only
+exists once the workflow starts grading, and blocking commits on a practice
+that pays off over weeks would be dishonest friction.
+
+Also validates labeled calibration cases under
+docs/process/telemetry/calibration/ (skipping *.example.json seeds).
+"""
+from __future__ import annotations
+
+import json
+import re
+import sys
+from pathlib import Path
+
+JOURNAL_DIR = ".process-work/journal"
+CALIBRATION_DIR = "docs/process/telemetry/calibration"
+
+VERDICTS = {"satisfied", "partial", "not_satisfied", "out_of_scope"}
+ACTIONS = {"satisfied", "fixed", "disputed", "surfaced"}
+SOURCES = {"plan", "execute", "review", "quick", "debug"}
+
+# The full grammar, anchored: one line per criterion per round.
+GRADE_RE = re.compile(
+    r"^GRADE\s+work=(\S+)\s+checkpoint=(\S+)\s+criterion=(\S+)\s+round=(\S+)"
+    r"\s+verdict=(\S+)\s+action=(\S+)\s+source=(\S+)\s*$"
+)
+FIELDS = ("work", "checkpoint", "criterion", "round", "verdict", "action", "source")
+
+
+def parse_grade_lines(text: str) -> list[dict]:
+    """All well-formed GRADE lines in `text` as field dicts (invalid enum
+    values included — callers that need validity use the gate)."""
+    rows = []
+    for line in text.splitlines():
+        m = GRADE_RE.match(line.strip())
+        if m:
+            rows.append(dict(zip(FIELDS, m.groups())))
+    return rows
+
+
+def _intended_grade(line: str) -> bool:
+    """A line meant as telemetry: first token is GRADE and it carries at least
+    one key=value token. Prose that merely mentions GRADE is not linted."""
+    stripped = line.strip()
+    return stripped.startswith("GRADE ") and re.search(r"\S+=", stripped) is not None
+
+
+def _check_line(line: str) -> str | None:
+    m = GRADE_RE.match(line.strip())
+    if not m:
+        return "does not match the GRADE grammar (7 fields, fixed order)"
+    row = dict(zip(FIELDS, m.groups()))
+    if not row["round"].isdigit():
+        return f"round={row['round']} is not a number"
+    if row["verdict"] not in VERDICTS:
+        return f"verdict={row['verdict']} not in {sorted(VERDICTS)}"
+    if row["action"] not in ACTIONS:
+        return f"action={row['action']} not in {sorted(ACTIONS)}"
+    if row["source"] not in SOURCES:
+        return f"source={row['source']} not in {sorted(SOURCES)}"
+    return None
+
+
+def check_journals(root: Path) -> tuple[list[str], list[str], int]:
+    hard: list[str] = []
+    total = 0
+    for f in sorted((root / JOURNAL_DIR).glob("**/*.md")):
+        try:
+            lines = f.read_text(encoding="utf-8").splitlines()
+        except UnicodeDecodeError:
+            hard.append(f"{f.relative_to(root)}: not valid UTF-8")
+            continue
+        for i, line in enumerate(lines, 1):
+            if not _intended_grade(line):
+                continue
+            err = _check_line(line)
+            if err:
+                hard.append(f"{f.relative_to(root)}:{i}: {err}")
+            else:
+                total += 1
+    soft = [] if total or hard else ["no GRADE lines yet — expected pre-adoption"]
+    return hard, soft, total
+
+
+def _check_verdict_map(value, what: str) -> str | None:
+    """ground_truth / grader_verdict: a single verdict or a criterion->verdict map."""
+    entries = value if isinstance(value, dict) else {"_": value}
+    if not entries:
+        return f"{what} is empty"
+    for k, v in entries.items():
+        if not isinstance(v, str) or v not in VERDICTS:
+            return f"{what}[{k}]={v!r} not in {sorted(VERDICTS)}"
+    return None
+
+
+def check_cases(root: Path) -> tuple[list[str], list[str]]:
+    d = root / CALIBRATION_DIR
+    hard: list[str] = []
+    cases = [f for f in sorted(d.glob("*.json")) if not f.name.endswith(".example.json")]
+    if not cases:
+        return hard, ["no calibration cases yet — grow the suite as work merges"]
+    for f in cases:
+        rel = f.relative_to(root)
+        try:
+            data = json.loads(f.read_text(encoding="utf-8"))
+        except UnicodeDecodeError:
+            hard.append(f"{rel}: not valid UTF-8")
+            continue
+        except json.JSONDecodeError as exc:
+            hard.append(f"{rel}: invalid JSON: {exc}")
+            continue
+        if not isinstance(data, dict):
+            hard.append(f"{rel}: not a JSON object")
+            continue
+        case_id = data.get("id")
+        if not isinstance(case_id, str) or not case_id:
+            hard.append(f"{rel}: missing or non-string 'id'")
+        elif case_id != f.stem:
+            hard.append(f"{rel}: id '{case_id}' does not equal the filename stem")
+        if "ground_truth" not in data:
+            hard.append(f"{rel}: missing 'ground_truth'")
+        else:
+            err = _check_verdict_map(data["ground_truth"], "ground_truth")
+            if err:
+                hard.append(f"{rel}: {err}")
+        verdict = data.get("grader_verdict")
+        if verdict is not None:  # null = not yet graded; a fixture, not evidence
+            err = _check_verdict_map(verdict, "grader_verdict")
+            if err:
+                hard.append(f"{rel}: {err}")
+    return hard, []
+
+
+def main() -> int:
+    root = Path(sys.argv[1] if len(sys.argv) > 1 else ".").resolve()
+    j_hard, j_soft, total = check_journals(root)
+    c_hard, c_soft = check_cases(root)
+    hard = j_hard + c_hard
+    for note in j_soft + c_soft:
+        print(f"telemetry: note: {note}")
+    if hard:
+        print("telemetry: FAILED:")
+        for msg in hard:
+            print(f"  - {msg}")
+        return 1
+    if total:
+        print(f"telemetry: OK ({total} GRADE line(s) parseable)")
+    else:
+        print("telemetry: OK")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

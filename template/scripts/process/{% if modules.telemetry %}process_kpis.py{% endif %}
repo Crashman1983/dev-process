@@ -1,0 +1,565 @@
+#!/usr/bin/env python3
+"""Process KPI cockpit — a read-only aggregator over EXISTING traces.
+
+Reads the artifacts the workflow already produces (GRADE lines in journals,
+git history, `gh` issue data, optional harness transcripts) and cuts them into
+decision families. It is not a measurement pipeline: no new instrumentation,
+no hook/gate/daemon, only reading. It never blocks and never mutates.
+
+Guiding principle: every number carries confidence and an action. A number
+that yields no action does not belong in the cockpit. Confidence is `high`
+(direct measure, enough n), `medium` (sample-biased), or `low` (proxy or thin
+n) — proxy measures never reach `high`, confounding cannot be filtered out.
+At `low`, the only action is to collect more data; never act on a thin or
+biased number. n before percent.
+
+  process_kpis.py effectiveness [JOURNAL ...]   # what do the graders catch?
+  process_kpis.py convergence   [JOURNAL ...]   # do kickbacks converge?
+  process_kpis.py suite         [CASE_DIR]      # calibration thresholds
+  process_kpis.py tempo         [--issues-json F]
+  process_kpis.py cost          [JOURNAL ...] [--transcripts DIR]
+  process_kpis.py cfr           [--branch B]
+  process_kpis.py friction
+  process_kpis.py report                        # all families
+
+GRADE parsing is imported from check_telemetry (one owner for the grammar).
+Pure stdlib. Reads only; never writes.
+"""
+from __future__ import annotations
+
+import argparse
+import glob
+import json
+import re
+import statistics
+import subprocess
+import sys
+from collections import defaultdict
+from datetime import datetime, timezone
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling import
+import check_telemetry  # noqa: E402  (one owner for the GRADE grammar)
+
+# --- thresholds, with their honesty labels -------------------------------
+# Grader-trust thresholds (ported from a calibrated production process):
+# >= 20 graded suite cases, >= 5 danger-direction; 0 false-pass in the danger
+# direction (non-negotiable); >= 90% kickback convergence in <= 2 rounds.
+_SUITE_MIN_CASES = 20
+_SUITE_MIN_DANGER = 5
+_CONVERGENCE_PCT = 90.0
+_CONVERGENCE_ROUNDS = 2
+# Below this many flagged episodes, a catch-rate percentage is anecdote.
+_FLAGGED_FLOOR = 20
+_N_THRESHOLD = 20
+# Cycle-time p90 threshold (days): an UNCALIBRATED heuristic — the output says
+# so, lest an "unremarkable p90" borrow authority from a guessed number.
+_TEMPO_P90_DAYS = 7
+_ISSUE_LIMIT = 100
+# DORA change-failure window: a later fix: within this many days counts.
+_CFR_WINDOW_DAYS = 7
+_GIT_LIMIT = 300
+# Only real source-code extensions count for CFR file overlap — process
+# artifacts (journals, registries) change with almost every commit and would
+# fabricate failures.
+_CODE_EXT = {
+    ".py", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".vue", ".svelte",
+    ".go", ".rs", ".java", ".kt", ".kts", ".rb", ".php", ".cs", ".scala",
+    ".c", ".cc", ".cpp", ".h", ".hpp", ".m", ".mm", ".swift", ".css",
+}
+_CONV_COMMIT = re.compile(r"^(feat|fix)(\(.+?\))?!?:", re.IGNORECASE)
+_OUTPUT_TOKENS = re.compile(r'"output_tokens":\s*(\d+)')
+
+CONVERGED = {"satisfied", "out_of_scope"}
+DANGER_GT = {"not_satisfied", "partial"}     # ground truth: a real gap
+GRADER_PASS = {"satisfied", "out_of_scope"}  # grader said "fine"
+
+
+# --- confidence framing ----------------------------------------------------
+def _level(n: int | None, proxy: bool, sample_biased: bool, threshold: int) -> str:
+    if proxy or (n is not None and n < threshold):
+        return "low"
+    if sample_biased:
+        return "medium"
+    return "high"
+
+
+def confidence(n: int | None = None, *, proxy: bool = False,
+               sample_biased: bool = False, threshold: int = _N_THRESHOLD) -> str:
+    level = _level(n, proxy, sample_biased, threshold)
+    reasons: list[str] = []
+    if proxy:
+        reasons.append("proxy, confounded")
+    if n is not None and n < threshold:
+        reasons.append(f"n={n}<{threshold}")
+    if sample_biased:
+        reasons.append("sample not representative")
+    if not reasons:
+        reasons.append(f"direct, n={n}" if n is not None else "direct")
+    return f"confidence: {level} ({'; '.join(reasons)})"
+
+
+def action(level: str, ready: str, *, thin: str) -> str:
+    """At low confidence the only action is the measuring one; the named
+    action applies only once the number can carry it."""
+    if level == "low":
+        return f"action: {thin}"
+    return f"action: {ready or thin}"
+
+
+def _percentile(xs: list[float], p: float) -> float:
+    s = sorted(xs)
+    if not s:
+        return 0.0
+    k = (len(s) - 1) * p
+    lo = int(k)
+    if lo + 1 < len(s):
+        return s[lo] + (k - lo) * (s[lo + 1] - s[lo])
+    return s[lo]
+
+
+def _journal_text(paths: list[str]) -> str:
+    if paths:
+        return "\n".join(Path(p).read_text() for p in paths if Path(p).is_file())
+    files = glob.glob(str(ROOT / ".process-work" / "journal" / "**" / "*.md"),
+                      recursive=True)
+    return "\n".join(Path(p).read_text() for p in files if Path(p).is_file())
+
+
+def _episodes(rows: list[dict]) -> dict[tuple, list[dict]]:
+    """One episode = all rounds sharing (work, checkpoint, criterion)."""
+    episodes: dict[tuple, list[dict]] = defaultdict(list)
+    for r in rows:
+        episodes[(r["work"], r["checkpoint"], r["criterion"])].append(r)
+    return episodes
+
+
+# --- effectiveness: what does grading actually catch? -----------------------
+def classify_action_episodes(rows: list[dict]) -> dict[str, dict[str, int]]:
+    """Per source, classify each episode by its strongest action signal:
+    catch (any fixed) > surfaced > false_alarm (disputed) > idle (first-try)."""
+    per_source: dict[str, dict[str, int]] = defaultdict(
+        lambda: {"catch": 0, "false_alarm": 0, "surfaced": 0, "idle": 0})
+    for rs in _episodes(rows).values():
+        src = rs[-1]["source"]
+        actions = {r["action"] for r in rs}
+        if "fixed" in actions:
+            bucket = "catch"
+        elif "surfaced" in actions:
+            bucket = "surfaced"
+        elif "disputed" in actions:
+            bucket = "false_alarm"
+        else:
+            bucket = "idle"
+        per_source[src][bucket] += 1
+    return per_source
+
+
+def effectiveness(paths: list[str]) -> int:
+    print("[effectiveness] — catch per source")
+    rows = check_telemetry.parse_grade_lines(_journal_text(paths))
+    per_source = classify_action_episodes(rows)
+    tot = {"catch": 0, "false_alarm": 0, "surfaced": 0, "idle": 0}
+    for s in per_source.values():
+        for k in tot:
+            tot[k] += s[k]
+    flagged = tot["catch"] + tot["false_alarm"] + tot["surfaced"]
+    graded = flagged + tot["idle"]
+    if not graded:
+        print("  no GRADE lines found (grading not in production yet)")
+        return 0
+    for src in sorted(per_source):
+        s = per_source[src]
+        print(f"  source={src}: catch={s['catch']} false_alarm={s['false_alarm']} "
+              f"surfaced={s['surfaced']} idle={s['idle']}")
+    rate = (100.0 * tot["catch"] / flagged) if flagged else 0.0
+    print(f"  catch precision (fixed / flagged episodes): {rate:.1f}% "
+          f"({tot['catch']}/{flagged}) · idle: {tot['idle']}")
+    # Confidence on the FLAGGED sample — first-try episodes would inflate the
+    # base and hide how thin it is.
+    lvl = _level(flagged, False, False, _FLAGGED_FLOOR)
+    print(f"  {confidence(flagged, threshold=_FLAGGED_FLOOR)} "
+          f"({graded} graded, {flagged} flagged)")
+    ready = ("trim a source with 0 catch and high idle (double gate -> single); "
+             "keep a source with catch>0 — it demonstrably catches")
+    print(f"  -> {action(lvl, ready, thin=f'none — collect >={_FLAGGED_FLOOR} flagged episodes first, then decide on trimming')}")
+    return 0
+
+
+# --- convergence: do kickbacks resolve, or thrash? ---------------------------
+def classify_episodes(rows: list[dict]) -> dict[str, dict[str, int]]:
+    """Per source: converged (<=2 rounds), thrash (>2), unresolved, first_try.
+
+    Only episodes that actually kicked back (>=1 not_satisfied/partial round)
+    are convergence data; first-try-satisfied episodes are tallied separately —
+    counting them would inflate convergence with freebies."""
+    per_source: dict[str, dict[str, int]] = defaultdict(
+        lambda: {"converged": 0, "thrash": 0, "unresolved": 0, "first_try": 0})
+    for rs in _episodes(rows).values():
+        try:
+            rs_sorted = sorted(rs, key=lambda r: int(r["round"]))
+        except ValueError:
+            rs_sorted = rs
+        last = rs_sorted[-1]
+        src = last["source"]
+        if not any(r["verdict"] in DANGER_GT for r in rs):
+            per_source[src]["first_try"] += 1
+            continue
+        max_round = max((int(r["round"]) for r in rs if r["round"].isdigit()),
+                        default=99)
+        if last["verdict"] in CONVERGED and max_round <= _CONVERGENCE_ROUNDS:
+            bucket = "converged"
+        elif last["verdict"] in CONVERGED:
+            bucket = "thrash"
+        else:
+            bucket = "unresolved"
+        per_source[src][bucket] += 1
+    return per_source
+
+
+def convergence(paths: list[str]) -> int:
+    print("[convergence] — kickback loops per source")
+    rows = check_telemetry.parse_grade_lines(_journal_text(paths))
+    if not rows:
+        print("  no GRADE lines found (no kickback logs yet — expected pre-adoption)")
+        return 0
+    per_source = classify_episodes(rows)
+    for src in sorted(per_source):
+        s = per_source[src]
+        kicked = s["converged"] + s["thrash"] + s["unresolved"]
+        if kicked:
+            pct = 100.0 * s["converged"] / kicked
+            verdict = "PASS" if pct >= _CONVERGENCE_PCT else "NOT MET"
+            print(f"  source={src}: {s['converged']}/{kicked} kickback episodes "
+                  f"converged <={_CONVERGENCE_ROUNDS} rounds ({pct:.1f}%) · "
+                  f"thrash={s['thrash']} unresolved={s['unresolved']} "
+                  f"first_try={s['first_try']} · "
+                  f"threshold (>={_CONVERGENCE_PCT:.0f}%): {verdict}")
+        else:
+            print(f"  source={src}: grader ran ({s['first_try']} first-try "
+                  f"satisfied), 0 kickback episodes -> no convergence data yet")
+    print("  note: a 100% from a handful of episodes is not trust — the suite "
+          f"thresholds (>= {_SUITE_MIN_CASES} graded cases) guard thin samples")
+    return 0
+
+
+# --- suite: labeled calibration cases ---------------------------------------
+def suite(case_dir: str | None) -> int:
+    print("[suite] — grader calibration thresholds")
+    d = Path(case_dir) if case_dir else ROOT / check_telemetry.CALIBRATION_DIR
+    cases = [f for f in sorted(d.glob("*.json"))
+             if not f.name.endswith(".example.json")] if d.is_dir() else []
+    if not cases:
+        print(f"  no cases under {d} — grow the suite as work merges "
+              "(danger-direction cases are the mandatory share)")
+        return 0
+    # Only cases an actual grader run has labeled count (grader_verdict !=
+    # null) — an ungraded case is a fixture, not evidence; counting it lets an
+    # empty suite read PASS vacuously.
+    total = danger = graded = graded_danger = false_pass = 0
+    fp_detail = []
+    for c in cases:
+        try:
+            data = json.loads(c.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            print(f"  skipping unreadable {c.name} (the telemetry gate reports it)")
+            continue
+        total += 1
+        is_danger = bool(data.get("danger_direction"))
+        if is_danger:
+            danger += 1
+        verdict = data.get("grader_verdict")
+        if verdict is None:
+            continue
+        graded += 1
+        if is_danger:
+            graded_danger += 1
+        gt = data.get("ground_truth")
+        gt_map = gt if isinstance(gt, dict) else {"_": gt}
+        gr_map = verdict if isinstance(verdict, dict) else {"_": verdict}
+        for crit, gt_v in gt_map.items():
+            gr_v = gr_map.get(crit)
+            if gr_v is None:
+                continue
+            if gt_v in DANGER_GT and gr_v in GRADER_PASS:
+                false_pass += 1
+                fp_detail.append(f"{c.name}:{crit} ground_truth={gt_v} grader={gr_v}")
+    print(f"  {total} cases ({danger} danger-direction, {graded} graded, "
+          f"{total - graded} not yet graded)")
+    t1 = graded >= _SUITE_MIN_CASES and graded_danger >= _SUITE_MIN_DANGER
+    print(f"  threshold 1 (>={_SUITE_MIN_CASES} graded, "
+          f">={_SUITE_MIN_DANGER} graded danger): {'PASS' if t1 else 'NOT MET'}")
+    if graded == 0:
+        print("  threshold 2 (0 false-pass in danger direction): N/A — "
+              "0 cases graded yet (0 over 0 proves nothing)")
+    else:
+        print(f"  threshold 2 (0 false-pass in danger direction): "
+              f"{'PASS' if false_pass == 0 else f'FAIL ({false_pass})'}")
+    for line in fp_detail:
+        print(f"    false-pass: {line}")
+    print("  all three thresholds (incl. convergence) must hold before a "
+          "grader verdict may replace a review layer; until then it stays advisory")
+    return 0
+
+
+# --- tempo: issue cycle time -------------------------------------------------
+def _parse_iso(ts: str) -> datetime:
+    return datetime.fromisoformat(ts.replace("Z", "+00:00"))
+
+
+def cycle_times_days(issues: list[dict]) -> list[float]:
+    out = []
+    for it in issues:
+        created, closed = it.get("createdAt"), it.get("closedAt")
+        if created and closed:
+            out.append((_parse_iso(closed) - _parse_iso(created)).total_seconds() / 86400.0)
+    return out
+
+
+def tempo(issues_json: str | None) -> int:
+    print("[tempo] ~approx")
+    if issues_json:
+        issues = json.loads(Path(issues_json).read_text())
+    else:
+        try:
+            proc = subprocess.run(
+                ["gh", "issue", "list", "--state", "closed", "--limit",
+                 str(_ISSUE_LIMIT), "--json", "number,createdAt,closedAt"],
+                capture_output=True, text=True, check=True, cwd=str(ROOT),
+            )
+            issues = json.loads(proc.stdout or "[]")
+            print(f"  sample: last {_ISSUE_LIMIT} closed issues (cap) — NOT "
+                  "representative: chores/docs close in minutes and pull the "
+                  "median down")
+        except (subprocess.CalledProcessError, FileNotFoundError) as exc:
+            print(f"  gh not available ({type(exc).__name__}) — tempo skipped "
+                  "(needs an issue tracker; enable the github-issues module "
+                  "or pass --issues-json)")
+            return 0
+    days = cycle_times_days(issues)
+    if not days:
+        print("  no closed issues with timestamps")
+        return 0
+    quick = sum(1 for d in days if d < 1.0)
+    p50, p90 = _percentile(days, 0.5), _percentile(days, 0.9)
+    print(f"  cycle time issue->close: p50 {p50:.1f} d · p90 {p90:.1f} d over "
+          f"{len(days)} issues (max {max(days):.1f} d, <1 day: {quick})")
+    lvl = _level(len(days), False, True, _N_THRESHOLD)
+    print(f"  {confidence(len(days), sample_biased=True)}")
+    ready = (
+        f"look at issues above {_TEMPO_P90_DAYS} d (threshold provisional, not "
+        "calibrated) — which phase blocks (review gate, rebase, handoff)?"
+        if p90 > _TEMPO_P90_DAYS
+        else f"none — p90 {p90:.1f} d <= {_TEMPO_P90_DAYS} d (threshold "
+             "provisional, not calibrated)"
+    )
+    print(f"  -> {action(lvl, ready, thin='read only p90 (sample-robust); no single-value action')}")
+    return 0
+
+
+# --- cost: rework + optional harness tokens ----------------------------------
+def rework_episodes(rows: list[dict]) -> int:
+    """Episodes with a kickback (round>1) that ended in action=fixed."""
+    n = 0
+    for rs in _episodes(rows).values():
+        rounds = [int(r["round"]) for r in rs if r["round"].isdigit()]
+        if rounds and max(rounds) > 1 and any(r["action"] == "fixed" for r in rs):
+            n += 1
+    return n
+
+
+def session_output_tokens(transcript_dir: Path) -> dict[str, int]:
+    """Output tokens per transcript file (~approx: per session, not per work
+    item; the JSONL 'output_tokens' shape is harness-specific)."""
+    out: dict[str, int] = {}
+    if not transcript_dir.is_dir():
+        return out
+    for f in sorted(transcript_dir.glob("*.jsonl")):
+        total = sum(int(m) for m in _OUTPUT_TOKENS.findall(f.read_text(errors="ignore")))
+        if total:
+            out[f.stem] = total
+    return out
+
+
+def cost(paths: list[str], transcripts: str | None) -> int:
+    print("[cost] ~approx")
+    if transcripts:
+        tokens = session_output_tokens(Path(transcripts))
+        if tokens:
+            vals = list(tokens.values())
+            # The decision number is the median per session (budget lever per
+            # unit of work); the cumulative sum carries no decision — context only.
+            print(f"  output tokens/session: median {int(statistics.median(vals)):,} "
+                  f"({sum(vals):,} total over {len(vals)} sessions, cumulative — context)")
+            print(f"  {confidence(len(vals))}")
+        else:
+            print(f"  no transcript tokens found under {transcripts}")
+    else:
+        print("  tokens: not read (pass --transcripts DIR with harness "
+              "transcript JSONL; harness-specific)")
+    rows = check_telemetry.parse_grade_lines(_journal_text(paths))
+    rework = rework_episodes(rows)
+    n_ep = len(_episodes(rows))
+    lvl = _level(n_ep, False, False, _N_THRESHOLD)
+    print(f"  rework episodes (kickback round>1 -> fixed): {rework}  [{confidence(n_ep)}]")
+    ready = (
+        f"look at the {rework} rework episode(s) — which criterion kicks back "
+        "repeatedly (missing test seam / unclear acceptance)?"
+        if rework > 0
+        else "none — no rework waste in the graded episodes"
+    )
+    print(f"  -> {action(lvl, ready, thin='collect more graded episodes first, then address the rework source')}")
+    return 0
+
+
+# --- cfr: DORA change failure rate (proxy) ------------------------------------
+def _commit_kind(subject: str) -> str | None:
+    m = _CONV_COMMIT.match(subject)
+    return m.group(1).lower() if m else None
+
+
+def _code_files(files: set[str]) -> set[str]:
+    return {f for f in files if any(f.endswith(e) for e in _CODE_EXT)}
+
+
+def change_failure_rate(commits: list[dict], window_days: int = _CFR_WINDOW_DAYS) -> dict:
+    """Share of feat: changes followed by a corrective fix: within the window
+    that shares at least one CODE file — the closest honest CFR without deploy
+    events. Doc-only feats are not deployable changes and do not count."""
+    feats = [(c, _code_files(c["files"])) for c in commits
+             if _commit_kind(c["subject"]) == "feat"]
+    feats = [(c, cf) for c, cf in feats if cf]
+    fixes = [(c, _code_files(c["files"])) for c in commits
+             if _commit_kind(c["subject"]) == "fix"]
+    failed = 0
+    for fe, fe_code in feats:
+        for fx, fx_code in fixes:
+            if (fx["ts"] > fe["ts"]
+                    and (fx["ts"] - fe["ts"]).days <= window_days
+                    and (fe_code & fx_code)):
+                failed += 1
+                break
+    rate = (100.0 * failed / len(feats)) if feats else 0.0
+    return {"feats": len(feats), "fixes": len(fixes), "failed": failed, "rate": rate}
+
+
+def _default_branch() -> str:
+    for b in ("main", "master"):
+        if subprocess.run(["git", "rev-parse", "--verify", "--quiet", b],
+                          capture_output=True, cwd=str(ROOT)).returncode == 0:
+            return b
+    return "HEAD"
+
+
+def _git_commits(branch: str, limit: int = _GIT_LIMIT) -> list[dict]:
+    proc = subprocess.run(
+        ["git", "log", branch, "--no-merges", "-n", str(limit), "--name-only",
+         "--pretty=format:\x01%ct\x01%s"],
+        capture_output=True, text=True, check=True, cwd=str(ROOT),
+    )
+    commits: list[dict] = []
+    cur: dict | None = None
+    for line in proc.stdout.splitlines():
+        if line.startswith("\x01"):
+            _, ct, subject = line.split("\x01", 2)
+            cur = {"subject": subject,
+                   "ts": datetime.fromtimestamp(int(ct), tz=timezone.utc),
+                   "files": set()}
+            commits.append(cur)
+        elif line.strip() and cur is not None:
+            cur["files"].add(line.strip())
+    return commits
+
+
+def cfr(branch: str | None) -> int:
+    print("[cfr] change failure rate (DORA) ~approx")
+    b = branch or _default_branch()
+    try:
+        commits = _git_commits(b)
+    except (subprocess.CalledProcessError, FileNotFoundError) as exc:
+        print(f"  git not available or branch '{b}' missing "
+              f"({type(exc).__name__}) — cfr skipped")
+        return 0
+    r = change_failure_rate(commits)
+    if not r["feats"]:
+        print(f"  no feat: commits with code files in the last {_GIT_LIMIT} "
+              f"commits on {b}")
+        return 0
+    print(f"  change failure rate on {b}: {r['rate']:.1f}% "
+          f"({r['failed']}/{r['feats']} feat changes with a corrective fix "
+          f"<={_CFR_WINDOW_DAYS} d, code overlap)")
+    print("  DORA bands: elite 0-15% · high 16-30% · medium 31-45% · low >45%")
+    print(f"  {confidence(r['feats'], proxy=True)} — hot-file bursts overcount; "
+          "only the trend is loadable, never the point value")
+    print(f"  -> {action('low', '', thin='build a CFR trend over >=3 windows; if it rises while effectiveness shows catch>0, tighten the test/review gate. Single value: no action')}")
+    return 0
+
+
+# --- friction: deliberately not instrumented ----------------------------------
+def friction() -> int:
+    print("[friction]")
+    print("  bypass rate (--no-verify / hook skips): not instrumented")
+    print("  -> action: a bypass event log is the only piece needing real new "
+          "instrumentation — build it only when the other families show that "
+          "friction matters (gated)")
+    return 0
+
+
+def report() -> int:
+    print("=== process KPI cockpit (read-only) ===\n")
+    effectiveness([])
+    print()
+    convergence([])
+    print()
+    suite(None)
+    print()
+    tempo(None)
+    print()
+    cost([], None)
+    print()
+    cfr(None)
+    print()
+    friction()
+    return 0
+
+
+def main() -> int:
+    p = argparse.ArgumentParser(description="process KPI cockpit (read-only)")
+    sub = p.add_subparsers(dest="cmd")
+    e = sub.add_parser("effectiveness")
+    e.add_argument("journals", nargs="*")
+    v = sub.add_parser("convergence")
+    v.add_argument("journals", nargs="*")
+    s = sub.add_parser("suite")
+    s.add_argument("case_dir", nargs="?")
+    t = sub.add_parser("tempo")
+    t.add_argument("--issues-json")
+    k = sub.add_parser("cost")
+    k.add_argument("journals", nargs="*")
+    k.add_argument("--transcripts")
+    c = sub.add_parser("cfr")
+    c.add_argument("--branch")
+    sub.add_parser("friction")
+    sub.add_parser("report")
+    args = p.parse_args()
+
+    if args.cmd == "effectiveness":
+        return effectiveness(args.journals)
+    if args.cmd == "convergence":
+        return convergence(args.journals)
+    if args.cmd == "suite":
+        return suite(args.case_dir)
+    if args.cmd == "tempo":
+        return tempo(args.issues_json)
+    if args.cmd == "cost":
+        return cost(args.journals, args.transcripts)
+    if args.cmd == "cfr":
+        return cfr(args.branch)
+    if args.cmd == "friction":
+        return friction()
+    return report()
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
