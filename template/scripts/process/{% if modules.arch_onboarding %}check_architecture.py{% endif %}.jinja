@@ -18,7 +18,10 @@ import yaml
 ADR_DIR = "docs/process/adr"
 
 
-def extract_block(md: str) -> str | None:
+def extract_block(md: str) -> tuple[str | None, bool]:
+    """(block, unclosed). block is the ```arch fence content when properly
+    closed; unclosed=True when a fence opened but never closed — that must be
+    a hard failure, or a missing closing fence silently disables the gate."""
     inside, out = False, []
     for line in md.splitlines():
         s = line.strip()
@@ -27,9 +30,9 @@ def extract_block(md: str) -> str | None:
                 inside = True
             continue
         if s == "```":
-            return "\n".join(out)
+            return "\n".join(out), False
         out.append(line)
-    return None
+    return None, inside
 
 
 def _adr_exists(root: Path, adr: object) -> bool:
@@ -99,7 +102,13 @@ def check(root: Path) -> tuple[list[str], list[str]]:
     arch = root / "ARCHITECTURE.md"
     if not arch.is_file():
         return [], ["architecture not onboarded yet (no ARCHITECTURE.md)"]
-    block = extract_block(arch.read_text(encoding="utf-8"))
+    try:
+        md = arch.read_text(encoding="utf-8")
+    except UnicodeDecodeError as exc:
+        return [f"ARCHITECTURE.md is not valid UTF-8: {exc}"], []
+    block, unclosed = extract_block(md)
+    if unclosed:
+        return ["unclosed ```arch fence in ARCHITECTURE.md — add the closing ```"], []
     if block is None:
         return [], ["architecture not onboarded yet (no ```arch block)"]
 
@@ -127,7 +136,7 @@ def check(root: Path) -> tuple[list[str], list[str]]:
         path = spec.get("path") if isinstance(spec, dict) else None
         if not path:
             hard.append(f"layer '{name}' has no path")
-        elif not (root / path).exists():
+        elif not (root / str(path)).exists():
             hard.append(f"layer '{name}' path missing: {path}")
 
     for iface in data.get("interfaces", []) or []:
@@ -138,10 +147,16 @@ def check(root: Path) -> tuple[list[str], list[str]]:
         if not name:
             hard.append(f"interface entry missing 'name' (path: {path})")
             continue
-        target = root / path if path else None
+        target = root / str(path) if path else None
         if not target or not target.is_file():
             hard.append(f"interface '{name}' file missing: {path}")
-        elif not re.search(rf"\b{re.escape(str(name))}\b", target.read_text(encoding="utf-8")):
+            continue
+        try:
+            source = target.read_text(encoding="utf-8")
+        except UnicodeDecodeError as exc:
+            hard.append(f"interface '{name}' file not valid UTF-8: {path} ({exc})")
+            continue
+        if not re.search(rf"\b{re.escape(str(name))}\b", source):
             hard.append(f"interface symbol '{name}' not found in {path}")
 
     rules = data.get("rules", []) or []

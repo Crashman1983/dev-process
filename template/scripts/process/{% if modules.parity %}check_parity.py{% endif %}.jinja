@@ -32,8 +32,10 @@ def _declared_surfaces(root: Path) -> list[str] | None:
         return None
     try:
         ans = yaml.safe_load(f.read_text(encoding="utf-8")) or {}
-    except yaml.YAMLError:
+    except (yaml.YAMLError, UnicodeDecodeError):
         return None
+    if not isinstance(ans, dict):
+        return None  # the gate_runner owns manifest validity
     surf = ans.get("parity_surfaces")
     # require a non-empty list of strings — a non-string element would raise on
     # set(declared) later; a malformed answer disables coverage rather than crash.

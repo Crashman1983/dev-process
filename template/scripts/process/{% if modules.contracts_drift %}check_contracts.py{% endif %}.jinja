@@ -46,14 +46,15 @@ def _pin_hash(pin: str) -> tuple[str, str] | None:
     return (m.group(1), m.group(2).lower()) if m else None
 
 
-def _run_verify(command: str) -> str | None:
-    """Run a project-supplied verify command as argv (no shell). Returns None
-    on conformance (exit 0), else an advisory note. Never raises, never
-    hard-fails — a verify reaching an external system must not gate CI."""
+def _run_verify(command: str, root: Path) -> str | None:
+    """Run a project-supplied verify command as argv (no shell) from the repo
+    root, so relative paths behave the same wherever the gate is launched.
+    Returns None on conformance (exit 0), else an advisory note. Never raises,
+    never hard-fails — a verify reaching an external system must not gate CI."""
     try:
         r = subprocess.run(
             shlex.split(command),
-            capture_output=True, text=True, timeout=VERIFY_TIMEOUT_S,
+            capture_output=True, text=True, timeout=VERIFY_TIMEOUT_S, cwd=root,
         )
     except (subprocess.TimeoutExpired, OSError, ValueError):
         # ValueError: shlex.split on an unbalanced quote — still a soft note,
@@ -114,7 +115,7 @@ def _check_contract(root: Path, path: Path) -> tuple[list[str], list[str]]:
 
     verify = data.get("verify")
     if isinstance(verify, str) and verify.strip():
-        note = _run_verify(verify.strip())
+        note = _run_verify(verify.strip(), root)
         if note:
             soft.append(f"{rel}: {note}")
     else:

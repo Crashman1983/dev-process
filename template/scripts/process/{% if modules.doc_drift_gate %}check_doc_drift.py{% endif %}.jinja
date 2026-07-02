@@ -46,11 +46,19 @@ def find_drift(root: Path) -> list[str]:
             targets.append(root / f)
     problems: list[str] = []
     for doc in targets:
-        for ref in _candidates(doc.read_text(encoding="utf-8")):
+        try:
+            text = doc.read_text(encoding="utf-8")
+        except UnicodeDecodeError as exc:
+            problems.append(f"{doc.relative_to(root)} -> not valid UTF-8: {exc}")
+            continue
+        for ref in _candidates(text):
             ref_clean = ref.split("#", 1)[0].strip()
             if not _is_local_path(ref_clean):
                 continue
-            if not (root / ref_clean).exists():
+            # standard markdown: ./ and ../ are document-relative; bare paths
+            # keep the repo-root convention
+            base = doc.parent if ref_clean.startswith(("./", "../")) else root
+            if not (base / ref_clean).resolve().exists():
                 problems.append(f"{doc.relative_to(root)} -> missing '{ref_clean}'")
     return problems
 

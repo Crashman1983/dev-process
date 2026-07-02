@@ -125,6 +125,8 @@ def check(root: Path) -> tuple[list[str], list[str]]:
     files = _tracked_files(root)
     if files is None:
         return [], ["could not list tracked files (git unavailable); scan skipped"]
+    if not files:
+        return [], ["0 tracked files scanned — nothing committed/staged yet, floor not exercised"]
 
     findings: list[str] = []
     for rel in files:
