@@ -1,13 +1,21 @@
 #!/usr/bin/env python3
 """Manifest-aware gate runner. Reads .copier-answers.yml and runs only the
-gates whose module is active. Language-agnostic; each gate is a subprocess."""
+gates whose module is active. Language-agnostic; each gate is a subprocess.
+
+The manifest is load-bearing: a missing or malformed .copier-answers.yml is a
+hard failure, never an empty gate list — otherwise enforcement can disappear
+silently while reporting green."""
 from __future__ import annotations
 
 import subprocess
 import sys
 from pathlib import Path
 
-import yaml
+try:
+    import yaml
+except ImportError:
+    print("gate-runner: PyYAML is required — pip install 'PyYAML>=6'", file=sys.stderr)
+    raise SystemExit(1)
 
 # gate-name -> (module answer key, command relative to repo root)
 GATES = {
@@ -22,20 +30,46 @@ GATES = {
 }
 
 
-def _answers(root: Path) -> dict:
+def find_root(start: Path) -> Path | None:
+    """Nearest ancestor (including start) that holds the answers manifest."""
+    for d in [start, *start.parents]:
+        if (d / ".copier-answers.yml").is_file():
+            return d
+    return None
+
+
+def load_modules(root: Path) -> dict:
+    """The manifest's modules mapping; raises SystemExit with a diagnostic
+    on anything that would otherwise silently disable enforcement."""
     f = root / ".copier-answers.yml"
-    return yaml.safe_load(f.read_text()) if f.is_file() else {}
-
-
-def active_gates(answers: dict) -> list[str]:
-    mods = (answers or {}).get("modules", {}) or {}
-    return [name for name, (key, _cmd) in GATES.items() if mods.get(key)]
+    try:
+        answers = yaml.safe_load(f.read_text(encoding="utf-8"))
+    except (yaml.YAMLError, UnicodeDecodeError) as exc:
+        print(f"gate-runner: unparseable {f}: {exc}", file=sys.stderr)
+        raise SystemExit(1)
+    mods = answers.get("modules") if isinstance(answers, dict) else None
+    if not isinstance(mods, dict):
+        print(
+            f"gate-runner: {f} has no 'modules' mapping — manifest corrupt; "
+            "enforcement cannot be verified",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    return mods
 
 
 def main() -> int:
-    root = Path(".").resolve()
-    answers = _answers(root)
-    active = active_gates(answers)
+    root = find_root(Path(".").resolve())
+    if root is None:
+        print(
+            "gate-runner: no .copier-answers.yml found here or in any parent "
+            "directory — run inside a dev-process repo; enforcement cannot be "
+            "verified",
+            file=sys.stderr,
+        )
+        return 1
+    mods = load_modules(root)
+    active = [name for name, (key, _cmd) in GATES.items() if mods.get(key)]
     if "--list" in sys.argv:
         for g in active:
             print(g)
@@ -49,7 +83,7 @@ def main() -> int:
             failed.append(name)
     if failed:
         if warn:
-            print(f"⚠ gate warnings (not blocking): {', '.join(failed)}")
+            print(f"gate warnings (not blocking): {', '.join(failed)}")
             return 0
         print(f"FAILED gates: {', '.join(failed)}")
         return 1
