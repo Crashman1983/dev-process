@@ -120,11 +120,26 @@ def _percentile(xs: list[float], p: float) -> float:
 
 
 def _journal_text(paths: list[str]) -> str:
+    # errors="replace": the cockpit reads whatever is there; the gate is the
+    # place where a non-UTF-8 journal fails loudly.
     if paths:
-        return "\n".join(Path(p).read_text() for p in paths if Path(p).is_file())
+        return "\n".join(Path(p).read_text(encoding="utf-8", errors="replace")
+                         for p in paths if Path(p).is_file())
     files = glob.glob(str(ROOT / ".process-work" / "journal" / "**" / "*.md"),
                       recursive=True)
-    return "\n".join(Path(p).read_text() for p in files if Path(p).is_file())
+    return "\n".join(Path(p).read_text(encoding="utf-8", errors="replace")
+                     for p in files if Path(p).is_file())
+
+
+def _round_int(r: dict) -> int | None:
+    """round= as int, or None — isascii guards unicode digits that pass
+    isdigit() but crash int(). One owner; every reader uses this."""
+    v = r["round"]
+    return int(v) if v.isascii() and v.isdigit() else None
+
+
+def _by_round(rs: list[dict]) -> list[dict]:
+    return sorted(rs, key=lambda r: (_round_int(r) is None, _round_int(r) or 0))
 
 
 def _episodes(rows: list[dict]) -> dict[tuple, list[dict]]:
@@ -142,7 +157,7 @@ def classify_action_episodes(rows: list[dict]) -> dict[str, dict[str, int]]:
     per_source: dict[str, dict[str, int]] = defaultdict(
         lambda: {"catch": 0, "false_alarm": 0, "surfaced": 0, "idle": 0})
     for rs in _episodes(rows).values():
-        src = rs[-1]["source"]
+        src = _by_round(rs)[-1]["source"]  # last round wins, file order doesn't
         actions = {r["action"] for r in rs}
         if "fixed" in actions:
             bucket = "catch"
@@ -197,17 +212,13 @@ def classify_episodes(rows: list[dict]) -> dict[str, dict[str, int]]:
     per_source: dict[str, dict[str, int]] = defaultdict(
         lambda: {"converged": 0, "thrash": 0, "unresolved": 0, "first_try": 0})
     for rs in _episodes(rows).values():
-        try:
-            rs_sorted = sorted(rs, key=lambda r: int(r["round"]))
-        except ValueError:
-            rs_sorted = rs
-        last = rs_sorted[-1]
+        last = _by_round(rs)[-1]
         src = last["source"]
         if not any(r["verdict"] in DANGER_GT for r in rs):
             per_source[src]["first_try"] += 1
             continue
-        max_round = max((int(r["round"]) for r in rs if r["round"].isdigit()),
-                        default=99)
+        rounds = [n for n in (_round_int(r) for r in rs) if n is not None]
+        max_round = max(rounds, default=99)
         if last["verdict"] in CONVERGED and max_round <= _CONVERGENCE_ROUNDS:
             bucket = "converged"
         elif last["verdict"] in CONVERGED:
@@ -258,12 +269,16 @@ def suite(case_dir: str | None) -> int:
     # null) — an ungraded case is a fixture, not evidence; counting it lets an
     # empty suite read PASS vacuously.
     total = danger = graded = graded_danger = false_pass = 0
+    unmatched_danger = 0
     fp_detail = []
     for c in cases:
         try:
             data = json.loads(c.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, UnicodeDecodeError):
+        except (json.JSONDecodeError, UnicodeDecodeError, OSError):
             print(f"  skipping unreadable {c.name} (the telemetry gate reports it)")
+            continue
+        if not isinstance(data, dict):
+            print(f"  skipping non-object {c.name} (the telemetry gate reports it)")
             continue
         total += 1
         is_danger = bool(data.get("danger_direction"))
@@ -281,6 +296,12 @@ def suite(case_dir: str | None) -> int:
         for crit, gt_v in gt_map.items():
             gr_v = gr_map.get(crit)
             if gr_v is None:
+                # A ground-truth entry the grader run never covered is NOT
+                # evidence of no-false-pass — in the danger direction it must
+                # poison threshold 2, never read as evaluated (the gate also
+                # hard-fails this shape mismatch).
+                if gt_v in DANGER_GT:
+                    unmatched_danger += 1
                 continue
             if gt_v in DANGER_GT and gr_v in GRADER_PASS:
                 false_pass += 1
@@ -293,6 +314,10 @@ def suite(case_dir: str | None) -> int:
     if graded == 0:
         print("  threshold 2 (0 false-pass in danger direction): N/A — "
               "0 cases graded yet (0 over 0 proves nothing)")
+    elif unmatched_danger:
+        print(f"  threshold 2 (0 false-pass in danger direction): NOT EVALUABLE "
+              f"— {unmatched_danger} danger-direction entr(ies) without a grader "
+              "verdict (shape mismatch; run the telemetry gate)")
     else:
         print(f"  threshold 2 (0 false-pass in danger direction): "
               f"{'PASS' if false_pass == 0 else f'FAIL ({false_pass})'}")
@@ -311,16 +336,28 @@ def _parse_iso(ts: str) -> datetime:
 def cycle_times_days(issues: list[dict]) -> list[float]:
     out = []
     for it in issues:
+        if not isinstance(it, dict):
+            continue
         created, closed = it.get("createdAt"), it.get("closedAt")
         if created and closed:
-            out.append((_parse_iso(closed) - _parse_iso(created)).total_seconds() / 86400.0)
+            try:
+                out.append((_parse_iso(closed) - _parse_iso(created)).total_seconds() / 86400.0)
+            except (ValueError, TypeError):
+                continue  # malformed timestamps: skip the entry, not the family
     return out
 
 
 def tempo(issues_json: str | None) -> int:
     print("[tempo] ~approx")
     if issues_json:
-        issues = json.loads(Path(issues_json).read_text())
+        try:
+            issues = json.loads(Path(issues_json).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+            print(f"  cannot read --issues-json {issues_json}: {exc} — tempo skipped")
+            return 0
+        if not isinstance(issues, list):
+            print(f"  --issues-json {issues_json} is not a JSON list — tempo skipped")
+            return 0
     else:
         try:
             proc = subprocess.run(
@@ -363,7 +400,7 @@ def rework_episodes(rows: list[dict]) -> int:
     """Episodes with a kickback (round>1) that ended in action=fixed."""
     n = 0
     for rs in _episodes(rows).values():
-        rounds = [int(r["round"]) for r in rs if r["round"].isdigit()]
+        rounds = [n_ for n_ in (_round_int(r) for r in rs) if n_ is not None]
         if rounds and max(rounds) > 1 and any(r["action"] == "fixed" for r in rs):
             n += 1
     return n
@@ -474,11 +511,11 @@ def _git_commits(branch: str, limit: int = _GIT_LIMIT) -> list[dict]:
 
 def cfr(branch: str | None) -> int:
     print("[cfr] change failure rate (DORA) ~approx")
-    b = branch or _default_branch()
     try:
+        b = branch or _default_branch()
         commits = _git_commits(b)
-    except (subprocess.CalledProcessError, FileNotFoundError) as exc:
-        print(f"  git not available or branch '{b}' missing "
+    except (subprocess.CalledProcessError, OSError) as exc:
+        print(f"  not a git repository, git missing, or branch not resolvable "
               f"({type(exc).__name__}) — cfr skipped")
         return 0
     r = change_failure_rate(commits)

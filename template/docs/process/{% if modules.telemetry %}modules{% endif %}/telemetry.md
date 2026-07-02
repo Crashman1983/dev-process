@@ -47,7 +47,11 @@ Malformed calibration cases (invalid JSON, `id` ≠ filename stem, missing
 **Best-effort (advisory note, never fails CI):** zero GRADE lines repo-wide
 ("expected pre-adoption") and an empty calibration suite — the trace only
 exists once the workflow starts grading. Whether grading *happened* for a
-given change is review discipline, not machine-checked.
+given change is review discipline, not machine-checked. Two conventions the
+gate deliberately does not enforce: per-round uniqueness of a
+(`work`, `checkpoint`, `criterion`, `round`) line, and GRADE lines inside
+```-fenced blocks — fenced regions are treated as quotations and are
+invisible to gate and cockpit (quote literal GRADE examples only there).
 
 ## The KPI cockpit
 
