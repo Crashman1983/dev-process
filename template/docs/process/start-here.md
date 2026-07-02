@@ -87,8 +87,19 @@ ist, als offene Frage oder Annahme dokumentieren; nicht erfinden.
 - Zweck: Welches Problem loest das Projekt, und woran erkennt man Nutzen?
 - Nutzer: Wer nutzt das System, und welche Rolle hat Prioritaet?
 - Erster Slice: Was ist der kleinste nutzbare End-to-End-Erfolg?
-- Stack: Welche Sprache, Frameworks, Laufzeit, Datenhaltung und Deployment-Ziele
-  sind gesetzt oder bevorzugt?
+- Stack — pro Ebene erfragen; offene Ebenen laufen durch den Vorschlagsmodus
+  (siehe Dialogregeln):
+  - Frontend: Welche Technologie traegt jede Oberflaeche (Framework,
+    Rendering, Build), oder ist das Projekt bewusst ohne Frontend?
+  - Backend: Welche Sprache, welches Framework und welche Laufzeit sind
+    gesetzt oder bevorzugt?
+  - Storage: Welche Art von Persistenz (relational, dokumentenorientiert,
+    Dateien, keine), welches konkrete System, und wie laufen Migrationen?
+  - API/Kommunikation: Wie sprechen eigene Komponenten und Oberflaechen
+    miteinander (REST, GraphQL, gRPC, Events, Queues), und wie wird das
+    versioniert? Die Antwort informiert die Modulwahl (`contract-first`,
+    `contracts-drift`, `parity`).
+  - Deployment: Welche Laufzeitumgebung und Deployment-Ziele sind gesetzt?
 - Codebasis: Gibt es vorhandenen Code, Tests, CI, Docs oder Datenmodelle?
 - Architektur: Welche Code-Wurzeln, Layer, Schnittstellen und Grenzen sind
   tatsaechlich vorhanden oder geplant?
@@ -109,8 +120,18 @@ an open question or assumption; do not invent it.
 - Purpose: Which problem does the project solve, and how is value recognized?
 - Users: Who uses the system, and which role has priority?
 - First slice: What is the smallest useful end-to-end outcome?
-- Stack: Which language, frameworks, runtime, storage, and deployment targets
-  are fixed or preferred?
+- Stack — ask per layer; open layers go through proposal mode (see dialogue
+  rules):
+  - Frontend: Which technology carries each surface (framework, rendering,
+    build), or is the project deliberately frontend-free?
+  - Backend: Which language, framework, and runtime are fixed or preferred?
+  - Storage: What kind of persistence (relational, document, files, none),
+    which concrete system, and how do migrations run?
+  - API/communication: How do the project's own components and surfaces talk
+    to each other (REST, GraphQL, gRPC, events, queues), and how is that
+    versioned? The answer informs the module choice (`contract-first`,
+    `contracts-drift`, `parity`).
+  - Deployment: Which runtime environment and deployment targets are set?
 - Codebase: Is there existing code, tests, CI, docs, or data model?
 - Architecture: Which code roots, layers, interfaces, and boundaries actually
   exist or are planned?
@@ -132,6 +153,11 @@ an open question or assumption; do not invent it.
 - Maximal drei Fragen auf einmal stellen.
 - Nach jeder Antwort kurz zusammenfassen, was verstanden wurde.
 - Annahmen markieren und bestaetigen lassen, bevor Dateien geschrieben werden.
+- Vorschlagsmodus: Fehlt fuer eine Stack-Ebene eine Vorgabe, leite 1-3
+  Optionen aus Ziel, erstem Slice und Rahmenbedingungen ab, nenne die
+  Trade-offs, markiere eine Empfehlung und lasse sie bestaetigen. Vorschlaege
+  sind immer klar als Vorschlag gekennzeichnet — Fakten werden weiterhin nie
+  erfunden.
 - Keine echten Architektur-, Story-, Contract-, Parity- oder Security-Artefakte
   schreiben, solange die Fakten nicht belastbar sind.
 - Am Ende die naechsten drei konkreten Schritte nennen.
@@ -142,6 +168,10 @@ an open question or assumption; do not invent it.
 - Ask at most three questions at a time.
 - After each answer, briefly summarize what was understood.
 - Mark assumptions and get confirmation before writing files.
+- Proposal mode: if a stack layer has no given preference, derive 1-3 options
+  from the goal, the first slice, and the known constraints, name the
+  trade-offs, mark one recommendation, and get it confirmed. Proposals are
+  always clearly labeled as proposals — facts are still never invented.
 - Do not write real architecture, story, contract, parity, or security artifacts
   until the facts are defensible.
 - End with the next three concrete steps.
@@ -152,7 +182,9 @@ an open question or assumption; do not invent it.
 
 - Greenfield oder Brownfield;
 - Projektziel und erster nutzbarer Slice;
-- initialer Stack und Source-Layout;
+- initialer Stack je Ebene (Frontend, Backend, Storage, API/Kommunikation,
+  Deployment) und Source-Layout — jede Ebene ist entschieden,
+  vorgeschlagen-und-bestaetigt oder eine dokumentierte offene Frage;
 - ob `ARCHITECTURE.md` schon einen echten `arch`-Block bekommen kann;
 - ob echte Eintraege unter docs/process/feature-registry/ benoetigt werden;
 - ob Contracts, Parity oder Security-Floor jetzt echte Artefakte brauchen oder
@@ -162,7 +194,9 @@ an open question or assumption; do not invent it.
 
 - Greenfield or Brownfield;
 - project goal and first useful slice;
-- initial stack and source layout;
+- initial stack per layer (frontend, backend, storage, API/communication,
+  deployment) and source layout — each layer decided,
+  proposed-and-confirmed, or a documented open question;
 - whether `ARCHITECTURE.md` can already receive a real `arch` block;
 - whether real entries under docs/process/feature-registry/ are needed;
 - whether contracts, parity, or security floor need real artifacts now or stay
@@ -173,8 +207,11 @@ an open question or assumption; do not invent it.
 **Deutsch:** Nutze diesen Pfad, wenn noch kein Produktcode existiert.
 
 1. Dokumentiere Produktziel, Nutzer und ersten Slice in `.process-work/`.
-2. Waehle Stack und Source-Layout so klein, dass die erste Architektur wahr
-   beschrieben werden kann.
+2. Klaere den Stack je Ebene (Frontend, Backend, Storage, API/Kommunikation,
+   Deployment); fehlt eine Vorgabe, nutze den Vorschlagsmodus. Waehle das
+   bestaetigte Ergebnis und das Source-Layout so klein, dass die erste
+   Architektur wahr beschrieben werden kann, und halte grundlegende
+   Stack-Entscheidungen als ADR fest.
 3. Erzeuge erst dann Quellverzeichnisse und Interface-Dateien.
 4. Ersetze den inert markierten `arch-example` in `ARCHITECTURE.md` nur durch
    einen echten `arch`-Block, wenn die referenzierten Pfade existieren.
@@ -193,8 +230,11 @@ an open question or assumption; do not invent it.
 **English:** Use this path when no product code exists yet.
 
 1. Document product goal, users, and first slice in `.process-work/`.
-2. Choose stack and source layout small enough that the first architecture can
-   be described truthfully.
+2. Settle the stack per layer (frontend, backend, storage, API/communication,
+   deployment); where no preference is given, use proposal mode. Choose the
+   confirmed result and the source layout small enough that the first
+   architecture can be described truthfully, and record fundamental stack
+   decisions as ADRs.
 3. Create source directories and interface files only then.
 4. Replace the inert `arch-example` in `ARCHITECTURE.md` with a real `arch`
    block only when the referenced paths exist.

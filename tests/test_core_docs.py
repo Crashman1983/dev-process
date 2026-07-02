@@ -70,6 +70,30 @@ def test_start_here_guides_greenfield_and_brownfield(render, tmp_path):
         assert required in text, required
 
 
+def test_start_here_stack_compass_covers_layers_and_proposal_mode(render, tmp_path):
+    # the tech dialogue must decompose the stack into the concrete layers and
+    # instruct the LLM to propose confirmed options where the user has no
+    # preference — otherwise proposals depend on the model's temperament, not
+    # on the process.
+    out = render(tmp_path, {"project_name": "demo"})
+    text = (out / "docs/process/start-here.md").read_text()
+    for required in [
+        # the four layers, both languages
+        "Frontend", "Backend", "Storage",
+        "API/Kommunikation", "API/communication",
+        "Deployment",
+        # proposal mode: derive options, name trade-offs, confirm
+        "Vorschlagsmodus", "proposal mode",
+        "Trade-offs", "trade-offs",
+        "Empfehlung", "recommendation",
+        # the API answer feeds the module heuristic
+        "contract-first", "contracts-drift",
+        # confirmed fundamentals land in the existing decision mechanics
+        "ADR",
+    ]:
+        assert required in text, required
+
+
 def test_adr_template_has_intent_axis(render, tmp_path):
     out = render(tmp_path, {"project_name": "demo"})
     text = (out / "docs/process/adr/template.md").read_text()
