@@ -2,7 +2,7 @@
 
 Captures the architecture of **{{ project_name }}** and verifies it against the
 real code. Runs in CI via `process-gates` and locally via
-`uv run scripts/process/check_architecture.py`.
+`python scripts/process/check_architecture.py`.
 
 ## Interview (run this with a human)
 
@@ -17,9 +17,10 @@ Fill an ` ```arch ` block in `ARCHITECTURE.md` by answering, one at a time:
 4. **interfaces** — the key contract symbols in this repo and the file each
    lives in (e.g. `<PortName>` in `src/<domain>/ports.py`).
 
-Then write the block into `ARCHITECTURE.md`:
+Then write the block into `ARCHITECTURE.md`, fenced exactly as ` ```arch ` —
+an unlabeled fence is ignored by the gate:
 
-```
+```arch
 code_roots: [src]
 layers:
   domain: {path: src/<domain>}

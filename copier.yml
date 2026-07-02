@@ -1,5 +1,6 @@
 _subdirectory: template
 _answers_file: .copier-answers.yml
+_min_copier_version: "9.4.0"
 
 project_name:
   type: str

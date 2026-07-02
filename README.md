@@ -11,8 +11,9 @@ Ausgeliefert als [copier](https://copier.readthedocs.io)-Template. Adapter für
 > (feature-registry, github-issues, contracts-drift) + SP4 (git-hooks,
 > contract-first, parity, security-floor) + Capstone (command-adapters,
 > `v1.0.0` — das volle Kenni-Command-Set, harness-nativ) + SP7 (ci-adapters:
-> GitLab CI + Install-Fallbacks) + SP8 (english-canon + ehrliche Ökonomie)
-> ausgeliefert, `v1.2.0`.
+> GitLab CI + Install-Fallbacks) + SP8 (english-canon + ehrliche Ökonomie) +
+> SP9 (audit-fixes: False-Greens geschlossen, Failure-Modes sprechen)
+> ausgeliefert, `v1.3.0`.
 > Setup: [`BOOTSTRAP.md`](BOOTSTRAP.md) · Systemumgebung:
 > [`docs/SYSTEM-REQUIREMENTS.md`](docs/SYSTEM-REQUIREMENTS.md) · SBOM:
 > [`docs/SBOM.md`](docs/SBOM.md) · Design: [`docs/design/`](docs/design/).
@@ -37,7 +38,7 @@ Bausteine sind zuschaltbare Module.
 die Diff-Größe. User-sichtbar, komponentenübergreifend, API/Contract, Auth oder
 Persistenz ⇒ Tier 3+ auch bei winzigem Diff. Ein `flow`-Label ist Boden, nie Decke.
 
-**Acht bindende Regeln** (Reihenfolge = Priorität):
+**Neun bindende Regeln** (Reihenfolge = Priorität):
 
 1. Verifikation vor Behauptung (Tool-Call oder Confidence-Tag).
 2. Plan vor substanzieller Arbeit (Tier aus echtem Umfang ableiten).
@@ -47,6 +48,7 @@ Persistenz ⇒ Tier 3+ auch bei winzigem Diff. Ein `flow`-Label ist Boden, nie D
 6. Root-Cause vor Symptom (max. 2 Symptom-Versuche).
 7. Review-Gate vor Merge in den Main-Branch.
 8. Atomare Commits, dokumentierte Ausnahmen.
+9. Code wird zum Lesen geschrieben — intention-revealing, am Review-Gate geprüft.
 
 **Zyklus:** Brainstorm → Plan → Execute → Review, plus Quick (kleine Änderungen)
 und Debug. **ADRs** tragen zwei Achsen — `Status` (Proposed/Accepted/Superseded)
@@ -62,7 +64,7 @@ Root-Shim, kollisionsfrei für Brownfield). git-Hooks sichern lokal ab.
 die einzige Enforcement-Säule — und ohne dieses erzwingt nichts die Gates. Zuschaltbare
 Module heute: `doc-drift-gate` (tote Pfad-Referenzen in Docs), `arch-onboarding`
 (Architektur gegen echten Code), `feature-registry` (User-Story-/Akzeptanz-/
-Test-Traceability), `github-issues` (EARS-Templates + Issue-Ref-Gate) und
+Test-Traceability), `github-issues` (EARS-Templates + Issue-Ref-Gate),
 `contracts-drift` (Kopplung-als-Contract, Pin-Drift-Ratchet + best-effort-Konformität),
 `git-hooks` (lokale pre-commit/pre-push/post-commit-Durchsetzung, an den gate_runner delegiert),
 `contract-first` (geteiltes Capability-Interface im committeten Spec deklariert, bevor eine Surface darauf baut),
@@ -153,3 +155,4 @@ Pflicht-Verifikation über den `gate_runner`.
 | **Capstone** command-adapters | Harness-native Slash-Commands (Claude / Copilot / AGENTS.md), dünn auf `docs/process/` zeigend, vom doc-drift-gate mitgeprüft — schließt das „vollständig wie Kenni"-Programm bei `v1.0.0` | ✅ ausgeliefert |
 | **SP7** ci-adapters | GitLab CI als zweiter Enforcement-Transport (`ci`-Namespace, includable Job + Root-Shim) · dokumentierte No-CI-Degradation · Install-Fallbacks ohne `uv` (pipx / venv+pip / lokaler Clone) | ✅ ausgeliefert |
 | **SP8** english-canon | Alle Artefakte englisch (halbiert die Doku-Token je Session) · Kernel-Regel „Dialog in Nutzersprache" · „Wann lohnt es nicht"-Ehrlichkeit · Journal-Pflicht erst ab Tier 2 | ✅ ausgeliefert |
+| **SP9** audit-fixes | Drei-Achsen-Audit: alle bestätigten False-Greens geschlossen (Manifest load-bearing, arch-Fence, unborn-main-Hook, hooksPath-Guard) · Failure-Modes mit Diagnose statt Traceback · doc-drift versteht dokument-relative Links · Doku-Drift bereinigt | ✅ ausgeliefert |

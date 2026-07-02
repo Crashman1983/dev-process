@@ -4,7 +4,7 @@ The development cycle, described harness-neutrally. Each phase names what enters
 
 ## The cycle
 
-`brainstorm → plan → execute → review`, with `quick` as the Tier 1–2 shortcut and `debug` as the root-cause entry point. The tier (`risk-tiers.md`) decides how much of the cycle a change runs through: Tier 0 commits directly, Tier 1–2 take the quick path, Tier 3+ run the full cycle.
+`brainstorm → plan → execute → review`, with `quick` as the Tier 1–2 shortcut and `debug` as the root-cause entry point. The tier (`risk-tiers.md`) decides how much of the cycle a change runs through: Tier 0 commits directly (no plan/review cycle — the branching rules in `commits.md` still apply), Tier 1–2 take the quick path, Tier 3+ run the full cycle.
 
 ## Brainstorm
 

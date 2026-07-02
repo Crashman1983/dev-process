@@ -10,6 +10,10 @@ Enable when GitHub Issues is the operative backlog. Tracked work (a story at
 status `in-progress` or `done`) should carry an `issue` link; the gate emits a
 note when it does not.
 
+The gate operates on feature-registry story files: without the
+`feature-registry` module (or before the first real story exists) it is
+intentionally inert — enable both modules to get enforcement.
+
 ## Prerequisites (optional)
 
 - A GitHub repository. Set it at setup via the `github_repo` answer
