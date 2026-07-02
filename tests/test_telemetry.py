@@ -381,3 +381,149 @@ def test_docdrift_green_with_module_doc(render, tmp_path):
         capture_output=True, text=True,
     )
     assert r.returncode == 0, r.stdout
+
+
+# --- audit round 2 (adversarial findings) --------------------------------
+
+def test_tab_after_grade_reaches_grammar_check(render, tmp_path):
+    # F2: filter derived from the grammar — GRADE\t… must not slip past the
+    # gate while the cockpit ingests it
+    out = _render(render, tmp_path)
+    _journal(out, "GRADE\twork=1 checkpoint=1 criterion=A round=1 "
+                  "verdict=bogus action=satisfied source=execute\n")
+    r = _gate(out)
+    assert r.returncode == 1
+    assert "verdict=bogus" in r.stdout
+
+
+def test_unicode_round_fails_gate_and_cockpit_survives(render, tmp_path):
+    # F3: "²" is isdigit() but int() raises — gate must fail it, and the
+    # cockpit must not crash even when fed such a journal directly
+    out = _render(render, tmp_path)
+    _journal(out, "GRADE work=1 checkpoint=1 criterion=A round=² "
+                  "verdict=satisfied action=satisfied source=execute\n")
+    r = _gate(out)
+    assert r.returncode == 1
+    assert "round=" in r.stdout
+    j = out / JOURNAL / "2026-07-02.md"
+    for cmd in (["convergence", str(j)], ["cost", str(j)]):
+        rc = _kpis(out, *cmd)
+        assert rc.returncode == 0, rc.stderr
+        assert "Traceback" not in rc.stderr
+
+
+def test_directory_entries_do_not_traceback(render, tmp_path):
+    # F4: a directory named *.md / *.json is skipped, not a raw IsADirectoryError
+    out = _render(render, tmp_path)
+    (out / JOURNAL / "x.md").mkdir(parents=True)
+    (out / CALIB / "y.json").mkdir(parents=True)
+    r = _gate(out)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "Traceback" not in r.stderr
+
+
+def test_shape_mismatch_hard_fails_gate(render, tmp_path):
+    # F1: a grader_verdict whose kind or key set differs from ground_truth
+    # yields zero comparisons — the gate must fail it
+    out = _render(render, tmp_path)
+    _case(out, "mix.json", {"id": "mix", "danger_direction": True,
+                            "ground_truth": "not_satisfied",
+                            "grader_verdict": {"AC-1": "satisfied"}})
+    r = _gate(out)
+    assert r.returncode == 1
+    assert "shape" in r.stdout
+    _case(out, "mix.json", {"id": "mix", "danger_direction": True,
+                            "ground_truth": {"AC-1": "not_satisfied"},
+                            "grader_verdict": {"AC-2": "satisfied"}})
+    r = _gate(out)
+    assert r.returncode == 1
+    assert "criteria" in r.stdout
+
+
+def test_suite_unmatched_danger_never_reads_pass(render, tmp_path):
+    # F1 belt-and-suspenders: even standalone, the cockpit must not print
+    # threshold 2 PASS while a danger-direction entry went uncompared
+    out = _render(render, tmp_path)
+    d = tmp_path / "cases"
+    d.mkdir()
+    (d / "mix.json").write_text(json.dumps(
+        {"id": "mix", "danger_direction": True,
+         "ground_truth": {"AC-1": "not_satisfied"},
+         "grader_verdict": {"AC-2": "satisfied"}}), encoding="utf-8")
+    r = _kpis(out, "suite", str(d))
+    assert r.returncode == 0, r.stderr
+    assert "NOT EVALUABLE" in r.stdout
+    assert "threshold 2 (0 false-pass in danger direction): PASS" not in r.stdout
+
+
+def test_nonexistent_root_fails(render, tmp_path):
+    # F6: a typo'd root must not report green forever
+    out = _render(render, tmp_path)
+    r = _gate(out, root=out / "does-not-exist")
+    assert r.returncode == 1
+    assert "not a directory" in r.stdout
+
+
+def test_fenced_grade_examples_are_quotations(render, tmp_path):
+    # F8: fenced blocks are invisible to gate and cockpit
+    out = _render(render, tmp_path)
+    _journal(out, "```\nGRADE work=1 checkpoint= criterion=broken round=x "
+                  "verdict=nope action=nope source=nope\n```\n")
+    r = _gate(out)
+    assert r.returncode == 0, r.stdout
+    assert "no GRADE lines yet" in r.stdout
+    r = _kpis(out, "effectiveness")
+    assert "no GRADE lines found" in r.stdout
+
+
+def test_suite_non_object_case_skipped(render, tmp_path):
+    # F5: gate speaks about it; the standalone cockpit skips, never crashes
+    out = _render(render, tmp_path)
+    d = tmp_path / "cases"
+    d.mkdir()
+    (d / "list.json").write_text("[]", encoding="utf-8")
+    r = _kpis(out, "suite", str(d))
+    assert r.returncode == 0, r.stderr
+    assert "skipping non-object" in r.stdout
+
+
+def test_tempo_malformed_issues_json_diagnostic(render, tmp_path):
+    out = _render(render, tmp_path)
+    f = tmp_path / "bad.json"
+    f.write_text("{ not json", encoding="utf-8")
+    r = _kpis(out, "tempo", "--issues-json", str(f))
+    assert r.returncode == 0, r.stderr
+    assert "tempo skipped" in r.stdout
+    f.write_text('{"a": 1}', encoding="utf-8")
+    r = _kpis(out, "tempo", "--issues-json", str(f))
+    assert r.returncode == 0
+    assert "not a JSON list" in r.stdout
+
+
+def test_cfr_outside_git_diagnostic(render, tmp_path):
+    out = _render(render, tmp_path)  # rendered repo is not a git repo
+    r = _kpis(out, "cfr")
+    assert r.returncode == 0, r.stderr
+    assert "cfr skipped" in r.stdout
+    assert "Traceback" not in r.stderr
+
+
+def test_non_utf8_journal_does_not_crash_cockpit(render, tmp_path):
+    out = _render(render, tmp_path)
+    d = out / JOURNAL
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "2026-07-02.md").write_bytes(b"\xff\xfe garbage")
+    r = _kpis(out, "effectiveness")
+    assert r.returncode == 0, r.stderr
+    assert "Traceback" not in r.stderr
+
+
+def test_source_attribution_ignores_file_order(render, tmp_path):
+    # F7: the episode belongs to the highest round's source, not file order
+    out = _render(render, tmp_path)
+    _journal(out, (
+        "GRADE work=1 checkpoint=1 criterion=A round=2 verdict=satisfied action=fixed source=review\n"
+        "GRADE work=1 checkpoint=1 criterion=A round=1 verdict=partial action=fixed source=execute\n"
+    ))
+    r = _kpis(out, "effectiveness")
+    assert "source=review: catch=1" in r.stdout

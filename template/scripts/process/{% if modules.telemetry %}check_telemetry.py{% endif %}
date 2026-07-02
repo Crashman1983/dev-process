@@ -35,11 +35,24 @@ GRADE_RE = re.compile(
 FIELDS = ("work", "checkpoint", "criterion", "round", "verdict", "action", "source")
 
 
+def unfenced_lines(text: str):
+    """Lines outside ``` fences. Fenced regions may quote literal GRADE
+    examples (docs, journals) — those are quotations, not telemetry, and
+    must be invisible to both the gate and the cockpit."""
+    fenced = False
+    for line in text.splitlines():
+        if line.lstrip().startswith("```"):
+            fenced = not fenced
+            continue
+        if not fenced:
+            yield line
+
+
 def parse_grade_lines(text: str) -> list[dict]:
     """All well-formed GRADE lines in `text` as field dicts (invalid enum
     values included — callers that need validity use the gate)."""
     rows = []
-    for line in text.splitlines():
+    for line in unfenced_lines(text):
         m = GRADE_RE.match(line.strip())
         if m:
             rows.append(dict(zip(FIELDS, m.groups())))
@@ -47,10 +60,14 @@ def parse_grade_lines(text: str) -> list[dict]:
 
 
 def _intended_grade(line: str) -> bool:
-    """A line meant as telemetry: first token is GRADE and it carries at least
-    one key=value token. Prose that merely mentions GRADE is not linted."""
+    """A line meant as telemetry: starts like a GRADE line and carries at
+    least one key=value token. Prose that merely mentions GRADE is not
+    linted. The predicate is derived from the grammar's own prefix
+    (`GRADE` + any whitespace) so filter and grammar can never disagree —
+    a `GRADE\\t…` line must reach the grammar check, not slip past it."""
     stripped = line.strip()
-    return stripped.startswith("GRADE ") and re.search(r"\S+=", stripped) is not None
+    return (re.match(r"GRADE\s", stripped) is not None
+            and re.search(r"\S+=", stripped) is not None)
 
 
 def _check_line(line: str) -> str | None:
@@ -58,7 +75,9 @@ def _check_line(line: str) -> str | None:
     if not m:
         return "does not match the GRADE grammar (7 fields, fixed order)"
     row = dict(zip(FIELDS, m.groups()))
-    if not row["round"].isdigit():
+    # isascii guards unicode digits ("²"): isdigit-True but int() raises,
+    # which would pass the gate and crash every cockpit reader.
+    if not (row["round"].isascii() and row["round"].isdigit()):
         return f"round={row['round']} is not a number"
     if row["verdict"] not in VERDICTS:
         return f"verdict={row['verdict']} not in {sorted(VERDICTS)}"
@@ -73,13 +92,22 @@ def check_journals(root: Path) -> tuple[list[str], list[str], int]:
     hard: list[str] = []
     total = 0
     for f in sorted((root / JOURNAL_DIR).glob("**/*.md")):
+        if not f.is_file():
+            continue
         try:
-            lines = f.read_text(encoding="utf-8").splitlines()
+            text = f.read_text(encoding="utf-8")
         except UnicodeDecodeError:
             hard.append(f"{f.relative_to(root)}: not valid UTF-8")
             continue
-        for i, line in enumerate(lines, 1):
-            if not _intended_grade(line):
+        except OSError as exc:
+            hard.append(f"{f.relative_to(root)}: unreadable: {exc}")
+            continue
+        fenced = False
+        for i, line in enumerate(text.splitlines(), 1):
+            if line.lstrip().startswith("```"):
+                fenced = not fenced
+                continue
+            if fenced or not _intended_grade(line):
                 continue
             err = _check_line(line)
             if err:
@@ -109,6 +137,8 @@ def check_cases(root: Path) -> tuple[list[str], list[str]]:
         return hard, ["no calibration cases yet — grow the suite as work merges"]
     for f in cases:
         rel = f.relative_to(root)
+        if not f.is_file():
+            continue
         try:
             data = json.loads(f.read_text(encoding="utf-8"))
         except UnicodeDecodeError:
@@ -116,6 +146,9 @@ def check_cases(root: Path) -> tuple[list[str], list[str]]:
             continue
         except json.JSONDecodeError as exc:
             hard.append(f"{rel}: invalid JSON: {exc}")
+            continue
+        except OSError as exc:
+            hard.append(f"{rel}: unreadable: {exc}")
             continue
         if not isinstance(data, dict):
             hard.append(f"{rel}: not a JSON object")
@@ -136,11 +169,31 @@ def check_cases(root: Path) -> tuple[list[str], list[str]]:
             err = _check_verdict_map(verdict, "grader_verdict")
             if err:
                 hard.append(f"{rel}: {err}")
+            else:
+                # Shape alignment is load-bearing: a grader_verdict whose kind
+                # or key set differs from ground_truth yields ZERO comparisons
+                # in the suite — a false-pass in the danger direction would
+                # silently read as evaluated. Both single, or both dicts over
+                # the same criteria. (Only checked once ground_truth itself is
+                # present and valid — its own errors are already reported.)
+                gt = data.get("ground_truth")
+                if gt is None or _check_verdict_map(gt, "ground_truth"):
+                    pass
+                elif isinstance(gt, dict) != isinstance(verdict, dict):
+                    hard.append(f"{rel}: grader_verdict shape does not match "
+                                "ground_truth (one is a map, the other a single verdict)")
+                elif isinstance(gt, dict) and set(gt) != set(verdict):
+                    hard.append(f"{rel}: grader_verdict criteria {sorted(verdict)} "
+                                f"do not match ground_truth criteria {sorted(gt)}")
     return hard, []
 
 
 def main() -> int:
     root = Path(sys.argv[1] if len(sys.argv) > 1 else ".").resolve()
+    if not root.is_dir():
+        # a typo'd path must not report green forever
+        print(f"telemetry: FAILED:\n  - root {root} is not a directory")
+        return 1
     j_hard, j_soft, total = check_journals(root)
     c_hard, c_soft = check_cases(root)
     hard = j_hard + c_hard
