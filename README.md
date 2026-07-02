@@ -11,7 +11,8 @@ Ausgeliefert als [copier](https://copier.readthedocs.io)-Template. Adapter für
 > (feature-registry, github-issues, contracts-drift) + SP4 (git-hooks,
 > contract-first, parity, security-floor) + Capstone (command-adapters,
 > `v1.0.0` — das volle Kenni-Command-Set, harness-nativ) + SP7 (ci-adapters:
-> GitLab CI + Install-Fallbacks) ausgeliefert, `v1.1.0`.
+> GitLab CI + Install-Fallbacks) + SP8 (english-canon + ehrliche Ökonomie)
+> ausgeliefert, `v1.2.0`.
 > Setup: [`BOOTSTRAP.md`](BOOTSTRAP.md) · Systemumgebung:
 > [`docs/SYSTEM-REQUIREMENTS.md`](docs/SYSTEM-REQUIREMENTS.md) · SBOM:
 > [`docs/SBOM.md`](docs/SBOM.md) · Design: [`docs/design/`](docs/design/).
@@ -105,6 +106,19 @@ ein einmaliger Abwurf ohne Update-Pfad; CI-Linting sichert Stil, nicht Prozess,
 Architektur oder Entscheidungen. `dev-process` liefert die Methodik **mit** ihrer
 Durchsetzung, harness-übergreifend und über `copier update` versionierbar.
 
+## Sprachen & Ökonomie
+
+**Artefakte englisch, Dialog in Nutzersprache.** Alle gerenderten Artefakte
+(Prozessdoku, Adapter, Commands, ADRs, Journal, Commits) sind englisch — eine
+Sprache zu pflegen, und die, auf die LLMs am zuverlässigsten reagieren. Eine
+Kernel-Regel weist jeden Harness an, mit dem Nutzer in *dessen* Sprache zu
+sprechen; die Artefaktsprache bleibt davon unberührt.
+
+**Wann dieser Prozess nicht lohnt:** Für Wegwerf-Prototypen, Einmal-Skripte
+und Single-Session-Arbeit ist der Overhead netto negativ — dort nichts (oder
+nur das Minimalprofil) installieren. Der Prozess rechnet sich für alles
+Mehrsession-, Multi-Agent- oder Contract/Persistenz/Auth-behaftete.
+
 ## Nutzung
 
 **Greenfield oder Brownfield — derselbe Befehl:**
@@ -138,3 +152,4 @@ Pflicht-Verifikation über den `gate_runner`.
 | **SP4** Prozess-Vervollständigung II | git-hooks (lokale Enforcement-Säule) · contract-first (Interface-declared-first-Gate) · parity (Capability×Surface-Matrix, Gap→Issue) · security-floor (Pattern-Floor über git-getrackte Dateien) | ✅ ausgeliefert |
 | **Capstone** command-adapters | Harness-native Slash-Commands (Claude / Copilot / AGENTS.md), dünn auf `docs/process/` zeigend, vom doc-drift-gate mitgeprüft — schließt das „vollständig wie Kenni"-Programm bei `v1.0.0` | ✅ ausgeliefert |
 | **SP7** ci-adapters | GitLab CI als zweiter Enforcement-Transport (`ci`-Namespace, includable Job + Root-Shim) · dokumentierte No-CI-Degradation · Install-Fallbacks ohne `uv` (pipx / venv+pip / lokaler Clone) | ✅ ausgeliefert |
+| **SP8** english-canon | Alle Artefakte englisch (halbiert die Doku-Token je Session) · Kernel-Regel „Dialog in Nutzersprache" · „Wann lohnt es nicht"-Ehrlichkeit · Journal-Pflicht erst ab Tier 2 | ✅ ausgeliefert |

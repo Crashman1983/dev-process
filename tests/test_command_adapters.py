@@ -88,7 +88,6 @@ def test_agents_md_lists_commands(render, tmp_path):
     assert not (off / "AGENTS.md").exists()
     on = render(tmp_path / "on", {"project_name": "d", "harnesses": {"agents_md": True}})
     text = (on / "AGENTS.md").read_text()
-    assert "Prozesskommandos" in text
     assert "Process commands" in text
     for name in COMMANDS:
         assert name in text, name
