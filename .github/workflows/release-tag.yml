@@ -1,0 +1,33 @@
+# Creates a release tag via workflow_dispatch. Exists because contributors
+# (including agents) may have branch-scoped push rights that cannot push
+# refs/tags — the Actions token can. Trigger with the tag name and optionally
+# the commit SHA to tag (defaults to the HEAD of the ref the run starts from).
+name: release-tag
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to create (e.g. v1.3.0)"
+        required: true
+        type: string
+      sha:
+        description: "Commit SHA to tag (empty = HEAD of the run's ref)"
+        required: false
+        default: ""
+        type: string
+permissions:
+  contents: write
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - env:
+          TAG: ${{ inputs.tag }}
+          SHA: ${{ inputs.sha }}
+        run: |
+          target="${SHA:-$(git rev-parse HEAD)}"
+          git tag "$TAG" "$target"
+          git push origin "refs/tags/$TAG"
