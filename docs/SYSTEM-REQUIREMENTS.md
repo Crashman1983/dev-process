@@ -54,7 +54,7 @@ nach aktivierten Modulen werden folgende Laufzeitwerkzeuge benoetigt.
 | `PyYAML` | `>=6` | `gate_runner.py`, `arch-onboarding`, `parity` und alle Gates, die `.copier-answers.yml` lesen |
 | `git` | aktuelle stabile Version | lokale Hooks, Security-Floor-Dateiliste, normale Projektarbeit |
 | `bash` | POSIX-kompatible Shell plus Bash | `scripts/process/install-hooks.sh` und `scripts/process/new_issue.sh` |
-| `gh` | aktuelle stabile Version | optional fuer best-effort GitHub-Issue-Existenzpruefung |
+| `gh` | aktuelle stabile Version | optional fuer best-effort GitHub-Issue-Existenzpruefung und die Tempo-Familie des KPI-Cockpits (`telemetry`) |
 | Architekturlinter | projektabhaengig | optional fuer `arch-onboarding` best-effort Layering-Pruefungen |
 
 Die von `dev-process` gerenderte GitHub-Actions-Workflow-Datei installiert
@@ -87,6 +87,7 @@ bricht der gate_runner mit einem einzeiligen Installationshinweis ab.
 | `contract-first` | Python-Stdlib reicht |
 | `parity` | `PyYAML` |
 | `security-floor` | `git` und Python-Stdlib |
+| `telemetry` | Python-Stdlib fuer Gate und Cockpit-Kern; optional `gh` (Tempo-Familie) und `git` (CFR-Familie) |
 
 ## CI
 
