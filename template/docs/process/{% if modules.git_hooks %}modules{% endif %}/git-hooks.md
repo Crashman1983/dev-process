@@ -14,7 +14,16 @@ modules):
     bash scripts/process/install-hooks.sh
 
 It is brownfield-safe: a pre-existing hook that dev-process did not write is
-left untouched (you merge it yourself). Re-running is idempotent.
+left untouched (you merge it yourself). Re-running is idempotent. If
+`core.hooksPath` is configured (hook managers like husky, or a global
+`~/.githooks`), the installer refuses — integrate the hook contents into your
+manager manually instead.
+
+**Runtime requirement:** the pre-push and post-commit hooks run
+`python3 scripts/process/gate_runner.py`, which needs `PyYAML>=6` importable
+by that `python3` **at commit/push time** (a venv only on PATH during
+installation does not help). Without it, the runner exits with a one-line
+install hint.
 
 ## The three hooks
 
@@ -24,8 +33,10 @@ left untouched (you merge it yourself). Re-running is idempotent.
 | pre-push | each push | runs the gate runner over all active modules; a failing gate blocks the push | `git push --no-verify` or `SKIP_PUSH_GATE=1` |
 | post-commit | after each commit | runs the gate runner in `--warn` mode (reports drift, never blocks) | — |
 
-The commit hook is fast (a branch check only); enforcement of the module gates
-happens at push time, mirroring CI. The post-commit warning is advisory.
+The commit hook is fast (a branch check only); the push-time gate is
+best-effort local feedback: it checks the **working tree**, not the commits
+being pushed, so uncommitted changes can mask or cause failures. CI on the
+pushed commits is the authority. The post-commit warning is advisory.
 
 ## Why delegate
 

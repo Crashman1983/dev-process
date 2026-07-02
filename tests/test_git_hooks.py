@@ -101,6 +101,35 @@ def test_main_guard_blocks_and_escapes(render, tmp_path):
     assert ok.returncode == 0, ok.stderr
 
 
+def test_main_guard_blocks_first_commit_on_unborn_main(render, tmp_path):
+    # audit: on an unborn branch, `rev-parse --abbrev-ref HEAD` printed "HEAD",
+    # so the very first commit on main slipped past the guard.
+    out = _render(render, tmp_path)
+    _git(out, "init", "-q", "-b", "main", check=True)
+    _git(out, "config", "user.email", "t@example.com", check=True)
+    _git(out, "config", "user.name", "Test", check=True)
+    r = subprocess.run(["bash", "scripts/process/install-hooks.sh"],
+                       cwd=out, capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    blocked = _git(out, "commit", "--allow-empty", "-m", "first", env=_hook_env())
+    assert blocked.returncode != 0
+    assert "blocked" in blocked.stderr
+
+
+def test_installer_refuses_custom_hooks_path(render, tmp_path):
+    # audit: with core.hooksPath set (possibly globally), the installer wrote
+    # the hooks there — silently machine-wide for global configs.
+    out = _render(render, tmp_path)
+    _init_repo(out, install=False)
+    elsewhere = tmp_path / "elsewhere-hooks"
+    _git(out, "config", "core.hooksPath", str(elsewhere), check=True)
+    r = subprocess.run(["bash", "scripts/process/install-hooks.sh"],
+                       cwd=out, capture_output=True, text=True)
+    assert r.returncode != 0
+    assert "hooksPath" in r.stderr
+    assert not elsewhere.exists()
+
+
 def test_feature_branch_commit_allowed(render, tmp_path):
     out = _render(render, tmp_path)
     _init_repo(out)
