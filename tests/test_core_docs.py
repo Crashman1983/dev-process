@@ -94,6 +94,21 @@ def test_start_here_stack_compass_covers_layers_and_proposal_mode(render, tmp_pa
         assert required in text, required
 
 
+def test_commits_doc_names_isolation_invariant_and_both_merge_routes(render, tmp_path):
+    # branches are the default and hosted PR/MR merging is a first-class route;
+    # a worktree is one isolation option, not a mandate — otherwise the doc is
+    # unfollowable in environments with protected branches or fresh clones.
+    out = render(tmp_path, {"project_name": "demo"})
+    text = " ".join((out / "docs/process/commits.md").read_text().split())
+    assert "feature branch" in text.lower()
+    assert "worktree" in text.lower()             # still named as an option...
+    assert "one isolation technique" in text      # ...but explicitly not a mandate
+    assert "--ff-only" in text                    # local route
+    assert "pull/merge request" in text           # hosted route
+    assert "process-gates" in text                # CI job is part of the hosted gate
+    assert "one logical change per PR" in text    # squash-merge adaptation
+
+
 def test_adr_template_has_intent_axis(render, tmp_path):
     out = render(tmp_path, {"project_name": "demo"})
     text = (out / "docs/process/adr/template.md").read_text()

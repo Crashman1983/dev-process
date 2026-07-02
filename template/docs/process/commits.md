@@ -15,8 +15,23 @@ behaviors is not. A skipped gate or deliberately dropped scope is named in the b
 
 ## Branching
 
-No direct commits to the main branch. Light work goes on a feature branch; heavy or
-parallel work goes in an isolated worktree. Merge fast-forward-only after the tier's
-review gate has passed: fetch → rebase → gate → `merge --ff-only` → push. When
-the optional `git-hooks` module is installed, a `pre-commit` hook enforces this
-locally (bypassable for automation via `ALLOW_MAIN_COMMIT=1`).
+No direct commits to the main branch. The invariant is *isolation*: one feature
+branch per effort, no cross-contamination between parallel efforts. A feature branch
+is the default. Git worktrees are one isolation technique for when several agents or
+tasks share a single machine and clone — separate clones, sessions, or sandboxes
+satisfy the invariant just as well; the mechanism is the environment's choice.
+
+## Merging
+
+Merge only after the tier's review gate has passed (mandatory rule 7). Two
+equivalent routes:
+
+- **Local:** fetch → rebase → gate → `merge --ff-only` → push.
+- **Hosted (PR/MR):** open a pull/merge request; the review gate runs as the PR
+  review plus the `process-gates` CI job, and a linear-history merge ("rebase and
+  merge" or a fast-forward-only setting) is the `--ff-only` equivalent. Where the
+  platform enforces squash merges, atomicity shifts up one level: one logical
+  change per PR.
+
+When the optional `git-hooks` module is installed, a `pre-commit` hook enforces the
+no-direct-main rule locally (bypassable for automation via `ALLOW_MAIN_COMMIT=1`).
