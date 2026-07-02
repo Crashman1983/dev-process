@@ -9,6 +9,17 @@ REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {
   exit 1
 }
 cd "$REPO_ROOT"  # --git-path returns a CWD-relative path; anchor it at the root
+
+# A configured core.hooksPath (often global: husky, ~/.githooks) redirects
+# every hook lookup. Writing there would install dev-process hooks machine-wide
+# and the foreign-hook detection below would check the wrong directory.
+HOOKS_PATH_CFG="$(git config --get core.hooksPath || true)"
+if [ -n "$HOOKS_PATH_CFG" ]; then
+  echo "x core.hooksPath is configured ('$HOOKS_PATH_CFG') — refusing to install." >&2
+  echo "  dev-process hooks target .git/hooks; integrate them into your hook manager" >&2
+  echo "  manually (this script is the source of truth for their contents)." >&2
+  exit 1
+fi
 HOOK_DIR="$(git rev-parse --git-path hooks)"
 mkdir -p "$HOOK_DIR"
 
@@ -29,7 +40,9 @@ cat > "$HOOK_DIR/pre-commit" << 'EOF'
 # dev-process-managed-hook
 # Blocks direct commits to main/master. Feature branch + ff-only merge to main.
 # Automation escape: ALLOW_MAIN_COMMIT=1.
-branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null)"
+# symbolic-ref (not rev-parse --abbrev-ref): works on an unborn branch too,
+# so the very first commit on main is also blocked.
+branch="$(git symbolic-ref --short HEAD 2>/dev/null)"
 if { [ "$branch" = "main" ] || [ "$branch" = "master" ]; } && [ "${ALLOW_MAIN_COMMIT:-0}" != "1" ]; then
   echo "✗ Direct commit to '$branch' blocked. Use a feature branch; ff-only merge to main." >&2
   echo "  Automation: ALLOW_MAIN_COMMIT=1 git commit ..." >&2
@@ -45,8 +58,11 @@ if can_write pre-push; then
 cat > "$HOOK_DIR/pre-push" << 'EOF'
 #!/usr/bin/env bash
 # dev-process-managed-hook
-# Local mirror of the CI merge gates: runs the manifest-aware gate runner over
-# all active modules. Bypass: git push --no-verify, or SKIP_PUSH_GATE=1.
+# Best-effort local feedback before pushing: runs the manifest-aware gate
+# runner over all active modules — against the WORKING TREE, not the commits
+# being pushed (uncommitted state can mask or cause failures). CI on the
+# pushed commits is the authority. Bypass: git push --no-verify, or
+# SKIP_PUSH_GATE=1.
 [ "${SKIP_PUSH_GATE:-0}" = "1" ] && { echo "⚠ pre-push gate skipped (SKIP_PUSH_GATE=1)." >&2; exit 0; }
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
 cd "$REPO_ROOT" || exit 0
