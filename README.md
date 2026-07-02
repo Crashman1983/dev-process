@@ -20,8 +20,9 @@ Ausgeliefert als [copier](https://copier.readthedocs.io)-Template. Adapter für
 > `v1.0.0` — das volle Kenni-Command-Set, harness-nativ) + SP7 (ci-adapters:
 > GitLab CI + Install-Fallbacks) + SP8 (english-canon + ehrliche Ökonomie) +
 > SP9 (audit-fixes: False-Greens geschlossen, Failure-Modes sprechen) +
-> SP10 (telemetry: GRADE-Trace + KPI-Cockpit, Effizienz messbar)
-> ausgeliefert, `v1.4.0`.
+> SP10 (telemetry: GRADE-Trace + KPI-Cockpit, Effizienz messbar) +
+> SP11 (Re-Audit + Public-Readiness)
+> ausgeliefert, `v1.4.1`.
 > Setup: [`BOOTSTRAP.md`](BOOTSTRAP.md) · Systemumgebung:
 > [`docs/SYSTEM-REQUIREMENTS.md`](docs/SYSTEM-REQUIREMENTS.md) · SBOM:
 > [`docs/SBOM.md`](docs/SBOM.md) · Design: [`docs/design/`](docs/design/).
@@ -172,3 +173,4 @@ Pflicht-Verifikation über den `gate_runner`.
 | **SP8** english-canon | Alle Artefakte englisch (halbiert die Doku-Token je Session) · Kernel-Regel „Dialog in Nutzersprache" · „Wann lohnt es nicht"-Ehrlichkeit · Journal-Pflicht erst ab Tier 2 | ✅ ausgeliefert |
 | **SP9** audit-fixes | Drei-Achsen-Audit: alle bestätigten False-Greens geschlossen (Manifest load-bearing, arch-Fence, unborn-main-Hook, hooksPath-Guard) · Failure-Modes mit Diagnose statt Traceback · doc-drift versteht dokument-relative Links · Doku-Drift bereinigt | ✅ ausgeliefert |
 | **SP10** telemetry | Effizienz messbar (Audit-Finding, aus Kenni generalisiert): `GRADE`-Trace-Konvention im Journal · Gate lintet das Trace-Format (kein stiller Telemetrie-Verlust) · read-only KPI-Cockpit (`process_kpis.py`: effectiveness/convergence/suite/tempo/cost/cfr) · Grader-Kalibrier-Suite mit den drei Vertrauens-Schwellen (≥20/≥5 · 0 False-PASS · ≥90 % ≤2 Runden) | ✅ ausgeliefert |
+| **SP11** reaudit + public | Adversariales Re-Audit der Telemetry-Slice: False-Greens geschlossen (Suite-Shape-Alignment in Gefahr-Richtung, Filter=Grammatik, Unicode-round, Typo-Root) · Failure-Modes sprechen statt Tracebacks · persönliche Daten aus dem Tree, englischer README-Einstieg, `uv.lock` committed, CI least-privilege | ✅ ausgeliefert |
