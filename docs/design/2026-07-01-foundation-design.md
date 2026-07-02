@@ -1,6 +1,6 @@
 # SP1 Foundation — Design
 
-**Status:** Entwurf zur Freigabe · **Datum:** 2026-07-01 · **Autor:** Seb + Claude
+**Status:** Entwurf zur Freigabe · **Datum:** 2026-07-01 · **Autor:** Maintainer + Claude
 **Sub-Projekt:** SP1 (Foundation) von 3 — siehe [Dekomposition](#dekomposition)
 
 ---

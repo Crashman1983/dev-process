@@ -14,7 +14,7 @@ scenario is sharpened at onboarding, the concrete requirements — including cro
 coupling — land here (a coupling becomes a story with acceptance „consumes billing-api
 via OpenAPI, drift-checked"). It is what mandatory-rule *„tests prove acceptance"*
 checks against, and the substrate the later slices build on (GitHub-Issues links,
-contracts-drift). It mirrors Kenni's `docs/feature-registry/` deliberately — Seb keeps
+contracts-drift). It mirrors Kenni's `docs/feature-registry/` deliberately — the maintainer keeps
 working the way he does today.
 
 ## 2. Scope

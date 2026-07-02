@@ -1,7 +1,7 @@
 # Design: english-canon (SP8) + honest-economics
 
 **Date:** 2026-07-02
-**Status:** approved (scope agreed with Seb: efficiency review items 1 + 3;
+**Status:** approved (scope agreed with the maintainer: efficiency review items 1 + 3;
 item 2 — graders/telemetry — waits on access to the Kenni grader spec)
 **Slice:** all rendered artifacts become English-only; the user-facing dialogue
 language becomes an explicit kernel rule; the process states when it is *not*

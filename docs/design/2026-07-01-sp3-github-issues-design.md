@@ -232,8 +232,8 @@ dogfooding for an opt-in module the host repo does not adopt.
 
 ## 11. Open decisions (resolved)
 
-- **Existence check present?** Yes, best-effort `gh` — Seb.
-- **Template format?** Markdown `.md` with YAML frontmatter — Seb.
-- **GitHub config asked when?** At Ersteinrichtung via copier, optional — Seb.
+- **Existence check present?** Yes, best-effort `gh` — maintainer.
+- **Template format?** Markdown `.md` with YAML frontmatter — maintainer.
+- **GitHub config asked when?** At Ersteinrichtung via copier, optional — maintainer.
 - **Issue-format owner?** `check_issues.py`, feature-registry gate frozen —
   advisor-confirmed, adopted.

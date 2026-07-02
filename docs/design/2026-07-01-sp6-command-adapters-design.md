@@ -1,7 +1,7 @@
 # Design: command-adapters (SP6, capstone → v1.0.0)
 
 **Date:** 2026-07-01
-**Status:** approved (scope + cadence pre-agreed with Seb)
+**Status:** approved (scope + cadence pre-agreed with the maintainer)
 **Slice:** the final one. Ships the neutral process as harness-native slash
 commands, closing the "complete like Kenni" program at v1.0.0.
 
@@ -26,11 +26,11 @@ They therefore gate on `harnesses.*`, never on `modules.*`:
 
 This is also more consistent than a module: every module defaults `false`, but
 a command set should ship whenever its harness is active — which is exactly
-what `harnesses.*` gating gives. Matches Seb's "Alle aktivierten Harnesses."
+what `harnesses.*` gating gives. Matches the maintainer's "Alle aktivierten Harnesses."
 
 ## Decision 2 — full thin set, only if thin actually works
 
-Seb: *"Wenn dünn funktioniert nehme ich das. Aber nur dann."* Thin works here
+Maintainer: *"Wenn dünn funktioniert nehme ich das. Aber nur dann."* Thin works here
 because `workflow.md` already names, per phase, what enters / what it produces /
 when to use it. A command file is a ~6-line pointer into the right phase plus
 the one contract line the harness needs at the trigger point. It does **not**

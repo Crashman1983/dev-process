@@ -1,6 +1,6 @@
 # SP4 Slice 1 — `git_hooks` module design
 
-**Status:** approved (Seb, 2026-07-01), ready for `writing-plans`.
+**Status:** approved (maintainer, 2026-07-01), ready for `writing-plans`.
 
 ## 1. Context & goal
 
@@ -183,8 +183,8 @@ the conftest defaults dict. No new copier question — the hooks need no project
 
 - **Install mechanism:** rendered `install-hooks.sh` + documented one-time run (not
   `core.hooksPath`, not copier `_tasks`) — brownfield-safe, no task-trust, mirrors
-  Kenni's proven model. (Seb, 2026-07-01)
-- **post-commit:** included in v1 as warn-only (like Kenni), not deferred. (Seb)
+  Kenni's proven model. (maintainer, 2026-07-01)
+- **post-commit:** included in v1 as warn-only (like Kenni), not deferred. (maintainer)
 - **git_hooks is opt-in**, not core-always — respects brownfield adopters who use a
   hook manager; `commits.md` is reconciled so the core methodology makes no
   unconditional hook promise.
