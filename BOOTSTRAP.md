@@ -58,10 +58,29 @@ assumptions, and only then write real project artifacts.
 
 ## Spaeter / Later
 
-Add a module or pull an updated process version: re-answer (or edit
-`.copier-answers.yml`) and run `uvx copier update`. `update` checks out the
-latest **tagged** template release by default and preserves your local edits,
-flagging conflicts inline.
+**Deutsch:** Modul nachruesten oder eine neuere Prozess-Version ziehen — mit
+sauberem Arbeitsbaum (`git status --porcelain` leer), dann:
+
+    uvx copier update --defaults \
+      --data 'modules={"doc_drift_gate": true, "arch_onboarding": false, "feature_registry": false, "github_issues": false, "contracts_drift": false, "git_hooks": false, "contract_first": false, "parity": false, "security_floor": false}' \
+      --skip 'CLAUDE.md' --skip 'AGENTS.md'
+
+`--data` erwartet das **vollstaendige** `modules`-Dictionary mit den neuen
+Werten, nicht nur die geaenderten Schluessel. `update` checkt standardmaessig
+das neueste **getaggte** Template-Release aus, bewahrt lokale Aenderungen und
+markiert Konflikte inline.
+
+**English:** Add a module or pull an updated process version — with a clean
+working tree (`git status --porcelain` empty), then run the command above.
+`--data` expects the **complete** `modules` dictionary with the new values, not
+just the changed keys. `update` checks out the latest **tagged** template
+release by default, preserves your local edits, and flags conflicts inline.
+
+**Wichtig / Important:** Do not hand-edit `.copier-answers.yml` to enable a
+module. `copier update` reads that file as the *old* state: after a hand edit,
+the old and new renders are identical, the missing module files count as
+intentional local deletions, and the module is never rendered. Always pass new
+answers via `--data`; copier rewrites the answers file itself afterwards.
 
 If you enabled the `git-hooks` module, install the hooks once per clone (they
 live in host-local `.git/hooks`, not version control):

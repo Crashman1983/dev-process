@@ -110,8 +110,11 @@ uvx copier copy gh:Crashman1983/dev-process .
 
 copier fragt **Module** und **Harnesses** ab und rendert nur diese. Bestehende
 Dateien werden **nicht** überschrieben (additiver Drop-in). Ein Modul später
-nachrüsten oder eine neuere Prozess-Version ziehen: Antwort in
-`.copier-answers.yml` ändern → `uvx copier update`.
+nachrüsten oder eine neuere Prozess-Version ziehen:
+`uvx copier update --defaults --data 'modules={…}'` mit dem vollständigen
+Modul-Dictionary (Rezept: [`BOOTSTRAP.md`](BOOTSTRAP.md) — die Antwortdatei
+`.copier-answers.yml` nicht von Hand editieren, sonst rendert `update` die
+neuen Moduldateien nicht).
 
 **Pull-Mode** (ein KI-Agent richtet es ein): dem Agenten im Zielrepo sagen
 *„richte den Entwicklungsprozess aus diesem Repo ein, folge dessen `BOOTSTRAP.md`"* —
