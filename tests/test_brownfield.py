@@ -25,6 +25,22 @@ def test_conflict_refuses_silent_clobber(render_into, tmp_path):
     assert "keep me" in (tmp_path / "AGENTS.md").read_text()
 
 
+def test_skip_recipe_completes_headless(render_into, tmp_path):
+    # the documented headless brownfield recipe (BOOTSTRAP.md): --skip on the
+    # adapter files lets a non-interactive run complete instead of aborting
+    # mid-render, and leaves the user's file untouched.
+    out = render_into(
+        tmp_path, FIX,
+        {"project_name": "d", "harnesses": {"copilot": False, "agents_md": True}},
+        skip_if_exists=["AGENTS.md"],
+    )
+    assert "keep me" in (out / "AGENTS.md").read_text()  # user's file survived
+    # the run completed: process spine and gates landed
+    assert (out / "docs/process/start-here.md").exists()
+    assert (out / "scripts/process/gate_runner.py").exists()
+    assert (out / "CLAUDE.md").exists()
+
+
 def test_idempotent_second_copy(render_into, tmp_path):
     # identical content on re-run is not a conflict -> no changes, no error
     out = render_into(tmp_path, FIX, {"project_name": "d"})

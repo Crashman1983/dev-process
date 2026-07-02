@@ -49,12 +49,93 @@ onboarded as a product project. The LLM should use `docs/process/start-here.md`
 to clarify Greenfield or Brownfield in a brainstorming-style dialogue, confirm
 assumptions, and only then write real project artifacts.
 
+## Agent-Setup ohne Terminal / Headless agent setup
+
+**Deutsch:** copier stellt seine Fragen interaktiv; in Agent-Harnesses (Claude
+Code, Codex, Copilot & Co.) gibt es dafuer kein TTY. Uebergib die Antworten
+stattdessen vollstaendig auf der Kommandozeile:
+
+    uvx copier copy --defaults \
+      --data project_name="<Projektname / project name>" \
+      --data 'harnesses={"copilot": false, "agents_md": true}' \
+      --data 'modules={"doc_drift_gate": false, "arch_onboarding": false, "feature_registry": false, "github_issues": false, "contracts_drift": false, "git_hooks": false, "contract_first": false, "parity": false, "security_floor": false}' \
+      --skip 'CLAUDE.md' --skip 'AGENTS.md' \
+      gh:Crashman1983/dev-process .
+
+- `--defaults` beantwortet alles nicht Uebergebene mit dem Default; es darf
+  kein interaktiver Prompt uebrig bleiben.
+- `--data` erwartet fuer `harnesses` und `modules` das **vollstaendige**
+  Dictionary, nicht nur die geaenderten Schluessel.
+- `--skip 'CLAUDE.md' --skip 'AGENTS.md'` schuetzt Brownfield-Repos: Ohne TTY
+  bricht copier bei einem Inhaltskonflikt sonst mitten im Rendern ab und
+  hinterlaesst einen halb installierten Zustand. Mit `--skip` bleibt die
+  vorhandene Datei unangetastet und der Lauf schliesst ab. **Niemals**
+  `--overwrite` in einem fremden Repo verwenden.
+
+**English:** copier asks its questions interactively; agent harnesses (Claude
+Code, Codex, Copilot, and friends) have no TTY for that. Pass all answers on
+the command line instead (see above): `--defaults` answers everything not
+passed explicitly, `--data` expects the **complete** `harnesses` and `modules`
+dictionaries, and `--skip 'CLAUDE.md' --skip 'AGENTS.md'` protects brownfield
+repos — without a TTY, a content conflict otherwise aborts mid-render and
+leaves a half-installed state, while `--skip` keeps the existing file untouched
+and lets the run complete. **Never** use `--overwrite` in a repo you do not own.
+
+**Uebersprungene Adapter mergen / Merge skipped adapters:** Wurde eine
+vorhandene `CLAUDE.md`/`AGENTS.md` uebersprungen, kopiere den Block zwischen
+`<!-- KERNEL:START -->` und `<!-- KERNEL:END -->` aus einem gerenderten Adapter
+in die bestehende Datei und ergaenze einen Verweis auf
+`docs/process/start-here.md`. / If an existing `CLAUDE.md`/`AGENTS.md` was
+skipped, copy the block between `<!-- KERNEL:START -->` and `<!-- KERNEL:END -->`
+from a rendered adapter into your existing file and add a pointer to
+`docs/process/start-here.md`.
+
+**Verifikation (Pflicht) / Verification (mandatory):** Behaupte "installiert"
+erst nach diesen Checks / claim "installed" only after these checks:
+
+    python scripts/process/gate_runner.py   # Exit-Code 0 / must exit 0
+    git status --porcelain                  # Brownfield: nur neue Dateien / added files only
+
+## Empfohlene Reihenfolge / Recommended order
+
+**Deutsch:** Die Modulwahl faellt bei der Installation an; die klaerenden
+Fragen stellt aber erst `docs/process/start-here.md` — nach der Installation.
+Wenn die Modulwahl noch nicht feststeht, deshalb:
+
+1. Minimal installieren (alle Module `false`, wie oben).
+2. Den start-here-Dialog fuehren (Greenfield/Brownfield, Ziel, Stack, Risiken).
+3. Die Modulwahl aus den Antworten ableiten — Heuristik: Auth, Persistenz oder
+   Security-Invarianten → `security_floor`; mehrere Oberflaechen → `parity`;
+   geteilte Schnittstellen oder mehrere Repos → `contract_first`,
+   `contracts_drift`; User-Story-Traceability → `feature_registry`;
+   Issue-Pflicht → `github_issues`; lokale Durchsetzung → `git_hooks`;
+   Architektur als geprueftes Artefakt → `arch_onboarding`; Doc-Hygiene →
+   `doc_drift_gate`.
+4. Module nachruesten wie unter [Spaeter / Later](#spaeter--later) beschrieben.
+
+Steht die Modulwahl schon fest, setze sie direkt bei der Installation.
+
+**English:** Module choice happens at install time, but the clarifying
+questions live in `docs/process/start-here.md` — after the install. If the
+module choice is not yet settled: install minimally (all modules `false`), run
+the start-here dialogue, derive the module choice from the answers (heuristic
+above: auth/persistence/security invariants → `security_floor`; multiple
+surfaces → `parity`; shared interfaces or multiple repos → `contract_first`,
+`contracts_drift`; story traceability → `feature_registry`; issue discipline →
+`github_issues`; local enforcement → `git_hooks`; architecture as a checked
+artifact → `arch_onboarding`; doc hygiene → `doc_drift_gate`), then retrofit as
+described under [Spaeter / Later](#spaeter--later). If the choice is already
+known, set it directly at install time.
+
 ## Brownfield-Hinweise / Brownfield notes
 
 - copier never silently overwrites an existing file. On a content conflict it
-  prompts you per file (interactive) or requires `--overwrite` (non-interactive/CI).
+  prompts you per file (interactive); non-interactive runs abort mid-render
+  unless the conflicting files are excluded via `--skip` (safe, see the
+  headless setup above) or forced with `--overwrite` (destructive — avoid).
 - If you already have a `CLAUDE.md` / `AGENTS.md`, copier will flag the conflict —
-  merge the process kernel into yours, or accept the template's version.
+  merge the process kernel (the `KERNEL:START`/`KERNEL:END` block) into yours,
+  or accept the template's version.
 
 ## Spaeter / Later
 

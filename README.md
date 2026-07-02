@@ -118,7 +118,9 @@ neuen Moduldateien nicht).
 
 **Pull-Mode** (ein KI-Agent richtet es ein): dem Agenten im Zielrepo sagen
 *„richte den Entwicklungsprozess aus diesem Repo ein, folge dessen `BOOTSTRAP.md`"* —
-der Rest ist self-contained beschrieben.
+der Rest ist self-contained beschrieben, inklusive Headless-Rezept
+(`--defaults --data … --skip …`) für Harnesses ohne Terminal-Prompts und
+Pflicht-Verifikation über den `gate_runner`.
 
 ## Roadmap
 

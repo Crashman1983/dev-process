@@ -20,28 +20,28 @@ def _template_src(tmp_path_factory):
     return snap
 
 
-def _copy(src: Path, dst: Path, data: dict) -> Path:
+def _copy(src: Path, dst: Path, data: dict, **kwargs) -> Path:
     full = {
         "harnesses": {"copilot": False, "agents_md": False},
         "modules": {"doc_drift_gate": False, "arch_onboarding": False, "feature_registry": False, "github_issues": False, "contracts_drift": False, "git_hooks": False, "contract_first": False, "parity": False, "security_floor": False},
     }
     full.update(data)
-    copier.run_copy(str(src), str(dst), data=full, defaults=True, unsafe=True, quiet=True)
+    copier.run_copy(str(src), str(dst), data=full, defaults=True, unsafe=True, quiet=True, **kwargs)
     return dst
 
 
 @pytest.fixture
 def render(_template_src):
-    def _f(dst: Path, data: dict) -> Path:
-        return _copy(_template_src, dst, data)
+    def _f(dst: Path, data: dict, **kwargs) -> Path:
+        return _copy(_template_src, dst, data, **kwargs)
 
     return _f
 
 
 @pytest.fixture
 def render_into(_template_src):
-    def _f(dst: Path, seed: Path, data: dict) -> Path:
+    def _f(dst: Path, seed: Path, data: dict, **kwargs) -> Path:
         shutil.copytree(seed, dst, dirs_exist_ok=True)
-        return _copy(_template_src, dst, data)
+        return _copy(_template_src, dst, data, **kwargs)
 
     return _f
