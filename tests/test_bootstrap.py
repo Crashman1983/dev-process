@@ -37,6 +37,28 @@ def test_bootstrap_requires_post_install_verification():
     assert "git status --porcelain" in text
 
 
+def test_bootstrap_documents_ci_answer_and_degradation():
+    # the ci namespace is part of the install dialogue, headless recipe
+    # included; the no-CI degradation must be stated, not implied away.
+    text = (ROOT / "BOOTSTRAP.md").read_text()
+    assert "--data 'ci={" in text
+    assert "`ci`" in text
+    assert ".gitlab/ci/process-gates.gitlab-ci.yml" in text  # brownfield merge target
+    assert "--skip '.gitlab-ci.yml'" in text
+    readme = (ROOT / "README.md").read_text()
+    assert "einzige Enforcement-Säule" in readme  # honest degradation
+
+
+def test_bootstrap_documents_install_fallback_ladder():
+    # environments without uv (or where gh: cannot resolve) need a verified
+    # path, not a hard requirement.
+    text = (ROOT / "BOOTSTRAP.md").read_text()
+    assert "pipx run copier copy gh:Crashman1983/dev-process ." in text
+    assert "pip install 'copier>=9.4'" in text
+    assert "git clone https://github.com/Crashman1983/dev-process" in text
+    assert "--vcs-ref=HEAD" in text
+
+
 def test_retrofit_recipe_uses_update_data_not_answers_file_edit():
     # copier update reads .copier-answers.yml as the OLD state: after a hand
     # edit, old and new render are identical and the module files count as

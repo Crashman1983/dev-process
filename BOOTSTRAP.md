@@ -31,11 +31,35 @@ additive; it will not overwrite your files without asking).
 
        uvx copier copy gh:Crashman1983/dev-process .
 
+   **Ohne `uv` / without `uv`** — same command tail, different runner
+   (Fallback-Leiter, jede Stufe getestet / fallback ladder, each rung tested):
+
+       # pipx (isolated, like uvx)
+       pipx run copier copy gh:Crashman1983/dev-process .
+
+       # bare python: one-off venv
+       python3 -m venv .copier-venv
+       .copier-venv/bin/pip install 'copier>=9.4'
+       .copier-venv/bin/copier copy gh:Crashman1983/dev-process .
+       # remove .copier-venv afterwards; do not commit it
+
+   **Wenn `gh:` nicht aufloest / if the `gh:` shorthand cannot resolve**
+   (kein GitHub-Zugriff ueber copier / restricted network): clone first, copy
+   from the local path. Note: a local clone renders the latest **tag**; pass
+   `--vcs-ref=HEAD` for the branch tip.
+
+       git clone https://github.com/Crashman1983/dev-process /tmp/dev-process
+       uvx copier copy /tmp/dev-process .
+
 3. Answer the prompts:
    - `project_name` — human-readable name.
    - `harnesses` — which adapters to install (`copilot`, `agents_md`); Claude Code
      is always installed.
    - `modules` — which opt-in process modules to enable (e.g. `doc_drift_gate`).
+   - `ci` — which CI adapters render the `process-gates` job (`github`: Actions
+     workflow, default on; `gitlab`: includable job + root `.gitlab-ci.yml`
+     shim). **With both off, nothing enforces the gates remotely** — local git
+     hooks (`git_hooks` module) become the only enforcement pillar.
 4. Commit the result. Then let the LLM guide the Greenfield or Brownfield setup
    through `docs/process/start-here.md` before further work.
 
@@ -59,6 +83,7 @@ stattdessen vollstaendig auf der Kommandozeile:
       --data project_name="<Projektname / project name>" \
       --data 'harnesses={"copilot": false, "agents_md": true}' \
       --data 'modules={"doc_drift_gate": false, "arch_onboarding": false, "feature_registry": false, "github_issues": false, "contracts_drift": false, "git_hooks": false, "contract_first": false, "parity": false, "security_floor": false}' \
+      --data 'ci={"github": true, "gitlab": false}' \
       --skip 'CLAUDE.md' --skip 'AGENTS.md' \
       gh:Crashman1983/dev-process .
 
@@ -136,6 +161,14 @@ known, set it directly at install time.
 - If you already have a `CLAUDE.md` / `AGENTS.md`, copier will flag the conflict —
   merge the process kernel (the `KERNEL:START`/`KERNEL:END` block) into yours,
   or accept the template's version.
+- GitLab-Brownfield: aktivierst du `ci.gitlab` in einem Repo mit vorhandener
+  `.gitlab-ci.yml`, ergaenze `--skip '.gitlab-ci.yml'` und fuege die eine
+  `include:`-Zeile aus dem Template-Shim von Hand ein — der eigentliche Job
+  liegt kollisionsfrei unter `.gitlab/ci/process-gates.gitlab-ci.yml`. / If you
+  enable `ci.gitlab` in a repo that already has a `.gitlab-ci.yml`, add
+  `--skip '.gitlab-ci.yml'` and merge the single `include:` line from the
+  template shim by hand — the actual job lives collision-free under
+  `.gitlab/ci/process-gates.gitlab-ci.yml`.
 
 ## Spaeter / Later
 
