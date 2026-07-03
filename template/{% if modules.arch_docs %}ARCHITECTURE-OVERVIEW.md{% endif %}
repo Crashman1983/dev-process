@@ -1,0 +1,81 @@
+# Architecture Overview — {{ project_name }}
+
+A stakeholder-facing narrative of the system: enough to explain it to someone
+who will not read the code. Shape borrowed from arc42 / the C4 model, kept
+thin on purpose — this document is prose, and prose rots, so it carries only
+what the code and the decisions cannot say for themselves.
+
+**Verify tags.** Each section says how its claims are kept true:
+
+- `[verified elsewhere]` — the real, machine-checked source is named; do not
+  restate it here, link it.
+- `[review-checked]` — prose, not machine-checkable; kept honest by the review
+  gate (`docs/process/review-checklist.md`), not by a linter.
+
+Replace each `> _Placeholder…_` line with real content as you onboard. The
+`arch-docs` gate notes any section still holding a placeholder, so an empty
+overview never passes as "documented".
+
+## 1. Context & scope `[review-checked]`
+
+Who and what the system talks to: its users/roles, and the external systems it
+depends on or serves (the C4 "system context"). Name each external party and
+what crosses the boundary.
+
+> _Placeholder: list the users/roles and external systems, and what data or
+> calls cross each boundary._
+
+## 2. Quality goals `[review-checked]`
+
+The top three-to-five quality attributes that drive the architecture
+(performance, security, availability, changeability, …), each with a concrete
+scenario that makes it testable — "under X, the system does Y within Z".
+
+> _Placeholder: 3–5 quality goals, each with a one-line scenario._
+
+## 3. Building blocks `[verified elsewhere]`
+
+The structural decomposition — layers, boundaries, interface symbols — is the
+machine-checked `arch` block in `ARCHITECTURE.md` (the `arch-onboarding`
+module verifies it against real code every CI run). **Do not restate it here.**
+Add only the stakeholder gloss: a sentence per major block on *what it is for*.
+
+> _Placeholder: one sentence per major block; structure itself lives in
+> ARCHITECTURE.md._
+
+## 4. Runtime scenarios `[review-checked]`
+
+One or two key end-to-end flows (a request, a job, a failure path) as an
+ordered walk through the building blocks — the "runtime view".
+
+> _Placeholder: 1–2 key scenarios as ordered steps across the blocks._
+
+## 5. Deployment `[review-checked]`
+
+Where the system runs: the runtime environments, the deployment targets, and
+how a release reaches them.
+
+> _Placeholder: environments, targets, and the path a release takes to them._
+
+## 6. Decisions `[verified elsewhere]`
+
+Architecture decisions live as ADRs under `docs/process/adr/`, each with a
+`Status` and an `Intent` axis. **Do not restate them here.** Reference the ones
+a reader must know by id (e.g. `ADR-NNNN`); the `arch-docs` gate checks that
+every real `ADR-<number>` id referenced here resolves to an ADR file.
+
+> _Placeholder: reference the load-bearing ADRs by id._
+
+## 7. Risks & technical debt `[review-checked]`
+
+Known risks and accepted debt. An item that a decision already records as
+tolerated debt should reference that ADR by id (an ADR with `Intent: tolerated`
+is exactly this) rather than repeating it.
+
+> _Placeholder: known risks; accepted debt with the ADR id where one exists._
+
+## 8. Glossary `[review-checked]`
+
+Domain and technical terms a newcomer needs, defined once.
+
+> _Placeholder: the terms that would confuse a newcomer._

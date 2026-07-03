@@ -88,6 +88,7 @@ bricht der gate_runner mit einem einzeiligen Installationshinweis ab.
 | `parity` | `PyYAML` |
 | `security-floor` | `git` und Python-Stdlib |
 | `telemetry` | Python-Stdlib fuer Gate und Cockpit-Kern; optional `gh` (Tempo-Familie) und `git` (CFR-Familie) |
+| `arch_docs` | Python-Stdlib reicht |
 
 ## CI
 

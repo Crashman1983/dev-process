@@ -27,6 +27,7 @@ modules:
     parity: false
     security_floor: false
     telemetry: false
+    arch_docs: false
 
 ci:
   type: yaml
