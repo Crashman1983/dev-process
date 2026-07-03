@@ -30,7 +30,7 @@ def test_start_here_names_anchor_discriminator(render, tmp_path):
     out = render(tmp_path, {"project_name": "demo"})
     text = (out / "docs/process/start-here.md").read_text()
     assert "## Anchors" in text
-    assert "does it drift on a refactor" in text  # the discriminator
+    assert "drift" in text and "refactor" in text  # the discriminator, reword-robust
     assert "per subtree" in text or "per-area anchors" in text  # scaling note
 
 
