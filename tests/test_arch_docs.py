@@ -66,12 +66,25 @@ def test_resolving_adr_reference_passes(render, tmp_path):
     adr = out / ADR_DIR
     adr.mkdir(parents=True, exist_ok=True)
     (adr / "adr-0007-pick-a-store.md").write_text("# ADR-0007\n", encoding="utf-8")
+    # ADR-7 resolves to adr-0007 via the zero-pad-insensitive lookup
     (out / OVERVIEW).write_text(
         "# Overview\n\n## 6. Decisions\n\nSee ADR-0007 and ADR-7 for the store.\n",
         encoding="utf-8",
     )
     r = _gate(out)
     assert r.returncode == 0, r.stdout + r.stderr
+
+
+def test_short_form_dead_adr_hard_fails(render, tmp_path):
+    # a 1-2 digit dead ref must be caught, not silently skipped by the regex
+    out = _render(render, tmp_path)
+    (out / OVERVIEW).write_text(
+        "# Overview\n\n## 6. Decisions\n\nSee ADR-5 for the boundary.\n",
+        encoding="utf-8",
+    )
+    r = _gate(out)
+    assert r.returncode == 1
+    assert "ADR-5" in r.stdout
 
 
 def test_non_utf8_overview_fails(render, tmp_path):

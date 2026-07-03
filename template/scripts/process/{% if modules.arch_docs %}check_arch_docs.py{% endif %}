@@ -25,7 +25,7 @@ from pathlib import Path
 
 OVERVIEW = "ARCHITECTURE-OVERVIEW.md"
 ADR_DIR = "docs/process/adr"
-ADR_REF = re.compile(r"\bADR-(\d{3,})\b")
+ADR_REF = re.compile(r"\bADR-(\d+)\b")  # any digit width; ADR-NNNN placeholder has no digits
 # a section still carrying the shipped placeholder line
 PLACEHOLDER = re.compile(r"^\s*>\s*_Placeholder", re.MULTILINE)
 # section headings, to report *which* sections are still placeholder
