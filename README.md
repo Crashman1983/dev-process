@@ -25,8 +25,9 @@ Ausgeliefert als [copier](https://copier.readthedocs.io)-Template. Adapter für
 > SP10 (telemetry: GRADE-Trace + KPI-Cockpit, Effizienz messbar) +
 > SP11 (Re-Audit + Public-Readiness) + SP12 (verification-independence:
 > Verifikation unabhängig, tier-gestaffelt) + SP13 (anchor-guidance) +
-> SP14 (junior-legibility: Review-Checkliste, Tier-Erkennung)
-> ausgeliefert, `v1.4.5`.
+> SP14 (junior-legibility: Review-Checkliste, Tier-Erkennung) +
+> SP15 (arch-docs: arc42/C4-lite Architektur-Doku-Modul)
+> ausgeliefert, `v1.5.0`.
 > Setup: [`BOOTSTRAP.md`](BOOTSTRAP.md) · Systemumgebung:
 > [`docs/SYSTEM-REQUIREMENTS.md`](docs/SYSTEM-REQUIREMENTS.md) · SBOM:
 > [`docs/SBOM.md`](docs/SBOM.md) · Design: [`docs/design/`](docs/design/).
@@ -89,7 +90,8 @@ Test-Traceability), `github-issues` (EARS-Templates + Issue-Ref-Gate),
 `contract-first` (geteiltes Capability-Interface im committeten Spec deklariert, bevor eine Surface darauf baut),
 `parity` (Capability×Surface-Matrix, die jede bewusste Lücke an ein Tracking-Issue bindet — gegen stillen Capability-Verlust),
 `security-floor` (der grep-bare Teil der Security-Invarianten als blockierendes Gate — verbotene Regex-Muster über git-getrackte Dateien)
-und `telemetry` (Effizienz-Messung: `GRADE`-Trace-Zeilen im Journal als Gate-gesichertes Format plus read-only KPI-Cockpit — Wirksamkeit, Konvergenz, Kalibrier-Suite, Tempo, Kosten, DORA-CFR; jede Zahl mit Konfidenz + Maßnahme).
+`telemetry` (Effizienz-Messung: `GRADE`-Trace-Zeilen im Journal als Gate-gesichertes Format plus read-only KPI-Cockpit — Wirksamkeit, Konvergenz, Kalibrier-Suite, Tempo, Kosten, DORA-CFR; jede Zahl mit Konfidenz + Maßnahme)
+und `arch-docs` (stakeholder-gerichtete Architektur-Doku im arc42/C4-Zuschnitt: `ARCHITECTURE-OVERVIEW.md`-Scaffold mit Verify-Tags — Building-Blocks→arch-Block und Decisions→ADRs verlinkt statt dupliziert, Prosa ehrlich unverifiziert; Gate fängt nur tote ADR-Refs + verbliebene Platzhalter, nie „gute Prosa").
 
 **Harness-native Commands:** Der Zyklus (`brainstorm plan execute review quick
 debug commit prime`) liegt als dünne Slash-Commands je aktivem Harness
@@ -193,3 +195,4 @@ eingereicht werden — genau so werden PRs angenommen.
 | **SP12** verification-independence | Kontext-Unabhängigkeit der Verifikation als Kern-Methodik (die Lücke nach dem Telemetry-Slice): Produktion warm (Kohärenz), Verifikation unabhängig, tier-gestaffelt (0–1 Selbstcheck · 2–3 frischer Bundle-Review · 4 cross-model + adversarial-refute) · Review attestiert seine Unabhängigkeit, sonst zählt sie einen Tier schwächer | ✅ ausgeliefert |
 | **SP13** anchor-guidance | Zwei portable Lücken geschlossen (aus dem Vergleich mit einem reifen Adopter): der „Anker trägt Pointer, nicht driftendes Detail"-Diskriminator ist jetzt in `start-here.md` ausgesprochen (*driftet es beim Refactor? → nicht in den Anker*), plus wie man Anker für große Multi-Stack-Repos skaliert (nested per-Subtree-Anker) — hält den dünnen Kernel dünn | ✅ ausgeliefert |
 | **SP14** junior-legibility | Drei Lücken aus einer Junior-Simulation geschlossen: eine stack-neutrale `review-checklist.md` (was ein Review wirklich prüft — Vollständigkeit, Korrektheit, **Security** untrusted-input→sink, Design/ein-Owner, Tests), eine „Wie erkenne ich meinen Tier?"-Heuristik in `risk-tiers.md`, und ein ehrlicher „Muster-Floor, nicht deine Security-Review"-Satz im security-floor-Modul | ✅ ausgeliefert |
+| **SP15** arch-docs | Neues opt-in Modul: stakeholder-gerichtete Architektur-Doku (arc42/C4-lite) als `ARCHITECTURE-OVERVIEW.md`-Scaffold — Kontext, Qualitätsziele, Runtime, Deployment, Risiken/Tech-Debt, Glossar; Building-Blocks→arch-Block und Decisions→ADRs *verlinkt* statt dupliziert (ein Owner); Gate prüft nur mechanisch Ehrliches (tote ADR-Refs hart, Platzhalter als Note), täuscht nie „dokumentiert" vor | ✅ ausgeliefert |

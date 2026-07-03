@@ -1,0 +1,94 @@
+#!/usr/bin/env python3
+"""arch-docs gate: keep the architecture overview honest, without faking it.
+
+The overview is mostly prose (context, quality goals, risks) — not grep-able,
+so this gate never claims the prose is good. It checks only what is genuinely
+mechanical:
+
+  - HARD: an ADR-NNNN reference in the overview that does not resolve to a real
+    docs/process/adr/adr-NNNN-*.md file. A dead decision link is silent
+    doc-rot, exactly the class the process exists to catch.
+  - SOFT: sections still holding a placeholder marker — visible, never blocking
+    (documentation takes time), so emptiness cannot pass as "documented".
+  - SOFT: the overview file absent — pre-adoption, not a failure.
+
+Prose quality (are the quality goals good? the risks complete?) is judgment,
+caught by the review gate and review-checklist.md, never by this gate.
+
+Pure stdlib.
+"""
+from __future__ import annotations
+
+import re
+import sys
+from pathlib import Path
+
+OVERVIEW = "ARCHITECTURE-OVERVIEW.md"
+ADR_DIR = "docs/process/adr"
+ADR_REF = re.compile(r"\bADR-(\d{3,})\b")
+# a section still carrying the shipped placeholder line
+PLACEHOLDER = re.compile(r"^\s*>\s*_Placeholder", re.MULTILINE)
+# section headings, to report *which* sections are still placeholder
+HEADING = re.compile(r"^##\s+(.*)$", re.MULTILINE)
+
+
+def _adr_exists(root: Path, num: str) -> bool:
+    # zero-pad-insensitive: ADR-0002 and ADR-2 both look for adr-<num>-*.md,
+    # trying the reference's own width and a 4-wide form.
+    d = root / ADR_DIR
+    candidates = {num, num.zfill(4)}
+    for width in candidates:
+        if any(d.glob(f"adr-{width}-*.md")):
+            return True
+    return False
+
+
+def _placeholder_sections(text: str) -> list[str]:
+    """Headings of sections whose body still contains a placeholder line."""
+    out = []
+    heads = list(HEADING.finditer(text))
+    for i, m in enumerate(heads):
+        start = m.end()
+        end = heads[i + 1].start() if i + 1 < len(heads) else len(text)
+        if PLACEHOLDER.search(text[start:end]):
+            out.append(m.group(1).strip())
+    return out
+
+
+def main() -> int:
+    root = Path(sys.argv[1] if len(sys.argv) > 1 else ".").resolve()
+    if not root.is_dir():
+        print(f"arch-docs: FAILED:\n  - root {root} is not a directory")
+        return 1
+    f = root / OVERVIEW
+    if not f.is_file():
+        print("arch-docs: note: no ARCHITECTURE-OVERVIEW.md yet — expected pre-adoption")
+        print("arch-docs: OK")
+        return 0
+    try:
+        text = f.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        print(f"arch-docs: FAILED:\n  - {OVERVIEW}: not valid UTF-8")
+        return 1
+
+    hard = []
+    for m in ADR_REF.finditer(text):
+        if not _adr_exists(root, m.group(1)):
+            hard.append(f"{OVERVIEW}: ADR-{m.group(1)} referenced but no "
+                        f"{ADR_DIR}/adr-{m.group(1)}-*.md exists")
+    if hard:
+        print("arch-docs: FAILED:")
+        for h in sorted(set(hard)):
+            print(f"  - {h}")
+        return 1
+
+    placeholders = _placeholder_sections(text)
+    if placeholders:
+        print(f"arch-docs: note: {len(placeholders)} section(s) still placeholder "
+              f"(overview not fully onboarded): {', '.join(placeholders)}")
+    print("arch-docs: OK")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

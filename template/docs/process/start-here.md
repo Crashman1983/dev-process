@@ -107,7 +107,8 @@ After the dialogue, the LLM records at least:
   deployment) and source layout — each layer decided,
   proposed-and-confirmed, or a documented open question;
 - whether `ARCHITECTURE.md` (if `arch-onboarding` is active) can already
-  receive a real `arch` block;
+  receive a real `arch` block, and whether the stakeholder-facing
+  `ARCHITECTURE-OVERVIEW.md` (if `arch-docs` is active) has an audience yet;
 - whether real entries under docs/process/feature-registry/ are needed;
 - whether contracts, parity, or security floor need real artifacts now or stay
   intentionally inert.
