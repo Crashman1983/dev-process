@@ -20,7 +20,7 @@ Implements the plan task by task. Enters: the plan. Produces: committed, tested 
 
 ## Review
 
-The gate before merge to the main branch. Enters: the branch diff plus the plan/spec. Produces: a pass/fail judgment on functional completeness, correctness, and adherence to these rules. The required depth *and independence* scale with the tier (`risk-tiers.md`, `verification-independence.md`): a fresh process reviews a read-only bundle rather than the producing context, and the implementing agent does not self-certify. Use before every merge that the tier gates; fixes loop back through execute + review until clean.{% if modules.telemetry %} Record the per-criterion verdicts as `GRADE` lines with `source=review` in the journal (`docs/process/modules/telemetry.md`).{% endif %}
+The gate before merge to the main branch. Enters: the branch diff plus the plan/spec. Produces: a pass/fail judgment on functional completeness, correctness, and adherence to these rules. The required depth *and independence* scale with the tier (`risk-tiers.md`, `verification-independence.md`): a fresh process reviews a read-only bundle rather than the producing context, and the implementing agent does not self-certify. What a review actually checks — completeness, correctness, security, design, tests — is `review-checklist.md`. Use before every merge that the tier gates; fixes loop back through execute + review until clean.{% if modules.telemetry %} Record the per-criterion verdicts as `GRADE` lines with `source=review` in the journal (`docs/process/modules/telemetry.md`).{% endif %}
 
 ## Quick
 

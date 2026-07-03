@@ -6,6 +6,13 @@ as a blocking gate. It catches the careless regression — a `shell`-injection s
 or a committed private key — even on a review-less path, because the gate runs
 through the manifest-aware gate runner at push/CI time.
 
+**This is a pattern floor, not your security review.** A green floor means the
+banned patterns are absent — it does **not** mean the change is secure. Runtime
+vulnerabilities (open redirect, injection, broken authorization) are not
+grep-able and are the review gate's job (`review-checklist.md`, security
+questions), never this gate's. Do not read a passing floor as "security
+checked".
+
 ## When required
 
 Enable when the project has security invariants that are expressible as "this

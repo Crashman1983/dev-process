@@ -8,6 +8,7 @@ CORE = [
     "commits.md",
     "code-craft.md",
     "verification-independence.md",
+    "review-checklist.md",
     "journal-state-plans.md",
     "adr/README.md",
     "adr/template.md",
@@ -32,6 +33,21 @@ def test_start_here_names_anchor_discriminator(render, tmp_path):
     assert "## Anchors" in text
     assert "drift" in text and "refactor" in text  # the discriminator, reword-robust
     assert "per subtree" in text or "per-area anchors" in text  # scaling note
+
+
+def test_review_checklist_covers_security_sink(render, tmp_path):
+    out = render(tmp_path, {"project_name": "demo"})
+    text = (out / "docs/process/review-checklist.md").read_text()
+    assert "## Security" in text
+    assert "redirect" in text and "sink" in text  # the untrusted-input-to-sink class
+    assert "one owner" in text.lower()  # design/one-owner question
+
+
+def test_risk_tiers_recognition_questions(render, tmp_path):
+    out = render(tmp_path, {"project_name": "demo"})
+    text = (out / "docs/process/risk-tiers.md").read_text()
+    assert "Recognizing your tier" in text
+    assert "persistence" in text and "untrusted" in text
 
 
 def test_mandatory_rules_required_headings(render, tmp_path):
