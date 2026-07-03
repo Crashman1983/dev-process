@@ -67,11 +67,13 @@ Are **secrets** kept out of logs, responses, and the repository?
   ids, not the secrets?
 - Are messages at the **right level** — an expected condition is not an error, a
   real failure is not swallowed at debug?
-- Does a new **dependency or config fail fast** at startup, rather than at 3am
-  on the first request that needs it?
-- Is the change **safe to deploy and roll back** — a migration backward-
-  compatible for the window where the old and new versions run together, a
-  feature reversible without a data fix?
+- Does a new **dependency or config fail fast** at startup, rather than only
+  when the code path that needs it first runs (in a server, at 3am on the first
+  request; in a batch job, halfway through the run)?
+- Is the change **safe to release and reverse**? Where it is deployed
+  incrementally, is a migration backward-compatible for any window in which the
+  old and new versions run together; and can the change be reverted without a
+  data fix?
 
 ## Design — one owner per behavior
 
