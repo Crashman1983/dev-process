@@ -1,0 +1,67 @@
+# Review Checklist
+
+What a competent review actually checks — the judgment the review gate supplies
+that no machine gate can. These defects are not grep-able (that is why they need
+a review, not a linter), so this is a checklist of *questions to ask*, not a
+pattern to match. Framed neutrally: apply each to your stack.
+
+Depth scales with the tier (`risk-tiers.md`): a Tier 1–2 change gets a light
+pass over the relevant questions; Tier 3+ gets all of them; how *independent*
+the reviewer must be also scales (`verification-independence.md`) — the
+implementing agent does not self-certify.
+
+## Completeness
+
+- Does every new field, value, or side-effect reach its **terminal state**
+  (persisted, emitted, displayed, or deliberately dropped)? Trace it from where
+  it is created to where it is used — a value that is produced and never read is
+  dead data.
+- Are **all execution paths** handled: the happy path, the error path, the retry
+  path, and any async/deferred path?
+- Is there **one end-to-end proof** (a test or a manual trace) that input
+  becomes the intended durable state or visible outcome — not just a unit test
+  of one piece in isolation?
+
+## Correctness
+
+- What happens at the **boundaries**: empty input, a duplicate, a value at the
+  limit, a concurrent caller, a collision? Each is a common source of a silent
+  wrong answer or an unhandled crash.
+- Is **error handling** deliberate — does a failure surface, retry, or roll
+  back, rather than being swallowed or crashing on the next line?
+- If the operation can be retried, is it **idempotent**?
+
+## Security — untrusted input reaching a sink
+
+The dangerous class a junior most often misses. For every place external or
+user-controlled input flows, ask: does it reach a **sink** without validation?
+
+- A **redirect** target (open redirect — validate the scheme and destination).
+- **Rendered markup** or a template (injection / XSS).
+- A **query** or command string (injection).
+- A **subprocess** invocation (argv list, never a shell string).
+- A **file path** (path traversal — resolve and confine to a root).
+- **Deserialization** of external data.
+
+Also: is **authorization fail-closed** (deny by default, not allow on error)?
+Are **secrets** kept out of logs, responses, and the repository?
+
+## Design — one owner per behavior
+
+- Does this change **duplicate** an existing behavior instead of changing its
+  owner? A second function, flag, wrapper, or fallback that overlaps something
+  already there adds accretion — find the owning layer and change it there
+  (mandatory rule 4).
+- Is the code **readable** — intention-revealing names, small single-purpose
+  units, no magic values (mandatory rule 9, `code-craft.md`)?
+
+## Tests prove acceptance
+
+- Does a **test map to each acceptance criterion** the change claims? A feature
+  without a test proving its acceptance is not done (mandatory rule 5).
+
+## Extending this list
+
+This is the neutral floor. A project with a specific stack or risk surface
+should extend it in its own anchor — add the framework's known footguns, the
+domain's invariants — but never *remove* a category to make a review pass.
