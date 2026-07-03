@@ -26,8 +26,9 @@ Ausgeliefert als [copier](https://copier.readthedocs.io)-Template. Adapter für
 > SP11 (Re-Audit + Public-Readiness) + SP12 (verification-independence:
 > Verifikation unabhängig, tier-gestaffelt) + SP13 (anchor-guidance) +
 > SP14 (junior-legibility: Review-Checkliste, Tier-Erkennung) +
-> SP15 (arch-docs: arc42/C4-lite Architektur-Doku-Modul)
-> ausgeliefert, `v1.5.0`.
+> SP15 (arch-docs: arc42/C4-lite Architektur-Doku-Modul) +
+> SP16 (review-breadth: Performance/Observability-Dimensionen)
+> ausgeliefert, `v1.5.1`.
 > Setup: [`BOOTSTRAP.md`](BOOTSTRAP.md) · Systemumgebung:
 > [`docs/SYSTEM-REQUIREMENTS.md`](docs/SYSTEM-REQUIREMENTS.md) · SBOM:
 > [`docs/SBOM.md`](docs/SBOM.md) · Design: [`docs/design/`](docs/design/).
