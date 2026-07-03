@@ -42,7 +42,7 @@ def test_review_checklist_covers_security_sink(render, tmp_path):
     assert "redirect" in text and "sink" in text  # the untrusted-input-to-sink class
     assert "one owner" in text.lower()  # design/one-owner question
     assert "## Performance" in text and "N+1" in text  # performance dimension
-    assert "## Observability" in text and "roll back" in text  # ops dimension
+    assert "## Observability" in text and "fail fast" in text  # ops dimension
 
 
 def test_risk_tiers_recognition_questions(render, tmp_path):
