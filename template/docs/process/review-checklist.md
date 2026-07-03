@@ -31,10 +31,24 @@ implementing agent does not self-certify.
   back, rather than being swallowed or crashing on the next line?
 - If the operation can be retried, is it **idempotent**?
 
+## Performance & efficiency
+
+- Does the change add work that grows with the input — an **N+1** query, a loop
+  that re-fetches or re-computes per item, an **unbounded** collection, a full
+  scan where a keyed lookup exists?
+- Are expensive calls (I/O, network, database, subprocess) made **once and
+  reused**, not repeated inside a loop?
+- Is anything **unbounded loaded into memory** — a whole file, an unpaginated
+  result set, a growing cache with no eviction?
+- Both directions: catch the accidental blow-up on a hot path, but do not
+  gold-plate a cold one — flag premature optimization too.
+
 ## Security — untrusted input reaching a sink
 
-The dangerous class a junior most often misses. For every place external or
-user-controlled input flows, ask: does it reach a **sink** without validation?
+The dangerous class a junior most often misses. Untrusted input is not only a
+web form — a request body, a CLI argument, a config value, a file, a queue
+message are all external. For every place such input flows, ask: does it reach a
+**sink** without validation?
 
 - A **redirect** target (open redirect — validate the scheme and destination).
 - **Rendered markup** or a template (injection / XSS).
@@ -45,6 +59,19 @@ user-controlled input flows, ask: does it reach a **sink** without validation?
 
 Also: is **authorization fail-closed** (deny by default, not allow on error)?
 Are **secrets** kept out of logs, responses, and the repository?
+
+## Observability & operability
+
+- When this **fails in production, will anyone know**? Is there a log, metric,
+  or trace at the failure point carrying enough context to diagnose it — the
+  ids, not the secrets?
+- Are messages at the **right level** — an expected condition is not an error, a
+  real failure is not swallowed at debug?
+- Does a new **dependency or config fail fast** at startup, rather than at 3am
+  on the first request that needs it?
+- Is the change **safe to deploy and roll back** — a migration backward-
+  compatible for the window where the old and new versions run together, a
+  feature reversible without a data fix?
 
 ## Design — one owner per behavior
 
