@@ -30,26 +30,39 @@ check mean anything. Scale it to the tier (`risk-tiers.md`):
   (the diff plus the plan and the rules), not from the producing context. The
   implementing agent does not certify its own work. A single model is
   acceptable.
-- **Tier 4** — independence must cross the model family. Two families' blind
-  spots are uncorrelated; a same-family check, however fresh its context, can
-  still miss what its family systematically misses. Add adversarial
-  verification: independent reviewers try to *refute* the change rather than
-  confirm it, and a majority refutation blocks the merge.
+- **Tier 4** — independence should cross the model family **where a second
+  family is available**: two families' blind spots are uncorrelated, and a
+  same-family check, however fresh its context, can still miss what its family
+  systematically misses. Where only one family is available, do not fake it —
+  state the single-family limitation and treat the review as one tier weaker
+  (see attestation, below), the same honest degradation the process uses for
+  every other environment-dependent gate. Add adversarial verification:
+  independent reviewers try to *refute* the change rather than confirm it, and
+  a majority refutation blocks the merge.
 
 ## Independence is attested, not assumed
 
 The one step that is supposed to be independent is easy to run in the wrong
 context by accident. So the review records how it ran — bundle-only, by a
 non-implementing process, and (at Tier 4) cross-model — as part of its result.
-An unattested review is treated as a warm self-check: one tier weaker than it
-claims. This keeps the independent step auditable instead of taken on faith.
+A review that cannot make those claims is treated as a warm self-check: one
+tier weaker than it claims, and the merge decision weighs it accordingly. This
+makes the independence claim explicit and reviewable in the review record
+rather than assumed — a judgment applied at the gate, not a machine-checked
+gate itself.
 
 ## Why this is efficient, not just safe
 
 Independence costs tokens and wall-clock, so the process buys it only where it
 pays: at verification, scaled by risk. Production stays warm and fast; the
 expensive fresh, cross-model, adversarial pass fires only at the tier where an
-escaped defect is most expensive. A self-grading step that runs in the
-producing context is the worst of both — it costs a model call and returns
-false comfort. Prefer one trustworthy independent check over several correlated
-ones.
+escaped defect is most expensive. The saving is real where a team currently
+re-primes between production steps or runs several correlated checks; for a
+lean setup it is mostly a reallocation — the same budget spent where it catches
+more.
+
+One distinction matters here: an in-context self-grade is fine as an
+*advisory* signal for measurement (it costs little and its trace is useful),
+but it must not be *trusted as the gate* — read as assurance, a self-grade in
+the producing context is the worst of both, a model call that returns false
+comfort. Prefer one trustworthy independent check over several correlated ones.
