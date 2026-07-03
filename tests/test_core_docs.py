@@ -7,6 +7,7 @@ CORE = [
     "workflow.md",
     "commits.md",
     "code-craft.md",
+    "verification-independence.md",
     "journal-state-plans.md",
     "adr/README.md",
     "adr/template.md",
