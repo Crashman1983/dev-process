@@ -26,6 +26,14 @@ def test_core_docs_present_and_clean(render, tmp_path):
             assert k not in text, f"kenni-specific '{k}' leaked in {rel}"
 
 
+def test_start_here_names_anchor_discriminator(render, tmp_path):
+    out = render(tmp_path, {"project_name": "demo"})
+    text = (out / "docs/process/start-here.md").read_text()
+    assert "## Anchors" in text
+    assert "does it drift on a refactor" in text  # the discriminator
+    assert "per subtree" in text or "per-area anchors" in text  # scaling note
+
+
 def test_mandatory_rules_required_headings(render, tmp_path):
     out = render(tmp_path, {"project_name": "demo"})
     text = (out / "docs/process/mandatory-rules.md").read_text()
