@@ -23,8 +23,9 @@ Ausgeliefert als [copier](https://copier.readthedocs.io)-Template. Adapter für
 > GitLab CI + Install-Fallbacks) + SP8 (english-canon + ehrliche Ökonomie) +
 > SP9 (audit-fixes: False-Greens geschlossen, Failure-Modes sprechen) +
 > SP10 (telemetry: GRADE-Trace + KPI-Cockpit, Effizienz messbar) +
-> SP11 (Re-Audit + Public-Readiness)
-> ausgeliefert, `v1.4.2`.
+> SP11 (Re-Audit + Public-Readiness) + SP12 (verification-independence:
+> Verifikation unabhängig, tier-gestaffelt)
+> ausgeliefert, `v1.4.3`.
 > Setup: [`BOOTSTRAP.md`](BOOTSTRAP.md) · Systemumgebung:
 > [`docs/SYSTEM-REQUIREMENTS.md`](docs/SYSTEM-REQUIREMENTS.md) · SBOM:
 > [`docs/SBOM.md`](docs/SBOM.md) · Design: [`docs/design/`](docs/design/).
@@ -188,3 +189,4 @@ eingereicht werden — genau so werden PRs angenommen.
 | **SP9** audit-fixes | Drei-Achsen-Audit: alle bestätigten False-Greens geschlossen (Manifest load-bearing, arch-Fence, unborn-main-Hook, hooksPath-Guard) · Failure-Modes mit Diagnose statt Traceback · doc-drift versteht dokument-relative Links · Doku-Drift bereinigt | ✅ ausgeliefert |
 | **SP10** telemetry | Effizienz messbar (Audit-Finding, aus Kenni generalisiert): `GRADE`-Trace-Konvention im Journal · Gate lintet das Trace-Format (kein stiller Telemetrie-Verlust) · read-only KPI-Cockpit (`process_kpis.py`: effectiveness/convergence/suite/tempo/cost/cfr) · Grader-Kalibrier-Suite mit den drei Vertrauens-Schwellen (≥20/≥5 · 0 False-PASS · ≥90 % ≤2 Runden) | ✅ ausgeliefert |
 | **SP11** reaudit + public | Adversariales Re-Audit der Telemetry-Slice: False-Greens geschlossen (Suite-Shape-Alignment in Gefahr-Richtung, Filter=Grammatik, Unicode-round, Typo-Root) · Failure-Modes sprechen statt Tracebacks · persönliche Daten aus dem Tree, englischer README-Einstieg, `uv.lock` committed, CI least-privilege | ✅ ausgeliefert |
+| **SP12** verification-independence | Kontext-Unabhängigkeit der Verifikation als Kern-Methodik (die Lücke nach dem Telemetry-Slice): Produktion warm (Kohärenz), Verifikation unabhängig, tier-gestaffelt (0–1 Selbstcheck · 2–3 frischer Bundle-Review · 4 cross-model + adversarial-refute) · Review attestiert seine Unabhängigkeit, sonst zählt sie einen Tier schwächer | ✅ ausgeliefert |
