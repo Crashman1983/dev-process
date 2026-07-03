@@ -155,6 +155,29 @@ Use this path when product code already exists.
    contracts, parity, security floor.
 7. Start product work only after the relevant baseline for that area exists.
 
+## Anchors: what goes where, and how to scale them
+
+The anchor files (`CLAUDE.md`, `AGENTS.md`, and any harness equivalent) are thin
+by design: the authoritative process lives in `docs/process/`. Keep them thin as
+the project grows.
+
+**What the anchor carries:** role and mission, the always-on kernel, pointers to
+where things live, and project facts that do not drift. **What it must not
+carry:** any detail that changes on a refactor — commands, ports, versions,
+file or symbol names, mechanics. Those have canonical sources (build files, the
+code itself, `docs/process/`), and the anchor **points at them, it never copies
+them** — a copy drifts out of date and becomes a lie the reader trusts.
+Discriminator: *does it drift on a refactor?* If yes, it does not belong in the
+anchor.
+
+**Scaling to a large or multi-stack repo:** do not let the root anchor become a
+dumping ground for stack-specific facts. Keep the root about cross-cutting
+process, and put stack-specific facts in per-area anchors. The mechanism is
+harness-specific: Claude Code loads a nested anchor file per subtree
+automatically when work touches that subtree; AGENTS.md-style harnesses use a
+per-directory file or an explicit pointer from the root anchor. Either way the
+root stays small and each area owns its own detail.
+
 ## Definition of ready
 
 The project is ready for normal process-driven development when:
