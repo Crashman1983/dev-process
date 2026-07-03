@@ -36,8 +36,9 @@ scenario that makes it testable — "under X, the system does Y within Z".
 ## 3. Building blocks `[verified elsewhere]`
 
 The structural decomposition — layers, boundaries, interface symbols — is the
-machine-checked `arch` block in `ARCHITECTURE.md` (the `arch-onboarding`
-module verifies it against real code every CI run). **Do not restate it here.**
+`arch` block in `ARCHITECTURE.md`: when the `arch-onboarding` module is active
+that block is verified against real code every CI run; if it is not, name there
+where your structure is defined. **Do not restate it here.**
 Add only the stakeholder gloss: a sentence per major block on *what it is for*.
 
 > _Placeholder: one sentence per major block; structure itself lives in

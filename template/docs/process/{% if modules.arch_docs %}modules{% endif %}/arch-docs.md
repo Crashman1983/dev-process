@@ -35,9 +35,10 @@ for full arc42-style coverage with no duplicated owner.
 Every section of the overview is tagged so no reader mistakes prose for a
 verified fact:
 
-- `[verified elsewhere]` — building blocks and decisions; the real machine-checked
-  source is named (`ARCHITECTURE.md` / `docs/process/adr/`), and the gate checks
-  the references resolve.
+- `[verified elsewhere]` — building blocks and decisions; the real source is
+  named and linked, not restated. This gate checks that the **ADR** references
+  resolve; the building-blocks link points to `ARCHITECTURE.md`, which
+  `arch-onboarding` (not this gate) verifies against real code.
 - `[review-checked]` — context, quality goals, runtime, deployment, risks,
   glossary; prose, not machine-checkable, kept honest by the review gate and its
   `review-checklist.md`.
