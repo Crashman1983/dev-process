@@ -17,7 +17,7 @@ Scope — not code volume — sets the tier. User-visible, cross-component, API/
 - Does it **read or write persistence** (a database, a file, a durable store)?
 - Does **untrusted or user-controlled input leave the process** — a redirect, rendered markup, a query, a subprocess, a file path?
 - Does it touch **auth**, an **interface/contract** other code depends on, or **more than one surface**?
-- Could it **lose or corrupt data**, or is it a **repeated change to the same owner** (see the patch-count discipline in mandatory rule 4)?
+- Could it **lose or corrupt data**, or is it a **repeated change to the same owner** (see mandatory rule 4)?
 
 A yes to any of these lifts the change to **Tier 3+ regardless of diff size** — a ten-line redirect that reads a stored URL is Tier 3, not Tier 1. When in doubt, tier up; the cost of an unneeded review is small next to the cost of an escaped defect.
 
