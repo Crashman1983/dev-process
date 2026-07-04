@@ -1,0 +1,155 @@
+#!/usr/bin/env python3
+"""github-master gate: when GitHub is the source of truth, keep the local
+registry an honest mirror of it — hermetically.
+
+The truth lives in GitHub (issues, sub-issues, board). The `gh_sync.py` tool
+pulls that truth into a committed snapshot (`.process-work/github-snapshot.json`)
+over the network. THIS gate never touches the network: it checks, offline and
+deterministically, that the committed registry agrees with the committed
+snapshot, and that the master invariants hold. Freshness of the snapshot vs live
+GitHub is the sync tool's job, not a gate's.
+
+With this module off, nothing here runs and the registry stays the source of
+truth (the portable default). Stdlib only.
+"""
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+REGISTRY_DIR = "docs/process/feature-registry"
+SNAPSHOT = ".process-work/github-snapshot.json"
+
+# process status -> the GitHub issue state it must map to
+STATUS_STATE = {"proposed": "open", "in-progress": "open",
+                "done": "closed", "deprecated": None}  # deprecated: either
+ENTRY_KEYS = {"number", "story", "title", "state", "status",
+              "blocked_by", "parent", "board_status"}
+
+
+def _stories(root: Path) -> dict:
+    """Registry stories by id: {id: {title, status, blocked_by, has_issue}}."""
+    reg = root / REGISTRY_DIR
+    out: dict = {}
+    if not reg.is_dir():
+        return out
+    for p in sorted(reg.glob("*.json")):
+        if p.name.endswith(".example.json"):
+            continue
+        try:
+            d = json.loads(p.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            continue  # the feature-registry gate owns JSON validity
+        if not isinstance(d, dict) or not isinstance(d.get("id"), str):
+            continue
+        out[d["id"]] = {
+            "title": d.get("title"),
+            "status": d.get("status"),
+            "blocked_by": d.get("blocked_by") or [],
+            "has_issue": bool(d.get("issue")),
+            "rel": f"{REGISTRY_DIR}/{p.name}",
+        }
+    return out
+
+
+def _load_snapshot(root: Path) -> tuple[dict | None, list[str]]:
+    """(entries_by_story, hard_errors). entries_by_story is None when the
+    snapshot is absent (a soft, pre-sync state the caller reports)."""
+    f = root / SNAPSHOT
+    if not f.is_file():
+        return None, []
+    try:
+        raw = f.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        return {}, [f"{SNAPSHOT}: not valid UTF-8"]
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        return {}, [f"{SNAPSHOT}: invalid JSON: {exc}"]
+    if not isinstance(data, dict) or not isinstance(data.get("issues"), list):
+        return {}, [f"{SNAPSHOT}: must be an object with an 'issues' list"]
+    hard: list[str] = []
+    by_story: dict = {}
+    for i, e in enumerate(data["issues"]):
+        if not isinstance(e, dict):
+            hard.append(f"{SNAPSHOT}: issues[{i}] must be an object")
+            continue
+        extra = set(e) - ENTRY_KEYS
+        if extra:
+            hard.append(f"{SNAPSHOT}: issues[{i}] has unknown key(s): {sorted(extra)}")
+        sid = e.get("story")
+        if not isinstance(sid, str) or not sid:
+            hard.append(f"{SNAPSHOT}: issues[{i}] missing 'story'")
+            continue
+        if e.get("state") not in ("open", "closed"):
+            hard.append(f"{SNAPSHOT}: {sid} 'state' must be 'open' or 'closed'")
+        by_story[sid] = e
+    return by_story, hard
+
+
+def check(root: Path) -> tuple[list[str], list[str]]:
+    hard: list[str] = []
+    soft: list[str] = []
+    snap, snap_hard = _load_snapshot(root)
+    hard += snap_hard
+    if snap is None:
+        return hard, ["no github-snapshot.json yet — run gh_sync.py (expected pre-sync)"]
+
+    stories = _stories(root)
+
+    # master invariant: every *live* story traces to an issue and a snapshot
+    # entry. Deprecated stories are retired — exempt from both.
+    for sid, s in sorted(stories.items()):
+        if s["status"] == "deprecated":
+            continue
+        if not s["has_issue"]:
+            hard.append(f"{s['rel']}: {sid} has no 'issue' — github-master mode "
+                        f"requires every live story to trace to an issue")
+        if sid not in snap:
+            hard.append(f"{s['rel']}: {sid} has no snapshot entry — mirror is stale, "
+                        f"re-run gh_sync.py")
+
+    # completeness: every pulled issue has a materialized story
+    for sid in sorted(snap):
+        if sid not in stories:
+            hard.append(f"{SNAPSHOT}: {sid} pulled from GitHub but no registry story "
+                        f"exists — materialize it")
+
+    # drift: on the fields GitHub owns, the registry may not diverge
+    for sid in sorted(set(stories) & set(snap)):
+        s, e = stories[sid], snap[sid]
+        if e.get("title") is not None and s["title"] != e["title"]:
+            hard.append(f"{s['rel']}: {sid} title drifts from GitHub "
+                        f"({s['title']!r} vs {e['title']!r}) — re-sync")
+        want_state = STATUS_STATE.get(s["status"])
+        if want_state is not None and e.get("state") != want_state:
+            hard.append(f"{s['rel']}: {sid} status {s['status']!r} implies "
+                        f"issue {want_state}, but snapshot has {e.get('state')!r}")
+        if e.get("blocked_by") is not None and \
+                sorted(s["blocked_by"]) != sorted(e["blocked_by"]):
+            hard.append(f"{s['rel']}: {sid} blocked_by drifts from GitHub "
+                        f"({sorted(s['blocked_by'])} vs {sorted(e['blocked_by'])})")
+
+    return hard, soft
+
+
+def main() -> int:
+    root = Path(sys.argv[1] if len(sys.argv) > 1 else ".").resolve()
+    if not root.is_dir():
+        print(f"github-master: FAILED:\n  - root {root} is not a directory")
+        return 1
+    hard, soft = check(root)
+    for note in soft:
+        print(f"github-master: note: {note}")
+    if hard:
+        print("github-master: FAILED:")
+        for h in sorted(set(hard)):
+            print(f"  - {h}")
+        return 1
+    print("github-master: OK")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

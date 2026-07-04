@@ -28,6 +28,7 @@ modules:
     security_floor: false
     telemetry: false
     arch_docs: false
+    github_master: false
 
 ci:
   type: yaml

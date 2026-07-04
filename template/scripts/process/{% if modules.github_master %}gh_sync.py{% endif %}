@@ -1,0 +1,129 @@
+#!/usr/bin/env python3
+"""gh_sync: pull GitHub issues into the committed snapshot the github-master gate
+checks against. This is the ONE place the process talks to the network.
+
+Truth flows GitHub -> snapshot. The snapshot (.process-work/github-snapshot.json)
+is then compared against the registry, offline and deterministically, by
+check_github_master.py. Run this whenever the GitHub side changes, then commit
+the snapshot. Best-effort by nature (needs `gh`, auth, network) — it is not a
+gate and never blocks CI; the gate is the tested, hermetic contract.
+
+The story<->issue join comes from each registry story's `issue` field: an issue
+that no story links is reported so you can materialize a story for it (the gate
+also flags it). Stdlib + `gh`.
+
+Usage: python scripts/process/gh_sync.py [OWNER/REPO]
+       (repo falls back to the github_repo copier answer)
+"""
+from __future__ import annotations
+
+import json
+import re
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+REGISTRY_DIR = "docs/process/feature-registry"
+SNAPSHOT = ".process-work/github-snapshot.json"
+ANSWERS = ".copier-answers.yml"
+STATUS_LABEL = re.compile(r"^status:(\S+)$")
+
+
+def _repo(root: Path, argv: list[str]) -> str | None:
+    if len(argv) > 1 and argv[1]:
+        return argv[1]
+    f = root / ANSWERS
+    if f.is_file():
+        for line in f.read_text(encoding="utf-8").splitlines():
+            if line.startswith("github_repo:"):
+                v = line.split(":", 1)[1].strip().strip('"').strip("'")
+                return v or None
+    return None
+
+
+def _issue_to_story(root: Path) -> dict:
+    """issue number -> story id, from each story's `issue` ref."""
+    reg = root / REGISTRY_DIR
+    out: dict = {}
+    if not reg.is_dir():
+        return out
+    for p in sorted(reg.glob("*.json")):
+        if p.name.endswith(".example.json"):
+            continue
+        try:
+            d = json.loads(p.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            continue
+        issue = d.get("issue") if isinstance(d, dict) else None
+        sid = d.get("id") if isinstance(d, dict) else None
+        m = re.search(r"(\d+)$", str(issue)) if issue else None
+        if m and isinstance(sid, str):
+            out[int(m.group(1))] = sid
+    return out
+
+
+def _status_from(labels: list, state: str) -> str:
+    for lb in labels:
+        name = lb.get("name") if isinstance(lb, dict) else str(lb)
+        m = STATUS_LABEL.match(name or "")
+        if m:
+            return m.group(1)
+    return "done" if state == "closed" else "in-progress"
+
+
+def main() -> int:
+    root = Path(".").resolve()
+    gh = shutil.which("gh")
+    if not gh:
+        print("gh_sync: `gh` not on PATH — install and authenticate it", file=sys.stderr)
+        return 1
+    repo = _repo(root, sys.argv)
+    if not repo:
+        print("gh_sync: no repo — pass OWNER/REPO or set the github_repo answer",
+              file=sys.stderr)
+        return 1
+    try:
+        r = subprocess.run(
+            [gh, "issue", "list", "--repo", repo, "--state", "all", "--limit", "500",
+             "--json", "number,title,state,labels"],
+            capture_output=True, text=True, timeout=60,
+        )
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        print(f"gh_sync: gh failed: {exc}", file=sys.stderr)
+        return 1
+    if r.returncode != 0:
+        print(f"gh_sync: gh failed: {r.stderr.strip()}", file=sys.stderr)
+        return 1
+
+    mapping = _issue_to_story(root)
+    issues, orphans = [], []
+    for it in json.loads(r.stdout):
+        num = it["number"]
+        sid = mapping.get(num)
+        if sid is None:
+            orphans.append(num)
+            continue
+        issues.append({
+            "number": num, "story": sid, "title": it.get("title"),
+            "state": it.get("state", "").lower(),
+            "status": _status_from(it.get("labels") or [], it.get("state", "").lower()),
+            # null = not yet mastered by GitHub in this slice; the gate skips
+            # drift on null slots. blocked_by/parent/board_status are filled by
+            # later slices (dependencies, sub-issues, board).
+            "blocked_by": None, "parent": None, "board_status": None,
+        })
+    out = root / SNAPSHOT
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps({"generated_by": "gh_sync", "issues": issues},
+                              indent=2) + "\n", encoding="utf-8")
+    print(f"gh_sync: wrote {len(issues)} issue(s) to {SNAPSHOT}")
+    if orphans:
+        print(f"gh_sync: {len(orphans)} issue(s) have no story yet: "
+              f"{', '.join('#' + str(n) for n in sorted(orphans))} — materialize them")
+    print("gh_sync: commit the snapshot, then the github-master gate checks it offline")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
