@@ -19,16 +19,12 @@ Stdlib + `gh`.
 from __future__ import annotations
 
 import json
-import re
 import shutil
 import subprocess
 import sys
 from pathlib import Path
 
-REGISTRY_DIR = "docs/process/feature-registry"
 SNAPSHOT = ".process-work/github-snapshot.json"
-# story status -> the board column to move a card to under --push
-STATUS_COLUMN = {"proposed": "Backlog", "in-progress": "In-progress", "done": "Done"}
 
 
 def _run_gh(gh: str, args: list[str]) -> dict | list | None:
@@ -41,25 +37,6 @@ def _run_gh(gh: str, args: list[str]) -> dict | list | None:
         print(f"gh_board: gh failed: {r.stderr.strip()}", file=sys.stderr)
         return None
     return json.loads(r.stdout) if r.stdout.strip() else None
-
-
-def _issue_to_story(root: Path) -> dict:
-    reg = root / REGISTRY_DIR
-    out: dict = {}
-    if not reg.is_dir():
-        return out
-    for p in sorted(reg.glob("*.json")):
-        if p.name.endswith(".example.json"):
-            continue
-        try:
-            d = json.loads(p.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, UnicodeDecodeError):
-            continue
-        issue, sid = d.get("issue"), d.get("id")
-        m = re.search(r"(\d+)$", str(issue)) if issue else None
-        if m and isinstance(sid, str):
-            out[int(m.group(1))] = sid
-    return out
 
 
 def main() -> int:
@@ -87,8 +64,8 @@ def main() -> int:
         print(f"gh_board: no {SNAPSHOT} — run gh_sync.py first", file=sys.stderr)
         return 1
     snapshot = json.loads(snap_path.read_text(encoding="utf-8"))
-    by_number = {e.get("number"): e for e in snapshot.get("issues", [])}
-    mapping = _issue_to_story(root)
+    by_number = {e.get("number"): e for e in snapshot.get("issues", [])
+                 if e.get("number") is not None}
 
     cmd = ["project", "item-list", project, "--format", "json", "--limit", "500"]
     if owner:
@@ -101,6 +78,8 @@ def main() -> int:
     for item in (data.get("items", []) if isinstance(data, dict) else []):
         content = item.get("content") or {}
         num = content.get("number")
+        if num is None:  # a draft / numberless card is not an issue
+            continue
         entry = by_number.get(num)
         if entry is None:
             continue

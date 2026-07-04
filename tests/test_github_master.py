@@ -287,6 +287,19 @@ def test_board_deprecated_exempt(render, tmp_path):
     assert r.returncode == 0, r.stdout
 
 
+def test_board_non_string_fails_clean(render, tmp_path):
+    # a hand-edited numeric board_status must fail clean (unknown column), never
+    # traceback on .lower()
+    out = _render(render, tmp_path)
+    _story(out, "STORY-0001", status="in-progress")
+    e = _entry("STORY-0001", status="in-progress")
+    e["board_status"] = 42
+    _snapshot(out, e)
+    r = _run(out)
+    assert r.returncode == 1 and "not a known" in r.stdout
+    assert "Traceback" not in r.stdout and "Traceback" not in r.stderr
+
+
 def test_board_tool_present_when_on(render, tmp_path):
     out = _render(render, tmp_path)
     assert (out / "scripts/process/gh_board.py").is_file()
