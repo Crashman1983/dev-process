@@ -65,13 +65,26 @@ def test_runner_fails_loud_on_manifest_without_modules(render, tmp_path):
 
 
 def test_runner_all_modules_off_is_still_green(render, tmp_path):
-    # legitimate zero-gate state: manifest present, every module false
+    # every module false: only the core gate(s) run, and pass on a clean tree
     out = render(tmp_path, {"project_name": "d"})
     r = subprocess.run(
         [sys.executable, str(out / "scripts/process/gate_runner.py")],
         cwd=out, capture_output=True, text=True,
     )
     assert r.returncode == 0, r.stderr
+
+
+def test_core_gate_runs_with_all_modules_off(render, tmp_path):
+    # a core gate (module key None) guards a core artifact (docs/process/adr/),
+    # so it must run even when every optional module is off — otherwise
+    # decision-record integrity could silently go unchecked.
+    out = render(tmp_path, {"project_name": "d"})
+    r = subprocess.run(
+        [sys.executable, str(out / "scripts/process/gate_runner.py"), "--list"],
+        cwd=out, capture_output=True, text=True,
+    )
+    assert r.returncode == 0, r.stderr
+    assert "decision-records" in r.stdout
 
 
 def test_workflow_rendered(render, tmp_path):

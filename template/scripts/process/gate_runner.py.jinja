@@ -17,8 +17,13 @@ except ImportError:
     print("gate-runner: PyYAML is required — pip install 'PyYAML>=6'", file=sys.stderr)
     raise SystemExit(1)
 
-# gate-name -> (module answer key, command relative to repo root)
+# gate-name -> (module answer key, command relative to repo root).
+# A module key of None marks a *core* gate: it ships in core and always runs,
+# regardless of the manifest. Core gates guard artifacts that are themselves
+# core (e.g. docs/process/adr/), so their enforcement must not hinge on an
+# optional module being enabled.
 GATES = {
+    "decision-records": (None, [sys.executable, "scripts/process/check_decisions.py", "."]),
     "doc-drift-gate": ("doc_drift_gate", [sys.executable, "scripts/process/check_doc_drift.py", "."]),
     "arch-onboarding": ("arch_onboarding", [sys.executable, "scripts/process/check_architecture.py", "."]),
     "feature-registry": ("feature_registry", [sys.executable, "scripts/process/check_feature_registry.py", "."]),
@@ -71,7 +76,8 @@ def main() -> int:
         )
         return 1
     mods = load_modules(root)
-    active = [name for name, (key, _cmd) in GATES.items() if mods.get(key)]
+    # core gates (key is None) always run; module gates run when their key is on
+    active = [name for name, (key, _cmd) in GATES.items() if key is None or mods.get(key)]
     if "--list" in sys.argv:
         for g in active:
             print(g)
