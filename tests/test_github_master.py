@@ -67,6 +67,7 @@ def test_artifacts_absent_when_off(render, tmp_path):
     out = render(tmp_path, {"project_name": "d"})
     assert not (out / "scripts/process/check_github_master.py").exists()
     assert not (out / "scripts/process/gh_sync.py").exists()
+    assert not (out / "scripts/process/gh_board.py").exists()
     assert not (out / "docs/process/modules/github-master.md").exists()
 
 
@@ -74,7 +75,8 @@ def test_artifacts_neutral(render, tmp_path):
     out = _render(render, tmp_path)
     for rel in ["docs/process/modules/github-master.md",
                 "scripts/process/check_github_master.py",
-                "scripts/process/gh_sync.py"]:
+                "scripts/process/gh_sync.py",
+                "scripts/process/gh_board.py"]:
         text = (out / rel).read_text()
         for k in KENNI:
             assert k not in text, f"{k} leaked in {rel}"
@@ -227,6 +229,67 @@ def test_unknown_top_level_key_hard(render, tmp_path):
         {"generated_by": "t", "bogus": 1, "issues": [_entry("STORY-0001")]}))
     r = _run(out)
     assert r.returncode == 1 and "unknown top-level key" in r.stdout
+
+
+def _board(entry, col):
+    entry = dict(entry)
+    entry["board_status"] = col
+    return entry
+
+
+def test_board_unknown_column_hard(render, tmp_path):
+    out = _render(render, tmp_path)
+    _story(out, "STORY-0001", status="in-progress")
+    _snapshot(out, _board(_entry("STORY-0001", status="in-progress"), "Frozen"))
+    r = _run(out)
+    assert r.returncode == 1 and "not a known" in r.stdout
+
+
+def test_board_column_status_mismatch_hard(render, tmp_path):
+    out = _render(render, tmp_path)
+    _story(out, "STORY-0001", status="in-progress")
+    # card in Done while the story is in-progress
+    _snapshot(out, _board(_entry("STORY-0001", status="in-progress"), "Done"))
+    r = _run(out)
+    assert r.returncode == 1 and "implies status 'done'" in r.stdout
+
+
+def test_board_backlog_proposed_ok(render, tmp_path):
+    out = _render(render, tmp_path)
+    _story(out, "STORY-0001", status="proposed")
+    _snapshot(out, _board(_entry("STORY-0001", status="proposed"), "Backlog"))
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+
+
+def test_board_review_maps_to_in_progress_ok(render, tmp_path):
+    out = _render(render, tmp_path)
+    _story(out, "STORY-0001", status="in-progress")
+    _snapshot(out, _board(_entry("STORY-0001", status="in-progress"), "Review"))
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+
+
+def test_board_done_consistent_ok(render, tmp_path):
+    out = _render(render, tmp_path)
+    _story(out, "STORY-0001", status="done")
+    _snapshot(out, _board(_entry("STORY-0001", state="closed", status="done"), "Done"))
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+
+
+def test_board_deprecated_exempt(render, tmp_path):
+    out = _render(render, tmp_path)
+    _story(out, "STORY-0001", status="deprecated")
+    e = _board(_entry("STORY-0001", state="closed", status="deprecated"), "Done")
+    _snapshot(out, e)
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+
+
+def test_board_tool_present_when_on(render, tmp_path):
+    out = _render(render, tmp_path)
+    assert (out / "scripts/process/gh_board.py").is_file()
 
 
 def test_parent_drift_hard(render, tmp_path):

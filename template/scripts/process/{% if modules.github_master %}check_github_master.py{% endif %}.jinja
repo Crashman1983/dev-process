@@ -24,6 +24,10 @@ SNAPSHOT = ".process-work/github-snapshot.json"
 # process status -> the GitHub issue state it must map to
 STATUS_STATE = {"proposed": "open", "in-progress": "open",
                 "done": "closed", "deprecated": None}  # deprecated: either
+# board column (case-insensitive) -> the story status it implies
+BOARD_STATUS = {"backlog": "proposed", "ready": "proposed",
+                "in-progress": "in-progress", "in progress": "in-progress",
+                "review": "in-progress", "done": "done"}
 ENTRY_KEYS = {"number", "story", "title", "state", "status",
               "blocked_by", "parent", "board_status"}
 
@@ -149,6 +153,16 @@ def check(root: Path) -> tuple[list[str], list[str]]:
         if e.get("parent") is not None and s["parent"] != e["parent"]:
             hard.append(f"{s['rel']}: {sid} parent drifts from GitHub "
                         f"({s['parent']!r} vs {e['parent']!r}) — re-sync sub-issue link")
+        # board column consistency (deprecated stories are off the board, exempt)
+        board = e.get("board_status")
+        if board is not None and s["status"] != "deprecated":
+            col = board.lower() if isinstance(board, str) else None
+            if col not in BOARD_STATUS:
+                hard.append(f"{s['rel']}: {sid} board column {board!r} is not a known "
+                            f"column ({', '.join(sorted(set(BOARD_STATUS)))})")
+            elif s["status"] != BOARD_STATUS[col]:
+                hard.append(f"{s['rel']}: {sid} board column {board!r} implies status "
+                            f"{BOARD_STATUS[col]!r}, but the story is {s['status']!r}")
         if isinstance(e.get("blocked_by"), list) and \
                 sorted(s["blocked_by"]) != sorted(e["blocked_by"]):
             hard.append(f"{s['rel']}: {sid} blocked_by drifts from GitHub "
