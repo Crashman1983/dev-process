@@ -46,10 +46,44 @@ The one step that is supposed to be independent is easy to run in the wrong
 context by accident. So the review records how it ran — bundle-only, by a
 non-implementing process, and (at Tier 4) cross-model — as part of its result.
 A review that cannot make those claims is treated as a warm self-check: one
-tier weaker than it claims, and the merge decision weighs it accordingly. This
-makes the independence claim explicit and reviewable in the review record
-rather than assumed — a judgment applied at the gate, not a machine-checked
-gate itself.
+tier weaker than it claims. This makes the independence claim explicit and
+reviewable rather than assumed.
+
+The record is a structured `REVIEW` line in the journal, one per review:
+
+```
+REVIEW work=42 tier=3 reviewer=fresh-agent model=cross independence=bundle,non-implementing verdict=pass round=1
+```
+
+`independence` is a comma set drawn from `bundle,non-implementing,cross-model,
+single-family`; `single-family` is the explicit honesty flag for "only one
+model family was available — I did not fake cross-model". Grammar and fields
+are documented with the other working-memory records in
+`journal-state-plans.md`.
+
+## Enforcement
+
+The `review` gate (`scripts/process/check_review.py`, core and always-on)
+enforces what a language-agnostic gate honestly can, and no more:
+
+- **Arithmetic.** A `verdict=pass` may not claim to clear a tier its flags do
+  not support: a self-review (`non-implementing` absent) or a warm review
+  (`bundle` absent) cannot clear Tier 2+, and a Tier 4 pass must carry
+  `cross-model` or the explicit `single-family` acknowledgment. This is the
+  "one tier weaker" rule above, turned from prose into a check.
+- **Presence.** A plan is archived on merge; an **archived** plan that declares
+  `tier: N` with N ≥ 3 must carry a clearing `verdict=pass` `REVIEW` (matching
+  `work`, `tier ≥ N`) or an explicit `review-waived: <reason>` line. So a
+  Tier 3+ change cannot merge with no independent review — or it merges as a
+  named, auditable exception.
+
+What the gate **cannot** do is verify the reviewer was *truthfully* a different
+agent or model — it never sees the review runtime. That claim stays attested.
+The gate makes a weak, absent, or over-claiming attestation *block the merge*
+instead of being weighed by a human; it does not pretend to check identity.
+Presence keys on archived plans (not in-flight ones), so it never reds CI
+mid-development, and the `review-waived:` escape keeps honest single-agent
+setups unblocked.
 
 ## Why this is efficient, not just safe
 

@@ -52,6 +52,35 @@ def test_risk_tiers_recognition_questions(render, tmp_path):
     assert "persistence" in text and "untrusted" in text
 
 
+def test_verification_independence_names_enforcement_gate(render, tmp_path):
+    # SP19: the attestation is gated, not just prose. The doc must name the gate,
+    # the arithmetic, and the presence check — and stay honest that identity is
+    # attested, not machine-verified.
+    out = render(tmp_path, {"project_name": "demo"})
+    text = (out / "docs/process/verification-independence.md").read_text()
+    assert "## Enforcement" in text
+    assert "check_review.py" in text
+    assert "REVIEW" in text and "single-family" in text
+    assert "review-waived" in text
+    assert "attested" in text  # identity truthfulness stays attested
+
+
+def test_mandatory_rules_rule7_names_gated_attestation(render, tmp_path):
+    out = render(tmp_path, {"project_name": "demo"})
+    text = (out / "docs/process/mandatory-rules.md").read_text()
+    assert "REVIEW" in text and "attestation" in text
+    assert "review-waived" in text
+
+
+def test_journal_state_plans_documents_tier_field_and_review_record(render, tmp_path):
+    out = render(tmp_path, {"project_name": "demo"})
+    text = (out / "docs/process/journal-state-plans.md").read_text()
+    assert "tier: N" in text  # machine-readable plan tier field
+    assert "## Review attestations" in text
+    assert "REVIEW work=" in text
+    assert "independence" in text
+
+
 def test_mandatory_rules_names_decision_records_and_patch_count(render, tmp_path):
     # rule 4 must anchor the decision-record duty and the increment-vs-rewrite
     # call, otherwise significant non-feature decisions have no home and the

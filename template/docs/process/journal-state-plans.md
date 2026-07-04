@@ -35,6 +35,38 @@ after a break. One file per branch. Wherever other efforts' state files are visi
 (from the plan phase). Archived to `.process-work/plans/archive/` on merge. Designs
 from the brainstorm phase live beside plans as `design-<topic>.md`.
 
+A plan carries one machine-readable line, `tier: N`, recording the derived risk
+tier (`risk-tiers.md`). It is the single tier source the `review` gate keys on:
+once the plan is archived (i.e. the work merged), a declared `tier: 3` or higher
+must have a clearing review attestation (below) or a named `review-waived:`
+exception. A plan without a `tier:` line is simply not presence-enforced — the
+field is opt-in, and its absence is a note, never a failure.
+
+## Review attestations
+
+The `review` gate reads `REVIEW` lines from the journal — one per review, the
+structured record of how independent the review actually was (see
+`verification-independence.md`). Fields, space-separated `key=value` in any
+order, values without spaces:
+
+```
+REVIEW work=42 tier=3 reviewer=fresh-agent model=cross independence=bundle,non-implementing verdict=pass round=1
+```
+
+| field | meaning |
+|---|---|
+| `work` | attribution: the issue number, or the archived plan's slug it reviews |
+| `tier` | the reviewed change's tier (0–4) |
+| `reviewer` | an id for the reviewing process (presence gated; truthfulness attested) |
+| `model` | reviewing model-family slug, or `same` if the producer's family |
+| `independence` | comma set ⊆ `bundle,non-implementing,cross-model,single-family` |
+| `verdict` | `pass` \| `block` |
+| `round` | 1, 2, … |
+
+A `REVIEW` inside a ```-fenced block is a quotation and is ignored (quote
+literal examples only there). Grammar and the independence arithmetic the gate
+enforces on a `pass` are in `verification-independence.md`.
+
 ## Parallel efforts
 
 The process runs several efforts at once cleanly, and the split between what is
