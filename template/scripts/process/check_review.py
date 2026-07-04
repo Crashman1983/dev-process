@@ -43,6 +43,20 @@ WAIVED = re.compile(r"^\s*review-waived:\s*\S", re.IGNORECASE | re.MULTILINE)
 DATE_PREFIX = re.compile(r"^\d{4}-\d{2}-\d{2}-")
 
 
+def _unfenced(text: str) -> str:
+    """Text with ```-fenced blocks removed. A `tier:`/`issue:`/`review-waived:`
+    line inside a fenced example is a quotation, not a declaration — the same
+    discipline the journal parser applies to REVIEW lines."""
+    out, fenced = [], False
+    for line in text.splitlines():
+        if line.strip().startswith("```"):
+            fenced = not fenced
+            continue
+        if not fenced:
+            out.append(line)
+    return "\n".join(out)
+
+
 def parse_review_lines(text: str) -> tuple[list[tuple[int, dict]], list[tuple[int, str]]]:
     """Return (records, errors). A record is (lineno, field-dict) for a
     well-formed REVIEW line; an error is (lineno, message) for a malformed one.
@@ -67,6 +81,9 @@ def parse_review_lines(text: str) -> tuple[list[tuple[int, dict]], list[tuple[in
             k, v = t.split("=", 1)
             if not v:
                 malformed = f"empty value for {k!r}"
+                break
+            if k in fields:
+                malformed = f"duplicate key {k!r}"
                 break
             fields[k] = v
         if malformed:
@@ -118,10 +135,15 @@ def _arithmetic_violations(rel: str, records: list[tuple[int, dict]]) -> list[st
     return hard
 
 
-def _plan_work_ids(stem: str, text: str) -> set[str]:
+def _plan_work_ids(stem: str, text: str, *, include_dedated: bool) -> set[str]:
     """The identifiers a REVIEW's `work=` may use to match this plan: the file
-    stem, the stem without a leading date, and any `issue:` it declares."""
-    ids = {stem, DATE_PREFIX.sub("", stem)}
+    stem, any `issue:` it declares, and — only when it is unique across the
+    archive — the stem without its leading date. A de-dated slug shared by two
+    archived plans (a feature re-planned on another day) is dropped, so one
+    review cannot silently clear both."""
+    ids = {stem}
+    if include_dedated:
+        ids.add(DATE_PREFIX.sub("", stem))
     for m in ISSUE_DECL.finditer(text):
         ids.add(m.group(1))
     return ids
@@ -154,10 +176,15 @@ def check(root: Path) -> tuple[list[str], list[str]]:
     adir = root / PLANS_ARCHIVE
     enforced_any = False
     if adir.is_dir():
-        for p in sorted(adir.glob("*.md")):
-            if p.name.startswith("design-"):
-                continue
-            text = p.read_text(encoding="utf-8", errors="replace")
+        plans = [p for p in sorted(adir.glob("*.md")) if not p.name.startswith("design-")]
+        # a de-dated slug shared by two archived plans is ambiguous — one review
+        # must not clear both, so such slugs are excluded from matching
+        dedated_counts: dict[str, int] = {}
+        for p in plans:
+            key = DATE_PREFIX.sub("", p.stem)
+            dedated_counts[key] = dedated_counts.get(key, 0) + 1
+        for p in plans:
+            text = _unfenced(p.read_text(encoding="utf-8", errors="replace"))
             m = TIER_DECL.search(text)
             if not m:
                 soft.append(f"{PLANS_ARCHIVE}/{p.name}: no 'tier:' declaration "
@@ -169,7 +196,8 @@ def check(root: Path) -> tuple[list[str], list[str]]:
             enforced_any = True
             if WAIVED.search(text):
                 continue
-            ids = _plan_work_ids(p.stem, text)
+            unique = dedated_counts[DATE_PREFIX.sub("", p.stem)] == 1
+            ids = _plan_work_ids(p.stem, text, include_dedated=unique)
             cleared = any(f["work"] in ids and int(f["tier"]) >= tier for f in passes)
             if not cleared:
                 hard.append(f"{PLANS_ARCHIVE}/{p.name}: archived plan declares tier {tier} "
