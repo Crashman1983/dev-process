@@ -81,6 +81,14 @@ def test_journal_state_plans_documents_tier_field_and_review_record(render, tmp_
     assert "independence" in text
 
 
+def test_journal_state_plans_documents_plan_issue_field(render, tmp_path):
+    out = render(tmp_path, {"project_name": "demo"})
+    text = (out / "docs/process/journal-state-plans.md").read_text()
+    assert "issue: <ref>" in text  # optional plan issue link
+    assert "issue-before-code" in text
+    assert "issue-waived" in text
+
+
 def test_mandatory_rules_names_decision_records_and_patch_count(render, tmp_path):
     # rule 4 must anchor the decision-record duty and the increment-vs-rewrite
     # call, otherwise significant non-feature decisions have no home and the

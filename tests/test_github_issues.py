@@ -205,6 +205,14 @@ def test_plan_enforced_even_without_feature_registry(render, tmp_path):
     assert "issue-before-code" in r.stdout
 
 
+def test_module_doc_names_issue_before_code(render, tmp_path):
+    out = _render(render, tmp_path)
+    t = (out / "docs/process/modules/github-issues.md").read_text()
+    assert "## Issue before code" in t
+    assert "issue-waived" in t
+    assert "not gated" in t  # the claim workflow is convention, honestly labeled
+
+
 def _stub_gh(bindir: Path, code: int, stdout: str = ""):
     bindir.mkdir(parents=True, exist_ok=True)
     p = bindir / "gh"

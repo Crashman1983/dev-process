@@ -42,6 +42,12 @@ must have a clearing review attestation (below) or a named `review-waived:`
 exception. A plan without a `tier:` line is simply not presence-enforced — the
 field is opt-in, and its absence is a note, never a failure.
 
+A plan may also carry an `issue: <ref>` line linking its tracking issue (`#N`,
+`owner/repo#N`, or a URL). When the `github-issues` module is installed, an
+*active* Tier 3+ plan must carry that link before code — issue-before-code — or
+a named `issue-waived:` exception; the review gate also uses `issue:` to match a
+review attestation to its plan.
+
 ## Review attestations
 
 The `review` gate reads `REVIEW` lines from the journal — one per review, the
