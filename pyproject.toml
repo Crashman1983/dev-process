@@ -1,6 +1,6 @@
 [project]
 name = "dev-process"
-version = "1.7.0"
+version = "1.8.0"
 description = "Portable, harness-agnostic AI-assisted development process (copier template)"
 license = "LicenseRef-Prosperity-3.0.0"
 license-files = ["LICENSE.md"]
