@@ -125,6 +125,40 @@ def test_changeplanned_with_link_is_clean(render, tmp_path):
     assert "no follow-up linked" not in r.stdout
 
 
+def test_prose_reference_does_not_satisfy_index_hard(render, tmp_path):
+    # regression: a bare ADR-NNNN mention in README prose (e.g. another record's
+    # "Superseded by ADR-0002" status) must NOT count the file as listed —
+    # only a real index table row does. Otherwise unindexed files pass green.
+    out = render(tmp_path, {"project_name": "demo"})
+    _write_adr(out, "0002", list_it=False)  # no index row of its own
+    readme = out / ADR / "README.md"
+    # 0002 appears only in prose / a supersession mention, not as its own row
+    readme.write_text(readme.read_text() + "\nSee also: superseded by ADR-0002 someday.\n")
+    r = _run(out)
+    assert r.returncode == 1
+    assert "not listed" in r.stdout and "ADR-2" in r.stdout
+
+
+def test_annotated_and_list_values_are_not_false_red(render, tmp_path):
+    # cosmetic formatting must not hard-fail a genuine value: trailing
+    # annotation, trailing period, list marker, deeper heading level.
+    out = render(tmp_path, {"project_name": "demo"})
+    p = out / ADR / "adr-0002-example.md"
+    p.write_text(
+        "# ADR-0002: Example\n\n"
+        "### Status\n\n- Accepted (2026-01).\n\n"
+        "## Type\n\nproduct\n\n"
+        "## Intent\n\nkeep\n\n"
+        "## Context\n\nBody.\n",
+        encoding="utf-8",
+    )
+    readme = out / ADR / "README.md"
+    readme.write_text(readme.read_text() + "\n| 0002 | Example | Accepted |\n")
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+    assert "not a valid" not in r.stdout and "no '## Status'" not in r.stdout
+
+
 def test_non_utf8_hard(render, tmp_path):
     out = render(tmp_path, {"project_name": "demo"})
     p = out / ADR / "adr-0002-binary.md"

@@ -40,13 +40,13 @@ TYPE_OK = {"architecture", "product", "process"}
 
 
 def _section_value(text: str, name: str) -> tuple[str | None, int | None]:
-    """The first non-empty line under `## <name>`, and its 1-based line number.
-    (None, heading-line) if the section is present but empty; (None, None) if
-    the section heading is absent."""
+    """The first non-empty line under a `## <name>` heading (any heading level
+    is tolerated), and its 1-based line number. (None, heading-line) if the
+    section is present but empty; (None, None) if the heading is absent."""
+    heading = re.compile(rf"^#{{1,6}}\s+{re.escape(name)}\s*$", re.IGNORECASE)
     lines = text.splitlines()
-    want = f"## {name}".lower()
     for i, line in enumerate(lines):
-        if line.strip().lower() == want:
+        if heading.match(line.strip()):
             for j in range(i + 1, len(lines)):
                 s = lines[j].strip()
                 if s:
@@ -60,6 +60,18 @@ def _is_menu(value: str) -> bool:
     return "|" in value
 
 
+def _first_token(value: str) -> str:
+    """Normalize an axis value to its leading keyword: strip a markdown list
+    marker, take the first whitespace-delimited word, drop trailing
+    punctuation, lowercase. Lets `- Accepted`, `Accepted.`, `Accepted (2026)`
+    all read as `accepted` — cosmetic formatting is not a wrong value."""
+    v = value.strip()
+    if v.startswith(("- ", "* ")):
+        v = v[2:].strip()
+    parts = v.split()
+    return parts[0].strip(".,;:").lower() if parts else ""
+
+
 def _listed_numbers(root: Path) -> set[int]:
     """Decision numbers the README index references — as `ADR-NNNN` tokens or as
     leading table cells `| NNNN |`. Zero-pad-insensitive."""
@@ -71,8 +83,10 @@ def _listed_numbers(root: Path) -> set[int]:
     except UnicodeDecodeError:
         return set()
     nums: set[int] = set()
-    for m in re.finditer(r"ADR-0*(\d+)", text):
-        nums.add(int(m.group(1)))
+    # Only index *table rows* count as "listed". A bare ADR-NNNN mention in
+    # prose — most naturally another record's "Superseded by ADR-NNNN" status,
+    # the very case that puts a fresh number in the file — must NOT satisfy the
+    # index requirement, or a genuinely unindexed decision file passes green.
     for m in re.finditer(r"^\s*\|\s*0*(\d+)\s*\|", text, re.MULTILINE):
         nums.add(int(m.group(1)))
     return nums
@@ -109,7 +123,7 @@ def check(root: Path) -> tuple[list[str], list[str]]:
         intent, i_line = _section_value(text, "Intent")
 
         # --- Status (universal; every decision has a lifecycle) ---
-        status_norm = None
+        status_tok = None
         if status is None:
             if s_line is None:
                 hard.append(f"{rel}: no '## Status' section — lifecycle unstated")
@@ -118,8 +132,8 @@ def check(root: Path) -> tuple[list[str], list[str]]:
         elif _is_menu(status):
             soft.append(f"{rel}:{s_line}: Status not chosen (still the template menu)")
         else:
-            status_norm = status.lower()
-            if status_norm not in STATUS_OK and not status_norm.startswith("superseded"):
+            status_tok = _first_token(status)
+            if status_tok not in STATUS_OK and status_tok != "superseded":
                 hard.append(f"{rel}:{s_line}: Status {status!r} is not a valid "
                             f"lifecycle (Proposed | Accepted | Superseded ...)")
 
@@ -129,12 +143,12 @@ def check(root: Path) -> tuple[list[str], list[str]]:
                         f"default; add architecture | product | process")
         elif _is_menu(type_):
             soft.append(f"{rel}:{t_line}: Type not chosen (still the template menu)")
-        elif type_.lower() not in TYPE_OK:
+        elif _first_token(type_) not in TYPE_OK:
             hard.append(f"{rel}:{t_line}: Type {type_!r} is not one of "
                         f"architecture | product | process")
 
         # --- Intent (endorsement axis; absence is soft) ---
-        intent_norm = None
+        intent_tok = None
         if intent is None:
             if i_line is None:
                 soft.append(f"{rel}: no '## Intent' section — endorsement unstated")
@@ -143,19 +157,19 @@ def check(root: Path) -> tuple[list[str], list[str]]:
         elif _is_menu(intent):
             soft.append(f"{rel}:{i_line}: Intent not chosen (still the template menu)")
         else:
-            intent_norm = intent.lower()
-            if intent_norm not in INTENT_OK:
+            intent_tok = _first_token(intent)
+            if intent_tok not in INTENT_OK:
                 hard.append(f"{rel}:{i_line}: Intent {intent!r} is not one of "
                             f"keep | change-planned | tolerated")
 
         # --- coherence: a superseded decision cannot be kept or migration-planned ---
-        if (status_norm and status_norm.startswith("superseded")
-                and intent_norm in {"keep", "change-planned"}):
-            hard.append(f"{rel}:{i_line}: Superseded record with Intent={intent_norm!r} "
+        if (status_tok == "superseded"
+                and intent_tok in {"keep", "change-planned"}):
+            hard.append(f"{rel}:{i_line}: Superseded record with Intent={intent_tok!r} "
                         f"— a superseded decision is historical, not kept/change-planned")
 
         # --- change-planned should link its follow-up (soft) ---
-        if intent_norm == "change-planned":
+        if intent_tok == "change-planned":
             body_others = re.sub(rf"\bADR-0*{num}\b", "", text)  # ignore self-refs
             if not re.search(r"\bADR-\d+\b", body_others) and "http" not in text:
                 soft.append(f"{rel}:{i_line}: Intent=change-planned but no follow-up "
