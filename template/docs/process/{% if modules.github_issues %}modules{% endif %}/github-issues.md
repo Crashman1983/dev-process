@@ -85,3 +85,13 @@ makes a shared backlog legible when several efforts run at once.
 3. Post a heartbeat comment on long-running work (a cadence the team agrees —
    e.g. every ~90 min of active work), so a stalled claim is visible.
 4. On merge: remove `status:in-progress`, close the issue with the commit ref.
+
+## Optional: render story dependencies
+
+A story's `blocked_by` (feature-registry) is the portable source of truth for
+sequencing. If you want it visible on GitHub, render it into the issue body as a
+`Blocked by #N` line (or use GitHub's native issue relationships). This is a
+one-way projection *from* the registry — a convenience, never the source of
+truth, and not gated (it needs a write token). The feature-registry module's
+`story_order.py` tool prints the ready-to-start order from the same data without
+touching GitHub.

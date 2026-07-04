@@ -27,10 +27,32 @@ stories diff and merge independently):
 - **tests** — paths (optionally with a `::node` selector) to the tests that
   prove the acceptance. `status: done` needs at least one.
 - **adr** (optional) — `ADR-NNNN` linking a decision under `docs/process/adr/`.
+- **blocked_by** (optional) — a list of `STORY-NNNN` ids this story depends on
+  (sequencing, not decomposition). Absent or `[]` means no dependency.
 - **issue**, **links** (optional) — forward-compat slots for the GitHub-Issues
   and contracts modules; stored but not yet enforced.
 
 Copy `STORY-0001.example.json` (shipped, inert) as a starting point.
+
+## Dependencies and ready-to-start order
+
+`blocked_by` records that one story must land before another. The gate keeps the
+dependency graph honest; a read-only tool turns it into a work order.
+
+- **Hard (CI fails):** a `blocked_by` that is not a list of `STORY-NNNN`; a ref
+  to a story that does not exist (dangling); a story listing **itself**; a
+  **dependency cycle** (reported with its path — an unbuildable order).
+- **Best-effort:** a `done` story whose blocker is not itself `done` — a note
+  that the order looks off, never a block (status can move out of order during a
+  migration).
+- `python scripts/process/story_order.py` (read-only, never a gate) prints the
+  **ready-to-start** stories (no unfinished blockers), the **blocked** ones with
+  what they wait on, and a suggested topological order.
+
+`blocked_by` is sequencing between siblings; it is not parent/child
+decomposition. Rendering the dependency into a GitHub issue as "Blocked by #N"
+is an optional projection — see the `github-issues` module — never the source of
+truth, which stays here in the registry.
 
 ## What the gate verifies
 
