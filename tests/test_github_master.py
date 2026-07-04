@@ -182,6 +182,53 @@ def test_blocked_by_drift_hard(render, tmp_path):
     assert r.returncode == 1 and "blocked_by drifts" in r.stdout
 
 
+def test_status_drift_same_state_hard(render, tmp_path):
+    # proposed vs in-progress both map to 'open' — the direct status compare
+    # must still catch the divergence (F2)
+    out = _render(render, tmp_path)
+    _story(out, "STORY-0001", status="proposed")
+    _snapshot(out, _entry("STORY-0001", state="open", status="in-progress"))
+    r = _run(out)
+    assert r.returncode == 1 and "status drifts" in r.stdout
+
+
+def test_malformed_blocked_by_type_fails_clean(render, tmp_path):
+    # a hand-edited snapshot with a non-list blocked_by must fail clean, not
+    # traceback (F1)
+    out = _render(render, tmp_path)
+    _story(out, "STORY-0001")
+    e = _entry("STORY-0001")
+    e["blocked_by"] = 5
+    _snapshot(out, e)
+    r = _run(out)
+    assert r.returncode == 1
+    assert "blocked_by" in r.stdout and "must be a list" in r.stdout
+    assert "Traceback" not in r.stdout and "Traceback" not in r.stderr
+
+
+def test_duplicate_snapshot_entry_hard(render, tmp_path):
+    # a duplicate story entry must not silently mask a divergent one (F3)
+    out = _render(render, tmp_path)
+    _story(out, "STORY-0001", title="Right")
+    _snapshot(out,
+              _entry("STORY-0001", number=8, title="WRONG", state="closed", status="done"),
+              _entry("STORY-0001", number=7, title="Right"))
+    r = _run(out)
+    assert r.returncode == 1 and "duplicate entry" in r.stdout
+
+
+def test_unknown_top_level_key_hard(render, tmp_path):
+    # top-level strictness symmetric with per-entry strictness (F4)
+    out = _render(render, tmp_path)
+    _story(out, "STORY-0001")
+    d = out / ".process-work"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "github-snapshot.json").write_text(json.dumps(
+        {"generated_by": "t", "bogus": 1, "issues": [_entry("STORY-0001")]}))
+    r = _run(out)
+    assert r.returncode == 1 and "unknown top-level key" in r.stdout
+
+
 def test_unknown_snapshot_key_hard(render, tmp_path):
     out = _render(render, tmp_path)
     _story(out, "STORY-0001")

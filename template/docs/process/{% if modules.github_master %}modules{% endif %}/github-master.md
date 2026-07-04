@@ -50,7 +50,8 @@ every other gate in the process.
   ref (the master requires every live story to trace to an issue); a story with
   no snapshot entry, or a snapshot entry with no story (the mirror must be
   complete both ways); **drift** where the registry disagrees with the snapshot
-  on `title` or on the status↔state mapping (and on a non-null `blocked_by`).
+  on `title`, on `status` (both the value and its open/closed projection), or on
+  a non-null `blocked_by`.
 - **Best-effort (note):** no snapshot yet — expected before the first sync.
 
 Status↔state mapping the gate checks: `done` ⇒ issue **closed**;

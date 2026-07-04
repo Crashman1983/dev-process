@@ -69,7 +69,10 @@ def _load_snapshot(root: Path) -> tuple[dict | None, list[str]]:
         return {}, [f"{SNAPSHOT}: invalid JSON: {exc}"]
     if not isinstance(data, dict) or not isinstance(data.get("issues"), list):
         return {}, [f"{SNAPSHOT}: must be an object with an 'issues' list"]
+    top_extra = set(data) - {"generated_by", "issues"}
     hard: list[str] = []
+    if top_extra:
+        hard.append(f"{SNAPSHOT}: unknown top-level key(s): {sorted(top_extra)}")
     by_story: dict = {}
     for i, e in enumerate(data["issues"]):
         if not isinstance(e, dict):
@@ -82,8 +85,18 @@ def _load_snapshot(root: Path) -> tuple[dict | None, list[str]]:
         if not isinstance(sid, str) or not sid:
             hard.append(f"{SNAPSHOT}: issues[{i}] missing 'story'")
             continue
+        if sid in by_story:  # a duplicate would silently mask a divergent entry
+            hard.append(f"{SNAPSHOT}: duplicate entry for {sid}")
+            continue
         if e.get("state") not in ("open", "closed"):
             hard.append(f"{SNAPSHOT}: {sid} 'state' must be 'open' or 'closed'")
+        # type-guard the slots the drift loop consumes — a malformed committed
+        # snapshot must fail clean, never traceback
+        for key in ("title", "status"):
+            if e.get(key) is not None and not isinstance(e[key], str):
+                hard.append(f"{SNAPSHOT}: {sid} {key!r} must be a string or null")
+        if e.get("blocked_by") is not None and not isinstance(e["blocked_by"], list):
+            hard.append(f"{SNAPSHOT}: {sid} 'blocked_by' must be a list or null")
         by_story[sid] = e
     return by_story, hard
 
@@ -122,11 +135,17 @@ def check(root: Path) -> tuple[list[str], list[str]]:
         if e.get("title") is not None and s["title"] != e["title"]:
             hard.append(f"{s['rel']}: {sid} title drifts from GitHub "
                         f"({s['title']!r} vs {e['title']!r}) — re-sync")
+        # process status is GitHub-mastered (label/board) — compare it directly,
+        # not only its coarse open/closed projection (proposed vs in-progress
+        # both map to 'open' and would otherwise slip)
+        if e.get("status") is not None and s["status"] != e["status"]:
+            hard.append(f"{s['rel']}: {sid} status drifts from GitHub "
+                        f"({s['status']!r} vs {e['status']!r}) — re-sync")
         want_state = STATUS_STATE.get(s["status"])
         if want_state is not None and e.get("state") != want_state:
             hard.append(f"{s['rel']}: {sid} status {s['status']!r} implies "
                         f"issue {want_state}, but snapshot has {e.get('state')!r}")
-        if e.get("blocked_by") is not None and \
+        if isinstance(e.get("blocked_by"), list) and \
                 sorted(s["blocked_by"]) != sorted(e["blocked_by"]):
             hard.append(f"{s['rel']}: {sid} blocked_by drifts from GitHub "
                         f"({sorted(s['blocked_by'])} vs {sorted(e['blocked_by'])})")
