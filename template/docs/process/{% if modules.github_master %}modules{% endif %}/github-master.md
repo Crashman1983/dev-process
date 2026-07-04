@@ -40,10 +40,9 @@ every other gate in the process.
   materialize a story for it.
 - `state` is GitHub open/closed; `status` is the process status (from a
   `status:*` label, else derived).
-- `blocked_by` / `parent` / `board_status` are **nullable slots**. `blocked_by`
-  and `parent` (sub-issues) are drift-checked when non-null; `board_status` is
-  mastered by a later slice. `null` means "not yet mastered here" and the gate
-  skips drift on it.
+- `blocked_by` / `parent` / `board_status` are **nullable slots**, each
+  drift/consistency-checked when non-null (sequencing, sub-issues, the project
+  board). `null` means "not yet mastered here" and the gate skips it.
 
 ## What the gate enforces (all offline)
 
@@ -68,6 +67,28 @@ issue).
 3. Commit the snapshot (and any new story). The gate then verifies, offline,
    that the mirror matches — in CI and locally.
 
-The registry-master default is the alternative: leave this module off and author
-stories directly; GitHub, if used at all, is then a projection (see the
-`github-issues` module), not the master.
+## Project board
+
+A GitHub Project board (Backlog → Ready → In-progress → Review → Done) is
+supported the same two-layer way: `gh_board.py` (network) fills the snapshot's
+`board_status`; the gate checks it offline. The one canonical mapping:
+
+| board column | story `status` | issue `state` |
+|---|---|---|
+| Backlog, Ready | `proposed` | open |
+| In-progress, Review | `in-progress` | open |
+| Done | `done` | closed |
+
+Columns match case-insensitively; `deprecated` stories are off the board
+(exempt). The gate **hard-fails** an unknown column or a column whose implied
+status disagrees with the story — so column, status, and issue state stay
+mutually consistent, all offline. `gh_board.py <project-number> [--owner OWNER]`
+reads the board into the snapshot; `--push` (an explicit extension point) moves a
+card to the column its status implies. The move is a GitHub write — best-effort,
+never a gate.
+
+## The alternative
+
+The registry-master default: leave this module off and author stories directly;
+GitHub, if used at all, is then a projection (see the `github-issues` module),
+not the master.
