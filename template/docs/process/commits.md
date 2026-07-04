@@ -19,7 +19,9 @@ No direct commits to the main branch. The invariant is *isolation*: one feature
 branch per effort, no cross-contamination between parallel efforts. A feature branch
 is the default. Git worktrees are one isolation technique for when several agents or
 tasks share a single machine and clone — separate clones, sessions, or sandboxes
-satisfy the invariant just as well; the mechanism is the environment's choice.
+satisfy the invariant just as well; the mechanism is the environment's choice. How
+parallel efforts stay contention-free during execution and serialize at the merge is
+in `journal-state-plans.md` (Parallel efforts).
 
 ## Merging
 

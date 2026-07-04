@@ -112,6 +112,17 @@ def test_start_here_stack_compass_covers_layers_and_proposal_mode(render, tmp_pa
         assert required in text, required
 
 
+def test_journal_state_plans_shards_journal_and_names_parallel_efforts(render, tmp_path):
+    # the journal must be shardable per branch (the one shared-per-day working-memory
+    # file otherwise conflicts under parallel efforts), and the serialized-integration
+    # trade-off must be named so the rebase-and-re-gate cost is understood, not a surprise.
+    out = render(tmp_path, {"project_name": "demo"})
+    text = (out / "docs/process/journal-state-plans.md").read_text()
+    assert ".process-work/journal/<branch-slug>/YYYY-MM-DD.md" in text  # per-branch shard
+    assert "## Parallel efforts" in text
+    assert "serialized" in text.lower()  # integration is serialized by design
+
+
 def test_commits_doc_names_isolation_invariant_and_both_merge_routes(render, tmp_path):
     # branches are the default and hosted PR/MR merging is a first-class route;
     # a worktree is one isolation option, not a mandate — otherwise the doc is

@@ -11,7 +11,10 @@ grade would otherwise be silently unreadable.
 
 Whenever a phase grades acceptance criteria — execute checkpoints, the review
 gate, quick's lightweight check — it appends **one line per criterion per
-round** to the day's journal (`.process-work/journal/YYYY-MM-DD.md`):
+round** to the day's journal (`.process-work/journal/YYYY-MM-DD.md`, or the
+per-branch shard `.process-work/journal/<branch-slug>/YYYY-MM-DD.md` when efforts
+run in parallel — see `journal-state-plans.md`; the gate and cockpit read journals
+recursively, so either layout works):
 
 ```
 GRADE work=42 checkpoint=final criterion=AC-2 round=1 verdict=partial action=fixed source=execute

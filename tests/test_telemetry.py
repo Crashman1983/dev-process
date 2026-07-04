@@ -527,3 +527,20 @@ def test_source_attribution_ignores_file_order(render, tmp_path):
     ))
     r = _kpis(out, "effectiveness")
     assert "source=review: catch=1" in r.stdout
+
+
+def test_grade_lines_in_sharded_journal_are_read(render, tmp_path):
+    # SP17: journals may be sharded per branch — the gate and cockpit read
+    # .process-work/journal/**/*.md recursively, so a GRADE line in a per-branch
+    # shard must be counted, not lost.
+    out = _render(render, tmp_path)
+    d = out / JOURNAL / "feat-x-branch"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "2026-07-02.md").write_text(
+        "GRADE work=9 checkpoint=final criterion=AC-1 round=1 verdict=satisfied "
+        "action=satisfied source=execute\n", encoding="utf-8")
+    r = _gate(out)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "1 GRADE line(s) parseable" in r.stdout
+    r2 = _kpis(out, "effectiveness")
+    assert "source=execute: catch=0" in r2.stdout and "idle=1" in r2.stdout
