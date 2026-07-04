@@ -191,3 +191,9 @@ The project is ready for normal process-driven development when:
   one real project artifact;
 - `scripts/process/gate_runner.py` runs and all notes are understood as known
   onboarding state.
+
+Once developing: before planning any change, read the Decision Records
+(`docs/process/adr/`) relevant to the area you are about to touch — a decision
+already made and endorsed is a constraint, not an open question. A new
+significant, hard-to-reverse decision (architecture, product, or process) gets
+its own record *before* the code that assumes it (mandatory rule 4).

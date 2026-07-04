@@ -52,6 +52,46 @@ def test_risk_tiers_recognition_questions(render, tmp_path):
     assert "persistence" in text and "untrusted" in text
 
 
+def test_mandatory_rules_names_decision_records_and_patch_count(render, tmp_path):
+    # rule 4 must anchor the decision-record duty and the increment-vs-rewrite
+    # call, otherwise significant non-feature decisions have no home and the
+    # third-patch trap stays unguarded.
+    out = render(tmp_path, {"project_name": "demo"})
+    text = (out / "docs/process/mandatory-rules.md").read_text()
+    assert "Decision Record" in text
+    assert "product" in text and "process" in text  # decisions are typed, not just architecture
+    assert "increment vs. rewrite" in text.lower() or "increment vs rewrite" in text.lower()
+    assert "third patch" in text.lower()
+
+
+def test_start_here_reads_decision_records_before_planning(render, tmp_path):
+    out = render(tmp_path, {"project_name": "demo"})
+    text = (out / "docs/process/start-here.md").read_text()
+    assert "Decision Records" in text
+    assert "before planning" in text
+    assert "the code that assumes it" in text  # new decision recorded before its code
+
+
+def test_decision_record_template_has_type_axis_and_intent_atomicity(render, tmp_path):
+    # the generalized decision record must carry the Type axis and state that
+    # Intent is exactly one value per record (the atomicity forcing function).
+    out = render(tmp_path, {"project_name": "demo"})
+    text = (out / "docs/process/adr/template.md").read_text()
+    assert "## Type" in text
+    for t in ["architecture", "product", "process"]:
+        assert t in text, t
+    assert "one Intent per record" in text or "single value" in text
+    assert "split it" in text
+
+
+def test_decision_records_readme_generalized_and_token_kept(render, tmp_path):
+    out = render(tmp_path, {"project_name": "demo"})
+    text = (out / "docs/process/adr/README.md").read_text()
+    assert "Decision Records" in text
+    assert "product" in text and "process" in text  # not architecture-only
+    assert "ADR-NNNN" in text or "adr-NNNN" in text  # reference token preserved
+
+
 def test_mandatory_rules_required_headings(render, tmp_path):
     out = render(tmp_path, {"project_name": "demo"})
     text = (out / "docs/process/mandatory-rules.md").read_text()
