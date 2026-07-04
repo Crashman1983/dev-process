@@ -26,6 +26,25 @@ _BARE = re.compile(r"^#(\d+)$")
 _CROSS = re.compile(r"^([\w.-]+/[\w.-]+)#(\d+)$")
 _URL = re.compile(r"^https://github\.com/([\w.-]+/[\w.-]+)/issues/(\d+)$")
 
+PLANS_DIR = ".process-work/plans"  # active plans only; archive/ is finished work
+_PLAN_TIER = re.compile(r"^\s*tier:\s*(\d+)\s*$", re.IGNORECASE | re.MULTILINE)
+_PLAN_ISSUE = re.compile(r"^\s*issue:\s*(\S+)\s*$", re.IGNORECASE | re.MULTILINE)
+_PLAN_WAIVED = re.compile(r"^\s*issue-waived:\s*\S", re.IGNORECASE | re.MULTILINE)
+
+
+def _unfenced(text: str) -> str:
+    """Text with ```-fenced blocks removed — a `tier:`/`issue:` line inside a
+    fenced example is a quotation, not a declaration (same discipline the review
+    gate applies)."""
+    out, fenced = [], False
+    for line in text.splitlines():
+        if line.strip().startswith("```"):
+            fenced = not fenced
+            continue
+        if not fenced:
+            out.append(line)
+    return "\n".join(out)
+
 
 def _story_files(root: Path) -> list[Path]:
     reg = root / REGISTRY_DIR
@@ -71,14 +90,47 @@ def _issue_exists(gh: str, repo: str, number: int) -> bool:
     return r.returncode == 0
 
 
+def _check_plans(root: Path) -> tuple[list[str], list[str]]:
+    """Issue-before-code: an *active* plan (in `.process-work/plans/`, not the
+    archive) declaring Tier 3+ must carry a valid `issue:` link, or an explicit
+    `issue-waived: <reason>`. Opt-in by the `tier:` declaration — a plan without
+    it is not enforced. Mirrors the review gate's presence check, but at the
+    start of work rather than the end."""
+    pdir = root / PLANS_DIR
+    if not pdir.is_dir():
+        return [], []
+    hard: list[str] = []
+    for p in sorted(pdir.glob("*.md")):
+        if p.name.startswith("design-"):
+            continue
+        text = _unfenced(p.read_text(encoding="utf-8", errors="replace"))
+        m = _PLAN_TIER.search(text)
+        if not m or int(m.group(1)) < 3:
+            continue
+        rel = f"{PLANS_DIR}/{p.name}"
+        if _PLAN_WAIVED.search(text):
+            continue
+        im = _PLAN_ISSUE.search(text)
+        if not im:
+            hard.append(f"{rel}: tier {int(m.group(1))} plan has no 'issue:' link "
+                        f"(issue-before-code) and no 'issue-waived:' — track it before coding")
+            continue
+        if parse_issue_ref(im.group(1)) is None:
+            hard.append(f"{rel}: malformed issue ref {im.group(1)!r} "
+                        "(want '#N', 'owner/repo#N', or a github issue URL)")
+    return hard, []
+
+
 def check(root: Path) -> tuple[list[str], list[str]]:
+    # issue-before-code on active plans runs whenever the module is on,
+    # independent of whether a feature-registry exists yet
+    hard, soft = _check_plans(root)
     stories = _story_files(root)
     if not stories:
-        return [], ["no stories to check (feature-registry empty or absent)"]
+        soft.append("no stories to check (feature-registry empty or absent)")
+        return hard, soft
     default_repo = _default_repo(root)
     gh = shutil.which("gh")
-    hard: list[str] = []
-    soft: list[str] = []
     gh_absent_noted = False
     for path in stories:
         rel = path.relative_to(root)
