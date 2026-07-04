@@ -192,6 +192,15 @@ def test_dedated_slug_unique_still_clears(render, tmp_path):
     assert r.returncode == 0, r.stdout
 
 
+def test_bulleted_tier_still_enforced_in_review(render, tmp_path):
+    # F1 guard (review gate side): a bulleted archived-plan tier must not escape
+    # the presence check either
+    out = render(tmp_path, {"project_name": "demo"})
+    _archived_plan(out, "2026-07-04-feature.md", "# Plan\n\n- tier: 3\n")
+    r = _run(out)
+    assert r.returncode == 1 and "no clearing REVIEW" in r.stdout
+
+
 def test_presence_no_tier_is_soft(render, tmp_path):
     out = render(tmp_path, {"project_name": "demo"})
     _archived_plan(out, "2026-07-04-feature.md", "# Plan\n\nNo tier here.\n")

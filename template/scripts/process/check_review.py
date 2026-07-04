@@ -37,9 +37,13 @@ PLANS_ARCHIVE = ".process-work/plans/archive"
 REQUIRED = {"work", "tier", "reviewer", "model", "independence", "verdict", "round"}
 INDEP_TOKENS = {"bundle", "non-implementing", "cross-model", "single-family"}
 VERDICTS = {"pass", "block"}
-TIER_DECL = re.compile(r"^\s*tier:\s*(\d+)\s*$", re.IGNORECASE | re.MULTILINE)
-ISSUE_DECL = re.compile(r"^\s*issue:\s*#?(\d+)\s*$", re.IGNORECASE | re.MULTILINE)
-WAIVED = re.compile(r"^\s*review-waived:\s*\S", re.IGNORECASE | re.MULTILINE)
+# tolerant of a leading list bullet and **bold**/_emphasis_ on the key, and of
+# a trailing annotation — a bulleted `- tier: 3` must not escape the presence
+# check (a false-green). Kept identical to the issue gate's plan-field matchers.
+_LEAD = r"^\s*(?:[-*+]\s+)?[*_]*"
+TIER_DECL = re.compile(_LEAD + r"tier[*_]*\s*:\s*[*_]*\s*(\d+)\b", re.IGNORECASE | re.MULTILINE)
+ISSUE_DECL = re.compile(_LEAD + r"issue[*_]*\s*:\s*#?(\d+)\b", re.IGNORECASE | re.MULTILINE)
+WAIVED = re.compile(_LEAD + r"review-waived[*_]*\s*:\s*\S", re.IGNORECASE | re.MULTILINE)
 DATE_PREFIX = re.compile(r"^\d{4}-\d{2}-\d{2}-")
 
 

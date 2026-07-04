@@ -27,9 +27,14 @@ _CROSS = re.compile(r"^([\w.-]+/[\w.-]+)#(\d+)$")
 _URL = re.compile(r"^https://github\.com/([\w.-]+/[\w.-]+)/issues/(\d+)$")
 
 PLANS_DIR = ".process-work/plans"  # active plans only; archive/ is finished work
-_PLAN_TIER = re.compile(r"^\s*tier:\s*(\d+)\s*$", re.IGNORECASE | re.MULTILINE)
-_PLAN_ISSUE = re.compile(r"^\s*issue:\s*(\S+)\s*$", re.IGNORECASE | re.MULTILINE)
-_PLAN_WAIVED = re.compile(r"^\s*issue-waived:\s*\S", re.IGNORECASE | re.MULTILINE)
+# tolerant of a leading list bullet and **bold**/_emphasis_ on the key, and of a
+# trailing annotation after the value — the canonical form is a bare
+# `tier: N` / `issue: <ref>` line, but a plan is hand-written Markdown, and a
+# bulleted `- tier: 3` must not silently escape enforcement (a false-green).
+_LEAD = r"^\s*(?:[-*+]\s+)?[*_]*"
+_PLAN_TIER = re.compile(_LEAD + r"tier[*_]*\s*:\s*[*_]*\s*(\d+)\b", re.IGNORECASE | re.MULTILINE)
+_PLAN_ISSUE = re.compile(_LEAD + r"issue[*_]*\s*:\s*(\S+)", re.IGNORECASE | re.MULTILINE)
+_PLAN_WAIVED = re.compile(_LEAD + r"issue-waived[*_]*\s*:\s*\S", re.IGNORECASE | re.MULTILINE)
 
 
 def _unfenced(text: str) -> str:

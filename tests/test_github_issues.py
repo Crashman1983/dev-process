@@ -197,6 +197,36 @@ def test_archived_tier3_plan_not_issue_checked(render, tmp_path):
     assert r.returncode == 0, r.stdout
 
 
+def test_bulleted_tier_still_enforced(render, tmp_path):
+    # F1 guard: a bulleted `- tier: 3` must not silently escape enforcement
+    out = _render(render, tmp_path)
+    _plan(out, "2026-07-04-feature.md", "# Plan\n\n- tier: 3\n")
+    r = _run(out)
+    assert r.returncode == 1 and "issue-before-code" in r.stdout
+
+
+def test_bold_tier_still_enforced(render, tmp_path):
+    out = _render(render, tmp_path)
+    _plan(out, "2026-07-04-feature.md", "**tier:** 4\n")
+    r = _run(out)
+    assert r.returncode == 1 and "issue-before-code" in r.stdout
+
+
+def test_annotated_issue_accepted(render, tmp_path):
+    # F2 guard: a trailing note after the ref must not false-red
+    out = _render(render, tmp_path)
+    _plan(out, "2026-07-04-feature.md", "tier: 3\nissue: #7 (tracking the rollout)\n")
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+
+
+def test_bulleted_issue_accepted(render, tmp_path):
+    out = _render(render, tmp_path)
+    _plan(out, "2026-07-04-feature.md", "- tier: 3\n- issue: octo/api#7\n")
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+
+
 def test_plan_enforced_even_without_feature_registry(render, tmp_path):
     out = _render(render, tmp_path, feature_registry=False)
     _plan(out, "2026-07-04-feature.md", "tier: 4\n")
