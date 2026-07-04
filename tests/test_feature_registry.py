@@ -96,6 +96,88 @@ def test_valid_story_ok(render, tmp_path):
     assert "registry-gate: OK" in r.stdout
 
 
+def _dep(sid, blocked_by=None, status="proposed"):
+    d = {"id": sid, "title": "t",
+         "story": "As a x, when y, the system shall z.",
+         "acceptance": [{"id": "AC1", "text": "one behaviour."}],
+         "tests": [], "status": status}
+    if blocked_by is not None:
+        d["blocked_by"] = blocked_by
+    return d
+
+
+def test_valid_dependency_chain_ok(render, tmp_path):
+    out = _render(render, tmp_path)
+    _write_story(out, "STORY-0001.json", _dep("STORY-0001", ["STORY-0002"]))
+    _write_story(out, "STORY-0002.json", _dep("STORY-0002"))
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+
+
+def test_dangling_blocked_by_hard(render, tmp_path):
+    out = _render(render, tmp_path)
+    _write_story(out, "STORY-0001.json", _dep("STORY-0001", ["STORY-0099"]))
+    r = _run(out)
+    assert r.returncode == 1
+    assert "no such story" in r.stdout
+
+
+def test_self_reference_hard(render, tmp_path):
+    out = _render(render, tmp_path)
+    _write_story(out, "STORY-0001.json", _dep("STORY-0001", ["STORY-0001"]))
+    r = _run(out)
+    assert r.returncode == 1
+    assert "lists itself" in r.stdout
+
+
+def test_two_cycle_hard(render, tmp_path):
+    out = _render(render, tmp_path)
+    _write_story(out, "STORY-0001.json", _dep("STORY-0001", ["STORY-0002"]))
+    _write_story(out, "STORY-0002.json", _dep("STORY-0002", ["STORY-0001"]))
+    r = _run(out)
+    assert r.returncode == 1
+    assert "dependency cycle" in r.stdout
+
+
+def test_three_cycle_hard(render, tmp_path):
+    out = _render(render, tmp_path)
+    _write_story(out, "STORY-0001.json", _dep("STORY-0001", ["STORY-0002"]))
+    _write_story(out, "STORY-0002.json", _dep("STORY-0002", ["STORY-0003"]))
+    _write_story(out, "STORY-0003.json", _dep("STORY-0003", ["STORY-0001"]))
+    r = _run(out)
+    assert r.returncode == 1
+    assert "dependency cycle" in r.stdout
+
+
+def test_blocked_by_not_list_hard(render, tmp_path):
+    out = _render(render, tmp_path)
+    _write_story(out, "STORY-0001.json", _dep("STORY-0001", "STORY-0002"))  # str, not list
+    r = _run(out)
+    assert r.returncode == 1
+    assert "must be a list" in r.stdout
+
+
+def test_blocked_by_bad_entry_hard(render, tmp_path):
+    out = _render(render, tmp_path)
+    _write_story(out, "STORY-0001.json", _dep("STORY-0001", ["STORY-2"]))  # wrong format
+    r = _run(out)
+    assert r.returncode == 1
+    assert "must match STORY-NNNN" in r.stdout
+
+
+def test_done_with_unfinished_blocker_soft(render, tmp_path):
+    out = _render(render, tmp_path)
+    done = _dep("STORY-0001", ["STORY-0002"], status="done")
+    done["tests"] = ["tests/x/test_a.py"]
+    _write_story(out, "STORY-0001.json", done)
+    _write_story(out, "STORY-0002.json", _dep("STORY-0002", status="proposed"))
+    (out / "tests/x").mkdir(parents=True, exist_ok=True)
+    (out / "tests/x/test_a.py").write_text("def test_a():\n    pass\n")
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+    assert "dependency order looks off" in r.stdout
+
+
 def test_missing_required_field_is_hard(render, tmp_path):
     out = _render(render, tmp_path)
     broken = {k: v for k, v in VALID.items() if k != "title"}

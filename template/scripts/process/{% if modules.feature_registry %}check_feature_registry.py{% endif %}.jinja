@@ -34,7 +34,8 @@ def _adr_exists(root: Path, adr: object) -> bool:
     return bool(list((root / ADR_DIR).glob(f"adr-{int(m.group()):04d}-*.md")))
 
 
-def _check_story(root: Path, path: Path, seen_ids: dict) -> tuple[list[str], list[str]]:
+def _check_story(root: Path, path: Path, seen_ids: dict,
+                 graph: dict) -> tuple[list[str], list[str]]:
     hard: list[str] = []
     soft: list[str] = []
     rel = path.relative_to(root)
@@ -96,7 +97,71 @@ def _check_story(root: Path, path: Path, seen_ids: dict) -> tuple[list[str], lis
     if data.get("status") in ("in-progress", "done") and n_acc > n_tests:
         soft.append(f"{rel}: {n_acc} acceptance criteria but {n_tests} mapped test(s) — coverage unverified")
 
+    # blocked_by: a list of STORY-NNNN ids this story depends on. Format is
+    # validated here; dangling refs and cycles need the whole set (in check()).
+    blocked = data.get("blocked_by", [])
+    deps: list[str] = []
+    if blocked in (None, []):
+        pass
+    elif not isinstance(blocked, list):
+        hard.append(f"{rel}: 'blocked_by' must be a list of STORY-NNNN ids")
+    else:
+        for b in blocked:
+            if not isinstance(b, str) or not ID_RE.match(b):
+                hard.append(f"{rel}: blocked_by entry {b!r} must match STORY-NNNN")
+            else:
+                deps.append(b)
+    if isinstance(sid, str) and ID_RE.match(sid):
+        graph[sid] = {"deps": deps, "status": data.get("status"), "rel": str(rel)}
+
     return hard, soft
+
+
+def _dependency_checks(graph: dict) -> tuple[list[str], list[str]]:
+    """Cross-story dependency validation over the collected graph:
+    node -> {deps, status, rel}. Dangling refs, self-references, and cycles are
+    hard (an unbuildable or lying order); a done story with an unfinished
+    blocker is a soft integrity note."""
+    hard: list[str] = []
+    soft: list[str] = []
+    ids = set(graph)
+    for sid, node in sorted(graph.items()):
+        for d in node["deps"]:
+            if d == sid:
+                hard.append(f"{node['rel']}: {sid} lists itself in blocked_by")
+            elif d not in ids:
+                hard.append(f"{node['rel']}: blocked_by {d!r} — no such story")
+            elif node["status"] == "done" and graph[d]["status"] != "done":
+                soft.append(f"{node['rel']}: {sid} is done but blocker {d} is "
+                            f"{graph[d]['status']!r} — dependency order looks off")
+
+    # cycle detection: DFS over resolvable edges, dedup cycles by node-set
+    WHITE, GRAY, BLACK = 0, 1, 2
+    color = dict.fromkeys(graph, WHITE)
+    stack: list[str] = []
+    seen_cycles: set = set()
+
+    def dfs(u: str) -> None:
+        color[u] = GRAY
+        stack.append(u)
+        for v in graph[u]["deps"]:
+            if v not in color:  # dangling — already reported, skip
+                continue
+            if color[v] == GRAY:
+                cyc = stack[stack.index(v):] + [v]
+                key = frozenset(cyc)
+                if key not in seen_cycles:
+                    seen_cycles.add(key)
+                    hard.append("dependency cycle: " + " -> ".join(cyc))
+            elif color[v] == WHITE:
+                dfs(v)
+        stack.pop()
+        color[u] = BLACK
+
+    for sid in sorted(graph):
+        if color[sid] == WHITE:
+            dfs(sid)
+    return sorted(set(hard)), soft
 
 
 def check(root: Path) -> tuple[list[str], list[str]]:
@@ -106,10 +171,14 @@ def check(root: Path) -> tuple[list[str], list[str]]:
     hard: list[str] = []
     soft: list[str] = []
     seen_ids: dict = {}
+    graph: dict = {}
     for path in files:
-        h, s = _check_story(root, path, seen_ids)
+        h, s = _check_story(root, path, seen_ids, graph)
         hard += h
         soft += s
+    dh, ds = _dependency_checks(graph)
+    hard += dh
+    soft += ds
     return hard, soft
 
 
