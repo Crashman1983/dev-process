@@ -113,6 +113,29 @@ def test_clean_case_ok(render, tmp_path):
     assert "github-master: OK" in r.stdout
 
 
+def test_freshness_note_always_present(render, tmp_path):
+    # the stale-passes-green caveat is surfaced every run, where the reader sees it
+    out = _render(render, tmp_path)
+    _story(out, "STORY-0001", status="in-progress", title="Alpha")
+    _snapshot(out, _entry("STORY-0001", title="Alpha", state="open"))
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+    assert "freshness is not gated" in r.stdout
+
+
+def test_generated_at_allowed_and_shown(render, tmp_path):
+    out = _render(render, tmp_path)
+    _story(out, "STORY-0001", status="in-progress", title="Alpha")
+    d = out / ".process-work"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "github-snapshot.json").write_text(json.dumps({
+        "generated_by": "test", "generated_at": "2026-07-04T12:00:00Z",
+        "issues": [_entry("STORY-0001", title="Alpha", state="open")]}))
+    r = _run(out)
+    assert r.returncode == 0, r.stdout  # generated_at is NOT an unknown top-level key
+    assert "2026-07-04T12:00:00Z" in r.stdout
+
+
 def test_malformed_snapshot_hard(render, tmp_path):
     out = _render(render, tmp_path)
     (out / ".process-work").mkdir(parents=True, exist_ok=True)

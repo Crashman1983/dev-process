@@ -58,23 +58,24 @@ def _stories(root: Path) -> dict:
     return out
 
 
-def _load_snapshot(root: Path) -> tuple[dict | None, list[str]]:
-    """(entries_by_story, hard_errors). entries_by_story is None when the
-    snapshot is absent (a soft, pre-sync state the caller reports)."""
+def _load_snapshot(root: Path) -> tuple[dict | None, list[str], object]:
+    """(entries_by_story, hard_errors, generated_at). entries_by_story is None
+    when the snapshot is absent (a soft, pre-sync state the caller reports)."""
     f = root / SNAPSHOT
     if not f.is_file():
-        return None, []
+        return None, [], None
     try:
         raw = f.read_text(encoding="utf-8")
     except UnicodeDecodeError:
-        return {}, [f"{SNAPSHOT}: not valid UTF-8"]
+        return {}, [f"{SNAPSHOT}: not valid UTF-8"], None
     try:
         data = json.loads(raw)
     except json.JSONDecodeError as exc:
-        return {}, [f"{SNAPSHOT}: invalid JSON: {exc}"]
+        return {}, [f"{SNAPSHOT}: invalid JSON: {exc}"], None
     if not isinstance(data, dict) or not isinstance(data.get("issues"), list):
-        return {}, [f"{SNAPSHOT}: must be an object with an 'issues' list"]
-    top_extra = set(data) - {"generated_by", "issues"}
+        return {}, [f"{SNAPSHOT}: must be an object with an 'issues' list"], None
+    generated_at = data.get("generated_at")
+    top_extra = set(data) - {"generated_by", "generated_at", "issues"}
     hard: list[str] = []
     if top_extra:
         hard.append(f"{SNAPSHOT}: unknown top-level key(s): {sorted(top_extra)}")
@@ -103,16 +104,24 @@ def _load_snapshot(root: Path) -> tuple[dict | None, list[str]]:
         if e.get("blocked_by") is not None and not isinstance(e["blocked_by"], list):
             hard.append(f"{SNAPSHOT}: {sid} 'blocked_by' must be a list or null")
         by_story[sid] = e
-    return by_story, hard
+    return by_story, hard, generated_at
 
 
 def check(root: Path) -> tuple[list[str], list[str]]:
     hard: list[str] = []
     soft: list[str] = []
-    snap, snap_hard = _load_snapshot(root)
+    snap, snap_hard, generated_at = _load_snapshot(root)
     hard += snap_hard
     if snap is None:
         return hard, ["no github-snapshot.json yet — run gh_sync.py (expected pre-sync)"]
+
+    # Freshness is NOT gated: this gate is deterministic over the *committed*
+    # snapshot, so a snapshot that lags GitHub still passes green. Surface that
+    # every run — the caveat belongs where the reader sees the result, not only
+    # in the docs. The gate cannot check freshness without a clock/network.
+    stamp = generated_at if generated_at is not None else "unknown (no generated_at)"
+    soft.append(f"freshness is not gated — snapshot generated_at={stamp!r}; "
+                f"re-run gh_sync.py if GitHub changed since (a stale mirror passes)")
 
     stories = _stories(root)
 

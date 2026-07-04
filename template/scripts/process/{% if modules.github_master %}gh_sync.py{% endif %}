@@ -22,6 +22,7 @@ import re
 import shutil
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 REGISTRY_DIR = "docs/process/feature-registry"
@@ -115,8 +116,11 @@ def main() -> int:
         })
     out = root / SNAPSHOT
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps({"generated_by": "gh_sync", "issues": issues},
-                              indent=2) + "\n", encoding="utf-8")
+    # generated_at stamps when this mirror was pulled — the gate cannot check
+    # freshness (no clock/network), but it surfaces the stamp so a human can.
+    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    out.write_text(json.dumps({"generated_by": "gh_sync", "generated_at": stamp,
+                               "issues": issues}, indent=2) + "\n", encoding="utf-8")
     print(f"gh_sync: wrote {len(issues)} issue(s) to {SNAPSHOT}")
     if orphans:
         print(f"gh_sync: {len(orphans)} issue(s) have no story yet: "
