@@ -71,8 +71,10 @@ each other).
   parent's (carry the delta, not a copy — only verbatim duplication is
   mechanically detectable; the rest is review discipline).
 - An **epic** (a story that is some other story's `parent`) may be `done`
-  without its own test — its children's tests cover it (a note, not a fail); a
-  leaf `done` story still needs a test.
+  without its own test **only when all its children are `done`** — their
+  (leaf-enforced) tests then genuinely cover it (a note). A done epic with an
+  unfinished child, or a leaf `done` story, still needs a test (hard) — the
+  exemption is not a blanket escape.
 
 `story_order.py` prints an epic → children hierarchy alongside the sequencing
 view. Under `github_master`, sub-issues are the master for `parent`; linking a

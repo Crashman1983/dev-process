@@ -224,6 +224,18 @@ def test_epic_done_without_test_is_soft(render, tmp_path):
     assert "done epic without its own test" in r.stdout
 
 
+def test_done_epic_with_unfinished_child_still_hard(render, tmp_path):
+    # the exemption is NOT a blanket escape: a done epic with no test and a
+    # non-done child proves nothing -> hard (closes the SP23-review false-green)
+    out = _render(render, tmp_path)
+    _write_story(out, "STORY-0002.json", _dep("STORY-0002", status="done"))  # epic, no test
+    _write_story(out, "STORY-0001.json", _with(_dep("STORY-0001", status="proposed"),
+                                               parent="STORY-0002"))
+    r = _run(out)
+    assert r.returncode == 1
+    assert "exempt only when all its children are done" in r.stdout
+
+
 def test_leaf_done_without_test_still_hard(render, tmp_path):
     # a non-parent done story with no test stays hard (rule not weakened)
     out = _render(render, tmp_path)

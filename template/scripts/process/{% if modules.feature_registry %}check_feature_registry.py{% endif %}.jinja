@@ -191,7 +191,6 @@ def _hierarchy_checks(graph: dict) -> tuple[list[str], list[str]]:
     hard: list[str] = []
     soft: list[str] = []
     ids = set(graph)
-    parents = {n["parent"] for n in graph.values() if n["parent"]}
     for sid, n in sorted(graph.items()):
         p = n["parent"]
         if p:
@@ -209,13 +208,18 @@ def _hierarchy_checks(graph: dict) -> tuple[list[str], list[str]]:
                 if n["story"] and n["story"] == graph[p]["story"]:
                     soft.append(f"{n['rel']}: {sid} story is identical to parent {p} "
                                 f"— a child carries its own delta, not a copy")
-        # parent-aware 'done requires a test'
+        # parent-aware 'done requires a test'. An epic may skip its own test only
+        # when every child is itself done — the children's (leaf-enforced) tests
+        # then genuinely cover it. A done epic with an unfinished child proves
+        # nothing, so it stays hard: the exemption is not a blanket escape.
         if n["status"] == "done" and not n["has_test"]:
-            if sid in parents:
+            kids = [c for c, cn in graph.items() if cn["parent"] == sid]
+            if kids and all(graph[c]["status"] == "done" for c in kids):
                 soft.append(f"{n['rel']}: {sid} is a done epic without its own test "
-                            f"— its children's tests must cover it")
+                            f"— its children (all done) cover it")
             else:
-                hard.append(f"{n['rel']}: status 'done' requires at least one test")
+                hard.append(f"{n['rel']}: status 'done' requires at least one test "
+                            f"(an epic is exempt only when all its children are done)")
 
     adj = {sid: ([n["parent"]] if n["parent"] in ids and n["parent"] != sid else [])
            for sid, n in graph.items()}
