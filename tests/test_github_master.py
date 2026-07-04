@@ -229,6 +229,17 @@ def test_unknown_top_level_key_hard(render, tmp_path):
     assert r.returncode == 1 and "unknown top-level key" in r.stdout
 
 
+def test_parent_drift_hard(render, tmp_path):
+    out = _render(render, tmp_path)
+    _story(out, "STORY-0001", title="t")
+    # story has no parent; snapshot (GitHub sub-issue) says STORY-0002 -> drift
+    e = _entry("STORY-0001")
+    e["parent"] = "STORY-0002"
+    _snapshot(out, e)
+    r = _run(out)
+    assert r.returncode == 1 and "parent drifts" in r.stdout
+
+
 def test_unknown_snapshot_key_hard(render, tmp_path):
     out = _render(render, tmp_path)
     _story(out, "STORY-0001")

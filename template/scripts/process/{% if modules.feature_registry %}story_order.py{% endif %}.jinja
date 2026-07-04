@@ -36,7 +36,9 @@ def _load(root: Path) -> dict:
             continue
         bl = d.get("blocked_by")
         deps = [x for x in bl if isinstance(x, str)] if isinstance(bl, list) else []
+        parent = d.get("parent")
         stories[sid] = {"status": d.get("status"), "deps": deps,
+                        "parent": parent if isinstance(parent, str) else None,
                         "title": d.get("title") or ""}
     return stories
 
@@ -86,6 +88,20 @@ def report(stories: dict) -> list[str]:
     if leftover:
         out.append(f"  ! cycle among: {', '.join(sorted(leftover))} "
                    f"(the registry gate fails on this — fix it there)")
+
+    # hierarchy (decomposition) — separate from sequencing above
+    children: dict = {}
+    for sid, n in stories.items():
+        if n["parent"]:
+            children.setdefault(n["parent"], []).append(sid)
+    if children:
+        out.append("")
+        out.append("Hierarchy (epics → children):")
+        for epic in sorted(children):
+            label = epic if epic in stories else f"{epic} (missing)"
+            out.append(f"  {label}")
+            for child in sorted(children[epic]):
+                out.append(f"    - {child}  {stories[child]['title']}")
     return out
 
 

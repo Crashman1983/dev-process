@@ -47,6 +47,7 @@ def _stories(root: Path) -> dict:
             "title": d.get("title"),
             "status": d.get("status"),
             "blocked_by": d.get("blocked_by") or [],
+            "parent": d.get("parent"),
             "has_issue": bool(d.get("issue")),
             "rel": f"{REGISTRY_DIR}/{p.name}",
         }
@@ -145,6 +146,9 @@ def check(root: Path) -> tuple[list[str], list[str]]:
         if want_state is not None and e.get("state") != want_state:
             hard.append(f"{s['rel']}: {sid} status {s['status']!r} implies "
                         f"issue {want_state}, but snapshot has {e.get('state')!r}")
+        if e.get("parent") is not None and s["parent"] != e["parent"]:
+            hard.append(f"{s['rel']}: {sid} parent drifts from GitHub "
+                        f"({s['parent']!r} vs {e['parent']!r}) — re-sync sub-issue link")
         if isinstance(e.get("blocked_by"), list) and \
                 sorted(s["blocked_by"]) != sorted(e["blocked_by"]):
             hard.append(f"{s['rel']}: {sid} blocked_by drifts from GitHub "

@@ -17,14 +17,28 @@ def _run(out: Path):
     )
 
 
-def _story(out: Path, sid: str, status="proposed", blocked_by=None):
+def _story(out: Path, sid: str, status="proposed", blocked_by=None, parent=None):
     d = {"id": sid, "title": f"title {sid}", "story": "s",
          "acceptance": [{"id": "AC1", "text": "x"}], "tests": [], "status": status}
     if blocked_by is not None:
         d["blocked_by"] = blocked_by
+    if parent is not None:
+        d["parent"] = parent
     p = out / REG
     p.mkdir(parents=True, exist_ok=True)
     (p / f"{sid}.json").write_text(json.dumps(d), encoding="utf-8")
+
+
+def test_hierarchy_shows_epic_and_children(render, tmp_path):
+    out = _render(render, tmp_path)
+    _story(out, "STORY-0001")  # epic
+    _story(out, "STORY-0002", parent="STORY-0001")
+    _story(out, "STORY-0003", parent="STORY-0001")
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+    hier = r.stdout.split("Hierarchy")[1]
+    assert "STORY-0001" in hier
+    assert "STORY-0002" in hier and "STORY-0003" in hier
 
 
 def test_tool_present_when_module_on(render, tmp_path):

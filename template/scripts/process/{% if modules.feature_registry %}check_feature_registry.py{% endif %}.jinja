@@ -87,8 +87,8 @@ def _check_story(root: Path, path: Path, seen_ids: dict,
         else:
             n_tests += 1
 
-    if data.get("status") == "done" and not tests:
-        hard.append(f"{rel}: status 'done' requires at least one test")
+    # the 'done requires a test' rule is parent-aware — an epic is covered by its
+    # children's tests — so it runs in the cross-story pass, not here.
 
     adr = data.get("adr")
     if adr and not _adr_exists(root, adr):
@@ -111,17 +111,61 @@ def _check_story(root: Path, path: Path, seen_ids: dict,
                 hard.append(f"{rel}: blocked_by entry {b!r} must match STORY-NNNN")
             else:
                 deps.append(b)
+    # parent: a single STORY-NNNN this story decomposes (tree, not sequencing).
+    parent = data.get("parent")
+    parent_id: str | None = None
+    if parent in (None, ""):
+        pass
+    elif not isinstance(parent, str) or not ID_RE.match(parent):
+        hard.append(f"{rel}: 'parent' must be a STORY-NNNN id, got {parent!r}")
+    else:
+        parent_id = parent
+
     if isinstance(sid, str) and ID_RE.match(sid):
-        graph[sid] = {"deps": deps, "status": data.get("status"), "rel": str(rel)}
+        graph[sid] = {"deps": deps, "status": data.get("status"), "rel": str(rel),
+                      "parent": parent_id, "has_test": bool(tests),
+                      "title": data.get("title"), "story": data.get("story")}
 
     return hard, soft
 
 
+def _cycles(adj: dict, label: str) -> list[str]:
+    """`label: a -> b -> a` messages for every cycle in the adjacency map
+    (node -> [successors]). One owner for cycle detection — reused by both the
+    blocked_by graph and the parent tree. Self-edges are skipped (reported
+    separately); cycles are deduped by node-set."""
+    WHITE, GRAY, BLACK = 0, 1, 2
+    color = dict.fromkeys(adj, WHITE)
+    stack: list[str] = []
+    seen: set = set()
+    out: list[str] = []
+
+    def dfs(u: str) -> None:
+        color[u] = GRAY
+        stack.append(u)
+        for v in adj[u]:
+            if v not in color or v == u:
+                continue
+            if color[v] == GRAY:
+                cyc = stack[stack.index(v):] + [v]
+                key = frozenset(cyc)
+                if key not in seen:
+                    seen.add(key)
+                    out.append(f"{label}: " + " -> ".join(cyc))
+            elif color[v] == WHITE:
+                dfs(v)
+        stack.pop()
+        color[u] = BLACK
+
+    for sid in sorted(adj):
+        if color[sid] == WHITE:
+            dfs(sid)
+    return out
+
+
 def _dependency_checks(graph: dict) -> tuple[list[str], list[str]]:
-    """Cross-story dependency validation over the collected graph:
-    node -> {deps, status, rel}. Dangling refs, self-references, and cycles are
-    hard (an unbuildable or lying order); a done story with an unfinished
-    blocker is a soft integrity note."""
+    """blocked_by validation: dangling refs, self-references, and cycles are
+    hard; a done story with an unfinished blocker is a soft integrity note."""
     hard: list[str] = []
     soft: list[str] = []
     ids = set(graph)
@@ -134,35 +178,48 @@ def _dependency_checks(graph: dict) -> tuple[list[str], list[str]]:
             elif node["status"] == "done" and graph[d]["status"] != "done":
                 soft.append(f"{node['rel']}: {sid} is done but blocker {d} is "
                             f"{graph[d]['status']!r} — dependency order looks off")
+    adj = {sid: [d for d in n["deps"] if d in ids] for sid, n in graph.items()}
+    hard += _cycles(adj, "dependency cycle")
+    return sorted(set(hard)), soft
 
-    # cycle detection: DFS over resolvable edges, dedup cycles by node-set
-    WHITE, GRAY, BLACK = 0, 1, 2
-    color = dict.fromkeys(graph, WHITE)
-    stack: list[str] = []
-    seen_cycles: set = set()
 
-    def dfs(u: str) -> None:
-        color[u] = GRAY
-        stack.append(u)
-        for v in graph[u]["deps"]:
-            if v not in color:  # dangling — already reported, skip
-                continue
-            if v == u:  # self-edge — reported by the self-reference check, not here
-                continue
-            if color[v] == GRAY:
-                cyc = stack[stack.index(v):] + [v]
-                key = frozenset(cyc)
-                if key not in seen_cycles:
-                    seen_cycles.add(key)
-                    hard.append("dependency cycle: " + " -> ".join(cyc))
-            elif color[v] == WHITE:
-                dfs(v)
-        stack.pop()
-        color[u] = BLACK
+def _hierarchy_checks(graph: dict) -> tuple[list[str], list[str]]:
+    """parent (decomposition) validation, and the parent-aware done-test rule.
+    parent is a tree: dangling/self/cycle are hard. An epic (a story that is a
+    parent) may be done without its own test — its children cover it; a leaf
+    done story without a test stays hard."""
+    hard: list[str] = []
+    soft: list[str] = []
+    ids = set(graph)
+    parents = {n["parent"] for n in graph.values() if n["parent"]}
+    for sid, n in sorted(graph.items()):
+        p = n["parent"]
+        if p:
+            if p == sid:
+                hard.append(f"{n['rel']}: {sid} is its own parent")
+            elif p not in ids:
+                hard.append(f"{n['rel']}: parent {p!r} — no such story")
+            else:
+                if graph[p]["status"] == "done" and n["status"] != "done":
+                    soft.append(f"{n['rel']}: parent {p} is done but child {sid} is "
+                                f"{n['status']!r} — an epic outruns its parts")
+                if n["title"] and n["title"] == graph[p]["title"]:
+                    soft.append(f"{n['rel']}: {sid} title is identical to parent {p} "
+                                f"— a child carries its own delta, not a copy")
+                if n["story"] and n["story"] == graph[p]["story"]:
+                    soft.append(f"{n['rel']}: {sid} story is identical to parent {p} "
+                                f"— a child carries its own delta, not a copy")
+        # parent-aware 'done requires a test'
+        if n["status"] == "done" and not n["has_test"]:
+            if sid in parents:
+                soft.append(f"{n['rel']}: {sid} is a done epic without its own test "
+                            f"— its children's tests must cover it")
+            else:
+                hard.append(f"{n['rel']}: status 'done' requires at least one test")
 
-    for sid in sorted(graph):
-        if color[sid] == WHITE:
-            dfs(sid)
+    adj = {sid: ([n["parent"]] if n["parent"] in ids and n["parent"] != sid else [])
+           for sid, n in graph.items()}
+    hard += _cycles(adj, "parent cycle")
     return sorted(set(hard)), soft
 
 
@@ -181,6 +238,9 @@ def check(root: Path) -> tuple[list[str], list[str]]:
     dh, ds = _dependency_checks(graph)
     hard += dh
     soft += ds
+    hh, hs = _hierarchy_checks(graph)
+    hard += hh
+    soft += hs
     return hard, soft
 
 

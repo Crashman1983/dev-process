@@ -149,6 +149,102 @@ def test_three_cycle_hard(render, tmp_path):
     assert "dependency cycle" in r.stdout
 
 
+def _with(d, **kw):
+    d = dict(d)
+    d.update(kw)
+    return d
+
+
+def test_parent_dangling_hard(render, tmp_path):
+    out = _render(render, tmp_path)
+    _write_story(out, "STORY-0001.json", _with(_dep("STORY-0001"), parent="STORY-0099"))
+    r = _run(out)
+    assert r.returncode == 1 and "parent" in r.stdout and "no such story" in r.stdout
+
+
+def test_parent_self_hard(render, tmp_path):
+    out = _render(render, tmp_path)
+    _write_story(out, "STORY-0001.json", _with(_dep("STORY-0001"), parent="STORY-0001"))
+    r = _run(out)
+    assert r.returncode == 1 and "its own parent" in r.stdout
+
+
+def test_parent_malformed_hard(render, tmp_path):
+    out = _render(render, tmp_path)
+    _write_story(out, "STORY-0001.json", _with(_dep("STORY-0001"), parent="STORY-1"))
+    r = _run(out)
+    assert r.returncode == 1 and "'parent' must be a STORY-NNNN" in r.stdout
+
+
+def test_parent_cycle_hard(render, tmp_path):
+    out = _render(render, tmp_path)
+    _write_story(out, "STORY-0001.json", _with(_dep("STORY-0001"), parent="STORY-0002"))
+    _write_story(out, "STORY-0002.json", _with(_dep("STORY-0002"), parent="STORY-0001"))
+    r = _run(out)
+    assert r.returncode == 1 and "parent cycle" in r.stdout
+
+
+def test_valid_parent_ok(render, tmp_path):
+    out = _render(render, tmp_path)
+    _write_story(out, "STORY-0001.json", _with(_dep("STORY-0001"), parent="STORY-0002"))
+    _write_story(out, "STORY-0002.json", _dep("STORY-0002"))
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+
+
+def test_parent_done_before_child_soft(render, tmp_path):
+    out = _render(render, tmp_path)
+    # epic done, child not done, and epic has a child so it's exempt from the test rule
+    epic = _dep("STORY-0002", status="done")
+    epic["tests"] = ["tests/x/test_a.py"]
+    _write_story(out, "STORY-0002.json", epic)
+    _write_story(out, "STORY-0001.json", _with(_dep("STORY-0001", status="proposed"),
+                                               parent="STORY-0002"))
+    (out / "tests/x").mkdir(parents=True, exist_ok=True)
+    (out / "tests/x/test_a.py").write_text("def test_a():\n    pass\n")
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+    assert "an epic outruns its parts" in r.stdout
+
+
+def test_epic_done_without_test_is_soft(render, tmp_path):
+    # a parent (has a child) done without its own test is soft (children cover)
+    out = _render(render, tmp_path)
+    _write_story(out, "STORY-0002.json", _dep("STORY-0002", status="done"))  # no tests
+    _write_story(out, "STORY-0001.json", _with(_dep("STORY-0001", status="done"),
+                                               parent="STORY-0002"))
+    (out / "tests/x").mkdir(parents=True, exist_ok=True)
+    # give the leaf child a test so only the epic lacks one
+    child = _with(_dep("STORY-0001", status="done"), parent="STORY-0002")
+    child["tests"] = ["tests/x/test_c.py"]
+    _write_story(out, "STORY-0001.json", child)
+    (out / "tests/x/test_c.py").write_text("def test_c():\n    pass\n")
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+    assert "done epic without its own test" in r.stdout
+
+
+def test_leaf_done_without_test_still_hard(render, tmp_path):
+    # a non-parent done story with no test stays hard (rule not weakened)
+    out = _render(render, tmp_path)
+    _write_story(out, "STORY-0001.json", _dep("STORY-0001", status="done"))  # no tests, no children
+    r = _run(out)
+    assert r.returncode == 1 and "requires at least one test" in r.stdout
+
+
+def test_child_duplicating_parent_title_soft(render, tmp_path):
+    out = _render(render, tmp_path)
+    parent = _dep("STORY-0002")
+    parent["title"] = "Shared epic title"
+    _write_story(out, "STORY-0002.json", parent)
+    child = _with(_dep("STORY-0001"), parent="STORY-0002")
+    child["title"] = "Shared epic title"
+    _write_story(out, "STORY-0001.json", child)
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+    assert "identical to parent" in r.stdout
+
+
 def test_diamond_is_not_a_false_cycle(render, tmp_path):
     # A shared descendant (A->B, A->C, B->D, C->D) is a valid DAG, not a cycle —
     # the DFS must not false-positive on the re-visited node D.
