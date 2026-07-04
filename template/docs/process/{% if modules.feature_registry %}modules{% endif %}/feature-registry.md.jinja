@@ -29,6 +29,10 @@ stories diff and merge independently):
 - **adr** (optional) — `ADR-NNNN` linking a decision under `docs/process/adr/`.
 - **blocked_by** (optional) — a list of `STORY-NNNN` ids this story depends on
   (sequencing, not decomposition). Absent or `[]` means no dependency.
+- **parent** (optional) — one `STORY-NNNN` this story decomposes (an epic → its
+  tasks; a tree, not sequencing). Absent or `null` means no parent. A child
+  carries its own delta and *references* the parent — it does not copy the
+  parent's context.
 - **issue**, **links** (optional) — forward-compat slots for the GitHub-Issues
   and contracts modules; stored but not yet enforced.
 
@@ -53,6 +57,27 @@ dependency graph honest; a read-only tool turns it into a work order.
 decomposition. Rendering the dependency into a GitHub issue as "Blocked by #N"
 is an optional projection — see the `github-issues` module — never the source of
 truth, which stays here in the registry.
+
+## Decomposition (parent/child)
+
+`parent` records that a story is part of an epic. It is a **tree** — one parent
+per child — and orthogonal to `blocked_by` (an epic's children need not block
+each other).
+
+- **Hard:** a `parent` that is not `STORY-NNNN`; a ref to a non-existent story
+  (dangling); a story that is its own parent; a **parent cycle**.
+- **Best-effort:** a parent that is `done` while a child is not (an epic cannot
+  outrun its parts); a child whose `title`/`story` is byte-identical to its
+  parent's (carry the delta, not a copy — only verbatim duplication is
+  mechanically detectable; the rest is review discipline).
+- An **epic** (a story that is some other story's `parent`) may be `done`
+  without its own test — its children's tests cover it (a note, not a fail); a
+  leaf `done` story still needs a test.
+
+`story_order.py` prints an epic → children hierarchy alongside the sequencing
+view. Under `github_master`, sub-issues are the master for `parent`; linking a
+child issue to its parent on GitHub is an optional projection (best-effort, not
+a gate).
 
 ## What the gate verifies
 

@@ -40,9 +40,10 @@ every other gate in the process.
   materialize a story for it.
 - `state` is GitHub open/closed; `status` is the process status (from a
   `status:*` label, else derived).
-- `blocked_by` / `parent` / `board_status` are **nullable slots** that later
-  slices master (dependencies, sub-issues, board). `null` means "not yet
-  mastered here" and the gate skips drift on it.
+- `blocked_by` / `parent` / `board_status` are **nullable slots**. `blocked_by`
+  and `parent` (sub-issues) are drift-checked when non-null; `board_status` is
+  mastered by a later slice. `null` means "not yet mastered here" and the gate
+  skips drift on it.
 
 ## What the gate enforces (all offline)
 
@@ -51,7 +52,7 @@ every other gate in the process.
   no snapshot entry, or a snapshot entry with no story (the mirror must be
   complete both ways); **drift** where the registry disagrees with the snapshot
   on `title`, on `status` (both the value and its open/closed projection), or on
-  a non-null `blocked_by`.
+  a non-null `blocked_by` / `parent`.
 - **Best-effort (note):** no snapshot yet — expected before the first sync.
 
 Status↔state mapping the gate checks: `done` ⇒ issue **closed**;
