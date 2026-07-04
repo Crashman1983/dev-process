@@ -1,6 +1,6 @@
 # Software Bill of Materials
 
-Stand: 2026-07-02
+Stand: 2026-07-04
 
 Diese SBOM beschreibt die Abhaengigkeiten des `dev-process`-Repositorys. Quelle
 ist `pyproject.toml` fuer direkte Abhaengigkeiten und `uv.lock` fuer die

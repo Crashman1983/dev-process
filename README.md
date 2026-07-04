@@ -28,8 +28,9 @@ Ausgeliefert als [copier](https://copier.readthedocs.io)-Template. Adapter für
 > SP14 (junior-legibility: Review-Checkliste, Tier-Erkennung) +
 > SP15 (arch-docs: arc42/C4-lite Architektur-Doku-Modul) +
 > SP16 (review-breadth: Performance/Observability-Dimensionen) +
-> SP17 (parallel-friction: Journal-Sharding, Parallel-efforts-Doku)
-> ausgeliefert, `v1.5.2`.
+> SP17 (parallel-friction: Journal-Sharding, Parallel-efforts-Doku) +
+> SP18 (decision-records: getyptes Decision Record + Core-Integritäts-Gate)
+> ausgeliefert, `v1.6.0`.
 > Setup: [`BOOTSTRAP.md`](BOOTSTRAP.md) · Systemumgebung:
 > [`docs/SYSTEM-REQUIREMENTS.md`](docs/SYSTEM-REQUIREMENTS.md) · SBOM:
 > [`docs/SBOM.md`](docs/SBOM.md) · Design: [`docs/design/`](docs/design/).
@@ -200,3 +201,4 @@ eingereicht werden — genau so werden PRs angenommen.
 | **SP15** arch-docs | Neues opt-in Modul: stakeholder-gerichtete Architektur-Doku (arc42/C4-lite) als `ARCHITECTURE-OVERVIEW.md`-Scaffold — Kontext, Qualitätsziele, Runtime, Deployment, Risiken/Tech-Debt, Glossar; Building-Blocks→arch-Block und Decisions→ADRs *verlinkt* statt dupliziert (ein Owner); Gate prüft nur mechanisch Ehrliches (tote ADR-Refs hart, Platzhalter als Note), täuscht nie „dokumentiert" vor | ✅ ausgeliefert |
 | **SP16** review-breadth | `review-checklist.md` aus der Web-Lastigkeit gelöst: zwei stack-neutrale Dimensionen ergänzt — **Performance & Effizienz** (N+1, unbounded Fan-out, heiße Pfade) und **Observability & Betreibbarkeit** (fail-fast statt stiller Degradation, deploy-abhängige Fragen konditional formuliert); untrusted-input→sink breiter gefasst | ✅ ausgeliefert |
 | **SP17** parallel-friction | Reibung für parallele Agenten auf einem Repo reduziert: das eine geteilte Tages-Journal wird per Branch shardbar (`.process-work/journal/<branch-slug>/YYYY-MM-DD.md` — Gate und Cockpit lesen rekursiv, beide Layouts funktionieren); neue „## Parallel efforts"-Sektion nennt den Trade-off ehrlich (Ausführung parallel+sharded, Integration serialisiert durch ff-only, nie zwei Efforts auf einem Owner) | ✅ ausgeliefert |
+| **SP18** decision-records | ADR zum getypten **Decision Record** generalisiert (`Type: architecture \| product \| process`) — signifikante Produkt-/Prozessentscheidungen haben endlich ein Zuhause; Intent bleibt *ein* Wert pro Record (Atomaritäts-Forcing-Function). Erstes **Core-Gate** (`check_decisions.py`, immer aktiv, da `adr/` Core ist): Listing-Drift + ungültige Enums + inkohärente Status×Intent-Paare (`Superseded`+`keep`) hart, unausgefüllte Menüs/fehlender Type soft. Rule 4 verankert „signifikante Entscheidung → Decision Record" + Patch-Count-Gate (dritter Patch default-falsch) | ✅ ausgeliefert |
