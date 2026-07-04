@@ -51,10 +51,14 @@ check: when the snapshot entry's `parent` is non-null, the registry `parent`
 must equal it (GitHub sub-issues are master). `null` ⇒ skip, exactly like
 `blocked_by`. Symmetric, hermetic, offline.
 
-`gh_sync.py` populates `parent` **best-effort** where the sub-issues API is
-reachable; where it is not, it writes `null` and says so. The registry `parent`
-field + the gate are the solid, tested core; actual sub-issue *population* is
-best-effort and never faked (same posture as every other network touch).
+**`gh_sync.py` does not populate `parent` — it writes `null`.** Pulling the
+sub-issue relationship from GitHub's sub-issues API is an extension point, not
+shipped. So the `parent` drift check is live *capability* that fires only once a
+populator (or a hand-authored snapshot) writes the slot; against the shipped
+`gh_sync` output it is inert. The registry `parent` field + the gate are the
+solid, tested core; population is honestly a future step — the gate never invents
+a value. (Corrected in SP25: the original draft claimed `gh_sync` populated it
+best-effort, which it never did.)
 
 ## story_order.py
 

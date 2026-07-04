@@ -70,16 +70,19 @@ deterministic (registry files + committed snapshot):
 
 **Best-effort (advisory note, never CI):**
 - No snapshot file yet (pre-sync) — expected before the first sync.
-- Freshness of the snapshot vs *live* GitHub — that comparison needs the
-  network and lives in the **sync tool**, not the gate.
+- **Freshness is not gated at all.** The gate is deterministic over the
+  *committed* snapshot with no clock/network, so a snapshot that lags GitHub
+  passes green. This is disclosed every run as a note showing `generated_at`
+  (SP25). Verifying freshness vs *live* GitHub would need the network; a sync
+  CI job / stale-stamp merge guard is an adopter recipe, **not shipped** here.
 
 ## The sync tool — `gh_sync.py` (best-effort, network, not a gate)
 
 Pulls issues via `gh` → writes the snapshot (and, in github-master mode,
 materializes/updates the registry mirror). Thin, `gh`-dependent, best-effort —
 the same posture as `new_issue.sh`. Not unit-tested against live GitHub; the
-**gate** (offline, over a crafted snapshot) is the tested core. Runs in its own
-network-enabled CI job or locally, never in the hermetic gate job.
+**gate** (offline, over a crafted snapshot) is the tested core. Run locally, or
+wire it into a network-enabled job — no such job ships in the template.
 
 ## What SP22 deliberately does NOT do
 
