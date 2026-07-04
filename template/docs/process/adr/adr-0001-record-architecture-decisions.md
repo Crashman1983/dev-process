@@ -4,6 +4,10 @@
 
 Accepted
 
+## Type
+
+process
+
 ## Intent
 
 keep
@@ -17,10 +21,11 @@ place where decisions, their status, and their endorsement live.
 
 ## Decision
 
-We will record architecturally significant decisions as ADRs in
-`docs/process/adr/`, one decision per file, named `adr-NNNN-<slug>.md`, using
-the two axes of `template.md`: `Status` (lifecycle) and `Intent` (endorsement).
-Every new ADR is added to the index in `README.md`.
+We will record significant, hard-to-reverse decisions — architectural, product,
+or process — as decision records in `docs/process/adr/`, one decision per file,
+named `adr-NNNN-<slug>.md`, using the axes of `template.md`: `Status`
+(lifecycle), `Type` (which kind of decision), and `Intent` (endorsement). Every
+new record is added to the index in `README.md`.
 
 ## Consequences
 
