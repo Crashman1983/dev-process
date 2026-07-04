@@ -147,6 +147,8 @@ def _dependency_checks(graph: dict) -> tuple[list[str], list[str]]:
         for v in graph[u]["deps"]:
             if v not in color:  # dangling — already reported, skip
                 continue
+            if v == u:  # self-edge — reported by the self-reference check, not here
+                continue
             if color[v] == GRAY:
                 cyc = stack[stack.index(v):] + [v]
                 key = frozenset(cyc)

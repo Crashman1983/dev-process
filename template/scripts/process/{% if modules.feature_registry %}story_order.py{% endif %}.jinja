@@ -34,7 +34,8 @@ def _load(root: Path) -> dict:
         sid = d.get("id")
         if not isinstance(sid, str) or not sid:
             continue
-        deps = [x for x in (d.get("blocked_by") or []) if isinstance(x, str)]
+        bl = d.get("blocked_by")
+        deps = [x for x in bl if isinstance(x, str)] if isinstance(bl, list) else []
         stories[sid] = {"status": d.get("status"), "deps": deps,
                         "title": d.get("title") or ""}
     return stories

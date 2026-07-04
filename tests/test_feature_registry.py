@@ -149,6 +149,29 @@ def test_three_cycle_hard(render, tmp_path):
     assert "dependency cycle" in r.stdout
 
 
+def test_diamond_is_not_a_false_cycle(render, tmp_path):
+    # A shared descendant (A->B, A->C, B->D, C->D) is a valid DAG, not a cycle —
+    # the DFS must not false-positive on the re-visited node D.
+    out = _render(render, tmp_path)
+    _write_story(out, "STORY-0001.json", _dep("STORY-0001", ["STORY-0002", "STORY-0003"]))
+    _write_story(out, "STORY-0002.json", _dep("STORY-0002", ["STORY-0004"]))
+    _write_story(out, "STORY-0003.json", _dep("STORY-0003", ["STORY-0004"]))
+    _write_story(out, "STORY-0004.json", _dep("STORY-0004"))
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+    assert "cycle" not in r.stdout
+
+
+def test_self_reference_not_double_reported_as_cycle(render, tmp_path):
+    # a self-edge is reported once, as "lists itself" — not also as a cycle
+    out = _render(render, tmp_path)
+    _write_story(out, "STORY-0001.json", _dep("STORY-0001", ["STORY-0001"]))
+    r = _run(out)
+    assert r.returncode == 1
+    assert "lists itself" in r.stdout
+    assert "dependency cycle" not in r.stdout
+
+
 def test_blocked_by_not_list_hard(render, tmp_path):
     out = _render(render, tmp_path)
     _write_story(out, "STORY-0001.json", _dep("STORY-0001", "STORY-0002"))  # str, not list
