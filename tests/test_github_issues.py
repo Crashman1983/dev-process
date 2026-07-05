@@ -111,6 +111,23 @@ def test_tracked_without_issue_notes(render, tmp_path):
     assert "no issue link" in r.stdout
 
 
+def test_done_without_issue_is_hard(render, tmp_path):
+    # C: a finished story must trace to an issue (was soft, now hard)
+    out = _render(render, tmp_path)
+    _story(out, status="done")  # no issue field
+    r = _run(out)
+    assert r.returncode == 1
+    assert "status 'done' but no issue link" in r.stdout
+
+
+def test_in_progress_without_issue_still_soft(render, tmp_path):
+    # C: in-progress stays soft — its issue may still be forthcoming
+    out = _render(render, tmp_path)
+    _story(out, status="in-progress")
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+
+
 def test_bad_json_skipped(render, tmp_path):
     out = _render(render, tmp_path)
     reg = out / "docs/process/feature-registry"
@@ -233,6 +250,13 @@ def test_plan_enforced_even_without_feature_registry(render, tmp_path):
     r = _run(out)
     assert r.returncode == 1
     assert "issue-before-code" in r.stdout
+
+
+def test_feature_registry_doc_has_dor_dod(render, tmp_path):
+    out = _render(render, tmp_path)
+    t = (out / "docs/process/modules/feature-registry.md").read_text()
+    assert "## Definition of Ready / Done" in t
+    assert "Ready to start" in t and "Done:" in t
 
 
 def test_module_doc_names_issue_before_code(render, tmp_path):

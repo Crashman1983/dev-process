@@ -148,7 +148,13 @@ def check(root: Path) -> tuple[list[str], list[str]]:
         issue = data.get("issue")
         status = data.get("status")
         if not issue:
-            if status in TRACKED:
+            # a finished story must be traceable — hard; an in-progress one may
+            # still be filing its issue (issue-before-code is enforced on the
+            # plan in SP20), so it stays a soft note
+            if status == "done":
+                hard.append(f"{rel}: status 'done' but no issue link — a finished "
+                            f"story must trace to an issue")
+            elif status in TRACKED:
                 soft.append(f"{rel}: status {status!r} but no issue link — unverified")
             continue
         if not isinstance(issue, str):
