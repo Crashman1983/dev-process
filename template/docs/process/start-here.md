@@ -190,7 +190,13 @@ The project is ready for normal process-driven development when:
 - each active optional module either intentionally stays inert or has at least
   one real project artifact;
 - `scripts/process/gate_runner.py` runs and all notes are understood as known
-  onboarding state.
+  onboarding state;
+- **the CI gate is wired as a *required* check.** The `process-gates` job failing
+  only blocks a merge if your host is configured to require it — CI cannot set
+  this itself. On GitHub: Settings → Branches → protect the default branch → mark
+  `process-gates` a required status check. On GitLab: a merge-request approval
+  rule / pipeline-must-succeed setting. Without this, a red gate is advisory, not
+  enforced — the single step that turns "the gate runs" into "the gate blocks".
 
 Once developing: before planning any change, read the Decision Records
 (`docs/process/adr/`) relevant to the area you are about to touch — a decision
