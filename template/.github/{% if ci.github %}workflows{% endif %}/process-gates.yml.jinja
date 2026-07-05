@@ -5,6 +5,9 @@ on:
   push:
     branches: [main]
   pull_request:
+# least privilege: the gate job only reads the working tree and exits.
+permissions:
+  contents: read
 jobs:
   gates:
     runs-on: ubuntu-latest
@@ -13,5 +16,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: pip install pyyaml
+      - run: pip install 'pyyaml>=6,<7'   # pinned: gate behaviour is deterministic
       - run: python scripts/process/gate_runner.py
+# Note: a red check blocks a merge only if this job is set as a REQUIRED status
+# check in branch protection — see docs/process/start-here.md. CI cannot set that.
