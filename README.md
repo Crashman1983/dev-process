@@ -45,6 +45,8 @@ Ausgeliefert als [copier](https://copier.readthedocs.io)-Template. Adapter für
 > PR/Merge-Pflicht faktisch fiktive Tier 0 „direct commit" in Tier 1 gefaltet;
 > jede verbleibende Grenze trägt Gewicht; Gate-Schwellen + Anchor/Doku remapped)
 > ausgeliefert, `v1.16.0`.
+> **Überblick für Einsteiger:innen & Management** (wie es funktioniert, warum,
+> welcher Mehrwert): [`docs/CAPABILITIES.md`](docs/CAPABILITIES.md).
 > Setup: [`BOOTSTRAP.md`](BOOTSTRAP.md) · Systemumgebung:
 > [`docs/SYSTEM-REQUIREMENTS.md`](docs/SYSTEM-REQUIREMENTS.md) · SBOM:
 > [`docs/SBOM.md`](docs/SBOM.md) · Design: [`docs/design/`](docs/design/).
@@ -146,6 +148,10 @@ Kurz: Ein Playbook beschreibt, erzwingt aber nichts und altert; Scaffolding ist
 ein einmaliger Abwurf ohne Update-Pfad; CI-Linting sichert Stil, nicht Prozess,
 Architektur oder Entscheidungen. `dev-process` liefert die Methodik **mit** ihrer
 Durchsetzung, harness-übergreifend und über `copier update` versionierbar.
+
+Eine ausführliche, zielgruppengerechte Erklärung — *wie es funktioniert, warum,
+welcher Mehrwert*, getrennt für Entwickler:innen und Management — steht in
+[`docs/CAPABILITIES.md`](docs/CAPABILITIES.md).
 
 ## Sprachen & Ökonomie
 
