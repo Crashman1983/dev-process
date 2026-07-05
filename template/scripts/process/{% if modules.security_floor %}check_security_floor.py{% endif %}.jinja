@@ -129,6 +129,7 @@ def check(root: Path) -> tuple[list[str], list[str]]:
         return [], ["0 tracked files scanned — nothing committed/staged yet, floor not exercised"]
 
     findings: list[str] = []
+    skipped: list[str] = []
     for rel in files:
         if rel in SELF_EXCLUDE:
             continue
@@ -140,12 +141,22 @@ def check(root: Path) -> tuple[list[str], list[str]]:
         try:
             text = (root / rel).read_text(encoding="utf-8")
         except (UnicodeDecodeError, OSError):
-            continue  # binary / unreadable — cannot scan
+            # binary/unreadable — cannot grep it. A grep gate silently passing an
+            # unscannable file is false confidence on a security check, so the
+            # skip is disclosed, not swallowed (it stays advisory: this floor is
+            # the grep-able subset, not a full secret scanner).
+            skipped.append(rel)
+            continue
         for lineno, line in enumerate(text.splitlines(), 1):
             for r in applicable:
                 if r["regex"].search(line):
                     findings.append(f"{rel}:{lineno}: {r['message']} [{r['id']}]")
-    return findings, []
+    soft: list[str] = []
+    if skipped:
+        shown = ", ".join(skipped[:5]) + (" …" if len(skipped) > 5 else "")
+        soft.append(f"{len(skipped)} file(s) not scanned (binary/unreadable), "
+                    f"NOT covered by the floor: {shown}")
+    return findings, soft
 
 
 def main() -> int:

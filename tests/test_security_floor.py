@@ -196,8 +196,11 @@ def test_binary_file_skipped(render, tmp_path):
     (repo / "data.bin").write_bytes(b"\xff\xfe\x00\x01anything")
     _track(repo)
     r = _run(out, repo)
-    assert r.returncode == 0, r.stdout
-    assert "security-floor: OK" in r.stdout
+    assert r.returncode == 0, r.stdout  # can't grep binary — not a hard fail...
+    # ...but the skip is DISCLOSED, not silent (audit: a security gate silently
+    # passing an unscannable file is false confidence)
+    assert "not scanned (binary/unreadable)" in r.stdout
+    assert "data.bin" in r.stdout
 
 
 def test_skip_env_bypasses(render, tmp_path):
