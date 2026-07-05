@@ -254,6 +254,31 @@ def test_unknown_top_level_key_hard(render, tmp_path):
     assert r.returncode == 1 and "unknown top-level key" in r.stdout
 
 
+def test_status_vocabulary_agrees_across_gates(render, tmp_path):
+    # audit (both architects): check_github_master.STATUS_STATE.get(status) fails
+    # OPEN on an unknown status — a status added to check_feature_registry.STATUSES
+    # but not to STATUS_STATE would silently stop being drift-checked. The gates
+    # cannot import each other (module isolation), so a cross-gate test is the guard.
+    import importlib.util
+
+    def _load(name, path):
+        spec = importlib.util.spec_from_file_location(name, path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    out = render(tmp_path, {"project_name": "d",
+                            "modules": {"feature_registry": True, "github_master": True}})
+    fr = _load("cfr_x", out / "scripts/process/check_feature_registry.py")
+    gm = _load("cgm_x", out / "scripts/process/check_github_master.py")
+    missing = fr.STATUSES - set(gm.STATUS_STATE)
+    assert not missing, (f"status-vocab drift: {missing} in feature-registry STATUSES "
+                         f"but not github-master STATUS_STATE — its drift check would "
+                         f"silently fail open on those statuses")
+    # every board column must imply a real registry status
+    assert set(gm.BOARD_STATUS.values()) <= fr.STATUSES
+
+
 def _board(entry, col):
     entry = dict(entry)
     entry["board_status"] = col
