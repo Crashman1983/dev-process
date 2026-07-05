@@ -68,13 +68,13 @@ structured record of how independent the review actually was (see
 order, values without spaces:
 
 ```
-REVIEW work=42 tier=3 reviewer=fresh-agent model=cross independence=bundle,non-implementing verdict=pass round=1
+REVIEW work=42 tier=2 reviewer=fresh-agent model=same independence=bundle,non-implementing verdict=pass round=1
 ```
 
 | field | meaning |
 |---|---|
 | `work` | attribution: the issue number, or the archived plan's slug it reviews |
-| `tier` | the reviewed change's tier (0–4) |
+| `tier` | the reviewed change's tier (0–3) |
 | `reviewer` | an id for the reviewing process (presence gated; truthfulness attested) |
 | `model` | reviewing model-family slug, or `same` if the producer's family |
 | `independence` | comma set ⊆ `bundle,non-implementing,cross-model,single-family` |
