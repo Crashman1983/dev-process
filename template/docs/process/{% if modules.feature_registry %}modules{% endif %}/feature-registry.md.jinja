@@ -91,3 +91,24 @@ a gate).
   than mapped tests prints a note — the missing *mapping* is visible; semantic
   coverage stays a human judgement.
 - **Ignored:** `*.example.json` seeds; unknown fields (cross-module forward-compat).
+
+## Definition of Ready / Done
+
+Not a new checkbox — a one-place view of the bar every story clears, each item
+owned and enforced elsewhere. Use it to see the whole lifecycle at a glance.
+
+**Ready to start:**
+- a real user story (`story`) and gradeable acceptance (`acceptance`);
+- the approach recorded (the plan, for Tier 3+);
+- an issue link before code, for Tier 3+ (the `github-issues` module enforces it
+  on the plan).
+
+**Done:**
+- every acceptance criterion maps a test (`tests`; mandatory rule "tests prove
+  acceptance") — the registry gate requires ≥1 test for `status: done`;
+- the independent review ran and attested its independence (the review gate;
+  `verification-independence.md`);
+- a `done` story carries an issue link (the `github-issues` module makes this
+  hard) and its issue is `closed` (the `github-master` module checks this offline
+  where GitHub is the source of truth);
+- the registry, and any affected contract/parity SSOT, are updated.

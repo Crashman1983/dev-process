@@ -29,6 +29,18 @@ open risks, the next concrete action. It is the primary signal when restoring co
 after a break. One file per branch. Wherever other efforts' state files are visible
 (shared checkout, worktrees, or after a merge), treat them as read-only.
 
+## Discovered work (inbox)
+
+Work you spot mid-flow — a bug noticed while building something else, a missing
+test, a follow-up — is **captured, not scope-crept into the current change**.
+One line per item in `.process-work/inbox.md`; keep the current change focused on
+its own scope. Triage the inbox when you surface for air: each item becomes a
+tracked issue (via the `github-issues` module's `new_issue.sh`, when installed)
+or a registry story, or is deliberately dropped. This is discipline,
+not a gate — "did you capture everything you noticed" is not mechanically
+decidable, so nothing checks it; the value is that scope stays clean and nothing
+is silently lost.
+
 ## Plans
 
 `.process-work/plans/YYYY-MM-DD-<feature>.md` holds the current implementation plan

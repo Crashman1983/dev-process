@@ -81,6 +81,14 @@ def test_journal_state_plans_documents_tier_field_and_review_record(render, tmp_
     assert "independence" in text
 
 
+def test_journal_state_plans_has_discovered_work_inbox(render, tmp_path):
+    out = render(tmp_path, {"project_name": "demo"})
+    text = (out / "docs/process/journal-state-plans.md").read_text()
+    assert "## Discovered work (inbox)" in text
+    assert ".process-work/inbox.md" in text
+    assert "not scope-crept" in text or "captured" in text
+
+
 def test_journal_state_plans_documents_plan_issue_field(render, tmp_path):
     out = render(tmp_path, {"project_name": "demo"})
     text = (out / "docs/process/journal-state-plans.md").read_text()
