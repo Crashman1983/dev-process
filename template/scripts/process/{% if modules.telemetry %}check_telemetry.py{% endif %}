@@ -60,14 +60,14 @@ def parse_grade_lines(text: str) -> list[dict]:
 
 
 def _intended_grade(line: str) -> bool:
-    """A line meant as telemetry: starts like a GRADE line and carries at
-    least one key=value token. Prose that merely mentions GRADE is not
-    linted. The predicate is derived from the grammar's own prefix
-    (`GRADE` + any whitespace) so filter and grammar can never disagree —
-    a `GRADE\\t…` line must reach the grammar check, not slip past it."""
-    stripped = line.strip()
-    return (re.match(r"GRADE\s", stripped) is not None
-            and re.search(r"\S+=", stripped) is not None)
+    """A line meant as telemetry: `GRADE` + whitespace + a `key=value` pair as
+    its **first token** — exactly how every real GRADE line begins
+    (`GRADE work=…`). Prose that merely mentions GRADE is not linted, even when
+    a *later* word contains `=` (e.g. `GRADE totals for Q3 revenue=120k`),
+    because the first token after GRADE is then a bare word, not `key=value`.
+    A typo'd key (`GRADE wrok=…`) still qualifies and reaches the grammar check,
+    so a genuine-but-malformed line can never slip past it."""
+    return re.match(r"GRADE\s+\S+=", line.strip()) is not None
 
 
 def _check_line(line: str) -> str | None:

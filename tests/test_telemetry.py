@@ -155,6 +155,28 @@ def test_prose_mentioning_grade_ignored(render, tmp_path):
     assert r.returncode == 0, r.stdout
 
 
+def test_prose_starting_with_grade_and_later_equals_ignored(render, tmp_path):
+    # regression (audit): a prose line beginning 'GRADE ' with a '=' in a LATER
+    # word (not the first token) must NOT be linted — its first token is a bare
+    # word, so it is prose, not a GRADE line. Previously it hard-failed.
+    out = _render(render, tmp_path)
+    _journal(out, "GRADE totals for Q3 revenue=120k are in the report.\n")
+    r = _gate(out)
+    assert r.returncode == 0, r.stdout
+
+
+def test_grade_with_typoed_first_key_still_linted(render, tmp_path):
+    # the tightened predicate must NOT let a genuine-but-malformed GRADE line
+    # slip: 'GRADE wrok=…' has a key=value first token, so it reaches the grammar
+    # check and fails there.
+    out = _render(render, tmp_path)
+    _journal(out, "GRADE wrok=42 checkpoint=final criterion=AC-1 round=1 "
+                  "verdict=satisfied action=satisfied source=review\n")
+    r = _gate(out)
+    assert r.returncode == 1
+    assert "does not match the GRADE grammar" in r.stdout
+
+
 def test_non_utf8_journal_fails(render, tmp_path):
     out = _render(render, tmp_path)
     d = out / JOURNAL
