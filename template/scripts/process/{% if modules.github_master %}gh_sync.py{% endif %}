@@ -97,6 +97,19 @@ def main() -> int:
         print(f"gh_sync: gh failed: {r.stderr.strip()}", file=sys.stderr)
         return 1
 
+    # carry forward slots this tool does not master, so re-running gh_sync to
+    # refresh title/status does NOT wipe values another tool (e.g. gh_board's
+    # board_status) merged into the committed snapshot.
+    out = root / SNAPSHOT
+    prior: dict = {}
+    if out.is_file():
+        try:
+            prev = json.loads(out.read_text(encoding="utf-8"))
+            prior = {e.get("story"): e for e in prev.get("issues", [])
+                     if isinstance(e, dict)}
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            prior = {}
+
     mapping = _issue_to_story(root)
     issues, orphans = [], []
     for it in json.loads(r.stdout):
@@ -105,16 +118,17 @@ def main() -> int:
         if sid is None:
             orphans.append(num)
             continue
+        kept = prior.get(sid, {})
         issues.append({
             "number": num, "story": sid, "title": it.get("title"),
             "state": it.get("state", "").lower(),
             "status": _status_from(it.get("labels") or [], it.get("state", "").lower()),
-            # null = not yet mastered by GitHub in this slice; the gate skips
-            # drift on null slots. blocked_by/parent/board_status are filled by
-            # later slices (dependencies, sub-issues, board).
-            "blocked_by": None, "parent": None, "board_status": None,
+            # gh_sync does not master these — preserve whatever another tool
+            # committed (null until then); the gate skips drift on null slots.
+            "blocked_by": kept.get("blocked_by"),
+            "parent": kept.get("parent"),
+            "board_status": kept.get("board_status"),
         })
-    out = root / SNAPSHOT
     out.parent.mkdir(parents=True, exist_ok=True)
     # generated_at stamps when this mirror was pulled — the gate cannot check
     # freshness (no clock/network), but it surfaces the stamp so a human can.
