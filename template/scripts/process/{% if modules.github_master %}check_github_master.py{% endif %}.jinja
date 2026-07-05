@@ -107,26 +107,10 @@ def _load_snapshot(root: Path) -> tuple[dict | None, list[str], object]:
     return by_story, hard, generated_at
 
 
-def check(root: Path) -> tuple[list[str], list[str]]:
+def _invariant_hard(stories: dict, snap: dict) -> list[str]:
+    """Every *live* story traces to an issue and a snapshot entry. Deprecated
+    stories are retired — exempt from both."""
     hard: list[str] = []
-    soft: list[str] = []
-    snap, snap_hard, generated_at = _load_snapshot(root)
-    hard += snap_hard
-    if snap is None:
-        return hard, ["no github-snapshot.json yet — run gh_sync.py (expected pre-sync)"]
-
-    # Freshness is NOT gated: this gate is deterministic over the *committed*
-    # snapshot, so a snapshot that lags GitHub still passes green. Surface that
-    # every run — the caveat belongs where the reader sees the result, not only
-    # in the docs. The gate cannot check freshness without a clock/network.
-    stamp = generated_at if generated_at is not None else "unknown (no generated_at)"
-    soft.append(f"freshness is not gated — snapshot generated_at={stamp!r}; "
-                f"re-run gh_sync.py if GitHub changed since (a stale mirror passes)")
-
-    stories = _stories(root)
-
-    # master invariant: every *live* story traces to an issue and a snapshot
-    # entry. Deprecated stories are retired — exempt from both.
     for sid, s in sorted(stories.items()):
         if s["status"] == "deprecated":
             continue
@@ -136,14 +120,20 @@ def check(root: Path) -> tuple[list[str], list[str]]:
         if sid not in snap:
             hard.append(f"{s['rel']}: {sid} has no snapshot entry — mirror is stale, "
                         f"re-run gh_sync.py")
+    return hard
 
-    # completeness: every pulled issue has a materialized story
-    for sid in sorted(snap):
-        if sid not in stories:
-            hard.append(f"{SNAPSHOT}: {sid} pulled from GitHub but no registry story "
-                        f"exists — materialize it")
 
-    # drift: on the fields GitHub owns, the registry may not diverge
+def _completeness_hard(stories: dict, snap: dict) -> list[str]:
+    """Every pulled issue has a materialized story (mirror complete both ways)."""
+    return [f"{SNAPSHOT}: {sid} pulled from GitHub but no registry story "
+            f"exists — materialize it"
+            for sid in sorted(snap) if sid not in stories]
+
+
+def _drift_hard(stories: dict, snap: dict) -> list[str]:
+    """On the fields GitHub owns, the registry may not diverge from the snapshot.
+    `null` slots are skipped (not yet mastered here)."""
+    hard: list[str] = []
     for sid in sorted(set(stories) & set(snap)):
         s, e = stories[sid], snap[sid]
         if e.get("title") is not None and s["title"] != e["title"]:
@@ -176,7 +166,28 @@ def check(root: Path) -> tuple[list[str], list[str]]:
                 sorted(s["blocked_by"]) != sorted(e["blocked_by"]):
             hard.append(f"{s['rel']}: {sid} blocked_by drifts from GitHub "
                         f"({sorted(s['blocked_by'])} vs {sorted(e['blocked_by'])})")
+    return hard
 
+
+def check(root: Path) -> tuple[list[str], list[str]]:
+    hard: list[str] = []
+    snap, snap_hard, generated_at = _load_snapshot(root)
+    hard += snap_hard
+    if snap is None:
+        return hard, ["no github-snapshot.json yet — run gh_sync.py (expected pre-sync)"]
+
+    # Freshness is NOT gated: this gate is deterministic over the *committed*
+    # snapshot, so a snapshot that lags GitHub still passes green. Surface that
+    # every run — the caveat belongs where the reader sees the result, not only
+    # in the docs. The gate cannot check freshness without a clock/network.
+    stamp = generated_at if generated_at is not None else "unknown (no generated_at)"
+    soft = [f"freshness is not gated — snapshot generated_at={stamp!r}; "
+            f"re-run gh_sync.py if GitHub changed since (a stale mirror passes)"]
+
+    stories = _stories(root)
+    hard += _invariant_hard(stories, snap)
+    hard += _completeness_hard(stories, snap)
+    hard += _drift_hard(stories, snap)
     return hard, soft
 
 
