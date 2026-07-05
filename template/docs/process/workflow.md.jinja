@@ -4,7 +4,7 @@ The development cycle, described harness-neutrally. Each phase names what enters
 
 ## The cycle
 
-`brainstorm → plan → execute → review`, with `quick` as the Tier 1–2 shortcut and `debug` as the root-cause entry point. The tier (`risk-tiers.md`) decides how much of the cycle a change runs through: Tier 0 commits directly (no plan/review cycle — the branching rules in `commits.md` still apply), Tier 1–2 take the quick path, Tier 3+ run the full cycle.
+`brainstorm → plan → execute → review`, with `quick` as the Tier 0–1 shortcut and `debug` as the root-cause entry point. The tier (`risk-tiers.md`) decides how much of the cycle a change runs through: Tier 0 commits directly when there is no behavior change (the branching rules in `commits.md` still apply) and otherwise takes the quick path, Tier 1 takes the quick path with a test, Tier 2+ run the full cycle.
 
 ## Brainstorm
 
@@ -12,7 +12,7 @@ Turns an idea into an approved design. Enters: a request or problem. Produces: a
 
 ## Plan
 
-Turns an approved design into a zero-context task breakdown. Enters: the design/spec. Produces: a plan file (`journal-state-plans.md`) of bite-sized, independently testable tasks with exact files, code, and test commands. Assume the implementer knows the toolchain but not this codebase. Use for every Tier 3+ change.
+Turns an approved design into a zero-context task breakdown. Enters: the design/spec. Produces: a plan file (`journal-state-plans.md`) of bite-sized, independently testable tasks with exact files, code, and test commands. Assume the implementer knows the toolchain but not this codebase. Use for every Tier 2+ change.
 
 ## Execute
 
@@ -24,7 +24,7 @@ The gate before merge to the main branch. Enters: the branch diff plus the plan/
 
 ## Quick
 
-The Tier 1–2 shortcut: no separate plan file. Enters: a small, isolated request. Produces: the change plus a test (Tier 2). State goal, touched files, and risk before editing; escalate to plan if persistence, auth, contracts, or external integrations turn out to be in scope.
+The Tier 0–1 shortcut: no separate plan file. Enters: a small, isolated request. Produces: the change plus a test (Tier 1). State goal, touched files, and risk before editing; escalate to plan if persistence, auth, contracts, or external integrations turn out to be in scope.
 
 ## Debug
 

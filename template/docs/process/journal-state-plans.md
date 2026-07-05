@@ -18,8 +18,8 @@ plans are already sharded, so parallel efforts never touch the same file. The
 cross-project daily view is recovered by globbing the shards; tooling that reads
 journals does so recursively.
 
-Journal duty scales with the tier: entries are expected from Tier 2 upward, or
-whenever a non-obvious decision was made. Tier 0-1 changes need none — the
+Journal duty scales with the tier: entries are expected from Tier 1 upward, or
+whenever a non-obvious decision was made. Tier 0 changes need none — the
 commit message carries them.
 
 ## Branch-scoped state
@@ -56,7 +56,7 @@ field is opt-in, and its absence is a note, never a failure.
 
 A plan may also carry an `issue: <ref>` line linking its tracking issue (`#N`,
 `owner/repo#N`, or a URL). When the `github-issues` module is installed, an
-*active* Tier 3+ plan must carry that link before code — issue-before-code — or
+*active* Tier 2+ plan must carry that link before code — issue-before-code — or
 a named `issue-waived:` exception; the review gate also uses `issue:` to match a
 review attestation to its plan.
 

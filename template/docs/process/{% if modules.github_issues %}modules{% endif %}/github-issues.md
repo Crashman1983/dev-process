@@ -47,7 +47,7 @@ note, because the gate cannot tell a deleted issue from one the token cannot see
 
 ## Issue before code
 
-Tier 3+ work is tracked by an issue *before* the code is written. The gate
+Tier 2+ work is tracked by an issue *before* the code is written. The gate
 enforces this at the active plan (`.process-work/plans/`), which already
 declares its risk tier (`journal-state-plans.md`):
 
@@ -56,12 +56,12 @@ declares its risk tier (`journal-state-plans.md`):
   `issue-waived: <reason>`. A `tier:` inside a fenced example is a quotation and
   is ignored.
 - **Not enforced:** a plan without a `tier:` line (opt-in by declaration), a
-  Tier 0–2 plan, or an archived plan — archived (merged) plans are the review
+  Tier 0–1 plan, or an archived plan — archived (merged) plans are the review
   gate's business, not this one's.
 
 `issue-waived:` is the named, auditable escape for legitimately untracked work
 (a throwaway spike, an offline setting). The rule is the mature-adopter
-discipline "Tier 3+ needs an issue before any code", made a gate — but only
+discipline "Tier 2+ needs an issue before any code", made a gate — but only
 where the project has chosen to run its backlog on GitHub Issues.
 
 ## Templates and the seed helper

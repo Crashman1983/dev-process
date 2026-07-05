@@ -5,8 +5,8 @@ that no machine gate can. These defects are not grep-able (that is why they need
 a review, not a linter), so this is a checklist of *questions to ask*, not a
 pattern to match. Framed neutrally: apply each to your stack.
 
-Depth scales with the tier (`risk-tiers.md`): a Tier 1–2 change gets a light
-pass over the relevant questions; Tier 3+ gets all of them; how *independent*
+Depth scales with the tier (`risk-tiers.md`): a Tier 0–1 change gets a light
+pass over the relevant questions; Tier 2+ gets all of them; how *independent*
 the reviewer must be also scales (`verification-independence.md`) — the
 implementing agent does not self-certify.
 

@@ -136,7 +136,7 @@ Use this path when no product code exists yet.
 7. Keep optional examples for `parity`, `contract-first`, `contracts-drift`,
    and the `telemetry` calibration seed inert until real capabilities,
    interfaces, external contracts, or graded work exist.
-8. Start new work through tier routing: Tier 1-2 uses Quick; Tier 3+ uses
+8. Start new work through tier routing: Tier 0-1 uses Quick; Tier 2+ uses
    Brainstorm -> Plan -> Execute -> Review.
 
 ## Brownfield start

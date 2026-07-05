@@ -97,7 +97,7 @@ def _issue_exists(gh: str, repo: str, number: int) -> bool:
 
 def _check_plans(root: Path) -> tuple[list[str], list[str]]:
     """Issue-before-code: an *active* plan (in `.process-work/plans/`, not the
-    archive) declaring Tier 3+ must carry a valid `issue:` link, or an explicit
+    archive) declaring Tier 2+ must carry a valid `issue:` link, or an explicit
     `issue-waived: <reason>`. Opt-in by the `tier:` declaration — a plan without
     it is not enforced. Mirrors the review gate's presence check, but at the
     start of work rather than the end."""
@@ -110,7 +110,7 @@ def _check_plans(root: Path) -> tuple[list[str], list[str]]:
             continue
         text = _unfenced(p.read_text(encoding="utf-8", errors="replace"))
         m = _PLAN_TIER.search(text)
-        if not m or int(m.group(1)) < 3:
+        if not m or int(m.group(1)) < 2:
             continue
         rel = f"{PLANS_DIR}/{p.name}"
         if _PLAN_WAIVED.search(text):

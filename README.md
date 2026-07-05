@@ -40,8 +40,11 @@ Ausgeliefert als [copier](https://copier.readthedocs.io)-Template. Adapter für
 > SP26 (Rule-5-Konsolidierung: increment-vs-rewrite-Entscheidung + Gate-Refactor) +
 > SP27 (story-lifecycle-closure: done-braucht-Issue hart, DoR/DoD-View, Discovered-work-Inbox) +
 > SP28 (audit-hardening: sechs Persona-Audits über zwei Modelle — zwei Live-Bugs
-> gefixt, Konsens-Findings ausgeräumt, verifizierte Zweige regressionsgesichert)
-> ausgeliefert, `v1.15.0`.
+> gefixt, Konsens-Findings ausgeräumt, verifizierte Zweige regressionsgesichert) +
+> SP29 (tier-model: Skala von 0–4 auf zero-based **0–3** kollabiert — das unter
+> PR/Merge-Pflicht faktisch fiktive Tier 0 „direct commit" in Tier 1 gefaltet;
+> jede verbleibende Grenze trägt Gewicht; Gate-Schwellen + Anchor/Doku remapped)
+> ausgeliefert, `v1.16.0`.
 > Setup: [`BOOTSTRAP.md`](BOOTSTRAP.md) · Systemumgebung:
 > [`docs/SYSTEM-REQUIREMENTS.md`](docs/SYSTEM-REQUIREMENTS.md) · SBOM:
 > [`docs/SBOM.md`](docs/SBOM.md) · Design: [`docs/design/`](docs/design/).
@@ -68,9 +71,9 @@ Bausteine sind zuschaltbare Module.
 
 ## Der Prozess — Eckpunkte
 
-**Risiko-Tiers (0–4)** routen jede Aufgabe: der *Umfang* bestimmt den Tier, nicht
+**Risiko-Tiers (0–3)** routen jede Aufgabe: der *Umfang* bestimmt den Tier, nicht
 die Diff-Größe. User-sichtbar, komponentenübergreifend, API/Contract, Auth oder
-Persistenz ⇒ Tier 3+ auch bei winzigem Diff. Ein `flow`-Label ist Boden, nie Decke.
+Persistenz ⇒ Tier 2+ auch bei winzigem Diff. Ein `flow`-Label ist Boden, nie Decke.
 
 **Neun bindende Regeln** (Reihenfolge = Priorität):
 

@@ -155,24 +155,24 @@ def _plan(out: Path, name: str, body: str, archived: bool = False):
     (d / name).write_text(body)
 
 
-def test_active_tier3_plan_without_issue_hard(render, tmp_path):
+def test_active_tier2_plan_without_issue_hard(render, tmp_path):
     out = _render(render, tmp_path)
-    _plan(out, "2026-07-04-feature.md", "# Plan\n\ntier: 3\n")
+    _plan(out, "2026-07-04-feature.md", "# Plan\n\ntier: 2\n")
     r = _run(out)
     assert r.returncode == 1
     assert "issue-before-code" in r.stdout
 
 
-def test_active_tier3_plan_with_issue_clean(render, tmp_path):
+def test_active_tier2_plan_with_issue_clean(render, tmp_path):
     out = _render(render, tmp_path)
-    _plan(out, "2026-07-04-feature.md", "# Plan\n\ntier: 3\nissue: #7\n")
+    _plan(out, "2026-07-04-feature.md", "# Plan\n\ntier: 2\nissue: #7\n")
     r = _run(out)
     assert r.returncode == 0, r.stdout
 
 
-def test_active_tier3_plan_malformed_issue_hard(render, tmp_path):
+def test_active_tier2_plan_malformed_issue_hard(render, tmp_path):
     out = _render(render, tmp_path)
-    _plan(out, "2026-07-04-feature.md", "tier: 3\nissue: 7\n")  # bare number, invalid
+    _plan(out, "2026-07-04-feature.md", "tier: 2\nissue: 7\n")  # bare number, invalid
     r = _run(out)
     assert r.returncode == 1
     assert "malformed issue ref" in r.stdout
@@ -181,14 +181,14 @@ def test_active_tier3_plan_malformed_issue_hard(render, tmp_path):
 def test_active_plan_issue_waived_clears(render, tmp_path):
     out = _render(render, tmp_path)
     _plan(out, "2026-07-04-feature.md",
-          "tier: 3\nissue-waived: spike, will file the issue if it graduates\n")
+          "tier: 2\nissue-waived: spike, will file the issue if it graduates\n")
     r = _run(out)
     assert r.returncode == 0, r.stdout
 
 
-def test_active_tier2_plan_not_enforced(render, tmp_path):
+def test_active_tier1_plan_not_enforced(render, tmp_path):
     out = _render(render, tmp_path)
-    _plan(out, "2026-07-04-feature.md", "tier: 2\n")  # below the threshold
+    _plan(out, "2026-07-04-feature.md", "tier: 1\n")  # below the threshold
     r = _run(out)
     assert r.returncode == 0, r.stdout
 
@@ -203,16 +203,16 @@ def test_plan_without_tier_not_enforced(render, tmp_path):
 def test_fenced_tier_in_plan_ignored(render, tmp_path):
     # a tier: inside a fenced example is a quotation, not a declaration
     out = _render(render, tmp_path)
-    _plan(out, "2026-07-04-feature.md", "# Plan\n\n```\ntier: 3\n```\n")
+    _plan(out, "2026-07-04-feature.md", "# Plan\n\n```\ntier: 2\n```\n")
     r = _run(out)
     assert r.returncode == 0, r.stdout
 
 
-def test_archived_tier3_plan_not_issue_checked(render, tmp_path):
+def test_archived_tier2_plan_not_issue_checked(render, tmp_path):
     # issue-before-code is a start-of-work rule: archived (merged) plans are the
     # review gate's business, not this one's
     out = _render(render, tmp_path)
-    _plan(out, "2026-07-04-feature.md", "tier: 3\n", archived=True)
+    _plan(out, "2026-07-04-feature.md", "tier: 2\n", archived=True)
     r = _run(out)
     assert r.returncode == 0, r.stdout
 
@@ -222,23 +222,23 @@ def test_active_design_doc_exempt_from_issue_check(render, tmp_path):
     # unit of shippable work — issue-before-code does not apply (audit coverage:
     # the design- prefix skip had no regression test)
     out = _render(render, tmp_path)
-    _plan(out, "design-2026-07-04-spine.md", "# Design\n\ntier: 4\n")
+    _plan(out, "design-2026-07-04-spine.md", "# Design\n\ntier: 3\n")
     r = _run(out)
     assert r.returncode == 0, r.stdout
     assert "issue-before-code" not in r.stdout
 
 
 def test_bulleted_tier_still_enforced(render, tmp_path):
-    # F1 guard: a bulleted `- tier: 3` must not silently escape enforcement
+    # F1 guard: a bulleted `- tier: 2` must not silently escape enforcement
     out = _render(render, tmp_path)
-    _plan(out, "2026-07-04-feature.md", "# Plan\n\n- tier: 3\n")
+    _plan(out, "2026-07-04-feature.md", "# Plan\n\n- tier: 2\n")
     r = _run(out)
     assert r.returncode == 1 and "issue-before-code" in r.stdout
 
 
 def test_bold_tier_still_enforced(render, tmp_path):
     out = _render(render, tmp_path)
-    _plan(out, "2026-07-04-feature.md", "**tier:** 4\n")
+    _plan(out, "2026-07-04-feature.md", "**tier:** 3\n")
     r = _run(out)
     assert r.returncode == 1 and "issue-before-code" in r.stdout
 
@@ -246,21 +246,21 @@ def test_bold_tier_still_enforced(render, tmp_path):
 def test_annotated_issue_accepted(render, tmp_path):
     # F2 guard: a trailing note after the ref must not false-red
     out = _render(render, tmp_path)
-    _plan(out, "2026-07-04-feature.md", "tier: 3\nissue: #7 (tracking the rollout)\n")
+    _plan(out, "2026-07-04-feature.md", "tier: 2\nissue: #7 (tracking the rollout)\n")
     r = _run(out)
     assert r.returncode == 0, r.stdout
 
 
 def test_bulleted_issue_accepted(render, tmp_path):
     out = _render(render, tmp_path)
-    _plan(out, "2026-07-04-feature.md", "- tier: 3\n- issue: octo/api#7\n")
+    _plan(out, "2026-07-04-feature.md", "- tier: 2\n- issue: octo/api#7\n")
     r = _run(out)
     assert r.returncode == 0, r.stdout
 
 
 def test_plan_enforced_even_without_feature_registry(render, tmp_path):
     out = _render(render, tmp_path, feature_registry=False)
-    _plan(out, "2026-07-04-feature.md", "tier: 4\n")
+    _plan(out, "2026-07-04-feature.md", "tier: 3\n")
     r = _run(out)
     assert r.returncode == 1
     assert "issue-before-code" in r.stdout

@@ -52,5 +52,5 @@ def test_start_here_states_when_not_worth_it(render, tmp_path):
 def test_journal_duty_scales_with_tier(render, tmp_path):
     out = render(tmp_path, {"project_name": "d"})
     text = (out / "docs/process/journal-state-plans.md").read_text()
-    assert "Tier 2 upward" in text
-    assert "Tier 0-1" in text
+    assert "Tier 1 upward" in text
+    assert "Tier 0 changes need none" in text

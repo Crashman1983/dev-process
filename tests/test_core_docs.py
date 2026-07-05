@@ -154,8 +154,9 @@ def test_mandatory_rules_required_headings(render, tmp_path):
 def test_risk_tiers_matrix(render, tmp_path):
     out = render(tmp_path, {"project_name": "demo"})
     text = (out / "docs/process/risk-tiers.md").read_text()
-    for t in ["Tier 0", "Tier 1", "Tier 2", "Tier 3", "Tier 4"]:
+    for t in ["Tier 0", "Tier 1", "Tier 2", "Tier 3"]:
         assert t in text, t
+    assert "Tier 4" not in text, "scale collapsed to 0–3; Tier 4 must be gone"
 
 
 def test_start_here_guides_greenfield_and_brownfield(render, tmp_path):

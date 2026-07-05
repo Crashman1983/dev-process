@@ -15,8 +15,8 @@ user through Greenfield or Brownfield as a dialogue.
 7. Review gate before merge. 8. Atomic commits. 9. Readable, intention-revealing code.
 
 **Tier routing (full matrix: `docs/process/risk-tiers.md`):**
-Tier 0 -> direct commit (no review; branching rules still apply). Tier 1-2 -> quick flow.
-Tier 3+ -> plan -> execute -> review.
+Tier 0 -> direct commit if no behavior change, else quick flow (no review; branching rules still apply). Tier 1 -> quick flow + a test.
+Tier 2+ -> plan -> execute -> review.
 Scope, not diff size, sets the tier.
 
 **Language:** converse with the user in the user's language; write all artifacts
@@ -32,7 +32,7 @@ process file.
 - **plan** — design -> task plan (`docs/process/workflow.md`)
 - **execute** — build the plan test-driven (`docs/process/workflow.md`)
 - **review** — merge gate (`docs/process/workflow.md`, `docs/process/review-checklist.md`)
-- **quick** — Tier 1/2 shortcut (`docs/process/workflow.md`)
+- **quick** — Tier 0/1 shortcut (`docs/process/workflow.md`)
 - **debug** — root cause before fix (`docs/process/workflow.md`)
 - **commit** — atomic conventional commit (`docs/process/commits.md`)
 - **prime** — restore context (`docs/process/journal-state-plans.md`)

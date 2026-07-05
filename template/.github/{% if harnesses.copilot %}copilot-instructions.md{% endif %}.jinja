@@ -13,8 +13,8 @@ user through Greenfield or Brownfield as a dialogue.
 7. Review gate before merge. 8. Atomic commits. 9. Readable, intention-revealing code.
 
 **Tier routing (full matrix: `docs/process/risk-tiers.md`):**
-Tier 0 -> direct commit (no review; branching rules still apply). Tier 1-2 -> quick flow.
-Tier 3+ -> plan -> execute -> review.
+Tier 0 -> direct commit if no behavior change, else quick flow (no review; branching rules still apply). Tier 1 -> quick flow + a test.
+Tier 2+ -> plan -> execute -> review.
 Scope, not diff size, sets the tier.
 
 **Language:** converse with the user in the user's language; write all artifacts
