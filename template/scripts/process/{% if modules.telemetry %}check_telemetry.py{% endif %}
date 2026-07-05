@@ -65,8 +65,10 @@ def _intended_grade(line: str) -> bool:
     (`GRADE work=…`). Prose that merely mentions GRADE is not linted, even when
     a *later* word contains `=` (e.g. `GRADE totals for Q3 revenue=120k`),
     because the first token after GRADE is then a bare word, not `key=value`.
-    A typo'd key (`GRADE wrok=…`) still qualifies and reaches the grammar check,
-    so a genuine-but-malformed line can never slip past it."""
+    A typo'd key (`GRADE wrok=…`) still qualifies and reaches the grammar check.
+    The residual blind spot: a botched line whose *first* token is a bare word
+    and only a later token is `key=value` reads as prose here — machine-emitted
+    GRADE lines never take that shape, but a hand-authored one could slip."""
     return re.match(r"GRADE\s+\S+=", line.strip()) is not None
 
 

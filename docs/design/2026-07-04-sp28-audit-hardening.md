@@ -16,7 +16,12 @@ by execution before fixing.
    `GRADE totals for Q3 revenue=120k` hard-failed the gate (verified: exit 1).
    Fix: require the **first token** after `GRADE` to be `key=value`
    (`GRADE\s+\S+=`) — real GRADE lines (and typo'd-key ones) still lint; prose
-   with a later `=` does not. Tests added both directions.
+   with a later `=` does not. Tests added both directions. Residual blind spot
+   (accepted, disclosed in the predicate docstring): a hand-authored line whose
+   *first* token is a bare word and only a later token is `key=value` now reads
+   as prose — machine-emitted GRADE lines never take that shape, so the trade
+   against the prose false-positive is net-positive, but the fix is not "nothing
+   malformed can ever slip past."
 2. **Security-floor silent skip.** A non-UTF-8 / unreadable file was skipped
    with **no note** (unlike the git-absent path), and `test_binary_file_skipped`
    enshrined the silent `OK`. A grep gate silently passing an unscannable file is
@@ -36,7 +41,11 @@ by execution before fixing.
 4. **Rendered `process-gates` workflow ships no `permissions:`** (both CI-CD).
    Add `permissions: contents: read` to the GitHub workflow.
 5. **`release-tag.yml` `sha` unvalidated** (both CI-CD) — git option-injection
-   (`sha=--delete`). Add a `^[0-9a-f]{7,40}$` guard.
+   (`sha=--delete`). Guard shipped as a shell case pattern that ignores any
+   non-hex value (`*[!0-9a-fA-F]*` → fall back to HEAD). This closes the
+   injection (`--delete`, `;`, spaces all fall back); it is deliberately not a
+   length-bounded `^[0-9a-f]{7,40}$` — a too-short or malformed hex simply fails
+   later at `git tag` rather than being rejected up front.
 6. **`github_master` doc overclaim** (Opus/architect). The design says `gh_sync`
    "materializes/updates the registry mirror"; it writes only the snapshot. No
    registry write-back ships. Correct the docs to the truth (materialization is
