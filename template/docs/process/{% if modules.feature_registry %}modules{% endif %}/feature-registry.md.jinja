@@ -106,9 +106,10 @@ owned and enforced elsewhere. Use it to see the whole lifecycle at a glance.
 **Done:**
 - every acceptance criterion maps a test (`tests`; mandatory rule "tests prove
   acceptance") — the registry gate requires ≥1 test for `status: done`;
-- the independent review ran and attested its independence (the review gate;
-  `verification-independence.md`);
+- the independent review *attested* its independence (the review gate validates
+  the attestation, not the run itself — `verification-independence.md`);
 - a `done` story carries an issue link (the `github-issues` module makes this
-  hard) and its issue is `closed` (the `github-master` module checks this offline
-  where GitHub is the source of truth);
+  hard — for *every* done story, epic or leaf, unlike the test rule which an
+  epic's children can cover) and its issue is `closed` (the `github-master`
+  module checks this offline where GitHub is the source of truth);
 - the registry, and any affected contract/parity SSOT, are updated.

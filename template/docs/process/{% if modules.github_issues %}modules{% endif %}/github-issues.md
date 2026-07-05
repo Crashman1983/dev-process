@@ -32,9 +32,18 @@ A story's `issue` field (illustrative story path
 - cross-repo `owner/repo#412`
 - URL `https://github.com/owner/repo/issues/412`
 
-**Hard (CI fails):** a malformed ref. **Best-effort (advisory note only):**
-whether the issue exists — a 404 stays a note, because the gate cannot tell a
-deleted issue from one the token cannot see, and cross-repo refs are allowed.
+**Hard (CI fails):** a malformed ref; **a `done` story with no `issue` link at
+all** — a finished story must trace to an issue (this applies to *every* done
+story, epic or leaf: an epic's children can cover its tests, but the epic's own
+tracking issue is its own). **Soft (advisory note):** an `in-progress` story
+without an issue — still active, the issue may be forthcoming (issue-before-code
+is enforced on the *plan*, below); and whether the issue exists — a 404 stays a
+note, because the gate cannot tell a deleted issue from one the token cannot see.
+
+> **Migration:** enabling this module (or upgrading to it) makes done-without-
+> issue hard. An existing registry with legacy `done` stories that lack `issue`
+> links will fail on the first run — add the links, or move those stories off
+> `done`, before turning the gate on in CI.
 
 ## Issue before code
 
