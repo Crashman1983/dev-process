@@ -216,6 +216,17 @@ def test_presence_tier2_not_enforced(render, tmp_path):
     assert r.returncode == 0, r.stdout
 
 
+def test_archived_design_doc_exempt_from_presence(render, tmp_path):
+    # a design-*.md is a decision artifact, not a plan that ships behavior —
+    # the review-presence check skips it even at tier 3 (audit coverage: the
+    # design- prefix skip had no regression test)
+    out = render(tmp_path, {"project_name": "demo"})
+    _archived_plan(out, "design-2026-07-04-spine.md", "# Design\n\ntier: 3\n")
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+    assert "no clearing REVIEW" not in r.stdout
+
+
 def test_presence_matches_by_issue(render, tmp_path):
     out = render(tmp_path, {"project_name": "demo"})
     _archived_plan(out, "2026-07-04-feature.md", "tier: 3\nissue: #99\n")

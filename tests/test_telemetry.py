@@ -177,6 +177,16 @@ def test_grade_with_typoed_first_key_still_linted(render, tmp_path):
     assert "does not match the GRADE grammar" in r.stdout
 
 
+def test_out_of_scope_verdict_is_valid(render, tmp_path):
+    # audit coverage: out_of_scope is a first-class verdict driving the suite's
+    # "0 false-pass in the danger direction" logic — assert the grammar accepts it
+    out = _render(render, tmp_path)
+    _journal(out, "GRADE work=1 checkpoint=1 criterion=A round=1 "
+                  "verdict=out_of_scope action=disputed source=review\n")
+    r = _gate(out)
+    assert r.returncode == 0, r.stdout
+
+
 def test_non_utf8_journal_fails(render, tmp_path):
     out = _render(render, tmp_path)
     d = out / JOURNAL

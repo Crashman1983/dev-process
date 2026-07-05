@@ -144,6 +144,73 @@ def test_malformed_snapshot_hard(render, tmp_path):
     assert r.returncode == 1 and "invalid JSON" in r.stdout
 
 
+def test_non_utf8_snapshot_hard(render, tmp_path):
+    # a hand-corrupted committed snapshot must fail clean on the read, never
+    # traceback (audit coverage: the UnicodeDecodeError branch had no test)
+    out = _render(render, tmp_path)
+    _story(out, "STORY-0001")
+    (out / ".process-work").mkdir(parents=True, exist_ok=True)
+    (out / SNAP).write_bytes(b'{"issues": []}\n\xff\xfe')
+    r = _run(out)
+    assert r.returncode == 1 and "not valid UTF-8" in r.stdout
+    assert "Traceback" not in r.stdout and "Traceback" not in r.stderr
+
+
+def test_snapshot_not_object_hard(render, tmp_path):
+    # top-level must be an object with an 'issues' list
+    out = _render(render, tmp_path)
+    _story(out, "STORY-0001")
+    (out / ".process-work").mkdir(parents=True, exist_ok=True)
+    (out / SNAP).write_text(json.dumps([{"story": "STORY-0001"}]))  # a bare list
+    r = _run(out)
+    assert r.returncode == 1 and "object with an 'issues' list" in r.stdout
+
+
+def test_entry_not_object_hard(render, tmp_path):
+    # a non-dict issues[] element must fail clean, not traceback on .get()
+    out = _render(render, tmp_path)
+    _story(out, "STORY-0001")
+    (out / ".process-work").mkdir(parents=True, exist_ok=True)
+    (out / SNAP).write_text(json.dumps(
+        {"generated_by": "t", "issues": ["not-an-object"]}))
+    r = _run(out)
+    assert r.returncode == 1 and "must be an object" in r.stdout
+    assert "Traceback" not in r.stdout and "Traceback" not in r.stderr
+
+
+def test_entry_missing_story_hard(render, tmp_path):
+    # an entry without a 'story' join key cannot be matched to the registry
+    out = _render(render, tmp_path)
+    _story(out, "STORY-0001")
+    e = _entry("STORY-0001")
+    del e["story"]
+    _snapshot(out, e)
+    r = _run(out)
+    assert r.returncode == 1 and "missing 'story'" in r.stdout
+
+
+def test_entry_bad_state_hard(render, tmp_path):
+    # 'state' is GitHub open/closed — any other value is a corrupt snapshot
+    out = _render(render, tmp_path)
+    _story(out, "STORY-0001")
+    e = _entry("STORY-0001", state="merged")  # not open/closed
+    _snapshot(out, e)
+    r = _run(out)
+    assert r.returncode == 1 and "'state' must be 'open' or 'closed'" in r.stdout
+
+
+def test_entry_nonstring_title_fails_clean(render, tmp_path):
+    # a hand-edited numeric title must fail clean before the drift compare
+    out = _render(render, tmp_path)
+    _story(out, "STORY-0001")
+    e = _entry("STORY-0001")
+    e["title"] = 42
+    _snapshot(out, e)
+    r = _run(out)
+    assert r.returncode == 1 and "'title' must be a string or null" in r.stdout
+    assert "Traceback" not in r.stdout and "Traceback" not in r.stderr
+
+
 def test_missing_issue_invariant_hard(render, tmp_path):
     out = _render(render, tmp_path)
     _story(out, "STORY-0001", issue=None)  # no issue ref

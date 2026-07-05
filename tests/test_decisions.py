@@ -100,6 +100,17 @@ def test_unfilled_menu_is_soft(render, tmp_path):
     assert "not chosen" in r.stdout
 
 
+def test_missing_status_is_hard(render, tmp_path):
+    # every decision has a lifecycle; a record with no '## Status' section at all
+    # is unreadable on that axis and must be hard (audit coverage: only the enum
+    # typo and the empty section were tested, not the wholly-absent section).
+    out = render(tmp_path, {"project_name": "demo"})
+    _write_adr(out, "0002", status=None)
+    r = _run(out)
+    assert r.returncode == 1
+    assert "no '## Status' section" in r.stdout
+
+
 def test_missing_type_is_soft(render, tmp_path):
     out = render(tmp_path, {"project_name": "demo"})
     _write_adr(out, "0002", type_=None)

@@ -72,6 +72,7 @@ def test_malformed_hash_only(render, tmp_path):
     _story(out, issue="#")
     r = _run(out)
     assert r.returncode == 1
+    assert "malformed" in r.stdout  # fails for the right reason, not by accident
 
 
 def test_malformed_crossrepo_no_number(render, tmp_path):
@@ -79,6 +80,7 @@ def test_malformed_crossrepo_no_number(render, tmp_path):
     _story(out, issue="octo/billing#")
     r = _run(out)
     assert r.returncode == 1
+    assert "malformed" in r.stdout
 
 
 def test_malformed_non_github_url(render, tmp_path):
@@ -86,6 +88,7 @@ def test_malformed_non_github_url(render, tmp_path):
     _story(out, issue="https://example.com/octo/api/issues/1")
     r = _run(out)
     assert r.returncode == 1
+    assert "malformed" in r.stdout
 
 
 def test_issue_non_string_is_hard(render, tmp_path):
@@ -212,6 +215,17 @@ def test_archived_tier3_plan_not_issue_checked(render, tmp_path):
     _plan(out, "2026-07-04-feature.md", "tier: 3\n", archived=True)
     r = _run(out)
     assert r.returncode == 0, r.stdout
+
+
+def test_active_design_doc_exempt_from_issue_check(render, tmp_path):
+    # a design-*.md carries a tier for routing but is a decision artifact, not a
+    # unit of shippable work — issue-before-code does not apply (audit coverage:
+    # the design- prefix skip had no regression test)
+    out = _render(render, tmp_path)
+    _plan(out, "design-2026-07-04-spine.md", "# Design\n\ntier: 4\n")
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+    assert "issue-before-code" not in r.stdout
 
 
 def test_bulleted_tier_still_enforced(render, tmp_path):

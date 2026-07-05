@@ -91,3 +91,17 @@ def test_core_gate_runs_with_all_modules_off(render, tmp_path):
 def test_workflow_rendered(render, tmp_path):
     out = render(tmp_path, {"project_name": "d"})
     assert (out / ".github/workflows/process-gates.yml").is_file()
+
+
+def test_runner_fails_clean_without_pyyaml(render, tmp_path):
+    # audit coverage: the friendly "PyYAML is required" diagnostic (a documented
+    # SP9 audit fix) had no regression test. Exec the runner with yaml made
+    # unimportable -> exit 1 with the diagnostic, never a raw ImportError traceback.
+    out = render(tmp_path, {"project_name": "d"})
+    runner = out / "scripts/process/gate_runner.py"
+    code = ("import sys; sys.modules['yaml'] = None; sys.argv = ['gate_runner', '.']; "
+            f"exec(open({str(runner)!r}).read())")
+    r = subprocess.run([sys.executable, "-c", code], cwd=out, capture_output=True, text=True)
+    assert r.returncode == 1
+    assert "PyYAML" in (r.stdout + r.stderr)
+    assert "Traceback" not in r.stderr
