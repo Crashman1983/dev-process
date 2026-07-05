@@ -1,10 +1,10 @@
 # Was der Prozess kann — wie er funktioniert, warum, und was er bringt
 
-Dieses Dokument erklärt `dev-process` für zwei Zielgruppen ohne Vorwissen: für
+`dev-process` richtet sich hier an zwei Zielgruppen ohne Vorwissen:
 **Entwickler:innen** (auch Berufseinsteiger:innen), die täglich damit arbeiten,
-und für **Management**, das entscheidet, ob sich der Prozess lohnt. Es beantwortet
-drei Fragen — *wie geht das, warum so, welchen Vorteil bringt es* — erst
-gemeinsam, dann je Zielgruppe.
+und **Management**, das entscheidet, ob sich der Prozess lohnt. Die Leitfragen
+sind — *wie geht das, warum so, welchen Vorteil bringt es, wofür ist es geeignet
+und wo liegen seine Grenzen* — erst gemeinsam beantwortet, dann je Zielgruppe.
 
 Kurzfassung in je einem Satz:
 
@@ -162,6 +162,34 @@ hätten.
 
 ---
 
+## Wofür es geeignet ist — und wofür nicht
+
+Die Eignung hängt nicht an der Technologie (der Prozess ist sprach- und
+stack-unabhängig), sondern an der *Form* der Arbeit.
+
+**Gut geeignet, sobald mindestens eines zutrifft:**
+
+- Arbeit läuft über **mehrere Sessions** — Kontext muss zwischen ihnen überleben.
+- **Mehrere Beteiligte** (Menschen und/oder KI-Agenten) arbeiten am selben Repo —
+  jemand muss serialisieren und Kollisionen verhindern.
+- Änderungen berühren **Contracts, Persistenz, Auth oder Security** — dort ist ein
+  entkommener Fehler teuer und ein vergessener Review wahrscheinlich.
+- Das Projekt läuft **langlebig** und soll für neue Beteiligte übergebbar bleiben,
+  ohne dass Verfahrenswissen im Kopf einzelner steckt.
+- Ein **KI-Agent** schreibt viel Code schnell — Tempo, das menschliche Reviews
+  allein nicht mehr einholen.
+
+**Nicht geeignet (Overhead netto negativ):**
+
+- **Wegwerf-Prototypen** und Spikes, deren Code ohnehin verworfen wird.
+- **Einmal-Skripte** und Single-Session-Aufgaben ohne Fortsetzung.
+- Reine Erkundung, in der noch gar nicht klar ist, ob etwas gebaut werden soll.
+
+Dazwischen gibt es einen Mittelweg: das **Minimalprofil** (keine optionalen
+Module) installiert nur den leichten Kern und lässt die schweren Gates weg —
+sinnvoll, wenn ein kleines Projekt wachsen *könnte*, aber heute noch nicht die
+volle Durchsetzung braucht. Zuschalten geht später jederzeit per `copier update`.
+
 ## Was der Prozess *nicht* ist (ehrliche Grenzen)
 
 - **Kein Ersatz für Fachwissen.** Die Gates prüfen das maschinell Prüfbare — dass
@@ -173,10 +201,6 @@ hätten.
   reviewt hat; die Unabhängigkeit wird attestiert und arithmetisch geprüft, nicht
   forensisch bewiesen. Das benennt der Prozess offen, statt ein False-Green zu
   erzeugen.
-- **Nicht für Wegwerf-Arbeit.** Für Prototypen, Einmal-Skripte und
-  Single-Session-Aufgaben ist der Overhead netto negativ — dort nichts (oder nur
-  das Minimalprofil) installieren.
-
-Der Prozess rechnet sich für alles Mehrsession-, Multi-Agent- oder
-Contract-/Persistenz-/Auth-behaftete — also dort, wo ein entkommener Fehler teuer
-und ein vergessener Review wahrscheinlich ist.
+Diese Grenzen sind bewusst so benannt: Der Prozess garantiert nur, was eine
+Maschine ehrlich garantieren kann, und macht den Rest sichtbar — statt ihn hinter
+einem grünen Haken zu verstecken. Genau das macht seine grünen Läufe belastbar.
