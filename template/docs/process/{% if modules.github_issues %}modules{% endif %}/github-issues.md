@@ -51,7 +51,7 @@ Tier 2+ work is tracked by an issue *before* the code is written. The gate
 enforces this at the active plan (`.process-work/plans/`), which already
 declares its risk tier (`journal-state-plans.md`):
 
-- **Hard (CI fails):** an active plan declaring `tier: 3` or higher that carries
+- **Hard (CI fails):** an active plan declaring `tier: 2` or higher that carries
   neither a valid `issue:` line (same three forms as above) nor an explicit
   `issue-waived: <reason>`. A `tier:` inside a fenced example is a quotation and
   is ignored.
