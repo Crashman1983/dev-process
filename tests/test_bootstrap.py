@@ -33,7 +33,7 @@ def test_bootstrap_requires_post_install_verification():
     # mandatory rule 1 applied to the installer itself: claim "installed" only
     # after the gates ran green.
     text = (ROOT / "BOOTSTRAP.md").read_text()
-    assert "python scripts/process/gate_runner.py" in text
+    assert "scripts/process/gate_runner.py" in text  # python3 or python
     assert "git status --porcelain" in text
 
 

@@ -76,20 +76,27 @@ def test_selfreview_pass_tier2_hard(render, tmp_path):
     assert r.returncode == 1 and "non-implementing" in r.stdout
 
 
+def test_tier1_pass_needs_no_independence(render, tmp_path):
+    # SP34: Tier 0-1 is the self-check band (Quick flow reviews its own work);
+    # the bundle/non-implementing floor is Tier 2. A Tier 1 pass carrying an
+    # insufficient independence (non-implementing alone, no bundle — which WOULD
+    # fail at Tier 2+) is clean.
+    out = render(tmp_path, {"project_name": "demo"})
+    _journal(out, _review(tier="1", independence="non-implementing"))
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+
+
 def test_tier0_pass_needs_no_independence(render, tmp_path):
-    # the 0–3 collapse moved the self-check floor: Tier 0 (was Tier 0+1) is the
-    # only self-check tier, so a Tier 0 pass carrying an insufficient independence
-    # (non-implementing alone, no bundle — which WOULD fail at Tier 1+) is clean.
-    # This proves the arithmetic fires from Tier 1 upward, not Tier 0.
     out = render(tmp_path, {"project_name": "demo"})
     _journal(out, _review(tier="0", independence="non-implementing"))
     r = _run(out)
     assert r.returncode == 0, r.stdout
 
 
-def test_no_bundle_pass_tier1_hard(render, tmp_path):
+def test_no_bundle_pass_tier2_hard(render, tmp_path):
     out = render(tmp_path, {"project_name": "demo"})
-    _journal(out, _review(tier="1", independence="non-implementing"))  # no bundle
+    _journal(out, _review(tier="2", independence="non-implementing"))  # no bundle
     r = _run(out)
     assert r.returncode == 1 and "bundle" in r.stdout
 

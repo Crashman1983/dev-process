@@ -319,3 +319,68 @@ def test_adr_template_has_intent_axis(render, tmp_path):
     assert "## Intent" in text
     for v in ["keep", "change-planned", "tolerated"]:
         assert v in text, v
+
+
+def test_kernel_file_always_rendered(render, tmp_path):
+    # SP34: the neutral kernel source must render even with no harness adapters,
+    # so a brownfield skip-CLAUDE.md install can still obtain the kernel
+    out = render(tmp_path, {"project_name": "demo",
+                            "harnesses": {"copilot": False, "agents_md": False}})
+    k = out / "docs/process/kernel.md"
+    assert k.is_file()
+    text = k.read_text()
+    assert "<!-- KERNEL:START -->" in text and "<!-- KERNEL:END -->" in text
+    assert "Mandatory rules" in text and "Tier routing" in text
+
+
+def test_verification_independence_tier1_is_self_check(render, tmp_path):
+    # SP34: Tier 0-1 is the self-check band; Tier 2 is the first independent tier
+    out = render(tmp_path, {"project_name": "demo"})
+    text = (out / "docs/process/verification-independence.md").read_text()
+    assert "Tier 0–1" in text and "self-check" in text
+    assert "Tier 2" in text and "read-only bundle" in text
+
+
+def test_anchor_lists_active_module_docs(render, tmp_path):
+    # SP35: 8 of 12 module docs had no pointer anywhere — an agent discovered
+    # binding rules only via CI failure. The anchor now lists exactly the active
+    # modules' docs (render-time, zero-drift).
+    out = render(tmp_path, {"project_name": "demo",
+                            "modules": {"feature_registry": True, "github_issues": True,
+                                        "telemetry": True}})
+    text = (out / "CLAUDE.md").read_text()
+    assert "docs/process/modules/feature-registry.md" in text
+    assert "docs/process/modules/github-issues.md" in text
+    assert "docs/process/modules/telemetry.md" in text
+    # an inactive module's doc is NOT listed
+    assert "docs/process/modules/parity.md" not in text
+
+
+def test_anchor_no_module_list_when_none_active(render, tmp_path):
+    out = render(tmp_path, {"project_name": "demo"})
+    text = (out / "CLAUDE.md").read_text()
+    assert "docs/process/modules/" not in text  # no empty list header
+
+
+def test_start_here_has_artifact_routing_table(render, tmp_path):
+    # SP35 / cold-start #12: a single which-artifact-when router
+    out = render(tmp_path, {"project_name": "demo"})
+    text = (out / "docs/process/start-here.md").read_text()
+    assert "## Which artifact when" in text
+    for home in ["adr-NNNN", "PRODUCT.md", "STORY-NNNN", "inbox.md", "reviews/"]:
+        assert home in text
+
+
+def test_start_here_names_mid_size_trap(render, tmp_path):
+    out = render(tmp_path, {"project_name": "demo"})
+    text = (out / "docs/process/start-here.md").read_text()
+    assert "mid-size" in text
+    assert "decision-records" in text and "product-frame" in text  # the 3 core gates
+
+
+def test_parallel_efforts_names_ssot_collisions(render, tmp_path):
+    out = render(tmp_path, {"project_name": "demo"})
+    text = (out / "docs/process/journal-state-plans.md").read_text()
+    assert "Story-ID space" in text and "duplicate-id check fails" in text
+    assert "PRODUCT.md" in text and "auto-merges" in text
+    assert "Campaign parent" in text

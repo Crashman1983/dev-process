@@ -10,7 +10,7 @@ enforces what a language-agnostic CI gate honestly can:
     malformed attestation is silent loss, exactly as for telemetry `GRADE`.
   - HARD (independence arithmetic on a `verdict=pass`): a self-review
     (`non-implementing` absent) or a warm review (`bundle` absent) cannot clear
-    Tier 1+; a Tier 3 pass must carry `cross-model` or the explicit
+    Tier 2+; a Tier 3 pass must carry `cross-model` or the explicit
     `single-family` honesty flag.
   - HARD (presence, post-merge, opt-in by tier declaration): an archived plan
     declaring `tier: N` with N >= 2 that carries neither a clearing
@@ -157,12 +157,15 @@ def _arithmetic_violations(rel: str, records: list[tuple[int, dict]]) -> list[st
             continue
         tier = int(f["tier"])
         indep = set(f["independence"].split(","))
-        if tier >= 1 and "non-implementing" not in indep:
+        # bundle/non-implementing is the Tier-2 floor: Tier 0-1 is a self-check
+        # (Quick flow reviews itself), Tier 2 is the first tier with a fresh
+        # read-only-bundle review — verification-independence.md
+        if tier >= 2 and "non-implementing" not in indep:
             hard.append(f"{rel}:{lineno}: pass at tier {tier} without 'non-implementing' "
-                        f"— the implementer cannot certify its own work at Tier 1+")
-        if tier >= 1 and "bundle" not in indep:
+                        f"— the implementer cannot certify its own work at Tier 2+")
+        if tier >= 2 and "bundle" not in indep:
             hard.append(f"{rel}:{lineno}: pass at tier {tier} without 'bundle' "
-                        f"— Tier 1+ is reviewed from a read-only bundle, not the warm context")
+                        f"— Tier 2+ is reviewed from a read-only bundle, not the warm context")
         if tier >= 3 and not (indep & {"cross-model", "single-family"}):
             hard.append(f"{rel}:{lineno}: pass at tier 3 without 'cross-model' or "
                         f"'single-family' — Tier 3 must cross the model family or declare it could not")

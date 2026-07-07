@@ -63,8 +63,14 @@ Ausgeliefert als [copier](https://copier.readthedocs.io)-Template. Adapter für
 > geteilte Fence/Bullet-Disziplin für REVIEW/GRADE, Decisions-Sektionsparser,
 > github-master fail-clean, Kampagnen-Ref-Normalisierung, Symbol-Wortgrenze,
 > code_roots-Skalar; `v1.20.1` Patch aus dem SP33-Review: Unicode-Ziffer-Crash
-> im Tier-Check, Header-Split auf jeden Überschriften-Stil, ehrliche Symbol-Grenze)
-> ausgeliefert, `v1.20.1`.
+> im Tier-Check, Header-Split auf jeden Überschriften-Stil, ehrliche Symbol-Grenze) +
+> SP34 (flow-closure: Plan-Archivierung als benannter Merge-Schritt,
+> Baseline-Commit-Bypass, tracker-lose Waiver für done-Story + Follow-up-Finding,
+> neutrale `kernel.md`, Reviewer-Grammatik im /review, Tier-1/2-Grenze geschärft +
+> Tier-0-1 als Self-Check-Band) + SP35 (economics/discoverability: Anchor listet
+> aktive Modul-Docs, /quick trägt eigene Schritte, /prime liest inbox,
+> Which-artifact-when-Router, Multi-Agent-SSOT-Ehrlichkeit, Mid-Size-Trap benannt)
+> ausgeliefert, `v1.21.0`.
 > **Überblick für Einsteiger:innen & Management** (wie es funktioniert, warum,
 > welcher Mehrwert): [`docs/CAPABILITIES.md`](docs/CAPABILITIES.md).
 > Setup: [`BOOTSTRAP.md`](BOOTSTRAP.md) · Systemumgebung:

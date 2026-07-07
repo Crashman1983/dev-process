@@ -833,3 +833,56 @@ def test_no_space_heading_header_bypass_closed(render, tmp_path):
     r = _run(out)
     assert r.returncode == 1
     assert "invisible review" in r.stdout
+
+
+# --- SP34 flow closure (#16) ---
+
+def test_done_story_issue_waived_is_soft(render, tmp_path):
+    # tracker-less escape: a done story with issue_waived: <reason> is soft, so
+    # a project without a tracker is not permanently stuck below done
+    out = _render(render, tmp_path)
+    reg = out / "docs/process/feature-registry"
+    reg.mkdir(parents=True, exist_ok=True)
+    d = {"id": "STORY-0001", "title": "t", "story": "s", "status": "done",
+         "acceptance": [{"text": "a"}], "tests": [],
+         "issue_waived": "solo project, no issue tracker"}
+    (reg / "STORY-0001.json").write_text(json.dumps(d))
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+    assert "issue waived" in r.stdout
+
+
+def test_done_story_empty_waiver_still_hard(render, tmp_path):
+    # an empty reason does not waive
+    out = _render(render, tmp_path)
+    reg = out / "docs/process/feature-registry"
+    reg.mkdir(parents=True, exist_ok=True)
+    d = {"id": "STORY-0001", "title": "t", "story": "s", "status": "done",
+         "acceptance": [{"text": "a"}], "tests": [], "issue_waived": "  "}
+    (reg / "STORY-0001.json").write_text(json.dumps(d))
+    r = _run(out)
+    assert r.returncode == 1
+    assert "status 'done' but no issue link" in r.stdout
+
+
+def test_followup_finding_in_publish_waived_report_ok(render, tmp_path):
+    # off-tracker: a publish-waived report's follow-up findings can't carry an
+    # issue ref; the waiver covers them (no more dishonest accept-downgrades)
+    out = _render(render, tmp_path)
+    _report(out, "2026-07-07-x.md",
+            "review: x\nwork: #1\npublish-waived: offline repo, no tracker\n\n"
+            "## Result\n\npass\n\n## Findings\n"
+            "FINDING sev=major action=follow-up issue=- track this later\n")
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+
+
+def test_followup_finding_published_report_still_needs_issue(render, tmp_path):
+    # the waiver is the only escape — a published report's follow-up still binds
+    out = _render(render, tmp_path)
+    _report(out, "2026-07-07-y.md",
+            "review: y\nwork: #1\nissue: #57\n\n## Result\n\npass\n\n## Findings\n"
+            "FINDING sev=major action=follow-up issue=- track this later\n")
+    r = _run(out)
+    assert r.returncode == 1
+    assert "follow-up finding without an issue" in r.stdout

@@ -35,7 +35,10 @@ A story's `issue` field (illustrative story path
 **Hard (CI fails):** a malformed ref; **a `done` story with no `issue` link at
 all** — a finished story must trace to an issue (this applies to *every* done
 story, epic or leaf: an epic's children can cover its tests, but the epic's own
-tracking issue is its own). **Soft (advisory note):** an `in-progress` story
+tracking issue is its own). **Tracker-less escape:** a done story may instead
+carry an `issue_waived: <reason>` string field (soft note, not hard) — for a
+project running this module without a reachable issue tracker, so `done` is not
+permanently unreachable. **Soft (advisory note):** an `in-progress` story
 without an issue — still active, the issue may be forthcoming (issue-before-code
 is enforced on the *plan*, below); and whether the issue exists — a 404 stays a
 note, because the gate cannot tell a deleted issue from one the token cannot see.

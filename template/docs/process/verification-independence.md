@@ -24,9 +24,11 @@ Grading and review are verification. Their entire job is to see what production
 could not, so independence is not overhead — it is the property that makes the
 check mean anything. Scale it to the tier (`risk-tiers.md`):
 
-- **Tier 0** — an in-context self-check is enough; the change is small and
-  reversible enough that a blind spot is cheap.
-- **Tier 1–2** — a fresh, independent process reviews from a read-only bundle
+- **Tier 0–1** — an in-context self-check is enough; the change is small and
+  self-contained enough that a blind spot is cheap. Tier 1's Quick flow reviews
+  its own work (a light pass over the checklist), it does not dispatch a fresh
+  reviewer — the tier that first requires independence is Tier 2.
+- **Tier 2** — a fresh, independent process reviews from a read-only bundle
   (the diff plus the plan and the rules), not from the producing context. The
   implementing agent does not certify its own work. A single model is
   acceptable.
@@ -64,8 +66,8 @@ are documented with the other working-memory records in
 The `REVIEW` line is the attestation; it is deliberately one line. Tier 3
 reviews and audit campaigns additionally write a **report file**
 (`.process-work/reviews/`) carrying the full record — the prompt the reviewer
-ran with, the verdict, and each finding with its disposition; Tier 1–2 reports
-are encouraged where findings are worth tracking. When the `github-issues`
+ran with, the verdict, and each finding with its disposition; a Tier 2 report
+is encouraged where findings are worth tracking. When the `github-issues`
 module is on, reports are published as issues (campaigns bundled under a
 parent) and the gate binds them: unpublished-without-waiver and untracked
 follow-up findings fail (see the module doc).
@@ -77,7 +79,7 @@ enforces what a language-agnostic gate honestly can, and no more:
 
 - **Arithmetic.** A `verdict=pass` may not claim to clear a tier its flags do
   not support: a self-review (`non-implementing` absent) or a warm review
-  (`bundle` absent) cannot clear Tier 1+, and a Tier 3 pass must carry
+  (`bundle` absent) cannot clear Tier 2+, and a Tier 3 pass must carry
   `cross-model` or the explicit `single-family` acknowledgment. This is the
   "one tier weaker" rule above, turned from prose into a check.
 - **Presence.** A plan is archived on merge; an **archived** plan that declares

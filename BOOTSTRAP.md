@@ -96,13 +96,22 @@ line instead:
 
 **Merge skipped adapters:** if an existing `CLAUDE.md`/`AGENTS.md` was
 skipped, copy the block between `<!-- KERNEL:START -->` and
-`<!-- KERNEL:END -->` from a rendered adapter into your existing file and add
-a pointer to `docs/process/start-here.md`.
+`<!-- KERNEL:END -->` from `docs/process/kernel.md` (always rendered — the
+canonical kernel source, present even when every adapter was skipped) into your
+existing file and add a pointer to `docs/process/start-here.md`.
 
-**Verification (mandatory):** claim "installed" only after these checks:
+**Verification (mandatory):** claim "installed" only after these checks
+(use `python3` if `python` is not on PATH):
 
-    python scripts/process/gate_runner.py   # must exit 0
-    git status --porcelain                  # brownfield: added files only
+    python3 scripts/process/gate_runner.py   # must exit 0
+    git status --porcelain                   # brownfield: added files only
+
+**Version check:** confirm the render matches the docs you are following.
+`grep '^version' pyproject.toml` in the rendered repo should show the version
+the README advertises. The default `copier copy gh:…` renders the latest
+**tag** — if that lags the README, pass `--vcs-ref=HEAD` (or `git clone` +
+`--vcs-ref=HEAD`) to get the branch tip, or the tag is simply behind and the
+maintainer needs to cut a release.
 
 The gate runner needs `PyYAML>=6` importable (`pip install pyyaml`); without
 it, it exits with a one-line install hint.

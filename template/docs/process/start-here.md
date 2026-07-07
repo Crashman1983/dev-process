@@ -16,6 +16,17 @@ or keep the minimal profile (no optional modules) and skip the onboarding
 dialogue. The process pays off for anything multi-session, multi-agent, or
 touching contracts, persistence, or auth.
 
+**The mid-size caveat:** three gates are *core* and always run regardless of the
+module profile — `decision-records`, `review`, and `product-frame`. So even on
+the minimal profile, the first Tier 2+ change (one that touches a contract,
+persistence, auth, or something another component depends on) carries the full
+plan → review → attestation ceremony, without the optional modules
+(feature-registry, github-issues) that would house its acceptance and issue
+link. A project too small to want that ceremony but that will inevitably make
+one cross-component change sits in an awkward middle: keep such changes rare, or
+accept the core-gate floor as the price of the guarantee it buys (no unreviewed
+Tier 2+ merge).
+
 ## First run
 
 1. Confirm that the process files exist: `CLAUDE.md`, `PRODUCT.md`,
@@ -26,7 +37,11 @@ touching contracts, persistence, or auth.
 4. Run the gates: `python scripts/process/gate_runner.py` (use `python3` if
    `python` is not on PATH; needs `PyYAML>=6`).
 5. Read `docs/process/mandatory-rules.md` and `docs/process/risk-tiers.md`.
-6. Create a process-baseline commit before product work starts.
+6. Create a process-baseline commit before product work starts. If you already
+   installed the `git-hooks` module (step 3) and you are on the main branch, the
+   no-direct-main pre-commit will block this one-time commit — run it with
+   `ALLOW_MAIN_COMMIT=1 git commit …` (the sanctioned bypass for onboarding), or
+   make the baseline commit before installing the hooks.
 
 Green gates at this stage mean: "the process is installed." They do not yet
 mean that architecture, requirements, contracts, parity, or security rules
@@ -166,6 +181,26 @@ Use this path when product code already exists.
 6. Commit onboarding in small steps: architecture baseline, feature registry,
    contracts, parity, security floor.
 7. Start product work only after the relevant baseline for that area exists.
+
+## Which artifact when
+
+A quick router for the "where does this go?" question — the single most common
+onboarding confusion. Match your thing to its home:
+
+| You have… | It goes in… | Gated? |
+|---|---|---|
+| A significant, hard-to-reverse decision (architecture, product, or process) | a decision record `docs/process/adr/adr-NNNN-*.md` | integrity (core) |
+| An approved design/spec before building | a `design-*.md` beside the plan (`.process-work/plans/`) | no (review reads it) |
+| The product's purpose, goals, non-goals, scope | `PRODUCT.md` (edit it in the same change that shifts scope) | product-frame (core) |
+| A unit of user-visible behavior + its acceptance + tests | a registry story `docs/process/feature-registry/STORY-NNNN.json` | feature-registry |
+| A Tier 2+ change's task breakdown | a plan `.process-work/plans/YYYY-MM-DD-*.md` | review presence (core) |
+| The reasoning behind a choice made mid-work | the journal `.process-work/journal/…` | no |
+| Work you noticed but won't do now | one line in `.process-work/inbox.md` | no (triage later) |
+| A review/audit's prompt, verdict, findings | a report `.process-work/reviews/*.md` | github-issues |
+
+Rule of thumb: a *decision* → record; a *design* → design doc; the *product's
+shape* → PRODUCT.md; a *behavior* → story; *how to build it* → plan; *why you
+did it* → journal; *something for later* → inbox.
 
 ## Anchors: what goes where, and how to scale them
 

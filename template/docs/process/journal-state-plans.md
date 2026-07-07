@@ -125,3 +125,20 @@ parallel and what is serialized is deliberate:
   *phase-of* or *supersede* (mandatory rule 4), never race — that is the one kind of
   parallelism the process forbids, because it produces conflicting accretion no merge
   can reconcile.
+
+**What is *not* gate-protected across parallel efforts — know these.** The
+sharding above prevents file conflicts; it does not prevent semantic collisions
+on shared single-source-of-truth artifacts. These serialize only through
+ordinary git merge + the ff-only re-gate, and a gate catches each only *after*
+both efforts land:
+- **Story-ID space.** Two efforts can both claim `STORY-0042` off the same base;
+  the duplicate-id check fails at the *second* merge, forcing a manual renumber.
+  Reserve ids up front, or let the second effort renumber on rebase.
+- **`PRODUCT.md` coherence.** Git auto-merges edits to different lines, so one
+  effort adding a Goal and another adding a contradicting Non-goal merge clean
+  with no gate noticing the incoherence — only the review's product-frame
+  questions can. Coordinate frame edits, or review the merged frame.
+- **Campaign parent issues.** Two agents publishing a report near-simultaneously
+  both see "no parent yet" and each create one (`publish_review.sh` is
+  best-effort, network, not race-safe); the offline gate flags the split only
+  after both reports coexist. Create the campaign parent first, then publish.

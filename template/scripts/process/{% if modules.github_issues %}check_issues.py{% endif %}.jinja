@@ -252,7 +252,8 @@ def _check_reports(root: Path, default_repo: str | None) -> tuple[list[str], lis
             hard.append(f"{rel}: malformed issue ref {im.group(1)!r} "
                         "(want '#N', 'owner/repo#N', or a github issue URL)")
             published = False
-        if not published and not _RPT_WAIVED.search(header):
+        waived = bool(_RPT_WAIVED.search(header))
+        if not published and not waived:
             hard.append(f"{rel}: report has no 'issue:' ref and no "
                         f"'publish-waived: <reason>' — an unpublished review is "
                         f"invisible review (publish_review.sh, or waive with cause)")
@@ -276,10 +277,16 @@ def _check_reports(root: Path, default_repo: str | None) -> tuple[list[str], lis
             if err:
                 hard.append(f"{rel}: malformed FINDING line ({err}): {line.strip()!r}")
                 continue
-            if fields["action"] == "follow-up" and fields["issue"] == "-":
+            if fields["action"] == "follow-up" and fields["issue"] == "-" \
+                    and not waived:
+                # a publish-waived report is off-tracker (no issues to link) —
+                # its follow-ups can't carry an issue ref; the waiver covers
+                # them too (tracker-less projects). Without the waiver, an
+                # untracked follow-up is a finding that will be forgotten.
                 hard.append(f"{rel}: follow-up finding without an issue — a "
                             f"follow-up nobody tracks will be forgotten: "
-                            f"{fields['title']!r}")
+                            f"{fields['title']!r} (or 'publish-waived:' the "
+                            f"report if there is no tracker)")
             if fields["sev"] == "blocker" and fields["action"] == "accept":
                 soft.append(f"{rel}: blocker finding consciously accepted — "
                             f"make sure the reason stands in the report: "
@@ -320,9 +327,18 @@ def check(root: Path) -> tuple[list[str], list[str]]:
             # a finished story must be traceable — hard; an in-progress one may
             # still be filing its issue (issue-before-code is enforced on the
             # plan in SP20), so it stays a soft note
-            if status == "done":
+            if status == "done" and isinstance(data.get("issue_waived"), str) \
+                    and data["issue_waived"].strip():
+                # tracker-less escape: a done story may carry an
+                # `issue_waived: <reason>` string instead of an issue link, so a
+                # project with no reachable tracker is not permanently stuck
+                # below `done` (audit: this was unsatisfiable before)
+                soft.append(f"{rel}: status 'done', issue waived "
+                            f"({data['issue_waived'].strip()})")
+            elif status == "done":
                 hard.append(f"{rel}: status 'done' but no issue link — a finished "
-                            f"story must trace to an issue")
+                            f"story must trace to an issue (or set "
+                            f"'issue_waived: <reason>' if there is no tracker)")
             elif status in TRACKED:
                 soft.append(f"{rel}: status {status!r} but no issue link — unverified")
             continue

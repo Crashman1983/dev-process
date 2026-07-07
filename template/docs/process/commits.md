@@ -28,12 +28,22 @@ in `journal-state-plans.md` (Parallel efforts).
 Merge only after the tier's review gate has passed (mandatory rule 7). Two
 equivalent routes:
 
-- **Local:** fetch → rebase → gate → `merge --ff-only` → push.
+- **Local:** fetch → rebase → gate → **archive the plan** → `merge --ff-only` → push.
 - **Hosted (PR/MR):** open a pull/merge request; the review gate runs as the PR
   review plus the `process-gates` CI job, and a linear-history merge ("rebase and
   merge" or a fast-forward-only setting) is the `--ff-only` equivalent. Where the
   platform enforces squash merges, atomicity shifts up one level: one logical
-  change per PR.
+  change per PR. **Archive the plan in the last commit on the branch, before merge.**
+
+**Archiving the plan is a merge step, not an afterthought.** The last commit on
+the feature branch (before merge) moves the plan file from `.process-work/plans/`
+to `.process-work/plans/archive/` — this is what the review-presence gate keys on
+(`journal-state-plans.md`): it scans only the archive, so a Tier 2+ plan left in
+the active directory is never presence-checked. Do it before the merge, while you
+can still commit on the branch; archiving after the merge would need a direct
+commit to the main branch, which the branching rule (and the `git-hooks`
+pre-commit) forbid.
 
 When the optional `git-hooks` module is installed, a `pre-commit` hook enforces the
-no-direct-main rule locally (bypassable for automation via `ALLOW_MAIN_COMMIT=1`).
+no-direct-main rule locally (bypassable for automation, and for the one-time
+onboarding/baseline commit, via `ALLOW_MAIN_COMMIT=1`).
