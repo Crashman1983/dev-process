@@ -9,6 +9,7 @@ CORE = [
     "code-craft.md",
     "verification-independence.md",
     "review-checklist.md",
+    "definition-of-ready-and-done.md",
     "journal-state-plans.md",
     "adr/README.md",
     "adr/template.md",

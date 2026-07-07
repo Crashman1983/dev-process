@@ -225,7 +225,12 @@ automatically when work touches that subtree; AGENTS.md-style harnesses use a
 per-directory file or an explicit pointer from the root anchor. Either way the
 root stays small and each area owns its own detail.
 
-## Definition of ready
+## Definition of ready (project onboarding)
+
+This is the one-time *project*-readiness bar — the process is installed and
+onboarded. It is distinct from the per-work-item **Definition of Ready /
+Definition of Done** (`definition-of-ready-and-done.md`), which gates starting
+and finishing each issue or story once development is under way.
 
 The project is ready for normal process-driven development when:
 

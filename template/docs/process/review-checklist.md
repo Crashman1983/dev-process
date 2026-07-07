@@ -119,6 +119,14 @@ judge the change against its content:
 - Does a **test map to each acceptance criterion** the change claims? A feature
   without a test proving its acceptance is not done (mandatory rule 5).
 
+## Definition of Done
+
+- Is every applicable **Definition of Done** item met or carried as a documented
+  deviation (`definition-of-ready-and-done.md`)? Review owns the DoD gate — in
+  particular the items no other category above covers: **affected docs updated**
+  (module docs, decision records, API/contract, README), and the **issue status
+  set at each transition and closed with the commit ref**.
+
 ## Extending this list
 
 This is the neutral floor. A project with a specific stack or risk surface
