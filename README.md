@@ -62,8 +62,9 @@ Ausgeliefert als [copier](https://copier.readthedocs.io)-Template. Adapter für
 > geschlossen — Tier-Range-Validierung, Report-Header-Split auf jeder Ebene,
 > geteilte Fence/Bullet-Disziplin für REVIEW/GRADE, Decisions-Sektionsparser,
 > github-master fail-clean, Kampagnen-Ref-Normalisierung, Symbol-Wortgrenze,
-> code_roots-Skalar)
-> ausgeliefert, `v1.20.0`.
+> code_roots-Skalar; `v1.20.1` Patch aus dem SP33-Review: Unicode-Ziffer-Crash
+> im Tier-Check, Header-Split auf jeden Überschriften-Stil, ehrliche Symbol-Grenze)
+> ausgeliefert, `v1.20.1`.
 > **Überblick für Einsteiger:innen & Management** (wie es funktioniert, warum,
 > welcher Mehrwert): [`docs/CAPABILITIES.md`](docs/CAPABILITIES.md).
 > Setup: [`BOOTSTRAP.md`](BOOTSTRAP.md) · Systemumgebung:
