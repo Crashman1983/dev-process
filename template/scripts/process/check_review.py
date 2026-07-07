@@ -124,7 +124,10 @@ def parse_review_lines(text: str) -> tuple[list[tuple[int, dict]], list[tuple[in
                 bits.append("unexpected " + ",".join(sorted(extra)))
             errors.append((i, "; ".join(bits)))
             continue
-        if not fields["tier"].isdigit() or not fields["round"].isdigit():
+        # isascii guards unicode digits ("²"): isdigit() is True but int() raises
+        # — the same trap telemetry's GRADE round check already names
+        if not (fields["tier"].isascii() and fields["tier"].isdigit()) or \
+                not (fields["round"].isascii() and fields["round"].isdigit()):
             errors.append((i, "tier and round must be integers"))
             continue
         # audit: an out-of-range tier (e.g. tier=4 on the 0-3 scale) both

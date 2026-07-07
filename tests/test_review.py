@@ -312,3 +312,15 @@ def test_tilde_fenced_review_ignored(render, tmp_path):
                                  independence="bundle,non-implementing,cross-model"), "~~~")
     r = _run(out)
     assert r.returncode == 1 and "no clearing REVIEW" in r.stdout
+
+
+def test_unicode_digit_tier_fails_clean(render, tmp_path):
+    # SP33 review MAJOR: the new range check called int() on a tier that passed
+    # only isdigit() — unicode digits (²) raise ValueError → traceback. Must be
+    # the clean malformed message instead.
+    out = render(tmp_path, {"project_name": "demo"})
+    _journal(out, _review(tier="²"))  # superscript two: isdigit True, int() raises
+    r = _run(out)
+    assert r.returncode == 1
+    assert "integer" in r.stdout
+    assert "Traceback" not in r.stdout and "Traceback" not in r.stderr

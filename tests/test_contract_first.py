@@ -209,3 +209,13 @@ def test_word_boundary_symbol_still_matches(render, tmp_path):
     _write_contract(out, "chat.json", VALID)
     r = _run(out)
     assert r.returncode == 0, r.stdout
+
+
+def test_short_symbol_get_rejected(render, tmp_path):
+    # pin the real closed direction: "get" must NOT be satisfied by "getHealth"
+    out = _render(render, tmp_path)
+    _write_spec(out, "docs/api/openapi.json", '{"paths": {"getHealth": {}}}')
+    _write_contract(out, "chat.json", {**VALID, "symbols": ["get"]})
+    r = _run(out)
+    assert r.returncode == 1
+    assert "get" in r.stdout and "not found in spec" in r.stdout

@@ -17,10 +17,14 @@ Issues.
    A one-character edit defeated the gate's headline invariant. Fix: a tier
    outside 0–3 is malformed (hard); the cross-model check keys on `>= 3`
    defensively.
-2. **Report header block ends at ANY heading** (`check_issues.py`) — the
-   split on `"\n## "` let an `### `-first report treat the whole file as
+2. **Report header block ends at the first blank line** (`check_issues.py`) —
+   the split on `"\n## "` let an `### `-first report treat the whole file as
    header, so a quoted `issue: #N` in the body counted as publication. Fix:
-   split at the first ATX heading of any level.
+   the header is the contiguous key:value run from the top, ending at the
+   first blank line — which sits before *every* section-heading style (ATX,
+   no-space `##x`, setext underline), closing them all at once. (A first-pass
+   fix split on any ATX heading but missed setext + no-space; corrected after
+   the SP33 review.)
 3. **One fence-and-bullet discipline for every line grammar** — `~~~` fences
    were stripped by the issue/product-frame gates but not by review/telemetry
    (a `~~~`-quoted `verdict=pass` REALLY cleared a Tier-3 plan's presence);

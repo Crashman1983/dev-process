@@ -231,11 +231,18 @@ def _check_reports(root: Path, default_repo: str | None) -> tuple[list[str], lis
             soft.append(f"{rel}: unclosed fence — the rest of the file is "
                         f"treated as a quotation; close the fence")
         text = _unfenced(raw)
-        # the header block ends at the FIRST heading of any level — a report
-        # whose first section is `### ` (or a no-space `##x`) must not let its
-        # whole body count as header (audit false-green: a quoted body issue:
-        # counted as publication)
-        header = re.split(r"(?m)^#{1,6}\s", text, maxsplit=1)[0]
+        # the header is the contiguous run of lines from the top until the
+        # first blank line — the documented format is a key:value block, a
+        # blank, then the sections. Ending at the blank (not at a `## ` match)
+        # closes every section-heading style at once: ATX, no-space `##x`, and
+        # setext underlines all sit past the blank, so a quoted body `issue:`
+        # can never count as publication (audit false-green).
+        header_lines: list[str] = []
+        for ln in text.splitlines():
+            if not ln.strip():
+                break
+            header_lines.append(ln)
+        header = "\n".join(header_lines)
         if not _RPT_KIND.search(header):
             hard.append(f"{rel}: no 'review:' or 'audit:' header — not a readable report")
             continue

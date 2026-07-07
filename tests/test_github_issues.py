@@ -792,7 +792,7 @@ def test_h3_first_report_header_bypass_closed(render, tmp_path):
     assert "invisible review" in r.stdout
 
 
-def test_no_space_heading_header_bypass_closed(render, tmp_path):
+def test_h4_heading_header_bypass_closed(render, tmp_path):
     out = _render(render, tmp_path)
     _report(out, "2026-07-05-x.md",
             "review: x\nwork: #1\n\n#### Deep\n\nissue: #123 in prose\n")
@@ -811,3 +811,25 @@ def test_same_campaign_issue_two_ref_forms_not_split(render, tmp_path):
             "audit: b\ncampaign: r1\nissue: #58\ncampaign-issue: octo/api#5\n\n## Result\n\npass\n")
     r = _run(out)
     assert r.returncode == 0, r.stdout
+
+
+def test_setext_heading_header_bypass_closed(render, tmp_path):
+    # SP33 review MINOR: a setext-underlined section (Result\n======) did not
+    # terminate the header block, so a quoted body issue: counted as publication
+    out = _render(render, tmp_path)
+    _report(out, "2026-07-05-x.md",
+            "review: x\nwork: #1\n\nResult\n======\n\nissue: #123 covers the flaky test\n")
+    r = _run(out)
+    assert r.returncode == 1
+    assert "invisible review" in r.stdout
+
+
+def test_no_space_heading_header_bypass_closed(render, tmp_path):
+    # a genuine no-space '##Result' (not a real ATX heading) must also not let
+    # the body issue: count — the contiguous-header rule closes it
+    out = _render(render, tmp_path)
+    _report(out, "2026-07-05-y.md",
+            "review: y\nwork: #1\n\n##Result\n\nissue: #123 in prose\n")
+    r = _run(out)
+    assert r.returncode == 1
+    assert "invisible review" in r.stdout
