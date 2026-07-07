@@ -50,14 +50,35 @@ def test_attention_reads_flat_registry_tests(render, tmp_path):
     out = _render(render, tmp_path)
     reg = out / "docs/process/feature-registry"
     reg.mkdir(parents=True, exist_ok=True)
-    (reg / "STORY-0009.json").write_text(
-        '{"id": "STORY-0009", "status": "done", "issue": "#5",'
-        ' "acceptance": [{"id": "AC1", "text": "z"}],'
-        ' "tests": ["a.py", "b.py", "c.py", "d.py", "e.py", "f.py"]}')
+    # n_tests counts only tests that exist on disk (consistency with the gate)
+    paths = [f"tests/test_flat_{i}.py" for i in range(6)]
+    for p in paths:
+        (out / p).parent.mkdir(parents=True, exist_ok=True)
+        (out / p).write_text("def test_x():\n    pass\n")
+    import json as _json
+    (reg / "STORY-0009.json").write_text(_json.dumps(
+        {"id": "STORY-0009", "status": "done", "issue": "#5",
+         "acceptance": [{"id": "AC1", "text": "z"}], "tests": paths}))
     mod = _load(out / "scripts/process/attention.py", "att_flat")
     rows = mod.load_stories(reg)
     assert rows[0]["n_ak"] == 1 and rows[0]["n_tests"] == 6
     assert [r["id"] for r in mod.under_granular(rows, 5)] == ["STORY-0009"]
+
+
+def test_attention_n_tests_ignores_missing_files(render, tmp_path):
+    # a story listing tests that do not exist must count 0 — matching the
+    # feature-registry gate, which only counts existing test paths.
+    out = _render(render, tmp_path)
+    reg = out / "docs/process/feature-registry"
+    reg.mkdir(parents=True, exist_ok=True)
+    import json as _json
+    (reg / "STORY-0010.json").write_text(_json.dumps(
+        {"id": "STORY-0010", "status": "proposed", "issue": "#6",
+         "acceptance": [{"id": "AC1", "text": "z"}],
+         "tests": ["tests/nope_a.py", "tests/nope_b.py"]}))
+    mod = _load(out / "scripts/process/attention.py", "att_missing")
+    rows = mod.load_stories(reg)
+    assert rows[0]["n_tests"] == 0
 
 
 def test_workflow_parallel_agents_section_gated(render, tmp_path):

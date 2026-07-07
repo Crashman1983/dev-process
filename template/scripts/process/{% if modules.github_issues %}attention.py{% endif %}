@@ -35,11 +35,15 @@ UNDER_GRANULAR_MAX_AK = 2
 # ---------------------------------------------------------------- pure helpers
 
 def load_stories(reg: Path) -> list[dict]:
-    """Registry rows: {id, status, issue, n_ak, n_tests}. The registry maps
-    tests at the story root (a flat `tests` list), so n_tests counts those."""
+    """Registry rows: {id, status, issue, n_ak, n_tests}. The registry maps tests
+    at the story root (a flat `tests` list). n_tests counts only tests whose file
+    exists on disk — the same rule the feature-registry gate applies — so the two
+    surfaces never disagree about a story's test count."""
     rows: list[dict] = []
     if not reg.is_dir():
         return rows
+    # tests are repo-root-relative; the registry lives at docs/process/feature-registry
+    root = reg.resolve().parents[2] if len(reg.resolve().parts) >= 3 else reg.resolve()
     for path in sorted(reg.glob("STORY-*.json")):
         if path.name.endswith(".example.json"):
             continue
@@ -49,7 +53,10 @@ def load_stories(reg: Path) -> list[dict]:
             continue
         acc = d.get("acceptance", []) or []
         tests = d.get("tests", []) or []
-        n_tests = len(tests) if isinstance(tests, list) else 0
+        n_tests = 0
+        if isinstance(tests, list):
+            n_tests = sum(1 for t in tests
+                          if (root / str(t).split("::", 1)[0]).is_file())
         rows.append({"id": d.get("id"), "status": d.get("status"),
                      "issue": d.get("issue"), "n_ak": len(acc),
                      "n_tests": n_tests})
