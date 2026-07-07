@@ -332,3 +332,15 @@ def test_conformance_configured_but_uninstalled_no_double_note(render, tmp_path)
     assert r.returncode == 0, r.stdout
     assert "not installed" in r.stdout
     assert "no arch-linter" not in r.stdout  # redundant checklist suppressed
+
+
+def test_scalar_code_roots_fails_clean(render, tmp_path):
+    # audit false-red: `code_roots: src` (a scalar) was iterated char-wise into
+    # "s / r / c" — it must hard-fail naming the list shape instead
+    out = _render(render, tmp_path)
+    _write_arch(out, "code_roots: src\nlayers:\n  domain: {path: src}\n")
+    (out / "src").mkdir(exist_ok=True)
+    r = _run(out)
+    assert r.returncode == 1
+    assert "'code_roots' must be a list" in r.stdout
+    assert "code_root missing: s" not in r.stdout  # not the char-wise nonsense

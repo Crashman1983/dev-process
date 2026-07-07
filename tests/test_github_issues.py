@@ -72,6 +72,7 @@ def test_malformed_hash_only(render, tmp_path):
     _story(out, issue="#")
     r = _run(out)
     assert r.returncode == 1
+    assert "malformed" in r.stdout  # fails for the right reason, not by accident
 
 
 def test_malformed_crossrepo_no_number(render, tmp_path):
@@ -79,6 +80,7 @@ def test_malformed_crossrepo_no_number(render, tmp_path):
     _story(out, issue="octo/billing#")
     r = _run(out)
     assert r.returncode == 1
+    assert "malformed" in r.stdout
 
 
 def test_malformed_non_github_url(render, tmp_path):
@@ -86,6 +88,7 @@ def test_malformed_non_github_url(render, tmp_path):
     _story(out, issue="https://example.com/octo/api/issues/1")
     r = _run(out)
     assert r.returncode == 1
+    assert "malformed" in r.stdout
 
 
 def test_issue_non_string_is_hard(render, tmp_path):
@@ -152,24 +155,24 @@ def _plan(out: Path, name: str, body: str, archived: bool = False):
     (d / name).write_text(body)
 
 
-def test_active_tier3_plan_without_issue_hard(render, tmp_path):
+def test_active_tier2_plan_without_issue_hard(render, tmp_path):
     out = _render(render, tmp_path)
-    _plan(out, "2026-07-04-feature.md", "# Plan\n\ntier: 3\n")
+    _plan(out, "2026-07-04-feature.md", "# Plan\n\ntier: 2\n")
     r = _run(out)
     assert r.returncode == 1
     assert "issue-before-code" in r.stdout
 
 
-def test_active_tier3_plan_with_issue_clean(render, tmp_path):
+def test_active_tier2_plan_with_issue_clean(render, tmp_path):
     out = _render(render, tmp_path)
-    _plan(out, "2026-07-04-feature.md", "# Plan\n\ntier: 3\nissue: #7\n")
+    _plan(out, "2026-07-04-feature.md", "# Plan\n\ntier: 2\nissue: #7\n")
     r = _run(out)
     assert r.returncode == 0, r.stdout
 
 
-def test_active_tier3_plan_malformed_issue_hard(render, tmp_path):
+def test_active_tier2_plan_malformed_issue_hard(render, tmp_path):
     out = _render(render, tmp_path)
-    _plan(out, "2026-07-04-feature.md", "tier: 3\nissue: 7\n")  # bare number, invalid
+    _plan(out, "2026-07-04-feature.md", "tier: 2\nissue: 7\n")  # bare number, invalid
     r = _run(out)
     assert r.returncode == 1
     assert "malformed issue ref" in r.stdout
@@ -178,14 +181,14 @@ def test_active_tier3_plan_malformed_issue_hard(render, tmp_path):
 def test_active_plan_issue_waived_clears(render, tmp_path):
     out = _render(render, tmp_path)
     _plan(out, "2026-07-04-feature.md",
-          "tier: 3\nissue-waived: spike, will file the issue if it graduates\n")
+          "tier: 2\nissue-waived: spike, will file the issue if it graduates\n")
     r = _run(out)
     assert r.returncode == 0, r.stdout
 
 
-def test_active_tier2_plan_not_enforced(render, tmp_path):
+def test_active_tier1_plan_not_enforced(render, tmp_path):
     out = _render(render, tmp_path)
-    _plan(out, "2026-07-04-feature.md", "tier: 2\n")  # below the threshold
+    _plan(out, "2026-07-04-feature.md", "tier: 1\n")  # below the threshold
     r = _run(out)
     assert r.returncode == 0, r.stdout
 
@@ -200,31 +203,42 @@ def test_plan_without_tier_not_enforced(render, tmp_path):
 def test_fenced_tier_in_plan_ignored(render, tmp_path):
     # a tier: inside a fenced example is a quotation, not a declaration
     out = _render(render, tmp_path)
-    _plan(out, "2026-07-04-feature.md", "# Plan\n\n```\ntier: 3\n```\n")
+    _plan(out, "2026-07-04-feature.md", "# Plan\n\n```\ntier: 2\n```\n")
     r = _run(out)
     assert r.returncode == 0, r.stdout
 
 
-def test_archived_tier3_plan_not_issue_checked(render, tmp_path):
+def test_archived_tier2_plan_not_issue_checked(render, tmp_path):
     # issue-before-code is a start-of-work rule: archived (merged) plans are the
     # review gate's business, not this one's
     out = _render(render, tmp_path)
-    _plan(out, "2026-07-04-feature.md", "tier: 3\n", archived=True)
+    _plan(out, "2026-07-04-feature.md", "tier: 2\n", archived=True)
     r = _run(out)
     assert r.returncode == 0, r.stdout
 
 
-def test_bulleted_tier_still_enforced(render, tmp_path):
-    # F1 guard: a bulleted `- tier: 3` must not silently escape enforcement
+def test_active_design_doc_exempt_from_issue_check(render, tmp_path):
+    # a design-*.md carries a tier for routing but is a decision artifact, not a
+    # unit of shippable work — issue-before-code does not apply (audit coverage:
+    # the design- prefix skip had no regression test)
     out = _render(render, tmp_path)
-    _plan(out, "2026-07-04-feature.md", "# Plan\n\n- tier: 3\n")
+    _plan(out, "design-2026-07-04-spine.md", "# Design\n\ntier: 3\n")
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+    assert "issue-before-code" not in r.stdout
+
+
+def test_bulleted_tier_still_enforced(render, tmp_path):
+    # F1 guard: a bulleted `- tier: 2` must not silently escape enforcement
+    out = _render(render, tmp_path)
+    _plan(out, "2026-07-04-feature.md", "# Plan\n\n- tier: 2\n")
     r = _run(out)
     assert r.returncode == 1 and "issue-before-code" in r.stdout
 
 
 def test_bold_tier_still_enforced(render, tmp_path):
     out = _render(render, tmp_path)
-    _plan(out, "2026-07-04-feature.md", "**tier:** 4\n")
+    _plan(out, "2026-07-04-feature.md", "**tier:** 3\n")
     r = _run(out)
     assert r.returncode == 1 and "issue-before-code" in r.stdout
 
@@ -232,21 +246,21 @@ def test_bold_tier_still_enforced(render, tmp_path):
 def test_annotated_issue_accepted(render, tmp_path):
     # F2 guard: a trailing note after the ref must not false-red
     out = _render(render, tmp_path)
-    _plan(out, "2026-07-04-feature.md", "tier: 3\nissue: #7 (tracking the rollout)\n")
+    _plan(out, "2026-07-04-feature.md", "tier: 2\nissue: #7 (tracking the rollout)\n")
     r = _run(out)
     assert r.returncode == 0, r.stdout
 
 
 def test_bulleted_issue_accepted(render, tmp_path):
     out = _render(render, tmp_path)
-    _plan(out, "2026-07-04-feature.md", "- tier: 3\n- issue: octo/api#7\n")
+    _plan(out, "2026-07-04-feature.md", "- tier: 2\n- issue: octo/api#7\n")
     r = _run(out)
     assert r.returncode == 0, r.stdout
 
 
 def test_plan_enforced_even_without_feature_registry(render, tmp_path):
     out = _render(render, tmp_path, feature_registry=False)
-    _plan(out, "2026-07-04-feature.md", "tier: 4\n")
+    _plan(out, "2026-07-04-feature.md", "tier: 3\n")
     r = _run(out)
     assert r.returncode == 1
     assert "issue-before-code" in r.stdout
@@ -429,3 +443,459 @@ def test_docdrift_resolves_module_doc_refs(render, tmp_path):
         capture_output=True, text=True,
     )
     assert r.returncode == 0, r.stdout  # module-doc refs resolve; feature_registry off
+
+
+# --- review/audit reports (SP32) ---
+
+def _report(out: Path, name: str, body: str):
+    d = out / ".process-work" / "reviews"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / name).write_text(body, encoding="utf-8")
+
+
+VALID_REPORT = (
+    "review: sp-test\n"
+    "work: #42\n"
+    "issue: #57\n\n"
+    "## Prompt\n\nthe prompt\n\n"
+    "## Result\n\npass\n\n"
+    "## Findings\n\n"
+    "FINDING sev=minor action=fix issue=- tightened a message\n"
+)
+
+
+def test_no_reports_dir_is_silent(render, tmp_path):
+    # binding is opt-in by artifact existence — no perpetual "no audits yet" noise
+    out = _render(render, tmp_path)
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+    assert "review" not in r.stdout.lower()  # F8: the old disjunct was near-vacuous
+
+
+def test_valid_published_report_ok(render, tmp_path):
+    out = _render(render, tmp_path)
+    _report(out, "2026-07-05-sp-test.md", VALID_REPORT)
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+
+
+def test_report_without_header_hard(render, tmp_path):
+    out = _render(render, tmp_path)
+    _report(out, "2026-07-05-x.md", "# Just some notes\n\nno header here\n")
+    r = _run(out)
+    assert r.returncode == 1
+    assert "no 'review:' or 'audit:' header" in r.stdout
+
+
+def test_unpublished_report_without_waiver_hard(render, tmp_path):
+    out = _render(render, tmp_path)
+    _report(out, "2026-07-05-x.md", "review: x\nwork: #1\n\n## Result\n\npass\n")
+    r = _run(out)
+    assert r.returncode == 1
+    assert "invisible review" in r.stdout
+
+
+def test_publish_waived_clears(render, tmp_path):
+    out = _render(render, tmp_path)
+    _report(out, "2026-07-05-x.md",
+            "review: x\nwork: #1\npublish-waived: offline repo, no issue tracker\n\n"
+            "## Result\n\npass\n")
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+
+
+def test_report_malformed_issue_ref_hard(render, tmp_path):
+    out = _render(render, tmp_path)
+    _report(out, "2026-07-05-x.md", "review: x\nissue: 57\n\n## Result\n\npass\n")
+    r = _run(out)
+    assert r.returncode == 1
+    assert "malformed issue ref" in r.stdout
+
+
+def test_followup_finding_without_issue_hard(render, tmp_path):
+    out = _render(render, tmp_path)
+    _report(out, "2026-07-05-x.md", VALID_REPORT +
+            "FINDING sev=major action=follow-up issue=- needs work later\n")
+    r = _run(out)
+    assert r.returncode == 1
+    assert "follow-up finding without an issue" in r.stdout
+
+
+def test_followup_finding_with_issue_ok(render, tmp_path):
+    out = _render(render, tmp_path)
+    _report(out, "2026-07-05-x.md", VALID_REPORT +
+            "FINDING sev=major action=follow-up issue=#61 tracked follow-up\n")
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+
+
+def test_malformed_finding_sev_hard(render, tmp_path):
+    out = _render(render, tmp_path)
+    _report(out, "2026-07-05-x.md", VALID_REPORT +
+            "FINDING sev=huge action=fix issue=- bad severity\n")
+    r = _run(out)
+    assert r.returncode == 1
+    assert "malformed FINDING" in r.stdout
+
+
+def test_finding_without_title_hard(render, tmp_path):
+    out = _render(render, tmp_path)
+    _report(out, "2026-07-05-x.md", VALID_REPORT +
+            "FINDING sev=minor action=fix issue=-\n")
+    r = _run(out)
+    assert r.returncode == 1
+    assert "no title" in r.stdout
+
+
+def test_prose_starting_with_finding_ignored(render, tmp_path):
+    # the telemetry GRADE lesson applied: first token after FINDING must be
+    # key=value, else it is prose
+    out = _render(render, tmp_path)
+    _report(out, "2026-07-05-x.md", VALID_REPORT +
+            "\nFINDING one was bad, severity=high overall.\n")
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+
+
+def test_fenced_finding_ignored(render, tmp_path):
+    out = _render(render, tmp_path)
+    _report(out, "2026-07-05-x.md", VALID_REPORT +
+            "\n```\nFINDING sev=bogus action=nope issue=- quoted example\n```\n"
+            "\n~~~\nFINDING sev=bogus action=nope issue=- tilde quoted\n~~~\n")
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+
+
+def test_blocker_accepted_is_soft_note(render, tmp_path):
+    out = _render(render, tmp_path)
+    _report(out, "2026-07-05-x.md", VALID_REPORT +
+            "FINDING sev=blocker action=accept issue=- accepted with cause\n")
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+    assert "blocker finding consciously accepted" in r.stdout
+
+
+def test_campaign_published_without_parent_hard(render, tmp_path):
+    out = _render(render, tmp_path)
+    _report(out, "2026-07-05-x.md",
+            "review: x\ncampaign: round-1\nissue: #57\n\n## Result\n\npass\n")
+    r = _run(out)
+    assert r.returncode == 1
+    assert "campaign" in r.stdout and "campaign-issue" in r.stdout
+
+
+def test_campaign_split_across_parents_hard(render, tmp_path):
+    out = _render(render, tmp_path)
+    _report(out, "2026-07-05-a.md",
+            "review: a\ncampaign: round-1\nissue: #57\ncampaign-issue: #50\n\n## Result\n\npass\n")
+    _report(out, "2026-07-05-b.md",
+            "review: b\ncampaign: round-1\nissue: #58\ncampaign-issue: #51\n\n## Result\n\npass\n")
+    r = _run(out)
+    assert r.returncode == 1
+    assert "split across parent issues" in r.stdout
+
+
+def test_campaign_consistent_ok(render, tmp_path):
+    out = _render(render, tmp_path)
+    _report(out, "2026-07-05-a.md",
+            "review: a\ncampaign: round-1\nissue: #57\ncampaign-issue: #50\n\n## Result\n\npass\n")
+    _report(out, "2026-07-05-b.md",
+            "audit: b\ncampaign: round-1\nissue: #58\ncampaign-issue: #50\n\n## Result\n\npass\n")
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+
+
+def test_report_non_utf8_hard(render, tmp_path):
+    out = _render(render, tmp_path)
+    d = out / ".process-work" / "reviews"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "2026-07-05-x.md").write_bytes(b"review: x\n\xff\xfe\n")
+    r = _run(out)
+    assert r.returncode == 1
+    assert "not valid UTF-8" in r.stdout
+
+
+def test_publish_tool_present_when_on_absent_when_off(render, tmp_path):
+    on = _render(render, tmp_path / "on")
+    assert (on / "scripts/process/publish_review.sh").is_file()
+    off = render(tmp_path / "off", {"project_name": "d"})
+    assert not (off / "scripts/process/publish_review.sh").exists()
+
+
+def test_publish_tool_and_doc_neutral(render, tmp_path):
+    out = _render(render, tmp_path)
+    for rel in ["scripts/process/publish_review.sh",
+                "docs/process/modules/github-issues.md"]:
+        text = (out / rel).read_text()
+        for k in KENNI:
+            assert k not in text, f"{k} leaked in {rel}"
+
+
+def test_module_doc_names_review_visibility(render, tmp_path):
+    out = _render(render, tmp_path)
+    t = (out / "docs/process/modules/github-issues.md").read_text()
+    assert "## Review and audit visibility" in t
+    assert "FINDING sev=" in t
+    assert "publish_review.sh" in t
+    assert "campaign" in t
+
+
+def test_docs_wire_report_duty(render, tmp_path):
+    out = _render(render, tmp_path)
+    vi = (out / "docs/process/verification-independence.md").read_text()
+    assert "report file" in vi and ".process-work/reviews/" in vi
+    wf = (out / "docs/process/workflow.md").read_text()
+    review = wf.split("## Review")[1].split("## Quick")[0]
+    assert ".process-work/reviews/" in review
+    jsp = (out / "docs/process/journal-state-plans.md").read_text()
+    assert "## Review reports" in jsp
+
+
+# --- discovered work: form + trail (SP32 addendum) ---
+
+def test_finding_template_present_with_ears_and_origin(render, tmp_path):
+    out = _render(render, tmp_path)
+    p = out / ".github/ISSUE_TEMPLATE/finding.md"
+    assert p.is_file()
+    t = p.read_text()
+    assert "## Origin" in t
+    assert "Discovered during" in t
+    assert "EARS" in t and "shall" in t          # the normal form, not prose
+    assert "comment on the origin issue" in t.lower() or "comment on" in t.lower()
+
+
+def test_bug_template_gains_origin_section(render, tmp_path):
+    out = _render(render, tmp_path)
+    t = (out / ".github/ISSUE_TEMPLATE/bug.md").read_text()
+    assert "## Origin" in t
+    assert "Discovered during" in t
+    assert "EARS" in t                            # form kept
+
+
+def test_finding_template_seedable(render, tmp_path):
+    # new_issue.sh must serve the new template like the others
+    out = _render(render, tmp_path)
+    r = subprocess.run(
+        ["bash", str(out / "scripts/process/new_issue.sh"), "finding"],
+        cwd=out, capture_output=True, text=True,
+    )
+    assert r.returncode == 0, r.stderr
+    body = Path(r.stdout.strip()).read_text()
+    assert "## Origin" in body and "labels:" not in body
+
+
+def test_finding_template_neutral(render, tmp_path):
+    out = _render(render, tmp_path)
+    t = (out / ".github/ISSUE_TEMPLATE/finding.md").read_text()
+    for k in KENNI:
+        assert k not in t, f"{k} leaked in finding.md"
+
+
+def test_module_doc_names_discovered_work_form(render, tmp_path):
+    out = _render(render, tmp_path)
+    t = (out / "docs/process/modules/github-issues.md").read_text()
+    assert "## Discovered work keeps the form and the trail" in t
+    assert "normal work and gets the normal form" in t
+    assert "comment on" in t and "Origin" in t
+
+
+def test_inbox_doc_routes_through_templates(render, tmp_path):
+    out = _render(render, tmp_path)
+    t = (out / "docs/process/journal-state-plans.md").read_text()
+    assert "normal form" in t
+    assert "Origin" in t
+
+
+def test_publish_tool_hints_finding_form(render, tmp_path):
+    out = _render(render, tmp_path)
+    t = (out / "scripts/process/publish_review.sh").read_text()
+    assert "new_issue.sh finding" in t
+    assert "comment on the origin issue" in t
+
+
+# --- SP32 review findings: header scoping, bullets, edges ---
+
+def test_quoted_issue_in_prose_is_not_publication(render, tmp_path):
+    # F1 (MAJOR false-green): a prose 'issue: #61 ...' in Result must not make
+    # an unpublished report count as published — headers live before the
+    # first ## heading only
+    out = _render(render, tmp_path)
+    _report(out, "2026-07-05-x.md",
+            "review: x\nwork: #1\n\n## Result\n\n"
+            "issue: #61 covers the flaky test too.\n")
+    r = _run(out)
+    assert r.returncode == 1
+    assert "invisible review" in r.stdout
+
+
+def test_prose_campaign_sentence_not_a_header(render, tmp_path):
+    # F5 (false-red): 'campaign: overall ...' prose in Result must not trigger
+    # the campaign-issue requirement
+    out = _render(render, tmp_path)
+    _report(out, "2026-07-05-x.md",
+            "review: x\nissue: #57\n\n## Result\n\n"
+            "campaign: overall the round went well.\n")
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+
+
+def test_bulleted_finding_still_linted(render, tmp_path):
+    # F2 (MAJOR false-green): '- FINDING ...' is the natural Markdown form and
+    # must not escape the lint — same _LEAD lesson as plan tier lines
+    out = _render(render, tmp_path)
+    _report(out, "2026-07-05-x.md", VALID_REPORT +
+            "- FINDING sev=major action=follow-up issue=- forgotten follow-up\n")
+    r = _run(out)
+    assert r.returncode == 1
+    assert "follow-up finding without an issue" in r.stdout
+
+
+def test_bulleted_malformed_finding_hard(render, tmp_path):
+    out = _render(render, tmp_path)
+    _report(out, "2026-07-05-x.md", VALID_REPORT +
+            "- FINDING sev=bogus action=nope issue=- malformed too\n")
+    r = _run(out)
+    assert r.returncode == 1
+    assert "malformed FINDING" in r.stdout
+
+
+def test_title_with_equals_token_is_valid(render, tmp_path):
+    # F6 (false-red): a title starting with a k=v-shaped token that is not a
+    # known key belongs to the title — 'user_id=1 hardcoded' is legitimate
+    out = _render(render, tmp_path)
+    _report(out, "2026-07-05-x.md", VALID_REPORT +
+            "FINDING sev=major action=fix issue=- USER_ID=1 hardcoded in deps\n")
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+
+
+def test_unclosed_fence_notes(render, tmp_path):
+    # F7: an unclosed fence swallows the rest of the file — disclose it
+    out = _render(render, tmp_path)
+    _report(out, "2026-07-05-x.md", VALID_REPORT +
+            "\n```\nFINDING sev=major action=follow-up issue=- swallowed\n")
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+    assert "unclosed fence" in r.stdout
+
+
+# --- SP33 gate hardening (audit findings) ---
+
+def test_h3_first_report_header_bypass_closed(render, tmp_path):
+    # audit: header split on \n## let an ###-first report treat the whole file
+    # as header — a quoted body issue: counted as publication (false-green)
+    out = _render(render, tmp_path)
+    _report(out, "2026-07-05-x.md",
+            "review: x\nwork: #1\n\n### Result\n\nissue: #123 covers the flaky test\n")
+    r = _run(out)
+    assert r.returncode == 1
+    assert "invisible review" in r.stdout
+
+
+def test_h4_heading_header_bypass_closed(render, tmp_path):
+    out = _render(render, tmp_path)
+    _report(out, "2026-07-05-x.md",
+            "review: x\nwork: #1\n\n#### Deep\n\nissue: #123 in prose\n")
+    r = _run(out)
+    assert r.returncode == 1
+    assert "invisible review" in r.stdout
+
+
+def test_same_campaign_issue_two_ref_forms_not_split(render, tmp_path):
+    # audit: #5 and octo/api#5 (the configured repo) are the same issue but were
+    # string-compared and reported as a split campaign (false-red)
+    out = _render(render, tmp_path, repo="octo/api")
+    _report(out, "2026-07-05-a.md",
+            "review: a\ncampaign: r1\nissue: #57\ncampaign-issue: #5\n\n## Result\n\npass\n")
+    _report(out, "2026-07-05-b.md",
+            "audit: b\ncampaign: r1\nissue: #58\ncampaign-issue: octo/api#5\n\n## Result\n\npass\n")
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+
+
+def test_setext_heading_header_bypass_closed(render, tmp_path):
+    # SP33 review MINOR: a setext-underlined section (Result\n======) did not
+    # terminate the header block, so a quoted body issue: counted as publication
+    out = _render(render, tmp_path)
+    _report(out, "2026-07-05-x.md",
+            "review: x\nwork: #1\n\nResult\n======\n\nissue: #123 covers the flaky test\n")
+    r = _run(out)
+    assert r.returncode == 1
+    assert "invisible review" in r.stdout
+
+
+def test_no_space_heading_header_bypass_closed(render, tmp_path):
+    # a genuine no-space '##Result' (not a real ATX heading) must also not let
+    # the body issue: count — the contiguous-header rule closes it
+    out = _render(render, tmp_path)
+    _report(out, "2026-07-05-y.md",
+            "review: y\nwork: #1\n\n##Result\n\nissue: #123 in prose\n")
+    r = _run(out)
+    assert r.returncode == 1
+    assert "invisible review" in r.stdout
+
+
+# --- SP34 flow closure (#16) ---
+
+def test_done_story_issue_waived_is_soft(render, tmp_path):
+    # tracker-less escape: a done story with issue_waived: <reason> is soft, so
+    # a project without a tracker is not permanently stuck below done
+    out = _render(render, tmp_path)
+    reg = out / "docs/process/feature-registry"
+    reg.mkdir(parents=True, exist_ok=True)
+    d = {"id": "STORY-0001", "title": "t", "story": "s", "status": "done",
+         "acceptance": [{"text": "a"}], "tests": [],
+         "issue_waived": "solo project, no issue tracker"}
+    (reg / "STORY-0001.json").write_text(json.dumps(d))
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+    assert "issue waived" in r.stdout
+
+
+def test_done_story_empty_waiver_still_hard(render, tmp_path):
+    # an empty reason does not waive
+    out = _render(render, tmp_path)
+    reg = out / "docs/process/feature-registry"
+    reg.mkdir(parents=True, exist_ok=True)
+    d = {"id": "STORY-0001", "title": "t", "story": "s", "status": "done",
+         "acceptance": [{"text": "a"}], "tests": [], "issue_waived": "  "}
+    (reg / "STORY-0001.json").write_text(json.dumps(d))
+    r = _run(out)
+    assert r.returncode == 1
+    assert "status 'done' but no issue link" in r.stdout
+
+
+def test_followup_finding_in_publish_waived_report_ok(render, tmp_path):
+    # off-tracker: a publish-waived report's follow-up findings can't carry an
+    # issue ref; the waiver covers them (no more dishonest accept-downgrades)
+    out = _render(render, tmp_path)
+    _report(out, "2026-07-07-x.md",
+            "review: x\nwork: #1\npublish-waived: offline repo, no tracker\n\n"
+            "## Result\n\npass\n\n## Findings\n"
+            "FINDING sev=major action=follow-up issue=- track this later\n")
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+
+
+def test_followup_finding_published_report_still_needs_issue(render, tmp_path):
+    # the waiver is the only escape — a published report's follow-up still binds
+    out = _render(render, tmp_path)
+    _report(out, "2026-07-07-y.md",
+            "review: y\nwork: #1\nissue: #57\n\n## Result\n\npass\n\n## Findings\n"
+            "FINDING sev=major action=follow-up issue=- track this later\n")
+    r = _run(out)
+    assert r.returncode == 1
+    assert "follow-up finding without an issue" in r.stdout
+
+
+def test_followup_in_published_but_waived_report_still_binds(render, tmp_path):
+    # SP34-review F2: publish-waived is the off-tracker escape; a report ALSO
+    # published (has issue:) is on-tracker, so its follow-ups still bind
+    out = _render(render, tmp_path)
+    _report(out, "2026-07-07-z.md",
+            "review: z\nwork: #1\nissue: #57\npublish-waived: contradictory\n\n"
+            "## Result\n\npass\n\n## Findings\n"
+            "FINDING sev=major action=follow-up issue=- track this\n")
+    r = _run(out)
+    assert r.returncode == 1
+    assert "follow-up finding without an issue" in r.stdout

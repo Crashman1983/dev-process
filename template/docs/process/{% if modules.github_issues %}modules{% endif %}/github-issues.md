@@ -35,7 +35,10 @@ A story's `issue` field (illustrative story path
 **Hard (CI fails):** a malformed ref; **a `done` story with no `issue` link at
 all** — a finished story must trace to an issue (this applies to *every* done
 story, epic or leaf: an epic's children can cover its tests, but the epic's own
-tracking issue is its own). **Soft (advisory note):** an `in-progress` story
+tracking issue is its own). **Tracker-less escape:** a done story may instead
+carry an `issue_waived: <reason>` string field (soft note, not hard) — for a
+project running this module without a reachable issue tracker, so `done` is not
+permanently unreachable. **Soft (advisory note):** an `in-progress` story
 without an issue — still active, the issue may be forthcoming (issue-before-code
 is enforced on the *plan*, below); and whether the issue exists — a 404 stays a
 note, because the gate cannot tell a deleted issue from one the token cannot see.
@@ -47,21 +50,21 @@ note, because the gate cannot tell a deleted issue from one the token cannot see
 
 ## Issue before code
 
-Tier 3+ work is tracked by an issue *before* the code is written. The gate
+Tier 2+ work is tracked by an issue *before* the code is written. The gate
 enforces this at the active plan (`.process-work/plans/`), which already
 declares its risk tier (`journal-state-plans.md`):
 
-- **Hard (CI fails):** an active plan declaring `tier: 3` or higher that carries
+- **Hard (CI fails):** an active plan declaring `tier: 2` or higher that carries
   neither a valid `issue:` line (same three forms as above) nor an explicit
   `issue-waived: <reason>`. A `tier:` inside a fenced example is a quotation and
   is ignored.
 - **Not enforced:** a plan without a `tier:` line (opt-in by declaration), a
-  Tier 0–2 plan, or an archived plan — archived (merged) plans are the review
+  Tier 0–1 plan, or an archived plan — archived (merged) plans are the review
   gate's business, not this one's.
 
 `issue-waived:` is the named, auditable escape for legitimately untracked work
 (a throwaway spike, an offline setting). The rule is the mature-adopter
-discipline "Tier 3+ needs an issue before any code", made a gate — but only
+discipline "Tier 2+ needs an issue before any code", made a gate — but only
 where the project has chosen to run its backlog on GitHub Issues.
 
 ## Templates and the seed helper
@@ -104,3 +107,67 @@ one-way projection *from* the registry — a convenience, never the source of
 truth, and not gated (it needs a write token). The feature-registry module's
 `story_order.py` tool prints the ready-to-start order from the same data without
 touching GitHub.
+
+## Review and audit visibility
+
+Independent reviews and audits produce the process's most valuable negative
+knowledge — findings — and that knowledge belongs where the team works: in
+issues, not in chat history. Three pieces:
+
+**The report file** — `.process-work/reviews/YYYY-MM-DD-<slug>.md`, beside the
+plans. Machine-readable header plus free sections:
+
+~~~
+review: sp31-product-frame        (or: audit: qa-persona)
+work: #42
+campaign: 2026-07-round-1         (optional — bundles reports of one campaign)
+issue: #57                        (once published; or: publish-waived: <reason>)
+campaign-issue: #50               (required when campaign: is set and published)
+
+## Prompt      — the verbatim prompt the reviewer/auditor ran with
+## Result      — verdict and summary
+## Findings
+FINDING sev=major action=fix issue=- placeholder scan missed the intro
+FINDING sev=minor action=follow-up issue=#61 story refs resolve by filename
+~~~
+
+`FINDING sev=<blocker|major|minor|nit> action=<fix|accept|follow-up>
+issue=<ref|-> <title>` — `fix` was resolved within the reviewed change,
+`accept` is a conscious acceptance (reason in prose), `follow-up` becomes
+tracked work and **must** carry an issue ref. Fenced examples are quotations
+and are ignored, as everywhere — **fence the Prompt section** when it quotes
+the grammar or header-like lines (`issue:`, `campaign:`), or the gate lints
+the quotes as claims. A title may contain `=` (`USER_ID=1 hardcoded` is fine);
+only leading `sev=`/`action=`/`issue=` tokens are parsed as fields.
+
+**The publish tool** — `bash scripts/process/publish_review.sh <report.md>
+[--campaign <title>]` creates the issue with the full report as body (prompt,
+result, findings — full visibility); with a campaign it creates or reuses the
+campaign parent issue and links the report to it (natively as a sub-issue
+where the installed `gh` supports it, else as a body reference). Best-effort,
+network, never a gate. Write the printed refs back into the report and commit.
+
+**The gate binding (offline, hard):** a report with neither an `issue:` ref
+nor a named `publish-waived:` reason fails — an unpublished review is
+invisible review. A `follow-up` finding without an issue fails — a follow-up
+nobody tracks will be forgotten (the parity gap→issue rule, applied to
+findings). Reports sharing a `campaign:` must agree on the `campaign-issue:`
+parent. A `blocker` finding that is merely `accept`ed is a visible note. The
+gate reads files, not GitHub: whether the issue body still matches the report
+stays attested, like every truthfulness claim.
+
+## Discovered work keeps the form and the trail
+
+A follow-up from a finding, or a bug discovered while working on something
+else, is **normal work and gets the normal form** — filed through the
+templates (`new_issue.sh finding` / `new_issue.sh bug`), with a user story
+where one applies and gradeable EARS acceptance criteria. A prose dump titled
+"fix stuff from review" is not a tracked follow-up.
+
+Both templates carry an **Origin** section: the report or issue that surfaced
+the item (`Discovered during: #N`). When an origin issue exists, **comment on
+it** referencing the new issue, so the trail runs both ways — from the origin
+to the follow-up and back. Like the claim workflow, the linking and the
+comment are convention, not gated (a CI gate cannot see issue bodies or
+comments); the *templates* provide the form, and the report gate already
+enforces that a `follow-up` finding carries *some* issue ref.

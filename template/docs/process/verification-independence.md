@@ -25,12 +25,14 @@ could not, so independence is not overhead — it is the property that makes the
 check mean anything. Scale it to the tier (`risk-tiers.md`):
 
 - **Tier 0–1** — an in-context self-check is enough; the change is small and
-  reversible enough that a blind spot is cheap.
-- **Tier 2–3** — a fresh, independent process reviews from a read-only bundle
+  self-contained enough that a blind spot is cheap. Tier 1's Quick flow reviews
+  its own work (a light pass over the checklist), it does not dispatch a fresh
+  reviewer — the tier that first requires independence is Tier 2.
+- **Tier 2** — a fresh, independent process reviews from a read-only bundle
   (the diff plus the plan and the rules), not from the producing context. The
   implementing agent does not certify its own work. A single model is
   acceptable.
-- **Tier 4** — independence should cross the model family **where a second
+- **Tier 3** — independence should cross the model family **where a second
   family is available**: two families' blind spots are uncorrelated, and a
   same-family check, however fresh its context, can still miss what its family
   systematically misses. Where only one family is available, do not fake it —
@@ -44,7 +46,7 @@ check mean anything. Scale it to the tier (`risk-tiers.md`):
 
 The one step that is supposed to be independent is easy to run in the wrong
 context by accident. So the review records how it ran — bundle-only, by a
-non-implementing process, and (at Tier 4) cross-model — as part of its result.
+non-implementing process, and (at Tier 3) cross-model — as part of its result.
 A review that cannot make those claims is treated as a warm self-check: one
 tier weaker than it claims. This makes the independence claim explicit and
 reviewable rather than assumed.
@@ -52,7 +54,7 @@ reviewable rather than assumed.
 The record is a structured `REVIEW` line in the journal, one per review:
 
 ```
-REVIEW work=42 tier=3 reviewer=fresh-agent model=cross independence=bundle,non-implementing verdict=pass round=1
+REVIEW work=42 tier=2 reviewer=fresh-agent model=same independence=bundle,non-implementing verdict=pass round=1
 ```
 
 `independence` is a comma set drawn from `bundle,non-implementing,cross-model,
@@ -61,6 +63,15 @@ model family was available — I did not fake cross-model". Grammar and fields
 are documented with the other working-memory records in
 `journal-state-plans.md`.
 
+The `REVIEW` line is the attestation; it is deliberately one line. Tier 3
+reviews and audit campaigns additionally write a **report file**
+(`.process-work/reviews/`) carrying the full record — the prompt the reviewer
+ran with, the verdict, and each finding with its disposition; a Tier 2 report
+is encouraged where findings are worth tracking. When the `github-issues`
+module is on, reports are published as issues (campaigns bundled under a
+parent) and the gate binds them: unpublished-without-waiver and untracked
+follow-up findings fail (see the module doc).
+
 ## Enforcement
 
 The `review` gate (`scripts/process/check_review.py`, core and always-on)
@@ -68,13 +79,13 @@ enforces what a language-agnostic gate honestly can, and no more:
 
 - **Arithmetic.** A `verdict=pass` may not claim to clear a tier its flags do
   not support: a self-review (`non-implementing` absent) or a warm review
-  (`bundle` absent) cannot clear Tier 2+, and a Tier 4 pass must carry
+  (`bundle` absent) cannot clear Tier 2+, and a Tier 3 pass must carry
   `cross-model` or the explicit `single-family` acknowledgment. This is the
   "one tier weaker" rule above, turned from prose into a check.
 - **Presence.** A plan is archived on merge; an **archived** plan that declares
-  `tier: N` with N ≥ 3 must carry a clearing `verdict=pass` `REVIEW` (matching
+  `tier: N` with N ≥ 2 must carry a clearing `verdict=pass` `REVIEW` (matching
   `work`, `tier ≥ N`) or an explicit `review-waived: <reason>` line. So a
-  Tier 3+ change cannot merge with no independent review — or it merges as a
+  Tier 2+ change cannot merge with no independent review — or it merges as a
   named, auditable exception.
 
 What the gate **cannot** do is verify the reviewer was *truthfully* a different

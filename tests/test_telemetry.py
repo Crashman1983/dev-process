@@ -155,6 +155,38 @@ def test_prose_mentioning_grade_ignored(render, tmp_path):
     assert r.returncode == 0, r.stdout
 
 
+def test_prose_starting_with_grade_and_later_equals_ignored(render, tmp_path):
+    # regression (audit): a prose line beginning 'GRADE ' with a '=' in a LATER
+    # word (not the first token) must NOT be linted — its first token is a bare
+    # word, so it is prose, not a GRADE line. Previously it hard-failed.
+    out = _render(render, tmp_path)
+    _journal(out, "GRADE totals for Q3 revenue=120k are in the report.\n")
+    r = _gate(out)
+    assert r.returncode == 0, r.stdout
+
+
+def test_grade_with_typoed_first_key_still_linted(render, tmp_path):
+    # the tightened predicate must NOT let a genuine-but-malformed GRADE line
+    # slip: 'GRADE wrok=…' has a key=value first token, so it reaches the grammar
+    # check and fails there.
+    out = _render(render, tmp_path)
+    _journal(out, "GRADE wrok=42 checkpoint=final criterion=AC-1 round=1 "
+                  "verdict=satisfied action=satisfied source=review\n")
+    r = _gate(out)
+    assert r.returncode == 1
+    assert "does not match the GRADE grammar" in r.stdout
+
+
+def test_out_of_scope_verdict_is_valid(render, tmp_path):
+    # audit coverage: out_of_scope is a first-class verdict driving the suite's
+    # "0 false-pass in the danger direction" logic — assert the grammar accepts it
+    out = _render(render, tmp_path)
+    _journal(out, "GRADE work=1 checkpoint=1 criterion=A round=1 "
+                  "verdict=out_of_scope action=disputed source=review\n")
+    r = _gate(out)
+    assert r.returncode == 0, r.stdout
+
+
 def test_non_utf8_journal_fails(render, tmp_path):
     out = _render(render, tmp_path)
     d = out / JOURNAL
@@ -544,3 +576,28 @@ def test_grade_lines_in_sharded_journal_are_read(render, tmp_path):
     assert "1 GRADE line(s) parseable" in r.stdout
     r2 = _kpis(out, "effectiveness")
     assert "source=execute: catch=0" in r2.stdout and "idle=1" in r2.stdout
+
+
+def test_bulleted_grade_line_is_linted(render, tmp_path):
+    # audit: '- GRADE ...' silently vanished from both the gate and cockpit
+    out = render(tmp_path, {"project_name": "demo", "modules": {"telemetry": True}})
+    d = out / ".process-work" / "journal"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "2026-07-05.md").write_text(
+        "- GRADE work=x checkpoint=1 criterion=A round=1 verdict=satisfied "
+        "action=bogus source=review\n", encoding="utf-8")
+    r = subprocess.run([sys.executable, str(out / "scripts/process/check_telemetry.py"), str(out)],
+                       capture_output=True, text=True)
+    assert r.returncode == 1  # the bulleted line is seen and its bad action linted
+
+
+def test_tilde_fenced_grade_ignored(render, tmp_path):
+    out = render(tmp_path, {"project_name": "demo", "modules": {"telemetry": True}})
+    d = out / ".process-work" / "journal"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "2026-07-05.md").write_text(
+        "~~~\nGRADE work=x checkpoint=1 criterion=A round=1 verdict=satisfied "
+        "action=bogus source=review\n~~~\n", encoding="utf-8")
+    r = subprocess.run([sys.executable, str(out / "scripts/process/check_telemetry.py"), str(out)],
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stdout  # quotation, not telemetry

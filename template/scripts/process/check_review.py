@@ -10,10 +10,10 @@ enforces what a language-agnostic CI gate honestly can:
     malformed attestation is silent loss, exactly as for telemetry `GRADE`.
   - HARD (independence arithmetic on a `verdict=pass`): a self-review
     (`non-implementing` absent) or a warm review (`bundle` absent) cannot clear
-    Tier 2+; a Tier 4 pass must carry `cross-model` or the explicit
+    Tier 2+; a Tier 3 pass must carry `cross-model` or the explicit
     `single-family` honesty flag.
   - HARD (presence, post-merge, opt-in by tier declaration): an archived plan
-    declaring `tier: N` with N >= 3 that carries neither a clearing
+    declaring `tier: N` with N >= 2 that carries neither a clearing
     `verdict=pass` REVIEW nor an explicit `review-waived:` line.
 
 It does NOT verify that the reviewer was truthfully a different agent or model —
@@ -47,35 +47,56 @@ WAIVED = re.compile(_LEAD + r"review-waived[*_]*\s*:\s*\S", re.IGNORECASE | re.M
 DATE_PREFIX = re.compile(r"^\d{4}-\d{2}-\d{2}-")
 
 
+# a REVIEW record may be written as a Markdown bullet — `- REVIEW ...` must
+# not silently vanish (audit: the natural journal form was invisible to both
+# the parse and the malformed check)
+_REVIEW_LINE = re.compile(r"^\s*(?:[-*+]\s+)?[*_]*REVIEW(\s+.*|)$")
+
+
 def _unfenced(text: str) -> str:
-    """Text with ```-fenced blocks removed. A `tier:`/`issue:`/`review-waived:`
-    line inside a fenced example is a quotation, not a declaration — the same
-    discipline the journal parser applies to REVIEW lines."""
-    out, fenced = [], False
+    """Text with fenced blocks (``` and ~~~, each closed by its own marker)
+    removed. A `tier:`/`issue:`/`review-waived:` line inside a fenced example
+    is a quotation, not a declaration — the same discipline the journal parser
+    applies to REVIEW lines."""
+    out: list[str] = []
+    fence: str | None = None
     for line in text.splitlines():
-        if line.strip().startswith("```"):
-            fenced = not fenced
+        stripped = line.strip()
+        marker = next((m for m in ("```", "~~~") if stripped.startswith(m)), None)
+        if marker and fence is None:
+            fence = marker
             continue
-        if not fenced:
+        if marker and fence == marker:
+            fence = None
+            continue
+        if fence is None:
             out.append(line)
     return "\n".join(out)
 
 
 def parse_review_lines(text: str) -> tuple[list[tuple[int, dict]], list[tuple[int, str]]]:
     """Return (records, errors). A record is (lineno, field-dict) for a
-    well-formed REVIEW line; an error is (lineno, message) for a malformed one.
-    Lines inside ```-fenced blocks are quotations and are ignored."""
+    well-formed REVIEW line (optionally bulleted); an error is (lineno,
+    message) for a malformed one. Lines inside fenced blocks (``` or ~~~) are
+    quotations and are ignored."""
     records: list[tuple[int, dict]] = []
     errors: list[tuple[int, str]] = []
-    fenced = False
+    fence: str | None = None
     for i, raw in enumerate(text.splitlines(), start=1):
         s = raw.strip()
-        if s.startswith("```"):
-            fenced = not fenced
+        marker = next((m for m in ("```", "~~~") if s.startswith(m)), None)
+        if marker and fence is None:
+            fence = marker
             continue
-        if fenced or not (s == "REVIEW" or s.startswith("REVIEW ")):
+        if marker and fence == marker:
+            fence = None
             continue
-        toks = s.split()[1:]
+        if fence is not None:
+            continue
+        rm = _REVIEW_LINE.match(raw)
+        if not rm:
+            continue
+        toks = rm.group(1).split()
         fields: dict[str, str] = {}
         malformed = None
         for t in toks:
@@ -103,8 +124,17 @@ def parse_review_lines(text: str) -> tuple[list[tuple[int, dict]], list[tuple[in
                 bits.append("unexpected " + ",".join(sorted(extra)))
             errors.append((i, "; ".join(bits)))
             continue
-        if not fields["tier"].isdigit() or not fields["round"].isdigit():
+        # isascii guards unicode digits ("²"): isdigit() is True but int() raises
+        # — the same trap telemetry's GRADE round check already names
+        if not (fields["tier"].isascii() and fields["tier"].isdigit()) or \
+                not (fields["round"].isascii() and fields["round"].isdigit()):
             errors.append((i, "tier and round must be integers"))
+            continue
+        # audit: an out-of-range tier (e.g. tier=4 on the 0-3 scale) both
+        # skipped the cross-model check and still cleared a lower plan via
+        # `>= tier` — over-declaring must be malformed, not a bypass
+        if not 0 <= int(fields["tier"]) <= 3:
+            errors.append((i, f"tier {fields['tier']} outside the 0-3 scale"))
             continue
         if fields["verdict"] not in VERDICTS:
             errors.append((i, f"verdict {fields['verdict']!r} not in {sorted(VERDICTS)}"))
@@ -127,15 +157,18 @@ def _arithmetic_violations(rel: str, records: list[tuple[int, dict]]) -> list[st
             continue
         tier = int(f["tier"])
         indep = set(f["independence"].split(","))
+        # bundle/non-implementing is the Tier-2 floor: Tier 0-1 is a self-check
+        # (Quick flow reviews itself), Tier 2 is the first tier with a fresh
+        # read-only-bundle review — verification-independence.md
         if tier >= 2 and "non-implementing" not in indep:
             hard.append(f"{rel}:{lineno}: pass at tier {tier} without 'non-implementing' "
                         f"— the implementer cannot certify its own work at Tier 2+")
         if tier >= 2 and "bundle" not in indep:
             hard.append(f"{rel}:{lineno}: pass at tier {tier} without 'bundle' "
                         f"— Tier 2+ is reviewed from a read-only bundle, not the warm context")
-        if tier == 4 and not (indep & {"cross-model", "single-family"}):
-            hard.append(f"{rel}:{lineno}: pass at tier 4 without 'cross-model' or "
-                        f"'single-family' — Tier 4 must cross the model family or declare it could not")
+        if tier >= 3 and not (indep & {"cross-model", "single-family"}):
+            hard.append(f"{rel}:{lineno}: pass at tier 3 without 'cross-model' or "
+                        f"'single-family' — Tier 3 must cross the model family or declare it could not")
     return hard
 
 
@@ -176,7 +209,7 @@ def check(root: Path) -> tuple[list[str], list[str]]:
 
     passes = [f for _ln, f in all_records if f["verdict"] == "pass"]
 
-    # --- presence: archived (merged) plans that declare Tier 3+ ---
+    # --- presence: archived (merged) plans that declare Tier 2+ ---
     adir = root / PLANS_ARCHIVE
     enforced_any = False
     if adir.is_dir():
@@ -195,7 +228,7 @@ def check(root: Path) -> tuple[list[str], list[str]]:
                             f"— review presence not enforced for this plan")
                 continue
             tier = int(m.group(1))
-            if tier < 3:
+            if tier < 2:
                 continue
             enforced_any = True
             if WAIVED.search(text):

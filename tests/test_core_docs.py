@@ -117,6 +117,95 @@ def test_start_here_reads_decision_records_before_planning(render, tmp_path):
     assert "the code that assumes it" in text  # new decision recorded before its code
 
 
+def test_workflow_phases_wire_decision_records(render, tmp_path):
+    # SP30 audit finding: workflow.md is the phase SSOT every command points at,
+    # yet it never mentioned decision records — an agent following /plan never
+    # met the rule-4 duty. Each cycle phase must now carry its decision hook.
+    out = render(tmp_path, {"project_name": "demo"})
+    text = (out / "docs/process/workflow.md").read_text()
+    brainstorm = text.split("## Brainstorm")[1].split("## Plan")[0]
+    plan = text.split("## Plan")[1].split("## Execute")[0]
+    execute = text.split("## Execute")[1].split("## Review")[0]
+    review = text.split("## Review")[1].split("## Quick")[0]
+    assert "decision records" in brainstorm  # read as constraints before design
+    assert "supersession" in brainstorm
+    assert "decision records" in plan        # plan names its decision context
+    assert "decision record" in execute      # mid-build decision stops the task
+    assert "record it as a decision record first" in execute
+    # pin the enumeration itself, not a bare substring — 'decisions' surviving
+    # elsewhere in the section must not mask its removal from the category list
+    assert "design, decisions, product frame, tests" in review
+
+
+def test_review_checklist_has_decisions_section(render, tmp_path):
+    # the gate can only check records that exist; the review is the one point
+    # a MISSING or contradicted or silently-obsoleted record can be caught —
+    # so the checklist must ask.
+    out = render(tmp_path, {"project_name": "demo"})
+    text = (out / "docs/process/review-checklist.md").read_text()
+    assert "## Decisions" in text
+    # scope to the section — the same words elsewhere in the file must not
+    # mask deletion of the actual bullets
+    section = text.split("## Decisions")[1].split("## Tests")[0]
+    assert "no decision record" in section            # missing record
+    assert "contradict" in section and "Accepted" in section  # conflict with endorsed
+    assert "obsolete in practice" in section          # silent obsolescence
+    assert "supersede it in the same change" in section
+
+
+def test_workflow_phases_wire_product_frame(render, tmp_path):
+    # SP31: the frame only gives direction if the phases read it — brainstorm
+    # as constraint, plan names the goal served, review's category list carries it
+    out = render(tmp_path, {"project_name": "demo"})
+    text = (out / "docs/process/workflow.md").read_text()
+    brainstorm = text.split("## Brainstorm")[1].split("## Plan")[0]
+    plan = text.split("## Plan")[1].split("## Execute")[0]
+    review = text.split("## Review")[1].split("## Quick")[0]
+    assert "PRODUCT.md" in brainstorm
+    assert "violates a non-goal" in brainstorm
+    assert "PRODUCT.md" in plan and "product-neutral" in plan
+    assert "design, decisions, product frame, tests" in review
+
+
+def test_review_checklist_has_product_frame_section(render, tmp_path):
+    out = render(tmp_path, {"project_name": "demo"})
+    text = (out / "docs/process/review-checklist.md").read_text()
+    assert "## Product frame" in text
+    section = text.split("## Product frame")[1].split("## Tests")[0]
+    assert "serve a stated goal" in section
+    assert "violate a non-goal" in section
+    assert "silent drift" in section
+
+
+def test_anchors_and_prime_point_at_product_frame(render, tmp_path):
+    out = render(tmp_path, {"project_name": "demo",
+                            "harnesses": {"claude": True, "agents_md": True,
+                                          "copilot": True}})
+    for rel in ["CLAUDE.md", "AGENTS.md", ".github/copilot-instructions.md",
+                ".claude/commands/prime.md", ".github/prompts/prime.prompt.md"]:
+        assert "PRODUCT.md" in (out / rel).read_text(), f"{rel} misses the frame pointer"
+
+
+def test_start_here_creates_frame_in_init_dialogue(render, tmp_path):
+    # user requirement: initial creation happens in the init/brainstorm dialogue
+    out = render(tmp_path, {"project_name": "demo"})
+    text = (out / "docs/process/start-here.md").read_text()
+    assert "primary artifact is the product frame" in text
+    assert "status:` to `onboarded" in text
+    assert "not as a separate chore" in text
+
+
+def test_plan_format_names_decision_context(render, tmp_path):
+    # a Tier 2+ plan names the records it read and any record it entails —
+    # a prose duty judged at review, honestly labeled as ungated.
+    out = render(tmp_path, {"project_name": "demo"})
+    text = (out / "docs/process/journal-state-plans.md").read_text()
+    assert "decision context" in text
+    assert "new or superseded record" in text
+    # whitespace-normalized: the phrase wraps across a line break in the source
+    assert "deliberately not gated fields" in " ".join(text.split())
+
+
 def test_decision_record_template_has_type_axis_and_intent_atomicity(render, tmp_path):
     # the generalized decision record must carry the Type axis and state that
     # Intent is exactly one value per record (the atomicity forcing function).
@@ -154,8 +243,9 @@ def test_mandatory_rules_required_headings(render, tmp_path):
 def test_risk_tiers_matrix(render, tmp_path):
     out = render(tmp_path, {"project_name": "demo"})
     text = (out / "docs/process/risk-tiers.md").read_text()
-    for t in ["Tier 0", "Tier 1", "Tier 2", "Tier 3", "Tier 4"]:
+    for t in ["Tier 0", "Tier 1", "Tier 2", "Tier 3"]:
         assert t in text, t
+    assert "Tier 4" not in text, "scale collapsed to 0–3; Tier 4 must be gone"
 
 
 def test_start_here_guides_greenfield_and_brownfield(render, tmp_path):
@@ -229,3 +319,80 @@ def test_adr_template_has_intent_axis(render, tmp_path):
     assert "## Intent" in text
     for v in ["keep", "change-planned", "tolerated"]:
         assert v in text, v
+
+
+def test_kernel_file_always_rendered(render, tmp_path):
+    # SP34: the neutral kernel source must render even with no harness adapters,
+    # so a brownfield skip-CLAUDE.md install can still obtain the kernel
+    out = render(tmp_path, {"project_name": "demo",
+                            "harnesses": {"copilot": False, "agents_md": False}})
+    k = out / "docs/process/kernel.md"
+    assert k.is_file()
+    text = k.read_text()
+    assert "<!-- KERNEL:START -->" in text and "<!-- KERNEL:END -->" in text
+    assert "Mandatory rules" in text and "Tier routing" in text
+
+
+def test_verification_independence_tier1_is_self_check(render, tmp_path):
+    # SP34: Tier 0-1 is the self-check band; Tier 2 is the first independent tier
+    out = render(tmp_path, {"project_name": "demo"})
+    text = (out / "docs/process/verification-independence.md").read_text()
+    assert "Tier 0–1" in text and "self-check" in text
+    assert "Tier 2" in text and "read-only bundle" in text
+
+
+def test_anchor_lists_active_module_docs(render, tmp_path):
+    # SP35: 8 of 12 module docs had no pointer anywhere — an agent discovered
+    # binding rules only via CI failure. The anchor now lists exactly the active
+    # modules' docs (render-time, zero-drift).
+    out = render(tmp_path, {"project_name": "demo",
+                            "modules": {"feature_registry": True, "github_issues": True,
+                                        "telemetry": True}})
+    text = (out / "CLAUDE.md").read_text()
+    assert "docs/process/modules/feature-registry.md" in text
+    assert "docs/process/modules/github-issues.md" in text
+    assert "docs/process/modules/telemetry.md" in text
+    # an inactive module's doc is NOT listed
+    assert "docs/process/modules/parity.md" not in text
+
+
+def test_anchor_no_module_list_when_none_active(render, tmp_path):
+    out = render(tmp_path, {"project_name": "demo"})
+    text = (out / "CLAUDE.md").read_text()
+    assert "docs/process/modules/" not in text  # no empty list header
+
+
+def test_start_here_has_artifact_routing_table(render, tmp_path):
+    # SP35 / cold-start #12: a single which-artifact-when router
+    out = render(tmp_path, {"project_name": "demo"})
+    text = (out / "docs/process/start-here.md").read_text()
+    assert "## Which artifact when" in text
+    for home in ["adr-NNNN", "PRODUCT.md", "STORY-NNNN", "inbox.md", "reviews/"]:
+        assert home in text
+
+
+def test_start_here_names_mid_size_trap(render, tmp_path):
+    out = render(tmp_path, {"project_name": "demo"})
+    text = (out / "docs/process/start-here.md").read_text()
+    assert "mid-size" in text
+    assert "decision-records" in text and "product-frame" in text  # the 3 core gates
+
+
+def test_parallel_efforts_names_ssot_collisions(render, tmp_path):
+    out = render(tmp_path, {"project_name": "demo"})
+    text = (out / "docs/process/journal-state-plans.md").read_text()
+    assert "Story-ID space" in text and "duplicate-id check fails" in text
+    assert "PRODUCT.md" in text and "auto-merges" in text
+    assert "Campaign parent" in text
+
+
+def test_tier_banding_consistent_across_docs(render, tmp_path):
+    # SP34-review F1: risk-tiers.md's "Verification scales too" paragraph
+    # contradicted verification-independence.md and the gate by still banding
+    # Tier 1 with a fresh bundle review. Pin the SSOT-wide consistency.
+    out = render(tmp_path, {"project_name": "demo"})
+    rt = (out / "docs/process/risk-tiers.md").read_text()
+    vi = (out / "docs/process/verification-independence.md").read_text()
+    assert "Tier 1–2 a fresh process" not in rt
+    assert "Tier 0–1 an in-context self-check" in rt
+    assert "Tier 0–1" in vi and "self-check" in vi

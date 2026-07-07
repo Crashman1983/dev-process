@@ -16,17 +16,32 @@ or keep the minimal profile (no optional modules) and skip the onboarding
 dialogue. The process pays off for anything multi-session, multi-agent, or
 touching contracts, persistence, or auth.
 
+**The mid-size caveat:** three gates are *core* and always run regardless of the
+module profile — `decision-records`, `review`, and `product-frame`. So even on
+the minimal profile, the first Tier 2+ change (one that touches a contract,
+persistence, auth, or something another component depends on) carries the full
+plan → review → attestation ceremony, without the optional modules
+(feature-registry, github-issues) that would house its acceptance and issue
+link. A project too small to want that ceremony but that will inevitably make
+one cross-component change sits in an awkward middle: keep such changes rare, or
+accept the core-gate floor as the price of the guarantee it buys (no unreviewed
+Tier 2+ merge).
+
 ## First run
 
-1. Confirm that the process files exist: `CLAUDE.md`, `docs/process/`,
-   `.copier-answers.yml`, and `scripts/process/gate_runner.py`.
+1. Confirm that the process files exist: `CLAUDE.md`, `PRODUCT.md`,
+   `docs/process/`, `.copier-answers.yml`, and `scripts/process/gate_runner.py`.
 2. Initialize Git if this is a new repository.
 3. Install local hooks if the `git-hooks` module is active:
    `bash scripts/process/install-hooks.sh`.
 4. Run the gates: `python scripts/process/gate_runner.py` (use `python3` if
    `python` is not on PATH; needs `PyYAML>=6`).
 5. Read `docs/process/mandatory-rules.md` and `docs/process/risk-tiers.md`.
-6. Create a process-baseline commit before product work starts.
+6. Create a process-baseline commit before product work starts. If you already
+   installed the `git-hooks` module (step 3) and you are on the main branch, the
+   no-direct-main pre-commit will block this one-time commit — run it with
+   `ALLOW_MAIN_COMMIT=1 git commit …` (the sanctioned bypass for onboarding), or
+   make the baseline commit before installing the hooks.
 
 Green gates at this stage mean: "the process is installed." They do not yet
 mean that architecture, requirements, contracts, parity, or security rules
@@ -99,7 +114,14 @@ question or assumption; do not invent it.
 
 ### Dialogue output
 
-After the dialogue, the LLM records at least:
+**The dialogue's primary artifact is the product frame:** fill `PRODUCT.md`
+(purpose, users, goals, non-goals, constraints, scope now) from the confirmed
+answers and flip its `status:` to `onboarded` — the frame is created *in* this
+init dialogue, not as a separate chore afterwards. Every later phase reads it
+as the direction development is checked against (`workflow.md`,
+`review-checklist.md`).
+
+Beyond the frame, the LLM records at least:
 
 - Greenfield or Brownfield;
 - project goal and first useful slice;
@@ -117,7 +139,8 @@ After the dialogue, the LLM records at least:
 
 Use this path when no product code exists yet.
 
-1. Document product goal, users, and first slice in `.process-work/`.
+1. Fill `PRODUCT.md` from the onboarding dialogue (purpose, users, goals,
+   non-goals, constraints, scope now) and flip its `status:` to `onboarded`.
 2. Settle the stack per layer (frontend, backend, storage, API/communication,
    deployment); where no preference is given, use proposal mode. Choose the
    confirmed result and the source layout small enough that the first
@@ -136,7 +159,7 @@ Use this path when no product code exists yet.
 7. Keep optional examples for `parity`, `contract-first`, `contracts-drift`,
    and the `telemetry` calibration seed inert until real capabilities,
    interfaces, external contracts, or graded work exist.
-8. Start new work through tier routing: Tier 1-2 uses Quick; Tier 3+ uses
+8. Start new work through tier routing: Tier 0-1 uses Quick; Tier 2+ uses
    Brainstorm -> Plan -> Execute -> Review.
 
 ## Brownfield start
@@ -146,6 +169,9 @@ Use this path when product code already exists.
 1. Do not rewrite the project just to fit the process.
 2. Inventory real code roots, tests, architecture boundaries, features,
    external contracts, security invariants, and surfaces first.
+   Fill `PRODUCT.md` from the *real* product — what it actually does and for
+   whom, plus the deliberate non-goals — and flip its `status:` to `onboarded`;
+   aspirations that are not yet true belong in Goals, not in Scope now.
 3. Fill `ARCHITECTURE.md` from real code. If a rule is only aspirational,
    document it in an ADR as `change-planned` or `tolerated`, not as already
    satisfied.
@@ -155,6 +181,26 @@ Use this path when product code already exists.
 6. Commit onboarding in small steps: architecture baseline, feature registry,
    contracts, parity, security floor.
 7. Start product work only after the relevant baseline for that area exists.
+
+## Which artifact when
+
+A quick router for the "where does this go?" question — the single most common
+onboarding confusion. Match your thing to its home:
+
+| You have… | It goes in… | Gated? |
+|---|---|---|
+| A significant, hard-to-reverse decision (architecture, product, or process) | a decision record `docs/process/adr/adr-NNNN-*.md` | decision-records (core) |
+| An approved design/spec before building | a `design-*.md` beside the plan (`.process-work/plans/`) | no (review reads it) |
+| The product's purpose, goals, non-goals, scope | `PRODUCT.md` (edit it in the same change that shifts scope) | product-frame (core) |
+| A unit of user-visible behavior + its acceptance + tests | a registry story `docs/process/feature-registry/STORY-NNNN.json` | feature-registry |
+| A Tier 2+ change's task breakdown | a plan `.process-work/plans/YYYY-MM-DD-*.md` | review presence (core) |
+| The reasoning behind a choice made mid-work | the journal `.process-work/journal/…` | no |
+| Work you noticed but won't do now | one line in `.process-work/inbox.md` | no (triage later) |
+| A review/audit's prompt, verdict, findings | a report `.process-work/reviews/*.md` | github-issues |
+
+Rule of thumb: a *decision* → record; a *design* → design doc; the *product's
+shape* → PRODUCT.md; a *behavior* → story; *how to build it* → plan; *why you
+did it* → journal; *something for later* → inbox.
 
 ## Anchors: what goes where, and how to scale them
 
@@ -185,12 +231,20 @@ The project is ready for normal process-driven development when:
 
 - the process baseline is committed;
 - Greenfield or Brownfield is recorded in `.process-work/`;
+- `PRODUCT.md` is either honestly `not-onboarded` (the gate notes it) or
+  onboarded with real purpose, users, goals and non-goals from the dialogue;
 - if `arch-onboarding` is active: `ARCHITECTURE.md` either honestly remains
   "not onboarded yet" or contains a real `arch` block with existing paths;
 - each active optional module either intentionally stays inert or has at least
   one real project artifact;
 - `scripts/process/gate_runner.py` runs and all notes are understood as known
-  onboarding state.
+  onboarding state;
+- **the CI gate is wired as a *required* check.** The `process-gates` job failing
+  only blocks a merge if your host is configured to require it — CI cannot set
+  this itself. On GitHub: Settings → Branches → protect the default branch → mark
+  `process-gates` a required status check. On GitLab: a merge-request approval
+  rule / pipeline-must-succeed setting. Without this, a red gate is advisory, not
+  enforced — the single step that turns "the gate runs" into "the gate blocks".
 
 Once developing: before planning any change, read the Decision Records
 (`docs/process/adr/`) relevant to the area you are about to touch — a decision

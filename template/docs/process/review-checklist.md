@@ -5,8 +5,8 @@ that no machine gate can. These defects are not grep-able (that is why they need
 a review, not a linter), so this is a checklist of *questions to ask*, not a
 pattern to match. Framed neutrally: apply each to your stack.
 
-Depth scales with the tier (`risk-tiers.md`): a Tier 1–2 change gets a light
-pass over the relevant questions; Tier 3+ gets all of them; how *independent*
+Depth scales with the tier (`risk-tiers.md`): a Tier 0–1 change gets a light
+pass over the relevant questions; Tier 2+ gets all of them; how *independent*
 the reviewer must be also scales (`verification-independence.md`) — the
 implementing agent does not self-certify.
 
@@ -83,6 +83,36 @@ Are **secrets** kept out of logs, responses, and the repository?
   (mandatory rule 4).
 - Is the code **readable** — intention-revealing names, small single-purpose
   units, no magic values (mandatory rule 9, `code-craft.md`)?
+
+## Decisions — recorded, not embodied silently
+
+The non-mechanical counterpart of the `decision-records` gate: the gate checks
+the integrity of records that *exist*; only a review can notice one that is
+*missing*. Ask of the change as a whole (mandatory rule 4):
+
+- Does it **embody a significant, hard-to-reverse decision** — architectural,
+  product, or process — that has **no decision record**? A choice of storage
+  model, protocol, dependency, or irreversible data shape hidden inside a diff
+  is a decision made silently.
+- Does it **contradict an `Accepted` record**? Then either the change or the
+  record is wrong — resolve the conflict, do not merge the contradiction.
+- Does it make an existing record **obsolete in practice** while leaving the
+  file untouched? A record the code no longer honors is a lie to the next
+  reader — supersede it in the same change.
+
+## Product frame — direction, not drift
+
+The frame (`PRODUCT.md`) is what development is checked against; the
+product-frame gate keeps it present and reference-clean, but only a review can
+judge the change against its content:
+
+- Does the change **serve a stated goal** — or is it product-neutral
+  infrastructure? Work that serves no goal and is not infrastructure is scope
+  arriving uninvited.
+- Does it **violate a non-goal**? Then either the change is wrong or the frame
+  is — change `PRODUCT.md` deliberately in the same change, or do not merge.
+- Does it **shift scope while `PRODUCT.md` stays untouched**? A scope change
+  that only lives in code is silent drift; the frame must move with it.
 
 ## Tests prove acceptance
 

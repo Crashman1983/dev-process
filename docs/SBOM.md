@@ -1,6 +1,6 @@
 # Software Bill of Materials
 
-Stand: 2026-07-04
+Stand: 2026-07-05
 
 Diese SBOM beschreibt die Abhaengigkeiten des `dev-process`-Repositorys. Quelle
 ist `pyproject.toml` fuer direkte Abhaengigkeiten und `uv.lock` fuer die
@@ -11,7 +11,7 @@ JavaScript-, Container- oder Systempaket-Lockfiles aus.
 
 | Komponente | Version | Quelle |
 |---|---:|---|
-| `dev-process` | `1.14.0` | lokales Repository |
+| `dev-process` | `1.21.0` | lokales Repository |
 
 ## Direkte Python-Abhaengigkeiten
 

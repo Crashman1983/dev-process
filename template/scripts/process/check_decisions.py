@@ -44,11 +44,17 @@ def _section_value(text: str, name: str) -> tuple[str | None, int | None]:
     is tolerated), and its 1-based line number. (None, heading-line) if the
     section is present but empty; (None, None) if the heading is absent."""
     heading = re.compile(rf"^#{{1,6}}\s+{re.escape(name)}\s*$", re.IGNORECASE)
+    any_heading = re.compile(r"^#{1,6}\s")
     lines = text.splitlines()
     for i, line in enumerate(lines):
         if heading.match(line.strip()):
             for j in range(i + 1, len(lines)):
                 s = lines[j].strip()
+                # a following heading ends the section — an empty section must
+                # take the documented soft path, never read the next heading's
+                # text as its value (audit false-red)
+                if any_heading.match(s):
+                    break
                 if s:
                     return s, j + 1
             return None, i + 1

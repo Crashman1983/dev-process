@@ -144,6 +144,73 @@ def test_malformed_snapshot_hard(render, tmp_path):
     assert r.returncode == 1 and "invalid JSON" in r.stdout
 
 
+def test_non_utf8_snapshot_hard(render, tmp_path):
+    # a hand-corrupted committed snapshot must fail clean on the read, never
+    # traceback (audit coverage: the UnicodeDecodeError branch had no test)
+    out = _render(render, tmp_path)
+    _story(out, "STORY-0001")
+    (out / ".process-work").mkdir(parents=True, exist_ok=True)
+    (out / SNAP).write_bytes(b'{"issues": []}\n\xff\xfe')
+    r = _run(out)
+    assert r.returncode == 1 and "not valid UTF-8" in r.stdout
+    assert "Traceback" not in r.stdout and "Traceback" not in r.stderr
+
+
+def test_snapshot_not_object_hard(render, tmp_path):
+    # top-level must be an object with an 'issues' list
+    out = _render(render, tmp_path)
+    _story(out, "STORY-0001")
+    (out / ".process-work").mkdir(parents=True, exist_ok=True)
+    (out / SNAP).write_text(json.dumps([{"story": "STORY-0001"}]))  # a bare list
+    r = _run(out)
+    assert r.returncode == 1 and "object with an 'issues' list" in r.stdout
+
+
+def test_entry_not_object_hard(render, tmp_path):
+    # a non-dict issues[] element must fail clean, not traceback on .get()
+    out = _render(render, tmp_path)
+    _story(out, "STORY-0001")
+    (out / ".process-work").mkdir(parents=True, exist_ok=True)
+    (out / SNAP).write_text(json.dumps(
+        {"generated_by": "t", "issues": ["not-an-object"]}))
+    r = _run(out)
+    assert r.returncode == 1 and "must be an object" in r.stdout
+    assert "Traceback" not in r.stdout and "Traceback" not in r.stderr
+
+
+def test_entry_missing_story_hard(render, tmp_path):
+    # an entry without a 'story' join key cannot be matched to the registry
+    out = _render(render, tmp_path)
+    _story(out, "STORY-0001")
+    e = _entry("STORY-0001")
+    del e["story"]
+    _snapshot(out, e)
+    r = _run(out)
+    assert r.returncode == 1 and "missing 'story'" in r.stdout
+
+
+def test_entry_bad_state_hard(render, tmp_path):
+    # 'state' is GitHub open/closed — any other value is a corrupt snapshot
+    out = _render(render, tmp_path)
+    _story(out, "STORY-0001")
+    e = _entry("STORY-0001", state="merged")  # not open/closed
+    _snapshot(out, e)
+    r = _run(out)
+    assert r.returncode == 1 and "'state' must be 'open' or 'closed'" in r.stdout
+
+
+def test_entry_nonstring_title_fails_clean(render, tmp_path):
+    # a hand-edited numeric title must fail clean before the drift compare
+    out = _render(render, tmp_path)
+    _story(out, "STORY-0001")
+    e = _entry("STORY-0001")
+    e["title"] = 42
+    _snapshot(out, e)
+    r = _run(out)
+    assert r.returncode == 1 and "'title' must be a string or null" in r.stdout
+    assert "Traceback" not in r.stdout and "Traceback" not in r.stderr
+
+
 def test_missing_issue_invariant_hard(render, tmp_path):
     out = _render(render, tmp_path)
     _story(out, "STORY-0001", issue=None)  # no issue ref
@@ -254,6 +321,31 @@ def test_unknown_top_level_key_hard(render, tmp_path):
     assert r.returncode == 1 and "unknown top-level key" in r.stdout
 
 
+def test_status_vocabulary_agrees_across_gates(render, tmp_path):
+    # audit (both architects): check_github_master.STATUS_STATE.get(status) fails
+    # OPEN on an unknown status — a status added to check_feature_registry.STATUSES
+    # but not to STATUS_STATE would silently stop being drift-checked. The gates
+    # cannot import each other (module isolation), so a cross-gate test is the guard.
+    import importlib.util
+
+    def _load(name, path):
+        spec = importlib.util.spec_from_file_location(name, path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    out = render(tmp_path, {"project_name": "d",
+                            "modules": {"feature_registry": True, "github_master": True}})
+    fr = _load("cfr_x", out / "scripts/process/check_feature_registry.py")
+    gm = _load("cgm_x", out / "scripts/process/check_github_master.py")
+    missing = fr.STATUSES - set(gm.STATUS_STATE)
+    assert not missing, (f"status-vocab drift: {missing} in feature-registry STATUSES "
+                         f"but not github-master STATUS_STATE — its drift check would "
+                         f"silently fail open on those statuses")
+    # every board column must imply a real registry status
+    assert set(gm.BOARD_STATUS.values()) <= fr.STATUSES
+
+
 def _board(entry, col):
     entry = dict(entry)
     entry["board_status"] = col
@@ -347,3 +439,16 @@ def test_unknown_snapshot_key_hard(render, tmp_path):
     _snapshot(out, e)
     r = _run(out)
     assert r.returncode == 1 and "unknown key" in r.stdout
+
+
+def test_mixed_type_blocked_by_fails_clean(render, tmp_path):
+    # audit: sorted([1, "STORY-0002"]) raised an uncaught TypeError (traceback)
+    out = _render(render, tmp_path)
+    _story(out, "STORY-0001", blocked_by=["STORY-0002"])
+    e = _entry("STORY-0001")
+    e["blocked_by"] = [1, "STORY-0002"]
+    _snapshot(out, e)
+    r = _run(out)
+    assert r.returncode == 1
+    assert "non-string element" in r.stdout
+    assert "Traceback" not in r.stdout and "Traceback" not in r.stderr

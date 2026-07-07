@@ -38,8 +38,41 @@ Ausgeliefert als [copier](https://copier.readthedocs.io)-Template. Adapter für
 > SP24 (project-board: hermetischer Spalten-Konsistenz-Gate + Board-Automation) +
 > SP25 (github-master honesty-pass: Freshness-Disclosure + ehrliche Doc-Fixes) +
 > SP26 (Rule-5-Konsolidierung: increment-vs-rewrite-Entscheidung + Gate-Refactor) +
-> SP27 (story-lifecycle-closure: done-braucht-Issue hart, DoR/DoD-View, Discovered-work-Inbox)
-> ausgeliefert, `v1.14.0`.
+> SP27 (story-lifecycle-closure: done-braucht-Issue hart, DoR/DoD-View, Discovered-work-Inbox) +
+> SP28 (audit-hardening: sechs Persona-Audits über zwei Modelle — zwei Live-Bugs
+> gefixt, Konsens-Findings ausgeräumt, verifizierte Zweige regressionsgesichert) +
+> SP29 (tier-model: Skala von 0–4 auf zero-based **0–3** kollabiert — das unter
+> PR/Merge-Pflicht faktisch fiktive Tier 0 „direct commit" in Tier 1 gefaltet;
+> jede verbleibende Grenze trägt Gewicht; Gate-Schwellen + Anchor/Doku remapped) +
+> SP30 (decision-flow-wiring: Decision Records in die Phasen eingehängt —
+> Brainstorm liest sie als Constraints, Plan nennt seinen Decision-Kontext,
+> Execute stoppt bei entdeckter Grundsatzentscheidung, Review-Checkliste fragt
+> nach fehlendem/widersprochenem/still-obsoletem Record) +
+> SP31 (product-frame: `PRODUCT.md` als **Core**-Artefakt — Produktrahmen mit
+> Goals/Non-Goals/Constraints, im Init-Dialog erstellt, von allen Phasen als
+> Richtungs-Constraint gelesen, immer aktives Gate: fehlend hart,
+> not-onboarded ehrliche Note, Platzhalter-nach-Onboarding + tote Refs hart) +
+> SP32 (review-visibility: Audits/Reviews samt Prompt, Verdikt und Findings als
+> Report-Artefakt + GitHub-Issue — `FINDING`-Grammatik, `publish_review.sh` mit
+> Kampagnen-Bündelung unter Parent-Issue, hermetische Bindung: unpubliziert
+> ohne Waiver hart, Follow-up-Finding ohne Issue hart, gesplittete Kampagne hart;
+> entdeckte Arbeit in korrekter Form: `finding`-/`bug`-Templates mit EARS-AKs +
+> Origin-Sektion, Rückverlinkung + Kommentar am Ausgangsitem als Konvention) +
+> SP33 (gate-hardening aus 4-Session-Audit: 8 reproduzierte Gate-Defekte
+> geschlossen — Tier-Range-Validierung, Report-Header-Split auf jeder Ebene,
+> geteilte Fence/Bullet-Disziplin für REVIEW/GRADE, Decisions-Sektionsparser,
+> github-master fail-clean, Kampagnen-Ref-Normalisierung, Symbol-Wortgrenze,
+> code_roots-Skalar; `v1.20.1` Patch aus dem SP33-Review: Unicode-Ziffer-Crash
+> im Tier-Check, Header-Split auf jeden Überschriften-Stil, ehrliche Symbol-Grenze) +
+> SP34 (flow-closure: Plan-Archivierung als benannter Merge-Schritt,
+> Baseline-Commit-Bypass, tracker-lose Waiver für done-Story + Follow-up-Finding,
+> neutrale `kernel.md`, Reviewer-Grammatik im /review, Tier-1/2-Grenze geschärft +
+> Tier-0-1 als Self-Check-Band) + SP35 (economics/discoverability: Anchor listet
+> aktive Modul-Docs, /quick trägt eigene Schritte, /prime liest inbox,
+> Which-artifact-when-Router, Multi-Agent-SSOT-Ehrlichkeit, Mid-Size-Trap benannt)
+> ausgeliefert, `v1.21.0`.
+> **Überblick für Einsteiger:innen & Management** (wie es funktioniert, warum,
+> welcher Mehrwert): [`docs/CAPABILITIES.md`](docs/CAPABILITIES.md).
 > Setup: [`BOOTSTRAP.md`](BOOTSTRAP.md) · Systemumgebung:
 > [`docs/SYSTEM-REQUIREMENTS.md`](docs/SYSTEM-REQUIREMENTS.md) · SBOM:
 > [`docs/SBOM.md`](docs/SBOM.md) · Design: [`docs/design/`](docs/design/).
@@ -66,9 +99,9 @@ Bausteine sind zuschaltbare Module.
 
 ## Der Prozess — Eckpunkte
 
-**Risiko-Tiers (0–4)** routen jede Aufgabe: der *Umfang* bestimmt den Tier, nicht
+**Risiko-Tiers (0–3)** routen jede Aufgabe: der *Umfang* bestimmt den Tier, nicht
 die Diff-Größe. User-sichtbar, komponentenübergreifend, API/Contract, Auth oder
-Persistenz ⇒ Tier 3+ auch bei winzigem Diff. Ein `flow`-Label ist Boden, nie Decke.
+Persistenz ⇒ Tier 2+ auch bei winzigem Diff. Ein `flow`-Label ist Boden, nie Decke.
 
 **Neun bindende Regeln** (Reihenfolge = Priorität):
 
@@ -86,7 +119,10 @@ Persistenz ⇒ Tier 3+ auch bei winzigem Diff. Ein `flow`-Label ist Boden, nie D
 und Debug. **ADRs** tragen zwei Achsen — `Status` (Proposed/Accepted/Superseded)
 und `Intent` (keep/change-planned/tolerated), damit „so ist es" von „so soll es
 werden" getrennt bleibt. **Journal, Branch-State und Pläne** halten das *Warum*
-fest, das das git-log nicht zeigt.
+fest, das das git-log nicht zeigt. **`PRODUCT.md`** (Core) ist der Produktrahmen —
+Purpose, Users, Goals, **Non-Goals**, Constraints, aktueller Scope —, im
+Onboarding-Dialog befüllt und von Brainstorm/Plan/Review als Richtungs-Constraint
+gelesen; ein immer aktives Gate hält ihn präsent und referenz-sauber.
 
 **Durchsetzung:** ein manifest-bewusster `gate_runner` liest `.copier-answers.yml`
 und fährt in CI nur die *aktiven* Module — als GitHub-Actions-Workflow und/oder
@@ -141,6 +177,10 @@ Kurz: Ein Playbook beschreibt, erzwingt aber nichts und altert; Scaffolding ist
 ein einmaliger Abwurf ohne Update-Pfad; CI-Linting sichert Stil, nicht Prozess,
 Architektur oder Entscheidungen. `dev-process` liefert die Methodik **mit** ihrer
 Durchsetzung, harness-übergreifend und über `copier update` versionierbar.
+
+Eine ausführliche, zielgruppengerechte Erklärung — *wie es funktioniert, warum,
+welcher Mehrwert*, getrennt für Entwickler:innen und Management — steht in
+[`docs/CAPABILITIES.md`](docs/CAPABILITIES.md).
 
 ## Sprachen & Ökonomie
 

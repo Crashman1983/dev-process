@@ -3,5 +3,5 @@
 process-gates:
   image: python:3.11
   script:
-    - pip install pyyaml
+    - pip install 'pyyaml>=6,<7'   # pinned: gate behaviour is deterministic
     - python scripts/process/gate_runner.py

@@ -45,9 +45,13 @@ default, and with it off nothing in SP18–21 changes.
   board — SP24 fills `board_status`). `parent` (SP23) and `board_status` (SP24)
   ship as nullable slots now so later slices only *fill* them, never reshape.
 
-The registry files stay the working representation and carry a
-`"source": "github"` marker in `github_master` mode (they mirror the master; on
-conflict, re-sync from GitHub — do not hand-edit the mirrored fields).
+The registry files stay the working representation. **Materializing them from the
+snapshot is not automated** — `gh_sync` writes the snapshot only; keeping the
+registry in step with it (updating a title/status a story mirrors, or creating a
+story for an orphan issue the sync reports) is a manual step, or an adopter's own
+extension. The gate makes the two agree; it does not itself write the registry.
+(An earlier draft of this design said `gh_sync` "materializes/updates the registry
+mirror" — it never did; corrected in SP28 after an architecture audit.)
 
 ## The gate — `check_github_master.py` (module: `github_master`)
 
@@ -78,8 +82,8 @@ deterministic (registry files + committed snapshot):
 
 ## The sync tool — `gh_sync.py` (best-effort, network, not a gate)
 
-Pulls issues via `gh` → writes the snapshot (and, in github-master mode,
-materializes/updates the registry mirror). Thin, `gh`-dependent, best-effort —
+Pulls issues via `gh` → writes the snapshot (only — it does **not** write the
+registry; see the materialization note above). Thin, `gh`-dependent, best-effort —
 the same posture as `new_issue.sh`. Not unit-tested against live GitHub; the
 **gate** (offline, over a crafted snapshot) is the tested core. Run locally, or
 wire it into a network-enabled job — no such job ships in the template.

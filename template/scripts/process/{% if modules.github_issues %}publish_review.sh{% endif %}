@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+# Publish a review/audit report (.process-work/reviews/*.md) as a GitHub
+# issue — prompt, result, and findings become visible where the team works.
+# Best-effort by design (needs `gh`, auth, network); NEVER a gate. The
+# hermetic binding — a report must carry the resulting `issue:` ref or a
+# `publish-waived:` reason — lives in check_issues.py, offline.
+#
+# usage: publish_review.sh <report.md> [--campaign <title>]
+#
+# Prints the created issue reference (#N). With --campaign: finds an open
+# issue titled exactly "<title>" (creates it if absent) and links the report
+# issue to it — natively as a sub-issue where the installed `gh` supports it,
+# otherwise as a "Part of #N" body reference (best-effort fallback).
+# Afterwards, write the printed refs into the report's `issue:` (and
+# `campaign-issue:`) header lines and commit — the gate reads the file, not
+# GitHub.
+set -euo pipefail
+
+report="${1:?usage: publish_review.sh <report.md> [--campaign <title>]}"
+[ -f "$report" ] || { echo "no such report: $report" >&2; exit 1; }
+campaign=""
+if [ "${2:-}" = "--campaign" ]; then
+  campaign="${3:?--campaign needs a title}"
+fi
+
+command -v gh >/dev/null || { echo "gh not on PATH — publish manually or waive" >&2; exit 1; }
+
+title="$(basename "$report" .md)"
+
+parent=""
+if [ -n "$campaign" ]; then
+  parent="$(gh issue list --state open --search "in:title \"$campaign\"" \
+            --json number,title --jq ".[] | select(.title == \"$campaign\") | .number" \
+            | head -n1)"
+  if [ -z "$parent" ]; then
+    parent="$(gh issue create --title "$campaign" \
+              --body "Campaign parent: bundles the reports of this audit/review campaign." \
+              | grep -oE '[0-9]+$')"
+    echo "campaign-issue: #$parent (created)"
+  else
+    echo "campaign-issue: #$parent (reused)"
+  fi
+fi
+
+body="$(mktemp -t review-body.XXXXXX.md)"
+if [ -n "$parent" ]; then
+  { echo "Part of #$parent."; echo; cat "$report"; } > "$body"
+else
+  cat "$report" > "$body"
+fi
+
+number="$(gh issue create --title "review: $title" --body-file "$body" \
+          | grep -oE '[0-9]+$')"
+echo "issue: #$number"
+
+if [ -n "$parent" ]; then
+  # native sub-issue linking where the installed gh/API supports it; the
+  # body reference above already carries the bundle either way
+  gh issue edit "$number" --add-parent "$parent" >/dev/null 2>&1 \
+    || echo "note: native sub-issue link not supported here — body reference stands"
+fi
+
+echo "now write these refs into $report ('issue:'/'campaign-issue:') and commit"
+echo "for each follow-up finding: create its issue in the proper form —"
+echo "  body=\$(bash scripts/process/new_issue.sh finding)   # EARS + Origin"
+echo "  gh issue create --title '...' --body-file \"\$body\""
+echo "then write the ref into the FINDING line, and comment on the origin issue"

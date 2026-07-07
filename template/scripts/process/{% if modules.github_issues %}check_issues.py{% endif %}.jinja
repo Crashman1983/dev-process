@@ -27,6 +27,7 @@ _CROSS = re.compile(r"^([\w.-]+/[\w.-]+)#(\d+)$")
 _URL = re.compile(r"^https://github\.com/([\w.-]+/[\w.-]+)/issues/(\d+)$")
 
 PLANS_DIR = ".process-work/plans"  # active plans only; archive/ is finished work
+REVIEWS_DIR = ".process-work/reviews"  # review/audit reports (SP32)
 # tolerant of a leading list bullet and **bold**/_emphasis_ on the key, and of a
 # trailing annotation after the value — the canonical form is a bare
 # `tier: N` / `issue: <ref>` line, but a plan is hand-written Markdown, and a
@@ -38,15 +39,21 @@ _PLAN_WAIVED = re.compile(_LEAD + r"issue-waived[*_]*\s*:\s*\S", re.IGNORECASE |
 
 
 def _unfenced(text: str) -> str:
-    """Text with ```-fenced blocks removed — a `tier:`/`issue:` line inside a
-    fenced example is a quotation, not a declaration (same discipline the review
-    gate applies)."""
-    out, fenced = [], False
+    """Text with fenced blocks (``` and ~~~, closed by their own marker)
+    removed — a `tier:`/`issue:`/`FINDING` line inside a fenced example is a
+    quotation, not a declaration (same discipline the review gate applies)."""
+    out: list[str] = []
+    fence: str | None = None
     for line in text.splitlines():
-        if line.strip().startswith("```"):
-            fenced = not fenced
+        stripped = line.strip()
+        marker = next((m for m in ("```", "~~~") if stripped.startswith(m)), None)
+        if marker and fence is None:
+            fence = marker
             continue
-        if not fenced:
+        if marker and fence == marker:
+            fence = None
+            continue
+        if fence is None:
             out.append(line)
     return "\n".join(out)
 
@@ -97,7 +104,7 @@ def _issue_exists(gh: str, repo: str, number: int) -> bool:
 
 def _check_plans(root: Path) -> tuple[list[str], list[str]]:
     """Issue-before-code: an *active* plan (in `.process-work/plans/`, not the
-    archive) declaring Tier 3+ must carry a valid `issue:` link, or an explicit
+    archive) declaring Tier 2+ must carry a valid `issue:` link, or an explicit
     `issue-waived: <reason>`. Opt-in by the `tier:` declaration — a plan without
     it is not enforced. Mirrors the review gate's presence check, but at the
     start of work rather than the end."""
@@ -110,7 +117,7 @@ def _check_plans(root: Path) -> tuple[list[str], list[str]]:
             continue
         text = _unfenced(p.read_text(encoding="utf-8", errors="replace"))
         m = _PLAN_TIER.search(text)
-        if not m or int(m.group(1)) < 3:
+        if not m or int(m.group(1)) < 2:
             continue
         rel = f"{PLANS_DIR}/{p.name}"
         if _PLAN_WAIVED.search(text):
@@ -126,15 +133,184 @@ def _check_plans(root: Path) -> tuple[list[str], list[str]]:
     return hard, []
 
 
+# --- review/audit reports (SP32): visibility binding, offline ---------------
+# header keys on a report file in .process-work/reviews/
+_RPT_KIND = re.compile(_LEAD + r"(review|audit)[*_]*\s*:\s*\S", re.IGNORECASE | re.MULTILINE)
+_RPT_ISSUE = re.compile(_LEAD + r"issue[*_]*\s*:\s*(\S+)", re.IGNORECASE | re.MULTILINE)
+_RPT_WAIVED = re.compile(_LEAD + r"publish-waived[*_]*\s*:\s*\S", re.IGNORECASE | re.MULTILINE)
+_RPT_CAMPAIGN = re.compile(_LEAD + r"campaign[*_]*\s*:\s*(\S+)", re.IGNORECASE | re.MULTILINE)
+_RPT_CAMPAIGN_ISSUE = re.compile(_LEAD + r"campaign-issue[*_]*\s*:\s*(\S+)",
+                                 re.IGNORECASE | re.MULTILINE)
+FINDING_SEVS = {"blocker", "major", "minor", "nit"}
+FINDING_ACTIONS = {"fix", "accept", "follow-up"}
+
+
+# a FINDING may be written as a Markdown bullet — `- FINDING ...` must not
+# silently escape the lint (the same _LEAD lesson as plan tier lines)
+_FINDING_LINE = re.compile(r"^\s*(?:[-*+]\s+)?[*_]*FINDING\s+(\S+=.*)$")
+
+
+def _intended_finding(line: str) -> re.Match | None:
+    """A line meant as a structured finding: optional bullet, `FINDING`,
+    whitespace, and a `key=value` first token — how every real FINDING line
+    begins. Prose that merely starts with the word is not linted (the
+    telemetry GRADE lesson). Residual blind spot: a botched line whose first
+    token is a bare word reads as prose."""
+    return _FINDING_LINE.match(line)
+
+
+def _parse_finding(match: re.Match) -> tuple[dict | None, str | None]:
+    """(fields, error). Leading known key=value tokens (sev/action/issue) are
+    parsed; everything from the first other token on is the title — so a
+    title may itself contain `=` (e.g. 'user_id=1 hardcoded'). Requires sev=
+    and action= with valid enums; issue= optional, '-' meaning none."""
+    fields: dict = {}
+    tokens = match.group(1).split()
+    i = 0
+    for i, tok in enumerate(tokens):
+        k, eq, v = tok.partition("=")
+        if not eq or k not in ("sev", "action", "issue"):
+            break  # title starts here
+        if k in fields:
+            return None, f"duplicate key {k!r}"
+        fields[k] = v
+    else:
+        i = len(tokens)
+    title = " ".join(tokens[i:])
+    if fields.get("sev") not in FINDING_SEVS:
+        return None, f"sev={fields.get('sev')!r} not in {sorted(FINDING_SEVS)}"
+    if fields.get("action") not in FINDING_ACTIONS:
+        return None, f"action={fields.get('action')!r} not in {sorted(FINDING_ACTIONS)}"
+    issue = fields.get("issue", "-")
+    if issue != "-" and parse_issue_ref(issue) is None:
+        return None, f"issue={issue!r} is neither '-' nor a valid ref"
+    if not title:
+        return None, "no title after the key=value fields"
+    fields["issue"] = issue
+    fields["title"] = title
+    return fields, None
+
+
+def _canon_ref(ref: str, default_repo: str | None) -> str:
+    """A campaign-issue ref normalized to `repo#number` so the same issue in
+    different forms (`#5`, `owner/repo#5`, a URL) compares equal. Falls back
+    to the raw ref if unparseable (already flagged elsewhere)."""
+    parsed = parse_issue_ref(ref)
+    if parsed is None:
+        return ref
+    repo, number = parsed
+    return f"{repo or default_repo}#{number}"
+
+
+def _check_reports(root: Path, default_repo: str | None) -> tuple[list[str], list[str]]:
+    """Review/audit visibility binding, offline over committed report files.
+    Opt-in by artifact existence: no reports directory or files -> silent.
+    Header keys are read ONLY from the header block (before the first `## `
+    heading) — the Prompt/Result sections quote material by design, and a
+    quoted 'issue: #N' in prose must not count as publication (false-green).
+    What cannot be checked (does the issue body match the report? was the
+    prompt truly the one used?) stays attested — the gate sees files, not
+    history."""
+    rdir = root / REVIEWS_DIR
+    if not rdir.is_dir():
+        return [], []
+    hard: list[str] = []
+    soft: list[str] = []
+    campaigns: dict[str, dict[str, str]] = {}  # slug -> {report: campaign-issue}
+    for p in sorted(rdir.glob("*.md")):
+        rel = f"{REVIEWS_DIR}/{p.name}"
+        try:
+            raw = p.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            hard.append(f"{rel}: not valid UTF-8")
+            continue
+        # an unclosed fence swallows the rest of the file as quotation —
+        # disclose it instead of silently dropping whatever followed
+        if sum(1 for ln in raw.splitlines()
+               if ln.strip().startswith(("```", "~~~"))) % 2:
+            soft.append(f"{rel}: unclosed fence — the rest of the file is "
+                        f"treated as a quotation; close the fence")
+        text = _unfenced(raw)
+        # the header is the contiguous run of lines from the top until the
+        # first blank line — the documented format is a key:value block, a
+        # blank, then the sections. Ending at the blank (not at a `## ` match)
+        # closes every section-heading style at once: ATX, no-space `##x`, and
+        # setext underlines all sit past the blank, so a quoted body `issue:`
+        # can never count as publication (audit false-green).
+        header_lines: list[str] = []
+        for ln in text.splitlines():
+            if not ln.strip():
+                break
+            header_lines.append(ln)
+        header = "\n".join(header_lines)
+        if not _RPT_KIND.search(header):
+            hard.append(f"{rel}: no 'review:' or 'audit:' header — not a readable report")
+            continue
+        im = _RPT_ISSUE.search(header)
+        published = im is not None
+        if published and parse_issue_ref(im.group(1)) is None:
+            hard.append(f"{rel}: malformed issue ref {im.group(1)!r} "
+                        "(want '#N', 'owner/repo#N', or a github issue URL)")
+            published = False
+        waived = bool(_RPT_WAIVED.search(header))
+        if not published and not waived:
+            hard.append(f"{rel}: report has no 'issue:' ref and no "
+                        f"'publish-waived: <reason>' — an unpublished review is "
+                        f"invisible review (publish_review.sh, or waive with cause)")
+        cm = _RPT_CAMPAIGN.search(header)
+        if cm:
+            ci = _RPT_CAMPAIGN_ISSUE.search(header)
+            if ci and parse_issue_ref(ci.group(1)) is None:
+                hard.append(f"{rel}: malformed campaign-issue ref {ci.group(1)!r}")
+            elif ci:
+                campaigns.setdefault(cm.group(1), {})[rel] = _canon_ref(
+                    ci.group(1), default_repo)
+            elif published:
+                hard.append(f"{rel}: campaign {cm.group(1)!r} set on a published "
+                            f"report but no 'campaign-issue:' ref — the bundle "
+                            f"parent must be named")
+        for line in text.splitlines():
+            fmatch = _intended_finding(line)
+            if not fmatch:
+                continue
+            fields, err = _parse_finding(fmatch)
+            if err:
+                hard.append(f"{rel}: malformed FINDING line ({err}): {line.strip()!r}")
+                continue
+            if fields["action"] == "follow-up" and fields["issue"] == "-" \
+                    and not (waived and not published):
+                # a publish-waived report is off-tracker (no issues to link) —
+                # its follow-ups can't carry an issue ref; the waiver covers
+                # them too (tracker-less projects). Without the waiver, an
+                # untracked follow-up is a finding that will be forgotten.
+                hard.append(f"{rel}: follow-up finding without an issue — a "
+                            f"follow-up nobody tracks will be forgotten: "
+                            f"{fields['title']!r} (or 'publish-waived:' the "
+                            f"report if there is no tracker)")
+            if fields["sev"] == "blocker" and fields["action"] == "accept":
+                soft.append(f"{rel}: blocker finding consciously accepted — "
+                            f"make sure the reason stands in the report: "
+                            f"{fields['title']!r}")
+    for slug, members in campaigns.items():
+        if len(set(members.values())) > 1:
+            detail = ", ".join(f"{r}={v}" for r, v in sorted(members.items()))
+            hard.append(f"campaign {slug!r} is split across parent issues — "
+                        f"a split campaign is not bundled: {detail}")
+    return hard, soft
+
+
 def check(root: Path) -> tuple[list[str], list[str]]:
     # issue-before-code on active plans runs whenever the module is on,
     # independent of whether a feature-registry exists yet
     hard, soft = _check_plans(root)
+    default_repo = _default_repo(root)
+    rh, rs = _check_reports(root, default_repo)
+    hard += rh
+    soft += rs
     stories = _story_files(root)
     if not stories:
         soft.append("no stories to check (feature-registry empty or absent)")
         return hard, soft
-    default_repo = _default_repo(root)
     gh = shutil.which("gh")
     gh_absent_noted = False
     for path in stories:
@@ -151,9 +327,18 @@ def check(root: Path) -> tuple[list[str], list[str]]:
             # a finished story must be traceable — hard; an in-progress one may
             # still be filing its issue (issue-before-code is enforced on the
             # plan in SP20), so it stays a soft note
-            if status == "done":
+            if status == "done" and isinstance(data.get("issue_waived"), str) \
+                    and data["issue_waived"].strip():
+                # tracker-less escape: a done story may carry an
+                # `issue_waived: <reason>` string instead of an issue link, so a
+                # project with no reachable tracker is not permanently stuck
+                # below `done` (audit: this was unsatisfiable before)
+                soft.append(f"{rel}: status 'done', issue waived "
+                            f"({data['issue_waived'].strip()})")
+            elif status == "done":
                 hard.append(f"{rel}: status 'done' but no issue link — a finished "
-                            f"story must trace to an issue")
+                            f"story must trace to an issue (or set "
+                            f"'issue_waived: <reason>' if there is no tracker)")
             elif status in TRACKED:
                 soft.append(f"{rel}: status {status!r} but no issue link — unverified")
             continue

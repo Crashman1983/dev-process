@@ -27,24 +27,39 @@ VERDICTS = {"satisfied", "partial", "not_satisfied", "out_of_scope"}
 ACTIONS = {"satisfied", "fixed", "disputed", "surfaced"}
 SOURCES = {"plan", "execute", "review", "quick", "debug"}
 
-# The full grammar, anchored: one line per criterion per round.
+# The full grammar, anchored: one line per criterion per round. A record may
+# be written as a Markdown bullet (audit: the natural journal form silently
+# vanished) — _degrade_lead strips it before matching.
 GRADE_RE = re.compile(
     r"^GRADE\s+work=(\S+)\s+checkpoint=(\S+)\s+criterion=(\S+)\s+round=(\S+)"
     r"\s+verdict=(\S+)\s+action=(\S+)\s+source=(\S+)\s*$"
 )
+_LEAD_RE = re.compile(r"^\s*(?:[-*+]\s+)?[*_]*")
+
+
+def _degrade_lead(line: str) -> str:
+    """The line with a leading bullet/emphasis prefix stripped — `- GRADE ...`
+    is the same record as `GRADE ...`."""
+    return _LEAD_RE.sub("", line, count=1)
 FIELDS = ("work", "checkpoint", "criterion", "round", "verdict", "action", "source")
 
 
 def unfenced_lines(text: str):
-    """Lines outside ``` fences. Fenced regions may quote literal GRADE
-    examples (docs, journals) — those are quotations, not telemetry, and
-    must be invisible to both the gate and the cockpit."""
-    fenced = False
+    """Lines outside fenced blocks (``` and ~~~, each closed by its own
+    marker). Fenced regions may quote literal GRADE examples (docs, journals)
+    — those are quotations, not telemetry, and must be invisible to both the
+    gate and the cockpit."""
+    fence = None
     for line in text.splitlines():
-        if line.lstrip().startswith("```"):
-            fenced = not fenced
+        stripped = line.lstrip()
+        marker = next((m for m in ("```", "~~~") if stripped.startswith(m)), None)
+        if marker and fence is None:
+            fence = marker
             continue
-        if not fenced:
+        if marker and fence == marker:
+            fence = None
+            continue
+        if fence is None:
             yield line
 
 
@@ -53,21 +68,23 @@ def parse_grade_lines(text: str) -> list[dict]:
     values included — callers that need validity use the gate)."""
     rows = []
     for line in unfenced_lines(text):
-        m = GRADE_RE.match(line.strip())
+        m = GRADE_RE.match(_degrade_lead(line).strip())
         if m:
             rows.append(dict(zip(FIELDS, m.groups())))
     return rows
 
 
 def _intended_grade(line: str) -> bool:
-    """A line meant as telemetry: starts like a GRADE line and carries at
-    least one key=value token. Prose that merely mentions GRADE is not
-    linted. The predicate is derived from the grammar's own prefix
-    (`GRADE` + any whitespace) so filter and grammar can never disagree —
-    a `GRADE\\t…` line must reach the grammar check, not slip past it."""
-    stripped = line.strip()
-    return (re.match(r"GRADE\s", stripped) is not None
-            and re.search(r"\S+=", stripped) is not None)
+    """A line meant as telemetry: `GRADE` + whitespace + a `key=value` pair as
+    its **first token** — exactly how every real GRADE line begins
+    (`GRADE work=…`). Prose that merely mentions GRADE is not linted, even when
+    a *later* word contains `=` (e.g. `GRADE totals for Q3 revenue=120k`),
+    because the first token after GRADE is then a bare word, not `key=value`.
+    A typo'd key (`GRADE wrok=…`) still qualifies and reaches the grammar check.
+    The residual blind spot: a botched line whose *first* token is a bare word
+    and only a later token is `key=value` reads as prose here — machine-emitted
+    GRADE lines never take that shape, but a hand-authored one could slip."""
+    return re.match(r"GRADE\s+\S+=", _degrade_lead(line).strip()) is not None
 
 
 def _check_line(line: str) -> str | None:
@@ -102,14 +119,19 @@ def check_journals(root: Path) -> tuple[list[str], list[str], int]:
         except OSError as exc:
             hard.append(f"{f.relative_to(root)}: unreadable: {exc}")
             continue
-        fenced = False
+        fence = None
         for i, line in enumerate(text.splitlines(), 1):
-            if line.lstrip().startswith("```"):
-                fenced = not fenced
+            stripped = line.lstrip()
+            marker = next((m for m in ("```", "~~~") if stripped.startswith(m)), None)
+            if marker and fence is None:
+                fence = marker
                 continue
-            if fenced or not _intended_grade(line):
+            if marker and fence == marker:
+                fence = None
                 continue
-            err = _check_line(line)
+            if fence is not None or not _intended_grade(line):
+                continue
+            err = _check_line(_degrade_lead(line))
             if err:
                 hard.append(f"{f.relative_to(root)}:{i}: {err}")
             else:

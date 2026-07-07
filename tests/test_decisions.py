@@ -100,6 +100,17 @@ def test_unfilled_menu_is_soft(render, tmp_path):
     assert "not chosen" in r.stdout
 
 
+def test_missing_status_is_hard(render, tmp_path):
+    # every decision has a lifecycle; a record with no '## Status' section at all
+    # is unreadable on that axis and must be hard (audit coverage: only the enum
+    # typo and the empty section were tested, not the wholly-absent section).
+    out = render(tmp_path, {"project_name": "demo"})
+    _write_adr(out, "0002", status=None)
+    r = _run(out)
+    assert r.returncode == 1
+    assert "no '## Status' section" in r.stdout
+
+
 def test_missing_type_is_soft(render, tmp_path):
     out = render(tmp_path, {"project_name": "demo"})
     _write_adr(out, "0002", type_=None)
@@ -168,3 +179,18 @@ def test_non_utf8_hard(render, tmp_path):
     r = _run(out)
     assert r.returncode == 1
     assert "not valid UTF-8" in r.stdout
+
+
+def test_empty_section_before_next_heading_is_soft(render, tmp_path):
+    # audit: an empty ## Type before ## Intent returned the next heading as the
+    # value, hard-failing with nonsense; the documented soft path was unreachable
+    out = render(tmp_path, {"project_name": "demo"})
+    p = out / ADR / "adr-0002-example.md"
+    p.write_text(
+        "# ADR-0002: Example\n\n## Status\n\nAccepted\n\n## Type\n\n## Intent\n\nkeep\n\n"
+        "## Context\n\nBody.\n", encoding="utf-8")
+    readme = out / ADR / "README.md"
+    readme.write_text(readme.read_text() + "\n| 0002 | Example | Accepted |\n")
+    r = _run(out)
+    assert r.returncode == 0, r.stdout  # missing Type is soft, not a false-red
+    assert "not one of" not in r.stdout and "not a valid" not in r.stdout
