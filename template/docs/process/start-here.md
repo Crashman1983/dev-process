@@ -189,7 +189,7 @@ onboarding confusion. Match your thing to its home:
 
 | You have… | It goes in… | Gated? |
 |---|---|---|
-| A significant, hard-to-reverse decision (architecture, product, or process) | a decision record `docs/process/adr/adr-NNNN-*.md` | integrity (core) |
+| A significant, hard-to-reverse decision (architecture, product, or process) | a decision record `docs/process/adr/adr-NNNN-*.md` | decision-records (core) |
 | An approved design/spec before building | a `design-*.md` beside the plan (`.process-work/plans/`) | no (review reads it) |
 | The product's purpose, goals, non-goals, scope | `PRODUCT.md` (edit it in the same change that shifts scope) | product-frame (core) |
 | A unit of user-visible behavior + its acceptance + tests | a registry story `docs/process/feature-registry/STORY-NNNN.json` | feature-registry |

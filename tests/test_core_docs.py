@@ -384,3 +384,15 @@ def test_parallel_efforts_names_ssot_collisions(render, tmp_path):
     assert "Story-ID space" in text and "duplicate-id check fails" in text
     assert "PRODUCT.md" in text and "auto-merges" in text
     assert "Campaign parent" in text
+
+
+def test_tier_banding_consistent_across_docs(render, tmp_path):
+    # SP34-review F1: risk-tiers.md's "Verification scales too" paragraph
+    # contradicted verification-independence.md and the gate by still banding
+    # Tier 1 with a fresh bundle review. Pin the SSOT-wide consistency.
+    out = render(tmp_path, {"project_name": "demo"})
+    rt = (out / "docs/process/risk-tiers.md").read_text()
+    vi = (out / "docs/process/verification-independence.md").read_text()
+    assert "Tier 1–2 a fresh process" not in rt
+    assert "Tier 0–1 an in-context self-check" in rt
+    assert "Tier 0–1" in vi and "self-check" in vi

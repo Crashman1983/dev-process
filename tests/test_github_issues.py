@@ -886,3 +886,16 @@ def test_followup_finding_published_report_still_needs_issue(render, tmp_path):
     r = _run(out)
     assert r.returncode == 1
     assert "follow-up finding without an issue" in r.stdout
+
+
+def test_followup_in_published_but_waived_report_still_binds(render, tmp_path):
+    # SP34-review F2: publish-waived is the off-tracker escape; a report ALSO
+    # published (has issue:) is on-tracker, so its follow-ups still bind
+    out = _render(render, tmp_path)
+    _report(out, "2026-07-07-z.md",
+            "review: z\nwork: #1\nissue: #57\npublish-waived: contradictory\n\n"
+            "## Result\n\npass\n\n## Findings\n"
+            "FINDING sev=major action=follow-up issue=- track this\n")
+    r = _run(out)
+    assert r.returncode == 1
+    assert "follow-up finding without an issue" in r.stdout

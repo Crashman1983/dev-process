@@ -278,7 +278,7 @@ def _check_reports(root: Path, default_repo: str | None) -> tuple[list[str], lis
                 hard.append(f"{rel}: malformed FINDING line ({err}): {line.strip()!r}")
                 continue
             if fields["action"] == "follow-up" and fields["issue"] == "-" \
-                    and not waived:
+                    and not (waived and not published):
                 # a publish-waived report is off-tracker (no issues to link) —
                 # its follow-ups can't carry an issue ref; the waiver covers
                 # them too (tracker-less projects). Without the waiver, an
