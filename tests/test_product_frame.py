@@ -118,7 +118,7 @@ def test_dead_adr_ref_hard(render, tmp_path):
     _onboarded(out, "\nGrounded in ADR-0099.\n")
     r = _run(out)
     assert r.returncode == 1
-    assert "ADR-0099" in r.stdout and "no" in r.stdout
+    assert "ADR-0099 referenced but no" in r.stdout  # the specific message, not any 'no'
 
 
 def test_valid_adr_ref_ok(render, tmp_path):
@@ -168,6 +168,78 @@ def test_story_ref_with_registry_resolving_ok(render, tmp_path):
     _onboarded(out, "\nScope now includes STORY-0007.\n")
     r = _run(out)
     assert r.returncode == 0, r.stdout
+
+
+def test_onboarded_placeholder_before_first_heading_hard(render, tmp_path):
+    # SP31 review MAJOR: the section-scoped scan let a placeholder ABOVE the
+    # first ## heading pass green on an onboarded frame — a false-green. The
+    # whole text is scanned now.
+    out = render(tmp_path, {"project_name": "demo"})
+    _onboarded(out)
+    text = (out / FRAME).read_text().replace(
+        "status: onboarded\n", "status: onboarded\n\n> _Placeholder — intro left over._\n")
+    (out / FRAME).write_text(text, encoding="utf-8")
+    r = _run(out)
+    assert r.returncode == 1
+    assert "before the first section" in r.stdout
+
+
+def test_tilde_fence_ignored(render, tmp_path):
+    # CommonMark-legal ~~~ fences are quotations too (SP31 review)
+    out = render(tmp_path, {"project_name": "demo"})
+    _onboarded(out, "\n~~~\nADR-0099 and\n> _Placeholder in a tilde fence\n~~~\n")
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+
+
+def test_html_comment_ref_ignored(render, tmp_path):
+    # the seed itself establishes HTML comments as an idiom in this file —
+    # a commented-out ref is not a claim (SP31 review)
+    out = render(tmp_path, {"project_name": "demo"})
+    _onboarded(out, "\n<!-- TODO: maybe cite ADR-0099 someday -->\n")
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+
+
+def test_story_resolved_by_id_not_filename(render, tmp_path):
+    # the registry SSOT resolves stories by their id field, not the filename —
+    # the frame gate must agree (SP31 review: false-red on login.json)
+    import json
+    out = render(tmp_path, {"project_name": "demo",
+                            "modules": {"feature_registry": True}})
+    reg = out / "docs/process/feature-registry"
+    reg.mkdir(parents=True, exist_ok=True)
+    (reg / "login.json").write_text(json.dumps(
+        {"id": "STORY-0007", "title": "t",
+         "story": "As a x, when y, the system shall z.",
+         "acceptance": [{"id": "AC1", "text": "a"}], "tests": [],
+         "status": "proposed"}), encoding="utf-8")
+    _onboarded(out, "\nScope now includes STORY-0007.\n")
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+
+
+def test_story_ref_width_normalized(render, tmp_path):
+    # STORY-7 is matched and width-normalized like ADR refs — a typo'd width
+    # must fail loudly, not pass silently (SP31 review)
+    out = render(tmp_path, {"project_name": "demo",
+                            "modules": {"feature_registry": True}})
+    _onboarded(out, "\nScope now includes STORY-7.\n")
+    r = _run(out)
+    assert r.returncode == 1
+    assert "STORY-7" in r.stdout
+
+
+def test_annotated_status_message_names_the_problem(render, tmp_path):
+    # 'status: onboarded since 2026' is hard either way, but the message must
+    # point at the annotation, not claim the line is missing (SP31 review)
+    out = render(tmp_path, {"project_name": "demo"})
+    (out / FRAME).write_text(
+        "# demo\n\nstatus: onboarded since 2026\n\n## Purpose\n\nx\n", encoding="utf-8")
+    r = _run(out)
+    assert r.returncode == 1
+    assert "is not one of" in r.stdout
+    assert "no 'status:' line" not in r.stdout
 
 
 def test_non_utf8_hard(render, tmp_path):

@@ -97,10 +97,13 @@ New root artifact `PRODUCT.md.jinja`; new core gate script
 `check_product_frame.py` + `gate_runner` core entry (`product-frame`, key
 `None`); `start-here.md` (onboarding output, first-run, definition of ready),
 `workflow.md.jinja` (Brainstorm/Plan/Review), `review-checklist.md` (new
-section), `journal-state-plans.md` (plan duty), three anchor templates and
-`prime.md` (pointers). README (Eckpunkte + status), CAPABILITIES.md (one
-clause). No rule change — rule 2/4 already carry plan- and decision-duties;
-the frame is an artifact those duties now see.
+section), `journal-state-plans.md` (plan duty), three anchor templates, both
+prime commands (`.claude/commands/prime.md`, `.github/prompts/prime.prompt.md`)
+and the `.claude/commands/review.md` category enumeration (gains
+`product frame`); doc-drift `SCAN_FILES` gains `PRODUCT.md` (post-review fix).
+README (Eckpunkte + status), CAPABILITIES.md (one clause). No rule change —
+rule 2/4 already carry plan- and decision-duties; the frame is an artifact
+those duties now see.
 
 ## Feature Registry Trace
 

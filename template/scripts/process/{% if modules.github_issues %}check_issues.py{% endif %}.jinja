@@ -27,6 +27,7 @@ _CROSS = re.compile(r"^([\w.-]+/[\w.-]+)#(\d+)$")
 _URL = re.compile(r"^https://github\.com/([\w.-]+/[\w.-]+)/issues/(\d+)$")
 
 PLANS_DIR = ".process-work/plans"  # active plans only; archive/ is finished work
+REVIEWS_DIR = ".process-work/reviews"  # review/audit reports (SP32)
 # tolerant of a leading list bullet and **bold**/_emphasis_ on the key, and of a
 # trailing annotation after the value — the canonical form is a bare
 # `tier: N` / `issue: <ref>` line, but a plan is hand-written Markdown, and a
@@ -126,10 +127,135 @@ def _check_plans(root: Path) -> tuple[list[str], list[str]]:
     return hard, []
 
 
+# --- review/audit reports (SP32): visibility binding, offline ---------------
+# header keys on a report file in .process-work/reviews/
+_RPT_KIND = re.compile(_LEAD + r"(review|audit)[*_]*\s*:\s*\S", re.IGNORECASE | re.MULTILINE)
+_RPT_ISSUE = re.compile(_LEAD + r"issue[*_]*\s*:\s*(\S+)", re.IGNORECASE | re.MULTILINE)
+_RPT_WAIVED = re.compile(_LEAD + r"publish-waived[*_]*\s*:\s*\S", re.IGNORECASE | re.MULTILINE)
+_RPT_CAMPAIGN = re.compile(_LEAD + r"campaign[*_]*\s*:\s*(\S+)", re.IGNORECASE | re.MULTILINE)
+_RPT_CAMPAIGN_ISSUE = re.compile(_LEAD + r"campaign-issue[*_]*\s*:\s*(\S+)",
+                                 re.IGNORECASE | re.MULTILINE)
+FINDING_SEVS = {"blocker", "major", "minor", "nit"}
+FINDING_ACTIONS = {"fix", "accept", "follow-up"}
+
+
+def _intended_finding(line: str) -> bool:
+    """A line meant as a structured finding: `FINDING` + whitespace + a
+    `key=value` first token — how every real FINDING line begins. Prose that
+    merely starts with the word is not linted (the telemetry GRADE lesson:
+    require the first token to be key=value). Residual blind spot: a botched
+    line whose first token is a bare word reads as prose."""
+    return re.match(r"FINDING\s+\S+=", line.strip()) is not None
+
+
+def _parse_finding(line: str) -> tuple[dict | None, str | None]:
+    """(fields, error). Leading key=value tokens are parsed; the remainder is
+    the title. Requires sev= and action= with valid enums; issue= optional,
+    '-' meaning none."""
+    fields: dict = {}
+    rest = line.strip()[len("FINDING"):].strip()
+    tokens = rest.split()
+    i = 0
+    for i, tok in enumerate(tokens):
+        if "=" not in tok:
+            break
+        k, _, v = tok.partition("=")
+        if k in fields:
+            return None, f"duplicate key {k!r}"
+        fields[k] = v
+    else:
+        i = len(tokens)
+    title = " ".join(tokens[i:])
+    unknown = set(fields) - {"sev", "action", "issue"}
+    if unknown:
+        return None, f"unknown key(s) {sorted(unknown)}"
+    if fields.get("sev") not in FINDING_SEVS:
+        return None, f"sev={fields.get('sev')!r} not in {sorted(FINDING_SEVS)}"
+    if fields.get("action") not in FINDING_ACTIONS:
+        return None, f"action={fields.get('action')!r} not in {sorted(FINDING_ACTIONS)}"
+    issue = fields.get("issue", "-")
+    if issue != "-" and parse_issue_ref(issue) is None:
+        return None, f"issue={issue!r} is neither '-' nor a valid ref"
+    if not title:
+        return None, "no title after the key=value fields"
+    fields["issue"] = issue
+    fields["title"] = title
+    return fields, None
+
+
+def _check_reports(root: Path) -> tuple[list[str], list[str]]:
+    """Review/audit visibility binding, offline over committed report files.
+    Opt-in by artifact existence: no reports directory or files -> silent.
+    What cannot be checked (does the issue body match the report? was the
+    prompt truly the one used?) stays attested — the gate sees files, not
+    history."""
+    rdir = root / REVIEWS_DIR
+    if not rdir.is_dir():
+        return [], []
+    hard: list[str] = []
+    soft: list[str] = []
+    campaigns: dict[str, dict[str, str]] = {}  # slug -> {report: campaign-issue}
+    for p in sorted(rdir.glob("*.md")):
+        rel = f"{REVIEWS_DIR}/{p.name}"
+        try:
+            text = _unfenced(p.read_text(encoding="utf-8"))
+        except UnicodeDecodeError:
+            hard.append(f"{rel}: not valid UTF-8")
+            continue
+        if not _RPT_KIND.search(text):
+            hard.append(f"{rel}: no 'review:' or 'audit:' header — not a readable report")
+            continue
+        im = _RPT_ISSUE.search(text)
+        published = im is not None
+        if published and parse_issue_ref(im.group(1)) is None:
+            hard.append(f"{rel}: malformed issue ref {im.group(1)!r} "
+                        "(want '#N', 'owner/repo#N', or a github issue URL)")
+            published = False
+        if not published and not _RPT_WAIVED.search(text):
+            hard.append(f"{rel}: report has no 'issue:' ref and no "
+                        f"'publish-waived: <reason>' — an unpublished review is "
+                        f"invisible review (publish_review.sh, or waive with cause)")
+        cm = _RPT_CAMPAIGN.search(text)
+        if cm:
+            ci = _RPT_CAMPAIGN_ISSUE.search(text)
+            if ci and parse_issue_ref(ci.group(1)) is None:
+                hard.append(f"{rel}: malformed campaign-issue ref {ci.group(1)!r}")
+            elif ci:
+                campaigns.setdefault(cm.group(1), {})[rel] = ci.group(1)
+            elif published:
+                hard.append(f"{rel}: campaign {cm.group(1)!r} set on a published "
+                            f"report but no 'campaign-issue:' ref — the bundle "
+                            f"parent must be named")
+        for line in text.splitlines():
+            if not _intended_finding(line):
+                continue
+            fields, err = _parse_finding(line)
+            if err:
+                hard.append(f"{rel}: malformed FINDING line ({err}): {line.strip()!r}")
+                continue
+            if fields["action"] == "follow-up" and fields["issue"] == "-":
+                hard.append(f"{rel}: follow-up finding without an issue — a "
+                            f"follow-up nobody tracks will be forgotten: "
+                            f"{fields['title']!r}")
+            if fields["sev"] == "blocker" and fields["action"] == "accept":
+                soft.append(f"{rel}: blocker finding consciously accepted — "
+                            f"make sure the reason stands in the report: "
+                            f"{fields['title']!r}")
+    for slug, members in campaigns.items():
+        if len(set(members.values())) > 1:
+            detail = ", ".join(f"{r}={v}" for r, v in sorted(members.items()))
+            hard.append(f"campaign {slug!r} is split across parent issues — "
+                        f"a split campaign is not bundled: {detail}")
+    return hard, soft
+
+
 def check(root: Path) -> tuple[list[str], list[str]]:
     # issue-before-code on active plans runs whenever the module is on,
     # independent of whether a feature-registry exists yet
     hard, soft = _check_plans(root)
+    rh, rs = _check_reports(root)
+    hard += rh
+    soft += rs
     stories = _story_files(root)
     if not stories:
         soft.append("no stories to check (feature-registry empty or absent)")

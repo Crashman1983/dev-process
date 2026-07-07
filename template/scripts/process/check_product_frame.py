@@ -28,6 +28,7 @@ placeholders. Pure stdlib.
 """
 from __future__ import annotations
 
+import json
 import re
 import sys
 from pathlib import Path
@@ -36,23 +37,32 @@ FRAME = "PRODUCT.md"
 ADR_DIR = "docs/process/adr"
 REGISTRY_DIR = "docs/process/feature-registry"
 
-STATUS = re.compile(r"^status:\s*(\S+)\s*$", re.MULTILINE)
+STATUS = re.compile(r"^status:\s*(.+?)\s*$", re.MULTILINE)
 STATES = {"not-onboarded", "onboarded"}
 ADR_REF = re.compile(r"\bADR-(\d+)\b")
-STORY_REF = re.compile(r"\bSTORY-(\d{4})\b")
+STORY_REF = re.compile(r"\bSTORY-(\d+)\b")  # any width; normalized like ADR refs
 PLACEHOLDER = re.compile(r"^\s*>\s*_Placeholder", re.MULTILINE)
 HEADING = re.compile(r"^##\s+(.*)$", re.MULTILINE)
+HTML_COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
 
 
 def _unfenced(text: str) -> str:
-    """Drop fenced code blocks — a quoted example is not a claim."""
+    """Drop fenced code blocks (``` and ~~~, closed by their own marker) and
+    HTML comments — a quoted or commented example is not a claim. The seed
+    itself uses an HTML comment for the status-flip instruction."""
+    text = HTML_COMMENT.sub("", text)
     out: list[str] = []
-    fenced = False
+    fence: str | None = None
     for line in text.splitlines(keepends=True):
-        if line.lstrip().startswith("```"):
-            fenced = not fenced
+        stripped = line.lstrip()
+        marker = next((m for m in ("```", "~~~") if stripped.startswith(m)), None)
+        if marker and fence is None:
+            fence = marker
             continue
-        if not fenced:
+        if marker and fence == marker:
+            fence = None
+            continue
+        if fence is None:
             out.append(line)
     return "".join(out)
 
@@ -65,10 +75,34 @@ def _adr_exists(root: Path, num: str) -> bool:
     return False
 
 
-def _placeholder_sections(text: str) -> list[str]:
-    """Headings of sections whose body still holds a placeholder line."""
-    out = []
+def _story_ids(root: Path) -> set[str]:
+    """Registered story ids — resolved by the `id` field like the registry
+    gate does, falling back to the filename stem, so a story living in a
+    non-canonical filename still resolves."""
+    reg = root / REGISTRY_DIR
+    ids: set[str] = set()
+    for p in reg.glob("*.json"):
+        if p.name.endswith(".example.json"):
+            continue
+        ids.add(p.stem)
+        try:
+            d = json.loads(p.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError, OSError):
+            continue
+        if isinstance(d, dict) and isinstance(d.get("id"), str):
+            ids.add(d["id"])
+    return ids
+
+
+def _leftover_placeholders(text: str) -> list[str]:
+    """Where placeholder lines survive: section headings when a heading
+    encloses the hit, '(before the first section)' otherwise. Scans the WHOLE
+    text — a placeholder above the first heading must not pass green."""
+    out: list[str] = []
     heads = list(HEADING.finditer(text))
+    first = heads[0].start() if heads else len(text)
+    if PLACEHOLDER.search(text[:first]):
+        out.append("(before the first section)")
     for i, m in enumerate(heads):
         start = m.end()
         end = heads[i + 1].start() if i + 1 < len(heads) else len(text)
@@ -95,15 +129,15 @@ def check(root: Path) -> tuple[list[str], list[str]]:
                     f"(want 'status: not-onboarded' or 'status: onboarded')")
     elif m.group(1) not in STATES:
         hard.append(f"{FRAME}: status {m.group(1)!r} is not one of "
-                    f"{sorted(STATES)}")
+                    f"{sorted(STATES)} (one bare value, no annotation)")
     elif m.group(1) == "not-onboarded":
         soft.append("product frame not onboarded yet — fill it in the start-here "
                     "onboarding dialogue and flip 'status:' to 'onboarded'")
     else:  # onboarded — placeholders now claim direction that is not there
-        left = _placeholder_sections(text)
+        left = _leftover_placeholders(text)
         if left:
             hard.append(f"{FRAME}: status is 'onboarded' but "
-                        f"{len(left)} section(s) still hold a placeholder: "
+                        f"{len(left)} place(s) still hold a placeholder: "
                         f"{', '.join(left)}")
 
     for ref in ADR_REF.finditer(text):
@@ -118,10 +152,12 @@ def check(root: Path) -> tuple[list[str], list[str]]:
             soft.append(f"STORY reference(s) in {FRAME} not checkable — "
                         f"no {REGISTRY_DIR}/ (feature-registry off)")
         else:
+            ids = _story_ids(root)
             for num in stories:
-                if not (reg / f"STORY-{num}.json").is_file():
-                    hard.append(f"{FRAME}: STORY-{num} referenced but no "
-                                f"{REGISTRY_DIR}/STORY-{num}.json exists")
+                # width-normalized like ADR refs: STORY-7 resolves to STORY-0007
+                if f"STORY-{num.zfill(4)}" not in ids and f"STORY-{num}" not in ids:
+                    hard.append(f"{FRAME}: STORY-{num} referenced but no such "
+                                f"story is registered in {REGISTRY_DIR}/")
     return hard, soft
 
 
