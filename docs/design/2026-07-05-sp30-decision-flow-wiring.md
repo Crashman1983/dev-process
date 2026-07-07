@@ -53,28 +53,40 @@ enforced by a gate would only check presence of text, inviting a ritual
 "decisions: none" — the review checklist (b) is where substance is judged.
 Honestly labeled as such.
 
-## Non-goals
+## Non-goals / alternatives considered
 
 - No PRD/product-level artifact — deliberately deferred; the product side is
   under separate discussion (audit finding: the template has no PRD concept;
   whether feature-registry + arch-docs suffice is a product decision).
 - No new gate and no gate change — `check_decisions.py` already owns record
   integrity; presence-of-judgment cannot be gated without false confidence.
+  Two middle paths were considered and deferred, not refuted: (a) a resolvable
+  `decisions: ADR-NNNN` plan line whose non-none values a gate could resolve
+  against `docs/process/adr/` (only the "none" branch stays unverifiable);
+  (b) a soft advisory note when an active Tier 2+ plan carries no
+  decision-context text — the corpus' established "absence is a note, never a
+  failure" pattern, a mechanical nudge with no ritual-"none" incentive. Either
+  can land as a follow-up if practice shows the prose duty gets skipped.
 - No change to rule 4 — the duty exists; this is wiring, not legislation.
 
 ## Anchor Delta
 
 `workflow.md.jinja` (four phase paragraphs extended), `review-checklist.md`
-(one new section), `journal-state-plans.md` (plan-format paragraph). No command
-file changes — commands already point at workflow.md. No gate, no schema, no
-module change.
+(one new section), `journal-state-plans.md` (plan-format paragraph), and the
+`.claude/commands/review.md` category enumeration (gains `decisions`). Other
+command files unchanged — they point at workflow.md without enumerating. No
+gate, no schema, no module change.
 
 ## Feature Registry Trace
 
 Template self-change; template tests are acceptance. New assertions in
 `test_core_docs.py`: workflow.md mentions decision records in Brainstorm, Plan,
 Execute and Review; review-checklist.md carries the Decisions section with the
-three questions; journal-state-plans.md names the plan decision duty.
+three questions; journal-state-plans.md names the plan decision duty; the
+review.md enumeration is covered by the workflow Review-phase assertion.
 
 tier: 2
+decisions: read ADR-0001 (record architecture decisions) as constraint; no new
+or superseded record — this slice wires the existing rule-4 duty, it decides
+nothing new.
 review-waived: template-repo slice; independent fresh-context review runs before push (same session pattern as SP28/SP29)

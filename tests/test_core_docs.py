@@ -132,7 +132,9 @@ def test_workflow_phases_wire_decision_records(render, tmp_path):
     assert "decision records" in plan        # plan names its decision context
     assert "decision record" in execute      # mid-build decision stops the task
     assert "record it as a decision record first" in execute
-    assert "decisions" in review             # checklist enumeration includes it
+    # pin the enumeration itself, not a bare substring — 'decisions' surviving
+    # elsewhere in the section must not mask its removal from the category list
+    assert "design, decisions, tests" in review
 
 
 def test_review_checklist_has_decisions_section(render, tmp_path):
@@ -142,10 +144,13 @@ def test_review_checklist_has_decisions_section(render, tmp_path):
     out = render(tmp_path, {"project_name": "demo"})
     text = (out / "docs/process/review-checklist.md").read_text()
     assert "## Decisions" in text
-    assert "no decision record" in text            # missing record
-    assert "contradict" in text and "Accepted" in text  # conflict with endorsed
-    assert "obsolete in practice" in text          # silent obsolescence
-    assert "supersede it in the same change" in text
+    # scope to the section — the same words elsewhere in the file must not
+    # mask deletion of the actual bullets
+    section = text.split("## Decisions")[1].split("## Tests")[0]
+    assert "no decision record" in section            # missing record
+    assert "contradict" in section and "Accepted" in section  # conflict with endorsed
+    assert "obsolete in practice" in section          # silent obsolescence
+    assert "supersede it in the same change" in section
 
 
 def test_plan_format_names_decision_context(render, tmp_path):
