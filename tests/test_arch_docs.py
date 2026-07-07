@@ -29,6 +29,15 @@ def test_module_on_ships_scaffold_gate_doc(render, tmp_path):
     assert (out / "docs/process/modules/arch-docs.md").is_file()
 
 
+def test_overview_renders_project_name_no_jinja_leak(render, tmp_path):
+    # the scaffold must carry the .jinja suffix so its title renders, not ship
+    # a raw {{ project_name }} token.
+    out = render(tmp_path, {"project_name": "Acme", "modules": {"arch_docs": True}})
+    text = (out / OVERVIEW).read_text(encoding="utf-8")
+    assert "{{" not in text and "{%" not in text
+    assert "Acme" in text
+
+
 def test_module_off_ships_nothing(render, tmp_path):
     out = render(tmp_path, {"project_name": "d"})
     assert not (out / OVERVIEW).exists()
