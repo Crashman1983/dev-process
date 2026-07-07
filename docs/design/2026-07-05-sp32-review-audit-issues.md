@@ -70,7 +70,7 @@ issue lives on GitHub and stays convention + template.
 
 ### 2. Publication tool — `publish_review.sh` (github-issues module, network, best-effort)
 
-`bash scripts/process/publish_review.sh <report.md> [--campaign]` creates the
+`bash scripts/process/publish_review.sh <report.md> [--campaign <title>]` creates the
 GitHub issue with the report as body (prompt, result, findings — full
 visibility), prints the issue number to write into `issue:`. With a campaign:
 creates (or reuses) the campaign parent issue and links the report issue to it
@@ -135,17 +135,34 @@ sees files, not history; truthfulness stays attested, as with `REVIEW` lines.
 ## Anchor Delta
 
 `check_issues.py` gains the report/FINDING lint (module-gated, github_issues);
-new `publish_review.sh`; module doc section; three doc touches
-(verification-independence, workflow Review, journal-state-plans). No core
-gate change, no schema change to registry/snapshot, no rule change.
+new `publish_review.sh`; new `.github/ISSUE_TEMPLATE/finding.md` and an
+`Origin` section in `bug.md` (addendum 1b); module doc section; three doc
+touches (verification-independence, workflow Review, journal-state-plans +
+inbox triage). No core gate change, no schema change to registry/snapshot, no
+rule change.
+
+**Provenance note (rule 10):** the gate core of this slice (`_check_reports`
+and the FINDING grammar) was accidentally committed inside the SP31-review-fix
+commit `07544f4` — a mislabeled multi-feature commit; named here instead of
+rewriting pushed history. The SP32 review ran against the full working tree,
+not only the (therefore incomplete) diff bundle.
 
 ## Feature Registry Trace
 
 Template self-change; template tests are acceptance. New tests: grammar
 hard/soft branches (malformed FINDING, follow-up without issue, unpublished
 without waiver, campaign disagreement, blocker-accepted note, fenced ignored,
-no-reports-dir note, non-UTF-8), tool present/absent by module, neutrality,
-docs wiring assertions.
+no-reports-dir silent, non-UTF-8), tool present/absent by module, neutrality,
+docs wiring assertions; addendum 1b: finding-template presence/EARS/Origin/
+seedability, bug-template Origin, inbox routing, publish-tool hint; review
+regressions: prose-issue-not-publication, prose-campaign-not-header, bulleted
+FINDING linted, title-with-`=`, unclosed-fence note.
+
+Independent review (post-push): two MAJOR false-greens fixed — header keys
+are now read only from the header block before the first `## ` heading (a
+quoted `issue: #N` in prose no longer counts as publication), and bulleted
+`- FINDING` lines no longer escape the lint; plus title-with-`=` false-red,
+unclosed-fence disclosure, and the near-vacuous silent-dir test assertion.
 
 tier: 2
 decisions: read SP22 (sync/gate separation) and SP30 (prose duty vs gate) as

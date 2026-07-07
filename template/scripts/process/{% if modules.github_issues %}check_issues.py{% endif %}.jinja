@@ -145,36 +145,38 @@ FINDING_SEVS = {"blocker", "major", "minor", "nit"}
 FINDING_ACTIONS = {"fix", "accept", "follow-up"}
 
 
-def _intended_finding(line: str) -> bool:
-    """A line meant as a structured finding: `FINDING` + whitespace + a
-    `key=value` first token — how every real FINDING line begins. Prose that
-    merely starts with the word is not linted (the telemetry GRADE lesson:
-    require the first token to be key=value). Residual blind spot: a botched
-    line whose first token is a bare word reads as prose."""
-    return re.match(r"FINDING\s+\S+=", line.strip()) is not None
+# a FINDING may be written as a Markdown bullet — `- FINDING ...` must not
+# silently escape the lint (the same _LEAD lesson as plan tier lines)
+_FINDING_LINE = re.compile(r"^\s*(?:[-*+]\s+)?[*_]*FINDING\s+(\S+=.*)$")
 
 
-def _parse_finding(line: str) -> tuple[dict | None, str | None]:
-    """(fields, error). Leading key=value tokens are parsed; the remainder is
-    the title. Requires sev= and action= with valid enums; issue= optional,
-    '-' meaning none."""
+def _intended_finding(line: str) -> re.Match | None:
+    """A line meant as a structured finding: optional bullet, `FINDING`,
+    whitespace, and a `key=value` first token — how every real FINDING line
+    begins. Prose that merely starts with the word is not linted (the
+    telemetry GRADE lesson). Residual blind spot: a botched line whose first
+    token is a bare word reads as prose."""
+    return _FINDING_LINE.match(line)
+
+
+def _parse_finding(match: re.Match) -> tuple[dict | None, str | None]:
+    """(fields, error). Leading known key=value tokens (sev/action/issue) are
+    parsed; everything from the first other token on is the title — so a
+    title may itself contain `=` (e.g. 'user_id=1 hardcoded'). Requires sev=
+    and action= with valid enums; issue= optional, '-' meaning none."""
     fields: dict = {}
-    rest = line.strip()[len("FINDING"):].strip()
-    tokens = rest.split()
+    tokens = match.group(1).split()
     i = 0
     for i, tok in enumerate(tokens):
-        if "=" not in tok:
-            break
-        k, _, v = tok.partition("=")
+        k, eq, v = tok.partition("=")
+        if not eq or k not in ("sev", "action", "issue"):
+            break  # title starts here
         if k in fields:
             return None, f"duplicate key {k!r}"
         fields[k] = v
     else:
         i = len(tokens)
     title = " ".join(tokens[i:])
-    unknown = set(fields) - {"sev", "action", "issue"}
-    if unknown:
-        return None, f"unknown key(s) {sorted(unknown)}"
     if fields.get("sev") not in FINDING_SEVS:
         return None, f"sev={fields.get('sev')!r} not in {sorted(FINDING_SEVS)}"
     if fields.get("action") not in FINDING_ACTIONS:
@@ -192,6 +194,9 @@ def _parse_finding(line: str) -> tuple[dict | None, str | None]:
 def _check_reports(root: Path) -> tuple[list[str], list[str]]:
     """Review/audit visibility binding, offline over committed report files.
     Opt-in by artifact existence: no reports directory or files -> silent.
+    Header keys are read ONLY from the header block (before the first `## `
+    heading) — the Prompt/Result sections quote material by design, and a
+    quoted 'issue: #N' in prose must not count as publication (false-green).
     What cannot be checked (does the issue body match the report? was the
     prompt truly the one used?) stays attested — the gate sees files, not
     history."""
@@ -204,26 +209,34 @@ def _check_reports(root: Path) -> tuple[list[str], list[str]]:
     for p in sorted(rdir.glob("*.md")):
         rel = f"{REVIEWS_DIR}/{p.name}"
         try:
-            text = _unfenced(p.read_text(encoding="utf-8"))
+            raw = p.read_text(encoding="utf-8")
         except UnicodeDecodeError:
             hard.append(f"{rel}: not valid UTF-8")
             continue
-        if not _RPT_KIND.search(text):
+        # an unclosed fence swallows the rest of the file as quotation —
+        # disclose it instead of silently dropping whatever followed
+        if sum(1 for ln in raw.splitlines()
+               if ln.strip().startswith(("```", "~~~"))) % 2:
+            soft.append(f"{rel}: unclosed fence — the rest of the file is "
+                        f"treated as a quotation; close the fence")
+        text = _unfenced(raw)
+        header = text.split("\n## ", 1)[0]
+        if not _RPT_KIND.search(header):
             hard.append(f"{rel}: no 'review:' or 'audit:' header — not a readable report")
             continue
-        im = _RPT_ISSUE.search(text)
+        im = _RPT_ISSUE.search(header)
         published = im is not None
         if published and parse_issue_ref(im.group(1)) is None:
             hard.append(f"{rel}: malformed issue ref {im.group(1)!r} "
                         "(want '#N', 'owner/repo#N', or a github issue URL)")
             published = False
-        if not published and not _RPT_WAIVED.search(text):
+        if not published and not _RPT_WAIVED.search(header):
             hard.append(f"{rel}: report has no 'issue:' ref and no "
                         f"'publish-waived: <reason>' — an unpublished review is "
                         f"invisible review (publish_review.sh, or waive with cause)")
-        cm = _RPT_CAMPAIGN.search(text)
+        cm = _RPT_CAMPAIGN.search(header)
         if cm:
-            ci = _RPT_CAMPAIGN_ISSUE.search(text)
+            ci = _RPT_CAMPAIGN_ISSUE.search(header)
             if ci and parse_issue_ref(ci.group(1)) is None:
                 hard.append(f"{rel}: malformed campaign-issue ref {ci.group(1)!r}")
             elif ci:
@@ -233,9 +246,10 @@ def _check_reports(root: Path) -> tuple[list[str], list[str]]:
                             f"report but no 'campaign-issue:' ref — the bundle "
                             f"parent must be named")
         for line in text.splitlines():
-            if not _intended_finding(line):
+            fmatch = _intended_finding(line)
+            if not fmatch:
                 continue
-            fields, err = _parse_finding(line)
+            fields, err = _parse_finding(fmatch)
             if err:
                 hard.append(f"{rel}: malformed FINDING line ({err}): {line.strip()!r}")
                 continue

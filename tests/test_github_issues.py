@@ -469,7 +469,7 @@ def test_no_reports_dir_is_silent(render, tmp_path):
     out = _render(render, tmp_path)
     r = _run(out)
     assert r.returncode == 0, r.stdout
-    assert "review" not in r.stdout.lower() or "reviews/" not in r.stdout
+    assert "review" not in r.stdout.lower()  # F8: the old disjunct was near-vacuous
 
 
 def test_valid_published_report_ok(render, tmp_path):
@@ -711,3 +711,69 @@ def test_publish_tool_hints_finding_form(render, tmp_path):
     t = (out / "scripts/process/publish_review.sh").read_text()
     assert "new_issue.sh finding" in t
     assert "comment on the origin issue" in t
+
+
+# --- SP32 review findings: header scoping, bullets, edges ---
+
+def test_quoted_issue_in_prose_is_not_publication(render, tmp_path):
+    # F1 (MAJOR false-green): a prose 'issue: #61 ...' in Result must not make
+    # an unpublished report count as published — headers live before the
+    # first ## heading only
+    out = _render(render, tmp_path)
+    _report(out, "2026-07-05-x.md",
+            "review: x\nwork: #1\n\n## Result\n\n"
+            "issue: #61 covers the flaky test too.\n")
+    r = _run(out)
+    assert r.returncode == 1
+    assert "invisible review" in r.stdout
+
+
+def test_prose_campaign_sentence_not_a_header(render, tmp_path):
+    # F5 (false-red): 'campaign: overall ...' prose in Result must not trigger
+    # the campaign-issue requirement
+    out = _render(render, tmp_path)
+    _report(out, "2026-07-05-x.md",
+            "review: x\nissue: #57\n\n## Result\n\n"
+            "campaign: overall the round went well.\n")
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+
+
+def test_bulleted_finding_still_linted(render, tmp_path):
+    # F2 (MAJOR false-green): '- FINDING ...' is the natural Markdown form and
+    # must not escape the lint — same _LEAD lesson as plan tier lines
+    out = _render(render, tmp_path)
+    _report(out, "2026-07-05-x.md", VALID_REPORT +
+            "- FINDING sev=major action=follow-up issue=- forgotten follow-up\n")
+    r = _run(out)
+    assert r.returncode == 1
+    assert "follow-up finding without an issue" in r.stdout
+
+
+def test_bulleted_malformed_finding_hard(render, tmp_path):
+    out = _render(render, tmp_path)
+    _report(out, "2026-07-05-x.md", VALID_REPORT +
+            "- FINDING sev=bogus action=nope issue=- malformed too\n")
+    r = _run(out)
+    assert r.returncode == 1
+    assert "malformed FINDING" in r.stdout
+
+
+def test_title_with_equals_token_is_valid(render, tmp_path):
+    # F6 (false-red): a title starting with a k=v-shaped token that is not a
+    # known key belongs to the title — 'user_id=1 hardcoded' is legitimate
+    out = _render(render, tmp_path)
+    _report(out, "2026-07-05-x.md", VALID_REPORT +
+            "FINDING sev=major action=fix issue=- USER_ID=1 hardcoded in deps\n")
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+
+
+def test_unclosed_fence_notes(render, tmp_path):
+    # F7: an unclosed fence swallows the rest of the file — disclose it
+    out = _render(render, tmp_path)
+    _report(out, "2026-07-05-x.md", VALID_REPORT +
+            "\n```\nFINDING sev=major action=follow-up issue=- swallowed\n")
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+    assert "unclosed fence" in r.stdout

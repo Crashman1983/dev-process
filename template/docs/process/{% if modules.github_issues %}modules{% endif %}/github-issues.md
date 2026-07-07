@@ -132,7 +132,10 @@ FINDING sev=minor action=follow-up issue=#61 story refs resolve by filename
 issue=<ref|-> <title>` — `fix` was resolved within the reviewed change,
 `accept` is a conscious acceptance (reason in prose), `follow-up` becomes
 tracked work and **must** carry an issue ref. Fenced examples are quotations
-and are ignored, as everywhere.
+and are ignored, as everywhere — **fence the Prompt section** when it quotes
+the grammar or header-like lines (`issue:`, `campaign:`), or the gate lints
+the quotes as claims. A title may contain `=` (`USER_ID=1 hardcoded` is fine);
+only leading `sev=`/`action=`/`issue=` tokens are parsed as fields.
 
 **The publish tool** — `bash scripts/process/publish_review.sh <report.md>
 [--campaign <title>]` creates the issue with the full report as body (prompt,
