@@ -1,0 +1,237 @@
+#!/usr/bin/env python3
+"""attention: a read-only human-in-the-loop dashboard — where should a person
+look and steer? It aggregates, in one view, signals the offline gates and
+who_is_working surface only separately:
+
+  - Under-granular acceptance: a story whose mapped tests far outnumber its
+    stated acceptance criteria (the criteria say less than the tests prove).
+  - Done without an issue link: a legacy story with no prose SSOT at all.
+  - Issue hygiene: an open issue that is not gradeable — missing a `type:` label,
+    or (unless an epic) missing an EARS acceptance section. This is the pattern
+    review findings and follow-ups fall into when filed outside the story flow.
+  - Active now: claimed issues and open pull requests.
+
+Read-only and best-effort: it never edits anything; a missing or unauthenticated
+`gh` drops the online sections with a note (the offline sections still work).
+
+Usage:
+    attention.py [--json] [--stale-min-tests N]
+
+`--stale-min-tests` (default 5) is the test count above which a story with
+<= 2 acceptance criteria is flagged as under-granular.
+"""
+from __future__ import annotations
+
+import json
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+REGISTRY_DIR = Path("docs/process/feature-registry")
+UNDER_GRANULAR_MAX_AK = 2
+
+
+# ---------------------------------------------------------------- pure helpers
+
+def load_stories(reg: Path) -> list[dict]:
+    """Registry rows: {id, status, issue, n_ak, n_tests}. The registry maps
+    tests at the story root (a flat `tests` list), so n_tests counts those."""
+    rows: list[dict] = []
+    if not reg.is_dir():
+        return rows
+    for path in sorted(reg.glob("STORY-*.json")):
+        if path.name.endswith(".example.json"):
+            continue
+        try:
+            d = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            continue
+        acc = d.get("acceptance", []) or []
+        tests = d.get("tests", []) or []
+        n_tests = len(tests) if isinstance(tests, list) else 0
+        rows.append({"id": d.get("id"), "status": d.get("status"),
+                     "issue": d.get("issue"), "n_ak": len(acc),
+                     "n_tests": n_tests})
+    return rows
+
+
+def under_granular(rows: list[dict], min_tests: int) -> list[dict]:
+    out = [r for r in rows if r["n_ak"] <= UNDER_GRANULAR_MAX_AK
+           and r["n_tests"] >= min_tests]
+    return sorted(out, key=lambda r: -r["n_tests"])
+
+
+def done_without_issue(rows: list[dict]) -> list[dict]:
+    return [r for r in rows if r["status"] == "done" and not r["issue"]]
+
+
+def issue_number(ref) -> str | None:
+    digits = "".join(c for c in str(ref or "") if c.isdigit())
+    return digits or None
+
+
+def _is_epic(labels: set[str], title: str) -> bool:
+    return "type:epic" in labels or title.upper().startswith("EPIC")
+
+
+def _has_ears(body: str) -> bool:
+    """A gradeable acceptance section: an EARS heading (either language) or an
+    EARS 'shall' clause (case-insensitive, so uppercase SHALL counts)."""
+    b = body or ""
+    if re.search(r"(acceptance criteria|akzeptanzkriterien)\s*\(ears\)", b, re.I):
+        return True
+    return re.search(r"\bshall\b", b, re.I) is not None
+
+
+def issue_hygiene(issues: list[dict]) -> list[dict]:
+    """Open issues that are not gradeable: missing a `type:` label, or (unless an
+    epic) missing an EARS acceptance section — the pattern review findings and
+    follow-ups fall into. Advisory only: a triage hint, never a gate. Each input
+    issue is {number, title, labels:[{name}], body, state}."""
+    out: list[dict] = []
+    for i in issues:
+        if str(i.get("state", "OPEN")).upper() != "OPEN":
+            continue
+        labels = {lab["name"] for lab in i.get("labels", [])}
+        title = i.get("title", "")
+        body = i.get("body") or ""
+        missing = []
+        if not any(lab.startswith("type:") for lab in labels):
+            missing.append("type")
+        if not _is_epic(labels, title) and not _has_ears(body):
+            missing.append("EARS acceptance")
+        if missing:
+            out.append({"issue": f"#{i['number']}", "title": title, "missing": missing})
+    return out
+
+
+# ------------------------------------------------------------------------ i/o
+
+def gh_json(*args: str):
+    try:
+        out = subprocess.run(["gh", *args], check=True,
+                             capture_output=True, text=True).stdout
+        return json.loads(out) if out.strip() else []
+    except (subprocess.CalledProcessError, FileNotFoundError, json.JSONDecodeError):
+        return None
+
+
+# --------------------------------------------------------------------- collect
+
+def collect(min_tests: int) -> dict:
+    rows = load_stories(REGISTRY_DIR)
+    report: dict = {"under_granular": [], "done_no_issue": [], "hygiene": [],
+                    "active_claims": [], "open_prs": [], "notes": []}
+
+    report["under_granular"] = [
+        {"id": r["id"], "n_ak": r["n_ak"], "n_tests": r["n_tests"]}
+        for r in under_granular(rows, min_tests)]
+    report["done_no_issue"] = [r["id"] for r in done_without_issue(rows)]
+
+    open_issues = gh_json("issue", "list", "--state", "open", "-L", "500",
+                          "--json", "number,title,labels,body")
+    if open_issues is None:
+        report["notes"].append("gh unavailable — issue-hygiene check skipped")
+    else:
+        report["hygiene"] = issue_hygiene(open_issues)
+
+    claims = gh_json("issue", "list", "--label", "status:in-progress",
+                     "--json", "number,title")
+    if claims is None:
+        report["notes"].append("gh unavailable — active claims skipped")
+    else:
+        report["active_claims"] = [{"issue": f"#{c['number']}",
+                                    "title": c.get("title", "")} for c in claims]
+    prs = gh_json("pr", "list", "--state", "open", "--json",
+                  "number,title,headRefName")
+    if prs is not None:
+        report["open_prs"] = [{"pr": f"#{p['number']}", "branch": p.get("headRefName", ""),
+                               "title": p.get("title", "")} for p in prs]
+    return report
+
+
+def render(report: dict) -> str:
+    L = ["# attention — where a human should look & steer", ""]
+
+    L.append("## Under-granular acceptance (tests >> criteria)")
+    if report["under_granular"]:
+        for u in report["under_granular"][:12]:
+            L.append(f"- {u['id']}: {u['n_ak']} AK / {u['n_tests']} tests")
+        extra = len(report["under_granular"]) - 12
+        if extra > 0:
+            L.append(f"- (+{extra} more)")
+    else:
+        L.append("- none")
+
+    L += ["", "## Done without an issue link (no prose SSOT)"]
+    L += [f"- {sid}" for sid in report["done_no_issue"]] or ["- none"]
+
+    L += ["", "## Issue hygiene (untyped or no EARS acceptance)"]
+    if report.get("hygiene"):
+        for h in report["hygiene"][:15]:
+            L.append(f"- {h['issue']} — missing {', '.join(h['missing'])}: "
+                     f"{h['title'][:60]}")
+        extra = len(report["hygiene"]) - 15
+        if extra > 0:
+            L.append(f"- (+{extra} more)")
+    else:
+        L.append("- none")
+
+    L += ["", "## Active now"]
+    if report["active_claims"]:
+        L += [f"- claim {c['issue']} — {c['title']}" for c in report["active_claims"]]
+    else:
+        L.append("- no active claims")
+    L += [f"- PR {p['pr']} [{p['branch']}] — {p['title']}" for p in report["open_prs"]]
+
+    if report["notes"]:
+        L += ["", "## Notes"] + [f"- {n}" for n in report["notes"]]
+    return "\n".join(L)
+
+
+# ------------------------------------------------------------------- selftest
+
+def _selftest() -> int:
+    rows = [{"id": "A", "status": "done", "issue": "#1", "n_ak": 2, "n_tests": 9},
+            {"id": "B", "status": "done", "issue": "#2", "n_ak": 5, "n_tests": 20},
+            {"id": "C", "status": "proposed", "issue": "#3", "n_ak": 1, "n_tests": 0},
+            {"id": "D", "status": "done", "issue": None, "n_ak": 1, "n_tests": 6}]
+    ug = [r["id"] for r in under_granular(rows, 5)]
+    assert ug == ["A", "D"], ug  # B has 5 AK; C has too few tests
+    assert done_without_issue(rows) == [rows[3]]
+    assert issue_number("#42") == "42" and issue_number(None) is None
+
+    hy = issue_hygiene([
+        {"number": 1, "title": "STORY-1: x", "labels": [{"name": "type:feature"}],
+         "body": "When X, the system shall Y.", "state": "OPEN"},
+        {"number": 2, "title": "[Finding] z", "labels": [], "body": "Problem: p",
+         "state": "OPEN"},
+        {"number": 3, "title": "EPIC: big", "labels": [{"name": "type:epic"}],
+         "body": "scope only", "state": "OPEN"},
+        {"number": 4, "title": "old", "labels": [], "body": "", "state": "CLOSED"},
+    ])
+    assert [h["issue"] for h in hy] == ["#2"], hy
+    assert hy[0]["missing"] == ["type", "EARS acceptance"], hy
+    # uppercase SHALL and the German EARS heading both count as gradeable
+    assert _has_ears("The system SHALL X") and _has_ears("Akzeptanzkriterien (EARS)")
+    print("attention selftest: OK")
+    return 0
+
+
+def main(argv: list[str]) -> int:
+    if "--selftest" in argv:
+        return _selftest()
+    min_tests = 5
+    if "--stale-min-tests" in argv:
+        min_tests = int(argv[argv.index("--stale-min-tests") + 1])
+    report = collect(min_tests)
+    if "--json" in argv:
+        print(json.dumps(report, indent=2, ensure_ascii=False))
+    else:
+        print(render(report))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

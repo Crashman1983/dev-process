@@ -98,6 +98,26 @@ makes a shared backlog legible when several efforts run at once.
    e.g. every ~90 min of active work), so a stalled claim is visible.
 4. On merge: remove `status:in-progress`, close the issue with the commit ref.
 
+## Coordination views (read-only)
+
+Two read-only tools surface, on the command line, what the offline gates and the
+issue labels only show separately — neither edits anything, and a missing or
+unauthenticated `gh` degrades to a note rather than an error:
+
+- `scripts/process/who_is_working.py` — a concurrent-activity preflight before
+  claiming: active claims (with branch and staleness), open PRs, remote work
+  branches with no PR, and local worktrees. Read it *before* starting so two
+  efforts do not collide on one issue.
+- `scripts/process/attention.py` — where a human should look and steer:
+  under-granular acceptance (tests far outnumber criteria), done-without-issue,
+  active claims and PRs, and **issue hygiene** — open issues that are not
+  gradeable (missing a `type:` label, or, unless an epic, missing an EARS
+  acceptance section). That last is the pattern review findings and follow-ups
+  fall into when filed outside the story flow: a finding or follow-up that needs
+  work is a typed issue (`type:bug`/`chore`/`feature`) with EARS acceptance, the
+  same gradeable discipline as a story; a purely informational record is exempt.
+  Advisory only — a triage hint, never a gate.
+
 ## Optional: render story dependencies
 
 A story's `blocked_by` (feature-registry) is the portable source of truth for

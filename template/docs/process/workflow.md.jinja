@@ -29,3 +29,8 @@ The Tier 0–1 shortcut: no separate plan file. Enters: a small, isolated reques
 ## Debug
 
 The root-cause entry point (mandatory rule 6). Enters: a bug, test failure, or unexpected behavior. Produces: a root-cause analysis before any fix. After two failed attempts at a symptom, stop patching and investigate why it happens; fix the cause, not the symptom.
+{% if modules.github_issues %}
+## Parallel agents
+
+Several agents may work the backlog at once; the failure mode to design out is a *shared working tree* — two agents in one directory racing on the same `.git` HEAD/index. **Isolate:** give each agent its own `git worktree` or clone, never two in one directory; prefer server-side git (`gh pr merge --rebase`) over local `checkout`/`stash` that move HEAD out from under another agent. **Stay aware:** read live claims and in-flight work with `scripts/process/who_is_working.py` before starting, then claim (a comment naming agent/branch/scope, the `status:in-progress` label, and a heartbeat — see the claim workflow in the github-issues module) and never pick up already-claimed work. **Minimize conflict:** {% if modules.feature_registry %}take non-overlapping ready work (`scripts/process/story_order.py` prints the ready-to-start order), {% endif %}keep branches small and rebased, stage explicit paths (never `git add -A`), and serialize edits to high-contention artifacts. See where a human should look and steer in one view with `scripts/process/attention.py`. Two efforts on one behaviour declare *phase-of*/*supersede* rather than run in parallel (mandatory rule 4).
+{% endif %}
