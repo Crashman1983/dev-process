@@ -134,7 +134,7 @@ def test_workflow_phases_wire_decision_records(render, tmp_path):
     assert "record it as a decision record first" in execute
     # pin the enumeration itself, not a bare substring — 'decisions' surviving
     # elsewhere in the section must not mask its removal from the category list
-    assert "design, decisions, tests" in review
+    assert "design, decisions, product frame, tests" in review
 
 
 def test_review_checklist_has_decisions_section(render, tmp_path):
@@ -153,6 +153,48 @@ def test_review_checklist_has_decisions_section(render, tmp_path):
     assert "supersede it in the same change" in section
 
 
+def test_workflow_phases_wire_product_frame(render, tmp_path):
+    # SP31: the frame only gives direction if the phases read it — brainstorm
+    # as constraint, plan names the goal served, review's category list carries it
+    out = render(tmp_path, {"project_name": "demo"})
+    text = (out / "docs/process/workflow.md").read_text()
+    brainstorm = text.split("## Brainstorm")[1].split("## Plan")[0]
+    plan = text.split("## Plan")[1].split("## Execute")[0]
+    review = text.split("## Review")[1].split("## Quick")[0]
+    assert "PRODUCT.md" in brainstorm
+    assert "violates a non-goal" in brainstorm
+    assert "PRODUCT.md" in plan and "product-neutral" in plan
+    assert "design, decisions, product frame, tests" in review
+
+
+def test_review_checklist_has_product_frame_section(render, tmp_path):
+    out = render(tmp_path, {"project_name": "demo"})
+    text = (out / "docs/process/review-checklist.md").read_text()
+    assert "## Product frame" in text
+    section = text.split("## Product frame")[1].split("## Tests")[0]
+    assert "serve a stated goal" in section
+    assert "violate a non-goal" in section
+    assert "silent drift" in section
+
+
+def test_anchors_and_prime_point_at_product_frame(render, tmp_path):
+    out = render(tmp_path, {"project_name": "demo",
+                            "harnesses": {"claude": True, "agents_md": True,
+                                          "copilot": True}})
+    for rel in ["CLAUDE.md", "AGENTS.md", ".github/copilot-instructions.md",
+                ".claude/commands/prime.md", ".github/prompts/prime.prompt.md"]:
+        assert "PRODUCT.md" in (out / rel).read_text(), f"{rel} misses the frame pointer"
+
+
+def test_start_here_creates_frame_in_init_dialogue(render, tmp_path):
+    # user requirement: initial creation happens in the init/brainstorm dialogue
+    out = render(tmp_path, {"project_name": "demo"})
+    text = (out / "docs/process/start-here.md").read_text()
+    assert "primary artifact is the product frame" in text
+    assert "status:` to `onboarded" in text
+    assert "not as a separate chore" in text
+
+
 def test_plan_format_names_decision_context(render, tmp_path):
     # a Tier 2+ plan names the records it read and any record it entails —
     # a prose duty judged at review, honestly labeled as ungated.
@@ -160,7 +202,8 @@ def test_plan_format_names_decision_context(render, tmp_path):
     text = (out / "docs/process/journal-state-plans.md").read_text()
     assert "decision context" in text
     assert "new or superseded record" in text
-    assert "deliberately not a gated field" in text  # honest about enforceability
+    # whitespace-normalized: the phrase wraps across a line break in the source
+    assert "deliberately not gated fields" in " ".join(text.split())
 
 
 def test_decision_record_template_has_type_axis_and_intent_atomicity(render, tmp_path):

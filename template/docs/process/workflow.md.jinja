@@ -8,11 +8,11 @@ The development cycle, described harness-neutrally. Each phase names what enters
 
 ## Brainstorm
 
-Turns an idea into an approved design. Enters: a request or problem. Produces: a written design/spec the implementer can follow, plus explicit approval. Use before any non-trivial new behavior — do not start building until the design is agreed. Prefer a few clarifying questions over guessing the intent. Read the decision records (`docs/process/adr/`) relevant to the area first — an endorsed decision is a constraint, not an open question; a design that overturns one says so and names the supersession (mandatory rule 4).
+Turns an idea into an approved design. Enters: a request or problem. Produces: a written design/spec the implementer can follow, plus explicit approval. Use before any non-trivial new behavior — do not start building until the design is agreed. Prefer a few clarifying questions over guessing the intent. Read the product frame (`PRODUCT.md`) and the decision records (`docs/process/adr/`) relevant to the area first — both are constraints, not open questions: a design that serves no stated goal or violates a non-goal says so and changes the frame in the same effort (or does not proceed); a design that overturns an endorsed decision names the supersession (mandatory rule 4). If the frame is still `not-onboarded`, the start-here onboarding dialogue fills it before product-shaped work.
 
 ## Plan
 
-Turns an approved design into a zero-context task breakdown. Enters: the design/spec. Produces: a plan file (`journal-state-plans.md`) of bite-sized, independently testable tasks with exact files, code, and test commands. Assume the implementer knows the toolchain but not this codebase. Use for every Tier 2+ change. The plan names the decision records it read and any new or superseded record the change entails — or states that none apply (`journal-state-plans.md`, Plans).
+Turns an approved design into a zero-context task breakdown. Enters: the design/spec. Produces: a plan file (`journal-state-plans.md`) of bite-sized, independently testable tasks with exact files, code, and test commands. Assume the implementer knows the toolchain but not this codebase. Use for every Tier 2+ change. The plan names the decision records it read and any new or superseded record the change entails — or states that none apply — and the product goal (`PRODUCT.md`) the change serves, or that it is product-neutral (`journal-state-plans.md`, Plans).
 
 ## Execute
 
@@ -20,7 +20,7 @@ Implements the plan task by task. Enters: the plan. Produces: committed, tested 
 
 ## Review
 
-The gate before merge to the main branch. Enters: the branch diff plus the plan/spec. Produces: a pass/fail judgment on functional completeness, correctness, and adherence to these rules. The required depth *and independence* scale with the tier (`risk-tiers.md`, `verification-independence.md`): a fresh process reviews a read-only bundle rather than the producing context, and the implementing agent does not self-certify. What a review actually checks — completeness, correctness, security, design, decisions, tests — is `review-checklist.md`. Use before every merge that the tier gates; fixes loop back through execute + review until clean.{% if modules.telemetry %} Record the per-criterion verdicts as `GRADE` lines with `source=review` in the journal (`docs/process/modules/telemetry.md`).{% endif %}
+The gate before merge to the main branch. Enters: the branch diff plus the plan/spec. Produces: a pass/fail judgment on functional completeness, correctness, and adherence to these rules. The required depth *and independence* scale with the tier (`risk-tiers.md`, `verification-independence.md`): a fresh process reviews a read-only bundle rather than the producing context, and the implementing agent does not self-certify. What a review actually checks — completeness, correctness, security, design, decisions, product frame, tests — is `review-checklist.md`. Use before every merge that the tier gates; fixes loop back through execute + review until clean.{% if modules.telemetry %} Record the per-criterion verdicts as `GRADE` lines with `source=review` in the journal (`docs/process/modules/telemetry.md`).{% endif %}
 
 ## Quick
 

@@ -86,6 +86,7 @@ def test_core_gate_runs_with_all_modules_off(render, tmp_path):
     assert r.returncode == 0, r.stderr
     assert "decision-records" in r.stdout
     assert "review" in r.stdout  # second core gate also always active
+    assert "product-frame" in r.stdout  # third core gate (SP31)
 
 
 def test_workflow_rendered(render, tmp_path):

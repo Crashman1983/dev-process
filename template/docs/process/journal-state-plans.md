@@ -62,10 +62,12 @@ review attestation to its plan.
 
 A Tier 2+ plan also names its **decision context**: which decision records
 (`docs/process/adr/`) it read as constraints, and any new or superseded record
-the change entails — or states that none apply. This is a prose duty judged at
-the review (`review-checklist.md`, Decisions), deliberately not a gated field: a
-machine could only check that *some* text is present, which invites a ritual
-"none" — the substance is exactly what the reviewer's decision questions probe.
+the change entails — or states that none apply. It likewise names the
+**product goal** (`PRODUCT.md`) the change serves, or that it is
+product-neutral. Both are prose duties judged at the review
+(`review-checklist.md`, Decisions and Product frame), deliberately not gated
+fields: a machine could only check that *some* text is present, which invites
+a ritual "none" — the substance is exactly what the reviewer's questions probe.
 
 ## Review attestations
 

@@ -18,8 +18,8 @@ touching contracts, persistence, or auth.
 
 ## First run
 
-1. Confirm that the process files exist: `CLAUDE.md`, `docs/process/`,
-   `.copier-answers.yml`, and `scripts/process/gate_runner.py`.
+1. Confirm that the process files exist: `CLAUDE.md`, `PRODUCT.md`,
+   `docs/process/`, `.copier-answers.yml`, and `scripts/process/gate_runner.py`.
 2. Initialize Git if this is a new repository.
 3. Install local hooks if the `git-hooks` module is active:
    `bash scripts/process/install-hooks.sh`.
@@ -99,7 +99,14 @@ question or assumption; do not invent it.
 
 ### Dialogue output
 
-After the dialogue, the LLM records at least:
+**The dialogue's primary artifact is the product frame:** fill `PRODUCT.md`
+(purpose, users, goals, non-goals, constraints, scope now) from the confirmed
+answers and flip its `status:` to `onboarded` — the frame is created *in* this
+init dialogue, not as a separate chore afterwards. Every later phase reads it
+as the direction development is checked against (`workflow.md`,
+`review-checklist.md`).
+
+Beyond the frame, the LLM records at least:
 
 - Greenfield or Brownfield;
 - project goal and first useful slice;
@@ -117,7 +124,8 @@ After the dialogue, the LLM records at least:
 
 Use this path when no product code exists yet.
 
-1. Document product goal, users, and first slice in `.process-work/`.
+1. Fill `PRODUCT.md` from the onboarding dialogue (purpose, users, goals,
+   non-goals, constraints, scope now) and flip its `status:` to `onboarded`.
 2. Settle the stack per layer (frontend, backend, storage, API/communication,
    deployment); where no preference is given, use proposal mode. Choose the
    confirmed result and the source layout small enough that the first
@@ -146,6 +154,9 @@ Use this path when product code already exists.
 1. Do not rewrite the project just to fit the process.
 2. Inventory real code roots, tests, architecture boundaries, features,
    external contracts, security invariants, and surfaces first.
+   Fill `PRODUCT.md` from the *real* product — what it actually does and for
+   whom, plus the deliberate non-goals — and flip its `status:` to `onboarded`;
+   aspirations that are not yet true belong in Goals, not in Scope now.
 3. Fill `ARCHITECTURE.md` from real code. If a rule is only aspirational,
    document it in an ADR as `change-planned` or `tolerated`, not as already
    satisfied.
@@ -185,6 +196,8 @@ The project is ready for normal process-driven development when:
 
 - the process baseline is committed;
 - Greenfield or Brownfield is recorded in `.process-work/`;
+- `PRODUCT.md` is either honestly `not-onboarded` (the gate notes it) or
+  onboarded with real purpose, users, goals and non-goals from the dialogue;
 - if `arch-onboarding` is active: `ARCHITECTURE.md` either honestly remains
   "not onboarded yet" or contains a real `arch` block with existing paths;
 - each active optional module either intentionally stays inert or has at least

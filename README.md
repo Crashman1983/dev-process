@@ -47,8 +47,12 @@ Ausgeliefert als [copier](https://copier.readthedocs.io)-Template. Adapter für
 > SP30 (decision-flow-wiring: Decision Records in die Phasen eingehängt —
 > Brainstorm liest sie als Constraints, Plan nennt seinen Decision-Kontext,
 > Execute stoppt bei entdeckter Grundsatzentscheidung, Review-Checkliste fragt
-> nach fehlendem/widersprochenem/still-obsoletem Record)
-> ausgeliefert, `v1.17.0`.
+> nach fehlendem/widersprochenem/still-obsoletem Record) +
+> SP31 (product-frame: `PRODUCT.md` als **Core**-Artefakt — Produktrahmen mit
+> Goals/Non-Goals/Constraints, im Init-Dialog erstellt, von allen Phasen als
+> Richtungs-Constraint gelesen, immer aktives Gate: fehlend hart,
+> not-onboarded ehrliche Note, Platzhalter-nach-Onboarding + tote Refs hart)
+> ausgeliefert, `v1.18.0`.
 > **Überblick für Einsteiger:innen & Management** (wie es funktioniert, warum,
 > welcher Mehrwert): [`docs/CAPABILITIES.md`](docs/CAPABILITIES.md).
 > Setup: [`BOOTSTRAP.md`](BOOTSTRAP.md) · Systemumgebung:
@@ -97,7 +101,10 @@ Persistenz ⇒ Tier 2+ auch bei winzigem Diff. Ein `flow`-Label ist Boden, nie D
 und Debug. **ADRs** tragen zwei Achsen — `Status` (Proposed/Accepted/Superseded)
 und `Intent` (keep/change-planned/tolerated), damit „so ist es" von „so soll es
 werden" getrennt bleibt. **Journal, Branch-State und Pläne** halten das *Warum*
-fest, das das git-log nicht zeigt.
+fest, das das git-log nicht zeigt. **`PRODUCT.md`** (Core) ist der Produktrahmen —
+Purpose, Users, Goals, **Non-Goals**, Constraints, aktueller Scope —, im
+Onboarding-Dialog befüllt und von Brainstorm/Plan/Review als Richtungs-Constraint
+gelesen; ein immer aktives Gate hält ihn präsent und referenz-sauber.
 
 **Durchsetzung:** ein manifest-bewusster `gate_runner` liest `.copier-answers.yml`
 und fährt in CI nur die *aktiven* Module — als GitHub-Actions-Workflow und/oder

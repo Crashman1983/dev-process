@@ -50,10 +50,13 @@ ist entweder eine feste Regel oder eine Maschine, die prüft.
    AGENTS.md u. a. sind dünn und zeigen darauf. Wechselt das KI-Werkzeug,
    degradiert nur die Bequemlichkeit — Methodik und Durchsetzung bleiben.
 
-5. **Das Warum wird festgehalten.** Entscheidungen kommen in typisierte Decision
-   Records (ADRs: *ist so* vs. *soll so werden* getrennt), das Journal hält fest,
-   was das git-log nicht zeigt, und eine Feature-Registry verknüpft User-Story →
-   Akzeptanzkriterium → Test. Kontext geht zwischen Sessions nicht verloren.
+5. **Das Warum wird festgehalten.** Ein Produktrahmen (`PRODUCT.md`: Ziele,
+   **Nicht-Ziele**, Nutzer, Constraints — im Einrichtungs-Dialog erstellt) gibt
+   jeder Entwicklungsentscheidung die Richtung vor; Entscheidungen kommen in
+   typisierte Decision Records (ADRs: *ist so* vs. *soll so werden* getrennt),
+   das Journal hält fest, was das git-log nicht zeigt, und eine Feature-Registry
+   verknüpft User-Story → Akzeptanzkriterium → Test. Kontext geht zwischen
+   Sessions nicht verloren.
 
 Alles jenseits des Kerns sind **zuschaltbare Module** (Architektur-Prüfung,
 Security-Floor, Contract-/Parity-Prüfung, GitHub-Issues als SSOT, Effizienz-

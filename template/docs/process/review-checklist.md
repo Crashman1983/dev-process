@@ -100,6 +100,20 @@ the integrity of records that *exist*; only a review can notice one that is
   file untouched? A record the code no longer honors is a lie to the next
   reader — supersede it in the same change.
 
+## Product frame — direction, not drift
+
+The frame (`PRODUCT.md`) is what development is checked against; the
+product-frame gate keeps it present and reference-clean, but only a review can
+judge the change against its content:
+
+- Does the change **serve a stated goal** — or is it product-neutral
+  infrastructure? Work that serves no goal and is not infrastructure is scope
+  arriving uninvited.
+- Does it **violate a non-goal**? Then either the change is wrong or the frame
+  is — change `PRODUCT.md` deliberately in the same change, or do not merge.
+- Does it **shift scope while `PRODUCT.md` stays untouched**? A scope change
+  that only lives in code is silent drift; the frame must move with it.
+
 ## Tests prove acceptance
 
 - Does a **test map to each acceptance criterion** the change claims? A feature
