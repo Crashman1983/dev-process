@@ -39,15 +39,21 @@ _PLAN_WAIVED = re.compile(_LEAD + r"issue-waived[*_]*\s*:\s*\S", re.IGNORECASE |
 
 
 def _unfenced(text: str) -> str:
-    """Text with ```-fenced blocks removed — a `tier:`/`issue:` line inside a
-    fenced example is a quotation, not a declaration (same discipline the review
-    gate applies)."""
-    out, fenced = [], False
+    """Text with fenced blocks (``` and ~~~, closed by their own marker)
+    removed — a `tier:`/`issue:`/`FINDING` line inside a fenced example is a
+    quotation, not a declaration (same discipline the review gate applies)."""
+    out: list[str] = []
+    fence: str | None = None
     for line in text.splitlines():
-        if line.strip().startswith("```"):
-            fenced = not fenced
+        stripped = line.strip()
+        marker = next((m for m in ("```", "~~~") if stripped.startswith(m)), None)
+        if marker and fence is None:
+            fence = marker
             continue
-        if not fenced:
+        if marker and fence == marker:
+            fence = None
+            continue
+        if fence is None:
             out.append(line)
     return "\n".join(out)
 

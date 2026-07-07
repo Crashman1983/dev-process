@@ -8,6 +8,13 @@ labels: type:bug
 
 <One sentence: what is wrong.>
 
+## Origin (when discovered mid-work)
+
+- Discovered during: <the issue/story/plan being worked when this surfaced, #N — or 'standalone'>
+
+<When an origin issue exists, comment on it referencing this bug so the trail
+runs both ways; keep the current change focused and fix the bug here.>
+
 ## Steps to reproduce
 
 1. <step>

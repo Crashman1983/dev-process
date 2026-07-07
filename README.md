@@ -51,8 +51,14 @@ Ausgeliefert als [copier](https://copier.readthedocs.io)-Template. Adapter für
 > SP31 (product-frame: `PRODUCT.md` als **Core**-Artefakt — Produktrahmen mit
 > Goals/Non-Goals/Constraints, im Init-Dialog erstellt, von allen Phasen als
 > Richtungs-Constraint gelesen, immer aktives Gate: fehlend hart,
-> not-onboarded ehrliche Note, Platzhalter-nach-Onboarding + tote Refs hart)
-> ausgeliefert, `v1.18.0`.
+> not-onboarded ehrliche Note, Platzhalter-nach-Onboarding + tote Refs hart) +
+> SP32 (review-visibility: Audits/Reviews samt Prompt, Verdikt und Findings als
+> Report-Artefakt + GitHub-Issue — `FINDING`-Grammatik, `publish_review.sh` mit
+> Kampagnen-Bündelung unter Parent-Issue, hermetische Bindung: unpubliziert
+> ohne Waiver hart, Follow-up-Finding ohne Issue hart, gesplittete Kampagne hart;
+> entdeckte Arbeit in korrekter Form: `finding`-/`bug`-Templates mit EARS-AKs +
+> Origin-Sektion, Rückverlinkung + Kommentar am Ausgangsitem als Konvention)
+> ausgeliefert, `v1.19.0`.
 > **Überblick für Einsteiger:innen & Management** (wie es funktioniert, warum,
 > welcher Mehrwert): [`docs/CAPABILITIES.md`](docs/CAPABILITIES.md).
 > Setup: [`BOOTSTRAP.md`](BOOTSTRAP.md) · Systemumgebung:

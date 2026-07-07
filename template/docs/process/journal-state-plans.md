@@ -36,10 +36,13 @@ test, a follow-up — is **captured, not scope-crept into the current change**.
 One line per item in `.process-work/inbox.md`; keep the current change focused on
 its own scope. Triage the inbox when you surface for air: each item becomes a
 tracked issue (via the `github-issues` module's `new_issue.sh`, when installed)
-or a registry story, or is deliberately dropped. This is discipline,
-not a gate — "did you capture everything you noticed" is not mechanically
-decidable, so nothing checks it; the value is that scope stays clean and nothing
-is silently lost.
+or a registry story, or is deliberately dropped. A triaged issue gets the
+**normal form** — the bug/finding templates with EARS acceptance criteria, an
+`Origin` naming the item being worked when it surfaced, and a comment on that
+origin issue so the trail runs both ways (module doc, "Discovered work keeps
+the form and the trail"). This is discipline, not a gate — "did you capture
+everything you noticed" is not mechanically decidable, so nothing checks it;
+the value is that scope stays clean and nothing is silently lost.
 
 ## Plans
 
@@ -68,6 +71,15 @@ product-neutral. Both are prose duties judged at the review
 (`review-checklist.md`, Decisions and Product frame), deliberately not gated
 fields: a machine could only check that *some* text is present, which invites
 a ritual "none" — the substance is exactly what the reviewer's questions probe.
+
+## Review reports
+
+`.process-work/reviews/YYYY-MM-DD-<slug>.md` holds the full record of a
+findings-producing review or audit — the prompt, the verdict, and one
+structured `FINDING` line per finding — beside the one-line `REVIEW`
+attestation below, which stays the journal's record. Format, publication to
+GitHub Issues, and the gate binding are in the `github-issues` module doc;
+without that module the reports are simply working memory.
 
 ## Review attestations
 

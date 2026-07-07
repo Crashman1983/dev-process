@@ -56,6 +56,18 @@ FINDING sev=blocker|major|minor|nit action=fix|accept|follow-up issue=#N|- <titl
 accepted, reason in prose; `follow-up` = becomes tracked work — **must** carry
 an issue ref. Fenced examples are quotations and ignored (house rule).
 
+### 1b. Discovered work keeps the form and the trail (user addendum)
+
+Follow-up findings and bugs discovered mid-work are **normal work in the
+normal form**: a new `finding.md` issue template (EARS ACs + an `Origin`
+section naming the source report/finding and the item being worked), and the
+`bug.md` template gains the same `Origin` section. Convention (documented,
+claim-workflow posture, not gatable): when an origin issue exists, comment on
+it referencing the new issue — the trail runs both ways. The inbox-triage doc
+routes through the same door. The gate keeps enforcing what it can see
+offline: a `follow-up` finding must carry *some* issue ref; the form of that
+issue lives on GitHub and stays convention + template.
+
 ### 2. Publication tool — `publish_review.sh` (github-issues module, network, best-effort)
 
 `bash scripts/process/publish_review.sh <report.md> [--campaign]` creates the

@@ -443,3 +443,271 @@ def test_docdrift_resolves_module_doc_refs(render, tmp_path):
         capture_output=True, text=True,
     )
     assert r.returncode == 0, r.stdout  # module-doc refs resolve; feature_registry off
+
+
+# --- review/audit reports (SP32) ---
+
+def _report(out: Path, name: str, body: str):
+    d = out / ".process-work" / "reviews"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / name).write_text(body, encoding="utf-8")
+
+
+VALID_REPORT = (
+    "review: sp-test\n"
+    "work: #42\n"
+    "issue: #57\n\n"
+    "## Prompt\n\nthe prompt\n\n"
+    "## Result\n\npass\n\n"
+    "## Findings\n\n"
+    "FINDING sev=minor action=fix issue=- tightened a message\n"
+)
+
+
+def test_no_reports_dir_is_silent(render, tmp_path):
+    # binding is opt-in by artifact existence — no perpetual "no audits yet" noise
+    out = _render(render, tmp_path)
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+    assert "review" not in r.stdout.lower() or "reviews/" not in r.stdout
+
+
+def test_valid_published_report_ok(render, tmp_path):
+    out = _render(render, tmp_path)
+    _report(out, "2026-07-05-sp-test.md", VALID_REPORT)
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+
+
+def test_report_without_header_hard(render, tmp_path):
+    out = _render(render, tmp_path)
+    _report(out, "2026-07-05-x.md", "# Just some notes\n\nno header here\n")
+    r = _run(out)
+    assert r.returncode == 1
+    assert "no 'review:' or 'audit:' header" in r.stdout
+
+
+def test_unpublished_report_without_waiver_hard(render, tmp_path):
+    out = _render(render, tmp_path)
+    _report(out, "2026-07-05-x.md", "review: x\nwork: #1\n\n## Result\n\npass\n")
+    r = _run(out)
+    assert r.returncode == 1
+    assert "invisible review" in r.stdout
+
+
+def test_publish_waived_clears(render, tmp_path):
+    out = _render(render, tmp_path)
+    _report(out, "2026-07-05-x.md",
+            "review: x\nwork: #1\npublish-waived: offline repo, no issue tracker\n\n"
+            "## Result\n\npass\n")
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+
+
+def test_report_malformed_issue_ref_hard(render, tmp_path):
+    out = _render(render, tmp_path)
+    _report(out, "2026-07-05-x.md", "review: x\nissue: 57\n\n## Result\n\npass\n")
+    r = _run(out)
+    assert r.returncode == 1
+    assert "malformed issue ref" in r.stdout
+
+
+def test_followup_finding_without_issue_hard(render, tmp_path):
+    out = _render(render, tmp_path)
+    _report(out, "2026-07-05-x.md", VALID_REPORT +
+            "FINDING sev=major action=follow-up issue=- needs work later\n")
+    r = _run(out)
+    assert r.returncode == 1
+    assert "follow-up finding without an issue" in r.stdout
+
+
+def test_followup_finding_with_issue_ok(render, tmp_path):
+    out = _render(render, tmp_path)
+    _report(out, "2026-07-05-x.md", VALID_REPORT +
+            "FINDING sev=major action=follow-up issue=#61 tracked follow-up\n")
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+
+
+def test_malformed_finding_sev_hard(render, tmp_path):
+    out = _render(render, tmp_path)
+    _report(out, "2026-07-05-x.md", VALID_REPORT +
+            "FINDING sev=huge action=fix issue=- bad severity\n")
+    r = _run(out)
+    assert r.returncode == 1
+    assert "malformed FINDING" in r.stdout
+
+
+def test_finding_without_title_hard(render, tmp_path):
+    out = _render(render, tmp_path)
+    _report(out, "2026-07-05-x.md", VALID_REPORT +
+            "FINDING sev=minor action=fix issue=-\n")
+    r = _run(out)
+    assert r.returncode == 1
+    assert "no title" in r.stdout
+
+
+def test_prose_starting_with_finding_ignored(render, tmp_path):
+    # the telemetry GRADE lesson applied: first token after FINDING must be
+    # key=value, else it is prose
+    out = _render(render, tmp_path)
+    _report(out, "2026-07-05-x.md", VALID_REPORT +
+            "\nFINDING one was bad, severity=high overall.\n")
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+
+
+def test_fenced_finding_ignored(render, tmp_path):
+    out = _render(render, tmp_path)
+    _report(out, "2026-07-05-x.md", VALID_REPORT +
+            "\n```\nFINDING sev=bogus action=nope issue=- quoted example\n```\n"
+            "\n~~~\nFINDING sev=bogus action=nope issue=- tilde quoted\n~~~\n")
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+
+
+def test_blocker_accepted_is_soft_note(render, tmp_path):
+    out = _render(render, tmp_path)
+    _report(out, "2026-07-05-x.md", VALID_REPORT +
+            "FINDING sev=blocker action=accept issue=- accepted with cause\n")
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+    assert "blocker finding consciously accepted" in r.stdout
+
+
+def test_campaign_published_without_parent_hard(render, tmp_path):
+    out = _render(render, tmp_path)
+    _report(out, "2026-07-05-x.md",
+            "review: x\ncampaign: round-1\nissue: #57\n\n## Result\n\npass\n")
+    r = _run(out)
+    assert r.returncode == 1
+    assert "campaign" in r.stdout and "campaign-issue" in r.stdout
+
+
+def test_campaign_split_across_parents_hard(render, tmp_path):
+    out = _render(render, tmp_path)
+    _report(out, "2026-07-05-a.md",
+            "review: a\ncampaign: round-1\nissue: #57\ncampaign-issue: #50\n\n## Result\n\npass\n")
+    _report(out, "2026-07-05-b.md",
+            "review: b\ncampaign: round-1\nissue: #58\ncampaign-issue: #51\n\n## Result\n\npass\n")
+    r = _run(out)
+    assert r.returncode == 1
+    assert "split across parent issues" in r.stdout
+
+
+def test_campaign_consistent_ok(render, tmp_path):
+    out = _render(render, tmp_path)
+    _report(out, "2026-07-05-a.md",
+            "review: a\ncampaign: round-1\nissue: #57\ncampaign-issue: #50\n\n## Result\n\npass\n")
+    _report(out, "2026-07-05-b.md",
+            "audit: b\ncampaign: round-1\nissue: #58\ncampaign-issue: #50\n\n## Result\n\npass\n")
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+
+
+def test_report_non_utf8_hard(render, tmp_path):
+    out = _render(render, tmp_path)
+    d = out / ".process-work" / "reviews"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "2026-07-05-x.md").write_bytes(b"review: x\n\xff\xfe\n")
+    r = _run(out)
+    assert r.returncode == 1
+    assert "not valid UTF-8" in r.stdout
+
+
+def test_publish_tool_present_when_on_absent_when_off(render, tmp_path):
+    on = _render(render, tmp_path / "on")
+    assert (on / "scripts/process/publish_review.sh").is_file()
+    off = render(tmp_path / "off", {"project_name": "d"})
+    assert not (off / "scripts/process/publish_review.sh").exists()
+
+
+def test_publish_tool_and_doc_neutral(render, tmp_path):
+    out = _render(render, tmp_path)
+    for rel in ["scripts/process/publish_review.sh",
+                "docs/process/modules/github-issues.md"]:
+        text = (out / rel).read_text()
+        for k in KENNI:
+            assert k not in text, f"{k} leaked in {rel}"
+
+
+def test_module_doc_names_review_visibility(render, tmp_path):
+    out = _render(render, tmp_path)
+    t = (out / "docs/process/modules/github-issues.md").read_text()
+    assert "## Review and audit visibility" in t
+    assert "FINDING sev=" in t
+    assert "publish_review.sh" in t
+    assert "campaign" in t
+
+
+def test_docs_wire_report_duty(render, tmp_path):
+    out = _render(render, tmp_path)
+    vi = (out / "docs/process/verification-independence.md").read_text()
+    assert "report file" in vi and ".process-work/reviews/" in vi
+    wf = (out / "docs/process/workflow.md").read_text()
+    review = wf.split("## Review")[1].split("## Quick")[0]
+    assert ".process-work/reviews/" in review
+    jsp = (out / "docs/process/journal-state-plans.md").read_text()
+    assert "## Review reports" in jsp
+
+
+# --- discovered work: form + trail (SP32 addendum) ---
+
+def test_finding_template_present_with_ears_and_origin(render, tmp_path):
+    out = _render(render, tmp_path)
+    p = out / ".github/ISSUE_TEMPLATE/finding.md"
+    assert p.is_file()
+    t = p.read_text()
+    assert "## Origin" in t
+    assert "Discovered during" in t
+    assert "EARS" in t and "shall" in t          # the normal form, not prose
+    assert "comment on the origin issue" in t.lower() or "comment on" in t.lower()
+
+
+def test_bug_template_gains_origin_section(render, tmp_path):
+    out = _render(render, tmp_path)
+    t = (out / ".github/ISSUE_TEMPLATE/bug.md").read_text()
+    assert "## Origin" in t
+    assert "Discovered during" in t
+    assert "EARS" in t                            # form kept
+
+
+def test_finding_template_seedable(render, tmp_path):
+    # new_issue.sh must serve the new template like the others
+    out = _render(render, tmp_path)
+    r = subprocess.run(
+        ["bash", str(out / "scripts/process/new_issue.sh"), "finding"],
+        cwd=out, capture_output=True, text=True,
+    )
+    assert r.returncode == 0, r.stderr
+    body = Path(r.stdout.strip()).read_text()
+    assert "## Origin" in body and "labels:" not in body
+
+
+def test_finding_template_neutral(render, tmp_path):
+    out = _render(render, tmp_path)
+    t = (out / ".github/ISSUE_TEMPLATE/finding.md").read_text()
+    for k in KENNI:
+        assert k not in t, f"{k} leaked in finding.md"
+
+
+def test_module_doc_names_discovered_work_form(render, tmp_path):
+    out = _render(render, tmp_path)
+    t = (out / "docs/process/modules/github-issues.md").read_text()
+    assert "## Discovered work keeps the form and the trail" in t
+    assert "normal work and gets the normal form" in t
+    assert "comment on" in t and "Origin" in t
+
+
+def test_inbox_doc_routes_through_templates(render, tmp_path):
+    out = _render(render, tmp_path)
+    t = (out / "docs/process/journal-state-plans.md").read_text()
+    assert "normal form" in t
+    assert "Origin" in t
+
+
+def test_publish_tool_hints_finding_form(render, tmp_path):
+    out = _render(render, tmp_path)
+    t = (out / "scripts/process/publish_review.sh").read_text()
+    assert "new_issue.sh finding" in t
+    assert "comment on the origin issue" in t

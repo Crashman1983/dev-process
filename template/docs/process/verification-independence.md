@@ -61,6 +61,15 @@ model family was available — I did not fake cross-model". Grammar and fields
 are documented with the other working-memory records in
 `journal-state-plans.md`.
 
+The `REVIEW` line is the attestation; it is deliberately one line. Tier 3
+reviews and audit campaigns additionally write a **report file**
+(`.process-work/reviews/`) carrying the full record — the prompt the reviewer
+ran with, the verdict, and each finding with its disposition; Tier 1–2 reports
+are encouraged where findings are worth tracking. When the `github-issues`
+module is on, reports are published as issues (campaigns bundled under a
+parent) and the gate binds them: unpublished-without-waiver and untracked
+follow-up findings fail (see the module doc).
+
 ## Enforcement
 
 The `review` gate (`scripts/process/check_review.py`, core and always-on)
