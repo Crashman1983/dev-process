@@ -74,7 +74,12 @@ Ausgeliefert als [copier](https://copier.readthedocs.io)-Template. Adapter für
 > law-aidev-Zweig, Issue #22: pre-push prüft die **gepushten Commits** statt des
 > Working Tree (Wegwerf-Worktree), neues opt-in **`sbom`**-Modul mit
 > CycloneDX-Lizenz-Attestierung, feature-registry-Advisory für unter-granulare
-> Akzeptanz) ausgeliefert, `v1.22.0`.
+> Akzeptanz) ausgeliefert, `v1.22.0`. SP37 (Backport-Batch 2, Issue #22:
+> read-only Koordinations-Dashboards `who_is_working.py` (Nebenläufigkeits-
+> Preflight) und `attention.py` (wo ein Mensch hinschauen sollte — inkl.
+> Issue-Hygiene) unter `github-issues`, Parallel-agents-Workflow-Abschnitt; die
+> label-mutierenden Lifecycle-Tools und `status:hold`/`awaiting-ack`-Overlays
+> bewusst ausgelassen) ausgeliefert, `v1.23.0`.
 > **Überblick für Einsteiger:innen & Management** (wie es funktioniert, warum,
 > welcher Mehrwert): [`docs/CAPABILITIES.md`](docs/CAPABILITIES.md).
 > Setup: [`BOOTSTRAP.md`](BOOTSTRAP.md) · Systemumgebung:
