@@ -27,7 +27,7 @@ _CROSS = re.compile(r"^([\w.-]+/[\w.-]+)#(\d+)$")
 _URL = re.compile(r"^https://github\.com/([\w.-]+/[\w.-]+)/issues/(\d+)$")
 
 PLANS_DIR = ".process-work/plans"  # active plans only; archive/ is finished work
-REVIEWS_DIR = ".process-work/reviews"  # review/audit reports (SP32)
+REVIEWS_DIR = ".process-work/reviews"  # review/audit reports
 # tolerant of a leading list bullet and **bold**/_emphasis_ on the key, and of a
 # trailing annotation after the value — the canonical form is a bare
 # `tier: N` / `issue: <ref>` line, but a plan is hand-written Markdown, and a
@@ -133,7 +133,7 @@ def _check_plans(root: Path) -> tuple[list[str], list[str]]:
     return hard, []
 
 
-# --- review/audit reports (SP32): visibility binding, offline ---------------
+# --- review/audit reports: visibility binding, offline ----------------------
 # header keys on a report file in .process-work/reviews/
 _RPT_KIND = re.compile(_LEAD + r"(review|audit)[*_]*\s*:\s*\S", re.IGNORECASE | re.MULTILINE)
 _RPT_ISSUE = re.compile(_LEAD + r"issue[*_]*\s*:\s*(\S+)", re.IGNORECASE | re.MULTILINE)
@@ -326,7 +326,7 @@ def check(root: Path) -> tuple[list[str], list[str]]:
         if not issue:
             # a finished story must be traceable — hard; an in-progress one may
             # still be filing its issue (issue-before-code is enforced on the
-            # plan in SP20), so it stays a soft note
+            # plan, not here), so it stays a soft note
             if status == "done" and isinstance(data.get("issue_waived"), str) \
                     and data["issue_waived"].strip():
                 # tracker-less escape: a done story may carry an

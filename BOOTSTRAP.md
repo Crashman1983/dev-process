@@ -80,7 +80,7 @@ line instead:
     uvx copier copy --defaults \
       --data project_name="<project name>" \
       --data 'harnesses={"copilot": false, "agents_md": true}' \
-      --data 'modules={"doc_drift_gate": false, "arch_onboarding": false, "feature_registry": false, "github_issues": false, "contracts_drift": false, "git_hooks": false, "contract_first": false, "parity": false, "security_floor": false, "sbom": false, "telemetry": false, "arch_docs": false}' \
+      --data 'modules={"doc_drift_gate": false, "arch_onboarding": false, "feature_registry": false, "github_issues": false, "contracts_drift": false, "git_hooks": false, "contract_first": false, "parity": false, "security_floor": false, "sbom": false, "telemetry": false, "arch_docs": false, "github_master": false}' \
       --data 'ci={"github": true, "gitlab": false}' \
       --skip 'CLAUDE.md' --skip 'AGENTS.md' \
       gh:Crashman1983/dev-process .
@@ -132,7 +132,9 @@ yet settled:
    checked artifact → `arch_onboarding`; doc hygiene → `doc_drift_gate`;
    measuring what the process catches and costs → `telemetry`;
    stakeholder-facing architecture docs → `arch_docs`;
-   supply-chain transparency / license compliance → `sbom`.
+   supply-chain transparency / license compliance → `sbom`;
+   a checked GitHub issue/board spine for multi-agent coordination →
+   `github_master`.
 4. Retrofit modules as described under [Later](#later).
 
 If the choice is already known, set it directly at install time.
@@ -157,7 +159,7 @@ Add a module or pull an updated process version — with a clean working tree
 (`git status --porcelain` empty), then:
 
     uvx copier update --defaults \
-      --data 'modules={"doc_drift_gate": true, "arch_onboarding": false, "feature_registry": false, "github_issues": false, "contracts_drift": false, "git_hooks": false, "contract_first": false, "parity": false, "security_floor": false, "sbom": false, "telemetry": false, "arch_docs": false}' \
+      --data 'modules={"doc_drift_gate": true, "arch_onboarding": false, "feature_registry": false, "github_issues": false, "contracts_drift": false, "git_hooks": false, "contract_first": false, "parity": false, "security_floor": false, "sbom": false, "telemetry": false, "arch_docs": false, "github_master": false}' \
       --skip 'CLAUDE.md' --skip 'AGENTS.md'
 
 `--data` expects the **complete** `modules` dictionary with the new values,

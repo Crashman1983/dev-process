@@ -17,9 +17,9 @@ enforces what a language-agnostic CI gate honestly can:
     `verdict=pass` REVIEW nor an explicit `review-waived:` line.
 
 It does NOT verify that the reviewer was truthfully a different agent or model —
-the gate never sees the review runtime. That claim stays *attested*; SP19 only
-makes a weak, absent, or over-claiming attestation *block the merge* rather than
-be weighed by a human. Presence is checked against archived plans (a plan is
+the gate never sees the review runtime. That claim stays *attested*; the gate
+only makes a weak, absent, or over-claiming attestation *block the merge* rather
+than be weighed by a human. Presence is checked against archived plans (a plan is
 archived on merge), so the gate never reds CI mid-development and offers a
 named-exception escape (`review-waived:`) so it enforces without a footgun.
 
