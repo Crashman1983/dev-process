@@ -1,0 +1,17 @@
+{
+  "sbom_paths": ["bom.json", "**/bom.json", "**/*.cdx.json", "sbom/*.json"],
+  "manifest_paths": ["**/package.json", "**/pom.xml", "**/requirements.txt", "**/build.gradle", "**/build.gradle.kts", "**/go.mod"],
+  "allowed_licenses": [
+    "Apache-2.0",
+    "MIT",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "0BSD",
+    "Unlicense",
+    "CC0-1.0",
+    "EPL-2.0",
+    "MPL-2.0"
+  ],
+  "exclude": []
+}

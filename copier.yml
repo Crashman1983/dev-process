@@ -26,6 +26,7 @@ modules:
     contract_first: false
     parity: false
     security_floor: false
+    sbom: false
     telemetry: false
     arch_docs: false
     github_master: false

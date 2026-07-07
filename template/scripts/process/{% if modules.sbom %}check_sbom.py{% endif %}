@@ -1,0 +1,202 @@
+#!/usr/bin/env python3
+"""sbom gate: a project must carry a Software Bill of Materials (CycloneDX JSON)
+that attests a license for every third-party component, and only licenses the
+project allows.
+
+The policy lives in docs/process/sbom-policy.json:
+  - `sbom_paths`     : globs locating the CycloneDX file(s) (default: common names).
+  - `allowed_licenses`: SPDX ids/expressions the project permits (optional — when
+                        absent, licenses are only required to be *present*).
+  - `manifest_paths` : dependency manifests, for an advisory coverage check.
+  - `exclude`        : component names (globs) exempt from the checks.
+
+Enforcement (mirrors the other gates — advisory when data is absent, hard on a
+real violation):
+  - no policy file            -> advisory note, pass (the DoD is the backstop).
+  - broken policy JSON        -> hard fail.
+  - policy present, no SBOM   -> advisory note, pass (generate one — see the doc).
+  - library component with no license          -> hard fail (attestation missing).
+  - library license outside `allowed_licenses` -> hard fail.
+  - manifest dependency absent from the SBOM   -> advisory note (best-effort).
+
+Enumeration needs git; if git is unavailable the scan is skipped with a note,
+never faked as a pass. Bypass: SKIP_SBOM=1. Python stdlib only.
+"""
+from __future__ import annotations
+
+import fnmatch
+import json
+import os
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+CONFIG = "docs/process/sbom-policy.json"
+DEFAULT_SBOM_PATHS = ["bom.json", "**/bom.json", "**/*.cdx.json", "sbom/*.json"]
+DEFAULT_MANIFESTS = ["**/package.json", "**/pom.xml", "**/requirements.txt",
+                     "**/build.gradle", "**/build.gradle.kts", "**/go.mod"]
+
+
+def _tracked_files(root: Path) -> list[str] | None:
+    try:
+        r = subprocess.run(["git", "-C", str(root), "ls-files", "-z"],
+                           capture_output=True, timeout=30)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if r.returncode != 0:
+        return None
+    return [p for p in r.stdout.decode("utf-8", "replace").split("\0") if p]
+
+
+def _matches_any(rel: str, globs: list[str]) -> bool:
+    base = rel.rsplit("/", 1)[-1]
+    return any(fnmatch.fnmatch(rel, g) or fnmatch.fnmatch(base, g) for g in globs)
+
+
+def _load_config(root: Path) -> tuple[dict | None, list[str]]:
+    p = root / CONFIG
+    if not p.is_file():
+        return None, []
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        return None, [f"{CONFIG}: invalid JSON: {exc}"]
+    except (UnicodeDecodeError, OSError) as exc:
+        return None, [f"{CONFIG}: could not read: {exc}"]
+    if not isinstance(data, dict):
+        return None, [f"{CONFIG}: must be a JSON object"]
+    return data, []
+
+
+def _str_list(cfg: dict, key: str, default: list[str]) -> tuple[list[str], list[str]]:
+    raw = cfg.get(key)
+    if raw is None:
+        return default, []
+    if isinstance(raw, list) and all(isinstance(x, str) for x in raw):
+        return raw, []
+    return default, [f"{CONFIG}: '{key}' must be a list of strings"]
+
+
+def _component_licenses(comp: dict) -> list[str]:
+    """SPDX ids / names / expressions attested for one CycloneDX component."""
+    out: list[str] = []
+    for entry in comp.get("licenses") or []:
+        if not isinstance(entry, dict):
+            continue
+        if isinstance(entry.get("expression"), str) and entry["expression"].strip():
+            out.append(entry["expression"].strip())
+        lic = entry.get("license")
+        if isinstance(lic, dict):
+            for k in ("id", "name"):
+                if isinstance(lic.get(k), str) and lic[k].strip():
+                    out.append(lic[k].strip())
+                    break
+    return out
+
+
+def check(root: Path) -> tuple[list[str], list[str]]:
+    cfg, errs = _load_config(root)
+    if errs:
+        return errs, []
+    if cfg is None:
+        return [], [f"no SBOM policy yet ({CONFIG} absent)"]
+
+    hard: list[str] = []
+    sbom_paths, e1 = _str_list(cfg, "sbom_paths", DEFAULT_SBOM_PATHS)
+    manifests, e2 = _str_list(cfg, "manifest_paths", DEFAULT_MANIFESTS)
+    exclude, e3 = _str_list(cfg, "exclude", [])
+    allowed_raw = cfg.get("allowed_licenses")
+    if allowed_raw is not None and not (
+            isinstance(allowed_raw, list) and all(isinstance(x, str) for x in allowed_raw)):
+        hard.append(f"{CONFIG}: 'allowed_licenses' must be a list of strings")
+    hard += e1 + e2 + e3
+    if hard:
+        return hard, []
+    allowed = {x.strip() for x in (allowed_raw or [])}
+
+    files = _tracked_files(root)
+    if files is None:
+        return [], ["could not list tracked files (git unavailable); scan skipped"]
+    sbom_files = [f for f in files if _matches_any(f, sbom_paths)]
+    if not sbom_files:
+        return [], [f"no SBOM found ({', '.join(sbom_paths)}) — third-party "
+                    "inventory unverified; generate a CycloneDX SBOM"]
+
+    soft: list[str] = []
+    seen_components: set[str] = set()
+    for rel in sbom_files:
+        try:
+            doc = json.loads((root / rel).read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError, OSError) as exc:
+            hard.append(f"{rel}: not a readable CycloneDX JSON: {exc}")
+            continue
+        for comp in doc.get("components") or []:
+            if not isinstance(comp, dict):
+                continue
+            if comp.get("type") == "application":
+                continue  # the project's own root component, not a third party
+            name = comp.get("name") or "<unnamed>"
+            if exclude and _matches_any(name, exclude):
+                continue
+            seen_components.add(str(name).lower())
+            licenses = _component_licenses(comp)
+            if not licenses:
+                hard.append(f"{rel}: component '{name}' has no license attestation")
+                continue
+            if allowed and not any(lic in allowed for lic in licenses):
+                hard.append(f"{rel}: component '{name}' license "
+                            f"{licenses} not in allowed_licenses")
+
+    manifest_files = [f for f in files if _matches_any(f, manifests)]
+    missing = _coverage_gaps(root, manifest_files, seen_components)
+    if missing:
+        shown = ", ".join(sorted(missing)[:10])
+        extra = f" (+{len(missing) - 10} more)" if len(missing) > 10 else ""
+        soft.append(f"{len(missing)} manifest dependency(ies) not found in the SBOM: "
+                    f"{shown}{extra}")
+    return hard, soft
+
+
+def _coverage_gaps(root: Path, manifests: list[str], seen: set[str]) -> set[str]:
+    """Best-effort: dependency names in package.json / pom.xml absent from the SBOM."""
+    deps: set[str] = set()
+    for rel in manifests:
+        try:
+            text = (root / rel).read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue
+        if rel.endswith("package.json"):
+            try:
+                pkg = json.loads(text)
+            except json.JSONDecodeError:
+                continue
+            for section in ("dependencies", "devDependencies"):
+                deps |= set((pkg.get(section) or {}).keys())
+        elif rel.endswith("pom.xml"):
+            deps |= set(re.findall(r"<artifactId>\s*([^<\s]+)\s*</artifactId>", text))
+    return {d for d in deps if d and d.lower() not in seen
+            and not any(d.lower() in c or c in d.lower() for c in seen)}
+
+
+def main() -> int:
+    if os.environ.get("SKIP_SBOM") == "1":
+        print("sbom: skipped (SKIP_SBOM=1)")
+        return 0
+    root = Path(sys.argv[1] if len(sys.argv) > 1 else ".").resolve()
+    hard, soft = check(root)
+    for note in soft:
+        print(f"sbom: note: {note}")
+    if hard:
+        print("sbom: FAILED:")
+        for h in hard:
+            print(f"  - {h}")
+        print("  → attest licenses / update the SBOM, or bypass with SKIP_SBOM=1 "
+              "(and say why in the commit).")
+        return 1
+    print("sbom: OK")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
