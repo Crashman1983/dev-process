@@ -34,6 +34,17 @@ def test_registered_in_gate_runner(render, tmp_path):
     assert '"sbom": ("sbom"' in (out / "scripts/process/gate_runner.py").read_text()
 
 
+def test_fresh_render_gates_green_with_doc_drift(render, tmp_path):
+    # sbom.md must not reference a concrete not-yet-created path that the
+    # doc-drift gate reads as a broken reference — a fresh render with both
+    # modules on must pass gate_runner (exit 0), not fail before any work.
+    out = render(tmp_path, {"project_name": "d",
+                            "modules": {"sbom": True, "doc_drift_gate": True}})
+    r = subprocess.run([sys.executable, str(out / "scripts/process/gate_runner.py")],
+                       cwd=out, capture_output=True, text=True)
+    assert r.returncode == 0, r.stdout
+
+
 def _git_init(root: Path):
     for a in (["init"], ["add", "-A"], ["-c", "user.email=a@b.c", "-c", "user.name=t",
                                         "commit", "-m", "x", "--no-gpg-sign"]):
@@ -52,10 +63,13 @@ def _policy(work: Path, **over):
     (work / "docs/process/sbom-policy.json").write_text(json.dumps(pol))
 
 
-def _sbom(work: Path, components):
+def _sbom(work: Path, components, root_name=None):
     (work / "sbom").mkdir(parents=True, exist_ok=True)
-    (work / "sbom/bom.json").write_text(json.dumps(
-        {"bomFormat": "CycloneDX", "components": components}))
+    doc = {"bomFormat": "CycloneDX", "components": components}
+    if root_name is not None:
+        doc["metadata"] = {"component": {"type": "application", "name": root_name,
+                                         "bom-ref": root_name}}
+    (work / "sbom/bom.json").write_text(json.dumps(doc))
 
 
 def test_no_policy_is_advisory(render, tmp_path):
@@ -76,14 +90,13 @@ def test_missing_and_disallowed_license_fail(render, tmp_path):
         {"type": "library", "name": "ok-lib", "licenses": [{"license": {"id": "MIT"}}]},
         {"type": "library", "name": "no-lic", "licenses": []},
         {"type": "library", "name": "bad-lic", "licenses": [{"license": {"id": "GPL-3.0"}}]},
-        {"type": "application", "name": "self"},  # exempt
-    ])
+    ], root_name="my-app")  # the project's own root, via metadata.component
     _git_init(work)
     hard, _ = _run_check(out, work)
     joined = " ".join(hard)
     assert "no-lic" in joined and "no license attestation" in joined
     assert "bad-lic" in joined and "not in allowed_licenses" in joined
-    assert "self" not in joined  # application component skipped
+    assert "my-app" not in joined  # root component (metadata.component) skipped
 
 
 def test_all_attested_and_allowed_passes(render, tmp_path):
@@ -98,3 +111,65 @@ def test_all_attested_and_allowed_passes(render, tmp_path):
     _git_init(work)
     hard, _ = _run_check(out, work)
     assert hard == []
+
+
+def test_application_typed_non_root_is_enforced(render, tmp_path):
+    # a third-party component typed "application" must NOT dodge the check; only
+    # the SBOM's own root (metadata.component) is exempt.
+    out = _render(render, tmp_path, True)
+    work = tmp_path / "wapp"
+    work.mkdir()
+    _policy(work)
+    _sbom(work, [
+        {"type": "application", "name": "vendored-gpl-tool",
+         "licenses": [{"license": {"id": "GPL-3.0-only"}}]},
+        {"type": "application", "name": "unattested-tool", "licenses": []},
+    ], root_name="my-app")
+    _git_init(work)
+    hard, _ = _run_check(out, work)
+    joined = " ".join(hard)
+    assert "vendored-gpl-tool" in joined and "not in allowed_licenses" in joined
+    assert "unattested-tool" in joined and "no license attestation" in joined
+
+
+def test_spdx_expression_or_and_and_multi_entry(render, tmp_path):
+    out = _render(render, tmp_path, True)
+    work = tmp_path / "wexpr"
+    work.mkdir()
+    _policy(work)  # allowed: MIT, Apache-2.0
+    _sbom(work, [
+        # OR with one allowed operand -> allowed
+        {"type": "library", "name": "dual-or", "licenses": [{"expression": "MIT OR GPL-3.0-only"}]},
+        # OR of two allowed, order/case irrelevant -> allowed
+        {"type": "library", "name": "dual-ok", "licenses": [{"expression": "Apache-2.0 or MIT"}]},
+        # AND with a forbidden operand -> rejected
+        {"type": "library", "name": "conj-bad", "licenses": [{"expression": "MIT AND GPL-3.0-only"}]},
+        # multiple separate entries = conjunction; one forbidden -> rejected
+        {"type": "library", "name": "multi-bad",
+         "licenses": [{"license": {"id": "MIT"}}, {"license": {"id": "GPL-3.0-only"}}]},
+    ])
+    _git_init(work)
+    hard, _ = _run_check(out, work)
+    joined = " ".join(hard)
+    assert "dual-or" not in joined      # OR: one allowed operand suffices
+    assert "dual-ok" not in joined
+    assert "conj-bad" in joined         # AND: forbidden operand blocks
+    assert "multi-bad" in joined        # multi-entry conjunction blocks
+
+
+def test_coverage_root_manifest_and_exact_match(render, tmp_path):
+    out = _render(render, tmp_path, True)
+    work = tmp_path / "wcov"
+    work.mkdir()
+    _policy(work)
+    _sbom(work, [
+        {"type": "library", "name": "leftpad-fs", "licenses": [{"license": {"id": "MIT"}}]},
+    ])
+    # root-level package.json (the common layout) must be scanned
+    (work / "package.json").write_text(json.dumps({"dependencies": {"fs": "^1", "react": "^18"}}))
+    _git_init(work)
+    hard, soft = _run_check(out, work)
+    assert hard == []
+    note = " ".join(soft)
+    # 'fs' is a distinct dep absent from the SBOM — not "covered" by substring of leftpad-fs
+    assert "fs" in note and "react" in note

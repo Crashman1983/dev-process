@@ -34,8 +34,14 @@ from pathlib import Path
 
 CONFIG = "docs/process/sbom-policy.json"
 DEFAULT_SBOM_PATHS = ["bom.json", "**/bom.json", "**/*.cdx.json", "sbom/*.json"]
-DEFAULT_MANIFESTS = ["**/package.json", "**/pom.xml", "**/requirements.txt",
-                     "**/build.gradle", "**/build.gradle.kts", "**/go.mod"]
+# Each manifest kind is listed both bare (root-level) and under **/ (nested) —
+# fnmatch("package.json", "**/package.json") is False, so a root manifest needs
+# its own bare entry or the coverage check silently no-ops on the common layout.
+DEFAULT_MANIFESTS = ["package.json", "**/package.json", "pom.xml", "**/pom.xml",
+                     "requirements.txt", "**/requirements.txt",
+                     "build.gradle", "**/build.gradle",
+                     "build.gradle.kts", "**/build.gradle.kts",
+                     "go.mod", "**/go.mod"]
 
 
 def _tracked_files(root: Path) -> list[str] | None:
@@ -79,13 +85,17 @@ def _str_list(cfg: dict, key: str, default: list[str]) -> tuple[list[str], list[
 
 
 def _component_licenses(comp: dict) -> list[str]:
-    """SPDX ids / names / expressions attested for one CycloneDX component."""
+    """The license terms attested for one CycloneDX component, each as its raw
+    string (an SPDX id/name, or a full expression). Order preserved for display.
+    A component with several `licenses[]` entries is bound by *all* of them (a
+    conjunction); a disjunction is expressed inside a single `expression`."""
     out: list[str] = []
     for entry in comp.get("licenses") or []:
         if not isinstance(entry, dict):
             continue
         if isinstance(entry.get("expression"), str) and entry["expression"].strip():
             out.append(entry["expression"].strip())
+            continue
         lic = entry.get("license")
         if isinstance(lic, dict):
             for k in ("id", "name"):
@@ -93,6 +103,48 @@ def _component_licenses(comp: dict) -> list[str]:
                     out.append(lic[k].strip())
                     break
     return out
+
+
+def _expr_allowed(expr: str, allowed: set[str]) -> bool:
+    """Evaluate a simple SPDX license expression against the allow-list:
+    `A OR B` passes if any operand is allowed; `A AND B` requires all; a bare id
+    must be a member. Parentheses and `WITH` exceptions are flattened
+    conservatively — an unparsed token simply falls back to membership. Not a
+    full SPDX parser, but it covers the dual-license forms real SBOMs carry."""
+    e = expr.strip().strip("()").strip()
+    # AND binds the component to every operand; OR offers a choice. Handle the
+    # weaker operator (OR) first so `A AND B OR C` splits on OR into (A AND B), C.
+    upper = e.upper()
+    if " OR " in upper:
+        parts = re.split(r"\s+OR\s+", e, flags=re.I)
+        return any(_expr_allowed(p, allowed) for p in parts)
+    if " AND " in upper:
+        parts = re.split(r"\s+AND\s+", e, flags=re.I)
+        return all(_expr_allowed(p, allowed) for p in parts)
+    token = e.split(" WITH ", 1)[0].strip() if " WITH " in upper else e
+    return token in allowed
+
+
+def _licenses_ok(terms: list[str], allowed: set[str]) -> bool:
+    """A component satisfies the policy when *every* attested term is allowed
+    (conjunction across `licenses[]` entries); each term may itself be an SPDX
+    expression with its own OR/AND. Empty allow-list means presence-only, handled
+    by the caller."""
+    return all(_expr_allowed(t, allowed) for t in terms)
+
+
+def _root_identity(doc: dict) -> tuple[str | None, str | None]:
+    """The (bom-ref, name) of the SBOM's own root component from
+    metadata.component — the one entry that is the project itself, not a
+    dependency. Either may be None."""
+    meta = doc.get("metadata")
+    comp = meta.get("component") if isinstance(meta, dict) else None
+    if not isinstance(comp, dict):
+        return None, None
+    ref = comp.get("bom-ref")
+    name = comp.get("name")
+    return (ref if isinstance(ref, str) else None,
+            name if isinstance(name, str) else None)
 
 
 def check(root: Path) -> tuple[list[str], list[str]]:
@@ -131,12 +183,18 @@ def check(root: Path) -> tuple[list[str], list[str]]:
         except (json.JSONDecodeError, UnicodeDecodeError, OSError) as exc:
             hard.append(f"{rel}: not a readable CycloneDX JSON: {exc}")
             continue
+        # The project's own root component lives in metadata.component, NOT in
+        # components[] — so identify it there and skip only that one, rather than
+        # exempting every component that self-declares type "application" (any
+        # third-party app could carry that type and thereby dodge the check).
+        root_ref, root_name = _root_identity(doc)
         for comp in doc.get("components") or []:
             if not isinstance(comp, dict):
                 continue
-            if comp.get("type") == "application":
-                continue  # the project's own root component, not a third party
+            ref = comp.get("bom-ref")
             name = comp.get("name") or "<unnamed>"
+            if (root_ref and ref == root_ref) or (not ref and root_name and name == root_name):
+                continue  # the SBOM's own root component, not a third party
             if exclude and _matches_any(name, exclude):
                 continue
             seen_components.add(str(name).lower())
@@ -144,7 +202,7 @@ def check(root: Path) -> tuple[list[str], list[str]]:
             if not licenses:
                 hard.append(f"{rel}: component '{name}' has no license attestation")
                 continue
-            if allowed and not any(lic in allowed for lic in licenses):
+            if allowed and not _licenses_ok(licenses, allowed):
                 hard.append(f"{rel}: component '{name}' license "
                             f"{licenses} not in allowed_licenses")
 
@@ -175,8 +233,15 @@ def _coverage_gaps(root: Path, manifests: list[str], seen: set[str]) -> set[str]
                 deps |= set((pkg.get(section) or {}).keys())
         elif rel.endswith("pom.xml"):
             deps |= set(re.findall(r"<artifactId>\s*([^<\s]+)\s*</artifactId>", text))
-    return {d for d in deps if d and d.lower() not in seen
-            and not any(d.lower() in c or c in d.lower() for c in seen)}
+
+    def _norm(n: str) -> str:
+        # npm scope (@ns/pkg) — the SBOM usually lists the bare package name.
+        return n.rsplit("/", 1)[-1].lower() if n.startswith("@") else n.lower()
+
+    seen_norm = {_norm(c) for c in seen}
+    # Exact normalized-name comparison: substring matching wrongly marked a short
+    # dep name (e.g. `fs`) "covered" by any component whose name contained it.
+    return {d for d in deps if d and _norm(d) not in seen_norm}
 
 
 def main() -> int:

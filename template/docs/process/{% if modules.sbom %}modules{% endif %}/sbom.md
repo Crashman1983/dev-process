@@ -13,12 +13,18 @@ of "done" — most products shipping external dependencies.
 
 ## Policy
 
-Copy the shipped example to `docs/process/sbom-policy.json` and adjust:
+Copy the shipped `sbom-policy.example.json` to a policy file named
+`sbom-policy.json` in the same folder, and adjust:
 
 - **`sbom_paths`** — globs locating the CycloneDX file(s). Default covers common
   names (`bom.json`, `**/*.cdx.json`, `sbom/*.json`).
-- **`allowed_licenses`** — SPDX ids/expressions the project permits. Omit to only
-  require that a license is *present* (no allow-list).
+- **`allowed_licenses`** — SPDX ids the project permits. A component's SPDX
+  **expression** is evaluated against them (`A OR B` passes if either is allowed;
+  `A AND B` requires both), and a component bound by several separate license
+  entries must have every one allowed. Licenses attested by full **name**
+  (`MIT License`) rather than SPDX id are matched verbatim — allow-list the id
+  your SBOM actually emits. Omit `allowed_licenses` to only require that a license
+  is *present* (no allow-list).
 - **`manifest_paths`** — dependency manifests (`package.json`, `pom.xml`, …) for an
   advisory coverage check.
 - **`exclude`** — component-name globs exempt from the checks (e.g. internal
