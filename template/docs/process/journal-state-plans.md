@@ -49,7 +49,7 @@ from the brainstorm phase live beside plans as `design-<topic>.md`.
 
 A plan carries one machine-readable line, `tier: N`, recording the derived risk
 tier (`risk-tiers.md`). It is the single tier source the `review` gate keys on:
-once the plan is archived (i.e. the work merged), a declared `tier: 3` or higher
+once the plan is archived (i.e. the work merged), a declared `tier: 2` or higher
 must have a clearing review attestation (below) or a named `review-waived:`
 exception. A plan without a `tier:` line is simply not presence-enforced — the
 field is opt-in, and its absence is a note, never a failure.
