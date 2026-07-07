@@ -117,6 +117,47 @@ def test_start_here_reads_decision_records_before_planning(render, tmp_path):
     assert "the code that assumes it" in text  # new decision recorded before its code
 
 
+def test_workflow_phases_wire_decision_records(render, tmp_path):
+    # SP30 audit finding: workflow.md is the phase SSOT every command points at,
+    # yet it never mentioned decision records — an agent following /plan never
+    # met the rule-4 duty. Each cycle phase must now carry its decision hook.
+    out = render(tmp_path, {"project_name": "demo"})
+    text = (out / "docs/process/workflow.md").read_text()
+    brainstorm = text.split("## Brainstorm")[1].split("## Plan")[0]
+    plan = text.split("## Plan")[1].split("## Execute")[0]
+    execute = text.split("## Execute")[1].split("## Review")[0]
+    review = text.split("## Review")[1].split("## Quick")[0]
+    assert "decision records" in brainstorm  # read as constraints before design
+    assert "supersession" in brainstorm
+    assert "decision records" in plan        # plan names its decision context
+    assert "decision record" in execute      # mid-build decision stops the task
+    assert "record it as a decision record first" in execute
+    assert "decisions" in review             # checklist enumeration includes it
+
+
+def test_review_checklist_has_decisions_section(render, tmp_path):
+    # the gate can only check records that exist; the review is the one point
+    # a MISSING or contradicted or silently-obsoleted record can be caught —
+    # so the checklist must ask.
+    out = render(tmp_path, {"project_name": "demo"})
+    text = (out / "docs/process/review-checklist.md").read_text()
+    assert "## Decisions" in text
+    assert "no decision record" in text            # missing record
+    assert "contradict" in text and "Accepted" in text  # conflict with endorsed
+    assert "obsolete in practice" in text          # silent obsolescence
+    assert "supersede it in the same change" in text
+
+
+def test_plan_format_names_decision_context(render, tmp_path):
+    # a Tier 2+ plan names the records it read and any record it entails —
+    # a prose duty judged at review, honestly labeled as ungated.
+    out = render(tmp_path, {"project_name": "demo"})
+    text = (out / "docs/process/journal-state-plans.md").read_text()
+    assert "decision context" in text
+    assert "new or superseded record" in text
+    assert "deliberately not a gated field" in text  # honest about enforceability
+
+
 def test_decision_record_template_has_type_axis_and_intent_atomicity(render, tmp_path):
     # the generalized decision record must carry the Type axis and state that
     # Intent is exactly one value per record (the atomicity forcing function).

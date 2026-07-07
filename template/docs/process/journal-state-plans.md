@@ -60,6 +60,13 @@ A plan may also carry an `issue: <ref>` line linking its tracking issue (`#N`,
 a named `issue-waived:` exception; the review gate also uses `issue:` to match a
 review attestation to its plan.
 
+A Tier 2+ plan also names its **decision context**: which decision records
+(`docs/process/adr/`) it read as constraints, and any new or superseded record
+the change entails — or states that none apply. This is a prose duty judged at
+the review (`review-checklist.md`, Decisions), deliberately not a gated field: a
+machine could only check that *some* text is present, which invites a ritual
+"none" — the substance is exactly what the reviewer's decision questions probe.
+
 ## Review attestations
 
 The `review` gate reads `REVIEW` lines from the journal — one per review, the

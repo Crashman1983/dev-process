@@ -43,8 +43,12 @@ Ausgeliefert als [copier](https://copier.readthedocs.io)-Template. Adapter für
 > gefixt, Konsens-Findings ausgeräumt, verifizierte Zweige regressionsgesichert) +
 > SP29 (tier-model: Skala von 0–4 auf zero-based **0–3** kollabiert — das unter
 > PR/Merge-Pflicht faktisch fiktive Tier 0 „direct commit" in Tier 1 gefaltet;
-> jede verbleibende Grenze trägt Gewicht; Gate-Schwellen + Anchor/Doku remapped)
-> ausgeliefert, `v1.16.0`.
+> jede verbleibende Grenze trägt Gewicht; Gate-Schwellen + Anchor/Doku remapped) +
+> SP30 (decision-flow-wiring: Decision Records in die Phasen eingehängt —
+> Brainstorm liest sie als Constraints, Plan nennt seinen Decision-Kontext,
+> Execute stoppt bei entdeckter Grundsatzentscheidung, Review-Checkliste fragt
+> nach fehlendem/widersprochenem/still-obsoletem Record)
+> ausgeliefert, `v1.17.0`.
 > **Überblick für Einsteiger:innen & Management** (wie es funktioniert, warum,
 > welcher Mehrwert): [`docs/CAPABILITIES.md`](docs/CAPABILITIES.md).
 > Setup: [`BOOTSTRAP.md`](BOOTSTRAP.md) · Systemumgebung:

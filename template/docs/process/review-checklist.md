@@ -84,6 +84,22 @@ Are **secrets** kept out of logs, responses, and the repository?
 - Is the code **readable** — intention-revealing names, small single-purpose
   units, no magic values (mandatory rule 9, `code-craft.md`)?
 
+## Decisions — recorded, not embodied silently
+
+The non-mechanical counterpart of the `decision-records` gate: the gate checks
+the integrity of records that *exist*; only a review can notice one that is
+*missing*. Ask of the change as a whole (mandatory rule 4):
+
+- Does it **embody a significant, hard-to-reverse decision** — architectural,
+  product, or process — that has **no decision record**? A choice of storage
+  model, protocol, dependency, or irreversible data shape hidden inside a diff
+  is a decision made silently.
+- Does it **contradict an `Accepted` record**? Then either the change or the
+  record is wrong — resolve the conflict, do not merge the contradiction.
+- Does it make an existing record **obsolete in practice** while leaving the
+  file untouched? A record the code no longer honors is a lie to the next
+  reader — supersede it in the same change.
+
 ## Tests prove acceptance
 
 - Does a **test map to each acceptance criterion** the change claims? A feature
