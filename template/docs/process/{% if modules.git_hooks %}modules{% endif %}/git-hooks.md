@@ -30,13 +30,15 @@ install hint.
 | Hook | When | What | Bypass |
 |---|---|---|---|
 | pre-commit | each commit | blocks a direct commit to `main`/`master` | `ALLOW_MAIN_COMMIT=1` |
-| pre-push | each push | runs the gate runner over all active modules; a failing gate blocks the push | `git push --no-verify` or `SKIP_PUSH_GATE=1` |
+| pre-push | each push | gates the **pushed commits** — each pushed tip is checked out into a throwaway worktree and the gate runner runs there; a failing gate blocks the push | `git push --no-verify` or `SKIP_PUSH_GATE=1` |
 | post-commit | after each commit | runs the gate runner in `--warn` mode (reports drift, never blocks) | — |
 
-The commit hook is fast (a branch check only); the push-time gate is
-best-effort local feedback: it checks the **working tree**, not the commits
-being pushed, so uncommitted changes can mask or cause failures. CI on the
-pushed commits is the authority. The post-commit warning is advisory.
+The commit hook is fast (a branch check only); the push-time gate checks the
+**commits being pushed**, not the working tree: each pushed tip is materialized
+in a throwaway detached `git worktree` and the gate runner runs against that, so
+local uncommitted state can neither mask nor cause a failure, and the check is
+parallel-safe (no `stash`, no HEAD move). Where CI runs the gate on the pushed
+commits it remains the authority; the post-commit warning is advisory.
 
 ## Why delegate
 
