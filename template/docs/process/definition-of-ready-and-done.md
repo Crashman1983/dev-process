@@ -40,13 +40,14 @@ A unit of work is ready to be started when:
 | # | Item | Evaluated by (owner) |
 | - | ---- | -------------------- |
 | R1 | Typed (bug / chore / feature / epic) | the issue-hygiene view (`attention.py`) where `github-issues` is active; else review |
-| R2 | Acceptance stated in **EARS** (`When <trigger>, the system shall <response>`); an epic carries scope + invariants instead | the issue-hygiene view; decomposed at **brainstorm** (`workflow.md`) |
+| R2 | Acceptance stated in **EARS** (`When <trigger>, the system shall <response>`); an epic carries scope + invariants instead | the issue-hygiene view; decomposed at the tier's design step — an upfront brainstorm (Tier 3) or the plan (Tier 2) (`workflow.md`) |
 | R3 | Linked to its epic/story and the applicable design / decision records / product frame | brainstorm & plan review (`workflow.md`, mandatory rule 4) |
 | R4 | Dependencies (`blocked_by`) known, and no open blocker remains | the backlog-ordering view (`story_order.py`) where `feature-registry` is active; else review |
 
-Recognizing the tier (`risk-tiers.md`) is part of getting to Ready: a Tier 2+
-item is not ready until it is tracked by an issue (mandatory rule 2, and the
-`github-issues` issue-before-code gate where installed).
+Recognizing the tier (`risk-tiers.md`) is part of getting to Ready: it decides
+how much of the cycle runs (mandatory rule 2), and a Tier 2+ item is not ready
+until it is tracked by an issue (enforced by the `github-issues`
+issue-before-code gate where installed).
 
 ## Definition of Done — gate: review / merge
 
@@ -57,7 +58,7 @@ A change is done when:
 | D1 | Every acceptance criterion has a passing test | feature-registry coverage + **review** (`review-checklist.md`) |
 | D2 | All **active** process gates are green | the gate runner (pre-push / CI) |
 | D3 | **Affected docs updated** — module docs, decision records, API/contract, README; no stale references | **review** judgment; path validity by the doc-drift gate |
-| D4 | Decision obligations reconciled (adopted, or deferred with a follow-up); a new significant decision is recorded before the code that assumes it | the adr-/pdr-adoption gates where installed + review (mandatory rule 4) |
+| D4 | Decision obligations reconciled (adopted, or deferred with a follow-up); a new significant decision is recorded before the code that assumes it | the core `decision-records` gate + review (mandatory rule 4) |
 | D5 | Atomic, conventional commit(s); any skipped gate or dropped scope named in the commit | `commits.md` + review (mandatory rule 8) |
 | D6 | Issue status set at each phase transition, and the issue closed with the commit ref on merge | the claim/lifecycle convention + review (`github-issues` module) |
 
