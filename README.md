@@ -79,7 +79,12 @@ Ausgeliefert als [copier](https://copier.readthedocs.io)-Template. Adapter für
 > Preflight) und `attention.py` (wo ein Mensch hinschauen sollte — inkl.
 > Issue-Hygiene) unter `github-issues`, Parallel-agents-Workflow-Abschnitt; die
 > label-mutierenden Lifecycle-Tools und `status:hold`/`awaiting-ack`-Overlays
-> bewusst ausgelassen) ausgeliefert, `v1.23.0`.
+> bewusst ausgelassen) ausgeliefert, `v1.23.0`. SP38 (bindende **Definition of
+> Ready & Done** als Core-Doc `definition-of-ready-and-done.md` — pro Arbeitseinheit,
+> Enforcement an bestehende Mechanismen delegiert, lebende Checklisten; Namens-Kollision
+> mit der Projekt-Onboarding-Reife in `start-here.md` aufgelöst; in Brainstorm/Review,
+> Regel 7 und Review-Checkliste eingehängt; Konsolidierung von Backport-Patch 0013)
+> ausgeliefert, `v1.24.0`.
 > **Überblick für Einsteiger:innen & Management** (wie es funktioniert, warum,
 > welcher Mehrwert): [`docs/CAPABILITIES.md`](docs/CAPABILITIES.md).
 > Setup: [`BOOTSTRAP.md`](BOOTSTRAP.md) · Systemumgebung:
