@@ -777,3 +777,37 @@ def test_unclosed_fence_notes(render, tmp_path):
     r = _run(out)
     assert r.returncode == 0, r.stdout
     assert "unclosed fence" in r.stdout
+
+
+# --- SP33 gate hardening (audit findings) ---
+
+def test_h3_first_report_header_bypass_closed(render, tmp_path):
+    # audit: header split on \n## let an ###-first report treat the whole file
+    # as header — a quoted body issue: counted as publication (false-green)
+    out = _render(render, tmp_path)
+    _report(out, "2026-07-05-x.md",
+            "review: x\nwork: #1\n\n### Result\n\nissue: #123 covers the flaky test\n")
+    r = _run(out)
+    assert r.returncode == 1
+    assert "invisible review" in r.stdout
+
+
+def test_no_space_heading_header_bypass_closed(render, tmp_path):
+    out = _render(render, tmp_path)
+    _report(out, "2026-07-05-x.md",
+            "review: x\nwork: #1\n\n#### Deep\n\nissue: #123 in prose\n")
+    r = _run(out)
+    assert r.returncode == 1
+    assert "invisible review" in r.stdout
+
+
+def test_same_campaign_issue_two_ref_forms_not_split(render, tmp_path):
+    # audit: #5 and octo/api#5 (the configured repo) are the same issue but were
+    # string-compared and reported as a split campaign (false-red)
+    out = _render(render, tmp_path, repo="octo/api")
+    _report(out, "2026-07-05-a.md",
+            "review: a\ncampaign: r1\nissue: #57\ncampaign-issue: #5\n\n## Result\n\npass\n")
+    _report(out, "2026-07-05-b.md",
+            "audit: b\ncampaign: r1\nissue: #58\ncampaign-issue: octo/api#5\n\n## Result\n\npass\n")
+    r = _run(out)
+    assert r.returncode == 0, r.stdout

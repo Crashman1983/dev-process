@@ -576,3 +576,28 @@ def test_grade_lines_in_sharded_journal_are_read(render, tmp_path):
     assert "1 GRADE line(s) parseable" in r.stdout
     r2 = _kpis(out, "effectiveness")
     assert "source=execute: catch=0" in r2.stdout and "idle=1" in r2.stdout
+
+
+def test_bulleted_grade_line_is_linted(render, tmp_path):
+    # audit: '- GRADE ...' silently vanished from both the gate and cockpit
+    out = render(tmp_path, {"project_name": "demo", "modules": {"telemetry": True}})
+    d = out / ".process-work" / "journal"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "2026-07-05.md").write_text(
+        "- GRADE work=x checkpoint=1 criterion=A round=1 verdict=satisfied "
+        "action=bogus source=review\n", encoding="utf-8")
+    r = subprocess.run([sys.executable, str(out / "scripts/process/check_telemetry.py"), str(out)],
+                       capture_output=True, text=True)
+    assert r.returncode == 1  # the bulleted line is seen and its bad action linted
+
+
+def test_tilde_fenced_grade_ignored(render, tmp_path):
+    out = render(tmp_path, {"project_name": "demo", "modules": {"telemetry": True}})
+    d = out / ".process-work" / "journal"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "2026-07-05.md").write_text(
+        "~~~\nGRADE work=x checkpoint=1 criterion=A round=1 verdict=satisfied "
+        "action=bogus source=review\n~~~\n", encoding="utf-8")
+    r = subprocess.run([sys.executable, str(out / "scripts/process/check_telemetry.py"), str(out)],
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stdout  # quotation, not telemetry

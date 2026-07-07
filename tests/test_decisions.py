@@ -179,3 +179,18 @@ def test_non_utf8_hard(render, tmp_path):
     r = _run(out)
     assert r.returncode == 1
     assert "not valid UTF-8" in r.stdout
+
+
+def test_empty_section_before_next_heading_is_soft(render, tmp_path):
+    # audit: an empty ## Type before ## Intent returned the next heading as the
+    # value, hard-failing with nonsense; the documented soft path was unreachable
+    out = render(tmp_path, {"project_name": "demo"})
+    p = out / ADR / "adr-0002-example.md"
+    p.write_text(
+        "# ADR-0002: Example\n\n## Status\n\nAccepted\n\n## Type\n\n## Intent\n\nkeep\n\n"
+        "## Context\n\nBody.\n", encoding="utf-8")
+    readme = out / ADR / "README.md"
+    readme.write_text(readme.read_text() + "\n| 0002 | Example | Accepted |\n")
+    r = _run(out)
+    assert r.returncode == 0, r.stdout  # missing Type is soft, not a false-red
+    assert "not one of" not in r.stdout and "not a valid" not in r.stdout

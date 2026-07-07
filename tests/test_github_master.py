@@ -439,3 +439,16 @@ def test_unknown_snapshot_key_hard(render, tmp_path):
     _snapshot(out, e)
     r = _run(out)
     assert r.returncode == 1 and "unknown key" in r.stdout
+
+
+def test_mixed_type_blocked_by_fails_clean(render, tmp_path):
+    # audit: sorted([1, "STORY-0002"]) raised an uncaught TypeError (traceback)
+    out = _render(render, tmp_path)
+    _story(out, "STORY-0001", blocked_by=["STORY-0002"])
+    e = _entry("STORY-0001")
+    e["blocked_by"] = [1, "STORY-0002"]
+    _snapshot(out, e)
+    r = _run(out)
+    assert r.returncode == 1
+    assert "non-string element" in r.stdout
+    assert "Traceback" not in r.stdout and "Traceback" not in r.stderr

@@ -8,6 +8,7 @@ codebases and is advisory only, never faked as verified. Python stdlib only."""
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -78,7 +79,10 @@ def _check(root: Path, path: Path) -> tuple[list[str], list[str]]:
     except UnicodeDecodeError:
         spec_text = apath.read_bytes().decode("utf-8", "replace")
     for sym in data["symbols"]:
-        if sym not in spec_text:
+        # word-boundary match, not bare substring — else short symbols like
+        # "get"/"p"/"3.0" satisfy the declared-first guarantee by coincidence
+        # (audit false-green). Mirrors the architecture gate's posture.
+        if not re.search(rf"(?<!\w){re.escape(str(sym))}(?!\w)", spec_text):
             hard.append(
                 f"{rel}: symbol {sym!r} not found in spec {spec.strip()} — "
                 "declare the interface in the spec before building the surface (Rule 3)"

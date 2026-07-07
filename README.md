@@ -57,8 +57,13 @@ Ausgeliefert als [copier](https://copier.readthedocs.io)-Template. Adapter für
 > Kampagnen-Bündelung unter Parent-Issue, hermetische Bindung: unpubliziert
 > ohne Waiver hart, Follow-up-Finding ohne Issue hart, gesplittete Kampagne hart;
 > entdeckte Arbeit in korrekter Form: `finding`-/`bug`-Templates mit EARS-AKs +
-> Origin-Sektion, Rückverlinkung + Kommentar am Ausgangsitem als Konvention)
-> ausgeliefert, `v1.19.0`.
+> Origin-Sektion, Rückverlinkung + Kommentar am Ausgangsitem als Konvention) +
+> SP33 (gate-hardening aus 4-Session-Audit: 8 reproduzierte Gate-Defekte
+> geschlossen — Tier-Range-Validierung, Report-Header-Split auf jeder Ebene,
+> geteilte Fence/Bullet-Disziplin für REVIEW/GRADE, Decisions-Sektionsparser,
+> github-master fail-clean, Kampagnen-Ref-Normalisierung, Symbol-Wortgrenze,
+> code_roots-Skalar)
+> ausgeliefert, `v1.20.0`.
 > **Überblick für Einsteiger:innen & Management** (wie es funktioniert, warum,
 > welcher Mehrwert): [`docs/CAPABILITIES.md`](docs/CAPABILITIES.md).
 > Setup: [`BOOTSTRAP.md`](BOOTSTRAP.md) · Systemumgebung:

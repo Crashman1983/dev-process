@@ -259,3 +259,15 @@ def test_full_runner_green_on_seed_tree(render, tmp_path):
         cwd=out, capture_output=True, text=True,
     )
     assert r.returncode == 0, r.stdout + r.stderr
+
+
+def test_bulleted_status_line_is_read(render, tmp_path):
+    # audit consistency: '- status: onboarded' must not read as "no status line"
+    # (every other grammar tolerates the leading bullet)
+    out = render(tmp_path, {"project_name": "demo"})
+    _onboarded(out)
+    text = (out / FRAME).read_text().replace("status: onboarded", "- status: onboarded")
+    (out / FRAME).write_text(text, encoding="utf-8")
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+    assert "no 'status:' line" not in r.stdout

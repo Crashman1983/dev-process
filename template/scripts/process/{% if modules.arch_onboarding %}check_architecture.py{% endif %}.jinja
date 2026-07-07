@@ -123,6 +123,11 @@ def check(root: Path) -> tuple[list[str], list[str]]:
 
     hard: list[str] = []
     code_roots = data.get("code_roots", []) or []
+    # a YAML scalar (`code_roots: src`) must not be iterated character-wise
+    # into "s / r / c" and fed to the linter as paths (audit false-red)
+    if not isinstance(code_roots, list):
+        hard.append(f"'code_roots' must be a list, got {type(code_roots).__name__}")
+        code_roots = []
 
     for r in code_roots:
         if not (root / str(r)).exists():

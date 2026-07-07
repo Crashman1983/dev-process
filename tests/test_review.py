@@ -262,3 +262,53 @@ def test_non_utf8_journal_hard(render, tmp_path):
     (d / "2026-07-04.md").write_bytes(b"REVIEW \xff\xfe\n")
     r = _run(out)
     assert r.returncode == 1 and "not valid UTF-8" in r.stdout
+
+
+# --- SP33 gate hardening (audit findings) ---
+
+def test_tier_out_of_range_is_malformed(render, tmp_path):
+    # audit: tier=4 on the 0-3 scale skipped the cross-model check AND cleared
+    # a Tier-3 plan via >= tier — over-declaring must be malformed
+    out = render(tmp_path, {"project_name": "demo"})
+    _journal(out, _review(tier="4", independence="bundle,non-implementing"))
+    r = _run(out)
+    assert r.returncode == 1
+    assert "outside the 0-3 scale" in r.stdout
+
+
+def test_tier_over_declaration_does_not_clear_plan(render, tmp_path):
+    # the full bypass: an archived Tier-3 plan must not be cleared by a tier=4
+    # self-review that dodges the cross-model requirement
+    out = render(tmp_path, {"project_name": "demo"})
+    _archived_plan(out, "2026-07-01-auth.md", "tier: 3\n")
+    _journal(out, _review(work="auth", tier="4", independence="bundle,non-implementing"))
+    r = _run(out)
+    assert r.returncode == 1
+    # malformed tier line + unmet presence — both must bite
+    assert "outside the 0-3 scale" in r.stdout
+
+
+def test_bulleted_review_line_is_parsed(render, tmp_path):
+    # audit: '- REVIEW ...' silently vanished — not parsed, not flagged
+    out = render(tmp_path, {"project_name": "demo"})
+    _archived_plan(out, "2026-07-04-feature.md", "tier: 2\n")
+    _journal(out, "- " + _review(work="feature", tier="2"))
+    r = _run(out)
+    assert r.returncode == 0, r.stdout  # the bulleted pass clears the plan
+
+
+def test_bulleted_malformed_review_is_flagged(render, tmp_path):
+    out = render(tmp_path, {"project_name": "demo"})
+    _journal(out, "- REVIEW work=1 tier=2 verdict=pass")  # missing keys
+    r = _run(out)
+    assert r.returncode == 1 and "malformed" in r.stdout
+
+
+def test_tilde_fenced_review_ignored(render, tmp_path):
+    # audit false-green: a ~~~-fenced verdict=pass really cleared a Tier-3 plan
+    out = render(tmp_path, {"project_name": "demo"})
+    _archived_plan(out, "2026-07-01-auth.md", "tier: 3\n")
+    _journal(out, "~~~", _review(work="auth", tier="3",
+                                 independence="bundle,non-implementing,cross-model"), "~~~")
+    r = _run(out)
+    assert r.returncode == 1 and "no clearing REVIEW" in r.stdout

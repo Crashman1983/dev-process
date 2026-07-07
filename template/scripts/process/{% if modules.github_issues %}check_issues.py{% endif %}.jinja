@@ -191,7 +191,18 @@ def _parse_finding(match: re.Match) -> tuple[dict | None, str | None]:
     return fields, None
 
 
-def _check_reports(root: Path) -> tuple[list[str], list[str]]:
+def _canon_ref(ref: str, default_repo: str | None) -> str:
+    """A campaign-issue ref normalized to `repo#number` so the same issue in
+    different forms (`#5`, `owner/repo#5`, a URL) compares equal. Falls back
+    to the raw ref if unparseable (already flagged elsewhere)."""
+    parsed = parse_issue_ref(ref)
+    if parsed is None:
+        return ref
+    repo, number = parsed
+    return f"{repo or default_repo}#{number}"
+
+
+def _check_reports(root: Path, default_repo: str | None) -> tuple[list[str], list[str]]:
     """Review/audit visibility binding, offline over committed report files.
     Opt-in by artifact existence: no reports directory or files -> silent.
     Header keys are read ONLY from the header block (before the first `## `
@@ -220,7 +231,11 @@ def _check_reports(root: Path) -> tuple[list[str], list[str]]:
             soft.append(f"{rel}: unclosed fence — the rest of the file is "
                         f"treated as a quotation; close the fence")
         text = _unfenced(raw)
-        header = text.split("\n## ", 1)[0]
+        # the header block ends at the FIRST heading of any level — a report
+        # whose first section is `### ` (or a no-space `##x`) must not let its
+        # whole body count as header (audit false-green: a quoted body issue:
+        # counted as publication)
+        header = re.split(r"(?m)^#{1,6}\s", text, maxsplit=1)[0]
         if not _RPT_KIND.search(header):
             hard.append(f"{rel}: no 'review:' or 'audit:' header — not a readable report")
             continue
@@ -240,7 +255,8 @@ def _check_reports(root: Path) -> tuple[list[str], list[str]]:
             if ci and parse_issue_ref(ci.group(1)) is None:
                 hard.append(f"{rel}: malformed campaign-issue ref {ci.group(1)!r}")
             elif ci:
-                campaigns.setdefault(cm.group(1), {})[rel] = ci.group(1)
+                campaigns.setdefault(cm.group(1), {})[rel] = _canon_ref(
+                    ci.group(1), default_repo)
             elif published:
                 hard.append(f"{rel}: campaign {cm.group(1)!r} set on a published "
                             f"report but no 'campaign-issue:' ref — the bundle "
@@ -273,14 +289,14 @@ def check(root: Path) -> tuple[list[str], list[str]]:
     # issue-before-code on active plans runs whenever the module is on,
     # independent of whether a feature-registry exists yet
     hard, soft = _check_plans(root)
-    rh, rs = _check_reports(root)
+    default_repo = _default_repo(root)
+    rh, rs = _check_reports(root, default_repo)
     hard += rh
     soft += rs
     stories = _story_files(root)
     if not stories:
         soft.append("no stories to check (feature-registry empty or absent)")
         return hard, soft
-    default_repo = _default_repo(root)
     gh = shutil.which("gh")
     gh_absent_noted = False
     for path in stories:

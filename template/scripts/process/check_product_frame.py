@@ -37,7 +37,7 @@ FRAME = "PRODUCT.md"
 ADR_DIR = "docs/process/adr"
 REGISTRY_DIR = "docs/process/feature-registry"
 
-STATUS = re.compile(r"^status:\s*(.+?)\s*$", re.MULTILINE)
+STATUS = re.compile(r"^\s*(?:[-*+]\s+)?[*_]*status[*_]*:\s*(.+?)\s*$", re.MULTILINE)
 STATES = {"not-onboarded", "onboarded"}
 ADR_REF = re.compile(r"\bADR-(\d+)\b")
 STORY_REF = re.compile(r"\bSTORY-(\d+)\b")  # any width; normalized like ADR refs

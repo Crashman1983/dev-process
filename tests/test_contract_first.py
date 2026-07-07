@@ -189,3 +189,23 @@ def test_docdrift_green_with_module_doc(render, tmp_path):
         capture_output=True, text=True,
     )
     assert r.returncode == 0, r.stdout
+
+
+def test_short_symbol_needs_word_boundary(render, tmp_path):
+    # audit false-green: bare substring let short symbols pass by coincidence —
+    # "get" must NOT be satisfied by "getHealth", "p" by "paths", "3.0" by "3.0.0"
+    out = _render(render, tmp_path)
+    _write_spec(out, "docs/api/openapi.json",
+                '{"paths": {"getHealth": {}}, "openapi": "3.0.0"}')
+    _write_contract(out, "chat.json", {**VALID, "symbols": ["get", "p", "3.0"]})
+    r = _run(out)
+    assert r.returncode == 1
+    assert "not found in spec" in r.stdout
+
+
+def test_word_boundary_symbol_still_matches(render, tmp_path):
+    out = _render(render, tmp_path)
+    _write_spec(out, "docs/api/openapi.json", "components: ChatMessage and ChatSession here")
+    _write_contract(out, "chat.json", VALID)
+    r = _run(out)
+    assert r.returncode == 0, r.stdout

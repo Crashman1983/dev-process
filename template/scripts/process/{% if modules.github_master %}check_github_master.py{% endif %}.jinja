@@ -101,8 +101,15 @@ def _load_snapshot(root: Path) -> tuple[dict | None, list[str], object]:
         for key in ("title", "status"):
             if e.get(key) is not None and not isinstance(e[key], str):
                 hard.append(f"{SNAPSHOT}: {sid} {key!r} must be a string or null")
-        if e.get("blocked_by") is not None and not isinstance(e["blocked_by"], list):
-            hard.append(f"{SNAPSHOT}: {sid} 'blocked_by' must be a list or null")
+        bl = e.get("blocked_by")
+        if bl is not None:
+            if not isinstance(bl, list):
+                hard.append(f"{SNAPSHOT}: {sid} 'blocked_by' must be a list or null")
+            elif not all(isinstance(x, str) for x in bl):
+                # the drift loop sorts this list — a non-string element would
+                # traceback on comparison; fail clean instead (audit)
+                hard.append(f"{SNAPSHOT}: {sid} 'blocked_by' has a non-string element")
+                e = {**e, "blocked_by": None}  # neutralize before the drift loop
         by_story[sid] = e
     return by_story, hard, generated_at
 
