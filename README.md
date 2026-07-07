@@ -70,7 +70,13 @@ Ausgeliefert als [copier](https://copier.readthedocs.io)-Template. Adapter für
 > Tier-0-1 als Self-Check-Band) + SP35 (economics/discoverability: Anchor listet
 > aktive Modul-Docs, /quick trägt eigene Schritte, /prime liest inbox,
 > Which-artifact-when-Router, Multi-Agent-SSOT-Ehrlichkeit, Mid-Size-Trap benannt)
-> ausgeliefert, `v1.21.0`. SP36 (Backport-Batch 1 aus dem parallelen
+> ausgeliefert, `v1.21.0`. SP39 (4-Perspektiven-Funktionsaudit: sbom-Gate
+> gehärtet — SPDX-`OR`/`AND`-Auswertung, nur Root-Komponente exempt,
+> Multi-License-Konjunktion, exakte Coverage-Namen, kein doc-drift-Rotlauf beim
+> frischen Render; `attention` zählt nur existierende Tests; DoR/DoD- und
+> Tier-Routen-Kohärenz; `ARCHITECTURE-OVERVIEW.md` `.jinja`; BOOTSTRAP-
+> `github_master`-Key; interne Sprint-Refs aus Adopter-Code entfernt)
+> ausgeliefert, `v1.25.0`. SP36 (Backport-Batch 1 aus dem parallelen
 > law-aidev-Zweig, Issue #22: pre-push prüft die **gepushten Commits** statt des
 > Working Tree (Wegwerf-Worktree), neues opt-in **`sbom`**-Modul mit
 > CycloneDX-Lizenz-Attestierung, feature-registry-Advisory für unter-granulare
