@@ -70,7 +70,11 @@ Ausgeliefert als [copier](https://copier.readthedocs.io)-Template. Adapter für
 > Tier-0-1 als Self-Check-Band) + SP35 (economics/discoverability: Anchor listet
 > aktive Modul-Docs, /quick trägt eigene Schritte, /prime liest inbox,
 > Which-artifact-when-Router, Multi-Agent-SSOT-Ehrlichkeit, Mid-Size-Trap benannt)
-> ausgeliefert, `v1.21.0`.
+> ausgeliefert, `v1.21.0`. SP36 (Backport-Batch 1 aus dem parallelen
+> law-aidev-Zweig, Issue #22: pre-push prüft die **gepushten Commits** statt des
+> Working Tree (Wegwerf-Worktree), neues opt-in **`sbom`**-Modul mit
+> CycloneDX-Lizenz-Attestierung, feature-registry-Advisory für unter-granulare
+> Akzeptanz) ausgeliefert, `v1.22.0`.
 > **Überblick für Einsteiger:innen & Management** (wie es funktioniert, warum,
 > welcher Mehrwert): [`docs/CAPABILITIES.md`](docs/CAPABILITIES.md).
 > Setup: [`BOOTSTRAP.md`](BOOTSTRAP.md) · Systemumgebung:
@@ -139,7 +143,8 @@ Test-Traceability), `github-issues` (EARS-Templates + Issue-Ref-Gate),
 `parity` (Capability×Surface-Matrix, die jede bewusste Lücke an ein Tracking-Issue bindet — gegen stillen Capability-Verlust),
 `security-floor` (der grep-bare Teil der Security-Invarianten als blockierendes Gate — verbotene Regex-Muster über git-getrackte Dateien)
 `telemetry` (Effizienz-Messung: `GRADE`-Trace-Zeilen im Journal als Gate-gesichertes Format plus read-only KPI-Cockpit — Wirksamkeit, Konvergenz, Kalibrier-Suite, Tempo, Kosten, DORA-CFR; jede Zahl mit Konfidenz + Maßnahme)
-und `arch-docs` (stakeholder-gerichtete Architektur-Doku im arc42/C4-Zuschnitt: `ARCHITECTURE-OVERVIEW.md`-Scaffold mit Verify-Tags — Building-Blocks→arch-Block und Decisions→ADRs verlinkt statt dupliziert, Prosa ehrlich unverifiziert; Gate fängt nur tote ADR-Refs + verbliebene Platzhalter, nie „gute Prosa").
+`arch-docs` (stakeholder-gerichtete Architektur-Doku im arc42/C4-Zuschnitt: `ARCHITECTURE-OVERVIEW.md`-Scaffold mit Verify-Tags — Building-Blocks→arch-Block und Decisions→ADRs verlinkt statt dupliziert, Prosa ehrlich unverifiziert; Gate fängt nur tote ADR-Refs + verbliebene Platzhalter, nie „gute Prosa")
+und `sbom` (CycloneDX-SBOM mit attestierter Lizenz je Third-Party-Komponente + SPDX-Allow-List als blockierendes Gate — ehrlich degradierend: advisory ohne Policy/SBOM, hart bei fehlender/unerlaubter Lizenz).
 
 **Harness-native Commands:** Der Zyklus (`brainstorm plan execute review quick
 debug commit prime`) liegt als dünne Slash-Commands je aktivem Harness
