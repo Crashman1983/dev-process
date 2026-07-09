@@ -76,7 +76,12 @@ Ausgeliefert als [copier](https://copier.readthedocs.io)-Template. Adapter für
 > frischen Render; `attention` zählt nur existierende Tests; DoR/DoD- und
 > Tier-Routen-Kohärenz; `ARCHITECTURE-OVERVIEW.md` `.jinja`; BOOTSTRAP-
 > `github_master`-Key; interne Sprint-Refs aus Adopter-Code entfernt)
-> ausgeliefert, `v1.25.0`. SP36 (Backport-Batch 1 aus dem parallelen
+> ausgeliefert, `v1.25.0`. SP40 (Kernel-Integrität als viertes **Core-Gate**
+> `check_kernel.py`: der immer-geladene Regel-Block muss in jedem vorhandenen
+> Anker byte-identisch zu `kernel.md` sein — eine still gelöschte/geänderte
+> Regel blockt den Merge; schließt die „Regeln vergessen weil ungegatet"-Lücke,
+> die ein abgeleiteter Prozess sichtbar machte) ausgeliefert, `v1.26.0`.
+> SP36 (Backport-Batch 1 aus dem parallelen
 > law-aidev-Zweig, Issue #22: pre-push prüft die **gepushten Commits** statt des
 > Working Tree (Wegwerf-Worktree), neues opt-in **`sbom`**-Modul mit
 > CycloneDX-Lizenz-Attestierung, feature-registry-Advisory für unter-granulare
