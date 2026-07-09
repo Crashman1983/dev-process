@@ -8,6 +8,12 @@ pointer to `docs/process/start-here.md`. The rendered adapters carry an
 identical copy; this neutral file exists so the kernel is obtainable even when
 none of them were rendered.
 
+**This block is gated.** The core `kernel` gate (`scripts/process/check_kernel.py`,
+always on) verifies that every anchor present in the repo carries the block below
+byte-identical to this file — so a rule cannot be silently dropped, edited, or
+truncated out of the always-on context. Adopt and extend your anchor *outside*
+the `KERNEL:START`/`KERNEL:END` markers; the text inside them is canonical here.
+
 <!-- KERNEL:START -->
 ## Always-on kernel
 

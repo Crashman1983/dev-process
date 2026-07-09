@@ -16,8 +16,9 @@ or keep the minimal profile (no optional modules) and skip the onboarding
 dialogue. The process pays off for anything multi-session, multi-agent, or
 touching contracts, persistence, or auth.
 
-**The mid-size caveat:** three gates are *core* and always run regardless of the
-module profile — `decision-records`, `review`, and `product-frame`. So even on
+**The mid-size caveat:** four gates are *core* and always run regardless of the
+module profile — `kernel` (the always-on rule block is intact in the anchor),
+`decision-records`, `review`, and `product-frame`. So even on
 the minimal profile, the first Tier 2+ change (one that touches a contract,
 persistence, auth, or something another component depends on) carries the full
 plan → review → attestation ceremony, without the optional modules

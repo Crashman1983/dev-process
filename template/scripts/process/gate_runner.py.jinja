@@ -23,6 +23,7 @@ except ImportError:
 # core (e.g. docs/process/adr/), so their enforcement must not hinge on an
 # optional module being enabled.
 GATES = {
+    "kernel": (None, [sys.executable, "scripts/process/check_kernel.py", "."]),
     "decision-records": (None, [sys.executable, "scripts/process/check_decisions.py", "."]),
     "review": (None, [sys.executable, "scripts/process/check_review.py", "."]),
     "product-frame": (None, [sys.executable, "scripts/process/check_product_frame.py", "."]),
