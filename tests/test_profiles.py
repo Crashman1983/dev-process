@@ -68,8 +68,9 @@ def test_ratchet_documented(render_raw, tmp_path):
     assert "hardening ratchet" in text
     for prof in ("`minimal`", "`solo`", "`team`", "`custom`"):
         assert prof in text, prof
-    # every optional module appears as a ratchet target
-    for mod in ("security_floor", "parity", "contract_first", "contracts_drift",
+    # every optional module (all 13 copier.yml keys) has a ratchet trigger
+    for mod in ("doc_drift_gate", "git_hooks",
+                "security_floor", "parity", "contract_first", "contracts_drift",
                 "feature_registry", "github_issues", "github_master",
                 "arch_onboarding", "arch_docs", "telemetry", "sbom"):
         assert f"`{mod}`" in text, mod

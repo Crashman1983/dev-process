@@ -33,6 +33,10 @@ adjustment — a starting point, not a lock.
 module on when its trigger appears; each step is a `copier update` with the new
 module set (see BOOTSTRAP.md, "Later"). The triggers:
 
+- **docs worth trusting** — more than a handful, referenced from anchors →
+  `doc_drift_gate`
+- **no CI, or work leaves your machine** — local enforcement as the (only or
+  additional) pillar → `git_hooks`
 - first **persistence, auth, or secrets** → `security_floor`
 - a **second surface** (web + cli, web + mobile) → `parity`
 - a **shared or external interface** another component builds on →

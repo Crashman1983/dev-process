@@ -17,7 +17,9 @@ profile:
   type: str
   help: >-
     Module preset — a starting point, not a lock (the next question shows the
-    derived set; adjust freely, and harden later via `copier update`).
+    derived set; adjust freely). It only seeds the INITIAL modules answer: on
+    `copier update`, the recorded modules dict wins, so harden later by passing
+    the new modules set explicitly (see BOOTSTRAP.md, "Later").
     minimal: core gates only (prototypes, smallest footprint).
     solo: + doc-drift + git-hooks (one developer, local enforcement).
     team: + feature-registry + github-issues on top of solo (shared backlog,

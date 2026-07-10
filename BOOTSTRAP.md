@@ -141,17 +141,9 @@ yet settled:
 
 1. Install minimally (`--data profile=minimal` — core gates only).
 2. Run the start-here dialogue (greenfield/brownfield, goal, stack, risks).
-3. Derive the module choice from the answers — heuristic: auth, persistence,
-   or security invariants → `security_floor`; multiple surfaces → `parity`;
-   shared interfaces or multiple repos → `contract_first`, `contracts_drift`;
-   user-story traceability → `feature_registry`; issue discipline →
-   `github_issues`; local enforcement → `git_hooks`; architecture as a
-   checked artifact → `arch_onboarding`; doc hygiene → `doc_drift_gate`;
-   measuring what the process catches and costs → `telemetry`;
-   stakeholder-facing architecture docs → `arch_docs`;
-   supply-chain transparency / license compliance → `sbom`;
-   a checked GitHub issue/board spine for multi-agent coordination →
-   `github_master`.
+3. Derive the module choice from the answers by applying the **hardening
+   ratchet** in `docs/process/start-here.md` — every optional module has one
+   named trigger there; switch a module on when its trigger appears.
 4. Retrofit modules as described under [Later](#later).
 
 If the choice is already known, set it directly at install time.
@@ -179,6 +171,9 @@ Add a module or pull an updated process version — with a clean working tree
       --data 'modules={"doc_drift_gate": true, "arch_onboarding": false, "feature_registry": false, "github_issues": false, "contracts_drift": false, "git_hooks": false, "contract_first": false, "parity": false, "security_floor": false, "sbom": false, "telemetry": false, "arch_docs": false, "github_master": false}' \
       --skip 'CLAUDE.md' --skip 'AGENTS.md'
 
+The install-time `profile` only seeded the initial modules answer — on update,
+the **recorded `modules` dict wins**, so passing a different profile alone is a
+silent no-op; always pass the new `modules` set explicitly, as above.
 `--data` expects the **complete** `modules` dictionary with the new values,
 not just the changed keys. `update` checks out the latest **tagged** template
 release by default, preserves your local edits, and flags conflicts inline.

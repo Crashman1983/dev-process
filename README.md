@@ -16,7 +16,7 @@ durchgesetzten**, KI-gestützten Entwicklungsprozess — einspielbar in **neue
 Ausgeliefert als [copier](https://copier.readthedocs.io)-Template. Adapter für
 **Claude Code**, **GitHub Copilot** und **AGENTS.md** (Codex / Gemini CLI / Aider …).
 
-> **Status:** `v1.30.0` — 44 Sub-Projekte ausgeliefert (Kern + 13 opt-in
+> **Status:** `v1.30.1` — Sub-Projekte SP1–SP44 ausgeliefert (Kern + 13 opt-in
 > Module, 4 Core-Gates, Profile für Solo/Team, DoR/DoD, Kernel-Integritäts-
 > und Compaction-Schutz). Vollständige Historie: [`CHANGELOG.md`](CHANGELOG.md).
 > **Überblick für Einsteiger:innen & Management** (wie es funktioniert, warum,
@@ -88,7 +88,8 @@ Test-Traceability), `github-issues` (EARS-Templates + Issue-Ref-Gate),
 `security-floor` (der grep-bare Teil der Security-Invarianten als blockierendes Gate — verbotene Regex-Muster über git-getrackte Dateien)
 `telemetry` (Effizienz-Messung: `GRADE`-Trace-Zeilen im Journal als Gate-gesichertes Format plus read-only KPI-Cockpit — Wirksamkeit, Konvergenz, Kalibrier-Suite, Tempo, Kosten, DORA-CFR; jede Zahl mit Konfidenz + Maßnahme)
 `arch-docs` (stakeholder-gerichtete Architektur-Doku im arc42/C4-Zuschnitt: `ARCHITECTURE-OVERVIEW.md`-Scaffold mit Verify-Tags — Building-Blocks→arch-Block und Decisions→ADRs verlinkt statt dupliziert, Prosa ehrlich unverifiziert; Gate fängt nur tote ADR-Refs + verbliebene Platzhalter, nie „gute Prosa")
-und `sbom` (CycloneDX-SBOM mit attestierter Lizenz je Third-Party-Komponente + SPDX-Allow-List als blockierendes Gate — ehrlich degradierend: advisory ohne Policy/SBOM, hart bei fehlender/unerlaubter Lizenz).
+`sbom` (CycloneDX-SBOM mit attestierter Lizenz je Third-Party-Komponente + SPDX-Allow-List als blockierendes Gate — ehrlich degradierend: advisory ohne Policy/SBOM, hart bei fehlender/unerlaubter Lizenz)
+und `github-master` (dreht die Wahrheitsrichtung: GitHub Issues als SSOT über einen committeten Snapshot — Sync mit Netz, Gate hermetisch offline; Board-Spalten-Konsistenz mitgeprüft).
 
 **Harness-native Commands:** Der Zyklus (`brainstorm plan execute review quick
 debug commit prime`) liegt als dünne Slash-Commands je aktivem Harness
@@ -152,7 +153,7 @@ Mehrsession-, Multi-Agent- oder Contract/Persistenz/Auth-behaftete.
 uvx copier copy gh:Crashman1983/dev-process .
 ```
 
-copier fragt **Module**, **Harnesses** und **CI-Adapter** ab und rendert nur
+copier fragt **Profil** (leitet den Modul-Default ab), **Module**, **Harnesses** und **CI-Adapter** ab und rendert nur
 diese. Bestehende
 Dateien werden **nicht** überschrieben (additiver Drop-in). Ein Modul später
 nachrüsten oder eine neuere Prozess-Version ziehen:
