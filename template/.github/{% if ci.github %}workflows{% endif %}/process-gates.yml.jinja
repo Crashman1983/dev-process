@@ -9,7 +9,9 @@ on:
 permissions:
   contents: read
 jobs:
-  gates:
+  # job id = the required-status-check context; must match what the docs tell
+  # adopters to require (and what setup_branch_protection.sh sets): process-gates
+  process-gates:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

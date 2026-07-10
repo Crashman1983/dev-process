@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# Wire `process-gates` as a REQUIRED status check on the default branch — the
+# single step that turns "the gate runs" into "the gate blocks" (see
+# docs/process/start-here.md, Definition of ready). CI cannot set this itself.
+#
+# Idempotent and non-destructive:
+#   - protection already exists  -> only ADD the process-gates context to the
+#     required checks (nothing else is touched);
+#   - no protection yet          -> create a minimal rule that requires only the
+#     process-gates check (no forced PR reviews — solo-friendly; tighten in the
+#     GitHub UI as the team grows).
+#
+# Needs: gh CLI authenticated with admin rights on the repo. Honest limits:
+# branch protection on PRIVATE repos requires a paid GitHub plan (public repos:
+# free) — a 403/upgrade error means plan, not script. Manual path: Settings ->
+# Branches -> protect the default branch -> require the `process-gates` check.
+set -euo pipefail
+
+CONTEXT="process-gates"
+
+command -v gh >/dev/null || { echo "setup-branch-protection: gh CLI not found — install https://cli.github.com/ and run 'gh auth login'." >&2; exit 1; }
+
+repo="$(gh repo view --json nameWithOwner --jq .nameWithOwner)" \
+  || { echo "setup-branch-protection: not inside a GitHub repo gh can see (run from the repo, gh authenticated)." >&2; exit 1; }
+branch="$(gh repo view --json defaultBranchRef --jq .defaultBranchRef.name)"
+echo "repo: $repo  default branch: $branch"
+
+api="repos/$repo/branches/$branch/protection"
+
+if existing="$(gh api "$api/required_status_checks" 2>/dev/null)"; then
+  # protection exists — merge our context into the required checks, change nothing else
+  if printf '%s' "$existing" | grep -q "\"$CONTEXT\""; then
+    echo "✓ '$CONTEXT' is already a required status check on $branch"
+    exit 0
+  fi
+  gh api -X POST "$api/required_status_checks/contexts" \
+    -f "contexts[]=$CONTEXT" >/dev/null
+  echo "✓ added '$CONTEXT' to the existing required status checks on $branch"
+else
+  # no protection yet — create the minimal rule: require only the gate check.
+  # strict=false: a branch need not be up to date with main, only green.
+  body="$(printf '{"required_status_checks":{"strict":false,"contexts":["%s"]},"enforce_admins":false,"required_pull_request_reviews":null,"restrictions":null}' "$CONTEXT")"
+  if ! printf '%s' "$body" | gh api -X PUT "$api" --input - >/dev/null; then
+    echo "setup-branch-protection: could not create protection." >&2
+    echo "  Common causes: missing admin rights, or a private repo on the free" >&2
+    echo "  plan (branch protection needs a paid plan there; public repos are" >&2
+    echo "  free). Manual path: Settings -> Branches -> protect '$branch' ->" >&2
+    echo "  require the '$CONTEXT' status check." >&2
+    exit 1
+  fi
+  echo "✓ created branch protection on $branch requiring '$CONTEXT' (minimal rule — no forced PR reviews; tighten in the UI as the team grows)"
+fi

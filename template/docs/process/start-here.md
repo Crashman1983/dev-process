@@ -303,9 +303,11 @@ The project is ready for normal process-driven development when:
   onboarding state;
 - **the CI gate is wired as a *required* check.** The `process-gates` job failing
   only blocks a merge if your host is configured to require it — CI cannot set
-  this itself. On GitHub: Settings → Branches → protect the default branch → mark
-  `process-gates` a required status check. On GitLab: a merge-request approval
-  rule / pipeline-must-succeed setting. Without this, a red gate is advisory, not
+  this itself. On GitHub, the GitHub CI adapter ships a one-command setup:
+  `setup_branch_protection.sh` (under scripts/process/) idempotently adds
+  `process-gates` as a required status check on the default branch — or do it
+  manually via Settings → Branches. On GitLab: a merge-request approval rule /
+  pipeline-must-succeed setting. Without this, a red gate is advisory, not
   enforced — the single step that turns "the gate runs" into "the gate blocks".
 
 Once developing: before planning any change, read the Decision Records
