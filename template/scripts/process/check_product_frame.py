@@ -34,8 +34,13 @@ import sys
 from pathlib import Path
 
 FRAME = "PRODUCT.md"
-ADR_DIR = "docs/process/adr"
 REGISTRY_DIR = "docs/process/feature-registry"
+
+# the decision-records gate (core, co-rendered) owns ADR file identity; the
+# review gate owns fence stripping — import, don't copy (one owner per behavior)
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling import
+from check_decisions import ADR_DIR, adr_exists  # noqa: E402
+from check_review import _unfenced as _strip_fences  # noqa: E402
 
 STATUS = re.compile(r"^\s*(?:[-*+]\s+)?[*_]*status[*_]*:\s*(.+?)\s*$", re.MULTILINE)
 STATES = {"not-onboarded", "onboarded"}
@@ -47,32 +52,10 @@ HTML_COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
 
 
 def _unfenced(text: str) -> str:
-    """Drop fenced code blocks (``` and ~~~, closed by their own marker) and
+    """Drop fenced code blocks (the review gate's length-aware stripper) and
     HTML comments — a quoted or commented example is not a claim. The seed
     itself uses an HTML comment for the status-flip instruction."""
-    text = HTML_COMMENT.sub("", text)
-    out: list[str] = []
-    fence: str | None = None
-    for line in text.splitlines(keepends=True):
-        stripped = line.lstrip()
-        marker = next((m for m in ("```", "~~~") if stripped.startswith(m)), None)
-        if marker and fence is None:
-            fence = marker
-            continue
-        if marker and fence == marker:
-            fence = None
-            continue
-        if fence is None:
-            out.append(line)
-    return "".join(out)
-
-
-def _adr_exists(root: Path, num: str) -> bool:
-    d = root / ADR_DIR
-    for width in {num, num.zfill(4)}:
-        if any(d.glob(f"adr-{width}-*.md")):
-            return True
-    return False
+    return _strip_fences(HTML_COMMENT.sub("", text))
 
 
 def _story_ids(root: Path) -> set[str]:
@@ -141,7 +124,7 @@ def check(root: Path) -> tuple[list[str], list[str]]:
                         f"{', '.join(left)}")
 
     for ref in ADR_REF.finditer(text):
-        if not _adr_exists(root, ref.group(1)):
+        if not adr_exists(root, ref.group(1)):
             hard.append(f"{FRAME}: ADR-{ref.group(1)} referenced but no "
                         f"{ADR_DIR}/adr-{ref.group(1)}-*.md exists")
 

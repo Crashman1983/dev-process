@@ -34,6 +34,21 @@ ADR_DIR = "docs/process/adr"
 README = "README.md"
 ADR_FILE = re.compile(r"^adr-(\d+)-.*\.md$")
 
+
+def adr_exists(root: Path, ref: str) -> bool:
+    """Does the decision record with the number in `ref` exist? `ref` is
+    anything carrying digits ('ADR-0002', '12', 'adr-3'); width-insensitive —
+    adr-12-*.md and adr-0012-*.md both resolve. This gate owns ADR file
+    identity; the product-frame, feature-registry and security-floor gates
+    import this instead of keeping copies."""
+    m = re.search(r"\d+", str(ref))
+    if not m:
+        return False
+    num = int(m.group())
+    d = root / ADR_DIR
+    return any(fm and int(fm.group(1)) == num
+               for fm in (ADR_FILE.match(p.name) for p in d.glob("adr-*.md")))
+
 STATUS_OK = {"proposed", "accepted"}  # plus any "superseded..." prefix
 INTENT_OK = {"keep", "change-planned", "tolerated"}
 TYPE_OK = {"architecture", "product", "process"}

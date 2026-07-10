@@ -36,9 +36,10 @@ check mean anything. Scale it to the tier (`risk-tiers.md`):
   family is available**: two families' blind spots are uncorrelated, and a
   same-family check, however fresh its context, can still miss what its family
   systematically misses. Where only one family is available, do not fake it —
-  state the single-family limitation and treat the review as one tier weaker
-  (see attestation, below), the same honest degradation the process uses for
-  every other environment-dependent gate. Add adversarial verification:
+  declare the `single-family` limitation in the attestation (below); the
+  recorded flag is the honest degradation the process uses for every other
+  environment-dependent gate, and the gate accepts it as the explicit
+  alternative to `cross-model`. Add adversarial verification:
   independent reviewers try to *refute* the change rather than confirm it, and
   a majority refutation blocks the merge.
 
@@ -74,9 +75,9 @@ attestation: a fresh process over the bundle is `bundle,non-implementing`; add
 The one step that is supposed to be independent is easy to run in the wrong
 context by accident. So the review records how it ran — bundle-only, by a
 non-implementing process, and (at Tier 3) cross-model — as part of its result.
-A review that cannot make those claims is treated as a warm self-check: one
-tier weaker than it claims. This makes the independence claim explicit and
-reviewable rather than assumed.
+A `pass` that cannot make those claims does not clear the tier — the gate
+blocks it. This makes the independence claim explicit and reviewable rather
+than assumed.
 
 The record is a structured `REVIEW` line in the journal, one per review:
 
@@ -108,7 +109,7 @@ enforces what a language-agnostic gate honestly can, and no more:
   not support: a self-review (`non-implementing` absent) or a warm review
   (`bundle` absent) cannot clear Tier 2+, and a Tier 3 pass must carry
   `cross-model` or the explicit `single-family` acknowledgment. This is the
-  "one tier weaker" rule above, turned from prose into a check.
+  independence expectation above, turned from prose into a check.
 - **Presence.** A plan is archived on merge; an **archived** plan that declares
   `tier: N` with N ≥ 2 must carry a clearing `verdict=pass` `REVIEW` (matching
   `work`, `tier ≥ N`) or an explicit `review-waived: <reason>` line. So a

@@ -87,8 +87,10 @@ bricht der gate_runner mit einem einzeiligen Installationshinweis ab.
 | `contract-first` | Python-Stdlib reicht |
 | `parity` | `PyYAML` |
 | `security-floor` | `git` und Python-Stdlib |
+| `sbom` | `git` und Python-Stdlib; SBOM-Erzeugung braucht einen CycloneDX-Generator im Build (z. B. Maven-Plugin, `@cyclonedx/cyclonedx-npm`, `syft`) |
 | `telemetry` | Python-Stdlib fuer Gate und Cockpit-Kern; optional `gh` (Tempo-Familie) und `git` (CFR-Familie) |
 | `arch_docs` | Python-Stdlib reicht |
+| `github-master` | Gate: Python-Stdlib (hermetisch, offline); Sync/Board-Tools: `gh` (authentifiziert, Board zusaetzlich `project`-Scope) |
 
 ## CI
 

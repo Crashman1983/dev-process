@@ -9,7 +9,7 @@ Two **binding** checklists, each tied to a transition of a single unit of work
   closing the issue is the record).
 
 This is per-work-item readiness and doneness. It is **not** the one-time
-project-onboarding readiness (baseline committed, CI wired, `PRODUCT.md`
+project-onboarding readiness (baseline committed, enforcement wired — CI or hooks, `PRODUCT.md`
 onboarded) — that lives in `start-here.md` under "Definition of ready (project
 onboarding)".
 
@@ -41,8 +41,8 @@ A unit of work is ready to be started when:
 
 | # | Item | Evaluated by (owner) |
 | - | ---- | -------------------- |
-| R1 | Typed (bug / chore / feature / epic) | the issue-hygiene view (`attention.py`) where `github-issues` is active; **hard** via the `github-master` gate where installed; else review |
-| R2 | Acceptance stated in **EARS** (`When <trigger>, the system shall <response>`); an epic carries scope + invariants instead | the issue-hygiene view; **hard** via the `github-master` gate where installed; decomposed at the tier's design step — an upfront brainstorm (Tier 3) or the plan (Tier 2) (`workflow.md`) |
+| R1 | Typed (bug / chore / feature / finding / epic) | the issue-hygiene view (`attention.py`) where `github-issues` is active; **hard** via the `github-master` gate where installed; else review |
+| R2 | Acceptance stated in **EARS** (`When <trigger>, the system shall <response>`), decomposed to include the **negative, edge, authorization, and invalidation/cleanup** cases; an epic carries scope + invariants instead | the issue-hygiene view; **hard** via the `github-master` gate where installed; decomposed at the tier's design step — an upfront brainstorm (Tier 3) or the plan (Tier 2) (`workflow.md`) |
 | R3 | Linked to its epic/story and the applicable design / decision records / product frame | brainstorm & plan review (`workflow.md`, mandatory rule 4) |
 | R4 | Dependencies (`blocked_by`) known, and no open blocker remains | the backlog-ordering view (`story_order.py`) where `feature-registry` is active; else review |
 

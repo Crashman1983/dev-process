@@ -172,3 +172,43 @@ def test_dirty_tree_is_disclosed(render, tmp_path):
     (out / "uncommitted.py").write_text("x = 1\n")
     t = _run(out, "--base", "main").stdout
     assert "working tree dirty" in t and "NOT in this diff" in t
+
+
+def test_bundle_survives_safe_path_python(render, tmp_path):
+    # PYTHONSAFEPATH removes the implicit script-dir sys.path entry — the
+    # explicit sibling-import shim must keep the tool working (SP50 audit)
+    import os
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    env = {**os.environ, "PYTHONSAFEPATH": "1"}
+    r = subprocess.run(
+        [sys.executable, str(out / "scripts/process/make_review_bundle.py"),
+         "--base", "main"],
+        cwd=out, capture_output=True, text=True, env=env)
+    assert r.returncode == 0, r.stderr
+    assert "Mandatory rules" in r.stdout
+
+
+def test_unknown_flag_is_usage_error(render, tmp_path):
+    # a typo'd --base must not silently produce a bundle against the wrong ref
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    for args in (["--bases", "main"], ["--help"], ["--base", "main", "extra"]):
+        r = _run(out, *args)
+        assert r.returncode != 0, args
+        assert "usage" in (r.stdout + r.stderr)
+        assert "Traceback" not in r.stderr
+
+
+def test_plan_filter_narrows_bundle(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    plans = out / ".process-work/plans"
+    (plans / "2026-07-11-other.md").write_text("# Other\n\ntier: 2\n")
+    r = _run(out, "--base", "main", "--plan", "widget")
+    assert r.returncode == 0, r.stderr
+    assert "2026-07-09-widget.md" in r.stdout
+    assert "2026-07-11-other.md" not in r.stdout
+    # a filter matching nothing says so instead of silently bundling all
+    r2 = _run(out, "--base", "main", "--plan", "nope")
+    assert "no active plan matches" in r2.stdout

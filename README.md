@@ -16,7 +16,7 @@ durchgesetzten**, KI-gestützten Entwicklungsprozess — einspielbar in **neue
 Ausgeliefert als [copier](https://copier.readthedocs.io)-Template. Adapter für
 **Claude Code**, **GitHub Copilot** und **AGENTS.md** (Codex / Gemini CLI / Aider …).
 
-> **Status:** `v1.32.1` — Sub-Projekte SP1–SP47 ausgeliefert (Kern + 13 opt-in
+> **Status:** `v1.35.1` — Sub-Projekte SP1–SP52 ausgeliefert (Kern + 13 opt-in
 > Module, 4 Core-Gates, Profile für Solo/Team, DoR/DoD, Kernel-Integritäts-
 > und Compaction-Schutz). Vollständige Historie: [`CHANGELOG.md`](CHANGELOG.md).
 > **Überblick für Einsteiger:innen & Management** (wie es funktioniert, warum,
@@ -48,8 +48,9 @@ Bausteine sind zuschaltbare Module.
 ## Der Prozess — Eckpunkte
 
 **Risiko-Tiers (0–3)** routen jede Aufgabe: der *Umfang* bestimmt den Tier, nicht
-die Diff-Größe. User-sichtbar, komponentenübergreifend, API/Contract, Auth oder
-Persistenz ⇒ Tier 2+ auch bei winzigem Diff. Ein `flow`-Label ist Boden, nie Decke.
+die Diff-Größe. Komponentenübergreifend, API/Contract, Auth oder Persistenz ⇒
+Tier 2+ auch bei winzigem Diff; bloße User-Sichtbarkeit allein ist noch kein
+Tier 2 (`risk-tiers.md` ist die SSOT). Ein `flow`-Label ist Boden, nie Decke.
 
 **Neun bindende Regeln** (Reihenfolge = Priorität):
 
@@ -64,7 +65,11 @@ Persistenz ⇒ Tier 2+ auch bei winzigem Diff. Ein `flow`-Label ist Boden, nie D
 9. Code wird zum Lesen geschrieben — intention-revealing, am Review-Gate geprüft.
 
 **Zyklus:** Brainstorm → Plan → Execute → Review, plus Quick (kleine Änderungen)
-und Debug. **ADRs** tragen zwei Achsen — `Status` (Proposed/Accepted/Superseded)
+und Debug. Methodik-Docs tragen die Tiefe: `testing.md` (Suite-Form: Pyramide,
+Property-based, Regression-Pins, ehrliche Coverage-Decke), `releases.md`
+(SemVer, Changelog, Tag-Ritual), `code-craft.md` (lesbarer Code); Tier-3-Designs
+beantworten die Threat-Frage („Was könnte ein Angreifer damit?") schon im
+Brainstorm. **ADRs** tragen zwei Achsen — `Status` (Proposed/Accepted/Superseded)
 und `Intent` (keep/change-planned/tolerated), damit „so ist es" von „so soll es
 werden" getrennt bleibt. **Journal, Branch-State und Pläne** halten das *Warum*
 fest, das das git-log nicht zeigt. **`PRODUCT.md`** (Core) ist der Produktrahmen —
@@ -86,7 +91,7 @@ Test-Traceability), `github-issues` (EARS-Templates + Issue-Ref-Gate),
 `contract-first` (geteiltes Capability-Interface im committeten Spec deklariert, bevor eine Surface darauf baut),
 `parity` (Capability×Surface-Matrix, die jede bewusste Lücke an ein Tracking-Issue bindet — gegen stillen Capability-Verlust),
 `security-floor` (der grep-bare Teil der Security-Invarianten als blockierendes Gate — verbotene Regex-Muster über git-getrackte Dateien)
-`telemetry` (Effizienz-Messung: `GRADE`-Trace-Zeilen im Journal als Gate-gesichertes Format plus read-only KPI-Cockpit — Wirksamkeit, Konvergenz, Kalibrier-Suite, Tempo, Kosten, DORA-CFR; jede Zahl mit Konfidenz + Maßnahme)
+`telemetry` (Effizienz-Messung: `GRADE`-Trace-Zeilen im Journal als Gate-gesichertes Format plus read-only KPI-Cockpit — Wirksamkeit, Konvergenz, Kalibrier-Suite, Tempo, Kosten, DORA-CFR; Messwerte mit Konfidenz + Maßnahme, Schwellen-Familien als erfüllt/nicht-erfüllt. Misst Trends, Verhältnisse und Catch/Escape-Ereignisse gegen die projekteigene Baseline — kein projektübergreifendes Benchmarking, Absolutwerte ohne eigene Baseline sind bedeutungslos)
 `arch-docs` (stakeholder-gerichtete Architektur-Doku im arc42/C4-Zuschnitt: `ARCHITECTURE-OVERVIEW.md`-Scaffold mit Verify-Tags — Building-Blocks→arch-Block und Decisions→ADRs verlinkt statt dupliziert, Prosa ehrlich unverifiziert; Gate fängt nur tote ADR-Refs + verbliebene Platzhalter, nie „gute Prosa")
 `sbom` (CycloneDX-SBOM mit attestierter Lizenz je Third-Party-Komponente + SPDX-Allow-List als blockierendes Gate — ehrlich degradierend: advisory ohne Policy/SBOM, hart bei fehlender/unerlaubter Lizenz)
 und `github-master` (dreht die Wahrheitsrichtung: GitHub Issues als SSOT über einen committeten Snapshot — Sync mit Netz, Gate hermetisch offline; Board-Spalten-Konsistenz mitgeprüft).

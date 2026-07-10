@@ -32,6 +32,7 @@ import sys
 from pathlib import Path
 
 JOURNAL_DIR = ".process-work/journal"
+PLANS_ACTIVE = ".process-work/plans"
 PLANS_ARCHIVE = ".process-work/plans/archive"
 
 REQUIRED = {"work", "tier", "reviewer", "model", "independence", "verdict", "round"}
@@ -39,12 +40,29 @@ INDEP_TOKENS = {"bundle", "non-implementing", "cross-model", "single-family"}
 VERDICTS = {"pass", "block"}
 # tolerant of a leading list bullet and **bold**/_emphasis_ on the key, and of
 # a trailing annotation — a bulleted `- tier: 3` must not escape the presence
-# check (a false-green). Kept identical to the issue gate's plan-field matchers.
+# check (a false-green). This gate OWNS the plan-field grammar; the issue gate
+# and trace.py import these matchers instead of keeping copies in sync.
 _LEAD = r"^\s*(?:[-*+]\s+)?[*_]*"
 TIER_DECL = re.compile(_LEAD + r"tier[*_]*\s*:\s*[*_]*\s*(\d+)\b", re.IGNORECASE | re.MULTILINE)
-ISSUE_DECL = re.compile(_LEAD + r"issue[*_]*\s*:\s*#?(\d+)\b", re.IGNORECASE | re.MULTILINE)
+ISSUE_DECL = re.compile(_LEAD + r"issue[*_]*\s*:\s*(\S+)", re.IGNORECASE | re.MULTILINE)
 WAIVED = re.compile(_LEAD + r"review-waived[*_]*\s*:\s*\S", re.IGNORECASE | re.MULTILINE)
 DATE_PREFIX = re.compile(r"^\d{4}-\d{2}-\d{2}-")
+
+# issue-ref grammar — owned here (core) so both this gate and the issue gate
+# read the same shapes; only these count as issue declarations
+_BARE = re.compile(r"^#(\d+)$")
+_CROSS = re.compile(r"^([\w.-]+/[\w.-]+)#(\d+)$")
+_URL = re.compile(r"^https://github\.com/([\w.-]+/[\w.-]+)/issues/(\d+)$")
+
+
+def parse_issue_ref(ref: str) -> tuple[str | None, int] | None:
+    """(repo_or_None, number) for a well-formed ref, else None. repo is None
+    only for the bare `#N` form, which resolves against the configured repo."""
+    for pat, has_repo in ((_BARE, False), (_CROSS, True), (_URL, True)):
+        m = pat.match(ref)
+        if m:
+            return (m.group(1), int(m.group(2))) if has_repo else (None, int(m.group(1)))
+    return None
 
 
 # a REVIEW record may be written as a Markdown bullet — `- REVIEW ...` must
@@ -53,20 +71,35 @@ DATE_PREFIX = re.compile(r"^\d{4}-\d{2}-\d{2}-")
 _REVIEW_LINE = re.compile(r"^\s*(?:[-*+]\s+)?[*_]*REVIEW(\s+.*|)$")
 
 
+_FENCE_RUN = re.compile(r"^(`{3,}|~{3,})")
+
+
+def _fence_marker(line: str) -> str | None:
+    """The fence run (``` or ~~~, any length >= 3) opening this line, if any."""
+    m = _FENCE_RUN.match(line.strip())
+    return m.group(1) if m else None
+
+
+def _fence_closes(fence: str, marker: str) -> bool:
+    """CommonMark: a fence closes only on a run of the SAME character at least
+    as long as the opener — a ``` inside a ````-fenced example must not close
+    it early, or quoted `review-waived:`/`tier:` lines leak out (false-green)."""
+    return marker[0] == fence[0] and len(marker) >= len(fence)
+
+
 def _unfenced(text: str) -> str:
-    """Text with fenced blocks (``` and ~~~, each closed by its own marker)
-    removed. A `tier:`/`issue:`/`review-waived:` line inside a fenced example
-    is a quotation, not a declaration — the same discipline the journal parser
-    applies to REVIEW lines."""
+    """Text with fenced blocks (``` and ~~~, each closed by its own,
+    length-aware marker) removed. A `tier:`/`issue:`/`review-waived:` line
+    inside a fenced example is a quotation, not a declaration — the same
+    discipline the journal parser applies to REVIEW lines."""
     out: list[str] = []
     fence: str | None = None
     for line in text.splitlines():
-        stripped = line.strip()
-        marker = next((m for m in ("```", "~~~") if stripped.startswith(m)), None)
+        marker = _fence_marker(line)
         if marker and fence is None:
             fence = marker
             continue
-        if marker and fence == marker:
+        if marker and fence is not None and _fence_closes(fence, marker):
             fence = None
             continue
         if fence is None:
@@ -83,12 +116,11 @@ def parse_review_lines(text: str) -> tuple[list[tuple[int, dict]], list[tuple[in
     errors: list[tuple[int, str]] = []
     fence: str | None = None
     for i, raw in enumerate(text.splitlines(), start=1):
-        s = raw.strip()
-        marker = next((m for m in ("```", "~~~") if s.startswith(m)), None)
+        marker = _fence_marker(raw)
         if marker and fence is None:
             fence = marker
             continue
-        if marker and fence == marker:
+        if marker and fence is not None and _fence_closes(fence, marker):
             fence = None
             continue
         if fence is not None:
@@ -182,7 +214,17 @@ def _plan_work_ids(stem: str, text: str, *, include_dedated: bool) -> set[str]:
     if include_dedated:
         ids.add(DATE_PREFIX.sub("", stem))
     for m in ISSUE_DECL.finditer(text):
-        ids.add(m.group(1))
+        # only a real issue ref may act as a clearing work-id — `issue: v2.0`
+        # or `issue: none` must not let an unrelated REVIEW clear this plan
+        # (and `none` twice would let ONE review clear two plans)
+        tok = m.group(1)
+        if tok.isascii() and tok.isdigit():
+            ids.add(tok)  # bare number, the historical form
+            continue
+        parsed = parse_issue_ref(tok)
+        if parsed is not None:
+            ids.add(tok)
+            ids.add(str(parsed[1]))  # `work=42` matches `issue: owner/repo#42`
     return ids
 
 
@@ -200,6 +242,9 @@ def check(root: Path) -> tuple[list[str], list[str]]:
                 text = f.read_text(encoding="utf-8")
             except UnicodeDecodeError:
                 hard.append(f"{rel}: not valid UTF-8")
+                continue
+            except OSError as exc:  # broken symlink, directory named *.md, …
+                hard.append(f"{rel}: could not read: {exc}")
                 continue
             records, errors = parse_review_lines(text)
             for lineno, msg in errors:
@@ -221,7 +266,11 @@ def check(root: Path) -> tuple[list[str], list[str]]:
             key = DATE_PREFIX.sub("", p.stem)
             dedated_counts[key] = dedated_counts.get(key, 0) + 1
         for p in plans:
-            text = _unfenced(p.read_text(encoding="utf-8", errors="replace"))
+            try:
+                text = _unfenced(p.read_text(encoding="utf-8", errors="replace"))
+            except OSError as exc:  # broken symlink, directory named *.md, …
+                hard.append(f"{PLANS_ARCHIVE}/{p.name}: could not read: {exc}")
+                continue
             m = TIER_DECL.search(text)
             if not m:
                 soft.append(f"{PLANS_ARCHIVE}/{p.name}: no 'tier:' declaration "
@@ -240,6 +289,27 @@ def check(root: Path) -> tuple[list[str], list[str]]:
                 hard.append(f"{PLANS_ARCHIVE}/{p.name}: archived plan declares tier {tier} "
                             f"but has no clearing REVIEW (verdict=pass, work in {sorted(ids)}, "
                             f"tier>={tier}) and no 'review-waived:' line")
+
+    # active Tier 2+ plans are not presence-checked (by design: no red CI
+    # mid-development) — but "forgot to archive on merge" and that design are
+    # indistinguishable and silent, so the gap is at least made visible
+    pdir = root / PLANS_ACTIVE
+    if pdir.is_dir():
+        active = 0
+        for p in sorted(pdir.glob("*.md")):
+            if p.name.startswith("design-"):
+                continue
+            try:
+                text = _unfenced(p.read_text(encoding="utf-8", errors="replace"))
+            except OSError:
+                continue  # active plans are not enforced; the archive path diagnoses
+            m = TIER_DECL.search(text)
+            if m and int(m.group(1)) >= 2:
+                active += 1
+        if active:
+            soft.append(f"{active} active Tier 2+ plan(s) in {PLANS_ACTIVE} — "
+                        f"review presence is only enforced once a plan is "
+                        f"archived (the merge step); archive on merge")
 
     if not all_records and not enforced_any and not hard:
         soft.append("no REVIEW attestations yet — expected pre-adoption")

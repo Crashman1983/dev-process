@@ -125,3 +125,21 @@ def test_honest_about_missing_sources(render, tmp_path):
     assert "gh unavailable" in t or "ref only" in t
     assert "none found" in t                              # plans
     assert "no REVIEW attestation" in t
+
+
+def test_bare_digit_key_does_not_match_every_plan(render, tmp_path):
+    # SP52: issue #7's bare "7" must not substring-match dates/step numbers —
+    # and "#7" must not match "#70"
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    plans = out / ".process-work/plans"
+    plans.mkdir(parents=True, exist_ok=True)
+    (plans / "2026-07-11-unrelated.md").write_text(
+        "# Unrelated\n\ntier: 2\nissue: #70\nstep 7 of the plan\n")
+    (plans / "2026-01-01-target.md").write_text(
+        "# Target\n\ntier: 2\nissue: #7\n")
+    r = subprocess.run(
+        [sys.executable, str(out / "scripts/process/trace.py"), "#7"],
+        cwd=out, capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    assert "target.md" in r.stdout
+    assert "unrelated.md" not in r.stdout

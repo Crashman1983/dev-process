@@ -130,8 +130,10 @@ liefert der Prozess, und zwar tool-übergreifend statt an einen Anbieter gekette
   geht das Verfahrenswissen nicht mit.
 - **Wirkung wird messbar, nicht behauptet.** Das Telemetrie-Modul liefert
   Kennzahlen — Wirksamkeit, Konvergenz (wie oft ein Review durchgeht), Tempo,
-  Kosten, DORA-Change-Failure-Rate — jede mit Konfidenz und Maßnahme. Man sieht,
-  ob der Prozess wirkt.
+  Kosten, DORA-Change-Failure-Rate — Messwerte mit Konfidenz und Maßnahme,
+  Schwellen-Familien als klares erfüllt/nicht-erfüllt. Man sieht, ob der
+  Prozess wirkt — als Trend gegen die projekteigene Baseline, nicht als
+  Vergleich mit anderen Projekten.
 - **Keine Anbieterbindung.** Ein Wechsel des KI-Werkzeugs kostet Bequemlichkeit,
   nicht die Methodik oder ihre Durchsetzung. Die Investition ist portabel.
 - **Verlässliche Ampel.** Weil das System nie „grün" meldet, wo es nicht prüfen

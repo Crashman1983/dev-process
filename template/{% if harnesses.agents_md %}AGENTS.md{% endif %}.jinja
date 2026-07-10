@@ -34,12 +34,12 @@ process file.
 - **brainstorm** — idea -> approved design (`docs/process/workflow.md`)
 - **plan** — design -> task plan (`docs/process/workflow.md`)
 - **execute** — build the plan test-driven (`docs/process/workflow.md`)
-- **review** — merge gate (`docs/process/workflow.md`, `docs/process/review-checklist.md`)
+- **review** — merge gate (`docs/process/workflow.md`, `docs/process/review-checklist.md`); record the gate-parsed `REVIEW` attestation line and dispatch independent reviewers via `make_review_bundle.py` (`docs/process/verification-independence.md`)
 - **quick** — Tier 0/1 shortcut (`docs/process/workflow.md`)
 - **debug** — root cause before fix (`docs/process/workflow.md`)
 - **commit** — atomic conventional commit (`docs/process/commits.md`)
 - **prime** — restore context (`docs/process/journal-state-plans.md`)
-{%- set _mod_slugs = {"doc_drift_gate": "doc-drift-gate", "arch_onboarding": "arch-onboarding", "feature_registry": "feature-registry", "github_issues": "github-issues", "contracts_drift": "contracts-drift", "git_hooks": "git-hooks", "contract_first": "contract-first", "parity": "parity", "security_floor": "security-floor", "telemetry": "telemetry", "arch_docs": "arch-docs", "github_master": "github-master"} %}
+{%- set _mod_slugs = {"doc_drift_gate": "doc-drift-gate", "arch_onboarding": "arch-onboarding", "feature_registry": "feature-registry", "github_issues": "github-issues", "contracts_drift": "contracts-drift", "git_hooks": "git-hooks", "contract_first": "contract-first", "parity": "parity", "security_floor": "security-floor", "sbom": "sbom", "telemetry": "telemetry", "arch_docs": "arch-docs", "github_master": "github-master"} %}
 {%- set _active = [] %}
 {%- for _k, _slug in _mod_slugs.items() %}{% if modules[_k] %}{% set _ = _active.append(_slug) %}{% endif %}{% endfor %}
 {%- if _active %}

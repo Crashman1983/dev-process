@@ -6,7 +6,12 @@ those rules, and a long session may have compacted them out. Then read
 `docs/process/workflow.md` (Review) and
 `docs/process/risk-tiers.md`. Check completeness, correctness, and rule
 adherence against the plan or spec, working through
-`docs/process/review-checklist.md`. To dispatch a fresh or cross-model
+`docs/process/review-checklist.md`. Record the result in the exact grammar
+(`journal-state-plans.md`): a
+`REVIEW work=… tier=… reviewer=… model=… independence=… verdict=… round=…`
+line in the journal (the core `review` gate parses it), and — for a
+findings-producing or Tier 3 review — `FINDING sev=… action=… issue=…` lines
+in a `.process-work/reviews/` report. To dispatch a fresh or cross-model
 reviewer, assemble its complete input with
 `python scripts/process/make_review_bundle.py -o /tmp/bundle.md`
 (`docs/process/verification-independence.md`).

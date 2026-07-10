@@ -34,7 +34,7 @@ profile:
 
 modules:
   type: yaml
-  help: "Which opt-in process modules to install (default derived from the profile; adjust freely)"
+  help: "Which opt-in process modules to install (default derived from the profile; adjust freely). Note: github_issues and github_master assume a GitHub-hosted repo and the gh CLI — dead weight elsewhere."
   default: "{doc_drift_gate: {{ profile in ['solo', 'team'] }}, arch_onboarding: false, feature_registry: {{ profile == 'team' }}, github_issues: {{ profile == 'team' }}, contracts_drift: false, git_hooks: {{ profile in ['solo', 'team'] }}, contract_first: false, parity: false, security_floor: false, sbom: false, telemetry: false, arch_docs: false, github_master: false}"
 
 ci:

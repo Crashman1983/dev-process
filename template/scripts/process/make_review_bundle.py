@@ -22,7 +22,10 @@ take as its whole input. This tool assembles it:
 Sources that cannot be read are named in place, never silently skipped.
 
 Usage:
-    make_review_bundle.py [--base REF] [-o FILE]
+    make_review_bundle.py [--base REF] [--plan SLUG] [-o FILE]
+
+--plan narrows the bundled plans to filenames containing SLUG — for parallel
+efforts, so the reviewer sees the one plan under review, not all of them.
 
 --base defaults to the first of origin/main, main, origin/master, master that
 git can resolve. Output goes to stdout unless -o is given. The repo root is
@@ -36,11 +39,12 @@ import subprocess
 import sys
 from pathlib import Path
 
-# check_review.py owns the REVIEW grammar; importing it keeps that half of the
-# instructions byte-honest with what the gate actually parses
-import check_review as _review_gate
+# check_review.py owns the REVIEW grammar; check_kernel.py owns kernel-block
+# extraction — importing both keeps this tool byte-honest with the gates
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling import
+import check_kernel as _kernel_gate  # noqa: E402
+import check_review as _review_gate  # noqa: E402
 
-KERNEL_DOC = "docs/process/kernel.md"
 CHECKLIST = "docs/process/review-checklist.md"
 PRODUCT = "PRODUCT.md"
 PLANS = ".process-work/plans"
@@ -56,13 +60,14 @@ def _read(root: Path, rel: str) -> str | None:
 
 
 def _kernel_block(root: Path) -> str | None:
-    text = _read(root, KERNEL_DOC)
+    text = _read(root, _kernel_gate.KERNEL_DOC)
     if text is None:
         return None
-    start, end = "<!-- KERNEL:START -->", "<!-- KERNEL:END -->"
-    if start in text and end in text:
-        return text.split(start, 1)[1].split(end, 1)[0].strip()
-    return None
+    # >1 START marker is ambiguous (the kernel gate hard-fails it) — refusing
+    # here beats silently bundling whichever block happens to come first
+    if text.count(_kernel_gate._START) > 1:
+        return None
+    return _kernel_gate._block(text)
 
 
 def _git(root: Path, *args: str) -> str | None:
@@ -92,11 +97,16 @@ def _resolve_base(root: Path, base: str | None) -> str | None:
     return None
 
 
-def _active_plans(root: Path) -> list[Path]:
+def _active_plans(root: Path, plan_filter: str | None) -> list[Path]:
     d = root / PLANS
     if not d.is_dir():
         return []
-    return sorted(p for p in d.glob("*.md"))  # archive/ is finished work
+    plans = sorted(p for p in d.glob("*.md"))  # archive/ is finished work
+    if plan_filter:
+        # parallel efforts: 8 active plans would bury the reviewer in 7
+        # irrelevant ones — --plan narrows to the effort under review
+        plans = [p for p in plans if plan_filter in p.name]
+    return plans
 
 
 def _grammar_section() -> str:
@@ -125,7 +135,7 @@ Judge against the checklist and the rules above; cite file:line evidence; a
 `pass` with unfixed blockers is a false green — verdict `block` instead."""
 
 
-def build(root: Path, base: str | None) -> str:
+def build(root: Path, base: str | None, plan_filter: str | None = None) -> str:
     out: list[str] = []
     add = out.append
 
@@ -148,12 +158,15 @@ def build(root: Path, base: str | None) -> str:
     add(product + "\n" if product else "*(unavailable: PRODUCT.md missing)*\n")
 
     add("## Plan(s) under review\n")
-    plans = _active_plans(root)
+    plans = _active_plans(root, plan_filter)
     if plans:
         for p in plans:
             add(f"### {p.name}\n")
             body = _read(root, str(p.relative_to(root)))
             add((body or "*(unreadable)*") + "\n")
+    elif plan_filter:
+        add(f"*(no active plan matches --plan {plan_filter!r} — check the "
+            f"filter, or drop it to bundle every active plan)*\n")
     else:
         add("*(no active plan in .process-work/plans — review the diff against "
             "the checklist and rules alone, and say so in your verdict)*\n")
@@ -191,20 +204,31 @@ def build(root: Path, base: str | None) -> str:
     return "\n".join(out)
 
 
+USAGE = "usage: make_review_bundle.py [--base REF] [--plan SLUG] [-o FILE]"
+
+
 def _opt(argv: list[str], flag: str) -> str | None:
     if flag not in argv:
         return None
     i = argv.index(flag)
     if i + 1 >= len(argv):
-        raise SystemExit(f"usage: make_review_bundle.py [--base REF] [-o FILE] "
-                         f"— {flag} needs a value")
+        raise SystemExit(f"{USAGE} — {flag} needs a value")
     return argv[i + 1]
 
 
 def main(argv: list[str]) -> int:
     base = _opt(argv, "--base")
     out_file = _opt(argv, "-o")
-    text = build(_repo_root(Path.cwd()), base)
+    plan_filter = _opt(argv, "--plan")
+    # an unknown flag must be a hard error, not silently ignored — a typo'd
+    # --base would hand the reviewer a bundle diffed against the wrong ref
+    known = {"--base", "-o", "--plan"}
+    consumed = {i for f in known if f in argv
+                for i in (argv.index(f), argv.index(f) + 1)}
+    extra = [a for i, a in enumerate(argv) if i not in consumed]
+    if extra:
+        raise SystemExit(f"{USAGE} — unknown argument(s): {' '.join(extra)}")
+    text = build(_repo_root(Path.cwd()), base, plan_filter)
     if out_file:
         Path(out_file).write_text(text, encoding="utf-8")
         print(f"review bundle written to {out_file}")

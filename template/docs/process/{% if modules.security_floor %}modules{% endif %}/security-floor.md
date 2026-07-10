@@ -52,8 +52,9 @@ one-per-file registry). Absent by default; the gate is a no-op until it exists.
 `applies_to` and `exclude` are `fnmatch` globs matched against the repo-relative
 POSIX path **or** the basename — so `*.py` scans every Python file, `*test_*`
 matches a test file at any depth, and a path fragment like `src/*` targets a
-subtree. Unlike shell globbing, `*` crosses `/`. The policy file itself and the
-gate script are always excluded, so a rule never flags its own pattern text.
+subtree. Unlike shell globbing, `*` crosses `/`. The policy file itself, the
+shipped example seed and the gate script are always excluded, so a rule never
+flags its own pattern text.
 
 ## Scan scope — whole tree, not added-only
 
@@ -80,8 +81,11 @@ yields a hard finding `path:line: message [id]` plus a fix-or-bypass hint.
 **Best-effort (advisory note, exit 0 — never faked):**
 
 - no policy file yet → "no security-floor config yet".
+- a policy whose `rules` list is empty → "config has no rules".
 - `git ls-files` unavailable (not a git repo, or git absent) → "could not list
   tracked files; scan skipped" — enumeration is impossible, so a pass is not faked.
+- `git ls-files` returns nothing (nothing committed yet) → "0 tracked files
+  scanned — floor not exercised".
 - a tracked file that is not valid UTF-8 (binary) is skipped for scanning.
 - `SKIP_SECURITY_FLOOR=1` in the environment → "skipped", exit 0.
 

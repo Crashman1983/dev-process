@@ -1,7 +1,7 @@
 # Module: feature-registry
 
 Records the user-visible stories of **{{ project_name }}** and traces each to its
-acceptance criteria and tests. Runs in CI via `process-gates` and locally via
+acceptance criteria and tests. Runs via `process-gates` (in CI when a CI adapter is installed, and in the pre-push hook) and locally via
 `python scripts/process/check_feature_registry.py`.
 
 ## When a story is required
@@ -22,7 +22,8 @@ stories diff and merge independently):
 - **story** — one sentence in EARS form: *As a `<role>`, when `<trigger>`, the
   system shall `<response>`.* Wording is graded by humans, not the gate.
 - **acceptance** — a non-empty list of `{id, text}`; each `text` is a gradeable,
-  testable statement.
+  testable statement. The `id` is a naming convention for referencing criteria
+  (plans, GRADE lines); the gate validates only `text`.
 - **status** — `proposed | in-progress | done | deprecated`.
 - **tests** — paths (optionally with a `::node` selector) to the tests that
   prove the acceptance. `status: done` needs at least one.
@@ -89,7 +90,8 @@ a gate).
   `status: done` has ≥1 test; an `adr` link resolves to a file.
 - **Best-effort:** an `in-progress`/`done` story with more acceptance criteria
   than mapped tests prints a note — the missing *mapping* is visible; semantic
-  coverage stays a human judgement.
+  coverage stays a human judgement. The inverse also notes: many tests on very
+  few criteria suggests the criteria under-describe the tested behaviour.
 - **Ignored:** `*.example.json` seeds; unknown fields (cross-module forward-compat).
 
 ## Definition of Ready / Done

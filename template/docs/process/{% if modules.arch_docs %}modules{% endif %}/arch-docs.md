@@ -18,9 +18,11 @@ conversation. If the only audience is the implementers and the machine-checked
 Architecture lives in three places, one owner each (mandatory rule 4):
 
 - **Structure** — layers, boundaries, interface symbols — is the machine-checked
-  `arch` block in `ARCHITECTURE.md` (the `arch-onboarding` module verifies it
-  against real code). The overview's "building blocks" section **links** to it
-  and adds only a stakeholder gloss; it never restates the structure.
+  `arch` block in `ARCHITECTURE.md` *when the `arch-onboarding` module is
+  active* (it ships that file and verifies it against real code; without it,
+  name where your structure is defined). The overview's "building blocks"
+  section **links** there and adds only a stakeholder gloss; it never restates
+  the structure.
 - **Decisions** are ADRs under `docs/process/adr/` (`Status` + `Intent` axes).
   The overview's "decisions" section **references** load-bearing ADRs by id; it
   never restates them.
@@ -37,8 +39,9 @@ verified fact:
 
 - `[verified elsewhere]` — building blocks and decisions; the real source is
   named and linked, not restated. This gate checks that the **ADR** references
-  resolve; the building-blocks link points to `ARCHITECTURE.md`, which
-  `arch-onboarding` (not this gate) verifies against real code.
+  resolve; the building-blocks link points to the structure's owner
+  (`ARCHITECTURE.md` when `arch-onboarding` is active), which that module —
+  not this gate — verifies against real code.
 - `[review-checked]` — context, quality goals, runtime, deployment, risks,
   glossary; prose, not machine-checkable, kept honest by the review gate and its
   `review-checklist.md`.
@@ -66,6 +69,18 @@ oriented: context & scope = C4 system context / arc42 §3; quality goals =
 arc42 §1.2 + §10; building blocks = C4 containers/components / arc42 §5 (owned
 by `arch-onboarding`); runtime scenarios = arc42 §6; deployment = arc42 §7;
 decisions = arc42 §9 (owned by ADRs); risks & technical debt = arc42 §11;
-glossary = arc42 §12. The module ships no diagram generator — naming the C4
-levels is enough; a project adds diagrams with its own tooling if it wants
-them.
+glossary = arc42 §12.
+
+## Diagrams as code (convention, not gated)
+
+When a section wants a picture, write it as a **fenced Mermaid block in the
+markdown itself** — GitHub and GitLab render it natively, most doc tools via a plugin, and
+a text diagram diffs in the PR alongside the change that moved a boundary
+(the whole point: a diagram that cannot drift invisibly). Mermaid covers the
+C4-style context/container view plus sequence and state diagrams; that is
+enough here. Prose remains the primary carrier — a diagram *illustrates* a
+section, it never becomes a second owner of structure (the `arch` block and
+the ADRs own that). Binary diagram exports (draw.io PNGs, screenshots) are
+the anti-pattern this convention replaces: not diffable, not reviewable,
+stale on arrival. The gate deliberately does not parse diagrams — placeholder
+and ADR-reference honesty stay its whole job.

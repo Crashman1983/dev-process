@@ -9,8 +9,9 @@ the snapshot. Best-effort by nature (needs `gh`, auth, network) — it is not a
 gate and never blocks CI; the gate is the tested, hermetic contract.
 
 The story<->issue join comes from each registry story's `issue` field: an issue
-that no story links is reported so you can materialize a story for it (the gate
-also flags it). Stdlib + `gh`.
+that no story links is reported HERE ONLY — it is not written to the snapshot,
+so the offline gate cannot see it; materialize a story when the sync reports
+one. Stdlib + `gh`.
 
 Usage: python scripts/process/gh_sync.py [OWNER/REPO]
        (repo falls back to the github_repo copier answer)

@@ -37,11 +37,9 @@ DEFAULT_SBOM_PATHS = ["bom.json", "**/bom.json", "**/*.cdx.json", "sbom/*.json"]
 # Each manifest kind is listed both bare (root-level) and under **/ (nested) —
 # fnmatch("package.json", "**/package.json") is False, so a root manifest needs
 # its own bare entry or the coverage check silently no-ops on the common layout.
-DEFAULT_MANIFESTS = ["package.json", "**/package.json", "pom.xml", "**/pom.xml",
-                     "requirements.txt", "**/requirements.txt",
-                     "build.gradle", "**/build.gradle",
-                     "build.gradle.kts", "**/build.gradle.kts",
-                     "go.mod", "**/go.mod"]
+# Only the kinds _coverage_gaps() can actually parse are listed — collecting a
+# manifest no parser reads would imply coverage that does not exist.
+DEFAULT_MANIFESTS = ["package.json", "**/package.json", "pom.xml", "**/pom.xml"]
 
 
 def _tracked_files(root: Path) -> list[str] | None:

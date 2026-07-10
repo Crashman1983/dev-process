@@ -45,7 +45,8 @@ the grammar, or whose `verdict`/`action`/`source` is outside the enums, or a
 non-numeric `round` — each with file:line. A grade that does not parse is
 silent telemetry loss: written, never counted. Non-UTF-8 journals fail.
 Malformed calibration cases (invalid JSON, `id` ≠ filename stem, missing
-`ground_truth`, out-of-enum verdicts) fail.
+`ground_truth`, out-of-enum verdicts, or a `grader_verdict` whose shape or
+criteria set does not match `ground_truth`) fail.
 
 **Best-effort (advisory note, never fails CI):** zero GRADE lines repo-wide
 ("expected pre-adoption") and an empty calibration suite — the trace only
@@ -59,10 +60,12 @@ invisible to gate and cockpit (quote literal GRADE examples only there).
 ## The KPI cockpit
 
 `scripts/process/process_kpis.py` (read-only, never a gate, not in CI) cuts
-the existing traces into decision families. Every number prints with a
+the existing traces into decision families. Measured numbers print with a
 confidence tag — `high` (direct measure, enough n), `medium` (sample-biased),
 `low` (proxy or thin n; proxies never reach `high`) — and a confidence-gated
 action: at `low` the only action is to collect more data. n before percent.
+The two threshold families (`convergence`, `suite`) print pass/not-met against
+their documented thresholds instead of a confidence tag.
 
 | family | measures | action (threshold → act) |
 |---|---|---|
@@ -73,6 +76,36 @@ action: at `low` the only action is to collect more data. n before percent.
 | `cost` | rework episodes (kickback round>1 → fixed); optional `--transcripts DIR` token medians (harness-specific, `~approx`) | rework>0 → find the criterion that kicks back repeatedly |
 | `cfr` | DORA change failure rate: `feat:` with a corrective `fix:` ≤7 d sharing a code file (proxy) | trend over ≥3 windows only; rising despite catch>0 → tighten the test/review gate |
 | `friction` | bypass rate — deliberately **not instrumented** | build the bypass event log only when the other families prove friction matters |
+
+## What the numbers can say — and what they cannot (honest ceiling)
+
+Every cockpit number is shaped by project-individual choices: how fine the
+acceptance criteria are cut, what tier mix the work happens to have, how old
+the codebase is, how strictly the grader words verdicts. These confounders do
+not cancel out across projects. The consequences are binding:
+
+- **Within-project only.** A number compares a project against its *own*
+  baseline over time. Cross-project comparison ("project A has 40% catch rate,
+  project B has 25%, so A's process is better") is meaningless — the number
+  difference is dominated by criterion granularity and domain, not process
+  quality. The cockpit deliberately has no export/benchmark format.
+- **Trends and ratios, not absolutes.** An absolute value carries no
+  information until the project has its own baseline (typically the first
+  weeks of traces). Act on direction — catch rate falling, rework rising,
+  convergence degrading — and on within-project ratios, never on the raw
+  number against a universal threshold. The thresholds in the cockpit are
+  provisional starting points to be recalibrated per project, not standards.
+- **Events are the robust class.** Counting discrete events survives
+  granularity differences that break rates: a **catch** (a grading source or
+  gate stopped a real defect before merge) and an **escape** (a defect reached
+  the main branch and needed a corrective fix) are countable facts. When in
+  doubt which number to trust, trust the raw event counts over any percentage
+  derived from them.
+- **Goodhart and self-grading.** Grader and graded are often the same model
+  family; a metric that becomes a target stops measuring. The numbers steer
+  *attention* — which grading source to keep, which criterion thrashes — they
+  never grade people, projects, or model choices, and no cockpit value is a
+  target to optimize toward.
 
 ## Grader trust: the calibration suite
 

@@ -6,12 +6,19 @@ git history, `gh` issue data, optional harness transcripts) and cuts them into
 decision families. It is not a measurement pipeline: no new instrumentation,
 no hook/gate/daemon, only reading. It never blocks and never mutates.
 
-Guiding principle: every number carries confidence and an action. A number
-that yields no action does not belong in the cockpit. Confidence is `high`
+Guiding principle: measured numbers carry confidence and an action; the two
+threshold families (convergence, suite) print pass/not-met against their
+documented thresholds instead. A number that yields no action does not belong
+in the cockpit. Confidence is `high`
 (direct measure, enough n), `medium` (sample-biased), or `low` (proxy or thin
-n) — proxy measures never reach `high`, confounding cannot be filtered out.
+n) — proxy measures never reach `high`, because confounding cannot be filtered out.
 At `low`, the only action is to collect more data; never act on a thin or
 biased number. n before percent.
+
+Numbers are within-project only: they compare a project against its own
+baseline over time (trends, ratios, catch/escape events). Cross-project
+comparison is meaningless — criterion granularity and domain dominate the
+difference. See "honest ceiling" in the module doc.
 
   process_kpis.py effectiveness [JOURNAL ...]   # what do the graders catch?
   process_kpis.py convergence   [JOURNAL ...]   # do kickbacks converge?

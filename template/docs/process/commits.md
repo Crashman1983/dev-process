@@ -5,6 +5,9 @@
 Conventional Commits: `type: imperative subject` where `type` is one of
 `feat | fix | docs | refactor | test | chore | perf`. Subject under 72 characters,
 imperative mood, no trailing period. Body (optional) explains *why*, wraps at ~72.
+Mention the plan slug or issue ref (subject or body) when the commit implements
+planned work — that mention is what lets `trace.py` correlate commits with the
+story/plan/review chain.
 
 ## Atomicity
 
@@ -17,7 +20,10 @@ behaviors is not. A skipped gate or deliberately dropped scope is named in the b
 
 No direct commits to the main branch. The invariant is *isolation*: one feature
 branch per effort, no cross-contamination between parallel efforts. A feature branch
-is the default. Git worktrees are one isolation technique for when several agents or
+is the default — and it lives **days, not weeks**: the further a branch drifts from
+main, the more the merge costs and the later the gates see the work (the small-batch
+finding behind trunk-based development). A branch that keeps growing is a scope
+signal — split the work, merge what is green. Git worktrees are one isolation technique for when several agents or
 tasks share a single machine and clone — separate clones, sessions, or sandboxes
 satisfy the invariant just as well; the mechanism is the environment's choice. How
 parallel efforts stay contention-free during execution and serialize at the merge is
@@ -43,6 +49,9 @@ the active directory is never presence-checked. Do it before the merge, while yo
 can still commit on the branch; archiving after the merge would need a direct
 commit to the main branch, which the branching rule (and the `git-hooks`
 pre-commit) forbid.
+
+What a merged state becomes for consumers — version, changelog, tag — is the
+release ritual: `docs/process/releases.md`.
 
 When the optional `git-hooks` module is installed, a `pre-commit` hook enforces the
 no-direct-main rule locally (bypassable for automation, and for the one-time

@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -467,3 +468,39 @@ def test_dangling_adr_reported_even_with_invalid_pattern(render, tmp_path):
     flat = " ".join(r.stdout.split())
     assert "not a valid regex" in flat
     assert "no such decision record" in flat
+
+
+# --- SP50 audit: silent-neuter disclosure + backtracking budget -------------
+
+
+def test_exclude_star_discloses_zero_in_scope(render, tmp_path):
+    # exclude:["*"] neuters the whole floor — that must be an advisory note,
+    # never a bare green
+    out = _render(render, tmp_path)
+    repo = tmp_path / "repo"
+    _git_repo(repo)
+    _write_config(repo, {"rules": [{"id": "r", "pattern": "boom",
+                                    "message": "no boom"}],
+                         "exclude": ["*"]})
+    (repo / "app.py").write_text("boom\n")
+    _track(repo)
+    r = _run(out, repo)
+    assert r.returncode == 0, r.stdout
+    assert "0 files in scope" in r.stdout
+
+
+def test_pathological_pattern_fails_budget_not_hangs(render, tmp_path):
+    # a rule that exhausts its wall-clock budget is a hard, named failure —
+    # never an open-ended CI hang (budget forced to 0 for determinism)
+    out = _render(render, tmp_path)
+    repo = tmp_path / "repo"
+    _git_repo(repo)
+    _write_config(repo, {"rules": [{"id": "slow", "pattern": "(a+)+$",
+                                    "message": "pathological"}]})
+    (repo / "app.py").write_text("line one\nline two\n")
+    _track(repo)
+    env = dict(os.environ)
+    env["SECURITY_FLOOR_RULE_BUDGET_S"] = "0"
+    r = _run(out, repo, env=env)
+    assert r.returncode == 1, r.stdout
+    assert "scan budget" in r.stdout and "slow" in r.stdout

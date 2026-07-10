@@ -43,14 +43,16 @@ adopter recipe, not part of this module.
   "issues": [
     {"number": 42, "story": "STORY-0001", "title": "…",
      "state": "open", "status": "in-progress",
-     "blocked_by": null, "parent": null, "board_status": null}
+     "blocked_by": null, "parent": null, "board_status": null,
+     "dor": {"typed": true, "ears": true, "deviation": false}}
   ]
 }
 ```
 
 - `story` is the join key — filled from each story's `issue` ref. An issue with
-  no story yet is reported by the sync (and flagged by the gate) so you
-  materialize a story for it.
+  no story yet is reported by the sync (it is not written into the snapshot, so
+  the offline gate cannot see it) — materialize a story for it when the sync
+  reports one.
 - `state` is GitHub open/closed; `status` is the process status (from a
   `status:*` label, else derived).
 - `blocked_by` / `parent` / `board_status` are **nullable slots**, each
@@ -114,11 +116,11 @@ Columns match case-insensitively; `deprecated` stories are off the board
 (exempt). The gate **hard-fails** an unknown column or a column whose implied
 status disagrees with the story — so column, status, and issue state stay
 mutually consistent, all offline. `gh_board.py <project-number> [--owner OWNER]`
-reads the board into the snapshot (this half is real). `--push` is a **deliberate
-no-op extension point**: moving a card is a GitHub write that needs your project's
-Status-field and option ids, so the tool refuses to guess — it prints a notice and
-moves nothing until you wire it. Card *movement is not shipped*; column *reading*
-and *consistency gating* are.
+only *reads* the board into the snapshot — moving cards stays a manual (or
+GitHub-project-automation) act; the gate flags any divergence either way. Note
+the asymmetry: the `status:*` **label** is what `gh_sync.py` derives the story
+status from — the board column is a checked *view* of that status, never a
+second writer.
 
 ## The alternative
 

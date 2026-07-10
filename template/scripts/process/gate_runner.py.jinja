@@ -7,9 +7,12 @@ hard failure, never an empty gate list — otherwise enforcement can disappear
 silently while reporting green."""
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
+
+GATE_TIMEOUT_S = 600  # a wedged gate (e.g. pathological regex) must fail, not hang CI
 
 try:
     import yaml
@@ -89,10 +92,29 @@ def main() -> int:
         return 0
     warn = "--warn" in sys.argv
     failed = []
+    # don't litter the repo with __pycache__ from the gates' sibling imports
+    env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
     for name in active:
         _key, cmd = GATES[name]
+        script = root / cmd[1]
+        if not script.is_file():
+            # a module enabled in the manifest whose gate script is missing is
+            # almost always a hand-edited .copier-answers.yml (copier then never
+            # renders the module) — name the cause, not just the missing file
+            print(f"gate-runner: {name} is enabled in the manifest but "
+                  f"{cmd[1]} is missing — if .copier-answers.yml was edited by "
+                  f"hand, revert it and enable the module via `copier update "
+                  f"--data` instead (see BOOTSTRAP 'Later')", file=sys.stderr)
+            failed.append(name)
+            continue
         print(f"== running {name} ==")
-        if subprocess.run(cmd, cwd=root).returncode != 0:
+        try:
+            rc = subprocess.run(cmd, cwd=root, env=env, timeout=GATE_TIMEOUT_S).returncode
+        except subprocess.TimeoutExpired:
+            print(f"gate-runner: {name} exceeded {GATE_TIMEOUT_S}s and was killed "
+                  f"— a hanging gate is a failure, not a wait", file=sys.stderr)
+            rc = 1
+        if rc != 0:
             failed.append(name)
     if failed:
         if warn:

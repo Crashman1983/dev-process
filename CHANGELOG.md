@@ -4,7 +4,7 @@ Die vollständige Sub-Projekt-Historie, aus dem README hierher ausgelagert
 (das README orientiert, dieses Dokument archiviert). Neue Releases nennen im
 README nur die aktuelle Version und schreiben die Historie hier fort.
 
-## Status-Narrativ (SP1–SP47, chronologisch)
+## Status-Narrativ (chronologisch)
 
 SP1 (Foundation) + SP2 (Architektur-Onboarding) + SP3
 (feature-registry, github-issues, contracts-drift) + SP4 (git-hooks,
@@ -149,6 +149,81 @@ REVIEW-Hälfte begrenzt + FINDING-Tokens per Template-Test an check_issues
 gepinnt; adr-Auflösung sieht rohe Regeln, Deviation nur als echte Überschrift,
 dor-Slot mit exaktem Key-Set; Doku-Kohärenz: bedingter arch-onboarding-Verweis,
 Hard-Path-Klausel in github-issues).
+
+SP48 (Telemetry-Ehrlichkeit — die Individualität von Projekten als bindende
+Decke dokumentiert: Zahlen gelten nur projektintern gegen die eigene Baseline
+(Trends, Verhältnisse, Catch/Escape-Ereignisse als robusteste Klasse), kein
+projektübergreifendes Benchmarking, Cockpit-Schwellen sind Startwerte zur
+Rekalibrierung, Goodhart/Self-Grading-Vorbehalt; Moduldoc-Sektion „honest
+ceiling" + Cockpit-Docstring + README; Moduldoc + Cockpit per
+Template-Test gepinnt)
+ausgeliefert, `v1.33.0`.
+
+SP49 (KISS-Cleanup — ein Owner je Verhalten, aus drei parallelen
+Tiefen-Sweeps (Dead Code, Duplikate, Doku-vs-Code): check_review besitzt die
+Plan-Feld-Grammatik und _unfenced (check_issues/trace importieren; Issue-Regex
+vereinheitlicht, Cross-Repo-Refs clearen jetzt auch das Review-Gate),
+check_decisions besitzt adr_exists (3 divergente Kopien ersetzt), das
+Review-Bundle importiert die Kernel-Block-Extraktion (Zweitblock → ehrlich
+unavailable statt still der erste), gh_json ein Owner im github-issues-Modul;
+nicht-importierbare Zwillinge (sbom/security-floor-Git-Helfer,
+EARS/Epic-Heuristik) per Template-Test gepinnt. Funktional: sbom-Beispiel-Policy
+no-opte auf Root-Manifesten (bare+**/-Paare), tote Manifest-Globs ohne Parser
+entfernt, `sbom` fehlte in allen drei Adapter-Modullisten (Test pinnt auf
+copier.yml), gh_board --push-No-op-Stub entfernt, github-master meldet leeren
+Mirror advisory statt still OK, trace-FINDING-Matcher verlangt key=value; dazu
+12 Doku-Kohärenz-Fixes ("one tier weaker" gestrichen, DoR/DoD-Abweichungskanäle
+getrennt, Copilot-Review-Prompt trägt die Grammatik, u. a.)) ausgeliefert,
+`v1.34.0`.
+
+SP50 (Tiefenaudit über den bereinigten Stand, vier unabhängige Blickwinkel
+mit Ausführungsmandat — adversarial, Kohärenz, Fresh-Adopter, Robustheit:
+1 Blocker geschlossen (Fence-Tracking längenbewusst — gequotete Waiver in
+verschachtelten Fences clearten Review-/Issue-Gate), SP49-Regression gefixt
+(nur echte Issue-Refs zählen als clearende work-ids; Ref-Grammatik nach
+check_review verschoben, ein Owner), OSError-Diagnosen statt Tracebacks,
+security-floor mit Regex-Backtracking-Budget + Zero-in-Scope-Note,
+gate_runner mit Gate-Timeout + bytecode-frei, letzte adr_exists/_unfenced-
+Kopien konsolidiert, gh_board-Argument-Hygiene, BOOTSTRAP-Update-Rezept für
+HEAD-Installs, start-here-Reihenfolge + `git init -b main`,
+Commit-Traceability-Konvention; Adopter-Verdict: Solo-Dev erreicht grünen
+Gate-Lauf + ersten reviewten Change ohne Hilfe; Report
+`.process-work/reviews/2026-07-10-sp50-deep-audit.md`) ausgeliefert,
+`v1.34.1`.
+
+SP51 (State-of-the-art-Abgleich geschlossen — sechs Lücken aus der Recherche
+(DORA, Diátaxis/arc42, Supply-Chain, Diagrams-as-Code, KI-Guardrails):
+`testing.md` als Core-Doc (Suite-Form als Pyramiden-Heuristik, Property-based,
+Regression-Pins, Mutation-Testing auf kritischer Logik, ehrliche
+Coverage-Decke — Trend statt Schwellen-Gate; via Regel 5 +
+Review-Checkliste verdrahtet), `releases.md` als Core-Doc (SemVer,
+kuratiertes Changelog, Tag-Ritual mit Versions-Dreiklang-Invariante;
+via commits.md verdrahtet), Threat-Frage für Tier 3 in Brainstorm +
+Review-Checkliste („Was könnte ein Angreifer mit dieser Änderung?" —
+Assets/Inputs/Trust-Boundaries), Diagrams-as-Code-Konvention (Mermaid im
+Markdown, diffbar im PR; Gate parst weiterhin keine Diagramme) in
+arch-docs-Moduldoc + Overview-Scaffold, Plattform-Hygiene im
+Onboarding-DoR (Secret Scanning + Push Protection, Dependabot/Renovate —
+ehrlich als Netz-Dienste gerahmt, kein hermetisches Gate),
+Branch-Lebensdauer „Tage, nicht Wochen" in commits.md (Small-Batch-Befund
+hinter Trunk-based)) ausgeliefert, `v1.35.0`.
+
+SP52 (Divers-Audit über v1.35.0 — vier bewusst neue Blickwinkel: Pragmatiker/
+Ökonomie (Verdict „Prozess mit ungewöhnlich wenig Theater": ~5.4k Token
+Lese-Steuer/Session, Gates 0.2–0.8s, Over-Engineering-Kandidaten
+freigesprochen), Multi-Harness-Degradation (9 Render-Kombos), Lebenszyklus
+(Upgrades v1.13.0→HEAD konfliktfrei byte-identisch; 10x-Wachstum <0.9s) und
+Technical Writer über die SP48–51-Prosa. Gefixt: Copilot-Anker erhält die
+Route zu workflow/commits, BOOTSTRAP-„Later" ohne --skip (stale Kernel nach
+Upgrade reproduziert) + Hooks-Neuinstallations-Hinweis, trace ohne
+Bare-Digit-Rauschen (#7 matchte 68/68 Pläne), Bundle mit --plan-Filter und
+hartem Unknown-Flag-Fehler, Soft-Note für nicht archivierte Tier-2+-Pläne,
+doc-drift scannt die Copilot-instructions-Datei, gate_runner benennt die
+Hand-Edit-Ursache, No-CI-DoR erfüllbar (Hooks als Authority), Quick-Fragen
+mit einem Owner in workflow.md, Retention-Ehrlichkeit, R2 besitzt die vier
+Akzeptanz-Fälle, ~15 Writer-Präzisionsfixes; Report
+`.process-work/reviews/2026-07-10-sp52-diverse-audit.md`) ausgeliefert,
+`v1.35.1`.
 
 ## Sub-Projekt-Tabelle (SP1–SP24)
 

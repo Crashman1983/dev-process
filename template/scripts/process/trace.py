@@ -39,13 +39,19 @@ JOURNAL = Path(".process-work/journal")
 REVIEWS = Path(".process-work/reviews")
 SNAPSHOT = Path(".process-work/github-snapshot.json")
 
+# the review gate (core, co-rendered) owns the plan-field grammar — import,
+# don't copy (one owner per behavior)
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling import
+from check_review import _LEAD  # noqa: E402
+from check_review import ISSUE_DECL as _PLAN_ISSUE  # noqa: E402
+from check_review import TIER_DECL as _PLAN_TIER  # noqa: E402
+
 _STORY = re.compile(r"^STORY-\d{4}$")
 _ISSUE = re.compile(r"^#?(\d+)$")
-_LEAD = r"^\s*(?:[-*+]\s+)?[*_]*"
-_PLAN_TIER = re.compile(_LEAD + r"tier[*_]*\s*:\s*[*_]*\s*(\d+)\b", re.I | re.M)
-_PLAN_ISSUE = re.compile(_LEAD + r"issue[*_]*\s*:\s*(\S+)", re.I | re.M)
 _REVIEW = re.compile(r"^\s*(?:[-*+]\s+)?[*_]*REVIEW\s+(.*)$")
-_FINDING = re.compile(r"^\s*(?:[-*+]\s+)?FINDING\s+(.*)$")
+# key=value first token required — prose that merely starts with the word
+# FINDING is not a structured entry (same guard as the issue gate's lint)
+_FINDING = re.compile(r"^\s*(?:[-*+]\s+)?[*_]*FINDING\s+(\S+=.*)$")
 _RPT_HEAD = re.compile(_LEAD + r"(review|audit|work|issue|campaign)[*_]*\s*:\s*(.+)$", re.I)
 
 
@@ -121,17 +127,33 @@ def issue_details(root: Path, num: str) -> tuple[dict | None, str | None]:
         return None, None
 
 
+def _content_keys(keys: list[str]) -> list[str]:
+    """Keys distinctive enough for matching over prose. A bare digit ('7')
+    substring-matches every date, step number and '#107' — issue keys only
+    count in their '#N' form (same guard matching_commits applies)."""
+    return [k for k in keys if not k.isdigit()]
+
+
+def _key_in(key: str, text: str) -> bool:
+    """Substring match, except a '#N' key must not stop mid-number —
+    '#7' matches '#7' and '#7,' but not '#70'."""
+    if key.startswith("#") and key[1:].isdigit():
+        return re.search(re.escape(key) + r"(?!\d)", text) is not None
+    return key in text
+
+
 def matching_plans(root: Path, keys: list[str]) -> list[dict]:
     out = []
     base = root / PLANS
     if not base.is_dir():
         return out
+    ckeys = _content_keys(keys)
     for p in sorted(base.rglob("*.md")):
         try:
             text = p.read_text(encoding="utf-8")
         except (UnicodeDecodeError, OSError):
             continue
-        hit = any(k in p.name for k in keys) or any(k in text for k in keys)
+        hit = any(k in p.name for k in ckeys) or any(_key_in(k, text) for k in ckeys)
         if not hit:
             continue
         tier = _PLAN_TIER.search(text)
@@ -162,13 +184,14 @@ def matching_reviews(root: Path, keys: list[str]) -> tuple[list[str], list[dict]
                     lines.append("REVIEW " + m.group(1).strip())
     reports: list[dict] = []
     rdir = root / REVIEWS
+    ckeys = _content_keys(keys)
     if rdir.is_dir():
         for p in sorted(rdir.glob("*.md")):
             try:
                 text = p.read_text(encoding="utf-8")
             except (UnicodeDecodeError, OSError):
                 continue
-            if not any(k in text for k in keys):
+            if not any(_key_in(k, text) for k in ckeys):
                 continue
             head = {m.group(1).lower(): m.group(2).strip()
                     for m in (_RPT_HEAD.match(ln) for ln in text.splitlines()[:12]) if m}

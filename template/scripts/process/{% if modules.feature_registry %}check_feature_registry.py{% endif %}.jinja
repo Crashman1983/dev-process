@@ -15,8 +15,12 @@ import sys
 from pathlib import Path
 
 REGISTRY_DIR = "docs/process/feature-registry"
-ADR_DIR = "docs/process/adr"
 STATUSES = {"proposed", "in-progress", "done", "deprecated"}
+
+# the decision-records gate (core, always rendered) owns ADR file identity —
+# import, don't copy (one owner per behavior)
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling import
+from check_decisions import ADR_DIR, adr_exists as _adr_exists  # noqa: E402
 ID_RE = re.compile(r"^STORY-\d{4}$")
 
 # Advisory only: a story with many mapped tests but very few acceptance criteria
@@ -31,13 +35,6 @@ def _story_files(root: Path) -> list[Path]:
     if not reg.is_dir():
         return []
     return sorted(p for p in reg.glob("*.json") if not p.name.endswith(".example.json"))
-
-
-def _adr_exists(root: Path, adr: object) -> bool:
-    m = re.search(r"\d+", str(adr))
-    if not m:
-        return False
-    return bool(list((root / ADR_DIR).glob(f"adr-{int(m.group()):04d}-*.md")))
 
 
 def _check_story(root: Path, path: Path, seen_ids: dict,

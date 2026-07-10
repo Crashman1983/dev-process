@@ -1,6 +1,16 @@
 {
-  "sbom_paths": ["bom.json", "**/bom.json", "**/*.cdx.json", "sbom/*.json"],
-  "manifest_paths": ["**/package.json", "**/pom.xml", "**/requirements.txt", "**/build.gradle", "**/build.gradle.kts", "**/go.mod"],
+  "sbom_paths": [
+    "bom.json",
+    "**/bom.json",
+    "**/*.cdx.json",
+    "sbom/*.json"
+  ],
+  "manifest_paths": [
+    "package.json",
+    "**/package.json",
+    "pom.xml",
+    "**/pom.xml"
+  ],
   "allowed_licenses": [
     "Apache-2.0",
     "MIT",

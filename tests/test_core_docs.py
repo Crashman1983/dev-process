@@ -7,6 +7,8 @@ CORE = [
     "workflow.md",
     "commits.md",
     "code-craft.md",
+    "testing.md",
+    "releases.md",
     "verification-independence.md",
     "review-checklist.md",
     "definition-of-ready-and-done.md",
@@ -397,3 +399,59 @@ def test_tier_banding_consistent_across_docs(render, tmp_path):
     assert "Tier 1–2 a fresh process" not in rt
     assert "Tier 0–1 an in-context self-check" in rt
     assert "Tier 0–1" in vi and "self-check" in vi
+
+
+# --- SP51: state-of-the-art gap docs -----------------------------------------
+
+
+def test_testing_doc_carries_the_methodology(render, tmp_path):
+    out = render(tmp_path, {"project_name": "demo"})
+    text = (out / "docs/process/testing.md").read_text()
+    # shape, beyond-happy-path patterns, and the coverage honesty
+    assert "Unit" in text and "Integration" in text and "end-to-end" in text.lower()
+    assert "Property-based" in text
+    assert "Regression pins" in text
+    assert "mutation testing" in text.lower()
+    assert "no universal threshold\ngate" in text.lower() or "no universal threshold gate" in text.lower()
+    assert "flaky test is a defect" in text
+    # wired: rule 5 points here, the checklist asks the shape question
+    rules = (out / "docs/process/mandatory-rules.md").read_text()
+    assert "docs/process/testing.md" in rules
+    checklist = (out / "docs/process/review-checklist.md").read_text()
+    assert "testing.md" in checklist
+
+
+def test_releases_doc_carries_the_ritual(render, tmp_path):
+    out = render(tmp_path, {"project_name": "demo"})
+    text = (out / "docs/process/releases.md").read_text()
+    assert "MAJOR" in text and "MINOR" in text and "PATCH" in text
+    assert "CHANGELOG.md" in text
+    assert "Tag the commit that lands on the main branch" in text
+    assert "immutable" in text  # tags never move
+    # wired from commits.md
+    commits = (out / "docs/process/commits.md").read_text()
+    assert "docs/process/releases.md" in commits
+
+
+def test_threat_question_at_tier3(render, tmp_path):
+    out = render(tmp_path, {"project_name": "demo"})
+    checklist = (out / "docs/process/review-checklist.md").read_text()
+    assert "what could an attacker do" in checklist.lower()
+    assert "trust boundary" in checklist
+    workflow = (out / "docs/process/workflow.md").read_text()
+    assert "what could an attacker do" in workflow.lower()
+
+
+def test_branch_lifetime_guidance(render, tmp_path):
+    out = render(tmp_path, {"project_name": "demo"})
+    commits = (out / "docs/process/commits.md").read_text()
+    assert "days, not weeks" in commits
+
+
+def test_platform_hygiene_in_onboarding_dor(render, tmp_path):
+    out = render(tmp_path, {"project_name": "demo"})
+    text = (out / "docs/process/start-here.md").read_text()
+    assert "secret scanning" in text and "push protection" in text
+    assert "Dependabot" in text
+    # honest framing: platform services, not hermetic gates
+    assert "not hermetic gates" in text
