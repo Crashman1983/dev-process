@@ -36,11 +36,11 @@ import subprocess
 import sys
 from pathlib import Path
 
-# check_review.py owns the REVIEW grammar; importing it keeps that half of the
-# instructions byte-honest with what the gate actually parses
+# check_review.py owns the REVIEW grammar; check_kernel.py owns kernel-block
+# extraction — importing both keeps this tool byte-honest with the gates
+import check_kernel as _kernel_gate
 import check_review as _review_gate
 
-KERNEL_DOC = "docs/process/kernel.md"
 CHECKLIST = "docs/process/review-checklist.md"
 PRODUCT = "PRODUCT.md"
 PLANS = ".process-work/plans"
@@ -56,13 +56,14 @@ def _read(root: Path, rel: str) -> str | None:
 
 
 def _kernel_block(root: Path) -> str | None:
-    text = _read(root, KERNEL_DOC)
+    text = _read(root, _kernel_gate.KERNEL_DOC)
     if text is None:
         return None
-    start, end = "<!-- KERNEL:START -->", "<!-- KERNEL:END -->"
-    if start in text and end in text:
-        return text.split(start, 1)[1].split(end, 1)[0].strip()
-    return None
+    # >1 START marker is ambiguous (the kernel gate hard-fails it) — refusing
+    # here beats silently bundling whichever block happens to come first
+    if text.count(_kernel_gate._START) > 1:
+        return None
+    return _kernel_gate._block(text)
 
 
 def _git(root: Path, *args: str) -> str | None:

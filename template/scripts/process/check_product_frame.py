@@ -34,8 +34,12 @@ import sys
 from pathlib import Path
 
 FRAME = "PRODUCT.md"
-ADR_DIR = "docs/process/adr"
 REGISTRY_DIR = "docs/process/feature-registry"
+
+# the decision-records gate (core, co-rendered) owns ADR file identity —
+# import, don't copy (one owner per behavior)
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling import
+from check_decisions import ADR_DIR, adr_exists  # noqa: E402
 
 STATUS = re.compile(r"^\s*(?:[-*+]\s+)?[*_]*status[*_]*:\s*(.+?)\s*$", re.MULTILINE)
 STATES = {"not-onboarded", "onboarded"}
@@ -65,14 +69,6 @@ def _unfenced(text: str) -> str:
         if fence is None:
             out.append(line)
     return "".join(out)
-
-
-def _adr_exists(root: Path, num: str) -> bool:
-    d = root / ADR_DIR
-    for width in {num, num.zfill(4)}:
-        if any(d.glob(f"adr-{width}-*.md")):
-            return True
-    return False
 
 
 def _story_ids(root: Path) -> set[str]:
@@ -141,7 +137,7 @@ def check(root: Path) -> tuple[list[str], list[str]]:
                         f"{', '.join(left)}")
 
     for ref in ADR_REF.finditer(text):
-        if not _adr_exists(root, ref.group(1)):
+        if not adr_exists(root, ref.group(1)):
             hard.append(f"{FRAME}: ADR-{ref.group(1)} referenced but no "
                         f"{ADR_DIR}/adr-{ref.group(1)}-*.md exists")
 

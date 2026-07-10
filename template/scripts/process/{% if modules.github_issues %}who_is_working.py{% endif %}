@@ -28,6 +28,12 @@ import re
 import subprocess
 import sys
 from datetime import datetime, timezone
+from pathlib import Path
+
+# attention.py (same module, always co-rendered) owns the gh JSON wrapper —
+# import, don't copy (one owner per behavior)
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling import
+from attention import gh_json  # noqa: E402
 
 ACTIVE_STATUS = {
     "status:in-progress",
@@ -119,15 +125,7 @@ def feature_branches(ls_remote: str, prefixes: tuple[str, ...] = BRANCH_PREFIXES
 
 
 # ------------------------------------------------------------------------ i/o
-
-def gh_json(*args: str):
-    """Run a gh command returning JSON; None on any failure (best-effort)."""
-    try:
-        out = subprocess.run(["gh", *args], check=True,
-                             capture_output=True, text=True).stdout
-        return json.loads(out) if out.strip() else []
-    except (subprocess.CalledProcessError, FileNotFoundError, json.JSONDecodeError):
-        return None
+# gh_json comes from attention.py (import at top) — one owner for the wrapper
 
 
 def git(*args: str) -> str | None:

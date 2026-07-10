@@ -16,7 +16,11 @@ import sys
 from pathlib import Path
 
 CONFIG = "docs/process/security-floor.json"
-ADR_DIR = "docs/process/adr"
+
+# the decision-records gate (core, always rendered) owns ADR file identity —
+# import, don't copy (one owner per behavior)
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling import
+from check_decisions import ADR_DIR, adr_exists as _adr_exists  # noqa: E402
 # never scan the policy file itself (it holds the patterns), the shipped seed the
 # doc says to copy, or the gate script — a rule must not flag its own tooling.
 SELF_EXCLUDE = {
@@ -26,12 +30,12 @@ SELF_EXCLUDE = {
 }
 
 
+# kept byte-identical with check_sbom.py's twin (independent render units —
+# neither module may import the other); tests/test_one_owner.py pins this
 def _tracked_files(root: Path) -> list[str] | None:
     try:
-        r = subprocess.run(
-            ["git", "-C", str(root), "ls-files", "-z"],
-            capture_output=True, timeout=30,
-        )
+        r = subprocess.run(["git", "-C", str(root), "ls-files", "-z"],
+                           capture_output=True, timeout=30)
     except (OSError, subprocess.TimeoutExpired):
         return None
     if r.returncode != 0:
@@ -118,15 +122,6 @@ def _validate(cfg: dict) -> tuple[list[dict], list[str], list[str]]:
         compiled.append({"id": rid, "regex": regex, "applies_to": applies,
                          "message": message, "adr": adr})
     return compiled, exclude, hard
-
-
-def _adr_exists(root: Path, adr: str) -> bool:
-    """Same resolution the feature-registry gate uses: any digits in the ref
-    select docs/process/adr/adr-NNNN-*.md."""
-    m = re.search(r"\d+", adr)
-    if not m:
-        return False
-    return bool(list((root / ADR_DIR).glob(f"adr-{int(m.group()):04d}-*.md")))
 
 
 def check(root: Path) -> tuple[list[str], list[str]]:

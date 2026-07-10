@@ -39,10 +39,12 @@ INDEP_TOKENS = {"bundle", "non-implementing", "cross-model", "single-family"}
 VERDICTS = {"pass", "block"}
 # tolerant of a leading list bullet and **bold**/_emphasis_ on the key, and of
 # a trailing annotation — a bulleted `- tier: 3` must not escape the presence
-# check (a false-green). Kept identical to the issue gate's plan-field matchers.
+# check (a false-green). This gate OWNS the plan-field grammar; the issue gate
+# and trace.py import these matchers instead of keeping copies in sync.
 _LEAD = r"^\s*(?:[-*+]\s+)?[*_]*"
 TIER_DECL = re.compile(_LEAD + r"tier[*_]*\s*:\s*[*_]*\s*(\d+)\b", re.IGNORECASE | re.MULTILINE)
-ISSUE_DECL = re.compile(_LEAD + r"issue[*_]*\s*:\s*#?(\d+)\b", re.IGNORECASE | re.MULTILINE)
+ISSUE_DECL = re.compile(_LEAD + r"issue[*_]*\s*:\s*(\S+)", re.IGNORECASE | re.MULTILINE)
+_REF_NUM = re.compile(r"#?(\d+)$")  # the number in '#42', 'owner/repo#42', '.../issues/42'
 WAIVED = re.compile(_LEAD + r"review-waived[*_]*\s*:\s*\S", re.IGNORECASE | re.MULTILINE)
 DATE_PREFIX = re.compile(r"^\d{4}-\d{2}-\d{2}-")
 
@@ -182,7 +184,13 @@ def _plan_work_ids(stem: str, text: str, *, include_dedated: bool) -> set[str]:
     if include_dedated:
         ids.add(DATE_PREFIX.sub("", stem))
     for m in ISSUE_DECL.finditer(text):
-        ids.add(m.group(1))
+        tok = m.group(1)
+        ids.add(tok)
+        # a cross-repo ref or URL still resolves to its number, so a REVIEW
+        # written as `work=42` matches `issue: owner/repo#42` (was digits-only)
+        nm = _REF_NUM.search(tok)
+        if nm:
+            ids.add(nm.group(1))
     return ids
 
 

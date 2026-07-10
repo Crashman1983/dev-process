@@ -40,7 +40,6 @@ def test_dropped_rule_fails(render, tmp_path):
     anchor = out / "CLAUDE.md"
     text = anchor.read_text()
     # drop a line from inside the kernel block (a rule silently removed)
-    block = mod._block(text)
     tampered = text.replace("6. Root cause before symptom.", "")
     assert tampered != text
     anchor.write_text(tampered)

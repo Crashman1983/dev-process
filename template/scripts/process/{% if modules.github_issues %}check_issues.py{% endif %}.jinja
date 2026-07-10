@@ -28,34 +28,15 @@ _URL = re.compile(r"^https://github\.com/([\w.-]+/[\w.-]+)/issues/(\d+)$")
 
 PLANS_DIR = ".process-work/plans"  # active plans only; archive/ is finished work
 REVIEWS_DIR = ".process-work/reviews"  # review/audit reports
-# tolerant of a leading list bullet and **bold**/_emphasis_ on the key, and of a
-# trailing annotation after the value — the canonical form is a bare
-# `tier: N` / `issue: <ref>` line, but a plan is hand-written Markdown, and a
-# bulleted `- tier: 3` must not silently escape enforcement (a false-green).
-_LEAD = r"^\s*(?:[-*+]\s+)?[*_]*"
-_PLAN_TIER = re.compile(_LEAD + r"tier[*_]*\s*:\s*[*_]*\s*(\d+)\b", re.IGNORECASE | re.MULTILINE)
-_PLAN_ISSUE = re.compile(_LEAD + r"issue[*_]*\s*:\s*(\S+)", re.IGNORECASE | re.MULTILINE)
+
+# the review gate (core, always rendered) owns the plan-field grammar and the
+# fence-stripping discipline — import, don't copy (one owner per behavior)
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling import
+from check_review import _LEAD, _unfenced  # noqa: E402
+from check_review import ISSUE_DECL as _PLAN_ISSUE  # noqa: E402
+from check_review import TIER_DECL as _PLAN_TIER  # noqa: E402
+
 _PLAN_WAIVED = re.compile(_LEAD + r"issue-waived[*_]*\s*:\s*\S", re.IGNORECASE | re.MULTILINE)
-
-
-def _unfenced(text: str) -> str:
-    """Text with fenced blocks (``` and ~~~, closed by their own marker)
-    removed — a `tier:`/`issue:`/`FINDING` line inside a fenced example is a
-    quotation, not a declaration (same discipline the review gate applies)."""
-    out: list[str] = []
-    fence: str | None = None
-    for line in text.splitlines():
-        stripped = line.strip()
-        marker = next((m for m in ("```", "~~~") if stripped.startswith(m)), None)
-        if marker and fence is None:
-            fence = marker
-            continue
-        if marker and fence == marker:
-            fence = None
-            continue
-        if fence is None:
-            out.append(line)
-    return "\n".join(out)
 
 
 def _story_files(root: Path) -> list[Path]:

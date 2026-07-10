@@ -39,13 +39,19 @@ JOURNAL = Path(".process-work/journal")
 REVIEWS = Path(".process-work/reviews")
 SNAPSHOT = Path(".process-work/github-snapshot.json")
 
+# the review gate (core, co-rendered) owns the plan-field grammar — import,
+# don't copy (one owner per behavior)
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling import
+from check_review import _LEAD  # noqa: E402
+from check_review import ISSUE_DECL as _PLAN_ISSUE  # noqa: E402
+from check_review import TIER_DECL as _PLAN_TIER  # noqa: E402
+
 _STORY = re.compile(r"^STORY-\d{4}$")
 _ISSUE = re.compile(r"^#?(\d+)$")
-_LEAD = r"^\s*(?:[-*+]\s+)?[*_]*"
-_PLAN_TIER = re.compile(_LEAD + r"tier[*_]*\s*:\s*[*_]*\s*(\d+)\b", re.I | re.M)
-_PLAN_ISSUE = re.compile(_LEAD + r"issue[*_]*\s*:\s*(\S+)", re.I | re.M)
 _REVIEW = re.compile(r"^\s*(?:[-*+]\s+)?[*_]*REVIEW\s+(.*)$")
-_FINDING = re.compile(r"^\s*(?:[-*+]\s+)?FINDING\s+(.*)$")
+# key=value first token required — prose that merely starts with the word
+# FINDING is not a structured entry (same guard as the issue gate's lint)
+_FINDING = re.compile(r"^\s*(?:[-*+]\s+)?[*_]*FINDING\s+(\S+=.*)$")
 _RPT_HEAD = re.compile(_LEAD + r"(review|audit|work|issue|campaign)[*_]*\s*:\s*(.+)$", re.I)
 
 
