@@ -16,7 +16,7 @@ durchgesetzten**, KI-gestützten Entwicklungsprozess — einspielbar in **neue
 Ausgeliefert als [copier](https://copier.readthedocs.io)-Template. Adapter für
 **Claude Code**, **GitHub Copilot** und **AGENTS.md** (Codex / Gemini CLI / Aider …).
 
-> **Status:** `v1.35.1` — Sub-Projekte SP1–SP52 ausgeliefert (Kern + 13 opt-in
+> **Status:** `v1.36.0` — Sub-Projekte SP1–SP53 ausgeliefert (Kern + 13 opt-in
 > Module, 4 Core-Gates, Profile für Solo/Team, DoR/DoD, Kernel-Integritäts-
 > und Compaction-Schutz). Vollständige Historie: [`CHANGELOG.md`](CHANGELOG.md).
 > **Überblick für Einsteiger:innen & Management** (wie es funktioniert, warum,

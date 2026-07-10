@@ -225,6 +225,15 @@ Akzeptanz-Fälle, ~15 Writer-Präzisionsfixes; Report
 `.process-work/reviews/2026-07-10-sp52-diverse-audit.md`) ausgeliefert,
 `v1.35.1`.
 
+SP53 (Methodik-Eignungsprüfung geschlossen — die zwei Lücken aus dem
+Prinzipien-Check der Kette Brainstorm→EARS→Plan: der **EARS-Musterkatalog**
+in der DoR-Doc (alle fünf Formen — ubiquitous/event/state/unwanted/optional —
+mit Unwanted-behaviour als natürlicher Form der von R2 geforderten
+Negativ-Fälle) und der **Spike-Pfad** in workflow.md für ergebnisoffene
+Arbeit (timeboxed, Output ist Wissen — Journal/Design/Decision Record —,
+nie Produkt-Code; Folge-Feature läuft durch den normalen Zyklus statt den
+Prototyp zu befördern; Timebox-Stopp ist Erfolg)) ausgeliefert, `v1.36.0`.
+
 ## Sub-Projekt-Tabelle (SP1–SP24)
 
 Die Tabelle wurde bis SP24 gepflegt; ab SP25 trägt das Narrativ oben die
