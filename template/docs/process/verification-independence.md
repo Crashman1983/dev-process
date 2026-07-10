@@ -48,9 +48,11 @@ The read-only bundle is the seam that makes independence *and* model diversity
 practical: one self-contained markdown document that is the reviewer's complete
 input. `scripts/process/make_review_bundle.py` assembles it — reviewer preamble,
 the kernel block, the review checklist, the product frame, the active plan(s),
-the diff against a base ref, and the exact `REVIEW`/`FINDING` output grammar
-(imported from the gate itself, so the instructions cannot drift from what
-`check_review.py` parses). Sources it cannot read are named in place.
+the diff against a base ref, and the output grammar: the `REVIEW` line is
+imported from `check_review.py` itself (that half cannot drift from the gate),
+the `FINDING` line's owner is the github-issues report gate and its tokens are
+pinned to that gate by a template test. Sources it cannot read are named in
+place.
 
 Dispatching is harness-plumbing around that artifact — pick what exists:
 

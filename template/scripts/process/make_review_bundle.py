@@ -14,8 +14,10 @@ take as its whole input. This tool assembles it:
   4. the product frame (PRODUCT.md — direction to judge the change against);
   5. the active plan(s) under review;
   6. the diff (BASE...HEAD, three-dot: what the branch adds);
-  7. the exact output grammar the gates parse (REVIEW / FINDING lines) —
-     imported from check_review.py, so the bundle can never drift from the gate.
+  7. the output grammar: the REVIEW line imported from check_review.py (the
+     gate that parses it — that half cannot drift), plus the FINDING line whose
+     owner is the github-issues module's report gate (journal-state-plans.md);
+     a template test pins the FINDING tokens to that gate's enums.
 
 Sources that cannot be read are named in place, never silently skipped.
 
@@ -23,17 +25,19 @@ Usage:
     make_review_bundle.py [--base REF] [-o FILE]
 
 --base defaults to the first of origin/main, main, origin/master, master that
-git can resolve. Output goes to stdout unless -o is given. Read-only; never a
-gate, never in CI. Stdlib only.
+git can resolve. Output goes to stdout unless -o is given. The repo root is
+resolved via git (works from a subdirectory); read-only; never a gate, never in
+CI. Stdlib only.
 """
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
 from pathlib import Path
 
-# the gate owns the grammar; importing it keeps the bundle's instructions
-# byte-honest with what check_review.py will actually parse
+# check_review.py owns the REVIEW grammar; importing it keeps that half of the
+# instructions byte-honest with what the gate actually parses
 import check_review as _review_gate
 
 KERNEL_DOC = "docs/process/kernel.md"
@@ -63,11 +67,21 @@ def _kernel_block(root: Path) -> str | None:
 
 def _git(root: Path, *args: str) -> str | None:
     try:
+        # errors="replace": a non-UTF-8 tracked text file must degrade to
+        # replacement chars in the diff, not crash the whole bundle
         r = subprocess.run(["git", "-C", str(root), *args],
-                           capture_output=True, text=True, timeout=60)
+                           capture_output=True, text=True, timeout=60,
+                           encoding="utf-8", errors="replace")
     except (OSError, subprocess.TimeoutExpired):
         return None
     return r.stdout if r.returncode == 0 else None
+
+
+def _repo_root(cwd: Path) -> Path:
+    """The git toplevel when available — running from a subdirectory must not
+    silently lose the root-level plan/kernel/PRODUCT sources."""
+    top = _git(cwd, "rev-parse", "--show-toplevel")
+    return Path(top.strip()) if top and top.strip() else cwd
 
 
 def _resolve_base(root: Path, base: str | None) -> str | None:
@@ -86,6 +100,10 @@ def _active_plans(root: Path) -> list[Path]:
 
 
 def _grammar_section() -> str:
+    # REVIEW fields/enums come from the gate that parses them (import above).
+    # The FINDING line's owner is check_issues.py (github-issues module — not
+    # importable here, it renders conditionally); its sev/action tokens are
+    # duplicated below and pinned to that gate's enums by a template test.
     fields = " ".join(f"{k}=…" for k in sorted(_review_gate.REQUIRED))
     return f"""Record your verdict EXACTLY in this grammar — the gates parse it verbatim,
 free-form prose is invisible to them:
@@ -157,21 +175,36 @@ def build(root: Path, base: str | None) -> str:
                 f"{lines} diff lines.\n")
             if lines > 4000:
                 add("*(large diff — consider a per-area pass; nothing was truncated)*\n")
-            add("```diff\n" + diff + ("\n" if not diff.endswith("\n") else "") + "```\n")
+            status = _git(root, "status", "--porcelain")
+            if status and status.strip():
+                add("*(working tree dirty — uncommitted changes are NOT in this "
+                    "diff; only committed work is under review)*\n")
+            # a diff of a markdown file carries its own ``` runs, which would
+            # close a plain fence early and corrupt everything after it — fence
+            # with more backticks than the longest run inside (min 4)
+            longest = max((len(m) for m in re.findall(r"`+", diff)), default=0)
+            fence = "`" * max(4, longest + 1)
+            add(f"{fence}diff\n" + diff + ("\n" if not diff.endswith("\n") else "") + fence + "\n")
 
     add("## Required output grammar\n")
     add(_grammar_section() + "\n")
     return "\n".join(out)
 
 
+def _opt(argv: list[str], flag: str) -> str | None:
+    if flag not in argv:
+        return None
+    i = argv.index(flag)
+    if i + 1 >= len(argv):
+        raise SystemExit(f"usage: make_review_bundle.py [--base REF] [-o FILE] "
+                         f"— {flag} needs a value")
+    return argv[i + 1]
+
+
 def main(argv: list[str]) -> int:
-    base = None
-    out_file = None
-    if "--base" in argv:
-        base = argv[argv.index("--base") + 1]
-    if "-o" in argv:
-        out_file = argv[argv.index("-o") + 1]
-    text = build(Path.cwd(), base)
+    base = _opt(argv, "--base")
+    out_file = _opt(argv, "-o")
+    text = build(_repo_root(Path.cwd()), base)
     if out_file:
         Path(out_file).write_text(text, encoding="utf-8")
         print(f"review bundle written to {out_file}")

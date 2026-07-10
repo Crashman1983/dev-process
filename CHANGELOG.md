@@ -137,8 +137,8 @@ Arch-Beispielregel, Moduldoc-Sektion mit ehrlicher Decke (Regex-Floor, kein
 Architektur-Review), Ratchet-Trigger + arch-onboarding-Querverweis) + SP47
 (Tiefe III — Review-Bundle als portables Reviewer-Interface:
 `make_review_bundle.py` (Core) baut das eine self-contained Dokument — Kernel,
-Checkliste, Produktrahmen, Pläne, Diff, Output-Grammatik direkt aus
-check_review importiert (kann nie driften); Dispatch-Rezepte je Harness in
+Checkliste, Produktrahmen, Pläne, Diff, REVIEW-Grammatik direkt aus
+check_review importiert; FINDING-Tokens per Template-Test an check_issues gepinnt; Dispatch-Rezepte je Harness in
 verification-independence, /review zeigt aufs Tool) ausgeliefert, `v1.32.0`.
 
 ## Sub-Projekt-Tabelle (SP1–SP24)

@@ -88,3 +88,87 @@ def test_empty_diff_stated(render, tmp_path):
     _git(out, "commit", "-q", "-m", "base")
     r = _run(out, "--base", "main")
     assert "HEAD adds nothing over main" in r.stdout
+
+
+def test_finding_tokens_pinned_to_their_owning_gate(render, tmp_path):
+    # the FINDING line is hand-written in the bundle (its owner, check_issues,
+    # renders only with github_issues) — this pins the duplicate to the enums
+    import importlib.util
+    out = render(tmp_path, {"project_name": "d",
+                            "modules": {"github_issues": True}})
+    spec = importlib.util.spec_from_file_location(
+        "ci_gate", out / "scripts/process/check_issues.py")
+    gate = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(gate)
+    bundle_src = (out / "scripts/process/make_review_bundle.py").read_text()
+    sev_line = "sev=<" + "|".join(sorted(gate.FINDING_SEVS, key="blocker major minor nit".split().index)) + ">"
+    act_line = "action=<" + "|".join(sorted(gate.FINDING_ACTIONS, key="fix accept follow-up".split().index)) + ">"
+    assert sev_line in bundle_src, sev_line
+    assert act_line in bundle_src, act_line
+
+
+def test_option_missing_value_is_usage_not_traceback(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    for args in (["--base"], ["-o"]):
+        r = _run(out, *args)
+        assert r.returncode != 0
+        assert "usage" in (r.stdout + r.stderr)
+        assert "Traceback" not in r.stderr
+
+
+def test_nested_fences_do_not_corrupt_bundle(render, tmp_path):
+    # a diff of a markdown file carries its own ``` — the bundle's fence must
+    # outrun it, or everything after the diff sits inside an open code block
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    (out / "notes.md").write_text("intro\n```python\nx = 1\n```\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "docs: notes with fence")
+    t = _run(out, "--base", "main").stdout
+    lines = t.splitlines()
+    # the fence must outrun the diff's own ``` runs: 4 backticks here
+    opens = [i for i, ln in enumerate(lines) if ln.startswith("````diff")]
+    assert len(opens) == 1, "exactly one diff fence expected"
+    closes = [i for i, ln in enumerate(lines[opens[0] + 1:], opens[0] + 1)
+              if ln.rstrip() == "````"]
+    assert closes, "the 4-backtick fence is never closed"
+    inner = "\n".join(lines[opens[0] + 1:closes[0]])
+    assert "```python" in inner   # the md file's own fence rides INSIDE the diff
+    # the grammar section lives after the closed fence, not swallowed by it
+    grammar_at = next(i for i, ln in enumerate(lines)
+                      if ln.startswith("## Required output grammar"))
+    assert grammar_at > closes[0]
+    assert t.rstrip().endswith("verdict `block` instead.")
+
+
+def test_subdirectory_invocation_finds_root(render, tmp_path):
+    import subprocess as sp
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    r = sp.run([sys.executable, str(out / "scripts/process/make_review_bundle.py"),
+                "--base", "main"],
+               cwd=out / "docs", capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    # root-level sources found despite subdir cwd
+    assert "2026-07-09-widget.md" in r.stdout
+    assert "Mandatory rules" in r.stdout
+    assert "no active plan" not in r.stdout
+
+
+def test_non_utf8_tracked_file_does_not_crash(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    (out / "latin.txt").write_bytes("café résumé\n".encode("latin-1"))
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "feat: latin file")
+    r = _run(out, "--base", "main")
+    assert r.returncode == 0, r.stderr
+    assert "Traceback" not in r.stderr
+
+
+def test_dirty_tree_is_disclosed(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    (out / "uncommitted.py").write_text("x = 1\n")
+    t = _run(out, "--base", "main").stdout
+    assert "working tree dirty" in t and "NOT in this diff" in t
