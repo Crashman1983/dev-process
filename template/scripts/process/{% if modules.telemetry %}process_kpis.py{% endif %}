@@ -13,6 +13,11 @@ n) — proxy measures never reach `high`, confounding cannot be filtered out.
 At `low`, the only action is to collect more data; never act on a thin or
 biased number. n before percent.
 
+Numbers are within-project only: they compare a project against its own
+baseline over time (trends, ratios, catch/escape events). Cross-project
+comparison is meaningless — criterion granularity and domain dominate the
+difference. See "honest ceiling" in the module doc.
+
   process_kpis.py effectiveness [JOURNAL ...]   # what do the graders catch?
   process_kpis.py convergence   [JOURNAL ...]   # do kickbacks converge?
   process_kpis.py suite         [CASE_DIR]      # calibration thresholds

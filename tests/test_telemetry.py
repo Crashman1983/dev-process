@@ -68,6 +68,18 @@ def test_module_off_ships_nothing(render, tmp_path):
     assert not (out / "docs/process/telemetry").exists()
 
 
+def test_doc_carries_honest_ceiling(render, tmp_path):
+    # the honesty contract must not silently drop: numbers are within-project
+    # trends/ratios/events, never cross-project benchmarks
+    out = _render(render, tmp_path)
+    doc = (out / "docs/process/modules/telemetry.md").read_text()
+    assert "honest ceiling" in doc
+    assert "Within-project only" in doc
+    assert "Events are the robust class" in doc
+    cockpit = (out / "scripts/process/process_kpis.py").read_text()
+    assert "within-project only" in cockpit
+
+
 def test_answers_records_telemetry(render, tmp_path):
     out = _render(render, tmp_path)
     assert "telemetry: true" in (out / ".copier-answers.yml").read_text()

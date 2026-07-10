@@ -150,6 +150,14 @@ gepinnt; adr-Auflösung sieht rohe Regeln, Deviation nur als echte Überschrift,
 dor-Slot mit exaktem Key-Set; Doku-Kohärenz: bedingter arch-onboarding-Verweis,
 Hard-Path-Klausel in github-issues).
 
+SP48 (Telemetry-Ehrlichkeit — die Individualität von Projekten als bindende
+Decke dokumentiert: Zahlen gelten nur projektintern gegen die eigene Baseline
+(Trends, Verhältnisse, Catch/Escape-Ereignisse als robusteste Klasse), kein
+projektübergreifendes Benchmarking, Cockpit-Schwellen sind Startwerte zur
+Rekalibrierung, Goodhart/Self-Grading-Vorbehalt; Moduldoc-Sektion „honest
+ceiling" + Cockpit-Docstring + README, per Template-Test gepinnt)
+ausgeliefert, `v1.33.0`.
+
 ## Sub-Projekt-Tabelle (SP1–SP24)
 
 Die Tabelle wurde bis SP24 gepflegt; ab SP25 trägt das Narrativ oben die
