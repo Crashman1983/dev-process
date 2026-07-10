@@ -17,7 +17,7 @@ Copy the shipped `sbom-policy.example.json` to a policy file named
 `sbom-policy.json` in the same folder, and adjust:
 
 - **`sbom_paths`** — globs locating the CycloneDX file(s). Default covers common
-  names (`bom.json`, `**/*.cdx.json`, `sbom/*.json`).
+  names (`bom.json`, `**/bom.json`, `**/*.cdx.json`, `sbom/*.json`).
 - **`allowed_licenses`** — SPDX ids the project permits. A component's SPDX
   **expression** is evaluated against them (`A OR B` passes if either is allowed;
   `A AND B` requires both), and a component bound by several separate license
@@ -25,8 +25,11 @@ Copy the shipped `sbom-policy.example.json` to a policy file named
   (`MIT License`) rather than SPDX id are matched verbatim — allow-list the id
   your SBOM actually emits. Omit `allowed_licenses` to only require that a license
   is *present* (no allow-list).
-- **`manifest_paths`** — dependency manifests (`package.json`, `pom.xml`, …) for an
-  advisory coverage check.
+- **`manifest_paths`** — dependency manifests for the advisory coverage check.
+  The check can parse `package.json` and `pom.xml` — only list what it reads.
+  List each kind both bare and under `**/` (`"package.json", "**/package.json"`):
+  a root-level manifest does not match the `**/` form, so a `**/`-only list
+  silently skips the most common layout.
 - **`exclude`** — component-name globs exempt from the checks (e.g. internal
   first-party modules the SBOM lists).
 
