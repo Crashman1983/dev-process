@@ -321,7 +321,15 @@ The project is ready for normal process-driven development when:
   `process-gates` as a required status check on the default branch — or do it
   manually via Settings → Branches. On GitLab: a merge-request approval rule /
   pipeline-must-succeed setting. Without this, a red gate is advisory, not
-  enforced — the single step that turns "the gate runs" into "the gate blocks".
+  enforced — the single step that turns "the gate runs" into "the gate blocks";
+- **platform-side hygiene is switched on** where the host offers it:
+  **secret scanning** with **push protection**, and automated dependency
+  updates (**Dependabot**/Renovate) with vulnerability alerts. Honest
+  framing: these are the platform's network-side services, not hermetic gates
+  this process can run or verify offline — the `security-floor` pattern rules
+  and the `sbom` license gate complement them, they do not replace them (a
+  floor regex is no CVE feed). Enable them once at onboarding; review the
+  update PRs like any other change.
 
 Once developing: before planning any change, read the Decision Records
 (`docs/process/adr/`) relevant to the area you are about to touch — a decision

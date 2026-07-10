@@ -191,6 +191,23 @@ Gate-Lauf + ersten reviewten Change ohne Hilfe; Report
 `.process-work/reviews/2026-07-10-sp50-deep-audit.md`) ausgeliefert,
 `v1.34.1`.
 
+SP51 (State-of-the-art-Abgleich geschlossen — sechs Lücken aus der Recherche
+(DORA, Diátaxis/arc42, Supply-Chain, Diagrams-as-Code, KI-Guardrails):
+`testing.md` als Core-Doc (Suite-Form Pyramide/Trophy, Property-based,
+Regression-Pins, Mutation-Testing auf kritischer Logik, ehrliche
+Coverage-Decke — Trend statt Schwellen-Gate; via Regel 5 +
+Review-Checkliste verdrahtet), `releases.md` als Core-Doc (SemVer,
+kuratiertes Changelog, Tag-Ritual mit Versions-Dreiklang-Invariante;
+via commits.md verdrahtet), Threat-Frage für Tier 3 in Brainstorm +
+Review-Checkliste („Was könnte ein Angreifer mit dieser Änderung?" —
+Assets/Inputs/Trust-Boundaries), Diagrams-as-Code-Konvention (Mermaid im
+Markdown, diffbar im PR; Gate parst weiterhin keine Diagramme) in
+arch-docs-Moduldoc + Overview-Scaffold, Plattform-Hygiene im
+Onboarding-DoR (Secret Scanning + Push Protection, Dependabot/Renovate —
+ehrlich als Netz-Dienste gerahmt, kein hermetisches Gate),
+Branch-Lebensdauer „Tage, nicht Wochen" in commits.md (Small-Batch-Befund
+hinter Trunk-based)) ausgeliefert, `v1.35.0`.
+
 ## Sub-Projekt-Tabelle (SP1–SP24)
 
 Die Tabelle wurde bis SP24 gepflegt; ab SP25 trägt das Narrativ oben die

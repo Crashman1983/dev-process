@@ -16,7 +16,7 @@ durchgesetzten**, KI-gestützten Entwicklungsprozess — einspielbar in **neue
 Ausgeliefert als [copier](https://copier.readthedocs.io)-Template. Adapter für
 **Claude Code**, **GitHub Copilot** und **AGENTS.md** (Codex / Gemini CLI / Aider …).
 
-> **Status:** `v1.34.1` — Sub-Projekte SP1–SP50 ausgeliefert (Kern + 13 opt-in
+> **Status:** `v1.35.0` — Sub-Projekte SP1–SP51 ausgeliefert (Kern + 13 opt-in
 > Module, 4 Core-Gates, Profile für Solo/Team, DoR/DoD, Kernel-Integritäts-
 > und Compaction-Schutz). Vollständige Historie: [`CHANGELOG.md`](CHANGELOG.md).
 > **Überblick für Einsteiger:innen & Management** (wie es funktioniert, warum,
@@ -65,7 +65,11 @@ Tier 2 (`risk-tiers.md` ist die SSOT). Ein `flow`-Label ist Boden, nie Decke.
 9. Code wird zum Lesen geschrieben — intention-revealing, am Review-Gate geprüft.
 
 **Zyklus:** Brainstorm → Plan → Execute → Review, plus Quick (kleine Änderungen)
-und Debug. **ADRs** tragen zwei Achsen — `Status` (Proposed/Accepted/Superseded)
+und Debug. Methodik-Docs tragen die Tiefe: `testing.md` (Suite-Form: Pyramide,
+Property-based, Regression-Pins, ehrliche Coverage-Decke), `releases.md`
+(SemVer, Changelog, Tag-Ritual), `code-craft.md` (lesbarer Code); Tier-3-Designs
+beantworten die Threat-Frage („Was könnte ein Angreifer damit?") schon im
+Brainstorm. **ADRs** tragen zwei Achsen — `Status` (Proposed/Accepted/Superseded)
 und `Intent` (keep/change-planned/tolerated), damit „so ist es" von „so soll es
 werden" getrennt bleibt. **Journal, Branch-State und Pläne** halten das *Warum*
 fest, das das git-log nicht zeigt. **`PRODUCT.md`** (Core) ist der Produktrahmen —

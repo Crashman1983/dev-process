@@ -69,6 +69,18 @@ oriented: context & scope = C4 system context / arc42 §3; quality goals =
 arc42 §1.2 + §10; building blocks = C4 containers/components / arc42 §5 (owned
 by `arch-onboarding`); runtime scenarios = arc42 §6; deployment = arc42 §7;
 decisions = arc42 §9 (owned by ADRs); risks & technical debt = arc42 §11;
-glossary = arc42 §12. The module ships no diagram generator — naming the C4
-levels is enough; a project adds diagrams with its own tooling if it wants
-them.
+glossary = arc42 §12.
+
+## Diagrams as code (convention, not gated)
+
+When a section wants a picture, write it as a **fenced Mermaid block in the
+markdown itself** — GitHub, GitLab and most doc tools render it natively, and
+a text diagram diffs in the PR alongside the change that moved a boundary
+(the whole point: a diagram that cannot drift invisibly). Mermaid covers the
+C4-style context/container view plus sequence and state diagrams; that is
+enough here. Prose remains the primary carrier — a diagram *illustrates* a
+section, it never becomes a second owner of structure (the `arch` block and
+the ADRs own that). Binary diagram exports (draw.io PNGs, screenshots) are
+the anti-pattern this convention replaces: not diffable, not reviewable,
+stale on arrival. The gate deliberately does not parse diagrams — placeholder
+and ADR-reference honesty stay its whole job.

@@ -156,3 +156,15 @@ def test_unpadded_adr_filename_resolves(render, tmp_path):
     )
     r = _gate(out)
     assert r.returncode == 0, r.stdout + r.stderr
+
+
+def test_diagrams_as_code_convention_stated(render, tmp_path):
+    # SP51: Mermaid-in-markdown is the stated diagram convention — scaffold and
+    # module doc both carry it; the gate deliberately does not parse diagrams
+    out = _render(render, tmp_path)
+    overview = (out / OVERVIEW).read_text()
+    assert "mermaid" in overview.lower()
+    doc = (out / "docs/process/modules/arch-docs.md").read_text()
+    assert "Diagrams as code" in doc
+    assert "Mermaid" in doc
+    assert "not parse diagrams" in doc

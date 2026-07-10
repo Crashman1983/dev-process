@@ -60,6 +60,13 @@ message are all external. For every place such input flows, ask: does it reach a
 Also: is **authorization fail-closed** (deny by default, not allow on error)?
 Are **secrets** kept out of logs, responses, and the repository?
 
+At **Tier 3**, ask the threat question explicitly before the detail checks:
+*what could an attacker do with this change?* Name the assets it touches, the
+new inputs it accepts, and any trust boundary it crosses (user→server,
+service→service, repo→CI) — three lines in the review, not a workshop. A
+change that adds an input, a credential, or a boundary and cannot answer this
+is not ready to pass.
+
 ## Observability & operability
 
 - When this **fails in production, will anyone know**? Is there a log, metric,
@@ -118,6 +125,9 @@ judge the change against its content:
 
 - Does a **test map to each acceptance criterion** the change claims? A feature
   without a test proving its acceptance is not done (mandatory rule 5).
+- Is the suite **shaped** right for what changed (`testing.md`): the new tests
+  at the cheapest layer that proves the behavior, the negative/edge/
+  authorization twins present, and a bug fix carrying its regression pin?
 
 ## Definition of Done
 
