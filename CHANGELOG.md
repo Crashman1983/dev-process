@@ -4,7 +4,7 @@ Die vollständige Sub-Projekt-Historie, aus dem README hierher ausgelagert
 (das README orientiert, dieses Dokument archiviert). Neue Releases nennen im
 README nur die aktuelle Version und schreiben die Historie hier fort.
 
-## Status-Narrativ (SP1–SP45, chronologisch)
+## Status-Narrativ (SP1–SP47, chronologisch)
 
 SP1 (Foundation) + SP2 (Architektur-Onboarding) + SP3
 (feature-registry, github-issues, contracts-drift) + SP4 (git-hooks,
@@ -129,6 +129,17 @@ legt sie als `dor`-Slot in den Snapshot; das hermetische github-master-Gate
 failt hart, wenn eine in-progress-Story ein nicht-Ready-Issue ohne Deviation
 verlinkt — proposed noch nicht gestartet, done Sache des Review-Gates; alter
 Snapshot degradiert ehrlich zur Re-sync-Note) ausgeliefert, `v1.31.0`.
+
+SP46 (Tiefe II — Architektur-Grenzen als Floor-Regeln: kein 14. Modul,
+sondern der bestehende Owner — security-floor kann per `applies_to` gescopte
+Regeln schon; neu: optionales `adr`-Feld je Regel (hängende Links hart),
+Arch-Beispielregel, Moduldoc-Sektion mit ehrlicher Decke (Regex-Floor, kein
+Architektur-Review), Ratchet-Trigger + arch-onboarding-Querverweis) + SP47
+(Tiefe III — Review-Bundle als portables Reviewer-Interface:
+`make_review_bundle.py` (Core) baut das eine self-contained Dokument — Kernel,
+Checkliste, Produktrahmen, Pläne, Diff, Output-Grammatik direkt aus
+check_review importiert (kann nie driften); Dispatch-Rezepte je Harness in
+verification-independence, /review zeigt aufs Tool) ausgeliefert, `v1.32.0`.
 
 ## Sub-Projekt-Tabelle (SP1–SP24)
 
