@@ -38,6 +38,8 @@ module set (see BOOTSTRAP.md, "Later"). The triggers:
 - **no CI, or work leaves your machine** — local enforcement as the (only or
   additional) pillar → `git_hooks`
 - first **persistence, auth, or secrets** → `security_floor`
+- a **layer boundary worth defending** ("ui never imports db") → a scoped
+  floor rule in `security_floor` (its module doc: architecture boundaries)
 - a **second surface** (web + cli, web + mobile) → `parity`
 - a **shared or external interface** another component builds on →
   `contract_first`, `contracts_drift`

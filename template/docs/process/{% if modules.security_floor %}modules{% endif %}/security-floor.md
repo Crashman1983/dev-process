@@ -85,6 +85,30 @@ yields a hard finding `path:line: message [id]` plus a fix-or-bypass hint.
 - a tracked file that is not valid UTF-8 (binary) is skipped for scanning.
 - `SKIP_SECURITY_FLOOR=1` in the environment → "skipped", exit 0.
 
+## Architecture boundaries as floor rules
+
+The pattern floor is concern-agnostic: a scoped rule turns an **architecture
+boundary** into a blocking gate with the same mechanism. Declare the forbidden
+dependency as a rule whose `applies_to` scopes it to the source side of the
+boundary:
+
+    { "id": "arch-ui-no-direct-db",
+      "pattern": "from\\s+app\\.db\\b|import\\s+app\\.db\\b",
+      "applies_to": ["src/ui/*", "src/ui/**"],
+      "message": "architecture floor: the UI reaches the db only through the service layer",
+      "adr": "ADR-0002" }
+
+The optional **`adr`** field links the rule to the decision record it enforces
+(ADR-0002 above is illustrative — point it at one of *your* records, or omit
+it) — the gate hard-fails when the link does not resolve, so a boundary rule
+cannot outlive or misquote its decision. Honest ceiling: this is a **regex floor, not
+an architecture review** — it catches the literal import the rule names, not a
+clever indirection. For semantic layering conformance use a real arch-linter
+(the `arch-onboarding` module runs one best-effort when present); the floor is
+the portable, always-on backstop for the few boundaries worth defending
+unconditionally. Deliberately *not* a separate module: the mechanism has one
+owner here (Rule 4), only the rule's concern differs.
+
 ## Heuristic caveat
 
 A line regex cannot tell real code from the same text in a comment, a string, or a

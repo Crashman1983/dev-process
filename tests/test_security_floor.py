@@ -377,3 +377,93 @@ def test_docdrift_green_with_module_doc(render, tmp_path):
         capture_output=True, text=True,
     )
     assert r.returncode == 0, r.stdout
+
+
+# --- architecture boundaries as floor rules (scoped + adr link) ---------------
+
+ARCH_RULE = {
+    "rules": [
+        {"id": "arch-ui-no-direct-db",
+         "pattern": r"from\s+app\.db\b|import\s+app\.db\b",
+         "applies_to": ["src/ui/*", "src/ui/**"],
+         "message": "architecture floor: UI reaches db only through the service layer"},
+    ],
+}
+
+
+def test_arch_boundary_rule_is_scoped(render, tmp_path):
+    # the same forbidden import fails inside the scoped layer, passes outside it
+    out = _render(render, tmp_path)
+    work = tmp_path / "arch"
+    _git_repo(work)
+    _write_config(work, ARCH_RULE)
+    (work / "src/ui").mkdir(parents=True)
+    (work / "src/services").mkdir(parents=True)
+    (work / "src/ui/page.py").write_text("from app.db import models\n")
+    (work / "src/services/svc.py").write_text("from app.db import models\n")
+    _track(work)
+    r = _run(out, work)
+    assert r.returncode == 1
+    assert "src/ui/page.py:1" in r.stdout
+    assert "src/services/svc.py" not in r.stdout  # outside the boundary's scope
+
+
+def test_rule_adr_link_dangling_hard(render, tmp_path):
+    # a boundary rule may name its decision record — a dangling link is a lie
+    out = _render(render, tmp_path)
+    work = tmp_path / "adrmiss"
+    _git_repo(work)
+    cfg = {"rules": [{**ARCH_RULE["rules"][0], "adr": "ADR-0002"}]}
+    _write_config(work, cfg)
+    _track(work)
+    r = _run(out, work)
+    assert r.returncode == 1
+    assert "no such" in r.stdout and "decision record" in " ".join(r.stdout.split())
+
+
+def test_rule_adr_link_resolving_ok(render, tmp_path):
+    out = _render(render, tmp_path)
+    work = tmp_path / "adrok"
+    _git_repo(work)
+    adr = work / "docs/process/adr"
+    adr.mkdir(parents=True)
+    (adr / "adr-0002-ui-db-boundary.md").write_text("# ADR-0002\n")
+    cfg = {"rules": [{**ARCH_RULE["rules"][0], "adr": "ADR-0002"}]}
+    _write_config(work, cfg)
+    _track(work)
+    r = _run(out, work)
+    assert r.returncode == 0, r.stdout
+
+
+def test_rule_adr_field_type_guarded(render, tmp_path):
+    out = _render(render, tmp_path)
+    work = tmp_path / "adrbad"
+    _git_repo(work)
+    cfg = {"rules": [{**ARCH_RULE["rules"][0], "adr": 42}]}
+    _write_config(work, cfg)
+    _track(work)
+    r = _run(out, work)
+    assert r.returncode == 1
+    assert "must reference a decision" in " ".join(r.stdout.split())
+
+
+def test_shipped_example_has_arch_rule_and_stays_valid(render, tmp_path):
+    out = _render(render, tmp_path)
+    data = json.loads((out / SEED).read_text(encoding="utf-8"))
+    ids = [r["id"] for r in data["rules"]]
+    assert "arch-ui-no-direct-db" in ids
+
+
+def test_dangling_adr_reported_even_with_invalid_pattern(render, tmp_path):
+    # an invalid regex must not hide the dangling decision-record link
+    out = _render(render, tmp_path)
+    work = tmp_path / "adrboth"
+    _git_repo(work)
+    _write_config(work, {"rules": [{"id": "broken", "pattern": "(",
+                                    "message": "m", "adr": "ADR-0002"}]})
+    _track(work)
+    r = _run(out, work)
+    assert r.returncode == 1
+    flat = " ".join(r.stdout.split())
+    assert "not a valid regex" in flat
+    assert "no such decision record" in flat

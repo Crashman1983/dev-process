@@ -29,7 +29,7 @@ BOARD_STATUS = {"backlog": "proposed", "ready": "proposed",
                 "in-progress": "in-progress", "in progress": "in-progress",
                 "review": "in-progress", "done": "done"}
 ENTRY_KEYS = {"number", "story", "title", "state", "status",
-              "blocked_by", "parent", "board_status"}
+              "blocked_by", "parent", "board_status", "dor"}
 
 
 def _stories(root: Path) -> dict:
@@ -110,6 +110,14 @@ def _load_snapshot(root: Path) -> tuple[dict | None, list[str], object]:
                 # traceback on comparison; fail clean instead (audit)
                 hard.append(f"{SNAPSHOT}: {sid} 'blocked_by' has a non-string element")
                 e = {**e, "blocked_by": None}  # neutralize before the drift loop
+        dor = e.get("dor")
+        if dor is not None and not (
+                isinstance(dor, dict)
+                and set(dor) == {"typed", "ears", "deviation"}
+                and all(isinstance(dor[k], bool) for k in dor)):
+            hard.append(f"{SNAPSHOT}: {sid} 'dor' must be null or an object with "
+                        f"boolean typed/ears/deviation")
+            e = {**e, "dor": None}  # neutralize before the DoR check
         by_story[sid] = e
     return by_story, hard, generated_at
 
@@ -176,6 +184,41 @@ def _drift_hard(stories: dict, snap: dict) -> list[str]:
     return hard
 
 
+def _dor_checks(stories: dict, snap: dict) -> tuple[list[str], list[str]]:
+    """Definition of Ready, enforced at rest: an *in-progress* story (work has
+    started) must link an issue that is Ready — typed (R1) and EARS-gradeable
+    (R2, epics exempt at sync time) — or carry a recorded `## Deviations` note
+    (the DoR's named escape). Facts come from the snapshot's `dor` slot, which
+    gh_sync derives from the live issue; a snapshot predating that slot degrades
+    to a note (re-sync), never a fake fail. Proposed stories are not yet
+    started and `done` is the review gate's business — both out of scope."""
+    hard: list[str] = []
+    stale: list[str] = []
+    for sid in sorted(set(stories) & set(snap)):
+        s = stories[sid]
+        if s["status"] != "in-progress":
+            continue
+        dor = snap[sid].get("dor")
+        if dor is None:
+            stale.append(sid)
+            continue
+        if dor["deviation"]:
+            continue  # recorded, justified deviation — the named escape
+        missing = [name for flag, name in ((dor["typed"], "a type: label (R1)"),
+                                           (dor["ears"], "EARS acceptance (R2)"))
+                   if not flag]
+        if missing:
+            hard.append(f"{s['rel']}: {sid} is in-progress but its issue is not "
+                        f"Ready — missing {' and '.join(missing)}; make it ready "
+                        f"or record a '## Deviations' note on the issue, then "
+                        f"re-run gh_sync.py (definition-of-ready-and-done.md)")
+    soft = ([f"{len(stale)} in-progress story(ies) have a snapshot entry without "
+             f"DoR facts ({', '.join(stale)}) — snapshot predates the dor slot; "
+             f"re-run gh_sync.py to enforce the Definition of Ready"]
+            if stale else [])
+    return hard, soft
+
+
 def check(root: Path) -> tuple[list[str], list[str]]:
     hard: list[str] = []
     snap, snap_hard, generated_at = _load_snapshot(root)
@@ -195,6 +238,9 @@ def check(root: Path) -> tuple[list[str], list[str]]:
     hard += _invariant_hard(stories, snap)
     hard += _completeness_hard(stories, snap)
     hard += _drift_hard(stories, snap)
+    dor_hard, dor_soft = _dor_checks(stories, snap)
+    hard += dor_hard
+    soft += dor_soft
     return hard, soft
 
 

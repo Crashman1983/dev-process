@@ -4,7 +4,7 @@ Die vollständige Sub-Projekt-Historie, aus dem README hierher ausgelagert
 (das README orientiert, dieses Dokument archiviert). Neue Releases nennen im
 README nur die aktuelle Version und schreiben die Historie hier fort.
 
-## Status-Narrativ (SP1–SP44, chronologisch)
+## Status-Narrativ (SP1–SP47, chronologisch)
 
 SP1 (Foundation) + SP2 (Architektur-Onboarding) + SP3
 (feature-registry, github-issues, contracts-drift) + SP4 (git-hooks,
@@ -122,6 +122,33 @@ wird nie mehr überschrieben (GET-404-Ambiguität); Kernel-Gate erzwingt exakt
 einen Block und lehnt leeren Kanon ab; trace-Präzision (kein Bare-Number-Grep,
 leere Query verweigert); Ratchet als einziger Owner mit allen 13 Modulen;
 README/Update-Semantik-Kohärenz).
+
+SP45 (Tiefe I — DoR als Gate: `gh_sync` leitet die Ready-Fakten aus dem
+Live-Issue ab (typed/EARS/`## Deviations`-Body-Note als benannter Escape) und
+legt sie als `dor`-Slot in den Snapshot; das hermetische github-master-Gate
+failt hart, wenn eine in-progress-Story ein nicht-Ready-Issue ohne Deviation
+verlinkt — proposed noch nicht gestartet, done Sache des Review-Gates; alter
+Snapshot degradiert ehrlich zur Re-sync-Note) ausgeliefert, `v1.31.0`.
+
+SP46 (Tiefe II — Architektur-Grenzen als Floor-Regeln: kein 14. Modul,
+sondern der bestehende Owner — security-floor kann per `applies_to` gescopte
+Regeln schon; neu: optionales `adr`-Feld je Regel (hängende Links hart),
+Arch-Beispielregel, Moduldoc-Sektion mit ehrlicher Decke (Regex-Floor, kein
+Architektur-Review), Ratchet-Trigger + arch-onboarding-Querverweis) + SP47
+(Tiefe III — Review-Bundle als portables Reviewer-Interface:
+`make_review_bundle.py` (Core) baut das eine self-contained Dokument — Kernel,
+Checkliste, Produktrahmen, Pläne, Diff, REVIEW-Grammatik direkt aus
+check_review importiert; FINDING-Tokens per Template-Test an check_issues gepinnt; Dispatch-Rezepte je Harness in
+verification-independence, /review zeigt aufs Tool) ausgeliefert, `v1.32.0`.
+
+`v1.32.1` (Arc-Review über den Tiefe-Bogen, zwei unabhängige Reviewer: vier
+ausführbare Defekte im Bundle-Tool geschlossen — Fence-Korruption bei
+Markdown-Diffs, Non-UTF-8-Crash, IndexError bei fehlendem Options-Wert,
+Subdir-Aufruf verlor Root-Quellen; Grammatik-Claim ehrlich auf die
+REVIEW-Hälfte begrenzt + FINDING-Tokens per Template-Test an check_issues
+gepinnt; adr-Auflösung sieht rohe Regeln, Deviation nur als echte Überschrift,
+dor-Slot mit exaktem Key-Set; Doku-Kohärenz: bedingter arch-onboarding-Verweis,
+Hard-Path-Klausel in github-issues).
 
 ## Sub-Projekt-Tabelle (SP1–SP24)
 

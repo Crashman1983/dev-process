@@ -142,8 +142,8 @@ yet settled:
 1. Install minimally (`--data profile=minimal` — core gates only).
 2. Run the start-here dialogue (greenfield/brownfield, goal, stack, risks).
 3. Derive the module choice from the answers by applying the **hardening
-   ratchet** in `docs/process/start-here.md` — every optional module has one
-   named trigger there; switch a module on when its trigger appears.
+   ratchet** in `docs/process/start-here.md` — every optional module has at
+   least one named trigger there; switch a module on when its trigger appears.
 4. Retrofit modules as described under [Later](#later).
 
 If the choice is already known, set it directly at install time.

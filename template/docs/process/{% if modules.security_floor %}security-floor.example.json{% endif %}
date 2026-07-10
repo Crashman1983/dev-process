@@ -3,7 +3,10 @@
     { "id": "no-shell-true", "pattern": "shell\\s*=\\s*True",
       "applies_to": ["*.py"], "message": "use a subprocess argv list, not shell=True" },
     { "id": "no-committed-private-key", "pattern": "-----BEGIN [A-Z ]*PRIVATE KEY-----",
-      "message": "private key material must not be committed" }
+      "message": "private key material must not be committed" },
+    { "id": "arch-ui-no-direct-db", "pattern": "from\\s+app\\.db\\b|import\\s+app\\.db\\b",
+      "applies_to": ["src/ui/*", "src/ui/**"],
+      "message": "architecture floor: the UI reaches the db only through the service layer" }
   ],
   "exclude": ["*test_*", "tests/*"]
 }

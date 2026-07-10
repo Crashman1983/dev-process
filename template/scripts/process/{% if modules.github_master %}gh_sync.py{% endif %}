@@ -73,6 +73,30 @@ def _status_from(labels: list, state: str) -> str:
     return "done" if state == "closed" else "in-progress"
 
 
+def _dor_facts(labels: list, title: str, body: str) -> dict:
+    """Definition-of-Ready facts, computed here — the one place that sees the
+    live issue content — so the hermetic gate can enforce DoR offline without
+    the snapshot carrying the body. Mirrors the EARS/epic heuristic of the
+    github-issues module's attention.py (kept in sync by convention):
+
+    - typed: carries a `type:*` label (DoR R1);
+    - ears: an EARS acceptance section — heading (English or German) or a
+      `shall` clause, case-insensitive; an epic is exempt (scope + invariants
+      instead, DoR R2);
+    - deviation: the issue body records a `## Deviations` note — the DoR's named
+      escape hatch (definition-of-ready-and-done.md, Bindingness)."""
+    names = {(lb.get("name") if isinstance(lb, dict) else str(lb)) or ""
+             for lb in labels}
+    typed = any(n.startswith("type:") for n in names)
+    is_epic = "type:epic" in names or (title or "").upper().startswith("EPIC")
+    b = body or ""
+    ears = bool(is_epic
+                or re.search(r"(acceptance criteria|akzeptanzkriterien)\s*\(ears\)", b, re.I)
+                or re.search(r"\bshall\b", b, re.I))
+    deviation = bool(re.search(r"(?m)^#{1,6}[ \t]+Deviations\b", b, re.I))
+    return {"typed": typed, "ears": ears, "deviation": deviation}
+
+
 def main() -> int:
     root = Path(".").resolve()
     gh = shutil.which("gh")
@@ -87,7 +111,7 @@ def main() -> int:
     try:
         r = subprocess.run(
             [gh, "issue", "list", "--repo", repo, "--state", "all", "--limit", "500",
-             "--json", "number,title,state,labels"],
+             "--json", "number,title,state,labels,body"],
             capture_output=True, text=True, timeout=60,
         )
     except (subprocess.TimeoutExpired, OSError) as exc:
@@ -123,6 +147,10 @@ def main() -> int:
             "number": num, "story": sid, "title": it.get("title"),
             "state": it.get("state", "").lower(),
             "status": _status_from(it.get("labels") or [], it.get("state", "").lower()),
+            # Definition-of-Ready facts, derived from the live issue here so the
+            # gate can enforce DoR offline (the body itself is not snapshotted)
+            "dor": _dor_facts(it.get("labels") or [], it.get("title") or "",
+                              it.get("body") or ""),
             # gh_sync does not master these — preserve whatever another tool
             # committed (null until then); the gate skips drift on null slots.
             "blocked_by": kept.get("blocked_by"),

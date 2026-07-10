@@ -69,8 +69,21 @@ adopter recipe, not part of this module.
   no snapshot entry, or a snapshot entry with no story (the mirror must be
   complete both ways); **drift** where the registry disagrees with the snapshot
   on `title`, on `status` (both the value and its open/closed projection), or on
-  a non-null `blocked_by` / `parent`.
-- **Best-effort (note):** no snapshot yet — expected before the first sync.
+  a non-null `blocked_by` / `parent`; an **in-progress story whose issue is not
+  Ready** (see below).
+- **Best-effort (note):** no snapshot yet — expected before the first sync; a
+  snapshot entry predating the `dor` slot (re-sync to enforce the DoR).
+
+**Definition of Ready, enforced.** `gh_sync.py` is the one place that sees the
+live issue, so it derives the DoR facts there and stores them in the entry's
+`dor` slot: `typed` (a `type:*` label — R1), `ears` (an EARS acceptance section,
+heading or `shall` clause, case-insensitive; an epic is exempt — R2), and
+`deviation` (the body records a `## Deviations` note — the DoR's named escape,
+`definition-of-ready-and-done.md`). The gate then enforces, offline: a story at
+`in-progress` (work has started) whose issue is neither Ready nor carries a
+deviation **fails hard** — the DoR moves from checklist to gate. `proposed` is
+not yet started and `done` is the review gate's business; both stay out of
+scope. The body itself is never snapshotted, only the derived booleans.
 
 Status↔state mapping the gate checks: `done` ⇒ issue **closed**;
 `proposed`/`in-progress` ⇒ issue **open**; `deprecated` ⇒ either (and exempt
