@@ -86,7 +86,13 @@ Ausgeliefert als [copier](https://copier.readthedocs.io)-Template. Adapter für
 > Kopien und damit vom Kernel-Gate unentfernbar; Phasen-Re-Hydration in
 > /execute, /review, /prime; ehrliche Grenze + Pro-Harness-Realität in
 > start-here dokumentiert — ein Gate sieht den Live-Kontext nicht) ausgeliefert,
-> `v1.27.0`. SP36 (Backport-Batch 1 aus dem parallelen
+> `v1.27.0`. SP42 (Meta-Review „Reichweite vor Tiefe" für Solo-Devs/kleine
+> Teams: **Profile** statt 13 Modul-Booleans — eine `profile`-Frage
+> (minimal/solo/team/custom) leitet den Modul-Default ab, explizites `modules`
+> überschreibt weiter; dazu der **Härtungs-Ratchet** in start-here: Modul
+> einschalten, wenn sein Trigger eintritt — erste Persistenz → security_floor,
+> zweite Surface → parity usw.; Lockern ist eine dokumentierte
+> Prozessentscheidung) ausgeliefert, `v1.28.0`. SP36 (Backport-Batch 1 aus dem parallelen
 > law-aidev-Zweig, Issue #22: pre-push prüft die **gepushten Commits** statt des
 > Working Tree (Wegwerf-Worktree), neues opt-in **`sbom`**-Modul mit
 > CycloneDX-Lizenz-Attestierung, feature-registry-Advisory für unter-granulare
