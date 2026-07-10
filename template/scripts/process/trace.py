@@ -15,8 +15,10 @@ It correlates, best-effort and read-only:
   - the feature-registry story (when that module is installed);
   - the issue — offline from the github-master snapshot when present, else via
     `gh` when available, else just the ref;
-  - plans (active and archived) whose slug or `issue:` line matches;
-  - commits mentioning any correlation key (`git log --grep`);
+  - plans (active and archived) whose filename or text mentions a correlation
+    key (deliberately broad — a plan that merely discusses the issue is shown);
+  - commits mentioning a distinctive key (`git log --grep`; the bare issue
+    number is not grepped — it substring-matches unrelated shas/versions);
   - `REVIEW` attestations in the journal whose `work=` matches;
   - review/audit reports in `.process-work/reviews/` (header + FINDING lines).
 
@@ -157,7 +159,7 @@ def matching_reviews(root: Path, keys: list[str]) -> tuple[list[str], list[dict]
                     continue
                 wm = re.search(r"\bwork=(\S+)", m.group(1))
                 if wm and wm.group(1).lstrip("#") in bare:
-                    lines.append(m.group(0).strip())
+                    lines.append("REVIEW " + m.group(1).strip())
     reports: list[dict] = []
     rdir = root / REVIEWS
     if rdir.is_dir():
@@ -177,9 +179,11 @@ def matching_reviews(root: Path, keys: list[str]) -> tuple[list[str], list[dict]
 
 
 def matching_commits(root: Path, keys: list[str]) -> list[str] | None:
-    """Commits mentioning any key, newest first; None if git is unavailable."""
+    """Commits mentioning a distinctive key, newest first; None if git is
+    unavailable, [] for a repo with no commits yet. Bare digit keys are skipped
+    — `--grep=42` substring-matches unrelated shas and version strings."""
     seen: dict[str, str] = {}
-    for k in keys:
+    for k in (k for k in keys if not k.isdigit()):
         try:
             out = subprocess.run(
                 ["git", "-C", str(root), "log", "--oneline", "--fixed-strings",
@@ -187,7 +191,14 @@ def matching_commits(root: Path, keys: list[str]) -> list[str] | None:
         except (OSError, subprocess.TimeoutExpired):
             return None
         if out.returncode != 0:
-            return None
+            try:
+                probe = subprocess.run(["git", "-C", str(root), "rev-parse",
+                                        "--git-dir"], capture_output=True, timeout=30)
+            except (OSError, subprocess.TimeoutExpired):
+                return None
+            # a git repo with an unborn branch has no commits — that is an
+            # empty trail, not "git unavailable"
+            return [] if probe.returncode == 0 else None
         for ln in out.stdout.splitlines():
             sha = ln.split(" ", 1)[0]
             seen.setdefault(sha, ln)
@@ -246,6 +257,8 @@ def render(query: str, root: Path) -> str:
         L.append("- none mention " + ", ".join(keys))
 
     L += ["", "## Reviews"]
+    if not (root / REVIEWS).is_dir():
+        notes.append("no reviews directory yet (.process-work/reviews absent) — reports skipped")
     rev_lines, reports = matching_reviews(root, keys)
     L += [f"- {ln}" for ln in rev_lines] or ["- no REVIEW attestation references this work"]
     for r in reports:
@@ -281,7 +294,8 @@ def _selftest() -> int:
 def main(argv: list[str]) -> int:
     if "--selftest" in argv:
         return _selftest()
-    if not argv:
+    if not argv or not argv[0].strip():
+        # a blank query would match every plan, commit, and report — refuse
         raise SystemExit(__doc__)
     print(render(argv[0], Path.cwd()))
     return 0

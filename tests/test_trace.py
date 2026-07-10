@@ -81,6 +81,41 @@ def test_traces_by_issue_ref(render, tmp_path):
     assert "REVIEW work=42" in t
 
 
+def test_commit_grep_skips_bare_number(render, tmp_path):
+    # '#42' must not surface unrelated commits that merely contain "42"
+    out = render(tmp_path, {"project_name": "d",
+                            "modules": {"feature_registry": True}})
+    _seed(out)
+    _git(out, "commit", "-q", "--allow-empty", "-m", "chore: bump to v0.42.1")
+    _git(out, "commit", "-q", "--allow-empty", "-m", "feat: PR-142 follow-up")
+    t = _run(out, "#42").stdout
+    assert "billing hook (STORY-0007, #42)" in t
+    assert "v0.42.1" not in t and "PR-142" not in t
+
+
+def test_review_line_renders_single_bullet(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d",
+                            "modules": {"feature_registry": True}})
+    _seed(out)
+    t = _run(out, "#42").stdout
+    assert "- REVIEW work=42" in t
+    assert "- - REVIEW" not in t
+
+
+def test_blank_query_refused(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    r = _run(out, "")
+    assert r.returncode != 0  # usage, not a match-everything trace
+
+
+def test_empty_repo_is_not_git_unavailable(render, tmp_path):
+    # unborn branch: an empty commit trail, honestly not "git unavailable"
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _git(out, "init", "-q")
+    t = _run(out, "#7").stdout
+    assert "git unavailable" not in t
+
+
 def test_honest_about_missing_sources(render, tmp_path):
     # minimal profile, no git, nothing seeded: every gap is named, exit 0
     out = render(tmp_path, {"project_name": "d", "modules": {}})
