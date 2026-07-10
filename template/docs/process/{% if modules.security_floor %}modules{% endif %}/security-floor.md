@@ -98,9 +98,10 @@ boundary:
       "message": "architecture floor: the UI reaches the db only through the service layer",
       "adr": "ADR-0002" }
 
-The optional **`adr`** field links the rule to the decision record it enforces —
-the gate hard-fails when the link does not resolve, so a boundary rule cannot
-outlive or misquote its decision. Honest ceiling: this is a **regex floor, not
+The optional **`adr`** field links the rule to the decision record it enforces
+(ADR-0002 above is illustrative — point it at one of *your* records, or omit
+it) — the gate hard-fails when the link does not resolve, so a boundary rule
+cannot outlive or misquote its decision. Honest ceiling: this is a **regex floor, not
 an architecture review** — it catches the literal import the rule names, not a
 clever indirection. For semantic layering conformance use a real arch-linter
 (the `arch-onboarding` module runs one best-effort when present); the floor is

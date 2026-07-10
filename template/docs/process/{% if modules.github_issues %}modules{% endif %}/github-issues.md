@@ -116,7 +116,9 @@ unauthenticated `gh` degrades to a note rather than an error:
   fall into when filed outside the story flow: a finding or follow-up that needs
   work is a typed issue (`type:bug`/`chore`/`feature`) with EARS acceptance, the
   same gradeable discipline as a story; a purely informational record is exempt.
-  Advisory only — a triage hint, never a gate.
+  Advisory only as a view — a triage hint, this tool never gates. (With the
+  `github-master` module installed, the same two conditions DO fail the gate
+  hard once a story is in-progress — `definition-of-ready-and-done.md`.)
 
 ## Optional: render story dependencies
 

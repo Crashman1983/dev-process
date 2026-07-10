@@ -39,10 +39,12 @@ interfaces:
 - **Best-effort:** layering conformance runs a present arch-linter
   (import-linter via `lint-imports`, dependency-cruiser via `depcruise`) and
   fails on violations; with no linter it prints a manual-review checklist and
-  stays green. For the few boundaries worth a portable, unconditional gate,
+  stays green. {% if modules.security_floor %}For the few boundaries worth a portable, unconditional gate,
   declare a scoped floor rule in the `security_floor` module (see its
   "Architecture boundaries as floor rules") — a regex backstop, not a linter
-  replacement. Conformance is **delegated to the linter's own contracts**
+  replacement. {% else %}For the few boundaries worth a portable, unconditional
+  gate, the `security_floor` module (not installed here) can carry a scoped
+  floor rule — see the hardening ratchet in `start-here.md`. {% endif %}Conformance is **delegated to the linter's own contracts**
   (`.importlinter`, `.dependency-cruiser.*`) — keep those in sync with the
   `rules` here, or a green linter can silently pass a rule it never enforces.
 - **Ignored:** unknown top-level keys (reserved for later cross-repo work).
