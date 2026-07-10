@@ -452,3 +452,98 @@ def test_mixed_type_blocked_by_fails_clean(render, tmp_path):
     assert r.returncode == 1
     assert "non-string element" in r.stdout
     assert "Traceback" not in r.stdout and "Traceback" not in r.stderr
+
+
+# --- Definition of Ready, enforced (dor slot) --------------------------------
+
+def _dor(typed=True, ears=True, deviation=False):
+    return {"typed": typed, "ears": ears, "deviation": deviation}
+
+
+def test_in_progress_not_ready_hard(render, tmp_path):
+    out = _render(render, tmp_path)
+    _story(out, "STORY-0001", status="in-progress")
+    _snapshot(out, {**_entry("STORY-0001"), "dor": _dor(typed=False)})
+    r = _run(out)
+    assert r.returncode == 1
+    flat = " ".join(r.stdout.split())
+    assert "not Ready" in flat and "type: label (R1)" in flat
+
+
+def test_in_progress_no_ears_hard(render, tmp_path):
+    out = _render(render, tmp_path)
+    _story(out, "STORY-0001", status="in-progress")
+    _snapshot(out, {**_entry("STORY-0001"), "dor": _dor(ears=False)})
+    r = _run(out)
+    assert r.returncode == 1
+    assert "EARS acceptance (R2)" in r.stdout.replace("\n", " ")
+
+
+def test_deviation_is_the_named_escape(render, tmp_path):
+    out = _render(render, tmp_path)
+    _story(out, "STORY-0001", status="in-progress")
+    _snapshot(out, {**_entry("STORY-0001"),
+                    "dor": _dor(typed=False, ears=False, deviation=True)})
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+
+
+def test_ready_issue_passes(render, tmp_path):
+    out = _render(render, tmp_path)
+    _story(out, "STORY-0001", status="in-progress")
+    _snapshot(out, {**_entry("STORY-0001"), "dor": _dor()})
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+
+
+def test_proposed_not_gated_by_dor(render, tmp_path):
+    # DoR gates STARTING; a proposed story with an unready issue is fine
+    out = _render(render, tmp_path)
+    _story(out, "STORY-0001", status="proposed")
+    _snapshot(out, {**_entry("STORY-0001", status="proposed"),
+                    "dor": _dor(typed=False, ears=False)})
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+
+
+def test_missing_dor_slot_is_soft(render, tmp_path):
+    # a snapshot predating the dor slot degrades to a note, never a fake fail
+    out = _render(render, tmp_path)
+    _story(out, "STORY-0001", status="in-progress")
+    _snapshot(out, _entry("STORY-0001"))  # no dor key at all
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+    assert "predates the dor slot" in r.stdout.replace("\n", " ")
+
+
+def test_malformed_dor_fails_clean(render, tmp_path):
+    out = _render(render, tmp_path)
+    _story(out, "STORY-0001", status="in-progress")
+    _snapshot(out, {**_entry("STORY-0001"), "dor": {"typed": "yes"}})
+    r = _run(out)
+    assert r.returncode == 1
+    assert "boolean typed/ears/deviation" in r.stdout.replace("\n", " ")
+    assert "Traceback" not in r.stdout + r.stderr
+
+
+def test_gh_sync_dor_facts(render, tmp_path):
+    # the pure helper that derives DoR facts at sync time
+    import importlib.util
+    out = _render(render, tmp_path)
+    spec = importlib.util.spec_from_file_location("ghs", out / "scripts/process/gh_sync.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    f = mod._dor_facts
+    assert f([{"name": "type:feature"}], "t", "When x, the system shall y.") == \
+        {"typed": True, "ears": True, "deviation": False}
+    # uppercase SHALL and the German heading both count
+    assert f([{"name": "type:bug"}], "t", "The system SHALL x")["ears"] is True
+    assert f([{"name": "type:bug"}], "t", "## Akzeptanzkriterien (EARS)")["ears"] is True
+    # epic is EARS-exempt (label or title)
+    assert f([{"name": "type:epic"}], "t", "scope only")["ears"] is True
+    assert f([], "EPIC: big", "scope only")["ears"] is True
+    # untyped, prose-only -> not ready
+    assert f([], "t", "some prose") == {"typed": False, "ears": False, "deviation": False}
+    # the named escape: a Deviations heading in the body
+    assert f([], "t", "## Deviations\nspike, no EARS yet")["deviation"] is True
+    assert f([], "t", "we deviate informally")["deviation"] is False
