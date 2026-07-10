@@ -158,6 +158,23 @@ Rekalibrierung, Goodhart/Self-Grading-Vorbehalt; Moduldoc-Sektion „honest
 ceiling" + Cockpit-Docstring + README, per Template-Test gepinnt)
 ausgeliefert, `v1.33.0`.
 
+SP49 (KISS-Cleanup — ein Owner je Verhalten, aus drei parallelen
+Tiefen-Sweeps (Dead Code, Duplikate, Doku-vs-Code): check_review besitzt die
+Plan-Feld-Grammatik und _unfenced (check_issues/trace importieren; Issue-Regex
+vereinheitlicht, Cross-Repo-Refs clearen jetzt auch das Review-Gate),
+check_decisions besitzt adr_exists (3 divergente Kopien ersetzt), das
+Review-Bundle importiert die Kernel-Block-Extraktion (Zweitblock → ehrlich
+unavailable statt still der erste), gh_json ein Owner im github-issues-Modul;
+nicht-importierbare Zwillinge (sbom/security-floor-Git-Helfer,
+EARS/Epic-Heuristik) per Template-Test gepinnt. Funktional: sbom-Beispiel-Policy
+no-opte auf Root-Manifesten (bare+**/-Paare), tote Manifest-Globs ohne Parser
+entfernt, `sbom` fehlte in allen drei Adapter-Modullisten (Test pinnt auf
+copier.yml), gh_board --push-No-op-Stub entfernt, github-master meldet leeren
+Mirror advisory statt still OK, trace-FINDING-Matcher verlangt key=value; dazu
+12 Doku-Kohärenz-Fixes ("one tier weaker" gestrichen, DoR/DoD-Abweichungskanäle
+getrennt, Copilot-Review-Prompt trägt die Grammatik, u. a.)) ausgeliefert,
+`v1.34.0`.
+
 ## Sub-Projekt-Tabelle (SP1–SP24)
 
 Die Tabelle wurde bis SP24 gepflegt; ab SP25 trägt das Narrativ oben die
