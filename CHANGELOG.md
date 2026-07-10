@@ -141,6 +141,15 @@ Checkliste, Produktrahmen, Pläne, Diff, REVIEW-Grammatik direkt aus
 check_review importiert; FINDING-Tokens per Template-Test an check_issues gepinnt; Dispatch-Rezepte je Harness in
 verification-independence, /review zeigt aufs Tool) ausgeliefert, `v1.32.0`.
 
+`v1.32.1` (Arc-Review über den Tiefe-Bogen, zwei unabhängige Reviewer: vier
+ausführbare Defekte im Bundle-Tool geschlossen — Fence-Korruption bei
+Markdown-Diffs, Non-UTF-8-Crash, IndexError bei fehlendem Options-Wert,
+Subdir-Aufruf verlor Root-Quellen; Grammatik-Claim ehrlich auf die
+REVIEW-Hälfte begrenzt + FINDING-Tokens per Template-Test an check_issues
+gepinnt; adr-Auflösung sieht rohe Regeln, Deviation nur als echte Überschrift,
+dor-Slot mit exaktem Key-Set; Doku-Kohärenz: bedingter arch-onboarding-Verweis,
+Hard-Path-Klausel in github-issues).
+
 ## Sub-Projekt-Tabelle (SP1–SP24)
 
 Die Tabelle wurde bis SP24 gepflegt; ab SP25 trägt das Narrativ oben die
