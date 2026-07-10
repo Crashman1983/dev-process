@@ -23,6 +23,7 @@ except ImportError:
 # core (e.g. docs/process/adr/), so their enforcement must not hinge on an
 # optional module being enabled.
 GATES = {
+    "kernel": (None, [sys.executable, "scripts/process/check_kernel.py", "."]),
     "decision-records": (None, [sys.executable, "scripts/process/check_decisions.py", "."]),
     "review": (None, [sys.executable, "scripts/process/check_review.py", "."]),
     "product-frame": (None, [sys.executable, "scripts/process/check_product_frame.py", "."]),
@@ -34,6 +35,7 @@ GATES = {
     "contract-first": ("contract_first", [sys.executable, "scripts/process/check_capability_contracts.py", "."]),
     "parity": ("parity", [sys.executable, "scripts/process/check_parity.py", "."]),
     "security-floor": ("security_floor", [sys.executable, "scripts/process/check_security_floor.py", "."]),
+    "sbom": ("sbom", [sys.executable, "scripts/process/check_sbom.py", "."]),
     "telemetry": ("telemetry", [sys.executable, "scripts/process/check_telemetry.py", "."]),
     "arch-docs": ("arch_docs", [sys.executable, "scripts/process/check_arch_docs.py", "."]),
     "github-master": ("github_master", [sys.executable, "scripts/process/check_github_master.py", "."]),

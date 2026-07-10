@@ -1,0 +1,267 @@
+#!/usr/bin/env python3
+"""sbom gate: a project must carry a Software Bill of Materials (CycloneDX JSON)
+that attests a license for every third-party component, and only licenses the
+project allows.
+
+The policy lives in docs/process/sbom-policy.json:
+  - `sbom_paths`     : globs locating the CycloneDX file(s) (default: common names).
+  - `allowed_licenses`: SPDX ids/expressions the project permits (optional — when
+                        absent, licenses are only required to be *present*).
+  - `manifest_paths` : dependency manifests, for an advisory coverage check.
+  - `exclude`        : component names (globs) exempt from the checks.
+
+Enforcement (mirrors the other gates — advisory when data is absent, hard on a
+real violation):
+  - no policy file            -> advisory note, pass (the DoD is the backstop).
+  - broken policy JSON        -> hard fail.
+  - policy present, no SBOM   -> advisory note, pass (generate one — see the doc).
+  - library component with no license          -> hard fail (attestation missing).
+  - library license outside `allowed_licenses` -> hard fail.
+  - manifest dependency absent from the SBOM   -> advisory note (best-effort).
+
+Enumeration needs git; if git is unavailable the scan is skipped with a note,
+never faked as a pass. Bypass: SKIP_SBOM=1. Python stdlib only.
+"""
+from __future__ import annotations
+
+import fnmatch
+import json
+import os
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+CONFIG = "docs/process/sbom-policy.json"
+DEFAULT_SBOM_PATHS = ["bom.json", "**/bom.json", "**/*.cdx.json", "sbom/*.json"]
+# Each manifest kind is listed both bare (root-level) and under **/ (nested) —
+# fnmatch("package.json", "**/package.json") is False, so a root manifest needs
+# its own bare entry or the coverage check silently no-ops on the common layout.
+DEFAULT_MANIFESTS = ["package.json", "**/package.json", "pom.xml", "**/pom.xml",
+                     "requirements.txt", "**/requirements.txt",
+                     "build.gradle", "**/build.gradle",
+                     "build.gradle.kts", "**/build.gradle.kts",
+                     "go.mod", "**/go.mod"]
+
+
+def _tracked_files(root: Path) -> list[str] | None:
+    try:
+        r = subprocess.run(["git", "-C", str(root), "ls-files", "-z"],
+                           capture_output=True, timeout=30)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if r.returncode != 0:
+        return None
+    return [p for p in r.stdout.decode("utf-8", "replace").split("\0") if p]
+
+
+def _matches_any(rel: str, globs: list[str]) -> bool:
+    base = rel.rsplit("/", 1)[-1]
+    return any(fnmatch.fnmatch(rel, g) or fnmatch.fnmatch(base, g) for g in globs)
+
+
+def _load_config(root: Path) -> tuple[dict | None, list[str]]:
+    p = root / CONFIG
+    if not p.is_file():
+        return None, []
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        return None, [f"{CONFIG}: invalid JSON: {exc}"]
+    except (UnicodeDecodeError, OSError) as exc:
+        return None, [f"{CONFIG}: could not read: {exc}"]
+    if not isinstance(data, dict):
+        return None, [f"{CONFIG}: must be a JSON object"]
+    return data, []
+
+
+def _str_list(cfg: dict, key: str, default: list[str]) -> tuple[list[str], list[str]]:
+    raw = cfg.get(key)
+    if raw is None:
+        return default, []
+    if isinstance(raw, list) and all(isinstance(x, str) for x in raw):
+        return raw, []
+    return default, [f"{CONFIG}: '{key}' must be a list of strings"]
+
+
+def _component_licenses(comp: dict) -> list[str]:
+    """The license terms attested for one CycloneDX component, each as its raw
+    string (an SPDX id/name, or a full expression). Order preserved for display.
+    A component with several `licenses[]` entries is bound by *all* of them (a
+    conjunction); a disjunction is expressed inside a single `expression`."""
+    out: list[str] = []
+    for entry in comp.get("licenses") or []:
+        if not isinstance(entry, dict):
+            continue
+        if isinstance(entry.get("expression"), str) and entry["expression"].strip():
+            out.append(entry["expression"].strip())
+            continue
+        lic = entry.get("license")
+        if isinstance(lic, dict):
+            for k in ("id", "name"):
+                if isinstance(lic.get(k), str) and lic[k].strip():
+                    out.append(lic[k].strip())
+                    break
+    return out
+
+
+def _expr_allowed(expr: str, allowed: set[str]) -> bool:
+    """Evaluate a simple SPDX license expression against the allow-list:
+    `A OR B` passes if any operand is allowed; `A AND B` requires all; a bare id
+    must be a member. Parentheses and `WITH` exceptions are flattened
+    conservatively — an unparsed token simply falls back to membership. Not a
+    full SPDX parser, but it covers the dual-license forms real SBOMs carry."""
+    e = expr.strip().strip("()").strip()
+    # AND binds the component to every operand; OR offers a choice. Handle the
+    # weaker operator (OR) first so `A AND B OR C` splits on OR into (A AND B), C.
+    upper = e.upper()
+    if " OR " in upper:
+        parts = re.split(r"\s+OR\s+", e, flags=re.I)
+        return any(_expr_allowed(p, allowed) for p in parts)
+    if " AND " in upper:
+        parts = re.split(r"\s+AND\s+", e, flags=re.I)
+        return all(_expr_allowed(p, allowed) for p in parts)
+    token = e.split(" WITH ", 1)[0].strip() if " WITH " in upper else e
+    return token in allowed
+
+
+def _licenses_ok(terms: list[str], allowed: set[str]) -> bool:
+    """A component satisfies the policy when *every* attested term is allowed
+    (conjunction across `licenses[]` entries); each term may itself be an SPDX
+    expression with its own OR/AND. Empty allow-list means presence-only, handled
+    by the caller."""
+    return all(_expr_allowed(t, allowed) for t in terms)
+
+
+def _root_identity(doc: dict) -> tuple[str | None, str | None]:
+    """The (bom-ref, name) of the SBOM's own root component from
+    metadata.component — the one entry that is the project itself, not a
+    dependency. Either may be None."""
+    meta = doc.get("metadata")
+    comp = meta.get("component") if isinstance(meta, dict) else None
+    if not isinstance(comp, dict):
+        return None, None
+    ref = comp.get("bom-ref")
+    name = comp.get("name")
+    return (ref if isinstance(ref, str) else None,
+            name if isinstance(name, str) else None)
+
+
+def check(root: Path) -> tuple[list[str], list[str]]:
+    cfg, errs = _load_config(root)
+    if errs:
+        return errs, []
+    if cfg is None:
+        return [], [f"no SBOM policy yet ({CONFIG} absent)"]
+
+    hard: list[str] = []
+    sbom_paths, e1 = _str_list(cfg, "sbom_paths", DEFAULT_SBOM_PATHS)
+    manifests, e2 = _str_list(cfg, "manifest_paths", DEFAULT_MANIFESTS)
+    exclude, e3 = _str_list(cfg, "exclude", [])
+    allowed_raw = cfg.get("allowed_licenses")
+    if allowed_raw is not None and not (
+            isinstance(allowed_raw, list) and all(isinstance(x, str) for x in allowed_raw)):
+        hard.append(f"{CONFIG}: 'allowed_licenses' must be a list of strings")
+    hard += e1 + e2 + e3
+    if hard:
+        return hard, []
+    allowed = {x.strip() for x in (allowed_raw or [])}
+
+    files = _tracked_files(root)
+    if files is None:
+        return [], ["could not list tracked files (git unavailable); scan skipped"]
+    sbom_files = [f for f in files if _matches_any(f, sbom_paths)]
+    if not sbom_files:
+        return [], [f"no SBOM found ({', '.join(sbom_paths)}) — third-party "
+                    "inventory unverified; generate a CycloneDX SBOM"]
+
+    soft: list[str] = []
+    seen_components: set[str] = set()
+    for rel in sbom_files:
+        try:
+            doc = json.loads((root / rel).read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError, OSError) as exc:
+            hard.append(f"{rel}: not a readable CycloneDX JSON: {exc}")
+            continue
+        # The project's own root component lives in metadata.component, NOT in
+        # components[] — so identify it there and skip only that one, rather than
+        # exempting every component that self-declares type "application" (any
+        # third-party app could carry that type and thereby dodge the check).
+        root_ref, root_name = _root_identity(doc)
+        for comp in doc.get("components") or []:
+            if not isinstance(comp, dict):
+                continue
+            ref = comp.get("bom-ref")
+            name = comp.get("name") or "<unnamed>"
+            if (root_ref and ref == root_ref) or (not ref and root_name and name == root_name):
+                continue  # the SBOM's own root component, not a third party
+            if exclude and _matches_any(name, exclude):
+                continue
+            seen_components.add(str(name).lower())
+            licenses = _component_licenses(comp)
+            if not licenses:
+                hard.append(f"{rel}: component '{name}' has no license attestation")
+                continue
+            if allowed and not _licenses_ok(licenses, allowed):
+                hard.append(f"{rel}: component '{name}' license "
+                            f"{licenses} not in allowed_licenses")
+
+    manifest_files = [f for f in files if _matches_any(f, manifests)]
+    missing = _coverage_gaps(root, manifest_files, seen_components)
+    if missing:
+        shown = ", ".join(sorted(missing)[:10])
+        extra = f" (+{len(missing) - 10} more)" if len(missing) > 10 else ""
+        soft.append(f"{len(missing)} manifest dependency(ies) not found in the SBOM: "
+                    f"{shown}{extra}")
+    return hard, soft
+
+
+def _coverage_gaps(root: Path, manifests: list[str], seen: set[str]) -> set[str]:
+    """Best-effort: dependency names in package.json / pom.xml absent from the SBOM."""
+    deps: set[str] = set()
+    for rel in manifests:
+        try:
+            text = (root / rel).read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue
+        if rel.endswith("package.json"):
+            try:
+                pkg = json.loads(text)
+            except json.JSONDecodeError:
+                continue
+            for section in ("dependencies", "devDependencies"):
+                deps |= set((pkg.get(section) or {}).keys())
+        elif rel.endswith("pom.xml"):
+            deps |= set(re.findall(r"<artifactId>\s*([^<\s]+)\s*</artifactId>", text))
+
+    def _norm(n: str) -> str:
+        # npm scope (@ns/pkg) — the SBOM usually lists the bare package name.
+        return n.rsplit("/", 1)[-1].lower() if n.startswith("@") else n.lower()
+
+    seen_norm = {_norm(c) for c in seen}
+    # Exact normalized-name comparison: substring matching wrongly marked a short
+    # dep name (e.g. `fs`) "covered" by any component whose name contained it.
+    return {d for d in deps if d and _norm(d) not in seen_norm}
+
+
+def main() -> int:
+    if os.environ.get("SKIP_SBOM") == "1":
+        print("sbom: skipped (SKIP_SBOM=1)")
+        return 0
+    root = Path(sys.argv[1] if len(sys.argv) > 1 else ".").resolve()
+    hard, soft = check(root)
+    for note in soft:
+        print(f"sbom: note: {note}")
+    if hard:
+        print("sbom: FAILED:")
+        for h in hard:
+            print(f"  - {h}")
+        print("  → attest licenses / update the SBOM, or bypass with SKIP_SBOM=1 "
+              "(and say why in the commit).")
+        return 1
+    print("sbom: OK")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

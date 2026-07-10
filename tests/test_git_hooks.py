@@ -138,17 +138,40 @@ def test_feature_branch_commit_allowed(render, tmp_path):
     assert r.returncode == 0, r.stderr
 
 
-def test_pre_push_runs_gate_and_bypass(render, tmp_path):
+def test_pre_push_gates_pushed_commit_and_bypass(render, tmp_path):
     out = _render(render, tmp_path, contracts_drift=True)
     _init_repo(out)
+    # Commit a failing state on a feature branch; the hook gates the pushed
+    # commits (fed on stdin), not the working tree.
+    _git(out, "checkout", "-q", "-b", "feat", check=True)
     _failing_contract(out)
+    _git(out, "add", "-A", check=True)
+    _git(out, "commit", "-q", "-m", "bad", env=_hook_env(), check=True)
+    bad = _git(out, "rev-parse", "HEAD", check=True).stdout.strip()
+    refs = f"refs/heads/feat {bad} refs/heads/feat {'0' * 40}\n"
     blocked = subprocess.run(["bash", ".git/hooks/pre-push"], cwd=out,
-                             stdin=subprocess.DEVNULL, capture_output=True, text=True, env=_hook_env())
-    assert blocked.returncode == 1, blocked.stdout
+                             input=refs, capture_output=True, text=True, env=_hook_env())
+    assert blocked.returncode == 1, blocked.stdout + blocked.stderr
     bypass = subprocess.run(["bash", ".git/hooks/pre-push"], cwd=out,
-                            stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                            input=refs, capture_output=True, text=True,
                             env=_hook_env(SKIP_PUSH_GATE="1"))
     assert bypass.returncode == 0
+
+
+def test_pre_push_ignores_dirty_working_tree(render, tmp_path):
+    out = _render(render, tmp_path, contracts_drift=True)
+    _init_repo(out)
+    _git(out, "checkout", "-q", "-b", "feat", check=True)
+    # A clean, gate-passing committed tip ...
+    _git(out, "commit", "--allow-empty", "-q", "-m", "ok", env=_hook_env(), check=True)
+    good = _git(out, "rev-parse", "HEAD", check=True).stdout.strip()
+    # ... with a failing but *uncommitted* working tree must not block the push:
+    # the hook gates the pushed tip in an isolated worktree, not this tree.
+    _failing_contract(out)
+    refs = f"refs/heads/feat {good} refs/heads/feat {'0' * 40}\n"
+    r = subprocess.run(["bash", ".git/hooks/pre-push"], cwd=out,
+                       input=refs, capture_output=True, text=True, env=_hook_env())
+    assert r.returncode == 0, r.stdout + r.stderr
 
 
 def test_post_commit_warns_never_blocks(render, tmp_path):

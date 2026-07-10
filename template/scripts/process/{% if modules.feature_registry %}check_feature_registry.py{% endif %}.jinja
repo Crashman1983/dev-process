@@ -19,6 +19,12 @@ ADR_DIR = "docs/process/adr"
 STATUSES = {"proposed", "in-progress", "done", "deprecated"}
 ID_RE = re.compile(r"^STORY-\d{4}$")
 
+# Advisory only: a story with many mapped tests but very few acceptance criteria
+# likely under-describes its tested behaviour — the criteria state less than the
+# tests prove. Granularity is a judgement call, so this warns, never blocks.
+UNDER_GRANULAR_MAX_ACC = 2
+UNDER_GRANULAR_MIN_TESTS = 5
+
 
 def _story_files(root: Path) -> list[Path]:
     reg = root / REGISTRY_DIR
@@ -124,7 +130,8 @@ def _check_story(root: Path, path: Path, seen_ids: dict,
     if isinstance(sid, str) and ID_RE.match(sid):
         graph[sid] = {"deps": deps, "status": data.get("status"), "rel": str(rel),
                       "parent": parent_id, "has_test": bool(tests),
-                      "title": data.get("title"), "story": data.get("story")}
+                      "title": data.get("title"), "story": data.get("story"),
+                      "n_acc": n_acc, "n_tests": n_tests}
 
     return hard, soft
 
@@ -227,6 +234,23 @@ def _hierarchy_checks(graph: dict) -> tuple[list[str], list[str]]:
     return sorted(set(hard)), soft
 
 
+def _under_granular_note(graph: dict) -> list[str]:
+    """Advisory: stories with few acceptance criteria but many mapped tests — the
+    acceptance likely under-describes what the tests prove. Never blocks."""
+    flagged = sorted(
+        ((sid, n["n_tests"]) for sid, n in graph.items()
+         if n["n_acc"] <= UNDER_GRANULAR_MAX_ACC and n["n_tests"] >= UNDER_GRANULAR_MIN_TESTS),
+        key=lambda x: -x[1])
+    if not flagged:
+        return []
+    shown = ", ".join(f"{sid}({nt}t)" for sid, nt in flagged[:12])
+    more = f" (+{len(flagged) - 12} more)" if len(flagged) > 12 else ""
+    return [f"{len(flagged)} story(ies) carry <= {UNDER_GRANULAR_MAX_ACC} acceptance "
+            f"criteria but >= {UNDER_GRANULAR_MIN_TESTS} mapped tests — acceptance may "
+            f"under-describe tested behaviour; consider adding explicit criteria: "
+            f"{shown}{more}"]
+
+
 def check(root: Path) -> tuple[list[str], list[str]]:
     files = _story_files(root)
     if not files:
@@ -245,6 +269,7 @@ def check(root: Path) -> tuple[list[str], list[str]]:
     hh, hs = _hierarchy_checks(graph)
     hard += hh
     soft += hs
+    soft += _under_granular_note(graph)
     return hard, soft
 
 

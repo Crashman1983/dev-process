@@ -96,6 +96,27 @@ def test_valid_story_ok(render, tmp_path):
     assert "registry-gate: OK" in r.stdout
 
 
+def test_under_granular_acceptance_is_advisory(render, tmp_path):
+    out = _render(render, tmp_path)
+    (out / "tests").mkdir(parents=True, exist_ok=True)
+    paths = []
+    for i in range(6):
+        p = f"tests/test_ug_{i}.py"
+        (out / p).write_text("def test_x():\n    pass\n")
+        paths.append(p)
+    # 1 acceptance criterion, 6 mapped tests -> under-granular (advisory, never blocks)
+    _write_story(out, "STORY-0009.json", {
+        "id": "STORY-0009", "title": "Thin acceptance",
+        "story": "As x, when y, the system shall z.",
+        "acceptance": [{"id": "AC1", "text": "z happens."}],
+        "tests": paths, "status": "done",
+    })
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+    assert "under-describe tested behaviour" in r.stdout
+    assert "STORY-0009" in r.stdout
+
+
 def _dep(sid, blocked_by=None, status="proposed"):
     d = {"id": sid, "title": "t",
          "story": "As a x, when y, the system shall z.",

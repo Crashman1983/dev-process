@@ -12,12 +12,50 @@ code, commits, ADRs, journal) in English.
 
 **When this process is not worth it:** for throwaway prototypes, one-off
 scripts, and single-session work the overhead is a net loss — install nothing,
-or keep the minimal profile (no optional modules) and skip the onboarding
-dialogue. The process pays off for anything multi-session, multi-agent, or
-touching contracts, persistence, or auth.
+or pick the `minimal` profile and skip the onboarding dialogue. The process
+pays off for anything multi-session, multi-agent, or touching contracts,
+persistence, or auth.
 
-**The mid-size caveat:** three gates are *core* and always run regardless of the
-module profile — `decision-records`, `review`, and `product-frame`. So even on
+## Profiles and the hardening ratchet
+
+Module choice at install time is one question, not thirteen: the **profile**
+preset derives the module set, and the modules question then shows that set for
+adjustment — a starting point, not a lock.
+
+| Profile | Modules on top of the core gates | Who it fits |
+|---|---|---|
+| `minimal` | none | prototypes; the smallest footprint |
+| `solo` (default) | doc-drift, git-hooks | one developer — local enforcement carries the process even without CI review culture |
+| `team` | solo + feature-registry, github-issues | a small team — shared backlog and acceptance traceability |
+| `custom` | none preselected | you know exactly what you want |
+
+**Harden as the project earns it — the ratchet.** Start light and switch a
+module on when its trigger appears; each step is a `copier update` with the new
+module set (see BOOTSTRAP.md, "Later"). The triggers:
+
+- **docs worth trusting** — more than a handful, referenced from anchors →
+  `doc_drift_gate`
+- **no CI, or work leaves your machine** — local enforcement as the (only or
+  additional) pillar → `git_hooks`
+- first **persistence, auth, or secrets** → `security_floor`
+- a **second surface** (web + cli, web + mobile) → `parity`
+- a **shared or external interface** another component builds on →
+  `contract_first`, `contracts_drift`
+- **user-visible behavior worth tracing** to acceptance and tests →
+  `feature_registry`
+- the backlog outgrows one head, or a **second person/agent** joins →
+  `github_issues` (and `github_master` once issues become the source of truth)
+- **architecture claims worth checking** against real code → `arch_onboarding`;
+  stakeholders who want to *read* it → `arch_docs`
+- you want to **measure what the process catches and costs** → `telemetry`
+- **license/compliance** obligations → `sbom`
+
+The ratchet only tightens: switching a module *off* again is a process decision
+— record why (decision record), do not just drop the gate that started failing.
+
+**The mid-size caveat:** four gates are *core* and always run regardless of the
+module profile — `kernel` (the always-on rule block is intact in the anchor),
+`decision-records`, `review`, and `product-frame`. So even on
 the minimal profile, the first Tier 2+ change (one that touches a contract,
 persistence, auth, or something another component depends on) carries the full
 plan → review → attestation ceremony, without the optional modules
@@ -202,6 +240,12 @@ Rule of thumb: a *decision* → record; a *design* → design doc; the *product'
 shape* → PRODUCT.md; a *behavior* → story; *how to build it* → plan; *why you
 did it* → journal; *something for later* → inbox.
 
+Reading the trail back is one command, not archaeology:
+`scripts/process/trace.py STORY-NNNN` (or `'#42'`, or a plan slug) reassembles
+the full story of one piece of work — story, issue, plans, commits, `REVIEW`
+attestations, and review reports — read-only, naming any source it cannot
+reach.
+
 ## Anchors: what goes where, and how to scale them
 
 The anchor files (`CLAUDE.md`, `AGENTS.md`, and any harness equivalent) are thin
@@ -225,7 +269,35 @@ automatically when work touches that subtree; AGENTS.md-style harnesses use a
 per-directory file or an explicit pointer from the root anchor. Either way the
 root stays small and each area owns its own detail.
 
-## Definition of ready
+## Keeping the kernel loaded across compaction
+
+The `kernel` gate guarantees the rule block is intact *in the anchor file*. It
+cannot guarantee the block is in the model's *live context* — a long session
+compacts (summarizes) its history, and the anchor can be summarized away even
+though the file is untouched. No offline gate can see the live context, so this
+is a behavioral invariant, not a checkable one. Four things keep the kernel
+loaded:
+
+- **The kernel is thin by design** — small enough to survive a summary intact.
+- **It is self-restoring.** Its first line instructs: if you are resuming or the
+  block was compacted, re-read `kernel.md` and `mandatory-rules.md` before
+  acting. That directive rides along with any surviving fragment, and the
+  `kernel` gate's byte-identity check makes it un-droppable from the file.
+- **Phases re-hydrate.** `execute` and `review` re-read the kernel and the plan
+  at phase entry (`workflow.md`) — the long phases are exactly where compaction
+  strikes, so they do not trust warm memory.
+- **The harness helps, unevenly.** Claude Code re-injects the root anchor after
+  compaction automatically; a `PreCompact`/`SessionStart` hook can re-read the
+  kernel explicitly. AGENTS.md-style harnesses vary — there, the self-restoring
+  directive and `/prime` on resume are the safety net. Configure a
+  compaction/session hook where your harness supports one.
+
+## Definition of ready (project onboarding)
+
+This is the one-time *project*-readiness bar — the process is installed and
+onboarded. It is distinct from the per-work-item **Definition of Ready /
+Definition of Done** (`definition-of-ready-and-done.md`), which gates starting
+and finishing each issue or story once development is under way.
 
 The project is ready for normal process-driven development when:
 
@@ -241,9 +313,11 @@ The project is ready for normal process-driven development when:
   onboarding state;
 - **the CI gate is wired as a *required* check.** The `process-gates` job failing
   only blocks a merge if your host is configured to require it — CI cannot set
-  this itself. On GitHub: Settings → Branches → protect the default branch → mark
-  `process-gates` a required status check. On GitLab: a merge-request approval
-  rule / pipeline-must-succeed setting. Without this, a red gate is advisory, not
+  this itself. On GitHub, the GitHub CI adapter ships a one-command setup:
+  `setup_branch_protection.sh` (under scripts/process/) idempotently adds
+  `process-gates` as a required status check on the default branch — or do it
+  manually via Settings → Branches. On GitLab: a merge-request approval rule /
+  pipeline-must-succeed setting. Without this, a red gate is advisory, not
   enforced — the single step that turns "the gate runs" into "the gate blocks".
 
 Once developing: before planning any change, read the Decision Records

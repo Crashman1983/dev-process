@@ -1,6 +1,9 @@
 # /review
 
-Run the gate before merging to the main branch. Read
+Run the gate before merging to the main branch. Re-read the kernel
+(`docs/process/kernel.md`) and `docs/process/mandatory-rules.md` first — the
+review judges the change against those rules, and a long session may have
+compacted them out of context. Then read
 `docs/process/workflow.md` (Review); depth scales with
 `docs/process/risk-tiers.md`. Judge functional completeness, correctness, and
 rule adherence against the plan or spec, working through

@@ -13,22 +13,29 @@ harnesses:
     copilot: false
     agents_md: false
 
+profile:
+  type: str
+  help: >-
+    Module preset — a starting point, not a lock (the next question shows the
+    derived set; adjust freely). It only seeds the INITIAL modules answer: on
+    `copier update`, the recorded modules dict wins, so harden later by passing
+    the new modules set explicitly (see BOOTSTRAP.md, "Later").
+    minimal: core gates only (prototypes, smallest footprint).
+    solo: + doc-drift + git-hooks (one developer, local enforcement).
+    team: + feature-registry + github-issues on top of solo (shared backlog,
+    acceptance traceability).
+    custom: start all-off and pick modules yourself.
+  choices:
+    - minimal
+    - solo
+    - team
+    - custom
+  default: solo
+
 modules:
   type: yaml
-  help: "Which opt-in process modules to install"
-  default:
-    doc_drift_gate: false
-    arch_onboarding: false
-    feature_registry: false
-    github_issues: false
-    contracts_drift: false
-    git_hooks: false
-    contract_first: false
-    parity: false
-    security_floor: false
-    telemetry: false
-    arch_docs: false
-    github_master: false
+  help: "Which opt-in process modules to install (default derived from the profile; adjust freely)"
+  default: "{doc_drift_gate: {{ profile in ['solo', 'team'] }}, arch_onboarding: false, feature_registry: {{ profile == 'team' }}, github_issues: {{ profile == 'team' }}, contracts_drift: false, git_hooks: {{ profile in ['solo', 'team'] }}, contract_first: false, parity: false, security_floor: false, sbom: false, telemetry: false, arch_docs: false, github_master: false}"
 
 ci:
   type: yaml

@@ -8,8 +8,18 @@ pointer to `docs/process/start-here.md`. The rendered adapters carry an
 identical copy; this neutral file exists so the kernel is obtainable even when
 none of them were rendered.
 
+**This block is gated.** The core `kernel` gate (`scripts/process/check_kernel.py`,
+always on) verifies that every root anchor present in the repo carries the block
+below byte-identical to this file — so a rule cannot be silently dropped, edited,
+or truncated out of the anchor file (keeping it in the *live context* across
+compaction is the behavioral mechanism in `start-here.md`, which no file gate can
+verify). Adopt and extend your anchor *outside* the `KERNEL:START`/`KERNEL:END`
+markers; the text inside them is canonical here, and exactly one block per file.
+
 <!-- KERNEL:START -->
 ## Always-on kernel
+
+**Load-bearing — these rules bind every turn, not just the first.** If you are resuming a session, or this block was summarized or compacted out of context, re-read `docs/process/kernel.md` and `docs/process/mandatory-rules.md` in full before continuing.
 
 **Mandatory rules (full text: `docs/process/mandatory-rules.md`):**
 1. Verify before asserting. 2. Plan before substantive work. 3. Contract/interface first.

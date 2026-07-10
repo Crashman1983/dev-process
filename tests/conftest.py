@@ -23,7 +23,7 @@ def _template_src(tmp_path_factory):
 def _copy(src: Path, dst: Path, data: dict, **kwargs) -> Path:
     full = {
         "harnesses": {"copilot": False, "agents_md": False},
-        "modules": {"doc_drift_gate": False, "arch_onboarding": False, "feature_registry": False, "github_issues": False, "contracts_drift": False, "git_hooks": False, "contract_first": False, "parity": False, "security_floor": False, "telemetry": False, "arch_docs": False, "github_master": False},
+        "modules": {"doc_drift_gate": False, "arch_onboarding": False, "feature_registry": False, "github_issues": False, "contracts_drift": False, "git_hooks": False, "contract_first": False, "parity": False, "security_floor": False, "sbom": False, "telemetry": False, "arch_docs": False, "github_master": False},
         "ci": {"github": True, "gitlab": False},
     }
     full.update(data)
@@ -35,6 +35,19 @@ def _copy(src: Path, dst: Path, data: dict, **kwargs) -> Path:
 def render(_template_src):
     def _f(dst: Path, data: dict, **kwargs) -> Path:
         return _copy(_template_src, dst, data, **kwargs)
+
+    return _f
+
+
+@pytest.fixture
+def render_raw(_template_src):
+    """Render passing ONLY the given answers — unlike `render`, no full modules
+    dict is injected, so profile-derived module defaults actually apply."""
+
+    def _f(dst: Path, data: dict, **kwargs) -> Path:
+        copier.run_copy(str(_template_src), str(dst), data=data,
+                        defaults=True, unsafe=True, quiet=True, **kwargs)
+        return dst
 
     return _f
 

@@ -58,16 +58,40 @@ if can_write pre-push; then
 cat > "$HOOK_DIR/pre-push" << 'EOF'
 #!/usr/bin/env bash
 # dev-process-managed-hook
-# Best-effort local feedback before pushing: runs the manifest-aware gate
-# runner over all active modules — against the WORKING TREE, not the commits
-# being pushed (uncommitted state can mask or cause failures). CI on the
-# pushed commits is the authority. Bypass: git push --no-verify, or
-# SKIP_PUSH_GATE=1.
+# Gates the COMMITS BEING PUSHED, not the working tree: for each pushed ref the
+# hook checks the pushed tip out into a throwaway detached worktree and runs the
+# manifest-aware gate runner there. This isolates the check from local
+# uncommitted state (which could otherwise mask OR cause failures) and is
+# parallel-safe (no stash, no HEAD move). With no CI configured, this
+# pushed-commit gate is the last automated check before the remote.
+# Bypass: git push --no-verify, or SKIP_PUSH_GATE=1.
 [ "${SKIP_PUSH_GATE:-0}" = "1" ] && { echo "⚠ pre-push gate skipped (SKIP_PUSH_GATE=1)." >&2; exit 0; }
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
 cd "$REPO_ROOT" || exit 0
-[ -f scripts/process/gate_runner.py ] || exit 0
-python3 scripts/process/gate_runner.py
+# Drop Git's hook-local env (GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE/…) so every git
+# command below — and any git a gate runs — resolves the throwaway worktree it
+# is standing in, not the pushing worktree that invoked the hook.
+unset $(git rev-parse --local-env-vars 2>/dev/null)
+# Read the whole ref stream up front: once consumed, no child command (e.g. a
+# post-checkout hook fired by `git worktree add`) can drain the remaining refs.
+refs="$(cat)"
+ZERO="0000000000000000000000000000000000000000"
+gate_status=0
+while read -r _lref lsha _rref _rsha; do
+  [ -z "$lsha" ] && continue
+  [ "$lsha" = "$ZERO" ] && continue   # branch deletion — nothing to gate
+  wt="$(mktemp -d "${TMPDIR:-/tmp}/devproc-prepush.XXXXXX")" || continue
+  if git worktree add --quiet --detach "$wt" "$lsha" </dev/null 2>/dev/null; then
+    if [ -f "$wt/scripts/process/gate_runner.py" ]; then
+      ( cd "$wt" && python3 scripts/process/gate_runner.py </dev/null ) || gate_status=1
+    fi
+    git worktree remove --force "$wt" </dev/null 2>/dev/null
+  else
+    echo "⚠ pre-push: could not materialize $lsha for gating; not blocking." >&2
+  fi
+  rm -rf "$wt" 2>/dev/null
+done <<< "$refs"
+exit $gate_status
 EOF
 chmod +x "$HOOK_DIR/pre-push"
 echo "✓ installed pre-push"

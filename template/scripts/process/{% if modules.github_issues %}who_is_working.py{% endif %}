@@ -1,0 +1,300 @@
+#!/usr/bin/env python3
+"""who_is_working: a read-only preflight view of concurrent activity, so an
+agent can see what is already in flight *before* claiming work (see the
+"Parallel agents" section of docs/process/workflow.md).
+
+It aggregates, in one view:
+
+  - active issue claims (status:in-progress / review / handoff / blocked), with
+    the claimed branch and time since last activity — stale claims are flagged;
+  - open pull requests (branch, author, age);
+  - remote feature branches with no open PR yet;
+  - local git worktrees (who has what checked out where).
+
+Read-only: it never edits issues, labels, comments, or git state. Best-effort —
+a missing/unauthenticated `gh` just drops the GitHub sections with a note; the
+git sections still work outside a network.
+
+Usage:
+    who_is_working.py [--stale-hours N] [--json] [--selftest]
+
+`--stale-hours` (default 12) is the age past which a claim with no new activity
+is flagged STALE (a candidate for reclaim per the coordination convention).
+"""
+from __future__ import annotations
+
+import json
+import re
+import subprocess
+import sys
+from datetime import datetime, timezone
+
+ACTIVE_STATUS = {
+    "status:in-progress",
+    "status:review",
+    "status:handoff",
+    "status:blocked",
+}
+BRANCH_PREFIXES = ("feature/", "fix/", "chore/", "docs/", "refactor/")
+_CLAIM_BRANCH = re.compile(r"[Bb]ranch `([^`]+)`")
+
+
+# ---------------------------------------------------------------- pure helpers
+
+def parse_iso(ts: str) -> datetime | None:
+    """Parse a GitHub ISO-8601 timestamp (…Z) into an aware datetime."""
+    if not ts:
+        return None
+    try:
+        return datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def hours_since(ts: str, now: datetime) -> float | None:
+    dt = parse_iso(ts)
+    if dt is None:
+        return None
+    return (now - dt).total_seconds() / 3600.0
+
+
+def is_stale(ts: str, now: datetime, stale_hours: float) -> bool:
+    h = hours_since(ts, now)
+    return h is not None and h >= stale_hours
+
+
+def active_claims(issues: list[dict], active: set[str] = ACTIVE_STATUS) -> list[dict]:
+    """Issues carrying at least one active status label, newest-stale first."""
+    out = []
+    for it in issues:
+        labels = {lb.get("name", "") for lb in it.get("labels", [])}
+        hit = labels & active
+        if hit:
+            out.append({**it, "_status": sorted(hit)})
+    return out
+
+
+def claim_branch(comment_bodies: list[str]) -> str | None:
+    """Branch from the most recent 'Claimed … Branch `X`' comment, if any."""
+    for body in reversed(comment_bodies):
+        if "Claimed" in body:
+            m = _CLAIM_BRANCH.search(body)
+            if m:
+                return m.group(1)
+    return None
+
+
+def parse_worktrees(porcelain: str) -> list[dict]:
+    """Parse `git worktree list --porcelain` into {path, branch, head}."""
+    trees, cur = [], {}
+    for line in porcelain.splitlines():
+        if not line.strip():
+            if cur:
+                trees.append(cur)
+                cur = {}
+            continue
+        key, _, val = line.partition(" ")
+        if key == "worktree":
+            cur["path"] = val
+        elif key == "HEAD":
+            cur["head"] = val[:8]
+        elif key == "branch":
+            cur["branch"] = val.replace("refs/heads/", "")
+        elif key == "detached":
+            cur["branch"] = "(detached)"
+    if cur:
+        trees.append(cur)
+    return trees
+
+
+def feature_branches(ls_remote: str, prefixes: tuple[str, ...] = BRANCH_PREFIXES) -> list[str]:
+    """Branch names from `git ls-remote --heads` matching a work prefix."""
+    names = []
+    for line in ls_remote.splitlines():
+        _, _, ref = line.partition("\t")
+        name = ref.replace("refs/heads/", "").strip()
+        if name.startswith(prefixes):
+            names.append(name)
+    return names
+
+
+# ------------------------------------------------------------------------ i/o
+
+def gh_json(*args: str):
+    """Run a gh command returning JSON; None on any failure (best-effort)."""
+    try:
+        out = subprocess.run(["gh", *args], check=True,
+                             capture_output=True, text=True).stdout
+        return json.loads(out) if out.strip() else []
+    except (subprocess.CalledProcessError, FileNotFoundError, json.JSONDecodeError):
+        return None
+
+
+def git(*args: str) -> str | None:
+    try:
+        return subprocess.run(["git", *args], check=True,
+                             capture_output=True, text=True).stdout
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return None
+
+
+# --------------------------------------------------------------------- report
+
+def collect(stale_hours: float, now: datetime) -> dict:
+    report: dict = {"claims": [], "prs": [], "branches": [], "worktrees": [],
+                    "notes": []}
+
+    issues = gh_json("issue", "list", "--state", "open", "--limit", "100",
+                     "--json", "number,title,updatedAt,labels,url")
+    if issues is None:
+        report["notes"].append("gh unavailable — issue claims skipped")
+    else:
+        for it in active_claims(issues):
+            num = str(it["number"])
+            detail = gh_json("issue", "view", num, "--json", "comments")
+            bodies = [c.get("body", "") for c in (detail or {}).get("comments", [])]
+            report["claims"].append({
+                "number": num,
+                "title": it.get("title", ""),
+                "status": it["_status"],
+                "branch": claim_branch(bodies),
+                "hours": hours_since(it.get("updatedAt", ""), now),
+                "stale": is_stale(it.get("updatedAt", ""), now, stale_hours),
+                "url": it.get("url", ""),
+            })
+        report["claims"].sort(key=lambda c: (c["hours"] is None, -(c["hours"] or 0)))
+
+    prs = gh_json("pr", "list", "--state", "open", "--limit", "100",
+                  "--json", "number,title,headRefName,author,updatedAt,url")
+    claimed_branches = set()
+    if prs is None:
+        report["notes"].append("gh unavailable — open PRs skipped")
+    else:
+        for pr in prs:
+            branch = pr.get("headRefName", "")
+            claimed_branches.add(branch)
+            report["prs"].append({
+                "number": str(pr["number"]),
+                "title": pr.get("title", ""),
+                "branch": branch,
+                "author": (pr.get("author") or {}).get("login", "?"),
+                "hours": hours_since(pr.get("updatedAt", ""), now),
+                "url": pr.get("url", ""),
+            })
+
+    ls = git("ls-remote", "--heads", "origin")
+    if ls is None:
+        report["notes"].append("no remote 'origin' — remote branches skipped")
+    else:
+        report["branches"] = [b for b in feature_branches(ls)
+                              if b not in claimed_branches]
+
+    wt = git("worktree", "list", "--porcelain")
+    if wt is not None:
+        report["worktrees"] = parse_worktrees(wt)
+
+    return report
+
+
+def _age(hours: float | None) -> str:
+    if hours is None:
+        return "?"
+    if hours < 1:
+        return f"{int(hours * 60)}m"
+    if hours < 48:
+        return f"{hours:.0f}h"
+    return f"{hours / 24:.0f}d"
+
+
+def render(report: dict) -> str:
+    lines = ["# who is working — concurrent activity preflight", ""]
+
+    lines.append("## Active claims")
+    if report["claims"]:
+        for c in report["claims"]:
+            flag = "  ⚠ STALE" if c["stale"] else ""
+            br = f" [{c['branch']}]" if c["branch"] else ""
+            st = ",".join(s.replace("status:", "") for s in c["status"])
+            lines.append(f"- #{c['number']} ({st}, {_age(c['hours'])}){br} "
+                        f"{c['title']}{flag}")
+    else:
+        lines.append("- none")
+
+    lines += ["", "## Open pull requests"]
+    if report["prs"]:
+        for p in report["prs"]:
+            lines.append(f"- #{p['number']} [{p['branch']}] by {p['author']} "
+                        f"({_age(p['hours'])}) — {p['title']}")
+    else:
+        lines.append("- none")
+
+    lines += ["", "## Remote work branches without an open PR"]
+    lines += [f"- {b}" for b in report["branches"]] or ["- none"]
+
+    lines += ["", "## Local worktrees"]
+    if report["worktrees"]:
+        for w in report["worktrees"]:
+            lines.append(f"- {w.get('branch', '(none)')}  "
+                        f"{w.get('head', '')}  {w.get('path', '')}")
+    else:
+        lines.append("- none")
+
+    if report["notes"]:
+        lines += ["", "## Notes"] + [f"- {n}" for n in report["notes"]]
+    return "\n".join(lines)
+
+
+# ------------------------------------------------------------------- selftest
+
+def _selftest() -> int:
+    now = datetime(2026, 7, 6, 12, 0, tzinfo=timezone.utc)
+    assert abs(hours_since("2026-07-06T06:00:00Z", now) - 6.0) < 1e-6
+    assert hours_since("not-a-date", now) is None
+    assert is_stale("2026-07-05T12:00:00Z", now, 12) is True
+    assert is_stale("2026-07-06T09:00:00Z", now, 12) is False
+
+    issues = [
+        {"number": 1, "labels": [{"name": "status:in-progress"}, {"name": "x"}]},
+        {"number": 2, "labels": [{"name": "type:feature"}]},
+        {"number": 3, "labels": [{"name": "status:review"}]},
+    ]
+    got = {c["number"] for c in active_claims(issues)}
+    assert got == {1, 3}, got
+
+    assert claim_branch(["hi", "**Claimed** by an agent. Branch `feature/x`."]) == "feature/x"
+    assert claim_branch(["**Claimed**. Branch `a`.", "**Claimed**. Branch `b`."]) == "b"
+    assert claim_branch(["no claim here"]) is None
+
+    porc = ("worktree /repo\nHEAD abc1234500\nbranch refs/heads/main\n\n"
+            "worktree /tmp/wt\nHEAD def6789000\ndetached\n")
+    trees = parse_worktrees(porc)
+    assert trees[0] == {"path": "/repo", "head": "abc12345", "branch": "main"}, trees
+    assert trees[1]["branch"] == "(detached)", trees
+
+    ls = ("aaa\trefs/heads/main\n"
+          "bbb\trefs/heads/feature/foo\n"
+          "ccc\trefs/heads/chore/bar\n"
+          "ddd\trefs/heads/release-1\n")
+    assert feature_branches(ls) == ["feature/foo", "chore/bar"], feature_branches(ls)
+
+    assert _age(0.25) == "15m" and _age(6.0) == "6h" and _age(72.0) == "3d"
+    print("who_is_working selftest: OK")
+    return 0
+
+
+def main(argv: list[str]) -> int:
+    if "--selftest" in argv:
+        return _selftest()
+    stale_hours = 12.0
+    if "--stale-hours" in argv:
+        stale_hours = float(argv[argv.index("--stale-hours") + 1])
+    report = collect(stale_hours, datetime.now(timezone.utc))
+    if "--json" in argv:
+        print(json.dumps(report, indent=2, ensure_ascii=False))
+    else:
+        print(render(report))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))
