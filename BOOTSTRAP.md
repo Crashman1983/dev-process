@@ -123,12 +123,13 @@ existing file and add a pointer to `docs/process/start-here.md`.
     python3 scripts/process/gate_runner.py   # must exit 0
     git status --porcelain                   # brownfield: added files only
 
-**Version check:** confirm the render matches the docs you are following.
-`grep '^version' pyproject.toml` in the rendered repo should show the version
-the README advertises. The default `copier copy gh:…` renders the latest
-**tag** — if that lags the README, pass `--vcs-ref=HEAD` (or `git clone` +
-`--vcs-ref=HEAD`) to get the branch tip, or the tag is simply behind and the
-maintainer needs to cut a release.
+**Version check:** confirm the render matches the docs you are following. The
+rendered project records its template version in `.copier-answers.yml` (the
+`_commit:` line — a tag, or `<tag>.post…` for a HEAD install); compare it to
+the version the template README advertises. The default `copier copy gh:…`
+renders the latest **tag** — if that lags the README, pass `--vcs-ref=HEAD`
+(or `git clone` + `--vcs-ref=HEAD`) to get the branch tip, or the tag is
+simply behind and the maintainer needs to cut a release.
 
 The gate runner needs `PyYAML>=6` importable (`pip install pyyaml`); without
 it, it exits with a one-line install hint.
@@ -177,6 +178,9 @@ silent no-op; always pass the new `modules` set explicitly, as above.
 `--data` expects the **complete** `modules` dictionary with the new values,
 not just the changed keys. `update` checks out the latest **tagged** template
 release by default, preserves your local edits, and flags conflicts inline.
+**If the project was installed with `--vcs-ref=HEAD`** (a `.post…` version in
+`.copier-answers.yml`), a default update refuses with "Downgrades are not
+supported" — pass `--vcs-ref=HEAD` here too.
 
 Disabling works the same way (flag back to `false`): `copier update` then
 **removes** that module's rendered files (gate script, module doc) and the

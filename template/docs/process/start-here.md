@@ -71,17 +71,18 @@ Tier 2+ merge).
 
 1. Confirm that the process files exist: `CLAUDE.md`, `PRODUCT.md`,
    `docs/process/`, `.copier-answers.yml`, and `scripts/process/gate_runner.py`.
-2. Initialize Git if this is a new repository.
-3. Install local hooks if the `git-hooks` module is active:
-   `bash scripts/process/install-hooks.sh`.
-4. Run the gates: `python scripts/process/gate_runner.py` (use `python3` if
+2. Initialize Git if this is a new repository — `git init -b main` (the shipped
+   CI workflow's push trigger and these docs assume the default branch is
+   named `main`).
+3. Run the gates: `python scripts/process/gate_runner.py` (use `python3` if
    `python` is not on PATH; needs `PyYAML>=6`).
-5. Read `docs/process/mandatory-rules.md` and `docs/process/risk-tiers.md`.
-6. Create a process-baseline commit before product work starts. If you already
-   installed the `git-hooks` module (step 3) and you are on the main branch, the
-   no-direct-main pre-commit will block this one-time commit — run it with
-   `ALLOW_MAIN_COMMIT=1 git commit …` (the sanctioned bypass for onboarding), or
-   make the baseline commit before installing the hooks.
+4. Read `docs/process/mandatory-rules.md` and `docs/process/risk-tiers.md`.
+5. Create the process-baseline commit before product work starts.
+6. Install local hooks if the `git-hooks` module is active:
+   `bash scripts/process/install-hooks.sh`. Installing *after* the baseline
+   commit avoids the no-direct-main hook blocking it; if the hooks were
+   installed first, `ALLOW_MAIN_COMMIT=1 git commit …` is the sanctioned
+   onboarding bypass.
 
 Green gates at this stage mean: "the process is installed." They do not yet
 mean that architecture, requirements, contracts, parity, or security rules

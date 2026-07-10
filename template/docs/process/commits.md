@@ -5,6 +5,9 @@
 Conventional Commits: `type: imperative subject` where `type` is one of
 `feat | fix | docs | refactor | test | chore | perf`. Subject under 72 characters,
 imperative mood, no trailing period. Body (optional) explains *why*, wraps at ~72.
+Mention the plan slug or issue ref (subject or body) when the commit implements
+planned work — that mention is what lets `trace.py` correlate commits with the
+story/plan/review chain.
 
 ## Atomicity
 

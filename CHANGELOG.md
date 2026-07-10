@@ -155,7 +155,8 @@ Decke dokumentiert: Zahlen gelten nur projektintern gegen die eigene Baseline
 (Trends, Verhältnisse, Catch/Escape-Ereignisse als robusteste Klasse), kein
 projektübergreifendes Benchmarking, Cockpit-Schwellen sind Startwerte zur
 Rekalibrierung, Goodhart/Self-Grading-Vorbehalt; Moduldoc-Sektion „honest
-ceiling" + Cockpit-Docstring + README, per Template-Test gepinnt)
+ceiling" + Cockpit-Docstring + README; Moduldoc + Cockpit per
+Template-Test gepinnt)
 ausgeliefert, `v1.33.0`.
 
 SP49 (KISS-Cleanup — ein Owner je Verhalten, aus drei parallelen
