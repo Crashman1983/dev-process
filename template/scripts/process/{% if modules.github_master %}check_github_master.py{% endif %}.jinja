@@ -113,8 +113,8 @@ def _load_snapshot(root: Path) -> tuple[dict | None, list[str], object]:
         dor = e.get("dor")
         if dor is not None and not (
                 isinstance(dor, dict)
-                and all(isinstance(dor.get(k), bool)
-                        for k in ("typed", "ears", "deviation"))):
+                and set(dor) == {"typed", "ears", "deviation"}
+                and all(isinstance(dor[k], bool) for k in dor)):
             hard.append(f"{SNAPSHOT}: {sid} 'dor' must be null or an object with "
                         f"boolean typed/ears/deviation")
             e = {**e, "dor": None}  # neutralize before the DoR check

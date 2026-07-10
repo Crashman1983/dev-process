@@ -452,3 +452,18 @@ def test_shipped_example_has_arch_rule_and_stays_valid(render, tmp_path):
     data = json.loads((out / SEED).read_text(encoding="utf-8"))
     ids = [r["id"] for r in data["rules"]]
     assert "arch-ui-no-direct-db" in ids
+
+
+def test_dangling_adr_reported_even_with_invalid_pattern(render, tmp_path):
+    # an invalid regex must not hide the dangling decision-record link
+    out = _render(render, tmp_path)
+    work = tmp_path / "adrboth"
+    _git_repo(work)
+    _write_config(work, {"rules": [{"id": "broken", "pattern": "(",
+                                    "message": "m", "adr": "ADR-0002"}]})
+    _track(work)
+    r = _run(out, work)
+    assert r.returncode == 1
+    flat = " ".join(r.stdout.split())
+    assert "not a valid regex" in flat
+    assert "no such decision record" in flat

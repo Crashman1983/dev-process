@@ -93,7 +93,7 @@ def _dor_facts(labels: list, title: str, body: str) -> dict:
     ears = bool(is_epic
                 or re.search(r"(acceptance criteria|akzeptanzkriterien)\s*\(ears\)", b, re.I)
                 or re.search(r"\bshall\b", b, re.I))
-    deviation = bool(re.search(r"(?m)^#{1,6}\s*Deviations\b", b, re.I))
+    deviation = bool(re.search(r"(?m)^#{1,6}[ \t]+Deviations\b", b, re.I))
     return {"typed": typed, "ears": ears, "deviation": deviation}
 
 

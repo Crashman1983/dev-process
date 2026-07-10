@@ -547,3 +547,13 @@ def test_gh_sync_dor_facts(render, tmp_path):
     # the named escape: a Deviations heading in the body
     assert f([], "t", "## Deviations\nspike, no EARS yet")["deviation"] is True
     assert f([], "t", "we deviate informally")["deviation"] is False
+
+
+def test_dor_extra_key_fails_clean(render, tmp_path):
+    # a typoed fourth key must not vanish silently — exact key set enforced
+    out = _render(render, tmp_path)
+    _story(out, "STORY-0001", status="in-progress")
+    _snapshot(out, {**_entry("STORY-0001"), "dor": {**_dor(), "bogus": True}})
+    r = _run(out)
+    assert r.returncode == 1
+    assert "boolean typed/ears/deviation" in " ".join(r.stdout.split())

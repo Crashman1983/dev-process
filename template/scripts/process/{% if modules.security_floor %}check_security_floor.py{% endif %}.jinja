@@ -137,10 +137,15 @@ def check(root: Path) -> tuple[list[str], list[str]]:
         return [], [f"no security-floor config yet ({CONFIG} absent)"]
     rules, exclude, hard = _validate(cfg)
     # a rule claiming a decision record that does not exist is a lie to the next
-    # reader — config integrity, checked before any scanning
-    for r in rules:
-        if r["adr"] and not _adr_exists(root, r["adr"]):
-            hard.append(f"{CONFIG}: rule {r['id']!r} links {r['adr']!r} but no such "
+    # reader — config integrity, checked before any scanning. Walk the RAW rules,
+    # not the compiled ones: an invalid pattern must not hide a dangling link.
+    for i, rule in enumerate(cfg.get("rules") or []):
+        if not isinstance(rule, dict):
+            continue
+        adr = rule.get("adr")
+        if isinstance(adr, str) and re.search(r"\d", adr) and not _adr_exists(root, adr):
+            label = rule.get("id") if isinstance(rule.get("id"), str) else f"#{i}"
+            hard.append(f"{CONFIG}: rule {label!r} links {adr!r} but no such "
                         f"decision record exists under {ADR_DIR}/")
     if hard:
         return hard, []
