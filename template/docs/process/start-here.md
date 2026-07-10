@@ -226,6 +226,29 @@ automatically when work touches that subtree; AGENTS.md-style harnesses use a
 per-directory file or an explicit pointer from the root anchor. Either way the
 root stays small and each area owns its own detail.
 
+## Keeping the kernel loaded across compaction
+
+The `kernel` gate guarantees the rule block is intact *in the anchor file*. It
+cannot guarantee the block is in the model's *live context* — a long session
+compacts (summarizes) its history, and the anchor can be summarized away even
+though the file is untouched. No offline gate can see the live context, so this
+is a behavioral invariant, not a checkable one. Four things keep the kernel
+loaded:
+
+- **The kernel is thin by design** — small enough to survive a summary intact.
+- **It is self-restoring.** Its first line instructs: if you are resuming or the
+  block was compacted, re-read `kernel.md` and `mandatory-rules.md` before
+  acting. That directive rides along with any surviving fragment, and the
+  `kernel` gate's byte-identity check makes it un-droppable from the file.
+- **Phases re-hydrate.** `execute` and `review` re-read the kernel and the plan
+  at phase entry (`workflow.md`) — the long phases are exactly where compaction
+  strikes, so they do not trust warm memory.
+- **The harness helps, unevenly.** Claude Code re-injects the root anchor after
+  compaction automatically; a `PreCompact`/`SessionStart` hook can re-read the
+  kernel explicitly. AGENTS.md-style harnesses vary — there, the self-restoring
+  directive and `/prime` on resume are the safety net. Configure a
+  compaction/session hook where your harness supports one.
+
 ## Definition of ready (project onboarding)
 
 This is the one-time *project*-readiness bar — the process is installed and

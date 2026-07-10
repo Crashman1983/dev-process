@@ -17,6 +17,8 @@ the `KERNEL:START`/`KERNEL:END` markers; the text inside them is canonical here.
 <!-- KERNEL:START -->
 ## Always-on kernel
 
+**Load-bearing — these rules bind every turn, not just the first.** If you are resuming a session, or this block was summarized or compacted out of context, re-read `docs/process/kernel.md` and `docs/process/mandatory-rules.md` in full before continuing.
+
 **Mandatory rules (full text: `docs/process/mandatory-rules.md`):**
 1. Verify before asserting. 2. Plan before substantive work. 3. Contract/interface first.
 4. One owner per behavior. 5. Tests prove acceptance. 6. Root cause before symptom.

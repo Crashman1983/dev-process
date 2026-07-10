@@ -78,6 +78,19 @@ def test_missing_kernel_doc_fails(render, tmp_path):
     assert any("canonical kernel source is gone" in h for h in hard)
 
 
+def test_kernel_carries_compaction_directive(render, tmp_path):
+    # the self-restoring directive must live inside the kernel block so it rides
+    # along with any surviving fragment and the gate's byte-identity keeps it.
+    out = _render(render, tmp_path)
+    mod = _load(out)
+    canonical = mod._block((out / "docs/process/kernel.md").read_text())
+    assert canonical is not None
+    assert "resuming" in canonical and "compacted" in canonical
+    assert "re-read" in canonical and "mandatory-rules.md" in canonical
+    # the anchor block must equal the canonical doc block (the gate's invariant)
+    assert mod._block((out / "CLAUDE.md").read_text()) == canonical
+
+
 def test_all_adapters_render_gate_green(render, tmp_path):
     # with every anchor present, the gate runner passes on a fresh render
     out = render(tmp_path, {"project_name": "d",
