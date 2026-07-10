@@ -69,9 +69,11 @@ where the project has chosen to run its backlog on GitHub Issues.
 
 ## Templates and the seed helper
 
-Two templates: `.github/ISSUE_TEMPLATE/feature.md` and
-`.github/ISSUE_TEMPLATE/bug.md`. Because `gh issue create` ignores
-`ISSUE_TEMPLATE/`, seed a body with `scripts/process/new_issue.sh`:
+Three templates: `.github/ISSUE_TEMPLATE/feature.md`,
+`.github/ISSUE_TEMPLATE/bug.md` and `.github/ISSUE_TEMPLATE/finding.md` (a
+review/audit finding that needs work — see the report binding below). Because
+`gh issue create` ignores `ISSUE_TEMPLATE/`, seed a body with
+`scripts/process/new_issue.sh`:
 
     body="$(bash scripts/process/new_issue.sh feature)"
     gh issue create --title "..." --body-file "$body"
@@ -82,8 +84,9 @@ A starting point, not enforced by any gate:
 
 - `surface:<area>` — which part of the system
 - `priority:{low,med,high}`
-- `type:{feature,bug,chore}`
-- `status:in-progress` — claimed and being worked
+- `type:{feature,bug,chore,finding}` (the finding template sets `type:finding`)
+- `status:in-progress` — claimed and being worked. `who_is_working.py` also
+  treats `status:{review,handoff,blocked}` as active if you use finer states.
 
 ## Claim workflow
 
@@ -114,7 +117,7 @@ unauthenticated `gh` degrades to a note rather than an error:
   gradeable (missing a `type:` label, or, unless an epic, missing an EARS
   acceptance section). That last is the pattern review findings and follow-ups
   fall into when filed outside the story flow: a finding or follow-up that needs
-  work is a typed issue (`type:bug`/`chore`/`feature`) with EARS acceptance, the
+  work is a typed issue (`type:bug`/`chore`/`feature`/`finding`) with EARS acceptance, the
   same gradeable discipline as a story; a purely informational record is exempt.
   Advisory only as a view — a triage hint, this tool never gates. (With the
   `github-master` module installed, the same two conditions DO fail the gate

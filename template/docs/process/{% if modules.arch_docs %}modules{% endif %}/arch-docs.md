@@ -18,9 +18,11 @@ conversation. If the only audience is the implementers and the machine-checked
 Architecture lives in three places, one owner each (mandatory rule 4):
 
 - **Structure** — layers, boundaries, interface symbols — is the machine-checked
-  `arch` block in `ARCHITECTURE.md` (the `arch-onboarding` module verifies it
-  against real code). The overview's "building blocks" section **links** to it
-  and adds only a stakeholder gloss; it never restates the structure.
+  `arch` block in `ARCHITECTURE.md` *when the `arch-onboarding` module is
+  active* (it ships that file and verifies it against real code; without it,
+  name where your structure is defined). The overview's "building blocks"
+  section **links** there and adds only a stakeholder gloss; it never restates
+  the structure.
 - **Decisions** are ADRs under `docs/process/adr/` (`Status` + `Intent` axes).
   The overview's "decisions" section **references** load-bearing ADRs by id; it
   never restates them.
@@ -37,8 +39,9 @@ verified fact:
 
 - `[verified elsewhere]` — building blocks and decisions; the real source is
   named and linked, not restated. This gate checks that the **ADR** references
-  resolve; the building-blocks link points to `ARCHITECTURE.md`, which
-  `arch-onboarding` (not this gate) verifies against real code.
+  resolve; the building-blocks link points to the structure's owner
+  (`ARCHITECTURE.md` when `arch-onboarding` is active), which that module —
+  not this gate — verifies against real code.
 - `[review-checked]` — context, quality goals, runtime, deployment, risks,
   glossary; prose, not machine-checkable, kept honest by the review gate and its
   `review-checklist.md`.

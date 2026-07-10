@@ -48,8 +48,9 @@ Bausteine sind zuschaltbare Module.
 ## Der Prozess — Eckpunkte
 
 **Risiko-Tiers (0–3)** routen jede Aufgabe: der *Umfang* bestimmt den Tier, nicht
-die Diff-Größe. User-sichtbar, komponentenübergreifend, API/Contract, Auth oder
-Persistenz ⇒ Tier 2+ auch bei winzigem Diff. Ein `flow`-Label ist Boden, nie Decke.
+die Diff-Größe. Komponentenübergreifend, API/Contract, Auth oder Persistenz ⇒
+Tier 2+ auch bei winzigem Diff; bloße User-Sichtbarkeit allein ist noch kein
+Tier 2 (`risk-tiers.md` ist die SSOT). Ein `flow`-Label ist Boden, nie Decke.
 
 **Neun bindende Regeln** (Reihenfolge = Priorität):
 

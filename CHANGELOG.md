@@ -4,7 +4,7 @@ Die vollständige Sub-Projekt-Historie, aus dem README hierher ausgelagert
 (das README orientiert, dieses Dokument archiviert). Neue Releases nennen im
 README nur die aktuelle Version und schreiben die Historie hier fort.
 
-## Status-Narrativ (SP1–SP47, chronologisch)
+## Status-Narrativ (chronologisch)
 
 SP1 (Foundation) + SP2 (Architektur-Onboarding) + SP3
 (feature-registry, github-issues, contracts-drift) + SP4 (git-hooks,

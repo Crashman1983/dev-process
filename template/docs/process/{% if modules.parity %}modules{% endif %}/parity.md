@@ -49,9 +49,11 @@ The optional `parity_surfaces` answer (a copier question, e.g. `[web, mobile,
 cli]`) is the project's canonical surface list. When it is a non-empty list, every
 capability file's `surfaces` keys must cover **exactly** that set: a missing
 surface is a silent omission (the precise failure this module prevents), an
-unknown surface is a typo. When `parity_surfaces` is empty (the default), coverage is not enforced —
-surfaces are free-form and only status/gap validity applies. The gate reads the
-answer from `.copier-answers.yml` at runtime.
+unknown surface is a typo. When `parity_surfaces` is empty (the default) — or
+malformed (not a list of strings), which degrades the same way rather than
+crash — coverage is not enforced: surfaces are free-form and only status/gap
+validity applies. The gate reads the answer from `.copier-answers.yml` at
+runtime.
 
 ## Hard vs. best-effort (no false-green)
 

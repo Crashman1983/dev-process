@@ -12,10 +12,12 @@ completeness, correctness, security, design, decisions, product frame, tests).
 Fixes loop back through `/execute` and then `/review` again until the branch is
 clean.
 
-Record the result in the exact grammar the gates read (`journal-state-plans.md`):
-a `REVIEW work=… tier=… reviewer=… model=… independence=… verdict=… round=…`
-line in the journal, and — for a findings-producing or Tier 3 review —
-`FINDING sev=… action=… issue=…` lines in a `.process-work/reviews/` report.
+Record the result in the exact grammar (`journal-state-plans.md`): a
+`REVIEW work=… tier=… reviewer=… model=… independence=… verdict=… round=…`
+line in the journal (the core `review` gate parses it), and — for a
+findings-producing or Tier 3 review — `FINDING sev=… action=… issue=…` lines
+in a `.process-work/reviews/` report (gate-linted where the `github-issues`
+module is installed; the report grammar either way).
 
 To dispatch a fresh (or cross-model) reviewer, do not hand-craft its input:
 `python scripts/process/make_review_bundle.py -o /tmp/bundle.md` assembles the

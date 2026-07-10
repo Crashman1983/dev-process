@@ -45,7 +45,8 @@ the grammar, or whose `verdict`/`action`/`source` is outside the enums, or a
 non-numeric `round` — each with file:line. A grade that does not parse is
 silent telemetry loss: written, never counted. Non-UTF-8 journals fail.
 Malformed calibration cases (invalid JSON, `id` ≠ filename stem, missing
-`ground_truth`, out-of-enum verdicts) fail.
+`ground_truth`, out-of-enum verdicts, or a `grader_verdict` whose shape or
+criteria set does not match `ground_truth`) fail.
 
 **Best-effort (advisory note, never fails CI):** zero GRADE lines repo-wide
 ("expected pre-adoption") and an empty calibration suite — the trace only
@@ -59,10 +60,12 @@ invisible to gate and cockpit (quote literal GRADE examples only there).
 ## The KPI cockpit
 
 `scripts/process/process_kpis.py` (read-only, never a gate, not in CI) cuts
-the existing traces into decision families. Every number prints with a
+the existing traces into decision families. Measured numbers print with a
 confidence tag — `high` (direct measure, enough n), `medium` (sample-biased),
 `low` (proxy or thin n; proxies never reach `high`) — and a confidence-gated
 action: at `low` the only action is to collect more data. n before percent.
+The two threshold families (`convergence`, `suite`) print pass/not-met against
+their documented thresholds instead of a confidence tag.
 
 | family | measures | action (threshold → act) |
 |---|---|---|

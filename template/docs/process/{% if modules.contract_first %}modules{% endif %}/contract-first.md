@@ -49,13 +49,13 @@ absent registry yields "no capability contracts yet".
 
 ## The symbol floor — what it does and does not prove
 
-Symbol presence is a plain substring search over the committed spec text:
+Symbol presence is a word-boundary text search over the committed spec text:
 language- and format-agnostic (JSON / YAML / proto / …), honest as a floor — it
 proves the name is *present*, and can fail CI when it is not. It deliberately
-does not parse the spec structure, which would assume a format. A short symbol
-name that is a common substring can therefore match spuriously; the gate
-enforces *declaration order*, not precise structural conformance. Choose
-distinctive symbol names.
+does not parse the spec structure, which would assume a format. Word boundaries
+stop a short name (`get`, `p`) from matching inside another word; a dotted
+symbol can still match inside a longer dotted run (`3.0` in `3.0.0`). The gate
+enforces *declaration order*, not precise structural conformance.
 
 ## One owner per behavior (Rule 4)
 
