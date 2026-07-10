@@ -236,6 +236,12 @@ Rule of thumb: a *decision* → record; a *design* → design doc; the *product'
 shape* → PRODUCT.md; a *behavior* → story; *how to build it* → plan; *why you
 did it* → journal; *something for later* → inbox.
 
+Reading the trail back is one command, not archaeology:
+`scripts/process/trace.py STORY-NNNN` (or `'#42'`, or a plan slug) reassembles
+the full story of one piece of work — story, issue, plans, commits, `REVIEW`
+attestations, and review reports — read-only, naming any source it cannot
+reach.
+
 ## Anchors: what goes where, and how to scale them
 
 The anchor files (`CLAUDE.md`, `AGENTS.md`, and any harness equivalent) are thin
