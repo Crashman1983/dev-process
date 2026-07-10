@@ -4,7 +4,7 @@ Die vollständige Sub-Projekt-Historie, aus dem README hierher ausgelagert
 (das README orientiert, dieses Dokument archiviert). Neue Releases nennen im
 README nur die aktuelle Version und schreiben die Historie hier fort.
 
-## Status-Narrativ (SP1–SP42, chronologisch)
+## Status-Narrativ (SP1–SP43, chronologisch)
 
 SP1 (Foundation) + SP2 (Architektur-Onboarding) + SP3
 (feature-registry, github-issues, contracts-drift) + SP4 (git-hooks,
@@ -101,6 +101,13 @@ Teams: **Profile** statt 13 Modul-Booleans — eine `profile`-Frage
 einschalten, wenn sein Trigger eintritt — erste Persistenz → security_floor,
 zweite Surface → parity usw.; Lockern ist eine dokumentierte
 Prozessentscheidung) ausgeliefert, `v1.28.0`.
+
+SP43 (Quick Wins „verlässlich + lesbar": `setup_branch_protection.sh` — der
+eine Schritt, der aus „Gate läuft" „Gate blockt" macht, als idempotenter
+Einzeiler (nicht-destruktiv, ehrliche Fehlermodi für Private-Repo/Free-Plan);
+Actions-Job-Id von `gates` auf `process-gates` angeglichen, damit der
+dokumentierte Required-Check-Kontext überhaupt erfüllbar ist; SP-Historie aus
+dem README in dieses CHANGELOG ausgelagert) ausgeliefert, `v1.29.0`.
 
 ## Sub-Projekt-Tabelle (SP1–SP24)
 
