@@ -54,7 +54,12 @@ contract/persistence/auth-touching work.
    - `project_name` — human-readable name.
    - `harnesses` — which adapters to install (`copilot`, `agents_md`); Claude Code
      is always installed.
-   - `modules` — which opt-in process modules to enable (e.g. `doc_drift_gate`).
+   - `profile` — a module preset (`minimal` | `solo` | `team` | `custom`) that
+     derives the `modules` default. Pick the closest fit; the next question
+     shows the derived set for adjustment. Harden later via `copier update`
+     (the ratchet in `docs/process/start-here.md`).
+   - `modules` — which opt-in process modules to enable (default derived from
+     the profile; adjust freely).
    - `ci` — which CI adapters render the `process-gates` job (`github`: Actions
      workflow, default on; `gitlab`: includable job + root `.gitlab-ci.yml`
      shim). **With both off, nothing enforces the gates remotely** — local git
@@ -77,9 +82,20 @@ copier asks its questions interactively; agent harnesses (Claude Code, Codex,
 Copilot, and friends) have no TTY for that. Pass all answers on the command
 line instead:
 
+    # simple: pick a profile, let it derive the module set
     uvx copier copy --defaults \
       --data project_name="<project name>" \
       --data 'harnesses={"copilot": false, "agents_md": true}' \
+      --data profile=solo \
+      --data 'ci={"github": true, "gitlab": false}' \
+      --skip 'CLAUDE.md' --skip 'AGENTS.md' \
+      gh:Crashman1983/dev-process .
+
+    # fine-grained: profile=custom plus the complete modules dictionary
+    uvx copier copy --defaults \
+      --data project_name="<project name>" \
+      --data 'harnesses={"copilot": false, "agents_md": true}' \
+      --data profile=custom \
       --data 'modules={"doc_drift_gate": false, "arch_onboarding": false, "feature_registry": false, "github_issues": false, "contracts_drift": false, "git_hooks": false, "contract_first": false, "parity": false, "security_floor": false, "sbom": false, "telemetry": false, "arch_docs": false, "github_master": false}' \
       --data 'ci={"github": true, "gitlab": false}' \
       --skip 'CLAUDE.md' --skip 'AGENTS.md' \
@@ -87,8 +103,9 @@ line instead:
 
 - `--defaults` answers everything not passed explicitly; no interactive prompt
   may remain.
-- `--data` expects the **complete** `harnesses`, `modules`, and `ci`
-  dictionaries, not just the changed keys.
+- When you pass a dictionary (`harnesses`, `modules`, `ci`), pass it
+  **complete**, not just the changed keys. Passing `modules` overrides the
+  profile-derived set entirely — omit it to let the profile decide.
 - `--skip 'CLAUDE.md' --skip 'AGENTS.md'` protects brownfield repos: without a
   TTY, a content conflict otherwise aborts mid-render and leaves a
   half-installed state, while `--skip` keeps the existing file untouched and
@@ -122,7 +139,7 @@ Module choice happens at install time, but the clarifying questions live in
 `docs/process/start-here.md` — after the install. If the module choice is not
 yet settled:
 
-1. Install minimally (all modules `false`, as above).
+1. Install minimally (`--data profile=minimal` — core gates only).
 2. Run the start-here dialogue (greenfield/brownfield, goal, stack, risks).
 3. Derive the module choice from the answers — heuristic: auth, persistence,
    or security invariants → `security_floor`; multiple surfaces → `parity`;

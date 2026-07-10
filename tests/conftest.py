@@ -40,6 +40,19 @@ def render(_template_src):
 
 
 @pytest.fixture
+def render_raw(_template_src):
+    """Render passing ONLY the given answers — unlike `render`, no full modules
+    dict is injected, so profile-derived module defaults actually apply."""
+
+    def _f(dst: Path, data: dict, **kwargs) -> Path:
+        copier.run_copy(str(_template_src), str(dst), data=data,
+                        defaults=True, unsafe=True, quiet=True, **kwargs)
+        return dst
+
+    return _f
+
+
+@pytest.fixture
 def render_into(_template_src):
     def _f(dst: Path, seed: Path, data: dict, **kwargs) -> Path:
         shutil.copytree(seed, dst, dirs_exist_ok=True)

@@ -12,9 +12,42 @@ code, commits, ADRs, journal) in English.
 
 **When this process is not worth it:** for throwaway prototypes, one-off
 scripts, and single-session work the overhead is a net loss — install nothing,
-or keep the minimal profile (no optional modules) and skip the onboarding
-dialogue. The process pays off for anything multi-session, multi-agent, or
-touching contracts, persistence, or auth.
+or pick the `minimal` profile and skip the onboarding dialogue. The process
+pays off for anything multi-session, multi-agent, or touching contracts,
+persistence, or auth.
+
+## Profiles and the hardening ratchet
+
+Module choice at install time is one question, not thirteen: the **profile**
+preset derives the module set, and the modules question then shows that set for
+adjustment — a starting point, not a lock.
+
+| Profile | Modules on top of the core gates | Who it fits |
+|---|---|---|
+| `minimal` | none | prototypes; the smallest footprint |
+| `solo` (default) | doc-drift, git-hooks | one developer — local enforcement carries the process even without CI review culture |
+| `team` | solo + feature-registry, github-issues | a small team — shared backlog and acceptance traceability |
+| `custom` | none preselected | you know exactly what you want |
+
+**Harden as the project earns it — the ratchet.** Start light and switch a
+module on when its trigger appears; each step is a `copier update` with the new
+module set (see BOOTSTRAP.md, "Later"). The triggers:
+
+- first **persistence, auth, or secrets** → `security_floor`
+- a **second surface** (web + cli, web + mobile) → `parity`
+- a **shared or external interface** another component builds on →
+  `contract_first`, `contracts_drift`
+- **user-visible behavior worth tracing** to acceptance and tests →
+  `feature_registry`
+- the backlog outgrows one head, or a **second person/agent** joins →
+  `github_issues` (and `github_master` once issues become the source of truth)
+- **architecture claims worth checking** against real code → `arch_onboarding`;
+  stakeholders who want to *read* it → `arch_docs`
+- you want to **measure what the process catches and costs** → `telemetry`
+- **license/compliance** obligations → `sbom`
+
+The ratchet only tightens: switching a module *off* again is a process decision
+— record why (decision record), do not just drop the gate that started failing.
 
 **The mid-size caveat:** four gates are *core* and always run regardless of the
 module profile — `kernel` (the always-on rule block is intact in the anchor),
