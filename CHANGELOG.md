@@ -176,6 +176,21 @@ Mirror advisory statt still OK, trace-FINDING-Matcher verlangt key=value; dazu
 getrennt, Copilot-Review-Prompt trägt die Grammatik, u. a.)) ausgeliefert,
 `v1.34.0`.
 
+SP50 (Tiefenaudit über den bereinigten Stand, vier unabhängige Blickwinkel
+mit Ausführungsmandat — adversarial, Kohärenz, Fresh-Adopter, Robustheit:
+1 Blocker geschlossen (Fence-Tracking längenbewusst — gequotete Waiver in
+verschachtelten Fences clearten Review-/Issue-Gate), SP49-Regression gefixt
+(nur echte Issue-Refs zählen als clearende work-ids; Ref-Grammatik nach
+check_review verschoben, ein Owner), OSError-Diagnosen statt Tracebacks,
+security-floor mit Regex-Backtracking-Budget + Zero-in-Scope-Note,
+gate_runner mit Gate-Timeout + bytecode-frei, letzte adr_exists/_unfenced-
+Kopien konsolidiert, gh_board-Argument-Hygiene, BOOTSTRAP-Update-Rezept für
+HEAD-Installs, start-here-Reihenfolge + `git init -b main`,
+Commit-Traceability-Konvention; Adopter-Verdict: Solo-Dev erreicht grünen
+Gate-Lauf + ersten reviewten Change ohne Hilfe; Report
+`.process-work/reviews/2026-07-10-sp50-deep-audit.md`) ausgeliefert,
+`v1.34.1`.
+
 ## Sub-Projekt-Tabelle (SP1–SP24)
 
 Die Tabelle wurde bis SP24 gepflegt; ab SP25 trägt das Narrativ oben die
