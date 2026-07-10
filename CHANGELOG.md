@@ -208,6 +208,23 @@ ehrlich als Netz-Dienste gerahmt, kein hermetisches Gate),
 Branch-Lebensdauer „Tage, nicht Wochen" in commits.md (Small-Batch-Befund
 hinter Trunk-based)) ausgeliefert, `v1.35.0`.
 
+SP52 (Divers-Audit über v1.35.0 — vier bewusst neue Blickwinkel: Pragmatiker/
+Ökonomie (Verdict „Prozess mit ungewöhnlich wenig Theater": ~5.4k Token
+Lese-Steuer/Session, Gates 0.2–0.8s, Over-Engineering-Kandidaten
+freigesprochen), Multi-Harness-Degradation (9 Render-Kombos), Lebenszyklus
+(Upgrades v1.13.0→HEAD konfliktfrei byte-identisch; 10x-Wachstum <0.9s) und
+Technical Writer über die SP48–51-Prosa. Gefixt: Copilot-Anker erhält die
+Route zu workflow/commits, BOOTSTRAP-„Later" ohne --skip (stale Kernel nach
+Upgrade reproduziert) + Hooks-Neuinstallations-Hinweis, trace ohne
+Bare-Digit-Rauschen (#7 matchte 68/68 Pläne), Bundle mit --plan-Filter und
+hartem Unknown-Flag-Fehler, Soft-Note für nicht archivierte Tier-2+-Pläne,
+doc-drift scannt die Copilot-instructions-Datei, gate_runner benennt die
+Hand-Edit-Ursache, No-CI-DoR erfüllbar (Hooks als Authority), Quick-Fragen
+mit einem Owner in workflow.md, Retention-Ehrlichkeit, R2 besitzt die vier
+Akzeptanz-Fälle, ~15 Writer-Präzisionsfixes; Report
+`.process-work/reviews/2026-07-10-sp52-diverse-audit.md`) ausgeliefert,
+`v1.35.1`.
+
 ## Sub-Projekt-Tabelle (SP1–SP24)
 
 Die Tabelle wurde bis SP24 gepflegt; ab SP25 trägt das Narrativ oben die
