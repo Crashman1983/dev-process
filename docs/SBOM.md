@@ -11,7 +11,7 @@ JavaScript-, Container- oder Systempaket-Lockfiles aus.
 
 | Komponente | Version | Quelle |
 |---|---:|---|
-| `dev-process` | `1.29.0` | lokales Repository |
+| `dev-process` | `1.30.0` | lokales Repository |
 
 ## Direkte Python-Abhaengigkeiten
 

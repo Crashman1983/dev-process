@@ -4,7 +4,7 @@ Die vollständige Sub-Projekt-Historie, aus dem README hierher ausgelagert
 (das README orientiert, dieses Dokument archiviert). Neue Releases nennen im
 README nur die aktuelle Version und schreiben die Historie hier fort.
 
-## Status-Narrativ (SP1–SP43, chronologisch)
+## Status-Narrativ (SP1–SP44, chronologisch)
 
 SP1 (Foundation) + SP2 (Architektur-Onboarding) + SP3
 (feature-registry, github-issues, contracts-drift) + SP4 (git-hooks,
@@ -108,6 +108,13 @@ Einzeiler (nicht-destruktiv, ehrliche Fehlermodi für Private-Repo/Free-Plan);
 Actions-Job-Id von `gates` auf `process-gates` angeglichen, damit der
 dokumentierte Required-Check-Kontext überhaupt erfüllbar ist; SP-Historie aus
 dem README in dieses CHANGELOG ausgelagert) ausgeliefert, `v1.29.0`.
+
+SP44 (Nachvollziehbarkeit als Werkzeug: `trace.py` — die ganze Geschichte
+eines Arbeitsstücks in einem Kommando: Story, Issue (Snapshot offline zuerst,
+dann `gh`, sonst nur Ref), aktive/archivierte Pläne, Commits, geparste
+`REVIEW work=`-Attestierungen, Reports samt FINDINGs; read-only, Core,
+unerreichbare Quellen werden benannt statt still übersprungen) ausgeliefert,
+`v1.30.0`.
 
 ## Sub-Projekt-Tabelle (SP1–SP24)
 
