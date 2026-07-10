@@ -3,10 +3,14 @@
 # single step that turns "the gate runs" into "the gate blocks" (see
 # docs/process/start-here.md, Definition of ready). CI cannot set this itself.
 #
-# Idempotent and non-destructive:
-#   - protection already exists  -> only ADD the process-gates context to the
-#     required checks (nothing else is touched);
-#   - no protection yet          -> create a minimal rule that requires only the
+# Idempotent and non-destructive — an existing protection rule is NEVER
+# rewritten by this script:
+#   - protection exists, status checks enabled -> only ADD the process-gates
+#     context (nothing else is touched);
+#   - protection exists, status checks NOT enabled -> refuse with instructions
+#     (enabling them means rewriting the rule — that stays a deliberate human
+#     step in the UI);
+#   - no protection at all -> create a minimal rule that requires only the
 #     process-gates check (no forced PR reviews — solo-friendly; tighten in the
 #     GitHub UI as the team grows).
 #
@@ -22,22 +26,49 @@ command -v gh >/dev/null || { echo "setup-branch-protection: gh CLI not found �
 
 repo="$(gh repo view --json nameWithOwner --jq .nameWithOwner)" \
   || { echo "setup-branch-protection: not inside a GitHub repo gh can see (run from the repo, gh authenticated)." >&2; exit 1; }
-branch="$(gh repo view --json defaultBranchRef --jq .defaultBranchRef.name)"
+branch="$(gh repo view --json defaultBranchRef --jq .defaultBranchRef.name)" \
+  || { echo "setup-branch-protection: could not resolve the default branch (gh authenticated? repo pushed?)." >&2; exit 1; }
 echo "repo: $repo  default branch: $branch"
 
 api="repos/$repo/branches/$branch/protection"
+err_file="$(mktemp "${TMPDIR:-/tmp}/sbp.XXXXXX")"
+trap 'rm -f "$err_file"' EXIT
 
-if existing="$(gh api "$api/required_status_checks" 2>/dev/null)"; then
-  # protection exists — merge our context into the required checks, change nothing else
-  if printf '%s' "$existing" | grep -q "\"$CONTEXT\""; then
-    echo "✓ '$CONTEXT' is already a required status check on $branch"
-    exit 0
+# Probe the WHOLE protection rule first. GET .../required_status_checks alone is
+# ambiguous: it 404s both when the branch is unprotected AND when a rule exists
+# without status checks (e.g. required-PR-reviews only) — acting on that
+# ambiguity could overwrite a real rule. Only an explicit "Branch not protected"
+# may take the create path; any other failure stops, untouched.
+prot_err=""
+if prot="$(gh api "$api" 2>"$err_file")"; then
+  # --- a protection rule exists: never rewrite it ---
+  if printf '%s' "$prot" | grep -q '"required_status_checks"'; then
+    if printf '%s' "$prot" | grep -q "\"$CONTEXT\""; then
+      echo "✓ '$CONTEXT' is already a required status check on $branch"
+      exit 0
+    fi
+    gh api -X POST "$api/required_status_checks/contexts" \
+      -f "contexts[]=$CONTEXT" >/dev/null
+    echo "✓ added '$CONTEXT' to the existing required status checks on $branch"
+  else
+    echo "setup-branch-protection: $branch already has a protection rule, but" >&2
+    echo "  required status checks are not enabled on it. Enabling them means" >&2
+    echo "  rewriting the existing rule — do that deliberately in the UI:" >&2
+    echo "  Settings -> Branches -> edit the rule for '$branch' -> enable" >&2
+    echo "  'Require status checks to pass' -> add '$CONTEXT'." >&2
+    echo "  This script never rewrites an existing rule." >&2
+    exit 1
   fi
-  gh api -X POST "$api/required_status_checks/contexts" \
-    -f "contexts[]=$CONTEXT" >/dev/null
-  echo "✓ added '$CONTEXT' to the existing required status checks on $branch"
 else
-  # no protection yet — create the minimal rule: require only the gate check.
+  prot_err="$(cat "$err_file" 2>/dev/null || true)"
+  if ! printf '%s' "$prot_err" | grep -qi "Branch not protected"; then
+    echo "setup-branch-protection: could not read the protection state — not touching anything." >&2
+    echo "  gh said: ${prot_err:-<no error output>}" >&2
+    echo "  Common causes: missing admin rights, network, or a private repo on" >&2
+    echo "  the free plan (branch protection needs a paid plan there)." >&2
+    exit 1
+  fi
+  # --- genuinely unprotected: create the minimal rule ---
   # strict=false: a branch need not be up to date with main, only green.
   body="$(printf '{"required_status_checks":{"strict":false,"contexts":["%s"]},"enforce_admins":false,"required_pull_request_reviews":null,"restrictions":null}' "$CONTEXT")"
   if ! printf '%s' "$body" | gh api -X PUT "$api" --input - >/dev/null; then
