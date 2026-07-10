@@ -79,6 +79,9 @@ def test_portable_python_helpers_render(render, tmp_path):
     assert (out / "scripts/process/install_hooks.py").is_file()
     assert (out / "scripts/process/run_hook.py").is_file()
     assert (out / "scripts/process/new_issue.py").is_file()
+    for name in ["install_hooks.py", "run_hook.py", "new_issue.py"]:
+        text = (out / "scripts/process" / name).read_text(encoding="utf-8")
+        assert '# requires-python = ">=3.11"' in text
 
     subprocess.run(["git", "init", "-q", "-b", "main"], cwd=out, check=True)
     gates = subprocess.run(
@@ -95,6 +98,14 @@ def test_portable_python_helpers_render(render, tmp_path):
         text=True,
     )
     assert hooks.returncode == 0, hooks.stderr
+    pre_push = subprocess.run(
+        ["sh", ".git/hooks/pre-push", "origin", "unused-location"],
+        cwd=out,
+        input="",
+        capture_output=True,
+        text=True,
+    )
+    assert pre_push.returncode == 0, pre_push.stderr
     issue = subprocess.run(
         ["uv", "run", "scripts/process/new_issue.py", "feature"],
         cwd=out,
@@ -124,3 +135,11 @@ def test_release_workflow_requires_tag_to_match_project_version():
     assert "pyproject.toml" in text
     assert 'expected = f"v{version}"' in text
     assert "tag != expected" in text
+    assert "astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b" in text
+
+
+def test_bootstrap_documents_complete_optional_harness_mapping():
+    root = Path(__file__).parents[1]
+    text = (root / "BOOTSTRAP.md").read_text(encoding="utf-8")
+    assert "Claude Code is always installed" not in text
+    assert 'harnesses={"claude": false, "copilot": false, "agents_md": true}' in text

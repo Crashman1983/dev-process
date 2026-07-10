@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.11"
+# ///
 """Install portable dev-process Git hooks without replacing foreign hooks."""
 from __future__ import annotations
 
@@ -17,7 +20,7 @@ def _hook(name: str, *, warn_only: bool = False) -> str:
 command -v uv >/dev/null 2>&1 || {{ echo "uv is required for dev-process hooks." >&2; {unavailable}; }}
 repo_root="$(git rev-parse --show-toplevel 2>/dev/null)" || {unavailable}
 cd "$repo_root" || {unavailable}
-exec uv run scripts/process/run_hook.py {name} "$@"
+exec uv run scripts/process/run_hook.py {name}
 """
 
 

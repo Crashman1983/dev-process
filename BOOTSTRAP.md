@@ -52,8 +52,8 @@ contract/persistence/auth-touching work.
 
 3. Answer the prompts:
    - `project_name` — human-readable name.
-   - `harnesses` — which adapters to install (`copilot`, `agents_md`); Claude Code
-     is always installed.
+   - `harnesses` — independently select `claude`, `copilot`, and `agents_md`.
+     Claude defaults to enabled for backward compatibility but can be disabled.
    - `profile` — a module preset (`minimal` | `solo` | `team` | `custom`) that
      derives the `modules` default. Pick the closest fit; the next question
      shows the derived set for adjustment. Harden later via `copier update`
@@ -85,7 +85,7 @@ line instead:
     # simple: pick a profile, let it derive the module set
     uvx copier copy --defaults \
       --data project_name="<project name>" \
-      --data 'harnesses={"copilot": false, "agents_md": true}' \
+      --data 'harnesses={"claude": false, "copilot": false, "agents_md": true}' \
       --data profile=solo \
       --data 'ci={"github": true, "gitlab": false}' \
       --skip 'CLAUDE.md' --skip 'AGENTS.md' \
@@ -94,7 +94,7 @@ line instead:
     # fine-grained: profile=custom plus the complete modules dictionary
     uvx copier copy --defaults \
       --data project_name="<project name>" \
-      --data 'harnesses={"copilot": false, "agents_md": true}' \
+      --data 'harnesses={"claude": false, "copilot": false, "agents_md": true}' \
       --data profile=custom \
       --data 'modules={"doc_drift_gate": false, "arch_onboarding": false, "feature_registry": false, "github_issues": false, "contracts_drift": false, "git_hooks": false, "contract_first": false, "parity": false, "security_floor": false, "sbom": false, "telemetry": false, "arch_docs": false, "github_master": false}' \
       --data 'ci={"github": true, "gitlab": false}' \

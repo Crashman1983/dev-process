@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.11"
+# ///
 """Create a temporary issue body from a rendered GitHub issue template."""
 from __future__ import annotations
 
