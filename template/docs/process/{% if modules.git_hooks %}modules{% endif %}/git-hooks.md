@@ -8,8 +8,9 @@ without naming any of them.
 ## Install
 
 The hooks live in `.git/hooks`, which is host-local and not versioned — so the
-installer is the source of truth. Run it once per clone (and after enabling new
-modules):
+installer is the source of truth. Run it once per clone, after enabling new
+modules, and **after every `copier update`** — installed hooks are copies and
+do not update themselves:
 
     bash scripts/process/install-hooks.sh
 

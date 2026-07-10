@@ -74,7 +74,7 @@ glossary = arc42 §12.
 ## Diagrams as code (convention, not gated)
 
 When a section wants a picture, write it as a **fenced Mermaid block in the
-markdown itself** — GitHub, GitLab and most doc tools render it natively, and
+markdown itself** — GitHub and GitLab render it natively, most doc tools via a plugin, and
 a text diagram diffs in the PR alongside the change that moved a boundary
 (the whole point: a diagram that cannot drift invisibly). Mermaid covers the
 C4-style context/container view plus sequence and state diagrams; that is

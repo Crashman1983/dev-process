@@ -32,6 +32,7 @@ import sys
 from pathlib import Path
 
 JOURNAL_DIR = ".process-work/journal"
+PLANS_ACTIVE = ".process-work/plans"
 PLANS_ARCHIVE = ".process-work/plans/archive"
 
 REQUIRED = {"work", "tier", "reviewer", "model", "independence", "verdict", "round"}
@@ -288,6 +289,27 @@ def check(root: Path) -> tuple[list[str], list[str]]:
                 hard.append(f"{PLANS_ARCHIVE}/{p.name}: archived plan declares tier {tier} "
                             f"but has no clearing REVIEW (verdict=pass, work in {sorted(ids)}, "
                             f"tier>={tier}) and no 'review-waived:' line")
+
+    # active Tier 2+ plans are not presence-checked (by design: no red CI
+    # mid-development) — but "forgot to archive on merge" and that design are
+    # indistinguishable and silent, so the gap is at least made visible
+    pdir = root / PLANS_ACTIVE
+    if pdir.is_dir():
+        active = 0
+        for p in sorted(pdir.glob("*.md")):
+            if p.name.startswith("design-"):
+                continue
+            try:
+                text = _unfenced(p.read_text(encoding="utf-8", errors="replace"))
+            except OSError:
+                continue  # active plans are not enforced; the archive path diagnoses
+            m = TIER_DECL.search(text)
+            if m and int(m.group(1)) >= 2:
+                active += 1
+        if active:
+            soft.append(f"{active} active Tier 2+ plan(s) in {PLANS_ACTIVE} — "
+                        f"review presence is only enforced once a plan is "
+                        f"archived (the merge step); archive on merge")
 
     if not all_records and not enforced_any and not hard:
         soft.append("no REVIEW attestations yet — expected pre-adoption")

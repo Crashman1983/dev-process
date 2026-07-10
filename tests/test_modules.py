@@ -43,3 +43,17 @@ def test_gate_runner_leaves_no_pycache(render, tmp_path):
                        cwd=out, capture_output=True, text=True)
     assert r.returncode == 0, r.stdout + r.stderr
     assert not (out / "scripts/process/__pycache__").exists()
+
+
+def test_gate_runner_names_hand_edited_manifest_cause(render, tmp_path):
+    # SP52: module enabled but script missing (the hand-edited-answers trap)
+    # must name the likely cause, not just "can't open file"
+    import subprocess
+    import sys
+    out = render(tmp_path, {"project_name": "d",
+                            "modules": {"telemetry": True}})
+    (out / "scripts/process/check_telemetry.py").unlink()
+    r = subprocess.run([sys.executable, str(out / "scripts/process/gate_runner.py")],
+                       cwd=out, capture_output=True, text=True)
+    assert r.returncode == 1
+    assert "hand" in r.stderr and "copier update" in r.stderr

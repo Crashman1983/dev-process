@@ -169,8 +169,13 @@ Add a module or pull an updated process version — with a clean working tree
 (`git status --porcelain` empty), then:
 
     uvx copier update --defaults \
-      --data 'modules={"doc_drift_gate": true, "arch_onboarding": false, "feature_registry": false, "github_issues": false, "contracts_drift": false, "git_hooks": false, "contract_first": false, "parity": false, "security_floor": false, "sbom": false, "telemetry": false, "arch_docs": false, "github_master": false}' \
-      --skip 'CLAUDE.md' --skip 'AGENTS.md'
+      --data 'modules={"doc_drift_gate": true, "arch_onboarding": false, "feature_registry": false, "github_issues": false, "contracts_drift": false, "git_hooks": false, "contract_first": false, "parity": false, "security_floor": false, "sbom": false, "telemetry": false, "arch_docs": false, "github_master": false}' 
+
+Do NOT `--skip` the anchor files here: copier's three-way merge preserves your
+local anchor extensions anyway, while a skipped anchor keeps the OLD kernel
+block and turns the kernel gate red after the update. After any update, re-run
+`bash scripts/process/install-hooks.sh` if the `git-hooks` module is active —
+the installed hooks are copies and do not update themselves.
 
 The install-time `profile` only seeded the initial modules answer — on update,
 the **recorded `modules` dict wins**, so passing a different profile alone is a

@@ -14,8 +14,8 @@ Version `MAJOR.MINOR.PATCH`:
 - **MINOR** — new behavior, nothing existing breaks.
 - **PATCH** — a fix or internal change, observable behavior otherwise equal.
 
-Before `1.0.0` the contract is explicitly unstable — breaking changes may
-land in MINOR; say so in the README. Cutting `1.0.0` *is* the promise of
+Before `1.0.0` the contract is explicitly unstable — by convention here,
+breaking changes land in MINOR; say so in the README. Cutting `1.0.0` *is* the promise of
 stability, so make it deliberately, not by drift.
 
 ## The changelog
@@ -35,7 +35,7 @@ files already claim that version:
    `pyproject.toml`, `package.json`, …) and write the `CHANGELOG.md` entry
    in the same commit (`chore: release vX.Y.Z`).
 2. Merge through the normal gate path — a release commit is not a bypass.
-3. Tag the merge commit `vX.Y.Z` and push the tag. Where the platform builds
+3. Tag the commit that lands on the main branch `vX.Y.Z` and push the tag. Where the platform builds
    releases from tags (GitHub Releases, package publish), that automation
    hangs off this tag — never off a branch tip.
 

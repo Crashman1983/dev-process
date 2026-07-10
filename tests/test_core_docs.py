@@ -412,7 +412,7 @@ def test_testing_doc_carries_the_methodology(render, tmp_path):
     assert "Property-based" in text
     assert "Regression pins" in text
     assert "mutation testing" in text.lower()
-    assert "no universal threshold gate" in text.lower()
+    assert "no universal threshold\ngate" in text.lower() or "no universal threshold gate" in text.lower()
     assert "flaky test is a defect" in text
     # wired: rule 5 points here, the checklist asks the shape question
     rules = (out / "docs/process/mandatory-rules.md").read_text()
@@ -426,7 +426,7 @@ def test_releases_doc_carries_the_ritual(render, tmp_path):
     text = (out / "docs/process/releases.md").read_text()
     assert "MAJOR" in text and "MINOR" in text and "PATCH" in text
     assert "CHANGELOG.md" in text
-    assert "Tag the merge commit" in text
+    assert "Tag the commit that lands on the main branch" in text
     assert "immutable" in text  # tags never move
     # wired from commits.md
     commits = (out / "docs/process/commits.md").read_text()

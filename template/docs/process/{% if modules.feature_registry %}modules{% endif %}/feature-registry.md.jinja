@@ -1,7 +1,7 @@
 # Module: feature-registry
 
 Records the user-visible stories of **{{ project_name }}** and traces each to its
-acceptance criteria and tests. Runs in CI via `process-gates` and locally via
+acceptance criteria and tests. Runs via `process-gates` (in CI when a CI adapter is installed, and in the pre-push hook) and locally via
 `python scripts/process/check_feature_registry.py`.
 
 ## When a story is required

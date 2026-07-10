@@ -96,6 +96,17 @@ def main() -> int:
     env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
     for name in active:
         _key, cmd = GATES[name]
+        script = root / cmd[1]
+        if not script.is_file():
+            # a module enabled in the manifest whose gate script is missing is
+            # almost always a hand-edited .copier-answers.yml (copier then never
+            # renders the module) — name the cause, not just the missing file
+            print(f"gate-runner: {name} is enabled in the manifest but "
+                  f"{cmd[1]} is missing — if .copier-answers.yml was edited by "
+                  f"hand, revert it and enable the module via `copier update "
+                  f"--data` instead (see BOOTSTRAP 'Later')", file=sys.stderr)
+            failed.append(name)
+            continue
         print(f"== running {name} ==")
         try:
             rc = subprocess.run(cmd, cwd=root, env=env, timeout=GATE_TIMEOUT_S).returncode

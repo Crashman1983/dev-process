@@ -409,3 +409,15 @@ def test_directory_named_md_is_diagnosed_not_traceback(render, tmp_path):
     r = _run(out)
     assert "Traceback" not in r.stderr
     assert r.returncode == 1 and "could not read" in r.stdout
+
+
+def test_active_tier2_plan_gets_visibility_note(render, tmp_path):
+    # SP52: "forgot to archive" must not be perfectly silent — a soft note
+    # names the gap; exit stays 0 (no red CI mid-development)
+    out = render(tmp_path, {"project_name": "demo"})
+    d = out / ".process-work/plans"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "2026-07-11-wip.md").write_text("# WIP\n\ntier: 2\n")
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+    assert "active Tier 2+ plan(s)" in r.stdout

@@ -193,7 +193,7 @@ Gate-Lauf + ersten reviewten Change ohne Hilfe; Report
 
 SP51 (State-of-the-art-Abgleich geschlossen — sechs Lücken aus der Recherche
 (DORA, Diátaxis/arc42, Supply-Chain, Diagrams-as-Code, KI-Guardrails):
-`testing.md` als Core-Doc (Suite-Form Pyramide/Trophy, Property-based,
+`testing.md` als Core-Doc (Suite-Form als Pyramiden-Heuristik, Property-based,
 Regression-Pins, Mutation-Testing auf kritischer Logik, ehrliche
 Coverage-Decke — Trend statt Schwellen-Gate; via Regel 5 +
 Review-Checkliste verdrahtet), `releases.md` als Core-Doc (SemVer,

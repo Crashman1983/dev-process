@@ -99,8 +99,8 @@ not cancel out across projects. The consequences are binding:
   granularity differences that break rates: a **catch** (a grading source or
   gate stopped a real defect before merge) and an **escape** (a defect reached
   the main branch and needed a corrective fix) are countable facts. When in
-  doubt which number to trust, trust the event ledger over any percentage
-  derived from it.
+  doubt which number to trust, trust the raw event counts over any percentage
+  derived from them.
 - **Goodhart and self-grading.** Grader and graded are often the same model
   family; a metric that becomes a target stops measuring. The numbers steer
   *attention* — which grading source to keep, which criterion thrashes — they

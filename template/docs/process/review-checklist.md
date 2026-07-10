@@ -127,7 +127,7 @@ judge the change against its content:
   without a test proving its acceptance is not done (mandatory rule 5).
 - Is the suite **shaped** right for what changed (`testing.md`): the new tests
   at the cheapest layer that proves the behavior, the negative/edge/
-  authorization twins present, and a bug fix carrying its regression pin?
+  authorization/invalidation twins present, and a bug fix carrying its regression pin?
 
 ## Definition of Done
 

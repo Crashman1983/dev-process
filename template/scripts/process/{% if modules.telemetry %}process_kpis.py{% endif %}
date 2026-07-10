@@ -11,7 +11,7 @@ threshold families (convergence, suite) print pass/not-met against their
 documented thresholds instead. A number that yields no action does not belong
 in the cockpit. Confidence is `high`
 (direct measure, enough n), `medium` (sample-biased), or `low` (proxy or thin
-n) — proxy measures never reach `high`, confounding cannot be filtered out.
+n) — proxy measures never reach `high`, because confounding cannot be filtered out.
 At `low`, the only action is to collect more data; never act on a thin or
 biased number. n before percent.
 

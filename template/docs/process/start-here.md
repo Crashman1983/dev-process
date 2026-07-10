@@ -314,21 +314,24 @@ The project is ready for normal process-driven development when:
   one real project artifact;
 - `scripts/process/gate_runner.py` runs and all notes are understood as known
   onboarding state;
-- **the CI gate is wired as a *required* check.** The `process-gates` job failing
-  only blocks a merge if your host is configured to require it — CI cannot set
-  this itself. On GitHub, the GitHub CI adapter ships a one-command setup:
-  `setup_branch_protection.sh` (under scripts/process/) idempotently adds
-  `process-gates` as a required status check on the default branch — or do it
-  manually via Settings → Branches. On GitLab: a merge-request approval rule /
-  pipeline-must-succeed setting. Without this, a red gate is advisory, not
-  enforced — the single step that turns "the gate runs" into "the gate blocks";
+- **the gate is wired to block.** A red `process-gates` job only blocks a
+  merge if your host is configured to require it — CI cannot set this itself.
+  On GitHub, the GitHub CI adapter ships a one-command setup
+  (`scripts/process/setup_branch_protection.sh` in repos rendered with that
+  adapter) that idempotently adds `process-gates` as a required status check —
+  or do it manually via Settings → Branches. On GitLab: a merge-request
+  approval rule / pipeline-must-succeed setting. Without any CI adapter, the
+  `git-hooks` module's pre-push hook IS the enforcement authority — install it
+  and treat a bypassed hook like a skipped gate (mandatory rule 8). Whichever
+  transport: this is the single step that turns "the gate runs" into "the
+  gate blocks";
 - **platform-side hygiene is switched on** where the host offers it:
   **secret scanning** with **push protection**, and automated dependency
   updates (**Dependabot**/Renovate) with vulnerability alerts. Honest
   framing: these are the platform's network-side services, not hermetic gates
   this process can run or verify offline — the `security-floor` pattern rules
-  and the `sbom` license gate complement them, they do not replace them (a
-  floor regex is no CVE feed). Enable them once at onboarding; review the
+  and the `sbom` license gate complement them but do not replace them (a
+  floor regex is not a CVE feed). Enable them once at onboarding; review the
   update PRs like any other change.
 
 Once developing: before planning any change, read the Decision Records
