@@ -15,6 +15,10 @@ clean.
 Record the result in the exact grammar the gates read (`journal-state-plans.md`):
 a `REVIEW work=… tier=… reviewer=… model=… independence=… verdict=… round=…`
 line in the journal, and — for a findings-producing or Tier 3 review —
-`FINDING sev=… action=… issue=…` lines in a `.process-work/reviews/` report. A
-dispatched fresh reviewer must be told to emit these verbatim, not free-form
-prose, or the gate cannot read them.
+`FINDING sev=… action=… issue=…` lines in a `.process-work/reviews/` report.
+
+To dispatch a fresh (or cross-model) reviewer, do not hand-craft its input:
+`python scripts/process/make_review_bundle.py -o /tmp/bundle.md` assembles the
+complete read-only bundle — rules, checklist, product frame, plan, diff, and
+the exact output grammar — ready to feed any model
+(`docs/process/verification-independence.md`, "The review bundle").

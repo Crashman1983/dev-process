@@ -42,6 +42,31 @@ check mean anything. Scale it to the tier (`risk-tiers.md`):
   independent reviewers try to *refute* the change rather than confirm it, and
   a majority refutation blocks the merge.
 
+## The review bundle — the portable interface to any reviewer
+
+The read-only bundle is the seam that makes independence *and* model diversity
+practical: one self-contained markdown document that is the reviewer's complete
+input. `scripts/process/make_review_bundle.py` assembles it — reviewer preamble,
+the kernel block, the review checklist, the product frame, the active plan(s),
+the diff against a base ref, and the exact `REVIEW`/`FINDING` output grammar
+(imported from the gate itself, so the instructions cannot drift from what
+`check_review.py` parses). Sources it cannot read are named in place.
+
+Dispatching is harness-plumbing around that artifact — pick what exists:
+
+    python scripts/process/make_review_bundle.py -o /tmp/bundle.md
+
+- **Claude Code:** `claude -p "$(cat /tmp/bundle.md)"` (a fresh process — not
+  the implementing session).
+- **Codex CLI:** `codex exec "$(cat /tmp/bundle.md)"` — this is the cross-model
+  path when the implementer was a Claude, and vice versa.
+- **Any chat model:** paste the bundle as the whole prompt.
+
+The reviewer's independence flags follow from the dispatch, not from wishful
+attestation: a fresh process over the bundle is `bundle,non-implementing`; add
+`cross-model` only when the reviewing family really differs, else declare
+`single-family` (the honest degradation above).
+
 ## Independence is attested, not assumed
 
 The one step that is supposed to be independent is easy to run in the wrong
