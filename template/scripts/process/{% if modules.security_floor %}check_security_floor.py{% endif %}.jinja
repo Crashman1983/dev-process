@@ -16,6 +16,7 @@ import sys
 from pathlib import Path
 
 CONFIG = "docs/process/security-floor.json"
+ADR_DIR = "docs/process/adr"
 # never scan the policy file itself (it holds the patterns), the shipped seed the
 # doc says to copy, or the gate script — a rule must not flag its own tooling.
 SELF_EXCLUDE = {
@@ -99,6 +100,13 @@ def _validate(cfg: dict) -> tuple[list[dict], list[str], list[str]]:
                 "glob strings (omit it to scan all files)"
             )
             applies = None
+        # optional adr link: a floor rule (e.g. an architecture boundary) may name
+        # the decision record it enforces — the link must then resolve.
+        adr = rule.get("adr")
+        if adr is not None and not (isinstance(adr, str) and re.search(r"\d", adr)):
+            hard.append(f"{CONFIG}: rule {label!r} 'adr' must reference a decision "
+                        "record like 'ADR-0002' (or be omitted)")
+            adr = None
         if not isinstance(pattern, str) or not pattern:
             hard.append(f"{CONFIG}: rule {label!r} 'pattern' must be a non-empty string")
             continue
@@ -107,8 +115,18 @@ def _validate(cfg: dict) -> tuple[list[dict], list[str], list[str]]:
         except re.error as exc:
             hard.append(f"{CONFIG}: rule {label!r} pattern is not a valid regex: {exc}")
             continue
-        compiled.append({"id": rid, "regex": regex, "applies_to": applies, "message": message})
+        compiled.append({"id": rid, "regex": regex, "applies_to": applies,
+                         "message": message, "adr": adr})
     return compiled, exclude, hard
+
+
+def _adr_exists(root: Path, adr: str) -> bool:
+    """Same resolution the feature-registry gate uses: any digits in the ref
+    select docs/process/adr/adr-NNNN-*.md."""
+    m = re.search(r"\d+", adr)
+    if not m:
+        return False
+    return bool(list((root / ADR_DIR).glob(f"adr-{int(m.group()):04d}-*.md")))
 
 
 def check(root: Path) -> tuple[list[str], list[str]]:
@@ -118,6 +136,12 @@ def check(root: Path) -> tuple[list[str], list[str]]:
     if cfg is None:
         return [], [f"no security-floor config yet ({CONFIG} absent)"]
     rules, exclude, hard = _validate(cfg)
+    # a rule claiming a decision record that does not exist is a lie to the next
+    # reader — config integrity, checked before any scanning
+    for r in rules:
+        if r["adr"] and not _adr_exists(root, r["adr"]):
+            hard.append(f"{CONFIG}: rule {r['id']!r} links {r['adr']!r} but no such "
+                        f"decision record exists under {ADR_DIR}/")
     if hard:
         return hard, []
     if not rules:
