@@ -84,7 +84,8 @@ def test_adapters_list_every_module_doc():
     modules = set(re.findall(r"([a-z_]+):", copier["modules"]["default"]))
     assert len(modules) >= 13, "copier modules default not parsed"
     adapters = [
-        ROOT / "template/CLAUDE.md.jinja",
+        ROOT
+        / "template/{% if harnesses.claude | default(true) %}CLAUDE.md{% endif %}.jinja",
         ROOT / "template/.github/{% if harnesses.copilot %}copilot-instructions.md{% endif %}.jinja",
         ROOT / "template/{% if harnesses.agents_md %}AGENTS.md{% endif %}.jinja",
     ]
