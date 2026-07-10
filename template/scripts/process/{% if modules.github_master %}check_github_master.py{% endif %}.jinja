@@ -235,6 +235,12 @@ def check(root: Path) -> tuple[list[str], list[str]]:
             f"re-run gh_sync.py if GitHub changed since (a stale mirror passes)"]
 
     stories = _stories(root)
+    if not stories:
+        # an empty mirror is a no-op, not proof of consistency — say so instead
+        # of a bare green (this module depends on populated feature-registry stories)
+        soft.append(f"no stories under {REGISTRY_DIR}/ — nothing is mirrored, "
+                    f"so there is nothing to verify (populate the registry, "
+                    f"then re-sync)")
     hard += _invariant_hard(stories, snap)
     hard += _completeness_hard(stories, snap)
     hard += _drift_hard(stories, snap)

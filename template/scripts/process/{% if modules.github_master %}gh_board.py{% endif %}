@@ -1,18 +1,16 @@
 #!/usr/bin/env python3
 """gh_board: pull a GitHub Project board's Status field into the snapshot's
-`board_status` slot (and, with --push, move a card to the column its story
-status implies).
+`board_status` slot.
 
 Like gh_sync.py, this is the network layer — best-effort, `gh`-dependent, never
 a gate. It fills `board_status`; the github-master gate then checks, offline,
 that the column is consistent with the story status and issue state. The tested,
-hermetic contract is the gate, not this tool.
+hermetic contract is the gate, not this tool. This tool only READS the board —
+moving cards stays a manual (or project-automation) act; the gate flags the
+divergence either way.
 
 Usage:
-  python scripts/process/gh_board.py <project-number> [--owner OWNER] [--push]
-
---push moves a card whose column disagrees with its story status to the column
-that status implies (a GitHub write; needs the `project` scope). Off by default.
+  python scripts/process/gh_board.py <project-number> [--owner OWNER]
 
 Stdlib + `gh`.
 """
@@ -46,15 +44,13 @@ def main() -> int:
         print("gh_board: `gh` not on PATH", file=sys.stderr)
         return 1
     args = sys.argv[1:]
-    push = "--push" in args
-    args = [a for a in args if a != "--push"]
     owner = None
     if "--owner" in args:
         i = args.index("--owner")
         owner = args[i + 1] if i + 1 < len(args) else None
         args = args[:i] + args[i + 2:]
     if not args:
-        print("gh_board: usage: gh_board.py <project-number> [--owner OWNER] [--push]",
+        print("gh_board: usage: gh_board.py <project-number> [--owner OWNER]",
               file=sys.stderr)
         return 1
     project = args[0]
@@ -88,14 +84,6 @@ def main() -> int:
 
     snap_path.write_text(json.dumps(snapshot, indent=2) + "\n", encoding="utf-8")
     print(f"gh_board: filled board_status for {filled} issue(s) in {SNAPSHOT} — commit it")
-
-    if push:
-        # best-effort: move cards whose column disagrees with the story status.
-        # `gh project item-edit` needs the item id + the Status field/option ids;
-        # wire your project's ids here — left as an explicit extension point so
-        # the tool never guesses a destructive write.
-        print("gh_board: --push is an extension point — see the module doc; "
-              "no cards were moved", file=sys.stderr)
     return 0
 
 
