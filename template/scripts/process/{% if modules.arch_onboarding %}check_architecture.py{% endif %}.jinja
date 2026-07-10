@@ -15,7 +15,10 @@ from pathlib import Path
 
 import yaml
 
-ADR_DIR = "docs/process/adr"
+# the decision-records gate (core, always rendered) owns ADR file identity —
+# import, don't copy (one owner per behavior)
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling import
+from check_decisions import ADR_DIR, adr_exists as _adr_exists  # noqa: E402
 
 
 def extract_block(md: str) -> tuple[str | None, bool]:
@@ -33,13 +36,6 @@ def extract_block(md: str) -> tuple[str | None, bool]:
             return "\n".join(out), False
         out.append(line)
     return None, inside
-
-
-def _adr_exists(root: Path, adr: object) -> bool:
-    m = re.search(r"\d+", str(adr))
-    if not m:
-        return False
-    return bool(list((root / ADR_DIR).glob(f"adr-{int(m.group()):04d}-*.md")))
 
 
 def _has_importlinter(root: Path) -> bool:

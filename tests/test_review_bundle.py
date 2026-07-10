@@ -172,3 +172,18 @@ def test_dirty_tree_is_disclosed(render, tmp_path):
     (out / "uncommitted.py").write_text("x = 1\n")
     t = _run(out, "--base", "main").stdout
     assert "working tree dirty" in t and "NOT in this diff" in t
+
+
+def test_bundle_survives_safe_path_python(render, tmp_path):
+    # PYTHONSAFEPATH removes the implicit script-dir sys.path entry — the
+    # explicit sibling-import shim must keep the tool working (SP50 audit)
+    import os
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    env = {**os.environ, "PYTHONSAFEPATH": "1"}
+    r = subprocess.run(
+        [sys.executable, str(out / "scripts/process/make_review_bundle.py"),
+         "--base", "main"],
+        cwd=out, capture_output=True, text=True, env=env)
+    assert r.returncode == 0, r.stderr
+    assert "Mandatory rules" in r.stdout

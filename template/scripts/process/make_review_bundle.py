@@ -38,8 +38,9 @@ from pathlib import Path
 
 # check_review.py owns the REVIEW grammar; check_kernel.py owns kernel-block
 # extraction — importing both keeps this tool byte-honest with the gates
-import check_kernel as _kernel_gate
-import check_review as _review_gate
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling import
+import check_kernel as _kernel_gate  # noqa: E402
+import check_review as _review_gate  # noqa: E402
 
 CHECKLIST = "docs/process/review-checklist.md"
 PRODUCT = "PRODUCT.md"

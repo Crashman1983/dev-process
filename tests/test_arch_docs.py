@@ -140,3 +140,19 @@ def test_docdrift_green_with_module_doc(render, tmp_path):
         capture_output=True, text=True,
     )
     assert r.returncode == 0, r.stdout
+
+
+def test_unpadded_adr_filename_resolves(render, tmp_path):
+    # adr-12-*.md (no zero-padding) must satisfy both ADR-12 and ADR-0012 —
+    # the decision-records gate accepts any width, so its consumers must too
+    # (SP50: two divergent local copies replaced by check_decisions.adr_exists)
+    out = _render(render, tmp_path)
+    adr = out / ADR_DIR
+    adr.mkdir(parents=True, exist_ok=True)
+    (adr / "adr-12-widths.md").write_text("# ADR-12\n", encoding="utf-8")
+    (out / OVERVIEW).write_text(
+        "# Overview\n\n## 6. Decisions\n\nSee ADR-12 and ADR-0012.\n",
+        encoding="utf-8",
+    )
+    r = _gate(out)
+    assert r.returncode == 0, r.stdout + r.stderr

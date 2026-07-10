@@ -557,3 +557,18 @@ def test_dor_extra_key_fails_clean(render, tmp_path):
     r = _run(out)
     assert r.returncode == 1
     assert "boolean typed/ears/deviation" in " ".join(r.stdout.split())
+
+
+# --- SP50 audit: gh_board argument hygiene ----------------------------------
+
+
+def test_gh_board_rejects_unknown_flag_with_usage(render, tmp_path):
+    # a stale `--push` (removed) or a typo must error loudly, not ride into
+    # `gh` as the project number or be silently swallowed
+    out = _render(render, tmp_path)
+    for args in (["--push"], ["5", "--push"], []):
+        r = subprocess.run(
+            [sys.executable, str(out / "scripts/process/gh_board.py"), *args],
+            cwd=out, capture_output=True, text=True)
+        assert r.returncode == 1, (args, r.stdout, r.stderr)
+        assert "usage" in r.stderr

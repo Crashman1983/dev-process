@@ -22,17 +22,14 @@ ANSWERS_FILE = ".copier-answers.yml"
 GH_TIMEOUT_S = 10  # cap a hung `gh` so it cannot wedge CI
 TRACKED = ("in-progress", "done")  # statuses that ought to carry an issue link
 
-_BARE = re.compile(r"^#(\d+)$")
-_CROSS = re.compile(r"^([\w.-]+/[\w.-]+)#(\d+)$")
-_URL = re.compile(r"^https://github\.com/([\w.-]+/[\w.-]+)/issues/(\d+)$")
-
 PLANS_DIR = ".process-work/plans"  # active plans only; archive/ is finished work
 REVIEWS_DIR = ".process-work/reviews"  # review/audit reports
 
-# the review gate (core, always rendered) owns the plan-field grammar and the
-# fence-stripping discipline — import, don't copy (one owner per behavior)
+# the review gate (core, always rendered) owns the plan-field grammar, the
+# issue-ref grammar and the fence-stripping discipline — import, don't copy
+# (one owner per behavior)
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling import
-from check_review import _LEAD, _unfenced  # noqa: E402
+from check_review import _LEAD, _unfenced, parse_issue_ref  # noqa: E402
 from check_review import ISSUE_DECL as _PLAN_ISSUE  # noqa: E402
 from check_review import TIER_DECL as _PLAN_TIER  # noqa: E402
 
@@ -52,22 +49,12 @@ def _default_repo(root: Path) -> str | None:
         return None
     try:
         data = yaml.safe_load(f.read_text(encoding="utf-8")) or {}
-    except (yaml.YAMLError, UnicodeDecodeError):
+    except (yaml.YAMLError, UnicodeDecodeError, OSError):
         return None  # the gate_runner owns manifest validity
     if not isinstance(data, dict):
         return None
     repo = data.get("github_repo")
     return repo.strip() if isinstance(repo, str) and repo.strip() else None
-
-
-def parse_issue_ref(ref: str) -> tuple[str | None, int] | None:
-    """(repo_or_None, number) for a well-formed ref, else None. repo is None
-    only for the bare `#N` form, which resolves against the configured repo."""
-    for pat, has_repo in ((_BARE, False), (_CROSS, True), (_URL, True)):
-        m = pat.match(ref)
-        if m:
-            return (m.group(1), int(m.group(2))) if has_repo else (None, int(m.group(1)))
-    return None
 
 
 def _issue_exists(gh: str, repo: str, number: int) -> bool:
@@ -96,7 +83,11 @@ def _check_plans(root: Path) -> tuple[list[str], list[str]]:
     for p in sorted(pdir.glob("*.md")):
         if p.name.startswith("design-"):
             continue
-        text = _unfenced(p.read_text(encoding="utf-8", errors="replace"))
+        try:
+            text = _unfenced(p.read_text(encoding="utf-8", errors="replace"))
+        except OSError as exc:  # broken symlink, directory named *.md, …
+            hard.append(f"{PLANS_DIR}/{p.name}: could not read: {exc}")
+            continue
         m = _PLAN_TIER.search(text)
         if not m or int(m.group(1)) < 2:
             continue
@@ -205,6 +196,9 @@ def _check_reports(root: Path, default_repo: str | None) -> tuple[list[str], lis
         except UnicodeDecodeError:
             hard.append(f"{rel}: not valid UTF-8")
             continue
+        except OSError as exc:  # broken symlink, directory named *.md, …
+            hard.append(f"{rel}: could not read: {exc}")
+            continue
         # an unclosed fence swallows the rest of the file as quotation —
         # disclose it instead of silently dropping whatever followed
         if sum(1 for ln in raw.splitlines()
@@ -298,7 +292,7 @@ def check(root: Path) -> tuple[list[str], list[str]]:
         rel = path.relative_to(root)
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, UnicodeDecodeError):
+        except (json.JSONDecodeError, UnicodeDecodeError, OSError):
             continue  # the feature-registry gate owns JSON validity
         if not isinstance(data, dict):
             continue

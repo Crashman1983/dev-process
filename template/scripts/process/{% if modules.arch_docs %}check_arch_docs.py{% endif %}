@@ -24,23 +24,16 @@ import sys
 from pathlib import Path
 
 OVERVIEW = "ARCHITECTURE-OVERVIEW.md"
-ADR_DIR = "docs/process/adr"
 ADR_REF = re.compile(r"\bADR-(\d+)\b")  # any digit width; ADR-NNNN placeholder has no digits
 # a section still carrying the shipped placeholder line
 PLACEHOLDER = re.compile(r"^\s*>\s*_Placeholder", re.MULTILINE)
 # section headings, to report *which* sections are still placeholder
 HEADING = re.compile(r"^##\s+(.*)$", re.MULTILINE)
 
-
-def _adr_exists(root: Path, num: str) -> bool:
-    # zero-pad-insensitive: ADR-0002 and ADR-2 both look for adr-<num>-*.md,
-    # trying the reference's own width and a 4-wide form.
-    d = root / ADR_DIR
-    candidates = {num, num.zfill(4)}
-    for width in candidates:
-        if any(d.glob(f"adr-{width}-*.md")):
-            return True
-    return False
+# the decision-records gate (core, always rendered) owns ADR file identity —
+# import, don't copy (one owner per behavior)
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling import
+from check_decisions import ADR_DIR, adr_exists as _adr_exists  # noqa: E402
 
 
 def _placeholder_sections(text: str) -> list[str]:

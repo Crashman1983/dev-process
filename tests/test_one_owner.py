@@ -96,3 +96,17 @@ def test_adapters_list_every_module_doc():
         assert listed == modules, (
             f"{p.name}: _mod_slugs != copier.yml modules — "
             f"missing {sorted(modules - listed)}, extra {sorted(listed - modules)}")
+
+
+def test_finding_line_regex_pinned_trace_vs_check_issues():
+    # trace.py (core) cannot import the github_issues module — its FINDING
+    # detection regex is a deliberate twin of check_issues' _FINDING_LINE;
+    # byte-identical literals, or this trips.
+    trace = _src("trace.py")
+    issues = _src("{% if modules.github_issues %}check_issues.py{% endif %}.jinja")
+    pat = re.compile(r'_FINDING(?:_LINE)?\s*=\s*re\.compile\(\s*r"([^"]+)"')
+    m_t, m_i = pat.search(trace), pat.search(issues)
+    assert m_t and m_i, "FINDING regex literal not found"
+    assert m_t.group(1) == m_i.group(1), (
+        f"FINDING detection drifted: trace={m_t.group(1)!r} "
+        f"check_issues={m_i.group(1)!r}")

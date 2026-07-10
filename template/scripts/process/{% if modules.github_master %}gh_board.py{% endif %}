@@ -39,21 +39,23 @@ def _run_gh(gh: str, args: list[str]) -> dict | list | None:
 
 def main() -> int:
     root = Path(".").resolve()
-    gh = shutil.which("gh")
-    if not gh:
-        print("gh_board: `gh` not on PATH", file=sys.stderr)
-        return 1
     args = sys.argv[1:]
     owner = None
     if "--owner" in args:
         i = args.index("--owner")
         owner = args[i + 1] if i + 1 < len(args) else None
         args = args[:i] + args[i + 2:]
-    if not args:
+    # exactly one positional, no unknown flags — a stale `--push` (removed) or a
+    # typo must error loudly, not ride into `gh` as the project number
+    if len(args) != 1 or args[0].startswith("-"):
         print("gh_board: usage: gh_board.py <project-number> [--owner OWNER]",
               file=sys.stderr)
         return 1
     project = args[0]
+    gh = shutil.which("gh")
+    if not gh:
+        print("gh_board: `gh` not on PATH", file=sys.stderr)
+        return 1
 
     snap_path = root / SNAPSHOT
     if not snap_path.is_file():

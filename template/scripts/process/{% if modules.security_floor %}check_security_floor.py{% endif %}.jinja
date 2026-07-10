@@ -13,6 +13,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 CONFIG = "docs/process/security-floor.json"
@@ -154,6 +155,13 @@ def check(root: Path) -> tuple[list[str], list[str]]:
 
     findings: list[str] = []
     skipped: list[str] = []
+    scanned = 0
+    # a pathological pattern (catastrophic backtracking) must not wedge CI:
+    # each rule gets a wall-clock budget, checked between lines; exceeding it
+    # is a hard, named failure — rewrite the pattern. Overridable for tests.
+    budget_s = float(os.environ.get("SECURITY_FLOOR_RULE_BUDGET_S", "10"))
+    spent: dict[str, float] = {}
+    blown: set[str] = set()
     for rel in files:
         if rel in SELF_EXCLUDE:
             continue
@@ -171,11 +179,26 @@ def check(root: Path) -> tuple[list[str], list[str]]:
             # the grep-able subset, not a full secret scanner).
             skipped.append(rel)
             continue
+        scanned += 1
         for lineno, line in enumerate(text.splitlines(), 1):
             for r in applicable:
-                if r["regex"].search(line):
+                if r["id"] in blown:
+                    continue
+                t0 = time.monotonic()
+                match = r["regex"].search(line)
+                spent[r["id"]] = spent.get(r["id"], 0.0) + (time.monotonic() - t0)
+                if match:
                     findings.append(f"{rel}:{lineno}: {r['message']} [{r['id']}]")
+                elif spent[r["id"]] > budget_s:
+                    blown.add(r["id"])
+                    findings.append(f"{CONFIG}: rule {r['id']!r} exceeded its "
+                                    f"{budget_s:g}s scan budget — likely "
+                                    f"catastrophic backtracking; rewrite the pattern")
     soft: list[str] = []
+    if scanned == 0:
+        # an exclude/applies_to combination that leaves nothing in scope is the
+        # same silent neuter as an empty tree — disclose it, never a bare green
+        soft.append("0 files in scope after exclude/applies_to — floor not exercised")
     if skipped:
         shown = ", ".join(skipped[:5]) + (" …" if len(skipped) > 5 else "")
         soft.append(f"{len(skipped)} file(s) not scanned (binary/unreadable), "

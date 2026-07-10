@@ -331,3 +331,81 @@ def test_unicode_digit_tier_fails_clean(render, tmp_path):
     assert r.returncode == 1
     assert "integer" in r.stdout
     assert "Traceback" not in r.stdout and "Traceback" not in r.stderr
+
+
+# --- SP50 audit: fence length-awareness, work-id validation, unreadable files
+
+
+def test_quoted_waiver_in_nested_fence_does_not_clear(render, tmp_path):
+    # a ``` run inside a ````-fenced example must not close the outer fence —
+    # a QUOTED review-waived:/tier: line is a quotation, never a declaration
+    out = render(tmp_path, {"project_name": "demo"})
+    _archived_plan(out, "2026-07-10-widget.md",
+                   "# Plan\n\ntier: 3\n\n````md\nexample:\n```\ncode\n```\n"
+                   "review-waived: quoted example, not a waiver\n````\n")
+    r = _run(out)
+    assert r.returncode == 1, r.stdout
+    assert "no clearing REVIEW" in r.stdout
+
+
+def test_quoted_review_line_in_nested_fence_not_malformed(render, tmp_path):
+    # the same length-awareness must not flag a QUOTED (fenced) REVIEW example
+    out = render(tmp_path, {"project_name": "demo"})
+    _journal(out,
+             "notes",
+             "````md",
+             "```",
+             "inner",
+             "```",
+             "REVIEW this quoted prose would be malformed outside a fence",
+             "````")
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+
+
+def test_non_issue_token_is_not_a_clearing_work_id(render, tmp_path):
+    # `issue: v2.0` is not an issue ref — a REVIEW of unrelated work (work=0)
+    # must not clear the plan (SP50 adversarial regression)
+    out = render(tmp_path, {"project_name": "demo"})
+    _archived_plan(out, "2026-07-10-widget.md", "# P\n\ntier: 2\nissue: v2.0\n")
+    _journal(out, _review(work="0"))
+    r = _run(out)
+    assert r.returncode == 1, r.stdout
+    assert "no clearing REVIEW" in r.stdout
+
+
+def test_sentinel_issue_token_cannot_clear_two_plans(render, tmp_path):
+    # two plans both declaring `issue: none` + one REVIEW work=none must not
+    # both clear — `none` is not a ref and never becomes a work-id
+    out = render(tmp_path, {"project_name": "demo"})
+    _archived_plan(out, "2026-07-01-alpha.md", "# A\n\ntier: 2\nissue: none\n")
+    _archived_plan(out, "2026-07-02-beta.md", "# B\n\ntier: 2\nissue: none\n")
+    _journal(out, _review(work="none"))
+    r = _run(out)
+    assert r.returncode == 1, r.stdout
+    assert r.stdout.count("no clearing REVIEW") == 2
+
+
+def test_cross_repo_and_url_refs_still_clear(render, tmp_path):
+    # the intended capability survives the validation: real refs resolve to
+    # their number and `work=42` clears
+    out = render(tmp_path, {"project_name": "demo"})
+    _archived_plan(out, "2026-07-01-alpha.md", "# A\n\ntier: 2\nissue: owner/repo#42\n")
+    _archived_plan(out, "2026-07-02-beta.md",
+                   "# B\n\ntier: 2\nissue: https://github.com/o/r/issues/42\n")
+    _journal(out, _review(work="42"))
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+
+
+def test_directory_named_md_is_diagnosed_not_traceback(render, tmp_path):
+    # a directory matching *.md (or a broken symlink) must yield a spoken
+    # diagnosis, never a Python traceback
+    out = render(tmp_path, {"project_name": "demo"})
+    (out / JOURNAL / "2026-07-10.md").mkdir(parents=True)
+    (out / ARCHIVE).mkdir(parents=True, exist_ok=True)
+    (out / ARCHIVE / "2026-07-10-x.md").mkdir()
+    (out / ARCHIVE / "gone.md").symlink_to(out / "does-not-exist")
+    r = _run(out)
+    assert "Traceback" not in r.stderr
+    assert r.returncode == 1 and "could not read" in r.stdout

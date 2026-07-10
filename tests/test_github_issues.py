@@ -899,3 +899,30 @@ def test_followup_in_published_but_waived_report_still_binds(render, tmp_path):
     r = _run(out)
     assert r.returncode == 1
     assert "follow-up finding without an issue" in r.stdout
+
+
+# --- SP50 audit: fence length-awareness + unreadable plan shapes ------------
+
+
+def test_quoted_issue_waiver_in_nested_fence_does_not_clear(render, tmp_path):
+    # a 3-backtick run inside a 4-backtick fence must not close it — a QUOTED
+    # issue-waived: example never waives issue-before-code
+    out = _render(render, tmp_path)
+    _plan(out, "2026-07-10-widget.md",
+          "# Plan\n\ntier: 2\n\n````md\n```\ncode\n```\n"
+          "issue-waived: quoted example, not a waiver\n````\n")
+    r = _run(out)
+    assert r.returncode == 1, r.stdout
+    assert "no 'issue:' link" in r.stdout
+
+
+def test_unreadable_plan_shapes_diagnosed_not_traceback(render, tmp_path):
+    # a directory named *.md or a broken symlink yields a spoken diagnosis
+    out = _render(render, tmp_path)
+    d = out / ".process-work" / "plans"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "2026-07-10-dir.md").mkdir()
+    (d / "gone.md").symlink_to(out / "does-not-exist")
+    r = _run(out)
+    assert "Traceback" not in r.stderr
+    assert r.returncode == 1 and "could not read" in r.stdout
