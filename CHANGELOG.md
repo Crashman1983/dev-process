@@ -116,6 +116,13 @@ dann `gh`, sonst nur Ref), aktive/archivierte Pläne, Commits, geparste
 unerreichbare Quellen werden benannt statt still übersprungen) ausgeliefert,
 `v1.30.0`.
 
+`v1.30.1` (Merge-Gate-Review über den v1.26–v1.30-Bogen, zwei unabhängige
+Reviewer: Blocker im Branch-Protection-Skript geschlossen — bestehende Regel
+wird nie mehr überschrieben (GET-404-Ambiguität); Kernel-Gate erzwingt exakt
+einen Block und lehnt leeren Kanon ab; trace-Präzision (kein Bare-Number-Grep,
+leere Query verweigert); Ratchet als einziger Owner mit allen 13 Modulen;
+README/Update-Semantik-Kohärenz).
+
 ## Sub-Projekt-Tabelle (SP1–SP24)
 
 Die Tabelle wurde bis SP24 gepflegt; ab SP25 trägt das Narrativ oben die
