@@ -81,7 +81,12 @@ Ausgeliefert als [copier](https://copier.readthedocs.io)-Template. Adapter für
 > Anker byte-identisch zu `kernel.md` sein — eine still gelöschte/geänderte
 > Regel blockt den Merge; schließt die „Regeln vergessen weil ungegatet"-Lücke,
 > die ein abgeleiteter Prozess sichtbar machte) ausgeliefert, `v1.26.0`.
-> SP36 (Backport-Batch 1 aus dem parallelen
+> SP41 (Kernel überlebt Compaction: selbst-heilende Direktive *im* Kernel-Block
+> — bei Resume/Compaction Kernel+Regeln neu lesen, byte-identisch in allen vier
+> Kopien und damit vom Kernel-Gate unentfernbar; Phasen-Re-Hydration in
+> /execute, /review, /prime; ehrliche Grenze + Pro-Harness-Realität in
+> start-here dokumentiert — ein Gate sieht den Live-Kontext nicht) ausgeliefert,
+> `v1.27.0`. SP36 (Backport-Batch 1 aus dem parallelen
 > law-aidev-Zweig, Issue #22: pre-push prüft die **gepushten Commits** statt des
 > Working Tree (Wegwerf-Worktree), neues opt-in **`sbom`**-Modul mit
 > CycloneDX-Lizenz-Attestierung, feature-registry-Advisory für unter-granulare
