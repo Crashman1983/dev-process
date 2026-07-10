@@ -2,9 +2,10 @@
 """kernel gate (core, always on): the always-on kernel block must be present and
 intact in every anchor file that exists.
 
-The kernel is the one part of the process that is *always in context* — it
-carries the mandatory-rule summary, tier routing, and the language rule into
-every session. Most mandatory rules are not individually machine-checkable
+The kernel is the part of the process every anchor-reading harness loads at
+session start — it carries the mandatory-rule summary, tier routing, and the
+language rule into the session (keeping it there across compaction is the
+behavioral mechanism in start-here, not this gate). Most mandatory rules are not individually machine-checkable
 (verify-before-asserting, root-cause-before-symptom, readable code); they are
 binding only because the kernel keeps them in front of the agent. So the kernel
 itself is the load-bearing artifact — and this gate protects it: if the block is
@@ -31,6 +32,7 @@ KERNEL_DOC = "docs/process/kernel.md"
 # checks only the ones that exist — a skipped adapter leaves no file to drift.
 ANCHORS = ["CLAUDE.md", "AGENTS.md", ".github/copilot-instructions.md"]
 _BLOCK = re.compile(r"<!-- KERNEL:START -->(.*?)<!-- KERNEL:END -->", re.S)
+_START = "<!-- KERNEL:START -->"
 
 
 def _block(text: str) -> str | None:
@@ -43,12 +45,16 @@ def check(root: Path) -> tuple[list[str], list[str]]:
     if not doc.is_file():
         return [f"{KERNEL_DOC} is missing — the canonical kernel source is gone"], []
     try:
-        canonical = _block(doc.read_text(encoding="utf-8"))
+        doc_text = doc.read_text(encoding="utf-8")
     except (UnicodeDecodeError, OSError) as exc:
         return [f"{KERNEL_DOC}: could not read: {exc}"], []
-    if canonical is None:
-        return [f"{KERNEL_DOC} has no KERNEL:START/END block — the canonical "
-                "kernel is unreadable"], []
+    if doc_text.count(_START) > 1:
+        return [f"{KERNEL_DOC} carries {doc_text.count(_START)} KERNEL:START "
+                "markers — exactly one canonical block is allowed"], []
+    canonical = _block(doc_text)
+    if not canonical:  # missing OR empty: no rules is not a kernel
+        return [f"{KERNEL_DOC} has no non-empty KERNEL:START/END block — the "
+                "canonical kernel is unreadable"], []
 
     hard: list[str] = []
     present = []
@@ -58,10 +64,18 @@ def check(root: Path) -> tuple[list[str], list[str]]:
             continue
         present.append(rel)
         try:
-            block = _block(p.read_text(encoding="utf-8"))
+            text = p.read_text(encoding="utf-8")
         except (UnicodeDecodeError, OSError) as exc:
             hard.append(f"{rel}: could not read: {exc}")
             continue
+        # exactly one block: a second START..END pair behind an intact first one
+        # is how contradictory "rules" would smuggle past a first-match compare
+        if text.count(_START) > 1:
+            hard.append(f"{rel}: carries {text.count(_START)} KERNEL:START "
+                        "markers — exactly one kernel block is allowed; remove "
+                        "the extra block(s)")
+            continue
+        block = _block(text)
         if block is None:
             hard.append(f"{rel}: the KERNEL:START/END block is missing — the "
                         "always-on rules are not carried into the session")
