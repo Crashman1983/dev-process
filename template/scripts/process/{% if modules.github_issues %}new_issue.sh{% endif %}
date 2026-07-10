@@ -1,14 +1,4 @@
-#!/usr/bin/env bash
-# Seed an issue body from a .github/ISSUE_TEMPLATE, because `gh issue create`
-# ignores ISSUE_TEMPLATE/. Prints the path to a temp file with the YAML
-# frontmatter stripped; feed it to `gh issue create --body-file <path>`.
-set -euo pipefail
-
-kind="${1:?usage: new_issue.sh <template, e.g. feature|bug>}"
-tpl=".github/ISSUE_TEMPLATE/${kind}.md"
-[ -f "$tpl" ] || { echo "no such template: $tpl" >&2; exit 1; }
-
-out="$(mktemp -t issue-body.XXXXXX.md)"
-# Drop the leading YAML frontmatter block (--- ... ---), keep the rest.
-awk 'NR==1 && $0=="---"{f=1; next} f && $0=="---"{f=0; next} !f' "$tpl" > "$out"
-echo "$out"
+#!/bin/sh
+# Backward-compatible launcher. The portable Python helper is authoritative.
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+exec uv run "$script_dir/new_issue.py" "$@"

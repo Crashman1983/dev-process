@@ -30,8 +30,8 @@ def test_gitlab_on_renders_shim_and_includable_job(render, tmp_path):
     assert job.is_file()
     assert ".gitlab/ci/process-gates.gitlab-ci.yml" in shim.read_text()
     job_text = job.read_text()
-    assert "python scripts/process/gate_runner.py" in job_text
-    assert "pyyaml" in job_text  # gate_runner reads .copier-answers.yml
+    assert "uv run scripts/process/gate_runner.py" in job_text
+    assert "ghcr.io/astral-sh/uv" in job_text
 
 
 def test_both_ci_providers_can_coexist(render, tmp_path):

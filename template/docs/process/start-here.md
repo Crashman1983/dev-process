@@ -69,17 +69,17 @@ Tier 2+ merge).
 
 ## First run
 
-1. Confirm that the process files exist: `CLAUDE.md`, `PRODUCT.md`,
-   `docs/process/`, `.copier-answers.yml`, and `scripts/process/gate_runner.py`.
+1. Confirm that the selected adapter anchor (`CLAUDE.md`, `AGENTS.md`, or
+   `copilot-instructions.md`), `PRODUCT.md`, `docs/process/`,
+   `.copier-answers.yml`, and `scripts/process/gate_runner.py` exist.
 2. Initialize Git if this is a new repository — `git init -b main` (the shipped
    CI workflow's push trigger and these docs assume the default branch is
    named `main`).
-3. Run the gates: `python scripts/process/gate_runner.py` (use `python3` if
-   `python` is not on PATH; needs `PyYAML>=6`).
+3. Run the gates: `uv run scripts/process/gate_runner.py`.
 4. Read `docs/process/mandatory-rules.md` and `docs/process/risk-tiers.md`.
 5. Create the process-baseline commit before product work starts.
 6. Install local hooks if the `git-hooks` module is active:
-   `bash scripts/process/install-hooks.sh`. Installing *after* the baseline
+   `uv run scripts/process/install_hooks.py`. Installing *after* the baseline
    commit avoids the no-direct-main hook blocking it; if the hooks were
    installed first, `ALLOW_MAIN_COMMIT=1 git commit …` is the sanctioned
    onboarding bypass.
@@ -218,7 +218,7 @@ Use this path when product code already exists.
    satisfied.
 4. Create registry entries only for facts you can defend: real stories, real
    tests, real contracts, real parity gaps, real security rules.
-5. Run `python scripts/process/gate_runner.py` after each onboarding slice.
+5. Run `uv run scripts/process/gate_runner.py` after each onboarding slice.
 6. Commit onboarding in small steps: architecture baseline, feature registry,
    contracts, parity, security floor.
 7. Start product work only after the relevant baseline for that area exists.

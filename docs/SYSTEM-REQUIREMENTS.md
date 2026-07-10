@@ -1,6 +1,6 @@
 # System Requirements
 
-Stand: 2026-07-02
+Stand: 2026-07-10
 
 Dieses Dokument beschreibt, was auf einem System installiert sein muss, um
 `dev-process` zu nutzen, im Upstream-Repository zu entwickeln oder die gerenderten
@@ -45,34 +45,29 @@ Versionen sind in `uv.lock` gepinnt und in `docs/SBOM.md` zusammengefasst.
 
 ## Gerenderte Zielrepos
 
-Die installierten Prozessdateien sind weitgehend Markdown, Shell und Python. Je
-nach aktivierten Modulen werden folgende Laufzeitwerkzeuge benoetigt.
+Der Core-Runtime-Vertrag ist auf Linux, macOS und Windows gleich: `git` und
+`uv`. Ein system Python, eine systemweite PyYAML-Installation oder Bash ist
+nicht erforderlich. `uv` liest die PEP-723-Metadaten des Gate-Runners und
+stellt Laufzeit und Abhaengigkeiten isoliert bereit.
 
 | Voraussetzung | Version | Wann erforderlich |
 |---|---:|---|
-| Python | `>=3.11` empfohlen | alle Python-basierten Prozess-Gates |
-| `PyYAML` | `>=6` | `gate_runner.py`, `arch-onboarding`, `parity` und alle Gates, die `.copier-answers.yml` lesen |
+| `uv` | aktuelle stabile Version | startet Gates und portable Helfer samt isolierter Python-Abhaengigkeiten |
 | `git` | aktuelle stabile Version | lokale Hooks, Security-Floor-Dateiliste, normale Projektarbeit |
-| `bash` | POSIX-kompatible Shell plus Bash | `scripts/process/install-hooks.sh` und `scripts/process/new_issue.sh` |
 | `gh` | aktuelle stabile Version | optional fuer best-effort GitHub-Issue-Existenzpruefung und die Tempo-Familie des KPI-Cockpits (`telemetry`) |
 | Architekturlinter | projektabhaengig | optional fuer `arch-onboarding` best-effort Layering-Pruefungen |
 
-Die von `dev-process` gerenderte GitHub-Actions-Workflow-Datei installiert
-`pyyaml` explizit, bevor `python scripts/process/gate_runner.py` ausgefuehrt
-wird. Lokal muss `python3` ebenfalls `PyYAML` finden, wenn die installierten
-Git-Hooks direkt `python3 scripts/process/gate_runner.py` starten. Praktische
-Optionen sind:
+Die plattformneutralen Befehle sind:
 
 ```bash
-python3 -m venv .venv
-.venv/bin/python -m pip install 'PyYAML>=6'
+uv run scripts/process/gate_runner.py
+uv run scripts/process/install_hooks.py
+uv run scripts/process/new_issue.py feature
 ```
 
-Wichtig: Die Hooks rufen `python3` **zum Commit-/Push-Zeitpunkt** auf — das
-venv muss dann auf dem PATH liegen (Shell-Aktivierung o. ae.); ein PATH-Prefix
-nur waehrend der Hook-Installation wirkt nicht. Alternativ eine projektweite
-Python-Umgebung, in der `PyYAML>=6` bereits installiert ist. Fehlt PyYAML,
-bricht der gate_runner mit einem einzeiligen Installationshinweis ab.
+Git startet die kleinen POSIX-Hook-Launcher selbst; Git for Windows liefert
+diese Hook-Umgebung mit. Die eigentliche Hook-Logik laeuft danach ueber `uv` in
+Python.
 
 ## Modulbezogene Hinweise
 
@@ -83,7 +78,7 @@ bricht der gate_runner mit einem einzeiligen Installationshinweis ab.
 | `feature-registry` | Python-Stdlib reicht |
 | `github-issues` | `PyYAML` (liest `.copier-answers.yml`); optional `gh` fuer best-effort Remote-Checks |
 | `contracts-drift` | Python-Stdlib reicht; Contract-spezifische Verify-Kommandos koennen projektspezifische Tools brauchen |
-| `git-hooks` | `git`, `bash`, Python mit `PyYAML` fuer die Hooks |
+| `git-hooks` | keine zusaetzlichen Werkzeuge ausser dem Core-Vertrag |
 | `contract-first` | Python-Stdlib reicht |
 | `parity` | `PyYAML` |
 | `security-floor` | `git` und Python-Stdlib |
@@ -94,15 +89,15 @@ bricht der gate_runner mit einem einzeiligen Installationshinweis ab.
 
 ## CI
 
-Die Upstream-CI verwendet Ubuntu, `astral-sh/setup-uv`, `uv sync --group dev`,
-`uv run ruff check .` und `uv run pytest -v`.
+Die Upstream-CI verwendet Ubuntu fuer die Vollsuite und eine portable
+Smoke-Matrix auf Linux, macOS und Windows.
 
 Gerenderte Zielrepos erhalten je nach `ci`-Antwort einen `process-gates`-Job:
 
-- **GitHub** (`ci.github`, Default): Actions-Workflow mit `actions/setup-python`,
-  `pip install pyyaml` und `python scripts/process/gate_runner.py`.
+- **GitHub** (`ci.github`, Default): Actions-Workflow mit
+  `astral-sh/setup-uv` und `uv run scripts/process/gate_runner.py`.
 - **GitLab** (`ci.gitlab`): includable Job-Datei
-  `.gitlab/ci/process-gates.gitlab-ci.yml` (Image `python:3.11`, gleiches
+  `.gitlab/ci/process-gates.gitlab-ci.yml` (offizielles `uv`-Image, gleiches
   Kommando) plus duenner Root-Shim `.gitlab-ci.yml` mit einer
   `include:`-Zeile.
 

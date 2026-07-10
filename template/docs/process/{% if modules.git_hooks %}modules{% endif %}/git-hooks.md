@@ -12,7 +12,7 @@ installer is the source of truth. Run it once per clone, after enabling new
 modules, and **after every `copier update`** — installed hooks are copies and
 do not update themselves:
 
-    bash scripts/process/install-hooks.sh
+    uv run scripts/process/install_hooks.py
 
 It is brownfield-safe: a pre-existing hook that dev-process did not write is
 left untouched (you merge it yourself). Re-running is idempotent. If
@@ -20,11 +20,11 @@ left untouched (you merge it yourself). Re-running is idempotent. If
 `~/.githooks`), the installer refuses — integrate the hook contents into your
 manager manually instead.
 
-**Runtime requirement:** the pre-push and post-commit hooks run
-`python3 scripts/process/gate_runner.py`, which needs `PyYAML>=6` importable
-by that `python3` **at commit/push time** (a venv only on PATH during
-installation does not help). Without it, the runner exits with a one-line
-install hint.
+**Runtime requirement:** the installed hooks delegate through `uv` to portable
+Python helpers. `uv` supplies Python and the gate runner's declared PyYAML
+dependency at commit/push time; no system Python or Bash installation is
+required. Git invokes the small POSIX hook launchers itself (including Git for
+Windows).
 
 ## The three hooks
 
@@ -43,6 +43,7 @@ commits it remains the authority; the post-commit warning is advisory.
 
 ## Why delegate
 
-The hooks call `scripts/process/gate_runner.py`, never a fixed gate list. Enable
-or disable a module and the hooks adjust automatically — one owner for "which
-gates run", shared with CI.
+The hooks call `scripts/process/run_hook.py`; its push/post-commit paths invoke
+`scripts/process/gate_runner.py`, never a fixed gate list. Enable or disable a
+module and the hooks adjust automatically — one owner for "which gates run",
+shared with CI.

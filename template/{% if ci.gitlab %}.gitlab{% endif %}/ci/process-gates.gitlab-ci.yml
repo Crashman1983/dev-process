@@ -1,7 +1,6 @@
 # Manifest-aware process gates: gate_runner.py reads .copier-answers.yml and
 # runs only the modules this repo enabled. Mirrors .github/workflows/process-gates.yml.
 process-gates:
-  image: python:3.11
+  image: ghcr.io/astral-sh/uv:python3.11-bookworm
   script:
-    - pip install 'pyyaml>=6,<7'   # pinned: gate behaviour is deterministic
-    - python scripts/process/gate_runner.py
+    - uv run scripts/process/gate_runner.py

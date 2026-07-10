@@ -11,7 +11,7 @@ JavaScript-, Container- oder Systempaket-Lockfiles aus.
 
 | Komponente | Version | Quelle |
 |---|---:|---|
-| `dev-process` | `1.36.0` | lokales Repository |
+| `dev-process` | `1.37.0` | lokales Repository |
 
 ## Direkte Python-Abhaengigkeiten
 
@@ -68,7 +68,7 @@ bestimmten Modulen oder Workflows genutzt werden.
 | Werkzeug | Wann relevant | Status |
 |---|---|---|
 | `git` | Template-Quelle klonen, Updates, lokale Hooks, Security-Floor-Dateiliste | erforderlich fuer normale Nutzung |
-| `bash` | `git-hooks`-Installer und `new_issue.sh` | erforderlich, wenn diese Skripte genutzt werden |
+| `uv` | portable Python-Laufzeit und isolierte Gate-Abhaengigkeiten | erforderlich fuer normale Nutzung |
 | `gh` | best-effort Existenzpruefung im `github-issues`-Modul; Tempo-Familie des KPI-Cockpits im `telemetry`-Modul | optional |
 | `import-linter` | best-effort Architektur-Layering in Python-Repos | optional, nur wenn Zielrepo es konfiguriert |
 | `dependency-cruiser` | best-effort Architektur-Layering in JS/TS-Repos | optional, nur wenn Zielrepo es konfiguriert |

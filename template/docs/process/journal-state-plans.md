@@ -35,7 +35,7 @@ Work you spot mid-flow — a bug noticed while building something else, a missin
 test, a follow-up — is **captured, not scope-crept into the current change**.
 One line per item in `.process-work/inbox.md`; keep the current change focused on
 its own scope. Triage the inbox when you surface for air: each item becomes a
-tracked issue (via the `github-issues` module's `new_issue.sh`, when installed)
+tracked issue (via the `github-issues` module's `new_issue.py`, when installed)
 or a registry story, or is deliberately dropped. A triaged issue gets the
 **normal form** — the bug/finding templates with EARS acceptance criteria, an
 `Origin` naming the item being worked when it surfaced, and a comment on that

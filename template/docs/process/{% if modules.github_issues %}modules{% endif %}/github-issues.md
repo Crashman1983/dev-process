@@ -73,10 +73,17 @@ Three templates: `.github/ISSUE_TEMPLATE/feature.md`,
 `.github/ISSUE_TEMPLATE/bug.md` and `.github/ISSUE_TEMPLATE/finding.md` (a
 review/audit finding that needs work — see the report binding below). Because
 `gh issue create` ignores `ISSUE_TEMPLATE/`, seed a body with
-`scripts/process/new_issue.sh`:
+`scripts/process/new_issue.py`:
 
-    body="$(bash scripts/process/new_issue.sh feature)"
+POSIX shell:
+
+    body="$(uv run scripts/process/new_issue.py feature)"
     gh issue create --title "..." --body-file "$body"
+
+PowerShell:
+
+    $body = uv run scripts/process/new_issue.py feature
+    gh issue create --title "..." --body-file $body
 
 ## Example label schema (adapt freely)
 
@@ -185,7 +192,7 @@ stays attested, like every truthfulness claim.
 
 A follow-up from a finding, or a bug discovered while working on something
 else, is **normal work and gets the normal form** — filed through the
-templates (`new_issue.sh finding` / `new_issue.sh bug`), with a user story
+templates (`new_issue.py finding` / `new_issue.py bug`), with a user story
 where one applies and gradeable EARS acceptance criteria. A prose dump titled
 "fix stuff from review" is not a tracked follow-up.
 

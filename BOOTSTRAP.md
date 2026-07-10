@@ -120,7 +120,7 @@ existing file and add a pointer to `docs/process/start-here.md`.
 **Verification (mandatory):** claim "installed" only after these checks
 (use `python3` if `python` is not on PATH):
 
-    python3 scripts/process/gate_runner.py   # must exit 0
+    uv run scripts/process/gate_runner.py   # must exit 0
     git status --porcelain                   # brownfield: added files only
 
 **Version check:** confirm the render matches the docs you are following. The
@@ -131,8 +131,8 @@ renders the latest **tag** — if that lags the README, pass `--vcs-ref=HEAD`
 (or `git clone` + `--vcs-ref=HEAD`) to get the branch tip, or the tag is
 simply behind and the maintainer needs to cut a release.
 
-The gate runner needs `PyYAML>=6` importable (`pip install pyyaml`); without
-it, it exits with a one-line install hint.
+The gate runner carries PEP 723 metadata; `uv run` supplies Python and
+`PyYAML>=6` without a system Python installation.
 
 ## Recommended order
 
@@ -174,7 +174,7 @@ Add a module or pull an updated process version — with a clean working tree
 Do NOT `--skip` the anchor files here: copier's three-way merge preserves your
 local anchor extensions anyway, while a skipped anchor keeps the OLD kernel
 block and turns the kernel gate red after the update. After any update, re-run
-`bash scripts/process/install-hooks.sh` if the `git-hooks` module is active —
+`uv run scripts/process/install_hooks.py` if the `git-hooks` module is active —
 the installed hooks are copies and do not update themselves.
 
 The install-time `profile` only seeded the initial modules answer — on update,
@@ -200,4 +200,4 @@ local deletions, and the module is never rendered. Always pass new answers via
 If you enabled the `git-hooks` module, install the hooks once per clone (they
 live in host-local `.git/hooks`, not version control):
 
-    bash scripts/process/install-hooks.sh
+    uv run scripts/process/install_hooks.py

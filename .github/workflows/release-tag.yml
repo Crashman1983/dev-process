@@ -33,5 +33,20 @@ jobs:
           case "$TAG" in v[0-9]*) ;; *) echo "tag must look like vX.Y.Z"; exit 1;; esac
           case "$SHA" in "" | *[!0-9a-fA-F]* ) SHA="";; esac  # hex-only, else ignore
           target="${SHA:-$(git rev-parse HEAD)}"
+          export TARGET="$target"
+          uv run python - <<'PY'
+          import os
+          import subprocess
+          import tomllib
+
+          raw = subprocess.check_output(
+              ["git", "show", f"{os.environ['TARGET']}:pyproject.toml"]
+          )
+          version = tomllib.loads(raw.decode())["project"]["version"]
+          expected = f"v{version}"
+          tag = os.environ["TAG"]
+          if tag != expected:
+              raise SystemExit(f"tag {tag!r} does not match project version {expected!r}")
+          PY
           git tag "$TAG" "$target"
           git push origin "refs/tags/$TAG"

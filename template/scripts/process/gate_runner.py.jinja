@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.11"
+# dependencies = ["pyyaml>=6,<7"]
+# ///
 """Manifest-aware gate runner. Reads .copier-answers.yml and runs only the
 gates whose module is active. Language-agnostic; each gate is a subprocess.
 
@@ -43,14 +47,32 @@ GATES = {
     "arch-docs": ("arch_docs", [sys.executable, "scripts/process/check_arch_docs.py", "."]),
     "github-master": ("github_master", [sys.executable, "scripts/process/check_github_master.py", "."]),
 }
+KNOWN_MODULES = {key for key, _command in GATES.values() if key is not None} | {"git_hooks"}
+KNOWN_HARNESSES = {"claude", "copilot", "agents_md"}
 
 
-def find_root(start: Path) -> Path | None:
-    """Nearest ancestor (including start) that holds the answers manifest."""
-    for d in [start, *start.parents]:
-        if (d / ".copier-answers.yml").is_file():
-            return d
-    return None
+def _validate_boolean_mapping(
+    answers: dict, field: str, known_keys: set[str], label: str, *, required: bool = False
+) -> dict:
+    if required and field not in answers:
+        print(f"gate-runner: manifest has no '{field}' mapping", file=sys.stderr)
+        raise SystemExit(1)
+    values = answers.get(field, {})
+    if not isinstance(values, dict):
+        print(f"gate-runner: '{field}' must be a mapping", file=sys.stderr)
+        raise SystemExit(1)
+    unknown = sorted(set(values) - known_keys)
+    if unknown:
+        print(f"gate-runner: unknown {label} key(s): {', '.join(unknown)}", file=sys.stderr)
+        raise SystemExit(1)
+    invalid = sorted(key for key, value in values.items() if not isinstance(value, bool))
+    if invalid:
+        print(
+            f"gate-runner: {label} values must be booleans: {', '.join(invalid)}",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    return values
 
 
 def load_modules(root: Path) -> dict:
@@ -62,24 +84,25 @@ def load_modules(root: Path) -> dict:
     except (yaml.YAMLError, UnicodeDecodeError) as exc:
         print(f"gate-runner: unparseable {f}: {exc}", file=sys.stderr)
         raise SystemExit(1)
-    mods = answers.get("modules") if isinstance(answers, dict) else None
-    if not isinstance(mods, dict):
+    if not isinstance(answers, dict):
         print(
-            f"gate-runner: {f} has no 'modules' mapping — manifest corrupt; "
-            "enforcement cannot be verified",
+            f"gate-runner: {f} must contain a top-level mapping — manifest corrupt",
             file=sys.stderr,
         )
         raise SystemExit(1)
+    mods = _validate_boolean_mapping(
+        answers, "modules", KNOWN_MODULES, "module", required=True
+    )
+    _validate_boolean_mapping(answers, "harnesses", KNOWN_HARNESSES, "harness")
     return mods
 
 
 def main() -> int:
-    root = find_root(Path(".").resolve())
-    if root is None:
+    root = Path(__file__).resolve().parents[2]
+    if not (root / ".copier-answers.yml").is_file():
         print(
-            "gate-runner: no .copier-answers.yml found here or in any parent "
-            "directory — run inside a dev-process repo; enforcement cannot be "
-            "verified",
+            f"gate-runner: no .copier-answers.yml found at rendered repo root {root}; "
+            "enforcement cannot be verified",
             file=sys.stderr,
         )
         return 1

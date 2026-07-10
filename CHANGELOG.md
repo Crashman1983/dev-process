@@ -234,6 +234,13 @@ Arbeit (timeboxed, Output ist Wissen — Journal/Design/Decision Record —,
 nie Produkt-Code; Folge-Feature läuft durch den normalen Zyklus statt den
 Prototyp zu befördern; Timebox-Stopp ist Erfolg)) ausgeliefert, `v1.36.0`.
 
+SP54 (Cross-Platform-Haertung: `git` + `uv` als einheitlicher Runtime-Vertrag
+auf Linux, macOS und Windows; PEP-723-Gate-Runner ohne systemweites Python oder
+PyYAML; portable Python-Implementierungen fuer Hook-Installation, Hook-Logik
+und Issue-Body-Erzeugung bei kompatiblen Shell-Launchern; Claude, Copilot und
+AGENTS.md unabhaengig kombinierbar; OS-Smoke-Matrix; Manifestwerte fail-closed
+validiert; Release-Tag muss zur Projektversion passen) ausgeliefert, `v1.37.0`.
+
 ## Sub-Projekt-Tabelle (SP1–SP24)
 
 Die Tabelle wurde bis SP24 gepflegt; ab SP25 trägt das Narrativ oben die

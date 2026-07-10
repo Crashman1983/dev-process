@@ -15,10 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-      - run: pip install 'pyyaml>=6,<7'   # pinned: gate behaviour is deterministic
-      - run: python scripts/process/gate_runner.py
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+      - run: uv run scripts/process/gate_runner.py
 # Note: a red check blocks a merge only if this job is set as a REQUIRED status
 # check in branch protection — see docs/process/start-here.md. CI cannot set that.

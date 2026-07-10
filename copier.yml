@@ -8,8 +8,9 @@ project_name:
 
 harnesses:
   type: yaml
-  help: "Which harness adapters to install (Claude Code is always installed)"
+  help: "Which harness adapters to install"
   default:
+    claude: true
     copilot: false
     agents_md: false
 

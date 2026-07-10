@@ -1,0 +1,89 @@
+#!/usr/bin/env python3
+"""Install portable dev-process Git hooks without replacing foreign hooks."""
+from __future__ import annotations
+
+import stat
+import subprocess
+import sys
+from pathlib import Path
+
+MARKER = "# dev-process-managed-hook"
+
+
+def _hook(name: str, *, warn_only: bool = False) -> str:
+    unavailable = "exit 0" if warn_only else "exit 1"
+    return f"""#!/bin/sh
+{MARKER}
+command -v uv >/dev/null 2>&1 || {{ echo "uv is required for dev-process hooks." >&2; {unavailable}; }}
+repo_root="$(git rev-parse --show-toplevel 2>/dev/null)" || {unavailable}
+cd "$repo_root" || {unavailable}
+exec uv run scripts/process/run_hook.py {name} "$@"
+"""
+
+
+HOOKS = {
+    "pre-commit": _hook("pre-commit"),
+    "pre-push": _hook("pre-push"),
+    "post-commit": _hook("post-commit", warn_only=True),
+}
+
+
+def _git(*args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(["git", *args], capture_output=True, text=True, check=False)
+
+
+def _locations() -> tuple[Path, Path]:
+    root_result = _git("rev-parse", "--show-toplevel")
+    if root_result.returncode:
+        raise RuntimeError(root_result.stderr.strip() or "not a Git repository")
+    root = Path(root_result.stdout.strip()).resolve()
+    configured = _git("-C", str(root), "config", "--get", "core.hooksPath")
+    if configured.returncode == 0 and configured.stdout.strip():
+        raise RuntimeError(
+            f"core.hooksPath is configured ({configured.stdout.strip()!r}); "
+            "integrate dev-process hooks into that hook manager manually"
+        )
+    hook_result = _git("-C", str(root), "rev-parse", "--git-path", "hooks")
+    if hook_result.returncode:
+        raise RuntimeError(hook_result.stderr.strip() or "cannot locate Git hooks")
+    value = Path(hook_result.stdout.strip())
+    hooks = value if value.is_absolute() else root / value
+    return root, hooks.resolve()
+
+
+def _managed(path: Path) -> bool:
+    if not path.exists():
+        return True
+    try:
+        return MARKER in path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        return False
+
+
+def _write(path: Path, content: str) -> None:
+    path.write_text(content, encoding="utf-8", newline="\n")
+    path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+
+
+def main() -> int:
+    try:
+        _root, hook_dir = _locations()
+    except RuntimeError as exc:
+        print(f"hook-installer: error: {exc}", file=sys.stderr)
+        return 1
+    hook_dir.mkdir(parents=True, exist_ok=True)
+    for name, content in HOOKS.items():
+        target = hook_dir / name
+        if not _managed(target):
+            print(
+                f"warning: {name} exists and is not dev-process-managed; leaving it untouched.",
+                file=sys.stderr,
+            )
+            continue
+        _write(target, content)
+        print(f"installed {name}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
