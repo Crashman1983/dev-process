@@ -26,3 +26,14 @@ def test_start_here_disambiguates_onboarding_readiness(render, tmp_path):
     # the onboarding-readiness heading is disambiguated and points at the per-item doc
     assert "Definition of ready (project onboarding)" in text
     assert "definition-of-ready-and-done.md" in text
+
+
+def test_ears_pattern_catalog_present(render, tmp_path):
+    # SP53: all five EARS patterns named, unwanted-behaviour tied to the
+    # negative cases R2 requires
+    out = render(tmp_path, {"project_name": "d"})
+    text = (out / "docs/process/definition-of-ready-and-done.md").read_text()
+    for pat in ("Ubiquitous", "Event-driven", "State-driven",
+                "Unwanted behaviour", "Optional feature"):
+        assert pat in text, pat
+    assert "While <state>" in text and "If <undesired condition>" in text

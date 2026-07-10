@@ -51,6 +51,27 @@ how much of the cycle runs (mandatory rule 2), and a Tier 2+ item is not ready
 until it is tracked by an issue (enforced by the `github-issues`
 issue-before-code gate where installed).
 
+### The EARS patterns
+
+R2's `When <trigger>, the system shall <response>` is the event-driven form —
+EARS has five, and picking the right one is what makes a criterion gradeable
+instead of vague:
+
+- **Ubiquitous** — `The system shall <response>` — an invariant with no
+  trigger (always true).
+- **Event-driven** — `When <trigger>, the system shall <response>` — the
+  default for behavior.
+- **State-driven** — `While <state>, the system shall <response>` — behavior
+  bound to a mode or condition.
+- **Unwanted behaviour** — `If <undesired condition>, then the system shall
+  <response>` — the natural form for the **negative** cases R2 requires; a
+  criterion set without an If/then is usually missing its failure story.
+- **Optional feature** — `Where <feature is present>, the system shall
+  <response>` — configuration-dependent behavior.
+
+Complex criteria combine them (`While <state>, when <trigger>, …`). The gates
+check only presence and form, never which pattern — choosing it is design work.
+
 ## Definition of Done — gate: review / merge
 
 A change is done when:

@@ -455,3 +455,14 @@ def test_platform_hygiene_in_onboarding_dor(render, tmp_path):
     assert "Dependabot" in text
     # honest framing: platform services, not hermetic gates
     assert "not hermetic gates" in text
+
+
+def test_workflow_carries_spike_path(render, tmp_path):
+    # SP53: open-ended work has a named path — timeboxed, knowledge out,
+    # never product code, follow-up re-enters the normal cycle
+    out = render(tmp_path, {"project_name": "d"})
+    text = (out / "docs/process/workflow.md").read_text()
+    assert "## Spike" in text
+    assert "timebox" in text
+    assert "knowledge, never product\ncode" in text or "never product code" in text
+    assert "re-enters through the normal cycle" in text

@@ -26,6 +26,21 @@ The gate before merge to the main branch. Enters: the branch diff plus the plan/
 
 The Tier 0–1 shortcut: no separate plan file. Enters: a small, isolated request. Produces: the change plus a test (Tier 1). State goal, touched files, and risk before editing. Before finishing, take a light pass over the two checklist questions most likely to bite a small change: untrusted input reaching a sink, and duplicating an existing behavior instead of changing its owner. Escalate to Plan the moment persistence, auth, contracts, external integrations, or anything another component depends on come into scope.
 
+## Spike
+
+The named path for open-ended work — "can this be done?", "which library?",
+"what does the API actually return?" — where the outcome is unknown, so
+Brainstorm → Plan → Execute (which presumes you know what done looks like)
+does not fit and forcing it produces invented acceptance criteria. Enters: a
+question and an explicit **timebox**. Produces: **knowledge, never product
+code** — a journal entry or design doc with the answer, and a decision record
+when the answer settles something hard to reverse (mandatory rule 4). Spike
+code is throwaway by declaration: it does not merge to the main branch, and a
+feature built on what the spike learned re-enters through the normal cycle
+(plan, tests, review) rather than promoting the prototype. Stopping at the
+timebox with a partial answer is a successful spike — the timebox is the
+scope. The spike itself is not tier-routed work; the follow-up change is.
+
 ## Debug
 
 The root-cause entry point (mandatory rule 6). Enters: a bug, test failure, or unexpected behavior. Produces: a root-cause analysis before any fix. After two failed attempts at a symptom, stop patching and investigate why it happens; fix the cause, not the symptom.
