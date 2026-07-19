@@ -65,7 +65,10 @@ def test_bundle_assembles_all_sections(render, tmp_path):
     assert "def widget():" in t                         # the diff itself
     assert "```diff" in t
     # grammar imported from the gate — fields, verdicts, independence tokens
-    assert "REVIEW independence=… model=… reviewer=… round=… tier=… verdict=… work=…" in t
+    assert (
+        "REVIEW base=… diff=… head=… independence=… model=… reviewer=… "
+        "round=… tier=… verdict=… work=…"
+    ) in t
     assert "['block', 'pass']" in t
     assert "'cross-model'" in t and "'single-family'" in t
     assert "FINDING sev=<blocker|major|minor|nit>" in t
