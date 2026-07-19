@@ -1,6 +1,6 @@
 # SP54 — Review-Artefaktbindung und Governance-Pilot
 
-**Status:** Entwurf zur schriftlichen Freigabe
+**Status:** Von Seb am 2026-07-19 freigegeben
 
 **Datum:** 2026-07-18
 
