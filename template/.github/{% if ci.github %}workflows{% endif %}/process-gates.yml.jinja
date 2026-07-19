@@ -13,8 +13,15 @@ jobs:
   # adopters to require (and what setup_branch_protection.sh sets): process-gates
   process-gates:
     runs-on: ubuntu-latest
+{% raw %}
+    env:
+      DEV_PROCESS_CANDIDATE_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+      DEV_PROCESS_CANDIDATE_TARGET: ${{ github.event.pull_request.base.ref || github.ref_name }}
+{% endraw %}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
       - run: uv run scripts/process/gate_runner.py
 # Note: a red check blocks a merge only if this job is set as a REQUIRED status

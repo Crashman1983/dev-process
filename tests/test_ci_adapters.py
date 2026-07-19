@@ -5,7 +5,14 @@
 
 def test_github_workflow_rendered_by_default(render, tmp_path):
     out = render(tmp_path, {"project_name": "d"})
-    assert (out / ".github/workflows/process-gates.yml").is_file()
+    workflow = out / ".github/workflows/process-gates.yml"
+    assert workflow.is_file()
+    text = workflow.read_text()
+    assert "fetch-depth: 0" in text
+    assert "DEV_PROCESS_CANDIDATE_BASE" in text
+    assert "github.event.pull_request.base.sha" in text
+    assert "github.event.before" in text
+    assert "DEV_PROCESS_CANDIDATE_TARGET" in text
 
 
 def test_github_off_renders_no_workflow_anywhere(render, tmp_path):
@@ -32,6 +39,11 @@ def test_gitlab_on_renders_shim_and_includable_job(render, tmp_path):
     job_text = job.read_text()
     assert "uv run scripts/process/gate_runner.py" in job_text
     assert "ghcr.io/astral-sh/uv" in job_text
+    assert 'GIT_DEPTH: "0"' in job_text
+    assert "DEV_PROCESS_CANDIDATE_BASE" in job_text
+    assert "CI_MERGE_REQUEST_DIFF_BASE_SHA" in job_text
+    assert "CI_COMMIT_BEFORE_SHA" in job_text
+    assert "DEV_PROCESS_CANDIDATE_TARGET" in job_text
 
 
 def test_both_ci_providers_can_coexist(render, tmp_path):

@@ -2,5 +2,10 @@
 # runs only the modules this repo enabled. Mirrors .github/workflows/process-gates.yml.
 process-gates:
   image: ghcr.io/astral-sh/uv:python3.11-bookworm
+  variables:
+    GIT_DEPTH: "0"
   script:
-    - uv run scripts/process/gate_runner.py
+    - |
+      DEV_PROCESS_CANDIDATE_BASE="${CI_MERGE_REQUEST_DIFF_BASE_SHA:-$CI_COMMIT_BEFORE_SHA}" \
+      DEV_PROCESS_CANDIDATE_TARGET="${CI_MERGE_REQUEST_TARGET_BRANCH_NAME:-$CI_COMMIT_BRANCH}" \
+      uv run scripts/process/gate_runner.py

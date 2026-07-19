@@ -1,4 +1,6 @@
 import hashlib
+import importlib.util
+import io
 import json
 import os
 import subprocess
@@ -91,6 +93,14 @@ def _init_repo(out: Path, install=True):
     return None
 
 
+def _load_run_hook(out: Path):
+    path = out / "scripts/process/run_hook.py"
+    spec = importlib.util.spec_from_file_location("rendered_run_hook", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def test_main_guard_blocks_and_escapes(render, tmp_path):
     out = _render(render, tmp_path)
     _init_repo(out)
@@ -172,6 +182,50 @@ def test_pre_push_ignores_dirty_working_tree(render, tmp_path):
     r = subprocess.run(["bash", ".git/hooks/pre-push"], cwd=out,
                        input=refs, capture_output=True, text=True, env=_hook_env())
     assert r.returncode == 0, r.stdout + r.stderr
+
+
+def test_candidate_env_only_for_existing_protected_target(render, tmp_path):
+    out = _render(render, tmp_path)
+    hook = _load_run_hook(out)
+    base = {"KEEP": "yes"}
+    sha = "a" * 40
+
+    main = hook._candidate_gate_env(base, "refs/heads/main", sha)
+    assert main == {
+        "KEEP": "yes",
+        "DEV_PROCESS_CANDIDATE_BASE": sha,
+        "DEV_PROCESS_CANDIDATE_TARGET": "refs/heads/main",
+    }
+    assert hook._candidate_gate_env(base, "refs/heads/feature", sha) == base
+    assert hook._candidate_gate_env(base, "refs/heads/main", "0" * 40) == base
+    assert base == {"KEEP": "yes"}, "helper must not mutate the shared environment"
+
+
+def test_pre_push_forwards_remote_ref_and_sha(render, tmp_path, monkeypatch):
+    out = _render(render, tmp_path)
+    hook = _load_run_hook(out)
+    local = "b" * 40
+    remote = "a" * 40
+    seen = []
+
+    monkeypatch.setattr(hook, "_clean_git_env", lambda _root: {"BASE": "1"})
+    monkeypatch.setattr(
+        hook,
+        "_gate_commit",
+        lambda root, sha, env, remote_ref, remote_sha: seen.append(
+            (root, sha, env, remote_ref, remote_sha)
+        ) or 0,
+    )
+    monkeypatch.setattr(
+        sys,
+        "stdin",
+        io.StringIO(
+            f"refs/heads/main {local} refs/heads/main {remote}\n"
+        ),
+    )
+
+    assert hook.pre_push(out) == 0
+    assert seen == [(out, local, {"BASE": "1"}, "refs/heads/main", remote)]
 
 
 def test_post_commit_warns_never_blocks(render, tmp_path):

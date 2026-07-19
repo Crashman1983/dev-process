@@ -52,13 +52,30 @@ def pre_commit(root: Path) -> int:
     return 0
 
 
-def _gate_commit(root: Path, sha: str, env: dict[str, str]) -> int:
+def _candidate_gate_env(
+    env: dict[str, str], remote_ref: str, remote_sha: str
+) -> dict[str, str]:
+    gate_env = dict(env)
+    if remote_ref in {"refs/heads/main", "refs/heads/master"} and remote_sha != ZERO_SHA:
+        gate_env["DEV_PROCESS_CANDIDATE_BASE"] = remote_sha
+        gate_env["DEV_PROCESS_CANDIDATE_TARGET"] = remote_ref
+    return gate_env
+
+
+def _gate_commit(
+    root: Path,
+    sha: str,
+    env: dict[str, str],
+    remote_ref: str,
+    remote_sha: str,
+) -> int:
+    gate_env = _candidate_gate_env(env, remote_ref, remote_sha)
     with tempfile.TemporaryDirectory(prefix="devproc-prepush-") as directory:
         worktree = Path(directory)
         added = _run(
             ["git", "worktree", "add", "--quiet", "--detach", str(worktree), sha],
             root,
-            env=env,
+            env=gate_env,
             stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
@@ -73,14 +90,14 @@ def _gate_commit(root: Path, sha: str, env: dict[str, str]) -> int:
             return _run(
                 ["uv", "run", "scripts/process/gate_runner.py"],
                 worktree,
-                env=env,
+                env=gate_env,
                 stdin=subprocess.DEVNULL,
             ).returncode
         finally:
             _run(
                 ["git", "worktree", "remove", "--force", str(worktree)],
                 root,
-                env=env,
+                env=gate_env,
                 stdin=subprocess.DEVNULL,
                 capture_output=True,
             )
@@ -96,8 +113,10 @@ def pre_push(root: Path) -> int:
         fields = line.split()
         if len(fields) != 4:
             continue
-        sha = fields[1]
-        if sha != ZERO_SHA and _gate_commit(root, sha, env) != 0:
+        _local_ref, sha, remote_ref, remote_sha = fields
+        if sha != ZERO_SHA and _gate_commit(
+            root, sha, env, remote_ref, remote_sha
+        ) != 0:
             status = 1
     return status
 
