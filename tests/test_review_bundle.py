@@ -1,3 +1,5 @@
+import hashlib
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -9,8 +11,21 @@ def _run(out: Path, *args):
         cwd=out, capture_output=True, text=True)
 
 
-def _git(out: Path, *args):
-    return subprocess.run(["git", *args], cwd=out, capture_output=True, text=True)
+def _git(out: Path, *args, **kwargs):
+    return subprocess.run(
+        ["git", *args], cwd=out, capture_output=True, text=True, **kwargs
+    )
+
+
+def _artifact(text: str) -> dict[str, str]:
+    match = re.search(
+        r"^REVIEW_ARTIFACT base=(?P<base>[0-9a-f]{40,64}) "
+        r"head=(?P<head>[0-9a-f]{40,64}) diff=(?P<diff>[0-9a-f]{64})$",
+        text,
+        re.MULTILINE,
+    )
+    assert match, text
+    return match.groupdict()
 
 
 def _seed_repo(out: Path):
@@ -54,6 +69,37 @@ def test_bundle_assembles_all_sections(render, tmp_path):
     assert "['block', 'pass']" in t
     assert "'cross-model'" in t and "'single-family'" in t
     assert "FINDING sev=<blocker|major|minor|nit>" in t
+
+
+def test_bundle_fingerprint_matches_binary_diff(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    text = _run(out, "--base", "main").stdout
+    artifact = _artifact(text)
+    merge_base = _git(out, "merge-base", "main", "HEAD").stdout.strip()
+    head = _git(out, "rev-parse", "HEAD").stdout.strip()
+    diff = subprocess.run(
+        ["git", "diff", "--binary", f"{merge_base}...{head}"],
+        cwd=out,
+        capture_output=True,
+        check=True,
+    ).stdout
+    assert artifact == {
+        "base": merge_base,
+        "head": head,
+        "diff": hashlib.sha256(diff).hexdigest(),
+    }
+
+
+def test_bundle_fingerprint_changes_with_committed_content(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    first = _artifact(_run(out, "--base", "main").stdout)["diff"]
+    (out / "widget.py").write_text("def widget():\n    return 43\n")
+    _git(out, "add", "widget.py", check=True)
+    _git(out, "commit", "-q", "-m", "fix: change widget", check=True)
+    second = _artifact(_run(out, "--base", "main").stdout)["diff"]
+    assert first != second
 
 
 def test_output_file_option(render, tmp_path):

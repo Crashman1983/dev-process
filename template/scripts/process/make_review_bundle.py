@@ -34,6 +34,7 @@ CI. Stdlib only.
 """
 from __future__ import annotations
 
+import hashlib
 import re
 import subprocess
 import sys
@@ -82,6 +83,19 @@ def _git(root: Path, *args: str) -> str | None:
     return r.stdout if r.returncode == 0 else None
 
 
+def _git_bytes(root: Path, *args: str) -> bytes | None:
+    """Raw Git stdout for artifact hashing; decoding must not change bytes."""
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(root), *args],
+            capture_output=True,
+            timeout=60,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return result.stdout if result.returncode == 0 else None
+
+
 def _repo_root(cwd: Path) -> Path:
     """The git toplevel when available — running from a subdirectory must not
     silently lose the root-level plan/kernel/PRODUCT sources."""
@@ -107,6 +121,20 @@ def _active_plans(root: Path, plan_filter: str | None) -> list[Path]:
         # irrelevant ones — --plan narrows to the effort under review
         plans = [p for p in plans if plan_filter in p.name]
     return plans
+
+
+def _review_artifact(root: Path, base_ref: str) -> tuple[str, str, str, bytes] | None:
+    """Resolved endpoints, SHA-256, and exact bytes of the reviewed diff."""
+    base = _git(root, "merge-base", base_ref, "HEAD")
+    head = _git(root, "rev-parse", "HEAD")
+    if not base or not head:
+        return None
+    base_sha = base.strip()
+    head_sha = head.strip()
+    diff = _git_bytes(root, "diff", "--binary", f"{base_sha}...{head_sha}")
+    if diff is None:
+        return None
+    return base_sha, head_sha, hashlib.sha256(diff).hexdigest(), diff
 
 
 def _grammar_section() -> str:
@@ -177,27 +205,32 @@ def build(root: Path, base: str | None, plan_filter: str | None = None) -> str:
         add("*(unavailable: no usable base ref — pass --base explicitly; "
             "git may be absent or the repo unborn)*\n")
     else:
-        diff = _git(root, "diff", f"{resolved}...HEAD")
-        if diff is None:
+        artifact = _review_artifact(root, resolved)
+        if artifact is None:
             add(f"*(unavailable: `git diff {resolved}...HEAD` failed)*\n")
-        elif not diff.strip():
-            add(f"*(empty: HEAD adds nothing over {resolved})*\n")
         else:
-            lines = diff.count("\n")
-            add(f"Base: `{resolved}` (three-dot: what the branch adds). "
-                f"{lines} diff lines.\n")
-            if lines > 4000:
-                add("*(large diff — consider a per-area pass; nothing was truncated)*\n")
-            status = _git(root, "status", "--porcelain")
-            if status and status.strip():
-                add("*(working tree dirty — uncommitted changes are NOT in this "
-                    "diff; only committed work is under review)*\n")
-            # a diff of a markdown file carries its own ``` runs, which would
-            # close a plain fence early and corrupt everything after it — fence
-            # with more backticks than the longest run inside (min 4)
-            longest = max((len(m) for m in re.findall(r"`+", diff)), default=0)
-            fence = "`" * max(4, longest + 1)
-            add(f"{fence}diff\n" + diff + ("\n" if not diff.endswith("\n") else "") + fence + "\n")
+            base_sha, head_sha, digest, diff_bytes = artifact
+            add(f"REVIEW_ARTIFACT base={base_sha} head={head_sha} diff={digest}\n")
+            diff = diff_bytes.decode("utf-8", errors="replace")
+            if not diff.strip():
+                add(f"*(empty: HEAD adds nothing over {resolved})*\n")
+            else:
+                lines = diff.count("\n")
+                add(f"Base: `{resolved}` resolved to `{base_sha}` "
+                    "(three-dot: what the branch adds). "
+                    f"{lines} diff lines.\n")
+                if lines > 4000:
+                    add("*(large diff — consider a per-area pass; nothing was truncated)*\n")
+                status = _git(root, "status", "--porcelain")
+                if status and status.strip():
+                    add("*(working tree dirty — uncommitted changes are NOT in this "
+                        "diff; only committed work is under review)*\n")
+                # a diff of a markdown file carries its own ``` runs, which would
+                # close a plain fence early and corrupt everything after it — fence
+                # with more backticks than the longest run inside (min 4)
+                longest = max((len(m) for m in re.findall(r"`+", diff)), default=0)
+                fence = "`" * max(4, longest + 1)
+                add(f"{fence}diff\n" + diff + ("\n" if not diff.endswith("\n") else "") + fence + "\n")
 
     add("## Required output grammar\n")
     add(_grammar_section() + "\n")
