@@ -496,12 +496,14 @@ Git, create one `artifact-v1` plan and certificate, then prove:
 
 Use only a temporary directory; do not commit rendered artifacts.
 
-- [ ] **Step 4: Freeze the candidate and build its own review bundle**
+- [ ] **Step 4: Freeze the candidate and build its review bundle**
 
-After checklist updates are committed, archive/finalize the plan according to
-the new workflow, build the read-only bundle from `origin/main`, and run the
-required independent review. Record its v2 line in a tree-empty certificate
-commit so this branch proves its own feature.
+After checklist updates are committed, build the read-only bundle from
+`origin/main` and run the required independent review. The meta-repo owns plans
+under `docs/plans`; do not create a duplicate `.process-work/plans` copy merely
+to self-host the newly rendered contract. The temporary rendered-target proof
+from Step 3 is the v2 certificate acceptance test for this slice; the meta diff
+keeps its normal repository review record.
 
 - [ ] **Step 5: Report terminal state**
 
