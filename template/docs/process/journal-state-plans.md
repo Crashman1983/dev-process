@@ -57,6 +57,12 @@ must have a clearing review attestation (below) or a named `review-waived:`
 exception. A plan without a `tier:` line is simply not presence-enforced — the
 field is opt-in, and its absence is a note, never a failure.
 
+A Tier 2+ plan may opt into exact review artifact binding with
+`review-binding: artifact-v1`. When present, a clearing review must be stored in
+the tree-empty certificate commit described in
+`verification-independence.md`; a journal-only record cannot clear the plan.
+Plans without this field retain the legacy attestation behavior.
+
 A plan may also carry an `issue: <ref>` line linking its tracking issue (`#N`,
 `owner/repo#N`, or a URL). When the `github-issues` module is installed, an
 *active* Tier 2+ plan must carry that link before code — issue-before-code — or
@@ -92,6 +98,12 @@ order, values without spaces:
 REVIEW work=42 tier=2 reviewer=fresh-agent model=same independence=bundle,non-implementing verdict=pass round=1
 ```
 
+An `artifact-v1` certificate uses the extended shape:
+
+```
+REVIEW work=42 tier=2 reviewer=fresh-agent model=same independence=bundle,non-implementing verdict=pass round=1 base=<git-sha> head=<git-sha> diff=<sha256>
+```
+
 | field | meaning |
 |---|---|
 | `work` | attribution: the issue number, or the archived plan's slug it reviews |
@@ -101,10 +113,17 @@ REVIEW work=42 tier=2 reviewer=fresh-agent model=same independence=bundle,non-im
 | `independence` | comma set ⊆ `bundle,non-implementing,cross-model,single-family` |
 | `verdict` | `pass` \| `block` |
 | `round` | 1, 2, … |
+| `base` | resolved merge-base commit reviewed by the bundle; required for `artifact-v1` |
+| `head` | reviewed branch head and sole parent of the certificate commit; required for `artifact-v1` |
+| `diff` | SHA-256 of the raw `git diff --binary base...head` bytes; required for `artifact-v1` |
 
 A `REVIEW` inside a ```-fenced block is a quotation and is ignored (quote
 literal examples only there). Grammar and the independence arithmetic the gate
 enforces on a `pass` are in `verification-independence.md`.
+
+Legacy records contain none of `base`, `head`, and `diff`. The extended record
+contains all three; partial artifact metadata is malformed rather than treated
+as legacy.
 
 ## Parallel efforts
 

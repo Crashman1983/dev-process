@@ -62,6 +62,20 @@ paying on the code that matters most.
 - Test code is code: mandatory rule 9 (written to be read) applies — a test
   nobody understands proves nothing when it fails.
 
+## Gates must survive a fresh checkout
+
+A project-level gate is trustworthy only if a fresh checkout can bootstrap and
+run it from tracked inputs. Local caches such as `.venv`, `node_modules`, build
+outputs, or a previously prepared agent workspace are conveniences, not part
+of the gate contract. The documented gate command must provide a
+reproducible bootstrap from lockfiles or an equivalent pinned environment (for example
+`uv run`, the project's package-manager install, or a versioned container).
+
+Exercise that contract in CI or a disposable checkout. Report a missing cache
+or bootstrap defect separately from a product failure: both block a trustworthy
+gate, but they have different owners and fixes. A command that passes only in a
+warm development tree is not a reproducible gate.
+
 Review binding: the review checklist's "Tests prove acceptance" section is
 where this document is enforced — mapping per criterion, the E2E proof, and the
 negative/edge/authorization/invalidation cases are review questions, not

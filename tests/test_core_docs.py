@@ -421,6 +421,32 @@ def test_testing_doc_carries_the_methodology(render, tmp_path):
     assert "testing.md" in checklist
 
 
+def test_bound_review_and_fresh_checkout_contracts_render(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {"git_hooks": True}})
+    verification = (out / "docs/process/verification-independence.md").read_text()
+    journal = (out / "docs/process/journal-state-plans.md").read_text()
+    workflow = (out / "docs/process/workflow.md").read_text()
+    testing = (out / "docs/process/testing.md").read_text()
+
+    assert "review-binding: artifact-v1" in verification
+    assert "tree-empty certificate commit" in verification
+    assert "base=<git-sha> head=<git-sha> diff=<sha256>" in journal
+    assert "final rebase" in workflow
+    assert "tree-empty certificate commit" in workflow
+    assert "fresh checkout" in testing
+    assert ".venv" in testing and "node_modules" in testing
+    assert "reproducible bootstrap" in testing
+
+    active_routing = "\n".join(
+        [
+            (out / "docs/process/risk-tiers.md").read_text(),
+            workflow,
+            *(path.read_text() for path in (out / ".claude/commands").glob("*.md")),
+        ]
+    )
+    assert "governance-only" not in active_routing
+
+
 def test_releases_doc_carries_the_ritual(render, tmp_path):
     out = render(tmp_path, {"project_name": "demo"})
     text = (out / "docs/process/releases.md").read_text()

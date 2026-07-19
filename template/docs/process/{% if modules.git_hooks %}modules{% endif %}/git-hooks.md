@@ -41,6 +41,14 @@ local uncommitted state can neither mask nor cause a failure, and the check is
 parallel-safe (no `stash`, no HEAD move). Where CI runs the gate on the pushed
 commits it remains the authority; the post-commit warning is advisory.
 
+The process hooks themselves run from that detached checkout through `uv`, so
+they do not depend on a pre-existing project environment there. Any downstream
+project gate they invoke must meet the same **fresh checkout** contract: its
+tracked configuration must define a **reproducible bootstrap**, without relying
+on a warm `.venv`, `node_modules`, or other host-local cache. Treat bootstrap
+failure and product-test failure as distinct diagnostics even though either
+correctly blocks the push.
+
 ## Why delegate
 
 The hooks call `scripts/process/run_hook.py`; its push/post-commit paths invoke

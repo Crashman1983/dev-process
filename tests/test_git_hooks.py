@@ -292,6 +292,8 @@ def test_module_doc_present_and_neutral(render, tmp_path):
     text = doc.read_text()
     for k in KENNI:
         assert k not in text, f"{k} leaked in git-hooks.md"
+    assert "fresh checkout" in text
+    assert "reproducible bootstrap" in text
 
 
 def test_module_doc_absent_when_off(render, tmp_path):
