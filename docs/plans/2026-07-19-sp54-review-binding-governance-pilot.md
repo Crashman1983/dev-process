@@ -35,7 +35,7 @@
 - Modify: `tests/test_review_bundle.py`
 - Modify: `template/scripts/process/make_review_bundle.py`
 
-- [ ] **Step 1: Add failing fingerprint tests**
+- [x] **Step 1: Add failing fingerprint tests**
 
 Add tests that extract this exact bundle block and independently recompute the digest:
 
@@ -86,7 +86,7 @@ def test_bundle_fingerprint_changes_with_committed_content(render, tmp_path):
     assert first != second
 ```
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 Run:
 
@@ -96,7 +96,7 @@ uv run pytest tests/test_review_bundle.py -q
 
 Expected: the new tests fail because `REVIEW_ARTIFACT` is absent.
 
-- [ ] **Step 3: Implement byte-exact fingerprinting**
+- [x] **Step 3: Implement byte-exact fingerprinting**
 
 Add `hashlib`, a bytes-returning Git helper, and a single owner for artifact creation:
 
@@ -128,7 +128,7 @@ def _review_artifact(root: Path, base_ref: str) -> tuple[str, str, str, bytes] |
 
 Render `REVIEW_ARTIFACT base=... head=... diff=...` immediately before the diff fence. Decode only for Markdown display with UTF-8 replacement; hash the original bytes. Keep empty-diff and unavailable-base diagnostics explicit.
 
-- [ ] **Step 4: Run GREEN and regressions**
+- [x] **Step 4: Run GREEN and regressions**
 
 Run:
 
@@ -138,7 +138,7 @@ uv run pytest tests/test_review_bundle.py -q
 
 Expected: all bundle tests pass.
 
-- [ ] **Step 5: Commit Task 1**
+- [x] **Step 5: Commit Task 1**
 
 ```bash
 git add tests/test_review_bundle.py template/scripts/process/make_review_bundle.py
@@ -152,7 +152,7 @@ git commit -m "feat: fingerprint review bundles"
 - Modify: `tests/test_review.py`
 - Modify: `template/scripts/process/check_review.py`
 
-- [ ] **Step 1: Add failing grammar and certificate tests**
+- [x] **Step 1: Add failing grammar and certificate tests**
 
 Extend the test helper without changing legacy defaults:
 
@@ -194,7 +194,7 @@ Use a helper that initializes a rendered repo, commits a base, commits and archi
 _git(out, "commit", "--allow-empty", "-q", "-m", "chore: attest review", "-m", review_line, check=True)
 ```
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 Run:
 
@@ -204,7 +204,7 @@ uv run pytest tests/test_review.py -q
 
 Expected: bound-record and certificate tests fail; existing legacy tests remain green.
 
-- [ ] **Step 3: Implement migration-safe v2 parsing**
+- [x] **Step 3: Implement migration-safe v2 parsing**
 
 Keep the legacy required set and accept exactly one of two shapes:
 
@@ -224,7 +224,7 @@ SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
 `parse_review_lines()` accepts `LEGACY_REQUIRED` or `ARTIFACT_REQUIRED`, rejects every partial/extra shape, and validates artifact formats. `_grammar_section()` continues importing `REQUIRED`, so new bundles demand v2 output.
 
-- [ ] **Step 4: Collect and validate commit certificates**
+- [x] **Step 4: Collect and validate commit certificates**
 
 Add stdlib-only Git helpers and a certificate record carrying source commit, parents and tree. Parse commit bodies from one NUL/record-separated `git log` call. A certificate is valid only when:
 
@@ -237,7 +237,7 @@ and _sha256_diff(root, fields["base"], fields["head"]) == fields["diff"]
 
 Journal records continue through the old path. Only valid commit certificates enter `bound_passes`; all validation failures are hard findings naming the source commit.
 
-- [ ] **Step 5: Enforce artifact-v1 presence and candidate equality**
+- [x] **Step 5: Enforce artifact-v1 presence and candidate equality**
 
 For each archived plan, parse `review-binding`. Values other than `artifact-v1` are hard. A bound plan is cleared only by `bound_passes`; a legacy plan may use either legacy or valid bound passes.
 
@@ -252,7 +252,7 @@ When both `DEV_PROCESS_CANDIDATE_BASE` and a protected target are present:
 
 Do not infer candidate binding without explicit context.
 
-- [ ] **Step 6: Run GREEN and full review-gate tests**
+- [x] **Step 6: Run GREEN and full review-gate tests**
 
 Run:
 
@@ -262,7 +262,7 @@ uv run pytest tests/test_review.py tests/test_review_bundle.py -q
 
 Expected: all review and bundle tests pass.
 
-- [ ] **Step 7: Commit Task 2**
+- [x] **Step 7: Commit Task 2**
 
 ```bash
 git add tests/test_review.py template/scripts/process/check_review.py template/scripts/process/make_review_bundle.py
@@ -279,7 +279,7 @@ git commit -m "feat: bind reviews to certified diffs"
 - Modify: `template/.github/{% if ci.github %}workflows{% endif %}/process-gates.yml.jinja`
 - Modify: `template/{% if ci.gitlab %}.gitlab{% endif %}/ci/process-gates.gitlab-ci.yml`
 
-- [ ] **Step 1: Add failing transport tests**
+- [x] **Step 1: Add failing transport tests**
 
 In `tests/test_git_hooks.py`, commit a tiny executable probe as the rendered `gate_runner.py` that writes `DEV_PROCESS_CANDIDATE_BASE` and `DEV_PROCESS_CANDIDATE_TARGET` to a tracked-test temporary path. Feed the hook:
 
@@ -301,7 +301,7 @@ assert "CI_MERGE_REQUEST_DIFF_BASE_SHA" in gitlab_text
 assert "CI_COMMIT_BEFORE_SHA" in gitlab_text
 ```
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 Run:
 
@@ -311,7 +311,7 @@ uv run pytest tests/test_git_hooks.py tests/test_ci_adapters.py -q
 
 Expected: candidate-context assertions fail.
 
-- [ ] **Step 3: Implement hook transport**
+- [x] **Step 3: Implement hook transport**
 
 Change `_gate_commit()` to receive remote ref/SHA. Copy the clean environment and set neutral variables only when the target is `refs/heads/main` or `refs/heads/master` and the SHA is not all zeroes:
 
@@ -324,7 +324,7 @@ if remote_ref in {"refs/heads/main", "refs/heads/master"} and remote_sha != ZERO
 
 Pass `gate_env` to worktree creation and the gate runner. Preserve new-feature-branch behavior.
 
-- [ ] **Step 4: Implement CI transport and full-history checkout**
+- [x] **Step 4: Implement CI transport and full-history checkout**
 
 GitHub Actions uses `fetch-depth: 0` and provider expressions selecting PR base SHA/target or push-before SHA/ref. GitLab sets `GIT_DEPTH: "0"` and invokes the runner with shell-fallback variables:
 
@@ -334,7 +334,7 @@ GitHub Actions uses `fetch-depth: 0` and provider expressions selecting PR base 
   uv run scripts/process/gate_runner.py
 ```
 
-- [ ] **Step 5: Run GREEN**
+- [x] **Step 5: Run GREEN**
 
 Run:
 
@@ -344,7 +344,7 @@ uv run pytest tests/test_git_hooks.py tests/test_ci_adapters.py tests/test_cross
 
 Expected: all hook, CI, and cross-platform tests pass.
 
-- [ ] **Step 6: Commit Task 3**
+- [x] **Step 6: Commit Task 3**
 
 ```bash
 git add tests/test_git_hooks.py tests/test_ci_adapters.py \
@@ -364,10 +364,11 @@ git commit -m "feat: pass review candidate context"
 - Modify: `template/docs/process/workflow.md.jinja`
 - Modify: `template/docs/process/testing.md`
 - Modify: `template/docs/process/{% if modules.git_hooks %}modules{% endif %}/git-hooks.md`
-- Modify: `tests/test_review_bundle.py`
+- Modify: `tests/test_core_docs.py`
 - Modify: `tests/test_git_hooks.py`
+- Create: `tests/test_governance_pilot.py`
 
-- [ ] **Step 1: Add failing rendered-document assertions**
+- [x] **Step 1: Add failing rendered-document assertions**
 
 Assert the rendered docs contain these invariant phrases or equivalent exact sentences:
 
@@ -383,7 +384,7 @@ assert "reproducible bootstrap" in hook_text
 Also assert no active `governance-only` routing token is added to rendered
 `risk-tiers.md`, `workflow.md`, or command adapters.
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 Run:
 
@@ -393,7 +394,7 @@ uv run pytest tests/test_review_bundle.py tests/test_git_hooks.py -q
 
 Expected: new documentation assertions fail.
 
-- [ ] **Step 3: Document the bound workflow**
+- [x] **Step 3: Document the bound workflow**
 
 Update the three review owners in English:
 
@@ -405,14 +406,14 @@ Update the three review owners in English:
 
 State that journal copies are human-readable but do not clear `artifact-v1`.
 
-- [ ] **Step 4: Document the fresh-worktree project-gate contract**
+- [x] **Step 4: Document the fresh-worktree project-gate contract**
 
 Add one compact section to `testing.md` and one adapter note to the Git-hook
 module: protected-path project gates must start from a fresh checkout without
 ignored caches, bootstrap via a lockfile-backed command such as `uv run`, and
 must diagnose missing bootstrap separately from product failure.
 
-- [ ] **Step 5: Create the non-active pilot ledger**
+- [x] **Step 5: Create the non-active pilot ledger**
 
 Create the meta-repo file with case 1/3 populated from the Kenni observation:
 
@@ -437,7 +438,7 @@ Below the table, define the same fields for cases 2/3 and the final
 `adopt | revise | reject` decision. State explicitly that this file has no
 template or gate effect.
 
-- [ ] **Step 6: Run GREEN**
+- [x] **Step 6: Run GREEN**
 
 Run:
 
@@ -447,7 +448,7 @@ uv run pytest tests/test_review_bundle.py tests/test_git_hooks.py -q
 
 Expected: rendered-document assertions pass.
 
-- [ ] **Step 7: Commit Task 4**
+- [x] **Step 7: Commit Task 4**
 
 ```bash
 git add docs/pilots/2026-07-19-governance-economics.md \
@@ -467,7 +468,7 @@ git commit -m "docs: define bound review workflow"
 - Modify: `docs/plans/2026-07-19-sp54-review-binding-governance-pilot.md` (checkboxes only before freeze)
 - Review: every changed file since `origin/main`
 
-- [ ] **Step 1: Run scoped tests**
+- [x] **Step 1: Run scoped tests**
 
 ```bash
 uv run pytest tests/test_review.py tests/test_review_bundle.py \
@@ -475,7 +476,7 @@ uv run pytest tests/test_review.py tests/test_review_bundle.py \
   tests/test_cross_platform_runtime.py -q
 ```
 
-- [ ] **Step 2: Run full verification**
+- [x] **Step 2: Run full verification**
 
 ```bash
 uv run pytest -q
@@ -485,7 +486,7 @@ git diff --check origin/main...HEAD
 
 Expected: all commands exit zero.
 
-- [ ] **Step 3: Validate a rendered target manually**
+- [x] **Step 3: Validate a rendered target manually**
 
 Render a default target through the existing pytest fixture path, initialize
 Git, create one `artifact-v1` plan and certificate, then prove:
