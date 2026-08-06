@@ -60,10 +60,9 @@ contract/persistence/auth-touching work.
      (the ratchet in `docs/process/start-here.md`).
    - `modules` — which opt-in process modules to enable (default derived from
      the profile; adjust freely).
-   - `ci` — which CI adapters render the `process-gates` job (`github`: Actions
-     workflow, default on; `gitlab`: includable job + root `.gitlab-ci.yml`
-     shim). **With both off, nothing enforces the gates remotely** — local git
-     hooks (`git_hooks` module) become the only enforcement pillar.
+   - `ci` — whether the `github` Actions workflow renders the `process-gates`
+     job (default on). **With it off, nothing enforces the gates remotely** —
+     local git hooks (`git_hooks` module) become the only enforcement pillar.
    - Two modules add conditional prompts: `github_issues` asks for
      `github_repo` (OWNER/REPO, optional) and `parity` asks for
      `parity_surfaces` (canonical surface list). Headless: pass them via
@@ -87,7 +86,7 @@ line instead:
       --data project_name="<project name>" \
       --data 'harnesses={"claude": false, "copilot": false, "agents_md": true}' \
       --data profile=solo \
-      --data 'ci={"github": true, "gitlab": false}' \
+      --data 'ci={"github": true}' \
       --skip 'CLAUDE.md' --skip 'AGENTS.md' \
       gh:Crashman1983/dev-process .
 
@@ -97,7 +96,7 @@ line instead:
       --data 'harnesses={"claude": false, "copilot": false, "agents_md": true}' \
       --data profile=custom \
       --data 'modules={"doc_drift_gate": false, "arch_onboarding": false, "feature_registry": false, "github_issues": false, "contracts_drift": false, "git_hooks": false, "contract_first": false, "parity": false, "security_floor": false, "sbom": false, "telemetry": false, "arch_docs": false, "github_master": false}' \
-      --data 'ci={"github": true, "gitlab": false}' \
+      --data 'ci={"github": true}' \
       --skip 'CLAUDE.md' --skip 'AGENTS.md' \
       gh:Crashman1983/dev-process .
 
@@ -158,11 +157,6 @@ If the choice is already known, set it directly at install time.
 - If you already have a `CLAUDE.md` / `AGENTS.md`, copier will flag the conflict —
   merge the process kernel (the `KERNEL:START`/`KERNEL:END` block) into yours,
   or accept the template's version.
-- If you enable `ci.gitlab` in a repo that already has a `.gitlab-ci.yml`, add
-  `--skip '.gitlab-ci.yml'` and merge the single `include:` line from the
-  template shim by hand — the actual job lives collision-free under
-  `.gitlab/ci/process-gates.gitlab-ci.yml`.
-
 ## Later
 
 Add a module or pull an updated process version — with a clean working tree

@@ -13,7 +13,7 @@ ALL_ON = {
         "github_issues": True, "contracts_drift": True, "git_hooks": True,
         "contract_first": True, "parity": True, "security_floor": True,
     },
-    "ci": {"github": True, "gitlab": True},
+    "ci": {"github": True},
 }
 
 

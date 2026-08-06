@@ -41,12 +41,10 @@ modules:
 ci:
   type: yaml
   help: >-
-    Which CI adapters render the process-gates job (github: Actions workflow;
-    gitlab: includable job file + root .gitlab-ci.yml shim). With both off,
-    enforcement degrades to the local git-hooks module only.
+    CI adapter rendering the process-gates job (github: Actions workflow).
+    With it off, enforcement degrades to the local git-hooks module only.
   default:
     github: true
-    gitlab: false
 
 github_repo:
   type: str

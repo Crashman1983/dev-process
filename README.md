@@ -80,10 +80,9 @@ Onboarding-Dialog befüllt und von Brainstorm/Plan/Review als Richtungs-Constrai
 gelesen; ein immer aktives Gate hält ihn präsent und referenz-sauber.
 
 **Durchsetzung:** ein manifest-bewusster `gate_runner` liest `.copier-answers.yml`
-und fährt in CI nur die *aktiven* Module — als GitHub-Actions-Workflow und/oder
-GitLab-CI-Job (`ci`-Frage; GitLab: includable Job-Datei plus dünner
-Root-Shim, kollisionsfrei für Brownfield). git-Hooks sichern lokal ab.
-**Ehrliche Degradation:** ohne GitHub *und* GitLab bleibt das `git-hooks`-Modul
+und fährt in CI nur die *aktiven* Module — als GitHub-Actions-Workflow
+(`ci`-Frage). git-Hooks sichern lokal ab.
+**Ehrliche Degradation:** ohne GitHub-CI bleibt das `git-hooks`-Modul
 die einzige Enforcement-Säule — und ohne dieses erzwingt nichts die Gates. Zuschaltbare
 Module heute: `doc-drift-gate` (tote Pfad-Referenzen in Docs), `arch-onboarding`
 (Architektur gegen echten Code), `feature-registry` (User-Story-/Akzeptanz-/
