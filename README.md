@@ -1,26 +1,37 @@
 # dev-process
 
-> **English:** A portable, harness-agnostic, modular foundation for a
-> **machine-enforced**, AI-assisted development process — installable into new
-> and existing repositories via `uvx copier copy gh:Crashman1983/dev-process .`.
+> **English:** A **machine-enforced**, AI-assisted development process on a
+> committed standard stack — GitHub + Spec Kit + pre-commit + a lean
+> dev-process enforcement kernel — installable into new and existing
+> repositories via `uvx copier copy gh:Crashman1983/dev-process .`.
 > This README is German by choice; everything the template installs (process
 > docs, adapters, commands) is English — start with
 > [`BOOTSTRAP.md`](BOOTSTRAP.md). License: [Prosperity Public
 > License 3.0.0](LICENSE.md) — free for noncommercial use; commercial use
 > beyond a 30-day trial requires a license from the contributor.
 
-Ein portables, harness-agnostisches, modulares Fundament für einen **maschinell
-durchgesetzten**, KI-gestützten Entwicklungsprozess — einspielbar in **neue
-(Greenfield)** wie **bestehende (Brownfield)** Projekte.
+Ein **maschinell durchgesetzter**, KI-gestützter Entwicklungsprozess auf einem
+bewussten Standard-Stack: **GitHub** (Issues/Projects/Actions als Arbeits-Log
+und CI), **[Spec Kit](https://github.com/github/spec-kit)** (der Weg zur
+Spezifikation, gepinnt und vendored), **[pre-commit](https://pre-commit.com)**
+(lokale Hooks) und ein schlanker **dev-process-Kernel** (Risiko-Tiers, Gates,
+Review-Unabhängigkeit, Inventar, Telemetrie). Einspielbar in **neue
+(Greenfield)** wie **bestehende (Brownfield)** Projekte; ausgeliefert als
+[copier](https://copier.readthedocs.io)-Template. Der Command-Adapter wird bei
+der Installation gewählt (`claude` | `copilot` | `agents_md`); die
+Spezifikations-Skills deckt Spec Kits eigenes Integrations-System ab.
 
-Ausgeliefert als [copier](https://copier.readthedocs.io)-Template. Adapter für
-**Claude Code**, **GitHub Copilot** und **AGENTS.md** (Codex / Gemini CLI / Aider …).
-Cross-platform bedeutet: native Core-Gates auf Linux, macOS und Windows mit
-`git` + `uv`; alle drei AI-Harness-Adapter sind unabhaengig kombinierbar.
+> **Produktrahmen-Entscheidung (2026-08-06):** Die frühere Identität
+> „portabel, harness-agnostisch, 13 opt-in Module" wurde bewusst gegen den
+> Standard-Stack getauscht (Lean-Pass SP56) — weniger Optionen, weniger
+> Eigenbau, gleiche Garantien. Analyse und Design:
+> [`docs/analysis/`](docs/analysis/) · [`docs/design/2026-08-06-speckit-hybrid-design.md`](docs/design/2026-08-06-speckit-hybrid-design.md).
+> Exit-Szenario der Spec-Kit-Abhängigkeit: Pin einfrieren — der vendored
+> Stand läuft ohne Netz und ohne CLI unbegrenzt weiter.
 
-> **Status:** `v1.37.0` — Sub-Projekte SP1–SP55 ausgeliefert (Kern + 13 opt-in
-> Module, 5 Core-Gates, Profile für Solo/Team, DoR/DoD, Kernel-Integritäts-
-> und Compaction-Schutz). Vollständige Historie: [`CHANGELOG.md`](CHANGELOG.md).
+> **Status:** `v1.37.0` + Lean-Pass — Sub-Projekte SP1–SP56 (Standard-Setup
+> statt Profile/Toggles, Spec Kit als Standard-Spezifikationsweg, 5 Core-Gates,
+> DoR/DoD, Kernel-Integritäts- und Compaction-Schutz). Vollständige Historie: [`CHANGELOG.md`](CHANGELOG.md).
 > **Überblick für Einsteiger:innen & Management** (wie es funktioniert, warum,
 > welcher Mehrwert): [`docs/CAPABILITIES.md`](docs/CAPABILITIES.md).
 > Setup: [`BOOTSTRAP.md`](BOOTSTRAP.md) · Systemumgebung:
@@ -83,25 +94,25 @@ gelesen; ein immer aktives Gate hält ihn präsent und referenz-sauber.
 und fährt in CI nur die *aktiven* Module — als GitHub-Actions-Workflow
 (`ci`-Frage). git-Hooks sichern lokal ab.
 **Ehrliche Degradation:** ohne GitHub-CI bleibt das `git-hooks`-Modul
-die einzige Enforcement-Säule — und ohne dieses erzwingt nichts die Gates. Zuschaltbare
-Module heute: `doc-drift-gate` (tote Pfad-Referenzen in Docs), `arch-onboarding`
-(Architektur gegen echten Code), `feature-registry` (User-Story-/Akzeptanz-/
-Test-Traceability), `github-issues` (EARS-Templates + Issue-Ref-Gate),
-`contracts-drift` (Kopplung-als-Contract, Pin-Drift-Ratchet + best-effort-Konformität),
-`git-hooks` (lokale pre-commit/pre-push/post-commit-Durchsetzung, an den gate_runner delegiert),
-`contract-first` (geteiltes Capability-Interface im committeten Spec deklariert, bevor eine Surface darauf baut),
-`security-floor` (der grep-bare Teil der Security-Invarianten als blockierendes Gate — verbotene Regex-Muster über git-getrackte Dateien)
-`telemetry` (Effizienz-Messung: `GRADE`-Trace-Zeilen im Journal als Gate-gesichertes Format plus read-only KPI-Cockpit mit genau den drei Ziel-KPIs Konvergenz, Kosten und DORA-CFR; Messwerte mit Konfidenz + Maßnahme. Misst Trends, Verhältnisse und Catch/Escape-Ereignisse gegen die projekteigene Baseline — kein projektübergreifendes Benchmarking, Absolutwerte ohne eigene Baseline sind bedeutungslos)
-`arch-docs` (stakeholder-gerichtete Architektur-Doku im arc42/C4-Zuschnitt: `ARCHITECTURE-OVERVIEW.md`-Scaffold mit Verify-Tags — Building-Blocks→arch-Block und Decisions→ADRs verlinkt statt dupliziert, Prosa ehrlich unverifiziert; Gate fängt nur tote ADR-Refs + verbliebene Platzhalter, nie „gute Prosa")
-`sbom` (CycloneDX-SBOM mit attestierter Lizenz je Third-Party-Komponente + SPDX-Allow-List als blockierendes Gate — ehrlich degradierend: advisory ohne Policy/SBOM, hart bei fehlender/unerlaubter Lizenz)
-und `github-master` (dreht die Wahrheitsrichtung: GitHub Issues als SSOT über einen committeten Snapshot — Sync mit Netz, Gate hermetisch offline; Board-Spalten-Konsistenz mitgeprüft).
+die einzige Enforcement-Säule — und ohne dieses erzwingt nichts die Gates. Das **Standard-Setup**
+(Lean-Pass: eine Frage — `regulated` — statt 13 Toggles) umfasst:
+`speckit` (Spec Kit als Tier-2+-Spezifikationsweg — Constitution-Pointer statt zweiter Wahrheit, EARS-/Test-Pflicht-Overrides, publish-and-prune-Merge-Ritual mit SC-Accounting),
+`doc-drift-gate` (tote Pfad-Referenzen in Docs), `arch-onboarding`
+(Architektur gegen echten Code), `feature-registry` (das **Feature-Inventar**: Capability → Akzeptanz → beweisender Test — das Arbeits-Log liegt in GitHub Issues),
+`github-issues` (EARS-Templates + Issue-Ref-Gate),
+`contracts` (Kopplung als geprüfter Contract: contract-first + Pin-Drift),
+`git-hooks` (lokale Durchsetzung über das pre-commit-Framework),
+`telemetry` (genau die drei Ziel-KPIs: Konvergenz, Kosten, DORA-CFR — `GRADE`-Trace gate-gesichert, Trends gegen die eigene Baseline),
+`arch-docs` (arc42/C4-lite Doku-Scaffold mit ehrlichem Gate) und
+`github-master` (GitHub Issues als Arbeits-Log-SSOT über einen committeten Snapshot — Sync mit Netz, Gate hermetisch offline; DoR-at-rest + Board-Konsistenz).
+Das `regulated`-Paket ergänzt `security-floor` (verbotene Muster als Gate) und `sbom` (CycloneDX + Lizenz-Allow-List).
 
-**Harness-native Commands:** Der Zyklus (`brainstorm plan execute review quick
-debug commit prime`) liegt als dünne Slash-Commands je aktivem Harness
-(`.claude/commands/`, `.github/prompts/`, plus eine AGENTS.md-Sektion), die auf
-die neutralen `docs/process/`-Phasen zeigen. Sie sind harness-Ergonomie, kein
-Modul — und werden vom `doc-drift-gate` mitgeprüft, sodass ein toter
-Command-Pointer die CI failt.
+**Commands:** Der Zyklus (`brainstorm plan execute review quick debug commit
+prime`) liegt als dünne Slash-Commands für den gewählten Harness; `brainstorm`
+und `plan` zeigen auf den Spec-Kit-Pfad (`/speckit-specify → clarify → plan →
+tasks`), der Rest auf die neutralen `docs/process/`-Phasen. Der
+`doc-drift-gate` prüft die Pointer mit — ein toter Command-Pointer failt die
+CI.
 
 ## Architektur als geprüfter Contract (SP2)
 
@@ -119,19 +130,22 @@ nicht:
 
 ## Mehrwert gegenüber Standard-Ansätzen
 
-|  | Prosa-Playbook | Scaffolding (cookiecutter) | reines CI-Linting | **dev-process** |
+|  | Prosa-Playbook | Spec Kit allein | reines CI-Linting | **dev-process** |
 |---|:---:|:---:|:---:|:---:|
-| durchgesetzt, nicht nur dokumentiert | ✗ | ✗ | nur Stil | ✓ Gates + Hooks |
-| nachträglich aktualisierbar | ✗ | ✗ (one-shot) | – | ✓ `copier update` |
-| tool-/harness-unabhängig | – | – | – | ✓ Kernel byte-identisch |
+| durchgesetzt, nicht nur dokumentiert | ✗ | ✗ (LLM-Selbstchecks) | nur Stil | ✓ Gates + Hooks |
+| risiko-proportional (Tiers statt Ein-Pfad) | – | ✗ | – | ✓ |
+| Spezifikationsweg nach Industriestandard | ✗ | ✓ | – | ✓ (Spec Kit integriert) |
+| nachträglich aktualisierbar | ✗ | teils (0.x) | – | ✓ `copier update` + Pin |
 | Architektur gegen echten Code geprüft | ✗ | ✗ | ✗ | ✓ arch-onboarding |
-| Brownfield-additiv (überschreibt nichts) | ✗ | ✗ | – | ✓ |
-| ehrliche Decke (hart vs. best-effort) | – | – | – | ✓ kein False-Green |
+| Brownfield-additiv (überschreibt nichts) | ✗ | (✓) | – | ✓ |
+| ehrliche Decke (hart vs. best-effort) | – | ✗ | – | ✓ kein False-Green |
 
-Kurz: Ein Playbook beschreibt, erzwingt aber nichts und altert; Scaffolding ist
-ein einmaliger Abwurf ohne Update-Pfad; CI-Linting sichert Stil, nicht Prozess,
-Architektur oder Entscheidungen. `dev-process` liefert die Methodik **mit** ihrer
-Durchsetzung, harness-übergreifend und über `copier update` versionierbar.
+Kurz: Ein Playbook beschreibt, erzwingt aber nichts und altert; Spec Kit
+allein spezifiziert stark, erzwingt aber nichts und kennt keine Risiko-Tiers;
+CI-Linting sichert Stil, nicht Prozess. `dev-process` kombiniert den
+Standard-Spezifikationsweg mit deterministischer Durchsetzung — und bleibt
+über `copier update` (Prozess) und den Version-Pin (Spec Kit) getrennt
+aktualisierbar.
 
 Eine ausführliche, zielgruppengerechte Erklärung — *wie es funktioniert, warum,
 welcher Mehrwert*, getrennt für Entwickler:innen und Management — steht in

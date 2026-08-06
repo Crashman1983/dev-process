@@ -253,6 +253,26 @@ Marker in einem *aktiven Plan* hart (Plan setzt genehmigtes Design voraus),
 im aktiven Design nur Note (mid-flight bleibt grün), Archiv ist Historie;
 Fenced-Block = Zitat wie beim Review-Gate) ausgeliefert.
 
+SP56 (lean-standard: das große Refactoring auf den Standard-Stack
+GitHub + Spec Kit + pre-commit + dev-process-Kernel, nach unabhängigem
+Design-Review (Report: `.process-work/reviews/2026-08-06-speckit-hybrid-design-review.md`).
+**Abgebaut:** GitLab-CI-Adapter, parity, attention.py/who_is_working.py
+(GitHub-UI übernimmt), story_order + Arbeits-Log-Achse der Registry,
+eigener Hook-Installer, artifact-v1-Zertifikatsritual, Telemetrie auf die
+drei Ziel-KPIs (Konvergenz, Kosten, CFR), Profile/Toggles auf das
+Standard-Setup mit einzigem `regulated`-Schalter, contract-first +
+contracts-drift zu `contracts` verschmolzen. **Umgebaut:** feature-registry
+zum Feature-Inventar (Capability → Akzeptanz → Test, hermetisch), Hooks auf
+das pre-commit-Framework, github-master registry-frei (Snapshot nach
+Issue-Nummer, DoR-at-rest, Board-Konsistenz), Review auf eine
+Attestierung mit opt-in Diff-Digest (verifiziert statt Ritual).
+**Gebaut:** `speckit`-Modul als Standard-Spezifikationsweg —
+Constitution-Pointer mit Gate-Guard, EARS-/Test-Pflicht-Overrides,
+Command-Wrapper mit Kernel-Pflichten, clarification-Gate über `specs/`,
+publish_and_prune-Merge-Ritual mit verifiziertem Publish + SC-Accounting
+und Flow-Forward-Degradation. Produktrahmen-Wechsel im README dokumentiert,
+Exit-Szenario (Pin einfrieren) festgehalten) ausgeliefert.
+
 ## Sub-Projekt-Tabelle (SP1–SP24)
 
 Die Tabelle wurde bis SP24 gepflegt; ab SP25 trägt das Narrativ oben die
