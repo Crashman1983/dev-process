@@ -91,6 +91,8 @@ def test_gate_passes_story_phase_with_test_task(render, tmp_path):
         "\n## Final phase: Polish\n\n- [ ] T003 Update docs\n")
     r = _gate(out)
     assert r.returncode == 0, r.stdout
+    # unchecked tasks are the deterministic completeness signal (converge diet)
+    assert "unchecked task(s)" in r.stdout
 
 
 def test_clarification_marker_in_spec_is_note_in_plan_is_hard(render, tmp_path):
@@ -132,6 +134,7 @@ def test_module_doc_pins_version_and_exit_scenario(render, tmp_path):
     assert "specify-cli==" in doc  # pinned, vendored dependency
     assert "speckit-implement" in doc  # excluded skills named
     assert "Exit scenario" in doc and "freeze the pin" in doc
+    assert "Tier 3" in doc  # analyze/converge reserved for Tier 3 (token economy)
     assert "publish_and_prune.py" in doc
     assert "feature.json" in doc  # gitignored per-checkout state
 

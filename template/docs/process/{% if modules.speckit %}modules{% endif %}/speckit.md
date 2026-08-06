@@ -42,13 +42,21 @@ unchanged, forever if needed.
    constraints.
 2. `/plan` → `/speckit-plan` + `/speckit-tasks`; add `tier: N` and
    `issue: <ref>` lines to `specs/<feature>/plan.md` (the review and issue
-   gates key on them). Run `/speckit-analyze` at plan exit — mandatory for
-   Tier 3, recommended for Tier 2 (LLM judgment: review input, never a gate).
+   gates key on them). Run `/speckit-analyze` at plan exit for **Tier 3, or
+   when the spec was substantially iterated** — for a clean, single-pass
+   Tier 2 cycle the templates already enforce structurally what analyze
+   would re-derive, and the independent review sees spec + plan + tasks in
+   the bundle anyway (token economy: one LLM pass saved per normal feature;
+   LLM judgment is review input, never a gate).
 3. Execute through the normal execute flow, consuming `tasks.md`: checkboxes
    in the file are the canonical progress state, story checkpoints validate
    each slice (GRADE lines where telemetry is on), TDD + one atomic commit
-   per task. `/speckit-converge` before the independent review gives the
-   reviewer a machine-prepared completeness list.
+   per task. Completeness at review time is deterministic first: the
+   `speckit` gate reports unchecked tasks in an active `tasks.md` as a
+   visible note (zero tokens), and the review judges them. `/speckit-converge`
+   (a full LLM pass over spec/plan/tasks/codebase) is reserved for **Tier 3**,
+   where semantic divergence — built ≠ specified despite ticked boxes —
+   justifies the cost.
 4. Review + merge as always (bundle, REVIEW attestation, DoD). The merge
    ritual then runs `python scripts/process/publish_and_prune.py <feature>`:
    SC accounting first (every SC-ID evidenced / tracked as follow-up /
@@ -81,7 +89,9 @@ so worktrees stay independent and merges never conflict on it.
 
 specify/clarify: strongest model (judgment density) · plan: mid ·
 tasks generation + execution against tasks.md: small (zero-context tasks
-with exact paths) · review: per `verification-independence.md` — Tier 3
-crosses the model family, non-negotiable. Measure the effect against your
+with exact paths; `process_context.py` hands the next task and the files it
+names — no orientation guesswork) · review: per
+`verification-independence.md` — Tier 3 crosses the model family,
+non-negotiable. Measure the effect against your
 own baseline (telemetry: convergence, cost, CFR) instead of trusting this
 paragraph.
