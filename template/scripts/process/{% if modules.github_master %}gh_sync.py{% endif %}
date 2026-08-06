@@ -47,7 +47,9 @@ def _status_from(labels: list, state: str) -> str:
         m = STATUS_LABEL.match(name or "")
         if m:
             return m.group(1)
-    return "done" if state == "closed" else "in-progress"
+    # unlabeled open = proposed: the DoR gates *starting* work — an unclaimed
+    # backlog issue is not started; `status:in-progress` is the claim
+    return "done" if state == "closed" else "proposed"
 
 
 def _dor_facts(labels: list, title: str, body: str) -> dict:
