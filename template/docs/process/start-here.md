@@ -319,8 +319,7 @@ The project is ready for normal process-driven development when:
   On GitHub, the GitHub CI adapter ships a one-command setup
   (`scripts/process/setup_branch_protection.sh` in repos rendered with that
   adapter) that idempotently adds `process-gates` as a required status check —
-  or do it manually via Settings → Branches. On GitLab: a merge-request
-  approval rule / pipeline-must-succeed setting. Without any CI adapter, the
+  or do it manually via Settings → Branches. Without the CI adapter, the
   `git-hooks` module's pre-push hook IS the enforcement authority — install it
   and treat a bypassed hook like a skipped gate (mandatory rule 8). Whichever
   transport: this is the single step that turns "the gate runs" into "the

@@ -40,7 +40,7 @@ def _run_script(out, tmp_path, scenario):
 
 
 def test_script_present_with_github_ci(render, tmp_path):
-    out = render(tmp_path, {"project_name": "d", "ci": {"github": True, "gitlab": False}})
+    out = render(tmp_path, {"project_name": "d", "ci": {"github": True}})
     p = out / "scripts/process/setup_branch_protection.sh"
     assert p.is_file()
     r = subprocess.run(["bash", "-n", str(p)], capture_output=True, text=True)
@@ -52,12 +52,12 @@ def test_script_present_with_github_ci(render, tmp_path):
 
 
 def test_script_absent_without_github_ci(render, tmp_path):
-    out = render(tmp_path, {"project_name": "d", "ci": {"github": False, "gitlab": True}})
+    out = render(tmp_path, {"project_name": "d", "ci": {"github": False}})
     assert not (out / "scripts/process/setup_branch_protection.sh").exists()
 
 
 def _render_on(render, tmp_path):
-    return render(tmp_path, {"project_name": "d", "ci": {"github": True, "gitlab": False}})
+    return render(tmp_path, {"project_name": "d", "ci": {"github": True}})
 
 
 def test_unprotected_branch_gets_minimal_rule(render, tmp_path):
@@ -107,7 +107,7 @@ def test_job_id_matches_required_check_context(render, tmp_path):
     # the Actions job id IS the status-check context; docs and the setup script
     # both say `process-gates`, so the job must be named exactly that (a job
     # named `gates` would make the documented required check never satisfiable).
-    out = render(tmp_path, {"project_name": "d", "ci": {"github": True, "gitlab": False}})
+    out = render(tmp_path, {"project_name": "d", "ci": {"github": True}})
     wf = yaml.safe_load((out / ".github/workflows/process-gates.yml").read_text())
     assert "process-gates" in wf["jobs"], wf["jobs"].keys()
     script = (out / "scripts/process/setup_branch_protection.sh").read_text()

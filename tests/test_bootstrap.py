@@ -43,8 +43,6 @@ def test_bootstrap_documents_ci_answer_and_degradation():
     text = (ROOT / "BOOTSTRAP.md").read_text()
     assert "--data 'ci={" in text
     assert "`ci`" in text
-    assert ".gitlab/ci/process-gates.gitlab-ci.yml" in text  # brownfield merge target
-    assert "--skip '.gitlab-ci.yml'" in text
     readme = (ROOT / "README.md").read_text()
     assert "einzige Enforcement-Säule" in readme  # honest degradation
 
