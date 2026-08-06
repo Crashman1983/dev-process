@@ -16,6 +16,9 @@ design review's F3/F7 conditions — prompts alone must not carry rule 5):
     test; semantic adequacy stays review judgment.
   - SOFT: .specify/ missing entirely — expected before `specify init` ran
     (the BOOTSTRAP step); named, never silently green.
+  - SOFT: unchecked tasks in an active specs/*/tasks.md — the deterministic
+    completeness signal at review time (replaces an LLM converge pass for
+    Tier 2; the reviewer judges the note, the gate never blocks mid-build).
 
 Unresolved [NEEDS CLARIFICATION] markers in specs/ are the clarification
 gate's job (one owner). Pure stdlib.
@@ -86,6 +89,11 @@ def check(root: Path) -> tuple[list[str], list[str]]:
                 hard.append(f"{rel}: {phase!r} has no test task — tests prove "
                             f"acceptance (mandatory rule 5); add the failing "
                             f"test task(s) before implementation")
+            open_tasks = len(re.findall(r"^\s*- \[ \] ", text, re.MULTILINE))
+            if open_tasks:
+                soft.append(f"{rel}: {open_tasks} unchecked task(s) — the "
+                            f"deterministic completeness signal for the review "
+                            f"(done means every box ticked or the gap named)")
     return hard, soft
 
 
