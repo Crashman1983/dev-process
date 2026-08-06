@@ -174,7 +174,23 @@ flow-forward.**
    nowhere to publish, so the honest degradation is flow-forward: the
    feature directory merges and stays, under the existing retention stance
    ("prune by age as an ordinary change").
-4. **Context hygiene enables the small-model routing.** `/prime` and execute
+4. **Success criteria outlive the prune (SC lifecycle).** The spec's
+   measurable Success Criteria deliver value at three moments: as a
+   design-time forcing function (stating the outcome measurably is what
+   steers toward the right problem), at review/checkpoint time (the spec is
+   still on the branch — the bundle carries it, the reviewer judges the diff
+   and the P1 slice against it; pruning happens only after the review
+   passes), and **after release** — where most SCs are first verifiable at
+   all, and where publish-and-prune would otherwise let them vanish silently
+   into an issue comment. So the merge ritual carries a DoD item: every
+   SC-ID is either (a) already evidenced at review (a test or measurement
+   exists), (b) converted into a tracked follow-up — a measurement task on
+   the issue or a registry story naming metric, threshold, and when to
+   measure; a GRADE target where telemetry is installed — or (c) explicitly
+   waived with a reason. Silent disappearance is not an option (the same
+   deviation discipline DoR/DoD apply everywhere else). This gives SCs the
+   post-merge lifecycle Spec Kit itself lacks.
+5. **Context hygiene enables the small-model routing.** `/prime` and execute
    load, per task, only `tasks.md` plus the files it names exactly — never
    `specs/` recursively; the doc-drift gate keeps those references resolvable
    so targeted loading stays reliable.
