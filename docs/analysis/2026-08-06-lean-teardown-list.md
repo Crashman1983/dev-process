@@ -17,7 +17,7 @@ Nische ohne Nachfrage? → streichen.
 |---|---|---|---:|---|---|
 | 1 | GitLab-CI-Adapter | **streichen** | ~150 + CI-Matrix ×2→×1 | klein | keins (GitHub im Einsatz) |
 | 2 | `parity`-Modul | **streichen** | ~385 | klein | Nischen-Feature weg |
-| 3 | `feature-registry` + `story_order` | **streichen** → GitHub Issues/Sub-Issues/Projects (via `github-issues`/`github-master`) | ~985 | mittel | Story-Tracking nur noch online-SSOT (Snapshot-Gate bleibt hermetisch) |
+| 3 | `feature-registry` + `story_order` | **umbauen** zum Feature-Inventar: Arbeits-Log-Achse (status, blocked_by, parent, story_order) → GitHub Issues/Sub-Issues/Projects; Inventar-Achse (Capability → Akzeptanz → Test, hermetisch gate-geprüft) bleibt | ~600 von ~985 | mittel | Arbeits-Log nur noch online-SSOT; Inventar bleibt offline prüfbar |
 | 4 | Issue-Convenience-Views (`attention.py`, `who_is_working.py`) | **streichen** → GitHub Projects/UI | ~540 | klein | HITL-Cockpit weg; Claim-Konvention bleibt als Doku |
 | 5 | Eigener Hook-Installer (`install_hooks`, `run_hook`) | **ersetzen** → [pre-commit](https://pre-commit.com)-Framework | ~560 | mittel | neue (Standard-)Dependency |
 | 6 | Copilot- + AGENTS.md-Command-Adapter | **streichen** → Spec-Kit-Integrationen decken Agent-Vielfalt; verbleibende Nicht-Spec-Commands nur noch für den gewählten Harness | ~350 + Achse 3→1 | klein | Harness-Wechsel kostet Re-Init statt Umschalten |
@@ -50,12 +50,22 @@ selbstgeschriebenen Job auf. Streichen halbiert die CI-Render-Matrix.
 konzeptionell schön, praktisch Nische; in keinem der Ziele (Tempo, Kosten,
 Fehlerrate) wirksam.
 
-**3. feature-registry** — der Nachbau eines Standards, den wir parallel
-nutzen: GitHub Issues/Sub-Issues sind das Story-Tracking der Industrie, und
-`github-master` hat die Wahrheitsrichtung schon zu GitHub gedreht (hermetisch
-über den committeten Snapshot — der Offline-Gate-Charakter bleibt).
-`blocked_by`/`parent`-Prüfungen wandern in den `github-master`-Gate; die
-Story→Test-Traceability trägt das EARS-Kriterium im Issue plus Test-Referenz.
+**3. feature-registry → Feature-Inventar** — die Registry beantwortet zwei
+verschiedene Fragen, und nur eine davon ist ein Standard-Nachbau. *„Was ist
+in Arbeit / erledigt?"* ist ein Arbeits-Log — das können GitHub
+Issues/Sub-Issues/Projects auch bei hunderten Einträgen besser (Filter,
+Milestones, Board); dieser Teil (status, blocked_by, parent, Zyklus-DFS,
+`story_order.py`) entfällt. *„Was kann das Produkt heute, und wo ist das
+bewiesen?"* ist ein **Inventar** — hundert geschlossene Issues beantworten
+sie nicht (ein geschlossenes Issue sagt „diese Änderung geschah", nicht
+„diese Fähigkeit existiert heute"; Fähigkeiten entstehen über viele Issues
+und werden von späteren überformt). Diese Achse bleibt als schlankes,
+hermetisch gate-geprüftes Verzeichnis: Capability → Akzeptanzkriterium →
+beweisender Test (toter Test-Ref = rot). Gefüttert wird es vom Merge-Ritual:
+die Spec-User-Stories werden dorthin promoted (US → Inventar-Eintrag mit
+Test-Referenz + Issue-Link) — der bleibende Ertrag der gepruneten Specs.
+Es skaliert mit den Fähigkeiten (Dutzende), nicht mit den Arbeitsschritten
+(Hunderte), und bleibt dadurch lesbar.
 
 **4. attention.py / who_is_working.py** — eigene Dashboards für etwas, das
 GitHub Projects nativ rendert. Die Claim-/Heartbeat-*Konvention* (nie
