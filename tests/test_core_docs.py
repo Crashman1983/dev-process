@@ -429,11 +429,11 @@ def test_bound_review_and_fresh_checkout_contracts_render(render, tmp_path):
     workflow = (out / "docs/process/workflow.md").read_text()
     testing = (out / "docs/process/testing.md").read_text()
 
-    assert "review-binding: artifact-v1" in verification
-    assert "tree-empty certificate commit" in verification
+    assert "REVIEW_ARTIFACT base=<git-sha> head=<git-sha> diff=<sha256>" in verification
+    assert "recomputes" in verification  # digest verified, not trusted
     assert "base=<git-sha> head=<git-sha> diff=<sha256>" in journal
     assert "final rebase" in workflow
-    assert "tree-empty certificate commit" in workflow
+    assert "digest fields" in workflow
     assert "fresh checkout" in testing
     assert ".venv" in testing and "node_modules" in testing
     assert "reproducible bootstrap" in testing

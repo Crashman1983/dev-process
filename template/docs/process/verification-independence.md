@@ -73,31 +73,21 @@ attestation: a fresh process over the bundle is `bundle,non-implementing`; add
 ## Bind the verdict to the reviewed artifact
 
 Independence is incomplete if the branch can change after review without
-invalidating the verdict. A Tier 2+ plan can opt into exact artifact binding
-with this machine-readable line:
-
-    review-binding: artifact-v1
-
-For a bound review, perform the final rebase before review, finalize and
-archive the plan, and only then build the bundle. The bundle prints one
-fingerprint over the raw binary diff from the resolved merge base to the
-reviewed head:
+invalidating the verdict. The bundle therefore prints one fingerprint over
+the raw binary diff from the resolved merge base to the reviewed head:
 
     REVIEW_ARTIFACT base=<git-sha> head=<git-sha> diff=<sha256>
 
-The clearing `REVIEW` record repeats those three fields. It must be recorded in
-a **tree-empty certificate commit** whose sole parent is the reviewed head and
-whose tree is identical to that parent. The commit body is the durable review
-certificate; an optional copy in the journal is useful to humans but does not
-clear an `artifact-v1` plan. This avoids changing the reviewed tree merely to
-record that it was reviewed.
+The reviewer copies those three fields — verbatim, never invented — onto the
+`REVIEW` line. The gate then recomputes the digest from git and hard-fails a
+mismatch or an unresolvable commit: the verdict is bound to the exact diff
+that was reviewed. Perform the final rebase *before* the review — a rebase
+after it changes the diff, and the recorded digest honestly stops matching
+the merged content; loop back to a fresh bundle and review instead.
 
-On a protected-target push or pull request, the gate recomputes the exact
-candidate diff and requires the certificate digest to match it. Any content
-change after review — including a rebase that changes the reviewed diff —
-invalidates the certificate and requires a fresh bundle and review. A bound
-integration slice may carry only one newly archived bound plan, keeping the
-certificate-to-change relationship unambiguous.
+(Lean pass: the former `review-binding: artifact-v1` mode — tree-empty
+certificate commits and CI candidate binding — is retired; the per-line
+digest keeps the diff-exact guarantee without the ritual.)
 
 ## Independence is attested, not assumed
 
@@ -114,9 +104,9 @@ The record is a structured `REVIEW` line in the journal, one per review:
 REVIEW work=42 tier=2 reviewer=fresh-agent model=same independence=bundle,non-implementing verdict=pass round=1
 ```
 
-For `review-binding: artifact-v1`, the same record is placed in the certificate
-commit body and additionally carries `base`, `head`, and `diff`; the exact
-grammar is in `journal-state-plans.md`.
+A digest-bound record additionally carries `base`, `head`, and `diff` (copied
+from the bundle's `REVIEW_ARTIFACT` line); the exact grammar is in
+`journal-state-plans.md`.
 
 `independence` is a comma set drawn from `bundle,non-implementing,cross-model,
 single-family`; `single-family` is the explicit honesty flag for "only one
@@ -148,11 +138,10 @@ enforces what a language-agnostic gate honestly can, and no more:
   `work`, `tier ≥ N`) or an explicit `review-waived: <reason>` line. So a
   Tier 2+ change cannot merge with no independent review — or it merges as a
   named, auditable exception.
-- **Artifact identity.** For a plan declaring `review-binding: artifact-v1`, a
-  journal attestation alone is insufficient. The clearing record must live in
-  the tree-empty certificate commit and its base, head, and raw binary-diff
-  digest must match both the commit relationship and the protected integration
-  candidate.
+- **Artifact identity.** A `REVIEW` carrying `base`/`head`/`diff` is verified:
+  the gate recomputes the raw binary-diff digest from git and fails a mismatch
+  or unresolvable commits — a claimed digest that cannot be checked is treated
+  as false, never skipped.
 
 What the gate **cannot** do is verify the reviewer was *truthfully* a different
 agent or model — it never sees the review runtime. That claim stays attested.

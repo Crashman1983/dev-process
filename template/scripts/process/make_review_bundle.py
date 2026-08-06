@@ -148,6 +148,11 @@ free-form prose is invisible to them:
 
     REVIEW {fields}
 
+Optionally append `base=… head=… diff=…` copied VERBATIM from the
+`REVIEW_ARTIFACT` line in this bundle — that binds your verdict to the exact
+reviewed diff (the gate recomputes and verifies the digest). Never invent
+these values.
+
 - `verdict`: one of {sorted(_review_gate.VERDICTS)}.
 - `independence`: comma-joined tokens from {sorted(_review_gate.INDEP_TOKENS)} —
   attest honestly what you are: reading this bundle in a fresh context is

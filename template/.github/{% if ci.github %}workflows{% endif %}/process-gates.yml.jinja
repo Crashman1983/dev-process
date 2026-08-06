@@ -13,11 +13,6 @@ jobs:
   # adopters to require (and what setup_branch_protection.sh sets): process-gates
   process-gates:
     runs-on: ubuntu-latest
-{% raw %}
-    env:
-      DEV_PROCESS_CANDIDATE_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
-      DEV_PROCESS_CANDIDATE_TARGET: ${{ github.event.pull_request.base.ref || github.ref_name }}
-{% endraw %}
     steps:
       - uses: actions/checkout@v4
         with:

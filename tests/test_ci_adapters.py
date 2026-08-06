@@ -9,10 +9,7 @@ def test_github_workflow_rendered_by_default(render, tmp_path):
     assert workflow.is_file()
     text = workflow.read_text()
     assert "fetch-depth: 0" in text
-    assert "DEV_PROCESS_CANDIDATE_BASE" in text
-    assert "github.event.pull_request.base.sha" in text
-    assert "github.event.before" in text
-    assert "DEV_PROCESS_CANDIDATE_TARGET" in text
+    assert "gate_runner.py" in text
 
 
 def test_github_off_renders_no_workflow_anywhere(render, tmp_path):
