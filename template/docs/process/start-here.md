@@ -40,7 +40,6 @@ module set (see BOOTSTRAP.md, "Later"). The triggers:
 - first **persistence, auth, or secrets** → `security_floor`
 - a **layer boundary worth defending** ("ui never imports db") → a scoped
   floor rule in `security_floor` (its module doc: architecture boundaries)
-- a **second surface** (web + cli, web + mobile) → `parity`
 - a **shared or external interface** another component builds on →
   `contract_first`, `contracts_drift`
 - **user-visible behavior worth tracing** to acceptance and tests →
@@ -85,7 +84,7 @@ Tier 2+ merge).
    onboarding bypass.
 
 Green gates at this stage mean: "the process is installed." They do not yet
-mean that architecture, requirements, contracts, parity, or security rules
+mean that architecture, requirements, contracts, or security rules
 have been onboarded as project facts.
 
 ## LLM-guided onboarding
@@ -122,7 +121,7 @@ question or assumption; do not invent it.
   - API/communication: How do the project's own components and surfaces talk
     to each other (REST, GraphQL, gRPC, events, queues), and how is that
     versioned? The answer informs the module choice (`contract-first`,
-    `contracts-drift`, `parity`).
+    `contracts-drift`).
   - Deployment: Which runtime environment and deployment targets are set?
 - Codebase: Is there existing code, tests, CI, docs, or data model?
 - Architecture: Which code roots, layers, interfaces, and boundaries actually
@@ -149,7 +148,7 @@ question or assumption; do not invent it.
   from the goal, the first slice, and the known constraints, name the
   trade-offs, mark one recommendation, and get it confirmed. Proposals are
   always clearly labeled as proposals — facts are still never invented.
-- Do not write real architecture, story, contract, parity, or security
+- Do not write real architecture, story, contract, or security
   artifacts until the facts are defensible.
 - End with the next three concrete steps.
 
@@ -173,7 +172,7 @@ Beyond the frame, the LLM records at least:
   receive a real `arch` block, and whether the stakeholder-facing
   `ARCHITECTURE-OVERVIEW.md` (if `arch-docs` is active) has an audience yet;
 - whether real entries under docs/process/feature-registry/ are needed;
-- whether contracts, parity, or security floor need real artifacts now or stay
+- whether contracts or security floor need real artifacts now or stay
   intentionally inert.
 
 ## Greenfield start
@@ -197,7 +196,7 @@ Use this path when no product code exists yet.
 6. If `security-floor` is active, copy the file security-floor.example.json to
    a policy file named security-floor.json once real forbidden patterns are
    known.
-7. Keep optional examples for `parity`, `contract-first`, `contracts-drift`,
+7. Keep optional examples for `contract-first`, `contracts-drift`,
    and the `telemetry` calibration seed inert until real capabilities,
    interfaces, external contracts, or graded work exist.
 8. Start new work through tier routing: Tier 0-1 uses Quick; Tier 2+ uses
@@ -217,10 +216,10 @@ Use this path when product code already exists.
    document it in an ADR as `change-planned` or `tolerated`, not as already
    satisfied.
 4. Create registry entries only for facts you can defend: real stories, real
-   tests, real contracts, real parity gaps, real security rules.
+   tests, real contracts, real security rules.
 5. Run `uv run scripts/process/gate_runner.py` after each onboarding slice.
 6. Commit onboarding in small steps: architecture baseline, feature registry,
-   contracts, parity, security floor.
+   contracts, security floor.
 7. Start product work only after the relevant baseline for that area exists.
 
 ## Which artifact when

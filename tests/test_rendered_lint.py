@@ -14,7 +14,7 @@ import pytest
 ALL_MODULES = {
     "doc_drift_gate": True, "arch_onboarding": True, "feature_registry": True,
     "github_issues": True, "contracts_drift": True, "git_hooks": True,
-    "contract_first": True, "parity": True, "security_floor": True,
+    "contract_first": True, "security_floor": True,
     "telemetry": True, "arch_docs": True, "github_master": True,
 }
 

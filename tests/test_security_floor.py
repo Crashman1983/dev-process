@@ -30,7 +30,7 @@ def _git(d: Path, *args):
 def _git_repo(d: Path):
     """A fresh git repo we fully control — the scan enumerates via git ls-files,
     so isolating it from the rendered tree keeps exactly our planted files in scope
-    (mirrors parity's controlled-root pattern)."""
+    (a controlled-root pattern)."""
     d.mkdir(parents=True, exist_ok=True)
     _git(d, "init", "-q", "-b", "main")
     _git(d, "config", "user.email", "t@example.com")

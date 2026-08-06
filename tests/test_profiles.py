@@ -4,7 +4,7 @@ import sys
 SOLO_ON = ["scripts/process/check_doc_drift.py", "scripts/process/install-hooks.sh"]
 TEAM_EXTRA = ["scripts/process/check_feature_registry.py", "scripts/process/check_issues.py"]
 HEAVY_OFF = ["scripts/process/check_sbom.py", "scripts/process/check_security_floor.py",
-             "scripts/process/check_parity.py", "scripts/process/check_github_master.py"]
+             "scripts/process/check_github_master.py"]
 
 
 def test_default_profile_is_solo(render_raw, tmp_path):
@@ -70,7 +70,7 @@ def test_ratchet_documented(render_raw, tmp_path):
         assert prof in text, prof
     # every optional module (all 13 copier.yml keys) has a ratchet trigger
     for mod in ("doc_drift_gate", "git_hooks",
-                "security_floor", "parity", "contract_first", "contracts_drift",
+                "security_floor", "contract_first", "contracts_drift",
                 "feature_registry", "github_issues", "github_master",
                 "arch_onboarding", "arch_docs", "telemetry", "sbom"):
         assert f"`{mod}`" in text, mod

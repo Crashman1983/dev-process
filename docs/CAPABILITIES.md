@@ -59,7 +59,7 @@ ist entweder eine feste Regel oder eine Maschine, die prüft.
    Sessions nicht verloren.
 
 Alles jenseits des Kerns sind **zuschaltbare Module** (Architektur-Prüfung,
-Security-Floor, Contract-/Parity-Prüfung, GitHub-Issues als SSOT, Effizienz-
+Security-Floor, Contract-Prüfung, GitHub-Issues als SSOT, Effizienz-
 Telemetrie …). Ein Wegwerf-Skript installiert nichts davon; ein Mehrsession-
 Produkt schaltet zu, was es braucht.
 
