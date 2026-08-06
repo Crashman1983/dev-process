@@ -44,12 +44,9 @@ that starts with `GRADE ` and carries `key=value` tokens but does not match
 the grammar, or whose `verdict`/`action`/`source` is outside the enums, or a
 non-numeric `round` — each with file:line. A grade that does not parse is
 silent telemetry loss: written, never counted. Non-UTF-8 journals fail.
-Malformed calibration cases (invalid JSON, `id` ≠ filename stem, missing
-`ground_truth`, out-of-enum verdicts, or a `grader_verdict` whose shape or
-criteria set does not match `ground_truth`) fail.
 
 **Best-effort (advisory note, never fails CI):** zero GRADE lines repo-wide
-("expected pre-adoption") and an empty calibration suite — the trace only
+("expected pre-adoption") — the trace only
 exists once the workflow starts grading. Whether grading *happened* for a
 given change is review discipline, not machine-checked. Two conventions the
 gate deliberately does not enforce: per-round uniqueness of a
@@ -64,18 +61,18 @@ the existing traces into decision families. Measured numbers print with a
 confidence tag — `high` (direct measure, enough n), `medium` (sample-biased),
 `low` (proxy or thin n; proxies never reach `high`) — and a confidence-gated
 action: at `low` the only action is to collect more data. n before percent.
-The two threshold families (`convergence`, `suite`) print pass/not-met against
-their documented thresholds instead of a confidence tag.
+The `convergence` threshold family prints pass/not-met against
+its documented threshold instead of a confidence tag.
+
+Lean pass: the cockpit carries exactly the three KPIs the process goals name
+— convergence (error rate at the gate), cost, and CFR (error rate after
+merge).
 
 | family | measures | action (threshold → act) |
 |---|---|---|
-| `effectiveness` | per-source catch precision: `catch` (action=fixed) / `false_alarm` (disputed) / `surfaced` / `idle` (first-try satisfied) | ≥20 flagged episodes and 0 catch + high idle → trim that grading source; catch>0 → keep it |
-| `convergence` | do kickbacks resolve ≤2 rounds, or thrash? (first-try episodes excluded from the denominator) | part of the grader-trust thresholds below |
-| `suite` | labeled calibration cases: graded count, danger-direction count, false-passes | grader-trust thresholds below |
-| `tempo` | issue cycle time p50/p90 via `gh` (skipped without a tracker) | p90 > 7 d (provisional, uncalibrated threshold) → find the blocking phase |
+| `convergence` | do kickbacks resolve ≤2 rounds, or thrash? (first-try episodes excluded from the denominator) | <90% in ≤2 rounds → find the thrashing criterion (unclear acceptance / missing test seam) |
 | `cost` | rework episodes (kickback round>1 → fixed); optional `--transcripts DIR` token medians (harness-specific, `~approx`) | rework>0 → find the criterion that kicks back repeatedly |
 | `cfr` | DORA change failure rate: `feat:` with a corrective `fix:` ≤7 d sharing a code file (proxy) | trend over ≥3 windows only; rising despite catch>0 → tighten the test/review gate |
-| `friction` | bypass rate — deliberately **not instrumented** | build the bypass event log only when the other families prove friction matters |
 
 ## What the numbers can say — and what they cannot (honest ceiling)
 
@@ -107,25 +104,6 @@ not cancel out across projects. The consequences are binding:
   never grade people, projects, or model choices, and no cockpit value is a
   target to optimize toward.
 
-## Grader trust: the calibration suite
-
-An AI grader's verdict may replace a redundant review layer only when all
-three thresholds hold — until then it stays additive-advisory (the safe
-default, no time pressure):
-
-1. **≥ 20 graded cases, ≥ 5 in the danger direction** (pre-fix states of real
-   bugs — a clean-feature-only suite measures the wrong regime and hides the
-   only dangerous direction).
-2. **0 false-passes in the danger direction** — non-negotiable.
-3. **≥ 90% kickback convergence** to satisfied in ≤ 2 rounds, from real logs.
-
-Cases live one-per-file under `docs/process/telemetry/calibration/` (`id`
-equals the filename stem); an inert `case.example.json` ships as the seed and
-is skipped by gate and cockpit. `grader_verdict` stays `null` until an actual
-grader run against the (regenerated) diff fills it — only graded cases count,
-an unlabeled file is a fixture, not evidence. Grow the suite by piggyback:
-when work merges, the diff and its criteria already exist — label a case,
-danger-direction cases being the mandatory share.
 
 ## One owner per behavior
 

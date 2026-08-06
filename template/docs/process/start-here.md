@@ -196,9 +196,8 @@ Use this path when no product code exists yet.
 6. If `security-floor` is active, copy the file security-floor.example.json to
    a policy file named security-floor.json once real forbidden patterns are
    known.
-7. Keep optional examples for `contract-first`, `contracts-drift`,
-   and the `telemetry` calibration seed inert until real capabilities,
-   interfaces, external contracts, or graded work exist.
+7. Keep optional examples for `contract-first` and `contracts-drift`
+   inert until real interfaces or external contracts exist.
 8. Start new work through tier routing: Tier 0-1 uses Quick; Tier 2+ uses
    Brainstorm -> Plan -> Execute -> Review.
 

@@ -9,19 +9,14 @@ episode can vanish unnoticed. This gate hard-fails malformed lines instead.
 Zero GRADE lines repo-wide is a soft note, never a failure — the trace only
 exists once the workflow starts grading, and blocking commits on a practice
 that pays off over weeks would be dishonest friction.
-
-Also validates labeled calibration cases under
-docs/process/telemetry/calibration/ (skipping *.example.json seeds).
 """
 from __future__ import annotations
 
-import json
 import re
 import sys
 from pathlib import Path
 
 JOURNAL_DIR = ".process-work/journal"
-CALIBRATION_DIR = "docs/process/telemetry/calibration"
 
 VERDICTS = {"satisfied", "partial", "not_satisfied", "out_of_scope"}
 ACTIONS = {"satisfied", "fixed", "disputed", "surfaced"}
@@ -140,74 +135,6 @@ def check_journals(root: Path) -> tuple[list[str], list[str], int]:
     return hard, soft, total
 
 
-def _check_verdict_map(value, what: str) -> str | None:
-    """ground_truth / grader_verdict: a single verdict or a criterion->verdict map."""
-    entries = value if isinstance(value, dict) else {"_": value}
-    if not entries:
-        return f"{what} is empty"
-    for k, v in entries.items():
-        if not isinstance(v, str) or v not in VERDICTS:
-            return f"{what}[{k}]={v!r} not in {sorted(VERDICTS)}"
-    return None
-
-
-def check_cases(root: Path) -> tuple[list[str], list[str]]:
-    d = root / CALIBRATION_DIR
-    hard: list[str] = []
-    cases = [f for f in sorted(d.glob("*.json")) if not f.name.endswith(".example.json")]
-    if not cases:
-        return hard, ["no calibration cases yet — grow the suite as work merges"]
-    for f in cases:
-        rel = f.relative_to(root)
-        if not f.is_file():
-            continue
-        try:
-            data = json.loads(f.read_text(encoding="utf-8"))
-        except UnicodeDecodeError:
-            hard.append(f"{rel}: not valid UTF-8")
-            continue
-        except json.JSONDecodeError as exc:
-            hard.append(f"{rel}: invalid JSON: {exc}")
-            continue
-        except OSError as exc:
-            hard.append(f"{rel}: unreadable: {exc}")
-            continue
-        if not isinstance(data, dict):
-            hard.append(f"{rel}: not a JSON object")
-            continue
-        case_id = data.get("id")
-        if not isinstance(case_id, str) or not case_id:
-            hard.append(f"{rel}: missing or non-string 'id'")
-        elif case_id != f.stem:
-            hard.append(f"{rel}: id '{case_id}' does not equal the filename stem")
-        if "ground_truth" not in data:
-            hard.append(f"{rel}: missing 'ground_truth'")
-        else:
-            err = _check_verdict_map(data["ground_truth"], "ground_truth")
-            if err:
-                hard.append(f"{rel}: {err}")
-        verdict = data.get("grader_verdict")
-        if verdict is not None:  # null = not yet graded; a fixture, not evidence
-            err = _check_verdict_map(verdict, "grader_verdict")
-            if err:
-                hard.append(f"{rel}: {err}")
-            else:
-                # Shape alignment is load-bearing: a grader_verdict whose kind
-                # or key set differs from ground_truth yields ZERO comparisons
-                # in the suite — a false-pass in the danger direction would
-                # silently read as evaluated. Both single, or both dicts over
-                # the same criteria. (Only checked once ground_truth itself is
-                # present and valid — its own errors are already reported.)
-                gt = data.get("ground_truth")
-                if gt is None or _check_verdict_map(gt, "ground_truth"):
-                    pass
-                elif isinstance(gt, dict) != isinstance(verdict, dict):
-                    hard.append(f"{rel}: grader_verdict shape does not match "
-                                "ground_truth (one is a map, the other a single verdict)")
-                elif isinstance(gt, dict) and set(gt) != set(verdict):
-                    hard.append(f"{rel}: grader_verdict criteria {sorted(verdict)} "
-                                f"do not match ground_truth criteria {sorted(gt)}")
-    return hard, []
 
 
 def main() -> int:
@@ -216,10 +143,8 @@ def main() -> int:
         # a typo'd path must not report green forever
         print(f"telemetry: FAILED:\n  - root {root} is not a directory")
         return 1
-    j_hard, j_soft, total = check_journals(root)
-    c_hard, c_soft = check_cases(root)
-    hard = j_hard + c_hard
-    for note in j_soft + c_soft:
+    hard, soft, total = check_journals(root)
+    for note in soft:
         print(f"telemetry: note: {note}")
     if hard:
         print("telemetry: FAILED:")
