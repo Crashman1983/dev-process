@@ -125,5 +125,5 @@ as a prompt to look, not an infallible verdict.
 This module owns only the pattern floor. It reads no other module's artifacts; it
 is the only module that queries `git ls-files`, which is a repo enumeration, not a
 cross-module import. Byte-level artifact drift is the `contracts-drift` module's
-job, capability×surface coverage is `parity`'s — security-floor composes with them
+job — security-floor composes with the other gates
 without coupling. The gate itself is `scripts/process/check_security_floor.py`.

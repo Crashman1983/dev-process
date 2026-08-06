@@ -182,8 +182,7 @@ network, never a gate. Write the printed refs back into the report and commit.
 **The gate binding (offline, hard):** a report with neither an `issue:` ref
 nor a named `publish-waived:` reason fails — an unpublished review is
 invisible review. A `follow-up` finding without an issue fails — a follow-up
-nobody tracks will be forgotten (the parity gap→issue rule, applied to
-findings). Reports sharing a `campaign:` must agree on the `campaign-issue:`
+nobody tracks will be forgotten. Reports sharing a `campaign:` must agree on the `campaign-issue:`
 parent. A `blocker` finding that is merely `accept`ed is a visible note. The
 gate reads files, not GitHub: whether the issue body still matches the report
 stays attested, like every truthfulness claim.

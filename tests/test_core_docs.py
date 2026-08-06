@@ -357,7 +357,7 @@ def test_anchor_lists_active_module_docs(render, tmp_path):
     assert "docs/process/modules/github-issues.md" in text
     assert "docs/process/modules/telemetry.md" in text
     # an inactive module's doc is NOT listed
-    assert "docs/process/modules/parity.md" not in text
+    assert "docs/process/modules/sbom.md" not in text
 
 
 def test_anchor_no_module_list_when_none_active(render, tmp_path):

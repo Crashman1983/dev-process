@@ -63,13 +63,3 @@ def test_registry_reports_non_utf8_story_cleanly(render, tmp_path):
     assert "invalid JSON" in r.stdout
 
 
-def test_parity_survives_non_mapping_answers(render, tmp_path):
-    # audit: a scalar .copier-answers.yml crashed the gate with AttributeError
-    out = render(
-        tmp_path,
-        {"project_name": "d", "modules": {"parity": True}, "parity_surfaces": ["web"]},
-    )
-    (out / ".copier-answers.yml").write_text("just a string\n")
-    r = _run(out / "scripts/process/check_parity.py", out)
-    assert "Traceback" not in r.stderr
-    assert r.returncode == 0  # no parity files -> honest empty state, no crash

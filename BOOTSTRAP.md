@@ -64,8 +64,7 @@ contract/persistence/auth-touching work.
      job (default on). **With it off, nothing enforces the gates remotely** —
      local git hooks (`git_hooks` module) become the only enforcement pillar.
    - Two modules add conditional prompts: `github_issues` asks for
-     `github_repo` (OWNER/REPO, optional) and `parity` asks for
-     `parity_surfaces` (canonical surface list). Headless: pass them via
+     `github_repo` (OWNER/REPO, optional). Headless: pass it via
      `--data` like the others.
 4. Commit the result. Then let the LLM guide the Greenfield or Brownfield setup
    through `docs/process/start-here.md` before further work.
@@ -95,7 +94,7 @@ line instead:
       --data project_name="<project name>" \
       --data 'harnesses={"claude": false, "copilot": false, "agents_md": true}' \
       --data profile=custom \
-      --data 'modules={"doc_drift_gate": false, "arch_onboarding": false, "feature_registry": false, "github_issues": false, "contracts_drift": false, "git_hooks": false, "contract_first": false, "parity": false, "security_floor": false, "sbom": false, "telemetry": false, "arch_docs": false, "github_master": false}' \
+      --data 'modules={"doc_drift_gate": false, "arch_onboarding": false, "feature_registry": false, "github_issues": false, "contracts_drift": false, "git_hooks": false, "contract_first": false, "security_floor": false, "sbom": false, "telemetry": false, "arch_docs": false, "github_master": false}' \
       --data 'ci={"github": true}' \
       --skip 'CLAUDE.md' --skip 'AGENTS.md' \
       gh:Crashman1983/dev-process .
@@ -163,7 +162,7 @@ Add a module or pull an updated process version — with a clean working tree
 (`git status --porcelain` empty), then:
 
     uvx copier update --defaults \
-      --data 'modules={"doc_drift_gate": true, "arch_onboarding": false, "feature_registry": false, "github_issues": false, "contracts_drift": false, "git_hooks": false, "contract_first": false, "parity": false, "security_floor": false, "sbom": false, "telemetry": false, "arch_docs": false, "github_master": false}' 
+      --data 'modules={"doc_drift_gate": true, "arch_onboarding": false, "feature_registry": false, "github_issues": false, "contracts_drift": false, "git_hooks": false, "contract_first": false, "security_floor": false, "sbom": false, "telemetry": false, "arch_docs": false, "github_master": false}' 
 
 Do NOT `--skip` the anchor files here: copier's three-way merge preserves your
 local anchor extensions anyway, while a skipped anchor keeps the OLD kernel
