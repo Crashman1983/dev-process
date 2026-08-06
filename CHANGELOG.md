@@ -271,7 +271,12 @@ Constitution-Pointer mit Gate-Guard, EARS-/Test-Pflicht-Overrides,
 Command-Wrapper mit Kernel-Pflichten, clarification-Gate über `specs/`,
 publish_and_prune-Merge-Ritual mit verifiziertem Publish + SC-Accounting
 und Flow-Forward-Degradation. Produktrahmen-Wechsel im README dokumentiert,
-Exit-Szenario (Pin einfrieren) festgehalten) ausgeliefert.
+Exit-Szenario (Pin einfrieren) festgehalten. Dazu der Token-Lean-Pass
+(process_context.py, Prime-Diät, analyze/converge nur noch Tier 3) und der
+Windows-Pfad-Fix (kein `|` mehr in Template-Pfaden — die OS-Smoke-Matrix ist
+wieder grün)) ausgeliefert, `v2.0.0` — **Breaking**: Modul-Keys und
+Install-Dialog geändert; Migration bestehender Adopter über `copier update`
+mit explizitem `modules`-Dict (BOOTSTRAP, "Later").
 
 ## Sub-Projekt-Tabelle (SP1–SP24)
 
