@@ -23,7 +23,7 @@ def test_bootstrap_documents_headless_setup():
     # the destructive --overwrite escape hatch.
     text = (ROOT / "BOOTSTRAP.md").read_text()
     assert "copier copy --defaults" in text
-    assert "--data 'harnesses={" in text
+    assert "--data harness=" in text
     assert "--data 'modules={" in text
     assert "--skip 'CLAUDE.md' --skip 'AGENTS.md'" in text
     assert "KERNEL:START" in text  # merge recipe for skipped adapter files

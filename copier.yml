@@ -6,37 +6,40 @@ project_name:
   type: str
   help: "Human-readable project name"
 
-harnesses:
-  type: yaml
-  help: "Which harness adapters to install"
-  default:
-    claude: true
-    copilot: false
-    agents_md: false
-
-profile:
+harness:
   type: str
   help: >-
-    Module preset — a starting point, not a lock (the next question shows the
-    derived set; adjust freely). It only seeds the INITIAL modules answer: on
-    `copier update`, the recorded modules dict wins, so harden later by passing
-    the new modules set explicitly (see BOOTSTRAP.md, "Later").
-    minimal: core gates only (prototypes, smallest footprint).
-    solo: + doc-drift + git-hooks (one developer, local enforcement).
-    team: + feature-registry + github-issues on top of solo (shared backlog,
-    acceptance traceability).
-    custom: start all-off and pick modules yourself.
+    The AI harness whose command adapters render (the methodology and gates
+    are harness-neutral either way; the Spec Kit integration covers further
+    agents).
   choices:
-    - minimal
-    - solo
-    - team
-    - custom
-  default: solo
+    - claude
+    - copilot
+    - agents_md
+  default: claude
 
+# derived from `harness` — kept as a mapping because every template condition
+# and the gate runner key on harnesses.<name>; not asked.
+harnesses:
+  type: yaml
+  when: false
+  default: "{claude: {{ harness == 'claude' }}, copilot: {{ harness == 'copilot' }}, agents_md: {{ harness == 'agents_md' }}}"
+
+regulated:
+  type: bool
+  help: >-
+    Regulated pack: adds the sbom (CycloneDX + license allow-list) and
+    security-floor (forbidden-pattern) gates for compliance-bound projects.
+  default: false
+
+# The standard setup is fixed (lean pass): one opinionated module set, on by
+# default, instead of thirteen toggles. The only switch is `regulated` above.
+# The mapping stays overridable via `copier ... --data modules=...` for the
+# rare expert opt-out; it is not asked interactively.
 modules:
   type: yaml
-  help: "Which opt-in process modules to install (default derived from the profile; adjust freely). Note: github_issues and github_master assume a GitHub-hosted repo and the gh CLI — dead weight elsewhere."
-  default: "{doc_drift_gate: {{ profile in ['solo', 'team'] }}, arch_onboarding: false, feature_registry: {{ profile == 'team' }}, github_issues: {{ profile == 'team' }}, contracts: false, git_hooks: {{ profile in ['solo', 'team'] }}, security_floor: false, sbom: false, telemetry: false, arch_docs: false, github_master: false}"
+  when: false
+  default: "{doc_drift_gate: true, arch_onboarding: true, feature_registry: true, github_issues: true, contracts: true, git_hooks: true, security_floor: {{ regulated }}, sbom: {{ regulated }}, telemetry: true, arch_docs: true, github_master: true}"
 
 ci:
   type: yaml

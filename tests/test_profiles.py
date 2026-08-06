@@ -1,76 +1,76 @@
+"""The standard setup (lean pass): one opinionated module set instead of
+profiles and thirteen toggles; `regulated` is the single switch."""
 import subprocess
 import sys
 
-SOLO_ON = ["scripts/process/check_doc_drift.py", ".pre-commit-config.yaml"]
-TEAM_EXTRA = ["scripts/process/check_feature_registry.py", "scripts/process/check_issues.py"]
-HEAVY_OFF = ["scripts/process/check_sbom.py", "scripts/process/check_security_floor.py",
-             "scripts/process/check_github_master.py"]
+STANDARD_ON = [
+    "scripts/process/check_doc_drift.py",
+    ".pre-commit-config.yaml",
+    "scripts/process/check_feature_registry.py",
+    "scripts/process/check_issues.py",
+    "scripts/process/check_github_master.py",
+    "scripts/process/check_contracts.py",
+    "scripts/process/check_capability_contracts.py",
+    "scripts/process/check_architecture.py",
+    "scripts/process/check_arch_docs.py",
+    "scripts/process/check_telemetry.py",
+]
+REGULATED_ONLY = [
+    "scripts/process/check_sbom.py",
+    "scripts/process/check_security_floor.py",
+]
 
 
-def test_default_profile_is_solo(render_raw, tmp_path):
+def test_default_render_is_the_standard_set(render_raw, tmp_path):
     out = render_raw(tmp_path, {"project_name": "d"})
-    for rel in SOLO_ON:
+    for rel in STANDARD_ON:
         assert (out / rel).is_file(), rel
-    for rel in TEAM_EXTRA + HEAVY_OFF:
+    for rel in REGULATED_ONLY:
         assert not (out / rel).exists(), rel
-    assert "profile: solo" in (out / ".copier-answers.yml").read_text()
+    answers = (out / ".copier-answers.yml").read_text()
+    assert "doc_drift_gate: true" in answers  # manifest stays load-bearing
+    assert "sbom: false" in answers
 
 
-def test_minimal_profile_core_only(render_raw, tmp_path):
-    out = render_raw(tmp_path, {"project_name": "d", "profile": "minimal"})
-    for rel in SOLO_ON + TEAM_EXTRA + HEAVY_OFF:
-        assert not (out / rel).exists(), rel
-    # core gates still there
-    for rel in ["scripts/process/check_kernel.py", "scripts/process/check_decisions.py",
-                "scripts/process/check_review.py", "scripts/process/check_product_frame.py"]:
+def test_regulated_adds_the_compliance_pack(render_raw, tmp_path):
+    out = render_raw(tmp_path, {"project_name": "d", "regulated": True})
+    for rel in STANDARD_ON + REGULATED_ONLY:
         assert (out / rel).is_file(), rel
+    answers = (out / ".copier-answers.yml").read_text()
+    assert "sbom: true" in answers and "security_floor: true" in answers
 
 
-def test_team_profile_adds_backlog_modules(render_raw, tmp_path):
-    out = render_raw(tmp_path, {"project_name": "d", "profile": "team"})
-    for rel in SOLO_ON + TEAM_EXTRA:
-        assert (out / rel).is_file(), rel
-    for rel in HEAVY_OFF:
+def test_standard_render_gates_green(render_raw, tmp_path):
+    # content-driven gates must be honestly inert on an empty project — the
+    # standard set never blocks a fresh install
+    out = render_raw(tmp_path, {"project_name": "d"})
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=out, check=True)
+    r = subprocess.run([sys.executable, str(out / "scripts/process/gate_runner.py")],
+                       cwd=out, capture_output=True, text=True)
+    assert r.returncode == 0, r.stdout + r.stderr
+
+
+def test_harness_single_choice(render_raw, tmp_path):
+    out = render_raw(tmp_path, {"project_name": "d", "harness": "copilot"})
+    assert (out / ".github/prompts/brainstorm.prompt.md").is_file()
+    assert not (out / ".claude").exists()
+    assert not (out / "AGENTS.md").exists()
+
+
+def test_explicit_modules_still_override(render_raw, tmp_path):
+    # the expert opt-out: a passed complete modules dict replaces the standard
+    out = render_raw(tmp_path, {"project_name": "d", "modules": {
+        "doc_drift_gate": False, "arch_onboarding": False,
+        "feature_registry": False, "github_issues": False, "contracts": False,
+        "git_hooks": False, "security_floor": False, "sbom": False,
+        "telemetry": False, "arch_docs": False, "github_master": False}})
+    for rel in STANDARD_ON + REGULATED_ONLY:
         assert not (out / rel).exists(), rel
-    # derived set is recorded concretely, so `copier update` keeps it
-    ans = (out / ".copier-answers.yml").read_text()
-    assert "profile: team" in ans
-    assert "feature_registry: true" in ans and "sbom: false" in ans
 
 
-def test_custom_profile_starts_all_off(render_raw, tmp_path):
-    out = render_raw(tmp_path, {"project_name": "d", "profile": "custom"})
-    for rel in SOLO_ON + TEAM_EXTRA + HEAVY_OFF:
-        assert not (out / rel).exists(), rel
-
-
-def test_explicit_modules_override_profile(render_raw, tmp_path):
-    # a passed modules dict wins over the profile-derived default entirely
-    out = render_raw(tmp_path, {"project_name": "d", "profile": "solo",
-                                "modules": {"sbom": True}})
-    assert (out / "scripts/process/check_sbom.py").is_file()
-    for rel in SOLO_ON:
-        assert not (out / rel).exists(), rel
-
-
-def test_profile_renders_gate_green(render_raw, tmp_path):
-    # each profile's fresh render must pass its own gate runner
-    for prof in ("minimal", "solo", "team"):
-        out = render_raw(tmp_path / prof, {"project_name": "d", "profile": prof})
-        r = subprocess.run([sys.executable, str(out / "scripts/process/gate_runner.py")],
-                           cwd=out, capture_output=True, text=True)
-        assert r.returncode == 0, f"{prof}: {r.stdout}"
-
-
-def test_ratchet_documented(render_raw, tmp_path):
-    out = render_raw(tmp_path, {"project_name": "d", "profile": "minimal"})
+def test_standard_setup_documented(render_raw, tmp_path):
+    out = render_raw(tmp_path, {"project_name": "d"})
     text = (out / "docs/process/start-here.md").read_text(encoding="utf-8")
-    assert "hardening ratchet" in text
-    for prof in ("`minimal`", "`solo`", "`team`", "`custom`"):
-        assert prof in text, prof
-    # every optional module (all 13 copier.yml keys) has a ratchet trigger
-    for mod in ("doc_drift_gate", "git_hooks",
-                "security_floor", "contracts",
-                "feature_registry", "github_issues", "github_master",
-                "arch_onboarding", "arch_docs", "telemetry", "sbom"):
-        assert f"`{mod}`" in text, mod
+    assert "## The standard setup" in text
+    assert "`regulated`" in text
+    assert "decision record" in text  # switching off is a recorded decision
