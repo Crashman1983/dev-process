@@ -129,4 +129,4 @@ def test_bootstrap_documents_complete_optional_harness_mapping():
     root = Path(__file__).parents[1]
     text = (root / "BOOTSTRAP.md").read_text(encoding="utf-8")
     assert "Claude Code is always installed" not in text
-    assert 'harnesses={"claude": false, "copilot": false, "agents_md": true}' in text
+    assert "--data harness=agents_md" in text and "--data harness=claude" in text

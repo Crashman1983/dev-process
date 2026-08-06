@@ -1,2 +1,6 @@
 # Managed by copier — do not edit by hand. Records the installed process version.
 {{ _copier_answers|to_nice_yaml }}
+# Derived, load-bearing state (the gate runner reads these; `harness` and
+# `regulated` above are the source answers):
+harnesses: {claude: {{ harnesses.claude | default(false) | lower }}, copilot: {{ harnesses.copilot | default(false) | lower }}, agents_md: {{ harnesses.agents_md | default(false) | lower }}}
+modules: {doc_drift_gate: {{ modules.doc_drift_gate | default(false) | lower }}, arch_onboarding: {{ modules.arch_onboarding | default(false) | lower }}, feature_registry: {{ modules.feature_registry | default(false) | lower }}, github_issues: {{ modules.github_issues | default(false) | lower }}, contracts: {{ modules.contracts | default(false) | lower }}, git_hooks: {{ modules.git_hooks | default(false) | lower }}, security_floor: {{ modules.security_floor | default(false) | lower }}, sbom: {{ modules.sbom | default(false) | lower }}, telemetry: {{ modules.telemetry | default(false) | lower }}, arch_docs: {{ modules.arch_docs | default(false) | lower }}, github_master: {{ modules.github_master | default(false) | lower }}}

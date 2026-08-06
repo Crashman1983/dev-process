@@ -11,60 +11,34 @@ Converse with the user in the user's language; write all artifacts (docs,
 code, commits, ADRs, journal) in English.
 
 **When this process is not worth it:** for throwaway prototypes, one-off
-scripts, and single-session work the overhead is a net loss — install nothing,
-or pick the `minimal` profile and skip the onboarding dialogue. The process
-pays off for anything multi-session, multi-agent, or touching contracts,
-persistence, or auth.
+scripts, and single-session work the overhead is a net loss — install nothing.
+The process pays off for anything multi-session, multi-agent, or touching
+contracts, persistence, or auth.
 
-## Profiles and the hardening ratchet
+## The standard setup
 
-Module choice at install time is one question, not thirteen: the **profile**
-preset derives the module set, and the modules question then shows that set for
-adjustment — a starting point, not a lock.
+Module choice is not a question (lean pass): the template renders one
+opinionated standard set — doc-drift, git-hooks (pre-commit), feature
+inventory, github-issues + github-master, contracts, arch-onboarding,
+arch-docs, telemetry — on top of the always-on core gates. The single switch
+is **`regulated`**, which adds the compliance pack (`sbom` + `security_floor`).
+Content-driven gates are honestly inert until their artifacts exist: an empty
+inventory, contract set, or journal is a note, never a failure, so the
+standard set costs nothing before the project grows into it.
 
-| Profile | Modules on top of the core gates | Who it fits |
-|---|---|---|
-| `minimal` | none | prototypes; the smallest footprint |
-| `solo` (default) | doc-drift, git-hooks | one developer — local enforcement carries the process even without CI review culture |
-| `team` | solo + feature-registry, github-issues | a small team — shared backlog and acceptance traceability |
-| `custom` | none preselected | you know exactly what you want |
+Switching a module *off* afterwards (`copier update --data modules=…`) is an
+expert opt-out and a process decision — record why (decision record); do not
+just drop the gate that started failing.
 
-**Harden as the project earns it — the ratchet.** Start light and switch a
-module on when its trigger appears; each step is a `copier update` with the new
-module set (see BOOTSTRAP.md, "Later"). The triggers:
-
-- **docs worth trusting** — more than a handful, referenced from anchors →
-  `doc_drift_gate`
-- **no CI, or work leaves your machine** — local enforcement as the (only or
-  additional) pillar → `git_hooks`
-- first **persistence, auth, or secrets** → `security_floor`
-- a **layer boundary worth defending** ("ui never imports db") → a scoped
-  floor rule in `security_floor` (its module doc: architecture boundaries)
-- a **shared or external interface** another component builds on →
-  `contracts`
-- **user-visible behavior worth tracing** to acceptance and tests →
-  `feature_registry`
-- the backlog outgrows one head, or a **second person/agent** joins →
-  `github_issues` (and `github_master` once issues become the source of truth)
-- **architecture claims worth checking** against real code → `arch_onboarding`;
-  stakeholders who want to *read* it → `arch_docs`
-- you want to **measure what the process catches and costs** → `telemetry`
-- **license/compliance** obligations → `sbom`
-
-The ratchet only tightens: switching a module *off* again is a process decision
-— record why (decision record), do not just drop the gate that started failing.
-
-**The mid-size caveat:** four gates are *core* and always run regardless of the
-module profile — `kernel` (the always-on rule block is intact in the anchor),
-`decision-records`, `review`, and `product-frame`. So even on
-the minimal profile, the first Tier 2+ change (one that touches a contract,
-persistence, auth, or something another component depends on) carries the full
-plan → review → attestation ceremony, without the optional modules
-(feature-registry, github-issues) that would house its acceptance and issue
-link. A project too small to want that ceremony but that will inevitably make
-one cross-component change sits in an awkward middle: keep such changes rare, or
-accept the core-gate floor as the price of the guarantee it buys (no unreviewed
-Tier 2+ merge).
+**The mid-size caveat:** five gates are *core* and always run regardless of
+the module set — `kernel` (the always-on rule block is intact in the anchor),
+`decision-records`, `review`, `clarification`, and `product-frame`. The first
+Tier 2+ change (one that touches a contract, persistence, auth, or something
+another component depends on) therefore always carries the full
+plan → review → attestation ceremony. A project too small to want that
+ceremony but that will inevitably make one cross-component change sits in an
+awkward middle: keep such changes rare, or accept the core-gate floor as the
+price of the guarantee it buys (no unreviewed Tier 2+ merge).
 
 ## First run
 

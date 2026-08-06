@@ -50,22 +50,18 @@ contract/persistence/auth-touching work.
        git clone https://github.com/Crashman1983/dev-process /tmp/dev-process
        uvx copier copy /tmp/dev-process .
 
-3. Answer the prompts:
+3. Answer the prompts (the lean pass collapsed the dialogue to four):
    - `project_name` — human-readable name.
-   - `harnesses` — independently select `claude`, `copilot`, and `agents_md`.
-     Claude defaults to enabled for backward compatibility but can be disabled.
-   - `profile` — a module preset (`minimal` | `solo` | `team` | `custom`) that
-     derives the `modules` default. Pick the closest fit; the next question
-     shows the derived set for adjustment. Harden later via `copier update`
-     (the ratchet in `docs/process/start-here.md`).
-   - `modules` — which opt-in process modules to enable (default derived from
-     the profile; adjust freely).
+   - `harness` — one of `claude` | `copilot` | `agents_md` for the command
+     adapters; the methodology and gates are harness-neutral either way.
+   - `regulated` — adds the compliance pack (`sbom` + `security_floor`).
+     Everything else renders as the fixed standard set
+     (`docs/process/start-here.md`, "The standard setup").
    - `ci` — whether the `github` Actions workflow renders the `process-gates`
      job (default on). **With it off, nothing enforces the gates remotely** —
      local git hooks (`git_hooks` module) become the only enforcement pillar.
-   - Two modules add conditional prompts: `github_issues` asks for
-     `github_repo` (OWNER/REPO, optional). Headless: pass it via
-     `--data` like the others.
+   - `github_repo` (OWNER/REPO, optional) for the issue gate. Headless: pass
+     it via `--data` like the others.
 4. Commit the result. Then let the LLM guide the Greenfield or Brownfield setup
    through `docs/process/start-here.md` before further work.
 
@@ -80,30 +76,29 @@ copier asks its questions interactively; agent harnesses (Claude Code, Codex,
 Copilot, and friends) have no TTY for that. Pass all answers on the command
 line instead:
 
-    # simple: pick a profile, let it derive the module set
+    # standard setup
     uvx copier copy --defaults \
       --data project_name="<project name>" \
-      --data 'harnesses={"claude": false, "copilot": false, "agents_md": true}' \
-      --data profile=solo \
+      --data harness=agents_md \
+      --data regulated=false \
       --data 'ci={"github": true}' \
       --skip 'CLAUDE.md' --skip 'AGENTS.md' \
       gh:Crashman1983/dev-process .
 
-    # fine-grained: profile=custom plus the complete modules dictionary
+    # expert opt-out only: override the fixed standard module set
     uvx copier copy --defaults \
       --data project_name="<project name>" \
-      --data 'harnesses={"claude": false, "copilot": false, "agents_md": true}' \
-      --data profile=custom \
-      --data 'modules={"doc_drift_gate": false, "arch_onboarding": false, "feature_registry": false, "github_issues": false, "contracts": false, "git_hooks": false, "security_floor": false, "sbom": false, "telemetry": false, "arch_docs": false, "github_master": false}' \
+      --data harness=claude \
+      --data 'modules={"doc_drift_gate": true, "arch_onboarding": false, "feature_registry": true, "github_issues": true, "contracts": false, "git_hooks": true, "security_floor": false, "sbom": false, "telemetry": true, "arch_docs": false, "github_master": true}' \
       --data 'ci={"github": true}' \
       --skip 'CLAUDE.md' --skip 'AGENTS.md' \
       gh:Crashman1983/dev-process .
 
 - `--defaults` answers everything not passed explicitly; no interactive prompt
   may remain.
-- When you pass a dictionary (`harnesses`, `modules`, `ci`), pass it
-  **complete**, not just the changed keys. Passing `modules` overrides the
-  profile-derived set entirely — omit it to let the profile decide.
+- When you pass a dictionary (`modules`, `ci`), pass it **complete**, not
+  just the changed keys — a passed `modules` overrides the standard set
+  entirely; omit it to get the standard setup.
 - `--skip 'CLAUDE.md' --skip 'AGENTS.md'` protects brownfield repos: without a
   TTY, a content conflict otherwise aborts mid-render and leaves a
   half-installed state, while `--skip` keeps the existing file untouched and
@@ -134,18 +129,11 @@ The gate runner carries PEP 723 metadata; `uv run` supplies Python and
 
 ## Recommended order
 
-Module choice happens at install time, but the clarifying questions live in
-`docs/process/start-here.md` — after the install. If the module choice is not
-yet settled:
-
-1. Install minimally (`--data profile=minimal` — core gates only).
-2. Run the start-here dialogue (greenfield/brownfield, goal, stack, risks).
-3. Derive the module choice from the answers by applying the **hardening
-   ratchet** in `docs/process/start-here.md` — every optional module has at
-   least one named trigger there; switch a module on when its trigger appears.
-4. Retrofit modules as described under [Later](#later).
-
-If the choice is already known, set it directly at install time.
+1. Install the standard setup (the four prompts above).
+2. Run the start-here dialogue (greenfield/brownfield, goal, stack, risks) —
+   content-driven gates stay honestly inert until their artifacts exist, so
+   the standard set never blocks an empty project.
+3. Onboard area by area as `docs/process/start-here.md` describes.
 
 ## Brownfield notes
 
@@ -170,9 +158,8 @@ block and turns the kernel gate red after the update. After any update, re-run
 `uvx pre-commit install --hook-type pre-commit --hook-type pre-push` if the
 `git-hooks` module is active.
 
-The install-time `profile` only seeded the initial modules answer — on update,
-the **recorded `modules` dict wins**, so passing a different profile alone is a
-silent no-op; always pass the new `modules` set explicitly, as above.
+On update the **recorded `modules` dict wins**;
+to change the set, pass the new `modules` explicitly, as above.
 `--data` expects the **complete** `modules` dictionary with the new values,
 not just the changed keys. `update` checks out the latest **tagged** template
 release by default, preserves your local edits, and flags conflicts inline.
