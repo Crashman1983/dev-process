@@ -153,13 +153,27 @@ flow-forward.**
    by a reference; durable product/architecture truth moves to
    `PRODUCT.md`/ADRs/registry. `specs/` is the path to the result, never the
    truth afterwards (mandatory rule 4).
-3. **Flow-forward persistence, consistent with the archive ritual.** Of Spec
-   Kit's three persistence models we choose flow-forward: each feature keeps
-   its directory, unchanged after merge, as audit trail — the same role
-   `.process-work/plans/archive/` plays today, covered by the same retention
-   stance ("growth is unbounded by design; prune by age as an ordinary
-   change"). The merge ritual still archives the plan (the review record has
-   one owner — the archive); `specs/` remains working history.
+3. **Publish-and-prune at merge (with `github-issues`); flow-forward as the
+   fallback.** During work the artifacts must live on the feature branch —
+   `tasks.md` is the execution input, clarify edits `spec.md` in place, and
+   the review bundle needs spec+plan+tasks beside the diff. At the merge
+   ritual, `spec.md`, `tasks.md` (and any research/data-model files) are
+   published as comments on the tracking issue (the plan's `issue:` link
+   names the target; same mechanism and best-effort character as
+   `publish_review.sh` — the GitHub API supports no real file attachments,
+   so comments it is, split at the 65k character limit), and `specs/NNN-…/`
+   is deleted before merge. `main` carries nothing of the feature directory;
+   the full content stays reachable in git history anyway (ff-only merges
+   preserve the branch commits), so no traceability is lost. **One file
+   stays in the repo:** the compact `plan.md` is archived to
+   `.process-work/plans/archive/` exactly as today — it carries `tier:` and
+   `issue:` and is the only artifact the review gate keys on. That part is
+   non-negotiable: gates are hermetic and offline; issue comments are
+   silently editable and deletable — a fine human archive, an unacceptable
+   enforcement substrate. Without the `github-issues` module there is
+   nowhere to publish, so the honest degradation is flow-forward: the
+   feature directory merges and stays, under the existing retention stance
+   ("prune by age as an ordinary change").
 4. **Context hygiene enables the small-model routing.** `/prime` and execute
    load, per task, only `tasks.md` plus the files it names exactly — never
    `specs/` recursively; the doc-drift gate keeps those references resolvable
