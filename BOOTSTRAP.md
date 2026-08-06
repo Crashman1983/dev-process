@@ -167,8 +167,8 @@ Add a module or pull an updated process version — with a clean working tree
 Do NOT `--skip` the anchor files here: copier's three-way merge preserves your
 local anchor extensions anyway, while a skipped anchor keeps the OLD kernel
 block and turns the kernel gate red after the update. After any update, re-run
-`uv run scripts/process/install_hooks.py` if the `git-hooks` module is active —
-the installed hooks are copies and do not update themselves.
+`uvx pre-commit install --hook-type pre-commit --hook-type pre-push` if the
+`git-hooks` module is active.
 
 The install-time `profile` only seeded the initial modules answer — on update,
 the **recorded `modules` dict wins**, so passing a different profile alone is a
@@ -193,4 +193,4 @@ local deletions, and the module is never rendered. Always pass new answers via
 If you enabled the `git-hooks` module, install the hooks once per clone (they
 live in host-local `.git/hooks`, not version control):
 
-    uv run scripts/process/install_hooks.py
+    uvx pre-commit install --hook-type pre-commit --hook-type pre-push

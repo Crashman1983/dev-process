@@ -55,4 +55,4 @@ release ritual: `docs/process/releases.md`.
 
 When the optional `git-hooks` module is installed, a `pre-commit` hook enforces the
 no-direct-main rule locally (bypassable for automation, and for the one-time
-onboarding/baseline commit, via `ALLOW_MAIN_COMMIT=1`).
+onboarding/baseline commit, via `SKIP=no-commit-to-branch`).

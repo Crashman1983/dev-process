@@ -78,10 +78,11 @@ Tier 2+ merge).
 4. Read `docs/process/mandatory-rules.md` and `docs/process/risk-tiers.md`.
 5. Create the process-baseline commit before product work starts.
 6. Install local hooks if the `git-hooks` module is active:
-   `uv run scripts/process/install_hooks.py`. Installing *after* the baseline
-   commit avoids the no-direct-main hook blocking it; if the hooks were
-   installed first, `ALLOW_MAIN_COMMIT=1 git commit …` is the sanctioned
-   onboarding bypass.
+   `uvx pre-commit install --hook-type pre-commit --hook-type pre-push`.
+   Installing *after* the baseline commit avoids the no-direct-main hook
+   blocking it; if the hooks were installed first,
+   `SKIP=no-commit-to-branch git commit …` is the sanctioned onboarding
+   bypass.
 
 Green gates at this stage mean: "the process is installed." They do not yet
 mean that architecture, requirements, contracts, or security rules

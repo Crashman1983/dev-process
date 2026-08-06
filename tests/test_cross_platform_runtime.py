@@ -76,12 +76,13 @@ def test_portable_python_helpers_render(render, tmp_path):
             "modules": {"git_hooks": True, "github_issues": True},
         },
     )
-    assert (out / "scripts/process/install_hooks.py").is_file()
-    assert (out / "scripts/process/run_hook.py").is_file()
+    assert (out / ".pre-commit-config.yaml").is_file()
+    cfg = (out / ".pre-commit-config.yaml").read_text(encoding="utf-8")
+    assert "no-commit-to-branch" in cfg
+    assert "gate_runner.py" in cfg and "pre-push" in cfg
     assert (out / "scripts/process/new_issue.py").is_file()
-    for name in ["install_hooks.py", "run_hook.py", "new_issue.py"]:
-        text = (out / "scripts/process" / name).read_text(encoding="utf-8")
-        assert '# requires-python = ">=3.11"' in text
+    text = (out / "scripts/process/new_issue.py").read_text(encoding="utf-8")
+    assert '# requires-python = ">=3.11"' in text
 
     subprocess.run(["git", "init", "-q", "-b", "main"], cwd=out, check=True)
     gates = subprocess.run(
@@ -91,23 +92,9 @@ def test_portable_python_helpers_render(render, tmp_path):
         text=True,
     )
     assert gates.returncode == 0, gates.stdout + gates.stderr
-    hooks = subprocess.run(
-        ["uv", "run", "scripts/process/install_hooks.py"],
-        cwd=out,
-        capture_output=True,
-        text=True,
-    )
-    assert hooks.returncode == 0, hooks.stderr
-    pre_push = subprocess.run(
-        ["sh", ".git/hooks/pre-push", "origin", "unused-location"],
-        cwd=out,
-        input="",
-        capture_output=True,
-        text=True,
-    )
-    assert pre_push.returncode == 0, pre_push.stderr
     issue = subprocess.run(
         ["uv", "run", "scripts/process/new_issue.py", "feature"],
+
         cwd=out,
         capture_output=True,
         text=True,

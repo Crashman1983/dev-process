@@ -61,13 +61,12 @@ Die plattformneutralen Befehle sind:
 
 ```bash
 uv run scripts/process/gate_runner.py
-uv run scripts/process/install_hooks.py
+uvx pre-commit install --hook-type pre-commit --hook-type pre-push
 uv run scripts/process/new_issue.py feature
 ```
 
-Git startet die kleinen POSIX-Hook-Launcher selbst; Git for Windows liefert
-diese Hook-Umgebung mit. Die eigentliche Hook-Logik laeuft danach ueber `uv` in
-Python.
+Die lokalen Hooks verwaltet das Standard-Framework `pre-commit`
+(https://pre-commit.com); die Gate-Logik laeuft danach ueber `uv` in Python.
 
 ## Modulbezogene Hinweise
 
