@@ -1,7 +1,7 @@
 import subprocess
 import sys
 
-SOLO_ON = ["scripts/process/check_doc_drift.py", "scripts/process/install-hooks.sh"]
+SOLO_ON = ["scripts/process/check_doc_drift.py", ".pre-commit-config.yaml"]
 TEAM_EXTRA = ["scripts/process/check_feature_registry.py", "scripts/process/check_issues.py"]
 HEAVY_OFF = ["scripts/process/check_sbom.py", "scripts/process/check_security_floor.py",
              "scripts/process/check_github_master.py"]

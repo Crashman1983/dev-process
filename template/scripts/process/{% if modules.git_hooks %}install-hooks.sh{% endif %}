@@ -1,4 +1,0 @@
-#!/bin/sh
-# Backward-compatible launcher. The portable Python installer is authoritative.
-script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-exec uv run "$script_dir/install_hooks.py" "$@"

@@ -1,57 +1,44 @@
-# Module: git-hooks
+# Module: git-hooks — local enforcement via pre-commit
 
-Opt-in. Installs local git hooks that enforce the process on every commit and
-push — the guarantee that holds when nobody is watching. The hooks delegate to
-the manifest-aware gate runner, so they cover whatever modules you enabled
-without naming any of them.
+The local enforcement pillar. Without CI (or before it runs), git hooks are
+what stands between a rule and a silent violation. This module delegates to
+the standard [pre-commit](https://pre-commit.com) framework instead of a
+custom installer — one less thing to maintain, and a tool contributors
+already know.
 
-## Install
+## What it ships
 
-The hooks live in `.git/hooks`, which is host-local and not versioned — so the
-installer is the source of truth. Run it once per clone, after enabling new
-modules, and **after every `copier update`** — installed hooks are copies and
-do not update themselves:
+A rendered `.pre-commit-config.yaml` with two hooks:
 
-    uv run scripts/process/install_hooks.py
+- **`no-commit-to-branch`** (pre-commit stage, upstream standard hook):
+  blocks direct commits to `main`/`master` — branch discipline
+  (`commits.md`).
+- **`process-gates`** (pre-push stage, local hook): runs
+  `uv run scripts/process/gate_runner.py` — the same manifest-aware gates CI
+  runs, so a push that would fail CI fails at your machine first.
 
-It is brownfield-safe: a pre-existing hook that dev-process did not write is
-left untouched (you merge it yourself). Re-running is idempotent. If
-`core.hooksPath` is configured (hook managers like husky, or a global
-`~/.githooks`), the installer refuses — integrate the hook contents into your
-manager manually instead.
+## Install (once per clone)
 
-**Runtime requirement:** the installed hooks delegate through `uv` to portable
-Python helpers. `uv` supplies Python and the gate runner's declared PyYAML
-dependency at commit/push time; no system Python or Bash installation is
-required. Git invokes the small POSIX hook launchers itself (including Git for
-Windows).
+```
+uvx pre-commit install --hook-type pre-commit --hook-type pre-push
+```
 
-## The three hooks
+`pre-commit` manages `.git/hooks` itself and composes with hooks a project
+already uses via its own config — the brownfield-additive property the old
+custom installer provided, now owned by the standard tool. Re-run the same
+command after a `copier update`; it is idempotent.
 
-| Hook | When | What | Bypass |
-|---|---|---|---|
-| pre-commit | each commit | blocks a direct commit to `main`/`master` | `ALLOW_MAIN_COMMIT=1` |
-| pre-push | each push | gates the **pushed commits** — each pushed tip is checked out into a throwaway worktree and the gate runner runs there; a failing gate blocks the push | `git push --no-verify` or `SKIP_PUSH_GATE=1` |
-| post-commit | after each commit | runs the gate runner in `--warn` mode (reports drift, never blocks) | — |
+## Bypass — sanctioned and otherwise
 
-The commit hook is fast (a branch check only); the push-time gate checks the
-**commits being pushed**, not the working tree: each pushed tip is materialized
-in a throwaway detached `git worktree` and the gate runner runs against that, so
-local uncommitted state can neither mask nor cause a failure, and the check is
-parallel-safe (no `stash`, no HEAD move). Where CI runs the gate on the pushed
-commits it remains the authority; the post-commit warning is advisory.
+- The **onboarding baseline commit** on main is the one sanctioned bypass:
+  `SKIP=no-commit-to-branch git commit …`.
+- Anything else (`--no-verify`, `SKIP=process-gates`) is a skipped gate:
+  allowed in an emergency, documented in the commit body (mandatory rule 8),
+  and caught by CI on push anyway.
 
-The process hooks themselves run from that detached checkout through `uv`, so
-they do not depend on a pre-existing project environment there. Any downstream
-project gate they invoke must meet the same **fresh checkout** contract: its
-tracked configuration must define a **reproducible bootstrap**, without relying
-on a warm `.venv`, `node_modules`, or other host-local cache. Treat bootstrap
-failure and product-test failure as distinct diagnostics even though either
-correctly blocks the push.
+## Honest ceiling
 
-## Why delegate
-
-The hooks call `scripts/process/run_hook.py`; its push/post-commit paths invoke
-`scripts/process/gate_runner.py`, never a fixed gate list. Enable or disable a
-module and the hooks adjust automatically — one owner for "which gates run",
-shared with CI.
+Hooks are client-side: a clone that never installs them enforces nothing
+locally. CI (the `ci.github` adapter plus branch protection) remains the
+enforcement authority; this module is the fast local mirror of it, and — in
+a no-CI setup — the only pillar (`start-here.md`, enforcement wiring).

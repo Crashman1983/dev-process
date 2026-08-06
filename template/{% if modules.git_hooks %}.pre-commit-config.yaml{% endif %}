@@ -1,0 +1,24 @@
+# dev-process local enforcement via the standard pre-commit framework
+# (https://pre-commit.com). Install once per clone:
+#
+#     uvx pre-commit install --hook-type pre-commit --hook-type pre-push
+#
+# Bypass for the sanctioned onboarding case (the process-baseline commit on
+# main): SKIP=no-commit-to-branch git commit ...  — any other bypass
+# (--no-verify) is a skipped gate and is documented in the commit body
+# (mandatory rule 8).
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: no-commit-to-branch
+        args: [--branch, main, --branch, master]
+  - repo: local
+    hooks:
+      - id: process-gates
+        name: dev-process gates (gate_runner)
+        entry: uv run scripts/process/gate_runner.py
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
