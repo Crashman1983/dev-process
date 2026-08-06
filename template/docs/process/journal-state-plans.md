@@ -48,7 +48,14 @@ the value is that scope stays clean and nothing is silently lost.
 
 `.process-work/plans/YYYY-MM-DD-<feature>.md` holds the current implementation plan
 (from the plan phase). Archived to `.process-work/plans/archive/` on merge. Designs
-from the brainstorm phase live beside plans as `design-<topic>.md`.
+from the brainstorm phase live beside plans as `design-<topic>.md` — scaffold and
+section prompts in `docs/process/design-template.md`.
+
+An in-progress design may carry `[NEEDS CLARIFICATION: …]` markers for its open
+questions (`design-template.md`); a **plan** may not — a plan is built from an
+approved, clarification-free design. The core `clarification` gate enforces
+exactly that line: a marker in an active plan is a hard failure, markers in an
+active design are a visible note, and archived files are history.
 
 A plan carries one machine-readable line, `tier: N`, recording the derived risk
 tier (`risk-tiers.md`). It is the single tier source the `review` gate keys on:

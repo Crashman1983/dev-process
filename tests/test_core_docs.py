@@ -13,6 +13,7 @@ CORE = [
     "review-checklist.md",
     "definition-of-ready-and-done.md",
     "journal-state-plans.md",
+    "design-template.md",
     "adr/README.md",
     "adr/template.md",
 ]

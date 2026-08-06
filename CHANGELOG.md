@@ -241,6 +241,18 @@ und Issue-Body-Erzeugung bei kompatiblen Shell-Launchern; Claude, Copilot und
 AGENTS.md unabhaengig kombinierbar; OS-Smoke-Matrix; Manifestwerte fail-closed
 validiert; Release-Tag muss zur Projektversion passen) ausgeliefert, `v1.37.0`.
 
+SP55 (spec-deepening: Spezifikationsphase vertieft — Anleihen aus GitHub
+Spec Kit, schema-erhaltend (Analyse: `docs/analysis/2026-08-06-speckit-comparison.md`).
+`[NEEDS CLARIFICATION: …]`-Marker-Konvention im Brainstorm statt stiller
+Annahmen; `design-template.md` als Core-Doc-Scaffold (Intent, Constraints,
+Touchpoints, nummerierte EARS-ACs, Alternativen, offene Fragen, Tier-3-
+Threat-Frage); Review-Checkliste um „Specification quality" erweitert
+(testbare Kriterien, ehrlich aufgelöste Fragen, Was/Wie-Trennung, DoR-R2-
+Twins). Fünftes **Core-Gate** (`check_clarification.py`): unaufgelöster
+Marker in einem *aktiven Plan* hart (Plan setzt genehmigtes Design voraus),
+im aktiven Design nur Note (mid-flight bleibt grün), Archiv ist Historie;
+Fenced-Block = Zitat wie beim Review-Gate) ausgeliefert.
+
 ## Sub-Projekt-Tabelle (SP1–SP24)
 
 Die Tabelle wurde bis SP24 gepflegt; ab SP25 trägt das Narrativ oben die
