@@ -39,7 +39,7 @@ regulated:
 modules:
   type: yaml
   when: false
-  default: "{doc_drift_gate: true, arch_onboarding: true, feature_registry: true, github_issues: true, contracts: true, git_hooks: true, security_floor: {{ regulated }}, sbom: {{ regulated }}, telemetry: true, arch_docs: true, github_master: true}"
+  default: "{speckit: true, doc_drift_gate: true, arch_onboarding: true, feature_registry: true, github_issues: true, contracts: true, git_hooks: true, security_floor: {{ regulated }}, sbom: {{ regulated }}, telemetry: true, arch_docs: true, github_master: true}"
 
 ci:
   type: yaml

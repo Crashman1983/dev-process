@@ -62,8 +62,10 @@ contract/persistence/auth-touching work.
      local git hooks (`git_hooks` module) become the only enforcement pillar.
    - `github_repo` (OWNER/REPO, optional) for the issue gate. Headless: pass
      it via `--data` like the others.
-4. Commit the result. Then let the LLM guide the Greenfield or Brownfield setup
-   through `docs/process/start-here.md` before further work.
+4. Commit the result. Then run the Spec Kit setup (pinned, one command
+   sequence — see the rendered `docs/process/modules/speckit.md`, "Setup"),
+   and let the LLM guide the Greenfield or Brownfield setup through
+   `docs/process/start-here.md` before further work.
 
 After copying, the process is installed, but the project is not yet onboarded
 as a product project. The LLM should use `docs/process/start-here.md` to
@@ -89,7 +91,7 @@ line instead:
     uvx copier copy --defaults \
       --data project_name="<project name>" \
       --data harness=claude \
-      --data 'modules={"doc_drift_gate": true, "arch_onboarding": false, "feature_registry": true, "github_issues": true, "contracts": false, "git_hooks": true, "security_floor": false, "sbom": false, "telemetry": true, "arch_docs": false, "github_master": true}' \
+      --data 'modules={"speckit": true, "doc_drift_gate": true, "arch_onboarding": false, "feature_registry": true, "github_issues": true, "contracts": false, "git_hooks": true, "security_floor": false, "sbom": false, "telemetry": true, "arch_docs": false, "github_master": true}' \
       --data 'ci={"github": true}' \
       --skip 'CLAUDE.md' --skip 'AGENTS.md' \
       gh:Crashman1983/dev-process .
@@ -150,7 +152,7 @@ Add a module or pull an updated process version — with a clean working tree
 (`git status --porcelain` empty), then:
 
     uvx copier update --defaults \
-      --data 'modules={"doc_drift_gate": true, "arch_onboarding": false, "feature_registry": false, "github_issues": false, "contracts": false, "git_hooks": false, "security_floor": false, "sbom": false, "telemetry": false, "arch_docs": false, "github_master": false}' 
+      --data 'modules={"speckit": true, "doc_drift_gate": true, "arch_onboarding": false, "feature_registry": false, "github_issues": false, "contracts": false, "git_hooks": false, "security_floor": false, "sbom": false, "telemetry": false, "arch_docs": false, "github_master": false}' 
 
 Do NOT `--skip` the anchor files here: copier's three-way merge preserves your
 local anchor extensions anyway, while a skipped anchor keeps the OLD kernel
