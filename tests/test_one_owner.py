@@ -48,32 +48,6 @@ def test_tracked_files_helpers_identical_sbom_vs_security_floor():
             f"keep the twins byte-identical (independent render units)")
 
 
-def test_dor_heuristic_agrees_attention_vs_gh_sync(render, tmp_path):
-    # github_issues (attention.py) and github_master (gh_sync.py) are
-    # independent modules; both derive the same EARS/epic DoR facts "in sync
-    # by convention". This pins the convention with shared fixtures.
-    out = render(tmp_path, {"project_name": "d",
-                            "modules": {"github_issues": True,
-                                        "github_master": True}})
-    att = _load(out / "scripts/process/attention.py", "att_mod")
-    sync = _load(out / "scripts/process/gh_sync.py", "sync_mod")
-
-    cases = [
-        # (labels, title, body)
-        ([{"name": "type:feature"}], "Widget", "## Acceptance criteria (EARS)\nWHEN x the system shall y"),
-        ([{"name": "type:feature"}], "Widget", "The system shall respond."),
-        ([{"name": "type:feature"}], "Widget", "free prose, no EARS"),
-        ([{"name": "type:epic"}], "Big theme", ""),
-        ([], "EPIC: rollout", "no criteria"),
-        ([{"name": "type:bug"}], "Fix", "### Akzeptanzkriterien (EARS)\n..."),
-        ([], "Widget", None),
-    ]
-    for labels, title, body in cases:
-        names = {lab["name"] for lab in labels}
-        facts = sync._dor_facts(labels, title, body)
-        assert facts["ears"] == (att._is_epic(names, title) or att._has_ears(body)), (
-            f"EARS/epic verdict drifted for {title!r}/{body!r}")
-
 
 def test_adapters_list_every_module_doc():
     # the _mod_slugs map in each harness adapter must name all modules —
@@ -82,7 +56,7 @@ def test_adapters_list_every_module_doc():
     import yaml
     copier = yaml.safe_load((ROOT / "copier.yml").read_text(encoding="utf-8"))
     modules = set(re.findall(r"([a-z_]+):", copier["modules"]["default"]))
-    assert len(modules) >= 13, "copier modules default not parsed"
+    assert len(modules) >= 12, "copier modules default not parsed"
     adapters = [
         ROOT
         / "template/{% if harnesses.claude | default(true) %}CLAUDE.md{% endif %}.jinja",

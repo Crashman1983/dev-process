@@ -77,8 +77,7 @@ def _status_from(labels: list, state: str) -> str:
 def _dor_facts(labels: list, title: str, body: str) -> dict:
     """Definition-of-Ready facts, computed here — the one place that sees the
     live issue content — so the hermetic gate can enforce DoR offline without
-    the snapshot carrying the body. Mirrors the EARS/epic heuristic of the
-    github-issues module's attention.py (kept in sync by convention):
+    the snapshot carrying the body:
 
     - typed: carries a `type:*` label (DoR R1);
     - ears: an EARS acceptance section — heading (English or German) or a
