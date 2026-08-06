@@ -7,3 +7,10 @@ adapters resolve to real files. Runs via `process-gates` (in CI when a CI adapte
 Installed for **{{ project_name }}**. Rationale: anchors that name files or paths
 must stay true as code moves (mandatory rule 1). Only slash-containing references
 are checked; bare filenames and placeholders are ignored to avoid false positives.
+
+The gate also watches the **anchor budget**: an anchor file (`CLAUDE.md`,
+`AGENTS.md`, or a harness instructions file) over 200 lines (env
+`ANCHOR_LINE_BUDGET`) gets a note — never a failure. Anchors regrow silently;
+the note flags accretion so a human applies the discriminator from
+`docs/process/start-here.md` ("does it drift on a refactor? then it does not
+belong in the anchor") and moves detail back to its canonical source.

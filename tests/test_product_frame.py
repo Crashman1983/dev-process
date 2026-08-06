@@ -123,7 +123,7 @@ def test_dead_adr_ref_hard(render, tmp_path):
 
 def test_valid_adr_ref_ok(render, tmp_path):
     out = render(tmp_path, {"project_name": "demo"})
-    _onboarded(out, "\nGrounded in ADR-0001.\n")  # seed record ships
+    _onboarded(out, "\nGrounded in ADR-0000.\n")  # seed record ships
     r = _run(out)
     assert r.returncode == 0, r.stdout
 

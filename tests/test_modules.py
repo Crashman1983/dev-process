@@ -33,6 +33,35 @@ def test_gate_skips_runtime_process_work_paths(render, tmp_path):
     assert subprocess.run([sys.executable, str(script), str(out)]).returncode == 0
 
 
+def test_gate_skips_decision_records(render, tmp_path):
+    # ADRs are point-in-time records owned by the decision-records gate; their
+    # historical code refs must not read as drift
+    out = render(tmp_path, {"project_name": "d", "modules": {"doc_drift_gate": True}})
+    script = out / "scripts/process/check_doc_drift.py"
+    (out / "docs/process/adr/adr-0002-old.md").write_text(
+        "# ADR-0002: Old\n\nSee `code/that/was/deleted.py`.\n")
+    assert subprocess.run([sys.executable, str(script), str(out)]).returncode == 0
+
+
+def test_gate_notes_anchor_over_budget_without_failing(render, tmp_path):
+    # anchors regrow silently — over the line budget the gate notes it for a
+    # human but never fails (accretion is a judgment call, not a broken ref)
+    out = render(tmp_path, {"project_name": "d", "modules": {"doc_drift_gate": True}})
+    script = out / "scripts/process/check_doc_drift.py"
+    claude = out / "CLAUDE.md"
+    claude.write_text(claude.read_text() + "filler\n" * 300)
+    r = subprocess.run([sys.executable, str(script), str(out)],
+                       capture_output=True, text=True)
+    assert r.returncode == 0
+    assert "note:" in r.stdout and "budget" in r.stdout
+    # and a raised budget silences the note
+    import os
+    env = dict(os.environ, ANCHOR_LINE_BUDGET="10000")
+    r2 = subprocess.run([sys.executable, str(script), str(out)],
+                        capture_output=True, text=True, env=env)
+    assert r2.returncode == 0 and "note:" not in r2.stdout
+
+
 def test_gate_runner_leaves_no_pycache(render, tmp_path):
     # the gates' sibling imports must not litter the adopter repo with
     # untracked __pycache__ (gate_runner sets PYTHONDONTWRITEBYTECODE)

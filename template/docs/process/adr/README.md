@@ -13,11 +13,14 @@ Records keep the historical filename and reference token `adr-NNNN` / `ADR-NNNN`
 stays "ADR", the *concept* is a decision record of any type.
 
 Filename convention: `adr-NNNN-<slug>.md` (zero-padded, e.g.
-`adr-0001-record-architecture-decisions.md`) — the gates resolve `ADR-NNNN`
+`adr-0000-record-architecture-decisions.md`) — the gates resolve `ADR-NNNN`
 references against exactly this pattern.
 
 Every new ADR file must be added to the index below in the same change.
 
+The seed record is numbered `0000` so an existing decision corpus that starts
+at `0001` can move in without a number collision.
+
 | ADR | Title | Status |
 |---|---|---|
-| 0001 | Record architecture decisions | Accepted |
+| 0000 | Record architecture decisions | Accepted |

@@ -84,6 +84,25 @@ def test_superseded_changeplanned_incoherent_hard(render, tmp_path):
     assert "Superseded" in r.stdout
 
 
+def test_rejected_and_deprecated_are_valid_statuses(render, tmp_path):
+    # a dead proposal must not sit on `proposed` forever; a decision that held
+    # once and is discouraged now is `deprecated`, not a lie about the past
+    out = render(tmp_path, {"project_name": "demo"})
+    _write_adr(out, "0002", status="Rejected", intent="tolerated")
+    _write_adr(out, "0003", status="Deprecated", intent="tolerated")
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+
+
+def test_rejected_keep_incoherent_hard(render, tmp_path):
+    # rejected never held — there is nothing to keep
+    out = render(tmp_path, {"project_name": "demo"})
+    _write_adr(out, "0002", status="Rejected", intent="keep")
+    r = _run(out)
+    assert r.returncode == 1
+    assert "Rejected" in r.stdout and "historical" in r.stdout
+
+
 def test_superseded_tolerated_is_ok(render, tmp_path):
     # a superseded-but-tolerated record is coherent (historical debt), not hard
     out = render(tmp_path, {"project_name": "demo"})
