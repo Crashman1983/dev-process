@@ -271,6 +271,44 @@ convention and the `clarification` gate carry over unchanged in both paths
 (Spec Kit uses the identical marker natively — verified in its spec
 template).
 
+## Cleanup — consolidations the standard decision forces
+
+Making the Spec Kit path standard creates overlap that rule 4 requires us to
+resolve *before* it becomes parallel accretion:
+
+1. **One acceptance grammar.** EARS lives in issue bodies (DoR R2, read by
+   the `github-master` gate); Spec Kit's template writes Given/When/Then.
+   Resolution: the spec is the authoring site and the override formulates
+   acceptance in EARS; the issue carries the EARS criteria as a copy synced
+   at spec approval, direction spec → issue, so the existing gate keeps
+   working. Two grammars, two locations, no owner — that ends here.
+2. **One story concept.** Spec user stories (US1/P1, feature-local working
+   form) map to feature-registry stories (STORY-NNNN, the durable
+   traceability owner) via the promotion rule at merge; the US→STORY mapping
+   is named in the merge commit.
+3. **Skill exclusions.** Installed: specify, clarify, plan, tasks, analyze,
+   converge, checklist — seven of ten. Excluded: `implement` (decided),
+   `taskstoissues` (issue creation already has an owner:
+   `new_issue.py` + issue-before-code), and `constitution` — running it
+   would replace our rendered pointer with generated principles, recreating
+   the second truth. Guard: a small check (kernel-gate mechanic) that the
+   constitution file still carries its pointer line.
+4. **SP55 partially superseded — honestly.** `design-template.md` renders
+   only in the frozen fallback (conditional template); its marker
+   documentation moves to a neutral home (`journal-state-plans.md`) since
+   the spec template carries the marker natively. The `clarification` gate
+   and the Specification-quality review section stay unchanged — both are
+   template-agnostic.
+5. **Reference hygiene.** `workflow.md`, `start-here.md`, the Copilot
+   prompts, and the AGENTS.md section repoint to the Spec Kit path during
+   the build; the doc-drift gate fails CI on any pointer missed. Checklist
+   ownership stated once: `review-checklist.md` owns the review;
+   `speckit-checklist` produces pre-review spec-quality aids.
+6. **Outward-facing docs.** The README currently narrates a fully self-built
+   specification path; after the build it describes the hybrid honestly
+   (Spec Kit for the path to a specification, dev-process for enforcement
+   and lifecycle). Analysis doc and CHANGELOG stay as history.
+
 ## Acceptance criteria for the module (EARS)
 
 - AC-1: When the module is enabled and `specify init` has run, the gate runner
