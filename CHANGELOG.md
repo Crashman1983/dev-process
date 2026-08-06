@@ -278,6 +278,24 @@ wieder grün)) ausgeliefert, `v2.0.0` — **Breaking**: Modul-Keys und
 Install-Dialog geändert; Migration bestehender Adopter über `copier update`
 mit explizitem `modules`-Dict (BOOTSTRAP, "Later").
 
+SP57 (kenni-backflow: die vier Prozess-Lektionen aus Kennis Live-Betrieb,
+die dem generischen Kern nach der Adoption nachweislich noch fehlten —
+Regel 1 geschärft (Sub-Agent-Summaries sind `[assumption]` bis zur
+Stichprobe; Stop-Wort „source?" ⇒ Tool-Beweis oder Rückzug),
+Review-Runden-Cap im Workflow (nach zwei erfolglosen Review→Fix-Runden
+zurück in die Planung — das Review-Pendant zur Zwei-Versuche-Regel 6),
+Bookkeeping-Disziplin in `commits.md` (Journal/Plan/State fahren im
+Arbeits-Commit, keine `record`-Ketten; SSOT-lose Evidence ins
+Issue-Kommentar) und der Anchor-Budget-Check im doc-drift-gate
+(Anchor > 200 Zeilen ⇒ Note, nie Fail — der mechanische Wächter für den
+„driftet es beim Refactor?"-Diskriminator). Dazu zwei Brownfield-Fixes am
+Decision-Records-Gate, die Kennis ADR-Korpus-Übernahme aufgedeckt hat:
+Status-Enum um `Rejected` (Vorschlag, der nie galt) und `Deprecated`
+(galt einmal, jetzt abgeraten) erweitert — sonst bliebe ein toter
+Vorschlag ewig `proposed` —, und der Seed-Record von `adr-0001` auf
+`adr-0000` umnummeriert, damit ein bestehender Korpus, der bei 0001
+beginnt, kollisionsfrei einziehen kann. Ausgeliefert als `v2.1.0`.
+
 ## Sub-Projekt-Tabelle (SP1–SP24)
 
 Die Tabelle wurde bis SP24 gepflegt; ab SP25 trägt das Narrativ oben die

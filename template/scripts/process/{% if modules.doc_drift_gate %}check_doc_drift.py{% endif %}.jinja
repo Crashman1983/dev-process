@@ -6,9 +6,15 @@ Portable, language-agnostic.
 
 Only references that contain a slash (repo-relative paths) are checked; bare
 filenames and obvious placeholders (<...>, YYYY, NNNN, *) are ignored to avoid
-false positives on illustrative examples."""
+false positives on illustrative examples.
+
+Besides broken references, the gate watches the anchor budget: the discriminator
+in start-here.md ("does it drift on a refactor?") only holds if anchors stay
+thin, and anchors regrow silently. An anchor over the line budget is a note,
+never a failure — the budget flags accretion for a human, it does not block."""
 from __future__ import annotations
 
+import os
 import re
 import sys
 from pathlib import Path
@@ -20,6 +26,25 @@ SCAN_DIRS = ["docs/process", ".claude/commands", ".github/prompts"]
 SCAN_FILES = ["CLAUDE.md", "AGENTS.md", ".github/copilot-instructions.md",
               ".github/instructions/process.instructions.md",
               "ARCHITECTURE.md", "ARCHITECTURE-OVERVIEW.md", "PRODUCT.md"]
+ANCHOR_FILES = ["CLAUDE.md", "AGENTS.md", ".github/copilot-instructions.md",
+                ".github/instructions/process.instructions.md"]
+ANCHOR_LINE_BUDGET = int(os.environ.get("ANCHOR_LINE_BUDGET", "200"))
+
+
+def anchor_budget_notes(root: Path) -> list[str]:
+    notes: list[str] = []
+    for f in ANCHOR_FILES:
+        p = root / f
+        if not p.is_file():
+            continue
+        lines = p.read_text(encoding="utf-8", errors="replace").count("\n") + 1
+        if lines > ANCHOR_LINE_BUDGET:
+            notes.append(
+                f"{f} is {lines} lines (budget {ANCHOR_LINE_BUDGET}) — anchors carry "
+                "methodology and pointers, not implementation (start-here.md, "
+                "'Anchors: what goes where'); move drifting detail to its "
+                "canonical source")
+    return notes
 
 
 def _candidates(text: str):
@@ -44,7 +69,12 @@ def _is_local_path(ref: str) -> bool:
 def find_drift(root: Path) -> list[str]:
     targets: list[Path] = []
     for d in SCAN_DIRS:
-        targets += (root / d).rglob("*.md")
+        # decision records are point-in-time documents — their code references
+        # describe the tree as it was when the decision was made, and the
+        # decision-records gate owns those files (one owner per artifact); a
+        # brownfield corpus would otherwise flood this gate with false reds
+        targets += (p for p in (root / d).rglob("*.md")
+                    if "adr" not in p.relative_to(root).parts)
     for f in SCAN_FILES:
         if (root / f).is_file():
             targets.append(root / f)
@@ -70,6 +100,8 @@ def find_drift(root: Path) -> list[str]:
 def main() -> int:
     root = Path(sys.argv[1] if len(sys.argv) > 1 else ".").resolve()
     problems = find_drift(root)
+    for n in anchor_budget_notes(root):
+        print(f"doc-drift-gate: note: {n}")
     if problems:
         print("doc-drift-gate: broken references:")
         for p in problems:

@@ -49,7 +49,11 @@ def adr_exists(root: Path, ref: str) -> bool:
     return any(fm and int(fm.group(1)) == num
                for fm in (ADR_FILE.match(p.name) for p in d.glob("adr-*.md")))
 
-STATUS_OK = {"proposed", "accepted"}  # plus any "superseded..." prefix
+# plus any "superseded..." prefix. `rejected` ends a proposal that never took
+# effect; `deprecated` marks a decision that held once and is discouraged now —
+# without those tokens a dead proposal would sit on `proposed` forever, which is
+# exactly the accretion this gate exists to surface.
+STATUS_OK = {"proposed", "accepted", "rejected", "deprecated"}
 INTENT_OK = {"keep", "change-planned", "tolerated"}
 TYPE_OK = {"architecture", "product", "process"}
 
@@ -156,7 +160,8 @@ def check(root: Path) -> tuple[list[str], list[str]]:
             status_tok = _first_token(status)
             if status_tok not in STATUS_OK and status_tok != "superseded":
                 hard.append(f"{rel}:{s_line}: Status {status!r} is not a valid "
-                            f"lifecycle (Proposed | Accepted | Superseded ...)")
+                            f"lifecycle (Proposed | Accepted | Superseded ... | "
+                            f"Deprecated | Rejected)")
 
         # --- Type (process's own axis; absence is soft, not a false-red) ---
         if type_ is None:
@@ -183,11 +188,13 @@ def check(root: Path) -> tuple[list[str], list[str]]:
                 hard.append(f"{rel}:{i_line}: Intent {intent!r} is not one of "
                             f"keep | change-planned | tolerated")
 
-        # --- coherence: a superseded decision cannot be kept or migration-planned ---
-        if (status_tok == "superseded"
+        # --- coherence: a superseded/rejected decision cannot be kept or
+        # migration-planned (superseded is historical; rejected never held) ---
+        if (status_tok in {"superseded", "rejected"}
                 and intent_tok in {"keep", "change-planned"}):
-            hard.append(f"{rel}:{i_line}: Superseded record with Intent={intent_tok!r} "
-                        f"— a superseded decision is historical, not kept/change-planned")
+            hard.append(f"{rel}:{i_line}: {status_tok.capitalize()} record with "
+                        f"Intent={intent_tok!r} — such a decision is historical, "
+                        f"not kept/change-planned")
 
         # --- change-planned should link its follow-up (soft) ---
         if intent_tok == "change-planned":

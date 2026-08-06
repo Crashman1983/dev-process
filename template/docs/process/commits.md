@@ -16,6 +16,11 @@ and implementation for the same behavior is atomic; a commit that mixes two unre
 behaviors is not. A skipped gate or deliberately dropped scope is named in the body
 (e.g. `skipped review: <reason>`).
 
+Process bookkeeping (journal entry, plan checkboxes, state file) rides in the
+work's commit or one adjacent commit — never a chain of per-step `record`/
+`reconcile` commits. Evidence that changes no tracked artifact (logs, screenshots,
+verification output) goes to the issue or PR as a comment, not into the history.
+
 ## Branching
 
 No direct commits to the main branch. The invariant is *isolation*: one feature
