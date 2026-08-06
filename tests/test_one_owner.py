@@ -59,7 +59,7 @@ def test_adapters_list_every_module_doc():
     assert len(modules) >= 11, "copier modules default not parsed"
     adapters = [
         ROOT
-        / "template/{% if harnesses.claude | default(true) %}CLAUDE.md{% endif %}.jinja",
+        / "template/{% if harnesses.claude %}CLAUDE.md{% endif %}.jinja",
         ROOT / "template/.github/{% if harnesses.copilot %}copilot-instructions.md{% endif %}.jinja",
         ROOT / "template/{% if harnesses.agents_md %}AGENTS.md{% endif %}.jinja",
     ]

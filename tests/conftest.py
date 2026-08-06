@@ -22,10 +22,17 @@ def _template_src(tmp_path_factory):
 
 def _copy(src: Path, dst: Path, data: dict, **kwargs) -> Path:
     full = {
-        "harnesses": {"copilot": False, "agents_md": False},
+        "harnesses": {"claude": True, "copilot": False, "agents_md": False},
         "modules": {"speckit": False, "doc_drift_gate": False, "arch_onboarding": False, "feature_registry": False, "github_issues": False, "contracts": False, "git_hooks": False, "security_floor": False, "sbom": False, "telemetry": False, "arch_docs": False, "github_master": False},
         "ci": {"github": True},
     }
+    # merge partial harnesses/modules dicts over the defaults — a test passing
+    # {"copilot": True} keeps claude on, matching the old `| default(true)`
+    # semantics that lived in the (Windows-hostile) template path names
+    data = dict(data)
+    for key in ("harnesses", "modules", "ci"):
+        if key in data:
+            full[key] = {**full[key], **data.pop(key)}
     full.update(data)
     copier.run_copy(str(src), str(dst), data=full, defaults=True, unsafe=True, quiet=True, **kwargs)
     return dst
