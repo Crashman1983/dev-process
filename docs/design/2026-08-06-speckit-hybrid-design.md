@@ -1,6 +1,6 @@
 # Design: Spec Kit as the Tier 2+ specification front-end (`speckit-adapter` module)
 
-Date: 2026-08-06 · Status: proposed · Companion analysis:
+Date: 2026-08-06 · Status: **implemented** (SP56; conditions of the independent review folded in — see `.process-work/reviews/2026-08-06-speckit-hybrid-design-review.md`) · Companion analysis:
 `docs/analysis/2026-08-06-speckit-comparison.md` (strategic comparison; this
 document is the integration design after an *empirical* evaluation).
 
@@ -326,9 +326,9 @@ resolve *before* it becomes parallel accretion:
 
 ## Open questions
 
-- [NEEDS CLARIFICATION: pilot scope — enable the module in one real project
-  first, or ship it in dev-process and pilot there? Telemetry baseline needs
-  a few Tier 2 cycles either way.]
+- Resolved (2026-08-06): built directly as the standard (owner's decision —
+  result over path); the first adopting project delivers the measured
+  baseline (convergence, cost, CFR).
 - Resolved (2026-08-06): `/speckit-implement` stays uninstalled — execution
   remains with the dev-process execute flow (TDD + atomic commits + GRADE),
   consuming `tasks.md` as input and adopting implement's checkbox-progress
