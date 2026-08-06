@@ -1,0 +1,148 @@
+#!/usr/bin/env python3
+"""publish_and_prune: the Spec Kit merge ritual — move a feature's spec
+artifacts to their tracking issue, then remove specs/<feature>/ from the tree.
+
+Order and safety (the independent design review's F5 conditions):
+  1. read the `issue:` ref from specs/<feature>/plan.md — no ref, no prune;
+  2. account for every SC-ID in spec.md: each must appear in the plan's
+     `sc-evidenced:`/`sc-followup:`/`sc-waived:` lines — an unaccounted SC
+     would vanish silently, so the ritual refuses (the SC lifecycle);
+  3. publish spec.md, tasks.md (and research/data-model, if present) as
+     comments on the issue, split under GitHub's comment size limit;
+  4. VERIFY the publish by reading the comment ids back — only then
+  5. delete specs/<feature>/ (git rm) so main stays clean; on any publish
+     failure the directory stays (flow-forward degradation, stated loudly).
+
+The plan itself is archived by the normal merge ritual
+(`.process-work/plans/archive/` — the review gate keys on it); this tool
+copies it there if the caller has not. Best-effort network tool (gh), never
+a gate. Stdlib + `gh`.
+
+Usage: python scripts/process/publish_and_prune.py <feature-dir-name>
+"""
+from __future__ import annotations
+
+import json
+import re
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+SPECS = "specs"
+ARCHIVE = ".process-work/plans/archive"
+COMMENT_LIMIT = 60000  # under GitHub's 65536, leaving header room
+SC_ID = re.compile(r"\bSC-\d{3}\b")
+SC_ACCOUNT = re.compile(r"^\s*(?:[-*+]\s+)?sc-(evidenced|followup|waived)\s*:\s*(SC-\d{3})\b",
+                        re.IGNORECASE | re.MULTILINE)
+ISSUE_LINE = re.compile(r"^\s*(?:[-*+]\s+)?issue\s*:\s*(\S+)", re.IGNORECASE | re.MULTILINE)
+
+
+def _issue_number(plan_text: str) -> str | None:
+    m = ISSUE_LINE.search(plan_text)
+    if not m:
+        return None
+    ref = m.group(1)
+    num = re.search(r"(\d+)$", ref)
+    return num.group(1) if num else None
+
+
+def _unaccounted_scs(spec_text: str, plan_text: str) -> list[str]:
+    declared = sorted(set(SC_ID.findall(spec_text)))
+    accounted = {m.group(2).upper() for m in SC_ACCOUNT.finditer(plan_text)}
+    return [sc for sc in declared if sc.upper() not in accounted]
+
+
+def _gh(gh: str, *args: str) -> subprocess.CompletedProcess:
+    return subprocess.run([gh, *args], capture_output=True, text=True, timeout=120)
+
+
+def _post_comment(gh: str, issue: str, title: str, body: str) -> bool:
+    """Post (possibly split) and verify by reading the comment back."""
+    chunks = [body[i:i + COMMENT_LIMIT] for i in range(0, len(body), COMMENT_LIMIT)] or [""]
+    for i, chunk in enumerate(chunks, 1):
+        suffix = f" (part {i}/{len(chunks)})" if len(chunks) > 1 else ""
+        text = f"<!-- publish_and_prune -->\n## {title}{suffix}\n\n{chunk}"
+        r = _gh(gh, "issue", "comment", issue, "--body", text)
+        if r.returncode != 0:
+            print(f"publish_and_prune: comment failed: {r.stderr.strip()}", file=sys.stderr)
+            return False
+    # verify: the marker must be present in the issue's comments
+    r = _gh(gh, "issue", "view", issue, "--json", "comments")
+    if r.returncode != 0:
+        return False
+    try:
+        comments = json.loads(r.stdout).get("comments", [])
+    except json.JSONDecodeError:
+        return False
+    return any("publish_and_prune" in (c.get("body") or "") for c in comments)
+
+
+def main() -> int:
+    if len(sys.argv) != 2:
+        print("usage: publish_and_prune.py <feature-dir-name>", file=sys.stderr)
+        return 2
+    root = Path(".").resolve()
+    fdir = root / SPECS / sys.argv[1]
+    if not fdir.is_dir():
+        print(f"publish_and_prune: no {fdir.relative_to(root)}", file=sys.stderr)
+        return 1
+    plan = fdir / "plan.md"
+    spec = fdir / "spec.md"
+    if not plan.is_file() or not spec.is_file():
+        print("publish_and_prune: plan.md and spec.md required — nothing pruned",
+              file=sys.stderr)
+        return 1
+    plan_text = plan.read_text(encoding="utf-8", errors="replace")
+    spec_text = spec.read_text(encoding="utf-8", errors="replace")
+
+    issue = _issue_number(plan_text)
+    if not issue:
+        print("publish_and_prune: plan.md has no issue: ref — no publish target, "
+              "directory stays (flow-forward)", file=sys.stderr)
+        return 1
+    missing = _unaccounted_scs(spec_text, plan_text)
+    if missing:
+        print("publish_and_prune: unaccounted Success Criteria — each SC-ID needs "
+              "an sc-evidenced:/sc-followup:/sc-waived: line in plan.md before the "
+              f"prune (silent disappearance is not an option): {', '.join(missing)}",
+              file=sys.stderr)
+        return 1
+
+    gh = shutil.which("gh")
+    if not gh:
+        print("publish_and_prune: `gh` not on PATH — directory stays (flow-forward)",
+              file=sys.stderr)
+        return 1
+
+    ok = True
+    for f in sorted(fdir.glob("*.md")):
+        ok = ok and _post_comment(gh, issue, f"{fdir.name}/{f.name}",
+                                  f.read_text(encoding="utf-8", errors="replace"))
+    for sub in ("contracts", "checklists"):
+        for f in sorted((fdir / sub).glob("*")) if (fdir / sub).is_dir() else []:
+            if f.is_file():
+                ok = ok and _post_comment(gh, issue, f"{fdir.name}/{sub}/{f.name}",
+                                          f.read_text(encoding="utf-8", errors="replace"))
+    if not ok:
+        print("publish_and_prune: publish NOT verified — directory stays "
+              "(flow-forward degradation); fix and re-run", file=sys.stderr)
+        return 1
+
+    # archive the plan for the review gate, then prune
+    adir = root / ARCHIVE
+    adir.mkdir(parents=True, exist_ok=True)
+    target = adir / f"{fdir.name}.md"
+    if not target.exists():
+        shutil.copy2(plan, target)
+    r = subprocess.run(["git", "rm", "-r", "-q", str(fdir.relative_to(root))],
+                       cwd=root, capture_output=True, text=True)
+    if r.returncode != 0:
+        shutil.rmtree(fdir)
+    print(f"publish_and_prune: published to issue #{issue}, archived plan to "
+          f"{ARCHIVE}/{fdir.name}.md, pruned {SPECS}/{fdir.name}/ — commit the result")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

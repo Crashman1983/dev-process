@@ -1,0 +1,110 @@
+#!/usr/bin/env python3
+"""speckit gate: the deterministic floor under the Spec Kit integration.
+
+Spec Kit's own quality steps (analyze, checklist, converge) are LLM judgment;
+this gate enforces the two lines a machine can honestly draw (the independent
+design review's F3/F7 conditions — prompts alone must not carry rule 5):
+
+  - HARD: the constitution pointer marker is missing from
+    .specify/memory/constitution.md — someone ran /speckit-constitution (or
+    edited the file) and replaced the pointer with generated principles: a
+    second truth beside the gated one. Restore the pointer.
+  - HARD: a user-story phase in an active specs/*/tasks.md carries no test
+    task — "tests are optional" upstream must never survive into rendered
+    tasks (mandatory rule 5). Heuristic and honest about it: a phase heading
+    that names a user story must contain at least one task line mentioning a
+    test; semantic adequacy stays review judgment.
+  - SOFT: .specify/ missing entirely — expected before `specify init` ran
+    (the BOOTSTRAP step); named, never silently green.
+
+Unresolved [NEEDS CLARIFICATION] markers in specs/ are the clarification
+gate's job (one owner). Pure stdlib.
+"""
+from __future__ import annotations
+
+import re
+import sys
+from pathlib import Path
+
+CONSTITUTION = ".specify/memory/constitution.md"
+POINTER_MARK = "DEV-PROCESS-CONSTITUTION-POINTER"
+SPECS_DIR = "specs"
+
+STORY_PHASE = re.compile(r"^##+\s+Phase\s+\d+.*User Story", re.IGNORECASE)
+ANY_PHASE = re.compile(r"^##+\s+(?:Phase\b|Final phase\b)", re.IGNORECASE)
+TASK_LINE = re.compile(r"^\s*- \[[ xX]\] ")
+TESTY = re.compile(r"\btest", re.IGNORECASE)
+
+
+def _story_phases_without_tests(text: str) -> list[str]:
+    missing: list[str] = []
+    lines = text.splitlines()
+    current: str | None = None
+    has_test = False
+    def flush():
+        if current is not None and not has_test:
+            missing.append(current)
+    for line in lines:
+        if ANY_PHASE.match(line):
+            flush()
+            current = line.strip() if STORY_PHASE.match(line) else None
+            has_test = False
+            continue
+        if current is not None and TASK_LINE.match(line) and TESTY.search(line):
+            has_test = True
+    flush()
+    return missing
+
+
+def check(root: Path) -> tuple[list[str], list[str]]:
+    hard: list[str] = []
+    soft: list[str] = []
+
+    spec_dir = root / ".specify"
+    if not spec_dir.is_dir():
+        return [], [f"no .specify/ yet — run the pinned `specify init` step "
+                    f"(BOOTSTRAP, Spec Kit setup); the speckit gate has nothing "
+                    f"to verify until then"]
+
+    cf = root / CONSTITUTION
+    if not cf.is_file():
+        hard.append(f"{CONSTITUTION}: missing — the rendered pointer file was "
+                    f"removed; restore it (it routes every /speckit-* phase to "
+                    f"the gated methodology)")
+    elif POINTER_MARK not in cf.read_text(encoding="utf-8", errors="replace"):
+        hard.append(f"{CONSTITUTION}: pointer marker missing — running "
+                    f"/speckit-constitution (or hand-editing) replaced the "
+                    f"pointer with a second truth beside the gated one; "
+                    f"restore the pointer file (git checkout -- {CONSTITUTION})")
+
+    sdir = root / SPECS_DIR
+    if sdir.is_dir():
+        for tasks in sorted(sdir.glob("*/tasks.md")):
+            rel = tasks.relative_to(root)
+            text = tasks.read_text(encoding="utf-8", errors="replace")
+            for phase in _story_phases_without_tests(text):
+                hard.append(f"{rel}: {phase!r} has no test task — tests prove "
+                            f"acceptance (mandatory rule 5); add the failing "
+                            f"test task(s) before implementation")
+    return hard, soft
+
+
+def main() -> int:
+    root = Path(sys.argv[1] if len(sys.argv) > 1 else ".").resolve()
+    if not root.is_dir():
+        print(f"speckit: FAILED:\n  - root {root} is not a directory")
+        return 1
+    hard, soft = check(root)
+    for note in soft:
+        print(f"speckit: note: {note}")
+    if hard:
+        print("speckit: FAILED:")
+        for h in hard:
+            print(f"  - {h}")
+        return 1
+    print("speckit: OK")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

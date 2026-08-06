@@ -2,8 +2,13 @@
 
 Run brainstorming before building. Read
 `docs/process/start-here.md` for setup/onboarding context and
-`docs/process/workflow.md` for the Brainstorm phase. Ask a few targeted
+`docs/process/workflow.md` for the Brainstorm phase.
+{% if modules.speckit %}Derive the tier first; for Tier 2+ run `/speckit-specify` and iterate
+`/speckit-clarify` until no `[NEEDS CLARIFICATION]` marker survives
+(`docs/process/modules/speckit.md`). Write a spec only after approval.
+{% else %}Ask a few targeted
 questions, summarize assumptions, name trade-offs, and write the design using
 the scaffold in `docs/process/design-template.md` — mark underspecified points
 as `[NEEDS CLARIFICATION: <question>]` instead of guessing, and resolve every
 marker before approval.
+{% endif %}

@@ -35,6 +35,7 @@ GATES = {
     "review": (None, [sys.executable, "scripts/process/check_review.py", "."]),
     "clarification": (None, [sys.executable, "scripts/process/check_clarification.py", "."]),
     "product-frame": (None, [sys.executable, "scripts/process/check_product_frame.py", "."]),
+    "speckit": ("speckit", [sys.executable, "scripts/process/check_speckit.py", "."]),
     "doc-drift-gate": ("doc_drift_gate", [sys.executable, "scripts/process/check_doc_drift.py", "."]),
     "arch-onboarding": ("arch_onboarding", [sys.executable, "scripts/process/check_architecture.py", "."]),
     "feature-registry": ("feature_registry", [sys.executable, "scripts/process/check_feature_registry.py", "."]),

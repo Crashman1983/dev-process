@@ -9,10 +9,12 @@ the one line a machine can honestly draw:
 
   - HARD: an unresolved marker in an ACTIVE plan (`.process-work/plans/*.md`,
     excluding `design-*` and the archive) — a plan carrying an open question
-    was built from an unapproved design.
-  - SOFT (note only): markers in active `design-*` files — an in-progress
-    design legitimately carries them; the note keeps them visible, mid-flight
-    CI stays green.
+    was built from an unapproved design. The same line holds on the Spec Kit
+    surface: a marker in `specs/*/plan.md` or `specs/*/tasks.md` is hard —
+    planning consumed an unclarified spec.
+  - SOFT (note only): markers in active `design-*` files and in
+    `specs/*/spec.md` — an in-progress design/spec legitimately carries
+    them; the note keeps them visible, mid-flight CI stays green.
   - Archived plans and designs are history and are not checked: the convention
     postdates them, and the active check already blocked the merge path.
 
@@ -54,9 +56,37 @@ def _marker_lines(text: str) -> list[int]:
     return hits
 
 
+def _check_specs(root: Path, hard: list[str], soft: list[str]) -> None:
+    sdir = root / "specs"
+    if not sdir.is_dir():
+        return
+    for p in sorted(sdir.glob("*/*.md")):
+        rel = p.relative_to(root)
+        try:
+            text = p.read_text(encoding="utf-8", errors="replace")
+        except OSError as exc:
+            hard.append(f"{rel}: could not read: {exc}")
+            continue
+        lines = _marker_lines(text)
+        if not lines:
+            continue
+        if p.name == "spec.md":
+            soft.append(
+                f"{rel}: {len(lines)} unresolved [NEEDS CLARIFICATION] marker(s) "
+                f"(line(s) {', '.join(map(str, lines))}) — run /speckit-clarify "
+                f"and resolve before /speckit-plan")
+        else:
+            for lineno in lines:
+                hard.append(
+                    f"{rel}:{lineno}: unresolved [NEEDS CLARIFICATION] marker — "
+                    f"planning consumed an unclarified spec; resolve the question "
+                    f"in spec.md (or record the named assumption) and re-plan")
+
+
 def check(root: Path) -> tuple[list[str], list[str]]:
     hard: list[str] = []
     soft: list[str] = []
+    _check_specs(root, hard, soft)
     pdir = root / PLANS_ACTIVE
     if not pdir.is_dir():
         return hard, soft
