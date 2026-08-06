@@ -66,9 +66,10 @@ def test_bundle_assembles_all_sections(render, tmp_path):
     assert "```diff" in t
     # grammar imported from the gate — fields, verdicts, independence tokens
     assert (
-        "REVIEW base=… diff=… head=… independence=… model=… reviewer=… "
+        "REVIEW independence=… model=… reviewer=… "
         "round=… tier=… verdict=… work=…"
     ) in t
+    assert "copied VERBATIM" in t  # optional digest fields come from the bundle
     assert "['block', 'pass']" in t
     assert "'cross-model'" in t and "'single-family'" in t
     assert "FINDING sev=<blocker|major|minor|nit>" in t

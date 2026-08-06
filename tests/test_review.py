@@ -1,5 +1,4 @@
 import hashlib
-import os
 import subprocess
 import sys
 from pathlib import Path
@@ -47,18 +46,15 @@ def _git(root: Path, *args: str, text: bool = True):
     )
 
 
-def _init_bound_repo(root: Path, *, work: str = "bound") -> tuple[str, str, str, str]:
+def _init_git_repo(root: Path, *, work: str = "bound") -> tuple[str, str, str]:
+    """A repo with one reviewed feature commit; returns (base, head, digest)."""
     _git(root, "init", "-q", "-b", "main")
     _git(root, "config", "user.email", "t@example.com")
     _git(root, "config", "user.name", "Test")
     _git(root, "add", "-A")
     _git(root, "commit", "-q", "-m", "base")
     _git(root, "checkout", "-q", "-b", "feature")
-    _archived_plan(
-        root,
-        f"2026-07-19-{work}.md",
-        "# Plan\n\ntier: 2\nreview-binding: artifact-v1\n",
-    )
+    _archived_plan(root, f"2026-07-19-{work}.md", "# Plan\n\ntier: 2\n")
     (root / "payload.txt").write_text("reviewed\n", encoding="utf-8")
     _git(root, "add", "-A")
     _git(root, "commit", "-q", "-m", "feat: payload")
@@ -66,18 +62,7 @@ def _init_bound_repo(root: Path, *, work: str = "bound") -> tuple[str, str, str,
     head = _git(root, "rev-parse", "HEAD").stdout.strip()
     raw = _git(root, "diff", "--binary", f"{base}...{head}", text=False).stdout
     digest = hashlib.sha256(raw).hexdigest()
-    line = _review(work=work, artifact=(base, head, digest))
-    _git(root, "commit", "--allow-empty", "-q", "-m", "chore: attest review", "-m", line)
-    certificate = _git(root, "rev-parse", "HEAD").stdout.strip()
-    return base, head, digest, certificate
-
-
-def _candidate_env(base: str, target: str = "refs/heads/main") -> dict[str, str]:
-    return {
-        **os.environ,
-        "DEV_PROCESS_CANDIDATE_BASE": base,
-        "DEV_PROCESS_CANDIDATE_TARGET": target,
-    }
+    return base, head, digest
 
 
 def test_seed_tree_passes(render, tmp_path):
@@ -303,21 +288,43 @@ def test_presence_matches_by_issue(render, tmp_path):
     assert r.returncode == 0, r.stdout
 
 
-# --- artifact-v1 binding ---
+# --- digest binding (opt-in per REVIEW line) ---
 
 
-def test_bound_plan_rejects_journal_only_record(render, tmp_path):
+def test_valid_digest_record_clears_plan(render, tmp_path):
     out = render(tmp_path, {"project_name": "demo"})
-    _archived_plan(
-        out,
-        "2026-07-19-bound.md",
-        "tier: 2\nreview-binding: artifact-v1\n",
-    )
-    fake = ("a" * 40, "b" * 40, "c" * 64)
-    _journal(out, _review(work="bound", artifact=fake))
+    base, head, digest = _init_git_repo(out, work="bound")
+    _journal(out, _review(work="bound", artifact=(base, head, digest)))
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+
+
+def test_wrong_digest_is_hard(render, tmp_path):
+    out = render(tmp_path, {"project_name": "demo"})
+    base, head, _digest = _init_git_repo(out, work="bound")
+    _journal(out, _review(work="bound", artifact=(base, head, "0" * 64)))
     r = _run(out)
     assert r.returncode == 1
-    assert "artifact-v1" in r.stdout and "certificate" in r.stdout
+    assert "digest mismatch" in r.stdout
+
+
+def test_unresolvable_artifact_commit_is_hard(render, tmp_path):
+    out = render(tmp_path, {"project_name": "demo"})
+    _base, head, digest = _init_git_repo(out, work="bound")
+    _journal(out, _review(work="bound", artifact=("d" * 40, head, digest)))
+    r = _run(out)
+    assert r.returncode == 1
+    assert "do not resolve" in r.stdout
+
+
+def test_retired_review_binding_is_note_not_silent(render, tmp_path):
+    out = render(tmp_path, {"project_name": "demo"})
+    _archived_plan(out, "2026-07-04-old.md",
+                   "tier: 2\nreview-binding: artifact-v1\n")
+    _journal(out, _review(work="old", tier="2"))
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+    assert "retired" in r.stdout
 
 
 def test_partial_artifact_record_is_malformed(render, tmp_path):
@@ -337,116 +344,14 @@ def test_bad_artifact_sha_is_malformed(render, tmp_path):
     assert "base" in r.stdout and "Git SHA" in r.stdout
 
 
-def test_valid_empty_commit_certificate_clears_bound_plan(render, tmp_path):
-    out = render(tmp_path, {"project_name": "demo"})
-    _init_bound_repo(out)
-    r = _run(out)
-    assert r.returncode == 0, r.stdout + r.stderr
 
 
-def test_nonempty_certificate_commit_is_rejected(render, tmp_path):
-    out = render(tmp_path, {"project_name": "demo"})
-    _git(out, "init", "-q", "-b", "main")
-    _git(out, "config", "user.email", "t@example.com")
-    _git(out, "config", "user.name", "Test")
-    _git(out, "add", "-A")
-    _git(out, "commit", "-q", "-m", "base")
-    _git(out, "checkout", "-q", "-b", "feature")
-    _archived_plan(out, "2026-07-19-bound.md",
-                   "tier: 2\nreview-binding: artifact-v1\n")
-    _git(out, "add", "-A")
-    _git(out, "commit", "-q", "-m", "feat: payload")
-    base = _git(out, "merge-base", "main", "HEAD").stdout.strip()
-    head = _git(out, "rev-parse", "HEAD").stdout.strip()
-    raw = _git(out, "diff", "--binary", f"{base}...{head}", text=False).stdout
-    line = _review(work="bound", artifact=(base, head, hashlib.sha256(raw).hexdigest()))
-    (out / "after-review.txt").write_text("mutation\n", encoding="utf-8")
-    _git(out, "add", "after-review.txt")
-    _git(out, "commit", "-q", "-m", "chore: attest review", "-m", line)
-    r = _run(out)
-    assert r.returncode == 1
-    assert "tree-empty" in r.stdout
 
 
-def test_certificate_wrong_parent_is_rejected(render, tmp_path):
-    out = render(tmp_path, {"project_name": "demo"})
-    base, _head, digest, certificate = _init_bound_repo(out)
-    message = _review(work="bound", artifact=(base, base, digest))
-    _git(out, "commit", "--allow-empty", "-q", "-m", "chore: bad parent", "-m", message)
-    r = _run(out)
-    assert r.returncode == 1
-    assert certificate in r.stdout or "parent" in r.stdout
 
 
-def test_certificate_unknown_commits_are_rejected(render, tmp_path):
-    out = render(tmp_path, {"project_name": "demo"})
-    _git(out, "init", "-q", "-b", "main")
-    _git(out, "config", "user.email", "t@example.com")
-    _git(out, "config", "user.name", "Test")
-    _git(out, "add", "-A")
-    _git(out, "commit", "-q", "-m", "base")
-    line = _review(work="ghost", artifact=("a" * 40, "b" * 40, "c" * 64))
-    _git(out, "commit", "--allow-empty", "-q", "-m", "chore: ghost", "-m", line)
-    r = _run(out)
-    assert r.returncode == 1
-    assert "do not resolve" in r.stdout
 
 
-def test_certificate_wrong_digest_is_rejected(render, tmp_path):
-    out = render(tmp_path, {"project_name": "demo"})
-    base, head, _digest, _certificate = _init_bound_repo(out)
-    _git(out, "reset", "--hard", head)
-    line = _review(work="bound", artifact=(base, head, "0" * 64))
-    _git(out, "commit", "--allow-empty", "-q", "-m", "chore: bad digest", "-m", line)
-    r = _run(out)
-    assert r.returncode == 1
-    assert "digest" in r.stdout
-
-
-def test_exact_main_candidate_matches_certificate(render, tmp_path):
-    out = render(tmp_path, {"project_name": "demo"})
-    base, _head, _digest, _certificate = _init_bound_repo(out)
-    r = _run(out, _candidate_env(base))
-    assert r.returncode == 0, r.stdout + r.stderr
-
-
-def test_changed_main_candidate_is_rejected(render, tmp_path):
-    out = render(tmp_path, {"project_name": "demo"})
-    base, _head, _digest, _certificate = _init_bound_repo(out)
-    (out / "payload.txt").write_text("changed after review\n", encoding="utf-8")
-    _git(out, "add", "payload.txt")
-    _git(out, "commit", "-q", "-m", "fix: mutate candidate")
-    r = _run(out, _candidate_env(base))
-    assert r.returncode == 1
-    assert "candidate digest" in r.stdout
-
-
-def test_multiple_bound_plans_in_one_candidate_are_rejected(render, tmp_path):
-    out = render(tmp_path, {"project_name": "demo"})
-    base, _head, _digest, _certificate = _init_bound_repo(out)
-    _archived_plan(
-        out,
-        "2026-07-19-second.md",
-        "tier: 2\nreview-binding: artifact-v1\n",
-    )
-    _git(out, "add", "-A")
-    _git(out, "commit", "-q", "-m", "docs: add second reviewed slice")
-    r = _run(out, _candidate_env(base))
-    assert r.returncode == 1
-    assert "multiple newly archived artifact-v1 plans" in r.stdout
-
-
-def test_feature_target_does_not_apply_candidate_binding(render, tmp_path):
-    out = render(tmp_path, {"project_name": "demo"})
-    base, _head, _digest, _certificate = _init_bound_repo(out)
-    (out / "payload.txt").write_text("changed after review\n", encoding="utf-8")
-    _git(out, "add", "payload.txt")
-    _git(out, "commit", "-q", "-m", "fix: mutate candidate")
-    r = _run(out, _candidate_env(base, "refs/heads/feature"))
-    assert r.returncode == 0, r.stdout + r.stderr
-
-
-# --- fenced quotations ignored ---
 
 def test_fenced_review_line_ignored(render, tmp_path):
     out = render(tmp_path, {"project_name": "demo"})
