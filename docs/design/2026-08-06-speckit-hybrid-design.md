@@ -81,11 +81,12 @@ A real `specify init --integration claude` render was inspected. Facts:
 | Journal, ADRs, telemetry, issues | dev-process |
 | Execution vocabulary for Tier 2+ tasks | Spec Kit `tasks.md` (checkpoints double as GRADE/journal points) |
 
-## The `speckit-adapter` module (opt-in)
+## The `speckit-adapter` module (standard, default-on)
 
-A new module, so nothing is discarded: without it, the existing thin
-brainstorm/plan commands remain the Tier 2+ path (they stay for portability
-and for harnesses Spec Kit does not cover). With it:
+**Decision (2026-08-06): Spec Kit is the standard path, not an option.** The
+module renders by default in every profile; disabling it is an explicit
+opt-out for setups that cannot run Spec Kit, and that fallback path (thin
+original commands + `design-template.md`) is frozen. With the module on:
 
 1. **Bootstrap step:** documented pinned install
    (`uv tool install specify-cli==<pin>` + `specify init --here
@@ -195,6 +196,51 @@ flow-forward.**
    `specs/` recursively; the doc-drift gate keeps those references resolvable
    so targeted loading stays reliable.
 
+## Downstream phases — what quick/debug/spike/execute/review borrow
+
+The remaining Spec Kit skills were held against the downstream phases. Two
+real finds, two format borrowings, two places where dev-process is ahead and
+deliberately takes nothing:
+
+1. **Plan exit gains an artifact-consistency step (`/speckit-analyze`) — the
+   biggest find.** Our review judges code after implementation; `analyze`
+   judges the *artifacts against each other before any code exists*:
+   requirements with no covering task, spec↔plan contradictions, terminology
+   drift, constitution violations. It is the cheapest point in the cycle to
+   catch a wrong solution, and as a pure artifact read it is small-model
+   work. Wiring: the `/plan` wrapper runs it at phase exit — mandatory for
+   Tier 3, recommended for Tier 2.
+2. **Execute adopts progress-in-the-artifact and checkpoints.** Task
+   checkboxes are maintained in `tasks.md` itself (next task = first
+   unchecked box), making session re-entry trivial and small-model-robust;
+   foundational tasks gate story tasks, and each story checkpoint stops for
+   slice validation (a GRADE point where telemetry is on). Execute keeps
+   what `/speckit-implement` lacks — TDD ordering, atomic commits per task —
+   which is exactly why the implement skill itself stays uninstalled: its
+   two good ideas move into our execute flow instead of trading away the
+   commit discipline.
+3. **Review gains a completeness aid (`/speckit-converge`).** Before the
+   independent review, converge diffs the codebase against spec/plan/tasks
+   and lists what was promised but not built; the reviewer starts from a
+   machine-prepared gap list. Both analyze and converge are LLM judgment:
+   review *input*, never a gate — attestation and independence stay ours.
+4. **Spike adopts the research resolution format.** Unknown → Decision →
+   Rationale → Alternatives considered (Spec Kit's `research.md` shape); a
+   spike born from a `[NEEDS CLARIFICATION]` marker writes its answer back
+   at the marker site in exactly this shape, closing the loop mechanically.
+5. **Cross-cutting: deterministic context bootstrap.** Every Spec Kit skill
+   opens with `check-prerequisites.sh --json` — phase state as
+   machine-readable JSON instead of model memory. `/prime` and execute adopt
+   the same pattern; it is the quiet enabler of the small-model routing.
+6. **Debug and quick take nothing, deliberately.** Spec Kit has no debugging
+   story (a documented criticism) — root-cause-first stays as is. And quick
+   is precisely what Spec Kit lacks and gets criticized for; the tier model
+   is the answer to that gap, not the other way around.
+
+Priority by the stated goals (cost, error rate): analyze at plan exit →
+checkbox progress + checkpoints in execute → converge before review → spike
+format → prerequisite JSON.
+
 ## Replacement, not parallel operation
 
 Within a project that enables the module, the Spec Kit path **replaces** the
@@ -245,10 +291,10 @@ template).
 - [NEEDS CLARIFICATION: pilot scope — enable the module in one real project
   first, or ship it in dev-process and pilot there? Telemetry baseline needs
   a few Tier 2 cycles either way.]
-- [NEEDS CLARIFICATION: should `/speckit-implement` be recommended at all, or
-  should execution stay with the dev-process execute flow (TDD + atomic
-  commits + GRADE), consuming Spec Kit's tasks.md as input? Default
-  recommendation: keep execute — implement bypasses the commit discipline.]
+- Resolved (2026-08-06): `/speckit-implement` stays uninstalled — execution
+  remains with the dev-process execute flow (TDD + atomic commits + GRADE),
+  consuming `tasks.md` as input and adopting implement's checkbox-progress
+  and checkpoint ideas (see "Downstream phases").
 
 ## Measurement
 
