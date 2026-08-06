@@ -1,482 +1,139 @@
+"""feature-inventory gate (lean pass): capability -> acceptance -> proving
+tests; the work-log axis (status, blocked_by, parent) moved to GitHub."""
 import json
 import subprocess
 import sys
-from pathlib import Path
-
-
-def _render(render, tmp_path, **mods):
-    m = {"feature_registry": True}
-    m.update(mods)
-    return render(tmp_path, {"project_name": "d", "modules": m})
-
-
-def _run(out: Path):
-    return subprocess.run(
-        [sys.executable, str(out / "scripts/process/check_feature_registry.py"), str(out)],
-        capture_output=True, text=True,
-    )
-
 
 REG = "docs/process/feature-registry"
 
 
-def _write_story(out: Path, name: str, data: dict):
+def _render(render, tmp_path, **extra):
+    return render(tmp_path, {"project_name": "d", "modules": {"feature_registry": True}, **extra})
+
+
+def _gate(out):
+    return subprocess.run(
+        [sys.executable, str(out / "scripts/process/check_feature_registry.py"), "."],
+        cwd=out, capture_output=True, text=True)
+
+
+def _entry(out, name="STORY-0002.json", **over):
     d = out / REG
     d.mkdir(parents=True, exist_ok=True)
+    data = {
+        "id": "STORY-0002",
+        "title": "Widget capability",
+        "story": "As a user, when saving, the system shall persist the widget.",
+        "acceptance": [{"id": "AC1", "text": "Saved widgets survive a restart."}],
+        "tests": ["tests/test_widget.py"],
+    }
+    data.update(over)
     (d / name).write_text(json.dumps(data), encoding="utf-8")
+    (out / "tests").mkdir(exist_ok=True)
+    (out / "tests/test_widget.py").write_text("def test_widget(): pass\n")
 
 
-VALID = {
-    "id": "STORY-0007",
-    "title": "Consume billing API",
-    "story": "As an order service, when a checkout completes, the system shall post the invoice.",
-    "acceptance": [{"id": "AC1", "text": "A completed checkout produces exactly one billing POST."}],
-    "tests": ["tests/billing/test_post.py"],
-    "status": "done",
-}
-
-
-def test_module_files_present_when_on(render, tmp_path):
+def test_empty_inventory_is_note_not_failure(render, tmp_path):
     out = _render(render, tmp_path)
-    assert (out / "scripts/process/check_feature_registry.py").is_file()
-    assert (out / "docs/process/modules/feature-registry.md").is_file()
-    assert (out / REG / "STORY-0001.example.json").is_file()
-
-
-def test_module_files_absent_when_off(render, tmp_path):
-    out = render(tmp_path, {"project_name": "d"})
-    assert not (out / "scripts/process/check_feature_registry.py").exists()
-    assert not (out / "docs/process/modules/feature-registry.md").exists()
-    assert not (out / REG).exists()
-
-
-def test_shipped_seed_is_inert(render, tmp_path):
-    # only the *.example.json seed ships → registry reads as empty
-    out = _render(render, tmp_path)
-    r = _run(out)
+    r = _gate(out)
     assert r.returncode == 0, r.stdout + r.stderr
-    assert "no stories yet" in r.stdout
+    assert "no inventory entries yet" in r.stdout
 
 
-def test_invalid_json_is_hard(render, tmp_path):
+def test_valid_entry_passes(render, tmp_path):
     out = _render(render, tmp_path)
-    (out / REG).mkdir(parents=True, exist_ok=True)
-    (out / REG / "STORY-0002.json").write_text("{ not json", encoding="utf-8")
-    r = _run(out)
+    _entry(out)
+    r = _gate(out)
+    assert r.returncode == 0, r.stdout + r.stderr
+
+
+def test_missing_tests_is_hard(render, tmp_path):
+    # an inventory entry without a proving test is a claim, not an inventory
+    out = _render(render, tmp_path)
+    _entry(out, tests=[])
+    r = _gate(out)
     assert r.returncode == 1
-    assert "invalid JSON" in r.stdout
+    assert "non-empty list" in r.stdout
 
 
-def test_runner_lists_gate_when_module_on(render, tmp_path):
+def test_dead_test_path_is_hard(render, tmp_path):
     out = _render(render, tmp_path)
-    r = subprocess.run(
-        [sys.executable, str(out / "scripts/process/gate_runner.py"), "--list"],
-        cwd=out, capture_output=True, text=True,
-    )
-    assert "feature-registry" in r.stdout
-
-
-def test_runner_omits_gate_when_module_off(render, tmp_path):
-    out = render(tmp_path, {"project_name": "d"})
-    r = subprocess.run(
-        [sys.executable, str(out / "scripts/process/gate_runner.py"), "--list"],
-        cwd=out, capture_output=True, text=True,
-    )
-    assert r.returncode == 0, r.stderr
-    assert "feature-registry" not in r.stdout
-
-
-def test_valid_story_ok(render, tmp_path):
-    out = _render(render, tmp_path)
-    _write_story(out, "STORY-0007.json", VALID)
-    (out / "tests/billing").mkdir(parents=True, exist_ok=True)
-    (out / "tests/billing/test_post.py").write_text("def test_x():\n    pass\n")
-    r = _run(out)
-    assert r.returncode == 0, r.stdout
-    assert "registry-gate: OK" in r.stdout
-
-
-def test_under_granular_acceptance_is_advisory(render, tmp_path):
-    out = _render(render, tmp_path)
-    (out / "tests").mkdir(parents=True, exist_ok=True)
-    paths = []
-    for i in range(6):
-        p = f"tests/test_ug_{i}.py"
-        (out / p).write_text("def test_x():\n    pass\n")
-        paths.append(p)
-    # 1 acceptance criterion, 6 mapped tests -> under-granular (advisory, never blocks)
-    _write_story(out, "STORY-0009.json", {
-        "id": "STORY-0009", "title": "Thin acceptance",
-        "story": "As x, when y, the system shall z.",
-        "acceptance": [{"id": "AC1", "text": "z happens."}],
-        "tests": paths, "status": "done",
-    })
-    r = _run(out)
-    assert r.returncode == 0, r.stdout
-    assert "under-describe tested behaviour" in r.stdout
-    assert "STORY-0009" in r.stdout
-
-
-def _dep(sid, blocked_by=None, status="proposed"):
-    d = {"id": sid, "title": "t",
-         "story": "As a x, when y, the system shall z.",
-         "acceptance": [{"id": "AC1", "text": "one behaviour."}],
-         "tests": [], "status": status}
-    if blocked_by is not None:
-        d["blocked_by"] = blocked_by
-    return d
-
-
-def test_valid_dependency_chain_ok(render, tmp_path):
-    out = _render(render, tmp_path)
-    _write_story(out, "STORY-0001.json", _dep("STORY-0001", ["STORY-0002"]))
-    _write_story(out, "STORY-0002.json", _dep("STORY-0002"))
-    r = _run(out)
-    assert r.returncode == 0, r.stdout
-
-
-def test_dangling_blocked_by_hard(render, tmp_path):
-    out = _render(render, tmp_path)
-    _write_story(out, "STORY-0001.json", _dep("STORY-0001", ["STORY-0099"]))
-    r = _run(out)
+    _entry(out, tests=["tests/test_missing.py"])
+    r = _gate(out)
     assert r.returncode == 1
-    assert "no such story" in r.stdout
+    assert "does not exist" in r.stdout
 
 
-def test_self_reference_hard(render, tmp_path):
+def test_retired_worklog_fields_are_hard(render, tmp_path):
+    # status/blocked_by/parent moved to GitHub — a leftover is double bookkeeping
     out = _render(render, tmp_path)
-    _write_story(out, "STORY-0001.json", _dep("STORY-0001", ["STORY-0001"]))
-    r = _run(out)
+    _entry(out, status="done", blocked_by=["STORY-0001"])
+    r = _gate(out)
     assert r.returncode == 1
-    assert "lists itself" in r.stdout
-
-
-def test_two_cycle_hard(render, tmp_path):
-    out = _render(render, tmp_path)
-    _write_story(out, "STORY-0001.json", _dep("STORY-0001", ["STORY-0002"]))
-    _write_story(out, "STORY-0002.json", _dep("STORY-0002", ["STORY-0001"]))
-    r = _run(out)
-    assert r.returncode == 1
-    assert "dependency cycle" in r.stdout
-
-
-def test_three_cycle_hard(render, tmp_path):
-    out = _render(render, tmp_path)
-    _write_story(out, "STORY-0001.json", _dep("STORY-0001", ["STORY-0002"]))
-    _write_story(out, "STORY-0002.json", _dep("STORY-0002", ["STORY-0003"]))
-    _write_story(out, "STORY-0003.json", _dep("STORY-0003", ["STORY-0001"]))
-    r = _run(out)
-    assert r.returncode == 1
-    assert "dependency cycle" in r.stdout
-
-
-def _with(d, **kw):
-    d = dict(d)
-    d.update(kw)
-    return d
-
-
-def test_parent_dangling_hard(render, tmp_path):
-    out = _render(render, tmp_path)
-    _write_story(out, "STORY-0001.json", _with(_dep("STORY-0001"), parent="STORY-0099"))
-    r = _run(out)
-    assert r.returncode == 1 and "parent" in r.stdout and "no such story" in r.stdout
-
-
-def test_parent_self_hard(render, tmp_path):
-    out = _render(render, tmp_path)
-    _write_story(out, "STORY-0001.json", _with(_dep("STORY-0001"), parent="STORY-0001"))
-    r = _run(out)
-    assert r.returncode == 1 and "its own parent" in r.stdout
-
-
-def test_parent_malformed_hard(render, tmp_path):
-    out = _render(render, tmp_path)
-    _write_story(out, "STORY-0001.json", _with(_dep("STORY-0001"), parent="STORY-1"))
-    r = _run(out)
-    assert r.returncode == 1 and "'parent' must be a STORY-NNNN" in r.stdout
-
-
-def test_parent_cycle_hard(render, tmp_path):
-    out = _render(render, tmp_path)
-    _write_story(out, "STORY-0001.json", _with(_dep("STORY-0001"), parent="STORY-0002"))
-    _write_story(out, "STORY-0002.json", _with(_dep("STORY-0002"), parent="STORY-0001"))
-    r = _run(out)
-    assert r.returncode == 1 and "parent cycle" in r.stdout
-
-
-def test_valid_parent_ok(render, tmp_path):
-    out = _render(render, tmp_path)
-    _write_story(out, "STORY-0001.json", _with(_dep("STORY-0001"), parent="STORY-0002"))
-    _write_story(out, "STORY-0002.json", _dep("STORY-0002"))
-    r = _run(out)
-    assert r.returncode == 0, r.stdout
-
-
-def test_parent_done_before_child_soft(render, tmp_path):
-    out = _render(render, tmp_path)
-    # epic done, child not done, and epic has a child so it's exempt from the test rule
-    epic = _dep("STORY-0002", status="done")
-    epic["tests"] = ["tests/x/test_a.py"]
-    _write_story(out, "STORY-0002.json", epic)
-    _write_story(out, "STORY-0001.json", _with(_dep("STORY-0001", status="proposed"),
-                                               parent="STORY-0002"))
-    (out / "tests/x").mkdir(parents=True, exist_ok=True)
-    (out / "tests/x/test_a.py").write_text("def test_a():\n    pass\n")
-    r = _run(out)
-    assert r.returncode == 0, r.stdout
-    assert "an epic outruns its parts" in r.stdout
-
-
-def test_epic_done_without_test_is_soft(render, tmp_path):
-    # a parent (has a child) done without its own test is soft (children cover)
-    out = _render(render, tmp_path)
-    _write_story(out, "STORY-0002.json", _dep("STORY-0002", status="done"))  # no tests
-    _write_story(out, "STORY-0001.json", _with(_dep("STORY-0001", status="done"),
-                                               parent="STORY-0002"))
-    (out / "tests/x").mkdir(parents=True, exist_ok=True)
-    # give the leaf child a test so only the epic lacks one
-    child = _with(_dep("STORY-0001", status="done"), parent="STORY-0002")
-    child["tests"] = ["tests/x/test_c.py"]
-    _write_story(out, "STORY-0001.json", child)
-    (out / "tests/x/test_c.py").write_text("def test_c():\n    pass\n")
-    r = _run(out)
-    assert r.returncode == 0, r.stdout
-    assert "done epic without its own test" in r.stdout
-
-
-def test_done_epic_with_unfinished_child_still_hard(render, tmp_path):
-    # the exemption is NOT a blanket escape: a done epic with no test and a
-    # non-done child proves nothing -> hard (closes the SP23-review false-green)
-    out = _render(render, tmp_path)
-    _write_story(out, "STORY-0002.json", _dep("STORY-0002", status="done"))  # epic, no test
-    _write_story(out, "STORY-0001.json", _with(_dep("STORY-0001", status="proposed"),
-                                               parent="STORY-0002"))
-    r = _run(out)
-    assert r.returncode == 1
-    assert "exempt only when all its children are done" in r.stdout
-
-
-def test_leaf_done_without_test_still_hard(render, tmp_path):
-    # a non-parent done story with no test stays hard (rule not weakened)
-    out = _render(render, tmp_path)
-    _write_story(out, "STORY-0001.json", _dep("STORY-0001", status="done"))  # no tests, no children
-    r = _run(out)
-    assert r.returncode == 1 and "requires at least one test" in r.stdout
-
-
-def test_child_duplicating_parent_title_soft(render, tmp_path):
-    out = _render(render, tmp_path)
-    parent = _dep("STORY-0002")
-    parent["title"] = "Shared epic title"
-    _write_story(out, "STORY-0002.json", parent)
-    child = _with(_dep("STORY-0001"), parent="STORY-0002")
-    child["title"] = "Shared epic title"
-    _write_story(out, "STORY-0001.json", child)
-    r = _run(out)
-    assert r.returncode == 0, r.stdout
-    assert "identical to parent" in r.stdout
-
-
-def test_diamond_is_not_a_false_cycle(render, tmp_path):
-    # A shared descendant (A->B, A->C, B->D, C->D) is a valid DAG, not a cycle —
-    # the DFS must not false-positive on the re-visited node D.
-    out = _render(render, tmp_path)
-    _write_story(out, "STORY-0001.json", _dep("STORY-0001", ["STORY-0002", "STORY-0003"]))
-    _write_story(out, "STORY-0002.json", _dep("STORY-0002", ["STORY-0004"]))
-    _write_story(out, "STORY-0003.json", _dep("STORY-0003", ["STORY-0004"]))
-    _write_story(out, "STORY-0004.json", _dep("STORY-0004"))
-    r = _run(out)
-    assert r.returncode == 0, r.stdout
-    assert "cycle" not in r.stdout
-
-
-def test_self_reference_not_double_reported_as_cycle(render, tmp_path):
-    # a self-edge is reported once, as "lists itself" — not also as a cycle
-    out = _render(render, tmp_path)
-    _write_story(out, "STORY-0001.json", _dep("STORY-0001", ["STORY-0001"]))
-    r = _run(out)
-    assert r.returncode == 1
-    assert "lists itself" in r.stdout
-    assert "dependency cycle" not in r.stdout
-
-
-def test_blocked_by_not_list_hard(render, tmp_path):
-    out = _render(render, tmp_path)
-    _write_story(out, "STORY-0001.json", _dep("STORY-0001", "STORY-0002"))  # str, not list
-    r = _run(out)
-    assert r.returncode == 1
-    assert "must be a list" in r.stdout
-
-
-def test_blocked_by_bad_entry_hard(render, tmp_path):
-    out = _render(render, tmp_path)
-    _write_story(out, "STORY-0001.json", _dep("STORY-0001", ["STORY-2"]))  # wrong format
-    r = _run(out)
-    assert r.returncode == 1
-    assert "must match STORY-NNNN" in r.stdout
-
-
-def test_done_with_unfinished_blocker_soft(render, tmp_path):
-    out = _render(render, tmp_path)
-    done = _dep("STORY-0001", ["STORY-0002"], status="done")
-    done["tests"] = ["tests/x/test_a.py"]
-    _write_story(out, "STORY-0001.json", done)
-    _write_story(out, "STORY-0002.json", _dep("STORY-0002", status="proposed"))
-    (out / "tests/x").mkdir(parents=True, exist_ok=True)
-    (out / "tests/x/test_a.py").write_text("def test_a():\n    pass\n")
-    r = _run(out)
-    assert r.returncode == 0, r.stdout
-    assert "dependency order looks off" in r.stdout
-
-
-def test_missing_required_field_is_hard(render, tmp_path):
-    out = _render(render, tmp_path)
-    broken = {k: v for k, v in VALID.items() if k != "title"}
-    _write_story(out, "STORY-0008.json", broken)
-    r = _run(out)
-    assert r.returncode == 1
-    assert "missing 'title'" in r.stdout
-
-
-def test_bad_id_format_is_hard(render, tmp_path):
-    out = _render(render, tmp_path)
-    _write_story(out, "story7.json", {**VALID, "id": "STORY-7"})
-    r = _run(out)
-    assert r.returncode == 1
-    assert "STORY-NNNN" in r.stdout
+    assert "retired work-log field" in r.stdout
+    assert "GitHub" in r.stdout
 
 
 def test_duplicate_id_is_hard(render, tmp_path):
     out = _render(render, tmp_path)
-    _write_story(out, "a.json", {**VALID, "id": "STORY-0009"})
-    _write_story(out, "b.json", {**VALID, "id": "STORY-0009"})
-    r = _run(out)
+    _entry(out, name="STORY-0002.json")
+    _entry(out, name="STORY-0002-copy.json")
+    r = _gate(out)
     assert r.returncode == 1
     assert "duplicate id" in r.stdout
 
 
-def test_bad_status_is_hard(render, tmp_path):
+def test_dangling_adr_is_hard(render, tmp_path):
     out = _render(render, tmp_path)
-    _write_story(out, "STORY-0010.json", {**VALID, "status": "shipped"})
-    r = _run(out)
+    _entry(out, adr="ADR-9999")
+    r = _gate(out)
     assert r.returncode == 1
-    assert "status" in r.stdout
+    assert "no file under" in r.stdout
 
 
-def test_empty_acceptance_text_is_hard(render, tmp_path):
+def test_empty_acceptance_is_hard(render, tmp_path):
     out = _render(render, tmp_path)
-    bad = {**VALID, "acceptance": [{"id": "AC1", "text": "   "}]}
-    _write_story(out, "STORY-0011.json", bad)
-    r = _run(out)
+    _entry(out, acceptance=[])
+    r = _gate(out)
     assert r.returncode == 1
-    assert "acceptance[0]" in r.stdout
 
 
-def test_acceptance_text_null_is_hard(render, tmp_path):
+def test_pytest_node_selector_is_stripped(render, tmp_path):
     out = _render(render, tmp_path)
-    bad = {**VALID, "status": "proposed", "acceptance": [{"id": "AC1", "text": None}]}
-    bad.pop("tests")  # isolate the failure signal to the acceptance check
-    _write_story(out, "STORY-0019.json", bad)
-    r = _run(out)
-    assert r.returncode == 1
-    assert "acceptance[0]" in r.stdout
-
-
-def test_acceptance_text_nonstring_is_hard(render, tmp_path):
-    out = _render(render, tmp_path)
-    bad = {**VALID, "status": "proposed", "acceptance": [{"id": "AC1", "text": [1, 2, 3]}]}
-    bad.pop("tests")  # isolate the failure signal to the acceptance check
-    _write_story(out, "STORY-0020.json", bad)
-    r = _run(out)
-    assert r.returncode == 1
-    assert "acceptance[0]" in r.stdout
-
-
-def test_missing_test_path_is_hard(render, tmp_path):
-    out = _render(render, tmp_path)
-    _write_story(out, "STORY-0012.json", {**VALID, "tests": ["tests/nope/test_absent.py"]})
-    r = _run(out)
-    assert r.returncode == 1
-    assert "test path does not exist" in r.stdout
-
-
-def test_done_without_tests_is_hard(render, tmp_path):
-    out = _render(render, tmp_path)
-    story = {**VALID, "status": "done"}
-    story.pop("tests")
-    _write_story(out, "STORY-0013.json", story)
-    r = _run(out)
-    assert r.returncode == 1
-    assert "requires at least one test" in r.stdout
-
-
-def test_test_path_with_node_selector_resolves(render, tmp_path):
-    out = _render(render, tmp_path)
-    (out / "tests/billing").mkdir(parents=True, exist_ok=True)
-    (out / "tests/billing/test_post.py").write_text("def test_x():\n    pass\n")
-    story = {**VALID, "tests": ["tests/billing/test_post.py::test_x"]}
-    _write_story(out, "STORY-0014.json", story)
-    r = _run(out)
+    _entry(out, tests=["tests/test_widget.py::test_widget"])
+    r = _gate(out)
     assert r.returncode == 0, r.stdout
 
 
-def test_missing_adr_is_hard(render, tmp_path):
+def test_example_seed_is_ignored(render, tmp_path):
     out = _render(render, tmp_path)
-    (out / "tests/billing").mkdir(parents=True, exist_ok=True)
-    (out / "tests/billing/test_post.py").write_text("def test_x():\n    pass\n")
-    _write_story(out, "STORY-0015.json", {**VALID, "adr": "ADR-0099"})
-    r = _run(out)
+    assert (out / REG / "STORY-0001.example.json").is_file()
+    r = _gate(out)
+    assert r.returncode == 0, r.stdout
+
+
+def test_unknown_field_is_note_only(render, tmp_path):
+    out = _render(render, tmp_path)
+    _entry(out, owner="somebody")
+    r = _gate(out)
+    assert r.returncode == 0
+    assert "unknown field" in r.stdout
+
+
+def test_invalid_json_is_hard(render, tmp_path):
+    out = _render(render, tmp_path)
+    d = out / REG
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "STORY-0003.json").write_text("{ nope", encoding="utf-8")
+    r = _gate(out)
     assert r.returncode == 1
-    assert "adr link" in r.stdout
+    assert "invalid JSON" in r.stdout
 
 
-def test_present_adr_passes(render, tmp_path):
+def test_module_doc_states_inventory_split(render, tmp_path):
     out = _render(render, tmp_path)
-    (out / "tests/billing").mkdir(parents=True, exist_ok=True)
-    (out / "tests/billing/test_post.py").write_text("def test_x():\n    pass\n")
-    (out / "docs/process/adr").mkdir(parents=True, exist_ok=True)
-    (out / "docs/process/adr/adr-0005-billing.md").write_text("# ADR 5\n")
-    _write_story(out, "STORY-0016.json", {**VALID, "adr": "ADR-0005"})
-    r = _run(out)
-    assert r.returncode == 0, r.stdout
-
-
-def test_acceptance_without_test_is_soft(render, tmp_path):
-    out = _render(render, tmp_path)
-    (out / "tests/billing").mkdir(parents=True, exist_ok=True)
-    (out / "tests/billing/test_post.py").write_text("def test_x():\n    pass\n")
-    story = {
-        **VALID,
-        "status": "in-progress",
-        "acceptance": [
-            {"id": "AC1", "text": "one"},
-            {"id": "AC2", "text": "two"},
-        ],
-        "tests": ["tests/billing/test_post.py"],
-    }
-    _write_story(out, "STORY-0017.json", story)
-    r = _run(out)
-    assert r.returncode == 0, r.stdout          # soft: does not fail the build
-    assert "coverage unverified" in r.stdout
-
-
-def test_unknown_field_ignored(render, tmp_path):
-    out = _render(render, tmp_path)
-    (out / "tests/billing").mkdir(parents=True, exist_ok=True)
-    (out / "tests/billing/test_post.py").write_text("def test_x():\n    pass\n")
-    story = {**VALID, "surface": "web", "owner": "team-a", "links": ["x"]}
-    _write_story(out, "STORY-0018.json", story)
-    r = _run(out)
-    assert r.returncode == 0, r.stdout
-    assert "registry-gate: OK" in r.stdout
-
-
-def test_example_file_not_validated(render, tmp_path):
-    out = _render(render, tmp_path)
-    # a broken *.example.json must be ignored even though it is malformed
-    (out / REG).mkdir(parents=True, exist_ok=True)
-    (out / REG / "STORY-9999.example.json").write_text("{ not json", encoding="utf-8")
-    r = _run(out)
-    assert r.returncode == 0, r.stdout
-    assert "no stories yet" in r.stdout
+    doc = (out / "docs/process/modules/feature-registry.md").read_text()
+    assert "Inventory, not work log" in doc
+    assert "GitHub" in doc
+    # story_order was retired with the work-log axis
+    assert not (out / "scripts/process/story_order.py").exists()

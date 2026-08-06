@@ -1,12 +1,19 @@
 #!/usr/bin/env python3
-"""feature-registry gate: validate the story files under
-docs/process/feature-registry/ — the requirements / acceptance / test
-traceability SSOT.
+"""feature-inventory gate: validate the capability entries under
+docs/process/feature-registry/ — the "what can the product do today, and
+where is that proven?" SSOT.
+
+Lean pass: the registry's work-log axis (status, blocked_by, parent, ready
+ordering) moved to GitHub Issues/Projects — issues own "what is in flight".
+This inventory owns the other question: each entry names a shipped
+capability, its acceptance criteria, and the tests that prove them. An entry
+without a resolvable test is a claim, not an inventory item — hard failure.
+Fed at merge: the feature's spec user stories are promoted here with their
+test references (the durable yield of the pruned spec artifacts).
 
 Structure and reference existence are hard-guaranteed (CI exit 1). Whether a
-test *semantically* proves its acceptance criterion is not mechanically
-decidable — a missing test mapping is flagged best-effort, never faked as
-verified. Language-agnostic; stdlib only (plus the shared adr glob)."""
+test *semantically* proves its criterion is not mechanically decidable and is
+review judgment. Language-agnostic; stdlib only (plus the shared adr glob)."""
 from __future__ import annotations
 
 import json
@@ -15,7 +22,6 @@ import sys
 from pathlib import Path
 
 REGISTRY_DIR = "docs/process/feature-registry"
-STATUSES = {"proposed", "in-progress", "done", "deprecated"}
 
 # the decision-records gate (core, always rendered) owns ADR file identity —
 # import, don't copy (one owner per behavior)
@@ -23,31 +29,45 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling import
 from check_decisions import ADR_DIR, adr_exists as _adr_exists  # noqa: E402
 ID_RE = re.compile(r"^STORY-\d{4}$")
 
-# Advisory only: a story with many mapped tests but very few acceptance criteria
-# likely under-describes its tested behaviour — the criteria state less than the
-# tests prove. Granularity is a judgement call, so this warns, never blocks.
+# work-log fields retired in the lean pass — their truth lives in GitHub
+# Issues/Sub-Issues/Projects now; a leftover field is stale double bookkeeping
+RETIRED_FIELDS = {"status", "blocked_by", "parent"}
+KNOWN_FIELDS = {"id", "title", "story", "acceptance", "tests", "adr", "issue", "links"}
+
+# Advisory only: an entry with many mapped tests but very few acceptance
+# criteria likely under-describes its tested behaviour. Warns, never blocks.
 UNDER_GRANULAR_MAX_ACC = 2
 UNDER_GRANULAR_MIN_TESTS = 5
 
 
-def _story_files(root: Path) -> list[Path]:
+def _entry_files(root: Path) -> list[Path]:
     reg = root / REGISTRY_DIR
     if not reg.is_dir():
         return []
     return sorted(p for p in reg.glob("*.json") if not p.name.endswith(".example.json"))
 
 
-def _check_story(root: Path, path: Path, seen_ids: dict,
-                 graph: dict) -> tuple[list[str], list[str]]:
+def _check_entry(root: Path, path: Path, seen_ids: dict) -> tuple[list[str], list[str], dict]:
     hard: list[str] = []
     soft: list[str] = []
+    stats = {"n_acc": 0, "n_tests": 0, "sid": None}
     rel = path.relative_to(root)
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-        return [f"{rel}: invalid JSON: {exc}"], []
+        return [f"{rel}: invalid JSON: {exc}"], [], stats
     if not isinstance(data, dict):
-        return [f"{rel}: story must be a JSON object, got {type(data).__name__}"], []
+        return [f"{rel}: entry must be a JSON object, got {type(data).__name__}"], [], stats
+
+    retired = sorted(RETIRED_FIELDS & set(data))
+    if retired:
+        hard.append(f"{rel}: retired work-log field(s) {retired} — status, "
+                    f"dependencies, and decomposition live in GitHub "
+                    f"Issues/Projects now; the inventory carries only "
+                    f"capability -> acceptance -> tests")
+    unknown = sorted(set(data) - KNOWN_FIELDS - RETIRED_FIELDS)
+    if unknown:
+        soft.append(f"{rel}: unknown field(s) {unknown} — not validated")
 
     sid = data.get("id")
     if not isinstance(sid, str) or not sid:
@@ -58,215 +78,74 @@ def _check_story(root: Path, path: Path, seen_ids: dict,
         hard.append(f"{rel}: duplicate id {sid!r} (also in {seen_ids[sid]})")
     else:
         seen_ids[sid] = str(rel)
+        stats["sid"] = sid
 
     if not data.get("title"):
         hard.append(f"{rel}: missing 'title'")
     if not data.get("story"):
         hard.append(f"{rel}: missing 'story'")
 
-    if data.get("status") not in STATUSES:
-        hard.append(f"{rel}: 'status' must be one of {sorted(STATUSES)}, got {data.get('status')!r}")
-
     acceptance = data.get("acceptance")
-    n_acc = 0
     if not isinstance(acceptance, list) or not acceptance:
         hard.append(f"{rel}: 'acceptance' must be a non-empty list")
     else:
-        n_acc = len(acceptance)
+        stats["n_acc"] = len(acceptance)
         for i, ac in enumerate(acceptance):
             text = ac.get("text") if isinstance(ac, dict) else None
             if not isinstance(text, str) or not text.strip():
                 hard.append(f"{rel}: acceptance[{i}] 'text' must be a non-empty string")
 
-    tests = data.get("tests") or []
-    if not isinstance(tests, list):
-        hard.append(f"{rel}: 'tests' must be a list")
-        tests = []
-    n_tests = 0
-    for t in tests:
-        file_part = str(t).split("::", 1)[0]  # strip a pytest ::node selector
-        if not (root / file_part).is_file():
-            hard.append(f"{rel}: test path does not exist: {t}")
-        else:
-            n_tests += 1
-
-    # the 'done requires a test' rule is parent-aware — an epic is covered by its
-    # children's tests — so it runs in the cross-story pass, not here.
+    # an inventory entry asserts a shipped, proven capability — it requires at
+    # least one existing test; a dead test path is a false claim of proof
+    tests = data.get("tests")
+    if not isinstance(tests, list) or not tests:
+        hard.append(f"{rel}: 'tests' must be a non-empty list — an inventory "
+                    f"entry without a proving test is a claim, not an inventory")
+    else:
+        for t in tests:
+            file_part = str(t).split("::", 1)[0]  # strip a pytest ::node selector
+            if not (root / file_part).is_file():
+                hard.append(f"{rel}: test path does not exist: {t}")
+            else:
+                stats["n_tests"] += 1
 
     adr = data.get("adr")
     if adr and not _adr_exists(root, adr):
         hard.append(f"{rel}: adr link {adr!r} has no file under {ADR_DIR}/")
 
-    if data.get("status") in ("in-progress", "done") and n_acc > n_tests:
-        soft.append(f"{rel}: {n_acc} acceptance criteria but {n_tests} mapped test(s) — coverage unverified")
-
-    # blocked_by: a list of STORY-NNNN ids this story depends on. Format is
-    # validated here; dangling refs and cycles need the whole set (in check()).
-    blocked = data.get("blocked_by", [])
-    deps: list[str] = []
-    if blocked in (None, []):
-        pass
-    elif not isinstance(blocked, list):
-        hard.append(f"{rel}: 'blocked_by' must be a list of STORY-NNNN ids")
-    else:
-        for b in blocked:
-            if not isinstance(b, str) or not ID_RE.match(b):
-                hard.append(f"{rel}: blocked_by entry {b!r} must match STORY-NNNN")
-            else:
-                deps.append(b)
-    # parent: a single STORY-NNNN this story decomposes (tree, not sequencing).
-    parent = data.get("parent")
-    parent_id: str | None = None
-    if parent in (None, ""):
-        pass
-    elif not isinstance(parent, str) or not ID_RE.match(parent):
-        hard.append(f"{rel}: 'parent' must be a STORY-NNNN id, got {parent!r}")
-    else:
-        parent_id = parent
-
-    if isinstance(sid, str) and ID_RE.match(sid):
-        graph[sid] = {"deps": deps, "status": data.get("status"), "rel": str(rel),
-                      "parent": parent_id, "has_test": bool(tests),
-                      "title": data.get("title"), "story": data.get("story"),
-                      "n_acc": n_acc, "n_tests": n_tests}
-
-    return hard, soft
+    return hard, soft, stats
 
 
-def _cycles(adj: dict, label: str) -> list[str]:
-    """`label: a -> b -> a` messages for every cycle in the adjacency map
-    (node -> [successors]). One owner for cycle detection — reused by both the
-    blocked_by graph and the parent tree. Self-edges are skipped (reported
-    separately); cycles are deduped by node-set."""
-    WHITE, GRAY, BLACK = 0, 1, 2
-    color = dict.fromkeys(adj, WHITE)
-    stack: list[str] = []
-    seen: set = set()
-    out: list[str] = []
-
-    def dfs(u: str) -> None:
-        color[u] = GRAY
-        stack.append(u)
-        for v in adj[u]:
-            if v not in color or v == u:
-                continue
-            if color[v] == GRAY:
-                cyc = stack[stack.index(v):] + [v]
-                key = frozenset(cyc)
-                if key not in seen:
-                    seen.add(key)
-                    out.append(f"{label}: " + " -> ".join(cyc))
-            elif color[v] == WHITE:
-                dfs(v)
-        stack.pop()
-        color[u] = BLACK
-
-    for sid in sorted(adj):
-        if color[sid] == WHITE:
-            dfs(sid)
-    return out
-
-
-def _dependency_checks(graph: dict) -> tuple[list[str], list[str]]:
-    """blocked_by validation: dangling refs, self-references, and cycles are
-    hard; a done story with an unfinished blocker is a soft integrity note."""
-    hard: list[str] = []
-    soft: list[str] = []
-    ids = set(graph)
-    for sid, node in sorted(graph.items()):
-        for d in node["deps"]:
-            if d == sid:
-                hard.append(f"{node['rel']}: {sid} lists itself in blocked_by")
-            elif d not in ids:
-                hard.append(f"{node['rel']}: blocked_by {d!r} — no such story")
-            elif node["status"] == "done" and graph[d]["status"] != "done":
-                soft.append(f"{node['rel']}: {sid} is done but blocker {d} is "
-                            f"{graph[d]['status']!r} — dependency order looks off")
-    adj = {sid: [d for d in n["deps"] if d in ids] for sid, n in graph.items()}
-    hard += _cycles(adj, "dependency cycle")
-    return sorted(set(hard)), soft
-
-
-def _hierarchy_checks(graph: dict) -> tuple[list[str], list[str]]:
-    """parent (decomposition) validation, and the parent-aware done-test rule.
-    parent is a tree: dangling/self/cycle are hard. An epic (a story that is a
-    parent) may be done without its own test — its children cover it; a leaf
-    done story without a test stays hard."""
-    hard: list[str] = []
-    soft: list[str] = []
-    ids = set(graph)
-    for sid, n in sorted(graph.items()):
-        p = n["parent"]
-        if p:
-            if p == sid:
-                hard.append(f"{n['rel']}: {sid} is its own parent")
-            elif p not in ids:
-                hard.append(f"{n['rel']}: parent {p!r} — no such story")
-            else:
-                if graph[p]["status"] == "done" and n["status"] != "done":
-                    soft.append(f"{n['rel']}: parent {p} is done but child {sid} is "
-                                f"{n['status']!r} — an epic outruns its parts")
-                if n["title"] and n["title"] == graph[p]["title"]:
-                    soft.append(f"{n['rel']}: {sid} title is identical to parent {p} "
-                                f"— a child carries its own delta, not a copy")
-                if n["story"] and n["story"] == graph[p]["story"]:
-                    soft.append(f"{n['rel']}: {sid} story is identical to parent {p} "
-                                f"— a child carries its own delta, not a copy")
-        # parent-aware 'done requires a test'. An epic may skip its own test only
-        # when every child is itself done — the children's (leaf-enforced) tests
-        # then genuinely cover it. A done epic with an unfinished child proves
-        # nothing, so it stays hard: the exemption is not a blanket escape.
-        if n["status"] == "done" and not n["has_test"]:
-            kids = [c for c, cn in graph.items() if cn["parent"] == sid]
-            if kids and all(graph[c]["status"] == "done" for c in kids):
-                soft.append(f"{n['rel']}: {sid} is a done epic without its own test "
-                            f"— its children (all done) cover it")
-            else:
-                hard.append(f"{n['rel']}: status 'done' requires at least one test "
-                            f"(an epic is exempt only when all its children are done)")
-
-    adj = {sid: ([n["parent"]] if n["parent"] in ids and n["parent"] != sid else [])
-           for sid, n in graph.items()}
-    hard += _cycles(adj, "parent cycle")
-    return sorted(set(hard)), soft
-
-
-def _under_granular_note(graph: dict) -> list[str]:
-    """Advisory: stories with few acceptance criteria but many mapped tests — the
-    acceptance likely under-describes what the tests prove. Never blocks."""
+def _under_granular_note(stats: list[dict]) -> list[str]:
     flagged = sorted(
-        ((sid, n["n_tests"]) for sid, n in graph.items()
-         if n["n_acc"] <= UNDER_GRANULAR_MAX_ACC and n["n_tests"] >= UNDER_GRANULAR_MIN_TESTS),
+        ((s["sid"], s["n_tests"]) for s in stats
+         if s["sid"] and s["n_acc"] <= UNDER_GRANULAR_MAX_ACC
+         and s["n_tests"] >= UNDER_GRANULAR_MIN_TESTS),
         key=lambda x: -x[1])
     if not flagged:
         return []
     shown = ", ".join(f"{sid}({nt}t)" for sid, nt in flagged[:12])
     more = f" (+{len(flagged) - 12} more)" if len(flagged) > 12 else ""
-    return [f"{len(flagged)} story(ies) carry <= {UNDER_GRANULAR_MAX_ACC} acceptance "
+    return [f"{len(flagged)} entr(ies) carry <= {UNDER_GRANULAR_MAX_ACC} acceptance "
             f"criteria but >= {UNDER_GRANULAR_MIN_TESTS} mapped tests — acceptance may "
             f"under-describe tested behaviour; consider adding explicit criteria: "
             f"{shown}{more}"]
 
 
 def check(root: Path) -> tuple[list[str], list[str]]:
-    files = _story_files(root)
+    files = _entry_files(root)
     if not files:
-        return [], ["no stories yet (feature-registry empty)"]
+        return [], ["no inventory entries yet (feature inventory empty)"]
     hard: list[str] = []
     soft: list[str] = []
     seen_ids: dict = {}
-    graph: dict = {}
+    all_stats: list[dict] = []
     for path in files:
-        h, s = _check_story(root, path, seen_ids, graph)
+        h, s, stats = _check_entry(root, path, seen_ids)
         hard += h
         soft += s
-    dh, ds = _dependency_checks(graph)
-    hard += dh
-    soft += ds
-    hh, hs = _hierarchy_checks(graph)
-    hard += hh
-    soft += hs
-    soft += _under_granular_note(graph)
+        all_stats.append(stats)
+    soft += _under_granular_note(all_stats)
     return hard, soft
 
 
@@ -274,13 +153,13 @@ def main() -> int:
     root = Path(sys.argv[1] if len(sys.argv) > 1 else ".").resolve()
     hard, soft = check(root)
     for note in soft:
-        print(f"registry-gate: note: {note}")
+        print(f"inventory-gate: note: {note}")
     if hard:
-        print("registry-gate: FAILED:")
+        print("inventory-gate: FAILED:")
         for h in hard:
             print(f"  - {h}")
         return 1
-    print("registry-gate: OK")
+    print("inventory-gate: OK")
     return 0
 
 

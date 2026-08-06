@@ -1,117 +1,62 @@
-# Module: feature-registry
+# Module: feature-registry — the feature inventory
 
-Records the user-visible stories of **{{ project_name }}** and traces each to its
-acceptance criteria and tests. Runs via `process-gates` (in CI when a CI adapter is installed, and in the pre-push hook) and locally via
+The capability inventory of **{{ project_name }}**: what can the product do
+today, and where is that proven? One entry per shipped capability, each
+tracing to its acceptance criteria and the tests that prove them. Runs via
+`process-gates` (CI and the pre-push hook) and locally via
 `python scripts/process/check_feature_registry.py`.
 
-## When a story is required
+## Inventory, not work log
 
-Mandatory rule *"tests prove acceptance"* (`docs/process/mandatory-rules.md`)
-routes here: any user-visible behaviour, UI flow, contract, or test-coverage
-change needs an affected story **before** implementation. New behaviour gets a
-new story first. This is where a scenario sharpened at onboarding — including a
-cross-repo coupling — is deposited as a concrete requirement.
+Two questions used to share this registry; the lean pass split them:
 
-## One story per file
+- **"What is in flight?"** is the work log — owned by **GitHub
+  Issues/Sub-Issues/Projects** (status labels, `blocked_by` issue links,
+  board columns; gate-checked by the `github-master` module where installed).
+  The retired fields `status`, `blocked_by`, and `parent` are **hard
+  failures** here — a leftover is stale double bookkeeping.
+- **"What exists and is proven?"** is this inventory. A hundred closed issues
+  answer "what happened", not "what is": capabilities span many issues and
+  get reshaped by later ones. The inventory scales with capabilities
+  (dozens, slowly), not work items (hundreds, fast) — it stays readable.
 
-Create `docs/process/feature-registry/STORY-NNNN.json` (one file per story so
-stories diff and merge independently):
+The inventory is fed at merge: a feature's spec user stories are promoted
+here with their test references — the durable yield of the pruned spec
+artifacts (see the speckit module's merge ritual, where installed).
 
-- **id** — `STORY-NNNN` (four digits), unique across the registry.
+## One entry per file
+
+Create `docs/process/feature-registry/STORY-NNNN.json` (one file per entry so
+entries diff and merge independently):
+
+- **id** — `STORY-NNNN` (four digits), unique across the inventory.
 - **title** — a short label.
-- **story** — one sentence in EARS form: *As a `<role>`, when `<trigger>`, the
-  system shall `<response>`.* Wording is graded by humans, not the gate.
-- **acceptance** — a non-empty list of `{id, text}`; each `text` is a gradeable,
-  testable statement. The `id` is a naming convention for referencing criteria
-  (plans, GRADE lines); the gate validates only `text`.
-- **status** — `proposed | in-progress | done | deprecated`.
-- **tests** — paths (optionally with a `::node` selector) to the tests that
-  prove the acceptance. `status: done` needs at least one.
-- **adr** (optional) — `ADR-NNNN` linking a decision under `docs/process/adr/`.
-- **blocked_by** (optional) — a list of `STORY-NNNN` ids this story depends on
-  (sequencing, not decomposition). Absent or `[]` means no dependency.
-- **parent** (optional) — one `STORY-NNNN` this story decomposes (an epic → its
-  tasks; a tree, not sequencing). Absent or `null` means no parent. A child
-  carries its own delta and *references* the parent — it does not copy the
-  parent's context.
-- **issue**, **links** (optional) — forward-compat slots for the GitHub-Issues
-  and contracts modules; stored but not yet enforced.
+- **story** — one sentence in EARS form: *As a `<role>`, when `<trigger>`,
+  the system shall `<response>`.* Wording is graded by humans, not the gate.
+- **acceptance** — a non-empty list of `{id, text}`; each `text` is a
+  gradeable, testable statement. The `id` is a naming convention for
+  referencing criteria (plans, GRADE lines); the gate validates only `text`.
+- **tests** — a **non-empty** list of paths (optionally with a `::node`
+  selector) to the tests that prove the acceptance. An inventory entry
+  without a resolvable test is a claim, not an inventory item.
+- **adr** (optional) — `ADR-NNNN` linking a decision under
+  `docs/process/adr/`.
+- **issue** (optional) — provenance: the issue or PR that delivered the
+  capability. A pointer for humans; the gate does not resolve it.
+- **links** (optional) — free-form coupling notes (consumed contracts, pins).
 
-Copy `STORY-0001.example.json` (shipped, inert) as a starting point.
+A retired capability is **deleted** (git history is the archive) — the
+inventory lists what exists, not what once did.
 
-## Dependencies and ready-to-start order
+## Hard vs. best-effort (no false-green)
 
-`blocked_by` records that one story must land before another. The gate keeps the
-dependency graph honest; a read-only tool turns it into a work order.
+**Hard (CI fails):** invalid JSON; missing/duplicate/misshaped `id`; missing
+`title`/`story`; empty `acceptance` or criterion without text; empty `tests`
+or a test path that does not exist; a retired work-log field; a dangling
+`adr` link.
 
-- **Hard (CI fails):** a `blocked_by` that is not a list of `STORY-NNNN`; a ref
-  to a story that does not exist (dangling); a story listing **itself**; a
-  **dependency cycle** (reported with its path — an unbuildable order).
-- **Best-effort:** a `done` story whose blocker is not itself `done` — a note
-  that the order looks off, never a block (status can move out of order during a
-  migration).
-- `python scripts/process/story_order.py` (read-only, never a gate) prints the
-  **ready-to-start** stories (no unfinished blockers), the **blocked** ones with
-  what they wait on, and a suggested topological order.
-
-`blocked_by` is sequencing between siblings; it is not parent/child
-decomposition. Rendering the dependency into a GitHub issue as "Blocked by #N"
-is an optional projection — see the `github-issues` module — never the source of
-truth, which stays here in the registry.
-
-## Decomposition (parent/child)
-
-`parent` records that a story is part of an epic. It is a **tree** — one parent
-per child — and orthogonal to `blocked_by` (an epic's children need not block
-each other).
-
-- **Hard:** a `parent` that is not `STORY-NNNN`; a ref to a non-existent story
-  (dangling); a story that is its own parent; a **parent cycle**.
-- **Best-effort:** a parent that is `done` while a child is not (an epic cannot
-  outrun its parts); a child whose `title`/`story` is byte-identical to its
-  parent's (carry the delta, not a copy — only verbatim duplication is
-  mechanically detectable; the rest is review discipline).
-- An **epic** (a story that is some other story's `parent`) may be `done`
-  without its own test **only when all its children are `done`** — their
-  (leaf-enforced) tests then genuinely cover it (a note). A done epic with an
-  unfinished child, or a leaf `done` story, still needs a test (hard) — the
-  exemption is not a blanket escape.
-
-`story_order.py` prints an epic → children hierarchy alongside the sequencing
-view. Under `github_master`, sub-issues are the master for `parent`; linking a
-child issue to its parent on GitHub is an optional projection (best-effort, not
-a gate).
-
-## What the gate verifies
-
-- **Hard (CI fails):** valid JSON object; `id`/`title`/`story`/`status`/
-  `acceptance` present; `id` matches `STORY-NNNN` and is unique; `status` in the
-  enum; every `acceptance[].text` non-empty; every `tests[]` path exists;
-  `status: done` has ≥1 test; an `adr` link resolves to a file.
-- **Best-effort:** an `in-progress`/`done` story with more acceptance criteria
-  than mapped tests prints a note — the missing *mapping* is visible; semantic
-  coverage stays a human judgement. The inverse also notes: many tests on very
-  few criteria suggests the criteria under-describe the tested behaviour.
-- **Ignored:** `*.example.json` seeds; unknown fields (cross-module forward-compat).
-
-## Definition of Ready / Done
-
-Not a new checkbox — a one-place view of the bar every story clears, each item
-owned and enforced elsewhere. Use it to see the whole lifecycle at a glance.
-
-**Ready to start:**
-- a real user story (`story`) and gradeable acceptance (`acceptance`);
-- the approach recorded (the plan, for Tier 2+);
-- an issue link before code, for Tier 2+ (the `github-issues` module enforces it
-  on the plan).
-
-**Done:**
-- every acceptance criterion maps a test (`tests`; mandatory rule "tests prove
-  acceptance") — the registry gate requires ≥1 test for `status: done`;
-- the independent review *attested* its independence (the review gate validates
-  the attestation, not the run itself — `verification-independence.md`);
-- a `done` story carries an issue link (the `github-issues` module makes this
-  hard — for *every* done story, epic or leaf, unlike the test rule which an
-  epic's children can cover) and its issue is `closed` (the `github-master`
-  module checks this offline where GitHub is the source of truth);
-- the registry, and any affected contract SSOT, are updated.
+**Best-effort (note, never fails):** an empty inventory ("no entries yet");
+unknown fields; the under-granularity advisory (an entry with ≤2 criteria
+but ≥5 mapped tests likely under-describes its tested behaviour). Whether a
+test *semantically* proves its criterion is review judgment
+(`review-checklist.md`, Tests prove acceptance) — the gate never fakes that.

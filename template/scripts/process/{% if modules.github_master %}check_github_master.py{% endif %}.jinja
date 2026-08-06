@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
-"""github-master gate: when GitHub is the source of truth, keep the local
-registry an honest mirror of it — hermetically.
+"""github-master gate: when GitHub Issues are the work-log source of truth,
+keep the committed snapshot honest — hermetically.
 
-The truth lives in GitHub (issues, sub-issues, board). The `gh_sync.py` tool
-pulls that truth into a committed snapshot (`.process-work/github-snapshot.json`)
-over the network. THIS gate never touches the network: it checks, offline and
-deterministically, that the committed registry agrees with the committed
-snapshot, and that the master invariants hold. Freshness of the snapshot vs live
-GitHub is the sync tool's job, not a gate's.
+The truth lives in GitHub (issues, board). The `gh_sync.py` tool pulls it into
+a committed snapshot (`.process-work/github-snapshot.json`) over the network.
+THIS gate never touches the network: it checks, offline and deterministically,
+that the committed snapshot is well-formed and internally consistent — DoR at
+rest for started work, board column vs issue state/status. Freshness of the
+snapshot vs live GitHub is the sync tool's job, not a gate's.
 
-With this module off, nothing here runs and the registry stays the source of
-truth (the portable default). Stdlib only.
+Lean pass: issues ARE the work log — there is no registry mirror to
+cross-check; the feature inventory (feature-registry module) answers the
+separate "what exists and is proven" question and is not coupled here.
+With this module off, nothing here runs. Stdlib only.
 """
 from __future__ import annotations
 
@@ -18,49 +20,21 @@ import json
 import sys
 from pathlib import Path
 
-REGISTRY_DIR = "docs/process/feature-registry"
 SNAPSHOT = ".process-work/github-snapshot.json"
 
-# process status -> the GitHub issue state it must map to
-STATUS_STATE = {"proposed": "open", "in-progress": "open",
-                "done": "closed", "deprecated": None}  # deprecated: either
-# board column (case-insensitive) -> the story status it implies
+# board column (case-insensitive) -> the status label it implies
 BOARD_STATUS = {"backlog": "proposed", "ready": "proposed",
                 "in-progress": "in-progress", "in progress": "in-progress",
                 "review": "in-progress", "done": "done"}
-ENTRY_KEYS = {"number", "story", "title", "state", "status",
-              "blocked_by", "parent", "board_status", "dor"}
-
-
-def _stories(root: Path) -> dict:
-    """Registry stories by id: {id: {title, status, blocked_by, has_issue}}."""
-    reg = root / REGISTRY_DIR
-    out: dict = {}
-    if not reg.is_dir():
-        return out
-    for p in sorted(reg.glob("*.json")):
-        if p.name.endswith(".example.json"):
-            continue
-        try:
-            d = json.loads(p.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, UnicodeDecodeError):
-            continue  # the feature-registry gate owns JSON validity
-        if not isinstance(d, dict) or not isinstance(d.get("id"), str):
-            continue
-        out[d["id"]] = {
-            "title": d.get("title"),
-            "status": d.get("status"),
-            "blocked_by": d.get("blocked_by") or [],
-            "parent": d.get("parent"),
-            "has_issue": bool(d.get("issue")),
-            "rel": f"{REGISTRY_DIR}/{p.name}",
-        }
-    return out
+# board column -> the issue state it implies
+BOARD_STATE = {"backlog": "open", "ready": "open", "in-progress": "open",
+               "in progress": "open", "review": "open", "done": "closed"}
+ENTRY_KEYS = {"number", "title", "state", "status", "board_status", "dor"}
 
 
 def _load_snapshot(root: Path) -> tuple[dict | None, list[str], object]:
-    """(entries_by_story, hard_errors, generated_at). entries_by_story is None
-    when the snapshot is absent (a soft, pre-sync state the caller reports)."""
+    """(entries_by_number, hard_errors, generated_at). entries is None when the
+    snapshot is absent (a soft, pre-sync state the caller reports)."""
     f = root / SNAPSHOT
     if not f.is_file():
         return None, [], None
@@ -79,7 +53,7 @@ def _load_snapshot(root: Path) -> tuple[dict | None, list[str], object]:
     hard: list[str] = []
     if top_extra:
         hard.append(f"{SNAPSHOT}: unknown top-level key(s): {sorted(top_extra)}")
-    by_story: dict = {}
+    by_number: dict = {}
     for i, e in enumerate(data["issues"]):
         if not isinstance(e, dict):
             hard.append(f"{SNAPSHOT}: issues[{i}] must be an object")
@@ -87,120 +61,73 @@ def _load_snapshot(root: Path) -> tuple[dict | None, list[str], object]:
         extra = set(e) - ENTRY_KEYS
         if extra:
             hard.append(f"{SNAPSHOT}: issues[{i}] has unknown key(s): {sorted(extra)}")
-        sid = e.get("story")
-        if not isinstance(sid, str) or not sid:
-            hard.append(f"{SNAPSHOT}: issues[{i}] missing 'story'")
+        num = e.get("number")
+        if not isinstance(num, int):
+            hard.append(f"{SNAPSHOT}: issues[{i}] missing integer 'number'")
             continue
-        if sid in by_story:  # a duplicate would silently mask a divergent entry
-            hard.append(f"{SNAPSHOT}: duplicate entry for {sid}")
+        if num in by_number:  # a duplicate would silently mask a divergent entry
+            hard.append(f"{SNAPSHOT}: duplicate entry for #{num}")
             continue
         if e.get("state") not in ("open", "closed"):
-            hard.append(f"{SNAPSHOT}: {sid} 'state' must be 'open' or 'closed'")
-        # type-guard the slots the drift loop consumes — a malformed committed
+            hard.append(f"{SNAPSHOT}: #{num} 'state' must be 'open' or 'closed'")
+        # type-guard the slots the checks consume — a malformed committed
         # snapshot must fail clean, never traceback
-        for key in ("title", "status"):
+        for key in ("title", "status", "board_status"):
             if e.get(key) is not None and not isinstance(e[key], str):
-                hard.append(f"{SNAPSHOT}: {sid} {key!r} must be a string or null")
-        bl = e.get("blocked_by")
-        if bl is not None:
-            if not isinstance(bl, list):
-                hard.append(f"{SNAPSHOT}: {sid} 'blocked_by' must be a list or null")
-            elif not all(isinstance(x, str) for x in bl):
-                # the drift loop sorts this list — a non-string element would
-                # traceback on comparison; fail clean instead (audit)
-                hard.append(f"{SNAPSHOT}: {sid} 'blocked_by' has a non-string element")
-                e = {**e, "blocked_by": None}  # neutralize before the drift loop
+                hard.append(f"{SNAPSHOT}: #{num} {key!r} must be a string or null")
+                e = {**e, key: None}
         dor = e.get("dor")
         if dor is not None and not (
                 isinstance(dor, dict)
                 and set(dor) == {"typed", "ears", "deviation"}
                 and all(isinstance(dor[k], bool) for k in dor)):
-            hard.append(f"{SNAPSHOT}: {sid} 'dor' must be null or an object with "
+            hard.append(f"{SNAPSHOT}: #{num} 'dor' must be null or an object with "
                         f"boolean typed/ears/deviation")
             e = {**e, "dor": None}  # neutralize before the DoR check
-        by_story[sid] = e
-    return by_story, hard, generated_at
+        by_number[num] = e
+    return by_number, hard, generated_at
 
 
-def _invariant_hard(stories: dict, snap: dict) -> list[str]:
-    """Every *live* story traces to an issue and a snapshot entry. Deprecated
-    stories are retired — exempt from both."""
+def _board_checks(snap: dict) -> list[str]:
+    """Board column vs issue state and status label — all three come from
+    GitHub, but from different surfaces (board, issue state, labels); the gate
+    catches the divergence a human misses (e.g. a closed issue still parked in
+    In-progress). `null` board slots are skipped (board not synced yet)."""
     hard: list[str] = []
-    for sid, s in sorted(stories.items()):
-        if s["status"] == "deprecated":
-            continue
-        if not s["has_issue"]:
-            hard.append(f"{s['rel']}: {sid} has no 'issue' — github-master mode "
-                        f"requires every live story to trace to an issue")
-        if sid not in snap:
-            hard.append(f"{s['rel']}: {sid} has no snapshot entry — mirror is stale, "
-                        f"re-run gh_sync.py")
-    return hard
-
-
-def _completeness_hard(stories: dict, snap: dict) -> list[str]:
-    """Every pulled issue has a materialized story (mirror complete both ways)."""
-    return [f"{SNAPSHOT}: {sid} pulled from GitHub but no registry story "
-            f"exists — materialize it"
-            for sid in sorted(snap) if sid not in stories]
-
-
-def _drift_hard(stories: dict, snap: dict) -> list[str]:
-    """On the fields GitHub owns, the registry may not diverge from the snapshot.
-    `null` slots are skipped (not yet mastered here)."""
-    hard: list[str] = []
-    for sid in sorted(set(stories) & set(snap)):
-        s, e = stories[sid], snap[sid]
-        if e.get("title") is not None and s["title"] != e["title"]:
-            hard.append(f"{s['rel']}: {sid} title drifts from GitHub "
-                        f"({s['title']!r} vs {e['title']!r}) — re-sync")
-        # process status is GitHub-mastered (label/board) — compare it directly,
-        # not only its coarse open/closed projection (proposed vs in-progress
-        # both map to 'open' and would otherwise slip)
-        if e.get("status") is not None and s["status"] != e["status"]:
-            hard.append(f"{s['rel']}: {sid} status drifts from GitHub "
-                        f"({s['status']!r} vs {e['status']!r}) — re-sync")
-        want_state = STATUS_STATE.get(s["status"])
-        if want_state is not None and e.get("state") != want_state:
-            hard.append(f"{s['rel']}: {sid} status {s['status']!r} implies "
-                        f"issue {want_state}, but snapshot has {e.get('state')!r}")
-        if e.get("parent") is not None and s["parent"] != e["parent"]:
-            hard.append(f"{s['rel']}: {sid} parent drifts from GitHub "
-                        f"({s['parent']!r} vs {e['parent']!r}) — re-sync sub-issue link")
-        # board column consistency (deprecated stories are off the board, exempt)
+    for num, e in sorted(snap.items()):
         board = e.get("board_status")
-        if board is not None and s["status"] != "deprecated":
-            col = board.lower() if isinstance(board, str) else None
-            if col not in BOARD_STATUS:
-                hard.append(f"{s['rel']}: {sid} board column {board!r} is not a known "
-                            f"column ({', '.join(sorted(set(BOARD_STATUS)))})")
-            elif s["status"] != BOARD_STATUS[col]:
-                hard.append(f"{s['rel']}: {sid} board column {board!r} implies status "
-                            f"{BOARD_STATUS[col]!r}, but the story is {s['status']!r}")
-        if isinstance(e.get("blocked_by"), list) and \
-                sorted(s["blocked_by"]) != sorted(e["blocked_by"]):
-            hard.append(f"{s['rel']}: {sid} blocked_by drifts from GitHub "
-                        f"({sorted(s['blocked_by'])} vs {sorted(e['blocked_by'])})")
+        if board is None:
+            continue
+        col = board.lower()
+        if col not in BOARD_STATUS:
+            hard.append(f"{SNAPSHOT}: #{num} board column {board!r} is not a known "
+                        f"column ({', '.join(sorted(set(BOARD_STATUS)))})")
+            continue
+        if e.get("state") in ("open", "closed") and e["state"] != BOARD_STATE[col]:
+            hard.append(f"{SNAPSHOT}: #{num} board column {board!r} implies a "
+                        f"{BOARD_STATE[col]} issue, but it is {e['state']!r}")
+        if e.get("status") is not None and e["status"] != BOARD_STATUS[col]:
+            hard.append(f"{SNAPSHOT}: #{num} board column {board!r} implies status "
+                        f"{BOARD_STATUS[col]!r}, but the status label says "
+                        f"{e['status']!r}")
     return hard
 
 
-def _dor_checks(stories: dict, snap: dict) -> tuple[list[str], list[str]]:
-    """Definition of Ready, enforced at rest: an *in-progress* story (work has
-    started) must link an issue that is Ready — typed (R1) and EARS-gradeable
-    (R2, epics exempt at sync time) — or carry a recorded `## Deviations` note
-    (the DoR's named escape). Facts come from the snapshot's `dor` slot, which
-    gh_sync derives from the live issue; a snapshot predating that slot degrades
-    to a note (re-sync), never a fake fail. Proposed stories are not yet
-    started and `done` is the review gate's business — both out of scope."""
+def _dor_checks(snap: dict) -> tuple[list[str], list[str]]:
+    """Definition of Ready, enforced at rest: an *in-progress* issue (work has
+    started) must be Ready — typed (R1) and EARS-gradeable (R2, epics exempt at
+    sync time) — or carry a recorded `## Deviations` note (the DoR's named
+    escape). Facts come from the snapshot's `dor` slot, which gh_sync derives
+    from the live issue; a snapshot predating that slot degrades to a note
+    (re-sync), never a fake fail. `done` is the review gate's business."""
     hard: list[str] = []
     stale: list[str] = []
-    for sid in sorted(set(stories) & set(snap)):
-        s = stories[sid]
-        if s["status"] != "in-progress":
+    for num, e in sorted(snap.items()):
+        if e.get("status") != "in-progress" or e.get("state") != "open":
             continue
-        dor = snap[sid].get("dor")
+        dor = e.get("dor")
         if dor is None:
-            stale.append(sid)
+            stale.append(f"#{num}")
             continue
         if dor["deviation"]:
             continue  # recorded, justified deviation — the named escape
@@ -208,11 +135,11 @@ def _dor_checks(stories: dict, snap: dict) -> tuple[list[str], list[str]]:
                                            (dor["ears"], "EARS acceptance (R2)"))
                    if not flag]
         if missing:
-            hard.append(f"{s['rel']}: {sid} is in-progress but its issue is not "
-                        f"Ready — missing {' and '.join(missing)}; make it ready "
-                        f"or record a '## Deviations' note on the issue, then "
+            hard.append(f"{SNAPSHOT}: #{num} is in-progress but not Ready — "
+                        f"missing {' and '.join(missing)}; make it ready or "
+                        f"record a '## Deviations' note on the issue, then "
                         f"re-run gh_sync.py (definition-of-ready-and-done.md)")
-    soft = ([f"{len(stale)} in-progress story(ies) have a snapshot entry without "
+    soft = ([f"{len(stale)} in-progress issue(s) have a snapshot entry without "
              f"DoR facts ({', '.join(stale)}) — snapshot predates the dor slot; "
              f"re-run gh_sync.py to enforce the Definition of Ready"]
             if stale else [])
@@ -234,17 +161,8 @@ def check(root: Path) -> tuple[list[str], list[str]]:
     soft = [f"freshness is not gated — snapshot generated_at={stamp!r}; "
             f"re-run gh_sync.py if GitHub changed since (a stale mirror passes)"]
 
-    stories = _stories(root)
-    if not stories:
-        # an empty mirror is a no-op, not proof of consistency — say so instead
-        # of a bare green (this module depends on populated feature-registry stories)
-        soft.append(f"no stories under {REGISTRY_DIR}/ — nothing is mirrored, "
-                    f"so there is nothing to verify (populate the registry, "
-                    f"then re-sync)")
-    hard += _invariant_hard(stories, snap)
-    hard += _completeness_hard(stories, snap)
-    hard += _drift_hard(stories, snap)
-    dor_hard, dor_soft = _dor_checks(stories, snap)
+    hard += _board_checks(snap)
+    dor_hard, dor_soft = _dor_checks(snap)
     hard += dor_hard
     soft += dor_soft
     return hard, soft

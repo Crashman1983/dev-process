@@ -266,11 +266,13 @@ def test_plan_enforced_even_without_feature_registry(render, tmp_path):
     assert "issue-before-code" in r.stdout
 
 
-def test_feature_registry_doc_has_dor_dod(render, tmp_path):
+def test_feature_registry_doc_states_worklog_split(render, tmp_path):
+    # lean pass: DoR/DoD live in definition-of-ready-and-done.md and the
+    # work log in GitHub Issues — the inventory doc states the split
     out = _render(render, tmp_path)
     t = (out / "docs/process/modules/feature-registry.md").read_text()
-    assert "## Definition of Ready / Done" in t
-    assert "Ready to start" in t and "Done:" in t
+    assert "Inventory, not work log" in t
+    assert "github-master" in t
 
 
 def test_module_doc_names_issue_before_code(render, tmp_path):
