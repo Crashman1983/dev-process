@@ -195,14 +195,35 @@ flow-forward.**
    `specs/` recursively; the doc-drift gate keeps those references resolvable
    so targeted loading stays reliable.
 
-## What SP55 becomes
+## Replacement, not parallel operation
 
-The marker convention and the `clarification` gate carry over unchanged (Spec
-Kit uses the identical marker natively — verified in its spec template).
-`design-template.md` remains the owner of the design scaffold **without** the
-module; with the module active, the Spec Kit spec template owns Tier 2+ specs
-and `design-template.md` stays the fallback for quick designs and spikes — the
-module doc states this ownership split explicitly.
+Within a project that enables the module, the Spec Kit path **replaces** the
+existing specification steps — mandatory rule 4 (one owner per behavior,
+structural not additive) forbids a second parallel path:
+
+- `/brainstorm` and `/plan` stay as the entry points but their bodies are
+  repointed: `/brainstorm` → `speckit-specify` + `speckit-clarify`,
+  `/plan` → `speckit-plan` + `speckit-tasks`. The kernel duties travel into
+  the wrapper — deriving the tier and reading `PRODUCT.md`/ADRs as
+  constraints are process obligations Spec Kit does not know.
+- `design-template.md` is **not rendered** when the module is on — the
+  spec-template override is then the sole owner of the Tier 2+ spec scaffold.
+- `workflow.md` remains the phase SSOT: it states *what* Brainstorm and Plan
+  must achieve; Spec Kit is the *how*. Specification vs. implementation, not
+  duplication.
+- Everything Spec Kit has no equivalent for stays untouched: quick, debug,
+  spike, execute, review, commit, prime, all gates and hooks, tiers, DoR/DoD,
+  journal, ADRs, telemetry.
+
+The one honest residual duplication sits at template level: the module-off
+path (thin original commands + `design-template.md`) keeps shipping as the
+degradation for setups without Spec Kit — **frozen, not developed**. All
+future evolution of the specification phase happens in the Spec Kit path only
+(overrides, constitution, gate wiring); the fallback is a maintained-at-rest
+escape hatch of a few pointer files, not a second product. The marker
+convention and the `clarification` gate carry over unchanged in both paths
+(Spec Kit uses the identical marker natively — verified in its spec
+template).
 
 ## Acceptance criteria for the module (EARS)
 
