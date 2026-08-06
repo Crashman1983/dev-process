@@ -121,6 +121,50 @@ and for harnesses Spec Kit does not cover). With it:
    `verification-independence.md` (Tier 3 crosses the model family — the one
    place the strong model is non-negotiable).
 
+## File governance — containing the artifact volume
+
+Spec Kit's most-cited criticism is its file volume; the module makes the
+containment rules explicit. Two file classes, two treatments:
+
+**Infrastructure (`.specify/`, `.claude/skills/speckit-*` — ~30 files, once
+per repo): treated as a vendored, pinned dependency.**
+
+- Never hand-edited — a re-init regenerates them; our layer lives only in
+  `overrides/`, `extensions.yml`, and the constitution pointer.
+- Marked `linguist-generated` in `.gitattributes` so upgrade diffs collapse
+  in PR review.
+- Upgraded in a dedicated commit (`chore: bump spec-kit X→Y`), never mixed
+  into feature work — diff noise becomes one reviewable moment per upgrade.
+- Only the skills the process actually uses are installed; `implement` (the
+  execute flow owns execution) and redundant optional skills are skipped.
+- Token cost is a non-issue: skills load into context on invocation only.
+
+**Per-feature artifacts (`specs/NNN-feature/`): tier-capped, single-owner,
+flow-forward.**
+
+1. **Tier-proportional artifact ceiling.** The core is `spec.md + plan.md +
+   tasks.md`. `research.md`, `data-model.md`, `quickstart.md`, `checklists/`
+   are created only when content demands them (Tier 3, data-model contact,
+   real research questions) — stated in the plan-template override, not left
+   to habit. Effort scales with risk, not ritual.
+2. **Feature files point, they do not duplicate.** A contract touching more
+   than the one feature is promoted to the repo-wide contract SSOT
+   (`contract-first`/`contracts-drift`) at merge, the feature copy replaced
+   by a reference; durable product/architecture truth moves to
+   `PRODUCT.md`/ADRs/registry. `specs/` is the path to the result, never the
+   truth afterwards (mandatory rule 4).
+3. **Flow-forward persistence, consistent with the archive ritual.** Of Spec
+   Kit's three persistence models we choose flow-forward: each feature keeps
+   its directory, unchanged after merge, as audit trail — the same role
+   `.process-work/plans/archive/` plays today, covered by the same retention
+   stance ("growth is unbounded by design; prune by age as an ordinary
+   change"). The merge ritual still archives the plan (the review record has
+   one owner — the archive); `specs/` remains working history.
+4. **Context hygiene enables the small-model routing.** `/prime` and execute
+   load, per task, only `tasks.md` plus the files it names exactly — never
+   `specs/` recursively; the doc-drift gate keeps those references resolvable
+   so targeted loading stays reliable.
+
 ## What SP55 becomes
 
 The marker convention and the `clarification` gate carry over unchanged (Spec
