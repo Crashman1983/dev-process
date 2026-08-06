@@ -121,6 +121,26 @@ judge the change against its content:
 - Does it **shift scope while `PRODUCT.md` stays untouched**? A scope change
   that only lives in code is silent drift; the frame must move with it.
 
+## Specification quality — the spec is an artifact too
+
+The review sees the plan/design beside the diff; judge the words with the same
+care as the code. The `clarification` gate catches only the literal
+`[NEEDS CLARIFICATION]` marker — everything below is the judgment it cannot
+supply:
+
+- Is every acceptance criterion **individually testable** — a concrete trigger
+  and observable response (EARS), not "works correctly" or "is fast"? A
+  criterion no test could fail is not a criterion.
+- Did the design **resolve its open questions honestly** — answered or carried
+  as a *written, named assumption* — rather than silently deleting the marker?
+  An assumption load-bearing enough to change the design belongs in the text,
+  not in the author's head.
+- Does the spec stay at the **what/why** while the plan owns the *how* — or do
+  implementation details in the spec pre-empt decisions the plan should make
+  (and double the places a change must edit)?
+- Do the negative, edge, authorization, and invalidation/cleanup **twins**
+  (DoR R2) actually appear as criteria — not only the happy path?
+
 ## Tests prove acceptance
 
 - Does a **test map to each acceptance criterion** the change claims? A feature

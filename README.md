@@ -18,8 +18,8 @@ Ausgeliefert als [copier](https://copier.readthedocs.io)-Template. Adapter für
 Cross-platform bedeutet: native Core-Gates auf Linux, macOS und Windows mit
 `git` + `uv`; alle drei AI-Harness-Adapter sind unabhaengig kombinierbar.
 
-> **Status:** `v1.37.0` — Sub-Projekte SP1–SP54 ausgeliefert (Kern + 13 opt-in
-> Module, 4 Core-Gates, Profile für Solo/Team, DoR/DoD, Kernel-Integritäts-
+> **Status:** `v1.37.0` — Sub-Projekte SP1–SP55 ausgeliefert (Kern + 13 opt-in
+> Module, 5 Core-Gates, Profile für Solo/Team, DoR/DoD, Kernel-Integritäts-
 > und Compaction-Schutz). Vollständige Historie: [`CHANGELOG.md`](CHANGELOG.md).
 > **Überblick für Einsteiger:innen & Management** (wie es funktioniert, warum,
 > welcher Mehrwert): [`docs/CAPABILITIES.md`](docs/CAPABILITIES.md).
