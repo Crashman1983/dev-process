@@ -56,7 +56,7 @@ def test_adapters_list_every_module_doc():
     import yaml
     copier = yaml.safe_load((ROOT / "copier.yml").read_text(encoding="utf-8"))
     modules = set(re.findall(r"([a-z_]+):", copier["modules"]["default"]))
-    assert len(modules) >= 12, "copier modules default not parsed"
+    assert len(modules) >= 11, "copier modules default not parsed"
     adapters = [
         ROOT
         / "template/{% if harnesses.claude | default(true) %}CLAUDE.md{% endif %}.jinja",

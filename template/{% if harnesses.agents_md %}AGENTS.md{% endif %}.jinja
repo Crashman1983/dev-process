@@ -39,9 +39,9 @@ process file.
 - **debug** — root cause before fix (`docs/process/workflow.md`)
 - **commit** — atomic conventional commit (`docs/process/commits.md`)
 - **prime** — restore context (`docs/process/journal-state-plans.md`)
-{%- set _mod_slugs = {"doc_drift_gate": "doc-drift-gate", "arch_onboarding": "arch-onboarding", "feature_registry": "feature-registry", "github_issues": "github-issues", "contracts_drift": "contracts-drift", "git_hooks": "git-hooks", "contract_first": "contract-first", "security_floor": "security-floor", "sbom": "sbom", "telemetry": "telemetry", "arch_docs": "arch-docs", "github_master": "github-master"} %}
+{%- set _mod_slugs = {"doc_drift_gate": ["doc-drift-gate"], "arch_onboarding": ["arch-onboarding"], "feature_registry": ["feature-registry"], "github_issues": ["github-issues"], "contracts": ["contract-first", "contracts-drift"], "git_hooks": ["git-hooks"], "security_floor": ["security-floor"], "sbom": ["sbom"], "telemetry": ["telemetry"], "arch_docs": ["arch-docs"], "github_master": ["github-master"]} %}
 {%- set _active = [] %}
-{%- for _k, _slug in _mod_slugs.items() %}{% if modules[_k] %}{% set _ = _active.append(_slug) %}{% endif %}{% endfor %}
+{%- for _k, _slugs in _mod_slugs.items() %}{% if modules[_k] %}{% for _s in _slugs %}{% set _ = _active.append(_s) %}{% endfor %}{% endif %}{% endfor %}
 {%- if _active %}
 
 Active optional modules — read the module doc for the area you touch:

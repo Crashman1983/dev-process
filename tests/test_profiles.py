@@ -70,7 +70,7 @@ def test_ratchet_documented(render_raw, tmp_path):
         assert prof in text, prof
     # every optional module (all 13 copier.yml keys) has a ratchet trigger
     for mod in ("doc_drift_gate", "git_hooks",
-                "security_floor", "contract_first", "contracts_drift",
+                "security_floor", "contracts",
                 "feature_registry", "github_issues", "github_master",
                 "arch_onboarding", "arch_docs", "telemetry", "sbom"):
         assert f"`{mod}`" in text, mod

@@ -10,8 +10,8 @@ ALL_ON = {
     "harnesses": {"copilot": True, "agents_md": True},
     "modules": {
         "doc_drift_gate": True, "arch_onboarding": True, "feature_registry": True,
-        "github_issues": True, "contracts_drift": True, "git_hooks": True,
-        "contract_first": True, "security_floor": True,
+        "github_issues": True, "contracts": True, "git_hooks": True,
+        "security_floor": True,
     },
     "ci": {"github": True},
 }

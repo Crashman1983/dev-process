@@ -9,7 +9,7 @@ KENNI = ["Kenni", "KenniNext", "Seb", "Signal", "SvelteKit", "user_id=1", "surfa
 
 
 def _render(render, tmp_path, **mods):
-    m = {"contracts_drift": True}
+    m = {"contracts": True}
     m.update(mods)
     return render(tmp_path, {"project_name": "d", "modules": m})
 
@@ -274,7 +274,7 @@ def test_artifacts_neutral(render, tmp_path):
 def test_docdrift_resolves_module_doc_refs(render, tmp_path):
     out = render(
         tmp_path,
-        {"project_name": "d", "modules": {"doc_drift_gate": True, "contracts_drift": True}},
+        {"project_name": "d", "modules": {"doc_drift_gate": True, "contracts": True}},
     )
     r = subprocess.run(
         [sys.executable, str(out / "scripts/process/check_doc_drift.py"), str(out)],

@@ -9,7 +9,7 @@ CONTRACTS = "docs/process/capability-contracts"
 
 
 def _render(render, tmp_path, **mods):
-    m = {"contract_first": True}
+    m = {"contracts": True}
     m.update(mods)
     return render(tmp_path, {"project_name": "d", "modules": m})
 
@@ -60,7 +60,7 @@ def test_module_off_ships_neither(render, tmp_path):
 
 def test_answers_records_contract_first(render, tmp_path):
     out = _render(render, tmp_path)
-    assert "contract_first: true" in (out / ".copier-answers.yml").read_text()
+    assert "contracts: true" in (out / ".copier-answers.yml").read_text()
 
 
 def test_valid_contract_passes(render, tmp_path):
@@ -183,7 +183,7 @@ def test_neutral_no_kenni_terms(render, tmp_path):
 
 def test_docdrift_green_with_module_doc(render, tmp_path):
     out = render(tmp_path, {"project_name": "d",
-                            "modules": {"doc_drift_gate": True, "contract_first": True}})
+                            "modules": {"doc_drift_gate": True, "contracts": True}})
     r = subprocess.run(
         [sys.executable, str(out / "scripts/process/check_doc_drift.py"), str(out)],
         capture_output=True, text=True,
