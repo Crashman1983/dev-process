@@ -92,8 +92,8 @@ A starting point, not enforced by any gate:
 - `surface:<area>` — which part of the system
 - `priority:{low,med,high}`
 - `type:{feature,bug,chore,finding}` (the finding template sets `type:finding`)
-- `status:in-progress` — claimed and being worked. `who_is_working.py` also
-  treats `status:{review,handoff,blocked}` as active if you use finer states.
+- `status:in-progress` — claimed and being worked (`status:{review,handoff,blocked}`
+  for finer states).
 
 ## Claim workflow
 
@@ -110,22 +110,11 @@ makes a shared backlog legible when several efforts run at once.
 
 ## Coordination views (read-only)
 
-Two read-only tools surface, on the command line, what the offline gates and the
-issue labels only show separately — neither edits anything, and a missing or
-unauthenticated `gh` degrades to a note rather than an error:
-
-- `scripts/process/who_is_working.py` — a concurrent-activity preflight before
-  claiming: active claims (with branch and staleness), open PRs, remote work
-  branches with no PR, and local worktrees. Read it *before* starting so two
-  efforts do not collide on one issue.
-- `scripts/process/attention.py` — where a human should look and steer:
-  under-granular acceptance (tests far outnumber criteria), done-without-issue,
-  active claims and PRs, and **issue hygiene** — open issues that are not
-  gradeable (missing a `type:` label, or, unless an epic, missing an EARS
-  acceptance section). That last is the pattern review findings and follow-ups
-  fall into when filed outside the story flow: a finding or follow-up that needs
-  work is a typed issue (`type:bug`/`chore`/`feature`/`finding`) with EARS acceptance, the
-  same gradeable discipline as a story; a purely informational record is exempt.
+Where a human should look and steer — active claims, open PRs, issues missing
+a `type:` label or EARS acceptance — is visible in the GitHub UI itself
+(issue filters and the project board); review findings and follow-ups filed
+outside the story flow keep the same gradeable discipline as a story: a typed
+issue with EARS acceptance, while a purely informational record is exempt.
   Advisory only as a view — a triage hint, this tool never gates. (With the
   `github-master` module installed, the same two conditions DO fail the gate
   hard once a story is in-progress — `definition-of-ready-and-done.md`.)
