@@ -44,7 +44,7 @@ A unit of work is ready to be started when:
 | R1 | Typed (bug / chore / feature / finding / epic) | **hard** via the `github-master` gate where installed; else review |
 | R2 | Acceptance stated in **EARS** (`When <trigger>, the system shall <response>`), decomposed to include the **negative, edge, authorization, and invalidation/cleanup** cases; an epic carries scope + invariants instead | the issue-hygiene view; **hard** via the `github-master` gate where installed; decomposed at the tier's design step — an upfront brainstorm (Tier 3) or the plan (Tier 2) (`workflow.md`) |
 | R3 | Linked to its epic/story and the applicable design / decision records / product frame | brainstorm & plan review (`workflow.md`, mandatory rule 4) |
-| R4 | Dependencies (`blocked_by`) known, and no open blocker remains | the backlog-ordering view (`story_order.py`) where `feature-registry` is active; else review |
+| R4 | Dependencies known (GitHub issue links / sub-issues), and no open blocker remains | the project board and issue links; else review |
 
 Recognizing the tier (`risk-tiers.md`) is part of getting to Ready: it decides
 how much of the cycle runs (mandatory rule 2), and a Tier 2+ item is not ready
@@ -78,7 +78,7 @@ A change is done when:
 
 | # | Item | Evaluated by (owner) |
 | - | ---- | -------------------- |
-| D1 | Every acceptance criterion has a passing test | feature-registry coverage + **review** (`review-checklist.md`) |
+| D1 | Every acceptance criterion has a passing test | feature-inventory entry (capability → tests, gate-checked) + **review** (`review-checklist.md`) |
 | D2 | All **active** process gates are green | the gate runner (pre-push / CI) |
 | D3 | **Affected docs updated** — module docs, decision records, API/contract, README; no stale references | **review** judgment; path validity by the doc-drift gate |
 | D4 | Decision obligations reconciled (adopted, or deferred with a follow-up); a new significant decision is recorded before the code that assumes it | the core `decision-records` gate + review (mandatory rule 4) |

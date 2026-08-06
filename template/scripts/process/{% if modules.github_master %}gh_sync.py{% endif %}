@@ -3,15 +3,13 @@
 checks against. This is the ONE place the process talks to the network.
 
 Truth flows GitHub -> snapshot. The snapshot (.process-work/github-snapshot.json)
-is then compared against the registry, offline and deterministically, by
-check_github_master.py. Run this whenever the GitHub side changes, then commit
-the snapshot. Best-effort by nature (needs `gh`, auth, network) — it is not a
-gate and never blocks CI; the gate is the tested, hermetic contract.
+is then checked, offline and deterministically, by check_github_master.py. Run
+this whenever the GitHub side changes, then commit the snapshot. Best-effort by
+nature (needs `gh`, auth, network) — it is not a gate and never blocks CI; the
+gate is the tested, hermetic contract.
 
-The story<->issue join comes from each registry story's `issue` field: an issue
-that no story links is reported HERE ONLY — it is not written to the snapshot,
-so the offline gate cannot see it; materialize a story when the sync reports
-one. Stdlib + `gh`.
+Lean pass: issues ARE the work log (no registry mirror to join against) — the
+snapshot keys entries by issue number. Stdlib + `gh`.
 
 Usage: python scripts/process/gh_sync.py [OWNER/REPO]
        (repo falls back to the github_repo copier answer)
@@ -26,7 +24,6 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-REGISTRY_DIR = "docs/process/feature-registry"
 SNAPSHOT = ".process-work/github-snapshot.json"
 ANSWERS = ".copier-answers.yml"
 STATUS_LABEL = re.compile(r"^status:(\S+)$")
@@ -42,27 +39,6 @@ def _repo(root: Path, argv: list[str]) -> str | None:
                 v = line.split(":", 1)[1].strip().strip('"').strip("'")
                 return v or None
     return None
-
-
-def _issue_to_story(root: Path) -> dict:
-    """issue number -> story id, from each story's `issue` ref."""
-    reg = root / REGISTRY_DIR
-    out: dict = {}
-    if not reg.is_dir():
-        return out
-    for p in sorted(reg.glob("*.json")):
-        if p.name.endswith(".example.json"):
-            continue
-        try:
-            d = json.loads(p.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, UnicodeDecodeError):
-            continue
-        issue = d.get("issue") if isinstance(d, dict) else None
-        sid = d.get("id") if isinstance(d, dict) else None
-        m = re.search(r"(\d+)$", str(issue)) if issue else None
-        if m and isinstance(sid, str):
-            out[int(m.group(1))] = sid
-    return out
 
 
 def _status_from(labels: list, state: str) -> str:
@@ -129,32 +105,25 @@ def main() -> int:
     if out.is_file():
         try:
             prev = json.loads(out.read_text(encoding="utf-8"))
-            prior = {e.get("story"): e for e in prev.get("issues", [])
+            prior = {e.get("number"): e for e in prev.get("issues", [])
                      if isinstance(e, dict)}
         except (json.JSONDecodeError, UnicodeDecodeError):
             prior = {}
 
-    mapping = _issue_to_story(root)
-    issues, orphans = [], []
+    issues = []
     for it in json.loads(r.stdout):
         num = it["number"]
-        sid = mapping.get(num)
-        if sid is None:
-            orphans.append(num)
-            continue
-        kept = prior.get(sid, {})
+        kept = prior.get(num, {})
         issues.append({
-            "number": num, "story": sid, "title": it.get("title"),
+            "number": num, "title": it.get("title"),
             "state": it.get("state", "").lower(),
             "status": _status_from(it.get("labels") or [], it.get("state", "").lower()),
             # Definition-of-Ready facts, derived from the live issue here so the
             # gate can enforce DoR offline (the body itself is not snapshotted)
             "dor": _dor_facts(it.get("labels") or [], it.get("title") or "",
                               it.get("body") or ""),
-            # gh_sync does not master these — preserve whatever another tool
-            # committed (null until then); the gate skips drift on null slots.
-            "blocked_by": kept.get("blocked_by"),
-            "parent": kept.get("parent"),
+            # gh_sync does not master this — preserve whatever gh_board committed
+            # (null until then); the gate skips checks on null slots.
             "board_status": kept.get("board_status"),
         })
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -164,9 +133,6 @@ def main() -> int:
     out.write_text(json.dumps({"generated_by": "gh_sync", "generated_at": stamp,
                                "issues": issues}, indent=2) + "\n", encoding="utf-8")
     print(f"gh_sync: wrote {len(issues)} issue(s) to {SNAPSHOT}")
-    if orphans:
-        print(f"gh_sync: {len(orphans)} issue(s) have no story yet: "
-              f"{', '.join('#' + str(n) for n in sorted(orphans))} — materialize them")
     print("gh_sync: commit the snapshot, then the github-master gate checks it offline")
     return 0
 
