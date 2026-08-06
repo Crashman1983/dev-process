@@ -37,7 +37,7 @@ def _failing_contract(out: Path):
 
 
 def test_warn_mode_reports_but_exits_zero(render, tmp_path):
-    out = _render(render, tmp_path, contracts_drift=True)
+    out = _render(render, tmp_path, contracts=True)
     _failing_contract(out)
     r = _runner(out, "--warn")
     assert r.returncode == 0, r.stdout
@@ -46,7 +46,7 @@ def test_warn_mode_reports_but_exits_zero(render, tmp_path):
 
 
 def test_without_warn_hard_fails(render, tmp_path):
-    out = _render(render, tmp_path, contracts_drift=True)
+    out = _render(render, tmp_path, contracts=True)
     _failing_contract(out)
     r = _runner(out)
     assert r.returncode == 1
@@ -54,7 +54,7 @@ def test_without_warn_hard_fails(render, tmp_path):
 
 
 def test_list_unaffected(render, tmp_path):
-    out = _render(render, tmp_path, contracts_drift=True)
+    out = _render(render, tmp_path, contracts=True)
     r = _runner(out, "--list")
     assert r.returncode == 0, r.stderr
     assert "contracts-drift" in r.stdout
@@ -149,7 +149,7 @@ def test_feature_branch_commit_allowed(render, tmp_path):
 
 
 def test_pre_push_gates_pushed_commit_and_bypass(render, tmp_path):
-    out = _render(render, tmp_path, contracts_drift=True)
+    out = _render(render, tmp_path, contracts=True)
     _init_repo(out)
     # Commit a failing state on a feature branch; the hook gates the pushed
     # commits (fed on stdin), not the working tree.
@@ -169,7 +169,7 @@ def test_pre_push_gates_pushed_commit_and_bypass(render, tmp_path):
 
 
 def test_pre_push_ignores_dirty_working_tree(render, tmp_path):
-    out = _render(render, tmp_path, contracts_drift=True)
+    out = _render(render, tmp_path, contracts=True)
     _init_repo(out)
     _git(out, "checkout", "-q", "-b", "feat", check=True)
     # A clean, gate-passing committed tip ...
@@ -229,7 +229,7 @@ def test_pre_push_forwards_remote_ref_and_sha(render, tmp_path, monkeypatch):
 
 
 def test_post_commit_warns_never_blocks(render, tmp_path):
-    out = _render(render, tmp_path, contracts_drift=True)
+    out = _render(render, tmp_path, contracts=True)
     _init_repo(out)
     _failing_contract(out)
     r = subprocess.run(["bash", ".git/hooks/post-commit"], cwd=out,

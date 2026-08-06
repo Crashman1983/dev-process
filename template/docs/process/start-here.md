@@ -41,7 +41,7 @@ module set (see BOOTSTRAP.md, "Later"). The triggers:
 - a **layer boundary worth defending** ("ui never imports db") → a scoped
   floor rule in `security_floor` (its module doc: architecture boundaries)
 - a **shared or external interface** another component builds on →
-  `contract_first`, `contracts_drift`
+  `contracts`
 - **user-visible behavior worth tracing** to acceptance and tests →
   `feature_registry`
 - the backlog outgrows one head, or a **second person/agent** joins →
