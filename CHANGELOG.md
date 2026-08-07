@@ -320,6 +320,22 @@ referenziert sein `specs/`-Verzeichnis oder trägt eine begründete
 eine dokumentierte Entscheidung, nie ein stilles Verhalten) ausgeliefert,
 `v2.2.0` (enthält auch den Apache-2.0-Lizenzwechsel unten).
 
+SP59 (downstream-backflow: die vier generalisierbaren Beiträge aus dem
+privaten DATEV-Fork, per Patch-Handoff übernommen (der Fork darf keine
+PRs stellen) — Copier-Render-Cache in den Tests (jedes Answer-Set
+rendert einmal pro Session, jeder Test bekommt seine Kopie; volle Suite
+von ~4,5 min auf ~1,5 min), Gate-Preflight vor dem Review-Bundle (rote
+Gates ergeben kein review-fertiges Bundle; `--skip-preflight` als
+bewusster Ausweg), begrenzte Delta-Re-Reviews (`--since` mit
+Voll-Artefakt-Bindung, mitgeführten Vorbefunden und Tier-3-Ablehnung)
+und der advisory Finding-Ratchet (`gate=judgement|possible|<rule>` an
+FINDING-Zeilen — `possible` markiert Automatisierungskandidaten als
+Note, nie blockierend). Bewusst NICHT übernommen: Model-Routing,
+CODEOWNERS-Härtung, Pflicht-SBOM, Plattform-Fixierung (Fork-lokal,
+deckungsgleich mit dem Lean-Pass) und das decision-adoption-Modul
+(geparkt bis Nutzungsevidenz vorliegt — die Intent-Achse trägt die
+leichte Version bereits)) ausgeliefert, `v2.3.0`.
+
 ## Sub-Projekt-Tabelle (SP1–SP24)
 
 Die Tabelle wurde bis SP24 gepflegt; ab SP25 trägt das Narrativ oben die
