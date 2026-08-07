@@ -8,7 +8,9 @@
 > docs, adapters, commands) is English — start with
 > [`BOOTSTRAP.md`](BOOTSTRAP.md). License: [Prosperity Public
 > License 3.0.0](LICENSE.md) — free for noncommercial use; commercial use
-> beyond a 30-day trial requires a license from the contributor.
+> beyond a 30-day trial requires a license from the contributor. Two spec
+> templates derive from GitHub Spec Kit (MIT, © GitHub, Inc.):
+> [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md).
 
 Ein **maschinell durchgesetzter**, KI-gestützter Entwicklungsprozess auf einem
 bewussten Standard-Stack: **GitHub** (Issues/Projects/Actions als Arbeits-Log
