@@ -14,6 +14,12 @@ design review's F3/F7 conditions — prompts alone must not carry rule 5):
     tasks (mandatory rule 5). Heuristic and honest about it: a phase heading
     that names a user story must contain at least one task line mentioning a
     test; semantic adequacy stays review judgment.
+  - HARD: an active Tier 2+ plan in .process-work/plans that neither
+    references a specs/ directory nor carries a `spec-waived: <reason>` line —
+    with the speckit module on, the spec interrogation (stories, EARS twins,
+    clarify loop) comes BEFORE planning; skipping it is a documented decision,
+    never a silent one. Fenced text is quotation; designs (design-*) and
+    archived plans are out of scope (history is not retroactively re-specced).
   - SOFT: .specify/ missing entirely — expected before `specify init` ran
     (the BOOTSTRAP step); named, never silently green.
   - SOFT: unchecked tasks in an active specs/*/tasks.md — the deterministic
@@ -29,9 +35,16 @@ import re
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from check_review import TIER_DECL, _unfenced  # noqa: E402  (one owner: the
+# review gate owns the plan-field grammar and fence discipline; import, don't copy)
+
 CONSTITUTION = ".specify/memory/constitution.md"
 POINTER_MARK = "DEV-PROCESS-CONSTITUTION-POINTER"
 SPECS_DIR = "specs"
+PLANS_ACTIVE = ".process-work/plans"
+SPEC_REF = re.compile(r"\bspecs/[\w][\w.-]*", re.IGNORECASE)
+SPEC_WAIVED = re.compile(r"^[>\s\-*]*spec-waived[*_]*\s*:\s*\S", re.IGNORECASE | re.MULTILINE)
 
 STORY_PHASE = re.compile(r"^##+\s+Phase\s+\d+.*User Story", re.IGNORECASE)
 ANY_PHASE = re.compile(r"^##+\s+(?:Phase\b|Final phase\b)", re.IGNORECASE)
@@ -94,6 +107,25 @@ def check(root: Path) -> tuple[list[str], list[str]]:
                 soft.append(f"{rel}: {open_tasks} unchecked task(s) — the "
                             f"deterministic completeness signal for the review "
                             f"(done means every box ticked or the gap named)")
+
+    # --- spec-before-plan: an active Tier 2+ plan either points at its spec
+    # or names why it has none (spec-waived:) — never silently spec-free ---
+    pdir = root / PLANS_ACTIVE
+    if pdir.is_dir():
+        for p in sorted(pdir.glob("*.md")):
+            if p.name.startswith("design-"):
+                continue
+            text = _unfenced(p.read_text(encoding="utf-8", errors="replace"))
+            m = TIER_DECL.search(text)
+            if not m or int(m.group(1)) < 2:
+                continue
+            if SPEC_REF.search(text) or SPEC_WAIVED.search(text):
+                continue
+            hard.append(
+                f"{PLANS_ACTIVE}/{p.name}: tier {m.group(1)} plan references no "
+                f"specs/ directory and carries no 'spec-waived: <reason>' line — "
+                f"the spec interrogation (/speckit-specify + clarify) comes "
+                f"before planning; run it, or record why it does not apply")
     return hard, soft
 
 
