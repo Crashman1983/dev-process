@@ -119,7 +119,7 @@ def test_missing_sources_named_not_skipped(render, tmp_path):
     # no git repo, no plan: every gap is named in place, exit still 0
     out = render(tmp_path, {"project_name": "d", "modules": {}})
     (out / "PRODUCT.md").unlink()
-    r = _run(out)
+    r = _run(out, "--skip-preflight")
     assert r.returncode == 0, r.stderr
     t = r.stdout
     assert "no active plan" in t
@@ -262,3 +262,33 @@ def test_plan_filter_narrows_bundle(render, tmp_path):
     # a filter matching nothing says so instead of silently bundling all
     r2 = _run(out, "--base", "main", "--plan", "nope")
     assert "no active plan matches" in r2.stdout
+
+
+def test_preflight_failure_blocks_bundle(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    runner = out / "scripts/process/gate_runner.py"
+    runner.write_text("import sys\nprint('gate failed')\nraise SystemExit(1)\n")
+    r = _run(out, "--base", "main")
+    assert r.returncode == 1
+    assert "review bundle blocked: preflight gates failed" in r.stderr
+    assert "Review bundle" not in r.stdout
+
+
+def test_preflight_runner_failure_is_not_a_successful_bundle(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    (out / "scripts/process/gate_runner.py").unlink()
+    r = _run(out, "--base", "main")
+    assert r.returncode == 2
+    assert "review bundle unavailable: preflight runner missing" in r.stderr
+    assert "Review bundle" not in r.stdout
+
+
+def test_skip_preflight_is_a_deliberate_opt_out(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    (out / "scripts/process/gate_runner.py").unlink()
+    r = _run(out, "--base", "main", "--skip-preflight")
+    assert r.returncode == 0, r.stderr
+    assert "Review bundle" in r.stdout
