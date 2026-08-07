@@ -10,7 +10,7 @@ adherence against the plan or spec, working through
 (`journal-state-plans.md`): a
 `REVIEW work=… tier=… reviewer=… model=… independence=… verdict=… round=…`
 line in the journal (the core `review` gate parses it), and — for a
-findings-producing or Tier 3 review — `FINDING sev=… action=… issue=…` lines
+findings-producing or Tier 3 review — `FINDING sev=… action=… issue=… gate=…` lines
 in a `.process-work/reviews/` report. To dispatch a fresh or cross-model
 reviewer, assemble its complete input with
 `python scripts/process/make_review_bundle.py -o /tmp/bundle.md`

@@ -148,18 +148,36 @@ campaign-issue: #50               (required when campaign: is set and published)
 ## Prompt      — the verbatim prompt the reviewer/auditor ran with
 ## Result      — verdict and summary
 ## Findings
-FINDING sev=major action=fix issue=- placeholder scan missed the intro
-FINDING sev=minor action=follow-up issue=#61 story refs resolve by filename
+FINDING sev=major action=fix issue=- gate=possible placeholder scan missed the intro
+FINDING sev=minor action=follow-up issue=#61 gate=judgement story refs resolve by filename
 ~~~
 
 `FINDING sev=<blocker|major|minor|nit> action=<fix|accept|follow-up>
-issue=<ref|-> <title>` — `fix` was resolved within the reviewed change,
-`accept` is a conscious acceptance (reason in prose), `follow-up` becomes
-tracked work and **must** carry an issue ref. Fenced examples are quotations
+issue=<ref|-> gate=<judgement|possible|name> <title>` — `fix` was resolved
+within the reviewed change, `accept` is a conscious acceptance (reason in
+prose), `follow-up` becomes tracked work and **must** carry an issue ref.
+
+`gate` is the **ratchet field**, and it answers one question per finding:
+*could a linter, type checker or gate rule have produced this?*
+
+| value | meaning |
+|---|---|
+| `judgement` | no — it needed a reader. Most Tier 3 findings are this |
+| `possible` | yes, but no rule exists. **The debt marker** |
+| *anything else* | the name of the rule that now catches it — the ratchet closed |
+
+`possible` is the value with money attached: that finding will be rediscovered
+by a paid reader on every future change until somebody writes the rule, and
+written once the rule costs nothing again, forever. The gate lists such
+findings as a note and never fails on them — `gate` is self-classified, and a
+hard rule on a self-classified field buys `gate=judgement` on everything
+mechanical, which is data-shaped noise and worse than no field at all. A gate
+name is likewise recorded, not verified: this gate does not know the gate set.
+The field is optional; omitting it is not a lie, it is an un-asked question. Fenced examples are quotations
 and are ignored, as everywhere — **fence the Prompt section** when it quotes
 the grammar or header-like lines (`issue:`, `campaign:`), or the gate lints
 the quotes as claims. A title may contain `=` (`USER_ID=1 hardcoded` is fine);
-only leading `sev=`/`action=`/`issue=` tokens are parsed as fields.
+only leading `sev=`/`action=`/`issue=`/`gate=` tokens are parsed as fields.
 
 **The publish tool** — `bash scripts/process/publish_review.sh <report.md>
 [--campaign <title>]` creates the issue with the full report as body (prompt,

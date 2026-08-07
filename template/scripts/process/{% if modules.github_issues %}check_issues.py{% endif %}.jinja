@@ -115,6 +115,14 @@ _RPT_CAMPAIGN_ISSUE = re.compile(_LEAD + r"campaign-issue[*_]*\s*:\s*(\S+)",
                                  re.IGNORECASE | re.MULTILINE)
 FINDING_SEVS = {"blocker", "major", "minor", "nit"}
 FINDING_ACTIONS = {"fix", "accept", "follow-up"}
+# The ratchet field: could a linter, type checker or gate rule have produced
+# this finding? `judgement` = no, it needed a reader. `possible` = yes, but no
+# rule exists — the debt marker. Any other value names the gate that now
+# catches it; that name cannot be verified offline (this gate does not know
+# the gate set), so it is recorded, not checked.
+FINDING_GATE_JUDGEMENT = "judgement"
+FINDING_GATE_POSSIBLE = "possible"
+FINDING_KEYS = ("sev", "action", "issue", "gate")
 
 
 # a FINDING may be written as a Markdown bullet — `- FINDING ...` must not
@@ -132,16 +140,17 @@ def _intended_finding(line: str) -> re.Match | None:
 
 
 def _parse_finding(match: re.Match) -> tuple[dict | None, str | None]:
-    """(fields, error). Leading known key=value tokens (sev/action/issue) are
+    """(fields, error). Leading known key=value tokens (FINDING_KEYS) are
     parsed; everything from the first other token on is the title — so a
     title may itself contain `=` (e.g. 'user_id=1 hardcoded'). Requires sev=
-    and action= with valid enums; issue= optional, '-' meaning none."""
+    and action= with valid enums; issue= optional, '-' meaning none; gate=
+    optional, free-form (see FINDING_GATE_*)."""
     fields: dict = {}
     tokens = match.group(1).split()
     i = 0
     for i, tok in enumerate(tokens):
         k, eq, v = tok.partition("=")
-        if not eq or k not in ("sev", "action", "issue"):
+        if not eq or k not in FINDING_KEYS:
             break  # title starts here
         if k in fields:
             return None, f"duplicate key {k!r}"
@@ -160,6 +169,7 @@ def _parse_finding(match: re.Match) -> tuple[dict | None, str | None]:
         return None, "no title after the key=value fields"
     fields["issue"] = issue
     fields["title"] = title
+    fields.setdefault("gate", "")
     return fields, None
 
 
@@ -244,6 +254,7 @@ def _check_reports(root: Path, default_repo: str | None) -> tuple[list[str], lis
                 hard.append(f"{rel}: campaign {cm.group(1)!r} set on a published "
                             f"report but no 'campaign-issue:' ref — the bundle "
                             f"parent must be named")
+        ratchet: list[str] = []
         for line in text.splitlines():
             fmatch = _intended_finding(line)
             if not fmatch:
@@ -266,6 +277,19 @@ def _check_reports(root: Path, default_repo: str | None) -> tuple[list[str], lis
                 soft.append(f"{rel}: blocker finding consciously accepted — "
                             f"make sure the reason stands in the report: "
                             f"{fields['title']!r}")
+            if fields["gate"] == FINDING_GATE_POSSIBLE:
+                ratchet.append(fields["title"])
+        if ratchet:
+            # Advisory on purpose: `gate=` is self-classified, and a hard rule
+            # on a self-classified field buys `gate=judgement` on everything
+            # mechanical — data-shaped noise, worse than no field at all. The
+            # reader who can act on this is a human choosing what to automate.
+            titles = ", ".join(repr(x) for x in ratchet)
+            soft.append(f"{rel}: {len(ratchet)} finding(s) marked gate=possible "
+                        f"— a check could have caught them but no rule exists, "
+                        f"so every future change pays for a reader to find them "
+                        f"again. Turning one into a rule retires that cost for "
+                        f"good: {titles}")
     for slug, members in campaigns.items():
         if len(set(members.values())) > 1:
             detail = ", ".join(f"{r}={v}" for r, v in sorted(members.items()))
