@@ -1,6 +1,6 @@
 # Third-party notices
 
-This project's own license is `LICENSE.md` (Prosperity Public License 3.0.0).
+This project's own license is `LICENSE` (Apache License 2.0).
 The material below is incorporated from third parties under their own terms,
 which continue to apply to those portions.
 
