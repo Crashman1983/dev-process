@@ -81,6 +81,8 @@ so worktrees stay independent and merges never conflict on it.
   truth); a user-story phase in an active `specs/*/tasks.md` without a test
   task (rule 5 must not hang on prompt obedience — upstream declares "tests
   optional", the override plus this gate say otherwise).
+- **Hard:** an active Tier 2+ plan with neither a `specs/` reference nor a
+  `spec-waived: <reason>` line — spec-before-plan is a recorded decision.
 - **Soft:** no `.specify/` yet (pre-init), named every run.
 - The clarification gate additionally treats `specs/*/spec.md` markers as
   notes and `specs/*/plan.md`/`tasks.md` markers as hard.

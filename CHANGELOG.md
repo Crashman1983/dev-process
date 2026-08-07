@@ -313,7 +313,11 @@ Clarification- noch Review-Präsenz aus. Antwort auf beiden Ebenen:
 Review-Gate bekommt den **Unhomed-Plan-Detector** — eine `tier: 2+`-
 Deklaration außerhalb der sanktionierten Homes (`.process-work/`,
 `specs/`, `docs/process/`, Harness-Verzeichnisse; Archive sind Historie)
-ist hart; Tier 0/1 und gefencte Zitate bleiben außen vor) ausgeliefert,
+ist hart; Tier 0/1 und gefencte Zitate bleiben außen vor. Dazu
+**spec-before-plan** im Speckit-Gate: ein aktiver Tier-2+-Plan
+referenziert sein `specs/`-Verzeichnis oder trägt eine begründete
+`spec-waived:`-Zeile — die Spec-Kit-Interrogation zu überspringen ist
+eine dokumentierte Entscheidung, nie ein stilles Verhalten) ausgeliefert,
 `v2.2.0` (enthält auch den Apache-2.0-Lizenzwechsel unten).
 
 ## Sub-Projekt-Tabelle (SP1–SP24)

@@ -175,3 +175,36 @@ def test_workflow_phases_point_to_speckit(render, tmp_path):
     assert "speckit-specify" in text and "speckit-tasks" in text
     out2 = _render(render, tmp_path / "off", on=False)
     assert "speckit" not in (out2 / "docs/process/workflow.md").read_text()
+
+
+# --- spec-before-plan: active Tier 2+ plans point at their spec or say why not ---
+
+def _plan(out, name, body):
+    d = out / ".process-work/plans"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / name).write_text(body, encoding="utf-8")
+
+
+def test_gate_fails_tier2_plan_without_spec_ref(render, tmp_path):
+    out = _render(render, tmp_path)
+    _plan(out, "2026-08-07-thing.md", "# Plan\n\ntier: 2\nissue: #1\n\nSteps.\n")
+    r = _gate(out)
+    assert r.returncode == 1
+    assert "spec-waived" in r.stdout and "specs/" in r.stdout
+
+
+def test_gate_passes_plan_with_spec_ref_or_waiver(render, tmp_path):
+    out = _render(render, tmp_path)
+    _plan(out, "2026-08-07-a.md", "tier: 2\n\nBuilt from specs/001-widget/.\n")
+    _plan(out, "2026-08-07-b.md", "tier: 3\nspec-waived: hotfix, no feature scope\n")
+    r = _gate(out)
+    assert r.returncode == 0, r.stdout
+
+
+def test_gate_ignores_tier1_designs_and_fenced_quotes(render, tmp_path):
+    out = _render(render, tmp_path)
+    _plan(out, "2026-08-07-small.md", "tier: 1\n")
+    _plan(out, "design-2026-08-07-idea.md", "tier: 3\n")
+    _plan(out, "2026-08-07-doc.md", "```\ntier: 2\n```\nNo declaration here.\n")
+    r = _gate(out)
+    assert r.returncode == 0, r.stdout

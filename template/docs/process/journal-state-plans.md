@@ -77,6 +77,11 @@ Digest binding is opt-in per REVIEW line (below), not per plan — the former
 `review-binding: artifact-v1` plan field is retired; the gate reports a
 leftover as a note.
 
+With the `speckit` module on, an active Tier 2+ plan also either references
+its `specs/NNN-…` directory or carries a `spec-waived: <reason>` line — the
+spec interrogation comes before planning, and skipping it is a recorded
+decision, never a silent one (the `speckit` gate enforces this).
+
 A plan may also carry an `issue: <ref>` line linking its tracking issue (`#N`,
 `owner/repo#N`, or a URL). When the `github-issues` module is installed, an
 *active* Tier 2+ plan must carry that link before code — issue-before-code — or
