@@ -303,6 +303,19 @@ separate Werke). Zugleich die MIT-Attribution für die zwei von GitHub
 Spec Kit abgeleiteten Templates nachgezogen (`THIRD-PARTY-NOTICES.md`,
 auch gerendert in Adopter-Repos; Provenienz-Kommentare in den Dateien).
 
+SP58 (skill-bypass-closure: Kennis Beobachtung, dass topic-getriggerte
+Dritt-Skills (Superpowers-Brainstorming/-Planning) mit eigenen Datei-
+Konventionen die artefakt-präsenz-abhängigen Pflichten lautlos umgehen
+können — ein Plan, der nie in `.process-work/plans/` landet, löst weder
+Clarification- noch Review-Präsenz aus. Antwort auf beiden Ebenen:
+`journal-state-plans.md` schreibt „Plans have exactly one home" fest
+(Skills helfen *in* Phasen, das Artefakt hat genau ein Zuhause), und das
+Review-Gate bekommt den **Unhomed-Plan-Detector** — eine `tier: 2+`-
+Deklaration außerhalb der sanktionierten Homes (`.process-work/`,
+`specs/`, `docs/process/`, Harness-Verzeichnisse; Archive sind Historie)
+ist hart; Tier 0/1 und gefencte Zitate bleiben außen vor) ausgeliefert,
+`v2.2.0` (enthält auch den Apache-2.0-Lizenzwechsel unten).
+
 ## Sub-Projekt-Tabelle (SP1–SP24)
 
 Die Tabelle wurde bis SP24 gepflegt; ab SP25 trägt das Narrativ oben die

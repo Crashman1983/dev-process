@@ -57,6 +57,15 @@ approved, clarification-free design. The core `clarification` gate enforces
 exactly that line: a marker in an active plan is a hard failure, markers in an
 active design are a visible note, and archived files are history.
 
+**Plans have exactly one home.** Every presence guarantee downstream (review
+attestation, archive ritual, issue-before-code) keys on `.process-work/plans/`
+— a plan written anywhere else silently escapes all of them. This matters with
+topic-triggered third-party skills (brainstorming/planning assistants with
+their own file conventions): a skill may help *inside* a phase, but the
+artifact lands in the plan home (or `specs/` on the Spec Kit path), nowhere
+else. The `review` gate enforces the loud half of this: a `tier: 2+`
+declaration outside the sanctioned homes is a hard failure.
+
 A plan carries one machine-readable line, `tier: N`, recording the derived risk
 tier (`risk-tiers.md`). It is the single tier source the `review` gate keys on:
 once the plan is archived (i.e. the work merged), a declared `tier: 2` or higher
