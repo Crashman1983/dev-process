@@ -386,9 +386,49 @@ def check(root: Path) -> tuple[list[str], list[str]]:
                         f"review presence is only enforced once a plan is "
                         f"archived (the merge step); archive on merge")
 
+    hard.extend(_unhomed_plans(root))
+
     if not all_records and not enforced_any and not hard:
         soft.append("no REVIEW attestations yet — expected pre-adoption")
     return hard, soft
+
+
+# The presence check above keys on .process-work/plans — a plan written
+# anywhere else (a topic-triggered third-party skill with its own conventions,
+# a stray docs/plans/) silently escapes it, and everything downstream (review
+# attestation, archive ritual) never fires. This detector makes that bypass
+# loud: a Tier 2+ declaration is the very opt-in the presence gate keys on, so
+# one living outside the plan home is hard. Tier 0/1 documents are not plans
+# in the gated sense and stay out of scope.
+_UNHOMED_PRUNE = {".git", "node_modules", ".venv", "venv", "archive",
+                  "__pycache__"}
+_UNHOMED_SANCTIONED = (".process-work", "specs", "docs/process", ".github",
+                       ".specify", ".claude")
+
+
+def _unhomed_plans(root: Path) -> list[str]:
+    hard: list[str] = []
+    for p in sorted(root.rglob("*.md")):
+        rel = p.relative_to(root)
+        parts = rel.parts
+        if any(part in _UNHOMED_PRUNE for part in parts):
+            continue
+        rel_s = str(rel).replace("\\", "/")
+        if any(rel_s == s or rel_s.startswith(s + "/")
+               for s in _UNHOMED_SANCTIONED):
+            continue
+        try:
+            text = _unfenced(p.read_text(encoding="utf-8", errors="replace"))
+        except OSError:
+            continue
+        m = TIER_DECL.search(text)
+        if m and int(m.group(1)) >= 2:
+            hard.append(
+                f"{rel_s}: declares 'tier: {m.group(1)}' outside the plan home "
+                f"— the review-presence gate only sees {PLANS_ACTIVE}; move the "
+                f"plan there (or the spec to specs/), or fence the line if it "
+                f"is a quotation")
+    return hard
 
 
 def main() -> int:

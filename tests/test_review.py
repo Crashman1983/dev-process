@@ -519,3 +519,34 @@ def test_active_tier2_plan_gets_visibility_note(render, tmp_path):
     r = _run(out)
     assert r.returncode == 0, r.stdout
     assert "active Tier 2+ plan(s)" in r.stdout
+
+
+# --- unhomed plans: a tier-declaring plan outside .process-work/specs is loud ---
+
+def test_unhomed_tier2_plan_is_hard(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d"})
+    (out / "docs/plans").mkdir(parents=True)
+    (out / "docs/plans/2026-08-07-rogue.md").write_text(
+        "# Plan\n\ntier: 2\n\nSteps.\n")
+    r = _run(out)
+    assert r.returncode == 1
+    assert "outside the plan home" in r.stdout
+
+
+def test_unhomed_tier1_and_fenced_quote_are_ignored(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d"})
+    (out / "notes.md").write_text("tier: 1\n")  # not a gated plan
+    (out / "howto.md").write_text("```\ntier: 3\n```\n")  # quotation
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+
+
+def test_homed_and_archived_plans_are_not_unhomed(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d"})
+    p = out / ".process-work/plans"
+    p.mkdir(parents=True, exist_ok=True)
+    (p / "2026-08-07-fine.md").write_text("tier: 2\nissue: #1\n")
+    (out / "old/archive").mkdir(parents=True)
+    (out / "old/archive/hist.md").write_text("tier: 3\n")  # archives are history
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
