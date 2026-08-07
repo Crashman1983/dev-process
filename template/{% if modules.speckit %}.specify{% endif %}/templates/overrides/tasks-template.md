@@ -2,6 +2,7 @@
 
 description: "Task list template for feature implementation (dev-process override)"
 ---
+<!-- Derived from GitHub Spec Kit's tasks-template.md (MIT, Copyright GitHub, Inc.) — see THIRD-PARTY-NOTICES.md -->
 
 # Tasks: [FEATURE NAME]
 
