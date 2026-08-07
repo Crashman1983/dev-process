@@ -49,9 +49,11 @@ import check_review as _review_gate  # noqa: E402
 CHECKLIST = "docs/process/review-checklist.md"
 PRODUCT = "PRODUCT.md"
 PLANS = ".process-work/plans"
+REVIEWS = ".process-work/reviews"
 DEFAULT_BASES = ("origin/main", "main", "origin/master", "master")
 GATE_RUNNER = "scripts/process/gate_runner.py"
 PREFLIGHT_TIMEOUT_S = 600
+DELTA_MAX_TIER = 2
 
 
 def _read(root: Path, rel: str) -> str | None:
@@ -149,15 +151,29 @@ def _active_plans(root: Path, plan_filter: str | None) -> list[Path]:
     return plans
 
 
-def _review_artifact(root: Path, base_ref: str) -> tuple[str, str, str, bytes] | None:
+_TIER_RE = _review_gate.TIER_DECL
+
+
+def _declared_tier(texts: list[str]) -> int | None:
+    tiers = [int(match.group(1)) for text in texts for match in _TIER_RE.finditer(text)]
+    return max(tiers) if tiers else None
+
+
+def _latest_review_report(root: Path) -> Path | None:
+    reports = sorted((root / REVIEWS).glob("*.md")) if (root / REVIEWS).is_dir() else []
+    return reports[-1] if reports else None
+
+
+def _review_artifact(root: Path, base_ref: str, *, delta: bool = False) -> tuple[str, str, str, bytes] | None:
     """Resolved endpoints, SHA-256, and exact bytes of the reviewed diff."""
-    base = _git(root, "merge-base", base_ref, "HEAD")
+    base = _git(root, "rev-parse", base_ref) if delta else _git(root, "merge-base", base_ref, "HEAD")
     head = _git(root, "rev-parse", "HEAD")
     if not base or not head:
         return None
     base_sha = base.strip()
     head_sha = head.strip()
-    diff = _git_bytes(root, "diff", "--binary", f"{base_sha}...{head_sha}")
+    range_spec = f"{base_sha}..{head_sha}" if delta else f"{base_sha}...{head_sha}"
+    diff = _git_bytes(root, "diff", "--binary", range_spec)
     if diff is None:
         return None
     return base_sha, head_sha, hashlib.sha256(diff).hexdigest(), diff
@@ -194,15 +210,28 @@ Judge against the checklist and the rules above; cite file:line evidence; a
 `pass` with unfixed blockers is a false green — verdict `block` instead."""
 
 
-def build(root: Path, base: str | None, plan_filter: str | None = None) -> str:
+def build(root: Path, base: str | None, plan_filter: str | None = None,
+          since: str | None = None) -> str:
     out: list[str] = []
     add = out.append
+    plans = _active_plans(root, plan_filter)
+    plan_texts = {plan: (_read(root, str(plan.relative_to(root))) or "") for plan in plans}
+    tier = _declared_tier(list(plan_texts.values()))
+    if since and tier is not None and tier > DELTA_MAX_TIER:
+        raise SystemExit(
+            f"make_review_bundle: --since refused — bundled plan declares tier: {tier}; "
+            "Tier 3 reviews require a full diff"
+        )
 
     add("# Review bundle — read-only\n")
     add("You are an INDEPENDENT reviewer. This bundle is your complete input: "
         "do not consult the implementing agent's context, do not edit anything, "
         "and do not trust claims you can check in the diff. Your deliverable is "
         "a verdict plus findings in the exact grammar at the end.\n")
+    if since:
+        add("**Delta re-review.** The diff below is limited to changes since "
+            f"`{since}`. Previous findings and the full branch file surface are "
+            "included so fixes are judged in their original scope.\n")
 
     kernel = _kernel_block(root)
     add("## The binding rules (kernel)\n")
@@ -217,12 +246,10 @@ def build(root: Path, base: str | None, plan_filter: str | None = None) -> str:
     add(product + "\n" if product else "*(unavailable: PRODUCT.md missing)*\n")
 
     add("## Plan(s) under review\n")
-    plans = _active_plans(root, plan_filter)
     if plans:
         for p in plans:
             add(f"### {p.name}\n")
-            body = _read(root, str(p.relative_to(root)))
-            add((body or "*(unreadable)*") + "\n")
+            add((plan_texts[p] or "*(unreadable)*") + "\n")
     elif plan_filter:
         add(f"*(no active plan matches --plan {plan_filter!r} — check the "
             f"filter, or drop it to bundle every active plan)*\n")
@@ -230,26 +257,42 @@ def build(root: Path, base: str | None, plan_filter: str | None = None) -> str:
         add("*(no active plan in .process-work/plans — review the diff against "
             "the checklist and rules alone, and say so in your verdict)*\n")
 
+    if since:
+        add("## Findings from the previous round\n")
+        report = _latest_review_report(root)
+        report_text = _read(root, str(report.relative_to(root))) if report else None
+        if report_text:
+            add(f"### {report.name}\n{report_text}\n")
+        else:
+            add(f"*(no readable report in {REVIEWS}; prior findings unavailable)*\n")
+
     resolved = _resolve_base(root, base)
     add("## Diff under review\n")
     if resolved is None:
         add("*(unavailable: no usable base ref — pass --base explicitly; "
             "git may be absent or the repo unborn)*\n")
     else:
-        artifact = _review_artifact(root, resolved)
+        artifact = _review_artifact(root, since or resolved, delta=bool(since))
         if artifact is None:
             add(f"*(unavailable: `git diff {resolved}...HEAD` failed)*\n")
         else:
             base_sha, head_sha, digest, diff_bytes = artifact
             add(f"REVIEW_ARTIFACT base={base_sha} head={head_sha} diff={digest}\n")
+            if since:
+                add(f"REVIEW_SCOPE mode=delta since={base_sha} head={head_sha}\n")
             diff = diff_bytes.decode("utf-8", errors="replace")
             if not diff.strip():
                 add(f"*(empty: HEAD adds nothing over {resolved})*\n")
             else:
                 lines = diff.count("\n")
-                add(f"Base: `{resolved}` resolved to `{base_sha}` "
-                    "(three-dot: what the branch adds). "
+                label = (f"Delta: `{since}..HEAD`" if since else
+                         f"Base: `{resolved}` resolved to `{base_sha}` (three-dot: what the branch adds)")
+                add(f"{label}. "
                     f"{lines} diff lines.\n")
+                if since:
+                    stat = _git(root, "diff", "--stat", f"{resolved}...HEAD")
+                    if stat and stat.strip():
+                        add("Full branch surface:\n```\n" + stat.rstrip() + "\n```\n")
                 if lines > 4000:
                     add("*(large diff — consider a per-area pass; nothing was truncated)*\n")
                 status = _git(root, "status", "--porcelain")
@@ -268,7 +311,7 @@ def build(root: Path, base: str | None, plan_filter: str | None = None) -> str:
     return "\n".join(out)
 
 
-USAGE = "usage: make_review_bundle.py [--skip-preflight] [--base REF] [--plan SLUG] [-o FILE]"
+USAGE = "usage: make_review_bundle.py [--skip-preflight] [--base REF] [--plan SLUG] [--since REF] [-o FILE]"
 
 
 def _opt(argv: list[str], flag: str) -> str | None:
@@ -286,9 +329,10 @@ def main(argv: list[str]) -> int:
     base = _opt(argv, "--base")
     out_file = _opt(argv, "-o")
     plan_filter = _opt(argv, "--plan")
+    since = _opt(argv, "--since")
     # an unknown flag must be a hard error, not silently ignored — a typo'd
     # --base would hand the reviewer a bundle diffed against the wrong ref
-    known = {"--base", "-o", "--plan"}
+    known = {"--base", "-o", "--plan", "--since"}
     consumed = {i for f in known if f in argv
                 for i in (argv.index(f), argv.index(f) + 1)}
     extra = [a for i, a in enumerate(argv) if i not in consumed]
@@ -300,7 +344,7 @@ def main(argv: list[str]) -> int:
         if not ok:
             print(detail, file=sys.stderr)
             return status
-    text = build(root, base, plan_filter)
+    text = build(root, base, plan_filter, since)
     if out_file:
         Path(out_file).write_text(text, encoding="utf-8")
         print(f"review bundle written to {out_file}")

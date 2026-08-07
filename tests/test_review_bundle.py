@@ -292,3 +292,37 @@ def test_skip_preflight_is_a_deliberate_opt_out(render, tmp_path):
     r = _run(out, "--base", "main", "--skip-preflight")
     assert r.returncode == 0, r.stderr
     assert "Review bundle" in r.stdout
+
+def test_delta_bundle_carries_findings_and_exact_delta_artifact(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    previous = _git(out, "rev-parse", "HEAD").stdout.strip()
+    reports = out / ".process-work/reviews"
+    reports.mkdir(parents=True)
+    (reports / "2026-07-10-review.md").write_text("FINDING prior finding\n")
+    (out / "widget.py").write_text("def widget():\n    return 43\n")
+    _git(out, "add", "-A", check=True)
+    _git(out, "commit", "-q", "-m", "fix: widget", check=True)
+    text = _run(out, "--base", "main", "--since", previous).stdout
+    artifact = _artifact(text)
+    diff = subprocess.run(
+        ["git", "diff", "--binary", f"{previous}..HEAD"], cwd=out,
+        capture_output=True, check=True,
+    ).stdout
+    assert artifact["base"] == previous
+    assert artifact["diff"] == hashlib.sha256(diff).hexdigest()
+    assert "FINDING prior finding" in text
+    assert "REVIEW_SCOPE mode=delta" in text
+    assert "Full branch surface:" in text
+
+
+def test_delta_bundle_refuses_tier_three(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    r = _run(out, "--base", "main", "--since", "main")
+    assert r.returncode == 0, r.stderr
+    plan = out / ".process-work/plans/2026-07-09-widget.md"
+    plan.write_text("# Plan\n\ntier: 3\nissue: #9\n")
+    r = _run(out, "--base", "main", "--since", "main")
+    assert r.returncode != 0
+    assert "Tier 3 reviews require a full diff" in (r.stdout + r.stderr)
