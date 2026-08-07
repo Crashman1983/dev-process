@@ -928,3 +928,41 @@ def test_unreadable_plan_shapes_diagnosed_not_traceback(render, tmp_path):
     r = _run(out)
     assert "Traceback" not in r.stderr
     assert r.returncode == 1 and "could not read" in r.stdout
+
+
+# --- the findings ratchet: gate= ---------------------------------------------
+
+def test_gate_possible_is_a_soft_note_never_a_block(render, tmp_path):
+    out = _render(render, tmp_path)
+    _report(out, "2026-07-05-x.md", VALID_REPORT +
+            "FINDING sev=major action=fix issue=- gate=possible unpinned dep version\n")
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+    assert "1 finding(s) marked gate=possible" in r.stdout
+
+
+def test_gate_judgement_and_named_gate_produce_no_note(render, tmp_path):
+    out = _render(render, tmp_path)
+    _report(out, "2026-07-05-x.md", VALID_REPORT +
+            "FINDING sev=major action=fix issue=- gate=judgement the model is wrong\n"
+            "FINDING sev=minor action=fix issue=- gate=lint secret in log\n")
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+    assert "gate=possible" not in r.stdout
+
+
+def test_finding_without_gate_stays_valid(render, tmp_path):
+    out = _render(render, tmp_path)
+    _report(out, "2026-07-05-x.md", VALID_REPORT)
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+    assert "gate=possible" not in r.stdout
+
+
+def test_gate_token_after_title_is_not_a_field(render, tmp_path):
+    out = _render(render, tmp_path)
+    _report(out, "2026-07-05-x.md", VALID_REPORT +
+            "FINDING sev=minor action=fix issue=- config gate=possible is a bad key name\n")
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+    assert "marked gate=possible" not in r.stdout

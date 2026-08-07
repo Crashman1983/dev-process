@@ -201,10 +201,18 @@ these values.
   `bundle,non-implementing`; add `cross-model` only if you are a different
   model family than the implementer, else declare `single-family`.
 - `tier`/`round`: integers; `work`: the issue number or plan slug under review.
+- `model`: your own model's id, verbatim — the *relation* to the implementer is
+  what `independence` records, so `same`/`cross` there says nothing new.
 
 For each finding, one line:
 
-    FINDING sev=<blocker|major|minor|nit> action=<fix|accept|follow-up> issue=<ref|-> <title>
+    FINDING sev=<blocker|major|minor|nit> action=<fix|accept|follow-up> issue=<ref|-> gate=<judgement|possible|name> <title>
+
+- `gate`: could a linter, type checker or gate rule have produced this finding?
+  `judgement` = no, it needed a reader; `possible` = yes, but no rule exists
+  yet; otherwise the name of the rule that now catches it. `possible` is the
+  one that matters: it marks a finding every future change will pay a reader
+  to rediscover until somebody writes the rule.
 
 Judge against the checklist and the rules above; cite file:line evidence; a
 `pass` with unfixed blockers is a false green — verdict `block` instead."""

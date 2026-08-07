@@ -157,6 +157,24 @@ supply:
   (module docs, decision records, API/contract, README), and the **issue status
   set at each transition and closed with the commit ref**.
 
+## Each finding, once: could a check have found it?
+
+Ask it of every finding you write, and record the answer where the finding
+lives: **could a linter, type checker or gate rule have produced this?**
+
+- **No** — it needed a reader; that is what a review is for. Move on.
+- **Yes, and a rule exists** — say which; the rule was bypassed or is too weak.
+- **Yes, and no rule exists** — this is the one worth naming. A finding a
+  machine could make is otherwise found again, by a paid reader, on every
+  future change; written as a rule once, it is found for free forever after.
+
+This is not a category of defect but a disposition, so it does not block
+anything: it is a standing invitation to convert the mechanical part of review
+into the gate set, which is the only part of review cost that can go to zero.
+Where the `github-issues` module is on, the answer is the `FINDING` line's
+`gate=` field and unconverted ones are listed back to you; without it, the
+question is still worth asking — just untracked.
+
 ## Extending this list
 
 This is the neutral floor. A project with a specific stack or risk surface
