@@ -1,3 +1,4 @@
+import json
 import shutil
 from pathlib import Path
 
@@ -38,22 +39,51 @@ def _copy(src: Path, dst: Path, data: dict, **kwargs) -> Path:
     return dst
 
 
+@pytest.fixture(scope="session")
+def _rendered(_template_src, tmp_path_factory):
+    """Render each distinct answer set once per session and hand out copies.
+
+    A render costs ~1.5s of fixed copier startup (parse copier.yml, build the
+    Jinja environment, walk the template) no matter how small the result is,
+    and the suite asks for one per test. Copying an already-rendered tree is
+    ~13x cheaper, so the answers — not the test — decide when work happens.
+    Every caller still gets its own writable tree; the cached one is never
+    handed out.
+    """
+    root = tmp_path_factory.mktemp("rendered")
+    store: dict[str, Path] = {}
+
+    def _get(raw: bool, data: dict, kwargs: dict) -> Path:
+        key = json.dumps([raw, data, kwargs], sort_keys=True, default=repr)
+        if key not in store:
+            src = root / f"r{len(store)}"
+            if raw:
+                copier.run_copy(str(_template_src), str(src), data=data,
+                                defaults=True, unsafe=True, quiet=True, **kwargs)
+            else:
+                _copy(_template_src, src, data, **kwargs)
+            store[key] = src
+        return store[key]
+
+    return _get
+
+
 @pytest.fixture
-def render(_template_src):
+def render(_rendered):
     def _f(dst: Path, data: dict, **kwargs) -> Path:
-        return _copy(_template_src, dst, data, **kwargs)
+        shutil.copytree(_rendered(False, data, kwargs), dst, dirs_exist_ok=True)
+        return dst
 
     return _f
 
 
 @pytest.fixture
-def render_raw(_template_src):
+def render_raw(_rendered):
     """Render passing ONLY the given answers — unlike `render`, no full modules
     dict is injected, so profile-derived module defaults actually apply."""
 
     def _f(dst: Path, data: dict, **kwargs) -> Path:
-        copier.run_copy(str(_template_src), str(dst), data=data,
-                        defaults=True, unsafe=True, quiet=True, **kwargs)
+        shutil.copytree(_rendered(True, data, kwargs), dst, dirs_exist_ok=True)
         return dst
 
     return _f
@@ -61,6 +91,8 @@ def render_raw(_template_src):
 
 @pytest.fixture
 def render_into(_template_src):
+    # Not cached: this one renders *onto* an existing seed, so the result
+    # depends on what is already there, not on the answers alone.
     def _f(dst: Path, seed: Path, data: dict, **kwargs) -> Path:
         shutil.copytree(seed, dst, dirs_exist_ok=True)
         return _copy(_template_src, dst, data, **kwargs)
