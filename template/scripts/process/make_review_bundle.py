@@ -50,6 +50,8 @@ CHECKLIST = "docs/process/review-checklist.md"
 PRODUCT = "PRODUCT.md"
 PLANS = ".process-work/plans"
 DEFAULT_BASES = ("origin/main", "main", "origin/master", "master")
+GATE_RUNNER = "scripts/process/gate_runner.py"
+PREFLIGHT_TIMEOUT_S = 600
 
 
 def _read(root: Path, rel: str) -> str | None:
@@ -109,6 +111,30 @@ def _resolve_base(root: Path, base: str | None) -> str | None:
         if c and _git(root, "rev-parse", "--verify", "--quiet", f"{c}^{{commit}}") is not None:
             return c
     return None
+
+
+def _preflight(root: Path) -> tuple[bool, int, str]:
+    """Run the authoritative gate runner before dispatching a review."""
+    runner = root / GATE_RUNNER
+    if not runner.is_file():
+        return False, 2, f"review bundle unavailable: preflight runner missing: {GATE_RUNNER}"
+    try:
+        result = subprocess.run(
+            [sys.executable, str(runner)], cwd=root, capture_output=True, text=True,
+            timeout=PREFLIGHT_TIMEOUT_S, encoding="utf-8", errors="replace",
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return False, 2, (
+            f"review bundle unavailable: preflight runner could not run "
+            f"({type(exc).__name__})"
+        )
+    if result.returncode:
+        detail = (result.stdout + result.stderr).strip()
+        return False, 1, (
+            "review bundle blocked: preflight gates failed"
+            + (f"\n{detail}" if detail else "")
+        )
+    return True, 0, ""
 
 
 def _active_plans(root: Path, plan_filter: str | None) -> list[Path]:
@@ -242,7 +268,7 @@ def build(root: Path, base: str | None, plan_filter: str | None = None) -> str:
     return "\n".join(out)
 
 
-USAGE = "usage: make_review_bundle.py [--base REF] [--plan SLUG] [-o FILE]"
+USAGE = "usage: make_review_bundle.py [--skip-preflight] [--base REF] [--plan SLUG] [-o FILE]"
 
 
 def _opt(argv: list[str], flag: str) -> str | None:
@@ -255,6 +281,8 @@ def _opt(argv: list[str], flag: str) -> str | None:
 
 
 def main(argv: list[str]) -> int:
+    skip_preflight = "--skip-preflight" in argv
+    argv = [arg for arg in argv if arg != "--skip-preflight"]
     base = _opt(argv, "--base")
     out_file = _opt(argv, "-o")
     plan_filter = _opt(argv, "--plan")
@@ -266,7 +294,13 @@ def main(argv: list[str]) -> int:
     extra = [a for i, a in enumerate(argv) if i not in consumed]
     if extra:
         raise SystemExit(f"{USAGE} — unknown argument(s): {' '.join(extra)}")
-    text = build(_repo_root(Path.cwd()), base, plan_filter)
+    root = _repo_root(Path.cwd())
+    if not skip_preflight:
+        ok, status, detail = _preflight(root)
+        if not ok:
+            print(detail, file=sys.stderr)
+            return status
+    text = build(root, base, plan_filter)
     if out_file:
         Path(out_file).write_text(text, encoding="utf-8")
         print(f"review bundle written to {out_file}")
