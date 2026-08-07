@@ -6,10 +6,9 @@
 > repositories via `uvx copier copy gh:Crashman1983/dev-process .`.
 > This README is German by choice; everything the template installs (process
 > docs, adapters, commands) is English — start with
-> [`BOOTSTRAP.md`](BOOTSTRAP.md). License: [Prosperity Public
-> License 3.0.0](LICENSE.md) — free for noncommercial use; commercial use
-> beyond a 30-day trial requires a license from the contributor. Two spec
-> templates derive from GitHub Spec Kit (MIT, © GitHub, Inc.):
+> [`BOOTSTRAP.md`](BOOTSTRAP.md). License: [Apache-2.0](LICENSE) —
+> free for any use, commercial included. Two spec templates derive from
+> GitHub Spec Kit (MIT, © GitHub, Inc.):
 > [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md).
 
 Ein **maschinell durchgesetzter**, KI-gestützter Entwicklungsprozess auf einem
@@ -191,15 +190,16 @@ Pflicht-Verifikation über den `gate_runner`.
 
 ## Lizenz
 
-[Prosperity Public License 3.0.0](LICENSE.md): Nutzung, Änderung und
-Weitergabe sind für **nicht-kommerzielle Zwecke** frei (privat, Forschung,
-Lehre, gemeinnützig, Behörden). **Kommerzielle Nutzung** — auch das
-Einspielen des Prozesses in kommerzielle Projekte — ist auf eine
-**30-Tage-Testphase** begrenzt (eine Testphase pro Firma); danach braucht
-es eine Lizenz des Contributors (Anfrage per GitHub-Issue). Beiträge
-zurück an das Projekt gelten laut Lizenz nicht als kommerzielle Nutzung,
-wenn sie unter einer standardisierten offenen Lizenz (z. B. MIT/Apache-2.0)
-eingereicht werden — genau so werden PRs angenommen.
+[Apache-2.0](LICENSE): Nutzung, Änderung und Weitergabe sind frei — auch
+kommerziell, auch das Einspielen des Prozesses in kommerzielle Projekte.
+Bedingungen: Lizenz- und Copyright-Hinweis mitführen, Änderungen an
+lizenzierten Dateien kennzeichnen; die Lizenz enthält eine ausdrückliche
+Patentklausel. Zwei Spezifikations-Templates sind von GitHub Spec Kit
+abgeleitet (MIT, © GitHub, Inc.) — Details in
+[`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md). Bis v2.1.0 stand das
+Projekt unter der Prosperity Public License 3.0.0; der Wechsel zu Apache-2.0
+öffnet den Kern bewusst (Open-Core: künftige kommerzielle Zusatzkomponenten
+bleiben davon getrennt).
 
 ## Historie
 

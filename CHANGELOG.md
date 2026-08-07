@@ -296,6 +296,13 @@ Vorschlag ewig `proposed` —, und der Seed-Record von `adr-0001` auf
 `adr-0000` umnummeriert, damit ein bestehender Korpus, der bei 0001
 beginnt, kollisionsfrei einziehen kann. Ausgeliefert als `v2.1.0`.
 
+Lizenzwechsel (2026-08-07, nach v2.1.0): von der Prosperity Public
+License 3.0.0 (nicht-kommerziell) zu **Apache-2.0** — der Kern ist bewusst
+offen (Open-Core-Strategie: künftige kommerzielle Zusatzkomponenten bleiben
+separate Werke). Zugleich die MIT-Attribution für die zwei von GitHub
+Spec Kit abgeleiteten Templates nachgezogen (`THIRD-PARTY-NOTICES.md`,
+auch gerendert in Adopter-Repos; Provenienz-Kommentare in den Dateien).
+
 ## Sub-Projekt-Tabelle (SP1–SP24)
 
 Die Tabelle wurde bis SP24 gepflegt; ab SP25 trägt das Narrativ oben die
