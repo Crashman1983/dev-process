@@ -15,6 +15,11 @@ on:
         required: false
         default: ""
         type: string
+      replace:
+        description: "Move an existing tag (explicit opt-in; still validated)"
+        required: false
+        default: false
+        type: boolean
 permissions:
   contents: write
 jobs:
@@ -28,6 +33,7 @@ jobs:
       - env:
           TAG: ${{ inputs.tag }}
           SHA: ${{ inputs.sha }}
+          REPLACE: ${{ inputs.replace }}
         run: |
           # validate the inputs: a value starting with '-' would parse as a git
           # option (e.g. sha=--delete), so both are format-checked before use.
@@ -49,5 +55,14 @@ jobs:
           if tag != expected:
               raise SystemExit(f"tag {tag!r} does not match project version {expected!r}")
           PY
-          git tag "$TAG" "$target"
+          # an existing tag is moved only on explicit opt-in — a release tag
+          # silently changing meaning is exactly what this guard prevents
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null; then
+            if [ "$REPLACE" != "true" ]; then
+              echo "tag $TAG already exists — re-run with replace=true to move it"
+              exit 1
+            fi
+            git push origin ":refs/tags/$TAG"
+          fi
+          git tag -f "$TAG" "$target"
           git push origin "refs/tags/$TAG"
