@@ -349,6 +349,21 @@ remove`/`prune`) und der dispatchbare **cleanup-branches-Workflow**
 (patch-identitäts-basiert, Dry-Run-Default, Open-PR-Schutz) im Repo
 und im Template) ausgeliefert, `v2.4.0`.
 
+SP61 (sichtbarkeits-paket, aus Sebs Lebenszyklus-Review: **Issue bei
+der Idee statt beim Plan** — das Einflussfenster des Menschen ist die
+Spec-/Design-Phase, also entsteht das Tracking-Issue beim Brainstorm-
+Eintritt und eine aktive `specs/*/spec.md` ohne `issue:`-Zeile ist hart
+(issue-before-spec im Issues-Gate); **Stage-Publishing** —
+`publish_and_prune --stage` postet die fertige Spec (und Design) als
+datierten Read-only-Snapshot-Kommentar ans Issue, prunt nichts, und
+neue Issue-Kommentare sind Clarify-Input vor `/plan`; **Review-
+Ökonomie für Subagent-Engines** — Task-Reviews nur für Owner-/
+Integrations-Tasks (Mechanik im Sammel-Checkpoint), Runde 2+ als
+`--since`-Delta, und die finale Whole-Branch-Review des Engines IST
+die attestierte Merge-Review — ein Deep-Review auf dem stärksten
+Modell statt zwei (~5 statt ~9 Läufe pro #651-großem Paket))
+ausgeliefert, `v2.5.0`.
+
 ## Sub-Projekt-Tabelle (SP1–SP24)
 
 Die Tabelle wurde bis SP24 gepflegt; ab SP25 trägt das Narrativ oben die

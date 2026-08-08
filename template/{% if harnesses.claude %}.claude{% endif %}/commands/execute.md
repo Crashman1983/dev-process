@@ -21,4 +21,11 @@ test-first order stands, commits stay atomic, and the Tier-2+ **merge review
 remains the independent, attested review** (`/review`) — a per-task reviewer
 loop reduces defects but does not replace the attestation.
 
+**Calibrate the engine's review spend** (review cost is the budget lever):
+per-task reviews only for owner/integration tasks — mechanical tasks
+(registry updates, pure test tasks) batch at checkpoints; rounds 2+ review
+the delta (`make_review_bundle.py --since`); and let the engine's final
+whole-branch review BE the attested merge review (fresh process on the
+bundle, REVIEW line) — one deep review on the strongest model, not two.
+
 Next: `/review`.

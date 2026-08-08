@@ -67,6 +67,20 @@ unchanged, forever if needed.
    feature-inventory entries with test refs; shared contracts → the contract
    SSOT.
 
+## Stage publishing — the influence window
+
+The human reads spec and design, not the plan — and influence is only cheap
+BEFORE planning. So: create the tracking issue at *idea* time (title +
+one-paragraph idea; the spec records `issue: #N`, the issues gate enforces
+it), and once clarify is done, publish the spec to the issue:
+
+    python scripts/process/publish_and_prune.py --stage <feature-dir>
+
+A dated, read-only snapshot comment — the file in `specs/` stays the SSOT.
+Read new issue comments before `/plan`: they are clarify input. The merge-time
+`publish_and_prune <feature-dir>` (publish everything, prune the directory)
+is unchanged.
+
 ## Branching and parallel agents
 
 `specify init` does not create branches (0.16 — verified); branch creation

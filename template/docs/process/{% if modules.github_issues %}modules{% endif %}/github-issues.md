@@ -95,6 +95,14 @@ A starting point, not enforced by any gate:
 - `status:in-progress` — claimed and being worked (`status:{review,handoff,blocked}`
   for finer states).
 
+## Issue-before-spec
+
+The tracking issue exists from *idea* time, not from plan time: an active
+`specs/<feature>/spec.md` must carry an `issue:` line (hard) — by the time a
+plan exists, the human's influence window has closed. The spec is published
+to the issue as a stage snapshot (`publish_and_prune.py --stage`, speckit
+module) so specification and design are readable where the human reads.
+
 ## Claim workflow
 
 Convention, not gated — a CI gate cannot see cross-repo comments or wall-clock

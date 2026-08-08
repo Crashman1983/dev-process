@@ -208,3 +208,16 @@ def test_gate_ignores_tier1_designs_and_fenced_quotes(render, tmp_path):
     _plan(out, "2026-08-07-doc.md", "```\ntier: 2\n```\nNo declaration here.\n")
     r = _gate(out)
     assert r.returncode == 0, r.stdout
+
+
+def test_stage_publish_needs_issue_ref_and_prunes_nothing(render, tmp_path):
+    out = _render(render, tmp_path)
+    d = out / "specs/003-widget"
+    d.mkdir(parents=True)
+    (d / "spec.md").write_text("# Feature\n\nStories.\n")
+    r = subprocess.run(
+        [sys.executable, str(out / "scripts/process/publish_and_prune.py"),
+         "--stage", "003-widget"], cwd=out, capture_output=True, text=True)
+    assert r.returncode == 1
+    assert "issue-before-spec" in r.stderr
+    assert (d / "spec.md").is_file()  # --stage never prunes, even on failure

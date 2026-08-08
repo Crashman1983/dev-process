@@ -105,6 +105,32 @@ def _check_plans(root: Path) -> tuple[list[str], list[str]]:
     return hard, []
 
 
+def _check_spec_issue_refs(root: Path) -> list[str]:
+    """Issue-before-SPEC: the influence window is the spec/design stage, so a
+    spec without a tracking issue was never readable where the human reads —
+    by the time a plan exists, influence is expensive. Active specs only."""
+    sdir = root / "specs"
+    if not sdir.is_dir():
+        return []
+    hard: list[str] = []
+    for spec in sorted(sdir.glob("*/spec.md")):
+        rel = spec.relative_to(root)
+        try:
+            text = _unfenced(spec.read_text(encoding="utf-8", errors="replace"))
+        except OSError as exc:
+            hard.append(f"{rel}: could not read: {exc}")
+            continue
+        im = _PLAN_ISSUE.search(text)
+        if not im:
+            hard.append(f"{rel}: no 'issue:' line (issue-before-spec) — create the "
+                        f"tracking issue at idea time and record it, so the spec is "
+                        f"readable where the human reads before planning starts")
+        elif parse_issue_ref(im.group(1)) is None:
+            hard.append(f"{rel}: malformed issue ref {im.group(1)!r} "
+                        "(want '#N', 'owner/repo#N', or a github issue URL)")
+    return hard
+
+
 # --- review/audit reports: visibility binding, offline ----------------------
 # header keys on a report file in .process-work/reviews/
 _RPT_KIND = re.compile(_LEAD + r"(review|audit)[*_]*\s*:\s*\S", re.IGNORECASE | re.MULTILINE)
@@ -302,6 +328,7 @@ def check(root: Path) -> tuple[list[str], list[str]]:
     # issue-before-code on active plans runs whenever the module is on,
     # independent of whether a feature-registry exists yet
     hard, soft = _check_plans(root)
+    hard += _check_spec_issue_refs(root)
     default_repo = _default_repo(root)
     rh, rs = _check_reports(root, default_repo)
     hard += rh
