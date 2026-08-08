@@ -550,3 +550,16 @@ def test_homed_and_archived_plans_are_not_unhomed(render, tmp_path):
     (out / "old/archive/hist.md").write_text("tier: 3\n")  # archives are history
     r = _run(out)
     assert r.returncode == 0, r.stdout
+
+
+def test_prose_tier_without_declaration_is_a_loud_note(render, tmp_path):
+    # third-party plan writers know tiers, not the grammar — a plan saying
+    # "Tier 4" in prose but declaring nothing sits outside every tier-keyed gate
+    out = render(tmp_path, {"project_name": "d"})
+    p = out / ".process-work/plans"
+    p.mkdir(parents=True, exist_ok=True)
+    (p / "2026-08-08-rogue.md").write_text(
+        "# Plan\n\n- Issue: #7. Tier 4 — full review path.\n\nSteps.\n")
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+    assert "declares none" in r.stdout
