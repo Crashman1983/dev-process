@@ -12,4 +12,13 @@ make one atomic conventional commit, and tick the task's checkbox in
 `tasks.md` in the same commit (the checkboxes are the canonical progress
 state). Keep tasks isolated so each is independently reviewable.
 
+**Execution engine is free, artifacts are not.** Driving this phase with a
+subagent-per-task engine (e.g. a Superpowers-style skill: fresh implementer
+per task, per-task review loop, model routed by task complexity) is a valid —
+often better — way to run it, provided the invariants hold: tasks come from
+the plan/`tasks.md`, checkboxes are ticked in the artifact per task, the
+test-first order stands, commits stay atomic, and the Tier-2+ **merge review
+remains the independent, attested review** (`/review`) — a per-task reviewer
+loop reduces defects but does not replace the attestation.
+
 Next: `/review`.
