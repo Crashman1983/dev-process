@@ -55,6 +55,13 @@ can still commit on the branch; archiving after the merge would need a direct
 commit to the main branch, which the branching rule (and the `git-hooks`
 pre-commit) forbid.
 
+**Merge leaves no residue.** Delete the remote feature branch once it is
+merged (enable GitHub's *Automatically delete head branches*, or run a
+cleanup workflow), and remove the worktree that carried it
+(`git worktree remove <path>`, then `git worktree prune`) — a landscape of
+dead branches and orphaned worktrees is where the next agent picks the wrong
+base.
+
 What a merged state becomes for consumers — version, changelog, tag — is the
 release ritual: `docs/process/releases.md`.
 
