@@ -379,6 +379,15 @@ def check(root: Path) -> tuple[list[str], list[str]]:
             except OSError:
                 continue  # active plans are not enforced; the archive path diagnoses
             m = TIER_DECL.search(text)
+            # a plan that TALKS about its tier but never declares it sits outside
+            # every tier-keyed gate (presence, spec-before-plan, issue-before-code)
+            # — the third-party-plan-writer failure mode: the engine knows tiers,
+            # not this grammar. Loud note, not hard: prose mentions are heuristic.
+            if not m and re.search(r"\btier\s+[0-9]\b", text, re.IGNORECASE):
+                soft.append(f"{PLANS_ACTIVE}/{p.name}: mentions a tier in prose but "
+                            f"declares none — the gates key on a 'tier: N' line; "
+                            f"without it, review presence, spec-before-plan and "
+                            f"issue-before-code are all unarmed")
             if m and int(m.group(1)) >= 2:
                 active += 1
         if active:
