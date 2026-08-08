@@ -19,6 +19,14 @@ copies it there if the caller has not. Best-effort network tool (gh), never
 a gate. Stdlib + `gh`.
 
 Usage: python scripts/process/publish_and_prune.py <feature-dir-name>
+       python scripts/process/publish_and_prune.py --stage <feature-dir-name>
+
+--stage is the mid-flight half of the ritual: it publishes the CURRENT
+spec.md (and design.md, if present) to the tracking issue as a dated
+read-only snapshot comment and prunes NOTHING — the human's influence
+window is the spec/design stage, so those artifacts must be readable where
+the human reads BEFORE planning starts. The issue ref comes from spec.md's
+`issue:` line (falling back to plan.md).
 """
 from __future__ import annotations
 
@@ -78,15 +86,58 @@ def _post_comment(gh: str, issue: str, title: str, body: str) -> bool:
     return any("publish_and_prune" in (c.get("body") or "") for c in comments)
 
 
+def _stage(root: Path, fdir: Path) -> int:
+    """Mid-flight publish: spec (and design) to the issue, prune nothing."""
+    import datetime
+    spec = fdir / "spec.md"
+    if not spec.is_file():
+        print("publish_and_prune: --stage needs spec.md — nothing published",
+              file=sys.stderr)
+        return 1
+    spec_text = spec.read_text(encoding="utf-8", errors="replace")
+    plan = fdir / "plan.md"
+    issue = _issue_number(spec_text) or (
+        _issue_number(plan.read_text(encoding="utf-8", errors="replace"))
+        if plan.is_file() else None)
+    if not issue:
+        print("publish_and_prune: no issue: ref in spec.md (or plan.md) — create "
+              "the tracking issue at idea time and record it (issue-before-spec)",
+              file=sys.stderr)
+        return 1
+    gh = shutil.which("gh")
+    if not gh:
+        print("publish_and_prune: `gh` not on PATH — nothing published", file=sys.stderr)
+        return 1
+    stamp = datetime.date.today().isoformat()
+    ok = _post_comment(gh, issue, f"{fdir.name}/spec.md — stage snapshot {stamp} "
+                                  f"(read-only; the file in specs/ is the SSOT)",
+                       spec_text)
+    design = fdir / "design.md"
+    if ok and design.is_file():
+        ok = _post_comment(gh, issue, f"{fdir.name}/design.md — stage snapshot {stamp}",
+                           design.read_text(encoding="utf-8", errors="replace"))
+    if not ok:
+        print("publish_and_prune: stage publish NOT verified — re-run", file=sys.stderr)
+        return 1
+    print(f"publish_and_prune: staged {fdir.name} to issue #{issue} — "
+          f"read comments before /plan; they are clarify input")
+    return 0
+
+
 def main() -> int:
-    if len(sys.argv) != 2:
-        print("usage: publish_and_prune.py <feature-dir-name>", file=sys.stderr)
+    argv = sys.argv[1:]
+    stage = "--stage" in argv
+    argv = [a for a in argv if a != "--stage"]
+    if len(argv) != 1:
+        print("usage: publish_and_prune.py [--stage] <feature-dir-name>", file=sys.stderr)
         return 2
     root = Path(".").resolve()
-    fdir = root / SPECS / sys.argv[1]
+    fdir = root / SPECS / argv[0]
     if not fdir.is_dir():
         print(f"publish_and_prune: no {fdir.relative_to(root)}", file=sys.stderr)
         return 1
+    if stage:
+        return _stage(root, fdir)
     plan = fdir / "plan.md"
     spec = fdir / "spec.md"
     if not plan.is_file() or not spec.is_file():

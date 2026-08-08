@@ -966,3 +966,24 @@ def test_gate_token_after_title_is_not_a_field(render, tmp_path):
     r = _run(out)
     assert r.returncode == 0, r.stdout
     assert "marked gate=possible" not in r.stdout
+
+
+# --- issue-before-spec: the influence window needs a readable home -----------
+
+def test_active_spec_without_issue_ref_is_hard(render, tmp_path):
+    out = _render(render, tmp_path)
+    d = out / "specs/001-widget"
+    d.mkdir(parents=True)
+    (d / "spec.md").write_text("# Feature\n\nStories.\n")
+    r = _run(out)
+    assert r.returncode == 1
+    assert "issue-before-spec" in r.stdout
+
+
+def test_active_spec_with_issue_ref_passes(render, tmp_path):
+    out = _render(render, tmp_path)
+    d = out / "specs/002-widget"
+    d.mkdir(parents=True)
+    (d / "spec.md").write_text("# Feature\n\nissue: #7\n\nStories.\n")
+    r = _run(out)
+    assert r.returncode == 0, r.stdout

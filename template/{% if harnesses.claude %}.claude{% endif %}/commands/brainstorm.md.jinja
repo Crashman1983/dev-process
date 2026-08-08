@@ -6,8 +6,18 @@ quick flow, no spec artifacts. For Tier 2+: read `PRODUCT.md` and the
 decision records for the touched area as constraints, then run
 `/speckit-specify` and iterate `/speckit-clarify` until no
 `[NEEDS CLARIFICATION]` marker survives (the clarification gate blocks
-markers from reaching plan/tasks). See
-`docs/process/modules/speckit.md` for the full flow. Do not start
+markers from reaching plan/tasks).
+
+**Issue at idea time, not at plan time.** Before specifying, create the
+tracking issue (title + one-paragraph idea) — the human's influence window
+is the spec/design stage, and an unpublished idea cannot be influenced. The
+spec records its `issue: #N` line (the issues gate enforces it), and once
+the spec stands (clarify done), publish it to the issue:
+`python scripts/process/publish_and_prune.py --stage <feature-dir>` — a
+read-only snapshot comment the human can react to. Read new issue comments
+before `/plan`: they are clarify input, not archaeology.
+
+See `docs/process/modules/speckit.md` for the full flow. Do not start
 implementation before approval.
 {% else %}Read `docs/process/workflow.md` and, for new or unclear projects, start with
 `docs/process/start-here.md`. Ask a few targeted questions, summarize
