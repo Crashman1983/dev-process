@@ -1,0 +1,49 @@
+# Deletes remote branches whose every commit is patch-identical in the default
+# branch (rebase-merge aware via `git cherry`). Exists because contributors
+# (including agents) may have branch-scoped push rights that cannot delete
+# refs — the Actions token can. Dry-run by default: the run lists what it
+# WOULD delete; a second run with delete=true acts. Branches with an open PR
+# and the default branch are never touched.
+name: cleanup-branches
+on:
+  workflow_dispatch:
+    inputs:
+      delete:
+        description: "Actually delete (false = dry-run listing)"
+        required: false
+        default: false
+        type: boolean
+permissions:
+  contents: write
+  pull-requests: read
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - env:
+          DELETE: ${{ inputs.delete }}
+          GH_TOKEN: ${{ github.token }}
+          DEFAULT: ${{ github.event.repository.default_branch }}
+        run: |
+          git fetch --prune origin "+refs/heads/*:refs/remotes/origin/*"
+          gh pr list --state open --json headRefName -q '.[].headRefName' > /tmp/open.txt || : > /tmp/open.txt
+          swept=0
+          for b in $(git for-each-ref --format='%(refname:strip=3)' refs/remotes/origin); do
+            [ "$b" = "HEAD" ] || [ "$b" = "$DEFAULT" ] && continue
+            grep -qxF "$b" /tmp/open.txt && { echo "skip (open PR): $b"; continue; }
+            unmatched=$(git cherry "origin/$DEFAULT" "origin/$b" | grep -c '^+' || true)
+            if [ "$unmatched" = "0" ]; then
+              if [ "$DELETE" = "true" ]; then
+                git push origin ":refs/heads/$b" && echo "deleted: $b"
+              else
+                echo "would delete (merged): $b"
+              fi
+              swept=$((swept+1))
+            else
+              echo "keep (unmerged, $unmatched own commit(s)): $b"
+            fi
+          done
+          echo "merged branches found: $swept (delete=$DELETE)"
