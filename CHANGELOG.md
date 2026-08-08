@@ -336,6 +336,19 @@ deckungsgleich mit dem Lean-Pass) und das decision-adoption-Modul
 (geparkt bis Nutzungsevidenz vorliegt — die Intent-Achse trägt die
 leichte Version bereits)) ausgeliefert, `v2.3.0`.
 
+SP60 (engine-freiheit + hygiene, aus Kennis Live-Betrieb der
+SpecKit/Superpowers-Kombination: „The execute engine is free, the
+artifacts are not" — Subagent-per-Task-Engines sind im Execute
+sanktioniert, solange die Artefakt-Invarianten halten und die
+Merge-Review die attestierte bleibt; der **Prose-Tier-Detector** im
+Review-Gate macht den Drittskill-Fehlermodus laut (Plan erwähnt „Tier
+N", deklariert aber keine `tier:`-Zeile ⇒ alle tier-gekeyten Gates
+unbewaffnet — live auf #651 gefunden); dazu **„Merge leaves no
+residue"** in commits.md (Branch löschen, `git worktree
+remove`/`prune`) und der dispatchbare **cleanup-branches-Workflow**
+(patch-identitäts-basiert, Dry-Run-Default, Open-PR-Schutz) im Repo
+und im Template) ausgeliefert, `v2.4.0`.
+
 ## Sub-Projekt-Tabelle (SP1–SP24)
 
 Die Tabelle wurde bis SP24 gepflegt; ab SP25 trägt das Narrativ oben die
