@@ -1,3 +1,7 @@
+---
+model: opus
+---
+
 # /review
 
 Run the gate before merging to the main branch. Re-read the kernel
