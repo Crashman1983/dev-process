@@ -364,6 +364,16 @@ die attestierte Merge-Review — ein Deep-Review auf dem stärksten
 Modell statt zwei (~5 statt ~9 Läufe pro #651-großem Paket))
 ausgeliefert, `v2.5.0`.
 
+Modell-Routing als Harness-Default (`model:`-Frontmatter auf den
+Phase-Commands: `/brainstorm` und `/plan` auf dem stärksten Modell
+(Urteilsdichte — ein Spec-/Plan-Fehler kostet sein Vielfaches
+stromabwärts), `/review` auf `opus`, Execution erbt das
+Sitzungs-Arbeitsmodell; die `/speckit-*`-Commands bleiben unberührt, da
+ein Spec-Kit-Update sie überschreibt — Routing lebt in den
+Wrapper-Commands; Doku im speckit-Modul aktualisiert; kein neues Gate,
+keine Config-Achse — Routing bleibt Engine-/Harness-Verhalten),
+`v2.5.1`.
+
 ## Sub-Projekt-Tabelle (SP1–SP24)
 
 Die Tabelle wurde bis SP24 gepflegt; ab SP25 trägt das Narrativ oben die

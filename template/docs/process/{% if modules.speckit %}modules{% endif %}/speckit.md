@@ -103,11 +103,18 @@ so worktrees stay independent and merges never conflict on it.
 
 ## Model routing (recommendation, enforced by nothing)
 
-specify/clarify: strongest model (judgment density) · plan: mid ·
-tasks generation + execution against tasks.md: small (zero-context tasks
+specify/clarify and plan: strongest model (judgment density — a spec or plan
+error costs its multiple downstream) ·
+tasks generation + execution against tasks.md: the session's workhorse model,
+with small models for mechanical subagent tasks (zero-context tasks
 with exact paths; `process_context.py` hands the next task and the files it
 names — no orientation guesswork) · review: per
 `verification-independence.md` — Tier 3 crosses the model family,
-non-negotiable. Measure the effect against your
+non-negotiable. The Claude harness carries these defaults as `model:`
+frontmatter on the phase commands (`/brainstorm`, `/plan`, `/review`) — a
+per-invocation switch, the session model stays untouched; execution inherits
+the session model. Do not add frontmatter to the `/speckit-*` commands
+themselves — a Spec Kit update overwrites them; the routing lives in the
+wrapper commands. Measure the effect against your
 own baseline (telemetry: convergence, cost, CFR) instead of trusting this
 paragraph.
