@@ -374,6 +374,17 @@ Wrapper-Commands; Doku im speckit-Modul aktualisiert; kein neues Gate,
 keine Config-Achse — Routing bleibt Engine-/Harness-Verhalten),
 `v2.5.1`.
 
+Runden-Ökonomie der Review-Schleife dokumentiert (aus Sebs Befund „bei
+jeder Abweichung läuft die gesamte Kette": das `--since`-Delta-Bundle
+existierte seit v2.3.0, aber kein Dokument und kein Command lehrte es —
+`/review`, workflow.md (Review) und verification-independence.md
+beschreiben jetzt die drei Preisregeln: Findings einer Runde bündeln,
+ein Fix-Pass, ein Push (jeder zusätzliche Head-Commit bezahlt die
+Push-Gates/Tests erneut); Runde 2+ als Delta-Bundle über `--since`
+(Volldiff bleibt digest-gebunden, Tier 3 liest immer voll); einmal
+rebasen, vor der ersten Runde — jede spätere Rebase entwertet die
+Digests), `v2.5.2`.
+
 ## Sub-Projekt-Tabelle (SP1–SP24)
 
 Die Tabelle wurde bis SP24 gepflegt; ab SP25 trägt das Narrativ oben die

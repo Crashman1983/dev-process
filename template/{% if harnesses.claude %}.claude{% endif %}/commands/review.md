@@ -28,3 +28,16 @@ To dispatch a fresh (or cross-model) reviewer, do not hand-craft its input:
 complete read-only bundle — rules, checklist, product frame, plan, diff, and
 the exact output grammar — ready to feed any model
 (`docs/process/verification-independence.md`, "The review bundle").
+
+Round economy — a failed round must not re-pay the whole chain:
+
+- **Batch, don't drip.** Collect ALL must-fix findings of a round, fix them in
+  one pass, push once — every extra head commit re-pays the push-time test
+  suite for nothing.
+- **Round 2+ reviews the delta.** Rebuild with
+  `make_review_bundle.py --since <head the last round reviewed>`: the reviewer
+  reads the fix diff plus the prior round's findings, while the bundle still
+  binds the full-branch digest (Tier 3 gets a full bundle every round — the
+  tool refuses delta-only there).
+- **Rebase once**, before the first review round — every later rebase changes
+  the tree and voids the bundle digests, forcing a fresh full round.
