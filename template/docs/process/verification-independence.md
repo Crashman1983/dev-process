@@ -70,6 +70,17 @@ attestation: a fresh process over the bundle is `bundle,non-implementing`; add
 `cross-model` only when the reviewing family really differs, else declare
 `single-family` (the honest degradation above).
 
+**Delta rounds.** After a failed round, `--since <head the last round
+reviewed>` builds a bundle whose diff is only the fixes since that head, plus
+the prior round's reports from `.process-work/reviews/` and the full-branch
+stat — the reviewer re-reads what changed and what it was told, not the whole
+branch again. The full-branch digest fields stay in the bundle, so the
+attestation still binds the verdict to the complete artifact. Tier 3 is the
+exception: the tool refuses a delta-only bundle there — the highest tier
+re-reads in full every round. Pair this with batching: one fix pass and one
+push per round, never a drip of per-finding commits that each re-pay the
+push-time gates and tests.
+
 ## Bind the verdict to the reviewed artifact
 
 Independence is incomplete if the branch can change after review without
