@@ -18,7 +18,11 @@ is the spec/design stage, and an unpublished idea cannot be influenced. The
 spec records its `issue: #N` line (the issues gate enforces it), and once
 the spec stands (clarify done), publish it to the issue:
 `python scripts/process/publish_and_prune.py --stage <feature-dir>` — a
-read-only snapshot comment the human can react to. Read new issue comments
+read-only snapshot comment the human can react to. The spec's **Owner
+brief** (five plain-language sentences, spec-template top) is what makes
+that window usable: write it for someone who will read nothing else — no
+jargon, no file names; its "Your call" line names the decisions only the
+owner can make. Read new issue comments
 before `/plan`: they are clarify input, not archaeology.
 
 See `docs/process/modules/speckit.md` for the full flow. Do not start

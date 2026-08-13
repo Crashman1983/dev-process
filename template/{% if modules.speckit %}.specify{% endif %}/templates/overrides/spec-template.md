@@ -11,6 +11,19 @@ proceed silently. Mark anything underspecified as
 `[NEEDS CLARIFICATION: question]` instead of guessing — the clarification
 gate blocks unresolved markers from reaching plan.md/tasks.md.)*
 
+## Owner brief — plain language *(mandatory, first)*
+
+<!-- Five sentences, no jargon, no file names, no process vocabulary.
+     Written for the product owner, who must be able to steer HERE without
+     reading further. This block leads the staged issue comment — it is the
+     owner's influence window. -->
+
+1. **What**: [what will exist that does not exist today — one sentence]
+2. **Why**: [whose problem it solves, and what it costs to leave unsolved]
+3. **Visible change**: [what the user will see or do differently]
+4. **Risk**: [the one thing most likely to be wrong or regretted later]
+5. **Your call**: [the decision(s) only the owner can make — or "none"]
+
 ## User Scenarios & Testing *(mandatory)*
 
 <!-- Stories are PRIORITIZED, independently testable slices: implementing

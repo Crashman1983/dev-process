@@ -424,6 +424,21 @@ Commit, Checkbox, Gate — in Abhängigkeitsreihenfolge; /plan schärft
 Manifeste, generierte Indizes — ein falscher Marker wäre eine
 Working-Tree-Kollision), `v2.6.2`.
 
+SP63 (owner-loop, aus Sebs Befund „ich reviewe die Slices kaum — und
+verstehe die Specs oft nicht": der Mensch wird ein echter Knoten des
+Loop-Graphen, mit definierten Eingangs-Kanten statt Polling —
+**Owner brief** (Pflicht-Vorspann jeder Spec: fünf Klartext-Sätze ohne
+Jargon/Dateinamen — Was/Warum/sichtbare Änderung/Risiko/„Your call";
+führt den staged Issue-Kommentar an, macht das Einflussfenster
+benutzbar); **`human_digest.py`** (die Eingangs-Kanten als EINE Seite:
+wartende Specs samt Brief + offenen Fragen, Merges der letzten N Tage,
+stehende Waiver-Schulden, Fix-Cluster; read-only, fehlende Quellen
+benannt statt still leer); **Sampling-Audit** (ein gemergtes Paket pro
+Woche, deterministisch per ISO-Woche gewählt — kein Re-Rollen; Review
+by exception statt Diff-Konkurrenz zum Modell-Reviewer,
+verification-independence.md); **owner-digest-Workflow** (wöchentlich
+Mo + Dispatch, Digest in die Step-Summary)) ausgeliefert, `v2.7.0`.
+
 ## Sub-Projekt-Tabelle (SP1–SP24)
 
 Die Tabelle wurde bis SP24 gepflegt; ab SP25 trägt das Narrativ oben die

@@ -1,0 +1,20 @@
+name: owner-digest
+# The owner's inbound edges as one page, delivered on a schedule — an
+# influence window nobody is told about is not a window. Weekly cron +
+# manual dispatch; the digest lands in the run's step summary. Read-only.
+on:
+  schedule:
+    - cron: "23 5 * * 1"  # Mondays 05:23 UTC (odd minute: cron-storm etiquette)
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  digest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # the cluster section reads git history
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+      - name: Owner digest to step summary
+        run: uv run scripts/process/human_digest.py >> "$GITHUB_STEP_SUMMARY"
