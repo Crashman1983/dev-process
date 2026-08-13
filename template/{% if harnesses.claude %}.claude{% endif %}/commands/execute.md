@@ -21,6 +21,22 @@ test-first order stands, commits stay atomic, and the Tier-2+ **merge review
 remains the independent, attested review** (`/review`) — a per-task reviewer
 loop reduces defects but does not replace the attestation.
 
+**[P] groups run as "parallel edit, serial commit".** When `tasks.md` marks
+tasks `[P]`, dispatch them as concurrent subagents in the SAME worktree —
+three invariants make that safe:
+1. **Subagents edit, they never commit.** Each gets its file packet (its
+   tasks' named files, plus explicitly forbidden paths) and returns its
+   test-first evidence (failing run seen, green run) as its result —
+   disjoint files are race-free, a shared git index is not.
+2. **The orchestrator serialises each task's tail** — atomic commit,
+   checkbox tick in `tasks.md` in that commit, gate run — in dependency
+   order, not wallclock order. Every existing invariant holds verbatim;
+   only the thinking and writing runs in parallel.
+3. **`[P]` means no shared touchpoint at all** — not "different features":
+   two tasks that each add a line to the same barrel export, manifest, or
+   generated index are NOT `[P]` (`/plan` sets the markers under that
+   definition; trust them, do not re-derive).
+
 **Calibrate the engine's review spend** (review cost is the budget lever):
 per-task reviews only for owner/integration tasks — mechanical tasks
 (registry updates, pure test tasks) batch at checkpoints; rounds 2+ review
