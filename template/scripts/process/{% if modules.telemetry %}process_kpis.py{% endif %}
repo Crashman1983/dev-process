@@ -23,7 +23,8 @@ difference. See "honest ceiling" in the module doc.
   process_kpis.py convergence   [JOURNAL ...]   # do kickbacks converge?
   process_kpis.py cost          [JOURNAL ...] [--transcripts DIR]
   process_kpis.py cfr           [--branch B]
-  process_kpis.py clusters      [--branch B]    # fix clusters (rule 6 across sessions)
+  process_kpis.py clusters      [--branch B] [--window D] [--min N]
+                                                # fix clusters (rule 6 across sessions)
   process_kpis.py report                        # all families
 
 Lean pass: the cockpit carries exactly the three KPIs the process goals name
@@ -328,9 +329,13 @@ def _fix_tokens(subject: str) -> set[str]:
 def fix_clusters(commits: list[dict],
                  window_days: int = _CLUSTER_WINDOW_DAYS,
                  min_cluster: int = _CLUSTER_MIN) -> list[dict]:
-    """Clusters of fix: commits in the window sharing a subject token,
-    largest first. A token whose commit set is a subset of an already
-    reported one is folded away (it names the same cluster)."""
+    """Clusters of fix: commits in the window, largest first, in two kinds:
+    kind="token" (shared subject word — precise, but blind to synonyms and
+    to non-English vocabularies) and kind="file" (shared CODE file —
+    language-independent, but a hot file collects unrelated fixes). A
+    cluster whose commit set is a subset of an already reported one is
+    folded away (it re-names the same cluster); token clusters report
+    first, so the file dimension only adds what wording missed."""
     fixes = [c for c in commits if _commit_kind(c["subject"]) == "fix"]
     if not fixes:
         return []
@@ -340,23 +345,32 @@ def fix_clusters(commits: list[dict],
     for c in fixes:
         for t in _fix_tokens(c["subject"]):
             by_token[t].append(c)
+    by_file: dict[str, list[dict]] = defaultdict(list)
+    for c in fixes:
+        for f in _code_files(c["files"]):
+            by_file[f].append(c)
     clusters: list[dict] = []
     seen: list[set[int]] = []
-    for token, cs in sorted(by_token.items(), key=lambda kv: (-len(kv[1]), kv[0])):
-        if len(cs) < min_cluster:
-            continue
-        ids = {id(c) for c in cs}
-        if any(ids <= s for s in seen):
-            continue
-        seen.append(ids)
-        days = (max(c["ts"] for c in cs) - min(c["ts"] for c in cs)).days
-        clusters.append({"token": token, "count": len(cs), "days": days,
-                         "subjects": [c["subject"] for c in cs]})
+    for kind, groups in (("token", by_token), ("file", by_file)):
+        for key, cs in sorted(groups.items(), key=lambda kv: (-len(kv[1]), kv[0])):
+            if len(cs) < min_cluster:
+                continue
+            ids = {id(c) for c in cs}
+            if any(ids <= s for s in seen):
+                continue
+            seen.append(ids)
+            days = (max(c["ts"] for c in cs) - min(c["ts"] for c in cs)).days
+            label = key if kind == "token" else key.rsplit("/", 1)[-1]
+            clusters.append({"kind": kind, "token": label, "count": len(cs),
+                             "days": days,
+                             "subjects": [c["subject"] for c in cs]})
     return clusters
 
 
-def clusters(branch: str | None) -> int:
-    print(f"[clusters] fix clusters, last {_CLUSTER_WINDOW_DAYS} d ~advisory")
+def clusters(branch: str | None,
+             window_days: int = _CLUSTER_WINDOW_DAYS,
+             min_cluster: int = _CLUSTER_MIN) -> int:
+    print(f"[clusters] fix clusters, last {window_days} d ~advisory")
     try:
         b = branch or _default_branch()
         commits = _git_commits(b)
@@ -364,19 +378,28 @@ def clusters(branch: str | None) -> int:
         print(f"  not a git repository, git missing, or branch not resolvable "
               f"({type(exc).__name__}) — clusters skipped")
         return 0
-    found = fix_clusters(commits)
+    if not any(_commit_kind(c["subject"]) == "fix" for c in commits):
+        print(f"  no 'fix:' commits on {b} — this detector reads Conventional "
+              f"Commits; without 'fix:' subjects it is blind, not green")
+        return 0
+    found = fix_clusters(commits, window_days, min_cluster)
     if not found:
-        print(f"  no cluster of >={_CLUSTER_MIN} fix: commits sharing a "
-              f"subject token on {b} — nothing to escalate")
+        print(f"  no cluster of >={min_cluster} fix: commits sharing a "
+              f"subject token or code file on {b} — nothing to escalate")
         return 0
     # the advisory names the worst offenders, not every echo — overlapping
-    # token clusters largely describe the same behaviour from another word
+    # clusters largely describe the same behaviour from another angle
     shown, rest = found[:5], found[5:]
     if rest:
-        print(f"  top 5 of {len(found)} token clusters (the rest mostly "
+        print(f"  top 5 of {len(found)} clusters (the rest mostly "
               f"re-name these)")
     for cl in shown:
-        print(f"  '{cl['token']}': {cl['count']} fix commits in {cl['days']} d")
+        kind = "" if cl["kind"] == "token" else \
+            "file " if cl["kind"] == "file" else f"{cl['kind']} "
+        note = "" if cl["kind"] == "token" else \
+            "  (hot files collect unrelated fixes — read before believing)"
+        print(f"  {kind}'{cl['token']}': {cl['count']} fix commits in "
+              f"{cl['days']} d{note}")
         for s in cl["subjects"][:6]:
             print(f"    - {s}")
         if len(cl["subjects"]) > 6:
@@ -464,6 +487,10 @@ def main() -> int:
     c.add_argument("--branch")
     cl = sub.add_parser("clusters")
     cl.add_argument("--branch")
+    cl.add_argument("--window", type=int, default=_CLUSTER_WINDOW_DAYS,
+                    help="days of history to cluster (default 14)")
+    cl.add_argument("--min", type=int, default=_CLUSTER_MIN, dest="min_cluster",
+                    help="minimum fixes to call it a cluster (default 3)")
     sub.add_parser("report")
     args = p.parse_args()
 
@@ -474,7 +501,7 @@ def main() -> int:
     if args.cmd == "cfr":
         return cfr(args.branch)
     if args.cmd == "clusters":
-        return clusters(args.branch)
+        return clusters(args.branch, args.window, args.min_cluster)
     return report()
 
 

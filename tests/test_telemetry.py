@@ -465,3 +465,48 @@ def test_clusters_quiet_when_no_cluster(render, tmp_path):
     r = _kpis(out, "clusters")
     assert r.returncode == 0, r.stdout + r.stderr
     assert "nothing to escalate" in r.stdout
+
+
+def test_clusters_file_dimension_catches_synonyms(render, tmp_path):
+    """Fixes wording the same behaviour differently share no token — the
+    code-file dimension still clusters them (language-independent)."""
+    out = _render(render, tmp_path)
+    env_git = ["git", "-C", str(out)]
+
+    def git(date: str, *args):
+        subprocess.run([*env_git, *args], check=True, capture_output=True,
+                       env={"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
+                            "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t",
+                            "PATH": __import__("os").environ["PATH"],
+                            "GIT_AUTHOR_DATE": date, "GIT_COMMITTER_DATE": date})
+
+    subprocess.run([*env_git, "init", "-b", "main"], check=True, capture_output=True)
+    subjects = [  # zero shared salient tokens
+        "fix(chat): inherit the parent value",
+        "fix(chat): honour yesterday's setting on rollover",
+        "fix(router): default correctly on an empty first message",
+    ]
+    for i, s in enumerate(subjects):
+        (out / "scoping.py").write_text(f"x = {i}\n")
+        git(f"2026-06-0{i + 1}T00:00:00", "add", "-A")
+        git(f"2026-06-0{i + 1}T00:00:00", "commit", "-m", s)
+    r = _kpis(out, "clusters")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "file 'scoping.py': 3 fix commits" in r.stdout
+    assert "hot files" in r.stdout  # the honesty caveat rides along
+
+
+def test_clusters_blind_without_conventional_commits(render, tmp_path):
+    out = _render(render, tmp_path)
+    env_git = ["git", "-C", str(out)]
+    e = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
+         "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t",
+         "PATH": __import__("os").environ["PATH"]}
+    subprocess.run([*env_git, "init", "-b", "main"], check=True, capture_output=True)
+    (out / "app.py").write_text("x = 1\n")
+    subprocess.run([*env_git, "add", "-A"], check=True, capture_output=True, env=e)
+    subprocess.run([*env_git, "commit", "-m", "repaired the scope thing"],
+                   check=True, capture_output=True, env=e)
+    r = _kpis(out, "clusters")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "blind, not green" in r.stdout
