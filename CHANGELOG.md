@@ -415,6 +415,15 @@ ihre Ergebnisse wandern hinein, der Modell-Reviewer verifiziert die
 Mechanik-Schicht statt sie zu entdecken (ein grep-barer Befund kostet
 mechanisch Cents, per Review eine Runde)), `v2.6.1`.
 
+[P]-Gruppen wirklich nutzen („parallel edit, serial commit": [P]-Tasks
+laufen als gleichzeitige Subagents im selben Worktree — Subagents
+editieren ihr disjunktes Datei-Paket und liefern Test-Evidenz, committen
+nie; der Orchestrator serialisiert den Schwanz jedes Tasks — atomarer
+Commit, Checkbox, Gate — in Abhängigkeitsreihenfolge; /plan schärft
+[P] auf „kein geteilter Berührungspunkt", inkl. Barrel-Exports,
+Manifeste, generierte Indizes — ein falscher Marker wäre eine
+Working-Tree-Kollision), `v2.6.2`.
+
 ## Sub-Projekt-Tabelle (SP1–SP24)
 
 Die Tabelle wurde bis SP24 gepflegt; ab SP25 trägt das Narrativ oben die

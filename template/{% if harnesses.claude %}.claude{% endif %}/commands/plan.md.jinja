@@ -20,6 +20,15 @@ commits stay fine). The task is the unit of planning, checkboxes, gate
 runs, and reporting, and every task pays that ritual overhead once — a
 50-task list that could be 30 pays it twenty times for nothing. Split
 tasks by ownership and dependency, never by TDD phase.
+
+**A `[P]` marker is a no-shared-touchpoint claim, not a vibe.** Mark two
+tasks parallel only when their file sets are fully disjoint — including
+barrel exports, manifests, lockfiles, generated indexes, and shared CSS:
+two tasks that each add one line to the same file are sequential. The
+execute engine dispatches `[P]` groups as concurrent subagents on the
+marker's word (`/execute`, "parallel edit, serial commit"), so a wrong
+marker becomes a working-tree collision, not a style issue. Every task
+names its exact files; derive the markers from those sets.
 {% else %}Read `docs/process/workflow.md` (Plan)
 and `docs/process/journal-state-plans.md` for where plans live. The input design
 must be clarification-free — no unresolved `[NEEDS CLARIFICATION]` marker may
