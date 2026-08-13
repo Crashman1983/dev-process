@@ -66,6 +66,8 @@ scope. The spike itself is not tier-routed work; the follow-up change is.
 ## Debug
 
 The root-cause entry point (mandatory rule 6). Enters: a bug, test failure, or unexpected behavior. Produces: a root-cause analysis before any fix. After two failed attempts at a symptom, stop patching and investigate why it happens; fix the cause, not the symptom.
+
+Rule 6's counter must survive the session, or every new session sees its fix as a first attempt: the durable counter is the commit history. Before fixing, check whether the behaviour is already collecting fixes (`git log --grep` over recent `fix:` subjects{% if modules.telemetry %}, or `process_kpis.py clusters`{% endif %}). **The third fix on the same behaviour is not a debugging problem — it is a missing specification**: stop, write the rule as an invariant decision record (Type: invariant, `docs/process/adr/template.md`) whose `## Test` section names a table/property test pinning the *whole* rule, and land your case as one row of that table. A behaviour that spans features has no single spec to live in — the invariant record is its home; without one it gets discovered one path-fix at a time.
 {% if modules.github_issues %}
 ## Parallel agents
 

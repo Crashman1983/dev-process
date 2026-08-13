@@ -414,3 +414,54 @@ def test_tilde_fenced_grade_ignored(render, tmp_path):
     r = subprocess.run([sys.executable, str(out / "scripts/process/check_telemetry.py"), str(out)],
                        capture_output=True, text=True)
     assert r.returncode == 0, r.stdout  # quotation, not telemetry
+
+
+# --- SP62: fix clusters (rule 6 across sessions) ---------------------------
+
+def test_clusters_names_the_shared_token(render, tmp_path):
+    out = _render(render, tmp_path)
+    env_git = ["git", "-C", str(out)]
+
+    def git(date: str, *args):
+        subprocess.run([*env_git, *args], check=True, capture_output=True,
+                       env={"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
+                            "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t",
+                            "PATH": __import__("os").environ["PATH"],
+                            "GIT_AUTHOR_DATE": date, "GIT_COMMITTER_DATE": date})
+
+    subprocess.run([*env_git, "init", "-b", "main"], check=True, capture_output=True)
+    subjects = [
+        "feat: add scope model",
+        "fix(chat): inherit the working scope on rollover",
+        "fix(chat): resolve the first turn in its conversation scope",
+        "fix(router): carry a stated scope into the daily cut",
+        "fix(ui): align the button",
+    ]
+    for i, s in enumerate(subjects):
+        (out / "app.py").write_text(f"x = {i}\n")
+        git(f"2026-06-0{i + 1}T00:00:00", "add", "-A")
+        git(f"2026-06-0{i + 1}T00:00:00", "commit", "-m", s)
+    r = _kpis(out, "clusters")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "'scope': 3 fix commits" in r.stdout
+    assert "invariant record" in r.stdout          # the escalation advice
+    assert "'align'" not in r.stdout               # singletons are not clusters
+
+
+def test_clusters_quiet_when_no_cluster(render, tmp_path):
+    out = _render(render, tmp_path)
+    env_git = ["git", "-C", str(out)]
+    subprocess.run([*env_git, "init", "-b", "main"], check=True, capture_output=True)
+    (out / "app.py").write_text("x = 1\n")
+    subprocess.run([*env_git, "add", "-A"], check=True, capture_output=True,
+                   env={"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
+                        "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t",
+                        "PATH": __import__("os").environ["PATH"]})
+    subprocess.run([*env_git, "commit", "-m", "fix: one lonely fix"], check=True,
+                   capture_output=True,
+                   env={"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
+                        "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t",
+                        "PATH": __import__("os").environ["PATH"]})
+    r = _kpis(out, "clusters")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "nothing to escalate" in r.stdout

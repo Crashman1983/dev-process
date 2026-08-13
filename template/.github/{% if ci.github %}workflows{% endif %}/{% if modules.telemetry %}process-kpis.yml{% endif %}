@@ -1,0 +1,26 @@
+name: process-kpis
+# A KPI without a trigger does not exist: the cockpit sat unread while a
+# 20% fix rate accumulated (SP62). Monthly cron + manual dispatch; the report
+# lands in the run's step summary. Read-only, never blocks anything.
+on:
+  schedule:
+    - cron: "17 6 1 * *"  # monthly, 1st, 06:17 UTC (odd minute: cron-storm etiquette)
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  kpis:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # cfr and clusters read git history
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+      - name: KPI report to step summary
+        run: |
+          {
+            echo '## Process KPI report'
+            echo '```'
+            uv run scripts/process/process_kpis.py report
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

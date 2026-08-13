@@ -62,6 +62,24 @@ ISSUE_DECL = re.compile(_LEAD + r"issue[*_]*\s*:\s*(\S+)", re.IGNORECASE | re.MU
 WAIVED = re.compile(_LEAD + r"review-waived[*_]*\s*:\s*\S", re.IGNORECASE | re.MULTILINE)
 RETIRED_BINDING = re.compile(_LEAD + r"review-binding[*_]*\s*:", re.IGNORECASE | re.MULTILINE)
 DATE_PREFIX = re.compile(r"^\d{4}-\d{2}-\d{2}-")
+# a waiver is an honest degradation — but a degradation without an owner
+# becomes the new normal. The debt marker is an issue ref (#N) or a URL on
+# the waiver line itself. Soft everywhere: the waiver stays valid, the
+# missing owner is named. One owner for the notion; the speckit and issues
+# gates import this instead of keeping copies.
+_WAIVER_DEBT = re.compile(r"#\d+|https?://")
+
+
+def waiver_debt_notes(rel: str, text: str, pattern: re.Pattern[str],
+                      label: str) -> list[str]:
+    """One note per waiver line that names no issue/URL owner."""
+    notes = []
+    for line in text.splitlines():
+        if pattern.search(line) and not _WAIVER_DEBT.search(line):
+            notes.append(f"{rel}: '{label}:' without an issue ref — a "
+                         f"degradation is a debt with an owner; link #N (or a "
+                         f"URL) on the waiver line")
+    return notes
 GIT_SHA = re.compile(r"^[0-9a-f]{40}(?:[0-9a-f]{24})?$")
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
@@ -356,6 +374,8 @@ def check(root: Path) -> tuple[list[str], list[str]]:
                 continue
             enforced_any = True
             if WAIVED.search(text):
+                soft += waiver_debt_notes(f"{PLANS_ARCHIVE}/{p.name}", text,
+                                          WAIVED, "review-waived")
                 continue
             unique = dedated_counts[DATE_PREFIX.sub("", p.stem)] == 1
             ids = _plan_work_ids(p.stem, text, include_dedated=unique)

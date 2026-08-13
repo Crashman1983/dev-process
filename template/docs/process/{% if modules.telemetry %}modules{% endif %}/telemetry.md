@@ -66,13 +66,18 @@ its documented threshold instead of a confidence tag.
 
 Lean pass: the cockpit carries exactly the three KPIs the process goals name
 — convergence (error rate at the gate), cost, and CFR (error rate after
-merge).
+merge) — plus one advisory reader, `clusters`.
 
 | family | measures | action (threshold → act) |
 |---|---|---|
 | `convergence` | do kickbacks resolve ≤2 rounds, or thrash? (first-try episodes excluded from the denominator) | <90% in ≤2 rounds → find the thrashing criterion (unclear acceptance / missing test seam) |
 | `cost` | rework episodes (kickback round>1 → fixed); optional `--transcripts DIR` token medians (harness-specific, `~approx`) | rework>0 → find the criterion that kicks back repeatedly |
 | `cfr` | DORA change failure rate: `feat:` with a corrective `fix:` ≤7 d sharing a code file (proxy) | trend over ≥3 windows only; rising despite catch>0 → tighten the test/review gate |
+| `clusters` | rule 6 across sessions: `fix:` commits (14 d) sharing a subject token — each session sees its fix as a first attempt; git sees the series | a cluster ≥3 → stop path-patching, write the invariant record (Type: invariant) with its table test (`workflow.md`, Debug) |
+
+A KPI without a trigger does not exist — the cockpit only helps if something
+runs it. With GitHub CI the `process-kpis` workflow runs `report` monthly
+(and on dispatch) into the run's step summary; read it.
 
 ## What the numbers can say — and what they cannot (honest ceiling)
 

@@ -82,6 +82,11 @@ its `specs/NNN-…` directory or carries a `spec-waived: <reason>` line — the
 spec interrogation comes before planning, and skipping it is a recorded
 decision, never a silent one (the `speckit` gate enforces this).
 
+A waiver is an honest degradation — and a degradation without an owner
+becomes the new normal. `review-waived:` and `spec-waived:` lines should name
+their debt owner on the line itself (an issue ref `#N` or a URL); the gates
+report a waiver without one as a note, never a failure.
+
 A plan may also carry an `issue: <ref>` line linking its tracking issue (`#N`,
 `owner/repo#N`, or a URL). When the `github-issues` module is installed, an
 *active* Tier 2+ plan must carry that link before code — issue-before-code — or
