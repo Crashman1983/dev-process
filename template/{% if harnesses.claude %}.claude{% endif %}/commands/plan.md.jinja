@@ -12,6 +12,14 @@ gates key on them — `docs/process/journal-state-plans.md`). The input spec
 must be clarification-free (the clarification gate blocks unresolved
 markers here). Run `/speckit-analyze` at plan exit for Tier 3 or a heavily
 iterated spec (`docs/process/modules/speckit.md`, token economy).
+
+**Task grain: one task = one behaviour, test AND implementation.** Do not
+split "write the failing test" and "implement" into two tasks — TDD order
+lives *inside* the task (failing test first, watched, then the code; two
+commits stay fine). The task is the unit of planning, checkboxes, gate
+runs, and reporting, and every task pays that ritual overhead once — a
+50-task list that could be 30 pays it twenty times for nothing. Split
+tasks by ownership and dependency, never by TDD phase.
 {% else %}Read `docs/process/workflow.md` (Plan)
 and `docs/process/journal-state-plans.md` for where plans live. The input design
 must be clarification-free — no unresolved `[NEEDS CLARIFICATION]` marker may

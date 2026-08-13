@@ -29,6 +29,16 @@ complete read-only bundle — rules, checklist, product frame, plan, diff, and
 the exact output grammar — ready to feed any model
 (`docs/process/verification-independence.md`, "The review bundle").
 
+Mechanics before judgment — the model reviewer is the most expensive
+detector you have, so it goes last: before building the bundle, run every
+*mechanical* check the plan, spec, or contracts name (ownership/layering
+detectors, grep-able invariants, token/schema checks — the gate suite
+already runs as the bundle's preflight) and fix or file what they find.
+Append their results to the bundle: the reviewer then *verifies* the
+mechanical layer and spends its judgment on what only judgment can find. A
+finding a grep could have made costs cents mechanically and a review round
+otherwise.
+
 Round economy — a failed round must not re-pay the whole chain:
 
 - **Batch, don't drip.** Collect ALL must-fix findings of a round, fix them in

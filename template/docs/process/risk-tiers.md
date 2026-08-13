@@ -11,6 +11,8 @@ Scope — not code volume — sets the tier. A change that another component, co
 
 **Floor, not ceiling:** a label or convention may raise a tier; it never lowers the derived tier. Below the derived tier only with a one-line written justification.
 
+**The tier attaches to the change, not to the effort's title.** A slice that merges in stages carries a tier *per stage*: a behaviour-neutral extraction stage whose proof is mechanical (a protected test set unchanged and green on every commit) derives Tier 2 — fresh bundle review, no cross-model/adversarial program — even when the slice's behaviour-changing stage is Tier 3. Paying the Tier 3 ritual twice because both stages share a heading is spend without risk behind it; the stage that changes behaviour pays it once. The one-line justification duty above covers the split: the stage plan names its own tier and why.
+
 **Recognizing your tier.** The categories above only help if you can see your task in them. Ask, of the concrete change:
 
 - Does it **read or write persistence** (a database, a file, a durable store)?
