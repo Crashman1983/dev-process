@@ -402,6 +402,19 @@ pass, grüne Gates, sauberer Tree, dann der Rest-Ritus in Reihenfolge;
 read-only, gegen die beobachteten Tail-Ausfälle #652/#653/#660))
 ausgeliefert, `v2.6.0`.
 
+Slice-Ökonomie nachgeschärft (aus dem #688-Befund „50 Tasks, extrem
+lang": **Task-Korn** — ein Task = ein Verhalten, Test UND Implementierung;
+TDD-Reihenfolge lebt IM Task, nie als Task-Paar (der Task ist die Einheit
+von Planung, Checkbox, Gate-Lauf und Bericht — 50 Tasks, die 30 sein
+könnten, zahlen das Ritual zwanzigmal umsonst); **Tier pro Stage** — bei
+Stage-Merges trägt jede Stage ihren eigenen Tier, eine verhaltensneutrale
+Extraktions-Stage mit mechanischem Beweis ist Tier 2, auch wenn die
+verhaltensändernde Stage Tier 3 ist (risk-tiers.md); **Mechanik vor
+Urteil** — alle mechanischen Detektoren laufen VOR dem Review-Bundle und
+ihre Ergebnisse wandern hinein, der Modell-Reviewer verifiziert die
+Mechanik-Schicht statt sie zu entdecken (ein grep-barer Befund kostet
+mechanisch Cents, per Review eine Runde)), `v2.6.1`.
+
 ## Sub-Projekt-Tabelle (SP1–SP24)
 
 Die Tabelle wurde bis SP24 gepflegt; ab SP25 trägt das Narrativ oben die
