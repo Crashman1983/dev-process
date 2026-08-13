@@ -563,3 +563,23 @@ def test_prose_tier_without_declaration_is_a_loud_note(render, tmp_path):
     r = _run(out)
     assert r.returncode == 0, r.stdout
     assert "declares none" in r.stdout
+
+
+# --- SP62: a waiver is a debt with an owner --------------------------------
+
+def test_waiver_without_issue_ref_notes_debt(render, tmp_path):
+    out = render(tmp_path, {"project_name": "demo"})
+    _archived_plan(out, "2026-07-04-widget.md",
+                   "# Plan\n\ntier: 2\nreview-waived: trivial rename\n")
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+    assert "debt with an owner" in r.stdout
+
+
+def test_waiver_with_issue_ref_stays_quiet(render, tmp_path):
+    out = render(tmp_path, {"project_name": "demo"})
+    _archived_plan(out, "2026-07-04-widget.md",
+                   "# Plan\n\ntier: 2\nreview-waived: trivial rename, tracked #12\n")
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+    assert "debt with an owner" not in r.stdout

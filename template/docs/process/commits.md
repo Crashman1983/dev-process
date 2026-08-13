@@ -62,6 +62,14 @@ cleanup workflow), and remove the worktree that carried it
 dead branches and orphaned worktrees is where the next agent picks the wrong
 base.
 
+The whole tail — archive, merge, branch delete, worktree removal,
+publish/prune — is checkable as one verdict: `scripts/process/finish.py`
+(`/finish`) verifies the branch is done (clearing pass, green gates, clean
+tree) and prints the remaining steps in order. The tail failures it guards
+against (merge without clearing pass, plan never archived, residue left
+behind) were all observed in production; prefer the checker over improvising
+the ritual from memory.
+
 What a merged state becomes for consumers — version, changelog, tag — is the
 release ritual: `docs/process/releases.md`.
 

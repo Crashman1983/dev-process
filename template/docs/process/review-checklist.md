@@ -106,6 +106,12 @@ the integrity of records that *exist*; only a review can notice one that is
 - Does it make an existing record **obsolete in practice** while leaving the
   file untouched? A record the code no longer honors is a lie to the next
   reader — supersede it in the same change.
+- Is this a **`fix:` on a behaviour that is already collecting fixes**? The
+  review sees the branch; git sees the series. A third fix on the same
+  behaviour within days is not a fix to approve but a missing invariant to
+  demand: the rule belongs in an invariant record (Type: invariant) with a
+  table/property test pinning the whole rule (`workflow.md`, Debug) — a
+  path-pin approved here invites path-fix number four.
 
 ## Product frame — direction, not drift
 

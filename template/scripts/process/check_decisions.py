@@ -55,7 +55,13 @@ def adr_exists(root: Path, ref: str) -> bool:
 # exactly the accretion this gate exists to surface.
 STATUS_OK = {"proposed", "accepted", "rejected", "deprecated"}
 INTENT_OK = {"keep", "change-planned", "tolerated"}
-TYPE_OK = {"architecture", "product", "process"}
+# `invariant` is the home for a cross-cutting behavioural rule ("which scope
+# does a turn inherit?") — a rule that spans features has no single spec to
+# live in, and what has no home never gets specified as a whole; it gets
+# discovered one path-fix at a time. The record states the rule; its `## Test`
+# section names the enforcement twin (the table/property test that pins the
+# whole rule, not one path).
+TYPE_OK = {"architecture", "product", "process", "invariant"}
 
 
 def _section_value(text: str, name: str) -> tuple[str | None, int | None]:
@@ -171,7 +177,24 @@ def check(root: Path) -> tuple[list[str], list[str]]:
             soft.append(f"{rel}:{t_line}: Type not chosen (still the template menu)")
         elif _first_token(type_) not in TYPE_OK:
             hard.append(f"{rel}:{t_line}: Type {type_!r} is not one of "
-                        f"architecture | product | process")
+                        f"architecture | product | process | invariant")
+
+        # --- invariant records need their enforcement twin ---
+        # An accepted invariant without a named test is prose pretending to be
+        # a rule — the exact state that produced the one-path-fix-at-a-time
+        # spiral this type exists to end. Hard once accepted; a proposal may
+        # still be looking for its test (soft).
+        if type_ is not None and _first_token(type_) == "invariant":
+            test, test_line = _section_value(text, "Test")
+            has_test = test is not None and not _is_menu(test)
+            if not has_test and status_tok == "accepted":
+                hard.append(f"{rel}: accepted invariant without a '## Test' "
+                            f"section naming its enforcement twin — an "
+                            f"invariant without a table/property test is "
+                            f"one path-fix away from being false")
+            elif not has_test:
+                soft.append(f"{rel}: invariant without a '## Test' section — "
+                            f"name the enforcement twin before accepting")
 
         # --- Intent (endorsement axis; absence is soft) ---
         intent_tok = None

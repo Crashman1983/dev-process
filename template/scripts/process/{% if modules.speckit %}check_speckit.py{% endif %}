@@ -36,7 +36,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from check_review import TIER_DECL, _unfenced  # noqa: E402  (one owner: the
+from check_review import TIER_DECL, _unfenced, waiver_debt_notes  # noqa: E402  (one owner: the
 # review gate owns the plan-field grammar and fence discipline; import, don't copy)
 
 CONSTITUTION = ".specify/memory/constitution.md"
@@ -120,6 +120,8 @@ def check(root: Path) -> tuple[list[str], list[str]]:
             if not m or int(m.group(1)) < 2:
                 continue
             if SPEC_REF.search(text) or SPEC_WAIVED.search(text):
+                soft += waiver_debt_notes(f"{PLANS_ACTIVE}/{p.name}", text,
+                                          SPEC_WAIVED, "spec-waived")
                 continue
             hard.append(
                 f"{PLANS_ACTIVE}/{p.name}: tier {m.group(1)} plan references no "

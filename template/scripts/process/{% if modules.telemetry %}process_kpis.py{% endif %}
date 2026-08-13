@@ -23,7 +23,8 @@ difference. See "honest ceiling" in the module doc.
   process_kpis.py convergence   [JOURNAL ...]   # do kickbacks converge?
   process_kpis.py cost          [JOURNAL ...] [--transcripts DIR]
   process_kpis.py cfr           [--branch B]
-  process_kpis.py report                        # all three families
+  process_kpis.py clusters      [--branch B]    # fix clusters (rule 6 across sessions)
+  process_kpis.py report                        # all families
 
 Lean pass: the cockpit carries exactly the three KPIs the process goals name
 — convergence (error rate at the gate), cost, and CFR (error rate after
@@ -282,6 +283,111 @@ def change_failure_rate(commits: list[dict], window_days: int = _CFR_WINDOW_DAYS
     return {"feats": len(feats), "fixes": len(fixes), "failed": failed, "rate": rate}
 
 
+# --- fix clusters: rule 6 across sessions --------------------------------
+# Rule 6's two-attempt counter lives in the session; sessions end. A behaviour
+# that collects fix after fix across days looks like a first attempt from
+# inside every one of them. The durable counter is the commit history — this
+# family reads it and names clusters of fix: commits sharing a salient
+# subject token. Advisory only: a cluster is the signal to stop path-patching
+# and write the invariant record (Type: invariant, adr/template.md) with its
+# table test.
+_CLUSTER_WINDOW_DAYS = 14
+_CLUSTER_MIN = 3
+# subject words that carry no behaviour identity (articles, glue verbs the
+# conventional style produces constantly). Tokens shorter than 4 chars are
+# dropped anyway.
+_CLUSTER_STOP = {
+    "the", "a", "an", "and", "for", "with", "into", "from", "that", "this",
+    "its", "own", "one", "two", "not", "out", "when", "every", "only",
+    "let", "make", "keep", "give", "pass", "carry", "mark", "keep", "hear",
+    "reach", "behind", "through", "over", "under", "after", "before",
+    "test", "tests", "fix", "fixes", "again", "back", "path", "state",
+}
+
+
+def _fix_tokens(subject: str) -> set[str]:
+    """Salient identity tokens of a fix: subject — the conventional scope
+    plus every >=4-char word outside the stoplist."""
+    tokens: set[str] = set()
+    m = re.match(r"^fix\((?P<scope>[^)]+)\)!?:\s*(?P<tail>.*)$", subject,
+                 re.IGNORECASE)
+    tail = subject
+    if m:
+        tail = m.group("tail")
+    else:
+        m2 = re.match(r"^fix!?:\s*(?P<tail>.*)$", subject, re.IGNORECASE)
+        if m2:
+            tail = m2.group("tail")
+    for w in re.findall(r"[a-zA-Z][a-zA-Z-]{3,}", tail):
+        w = w.lower().strip("-")
+        if len(w) >= 4 and w not in _CLUSTER_STOP:
+            tokens.add(w)
+    return tokens
+
+
+def fix_clusters(commits: list[dict],
+                 window_days: int = _CLUSTER_WINDOW_DAYS,
+                 min_cluster: int = _CLUSTER_MIN) -> list[dict]:
+    """Clusters of fix: commits in the window sharing a subject token,
+    largest first. A token whose commit set is a subset of an already
+    reported one is folded away (it names the same cluster)."""
+    fixes = [c for c in commits if _commit_kind(c["subject"]) == "fix"]
+    if not fixes:
+        return []
+    newest = max(c["ts"] for c in fixes)
+    fixes = [c for c in fixes if (newest - c["ts"]).days <= window_days]
+    by_token: dict[str, list[dict]] = defaultdict(list)
+    for c in fixes:
+        for t in _fix_tokens(c["subject"]):
+            by_token[t].append(c)
+    clusters: list[dict] = []
+    seen: list[set[int]] = []
+    for token, cs in sorted(by_token.items(), key=lambda kv: (-len(kv[1]), kv[0])):
+        if len(cs) < min_cluster:
+            continue
+        ids = {id(c) for c in cs}
+        if any(ids <= s for s in seen):
+            continue
+        seen.append(ids)
+        days = (max(c["ts"] for c in cs) - min(c["ts"] for c in cs)).days
+        clusters.append({"token": token, "count": len(cs), "days": days,
+                         "subjects": [c["subject"] for c in cs]})
+    return clusters
+
+
+def clusters(branch: str | None) -> int:
+    print(f"[clusters] fix clusters, last {_CLUSTER_WINDOW_DAYS} d ~advisory")
+    try:
+        b = branch or _default_branch()
+        commits = _git_commits(b)
+    except (subprocess.CalledProcessError, OSError) as exc:
+        print(f"  not a git repository, git missing, or branch not resolvable "
+              f"({type(exc).__name__}) — clusters skipped")
+        return 0
+    found = fix_clusters(commits)
+    if not found:
+        print(f"  no cluster of >={_CLUSTER_MIN} fix: commits sharing a "
+              f"subject token on {b} — nothing to escalate")
+        return 0
+    # the advisory names the worst offenders, not every echo — overlapping
+    # token clusters largely describe the same behaviour from another word
+    shown, rest = found[:5], found[5:]
+    if rest:
+        print(f"  top 5 of {len(found)} token clusters (the rest mostly "
+              f"re-name these)")
+    for cl in shown:
+        print(f"  '{cl['token']}': {cl['count']} fix commits in {cl['days']} d")
+        for s in cl["subjects"][:6]:
+            print(f"    - {s}")
+        if len(cl["subjects"]) > 6:
+            print(f"    ... and {len(cl['subjects']) - 6} more")
+    print("  -> a cluster is rule 6's counter surviving the session: stop "
+          "path-patching, write the invariant record (Type: invariant, "
+          "docs/process/adr/template.md) and pin the WHOLE rule with a "
+          "table/property test — the next path-fix grows that table instead")
+    return 0
+
+
 def _default_branch() -> str:
     for b in ("main", "master"):
         if subprocess.run(["git", "rev-parse", "--verify", "--quiet", b],
@@ -341,6 +447,8 @@ def report() -> int:
     cost([], None)
     print()
     cfr(None)
+    print()
+    clusters(None)
     return 0
 
 
@@ -354,6 +462,8 @@ def main() -> int:
     k.add_argument("--transcripts")
     c = sub.add_parser("cfr")
     c.add_argument("--branch")
+    cl = sub.add_parser("clusters")
+    cl.add_argument("--branch")
     sub.add_parser("report")
     args = p.parse_args()
 
@@ -363,6 +473,8 @@ def main() -> int:
         return cost(args.journals, args.transcripts)
     if args.cmd == "cfr":
         return cfr(args.branch)
+    if args.cmd == "clusters":
+        return clusters(args.branch)
     return report()
 
 

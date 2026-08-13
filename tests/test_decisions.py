@@ -213,3 +213,55 @@ def test_empty_section_before_next_heading_is_soft(render, tmp_path):
     r = _run(out)
     assert r.returncode == 0, r.stdout  # missing Type is soft, not a false-red
     assert "not one of" not in r.stdout and "not a valid" not in r.stdout
+
+
+# --- SP62: invariant records need their enforcement twin -------------------
+
+def _write_invariant(root, num, *, status="Accepted", test_section=None,
+                     list_it=True):
+    p = root / ADR / f"adr-{num}-scope-inheritance.md"
+    parts = [f"# ADR-{num}: Scope inheritance", "",
+             "## Status", "", status, "",
+             "## Type", "", "invariant", "",
+             "## Intent", "", "keep", ""]
+    if test_section is not None:
+        parts += ["## Test", "", test_section, ""]
+    parts += ["## Context", "", "A turn inherits its conversation's scope.\n"]
+    p.write_text("\n".join(parts), encoding="utf-8")
+    if list_it:
+        readme = root / ADR / "README.md"
+        readme.write_text(readme.read_text()
+                          + f"\n| {int(num):04d} | Scope | {status} |\n")
+    return p
+
+
+def test_accepted_invariant_without_test_hard(render, tmp_path):
+    out = render(tmp_path, {"project_name": "demo"})
+    _write_invariant(out, "0002", status="Accepted", test_section=None)
+    r = _run(out)
+    assert r.returncode == 1
+    assert "invariant" in r.stdout and "'## Test'" in r.stdout
+
+
+def test_proposed_invariant_without_test_soft(render, tmp_path):
+    out = render(tmp_path, {"project_name": "demo"})
+    _write_invariant(out, "0002", status="Proposed", test_section=None)
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+    assert "invariant without a '## Test'" in r.stdout
+
+
+def test_accepted_invariant_with_test_ok(render, tmp_path):
+    out = render(tmp_path, {"project_name": "demo"})
+    _write_invariant(out, "0002", status="Accepted",
+                     test_section="tests/test_scope_matrix.py::test_inheritance_table")
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+
+
+def test_invariant_is_a_valid_type(render, tmp_path):
+    out = render(tmp_path, {"project_name": "demo"})
+    _write_adr(out, "0003", type_="invariant")
+    r = _run(out)
+    # valid type; missing Test on an accepted invariant is the only new hard
+    assert "is not one of" not in r.stdout

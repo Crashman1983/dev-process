@@ -385,6 +385,23 @@ Push-Gates/Tests erneut); Runde 2+ als Delta-Bundle über `--since`
 rebasen, vor der ersten Runde — jede spätere Rebase entwertet die
 Digests), `v2.5.2`.
 
+SP62 (längsschnitt, aus dem Kenni-Befund „53 fix-Commits in 5 Tagen, ein
+Scope-Cluster mit 13 Fixes, jeder einzeln durch alle Gates": der Prozess
+regierte das einzelne Paket, hatte aber kein Organ für Muster ZWISCHEN
+Paketen — **fix-Cluster-Advisory** (`process_kpis clusters`: Rule 6
+sessionübergreifend, der Zähler lebt in git; Debug-Command, workflow.md
+und Review-Checkliste tragen die Stopp-Regel „dritter Fix am selben
+Verhalten = fehlende Spezifikation"); **Invarianten-Heimat** (Decision-
+Record-Typ `invariant` für featureübergreifende Verhaltensregeln,
+`## Test`-Pflicht als Enforcement-Zwilling ab Accepted, decisions-Gate
+prüft); **Degradations-Schulden** (`review-waived:`/`spec-waived:` ohne
+Issue-Ref → Note „a debt with an owner"); **KPI-Trigger** (monatlicher
+process-kpis-Workflow — ein KPI ohne Trigger existiert nicht);
+**`/finish`** (`finish.py`: der Merge-Schwanz als EIN Verdikt — clearing
+pass, grüne Gates, sauberer Tree, dann der Rest-Ritus in Reihenfolge;
+read-only, gegen die beobachteten Tail-Ausfälle #652/#653/#660))
+ausgeliefert, `v2.6.0`.
+
 ## Sub-Projekt-Tabelle (SP1–SP24)
 
 Die Tabelle wurde bis SP24 gepflegt; ab SP25 trägt das Narrativ oben die
