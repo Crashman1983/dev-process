@@ -162,6 +162,20 @@ Presence keys on archived plans (not in-flight ones), so it never reds CI
 mid-development, and the `review-waived:` escape keeps honest single-agent
 setups unblocked.
 
+## Sampling audit — the human reviews by exception
+
+The human owner does not out-review the model reviewers, and should not try:
+their comparative advantage is intent, product taste, and the running
+surface, not diff-reading. The owner's standing verification duty is a
+**sampling audit**: one merged work item per week, chosen *deterministically*
+(the owner digest picks it by ISO week — no re-rolling until a convenient
+one comes up), read deep and post-merge from the full bundle. The point is
+not to catch what the gates missed on that one item — it is that no agent
+ever knows which item will be drawn, and that the owner's trust in the gates
+stays calibrated by contact instead of by dashboard. Findings route through
+the normal channel (issues, FINDING grammar); a sampling audit that keeps
+finding real defects is the signal to tighten the gates, not to sample more.
+
 ## Why this is efficient, not just safe
 
 Independence costs tokens and wall-clock, so the process buys it only where it
