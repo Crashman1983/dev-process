@@ -89,3 +89,54 @@ def test_blocked_on_dirty_worktree(render, tmp_path):
     r = _run(out)
     assert r.returncode == 1
     assert "worktree not clean" in r.stdout
+
+
+# --- SP64: the speckit path's plans reach the presence question ------------
+
+def _spec_dir(root, name, *, tier=2, ticked=True, issue="#42"):
+    d = root / "specs" / name
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "plan.md").write_text(f"# Plan\n\ntier: {tier}\nissue: {issue}\n",
+                               encoding="utf-8")
+    box = "x" if ticked else " "
+    (d / "tasks.md").write_text(f"- [{box}] T001 do the thing\n",
+                                encoding="utf-8")
+    return d
+
+
+def test_speckit_plan_without_pass_blocks(render, tmp_path):
+    out = _repo_on_feature(render, tmp_path)
+    _spec_dir(out, "009-widget", tier=3, ticked=True)
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "feat: widget spec work")
+    r = _run(out)
+    assert r.returncode == 1
+    assert "specs/009-widget" in r.stdout and "/review before /finish" in r.stdout
+
+
+def test_speckit_plan_with_pass_is_ready_and_prunes(render, tmp_path):
+    out = render(tmp_path, {"project_name": "demo",
+                            "modules": {"speckit": True}})
+    _git(out, "init", "-q", "-b", "main")
+    _git(out, "config", "user.email", "t@example.com")
+    _git(out, "config", "user.name", "Test")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "base")
+    _git(out, "checkout", "-q", "-b", "feature")
+    _spec_dir(out, "009-widget", tier=2, ticked=True, issue="#9")
+    _journal(out, "REVIEW work=9 tier=2 reviewer=fresh model=same "
+                  "independence=bundle,non-implementing verdict=pass round=1")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "feat: widget with pass")
+    r = _run(out)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "publish_and_prune.py specs/009-widget" in r.stdout
+
+
+def test_speckit_plan_in_flight_is_not_blocked(render, tmp_path):
+    out = _repo_on_feature(render, tmp_path)
+    _spec_dir(out, "009-widget", tier=3, ticked=False)
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "feat: widget in flight")
+    r = _run(out)
+    assert r.returncode == 0, r.stdout + r.stderr

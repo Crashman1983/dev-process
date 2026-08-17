@@ -108,6 +108,18 @@ def check(root: Path) -> tuple[list[str], list[str]]:
                             f"deterministic completeness signal for the review "
                             f"(done means every box ticked or the gap named)")
 
+        # --- the Owner brief is the influence window's readability layer:
+        # a spec the owner cannot understand has no working window. Soft —
+        # the template mandates it, the note catches the forgotten ones ---
+        for spec in sorted(sdir.glob("*/spec.md")):
+            stext = spec.read_text(encoding="utf-8", errors="replace")
+            if not re.search(r"^#{1,6}\s+Owner brief\b", stext,
+                             re.IGNORECASE | re.MULTILINE):
+                soft.append(f"{spec.relative_to(root)}: no 'Owner brief' "
+                            f"section — five plain-language sentences, first "
+                            f"(spec-template); the owner steers from this "
+                            f"block or not at all")
+
     # --- spec-before-plan: an active Tier 2+ plan either points at its spec
     # or names why it has none (spec-waived:) — never silently spec-free ---
     pdir = root / PLANS_ACTIVE

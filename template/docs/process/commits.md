@@ -55,6 +55,14 @@ can still commit on the branch; archiving after the merge would need a direct
 commit to the main branch, which the branching rule (and the `git-hooks`
 pre-commit) forbid.
 
+**Spec-dir plans (`specs/<feature>/plan.md`) do not archive — their merge
+boundary is the fully-ticked `tasks.md`.** The presence question is the same:
+a spec dir whose tasks are all ticked and whose plan declares Tier 2+ needs
+its clearing REVIEW pass before merging — `finish.py` blocks on it, the
+review gate notes it. Post-merge, `publish_and_prune.py <feature-dir>`
+publishes the outcome and clears the working set; a landscape of fully-ticked
+spec dirs is the speckit shape of the residue this section forbids.
+
 **Merge leaves no residue.** Delete the remote feature branch once it is
 merged (enable GitHub's *Automatically delete head branches*, or run a
 cleanup workflow), and remove the worktree that carried it

@@ -66,8 +66,13 @@ def test_digest_merged_debts_and_sampling_pick(render, tmp_path):
     (adir / f"{today}-widget.md").write_text(
         "# Plan\n\ntier: 2\nissue: #7\nreview-waived: tiny rename\n",
         encoding="utf-8")
+    (adir / f"{today}-orphan.md").write_text(
+        "# Plan\n\ntier: 2\nspec-waived: legacy, no tracker\n",
+        encoding="utf-8")
     r = _run(out)
     assert r.returncode == 0, r.stdout + r.stderr
     assert f"{today}-widget.md · tier 2 · issue #7" in r.stdout
     assert "Sampling audit pick" in r.stdout
-    assert "NO OWNER" in r.stdout                       # waiver without #ref
+    # the issue-anchored plan owns its waiver; the tracker-less one does not
+    assert f"{today}-widget.md: review-waived: tiny rename\n" in r.stdout
+    assert "orphan.md: spec-waived: legacy, no tracker  ← NO OWNER" in r.stdout

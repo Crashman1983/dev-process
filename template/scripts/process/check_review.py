@@ -72,13 +72,20 @@ _WAIVER_DEBT = re.compile(r"#\d+|https?://")
 
 def waiver_debt_notes(rel: str, text: str, pattern: re.Pattern[str],
                       label: str) -> list[str]:
-    """One note per waiver line that names no issue/URL owner."""
+    """One note per waiver line that names no issue/URL owner. A plan that
+    declares its tracking issue (`issue: #N`) already has an owner — the
+    waiver is recorded where the work is tracked — so only waivers in
+    plans without ANY issue anchor are flagged."""
+    if any(parse_issue_ref(m.group(1)) or m.group(1).isdigit()
+           for m in ISSUE_DECL.finditer(text)):
+        return []
     notes = []
     for line in text.splitlines():
         if pattern.search(line) and not _WAIVER_DEBT.search(line):
             notes.append(f"{rel}: '{label}:' without an issue ref — a "
                          f"degradation is a debt with an owner; link #N (or a "
-                         f"URL) on the waiver line")
+                         f"URL) on the waiver line, or declare the plan's "
+                         f"'issue:' link")
     return notes
 GIT_SHA = re.compile(r"^[0-9a-f]{40}(?:[0-9a-f]{24})?$")
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
@@ -316,6 +323,43 @@ def _plan_work_ids(stem: str, text: str, *, include_dedated: bool) -> set[str]:
     return ids
 
 
+SPECS_DIR = "specs"
+UNCHECKED = re.compile(r"^\s*- \[ \] ", re.MULTILINE)
+
+
+def speckit_unreviewed(root: Path, passes: list[dict]) -> list[tuple[str, int, set[str]]]:
+    """Spec-dir plans past the review-presence gate's blind spot: the speckit
+    path keeps its plan in specs/<dir>/plan.md and never archives it, so the
+    archived-plan scan cannot see it. The completion signal there is the
+    fully-ticked tasks.md. Returns (dir name, tier, matching work ids) for
+    every spec dir whose tasks are all ticked, whose plan declares tier >= 2
+    without a review-waived line, and which no clearing pass covers. One
+    owner: finish.py blocks on this at the merge ritual; the review gate
+    reports it as a note (a hard gate would red every push between the last
+    tick and the review that must follow it)."""
+    out: list[tuple[str, int, set[str]]] = []
+    sdir = root / SPECS_DIR
+    if not sdir.is_dir():
+        return out
+    for d in sorted(p for p in sdir.iterdir() if p.is_dir()):
+        plan, tasks = d / "plan.md", d / "tasks.md"
+        if not plan.is_file() or not tasks.is_file():
+            continue
+        ttext = tasks.read_text(encoding="utf-8", errors="replace")
+        if UNCHECKED.search(ttext) or not re.search(r"^\s*- \[[xX]\] ", ttext,
+                                                    re.MULTILINE):
+            continue  # in flight, or no checkbox grammar at all
+        ptext = _unfenced(plan.read_text(encoding="utf-8", errors="replace"))
+        m = TIER_DECL.search(ptext)
+        if not m or int(m.group(1)) < 2 or WAIVED.search(ptext):
+            continue
+        tier = int(m.group(1))
+        ids = _plan_work_ids(d.name, ptext, include_dedated=False)
+        if not any(r["work"] in ids and int(r["tier"]) >= tier for r in passes):
+            out.append((d.name, tier, ids))
+    return out
+
+
 def check(root: Path) -> tuple[list[str], list[str]]:
     hard: list[str] = []
     soft: list[str] = []
@@ -384,6 +428,14 @@ def check(root: Path) -> tuple[list[str], list[str]]:
                 hard.append(f"{PLANS_ARCHIVE}/{p.name}: archived plan declares tier {tier} "
                             f"but has no clearing REVIEW (verdict=pass, work in {sorted(ids)}, "
                             f"tier>={tier}) and no 'review-waived:' line")
+
+    # the speckit path's plans never enter the archive — surface the same
+    # presence question there as a note (finish.py is the hard stop)
+    for name, tier, ids in speckit_unreviewed(root, passes):
+        soft.append(f"{SPECS_DIR}/{name}: tasks all ticked and plan declares "
+                    f"tier {tier}, but no clearing REVIEW (verdict=pass, work "
+                    f"in {sorted(ids)}, tier>={tier}) and no 'review-waived:' "
+                    f"— run /review before merging; finish.py blocks on this")
 
     # active Tier 2+ plans are not presence-checked (by design: no red CI
     # mid-development) — but "forgot to archive on merge" and that design are
