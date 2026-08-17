@@ -274,19 +274,29 @@ def _git_bytes(root: Path, *args: str) -> bytes | None:
 
 
 def _integrity_violations(rel: str, root: Path,
-                          records: list[tuple[int, dict]]) -> list[str]:
+                          records: list[tuple[int, dict]]) -> tuple[list[str], list[str]]:
     """A REVIEW carrying base/head/diff binds itself to an exact diff — verify
-    the claim. Unresolvable commits or a mismatched digest are hard: a digest
-    that cannot be checked is a false guarantee, not a bonus field."""
+    the claim where it CAN be verified. A mismatched digest is hard: the
+    bound artifact provably differs from what was reviewed. Commits that do
+    not resolve in THIS clone are a note, not a failure: after a rebase-merge
+    plus branch deletion the pre-merge SHAs legitimately exist in no fresh
+    clone, and hard-failing there would red every clone retroactively for
+    every properly bound historical review (observed in production). The
+    binding did its job at merge time; a later clone that cannot re-check it
+    says so honestly instead of crying wolf."""
     hard: list[str] = []
+    soft: list[str] = []
     for lineno, f in records:
         if "diff" not in f:
             continue
         missing = [sha for sha in (f["base"], f["head"])
                    if _git_bytes(root, "cat-file", "-e", f"{sha}^{{commit}}") is None]
         if missing:
-            hard.append(f"{rel}:{lineno}: review artifact commit(s) do not resolve: "
-                        f"{', '.join(missing)}")
+            soft.append(f"{rel}:{lineno}: review artifact commit(s) not present "
+                        f"in this clone ({', '.join(missing)}) — digest "
+                        f"unverifiable here (pre-merge SHAs gone after "
+                        f"rebase-merge + branch delete); verified at merge "
+                        f"time or not at all")
             continue
         diff = _git_bytes(root, "diff", "--binary", f"{f['base']}...{f['head']}")
         if diff is None:
@@ -296,7 +306,7 @@ def _integrity_violations(rel: str, root: Path,
         if actual != f["diff"]:
             hard.append(f"{rel}:{lineno}: review artifact digest mismatch: "
                         f"expected {f['diff']}, actual {actual}")
-    return hard
+    return hard, soft
 
 
 def _plan_work_ids(stem: str, text: str, *, include_dedated: bool) -> set[str]:
@@ -354,8 +364,11 @@ def speckit_unreviewed(root: Path, passes: list[dict]) -> list[tuple[str, int, s
         if not m or int(m.group(1)) < 2 or WAIVED.search(ptext):
             continue
         tier = int(m.group(1))
+        # the REVIEW grammar caps tier at 3 — a plan on an extended downstream
+        # scale (tier 4/5) clears at the gated ceiling, not an unmeetable bar
+        req = min(tier, 3)
         ids = _plan_work_ids(d.name, ptext, include_dedated=False)
-        if not any(r["work"] in ids and int(r["tier"]) >= tier for r in passes):
+        if not any(r["work"] in ids and int(r["tier"]) >= req for r in passes):
             out.append((d.name, tier, ids))
     return out
 
@@ -382,7 +395,9 @@ def check(root: Path) -> tuple[list[str], list[str]]:
             for lineno, msg in errors:
                 hard.append(f"{rel}:{lineno}: malformed REVIEW line — {msg}")
             hard.extend(_arithmetic_violations(rel, records))
-            hard.extend(_integrity_violations(rel, root, records))
+            ih, isoft = _integrity_violations(rel, root, records)
+            hard.extend(ih)
+            soft.extend(isoft)
             all_records.extend(records)
 
     passes = [f for _ln, f in all_records if f["verdict"] == "pass"]
@@ -423,7 +438,8 @@ def check(root: Path) -> tuple[list[str], list[str]]:
                 continue
             unique = dedated_counts[DATE_PREFIX.sub("", p.stem)] == 1
             ids = _plan_work_ids(p.stem, text, include_dedated=unique)
-            cleared = any(f["work"] in ids and int(f["tier"]) >= tier for f in passes)
+            req = min(tier, 3)  # REVIEW grammar ceiling; see speckit_unreviewed
+            cleared = any(f["work"] in ids and int(f["tier"]) >= req for f in passes)
             if not cleared:
                 hard.append(f"{PLANS_ARCHIVE}/{p.name}: archived plan declares tier {tier} "
                             f"but has no clearing REVIEW (verdict=pass, work in {sorted(ids)}, "

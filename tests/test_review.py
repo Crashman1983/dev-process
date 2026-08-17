@@ -308,13 +308,17 @@ def test_wrong_digest_is_hard(render, tmp_path):
     assert "digest mismatch" in r.stdout
 
 
-def test_unresolvable_artifact_commit_is_hard(render, tmp_path):
+def test_unresolvable_artifact_commit_is_note_not_hard(render, tmp_path):
+    # after a rebase-merge + branch delete the pre-merge SHAs exist in no
+    # fresh clone — hard-failing there would red every clone retroactively
+    # for every properly bound historical review (observed in production)
     out = render(tmp_path, {"project_name": "demo"})
     _base, head, digest = _init_git_repo(out, work="bound")
     _journal(out, _review(work="bound", artifact=("d" * 40, head, digest)))
     r = _run(out)
-    assert r.returncode == 1
-    assert "do not resolve" in r.stdout
+    assert r.returncode == 0, r.stdout
+    assert "not present in this clone" in r.stdout
+    assert "unverifiable" in r.stdout
 
 
 def test_retired_review_binding_is_note_not_silent(render, tmp_path):
@@ -620,3 +624,20 @@ def test_waiver_in_issue_anchored_plan_is_owned(render, tmp_path):
     r = _run(out)
     assert r.returncode == 0, r.stdout
     assert "debt with an owner" not in r.stdout
+
+
+def test_extended_scale_plan_clears_at_gated_ceiling(render, tmp_path):
+    # a downstream 6-tier matrix may write `tier: 4` into a plan; the REVIEW
+    # grammar caps at 3, so the plan clears at the gated ceiling instead of
+    # an unmeetable bar
+    out = render(tmp_path, {"project_name": "demo"})
+    d = out / "specs" / "020-widget"
+    d.mkdir(parents=True)
+    (d / "plan.md").write_text("# Plan\n\ntier: 4\nissue: #20\n", encoding="utf-8")
+    (d / "tasks.md").write_text("- [x] T001 done\n", encoding="utf-8")
+    _journal(out, "REVIEW work=20 tier=3 reviewer=fresh model=cross "
+                  "independence=bundle,non-implementing,cross-model "
+                  "verdict=pass round=1")
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+    assert "finish.py blocks" not in r.stdout
