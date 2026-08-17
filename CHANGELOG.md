@@ -457,6 +457,18 @@ werden geflaggt; Digest gleichgezogen); **ADR-Rauschen** (Intent-Note
 entfällt für rejected/superseded — historische Records haben keine
 Endorsement-Achse)) ausgeliefert, `v2.7.1`.
 
+Zwei Gate-Defekte aus dem frischen Kenni-Klon (der erste kalte
+Prüfstand nach Wochen warmer Sessions): **Digest-Bindung ehrlich
+degradiert** — nach Rebase-Merge + Branch-Löschung existieren die
+Pre-Merge-SHAs in keinem frischen Klon; nicht auflösbare
+Artifact-Commits sind jetzt Note („unverifiable here") statt hartem
+Rot, das rückwirkend jeden Klon für jede korrekt gebundene historische
+Review röten würde; ein Digest-MISMATCH bleibt hart. **Tier-Deckel in
+der Presence-Arithmetik** — die REVIEW-Grammatik deckelt tier bei 3;
+ein Plan auf erweiterter Downstream-Skala (`tier: 4/5`) cleart an der
+gegateten Decke (min(tier,3)) statt an einer unerfüllbaren Latte,
+Archiv- und Speckit-Pfad gleichermaßen, `v2.7.2`.
+
 ## Sub-Projekt-Tabelle (SP1–SP24)
 
 Die Tabelle wurde bis SP24 gepflegt; ab SP25 trägt das Narrativ oben die
