@@ -439,6 +439,24 @@ by exception statt Diff-Konkurrenz zum Modell-Reviewer,
 verification-independence.md); **owner-digest-Workflow** (wöchentlich
 Mo + Dispatch, Digest in die Step-Summary)) ausgeliefert, `v2.7.0`.
 
+SP64 (speckit-presence, aus dem Kenni-Befund „Slices 009–016 liefen am
+stärksten Gate vorbei": die Spec-Kit-Pläne leben in `specs/<dir>/plan.md`
+und werden nie archiviert — das Review-Presence-Gate scannte nur
+`.process-work/plans/archive/` und konnte den Standardweg nicht sehen —
+**Speckit-Presence** (`speckit_unreviewed` in check_review: voll
+abgehaktes tasks.md + Tier-2+-Plan ohne Waiver braucht den clearing
+pass; `finish.py` blockt hart am Merge-Ritus, das Review-Gate meldet
+als Note — hart am Push würde jeden Push zwischen letztem Tick und
+Review röten; commits.md benennt die Speckit-Variante des
+Archiv-Schritts: publish_and_prune statt Archiv-Move, finish druckt
+die fertigen Verzeichnisse einzeln); **Owner-Brief-Note** (speckit-Gate:
+spec.md ohne Owner-brief-Sektion → Note — 2 von 6 neuen Kenni-Specs
+hatten den Brief vergessen); **Waiver-Ehrlichkeit** (ein Plan mit
+`issue:`-Anker besitzt seine Waiver dort — nur trackerlose Waiver
+werden geflaggt; Digest gleichgezogen); **ADR-Rauschen** (Intent-Note
+entfällt für rejected/superseded — historische Records haben keine
+Endorsement-Achse)) ausgeliefert, `v2.7.1`.
+
 ## Sub-Projekt-Tabelle (SP1–SP24)
 
 Die Tabelle wurde bis SP24 gepflegt; ab SP25 trägt das Narrativ oben die

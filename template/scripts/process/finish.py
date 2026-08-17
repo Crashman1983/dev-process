@@ -25,6 +25,7 @@ Pure stdlib + sibling imports.
 """
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -39,11 +40,13 @@ from check_review import (  # noqa: E402  (one owner for grammar + arithmetic)
     JOURNAL_DIR,
     PLANS_ACTIVE,
     PLANS_ARCHIVE,
+    SPECS_DIR,
     TIER_DECL,
     WAIVED,
     _plan_work_ids,
     _unfenced,
     parse_review_lines,
+    speckit_unreviewed,
 )
 
 
@@ -114,6 +117,26 @@ def check(root: Path) -> tuple[list[str], list[str]]:
                     f"REVIEW (verdict=pass, work in {sorted(ids)}, tier>={tier}) "
                     f"and no 'review-waived:' line — run /review before /finish")
 
+    # --- speckit-path plans: same presence question, different home — the
+    # spec dir's plan never enters the archive, its completion signal is the
+    # fully-ticked tasks.md (the review gate's blind spot; this IS the stop)
+    done_spec_dirs: list[str] = []
+    sdir = root / SPECS_DIR
+    if sdir.is_dir():
+        for name, tier, ids in speckit_unreviewed(root, passes):
+            blockers.append(
+                f"{SPECS_DIR}/{name}: tasks all ticked, plan declares tier "
+                f"{tier}, but no clearing REVIEW (verdict=pass, work in "
+                f"{sorted(ids)}, tier>={tier}) and no 'review-waived:' line — "
+                f"run /review before /finish")
+        for d in sorted(p for p in sdir.iterdir() if p.is_dir()):
+            tasks = d / "tasks.md"
+            if tasks.is_file():
+                ttext = tasks.read_text(encoding="utf-8", errors="replace")
+                if not re.search(r"^\s*- \[ \] ", ttext, re.MULTILINE) \
+                        and re.search(r"^\s*- \[[xX]\] ", ttext, re.MULTILINE):
+                    done_spec_dirs.append(d.name)
+
     # --- gates ---
     gr = subprocess.run([sys.executable, "scripts/process/gate_runner.py"],
                         cwd=str(ROOT), capture_output=True, text=True)
@@ -144,8 +167,15 @@ def check(root: Path) -> tuple[list[str], list[str]]:
     tail.append("git worktree remove <path> && git worktree prune  # if this "
                 "branch rode a worktree")
     if (root / "scripts/process/publish_and_prune.py").is_file():
-        tail.append("python scripts/process/publish_and_prune.py <feature-dir>"
-                    "  # publish the outcome, prune the spec working set")
+        if done_spec_dirs:
+            for name in done_spec_dirs:
+                tail.append(f"python scripts/process/publish_and_prune.py "
+                            f"{SPECS_DIR}/{name}  # publish the outcome, "
+                            f"prune the finished working set")
+        else:
+            tail.append("python scripts/process/publish_and_prune.py "
+                        "<feature-dir>  # publish the outcome, prune the spec "
+                        "working set")
     tail.append("close the tracking issue with the merge commit ref (DoD)")
     return [], tail
 

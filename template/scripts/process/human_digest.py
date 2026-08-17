@@ -154,8 +154,12 @@ def section_debts(root: Path) -> list[str]:
         if not d.is_dir():
             continue
         for p in sorted(d.glob("*.md")):
-            for kind, reason in WAIVER.findall(_read(p)):
-                owned = bool(re.search(r"#\d+|https?://", reason))
+            text = _read(p)
+            # a plan that declares its tracking issue owns its waivers there
+            plan_owned = bool(ISSUE.search(text)
+                              and re.search(r"#?\d", ISSUE.search(text).group(1)))
+            for kind, reason in WAIVER.findall(text):
+                owned = plan_owned or bool(re.search(r"#\d+|https?://", reason))
                 tag = "" if owned else "  ← NO OWNER (link an issue)"
                 out.append(f"- {rel_dir}/{p.name}: {kind.lower()}: "
                            f"{reason.strip()[:100]}{tag}")

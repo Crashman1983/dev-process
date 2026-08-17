@@ -197,9 +197,14 @@ def check(root: Path) -> tuple[list[str], list[str]]:
                             f"name the enforcement twin before accepting")
 
         # --- Intent (endorsement axis; absence is soft) ---
+        # a rejected or superseded record is historical — the endorsement
+        # axis does not apply, and noting its absence on every run buries
+        # real notes under legacy noise
         intent_tok = None
         if intent is None:
-            if i_line is None:
+            if status_tok in {"rejected", "superseded"}:
+                pass
+            elif i_line is None:
                 soft.append(f"{rel}: no '## Intent' section — endorsement unstated")
             else:
                 soft.append(f"{rel}:{i_line}: '## Intent' section is empty")

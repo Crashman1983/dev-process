@@ -583,3 +583,40 @@ def test_waiver_with_issue_ref_stays_quiet(render, tmp_path):
     r = _run(out)
     assert r.returncode == 0, r.stdout
     assert "debt with an owner" not in r.stdout
+
+
+def test_speckit_done_dir_without_pass_notes(render, tmp_path):
+    out = render(tmp_path, {"project_name": "demo"})
+    d = out / "specs" / "009-widget"
+    d.mkdir(parents=True)
+    (d / "plan.md").write_text("# Plan\n\ntier: 3\nissue: #9\n", encoding="utf-8")
+    (d / "tasks.md").write_text("- [x] T001 done\n", encoding="utf-8")
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+    assert "specs/009-widget" in r.stdout and "finish.py blocks" in r.stdout
+
+
+def test_speckit_done_dir_with_pass_stays_quiet(render, tmp_path):
+    out = render(tmp_path, {"project_name": "demo"})
+    d = out / "specs" / "009-widget"
+    d.mkdir(parents=True)
+    (d / "plan.md").write_text("# Plan\n\ntier: 3\nissue: #9\n", encoding="utf-8")
+    (d / "tasks.md").write_text("- [x] T001 done\n", encoding="utf-8")
+    _journal(out, "REVIEW work=9 tier=3 reviewer=fresh model=cross "
+                  "independence=bundle,non-implementing,cross-model "
+                  "verdict=pass round=1")
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+    assert "finish.py blocks" not in r.stdout
+
+
+def test_waiver_in_issue_anchored_plan_is_owned(render, tmp_path):
+    out = render(tmp_path, {"project_name": "demo"})
+    _archived_plan(out, "2026-07-04-widget.md",
+                   "# Plan\n\ntier: 2\nissue: #12\n"
+                   "review-waived: trivial rename\n")
+    _journal(out, "REVIEW work=12 tier=2 reviewer=fresh model=same "
+                  "independence=bundle,non-implementing verdict=pass round=1")
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+    assert "debt with an owner" not in r.stdout
