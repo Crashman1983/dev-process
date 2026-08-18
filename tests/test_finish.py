@@ -140,3 +140,12 @@ def test_speckit_plan_in_flight_is_not_blocked(render, tmp_path):
     _git(out, "commit", "-q", "-m", "feat: widget in flight")
     r = _run(out)
     assert r.returncode == 0, r.stdout + r.stderr
+
+
+def test_tail_names_the_full_suite_before_merge(render, tmp_path):
+    out = _repo_on_feature(render, tmp_path)
+    r = _run(out)
+    assert r.returncode == 0, r.stdout + r.stderr
+    fi = r.stdout.index("FULL test suite")
+    mi = r.stdout.index("merge:")
+    assert fi < mi  # the batch pays completeness before it merges

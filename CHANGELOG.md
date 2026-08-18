@@ -469,6 +469,17 @@ ein Plan auf erweiterter Downstream-Skala (`tier: 4/5`) cleart an der
 gegateten Decke (min(tier,3)) statt an einer unerfüllbaren Latte,
 Archiv- und Speckit-Pfad gleichermaßen, `v2.7.2`.
 
+Test-Ökonomie als generisches Muster (aus Sebs Frage „voller Testlauf
+bei jeder Änderung?": **Selektion nah am Edit, Vollständigkeit nah am
+Merge** — testing.md trägt die Staffel: pro Task/Push die gescopte
+Menge (Modul-Graph/`vitest related` oder auditierbare Modul-Karte) mit
+ehrlichen Voll-Lauf-Triggern für alles, was nicht über Imports wirkt
+(Config, Tokens, globale Styles, Schema, DI, Fixtures); am
+Merge-Boundary die VOLLE Suite genau einmal für das ganze Batch —
+mehrere Änderungen teilen sich einen Voll-Lauf, Selektion ist nie das
+letzte Netz; finish.py druckt den Voll-Suite-Schritt vor dem Merge),
+`v2.7.3`.
+
 ## Sub-Projekt-Tabelle (SP1–SP24)
 
 Die Tabelle wurde bis SP24 gepflegt; ab SP25 trägt das Narrativ oben die

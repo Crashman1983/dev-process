@@ -159,6 +159,9 @@ def check(root: Path) -> tuple[list[str], list[str]]:
         tail.append(f"git fetch origin {default} && git rebase origin/{default}"
                     f"  # {behind} commit(s) behind — NOTE: a rebase voids "
                     f"review-bundle digests; re-review if a bundle was built")
+    tail.append("run the FULL test suite now — the whole batch pays it once "
+                "here; scoped runs during the loop were evidence, not the "
+                "verdict (docs/process/testing.md, test economy)")
     tail.append(f"merge: PR with linear-history merge, or locally "
                 f"`git checkout {default} && git merge --ff-only {branch} "
                 f"&& git push`")
