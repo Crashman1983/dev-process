@@ -52,13 +52,41 @@ If you want a stronger signal on critical logic, run **mutation testing**
 ("would the suite notice broken code?") at a compute cost that is only worth
 paying on the code that matters most.
 
+## Test economy — scoped inner loop, full merge boundary
+
+Not every change pays for the full suite; **selection runs near the edit,
+completeness runs near the merge.** The ladder:
+
+- **Per task** (inner loop): the tests the task names plus the tests its
+  changed files reach — via the runner's module graph (`vitest related`,
+  coverage-based selectors) or an auditable module map (changed
+  `src/<pkg>/` → `tests/<pkg>/`). A scoped green is labeled scoped; it is
+  evidence, never the verdict.
+- **Per push**: the scoped set again — with **honest fallbacks to full**:
+  a changed file the map cannot place, and the categories whose effects do
+  not travel through imports (config, tokens/theme, global styles, schema/
+  migrations, DI registration, fixtures) always run full.
+- **Per merge boundary** (the batch): the FULL suite, exactly once for the
+  whole batch of changes a branch or stage carries — this is where several
+  changes share one full run and the economics work. `finish.py` names the
+  step; a stage-gate task is its speckit twin. Selection is never the last
+  net before a merge.
+
+Why the ladder is safe: selection fails exactly where dependencies bypass
+the import graph — and those categories are enumerated as full-run
+triggers, while the merge boundary re-proves everything regardless. Why it
+is worth it: an inner loop that pays the full suite per push pays it ten
+times per batch for what one boundary run proves.
+
 ## Suite discipline
 
 - A **flaky test is a defect**, not weather: fix it or quarantine it the same
   day with an issue (or an inbox entry, tracker-less) — a suite people retry is a suite people ignore.
-- The suite must stay **fast enough to run before every push**, alongside the
-  pre-push process gates; split a slow tier behind an explicit marker rather
-  than letting the default run grow past patience.
+- The **scoped set** must stay fast enough to run before every push,
+  alongside the pre-push process gates (test economy, above); the full suite
+  must stay fast enough to run at every merge boundary — split a slow tier
+  behind an explicit marker rather than letting either run grow past
+  patience.
 - Test code is code: mandatory rule 9 (written to be read) applies — a test
   nobody understands proves nothing when it fails.
 
