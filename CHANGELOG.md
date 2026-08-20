@@ -480,6 +480,17 @@ mehrere Änderungen teilen sich einen Voll-Lauf, Selektion ist nie das
 letzte Netz; finish.py druckt den Voll-Suite-Schritt vor dem Merge),
 `v2.7.3`.
 
+Push- und Zertifikats-Ökonomie (aus Sebs Befund „Deploy 20 min, Push-Gate
+ähnlich": **Push an Kohärenzpunkten, nicht pro Commit** — die Push-Gates
+bepreisen die gepushte Spanne, fünf zusammengehörige Commits in einem
+Push kosten einen Gate-Lauf; Grenzen: vor Bundle-Bau, vor Session-Ende,
+oft genug für die Parallel-Sichtbarkeit (commits.md). **Bezahlte
+Vollständigkeit ist übertragbar** — der Boundary-Volllauf schreibt die
+Zertifikate, auf die spätere Gates memoisieren (Coverage-Tree-Cert), in
+der zertifizierenden Konfiguration verdient, nie behauptet; ein Deploy-
+Gate auf demselben Baum wird zum Memo-Hit statt zur Doppelzahlung
+(testing.md)), `v2.7.4`.
+
 ## Sub-Projekt-Tabelle (SP1–SP24)
 
 Die Tabelle wurde bis SP24 gepflegt; ab SP25 trägt das Narrativ oben die
