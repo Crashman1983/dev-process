@@ -78,6 +78,16 @@ triggers, while the merge boundary re-proves everything regardless. Why it
 is worth it: an inner loop that pays the full suite per push pays it ten
 times per batch for what one boundary run proves.
 
+**Completeness paid once must be transferable.** The boundary full run
+should also *write* whatever certificate later gates memoize on — a
+coverage tree-cert, a build stamp — so a deploy gate that would re-prove
+the same tree becomes a memo hit instead of a second full payment. A
+deploy re-running the suite the boundary just ran, on the same tree, is
+the same double payment this section exists to remove; conversely, a
+cert written by a run that did not actually measure the certified thing
+(coverage claimed from a non-coverage run) is a false green — the
+boundary run earns the cert by running in the certifying configuration.
+
 ## Suite discipline
 
 - A **flaky test is a defect**, not weather: fix it or quarantine it the same

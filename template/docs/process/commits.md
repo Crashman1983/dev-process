@@ -16,6 +16,15 @@ and implementation for the same behavior is atomic; a commit that mixes two unre
 behaviors is not. A skipped gate or deliberately dropped scope is named in the body
 (e.g. `skipped review: <reason>`).
 
+**Push at coherence points, not per commit.** Atomicity is a property of
+commits; pushing is a sync decision. The push-time gates price the *pushed
+range* (diff against the merge base), so five coherent commits in one push
+cost one gate run instead of five — batch by task group or review round.
+Three honest bounds on batching: push before building a review bundle (the
+digest binds to the pushed state), push before a session ends (unpushed work
+in an ephemeral environment is lost work), and push often enough that
+parallel sessions see your claims and progress on the remote.
+
 Process bookkeeping (journal entry, plan checkboxes, state file) rides in the
 work's commit or one adjacent commit — never a chain of per-step `record`/
 `reconcile` commits. Evidence that changes no tracked artifact (logs, screenshots,
