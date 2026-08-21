@@ -491,6 +491,17 @@ der zertifizierenden Konfiguration verdient, nie behauptet; ein Deploy-
 Gate auf demselben Baum wird zum Memo-Hit statt zur Doppelzahlung
 (testing.md)), `v2.7.4`.
 
+Zertifikats-Transfer auch bergab (aus Sebs Live-Befund „Push-Gate zieht
+die volle Suite, gleich danach der Boundary-Lauf nochmal, ohne
+Änderung dazwischen": **stärkere Evidenz ersetzt schwächere** — ein
+Voll-Lauf-Trigger am Push darf auf ein Zertifikat memoisieren, das
+denselben Baum in einer Obermengen-Konfiguration deckt (Coverage-Lauf
+⊇ einfacher Lauf); die Reihenfolge am Kohärenzpunkt ist damit
+Boundary-Lauf → Push → Review → Merge — ein Voll-Lauf pro Batch, alle
+späteren Gates lesen das Zertifikat statt es neu zu verdienen;
+Klarstellung: der Review-Preflight fährt nur die Prozess-Gates, nie
+die Suite), `v2.7.5`.
+
 ## Sub-Projekt-Tabelle (SP1–SP24)
 
 Die Tabelle wurde bis SP24 gepflegt; ab SP25 trägt das Narrativ oben die
