@@ -88,6 +88,15 @@ cert written by a run that did not actually measure the certified thing
 (coverage claimed from a non-coverage run) is a false green — the
 boundary run earns the cert by running in the certifying configuration.
 
+The transfer works downhill too: **stronger evidence supersedes weaker.**
+A push-time full-run trigger may memo-hit on a certificate that covers
+the same tree in a configuration that is a strict superset (a coverage
+run covers a plain run) — so the order at a coherence point is: boundary
+run first (writes the cert), then push (the gate reads it), then review
+and merge (the bundle preflight runs the process gates, never the
+suite). One full run per batch; every later gate reads the certificate
+instead of re-earning it.
+
 ## Suite discipline
 
 - A **flaky test is a defect**, not weather: fix it or quarantine it the same
