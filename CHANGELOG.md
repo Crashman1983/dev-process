@@ -502,6 +502,18 @@ späteren Gates lesen das Zertifikat statt es neu zu verdienen;
 Klarstellung: der Review-Preflight fährt nur die Prozess-Gates, nie
 die Suite), `v2.7.5`.
 
+Suite als gemanagtes Asset (aus Sebs Befund „immer noch extrem viel
+Zeit für Tests" — gemessen: die Vitest-Suite wuchs in zwei Wochen um
+43 %, 69 E2E-Specs × 2 Plattformen, und Stabilitätsbeweise liefen als
+5× Voll-Suite: **E2E-Budget pro Feature = 1, Floor UND Ceiling** — ein
+wachsendes Feature ersetzt seinen E2E-Beweis, Plattform-Varianten nur
+bei abweichendem Verhalten, Konsolidierungs-Pässe sind Wartung, jeder
+pensionierte Test braucht einen benannten billigeren Ersatz;
+**Stabilitätsbeweise scoped × N, voll × 1** (testing.md); **Test-
+Estate-Trend im Owner-Digest** — Unit-/E2E-Dateizahlen jetzt vs. vor
+14 Tagen, git-basiert, read-only — Wachstum wird sichtbar, bevor es
+sich wieder wie heute anfühlt), `v2.7.6`.
+
 ## Sub-Projekt-Tabelle (SP1–SP24)
 
 Die Tabelle wurde bis SP24 gepflegt; ab SP25 trägt das Narrativ oben die

@@ -166,6 +166,52 @@ def section_debts(root: Path) -> list[str]:
     return out or ["(no standing waivers)"]
 
 
+TEST_FILE = re.compile(
+    r"(^|/)(test_[^/]+\.py|[^/]+_test\.(go|py|rb|ts|tsx|js)"
+    r"|[^/]+\.(test|spec)\.(ts|tsx|js|jsx|mjs))$")
+
+
+def _test_counts(root: Path, ref: str) -> tuple[int, int] | None:
+    """(unit/integration files, e2e files) among tracked test files at ref.
+    Split by path: anything under a directory containing 'e2e' is the
+    expensive tip; everything else is base/middle."""
+    proc = subprocess.run(["git", "ls-tree", "-r", "--name-only", ref],
+                          capture_output=True, text=True, cwd=str(root))
+    if proc.returncode != 0:
+        return None
+    unit = e2e = 0
+    for f in proc.stdout.splitlines():
+        if TEST_FILE.search(f):
+            if "e2e" in f.lower():
+                e2e += 1
+            else:
+                unit += 1
+    return unit, e2e
+
+
+def section_test_estate(root: Path) -> list[str]:
+    """The suite is a managed asset (testing.md): its growth should be as
+    visible as the fix clusters — felt slowness is usually estate growth."""
+    now = _test_counts(root, "HEAD")
+    if now is None:
+        return ["(not a git repository — no test-estate trend)"]
+    proc = subprocess.run(["git", "rev-list", "-1", "--before=14 days ago",
+                           "HEAD"], capture_output=True, text=True,
+                          cwd=str(root))
+    base_ref = proc.stdout.strip() if proc.returncode == 0 else ""
+    line = f"test files now: {now[0]} unit/integration · {now[1]} e2e"
+    if base_ref:
+        then = _test_counts(root, base_ref)
+        if then:
+            line += (f"  (14 d ago: {then[0]} · {then[1]} — "
+                     f"Δ {now[0] - then[0]:+d} · {now[1] - then[1]:+d})")
+    out = [line]
+    out.append("the E2E budget per feature is one, floor AND ceiling; a "
+               "growing tip is the usual reason tests FEEL slow "
+               "(testing.md, pyramid)")
+    return out
+
+
 def section_clusters(root: Path) -> list[str]:
     kpis = root / "scripts/process/process_kpis.py"
     if not kpis.is_file():
@@ -207,6 +253,10 @@ def build(root: Path, days: int) -> str:
     lines.append("## 4 · Repeating patterns (fix clusters)")
     lines.append("")
     lines += section_clusters(root)
+    lines.append("")
+    lines.append("## 5 · Test estate (managed asset)")
+    lines.append("")
+    lines += section_test_estate(root)
     lines.append("")
     return "\n".join(lines)
 
