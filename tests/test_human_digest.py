@@ -76,3 +76,22 @@ def test_digest_merged_debts_and_sampling_pick(render, tmp_path):
     # the issue-anchored plan owns its waiver; the tracker-less one does not
     assert f"{today}-widget.md: review-waived: tiny rename\n" in r.stdout
     assert "orphan.md: spec-waived: legacy, no tracker  ← NO OWNER" in r.stdout
+
+
+def test_digest_counts_the_test_estate(render, tmp_path):
+    import subprocess as sp
+    out = render(tmp_path, {"project_name": "demo"})
+    sp.run(["git", "init", "-q", "-b", "main"], cwd=out, check=True)
+    sp.run(["git", "config", "user.email", "t@t"], cwd=out, check=True)
+    sp.run(["git", "config", "user.name", "t"], cwd=out, check=True)
+    (out / "tests").mkdir(exist_ok=True)
+    (out / "tests" / "test_widget.py").write_text("def test_x(): pass\n")
+    (out / "e2e").mkdir()
+    (out / "e2e" / "flow.spec.ts").write_text("// spec\n")
+    sp.run(["git", "add", "-A"], cwd=out, check=True)
+    sp.run(["git", "commit", "-q", "-m", "base"], cwd=out, check=True)
+    r = _run(out)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "Test estate" in r.stdout
+    assert "1 e2e" in r.stdout
+    assert "floor AND ceiling" in r.stdout

@@ -24,6 +24,16 @@ Inverting the shape (many E2E, few units) makes the suite slow and flaky and
 is the most common failure mode. When an E2E test and a unit test would prove
 the same thing, prefer the unit test and keep the E2E count flat.
 
+**The E2E budget per feature is one — floor AND ceiling.** The DoD's "one
+end-to-end proof per feature" is not a minimum to build on: when a feature
+grows, its E2E proof is *replaced*, not joined by a sibling, and a platform
+variant (mobile/desktop) earns a spec only where the *behaviour* differs,
+not merely the rendering (the visual baseline owns rendering). The suite is
+a managed asset: growth is reviewed like code growth, and a periodic
+consolidation pass that retires double proofs is maintenance, not loss —
+every retired test must be covered by a named cheaper test, never merely
+deleted.
+
 ## What earns a test beyond the happy path
 
 Acceptance decomposition (Definition of Ready, R2) already names them: the
@@ -101,6 +111,10 @@ instead of re-earning it.
 
 - A **flaky test is a defect**, not weather: fix it or quarantine it the same
   day with an issue (or an inbox entry, tracker-less) — a suite people retry is a suite people ignore.
+- **Stability proofs run scoped × N, full × 1.** Proving a fix is not flaky
+  means repeating the *affected files* N times plus one full run — never N
+  consecutive full runs; five full suites for one stability claim is the
+  repetition cost the scoped set exists to carry.
 - The **scoped set** must stay fast enough to run before every push,
   alongside the pre-push process gates (test economy, above); the full suite
   must stay fast enough to run at every merge boundary — split a slow tier
