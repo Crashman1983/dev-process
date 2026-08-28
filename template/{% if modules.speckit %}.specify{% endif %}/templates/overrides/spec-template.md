@@ -49,6 +49,20 @@ authorization, and invalidation/cleanup twins (DoR R2,
 
 (same shape)
 
+### Surface states *(mandatory for any story with a UI surface)*
+
+Every surface the story touches names its **four states**, one expected
+behaviour each — the DoR-R2 edge twins, concretized for UI. "Unknown" is
+the one that ships broken when unnamed: not-yet-resolved is neither empty
+nor error, and a surface that reads it as "empty" invents data loss.
+
+| state | expected behaviour |
+|---|---|
+| loading | [what the user sees while nothing is known yet] |
+| empty | [a true empty stock — and the way out of it] |
+| error | [failure named, retry offered] |
+| unknown / not yet resolved | [never rendered as empty; what instead] |
+
 ### Edge cases
 
 - What happens when [boundary condition]?

@@ -30,7 +30,7 @@ Spezifikations-Skills deckt Spec Kits eigenes Integrations-System ab.
 > Exit-Szenario der Spec-Kit-Abhängigkeit: Pin einfrieren — der vendored
 > Stand läuft ohne Netz und ohne CLI unbegrenzt weiter.
 
-> **Status:** `v2.7.6` — Sub-Projekte SP1–SP64 (Standard-Setup
+> **Status:** `v2.7.7` — Sub-Projekte SP1–SP64 (Standard-Setup
 > statt Profile/Toggles, Spec Kit als Standard-Spezifikationsweg, 5 Core-Gates,
 > DoR/DoD, Kernel-Integritäts- und Compaction-Schutz). Vollständige Historie: [`CHANGELOG.md`](CHANGELOG.md).
 > **Überblick für Einsteiger:innen & Management** (wie es funktioniert, warum,

@@ -514,6 +514,15 @@ Estate-Trend im Owner-Digest** — Unit-/E2E-Dateizahlen jetzt vs. vor
 14 Tagen, git-basiert, read-only — Wachstum wird sichtbar, bevor es
 sich wieder wie heute anfühlt), `v2.7.6`.
 
+Vier-Zustands-Pflicht für UI-Stories (aus der Härtungswellen-Analyse:
+~¼ der Kenni-Fixes waren Kalt-/Leer-/Offline-Zustände — „unknown stock
+als leer gerendert", Scope-Fallback beim Laden; das Spec-Template
+verlangt jetzt pro berührter Oberfläche die Tabelle loading / empty /
+error / **unknown** mit je einem erwarteten Verhalten — die DoR-R2-
+Zwillinge, für UI konkretisiert; „unknown" ist der Zustand, der
+unbenannt kaputt ausgeliefert wird: not-yet-resolved ist weder leer
+noch Fehler), `v2.7.7`.
+
 ## Sub-Projekt-Tabelle (SP1–SP24)
 
 Die Tabelle wurde bis SP24 gepflegt; ab SP25 trägt das Narrativ oben die
