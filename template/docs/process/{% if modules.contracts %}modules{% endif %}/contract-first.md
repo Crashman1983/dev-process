@@ -1,5 +1,13 @@
 # Module: contract-first
 
+**A contract may change — deliberately.** Declared-first does not mean
+frozen: when a different interface makes the capability durably more
+sustainable, technically better, or clearer, that is sufficient reason to
+change the contract. The bar is the same as for decision records
+(`docs/process/adr/README.md`): name what becomes better and why it holds
+long-term, version the change, and update every consumer in the same change
+— never let surfaces drift against a spec that still claims the old shape.
+
 Opt-in. Enforces the *declared-first* half of Rule 3: a cross-surface capability
 (one that several surfaces — web, mobile, CLI — build on) must have its shared
 interface **declared in a committed spec before** any surface consumes it. The

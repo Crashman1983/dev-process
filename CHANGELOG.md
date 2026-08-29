@@ -523,6 +523,16 @@ Zwillinge, für UI konkretisiert; „unknown" ist der Zustand, der
 unbenannt kaputt ausgeliefert wird: not-yet-resolved ist weder leer
 noch Fehler), `v2.7.7`.
 
+Records sind Leitplanken, kein Beton (auf Sebs Wunsch festgehalten:
+ADRs und Contracts DÜRFEN geändert werden, wenn die Lösung dadurch
+dauerhaft tragfähiger, technisch besser oder klarer wird — das allein
+ist hinreichender Grund; die zwei Ehrlichkeitspflichten sind die ganze
+Latte: benennen, was besser wird und warum es langfristig hält (nicht
+bloß „gerade bequemer"), und die Änderung im selben Aufwand wie der
+Code, der sie voraussetzt (Rule 4) — Supersession bzw. versionierter
+Contract-Wechsel mit allen Konsumenten, nie stille Drift; adr/README
+und contract-first.md tragen den Grundsatz), `v2.7.8`.
+
 ## Sub-Projekt-Tabelle (SP1–SP24)
 
 Die Tabelle wurde bis SP24 gepflegt; ab SP25 trägt das Narrativ oben die
