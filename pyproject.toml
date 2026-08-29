@@ -1,6 +1,6 @@
 [project]
 name = "dev-process"
-version = "2.7.7"
+version = "2.7.8"
 description = "Portable, harness-agnostic AI-assisted development process (copier template)"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
