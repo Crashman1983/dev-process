@@ -97,6 +97,12 @@ the same double payment this section exists to remove; conversely, a
 cert written by a run that did not actually measure the certified thing
 (coverage claimed from a non-coverage run) is a false green — the
 boundary run earns the cert by running in the certifying configuration.
+A certificate is **keyed by what it certifies** — one entry per tree hash,
+never a single slot holding "the" certified tree: parallel worktrees each
+earn their own, and the last writer must not be able to erase another's
+proof (observed: a slot file let concurrent worktrees invalidate each
+other's boundary runs). The same goes for any scratch file the run
+writes — per run (`mktemp`), never a fixed shared path.
 
 The transfer works downhill too: **stronger evidence supersedes weaker.**
 A push-time full-run trigger may memo-hit on a certificate that covers
