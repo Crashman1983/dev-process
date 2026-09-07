@@ -113,6 +113,19 @@ and merge (the bundle preflight runs the process gates, never the
 suite). One full run per batch; every later gate reads the certificate
 instead of re-earning it.
 
+**Test lanes are a shared resource — queue, do not thrash.** Several
+agents in several worktrees on one host each running "their" scoped suite
+at the same time do not finish faster; they crawl together (observed: load
+6 on four agents), and a crawling gate is the one that gets bypassed. Two
+answers, neither a bypass: the certificate transfer above — a tree the
+boundary run already certified needs no scoped run at push — and a
+**test lane**: one lock per host (`flock`, where available) around every
+test-running arm, so parallel worktrees wait their turn. The sum of work is
+the same; every single run is fast, and nobody reaches for `--no-verify`.
+A merge commit of already-verified branches is not exempt by itself — the
+combination is new — but it is exactly what the boundary run certifies
+once, for every later gate to read.
+
 ## Ratchets — a threshold that only ever tightens
 
 Some qualities cannot be gated with one universal number on day one because
