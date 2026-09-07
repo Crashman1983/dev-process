@@ -613,6 +613,19 @@ Baum" gegenseitig die Zertifizierung — ein Eintrag je Tree-Hash, nie ein
 einzelner Slot; Zwischendateien pro Lauf per mktemp, nie ein fester
 geteilter Pfad; testing.md), `v2.9.2`.
 
+Drei Befunde der Mac-Session generisch geschlossen (Hook-Doktor prüft auch
+das andere Manager-Modell: ein befülltes `.githooks/` ohne passendes
+`core.hooksPath` ist hart — auf dem Mac lief monatelang eine Juni-Kopie
+aus `.git/hooks`; REST-Fallback in `publish_and_prune`, wenn `gh issue
+comment` am GraphQL-Sekundärlimit scheitert; `.publish-denylist` — Regexes,
+die beide Publish-Skripte prüfen, bevor etwas das Repo verlässt), `v2.9.3`.
+
+Test-Lanes sind eine geteilte Ressource (Kenni-Befund: vier Agenten in vier
+Worktrees ließen ihre gescopten Suiten gleichzeitig laufen, Load 6, alles
+kroch — und ein kriechendes Gate wird umgangen; testing.md: Zertifikats-
+Transfer am Push und eine flock-Spur je Host — anstellen statt drosseln,
+kein Bypass), `v2.9.4`.
+
 Drei Befunde der Mac-Session (kenni-88) generisch geschlossen:
 **Hook-Doktor für `.githooks/`** (ein getracktes Hook-Verzeichnis ohne
 passendes `core.hooksPath` liest git nie — im Mac-Repo lief monatelang
