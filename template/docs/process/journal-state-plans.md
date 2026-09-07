@@ -209,6 +209,11 @@ and branch state files accumulate, and the gates stay fast well past a
 thousand files — history is cheap, and `trace.py` is the reader. When the
 volume itself starts to bother you (searching, cloning), prune by age as an
 ordinary change: delete or move journal shards and archived plans older than
-what you still reference, in a commit that says so. Two things should NOT be
+what you still reference, in a commit that says so. `scripts/process/compact_journal.py`
+does the routine form of it: shards older than N weeks (default 8) are folded
+into a monthly `journal/archive/YYYY-MM.md` that keeps exactly the machine-read
+records (`REVIEW`, `GRADE`) verbatim — the gates and `trace.py` glob the archive
+like any shard — and drops the prose, which git still holds. Dry run by
+default, `--apply` writes. Two things should NOT be
 pruned casually: review reports (the audit trail the review gate's waivers
 point at) and the decision records (which are not working memory at all).
