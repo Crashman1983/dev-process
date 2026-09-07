@@ -55,6 +55,14 @@ Tier 3 presence arm hard on a push to main and a note elsewhere
 (`journal-state-plans.md`). A custom hook that replaces the framework must
 export `PROCESS_PUSH_TARGETS` from git's stdin to keep that arm armed.
 
+The doctor also covers the *other* manager: a tracked `.githooks/`
+directory is only read when `core.hooksPath` points at it. Unset, git runs
+whatever stale copy sits in `.git/hooks` — observed downstream: a months-old
+copy of `pre-push` ran while the tracked one evolved, and a leaked
+`GIT_DIR` from a test then flipped the real repository to `core.bare=true`
+through it. The doctor fails hard on a populated `.githooks/` without the
+matching `core.hooksPath`.
+
 ## Honest ceiling
 
 Hooks are client-side: a clone that never installs them enforces nothing

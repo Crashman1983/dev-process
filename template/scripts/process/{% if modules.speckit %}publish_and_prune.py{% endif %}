@@ -65,25 +65,88 @@ def _gh(gh: str, *args: str) -> subprocess.CompletedProcess:
     return subprocess.run([gh, *args], capture_output=True, text=True, timeout=120)
 
 
-def _post_comment(gh: str, issue: str, title: str, body: str) -> bool:
+# --- outbound guard: what leaves the repo is checked before it leaves ------
+# `.publish-denylist` holds one regex per line (comments with #). Every body
+# about to be posted is matched against it; a hit refuses the whole publish
+# and names pattern and line. Observed downstream: a spec snapshot carried
+# client slugs copied from UI-test stubs onto a public issue and had to be
+# scrubbed by hand. The list is the project's — the template ships none.
+DENYLIST = ".publish-denylist"
+
+
+def _denylist(root: Path) -> list[re.Pattern[str]]:
+    f = root / DENYLIST
+    if not f.is_file():
+        return []
+    pats: list[re.Pattern[str]] = []
+    for ln in f.read_text(encoding="utf-8").splitlines():
+        ln = ln.strip()
+        if ln and not ln.startswith("#"):
+            try:
+                pats.append(re.compile(ln))
+            except re.error as exc:
+                print(f"publish_and_prune: {DENYLIST}: bad pattern {ln!r}: {exc}",
+                      file=sys.stderr)
+    return pats
+
+
+def _denied(text: str, pats: list[re.Pattern[str]]) -> list[str]:
+    hits: list[str] = []
+    for i, line in enumerate(text.splitlines(), 1):
+        for pat in pats:
+            if pat.search(line):
+                hits.append(f"line {i} matches {pat.pattern!r}")
+    return hits
+
+
+def _rest_comment(gh: str, issue: str, text: str) -> subprocess.CompletedProcess:
+    """`gh issue comment` goes through GraphQL, whose secondary rate limit
+    refused posts for hours downstream while the REST budget sat at
+    5000/5000. REST is the fallback, same result, different quota."""
+    return _gh(gh, "api", f"repos/{{owner}}/{{repo}}/issues/{issue}/comments",
+               "-f", f"body={text}")
+
+
+def _post_comment(gh: str, issue: str, title: str, body: str,
+                  deny: list[re.Pattern[str]] | None = None) -> bool:
     """Post (possibly split) and verify by reading the comment back."""
+    hits = _denied(body, deny or [])
+    if hits:
+        print(f"publish_and_prune: REFUSED to publish {title!r} — {DENYLIST} hit: "
+              + "; ".join(hits[:5]) + ("; …" if len(hits) > 5 else ""),
+              file=sys.stderr)
+        return False
     chunks = [body[i:i + COMMENT_LIMIT] for i in range(0, len(body), COMMENT_LIMIT)] or [""]
     for i, chunk in enumerate(chunks, 1):
         suffix = f" (part {i}/{len(chunks)})" if len(chunks) > 1 else ""
         text = f"<!-- publish_and_prune -->\n## {title}{suffix}\n\n{chunk}"
         r = _gh(gh, "issue", "comment", issue, "--body", text)
         if r.returncode != 0:
+            print(f"publish_and_prune: `gh issue comment` failed "
+                  f"({r.stderr.strip()[:200]}) — retrying via REST", file=sys.stderr)
+            r = _rest_comment(gh, issue, text)
+        if r.returncode != 0:
             print(f"publish_and_prune: comment failed: {r.stderr.strip()}", file=sys.stderr)
             return False
-    # verify: the marker must be present in the issue's comments
-    r = _gh(gh, "issue", "view", issue, "--json", "comments")
-    if r.returncode != 0:
-        return False
-    try:
-        comments = json.loads(r.stdout).get("comments", [])
-    except json.JSONDecodeError:
-        return False
-    return any("publish_and_prune" in (c.get("body") or "") for c in comments)
+    # verify: the marker must be present in the issue's comments (REST first —
+    # it is the route that was still open when GraphQL was throttled)
+    r = _gh(gh, "api", "--paginate", f"repos/{{owner}}/{{repo}}/issues/{issue}/comments")
+    bodies: list[str] = []
+    if r.returncode == 0:
+        try:
+            for item in json.loads(r.stdout):
+                bodies.append(item.get("body") or "")
+        except (json.JSONDecodeError, AttributeError):
+            bodies = []
+    if not bodies:
+        r = _gh(gh, "issue", "view", issue, "--json", "comments")
+        if r.returncode != 0:
+            return False
+        try:
+            bodies = [c.get("body") or "" for c in json.loads(r.stdout).get("comments", [])]
+        except json.JSONDecodeError:
+            return False
+    return any("publish_and_prune" in b for b in bodies)
 
 
 def _stage(root: Path, fdir: Path) -> int:
@@ -109,13 +172,14 @@ def _stage(root: Path, fdir: Path) -> int:
         print("publish_and_prune: `gh` not on PATH — nothing published", file=sys.stderr)
         return 1
     stamp = datetime.date.today().isoformat()
+    deny = _denylist(root)
     ok = _post_comment(gh, issue, f"{fdir.name}/spec.md — stage snapshot {stamp} "
                                   f"(read-only; the file in specs/ is the SSOT)",
-                       spec_text)
+                       spec_text, deny)
     design = fdir / "design.md"
     if ok and design.is_file():
         ok = _post_comment(gh, issue, f"{fdir.name}/design.md — stage snapshot {stamp}",
-                           design.read_text(encoding="utf-8", errors="replace"))
+                           design.read_text(encoding="utf-8", errors="replace"), deny)
     if not ok:
         print("publish_and_prune: stage publish NOT verified — re-run", file=sys.stderr)
         return 1
@@ -167,14 +231,15 @@ def main() -> int:
         return 1
 
     ok = True
+    deny = _denylist(root)
     for f in sorted(fdir.glob("*.md")):
         ok = ok and _post_comment(gh, issue, f"{fdir.name}/{f.name}",
-                                  f.read_text(encoding="utf-8", errors="replace"))
+                                  f.read_text(encoding="utf-8", errors="replace"), deny)
     for sub in ("contracts", "checklists"):
         for f in sorted((fdir / sub).glob("*")) if (fdir / sub).is_dir() else []:
             if f.is_file():
                 ok = ok and _post_comment(gh, issue, f"{fdir.name}/{sub}/{f.name}",
-                                          f.read_text(encoding="utf-8", errors="replace"))
+                                          f.read_text(encoding="utf-8", errors="replace"), deny)
     if not ok:
         print("publish_and_prune: publish NOT verified — directory stays "
               "(flow-forward degradation); fix and re-run", file=sys.stderr)

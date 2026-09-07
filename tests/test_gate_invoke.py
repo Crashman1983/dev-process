@@ -108,3 +108,17 @@ def test_finish_blocks_on_inert_hooks(render, tmp_path):
                        cwd=out, capture_output=True, text=True)
     assert r.returncode == 1
     assert "hooks:" in r.stdout and "inert" in r.stdout
+
+
+def test_hook_doctor_tracked_githooks_need_hooks_path(render, tmp_path):
+    # a tracked .githooks/ that core.hooksPath does not point at is never
+    # read by git — a stale .git/hooks copy (or nothing) runs instead
+    out = render(tmp_path, {"project_name": "demo"})
+    _git(out, "init", "-q", "-b", "main")
+    (out / ".githooks").mkdir()
+    (out / ".githooks" / "pre-push").write_text("#!/bin/sh\nexit 0\n")
+    gi = _load(out)
+    hard, _soft = gi.hook_wiring_findings(out)
+    assert hard and "core.hooksPath is unset" in hard[0]
+    _git(out, "config", "core.hooksPath", ".githooks")
+    assert gi.hook_wiring_findings(out) == ([], [])
