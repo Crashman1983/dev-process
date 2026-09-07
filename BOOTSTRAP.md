@@ -169,6 +169,18 @@ release by default, preserves your local edits, and flags conflicts inline.
 `.copier-answers.yml`), a default update refuses with "Downgrades are not
 supported" — pass `--vcs-ref=HEAD` here too.
 
+**A project that owns some rendered files** (a gate it extended, a command it
+rewrote) lists them in a `.process-owned` file at the repo root (one path or
+glob per line) and updates through the helper instead:
+
+    uv run scripts/process/template_update.py            # add --ref <tag> to pick a release
+
+It runs `copier update`, keeps every owned file as committed, and writes the
+template's own change to each owned file (old release render → new release
+render) to `.process-work/template-delta/<ref>/<path>.diff` — the exact delta
+to port by hand, without the noise of the local divergence. Delete that
+directory once ported; it is working memory, not a commit.
+
 Disabling works the same way (flag back to `false`): `copier update` then
 **removes** that module's rendered files (gate script, module doc) and the
 gate stops running — check the diff before committing.

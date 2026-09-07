@@ -3,7 +3,8 @@
 This directory is the repository-local working memory for the development
 process.
 
-- `journal/` records why decisions were made.
+- `journal/` records why decisions were made; `journal/archive/` holds
+  months folded by `compact_journal.py` (records only, prose in git history).
 - `plans/` stores active implementation plans and archived plans.
 - `state/` stores branch-scoped context and next steps.
 - `inbox.md` collects work you noticed but will not do now (triage later).

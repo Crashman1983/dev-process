@@ -580,6 +580,25 @@ hinter der vollen Suite des Pakets — `--tests CMD` läuft sie, `--tests-
 passed` behauptet sie; jeder Schritt druckt sein Kommando, der erste
 Fehler stoppt in einem Zustand, den git erklärt), `v2.8.1`.
 
+SP66 (token-savers, die restlichen drei Kandidaten aus derselben Frage:
+**Kontextkosten messen** (`process_context.py --cost`: was ein Session-Start
+lädt, gruppiert nach Anker, Commands, Prozessdokus, Produktrahmen, aktive
+Pläne, State/Journal, alle Journal-Shards, Spec-Verzeichnisse, mit
+Session-Start-Schätzung und den zehn größten Dateien — chars/4, also
+vergleichbar untereinander, nicht mit der Rechnung; erst messen, dann
+kürzen), **Journal-Kompaktion** (`compact_journal.py`: Shards älter als N
+Wochen werden in ein Monatsarchiv gefaltet, das exakt die maschinell
+gelesenen Records — REVIEW, GRADE — wörtlich behält und die Prosa an git
+abgibt; Gates und trace globben das Archiv wie jeden Shard, gefenzte
+Zitate fallen mit der Prosa weg; Dry-Run per Default) und
+**Template-Update mit Owner-Liste** (`template_update.py` + `.process-owned`:
+copier update wie gehabt, die Owner-Dateien bleiben wie committet, und das
+Template-eigene Delta je Owner-Datei — alter Release-Render gegen neuen —
+landet als Diff unter `.process-work/template-delta/<ref>/`; aus der
+Stunde Hand-Konfliktlösung pro Release, gemessen am Referenzprojekt mit
+fünf Skripten, einem Doc und einem Command, wird ein mechanischer Port))
+ausgeliefert, `v2.9.0`.
+
 ## Sub-Projekt-Tabelle (SP1–SP24)
 
 Die Tabelle wurde bis SP24 gepflegt; ab SP25 trägt das Narrativ oben die

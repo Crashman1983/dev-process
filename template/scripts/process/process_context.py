@@ -55,7 +55,8 @@ def _plan_info(p: Path) -> dict:
 
 
 def main() -> int:
-    root = Path(sys.argv[1] if len(sys.argv) > 1 else ".").resolve()
+    positional = [a for a in sys.argv[1:] if not a.startswith("--")]
+    root = Path(positional[0] if positional else ".").resolve()
     branch = _branch(root)
     out: dict = {"branch": branch}
 
@@ -101,8 +102,60 @@ def main() -> int:
         1 for line in _read(inbox).splitlines() if line.strip().startswith(("-", "*"))
     ) if inbox.is_file() else 0
 
+    if "--cost" in sys.argv:
+        out["context_cost"] = context_cost(root, out)
+
     print(json.dumps(out, indent=2))
     return 0
+
+
+# --- context cost: what a session reads, in approximate tokens ------------
+# Measure before cutting. "Which doc is too long" is guesswork until the
+# sizes are on the table; this puts them there. The estimate is chars/4 — a
+# rough average for English prose and code in current tokenizers — so the
+# numbers compare against each other, not against a bill.
+CHARS_PER_TOKEN = 4
+ANCHORS = ("CLAUDE.md", "AGENTS.md", ".github/copilot-instructions.md")
+COMMAND_DIRS = (".claude/commands", ".github/prompts")
+
+
+def _tokens(paths: list[Path]) -> dict:
+    sizes = [(p, len(_read(p))) for p in paths if p.is_file()]
+    return {"files": len(sizes),
+            "tokens": sum(n for _p, n in sizes) // CHARS_PER_TOKEN}
+
+
+def context_cost(root: Path, ctx: dict) -> dict:
+    groups: dict[str, list[Path]] = {}
+    groups["anchor"] = [root / a for a in ANCHORS]
+    groups["commands"] = [p for d in COMMAND_DIRS
+                          for p in sorted((root / d).glob("*.md"))
+                          if (root / d).is_dir()]
+    groups["process_docs"] = sorted((root / "docs/process").rglob("*.md")) \
+        if (root / "docs/process").is_dir() else []
+    groups["product_frame"] = [root / "PRODUCT.md"]
+    groups["active_plans"] = [root / p["file"] for p in ctx.get("active_plans", [])]
+    groups["state_and_latest_journal"] = [root / f for f in
+                                          (ctx.get("state_file"), ctx.get("latest_journal"))
+                                          if f]
+    jdir = root / ".process-work/journal"
+    groups["all_journal_shards"] = sorted(jdir.rglob("*.md")) if jdir.is_dir() else []
+    groups["spec_dirs"] = [p for f in ctx.get("spec_features", [])
+                           for p in sorted((root / f["dir"]).glob("*.md"))]
+    report = {name: _tokens(paths) for name, paths in groups.items()}
+    # what /prime actually loads: anchor + commands + the branch's own working
+    # memory — the process docs are read on demand, the journal never whole
+    session = sum(report[k]["tokens"] for k in
+                  ("anchor", "commands", "product_frame", "active_plans",
+                   "state_and_latest_journal"))
+    report["session_start_estimate_tokens"] = session
+    everything = sorted({p for ps in groups.values() for p in ps if p.is_file()},
+                        key=lambda p: -len(_read(p)))
+    report["largest"] = [{"file": str(p.relative_to(root)),
+                          "tokens": len(_read(p)) // CHARS_PER_TOKEN}
+                         for p in everything[:10]]
+    report["unit"] = f"approx tokens = chars / {CHARS_PER_TOKEN}"
+    return report
 
 
 if __name__ == "__main__":
