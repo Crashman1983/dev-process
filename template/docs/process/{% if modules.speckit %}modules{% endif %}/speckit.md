@@ -81,6 +81,21 @@ Read new issue comments before `/plan`: they are clarify input. The merge-time
 `publish_and_prune <feature-dir>` (publish everything, prune the directory)
 is unchanged.
 
+## Outbound guard and the REST route
+
+Everything `publish_and_prune.py` posts leaves the repository for an issue
+that may be visible beyond the team. Before any post, each body is matched
+against `.publish-denylist` (project-owned, one regex per line, `#`
+comments); a hit refuses the whole publish and names the line — observed
+downstream: a spec snapshot carried client slugs copied from UI-test stubs
+and had to be scrubbed on the issue by hand. The template ships no list;
+the project knows its own stubs, secrets and names.
+
+Posting tries `gh issue comment` and falls back to the REST endpoint
+(`gh api …/issues/N/comments`) when that fails: the CLI's comment goes
+through GraphQL, whose secondary rate limit refused posts for hours while
+the REST budget sat untouched. Verification reads back via REST first.
+
 ## Branching and parallel agents
 
 `specify init` does not create branches (0.16 — verified); branch creation

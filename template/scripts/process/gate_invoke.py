@@ -36,6 +36,7 @@ from pathlib import Path
 
 RUNNER_REL = "scripts/process/gate_runner.py"
 PRE_COMMIT_CONFIG = ".pre-commit-config.yaml"
+GITHOOKS_DIR = ".githooks"
 
 # The PEP-723 block: `# /// script` … `# ///`, every line a comment.
 _PEP723_BLOCK = re.compile(r"^# /// script\s*$(?P<body>.*?)^# ///\s*$",
@@ -133,11 +134,24 @@ def hook_wiring_findings(root: Path) -> tuple[list[str], list[str]]:
     run in CI, but nothing runs locally before a push."""
     hard: list[str] = []
     soft: list[str] = []
-    if not (root / PRE_COMMIT_CONFIG).is_file():
-        return hard, soft
     if _git(root, "rev-parse", "--is-inside-work-tree") != "true":
         return hard, soft
     hooks_path = _git(root, "config", "--get", "core.hooksPath")
+    # the other manager: a tracked hooks directory that git only reads when
+    # core.hooksPath points at it. Unset, git runs whatever stale copy sits in
+    # .git/hooks — observed downstream: a June copy of pre-push ran for months
+    # while the tracked one evolved, and a leaked GIT_DIR from a test then
+    # flipped the real repo to core.bare=true through it.
+    tracked = root / GITHOOKS_DIR
+    if tracked.is_dir() and any(p.is_file() for p in tracked.iterdir()):
+        if hooks_path != GITHOOKS_DIR:
+            hard.append(
+                f"{GITHOOKS_DIR}/ holds tracked hooks but core.hooksPath is "
+                f"{hooks_path or 'unset'} — git never reads them; whatever sits "
+                f"in .git/hooks runs instead (a stale copy, or nothing). "
+                f"`git config core.hooksPath {GITHOOKS_DIR}` in this clone")
+    if not (root / PRE_COMMIT_CONFIG).is_file():
+        return hard, soft
     if hooks_path:
         hard.append(
             f"core.hooksPath={hooks_path} is set while {PRE_COMMIT_CONFIG} "

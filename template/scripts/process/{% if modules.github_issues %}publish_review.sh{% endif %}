@@ -49,6 +49,16 @@ else
   cat "$report" > "$body"
 fi
 
+# outbound guard: one regex per line in .publish-denylist (project-owned) —
+# a hit refuses the publish and names the line, nothing leaves the repo
+if [ -f .publish-denylist ]; then
+  if hit="$(grep -v -e '^#' -e '^$' .publish-denylist | grep -n -E -f /dev/stdin "$body" 2>/dev/null | head -n3)" && [ -n "$hit" ]; then
+    echo "REFUSED: report matches .publish-denylist — scrub before publishing:" >&2
+    echo "$hit" | sed 's/^/  /' >&2
+    rm -f "$body"; exit 1
+  fi
+fi
+
 number="$(gh issue create --title "review: $title" --body-file "$body" \
           | grep -oE '[0-9]+$')"
 echo "issue: #$number"

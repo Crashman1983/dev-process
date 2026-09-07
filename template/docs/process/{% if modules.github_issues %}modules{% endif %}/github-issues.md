@@ -127,6 +127,13 @@ issue with EARS acceptance, while a purely informational record is exempt.
   `github-master` module installed, the same two conditions DO fail the gate
   hard once a story is in-progress — `definition-of-ready-and-done.md`.)
 
+## Outbound guard
+
+`publish_review.sh` refuses to create the issue when the report body
+matches a line of `.publish-denylist` (project-owned regexes, `#`
+comments) and prints the matching lines — the same guard the speckit
+module's `publish_and_prune.py` applies before posting snapshots.
+
 ## Optional: render story dependencies
 
 A story's `blocked_by` (feature-registry) is the portable source of truth for

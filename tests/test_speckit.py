@@ -221,3 +221,60 @@ def test_stage_publish_needs_issue_ref_and_prunes_nothing(render, tmp_path):
     assert r.returncode == 1
     assert "issue-before-spec" in r.stderr
     assert (d / "spec.md").is_file()  # --stage never prunes, even on failure
+
+
+# --- v2.9.3: publish goes REST when GraphQL throttles; deny-list before posting
+
+def _fake_gh(tmp_path, *, comment_fails=True):
+    """A gh stub: `issue comment` fails (GraphQL secondary limit), `api`
+    succeeds and logs; `api …/comments` returns the marker so the verify
+    step passes. Every call is appended to gh.log."""
+    binpath = tmp_path / "bin"
+    binpath.mkdir(exist_ok=True)
+    log = tmp_path / "gh.log"
+    script = binpath / "gh"
+    script.write_text(f"""#!/bin/sh
+echo "$@" >> {log}
+case "$1 $2" in
+  "issue comment") {"echo 'GraphQL: secondary rate limit' >&2; exit 1" if comment_fails else "exit 0"} ;;
+  "api --paginate") echo '[{{"body": "<!-- publish_and_prune -->"}}]'; exit 0 ;;
+  "api "*) exit 0 ;;
+  *) exit 0 ;;
+esac
+""")
+    script.chmod(0o755)
+    return binpath, log
+
+
+def test_publish_falls_back_to_rest_when_graphql_throttles(render, tmp_path):
+    import os
+    out = _render(render, tmp_path)
+    d = out / "specs/004-widget"
+    d.mkdir(parents=True)
+    (d / "spec.md").write_text("# Feature\n\nissue: #12\n")
+    binpath, log = _fake_gh(tmp_path)
+    env = {**os.environ, "PATH": f"{binpath}:{os.environ['PATH']}"}
+    r = subprocess.run([sys.executable, str(out / "scripts/process/publish_and_prune.py"),
+                        "--stage", "004-widget"], cwd=out, capture_output=True,
+                       text=True, env=env)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "retrying via REST" in r.stderr
+    calls = log.read_text()
+    assert "api repos/{owner}/{repo}/issues/12/comments -f body=" in calls
+
+
+def test_publish_refuses_on_denylist_hit(render, tmp_path):
+    import os
+    out = _render(render, tmp_path)
+    (out / ".publish-denylist").write_text("# client slugs from the UI-test stubs\nacme-[a-z]+\n")
+    d = out / "specs/005-widget"
+    d.mkdir(parents=True)
+    (d / "spec.md").write_text("# Feature\n\nissue: #12\n\nsee client acme-berlin\n")
+    binpath, log = _fake_gh(tmp_path, comment_fails=False)
+    env = {**os.environ, "PATH": f"{binpath}:{os.environ['PATH']}"}
+    r = subprocess.run([sys.executable, str(out / "scripts/process/publish_and_prune.py"),
+                        "--stage", "005-widget"], cwd=out, capture_output=True,
+                       text=True, env=env)
+    assert r.returncode == 1
+    assert "REFUSED" in r.stderr and "line 5" in r.stderr and "acme-" in r.stderr
+    assert not log.exists()  # nothing was posted

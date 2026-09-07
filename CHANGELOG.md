@@ -613,6 +613,20 @@ Baum" gegenseitig die Zertifizierung — ein Eintrag je Tree-Hash, nie ein
 einzelner Slot; Zwischendateien pro Lauf per mktemp, nie ein fester
 geteilter Pfad; testing.md), `v2.9.2`.
 
+Drei Befunde der Mac-Session (kenni-88) generisch geschlossen:
+**Hook-Doktor für `.githooks/`** (ein getracktes Hook-Verzeichnis ohne
+passendes `core.hooksPath` liest git nie — im Mac-Repo lief monatelang
+eine Juni-Kopie von pre-push aus `.git/hooks`, und ein geleaktes GIT_DIR
+schaltete darüber das echte Repo auf `core.bare=true`; hart im gate_runner
+und in finish), **REST-Fallback beim Posten** (`gh issue comment` läuft
+über GraphQL, dessen Sekundärlimit stundenlang blockte, während das
+REST-Budget unberührt war — publish_and_prune fällt auf
+`gh api …/comments` zurück, Verifikation liest zuerst per REST) und
+**Deny-Liste vor dem Veröffentlichen** (`.publish-denylist`, projekteigene
+Regexes; ein Treffer verweigert den Post und nennt die Zeile —
+publish_and_prune und publish_review.sh; Anlass: Klienten-Slugs aus
+UITest-Stubs in einem Spec-Snapshot), `v2.9.3`.
+
 ## Sub-Projekt-Tabelle (SP1–SP24)
 
 Die Tabelle wurde bis SP24 gepflegt; ab SP25 trägt das Narrativ oben die
