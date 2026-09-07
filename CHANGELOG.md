@@ -607,6 +607,12 @@ Modul kommt still zurück (beobachtet: git-hooks samt Anker-Konflikt). Der
 Helfer setzt jetzt jede aufgezeichnete Antwort als `--data` neu; BOOTSTRAP
 korrigiert die frühere Behauptung „recorded modules dict wins", `v2.9.1`.
 
+Zertifikate sind nach dem verschlüsselt, was sie bezeugen (Kenni-Befund:
+parallele Worktrees zerhauten sich mit einer Slot-Datei „der zertifizierte
+Baum" gegenseitig die Zertifizierung — ein Eintrag je Tree-Hash, nie ein
+einzelner Slot; Zwischendateien pro Lauf per mktemp, nie ein fester
+geteilter Pfad; testing.md), `v2.9.2`.
+
 ## Sub-Projekt-Tabelle (SP1–SP24)
 
 Die Tabelle wurde bis SP24 gepflegt; ab SP25 trägt das Narrativ oben die
