@@ -73,6 +73,21 @@ must have a clearing review attestation (below) or a named `review-waived:`
 exception. A plan without a `tier:` line is simply not presence-enforced — the
 field is opt-in, and its absence is a note, never a failure.
 
+**Tier 3 is anchored to the push, not the archive.** Waiting for the archive
+step means the proof arrives after the merge it was meant to gate. So for an
+*active* `tier: 3` plan **this push carries** — its file is in the pushed
+range, or a pushed commit claims its issue (a closing trailer such as
+`closes #N`, or a `… (#N)` subject; a bare mention claims nothing) — the
+review gate demands the clearing pass **on the push to main/master** and
+reports the same finding as a note on every other push. The gate learns where
+a push lands from the environment: the pre-commit framework's
+`PRE_COMMIT_REMOTE_BRANCH`, or `PROCESS_PUSH_TARGETS` exported by a custom
+hook from git's stdin. Somebody else's Tier 3 plan sitting in the tree is not
+this push's proof to produce. Known limitation: a pull request merged
+server-side never pushes main from a clone, so this arm never fires on that
+route — there `finish.py` (run before the PR is opened) is the stop, and the
+archive arm catches the residue on main.
+
 Digest binding is opt-in per REVIEW line (below), not per plan — the former
 `review-binding: artifact-v1` plan field is retired; the gate reports a
 leftover as a note.

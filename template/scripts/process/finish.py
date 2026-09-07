@@ -13,10 +13,18 @@ commands — it never merges, archives, or deletes anything itself. The agent
 Checks, in order:
   1. on a feature branch (finishing main is meaningless)
   2. worktree clean (an unfinished tree cannot be finished)
-  3. every active tier-2+ plan has its clearing REVIEW pass (verdict=pass,
-     matching work id, tier>=plan tier) or a review-waived line — the exact
-     arithmetic of the review gate, imported from check_review (one owner)
-  4. the gate suite is green (gate_runner)
+  3. every active tier-2+ plan THIS BRANCH OWNS has its clearing REVIEW pass
+     (verdict=pass, matching work id, tier>=plan tier) or a review-waived
+     line — the exact arithmetic of the review gate, imported from
+     check_review (one owner). Owned = the plan file is in the branch's
+     committed range, or a commit in that range claims the plan's issue;
+     somebody else's decision paper sitting in the tree is neither this
+     branch's review debt nor its archiving duty. Without a determinable
+     merge base the check stays conservative (every active plan).
+  4. the registered local hooks can actually run (gate_invoke's hook doctor)
+     — a check that is missing is a blocker, never a skip
+  5. the gate suite is green (gate_runner, launched via gate_invoke); "not
+     runnable" is reported distinctly from "red"
 Then it prints the tail: archive plan(s) -> merge -> delete branch ->
 remove worktree -> publish/prune where those modules are installed.
 
@@ -43,10 +51,20 @@ from check_review import (  # noqa: E402  (one owner for grammar + arithmetic)
     SPECS_DIR,
     TIER_DECL,
     WAIVED,
+    _cleared,
+    _plan_issue_numbers,
     _plan_work_ids,
     _unfenced,
+    issue_refs_in_range,
+    merge_base,
     parse_review_lines,
+    paths_in_flight,
     speckit_unreviewed,
+)
+from gate_invoke import (  # noqa: E402  (one owner for "how to launch")
+    gate_runner_argv,
+    hook_wiring_findings,
+    not_runnable_reason,
 )
 
 
@@ -89,6 +107,10 @@ def check(root: Path) -> tuple[list[str], list[str]]:
 
     # --- clearing pass per active tier-2+ plan (review-gate arithmetic) ---
     passes = _journal_passes(root)
+    # the same scope as the review gate's push-anchored arm: a plan is this
+    # branch's business when the branch carries its file or claims its issue
+    in_flight = paths_in_flight(root) if merge_base(root) is not None else None
+    claimed_issues = issue_refs_in_range(root)
     to_archive: list[str] = []
     pdir = root / PLANS_ACTIVE
     if pdir.is_dir():
@@ -96,6 +118,10 @@ def check(root: Path) -> tuple[list[str], list[str]]:
             if p.name.startswith("design-") or not p.is_file():
                 continue
             text = _unfenced(p.read_text(encoding="utf-8", errors="replace"))
+            if (in_flight is not None
+                    and f"{PLANS_ACTIVE}/{p.name}" not in in_flight
+                    and not (_plan_issue_numbers(text) & claimed_issues)):
+                continue  # somebody else's plan — not this branch's tail
             m = TIER_DECL.search(text)
             if not m:
                 continue
@@ -107,9 +133,7 @@ def check(root: Path) -> tuple[list[str], list[str]]:
                 to_archive.append(p.name)
                 continue
             ids = _plan_work_ids(p.stem, text, include_dedated=True)
-            cleared = any(r["work"] in ids and int(r["tier"]) >= tier
-                          for r in passes)
-            if cleared:
+            if _cleared(passes, ids, tier):
                 to_archive.append(p.name)
             else:
                 blockers.append(
@@ -137,12 +161,24 @@ def check(root: Path) -> tuple[list[str], list[str]]:
                         and re.search(r"^\s*- \[[xX]\] ", ttext, re.MULTILINE):
                     done_spec_dirs.append(d.name)
 
-    # --- gates ---
-    gr = subprocess.run([sys.executable, "scripts/process/gate_runner.py"],
-                        cwd=str(ROOT), capture_output=True, text=True)
-    if gr.returncode != 0:
-        last = [ln for ln in gr.stdout.splitlines() if ln.strip()][-3:]
-        blockers.append("gate suite red: " + " | ".join(last))
+    # --- hook wiring: a registered check that cannot run is a missing check,
+    # and a missing check is a blocker, never a skip
+    hook_hard, hook_soft = hook_wiring_findings(root)
+    for finding in hook_hard + hook_soft:
+        blockers.append(f"hooks: {finding}")
+
+    # --- gates --- ("not runnable" and "red" are different failures with
+    # different owners; naming them apart is the whole point of the launcher)
+    argv = gate_runner_argv(root)
+    if argv is None:
+        blockers.append(f"gate suite NOT RUNNABLE (not red): "
+                        f"{not_runnable_reason(root)}")
+    else:
+        gr = subprocess.run(argv, cwd=str(root), capture_output=True, text=True)
+        if gr.returncode != 0:
+            last = [ln for ln in (gr.stdout + gr.stderr).splitlines()
+                    if ln.strip()][-3:]
+            blockers.append("gate suite red: " + " | ".join(last))
 
     if blockers:
         return blockers, []

@@ -36,6 +36,25 @@ command after a `copier update`; it is idempotent.
   allowed in an emergency, documented in the commit body (mandatory rule 8),
   and caught by CI on push anyway.
 
+## One hook manager — and a doctor for it
+
+The pre-commit framework installs into `.git/hooks`. If `core.hooksPath` is
+set (a second hook manager, a `.githooks/` directory, a global git config),
+git reads hooks from *there* and every pre-commit registration is silently
+inert — measured downstream: 25 days without a single local gate run,
+discovered by accident. So: exactly one hook manager per repository. The
+gate runner and `finish.py` run a **hook doctor** (`gate_invoke.py`) that
+fails hard when this config coexists with a `core.hooksPath`, and notes a
+clone that never installed the hooks. A registered check that cannot run is
+a missing check, and a missing check is reported as a blocker, never as a
+pass.
+
+The pre-push stage also hands the review gate the push target
+(`PRE_COMMIT_REMOTE_BRANCH`, set by the framework), which is what makes the
+Tier 3 presence arm hard on a push to main and a note elsewhere
+(`journal-state-plans.md`). A custom hook that replaces the framework must
+export `PROCESS_PUSH_TARGETS` from git's stdin to keep that arm armed.
+
 ## Honest ceiling
 
 Hooks are client-side: a clone that never installs them enforces nothing

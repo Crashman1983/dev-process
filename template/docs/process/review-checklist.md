@@ -147,6 +147,33 @@ supply:
 - Do the negative, edge, authorization, and invalidation/cleanup **twins**
   (DoR R2) actually appear as criteria — not only the happy path?
 
+## Surfaces — the UI acceptance floor
+
+For any change with a UI surface. These are the defects that ship when nobody
+opens the page: each is cheap to see and expensive to discover from a user.
+Evidence is the rendered state (a browser, a screenshot, an in-page check),
+never the stylesheet.
+
+- Is **nothing clipped or pushed past the viewport** — at a narrow width, with
+  long labels, dense content, a wrapped toolbar, an open menu, and 200% text?
+- Do **independent controls have separate, unobscured hit areas** — at least
+  24 × 24 CSS px per target (WCAG 2.5.8) or a named, reviewed exception — and
+  does firing one never trigger its neighbour?
+- Does **every button and link carry an accessible name**, and is nothing
+  interactive **covered** by another layer? "Visible" is owned by
+  reachability: a control under a backdrop is not present.
+- Are the **four states** the spec named (loading / empty / error / unknown)
+  all rendered as specified — in particular, is *not yet resolved* never
+  shown as *empty*?
+- Was it checked in **both themes** and on the representative viewports the
+  spec names?
+- Does the **UI reuse map** (DoR R5) trace to what was actually mounted —
+  the existing owner reused or extended, or a new one with its reason —
+  rather than a copied style or a local override on a shared control?
+
+Where a stack guide exists it sharpens this floor with the framework's
+specifics (which token, which component library); it does not lower it.
+
 ## Tests prove acceptance
 
 - Does a **test map to each acceptance criterion** the change claims? A feature
