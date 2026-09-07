@@ -81,8 +81,12 @@ base.
 
 The whole tail — archive, merge, branch delete, worktree removal,
 publish/prune — is checkable as one verdict: `scripts/process/finish.py`
-(`/finish`) verifies the branch is done (clearing pass, green gates, clean
-tree) and prints the remaining steps in order. The tail failures it guards
+(`/finish`) verifies the branch is done (clearing pass for the plans **this
+branch owns** — carried in its commits or claimed by its issue references —
+green gates, runnable hooks, clean tree) and prints the remaining steps in
+order. It names a gate suite that *cannot start* apart from one that ran red,
+and a registered hook that cannot run counts as a missing check, which is a
+blocker, never a skip. The tail failures it guards
 against (merge without clearing pass, plan never archived, residue left
 behind) were all observed in production; prefer the checker over improvising
 the ritual from memory.

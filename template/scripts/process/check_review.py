@@ -15,6 +15,16 @@ enforces what a language-agnostic CI gate honestly can:
   - HARD (presence, post-merge, opt-in by tier declaration): an archived plan
     declaring `tier: N` with N >= 2 that carries neither a clearing
     `verdict=pass` REVIEW nor an explicit `review-waived:` line.
+  - HARD on the merge push only (presence, push-anchored): an ACTIVE plan
+    declaring `tier: 3` that this push carries (its file is in the pushed
+    range, or a pushed commit claims its issue via a closing trailer or a
+    `(#N)` subject) without a clearing pass or waiver. Waiting for the
+    archive step means the proof arrives after the merge it was meant to
+    gate. "Merge push" is read from the environment (`PROCESS_PUSH_TARGETS`,
+    or the pre-commit framework's `PRE_COMMIT_REMOTE_BRANCH`): hard when a
+    target ref is main/master, the same findings as notes anywhere else —
+    a gate that reds the wrong push gets bypassed, and a bypassed gate
+    proves nothing.
   - HARD (integrity, opt-in by carrying the fields): a REVIEW that names
     `base`/`head`/`diff` binds itself to an exact reviewed diff — the gate
     recomputes the digest and fails on mismatch or unresolvable commits. The
@@ -38,6 +48,7 @@ Pure stdlib. Owns the `REVIEW` grammar; shares nothing with telemetry's `GRADE`.
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 import subprocess
 import sys
@@ -309,6 +320,133 @@ def _integrity_violations(rel: str, root: Path,
     return hard, soft
 
 
+def _cleared(passes: list[dict], ids: set[str], tier: int) -> bool:
+    """Does any pass clear a plan of this tier? The REVIEW grammar caps tier
+    at 3 — a plan on an extended downstream scale (tier 4/5) clears at the
+    gated ceiling, not an unmeetable bar."""
+    req = min(tier, 3)
+    return any(r["work"] in ids and int(r["tier"]) >= req for r in passes)
+
+
+# --- push anchoring: what THIS push carries ---------------------------------
+INTEGRATION_REFS = ("origin/main", "origin/master", "main", "master")
+INTEGRATION_TARGET_REFS = ("refs/heads/main", "refs/heads/master")
+# the remote refs a push lands on. A hook exports PROCESS_PUSH_TARGETS from
+# what git hands it on stdin (`<local_ref> <local_sha> <remote_ref>
+# <remote_sha>`); the pre-commit framework sets PRE_COMMIT_REMOTE_BRANCH for
+# its pre-push stage without any wiring — both are read, the explicit one first
+PUSH_TARGETS_ENV = "PROCESS_PUSH_TARGETS"
+PRE_COMMIT_TARGET_ENV = "PRE_COMMIT_REMOTE_BRANCH"
+# The issue numbers a push CLAIMS, not every `#N` it mentions. A cross-reference
+# ("see #1288", "Merge pull request #1589") claims nothing — read as a claim it
+# makes a foreign Tier 3 plan this push's proof to produce and reds a branch that
+# has nothing to do with it. Two forms count: a GitHub closing trailer anywhere
+# in the message, and the `… (#N)` subject convention.
+_ISSUE_CLOSING = re.compile(
+    r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s*:?\s+#(\d+)\b", re.IGNORECASE)
+_ISSUE_SUBJECT = re.compile(r"\(#(\d+)\)\s*$")
+
+
+def integration_push(env: dict[str, str] | None = None) -> tuple[bool, str]:
+    """(is this push a merge?, why not) — the switch between hard and note.
+
+    The push-anchored arms promise something that hangs on the MERGE, not on
+    every push: a worker pushes its feature branch while the review is still
+    ahead of it (the attestation is written later, from the bundle). Blocking
+    that push is a chicken-and-egg. So: hard only when a target ref is an
+    integration branch, otherwise the same findings as notes.
+
+    No variable at all (a manual run, CI) is deliberately the soft side: the
+    gate cannot know where the work would land, and guessing "merge" would
+    red every local run. The known limitation: a PR merged server-side never
+    pushes main from a clone, so this switch never fires for that route —
+    there, finish.py (run before the PR) is the stop, and the archive arm
+    above catches the residue on main."""
+    source = os.environ if env is None else env
+    raw = source.get(PUSH_TARGETS_ENV, "") or source.get(PRE_COMMIT_TARGET_ENV, "")
+    targets = raw.split()
+    if not targets:
+        return False, (f"no push target known ({PUSH_TARGETS_ENV} unset) — hard "
+                       f"only on a push to main/master")
+    if any(t in INTEGRATION_TARGET_REFS for t in targets):
+        return True, ""
+    return False, (f"push targets {' '.join(targets)}, no integration branch — "
+                   f"the proof is due on the merge push")
+
+
+def merge_base(root: Path) -> str | None:
+    """The commit the pushed range starts at, resolved offline. Tries the
+    integration branches in order, then falls back to HEAD~1. None means
+    "cannot tell", never "nothing to check": callers degrade to the
+    plan-anchored arms rather than reddening a clone without an integration
+    ref (a fresh shallow checkout, a differently named default branch)."""
+    for ref in INTEGRATION_REFS:
+        out = _git_bytes(root, "merge-base", "HEAD", ref)
+        if out is not None and out.strip():
+            return out.decode(errors="replace").strip()
+    out = _git_bytes(root, "rev-parse", "HEAD~1")
+    if out is not None and out.strip():
+        return out.decode(errors="replace").strip()
+    return None
+
+
+def issue_refs_in_range(root: Path) -> set[int]:
+    """The issue numbers the commits since the merge-base CLAIM as their own
+    (`_ISSUE_CLOSING`, `_ISSUE_SUBJECT`) — read from the local repo only, so
+    the gate stays offline like its neighbours. A plan is this push's
+    business when the push carries its file (`paths_in_flight`) or claims
+    its issue here; both arms mean the same thing by "this push's proof"."""
+    base = merge_base(root)
+    if base is None:
+        return set()
+    out = _git_bytes(root, "log", "--format=%B%x00", f"{base}..HEAD")
+    if out is None:
+        return set()
+    refs: set[int] = set()
+    for message in out.decode(errors="replace").split("\0"):
+        body = message.strip()
+        if not body:
+            continue
+        refs |= {int(n) for n in _ISSUE_CLOSING.findall(body)}
+        refs |= {int(n) for n in _ISSUE_SUBJECT.findall(body.splitlines()[0])}
+    return refs
+
+
+def paths_in_flight(root: Path) -> set[str]:
+    """Repo-relative paths this push carries: the committed range
+    `{base}...HEAD`, nothing else. An unscoped "every active Tier 3 plan"
+    reds every push in the repo for a plan the pusher does not own (measured
+    downstream: a committed decision paper, tier 3, deliberately unimplemented,
+    blocked an unrelated branch). Untracked, staged and modified files are
+    deliberately NOT in flight: a push transports commits, and an uncommitted
+    plan draft travels with nothing. `--no-optional-locks`: a gate must never
+    take `index.lock` out from under a concurrent commit."""
+    base = merge_base(root)
+    if base is None:
+        return set()
+    out = _git_bytes(root, "--no-optional-locks", "diff", "--name-only",
+                     f"{base}...HEAD")
+    if out is None:
+        return set()
+    return {line.strip() for line in out.decode(errors="replace").splitlines()
+            if line.strip()}
+
+
+def _plan_issue_numbers(text: str) -> set[int]:
+    """The issue numbers a plan declares — the join between a pushed commit
+    and the tier only the plan knows."""
+    numbers: set[int] = set()
+    for m in ISSUE_DECL.finditer(text):
+        tok = m.group(1)
+        if tok.isascii() and tok.isdigit():
+            numbers.add(int(tok))
+            continue
+        parsed = parse_issue_ref(tok)
+        if parsed is not None:
+            numbers.add(parsed[1])
+    return numbers
+
+
 def _plan_work_ids(stem: str, text: str, *, include_dedated: bool) -> set[str]:
     """The identifiers a REVIEW's `work=` may use to match this plan: the file
     stem, any `issue:` it declares, and — only when it is unique across the
@@ -377,6 +515,18 @@ def check(root: Path) -> tuple[list[str], list[str]]:
     hard: list[str] = []
     soft: list[str] = []
 
+    # the push-anchored arms below are the merge's condition, not every
+    # push's — see integration_push()
+    to_integration, not_a_merge = integration_push()
+
+    def presence(finding: str) -> None:
+        """A push-anchored presence finding: hard on the merge push, a
+        visible note anywhere else."""
+        if to_integration:
+            hard.append(finding)
+        else:
+            soft.append(f"{finding} [note only: {not_a_merge}]")
+
     # --- parse all REVIEW attestations from the (recursive) journal ---
     all_records: list[tuple[int, dict]] = []
     jdir = root / JOURNAL_DIR
@@ -405,11 +555,14 @@ def check(root: Path) -> tuple[list[str], list[str]]:
     # --- presence: archived (merged) plans that declare Tier 2+ ---
     adir = root / PLANS_ARCHIVE
     enforced_any = False
+    # a de-dated slug shared by two archived plans is ambiguous — one review
+    # must not clear both, so such slugs are excluded from matching
+    dedated_counts: dict[str, int] = {}
+    # (rel, text, tier, work ids) of every tiered plan — the join the
+    # commit-anchored arm below needs
+    tiered_plans: list[tuple[str, str, int, set[str]]] = []
     if adir.is_dir():
         plans = [p for p in sorted(adir.glob("*.md")) if not p.name.startswith("design-")]
-        # a de-dated slug shared by two archived plans is ambiguous — one review
-        # must not clear both, so such slugs are excluded from matching
-        dedated_counts: dict[str, int] = {}
         for p in plans:
             key = DATE_PREFIX.sub("", p.stem)
             dedated_counts[key] = dedated_counts.get(key, 0) + 1
@@ -438,9 +591,8 @@ def check(root: Path) -> tuple[list[str], list[str]]:
                 continue
             unique = dedated_counts[DATE_PREFIX.sub("", p.stem)] == 1
             ids = _plan_work_ids(p.stem, text, include_dedated=unique)
-            req = min(tier, 3)  # REVIEW grammar ceiling; see speckit_unreviewed
-            cleared = any(f["work"] in ids and int(f["tier"]) >= req for f in passes)
-            if not cleared:
+            tiered_plans.append((f"{PLANS_ARCHIVE}/{p.name}", text, tier, ids))
+            if not _cleared(passes, ids, tier):
                 hard.append(f"{PLANS_ARCHIVE}/{p.name}: archived plan declares tier {tier} "
                             f"but has no clearing REVIEW (verdict=pass, work in {sorted(ids)}, "
                             f"tier>={tier}) and no 'review-waived:' line")
@@ -453,19 +605,23 @@ def check(root: Path) -> tuple[list[str], list[str]]:
                     f"in {sorted(ids)}, tier>={tier}) and no 'review-waived:' "
                     f"— run /review before merging; finish.py blocks on this")
 
-    # active Tier 2+ plans are not presence-checked (by design: no red CI
-    # mid-development) — but "forgot to archive on merge" and that design are
-    # indistinguishable and silent, so the gap is at least made visible
+    # ACTIVE plans this push carries. Waiting for the archive step means the
+    # proof arrives after the merge it was supposed to gate — so Tier 3 is
+    # enforced here, at the push, scoped to the plans this push actually
+    # touches (paths_in_flight). Tier 2 keeps the archive-time threshold:
+    # "forgot to archive on merge" and that design are indistinguishable and
+    # silent, so the gap is at least made visible.
     pdir = root / PLANS_ACTIVE
+    in_flight = paths_in_flight(root)
     if pdir.is_dir():
-        active = 0
+        active_tier2 = 0
         for p in sorted(pdir.glob("*.md")):
             if p.name.startswith("design-"):
                 continue
             try:
                 text = _unfenced(p.read_text(encoding="utf-8", errors="replace"))
             except OSError:
-                continue  # active plans are not enforced; the archive path diagnoses
+                continue  # unreadable active plan; the archive path diagnoses
             m = TIER_DECL.search(text)
             # a plan that TALKS about its tier but never declares it sits outside
             # every tier-keyed gate (presence, spec-before-plan, issue-before-code)
@@ -476,12 +632,57 @@ def check(root: Path) -> tuple[list[str], list[str]]:
                             f"declares none — the gates key on a 'tier: N' line; "
                             f"without it, review presence, spec-before-plan and "
                             f"issue-before-code are all unarmed")
-            if m and int(m.group(1)) >= 2:
-                active += 1
-        if active:
-            soft.append(f"{active} active Tier 2+ plan(s) in {PLANS_ACTIVE} — "
-                        f"review presence is only enforced once a plan is "
+            if not m:
+                continue
+            tier = int(m.group(1))
+            if tier < 2:
+                continue
+            if tier == 2:
+                active_tier2 += 1
+            rel = f"{PLANS_ACTIVE}/{p.name}"
+            ids = _plan_work_ids(p.stem, text, include_dedated=False)
+            tiered_plans.append((rel, text, tier, ids))
+            if tier < 3:
+                continue
+            if WAIVED.search(text):
+                soft += waiver_debt_notes(rel, text, WAIVED, "review-waived")
+                continue
+            if rel not in in_flight:
+                # somebody else's plan, sitting in the tree untouched by this
+                # push — not this push's proof to produce
+                continue
+            if not _cleared(passes, ids, tier):
+                presence(f"{rel}: active plan declares tier {tier} but has no "
+                         f"clearing REVIEW (verdict=pass, work in {sorted(ids)}, "
+                         f"tier>={tier}) and no 'review-waived:' line — at Tier 3 "
+                         f"the proof is due before the merge, not at archival")
+        if active_tier2:
+            soft.append(f"{active_tier2} active Tier 2 plan(s) in {PLANS_ACTIVE} — "
+                        f"at Tier 2 review presence is enforced once the plan is "
                         f"archived (the merge step); archive on merge")
+
+    # the commit-anchored arm: what exists at every merge is the issue plus
+    # the commits that CLAIM it (a closing trailer or the `… (#N)` subject —
+    # a bare mention is somebody else's business, see issue_refs_in_range).
+    # The tier still comes from the plan — a gate that invents its own tier
+    # would be worse than the gap it closes — so a claimed issue without a
+    # findable plan is a note, not a failure.
+    for number in sorted(issue_refs_in_range(root)):
+        matching = [(rel, text, tier, ids) for rel, text, tier, ids in tiered_plans
+                    if number in _plan_issue_numbers(text)]
+        if not matching:
+            soft.append(f"a commit in the pushed range claims #{number}, but no "
+                        f"plan declares that issue — no tier to key on, so review "
+                        f"presence is not enforced for it")
+            continue
+        for rel, text, tier, ids in matching:
+            if tier < 3 or WAIVED.search(text):
+                continue
+            if not _cleared(passes, ids, tier):
+                presence(f"a commit in the pushed range claims #{number}, whose "
+                         f"plan {rel} declares tier {tier}, but no clearing REVIEW "
+                         f"(verdict=pass, work in {sorted(ids)}, tier>={tier}) and "
+                         f"no 'review-waived:' line")
 
     hard.extend(_unhomed_plans(root))
 

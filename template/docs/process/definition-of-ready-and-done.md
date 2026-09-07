@@ -45,6 +45,7 @@ A unit of work is ready to be started when:
 | R2 | Acceptance stated in **EARS** (`When <trigger>, the system shall <response>`), decomposed to include the **negative, edge, authorization, and invalidation/cleanup** cases; an epic carries scope + invariants instead | the issue-hygiene view; **hard** via the `github-master` gate where installed; decomposed at the tier's design step — an upfront brainstorm (Tier 3) or the plan (Tier 2) (`workflow.md`) |
 | R3 | Linked to its epic/story and the applicable design / decision records / product frame | brainstorm & plan review (`workflow.md`, mandatory rule 4) |
 | R4 | Dependencies known (GitHub issue links / sub-issues), and no open blocker remains | the project board and issue links; else review |
+| R5 | A change with a UI surface has inspected the existing shared components, tokens and layout/interaction patterns and recorded a **UI reuse map** before implementation: element → existing owner → reuse / extend / new *with reason* → affected consumers and how they are verified. "Not applicable" is a valid entry when there is no UI change — an unexamined copy is not | the plan (or quick-flow note) and its review; where a stack guide exists it is the detail owner and may sharpen this row, never weaken it |
 
 Recognizing the tier (`risk-tiers.md`) is part of getting to Ready: it decides
 how much of the cycle runs (mandatory rule 2), and a Tier 2+ item is not ready
@@ -84,6 +85,7 @@ A change is done when:
 | D4 | Decision obligations reconciled (adopted, or deferred with a follow-up); a new significant decision is recorded before the code that assumes it | the core `decision-records` gate + review (mandatory rule 4) |
 | D5 | Atomic, conventional commit(s); any skipped gate or dropped scope named in the commit | `commits.md` + review (mandatory rule 8) |
 | D6 | Issue status set at each phase transition, and the issue closed with the commit ref on merge | the claim/lifecycle convention + review (`github-issues` module) |
+| D7 | UI reuse decisions (R5) are traced to actual consumers: a changed shared owner is verified in its representative consumers and relevant states, no unexplained copy or local re-skin of a shared control remains, and the surface meets the **UI acceptance floor** (`review-checklist.md`, Surfaces) with browser evidence, not a token-lint alone | **review** (`review-checklist.md`); the stack guide, where one exists, names the evidence |
 
 The **Review** phase (`workflow.md`, `review-checklist.md`) owns the DoD gate: it
 does not pass unless each applicable item is met or a documented deviation is

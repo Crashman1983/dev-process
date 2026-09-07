@@ -533,6 +533,38 @@ Code, der sie voraussetzt (Rule 4) — Supersession bzw. versionierter
 Contract-Wechsel mit allen Konsumenten, nie stille Drift; adr/README
 und contract-first.md tragen den Grundsatz), `v2.7.8`.
 
+SP65 (kenni-upstreaming: vier Prozess-Erfindungen aus Kenni, die generisch
+tragen, in den Kern gehoben. **Launch-Owner** (`gate_invoke.py`, reines
+stdlib: die eine Stelle, die entscheidet, womit ein PEP-723-deklarierendes
+Skript gestartet wird — Kinder des Runners, `finish.py` und das
+Review-Bundle laufen darüber; „nicht startbar" wird getrennt von „rot"
+gemeldet, denn ein Runner, der nicht anläuft, ist ein Launch-Problem mit
+anderem Owner als eine Regression). **Hook-Doktor** (dasselbe Modul:
+`.pre-commit-config.yaml` neben gesetztem `core.hooksPath` heißt, jede
+Registrierung ist stumm — in Kenni 25 Tage lang unbemerkt; gate_runner
+und finish blocken hart, ein nie installierter Hook ist eine Note bzw.
+ein finish-Blocker: ein fehlender Check ist ein Blocker, nie ein Skip).
+**Push-verankerte Presence** (check_review: ein aktiver Tier-3-Plan, den
+DIESER Push trägt — Datei im gepushten Bereich oder Issue per
+Closing-Trailer/`(#N)`-Subject beansprucht — braucht den clearing pass
+hart auf dem Push nach main/master, als Note sonst; das Ziel liest das
+Gate aus `PRE_COMMIT_REMOTE_BRANCH` des pre-commit-Frameworks oder
+`PROCESS_PUSH_TARGETS` eines eigenen Hooks; bekannte Grenze: ein
+serverseitig gemergter PR pusht main nie lokal — dort bleibt finish.py
+der Stop). **finish auf Branch-Besitz gescoped** (nur Pläne, die der
+Branch trägt oder beansprucht, sind seine Review-Schuld und
+Archivierungspflicht — ein fremdes Entscheidungspapier im Baum blockte
+in Kenni einen unbeteiligten Branch). **UI-Wiederverwendungspflicht**
+(DoR R5 / DoD D7: Reuse-Map vor Implementierung, Konsumenten-Nachweis
+danach; review-checklist „Surfaces": nichts geclippt, 24-px-Ziele nach
+WCAG 2.5.8, zugänglicher Name auf jedem Button/Link, nichts verdeckt,
+vier Zustände, beide Themes — Stack-Guides schärfen, senken nie).
+**Ratchet-Muster** (testing.md: Baseline pinnt Legacy, neue Befunde und
+verwaiste Ausnahmen scheitern; die Baseline kann nur schrumpfen) und
+**„Unmessbar ist nicht rot"** (Mess-Gates verweigern auf belastetem Host
+mit eigenem Exit-Code, EX_TEMPFAIL, statt zu scheitern)) ausgeliefert,
+`v2.8.0`.
+
 ## Sub-Projekt-Tabelle (SP1–SP24)
 
 Die Tabelle wurde bis SP24 gepflegt; ab SP25 trägt das Narrativ oben die

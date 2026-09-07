@@ -142,6 +142,38 @@ def test_speckit_plan_in_flight_is_not_blocked(render, tmp_path):
     assert r.returncode == 0, r.stdout + r.stderr
 
 
+def test_foreign_active_plan_does_not_block_this_branch(render, tmp_path):
+    # SP65: a tier-3 decision paper committed on main by someone else is
+    # neither this branch's review debt nor its archiving duty
+    out = render(tmp_path, {"project_name": "demo"})
+    _git(out, "init", "-q", "-b", "main")
+    _git(out, "config", "user.email", "t@example.com")
+    _git(out, "config", "user.name", "Test")
+    _active_plan(out, "2026-09-01-foreign.md", "# Plan\n\ntier: 3\nissue: #5\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "base")
+    _git(out, "checkout", "-q", "-b", "feature")
+    (out / "payload.txt").write_text("mine\n", encoding="utf-8")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "feat: unrelated")
+    r = _run(out)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "foreign" not in r.stdout
+    # but a commit that CLAIMS the plan's issue pulls it in
+    _git(out, "commit", "-q", "--allow-empty", "-m", "feat: do it (#5)")
+    r = _run(out)
+    assert r.returncode == 1
+    assert "foreign" in r.stdout and "/review before /finish" in r.stdout
+
+
+def test_not_runnable_gates_are_named_apart_from_red(render, tmp_path, monkeypatch):
+    out = _repo_on_feature(render, tmp_path)
+    (out / "scripts/process/gate_runner.py").unlink()
+    r = _run(out)
+    assert r.returncode == 1
+    assert "NOT RUNNABLE (not red)" in r.stdout and "missing" in r.stdout
+
+
 def test_tail_names_the_full_suite_before_merge(render, tmp_path):
     out = _repo_on_feature(render, tmp_path)
     r = _run(out)

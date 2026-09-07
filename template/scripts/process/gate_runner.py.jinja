@@ -24,6 +24,13 @@ except ImportError:
     print("gate-runner: PyYAML is required — pip install 'PyYAML>=6'", file=sys.stderr)
     raise SystemExit(1)
 
+# gate_invoke owns "how is a declaring script launched" and "can the
+# registered hooks run at all" — one owner instead of a copy per caller.
+# The sibling import must not drop a __pycache__ into the tree it judges.
+sys.dont_write_bytecode = True
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling import
+from gate_invoke import child_argv, hook_wiring_findings  # noqa: E402
+
 # gate-name -> (module answer key, command relative to repo root).
 # A module key of None marks a *core* gate: it ships in core and always runs,
 # regardless of the manifest. Core gates guard artifacts that are themselves
@@ -116,6 +123,15 @@ def main() -> int:
         return 0
     warn = "--warn" in sys.argv
     failed = []
+    # a registered hook that cannot run is a missing check reported as passed
+    # — the loudest thing here, before any gate result
+    hook_hard, hook_soft = hook_wiring_findings(root)
+    for note in hook_soft:
+        print(f"gate-runner: note: {note}")
+    if hook_hard:
+        for finding in hook_hard:
+            print(f"gate-runner: hook-wiring: {finding}", file=sys.stderr)
+        failed.append("hook-wiring")
     # don't litter the repo with __pycache__ from the gates' sibling imports
     env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
     for name in active:
@@ -133,7 +149,10 @@ def main() -> int:
             continue
         print(f"== running {name} ==")
         try:
-            rc = subprocess.run(cmd, cwd=root, env=env, timeout=GATE_TIMEOUT_S).returncode
+            # a child that declares its own dependencies (PEP 723) runs through
+            # the launcher that resolves them, not this runner's interpreter
+            rc = subprocess.run(child_argv(root, cmd), cwd=root, env=env,
+                                timeout=GATE_TIMEOUT_S).returncode
         except subprocess.TimeoutExpired:
             print(f"gate-runner: {name} exceeded {GATE_TIMEOUT_S}s and was killed "
                   f"— a hanging gate is a failure, not a wait", file=sys.stderr)

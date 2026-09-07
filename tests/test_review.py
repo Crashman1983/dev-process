@@ -522,7 +522,117 @@ def test_active_tier2_plan_gets_visibility_note(render, tmp_path):
     (d / "2026-07-11-wip.md").write_text("# WIP\n\ntier: 2\n")
     r = _run(out)
     assert r.returncode == 0, r.stdout
-    assert "active Tier 2+ plan(s)" in r.stdout
+    assert "active Tier 2 plan(s)" in r.stdout
+
+
+# --- SP65: push-anchored presence — Tier 3 proof is due on the merge push ---
+
+def _feature_repo_with_active_plan(render, tmp_path, *, tier=3, issue="#77",
+                                   subject="feat: widget"):
+    out = render(tmp_path, {"project_name": "demo"})
+    _git(out, "init", "-q", "-b", "main")
+    _git(out, "config", "user.email", "t@example.com")
+    _git(out, "config", "user.name", "Test")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "base")
+    _git(out, "checkout", "-q", "-b", "feature")
+    d = out / ".process-work/plans"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "2026-09-07-widget.md").write_text(
+        f"# Plan\n\ntier: {tier}\nissue: {issue}\n", encoding="utf-8")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", subject)
+    return out
+
+
+def test_tier3_active_plan_in_flight_is_note_without_push_target(render, tmp_path):
+    out = _feature_repo_with_active_plan(render, tmp_path)
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+    assert "proof is due before the merge" in r.stdout
+    assert "[note only:" in r.stdout
+
+
+def test_tier3_active_plan_in_flight_is_hard_on_merge_push(render, tmp_path):
+    import os
+    out = _feature_repo_with_active_plan(render, tmp_path)
+    env = {**os.environ, "PROCESS_PUSH_TARGETS": "refs/heads/main"}
+    r = _run(out, env=env)
+    assert r.returncode == 1, r.stdout
+    assert "proof is due before the merge" in r.stdout
+    assert "[note only:" not in r.stdout
+
+
+def test_pre_commit_remote_branch_is_read_without_wiring(render, tmp_path):
+    # the pre-commit framework sets PRE_COMMIT_REMOTE_BRANCH for its pre-push
+    # stage — the gate reads it, so the rendered config needs no hook script
+    import os
+    out = _feature_repo_with_active_plan(render, tmp_path)
+    env = {**os.environ, "PRE_COMMIT_REMOTE_BRANCH": "refs/heads/master"}
+    assert _run(out, env=env).returncode == 1
+    env = {**os.environ, "PRE_COMMIT_REMOTE_BRANCH": "refs/heads/feature"}
+    r = _run(out, env=env)
+    assert r.returncode == 0 and "no integration branch" in r.stdout
+
+
+def test_tier3_plan_not_carried_by_this_push_is_ignored(render, tmp_path):
+    # somebody else's decision paper, committed on main before the branch:
+    # not this push's proof to produce (the unscoped arm blocked an unrelated
+    # branch in production)
+    import os
+    out = render(tmp_path, {"project_name": "demo"})
+    _git(out, "init", "-q", "-b", "main")
+    _git(out, "config", "user.email", "t@example.com")
+    _git(out, "config", "user.name", "Test")
+    d = out / ".process-work/plans"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "2026-09-01-foreign.md").write_text("# Plan\n\ntier: 3\nissue: #5\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "base with foreign plan")
+    _git(out, "checkout", "-q", "-b", "feature")
+    (out / "payload.txt").write_text("mine\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "feat: unrelated work, see #5")
+    env = {**os.environ, "PROCESS_PUSH_TARGETS": "refs/heads/main"}
+    r = _run(out, env=env)
+    assert r.returncode == 0, r.stdout
+    assert "foreign" not in r.stdout  # a bare mention claims nothing
+
+
+def test_commit_claiming_issue_of_tier3_plan_is_hard_on_merge_push(render, tmp_path):
+    import os
+    out = render(tmp_path, {"project_name": "demo"})
+    _git(out, "init", "-q", "-b", "main")
+    _git(out, "config", "user.email", "t@example.com")
+    _git(out, "config", "user.name", "Test")
+    d = out / ".process-work/plans"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "2026-09-01-claimed.md").write_text("# Plan\n\ntier: 3\nissue: #5\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "base with plan")
+    _git(out, "checkout", "-q", "-b", "feature")
+    (out / "payload.txt").write_text("mine\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "feat: implement it (#5)")
+    env = {**os.environ, "PROCESS_PUSH_TARGETS": "refs/heads/main"}
+    r = _run(out, env=env)
+    assert r.returncode == 1, r.stdout
+    assert "claims #5" in r.stdout and "2026-09-01-claimed.md" in r.stdout
+    # the clearing pass lifts it
+    _journal(out, _review(work="5", tier="3",
+                          independence="bundle,non-implementing,cross-model"))
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "docs: attest")
+    assert _run(out, env=env).returncode == 0
+
+
+def test_tier2_active_plan_stays_archive_time(render, tmp_path):
+    import os
+    out = _feature_repo_with_active_plan(render, tmp_path, tier=2)
+    env = {**os.environ, "PROCESS_PUSH_TARGETS": "refs/heads/main"}
+    r = _run(out, env=env)
+    assert r.returncode == 0, r.stdout
+    assert "active Tier 2 plan(s)" in r.stdout
 
 
 # --- unhomed plans: a tier-declaring plan outside .process-work/specs is loud ---

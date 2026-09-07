@@ -107,6 +107,32 @@ and merge (the bundle preflight runs the process gates, never the
 suite). One full run per batch; every later gate reads the certificate
 instead of re-earning it.
 
+## Ratchets — a threshold that only ever tightens
+
+Some qualities cannot be gated with one universal number on day one because
+the existing tree already violates them a hundred times (a token-reuse rule,
+a layout budget, a lint category adopted late). The pattern that works is a
+**ratchet**: the current findings are pinned as a *baseline* (a tracked
+file, exact identities not a count), and the gate fails on any finding
+**not in the baseline** and on any baseline entry that **no longer occurs**
+(a stale exception is debt that has been paid and must be struck, or the
+baseline silently becomes an allowlist). Legacy is tolerated, new debt is
+not, and the baseline can only shrink. A ratchet is a gate, not a score: it
+needs no target and cannot be gamed by adding volume.
+
+## Unmeasurable is not red
+
+A measurement gate (performance budget, timing-sensitive E2E, resource
+limits) can only speak when its precondition holds — a quiet host, a warm
+cache, the fixture service up. When it does not, the gate **refuses to
+measure** and says so with its own exit code (a temporary-failure code such
+as `75`, `EX_TEMPFAIL`, distinct from a failing assertion), and the caller
+reports "not measured" rather than "failed". A refusal is a launch problem
+with a different owner than a regression; conflating them sends people
+hunting for a defect in the branch that lives in the machine. The same rule
+covers the process gates: `finish.py` and the review bundle name a runner
+that cannot start apart from a runner that ran red.
+
 ## Suite discipline
 
 - A **flaky test is a defect**, not weather: fix it or quarantine it the same

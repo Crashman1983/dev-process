@@ -281,7 +281,7 @@ def test_preflight_runner_failure_is_not_a_successful_bundle(render, tmp_path):
     (out / "scripts/process/gate_runner.py").unlink()
     r = _run(out, "--base", "main")
     assert r.returncode == 2
-    assert "review bundle unavailable: preflight runner missing" in r.stderr
+    assert "review bundle unavailable: preflight runner not runnable" in r.stderr
     assert "Review bundle" not in r.stdout
 
 

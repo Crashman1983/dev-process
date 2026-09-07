@@ -45,13 +45,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling import
 import check_kernel as _kernel_gate  # noqa: E402
 import check_review as _review_gate  # noqa: E402
+import gate_invoke as _launch  # noqa: E402  (one owner for "how to start the runner")
 
 CHECKLIST = "docs/process/review-checklist.md"
 PRODUCT = "PRODUCT.md"
 PLANS = ".process-work/plans"
 REVIEWS = ".process-work/reviews"
 DEFAULT_BASES = ("origin/main", "main", "origin/master", "master")
-GATE_RUNNER = "scripts/process/gate_runner.py"
 PREFLIGHT_TIMEOUT_S = 600
 DELTA_MAX_TIER = 2
 
@@ -117,12 +117,15 @@ def _resolve_base(root: Path, base: str | None) -> str | None:
 
 def _preflight(root: Path) -> tuple[bool, int, str]:
     """Run the authoritative gate runner before dispatching a review."""
-    runner = root / GATE_RUNNER
-    if not runner.is_file():
-        return False, 2, f"review bundle unavailable: preflight runner missing: {GATE_RUNNER}"
+    argv = _launch.gate_runner_argv(root)
+    if argv is None:
+        # exit 2 = unavailable, distinct from 1 = gates red: a runner that
+        # cannot start is a launch problem, not a finding about the branch
+        return False, 2, (f"review bundle unavailable: preflight runner not "
+                          f"runnable — {_launch.not_runnable_reason(root)}")
     try:
         result = subprocess.run(
-            [sys.executable, str(runner)], cwd=root, capture_output=True, text=True,
+            argv, cwd=root, capture_output=True, text=True,
             timeout=PREFLIGHT_TIMEOUT_S, encoding="utf-8", errors="replace",
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
