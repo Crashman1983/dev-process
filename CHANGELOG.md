@@ -599,6 +599,14 @@ Stunde Hand-Konfliktlösung pro Release, gemessen am Referenzprojekt mit
 fünf Skripten, einem Doc und einem Command, wird ein mechanischer Port))
 ausgeliefert, `v2.9.0`.
 
+Erster echter Lauf von `template_update.py` am Referenzprojekt deckte einen
+Copier-Fallstrick auf: `modules` und `harnesses` sind abgeleitete
+(`when: false`) Antworten, die copier bei jedem Update aus dem Default
+neu berechnet — die aufgezeichnete Antwort gewinnt NICHT, ein abgeschaltetes
+Modul kommt still zurück (beobachtet: git-hooks samt Anker-Konflikt). Der
+Helfer setzt jetzt jede aufgezeichnete Antwort als `--data` neu; BOOTSTRAP
+korrigiert die frühere Behauptung „recorded modules dict wins", `v2.9.1`.
+
 ## Sub-Projekt-Tabelle (SP1–SP24)
 
 Die Tabelle wurde bis SP24 gepflegt; ab SP25 trägt das Narrativ oben die

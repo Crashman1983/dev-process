@@ -140,7 +140,8 @@ def test_answers_strip_underscore_keys_and_restore_owned(render, tmp_path):
     tu = _load(out, "template_update")
     src, commit, data = tu.answers(out)
     assert src == "https://example.invalid/t.git" and commit == "v1.0.0"
-    assert "_commit" not in data and "project_name: d" in data
+    assert "_commit" not in data and data["project_name"] == "d"
+    assert "speckit: true" in data["modules"]  # re-asserted as --data on update
     # a template overwrite of an owned file is put back to HEAD
     (out / "scripts/process/finish.py").write_text("overwritten\n")
     restored = tu.restore_owned(out, tu.owned_patterns(out))

@@ -160,8 +160,12 @@ block and turns the kernel gate red after the update. After any update, re-run
 `uvx pre-commit install --hook-type pre-commit --hook-type pre-push` if the
 `git-hooks` module is active.
 
-On update the **recorded `modules` dict wins**;
-to change the set, pass the new `modules` explicitly, as above.
+On a plain `copier update` the recorded `modules` dict does **not** win:
+`modules` is a derived (`when: false`) answer, and copier recomputes it from
+the template default on every update, so a module you switched off comes
+back. Pass the complete `modules` dictionary via `--data` on **every**
+update, as above — or use `scripts/process/template_update.py`, which
+re-asserts every recorded answer as `--data` for you.
 `--data` expects the **complete** `modules` dictionary with the new values,
 not just the changed keys. `update` checks out the latest **tagged** template
 release by default, preserves your local edits, and flags conflicts inline.
