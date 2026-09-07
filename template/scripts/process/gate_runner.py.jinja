@@ -12,6 +12,7 @@ silently while reporting green."""
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -105,6 +106,66 @@ def load_modules(root: Path) -> dict:
     return mods
 
 
+# --- note ledger: a note is printed when it is NEW, not on every run -------
+# Every gate run's stdout lands in an agent's context. The notes are stable
+# across runs by design (pre-adoption states, placeholder sections, known
+# freshness caveats), so re-printing them costs tokens on every push and
+# buries the one note that changed. The ledger remembers the notes of the
+# last run in .git/ (never in the tree) and prints only what is new; the
+# count of suppressed known notes is always shown, `--all-notes` shows them.
+# A fresh checkout (CI) has no ledger and prints everything — CI is the
+# authority and must not inherit a local silence.
+_NOTE_LINE = re.compile(r"^\S+: note: ")
+LEDGER_NAME = "process-notes-ledger"
+
+
+def _ledger_path(root: Path) -> Path | None:
+    try:
+        proc = subprocess.run(["git", "-C", str(root), "rev-parse", "--git-dir"],
+                              capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if proc.returncode != 0:
+        return None
+    gitdir = Path(proc.stdout.strip())
+    if not gitdir.is_absolute():
+        gitdir = root / gitdir
+    return gitdir / LEDGER_NAME
+
+
+def _read_ledger(path: Path | None) -> set[str]:
+    if path is None or not path.is_file():
+        return set()
+    try:
+        return {ln for ln in path.read_text(encoding="utf-8").splitlines() if ln}
+    except OSError:
+        return set()
+
+
+def _write_ledger(path: Path | None, notes: set[str]) -> None:
+    if path is None:
+        return
+    try:
+        path.write_text("\n".join(sorted(notes)) + ("\n" if notes else ""),
+                        encoding="utf-8")
+    except OSError:
+        pass  # a ledger that cannot be written just means notes print again
+
+
+def _emit(output: str, known: set[str], seen: set[str], show_all: bool) -> int:
+    """Print a gate's output, holding back notes already in the ledger.
+    Returns the number of suppressed notes."""
+    suppressed = 0
+    for line in output.splitlines():
+        if _NOTE_LINE.match(line):
+            seen.add(line)
+            if line in known and not show_all:
+                suppressed += 1
+                continue
+        print(line)
+    return suppressed
+
+
 def main() -> int:
     root = Path(__file__).resolve().parents[2]
     if not (root / ".copier-answers.yml").is_file():
@@ -122,12 +183,17 @@ def main() -> int:
             print(g)
         return 0
     warn = "--warn" in sys.argv
+    show_all = "--all-notes" in sys.argv
     failed = []
+    ledger = _ledger_path(root)
+    known = _read_ledger(ledger)
+    seen: set[str] = set()
+    suppressed = 0
     # a registered hook that cannot run is a missing check reported as passed
     # — the loudest thing here, before any gate result
     hook_hard, hook_soft = hook_wiring_findings(root)
-    for note in hook_soft:
-        print(f"gate-runner: note: {note}")
+    suppressed += _emit("".join(f"gate-runner: note: {n}\n" for n in hook_soft),
+                        known, seen, show_all)
     if hook_hard:
         for finding in hook_hard:
             print(f"gate-runner: hook-wiring: {finding}", file=sys.stderr)
@@ -150,15 +216,26 @@ def main() -> int:
         print(f"== running {name} ==")
         try:
             # a child that declares its own dependencies (PEP 723) runs through
-            # the launcher that resolves them, not this runner's interpreter
-            rc = subprocess.run(child_argv(root, cmd), cwd=root, env=env,
-                                timeout=GATE_TIMEOUT_S).returncode
+            # the launcher that resolves them, not this runner's interpreter.
+            # Output is captured so known notes can be held back (ledger).
+            proc = subprocess.run(child_argv(root, cmd), cwd=root, env=env,
+                                  timeout=GATE_TIMEOUT_S, capture_output=True,
+                                  text=True, encoding="utf-8", errors="replace")
+            rc = proc.returncode
+            suppressed += _emit(proc.stdout, known, seen, show_all)
+            if proc.stderr:
+                print(proc.stderr, end="" if proc.stderr.endswith("\n") else "\n",
+                      file=sys.stderr)
         except subprocess.TimeoutExpired:
             print(f"gate-runner: {name} exceeded {GATE_TIMEOUT_S}s and was killed "
                   f"— a hanging gate is a failure, not a wait", file=sys.stderr)
             rc = 1
         if rc != 0:
             failed.append(name)
+    _write_ledger(ledger, seen)
+    if suppressed:
+        print(f"gate-runner: {suppressed} known note(s) unchanged since the last "
+              f"run — not repeated (--all-notes shows them)")
     if failed:
         if warn:
             print(f"gate warnings (not blocking): {', '.join(failed)}")

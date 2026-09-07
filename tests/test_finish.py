@@ -174,6 +174,78 @@ def test_not_runnable_gates_are_named_apart_from_red(render, tmp_path, monkeypat
     assert "NOT RUNNABLE (not red)" in r.stdout and "missing" in r.stdout
 
 
+# --- v2.8.1: --apply executes the deterministic tail ------------------------
+
+def _run_args(root, *args):
+    return subprocess.run(
+        [sys.executable, str(root / "scripts/process/finish.py"), *args, "."],
+        cwd=root, capture_output=True, text=True,
+    )
+
+
+def _repo_with_origin(render, tmp_path):
+    out = render(tmp_path / "work", {"project_name": "demo"})
+    bare = tmp_path / "origin.git"
+    _git(out, "init", "-q", "-b", "main")
+    _git(out, "config", "user.email", "t@example.com")
+    _git(out, "config", "user.name", "Test")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "base")
+    subprocess.run(["git", "init", "-q", "--bare", str(bare)], check=True)
+    _git(out, "remote", "add", "origin", str(bare))
+    _git(out, "push", "-q", "-u", "origin", "main")
+    _git(out, "checkout", "-q", "-b", "feature")
+    _active_plan(out, "2026-09-07-tiny.md", "# Plan\n\ntier: 1\n")
+    (out / "payload.txt").write_text("done\n", encoding="utf-8")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "feat: tiny")
+    _git(out, "push", "-q", "-u", "origin", "feature")
+    return out, bare
+
+
+def test_apply_archives_and_stops_before_the_merge(render, tmp_path):
+    out, _bare = _repo_with_origin(render, tmp_path)
+    r = _run_args(out, "--apply")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "stopped before the merge" in r.stdout
+    assert (out / PLANS / "archive" / "2026-09-07-tiny.md").is_file()
+    assert not (out / PLANS / "2026-09-07-tiny.md").exists()
+    assert "archive plan(s) on merge" in _git(out, "log", "-1", "--format=%s").stdout
+    assert _git(out, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip() == "feature"
+
+
+def test_apply_with_asserted_suite_merges_pushes_and_deletes_branch(render, tmp_path):
+    out, bare = _repo_with_origin(render, tmp_path)
+    r = _run_args(out, "--apply", "--tests-passed")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "merged feature into main and pushed" in r.stdout
+    assert _git(out, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip() == "main"
+    remote_heads = subprocess.run(["git", "--git-dir", str(bare), "branch"],
+                                  capture_output=True, text=True).stdout
+    assert "feature" not in remote_heads and "main" in remote_heads
+    remote_log = subprocess.run(["git", "--git-dir", str(bare), "log", "-1",
+                                 "--format=%s", "main"],
+                                capture_output=True, text=True).stdout
+    assert "archive plan(s)" in remote_log
+
+
+def test_apply_red_suite_does_not_merge(render, tmp_path):
+    out, _bare = _repo_with_origin(render, tmp_path)
+    r = _run_args(out, "--apply", "--tests", "false")
+    assert r.returncode == 1
+    assert "full suite red" in r.stdout
+    assert _git(out, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip() == "feature"
+
+
+def test_apply_refuses_when_blocked(render, tmp_path):
+    out = _repo_on_feature(render, tmp_path)
+    _active_plan(out, "2026-07-04-widget.md", "# Plan\n\ntier: 2\nissue: none\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "feat: widget plan")
+    r = _run_args(out, "--apply", "--tests-passed")
+    assert r.returncode == 1 and "nothing applied" in r.stdout
+
+
 def test_tail_names_the_full_suite_before_merge(render, tmp_path):
     out = _repo_on_feature(render, tmp_path)
     r = _run(out)

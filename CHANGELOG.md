@@ -565,6 +565,21 @@ verwaiste Ausnahmen scheitern; die Baseline kann nur schrumpfen) und
 mit eigenem Exit-Code, EX_TEMPFAIL, statt zu scheitern)) ausgeliefert,
 `v2.8.0`.
 
+Zwei Token- und Zeitsparer, auf Sebs Frage „was lässt sich noch per
+Skript automatisieren": **Note-Ledger im gate_runner** (jede Gate-Note
+landet im Kontext des Agenten, und die Notes sind konstruktionsbedingt
+stabil — Pre-Adoption-Zustände, Platzhalter, Freshness-Hinweise — also
+kostete jeder Push dieselben Zeilen und begrub die eine, die sich
+geändert hat; der Runner merkt sich die Notes des letzten Laufs in
+`.git/`, druckt nur Neues, zählt das Unterdrückte, `--all-notes` zeigt
+alles; ein frischer Checkout hat kein Ledger und druckt alles — CI erbt
+kein lokales Schweigen) und **`finish.py --apply`** (der Tail-Checker
+führt den deterministischen Teil selbst aus statt ihn zum Abtippen zu
+drucken: Archiv-Commit und Rebase immer, Merge/Push/Branch-Löschen nur
+hinter der vollen Suite des Pakets — `--tests CMD` läuft sie, `--tests-
+passed` behauptet sie; jeder Schritt druckt sein Kommando, der erste
+Fehler stoppt in einem Zustand, den git erklärt), `v2.8.1`.
+
 ## Sub-Projekt-Tabelle (SP1–SP24)
 
 Die Tabelle wurde bis SP24 gepflegt; ab SP25 trägt das Narrativ oben die

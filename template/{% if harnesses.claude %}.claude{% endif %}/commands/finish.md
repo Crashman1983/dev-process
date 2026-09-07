@@ -13,6 +13,17 @@ publish/prune. Execute the printed steps; do not improvise the order
 (`docs/process/commits.md`, Merging — the plan archives BEFORE the merge,
 and merge leaves no residue).
 
+Then let the checker execute the deterministic part instead of retyping
+it:
+
+    uv run scripts/process/finish.py --apply            # archive commit + rebase, stops before the merge
+    uv run scripts/process/finish.py --apply --tests "<full suite command>"   # … then merge, push, delete branch
+    uv run scripts/process/finish.py --apply --tests-passed                  # same, asserting the suite already ran
+
+Every step prints its command; the first failure stops the run in a state
+git explains. The merge only happens behind the batch's FULL suite (test
+economy, `docs/process/testing.md`).
+
 BLOCKED means exactly one thing: the tail is not reachable yet — most often
 a missing clearing pass (run `/review`) or red gates. Do not merge around a
 BLOCKED verdict; the production failures this command exists for were all

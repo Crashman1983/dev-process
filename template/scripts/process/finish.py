@@ -6,9 +6,11 @@ a plan merged without its clearing pass, a pass recorded but the plan never
 archived, a merge that left branch and worktree behind. `/finish` runs the
 tail as ONE readable verdict instead of a ritual scattered over four docs.
 
-Read-only by design: it verifies and then PRINTS the exact remaining
-commands — it never merges, archives, or deletes anything itself. The agent
-(or human) executes; the checker cannot wreck a tree.
+Read-only by default: it verifies and then PRINTS the exact remaining
+commands. With `--apply` it executes the deterministic part itself
+(archive commit, rebase; then merge, push and branch delete only behind the
+batch's full suite, `--tests CMD` or `--tests-passed`) — every step prints
+its command and the first failure stops in a state git explains.
 
 Checks, in order:
   1. on a feature branch (finishing main is meaningless)
@@ -180,6 +182,7 @@ def check(root: Path) -> tuple[list[str], list[str]]:
                     if ln.strip()][-3:]
             blockers.append("gate suite red: " + " | ".join(last))
 
+    check.last_archive = list(to_archive)  # apply() reuses the same verdict
     if blockers:
         return blockers, []
 
@@ -219,8 +222,97 @@ def check(root: Path) -> tuple[list[str], list[str]]:
     return [], tail
 
 
+def _sh(root: Path, argv: list[str]) -> bool:
+    """Run one tail command visibly; False on failure (the caller stops)."""
+    print(f"finish: $ {' '.join(argv)}")
+    return subprocess.run(argv, cwd=str(root)).returncode == 0
+
+
+def apply(root: Path, *, tests: str | None, tests_passed: bool) -> int:
+    """--apply: execute the deterministic part of the tail instead of
+    printing it for an agent to retype. Archive commit and rebase always;
+    the merge only behind the batch's full suite — run here via --tests
+    CMD, or asserted with --tests-passed. Every step prints its command and
+    the first failure stops the run: the tree is then in a state git
+    explains (a rebase conflict, a rejected push), never half-merged."""
+    blockers, _tail = check(root)
+    if blockers:
+        print("finish: BLOCKED — nothing applied:")
+        for b in blockers:
+            print(f"  - {b}")
+        return 1
+    branch = _git("rev-parse", "--abbrev-ref", "HEAD")
+    default = "main" if _git("rev-parse", "--verify", "--quiet", "main") \
+        else "master"
+    # 1. archive the branch-owned plans ON the branch
+    to_archive = list(getattr(check, "last_archive", []))
+    if to_archive:
+        (root / PLANS_ARCHIVE).mkdir(parents=True, exist_ok=True)
+        for name in to_archive:
+            if not _sh(root, ["git", "mv", f"{PLANS_ACTIVE}/{name}",
+                              f"{PLANS_ARCHIVE}/{name}"]):
+                return 1
+        if not _sh(root, ["git", "commit", "-q", "-m",
+                          f"docs: archive plan(s) on merge — "
+                          f"{', '.join(to_archive)}"]):
+            return 1
+    # 2. rebase onto the moved integration branch (gates re-run below)
+    if _git("rev-parse", "--verify", "--quiet", f"origin/{default}") is not None:
+        if not _sh(root, ["git", "fetch", "-q", "origin", default]):
+            return 1
+        behind = _git("rev-list", "--count", f"{branch}..origin/{default}")
+        if behind and behind != "0":
+            if not _sh(root, ["git", "rebase", "-q", f"origin/{default}"]):
+                print("finish: rebase stopped — resolve, `git rebase "
+                      "--continue`, then re-run /finish --apply")
+                return 1
+            print("finish: rebased — NOTE: a rebase voids review-bundle "
+                  "digests; re-review if a bundle was built")
+            blockers, _tail = check(root)
+            if blockers:
+                print("finish: BLOCKED after rebase:")
+                for b in blockers:
+                    print(f"  - {b}")
+                return 1
+    # 3. the batch pays completeness once, here
+    if tests:
+        print(f"finish: $ {tests}   # the FULL suite, once per batch")
+        if subprocess.run(tests, shell=True, cwd=str(root)).returncode != 0:
+            print("finish: full suite red — not merging")
+            return 1
+    elif not tests_passed:
+        print("finish: applied archive + rebase; stopped before the merge — "
+              "run the FULL test suite now, then re-run with "
+              "`--apply --tests-passed` (or pass `--tests CMD` to run it here)")
+        return 0
+    # 4. merge ff-only, push, delete the remote branch
+    for argv in (["git", "checkout", "-q", default],
+                 ["git", "merge", "--ff-only", branch],
+                 ["git", "push", "-q", "origin", default],
+                 ["git", "push", "-q", "origin", "--delete", branch]):
+        if not _sh(root, argv):
+            return 1
+    print(f"finish: merged {branch} into {default} and pushed. Remaining by "
+          f"hand: remove the worktree if one carried the branch "
+          f"(`git worktree remove <path> && git worktree prune`), "
+          f"publish/prune finished spec dirs, close the tracking issue with "
+          f"the merge commit ref (DoD)")
+    return 0
+
+
 def main() -> int:
-    root = Path(sys.argv[1] if len(sys.argv) > 1 else ROOT).resolve()
+    args = [a for a in sys.argv[1:]]
+    tests: str | None = None
+    if "--tests" in args:
+        i = args.index("--tests")
+        tests = args[i + 1] if i + 1 < len(args) else None
+        del args[i:i + 2]
+    tests_passed = "--tests-passed" in args
+    do_apply = "--apply" in args
+    positional = [a for a in args if not a.startswith("--")]
+    root = Path(positional[0] if positional else ROOT).resolve()
+    if do_apply:
+        return apply(root, tests=tests, tests_passed=tests_passed)
     blockers, tail = check(root)
     if blockers:
         print("finish: BLOCKED:")
@@ -230,6 +322,9 @@ def main() -> int:
     print("finish: ready — remaining tail, in order:")
     for i, step in enumerate(tail, 1):
         print(f"  {i}. {step}")
+    print("finish: `--apply` executes archive + rebase (+ merge, push, branch "
+          "delete once the full suite is asserted via --tests CMD or "
+          "--tests-passed)")
     return 0
 
 
