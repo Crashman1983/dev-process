@@ -86,7 +86,10 @@ branch owns** — carried in its commits or claimed by its issue references —
 green gates, runnable hooks, clean tree) and prints the remaining steps in
 order. It names a gate suite that *cannot start* apart from one that ran red,
 and a registered hook that cannot run counts as a missing check, which is a
-blocker, never a skip. The tail failures it guards
+blocker, never a skip. With `--apply` it executes the deterministic part
+itself — archive commit, rebase, and (only behind the batch's full suite,
+`--tests CMD` or `--tests-passed`) the ff-only merge, push and branch
+delete — so the tail is one command, not a transcript to retype. The tail failures it guards
 against (merge without clearing pass, plan never archived, residue left
 behind) were all observed in production; prefer the checker over improvising
 the ritual from memory.

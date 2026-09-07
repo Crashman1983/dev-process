@@ -48,7 +48,12 @@ price of the guarantee it buys (no unreviewed Tier 2+ merge).
 2. Initialize Git if this is a new repository — `git init -b main` (the shipped
    CI workflow's push trigger and these docs assume the default branch is
    named `main`).
-3. Run the gates: `uv run scripts/process/gate_runner.py`.
+3. Run the gates: `uv run scripts/process/gate_runner.py`. A gate's *note*
+   prints when it is new; a note unchanged since the last run is counted,
+   not repeated (`--all-notes` shows them) — every run's output lands in an
+   agent's context, and known notes cost tokens on every push while burying
+   the one that changed. The ledger lives in `.git/`, so a fresh checkout
+   (CI) prints everything.
 4. Read `docs/process/mandatory-rules.md` and `docs/process/risk-tiers.md`.
 5. Create the process-baseline commit before product work starts.
 6. Install local hooks if the `git-hooks` module is active:

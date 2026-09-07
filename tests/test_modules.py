@@ -74,6 +74,34 @@ def test_gate_runner_leaves_no_pycache(render, tmp_path):
     assert not (out / "scripts/process/__pycache__").exists()
 
 
+def test_gate_runner_note_ledger_prints_a_note_once(render, tmp_path):
+    # v2.8.1: a note unchanged since the last run is not repeated (it would
+    # cost tokens in every agent context) — the count is shown, --all-notes
+    # restores everything; a NEW note prints immediately
+    import subprocess
+    import sys
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=out, check=True)
+    runner = [sys.executable, str(out / "scripts/process/gate_runner.py")]
+    first = subprocess.run(runner, cwd=out, capture_output=True, text=True)
+    assert first.returncode == 0, first.stdout + first.stderr
+    assert "review: note: no REVIEW attestations yet" in first.stdout
+    second = subprocess.run(runner, cwd=out, capture_output=True, text=True)
+    assert second.returncode == 0
+    assert "no REVIEW attestations yet" not in second.stdout
+    assert "known note(s) unchanged since the last run" in second.stdout
+    third = subprocess.run(runner + ["--all-notes"], cwd=out,
+                           capture_output=True, text=True)
+    assert "no REVIEW attestations yet" in third.stdout
+    # a new note appears at once
+    d = out / ".process-work/plans"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "2026-09-07-wip.md").write_text("# WIP\n\ntier: 2\n")
+    fourth = subprocess.run(runner, cwd=out, capture_output=True, text=True)
+    assert "active Tier 2 plan(s)" in fourth.stdout
+    assert not (out / "process-notes-ledger").exists()  # lives in .git/
+
+
 def test_gate_runner_names_hand_edited_manifest_cause(render, tmp_path):
     # SP52: module enabled but script missing (the hand-edited-answers trap)
     # must name the likely cause, not just "can't open file"
