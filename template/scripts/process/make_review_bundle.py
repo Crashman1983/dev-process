@@ -339,8 +339,9 @@ def _ui_evidence(root: Path, base_ref: str | None, plans: list[Path]) -> str:
     lines: list[str] = []
     pairs = 0
     for plan in plans:
-        slug = re.sub(r"^\d{4}-\d{2}-\d{2}-", "", plan.stem)
-        for cand in (root / EVIDENCE_DIR / slug, root / EVIDENCE_DIR / plan.stem):
+        stem = plan.parent.name if plan.name == "plan.md" else plan.stem
+        slug = re.sub(r"^\d{4}-\d{2}-\d{2}-", "", stem)
+        for cand in (root / EVIDENCE_DIR / slug, root / EVIDENCE_DIR / stem):
             if cand.is_dir():
                 imgs = sorted(p for p in cand.rglob("*") if p.is_file() and IMAGE_RE.search(p.name))
                 if imgs:
