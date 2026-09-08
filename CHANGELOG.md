@@ -644,6 +644,17 @@ erster Lauf an Kenni: 16 Gruppen, darunter „Fehler" identisch mit
 eines Spec-Kit-Plans (`specs/NNN-x/plan.md`) wird über das Verzeichnis
 gefunden, nicht über den Dateinamen `plan`, `v2.10.1`.
 
+SP68 (residue, auf Sebs Frage „räumt der Prozess ausreichend auf?" — gemessen
+an Kenni: 353 von 457 Remote-Branches bereits gemergt, 9 von 35 Spec-
+Verzeichnissen fertig, 5 aktive Pläne älter als zwei Wochen, alles ohne
+Rhythmus; nur die Plan-Archiv-Retention funktionierte, weil sie hart im Hook
+sitzt und der Fix ein Kommando ist: **`tidy.py`** (ein Report je Altlast mit
+dem Kommando, `--apply` erledigt den sicheren Teil — gemergte Remote-
+Branches, fertige Spec-Verzeichnisse via publish_and_prune, Journal falten,
+alte Archive, template-delta; alte aktive Pläne und stille Issues nur
+gelistet: Owner-Entscheidung) und **Digest Sektion 7** (dieselben Zahlen
+jede Woche vor dem Owner)) ausgeliefert, `v2.11.0`.
+
 Drei Befunde der Mac-Session (kenni-88) generisch geschlossen:
 **Hook-Doktor für `.githooks/`** (ein getracktes Hook-Verzeichnis ohne
 passendes `core.hooksPath` liest git nie — im Mac-Repo lief monatelang

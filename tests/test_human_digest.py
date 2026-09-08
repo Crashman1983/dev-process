@@ -53,7 +53,8 @@ def test_digest_planned_and_clean_spec_leaves_the_window(render, tmp_path):
     _spec(out, "013-done", brief=True, tasks=True, marker=False)
     r = _run(out)
     assert r.returncode == 0, r.stdout + r.stderr
-    assert "013-done" not in r.stdout                   # past the window
+    waiting = r.stdout.split("## 2")[0]
+    assert "013-done" not in waiting                    # past the window
     assert "nothing waiting" in r.stdout
 
 
@@ -115,3 +116,13 @@ def test_digest_points_at_screenshots_to_open(render, tmp_path):
     assert "What changed on screen" in r.stdout
     assert "A .process-work/reviews/panel/after-panel-375-dark.png" in r.stdout
     assert "1 in e2e/shots/" in r.stdout
+
+
+def test_digest_carries_the_residue_report(render, tmp_path):
+    out = render(tmp_path, {"project_name": "demo"})
+    (out / ".process-work/template-delta").mkdir(parents=True)
+    r = _run(out)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "Residue" in r.stdout and "template-delta/ left over" in r.stdout
+    assert "tidy.py" in r.stdout
+    assert not (out / "scripts/process/__pycache__").exists()

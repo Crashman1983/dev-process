@@ -220,3 +220,12 @@ like any shard — and drops the prose, which git still holds. Dry run by
 default, `--apply` writes. Two things should NOT be
 pruned casually: review reports (the audit trail the review gate's waivers
 point at) and the decision records (which are not working memory at all).
+
+Residue accrues where removal depends on remembering, so the pruning has
+one owner: `scripts/process/tidy.py` reports every kind of residue with the
+command that removes it — merged remote branches, finished spec
+directories, old archived plans, old journal shards (folded, records kept),
+a leftover template-delta directory — and `--apply` executes the safe part.
+Active plans past the window and quiet open issues are only listed: they
+are the owner's call. The weekly digest carries the same report, so the
+numbers are seen before they are felt.
