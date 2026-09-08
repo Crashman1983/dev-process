@@ -640,7 +640,9 @@ geänderte Pixel-Baselines als Pfade zum Öffnen);
 **check_baseline_duplicates.py** (byte-identische Screenshots unter
 verschiedenen Namen sind Beweis für nichts — Ratchet mit Baseline-Pin;
 erster Lauf an Kenni: 16 Gruppen, darunter „Fehler" identisch mit
-„teilweise geladen")) ausgeliefert, `v2.10.0`.
+„teilweise geladen")) ausgeliefert, `v2.10.0`. Patch: das Evidenz-Verzeichnis
+eines Spec-Kit-Plans (`specs/NNN-x/plan.md`) wird über das Verzeichnis
+gefunden, nicht über den Dateinamen `plan`, `v2.10.1`.
 
 Drei Befunde der Mac-Session (kenni-88) generisch geschlossen:
 **Hook-Doktor für `.githooks/`** (ein getracktes Hook-Verzeichnis ohne
