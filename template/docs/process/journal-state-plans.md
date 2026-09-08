@@ -122,7 +122,10 @@ a ritual "none" — the substance is exactly what the reviewer's questions probe
 `.process-work/reviews/YYYY-MM-DD-<slug>.md` holds the full record of a
 findings-producing review or audit — the prompt, the verdict, and one
 structured `FINDING` line per finding — beside the one-line `REVIEW`
-attestation below, which stays the journal's record. Format, publication to
+attestation below, which stays the journal's record. A UI story's
+**before/after evidence pair** lives beside it in
+`.process-work/reviews/<slug>/` (DoD D8): screenshots per viewport, theme
+and state, which the review bundle lists and the owner digest points at. Format, publication to
 GitHub Issues, and the gate binding are in the `github-issues` module doc;
 without that module the reports are simply working memory.
 

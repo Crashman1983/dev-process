@@ -326,3 +326,35 @@ def test_delta_bundle_refuses_tier_three(render, tmp_path):
     r = _run(out, "--base", "main", "--since", "main")
     assert r.returncode != 0
     assert "Tier 3 reviews require a full diff" in (r.stdout + r.stderr)
+
+
+# --- SP67: the bundle names the UI evidence (paths — it cannot carry pixels)
+
+def test_bundle_lists_evidence_pair_and_changed_images(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    plans = out / ".process-work/plans"
+    plans.mkdir(parents=True, exist_ok=True)
+    (plans / "2026-09-07-panel.md").write_text("# Plan\n\ntier: 2\n")
+    ev = out / ".process-work/reviews/panel"
+    ev.mkdir(parents=True)
+    (ev / "before-panel-375-light.png").write_bytes(b"\x89PNG before")
+    (ev / "after-panel-375-light.png").write_bytes(b"\x89PNG after")
+    (out / "e2e").mkdir(exist_ok=True)
+    (out / "e2e/panel-light.png").write_bytes(b"\x89PNG baseline")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "feat: panel with evidence")
+    r = _run(out, "--base", "main")
+    assert r.returncode == 0, r.stderr
+    assert "## UI evidence" in r.stdout
+    assert ".process-work/reviews/panel/after-panel-375-light.png" in r.stdout
+    assert "A e2e/panel-light.png" in r.stdout
+    assert "against the spec's intent" in r.stdout
+
+
+def test_bundle_names_missing_evidence_as_a_finding(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    r = _run(out, "--base", "main")
+    assert r.returncode == 0, r.stderr
+    assert "no screenshots" in r.stdout and "DoD D8" in r.stdout

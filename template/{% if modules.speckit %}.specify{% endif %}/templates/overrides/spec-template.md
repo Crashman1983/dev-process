@@ -63,6 +63,11 @@ nor error, and a surface that reads it as "empty" invents data loss.
 | error | [failure named, retry offered] |
 | unknown / not yet resolved | [never rendered as empty; what instead] |
 
+Evidence at review (DoD D8): a BEFORE and an AFTER screenshot per
+representative viewport and theme, one per state named above, under
+`.process-work/reviews/<slug>/` — the reviewer judges the AFTER picture
+against this table, and the owner sees the paths in the weekly digest.
+
 ### Edge cases
 
 - What happens when [boundary condition]?

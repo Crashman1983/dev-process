@@ -95,3 +95,23 @@ def test_digest_counts_the_test_estate(render, tmp_path):
     assert "Test estate" in r.stdout
     assert "1 e2e" in r.stdout
     assert "floor AND ceiling" in r.stdout
+
+
+def test_digest_points_at_screenshots_to_open(render, tmp_path):
+    import subprocess as sp
+    out = render(tmp_path, {"project_name": "demo"})
+    sp.run(["git", "init", "-q", "-b", "main"], cwd=out, check=True)
+    sp.run(["git", "config", "user.email", "t@t"], cwd=out, check=True)
+    sp.run(["git", "config", "user.name", "t"], cwd=out, check=True)
+    ev = out / ".process-work/reviews/panel"
+    ev.mkdir(parents=True)
+    (ev / "after-panel-375-dark.png").write_bytes(b"\x89PNG")
+    (out / "e2e/shots").mkdir(parents=True)
+    (out / "e2e/shots/home.png").write_bytes(b"\x89PNG")
+    sp.run(["git", "add", "-A"], cwd=out, check=True)
+    sp.run(["git", "commit", "-q", "-m", "feat: screens"], cwd=out, check=True)
+    r = _run(out)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "What changed on screen" in r.stdout
+    assert "A .process-work/reviews/panel/after-panel-375-dark.png" in r.stdout
+    assert "1 in e2e/shots/" in r.stdout
