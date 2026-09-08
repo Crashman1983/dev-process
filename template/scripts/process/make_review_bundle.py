@@ -317,9 +317,58 @@ def build(root: Path, base: str | None, plan_filter: str | None = None,
                 fence = "`" * max(4, longest + 1)
                 add(f"{fence}diff\n" + diff + ("\n" if not diff.endswith("\n") else "") + fence + "\n")
 
+    add("## UI evidence (open the files — a bundle cannot carry pixels)\n")
+    add(_ui_evidence(root, resolved, plans) + "\n")
+
     add("## Required output grammar\n")
     add(_grammar_section() + "\n")
     return "\n".join(out)
+
+
+IMAGE_RE = re.compile(r"\.(png|jpe?g|webp|gif)$", re.IGNORECASE)
+EVIDENCE_DIR = ".process-work/reviews"
+
+
+def _ui_evidence(root: Path, base_ref: str | None, plans: list[Path]) -> str:
+    """The screenshots this change carries: the before/after evidence pair the
+    DoD asks for (D8: `.process-work/reviews/<slug>/`) and every image the
+    diff adds or changes (pixel baselines). A reviewer judges a UI story
+    against the rendered state, and "matches the intent" needs the after
+    picture beside the spec — listing the paths is what makes that judgment
+    possible instead of skipped."""
+    lines: list[str] = []
+    pairs = 0
+    for plan in plans:
+        slug = re.sub(r"^\d{4}-\d{2}-\d{2}-", "", plan.stem)
+        for cand in (root / EVIDENCE_DIR / slug, root / EVIDENCE_DIR / plan.stem):
+            if cand.is_dir():
+                imgs = sorted(p for p in cand.rglob("*") if p.is_file() and IMAGE_RE.search(p.name))
+                if imgs:
+                    lines.append(f"Evidence for `{plan.name}` in `{cand.relative_to(root)}/`:")
+                    lines += [f"- {p.relative_to(root)}" for p in imgs]
+                    pairs += len(imgs)
+                break
+    changed: list[str] = []
+    if base_ref:
+        names = _git(root, "diff", "--name-status", f"{base_ref}...HEAD") or ""
+        for ln in names.splitlines():
+            parts = ln.split("\t")
+            if len(parts) >= 2 and IMAGE_RE.search(parts[-1]):
+                changed.append(f"- {parts[0][0]} {parts[-1]}")
+    if changed:
+        lines.append(f"Images added/modified/deleted by the diff ({len(changed)}):")
+        lines += changed[:60]
+        if len(changed) > 60:
+            lines.append(f"- … {len(changed) - 60} more")
+    if not lines:
+        return ("*(no screenshots: no evidence directory for the plan and no image "
+                "in the diff — for a change with a UI surface this is a finding, "
+                "not a pass; DoD D8)*")
+    lines.append("")
+    lines.append("Judge the AFTER picture against the spec's intent and the four "
+                 "states, not only against the acceptance floor; a baseline that "
+                 "is byte-identical to another name proves nothing.")
+    return "\n".join(lines)
 
 
 USAGE = "usage: make_review_bundle.py [--skip-preflight] [--base REF] [--plan SLUG] [--since REF] [-o FILE]"

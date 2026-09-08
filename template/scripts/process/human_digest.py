@@ -258,7 +258,52 @@ def build(root: Path, days: int) -> str:
     lines.append("")
     lines += section_test_estate(root)
     lines.append("")
+    lines.append("## 6 · What changed on screen (screenshots to open)")
+    lines.append("")
+    lines += section_ui_evidence(root, days)
+    lines.append("")
     return "\n".join(lines)
+
+
+IMAGE_RE = re.compile(r"\.(png|jpe?g|webp|gif)$", re.IGNORECASE)
+
+
+def section_ui_evidence(root: Path, days: int) -> list[str]:
+    """The owner's success check for UI work: the screenshots the window
+    added or changed, grouped by where they live — the before/after pairs
+    under .process-work/reviews/<slug>/ first, pixel baselines after. Paths,
+    not pictures: a digest cannot carry pixels, but it can say exactly what
+    to open."""
+    proc = subprocess.run(["git", "-C", str(root), "log", f"--since={days} days ago",
+                           "--name-status", "--format=", "--diff-filter=AM", "--",
+                           "*.png", "*.jpg", "*.jpeg", "*.webp", "*.gif"],
+                          capture_output=True, text=True)
+    if proc.returncode != 0:
+        return ["(no git history to read screenshots from)"]
+    seen: dict[str, str] = {}
+    for ln in proc.stdout.splitlines():
+        parts = ln.split("\t")
+        if len(parts) >= 2 and IMAGE_RE.search(parts[-1]):
+            seen.setdefault(parts[-1], parts[0][0])
+    if not seen:
+        return [f"(no screenshot added or changed in the last {days} days — for "
+                f"merged UI stories that is itself worth a question: DoD D8 asks "
+                f"for a before/after pair)"]
+    evidence = {p: s for p, s in seen.items() if p.startswith(".process-work/reviews/")}
+    baselines = {p: s for p, s in seen.items() if p not in evidence}
+    out: list[str] = []
+    if evidence:
+        out.append(f"**Before/after evidence ({len(evidence)} file(s))** — the pairs "
+                   f"the stories claim as their result; open the AFTER ones:")
+        out += [f"- {s} {p}" for p, s in sorted(evidence.items())[:40]]
+    if baselines:
+        by_dir: dict[str, int] = {}
+        for p in baselines:
+            by_dir[str(Path(p).parent)] = by_dir.get(str(Path(p).parent), 0) + 1
+        out.append(f"**Pixel baselines changed ({len(baselines)} file(s))** — what "
+                   f"the visual tests now accept as correct, by directory:")
+        out += [f"- {n} in {d}/" for d, n in sorted(by_dir.items(), key=lambda kv: -kv[1])[:12]]
+    return out
 
 
 def main() -> int:

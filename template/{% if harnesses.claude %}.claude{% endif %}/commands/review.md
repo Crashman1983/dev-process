@@ -29,6 +29,12 @@ complete read-only bundle — rules, checklist, product frame, plan, diff, and
 the exact output grammar — ready to feed any model
 (`docs/process/verification-independence.md`, "The review bundle").
 
+UI stories: the bundle ends with a **UI evidence** section — the story's
+before/after pair (DoD D8) and every image the diff touches. Open them. The
+verdict on a UI story names whether the AFTER picture matches the intent
+(spec, four-state table); "passes the floor" alone is not a pass, and a
+missing pair is a finding, not a skip.
+
 Mechanics before judgment — the model reviewer is the most expensive
 detector you have, so it goes last: before building the bundle, run every
 *mechanical* check the plan, spec, or contracts name (ownership/layering

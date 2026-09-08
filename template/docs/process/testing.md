@@ -139,6 +139,14 @@ baseline silently becomes an allowlist). Legacy is tolerated, new debt is
 not, and the baseline can only shrink. A ratchet is a gate, not a score: it
 needs no target and cannot be gamed by adding volume.
 
+A shipped instance: `scripts/process/check_baseline_duplicates.py` — byte-
+identical screenshots under different names inside the baseline directories
+are a finding (at most one of them is evidence of what its name claims;
+observed: desktop renders minted under mobile names, an error state
+identical to a partially-loaded one). `--write-baseline` pins the groups a
+tree already carries; from then on a new group fails and a stale pin fails,
+so the file only ever shrinks.
+
 ## Unmeasurable is not red
 
 A measurement gate (performance budget, timing-sensitive E2E, resource

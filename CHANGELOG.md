@@ -626,6 +626,22 @@ kroch — und ein kriechendes Gate wird umgangen; testing.md: Zertifikats-
 Transfer am Push und eine flock-Spur je Host — anstellen statt drosseln,
 kein Bypass), `v2.9.4`.
 
+SP67 (ui-evidence, auf Sebs Frage „sind Screenshots zum Abgleich und zur
+Erfolgskontrolle hinterlegt?" — sie waren Beweis an der Untergrenze, aber
+kein Abgleich mit der Absicht und für den Owner unsichtbar: **DoD D8**
+(Vorher-Nachher-Paar je Viewport, Theme und Zustand unter
+`.process-work/reviews/<slug>/`, aus dem Review-Report verlinkt; das
+Nachher-Bild wird gegen die Absicht beurteilt, nicht nur gegen die
+Untergrenze); **Review-Bundle „UI evidence"** (listet das Paar und jedes
+Bild, das der Diff berührt — fehlendes Paar ist Befund, kein Skip; /review
+und Checkliste verlangen das Urteil „entspricht der Absicht"); **Digest
+Sektion 6** (was sich auf dem Bildschirm geändert hat: Evidenzpaare und
+geänderte Pixel-Baselines als Pfade zum Öffnen);
+**check_baseline_duplicates.py** (byte-identische Screenshots unter
+verschiedenen Namen sind Beweis für nichts — Ratchet mit Baseline-Pin;
+erster Lauf an Kenni: 16 Gruppen, darunter „Fehler" identisch mit
+„teilweise geladen")) ausgeliefert, `v2.10.0`.
+
 Drei Befunde der Mac-Session (kenni-88) generisch geschlossen:
 **Hook-Doktor für `.githooks/`** (ein getracktes Hook-Verzeichnis ohne
 passendes `core.hooksPath` liest git nie — im Mac-Repo lief monatelang

@@ -171,6 +171,14 @@ never the stylesheet.
   the existing owner reused or extended, or a new one with its reason —
   rather than a copied style or a local override on a shared control?
 
+- Does the **AFTER picture match the intent**? Open the before/after pair
+  the story carries (DoD D8, `.process-work/reviews/<slug>/`) beside the
+  spec's Owner brief and four-state table: is what was asked for what is
+  on screen — and is each state the picture of *that* state? A story
+  without the pair is not done; a pair whose images are byte-identical
+  under different names is evidence of nothing (the harness rendered the
+  wrong thing — observed: desktop renders under mobile names).
+
 Where a stack guide exists it sharpens this floor with the framework's
 specifics (which token, which component library); it does not lower it.
 
