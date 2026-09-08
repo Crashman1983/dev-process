@@ -262,7 +262,27 @@ def build(root: Path, days: int) -> str:
     lines.append("")
     lines += section_ui_evidence(root, days)
     lines.append("")
+    lines.append("## 7 · Residue (what tidy would remove)")
+    lines.append("")
+    lines += section_residue(root)
+    lines.append("")
     return "\n".join(lines)
+
+
+def section_residue(root: Path) -> list[str]:
+    """Residue accrues where removal depends on remembering — this puts the
+    counts in front of the owner every week, with the one command per item.
+    tidy.py owns the measurement; the digest only shows it (offline: no
+    remote fetch here, the branch count comes from the last fetch)."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    try:
+        import tidy as _tidy  # noqa: E402  (sibling; one owner for the residue)
+    except ImportError:
+        return ["(tidy.py not installed)"]
+    lines, _items = _tidy.report(root, 30, with_remote=False)
+    lines.append("Run `python scripts/process/tidy.py` for the full report including "
+                 "remote branches, `--apply` to execute the safe part.")
+    return lines
 
 
 IMAGE_RE = re.compile(r"\.(png|jpe?g|webp|gif)$", re.IGNORECASE)

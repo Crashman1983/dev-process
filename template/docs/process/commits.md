@@ -77,7 +77,10 @@ merged (enable GitHub's *Automatically delete head branches*, or run a
 cleanup workflow), and remove the worktree that carried it
 (`git worktree remove <path>`, then `git worktree prune`) — a landscape of
 dead branches and orphaned worktrees is where the next agent picks the wrong
-base.
+base. `scripts/process/tidy.py` measures the residue (merged remote
+branches, finished spec directories, old archives) and `--apply` removes
+the safe part — the fallback for a platform without auto-delete or a
+cleanup workflow that does not run.
 
 The whole tail — archive, merge, branch delete, worktree removal,
 publish/prune — is checkable as one verdict: `scripts/process/finish.py`
