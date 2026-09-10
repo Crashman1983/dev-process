@@ -16,9 +16,17 @@ completeness, correctness, security, design, decisions, product frame, tests).
 Fixes loop back through `/execute` and then `/review` again until the branch is
 clean.
 
-Record the result in the exact grammar (`journal-state-plans.md`): a
-`REVIEW work=… tier=… reviewer=… model=… independence=… verdict=… round=…`
-line in the journal (the core `review` gate parses it), and — for a
+Record the result with the writer, never by hand:
+
+    python scripts/process/attest.py --work <id> --tier <n> --reviewer <id> \
+      --model <family> --independence bundle,non-implementing[,cross-model] \
+      --verdict pass|block --round <n> --bundle /tmp/bundle.md
+
+It recomputes the digest from the bundle's base/head with the gate's formula,
+refuses a stale bundle, validates the grammar and appends the `REVIEW` line to
+today's journal shard (`journal-state-plans.md`). A typed digest is a
+fabricated attestation; the gate names it as such and counts the review as
+absent. For a
 findings-producing or Tier 3 review — `FINDING sev=… action=… issue=…` lines
 in a `.process-work/reviews/` report (gate-linted where the `github-issues`
 module is installed; the report grammar either way).

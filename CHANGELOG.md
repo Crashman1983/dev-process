@@ -669,6 +669,25 @@ ohne den Abschnitt, auch specs/*/plan.md — das Gate kennt keine fehlende
 Entscheidung, aber ein Reviewer fragt bei leerem Ledger nach)) ausgeliefert,
 `v2.12.0`.
 
+SP70 (computed-evidence, Sebs Befund aus einem zweiten Einsatz: 15 von 16
+Review-Digests wurden nie berechnet — plausibles Hex, das kein Byte-Strom
+irgendeines Commits erzeugt; das Gate meldete es bei jedem Lauf, bis es
+als Dauerrot niemand mehr las. Zwei Antworten: **Evidenz wird berechnet,
+nie getippt** (`attest.py` schreibt die REVIEW-Zeile: Digest aus base/head
+mit der Formel des Gates neu gerechnet, veraltetes Bundle verweigert,
+Grammatik geprüft, an den Tagesshard angehängt; die Formel ist EIN Owner
+in check_review — `CANONICAL_DIFF` pinnt jede git-Config-Stellschraube
+(algorithm, renames, prefix, abbrev, ext-diff, textconv), damit ein Digest
+auf jedem Klon gleich verifiziert; Legacy-Digests bleiben gültig; ein Wert,
+den keine Formel erzeugt, heißt im Gate jetzt FABRICATED und zählt als
+fehlendes Review) und **Dauerrot bekommt ein Alter** (gate_runner merkt sich
+je Gate den ersten roten Tag in `.git/` und druckt das Alter mit jedem
+Fehlschlag; Digest Sektion 8 zeigt es dem Owner); dazu **Abschalten durch
+Weglassen geschlossen** (Sebs dritter Befund: zwei Pläne ohne `tier:`-Zeile
+waren für jedes Gate unsichtbar, bis sie eine bekamen und sofort zwei
+Pflichten scharf wurden — ein aktiver Plan und ein specs/*/plan.md ohne
+Tier sind jetzt hart, archivierte bleiben Note)) ausgeliefert, `v2.13.0`.
+
 Drei Befunde der Mac-Session (kenni-88) generisch geschlossen:
 **Hook-Doktor für `.githooks/`** (ein getracktes Hook-Verzeichnis ohne
 passendes `core.hooksPath` liest git nie — im Mac-Repo lief monatelang

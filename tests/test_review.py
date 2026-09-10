@@ -305,7 +305,7 @@ def test_wrong_digest_is_hard(render, tmp_path):
     _journal(out, _review(work="bound", artifact=(base, head, "0" * 64)))
     r = _run(out)
     assert r.returncode == 1
-    assert "digest mismatch" in r.stdout
+    assert "matches no formula" in r.stdout
 
 
 def test_unresolvable_artifact_commit_is_note_not_hard(render, tmp_path):
@@ -675,8 +675,9 @@ def test_prose_tier_without_declaration_is_a_loud_note(render, tmp_path):
     (p / "2026-08-08-rogue.md").write_text(
         "# Plan\n\n- Issue: #7. Tier 4 — full review path.\n\nSteps.\n")
     r = _run(out)
-    assert r.returncode == 0, r.stdout
-    assert "declares none" in r.stdout
+    # SP70: off by omission is closed — an active plan without `tier: N` is hard
+    assert r.returncode == 1, r.stdout
+    assert "off by omission" in r.stdout and "rogue.md" in r.stdout
 
 
 # --- SP62: a waiver is a debt with an owner --------------------------------

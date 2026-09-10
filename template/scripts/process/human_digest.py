@@ -266,7 +266,41 @@ def build(root: Path, days: int) -> str:
     lines.append("")
     lines += section_residue(root)
     lines.append("")
+    lines.append("## 8 · Gates red on this clone (and for how long)")
+    lines.append("")
+    lines += section_red_gates(root)
+    lines.append("")
     return "\n".join(lines)
+
+
+def section_red_gates(root: Path) -> list[str]:
+    """The gate runner's red ledger: first day each gate went red in this
+    clone. A gate red for weeks is a finding nobody reads any more — the
+    owner sees the age here even when no agent mentions it."""
+    proc = subprocess.run(["git", "-C", str(root), "rev-parse", "--git-dir"],
+                          capture_output=True, text=True)
+    if proc.returncode != 0:
+        return ["(not a git clone)"]
+    gitdir = Path(proc.stdout.strip())
+    if not gitdir.is_absolute():
+        gitdir = root / gitdir
+    ledger = gitdir / "process-red-ledger"
+    if not ledger.is_file():
+        return ["(no gate has been red on this clone since the last green run — or "
+                "the runner never ran here)"]
+    out: list[str] = []
+    today = _dt.date.today()
+    for ln in ledger.read_text(encoding="utf-8").splitlines():
+        if " " not in ln:
+            continue
+        gate, day = ln.split(" ", 1)
+        try:
+            age = (today - _dt.date.fromisoformat(day.strip())).days
+        except ValueError:
+            age = 0
+        out.append(f"- **{gate}** red since {day.strip()} ({age} day(s)) — "
+                   f"{'fix or waive with a named owner; a chronic red is read by nobody' if age >= 3 else 'fresh; watch it'}")
+    return out or ["(ledger empty)"]
 
 
 def section_residue(root: Path) -> list[str]:
