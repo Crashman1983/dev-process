@@ -175,8 +175,10 @@ def _review_artifact(root: Path, base_ref: str, *, delta: bool = False) -> tuple
         return None
     base_sha = base.strip()
     head_sha = head.strip()
-    range_spec = f"{base_sha}..{head_sha}" if delta else f"{base_sha}...{head_sha}"
-    diff = _git_bytes(root, "diff", "--binary", range_spec)
+    # ONE formula, owned by the gate that verifies it (check_review.artifact_diff):
+    # canonical three-dot diff with every git-config knob pinned. A delta bundle
+    # (`since` is an ancestor of HEAD) yields the same bytes as `since..HEAD`.
+    diff = _review_gate.artifact_diff(root, base_sha, head_sha)
     if diff is None:
         return None
     return base_sha, head_sha, hashlib.sha256(diff).hexdigest(), diff
@@ -193,8 +195,10 @@ free-form prose is invisible to them:
 
     REVIEW {fields}
 
-Optionally append `base=… head=… diff=…` copied VERBATIM from the
-`REVIEW_ARTIFACT` line in this bundle — that binds your verdict to the exact
+Bind your verdict to the exact artifact: do NOT type `base=… head=… diff=…`
+yourself — run `python scripts/process/attest.py --bundle <this file> …`,
+which recomputes the digest from base/head (a typed digest is a fabricated
+attestation the gate names as such). The `REVIEW_ARTIFACT` line binds to the exact
 reviewed diff (the gate recomputes and verifies the digest). Never invent
 these values.
 

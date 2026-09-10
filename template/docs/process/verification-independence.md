@@ -115,7 +115,9 @@ The record is a structured `REVIEW` line in the journal, one per review:
 REVIEW work=42 tier=2 reviewer=fresh-agent model=same independence=bundle,non-implementing verdict=pass round=1
 ```
 
-A digest-bound record additionally carries `base`, `head`, and `diff` (copied
+A digest-bound record additionally carries `base`, `head`, and `diff` (written
+by `scripts/process/attest.py`, which recomputes the digest from base/head with
+the gate's own formula — a digest typed by hand, or
 from the bundle's `REVIEW_ARTIFACT` line); the exact grammar is in
 `journal-state-plans.md`.
 

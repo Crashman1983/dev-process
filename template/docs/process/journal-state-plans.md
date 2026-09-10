@@ -91,8 +91,13 @@ A plan carries one machine-readable line, `tier: N`, recording the derived risk
 tier (`risk-tiers.md`). It is the single tier source the `review` gate keys on:
 once the plan is archived (i.e. the work merged), a declared `tier: 2` or higher
 must have a clearing review attestation (below) or a named `review-waived:`
-exception. A plan without a `tier:` line is simply not presence-enforced — the
-field is opt-in, and its absence is a note, never a failure.
+exception. An **active** plan (and a `specs/<feature>/plan.md`) without a
+`tier:` line is a hard failure of the review gate: every tier-keyed duty
+keys on that line, so omitting it switched them all off silently — off by
+omission was the escape (observed downstream: two plans without the line
+were invisible to every gate until it was added, and two duties armed at
+once). Archived plans without the line are a note: history is not
+re-litigated.
 
 **Tier 3 is anchored to the push, not the archive.** Waiting for the archive
 step means the proof arrives after the merge it was meant to gate. So for an
@@ -161,9 +166,17 @@ order, values without spaces:
 REVIEW work=42 tier=2 reviewer=fresh-agent model=same independence=bundle,non-implementing verdict=pass round=1
 ```
 
-A REVIEW may bind itself to the exact reviewed diff by appending the three
-integrity fields the review bundle prints (`REVIEW_ARTIFACT` line — copy,
-never invent):
+A REVIEW may bind itself to the exact reviewed diff by carrying the three
+integrity fields. **Write the line with `scripts/process/attest.py`**
+(`--bundle <bundle file>` or `--base/--head`): it recomputes the digest with
+the gate's own formula, refuses a stale bundle, validates the grammar and
+appends to today's shard. Never type a digest. The gate names a digest that
+matches no formula for its base/head as what it is — a fabricated
+attestation — and counts the review as absent (observed on one deployment:
+15 of 16 recorded digests were never computed, and the gate said so on every
+run until nobody read it). The digest formula is pinned against git config
+(`check_review.CANONICAL_DIFF`), so a value computed on one clone verifies
+on every other:
 
 ```
 REVIEW work=42 tier=2 reviewer=fresh-agent model=same independence=bundle,non-implementing verdict=pass round=1 base=<git-sha> head=<git-sha> diff=<sha256>

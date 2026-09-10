@@ -117,6 +117,53 @@ def load_modules(root: Path) -> dict:
 # authority and must not inherit a local silence.
 _NOTE_LINE = re.compile(r"^\S+: note: ")
 LEDGER_NAME = "process-notes-ledger"
+# A gate that stays red becomes wallpaper: observed downstream, a hard
+# integrity failure was reported on every run for months and nobody read it
+# any more — the evidence behind it turned out fabricated. The runner remembers
+# the first day each gate went red (in .git/, never the tree) and prints the
+# age with every failure; the owner digest shows the same numbers.
+RED_LEDGER_NAME = "process-red-ledger"
+
+
+def _red_ledger_path(root: Path) -> Path | None:
+    p = _ledger_path(root)
+    return p.with_name(RED_LEDGER_NAME) if p else None
+
+
+def _read_red(path: Path | None) -> dict[str, str]:
+    if path is None or not path.is_file():
+        return {}
+    out: dict[str, str] = {}
+    try:
+        for ln in path.read_text(encoding="utf-8").splitlines():
+            if " " in ln:
+                gate, day = ln.split(" ", 1)
+                out[gate] = day.strip()
+    except OSError:
+        pass
+    return out
+
+
+def _write_red(path: Path | None, red: dict[str, str]) -> None:
+    if path is None:
+        return
+    try:
+        path.write_text("".join(f"{g} {d}\n" for g, d in sorted(red.items())),
+                        encoding="utf-8")
+    except OSError:
+        pass
+
+
+def _red_age(red: dict[str, str], gate: str, today: str) -> str:
+    since = red.get(gate)
+    if not since or since == today:
+        return ""
+    try:
+        import datetime as _dt
+        days = (_dt.date.fromisoformat(today) - _dt.date.fromisoformat(since)).days
+    except ValueError:
+        return ""
+    return f" (red since {since}, {days} day(s))"
 
 
 def _ledger_path(root: Path) -> Path | None:
@@ -236,11 +283,26 @@ def main() -> int:
     if suppressed:
         print(f"gate-runner: {suppressed} known note(s) unchanged since the last "
               f"run — not repeated (--all-notes shows them)")
+    import datetime as _dt
+    today = _dt.date.today().isoformat()
+    red_path = _red_ledger_path(root)
+    red = _read_red(red_path)
+    for name in list(red):
+        if name not in failed:
+            del red[name]  # green again: the clock stops
+    for name in failed:
+        red.setdefault(name, today)
+    _write_red(red_path, red)
     if failed:
         if warn:
             print(f"gate warnings (not blocking): {', '.join(failed)}")
             return 0
-        print(f"FAILED gates: {', '.join(failed)}")
+        aged = [f"{n}{_red_age(red, n, today)}" for n in failed]
+        print(f"FAILED gates: {', '.join(aged)}")
+        if any(_red_age(red, n, today) for n in failed):
+            print("gate-runner: a gate red for days is wallpaper — nobody reads it, "
+                  "and the finding behind it stops being true or false. Fix it, or "
+                  "waive it with a named owner, today.")
         return 1
     print(f"all {len(active)} active gate(s) passed")
     return 0

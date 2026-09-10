@@ -114,3 +114,26 @@ def test_gate_runner_names_hand_edited_manifest_cause(render, tmp_path):
                        cwd=out, capture_output=True, text=True)
     assert r.returncode == 1
     assert "hand" in r.stderr and "copier update" in r.stderr
+
+
+def test_gate_runner_dates_a_chronic_red(render, tmp_path):
+    # SP70: a gate red for days is wallpaper — the runner prints the age
+    import datetime
+    import subprocess
+    import sys
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=out, check=True)
+    (out / ".process-work/journal").mkdir(parents=True, exist_ok=True)
+    (out / ".process-work/journal/x.md").write_text("REVIEW work=1 tier=9\n")  # malformed: red
+    runner = [sys.executable, str(out / "scripts/process/gate_runner.py")]
+    r1 = subprocess.run(runner, cwd=out, capture_output=True, text=True)
+    assert r1.returncode == 1 and "red since" not in r1.stdout  # first day: no age yet
+    ledger = out / ".git/process-red-ledger"
+    old = (datetime.date.today() - datetime.timedelta(days=12)).isoformat()
+    ledger.write_text(f"review {old}\n")
+    r2 = subprocess.run(runner, cwd=out, capture_output=True, text=True)
+    assert "review (red since" in r2.stdout and "12 day(s)" in r2.stdout
+    assert "wallpaper" in r2.stdout
+    (out / ".process-work/journal/x.md").unlink()
+    r3 = subprocess.run(runner, cwd=out, capture_output=True, text=True)
+    assert r3.returncode == 0 and ledger.read_text() == ""  # green: the clock stops

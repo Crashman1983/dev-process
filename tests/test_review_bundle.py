@@ -69,7 +69,7 @@ def test_bundle_assembles_all_sections(render, tmp_path):
         "REVIEW independence=… model=… reviewer=… "
         "round=… tier=… verdict=… work=…"
     ) in t
-    assert "copied VERBATIM" in t  # optional digest fields come from the bundle
+    assert "attest.py" in t  # the digest is computed by the writer, never typed
     assert "['block', 'pass']" in t
     assert "'cross-model'" in t and "'single-family'" in t
     assert "FINDING sev=<blocker|major|minor|nit>" in t
@@ -83,7 +83,11 @@ def test_bundle_fingerprint_matches_binary_diff(render, tmp_path):
     merge_base = _git(out, "merge-base", "main", "HEAD").stdout.strip()
     head = _git(out, "rev-parse", "HEAD").stdout.strip()
     diff = subprocess.run(
-        ["git", "diff", "--binary", f"{merge_base}...{head}"],
+        ["git", "-c", "diff.algorithm=myers", "-c", "diff.renames=false", "-c", "diff.noprefix=false",
+         "-c", "diff.mnemonicPrefix=false", "-c", "diff.context=3", "-c", "diff.suppressBlankEmpty=false",
+         "-c", "core.quotePath=true",
+         "diff", "--binary", "--full-index", "--no-color", "--no-ext-diff", "--no-textconv", "--no-renames",
+         f"{merge_base}...{head}"],
         cwd=out,
         capture_output=True,
         check=True,
@@ -305,12 +309,14 @@ def test_delta_bundle_carries_findings_and_exact_delta_artifact(render, tmp_path
     _git(out, "commit", "-q", "-m", "fix: widget", check=True)
     text = _run(out, "--base", "main", "--since", previous).stdout
     artifact = _artifact(text)
-    diff = subprocess.run(
-        ["git", "diff", "--binary", f"{previous}..HEAD"], cwd=out,
-        capture_output=True, check=True,
-    ).stdout
+    # one formula: the gate's canonical three-dot diff (`since` is an
+    # ancestor of HEAD, so it carries exactly the delta)
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("check_review", out / "scripts/process/check_review.py")
+    gate = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(gate)
     assert artifact["base"] == previous
-    assert artifact["diff"] == hashlib.sha256(diff).hexdigest()
+    assert artifact["diff"] == gate.artifact_digest(out, previous, "HEAD")
     assert "FINDING prior finding" in text
     assert "REVIEW_SCOPE mode=delta" in text
     assert "Full branch surface:" in text

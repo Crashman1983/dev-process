@@ -284,6 +284,47 @@ def _git_bytes(root: Path, *args: str) -> bytes | None:
     return result.stdout if result.returncode == 0 else None
 
 
+# --- the review artifact digest: ONE formula, pinned against git config -----
+# Producer (make_review_bundle), writer (attest.py) and verifier (this gate)
+# must compute the same bytes on every clone. `git diff` output depends on
+# user/repo config — diff.algorithm, diff.renames, diff.noprefix,
+# diff.mnemonicPrefix, core.abbrev (index lines), external diff drivers,
+# textconv — so a digest computed on one machine can honestly fail on another
+# (observed downstream: an attest at core.abbrev=9 red-ed a fresh clone at 7).
+# The canonical form pins every knob on the command line. Legacy digests
+# (plain `git diff --binary`, produced before the pin) stay verifiable.
+CANONICAL_DIFF = (
+    "-c", "diff.algorithm=myers", "-c", "diff.renames=false",
+    "-c", "diff.noprefix=false", "-c", "diff.mnemonicPrefix=false",
+    "-c", "diff.context=3", "-c", "diff.suppressBlankEmpty=false",
+    "-c", "core.quotePath=true",
+    "diff", "--binary", "--full-index", "--no-color", "--no-ext-diff",
+    "--no-textconv", "--no-renames",
+)
+
+
+def artifact_diff(root: Path, base: str, head: str) -> bytes | None:
+    """The exact bytes the digest is computed from: the canonical three-dot
+    diff `base...head` (what the branch adds over the merge base)."""
+    return _git_bytes(root, *CANONICAL_DIFF, f"{base}...{head}")
+
+
+def artifact_digest(root: Path, base: str, head: str) -> str | None:
+    diff = artifact_diff(root, base, head)
+    return hashlib.sha256(diff).hexdigest() if diff is not None else None
+
+
+def _legacy_digests(root: Path, base: str, head: str) -> set[str]:
+    """Digests older records may carry: the unpinned `git diff --binary` in
+    both range forms, as this clone's config renders them today."""
+    out: set[str] = set()
+    for rng in (f"{base}...{head}", f"{base}..{head}"):
+        diff = _git_bytes(root, "diff", "--binary", rng)
+        if diff is not None:
+            out.add(hashlib.sha256(diff).hexdigest())
+    return out
+
+
 def _integrity_violations(rel: str, root: Path,
                           records: list[tuple[int, dict]]) -> tuple[list[str], list[str]]:
     """A REVIEW carrying base/head/diff binds itself to an exact diff — verify
@@ -309,14 +350,23 @@ def _integrity_violations(rel: str, root: Path,
                         f"rebase-merge + branch delete); verified at merge "
                         f"time or not at all")
             continue
-        diff = _git_bytes(root, "diff", "--binary", f"{f['base']}...{f['head']}")
-        if diff is None:
+        actual = artifact_digest(root, f["base"], f["head"])
+        if actual is None:
             hard.append(f"{rel}:{lineno}: review artifact diff could not be computed")
             continue
-        actual = hashlib.sha256(diff).hexdigest()
-        if actual != f["diff"]:
-            hard.append(f"{rel}:{lineno}: review artifact digest mismatch: "
-                        f"expected {f['diff']}, actual {actual}")
+        if f["diff"] == actual or f["diff"] in _legacy_digests(root, f["base"], f["head"]):
+            continue
+        # neither the canonical nor any legacy formula produces this value:
+        # no byte stream of this diff hashes to it. Observed downstream: 15
+        # of 16 recorded digests matched no commit within five days — they
+        # were typed to look right, never computed. Name it as what it is.
+        hard.append(f"{rel}:{lineno}: review artifact digest {f['diff'][:12]}… "
+                    f"matches no formula for {f['base'][:9]}...{f['head'][:9]} "
+                    f"(canonical {actual[:12]}…) — no byte stream of this diff "
+                    f"produces it; a digest that was typed rather than computed "
+                    f"is a FABRICATED attestation, and this review counts as "
+                    f"absent. Write REVIEW lines with scripts/process/attest.py, "
+                    f"which computes the digest itself")
     return hard, soft
 
 
@@ -607,7 +657,13 @@ def check(root: Path) -> tuple[list[str], list[str]]:
                 continue
             ptext = _unfenced(plan.read_text(encoding="utf-8", errors="replace"))
             tm = TIER_DECL.search(ptext)
-            if tm and int(tm.group(1)) >= 2 and not DECISIONS_HEADING.search(ptext):
+            if not tm:
+                hard.append(f"{SPECS_DIR}/{d.name}/plan.md: no 'tier: N' declaration — "
+                            f"the review, speckit and issue gates all key on it; a "
+                            f"plan without a tier is off by omission (add the line, "
+                            f"`/plan` puts it there)")
+                continue
+            if int(tm.group(1)) >= 2 and not DECISIONS_HEADING.search(ptext):
                 soft.append(f"{SPECS_DIR}/{d.name}/plan.md: no '## Decisions' section "
                             f"— decisions made in dialogue have no home here and do "
                             f"not survive a compaction (journal-state-plans.md, Plans)")
@@ -642,12 +698,19 @@ def check(root: Path) -> tuple[list[str], list[str]]:
             # every tier-keyed gate (presence, spec-before-plan, issue-before-code)
             # — the third-party-plan-writer failure mode: the engine knows tiers,
             # not this grammar. Loud note, not hard: prose mentions are heuristic.
-            if not m and re.search(r"\btier\s+[0-9]\b", text, re.IGNORECASE):
-                soft.append(f"{PLANS_ACTIVE}/{p.name}: mentions a tier in prose but "
-                            f"declares none — the gates key on a 'tier: N' line; "
-                            f"without it, review presence, spec-before-plan and "
-                            f"issue-before-code are all unarmed")
             if not m:
+                # Off by omission was the escape: every tier-keyed duty (review
+                # presence, spec-before-plan, issue-before-code) is silent for a
+                # plan that declares no tier — observed downstream, two plans
+                # without the line were invisible to every gate until someone
+                # added it and two duties armed at once. An ACTIVE plan is a
+                # plan by location; declaring its tier is not optional. Archived
+                # plans stay a note (history is not re-litigated).
+                hard.append(f"{PLANS_ACTIVE}/{p.name}: no 'tier: N' declaration — "
+                            f"every tier-keyed gate (review presence, spec-before-"
+                            f"plan, issue-before-code) is unarmed for this plan; a "
+                            f"plan without a tier is off by omission. Declare it "
+                            f"(risk-tiers.md), or move a non-plan out of the plan home")
                 continue
             tier = int(m.group(1))
             if tier < 2:
