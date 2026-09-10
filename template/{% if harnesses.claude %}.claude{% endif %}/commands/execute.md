@@ -10,7 +10,10 @@ recursively. Then read
 write the failing test, see it fail, implement the minimum, see it pass, then
 make one atomic conventional commit, and tick the task's checkbox in
 `tasks.md` in the same commit (the checkboxes are the canonical progress
-state). Keep tasks isolated so each is independently reviewable.
+state). Keep tasks isolated so each is independently reviewable. A decision
+taken with the owner in dialogue is written to the plan's `## Decisions`
+ledger before the next tool call — `process_context.py` prints the ledger
+back after every compaction; the conversation it came from is gone by then.
 
 **Execution engine is free, artifacts are not.** Driving this phase with a
 subagent-per-task engine (e.g. a Superpowers-style skill: fresh implementer

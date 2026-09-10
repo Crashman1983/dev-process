@@ -69,3 +69,24 @@ def test_prime_and_execute_point_to_context_tool(render, tmp_path):
     assert "never the whole journal" in prime  # the prime diet
     assert "process_context.py" in execute
     assert "checkbox" in execute  # progress-in-the-artifact
+
+
+def test_context_prints_the_decisions_ledger(render, tmp_path):
+    # SP69: what a compaction summary drops, the plan keeps and prime re-reads
+    out = render(tmp_path, {"project_name": "d"})
+    d = out / ".process-work/plans"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "2026-09-10-panel.md").write_text(
+        "# Plan\n\ntier: 2\n\n## Decisions\n"
+        "- DECISION 2026-09-10 owner: variant B, not A — because one export owner\n"
+        "- DECISION 2026-09-10 agent: skip CSV in this slice — because deferred\n")
+    (d / "2026-09-10-bare.md").write_text("# Plan\n\ntier: 2\n")
+    ctx = _run(out)
+    plans = {p["file"]: p for p in ctx["active_plans"]}
+    panel = plans[".process-work/plans/2026-09-10-panel.md"]
+    assert panel["decisions_section"] is True
+    assert panel["decisions"] == [
+        "2026-09-10 owner: variant B, not A — because one export owner",
+        "2026-09-10 agent: skip CSV in this slice — because deferred"]
+    bare = plans[".process-work/plans/2026-09-10-bare.md"]
+    assert bare["decisions_section"] is False and bare["decisions"] == []

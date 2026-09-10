@@ -31,6 +31,13 @@ ISSUE = re.compile(r"^\s*(?:[-*+]\s+)?issue\s*:\s*(\S+)", re.IGNORECASE | re.MUL
 UNCHECKED = re.compile(r"^\s*- \[ \] (.+)$", re.MULTILINE)
 CHECKED = re.compile(r"^\s*- \[[xX]\] ", re.MULTILINE)
 MARKER = re.compile(r"\[NEEDS CLARIFICATION", re.IGNORECASE)
+# the decisions ledger (journal-state-plans.md, Plans): one line per decision
+# made in dialogue — `- DECISION 2026-09-10 owner: what — because why`. It is
+# surfaced here so every re-hydration (/prime, /execute, /review) sees what a
+# compaction summary would have dropped.
+DECISION = re.compile(r"^\s*(?:[-*+]\s+)?DECISION\s+(\d{4}-\d{2}-\d{2})\s+([^:]+):\s*(.+?)\s*$",
+                      re.MULTILINE)
+DECISIONS_HEADING = re.compile(r"^#{2,4}\s+Decisions\b", re.IGNORECASE | re.MULTILINE)
 
 
 def _branch(root: Path) -> str | None:
@@ -51,7 +58,9 @@ def _plan_info(p: Path) -> dict:
     tier = TIER.search(text)
     issue = ISSUE.search(text)
     return {"file": str(p), "tier": int(tier.group(1)) if tier else None,
-            "issue": issue.group(1) if issue else None}
+            "issue": issue.group(1) if issue else None,
+            "decisions": [f"{d} {who}: {what}" for d, who, what in DECISION.findall(text)],
+            "decisions_section": bool(DECISIONS_HEADING.search(text))}
 
 
 def main() -> int:

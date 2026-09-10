@@ -19,7 +19,7 @@ markers; the text inside them is canonical here, and exactly one block per file.
 <!-- KERNEL:START -->
 ## Always-on kernel
 
-**Load-bearing — these rules bind every turn, not just the first.** If you are resuming a session, or this block was summarized or compacted out of context, re-read `docs/process/kernel.md` and `docs/process/mandatory-rules.md` in full before continuing.
+**Load-bearing — these rules bind every turn, not just the first.** If you are resuming a session, or this block was summarized or compacted out of context, re-read `docs/process/kernel.md` and `docs/process/mandatory-rules.md` in full before continuing, then the `## Decisions` section of the active plan — decisions made in dialogue live there, never only in a summary.
 
 **Mandatory rules (full text: `docs/process/mandatory-rules.md`):**
 1. Verify before asserting. 2. Plan before substantive work. 3. Contract/interface first.
