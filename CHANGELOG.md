@@ -655,6 +655,20 @@ alte Archive, template-delta; alte aktive Pläne und stille Issues nur
 gelistet: Owner-Entscheidung) und **Digest Sektion 7** (dieselben Zahlen
 jede Woche vor dem Owner)) ausgeliefert, `v2.11.0`.
 
+SP69 (dialogue-decisions, Sebs Befund aus einem zweiten Prozess-Einsatz:
+Entscheidungen im Dialog landen nicht im Plan und gehen beim Kompaktieren
+verloren — der Kernel schützt sich selbst, Entscheidungen nicht: **`##
+Decisions`-Ledger im Plan** (eine `DECISION <Datum> <wer>: <was> — because
+<warum>`-Zeile je Entscheidung, geschrieben vor dem nächsten Schritt;
+Plan-, Execute- und Prime-Command sowie workflow.md tragen die Pflicht),
+**Re-Hydration liest sie** (process_context.py gibt das Ledger je aktivem
+Plan aus — /prime, /execute, /review sehen es nach jeder Kompaktierung
+wieder; die Kernel-Direktive nennt den Abschnitt, byte-identisch in allen
+vier Kopien) und **sichtbare Lücke** (Review-Gate-Note für Tier-2+-Pläne
+ohne den Abschnitt, auch specs/*/plan.md — das Gate kennt keine fehlende
+Entscheidung, aber ein Reviewer fragt bei leerem Ledger nach)) ausgeliefert,
+`v2.12.0`.
+
 Drei Befunde der Mac-Session (kenni-88) generisch geschlossen:
 **Hook-Doktor für `.githooks/`** (ein getracktes Hook-Verzeichnis ohne
 passendes `core.hooksPath` liest git nie — im Mac-Repo lief monatelang

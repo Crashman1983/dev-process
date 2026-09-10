@@ -66,6 +66,27 @@ artifact lands in the plan home (or `specs/` on the Spec Kit path), nowhere
 else. The `review` gate enforces the loud half of this: a `tier: 2+`
 declaration outside the sanctioned homes is a hard failure.
 
+**Decisions made in dialogue live in the plan, not in the conversation.**
+Every plan (and every `specs/<feature>/plan.md`) carries a `## Decisions`
+section — the ledger of choices the owner or the agent made while working,
+one line each, written *before the next step starts*, never at the end:
+
+```
+## Decisions
+- DECISION 2026-09-10 owner: variant B (single table), not A — because the
+  export path stays one owner
+- DECISION 2026-09-10 agent: skip the CSV export in this slice — because the
+  owner deferred it to the follow-up issue
+```
+
+A conversation is the one artifact a compaction summarizes, and the
+sentence carrying a decision is the first to go; the plan is re-read at
+every re-hydration (`process_context.py` prints the ledger for `/prime`,
+`/execute` and `/review`, and the kernel's compaction directive names it).
+A Tier 2+ plan without the section gets a note from the review gate: the
+gate cannot know a decision is missing, but a reviewer who sees an empty
+ledger asks.
+
 A plan carries one machine-readable line, `tier: N`, recording the derived risk
 tier (`risk-tiers.md`). It is the single tier source the `review` gate keys on:
 once the plan is archived (i.e. the work merged), a declared `tier: 2` or higher

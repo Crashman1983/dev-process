@@ -473,6 +473,7 @@ def _plan_work_ids(stem: str, text: str, *, include_dedated: bool) -> set[str]:
 
 SPECS_DIR = "specs"
 UNCHECKED = re.compile(r"^\s*- \[ \] ", re.MULTILINE)
+DECISIONS_HEADING = re.compile(r"^#{2,4}\s+Decisions\b", re.IGNORECASE | re.MULTILINE)
 
 
 def speckit_unreviewed(root: Path, passes: list[dict]) -> list[tuple[str, int, set[str]]]:
@@ -597,6 +598,20 @@ def check(root: Path) -> tuple[list[str], list[str]]:
                             f"but has no clearing REVIEW (verdict=pass, work in {sorted(ids)}, "
                             f"tier>={tier}) and no 'review-waived:' line")
 
+    # the speckit path's plans: the decisions ledger is a note there too
+    sdir = root / SPECS_DIR
+    if sdir.is_dir():
+        for d in sorted(p for p in sdir.iterdir() if p.is_dir()):
+            plan = d / "plan.md"
+            if not plan.is_file():
+                continue
+            ptext = _unfenced(plan.read_text(encoding="utf-8", errors="replace"))
+            tm = TIER_DECL.search(ptext)
+            if tm and int(tm.group(1)) >= 2 and not DECISIONS_HEADING.search(ptext):
+                soft.append(f"{SPECS_DIR}/{d.name}/plan.md: no '## Decisions' section "
+                            f"— decisions made in dialogue have no home here and do "
+                            f"not survive a compaction (journal-state-plans.md, Plans)")
+
     # the speckit path's plans never enter the archive — surface the same
     # presence question there as a note (finish.py is the hard stop)
     for name, tier, ids in speckit_unreviewed(root, passes):
@@ -640,6 +655,11 @@ def check(root: Path) -> tuple[list[str], list[str]]:
             if tier == 2:
                 active_tier2 += 1
             rel = f"{PLANS_ACTIVE}/{p.name}"
+            if not DECISIONS_HEADING.search(text):
+                soft.append(f"{rel}: no '## Decisions' section — decisions made in "
+                            f"dialogue have no home in this plan and do not survive a "
+                            f"compaction (journal-state-plans.md, Plans); add the "
+                            f"ledger, even if it is empty for now")
             ids = _plan_work_ids(p.stem, text, include_dedated=False)
             tiered_plans.append((rel, text, tier, ids))
             if tier < 3:

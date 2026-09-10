@@ -596,7 +596,7 @@ def test_tier3_plan_not_carried_by_this_push_is_ignored(render, tmp_path):
     env = {**os.environ, "PROCESS_PUSH_TARGETS": "refs/heads/main"}
     r = _run(out, env=env)
     assert r.returncode == 0, r.stdout
-    assert "foreign" not in r.stdout  # a bare mention claims nothing
+    assert "proof is due" not in r.stdout and "claims #5" not in r.stdout  # a bare mention claims nothing
 
 
 def test_commit_claiming_issue_of_tier3_plan_is_hard_on_merge_push(render, tmp_path):
@@ -751,3 +751,29 @@ def test_extended_scale_plan_clears_at_gated_ceiling(render, tmp_path):
     r = _run(out)
     assert r.returncode == 0, r.stdout
     assert "finish.py blocks" not in r.stdout
+
+
+# --- SP69: the decisions ledger is a visible gap, never a silent one ---------
+
+def test_tier2_plan_without_decisions_section_gets_a_note(render, tmp_path):
+    out = render(tmp_path, {"project_name": "demo"})
+    d = out / ".process-work/plans"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "2026-09-10-bare.md").write_text("# Plan\n\ntier: 2\n")
+    (d / "2026-09-10-kept.md").write_text("# Plan\n\ntier: 2\n\n## Decisions\n")
+    (d / "2026-09-10-tiny.md").write_text("# Plan\n\ntier: 1\n")
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+    assert "2026-09-10-bare.md: no '## Decisions' section" in r.stdout
+    assert "2026-09-10-kept.md: no '## Decisions'" not in r.stdout
+    assert "2026-09-10-tiny.md: no '## Decisions'" not in r.stdout
+
+
+def test_spec_plan_without_decisions_section_gets_a_note(render, tmp_path):
+    out = render(tmp_path, {"project_name": "demo"})
+    d = out / "specs/012-widget"
+    d.mkdir(parents=True)
+    (d / "plan.md").write_text("# Plan\n\ntier: 3\nissue: #12\n")
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+    assert "specs/012-widget/plan.md: no '## Decisions' section" in r.stdout
