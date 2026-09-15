@@ -178,6 +178,12 @@ never the stylesheet.
   without the pair is not done; a pair whose images are byte-identical
   under different names is evidence of nothing (the harness rendered the
   wrong thing — observed: desktop renders under mobile names).
+- Where the surface has a **design contract** (the `design-contracts` module):
+  does the AFTER picture match the **sealed reference board** for each ID
+  the plan cites, do the tests and snapshots cite those IDs, and is every
+  deviation an amendment in the contract with provenance — not a silent
+  re-interpretation? A plan that cites no ID for a surface change, or an ID
+  the contract does not define, is a finding.
 
 Where a stack guide exists it sharpens this floor with the framework's
 specifics (which token, which component library); it does not lower it.

@@ -55,6 +55,7 @@ GATES = {
     "telemetry": ("telemetry", [sys.executable, "scripts/process/check_telemetry.py", "."]),
     "arch-docs": ("arch_docs", [sys.executable, "scripts/process/check_arch_docs.py", "."]),
     "github-master": ("github_master", [sys.executable, "scripts/process/check_github_master.py", "."]),
+    "design-contracts": ("design_contracts", [sys.executable, "scripts/process/check_design_contracts.py", "."]),
 }
 KNOWN_MODULES = {key for key, _command in GATES.values() if key is not None} | {"git_hooks"}
 KNOWN_HARNESSES = {"claude", "copilot", "agents_md"}

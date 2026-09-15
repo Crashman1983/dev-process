@@ -702,6 +702,33 @@ Regexes; ein Treffer verweigert den Post und nennt die Zeile —
 publish_and_prune und publish_review.sh; Anlass: Klienten-Slugs aus
 UITest-Stubs in einem Spec-Snapshot), `v2.9.3`.
 
+SP71 (design-contracts, generalisiert aus Sebs Kenni-Praxis für WebUI
+und iOS: UI-Arbeit scheiterte wiederholt daran, dass jeder Agent etwas
+Plausibles rendert und niemand sagen kann, welches Bild *richtig* war —
+in Kenni geheilt durch je Surface einen Designvertrag mit stabilen IDs,
+gesiegelte Render-Runden als Referenz, unabhängiges Review mit GO und
+Amend-before-Code. Der Template macht daraus ein Modul im Standard-Set,
+inert bis zum ersten Registry-Eintrag: **Registry** (`docs/process/
+design-contracts/<surface>.json`: Vertrag, Status draft/accepted,
+sha256-Pin, ID-Familien, ADR, Review, gesiegelte Referenz, Code-Pfade),
+**Gate** (`check_design_contracts.py` — hart: Pin-Drift ohne Re-Pin,
+doppelt definierte ID, accepted ohne ADR oder ohne Review mit
+`Decision: GO`, Review mit anderem Siegel als die Referenz, Referenz mit
+gebrochenem Siegel, aktiver Plan zitiert eine ID, die der Vertrag nicht
+kennt; Note: opaker Pin, Draft, Boards aus älterem Vertrag, Surface-Push
+ohne zitierte ID), **`seal.py`** (Manifest + sha256 über Rundenordner und
+deklarierte Abhängigkeiten, `--verify` schlägt auf editierte, fehlende
+und undeklarierte Dateien fehl, Drift einer Abhängigkeit ist Exit 2),
+**Vorlagen** (Vertragsgerüst mit §-Blöcken und Amendment-Log,
+Review-Vorlage mit Rubrik/GO/Siegel-Hash, Runden-README mit Ablauf)
+und **Bindung ohne neue Kettenglieder** (R5 nennt jetzt auch die
+Vertrags-IDs, D8 beurteilt das AFTER-Bild gegen das gesiegelte Board
+der zitierten IDs, Review-Checkliste Surfaces und Regel 3 entsprechend;
+das Review-Bundle nennt den regierenden Vertrag und die zitierten IDs).
+Die Gestaltung selbst bleibt Menschen- und Reviewer-Urteil gegen die
+Boards; Render-Kit, Export-QA und Token-Lints bleiben projektspezifisch,
+das Modul beschreibt nur das Muster) ausgeliefert, `v2.14.0`.
+
 ## Sub-Projekt-Tabelle (SP1–SP24)
 
 Die Tabelle wurde bis SP24 gepflegt; ab SP25 trägt das Narrativ oben die

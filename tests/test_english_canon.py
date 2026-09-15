@@ -11,7 +11,7 @@ ALL_ON = {
     "modules": {
         "doc_drift_gate": True, "arch_onboarding": True, "feature_registry": True,
         "github_issues": True, "contracts": True, "git_hooks": True,
-        "security_floor": True,
+        "security_floor": True, "design_contracts": True,
     },
     "ci": {"github": True},
 }

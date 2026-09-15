@@ -1,0 +1,182 @@
+#!/usr/bin/env python3
+"""seal — freeze a reference folder (rendered concept boards, a design round)
+into a verifiable manifest.
+
+A design contract names *what* a surface must look like; the rendered boards
+of a round are the picture the reviewer judges an AFTER screenshot against.
+That reference is only worth something when nobody can quietly edit it after
+the independent review said GO. The seal makes that mechanical:
+
+    seal.py --seal docs/design/concepts/web-round-2 [--dep docs/design/web-contract.md ...]
+    seal.py --verify docs/design/concepts/web-round-2
+
+`--seal` hashes every file in the folder (SHA-256) plus every declared
+external dependency (repo-relative paths outside the folder — typically the
+contract the boards were rendered from and the token files), writes
+`manifest.json`, then `manifest.sha256` = the hash of the manifest bytes.
+`--verify` recomputes everything: a changed or missing file, an undeclared
+new file in the folder, or a manifest that no longer matches its seal is a
+hard failure (exit 1). A drifted *external* dependency is reported
+separately (exit 2 when nothing else failed): the boards are intact but were
+rendered from an older contract — re-seal, or start a new round.
+
+Stdlib only, path-safe (a dependency may not escape the repo root), and
+deterministic: the manifest is sorted, so two seals of the same bytes are
+byte-identical."""
+from __future__ import annotations
+
+import datetime as _dt
+import hashlib
+import json
+import sys
+from pathlib import Path
+
+MANIFEST = "manifest.json"
+SEAL = "manifest.sha256"
+SKIP_DIRS = {".git", "node_modules", "__pycache__", ".venv"}
+
+
+def _sha256(p: Path) -> str:
+    h = hashlib.sha256()
+    with p.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _local_files(folder: Path) -> list[Path]:
+    out: list[Path] = []
+    for p in sorted(folder.rglob("*")):
+        if not p.is_file() or p.name in (MANIFEST, SEAL):
+            continue
+        if any(part in SKIP_DIRS for part in p.relative_to(folder).parts):
+            continue
+        out.append(p)
+    return out
+
+
+def _inside(root: Path, rel: str) -> Path | None:
+    resolved = (root / rel).resolve()
+    if root.resolve() != resolved and root.resolve() not in resolved.parents:
+        return None
+    return resolved
+
+
+def seal(root: Path, folder: Path, deps: list[str]) -> tuple[list[str], dict]:
+    """Write manifest + seal. Returns (errors, manifest)."""
+    errors: list[str] = []
+    if not folder.is_dir():
+        return [f"{folder}: not a directory"], {}
+    files = {str(p.relative_to(folder)).replace("\\", "/"): _sha256(p)
+             for p in _local_files(folder)}
+    if not files:
+        errors.append(f"{folder}: nothing to seal (no files)")
+    external: dict[str, str] = {}
+    for dep in deps:
+        p = _inside(root, dep)
+        if p is None:
+            errors.append(f"dependency {dep!r} escapes the repo root")
+            continue
+        if not p.is_file():
+            errors.append(f"dependency {dep!r} does not exist")
+            continue
+        if folder.resolve() in p.parents:
+            errors.append(f"dependency {dep!r} lies inside the folder — it is hashed already")
+            continue
+        external[dep] = _sha256(p)
+    if errors:
+        return errors, {}
+    manifest = {
+        "folder": str(folder.resolve().relative_to(root.resolve())).replace("\\", "/"),
+        "sealed": _dt.date.today().isoformat(),
+        "files": files,
+        "external": external,
+    }
+    text = json.dumps(manifest, indent=2, sort_keys=True) + "\n"
+    (folder / MANIFEST).write_text(text, encoding="utf-8")
+    (folder / SEAL).write_text(hashlib.sha256(text.encode("utf-8")).hexdigest() + "\n",
+                               encoding="utf-8")
+    return [], manifest
+
+
+def verify(root: Path, folder: Path) -> tuple[list[str], list[str]]:
+    """(hard, external_drift). hard: the folder is not what was sealed.
+    external_drift: a declared dependency outside the folder changed."""
+    hard: list[str] = []
+    drift: list[str] = []
+    mpath, spath = folder / MANIFEST, folder / SEAL
+    if not mpath.is_file() or not spath.is_file():
+        return [f"{folder}: not sealed (missing {MANIFEST} or {SEAL})"], []
+    raw = mpath.read_bytes()
+    if hashlib.sha256(raw).hexdigest() != spath.read_text(encoding="utf-8").strip():
+        hard.append(f"{folder}: {MANIFEST} does not match {SEAL} — manifest edited after sealing")
+    try:
+        manifest = json.loads(raw.decode("utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        return hard + [f"{folder}: unreadable {MANIFEST}: {exc}"], []
+    files = manifest.get("files") if isinstance(manifest, dict) else None
+    if not isinstance(files, dict):
+        return hard + [f"{folder}: {MANIFEST} has no 'files' mapping"], []
+    present = {str(p.relative_to(folder)).replace("\\", "/"): p for p in _local_files(folder)}
+    for rel, digest in sorted(files.items()):
+        p = present.get(rel)
+        if p is None:
+            hard.append(f"{folder}/{rel}: sealed file missing")
+        elif _sha256(p) != digest:
+            hard.append(f"{folder}/{rel}: content differs from the seal")
+    for rel in sorted(set(present) - set(files)):
+        hard.append(f"{folder}/{rel}: file not in the seal (added after sealing)")
+    external = manifest.get("external") or {}
+    if isinstance(external, dict):
+        for rel, digest in sorted(external.items()):
+            p = _inside(root, rel)
+            if p is None or not p.is_file():
+                drift.append(f"{rel}: declared dependency missing")
+            elif _sha256(p) != digest:
+                drift.append(f"{rel}: changed since the seal")
+    return hard, drift
+
+
+def main(argv: list[str]) -> int:
+    if len(argv) < 2 or argv[0] not in ("--seal", "--verify"):
+        print("usage: seal.py --seal DIR [--dep PATH ...] | --verify DIR   (paths relative to the repo root)",
+              file=sys.stderr)
+        return 2
+    root = Path.cwd()
+    folder = root / argv[1]
+    if argv[0] == "--seal":
+        deps: list[str] = []
+        rest = argv[2:]
+        while rest:
+            if rest[0] == "--dep" and len(rest) > 1:
+                deps.append(rest[1])
+                rest = rest[2:]
+            else:
+                print(f"seal: unexpected argument {rest[0]!r}", file=sys.stderr)
+                return 2
+        errors, manifest = seal(root, folder, deps)
+        for e in errors:
+            print(f"seal: {e}", file=sys.stderr)
+        if errors:
+            return 1
+        print(f"seal: sealed {len(manifest['files'])} file(s) + {len(manifest['external'])} "
+              f"external dependenc{'y' if len(manifest['external']) == 1 else 'ies'} "
+              f"→ {folder.relative_to(root)}/{SEAL}: "
+              f"{(folder / SEAL).read_text(encoding='utf-8').strip()}")
+        return 0
+    hard, drift = verify(root, folder)
+    for line in hard:
+        print(f"seal: FAILED: {line}")
+    for line in drift:
+        print(f"seal: external drift: {line}")
+    if hard:
+        return 1
+    if drift:
+        print("seal: boards intact, but rendered from an older dependency — re-seal or start a new round")
+        return 2
+    print(f"seal: OK — {folder.relative_to(root)} matches its seal")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))
