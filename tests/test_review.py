@@ -778,3 +778,76 @@ def test_spec_plan_without_decisions_section_gets_a_note(render, tmp_path):
     r = _run(out)
     assert r.returncode == 0, r.stdout
     assert "specs/012-widget/plan.md: no '## Decisions' section" in r.stdout
+
+
+# --- integrity scope: verified once per clone, in-flight shards always fresh ---
+
+def _run_args(root, *args, env=None):
+    return subprocess.run(
+        [sys.executable, str(root / "scripts/process/check_review.py"), ".", *args],
+        cwd=root, capture_output=True, text=True, env=env)
+
+
+def test_integrity_ledger_reuses_verdicts_and_keeps_a_mismatch_red(render, tmp_path):
+    # downstream: 628 digest-bound records × several git diffs per push — the
+    # gate stopped finishing. A verification's inputs are immutable in a
+    # clone, so its verdict is remembered in .git/; a mismatch stays red
+    # without being recomputed, the shard a push changes is always fresh.
+    import os
+    out = render(tmp_path, {"project_name": "demo"})
+    base, head, digest = _init_git_repo(out, work="bound")
+    _journal(out, _review(work="bound", artifact=(base, head, digest)),
+             _review(work="bound", rnd="2", artifact=(base, head, "0" * 64)))
+    r1 = _run(out)
+    assert r1.returncode == 1 and "matches no formula" in r1.stdout
+    assert "answered from this clone's ledger" not in r1.stdout  # nothing reused yet
+    ledger = out / ".git/process-review-integrity"
+    text = ledger.read_text()
+    assert f"{base} {head} {digest}\tok" in text and "\thard:" in text
+    r2 = _run(out)
+    assert r2.returncode == 1 and "matches no formula" in r2.stdout  # red persists, from cache
+    assert "2 digest-bound record(s) in unchanged shards answered from this clone's ledger" in r2.stdout
+    r3 = _run_args(out, "--full")
+    assert r3.returncode == 1 and "answered from" not in r3.stdout
+    r3b = _run(out, env=dict(os.environ, PROCESS_REVIEW_INTEGRITY="all"))
+    assert "answered from" not in r3b.stdout
+    # a shard the push carries is verified fresh even when the ledger lies
+    ledger.write_text(f"{base} {head} {'0' * 64}\tok\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "journal")
+    r4 = _run(out)
+    assert r4.returncode == 1 and "matches no formula" in r4.stdout
+    # =in-flight: an unchanged (uncommitted, not in the pushed range) shard is
+    # skipped with a note — the CI knob for huge journals
+    _journal(out, _review(work="bound", rnd="3", artifact=(base, head, "1" * 64)),
+             name="2026-07-05.md")
+    r5 = _run(out, env=dict(os.environ, PROCESS_REVIEW_INTEGRITY="in-flight"))
+    assert "1 digest-bound record(s) in unchanged shards not re-verified" in r5.stdout
+    assert "2026-07-05.md" not in r5.stdout
+    assert not (out / "process-review-integrity").exists()  # lives in .git/
+
+
+def test_integrity_ledger_remembers_a_missing_commit_until_the_next_fetch(render, tmp_path):
+    # on a partial clone a lookup of a missing object costs seconds — the
+    # miss is remembered and retried only after a fetch (FETCH_HEAD moves)
+    import os
+    import time
+    out = render(tmp_path, {"project_name": "demo"})
+    _base, head, digest = _init_git_repo(out, work="bound")
+    _journal(out, _review(work="bound", artifact=("d" * 40, head, digest)))
+    r1 = _run(out)
+    assert r1.returncode == 0 and "not present in this clone" in r1.stdout
+    ledger = out / ".git/process-review-integrity"
+    entry = [ln for ln in ledger.read_text().splitlines() if "\tmissing:" in ln]
+    assert len(entry) == 1
+    r2 = _run(out)
+    assert "not present in this clone" in r2.stdout  # replayed, not recomputed
+    assert "1 digest-bound record(s) in unchanged shards answered from this clone's ledger" in r2.stdout
+    assert ledger.read_text().splitlines() == [*entry]
+    time.sleep(1.1)
+    (out / ".git/FETCH_HEAD").write_text("")  # a fetch happened
+    r3 = _run(out)
+    assert "not present in this clone" in r3.stdout
+    assert "answered from this clone's ledger" not in r3.stdout  # re-checked
+    assert ledger.read_text().splitlines() != [*entry]  # new stamp
+    assert os.path.getmtime(out / ".git/FETCH_HEAD") > 0
