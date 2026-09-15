@@ -392,3 +392,25 @@ def test_dor_dod_and_checklist_bind_the_contract(render, tmp_path):
     rules = (out / "docs/process/mandatory-rules.md").read_text()
     assert "design-contracts" in rules
     assert "docs/process/modules/design-contracts.md" in (out / "CLAUDE.md").read_text()
+
+
+def test_verify_reads_a_render_kits_own_manifest_shape(render, tmp_path):
+    # a project's freezer writes files as [{path, sha256}] and dependencies
+    # as folder-relative `../..` paths — the same seal formula; verify reads it
+    out = _render(render, tmp_path)
+    _write(out, CONTRACT, CONTRACT_TEXT)
+    _round(out)
+    rdir = out / ROUND
+    manifest = {"format": 1, "generatedAt": "2026-09-14T07:40:14.008Z",
+                "files": [{"path": p, "sha256": _sha(rdir / p)} for p in
+                          ("README.md", "boards/S01-desktop-dark.png", "boards/S01-desktop-light.png")],
+                "externalDependencies": [{"path": "../../web-contract.md", "sha256": _sha(out / CONTRACT)}]}
+    text = json.dumps(manifest, indent=2) + "\n"
+    (rdir / "manifest.json").write_text(text)
+    (rdir / "manifest.sha256").write_text(hashlib.sha256(text.encode()).hexdigest() + "  manifest.json\n")
+    assert _seal(out, "--verify", ROUND).returncode == 0
+    (out / CONTRACT).write_text(CONTRACT_TEXT + "\namended\n")
+    r = _seal(out, "--verify", ROUND)
+    assert r.returncode == 2 and "../../web-contract.md: changed" in r.stdout
+    (rdir / "boards/S01-desktop-dark.png").write_text("x")
+    assert _seal(out, "--verify", ROUND).returncode == 1

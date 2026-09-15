@@ -108,15 +108,16 @@ def verify(root: Path, folder: Path) -> tuple[list[str], list[str]]:
     if not mpath.is_file() or not spath.is_file():
         return [f"{folder}: not sealed (missing {MANIFEST} or {SEAL})"], []
     raw = mpath.read_bytes()
-    if hashlib.sha256(raw).hexdigest() != spath.read_text(encoding="utf-8").strip():
+    # `<hex>` or the sha256sum shape `<hex>  manifest.json` — first token either way
+    if hashlib.sha256(raw).hexdigest() != (spath.read_text(encoding="utf-8").split() or [""])[0]:
         hard.append(f"{folder}: {MANIFEST} does not match {SEAL} — manifest edited after sealing")
     try:
         manifest = json.loads(raw.decode("utf-8"))
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:
         return hard + [f"{folder}: unreadable {MANIFEST}: {exc}"], []
-    files = manifest.get("files") if isinstance(manifest, dict) else None
-    if not isinstance(files, dict):
-        return hard + [f"{folder}: {MANIFEST} has no 'files' mapping"], []
+    files = _entries(manifest.get("files")) if isinstance(manifest, dict) else None
+    if files is None:
+        return hard + [f"{folder}: {MANIFEST} has no 'files' entries"], []
     present = {str(p.relative_to(folder)).replace("\\", "/"): p for p in _local_files(folder)}
     for rel, digest in sorted(files.items()):
         p = present.get(rel)
@@ -126,15 +127,30 @@ def verify(root: Path, folder: Path) -> tuple[list[str], list[str]]:
             hard.append(f"{folder}/{rel}: content differs from the seal")
     for rel in sorted(set(present) - set(files)):
         hard.append(f"{folder}/{rel}: file not in the seal (added after sealing)")
-    external = manifest.get("external") or {}
-    if isinstance(external, dict):
-        for rel, digest in sorted(external.items()):
-            p = _inside(root, rel)
-            if p is None or not p.is_file():
-                drift.append(f"{rel}: declared dependency missing")
-            elif _sha256(p) != digest:
-                drift.append(f"{rel}: changed since the seal")
+    external = _entries(manifest.get("external", manifest.get("externalDependencies"))) or {}
+    for rel, digest in sorted(external.items()):
+        # repo-relative (this tool) or folder-relative `../..` (a render kit's
+        # own freezer) — both resolve, neither may leave the repo
+        p = ((folder / rel) if rel.startswith(".") else (root / rel)).resolve()
+        if root.resolve() not in p.parents or not p.is_file():
+            drift.append(f"{rel}: declared dependency missing")
+        elif _sha256(p) != digest:
+            drift.append(f"{rel}: changed since the seal")
     return hard, drift
+
+
+def _entries(raw) -> dict[str, str] | None:
+    """`{path: sha}` (this tool) or `[{path, sha256}, …]` (the manifest
+    shape a project's own render-kit freezer writes) → one mapping."""
+    if isinstance(raw, dict):
+        return {str(k): str(v) for k, v in raw.items()}
+    if isinstance(raw, list):
+        out: dict[str, str] = {}
+        for e in raw:
+            if isinstance(e, dict) and isinstance(e.get("path"), str):
+                out[e["path"]] = str(e.get("sha256") or e.get("sha") or "")
+        return out
+    return None
 
 
 def main(argv: list[str]) -> int:
