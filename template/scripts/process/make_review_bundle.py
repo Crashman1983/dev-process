@@ -365,15 +365,37 @@ def _ui_evidence(root: Path, base_ref: str | None, plans: list[Path]) -> str:
         lines += changed[:60]
         if len(changed) > 60:
             lines.append(f"- … {len(changed) - 60} more")
-    if not lines:
+    contracts = _design_contracts(root, plans)
+    if not lines and not contracts:
         return ("*(no screenshots: no evidence directory for the plan and no image "
                 "in the diff — for a change with a UI surface this is a finding, "
                 "not a pass; DoD D8)*")
-    lines.append("")
+    if contracts:
+        lines.append("Design contracts governing this change (judge the AFTER picture "
+                     "against the sealed reference board of each cited ID; a plan "
+                     "citing no ID for a surface change is a finding):")
+        lines += contracts
+    if lines and not lines[-1].startswith("*(no screenshots"):
+        lines.append("")
     lines.append("Judge the AFTER picture against the spec's intent and the four "
                  "states, not only against the acceptance floor; a baseline that "
                  "is byte-identical to another name proves nothing.")
     return "\n".join(lines)
+
+
+def _design_contracts(root: Path, plans: list[Path]) -> list[str]:
+    """The surface contracts and the IDs the plans cite — from the optional
+    design-contracts module's gate, when installed; nothing otherwise."""
+    gate = Path(__file__).resolve().parent / "check_design_contracts.py"
+    if not gate.is_file():
+        return []
+    try:
+        import check_design_contracts as _dc  # sibling; sys.path set at import
+        texts = {str(p.relative_to(root)): p.read_text(encoding="utf-8", errors="replace")
+                 for p in plans}
+        return _dc.bundle_lines(root, texts)
+    except Exception as exc:  # the bundle must not die on a module's oddity
+        return [f"- (design-contracts unreadable: {exc})"]
 
 
 USAGE = "usage: make_review_bundle.py [--skip-preflight] [--base REF] [--plan SLUG] [--since REF] [-o FILE]"

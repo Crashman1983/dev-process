@@ -1,0 +1,320 @@
+#!/usr/bin/env python3
+"""design-contracts gate: a surface's design contract is a first-class,
+pinned, cited norm — not a document somebody once wrote.
+
+One registry file per surface under docs/process/design-contracts/<surface>.json
+points at the committed contract, its status, its pin, the ID families the
+contract defines, the decision record that made it normative, the independent
+review that said GO, and (optionally) the sealed reference boards the reviewer
+judges an AFTER screenshot against.
+
+Hard (exit 1): registry structure; a contract that is not a committed file;
+a content-hash pin that no longer matches (the contract moved without a
+deliberate re-pin); an ID defined twice in the contract; an `accepted`
+contract without decision record or without an independent review that
+records a GO; a review that names a different seal than the reference
+carries; a reference folder whose seal no longer verifies; an active plan
+citing an ID the contract does not define.
+
+Best-effort (note, never red): an opaque pin; a draft contract; reference
+boards rendered from an older contract (external drift — re-seal or start a
+new round); a change in flight under the surface's paths while no active
+plan cites a contract ID (DoR R5). Judging the design itself is never
+machine work — that is what the sealed boards and the reviewer are for.
+Python stdlib only."""
+from __future__ import annotations
+
+import json
+import re
+import sys
+from pathlib import Path
+
+sys.dont_write_bytecode = True
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling imports
+import seal as _seal  # noqa: E402
+
+REGISTRY_DIR = "docs/process/design-contracts"
+PLANS_ACTIVE = ".process-work/plans"
+SPECS_DIR = "specs"
+STATUSES = {"draft", "accepted"}
+_HASH_PIN = re.compile(r"^sha256:([0-9a-f]{64})$")
+_HEX64 = re.compile(r"\b([0-9a-f]{64})\b")
+_GO = re.compile(r"^\s*[*_#\s]*(?:decision|entscheidung)[*_]*\s*:\s*[*_]*\s*(GO|NO[- ]GO|KEIN GO)\b",
+                 re.IGNORECASE | re.MULTILINE)
+_HEADING = re.compile(r"^#{1,6}\s+(.*)$", re.MULTILINE)
+
+
+def _registry_files(root: Path) -> list[Path]:
+    d = root / REGISTRY_DIR
+    if not d.is_dir():
+        return []
+    return sorted(p for p in d.glob("*.json") if not p.name.endswith(".example.json"))
+
+
+def _inside(root: Path, rel: str) -> Path | None:
+    resolved = (root / rel).resolve()
+    if root.resolve() not in resolved.parents:
+        return None
+    return resolved
+
+
+def _read(p: Path) -> str:
+    try:
+        return p.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        return p.read_bytes().decode("utf-8", "replace")
+
+
+def id_pattern(prefixes: list[str]) -> re.Pattern[str]:
+    """`["C", "E", "AX"]` → an ID like C03, E1, AX3, C05a. Word-bounded so
+    `E1` never matches inside `LINE1` and `C` alone matches nothing."""
+    alts = "|".join(re.escape(p) for p in sorted(prefixes, key=len, reverse=True))
+    return re.compile(rf"(?<![\w-])(?:{alts})\d+[a-z]?(?![\w-])")
+
+
+def _glob_re(pattern: str) -> re.Pattern[str]:
+    out = ""
+    i = 0
+    while i < len(pattern):
+        if pattern.startswith("**/", i):
+            out += "(?:.*/)?"
+            i += 3
+        elif pattern.startswith("**", i):
+            out += ".*"
+            i += 2
+        elif pattern[i] == "*":
+            out += "[^/]*"
+            i += 1
+        elif pattern[i] == "?":
+            out += "[^/]"
+            i += 1
+        else:
+            out += re.escape(pattern[i])
+            i += 1
+    return re.compile(rf"^{out}$")
+
+
+def active_plan_texts(root: Path) -> dict[str, str]:
+    """Active plans and spec plans — the documents that must cite the IDs a
+    UI change implements. Archived plans are history, never scanned."""
+    out: dict[str, str] = {}
+    d = root / PLANS_ACTIVE
+    if d.is_dir():
+        for p in sorted(d.glob("*.md")):
+            out[str(p.relative_to(root))] = _read(p)
+    s = root / SPECS_DIR
+    if s.is_dir():
+        for p in sorted(s.glob("*/plan.md")):
+            out[str(p.relative_to(root))] = _read(p)
+    return out
+
+
+def _paths_in_flight(root: Path) -> set[str]:
+    try:
+        import check_review as _review_gate  # sibling; core script
+    except ImportError:
+        return set()
+    try:
+        return _review_gate.paths_in_flight(root)
+    except Exception:  # a gate must never crash on git oddities
+        return set()
+
+
+def load(root: Path, path: Path) -> tuple[dict | None, list[str]]:
+    rel = path.relative_to(root)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        return None, [f"{rel}: invalid JSON: {exc}"]
+    except UnicodeDecodeError as exc:
+        return None, [f"{rel}: not valid UTF-8: {exc}"]
+    if not isinstance(data, dict):
+        return None, [f"{rel}: must be a JSON object, got {type(data).__name__}"]
+    hard: list[str] = []
+    for key in ("surface", "contract", "status", "pin"):
+        if not isinstance(data.get(key), str) or not data[key].strip():
+            hard.append(f"{rel}: '{key}' must be a non-empty string")
+    prefixes = data.get("id_prefixes")
+    if not (isinstance(prefixes, list) and prefixes
+            and all(isinstance(x, str) and re.fullmatch(r"[A-Za-z][\w-]*", x) for x in prefixes)):
+        hard.append(f"{rel}: 'id_prefixes' must be a non-empty list of identifier prefixes (e.g. [\"C\", \"E\", \"AX\"])")
+    for key in ("adr", "review", "reference", "notes"):
+        if key in data and not isinstance(data[key], str):
+            hard.append(f"{rel}: '{key}' must be a string when present")
+    paths = data.get("paths", [])
+    if not (isinstance(paths, list) and all(isinstance(x, str) and x.strip() for x in paths)):
+        hard.append(f"{rel}: 'paths' must be a list of glob strings when present")
+    if hard:
+        return None, hard
+    if data["surface"].strip() != path.stem:
+        hard.append(f"{rel}: 'surface' {data['surface'].strip()!r} must equal the filename stem {path.stem!r}")
+    if data["status"].strip() not in STATUSES:
+        hard.append(f"{rel}: 'status' must be one of {sorted(STATUSES)}")
+    return (None, hard) if hard else (data, [])
+
+
+def _check_one(root: Path, path: Path, plans: dict[str, str], in_flight: set[str]
+               ) -> tuple[list[str], list[str]]:
+    hard: list[str] = []
+    soft: list[str] = []
+    rel = path.relative_to(root)
+    data, errs = load(root, path)
+    if data is None:
+        return errs, []
+    surface = data["surface"].strip()
+    status = data["status"].strip()
+    cpath = _inside(root, data["contract"].strip())
+    if cpath is None:
+        return [f"{rel}: contract path escapes the repo root"], []
+    if not cpath.is_file():
+        return [f"{rel}: contract not committed / does not exist: {data['contract'].strip()}"], []
+    text = _read(cpath)
+
+    # --- the pin: the drift ratchet ---------------------------------------
+    m = _HASH_PIN.match(data["pin"].strip())
+    if m:
+        actual = _seal._sha256(cpath)
+        if actual != m.group(1):
+            hard.append(f"{rel}: contract {data['contract'].strip()} changed without a re-pin "
+                        f"(pin sha256:{m.group(1)[:12]}…, file sha256:{actual[:12]}…) — an "
+                        "amendment is deliberate: record its provenance in the contract, then re-pin")
+    else:
+        soft.append(f"{rel}: opaque pin {data['pin'].strip()!r} — drift is not machine-checked")
+
+    # --- IDs: defined once, cited from something real ------------------------
+    ids = id_pattern(data["id_prefixes"])
+    defined = set(ids.findall(text))
+    if not defined:
+        soft.append(f"{rel}: contract defines no ID of the families {data['id_prefixes']} yet")
+    seen: dict[str, int] = {}
+    for h in _HEADING.findall(text):
+        for i in ids.findall(h):
+            seen[i] = seen.get(i, 0) + 1
+    for i, n in sorted(seen.items()):
+        if n > 1:
+            hard.append(f"{rel}: ID {i} is defined by {n} headings in the contract — one owner per ID")
+    cited: dict[str, set[str]] = {}
+    for prel, ptext in plans.items():
+        found = set(ids.findall(ptext))
+        if found:
+            cited[prel] = found
+            for i in sorted(found - defined):
+                hard.append(f"{prel}: cites {surface} design-contract ID {i}, which "
+                            f"{data['contract'].strip()} does not define — a plan may only "
+                            "build on IDs the contract carries (amend the contract first)")
+
+    # --- status: accepted needs a decision record and an independent GO --------
+    if status == "draft":
+        soft.append(f"{rel}: {surface} contract is a draft — not yet the norm for implementation")
+    else:
+        for key, what in (("adr", "decision record"), ("review", "independent review")):
+            val = data.get(key, "").strip() if isinstance(data.get(key), str) else ""
+            if not val:
+                hard.append(f"{rel}: status 'accepted' requires '{key}' (the {what} that made it the norm)")
+                continue
+            p = _inside(root, val)
+            if p is None or not p.is_file():
+                hard.append(f"{rel}: {key} {val!r} is not a committed file")
+                continue
+            if key == "review":
+                rtext = _read(p)
+                go = _GO.search(rtext)
+                if go is None:
+                    hard.append(f"{rel}: review {val} records no decision line (`Decision: GO` / "
+                                "`Decision: NO GO`) — an accepted contract needs a recorded GO")
+                elif go.group(1).upper() != "GO":
+                    hard.append(f"{rel}: review {val} records {go.group(1)!r} — the contract "
+                                "cannot be 'accepted' on a review that did not clear it")
+                data["_review_hashes"] = set(_HEX64.findall(rtext))
+
+    # --- the reference: sealed boards -----------------------------------------
+    ref = data.get("reference", "").strip() if isinstance(data.get("reference"), str) else ""
+    if ref:
+        rdir = _inside(root, ref)
+        if rdir is None or not rdir.is_dir():
+            hard.append(f"{rel}: reference {ref!r} is not a directory in the repo")
+        else:
+            sealed_hard, drift = _seal.verify(root, rdir)
+            hard += [f"{rel}: reference: {h}" for h in sealed_hard]
+            soft += [f"{rel}: reference rendered from an older dependency — {d} "
+                     "(re-seal or start a new round)" for d in drift]
+            spath = rdir / _seal.SEAL
+            if not sealed_hard and spath.is_file() and "_review_hashes" in data:
+                current = spath.read_text(encoding="utf-8").strip()
+                hashes = data["_review_hashes"]
+                if hashes and current not in hashes:
+                    hard.append(f"{rel}: review {data['review'].strip()} names seal(s) "
+                                f"{', '.join(sorted(h[:12] + '…' for h in hashes))} but the reference "
+                                f"carries {current[:12]}… — the GO applies to different boards")
+                elif not hashes:
+                    soft.append(f"{rel}: review does not name the seal it verified — "
+                                "quote manifest.sha256 in the review")
+    elif status == "accepted":
+        soft.append(f"{rel}: no sealed reference — the reviewer judges AFTER pictures "
+                    "against the contract text alone")
+
+    # --- in flight: a UI change under the surface must cite what it implements ---
+    globs = [_glob_re(g.strip()) for g in data.get("paths", [])]
+    if globs and in_flight:
+        touched = sorted(p for p in in_flight if any(g.match(p) for g in globs))
+        if touched and not cited:
+            soft.append(f"{rel}: this push touches {len(touched)} file(s) under the {surface} "
+                        f"surface (e.g. {touched[0]}) while no active plan cites a "
+                        f"{'/'.join(data['id_prefixes'])}* contract ID — DoR R5: name the IDs "
+                        "the change implements or amends")
+    return hard, soft
+
+
+def check(root: Path) -> tuple[list[str], list[str]]:
+    files = _registry_files(root)
+    if not files:
+        return [], ["no design contracts yet (dir empty or absent)"]
+    plans = active_plan_texts(root)
+    in_flight = _paths_in_flight(root)
+    hard: list[str] = []
+    soft: list[str] = []
+    for path in files:
+        h, s = _check_one(root, path, plans, in_flight)
+        hard += h
+        soft += s
+    return hard, soft
+
+
+def bundle_lines(root: Path, plans: dict[str, str] | None = None) -> list[str]:
+    """For the review bundle: which surface contracts govern this change and
+    which IDs the plans cite — so the reviewer opens the right norm and the
+    right boards instead of judging from taste."""
+    out: list[str] = []
+    plans = active_plan_texts(root) if plans is None else plans
+    for path in _registry_files(root):
+        data, _errs = load(root, path)
+        if data is None:
+            out.append(f"- {path.relative_to(root)}: unreadable registry entry (gate reports it)")
+            continue
+        ids = id_pattern(data["id_prefixes"])
+        cited = sorted({i for t in plans.values() for i in ids.findall(t)})
+        ref = data.get("reference", "")
+        line = (f"- **{data['surface'].strip()}**: `{data['contract'].strip()}` "
+                f"({data['status'].strip()}"
+                + (f", reference `{ref}`" if ref else ", no sealed reference") + ")")
+        line += f" — plan cites {', '.join(cited)}" if cited else " — no ID cited by an active plan"
+        out.append(line)
+    return out
+
+
+def main() -> int:
+    root = Path(sys.argv[1] if len(sys.argv) > 1 else ".").resolve()
+    hard, soft = check(root)
+    for note in soft:
+        print(f"design-contracts: note: {note}")
+    if hard:
+        print("design-contracts: FAILED:")
+        for h in hard:
+            print(f"  - {h}")
+        return 1
+    print("design-contracts: OK")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -30,7 +30,7 @@ Spezifikations-Skills deckt Spec Kits eigenes Integrations-System ab.
 > Exit-Szenario der Spec-Kit-Abhängigkeit: Pin einfrieren — der vendored
 > Stand läuft ohne Netz und ohne CLI unbegrenzt weiter.
 
-> **Status:** `v2.13.0` — Sub-Projekte SP1–SP70 (Standard-Setup
+> **Status:** `v2.14.0` — Sub-Projekte SP1–SP71 (Standard-Setup
 > statt Profile/Toggles, Spec Kit als Standard-Spezifikationsweg, 5 Core-Gates,
 > DoR/DoD, Kernel-Integritäts- und Compaction-Schutz). Vollständige Historie: [`CHANGELOG.md`](CHANGELOG.md).
 > **Überblick für Einsteiger:innen & Management** (wie es funktioniert, warum,
@@ -104,7 +104,8 @@ die einzige Enforcement-Säule — und ohne dieses erzwingt nichts die Gates. Da
 `contracts` (Kopplung als geprüfter Contract: contract-first + Pin-Drift),
 `git-hooks` (lokale Durchsetzung über das pre-commit-Framework),
 `telemetry` (genau die drei Ziel-KPIs: Konvergenz, Kosten, DORA-CFR — `GRADE`-Trace gate-gesichert, Trends gegen die eigene Baseline),
-`arch-docs` (arc42/C4-lite Doku-Scaffold mit ehrlichem Gate) und
+`arch-docs` (arc42/C4-lite Doku-Scaffold mit ehrlichem Gate),
+`design-contracts` (der Designvertrag je Surface als gepinnte, zitierte Norm: stabile IDs, gesiegelte Referenz-Boards, unabhängiges Review mit GO, Amend-before-Code — die Gestaltung selbst beurteilt der Mensch gegen die Boards, das Gate nur Existenz, Pin, Zitat und Status) und
 `github-master` (GitHub Issues als Arbeits-Log-SSOT über einen committeten Snapshot — Sync mit Netz, Gate hermetisch offline; DoR-at-rest + Board-Konsistenz).
 Das `regulated`-Paket ergänzt `security-floor` (verbotene Muster als Gate) und `sbom` (CycloneDX + Lizenz-Allow-List).
 

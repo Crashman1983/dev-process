@@ -1,0 +1,12 @@
+{
+  "surface": "surface",
+  "contract": "docs/design/<surface>-contract.md",
+  "status": "draft",
+  "pin": "sha256:<hex of the contract file — sha256sum docs/design/<surface>-contract.md>",
+  "id_prefixes": ["S", "C", "E", "AX"],
+  "adr": "docs/process/adr/adr-NNNN-<surface>-visual-language.md",
+  "review": "docs/design/concepts/<surface>-round-N-independent-review.md",
+  "reference": "docs/design/concepts/<surface>-round-N",
+  "paths": ["<surface-code-root>/**"],
+  "notes": "Inert seed: the gate skips *.example.json. Copy, drop `.example`, rename the stem to the surface (web, ios, cli, ...). `status` becomes `accepted` only with a decision record and an independent review that records `Decision: GO`; `reference` is a folder sealed with scripts/process/seal.py; `paths` are the code roots whose changes must cite a contract ID in the plan."
+}

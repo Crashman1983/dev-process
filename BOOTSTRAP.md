@@ -91,7 +91,7 @@ line instead:
     uvx copier copy --defaults \
       --data project_name="<project name>" \
       --data harness=claude \
-      --data 'modules={"speckit": true, "doc_drift_gate": true, "arch_onboarding": false, "feature_registry": true, "github_issues": true, "contracts": false, "git_hooks": true, "security_floor": false, "sbom": false, "telemetry": true, "arch_docs": false, "github_master": true}' \
+      --data 'modules={"speckit": true, "doc_drift_gate": true, "arch_onboarding": false, "feature_registry": true, "github_issues": true, "contracts": false, "git_hooks": true, "security_floor": false, "sbom": false, "telemetry": true, "arch_docs": false, "github_master": true, "design_contracts": true}' \
       --data 'ci={"github": true}' \
       --skip 'CLAUDE.md' --skip 'AGENTS.md' \
       gh:Crashman1983/dev-process .
@@ -152,7 +152,7 @@ Add a module or pull an updated process version — with a clean working tree
 (`git status --porcelain` empty), then:
 
     uvx copier update --defaults \
-      --data 'modules={"speckit": true, "doc_drift_gate": true, "arch_onboarding": false, "feature_registry": false, "github_issues": false, "contracts": false, "git_hooks": false, "security_floor": false, "sbom": false, "telemetry": false, "arch_docs": false, "github_master": false}' 
+      --data 'modules={"speckit": true, "doc_drift_gate": true, "arch_onboarding": false, "feature_registry": false, "github_issues": false, "contracts": false, "git_hooks": false, "security_floor": false, "sbom": false, "telemetry": false, "arch_docs": false, "github_master": false, "design_contracts": false}' 
 
 Do NOT `--skip` the anchor files here: copier's three-way merge preserves your
 local anchor extensions anyway, while a skipped anchor keeps the OLD kernel
