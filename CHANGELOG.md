@@ -743,6 +743,18 @@ Plan wird nur gegen den Vertrag geprüft, den er nennt (Pfad oder
 `design-contract: <surface>`-Zeile); ein Plan mit Familien-IDs ohne
 Nennung bekommt genau eine Note; Nullen sind keine Identität), `v2.14.2`.
 
+**Integritäts-Ledger im Review-Gate** (Befund im Referenzprojekt: 628
+digest-gebundene REVIEW-Zeilen, je Zeile mehrere git-diffs, eine
+kanonische Diff großer Spannen ~3 s — der pre-push-Gate wurde nie
+fertig. Die Eingaben einer Verifikation sind im Klon unveränderlich,
+also auch ihr Ergebnis: ein einmal geprüfter Record wird in
+`.git/process-review-integrity` gemerkt — „ok" wie Mismatch, ein
+erfundener Digest bleibt bei jedem Lauf rot, ohne neu gerechnet zu
+werden; Shards, die der Push selbst ändert, werden immer frisch
+geprüft; fehlende Commits werden jedes Mal neu gesucht.
+`--full`/`PROCESS_REVIEW_INTEGRITY=all` prüft alles, `=in-flight` nur
+die geänderten Shards (CI-Schalter für riesige Journale)), `v2.14.3`.
+
 ## Sub-Projekt-Tabelle (SP1–SP24)
 
 Die Tabelle wurde bis SP24 gepflegt; ab SP25 trägt das Narrativ oben die

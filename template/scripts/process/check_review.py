@@ -52,6 +52,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 JOURNAL_DIR = ".process-work/journal"
@@ -370,6 +371,119 @@ def _integrity_violations(rel: str, root: Path,
     return hard, soft
 
 
+
+# --- integrity scope: verify what this push carries, remember the rest -------
+# Every digest-bound REVIEW record costs git diffs (canonical, then the
+# legacy forms). Re-verifying the whole journal on every push grows without
+# bound — measured downstream: 628 bound records, one canonical diff of a
+# large range ~3 s, a pre-push gate that no longer finished. The inputs of a
+# verification are immutable in a clone (commit objects, the recorded
+# digest), so its result is too: a record verified once in this clone is
+# taken from a ledger in .git/ afterwards — an "ok" as well as a mismatch,
+# so a fabricated digest stays red on every run without being recomputed.
+# Shards the push itself changes are always verified fresh; a record whose
+# commits are missing here is re-checked each run (a fetch may bring them).
+# PROCESS_REVIEW_INTEGRITY=all (or --full) re-verifies everything;
+# =in-flight verifies only the changed shards (a CI knob for huge journals).
+INTEGRITY_LEDGER = "process-review-integrity"
+INTEGRITY_ENV = "PROCESS_REVIEW_INTEGRITY"
+
+
+def _integrity_ledger_path(root: Path) -> Path | None:
+    out = _git_bytes(root, "rev-parse", "--git-dir")
+    if out is None:
+        return None
+    gitdir = Path(out.decode(errors="replace").strip())
+    if not gitdir.is_absolute():
+        gitdir = root / gitdir
+    return gitdir / INTEGRITY_LEDGER if gitdir.is_dir() else None
+
+
+def _load_integrity_ledger(path: Path | None) -> dict[str, str]:
+    if path is None or not path.is_file():
+        return {}
+    out: dict[str, str] = {}
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        key, sep, verdict = line.partition("\t")
+        if sep and key.count(" ") == 2:
+            out[key] = verdict
+    return out
+
+
+def _fetch_stamp(root: Path) -> float:
+    """When this clone last fetched — the only event that can bring a missing
+    artifact commit. Worktrees share FETCH_HEAD via the common dir."""
+    out = _git_bytes(root, "rev-parse", "--git-common-dir")
+    if out is None:
+        return 0.0
+    common = Path(out.decode(errors="replace").strip())
+    if not common.is_absolute():
+        common = root / common
+    try:
+        return (common / "FETCH_HEAD").stat().st_mtime
+    except OSError:
+        return 0.0
+
+
+def _integrity_scoped(rel: str, root: Path, records: list[tuple[int, dict]], *,
+                      fresh: bool, mode: str, ledger: dict[str, str] | None,
+                      fetched_at: float = 0.0) -> tuple[list[str], list[str], int]:
+    """(hard, soft, reused): integrity findings for one shard; `reused` counts
+    records answered from the ledger instead of recomputed. A record whose
+    commits are missing is remembered with the time of the check and looked
+    up again only after a later fetch — on a partial clone a miss costs
+    seconds (measured: ~8 s per lookup, 196 such records, ten minutes a run)."""
+    bound = [(ln, f) for ln, f in records if "diff" in f]
+    if not bound:
+        return [], [], 0
+    if fresh or mode == "all":
+        h, s = _integrity_violations(rel, root, records)
+        return h, s, 0
+    if mode == "in-flight":
+        return [], [], len(bound)
+    if ledger is None:  # no .git/ to remember in: verify every time
+        h, s = _integrity_violations(rel, root, records)
+        return h, s, 0
+    hard: list[str] = []
+    soft: list[str] = []
+    reused = 0
+    for ln, f in bound:
+        key = f"{f['base']} {f['head']} {f['diff']}"
+        cached = ledger.get(key)
+        if cached is not None and cached.startswith("missing:"):
+            checked_at = float(cached.split(":", 2)[1] or 0)
+            if fetched_at > checked_at:
+                cached = None  # a fetch happened since: the commits may be here now
+        if cached is not None:
+            reused += 1
+            if cached.startswith("hard:"):
+                hard.append(f"{rel}:{ln}: {cached[5:]}")
+            elif cached.startswith("missing:"):
+                soft.append(f"{rel}:{ln}: {cached.split(':', 2)[2]}")
+            continue
+        h, s = _integrity_violations(rel, root, [(ln, f)])
+        hard += h
+        soft += s
+        prefix = f"{rel}:{ln}: "
+        if h:
+            ledger[key] = "hard:" + h[0].removeprefix(prefix)
+        elif s:
+            ledger[key] = f"missing:{int(time.time())}:" + s[0].removeprefix(prefix)
+        else:
+            ledger[key] = "ok"
+    return hard, soft, reused
+
+
+def _save_integrity_ledger(path: Path | None, ledger: dict[str, str]) -> None:
+    if path is None:
+        return
+    try:
+        path.write_text("".join(f"{k}\t{v}\n" for k, v in sorted(ledger.items())),
+                        encoding="utf-8")
+    except OSError:
+        pass  # a read-only .git/ costs a recompute next run, never a finding
+
+
 def _cleared(passes: list[dict], ids: set[str], tier: int) -> bool:
     """Does any pass clear a plan of this tier? The REVIEW grammar caps tier
     at 3 — a plan on an extended downstream scale (tier 4/5) clears at the
@@ -580,6 +694,13 @@ def check(root: Path) -> tuple[list[str], list[str]]:
 
     # --- parse all REVIEW attestations from the (recursive) journal ---
     all_records: list[tuple[int, dict]] = []
+    integrity_mode = "all" if "--full" in sys.argv else os.environ.get(INTEGRITY_ENV, "ledger")
+    scope_base = merge_base(root)
+    changed_shards = paths_in_flight(root) if scope_base is not None else set()
+    ledger_path = _integrity_ledger_path(root) if integrity_mode == "ledger" else None
+    ledger = _load_integrity_ledger(ledger_path) if ledger_path is not None else None
+    fetched_at = _fetch_stamp(root) if ledger is not None else 0.0
+    reused_total = 0
     jdir = root / JOURNAL_DIR
     if jdir.is_dir():
         for f in sorted(jdir.glob("**/*.md")):
@@ -596,10 +717,21 @@ def check(root: Path) -> tuple[list[str], list[str]]:
             for lineno, msg in errors:
                 hard.append(f"{rel}:{lineno}: malformed REVIEW line — {msg}")
             hard.extend(_arithmetic_violations(rel, records))
-            ih, isoft = _integrity_violations(rel, root, records)
+            ih, isoft, reused = _integrity_scoped(
+                rel, root, records, ledger=ledger, mode=integrity_mode,
+                fetched_at=fetched_at,
+                fresh=(scope_base is None or rel in changed_shards))
+            reused_total += reused
             hard.extend(ih)
             soft.extend(isoft)
             all_records.extend(records)
+    if ledger is not None:
+        _save_integrity_ledger(ledger_path, ledger)
+    if reused_total:
+        what = ("not re-verified (only the shards this push changes are)" if integrity_mode == "in-flight"
+                else "answered from this clone's ledger (verified here before; a mismatch stays red)")
+        soft.append(f"integrity: {reused_total} digest-bound record(s) in unchanged shards {what} — "
+                    f"`--full` or {INTEGRITY_ENV}=all re-verifies everything")
 
     passes = [f for _ln, f in all_records if f["verdict"] == "pass"]
 
@@ -813,7 +945,8 @@ def _unhomed_plans(root: Path) -> list[str]:
 
 
 def main() -> int:
-    root = Path(sys.argv[1] if len(sys.argv) > 1 else ".").resolve()
+    args = [a for a in sys.argv[1:] if a != "--full"]
+    root = Path(args[0] if args else ".").resolve()
     if not root.is_dir():
         print(f"review: FAILED:\n  - root {root} is not a directory")
         return 1
