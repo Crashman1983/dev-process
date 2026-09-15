@@ -729,6 +729,13 @@ Die Gestaltung selbst bleibt Menschen- und Reviewer-Urteil gegen die
 Boards; Render-Kit, Export-QA und Token-Lints bleiben projektspezifisch,
 das Modul beschreibt nur das Muster) ausgeliefert, `v2.14.0`.
 
+**Siegel-Interop** (`seal.py --verify` und das design-contracts-Gate lesen
+auch das Manifest eines projekteigenen Render-Kit-Freezers: `files` als
+Liste `{path, sha256}`, Abhängigkeiten als `externalDependencies` mit
+ordnerrelativen `../..`-Pfaden, `manifest.sha256` in sha256sum-Form
+`<hex>  manifest.json` — dieselbe Formel, ein Verifizierer; Anlass: drei
+bereits gesiegelte Runden im Referenzprojekt), `v2.14.1`.
+
 ## Sub-Projekt-Tabelle (SP1–SP24)
 
 Die Tabelle wurde bis SP24 gepflegt; ab SP25 trägt das Narrativ oben die

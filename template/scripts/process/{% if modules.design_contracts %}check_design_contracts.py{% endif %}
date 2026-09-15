@@ -240,7 +240,7 @@ def _check_one(root: Path, path: Path, plans: dict[str, str], in_flight: set[str
                      "(re-seal or start a new round)" for d in drift]
             spath = rdir / _seal.SEAL
             if not sealed_hard and spath.is_file() and "_review_hashes" in data:
-                current = spath.read_text(encoding="utf-8").strip()
+                current = (spath.read_text(encoding="utf-8").split() or [""])[0]
                 hashes = data["_review_hashes"]
                 if hashes and current not in hashes:
                     hard.append(f"{rel}: review {data['review'].strip()} names seal(s) "
