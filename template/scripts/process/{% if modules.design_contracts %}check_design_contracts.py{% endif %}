@@ -19,7 +19,10 @@ citing an ID the contract does not define.
 Best-effort (note, never red): an opaque pin; a draft contract; reference
 boards rendered from an older contract (external drift — re-seal or start a
 new round); a change in flight under the surface's paths while no active
-plan cites a contract ID (DoR R5). Judging the design itself is never
+plan cites a contract ID (DoR R5); a plan citing IDs without naming the
+contract it means. A plan is bound to a contract by naming its path or a
+`design-contract: <surface>` line — ID families are shared across surfaces,
+so only a bound plan is judged against a contract. Judging the design itself is never
 machine work — that is what the sealed boards and the reviewer are for.
 Python stdlib only."""
 from __future__ import annotations
@@ -70,6 +73,25 @@ def id_pattern(prefixes: list[str]) -> re.Pattern[str]:
     `E1` never matches inside `LINE1` and `C` alone matches nothing."""
     alts = "|".join(re.escape(p) for p in sorted(prefixes, key=len, reverse=True))
     return re.compile(rf"(?<![\w-])(?:{alts})\d+[a-z]?(?![\w-])")
+
+
+_BIND = re.compile(r"^\s*(?:[-*+]\s+)?[*_]*design-contract[*_]*\s*:\s*(\S+)", re.IGNORECASE | re.MULTILINE)
+
+
+def bound_to(text: str, surface: str, contract_rel: str) -> bool:
+    """A plan builds on a contract when it names it: the contract's path, or a
+    `design-contract: <surface>` line. Two surfaces share ID families (E1 is
+    an elevation on web and on mobile) — without the binding an iOS plan
+    would be judged against the web contract and vice versa."""
+    if contract_rel in text:
+        return True
+    return any(m.group(1).strip("`'\"").lower() == surface.lower() for m in _BIND.finditer(text))
+
+
+def canonical(ident: str, ids: re.Pattern[str]) -> str:
+    """C8 and C08 are the same element: prefix + int(number) + suffix."""
+    m = re.fullmatch(r"(.*?)(\d+)([a-z]?)", ident)
+    return f"{m.group(1)}{int(m.group(2))}{m.group(3)}" if m else ident
 
 
 def _glob_re(pattern: str) -> re.Pattern[str]:
@@ -183,24 +205,30 @@ def _check_one(root: Path, path: Path, plans: dict[str, str], in_flight: set[str
 
     # --- IDs: defined once, cited from something real ------------------------
     ids = id_pattern(data["id_prefixes"])
-    defined = set(ids.findall(text))
+    defined = {canonical(i, ids) for i in ids.findall(text)}
     if not defined:
         soft.append(f"{rel}: contract defines no ID of the families {data['id_prefixes']} yet")
-    seen: dict[str, int] = {}
+    seen: dict[str, list[str]] = {}
     for h in _HEADING.findall(text):
-        for i in ids.findall(h):
-            seen[i] = seen.get(i, 0) + 1
-    for i, n in sorted(seen.items()):
-        if n > 1:
-            hard.append(f"{rel}: ID {i} is defined by {n} headings in the contract — one owner per ID")
+        for i in sorted({canonical(i, ids): i for i in ids.findall(h)}.values()):
+            seen.setdefault(canonical(i, ids), []).append(i)
+    for forms in seen.values():
+        if len(forms) > 1:
+            hard.append(f"{rel}: ID {forms[0]} is defined by {len(forms)} headings in the "
+                        "contract — one owner per ID")
     cited: dict[str, set[str]] = {}
+    contract_rel = data["contract"].strip()
     for prel, ptext in plans.items():
         found = set(ids.findall(ptext))
-        if found:
-            cited[prel] = found
-            for i in sorted(found - defined):
+        if not found:
+            continue
+        if not bound_to(ptext, surface, contract_rel):
+            continue  # judged against the contract it names; unbound plans: see check()
+        cited[prel] = found
+        for i in sorted(found, key=lambda x: canonical(x, ids)):
+            if canonical(i, ids) not in defined:
                 hard.append(f"{prel}: cites {surface} design-contract ID {i}, which "
-                            f"{data['contract'].strip()} does not define — a plan may only "
+                            f"{contract_rel} does not define — a plan may only "
                             "build on IDs the contract carries (amend the contract first)")
 
     # --- status: accepted needs a decision record and an independent GO --------
@@ -273,10 +301,25 @@ def check(root: Path) -> tuple[list[str], list[str]]:
     in_flight = _paths_in_flight(root)
     hard: list[str] = []
     soft: list[str] = []
+    entries = []
     for path in files:
         h, s = _check_one(root, path, plans, in_flight)
         hard += h
         soft += s
+        data, _errs = load(root, path)
+        if data is not None:
+            entries.append(data)
+    # a plan that cites IDs of some family but names no contract at all is
+    # judged against nothing — say so once, not once per surface
+    for prel, ptext in plans.items():
+        if any(bound_to(ptext, e["surface"].strip(), e["contract"].strip()) for e in entries):
+            continue
+        found = sorted({i for e in entries for i in id_pattern(e["id_prefixes"]).findall(ptext)})
+        if found:
+            surfaces = "|".join(e["surface"].strip() for e in entries)
+            soft.append(f"{prel}: cites {', '.join(found[:6])} but names no design contract — "
+                        f"bind it (`design-contract: {surfaces}` or the contract path) so the "
+                        "IDs are checked against the norm they mean")
     return hard, soft
 
 
@@ -292,7 +335,9 @@ def bundle_lines(root: Path, plans: dict[str, str] | None = None) -> list[str]:
             out.append(f"- {path.relative_to(root)}: unreadable registry entry (gate reports it)")
             continue
         ids = id_pattern(data["id_prefixes"])
-        cited = sorted({i for t in plans.values() for i in ids.findall(t)})
+        surface, contract_rel = data["surface"].strip(), data["contract"].strip()
+        cited = sorted({i for t in plans.values() if bound_to(t, surface, contract_rel)
+                        for i in ids.findall(t)})
         ref = data.get("reference", "")
         line = (f"- **{data['surface'].strip()}**: `{data['contract'].strip()}` "
                 f"({data['status'].strip()}"

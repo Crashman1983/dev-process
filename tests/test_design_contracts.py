@@ -202,9 +202,9 @@ def test_plan_citing_undefined_id_is_hard(render, tmp_path):
     _entry(out)
     plans = out / ".process-work/plans"
     plans.mkdir(parents=True, exist_ok=True)
-    (plans / "2026-09-15-composer.md").write_text("# Plan\n\ntier: 2\n\nImplements C01 and E1.\n")
+    (plans / "2026-09-15-composer.md").write_text("# Plan\n\ntier: 2\ndesign-contract: web\n\nImplements C01 and E1.\n")
     assert _gate(out).returncode == 0
-    (plans / "2026-09-15-composer.md").write_text("# Plan\n\ntier: 2\n\nImplements C07.\n")
+    (plans / "2026-09-15-composer.md").write_text("# Plan\n\ntier: 2\ndesign-contract: web\n\nImplements C07.\n")
     r = _gate(out)
     assert r.returncode == 1 and "cites web design-contract ID C07" in r.stdout
     # archived plans are history: never scanned
@@ -213,7 +213,7 @@ def test_plan_citing_undefined_id_is_hard(render, tmp_path):
     (plans / "archive/2026-01-01-old.md").write_text("Implements C99.\n")
     assert _gate(out).returncode == 0
     # spec plans count as active plans
-    _write(out, "specs/012-thing/plan.md", "# Plan\n\nImplements C42.\n")
+    _write(out, "specs/012-thing/plan.md", f"# Plan\n\nNorm: `{CONTRACT}`. Implements C42.\n")
     assert _gate(out).returncode == 1
 
 
@@ -339,7 +339,7 @@ def test_surface_change_without_cited_id_is_a_note(render, tmp_path):
     assert "touches 1 file(s) under the web surface" in r.stdout and "DoR R5" in r.stdout
     plans = out / ".process-work/plans"
     plans.mkdir(parents=True, exist_ok=True)
-    (plans / "2026-09-15-composer.md").write_text("# Plan\n\ntier: 2\n\nImplements C01.\n")
+    (plans / "2026-09-15-composer.md").write_text("# Plan\n\ntier: 2\ndesign-contract: web\n\nImplements C01.\n")
     r = _gate(out)
     assert r.returncode == 0 and "touches 1 file(s)" not in r.stdout
     # a change outside the surface's paths says nothing
@@ -368,7 +368,7 @@ def test_review_bundle_lists_contract_and_cited_ids(render, tmp_path):
     _git(out, "checkout", "-q", "-b", "feat")
     plans = out / ".process-work/plans"
     plans.mkdir(parents=True, exist_ok=True)
-    (plans / "2026-09-15-composer.md").write_text("# Plan\n\ntier: 2\nissue: #9\n\nImplements C01, E1.\n")
+    (plans / "2026-09-15-composer.md").write_text("# Plan\n\ntier: 2\nissue: #9\ndesign-contract: web\n\nImplements C01, E1.\n")
     _write(out, "web/src/composer.css", ".c{}\n")
     _git(out, "add", "-A")
     _git(out, "commit", "-q", "-m", "feat: composer")
@@ -414,3 +414,42 @@ def test_verify_reads_a_render_kits_own_manifest_shape(render, tmp_path):
     assert r.returncode == 2 and "../../web-contract.md: changed" in r.stdout
     (rdir / "boards/S01-desktop-dark.png").write_text("x")
     assert _seal(out, "--verify", ROUND).returncode == 1
+
+
+def test_unbound_plan_is_a_note_and_binding_decides_the_norm(render, tmp_path):
+    # ID families are shared across surfaces: an iOS plan's E1 must not be
+    # judged against the web contract. A plan names the contract it means.
+    out = _render(render, tmp_path)
+    _entry(out)
+    ios = _write(out, "docs/design/ios-contract.md", "# iOS\n\n### C01 Composer\n\n### E1 docked\n\n### E7 overlay\n")
+    _write(out, f"{REG}/ios.json", json.dumps({"surface": "ios", "contract": "docs/design/ios-contract.md",
+                                              "status": "draft", "pin": f"sha256:{_sha(ios)}",
+                                              "id_prefixes": ["C", "E"]}))
+    plans = out / ".process-work/plans"
+    plans.mkdir(parents=True, exist_ok=True)
+    p = plans / "2026-09-15-composer.md"
+    p.write_text("# Plan\n\ntier: 2\n\nImplements E7.\n")  # unbound: web has no E7
+    r = _gate(out)
+    assert r.returncode == 0, r.stdout
+    assert "names no design contract" in r.stdout and "design-contract: ios|web" in r.stdout
+    p.write_text("# Plan\n\ntier: 2\ndesign-contract: ios\n\nImplements E7.\n")
+    r = _gate(out)
+    assert r.returncode == 0 and "names no design contract" not in r.stdout
+    p.write_text("# Plan\n\ntier: 2\ndesign-contract: web\n\nImplements E7.\n")
+    r = _gate(out)
+    assert r.returncode == 1 and "cites web design-contract ID E7" in r.stdout
+    assert "ios design-contract" not in r.stdout
+
+
+def test_zero_padding_does_not_split_an_id(render, tmp_path):
+    out = _render(render, tmp_path)
+    c = _write(out, CONTRACT, CONTRACT_TEXT + "\n### C01 Composer (again, as C1)\n")
+    _entry(out, pin=f"sha256:{_sha(c)}")
+    r = _gate(out)
+    assert r.returncode == 1 and "ID C01 is defined by 2 headings" in r.stdout
+    _write(out, CONTRACT, CONTRACT_TEXT)
+    _entry(out)
+    plans = out / ".process-work/plans"
+    plans.mkdir(parents=True, exist_ok=True)
+    (plans / "2026-09-15-x.md").write_text("# Plan\n\ndesign-contract: web\n\nImplements C1 and C2 (P4 delta C1–C2).\n")
+    assert _gate(out).returncode == 0

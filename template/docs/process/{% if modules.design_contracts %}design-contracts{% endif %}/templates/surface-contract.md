@@ -9,7 +9,8 @@
 
 Every normative element carries a stable ID. IDs are never renumbered or
 reused; a retired element keeps its ID with a `retired:` line. Plans, commits,
-tests and snapshots cite these IDs (DoR R5, DoD D8).
+tests and snapshots cite these IDs (DoR R5, DoD D8); a plan binds itself to
+this contract with a `design-contract: <surface>` line or by naming this file.
 
 ## 0. Precedence
 
