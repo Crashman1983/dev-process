@@ -67,6 +67,17 @@ reference boards rendered from an older contract (external drift: re-seal or
 start a new round); a push touching the surface's `paths` while no active
 plan cites an ID (DoR R5); an accepted contract without a sealed reference.
 
+## Binding a plan to its contract
+
+ID families are shared across surfaces — `E1` is an elevation on web and on
+mobile — so a plan is judged only against the contract it **names**: the
+contract's path anywhere in the plan, or a `design-contract: <surface>`
+line. A plan that cites family IDs but names no contract gets one note; a
+bound plan citing an ID its contract does not define is red. Zero-padding
+is not identity: `C8` and `C08` are the same element. Keep labels that are
+*not* contract IDs (finding numbers, brief items) out of the registered
+families, or register only the families the contract really owns.
+
 ## Precedence — what wins when norms disagree
 
 1. the functional contract (API, capability, behaviour spec)

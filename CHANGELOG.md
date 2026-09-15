@@ -736,6 +736,13 @@ ordnerrelativen `../..`-Pfaden, `manifest.sha256` in sha256sum-Form
 `<hex>  manifest.json` — dieselbe Formel, ein Verifizierer; Anlass: drei
 bereits gesiegelte Runden im Referenzprojekt), `v2.14.1`.
 
+**Plan-Bindung** (erster Lauf im Referenzprojekt: ID-Familien sind
+surface-übergreifend — E1 ist auf Web wie iOS eine Ebene —, ein iOS-Plan
+wurde gegen den Web-Vertrag geprüft und `C8` galt nicht als `C08`. Ein
+Plan wird nur gegen den Vertrag geprüft, den er nennt (Pfad oder
+`design-contract: <surface>`-Zeile); ein Plan mit Familien-IDs ohne
+Nennung bekommt genau eine Note; Nullen sind keine Identität), `v2.14.2`.
+
 ## Sub-Projekt-Tabelle (SP1–SP24)
 
 Die Tabelle wurde bis SP24 gepflegt; ab SP25 trägt das Narrativ oben die
