@@ -63,6 +63,19 @@ copy of `pre-push` ran while the tracked one evolved, and a leaked
 through it. The doctor fails hard on a populated `.githooks/` without the
 matching `core.hooksPath`.
 
+## Long-running hooks and agent tool calls
+
+A hook that can run for minutes (a scoped test arm queued behind another
+worktree's full run) must never be waited out inside an agent's tool call:
+the call has its own timeout, it kills the push at the last percent, and
+the retry starts from zero — observed downstream five times in a row. Two
+rules: the hook waits **bounded** (minutes, not an hour) and then aborts
+with who holds the resource and the way out; and the evidence is produced
+**decoupled** from the push — a certify step run in the background that
+records the tree, which the hook then reads instead of re-earning. An
+agent that hits the bounded abort does other work and pushes again when
+the lane is free or the certificate exists; it does not loop on the push.
+
 ## Honest ceiling
 
 Hooks are client-side: a clone that never installs them enforces nothing

@@ -13,6 +13,11 @@ publish/prune. Execute the printed steps; do not improvise the order
 (`docs/process/commits.md`, Merging — the plan archives BEFORE the merge,
 and merge leaves no residue).
 
+A push whose hook may run tests for minutes is never waited out inside a
+tool call: produce the evidence in the background first (the project's
+certify step, where one exists), then push; on a busy-lane abort do other
+work and push again later — never a retry loop (the `git-hooks` module doc).
+
 Then let the checker execute the deterministic part instead of retyping
 it:
 
