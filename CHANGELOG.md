@@ -755,6 +755,16 @@ geprüft; fehlende Commits werden jedes Mal neu gesucht.
 `--full`/`PROCESS_REVIEW_INTEGRITY=all` prüft alles, `=in-flight` nur
 die geänderten Shards (CI-Schalter für riesige Journale)), `v2.14.3`.
 
+**Kein Push wartet blind** (Befund 2026-09-18 im Referenzprojekt: der
+pre-push-Hook stand hinter einem Volllauf an, der Tool-Call des Agenten
+starb nach 40 Minuten bei 96 % der Scoped-Tests, fünfmal hintereinander.
+Regel in git-hooks.md und /finish: ein Hook, der Minuten laufen kann,
+wartet begrenzt und bricht mit Halter und Ausweg ab; die Evidenz entsteht
+entkoppelt im Hintergrund (Certify-Schritt, Baum-Zertifikat), der Push
+liest sie. Werkzeug bleibt projektspezifisch — im Referenzprojekt
+`scripts/lane.py` mit zwei Lanes, `make certify`, `make lane-status`),
+`v2.14.4`.
+
 ## Sub-Projekt-Tabelle (SP1–SP24)
 
 Die Tabelle wurde bis SP24 gepflegt; ab SP25 trägt das Narrativ oben die
