@@ -34,6 +34,14 @@ reviewer keep those (`docs/process/verification-independence.md`).
    a human decision. If nothing happened, say nothing. On a direct
    question, answer from the table in five lines.
 
+## Hosts
+
+You run on one machine; a worker may run on another. Read
+`tower.py --remote` so its branches on origin and its published reports
+(`report.py --sync`) are in the table. Reach it the way that host allows
+(a message, an ssh command, a remote session); never assume a worktree
+you cannot see is idle — `elsewhere` in the table says what it carries.
+
 ## Resources
 
 Concurrency follows the lanes and the load, not the wish list. Mechanical

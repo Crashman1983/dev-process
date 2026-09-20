@@ -11,14 +11,21 @@ hour as stale.
 
 Where it lands: `<git common dir>/process-tower/reports.jsonl` — shared by
 every worktree of this clone on this machine, never committed, one line
-per report: {"ts","worker","branch","issue","state","note","cwd"}. A
-worker on another machine reaches the tower by message, not by file.
+per report: {"ts","host","worker","branch","issue","state","note","cwd"}.
+
+More than one host (the steward on one machine, a detached worker on
+another): `--sync` (or PROCESS_REPORT_SYNC=1) publishes this host's file
+as a blob under `refs/process/reports/<host>` on origin — git is the one
+channel every host already has; no ssh, nothing committed to a branch.
+The tower fetches those refs (`tower.py --remote`) and merges every
+host's reports. Host name: PROCESS_HOST or the machine's hostname.
 Stdlib only."""
 from __future__ import annotations
 
 import argparse
 import json
 import os
+import socket
 import subprocess
 import sys
 import time
@@ -27,6 +34,7 @@ from pathlib import Path
 STATES = ("planned", "pushed", "review-pass", "blocked", "done", "idle")
 REPORTS_DIR = "process-tower"
 REPORTS_FILE = "reports.jsonl"
+REPORT_REFS = "refs/process/reports"
 
 
 def _git(root: Path, *args: str) -> str:
@@ -49,6 +57,11 @@ def reports_path(root: Path) -> Path | None:
     return d / REPORTS_FILE
 
 
+def host_name() -> str:
+    raw = os.environ.get("PROCESS_HOST") or socket.gethostname() or "host"
+    return "".join(ch if ch.isalnum() or ch in "-_." else "-" for ch in raw.split(".")[0])[:40]
+
+
 def default_worker(root: Path) -> str:
     return (os.environ.get("PROCESS_WORKER") or _git(root, "rev-parse", "--abbrev-ref", "HEAD")
             or root.name)
@@ -58,6 +71,7 @@ def write_report(root: Path, state: str, *, issue: int | None, note: str, worker
     record = {
         "ts": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
         "epoch": int(time.time()),
+        "host": host_name(),
         "worker": worker or default_worker(root),
         "branch": _git(root, "rev-parse", "--abbrev-ref", "HEAD"),
         "issue": issue,
@@ -73,19 +87,56 @@ def write_report(root: Path, state: str, *, issue: int | None, note: str, worker
     return record
 
 
-def read_reports(root: Path) -> list[dict]:
-    p = reports_path(root)
-    if p is None or not p.is_file():
-        return []
+def _parse(text: str, host: str | None) -> list[dict]:
     out: list[dict] = []
-    for line in p.read_text(encoding="utf-8", errors="replace").splitlines():
+    for line in text.splitlines():
         try:
             rec = json.loads(line)
         except ValueError:
             continue
         if isinstance(rec, dict) and rec.get("state") in STATES:
+            rec.setdefault("host", host or "?")
             out.append(rec)
     return out
+
+
+def read_reports(root: Path, *, remote: bool = False) -> list[dict]:
+    """This host's file, plus — with `remote` — every other host's published
+    ref (fetch them first: `fetch_reports`). Own host: the file wins."""
+    p = reports_path(root)
+    out: list[dict] = []
+    if p is not None and p.is_file():
+        out += _parse(p.read_text(encoding="utf-8", errors="replace"), host_name())
+    if remote:
+        refs = _git(root, "for-each-ref", "--format=%(refname)", REPORT_REFS + "/")
+        for ref in refs.splitlines():
+            host = ref.rsplit("/", 1)[-1]
+            if host == host_name():
+                continue
+            out += _parse(_git(root, "cat-file", "-p", ref), host)
+    return out
+
+
+def fetch_reports(root: Path, remote: str = "origin") -> bool:
+    r = subprocess.run(["git", "-C", str(root), "fetch", "--quiet", remote,
+                        f"+{REPORT_REFS}/*:{REPORT_REFS}/*"], capture_output=True, text=True, timeout=60)
+    return r.returncode == 0
+
+
+def sync_reports(root: Path, remote: str = "origin") -> bool:
+    """Publish this host's reports file as a blob ref on the remote."""
+    p = reports_path(root)
+    if p is None or not p.is_file():
+        return False
+    blob = _git(root, "hash-object", "-w", str(p))
+    if not blob:
+        return False
+    ref = f"{REPORT_REFS}/{host_name()}"
+    if subprocess.run(["git", "-C", str(root), "update-ref", ref, blob], capture_output=True).returncode != 0:
+        return False
+    r = subprocess.run(["git", "-C", str(root), "push", "--quiet", "--force", remote, f"{ref}:{ref}"],
+                       capture_output=True, text=True, timeout=60)
+    return r.returncode == 0
 
 
 def main(argv: list[str]) -> int:
@@ -95,10 +146,17 @@ def main(argv: list[str]) -> int:
     p.add_argument("--note", default="")
     p.add_argument("--worker", help="name (default: PROCESS_WORKER or the branch)")
     p.add_argument("--root", default=".")
+    p.add_argument("--sync", action="store_true",
+                   help="publish this host's reports to origin (refs/process/reports/<host>)")
     a = p.parse_args(argv)
-    rec = write_report(Path(a.root).resolve(), a.state, issue=a.issue, note=a.note, worker=a.worker)
-    print(f"report: {rec['worker']} → {rec['state']}"
+    root = Path(a.root).resolve()
+    rec = write_report(root, a.state, issue=a.issue, note=a.note, worker=a.worker)
+    print(f"report: {rec['worker']}@{rec['host']} → {rec['state']}"
           + (f" #{rec['issue']}" if rec["issue"] else "") + (f" — {rec['note']}" if rec["note"] else ""))
+    if a.sync or os.environ.get("PROCESS_REPORT_SYNC") == "1":
+        print("report: published to origin" if sync_reports(root)
+              else "report: publish to origin failed (kept locally; the tower reads it on this host)",
+              file=sys.stderr)
     return 0
 
 

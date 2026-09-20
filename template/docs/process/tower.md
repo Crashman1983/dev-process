@@ -45,6 +45,26 @@ transition, the reason on `blocked`. Reports live in the clone's git common
 dir, shared across worktrees on the machine, never committed. A worker on
 another machine reports by message; the orchestrator writes the line for it.
 
+## More than one host
+
+The process stays host-agnostic: the steward may run on one machine and a
+detached worker (a platform build that needs its own OS) on another. The
+one channel every host already has is git, so that is the transport:
+
+- a worker publishes its reports with `report.py --sync` (or
+  `PROCESS_REPORT_SYNC=1`) as a blob under `refs/process/reports/<host>`
+  on origin — nothing committed to a branch, no ssh;
+- `tower.py --remote` (or `PROCESS_TOWER_REMOTE=1`) fetches origin and
+  those refs: branches on origin that no local worktree carries appear
+  as `elsewhere` (ahead/behind, paths in flight, minutes since commit),
+  join the overlap check, and can be stale like a local worker; every
+  host's reports are merged, the latest per worker wins.
+
+Starting or stopping a worker on another host stays that host's own
+mechanism (an ssh command, a remote session); the steward's rule does not
+change: it stops only what it started, and only after plan and decisions
+are committed. Host names come from `PROCESS_HOST` or the hostname.
+
 ## What the tower is not
 
 It decides nothing and speaks to nobody. It is the input an orchestrating

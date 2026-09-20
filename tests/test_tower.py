@@ -101,7 +101,7 @@ def test_reports_feed_the_tower_and_stale_workers_are_found(render, tmp_path):
     _repo(out)
     wt = _worktree(out, "quiet", {"src/q.py": "q\n"})
     r = _report(wt, "planned", "--issue", "7", "--note", "plan committed")
-    assert r.returncode == 0 and "quiet → planned #7" in r.stdout
+    assert r.returncode == 0 and "quiet@" in r.stdout and "→ planned #7" in r.stdout
     common = _git(out, "rev-parse", "--git-common-dir").stdout.strip()
     ledger = Path(common if Path(common).is_absolute() else out / common) / "process-tower/reports.jsonl"
     assert ledger.is_file() and '"state": "planned"' in ledger.read_text()
@@ -137,3 +137,59 @@ def test_report_rejects_unknown_state(render, tmp_path):
     out = render(tmp_path, {"project_name": "d", "modules": {}})
     _repo(out)
     assert _report(out, "sleeping").returncode != 0
+
+
+def test_two_hosts_meet_in_the_tower_via_origin(render, tmp_path):
+    # the steward on host A, a detached worker on host B: B publishes its
+    # reports as a ref on origin and pushes its branch; A's --remote table
+    # shows B's branch as `elsewhere`, its report with host, and an overlap
+    import os
+    src = render(tmp_path / "src", {"project_name": "d", "modules": {}})
+    _repo(src)
+    bare = tmp_path / "origin.git"
+    _git(src, "clone", "-q", "--bare", str(src), str(bare))
+    a = tmp_path / "hostA"
+    b = tmp_path / "hostB"
+    _git(tmp_path, "clone", "-q", str(bare), str(a))
+    _git(tmp_path, "clone", "-q", str(bare), str(b))
+    for c in (a, b):
+        _git(c, "config", "user.email", "t@t")
+        _git(c, "config", "user.name", "t")
+    env_b = dict(os.environ, PROCESS_HOST="mac", PROCESS_REPORT_SYNC="1")
+    env_a = dict(os.environ, PROCESS_HOST="lxc")
+    # host B works on a branch, touches src/owner.py, pushes, reports with sync
+    _git(b, "checkout", "-q", "-b", "ios-thing")
+    (b / "src").mkdir()
+    (b / "src/owner.py").write_text("ios\n")
+    _git(b, "add", "-A")
+    _git(b, "commit", "-q", "-m", "feat: ios")
+    _git(b, "push", "-q", "-u", "origin", "ios-thing")
+    r = subprocess.run([sys.executable, str(b / "scripts/process/report.py"), "pushed", "--issue", "9"],
+                       cwd=b, capture_output=True, text=True, env=env_b)
+    assert r.returncode == 0 and "ios-thing@mac → pushed #9" in r.stdout, r.stdout + r.stderr
+    assert "published to origin" in r.stderr
+    assert "refs/process/reports/mac" in _git(bare, "for-each-ref").stdout
+    # host A: a local worktree on the same file, its own report
+    _wt = _worktree(a, "web-thing", {"src/owner.py": "web\n"})
+    subprocess.run([sys.executable, str(a / "scripts/process/report.py"), "planned", "--worker", "web-thing"],
+                   cwd=a, capture_output=True, text=True, env=env_a, check=True)
+    r = subprocess.run([sys.executable, str(a / "scripts/process/tower.py"), "--json", "--remote"],
+                       cwd=a, capture_output=True, text=True, env=env_a)
+    assert r.returncode == 0, r.stderr
+    t = json.loads(r.stdout)
+    assert t["host"] == "lxc"
+    elsewhere = {w["branch"]: w for w in t["elsewhere"]}
+    assert "ios-thing" in elsewhere and elsewhere["ios-thing"]["remote"] is True
+    assert "src/owner.py" in elsewhere["ios-thing"]["in_flight"]
+    assert "web-thing" not in elsewhere  # local worktree, not "elsewhere"
+    hosts = {x["worker"]: x["host"] for x in t["reports"]}
+    assert hosts == {"ios-thing": "mac", "web-thing": "lxc"}
+    pairs = {(o["a"], o["b"], o["kind"]) for o in t["overlaps"]}
+    assert ("web-thing", "ios-thing", "file") in pairs
+    text = subprocess.run([sys.executable, str(a / "scripts/process/tower.py"), "--remote"],
+                          cwd=a, capture_output=True, text=True, env=env_a).stdout
+    assert "ios-thing (another host)" in text and "ios-thing@mac pushed #9" in text
+    # without --remote the other host is invisible, honestly
+    t2 = json.loads(subprocess.run([sys.executable, str(a / "scripts/process/tower.py"), "--json"],
+                                   cwd=a, capture_output=True, text=True, env=env_a).stdout)
+    assert t2["elsewhere"] == [] and {x["worker"] for x in t2["reports"]} == {"web-thing"}
