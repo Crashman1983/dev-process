@@ -814,6 +814,20 @@ gemergte Branches erschienen als „nothing ahead" — Rückstände sind
 Sache von `tidy.py`, keine Kandidaten; der Plan zeigt nur Branches mit
 Vorsprung), `v2.16.1`.
 
+**Tower über Hosts hinweg** (Sebs Anforderung: der Prozess bleibt
+host-agnostisch — bei Kenni läuft die Steuerung auf dem LXC, ein
+abgesetzter iOS/Mac-Worker auf einem Mac. Der einzige Kanal, den jeder
+Host schon hat, ist git, also ist er der Transport: `report.py --sync`
+(oder `PROCESS_REPORT_SYNC=1`) veröffentlicht die Meldungen eines Hosts
+als Blob unter `refs/process/reports/<host>` auf origin — kein ssh,
+nichts auf einem Branch committed; `tower.py --remote` (oder
+`PROCESS_TOWER_REMOTE=1`) holt origin und diese Refs: Branches anderer
+Hosts erscheinen als `elsewhere` mit Vorsprung, Pfaden in Flug und Alter,
+nehmen an der Überlappungsprüfung teil und können stale sein wie ein
+lokaler Worker; die Meldungen aller Hosts werden zusammengeführt, je
+Worker gewinnt die jüngste. Starten und Stoppen auf dem anderen Host
+bleibt dessen Mechanismus; die Steward-Regel ändert sich nicht), `v2.17.0`.
+
 ## Sub-Projekt-Tabelle (SP1–SP24)
 
 Die Tabelle wurde bis SP24 gepflegt; ab SP25 trägt das Narrativ oben die

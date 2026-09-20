@@ -5,6 +5,7 @@ never narrated.
     uv run scripts/process/tower.py            # short text: worktrees, findings
     uv run scripts/process/tower.py --json     # the full table for an agent
     uv run scripts/process/tower.py --stale-minutes 60
+    uv run scripts/process/tower.py --remote   # other hosts: their branches on origin, their published reports
 
 What it assembles (all from state the process already keeps):
   worktrees  — every `git worktree` of this clone: branch, ahead/behind the
@@ -218,9 +219,9 @@ def lanes(root: Path) -> list[str]:
     return [ln for ln in r.stdout.splitlines() if ln.strip()]
 
 
-def latest_reports(root: Path) -> list[dict]:
+def latest_reports(root: Path, *, remote: bool = False) -> list[dict]:
     latest: dict[str, dict] = {}
-    for rec in _report.read_reports(root):
+    for rec in sorted(_report.read_reports(root, remote=remote), key=lambda r: r.get("epoch", 0)):
         latest[rec["worker"]] = rec
     now = time.time()
     out = []
@@ -228,6 +229,33 @@ def latest_reports(root: Path) -> list[dict]:
         rec = dict(rec)
         rec["minutes_ago"] = int((now - rec.get("epoch", now)) // 60)
         out.append(rec)
+    return out
+
+
+def remote_branches(root: Path, ref: str | None, local_branches: set[str]) -> list[dict]:
+    """Branches on origin that no local worktree carries: work in flight on
+    another host. Same shape as a worktree entry, so overlaps and the stale
+    finding treat them alike."""
+    if not ref or not ref.startswith("origin/"):
+        return []
+    out: list[dict] = []
+    names = (_git(root, "for-each-ref", "--format=%(refname:short)", "refs/remotes/origin/") or "").splitlines()
+    for full in names:
+        b = full.replace("origin/", "", 1)
+        if not b or b in ("HEAD", "main", "master") or b.startswith("train/") or b in local_branches:
+            continue
+        counts = _git(root, "rev-list", "--left-right", "--count", f"{ref}...{full}")
+        if not counts:
+            continue
+        behind, ahead = (counts.split() + ["0", "0"])[:2]
+        if int(ahead) == 0:
+            continue
+        files = (_git(root, "diff", "--name-only", f"{ref}...{full}") or "").splitlines()
+        last = _git(root, "log", "-1", "--format=%ct", full)
+        out.append({"branch": b, "remote": True, "ahead": int(ahead), "behind": int(behind),
+                    "in_flight": sorted(f for f in files if f.strip()), "dirty": 0,
+                    "minutes_since_commit": int((time.time() - int(last.strip())) // 60)
+                    if last and last.strip().isdigit() else 0})
     return out
 
 
@@ -261,7 +289,7 @@ def findings(table: dict, stale_minutes: int) -> list[dict]:
                         "what": f"gate {g['gate']} red since {g['since']} ({g['age_days']} days)",
                         "because": "a gate red for days is read by nobody; fix it or waive it with a named owner"})
     reported = {r["worker"]: r for r in table["reports"]}
-    for wt in table["worktrees"]:
+    for wt in table["worktrees"] + table.get("elsewhere", []):
         if wt.get("missing") or wt["branch"] in ("main", "master", "detached"):
             continue
         rep = reported.get(wt["branch"])
@@ -269,7 +297,7 @@ def findings(table: dict, stale_minutes: int) -> list[dict]:
         quiet_report = rep is None or rep["minutes_ago"] >= stale_minutes
         if quiet_commit and quiet_report and (wt.get("ahead", 0) or wt.get("dirty", 0)):
             out.append({"kind": "stale-worker", "severity": "medium",
-                        "what": f"{wt['branch']}: no commit for {wt.get('minutes_since_commit', '?')} min and "
+                        "what": f"{wt['branch']}{' (another host)' if wt.get('remote') else ''}: no commit for {wt.get('minutes_since_commit', '?')} min and "
                                 f"{'no report' if rep is None else 'last report ' + str(rep['minutes_ago']) + ' min ago (' + rep['state'] + ')'}",
                         "because": "a worker that neither commits nor reports is idle, waiting on a lane, "
                                    "or looping — ask, reassign, or stop it"})
@@ -288,20 +316,26 @@ def findings(table: dict, stale_minutes: int) -> list[dict]:
 
 # --- assembly -------------------------------------------------------------------------
 
-def build(root: Path, stale_minutes: int = 60) -> dict:
+def build(root: Path, stale_minutes: int = 60, *, remote: bool = False) -> dict:
+    if remote:
+        _git(root, "fetch", "--quiet", "--prune", "origin")
+        _report.fetch_reports(root)
     ref = integration_ref(root)
     wts = [describe_worktree(w, ref) for w in worktrees(root)]
+    elsewhere = remote_branches(root, ref, {w["branch"] for w in wts}) if remote else []
     table = {
         "generated": _dt.datetime.now().isoformat(timespec="seconds"),
         "root": str(root),
+        "host": _report.host_name(),
         "integration_ref": ref,
         "worktrees": wts,
-        "overlaps": overlaps(wts),
+        "elsewhere": elsewhere,
+        "overlaps": overlaps(wts + elsewhere),
         "plans": plans(root),
         "reviews": reviews_today(root),
         "gates": red_gates(root),
         "lanes": lanes(root),
-        "reports": latest_reports(root),
+        "reports": latest_reports(root, remote=remote),
     }
     table["findings"] = findings(table, stale_minutes)
     return table
@@ -317,6 +351,9 @@ def render(table: dict) -> str:
         lines.append(f"  - {wt['branch']}: +{wt.get('ahead', 0)}/-{wt.get('behind', 0)}, "
                      f"{len(wt.get('in_flight', []))} file(s) in flight, {wt.get('dirty', 0)} dirty, "
                      f"last commit {wt.get('minutes_since_commit', '?')} min ago")
+    for wt in table.get("elsewhere", []):
+        lines.append(f"  - {wt['branch']} (another host): +{wt['ahead']}/-{wt['behind']}, "
+                     f"{len(wt['in_flight'])} file(s) in flight, last commit {wt['minutes_since_commit']} min ago")
     active = [p for p in table["plans"]]
     lines.append(f"plans ({len(active)}): " + ", ".join(
         f"{Path(p['path']).stem}[t{p['tier'] if p['tier'] is not None else '?'}"
@@ -328,7 +365,7 @@ def render(table: dict) -> str:
         lines.append("lanes: " + "; ".join(table["lanes"]))
     if table["reports"]:
         lines.append("reports: " + "; ".join(
-            f"{r['worker']} {r['state']}{' #' + str(r['issue']) if r.get('issue') else ''} ({r['minutes_ago']} min)"
+            f"{r['worker']}@{r.get('host', '?')} {r['state']}{' #' + str(r['issue']) if r.get('issue') else ''} ({r['minutes_ago']} min)"
             for r in table["reports"][:12]))
     if table["findings"]:
         lines.append(f"findings ({len(table['findings'])}):")
@@ -345,13 +382,15 @@ def main(argv: list[str]) -> int:
     p.add_argument("--stale-minutes", type=int, default=int(os.environ.get("PROCESS_STALE_MINUTES", "60")))
     p.add_argument("--min-severity", choices=("high", "medium", "low"), default="low",
                    help="drop findings below this severity")
+    p.add_argument("--remote", action="store_true", default=os.environ.get("PROCESS_TOWER_REMOTE") == "1",
+                   help="fetch origin: branches and reports of other hosts join the table")
     p.add_argument("root", nargs="?", default=".")
     a = p.parse_args(argv)
     root = Path(a.root).resolve()
     top = _git(root, "rev-parse", "--show-toplevel")
     if top:
         root = Path(top.strip())
-    table = build(root, a.stale_minutes)
+    table = build(root, a.stale_minutes, remote=a.remote)
     keep = {"high": ("high",), "medium": ("high", "medium"), "low": ("high", "medium", "low")}[a.min_severity]
     table["findings"] = [f for f in table["findings"] if f["severity"] in keep]
     print(json.dumps(table, indent=2, ensure_ascii=False) if a.json else render(table))
