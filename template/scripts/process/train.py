@@ -262,15 +262,28 @@ def run(root: Path, *, suite: str | None, deploy: str | None, push: bool, min_ca
     stamp = _dt.datetime.now().strftime("%Y%m%d-%H%M")
     logfile = _train_worktree(root).parent / f"{stamp}.log"
     logfile.parent.mkdir(parents=True, exist_ok=True)
-
-    def log(line: str) -> None:
-        with logfile.open("a", encoding="utf-8") as fh:
-            fh.write(f"{_dt.datetime.now().isoformat(timespec='seconds')} {line}\n")
-
     print(f"train {stamp}: departing with {', '.join(aboard)} ({p['why']})")
     if dry_run:
         print("train: dry run — no merge, no suite")
         return 0
+    try:
+        return _run_batch(root, local, p, aboard, stamp, logfile, suite=suite, deploy=deploy, push=push,
+                          keep_branches=keep_branches)
+    except BaseException:
+        wt = _train_worktree(root)
+        if wt.exists():
+            _git(root, "worktree", "remove", "--force", str(wt))
+            print(f"train: aborted — staging worktree removed, branch train/{stamp} kept; log: {logfile}",
+                  file=sys.stderr)
+        raise
+
+
+def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, logfile: Path, *,
+               suite: str | None, deploy: str | None, push: bool, keep_branches: bool) -> int:
+    def log(line: str) -> None:
+        with logfile.open("a", encoding="utf-8") as fh:
+            fh.write(f"{_dt.datetime.now().isoformat(timespec='seconds')} {line}\n")
+
     base = p["base"]
     # oldest first: boarding order is waiting order, and the bisection below
     # blames by position, so the order must mean something
@@ -314,12 +327,23 @@ def run(root: Path, *, suite: str | None, deploy: str | None, push: bool, min_ca
         print("train: nothing survived — see " + str(logfile), file=sys.stderr)
         _cleanup(root, stamp)
         return 1
+    if push:
+        # origin first, local second: a rejected push (branch protection, a
+        # race with another push) must leave local main untouched and the
+        # train branch in place — never a local main ahead of origin
+        r = _git(root, "push", "origin", f"{branch}:{local}")
+        if r.returncode != 0:
+            log(f"push of {branch} to origin/{local} rejected: {r.stderr.strip()}")
+            _git(root, "worktree", "remove", "--force", str(_train_worktree(root)))
+            print(f"train: origin rejected the push to {local} — nothing merged locally; the train "
+                  f"branch {branch} stays for inspection (branch protection? then open a PR from it):\n"
+                  f"{r.stderr.strip()}", file=sys.stderr)
+            return 1
+        log(f"pushed {branch} as origin/{local}")
     _git(root, "merge", "--ff-only", branch, check=True)
     log(f"{local} fast-forwarded to {branch} ({_out(root, 'rev-parse', '--short', 'HEAD')})")
-    print(f"train: {local} → {_out(root, 'rev-parse', '--short', 'HEAD')} with {', '.join(aboard)}")
-    if push:
-        _git(root, "push", "origin", local, check=True)
-        log(f"pushed {local}")
+    print(f"train: {local} → {_out(root, 'rev-parse', '--short', 'HEAD')} with {', '.join(aboard)}"
+          + (" (pushed)" if push else ""))
     for b in aboard:
         refs = sorted({int(n) for n in re.findall(r"(?<![\w/])#(\d+)\b",
                                                   _out(root, "log", "--format=%B", f"{base}..{b}"))})

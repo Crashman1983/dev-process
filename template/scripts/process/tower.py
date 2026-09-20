@@ -305,7 +305,8 @@ def findings(table: dict, stale_minutes: int) -> list[dict]:
         rep = reported.get(wt["branch"])
         quiet_commit = wt.get("minutes_since_commit", 0) >= stale_minutes
         quiet_report = rep is None or rep["minutes_ago"] >= stale_minutes
-        if quiet_commit and quiet_report and (wt.get("ahead", 0) or wt.get("dirty", 0)):
+        parked = rep is not None and rep["state"] in ("review-pass", "done", "idle")  # waiting, not working
+        if quiet_commit and quiet_report and not parked and (wt.get("ahead", 0) or wt.get("dirty", 0)):
             out.append({"kind": "stale-worker", "severity": "medium",
                         "what": f"{wt['branch']}{' (another host)' if wt.get('remote') else ''}: no commit for {wt.get('minutes_since_commit', '?')} min and "
                                 f"{'no report' if rep is None else 'last report ' + str(rep['minutes_ago']) + ' min ago (' + rep['state'] + ')'}",

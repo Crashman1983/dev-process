@@ -135,3 +135,25 @@ def test_core_files_present(render, tmp_path):
     assert (out / "scripts/process/train.py").is_file()
     assert (out / ".claude/commands/steward.md").is_file()
     assert (out / "docs/process/train.md").is_file()
+
+
+def test_rejected_push_leaves_local_main_untouched_and_keeps_the_train(render, tmp_path):
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    bare = tmp_path / "origin.git"
+    _git(out, "clone", "-q", "--bare", str(out), str(bare))
+    _git(out, "remote", "add", "origin", str(bare))
+    _git(out, "fetch", "-q", "origin")
+    _git(out, "branch", "-q", "--set-upstream-to=origin/main", "main")
+    _branch(out, "alpha", {"src/a.py": "a\n"})
+    _git(out, "push", "-q", "origin", "alpha")
+    hook = bare / "hooks/pre-receive"
+    hook.write_text("#!/bin/sh\nwhile read old new ref; do [ \"$ref\" = refs/heads/main ] && { echo 'protected'; exit 1; }; done; exit 0\n")
+    hook.chmod(0o755)
+    head = _git(out, "rev-parse", "main").stdout
+    r = _train(out, "run", "--force", "--push", "--suite", "true")
+    assert r.returncode == 1 and "origin rejected the push" in r.stderr
+    assert _git(out, "rev-parse", "main").stdout == head  # local main untouched
+    branches = _git(out, "branch", "--list", "--format=%(refname:short)").stdout.split()
+    assert "alpha" in branches and any(b.startswith("train/") for b in branches)
+    assert not (out / ".git/process-train/worktree").exists()
