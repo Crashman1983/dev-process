@@ -1,0 +1,362 @@
+#!/usr/bin/env python3
+"""tower — the situation table for parallel work on one clone, computed,
+never narrated.
+
+    uv run scripts/process/tower.py            # short text: worktrees, findings
+    uv run scripts/process/tower.py --json     # the full table for an agent
+    uv run scripts/process/tower.py --stale-minutes 60
+
+What it assembles (all from state the process already keeps):
+  worktrees  — every `git worktree` of this clone: branch, ahead/behind the
+               integration branch, paths in flight (merge-base…HEAD), dirty
+               files, minutes since the last commit
+  overlaps   — two worktrees carrying the same file (hard) or files in the
+               same directory (soft): the collision nobody sees until merge
+  plans      — active plans and spec plans with tier, issue, decisions
+               count, design-contract binding
+  reviews    — clearing REVIEW passes today, by work id
+  gates      — the runner's red ledger with age (a chronic red is wallpaper)
+  lanes      — `scripts/lane.py status` where the project has it
+  reports    — the latest state each worker reported (`report.py`)
+  findings   — deterministic, each with a because: overlaps, a Tier 2+ plan
+               without an issue, a plan without a Decisions ledger, a gate
+               red for days, a worker with no report and no commit for an
+               hour, a branch far behind the integration branch
+
+The tower decides nothing. It is the input an orchestrating agent reads
+instead of the sessions themselves — compact, testable, and the same on
+every run. Sibling imports; stdlib only."""
+from __future__ import annotations
+
+import argparse
+import datetime as _dt
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+sys.dont_write_bytecode = True
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling imports
+import check_review as _review  # noqa: E402
+import report as _report  # noqa: E402
+
+INTEGRATION = ("origin/main", "origin/master", "main", "master")
+PLANS_ACTIVE = ".process-work/plans"
+SPECS_DIR = "specs"
+DESIGN_CONTRACT = re.compile(r"^\s*(?:[-*+]\s+)?[*_]*design-contract[*_]*\s*:\s*(\S+)",
+                             re.IGNORECASE | re.MULTILINE)
+DECISION_LINE = re.compile(r"^\s*(?:[-*+]\s+)?DECISION\s+\d{4}-\d{2}-\d{2}\s", re.MULTILINE)
+BEHIND_LIMIT = 50
+RED_AGE_DAYS = 2
+
+
+def _git(root: Path, *args: str) -> str | None:
+    try:
+        r = subprocess.run(["git", "-C", str(root), "--no-optional-locks", *args],
+                           capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return r.stdout if r.returncode == 0 else None
+
+
+def integration_ref(root: Path) -> str | None:
+    for ref in INTEGRATION:
+        if _git(root, "rev-parse", "--verify", "--quiet", ref) is not None:
+            return ref
+    return None
+
+
+# --- worktrees -----------------------------------------------------------------
+
+def worktrees(root: Path) -> list[dict]:
+    out = _git(root, "worktree", "list", "--porcelain") or ""
+    items: list[dict] = []
+    cur: dict = {}
+    for line in out.splitlines() + [""]:
+        if not line:
+            if cur:
+                items.append(cur)
+            cur = {}
+            continue
+        key, _, val = line.partition(" ")
+        if key == "worktree":
+            cur["path"] = val
+        elif key == "branch":
+            cur["branch"] = val.replace("refs/heads/", "")
+        elif key == "HEAD":
+            cur["head"] = val
+        elif key in ("bare", "detached"):
+            cur[key] = True
+    return items
+
+
+def describe_worktree(wt: dict, ref: str | None) -> dict:
+    path = Path(wt["path"])
+    d = {"path": str(path), "branch": wt.get("branch") or ("detached" if wt.get("detached") else "?"),
+         "head": (wt.get("head") or "")[:12]}
+    if wt.get("bare") or not path.is_dir():
+        d["missing"] = True
+        return d
+    if ref:
+        counts = _git(path, "rev-list", "--left-right", "--count", f"{ref}...HEAD")
+        if counts:
+            behind, ahead = (counts.split() + ["0", "0"])[:2]
+            d["ahead"], d["behind"] = int(ahead), int(behind)
+    d["in_flight"] = sorted(_review.paths_in_flight(path))
+    status = _git(path, "status", "--porcelain")
+    d["dirty"] = len([ln for ln in (status or "").splitlines() if ln.strip()])
+    last = _git(path, "log", "-1", "--format=%ct")
+    if last and last.strip().isdigit():
+        d["minutes_since_commit"] = int((time.time() - int(last.strip())) // 60)
+    return d
+
+
+def overlaps(wts: list[dict]) -> list[dict]:
+    out: list[dict] = []
+    for i, a in enumerate(wts):
+        for b in wts[i + 1:]:
+            fa, fb = set(a.get("in_flight", [])), set(b.get("in_flight", []))
+            if not fa or not fb:
+                continue
+            same = sorted(fa & fb)
+            if same:
+                out.append({"a": a["branch"], "b": b["branch"], "kind": "file", "paths": same[:20]})
+                continue
+            da = {str(Path(p).parent) for p in fa}
+            db = {str(Path(p).parent) for p in fb}
+            shared = sorted(x for x in da & db if x not in (".", ""))
+            if shared:
+                out.append({"a": a["branch"], "b": b["branch"], "kind": "directory", "paths": shared[:20]})
+    return out
+
+
+# --- plans, reviews, gates, lanes ----------------------------------------------
+
+def plans(root: Path) -> list[dict]:
+    files: list[Path] = []
+    d = root / PLANS_ACTIVE
+    if d.is_dir():
+        files += sorted(p for p in d.glob("*.md"))
+    s = root / SPECS_DIR
+    if s.is_dir():
+        files += sorted(s.glob("*/plan.md"))
+    out: list[dict] = []
+    for p in files:
+        try:
+            text = p.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        tier = _review.TIER_DECL.search(text)
+        issues = sorted(_review._plan_issue_numbers(text))
+        dc = DESIGN_CONTRACT.search(text)
+        out.append({
+            "path": str(p.relative_to(root)),
+            "kind": "design" if p.stem.startswith("design-") else "plan",
+            "tier": int(tier.group(1)) if tier else None,
+            "issue": f"#{issues[0]}" if issues else None,
+            "decisions": len(DECISION_LINE.findall(text)),
+            "has_decisions_section": bool(_review.DECISIONS_HEADING.search(text)),
+            "design_contract": dc.group(1).strip("`'\"") if dc else None,
+            "waived": bool(_review.WAIVED.search(text)),
+            "age_days": int((time.time() - p.stat().st_mtime) // 86400),
+        })
+    return out
+
+
+def reviews_today(root: Path) -> dict:
+    today = _dt.date.today().isoformat()
+    jdir = root / _review.JOURNAL_DIR
+    passes: dict[str, int] = {}
+    blocks: dict[str, int] = {}
+    if jdir.is_dir():
+        for f in jdir.glob("**/*.md"):
+            if today not in f.name:
+                continue
+            records, _errors = _review.parse_review_lines(f.read_text(encoding="utf-8", errors="replace"))
+            for _ln, rec in records:
+                target = passes if rec.get("verdict") == "pass" else blocks
+                target[rec["work"]] = target.get(rec["work"], 0) + 1
+    return {"date": today, "pass": passes, "block": blocks}
+
+
+def red_gates(root: Path) -> list[dict]:
+    gitdir = _git(root, "rev-parse", "--git-dir")
+    if not gitdir:
+        return []
+    g = Path(gitdir.strip())
+    if not g.is_absolute():
+        g = root / g
+    ledger = g / "process-red-ledger"
+    if not ledger.is_file():
+        return []
+    out: list[dict] = []
+    today = _dt.date.today()
+    for ln in ledger.read_text(encoding="utf-8", errors="replace").splitlines():
+        if " " not in ln:
+            continue
+        gate, day = ln.split(" ", 1)
+        try:
+            age = (today - _dt.date.fromisoformat(day.strip())).days
+        except ValueError:
+            age = 0
+        out.append({"gate": gate, "since": day.strip(), "age_days": age})
+    return out
+
+
+def lanes(root: Path) -> list[str]:
+    lane = root / "scripts" / "lane.py"
+    if not lane.is_file():
+        return []
+    try:
+        r = subprocess.run([sys.executable, str(lane), "status"], cwd=root,
+                           capture_output=True, text=True, timeout=20)
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    return [ln for ln in r.stdout.splitlines() if ln.strip()]
+
+
+def latest_reports(root: Path) -> list[dict]:
+    latest: dict[str, dict] = {}
+    for rec in _report.read_reports(root):
+        latest[rec["worker"]] = rec
+    now = time.time()
+    out = []
+    for rec in sorted(latest.values(), key=lambda r: r.get("epoch", 0), reverse=True):
+        rec = dict(rec)
+        rec["minutes_ago"] = int((now - rec.get("epoch", now)) // 60)
+        out.append(rec)
+    return out
+
+
+# --- findings -----------------------------------------------------------------------
+
+def findings(table: dict, stale_minutes: int) -> list[dict]:
+    out: list[dict] = []
+    for o in table["overlaps"]:
+        out.append({"kind": "overlap", "severity": "high" if o["kind"] == "file" else "low",
+                    "what": f"{o['a']} and {o['b']} both carry {o['kind']}(s): {', '.join(o['paths'][:5])}",
+                    "because": "two branches changing the same owner merge last-wins; decide phase-of "
+                               "or supersede before both push (mandatory rule 4)"})
+    for p in table["plans"]:
+        if p.get("kind") == "design" or p["waived"]:
+            continue  # brainstorm papers and waived stale plans are not work in flight
+        if (p["tier"] or 0) >= 2 and not p["issue"]:
+            out.append({"kind": "plan-without-issue", "severity": "high",
+                        "what": f"{p['path']} declares tier {p['tier']} but no issue:",
+                        "because": "a Tier 2+ item is not Ready without an issue (DoR); the issue gate reds the push"})
+        if (p["tier"] or 0) >= 2 and not p["has_decisions_section"]:
+            out.append({"kind": "plan-without-decisions", "severity": "medium",
+                        "what": f"{p['path']} has no `## Decisions` section",
+                        "because": "decisions made in dialogue are lost at compaction unless the plan carries them"})
+        if p["tier"] is None:
+            out.append({"kind": "plan-without-tier", "severity": "medium",
+                        "what": f"{p['path']} declares no tier",
+                        "because": "a plan without a tier is invisible to every gate (v2.13.0: hard for active plans)"})
+    for g in table["gates"]:
+        if g["age_days"] >= RED_AGE_DAYS:
+            out.append({"kind": "chronic-red", "severity": "high",
+                        "what": f"gate {g['gate']} red since {g['since']} ({g['age_days']} days)",
+                        "because": "a gate red for days is read by nobody; fix it or waive it with a named owner"})
+    reported = {r["worker"]: r for r in table["reports"]}
+    for wt in table["worktrees"]:
+        if wt.get("missing") or wt["branch"] in ("main", "master", "detached"):
+            continue
+        rep = reported.get(wt["branch"])
+        quiet_commit = wt.get("minutes_since_commit", 0) >= stale_minutes
+        quiet_report = rep is None or rep["minutes_ago"] >= stale_minutes
+        if quiet_commit and quiet_report and (wt.get("ahead", 0) or wt.get("dirty", 0)):
+            out.append({"kind": "stale-worker", "severity": "medium",
+                        "what": f"{wt['branch']}: no commit for {wt.get('minutes_since_commit', '?')} min and "
+                                f"{'no report' if rep is None else 'last report ' + str(rep['minutes_ago']) + ' min ago (' + rep['state'] + ')'}",
+                        "because": "a worker that neither commits nor reports is idle, waiting on a lane, "
+                                   "or looping — ask, reassign, or stop it"})
+        if wt.get("behind", 0) >= BEHIND_LIMIT:
+            out.append({"kind": "far-behind", "severity": "low",
+                        "what": f"{wt['branch']} is {wt['behind']} commits behind the integration branch",
+                        "because": "the merge grows harder every day; rebase before it becomes a conflict session"})
+    for rep in table["reports"]:
+        if rep["state"] == "blocked" and rep["minutes_ago"] >= stale_minutes:
+            out.append({"kind": "blocked", "severity": "high",
+                        "what": f"{rep['worker']} blocked for {rep['minutes_ago']} min: {rep.get('note') or 'no reason given'}",
+                        "because": "a blocked worker burns nothing but delivers nothing — unblock or reassign"})
+    order = {"high": 0, "medium": 1, "low": 2}
+    return sorted(out, key=lambda f: order[f["severity"]])
+
+
+# --- assembly -------------------------------------------------------------------------
+
+def build(root: Path, stale_minutes: int = 60) -> dict:
+    ref = integration_ref(root)
+    wts = [describe_worktree(w, ref) for w in worktrees(root)]
+    table = {
+        "generated": _dt.datetime.now().isoformat(timespec="seconds"),
+        "root": str(root),
+        "integration_ref": ref,
+        "worktrees": wts,
+        "overlaps": overlaps(wts),
+        "plans": plans(root),
+        "reviews": reviews_today(root),
+        "gates": red_gates(root),
+        "lanes": lanes(root),
+        "reports": latest_reports(root),
+    }
+    table["findings"] = findings(table, stale_minutes)
+    return table
+
+
+def render(table: dict) -> str:
+    lines = [f"tower — {table['generated']} (integration: {table['integration_ref'] or 'none'})"]
+    lines.append(f"worktrees ({len(table['worktrees'])}):")
+    for wt in table["worktrees"]:
+        if wt.get("missing"):
+            lines.append(f"  - {wt['branch']}: (missing)")
+            continue
+        lines.append(f"  - {wt['branch']}: +{wt.get('ahead', 0)}/-{wt.get('behind', 0)}, "
+                     f"{len(wt.get('in_flight', []))} file(s) in flight, {wt.get('dirty', 0)} dirty, "
+                     f"last commit {wt.get('minutes_since_commit', '?')} min ago")
+    active = [p for p in table["plans"]]
+    lines.append(f"plans ({len(active)}): " + ", ".join(
+        f"{Path(p['path']).stem}[t{p['tier'] if p['tier'] is not None else '?'}"
+        f"{' ' + p['issue'] if p['issue'] else ''}{' d' + str(p['decisions']) if p['decisions'] else ''}]"
+        for p in active) if active else "plans: none")
+    rv = table["reviews"]
+    lines.append(f"reviews today: {sum(rv['pass'].values())} pass, {sum(rv['block'].values())} block")
+    if table["lanes"]:
+        lines.append("lanes: " + "; ".join(table["lanes"]))
+    if table["reports"]:
+        lines.append("reports: " + "; ".join(
+            f"{r['worker']} {r['state']}{' #' + str(r['issue']) if r.get('issue') else ''} ({r['minutes_ago']} min)"
+            for r in table["reports"][:12]))
+    if table["findings"]:
+        lines.append(f"findings ({len(table['findings'])}):")
+        for f in table["findings"]:
+            lines.append(f"  [{f['severity']}] {f['kind']}: {f['what']} — because {f['because']}")
+    else:
+        lines.append("findings: none")
+    return "\n".join(lines)
+
+
+def main(argv: list[str]) -> int:
+    p = argparse.ArgumentParser(prog="tower.py", description=__doc__.split("\n\n")[0])
+    p.add_argument("--json", action="store_true")
+    p.add_argument("--stale-minutes", type=int, default=int(os.environ.get("PROCESS_STALE_MINUTES", "60")))
+    p.add_argument("--min-severity", choices=("high", "medium", "low"), default="low",
+                   help="drop findings below this severity")
+    p.add_argument("root", nargs="?", default=".")
+    a = p.parse_args(argv)
+    root = Path(a.root).resolve()
+    top = _git(root, "rev-parse", "--show-toplevel")
+    if top:
+        root = Path(top.strip())
+    table = build(root, a.stale_minutes)
+    keep = {"high": ("high",), "medium": ("high", "medium"), "low": ("high", "medium", "low")}[a.min_severity]
+    table["findings"] = [f for f in table["findings"] if f["severity"] in keep]
+    print(json.dumps(table, indent=2, ensure_ascii=False) if a.json else render(table))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))
