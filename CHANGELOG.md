@@ -828,6 +828,11 @@ lokaler Worker; die Meldungen aller Hosts werden zusammengeführt, je
 Worker gewinnt die jüngste. Starten und Stoppen auf dem anderen Host
 bleibt dessen Mechanismus; die Steward-Regel ändert sich nicht), `v2.17.0`.
 
+**Rückstand ist kein Flug** (erster Remote-Lauf im Referenzprojekt:
+Juli-Branches, tausende Commits hinter main, erschienen als „anderswo in
+Flug". Ein Branch ohne Commit seit 14 Tagen wird gezählt statt gelistet
+und als ein Befund `remote-residue` gemeldet), `v2.17.1`.
+
 ## Sub-Projekt-Tabelle (SP1–SP24)
 
 Die Tabelle wurde bis SP24 gepflegt; ab SP25 trägt das Narrativ oben die
