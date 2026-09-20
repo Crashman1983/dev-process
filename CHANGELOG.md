@@ -765,6 +765,28 @@ liest sie. Werkzeug bleibt projektspezifisch — im Referenzprojekt
 `scripts/lane.py` mit zwei Lanes, `make certify`, `make lane-status`),
 `v2.14.4`.
 
+SP72 (tower — der deterministische Kern eines Steuermanns für parallele
+Arbeit: Sebs Idee eines Agenten, der viele Worker koordiniert, mit ihm
+spricht, Probleme findet und Ressourcen steuert. Bevor ein Agent urteilt,
+braucht er eine Lage, die nicht erzählt, sondern berechnet ist:
+**`tower.py`** (eine Tabelle aus Zustand, den der Prozess schon führt —
+alle Worktrees des Klons mit Vorsprung/Rückstand, Pfaden in Flug, Dirty-
+Zahl und Minuten seit dem letzten Commit; **Überlappungen** zweier
+Worktrees auf derselben Datei (hoch) oder demselben Verzeichnis (niedrig);
+aktive Pläne mit Tier, Issue, Decisions-Zahl, design-contract-Bindung;
+Reviews des Tages; rote Gates mit Alter; Lanes, wo es sie gibt; Worker-
+Meldungen) und **deterministische Befunde mit Begründung** (Überlappung,
+Tier-2+-Plan ohne Issue, Plan ohne Decisions-Ledger, Plan ohne Tier,
+chronisch rotes Gate, stiller Worker ohne Commit und Meldung seit einer
+Stunde, blockierter Worker, Branch weit hinter main; `--json`,
+`--min-severity`, `--stale-minutes`); **Worker-Protokoll** (`/report`,
+`report.py`: planned/pushed/review-pass/blocked/done/idle, eine Zeile je
+Zustandswechsel in das gemeinsame Git-Common-Dir des Klons, nie
+committed). Der Tower entscheidet nichts und redet mit niemandem — er ist
+die Eingabe des Steuermanns, damit dessen Tokens in Urteil fließen
+(zuteilen, umlenken, beenden) und nicht in Nachfragen bei dreizehn
+Workern; Doku `docs/process/tower.md`) ausgeliefert, `v2.15.0`.
+
 ## Sub-Projekt-Tabelle (SP1–SP24)
 
 Die Tabelle wurde bis SP24 gepflegt; ab SP25 trägt das Narrativ oben die
