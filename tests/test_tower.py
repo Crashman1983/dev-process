@@ -113,6 +113,10 @@ def test_reports_feed_the_tower_and_stale_workers_are_found(render, tmp_path):
     t2 = json.loads(_tower(out, "--json", "--stale-minutes", "0").stdout)
     stale = [f for f in t2["findings"] if f["kind"] == "stale-worker"]
     assert stale and "quiet" in stale[0]["what"]
+    # a worker that reported review-pass is waiting for the train, not stale
+    _report(wt, "review-pass", "--issue", "7")
+    t2b = json.loads(_tower(out, "--json", "--stale-minutes", "0").stdout)
+    assert not any(f["kind"] == "stale-worker" for f in t2b["findings"])
     # a blocked report older than the budget is a high finding
     _report(wt, "blocked", "--issue", "7", "--note", "lane held")
     t3 = json.loads(_tower(out, "--json", "--stale-minutes", "0").stdout)
