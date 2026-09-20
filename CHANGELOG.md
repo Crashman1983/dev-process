@@ -787,6 +787,28 @@ die Eingabe des Steuermanns, damit dessen Tokens in Urteil fließen
 (zuteilen, umlenken, beenden) und nicht in Nachfragen bei dreizehn
 Workern; Doku `docs/process/tower.md`) ausgeliefert, `v2.15.0`.
 
+SP73 (train + steward — Sebs Wunsch: Aufträge sammeln und zu einem
+günstigen Zeitpunkt effizient mergen und deployen, statt dass dreizehn
+Agenten dreizehn Volläufe und Deploys zahlen. **Merge-Zug** (`train.py`:
+`plan` zeigt, wer einsteigen darf und warum nicht — berechnet, nie
+behauptet: archivierter Plan auf dem Branch mit klärendem REVIEW-Pass
+oder Waiver, Worker-Meldung nur als Zeiger, nie als Ersatz für einen
+fehlenden Pass; keine Datei-Überlappung mit einem bereits eingestiegenen
+Branch; kein rotes Gate; Abfahrt bei `--min-candidates` oder
+`--max-wait-hours`, nur bei freien Lanes, `--force` fährt sofort. `run`:
+Staging-Branch aus main im eigenen Worktree, Kandidaten in
+Wartereihenfolge gemerged (Konflikt = aussteigen), Prozess-Gates und die
+volle Suite EINMAL auf dem kombinierten Baum; bei Rot findet eine
+Präfix-Bisektion den ersten Verursacher, er steigt aus und wird
+`blocked` gemeldet; bei Grün Fast-forward von main, `--push`, Branches
+gelöscht, `done` je Worker, `--deploy` einmal) und **Steward-Rolle**
+(`/steward`: Tower lesen statt Sessions befragen, Befunde nach Schwere
+abarbeiten, zuteilen, umlenken, nur eigene Kinder stoppen und nur nach
+committed Plan und Decisions, Zug abfertigen, dem Owner nur bei
+Ereignis schreiben; nie implementieren, reviewen, zertifizieren;
+Modellwahl nach Tier, Budget je Issue); Doku `docs/process/train.md`)
+ausgeliefert, `v2.16.0`.
+
 ## Sub-Projekt-Tabelle (SP1–SP24)
 
 Die Tabelle wurde bis SP24 gepflegt; ab SP25 trägt das Narrativ oben die
