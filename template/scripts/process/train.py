@@ -106,9 +106,7 @@ def candidates(root: Path, local: str, base: str) -> list[dict]:
         c: dict = {"branch": b, "ahead": int(ahead), "behind": int(behind), "eligible": False,
                    "reasons": [], "plans": [], "by": None}
         if int(ahead) == 0:
-            c["reasons"].append("nothing ahead of the integration branch")
-            out.append(c)
-            continue
+            continue  # already merged (or empty) — residue for tidy.py, not a candidate
         files = set(_out(root, "diff", "--name-only", f"{base}...{b}").splitlines())
         c["files"] = len(files)
         last = _out(root, "log", "-1", "--format=%ct", b)

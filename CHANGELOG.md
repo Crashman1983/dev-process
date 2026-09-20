@@ -809,6 +809,11 @@ Ereignis schreiben; nie implementieren, reviewen, zertifizieren;
 Modellwahl nach Tier, Budget je Issue); Doku `docs/process/train.md`)
 ausgeliefert, `v2.16.0`.
 
+**Zugplan ohne Reste** (erster Lauf im Referenzprojekt: 350 bereits
+gemergte Branches erschienen als „nothing ahead" — Rückstände sind
+Sache von `tidy.py`, keine Kandidaten; der Plan zeigt nur Branches mit
+Vorsprung), `v2.16.1`.
+
 ## Sub-Projekt-Tabelle (SP1–SP24)
 
 Die Tabelle wurde bis SP24 gepflegt; ab SP25 trägt das Narrativ oben die
