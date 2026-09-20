@@ -232,13 +232,20 @@ def latest_reports(root: Path, *, remote: bool = False) -> list[dict]:
     return out
 
 
-def remote_branches(root: Path, ref: str | None, local_branches: set[str]) -> list[dict]:
+ELSEWHERE_DAYS = 14
+
+
+def remote_branches(root: Path, ref: str | None, local_branches: set[str],
+                    max_age_days: int = ELSEWHERE_DAYS) -> tuple[list[dict], int]:
     """Branches on origin that no local worktree carries: work in flight on
     another host. Same shape as a worktree entry, so overlaps and the stale
-    finding treat them alike."""
+    finding treat them alike. A branch whose last commit is older than
+    `max_age_days` is not in flight, it is residue (observed downstream:
+    July branches thousands of commits behind) — counted, not listed."""
     if not ref or not ref.startswith("origin/"):
-        return []
+        return [], 0
     out: list[dict] = []
+    old = 0
     names = (_git(root, "for-each-ref", "--format=%(refname:short)", "refs/remotes/origin/") or "").splitlines()
     for full in names:
         b = full.replace("origin/", "", 1)
@@ -250,13 +257,16 @@ def remote_branches(root: Path, ref: str | None, local_branches: set[str]) -> li
         behind, ahead = (counts.split() + ["0", "0"])[:2]
         if int(ahead) == 0:
             continue
-        files = (_git(root, "diff", "--name-only", f"{ref}...{full}") or "").splitlines()
         last = _git(root, "log", "-1", "--format=%ct", full)
+        minutes = int((time.time() - int(last.strip())) // 60) if last and last.strip().isdigit() else 0
+        if minutes > max_age_days * 24 * 60:
+            old += 1
+            continue
+        files = (_git(root, "diff", "--name-only", f"{ref}...{full}") or "").splitlines()
         out.append({"branch": b, "remote": True, "ahead": int(ahead), "behind": int(behind),
                     "in_flight": sorted(f for f in files if f.strip()), "dirty": 0,
-                    "minutes_since_commit": int((time.time() - int(last.strip())) // 60)
-                    if last and last.strip().isdigit() else 0})
-    return out
+                    "minutes_since_commit": minutes})
+    return out, old
 
 
 # --- findings -----------------------------------------------------------------------
@@ -305,6 +315,12 @@ def findings(table: dict, stale_minutes: int) -> list[dict]:
             out.append({"kind": "far-behind", "severity": "low",
                         "what": f"{wt['branch']} is {wt['behind']} commits behind the integration branch",
                         "because": "the merge grows harder every day; rebase before it becomes a conflict session"})
+    if table.get("elsewhere_residue"):
+        out.append({"kind": "remote-residue", "severity": "low",
+                    "what": f"{table['elsewhere_residue']} unmerged branch(es) on origin older than "
+                            f"{ELSEWHERE_DAYS} days, not shown as in flight",
+                    "because": "a branch nobody has touched for weeks is residue, not work — tidy.py "
+                               "prunes merged ones; unmerged ones need an owner or a delete"})
     for rep in table["reports"]:
         if rep["state"] == "blocked" and rep["minutes_ago"] >= stale_minutes:
             out.append({"kind": "blocked", "severity": "high",
@@ -322,7 +338,7 @@ def build(root: Path, stale_minutes: int = 60, *, remote: bool = False) -> dict:
         _report.fetch_reports(root)
     ref = integration_ref(root)
     wts = [describe_worktree(w, ref) for w in worktrees(root)]
-    elsewhere = remote_branches(root, ref, {w["branch"] for w in wts}) if remote else []
+    elsewhere, old_remote = remote_branches(root, ref, {w["branch"] for w in wts}) if remote else ([], 0)
     table = {
         "generated": _dt.datetime.now().isoformat(timespec="seconds"),
         "root": str(root),
@@ -330,6 +346,7 @@ def build(root: Path, stale_minutes: int = 60, *, remote: bool = False) -> dict:
         "integration_ref": ref,
         "worktrees": wts,
         "elsewhere": elsewhere,
+        "elsewhere_residue": old_remote,
         "overlaps": overlaps(wts + elsewhere),
         "plans": plans(root),
         "reviews": reviews_today(root),

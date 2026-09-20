@@ -189,6 +189,18 @@ def test_two_hosts_meet_in_the_tower_via_origin(render, tmp_path):
     text = subprocess.run([sys.executable, str(a / "scripts/process/tower.py"), "--remote"],
                           cwd=a, capture_output=True, text=True, env=env_a).stdout
     assert "ios-thing (another host)" in text and "ios-thing@mac pushed #9" in text
+    # an old unmerged branch on origin is residue, not "elsewhere"
+    _git(b, "checkout", "-q", "-b", "ancient", "main")
+    (b / "old.txt").write_text("old\n")
+    _git(b, "add", "-A")
+    subprocess.run(["git", "commit", "-q", "-m", "feat: ancient"], cwd=b, check=True,
+                   env=dict(os.environ, GIT_AUTHOR_DATE="2026-01-01T00:00:00", GIT_COMMITTER_DATE="2026-01-01T00:00:00"))
+    _git(b, "push", "-q", "-u", "origin", "ancient")
+    t3 = json.loads(subprocess.run([sys.executable, str(a / "scripts/process/tower.py"), "--json", "--remote"],
+                                   cwd=a, capture_output=True, text=True, env=env_a).stdout)
+    assert "ancient" not in {w["branch"] for w in t3["elsewhere"]}
+    assert t3["elsewhere_residue"] == 1
+    assert any(f["kind"] == "remote-residue" for f in t3["findings"])
     # without --remote the other host is invisible, honestly
     t2 = json.loads(subprocess.run([sys.executable, str(a / "scripts/process/tower.py"), "--json"],
                                    cwd=a, capture_output=True, text=True, env=env_a).stdout)
