@@ -30,7 +30,7 @@ Spezifikations-Skills deckt Spec Kits eigenes Integrations-System ab.
 > Exit-Szenario der Spec-Kit-Abhängigkeit: Pin einfrieren — der vendored
 > Stand läuft ohne Netz und ohne CLI unbegrenzt weiter.
 
-> **Status:** `v2.17.1` — Sub-Projekte SP1–SP73 (Standard-Setup
+> **Status:** `v2.17.2` — Sub-Projekte SP1–SP73 (Standard-Setup
 > statt Profile/Toggles, Spec Kit als Standard-Spezifikationsweg, 5 Core-Gates,
 > DoR/DoD, Kernel-Integritäts- und Compaction-Schutz). Vollständige Historie: [`CHANGELOG.md`](CHANGELOG.md).
 > **Überblick für Einsteiger:innen & Management** (wie es funktioniert, warum,
@@ -110,7 +110,7 @@ die einzige Enforcement-Säule — und ohne dieses erzwingt nichts die Gates. Da
 Das `regulated`-Paket ergänzt `security-floor` (verbotene Muster als Gate) und `sbom` (CycloneDX + Lizenz-Allow-List).
 
 **Commands:** Der Zyklus (`brainstorm plan execute review quick debug commit
-prime`) liegt als dünne Slash-Commands für den gewählten Harness; `brainstorm`
+prime finish`) plus `report` (Zustandswechsel eines Workers an den Tower) und `steward` (die Steuerungsrolle: Tower lesen, zuteilen, Zug abfertigen, aufräumen) liegen als dünne Slash-Commands für den gewählten Harness; `brainstorm`
 und `plan` zeigen auf den Spec-Kit-Pfad (`/speckit-specify → clarify → plan →
 tasks`), der Rest auf die neutralen `docs/process/`-Phasen. Der
 `doc-drift-gate` prüft die Pointer mit — ein toter Command-Pointer failt die

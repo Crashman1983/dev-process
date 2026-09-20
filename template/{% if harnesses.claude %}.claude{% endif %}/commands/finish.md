@@ -1,5 +1,7 @@
 # /finish
 
+Where a steward runs the merge train (`docs/process/train.md`), stop after the archive step (`finish.py --apply` without `--tests`), push, and `report.py review-pass` — the train merges the batch behind one full suite. Without a train, this command is the merge tail:
+
 Close a feature branch cleanly — the merge tail as one verdict instead of a
 ritual scattered over four docs. Run:
 

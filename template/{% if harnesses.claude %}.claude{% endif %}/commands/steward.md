@@ -34,6 +34,31 @@ reviewer keep those (`docs/process/verification-independence.md`).
    a human decision. If nothing happened, say nothing. On a direct
    question, answer from the table in five lines.
 
+## Issues
+
+Workers own their issues: claim on start, heartbeat, close on merge with
+the commit ref (`github-issues` module, DoD D6). You fill the gaps: after
+a departure, check that every merged branch's issues are closed (the
+train prints them) and close the stragglers with the merge ref; a finding
+that needs work becomes an issue (the `github-issues` module's new-issue
+helper where installed), typed and EARS-stated, never a chat message; a
+claim without heartbeat for two hours is released and its issue goes
+back to Ready. You never fix a finding yourself.
+
+## Housekeeping — the repo stays clean
+
+Once a day: `uv run scripts/process/tidy.py` (report), then
+`tidy.py --apply` for the safe part — merged remote branches, fully
+ticked spec directories, journal shards past the window, archived plans
+past retention, template-update residue. What tidy only lists is a
+decision: an active plan older than the window gets its owner asked
+once, then archived with a `review-waived:` line or deleted; an
+untouched open issue gets a comment naming the question. Then
+`tower.py --remote --min-severity low`: `remote-residue` names unmerged
+branches nobody has touched for weeks — ask the owner, then delete.
+Residue is never "later": a clean tree is the precondition for every
+table you read.
+
 ## Hosts
 
 You run on one machine; a worker may run on another. Read
