@@ -1,5 +1,7 @@
 # /execute
 
+At the first push of the branch, `uv run scripts/process/report.py pushed --issue N` (`/report`); when you cannot proceed, `report.py blocked --note "<why>"` the moment it happens — that line is what gets you unblocked.
+
 Build the plan task by task, test-driven. Re-read the kernel
 (`docs/process/kernel.md`) and `docs/process/mandatory-rules.md` first — a long
 build compacts, and the rules bind every task, not just the first. Run

@@ -833,6 +833,22 @@ Juli-Branches, tausende Commits hinter main, erschienen als „anderswo in
 Flug". Ein Branch ohne Commit seit 14 Tagen wird gezählt statt gelistet
 und als ein Befund `remote-residue` gemeldet), `v2.17.1`.
 
+**Anleitung verdrahtet** (Sebs Frage „ist die Anleitung angepasst?" —
+nein, war sie nicht: Tower, Report, Zug und Steward standen nur in ihren
+eigenen Docs. Jetzt: workflow.md „Parallel agents" erklärt die vier und
+sagt ausdrücklich, dass ohne Steward jede Session autonom bleibt — Gates
+und /finish tragen weiter, der Tower macht nur sichtbar, der Zug nur
+billiger; /plan, /execute, /review und /finish nennen ihren
+`/report`-Zustandswechsel und der Zug den Weg am /finish-Merge vorbei;
+README-Commands-Liste), **Steward hält das Repo sauber und die Issues
+geschlossen** (Housekeeping-Abschnitt: täglich `tidy.py --apply` für
+den sicheren Teil, Owner-Frage für das, was tidy nur listet,
+`remote-residue` aus dem Tower; Issues-Abschnitt: Worker besitzen ihre
+Claims und Closes, der Steward schließt Nachzügler mit dem Merge-Ref,
+macht Befunde zu getypten Issues, gibt tote Claims nach zwei Stunden
+frei; der Zug druckt je gemergtem Branch die referenzierten Issues),
+`v2.17.2`.
+
 ## Sub-Projekt-Tabelle (SP1–SP24)
 
 Die Tabelle wurde bis SP24 gepflegt; ab SP25 trägt das Narrativ oben die

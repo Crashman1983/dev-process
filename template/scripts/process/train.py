@@ -43,6 +43,7 @@ import argparse
 import datetime as _dt
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -320,8 +321,15 @@ def run(root: Path, *, suite: str | None, deploy: str | None, push: bool, min_ca
         _git(root, "push", "origin", local, check=True)
         log(f"pushed {local}")
     for b in aboard:
+        refs = sorted({int(n) for n in re.findall(r"(?<![\w/])#(\d+)\b",
+                                                  _out(root, "log", "--format=%B", f"{base}..{b}"))})
+        if refs:
+            print(f"train: {b} references issue(s) {', '.join('#' + str(n) for n in refs)} — "
+                  "closed by GitHub where a commit says Closes; the steward closes the rest with the merge ref")
+            log(f"{b} issues: {refs}")
         try:
-            _report.write_report(root, "done", issue=None, note=f"merged by train {stamp}", worker=b)
+            _report.write_report(root, "done", issue=refs[0] if refs else None,
+                                 note=f"merged by train {stamp}" + (f"; issues {refs}" if refs else ""), worker=b)
         except SystemExit:
             pass
         if not keep_branches:
