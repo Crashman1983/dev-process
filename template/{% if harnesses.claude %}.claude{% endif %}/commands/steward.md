@@ -26,9 +26,14 @@ reviewer keep those (`docs/process/verification-independence.md`).
    --deploy "<deploy>" --push` (the project's two commands). A dropped
    offender is a finding for its worker, not for you to fix.
 4. Assign: the next Ready issue (DoR, `docs/process/definition-of-ready-and-done.md`)
-   to an idle worker, in a worktree of its own, with the issue, the tier
-   and the contract it binds to. Start a worker only when a lane and CPU
-   are free; stop only workers you started.
+   to a session of its own, one phase at a time, with the model the
+   policy assigns (`docs/process/model-policy.json`, tier × phase):
+   `uv run scripts/process/dispatch.py start --issue N --phase plan --tier T`,
+   then `--phase execute` after `planned`, then `--phase review` after
+   `pushed` — a fresh reviewing session, never the building one. The
+   dispatcher refuses when the policy's `max_workers` are live or a lane
+   is held. Stop only sessions you started (`dispatch.py stop <branch>`),
+   and only after the plan and its decisions are committed.
 5. Report to the owner only on an event: a departure, a dropped
    offender, a stopped worker, an overlap decided, a finding that needs
    a human decision. If nothing happened, say nothing. On a direct
@@ -69,7 +74,10 @@ you cannot see is idle — `elsewhere` in the table says what it carries.
 
 ## Resources
 
-Concurrency follows the lanes and the load, not the wish list. Mechanical
-work (tidy, digest, ports, regression pins) goes to a small model; design
-and Tier 3 to the large one. A worker over twice its tier's usual cost is
-reported, not fed.
+Concurrency follows the lanes and the load, not the wish list. Which model
+runs which phase is the policy's call, not yours: change the policy file,
+not the command line. Judge the policy by numbers — `process_kpis.py models`
+(telemetry module) shows rounds-to-pass and blocks per tier × phase ×
+model; a cheaper execute model that costs an extra review round every time
+is not cheaper. A worker over twice its tier's usual cost is reported, not
+fed.

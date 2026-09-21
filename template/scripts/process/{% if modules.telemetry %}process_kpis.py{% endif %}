@@ -25,6 +25,7 @@ difference. See "honest ceiling" in the module doc.
   process_kpis.py cfr           [--branch B]
   process_kpis.py clusters      [--branch B] [--window D] [--min N]
                                                 # fix clusters (rule 6 across sessions)
+  process_kpis.py models                        # rounds-to-pass and blocks by phase model × tier
   process_kpis.py report                        # all families
 
 Lean pass: the cockpit carries exactly the three KPIs the process goals name
@@ -463,6 +464,81 @@ def cfr(branch: str | None) -> int:
     return 0
 
 
+# --- models: which model did which phase, and what came of it -----------------
+def _reports_by_worker(root: Path) -> dict[str, list[dict]]:
+    try:
+        import report as _report  # sibling; the worker protocol
+    except ImportError:
+        return {}
+    by: dict[str, list[dict]] = {}
+    for rec in _report.read_reports(root, remote=True):
+        by.setdefault(rec.get("worker") or "?", []).append(rec)
+    return by
+
+
+def _review_rounds(root: Path) -> dict[str, dict]:
+    """work id → {max_round, passed} from every REVIEW line in the journal."""
+    import check_review as _review
+    out: dict[str, dict] = {}
+    jdir = root / _review.JOURNAL_DIR
+    if not jdir.is_dir():
+        return out
+    for f in jdir.glob("**/*.md"):
+        recs, _e = _review.parse_review_lines(f.read_text(encoding="utf-8", errors="replace"))
+        for _ln, r in recs:
+            e = out.setdefault(r["work"], {"max_round": 0, "passed": False, "tier": r.get("tier")})
+            try:
+                e["max_round"] = max(e["max_round"], int(r.get("round") or 0))
+            except ValueError:
+                pass
+            e["passed"] = e["passed"] or r.get("verdict") == "pass"
+    return out
+
+
+def models(root: Path | None = None) -> int:
+    """Per (tier, phase, model): issues seen, blocked reports, review rounds
+    to the clearing pass. Reads the worker reports (what model ran which
+    phase — the only trace that carries it) and the journal's REVIEW lines.
+    Proxy at best: the model is what the worker reported, the rounds are
+    the reviewer's count; confidence never above medium."""
+    root = root or Path.cwd()
+    print("[models] ~proxy — the worker's reported model × the journal's review rounds")
+    by = _reports_by_worker(root)
+    if not by:
+        print("  no worker reports with a model yet (report.py … --model, or PROCESS_MODEL in the session env)")
+        return 0
+    rounds = _review_rounds(root)
+    cells: dict[tuple, dict] = {}
+    for worker, recs in by.items():
+        issue = next((str(r.get("issue")) for r in recs if r.get("issue")), None)
+        for r in recs:
+            m, ph = r.get("model") or "", r.get("phase") or ""
+            if not m or not ph:
+                continue
+            tier = None
+            if issue and issue in rounds:
+                tier = rounds[issue].get("tier")
+            cell = cells.setdefault((str(tier), ph, m), {"issues": set(), "blocked": 0, "rounds": [], "passed": 0})
+            cell["issues"].add(worker)
+            if r.get("state") == "blocked":
+                cell["blocked"] += 1
+            if issue and issue in rounds and ph == "execute":
+                cell["rounds"].append(rounds[issue]["max_round"])
+                cell["passed"] += int(rounds[issue]["passed"])
+    if not cells:
+        print("  reports carry no model/phase yet — start sessions via dispatch.py or set PROCESS_MODEL/PROCESS_PHASE")
+        return 0
+    print(f"  {'tier':>4} {'phase':<8} {'model':<22} {'n':>3} {'blocked':>7} {'rounds→pass':>12}")
+    for (tier, ph, m), c in sorted(cells.items()):
+        n = len(c["issues"])
+        avg = f"{sum(c['rounds']) / len(c['rounds']):.1f} ({c['passed']}/{len(c['rounds'])} pass)" if c["rounds"] else "—"
+        print(f"  {tier:>4} {ph:<8} {m:<22} {n:>3} {c['blocked']:>7} {avg:>12}")
+    n = sum(len(c["issues"]) for c in cells.values())
+    lvl = _level(n, True, False, _N_THRESHOLD)
+    print(f"  {confidence(n, proxy=True)} · {action(lvl, 'compare execute models within one tier: more rounds to pass is the price of the cheaper model', thin='keep dispatching with the policy; judge after ~20 issues per cell')}")
+    return 0
+
+
 def report() -> int:
     print("=== process KPI cockpit (read-only) ===\n")
     convergence([])
@@ -491,8 +567,12 @@ def main() -> int:
                     help="days of history to cluster (default 14)")
     cl.add_argument("--min", type=int, default=_CLUSTER_MIN, dest="min_cluster",
                     help="minimum fixes to call it a cluster (default 3)")
+    sub.add_parser("models")
     sub.add_parser("report")
     args = p.parse_args()
+
+    if args.cmd == "models":
+        return models()
 
     if args.cmd == "convergence":
         return convergence(args.journals)

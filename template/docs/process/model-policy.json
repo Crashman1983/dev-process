@@ -1,0 +1,12 @@
+{
+  "_comment": "Which model runs which phase, by tier — the one place to turn. Read by scripts/process/dispatch.py; measured by process_kpis.py models (telemetry module). Phases: plan, execute, review. A tier without an entry falls back to `default`. `command` is the project's way to start a worker session: {model} and {prompt} are substituted, the prompt is passed as ONE argument (never through a shell). `max_workers` caps concurrent dispatched sessions on this host.",
+  "command": "claude -p --model {model} --permission-mode acceptEdits {prompt}",
+  "max_workers": 4,
+  "default": {"plan": "claude-opus-5", "execute": "claude-sonnet-5", "review": "claude-opus-5"},
+  "tiers": {
+    "0": {"plan": "claude-sonnet-5", "execute": "claude-sonnet-5", "review": "claude-sonnet-5"},
+    "1": {"plan": "claude-sonnet-5", "execute": "claude-sonnet-5", "review": "claude-sonnet-5"},
+    "2": {"plan": "claude-opus-5", "execute": "claude-sonnet-5", "review": "claude-opus-5"},
+    "3": {"plan": "claude-opus-5", "execute": "claude-opus-5", "review": "claude-fable-5-1"}
+  }
+}

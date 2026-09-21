@@ -875,6 +875,27 @@ verschachteltes `manifest.json` war vom Siegel ausgenommen; Ledger —
 überlebte (jetzt baut `--full` den Ledger neu). Doku an den Code
 angeglichen, Bedrohungsmodell des Towers ehrlich benannt), `v2.17.3`.
 
+SP74 (dispatch + Modell-Policy — Sebs Frage „startet das System die
+Sessions selbst?" (nein, bis jetzt) und „je Phase ein anderes LLM?" (ja,
+weil die Phasen über Artefakte getrennt sind: Plan und Decisions-Ledger,
+dann das Bundle). **`docs/process/model-policy.json`** ist die eine
+Stelle, an der man dreht: Tier × Phase → Modell, dazu der projekteigene
+Startbefehl als Vorlage (`{model}`, `{prompt}` — der Prompt ist EIN
+Argument, nie durch eine Shell) und `max_workers`; projekteigen, gehört
+in `.process-owned`. **`dispatch.py`** startet je Phase eine abgesetzte
+Session im Worktree des Branches (`start --issue N --phase
+plan|execute|review`, findet den Branch des Issues wieder), führt Buch in
+`.git/process-dispatch/`, zeigt Liveness (`list`), stoppt nur eigene
+Kinder und nur bei committetem Baum (`stop`, `--force`), weigert sich
+bei erreichtem `max_workers` oder gehaltener Lane. **Messen statt
+Bauchgefühl:** `report.py --model` (oder `PROCESS_MODEL`/`PROCESS_PHASE`
+aus dispatch) hält fest, welches Modell welche Phase fuhr;
+`process_kpis.py models` (Telemetrie) schneidet Review-Runden bis zum
+Pass und Blocks nach Tier × Phase × Modell — ehrlich als Proxy mit
+Konfidenz, die Zahl, an der die Policy gemessen wird. `/steward` teilt
+über dispatch zu und ändert Modelle nur über die Policy-Datei)
+ausgeliefert, `v2.18.0`.
+
 ## Sub-Projekt-Tabelle (SP1–SP24)
 
 Die Tabelle wurde bis SP24 gepflegt; ab SP25 trägt das Narrativ oben die
