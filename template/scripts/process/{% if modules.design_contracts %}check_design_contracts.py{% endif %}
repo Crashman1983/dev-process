@@ -41,10 +41,22 @@ PLANS_ACTIVE = ".process-work/plans"
 SPECS_DIR = "specs"
 STATUSES = {"draft", "accepted"}
 _HASH_PIN = re.compile(r"^sha256:([0-9a-f]{64})$")
-_HEX64 = re.compile(r"\b([0-9a-f]{64})\b")
-_GO = re.compile(r"^\s*[*_#\s]*(?:decision|entscheidung)[*_]*\s*:\s*[*_]*\s*(GO|NO[- ]GO|KEIN GO)\b",
+# the seal a review verified is named, not scavenged: a review also carries the
+# review-artifact digest (64 hex) — grabbing any hex read that as "a different seal"
+_SEAL_LINE = re.compile(r"(?:manifest\.sha256|seal(?:\s+reviewed)?)\s*[:=]\s*`?([0-9a-f]{64})`?", re.IGNORECASE)
+# the verdict is the whole token: "Decision: GO/NO-GO meeting" is no decision
+_GO = re.compile(r"^\s*[*_#\s]*(?:decision|entscheidung)[*_]*\s*:\s*[*_]*\s*(GO|NO[- ]GO|KEIN GO)\b(?![-/])",
                  re.IGNORECASE | re.MULTILINE)
 _HEADING = re.compile(r"^#{1,6}\s+(.*)$", re.MULTILINE)
+_FENCE = re.compile(r"^(`{3,}|~{3,}).*?^\1[ \t]*$", re.MULTILINE | re.DOTALL)
+
+
+def _unfenced(text: str) -> str:
+    """Fenced blocks are quotations, never declarations (same rule as the
+    review gate); an unterminated fence quotes the rest of the file."""
+    text = _FENCE.sub("", text)
+    m = re.search(r"^(`{3,}|~{3,})", text, re.MULTILINE)
+    return text[:m.start()] if m else text
 
 
 def _registry_files(root: Path) -> list[Path]:
@@ -190,7 +202,7 @@ def _check_one(root: Path, path: Path, plans: dict[str, str], in_flight: set[str
         return [f"{rel}: contract path escapes the repo root"], []
     if not cpath.is_file():
         return [f"{rel}: contract not committed / does not exist: {data['contract'].strip()}"], []
-    text = _read(cpath)
+    text = _unfenced(_read(cpath))
 
     # --- the pin: the drift ratchet ---------------------------------------
     m = _HASH_PIN.match(data["pin"].strip())
@@ -210,7 +222,9 @@ def _check_one(root: Path, path: Path, plans: dict[str, str], in_flight: set[str
         soft.append(f"{rel}: contract defines no ID of the families {data['id_prefixes']} yet")
     seen: dict[str, list[str]] = {}
     for h in _HEADING.findall(text):
-        for i in sorted({canonical(i, ids): i for i in ids.findall(h)}.values()):
+        lead = ids.match(h.strip().lstrip("*_`").strip())  # the ID *leads* the heading: a definition
+        if lead:
+            i = lead.group(0)
             seen.setdefault(canonical(i, ids), []).append(i)
     for forms in seen.values():
         if len(forms) > 1:
@@ -245,15 +259,16 @@ def _check_one(root: Path, path: Path, plans: dict[str, str], in_flight: set[str
                 hard.append(f"{rel}: {key} {val!r} is not a committed file")
                 continue
             if key == "review":
-                rtext = _read(p)
-                go = _GO.search(rtext)
+                rtext = _unfenced(_read(p))
+                decisions = list(_GO.finditer(rtext))
+                go = decisions[-1] if decisions else None  # the last decision line stands
                 if go is None:
                     hard.append(f"{rel}: review {val} records no decision line (`Decision: GO` / "
                                 "`Decision: NO GO`) — an accepted contract needs a recorded GO")
                 elif go.group(1).upper() != "GO":
                     hard.append(f"{rel}: review {val} records {go.group(1)!r} — the contract "
                                 "cannot be 'accepted' on a review that did not clear it")
-                data["_review_hashes"] = set(_HEX64.findall(rtext))
+                data["_review_hashes"] = {m.group(1) for m in _SEAL_LINE.finditer(rtext)}
 
     # --- the reference: sealed boards -----------------------------------------
     ref = data.get("reference", "").strip() if isinstance(data.get("reference"), str) else ""

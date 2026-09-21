@@ -436,13 +436,16 @@ def _integrity_scoped(rel: str, root: Path, records: list[tuple[int, dict]], *,
     bound = [(ln, f) for ln, f in records if "diff" in f]
     if not bound:
         return [], [], 0
-    if fresh or mode == "all":
-        h, s = _integrity_violations(rel, root, records)
-        return h, s, 0
-    if mode == "in-flight":
+    if mode == "in-flight" and not fresh:
         return [], [], len(bound)
-    if ledger is None:  # no .git/ to remember in: verify every time
+    if fresh or ledger is None:
         h, s = _integrity_violations(rel, root, records)
+        if mode == "all" and ledger is not None:
+            _remember(rel, root, bound, ledger)
+        return h, s, 0
+    if mode == "all":  # recompute everything, rewrite the ledger from scratch
+        h, s = _integrity_violations(rel, root, records)
+        _remember(rel, root, bound, ledger)
         return h, s, 0
     hard: list[str] = []
     soft: list[str] = []
@@ -472,6 +475,20 @@ def _integrity_scoped(rel: str, root: Path, records: list[tuple[int, dict]], *,
         else:
             ledger[key] = "ok"
     return hard, soft, reused
+
+
+def _remember(rel: str, root: Path, bound: list[tuple[int, dict]], ledger: dict[str, str]) -> None:
+    """Store the recomputed verdict of every bound record (used by --full)."""
+    for ln, f in bound:
+        key = f"{f['base']} {f['head']} {f['diff']}"
+        h, s = _integrity_violations(rel, root, [(ln, f)])
+        prefix = f"{rel}:{ln}: "
+        if h:
+            ledger[key] = "hard:" + h[0].removeprefix(prefix)
+        elif s:
+            ledger[key] = f"missing:{int(time.time())}:" + s[0].removeprefix(prefix)
+        else:
+            ledger[key] = "ok"
 
 
 def _save_integrity_ledger(path: Path | None, ledger: dict[str, str]) -> None:
@@ -697,8 +714,11 @@ def check(root: Path) -> tuple[list[str], list[str]]:
     integrity_mode = "all" if "--full" in sys.argv else os.environ.get(INTEGRITY_ENV, "ledger")
     scope_base = merge_base(root)
     changed_shards = paths_in_flight(root) if scope_base is not None else set()
-    ledger_path = _integrity_ledger_path(root) if integrity_mode == "ledger" else None
-    ledger = _load_integrity_ledger(ledger_path) if ledger_path is not None else None
+    ledger_path = _integrity_ledger_path(root) if integrity_mode in ("ledger", "all") else None
+    # `all` recomputes every record AND rewrites the ledger from that — a
+    # poisoned or stale entry does not survive a --full run
+    ledger = ({} if integrity_mode == "all" else _load_integrity_ledger(ledger_path)) \
+        if ledger_path is not None else None
     fetched_at = _fetch_stamp(root) if ledger is not None else 0.0
     reused_total = 0
     jdir = root / JOURNAL_DIR

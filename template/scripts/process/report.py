@@ -59,7 +59,8 @@ def reports_path(root: Path) -> Path | None:
 
 def host_name() -> str:
     raw = os.environ.get("PROCESS_HOST") or socket.gethostname() or "host"
-    return "".join(ch if ch.isalnum() or ch in "-_." else "-" for ch in raw.split(".")[0])[:40]
+    # the whole name, sanitised — `build.eu` and `build.us` must not share a ref
+    return "".join(ch if ch.isalnum() or ch in "-_." else "-" for ch in raw)[:64]
 
 
 def default_worker(root: Path) -> str:
@@ -117,10 +118,19 @@ def read_reports(root: Path, *, remote: bool = False) -> list[dict]:
     return out
 
 
+_GIT_ENV = dict(os.environ, GIT_TERMINAL_PROMPT="0")
+
+
+def _run(argv: list[str], timeout: float = 60) -> bool:
+    try:
+        return subprocess.run(argv, capture_output=True, text=True, timeout=timeout,
+                              env=_GIT_ENV).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
 def fetch_reports(root: Path, remote: str = "origin") -> bool:
-    r = subprocess.run(["git", "-C", str(root), "fetch", "--quiet", remote,
-                        f"+{REPORT_REFS}/*:{REPORT_REFS}/*"], capture_output=True, text=True, timeout=60)
-    return r.returncode == 0
+    return _run(["git", "-C", str(root), "fetch", "--quiet", remote, f"+{REPORT_REFS}/*:{REPORT_REFS}/*"])
 
 
 def sync_reports(root: Path, remote: str = "origin") -> bool:
@@ -132,11 +142,9 @@ def sync_reports(root: Path, remote: str = "origin") -> bool:
     if not blob:
         return False
     ref = f"{REPORT_REFS}/{host_name()}"
-    if subprocess.run(["git", "-C", str(root), "update-ref", ref, blob], capture_output=True).returncode != 0:
+    if not _run(["git", "-C", str(root), "update-ref", ref, blob]):
         return False
-    r = subprocess.run(["git", "-C", str(root), "push", "--quiet", "--force", remote, f"{ref}:{ref}"],
-                       capture_output=True, text=True, timeout=60)
-    return r.returncode == 0
+    return _run(["git", "-C", str(root), "push", "--quiet", "--force", remote, f"{ref}:{ref}"])
 
 
 def main(argv: list[str]) -> int:

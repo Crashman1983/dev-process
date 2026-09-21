@@ -51,6 +51,7 @@ DESIGN_CONTRACT = re.compile(r"^\s*(?:[-*+]\s+)?[*_]*design-contract[*_]*\s*:\s*
                              re.IGNORECASE | re.MULTILINE)
 DECISION_LINE = re.compile(r"^\s*(?:[-*+]\s+)?DECISION\s+\d{4}-\d{2}-\d{2}\s", re.MULTILINE)
 BEHIND_LIMIT = 50
+PLAN_NAME = re.compile(r"^(\d{4}-\d{2}-\d{2}-|design-)")
 RED_AGE_DAYS = 2
 
 
@@ -115,8 +116,13 @@ def describe_worktree(wt: dict, ref: str | None) -> dict:
     return d
 
 
+BOOKKEEPING = (".process-work/",)  # every branch writes here; sharing it is not a collision
+INTEGRATION_NAMES = ("main", "master")
+
+
 def overlaps(wts: list[dict]) -> list[dict]:
     out: list[dict] = []
+    wts = [w for w in wts if w.get("branch") not in INTEGRATION_NAMES and not w.get("missing")]
     for i, a in enumerate(wts):
         for b in wts[i + 1:]:
             fa, fb = set(a.get("in_flight", [])), set(b.get("in_flight", []))
@@ -126,8 +132,8 @@ def overlaps(wts: list[dict]) -> list[dict]:
             if same:
                 out.append({"a": a["branch"], "b": b["branch"], "kind": "file", "paths": same[:20]})
                 continue
-            da = {str(Path(p).parent) for p in fa}
-            db = {str(Path(p).parent) for p in fb}
+            da = {str(Path(p).parent) for p in fa if not p.startswith(BOOKKEEPING)}
+            db = {str(Path(p).parent) for p in fb if not p.startswith(BOOKKEEPING)}
             shared = sorted(x for x in da & db if x not in (".", ""))
             if shared:
                 out.append({"a": a["branch"], "b": b["branch"], "kind": "directory", "paths": shared[:20]})
@@ -146,8 +152,10 @@ def plans(root: Path) -> list[dict]:
         files += sorted(s.glob("*/plan.md"))
     out: list[dict] = []
     for p in files:
+        if p.name != "plan.md" and not PLAN_NAME.match(p.name):
+            continue  # a README or a note in the plans folder is not a plan
         try:
-            text = p.read_text(encoding="utf-8", errors="replace")
+            text = _review._unfenced(p.read_text(encoding="utf-8", errors="replace"))
         except OSError:
             continue
         tier = _review.TIER_DECL.search(text)
@@ -246,11 +254,19 @@ def remote_branches(root: Path, ref: str | None, local_branches: set[str],
         return [], 0
     out: list[dict] = []
     old = 0
-    names = (_git(root, "for-each-ref", "--format=%(refname:short)", "refs/remotes/origin/") or "").splitlines()
-    for full in names:
+    local_heads = set()
+    for line in (_git(root, "worktree", "list", "--porcelain") or "").splitlines():
+        if line.startswith("HEAD "):
+            local_heads.add(line.split(" ", 1)[1].strip())
+    upstreams = set((_git(root, "for-each-ref", "--format=%(upstream:short)", "refs/heads/") or "").split())
+    names = (_git(root, "for-each-ref", "--format=%(refname:short) %(objectname)", "refs/remotes/origin/") or "").splitlines()
+    for entry in names:
+        full, _, sha = entry.partition(" ")
         b = full.replace("origin/", "", 1)
         if not b or b in ("HEAD", "main", "master") or b.startswith("train/") or b in local_branches:
             continue
+        if sha in local_heads or full in upstreams:
+            continue  # a local worktree carries this tip under another name, or tracks it
         counts = _git(root, "rev-list", "--left-right", "--count", f"{ref}...{full}")
         if not counts:
             continue
@@ -334,9 +350,9 @@ def findings(table: dict, stale_minutes: int) -> list[dict]:
 # --- assembly -------------------------------------------------------------------------
 
 def build(root: Path, stale_minutes: int = 60, *, remote: bool = False) -> dict:
+    fetch_ok = True
     if remote:
-        _git(root, "fetch", "--quiet", "--prune", "origin")
-        _report.fetch_reports(root)
+        fetch_ok = _git(root, "fetch", "--quiet", "origin") is not None and _report.fetch_reports(root)
     ref = integration_ref(root)
     wts = [describe_worktree(w, ref) for w in worktrees(root)]
     elsewhere, old_remote = remote_branches(root, ref, {w["branch"] for w in wts}) if remote else ([], 0)
@@ -354,8 +370,15 @@ def build(root: Path, stale_minutes: int = 60, *, remote: bool = False) -> dict:
         "gates": red_gates(root),
         "lanes": lanes(root),
         "reports": latest_reports(root, remote=remote),
+        "remote_fetched": fetch_ok if remote else None,
     }
     table["findings"] = findings(table, stale_minutes)
+    if remote and not fetch_ok:
+        table["findings"].insert(0, {"kind": "remote-unreachable", "severity": "high",
+                                     "what": "fetch from origin failed or timed out — `elsewhere` and "
+                                             "other hosts' reports may be stale",
+                                     "because": "a table built on an old fetch is confidently wrong; "
+                                                "check the network or credentials before acting on it"})
     return table
 
 

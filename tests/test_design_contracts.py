@@ -453,3 +453,48 @@ def test_zero_padding_does_not_split_an_id(render, tmp_path):
     plans.mkdir(parents=True, exist_ok=True)
     (plans / "2026-09-15-x.md").write_text("# Plan\n\ndesign-contract: web\n\nImplements C1 and C2 (P4 delta C1–C2).\n")
     assert _gate(out).returncode == 0
+
+
+def test_review_reading_is_strict_about_decisions_and_seals(render, tmp_path):
+    out = _render(render, tmp_path)
+    # a fenced example does not decide; the last decision line stands
+    _accepted(out)
+    _write(out, REVIEW, "# R\n\n```\nDecision: GO\n```\n\nDecision: NO GO\n")
+    r = _gate(out)
+    assert r.returncode == 1 and "did not clear it" in r.stdout
+    _write(out, REVIEW, "# R\n\nDecision: GO/NO-GO meeting on Friday\n")
+    r = _gate(out)
+    assert r.returncode == 1 and "records no decision line" in r.stdout
+    # a review-artifact digest is not "a different seal": only a labelled seal line counts
+    _round(out)
+    _write(out, CONTRACT, CONTRACT_TEXT)
+    assert _seal(out, "--seal", ROUND, "--dep", CONTRACT).returncode == 0
+    seal_hex = (out / ROUND / "manifest.sha256").read_text().strip()
+    _accepted(out, reference=ROUND)
+    _write(out, REVIEW, f"# R\n\nArtifact digest: {'6' * 64}\n\nDecision: GO\n")
+    r = _gate(out)
+    assert r.returncode == 0, r.stdout
+    assert "does not name the seal" in r.stdout
+    _write(out, REVIEW, f"# R\n\nArtifact digest: {'6' * 64}\nmanifest.sha256: {seal_hex}\n\nDecision: GO\n")
+    r = _gate(out)
+    assert r.returncode == 0 and "does not name the seal" not in r.stdout
+
+
+def test_subheading_mentioning_an_id_is_not_a_second_definition(render, tmp_path):
+    out = _render(render, tmp_path)
+    c = _write(out, CONTRACT, CONTRACT_TEXT + "\n#### Notes on C01 spacing\n\n```\n### C01 quoted example\n```\n")
+    _entry(out, pin=f"sha256:{_sha(c)}")
+    assert _gate(out).returncode == 0
+
+
+def test_nested_manifest_names_are_content(render, tmp_path):
+    out = _render(render, tmp_path)
+    _write(out, CONTRACT, CONTRACT_TEXT)
+    _round(out)
+    _write(out, f"{ROUND}/boards/sub/manifest.json", "{}")
+    assert _seal(out, "--seal", ROUND).returncode == 0
+    _write(out, f"{ROUND}/boards/sub/manifest.json", "{\"edited\": 1}")
+    r = _seal(out, "--verify", ROUND)
+    assert r.returncode == 1 and "content differs" in r.stdout
+    _write(out, f"{ROUND}/boards/sub/manifest.sha256", "x")
+    assert "not in the seal" in _seal(out, "--verify", ROUND).stdout

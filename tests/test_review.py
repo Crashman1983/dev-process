@@ -851,3 +851,19 @@ def test_integrity_ledger_remembers_a_missing_commit_until_the_next_fetch(render
     assert "answered from this clone's ledger" not in r3.stdout  # re-checked
     assert ledger.read_text().splitlines() != [*entry]  # new stamp
     assert os.path.getmtime(out / ".git/FETCH_HEAD") > 0
+
+
+def test_full_rewrites_a_poisoned_ledger(render, tmp_path):
+    # the ledger is a plain file in .git/: a wrong "ok" written there must not
+    # survive --full, which recomputes every record and rewrites the file
+    out = render(tmp_path, {"project_name": "demo"})
+    base, head, _digest = _init_git_repo(out, work="bound")
+    _journal(out, _review(work="bound", artifact=(base, head, "0" * 64)))
+    assert _run(out).returncode == 1
+    ledger = out / ".git/process-review-integrity"
+    ledger.write_text(f"{base} {head} {'0' * 64}\tok\n")  # poisoned
+    assert _run(out).returncode == 0  # hidden — the documented remedy is --full
+    r = _run_args(out, "--full")
+    assert r.returncode == 1 and "matches no formula" in r.stdout
+    assert "\thard:" in ledger.read_text() and "\tok" not in ledger.read_text()
+    assert _run(out).returncode == 1  # and it stays red afterwards
