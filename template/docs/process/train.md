@@ -20,7 +20,9 @@ A local branch boards when it is ahead of the integration branch and
   never as a substitute for a missing pass;
 - has **no file overlap** with a branch already aboard — the earlier
   candidate keeps its seat, the later one is told why;
-- the clone's red ledger names **no red gate**.
+
+(The clone's red ledger naming no red gate is a *departure* condition for
+the whole train, not a per-candidate reason.)
 
 `train.py plan` prints every candidate with its reasons; `--json` gives an
 orchestrator the same.
@@ -41,12 +43,20 @@ the test lanes are free where the project has a lane script (see `tower.md`, lan
 2. Candidates merged in order (`--no-ff`); a conflict drops that candidate
    and continues.
 3. The process gates, then the full suite, run **once** on the combined
-   tree. Red: the last-boarded candidate is dropped and the train rebuilt
-   — linear back-off, the offender is named and gets a `blocked` report.
-4. Green: the integration branch fast-forwards to the train; `--push`
-   pushes it; merged branches are deleted (`--keep-branches` keeps them);
-   every merged worker gets a `done` report; `--deploy` runs once. A failed
-   deploy leaves the merge standing and says so.
+   tree. Red: the base itself is checked once (a red main blames nobody
+   and aborts), then a bisection over boarding-order prefixes names the
+   first offender; it is dropped, gets a `blocked` report, and the rest is
+   rebuilt. A candidate dropped for a merge conflict is reported `blocked`
+   too, with "rebase" as the reason.
+4. Green: with `--push` the train is pushed as the integration branch
+   *first* (a rejected push — branch protection, a race — leaves local
+   main untouched and keeps the train branch for a PR); then local main
+   fast-forwards. Local main carrying commits that are not on origin
+   refuses to depart. Merged branches are deleted (`--keep-branches`
+   keeps them; a branch checked out elsewhere is kept, locally and on
+   origin, and said so); every merged worker gets a `done` report;
+   `--deploy` runs once. A failed deploy leaves the merge standing and
+   says so.
 
 Run from the root worktree on the integration branch with a clean tree.
 The log lives next to the staging worktree (`<stamp>.log`).

@@ -94,8 +94,9 @@ def test_run_merges_the_batch_behind_one_suite_and_drops_the_offender(render, tm
     log = _git(out, "log", "--oneline", "main").stdout
     assert "train: merge alpha" in log and "train: merge beta" in log and "merge bad" not in log
     assert (out / "src/a.py").is_file() and (out / "src/b.py").is_file() and not (out / "src/BROKEN").exists()
-    # green runs: one bisection probe ([alpha]) + one for the surviving batch — never one per branch
-    assert (out.parent / "suite.log").read_text().count("run") == 2
+    # green runs: the base check (nobody aboard), one bisection probe ([alpha]),
+    # one for the surviving batch — never one per branch
+    assert (out.parent / "suite.log").read_text().count("run") == 3
     assert marker.exists()
     branches = _git(out, "branch", "--list", "--format=%(refname:short)").stdout.split()
     assert "alpha" not in branches and "beta" not in branches and "bad" in branches
@@ -157,3 +158,89 @@ def test_rejected_push_leaves_local_main_untouched_and_keeps_the_train(render, t
     branches = _git(out, "branch", "--list", "--format=%(refname:short)").stdout.split()
     assert "alpha" in branches and any(b.startswith("train/") for b in branches)
     assert not (out / ".git/process-train/worktree").exists()
+
+
+def test_a_same_named_old_pass_on_main_does_not_clear_a_new_plan(render, tmp_path):
+    # the review gate's uniqueness rule for de-dated slugs, mirrored: an old
+    # archived `login` plan + its pass on main must not clear `2026-09-20-login`
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    a = out / ".process-work/plans/archive"
+    a.mkdir(parents=True, exist_ok=True)
+    (a / "2026-01-05-login.md").write_text("# old\n\ntier: 3\n")
+    j = out / ".process-work/journal"
+    j.mkdir(parents=True, exist_ok=True)
+    (j / "2026-01-05.md").write_text("REVIEW work=login tier=3 reviewer=fresh model=cross "
+                                     "independence=bundle,non-implementing verdict=pass round=1\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "history")
+    _branch(out, "login", {"src/l.py": "l\n"}, tier=3, reviewed=False)
+    p = json.loads(_train(out, "plan", "--json").stdout)
+    c = next(c for c in p["candidates"] if c["branch"] == "login")
+    assert not c["eligible"] and "without a clearing REVIEW pass" in c["reasons"][0]
+
+
+def test_fenced_tier_example_is_not_a_declaration(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _git(out, "checkout", "-q", "-b", "tricky", "main")
+    a = out / ".process-work/plans/archive"
+    a.mkdir(parents=True, exist_ok=True)
+    (a / "2026-09-20-tricky.md").write_text("# P\n\n```\ntier: 1\n```\n\n- **Tier:** 3\nissue: #1\n")
+    (out / "src.py").write_text("x\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "feat: tricky")
+    _git(out, "checkout", "-q", "main")
+    p = json.loads(_train(out, "plan", "--json").stdout)
+    c = next(c for c in p["candidates"] if c["branch"] == "tricky")
+    assert not c["eligible"] and c["plans"][0]["tier"] == 3
+
+
+def test_a_red_base_blames_nobody(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _branch(out, "alpha", {"src/a.py": "a\n"})
+    _branch(out, "beta", {"src/b.py": "b\n"})
+    r = _train(out, "run", "--force", "--suite", "false")
+    assert r.returncode == 1 and "integration branch itself is red" in r.stderr
+    assert "dropping it" not in r.stdout
+    branches = _git(out, "branch", "--list", "--format=%(refname:short)").stdout.split()
+    assert "alpha" in branches and "beta" in branches and not any(b.startswith("train/") for b in branches)
+
+
+def test_local_main_ahead_of_origin_refuses_to_depart(render, tmp_path):
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    bare = tmp_path / "origin.git"
+    _git(out, "clone", "-q", "--bare", str(out), str(bare))
+    _git(out, "remote", "add", "origin", str(bare))
+    _git(out, "fetch", "-q", "origin")
+    _branch(out, "alpha", {"src/a.py": "a\n"})
+    (out / "local.txt").write_text("unpushed\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "local only")
+    head = _git(out, "rev-parse", "main").stdout
+    r = _train(out, "run", "--force", "--push", "--suite", "true")
+    assert r.returncode == 2 and "carries commits that are not on origin/main" in r.stderr
+    assert _git(out, "rev-parse", "main").stdout == head
+    assert _git(bare, "rev-parse", "main").stdout != head
+
+
+def test_conflicting_candidate_is_reported_blocked(render, tmp_path):
+    # a conflict arises when main moved on the same file after the branch
+    # forked (two candidates on one file never board together — overlap rule)
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _branch(out, "beta", {"shared.txt": "beta\n"})
+    (out / "shared.txt").write_text("main moved\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "main: shared")
+    r = _train(out, "run", "--force", "--suite", "true")
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert "merge conflict with the batch" in r.stdout and "beta" in r.stdout
+    t = json.loads(subprocess.run([sys.executable, str(out / "scripts/process/tower.py"), "--json"],
+                                  cwd=out, capture_output=True, text=True).stdout)
+    states = {x["worker"]: x["state"] for x in t["reports"]}
+    assert states["beta"] == "blocked"
+    branches = _git(out, "branch", "--list", "--format=%(refname:short)").stdout.split()
+    assert "beta" in branches and not any(b.startswith("train/") for b in branches)

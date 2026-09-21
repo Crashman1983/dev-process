@@ -849,6 +849,32 @@ macht Befunde zu getypten Issues, gibt tote Claims nach zwei Stunden
 frei; der Zug druckt je gemergtem Branch die referenzierten Issues),
 `v2.17.2`.
 
+**Unabhängiges Review von Tower, Zug, Report, Designvertrag und Ledger**
+(Sebs „check nochmal alles durch, ohne Bias" — ein frischer Reviewer ohne
+Kontext fand 26 Befunde, sechs davon hoch; alle mit Repro. Behoben:
+Zug — Tier aus dem Roh-Text las eingezäunte Beispiele als Deklaration
+(jetzt `_unfenced` wie im Review-Gate), ein de-datierter Slug ließ einen
+Januar-Pass einen September-Plan gleichen Namens klären (jetzt die
+Eindeutigkeitsregel des Gates), Push nach origin ohne Vorfahren-Prüfung
+konnte ein main ohne lokale Commits veröffentlichen (jetzt Abbruch),
+ein gescheitertes lokales `branch -d` löschte trotzdem auf origin (jetzt
+gekoppelt und gemeldet), die Bisektion beschuldigte bei rotem main den
+ersten Kandidaten (jetzt Basis-Check: rotes main beschuldigt niemanden),
+Konflikt-Aussteiger blieben stumm (jetzt `blocked`-Meldung); Tower — main
+und `.process-work/` erzeugten Überlappungs-Befunde, ein README zählte als
+Plan, ein lokal anders benannter Branch überlappte mit sich selbst auf
+origin, ein fehlgeschlagener Fetch war unsichtbar (jetzt Befund
+`remote-unreachable`, kein `--prune`); Report — Hostnamen wurden am
+ersten Punkt gekappt (`build.eu`/`build.us` teilten einen Ref), Timeouts
+ungefangen; Designvertrag — `Decision: GO/NO-GO meeting` galt als GO,
+eingezäunte Beispiele zählten, jede 64-Hex-Zahl im Review galt als
+Siegel (jetzt nur eine benannte `manifest.sha256:`-Zeile), eine
+Unterüberschrift mit ID zählte als zweite Definition; Siegel — ein
+verschachteltes `manifest.json` war vom Siegel ausgenommen; Ledger —
+`--full` prüfte neu, schrieb aber nicht zurück, ein vergifteter Eintrag
+überlebte (jetzt baut `--full` den Ledger neu). Doku an den Code
+angeglichen, Bedrohungsmodell des Towers ehrlich benannt), `v2.17.3`.
+
 ## Sub-Projekt-Tabelle (SP1–SP24)
 
 Die Tabelle wurde bis SP24 gepflegt; ab SP25 trägt das Narrativ oben die

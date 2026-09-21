@@ -209,3 +209,42 @@ def test_two_hosts_meet_in_the_tower_via_origin(render, tmp_path):
     t2 = json.loads(subprocess.run([sys.executable, str(a / "scripts/process/tower.py"), "--json"],
                                    cwd=a, capture_output=True, text=True, env=env_a).stdout)
     assert t2["elsewhere"] == [] and {x["worker"] for x in t2["reports"]} == {"web-thing"}
+
+
+def test_main_bookkeeping_and_readme_are_not_findings(render, tmp_path):
+    # main's unpushed commit is not an "overlap"; .process-work dirs every
+    # branch writes are not a directory overlap; a README is not a plan
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    bare = tmp_path / "origin.git"
+    _git(out, "clone", "-q", "--bare", str(out), str(bare))
+    _git(out, "remote", "add", "origin", str(bare))
+    _git(out, "fetch", "-q", "origin")
+    _worktree(out, "alpha", {"src/a.py": "a\n", ".process-work/journal/2026-09-21.md": "REVIEW work=1 tier=2 reviewer=r model=m independence=bundle,non-implementing verdict=pass round=1\n"})
+    _worktree(out, "beta", {"src/sub/b.py": "b\n", ".process-work/journal/2026-09-21-b.md": "x\n"})
+    (out / "src").mkdir(exist_ok=True)
+    (out / "src/a.py").write_text("main moved\n")  # main ahead of origin on alpha's file
+    (out / ".process-work/plans").mkdir(parents=True, exist_ok=True)
+    (out / ".process-work/plans/README.md").write_text("# how plans look\n\ntier: 3\nissue: #42\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "main local")
+    t = json.loads(_tower(out, "--json").stdout)
+    assert not any("main" in (o["a"], o["b"]) for o in t["overlaps"])
+    assert not any(o["kind"] == "directory" and ".process-work" in " ".join(o["paths"]) for o in t["overlaps"])
+    assert not any("README" in p["path"] for p in t["plans"])
+
+
+def test_remote_branch_carried_locally_under_another_name_is_not_elsewhere(render, tmp_path):
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    bare = tmp_path / "origin.git"
+    _git(out, "clone", "-q", "--bare", str(out), str(bare))
+    _git(out, "remote", "add", "origin", str(bare))
+    _git(out, "fetch", "-q", "origin")
+    wt = _worktree(out, "work-alpha", {"src/a.py": "a\n"})
+    _git(wt, "push", "-q", "origin", "work-alpha:alpha")
+    _git(wt, "branch", "-q", "--set-upstream-to=origin/alpha")
+    t = json.loads(_tower(out, "--json", "--remote").stdout)
+    assert [w["branch"] for w in t["elsewhere"]] == []
+    assert t["overlaps"] == []
+    assert t["remote_fetched"] is True

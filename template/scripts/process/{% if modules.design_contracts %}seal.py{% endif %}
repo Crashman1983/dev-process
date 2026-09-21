@@ -28,6 +28,7 @@ from __future__ import annotations
 import datetime as _dt
 import hashlib
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -47,8 +48,8 @@ def _sha256(p: Path) -> str:
 def _local_files(folder: Path) -> list[Path]:
     out: list[Path] = []
     for p in sorted(folder.rglob("*")):
-        if not p.is_file() or p.name in (MANIFEST, SEAL):
-            continue
+        if not p.is_file() or (p.parent == folder and p.name in (MANIFEST, SEAL)):
+            continue  # only the folder's own manifest is exempt; a nested one is content
         if any(part in SKIP_DIRS for part in p.relative_to(folder).parts):
             continue
         out.append(p)
@@ -158,8 +159,16 @@ def main(argv: list[str]) -> int:
         print("usage: seal.py --seal DIR [--dep PATH ...] | --verify DIR   (paths relative to the repo root)",
               file=sys.stderr)
         return 2
-    root = Path.cwd()
+    try:
+        top = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True,
+                             timeout=10).stdout.strip()
+    except (OSError, subprocess.TimeoutExpired):
+        top = ""
+    root = Path(top) if top else Path.cwd()
     folder = root / argv[1]
+    if root.resolve() not in folder.resolve().parents:
+        print(f"seal: {argv[1]} lies outside the repo root {root}", file=sys.stderr)
+        return 2
     if argv[0] == "--seal":
         deps: list[str] = []
         rest = argv[2:]

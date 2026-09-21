@@ -17,17 +17,18 @@ branch, is ahead of it, and
     report only the pointer;
   * has no file overlap with a branch already boarded (the earlier
     candidate keeps its seat; overlap = the same file in flight);
-  * the runner's red ledger names no gate red for the branch's clone.
 
 Departure: at least `--min-candidates` aboard, or the oldest candidate
-has waited longer than `--max-wait-hours`; and the test lanes are free
-where the project has lanes. `--force` departs with whatever boarded.
+has waited longer than `--max-wait-hours`; the test lanes are free where
+the project has lanes; and the runner's red ledger names no red gate on
+this clone. `--force` departs with whatever boarded.
 
 The run: a staging branch `train/<stamp>` from the integration branch in
 its own worktree; candidates merged in order (a conflict drops that
 candidate and continues); the process gates and then the full suite run
-ONCE on the combined tree. If they fail, the last-boarded candidate is
-dropped and the train rebuilt (linear back-off — the offender is named).
+ONCE on the combined tree. If they fail, the base itself is checked once
+(a red main blames nobody), then a bisection over boarding-order prefixes
+names the first offender, drops it, and the rest is rebuilt.
 On green: the integration branch fast-forwards to the train, `--push`
 pushes it, merged branches are deleted (unless `--keep-branches`), each
 worker gets a `done` report, and `--deploy` runs once. The combination
@@ -61,8 +62,15 @@ JOURNAL = ".process-work/journal"
 TRAIN_DIR = "process-train"
 
 
+_GIT_ENV = dict(os.environ, GIT_TERMINAL_PROMPT="0")
+
+
 def _git(root: Path, *args: str, check: bool = False) -> subprocess.CompletedProcess:
-    r = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True)
+    try:
+        r = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True,
+                           timeout=300, env=_GIT_ENV)
+    except subprocess.TimeoutExpired:
+        r = subprocess.CompletedProcess(args, 124, "", f"git {' '.join(args)}: timed out after 300 s")
     if check and r.returncode != 0:
         raise SystemExit(f"train: git {' '.join(args)} failed:\n{r.stderr.strip()}")
     return r
@@ -99,6 +107,17 @@ def candidates(root: Path, local: str, base: str) -> list[dict]:
     branches = [b for b in branches if b and b not in (local,) and not b.startswith("train/")]
     reports = {r["worker"]: r for r in _tower.latest_reports(root)}
     passes_root = _journal_passes_tree(root, local)
+    # the review gate's rule: a de-dated slug may act as a work id only when it
+    # is unique across the archive — count them over main's archive and every
+    # candidate's additions, so one old pass cannot clear a same-named new plan
+    dedated: dict[str, int] = {}
+    archived_stems = [Path(r).stem for r in _out(root, "ls-tree", "-r", "--name-only", local, "--", ARCHIVE).splitlines()]
+    for b in branches:
+        archived_stems += [Path(r).stem for r in _out(root, "diff", "--name-only", "--diff-filter=A",
+                                                        f"{base}...{b}", "--", ARCHIVE).splitlines()]
+    for st in archived_stems:
+        key = _review.DATE_PREFIX.sub("", st)
+        dedated[key] = dedated.get(key, 0) + 1
     boarded_files: set[str] = set()
     out: list[dict] = []
     for b in sorted(branches):
@@ -117,11 +136,12 @@ def candidates(root: Path, local: str, base: str) -> list[dict]:
         passes = passes_root + _journal_passes_branch(root, base, b)
         cleared_all = bool(archived)
         for rel in archived:
-            text = _show(root, b, rel)
+            text = _review._unfenced(_show(root, b, rel))  # a fenced example is not a declaration
             stem = Path(rel).stem
             tier_m = _review.TIER_DECL.search(text)
             tier = int(tier_m.group(1)) if tier_m else 0
-            ids = _review._plan_work_ids(stem, text, include_dedated=True)
+            unique = dedated.get(_review.DATE_PREFIX.sub("", stem), 0) <= 1
+            ids = _review._plan_work_ids(stem, text, include_dedated=unique)
             waived = bool(_review.WAIVED.search(text))
             ok = tier < 2 or waived or _review._cleared(passes, ids, tier)
             c["plans"].append({"path": rel, "tier": tier, "cleared": ok, "waived": waived})
@@ -290,22 +310,42 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
     waiting = {c["branch"]: c.get("hours_waiting") or 0 for c in p["candidates"]}
     aboard.sort(key=lambda b: -waiting[b])
     blamed: list[str] = []
+    conflicted: list[str] = []
     branch = ""
 
     def attempt(subset: list[str]) -> tuple[bool, list[str], str]:
-        wt, br, merged, _conflicted = build_train(root, base, subset, stamp, log)
+        wt, br, merged, dropped = build_train(root, base, subset, stamp, log)
+        for d in dropped:
+            if d not in conflicted:
+                conflicted.append(d)
         if not merged:
-            return False, merged, br
+            return len(subset) == 0 and _base_green(wt), merged, br
         gates_ok = _sh(wt, f"{sys.executable} scripts/process/gate_runner.py", log) \
             if (wt / "scripts/process/gate_runner.py").is_file() else True
         ok = gates_ok and (_sh(wt, suite, log) if suite else True)
         return ok, merged, br
 
+    def _base_green(wt: Path) -> bool:
+        gates_ok = _sh(wt, f"{sys.executable} scripts/process/gate_runner.py", log) \
+            if (wt / "scripts/process/gate_runner.py").is_file() else True
+        return gates_ok and (_sh(wt, suite, log) if suite else True)
+
+    base_checked = False
     while aboard:
         ok, merged, branch = attempt(aboard)
         aboard = merged
         if ok or not aboard:
             break
+        if not base_checked:
+            # before blaming anybody: is the base itself red (a broken main,
+            # a flaky suite)? Then no candidate is the offender.
+            base_checked = True
+            if not attempt([])[0]:
+                print("train: the integration branch itself is red (gates or suite fail with nobody "
+                      "aboard) — no candidate blamed, nothing merged; fix main first", file=sys.stderr)
+                log("base red — aborted without blame")
+                _cleanup(root, stamp)
+                return 1
         # the combination is red: find the first candidate whose prefix turns
         # it red (bisection over prefixes — O(log n) suite runs per offender),
         # drop it, and try the rest. Order is boarding order, so "first red
@@ -323,10 +363,25 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
         log(f"red with {offender} aboard — dropped, rebuilding")
         print(f"train: red with {offender} aboard — dropping it and rebuilding")
         aboard = [b for b in aboard if b != offender]
+    def _report_dropped() -> None:
+        for b in conflicted:
+            print(f"train: {b} did not board — merge conflict with the batch; its worker rebases (report: blocked)")
+            _write(root, "blocked", f"dropped from train {stamp}: merge conflict — rebase onto {local}", b)
+        for b in blamed:
+            print(f"train: {b} was dropped as the offender — its worker owes a fix (report: blocked)")
+            _write(root, "blocked", f"dropped from train {stamp}: red with it aboard", b)
+
     if not aboard:
         print("train: nothing survived — see " + str(logfile), file=sys.stderr)
+        _report_dropped()
         _cleanup(root, stamp)
         return 1
+    if _git(root, "merge-base", "--is-ancestor", local, base).returncode != 0:
+        print(f"train: local {local} carries commits that are not on {base} — push or drop them first; "
+              f"a fast-forward is impossible and the train would publish a {local} without them",
+              file=sys.stderr)
+        _cleanup(root, stamp)
+        return 2
     if push:
         # origin first, local second: a rejected push (branch protection, a
         # race with another push) must leave local main untouched and the
@@ -357,22 +412,26 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
         except SystemExit:
             pass
         if not keep_branches:
-            _git(root, "branch", "-d", b)
-            if push:
+            d = _git(root, "branch", "-d", b)
+            if d.returncode != 0:
+                print(f"train: local branch {b} kept — {d.stderr.strip().splitlines()[-1] if d.stderr.strip() else 'delete refused'} "
+                      "(checked out in a worktree?); origin copy kept too", file=sys.stderr)
+            elif push:
                 _git(root, "push", "origin", "--delete", b)
     _cleanup(root, stamp)
+    _report_dropped()
     if deploy:
         if not _sh(root, deploy, log):
             print("train: deploy failed — the merge stands, the deploy does not; see " + str(logfile), file=sys.stderr)
             return 1
-    for b in blamed:
-        print(f"train: {b} was dropped as the offender — its worker owes a fix (report: blocked)")
-        try:
-            _report.write_report(root, "blocked", issue=None,
-                                 note=f"dropped from train {stamp}: red with it aboard", worker=b)
-        except SystemExit:
-            pass
     return 0
+
+
+def _write(root: Path, state: str, note: str, worker: str) -> None:
+    try:
+        _report.write_report(root, state, issue=None, note=note, worker=worker)
+    except SystemExit:
+        pass
 
 
 def _cleanup(root: Path, stamp: str) -> None:

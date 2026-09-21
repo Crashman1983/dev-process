@@ -25,17 +25,26 @@ conversations.
 
 ## Findings (deterministic)
 
-- **overlap** (high for a shared file, low for a shared directory)
+- **overlap** (high for a shared file, low for a shared directory) — never with the integration branch, and `.process-work/` (which every branch writes) is not a shared directory
 - **plan-without-issue** — Tier 2+ plan, no issue, not waived
 - **plan-without-decisions** — Tier 2+ plan without a `## Decisions` section
 - **plan-without-tier** — an active plan no gate can see
 - **chronic-red** — a gate red for two days or more
-- **stale-worker** — a branch with work (ahead or dirty) but no commit and no report for an hour (`--stale-minutes`)
+- **stale-worker** — a branch with work (ahead or dirty) but no commit and no report for an hour (`--stale-minutes`); a worker whose latest report is `review-pass`, `done` or `idle` is parked, not stale
+- **remote-unreachable** — `--remote` could not fetch; the table may be stale
+- **remote-residue** — unmerged branches on origin untouched for 14 days, counted not listed
 - **blocked** — a worker that reported `blocked` an hour ago and nothing since
 - **far-behind** — 50+ commits behind the integration branch
 
 Brainstorm papers (`design-*` plans) and waived stale plans are listed but
-never findings: they are not work in flight.
+never findings: they are not work in flight. Only date-prefixed files,
+`design-*` papers and `specs/*/plan.md` are plans; a README in the plans
+folder is not.
+
+**Threat model, honestly.** The tower and the report ledger are plain
+files in `.git/`, and `tower.py` runs the project's lane script from the
+checked-out tree. Code that already runs in the repository can falsify them; the tower
+is evidence for a steward, not a security boundary.
 
 ## The worker protocol
 
