@@ -74,6 +74,27 @@ mechanism (an ssh command, a remote session); the steward's rule does not
 change: it stops only what it started, and only after plan and decisions
 are committed. Host names come from `PROCESS_HOST` or the hostname.
 
+## Dispatch and the model policy
+
+A phase is a session. `scripts/process/dispatch.py start --issue N --phase
+plan|execute|review [--tier T]` opens (or reuses) the branch's worktree and
+starts a detached session with the model `docs/process/model-policy.json`
+assigns to that tier and phase; the project's own start command is the
+policy's `command` template (`{model}`, `{prompt}` — the prompt is one
+argument, never shell-interpolated). Between phases the artifacts carry the
+state: the plan and its `## Decisions` ledger from plan to execute, the
+bundle from execute to review. `dispatch.py list` shows liveness;
+`dispatch.py stop <branch>` stops only what dispatch started, and refuses
+while the worktree has uncommitted work (a plan not committed dies with
+the process). `max_workers` caps live sessions per host; a held lane
+counts as no free CPU.
+
+The policy is project-owned (list it in `.process-owned` so a template
+update never overwrites it). Sessions report their model
+(`report.py … --model`, or `PROCESS_MODEL` set by dispatch), and the
+telemetry module's `process_kpis.py models` cuts rounds-to-pass and
+blocks by tier × phase × model — the number the policy is judged by.
+
 ## What the tower is not
 
 It decides nothing and speaks to nobody. It is the input an orchestrating

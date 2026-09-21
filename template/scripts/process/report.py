@@ -68,7 +68,8 @@ def default_worker(root: Path) -> str:
             or root.name)
 
 
-def write_report(root: Path, state: str, *, issue: int | None, note: str, worker: str | None) -> dict:
+def write_report(root: Path, state: str, *, issue: int | None, note: str, worker: str | None,
+                 model: str | None = None) -> dict:
     record = {
         "ts": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
         "epoch": int(time.time()),
@@ -77,6 +78,8 @@ def write_report(root: Path, state: str, *, issue: int | None, note: str, worker
         "branch": _git(root, "rev-parse", "--abbrev-ref", "HEAD"),
         "issue": issue,
         "state": state,
+        "model": model or os.environ.get("PROCESS_MODEL") or "",
+        "phase": os.environ.get("PROCESS_PHASE") or "",
         "note": note.strip()[:240],
         "cwd": str(root),
     }
@@ -153,12 +156,13 @@ def main(argv: list[str]) -> int:
     p.add_argument("--issue", type=int)
     p.add_argument("--note", default="")
     p.add_argument("--worker", help="name (default: PROCESS_WORKER or the branch)")
+    p.add_argument("--model", help="the model doing this phase (default: PROCESS_MODEL) — what the KPIs cut by")
     p.add_argument("--root", default=".")
     p.add_argument("--sync", action="store_true",
                    help="publish this host's reports to origin (refs/process/reports/<host>)")
     a = p.parse_args(argv)
     root = Path(a.root).resolve()
-    rec = write_report(root, a.state, issue=a.issue, note=a.note, worker=a.worker)
+    rec = write_report(root, a.state, issue=a.issue, note=a.note, worker=a.worker, model=a.model)
     print(f"report: {rec['worker']}@{rec['host']} → {rec['state']}"
           + (f" #{rec['issue']}" if rec["issue"] else "") + (f" — {rec['note']}" if rec["note"] else ""))
     if a.sync or os.environ.get("PROCESS_REPORT_SYNC") == "1":
