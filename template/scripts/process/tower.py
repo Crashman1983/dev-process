@@ -51,8 +51,8 @@ DESIGN_CONTRACT = re.compile(r"^\s*(?:[-*+]\s+)?[*_]*design-contract[*_]*\s*:\s*
                              re.IGNORECASE | re.MULTILINE)
 DECISION_LINE = re.compile(r"^\s*(?:[-*+]\s+)?DECISION\s+\d{4}-\d{2}-\d{2}\s", re.MULTILINE)
 # a worker's question to the owner — lives in the plan, not in a chat
-QUESTION_LINE = re.compile(r"^\s*(?:[-*+]\s+)?DECISION NEEDED\s+(\d{4}-\d{2}-\d{2})\s+([^:]+):\s*(.+?)\s*$",
-                           re.MULTILINE)
+QUESTION_LINE = re.compile(r"^\s*(?:[-*+]\s+)?[*_]*DECISION NEEDED[*_]*\s+(\d{4}-\d{2}-\d{2})(?:\s+([^:\n]+?))?\s*:\s*(.+?)\s*$",
+                           re.MULTILINE)  # bold markers and a missing `who` are still a question
 BEHIND_LIMIT = 50
 PLAN_NAME = re.compile(r"^(\d{4}-\d{2}-\d{2}-|design-)")
 RED_AGE_DAYS = 2
@@ -178,19 +178,53 @@ def plans(root: Path) -> list[dict]:
     return out
 
 
-def questions(root: Path, plan_rows: list[dict]) -> list[dict]:
+def _questions_in(text: str, plan: str, branch: str | None, issue: str | None) -> list[dict]:
+    out = []
+    for m in QUESTION_LINE.finditer(_review._unfenced(text)):
+        out.append({"plan": plan, "branch": branch, "issue": issue, "date": m.group(1),
+                    "who": (m.group(2) or "worker").strip(), "question": m.group(3).strip()[:600]})
+    return out
+
+
+def _plan_paths_in_ref(root: Path, ref: str) -> list[str]:
+    names = (_git(root, "ls-tree", "-r", "--name-only", ref, "--", PLANS_ACTIVE, SPECS_DIR) or "").splitlines()
+    return [n for n in names if (n.startswith(PLANS_ACTIVE + "/") and PLAN_NAME.match(Path(n).name))
+            or (n.startswith(SPECS_DIR + "/") and Path(n).name == "plan.md")]
+
+
+def questions(root: Path, wts: list[dict], elsewhere: list[dict] | None = None) -> list[dict]:
     """Open `DECISION NEEDED <date> <who>: <question — options … recommendation …>`
-    lines in active plans. Answered = the line was rewritten to DECISION."""
+    lines in active plans — in every worktree of this clone (a worker's plan
+    lives in ITS worktree, not the steward's) and in the branches other hosts
+    pushed. Answered = the line was rewritten to DECISION. Uncommitted text
+    counts on this host: the question is asked the moment it is written."""
     out: list[dict] = []
-    for p in plan_rows:
-        path = root / p["path"]
-        try:
-            text = _review._unfenced(path.read_text(encoding="utf-8", errors="replace"))
-        except OSError:
+    seen: set[tuple] = set()
+    for wt in wts:
+        wroot = Path(wt["path"])
+        if wt.get("missing") or not wroot.is_dir():
             continue
-        for m in QUESTION_LINE.finditer(text):
-            out.append({"plan": p["path"], "issue": p.get("issue"), "date": m.group(1),
-                        "who": m.group(2).strip(), "question": m.group(3).strip()[:600]})
+        for p in plans(wroot):
+            try:
+                text = (wroot / p["path"]).read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            for q in _questions_in(text, p["path"], wt.get("branch"), p.get("issue")):
+                key = (q["plan"], q["date"], q["question"])
+                if key not in seen:
+                    seen.add(key)
+                    out.append(q)
+    for b in elsewhere or []:
+        ref = f"origin/{b['branch']}"
+        for rel in _plan_paths_in_ref(root, ref):
+            text = _git(root, "show", f"{ref}:{rel}") or ""
+            issues = sorted(_review._plan_issue_numbers(_review._unfenced(text)))
+            for q in _questions_in(text, rel, b["branch"], f"#{issues[0]}" if issues else None):
+                key = (q["plan"], q["date"], q["question"])
+                if key not in seen:
+                    seen.add(key)
+                    q["remote"] = True
+                    out.append(q)
     return out
 
 
@@ -204,8 +238,10 @@ def sessions(root: Path) -> list[dict]:
     out = []
     for rec in _dispatch.records(root):
         last, since = _dispatch.last_output(rec)
+        where = (f"tmux {rec.get('tmux_session')}:{rec.get('tmux_name')}" if rec.get("tmux_window")
+                 else f"pid {rec.get('pid')}")
         out.append({"branch": rec["branch"], "phase": rec.get("phase"), "issue": rec.get("issue"),
-                    "model": rec.get("model"), "alive": rec["alive"], "where": rec.get("tmux_target") or f"pid {rec.get('pid')}",
+                    "model": rec.get("model"), "alive": rec["alive"], "state": rec["state"], "where": where,
                     "minutes_since_start": int((time.time() - int(rec.get("started") or time.time())) // 60),
                     "last_output": last[-200:], "minutes_since_output": since})
     return out
@@ -327,7 +363,9 @@ def findings(table: dict, stale_minutes: int) -> list[dict]:
     out: list[dict] = []
     for q in table.get("questions", []):
         out.append({"kind": "question", "severity": "high",
-                    "what": f"{q['who']} asks on {q['plan']}{' (' + q['issue'] + ')' if q.get('issue') else ''}: {q['question']}",
+                    "what": f"{q['who']} asks on {q['plan']}"
+                            f"{' [' + q['branch'] + (', another host' if q.get('remote') else '') + ']' if q.get('branch') else ''}"
+                            f"{' (' + q['issue'] + ')' if q.get('issue') else ''}: {q['question']}",
                     "because": "a worker is waiting for a decision only the owner can take — relay it with its "
                                "options now, write the answer back as a DECISION line"})
     for o in table["overlaps"]:
@@ -407,7 +445,7 @@ def build(root: Path, stale_minutes: int = 60, *, remote: bool = False) -> dict:
         "elsewhere_residue": old_remote,
         "overlaps": overlaps(wts + elsewhere),
         "plans": plans(root),
-        "questions": questions(root, plans(root)),
+        "questions": questions(root, wts, elsewhere),
         "sessions": sessions(root),
         "reviews": reviews_today(root),
         "gates": red_gates(root),
@@ -449,12 +487,13 @@ def render(table: dict) -> str:
         lines.append(f"sessions ({len(table['sessions'])}):")
         for s in table["sessions"]:
             lines.append(f"  - {s['branch']}: {s['phase']} #{s['issue']} {s['model']} {s['where']} "
-                         f"{'LIVE' if s['alive'] else 'ended'}"
+                         f"{s['state'].upper()}"
                          + (f" · {s['minutes_since_output']} min ago: {s['last_output'][-100:]}" if s['last_output'] else ""))
     if table.get("questions"):
         lines.append(f"questions ({len(table['questions'])}):")
         for q in table["questions"]:
-            lines.append(f"  - {q['who']} on {Path(q['plan']).stem}: {q['question'][:160]}")
+            lines.append(f"  - {q['who']} on {Path(q['plan']).stem}"
+                         f"{' [' + q['branch'] + ']' if q.get('branch') else ''}: {q['question'][:160]}")
     if table["lanes"]:
         lines.append("lanes: " + "; ".join(table["lanes"]))
     if table["reports"]:

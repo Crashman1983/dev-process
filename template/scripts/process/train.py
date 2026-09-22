@@ -146,6 +146,12 @@ def candidates(root: Path, local: str, base: str) -> list[dict]:
             ok = tier < 2 or waived or _review._cleared(passes, ids, tier)
             c["plans"].append({"path": rel, "tier": tier, "cleared": ok, "waived": waived})
             cleared_all = cleared_all and ok
+        # a question the owner never answered rides no train: the branch
+        # was built on an assumption — answer it (DECISION line) first
+        open_q = [rel for rel in _out(root, "diff", "--name-only", f"{base}...{b}", "--", _tower.PLANS_ACTIVE, _tower.SPECS_DIR).splitlines()
+                  if rel.endswith(".md") and _tower.QUESTION_LINE.search(_review._unfenced(_show(root, b, rel)))]
+        if open_q:
+            c["reasons"].append(f"open DECISION NEEDED in {open_q[0]} — answer it as a DECISION line before merging")
         rep = reports.get(b)
         if archived and cleared_all:
             c["by"] = "archived plan + REVIEW pass"
@@ -161,7 +167,7 @@ def candidates(root: Path, local: str, base: str) -> list[dict]:
         overlap = sorted(files & boarded_files)
         if overlap:
             c["reasons"].append(f"overlaps {len(overlap)} file(s) with a branch already aboard: {', '.join(overlap[:3])}")
-        if c["by"] and not overlap:
+        if c["by"] and not overlap and not open_q:
             c["eligible"] = True
             boarded_files |= files
         out.append(c)

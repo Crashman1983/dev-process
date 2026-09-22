@@ -7,12 +7,14 @@ reviewer keep those (`docs/process/verification-independence.md`).
 
 ## Loop
 
-Do not poll on a clock. Arm a watch on the two files that change when
-something needs you — the reports file (the `reports.jsonl` inside the
-`process-tower` folder of the git common dir; a `blocked` line) and the active plans
-(`.process-work/plans/*.md`; a `DECISION NEEDED` line) — and wake on a
-change; a clock tick (every 30 min) is only the fallback for what a
-watch cannot see (a stale worker, a train ready to depart). Then:
+Wake on a tick the owner sets (`/loop 30m /steward` in the steward's
+session) or on the owner's message; there is no file watch in this
+process — nothing wakes you when a worker writes `blocked` or a
+`DECISION NEEDED` line, so the tick is the only guarantee a question is
+seen within the interval. If your harness offers a watch on the reports
+file (the `reports.jsonl` inside the `process-tower` folder of the git
+common dir) or on the workers' plans, use it as an extra wake, never as
+the only one. On each wake:
 
 1. `uv run scripts/process/tower.py --json` — the situation table. Read
    it, not the sessions. `docs/process/tower.md` explains every field.
@@ -21,18 +23,24 @@ watch cannot see (a stale worker, a train ready to depart). Then:
    1234 doing?" — answer from the log, never from a guess.
 2. Act on the findings in severity order:
    - **question:** a worker wrote `DECISION NEEDED <date> <who>: <question>
-     — options: A …, B …; recommendation: …` into its plan and reported
-     `blocked`. Relay it to the owner *complete and at once*: issue, branch,
-     the question, the options, the worker's recommendation, and what the
-     tower says about the branch — never a bare "worker blocked". When the
-     owner answers, rewrite that line in the plan to
-     `DECISION <date> owner: <answer> — because <why>`, commit it on the
-     branch, and tell the worker to continue (interactive worker: a
-     message in its window; headless: `dispatch.py start --phase execute`
-     again — the plan carries the answer).
+     — options: A …, B …; recommendation: …` into its plan (in ITS
+     worktree — the tower reads every worktree and every branch on origin)
+     and reported `blocked`. Relay it to the owner *complete and at once*:
+     issue, branch, the question, the options, the worker's recommendation,
+     and what the tower says about the branch — never a bare "worker
+     blocked". When the owner answers, give the answer to the worker that
+     asked: `dispatch.py say <branch> "DECISION <date> owner: <answer> —
+     because <why>"` for a tmux worker (it rewrites the line in its plan and
+     continues); for a headless worker rewrite the line yourself in that
+     worker's worktree, commit it there on the worker's branch, and
+     `dispatch.py start --phase execute` again — the plan carries the
+     answer. Never edit a plan in a worktree whose worker is live without
+     telling it: two writers on one file lose one of them.
    - **overlap (file):** tell both workers; decide phase-of or supersede
      (mandatory rule 4) before either pushes.
-   - **blocked / stale-worker:** ask once by message; a worker waiting on a
+   - **blocked / stale-worker:** ask once by message (`dispatch.py say
+     <branch> "…"` reaches a tmux worker; a headless one only reads its
+     plan — write the question there); a worker waiting on a
      lane is told to `make certify` in the background (or the project's
      equivalent) and to take the next issue meanwhile; a worker that does
      not answer within an hour is stopped and its issue reassigned — only
@@ -50,8 +58,10 @@ watch cannot see (a stale worker, a train ready to depart). Then:
    policy assigns (`docs/process/model-policy.json`, tier × phase):
    `uv run scripts/process/dispatch.py start --issue N --phase plan --tier T`
    (policy `runner: tmux` starts each worker as a window the owner can
-   open; `detached` runs it headless — either way `dispatch.py log` shows
-   what it printed),
+   open and `dispatch.py say` can type into; `detached` runs it headless —
+   either way `dispatch.py log` shows what it shows; the policy's
+   `command` runs on this machine, so a change to it is reviewed like CI
+   configuration),
    then `--phase execute` after `planned`, then `--phase review` after
    `pushed` — a fresh reviewing session, never the building one. The
    dispatcher refuses when the policy's `max_workers` are live or a lane

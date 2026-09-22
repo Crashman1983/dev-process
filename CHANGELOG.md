@@ -914,6 +914,41 @@ Meldungen und Pläne, Takt nur als Rückfallebene; Fragen werden
 vollständig und sofort durchgereicht — Issue, Branch, Frage, Optionen,
 Empfehlung, Lage), `v2.19.0`.
 
+**Zweites unabhängiges Review (v2.18/v2.19) — 19 Befunde eingearbeitet.**
+Ein frischer Reviewer las Dispatch, Tower, Train, Steward und
+Modellpolitik ohne Vorwissen. Die harten Befunde: tmux-Worker galten
+ewig als lebendig (die Shell-PID war nicht der Worker); `stop` konnte
+fremde Prozesse treffen (recycelte PID, PID 0 = eigene Gruppe); ein
+fremdes Verzeichnis am Worktree-Pfad wurde als Worktree akzeptiert;
+Fragen im Worktree eines Workers sah der Tower nicht (er las nur den
+eigenen); die Modell-KPIs zählten Runden je Meldung statt je Issue; der
+Prompt lief trotz Doku durch eine interaktive Shell; der Steward hatte
+Anweisungen ohne Mechanismus („Dateiwache", „Nachricht ins Fenster").
+Geschlossen: `dispatch.py` neu — Lebendigkeit ist der Pane-Zustand
+(`pane_dead`, `remain-on-exit`), nie eine Shell-PID; Records tragen PID
+plus Startzeit, `stop` beendet nur den aufgezeichneten Prozess; das
+Fenster läuft eine nicht-interaktive `sh` mit exakter POSIX-Quotierung
+und `exec`; `{model}`/`{prompt}` werden auch innerhalb eines Tokens
+ersetzt; `CLAUDECODE`/`CLAUDE_CODE_*` werden für beide Runner entfernt;
+`issues.json` findet den Branch eines Issues auch nach einem Stop; der
+Prompt beginnt mit dem Slash-Befehl und trägt das Frageprotokoll; neu
+`dispatch.py say <branch> "<Text>"` tippt eine Zeile in einen
+tmux-Worker; `log` zeigt bei tmux den Bildschirm (ein TUI-Log ist
+Escape-Codes), sonst den Log-Schwanz ohne ANSI; die Dirty-Prüfung zählt
+Untracked mit. Tower: `questions` liest jeden Worktree dieses Klons und
+per `git show` die Branches anderer Hosts (`--remote`); die Fragezeile
+verträgt Fettdruck und fehlendes „wer"; `sessions` zeigt den Zustand
+(live/dead/gone/unknown). Train: ein offener `DECISION NEEDED` hält den
+Branch vom Zug. `process_context.py` führt `open_questions` je Plan
+(/prime sieht, worauf gewartet wird). KPI `models`: ein Issue ist eine
+Einheit, das zuletzt gemeldete Modell je Phase besitzt sie, Runden einmal
+je Issue. Steward-Anleitung ohne Erfindungen: Takt per `/loop`, keine
+Dateiwache im Prozess; Antworten per `say` an den fragenden Worker, nie
+zwei Schreiber auf einem Plan; Trust-Grenze der Policy (`command` läuft
+auf dem Steward-Host — wie CI-Konfiguration zu prüfen) in `tower.md` und
+der Policy selbst; Hinweis auf Berechtigungen (`-p` braucht eine
+Freigabe, interaktiv ggf. Trust-Dialog), `v2.19.1`.
+
 ## Sub-Projekt-Tabelle (SP1–SP24)
 
 Die Tabelle wurde bis SP24 gepflegt; ab SP25 trägt das Narrativ oben die

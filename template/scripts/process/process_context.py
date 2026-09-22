@@ -38,6 +38,11 @@ MARKER = re.compile(r"\[NEEDS CLARIFICATION", re.IGNORECASE)
 DECISION = re.compile(r"^\s*(?:[-*+]\s+)?DECISION\s+(\d{4}-\d{2}-\d{2})\s+([^:]+):\s*(.+?)\s*$",
                       re.MULTILINE)
 DECISIONS_HEADING = re.compile(r"^#{2,4}\s+Decisions\b", re.IGNORECASE | re.MULTILINE)
+# a question still open — `DECISION NEEDED <date> <who>: …` — is not a
+# decision; a re-hydrated session must see that it is waiting, not act as
+# if the plan were settled
+QUESTION = re.compile(r"^\s*(?:[-*+]\s+)?[*_]*DECISION NEEDED[*_]*\s+(\d{4}-\d{2}-\d{2})(?:\s+([^:\n]+?))?\s*:\s*(.+?)\s*$",
+                      re.MULTILINE)
 
 
 def _branch(root: Path) -> str | None:
@@ -60,6 +65,7 @@ def _plan_info(p: Path) -> dict:
     return {"file": str(p), "tier": int(tier.group(1)) if tier else None,
             "issue": issue.group(1) if issue else None,
             "decisions": [f"{d} {who}: {what}" for d, who, what in DECISION.findall(text)],
+            "open_questions": [f"{d} {who or 'worker'}: {what}" for d, who, what in QUESTION.findall(text)],
             "decisions_section": bool(DECISIONS_HEADING.search(text))}
 
 

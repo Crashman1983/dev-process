@@ -273,3 +273,23 @@ def test_worker_question_in_the_plan_is_a_high_finding(render, tmp_path):
     p.write_text(p.read_text().replace("DECISION NEEDED 2026-09-22 1234-thing: keep",
                                        "DECISION 2026-09-22 owner: keep"))
     assert json.loads(_tower(out, "--json").stdout)["questions"] == []
+    # a worker's question lives in ITS worktree, uncommitted — the tower sees it there too
+    wt = _worktree(out, "work-beta", {"src/b.py": "b\n"})
+    (wt / ".process-work/plans").mkdir(parents=True, exist_ok=True)
+    (wt / ".process-work/plans/2026-09-22-77-beta.md").write_text(
+        "# B\n\ntier: 2\nissue: #77\n\n## Decisions\n\n- **DECISION NEEDED** 2026-09-22: bold, no who — options: A, B\n")
+    t = json.loads(_tower(out, "--json").stdout)
+    assert [(q["branch"], q["who"], q["issue"]) for q in t["questions"]] == [("work-beta", "worker", "#77")]
+    assert "[work-beta]" in _tower(out).stdout
+    # and on a branch another host pushed, via origin
+    bare = tmp_path / "origin.git"
+    _git(out, "clone", "-q", "--bare", str(out), str(bare))
+    _git(out, "remote", "add", "origin", str(bare))
+    _git(wt, "add", "-A")
+    _git(wt, "commit", "-q", "-m", "plan with question")
+    _git(wt, "push", "-q", "origin", "work-beta:gamma")
+    subprocess.run(["git", "worktree", "remove", "--force", str(wt)], cwd=out, check=True, capture_output=True)
+    _git(out, "branch", "-q", "-D", "work-beta")
+    t = json.loads(_tower(out, "--json", "--remote").stdout)
+    assert [(q["branch"], q.get("remote")) for q in t["questions"]] == [("gamma", True)]
+    assert "another host" in [f for f in t["findings"] if f["kind"] == "question"][0]["what"]

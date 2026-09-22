@@ -81,26 +81,47 @@ are committed. Host names come from `PROCESS_HOST` or the hostname.
 
 A phase is a session. `scripts/process/dispatch.py start --issue N --phase
 plan|execute|review [--tier T]` opens (or reuses) the branch's worktree and
-starts a detached session with the model `docs/process/model-policy.json`
-assigns to that tier and phase; the project's own start command is the
-policy's `command` template (`{model}`, `{prompt}` — the prompt is one
-argument, never shell-interpolated). Between phases the artifacts carry the
-state: the plan and its `## Decisions` ledger from plan to execute, the
-bundle from execute to review. `dispatch.py list` shows liveness and each worker's last printed line,
-`dispatch.py log <branch>` the last thirty; with policy `runner: tmux`
-every worker is a window of one tmux session (`tmux_session`) a human can
-open — interactive, visible, stoppable — with its output piped to the same
-log;
-`dispatch.py stop <branch>` stops only what dispatch started, and refuses
-while the worktree has uncommitted work (a plan not committed dies with
-the process). `max_workers` caps live sessions per host; a held lane
-counts as no free CPU.
+starts a session with the model `docs/process/model-policy.json` assigns
+to that tier and phase; the project's own start command is the policy's
+`command` template (`{model}`, `{prompt}` are substituted inside the argv
+the template splits into; the prompt is one argv element, and it begins
+with the phase's slash command so the command file owns the steps).
+Between phases the artifacts carry the state: the plan and its
+`## Decisions` ledger from plan to execute, the bundle from execute to
+review. Two runners: `detached` starts the argv headless (output to a
+log); `tmux` starts it as a window of one tmux session (`tmux_session`)
+a human can open — interactive, visible, stoppable. The tmux window runs
+a non-interactive `sh` that `exec`s the argv with exact POSIX quoting (no
+aliases, no rc files), keeps the last screen when the worker exits, and
+pipes the output to the log; liveness is the pane's own state, never a
+shell pid. `dispatch.py list` shows state and each worker's last line
+(the live screen for a tmux worker — a TUI's log is escape codes),
+`dispatch.py log <branch>` more of it, `dispatch.py say <branch> "…"`
+types a line into a tmux worker (the owner's answer to a question, a
+redirect). `dispatch.py stop <branch>` stops only what dispatch started,
+only when the recorded process is still the recorded one (pid and start
+time), and refuses while the worktree has uncommitted or untracked work
+(a plan not committed dies with the process). `max_workers` caps live
+sessions per host; a held lane counts as no free CPU. Both runners strip
+the steward's own `CLAUDECODE`/`CLAUDE_CODE_*` variables from the
+worker's environment: a worker is a session of its own.
 
+Permissions belong to the command, not to dispatch: a headless `claude
+-p` needs its tool permissions granted in the project's settings (an
+allowlist for Bash, or `--permission-mode`), else it stops at the first
+gate; an interactive worker in a fresh worktree may show a trust dialog
+on first start — open the window once, or trust the worktrees' parent
+directory beforehand.
+
+Trust boundary: the policy's `command` is executed on the machine that
+runs dispatch. It is a repository file — whoever can merge to it can run
+code on the steward's host. Review a change to it like CI configuration.
 The policy is project-owned (list it in `.process-owned` so a template
 update never overwrites it). Sessions report their model
 (`report.py … --model`, or `PROCESS_MODEL` set by dispatch), and the
 telemetry module's `process_kpis.py models` cuts rounds-to-pass and
-blocks by tier × phase × model — the number the policy is judged by.
+blocks by tier × phase × model — one issue is one unit, the last model
+reported for a phase owns it — the number the policy is judged by.
 
 ## What the tower is not
 
