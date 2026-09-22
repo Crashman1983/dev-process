@@ -508,21 +508,30 @@ def models(root: Path | None = None) -> int:
         print("  no worker reports with a model yet (report.py … --model, or PROCESS_MODEL in the session env)")
         return 0
     rounds = _review_rounds(root)
+    # one issue is one unit: the LAST model reported per phase did the work
+    # that the review counted (a re-dispatch with another model supersedes),
+    # blocks are counted per report, rounds once per issue and phase
     cells: dict[tuple, dict] = {}
+    seen_rounds: set[tuple] = set()
     for worker, recs in by.items():
         issue = next((str(r.get("issue")) for r in recs if r.get("issue")), None)
+        unit = issue or worker
+        last_model: dict[str, str] = {}
+        for r in sorted(recs, key=lambda x: x.get("epoch", 0)):
+            if r.get("model") and r.get("phase"):
+                last_model[r["phase"]] = r["model"]
+        tier = rounds[issue].get("tier") if issue and issue in rounds else None
         for r in recs:
             m, ph = r.get("model") or "", r.get("phase") or ""
-            if not m or not ph:
+            if not m or not ph or last_model.get(ph) != m:
                 continue
-            tier = None
-            if issue and issue in rounds:
-                tier = rounds[issue].get("tier")
             cell = cells.setdefault((str(tier), ph, m), {"issues": set(), "blocked": 0, "rounds": [], "passed": 0})
-            cell["issues"].add(worker)
+            cell["issues"].add(unit)
             if r.get("state") == "blocked":
                 cell["blocked"] += 1
-            if issue and issue in rounds and ph == "execute":
+            key = (unit, ph, m)
+            if issue and issue in rounds and ph == "execute" and key not in seen_rounds:
+                seen_rounds.add(key)
                 cell["rounds"].append(rounds[issue]["max_round"])
                 cell["passed"] += int(rounds[issue]["passed"])
     if not cells:
@@ -533,7 +542,7 @@ def models(root: Path | None = None) -> int:
         n = len(c["issues"])
         avg = f"{sum(c['rounds']) / len(c['rounds']):.1f} ({c['passed']}/{len(c['rounds'])} pass)" if c["rounds"] else "—"
         print(f"  {tier:>4} {ph:<8} {m:<22} {n:>3} {c['blocked']:>7} {avg:>12}")
-    n = sum(len(c["issues"]) for c in cells.values())
+    n = len({u for c in cells.values() for u in c["issues"]})
     lvl = _level(n, True, False, _N_THRESHOLD)
     print(f"  {confidence(n, proxy=True)} · {action(lvl, 'compare execute models within one tier: more rounds to pass is the price of the cheaper model', thin='keep dispatching with the policy; judge after ~20 issues per cell')}")
     return 0

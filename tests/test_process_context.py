@@ -79,7 +79,8 @@ def test_context_prints_the_decisions_ledger(render, tmp_path):
     (d / "2026-09-10-panel.md").write_text(
         "# Plan\n\ntier: 2\n\n## Decisions\n"
         "- DECISION 2026-09-10 owner: variant B, not A — because one export owner\n"
-        "- DECISION 2026-09-10 agent: skip CSV in this slice — because deferred\n")
+        "- DECISION 2026-09-10 agent: skip CSV in this slice — because deferred\n"
+        "- DECISION NEEDED 2026-09-11 panel: keep the legacy export? — options: A, B; recommendation: B\n")
     (d / "2026-09-10-bare.md").write_text("# Plan\n\ntier: 2\n")
     ctx = _run(out)
     plans = {p["file"]: p for p in ctx["active_plans"]}
@@ -88,5 +89,7 @@ def test_context_prints_the_decisions_ledger(render, tmp_path):
     assert panel["decisions"] == [
         "2026-09-10 owner: variant B, not A — because one export owner",
         "2026-09-10 agent: skip CSV in this slice — because deferred"]
+    # an open question is not a decision — and a re-hydrated session must see it
+    assert panel["open_questions"] == ["2026-09-11 panel: keep the legacy export? — options: A, B; recommendation: B"]
     bare = plans[".process-work/plans/2026-09-10-bare.md"]
-    assert bare["decisions_section"] is False and bare["decisions"] == []
+    assert bare["decisions_section"] is False and bare["decisions"] == [] and bare["open_questions"] == []

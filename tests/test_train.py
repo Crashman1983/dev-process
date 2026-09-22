@@ -78,6 +78,25 @@ def test_plan_boards_cleared_branches_and_explains_the_rest(render, tmp_path):
     assert p3["ready"] is True  # three aboard now
 
 
+def test_open_question_keeps_a_branch_off_the_train(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _branch(out, "asked", {"src/q.py": "q\n"})
+    _git(out, "checkout", "-q", "asked")
+    a = out / ".process-work/plans/archive/2026-09-20-asked.md"
+    a.write_text(a.read_text() + "- DECISION NEEDED 2026-09-21 asked: drop the flag? — options: A, B; recommendation: B\n")
+    _git(out, "commit", "-q", "-am", "question")
+    _git(out, "checkout", "-q", "main")
+    by = {c["branch"]: c for c in json.loads(_train(out, "plan", "--json").stdout)["candidates"]}
+    assert not by["asked"]["eligible"] and "open DECISION NEEDED" in by["asked"]["reasons"][0]
+    _git(out, "checkout", "-q", "asked")
+    a.write_text(a.read_text().replace("DECISION NEEDED 2026-09-21 asked: drop", "DECISION 2026-09-21 owner: drop"))
+    _git(out, "commit", "-q", "-am", "answered")
+    _git(out, "checkout", "-q", "main")
+    by = {c["branch"]: c for c in json.loads(_train(out, "plan", "--json").stdout)["candidates"]}
+    assert by["asked"]["eligible"]
+
+
 def test_run_merges_the_batch_behind_one_suite_and_drops_the_offender(render, tmp_path):
     out = render(tmp_path, {"project_name": "d", "modules": {}})
     _repo(out)
