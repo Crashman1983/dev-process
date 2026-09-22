@@ -4,6 +4,7 @@ the policy assigns.
 
     uv run scripts/process/dispatch.py start --issue N --phase plan|execute|review [--tier T] [--branch B] [--title "..."]
     uv run scripts/process/dispatch.py list
+    uv run scripts/process/dispatch.py log <branch> [--lines N]   # what the worker printed last
     uv run scripts/process/dispatch.py stop <branch> [--force]
     uv run scripts/process/dispatch.py policy [--tier T]        # what would run
 
@@ -17,8 +18,11 @@ worktree stays. Which model runs which phase comes from
 command is the `command` template there, `{model}` and `{prompt}`
 substituted, the prompt passed as ONE argument (never through a shell).
 
-The child runs detached (own session, stdout+stderr to a log), so it
-survives the steward's own tool timeouts. `<git common dir>/process-
+Two runners (policy `runner`): `detached` starts the command headless
+(own session, stdout+stderr to a log); `tmux` starts it as a window of a
+tmux session (policy `tmux_session`, default `workers`) — an interactive
+worker a human can open, its output piped to the same log. Either way
+the child survives the steward's own tool timeouts. `<git common dir>/process-
 dispatch/<branch>.json` records pid, phase, model, log, start time; `list`
 shows them with liveness, `stop` sends SIGTERM to a child this tool
 started — and refuses while the branch has uncommitted work unless
@@ -154,6 +158,21 @@ def prompt_for(phase: str, issue: int, tier: int | None, branch: str, model: str
                      "`review-pass` or `blocked` with the findings, then stop. Never fix the code yourself.")
 
 
+def _tmux(*args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(["tmux", *args], capture_output=True, text=True, timeout=30)
+
+
+def _tmux_ensure_session(name: str) -> None:
+    if _tmux("has-session", "-t", name).returncode != 0:
+        r = _tmux("new-session", "-d", "-s", name, "-n", "steward")
+        if r.returncode != 0:
+            raise SystemExit(f"dispatch: cannot create tmux session {name!r}: {r.stderr.strip()}")
+
+
+def _tmux_window_alive(target: str) -> bool:
+    return _tmux("list-panes", "-t", target).returncode == 0
+
+
 def _records_dir(root: Path) -> Path:
     d = common_dir(root) / DISPATCH_DIR
     d.mkdir(parents=True, exist_ok=True)
@@ -181,9 +200,26 @@ def records(root: Path) -> list[dict]:
             rec = json.loads(p.read_text(encoding="utf-8"))
         except ValueError:
             continue
-        rec["alive"] = _alive(int(rec.get("pid") or 0))
+        if rec.get("tmux_target"):
+            rec["alive"] = _tmux_window_alive(rec["tmux_target"]) and _alive(int(rec.get("pid") or 0))
+        else:
+            rec["alive"] = _alive(int(rec.get("pid") or 0))
         out.append(rec)
     return out
+
+
+def last_output(rec: dict, lines: int = 1) -> tuple[str, int | None]:
+    """The worker's last printed line(s) and minutes since it printed."""
+    log = Path(rec.get("log") or "")
+    if not log.is_file():
+        return "", None
+    try:
+        data = log.read_bytes()[-8192:].decode("utf-8", "replace")
+    except OSError:
+        return "", None
+    text = "\n".join([ln for ln in data.splitlines() if ln.strip()][-lines:])
+    mins = int((time.time() - log.stat().st_mtime) // 60)
+    return text, mins
 
 
 def live_children(root: Path) -> list[dict]:
@@ -228,18 +264,60 @@ def start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str |
     log = _records_dir(root) / f"{branch.replace('/', '__')}-{phase}-{_dt.datetime.now():%Y%m%d-%H%M%S}.log"
     env = dict(os.environ, PROCESS_WORKER=branch, PROCESS_PHASE=phase, PROCESS_MODEL=model,
                PROCESS_ISSUE=str(issue))
-    with log.open("ab") as fh:
-        try:
-            proc = subprocess.Popen(argv, cwd=wt, stdin=subprocess.DEVNULL, stdout=fh, stderr=subprocess.STDOUT,
-                                    env=env, start_new_session=True)
-        except OSError as exc:
-            print(f"dispatch: cannot start {argv[0]!r}: {exc} — fix `command` in {POLICY}", file=sys.stderr)
-            return 1
-    rec = {"branch": branch, "issue": issue, "phase": phase, "tier": tier, "model": model, "pid": proc.pid,
+    runner = str(policy.get("runner") or "detached")
+    rec = {"branch": branch, "issue": issue, "phase": phase, "tier": tier, "model": model,
            "worktree": str(wt), "log": str(log), "started": int(time.time()),
-           "ts": _dt.datetime.now().isoformat(timespec="seconds")}
+           "ts": _dt.datetime.now().isoformat(timespec="seconds"), "runner": runner}
+    if runner == "tmux":
+        session = str(policy.get("tmux_session") or "workers")
+        _tmux_ensure_session(session)
+        window = branch.replace("/", "-").replace(".", "-")[:40]
+        target = f"{session}:{window}"
+        if _tmux_window_alive(target):
+            print(f"dispatch: tmux window {target} already exists — stop it or pick another branch", file=sys.stderr)
+            return 3
+        env_args = [x for k in ("PROCESS_WORKER", "PROCESS_PHASE", "PROCESS_MODEL", "PROCESS_ISSUE")
+                    for x in ("-e", f"{k}={env[k]}")]
+        # a shell first, the pipe second, the command third: output from the
+        # first second is not lost, the worker keeps its tty (a TUI needs one),
+        # and the human lands in a shell when the worker ends. shlex.join keeps
+        # the prompt one word for the shell that send-keys types into.
+        r = _tmux("new-window", "-d", "-t", session, "-n", window, "-c", str(wt), *env_args)
+        if r.returncode != 0:
+            print(f"dispatch: tmux new-window failed: {r.stderr.strip()}", file=sys.stderr)
+            return 1
+        _tmux("pipe-pane", "-t", target, "-o", f"cat >> {shlex.quote(str(log))}")
+        _tmux("send-keys", "-t", target, shlex.join(argv), "Enter")
+        pid_out = _tmux("list-panes", "-t", target, "-F", "#{pane_pid}").stdout.strip().splitlines()
+        rec["pid"] = int(pid_out[0]) if pid_out and pid_out[0].isdigit() else 0
+        rec["tmux_target"] = target
+        where = f"tmux {target}"
+    else:
+        with log.open("ab") as fh:
+            try:
+                proc = subprocess.Popen(argv, cwd=wt, stdin=subprocess.DEVNULL, stdout=fh,
+                                        stderr=subprocess.STDOUT, env=env, start_new_session=True)
+            except OSError as exc:
+                print(f"dispatch: cannot start {argv[0]!r}: {exc} — fix `command` in {POLICY}", file=sys.stderr)
+                return 1
+        rec["pid"] = proc.pid
+        where = f"pid {proc.pid}"
     _record_path(root, branch).write_text(json.dumps(rec, indent=2), encoding="utf-8")
-    print(f"dispatch: started {phase} for #{issue} on {branch} with {model} (pid {proc.pid}, log {log.name})")
+    print(f"dispatch: started {phase} for #{issue} on {branch} with {model} ({where}, log {log.name})")
+    return 0
+
+
+def show_log(root: Path, branch: str, lines: int) -> int:
+    p = _record_path(root, branch)
+    if not p.is_file():
+        print(f"dispatch: no record for {branch}", file=sys.stderr)
+        return 2
+    rec = json.loads(p.read_text(encoding="utf-8"))
+    text, mins = last_output(rec, lines)
+    head = f"{branch} — {rec.get('phase')} #{rec.get('issue')} {rec.get('model')}"
+    head += f" — {rec['tmux_target']}" if rec.get("tmux_target") else ""
+    print(head + (f" — last output {mins} min ago" if mins is not None else " — no output yet"))
+    print(text or "(empty)")
     return 0
 
 
@@ -251,8 +329,11 @@ def list_sessions(root: Path) -> int:
     now = time.time()
     for r in recs:
         mins = int((now - int(r.get("started") or now)) // 60)
-        print(f"- {r['branch']}: {r['phase']} #{r.get('issue')} {r.get('model')} pid {r.get('pid')} "
-              f"{'LIVE' if r['alive'] else 'ended'} ({mins} min) — {Path(r.get('log', '')).name}")
+        last, since = last_output(r)
+        where = r.get("tmux_target") or f"pid {r.get('pid')}"
+        print(f"- {r['branch']}: {r['phase']} #{r.get('issue')} {r.get('model')} {where} "
+              f"{'LIVE' if r['alive'] else 'ended'} ({mins} min)"
+              + (f" · last output {since} min ago: {last[-120:]}" if last else ""))
     return 0
 
 
@@ -263,8 +344,10 @@ def stop(root: Path, branch: str, *, force: bool) -> int:
         return 2
     rec = json.loads(p.read_text(encoding="utf-8"))
     pid = int(rec.get("pid") or 0)
-    if not _alive(pid):
-        print(f"dispatch: {branch} (pid {pid}) is not running")
+    target = rec.get("tmux_target")
+    alive = (_tmux_window_alive(target) and _alive(pid)) if target else _alive(pid)
+    if not alive:
+        print(f"dispatch: {branch} ({target or 'pid ' + str(pid)}) is not running")
         p.unlink()
         return 0
     wt = Path(rec.get("worktree") or "")
@@ -273,23 +356,29 @@ def stop(root: Path, branch: str, *, force: bool) -> int:
         print(f"dispatch: {branch} has uncommitted work ({len(dirty.splitlines())} file(s)) — a plan or decisions "
               "not committed die with the process; ask the worker to commit, or --force", file=sys.stderr)
         return 3
-    try:
-        os.killpg(os.getpgid(pid), signal.SIGTERM)
-    except (ProcessLookupError, PermissionError):
-        os.kill(pid, signal.SIGTERM)
+    if target:
+        _tmux("kill-window", "-t", target)
+    else:
+        try:
+            os.killpg(os.getpgid(pid), signal.SIGTERM)
+        except (ProcessLookupError, PermissionError):
+            os.kill(pid, signal.SIGTERM)
     for _ in range(50):
         if not _alive(pid):
             break
         time.sleep(0.2)
     else:
-        os.kill(pid, signal.SIGKILL)
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
     try:
         _report.write_report(root, "idle", issue=rec.get("issue"), note=f"stopped by dispatch ({rec.get('phase')})",
                              worker=branch)
     except SystemExit:
         pass
     p.unlink()
-    print(f"dispatch: stopped {branch} (pid {pid})")
+    print(f"dispatch: stopped {branch} ({target or 'pid ' + str(pid)})")
     return 0
 
 
@@ -305,6 +394,9 @@ def main(argv: list[str]) -> int:
     s.add_argument("--title", help="slug source for a new branch name")
     s.add_argument("--dry-run", action="store_true")
     sub.add_parser("list")
+    lg = sub.add_parser("log")
+    lg.add_argument("branch")
+    lg.add_argument("--lines", type=int, default=30)
     st = sub.add_parser("stop")
     st.add_argument("branch")
     st.add_argument("--force", action="store_true")
@@ -317,12 +409,15 @@ def main(argv: list[str]) -> int:
                      dry_run=a.dry_run)
     if a.command == "list":
         return list_sessions(root)
+    if a.command == "log":
+        return show_log(root, a.branch, a.lines)
     if a.command == "stop":
         return stop(root, a.branch, force=a.force)
     policy = load_policy(root)
     for ph in PHASES:
         print(f"{ph}: {model_for(policy, a.tier, ph)}")
-    print(f"command: {policy['command']}  (max_workers {policy.get('max_workers', 4)})")
+    print(f"command: {policy['command']}  (runner {policy.get('runner', 'detached')}, "
+          f"max_workers {policy.get('max_workers', 4)})")
     return 0
 
 

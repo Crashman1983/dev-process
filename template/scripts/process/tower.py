@@ -50,6 +50,9 @@ SPECS_DIR = "specs"
 DESIGN_CONTRACT = re.compile(r"^\s*(?:[-*+]\s+)?[*_]*design-contract[*_]*\s*:\s*(\S+)",
                              re.IGNORECASE | re.MULTILINE)
 DECISION_LINE = re.compile(r"^\s*(?:[-*+]\s+)?DECISION\s+\d{4}-\d{2}-\d{2}\s", re.MULTILINE)
+# a worker's question to the owner — lives in the plan, not in a chat
+QUESTION_LINE = re.compile(r"^\s*(?:[-*+]\s+)?DECISION NEEDED\s+(\d{4}-\d{2}-\d{2})\s+([^:]+):\s*(.+?)\s*$",
+                           re.MULTILINE)
 BEHIND_LIMIT = 50
 PLAN_NAME = re.compile(r"^(\d{4}-\d{2}-\d{2}-|design-)")
 RED_AGE_DAYS = 2
@@ -175,6 +178,39 @@ def plans(root: Path) -> list[dict]:
     return out
 
 
+def questions(root: Path, plan_rows: list[dict]) -> list[dict]:
+    """Open `DECISION NEEDED <date> <who>: <question — options … recommendation …>`
+    lines in active plans. Answered = the line was rewritten to DECISION."""
+    out: list[dict] = []
+    for p in plan_rows:
+        path = root / p["path"]
+        try:
+            text = _review._unfenced(path.read_text(encoding="utf-8", errors="replace"))
+        except OSError:
+            continue
+        for m in QUESTION_LINE.finditer(text):
+            out.append({"plan": p["path"], "issue": p.get("issue"), "date": m.group(1),
+                        "who": m.group(2).strip(), "question": m.group(3).strip()[:600]})
+    return out
+
+
+def sessions(root: Path) -> list[dict]:
+    """Dispatched worker sessions with their last printed line — the look at
+    the workers the steward otherwise lacks."""
+    try:
+        import dispatch as _dispatch
+    except ImportError:
+        return []
+    out = []
+    for rec in _dispatch.records(root):
+        last, since = _dispatch.last_output(rec)
+        out.append({"branch": rec["branch"], "phase": rec.get("phase"), "issue": rec.get("issue"),
+                    "model": rec.get("model"), "alive": rec["alive"], "where": rec.get("tmux_target") or f"pid {rec.get('pid')}",
+                    "minutes_since_start": int((time.time() - int(rec.get("started") or time.time())) // 60),
+                    "last_output": last[-200:], "minutes_since_output": since})
+    return out
+
+
 def reviews_today(root: Path) -> dict:
     today = _dt.date.today().isoformat()
     jdir = root / _review.JOURNAL_DIR
@@ -289,6 +325,11 @@ def remote_branches(root: Path, ref: str | None, local_branches: set[str],
 
 def findings(table: dict, stale_minutes: int) -> list[dict]:
     out: list[dict] = []
+    for q in table.get("questions", []):
+        out.append({"kind": "question", "severity": "high",
+                    "what": f"{q['who']} asks on {q['plan']}{' (' + q['issue'] + ')' if q.get('issue') else ''}: {q['question']}",
+                    "because": "a worker is waiting for a decision only the owner can take — relay it with its "
+                               "options now, write the answer back as a DECISION line"})
     for o in table["overlaps"]:
         out.append({"kind": "overlap", "severity": "high" if o["kind"] == "file" else "low",
                     "what": f"{o['a']} and {o['b']} both carry {o['kind']}(s): {', '.join(o['paths'][:5])}",
@@ -366,6 +407,8 @@ def build(root: Path, stale_minutes: int = 60, *, remote: bool = False) -> dict:
         "elsewhere_residue": old_remote,
         "overlaps": overlaps(wts + elsewhere),
         "plans": plans(root),
+        "questions": questions(root, plans(root)),
+        "sessions": sessions(root),
         "reviews": reviews_today(root),
         "gates": red_gates(root),
         "lanes": lanes(root),
@@ -402,6 +445,16 @@ def render(table: dict) -> str:
         for p in active) if active else "plans: none")
     rv = table["reviews"]
     lines.append(f"reviews today: {sum(rv['pass'].values())} pass, {sum(rv['block'].values())} block")
+    if table.get("sessions"):
+        lines.append(f"sessions ({len(table['sessions'])}):")
+        for s in table["sessions"]:
+            lines.append(f"  - {s['branch']}: {s['phase']} #{s['issue']} {s['model']} {s['where']} "
+                         f"{'LIVE' if s['alive'] else 'ended'}"
+                         + (f" · {s['minutes_since_output']} min ago: {s['last_output'][-100:]}" if s['last_output'] else ""))
+    if table.get("questions"):
+        lines.append(f"questions ({len(table['questions'])}):")
+        for q in table["questions"]:
+            lines.append(f"  - {q['who']} on {Path(q['plan']).stem}: {q['question'][:160]}")
     if table["lanes"]:
         lines.append("lanes: " + "; ".join(table["lanes"]))
     if table["reports"]:

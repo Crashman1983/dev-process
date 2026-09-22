@@ -7,9 +7,29 @@ reviewer keep those (`docs/process/verification-independence.md`).
 
 ## Loop
 
+Do not poll on a clock. Arm a watch on the two files that change when
+something needs you — the reports file (the `reports.jsonl` inside the
+`process-tower` folder of the git common dir; a `blocked` line) and the active plans
+(`.process-work/plans/*.md`; a `DECISION NEEDED` line) — and wake on a
+change; a clock tick (every 30 min) is only the fallback for what a
+watch cannot see (a stale worker, a train ready to depart). Then:
+
 1. `uv run scripts/process/tower.py --json` — the situation table. Read
    it, not the sessions. `docs/process/tower.md` explains every field.
+   `sessions` shows every dispatched worker with its last printed line;
+   `dispatch.py log <branch>` shows more when the owner asks "what is
+   1234 doing?" — answer from the log, never from a guess.
 2. Act on the findings in severity order:
+   - **question:** a worker wrote `DECISION NEEDED <date> <who>: <question>
+     — options: A …, B …; recommendation: …` into its plan and reported
+     `blocked`. Relay it to the owner *complete and at once*: issue, branch,
+     the question, the options, the worker's recommendation, and what the
+     tower says about the branch — never a bare "worker blocked". When the
+     owner answers, rewrite that line in the plan to
+     `DECISION <date> owner: <answer> — because <why>`, commit it on the
+     branch, and tell the worker to continue (interactive worker: a
+     message in its window; headless: `dispatch.py start --phase execute`
+     again — the plan carries the answer).
    - **overlap (file):** tell both workers; decide phase-of or supersede
      (mandatory rule 4) before either pushes.
    - **blocked / stale-worker:** ask once by message; a worker waiting on a
@@ -28,7 +48,10 @@ reviewer keep those (`docs/process/verification-independence.md`).
 4. Assign: the next Ready issue (DoR, `docs/process/definition-of-ready-and-done.md`)
    to a session of its own, one phase at a time, with the model the
    policy assigns (`docs/process/model-policy.json`, tier × phase):
-   `uv run scripts/process/dispatch.py start --issue N --phase plan --tier T`,
+   `uv run scripts/process/dispatch.py start --issue N --phase plan --tier T`
+   (policy `runner: tmux` starts each worker as a window the owner can
+   open; `detached` runs it headless — either way `dispatch.py log` shows
+   what it printed),
    then `--phase execute` after `planned`, then `--phase review` after
    `pushed` — a fresh reviewing session, never the building one. The
    dispatcher refuses when the policy's `max_workers` are live or a lane

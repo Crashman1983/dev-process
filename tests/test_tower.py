@@ -248,3 +248,28 @@ def test_remote_branch_carried_locally_under_another_name_is_not_elsewhere(rende
     assert [w["branch"] for w in t["elsewhere"]] == []
     assert t["overlaps"] == []
     assert t["remote_fetched"] is True
+
+
+def test_worker_question_in_the_plan_is_a_high_finding(render, tmp_path):
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    plans = out / ".process-work/plans"
+    plans.mkdir(parents=True, exist_ok=True)
+    (plans / "2026-09-22-1234-thing.md").write_text(
+        "# P\n\ntier: 2\nissue: #1234\n\n## Decisions\n\n"
+        "DECISION 2026-09-22 owner: variant B — because cheaper\n"
+        "DECISION NEEDED 2026-09-22 1234-thing: keep the legacy export? — options: A drop it, B keep behind a flag; recommendation: B\n"
+        "```\nDECISION NEEDED 2026-01-01 example: quoted, not real\n```\n")
+    t = json.loads(_tower(out, "--json").stdout)
+    assert len(t["questions"]) == 1
+    q = t["questions"][0]
+    assert q["who"] == "1234-thing" and q["issue"] == "#1234" and "legacy export" in q["question"]
+    f = [x for x in t["findings"] if x["kind"] == "question"]
+    assert f and f[0]["severity"] == "high" and "options: A drop it" in f[0]["what"]
+    text = _tower(out).stdout
+    assert "questions (1)" in text
+    # answered: the line becomes a DECISION — no question left
+    p = plans / "2026-09-22-1234-thing.md"
+    p.write_text(p.read_text().replace("DECISION NEEDED 2026-09-22 1234-thing: keep",
+                                       "DECISION 2026-09-22 owner: keep"))
+    assert json.loads(_tower(out, "--json").stdout)["questions"] == []
