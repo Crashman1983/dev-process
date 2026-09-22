@@ -21,10 +21,13 @@ conversations.
 | `gates` | the runner's red ledger with age | chronic reds |
 | `lanes` | `scripts/lane.py status` where the project has it | who holds the test lanes |
 | `reports` | the latest `report.py` line per worker | state each worker claims, and how long ago |
+| `sessions` | every worker `dispatch.py` started: phase, model, where (tmux window or pid), alive, last printed line and when | the look at the workers; `dispatch.py log <branch>` for more |
+| `questions` | open `DECISION NEEDED` lines in active plans | what only the owner can answer — relayed with options, answered as a `DECISION` line |
 | `findings` | deterministic, each with a *because* | the list to act on |
 
 ## Findings (deterministic)
 
+- **question** (high) — a worker wrote `DECISION NEEDED … — options: …; recommendation: …` into its plan: relay now, answer in the plan
 - **overlap** (high for a shared file, low for a shared directory) — never with the integration branch, and `.process-work/` (which every branch writes) is not a shared directory
 - **plan-without-issue** — Tier 2+ plan, no issue, not waived
 - **plan-without-decisions** — Tier 2+ plan without a `## Decisions` section
@@ -83,7 +86,11 @@ assigns to that tier and phase; the project's own start command is the
 policy's `command` template (`{model}`, `{prompt}` — the prompt is one
 argument, never shell-interpolated). Between phases the artifacts carry the
 state: the plan and its `## Decisions` ledger from plan to execute, the
-bundle from execute to review. `dispatch.py list` shows liveness;
+bundle from execute to review. `dispatch.py list` shows liveness and each worker's last printed line,
+`dispatch.py log <branch>` the last thirty; with policy `runner: tmux`
+every worker is a window of one tmux session (`tmux_session`) a human can
+open — interactive, visible, stoppable — with its output piped to the same
+log;
 `dispatch.py stop <branch>` stops only what dispatch started, and refuses
 while the worktree has uncommitted work (a plan not committed dies with
 the process). `max_workers` caps live sessions per host; a held lane

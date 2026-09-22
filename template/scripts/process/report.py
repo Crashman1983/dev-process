@@ -80,7 +80,7 @@ def write_report(root: Path, state: str, *, issue: int | None, note: str, worker
         "state": state,
         "model": model or os.environ.get("PROCESS_MODEL") or "",
         "phase": os.environ.get("PROCESS_PHASE") or "",
-        "note": note.strip()[:240],
+        "note": note.strip()[:1000],
         "cwd": str(root),
     }
     p = reports_path(root)

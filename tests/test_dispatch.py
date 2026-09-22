@@ -1,9 +1,12 @@
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
 from pathlib import Path
+
+import pytest
 
 
 def _git(root: Path, *args: str):
@@ -120,3 +123,36 @@ def test_report_carries_model_and_kpis_cut_by_it(render, tmp_path):
     assert r.returncode == 0, r.stderr
     assert "execute" in r.stdout and "claude-sonnet-5" in r.stdout and "2.0 (1/1 pass)" in r.stdout
     assert "confidence: low" in r.stdout
+
+
+@pytest.mark.skipif(shutil.which("tmux") is None, reason="tmux not installed")
+def test_tmux_runner_starts_a_window_with_log_and_stops_it(render, tmp_path):
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    pol = out / "docs/process/model-policy.json"
+    data = json.loads(pol.read_text())
+    fake = out.parent / "fake-interactive.sh"
+    fake.write_text('#!/bin/sh\necho "hello from $PROCESS_WORKER phase=$PROCESS_PHASE"\necho "prompt-has-issue: $3"\nsleep 60\n')
+    fake.chmod(0o755)
+    session = f"t{os.getpid()}"
+    data.update({"command": f"{fake} --model {{model}} {{prompt}}", "runner": "tmux", "tmux_session": session})
+    pol.write_text(json.dumps(data))
+    try:
+        r = _dispatch(out, "start", "--issue", "11", "--phase", "execute", "--tier", "2", "--branch", "w11")
+        assert r.returncode == 0, r.stderr
+        assert f"tmux {session}:w11" in r.stdout
+        deadline = time.time() + 10
+        text = ""
+        while time.time() < deadline and "prompt-has-issue" not in text:
+            time.sleep(0.2)
+            text = _dispatch(out, "log", "w11").stdout
+        assert "hello from w11 phase=execute" in text and "issue #11" in text
+        t = json.loads(subprocess.run([sys.executable, str(out / "scripts/process/tower.py"), "--json"],
+                                      cwd=out, capture_output=True, text=True).stdout)
+        s = next(x for x in t["sessions"] if x["branch"] == "w11")
+        assert s["alive"] and s["where"] == f"{session}:w11" and s["last_output"]
+        r = _dispatch(out, "stop", "w11")
+        assert r.returncode == 0 and "stopped w11" in r.stdout
+        assert subprocess.run(["tmux", "list-panes", "-t", f"{session}:w11"], capture_output=True).returncode != 0
+    finally:
+        subprocess.run(["tmux", "kill-session", "-t", session], capture_output=True)

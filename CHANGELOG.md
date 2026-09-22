@@ -896,6 +896,24 @@ Konfidenz, die Zahl, an der die Policy gemessen wird. `/steward` teilt
 über dispatch zu und ändert Modelle nur über die Policy-Datei)
 ausgeliefert, `v2.18.0`.
 
+SP75 (sichtbare Worker und ein Frageprotokoll — Sebs Erfahrung mit dem
+ersten Steward: „ich sehe zu wenig, Fragen kommen spät und ohne Kontext".
+Zwei Entwurfslücken, geschlossen: **Worker als tmux-Fenster** (Policy
+`runner: tmux`, `tmux_session`; `dispatch.py` öffnet je Worker ein
+Fenster einer tmux-Session — interaktiv, vom Menschen zu öffnen, Ausgabe
+per pipe-pane ins Log, Start als Shell → Pipe → send-keys, damit die
+erste Sekunde nicht verloren geht und die TUI ihr tty behält;
+`dispatch.py log <branch>`; der Tower führt `sessions` mit letzter
+Ausgabezeile und Alter je Worker), **Frageprotokoll** (eine Frage an den
+Owner ist eine Zeile im Plan: `DECISION NEEDED <Datum> <Worker>: <Frage>
+— options: …; recommendation: …` plus `blocked`; der Tower führt
+`questions` und meldet sie als hohen Befund; die Antwort wird als
+`DECISION`-Zeile zurückgeschrieben, der Worker liest den Plan; Notizen
+bis 1000 Zeichen) und **Steward wacht statt zu ticken** (Dateiwache auf
+Meldungen und Pläne, Takt nur als Rückfallebene; Fragen werden
+vollständig und sofort durchgereicht — Issue, Branch, Frage, Optionen,
+Empfehlung, Lage), `v2.19.0`.
+
 ## Sub-Projekt-Tabelle (SP1–SP24)
 
 Die Tabelle wurde bis SP24 gepflegt; ab SP25 trägt das Narrativ oben die
