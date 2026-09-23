@@ -26,6 +26,16 @@ test-first order stands, commits stay atomic, and the Tier-2+ **merge review
 remains the independent, attested review** (`/review`) — a per-task reviewer
 loop reduces defects but does not replace the attestation.
 
+**Offload reading, never the change.** A subagent has its own context and
+returns a summary — worth it for work that reads much and returns little:
+a search across the codebase, a diagnosis distilled from a long test run,
+a library's docs checked against a call. It is not worth it for the change
+itself: the subagent knows neither the kernel nor the plan's `## Decisions`,
+and you sign the commit you did not watch being made (mandatory rule 1).
+So: research and diagnosis may go to a subagent; edits, tests and commits
+stay in this session — except under the `[P]` protocol below, which gives
+each subagent its file packet and keeps every commit here.
+
 **[P] groups run as "parallel edit, serial commit".** When `tasks.md` marks
 tasks `[P]`, dispatch them as concurrent subagents in the SAME worktree —
 three invariants make that safe:

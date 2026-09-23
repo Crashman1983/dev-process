@@ -975,6 +975,15 @@ eine Harness die Sitzung benennen kann — Claude Code: `--remote-control={branc
 macht jeden Worker in der Claude-App sichtbar (die `=`-Form, sonst frisst
 der optionale Name des Flags den Prompt), `v2.20.0`.
 
+**Subagenten im Worker: Lesen auslagern, nie die Änderung.** `/execute`
+sagt jetzt, wofür ein Worker Subagenten nutzt — Suche über die Codebasis,
+Diagnose aus langen Testläufen, Doku-Abgleich: viel lesen, wenig
+zurückgeben — und wofür nicht: die Änderung selbst, weil der Subagent
+weder Kernel noch Ledger kennt und der Worker einen Commit signiert, den
+er nicht gesehen hat (Regel 1); Ausnahme bleibt das `[P]`-Protokoll.
+Dazu `rehydrate.py --install` behält die Escapes der Settings-Datei bei,
+`v2.20.1`.
+
 ## Sub-Projekt-Tabelle (SP1–SP24)
 
 Die Tabelle wurde bis SP24 gepflegt; ab SP25 trägt das Narrativ oben die
