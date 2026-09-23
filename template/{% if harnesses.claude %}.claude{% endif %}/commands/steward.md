@@ -7,14 +7,17 @@ reviewer keep those (`docs/process/verification-independence.md`).
 
 ## Loop
 
-Wake on a tick the owner sets (`/loop 30m /steward` in the steward's
-session) or on the owner's message; there is no file watch in this
-process — nothing wakes you when a worker writes `blocked` or a
-`DECISION NEEDED` line, so the tick is the only guarantee a question is
-seen within the interval. If your harness offers a watch on the reports
-file (the `reports.jsonl` inside the `process-tower` folder of the git
-common dir) or on the workers' plans, use it as an extra wake, never as
-the only one. On each wake:
+Two wakes, both armed by you. The **watch**: on every wake, put a
+monitor on the reports file (the `reports.jsonl` inside the
+`process-tower` folder of the git common dir — Claude Code: the `Monitor`
+tool on `tail -f` of that file) so a `planned`, `pushed`, `blocked`,
+`review-pass` or `done` line wakes you the moment it is written, not at
+the next tick. A monitor lives at most thirty minutes: re-arm it on every
+wake, first thing. The **tick**: `/loop 30m /steward`, the owner sets it
+once; it catches what no file shows (a stale worker, a train ready to
+depart, a monitor that expired). Neither replaces the other: a
+`DECISION NEEDED` without a `blocked` report is seen only by the tick's
+tower run. Owner messages are a third wake. On each wake:
 
 1. `uv run scripts/process/tower.py --json` — the situation table. Read
    it, not the sessions. `docs/process/tower.md` explains every field.
@@ -69,8 +72,12 @@ the only one. On each wake:
    either way `dispatch.py log` shows what it shows; the policy's
    `command` runs on this machine, so a change to it is reviewed like CI
    configuration),
-   then `--phase execute` after `planned`, then `--phase review` after
-   `pushed` — a fresh reviewing session, never the building one. The
+   then `--phase execute` the moment `planned` arrives, then `--phase
+   review` the moment `pushed` arrives — a fresh reviewing session, never
+   the building one. A phase change waits for nobody: the owner is told,
+   not asked (a worker parked on `planned` for an hour because you were
+   busy relaying another worker's question is the failure this rule
+   exists for). The
    dispatcher refuses when the policy's `max_workers` are live or a lane
    is held. Stop only sessions you started (`dispatch.py stop <branch>`),
    and only after the plan and its decisions are committed.

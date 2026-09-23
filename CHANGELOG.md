@@ -984,6 +984,23 @@ er nicht gesehen hat (Regel 1); Ausnahme bleibt das `[P]`-Protokoll.
 Dazu `rehydrate.py --install` behält die Escapes der Settings-Datei bei,
 `v2.20.1`.
 
+**Aus dem ersten Steward-Tag.** Zwei Befunde des Owners, beide aus dem
+Betrieb: (1) Der Steward ließ einen Worker eine Stunde auf `planned`
+warten, weil er nur alle 30 Minuten tickte und gerade eine Frage
+durchreichte. Die Anleitung kannte keine Wache — Claude Code hat aber
+eine: `Monitor` auf `tail -f` der Reports-Datei weckt beim nächsten
+`planned`/`pushed`/`blocked`/`review-pass`/`done` sofort; sie lebt maximal
+30 Minuten und wird bei jedem Wecken neu gestellt, der `/loop`-Takt bleibt
+Rückfallebene (ein `DECISION NEEDED` ohne `blocked` sieht nur der Tower).
+Phasenwechsel warten auf niemanden: nach `planned` sofort `execute`, nach
+`pushed` sofort `review`; der Owner wird informiert, nicht gefragt.
+(2) Ein Gate war im Zug rot, im Root nicht reproduzierbar: der
+Staging-Worktree lag unter `.git/process-train/`, und ein Dateilister,
+der jeden Pfad mit `.git`-Segment überspringt, sah einen leeren Baum.
+Der Staging-Worktree liegt jetzt als Geschwister neben dem Root
+(`<root>-train`, wie die Dispatch-Worktrees), nur Logs bleiben im git
+common dir, `v2.21.0`.
+
 ## Sub-Projekt-Tabelle (SP1–SP24)
 
 Die Tabelle wurde bis SP24 gepflegt; ab SP25 trägt das Narrativ oben die

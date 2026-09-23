@@ -231,13 +231,23 @@ def _sh(cwd: Path, cmd: str, log) -> bool:
     return r.returncode == 0
 
 
-def _train_worktree(root: Path) -> Path:
+def _train_dir(root: Path) -> Path:
+    """Logs and bookkeeping: inside the git common dir, never committed."""
     common = Path(_out(root, "rev-parse", "--git-common-dir"))
     if not common.is_absolute():
         common = root / common
     d = common / TRAIN_DIR
     d.mkdir(parents=True, exist_ok=True)
-    return d / "worktree"
+    return d
+
+
+def _train_worktree(root: Path) -> Path:
+    """The staging worktree is a sibling of the root (`<root>-train`), like
+    dispatch's worktrees — NOT under `.git/`: a suite run there met tools
+    that skip every path with a `.git` segment and saw an empty tree
+    (observed downstream: a file lister that filters `.git`, a gate red
+    for a reason nobody could reproduce in the root)."""
+    return root.parent / f"{root.name}-train"
 
 
 def build_train(root: Path, base: str, aboard: list[str], stamp: str, log) -> tuple[Path, str, list[str], list[str]]:
@@ -286,8 +296,7 @@ def run(root: Path, *, suite: str | None, deploy: str | None, push: bool, min_ca
         print(f"train: holding — {p['why']} (--force departs now)")
         return 0
     stamp = _dt.datetime.now().strftime("%Y%m%d-%H%M")
-    logfile = _train_worktree(root).parent / f"{stamp}.log"
-    logfile.parent.mkdir(parents=True, exist_ok=True)
+    logfile = _train_dir(root) / f"{stamp}.log"
     print(f"train {stamp}: departing with {', '.join(aboard)} ({p['why']})")
     if dry_run:
         print("train: dry run — no merge, no suite")
