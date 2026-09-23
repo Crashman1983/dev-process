@@ -176,7 +176,9 @@ def test_rejected_push_leaves_local_main_untouched_and_keeps_the_train(render, t
     assert _git(out, "rev-parse", "main").stdout == head  # local main untouched
     branches = _git(out, "branch", "--list", "--format=%(refname:short)").stdout.split()
     assert "alpha" in branches and any(b.startswith("train/") for b in branches)
-    assert not (out / ".git/process-train/worktree").exists()
+    assert not (out.parent / f"{out.name}-train").exists()
+    assert not (out / ".git/process-train/worktree").exists()  # never under .git: tools skip that segment
+    assert list((out / ".git/process-train").glob("*.log"))
 
 
 def test_a_same_named_old_pass_on_main_does_not_clear_a_new_plan(render, tmp_path):

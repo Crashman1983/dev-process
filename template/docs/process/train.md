@@ -38,8 +38,10 @@ the test lanes are free where the project has a lane script (see `tower.md`, lan
 ## The run
 
 1. A staging branch `train/<stamp>` from the integration branch, in its own
-   worktree under the clone's git common dir — the root worktree is not
-   touched until the end.
+   worktree next to the root (`<root>-train`, a sibling like dispatch's
+   worktrees, never under `.git/` — tools that skip every path with a
+   `.git` segment would see an empty tree there) — the root worktree is
+   not touched until the end.
 2. Candidates merged in order (`--no-ff`); a conflict drops that candidate
    and continues.
 3. The process gates, then the full suite, run **once** on the combined
@@ -59,7 +61,7 @@ the test lanes are free where the project has a lane script (see `tower.md`, lan
    says so.
 
 Run from the root worktree on the integration branch with a clean tree.
-The log lives next to the staging worktree (`<stamp>.log`).
+The log lives in the clone's git common dir (`process-train/<stamp>.log`).
 
 ## What the train does not do
 
