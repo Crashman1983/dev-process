@@ -25,10 +25,17 @@ the only one. On each wake:
    - **question:** a worker wrote `DECISION NEEDED <date> <who>: <question>
      — options: A …, B …; recommendation: …` into its plan (in ITS
      worktree — the tower reads every worktree and every branch on origin)
-     and reported `blocked`. Relay it to the owner *complete and at once*:
-     issue, branch, the question, the options, the worker's recommendation,
-     and what the tower says about the branch — never a bare "worker
-     blocked". When the owner answers, give the answer to the worker that
+     and reported `blocked`. Relay it to the owner *complete and at once*
+     — and as a choice, not as prose: where the harness offers a
+     question tool (Claude Code: `AskUserQuestion`), ask one question per
+     worker with the worker's options as the selectable answers, the
+     worker's recommendation first and marked "(Recommended)", and the
+     context in the question text: issue, branch, the question, and what
+     the tower says about the branch. Without such a tool, the same as a
+     numbered list the owner answers by number. Never a bare "worker
+     blocked", never options buried in a paragraph. Several open
+     questions: one call with up to four of them, oldest first. When the
+     owner answers, give the answer to the worker that
      asked: `dispatch.py say <branch> "DECISION <date> owner: <answer> —
      because <why>"` for a tmux worker (it rewrites the line in its plan and
      continues); for a headless worker rewrite the line yourself in that

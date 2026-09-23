@@ -949,6 +949,15 @@ auf dem Steward-Host — wie CI-Konfiguration zu prüfen) in `tower.md` und
 der Policy selbst; Hinweis auf Berechtigungen (`-p` braucht eine
 Freigabe, interaktiv ggf. Trust-Dialog), `v2.19.1`.
 
+**Fragen als Menü.** Der Steward reicht eine Worker-Frage nicht mehr als
+Absatz durch, sondern als Auswahl: wo die Harness ein Frage-Werkzeug hat
+(Claude Code: `AskUserQuestion`), eine Frage je Worker mit den Optionen
+des Workers als anklickbare Antworten, die Empfehlung zuerst und als
+„(Recommended)" markiert, Issue/Branch/Lage im Fragetext; ohne Werkzeug
+eine nummerierte Liste; bis zu vier offene Fragen in einem Aufruf,
+älteste zuerst. Funktioniert in der App und per Remote Control,
+`v2.19.2`.
+
 ## Sub-Projekt-Tabelle (SP1–SP24)
 
 Die Tabelle wurde bis SP24 gepflegt; ab SP25 trägt das Narrativ oben die
