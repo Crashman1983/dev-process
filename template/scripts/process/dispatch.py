@@ -119,8 +119,16 @@ def max_workers(policy: dict) -> int:
     return n if n > 0 else 4
 
 
-def build_argv(policy: dict, model: str, prompt: str) -> list[str]:
-    return [a.replace("{model}", model).replace("{prompt}", prompt) for a in shlex.split(policy["command"])]
+def build_argv(policy: dict, model: str, prompt: str, branch: str = "", issue: int | None = None) -> list[str]:
+    # {branch}/{issue} name the session for a harness that labels sessions
+    # (e.g. `--remote-control={branch}` — the `=` form, or the flag eats the prompt)
+    subs = {"{model}": model, "{prompt}": prompt, "{branch}": branch, "{issue}": str(issue or "")}
+    out = []
+    for a in shlex.split(policy["command"]):
+        for k, v in subs.items():
+            a = a.replace(k, v)
+        out.append(a)
+    return out
 
 
 # --- branches and worktrees --------------------------------------------------------
@@ -355,7 +363,7 @@ def start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str |
               file=sys.stderr)
         return 3
     prompt = prompt_for(phase, issue, tier, branch, model)
-    argv = build_argv(policy, model, prompt)
+    argv = build_argv(policy, model, prompt, branch, issue)
     runner = str(policy.get("runner") or "detached")
     if dry_run:
         shown = [a if a != prompt else f"<prompt {len(prompt)} chars>" for a in argv]

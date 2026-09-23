@@ -958,6 +958,23 @@ eine nummerierte Liste; bis zu vier offene Fragen in einem Aufruf,
 älteste zuerst. Funktioniert in der App und per Remote Control,
 `v2.19.2`.
 
+**Re-Hydrierung als Mechanismus, nicht als Satz.** Bisher stand nur im
+Kernel „nach einer Kompaktierung lies Kernel, Regeln und Ledger neu" —
+ein Satz, der die Kompaktierung überleben muss, vor der er warnt; dem
+Owner fiel auf, dass Worker das nicht tun. Neu `scripts/process/rehydrate.py`:
+druckt, was `/prime` liest, und nichts mehr (Kernel-Block, Pflichtregeln,
+aktive Pläne mit Tier/Issue, DECISION-Ledger, offene DECISION-NEEDED-Fragen
+mit dem Hinweis „nicht selbst entscheiden", nächste Aufgabe, State-File,
+Journal-Shard) — als Claude-Code-`SessionStart`-Hook für `compact|resume`.
+`rehydrate.py --install` trägt den Hook idempotent in `.claude/settings.json`
+ein, ohne den Rest der Datei anzufassen (sie bleibt Projekteigentum);
+`--check` sagt, ob er da ist. `/prime` bleibt für die Fälle, die der Hook
+nicht abdeckt; `start-here.md` beschreibt den Mechanismus. Dazu ersetzt
+`dispatch.py` im `command` der Policy auch `{branch}` und `{issue}`, damit
+eine Harness die Sitzung benennen kann — Claude Code: `--remote-control={branch}`
+macht jeden Worker in der Claude-App sichtbar (die `=`-Form, sonst frisst
+der optionale Name des Flags den Prompt), `v2.20.0`.
+
 ## Sub-Projekt-Tabelle (SP1–SP24)
 
 Die Tabelle wurde bis SP24 gepflegt; ab SP25 trägt das Narrativ oben die

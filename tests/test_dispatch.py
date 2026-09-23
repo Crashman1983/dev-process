@@ -127,9 +127,9 @@ def test_prompt_inside_a_token_and_env_stripped(render, tmp_path):
     pol = out / "docs/process/model-policy.json"
     data = json.loads(pol.read_text())
     fake = out.parent / "fake.sh"
-    fake.write_text(f'#!/bin/sh\nprintf "%s\\n" "$1" > {marker}\necho "CC=${{CLAUDECODE:-unset}} CCE=${{CLAUDE_CODE_ENTRY:-unset}}" >> {marker}\nsleep 30\n')
+    fake.write_text(f'#!/bin/sh\nprintf "%s\\n" "$2" > {marker}\necho "CC=${{CLAUDECODE:-unset}} CCE=${{CLAUDE_CODE_ENTRY:-unset}} $1" >> {marker}\nsleep 30\n')
     fake.chmod(0o755)
-    data["command"] = f"{fake} --prompt={{prompt}}"  # {prompt} inside a token, not alone
+    data["command"] = f"{fake} --name={{branch}}-{{issue}} --prompt={{prompt}}"  # placeholders inside tokens
     pol.write_text(json.dumps(data))
     env = dict(os.environ, CLAUDECODE="1", CLAUDE_CODE_ENTRY="steward")
     r = _dispatch(out, "start", "--issue", "2", "--phase", "plan", "--branch", "b2", env=env)
@@ -139,7 +139,7 @@ def test_prompt_inside_a_token_and_env_stripped(render, tmp_path):
         time.sleep(0.1)
     time.sleep(0.3)
     seen = marker.read_text()
-    assert seen.startswith("--prompt=/plan issue #2") and "CC=unset CCE=unset" in seen
+    assert seen.startswith("--prompt=/plan issue #2") and "CC=unset CCE=unset --name=b2-2" in seen
     _dispatch(out, "stop", "b2", "--force")
 
 
