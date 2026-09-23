@@ -98,9 +98,10 @@ def _has_hook(settings: dict) -> bool:
 def install(root: Path) -> int:
     p = root / SETTINGS
     settings: dict = {}
+    raw = _read(p) if p.is_file() else ""
     if p.is_file():
         try:
-            settings = json.loads(_read(p))
+            settings = json.loads(raw)
         except ValueError:
             print(f"rehydrate: {SETTINGS} is not valid JSON — fix it, then --install again", file=sys.stderr)
             return 1
@@ -109,7 +110,8 @@ def install(root: Path) -> int:
         return 0
     settings.setdefault("hooks", {}).setdefault("SessionStart", []).append(_hook_entry())
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(settings, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    # keep the file's own escaping so the diff is the hook and nothing else
+    p.write_text(json.dumps(settings, indent=2, ensure_ascii="\\u" in raw) + "\n", encoding="utf-8")
     print(f"rehydrate: SessionStart hook ({MATCHER}) added to {SETTINGS}")
     return 0
 
