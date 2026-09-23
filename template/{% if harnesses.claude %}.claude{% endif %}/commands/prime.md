@@ -1,6 +1,10 @@
 # /prime
 
-Restore working context after a break — cheaply. Re-read the kernel
+Restore working context after a break — cheaply. (After a compaction or a
+resume the `SessionStart` hook `scripts/process/rehydrate.py` already
+printed the kernel, the rules and the ledger into this session —
+`rehydrate.py --check` says whether it is installed; `--install` adds it.
+/prime is for the cases the hook does not cover.) Re-read the kernel
 (`docs/process/kernel.md`) and `docs/process/mandatory-rules.md` first — a break
 or compaction may have dropped the always-on rules from context. Then run
 `uv run scripts/process/process_context.py` (add `--cost` when the question is

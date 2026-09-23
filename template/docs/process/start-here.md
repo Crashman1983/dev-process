@@ -267,11 +267,19 @@ loaded:
 - **Phases re-hydrate.** `execute` and `review` re-read the kernel and the plan
   at phase entry (`workflow.md`) — the long phases are exactly where compaction
   strikes, so they do not trust warm memory.
-- **The harness helps, unevenly.** Claude Code re-injects the root anchor after
-  compaction automatically; a `PreCompact`/`SessionStart` hook can re-read the
-  kernel explicitly. AGENTS.md-style harnesses vary — there, the self-restoring
-  directive and `/prime` on resume are the safety net. Configure a
-  compaction/session hook where your harness supports one.
+- **The harness re-hydrates mechanically.** A directive that has to survive
+  the compaction it warns about is not a mechanism; a hook is.
+  `scripts/process/rehydrate.py` prints what `/prime` reads (the kernel
+  block, the mandatory rules, the branch's active plans with their DECISION
+  ledger and open DECISION NEEDED questions, the next task) and nothing
+  more; `rehydrate.py --install` registers it once as a Claude Code
+  `SessionStart` hook for `compact|resume` in the project's Claude settings
+  file (idempotent, the rest of the file stays the project's), `--check` tells
+  whether it is registered. After every compaction the session gets the
+  rules and the ledger back without remembering to ask. AGENTS.md-style
+  harnesses vary — there, the self-restoring directive and `/prime` on
+  resume are the safety net; wire `rehydrate.py` into whatever
+  compaction/session hook the harness offers.
 
 ## Definition of ready (project onboarding)
 
