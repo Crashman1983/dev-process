@@ -307,6 +307,38 @@ def _tmux_ensure_session(name: str) -> None:
             raise SystemExit(f"dispatch: cannot create tmux session {name!r}: {r.stderr.strip()}")
 
 
+def _tmux_start(session: str, window: str, cwd: Path, argv: list[str], extra: dict[str, str],
+                log: Path) -> tuple[str | None, str]:
+    """Start argv in a new window of tmux `session` (a real terminal); returns
+    (window_id, "") or (None, why). The pane keeps its process until it exits
+    (remain-on-exit), and its output is piped to `log`."""
+    _tmux_ensure_session(session)
+    # a non-interactive sh: exact quoting, no aliases/rc/history; the sleep
+    # lets the log pipe attach before the first line; exec keeps the pane
+    # process = the worker, so pane_dead is the truth about liveness
+    unset = [f"-u {shlex.quote(k)}" for k in os.environ if k.startswith(STRIP_ENV_PREFIXES)]
+    inner = "sleep 1; exec env " + " ".join(unset) + " \"$@\""
+    shell_cmd = shlex.join(["sh", "-c", inner, "_", *argv])
+    env_args = [x for k, v in extra.items() for x in ("-e", f"{k}={v}")]
+    r = _tmux("new-window", "-d", "-P", "-F", "#{window_id}", "-t", session, "-n", window, "-c", str(cwd),
+              *env_args, shell_cmd)
+    if r.returncode != 0:
+        return None, f"tmux new-window failed: {r.stderr.strip()}"
+    window_id = r.stdout.strip()
+    _tmux("set-option", "-t", window_id, "remain-on-exit", "on")
+    if _tmux("pipe-pane", "-t", window_id, "-o", f"cat >> {shlex.quote(str(log))}").returncode != 0:
+        print("dispatch: warning — log pipe could not be attached; `log` will read the live screen only",
+              file=sys.stderr)
+    return window_id, ""
+
+
+def _pane_exit(window_id: str) -> str:
+    """The exit status of a dead pane ('' while it runs or when unknown)."""
+    r = _tmux("display-message", "-p", "-t", window_id, "#{pane_dead}:#{pane_dead_status}")
+    dead, _, status = r.stdout.strip().partition(":")
+    return status if r.returncode == 0 and dead == "1" else ""
+
+
 def _pane_state(window_id: str) -> str:
     """'live' | 'dead' (pane exited, remain-on-exit) | 'gone' | 'unknown'."""
     r = _tmux("display-message", "-p", "-t", window_id, "#{pane_dead}")
@@ -344,7 +376,7 @@ def last_output(rec: dict, lines: int = 1) -> tuple[str, int | None]:
     codes are not words), else the log tail; and minutes since it wrote."""
     log = Path(rec.get("log") or "")
     mins = int((time.time() - log.stat().st_mtime) // 60) if log.is_file() else None
-    if rec.get("tmux_window") and rec.get("state") in (None, "live", "dead"):
+    if rec.get("tmux_window") and rec.get("state") in (None, "live", "dead", "remote"):
         r = _tmux("capture-pane", "-p", "-t", rec["tmux_window"], "-S", f"-{max(lines, 1) + 5}")
         if r.returncode == 0:
             text = [ln.rstrip() for ln in r.stdout.splitlines()
@@ -436,6 +468,28 @@ def start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str |
             return 3
         extra = {"PROCESS_WORKER": branch, "PROCESS_PHASE": phase, "PROCESS_MODEL": model, "PROCESS_ISSUE": str(issue),
              "PROCESS_PHASE_BASE": phase_base(root, branch)}
+        rec = {"branch": branch, "issue": issue, "phase": phase, "tier": tier, "model": model, "remote": True,
+               "started": int(time.time()), "ts": _dt.datetime.now().isoformat(timespec="seconds"),
+               "runner": runner}
+        if runner == "tmux":
+            # some hand-over CLIs refuse to start without a terminal (observed
+            # downstream: a cloud-session start exited at once when detached) —
+            # the tmux window is that terminal, and stays inspectable with log/say
+            session = str(policy.get("tmux_session") or "workers")
+            window = ("remote-" + branch.replace("/", "-").replace(".", "-"))[:40]
+            log = _records_dir(root) / f"{branch.replace('/', '__')}-{phase}-{_dt.datetime.now():%Y%m%d-%H%M%S}.log"
+            window_id, why = _tmux_start(session, window, root, argv, extra, log)
+            if window_id is None:
+                print(f"dispatch: remote start failed: {why}", file=sys.stderr)
+                return 1
+            rec.update({"tmux_window": window_id, "tmux_session": session, "tmux_name": window,
+                        "log": str(log)})
+            _record_path(root, branch).write_text(json.dumps(rec, indent=2), encoding="utf-8")
+            _remember_issue(root, issue, branch)
+            print(f"dispatch: handing {phase} for #{issue} on {branch} to another host with {model} from "
+                  f"tmux {session}:{window} ({window_id}) — watch it with `dispatch.py log {branch}`; "
+                  f"reports via origin (`tower.py --remote`)")
+            return 0
         try:
             r = subprocess.run(argv, cwd=root, capture_output=True, text=True, timeout=300, env=_worker_env(extra))
         except (OSError, subprocess.TimeoutExpired) as exc:
@@ -445,9 +499,7 @@ def start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str |
             print(f"dispatch: remote start command exited {r.returncode}: {(r.stderr or r.stdout).strip()[-400:]}",
                   file=sys.stderr)
             return 1
-        rec = {"branch": branch, "issue": issue, "phase": phase, "tier": tier, "model": model, "remote": True,
-               "started": int(time.time()), "ts": _dt.datetime.now().isoformat(timespec="seconds"),
-               "runner": runner, "handover": r.stdout.strip()[-400:]}
+        rec["handover"] = r.stdout.strip()[-400:]
         _record_path(root, branch).write_text(json.dumps(rec, indent=2), encoding="utf-8")
         _remember_issue(root, issue, branch)
         print(f"dispatch: handed {phase} for #{issue} on {branch} to another host with {model} — "
@@ -462,25 +514,11 @@ def start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str |
            "ts": _dt.datetime.now().isoformat(timespec="seconds"), "runner": runner}
     if runner == "tmux":
         session = str(policy.get("tmux_session") or "workers")
-        _tmux_ensure_session(session)
         window = branch.replace("/", "-").replace(".", "-")[:40]
-        # a non-interactive sh: exact quoting, no aliases/rc/history; the sleep
-        # lets the log pipe attach before the first line; exec keeps the pane
-        # process = the worker, so pane_dead is the truth about liveness
-        unset = [f"-u {shlex.quote(k)}" for k in os.environ if k.startswith(STRIP_ENV_PREFIXES)]
-        inner = "sleep 1; exec env " + " ".join(unset) + " \"$@\""
-        shell_cmd = shlex.join(["sh", "-c", inner, "_", *argv])
-        env_args = [x for k, v in extra.items() for x in ("-e", f"{k}={v}")]
-        r = _tmux("new-window", "-d", "-P", "-F", "#{window_id}", "-t", session, "-n", window, "-c", str(wt),
-                  *env_args, shell_cmd)
-        if r.returncode != 0:
-            print(f"dispatch: tmux new-window failed: {r.stderr.strip()}", file=sys.stderr)
+        window_id, why = _tmux_start(session, window, wt, argv, extra, log)
+        if window_id is None:
+            print(f"dispatch: {why}", file=sys.stderr)
             return 1
-        window_id = r.stdout.strip()
-        _tmux("set-option", "-t", window_id, "remain-on-exit", "on")
-        if _tmux("pipe-pane", "-t", window_id, "-o", f"cat >> {shlex.quote(str(log))}").returncode != 0:
-            print("dispatch: warning — log pipe could not be attached; `log` will read the live screen only",
-                  file=sys.stderr)
         rec.update({"tmux_window": window_id, "tmux_session": session, "tmux_name": window})
         where = f"tmux {session}:{window} ({window_id})"
     else:
@@ -508,6 +546,16 @@ def list_sessions(root: Path) -> int:
     for r in recs:
         mins = int((now - int(r.get("started") or now)) // 60)
         last, since = last_output(r)
+        if r.get("remote") and r.get("tmux_window"):
+            # the hand-over ran in a terminal: a dead window with a non-zero exit
+            # means the other host never got the work — say so, never "remote"
+            pane, code = _pane_state(r["tmux_window"]), _pane_exit(r["tmux_window"])
+            failed = pane == "dead" and code not in ("", "0")
+            print(f"- {r['branch']}: {r['phase']} #{r.get('issue')} {r.get('model')} another host, hand-over in "
+                  f"{r.get('tmux_session')}:{r.get('tmux_name')} "
+                  + (f"HAND-OVER FAILED (exit {code})" if failed else f"REMOTE (hand-over window {pane})")
+                  + (f" · {since} min ago: {last[-120:]}" if last else ""))
+            continue
         where = ("another host" if r.get("remote") else
                  f"{r.get('tmux_session')}:{r.get('tmux_name')}" if r.get("tmux_window") else f"pid {r.get('pid')}")
         print(f"- {r['branch']}: {r['phase']} #{r.get('issue')} {r.get('model')} {where} "
@@ -545,8 +593,9 @@ def say(root: Path, branch: str, text: str) -> int:
         print(f"dispatch: {branch} is not a tmux worker started here — nothing to type into", file=sys.stderr)
         return 2
     _p, rec = found
-    if rec["state"] != "live":
-        print(f"dispatch: {branch} is {rec['state']} — nobody is listening", file=sys.stderr)
+    state = _pane_state(rec["tmux_window"]) if rec["state"] == "remote" else rec["state"]
+    if state != "live":
+        print(f"dispatch: {branch} is {state} — nobody is listening", file=sys.stderr)
         return 3
     r = _tmux("send-keys", "-t", rec["tmux_window"], "-l", text)
     r2 = _tmux("send-keys", "-t", rec["tmux_window"], "Enter")

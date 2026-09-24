@@ -1073,6 +1073,14 @@ statt zu scheitern, `finish.py` nennt `publish_and_prune` nur für Änderungen
 mit Spec. Dazu: README neu und schlank mit Verweis auf den Überblick, der jetzt
 auch englisch vorliegt (`docs/OVERVIEW.md`), `v2.24.0`.
 
+**Remote-Übergabe aus einem Terminal.** Im Referenzprojekt scheiterte die
+Übergabe eines Reviews an eine Cloud-Sitzung: der Startbefehl lief nicht
+ohne Terminal, und `dispatch.py` startete ihn ohne. Eine Remote-Phase mit
+`"runner": "tmux"` startet den Übergabebefehl jetzt in einem tmux-Fenster;
+`log` und `say` erreichen dieses Fenster, und `list` zeigt
+`HAND-OVER FAILED (exit N)`, wenn es mit Fehler endete, statt die Phase als
+laufend auszugeben, `v2.25.0`.
+
 ## Sub-Projekt-Tabelle (SP1–SP24)
 
 Die Tabelle wurde bis SP24 gepflegt; ab SP25 trägt das Narrativ oben die

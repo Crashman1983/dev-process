@@ -119,7 +119,12 @@ the session elsewhere (a cloud session, an ssh command) and exits, the
 branch must already be on origin, and the worker's prompt tells it to
 report with `--sync` under its own `PROCESS_HOST`. `tower.py --remote`
 then shows its reports; `dispatch.py list` shows the record as REMOTE,
-`stop` only forgets it. Reviews are the phase to move first: they need
+`stop` only forgets it. A hand-over command that needs a terminal (some
+cloud-session starters exit at once when detached) gets one with
+`"runner": "tmux"` on the phase: dispatch runs it in a tmux window, `log`
+and `say` reach that window, and `list` shows `HAND-OVER FAILED (exit N)`
+when it died with an error — a failed hand-over never passes for a running
+remote session. Reviews are the phase to move first: they need
 git, the bundle and the process gates, nothing local; a fresh clone on
 another host is the independence `verification-independence.md` asks for;
 and they bind the most CPU here. Execution with browser suites or local

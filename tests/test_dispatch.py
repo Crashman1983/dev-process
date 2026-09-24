@@ -377,3 +377,48 @@ def test_tmux_runner_starts_a_window_with_log_and_stops_it(render, tmp_path):
         assert r.returncode == 0 and "dead" in r.stdout
     finally:
         subprocess.run(["tmux", "kill-session", "-t", session], capture_output=True)
+
+
+@pytest.mark.skipif(shutil.which("tmux") is None, reason="tmux not installed")
+def test_remote_phase_with_tmux_runner_hands_over_from_a_terminal(render, tmp_path):
+    # a hand-over CLI that refuses to start without a terminal: the tmux runner
+    # gives it one; a failed hand-over shows as FAILED, never as a running review
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    bare = tmp_path / "origin.git"
+    _git(out, "clone", "-q", "--bare", str(out), str(bare))
+    _git(out, "remote", "add", "origin", str(bare))
+    _git(out, "branch", "b6")
+    _git(out, "push", "-q", "origin", "b6")
+    cloud = out.parent / "cloud.sh"
+    cloud.write_text('#!/bin/sh\nif [ -t 0 ]; then echo "cloud session started for $1"; sleep 30; '
+                     'else echo "needs a terminal" >&2; exit 1; fi\n')
+    cloud.chmod(0o755)
+    pol = out / "docs/process/model-policy.json"
+    data = json.loads(pol.read_text())
+    session = f"t-{os.getpid()}"
+    data["tmux_session"] = session
+    data["phases"] = {"review": {"command": f"{cloud} {{branch}} {{prompt}}", "remote": True, "runner": "tmux"}}
+    pol.write_text(json.dumps(data))
+    try:
+        r = _dispatch(out, "start", "--issue", "6", "--phase", "review", "--branch", "b6")
+        assert r.returncode == 0, r.stderr
+        assert "from tmux" in r.stdout
+        for _ in range(40):
+            if "cloud session started for b6" in _dispatch(out, "log", "b6").stdout:
+                break
+            time.sleep(0.25)
+        assert "cloud session started for b6" in _dispatch(out, "log", "b6").stdout
+        assert "REMOTE (hand-over window live)" in _dispatch(out, "list").stdout
+        # a hand-over that fails shows as such
+        _dispatch(out, "stop", "b6")
+        cloud.write_text('#!/bin/sh\necho "login required"; exit 4\n')
+        r = _dispatch(out, "start", "--issue", "6", "--phase", "review", "--branch", "b6")
+        assert r.returncode == 0, r.stderr
+        for _ in range(40):
+            if "HAND-OVER FAILED (exit 4)" in _dispatch(out, "list").stdout:
+                break
+            time.sleep(0.25)
+        assert "HAND-OVER FAILED (exit 4)" in _dispatch(out, "list").stdout
+    finally:
+        subprocess.run(["tmux", "kill-session", "-t", session], capture_output=True)
