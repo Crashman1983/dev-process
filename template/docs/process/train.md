@@ -9,6 +9,13 @@ them as one batch behind **one** full suite at a good moment
     uv run scripts/process/train.py plan                       # who may board, why not, ready?
     uv run scripts/process/train.py run --suite "<full suite>" --deploy "<deploy>" --push
 
+**`--suite` is the full suite of every stack**: backend, frontend, whatever
+the repository ships. A stack the command leaves out is untested at the
+merge, and nothing downstream catches it when there is no CI. Put one make
+target behind it (e.g. `make test-merge` = frontend + backend) rather than a
+single stack's runner. Without `--suite` the train runs the process gates
+only and says so.
+
 ## Boarding — computed, never claimed
 
 A local branch boards when it is ahead of the integration branch and

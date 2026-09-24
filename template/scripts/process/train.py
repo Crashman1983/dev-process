@@ -321,6 +321,9 @@ def run(root: Path, *, suite: str | None, deploy: str | None, push: bool, min_ca
     stamp = _dt.datetime.now().strftime("%Y%m%d-%H%M")
     logfile = _train_dir(root) / f"{stamp}.log"
     print(f"train {stamp}: departing with {', '.join(aboard)} ({p['why']})")
+    if not suite:
+        print("train: no --suite — only the process gates run; the batch merges without "
+              "its full suite (docs/process/train.md)", file=sys.stderr)
     if dry_run:
         print("train: dry run — no merge, no suite")
         return 0
