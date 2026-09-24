@@ -4,7 +4,7 @@
 
 Principles, mechanics and the path to broad rollout
 
-Process template dev-process v2.25.0 · tested in a real repository in production use (reference project)
+Process template dev-process v2.26.0 · tested in a real repository in production use (reference project)
 
 Template published on GitHub: [github.com/Crashman1983/dev-process](https://github.com/Crashman1983/dev-process)
 

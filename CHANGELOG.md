@@ -1081,6 +1081,14 @@ ohne Terminal, und `dispatch.py` startete ihn ohne. Eine Remote-Phase mit
 `HAND-OVER FAILED (exit N)`, wenn es mit Fehler endete, statt die Phase als
 laufend auszugeben, `v2.25.0`.
 
+**Die Sitzung auf dem anderen Host hat einen Namen.** Im Piloten des
+Referenzprojekts gab der Cloud-Start im Terminal nur Text aus, kein JSON;
+die Sitzungskennung stand nur darin, und der Steward sah nicht, welche
+Sitzung er prüfen musste. `dispatch.py` liest sie jetzt aus der Ausgabe der
+Übergabe (Stdout oder Log des tmux-Fensters): per `phases.<phase>.handover_id`
+(Regex, Gruppe 1) oder als erste URL. `list`, `log` und der Tower zeigen sie,
+`v2.26.0`.
+
 ## Sub-Projekt-Tabelle (SP1–SP24)
 
 Die Tabelle wurde bis SP24 gepflegt; ab SP25 trägt das Narrativ oben die

@@ -1,100 +1,92 @@
 # dev-process
 
-> **English:** A development process for AI coding agents, delivered as a
-> [copier](https://copier.readthedocs.io) template for new and existing
-> repositories. Rules are checked by gates before every merge, the effort
-> scales with risk (Tier 0–3), review is always independent, and everything
-> an agent must remember lives in files. Start with the
-> **[Overview](docs/OVERVIEW.md)**; set it up with [`BOOTSTRAP.md`](BOOTSTRAP.md).
-> Everything the template installs is English. License: [Apache-2.0](LICENSE).
+> **Deutsch:** [README-DE.md](README-DE.md)
 
-Ein Entwicklungsprozess für KI-Agenten, ausgeliefert als
-[copier](https://copier.readthedocs.io)-Template für neue und bestehende
-Repositories. Er ändert nicht die Agenten, sondern ihre Arbeitsbedingungen:
-Regeln prüft ein Programm, der Aufwand folgt dem Risiko, niemand nimmt die
-eigene Arbeit ab, und das Gedächtnis liegt in Dateien statt im Kontext.
+A development process for AI coding agents, delivered as a
+[copier](https://copier.readthedocs.io) template for new and existing
+repositories. It does not change the agents; it changes the conditions they
+work under: a program checks the rules, the effort follows the risk, nobody
+signs off their own work, and memory lives in files instead of the context
+window.
 
-> **Status:** `v2.25.0` — Sub-Projekte SP1–SP75. Historie: [`CHANGELOG.md`](CHANGELOG.md).
+> **Status:** `v2.26.0` — sub-projects SP1–SP75. History (German): [`CHANGELOG.md`](CHANGELOG.md).
 
-## Einstieg
+## Where to start
 
-| Wofür | Dokument |
+| For | Document |
 |---|---|
-| Was der Prozess ist, warum er so ist, was offen ist | **[Überblick](docs/UEBERBLICK.md)** · [Overview (English)](docs/OVERVIEW.md) · [PDF](docs/Entwicklungsprozess-mit-KI-Agenten.pdf) |
-| Einrichten, headless oder im Dialog, und aktualisieren | [`BOOTSTRAP.md`](BOOTSTRAP.md) |
-| Was auf dem Rechner und in CI gebraucht wird | [`docs/SYSTEM-REQUIREMENTS.md`](docs/SYSTEM-REQUIREMENTS.md) |
-| Die Arbeit im Alltag, für Entwickler:innen und Management | [`docs/CAPABILITIES.md`](docs/CAPABILITIES.md) |
-| Abhängigkeiten dieses Repositorys (erzeugt, auch als CycloneDX) | [`docs/SBOM.md`](docs/SBOM.md) |
-| Entscheidungen und Entwürfe | [`docs/design/`](docs/design/) · [`docs/analysis/`](docs/analysis/) |
+| What the process is, why it works this way, what is still open | **[Overview](docs/OVERVIEW.md)** · [Überblick (German)](docs/UEBERBLICK.md) · [PDF (German)](docs/Entwicklungsprozess-mit-KI-Agenten.pdf) |
+| Setting it up, headless or in a dialogue, and updating it | [`BOOTSTRAP.md`](BOOTSTRAP.md) |
+| What the machine and CI need (German) | [`docs/SYSTEM-REQUIREMENTS.md`](docs/SYSTEM-REQUIREMENTS.md) |
+| Day-to-day work for developers and management (German) | [`docs/CAPABILITIES.md`](docs/CAPABILITIES.md) |
+| This repository's dependencies (generated, also as CycloneDX) | [`docs/SBOM.md`](docs/SBOM.md) · [`docs/sbom.cdx.json`](docs/sbom.cdx.json) |
+| Decisions and designs | [`docs/design/`](docs/design/) · [`docs/analysis/`](docs/analysis/) |
 
-## Das Wichtigste
+## The essentials
 
-- **Gates statt Erinnerung.** Vor jedem Merge laufen im Standard-Setup 16
-  automatische Prüfungen, mit dem Compliance-Paket 18. Was nicht besteht,
-  wird nicht gemergt.
-- **Risiko bestimmt den Aufwand.** Tier 0 bis 3 legen fest, ob eine Änderung
-  direkt gemergt wird oder Plan, unabhängige Prüfung und bei Tier 3 eine
-  Widerlegungsprüfung braucht. Maßgeblich ist der Umfang, nicht die
-  Diff-Größe.
-- **Unabhängige Prüfung.** Wer baut, nimmt nicht ab. Das Urteil steht als
-  Attest im Journal und gilt nur für genau den geprüften Code.
-- **Gedächtnis in Dateien.** Regelkern, Pläne mit Entscheidungen und Journal
-  liegen im Repository und werden nach jeder Kürzung des Kontexts wieder
-  eingespielt.
-- **Spezifikation mit [Spec Kit](https://github.com/github/spec-kit).** Ab
-  Tier 2 führt der Weg über Spec Kit, gepinnt und mit eigenen Overrides.
-- **Parallele Agenten, optional.** Ein Steward teilt Issues zu, startet je
-  Phase eine Agentensitzung mit dem Modell aus der Modellpolitik, legt dem
-  Owner Fragen als Auswahl vor und merget fertige Branches gebündelt.
-- **Drei Harnesses.** Claude Code, GitHub Copilot oder eine neutrale
-  `AGENTS.md`; Methodik und Gates sind in allen dieselben.
+- **Gates instead of memory.** Before every merge, the standard setup runs 16
+  automatic checks, 18 with the compliance pack. What fails does not merge.
+- **Risk sets the effort.** Tier 0 to 3 decide whether a change merges
+  directly or needs a plan, an independent review and, at Tier 3, a
+  refutation review. Scope decides the tier, not diff size.
+- **Independent review.** Whoever builds does not sign off. The verdict is an
+  attestation in the journal and holds only for exactly the reviewed code.
+- **Memory in files.** Rule kernel, plans with their decisions and the journal
+  live in the repository and are re-injected after every context compaction.
+- **Specification with [Spec Kit](https://github.com/github/spec-kit).** From
+  Tier 2 on, work goes through Spec Kit, pinned and with its own overrides.
+- **Parallel agents, optional.** A steward assigns issues, starts one agent
+  session per phase with the model from the model policy, puts questions to
+  the owner as a choice, and merges finished branches as a batch.
+- **Three harnesses.** Claude Code, GitHub Copilot or a neutral `AGENTS.md`;
+  methodology and gates are the same in all of them.
 
 ## Installation
 
-Greenfield und Brownfield, derselbe Befehl im Zielrepo:
+Greenfield and brownfield, the same command in the target repository:
 
 ```bash
 uvx copier copy gh:Crashman1983/dev-process .
 ```
 
-copier fragt fünf Dinge: Projektname, Harness (`claude` | `copilot` |
-`agents_md`), `regulated` (Compliance-Paket), CI (GitHub Actions, Standard an)
-und optional das GitHub-Repo für den Issue-Check. Bestehende Dateien werden
-nicht überschrieben. Danach muss
+copier asks five things: project name, harness (`claude` | `copilot` |
+`agents_md`), `regulated` (compliance pack), CI (GitHub Actions, on by
+default) and, optionally, the GitHub repository for the issue check. Existing
+files are not overwritten. Afterwards
 
 ```bash
 uv run scripts/process/gate_runner.py
 ```
 
-grün sein. Ohne GitHub-CI ist das `git-hooks`-Modul die
-einzige Enforcement-Säule; dann erzwingt remote nichts die Gates.
+must be green. Without GitHub CI, the `git-hooks` module is the only
+enforcement pillar; nothing enforces the gates remotely then.
 
-**Ein KI-Agent richtet es ein:** Im Zielrepo genügt *„richte den
-Entwicklungsprozess aus Crashman1983/dev-process ein, folge dessen
-`BOOTSTRAP.md`“*. Dort stehen das Headless-Rezept und die Pflichtprüfung.
+**Let an AI agent set it up:** in the target repository, say *"set up the
+development process from Crashman1983/dev-process, follow its
+`BOOTSTRAP.md`"*. It holds the headless recipe and the mandatory check.
 
-**Aktualisieren:** `uv run scripts/process/template_update.py` im Zielrepo.
-Das Skript übernimmt alle gespeicherten Antworten und lässt Dateien, die das
-Projekt in `.process-owned` als eigene führt, unberührt. Mit reinem copier
-geht es als `uvx copier update --defaults --data 'modules={…}'` mit dem
-vollständigen Modul-Dictionary (Rezept in [`BOOTSTRAP.md`](BOOTSTRAP.md)).
-Die Antwortdatei `.copier-answers.yml` nicht von Hand editieren.
+**Updating:** run `uv run scripts/process/template_update.py` in the target
+repository. It re-asserts every recorded answer and leaves files the project
+lists as its own in `.process-owned` untouched. With plain copier it is
+`uvx copier update --defaults --data 'modules={…}'` with the complete module
+dictionary (recipe in [`BOOTSTRAP.md`](BOOTSTRAP.md)). Do not hand-edit
+`.copier-answers.yml`.
 
-**Wann es sich nicht lohnt:** Für Wegwerf-Prototypen, Einmal-Skripte und
-Arbeit in einer einzigen Sitzung ist der Aufwand größer als der Nutzen.
+**When it does not pay off:** for throwaway prototypes, one-off scripts and
+single-session work, the overhead outweighs the benefit.
 
-## Herkunft
+## Origin
 
-Der Prozess ist in vielen Iterationen in einem privaten, produktiv genutzten
-Repository entstanden (in den Dokumenten „Referenzprojekt“). Verweise auf
-dessen Interna in `docs/design/` und `docs/plans/` sind Projektgeschichte;
-alles, was das Template ausliefert, ist davon unabhängig und neutral.
+The process grew over many iterations in a private repository in production
+use (the "reference project" in the documents). References to its internals
+in `docs/design/` and `docs/plans/` are project history; everything the
+template ships is independent of it and neutral.
 
-## Lizenz
+## License
 
-[Apache-2.0](LICENSE): Nutzung, Änderung und Weitergabe sind frei, auch
-kommerziell. Jedes eingerichtete Repository erhält den Lizenztext als
-`docs/process/LICENSE` und dazu `docs/process/NOTICE.md`: Die Lizenz gilt für
-die Prozessdateien, nicht für den eigenen Code und Inhalt des Projekts. Zwei
-Spezifikations-Templates sind von GitHub Spec Kit abgeleitet (MIT, © GitHub,
-Inc.), Details in [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md).
+[Apache-2.0](LICENSE): use, modification and redistribution are free,
+commercial use included. Every set-up repository receives the license text
+as `docs/process/LICENSE`, plus `docs/process/NOTICE.md`: the license covers
+the process files, not the project's own code and content. Two specification
+templates derive from GitHub Spec Kit (MIT, © GitHub, Inc.); details in
+[`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md).

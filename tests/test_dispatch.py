@@ -422,3 +422,35 @@ def test_remote_phase_with_tmux_runner_hands_over_from_a_terminal(render, tmp_pa
         assert "HAND-OVER FAILED (exit 4)" in _dispatch(out, "list").stdout
     finally:
         subprocess.run(["tmux", "kill-session", "-t", session], capture_output=True)
+
+
+def test_remote_hand_over_names_the_session_it_started(render, tmp_path):
+    # a starter that prints text, not JSON: the session id is read from that
+    # text — by the policy's handover_id regex, else the first URL
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    bare = tmp_path / "origin.git"
+    _git(out, "clone", "-q", "--bare", str(out), str(bare))
+    _git(out, "remote", "add", "origin", str(bare))
+    for b in ("b7", "b8"):
+        _git(out, "branch", b)
+        _git(out, "push", "-q", "origin", b)
+    cloud = out.parent / "cloud.sh"
+    cloud.write_text('#!/bin/sh\necho "Starting cloud session..."\n'
+                     'echo "Session session_01AbC started: https://claude.ai/code/session_01AbC"\n')
+    cloud.chmod(0o755)
+    pol = out / "docs/process/model-policy.json"
+    data = json.loads(pol.read_text())
+    data["phases"] = {"review": {"command": f"{cloud} {{prompt}}", "remote": True}}
+    pol.write_text(json.dumps(data))
+    assert _dispatch(out, "start", "--issue", "7", "--phase", "review", "--branch", "b7").returncode == 0
+    assert "session: https://claude.ai/code/session_01AbC" in _dispatch(out, "list").stdout
+    data["phases"]["review"]["handover_id"] = r"Session (session_\w+) started"
+    pol.write_text(json.dumps(data))
+    assert _dispatch(out, "start", "--issue", "8", "--phase", "review", "--branch", "b8").returncode == 0
+    listing = _dispatch(out, "list").stdout
+    assert "b8" in listing and "session: session_01AbC" in listing
+    assert "session session_01AbC" in _dispatch(out, "log", "b8").stdout
+    data["phases"]["review"]["handover_id"] = "(unclosed"
+    pol.write_text(json.dumps(data))
+    assert "not a regex" in _dispatch(out, "policy").stderr

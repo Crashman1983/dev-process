@@ -106,6 +106,11 @@ def load_policy(root: Path) -> dict:
             raise SystemExit(f"dispatch: {POLICY} `phases` keys must be plan|execute|review with an object each")
         if "command" in row and (not isinstance(row["command"], str) or "{prompt}" not in row["command"]):
             raise SystemExit(f"dispatch: {POLICY} phases.{ph}.command must contain {{prompt}}")
+        if "handover_id" in row:
+            try:
+                re.compile(str(row["handover_id"]))
+            except re.error as exc:
+                raise SystemExit(f"dispatch: {POLICY} phases.{ph}.handover_id is not a regex: {exc}")
     return data
 
 
@@ -124,7 +129,8 @@ def phase_policy(policy: dict, phase: str) -> dict:
     row = (policy.get("phases") or {}).get(phase) or {}
     return {"command": row.get("command") or policy["command"],
             "runner": str(row.get("runner") or policy.get("runner") or "detached"),
-            "remote": bool(row.get("remote", False))}
+            "remote": bool(row.get("remote", False)),
+            "handover_id": str(row.get("handover_id") or "")}
 
 
 def model_for(policy: dict, tier: int | None, phase: str) -> str:
@@ -371,6 +377,31 @@ def live_children(root: Path) -> list[dict]:
     return [r for r in records(root) if r["alive"]]
 
 
+_URL = re.compile(r"https?://[^\s'\"<>)\]]+")
+
+
+def handover_session(rec: dict) -> str:
+    """The other host's session id or URL, read from what the hand-over
+    printed (its stdout, or the tmux window's log): the policy's
+    `phases.<phase>.handover_id` regex (group 1 if it has one), else the
+    first URL. A starter that prints text instead of JSON still names its
+    session somewhere in that text — this is where the steward finds it."""
+    if not rec.get("remote"):
+        return ""
+    text = rec.get("handover") or ""
+    log = Path(rec.get("log") or "")
+    if log.is_file():
+        try:
+            text += "\n" + _ANSI.sub("", log.read_bytes()[:65536].decode("utf-8", "replace"))
+        except OSError:
+            pass
+    pattern = rec.get("handover_id") or ""
+    m = re.search(pattern, text) if pattern else _URL.search(text)
+    if not m:
+        return ""
+    return (m.group(1) if m.groups() else m.group(0)).strip()
+
+
 def last_output(rec: dict, lines: int = 1) -> tuple[str, int | None]:
     """What the worker shows: the live tmux screen for a tmux worker (escape
     codes are not words), else the log tail; and minutes since it wrote."""
@@ -470,7 +501,7 @@ def start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str |
              "PROCESS_PHASE_BASE": phase_base(root, branch)}
         rec = {"branch": branch, "issue": issue, "phase": phase, "tier": tier, "model": model, "remote": True,
                "started": int(time.time()), "ts": _dt.datetime.now().isoformat(timespec="seconds"),
-               "runner": runner}
+               "runner": runner, "handover_id": pp["handover_id"]}
         if runner == "tmux":
             # some hand-over CLIs refuse to start without a terminal (observed
             # downstream: a cloud-session start exited at once when detached) —
@@ -554,12 +585,15 @@ def list_sessions(root: Path) -> int:
             print(f"- {r['branch']}: {r['phase']} #{r.get('issue')} {r.get('model')} another host, hand-over in "
                   f"{r.get('tmux_session')}:{r.get('tmux_name')} "
                   + (f"HAND-OVER FAILED (exit {code})" if failed else f"REMOTE (hand-over window {pane})")
+                  + (f" · session: {sid}" if (sid := handover_session(r)) else "")
                   + (f" · {since} min ago: {last[-120:]}" if last else ""))
             continue
         where = ("another host" if r.get("remote") else
                  f"{r.get('tmux_session')}:{r.get('tmux_name')}" if r.get("tmux_window") else f"pid {r.get('pid')}")
+        sid = handover_session(r)
         print(f"- {r['branch']}: {r['phase']} #{r.get('issue')} {r.get('model')} {where} "
-              f"{r['state'].upper()} ({mins} min)" + (f" · {since} min ago: {last[-120:]}" if last else ""))
+              f"{r['state'].upper()} ({mins} min)" + (f" · session: {sid}" if sid else "")
+              + (f" · {since} min ago: {last[-120:]}" if last else ""))
     return 0
 
 
@@ -582,6 +616,8 @@ def show_log(root: Path, branch: str, lines: int) -> int:
     _p, rec = found
     text, mins = last_output(rec, lines)
     head = f"{branch} — {rec.get('phase')} #{rec.get('issue')} {rec.get('model')} — {rec['state']}"
+    if sid := handover_session(rec):
+        head += f" — session {sid}"
     print(head + (f" — last write {mins} min ago" if mins is not None else ""))
     print(text or "(nothing yet)")
     return 0
