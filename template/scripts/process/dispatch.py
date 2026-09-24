@@ -351,15 +351,32 @@ def last_output(rec: dict, lines: int = 1) -> tuple[str, int | None]:
     return "\n".join(text), mins
 
 
-def lanes_busy(root: Path) -> bool:
+_LANE_HELD = re.compile(r"^(\S+): held by", re.MULTILINE)
+
+
+def held_lanes(root: Path) -> set[str]:
+    """Names of the lanes `scripts/lane.py status` reports as held (one line per lane)."""
     lane = root / "scripts" / "lane.py"
     if not lane.is_file():
-        return False
+        return set()
     try:
         r = subprocess.run([sys.executable, str(lane), "status"], cwd=root, capture_output=True, text=True, timeout=20)
     except (OSError, subprocess.TimeoutExpired):
-        return False
-    return "held by" in r.stdout
+        return set()
+    return set(_LANE_HELD.findall(r.stdout))
+
+
+def lane_verdict(held: set[str], phase: str) -> str | None:
+    """None = start allowed, else why not. Only `full` held, for a plan or review, is
+    allowed (those run under the train); any other held lane fails closed."""
+    if not held:
+        return None
+    names = ", ".join(sorted(held))
+    if held == {"full"} and phase != "execute":
+        return None
+    if held == {"full"}:
+        return f"lane {names} is held — no free CPU for an execute session (phase {phase}); retry when lane-status says free"
+    return f"lane {names} is held — no free CPU for a new session (phase {phase}); retry when lane-status says free"
 
 
 def _worker_env(extra: dict[str, str]) -> dict[str, str]:
@@ -383,9 +400,9 @@ def start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str |
     if len(live) >= cap:
         print(f"dispatch: {len(live)} live sessions, policy max_workers={cap} — not starting", file=sys.stderr)
         return 3
-    if lanes_busy(root):
-        print("dispatch: a test lane is held — no free CPU for a new session; retry when lane-status says free",
-              file=sys.stderr)
+    refusal = lane_verdict(held_lanes(root), phase)
+    if refusal:
+        print(f"dispatch: {refusal}", file=sys.stderr)
         return 3
     pp = phase_policy(policy, phase)
     runner, remote = pp["runner"], pp["remote"]

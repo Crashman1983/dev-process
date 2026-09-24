@@ -39,6 +39,63 @@ def _fake_command(out: Path, script: str) -> None:
     pol.write_text(json.dumps(data))
 
 
+def _fake_lane(out: Path, status: str) -> None:
+    # the project's own lane tool: one status line per lane, like Kenni's scripts/lane.py
+    lane = out / "scripts" / "lane.py"
+    lane.write_text(f"import sys\nprint({status!r})\n")
+
+
+FULL_HELD = "scoped: free\nfull: held by pid 1 — test-boundary (train/x) since 09:28 (0 min)"
+
+
+def _load_dispatch(out: Path):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("dispatch_under_test", out / "scripts/process/dispatch.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+LANE_TABLE = [
+    (set(), {"plan": True, "execute": True, "review": True}),
+    ({"full"}, {"plan": True, "execute": False, "review": True}),
+    ({"scoped"}, {"plan": False, "execute": False, "review": False}),
+    ({"scoped", "full"}, {"plan": False, "execute": False, "review": False}),
+    ({"gpu"}, {"plan": False, "execute": False, "review": False}),
+]
+
+
+@pytest.mark.parametrize("held,allowed", LANE_TABLE)
+@pytest.mark.parametrize("phase", ["plan", "execute", "review"])
+def test_lane_rule_by_lane_and_phase(render, tmp_path, held, allowed, phase):
+    d = _load_dispatch(render(tmp_path, {"project_name": "d", "modules": {}}))
+    verdict = d.lane_verdict(held, phase)
+    assert (verdict is None) == allowed[phase], verdict
+    if verdict:
+        assert phase in verdict and any(name in verdict for name in held)
+
+
+def test_lane_status_is_parsed_line_by_line(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    d = _load_dispatch(out)
+    _fake_lane(out, FULL_HELD)
+    assert d.held_lanes(out) == {"full"}
+    _fake_lane(out, "scoped: free\nfull: free — last held by nobody")  # a label is not a holder
+    assert d.held_lanes(out) == set()
+
+
+def test_full_lane_held_lets_plan_start_but_not_execute(render, tmp_path):
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    _fake_command(out, "sleep 30\n")
+    _fake_lane(out, FULL_HELD)
+    r = _dispatch(out, "start", "--issue", "8", "--phase", "execute", "--branch", "b8")
+    assert r.returncode == 3 and "full" in r.stderr and "execute" in r.stderr
+    r = _dispatch(out, "start", "--issue", "8", "--phase", "plan", "--branch", "b8")
+    assert r.returncode == 0, r.stderr
+    _dispatch(out, "stop", "b8", "--force")
+
+
 def test_policy_resolves_by_tier_and_phase(render, tmp_path):
     out = render(tmp_path, {"project_name": "d", "modules": {}})
     r = _dispatch(out, "policy", "--tier", "3")
