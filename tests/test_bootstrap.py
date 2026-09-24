@@ -44,7 +44,8 @@ def test_bootstrap_documents_ci_answer_and_degradation():
     assert "--data 'ci={" in text
     assert "`ci`" in text
     readme = (ROOT / "README.md").read_text()
-    assert "einzige Enforcement-Säule" in readme  # honest degradation
+    assert "only\nenforcement pillar" in readme or "only enforcement pillar" in readme  # honest degradation
+    assert "einzige Enforcement-Säule" in (ROOT / "README-DE.md").read_text()
 
 
 def test_bootstrap_documents_install_fallback_ladder():

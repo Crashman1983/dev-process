@@ -238,7 +238,8 @@ def sessions(root: Path) -> list[dict]:
     out = []
     for rec in _dispatch.records(root):
         last, since = _dispatch.last_output(rec)
-        where = ("another host (reports via origin)" if rec.get("remote") else
+        sid = _dispatch.handover_session(rec) if hasattr(_dispatch, "handover_session") else ""
+        where = (f"another host (reports via origin{', session ' + sid if sid else ''})" if rec.get("remote") else
                  f"tmux {rec.get('tmux_session')}:{rec.get('tmux_name')}" if rec.get("tmux_window")
                  else f"pid {rec.get('pid')}")
         out.append({"branch": rec["branch"], "phase": rec.get("phase"), "issue": rec.get("issue"),
