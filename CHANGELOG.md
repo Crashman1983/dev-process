@@ -1139,7 +1139,7 @@ unter v2.24.0; die Lagetabelle liest Pläne aus allen Worktrees (ein
 Worker-Plan ohne Issue wird jetzt gefunden); das Review-Gate meldet ein
 beanspruchtes Issue nicht mehr als planlos, wenn ein Plan unter Tier 2 es
 nennt; veraltete Texte zu gestrichenen Modulen bereinigt, `fix-streak` meldet
-OK, `make_review_bundle.py` und `tidy.py` kennen `--help`, `v2.27.1`.
+OK, `make_review_bundle.py` und `tidy.py` kennen `--help`. Aus der Prüfung des Referenzprojekts: in der CI meldet die Hook-Verdrahtung nichts (dort ist der Job die Durchsetzung, lokale Hooks braucht er nicht), und ein nicht berechenbarer Review-Digest in einem flachen Klon (Standard einer Cloud-Sitzung) ist ein Hinweis statt rot, `v2.27.1`.
 
 ## Sub-Projekt-Tabelle (SP1–SP24)
 

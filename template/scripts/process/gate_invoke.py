@@ -27,6 +27,7 @@ Pure stdlib, so the helper cannot inherit the dependency problem it solves.
 """
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import subprocess
@@ -135,6 +136,10 @@ def hook_wiring_findings(root: Path) -> tuple[list[str], list[str]]:
     hard: list[str] = []
     soft: list[str] = []
     if _git(root, "rev-parse", "--is-inside-work-tree") != "true":
+        return hard, soft
+    if os.environ.get("CI") or os.environ.get("GITHUB_ACTIONS"):
+        # a CI checkout never installs local hooks and needs none: the job IS
+        # the enforcement there — reporting it as broken wiring would red CI
         return hard, soft
     hooks_path = _git(root, "config", "--get", "core.hooksPath")
     # the other manager: a tracked hooks directory that git only reads when

@@ -353,7 +353,14 @@ def _integrity_violations(rel: str, root: Path,
             continue
         actual = artifact_digest(root, f["base"], f["head"])
         if actual is None:
-            hard.append(f"{rel}:{lineno}: review artifact diff could not be computed")
+            shallow = (_git_bytes(root, "rev-parse", "--is-shallow-repository") or b"").strip() == b"true"
+            if shallow:
+                # a shallow clone (a cloud session's default) cuts the history the
+                # three-dot diff needs — unverifiable here, not a fabrication
+                soft.append(f"{rel}:{lineno}: review artifact diff not computable in this "
+                            f"shallow clone — digest unverifiable here (`git fetch --unshallow`)")
+            else:
+                hard.append(f"{rel}:{lineno}: review artifact diff could not be computed")
             continue
         if f["diff"] == actual or f["diff"] in _legacy_digests(root, f["base"], f["head"]):
             continue
