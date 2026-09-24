@@ -2,7 +2,7 @@
 
 Datum: 2026-08-06 · Entscheidungsvorlage (noch kein Beschluss) · Kontext:
 Spec Kit ist als Standard-Spezifikationsweg beschlossen
-(`docs/design/2026-08-06-speckit-hybrid-design.md`); diese Liste beziffert,
+(`docs/analysis/2026-08-06-speckit-hybrid-design.md`); diese Liste beziffert,
 was darüber hinaus gestrichen, ersetzt oder eingedampft werden kann, um näher
 an Industriestandards zu kommen. Zeilenzahlen sind gemessen (Scripts +
 zugehörige Tests), nicht geschätzt; Doku-/Template-Zeilen kommen jeweils hinzu.

@@ -1,6 +1,6 @@
 # Design: Spec Kit as the Tier 2+ specification front-end (`speckit-adapter` module)
 
-Date: 2026-08-06 · Status: **implemented** (SP56; conditions of the independent review folded in — see `.process-work/reviews/2026-08-06-speckit-hybrid-design-review.md`) · Companion analysis:
+Date: 2026-08-06 · Status: **implemented** (SP56; conditions of the independent review folded in — the review report is in the git history) · Companion analysis:
 `docs/analysis/2026-08-06-speckit-comparison.md` (strategic comparison; this
 document is the integration design after an *empirical* evaluation).
 

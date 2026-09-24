@@ -1095,6 +1095,14 @@ laufen auf eigenen Spuren in ein Gate aus je vier Tiers, dessen Öffnung nur
 eine Linie breit ist, und verlassen es als eine geprüfte Linie: ein Häkchen,
 das in einem Merge-Punkt endet.
 
+**Aufgeräumt.** Die Arbeitsdokumente seit Juli sind aus dem Baum entfernt:
+`docs/design/` und `docs/plans/` (67 Entwürfe und Pläne, die meisten aus der
+Zeit vor dem Lean-Pass), `docs/pilots/`, die Audit-Berichte unter
+`.process-work/reviews/` und `docs/CAPABILITIES.md`, das der Überblick
+ersetzt. Sie bleiben in der Git-Historie; dieser CHANGELOG erzählt die
+Entwicklung. Der geltende Spec-Kit-Entwurf liegt jetzt bei der Analyse unter
+`docs/analysis/`.
+
 ## Sub-Projekt-Tabelle (SP1–SP24)
 
 Die Tabelle wurde bis SP24 gepflegt; ab SP25 trägt das Narrativ oben die
