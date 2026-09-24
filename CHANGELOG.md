@@ -1124,6 +1124,23 @@ im Delta-Bundle nur die Befunde DIESES Vorgangs und nie ein veraltetes Bundle
 nach einem gescheiterten Lauf, sowie eine Anleitung für den Einrichtungs-Hook
 von Cloud-Sitzungen (`tower.md`). 15 Gates statt 16/18, `v2.27.0`.
 
+**Befunde einer unabhängigen Funktionsprüfung von v2.27.0 behoben.** Drei
+brachen dokumentierte Wege: `no-commit-to-branch` lief auch beim Pre-Push und
+blockierte den Merge-Push von `finish` und dem Zug (jetzt nur beim Commit);
+die Prüfung des gepushten Stands verglich bei einem annotierten Tag das
+Tag-Objekt statt des Commits; mit `ci.github=false` war doc-drift ab dem
+ersten Lauf rot (start-here nannte ein Skript, das nur mit CI gerendert
+wird). Dazu: `template_update.py` hebt eine ältere Standardinstallation auf
+`sbom: true` (dort war `sbom: false` nur aus `regulated: false` abgeleitet),
+`check_issues` liest eine durch alte Update-Helfer vervielfachte leere
+Antwort als leer, BOOTSTRAP nennt alle Dateien, die im Brownfield ein
+`--skip` und danach einen Merge brauchen, und den Weg für Installationen
+unter v2.24.0; die Lagetabelle liest Pläne aus allen Worktrees (ein
+Worker-Plan ohne Issue wird jetzt gefunden); das Review-Gate meldet ein
+beanspruchtes Issue nicht mehr als planlos, wenn ein Plan unter Tier 2 es
+nennt; veraltete Texte zu gestrichenen Modulen bereinigt, `fix-streak` meldet
+OK, `make_review_bundle.py` und `tidy.py` kennen `--help`, `v2.27.1`.
+
 ## Sub-Projekt-Tabelle (SP1–SP24)
 
 Die Tabelle wurde bis SP24 gepflegt; ab SP25 trägt das Narrativ oben die

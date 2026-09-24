@@ -46,11 +46,11 @@ VENDORED = [
 ]
 
 TOOLS = [
-    ("`git`", "Template-Quelle klonen, Updates, lokale Hooks, Security-Floor-Dateiliste",
+    ("`git`", "Template-Quelle klonen, Updates, lokale Hooks",
      "erforderlich"),
     ("`uv`", "portable Python-Laufzeit und isolierte Gate-Abhängigkeiten", "erforderlich"),
-    ("`gh`", "Existenzprüfung im `github-issues`-Modul, Tempo-Familie des KPI-Cockpits, "
-     "Sync im `github-master`-Modul", "optional"),
+    ("`gh`", "Existenzprüfung im `github-issues`-Modul, Tempo-Familie des KPI-Cockpits",
+     "optional"),
     ("`specify-cli`", "Spec-Kit-Setup im Zielrepo (gepinnte Version, siehe Modul-Doku)",
      "optional, Standard-Setup"),
     ("`tmux`", "sichtbare Worker-Fenster beim Runner `tmux`", "optional"),

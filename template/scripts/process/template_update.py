@@ -52,6 +52,21 @@ def is_owned(rel: str, patterns: list[str]) -> bool:
     return any(fnmatch.fnmatch(rel, pat) or rel == pat for pat in patterns)
 
 
+def _migrate(loaded: dict) -> None:
+    """Carry an older manifest across template changes that re-asserting it
+    verbatim would undo.
+
+    v2.27.0 retired the `regulated` question; `sbom` joined the standard set.
+    Before, `sbom` was derived from `regulated` — `sbom: false` next to
+    `regulated: false` was the default, not an opt-out, and re-asserting it
+    would keep a standard install one gate short."""
+    if "regulated" in loaded:
+        regulated = loaded.pop("regulated")
+        mods = loaded.get("modules")
+        if isinstance(mods, dict) and regulated is False and mods.get("sbom") is False:
+            mods["sbom"] = True
+
+
 def answers(root: Path) -> tuple[str | None, str | None, dict[str, str]]:
     """(src_path, commit, {answer: yaml-flow-value}) — the recorded answers,
     re-asserted on every copier call. Copier recomputes `when: false`
@@ -68,6 +83,7 @@ def answers(root: Path) -> tuple[str | None, str | None, dict[str, str]]:
     try:
         import yaml  # copier's own dependency; present wherever copier runs
         loaded = yaml.safe_load(text) or {}
+        _migrate(loaded)
         for key, value in loaded.items():
             if key == "_src_path":
                 src = str(value)

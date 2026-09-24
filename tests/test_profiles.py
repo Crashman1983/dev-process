@@ -102,3 +102,13 @@ def test_a_push_of_another_commit_than_the_checked_tree_fails(render_raw, tmp_pa
     other = subprocess.run(runner, cwd=out, capture_output=True, text=True,
                            env={**os.environ, "PRE_COMMIT_TO_REF": "0" * 40})
     assert other.returncode != 0 and "not being pushed" in other.stderr
+
+
+def test_render_without_ci_is_green(render_raw, tmp_path):
+    # without the CI adapter no rendered doc may point at a CI-only file
+    out = render_raw(tmp_path, {"project_name": "d", "ci": {"github": False}})
+    assert not (out / "scripts/process/setup_branch_protection.sh").exists()
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=out, check=True)
+    r = subprocess.run([sys.executable, str(out / "scripts/process/gate_runner.py")],
+                       cwd=out, capture_output=True, text=True)
+    assert r.returncode == 0, r.stdout + r.stderr

@@ -247,11 +247,13 @@ def test_unknown_flag_is_usage_error(render, tmp_path):
     # a typo'd --base must not silently produce a bundle against the wrong ref
     out = render(tmp_path, {"project_name": "d", "modules": {}})
     _seed_repo(out)
-    for args in (["--bases", "main"], ["--help"], ["--base", "main", "extra"]):
+    for args in (["--bases", "main"], ["--base", "main", "extra"]):
         r = _run(out, *args)
         assert r.returncode != 0, args
         assert "usage" in (r.stdout + r.stderr)
         assert "Traceback" not in r.stderr
+    r = _run(out, "--help")  # asking for help is not an error
+    assert r.returncode == 0 and "usage" in r.stdout
 
 
 def test_plan_filter_narrows_bundle(render, tmp_path):

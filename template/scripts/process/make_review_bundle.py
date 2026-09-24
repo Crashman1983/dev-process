@@ -442,6 +442,9 @@ def _opt(argv: list[str], flag: str) -> str | None:
 
 
 def main(argv: list[str]) -> int:
+    if "-h" in argv or "--help" in argv:
+        print(USAGE)
+        return 0
     skip_preflight = "--skip-preflight" in argv
     argv = [arg for arg in argv if arg != "--skip-preflight"]
     out_file = _opt(argv, "-o")

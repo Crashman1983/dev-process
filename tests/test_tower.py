@@ -332,3 +332,14 @@ def test_pushed_is_checked_against_origin_and_the_phase_start(render, tmp_path):
     _git(w, "checkout", "-q", "-b", "8-offline")
     r = rep("--force")
     assert r.returncode == 0 and "[unverified:" in r.stdout
+
+
+def test_a_workers_plan_without_issue_is_found_in_its_worktree(render, tmp_path):
+    # the worker's plan lives in ITS worktree; the steward's table must see it
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _worktree(out, "w1", {"src/x.py": "x\n"}, plan="# Plan\n\ntier: 2\n\n## Decisions\n")
+    t = json.loads(_tower(out, "--json").stdout)
+    assert any(p["path"].endswith("2026-09-20-w1.md") and p["branch"] == "w1" for p in t["plans"])
+    kinds = [(f["kind"], f["what"]) for f in t["findings"]]
+    assert any(k == "plan-without-issue" and "on w1" in w for k, w in kinds), kinds

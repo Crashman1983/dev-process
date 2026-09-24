@@ -23,10 +23,10 @@ A rendered `.pre-commit-config.yaml` with two hooks:
 uvx pre-commit install --hook-type pre-commit --hook-type pre-push
 ```
 
-`pre-commit` manages `.git/hooks` itself and composes with hooks a project
-already uses via its own config — the brownfield-additive property the old
-custom installer provided, now owned by the standard tool. Re-run the same
-command after a `copier update`; it is idempotent.
+`pre-commit` manages `.git/hooks` itself and reads ONE config file. A project
+that already had a `.pre-commit-config.yaml` keeps it and adds the two process
+hooks to it (BOOTSTRAP, brownfield notes). Re-run the same command after a
+`copier update`; it is idempotent.
 
 ## Bypass — sanctioned and otherwise
 

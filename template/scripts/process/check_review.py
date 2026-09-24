@@ -906,9 +906,11 @@ def check(root: Path) -> tuple[list[str], list[str]]:
         matching = [(rel, text, tier, ids) for rel, text, tier, ids in tiered_plans
                     if number in _plan_issue_numbers(text)]
         if not matching:
-            soft.append(f"a commit in the pushed range claims #{number}, but no "
-                        f"plan declares that issue — no tier to key on, so review "
-                        f"presence is not enforced for it")
+            if number not in _declared_anywhere(root):
+                soft.append(f"a commit in the pushed range claims #{number}, but no "
+                            f"plan declares that issue — no tier to key on, so review "
+                            f"presence is not enforced for it")
+            # a plan below Tier 2 or a waived one declares it: nothing to enforce
             continue
         for rel, text, tier, ids in matching:
             if tier < 3 or WAIVED.search(text):
@@ -937,6 +939,18 @@ _UNHOMED_PRUNE = {".git", "node_modules", ".venv", "venv", "archive",
                   "__pycache__"}
 _UNHOMED_SANCTIONED = (".process-work", "specs", "docs/process", ".github",
                        ".specify", ".claude")
+
+
+def _declared_anywhere(root: Path) -> set[int]:
+    """Issue numbers any plan declares — active or archived, whatever its tier."""
+    found: set[int] = set()
+    for d in (root / PLANS_ACTIVE, root / PLANS_ARCHIVE):
+        for p in sorted(d.glob("*.md")) if d.is_dir() else []:
+            try:
+                found |= _plan_issue_numbers(_unfenced(p.read_text(encoding="utf-8", errors="replace")))
+            except OSError:
+                continue
+    return found
 
 
 def _unhomed_plans(root: Path) -> list[str]:

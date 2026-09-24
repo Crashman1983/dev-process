@@ -215,6 +215,12 @@ def _emit(output: str, known: set[str], seen: set[str], show_all: bool) -> int:
     return suppressed
 
 
+def _commit_of(root: Path, ref: str) -> str:
+    r = subprocess.run(["git", "-C", str(root), "rev-parse", "--verify", "-q", f"{ref}^{{commit}}"],
+                       capture_output=True, text=True)
+    return r.stdout.strip() if r.returncode == 0 else ""
+
+
 def _head(root: Path) -> str:
     r = subprocess.run(["git", "-C", str(root), "rev-parse", "HEAD"], capture_output=True, text=True)
     return r.stdout.strip() if r.returncode == 0 else ""
@@ -259,6 +265,8 @@ def main() -> int:
     # pushed commit in PRE_COMMIT_TO_REF; a manual run has no such variable.
     pushed = os.environ.get("PRE_COMMIT_TO_REF", "").strip()
     if pushed:
+        # an annotated tag names a tag object: compare the commit it points to
+        pushed = _commit_of(root, pushed) or pushed
         head = _head(root)
         if head and pushed != head:
             print(f"gate-runner: the push carries {pushed[:10]} but this checkout is at "

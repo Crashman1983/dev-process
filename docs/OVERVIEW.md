@@ -6,7 +6,7 @@
 
 Principles, mechanics and the path to broad rollout
 
-Process template dev-process v2.27.0 · tested in a real repository in production use (reference project)
+Process template dev-process v2.27.1 · tested in a real repository in production use (reference project)
 
 Template published on GitHub: [github.com/Crashman1983/dev-process](https://github.com/Crashman1983/dev-process)
 
@@ -49,7 +49,7 @@ The process was built and improved over many iterations in live operation; it ha
 | **Gates** | fifteen check programs before every Merge: rules intact, decisions taken, attestation present and matching the code, design contracts and acceptance criteria consistent, licences allowed, documentation valid |
 | **Repository** | rule kernel, plans with decision lists, journal with attestations, situation table, contracts, metrics – the single source every layer reads from |
 
-The process ships as a template (dev-process). From it you get a fully set-up repository: the startup file and phase commands for the chosen Harness (GitHub Copilot, Claude Code or a neutral AGENTS.md), the Gates, and GitHub Actions workflows for Gates, Owner-Digest, metrics and cleanup. A repository pulls later versions of the template with one command; project-specific files stay untouched.
+The process ships as a template (dev-process). From it you get a fully set-up repository: the startup file and phase commands for the chosen Harness (GitHub Copilot, Claude Code or a neutral AGENTS.md), the Gates, and GitHub Actions workflows for Gates, Owner-Digest and metrics. A repository pulls later versions of the template with one command; project-specific files stay untouched.
 
 ## 3. Rules and risk tiers
 
@@ -153,7 +153,7 @@ The following table shows how the building blocks could be mapped and which of t
 | Workers | One Copilot session per Issue on its own Branch is conceivable – in the editor or as the Copilot coding agent, which opens a Pull Request. | planned, not tested |
 | Review | Uninvolved reviewer with review prompt and Bundle, attestation in the journal; Copilot code review as an additional voice. Since Copilot offers models from several vendors, the second model would only be a configuration entry. | prompt and Gate in the template |
 | Merge Queue | The Merge Queue could collect approved Pull Requests, check them together and merge them one after the other. | GitHub feature; not tested (reference project: its own Merge Train) |
-| Overview and cleanup | Owner-Digest, metrics and the cleanup of finished Branches run as Actions workflows. | in the template |
+| Overview and cleanup | Owner-Digest and metrics run as Actions workflows; a script (tidy) cleans up finished Branches, specs and journals. | in the template |
 | Coordinator | Overview and status reports can run as Actions. It is open who starts and stops the sessions on GitHub. | open (chapter 11) |
 
 **What this would change:** in the reference project the Gates run on a single server; on GitHub they would run in the organisation. With Branch Protection, only an administrator could still bypass the Gates. And for the second model at Tier 3, nobody would have to switch Harness any more. A pilot is meant to show whether this holds up in practice.

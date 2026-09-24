@@ -16,7 +16,7 @@ work under: a program checks the rules, the effort follows the risk, nobody
 signs off their own work, and memory lives in files instead of the context
 window.
 
-> **Status:** `v2.27.0` — sub-projects SP1–SP75. History (German): [`CHANGELOG.md`](CHANGELOG.md).
+> **Status:** `v2.27.1` — sub-projects SP1–SP75. History (German): [`CHANGELOG.md`](CHANGELOG.md).
 
 ## Where to start
 

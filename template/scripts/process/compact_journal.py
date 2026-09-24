@@ -3,7 +3,7 @@
 exactly what the gates read.
 
 Journals grow without bound by design (`journal-state-plans.md`, Retention)
-and are read by agents and tools alike — trace, the KPI cockpit, the review
+and are read by agents and tools alike — the KPI cockpit, the review
 and telemetry gates. Reasoning older than a few weeks is history: git has the
 full text, and nobody resumes a session from it. What must survive is the
 machine-read record: `REVIEW` attestations (the review gate clears archived

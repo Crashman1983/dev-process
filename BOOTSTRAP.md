@@ -105,12 +105,28 @@ line instead:
   TTY, a content conflict otherwise aborts mid-render and leaves a
   half-installed state, while `--skip` keeps the existing file untouched and
   lets the run complete. **Never** use `--overwrite` in a repo you do not own.
+- The same holds for every other file the template renders at a path your
+  repo already uses. Check first and add a `--skip` for each that exists:
+  `.pre-commit-config.yaml`, `PRODUCT.md`, `ARCHITECTURE.md`,
+  `THIRD-PARTY-NOTICES.md`, `.github/copilot-instructions.md`. Then merge
+  them as below.
 
 **Merge skipped adapters:** if an existing `CLAUDE.md`/`AGENTS.md` was
 skipped, copy the block between `<!-- KERNEL:START -->` and
 `<!-- KERNEL:END -->` from `docs/process/kernel.md` (always rendered — the
 canonical kernel source, present even when every adapter was skipped) into your
 existing file and add a pointer to `docs/process/start-here.md`.
+
+**Merge the other skipped files** (render the template once into an empty
+scratch directory to have the originals at hand):
+- `.pre-commit-config.yaml` — pre-commit reads one config: add the template's
+  two hooks (`no-commit-to-branch` at the pre-commit stage, the local
+  `process-gates` hook at pre-push) to yours.
+- `PRODUCT.md` — the product-frame gate reads the template's layout
+  (`status:` line and sections); move your content into it.
+- `ARCHITECTURE.md` — add the template's `arch` block (inert example first)
+  to your file; the arch-onboarding gate reads only that block.
+- `THIRD-PARTY-NOTICES.md` — append the template's Spec Kit section.
 
 **Verification (mandatory):** claim "installed" only after these checks
 (use `python3` if `python` is not on PATH):
@@ -215,6 +231,11 @@ skipped anchor keeps the OLD kernel block and turns the kernel gate red.
 project was installed with `--vcs-ref=HEAD`** (a `.post…` version in
 `.copier-answers.yml`), a default update refuses with "Downgrades are not
 supported" — pass `--vcs-ref=HEAD` here too.
+
+**A project on a release older than v2.24.0** carries an update helper that
+wraps empty answers in extra quotes on every run: copy this repository's
+`template/scripts/process/template_update.py` over the project's copy first,
+then update.
 
 **Important:** Do not hand-edit `.copier-answers.yml` to enable a module.
 `copier update` reads that file as the *old* state: after a hand edit, the old
