@@ -1,6 +1,13 @@
-# dev-process
-
 > **English:** [README.md](README.md)
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/logo-dark.svg">
+    <img alt="dev-process — gates, risk tiers, independent review" src="docs/assets/logo-light.svg" width="560">
+  </picture>
+</p>
+
+# dev-process
 
 Ein Entwicklungsprozess für KI-Agenten, ausgeliefert als
 [copier](https://copier.readthedocs.io)-Template für neue und bestehende

@@ -1,6 +1,13 @@
-# dev-process
-
 > **Deutsch:** [README-DE.md](README-DE.md)
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/logo-dark.svg">
+    <img alt="dev-process — gates, risk tiers, independent review" src="docs/assets/logo-light.svg" width="560">
+  </picture>
+</p>
+
+# dev-process
 
 A development process for AI coding agents, delivered as a
 [copier](https://copier.readthedocs.io) template for new and existing

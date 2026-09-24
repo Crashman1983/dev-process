@@ -1089,6 +1089,12 @@ Sitzung er prüfen musste. `dispatch.py` liest sie jetzt aus der Ausgabe der
 (Regex, Gruppe 1) oder als erste URL. `list`, `log` und der Tower zeigen sie,
 `v2.26.0`.
 
+**Logo.** `docs/assets/` enthält das Zeichen (`mark.svg`), die Wortmarke für
+helle und dunkle Flächen und ein Social-Preview-Bild (1280×640). Drei Agenten
+laufen auf eigenen Spuren in ein Gate aus je vier Tiers, dessen Öffnung nur
+eine Linie breit ist, und verlassen es als eine geprüfte Linie: ein Häkchen,
+das in einem Merge-Punkt endet.
+
 ## Sub-Projekt-Tabelle (SP1–SP24)
 
 Die Tabelle wurde bis SP24 gepflegt; ab SP25 trägt das Narrativ oben die
