@@ -394,18 +394,19 @@ def start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str |
     branch = branch or find_branch(root, issue) or default_branch(issue, title)
     live = live_children(root)
     cap = max_workers(policy)
+    pp = phase_policy(policy, phase)
+    runner, remote = pp["runner"], pp["remote"]
     if any(r["branch"] == branch for r in live):
         print(f"dispatch: {branch} already has a live session — stop it first", file=sys.stderr)
         return 3
-    if len(live) >= cap:
+    # a remote phase puts its load on another host: neither this host's cap nor its lanes apply
+    if not remote and len(live) >= cap:
         print(f"dispatch: {len(live)} live sessions, policy max_workers={cap} — not starting", file=sys.stderr)
         return 3
-    refusal = lane_verdict(held_lanes(root), phase)
+    refusal = None if remote else lane_verdict(held_lanes(root), phase)
     if refusal:
         print(f"dispatch: {refusal}", file=sys.stderr)
         return 3
-    pp = phase_policy(policy, phase)
-    runner, remote = pp["runner"], pp["remote"]
     prompt = prompt_for(phase, issue, tier, branch, model, remote=remote)
     argv = build_argv(policy, model, prompt, branch, issue, phase)
     if dry_run:

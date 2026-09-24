@@ -210,6 +210,39 @@ def test_remote_phase_hands_over_without_a_worktree(render, tmp_path):
     assert "{prompt}" in _dispatch(out, "policy").stderr
 
 
+def test_remote_phase_skips_local_cap_and_lanes(render, tmp_path):
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    bare = tmp_path / "origin.git"
+    _git(out, "clone", "-q", "--bare", str(out), str(bare))
+    _git(out, "remote", "add", "origin", str(bare))
+    marker = tmp_path / "handover"
+    pol = out / "docs/process/model-policy.json"
+    data = json.loads(pol.read_text())
+    cloud = out.parent / "start-cloud.sh"
+    cloud.write_text(f'#!/bin/sh\necho "$PROCESS_PHASE" > {marker}\necho session-xyz\n')
+    cloud.chmod(0o755)
+    local = out.parent / "local.sh"
+    local.write_text("#!/bin/sh\nsleep 30\n")
+    local.chmod(0o755)
+    data["command"] = f"{local} {{prompt}}"
+    data["max_workers"] = 1
+    data["phases"] = {"review": {"command": f"{cloud} {{prompt}}", "remote": True}}
+    pol.write_text(json.dumps(data))
+    assert _dispatch(out, "start", "--issue", "6", "--phase", "plan", "--branch", "b6").returncode == 0
+    _git(out, "branch", "b7")
+    _git(out, "push", "-q", "origin", "b7")
+    _fake_lane(out, "scoped: held by pid 1 — x (y) since 09:00 (1 min)\nfull: free")
+    # cap and lane refuse a local phase ...
+    r = _dispatch(out, "start", "--issue", "7", "--phase", "plan", "--branch", "b7")
+    assert r.returncode == 3 and "max_workers=1" in r.stderr
+    # ... but not a remote one: its load lies on the other host
+    r = _dispatch(out, "start", "--issue", "7", "--phase", "review", "--branch", "b7")
+    assert r.returncode == 0, r.stderr
+    assert marker.read_text().strip() == "review"
+    _dispatch(out, "stop", "b6", "--force")
+
+
 def test_worktree_path_taken_by_a_foreign_directory_is_refused(render, tmp_path):
     out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
     _repo(out)
