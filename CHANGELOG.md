@@ -1166,6 +1166,8 @@ ein Wächter-Test gegen doppelte Klammern ohne Leerzeichen in Python-Vorlagen.
 Wer v2.27.1 oder v2.28.0 installiert hat und am Push scheitert: auf v2.28.1
 aktualisieren, `v2.28.1`.
 
+**v2.28.2 — die Merge-Suite ist die volle Suite jedes Stacks.** Im Referenzprojekt fuhr der Zug nur die Backend-Suite; eine CSS-Änderung brach einen Frontend-Pin, und nichts vor dem Merge startete ihn. `train.md` und `testing.md` sagen jetzt, dass `--suite` die volle Suite *jedes* Stacks ist (ein Make-Ziel dahinter, z. B. `make test-merge`), weil ein ausgelassener Stack ohne CI beim Merge ungetestet bleibt. `train.py run` ohne `--suite` sagt das auf stderr: Dann laufen nur die Prozess-Gates. Ein Test deckt den Hinweis ab.
+
 ## Sub-Projekt-Tabelle (SP1–SP24)
 
 Die Tabelle wurde bis SP24 gepflegt; ab SP25 trägt das Narrativ oben die

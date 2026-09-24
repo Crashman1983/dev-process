@@ -150,6 +150,15 @@ def test_run_holds_without_departure_and_dry_run_touches_nothing(render, tmp_pat
     assert "dry run" in r.stdout and _git(out, "rev-parse", "main").stdout == head
 
 
+def test_run_without_suite_says_the_batch_merges_untested(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _branch(out, "alpha", {"src/a.py": "a\n"})
+    r = _train(out, "run", "--force", "--dry-run")
+    assert "no --suite" in r.stderr
+    r = _train(out, "run", "--force", "--dry-run", "--suite", "true")
+    assert "no --suite" not in r.stderr
+
 def test_core_files_present(render, tmp_path):
     out = render(tmp_path, {"project_name": "d", "modules": {}})
     assert (out / "scripts/process/train.py").is_file()

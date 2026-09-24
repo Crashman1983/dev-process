@@ -80,7 +80,8 @@ completeness runs near the merge.** The ladder:
   whole batch of changes a branch or stage carries — this is where several
   changes share one full run and the economics work. `finish.py` names the
   step; a stage-gate task is its speckit twin. Selection is never the last
-  net before a merge.
+  net before a merge. "Full" means every stack: a boundary command that runs
+  only the backend leaves the frontend proven by selection alone.
 
 Why the ladder is safe: selection fails exactly where dependencies bypass
 the import graph — and those categories are enumerated as full-run
