@@ -250,6 +250,28 @@ Judge against the checklist and the rules above; cite file:line evidence; a
 `pass` with unfixed blockers is a false green — verdict `block` instead."""
 
 
+# above this a review stops being one review: downstream, the works that ran
+# five to seven rounds were 3,000–5,500 changed lines or a batch of issues
+REVIEW_MAX_FILES = int(os.environ.get("PROCESS_REVIEW_MAX_FILES", "30"))
+REVIEW_MAX_LINES = int(os.environ.get("PROCESS_REVIEW_MAX_LINES", "1500"))
+SIZE_IGNORED = re.compile(r"^\.process-work/|(^|/)(package-lock\.json|uv\.lock|poetry\.lock|yarn\.lock|"
+                          r"pnpm-lock\.yaml|Cargo\.lock|go\.sum)$")
+
+
+def review_size(root: Path, base_ref: str) -> tuple[int, int]:
+    """(files, changed lines) of the whole branch — process bookkeeping,
+    lock files and binaries left out."""
+    files = lines = 0
+    for ln in (_git(root, "diff", "--numstat", f"{base_ref}...HEAD") or "").splitlines():
+        parts = ln.split("\t")
+        if len(parts) < 3 or SIZE_IGNORED.search(parts[2]):
+            continue
+        files += 1
+        if parts[0].isdigit() and parts[1].isdigit():
+            lines += int(parts[0]) + int(parts[1])
+    return files, lines
+
+
 def build(root: Path, base: str | None, plan_filter: str | None = None,
           since: str | None = None) -> str:
     out: list[str] = []
@@ -272,6 +294,16 @@ def build(root: Path, base: str | None, plan_filter: str | None = None,
         add("**Delta re-review.** The diff below is limited to changes since "
             f"`{since}`. Previous findings and the full branch file surface are "
             "included so fixes are judged in their original scope.\n")
+
+    sized = _resolve_base(root, base)
+    if sized is not None:
+        files, lines = review_size(root, sized)
+        if files > REVIEW_MAX_FILES or lines > REVIEW_MAX_LINES:
+            add(f"**SIZE WARNING:** this branch changes {files} files / {lines} lines (limit "
+                f"{REVIEW_MAX_FILES} / {REVIEW_MAX_LINES}, `PROCESS_REVIEW_MAX_FILES`/`_LINES`). "
+                "Reviews this large ran five to seven rounds downstream. Split it before the "
+                "first round if the plan allows; otherwise say so in the verdict and review "
+                "it slice by slice.\n")
 
     kernel = _kernel_block(root)
     add("## The binding rules (kernel)\n")
@@ -521,6 +553,9 @@ def main(argv: list[str]) -> int:
             print(detail, file=sys.stderr)
             return status
     text = build(root, base, plan_filter, since)
+    warn = next((ln for ln in text.splitlines() if ln.startswith("**SIZE WARNING:**")), None)
+    if warn:
+        print("make_review_bundle: " + warn.replace("**", ""), file=sys.stderr)
     if target is not None and partial is not None:
         try:  # atomic: a reader never sees half a bundle
             partial.write_text(text, encoding="utf-8")

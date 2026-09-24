@@ -20,11 +20,26 @@ gate's parser, and appends it to the journal shard. What this cannot do —
 and does not claim — is prove the review happened; it proves the line was
 produced from the artifact it names.
 
+The round is counted, not claimed: round = 1 + the blocking REVIEW lines
+already recorded for this work. A re-check after a pass, a rebase or a
+"short look" keeps the round — only a block starts a new one — and a block
+that was never attested cannot be skipped over (observed downstream: rounds
+numbered 6 with one line in the journal, re-checks counted as rounds, plan
+and code rounds on one counter). Plan reviews count apart (`--plan-review`
+records work=<id>-plan).
+
+Before any round after a block, each block's fix names its cause: a line
+`ROOT-CAUSE work=<id> round=<r>: <cause> — <the test that failed before the fix>`
+in the journal or the plan. A fix that names no cause is a patch, and
+patches on patches were the largest source of extra rounds downstream.
+`--exception TEXT` overrides either rule; the reason is written above the
+line as `REVIEW-EXCEPTION`, where it can be counted.
+
 Usage:
   attest.py --work ID --tier N --reviewer R --model M --independence a,b
-            --verdict pass|block --round N
+            --verdict pass|block [--round N] [--plan-review]
             [--bundle FILE | --base SHA --head SHA] [--note TEXT]
-            [--journal-dir DIR] [--dry-run]
+            [--exception TEXT] [--journal-dir DIR] [--dry-run]
 """
 from __future__ import annotations
 
@@ -40,9 +55,13 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling import
 from check_review import (  # noqa: E402  (one owner for grammar + digest)
     JOURNAL_DIR,
+    PLANS_ACTIVE,
     artifact_digest,
     parse_review_lines,
 )
+
+ROOT_CAUSE = re.compile(r"^\s*(?:[-*]\s+)?ROOT-CAUSE\s+work=(?P<work>\S+)\s+round=(?P<round>\d+):\s*\S",
+                        re.MULTILINE)
 
 ARTIFACT_LINE = re.compile(
     r"^REVIEW_ARTIFACT\s+base=(?P<base>\S+)\s+head=(?P<head>\S+)\s+diff=(?P<diff>\S+)\s*$",
@@ -69,6 +88,40 @@ def _journal_target(root: Path, journal_dir: Path) -> Path:
     if slug and slug not in INTEGRATION_BRANCHES:
         return journal_dir / slug / f"{today}.md"
     return journal_dir / f"{today}.md"
+
+
+def _texts(root: Path, journal_dir: Path) -> list[str]:
+    """Journal shards (root and branch directories) and plans (active and
+    archived): where REVIEW and ROOT-CAUSE lines live."""
+    out: list[str] = []
+    for d in (journal_dir, root / PLANS_ACTIVE):
+        if d.is_dir():
+            out += [f.read_text(encoding="utf-8", errors="replace") for f in sorted(d.rglob("*.md"))]
+    return out
+
+
+def round_problems(args, root: Path, journal_dir: Path) -> tuple[int, list[str]]:
+    """(the counted round, what is wrong with the claimed one)."""
+    texts = _texts(root, journal_dir)
+    blocks = sorted(int(f["round"]) for t in texts for _ln, f in parse_review_lines(t)[0]
+                    if f["work"] == args.work and f["verdict"] == "block")
+    counted = 1 + len(blocks)
+    problems: list[str] = []
+    if args.round_ is not None and str(args.round_) != str(counted):
+        problems.append(
+            f"round {args.round_} claimed, but {len(blocks)} blocking REVIEW line(s) are recorded for "
+            f"work={args.work} — this is round {counted}. A re-check after a pass or a rebase keeps "
+            f"the round; a block that was never attested is attested first (its own --base/--head); "
+            f"omit --round to use the count")
+    causes = {(m.group("work"), int(m.group("round"))) for t in texts for m in ROOT_CAUSE.finditer(t)}
+    missing = [r for r in blocks if (args.work, r) not in causes]
+    if missing:
+        problems.append(
+            "no root cause for the fix of blocking round(s) " + ", ".join(map(str, missing))
+            + f" — before the next round write `ROOT-CAUSE work={args.work} round=<r>: <cause> — <the test "
+            "that failed before the fix>` into the journal or the plan (docs/process/review-checklist.md, "
+            "round economy)")
+    return counted, problems
 
 
 def build_line(args, root: Path) -> tuple[str, list[str]]:
@@ -117,7 +170,11 @@ def main() -> int:
     ap.add_argument("--model", required=True)
     ap.add_argument("--independence", required=True)
     ap.add_argument("--verdict", required=True)
-    ap.add_argument("--round", required=True, dest="round_")
+    ap.add_argument("--round", default=None, dest="round_",
+                    help="optional: checked against the count of recorded blocks for this work")
+    ap.add_argument("--plan-review", action="store_true",
+                    help="a review of the plan, not the code: counted apart as work=<id>-plan")
+    ap.add_argument("--exception", help="override the round/root-cause rules; the reason is recorded")
     ap.add_argument("--bundle")
     ap.add_argument("--base")
     ap.add_argument("--head")
@@ -127,13 +184,23 @@ def main() -> int:
     ap.add_argument("root", nargs="?", default=str(ROOT))
     args = ap.parse_args()
     root = Path(args.root).resolve()
+    journal_dir = Path(args.journal_dir) if args.journal_dir else root / JOURNAL_DIR
+    if args.plan_review and not args.work.endswith("-plan"):
+        args.work += "-plan"
+    counted, round_issues = round_problems(args, root, journal_dir)
+    exception_note = ""
+    if round_issues and args.exception:
+        exception_note = (f"REVIEW-EXCEPTION work={args.work} round={counted}: {args.exception} "
+                          f"(overrides: {'; '.join(round_issues)})")
+        round_issues = []
+    args.round_ = counted if args.round_ is None else args.round_
     line, problems = build_line(args, root)
+    problems = round_issues + problems
     if problems:
         print("attest: REFUSED — nothing written:", file=sys.stderr)
         for p in problems:
             print(f"  - {p}", file=sys.stderr)
         return 1
-    journal_dir = Path(args.journal_dir) if args.journal_dir else root / JOURNAL_DIR
     target = _journal_target(root, journal_dir)
     print(line)
     if args.dry_run:
@@ -143,6 +210,8 @@ def main() -> int:
     with target.open("a", encoding="utf-8") as fh:
         if target.stat().st_size == 0:
             fh.write(f"# {dt.date.today().isoformat()}\n\n")
+        if exception_note:
+            fh.write(exception_note + "\n\n")
         if args.note:
             fh.write(args.note.rstrip() + "\n\n")
         fh.write(line + "\n")

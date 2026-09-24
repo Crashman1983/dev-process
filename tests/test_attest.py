@@ -168,3 +168,44 @@ def test_finish_blocks_a_stale_review(render, tmp_path):
     r = subprocess.run([sys.executable, str(out / "scripts/process/finish.py")],
                        cwd=out, capture_output=True, text=True)
     assert "code changed after the reviewed head" in r.stdout + r.stderr
+
+
+def _journal(out):
+    return "".join(f.read_text() for f in (out / ".process-work/journal").rglob("*.md"))
+
+
+def test_the_round_is_counted_from_recorded_blocks_not_claimed(render, tmp_path):
+    # downstream: re-checks after a pass and rebases were counted as rounds,
+    # and blocking rounds were skipped in the journal
+    out, base, head = _repo(render, tmp_path)
+    ab = ("--base", base, "--head", head)
+    assert _attest(out, *ab, "--verdict", "block").returncode == 0
+    r = _attest(out, *ab, "--round", "3")
+    assert r.returncode == 1 and "this is round 2" in r.stderr
+    # the fix of round 1 names no cause yet
+    r = _attest(out, *ab, "--round", "2")
+    assert r.returncode == 1 and "no root cause for the fix of blocking round(s) 1" in r.stderr
+    plan = out / ".process-work/plans/2026-09-10-widget.md"
+    plan.write_text(plan.read_text() + "\nROOT-CAUSE work=widget round=1: the cache key ignored the tenant "
+                    "— test_widget_per_tenant failed before the fix\n")
+    r = _attest(out, *ab, "--round", "2")
+    assert r.returncode == 0, r.stderr
+    assert "verdict=pass round=2" in _journal(out)
+    # a re-check after the pass (a rebase, a short look) keeps the round
+    r = _attest(out, *ab, "--round", "3")
+    assert r.returncode == 1 and "this is round 2" in r.stderr
+    assert _attest(out, *ab, "--round", "2").returncode == 0
+
+
+def test_an_exception_is_recorded_and_plan_reviews_count_apart(render, tmp_path):
+    out, base, head = _repo(render, tmp_path)
+    ab = ("--base", base, "--head", head)
+    assert _attest(out, *ab, "--verdict", "block").returncode == 0
+    r = _attest(out, *ab, "--round", "2", "--exception", "owner decided: cosmetic fix only")
+    assert r.returncode == 0, r.stderr
+    j = _journal(out)
+    assert "REVIEW-EXCEPTION work=widget round=2: owner decided: cosmetic fix only" in j
+    assert "no root cause" in j
+    r = _attest(out, *ab, "--plan-review", "--round", "1")
+    assert r.returncode == 0, r.stderr
+    assert "work=widget-plan" in r.stdout and "round=1" in r.stdout

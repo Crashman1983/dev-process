@@ -204,10 +204,12 @@ REVIEW work=42 tier=2 reviewer=fresh-agent model=same independence=bundle,non-im
 | `model` | reviewing model-family slug, or `same` if the producer's family |
 | `independence` | comma set ⊆ `bundle,non-implementing,cross-model,single-family` |
 | `verdict` | `pass` \| `block` |
-| `round` | 1, 2, … |
+| `round` | 1 + the blocking REVIEW lines already recorded for this `work` — counted by `attest.py`, not claimed: a re-check after a pass or a rebase keeps the round; plan reviews count apart as `work=<id>-plan` |
 | `base` | optional: merge-base commit the bundle diffed from |
 | `head` | optional: reviewed branch head |
 | `diff` | optional: SHA-256 of the raw `git diff --binary base...head` bytes — the gate recomputes and verifies it |
+
+Two companion lines. `ROOT-CAUSE work=<id> round=<r>: <cause> — <the test that failed before the fix>` (journal or plan): each blocking round's fix names its cause before the next round, or `attest.py` refuses it. `REVIEW-EXCEPTION work=<id> round=<n>: <reason> …`: written by `attest.py --exception` when the owner overrides either rule — countable, never silent.
 
 A `REVIEW` inside a ```-fenced block is a quotation and is ignored (quote
 literal examples only there). Grammar and the independence arithmetic the gate

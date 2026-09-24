@@ -431,3 +431,21 @@ def test_a_failed_run_leaves_no_stale_bundle_behind(render, tmp_path):
     r = _run(out, "--base", "main", "-o", str(bundle), "--skip-preflight")
     assert r.returncode == 0, r.stderr
     assert "Review bundle" in bundle.read_text() and not (out / "bundle.md.partial").exists()
+
+
+def test_a_large_branch_gets_a_size_warning(render, tmp_path, monkeypatch):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    r = _run(out, "--base", "main")
+    assert "SIZE WARNING" not in r.stdout
+    for i in range(4):
+        (out / f"m{i}.py").write_text("x = 1\n" * 10)
+    (out / "uv.lock").write_text("lock\n" * 5000)  # lock files do not count
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "more")
+    env = dict(__import__("os").environ, PROCESS_REVIEW_MAX_FILES="3")
+    r = subprocess.run([sys.executable, str(out / "scripts/process/make_review_bundle.py"), "--base", "main"],
+                       cwd=out, capture_output=True, text=True, env=env)
+    assert r.returncode == 0, r.stderr
+    assert "**SIZE WARNING:** this branch changes 5 files / 42 lines" in r.stdout
+    assert "SIZE WARNING" in r.stderr
