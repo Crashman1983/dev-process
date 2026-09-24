@@ -62,3 +62,17 @@ def test_adapters_list_every_module_doc():
             f"{p.name}: _mod_slugs != copier.yml modules — "
             f"missing {sorted(modules - listed)}, extra {sorted(listed - modules)}")
 
+
+
+def test_no_brace_pair_in_python_templates_renders_away():
+    # a Python f-string's `{{…}}` escape inside a *.py.jinja file is Jinja
+    # syntax: it renders to nothing (observed: `f"{ref}^{{commit}}"` became
+    # `f"{ref}^"`, the parent commit, and every push with history was refused).
+    # Template expressions here use `{{ name }}` with spaces; anything else is
+    # this mistake.
+    offenders = []
+    for p in (q for q in (ROOT / "template").rglob("*.jinja") if ".py" in q.name):
+        for n, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1):
+            if re.search(r"\{\{[^ {]", line):
+                offenders.append(f"{p.relative_to(ROOT)}:{n}: {line.strip()}")
+    assert not offenders, offenders

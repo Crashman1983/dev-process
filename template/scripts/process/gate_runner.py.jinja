@@ -216,7 +216,9 @@ def _emit(output: str, known: set[str], seen: set[str], show_all: bool) -> int:
 
 
 def _commit_of(root: Path, ref: str) -> str:
-    r = subprocess.run(["git", "-C", str(root), "rev-parse", "--verify", "-q", f"{ref}^{{commit}}"],
+    # `^0` peels a tag to its commit — written without braces on purpose: this
+    # file is a Jinja template, and a doubled brace would render away
+    r = subprocess.run(["git", "-C", str(root), "rev-parse", "--verify", "-q", ref + "^0"],
                        capture_output=True, text=True)
     return r.stdout.strip() if r.returncode == 0 else ""
 

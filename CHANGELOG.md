@@ -1155,6 +1155,17 @@ wie archivierte auch über den Kurznamen ohne Datum erkannt. Das Rezept für
 Cloud-Sitzungen installiert die Git-Hooks, denn auch dort wird gepusht,
 `v2.28.0`.
 
+**Dringende Korrektur: jeder Push mit Historie wurde abgelehnt.** Die in
+v2.27.1 eingeführte Auflösung annotierter Tags schrieb im Gate-Runner
+`^{{commit}}` — in einer Jinja-Vorlage ist das Jinja-Syntax und rendert zu
+`^`, also zum Eltern-Commit. Mit dem `git-hooks`-Modul lehnte die Prüfung des
+gepushten Stands damit jeden Push ab, dessen Commit einen Vorgänger hat. Der
+Test lief mit einem Repo aus einem einzigen Commit und sah es nicht. Jetzt
+`^0` (ohne Klammern), ein Test mit echter Historie und annotiertem Tag, und
+ein Wächter-Test gegen doppelte Klammern ohne Leerzeichen in Python-Vorlagen.
+Wer v2.27.1 oder v2.28.0 installiert hat und am Push scheitert: auf v2.28.1
+aktualisieren, `v2.28.1`.
+
 ## Sub-Projekt-Tabelle (SP1–SP24)
 
 Die Tabelle wurde bis SP24 gepflegt; ab SP25 trägt das Narrativ oben die

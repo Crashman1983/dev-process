@@ -91,14 +91,22 @@ def test_a_push_of_another_commit_than_the_checked_tree_fails(render_raw, tmp_pa
     import os
     out = render_raw(tmp_path, {"project_name": "d"})
     for args in (["init", "-q", "-b", "main"], ["config", "user.email", "t@t"],
-                 ["config", "user.name", "t"], ["add", "-A"], ["commit", "-q", "-m", "base"]):
+                 ["config", "user.name", "t"], ["add", "-A"], ["commit", "-q", "-m", "base"],
+                 ["commit", "-q", "--allow-empty", "-m", "second"],  # real history: HEAD has a parent
+                 ["tag", "-a", "v0.1.0", "-m", "release"]):
         subprocess.run(["git", *args], cwd=out, check=True, capture_output=True)
     head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=out, capture_output=True,
                           text=True).stdout.strip()
+    tag_object = subprocess.run(["git", "rev-parse", "v0.1.0"], cwd=out, capture_output=True,
+                                text=True).stdout.strip()
+    assert tag_object != head
     runner = [sys.executable, str(out / "scripts/process/gate_runner.py")]
     same = subprocess.run(runner, cwd=out, capture_output=True, text=True,
                           env={**os.environ, "PRE_COMMIT_TO_REF": head})
     assert same.returncode == 0, same.stdout + same.stderr
+    tag = subprocess.run(runner, cwd=out, capture_output=True, text=True,
+                         env={**os.environ, "PRE_COMMIT_TO_REF": tag_object})
+    assert tag.returncode == 0, tag.stdout + tag.stderr  # an annotated tag of HEAD is HEAD
     other = subprocess.run(runner, cwd=out, capture_output=True, text=True,
                            env={**os.environ, "PRE_COMMIT_TO_REF": "0" * 40})
     assert other.returncode != 0 and "not being pushed" in other.stderr
