@@ -99,7 +99,23 @@ def load_policy(root: Path) -> dict:
         raise SystemExit(f"dispatch: {POLICY} is not valid JSON: {exc}")
     if not isinstance(data.get("command"), str) or "{prompt}" not in data["command"]:
         raise SystemExit(f"dispatch: {POLICY} needs a `command` template containing {{prompt}}")
+    for ph, row in (data.get("phases") or {}).items():
+        if ph not in PHASES or not isinstance(row, dict):
+            raise SystemExit(f"dispatch: {POLICY} `phases` keys must be plan|execute|review with an object each")
+        if "command" in row and (not isinstance(row["command"], str) or "{prompt}" not in row["command"]):
+            raise SystemExit(f"dispatch: {POLICY} phases.{ph}.command must contain {{prompt}}")
     return data
+
+
+def phase_policy(policy: dict, phase: str) -> dict:
+    """The command, runner and host for ONE phase: `phases.<phase>` overrides
+    the top-level `command`/`runner`; `remote: true` says the session runs on
+    another host (a cloud session, another machine) — no local worktree, no
+    local liveness, reports come back through origin (`report.py --sync`)."""
+    row = (policy.get("phases") or {}).get(phase) or {}
+    return {"command": row.get("command") or policy["command"],
+            "runner": str(row.get("runner") or policy.get("runner") or "detached"),
+            "remote": bool(row.get("remote", False))}
 
 
 def model_for(policy: dict, tier: int | None, phase: str) -> str:
@@ -119,12 +135,14 @@ def max_workers(policy: dict) -> int:
     return n if n > 0 else 4
 
 
-def build_argv(policy: dict, model: str, prompt: str, branch: str = "", issue: int | None = None) -> list[str]:
+def build_argv(policy: dict, model: str, prompt: str, branch: str = "", issue: int | None = None,
+               phase: str | None = None) -> list[str]:
     # {branch}/{issue} name the session for a harness that labels sessions
     # (e.g. `--remote-control={branch}` — the `=` form, or the flag eats the prompt)
     subs = {"{model}": model, "{prompt}": prompt, "{branch}": branch, "{issue}": str(issue or "")}
+    command = phase_policy(policy, phase)["command"] if phase else policy["command"]
     out = []
-    for a in shlex.split(policy["command"]):
+    for a in shlex.split(command):
         for k, v in subs.items():
             a = a.replace(k, v)
         out.append(a)
@@ -208,11 +226,16 @@ def ensure_worktree(root: Path, branch: str) -> Path:
 
 # --- the prompt: the slash command leads, the command file owns the steps -----------
 
-def prompt_for(phase: str, issue: int, tier: int | None, branch: str, model: str) -> str:
+def prompt_for(phase: str, issue: int, tier: int | None, branch: str, model: str, remote: bool = False) -> str:
     tier_s = f"tier {tier}" if tier is not None else "tier to be derived from the scope (risk-tiers.md)"
+    where = ("run on another host than the steward: fetch and check out branch `{b}` from origin first, set "
+             "PROCESS_HOST to this host's name and PROCESS_REPORT_SYNC=1 so every report reaches origin "
+             "(`refs/process/reports/<host>`) — the steward reads it there; push only what the phase produces"
+             .format(b=branch) if remote else "work only in this worktree")
     tail = (f" You are the {phase} session for issue #{issue} on branch `{branch}` ({tier_s}), running as "
-            f"{model}; work only in this worktree. Report each state transition with "
-            f"`uv run scripts/process/report.py <state> --issue {issue} --model {model}`. A question only "
+            f"{model}; {where}. Report each state transition with "
+            f"`uv run scripts/process/report.py <state> --issue {issue} --model {model}"
+            f"{' --sync' if remote else ''}`. A question only "
             f"the owner can answer goes into the plan's `## Decisions` as "
             f"`DECISION NEEDED <date> {branch}: <question> — options: A …, B …; recommendation: …`, "
             f"then `report.py blocked` — never decide it yourself (mandatory rule 4).")
@@ -292,7 +315,9 @@ def records(root: Path) -> list[dict]:
             rec = json.loads(p.read_text(encoding="utf-8"))
         except ValueError:
             continue
-        if rec.get("tmux_window"):
+        if rec.get("remote"):
+            rec["state"] = "remote"  # liveness lives on the other host; its reports say
+        elif rec.get("tmux_window"):
             rec["state"] = _pane_state(rec["tmux_window"])
         else:
             rec["state"] = "live" if _same_process(rec) else "gone"
@@ -362,12 +387,40 @@ def start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str |
         print("dispatch: a test lane is held — no free CPU for a new session; retry when lane-status says free",
               file=sys.stderr)
         return 3
-    prompt = prompt_for(phase, issue, tier, branch, model)
-    argv = build_argv(policy, model, prompt, branch, issue)
-    runner = str(policy.get("runner") or "detached")
+    pp = phase_policy(policy, phase)
+    runner, remote = pp["runner"], pp["remote"]
+    prompt = prompt_for(phase, issue, tier, branch, model, remote=remote)
+    argv = build_argv(policy, model, prompt, branch, issue, phase)
     if dry_run:
         shown = [a if a != prompt else f"<prompt {len(prompt)} chars>" for a in argv]
-        print(f"dispatch: would start {phase} for #{issue} on {branch} with {model} ({runner}):\n  {shown}")
+        print(f"dispatch: would start {phase} for #{issue} on {branch} with {model} "
+              f"({'remote, ' if remote else ''}{runner}):\n  {shown}")
+        return 0
+    if remote:
+        # another host: no worktree here, the start command hands the work over
+        # (a cloud session, an ssh command); its exit is the hand-over, not the
+        # worker's end — the worker's reports arrive through origin
+        if not _out(root, "ls-remote", "--heads", "origin", branch):
+            print(f"dispatch: {branch} is not on origin — a remote {phase} session needs the branch pushed first",
+                  file=sys.stderr)
+            return 3
+        extra = {"PROCESS_WORKER": branch, "PROCESS_PHASE": phase, "PROCESS_MODEL": model, "PROCESS_ISSUE": str(issue)}
+        try:
+            r = subprocess.run(argv, cwd=root, capture_output=True, text=True, timeout=300, env=_worker_env(extra))
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            print(f"dispatch: remote start failed: {exc}", file=sys.stderr)
+            return 1
+        if r.returncode != 0:
+            print(f"dispatch: remote start command exited {r.returncode}: {(r.stderr or r.stdout).strip()[-400:]}",
+                  file=sys.stderr)
+            return 1
+        rec = {"branch": branch, "issue": issue, "phase": phase, "tier": tier, "model": model, "remote": True,
+               "started": int(time.time()), "ts": _dt.datetime.now().isoformat(timespec="seconds"),
+               "runner": runner, "handover": r.stdout.strip()[-400:]}
+        _record_path(root, branch).write_text(json.dumps(rec, indent=2), encoding="utf-8")
+        _remember_issue(root, issue, branch)
+        print(f"dispatch: handed {phase} for #{issue} on {branch} to another host with {model} — "
+              f"reports via origin (`tower.py --remote`)" + (f"\n  {rec['handover']}" if rec["handover"] else ""))
         return 0
     wt = ensure_worktree(root, branch)
     log = _records_dir(root) / f"{branch.replace('/', '__')}-{phase}-{_dt.datetime.now():%Y%m%d-%H%M%S}.log"
@@ -423,7 +476,8 @@ def list_sessions(root: Path) -> int:
     for r in recs:
         mins = int((now - int(r.get("started") or now)) // 60)
         last, since = last_output(r)
-        where = f"{r.get('tmux_session')}:{r.get('tmux_name')}" if r.get("tmux_window") else f"pid {r.get('pid')}"
+        where = ("another host" if r.get("remote") else
+                 f"{r.get('tmux_session')}:{r.get('tmux_name')}" if r.get("tmux_window") else f"pid {r.get('pid')}")
         print(f"- {r['branch']}: {r['phase']} #{r.get('issue')} {r.get('model')} {where} "
               f"{r['state'].upper()} ({mins} min)" + (f" · {since} min ago: {last[-120:]}" if last else ""))
     return 0
@@ -434,8 +488,9 @@ def _load_record(root: Path, branch: str) -> tuple[Path, dict] | None:
     if not p.is_file():
         return None
     rec = json.loads(p.read_text(encoding="utf-8"))
-    rec["state"] = _pane_state(rec["tmux_window"]) if rec.get("tmux_window") else (
-        "live" if _same_process(rec) else "gone")
+    rec["state"] = ("remote" if rec.get("remote") else
+                    _pane_state(rec["tmux_window"]) if rec.get("tmux_window") else
+                    "live" if _same_process(rec) else "gone")
     return p, rec
 
 
@@ -476,6 +531,10 @@ def stop(root: Path, branch: str, *, force: bool) -> int:
         print(f"dispatch: {branch} was not started by this tool — stop only what you started", file=sys.stderr)
         return 2
     p, rec = found
+    if rec["state"] == "remote":
+        print(f"dispatch: {branch} runs on another host — stop it there; record removed here")
+        p.unlink()
+        return 0
     if rec["state"] != "live":
         print(f"dispatch: {branch} is {rec['state']} — record removed")
         p.unlink()

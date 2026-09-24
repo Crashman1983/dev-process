@@ -34,6 +34,11 @@ def test_hook_prints_kernel_rules_and_ledger_only(render, tmp_path):
     assert "feat-x" in text
     assert "<!-- KERNEL:START -->" not in text  # the block, not the file around it
     assert len(text) < 12000  # every compaction pays for this
+    # a plan that became a log (113 decisions downstream): only the latest ride along
+    (d / "2026-09-11-log.md").write_text(
+        "# L\n\ntier: 2\n\n## Decisions\n" + "".join(f"- DECISION 2026-09-11 owner: d{i} — because\n" for i in range(40)))
+    text = _run(out).stdout
+    assert "28 earlier decisions in the plan" in text and "d39" in text and "d11" not in text
 
 
 def test_install_is_idempotent_and_keeps_the_projects_settings(render, tmp_path):

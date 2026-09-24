@@ -109,6 +109,50 @@ def test_start_list_stop_lifecycle(render, tmp_path):
     assert _dispatch(out, "stop", "foreign").returncode == 2
 
 
+def test_remote_phase_hands_over_without_a_worktree(render, tmp_path):
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    bare = tmp_path / "origin.git"
+    _git(out, "clone", "-q", "--bare", str(out), str(bare))
+    _git(out, "remote", "add", "origin", str(bare))
+    marker = tmp_path / "handover"
+    pol = out / "docs/process/model-policy.json"
+    data = json.loads(pol.read_text())
+    cloud = out.parent / "start-cloud.sh"
+    cloud.write_text(f'#!/bin/sh\nprintf "%s|%s|%s|%s" "$1" "$2" "$3" "$PROCESS_PHASE" > {marker}\necho session-abc\n')
+    cloud.chmod(0o755)
+    local = out.parent / "local.sh"
+    local.write_text("#!/bin/sh\nsleep 30\n")
+    local.chmod(0o755)
+    data["command"] = f"{local} {{prompt}}"
+    data["phases"] = {"review": {"command": f"{cloud} {{branch}} {{model}} {{prompt}}", "remote": True}}
+    pol.write_text(json.dumps(data))
+    # the branch must be on origin first — a review of unpushed work is nothing
+    r = _dispatch(out, "start", "--issue", "4", "--phase", "review", "--branch", "b4")
+    assert r.returncode == 3 and "not on origin" in r.stderr
+    _git(out, "branch", "b4")
+    _git(out, "push", "-q", "origin", "b4")
+    r = _dispatch(out, "start", "--issue", "4", "--phase", "review", "--tier", "3", "--branch", "b4")
+    assert r.returncode == 0, r.stderr
+    assert "handed review for #4" in r.stdout and "session-abc" in r.stdout
+    seen = marker.read_text().split("|")
+    assert seen[0] == "b4" and seen[1] == "claude-fable-5-1" and seen[3] == "review"
+    assert "--sync" in seen[2] and "PROCESS_REPORT_SYNC=1" in seen[2] and "/review" in seen[2]
+    assert not (out.parent / "repo-b4").exists()  # no local worktree for a remote phase
+    r = _dispatch(out, "list")
+    assert "b4: review #4" in r.stdout and "another host" in r.stdout and "REMOTE" in r.stdout
+    # a remote record does not count against this host's cap; local phases keep the local command
+    r = _dispatch(out, "start", "--issue", "5", "--phase", "plan", "--branch", "b5", "--dry-run")
+    assert r.returncode == 0 and "local.sh" in r.stdout and "(remote, " not in r.stdout
+    r = _dispatch(out, "stop", "b4")
+    assert r.returncode == 0 and "another host" in r.stdout
+    assert "b4" not in _dispatch(out, "list").stdout
+    # a bad per-phase command is refused up front
+    data["phases"] = {"review": {"command": "cloud-start only"}}
+    pol.write_text(json.dumps(data))
+    assert "{prompt}" in _dispatch(out, "policy").stderr
+
+
 def test_worktree_path_taken_by_a_foreign_directory_is_refused(render, tmp_path):
     out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
     _repo(out)
