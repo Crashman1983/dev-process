@@ -1141,6 +1141,20 @@ beanspruchtes Issue nicht mehr als planlos, wenn ein Plan unter Tier 2 es
 nennt; veraltete Texte zu gestrichenen Modulen bereinigt, `fix-streak` meldet
 OK, `make_review_bundle.py` und `tidy.py` kennen `--help`. Aus der Prüfung des Referenzprojekts: in der CI meldet die Hook-Verdrahtung nichts (dort ist der Job die Durchsetzung, lokale Hooks braucht er nicht), und ein nicht berechenbarer Review-Digest in einem flachen Klon (Standard einer Cloud-Sitzung) ist ein Hinweis statt rot, `v2.27.1`.
 
+**Review-Durchsetzung ohne CI geschärft.** Eine Prüfung des Referenzprojekts
+zeigte drei Lücken, alle ohne CI unentdeckt: Ein Tier-2-Plan ließ sich ohne
+Review auf main mergen (die Pflicht griff erst beim Archivieren), Code nach
+dem Prüfvermerk blieb grün, und ein übersprungener Hook oder ein Merge über
+den Plattform-Button fiel niemandem auf. Jetzt verlangt der Push auf main ab
+Tier 2 den klärenden Pass; ein Pass gilt nur für den `head`, den er nennt —
+später geänderter Code in den Pfaden des Pushs macht ihn beim Merge-Push und
+in `finish.py` ungültig (Journal und Pläne ausgenommen); ein Tier-3-Plan, der
+noch aktiv ist, während Commits auf main sein Issue beanspruchen, macht das
+Gate ohne Pass oder `review-waived:` auf jedem Lauf rot. Aktive Pläne werden
+wie archivierte auch über den Kurznamen ohne Datum erkannt. Das Rezept für
+Cloud-Sitzungen installiert die Git-Hooks, denn auch dort wird gepusht,
+`v2.28.0`.
+
 ## Sub-Projekt-Tabelle (SP1–SP24)
 
 Die Tabelle wurde bis SP24 gepflegt; ab SP25 trägt das Narrativ oben die

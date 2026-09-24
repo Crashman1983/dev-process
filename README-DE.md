@@ -15,7 +15,7 @@ Repositories. Er ändert nicht die Agenten, sondern ihre Arbeitsbedingungen:
 Regeln prüft ein Programm, der Aufwand folgt dem Risiko, niemand nimmt die
 eigene Arbeit ab, und das Gedächtnis liegt in Dateien statt im Kontext.
 
-> **Status:** `v2.27.1` — Sub-Projekte SP1–SP75. Historie: [`CHANGELOG.md`](CHANGELOG.md).
+> **Status:** `v2.28.0` — Sub-Projekte SP1–SP75. Historie: [`CHANGELOG.md`](CHANGELOG.md).
 
 ## Einstieg
 

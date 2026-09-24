@@ -136,3 +136,35 @@ def test_an_uncomputable_digest_in_a_shallow_clone_is_a_note(render, tmp_path, m
                         if a == ("rev-parse", "--is-shallow-repository") else real(root, *a))
     hard, soft = gate._integrity_violations("j.md", out, record)
     assert not hard and soft and "shallow clone" in soft[0]
+
+
+def test_code_after_the_reviewed_head_is_stale_on_the_merge_push(render, tmp_path):
+    # observed downstream: a fix committed after the attested pass merged green
+    import os
+    out, base, head = _repo(render, tmp_path)
+    r = _attest(out, "--base", base, "--head", head, "--note", "Reviewed.")
+    assert r.returncode == 0, r.stderr
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "docs: attest")
+    gate = [sys.executable, str(out / "scripts/process/check_review.py"), "."]
+    env = {**os.environ, "PROCESS_PUSH_TARGETS": "refs/heads/main"}
+    r = subprocess.run(gate, cwd=out, capture_output=True, text=True, env=env)
+    assert r.returncode == 0, r.stdout  # the attestation commit is bookkeeping
+    (out / "widget.py").write_text("def widget():\n    return 43\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "fix: after the review")
+    r = subprocess.run(gate, cwd=out, capture_output=True, text=True, env=env)
+    assert r.returncode == 1 and "code changed after the reviewed head (widget.py)" in r.stdout, r.stdout
+
+
+def test_finish_blocks_a_stale_review(render, tmp_path):
+    out, base, head = _repo(render, tmp_path)
+    assert _attest(out, "--base", base, "--head", head).returncode == 0
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "docs: attest")
+    (out / "widget.py").write_text("def widget():\n    return 44\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "fix: after the review")
+    r = subprocess.run([sys.executable, str(out / "scripts/process/finish.py")],
+                       cwd=out, capture_output=True, text=True)
+    assert "code changed after the reviewed head" in r.stdout + r.stderr

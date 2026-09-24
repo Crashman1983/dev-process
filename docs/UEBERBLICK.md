@@ -6,7 +6,7 @@
 
 Prinzipien, Mechanik und der Weg in die Fläche
 
-Prozessvorlage dev-process v2.27.1 · erprobt in einem realen, produktiv genutzten Repository (Referenzprojekt)
+Prozessvorlage dev-process v2.28.0 · erprobt in einem realen, produktiv genutzten Repository (Referenzprojekt)
 
 Vorlage öffentlich auf GitHub: [github.com/Crashman1983/dev-process](https://github.com/Crashman1983/dev-process)
 
@@ -174,7 +174,7 @@ Die folgende Tabelle zeigt, wie sich die Bausteine abbilden ließen und was davo
 
 | Risiko | Bedeutung | Gegenmaßnahme heute |
 |---|---|---|
-| Gates umgehbar | Ohne Branch Protection kann ein Merge die Gates überspringen. | Jede Umgehung muss im Commit benannt werden; die Branch Protection macht das Gate zur Pflicht; der Owner zieht Stichproben. |
+| Gates umgehbar | Ohne Branch Protection kann ein Merge die Gates überspringen. | Jede Umgehung muss im Commit benannt werden; ein Tier-3-Vorgang, der ohne Review auf main landet, macht das Gate nachträglich rot; die Branch Protection macht das Gate zur Pflicht; der Owner zieht Stichproben. |
 | Attest ist Selbstauskunft | Ob der Prüfer eine andere Instanz war, kann das Gate nicht nachprüfen. | Prüfsitzungen startet ein Programm, nicht ein Mensch von Hand; das Attest ist an den Code gebunden; der Owner zieht Stichproben. |
 | Eine Modellfamilie | Im Referenzprojekt liefen zwei Drittel der Tier-3-Prüfungen ohne zweites Modell; das Gate verlangt dann nur eine ausdrückliche Erklärung. | Die Widerlegungsprüfung bleibt; Plattformen wie Copilot bieten Modelle mehrerer Hersteller; ob das Gate das zweite Modell verlangen soll, ist offen. |
 | Modellpolitik ist Code | Die Datei enthält auch den Startbefehl der Sitzungen; wer sie ändert, kann Befehle auf dem startenden Rechner ausführen. | Wird wie die Konfiguration der Prüfumgebung behandelt: Jede Änderung durchläuft die Prüfung. |

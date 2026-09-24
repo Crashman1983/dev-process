@@ -626,13 +626,38 @@ def test_commit_claiming_issue_of_tier3_plan_is_hard_on_merge_push(render, tmp_p
     assert _run(out, env=env).returncode == 0
 
 
-def test_tier2_active_plan_stays_archive_time(render, tmp_path):
+def test_tier2_active_plan_is_hard_on_merge_push(render, tmp_path):
+    # observed downstream: a Tier 2 plan merged to main without a review, every
+    # gate green — from Tier 2 on the proof is due at the merge push
     import os
     out = _feature_repo_with_active_plan(render, tmp_path, tier=2)
+    r = _run(out)  # a feature push: visible, not blocking
+    assert r.returncode == 0 and "[note only:" in r.stdout, r.stdout
     env = {**os.environ, "PROCESS_PUSH_TARGETS": "refs/heads/main"}
     r = _run(out, env=env)
-    assert r.returncode == 0, r.stdout
-    assert "active Tier 2 plan(s)" in r.stdout
+    assert r.returncode == 1, r.stdout
+    assert "from Tier 2 on the proof is due before the merge" in r.stdout
+
+
+def test_tier3_plan_merged_past_the_process_is_hard_after_the_fact(render, tmp_path):
+    # a bypassed hook or a platform merge button leaves the plan active while
+    # its issue is already claimed on main — nothing else would ever see it
+    out = render(tmp_path, {"project_name": "demo"})
+    _git(out, "init", "-q", "-b", "main")
+    _git(out, "config", "user.email", "t@example.com")
+    _git(out, "config", "user.name", "Test")
+    d = out / ".process-work/plans"
+    d.mkdir(parents=True, exist_ok=True)
+    plan = d / "2026-09-01-risky.md"
+    plan.write_text("# Plan\n\ntier: 3\nissue: #9\n\n## Decisions\n")
+    (out / "risky.py").write_text("x = 1\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "feat: risky change (#9)")
+    r = _run(out)
+    assert r.returncode == 1 and "tier 3 work already merged" in r.stdout, r.stdout
+    plan.write_text(plan.read_text() + "\nreview-waived: hotfix under incident, reviewed after\n")
+    r = _run(out)
+    assert "tier 3 work already merged" not in r.stdout
 
 
 # --- unhomed plans: a tier-declaring plan outside .process-work/specs is loud ---

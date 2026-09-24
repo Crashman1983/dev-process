@@ -62,6 +62,7 @@ from check_review import (  # noqa: E402  (one owner for grammar + arithmetic)
     parse_review_lines,
     paths_in_flight,
     speckit_unreviewed,
+    stale_review,
 )
 from gate_invoke import (  # noqa: E402  (one owner for "how to launch")
     gate_runner_argv,
@@ -136,7 +137,11 @@ def check(root: Path) -> tuple[list[str], list[str]]:
                 continue
             ids = _plan_work_ids(p.stem, text, include_dedated=True)
             if _cleared(passes, ids, tier):
-                to_archive.append(p.name)
+                stale = stale_review(root, passes, ids, tier, in_flight or set())
+                if stale:
+                    blockers.append(f"{PLANS_ACTIVE}/{p.name}: {stale}")
+                else:
+                    to_archive.append(p.name)
             else:
                 blockers.append(
                     f"{PLANS_ACTIVE}/{p.name}: tier {tier} plan has no clearing "

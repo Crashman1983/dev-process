@@ -620,6 +620,59 @@ def paths_in_flight(root: Path) -> set[str]:
             if line.strip()}
 
 
+BOOKKEEPING = ".process-work/"
+
+
+def stale_review(root: Path, passes: list[dict], ids: set[str], tier: int,
+                 in_flight: set[str]) -> str | None:
+    """Why the clearing reviews of a plan no longer cover the code — None when
+    one of them still does (or none can be checked).
+
+    A pass records the `head` it reviewed. Code committed after it, in a path
+    this push carries, was never reviewed — observed downstream: a fix after
+    the attested pass merged green. Bookkeeping (journal, plans) is exempt: the
+    attestation commit itself lands after the reviewed head. A pass without
+    `head` (older records) or whose head is not in this clone cannot be
+    checked and counts as current — the digest check owns those."""
+    req = min(tier, 3)
+    clearing = [r for r in passes if r["work"] in ids and int(r["tier"]) >= req]
+    if not clearing:
+        return None
+    changed_after: list[str] = []
+    for r in clearing:
+        head = r.get("head")
+        if not head or _git_bytes(root, "cat-file", "-e", f"{head}^{{commit}}") is None:
+            return None
+        out = _git_bytes(root, "--no-optional-locks", "diff", "--name-only", head, "HEAD")
+        if out is None:
+            return None
+        paths = {p.strip() for p in out.decode(errors="replace").splitlines() if p.strip()}
+        late = sorted(p for p in paths & in_flight if not p.startswith(BOOKKEEPING))
+        if not late:
+            return None
+        changed_after = late
+    return (f"code changed after the reviewed head ({', '.join(changed_after[:4])}"
+            f"{', …' if len(changed_after) > 4 else ''}) — the review does not cover it; "
+            f"re-review the delta (`make_review_bundle.py --since <head>`) and attest again")
+
+
+def issues_on_integration(root: Path, limit: int = 2000) -> set[int]:
+    """Issue numbers claimed (closing trailer or `(#N)` subject) by commits
+    already on the integration branch — the record of what was merged."""
+    for ref in INTEGRATION_REFS:
+        out = _git_bytes(root, "log", "--format=%B%x00", f"-{limit}", ref)
+        if out is not None:
+            refs: set[int] = set()
+            for message in out.decode(errors="replace").split("\0"):
+                body = message.strip()
+                if not body:
+                    continue
+                refs |= {int(n) for n in _ISSUE_CLOSING.findall(body)}
+                refs |= {int(n) for n in _ISSUE_SUBJECT.findall(body.splitlines()[0])}
+            return refs
+    return set()
+
+
 def _plan_issue_numbers(text: str) -> set[int]:
     """The issue numbers a plan declares — the join between a pushed commit
     and the tier only the plan knows."""
@@ -843,8 +896,13 @@ def check(root: Path) -> tuple[list[str], list[str]]:
     # silent, so the gap is at least made visible.
     pdir = root / PLANS_ACTIVE
     in_flight = paths_in_flight(root)
+    merged_issues = issues_on_integration(root)
     if pdir.is_dir():
         active_tier2 = 0
+        active_dedated: dict[str, int] = {}
+        for p in pdir.glob("*.md"):
+            key = DATE_PREFIX.sub("", p.stem)
+            active_dedated[key] = active_dedated.get(key, 0) + 1
         for p in sorted(pdir.glob("*.md")):
             if p.name.startswith("design-"):
                 continue
@@ -882,12 +940,24 @@ def check(root: Path) -> tuple[list[str], list[str]]:
                             f"dialogue have no home in this plan and do not survive a "
                             f"compaction (journal-state-plans.md, Plans); add the "
                             f"ledger, even if it is empty for now")
-            ids = _plan_work_ids(p.stem, text, include_dedated=False)
+            # the slug without its date names the plan too, when unambiguous —
+            # as for archived plans (attest's `--work <slug>`)
+            ids = _plan_work_ids(p.stem, text,
+                                 include_dedated=active_dedated.get(DATE_PREFIX.sub("", p.stem), 0) == 1)
             tiered_plans.append((rel, text, tier, ids))
-            if tier < 3:
-                continue
             if WAIVED.search(text):
                 soft += waiver_debt_notes(rel, text, WAIVED, "review-waived")
+                continue
+            # after the fact: a Tier 3 plan still active while commits claiming
+            # its issue already sit on the integration branch was merged past
+            # the process (a bypassed hook, a platform merge button) — hard,
+            # whatever this push carries: nothing else would ever see it
+            if (tier >= 3 and not _cleared(passes, ids, tier)
+                    and _plan_issue_numbers(text) & merged_issues):
+                hard.append(f"{rel}: tier {tier} work already merged — commits on the "
+                            f"integration branch claim #{sorted(_plan_issue_numbers(text) & merged_issues)[0]}"
+                            f" — without a clearing REVIEW; review it now and attest, or record "
+                            f"the exception with a 'review-waived:' line")
                 continue
             if rel not in in_flight:
                 # somebody else's plan, sitting in the tree untouched by this
@@ -896,12 +966,15 @@ def check(root: Path) -> tuple[list[str], list[str]]:
             if not _cleared(passes, ids, tier):
                 presence(f"{rel}: active plan declares tier {tier} but has no "
                          f"clearing REVIEW (verdict=pass, work in {sorted(ids)}, "
-                         f"tier>={tier}) and no 'review-waived:' line — at Tier 3 "
-                         f"the proof is due before the merge, not at archival")
+                         f"tier>={min(tier, 3)}) and no 'review-waived:' line — from "
+                         f"Tier 2 on the proof is due before the merge")
+                continue
+            stale = stale_review(root, passes, ids, tier, in_flight)
+            if stale:
+                presence(f"{rel}: {stale}")
         if active_tier2:
             soft.append(f"{active_tier2} active Tier 2 plan(s) in {PLANS_ACTIVE} — "
-                        f"at Tier 2 review presence is enforced once the plan is "
-                        f"archived (the merge step); archive on merge")
+                        f"their review is due at the merge push; archive on merge")
 
     # the commit-anchored arm: what exists at every merge is the issue plus
     # the commits that CLAIM it (a closing trailer or the `… (#N)` subject —
@@ -920,13 +993,17 @@ def check(root: Path) -> tuple[list[str], list[str]]:
             # a plan below Tier 2 or a waived one declares it: nothing to enforce
             continue
         for rel, text, tier, ids in matching:
-            if tier < 3 or WAIVED.search(text):
+            if tier < 2 or WAIVED.search(text):
                 continue
             if not _cleared(passes, ids, tier):
                 presence(f"a commit in the pushed range claims #{number}, whose "
                          f"plan {rel} declares tier {tier}, but no clearing REVIEW "
-                         f"(verdict=pass, work in {sorted(ids)}, tier>={tier}) and "
+                         f"(verdict=pass, work in {sorted(ids)}, tier>={min(tier, 3)}) and "
                          f"no 'review-waived:' line")
+                continue
+            stale = stale_review(root, passes, ids, tier, in_flight)
+            if stale:
+                presence(f"#{number} ({rel}): {stale}")
 
     hard.extend(_unhomed_plans(root))
 
