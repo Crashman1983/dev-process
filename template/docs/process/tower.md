@@ -106,6 +106,21 @@ sessions per host; a held lane counts as no free CPU. Both runners strip
 the steward's own `CLAUDECODE`/`CLAUDE_CODE_*` variables from the
 worker's environment: a worker is a session of its own.
 
+A phase may run on another host. The policy's `phases.<phase>` overrides
+`command` and `runner` for that phase; `remote: true` makes dispatch hand
+the work over instead of running it: no worktree here, the command starts
+the session elsewhere (a cloud session, an ssh command) and exits, the
+branch must already be on origin, and the worker's prompt tells it to
+report with `--sync` under its own `PROCESS_HOST`. `tower.py --remote`
+then shows its reports; `dispatch.py list` shows the record as REMOTE,
+`stop` only forgets it. Reviews are the phase to move first: they need
+git, the bundle and the process gates, nothing local; a fresh clone on
+another host is the independence `verification-independence.md` asks for;
+and they bind the most CPU here. Execution with browser suites or local
+services stays on the host that has them. A push from another host runs
+no local pre-push hook: nothing is certified there — right for a review
+that pushes only journal and attest lines, wrong for an execute phase.
+
 Permissions belong to the command, not to dispatch: a headless `claude
 -p` needs its tool permissions granted in the project's settings (an
 allowlist for Bash, or `--permission-mode`), else it stops at the first

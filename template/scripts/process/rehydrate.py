@@ -31,6 +31,7 @@ SETTINGS = ".claude/settings.json"
 HOOK_CMD = "python3 scripts/process/rehydrate.py"
 MATCHER = "compact|resume"
 START, END = "<!-- KERNEL:START -->", "<!-- KERNEL:END -->"
+MAX_DECISIONS = 12  # the latest ones; older decisions are in the plan, which the session reads on demand
 
 
 def _read(p: Path) -> str:
@@ -66,7 +67,11 @@ def render(root: Path) -> str:
         out.append(f"## Working memory of branch `{ctx.get('branch')}`")
         for p in ctx.get("active_plans", []):
             out.append(f"- plan `{p['file']}` tier {p.get('tier')} issue {p.get('issue')}")
-            for d in p.get("decisions", []):
+            decisions = p.get("decisions", [])
+            if len(decisions) > MAX_DECISIONS:  # a plan with 113 decisions is a log; every compaction pays
+                out.append(f"  - ({len(decisions) - MAX_DECISIONS} earlier decisions in the plan — read it "
+                           "before touching what they decided)")
+            for d in decisions[-MAX_DECISIONS:]:
                 out.append(f"  - DECISION {d}")
             for q in p.get("open_questions", []):
                 out.append(f"  - OPEN QUESTION (do not decide it yourself): DECISION NEEDED {q}")

@@ -1001,6 +1001,21 @@ Der Staging-Worktree liegt jetzt als Geschwister neben dem Root
 (`<root>-train`, wie die Dispatch-Worktrees), nur Logs bleiben im git
 common dir, `v2.21.0`.
 
+**Phasen auf einem anderen Host.** Der Kenni-Steward stellte fest: der
+Engpass ist die CPU des LXC, nicht die Zahl der Plätze; Reviews binden
+viel davon und brauchen nur git. Die Policy kennt jetzt `phases.<phase>`
+mit `command`, `runner` und `remote: true`: ein Remote-Phase-Start legt
+keinen Worktree an, der Befehl ist die Übergabe (Cloud-Sitzung, ssh),
+der Branch muss auf origin liegen, der Prompt weist den Worker an, mit
+`--sync` unter eigenem `PROCESS_HOST` zu melden; `list` zeigt REMOTE,
+`stop` vergisst nur den Record, `tower.py --remote` sieht die Meldungen.
+`tower.md` sagt, warum Reviews zuerst wandern (git-only, CPU-schwer, und
+ein frischer Klon auf einem anderen Host ist Unabhängigkeit) und dass ein
+Push von dort keinen lokalen Pre-Push-Hook durchläuft. Dazu:
+`rehydrate.py` druckt nur die letzten zwölf Entscheidungen eines Plans
+(ein Plan mit 113 DECISION-Zeilen ist ein Log, jede Kompaktierung zahlte
+ihn), `v2.22.0`.
+
 ## Sub-Projekt-Tabelle (SP1–SP24)
 
 Die Tabelle wurde bis SP24 gepflegt; ab SP25 trägt das Narrativ oben die
