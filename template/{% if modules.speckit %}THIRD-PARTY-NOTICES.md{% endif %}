@@ -1,8 +1,10 @@
 # Third-party notices
 
-This project's own license is `LICENSE` (Apache License 2.0).
-The material below is incorporated from third parties under their own terms,
-which continue to apply to those portions.
+The process files in this repository come from the dev-process template and
+are licensed under the Apache License 2.0 (`docs/process/LICENSE`, scope in
+`docs/process/NOTICE.md`); the project's own code and content keep whatever
+license the project chooses. The material below is incorporated from third
+parties under their own terms, which continue to apply to those portions.
 
 ## GitHub Spec Kit (MIT)
 

@@ -95,5 +95,7 @@ ships is independent of that project and neutral.
 commercial use included. Every set-up repository receives the license text
 as `docs/process/LICENSE`, plus `docs/process/NOTICE.md`: the license covers
 the process files, not the project's own code and content. Two specification
-templates derive from GitHub Spec Kit (MIT, © GitHub, Inc.); details in
-[`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md).
+templates derive from GitHub Spec Kit (MIT, © GitHub, Inc.); details and the
+MIT text in [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md), which every
+set-up repository receives too. The repository's own dependencies are listed
+in the generated [SBOM](docs/SBOM.md) ([CycloneDX](docs/sbom.cdx.json)).
