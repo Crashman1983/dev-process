@@ -405,11 +405,14 @@ def start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str |
         return 3
     refusal = None if remote else lane_verdict(held_lanes(root), phase)
     if refusal:
-        print(f"dispatch: {refusal}", file=sys.stderr)
+        print(f"dispatch: lane rule refused — {refusal}", file=sys.stderr)
         return 3
     prompt = prompt_for(phase, issue, tier, branch, model, remote=remote)
     argv = build_argv(policy, model, prompt, branch, issue, phase)
     if dry_run:
+        held = sorted(held_lanes(root)) if not remote else []
+        print(f"dispatch: lane rule allowed — held: {', '.join(held) or 'none'}, phase {phase}"
+              + (" (remote: local lanes do not apply)" if remote else ""))
         shown = [a if a != prompt else f"<prompt {len(prompt)} chars>" for a in argv]
         print(f"dispatch: would start {phase} for #{issue} on {branch} with {model} "
               f"({'remote, ' if remote else ''}{runner}):\n  {shown}")

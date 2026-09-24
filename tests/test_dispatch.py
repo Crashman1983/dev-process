@@ -289,6 +289,18 @@ def test_dry_run_and_bad_policy(render, tmp_path):
     assert r.returncode != 0 and "{prompt}" in r.stderr
 
 
+def test_dry_run_names_the_lane_rule(render, tmp_path):
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    _fake_lane(out, FULL_HELD)
+    r = _dispatch(out, "start", "--issue", "9", "--phase", "plan", "--dry-run")
+    assert r.returncode == 0, r.stderr
+    assert "lane rule" in r.stdout and "allowed" in r.stdout and "full" in r.stdout
+    r = _dispatch(out, "start", "--issue", "9", "--phase", "execute", "--dry-run")
+    assert r.returncode == 3  # a refusal is never a green dry run
+    assert "lane rule" in r.stderr and "refused" in r.stderr
+
+
 def test_report_carries_model_and_kpis_cut_by_it(render, tmp_path):
     out = render(tmp_path / "repo", {"project_name": "d", "modules": {"telemetry": True}})
     _repo(out)
