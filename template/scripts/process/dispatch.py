@@ -109,6 +109,13 @@ def load_policy(root: Path) -> dict:
     return data
 
 
+def phase_base(root: Path, branch: str) -> str:
+    """The branch's commit on origin when a phase starts ('' when not on origin yet):
+    report.py refuses `pushed` until origin has moved past it."""
+    line = _out(root, "ls-remote", "--heads", "origin", branch)
+    return line.split()[0] if line else ""
+
+
 def phase_policy(policy: dict, phase: str) -> dict:
     """The command, runner and host for ONE phase: `phases.<phase>` overrides
     the top-level `command`/`runner`; `remote: true` says the session runs on
@@ -427,7 +434,8 @@ def start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str |
             print(f"dispatch: {branch} is not on origin — a remote {phase} session needs the branch pushed first",
                   file=sys.stderr)
             return 3
-        extra = {"PROCESS_WORKER": branch, "PROCESS_PHASE": phase, "PROCESS_MODEL": model, "PROCESS_ISSUE": str(issue)}
+        extra = {"PROCESS_WORKER": branch, "PROCESS_PHASE": phase, "PROCESS_MODEL": model, "PROCESS_ISSUE": str(issue),
+             "PROCESS_PHASE_BASE": phase_base(root, branch)}
         try:
             r = subprocess.run(argv, cwd=root, capture_output=True, text=True, timeout=300, env=_worker_env(extra))
         except (OSError, subprocess.TimeoutExpired) as exc:
@@ -447,7 +455,8 @@ def start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str |
         return 0
     wt = ensure_worktree(root, branch)
     log = _records_dir(root) / f"{branch.replace('/', '__')}-{phase}-{_dt.datetime.now():%Y%m%d-%H%M%S}.log"
-    extra = {"PROCESS_WORKER": branch, "PROCESS_PHASE": phase, "PROCESS_MODEL": model, "PROCESS_ISSUE": str(issue)}
+    extra = {"PROCESS_WORKER": branch, "PROCESS_PHASE": phase, "PROCESS_MODEL": model, "PROCESS_ISSUE": str(issue),
+             "PROCESS_PHASE_BASE": phase_base(root, branch)}
     rec = {"branch": branch, "issue": issue, "phase": phase, "tier": tier, "model": model,
            "worktree": str(wt), "log": str(log), "started": int(time.time()),
            "ts": _dt.datetime.now().isoformat(timespec="seconds"), "runner": runner}

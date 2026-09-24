@@ -1,235 +1,100 @@
 # dev-process
 
-> **English:** A **machine-enforced**, AI-assisted development process on a
-> committed standard stack — GitHub + Spec Kit + pre-commit + a lean
-> dev-process enforcement kernel — installable into new and existing
-> repositories via `uvx copier copy gh:Crashman1983/dev-process .`.
-> This README is German by choice; everything the template installs (process
-> docs, adapters, commands) is English — start with
-> [`BOOTSTRAP.md`](BOOTSTRAP.md). License: [Apache-2.0](LICENSE) —
-> free for any use, commercial included. Two spec templates derive from
-> GitHub Spec Kit (MIT, © GitHub, Inc.):
-> [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md).
+> **English:** A development process for AI coding agents, delivered as a
+> [copier](https://copier.readthedocs.io) template for new and existing
+> repositories. Rules are checked by gates before every merge, the effort
+> scales with risk (Tier 0–3), review is always independent, and everything
+> an agent must remember lives in files. Start with the
+> **[Overview](docs/OVERVIEW.md)**; set it up with [`BOOTSTRAP.md`](BOOTSTRAP.md).
+> Everything the template installs is English. License: [Apache-2.0](LICENSE).
 
-Ein **maschinell durchgesetzter**, KI-gestützter Entwicklungsprozess auf einem
-bewussten Standard-Stack: **GitHub** (Issues/Projects/Actions als Arbeits-Log
-und CI), **[Spec Kit](https://github.com/github/spec-kit)** (der Weg zur
-Spezifikation, gepinnt und vendored), **[pre-commit](https://pre-commit.com)**
-(lokale Hooks) und ein schlanker **dev-process-Kernel** (Risiko-Tiers, Gates,
-Review-Unabhängigkeit, Inventar, Telemetrie). Einspielbar in **neue
-(Greenfield)** wie **bestehende (Brownfield)** Projekte; ausgeliefert als
-[copier](https://copier.readthedocs.io)-Template. Der Command-Adapter wird bei
-der Installation gewählt (`claude` | `copilot` | `agents_md`); die
-Spezifikations-Skills deckt Spec Kits eigenes Integrations-System ab.
+Ein Entwicklungsprozess für KI-Agenten, ausgeliefert als
+[copier](https://copier.readthedocs.io)-Template für neue und bestehende
+Repositories. Er ändert nicht die Agenten, sondern ihre Arbeitsbedingungen:
+Regeln prüft ein Programm, der Aufwand folgt dem Risiko, niemand nimmt die
+eigene Arbeit ab, und das Gedächtnis liegt in Dateien statt im Kontext.
 
-> **Einstieg:** [`docs/UEBERBLICK.md`](docs/UEBERBLICK.md) erklärt den Prozess
-> in elf Kapiteln — welches Problem er löst, wie er aufgebaut ist, welche Regeln
-> hart geprüft und welche weich gehalten werden, wie parallele Agenten
-> koordiniert werden und was beim Skalieren offen ist. Dasselbe als PDF:
-> [`docs/Entwicklungsprozess-mit-KI-Agenten.pdf`](docs/Entwicklungsprozess-mit-KI-Agenten.pdf).
-> Einrichten: [`BOOTSTRAP.md`](BOOTSTRAP.md).
+> **Status:** `v2.24.0` — Sub-Projekte SP1–SP75. Historie: [`CHANGELOG.md`](CHANGELOG.md).
 
-> **Produktrahmen-Entscheidung (2026-08-06):** Die frühere Identität
-> „portabel, harness-agnostisch, 13 opt-in Module" wurde bewusst gegen den
-> Standard-Stack getauscht (Lean-Pass SP56) — weniger Optionen, weniger
-> Eigenbau, gleiche Garantien. Analyse und Design:
-> [`docs/analysis/`](docs/analysis/) · [`docs/design/2026-08-06-speckit-hybrid-design.md`](docs/design/2026-08-06-speckit-hybrid-design.md).
-> Exit-Szenario der Spec-Kit-Abhängigkeit: Pin einfrieren — der vendored
-> Stand läuft ohne Netz und ohne CLI unbegrenzt weiter.
+## Einstieg
 
-> **Status:** `v2.23.0` — Sub-Projekte SP1–SP75 (Standard-Setup
-> statt Profile/Toggles, Spec Kit als Standard-Spezifikationsweg, 5 Core-Gates,
-> DoR/DoD, Kernel-Integritäts- und Compaction-Schutz). Vollständige Historie: [`CHANGELOG.md`](CHANGELOG.md).
-> Überblick: [`docs/UEBERBLICK.md`](docs/UEBERBLICK.md) · Alltag für
-> Entwickler:innen und Management: [`docs/CAPABILITIES.md`](docs/CAPABILITIES.md) ·
-> Setup: [`BOOTSTRAP.md`](BOOTSTRAP.md) · Systemumgebung:
-> [`docs/SYSTEM-REQUIREMENTS.md`](docs/SYSTEM-REQUIREMENTS.md) · SBOM:
-> [`docs/SBOM.md`](docs/SBOM.md) · Design: [`docs/design/`](docs/design/).
+| Wofür | Dokument |
+|---|---|
+| Was der Prozess ist, warum er so ist, was offen ist | **[Überblick](docs/UEBERBLICK.md)** · [Overview (English)](docs/OVERVIEW.md) · [PDF](docs/Entwicklungsprozess-mit-KI-Agenten.pdf) |
+| Einrichten, headless oder im Dialog, und aktualisieren | [`BOOTSTRAP.md`](BOOTSTRAP.md) |
+| Was auf dem Rechner und in CI gebraucht wird | [`docs/SYSTEM-REQUIREMENTS.md`](docs/SYSTEM-REQUIREMENTS.md) |
+| Die Arbeit im Alltag, für Entwickler:innen und Management | [`docs/CAPABILITIES.md`](docs/CAPABILITIES.md) |
+| Abhängigkeiten dieses Repositorys (erzeugt, auch als CycloneDX) | [`docs/SBOM.md`](docs/SBOM.md) |
+| Entscheidungen und Entwürfe | [`docs/design/`](docs/design/) · [`docs/analysis/`](docs/analysis/) |
 
----
+## Das Wichtigste
 
-> **Herkunft:** Generalisiert aus einem privaten, produktiv genutzten
-> Repository (in den Dokumenten „Referenzprojekt“), in dem dieser Prozess in
-> vielen Iterationen entwickelt und erprobt wurde. Verweise auf dessen Interna
-> (Issue-Nummern, Spec-Abschnitte) in `docs/design/` und `docs/plans/` sind
-> Projektgeschichte und öffentlich nicht auflösbar; alles, was das Template
-> ausliefert, ist davon unabhängig und neutral.
+- **Gates statt Erinnerung.** Vor jedem Merge laufen im Standard-Setup 16
+  automatische Prüfungen, mit dem Compliance-Paket 18. Was nicht besteht,
+  wird nicht gemergt.
+- **Risiko bestimmt den Aufwand.** Tier 0 bis 3 legen fest, ob eine Änderung
+  direkt gemergt wird oder Plan, unabhängige Prüfung und bei Tier 3 eine
+  Widerlegungsprüfung braucht. Maßgeblich ist der Umfang, nicht die
+  Diff-Größe.
+- **Unabhängige Prüfung.** Wer baut, nimmt nicht ab. Das Urteil steht als
+  Attest im Journal und gilt nur für genau den geprüften Code.
+- **Gedächtnis in Dateien.** Regelkern, Pläne mit Entscheidungen und Journal
+  liegen im Repository und werden nach jeder Kürzung des Kontexts wieder
+  eingespielt.
+- **Spezifikation mit [Spec Kit](https://github.com/github/spec-kit).** Ab
+  Tier 2 führt der Weg über Spec Kit, gepinnt und mit eigenen Overrides.
+- **Parallele Agenten, optional.** Ein Steward teilt Issues zu, startet je
+  Phase eine Agentensitzung mit dem Modell aus der Modellpolitik, legt dem
+  Owner Fragen als Auswahl vor und merget fertige Branches gebündelt.
+- **Drei Harnesses.** Claude Code, GitHub Copilot oder eine neutrale
+  `AGENTS.md`; Methodik und Gates sind in allen dieselben.
 
-## Die Idee in einem Absatz
+## Installation
 
-Der Wert eines Entwicklungsprozesses steckt in drei Schichten, die üblicherweise
-vermischt werden. Die **Methodik** (Regeln, Risiko-Tiers, Zyklus, ADRs, Journal)
-ist reines Markdown + git und damit tool-unabhängig. Die **Durchsetzung**
-(CI-Gates, git-Hooks) ist die eigentliche Garantie — sie hält auch dann, wenn
-niemand hinsieht. Nur die **aktive Automatisierung** (Slash-Commands, Skills,
-Subagents) ist harness-spezifisch und degradiert kontrolliert, wenn man das Tool
-wechselt. `dev-process` legt die Methodik als neutrale SSOT (`docs/process/`) ab,
-erzwingt sie über CI, und liefert dünne Adapter je Harness. Die Bausteine
-kommen als ein festes Standard-Setup; nur das `regulated`-Paket ist ein
-Schalter.
-
-## Der Prozess — Eckpunkte
-
-**Risiko-Tiers (0–3)** routen jede Aufgabe: der *Umfang* bestimmt den Tier, nicht
-die Diff-Größe. Komponentenübergreifend, API/Contract, Auth oder Persistenz ⇒
-Tier 2+ auch bei winzigem Diff; bloße User-Sichtbarkeit allein ist noch kein
-Tier 2 (`risk-tiers.md` ist die SSOT). Ein `flow`-Label ist Boden, nie Decke.
-
-**Neun bindende Regeln** (Reihenfolge = Priorität):
-
-1. Verifikation vor Behauptung (Tool-Call oder Confidence-Tag).
-2. Plan vor substanzieller Arbeit (Tier aus echtem Umfang ableiten).
-3. Contract/Interface zuerst bei geteiltem Verhalten.
-4. Ein Owner pro Verhalten — strukturell statt additiv (keine parallelen Efforts).
-5. Tests beweisen Akzeptanz.
-6. Root-Cause vor Symptom (max. 2 Symptom-Versuche).
-7. Review-Gate vor Merge in den Main-Branch.
-8. Atomare Commits, dokumentierte Ausnahmen.
-9. Code wird zum Lesen geschrieben — intention-revealing, am Review-Gate geprüft.
-
-**Zyklus:** Brainstorm → Plan → Execute → Review, plus Quick (kleine Änderungen)
-und Debug. Methodik-Docs tragen die Tiefe: `testing.md` (Suite-Form: Pyramide,
-Property-based, Regression-Pins, ehrliche Coverage-Decke), `releases.md`
-(SemVer, Changelog, Tag-Ritual), `code-craft.md` (lesbarer Code); Tier-3-Designs
-beantworten die Threat-Frage („Was könnte ein Angreifer damit?") schon im
-Brainstorm. **ADRs** tragen zwei Achsen — `Status` (Proposed/Accepted/Superseded)
-und `Intent` (keep/change-planned/tolerated), damit „so ist es" von „so soll es
-werden" getrennt bleibt. **Journal, Branch-State und Pläne** halten das *Warum*
-fest, das das git-log nicht zeigt. **`PRODUCT.md`** (Core) ist der Produktrahmen —
-Purpose, Users, Goals, **Non-Goals**, Constraints, aktueller Scope —, im
-Onboarding-Dialog befüllt und von Brainstorm/Plan/Review als Richtungs-Constraint
-gelesen; ein immer aktives Gate hält ihn präsent und referenz-sauber.
-
-**Durchsetzung:** ein manifest-bewusster `gate_runner` liest `.copier-answers.yml`
-und fährt in CI nur die *aktiven* Module — als GitHub-Actions-Workflow
-(`ci`-Frage). git-Hooks sichern lokal ab.
-**Ehrliche Degradation:** ohne GitHub-CI bleibt das `git-hooks`-Modul
-die einzige Enforcement-Säule — und ohne dieses erzwingt nichts die Gates. Das **Standard-Setup**
-(Lean-Pass: eine Frage — `regulated` — statt 13 Toggles) umfasst:
-`speckit` (Spec Kit als Tier-2+-Spezifikationsweg — Constitution-Pointer statt zweiter Wahrheit, EARS-/Test-Pflicht-Overrides, publish-and-prune-Merge-Ritual mit SC-Accounting),
-`doc-drift-gate` (tote Pfad-Referenzen in Docs), `arch-onboarding`
-(Architektur gegen echten Code), `feature-registry` (das **Feature-Inventar**: Capability → Akzeptanz → beweisender Test — das Arbeits-Log liegt in GitHub Issues),
-`github-issues` (EARS-Templates + Issue-Ref-Gate),
-`contracts` (Kopplung als geprüfter Contract: contract-first + Pin-Drift),
-`git-hooks` (lokale Durchsetzung über das pre-commit-Framework),
-`telemetry` (genau die drei Ziel-KPIs: Konvergenz, Kosten, DORA-CFR — `GRADE`-Trace gate-gesichert, Trends gegen die eigene Baseline),
-`arch-docs` (arc42/C4-lite Doku-Scaffold mit ehrlichem Gate),
-`design-contracts` (der Designvertrag je Surface als gepinnte, zitierte Norm: stabile IDs, gesiegelte Referenz-Boards, unabhängiges Review mit GO, Amend-before-Code — die Gestaltung selbst beurteilt der Mensch gegen die Boards, das Gate nur Existenz, Pin, Zitat und Status) und
-`github-master` (GitHub Issues als Arbeits-Log-SSOT über einen committeten Snapshot — Sync mit Netz, Gate hermetisch offline; DoR-at-rest + Board-Konsistenz).
-Das `regulated`-Paket ergänzt `security-floor` (verbotene Muster als Gate) und `sbom` (CycloneDX + Lizenz-Allow-List).
-
-**Commands:** Der Zyklus (`brainstorm plan execute review quick debug commit
-prime finish`) plus `report` (Zustandswechsel eines Workers an den Tower) und `steward` (die Steuerungsrolle: Tower lesen, zuteilen, Zug abfertigen, aufräumen) liegen als dünne Slash-Commands für den gewählten Harness; `brainstorm`
-und `plan` zeigen auf den Spec-Kit-Pfad (`/speckit-specify → clarify → plan →
-tasks`), der Rest auf die neutralen `docs/process/`-Phasen. Der
-`doc-drift-gate` prüft die Pointer mit — ein toter Command-Pointer failt die
-CI.
-
-**Parallele Agenten (optional):** Mehrere Agenten arbeiten gleichzeitig, je
-Issue ein eigener Worktree und Branch. `tower.py` berechnet die Lagetabelle
-(wer arbeitet woran, wo überschneiden sich Vorhaben, welche Fragen warten auf
-den Owner). `dispatch.py` startet je Phase eine Sitzung mit dem Modell aus
-`docs/process/model-policy.json`, headless, als sichtbares tmux-Fenster oder
-auf einem anderen Host. Der Steward teilt zu, legt dem Owner Fragen als Auswahl
-vor und merget fertige Branches gebündelt als Zug (`train.py`: eine volle
-Suite für alle). `rehydrate.py` spielt nach jeder Kürzung des Kontexts den
-Regelkern und die Entscheidungen des aktiven Plans wieder ein. Einrichten:
-[`BOOTSTRAP.md`](BOOTSTRAP.md), Abschnitt „Parallel agents“.
-
-## Architektur als geprüfter Contract (SP2)
-
-Die meisten Frameworks dokumentieren Architektur in Prosa, die verrottet.
-`arch-onboarding` erfasst sie stattdessen als maschinen-prüfbaren Block in
-`ARCHITECTURE.md` und verifiziert die Aussagen bei **jedem** CI-Lauf gegen echten
-Code — ehrlich getrennt nach dem, was mechanisch garantierbar ist, und dem, was
-nicht:
-
-- **Hart (CI schlägt fehl):** `code_roots` und Layer-Pfade existieren, Interface-
-  Symbole liegen in ihrer Datei, ein `rules[].adr`-Link löst auf eine ADR auf.
-- **Best-effort:** Layering-Konformität fährt einen vorhandenen Arch-Linter
-  (import-linter / dependency-cruiser) und schlägt bei Verstößen fehl; ohne Linter
-  bleibt eine Manual-Review-Checkliste. Konformität wird nie *vorgetäuscht*.
-
-## Mehrwert gegenüber Standard-Ansätzen
-
-|  | Prosa-Playbook | Spec Kit allein | reines CI-Linting | **dev-process** |
-|---|:---:|:---:|:---:|:---:|
-| durchgesetzt, nicht nur dokumentiert | ✗ | ✗ (LLM-Selbstchecks) | nur Stil | ✓ Gates + Hooks |
-| risiko-proportional (Tiers statt Ein-Pfad) | – | ✗ | – | ✓ |
-| Spezifikationsweg nach Industriestandard | ✗ | ✓ | – | ✓ (Spec Kit integriert) |
-| nachträglich aktualisierbar | ✗ | teils (0.x) | – | ✓ `copier update` + Pin |
-| Architektur gegen echten Code geprüft | ✗ | ✗ | ✗ | ✓ arch-onboarding |
-| Brownfield-additiv (überschreibt nichts) | ✗ | (✓) | – | ✓ |
-| ehrliche Decke (hart vs. best-effort) | – | ✗ | – | ✓ kein False-Green |
-
-Kurz: Ein Playbook beschreibt, erzwingt aber nichts und altert; Spec Kit
-allein spezifiziert stark, erzwingt aber nichts und kennt keine Risiko-Tiers;
-CI-Linting sichert Stil, nicht Prozess. `dev-process` kombiniert den
-Standard-Spezifikationsweg mit deterministischer Durchsetzung — und bleibt
-über `copier update` (Prozess) und den Version-Pin (Spec Kit) getrennt
-aktualisierbar.
-
-Die ausführliche Erklärung steht in [`docs/UEBERBLICK.md`](docs/UEBERBLICK.md);
-die Sicht der täglichen Arbeit, getrennt für Entwickler:innen und Management,
-in [`docs/CAPABILITIES.md`](docs/CAPABILITIES.md).
-
-## Sprachen & Ökonomie
-
-**Artefakte englisch, Dialog in Nutzersprache.** Alle gerenderten Artefakte
-(Prozessdoku, Adapter, Commands, ADRs, Journal, Commits) sind englisch — eine
-Sprache zu pflegen, und die, auf die LLMs am zuverlässigsten reagieren. Eine
-Kernel-Regel weist jeden Harness an, mit dem Nutzer in *dessen* Sprache zu
-sprechen; die Artefaktsprache bleibt davon unberührt.
-
-**Wann dieser Prozess nicht lohnt:** Für Wegwerf-Prototypen, Einmal-Skripte
-und Single-Session-Arbeit ist der Overhead netto negativ — dort nichts
-installieren. Der Prozess rechnet sich für alles
-Mehrsession-, Multi-Agent- oder Contract/Persistenz/Auth-behaftete.
-
-## Nutzung
-
-**Greenfield oder Brownfield — derselbe Befehl:**
+Greenfield und Brownfield, derselbe Befehl im Zielrepo:
 
 ```bash
 uvx copier copy gh:Crashman1983/dev-process .
 ```
 
-copier fragt fünf Dinge: **Projektname**, **Harness** (`claude` | `copilot` |
-`agents_md`), **`regulated`** (Compliance-Paket ja/nein), **CI** (GitHub
-Actions, Default an) und optional das **GitHub-Repo** für den Issue-Check.
-Alles andere ist das feste Standard-Setup. Bestehende Dateien werden **nicht**
-überschrieben (additiver Drop-in). Danach prüft
-`uv run scripts/process/gate_runner.py`, ob alles grün ist.
+copier fragt fünf Dinge: Projektname, Harness (`claude` | `copilot` |
+`agents_md`), `regulated` (Compliance-Paket), CI (GitHub Actions, Standard an)
+und optional das GitHub-Repo für den Issue-Check. Bestehende Dateien werden
+nicht überschrieben. Danach muss
 
-Eine neuere Prozess-Version ziehen: `uv run scripts/process/template_update.py`
-im Zielrepo. Das Skript übernimmt alle gespeicherten Antworten und lässt
-Dateien, die das Projekt in `.process-owned` als eigene führt, unberührt
-Mit reinem copier geht es als
-`uvx copier update --defaults --data 'modules={…}'` mit dem vollständigen
-Modul-Dictionary (Rezept: [`BOOTSTRAP.md`](BOOTSTRAP.md)). Die Antwortdatei
-`.copier-answers.yml` nicht von Hand editieren, sonst rendert `update` neue
-Moduldateien nicht.
+```bash
+uv run scripts/process/gate_runner.py
+```
 
-**Pull-Mode** (ein KI-Agent richtet es ein): dem Agenten im Zielrepo sagen
-*„richte den Entwicklungsprozess aus diesem Repo ein, folge dessen `BOOTSTRAP.md`"* —
-der Rest ist self-contained beschrieben, inklusive Headless-Rezept
-(`--defaults --data … --skip …`) für Harnesses ohne Terminal-Prompts und
-Pflicht-Verifikation über den `gate_runner`.
+grün sein. Ohne GitHub-CI ist das `git-hooks`-Modul die
+einzige Enforcement-Säule; dann erzwingt remote nichts die Gates.
+
+**Ein KI-Agent richtet es ein:** Im Zielrepo genügt *„richte den
+Entwicklungsprozess aus Crashman1983/dev-process ein, folge dessen
+`BOOTSTRAP.md`“*. Dort stehen das Headless-Rezept und die Pflichtprüfung.
+
+**Aktualisieren:** `uv run scripts/process/template_update.py` im Zielrepo.
+Das Skript übernimmt alle gespeicherten Antworten und lässt Dateien, die das
+Projekt in `.process-owned` als eigene führt, unberührt. Mit reinem copier
+geht es als `uvx copier update --defaults --data 'modules={…}'` mit dem
+vollständigen Modul-Dictionary (Rezept in [`BOOTSTRAP.md`](BOOTSTRAP.md)).
+Die Antwortdatei `.copier-answers.yml` nicht von Hand editieren.
+
+**Wann es sich nicht lohnt:** Für Wegwerf-Prototypen, Einmal-Skripte und
+Arbeit in einer einzigen Sitzung ist der Aufwand größer als der Nutzen.
+
+## Herkunft
+
+Der Prozess ist in vielen Iterationen in einem privaten, produktiv genutzten
+Repository entstanden (in den Dokumenten „Referenzprojekt“). Verweise auf
+dessen Interna in `docs/design/` und `docs/plans/` sind Projektgeschichte;
+alles, was das Template ausliefert, ist davon unabhängig und neutral.
 
 ## Lizenz
 
-[Apache-2.0](LICENSE): Nutzung, Änderung und Weitergabe sind frei — auch
-kommerziell, auch das Einspielen des Prozesses in kommerzielle Projekte.
-Bedingungen: Lizenz- und Copyright-Hinweis mitführen, Änderungen an
-lizenzierten Dateien kennzeichnen; die Lizenz enthält eine ausdrückliche
-Patentklausel. Zwei Spezifikations-Templates sind von GitHub Spec Kit
-abgeleitet (MIT, © GitHub, Inc.) — Details in
-[`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md). Bis v2.1.0 stand das
-Projekt unter der Prosperity Public License 3.0.0; der Wechsel zu Apache-2.0
-öffnet den Kern bewusst (Open-Core: künftige kommerzielle Zusatzkomponenten
-bleiben davon getrennt).
-
-## Historie
-
-Die vollständige Sub-Projekt-Historie (Narrativ + Tabelle) ist nach
-[`CHANGELOG.md`](CHANGELOG.md) ausgelagert.
+[Apache-2.0](LICENSE): Nutzung, Änderung und Weitergabe sind frei, auch
+kommerziell. Jedes eingerichtete Repository erhält den Lizenztext als
+`docs/process/LICENSE` und dazu `docs/process/NOTICE.md`: Die Lizenz gilt für
+die Prozessdateien, nicht für den eigenen Code und Inhalt des Projekts. Zwei
+Spezifikations-Templates sind von GitHub Spec Kit abgeleitet (MIT, © GitHub,
+Inc.), Details in [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md).

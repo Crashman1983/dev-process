@@ -53,7 +53,13 @@ is evidence for a steward, not a security boundary.
 
 Workers report state transitions with `/report` (`scripts/process/report.py`):
 `planned`, `pushed`, `review-pass`, `blocked`, `done`, `idle`. One line per
-transition, the reason on `blocked`. Reports live in the clone's git common
+transition, the reason on `blocked`. `pushed` is verified, not believed:
+report.py refuses it until the branch is on origin with the worktree's HEAD
+and, for a dispatched phase, origin has moved past the commit the phase
+started from (`PROCESS_PHASE_BASE`, set by dispatch) — so a steward never
+starts the next phase on a branch without this phase's work. `--force`
+records an unverifiable report (origin unreachable), marked as such.
+Reports live in the clone's git common
 dir, shared across worktrees on the machine, never committed. A worker on
 another machine reports by message; the orchestrator writes the line for it.
 

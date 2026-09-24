@@ -41,7 +41,8 @@ uv run pytest -v
 ```
 
 Die direkten Python-Abhaengigkeiten stehen in `pyproject.toml`; die aufgeloesten
-Versionen sind in `uv.lock` gepinnt und in `docs/SBOM.md` zusammengefasst.
+Versionen sind in `uv.lock` gepinnt; `docs/SBOM.md` und `docs/sbom.cdx.json`
+erzeugt `python3 tools/gen_sbom.py` daraus (ein Test prüft, dass sie aktuell sind).
 
 ## Gerenderte Zielrepos
 

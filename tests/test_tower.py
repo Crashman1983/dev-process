@@ -293,3 +293,42 @@ def test_worker_question_in_the_plan_is_a_high_finding(render, tmp_path):
     t = json.loads(_tower(out, "--json", "--remote").stdout)
     assert [(q["branch"], q.get("remote")) for q in t["questions"]] == [("gamma", True)]
     assert "another host" in [f for f in t["findings"] if f["kind"] == "question"][0]["what"]
+
+
+def test_pushed_is_checked_against_origin_and_the_phase_start(render, tmp_path):
+    # a premature `pushed` let the steward start the next phase on a branch
+    # without this phase's work: the report is verified, not believed
+    import os
+    src = render(tmp_path / "src", {"project_name": "d", "modules": {}})
+    _repo(src)
+    bare = tmp_path / "origin.git"
+    _git(src, "clone", "-q", "--bare", str(src), str(bare))
+    w = tmp_path / "w"
+    _git(tmp_path, "clone", "-q", str(bare), str(w))
+    _git(w, "config", "user.email", "t@t")
+    _git(w, "config", "user.name", "t")
+    _git(w, "checkout", "-q", "-b", "7-thing")
+
+    def rep(*extra, env=None):
+        return subprocess.run([sys.executable, str(w / "scripts/process/report.py"), "pushed", *extra],
+                              cwd=w, capture_output=True, text=True, env=env)
+
+    r = rep()
+    assert r.returncode == 2 and "not on origin" in r.stderr
+    _git(w, "push", "-q", "-u", "origin", "7-thing")
+    base = _git(w, "rev-parse", "HEAD").stdout.strip()
+    phase = dict(os.environ, PROCESS_PHASE_BASE=base)
+    r = rep(env=phase)
+    assert r.returncode == 2 and "no new commit" in r.stderr
+    (w / "x.txt").write_text("work\n")
+    _git(w, "add", "x.txt")
+    _git(w, "commit", "-q", "-m", "feat: x")
+    r = rep(env=phase)
+    assert r.returncode == 2 and "not on origin" in r.stderr  # committed, not pushed
+    _git(w, "push", "-q")
+    r = rep(env=phase)
+    assert r.returncode == 0 and "→ pushed" in r.stdout, r.stderr
+    # --force records an unverifiable report, marked as such
+    _git(w, "checkout", "-q", "-b", "8-offline")
+    r = rep("--force")
+    assert r.returncode == 0 and "[unverified:" in r.stdout

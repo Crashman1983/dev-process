@@ -1,0 +1,3 @@
+# template_update.py writes the per-release delta of owned files here: working
+# memory to port by hand, never committed
+template-delta/

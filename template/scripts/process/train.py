@@ -487,6 +487,10 @@ def main(argv: list[str]) -> int:
     a = p.parse_args(argv)
     root = Path(_out(Path(a.root).resolve(), "rev-parse", "--show-toplevel") or a.root).resolve()
     if a.command == "plan":
+        if local_integration(root) is None:
+            # a fresh repo without commits: nothing can board yet — a state, not an error
+            print("train plan: hold — no local main/master branch yet (no commits)")
+            return 0
         result = plan(root, min_candidates=a.min_candidates, max_wait_hours=a.max_wait_hours)
         print(json.dumps(result, indent=2) if a.json else render_plan(result))
         return 0

@@ -74,6 +74,14 @@ def answers(root: Path) -> tuple[str | None, str | None, dict[str, str]]:
             elif key == "_commit":
                 commit = str(value)
             elif not str(key).startswith("_"):
+                if value is None:
+                    continue
+                if isinstance(value, str):
+                    # copier takes --data for a str question literally: a YAML
+                    # dump would wrap it in quotes, and every update would add
+                    # another layer ('' ->  -> ...)
+                    data[str(key)] = value
+                    continue
                 dumped = yaml.safe_dump(value, default_flow_style=True,
                                         width=10 ** 6).strip()
                 if dumped.endswith("..."):  # scalar document end marker
@@ -87,8 +95,11 @@ def answers(root: Path) -> tuple[str | None, str | None, dict[str, str]]:
                 commit = line.split(":", 1)[1].strip()
             elif line and not line.startswith(("_", " ", "#")) and ":" in line:
                 key, value = line.split(":", 1)
-                if value.strip():
-                    data[key.strip()] = value.strip()
+                value = value.strip()
+                if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
+                    value = value[1:-1]  # a quoted scalar: pass its content, not the quotes
+                if value or line.rstrip().endswith(("''", '""')):
+                    data[key.strip()] = value
     return src, commit, data
 
 
@@ -189,6 +200,13 @@ def main() -> int:
         return 2
     print(f"template-update: {len(owned)} owned pattern(s) from {OWNED_FILE}; "
           f"from {old_ref} to {ref or 'latest release'}")
+    if ref is None and (".post" in old_ref or re.search(r"-\d+-g[0-9a-f]+$", old_ref)):
+        # installed from a commit past the last tag: the latest release is older,
+        # and copier refuses a downgrade — say so before anything runs
+        print(f"template-update: {old_ref} is a commit past the last release; the "
+              f"latest release would be a downgrade — pass --ref HEAD (or a newer tag)",
+              file=sys.stderr)
+        return 2
     if dry:
         return 0
     upd = _copier("update", "--trust", "--defaults", "--conflict", "inline",

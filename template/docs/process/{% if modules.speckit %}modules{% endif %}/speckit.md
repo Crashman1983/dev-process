@@ -15,9 +15,11 @@ the network or the CLI:
 
     uv tool install specify-cli==0.16.0
     specify init --here --force --integration <your agent>
-    rm -rf .claude/skills/speckit-constitution \
-           .claude/skills/speckit-implement \
-           .claude/skills/speckit-taskstoissues
+    # drop three skills (why: below) where the integration put them —
+    # Claude Code: .claude/skills, GitHub Copilot: .github/skills
+    for d in .claude/skills .github/skills; do
+      rm -rf "$d/speckit-constitution" "$d/speckit-implement" "$d/speckit-taskstoissues"
+    done
     echo ".specify/feature.json" >> .gitignore   # per-checkout state, never committed
     uv run scripts/process/gate_runner.py   # the regression net over the init
 

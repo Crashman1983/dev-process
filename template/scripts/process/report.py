@@ -19,6 +19,14 @@ as a blob under `refs/process/reports/<host>` on origin — git is the one
 channel every host already has; no ssh, nothing committed to a branch.
 The tower fetches those refs (`tower.py --remote`) and merges every
 host's reports. Host name: PROCESS_HOST or the machine's hostname.
+
+`pushed` is checked, not believed: the branch must be on origin with this
+worktree's HEAD, and — when dispatch recorded where the phase began
+(PROCESS_PHASE_BASE, the branch's origin commit at phase start) — origin
+must have moved past that point. A premature `pushed` let the steward
+start the next phase on a branch that held none of this phase's work
+(observed downstream three times in one day). `--force` records it anyway,
+marked unverified in the note — for an origin that is unreachable.
 Stdlib only."""
 from __future__ import annotations
 
@@ -150,6 +158,27 @@ def sync_reports(root: Path, remote: str = "origin") -> bool:
     return _run(["git", "-C", str(root), "push", "--quiet", "--force", remote, f"{ref}:{ref}"])
 
 
+def pushed_refusal(root: Path, remote: str = "origin") -> str | None:
+    """Why a `pushed` report would be false right now — None when it is true."""
+    branch = _git(root, "rev-parse", "--abbrev-ref", "HEAD")
+    if not branch or branch == "HEAD":
+        return "HEAD is detached — `pushed` names a branch"
+    head = _git(root, "rev-parse", "HEAD")
+    line = _git(root, "ls-remote", "--heads", remote, branch)
+    on_origin = line.split()[0] if line else ""
+    if not on_origin:
+        return f"{branch} is not on {remote} (or {remote} is unreachable) — push first"
+    if on_origin != head and subprocess.run(
+            ["git", "-C", str(root), "merge-base", "--is-ancestor", head, on_origin],
+            capture_output=True).returncode != 0:
+        return f"{branch} has commits that are not on {remote} — push first"
+    base = os.environ.get("PROCESS_PHASE_BASE", "").strip()
+    if base and on_origin == base:
+        return (f"no new commit on {remote}/{branch} since this phase started ({base[:10]}) — "
+                f"commit and push the phase's work first")
+    return None
+
+
 def main(argv: list[str]) -> int:
     p = argparse.ArgumentParser(prog="report.py", description=__doc__.split("\n\n")[0])
     p.add_argument("state", choices=STATES)
@@ -158,11 +187,21 @@ def main(argv: list[str]) -> int:
     p.add_argument("--worker", help="name (default: PROCESS_WORKER or the branch)")
     p.add_argument("--model", help="the model doing this phase (default: PROCESS_MODEL) — what the KPIs cut by")
     p.add_argument("--root", default=".")
+    p.add_argument("--force", action="store_true",
+                   help="record `pushed` without the origin check (marked unverified)")
     p.add_argument("--sync", action="store_true",
                    help="publish this host's reports to origin (refs/process/reports/<host>)")
     a = p.parse_args(argv)
     root = Path(a.root).resolve()
-    rec = write_report(root, a.state, issue=a.issue, note=a.note, worker=a.worker, model=a.model)
+    note = a.note
+    if a.state == "pushed":
+        why = pushed_refusal(root)
+        if why and not a.force:
+            print(f"report: refusing `pushed` — {why}", file=sys.stderr)
+            return 2
+        if why:
+            note = f"[unverified: {why}] {note}".strip()
+    rec = write_report(root, a.state, issue=a.issue, note=note, worker=a.worker, model=a.model)
     print(f"report: {rec['worker']}@{rec['host']} → {rec['state']}"
           + (f" #{rec['issue']}" if rec["issue"] else "") + (f" — {rec['note']}" if rec["note"] else ""))
     if a.sync or os.environ.get("PROCESS_REPORT_SYNC") == "1":

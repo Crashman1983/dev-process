@@ -211,11 +211,12 @@ def check(root: Path) -> tuple[list[str], list[str]]:
     if (root / "scripts/process/publish_and_prune.py").is_file():
         if done_spec_dirs:
             for name in done_spec_dirs:
-                tail.append(f"python scripts/process/publish_and_prune.py "
+                tail.append(f"python3 scripts/process/publish_and_prune.py "
                             f"{SPECS_DIR}/{name}  # publish the outcome, "
                             f"prune the finished working set")
         else:
-            tail.append("python scripts/process/publish_and_prune.py "
+            tail.append("only if this change ran through a spec (not spec-waived): "
+                        "python3 scripts/process/publish_and_prune.py "
                         "<feature-dir>  # publish the outcome, prune the spec "
                         "working set")
     tail.append("close the tracking issue with the merge commit ref (DoD)")

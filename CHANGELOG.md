@@ -1036,6 +1036,43 @@ mit tmux und den Koordinationsskripten. Das öffentliche Repo nennt das
 Ursprungsprojekt nur noch als Referenzprojekt und enthält keine Betriebsdetails,
 Klientenbezüge oder Vornamen mehr; die Neutralitätslisten der Tests bleiben.
 
+**Lizenztext im gerenderten Repo, SBOM erzeugt statt gepflegt.** Jedes
+eingerichtete Repository erhält `docs/process/LICENSE` (Apache 2.0, identisch
+mit dem Repo-`LICENSE`, ein Test hält beide gleich) und `docs/process/NOTICE.md`:
+Die Lizenz gilt für die gerenderten Prozessdateien, nicht für Code und Inhalt
+des Projekts; geänderte Prozessdateien tragen einen Änderungshinweis. Bisher
+lieferte das Template den Lizenztext nicht mit, obwohl Apache 2.0 ihn bei
+Weitergabe verlangt. Die Repo-SBOM war von Hand gepflegt und stand auf
+v1.37.0; `tools/gen_sbom.py` erzeugt jetzt `docs/SBOM.md` und
+`docs/sbom.cdx.json` (CycloneDX 1.5, mit Hashes und Abhängigkeitsgraph,
+deterministisch) aus `pyproject.toml` und `uv.lock`, und `test_sbom.py` lässt
+CI rot werden, sobald eine der beiden Dateien veraltet.
+
+**`pushed` wird geprüft, nicht geglaubt.** Im Referenzprojekt meldeten
+Worker an einem Tag dreimal `pushed`, bevor die Arbeit auf origin lag; der
+Steward startete daraufhin die nächste Phase auf einem Branch ohne diese
+Arbeit. `report.py pushed` verweigert jetzt, solange der Branch nicht mit dem
+HEAD des Worktrees auf origin liegt oder origin seit Phasenstart keinen neuen
+Commit hat; `dispatch.py` gibt den Startpunkt als `PROCESS_PHASE_BASE` mit.
+`--force` bleibt für ein unerreichbares origin und markiert die Meldung als
+unverifiziert.
+
+**Greenfield-Prüfung durch einen unabhängigen Agenten** (leeres Repo, alle
+Harnesses, `regulated`, Hooks, Spec Kit, ein Tier-2-Durchlauf): kein Blocker,
+behoben wurde: `template_update.py` verdoppelte bei jedem Lauf die Quotes
+leerer String-Antworten (`github_repo: ''`) und erkennt jetzt eine
+HEAD-Installation vor dem Lauf statt an copiers Downgrade-Fehler;
+`scripts/process/.gitignore` und `.process-work/.gitignore` halten
+`__pycache__/` und die Update-Deltas aus dem Worktree; das Spec-Kit-Setup
+entfernt die drei Skills auch unter `.github/skills` (Copilot);
+`start-here.md` nennt `speckit` und `design-contracts` im Standard-Setup;
+`workflow.md` sagt, dass `/report`, `/steward` und `/finish` Claude-Code-
+Commands sind und andere Harnesses die Skripte direkt aufrufen;
+`rehydrate.py --check` bestätigt Erfolg, `train.py plan` ohne Commits hält
+statt zu scheitern, `finish.py` nennt `publish_and_prune` nur für Änderungen
+mit Spec. Dazu: README neu und schlank mit Verweis auf den Überblick, der jetzt
+auch englisch vorliegt (`docs/OVERVIEW.md`), `v2.24.0`.
+
 ## Sub-Projekt-Tabelle (SP1–SP24)
 
 Die Tabelle wurde bis SP24 gepflegt; ab SP25 trägt das Narrativ oben die

@@ -128,6 +128,7 @@ def check(root: Path) -> int:
     except ValueError:
         settings = {}
     if _has_hook(settings):
+        print(f"rehydrate: SessionStart hook (compact|resume) installed in {SETTINGS}")
         return 0
     print(f"rehydrate: no SessionStart hook in {SETTINGS} — run `python3 scripts/process/rehydrate.py --install`",
           file=sys.stderr)
