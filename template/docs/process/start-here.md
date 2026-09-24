@@ -18,9 +18,10 @@ contracts, persistence, or auth.
 ## The standard setup
 
 Module choice is not a question (lean pass): the template renders one
-opinionated standard set — doc-drift, git-hooks (pre-commit), feature
-inventory, github-issues + github-master, contracts, arch-onboarding,
-arch-docs, telemetry — on top of the always-on core gates. The single switch
+opinionated standard set — speckit (the Tier 2+ specification path),
+doc-drift, git-hooks (pre-commit), feature inventory, github-issues +
+github-master, contracts, arch-onboarding, arch-docs, telemetry,
+design-contracts — on top of the always-on core gates. The single switch
 is **`regulated`**, which adds the compliance pack (`sbom` + `security_floor`).
 Content-driven gates are honestly inert until their artifacts exist: an empty
 inventory, contract set, or journal is a note, never a failure, so the

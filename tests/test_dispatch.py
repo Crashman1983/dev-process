@@ -306,7 +306,7 @@ def test_report_carries_model_and_kpis_cut_by_it(render, tmp_path):
     _repo(out)
     env = dict(os.environ, PROCESS_PHASE="execute")
     r = subprocess.run([sys.executable, str(out / "scripts/process/report.py"), "pushed", "--issue", "5",
-                        "--worker", "w5", "--model", "claude-sonnet-5"], cwd=out, capture_output=True, text=True, env=env)
+                        "--worker", "w5", "--model", "claude-sonnet-5", "--force"], cwd=out, capture_output=True, text=True, env=env)
     assert r.returncode == 0
     j = out / ".process-work/journal"
     j.mkdir(parents=True, exist_ok=True)
@@ -323,7 +323,7 @@ def test_report_carries_model_and_kpis_cut_by_it(render, tmp_path):
     assert "confidence: low" in r.stdout
     # a re-dispatch with another model supersedes: the last execute model owns the issue
     subprocess.run([sys.executable, str(out / "scripts/process/report.py"), "pushed", "--issue", "5",
-                    "--worker", "w5", "--model", "claude-opus-5"], cwd=out, capture_output=True, text=True, env=env)
+                    "--worker", "w5", "--model", "claude-opus-5", "--force"], cwd=out, capture_output=True, text=True, env=env)
     r = subprocess.run([sys.executable, str(out / "scripts/process/process_kpis.py"), "models"],
                        cwd=out, capture_output=True, text=True)
     assert "claude-opus-5" in r.stdout and "claude-sonnet-5" not in r.stdout

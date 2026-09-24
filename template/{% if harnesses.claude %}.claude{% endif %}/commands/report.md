@@ -11,7 +11,9 @@ whole budget.
     uv run scripts/process/report.py done         --issue N
     uv run scripts/process/report.py idle                   --note "ready for the next issue"
 
-Send `planned` when the plan is committed, `pushed` at the first push,
+Send `planned` when the plan is committed, `pushed` after the phase's work
+is committed AND pushed (the script checks origin and refuses otherwise —
+push, then report; never `--force` to get past it while origin is reachable),
 `review-pass` when the clearing REVIEW is attested, `blocked` the moment
 you cannot proceed (with the reason — that line is what unblocks you),
 `done` after the merge, `idle` when you have nothing assigned. Reports land
