@@ -259,6 +259,9 @@ def apply(root: Path, items: dict, days: int) -> int:
 
 def main() -> int:
     args = sys.argv[1:]
+    if "-h" in args or "--help" in args:
+        print(__doc__)
+        return 0
     days = 30
     keep = list(DEFAULT_KEEP)
     if "--days" in args:

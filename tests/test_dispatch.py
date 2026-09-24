@@ -404,7 +404,7 @@ def test_remote_phase_with_tmux_runner_hands_over_from_a_terminal(render, tmp_pa
         r = _dispatch(out, "start", "--issue", "6", "--phase", "review", "--branch", "b6")
         assert r.returncode == 0, r.stderr
         assert "from tmux" in r.stdout
-        for _ in range(40):
+        for _ in range(160):  # generous: a loaded CI host starts tmux panes slowly
             if "cloud session started for b6" in _dispatch(out, "log", "b6").stdout:
                 break
             time.sleep(0.25)
@@ -415,7 +415,7 @@ def test_remote_phase_with_tmux_runner_hands_over_from_a_terminal(render, tmp_pa
         cloud.write_text('#!/bin/sh\necho "login required"; exit 4\n')
         r = _dispatch(out, "start", "--issue", "6", "--phase", "review", "--branch", "b6")
         assert r.returncode == 0, r.stderr
-        for _ in range(40):
+        for _ in range(160):  # generous: a loaded CI host starts tmux panes slowly
             if "HAND-OVER FAILED (exit 4)" in _dispatch(out, "list").stdout:
                 break
             time.sleep(0.25)

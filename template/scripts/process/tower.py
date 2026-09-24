@@ -178,6 +178,27 @@ def plans(root: Path) -> list[dict]:
     return out
 
 
+def plans_everywhere(root: Path, wts: list[dict]) -> list[dict]:
+    """Active plans of every worktree of this clone — a worker's plan lives in
+    ITS worktree, not in the steward's, and a plan there without an issue or a
+    tier is exactly what the table must show. Same plan path on several
+    worktrees: the first (the root comes first) wins; each entry names its
+    worktree's branch."""
+    out: list[dict] = []
+    seen: set[str] = set()
+    for wt in wts or [{"path": str(root)}]:
+        wroot = Path(wt["path"])
+        if wt.get("missing") or not wroot.is_dir():
+            continue
+        for p in plans(wroot):
+            key = p["path"]
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append({**p, "branch": wt.get("branch")})
+    return out
+
+
 def _questions_in(text: str, plan: str, branch: str | None, issue: str | None) -> list[dict]:
     out = []
     for m in QUESTION_LINE.finditer(_review._unfenced(text)):
@@ -380,7 +401,8 @@ def findings(table: dict, stale_minutes: int) -> list[dict]:
             continue  # brainstorm papers and waived stale plans are not work in flight
         if (p["tier"] or 0) >= 2 and not p["issue"]:
             out.append({"kind": "plan-without-issue", "severity": "high",
-                        "what": f"{p['path']} declares tier {p['tier']} but no issue:",
+                        "what": f"{p['path']}{' on ' + p['branch'] if p.get('branch') else ''} "
+                                f"declares tier {p['tier']} but no issue:",
                         "because": "a Tier 2+ item is not Ready without an issue (DoR); the issue gate reds the push"})
         if (p["tier"] or 0) >= 2 and not p["has_decisions_section"]:
             out.append({"kind": "plan-without-decisions", "severity": "medium",
@@ -446,7 +468,7 @@ def build(root: Path, stale_minutes: int = 60, *, remote: bool = False) -> dict:
         "elsewhere": elsewhere,
         "elsewhere_residue": old_remote,
         "overlaps": overlaps(wts + elsewhere),
-        "plans": plans(root),
+        "plans": plans_everywhere(root, wts),
         "questions": questions(root, wts, elsewhere),
         "sessions": sessions(root),
         "reviews": reviews_today(root),

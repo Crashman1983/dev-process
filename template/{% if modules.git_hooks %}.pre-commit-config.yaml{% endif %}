@@ -13,6 +13,9 @@ repos:
     hooks:
       - id: no-commit-to-branch
         args: [--branch, main, --branch, master]
+        # commits only: the merge push to main (finish, the train) is the
+        # sanctioned way in and must not be blocked by this hook
+        stages: [pre-commit]
   - repo: local
     hooks:
       - id: process-gates

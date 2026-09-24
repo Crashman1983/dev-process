@@ -73,9 +73,12 @@ def main(argv: list[str]) -> int:
     log = _git(root, "log", "--no-merges", "--pretty=%x01%s", "--name-only", f"{base}..HEAD")
     if log is None:
         return 0
-    for path, n in sorted(fix_streaks(log).items(), key=lambda kv: (-kv[1], kv[0])):
+    streaks = fix_streaks(log)
+    for path, n in sorted(streaks.items(), key=lambda kv: (-kv[1], kv[0])):
         print(f"fix-streak: note: {n} fix commits on {path} in this branch — mandatory rule 6: "
               f"find the root cause (or record the structural decision) before the next patch")
+    if not streaks:
+        print("fix-streak: OK")
     return 0
 
 

@@ -35,7 +35,8 @@ entries diff and merge independently):
   the system shall `<response>`.* Wording is graded by humans, not the gate.
 - **acceptance** — a non-empty list of `{id, text}`; each `text` is a
   gradeable, testable statement. The `id` is a naming convention for
-  referencing criteria (plans, GRADE lines); the gate validates only `text`.
+  referencing criteria (plans, GRADE lines, the spec's `AC-n` lines — the
+  `ac-text-drift` gate matches them by it); this gate validates `text`.
 - **tests** — a **non-empty** list of paths (optionally with a `::node`
   selector) to the tests that prove the acceptance. An inventory entry
   without a resolvable test is a claim, not an inventory item.

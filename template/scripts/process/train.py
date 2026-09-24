@@ -156,7 +156,9 @@ def candidates(root: Path, local: str, base: str) -> list[dict]:
             c["reasons"].append(f"open DECISION NEEDED in {open_q[0]} — answer it as a DECISION line before merging")
         rep = reports.get(b)
         if archived and cleared_all:
-            c["by"] = "archived plan + REVIEW pass"
+            needs_review = [p for p in c["plans"] if p["tier"] is not None and p["tier"] >= 2 and not p["waived"]]
+            c["by"] = ("archived plan + REVIEW pass" if needs_review
+                       else "archived plan (Tier 0-1 or waived: no review required)")
         elif rep and rep["state"] in ("review-pass", "done"):
             c["by"] = f"worker report {rep['state']} ({rep['minutes_ago']} min ago)"
             if archived and not cleared_all:

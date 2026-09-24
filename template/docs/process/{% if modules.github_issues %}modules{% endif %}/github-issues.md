@@ -123,16 +123,6 @@ matches a line of `.publish-denylist` (project-owned regexes, `#`
 comments) and prints the matching lines — the same guard the speckit
 module's `publish_and_prune.py` applies before posting snapshots.
 
-## Optional: render story dependencies
-
-A story's `blocked_by` (feature-registry) is the portable source of truth for
-sequencing. If you want it visible on GitHub, render it into the issue body as a
-`Blocked by #N` line (or use GitHub's native issue relationships). This is a
-one-way projection *from* the registry — a convenience, never the source of
-truth, and not gated (it needs a write token). The feature-registry module's
-`story_order.py` tool prints the ready-to-start order from the same data without
-touching GitHub.
-
 ## Review and audit visibility
 
 Independent reviews and audits produce the process's most valuable negative

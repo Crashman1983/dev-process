@@ -170,7 +170,7 @@ A REVIEW may bind itself to the exact reviewed diff by carrying the three
 integrity fields. **Write the line with `scripts/process/attest.py`**
 (`--bundle <bundle file>` or `--base/--head`): it recomputes the digest with
 the gate's own formula, refuses a stale bundle, validates the grammar and
-appends to today's shard. Never type a digest. The gate names a digest that
+appends to the branch's shard of today. Never type a digest. The gate names a digest that
 matches no formula for its base/head as what it is — a fabricated
 attestation — and counts the review as absent (observed on one deployment:
 15 of 16 recorded digests were never computed, and the gate said so on every

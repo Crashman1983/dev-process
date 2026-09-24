@@ -54,7 +54,10 @@ def _default_repo(root: Path) -> str | None:
     if not isinstance(data, dict):
         return None
     repo = data.get("github_repo")
-    return repo.strip() if isinstance(repo, str) and repo.strip() else None
+    # an update helper before v2.24 wrapped an empty answer in quotes on every
+    # run ('' ->  -> ...): a value made only of quotes is empty
+    repo = repo.strip().strip("'\"").strip() if isinstance(repo, str) else ""
+    return repo or None
 
 
 def _issue_exists(gh: str, repo: str, number: int) -> bool:

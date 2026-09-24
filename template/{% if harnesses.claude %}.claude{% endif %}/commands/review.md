@@ -24,7 +24,7 @@ Record the result with the writer, never by hand:
 
 It recomputes the digest from the bundle's base/head with the gate's formula,
 refuses a stale bundle, validates the grammar and appends the `REVIEW` line to
-today's journal shard (`journal-state-plans.md`). A typed digest is a
+today's journal shard of the branch (`journal-state-plans.md`). A typed digest is a
 fabricated attestation; the gate names it as such and counts the review as
 absent. For a
 findings-producing or Tier 3 review — `FINDING sev=… action=… issue=…` lines

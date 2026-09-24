@@ -186,11 +186,11 @@ Use this path when product code already exists.
 3. Fill `ARCHITECTURE.md` from real code. If a rule is only aspirational,
    document it in an ADR as `change-planned` or `tolerated`, not as already
    satisfied.
-4. Create registry entries only for facts you can defend: real stories, real
-   tests, real contracts, real security rules.
+4. Create registry entries only for facts you can defend: real stories and
+   real tests.
 5. Run `uv run scripts/process/gate_runner.py` after each onboarding slice.
 6. Commit onboarding in small steps: architecture baseline, feature registry,
-   contracts, security floor.
+   design contracts, SBOM policy.
 7. Start product work only after the relevant baseline for that area exists.
 
 ## Which artifact when
@@ -292,9 +292,9 @@ The project is ready for normal process-driven development when:
   onboarding state;
 - **the gate is wired to block.** A red `process-gates` job only blocks a
   merge if your host is configured to require it — CI cannot set this itself.
-  On GitHub, the GitHub CI adapter ships a one-command setup
-  (`scripts/process/setup_branch_protection.sh` in repos rendered with that
-  adapter) that idempotently adds `process-gates` as a required status check —
+  On GitHub, the GitHub CI adapter ships a one-command setup (the
+  setup_branch_protection.sh script under scripts/process, rendered only with
+  that adapter) that idempotently adds `process-gates` as a required status check —
   or do it manually via Settings → Branches. Without the CI adapter, the
   `git-hooks` module's pre-push hook IS the enforcement authority — install it
   and treat a bypassed hook like a skipped gate (mandatory rule 8). Whichever

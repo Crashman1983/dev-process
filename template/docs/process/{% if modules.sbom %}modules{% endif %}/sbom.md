@@ -1,15 +1,18 @@
 # Module: sbom
 
-Opt-in. Requires a **Software Bill of Materials** (CycloneDX JSON) that attests a
-**license for every third-party component**, and permits only the licenses the
-project allows. When enabled it makes "third-party dependencies are inventoried
+Part of the standard setup. Requires a **Software Bill of Materials** (CycloneDX
+JSON) that attests a **license for every third-party component**, and permits
+only the licenses the project allows. Once the project sets up its policy, it
+makes "third-party dependencies are inventoried
 with an attested license" part of what *done* means — a new or changed dependency
 updates the SBOM before merge.
 
-## When required
+## When it bites
 
-Enable when third-party supply-chain transparency and license compliance are part
-of "done" — most products shipping external dependencies.
+The gate is advisory until the project creates its policy (next section) —
+then it is hard. Set the policy up as soon as the product ships external
+dependencies: supply-chain transparency and license compliance are part of
+"done" for productive use.
 
 ## Policy
 

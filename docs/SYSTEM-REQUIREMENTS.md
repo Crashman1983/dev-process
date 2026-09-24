@@ -54,7 +54,7 @@ stellt Laufzeit und Abhaengigkeiten isoliert bereit.
 | Voraussetzung | Version | Wann erforderlich |
 |---|---:|---|
 | `uv` | aktuelle stabile Version | startet Gates und portable Helfer samt isolierter Python-Abhaengigkeiten |
-| `git` | aktuelle stabile Version | lokale Hooks, Security-Floor-Dateiliste, normale Projektarbeit |
+| `git` | aktuelle stabile Version | lokale Hooks, normale Projektarbeit |
 | `gh` | aktuelle stabile Version | optional fuer best-effort GitHub-Issue-Existenzpruefung und die Tempo-Familie des KPI-Cockpits (`telemetry`) |
 | Architekturlinter | projektabhaengig | optional fuer `arch-onboarding` best-effort Layering-Pruefungen |
 
@@ -63,7 +63,6 @@ Die plattformneutralen Befehle sind:
 ```bash
 uv run scripts/process/gate_runner.py
 uvx pre-commit install --hook-type pre-commit --hook-type pre-push
-uv run scripts/process/new_issue.py feature
 ```
 
 Die lokalen Hooks verwaltet das Standard-Framework `pre-commit`
