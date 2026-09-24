@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/mark.svg" width="120" alt="dev-process"></p>
+
 # Development Process with AI Agents
 
 *How goals, architecture and quality stay secured over time – and what role the human plays*
