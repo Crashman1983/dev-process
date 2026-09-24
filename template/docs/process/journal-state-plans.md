@@ -99,20 +99,34 @@ were invisible to every gate until it was added, and two duties armed at
 once). Archived plans without the line are a note: history is not
 re-litigated.
 
-**Tier 3 is anchored to the push, not the archive.** Waiting for the archive
-step means the proof arrives after the merge it was meant to gate. So for an
-*active* `tier: 3` plan **this push carries** — its file is in the pushed
+**From Tier 2 on, review is anchored to the push, not the archive.** Waiting
+for the archive step means the proof arrives after the merge it was meant to
+gate (observed downstream: a Tier 2 plan merged without a review, every gate
+green, because it was never archived). So for an *active* `tier: 2` or higher
+plan **this push carries** — its file is in the pushed
 range, or a pushed commit claims its issue (a closing trailer such as
 `closes #N`, or a `… (#N)` subject; a bare mention claims nothing) — the
 review gate demands the clearing pass **on the push to main/master** and
 reports the same finding as a note on every other push. The gate learns where
 a push lands from the environment: the pre-commit framework's
 `PRE_COMMIT_REMOTE_BRANCH`, or `PROCESS_PUSH_TARGETS` exported by a custom
-hook from git's stdin. Somebody else's Tier 3 plan sitting in the tree is not
-this push's proof to produce. Known limitation: a pull request merged
-server-side never pushes main from a clone, so this arm never fires on that
-route — there `finish.py` (run before the PR is opened) is the stop, and the
-archive arm catches the residue on main.
+hook from git's stdin. Somebody else's plan sitting in the tree is not this
+push's proof to produce.
+
+**A review covers the head it names.** The pass records the `head` it
+reviewed; code committed afterwards in a path this push carries was never
+reviewed, and the merge push (and `finish.py`) say so — re-review the delta
+and attest again. Journal and plan bookkeeping after the reviewed head is
+exempt.
+
+**Merged past the process is caught after the fact.** A pull request merged
+server-side never pushes main from a clone, and a hook can be skipped; neither
+passes a gate. A Tier 3 plan that is still active while commits claiming its
+issue already sit on the integration branch, without a clearing pass or a
+`review-waived:` line, turns the review gate red on every later run until it is
+reviewed or the exception is recorded. Where no CI enforces the gates, merge
+by pushing main from a clone (`finish.py`, the train) — never by a platform's
+merge button.
 
 Digest binding is opt-in per REVIEW line (below), not per plan — the former
 `review-binding: artifact-v1` plan field is retired; the gate reports a

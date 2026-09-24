@@ -6,7 +6,7 @@
 
 Principles, mechanics and the path to broad rollout
 
-Process template dev-process v2.27.1 · tested in a real repository in production use (reference project)
+Process template dev-process v2.28.0 · tested in a real repository in production use (reference project)
 
 Template published on GitHub: [github.com/Crashman1983/dev-process](https://github.com/Crashman1983/dev-process)
 
@@ -174,7 +174,7 @@ The following table shows how the building blocks could be mapped and which of t
 
 | Risk | What it means | Countermeasure today |
 |---|---|---|
-| Gates can be bypassed | Without Branch Protection, a Merge can skip the Gates. | Every bypass must be stated in the commit; Branch Protection makes the Gate mandatory; the Owner draws samples. |
+| Gates can be bypassed | Without Branch Protection, a Merge can skip the Gates. | Every bypass must be stated in the commit; a Tier 3 work item that lands on main without a Review turns the Gate red after the fact; Branch Protection makes the Gate mandatory; the Owner draws samples. |
 | Attestation is self-reported | The Gate cannot verify whether the reviewer was a different instance. | Review sessions are started by a program, not by a human by hand; the attestation is bound to the code; the Owner draws samples. |
 | One model family | In the reference project, two thirds of Tier 3 reviews ran without a second model; in that case the Gate only requires an explicit statement. | The refutation review remains; platforms like Copilot offer models from several vendors; whether the Gate should require the second model is open. |
 | Model policy is code | The file also contains the start command for the sessions; whoever changes it can run commands on the machine that starts them. | Treated like the configuration of the check environment: every change goes through review. |

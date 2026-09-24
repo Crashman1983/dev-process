@@ -143,6 +143,7 @@ a script such as
     cd "${CLAUDE_PROJECT_DIR:-.}"
     command -v uv >/dev/null || pip install --quiet uv
     uv sync                        # or the project's own setup target
+    uvx pre-commit install --hook-type pre-commit --hook-type pre-push  # the session pushes too
     # export PATH additions for the session's shells via "$CLAUDE_ENV_FILE"
 
 Make it idempotent and fast on a second start; a review that cannot run the
