@@ -1,6 +1,6 @@
 # System Requirements
 
-Stand: 2026-07-10
+Stand: 2026-09-24 (v2.23.0)
 
 Dieses Dokument beschreibt, was auf einem System installiert sein muss, um
 `dev-process` zu nutzen, im Upstream-Repository zu entwickeln oder die gerenderten
@@ -68,37 +68,49 @@ uv run scripts/process/new_issue.py feature
 Die lokalen Hooks verwaltet das Standard-Framework `pre-commit`
 (https://pre-commit.com); die Gate-Logik laeuft danach ueber `uv` in Python.
 
+## Parallele Agenten (optional)
+
+Wer mehrere Agenten gleichzeitig arbeiten lässt (Tower, Steward, Dispatch,
+Merge Train; `docs/process/tower.md` und `docs/process/train.md` im
+gerenderten Repo), braucht zusätzlich:
+
+| Voraussetzung | Wann erforderlich |
+|---|---|
+| Python `>=3.11` auf `PATH` | die Koordinationsskripte (`tower.py`, `dispatch.py`, `train.py`, `report.py`, `rehydrate.py`) laufen mit der Stdlib |
+| die CLI der Harness | `dispatch.py` startet Sitzungen mit dem Befehl aus `docs/process/model-policy.json`, im Standard `claude` (Claude Code) |
+| `tmux` | nur für `"runner": "tmux"`: jeder Worker wird ein sichtbares, ansprechbares Fenster |
+| Push-Zugriff auf `origin` | nur für Phasen auf einem anderen Host (`"remote": true`) und für Meldungen mit `report.py --sync` |
+
 ## Modulbezogene Hinweise
+
+Das Standard-Setup rendert alle Module außer `security-floor` und `sbom`;
+diese beiden kommen mit `regulated=true` dazu.
 
 | Modul | Zusaetzliche Umgebung |
 |---|---|
+| `speckit` | die gepinnte Spec-Kit-CLI für das Setup (Rezept im gerenderten `docs/process/modules/speckit.md`); das Gate selbst braucht nur die Python-Stdlib |
 | `doc-drift-gate` | Python-Stdlib reicht |
 | `arch-onboarding` | `PyYAML`; optional `import-linter` oder `dependency-cruiser`, wenn das Zielrepo Layering maschinell pruefen will |
 | `feature-registry` | Python-Stdlib reicht |
 | `github-issues` | `PyYAML` (liest `.copier-answers.yml`); optional `gh` fuer best-effort Remote-Checks |
-| `contracts-drift` | Python-Stdlib reicht; Contract-spezifische Verify-Kommandos koennen projektspezifische Tools brauchen |
+| `contracts` | Python-Stdlib reicht; Contract-spezifische Verify-Kommandos koennen projektspezifische Tools brauchen |
 | `git-hooks` | keine zusaetzlichen Werkzeuge ausser dem Core-Vertrag |
-| `contract-first` | Python-Stdlib reicht |
-| `parity` | `PyYAML` |
+| `telemetry` | Python-Stdlib fuer Gate und Cockpit-Kern; optional `gh` (Tempo-Familie) und `git` (CFR-Familie) |
+| `arch-docs` | Python-Stdlib reicht |
+| `github-master` | Gate: Python-Stdlib (hermetisch, offline); Sync/Board-Tools: `gh` (authentifiziert, Board zusaetzlich `project`-Scope) |
+| `design-contracts` | Python-Stdlib reicht; die Referenz-Boards erzeugt das Projekt mit eigenen Werkzeugen |
 | `security-floor` | `git` und Python-Stdlib |
 | `sbom` | `git` und Python-Stdlib; SBOM-Erzeugung braucht einen CycloneDX-Generator im Build (z. B. Maven-Plugin, `@cyclonedx/cyclonedx-npm`, `syft`) |
-| `telemetry` | Python-Stdlib fuer Gate und Cockpit-Kern; optional `gh` (Tempo-Familie) und `git` (CFR-Familie) |
-| `arch_docs` | Python-Stdlib reicht |
-| `github-master` | Gate: Python-Stdlib (hermetisch, offline); Sync/Board-Tools: `gh` (authentifiziert, Board zusaetzlich `project`-Scope) |
 
 ## CI
 
 Die Upstream-CI verwendet Ubuntu fuer die Vollsuite und eine portable
 Smoke-Matrix auf Linux, macOS und Windows.
 
-Gerenderte Zielrepos erhalten je nach `ci`-Antwort einen `process-gates`-Job:
+Gerenderte Zielrepos erhalten mit `ci.github` (Default) einen
+`process-gates`-Job: ein Actions-Workflow mit `astral-sh/setup-uv` und
+`uv run scripts/process/gate_runner.py`. `scripts/process/setup_branch_protection.sh`
+hinterlegt ihn als Required Status Check.
 
-- **GitHub** (`ci.github`, Default): Actions-Workflow mit
-  `astral-sh/setup-uv` und `uv run scripts/process/gate_runner.py`.
-- **GitLab** (`ci.gitlab`): includable Job-Datei
-  `.gitlab/ci/process-gates.gitlab-ci.yml` (offizielles `uv`-Image, gleiches
-  Kommando) plus duenner Root-Shim `.gitlab-ci.yml` mit einer
-  `include:`-Zeile.
-
-Sind beide aus, erzwingt remote nichts die Gates — dann ist das
+Ist `ci.github` aus, erzwingt remote nichts die Gates — dann ist das
 `git-hooks`-Modul die einzige Enforcement-Saeule.

@@ -140,7 +140,7 @@ def test_invalid_json_is_hard(render, tmp_path):
 
 - [ ] **Step 4: Run the tests to verify they fail**
 
-Run: `cd /home/claude/Projekte/dev-process && .venv/bin/python -m pytest tests/test_feature_registry.py -q`
+Run: `cd <repo> && .venv/bin/python -m pytest tests/test_feature_registry.py -q`
 Expected: FAIL — the template files do not exist yet (render produces no `check_feature_registry.py`).
 
 - [ ] **Step 5: Create the gate skeleton**
@@ -336,13 +336,13 @@ def test_runner_omits_gate_when_module_off(render, tmp_path):
 
 - [ ] **Step 10: Run the tests to verify they pass**
 
-Run: `cd /home/claude/Projekte/dev-process && .venv/bin/python -m pytest tests/test_feature_registry.py -q`
+Run: `cd <repo> && .venv/bin/python -m pytest tests/test_feature_registry.py -q`
 Expected: PASS (6 tests).
 
 - [ ] **Step 11: Commit**
 
 ```bash
-cd /home/claude/Projekte/dev-process
+cd <repo>
 git add copier.yml tests/conftest.py tests/test_feature_registry.py \
   "template/scripts/process/gate_runner.py.jinja" \
   "template/scripts/process/{% if modules.feature_registry %}check_feature_registry.py{% endif %}.jinja" \
@@ -431,7 +431,7 @@ Note: `test_valid_story_ok` currently fails only on the missing test file / it m
 
 - [ ] **Step 2: Run the tests to verify the new ones fail**
 
-Run: `cd /home/claude/Projekte/dev-process && .venv/bin/python -m pytest tests/test_feature_registry.py -q`
+Run: `cd <repo> && .venv/bin/python -m pytest tests/test_feature_registry.py -q`
 Expected: the structural cases FAIL (gate does not yet reject them; `_check_story` returns `[],[]` for any well-formed JSON object).
 
 - [ ] **Step 3: Extend `_check_story` with structural validation**
@@ -481,13 +481,13 @@ def _check_story(root: Path, path: Path, seen_ids: dict) -> tuple[list[str], lis
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
-Run: `cd /home/claude/Projekte/dev-process && .venv/bin/python -m pytest tests/test_feature_registry.py -q`
+Run: `cd <repo> && .venv/bin/python -m pytest tests/test_feature_registry.py -q`
 Expected: PASS (all structural cases green; `test_valid_story_ok` may still not be fully exercised until Task 3 but must not fail).
 
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /home/claude/Projekte/dev-process
+cd <repo>
 git add tests/test_feature_registry.py \
   "template/scripts/process/{% if modules.feature_registry %}check_feature_registry.py{% endif %}.jinja"
 git commit -m "$(cat <<'EOF'
@@ -567,7 +567,7 @@ def test_present_adr_passes(render, tmp_path):
 
 - [ ] **Step 2: Run the tests to verify the new ones fail**
 
-Run: `cd /home/claude/Projekte/dev-process && .venv/bin/python -m pytest tests/test_feature_registry.py -q`
+Run: `cd <repo> && .venv/bin/python -m pytest tests/test_feature_registry.py -q`
 Expected: the reference cases FAIL (gate does not yet check `tests[]`/`adr`).
 
 - [ ] **Step 3: Extend `_check_story` with reference validation**
@@ -597,13 +597,13 @@ In `check_feature_registry.py.jinja`, insert the following block into `_check_st
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
-Run: `cd /home/claude/Projekte/dev-process && .venv/bin/python -m pytest tests/test_feature_registry.py -q`
+Run: `cd <repo> && .venv/bin/python -m pytest tests/test_feature_registry.py -q`
 Expected: PASS (all reference cases green).
 
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /home/claude/Projekte/dev-process
+cd <repo>
 git add tests/test_feature_registry.py \
   "template/scripts/process/{% if modules.feature_registry %}check_feature_registry.py{% endif %}.jinja"
 git commit -m "$(cat <<'EOF'
@@ -674,7 +674,7 @@ def test_example_file_not_validated(render, tmp_path):
 
 - [ ] **Step 2: Run the tests to verify the soft-note case fails**
 
-Run: `cd /home/claude/Projekte/dev-process && .venv/bin/python -m pytest tests/test_feature_registry.py -q`
+Run: `cd <repo> && .venv/bin/python -m pytest tests/test_feature_registry.py -q`
 Expected: `test_acceptance_without_test_is_soft` FAILS (no note yet); the forward-compat cases likely already pass (unknown fields never read, example files already excluded) — that is fine, they lock in existing behaviour.
 
 - [ ] **Step 3: Add the best-effort note**
@@ -702,13 +702,13 @@ Then, immediately before the final `return hard, soft`, add:
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
-Run: `cd /home/claude/Projekte/dev-process && .venv/bin/python -m pytest tests/test_feature_registry.py -q`
+Run: `cd <repo> && .venv/bin/python -m pytest tests/test_feature_registry.py -q`
 Expected: PASS (all cases green).
 
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /home/claude/Projekte/dev-process
+cd <repo>
 git add tests/test_feature_registry.py \
   "template/scripts/process/{% if modules.feature_registry %}check_feature_registry.py{% endif %}.jinja"
 git commit -m "$(cat <<'EOF'
@@ -746,7 +746,7 @@ The new pointer references `docs/process/feature-registry/` — a directory path
 
 Run:
 ```bash
-cd /home/claude/Projekte/dev-process && .venv/bin/python -m pytest tests/ -q
+cd <repo> && .venv/bin/python -m pytest tests/ -q
 ```
 Expected: PASS (whole suite — the new module plus all SP1/SP2 tests).
 
@@ -756,7 +756,7 @@ Render the working tree with `--vcs-ref HEAD` (per the tag-shadowing lesson — 
 
 Run:
 ```bash
-cd /home/claude/Projekte/dev-process
+cd <repo>
 rm -rf /tmp/fr-on && mkdir -p /tmp/fr-on
 uvx copier copy --vcs-ref HEAD --trust \
   --data project_name=Demo \
@@ -773,7 +773,7 @@ Expected: all three files exist; `gate_runner.py` prints the feature-registry ga
 
 Run:
 ```bash
-cd /home/claude/Projekte/dev-process
+cd <repo>
 rm -rf /tmp/fr-off && mkdir -p /tmp/fr-off
 uvx copier copy --vcs-ref HEAD --trust --data project_name=Demo . /tmp/fr-off
 test ! -e /tmp/fr-off/scripts/process/check_feature_registry.py && echo "absent OK"
@@ -785,14 +785,14 @@ Expected: both "absent OK" lines print.
 
 Run:
 ```bash
-cd /home/claude/Projekte/dev-process && .venv/bin/ruff check tests/ && echo "ruff clean"
+cd <repo> && .venv/bin/ruff check tests/ && echo "ruff clean"
 ```
 Expected: "ruff clean". (The gate script itself is a `.jinja` template, not linted directly; its rendered form is exercised by the suite.)
 
 - [ ] **Step 6: Commit**
 
 ```bash
-cd /home/claude/Projekte/dev-process
+cd <repo>
 git add template/docs/process/mandatory-rules.md
 git commit -m "$(cat <<'EOF'
 docs: point mandatory-rule 5 at the feature-registry module

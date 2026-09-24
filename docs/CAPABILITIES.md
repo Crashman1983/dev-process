@@ -1,5 +1,11 @@
 # Was der Prozess kann — wie er funktioniert, warum, und was er bringt
 
+> **Einstieg:** Der aktuelle Überblick über Prinzipien, Mechanik, Koordination
+> paralleler Agenten und Skalierung ist [`UEBERBLICK.md`](UEBERBLICK.md)
+> (auch als [PDF](Entwicklungsprozess-mit-KI-Agenten.pdf)). Diese Datei ergänzt
+> ihn um die Sicht der täglichen Arbeit, getrennt für Entwickler:innen und
+> Management.
+
 `dev-process` richtet sich hier an zwei Zielgruppen ohne Vorwissen:
 **Entwickler:innen** (auch Berufseinsteiger:innen), die täglich damit arbeiten,
 und **Management**, das entscheidet, ob sich der Prozess lohnt. Die Leitfragen
@@ -190,10 +196,10 @@ stack-unabhängig), sondern an der *Form* der Arbeit.
 - **Einmal-Skripte** und Single-Session-Aufgaben ohne Fortsetzung.
 - Reine Erkundung, in der noch gar nicht klar ist, ob etwas gebaut werden soll.
 
-Dazwischen gibt es einen Mittelweg: das **Minimalprofil** (keine optionalen
-Module) installiert nur den leichten Kern und lässt die schweren Gates weg —
-sinnvoll, wenn ein kleines Projekt wachsen *könnte*, aber heute noch nicht die
-volle Durchsetzung braucht. Zuschalten geht später jederzeit per `copier update`.
+Dazwischen gibt es keinen eigenen Modus: Das Standard-Setup blockiert ein
+leeres oder kleines Projekt nicht, weil inhaltsgetriebene Gates ruhen, bis ihre
+Artefakte existieren. Einzelne Module lassen sich für Sonderfälle abwählen
+(Rezept in `BOOTSTRAP.md`).
 
 ## Was der Prozess *nicht* ist (ehrliche Grenzen)
 

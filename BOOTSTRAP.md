@@ -2,7 +2,8 @@
 
 **Deutsch:** Diese Datei ist die eigenstaendige Setup-Anleitung fuer LLM-Agenten
 und Menschen. Artefakte und Prozessdoku sind englisch; der Dialog mit dir laeuft
-in deiner Sprache.
+in deiner Sprache. Was der Prozess ist und warum, erklaert der Ueberblick
+[`docs/UEBERBLICK.md`](docs/UEBERBLICK.md).
 
 This file is self-contained. Any LLM or coding agent, in any harness, can
 follow it; no pre-installed adapter is required.
@@ -50,7 +51,7 @@ contract/persistence/auth-touching work.
        git clone https://github.com/Crashman1983/dev-process /tmp/dev-process
        uvx copier copy /tmp/dev-process .
 
-3. Answer the prompts (the lean pass collapsed the dialogue to four):
+3. Answer the prompts (five; the last one only matters for the issue gate):
    - `project_name` — human-readable name.
    - `harness` — one of `claude` | `copilot` | `agents_md` for the command
      adapters; the methodology and gates are harness-neutral either way.
@@ -131,7 +132,7 @@ The gate runner carries PEP 723 metadata; `uv run` supplies Python and
 
 ## Recommended order
 
-1. Install the standard setup (the four prompts above).
+1. Install the standard setup (the prompts above).
 2. Run the start-here dialogue (greenfield/brownfield, goal, stack, risks) —
    content-driven gates stay honestly inert until their artifacts exist, so
    the standard set never blocks an empty project.
@@ -146,48 +147,75 @@ The gate runner carries PEP 723 metadata; `uv run` supplies Python and
 - If you already have a `CLAUDE.md` / `AGENTS.md`, copier will flag the conflict —
   merge the process kernel (the `KERNEL:START`/`KERNEL:END` block) into yours,
   or accept the template's version.
-## Later
 
-Add a module or pull an updated process version — with a clean working tree
-(`git status --porcelain` empty), then:
+## Parallel agents (optional)
 
-    uvx copier update --defaults \
-      --data 'modules={"speckit": true, "doc_drift_gate": true, "arch_onboarding": false, "feature_registry": false, "github_issues": false, "contracts": false, "git_hooks": false, "security_floor": false, "sbom": false, "telemetry": false, "arch_docs": false, "github_master": false, "design_contracts": false}' 
+The process runs fine with one agent at a time. To let several agents work
+in parallel — one worktree and branch per issue, a steward that assigns work
+and merges finished branches as a batch — the rendered repo already carries
+the scripts; three steps switch it on:
 
-Do NOT `--skip` the anchor files here: copier's three-way merge preserves your
-local anchor extensions anyway, while a skipped anchor keeps the OLD kernel
-block and turns the kernel gate red after the update. After any update, re-run
-`uvx pre-commit install --hook-type pre-commit --hook-type pre-push` if the
-`git-hooks` module is active.
+1. **Set the model policy.** `docs/process/model-policy.json` names the model
+   per phase and tier, the command that starts a worker session, the runner
+   (`detached` headless, or `tmux` for visible windows a human can open) and
+   `max_workers`. Its `_comment` explains every key. It is executable
+   configuration: review changes to it like CI configuration.
+2. **Keep the kernel loaded across compaction** (Claude Code): run
+   `python3 scripts/process/rehydrate.py --install` once and commit the
+   resulting `.claude/settings.json`. After every compaction or resume, the
+   hook re-injects the kernel, the mandatory rules and the active plan's
+   decisions; `--check` reports whether it is installed.
+3. **Start the steward.** In a session on the main clone, run the `steward`
+   command (Claude Code; with another harness, the same scripts work by hand). It reads the situation table (`python3 scripts/process/tower.py`),
+   starts workers (`python3 scripts/process/dispatch.py start --issue N --phase
+   plan|execute|review`), relays questions, and merges finished branches as a
+   train (`python3 scripts/process/train.py plan`, then `run`).
 
-On a plain `copier update` the recorded `modules` dict does **not** win:
-`modules` is a derived (`when: false`) answer, and copier recomputes it from
-the template default on every update, so a module you switched off comes
-back. Pass the complete `modules` dictionary via `--data` on **every**
-update, as above — or use `scripts/process/template_update.py`, which
-re-asserts every recorded answer as `--data` for you.
-`--data` expects the **complete** `modules` dictionary with the new values,
-not just the changed keys. `update` checks out the latest **tagged** template
-release by default, preserves your local edits, and flags conflicts inline.
-**If the project was installed with `--vcs-ref=HEAD`** (a `.post…` version in
-`.copier-answers.yml`), a default update refuses with "Downgrades are not
-supported" — pass `--vcs-ref=HEAD` here too.
+Useful by hand: `dispatch.py list` shows every worker and its last line,
+`dispatch.py log <branch>` more of it, `dispatch.py say <branch> "…"` types an
+answer into a tmux worker, `dispatch.py stop <branch>` stops it. A phase can
+run on another host (a cloud session, a second machine) via
+`phases.<phase>.remote` in the policy; workers there report through git and
+`tower.py --remote` shows them. Details: `docs/process/tower.md` and
+`docs/process/train.md` in the rendered repo.
 
-**A project that owns some rendered files** (a gate it extended, a command it
-rewrote) lists them in a `.process-owned` file at the repo root (one path or
-glob per line) and updates through the helper instead:
+## Later: updating the process
+
+Pull a newer process version with a clean working tree
+(`git status --porcelain` empty). **Use the helper** — it re-asserts every
+recorded answer, so no module silently changes:
 
     uv run scripts/process/template_update.py            # add --ref <tag> to pick a release
 
-It runs `copier update`, keeps every owned file as committed, and writes the
-template's own change to each owned file (old release render → new release
+A project that **owns** some rendered files (a gate it extended, a command it
+rewrote) lists them in a `.process-owned` file at the repo root (one path or
+glob per line). The helper keeps every owned file as committed and writes the
+template's own change to each of them (old release render → new release
 render) to `.process-work/template-delta/<ref>/<path>.diff` — the exact delta
 to port by hand, without the noise of the local divergence. Delete that
 directory once ported; it is working memory, not a commit.
 
-Disabling works the same way (flag back to `false`): `copier update` then
-**removes** that module's rendered files (gate script, module doc) and the
-gate stops running — check the diff before committing.
+After any update, re-run
+`uvx pre-commit install --hook-type pre-commit --hook-type pre-push` (the
+`git-hooks` module is part of the standard set), then the gate runner.
+
+**Plain copier, if you must.** `modules` is a derived answer (`when: false`):
+copier recomputes it from the template default on every update, so a module
+you switched off comes back unless you pass the **complete** dictionary on
+every update. The standard set (with `regulated=false`) is:
+
+    uvx copier update --defaults \
+      --data 'modules={"speckit": true, "doc_drift_gate": true, "arch_onboarding": true, "feature_registry": true, "github_issues": true, "contracts": true, "git_hooks": true, "security_floor": false, "sbom": false, "telemetry": true, "arch_docs": true, "github_master": true, "design_contracts": true}'
+
+Setting a module to `false` makes `copier update` **remove** its rendered
+files (gate script, module doc), and the gate stops running — check the diff
+before committing. Do NOT `--skip` the anchor files on an update: copier's
+three-way merge preserves your local anchor extensions anyway, while a
+skipped anchor keeps the OLD kernel block and turns the kernel gate red.
+`update` checks out the latest **tagged** release by default. **If the
+project was installed with `--vcs-ref=HEAD`** (a `.post…` version in
+`.copier-answers.yml`), a default update refuses with "Downgrades are not
+supported" — pass `--vcs-ref=HEAD` here too.
 
 **Important:** Do not hand-edit `.copier-answers.yml` to enable a module.
 `copier update` reads that file as the *old* state: after a hand edit, the old
@@ -195,7 +223,7 @@ and new renders are identical, the missing module files count as intentional
 local deletions, and the module is never rendered. Always pass new answers via
 `--data`; copier rewrites the answers file itself afterwards.
 
-If you enabled the `git-hooks` module, install the hooks once per clone (they
-live in host-local `.git/hooks`, not version control):
+Install the git hooks once per clone (they live in host-local `.git/hooks`,
+not version control):
 
     uvx pre-commit install --hook-type pre-commit --hook-type pre-push

@@ -37,7 +37,7 @@ Design: `docs/design/2026-07-02-sp10-telemetry-design.md`. TDD per task.
   Imports parser/enums from sibling `check_telemetry`. Read-only; never
   blocks; not registered in the gate_runner.
 - Subcommands: `effectiveness`, `convergence`, `suite`, `tempo`, `cost`,
-  `cfr`, `friction`, `report` (default). Port from Kenni with English output,
+  `cfr`, `friction`, `report` (default). Port from the reference project with English output,
   `work=`/`criterion=` keys, confidence()/action() framing, thresholds as
   documented constants; tempo degrades without `gh`; cfr detects the default
   branch (`main`/`master`, `--branch` override) and uses a broad code-extension
@@ -59,13 +59,13 @@ Design: `docs/design/2026-07-02-sp10-telemetry-design.md`. TDD per task.
   practice (piggyback growth, danger-direction duty, thresholds with honesty
   labels), one-owner boundary note.
 - `template/docs/process/{% if modules.telemetry %}telemetry{% endif %}/calibration/case.example.json`
-  — inert seed mirroring the Kenni case format (id, source, danger_direction,
+  — inert seed mirroring the reference project's case format (id, source, danger_direction,
   ground_truth, grader_verdict=null, note).
 - `workflow.md` → `workflow.md.jinja`: Execute and Review sections gain one
   `{% if modules.telemetry %}` sentence pointing at the module doc.
 - Tests: rendered workflow.md mentions GRADE only with the module on;
   doc-drift gate green with `doc_drift_gate + telemetry` both on; neutrality
-  (no Kenni terms in rendered module files); core-docs suite stays green.
+  (no reference-project terms in rendered module files); core-docs suite stays green.
 
 ## Task 5 — upstream docs
 

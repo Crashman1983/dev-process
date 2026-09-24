@@ -15,7 +15,7 @@ nowhere. Three verified gaps:
    change embodies an undocumented significant decision" or "this change makes
    an Accepted record obsolete" — and the checklist never prompts for it.
 3. The plan format carries `tier:` and `issue:` but no decision duty — nothing
-   asks a plan to name the records it read or the records it entails (Kenni's
+   asks a plan to name the records it read or the records it entails (the reference project's
    `## Anchor Delta` has no template counterpart).
 
 Gap 4 from the audit (a change can silently obsolete an untouched record) has no

@@ -8,7 +8,7 @@
 ## 1. Ziel & Kontext
 
 Ein **portables, harness-agnostisches, modulares Muster** für einen stark
-automatisierten KI-gestützten Entwicklungsprozess, das sich aus dem KenniNext-Projekt
+automatisierten KI-gestützten Entwicklungsprozess, das sich aus einem Referenzprojekt
 destilliert und in beliebige neue oder bestehende Projekte einspielen lässt.
 
 Zwei Einsatzmodi:
@@ -55,7 +55,7 @@ Ebenfalls YAGNI in SP1 (Advisor-Direktive „Reichhaltigkeit aus Modulen, nicht 
 CLI-Fläche"):
 - Kein bespoke `add`/`remove`/`doctor`-CLI. „Modul nachrüsten" = Antwort in
   `.copier-answers.yml` ändern → `copier update`. `upgrade` fällt aus copier heraus.
-- Keine schweren Kenni-Spezifika als Default — sie sind opt-in-Module (§4.3).
+- Keine schweren Projekt-Spezifika als Default — sie sind opt-in-Module (§4.3).
 
 ---
 
@@ -107,11 +107,11 @@ dev-process/                        ← copier-Template-Repo = kanonisches Upstr
 ### 4.2 Neutrale SSOT: `docs/process/`
 
 Die Methodik lebt in **`docs/process/`** als reines Markdown — **nicht** in
-`CLAUDE.md`. Das ist der Unterschied zu Kenni (wo `CLAUDE.md` die SSOT ist und
+`CLAUDE.md`. Das ist der Unterschied zum Referenzprojekt (wo `CLAUDE.md` die SSOT ist und
 `AGENTS.md` darauf zeigt): eine tool-neutrale SSOT ist die Voraussetzung für
 echte Harness-Agnostik. Alle Adapter (§4.4) sind **dünne Zeiger** auf diese SSOT.
 
-Inhalt (destilliert + universalisiert aus Kenni, Kenni-Spezifika entfernt):
+Inhalt (destilliert + universalisiert aus dem Referenzprojekt, Projekt-Spezifika entfernt):
 
 - **`mandatory-rules.md`** — verbindliche Regeln, generalisiert: Verifikation-vor-Behauptung,
   Plan-vor-Arbeit, Struktur-über-Additiv/ein-Owner-pro-Verhalten, Root-Cause-vor-Symptom,
@@ -133,7 +133,7 @@ Inhalt (destilliert + universalisiert aus Kenni, Kenni-Spezifika entfernt):
 **Opt-in-Module (je eine copier-Frage; jedes self-contained: Methodik-Fragment +
 Gate-Skript + CI-Snippet + Adapter-Wissen + Templates):**
 
-| Modul | Zweck | Herkunft (Kenni) |
+| Modul | Zweck | Herkunft (Referenzprojekt) |
 |---|---|---|
 | `doc-drift-gate` | verifiziert Anker-Claims (Pfade/Symbole/Referenzen) gegen echten Code | `check_doc_drift.py` |
 | `contract-first` | Interface/API-Contract-SSOT + Drift-Gate | openapi-diff, `api-contract.md` |
@@ -293,7 +293,7 @@ CI des Musters selbst läuft diese Render-Matrix bei jedem Commit.
 - **Hook:** `.copier-answers.yml`-Version-Pin + `copier update` als Governance (eine
   Prozess-Version, N Repos).
 - **Koordination:** GitHub Issues/PRs/Org-Projects als inhärent multi-personen- +
-  multi-repo-Substrat; Kennis `[BOTH]`-Issue-Muster + Claim/Heartbeat generalisieren
+  multi-repo-Substrat; das `[BOTH]`-Issue-Muster des Referenzprojekts + Claim/Heartbeat generalisieren
   auf **Menschen UND Agenten**.
 - **Contracts:** Contract-SSOT wird cross-repo statt cross-subtree (baut auf
   `contract-first`-Modul auf).
@@ -302,8 +302,8 @@ CI des Musters selbst läuft diese Render-Matrix bei jedem Commit.
 
 ## 10. Offene Entscheidungen (für /planning)
 
-1. **Umfang der Regel-Universalisierung:** welche der 10 Kenni-Mandatory-Rules sind
-   wirklich universell vs. Kenni-spezifisch? (Erster Cut: Rules 1/2/5/9/10 universell;
+1. **Umfang der Regel-Universalisierung:** welche der 10 Mandatory-Rules des Referenzprojekts sind
+   wirklich universell vs. projektspezifisch? (Erster Cut: Rules 1/2/5/9/10 universell;
    3/4/6 an Module gebunden; 7/8 an Harness/Gates.)
 2. **Digest-Rendering-Mechanik:** Jinja-Include-Partial vs. copier-Task-Hook, der den
    Digest aus der SSOT generiert.

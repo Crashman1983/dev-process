@@ -25,7 +25,7 @@
   Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
   Claude-Session: https://claude.ai/code/session_01MS9nrQC9f9WGhipvJ9NFpk
   ```
-- **Environment:** repo `/home/claude/Projekte/dev-process`; Python `.venv/bin/python`; linter `.venv/bin/ruff`. Shell cwd resets between calls — prefix each with `cd /home/claude/Projekte/dev-process`.
+- **Environment:** repo `<repo>`; Python `.venv/bin/python`; linter `.venv/bin/ruff`. Shell cwd resets between calls — prefix each with `cd <repo>`.
 
 ---
 
@@ -193,7 +193,7 @@ def test_artifact_escaping_repo_is_hard(render, tmp_path):
 
 - [ ] **Step 4: Run the tests — verify they fail**
 
-Run: `cd /home/claude/Projekte/dev-process && .venv/bin/python -m pytest tests/test_contracts_drift.py -q`
+Run: `cd <repo> && .venv/bin/python -m pytest tests/test_contracts_drift.py -q`
 Expected: FAIL (the gate file does not render yet → `check_contracts.py` missing → non-zero exit / FileNotFoundError).
 
 - [ ] **Step 5: Write the gate (structural core)**
@@ -310,13 +310,13 @@ if __name__ == "__main__":
 
 - [ ] **Step 6: Run the tests — verify they pass**
 
-Run: `cd /home/claude/Projekte/dev-process && .venv/bin/python -m pytest tests/test_contracts_drift.py -q`
+Run: `cd <repo> && .venv/bin/python -m pytest tests/test_contracts_drift.py -q`
 Expected: PASS (7 tests). Then `.venv/bin/ruff check .` → clean.
 
 - [ ] **Step 7: Commit**
 
 ```bash
-cd /home/claude/Projekte/dev-process
+cd <repo>
 git add copier.yml tests/conftest.py tests/test_contracts_drift.py \
   "template/scripts/process/{% raw %}{% if modules.contracts_drift %}check_contracts.py{% endif %}{% endraw %}.jinja"
 git commit -F - <<'MSG'
@@ -382,7 +382,7 @@ def test_sha512_pin_match_is_clean(render, tmp_path):
 
 - [ ] **Step 2: Run — verify the two new pin tests fail**
 
-Run: `cd /home/claude/Projekte/dev-process && .venv/bin/python -m pytest tests/test_contracts_drift.py -q -k "pin"`
+Run: `cd <repo> && .venv/bin/python -m pytest tests/test_contracts_drift.py -q -k "pin"`
 Expected: `test_sha256_pin_mismatch_is_hard` FAILS (no hash check yet → exit 0, not 1); `test_opaque_pin_is_soft` FAILS (no "opaque pin" note yet). The two "match_is_clean" tests may already pass (no note is emitted yet).
 
 - [ ] **Step 3: Add the pin ratchet to `check_contracts.py`**
@@ -419,13 +419,13 @@ In `_check_contract`, replace the final `return hard, soft` with the pin logic:
 
 - [ ] **Step 4: Run — verify pass**
 
-Run: `cd /home/claude/Projekte/dev-process && .venv/bin/python -m pytest tests/test_contracts_drift.py -q`
+Run: `cd <repo> && .venv/bin/python -m pytest tests/test_contracts_drift.py -q`
 Expected: PASS (11 tests). `.venv/bin/ruff check .` → clean.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /home/claude/Projekte/dev-process
+cd <repo>
 git add tests/test_contracts_drift.py \
   "template/scripts/process/{% raw %}{% if modules.contracts_drift %}check_contracts.py{% endif %}{% endraw %}.jinja"
 git commit -F - <<'MSG'
@@ -500,7 +500,7 @@ def test_verify_unlaunchable_is_soft(render, tmp_path):
 
 - [ ] **Step 2: Run — verify the verify tests fail**
 
-Run: `cd /home/claude/Projekte/dev-process && .venv/bin/python -m pytest tests/test_contracts_drift.py -q -k "verify"`
+Run: `cd <repo> && .venv/bin/python -m pytest tests/test_contracts_drift.py -q -k "verify"`
 Expected: FAIL (no verify handling yet — no "no verify command" / "nonconformance" / "could not run" notes are emitted).
 
 - [ ] **Step 3: Add the verify handling to `check_contracts.py`**
@@ -540,13 +540,13 @@ In `_check_contract`, insert the verify block just before the final `return hard
 
 - [ ] **Step 4: Run — verify pass**
 
-Run: `cd /home/claude/Projekte/dev-process && .venv/bin/python -m pytest tests/test_contracts_drift.py -q`
+Run: `cd <repo> && .venv/bin/python -m pytest tests/test_contracts_drift.py -q`
 Expected: PASS (15 tests). `.venv/bin/ruff check .` → clean.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /home/claude/Projekte/dev-process
+cd <repo>
 git add tests/test_contracts_drift.py \
   "template/scripts/process/{% raw %}{% if modules.contracts_drift %}check_contracts.py{% endif %}{% endraw %}.jinja"
 git commit -F - <<'MSG'
@@ -596,7 +596,7 @@ def test_runner_skips_contracts_when_off(render, tmp_path):
 
 - [ ] **Step 2: Run — verify fail**
 
-Run: `cd /home/claude/Projekte/dev-process && .venv/bin/python -m pytest tests/test_contracts_drift.py -q -k "runner"`
+Run: `cd <repo> && .venv/bin/python -m pytest tests/test_contracts_drift.py -q -k "runner"`
 Expected: `test_runner_lists_contracts_when_on` FAILS (gate not registered).
 
 - [ ] **Step 3: Register the gate**
@@ -609,13 +609,13 @@ In `template/scripts/process/gate_runner.py.jinja`, add one line to the `GATES` 
 
 - [ ] **Step 4: Run — verify pass**
 
-Run: `cd /home/claude/Projekte/dev-process && .venv/bin/python -m pytest tests/test_contracts_drift.py -q`
+Run: `cd <repo> && .venv/bin/python -m pytest tests/test_contracts_drift.py -q`
 Expected: PASS (17 tests). `.venv/bin/ruff check .` → clean.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /home/claude/Projekte/dev-process
+cd <repo>
 git add tests/test_contracts_drift.py template/scripts/process/gate_runner.py.jinja
 git commit -F - <<'MSG'
 feat: register contracts-drift gate in the manifest runner
@@ -698,7 +698,7 @@ def test_docdrift_resolves_module_doc_refs(render, tmp_path):
 
 - [ ] **Step 2: Run — verify fail**
 
-Run: `cd /home/claude/Projekte/dev-process && .venv/bin/python -m pytest tests/test_contracts_drift.py -q -k "artifacts or seeds or example or docdrift"`
+Run: `cd <repo> && .venv/bin/python -m pytest tests/test_contracts_drift.py -q -k "artifacts or seeds or example or docdrift"`
 Expected: FAIL (seed + doc files do not render yet).
 
 - [ ] **Step 3: Create the REST seed**
@@ -820,7 +820,7 @@ And update the roadmap SP3 row to mark slice 3 shipped:
 
 - [ ] **Step 7: Run the full suite + ruff**
 
-Run: `cd /home/claude/Projekte/dev-process && .venv/bin/python -m pytest -q && .venv/bin/ruff check .`
+Run: `cd <repo> && .venv/bin/python -m pytest -q && .venv/bin/ruff check .`
 Expected: all green (97 prior + 23 new = 120 passed), ruff clean.
 
 - [ ] **Step 8: Real render verification (module on + off), via `vcs_ref="HEAD"`**
@@ -828,10 +828,10 @@ Expected: all green (97 prior + 23 new = 120 passed), ruff clean.
 `copier.run_copy` against the git repo renders from the last **tag**, hiding files committed after it — always verify a real render with `vcs_ref="HEAD"`. Run this script (writes to scratch, cleans up):
 
 ```bash
-cd /home/claude/Projekte/dev-process && .venv/bin/python - <<'PY'
+cd <repo> && .venv/bin/python - <<'PY'
 import copier, json, subprocess, sys, tempfile, hashlib
 from pathlib import Path
-REPO = "/home/claude/Projekte/dev-process"
+REPO = "<repo>"
 with tempfile.TemporaryDirectory() as td:
     out = Path(td) / "proj"
     copier.run_copy(REPO, str(out), data={
@@ -872,7 +872,7 @@ Expected: doc-drift + contracts exit 0 on the clean render; after editing the ar
 - [ ] **Step 9: Commit**
 
 ```bash
-cd /home/claude/Projekte/dev-process
+cd <repo>
 git add README.md tests/test_contracts_drift.py \
   "template/docs/process/{% raw %}{% if modules.contracts_drift %}contracts{% endif %}{% endraw %}/rest-orders.example.json" \
   "template/docs/process/{% raw %}{% if modules.contracts_drift %}contracts{% endif %}{% endraw %}/kafka-order-events.example.json" \
@@ -890,7 +890,7 @@ MSG
 
 After Task 5, mirror Slice 2:
 1. Full suite green + ruff clean; re-verify ff-only against `origin/main` (fetch → merge-base == main tip).
-2. Build a read-only review bundle (`git diff -U8 main..HEAD`) and dispatch an independent Opus merge-gate reviewer with these explicit lenses: **verify never exits non-zero**; **hash mismatch is the only pin hard-fail**; **no Kenni leakage**; **`contracts_drift` registered in copier.yml + gate_runner + README**; **doc-drift stays green (module-doc refs are placeholders or real)**.
+2. Build a read-only review bundle (`git diff -U8 main..HEAD`) and dispatch an independent Opus merge-gate reviewer with these explicit lenses: **verify never exits non-zero**; **hash mismatch is the only pin hard-fail**; **no the reference project leakage**; **`contracts_drift` registered in copier.yml + gate_runner + README**; **doc-drift stays green (module-doc refs are placeholders or real)**.
 3. On a clean review: `git checkout main && git merge --ff-only design/sp3-contracts-drift`; annotated tag `v0.5.0`; push main + tag; delete the branch.
 4. Update memory (`project_dev_process_meta_repo.md` slice-3 bullet → SHIPPED; MEMORY.md index line).
 

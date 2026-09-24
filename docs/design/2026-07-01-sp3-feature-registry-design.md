@@ -4,7 +4,7 @@
 
 ## 1. Purpose
 
-SP3 = *„complete the proven Kenni process for a multi-repo environment"* — a small
+SP3 = *„complete the reference project's proven process for a multi-repo environment"* — a small
 program of portable opt-in modules, not a cross-repo-contracts special case. This
 slice ships the **feature-registry**: the requirements / acceptance-criteria /
 test-traceability SSOT that every user-visible behaviour traces to.
@@ -14,7 +14,7 @@ scenario is sharpened at onboarding, the concrete requirements — including cro
 coupling — land here (a coupling becomes a story with acceptance „consumes billing-api
 via OpenAPI, drift-checked"). It is what mandatory-rule *„tests prove acceptance"*
 checks against, and the substrate the later slices build on (GitHub-Issues links,
-contracts-drift). It mirrors Kenni's `docs/feature-registry/` deliberately — the maintainer keeps
+contracts-drift). It mirrors the reference project's `docs/feature-registry/` deliberately — the maintainer keeps
 working the way he does today.
 
 ## 2. Scope
@@ -137,7 +137,7 @@ acceptance = each design's check table, their `tests[]` = the module test files,
 ## 8. Extension points (later slices)
 
 - **`issue` field → GitHub-Issues module (Slice 2):** populates the link, verifies it
-  resolves, generalises Kenni's surface-labels + claim/heartbeat + EARS templates.
+  resolves, generalises the reference project's surface-labels + claim/heartbeat + EARS templates.
   GitHub concrete **by example**; adopters adapt their copy (copier ownership model),
   GitHub listed under README prerequisites.
 - **`links` coupling → contracts-drift (Slice 3):** a coupling story gains a generic,
@@ -147,7 +147,7 @@ acceptance = each design's check table, their `tests[]` = the module test files,
 
 ## Open decisions (resolve in the plan)
 
-1. **JSON vs YAML** for entries — proposed **JSON**, mirrors Kenni; adopters may switch.
+1. **JSON vs YAML** for entries — proposed **JSON**, mirrors the reference project; adopters may switch.
 2. **one-file-per-story vs single file** — proposed **one file per story** (merge-friendly).
 3. **EARS enforcement depth** — proposed: acceptance `text` required + non-empty (hard),
    EARS wording encouraged in the doc, **not** regex-graded (open domain).
