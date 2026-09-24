@@ -122,3 +122,13 @@ def test_hook_doctor_tracked_githooks_need_hooks_path(render, tmp_path):
     assert hard and "core.hooksPath is unset" in hard[0]
     _git(out, "config", "core.hooksPath", ".githooks")
     assert gi.hook_wiring_findings(out) == ([], [])
+
+
+def test_hook_doctor_stays_quiet_in_ci(render, tmp_path, monkeypatch):
+    # a CI checkout installs no local hooks and needs none: the job is the gate
+    out = _repo(render, tmp_path)
+    _git(out, "config", "core.hooksPath", ".githooks")
+    gi = _load(out)
+    assert gi.hook_wiring_findings(out)[0]
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    assert gi.hook_wiring_findings(out) == ([], [])

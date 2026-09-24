@@ -120,3 +120,19 @@ def test_canonical_digest_survives_git_config_drift(render, tmp_path):
         _git(out, "config", k, v)
     g = _gate(out)
     assert g.returncode == 0, g.stdout
+
+
+def test_an_uncomputable_digest_in_a_shallow_clone_is_a_note(render, tmp_path, monkeypatch):
+    # a cloud session clones shallow: the three-dot diff lacks history there —
+    # unverifiable, not fabricated; outside a shallow clone it stays hard
+    out, base, head = _repo(render, tmp_path)
+    gate = _load_gate(out)
+    record = [(1, {"base": base, "head": head, "diff": "sha256:" + "0" * 64})]
+    monkeypatch.setattr(gate, "artifact_digest", lambda *a: None)
+    hard, soft = gate._integrity_violations("j.md", out, record)
+    assert hard and "could not be computed" in hard[0]
+    real = gate._git_bytes
+    monkeypatch.setattr(gate, "_git_bytes", lambda root, *a: b"true\n"
+                        if a == ("rev-parse", "--is-shallow-repository") else real(root, *a))
+    hard, soft = gate._integrity_violations("j.md", out, record)
+    assert not hard and soft and "shallow clone" in soft[0]

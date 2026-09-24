@@ -98,3 +98,11 @@ def render_into(_template_src):
         return _copy(_template_src, dst, data, **kwargs)
 
     return _f
+
+
+@pytest.fixture(autouse=True)
+def _outside_ci(monkeypatch):
+    # the tests exercise local behaviour (hook wiring, notes); the CI runner's
+    # own CI/GITHUB_ACTIONS variables must not switch it off under them
+    monkeypatch.delenv("CI", raising=False)
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
