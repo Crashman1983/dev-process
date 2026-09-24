@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/mark.svg" width="120" alt="dev-process"></p>
+
 # Entwicklungsprozess mit KI-Agenten
 
 *Wie Ziele, Architektur und Qualität dauerhaft gesichert werden – und welche Rolle der Mensch spielt*
