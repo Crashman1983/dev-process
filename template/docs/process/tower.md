@@ -102,7 +102,7 @@ redirect). `dispatch.py stop <branch>` stops only what dispatch started,
 only when the recorded process is still the recorded one (pid and start
 time), and refuses while the worktree has uncommitted or untracked work
 (a plan not committed dies with the process). `max_workers` caps live
-sessions per host; a held lane counts as no free CPU. Both runners strip
+sessions per host; a held lane counts as no free CPU: a held `full` lane blocks only execute, a held `scoped` (or unknown) lane blocks every phase, and a remote phase sees neither cap nor lane. Both runners strip
 the steward's own `CLAUDECODE`/`CLAUDE_CODE_*` variables from the
 worker's environment: a worker is a session of its own.
 

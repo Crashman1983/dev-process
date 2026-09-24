@@ -37,7 +37,9 @@ a stop). `stop` acts only on what this tool started, only when the
 recorded process is the recorded one (pid + start time; never pid 0), and
 refuses while the worktree has uncommitted or untracked work unless
 `--force` — a plan not committed dies with the process. `max_workers`
-caps live children on this host; a held lane counts as no free CPU.
+caps live children on this host; a held lane counts as no free CPU —
+a held full lane blocks only execute, a held scoped (or unknown) lane
+blocks every phase, and a remote phase sees neither cap nor lane.
 
 Trust boundary, plainly: the policy's `command` is executed on the
 machine that runs dispatch. It is a repository file — whoever can merge
