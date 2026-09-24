@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 512" role="img" aria-labelledby="t d">
+  <title id="t">dev-process</title>
+  <desc id="d">Three agents work in parallel lanes. The lanes pass through a gate built from four tiers per pillar, with an opening only one line wide, and leave it as one verified line: a check that ends in a merge point.</desc>
+  <defs>
+    <linearGradient id="dp-bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0A2F33"/>
+      <stop offset="1" stop-color="#0F5A4A"/>
+    </linearGradient>
+    <linearGradient id="dp-flow" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#5FD3B4" stop-opacity="0.6"/>
+      <stop offset="1" stop-color="#B8EC7E"/>
+    </linearGradient>
+  </defs>
+  <g>
+  <rect x="16" y="16" width="480" height="480" rx="116" fill="url(#dp-bg)"/>
+  <g fill="none" stroke="url(#dp-flow)" stroke-linecap="round" stroke-width="20">
+    <path d="M78 146 C150 146 176 256 236 256"/>
+    <path d="M78 256 L236 256"/>
+    <path d="M78 366 C150 366 176 256 236 256"/>
+  </g>
+  <circle cx="78" cy="146" r="17" fill="#5FD3B4"/>
+  <circle cx="78" cy="256" r="17" fill="#7ADBAA"/>
+  <circle cx="78" cy="366" r="17" fill="#98E29A"/>
+  <g>
+    <rect x="232" y="72"  width="52" height="36" rx="10" fill="#2A7560"/>
+    <rect x="232" y="114" width="52" height="36" rx="10" fill="#3E9672"/>
+    <rect x="232" y="156" width="52" height="36" rx="10" fill="#5BB47F"/>
+    <rect x="232" y="198" width="52" height="28" rx="10" fill="#86D08C"/>
+    <rect x="232" y="286" width="52" height="28" rx="10" fill="#86D08C"/>
+    <rect x="232" y="320" width="52" height="36" rx="10" fill="#5BB47F"/>
+    <rect x="232" y="362" width="52" height="36" rx="10" fill="#3E9672"/>
+    <rect x="232" y="404" width="52" height="36" rx="10" fill="#2A7560"/>
+  </g>
+  <path d="M236 256 L300 256 L338 300 L428 176" fill="none" stroke="#D4F56C"
+        stroke-width="32" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="428" cy="176" r="25" fill="#0A2F33" stroke="#D4F56C" stroke-width="12"/>
+</g>
+  <text x="572" y="286" font-family="Inter, 'Segoe UI', 'Helvetica Neue', Helvetica, Arial, sans-serif"
+        font-size="168" font-weight="700" letter-spacing="-4" fill="#EAF6EF">dev<tspan fill="#7ADBAA">-</tspan>process</text>
+  <text x="578" y="376" font-family="Inter, 'Segoe UI', 'Helvetica Neue', Helvetica, Arial, sans-serif"
+        font-size="50" font-weight="500" letter-spacing="1" fill="#9DBDB3">gates · risk tiers · independent review</text>
+</svg>
