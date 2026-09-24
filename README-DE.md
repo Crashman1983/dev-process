@@ -24,7 +24,7 @@ eigene Arbeit ab, und das Gedächtnis liegt in Dateien statt im Kontext.
 | Was der Prozess ist, warum er so ist, was offen ist | **[Überblick](docs/UEBERBLICK.md)** · [Overview (English)](docs/OVERVIEW.md) · [PDF](docs/Entwicklungsprozess-mit-KI-Agenten.pdf) |
 | Einrichten, headless oder im Dialog, und aktualisieren | [`BOOTSTRAP.md`](BOOTSTRAP.md) |
 | Was auf dem Rechner und in CI gebraucht wird | [`docs/SYSTEM-REQUIREMENTS.md`](docs/SYSTEM-REQUIREMENTS.md) |
-| Abhängigkeiten dieses Repositorys (erzeugt, auch als CycloneDX) | [`docs/SBOM.md`](docs/SBOM.md) |
+| Abhängigkeiten dieses Repositorys (erzeugt, auch als CycloneDX) | [`docs/SBOM.md`](docs/SBOM.md) · [`docs/sbom.cdx.json`](docs/sbom.cdx.json) |
 | Warum dieser Standard-Stack (Spec-Kit-Vergleich und Entwurf) | [`docs/analysis/`](docs/analysis/) |
 
 ## Das Wichtigste
@@ -98,4 +98,7 @@ kommerziell. Jedes eingerichtete Repository erhält den Lizenztext als
 `docs/process/LICENSE` und dazu `docs/process/NOTICE.md`: Die Lizenz gilt für
 die Prozessdateien, nicht für den eigenen Code und Inhalt des Projekts. Zwei
 Spezifikations-Templates sind von GitHub Spec Kit abgeleitet (MIT, © GitHub,
-Inc.), Details in [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md).
+Inc.); Details und der MIT-Text stehen in
+[`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md), die auch jedes
+eingerichtete Repository erhält. Die Abhängigkeiten dieses Repositorys listet
+die erzeugte [SBOM](docs/SBOM.md) ([CycloneDX](docs/sbom.cdx.json)).
