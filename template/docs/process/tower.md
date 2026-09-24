@@ -129,6 +129,17 @@ the first URL the hand-over printed, or what the phase's `handover_id`
 regex captures (group 1) — for starters that print text, not JSON, the
 session id is only in that text.
 
+**How a remote verdict comes back — one supported path.** The record is
+the reviewer's attest commit on the **work branch**: `attest.py` writes the
+REVIEW line into the branch's journal shard, the session commits it and
+pushes the work branch. The train reads passes from the branch's journal,
+so nothing else is needed — once the steward has the commit locally:
+`git fetch origin <branch>:<branch>` (the train boards local branches). A
+`report.py --sync` report is only the pointer; a cloud environment may
+refuse the push to `refs/process/reports/*` (observed downstream), and
+that loses nothing. What the path needs is that the remote session may
+push the work branch; where it may not, keep that phase local.
+
 A cloud session starts from a fresh clone with none of this host's tools:
 without them it cannot run the gates or the tests it is meant to judge. Give
 the project a session-start hook that provisions what the gates and the

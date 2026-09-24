@@ -159,6 +159,68 @@ def test_run_without_suite_says_the_batch_merges_untested(render, tmp_path):
     r = _train(out, "run", "--force", "--dry-run", "--suite", "true")
     assert "no --suite" not in r.stderr
 
+def _main_commit(out: Path, files: dict[str, str], msg: str) -> None:
+    for rel, text in files.items():
+        f = out / rel
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text(text)
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", msg)
+
+
+def test_archiving_other_works_cleared_plans_is_no_clearance(render, tmp_path):
+    # train 20260924-1427: a template-update branch archived seven older,
+    # already cleared plans and boarded on them while its own review ran
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    plans = {f".process-work/plans/2026-09-1{i}-old-{i}.md": f"# old {i}\n\ntier: 2\nissue: #{i}\n" for i in (1, 2)}
+    passes = "".join(f"REVIEW work=2026-09-1{i}-old-{i} tier=2 reviewer=fresh model=cross "
+                     "independence=bundle,non-implementing verdict=pass round=1\n" for i in (1, 2))
+    _main_commit(out, {**plans, ".process-work/journal/2026-09-19-old.md": passes}, "older work, cleared")
+    _git(out, "checkout", "-q", "-b", "claude/process-v2.28.0")
+    (out / ".process-work/plans/archive").mkdir(parents=True, exist_ok=True)
+    for rel in plans:
+        _git(out, "mv", rel, rel.replace("plans/", "plans/archive/"))
+    _main_commit(out, {"scripts/process/new_gate.py": "x = 1\n"}, "update the process")
+    _git(out, "checkout", "-q", "main")
+    _git(out, "checkout", "-q", "-b", "tidy-plans")
+    for rel in plans:
+        _git(out, "mv", rel, rel.replace("plans/", "plans/archive/"))
+    _main_commit(out, {"docs/x.md": "x\n"}, "archive only")
+    _git(out, "checkout", "-q", "main")
+    by = {c["branch"]: c for c in json.loads(_train(out, "plan", "--json").stdout)["candidates"]}
+    upd = by["claude/process-v2.28.0"]
+    assert not upd["eligible"] and upd["plans"] == [] and len(upd["housekeeping"]) == 2
+    assert "gates' code (scripts/process/new_gate.py)" in upd["reasons"][0]
+    tidy = by["tidy-plans"]
+    assert not tidy["eligible"] and "of other work only" in tidy["reasons"][0]
+
+
+def test_gate_code_boards_only_on_its_own_review_pass(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    # a Tier 1 plan needs no pass — unless the branch changes the gates' code
+    _branch(out, "gatefix", {"scripts/process/g.py": "g\n"}, tier=1, reviewed=False)
+    # the plan was written on main (by the steward); the branch archives it —
+    # still its own, because the issue number names the branch
+    _main_commit(out, {".process-work/plans/2026-09-20-login.md": "# login\n\ntier: 2\nissue: #42\n"}, "plan")
+    _git(out, "checkout", "-q", "-b", "42-fix-login")
+    _git(out, "mv", ".process-work/plans/2026-09-20-login.md", ".process-work/plans/archive/2026-09-20-login.md")
+    _main_commit(out, {"src/login.py": "l\n", ".process-work/journal/2026-09-21-login.md":
+                       "REVIEW work=42 tier=2 reviewer=fresh model=cross independence=bundle,non-implementing "
+                       "verdict=pass round=1\n"}, "login")
+    _git(out, "checkout", "-q", "main")
+    by = {c["branch"]: c for c in json.loads(_train(out, "plan", "--json").stdout)["candidates"]}
+    assert not by["gatefix"]["eligible"] and "without a REVIEW pass" in by["gatefix"]["reasons"][0]
+    assert by["42-fix-login"]["eligible"], by["42-fix-login"]
+    _git(out, "checkout", "-q", "gatefix")
+    _main_commit(out, {".process-work/journal/2026-09-21-gatefix.md":
+                       "REVIEW work=gatefix tier=2 reviewer=fresh model=cross independence=bundle,non-implementing "
+                       "verdict=pass round=1\n"}, "review")
+    _git(out, "checkout", "-q", "main")
+    by = {c["branch"]: c for c in json.loads(_train(out, "plan", "--json").stdout)["candidates"]}
+    assert by["gatefix"]["eligible"], by["gatefix"]
+
 def test_core_files_present(render, tmp_path):
     out = render(tmp_path, {"project_name": "d", "modules": {}})
     assert (out / "scripts/process/train.py").is_file()

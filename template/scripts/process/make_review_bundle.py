@@ -362,6 +362,48 @@ def build(root: Path, base: str | None, plan_filter: str | None = None,
 
 IMAGE_RE = re.compile(r"\.(png|jpe?g|webp|gif)$", re.IGNORECASE)
 EVIDENCE_DIR = ".process-work/reviews"
+# screenshots of states that are no evidence (a loading placeholder, an empty
+# shell): an evidence image byte-identical to one of them is void
+VOID_DIR = "docs/process/void-evidence"
+PAIR_SIDE = re.compile(r"^(before|after)-(.+)$")
+
+
+def _void_evidence(root: Path, imgs: list[Path]) -> list[str]:
+    """Evidence that proves nothing, named: a before/after pair whose two
+    images are byte-identical (nothing changed on screen — or both show the
+    same loading state), other images identical under different names (the
+    harness rendered the wrong thing), and images identical to a known void
+    state under `docs/process/void-evidence/`."""
+    def digest(f: Path) -> str:
+        return hashlib.sha256(f.read_bytes()).hexdigest()
+    void_dir = root / VOID_DIR
+    known = {digest(f): f.name for f in sorted(void_dir.glob("*")) if f.is_file() and IMAGE_RE.search(f.name)} \
+        if void_dir.is_dir() else {}
+    by_hash: dict[str, list[Path]] = {}
+    out: list[str] = []
+    for f in imgs:
+        h = digest(f)
+        by_hash.setdefault(h, []).append(f)
+        if h in known:
+            out.append(f"- VOID: `{f.relative_to(root)}` is the known void state `{known[h]}` ({VOID_DIR}/)")
+    for same in by_hash.values():
+        if len(same) < 2:
+            continue
+        sides: dict[str, dict[str, Path]] = {}
+        for f in same:
+            m = PAIR_SIDE.match(f.stem)
+            if m:
+                sides.setdefault(m.group(2), {})[m.group(1)] = f
+        paired = {f for pair in sides.values() if len(pair) == 2 for f in pair.values()}
+        for rest, pair in sorted(sides.items()):
+            if len(pair) == 2:
+                out.append(f"- VOID: pair `{rest}` — `{pair['before'].relative_to(root)}` and "
+                           f"`{pair['after'].relative_to(root)}` are byte-identical")
+        others = [f for f in same if f not in paired]
+        if len(others) > 1:
+            out.append("- VOID: byte-identical under different names: "
+                       + ", ".join(f"`{f.relative_to(root)}`" for f in others))
+    return out
 
 
 def _ui_evidence(root: Path, base_ref: str | None, plans: list[Path]) -> str:
@@ -383,6 +425,11 @@ def _ui_evidence(root: Path, base_ref: str | None, plans: list[Path]) -> str:
                     lines.append(f"Evidence for `{plan.name}` in `{cand.relative_to(root)}/`:")
                     lines += [f"- {p.relative_to(root)}" for p in imgs]
                     pairs += len(imgs)
+                    void = _void_evidence(root, imgs)
+                    if void:
+                        lines.append("**Void evidence — these prove nothing; a UI story resting on "
+                                     "them is not done (DoD D8), a pass on them is a finding:**")
+                        lines += void
                 break
     changed: list[str] = []
     if base_ref:

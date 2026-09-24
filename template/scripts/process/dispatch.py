@@ -101,7 +101,10 @@ def load_policy(root: Path) -> dict:
         raise SystemExit(f"dispatch: {POLICY} is not valid JSON: {exc}")
     if not isinstance(data.get("command"), str) or "{prompt}" not in data["command"]:
         raise SystemExit(f"dispatch: {POLICY} needs a `command` template containing {{prompt}}")
+    _check_env(data.get("env"), "env")
     for ph, row in (data.get("phases") or {}).items():
+        if isinstance(row, dict):
+            _check_env(row.get("env"), f"phases.{ph}.env")
         if ph not in PHASES or not isinstance(row, dict):
             raise SystemExit(f"dispatch: {POLICY} `phases` keys must be plan|execute|review with an object each")
         if "command" in row and (not isinstance(row["command"], str) or "{prompt}" not in row["command"]):
@@ -112,6 +115,15 @@ def load_policy(root: Path) -> dict:
             except re.error as exc:
                 raise SystemExit(f"dispatch: {POLICY} phases.{ph}.handover_id is not a regex: {exc}")
     return data
+
+
+def _check_env(env: object, where: str) -> None:
+    if env is None:
+        return
+    if not isinstance(env, dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in env.items()):
+        raise SystemExit(f"dispatch: {POLICY} `{where}` must map names to strings")
+    if any(k.startswith("PROCESS_") for k in env):
+        raise SystemExit(f"dispatch: {POLICY} `{where}` must not set PROCESS_* — dispatch owns those")
 
 
 def phase_base(root: Path, branch: str) -> str:
@@ -130,7 +142,11 @@ def phase_policy(policy: dict, phase: str) -> dict:
     return {"command": row.get("command") or policy["command"],
             "runner": str(row.get("runner") or policy.get("runner") or "detached"),
             "remote": bool(row.get("remote", False)),
-            "handover_id": str(row.get("handover_id") or "")}
+            "handover_id": str(row.get("handover_id") or ""),
+            # worker-only environment (e.g. a cheaper subagent model): the
+            # phase's entries over the top-level ones; the owner's own
+            # sessions never see it
+            "env": {**(policy.get("env") or {}), **(row.get("env") or {})}}
 
 
 def model_for(policy: dict, tier: int | None, phase: str) -> str:
@@ -245,7 +261,9 @@ def prompt_for(phase: str, issue: int, tier: int | None, branch: str, model: str
     tier_s = f"tier {tier}" if tier is not None else "tier to be derived from the scope (risk-tiers.md)"
     where = ("run on another host than the steward: fetch and check out branch `{b}` from origin first, set "
              "PROCESS_HOST to this host's name and PROCESS_REPORT_SYNC=1 so every report reaches origin "
-             "(`refs/process/reports/<host>`) — the steward reads it there; push only what the phase produces"
+             "(`refs/process/reports/<host>`) — the steward reads it there, and a refused report push loses "
+             "nothing: the record is what you commit and push on `{b}` (a review: the attest commit); push "
+             "only what the phase produces"
              .format(b=branch) if remote else "work only in this worktree")
     tail = (f" You are the {phase} session for issue #{issue} on branch `{branch}` ({tier_s}), running as "
             f"{model}; {where}. Report each state transition with "
@@ -322,7 +340,7 @@ def _tmux_start(session: str, window: str, cwd: Path, argv: list[str], extra: di
     # a non-interactive sh: exact quoting, no aliases/rc/history; the sleep
     # lets the log pipe attach before the first line; exec keeps the pane
     # process = the worker, so pane_dead is the truth about liveness
-    unset = [f"-u {shlex.quote(k)}" for k in os.environ if k.startswith(STRIP_ENV_PREFIXES)]
+    unset = [f"-u {shlex.quote(k)}" for k in os.environ if k.startswith(STRIP_ENV_PREFIXES) and k not in extra]
     inner = "sleep 1; exec env " + " ".join(unset) + " \"$@\""
     shell_cmd = shlex.join(["sh", "-c", inner, "_", *argv])
     env_args = [x for k, v in extra.items() for x in ("-e", f"{k}={v}")]
@@ -497,7 +515,7 @@ def start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str |
             print(f"dispatch: {branch} is not on origin — a remote {phase} session needs the branch pushed first",
                   file=sys.stderr)
             return 3
-        extra = {"PROCESS_WORKER": branch, "PROCESS_PHASE": phase, "PROCESS_MODEL": model, "PROCESS_ISSUE": str(issue),
+        extra = {**pp["env"], "PROCESS_WORKER": branch, "PROCESS_PHASE": phase, "PROCESS_MODEL": model, "PROCESS_ISSUE": str(issue),
              "PROCESS_PHASE_BASE": phase_base(root, branch)}
         rec = {"branch": branch, "issue": issue, "phase": phase, "tier": tier, "model": model, "remote": True,
                "started": int(time.time()), "ts": _dt.datetime.now().isoformat(timespec="seconds"),
@@ -538,7 +556,7 @@ def start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str |
         return 0
     wt = ensure_worktree(root, branch)
     log = _records_dir(root) / f"{branch.replace('/', '__')}-{phase}-{_dt.datetime.now():%Y%m%d-%H%M%S}.log"
-    extra = {"PROCESS_WORKER": branch, "PROCESS_PHASE": phase, "PROCESS_MODEL": model, "PROCESS_ISSUE": str(issue),
+    extra = {**pp["env"], "PROCESS_WORKER": branch, "PROCESS_PHASE": phase, "PROCESS_MODEL": model, "PROCESS_ISSUE": str(issue),
              "PROCESS_PHASE_BASE": phase_base(root, branch)}
     rec = {"branch": branch, "issue": issue, "phase": phase, "tier": tier, "model": model,
            "worktree": str(wt), "log": str(log), "started": int(time.time()),

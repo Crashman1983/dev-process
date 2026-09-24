@@ -24,7 +24,14 @@ A local branch boards when it is ahead of the integration branch and
   step) whose Tier 2+ plan is **cleared by a REVIEW pass** on the branch's
   journal, or is waived; a worker report `review-pass`/`done`
   (`report.py`) is accepted as the pointer when no archived plan exists,
-  never as a substitute for a missing pass;
+  never as a substitute for a missing pass. Only the branch's **own** plan
+  counts: one whose issue number or slug the branch name carries, or one
+  the base did not have. Archiving another work's cleared plan is
+  housekeeping — it clears nothing (a template-update branch once boarded
+  on seven such plans while its own review still ran);
+- changes the gates' code (`scripts/process/`, `.githooks/`) only with a
+  **REVIEW pass for its own work**, whatever its tier — no Tier 0-1 plan,
+  waiver or report lets unreviewed gate code onto main;
 - has **no file overlap** with a branch already aboard — the earlier
   candidate keeps its seat, the later one is told why;
 
