@@ -6,8 +6,6 @@ Prinzipien, Mechanik und der Weg in die Fläche
 
 Prozessvorlage dev-process v2.23.0 · erprobt in einem realen, produktiv genutzten Repository (Referenzprojekt)
 
-Sebastian Günther
-
 Vorlage öffentlich auf GitHub: [github.com/Crashman1983/dev-process](https://github.com/Crashman1983/dev-process)
 
 Der Prozess ist in vielen Iterationen im laufenden Betrieb entstanden und verbessert worden; in der Fläche muss er sich noch beweisen. Ein möglicher nächster Schritt ist ein Pilot, etwa auf GitHub mit Copilot. Dieses Dokument beschreibt, was heute umgesetzt ist, unterscheidet zwischen hart geprüften und weich gehaltenen Regeln, zeigt, wie sich die Bausteine auf eine solche Plattform übertragen ließen, und sammelt offene Fragen am Ende. Betriebsdetails des Referenzprojekts sind Beispiele, keine Vorgaben.
@@ -209,7 +207,5 @@ Der Kern – Gates, Prüfung, Regelkern, Journal, Design-Verträge – ist stabi
 | Prozess | Welche Arten von Fehlern entstehen? | Jedes Block-Verdikt erhält ein Schlagwort, damit das Cockpit Fehlerarten zählt, nicht nur Mengen. |
 
 Was dieses Dokument nicht behauptet: dass der Prozess fertig ist. Was es behauptet: dass jede Regel entweder von einem Programm geprüft wird oder ausdrücklich als Urteil ausgewiesen ist, dass jede Zahl ihre Aussagekraft nennt und dass die offenen Fragen bekannt sind. Das ist der Stand, von dem aus ein Pilot starten kann.
-
-Sebastian Günther
 
 Die Prozessvorlage ist öffentlich und kann eingesehen werden: [github.com/Crashman1983/dev-process](https://github.com/Crashman1983/dev-process)
