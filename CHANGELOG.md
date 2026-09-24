@@ -1016,6 +1016,15 @@ Push von dort keinen lokalen Pre-Push-Hook durchläuft. Dazu:
 (ein Plan mit 113 DECISION-Zeilen ist ein Log, jede Kompaktierung zahlte
 ihn), `v2.22.0`.
 
+`dispatch.py` wertet die Lane-Sperre jetzt nach Lane und Phase aus statt
+pauschal: `lane.py status` wird zeilenweise gelesen, ein gehaltenes `full`
+sperrt nur `execute` (Plan und Review laufen unter dem Zug), ein
+gehaltenes `scoped` oder eine unbekannte Lane sperrt alles. Eine
+Remote-Phase sieht weder `max_workers` noch Lane, denn ihre Last liegt auf
+dem anderen Host. `--dry-run` nennt die Regel, die erlaubt oder verweigert
+hat, und behält bei Verweigerung Exit 3; `tower.md` und der Docstring
+sagen dasselbe, `v2.23.0`.
+
 ## Sub-Projekt-Tabelle (SP1–SP24)
 
 Die Tabelle wurde bis SP24 gepflegt; ab SP25 trägt das Narrativ oben die
