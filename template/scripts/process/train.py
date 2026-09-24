@@ -10,11 +10,16 @@ full run and deploy.
 
 Boarding (all computed): a local branch that is not the integration
 branch, is ahead of it, and
-  * carries an archived plan (added on the branch — `/finish` did its
-    archive step) whose Tier 2+ plan is cleared by a REVIEW pass on the
-    branch's journal (or is waived), OR whose worker reported
+  * carries an archived plan of its OWN (added on the branch — `/finish`
+    did its archive step) whose Tier 2+ plan is cleared by a REVIEW pass on
+    the branch's journal (or is waived), OR whose worker reported
     `review-pass`/`done` (`report.py`) — the pass is then the record, the
-    report only the pointer;
+    report only the pointer. Own = the plan names the branch (its issue
+    number or slug is in the branch name) or did not exist on the base; a
+    plan of other work the branch merely archives is housekeeping and
+    clears nothing;
+  * changes the gates' code (`scripts/process/`, `.githooks/`) only with a
+    REVIEW pass for its own work, whatever the tier;
   * has no file overlap with a branch already boarded (the earlier
     candidate keeps its seat; overlap = the same file in flight);
 
@@ -60,6 +65,10 @@ import report as _report  # noqa: E402
 import tower as _tower  # noqa: E402
 
 ARCHIVE = ".process-work/plans/archive"
+PLANS = ".process-work/plans"
+# the gates' own code: a branch that changes it boards only on a REVIEW pass
+# for its own work — never on a Tier 0-1 plan, a waiver or a worker report
+PROCESS_PATHS = ("scripts/process/", ".githooks/")
 JOURNAL = ".process-work/journal"
 TRAIN_DIR = "process-train"
 
@@ -104,6 +113,34 @@ def _show(root: Path, branch: str, path: str) -> str:
 
 # --- boarding ---------------------------------------------------------------------
 
+BRANCH_ISSUE = re.compile(r"^(?:issue-)?([0-9]+)(?:-|$)")
+
+
+def _branch_work_ids(branch: str) -> set[str]:
+    """The work ids a branch name carries: the name, its last segment and the
+    issue number dispatch puts in front (`42-fix-login`, `issue-42`) — not
+    every number in it (`process-v2.28.0` names no issue 28)."""
+    leaf = branch.rsplit("/", 1)[-1]
+    m = BRANCH_ISSUE.match(leaf)
+    return {branch, leaf} | ({m.group(1)} if m else set())
+
+
+def _names_branch(branch: str, ids: set[str]) -> bool:
+    """Does a plan with these work ids belong to this branch? Its issue number
+    is the branch's, or its slug is in the branch name (or, long enough to
+    mean something, the other way round)."""
+    leaf = branch.rsplit("/", 1)[-1]
+    m = BRANCH_ISSUE.match(leaf)
+    for i in ids:
+        tail = i.rsplit("#", 1)[-1]
+        if tail.isdigit():
+            if m and tail == m.group(1):
+                return True
+        elif len(i) >= 3 and (i in leaf or (len(leaf) >= 8 and leaf in i)):
+            return True
+    return False
+
+
 def candidates(root: Path, local: str, base: str) -> list[dict]:
     branches = [b.strip().lstrip("* ").strip() for b in _out(root, "branch", "--list", "--format=%(refname:short)").splitlines()]
     branches = [b for b in branches if b and b not in (local,) and not b.startswith("train/")]
@@ -120,6 +157,9 @@ def candidates(root: Path, local: str, base: str) -> list[dict]:
     for st in archived_stems:
         key = _review.DATE_PREFIX.sub("", st)
         dedated[key] = dedated.get(key, 0) + 1
+    # a plan the base already carries (active or archived) is another work's —
+    # archiving it on a branch is housekeeping, not this branch's clearance
+    base_plan_stems = {Path(r).stem for r in _out(root, "ls-tree", "-r", "--name-only", base, "--", PLANS).splitlines()}
     boarded_files: set[str] = set()
     out: list[dict] = []
     for b in sorted(branches):
@@ -136,7 +176,10 @@ def candidates(root: Path, local: str, base: str) -> list[dict]:
         archived = [p for p in _out(root, "diff", "--name-only", "--diff-filter=A", f"{base}...{b}",
                                      "--", ARCHIVE).splitlines() if p.endswith(".md")]
         passes = passes_root + _journal_passes_branch(root, base, b)
-        cleared_all = bool(archived)
+        touches_process = sorted(f for f in files if f.startswith(PROCESS_PATHS))
+        own_ids = _branch_work_ids(b)
+        housekeeping: list[str] = []
+        own_archived: list[str] = []
         for rel in archived:
             text = _review._unfenced(_show(root, b, rel))  # a fenced example is not a declaration
             stem = Path(rel).stem
@@ -144,10 +187,20 @@ def candidates(root: Path, local: str, base: str) -> list[dict]:
             tier = int(tier_m.group(1)) if tier_m else 0
             unique = dedated.get(_review.DATE_PREFIX.sub("", stem), 0) <= 1
             ids = _review._plan_work_ids(stem, text, include_dedated=unique)
+            if not (_names_branch(b, ids) or stem not in base_plan_stems):
+                housekeeping.append(rel)  # another work's plan, only moved to the archive here
+                continue
+            own_archived.append(rel)
+            own_ids |= ids
             waived = bool(_review.WAIVED.search(text))
             ok = tier < 2 or waived or _review._cleared(passes, ids, tier)
+            if touches_process and not _review._cleared(passes, ids, 2):
+                ok = False
             c["plans"].append({"path": rel, "tier": tier, "cleared": ok, "waived": waived})
-            cleared_all = cleared_all and ok
+        archived = own_archived
+        cleared_all = bool(archived) and all(p["cleared"] for p in c["plans"])
+        if housekeeping:
+            c["housekeeping"] = housekeeping
         # a question the owner never answered rides no train: the branch
         # was built on an assumption — answer it (DECISION line) first
         open_q = [rel for rel in _out(root, "diff", "--name-only", f"{base}...{b}", "--", _tower.PLANS_ACTIVE, _tower.SPECS_DIR).splitlines()
@@ -155,7 +208,12 @@ def candidates(root: Path, local: str, base: str) -> list[dict]:
         if open_q:
             c["reasons"].append(f"open DECISION NEEDED in {open_q[0]} — answer it as a DECISION line before merging")
         rep = reports.get(b)
-        if archived and cleared_all:
+        process_unreviewed = bool(touches_process) and not _review._cleared(passes, own_ids, 2)
+        if process_unreviewed:
+            more = f" and {len(touches_process) - 1} more" if len(touches_process) > 1 else ""
+            c["reasons"].append(f"changes the gates' code ({touches_process[0]}{more}) without a REVIEW pass "
+                                f"for its own work (work= one of {', '.join(sorted(own_ids))})")
+        elif archived and cleared_all:
             needs_review = [p for p in c["plans"] if p["tier"] is not None and p["tier"] >= 2 and not p["waived"]]
             c["by"] = ("archived plan + REVIEW pass" if needs_review
                        else "archived plan (Tier 0-1 or waived: no review required)")
@@ -166,6 +224,9 @@ def candidates(root: Path, local: str, base: str) -> list[dict]:
                 c["by"] = None
         elif archived:
             c["reasons"].append("archived Tier 2+ plan without a clearing REVIEW pass (run /review, then attest)")
+        elif housekeeping:
+            c["reasons"].append(f"archives {len(housekeeping)} plan(s) of other work only — none is this "
+                                "branch's own, and another work's clearance does not clear this branch")
         else:
             c["reasons"].append("no archived plan on the branch and no review-pass report (run /finish first)")
         overlap = sorted(files & boarded_files)

@@ -375,6 +375,41 @@ def test_bundle_lists_evidence_pair_and_changed_images(render, tmp_path):
     assert "against the spec's intent" in r.stdout
 
 
+def test_bundle_names_identical_and_placeholder_evidence_as_void(render, tmp_path):
+    # #2093: both images of the pair showed only the loading state
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    plans = out / ".process-work/plans"
+    (plans / "2026-09-07-panel.md").write_text("# Plan\n\ntier: 2\n")
+    ev = out / ".process-work/reviews/panel"
+    ev.mkdir(parents=True)
+    (ev / "before-panel-375-light.png").write_bytes(b"\x89PNG loading")      # identical pair
+    (ev / "after-panel-375-light.png").write_bytes(b"\x89PNG loading")
+    (ev / "before-panel-1280-dark.png").write_bytes(b"\x89PNG old dark")     # distinct pair
+    (ev / "after-panel-1280-dark.png").write_bytes(b"\x89PNG spinner")
+    void = out / "docs/process/void-evidence"
+    void.mkdir(parents=True)
+    (void / "loading.png").write_bytes(b"\x89PNG spinner")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "feat: panel with evidence")
+    t = _run(out, "--base", "main").stdout
+    assert "Void evidence" in t
+    assert ("VOID: pair `panel-375-light` — `.process-work/reviews/panel/before-panel-375-light.png` and "
+            "`.process-work/reviews/panel/after-panel-375-light.png` are byte-identical") in t
+    assert "pair `panel-1280-dark`" not in t
+    assert "`.process-work/reviews/panel/after-panel-1280-dark.png` is the known void state `loading.png`" in t
+
+
+def test_bundle_lists_a_distinct_pair_without_void(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    ev = out / ".process-work/reviews/widget"
+    ev.mkdir(parents=True)
+    (ev / "before-w-375-light.png").write_bytes(b"\x89PNG a")
+    (ev / "after-w-375-light.png").write_bytes(b"\x89PNG b")
+    t = _run(out, "--base", "main").stdout
+    assert "after-w-375-light.png" in t and "- VOID:" not in t and "Void evidence" not in t
+
 def test_bundle_names_missing_evidence_as_a_finding(render, tmp_path):
     out = render(tmp_path, {"project_name": "d", "modules": {}})
     _seed_repo(out)

@@ -277,6 +277,53 @@ def test_prompt_inside_a_token_and_env_stripped(render, tmp_path):
     _dispatch(out, "stop", "b2", "--force")
 
 
+@pytest.mark.parametrize("runner", ["detached", "tmux"])
+def test_policy_env_reaches_the_worker_only(render, tmp_path, runner):
+    # #2110: worker sessions run built-in subagents on a cheaper model; the
+    # steward's own CLAUDE_CODE_* is still stripped, the policy's value wins
+    if runner == "tmux" and shutil.which("tmux") is None:
+        pytest.skip("tmux not installed")
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    marker = tmp_path / "seen"
+    pol = out / "docs/process/model-policy.json"
+    data = json.loads(pol.read_text())
+    fake = out.parent / "fake.sh"
+    fake.write_text(f'#!/bin/sh\necho "SUB=${{CLAUDE_CODE_SUBAGENT_MODEL:-unset}} '
+                    f'X=${{X_TOP:-unset}} CCE=${{CLAUDE_CODE_ENTRY:-unset}}" > {marker}\nsleep 30\n')
+    fake.chmod(0o755)
+    session = f"envtest{os.getpid()}"
+    data.update({"command": f"{fake} {{prompt}}", "runner": runner, "tmux_session": session,
+                 "env": {"CLAUDE_CODE_SUBAGENT_MODEL": "haiku", "X_TOP": "top"},
+                 "phases": {"plan": {"env": {"CLAUDE_CODE_SUBAGENT_MODEL": "sonnet"}}}})
+    pol.write_text(json.dumps(data))
+    env = dict(os.environ, CLAUDE_CODE_SUBAGENT_MODEL="opus", CLAUDE_CODE_ENTRY="steward")
+    try:
+        r = _dispatch(out, "start", "--issue", "4", "--phase", "plan", "--branch", "b4", env=env)
+        assert r.returncode == 0, r.stderr
+        deadline = time.time() + 15
+        while time.time() < deadline and not (marker.exists() and marker.read_text()):
+            time.sleep(0.1)
+        assert marker.read_text().strip() == "SUB=sonnet X=top CCE=unset"
+    finally:
+        _dispatch(out, "stop", "b4", "--force")
+        subprocess.run(["tmux", "kill-session", "-t", session], capture_output=True)
+
+
+def test_policy_env_must_not_set_process_vars(render, tmp_path):
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    pol = out / "docs/process/model-policy.json"
+    data = json.loads(pol.read_text())
+    data["phases"] = {"review": {"env": {"PROCESS_PHASE": "x"}}}
+    pol.write_text(json.dumps(data))
+    r = _dispatch(out, "policy")
+    assert r.returncode != 0 and "PROCESS_*" in r.stderr
+    data["phases"] = {}
+    data["env"] = {"A": 1}
+    pol.write_text(json.dumps(data))
+    r = _dispatch(out, "policy")
+    assert r.returncode != 0 and "must map names to strings" in r.stderr
+
 def test_dry_run_and_bad_policy(render, tmp_path):
     out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
     _repo(out)

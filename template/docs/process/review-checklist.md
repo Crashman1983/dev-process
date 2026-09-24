@@ -177,7 +177,11 @@ never the stylesheet.
   on screen — and is each state the picture of *that* state? A story
   without the pair is not done; a pair whose images are byte-identical
   under different names is evidence of nothing (the harness rendered the
-  wrong thing — observed: desktop renders under mobile names).
+  wrong thing — observed: desktop renders under mobile names), and so is
+  a pair that shows only a loading state. The review bundle names such
+  pairs as VOID; a project puts screenshots of its known void states (a
+  loading placeholder) under `docs/process/void-evidence/`, and any
+  evidence image identical to one is void too.
 - Where the surface has a **design contract** (the `design-contracts` module):
   does the AFTER picture match the **sealed reference board** for each ID
   the plan cites, do the tests and snapshots cite those IDs, and is every

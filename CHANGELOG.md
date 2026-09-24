@@ -1166,6 +1166,12 @@ ein Wächter-Test gegen doppelte Klammern ohne Leerzeichen in Python-Vorlagen.
 Wer v2.27.1 oder v2.28.0 installiert hat und am Push scheitert: auf v2.28.1
 aktualisieren, `v2.28.1`.
 
+**v2.29.0 — nur die eigene Arbeit gibt einen Branch frei; leere Belege, Worker-Umgebung, Rückweg aus der Cloud.**
+- **Zug (`train.py`):** Ein archivierter Plan gibt einen Branch nur frei, wenn es der eigene ist. Eigen heißt: Der Branch-Name trägt die Issue-Nummer oder den Slug des Plans, oder die Basis kannte den Plan nicht. Wer nur fremde, längst freigegebene Pläne archiviert, räumt auf und wird dadurch nicht freigegeben. Im Referenzprojekt war ein Template-Update-Branch so eingestiegen, während sein eigenes Review noch lief. Ein Branch, der `scripts/process/` oder `.githooks/` ändert, steigt nur mit einem REVIEW-Pass für die eigene Arbeit ein, unabhängig vom Tier. Regressionstests spielen genau diesen Fall nach.
+- **Review-Bündel:** `make_review_bundle.py` markiert ungültige Belege als VOID: byte-identische Vorher/Nachher-Paare, identische Bilder unter verschiedenen Namen und Bilder, die einem bekannten Leerzustand unter `docs/process/void-evidence/` gleichen (etwa dem Ladezustand).
+- **Worker-Umgebung:** `model-policy.json` kennt `env` global und pro Phase. Die Variablen gelten nur für Worker-Sitzungen, etwa `CLAUDE_CODE_SUBAGENT_MODEL`. Der tmux-Runner entfernt Policy-Variablen nicht mehr zusammen mit den `CLAUDE_CODE_*`-Variablen des Stewards.
+- **Cloud-Rückweg:** `tower.md` nennt den einen unterstützten Weg für ein Urteil aus der Cloud: den attest-Commit auf dem Arbeitsbranch. Der Remote-Prompt sagt, dass ein abgelehnter Report-Push nichts verliert.
+
 **v2.28.2 — die Merge-Suite ist die volle Suite jedes Stacks.** Im Referenzprojekt fuhr der Zug nur die Backend-Suite; eine CSS-Änderung brach einen Frontend-Pin, und nichts vor dem Merge startete ihn. `train.md` und `testing.md` sagen jetzt, dass `--suite` die volle Suite *jedes* Stacks ist (ein Make-Ziel dahinter, z. B. `make test-merge`), weil ein ausgelassener Stack ohne CI beim Merge ungetestet bleibt. `train.py run` ohne `--suite` sagt das auf stderr: Dann laufen nur die Prozess-Gates. Ein Test deckt den Hinweis ab.
 
 ## Sub-Projekt-Tabelle (SP1–SP24)
