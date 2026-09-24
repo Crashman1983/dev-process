@@ -7,7 +7,7 @@
 
 ## Global Constraints
 
-- Neutral: no Kenni terms in any shipped `template/…` file. List:
+- Neutral: no reference-project terms in any shipped `template/…` file. List:
   `Kenni KenniNext Seb Signal SvelteKit user_id=1 surface:ios`.
 - Honest ceiling: a present-but-broken config and any pattern match are HARD
   (exit 1); absent config / git-unavailable / binary file / `SKIP_SECURITY_FLOOR=1`

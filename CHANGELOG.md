@@ -9,7 +9,7 @@ README nur die aktuelle Version und schreiben die Historie hier fort.
 SP1 (Foundation) + SP2 (Architektur-Onboarding) + SP3
 (feature-registry, github-issues, contracts-drift) + SP4 (git-hooks,
 contract-first, parity, security-floor) + Capstone (command-adapters,
-`v1.0.0` — das volle Kenni-Command-Set, harness-nativ) + SP7 (ci-adapters:
+`v1.0.0` — das volle Command-Set des Referenzprojekts, harness-nativ) + SP7 (ci-adapters:
 GitLab CI + Install-Fallbacks) + SP8 (english-canon + ehrliche Ökonomie) +
 SP9 (audit-fixes: False-Greens geschlossen, Failure-Modes sprechen) +
 SP10 (telemetry: GRADE-Trace + KPI-Cockpit, Effizienz messbar) +
@@ -63,7 +63,7 @@ Which-artifact-when-Router, Multi-Agent-SSOT-Ehrlichkeit, Mid-Size-Trap benannt)
 ausgeliefert, `v1.21.0`.
 
 SP36 (Backport-Batch 1 aus dem parallelen
-law-aidev-Zweig, Issue #22: pre-push prüft die **gepushten Commits** statt des
+Prozess-Zweig: pre-push prüft die **gepushten Commits** statt des
 Working Tree (Wegwerf-Worktree), neues opt-in **`sbom`**-Modul mit
 CycloneDX-Lizenz-Attestierung, feature-registry-Advisory für unter-granulare
 Akzeptanz) ausgeliefert, `v1.22.0`. SP37 (Backport-Batch 2, Issue #22:
@@ -278,7 +278,7 @@ wieder grün)) ausgeliefert, `v2.0.0` — **Breaking**: Modul-Keys und
 Install-Dialog geändert; Migration bestehender Adopter über `copier update`
 mit explizitem `modules`-Dict (BOOTSTRAP, "Later").
 
-SP57 (kenni-backflow: die vier Prozess-Lektionen aus Kennis Live-Betrieb,
+SP57 (reference-backflow: die vier Prozess-Lektionen aus dem Live-Betrieb des Referenzprojekts,
 die dem generischen Kern nach der Adoption nachweislich noch fehlten —
 Regel 1 geschärft (Sub-Agent-Summaries sind `[assumption]` bis zur
 Stichprobe; Stop-Wort „source?" ⇒ Tool-Beweis oder Rückzug),
@@ -289,7 +289,7 @@ Arbeits-Commit, keine `record`-Ketten; SSOT-lose Evidence ins
 Issue-Kommentar) und der Anchor-Budget-Check im doc-drift-gate
 (Anchor > 200 Zeilen ⇒ Note, nie Fail — der mechanische Wächter für den
 „driftet es beim Refactor?"-Diskriminator). Dazu zwei Brownfield-Fixes am
-Decision-Records-Gate, die Kennis ADR-Korpus-Übernahme aufgedeckt hat:
+Decision-Records-Gate, die ADR-Korpus-Übernahme im Referenzprojekt aufgedeckt hat:
 Status-Enum um `Rejected` (Vorschlag, der nie galt) und `Deprecated`
 (galt einmal, jetzt abgeraten) erweitert — sonst bliebe ein toter
 Vorschlag ewig `proposed` —, und der Seed-Record von `adr-0001` auf
@@ -303,7 +303,7 @@ separate Werke). Zugleich die MIT-Attribution für die zwei von GitHub
 Spec Kit abgeleiteten Templates nachgezogen (`THIRD-PARTY-NOTICES.md`,
 auch gerendert in Adopter-Repos; Provenienz-Kommentare in den Dateien).
 
-SP58 (skill-bypass-closure: Kennis Beobachtung, dass topic-getriggerte
+SP58 (skill-bypass-closure: Beobachtung im Referenzprojekt, dass topic-getriggerte
 Dritt-Skills (Superpowers-Brainstorming/-Planning) mit eigenen Datei-
 Konventionen die artefakt-präsenz-abhängigen Pflichten lautlos umgehen
 können — ein Plan, der nie in `.process-work/plans/` landet, löst weder
@@ -336,7 +336,7 @@ deckungsgleich mit dem Lean-Pass) und das decision-adoption-Modul
 (geparkt bis Nutzungsevidenz vorliegt — die Intent-Achse trägt die
 leichte Version bereits)) ausgeliefert, `v2.3.0`.
 
-SP60 (engine-freiheit + hygiene, aus Kennis Live-Betrieb der
+SP60 (engine-freiheit + hygiene, aus dem Live-Betrieb des Referenzprojekts der
 SpecKit/Superpowers-Kombination: „The execute engine is free, the
 artifacts are not" — Subagent-per-Task-Engines sind im Execute
 sanktioniert, solange die Artefakt-Invarianten halten und die
@@ -349,7 +349,7 @@ remove`/`prune`) und der dispatchbare **cleanup-branches-Workflow**
 (patch-identitäts-basiert, Dry-Run-Default, Open-PR-Schutz) im Repo
 und im Template) ausgeliefert, `v2.4.0`.
 
-SP61 (sichtbarkeits-paket, aus Sebs Lebenszyklus-Review: **Issue bei
+SP61 (sichtbarkeits-paket, aus dem Lebenszyklus-Review des Maintainers: **Issue bei
 der Idee statt beim Plan** — das Einflussfenster des Menschen ist die
 Spec-/Design-Phase, also entsteht das Tracking-Issue beim Brainstorm-
 Eintritt und eine aktive `specs/*/spec.md` ohne `issue:`-Zeile ist hart
@@ -374,7 +374,7 @@ Wrapper-Commands; Doku im speckit-Modul aktualisiert; kein neues Gate,
 keine Config-Achse — Routing bleibt Engine-/Harness-Verhalten),
 `v2.5.1`.
 
-Runden-Ökonomie der Review-Schleife dokumentiert (aus Sebs Befund „bei
+Runden-Ökonomie der Review-Schleife dokumentiert (aus dem Maintainer-Befund „bei
 jeder Abweichung läuft die gesamte Kette": das `--since`-Delta-Bundle
 existierte seit v2.3.0, aber kein Dokument und kein Command lehrte es —
 `/review`, workflow.md (Review) und verification-independence.md
@@ -385,7 +385,7 @@ Push-Gates/Tests erneut); Runde 2+ als Delta-Bundle über `--since`
 rebasen, vor der ersten Runde — jede spätere Rebase entwertet die
 Digests), `v2.5.2`.
 
-SP62 (längsschnitt, aus dem Kenni-Befund „53 fix-Commits in 5 Tagen, ein
+SP62 (längsschnitt, aus dem Befund im Referenzprojekt „53 fix-Commits in 5 Tagen, ein
 Scope-Cluster mit 13 Fixes, jeder einzeln durch alle Gates": der Prozess
 regierte das einzelne Paket, hatte aber kein Organ für Muster ZWISCHEN
 Paketen — **fix-Cluster-Advisory** (`process_kpis clusters`: Rule 6
@@ -424,7 +424,7 @@ Commit, Checkbox, Gate — in Abhängigkeitsreihenfolge; /plan schärft
 Manifeste, generierte Indizes — ein falscher Marker wäre eine
 Working-Tree-Kollision), `v2.6.2`.
 
-SP63 (owner-loop, aus Sebs Befund „ich reviewe die Slices kaum — und
+SP63 (owner-loop, aus dem Maintainer-Befund „ich reviewe die Slices kaum — und
 verstehe die Specs oft nicht": der Mensch wird ein echter Knoten des
 Loop-Graphen, mit definierten Eingangs-Kanten statt Polling —
 **Owner brief** (Pflicht-Vorspann jeder Spec: fünf Klartext-Sätze ohne
@@ -439,7 +439,7 @@ by exception statt Diff-Konkurrenz zum Modell-Reviewer,
 verification-independence.md); **owner-digest-Workflow** (wöchentlich
 Mo + Dispatch, Digest in die Step-Summary)) ausgeliefert, `v2.7.0`.
 
-SP64 (speckit-presence, aus dem Kenni-Befund „Slices 009–016 liefen am
+SP64 (speckit-presence, aus dem Befund im Referenzprojekt „Slices 009–016 liefen am
 stärksten Gate vorbei": die Spec-Kit-Pläne leben in `specs/<dir>/plan.md`
 und werden nie archiviert — das Review-Presence-Gate scannte nur
 `.process-work/plans/archive/` und konnte den Standardweg nicht sehen —
@@ -450,14 +450,14 @@ als Note — hart am Push würde jeden Push zwischen letztem Tick und
 Review röten; commits.md benennt die Speckit-Variante des
 Archiv-Schritts: publish_and_prune statt Archiv-Move, finish druckt
 die fertigen Verzeichnisse einzeln); **Owner-Brief-Note** (speckit-Gate:
-spec.md ohne Owner-brief-Sektion → Note — 2 von 6 neuen Kenni-Specs
+spec.md ohne Owner-brief-Sektion → Note — 2 von 6 neuen Specs im Referenzprojekt
 hatten den Brief vergessen); **Waiver-Ehrlichkeit** (ein Plan mit
 `issue:`-Anker besitzt seine Waiver dort — nur trackerlose Waiver
 werden geflaggt; Digest gleichgezogen); **ADR-Rauschen** (Intent-Note
 entfällt für rejected/superseded — historische Records haben keine
 Endorsement-Achse)) ausgeliefert, `v2.7.1`.
 
-Zwei Gate-Defekte aus dem frischen Kenni-Klon (der erste kalte
+Zwei Gate-Defekte aus dem frischen Klon des Referenzprojekts (der erste kalte
 Prüfstand nach Wochen warmer Sessions): **Digest-Bindung ehrlich
 degradiert** — nach Rebase-Merge + Branch-Löschung existieren die
 Pre-Merge-SHAs in keinem frischen Klon; nicht auflösbare
@@ -469,7 +469,7 @@ ein Plan auf erweiterter Downstream-Skala (`tier: 4/5`) cleart an der
 gegateten Decke (min(tier,3)) statt an einer unerfüllbaren Latte,
 Archiv- und Speckit-Pfad gleichermaßen, `v2.7.2`.
 
-Test-Ökonomie als generisches Muster (aus Sebs Frage „voller Testlauf
+Test-Ökonomie als generisches Muster (aus der Maintainer-Frage „voller Testlauf
 bei jeder Änderung?": **Selektion nah am Edit, Vollständigkeit nah am
 Merge** — testing.md trägt die Staffel: pro Task/Push die gescopte
 Menge (Modul-Graph/`vitest related` oder auditierbare Modul-Karte) mit
@@ -480,7 +480,7 @@ mehrere Änderungen teilen sich einen Voll-Lauf, Selektion ist nie das
 letzte Netz; finish.py druckt den Voll-Suite-Schritt vor dem Merge),
 `v2.7.3`.
 
-Push- und Zertifikats-Ökonomie (aus Sebs Befund „Deploy 20 min, Push-Gate
+Push- und Zertifikats-Ökonomie (aus dem Maintainer-Befund „Deploy 20 min, Push-Gate
 ähnlich": **Push an Kohärenzpunkten, nicht pro Commit** — die Push-Gates
 bepreisen die gepushte Spanne, fünf zusammengehörige Commits in einem
 Push kosten einen Gate-Lauf; Grenzen: vor Bundle-Bau, vor Session-Ende,
@@ -491,7 +491,7 @@ der zertifizierenden Konfiguration verdient, nie behauptet; ein Deploy-
 Gate auf demselben Baum wird zum Memo-Hit statt zur Doppelzahlung
 (testing.md)), `v2.7.4`.
 
-Zertifikats-Transfer auch bergab (aus Sebs Live-Befund „Push-Gate zieht
+Zertifikats-Transfer auch bergab (aus einem Live-Befund des Maintainers „Push-Gate zieht
 die volle Suite, gleich danach der Boundary-Lauf nochmal, ohne
 Änderung dazwischen": **stärkere Evidenz ersetzt schwächere** — ein
 Voll-Lauf-Trigger am Push darf auf ein Zertifikat memoisieren, das
@@ -502,7 +502,7 @@ späteren Gates lesen das Zertifikat statt es neu zu verdienen;
 Klarstellung: der Review-Preflight fährt nur die Prozess-Gates, nie
 die Suite), `v2.7.5`.
 
-Suite als gemanagtes Asset (aus Sebs Befund „immer noch extrem viel
+Suite als gemanagtes Asset (aus dem Maintainer-Befund „immer noch extrem viel
 Zeit für Tests" — gemessen: die Vitest-Suite wuchs in zwei Wochen um
 43 %, 69 E2E-Specs × 2 Plattformen, und Stabilitätsbeweise liefen als
 5× Voll-Suite: **E2E-Budget pro Feature = 1, Floor UND Ceiling** — ein
@@ -515,7 +515,7 @@ Estate-Trend im Owner-Digest** — Unit-/E2E-Dateizahlen jetzt vs. vor
 sich wieder wie heute anfühlt), `v2.7.6`.
 
 Vier-Zustands-Pflicht für UI-Stories (aus der Härtungswellen-Analyse:
-~¼ der Kenni-Fixes waren Kalt-/Leer-/Offline-Zustände — „unknown stock
+~¼ der Fixes im Referenzprojekt waren Kalt-/Leer-/Offline-Zustände — „unknown stock
 als leer gerendert", Scope-Fallback beim Laden; das Spec-Template
 verlangt jetzt pro berührter Oberfläche die Tabelle loading / empty /
 error / **unknown** mit je einem erwarteten Verhalten — die DoR-R2-
@@ -523,7 +523,7 @@ Zwillinge, für UI konkretisiert; „unknown" ist der Zustand, der
 unbenannt kaputt ausgeliefert wird: not-yet-resolved ist weder leer
 noch Fehler), `v2.7.7`.
 
-Records sind Leitplanken, kein Beton (auf Sebs Wunsch festgehalten:
+Records sind Leitplanken, kein Beton (auf Wunsch des Maintainers festgehalten:
 ADRs und Contracts DÜRFEN geändert werden, wenn die Lösung dadurch
 dauerhaft tragfähiger, technisch besser oder klarer wird — das allein
 ist hinreichender Grund; die zwei Ehrlichkeitspflichten sind die ganze
@@ -533,7 +533,7 @@ Code, der sie voraussetzt (Rule 4) — Supersession bzw. versionierter
 Contract-Wechsel mit allen Konsumenten, nie stille Drift; adr/README
 und contract-first.md tragen den Grundsatz), `v2.7.8`.
 
-SP65 (kenni-upstreaming: vier Prozess-Erfindungen aus Kenni, die generisch
+SP65 (reference-upstreaming: vier Prozess-Erfindungen aus dem Referenzprojekt, die generisch
 tragen, in den Kern gehoben. **Launch-Owner** (`gate_invoke.py`, reines
 stdlib: die eine Stelle, die entscheidet, womit ein PEP-723-deklarierendes
 Skript gestartet wird — Kinder des Runners, `finish.py` und das
@@ -541,7 +541,7 @@ Review-Bundle laufen darüber; „nicht startbar" wird getrennt von „rot"
 gemeldet, denn ein Runner, der nicht anläuft, ist ein Launch-Problem mit
 anderem Owner als eine Regression). **Hook-Doktor** (dasselbe Modul:
 `.pre-commit-config.yaml` neben gesetztem `core.hooksPath` heißt, jede
-Registrierung ist stumm — in Kenni 25 Tage lang unbemerkt; gate_runner
+Registrierung ist stumm — im Referenzprojekt 25 Tage lang unbemerkt; gate_runner
 und finish blocken hart, ein nie installierter Hook ist eine Note bzw.
 ein finish-Blocker: ein fehlender Check ist ein Blocker, nie ein Skip).
 **Push-verankerte Presence** (check_review: ein aktiver Tier-3-Plan, den
@@ -554,7 +554,7 @@ serverseitig gemergter PR pusht main nie lokal — dort bleibt finish.py
 der Stop). **finish auf Branch-Besitz gescoped** (nur Pläne, die der
 Branch trägt oder beansprucht, sind seine Review-Schuld und
 Archivierungspflicht — ein fremdes Entscheidungspapier im Baum blockte
-in Kenni einen unbeteiligten Branch). **UI-Wiederverwendungspflicht**
+im Referenzprojekt einen unbeteiligten Branch). **UI-Wiederverwendungspflicht**
 (DoR R5 / DoD D7: Reuse-Map vor Implementierung, Konsumenten-Nachweis
 danach; review-checklist „Surfaces": nichts geclippt, 24-px-Ziele nach
 WCAG 2.5.8, zugänglicher Name auf jedem Button/Link, nichts verdeckt,
@@ -565,7 +565,7 @@ verwaiste Ausnahmen scheitern; die Baseline kann nur schrumpfen) und
 mit eigenem Exit-Code, EX_TEMPFAIL, statt zu scheitern)) ausgeliefert,
 `v2.8.0`.
 
-Zwei Token- und Zeitsparer, auf Sebs Frage „was lässt sich noch per
+Zwei Token- und Zeitsparer, auf die Maintainer-Frage „was lässt sich noch per
 Skript automatisieren": **Note-Ledger im gate_runner** (jede Gate-Note
 landet im Kontext des Agenten, und die Notes sind konstruktionsbedingt
 stabil — Pre-Adoption-Zustände, Platzhalter, Freshness-Hinweise — also
@@ -607,26 +607,26 @@ Modul kommt still zurück (beobachtet: git-hooks samt Anker-Konflikt). Der
 Helfer setzt jetzt jede aufgezeichnete Antwort als `--data` neu; BOOTSTRAP
 korrigiert die frühere Behauptung „recorded modules dict wins", `v2.9.1`.
 
-Zertifikate sind nach dem verschlüsselt, was sie bezeugen (Kenni-Befund:
+Zertifikate sind nach dem verschlüsselt, was sie bezeugen (Befund im Referenzprojekt:
 parallele Worktrees zerhauten sich mit einer Slot-Datei „der zertifizierte
 Baum" gegenseitig die Zertifizierung — ein Eintrag je Tree-Hash, nie ein
 einzelner Slot; Zwischendateien pro Lauf per mktemp, nie ein fester
 geteilter Pfad; testing.md), `v2.9.2`.
 
-Drei Befunde der Mac-Session generisch geschlossen (Hook-Doktor prüft auch
+Drei Befunde einer Worker-Session generisch geschlossen (Hook-Doktor prüft auch
 das andere Manager-Modell: ein befülltes `.githooks/` ohne passendes
-`core.hooksPath` ist hart — auf dem Mac lief monatelang eine Juni-Kopie
+`core.hooksPath` ist hart — auf einem Worker-Host lief monatelang eine Juni-Kopie
 aus `.git/hooks`; REST-Fallback in `publish_and_prune`, wenn `gh issue
 comment` am GraphQL-Sekundärlimit scheitert; `.publish-denylist` — Regexes,
 die beide Publish-Skripte prüfen, bevor etwas das Repo verlässt), `v2.9.3`.
 
-Test-Lanes sind eine geteilte Ressource (Kenni-Befund: vier Agenten in vier
+Test-Lanes sind eine geteilte Ressource (Befund im Referenzprojekt: vier Agenten in vier
 Worktrees ließen ihre gescopten Suiten gleichzeitig laufen, Load 6, alles
 kroch — und ein kriechendes Gate wird umgangen; testing.md: Zertifikats-
 Transfer am Push und eine flock-Spur je Host — anstellen statt drosseln,
 kein Bypass), `v2.9.4`.
 
-SP67 (ui-evidence, auf Sebs Frage „sind Screenshots zum Abgleich und zur
+SP67 (ui-evidence, auf die Maintainer-Frage „sind Screenshots zum Abgleich und zur
 Erfolgskontrolle hinterlegt?" — sie waren Beweis an der Untergrenze, aber
 kein Abgleich mit der Absicht und für den Owner unsichtbar: **DoD D8**
 (Vorher-Nachher-Paar je Viewport, Theme und Zustand unter
@@ -639,13 +639,13 @@ Sektion 6** (was sich auf dem Bildschirm geändert hat: Evidenzpaare und
 geänderte Pixel-Baselines als Pfade zum Öffnen);
 **check_baseline_duplicates.py** (byte-identische Screenshots unter
 verschiedenen Namen sind Beweis für nichts — Ratchet mit Baseline-Pin;
-erster Lauf an Kenni: 16 Gruppen, darunter „Fehler" identisch mit
+erster Lauf am Referenzprojekt: 16 Gruppen, darunter „Fehler" identisch mit
 „teilweise geladen")) ausgeliefert, `v2.10.0`. Patch: das Evidenz-Verzeichnis
 eines Spec-Kit-Plans (`specs/NNN-x/plan.md`) wird über das Verzeichnis
 gefunden, nicht über den Dateinamen `plan`, `v2.10.1`.
 
-SP68 (residue, auf Sebs Frage „räumt der Prozess ausreichend auf?" — gemessen
-an Kenni: 353 von 457 Remote-Branches bereits gemergt, 9 von 35 Spec-
+SP68 (residue, auf die Maintainer-Frage „räumt der Prozess ausreichend auf?" — gemessen
+am Referenzprojekt: 353 von 457 Remote-Branches bereits gemergt, 9 von 35 Spec-
 Verzeichnissen fertig, 5 aktive Pläne älter als zwei Wochen, alles ohne
 Rhythmus; nur die Plan-Archiv-Retention funktionierte, weil sie hart im Hook
 sitzt und der Fix ein Kommando ist: **`tidy.py`** (ein Report je Altlast mit
@@ -655,7 +655,7 @@ alte Archive, template-delta; alte aktive Pläne und stille Issues nur
 gelistet: Owner-Entscheidung) und **Digest Sektion 7** (dieselben Zahlen
 jede Woche vor dem Owner)) ausgeliefert, `v2.11.0`.
 
-SP69 (dialogue-decisions, Sebs Befund aus einem zweiten Prozess-Einsatz:
+SP69 (dialogue-decisions, Maintainer-Befund aus einem zweiten Prozess-Einsatz:
 Entscheidungen im Dialog landen nicht im Plan und gehen beim Kompaktieren
 verloren — der Kernel schützt sich selbst, Entscheidungen nicht: **`##
 Decisions`-Ledger im Plan** (eine `DECISION <Datum> <wer>: <was> — because
@@ -669,7 +669,7 @@ ohne den Abschnitt, auch specs/*/plan.md — das Gate kennt keine fehlende
 Entscheidung, aber ein Reviewer fragt bei leerem Ledger nach)) ausgeliefert,
 `v2.12.0`.
 
-SP70 (computed-evidence, Sebs Befund aus einem zweiten Einsatz: 15 von 16
+SP70 (computed-evidence, Maintainer-Befund aus einem zweiten Einsatz: 15 von 16
 Review-Digests wurden nie berechnet — plausibles Hex, das kein Byte-Strom
 irgendeines Commits erzeugt; das Gate meldete es bei jedem Lauf, bis es
 als Dauerrot niemand mehr las. Zwei Antworten: **Evidenz wird berechnet,
@@ -683,14 +683,14 @@ den keine Formel erzeugt, heißt im Gate jetzt FABRICATED und zählt als
 fehlendes Review) und **Dauerrot bekommt ein Alter** (gate_runner merkt sich
 je Gate den ersten roten Tag in `.git/` und druckt das Alter mit jedem
 Fehlschlag; Digest Sektion 8 zeigt es dem Owner); dazu **Abschalten durch
-Weglassen geschlossen** (Sebs dritter Befund: zwei Pläne ohne `tier:`-Zeile
+Weglassen geschlossen** (dritter Maintainer-Befund: zwei Pläne ohne `tier:`-Zeile
 waren für jedes Gate unsichtbar, bis sie eine bekamen und sofort zwei
 Pflichten scharf wurden — ein aktiver Plan und ein specs/*/plan.md ohne
 Tier sind jetzt hart, archivierte bleiben Note)) ausgeliefert, `v2.13.0`.
 
-Drei Befunde der Mac-Session (kenni-88) generisch geschlossen:
+Drei Befunde einer Worker-Session generisch geschlossen:
 **Hook-Doktor für `.githooks/`** (ein getracktes Hook-Verzeichnis ohne
-passendes `core.hooksPath` liest git nie — im Mac-Repo lief monatelang
+passendes `core.hooksPath` liest git nie — im Referenzprojekt lief monatelang
 eine Juni-Kopie von pre-push aus `.git/hooks`, und ein geleaktes GIT_DIR
 schaltete darüber das echte Repo auf `core.bare=true`; hart im gate_runner
 und in finish), **REST-Fallback beim Posten** (`gh issue comment` läuft
@@ -699,13 +699,13 @@ REST-Budget unberührt war — publish_and_prune fällt auf
 `gh api …/comments` zurück, Verifikation liest zuerst per REST) und
 **Deny-Liste vor dem Veröffentlichen** (`.publish-denylist`, projekteigene
 Regexes; ein Treffer verweigert den Post und nennt die Zeile —
-publish_and_prune und publish_review.sh; Anlass: Klienten-Slugs aus
-UITest-Stubs in einem Spec-Snapshot), `v2.9.3`.
+publish_and_prune und publish_review.sh; Anlass: projektinterne Bezeichner
+in einem Spec-Snapshot), `v2.9.3`.
 
-SP71 (design-contracts, generalisiert aus Sebs Kenni-Praxis für WebUI
-und iOS: UI-Arbeit scheiterte wiederholt daran, dass jeder Agent etwas
+SP71 (design-contracts, generalisiert aus der Praxis im Referenzprojekt für Web
+und App: UI-Arbeit scheiterte wiederholt daran, dass jeder Agent etwas
 Plausibles rendert und niemand sagen kann, welches Bild *richtig* war —
-in Kenni geheilt durch je Surface einen Designvertrag mit stabilen IDs,
+im Referenzprojekt geheilt durch je Surface einen Designvertrag mit stabilen IDs,
 gesiegelte Render-Runden als Referenz, unabhängiges Review mit GO und
 Amend-before-Code. Der Template macht daraus ein Modul im Standard-Set,
 inert bis zum ersten Registry-Eintrag: **Registry** (`docs/process/
@@ -737,7 +737,7 @@ ordnerrelativen `../..`-Pfaden, `manifest.sha256` in sha256sum-Form
 bereits gesiegelte Runden im Referenzprojekt), `v2.14.1`.
 
 **Plan-Bindung** (erster Lauf im Referenzprojekt: ID-Familien sind
-surface-übergreifend — E1 ist auf Web wie iOS eine Ebene —, ein iOS-Plan
+surface-übergreifend — E1 ist auf Web wie in der App eine Ebene —, ein App-Plan
 wurde gegen den Web-Vertrag geprüft und `C8` galt nicht als `C08`. Ein
 Plan wird nur gegen den Vertrag geprüft, den er nennt (Pfad oder
 `design-contract: <surface>`-Zeile); ein Plan mit Familien-IDs ohne
@@ -762,11 +762,11 @@ Regel in git-hooks.md und /finish: ein Hook, der Minuten laufen kann,
 wartet begrenzt und bricht mit Halter und Ausweg ab; die Evidenz entsteht
 entkoppelt im Hintergrund (Certify-Schritt, Baum-Zertifikat), der Push
 liest sie. Werkzeug bleibt projektspezifisch — im Referenzprojekt
-`scripts/lane.py` mit zwei Lanes, `make certify`, `make lane-status`),
+ein Lane-Skript mit zwei Lanes und ein Certify-Ziel),
 `v2.14.4`.
 
 SP72 (tower — der deterministische Kern eines Steuermanns für parallele
-Arbeit: Sebs Idee eines Agenten, der viele Worker koordiniert, mit ihm
+Arbeit: die Idee des Maintainers eines Agenten, der viele Worker koordiniert, mit ihm
 spricht, Probleme findet und Ressourcen steuert. Bevor ein Agent urteilt,
 braucht er eine Lage, die nicht erzählt, sondern berechnet ist:
 **`tower.py`** (eine Tabelle aus Zustand, den der Prozess schon führt —
@@ -787,7 +787,7 @@ die Eingabe des Steuermanns, damit dessen Tokens in Urteil fließen
 (zuteilen, umlenken, beenden) und nicht in Nachfragen bei dreizehn
 Workern; Doku `docs/process/tower.md`) ausgeliefert, `v2.15.0`.
 
-SP73 (train + steward — Sebs Wunsch: Aufträge sammeln und zu einem
+SP73 (train + steward — Maintainer-Wunsch: Aufträge sammeln und zu einem
 günstigen Zeitpunkt effizient mergen und deployen, statt dass dreizehn
 Agenten dreizehn Volläufe und Deploys zahlen. **Merge-Zug** (`train.py`:
 `plan` zeigt, wer einsteigen darf und warum nicht — berechnet, nie
@@ -814,9 +814,9 @@ gemergte Branches erschienen als „nothing ahead" — Rückstände sind
 Sache von `tidy.py`, keine Kandidaten; der Plan zeigt nur Branches mit
 Vorsprung), `v2.16.1`.
 
-**Tower über Hosts hinweg** (Sebs Anforderung: der Prozess bleibt
-host-agnostisch — bei Kenni läuft die Steuerung auf dem LXC, ein
-abgesetzter iOS/Mac-Worker auf einem Mac. Der einzige Kanal, den jeder
+**Tower über Hosts hinweg** (Maintainer-Anforderung: der Prozess bleibt
+host-agnostisch — im Referenzprojekt läuft die Steuerung auf einem
+Host, ein abgesetzter Worker auf einem zweiten. Der einzige Kanal, den jeder
 Host schon hat, ist git, also ist er der Transport: `report.py --sync`
 (oder `PROCESS_REPORT_SYNC=1`) veröffentlicht die Meldungen eines Hosts
 als Blob unter `refs/process/reports/<host>` auf origin — kein ssh,
@@ -833,7 +833,7 @@ Juli-Branches, tausende Commits hinter main, erschienen als „anderswo in
 Flug". Ein Branch ohne Commit seit 14 Tagen wird gezählt statt gelistet
 und als ein Befund `remote-residue` gemeldet), `v2.17.1`.
 
-**Anleitung verdrahtet** (Sebs Frage „ist die Anleitung angepasst?" —
+**Anleitung verdrahtet** (Maintainer-Frage „ist die Anleitung angepasst?" —
 nein, war sie nicht: Tower, Report, Zug und Steward standen nur in ihren
 eigenen Docs. Jetzt: workflow.md „Parallel agents" erklärt die vier und
 sagt ausdrücklich, dass ohne Steward jede Session autonom bleibt — Gates
@@ -850,7 +850,7 @@ frei; der Zug druckt je gemergtem Branch die referenzierten Issues),
 `v2.17.2`.
 
 **Unabhängiges Review von Tower, Zug, Report, Designvertrag und Ledger**
-(Sebs „check nochmal alles durch, ohne Bias" — ein frischer Reviewer ohne
+(Maintainer: „check nochmal alles durch, ohne Bias" — ein frischer Reviewer ohne
 Kontext fand 26 Befunde, sechs davon hoch; alle mit Repro. Behoben:
 Zug — Tier aus dem Roh-Text las eingezäunte Beispiele als Deklaration
 (jetzt `_unfenced` wie im Review-Gate), ein de-datierter Slug ließ einen
@@ -875,7 +875,7 @@ verschachteltes `manifest.json` war vom Siegel ausgenommen; Ledger —
 überlebte (jetzt baut `--full` den Ledger neu). Doku an den Code
 angeglichen, Bedrohungsmodell des Towers ehrlich benannt), `v2.17.3`.
 
-SP74 (dispatch + Modell-Policy — Sebs Frage „startet das System die
+SP74 (dispatch + Modell-Policy — Maintainer-Frage „startet das System die
 Sessions selbst?" (nein, bis jetzt) und „je Phase ein anderes LLM?" (ja,
 weil die Phasen über Artefakte getrennt sind: Plan und Decisions-Ledger,
 dann das Bundle). **`docs/process/model-policy.json`** ist die eine
@@ -896,7 +896,7 @@ Konfidenz, die Zahl, an der die Policy gemessen wird. `/steward` teilt
 über dispatch zu und ändert Modelle nur über die Policy-Datei)
 ausgeliefert, `v2.18.0`.
 
-SP75 (sichtbare Worker und ein Frageprotokoll — Sebs Erfahrung mit dem
+SP75 (sichtbare Worker und ein Frageprotokoll — Maintainer-Erfahrung mit dem
 ersten Steward: „ich sehe zu wenig, Fragen kommen spät und ohne Kontext".
 Zwei Entwurfslücken, geschlossen: **Worker als tmux-Fenster** (Policy
 `runner: tmux`, `tmux_session`; `dispatch.py` öffnet je Worker ein
@@ -1001,8 +1001,8 @@ Der Staging-Worktree liegt jetzt als Geschwister neben dem Root
 (`<root>-train`, wie die Dispatch-Worktrees), nur Logs bleiben im git
 common dir, `v2.21.0`.
 
-**Phasen auf einem anderen Host.** Der Kenni-Steward stellte fest: der
-Engpass ist die CPU des LXC, nicht die Zahl der Plätze; Reviews binden
+**Phasen auf einem anderen Host.** Der Steward im Referenzprojekt stellte fest: der
+Engpass ist die CPU des Steuer-Hosts, nicht die Zahl der Plätze; Reviews binden
 viel davon und brauchen nur git. Die Policy kennt jetzt `phases.<phase>`
 mit `command`, `runner` und `remote: true`: ein Remote-Phase-Start legt
 keinen Worktree an, der Befehl ist die Übergabe (Cloud-Sitzung, ssh),
@@ -1025,6 +1025,17 @@ dem anderen Host. `--dry-run` nennt die Regel, die erlaubt oder verweigert
 hat, und behält bei Verweigerung Exit 3; `tower.md` und der Docstring
 sagen dasselbe, `v2.23.0`.
 
+**Dokumentation als Einstieg, ohne Template-Änderung.** `docs/UEBERBLICK.md`
+(und inhaltsgleich als PDF) erklärt den Prozess in elf Kapiteln und ist der
+neue Einstieg aus dem README. BOOTSTRAP nennt die fünf tatsächlichen Fragen,
+empfiehlt für Updates `template_update.py` statt eines Beispiel-Dictionaries,
+das Module abgeschaltet hätte, und erklärt parallele Agenten (Modellpolitik,
+`rehydrate.py --install`, Steward, Dispatch, Zug); beides an einem frischen
+Headless-Render nachgeprüft. SYSTEM-REQUIREMENTS ohne GitLab und `parity`,
+mit tmux und den Koordinationsskripten. Das öffentliche Repo nennt das
+Ursprungsprojekt nur noch als Referenzprojekt und enthält keine Betriebsdetails,
+Klientenbezüge oder Vornamen mehr; die Neutralitätslisten der Tests bleiben.
+
 ## Sub-Projekt-Tabelle (SP1–SP24)
 
 Die Tabelle wurde bis SP24 gepflegt; ab SP25 trägt das Narrativ oben die
@@ -1036,11 +1047,11 @@ Historie allein.
 | **SP2** Architektur-Onboarding | Architektur-Interview + Verifikation gegen echten Code | ✅ ausgeliefert |
 | **SP3** Prozess-Vervollständigung (Multi-Repo/-Mensch) | feature-registry · github-issues · contracts-drift | ✅ Slices 1–3 |
 | **SP4** Prozess-Vervollständigung II | git-hooks (lokale Enforcement-Säule) · contract-first (Interface-declared-first-Gate) · parity (Capability×Surface-Matrix, Gap→Issue) · security-floor (Pattern-Floor über git-getrackte Dateien) | ✅ ausgeliefert |
-| **Capstone** command-adapters | Harness-native Slash-Commands (Claude / Copilot / AGENTS.md), dünn auf `docs/process/` zeigend, vom doc-drift-gate mitgeprüft — schließt das „vollständig wie Kenni"-Programm bei `v1.0.0` | ✅ ausgeliefert |
+| **Capstone** command-adapters | Harness-native Slash-Commands (Claude / Copilot / AGENTS.md), dünn auf `docs/process/` zeigend, vom doc-drift-gate mitgeprüft — schließt das „vollständig wie das Referenzprojekt"-Programm bei `v1.0.0` | ✅ ausgeliefert |
 | **SP7** ci-adapters | GitLab CI als zweiter Enforcement-Transport (`ci`-Namespace, includable Job + Root-Shim) · dokumentierte No-CI-Degradation · Install-Fallbacks ohne `uv` (pipx / venv+pip / lokaler Clone) | ✅ ausgeliefert |
 | **SP8** english-canon | Alle Artefakte englisch (halbiert die Doku-Token je Session) · Kernel-Regel „Dialog in Nutzersprache" · „Wann lohnt es nicht"-Ehrlichkeit · Journal-Pflicht erst ab Tier 2 | ✅ ausgeliefert |
 | **SP9** audit-fixes | Drei-Achsen-Audit: alle bestätigten False-Greens geschlossen (Manifest load-bearing, arch-Fence, unborn-main-Hook, hooksPath-Guard) · Failure-Modes mit Diagnose statt Traceback · doc-drift versteht dokument-relative Links · Doku-Drift bereinigt | ✅ ausgeliefert |
-| **SP10** telemetry | Effizienz messbar (Audit-Finding, aus Kenni generalisiert): `GRADE`-Trace-Konvention im Journal · Gate lintet das Trace-Format (kein stiller Telemetrie-Verlust) · read-only KPI-Cockpit (`process_kpis.py`: effectiveness/convergence/suite/tempo/cost/cfr) · Grader-Kalibrier-Suite mit den drei Vertrauens-Schwellen (≥20/≥5 · 0 False-PASS · ≥90 % ≤2 Runden) | ✅ ausgeliefert |
+| **SP10** telemetry | Effizienz messbar (Audit-Finding, aus dem Referenzprojekt generalisiert): `GRADE`-Trace-Konvention im Journal · Gate lintet das Trace-Format (kein stiller Telemetrie-Verlust) · read-only KPI-Cockpit (`process_kpis.py`: effectiveness/convergence/suite/tempo/cost/cfr) · Grader-Kalibrier-Suite mit den drei Vertrauens-Schwellen (≥20/≥5 · 0 False-PASS · ≥90 % ≤2 Runden) | ✅ ausgeliefert |
 | **SP11** reaudit + public | Adversariales Re-Audit der Telemetry-Slice: False-Greens geschlossen (Suite-Shape-Alignment in Gefahr-Richtung, Filter=Grammatik, Unicode-round, Typo-Root) · Failure-Modes sprechen statt Tracebacks · persönliche Daten aus dem Tree, englischer README-Einstieg, `uv.lock` committed, CI least-privilege | ✅ ausgeliefert |
 | **SP12** verification-independence | Kontext-Unabhängigkeit der Verifikation als Kern-Methodik (die Lücke nach dem Telemetry-Slice): Produktion warm (Kohärenz), Verifikation unabhängig, tier-gestaffelt (0–1 Selbstcheck · 2 frischer Bundle-Review · 3 cross-model + adversarial-refute) · Review attestiert seine Unabhängigkeit, sonst zählt sie einen Tier schwächer | ✅ ausgeliefert |
 | **SP13** anchor-guidance | Zwei portable Lücken geschlossen (aus dem Vergleich mit einem reifen Adopter): der „Anker trägt Pointer, nicht driftendes Detail"-Diskriminator ist jetzt in `start-here.md` ausgesprochen (*driftet es beim Refactor? → nicht in den Anker*), plus wie man Anker für große Multi-Stack-Repos skaliert (nested per-Subtree-Anker) — hält den dünnen Kernel dünn | ✅ ausgeliefert |

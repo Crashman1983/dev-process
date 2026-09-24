@@ -16,11 +16,11 @@
 - Sentinel marker string is exactly `# dev-process-managed-hook` (installer detects ownership by grepping for it).
 - Bypass envs: `ALLOW_MAIN_COMMIT=1` (pre-commit), `SKIP_PUSH_GATE=1` or `git push --no-verify` (pre-push).
 - Hooks call `python3 scripts/process/gate_runner.py`; never a hard-coded gate name.
-- No Kenni-specific term may leak into any shipped file. Neutrality list: `Kenni`, `KenniNext`, `Seb`, `Signal`, `SvelteKit`, `user_id=1`, `surface:ios`.
+- No project-specific term may leak into any shipped file. Neutrality list: `Kenni`, `KenniNext`, `Seb`, `Signal`, `SvelteKit`, `user_id=1`, `surface:ios`.
 - Commit trailers on every commit:
   `Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>`
   `Claude-Session: https://claude.ai/code/session_01MS9nrQC9f9WGhipvJ9NFpk`
-- Run tests with `.venv/bin/python -m pytest`; lint with `.venv/bin/ruff`. Prefix every shell command with `cd /home/claude/Projekte/dev-process`.
+- Run tests with `.venv/bin/python -m pytest`; lint with `.venv/bin/ruff`. Prefix every shell command with `cd <repo>`.
 
 ## File Structure
 
@@ -121,7 +121,7 @@ def test_answers_records_git_hooks(render, tmp_path):
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `cd /home/claude/Projekte/dev-process && .venv/bin/python -m pytest tests/test_git_hooks.py -q`
+Run: `cd <repo> && .venv/bin/python -m pytest tests/test_git_hooks.py -q`
 Expected: `test_warn_mode_reports_but_exits_zero` FAILS (no `--warn` handling → exit 1, no "not blocking"); `test_answers_records_git_hooks` FAILS (key not in copier.yml/conftest yet). Others may pass incidentally.
 
 - [ ] **Step 3: Add `--warn` to gate_runner**
@@ -173,13 +173,13 @@ In `tests/conftest.py`, line 26, add `"git_hooks": False` to the modules dict:
 
 - [ ] **Step 5: Run tests to verify they pass**
 
-Run: `cd /home/claude/Projekte/dev-process && .venv/bin/python -m pytest tests/test_git_hooks.py -q && .venv/bin/ruff check tests/test_git_hooks.py`
+Run: `cd <repo> && .venv/bin/python -m pytest tests/test_git_hooks.py -q && .venv/bin/ruff check tests/test_git_hooks.py`
 Expected: 4 passed; ruff clean.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-cd /home/claude/Projekte/dev-process
+cd <repo>
 git add template/scripts/process/gate_runner.py.jinja copier.yml tests/conftest.py tests/test_git_hooks.py
 git commit -F - <<'EOF'
 feat: add gate_runner --warn mode and git_hooks module key
@@ -308,7 +308,7 @@ def test_installer_absent_when_module_off(render, tmp_path):
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `cd /home/claude/Projekte/dev-process && .venv/bin/python -m pytest tests/test_git_hooks.py -q -k "guard or branch or pre_push or post_commit or brownfield or idempotent or module_off"`
+Run: `cd <repo> && .venv/bin/python -m pytest tests/test_git_hooks.py -q -k "guard or branch or pre_push or post_commit or brownfield or idempotent or module_off"`
 Expected: the install-dependent tests FAIL (install-hooks.sh does not exist → `_init_repo`'s install assert / bash errors). `test_installer_absent_when_module_off` PASSES already.
 
 - [ ] **Step 3: Create the installer**
@@ -392,13 +392,13 @@ echo "Done. Bypass: ALLOW_MAIN_COMMIT=1 (pre-commit); SKIP_PUSH_GATE=1 or --no-v
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `cd /home/claude/Projekte/dev-process && .venv/bin/python -m pytest tests/test_git_hooks.py -q`
+Run: `cd <repo> && .venv/bin/python -m pytest tests/test_git_hooks.py -q`
 Expected: all tests pass (11 total).
 
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /home/claude/Projekte/dev-process
+cd <repo>
 git add "template/scripts/process/{% raw %}{% if modules.git_hooks %}install-hooks.sh{% endif %}{% endraw %}" tests/test_git_hooks.py
 git commit -F - <<'EOF'
 feat: add brownfield-safe install-hooks.sh with three hooks
@@ -467,7 +467,7 @@ def test_commits_md_no_unconditional_hook_promise(render, tmp_path):
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `cd /home/claude/Projekte/dev-process && .venv/bin/python -m pytest tests/test_git_hooks.py -q -k "module_doc or docdrift or commits_md"`
+Run: `cd <repo> && .venv/bin/python -m pytest tests/test_git_hooks.py -q -k "module_doc or docdrift or commits_md"`
 Expected: FAIL (git-hooks.md missing; commits.md lacks "git-hooks").
 
 - [ ] **Step 3: Create the module doc**
@@ -554,18 +554,18 @@ In the Roadmap table, add a row after the SP3 row:
 
 - [ ] **Step 7: Run tests to verify they pass**
 
-Run: `cd /home/claude/Projekte/dev-process && .venv/bin/python -m pytest tests/test_git_hooks.py -q`
+Run: `cd <repo> && .venv/bin/python -m pytest tests/test_git_hooks.py -q`
 Expected: all pass (15 total).
 
 - [ ] **Step 8: Full suite + ruff**
 
-Run: `cd /home/claude/Projekte/dev-process && .venv/bin/python -m pytest -q && .venv/bin/ruff check tests/`
+Run: `cd <repo> && .venv/bin/python -m pytest -q && .venv/bin/ruff check tests/`
 Expected: full suite green; ruff clean.
 
 - [ ] **Step 9: Commit**
 
 ```bash
-cd /home/claude/Projekte/dev-process
+cd <repo>
 git add "template/docs/process/{% raw %}{% if modules.git_hooks %}modules{% endif %}{% endraw %}/git-hooks.md" template/docs/process/commits.md BOOTSTRAP.md README.md tests/test_git_hooks.py
 git commit -F - <<'EOF'
 docs: add git-hooks module doc, reconcile commits.md, README v0.6.0

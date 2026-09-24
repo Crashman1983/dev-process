@@ -13,7 +13,7 @@ module: a rendered installer that wires three hooks which **delegate to the exis
 manifest-aware `gate_runner.py`** (no hard-coded gate list — Rule 5, one owner) and
 are **brownfield-safe** (never clobber a foreign hook).
 
-First slice of the SP4–SP6 "complete like Kenni" program. Each module ships its own
+First slice of the SP4–SP6 "complete like the reference project" program. Each module ships its own
 `spec → plan → build → review → tag` cycle. This slice targets tag **v0.6.0**.
 
 ## 2. Scope
@@ -23,9 +23,9 @@ First slice of the SP4–SP6 "complete like Kenni" program. Each module ships it
 `gate_runner.py`; module doc; `commits.md` reconciliation; BOOTSTRAP install step;
 copier/conftest wiring; tests.
 
-**Out (deliberately):** path-aware push gates (Kenni optimizes for a heavy test
+**Out (deliberately):** path-aware push gates (the reference project optimizes for a heavy test
 suite; dev-process gates are all fast — run them all), staged-diff gates in
-pre-commit (enforcement lives in pre-push), and any Kenni-specific hook content
+pre-commit (enforcement lives in pre-push), and any project-specific hook content
 (security-floor, e2e-wait-ratchet — those arrive with their own later slices).
 
 ## 3. Files
@@ -171,7 +171,7 @@ Unit test for `--warn`: render with `git_hooks` + a module whose gate fails (e.g
 exits 1.
 
 Module-off tests: no `install-hooks.sh` and no `git-hooks.md` when the module is off;
-`gate_runner` without `--warn` is unchanged; neutrality (no Kenni-specific term leaks
+`gate_runner` without `--warn` is unchanged; neutrality (no project-specific term leaks
 into the shipped files); doc-drift stays green with the module doc present.
 
 ## 11. copier / conftest wiring
@@ -183,8 +183,8 @@ the conftest defaults dict. No new copier question — the hooks need no project
 
 - **Install mechanism:** rendered `install-hooks.sh` + documented one-time run (not
   `core.hooksPath`, not copier `_tasks`) — brownfield-safe, no task-trust, mirrors
-  Kenni's proven model. (maintainer, 2026-07-01)
-- **post-commit:** included in v1 as warn-only (like Kenni), not deferred. (maintainer)
+  the reference project's proven model. (maintainer, 2026-07-01)
+- **post-commit:** included in v1 as warn-only (like the reference project), not deferred. (maintainer)
 - **git_hooks is opt-in**, not core-always — respects brownfield adopters who use a
   hook manager; `commits.md` is reconciled so the core methodology makes no
   unconditional hook promise.

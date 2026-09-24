@@ -4,7 +4,7 @@ Status: proposed · Date: 2026-07-01 · Supersedes: — · Depends on: SP3 Slice
 
 ## 1. Purpose
 
-Give an adopter an opt-in, portable way to run the proven Kenni issue-backlog
+Give an adopter an opt-in, portable way to run the reference project's proven issue-backlog
 discipline on GitHub: EARS-framed issue templates, a seed helper, a documented
 claim/heartbeat workflow, and a gate that makes the *link* between a
 feature-registry story and its tracking issue trustworthy — the story's `issue`
@@ -154,7 +154,7 @@ modules; a segment that renders empty skips the file).
 - **`.github/ISSUE_TEMPLATE/feature.md`** and **`bug.md`** — neutral, EARS-framed
   Markdown templates with YAML frontmatter (`name`, `about`, `labels`). Sections:
   User Story (`As a <role>, I want …`), Context, Acceptance criteria (EARS),
-  Scope, Dependencies. No Kenni terms (no "Seb", "Signal", `surface:ios`, …).
+  Scope, Dependencies. No reference-project terms (no "Seb", "Signal", `surface:ios`, …).
 - **`scripts/process/new_issue.sh`** — portable POSIX seed helper: `new_issue.sh
   feature|bug` strips the YAML frontmatter from the chosen template, writes a
   temp body (neutral `mktemp` prefix), and prints the path (because `gh issue
@@ -165,7 +165,7 @@ modules; a segment that renders empty skips the file).
   the `issue`-ref format, what is hard vs. best-effort, prerequisites (repo + `gh`
   + auth), an **example** label schema (surface/priority/type/status — presented
   as a template to adapt, not enforced), and the claim/heartbeat/EARS-frame
-  workflow ported neutrally from Kenni's backlog doc.
+  workflow ported neutrally from the reference project's backlog doc.
 
 `copier.yml` gains `github_issues: false` in `modules.default` and the
 `github_repo` question (§3).

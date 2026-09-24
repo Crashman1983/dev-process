@@ -415,20 +415,20 @@ must diagnose missing bootstrap separately from product failure.
 
 - [x] **Step 5: Create the non-active pilot ledger**
 
-Create the meta-repo file with case 1/3 populated from the Kenni observation:
+Create the meta-repo file with case 1/3 populated from the reference-project observation:
 
 ```markdown
 # Governance economics pilot
 
 Status: 1/3 observed; no template routing change authorised.
 
-| Field | Case 1 — Kenni product direction |
+| Field | Case 1 — reference-project product direction |
 |---|---|
 | intent_mode | documentation |
 | semantic_impact | high |
 | mutation_class | governance-only |
 | terminal_state | review-complete, merge not authorised at observation time |
-| claim_delta | stale meeting capability claim corrected against inventory owner |
+| claim_delta | stale product capability claim corrected against inventory owner |
 | process_cost | 363 plan lines, 15 acceptance criteria, 10 commits, 3 review rounds |
 | repeated_decision_question | yes |
 | outcome | pending cases 2 and 3 |

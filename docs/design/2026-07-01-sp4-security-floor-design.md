@@ -6,17 +6,17 @@
 
 A mechanical security floor: the grep-able subset of a project's security
 invariants, enforced as a blocking gate so a careless regression is caught even
-on a review-less path. Kenni's `check_security_floor.py` greps *staged added
+on a review-less path. The reference project's `check_security_floor.py` greps *staged added
 lines* for a fixed pair of invariants (`shell=True` in Python; `{@html}` without
 a sanitizer in Svelte), excludes tests/self, blocks (exit 1), and is bypassable
 with `SKIP_SECURITY_FLOOR=1`.
 
 ## 2. Neutralization (what changes for a portable template)
 
-Kenni's patterns are stack-specific. The neutral module ships the **framework**,
+The reference project's patterns are stack-specific. The neutral module ships the **framework**,
 not the patterns: a project declares its own forbidden patterns.
 
-**Scan scope — the one deliberate divergence from Kenni.** Kenni scans *staged
+**Scan scope — the one deliberate divergence from the reference project.** The reference project scans *staged
 added lines* (via `git diff --cached`) so pre-existing debt never blocks a
 commit. This module runs through the manifest-aware `gate_runner` at push/CI
 time, where there is no staging area. It therefore scans **git-tracked files**
@@ -93,5 +93,5 @@ bypass exist; the value is catching the careless real case, not purity.
 No mandatory-rule number is cited (the neutral rule set has no security rule;
 security-floor is an optional discipline — lesson from the parity review). It
 reads no other module's artifacts; it is the only module that shells out to
-`git ls-files` (a repo query, not a cross-module import). No Kenni terms in
+`git ls-files` (a repo query, not a cross-module import). No reference-project terms in
 shipped files. Real `vcs_ref=HEAD` render on/off; module-off ships nothing.

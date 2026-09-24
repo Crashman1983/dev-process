@@ -6,7 +6,7 @@
 
 **Architecture:** A new manifest module (default off) rendered by copier path-conditionals. A new gate `check_issues.py` re-globs feature-registry stories, hard-fails (exit 1) on malformed `issue` refs, and best-effort-confirms existence via `gh` (entirely advisory, never exit 1). GitHub config (`github_repo`) is an optional, `when`-gated copier question read at runtime from `.copier-answers.yml`. The shipped v0.3.0 feature-registry gate stays frozen.
 
-**Tech Stack:** Python 3 (stdlib + PyYAML), copier, pytest, ruff. Env: `.venv/bin/python`, `.venv/bin/ruff` at repo root `/home/claude/Projekte/dev-process`.
+**Tech Stack:** Python 3 (stdlib + PyYAML), copier, pytest, ruff. Env: `.venv/bin/python`, `.venv/bin/ruff` at repo root `<repo>`.
 
 ## Global Constraints
 
@@ -916,7 +916,7 @@ git add "template/.github/{% if modules.github_issues %}ISSUE_TEMPLATE{% endif %
 git commit -F - <<'EOF'
 feat: add neutral EARS issue templates, seed helper, module doc
 
-feature.md/bug.md are EARS-framed and Kenni-free; new_issue.sh strips the YAML
+feature.md/bug.md are EARS-framed and project-neutral; new_issue.sh strips the YAML
 frontmatter (gh issue create ignores ISSUE_TEMPLATE/); github-issues.md
 documents the format/existence split, prerequisites, an example label schema,
 and the claim workflow. The doc references only this module's own artifacts as
@@ -956,7 +956,7 @@ Expected: artifacts present.
 - [ ] **Step 3: Gates green on the render**
 
 ```bash
-cd "$D" && /home/claude/Projekte/dev-process/.venv/bin/python scripts/process/gate_runner.py; cd -
+cd "$D" && <repo>/.venv/bin/python scripts/process/gate_runner.py; cd -
 ```
 Expected: doc-drift OK (module-doc template refs resolve), feature-registry OK (only the inert `.example` seed), github-issues OK/notes (no stories → "no stories" note); overall exit 0.
 

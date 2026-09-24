@@ -2,7 +2,7 @@
 
 ## Problem
 
-GitHub Issues are used far less intensively than in the mature adopter (Kenni),
+GitHub Issues are used far less intensively than in the mature adopter (the reference project),
 where "Tier 2+ requires a GitHub issue before any code" plus a claim/heartbeat
 protocol keeps the backlog operative. The template's `github-issues` module
 ships EARS templates, a seed helper, a prose claim workflow, and a gate — but

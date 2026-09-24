@@ -15,7 +15,7 @@
 - Conditional inclusion uses copier's **empty-rendered-filename** rule: the `.jinja` suffix stays OUTSIDE the `{% if %}`; when the condition is false the stem renders empty and the file is skipped (spec §7; verified pattern `{% if x %}name{% endif %}.jinja`).
 - copier Python API (verified 2026-07-01): `copier.run_copy(src_path, dst_path, data=..., defaults=True, unsafe=True, quiet=True)`; `copier.run_update(dst_path, overwrite=True, ...)`.
 - `_subdirectory: template` in `copier.yml` — only `template/` is rendered into targets; `docs/`, `tests/`, `README.md` of *this* repo are never shipped.
-- Rendered target files must contain **no leftover Jinja** (`{{`, `{%`, `{#`) and **no Kenni-specifics** (`KenniNext`, `Kenni`, `user_id=1`, `Seb`, `Signal`).
+- Rendered target files must contain **no leftover Jinja** (`{{`, `{%`, `{#`) and **no project-specifics** (`KenniNext`, `Kenni`, `user_id=1`, `Seb`, `Signal`).
 - Answer namespaces: harnesses under `harnesses.*` (bool), modules under `modules.*` (bool). Claude Code adapter is always rendered (no question).
 - Commits: Conventional Commits, atomic, imperative, `< 72` char subject. Every code-changing step ends with a commit.
 - Every process/gate script is Python run via `uv run` (spec §10 decision #3); no bash-only gates.
@@ -248,7 +248,7 @@ def test_risk_tiers_matrix(render, tmp_path):
 
 Run: `uv run pytest tests/test_core_docs.py -v` → FAIL.
 
-- [ ] **Step 3: Author `mandatory-rules.md`** (universal distillation; no Kenni-specifics)
+- [ ] **Step 3: Author `mandatory-rules.md`** (universal distillation; no project-specifics)
 
 ```markdown
 # Mandatory Rules

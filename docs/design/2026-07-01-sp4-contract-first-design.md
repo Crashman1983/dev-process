@@ -6,7 +6,7 @@
 
 Mandatory Rule 3 (contract-first) says a cross-surface capability must have its
 shared interface declared *before* any surface (web/mobile/CLI) builds on it.
-Kenni enforces the two halves of Rule 3 separately:
+The reference project enforces the two halves of Rule 3 separately:
 
 - **Artifact drift** (`make openapi-diff`, hard/pre-push): the committed API spec
   must match the freshly generated one.
@@ -30,12 +30,12 @@ does not make: **a declared capability's interface symbols must already exist in
 the committed shared spec** — the "declared first" in contract-first. A contract
 that references a DTO not yet in the spec is a Rule-3 violation and fails CI.
 
-Kenni's coverage-drift bridges `feature-inventory.md` ↔ `contracts.md`. That
+The reference project's coverage-drift bridges `feature-inventory.md` ↔ `contracts.md`. That
 cross-references the *parity* surface (SP4-③). Modules must not import each
 other (Rule 5), so `contract_first` is **self-contained** and does not read the
 inventory; the inventory↔contract status bridge, if wanted, belongs to whichever
 module owns the inventory. This is a deliberate, documented divergence from
-Kenni's exact mechanism — the portable, hard core is symbol-presence.
+The reference project's exact mechanism — the portable, hard core is symbol-presence.
 
 Distinct from siblings: `feature_registry` = story→acceptance→tests (behavior
 traceability); `contracts_drift` = external-system coupling by artifact+pin
@@ -102,7 +102,7 @@ and CI-failable. We do not parse the spec structure — that would assume a form
 
 ## 6. Neutrality & verification
 
-No Kenni terms in any shipped file (neutrality test list). Real `vcs_ref=HEAD`
+No reference-project terms in any shipped file (neutrality test list). Real `vcs_ref=HEAD`
 copier render verified on + off. doc-drift green with the module doc present.
 
 ## 7. Risks

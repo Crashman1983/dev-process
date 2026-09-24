@@ -65,8 +65,8 @@ decisions and are surfaced, not decided here.
   repo now follows its own pattern). The release-tag workflow validates the
   tag input before passing it to git.
 - README opens with an English signpost (what this is, the install command,
-  where the English docs live) and an origin note: Kenni is the private
-  project this process was generalized from; Kenni-internal references in
+  where the English docs live) and an origin note: the reference project is the private
+  project this process was generalized from; project-internal references in
   docs/design and docs/plans are history and not publicly resolvable.
 
 ## Out of scope

@@ -22,6 +22,13 @@ Review-Unabhängigkeit, Inventar, Telemetrie). Einspielbar in **neue
 der Installation gewählt (`claude` | `copilot` | `agents_md`); die
 Spezifikations-Skills deckt Spec Kits eigenes Integrations-System ab.
 
+> **Einstieg:** [`docs/UEBERBLICK.md`](docs/UEBERBLICK.md) erklärt den Prozess
+> in elf Kapiteln — welches Problem er löst, wie er aufgebaut ist, welche Regeln
+> hart geprüft und welche weich gehalten werden, wie parallele Agenten
+> koordiniert werden und was beim Skalieren offen ist. Dasselbe als PDF:
+> [`docs/Entwicklungsprozess-mit-KI-Agenten.pdf`](docs/Entwicklungsprozess-mit-KI-Agenten.pdf).
+> Einrichten: [`BOOTSTRAP.md`](BOOTSTRAP.md).
+
 > **Produktrahmen-Entscheidung (2026-08-06):** Die frühere Identität
 > „portabel, harness-agnostisch, 13 opt-in Module" wurde bewusst gegen den
 > Standard-Stack getauscht (Lean-Pass SP56) — weniger Optionen, weniger
@@ -33,16 +40,17 @@ Spezifikations-Skills deckt Spec Kits eigenes Integrations-System ab.
 > **Status:** `v2.23.0` — Sub-Projekte SP1–SP75 (Standard-Setup
 > statt Profile/Toggles, Spec Kit als Standard-Spezifikationsweg, 5 Core-Gates,
 > DoR/DoD, Kernel-Integritäts- und Compaction-Schutz). Vollständige Historie: [`CHANGELOG.md`](CHANGELOG.md).
-> **Überblick für Einsteiger:innen & Management** (wie es funktioniert, warum,
-> welcher Mehrwert): [`docs/CAPABILITIES.md`](docs/CAPABILITIES.md).
+> Überblick: [`docs/UEBERBLICK.md`](docs/UEBERBLICK.md) · Alltag für
+> Entwickler:innen und Management: [`docs/CAPABILITIES.md`](docs/CAPABILITIES.md) ·
 > Setup: [`BOOTSTRAP.md`](BOOTSTRAP.md) · Systemumgebung:
 > [`docs/SYSTEM-REQUIREMENTS.md`](docs/SYSTEM-REQUIREMENTS.md) · SBOM:
 > [`docs/SBOM.md`](docs/SBOM.md) · Design: [`docs/design/`](docs/design/).
 
 ---
 
-> **Herkunft:** Generalisiert aus *Kenni*, einem privaten Projekt, in dem
-> dieser Prozess entwickelt und erprobt wurde. Verweise auf Kenni-Interna
+> **Herkunft:** Generalisiert aus einem privaten, produktiv genutzten
+> Repository (in den Dokumenten „Referenzprojekt“), in dem dieser Prozess in
+> vielen Iterationen entwickelt und erprobt wurde. Verweise auf dessen Interna
 > (Issue-Nummern, Spec-Abschnitte) in `docs/design/` und `docs/plans/` sind
 > Projektgeschichte und öffentlich nicht auflösbar; alles, was das Template
 > ausliefert, ist davon unabhängig und neutral.
@@ -56,8 +64,9 @@ ist reines Markdown + git und damit tool-unabhängig. Die **Durchsetzung**
 niemand hinsieht. Nur die **aktive Automatisierung** (Slash-Commands, Skills,
 Subagents) ist harness-spezifisch und degradiert kontrolliert, wenn man das Tool
 wechselt. `dev-process` legt die Methodik als neutrale SSOT (`docs/process/`) ab,
-erzwingt sie über CI, und liefert dünne Adapter je Harness — die schweren
-Bausteine sind zuschaltbare Module.
+erzwingt sie über CI, und liefert dünne Adapter je Harness. Die Bausteine
+kommen als ein festes Standard-Setup; nur das `regulated`-Paket ist ein
+Schalter.
 
 ## Der Prozess — Eckpunkte
 
@@ -116,6 +125,17 @@ tasks`), der Rest auf die neutralen `docs/process/`-Phasen. Der
 `doc-drift-gate` prüft die Pointer mit — ein toter Command-Pointer failt die
 CI.
 
+**Parallele Agenten (optional):** Mehrere Agenten arbeiten gleichzeitig, je
+Issue ein eigener Worktree und Branch. `tower.py` berechnet die Lagetabelle
+(wer arbeitet woran, wo überschneiden sich Vorhaben, welche Fragen warten auf
+den Owner). `dispatch.py` startet je Phase eine Sitzung mit dem Modell aus
+`docs/process/model-policy.json`, headless, als sichtbares tmux-Fenster oder
+auf einem anderen Host. Der Steward teilt zu, legt dem Owner Fragen als Auswahl
+vor und merget fertige Branches gebündelt als Zug (`train.py`: eine volle
+Suite für alle). `rehydrate.py` spielt nach jeder Kürzung des Kontexts den
+Regelkern und die Entscheidungen des aktiven Plans wieder ein. Einrichten:
+[`BOOTSTRAP.md`](BOOTSTRAP.md), Abschnitt „Parallel agents“.
+
 ## Architektur als geprüfter Contract (SP2)
 
 Die meisten Frameworks dokumentieren Architektur in Prosa, die verrottet.
@@ -149,9 +169,9 @@ Standard-Spezifikationsweg mit deterministischer Durchsetzung — und bleibt
 über `copier update` (Prozess) und den Version-Pin (Spec Kit) getrennt
 aktualisierbar.
 
-Eine ausführliche, zielgruppengerechte Erklärung — *wie es funktioniert, warum,
-welcher Mehrwert*, getrennt für Entwickler:innen und Management — steht in
-[`docs/CAPABILITIES.md`](docs/CAPABILITIES.md).
+Die ausführliche Erklärung steht in [`docs/UEBERBLICK.md`](docs/UEBERBLICK.md);
+die Sicht der täglichen Arbeit, getrennt für Entwickler:innen und Management,
+in [`docs/CAPABILITIES.md`](docs/CAPABILITIES.md).
 
 ## Sprachen & Ökonomie
 
@@ -162,8 +182,8 @@ Kernel-Regel weist jeden Harness an, mit dem Nutzer in *dessen* Sprache zu
 sprechen; die Artefaktsprache bleibt davon unberührt.
 
 **Wann dieser Prozess nicht lohnt:** Für Wegwerf-Prototypen, Einmal-Skripte
-und Single-Session-Arbeit ist der Overhead netto negativ — dort nichts (oder
-nur das Minimalprofil) installieren. Der Prozess rechnet sich für alles
+und Single-Session-Arbeit ist der Overhead netto negativ — dort nichts
+installieren. Der Prozess rechnet sich für alles
 Mehrsession-, Multi-Agent- oder Contract/Persistenz/Auth-behaftete.
 
 ## Nutzung
@@ -174,14 +194,21 @@ Mehrsession-, Multi-Agent- oder Contract/Persistenz/Auth-behaftete.
 uvx copier copy gh:Crashman1983/dev-process .
 ```
 
-copier fragt **Profil** (leitet den Modul-Default ab), **Module**, **Harnesses** und **CI-Adapter** ab und rendert nur
-diese. Bestehende
-Dateien werden **nicht** überschrieben (additiver Drop-in). Ein Modul später
-nachrüsten oder eine neuere Prozess-Version ziehen:
+copier fragt fünf Dinge: **Projektname**, **Harness** (`claude` | `copilot` |
+`agents_md`), **`regulated`** (Compliance-Paket ja/nein), **CI** (GitHub
+Actions, Default an) und optional das **GitHub-Repo** für den Issue-Check.
+Alles andere ist das feste Standard-Setup. Bestehende Dateien werden **nicht**
+überschrieben (additiver Drop-in). Danach prüft
+`uv run scripts/process/gate_runner.py`, ob alles grün ist.
+
+Eine neuere Prozess-Version ziehen: `uv run scripts/process/template_update.py`
+im Zielrepo. Das Skript übernimmt alle gespeicherten Antworten und lässt
+Dateien, die das Projekt in `.process-owned` als eigene führt, unberührt
+Mit reinem copier geht es als
 `uvx copier update --defaults --data 'modules={…}'` mit dem vollständigen
-Modul-Dictionary (Rezept: [`BOOTSTRAP.md`](BOOTSTRAP.md) — die Antwortdatei
-`.copier-answers.yml` nicht von Hand editieren, sonst rendert `update` die
-neuen Moduldateien nicht).
+Modul-Dictionary (Rezept: [`BOOTSTRAP.md`](BOOTSTRAP.md)). Die Antwortdatei
+`.copier-answers.yml` nicht von Hand editieren, sonst rendert `update` neue
+Moduldateien nicht.
 
 **Pull-Mode** (ein KI-Agent richtet es ein): dem Agenten im Zielrepo sagen
 *„richte den Entwicklungsprozess aus diesem Repo ein, folge dessen `BOOTSTRAP.md`"* —

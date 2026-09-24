@@ -3,14 +3,14 @@
 **Date:** 2026-07-01
 **Status:** approved (scope + cadence pre-agreed with the maintainer)
 **Slice:** the final one. Ships the neutral process as harness-native slash
-commands, closing the "complete like Kenni" program at v1.0.0.
+commands, closing the "complete like the reference project" program at v1.0.0.
 
 ## Gap
 
 The neutral process lives in `docs/process/` and is pointed at by three thin
 adapters (`CLAUDE.md`, `AGENTS.md`, `.github/copilot-instructions.md`). But a
 user in a harness has no *native* way to invoke a phase — no `/plan`, no
-`/review`. Kenni carries a full command set (`brainstorm plan execute review
+`/review`. The reference project carries a full command set (`brainstorm plan execute review
 quick debug commit prime`); dev-process ships none. This slice extracts that
 command surface, harness-native, thin, and drift-checked.
 
@@ -53,7 +53,7 @@ command is reported back, not padded.
 `commit` and `prime` have no `workflow.md` phase → they point at
 `commits.md` / `journal-state-plans.md` respectively, nothing else. `prime` is
 written from `journal-state-plans.md` (restore state file + latest journal +
-active plan) — **not** transcribed from Kenni's richer `/prime` (which carries
+active plan) — **not** transcribed from the reference project's richer `/prime` (which carries
 `make dev-context`, PRD sections, branch-slug specifics that do not exist in the
 neutral process).
 
@@ -139,15 +139,15 @@ Plus behaviour tests for the ship-set:
    and assert the gate exits 0 — proves every shipped command file's real refs
    resolve (the slash-path discipline holds in the actual content).
 7. Neutrality: no shipped command file (and the AGENTS.md section) contains a
-   Kenni-ism from the neutrality word list.
+   project-ism from the neutrality word list.
 
 ## Neutrality beyond the word list
 
 The word-list check catches `Kenni/Seb/Signal/…` but not structural leaks
 (`make test`, `ARCHITECTURE.md`-as-anchor, `PRD.md`, surface labels). Command
 bodies are authored from the neutral docs only: no build-tool names, no
-Kenni-specific file anchors, no product nouns. `prime` and `debug` are the two
-most at risk of importing Kenni detail from memory — both authored strictly
+project-specific file anchors, no product nouns. `prime` and `debug` are the two
+most at risk of importing the reference project detail from memory — both authored strictly
 from `journal-state-plans.md` / `workflow.md`.
 
 ## Out of scope
@@ -160,5 +160,5 @@ from `journal-state-plans.md` / `workflow.md`.
 ## Release
 
 pyproject `0.9.0 → 1.0.0`; tag `v1.0.0`. This is the finish line: with
-command-adapters shipped, dev-process carries the full Kenni command surface,
+command-adapters shipped, dev-process carries the full the reference project command surface,
 harness-native and drift-checked. Program complete.

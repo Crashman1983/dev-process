@@ -16,7 +16,7 @@ existing `doc_drift_gate` owner is extended to scan the new command directories.
   (`docs/process/workflow.md`, never bare `workflow.md`) — else doc_drift can't
   check them.
 - No Jinja delimiters (`{{ {% {#`) in command bodies → ship without `.jinja`.
-- No Kenni-isms (word list + structural: no `make …`, `PRD.md`,
+- No project-isms (word list + structural: no `make …`, `PRD.md`,
   `ARCHITECTURE.md`-as-anchor, product nouns).
 - Harness-gated only: no `modules` key, no gate_runner entry, no conftest
   modules change.

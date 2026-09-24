@@ -16,7 +16,7 @@ Two gaps surfaced in use:
 2. **The ADR/decision machinery is weakly anchored and only optionally gated.**
    - No mandatory rule requires recording a significant decision or reading the
      relevant ones before planning.
-   - No patch-count discipline (Kenni Rule 5: ≥2 prior patches ⇒ explicit
+   - No patch-count discipline (reference-project Rule 5: ≥2 prior patches ⇒ explicit
      increment-vs-rewrite call) is generalized.
    - The README states "every new ADR must be in the index" but no gate checks
      it.

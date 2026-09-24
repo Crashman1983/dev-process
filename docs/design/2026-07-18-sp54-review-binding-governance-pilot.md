@@ -1,6 +1,6 @@
 # SP54 — Review-Artefaktbindung und Governance-Pilot
 
-**Status:** Von Seb am 2026-07-19 freigegeben
+**Status:** Vom Maintainer am 2026-07-19 freigegeben
 
 **Datum:** 2026-07-18
 
@@ -10,7 +10,7 @@
 
 ## Ausgangslage
 
-Die Kenni-Neuausrichtung hat zwei voneinander verschiedene Probleme sichtbar
+Die Neuausrichtung des Referenzprojekts hat zwei voneinander verschiedene Probleme sichtbar
 gemacht:
 
 1. Ein fachlich wichtiger, aber technisch rein dokumentarischer Auftrag lief
@@ -23,7 +23,7 @@ gemacht:
 Der zweite Punkt ist bereits ein konkreter Integritaetsfehler und wird in SP54
 aktiv behoben. Der erste Punkt wird als messbarer Pilot festgehalten, aber noch
 nicht in das allgemeine Routing des Templates eingebaut: Das bestaetigte
-Kenni-Design verlangt drei reale Anwendungen, bevor aus dem Overlay eine
+Design des Referenzprojekts verlangt drei reale Anwendungen, bevor aus dem Overlay eine
 portable Standardregel wird.
 
 ## Verifizierter Ist-Stand
@@ -62,8 +62,8 @@ portable Standardregel wird.
 ## Nicht-Ziele
 
 - Keine Aktivierung eines allgemeinen `governance-only`-Routings vor den drei
-  Kenni-Pilotfaellen.
-- Keine Kenni-Pfade, Claude-spezifischen Regeln oder Produktentscheidungen im
+  Pilotfaellen im Referenzprojekt.
+- Keine Pfade des Referenzprojekts, Claude-spezifischen Regeln oder Produktentscheidungen im
   neutralen Template.
 - Kein Signatur- oder Trust-System fuer die Wahrheit der Reviewer-Identitaet;
   diese bleibt attestiert.
@@ -195,7 +195,7 @@ statt eine nicht beweisbare Freigabe zu behaupten.
 
 ### 5. Governance-Oekonomie als nicht-aktiver Pilot
 
-Eine Meta-Repo-Pilotdatei erfasst drei Kenni-Anwendungen mit demselben Schema:
+Eine Meta-Repo-Pilotdatei erfasst drei Anwendungen im Referenzprojekt mit demselben Schema:
 
 - `intent_mode`: decision-only, documentation, planning oder implementation;
 - `semantic_impact`: niedrig, mittel, hoch;
@@ -209,7 +209,7 @@ Eine Meta-Repo-Pilotdatei erfasst drei Kenni-Anwendungen mit demselben Schema:
 - Ergebnis `adopt`, `revise` oder `reject` nach Fall 3.
 
 Diese Datei ist Evidenz fuer eine spaetere Entscheidung, keine aktive
-Template-Regel. Der erste Kenni-Fall wird als `1/3` eingetragen.
+Template-Regel. Der erste Fall aus dem Referenzprojekt wird als `1/3` eingetragen.
 
 ### 6. Fresh-Worktree-Vertrag fuer Projektgates
 
@@ -285,7 +285,7 @@ anderen als dem reviewten Diff nach `main` gepusht oder per Pull-/Merge-Request
 integriert werden kann, historische Adopter keinen rueckwirkenden roten
 Gate-Zustand erhalten und die Hooks weiter aus einem frischen Worktree laufen.
 
-Der Governance-Teil gilt erst nach drei echten Kenni-Faellen als
+Der Governance-Teil gilt erst nach drei echten Faellen im Referenzprojekt als
 entscheidungsreif. Danach folgt ein eigener Designentscheid zwischen engem
 Overlay und vollstaendigem `Impact x Mutation`-Modell. Bis dahin veraendert der
 Pilot das Template-Routing nicht.

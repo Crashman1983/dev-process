@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-02
 **Status:** approved (scope agreed with the maintainer: efficiency review items 1 + 3;
-item 2 — graders/telemetry — waits on access to the Kenni grader spec)
+item 2 — graders/telemetry — waits on access to the reference project's grader spec)
 **Slice:** all rendered artifacts become English-only; the user-facing dialogue
 language becomes an explicit kernel rule; the process states when it is *not*
 worth installing and exempts Tier 0-1 from journal duty.
@@ -59,5 +59,5 @@ remain a Tier 3+ artifact as before.
 
 ## Out of scope
 
-Graders/telemetry (efficiency item 2) — blocked on the Kenni grader spec;
+Graders/telemetry (efficiency item 2) — blocked on the reference project's grader spec;
 gets its own slice once accessible.

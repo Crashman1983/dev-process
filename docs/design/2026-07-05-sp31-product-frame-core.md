@@ -6,7 +6,7 @@ An adopter repo gets no product frame from the template. The rendered anchor
 carries process kernel only; the onboarding dialogue collects "product goal,
 users, first slice" into `.process-work/` notes that **nothing ever reads
 again** — no phase, no command, no gate, not `/prime` (verified in the
-2026-07-05 audit). The direction Kenni's PRD gave the LLM during development
+2026-07-05 audit). The direction the reference project's PRD gave the LLM during development
 (anchor triple CLAUDE.md + PRD + ARCHITECTURE.md, reloaded at execute/review,
 read by prime) has no counterpart in the framework. Consequences:
 
@@ -87,7 +87,7 @@ Mechanical honesty only, prose quality stays with the review:
 - **Goal-IDs + story→goal mapping gate:** deferred — would need a schema and
   invites ritual mapping; the checklist question covers the substance. Can
   land later if practice shows silent drift survives review.
-- **PRD long-form document** (Kenni-style multi-section spec): deliberately
+- **PRD long-form document** (reference-project-style multi-section spec): deliberately
   not — the frame is a compass, not a spec; features live in the registry,
   decisions in the records. Keeping it one page is what keeps it read.
 

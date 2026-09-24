@@ -6,7 +6,7 @@
 
 ## Global Constraints
 
-- Neutral: no Kenni terms in any shipped (`template/…`) file. Neutrality list:
+- Neutral: no reference-project terms in any shipped (`template/…`) file. Neutrality list:
   `Kenni KenniNext Seb Signal SvelteKit user_id=1 surface:ios`.
 - Honest ceiling: structure + spec-committed + symbol-presence are HARD (exit 1);
   everything external/unverifiable is a soft note (exit 0), never faked.

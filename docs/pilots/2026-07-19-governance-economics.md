@@ -14,9 +14,9 @@ Adoption requires evidence that the proposed classification is unambiguous,
 reduces meaningful process cost, and does not weaken review of high semantic
 impact. A smaller diff or the absence of runtime code is not sufficient.
 
-## Case 1 — Kenni product realignment documentation
+## Case 1 — Reference-project product realignment documentation
 
-Observed on 2026-07-18/19 from the completed Kenni documentation realignment
+Observed on 2026-07-18/19 from the completed documentation realignment in the reference project
 that motivated this pilot.
 
 | Field | Observation |
@@ -27,7 +27,7 @@ that motivated this pilot.
 | `owner` | PRD and product-direction anchors |
 | `non_goals` | no runtime behavior, API contract, persistence, or feature-registry implementation change |
 | `terminal_state` | review complete; merge was not authorised at observation time |
-| `claim_delta` | corrected a stale meeting-capability claim against the current inventory owner |
+| `claim_delta` | corrected a stale product-capability claim against the current inventory owner |
 | `process_cost` | 363 plan lines, 15 acceptance criteria, 10 commits, and 3 review rounds |
 | `repeated_decision_question` | `yes` — the documentation-only scope and intended terminal state were reconfirmed repeatedly |
 | `tool_stalls` | no material tool stall observed; elapsed cost came primarily from process breadth and review iteration |

@@ -5,14 +5,14 @@
 ## 1. Problem / motivation
 
 Mandatory Rule 4 (parity): a living capability×surface matrix prevents silent
-capability loss when a UI shell is rewritten (Kenni's inventory exists precisely
+capability loss when a UI shell is rewritten (the reference project's inventory exists precisely
 because features were silently dropped in a shell rewrite). Rule: no "complete"
 without code proof; no "gap" for an existing view; every deliberate gap is linked
 to a tracking issue.
 
 ## 2. What is mechanically enforceable (honest ceiling)
 
-Kenni keeps parity as a hand-maintained markdown matrix; its only script-level
+The reference project keeps parity as a hand-maintained markdown matrix; its only script-level
 enforcement is the contract-coverage bridge (owned elsewhere) — the matrix
 symbols themselves are review-enforced. A neutral, CI-failable core exists:
 
@@ -20,7 +20,7 @@ symbols themselves are review-enforced. A neutral, CI-failable core exists:
 - valid JSON object; UTF-8/JSON/non-dict hardening arms (mirror the sibling gates).
 - `capability` non-empty string == filename stem (uniqueness by construction).
 - `surfaces` a non-empty object `{surface-name: status}`; every status ∈
-  `{complete, view, code, gap, na}` (the neutral analog of Kenni's ✓/view/code/gap/–).
+  `{complete, view, code, gap, na}` (the neutral analog of the reference project's ✓/view/code/gap/–).
 - every surface whose status is `gap` has a matching entry in `issues`
   (`{surface-name: issue-ref}`) whose value is a valid issue reference — one of
   `#N`, `owner/repo#N`, or a github issue URL. This mechanizes Rule 4's "every
@@ -89,5 +89,5 @@ another's artifacts; the issue-ref regexes are a deliberate small duplication.
 
 ## 7. Neutrality & verification
 
-No Kenni terms in shipped files. Real `vcs_ref=HEAD` render on/off (module off
+No reference-project terms in shipped files. Real `vcs_ref=HEAD` render on/off (module off
 ships nothing incl. no seed dir — the Finding-D discipline). doc-drift green.
