@@ -283,8 +283,8 @@ def test_start_here_stack_compass_covers_layers_and_proposal_mode(render, tmp_pa
         "Frontend", "Backend", "Storage", "API/communication", "Deployment",
         # proposal mode: derive options, name trade-offs, confirm
         "proposal mode", "trade-offs", "recommendation",
-        # the API answer feeds the module heuristic
-        "contract-first", "contracts-drift",
+        # the API answer points at contract-first (mandatory rule 3)
+        "mandatory rule 3",
         # confirmed fundamentals land in the existing decision mechanics
         "ADR",
     ]:

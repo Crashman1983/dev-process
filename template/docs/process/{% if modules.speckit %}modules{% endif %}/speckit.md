@@ -26,7 +26,7 @@ the network or the CLI:
 Three skills are deliberately not kept: `constitution` would overwrite the
 rendered pointer (a second truth — the `speckit` gate guards the marker),
 `implement` would bypass the execute flow's TDD + atomic-commit discipline,
-and `taskstoissues` duplicates the issue path (`new_issue.py`,
+and `taskstoissues` duplicates the issue path (the issue templates,
 issue-before-code). **Upgrades** are a deliberate act: bump the pin, re-run
 `specify init --here --force`, diff the core templates against the overrides
 (`.specify/templates/overrides/` survives — highest resolution priority),

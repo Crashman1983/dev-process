@@ -35,7 +35,7 @@ Work you spot mid-flow — a bug noticed while building something else, a missin
 test, a follow-up — is **captured, not scope-crept into the current change**.
 One line per item in `.process-work/inbox.md`; keep the current change focused on
 its own scope. Triage the inbox when you surface for air: each item becomes a
-tracked issue (via the `github-issues` module's `new_issue.py`, when installed)
+tracked issue (from the `github-issues` module's issue templates, when installed)
 or is deliberately dropped. A triaged issue gets the
 **normal form** — the bug/finding templates with EARS acceptance criteria, an
 `Origin` naming the item being worked when it surfaced, and a comment on that
@@ -243,13 +243,13 @@ both efforts land:
 
 Nothing here expires automatically: journals, archived plans, review reports
 and branch state files accumulate, and the gates stay fast well past a
-thousand files — history is cheap, and `trace.py` is the reader. When the
+thousand files — history is cheap, and `git log` is the reader. When the
 volume itself starts to bother you (searching, cloning), prune by age as an
 ordinary change: delete or move journal shards and archived plans older than
 what you still reference, in a commit that says so. `scripts/process/compact_journal.py`
 does the routine form of it: shards older than N weeks (default 8) are folded
 into a monthly `journal/archive/YYYY-MM.md` that keeps exactly the machine-read
-records (`REVIEW`, `GRADE`) verbatim — the gates and `trace.py` glob the archive
+records (`REVIEW`, `GRADE`) verbatim — the gates glob the archive
 like any shard — and drops the prose, which git still holds. Dry run by
 default, `--apply` writes. Two things should NOT be
 pruned casually: review reports (the audit trail the review gate's waivers

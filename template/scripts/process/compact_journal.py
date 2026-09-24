@@ -12,8 +12,7 @@ shard is prose that costs tokens on every recursive read.
 
 The archive keeps one section per folded shard (its original path as the
 heading) with only its REVIEW/GRADE lines, verbatim and unfenced — so every
-gate that globs `.process-work/journal/**/*.md` still finds them, and
-`trace.py` still attributes them. Fenced blocks are quotations and are
+gate that globs `.process-work/journal/**/*.md` still finds them. Fenced blocks are quotations and are
 dropped with the prose.
 
 Dry run by default: prints what would fold and the byte saving. `--apply`

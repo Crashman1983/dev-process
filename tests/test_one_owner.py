@@ -36,16 +36,6 @@ def _load(path: Path, name: str):
     return mod
 
 
-def test_tracked_files_helpers_identical_sbom_vs_security_floor():
-    # sbom and security_floor are independent optional modules — neither may
-    # import the other, so the git-ls-files+fnmatch helper is duplicated by
-    # design. Byte-identical bodies, or this trips.
-    sbom = _src("{% if modules.sbom %}check_sbom.py{% endif %}")
-    floor = _src("{% if modules.security_floor %}check_security_floor.py{% endif %}.jinja")
-    for fn in ("_tracked_files", "_matches_any"):
-        assert _fn_body(sbom, fn) == _fn_body(floor, fn), (
-            f"{fn} drifted between check_sbom and check_security_floor — "
-            f"keep the twins byte-identical (independent render units)")
 
 
 
@@ -56,7 +46,7 @@ def test_adapters_list_every_module_doc():
     import yaml
     copier = yaml.safe_load((ROOT / "copier.yml").read_text(encoding="utf-8"))
     modules = set(re.findall(r"([a-z_]+):", copier["modules"]["default"]))
-    assert len(modules) >= 11, "copier modules default not parsed"
+    assert len(modules) >= 8, "copier modules default not parsed"
     adapters = [
         ROOT
         / "template/{% if harnesses.claude %}CLAUDE.md{% endif %}.jinja",
@@ -72,16 +62,3 @@ def test_adapters_list_every_module_doc():
             f"{p.name}: _mod_slugs != copier.yml modules — "
             f"missing {sorted(modules - listed)}, extra {sorted(listed - modules)}")
 
-
-def test_finding_line_regex_pinned_trace_vs_check_issues():
-    # trace.py (core) cannot import the github_issues module — its FINDING
-    # detection regex is a deliberate twin of check_issues' _FINDING_LINE;
-    # byte-identical literals, or this trips.
-    trace = _src("trace.py")
-    issues = _src("{% if modules.github_issues %}check_issues.py{% endif %}.jinja")
-    pat = re.compile(r'_FINDING(?:_LINE)?\s*=\s*re\.compile\(\s*r"([^"]+)"')
-    m_t, m_i = pat.search(trace), pat.search(issues)
-    assert m_t and m_i, "FINDING regex literal not found"
-    assert m_t.group(1) == m_i.group(1), (
-        f"FINDING detection drifted: trace={m_t.group(1)!r} "
-        f"check_issues={m_i.group(1)!r}")

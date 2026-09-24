@@ -6,7 +6,7 @@
 
 Principles, mechanics and the path to broad rollout
 
-Process template dev-process v2.26.0 · tested in a real repository in production use (reference project)
+Process template dev-process v2.27.0 · tested in a real repository in production use (reference project)
 
 Template published on GitHub: [github.com/Crashman1983/dev-process](https://github.com/Crashman1983/dev-process)
 
@@ -25,13 +25,13 @@ The process was built and improved over many iterations in live operation; it ha
 |---|---|---|
 | No long-term memory: after a break or an automatic shortening of the conversation, rules and agreements are gone. | The agent breaks agreements made an hour ago and reopens decisions already taken, possibly deciding differently. | The key rules are in the startup file that every agent reads first; decisions are a list in the plan. After every shortening, a program automatically feeds both back in. |
 | Asserting instead of checking: statements about existing code come from memory. | The agent builds on a function that does not exist – or misses an existing one and writes it a second time. The result is duplicate code and dangling references. | Rule 1: every statement needs evidence or is marked as an assumption. For documentation, a Gate (an automatic check before the Merge) also verifies that it only references files that exist. |
-| Patching symptoms: a fault is fixed where it becomes visible. | The cause stays; its symptom is patched separately in five places, and the fault rate rises. | Rule 6: after at most two attempts at the symptom, look for the cause. The metrics show where the same spot is corrected again and again. |
+| Patching symptoms: a fault is fixed where it becomes visible. | The cause stays; its symptom is patched separately in five places, and the fault rate rises. | Rule 6: after at most two attempts at the symptom, look for the cause. A Gate names the third fix on the same file, and the metrics show where the same spot is corrected again and again. |
 | Self-acceptance: the agent that built something also judges whether it is good. | Review becomes a formality; defects only surface in production. | Independent review by an uninvolved instance; the result is recorded as an attestation (a written review record in the journal, the running work log in the repository) and required by the Gate. |
 | Parallel work without coordination: several agents change the same files. | The last change overwrites the one before; work is lost. | An overview of all running work items (the situation table) shows overlaps; two efforts on the same problem are coordinated instead of worked on in parallel. |
 
 ### The essentials in five sentences
 
-1. **A program checks the rules, so nobody has to keep them in mind.** Sixteen automatic checks (“Gates”), eighteen with the compliance pack, run before every Merge; whatever fails is not merged.
+1. **A program checks the rules, so nobody has to keep them in mind.** Fifteen automatic checks (“Gates”) run before every Merge; whatever fails is not merged.
 1. **Risk sets the effort.** Four risk tiers – Tier 0 to 3 – decide whether a change may be merged directly or needs a plan, independent review and, at Tier 3, also a refutation review (targeted search for faults).
 1. **Review is always independent.** Whoever builds does not accept their own work; from Tier 2 on, an uninvolved instance (a separate agent session) reviews, and its verdict applies only to exactly the code it reviewed.
 1. **All knowledge lives in files.** Plans, decisions and journals are in the repository and are automatically shown to every agent again as soon as its memory has been shortened.
@@ -46,7 +46,7 @@ The process was built and improved over many iterations in live operation; it ha
 | **Human (Owner)** | prioritises, decides, approves designs, reviews a sample every week, evolves the rules |
 | **Coordinator** | gets the overview, assigns work items, starts and stops workers, passes questions to the human, triggers the Merge – writes and reviews no code itself |
 | **Workers and reviewers** | a separate session on its own Branch for each work item and phase; the reviewer is always a different instance from the worker |
-| **Gates** | sixteen check programs before every Merge (eighteen with the compliance pack): rules intact, decisions taken, attestation present and matching the code, contracts kept, documentation valid |
+| **Gates** | fifteen check programs before every Merge: rules intact, decisions taken, attestation present and matching the code, design contracts and acceptance criteria consistent, licences allowed, documentation valid |
 | **Repository** | rule kernel, plans with decision lists, journal with attestations, situation table, contracts, metrics – the single source every layer reads from |
 
 The process ships as a template (dev-process). From it you get a fully set-up repository: the startup file and phase commands for the chosen Harness (GitHub Copilot, Claude Code or a neutral AGENTS.md), the Gates, and GitHub Actions workflows for Gates, Owner-Digest, metrics and cleanup. A repository pulls later versions of the template with one command; project-specific files stay untouched.
@@ -98,15 +98,15 @@ The process ships as a template (dev-process). From it you get a fully set-up re
 | Requirement | Mechanism | Hard / soft | Reference project |
 |---|---|---|---|
 | Decisions before code | Decisions that are hard to reverse are documented before code builds on them; a Gate checks whether required decisions have been taken. Rules that must apply everywhere get one responsible component and a test covering all known cases. | hard: required decisions are taken; soft: whether one is needed at all | 73 decision documents |
-| Interfaces first | An interface is specified before anyone uses it; a Gate checks that the specification exists and has not been changed unnoticed since it was fixed. Tests and reviewers check whether the code complies with it. | hard: specification exists; soft: compliance | active |
+| Interfaces first | An interface is specified before anyone uses it (rule 3). Tests and reviewers check that the specification exists and that the code complies with it. | soft: review and tests | active |
 | User interfaces by contract | A design contract names spacing, colours and states with IDs; reference images are sealed with a checksum. A Gate checks IDs and seals; the reviewer compares the result with the image. | hard: IDs and seals; soft: appearance | active |
 | Layers, dependency direction | The architecture description defines which layer must not use which other layer. This is only checked by machine with an architecture linter. | hard only with a linter | linter not set up |
-| Security | Tier 3 requires a threat question, a refutation review and – where available – a second model. Optionally, a minimum security standard as a rule set and an SBOM (a list of all third-party components) can be added. | hard: Tier 3 flow; minimum standard only with a rule set | rule set not yet created |
+| Security | Tier 3 requires a threat question, a refutation review and – where available – a second model. In addition there is an SBOM (a list of all third-party components) whose licences a Gate checks against an allowed list. | hard: Tier 3 flow, SBOM licences | active; each project sets up its licence list |
 | Performance | The review checklist asks about performance. What is not measured cannot make a check fail. | soft | no target values set |
 | Maintainability, documentation | The reviewer judges maintainability against Rules 4, 6 and 9; the metrics show repeated corrections. For documentation, Gates check whether the files and references it names exist. | soft; hard for references | active |
 | Legacy | Existing violations are recorded in a Baseline and tolerated; new ones are not. The Baseline may only shrink. | hard as soon as a Baseline exists | procedure in the template |
 
-**Life cycle of a requirement:** A new requirement starts with a decision document. Whatever can be checked by machine becomes a rule in the minimum security standard, a forbidden dependency, or a test covering all known cases; the rest becomes a question in the review checklist. Existing violations go into a Baseline that may only shrink. A new violation makes the Gate fail; an exception exists only as a decision document with an expiry date. New non-functional goals take the same path and also get an item in the acceptance checklist.
+**Life cycle of a requirement:** A new requirement starts with a decision document. Whatever can be checked by machine becomes a forbidden dependency in the architecture linter or a test covering all known cases; the rest becomes a question in the review checklist. Existing violations go into a Baseline that may only shrink. A new violation makes the Gate fail; an exception exists only as a decision document with an expiry date. New non-functional goals take the same path and also get an item in the acceptance checklist.
 
 ## 6. The role of the human
 
@@ -149,7 +149,7 @@ The following table shows how the building blocks could be mapped and which of t
 | Startup file, rule kernel | “copilot-instructions.md” with the checked rule block; path rules under “.github/instructions”. | in the template |
 | Phase commands | Prompt files under “.github/prompts” for brainstorm, plan, implementation, review, short procedure, debug, commit, recovery. | in the template |
 | Gates | Actions workflow on every Pull Request, registered as a Required Status Check in Branch Protection; a script sets it without overwriting existing rules. | in the template |
-| Work items | Issues with type and acceptance criteria; two Gates check whether they are complete and move through their statuses correctly. | in the template |
+| Work items | Issues with type and acceptance criteria; a Gate checks that plans name their Issue and that Tier 3 work does not start without one. | in the template |
 | Workers | One Copilot session per Issue on its own Branch is conceivable – in the editor or as the Copilot coding agent, which opens a Pull Request. | planned, not tested |
 | Review | Uninvolved reviewer with review prompt and Bundle, attestation in the journal; Copilot code review as an additional voice. Since Copilot offers models from several vendors, the second model would only be a configuration entry. | prompt and Gate in the template |
 | Merge Queue | The Merge Queue could collect approved Pull Requests, check them together and merge them one after the other. | GitHub feature; not tested (reference project: its own Merge Train) |
@@ -162,7 +162,7 @@ The following table shows how the building blocks could be mapped and which of t
 
 > The unit of the process is the repository. Machines scale along with it; the limit is the number of decisions an Owner can make.
 
-**What scales along:** every repository gets the template with its own Gates, its own model policy and its own situation table. The template is versioned centrally and contains organisation-wide rules such as layering rules or a minimum security standard; an update arrives as a Pull Request in every repository. Gates run centrally, for example in GitHub Actions, and grow with the organisation. Workers are sessions of the Harness, for example one per Issue, and besides the models the model policy also sets how many of them run at the same time.
+**What scales along:** every repository gets the template with its own Gates, its own model policy and its own situation table. The template is versioned centrally and contains organisation-wide rules such as layering rules or the allowed licences; an update arrives as a Pull Request in every repository. Gates run centrally, for example in GitHub Actions, and grow with the organisation. Workers are sessions of the Harness, for example one per Issue, and besides the models the model policy also sets how many of them run at the same time.
 
 **What does not scale by itself:** every repository needs an Owner, and every work item needs on average one or two of that Owner's decisions. How many parallel work items one Owner can carry is the real capacity limit – and it is not measured today. It is also open where the coordinator runs in a larger environment and whether one coordinator can run several repositories.
 
@@ -190,7 +190,7 @@ The following table shows how the building blocks could be mapped and which of t
 | Correction rate (features corrected within 7 days) | 44.4 % (20 of 45 features) | DORA band “medium”, close to “low”; only the trend over three periods is meaningful. |
 | Correction hotspot | 11 corrections in 5 places | A business rule in the code was patched place by place; it now gets one responsible component and a test. |
 
-The core – Gates, review, rule kernel, journal, design contracts – is stable. The coordination layer is the youngest part. Its eight rapid reworks lead to an intention, not yet a rule: one week of operation before every extension, and changes to the coordination layer go through the same tiers as product code.
+The core – Gates, review, rule kernel, journal, design contracts – is stable; what did not carry weight in the reference project has been removed. The coordination layer is the youngest part. Its eight rapid reworks lead to an intention, not yet a rule: one week of operation before every extension, and changes to the coordination layer go through the same tiers as product code.
 
 ## 11. Open questions and outlook
 

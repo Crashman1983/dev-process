@@ -26,8 +26,7 @@ item is either **met** or carries a **documented, justified deviation** a
 reviewer can trace:
 
 - a **DoR** deviation is recorded on the issue — a `## Deviations` heading in the
-  issue **body** (that is where the `github-master` gate reads it; a comment is
-  visible to humans but not to the gate);
+  issue **body**, where a reviewer finds it next to the acceptance criteria;
 - a **DoD** deviation is named in the merging commit body / PR, per mandatory
   rule 8 (a skipped gate or dropped scope is documented there).
 
@@ -41,8 +40,8 @@ A unit of work is ready to be started when:
 
 | # | Item | Evaluated by (owner) |
 | - | ---- | -------------------- |
-| R1 | Typed (bug / chore / feature / finding / epic) | **hard** via the `github-master` gate where installed; else review |
-| R2 | Acceptance stated in **EARS** (`When <trigger>, the system shall <response>`), decomposed to include the **negative, edge, authorization, and invalidation/cleanup** cases; an epic carries scope + invariants instead | the issue-hygiene view; **hard** via the `github-master` gate where installed; decomposed at the tier's design step — an upfront brainstorm (Tier 3) or the plan (Tier 2) (`workflow.md`) |
+| R1 | Typed (bug / chore / feature / finding / epic) | review (the issue template asks for the type) |
+| R2 | Acceptance stated in **EARS** (`When <trigger>, the system shall <response>`), decomposed to include the **negative, edge, authorization, and invalidation/cleanup** cases; an epic carries scope + invariants instead | the issue-hygiene view and review; decomposed at the tier's design step — an upfront brainstorm (Tier 3) or the plan (Tier 2) (`workflow.md`) |
 | R3 | Linked to its epic/story and the applicable design / decision records / product frame | brainstorm & plan review (`workflow.md`, mandatory rule 4) |
 | R4 | Dependencies known (GitHub issue links / sub-issues), and no open blocker remains | the project board and issue links; else review |
 | R5 | A change with a UI surface has inspected the existing shared components, tokens and layout/interaction patterns and recorded a **UI reuse map** before implementation: element → existing owner → reuse / extend / new *with reason* → affected consumers and how they are verified. Where the surface has a **design contract** (the `design-contracts` module), the plan also names the **contract IDs** it implements or amends; a value the contract does not carry is amended there *first*, with provenance, then built. "Not applicable" is a valid entry when there is no UI change — an unexamined copy is not, and an ID the contract does not define is not | the plan (or quick-flow note) and its review; the `design-contracts` gate fails on an undefined ID and notes a surface change without any; where a stack guide exists it is the detail owner and may sharpen this row, never weaken it |

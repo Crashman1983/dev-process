@@ -1103,6 +1103,27 @@ ersetzt. Sie bleiben in der Git-Historie; dieser CHANGELOG erzählt die
 Entwicklung. Der geltende Spec-Kit-Entwurf liegt jetzt bei der Analyse unter
 `docs/analysis/`.
 
+**KISS-Pass, gemessen statt geschätzt.** Ein unabhängiger Audit hat am
+Referenzprojekt gemessen, was trägt: Welche Gates je etwas gefunden haben,
+welche Module Artefakte haben, welche Skripte genutzt werden. Gestrichen ist,
+was dort leer oder ungenutzt war: die Module `contracts` (`contract-first`,
+`contracts-drift`), `arch_docs`, `github_master` (mit `gh_sync`/`gh_board`)
+und `security_floor`, dazu `trace.py`, `new_issue.*` und der Workflow
+`cleanup-branches` (ersetzt durch `tidy`). Die Frage `regulated` entfällt;
+`sbom` bleibt und gehört jetzt zum Standard-Setup, weil eine SBOM für den
+produktiven Einsatz zählt. Ein älteres Manifest, das gestrichene Module nennt,
+läuft weiter; `template_update.py` entfernt ihre Dateien. Zurückgeholt aus
+dem Referenzprojekt, wo es sich bewährt hat: das Gate `fix-streak` (der dritte
+Fix an einer Datei im Branch wird benannt, Regel 6), das Gate `ac-text-drift`
+(ein Akzeptanzkriterium lautet in Spec und Inventar gleich), die Prüfung, dass
+ein Pre-Push den geprüften Stand pusht (`PRE_COMMIT_TO_REF` gegen HEAD), das
+Attest immer in den Journal-Ordner des Branches (parallele Reviews kollidieren
+nicht mehr in einer Tagesdatei), im Zug der Gate-Start über `gate_invoke`,
+ein zweiter Lauf bei rotem Basisstand und der Push aus dem Staging-Worktree,
+im Delta-Bundle nur die Befunde DIESES Vorgangs und nie ein veraltetes Bundle
+nach einem gescheiterten Lauf, sowie eine Anleitung für den Einrichtungs-Hook
+von Cloud-Sitzungen (`tower.md`). 15 Gates statt 16/18, `v2.27.0`.
+
 ## Sub-Projekt-Tabelle (SP1–SP24)
 
 Die Tabelle wurde bis SP24 gepflegt; ab SP25 trägt das Narrativ oben die

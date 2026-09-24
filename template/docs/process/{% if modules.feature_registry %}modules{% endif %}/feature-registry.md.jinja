@@ -12,7 +12,7 @@ Two questions used to share this registry; the lean pass split them:
 
 - **"What is in flight?"** is the work log — owned by **GitHub
   Issues/Sub-Issues/Projects** (status labels, `blocked_by` issue links,
-  board columns; gate-checked by the `github-master` module where installed).
+  board columns).
   The retired fields `status`, `blocked_by`, and `parent` are **hard
   failures** here — a leftover is stale double bookkeeping.
 - **"What exists and is proven?"** is this inventory. A hundred closed issues
@@ -60,3 +60,9 @@ unknown fields; the under-granularity advisory (an entry with ≤2 criteria
 but ≥5 mapped tests likely under-describes its tested behaviour). Whether a
 test *semantically* proves its criterion is review judgment
 (`review-checklist.md`, Tests prove acceptance) — the gate never fakes that.
+
+**One wording per criterion.** The `ac-text-drift` gate compares each
+criterion's text in the inventory entry with the same `AC-n` line in the spec
+(`specs/<dir>/spec.md`), bound through a plan that names both the spec and
+the issue the entry carries. Different wording fails: the test proves one
+sentence, the inventory would promise another. Amend both in the same change.

@@ -72,6 +72,5 @@ fi
 
 echo "now write these refs into $report ('issue:'/'campaign-issue:') and commit"
 echo "for each follow-up finding: create its issue in the proper form —"
-echo "  body=\$(bash scripts/process/new_issue.sh finding)   # EARS + Origin"
-echo "  gh issue create --title '...' --body-file \"\$body\""
+echo "  gh issue create --template finding.md --title '...'   # EARS + Origin"
 echo "then write the ref into the FINDING line, and comment on the origin issue"

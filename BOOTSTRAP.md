@@ -51,18 +51,18 @@ contract/persistence/auth-touching work.
        git clone https://github.com/Crashman1983/dev-process /tmp/dev-process
        uvx copier copy /tmp/dev-process .
 
-3. Answer the prompts (five; the last one only matters for the issue gate):
+3. Answer the prompts (four; the last one only matters for the issue gate):
    - `project_name` — human-readable name.
    - `harness` — one of `claude` | `copilot` | `agents_md` for the command
      adapters; the methodology and gates are harness-neutral either way.
-   - `regulated` — adds the compliance pack (`sbom` + `security_floor`).
-     Everything else renders as the fixed standard set
-     (`docs/process/start-here.md`, "The standard setup").
    - `ci` — whether the `github` Actions workflow renders the `process-gates`
      job (default on). **With it off, nothing enforces the gates remotely** —
      local git hooks (`git_hooks` module) become the only enforcement pillar.
    - `github_repo` (OWNER/REPO, optional) for the issue gate. Headless: pass
      it via `--data` like the others.
+
+   Everything else renders as the fixed standard set
+   (`docs/process/start-here.md`, "The standard setup").
 4. Commit the result. Then run the Spec Kit setup (pinned, one command
    sequence — see the rendered `docs/process/modules/speckit.md`, "Setup"),
    and let the LLM guide the Greenfield or Brownfield setup through
@@ -83,7 +83,6 @@ line instead:
     uvx copier copy --defaults \
       --data project_name="<project name>" \
       --data harness=agents_md \
-      --data regulated=false \
       --data 'ci={"github": true}' \
       --skip 'CLAUDE.md' --skip 'AGENTS.md' \
       gh:Crashman1983/dev-process .
@@ -92,7 +91,7 @@ line instead:
     uvx copier copy --defaults \
       --data project_name="<project name>" \
       --data harness=claude \
-      --data 'modules={"speckit": true, "doc_drift_gate": true, "arch_onboarding": false, "feature_registry": true, "github_issues": true, "contracts": false, "git_hooks": true, "security_floor": false, "sbom": false, "telemetry": true, "arch_docs": false, "github_master": true, "design_contracts": true}' \
+      --data 'modules={"speckit": true, "doc_drift_gate": true, "arch_onboarding": false, "feature_registry": true, "github_issues": true, "git_hooks": true, "sbom": true, "telemetry": true, "design_contracts": false}' \
       --data 'ci={"github": true}' \
       --skip 'CLAUDE.md' --skip 'AGENTS.md' \
       gh:Crashman1983/dev-process .
@@ -202,10 +201,10 @@ After any update, re-run
 **Plain copier, if you must.** `modules` is a derived answer (`when: false`):
 copier recomputes it from the template default on every update, so a module
 you switched off comes back unless you pass the **complete** dictionary on
-every update. The standard set (with `regulated=false`) is:
+every update. The standard set is:
 
     uvx copier update --defaults \
-      --data 'modules={"speckit": true, "doc_drift_gate": true, "arch_onboarding": true, "feature_registry": true, "github_issues": true, "contracts": true, "git_hooks": true, "security_floor": false, "sbom": false, "telemetry": true, "arch_docs": true, "github_master": true, "design_contracts": true}'
+      --data 'modules={"speckit": true, "doc_drift_gate": true, "arch_onboarding": true, "feature_registry": true, "github_issues": true, "git_hooks": true, "sbom": true, "telemetry": true, "design_contracts": true}'
 
 Setting a module to `false` makes `copier update` **remove** its rendered
 files (gate script, module doc), and the gate stops running — check the diff

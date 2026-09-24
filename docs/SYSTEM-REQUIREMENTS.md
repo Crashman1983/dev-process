@@ -1,6 +1,6 @@
 # System Requirements
 
-Stand: 2026-09-24 (v2.23.0)
+Stand: 2026-09-24 (v2.27.0)
 
 Dieses Dokument beschreibt, was auf einem System installiert sein muss, um
 `dev-process` zu nutzen, im Upstream-Repository zu entwickeln oder die gerenderten
@@ -84,8 +84,7 @@ gerenderten Repo), braucht zusätzlich:
 
 ## Modulbezogene Hinweise
 
-Das Standard-Setup rendert alle Module außer `security-floor` und `sbom`;
-diese beiden kommen mit `regulated=true` dazu.
+Das Standard-Setup rendert alle Module; es gibt keinen Modulschalter.
 
 | Modul | Zusaetzliche Umgebung |
 |---|---|
@@ -94,13 +93,9 @@ diese beiden kommen mit `regulated=true` dazu.
 | `arch-onboarding` | `PyYAML`; optional `import-linter` oder `dependency-cruiser`, wenn das Zielrepo Layering maschinell pruefen will |
 | `feature-registry` | Python-Stdlib reicht |
 | `github-issues` | `PyYAML` (liest `.copier-answers.yml`); optional `gh` fuer best-effort Remote-Checks |
-| `contracts` | Python-Stdlib reicht; Contract-spezifische Verify-Kommandos koennen projektspezifische Tools brauchen |
 | `git-hooks` | keine zusaetzlichen Werkzeuge ausser dem Core-Vertrag |
 | `telemetry` | Python-Stdlib fuer Gate und Cockpit-Kern; optional `gh` (Tempo-Familie) und `git` (CFR-Familie) |
-| `arch-docs` | Python-Stdlib reicht |
-| `github-master` | Gate: Python-Stdlib (hermetisch, offline); Sync/Board-Tools: `gh` (authentifiziert, Board zusaetzlich `project`-Scope) |
 | `design-contracts` | Python-Stdlib reicht; die Referenz-Boards erzeugt das Projekt mit eigenen Werkzeugen |
-| `security-floor` | `git` und Python-Stdlib |
 | `sbom` | `git` und Python-Stdlib; SBOM-Erzeugung braucht einen CycloneDX-Generator im Build (z. B. Maven-Plugin, `@cyclonedx/cyclonedx-npm`, `syft`) |
 
 ## CI

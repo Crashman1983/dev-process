@@ -25,7 +25,7 @@ PLACEHOLDER = re.compile(r"[<>*]|YYYY|NNNN")         # illustrative, not literal
 SCAN_DIRS = ["docs/process", ".claude/commands", ".github/prompts"]
 SCAN_FILES = ["CLAUDE.md", "AGENTS.md", ".github/copilot-instructions.md",
               ".github/instructions/process.instructions.md",
-              "ARCHITECTURE.md", "ARCHITECTURE-OVERVIEW.md", "PRODUCT.md"]
+              "ARCHITECTURE.md", "PRODUCT.md"]
 ANCHOR_FILES = ["CLAUDE.md", "AGENTS.md", ".github/copilot-instructions.md",
                 ".github/instructions/process.instructions.md"]
 ANCHOR_LINE_BUDGET = int(os.environ.get("ANCHOR_LINE_BUDGET", "200"))

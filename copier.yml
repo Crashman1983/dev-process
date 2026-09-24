@@ -25,21 +25,14 @@ harnesses:
   when: false
   default: "{claude: {{ harness == 'claude' }}, copilot: {{ harness == 'copilot' }}, agents_md: {{ harness == 'agents_md' }}}"
 
-regulated:
-  type: bool
-  help: >-
-    Regulated pack: adds the sbom (CycloneDX + license allow-list) and
-    security-floor (forbidden-pattern) gates for compliance-bound projects.
-  default: false
-
 # The standard setup is fixed (lean pass): one opinionated module set, on by
-# default, instead of thirteen toggles. The only switch is `regulated` above.
+# default, instead of toggles.
 # The mapping stays overridable via `copier ... --data modules=...` for the
 # rare expert opt-out; it is not asked interactively.
 modules:
   type: yaml
   when: false
-  default: "{speckit: true, doc_drift_gate: true, arch_onboarding: true, feature_registry: true, github_issues: true, contracts: true, git_hooks: true, security_floor: {{ regulated }}, sbom: {{ regulated }}, telemetry: true, arch_docs: true, github_master: true, design_contracts: true}"
+  default: "{speckit: true, doc_drift_gate: true, arch_onboarding: true, feature_registry: true, github_issues: true, git_hooks: true, sbom: true, telemetry: true, design_contracts: true}"
 
 ci:
   type: yaml

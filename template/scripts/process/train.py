@@ -45,6 +45,7 @@ import datetime as _dt
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -54,6 +55,7 @@ from pathlib import Path
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling imports
 import check_review as _review  # noqa: E402
+from gate_invoke import gate_runner_argv, not_runnable_reason  # noqa: E402
 import report as _report  # noqa: E402
 import tower as _tower  # noqa: E402
 
@@ -231,6 +233,20 @@ def _sh(cwd: Path, cmd: str, log) -> bool:
     return r.returncode == 0
 
 
+GATE_RUNNER_REL = "scripts/process/gate_runner.py"
+
+
+def _run_gates(wt: Path, log) -> bool:
+    """Process gates on the tree in `wt`. No runner in the checkout means no
+    gates; the start path is gate_invoke's decision, as in finish.py — a bare
+    `sys.executable` cannot resolve the runner's PEP-723 dependencies, and the
+    crash read as a red main (observed downstream)."""
+    if not (wt / GATE_RUNNER_REL).is_file():
+        return True
+    argv = gate_runner_argv(wt)
+    return argv is not None and _sh(wt, shlex.join(argv), log)
+
+
 def _train_dir(root: Path) -> Path:
     """Logs and bookkeeping: inside the git common dir, never committed."""
     common = Path(_out(root, "rev-parse", "--git-common-dir"))
@@ -287,6 +303,11 @@ def run(root: Path, *, suite: str | None, deploy: str | None, push: bool, min_ca
     if _out(root, "status", "--porcelain"):
         print("train: the root worktree is not clean — commit or stash first", file=sys.stderr)
         return 2
+    if (root / GATE_RUNNER_REL).is_file() and gate_runner_argv(root) is None:
+        # "not runnable" is a tooling finding, not "main is red" — surface it
+        # before any worktree or base check is paid for
+        print(f"train: gate runner not runnable — {not_runnable_reason(root)}", file=sys.stderr)
+        return 2
     p = plan(root, min_candidates=min_candidates, max_wait_hours=max_wait_hours)
     aboard = [c["branch"] for c in p["candidates"] if c["eligible"]]
     if not aboard:
@@ -335,15 +356,10 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
                 conflicted.append(d)
         if not merged:
             return len(subset) == 0 and _base_green(wt), merged, br
-        gates_ok = _sh(wt, f"{sys.executable} scripts/process/gate_runner.py", log) \
-            if (wt / "scripts/process/gate_runner.py").is_file() else True
-        ok = gates_ok and (_sh(wt, suite, log) if suite else True)
-        return ok, merged, br
+        return _run_gates(wt, log) and (_sh(wt, suite, log) if suite else True), merged, br
 
     def _base_green(wt: Path) -> bool:
-        gates_ok = _sh(wt, f"{sys.executable} scripts/process/gate_runner.py", log) \
-            if (wt / "scripts/process/gate_runner.py").is_file() else True
-        return gates_ok and (_sh(wt, suite, log) if suite else True)
+        return _run_gates(wt, log) and (_sh(wt, suite, log) if suite else True)
 
     base_checked = False
     while aboard:
@@ -356,9 +372,18 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
             # a flaky suite)? Then no candidate is the offender.
             base_checked = True
             if not attempt([])[0]:
-                print("train: the integration branch itself is red (gates or suite fail with nobody "
-                      "aboard) — no candidate blamed, nothing merged; fix main first", file=sys.stderr)
-                log("base red — aborted without blame")
+                # a red base does not clear the combination either: one more run
+                # of the combined tree tells a flaky suite from a broken main
+                log("base red — retry of the combined tree")
+                ok, merged, branch = attempt(aboard)
+                aboard = merged
+                if ok:
+                    break
+                print("train: the combined tree is red twice and the base is red too — the "
+                      "integration branch itself is red (gates or suite fail with nobody aboard); "
+                      "no candidate blamed, "
+                      "nothing merged — fix main first", file=sys.stderr)
+                log("base red and combined red on retry — aborted without blame")
                 _cleanup(root, stamp)
                 return 1
         # the combination is red: find the first candidate whose prefix turns
@@ -401,7 +426,9 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
         # origin first, local second: a rejected push (branch protection, a
         # race with another push) must leave local main untouched and the
         # train branch in place — never a local main ahead of origin
-        r = _git(root, "push", "origin", f"{branch}:{local}")
+        # from the staging worktree: a pre-push hook checks the pushed commit
+        # against HEAD of the checkout it runs in — from the root that is main
+        r = _git(_train_worktree(root), "push", "origin", f"HEAD:{local}")
         if r.returncode != 0:
             log(f"push of {branch} to origin/{local} rejected: {r.stderr.strip()}")
             _git(root, "worktree", "remove", "--force", str(_train_worktree(root)))

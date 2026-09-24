@@ -35,6 +35,7 @@ CI. Stdlib only.
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 import subprocess
 import sys
@@ -162,9 +163,33 @@ def _declared_tier(texts: list[str]) -> int | None:
     return max(tiers) if tiers else None
 
 
-def _latest_review_report(root: Path) -> Path | None:
-    reports = sorted((root / REVIEWS).glob("*.md")) if (root / REVIEWS).is_dir() else []
-    return reports[-1] if reports else None
+_ISSUE_FIELD = re.compile(r"^\s*(?:[-*+]\s+)?[*_]*issue[*_]*\s*:\s*#?(\d+)", re.IGNORECASE | re.MULTILINE)
+_DATED = re.compile(r"^\d{4}-\d{2}-\d{2}-")
+
+
+def _review_report_for(root: Path, slugs: list[str], issues: list[str]) -> Path | None:
+    """The previous round's report of THIS work item — never another one's.
+
+    Reports are `YYYY-MM-DD-<slug>.md`; the newest whose name (without the
+    date) carries a plan slug of this bundle, or starts with / names one of its
+    issue numbers (`<N>-…`, `issue-<N>`). Taking simply the newest report put
+    an unrelated item's findings into a delta bundle (observed downstream).
+    No match means no report, said so — not a stranger's."""
+    if not (root / REVIEWS).is_dir():
+        return None
+    reports = sorted(p for p in (root / REVIEWS).rglob("*.md") if p.is_file())
+    def stem(p: Path) -> str:
+        return _DATED.sub("", p.stem)
+    for slug in (s for s in slugs if s):
+        hits = [p for p in reports if slug == stem(p) or slug in stem(p)]
+        if hits:
+            return hits[-1]
+    for n in (i for i in issues if i):
+        hits = [p for p in reports
+                if stem(p).startswith(f"{n}-") or stem(p) == n or f"issue-{n}" in stem(p)]
+        if hits:
+            return hits[-1]
+    return None
 
 
 def _review_artifact(root: Path, base_ref: str, *, delta: bool = False) -> tuple[str, str, str, bytes] | None:
@@ -274,12 +299,18 @@ def build(root: Path, base: str | None, plan_filter: str | None = None,
 
     if since:
         add("## Findings from the previous round\n")
-        report = _latest_review_report(root)
+        slugs = [_DATED.sub("", plan_filter)] if plan_filter else []
+        slugs += [_DATED.sub("", p.stem) for p in plan_texts]
+        issues = [n for text in plan_texts.values() for n in _ISSUE_FIELD.findall(text or "")]
+        report = _review_report_for(root, slugs, issues)
         report_text = _read(root, str(report.relative_to(root))) if report else None
         if report_text:
-            add(f"### {report.name}\n{report_text}\n")
+            add(f"### {report.relative_to(root)}\n{report_text}\n")
         else:
-            add(f"*(no readable report in {REVIEWS}; prior findings unavailable)*\n")
+            named = ", ".join([*dict.fromkeys(s for s in slugs if s), *(f"#{n}" for n in issues)]) \
+                or "no plan or issue"
+            add(f"*(no review report for this work item ({named}) under {REVIEWS}; prior "
+                f"findings unavailable — deliberately not another item's report)*\n")
 
     resolved = _resolve_base(root, base)
     add("## Diff under review\n")
@@ -413,8 +444,16 @@ def _opt(argv: list[str], flag: str) -> str | None:
 def main(argv: list[str]) -> int:
     skip_preflight = "--skip-preflight" in argv
     argv = [arg for arg in argv if arg != "--skip-preflight"]
-    base = _opt(argv, "--base")
     out_file = _opt(argv, "-o")
+    # a stale output is unsafe whatever fails next (a bad flag, a red preflight):
+    # the caller could hand the previous bundle — old head, old digest — to a
+    # reviewer. Remove it before anything is validated (observed downstream).
+    target = Path(out_file) if out_file else None
+    partial = target.with_name(target.name + ".partial") if target else None
+    if target is not None and partial is not None:
+        target.unlink(missing_ok=True)
+        partial.unlink(missing_ok=True)
+    base = _opt(argv, "--base")
     plan_filter = _opt(argv, "--plan")
     since = _opt(argv, "--since")
     # an unknown flag must be a hard error, not silently ignored — a typo'd
@@ -432,8 +471,12 @@ def main(argv: list[str]) -> int:
             print(detail, file=sys.stderr)
             return status
     text = build(root, base, plan_filter, since)
-    if out_file:
-        Path(out_file).write_text(text, encoding="utf-8")
+    if target is not None and partial is not None:
+        try:  # atomic: a reader never sees half a bundle
+            partial.write_text(text, encoding="utf-8")
+            os.replace(partial, target)
+        finally:
+            partial.unlink(missing_ok=True)
         print(f"review bundle written to {out_file}")
     else:
         print(text)
