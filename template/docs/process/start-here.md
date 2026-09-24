@@ -19,12 +19,11 @@ contracts, persistence, or auth.
 
 Module choice is not a question (lean pass): the template renders one
 opinionated standard set — speckit (the Tier 2+ specification path),
-doc-drift, git-hooks (pre-commit), feature inventory, github-issues +
-github-master, contracts, arch-onboarding, arch-docs, telemetry,
-design-contracts — on top of the always-on core gates. The single switch
-is **`regulated`**, which adds the compliance pack (`sbom` + `security_floor`).
+doc-drift, git-hooks (pre-commit), feature inventory, github-issues,
+arch-onboarding, sbom, telemetry, design-contracts — on top of the always-on core
+gates. There is no module switch.
 Content-driven gates are honestly inert until their artifacts exist: an empty
-inventory, contract set, or journal is a note, never a failure, so the
+inventory, design-contract set, or journal is a note, never a failure, so the
 standard set costs nothing before the project grows into it.
 
 Switching a module *off* afterwards (`copier update --data modules=…`) is an
@@ -101,8 +100,8 @@ question or assumption; do not invent it.
     which concrete system, and how do migrations run?
   - API/communication: How do the project's own components and surfaces talk
     to each other (REST, GraphQL, gRPC, events, queues), and how is that
-    versioned? The answer informs the module choice (`contract-first`,
-    `contracts-drift`).
+    versioned? Shared interfaces are defined before their consumers
+    (mandatory rule 3).
   - Deployment: Which runtime environment and deployment targets are set?
 - Codebase: Is there existing code, tests, CI, docs, or data model?
 - Architecture: Which code roots, layers, interfaces, and boundaries actually
@@ -150,11 +149,8 @@ Beyond the frame, the LLM records at least:
   deployment) and source layout — each layer decided,
   proposed-and-confirmed, or a documented open question;
 - whether `ARCHITECTURE.md` (if `arch-onboarding` is active) can already
-  receive a real `arch` block, and whether the stakeholder-facing
-  `ARCHITECTURE-OVERVIEW.md` (if `arch-docs` is active) has an audience yet;
-- whether real entries under docs/process/feature-registry/ are needed;
-- whether contracts or security floor need real artifacts now or stay
-  intentionally inert.
+  receive a real `arch` block;
+- whether real entries under docs/process/feature-registry/ are needed.
 
 ## Greenfield start
 
@@ -174,12 +170,7 @@ Use this path when no product code exists yet.
 5. If `feature-registry` is active, copy the seed under
    docs/process/feature-registry/ and remove `.example` from the filename once
    the first real user story is known.
-6. If `security-floor` is active, copy the file security-floor.example.json to
-   a policy file named security-floor.json once real forbidden patterns are
-   known.
-7. Keep optional examples for `contract-first` and `contracts-drift`
-   inert until real interfaces or external contracts exist.
-8. Start new work through tier routing: Tier 0-1 uses Quick; Tier 2+ uses
+6. Start new work through tier routing: Tier 0-1 uses Quick; Tier 2+ uses
    Brainstorm -> Plan -> Execute -> Review.
 
 ## Brownfield start
@@ -222,11 +213,9 @@ Rule of thumb: a *decision* → record; a *design* → design doc; the *product'
 shape* → PRODUCT.md; a *behavior* → story; *how to build it* → plan; *why you
 did it* → journal; *something for later* → inbox.
 
-Reading the trail back is one command, not archaeology:
-`scripts/process/trace.py STORY-NNNN` (or `'#42'`, or a plan slug) reassembles
-the full story of one piece of work — story, issue, plans, commits, `REVIEW`
-attestations, and review reports — read-only, naming any source it cannot
-reach.
+Reading the trail back: `git log --grep '#42'` finds the commits of an
+issue, the plan names its issue and story, and the journal's `REVIEW` lines
+carry the work id.
 
 ## Anchors: what goes where, and how to scale them
 
@@ -315,9 +304,7 @@ The project is ready for normal process-driven development when:
   **secret scanning** with **push protection**, and automated dependency
   updates (**Dependabot**/Renovate) with vulnerability alerts. Honest
   framing: these are the platform's network-side services, not hermetic gates
-  this process can run or verify offline — the `security-floor` pattern rules
-  and the `sbom` license gate complement them but do not replace them (a
-  floor regex is not a CVE feed). Enable them once at onboarding; review the
+  this process can run or verify offline. Enable them once at onboarding; review the
   update PRs like any other change.
 
 Once developing: before planning any change, read the Decision Records

@@ -41,9 +41,7 @@ names the supersession (mandatory rule 4).
 
 ## Touchpoints
 What existing behavior, contracts, and data this touches — pointers, not
-copies: name the owning contract/spec files (e.g. the contract-first capability
-spec or contracts-drift pins, where those modules are installed) instead of
-restating them. New shared behavior gets its contract declared first
+copies: name the owning contract/spec files instead of restating them. New shared behavior gets its contract declared first
 (mandatory rule 3).
 
 ## Acceptance criteria

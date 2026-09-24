@@ -127,7 +127,26 @@ when it died with an error — a failed hand-over never passes for a running
 remote session. `list`, `log` and the tower name the other host's session:
 the first URL the hand-over printed, or what the phase's `handover_id`
 regex captures (group 1) — for starters that print text, not JSON, the
-session id is only in that text. Reviews are the phase to move first: they need
+session id is only in that text.
+
+A cloud session starts from a fresh clone with none of this host's tools:
+without them it cannot run the gates or the tests it is meant to judge. Give
+the project a session-start hook that provisions what the gates and the
+suite need (`uv`, the language runtimes, dependencies, browsers for UI
+suites) and does nothing on a local checkout. In Claude Code the hook is a
+`SessionStart` entry in the project settings of Claude Code, running
+a script such as
+
+    #!/bin/bash
+    set -euo pipefail
+    [ "${CLAUDE_CODE_REMOTE:-}" = "true" ] || exit 0   # local checkout: nothing to do
+    cd "${CLAUDE_PROJECT_DIR:-.}"
+    command -v uv >/dev/null || pip install --quiet uv
+    uv sync                        # or the project's own setup target
+    # export PATH additions for the session's shells via "$CLAUDE_ENV_FILE"
+
+Make it idempotent and fast on a second start; a review that cannot run the
+gates is a review of text, not of a working tree. Reviews are the phase to move first: they need
 git, the bundle and the process gates, nothing local; a fresh clone on
 another host is the independence `verification-independence.md` asks for;
 and they bind the most CPU here. Execution with browser suites or local

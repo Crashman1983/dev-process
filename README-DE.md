@@ -15,7 +15,7 @@ Repositories. Er ändert nicht die Agenten, sondern ihre Arbeitsbedingungen:
 Regeln prüft ein Programm, der Aufwand folgt dem Risiko, niemand nimmt die
 eigene Arbeit ab, und das Gedächtnis liegt in Dateien statt im Kontext.
 
-> **Status:** `v2.26.0` — Sub-Projekte SP1–SP75. Historie: [`CHANGELOG.md`](CHANGELOG.md).
+> **Status:** `v2.27.0` — Sub-Projekte SP1–SP75. Historie: [`CHANGELOG.md`](CHANGELOG.md).
 
 ## Einstieg
 
@@ -29,9 +29,9 @@ eigene Arbeit ab, und das Gedächtnis liegt in Dateien statt im Kontext.
 
 ## Das Wichtigste
 
-- **Gates statt Erinnerung.** Vor jedem Merge laufen im Standard-Setup 16
-  automatische Prüfungen, mit dem Compliance-Paket 18. Was nicht besteht,
-  wird nicht gemergt.
+- **Gates statt Erinnerung.** Vor jedem Merge laufen 15 automatische
+  Prüfungen. Was nicht besteht, wird nicht gemergt. Der Umfang ist auf das
+  reduziert, was im Referenzprojekt nachweislich trägt.
 - **Risiko bestimmt den Aufwand.** Tier 0 bis 3 legen fest, ob eine Änderung
   direkt gemergt wird oder Plan, unabhängige Prüfung und bei Tier 3 eine
   Widerlegungsprüfung braucht. Maßgeblich ist der Umfang, nicht die
@@ -57,9 +57,9 @@ Greenfield und Brownfield, derselbe Befehl im Zielrepo:
 uvx copier copy gh:Crashman1983/dev-process .
 ```
 
-copier fragt fünf Dinge: Projektname, Harness (`claude` | `copilot` |
-`agents_md`), `regulated` (Compliance-Paket), CI (GitHub Actions, Standard an)
-und optional das GitHub-Repo für den Issue-Check. Bestehende Dateien werden
+copier fragt vier Dinge: Projektname, Harness (`claude` | `copilot` |
+`agents_md`), CI (GitHub Actions, Standard an) und optional das GitHub-Repo
+für den Issue-Check. Bestehende Dateien werden
 nicht überschrieben. Danach muss
 
 ```bash

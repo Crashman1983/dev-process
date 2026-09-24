@@ -6,7 +6,7 @@
 
 Prinzipien, Mechanik und der Weg in die Fläche
 
-Prozessvorlage dev-process v2.26.0 · erprobt in einem realen, produktiv genutzten Repository (Referenzprojekt)
+Prozessvorlage dev-process v2.27.0 · erprobt in einem realen, produktiv genutzten Repository (Referenzprojekt)
 
 Vorlage öffentlich auf GitHub: [github.com/Crashman1983/dev-process](https://github.com/Crashman1983/dev-process)
 
@@ -25,13 +25,13 @@ Der Prozess ist in vielen Iterationen im laufenden Betrieb entstanden und verbes
 |---|---|---|
 | Kein Langzeitgedächtnis: Nach einer Pause oder einer automatischen Kürzung des Gesprächs sind Regeln und Absprachen weg. | Der Agent verletzt Vereinbarungen von vor einer Stunde und trifft bereits gefallene Entscheidungen erneut, womöglich anders. | Die wichtigsten Regeln stehen in der Startdatei, die jeder Agent zu Beginn liest, Entscheidungen als Liste im Plan. Nach jeder Kürzung spielt ein Programm beides automatisch wieder ein. |
 | Behaupten statt prüfen: Aussagen über vorhandenen Code kommen aus dem Gedächtnis. | Der Agent baut auf einer Funktion auf, die es gar nicht gibt – oder übersieht eine vorhandene und schreibt sie ein zweites Mal. Die Folge sind doppelter Code und Verweise ins Leere. | Regel 1: Jede Aussage braucht einen Nachweis oder wird als Annahme markiert. Für die Dokumentation prüft zusätzlich ein Gate (eine automatische Prüfung vor dem Merge), dass sie nur auf existierende Dateien verweist. |
-| Symptome flicken: Ein Fehler wird dort behoben, wo er sichtbar wird. | Die Ursache bleibt; ihr Symptom wird an fünf Stellen einzeln geflickt, die Fehlerrate steigt. | Regel 6: Nach höchstens zwei Versuchen am Symptom wird nach der Ursache gesucht. Die Kennzahlen zeigen, wo dieselbe Stelle immer wieder korrigiert wird. |
+| Symptome flicken: Ein Fehler wird dort behoben, wo er sichtbar wird. | Die Ursache bleibt; ihr Symptom wird an fünf Stellen einzeln geflickt, die Fehlerrate steigt. | Regel 6: Nach höchstens zwei Versuchen am Symptom wird nach der Ursache gesucht. Ein Gate meldet den dritten Fix an derselben Datei, und die Kennzahlen zeigen, wo dieselbe Stelle immer wieder korrigiert wird. |
 | Selbstabnahme: Der Agent, der gebaut hat, beurteilt auch, ob es gut ist. | Die Prüfung wird zur Formsache; Mängel fallen erst im Betrieb auf. | Unabhängige Prüfung durch eine unbeteiligte Instanz; das Ergebnis wird als Attest (schriftlicher Prüfvermerk im Journal, dem fortlaufenden Arbeitsprotokoll im Repository) festgehalten und vom Gate verlangt. |
 | Parallelität ohne Absprache: Mehrere Agenten ändern dieselben Dateien. | Die letzte Änderung überschreibt die vorherige; Arbeit geht verloren. | Eine Übersicht aller laufenden Vorgänge (Lagetabelle) zeigt Überschneidungen; zwei Vorhaben am selben Problem werden abgestimmt statt parallel bearbeitet. |
 
 ### Das Wesentliche in fünf Sätzen
 
-1. **Die Regeln prüft ein Programm, niemand muss sie im Kopf behalten.** Sechzehn automatische Prüfungen („Gates“), mit dem Compliance-Paket achtzehn, laufen vor jedem Merge; was nicht besteht, wird nicht gemergt.
+1. **Die Regeln prüft ein Programm, niemand muss sie im Kopf behalten.** Fünfzehn automatische Prüfungen („Gates“) laufen vor jedem Merge; was nicht besteht, wird nicht gemergt.
 1. **Das Risiko bestimmt den Aufwand.** Vier Risikostufen – Tier 0 bis 3 – legen fest, ob eine Änderung direkt gemergt werden darf oder Plan, unabhängige Prüfung und bei Tier 3 zusätzlich eine Widerlegungsprüfung (gezielte Fehlersuche) braucht.
 1. **Die Prüfung ist immer unabhängig.** Wer baut, nimmt nicht selbst ab; ab Tier 2 prüft eine unbeteiligte Instanz (eine eigene Agentensitzung), und ihr Urteil gilt nur für genau den geprüften Code.
 1. **Alles Wissen steht in Dateien.** Pläne, Entscheidungen und Journale liegen im Repository und werden jedem Agenten automatisch erneut vorgelegt, sobald sein Gedächtnis gekürzt wurde.
@@ -46,7 +46,7 @@ Der Prozess ist in vielen Iterationen im laufenden Betrieb entstanden und verbes
 | **Mensch (Owner)** | priorisiert, entscheidet, gibt Designs frei, prüft wöchentlich eine Stichprobe, schreibt die Regeln fort |
 | **Koordinator** | verschafft sich den Überblick, weist Vorgänge zu, startet und stoppt Arbeiter, leitet Fragen an den Menschen weiter, stößt den Merge an – schreibt und prüft selbst keinen Code |
 | **Arbeiter und Prüfer** | je Vorgang und Phase eine eigene Sitzung auf eigenem Branch; der Prüfer ist immer eine andere Instanz als der Arbeiter |
-| **Gates** | sechzehn Prüfprogramme vor jedem Merge (achtzehn mit Compliance-Paket): Regeln intakt, Entscheidungen getroffen, Attest vorhanden und zum Code passend, Verträge eingehalten, Dokumentation gültig |
+| **Gates** | fünfzehn Prüfprogramme vor jedem Merge: Regeln intakt, Entscheidungen getroffen, Attest vorhanden und zum Code passend, Designverträge und Akzeptanzkriterien einheitlich, Lizenzen erlaubt, Dokumentation gültig |
 | **Repository** | Regelkern, Pläne mit Entscheidungslisten, Journal mit Attesten, Lagetabelle, Verträge, Kennzahlen – die einzige Quelle, aus der jede Ebene liest |
 
 Der Prozess wird als Vorlage (dev-process) ausgeliefert. Aus ihr entsteht ein fertig eingerichtetes Repository: Startdatei und Phasenbefehle für die gewählte Harness (GitHub Copilot, Claude Code oder eine neutrale AGENTS.md), die Gates sowie GitHub Actions-Workflows für Gates, Owner-Digest, Kennzahlen und Aufräumen. Spätere Versionen der Vorlage holt sich ein Repository mit einem Befehl; projekteigene Dateien bleiben unberührt.
@@ -98,15 +98,15 @@ Der Prozess wird als Vorlage (dev-process) ausgeliefert. Aus ihr entsteht ein fe
 | Vorgabe | Mechanismus | Hart / weich | Referenzprojekt |
 |---|---|---|---|
 | Entscheidungen vor dem Code | Schwer umkehrbare Entscheidungen werden dokumentiert, bevor Code auf ihnen aufbaut; ein Gate prüft, ob verlangte Entscheidungen getroffen sind. Regeln, die überall gelten müssen, bekommen einen zuständigen Baustein und einen Test mit allen bekannten Fällen. | hart: verlangte Entscheidungen sind getroffen; weich: ob überhaupt eine nötig ist | 73 Entscheidungsdokumente |
-| Schnittstellen zuerst | Eine Schnittstelle wird beschrieben, bevor jemand sie nutzt; ein Gate prüft, dass die Beschreibung existiert und seit ihrer Festlegung nicht unbemerkt geändert wurde. Ob der Code sie einhält, prüfen Tests und Prüfer. | hart: Beschreibung vorhanden; weich: Einhaltung | aktiv |
+| Schnittstellen zuerst | Eine Schnittstelle wird beschrieben, bevor jemand sie nutzt (Regel 3). Ob die Beschreibung existiert und der Code sie einhält, prüfen Tests und Prüfer. | weich: Review und Tests | aktiv |
 | Oberflächen nach Vertrag | Ein Design-Vertrag benennt Abstände, Farben und Zustände mit IDs; Referenzbilder sind per Prüfsumme versiegelt. Ein Gate prüft IDs und Siegel, der Prüfer vergleicht das Ergebnis mit dem Bild. | hart: IDs und Siegel; weich: Aussehen | aktiv |
 | Schichten, Abhängigkeits­richtung | Die Architekturbeschreibung legt fest, welche Schicht welche andere nicht verwenden darf. Maschinell geprüft wird das nur mit einem Arch-Linter. | hart nur mit Linter | Linter nicht eingerichtet |
-| Sicherheit | Tier 3 verlangt Bedrohungsfrage, Widerlegungsprüfung und – wo verfügbar – ein zweites Modell. Optional kommen ein Sicherheitsmindestmaß als Regelwerk und eine SBOM (Liste aller Fremdkomponenten) hinzu. | hart: Tier-3-Ablauf; Mindestmaß erst mit Regelwerk | Regelwerk noch nicht angelegt |
+| Sicherheit | Tier 3 verlangt Bedrohungsfrage, Widerlegungsprüfung und – wo verfügbar – ein zweites Modell. Dazu kommt eine SBOM (Liste aller Fremdkomponenten), deren Lizenzen ein Gate gegen eine erlaubte Liste prüft. | hart: Tier-3-Ablauf, SBOM-Lizenzen | aktiv; die Lizenzliste legt jedes Projekt an |
 | Performance | Die Review-Checkliste fragt nach Performance. Was nicht gemessen wird, lässt keine Prüfung scheitern. | weich | keine Zielwerte festgelegt |
 | Wartbarkeit, Dokumentation | Wartbarkeit beurteilt der Prüfer nach den Regeln 4, 6 und 9; die Kennzahlen zeigen wiederholte Korrekturen. Für die Dokumentation prüfen Gates, ob genannte Dateien und Verweise existieren. | weich; hart für Verweise | aktiv |
 | Legacy | Bestehende Verstöße werden in einer Baseline festgehalten und geduldet, neue nicht. Die Baseline darf nur kleiner werden. | hart, sobald eine Baseline existiert | Verfahren in der Vorlage |
 
-**Lebenszyklus einer Vorgabe:** Eine neue Vorgabe beginnt mit einem Entscheidungsdokument. Was sich maschinell prüfen lässt, wird zur Regel im Sicherheitsmindestmaß, zur verbotenen Abhängigkeit oder zu einem Test mit allen bekannten Fällen; der Rest wird Frage in der Review-Checkliste. Bestehende Verstöße kommen in eine Baseline, die nur kleiner werden darf. Ein neuer Verstoß lässt das Gate scheitern; eine Ausnahme gibt es nur als Entscheidungsdokument mit Ablaufdatum. Neue nichtfunktionale Ziele nehmen denselben Weg und bekommen zusätzlich einen Punkt in der Abnahmeliste.
+**Lebenszyklus einer Vorgabe:** Eine neue Vorgabe beginnt mit einem Entscheidungsdokument. Was sich maschinell prüfen lässt, wird zur verbotenen Abhängigkeit im Architektur-Linter oder zu einem Test mit allen bekannten Fällen; der Rest wird Frage in der Review-Checkliste. Bestehende Verstöße kommen in eine Baseline, die nur kleiner werden darf. Ein neuer Verstoß lässt das Gate scheitern; eine Ausnahme gibt es nur als Entscheidungsdokument mit Ablaufdatum. Neue nichtfunktionale Ziele nehmen denselben Weg und bekommen zusätzlich einen Punkt in der Abnahmeliste.
 
 ## 6. Die Rolle des Menschen
 
@@ -149,7 +149,7 @@ Die folgende Tabelle zeigt, wie sich die Bausteine abbilden ließen und was davo
 | Startdatei, Regelkern | „copilot-instructions.md“ mit dem geprüften Regelblock; Pfadregeln unter „.github/instructions“. | in der Vorlage |
 | Phasenbefehle | Prompt-Dateien unter „.github/prompts“ für Brainstorm, Plan, Umsetzung, Prüfung, Kurzverfahren, Debug, Commit, Wiederherstellung. | in der Vorlage |
 | Gates | Actions-Workflow bei jedem Pull Request, als Required Status Check in der Branch Protection hinterlegt; ein Skript setzt ihn, ohne bestehende Regeln zu überschreiben. | in der Vorlage |
-| Vorgänge | Issues mit Typ und Akzeptanzkriterien; zwei Gates prüfen, ob sie vollständig sind und ihren Status korrekt durchlaufen. | in der Vorlage |
+| Vorgänge | Issues mit Typ und Akzeptanzkriterien; ein Gate prüft, dass Pläne ihr Issue nennen und Tier-3-Arbeit nicht ohne Issue beginnt. | in der Vorlage |
 | Arbeiter | Denkbar ist eine Copilot-Sitzung je Issue auf eigenem Branch – im Editor oder als Copilot Coding Agent, der einen Pull Request öffnet. | vorgesehen, nicht erprobt |
 | Prüfung | Unbeteiligter Prüfer mit Review-Prompt und Bundle, Attest im Journal; Copilot Code Review als zusätzliche Stimme. Da Copilot Modelle mehrerer Hersteller anbietet, wäre das zweite Modell nur ein Konfigurationseintrag. | Prompt und Gate in der Vorlage |
 | Merge Queue | Die Merge Queue könnte freigegebene Pull Requests sammeln, gemeinsam prüfen und der Reihe nach mergen. | GitHub-Funktion; nicht erprobt (Referenzprojekt: eigener Merge Train) |
@@ -162,7 +162,7 @@ Die folgende Tabelle zeigt, wie sich die Bausteine abbilden ließen und was davo
 
 > Die Einheit des Prozesses ist das Repository. Maschinen skalieren mit; die Grenze ist die Zahl der Entscheidungen, die ein Owner treffen kann.
 
-**Was mitwächst:** Jedes Repository erhält die Vorlage mit seinen eigenen Gates, seiner Modellpolitik und seiner Lagetabelle. Die Vorlage wird zentral versioniert und enthält organisationsweite Regeln wie Schichtenregeln oder ein Sicherheitsmindestmaß; ein Update kommt als Pull Request in jedes Repository. Gates laufen zentral, etwa in GitHub Actions, und wachsen mit der Organisation. Arbeiter sind Sitzungen der Harness, zum Beispiel eine je Issue, und die Modellpolitik legt neben den Modellen auch fest, wie viele davon gleichzeitig laufen.
+**Was mitwächst:** Jedes Repository erhält die Vorlage mit seinen eigenen Gates, seiner Modellpolitik und seiner Lagetabelle. Die Vorlage wird zentral versioniert und enthält organisationsweite Regeln wie Schichtenregeln oder die erlaubten Lizenzen; ein Update kommt als Pull Request in jedes Repository. Gates laufen zentral, etwa in GitHub Actions, und wachsen mit der Organisation. Arbeiter sind Sitzungen der Harness, zum Beispiel eine je Issue, und die Modellpolitik legt neben den Modellen auch fest, wie viele davon gleichzeitig laufen.
 
 **Was nicht von selbst mitwächst:** Jedes Repository braucht einen Owner, und jeder Vorgang braucht im Mittel ein bis zwei seiner Entscheidungen. Wie viele parallele Vorgänge ein Owner trägt, ist die eigentliche Kapazitätsgrenze – und heute nicht gemessen. Ebenso offen ist, wo der Koordinator in einer größeren Umgebung läuft und ob ein Koordinator mehrere Repositories führen kann.
 
@@ -190,7 +190,7 @@ Die folgende Tabelle zeigt, wie sich die Bausteine abbilden ließen und was davo
 | Korrekturquote (Features, die binnen 7 Tagen korrigiert wurden) | 44,4 % (20 von 45 Features) | DORA-Band „medium“, nahe an „low“; aussagekräftig ist erst der Verlauf über drei Zeiträume. |
 | Korrektur-Häufung | 11 Korrekturen an 5 Stellen | Eine fachliche Regel im Code wurde Stelle für Stelle nachgebessert; sie bekommt jetzt einen zuständigen Baustein und einen Test. |
 
-Der Kern – Gates, Prüfung, Regelkern, Journal, Design-Verträge – ist stabil. Die Koordinationsschicht ist die jüngste. Aus ihren acht schnellen Überarbeitungen folgt ein Vorsatz, noch keine Regel: eine Betriebswoche vor jeder Erweiterung, und Änderungen an der Koordinationsschicht durchlaufen dieselben Tiers wie Produktcode.
+Der Kern – Gates, Prüfung, Regelkern, Journal, Design-Verträge – ist stabil; was im Referenzprojekt nicht trug, ist gestrichen. Die Koordinationsschicht ist die jüngste. Aus ihren acht schnellen Überarbeitungen folgt ein Vorsatz, noch keine Regel: eine Betriebswoche vor jeder Erweiterung, und Änderungen an der Koordinationsschicht durchlaufen dieselben Tiers wie Produktcode.
 
 ## 11. Offene Fragen und Ausblick
 

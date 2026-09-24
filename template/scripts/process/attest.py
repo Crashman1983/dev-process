@@ -54,13 +54,19 @@ def _git(root: Path, *args: str) -> str | None:
     return r.stdout.strip() if r.returncode == 0 else None
 
 
+INTEGRATION_BRANCHES = ("main", "master")
+
+
 def _journal_target(root: Path, journal_dir: Path) -> Path:
-    """Today's shard: per-branch when that shard directory exists (parallel
-    efforts), the flat daily file otherwise (journal-state-plans.md)."""
+    """Today's shard: on a work branch always the branch's own directory
+    (journal-state-plans.md) — two parallel branches appending one shared daily
+    file collide at merge (observed downstream: attestations of parallel
+    reviews conflicting in the same file); on the integration branch or a
+    detached HEAD, the flat daily file."""
     today = dt.date.today().isoformat()
     branch = _git(root, "symbolic-ref", "--short", "HEAD") or ""
     slug = branch.replace("/", "-")
-    if slug and (journal_dir / slug).is_dir():
+    if slug and slug not in INTEGRATION_BRANCHES:
         return journal_dir / slug / f"{today}.md"
     return journal_dir / f"{today}.md"
 

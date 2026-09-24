@@ -303,7 +303,9 @@ def test_delta_bundle_carries_findings_and_exact_delta_artifact(render, tmp_path
     previous = _git(out, "rev-parse", "HEAD").stdout.strip()
     reports = out / ".process-work/reviews"
     reports.mkdir(parents=True)
-    (reports / "2026-07-10-review.md").write_text("FINDING prior finding\n")
+    (reports / "2026-07-10-widget.md").write_text("FINDING prior finding\n")
+    # a newer report of ANOTHER work item must not stand in for this one's
+    (reports / "2026-07-11-gadget.md").write_text("FINDING stranger's finding\n")
     (out / "widget.py").write_text("def widget():\n    return 43\n")
     _git(out, "add", "-A", check=True)
     _git(out, "commit", "-q", "-m", "fix: widget", check=True)
@@ -317,9 +319,22 @@ def test_delta_bundle_carries_findings_and_exact_delta_artifact(render, tmp_path
     spec.loader.exec_module(gate)
     assert artifact["base"] == previous
     assert artifact["diff"] == gate.artifact_digest(out, previous, "HEAD")
-    assert "FINDING prior finding" in text
+    findings = text.split("## Findings from the previous round", 1)[1].split("## Diff under review", 1)[0]
+    assert "FINDING prior finding" in findings
+    assert "stranger" not in findings  # the reports are in the diff, not in the findings
     assert "REVIEW_SCOPE mode=delta" in text
     assert "Full branch surface:" in text
+
+
+def test_delta_bundle_says_so_when_this_item_has_no_report(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    reports = out / ".process-work/reviews"
+    reports.mkdir(parents=True)
+    (reports / "2026-07-11-gadget.md").write_text("FINDING stranger's finding\n")
+    text = _run(out, "--base", "main", "--since", "main").stdout
+    assert "stranger" not in text
+    assert "no review report for this work item (widget, #9)" in text
 
 
 def test_delta_bundle_refuses_tier_three(render, tmp_path):
@@ -364,3 +379,18 @@ def test_bundle_names_missing_evidence_as_a_finding(render, tmp_path):
     r = _run(out, "--base", "main")
     assert r.returncode == 0, r.stderr
     assert "no screenshots" in r.stdout and "DoD D8" in r.stdout
+
+
+def test_a_failed_run_leaves_no_stale_bundle_behind(render, tmp_path):
+    # a previous bundle must not survive a run that fails — the next step
+    # would hand a reviewer the old head and digest
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    bundle = out / "bundle.md"
+    bundle.write_text("OLD BUNDLE head=deadbeef\n")
+    r = _run(out, "--base", "main", "-o", str(bundle), "--no-such-flag")
+    assert r.returncode != 0
+    assert not bundle.exists()
+    r = _run(out, "--base", "main", "-o", str(bundle), "--skip-preflight")
+    assert r.returncode == 0, r.stderr
+    assert "Review bundle" in bundle.read_text() and not (out / "bundle.md.partial").exists()

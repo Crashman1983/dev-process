@@ -9,8 +9,8 @@ complete?) is judgment and belongs to the review gate (`review-checklist.md`,
 Product frame). What this gate checks:
 
   - HARD: PRODUCT.md missing. It is a core artifact and ships with the
-    template; deleting it removes the frame. (Unlike the *optional* arch-docs
-    overview, absence here is a violation, not pre-adoption.)
+    template; deleting it removes the frame — absence is a violation, not
+    pre-adoption.
   - HARD: no recognizable `status:` line, or a value outside
     `not-onboarded | onboarded` — the state axis must stay readable.
   - SOFT: `status: not-onboarded` — expected before the start-here onboarding

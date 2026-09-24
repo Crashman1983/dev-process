@@ -43,21 +43,21 @@ GATES = {
     "review": (None, [sys.executable, "scripts/process/check_review.py", "."]),
     "clarification": (None, [sys.executable, "scripts/process/check_clarification.py", "."]),
     "product-frame": (None, [sys.executable, "scripts/process/check_product_frame.py", "."]),
+    "fix-streak": (None, [sys.executable, "scripts/process/check_fix_streak.py", "."]),
     "speckit": ("speckit", [sys.executable, "scripts/process/check_speckit.py", "."]),
     "doc-drift-gate": ("doc_drift_gate", [sys.executable, "scripts/process/check_doc_drift.py", "."]),
     "arch-onboarding": ("arch_onboarding", [sys.executable, "scripts/process/check_architecture.py", "."]),
     "feature-registry": ("feature_registry", [sys.executable, "scripts/process/check_feature_registry.py", "."]),
+    "ac-text-drift": ("feature_registry", [sys.executable, "scripts/process/check_ac_text_drift.py", "."]),
     "github-issues": ("github_issues", [sys.executable, "scripts/process/check_issues.py", "."]),
-    "contracts-drift": ("contracts", [sys.executable, "scripts/process/check_contracts.py", "."]),
-    "contract-first": ("contracts", [sys.executable, "scripts/process/check_capability_contracts.py", "."]),
-    "security-floor": ("security_floor", [sys.executable, "scripts/process/check_security_floor.py", "."]),
     "sbom": ("sbom", [sys.executable, "scripts/process/check_sbom.py", "."]),
     "telemetry": ("telemetry", [sys.executable, "scripts/process/check_telemetry.py", "."]),
-    "arch-docs": ("arch_docs", [sys.executable, "scripts/process/check_arch_docs.py", "."]),
-    "github-master": ("github_master", [sys.executable, "scripts/process/check_github_master.py", "."]),
     "design-contracts": ("design_contracts", [sys.executable, "scripts/process/check_design_contracts.py", "."]),
 }
 KNOWN_MODULES = {key for key, _command in GATES.values() if key is not None} | {"git_hooks"}
+# modules the template no longer ships (v2.27.0 KISS pass): an older manifest
+# may still name them — accepted, never run
+RETIRED_MODULES = {"contracts", "security_floor", "arch_docs", "github_master"}
 KNOWN_HARNESSES = {"claude", "copilot", "agents_md"}
 
 
@@ -101,8 +101,9 @@ def load_modules(root: Path) -> dict:
         )
         raise SystemExit(1)
     mods = _validate_boolean_mapping(
-        answers, "modules", KNOWN_MODULES, "module", required=True
+        answers, "modules", KNOWN_MODULES | RETIRED_MODULES, "module", required=True
     )
+    mods = {k: v for k, v in mods.items() if k not in RETIRED_MODULES}
     _validate_boolean_mapping(answers, "harnesses", KNOWN_HARNESSES, "harness")
     return mods
 
@@ -214,6 +215,11 @@ def _emit(output: str, known: set[str], seen: set[str], show_all: bool) -> int:
     return suppressed
 
 
+def _head(root: Path) -> str:
+    r = subprocess.run(["git", "-C", str(root), "rev-parse", "HEAD"], capture_output=True, text=True)
+    return r.stdout.strip() if r.returncode == 0 else ""
+
+
 def main() -> int:
     root = Path(__file__).resolve().parents[2]
     if not (root / ".copier-answers.yml").is_file():
@@ -246,6 +252,19 @@ def main() -> int:
         for finding in hook_hard:
             print(f"gate-runner: hook-wiring: {finding}", file=sys.stderr)
         failed.append("hook-wiring")
+    # the gates check the WORKING TREE. In a pre-push run the pushed commit must
+    # be that tree, or the verdict describes something nobody pushes (observed
+    # downstream: a shared checkout stood on another agent's branch while main
+    # was pushed, and the hook passed a tree it never saw). pre-commit names the
+    # pushed commit in PRE_COMMIT_TO_REF; a manual run has no such variable.
+    pushed = os.environ.get("PRE_COMMIT_TO_REF", "").strip()
+    if pushed:
+        head = _head(root)
+        if head and pushed != head:
+            print(f"gate-runner: the push carries {pushed[:10]} but this checkout is at "
+                  f"{head[:10]} — the gates would check a tree that is not being pushed; "
+                  f"push from the checkout of that commit (its worktree)", file=sys.stderr)
+            failed.append("pushed-tree")
     # don't litter the repo with __pycache__ from the gates' sibling imports
     env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
     for name in active:

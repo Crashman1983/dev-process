@@ -3,9 +3,7 @@
 themselves honest and internally coherent.
 
 `docs/process/adr/` ships in core, so its integrity is checked in core — not
-gated behind an optional module. This gate owns the *files*; the `arch_docs`
-gate owns overview→ADR *reference* resolution. Different artifacts, one owner
-each, no overlap.
+gated behind an optional module. This gate owns the *files*.
 
   - HARD: a decision file not listed in README.md's index (silently unfindable);
     a Status or Type value outside its enum (a typo makes the axis unreadable);
@@ -39,8 +37,8 @@ def adr_exists(root: Path, ref: str) -> bool:
     """Does the decision record with the number in `ref` exist? `ref` is
     anything carrying digits ('ADR-0002', '12', 'adr-3'); width-insensitive —
     adr-12-*.md and adr-0012-*.md both resolve. This gate owns ADR file
-    identity; the product-frame, feature-registry and security-floor gates
-    import this instead of keeping copies."""
+    identity; the product-frame and feature-registry gates import this
+    instead of keeping copies."""
     m = re.search(r"\d+", str(ref))
     if not m:
         return False

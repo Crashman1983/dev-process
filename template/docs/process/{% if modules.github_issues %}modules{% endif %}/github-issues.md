@@ -67,23 +67,14 @@ declares its risk tier (`journal-state-plans.md`):
 discipline "Tier 2+ needs an issue before any code", made a gate — but only
 where the project has chosen to run its backlog on GitHub Issues.
 
-## Templates and the seed helper
+## Templates
 
 Three templates: `.github/ISSUE_TEMPLATE/feature.md`,
 `.github/ISSUE_TEMPLATE/bug.md` and `.github/ISSUE_TEMPLATE/finding.md` (a
-review/audit finding that needs work — see the report binding below). Because
-`gh issue create` ignores `ISSUE_TEMPLATE/`, seed a body with
-`scripts/process/new_issue.py`:
-
-POSIX shell:
-
-    body="$(uv run scripts/process/new_issue.py feature)"
-    gh issue create --title "..." --body-file "$body"
-
-PowerShell:
-
-    $body = uv run scripts/process/new_issue.py feature
-    gh issue create --title "..." --body-file $body
+review/audit finding that needs work — see the report binding below). The
+GitHub UI offers them on "New issue"; from the command line,
+`gh issue create --template <template name>` starts from one, or pass the
+file's body with `--body-file` after filling it in.
 
 ## Example label schema (adapt freely)
 
@@ -123,9 +114,7 @@ a `type:` label or EARS acceptance — is visible in the GitHub UI itself
 (issue filters and the project board); review findings and follow-ups filed
 outside the story flow keep the same gradeable discipline as a story: a typed
 issue with EARS acceptance, while a purely informational record is exempt.
-  Advisory only as a view — a triage hint, this tool never gates. (With the
-  `github-master` module installed, the same two conditions DO fail the gate
-  hard once a story is in-progress — `definition-of-ready-and-done.md`.)
+  Advisory only as a view — a triage hint, this tool never gates.
 
 ## Outbound guard
 
@@ -213,7 +202,7 @@ stays attested, like every truthfulness claim.
 
 A follow-up from a finding, or a bug discovered while working on something
 else, is **normal work and gets the normal form** — filed through the
-templates (`new_issue.py finding` / `new_issue.py bug`), with a user story
+templates (`finding.md` / `bug.md`), with a user story
 where one applies and gradeable EARS acceptance criteria. A prose dump titled
 "fix stuff from review" is not a tracked follow-up.
 

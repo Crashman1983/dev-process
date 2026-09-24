@@ -272,7 +272,7 @@ def test_feature_registry_doc_states_worklog_split(render, tmp_path):
     out = _render(render, tmp_path)
     t = (out / "docs/process/modules/feature-registry.md").read_text()
     assert "Inventory, not work log" in t
-    assert "github-master" in t
+    assert "GitHub" in t
 
 
 def test_module_doc_names_issue_before_code(render, tmp_path):
@@ -388,14 +388,12 @@ def test_artifacts_present_when_on(render, tmp_path):
     out = _render(render, tmp_path)
     assert (out / ".github/ISSUE_TEMPLATE/feature.md").is_file()
     assert (out / ".github/ISSUE_TEMPLATE/bug.md").is_file()
-    assert (out / "scripts/process/new_issue.sh").is_file()
     assert (out / "docs/process/modules/github-issues.md").is_file()
 
 
 def test_artifacts_absent_when_off(render, tmp_path):
     out = render(tmp_path, {"project_name": "d"})
     assert not (out / ".github/ISSUE_TEMPLATE/feature.md").exists()
-    assert not (out / "scripts/process/new_issue.sh").exists()
     assert not (out / "docs/process/modules/github-issues.md").exists()
 
 
@@ -405,7 +403,6 @@ def test_artifacts_neutral(render, tmp_path):
         ".github/ISSUE_TEMPLATE/feature.md",
         ".github/ISSUE_TEMPLATE/bug.md",
         "docs/process/modules/github-issues.md",
-        "scripts/process/new_issue.sh",
     ]:
         text = (out / rel).read_text()
         for k in KENNI:
@@ -419,20 +416,6 @@ def test_feature_template_has_ears_and_story(render, tmp_path):
     assert "shall" in t  # EARS phrasing
     assert "<role>" in t
 
-
-def test_seed_script_strips_frontmatter(render, tmp_path):
-    out = _render(render, tmp_path)
-    r = subprocess.run(
-        ["bash", str(out / "scripts/process/new_issue.sh"), "feature"],
-        cwd=out, capture_output=True, text=True,
-    )
-    assert r.returncode == 0, r.stderr
-    body_path = Path(r.stdout.strip())
-    assert body_path.is_file()
-    body = body_path.read_text()
-    assert "User story" in body
-    assert "labels:" not in body  # YAML frontmatter removed
-    assert not body.lstrip().startswith("---")
 
 
 def test_docdrift_resolves_module_doc_refs(render, tmp_path):
@@ -674,17 +657,6 @@ def test_bug_template_gains_origin_section(render, tmp_path):
     assert "EARS" in t                            # form kept
 
 
-def test_finding_template_seedable(render, tmp_path):
-    # new_issue.sh must serve the new template like the others
-    out = _render(render, tmp_path)
-    r = subprocess.run(
-        ["bash", str(out / "scripts/process/new_issue.sh"), "finding"],
-        cwd=out, capture_output=True, text=True,
-    )
-    assert r.returncode == 0, r.stderr
-    body = Path(r.stdout.strip()).read_text()
-    assert "## Origin" in body and "labels:" not in body
-
 
 def test_finding_template_neutral(render, tmp_path):
     out = _render(render, tmp_path)
@@ -711,7 +683,7 @@ def test_inbox_doc_routes_through_templates(render, tmp_path):
 def test_publish_tool_hints_finding_form(render, tmp_path):
     out = _render(render, tmp_path)
     t = (out / "scripts/process/publish_review.sh").read_text()
-    assert "new_issue.sh finding" in t
+    assert "--template finding.md" in t
     assert "comment on the origin issue" in t
 
 

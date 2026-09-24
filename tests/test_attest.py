@@ -57,7 +57,8 @@ def test_attest_computes_digest_and_gate_verifies_it(render, tmp_path):
     assert r.returncode == 0, r.stdout + r.stderr
     gate = _load_gate(out)
     assert f"diff={gate.artifact_digest(out, base, head)}" in r.stdout
-    shard = next((out / ".process-work/journal").glob("*.md"))
+    shard = next((out / ".process-work/journal").rglob("*.md"))
+    assert shard.parent.name == "feature"  # a work branch writes its own shard
     assert "Reviewed from the bundle." in shard.read_text()
     assert _gate(out).returncode == 0, _gate(out).stdout
 

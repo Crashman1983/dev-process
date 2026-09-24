@@ -8,9 +8,7 @@ purpose: a solo project needs a predictable ritual, not a release train.
 Version `MAJOR.MINOR.PATCH`:
 
 - **MAJOR** — a breaking change: something a consumer depended on (API,
-  contract, file format, CLI flag, default) no longer holds. With the
-  `contract-first`/`contracts-drift` modules, the changed spec/pin is the
-  evidence.
+  contract, file format, CLI flag, default) no longer holds.
 - **MINOR** — new behavior, nothing existing breaks.
 - **PATCH** — a fix or internal change, observable behavior otherwise equal.
 

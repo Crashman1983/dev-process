@@ -16,7 +16,7 @@ work under: a program checks the rules, the effort follows the risk, nobody
 signs off their own work, and memory lives in files instead of the context
 window.
 
-> **Status:** `v2.26.0` — sub-projects SP1–SP75. History (German): [`CHANGELOG.md`](CHANGELOG.md).
+> **Status:** `v2.27.0` — sub-projects SP1–SP75. History (German): [`CHANGELOG.md`](CHANGELOG.md).
 
 ## Where to start
 
@@ -30,8 +30,9 @@ window.
 
 ## The essentials
 
-- **Gates instead of memory.** Before every merge, the standard setup runs 16
-  automatic checks, 18 with the compliance pack. What fails does not merge.
+- **Gates instead of memory.** Before every merge, 15 automatic checks run.
+  What fails does not merge. The set was cut to what demonstrably carries
+  weight in the reference project.
 - **Risk sets the effort.** Tier 0 to 3 decide whether a change merges
   directly or needs a plan, an independent review and, at Tier 3, a
   refutation review. Scope decides the tier, not diff size.
@@ -55,9 +56,9 @@ Greenfield and brownfield, the same command in the target repository:
 uvx copier copy gh:Crashman1983/dev-process .
 ```
 
-copier asks five things: project name, harness (`claude` | `copilot` |
-`agents_md`), `regulated` (compliance pack), CI (GitHub Actions, on by
-default) and, optionally, the GitHub repository for the issue check. Existing
+copier asks four things: project name, harness (`claude` | `copilot` |
+`agents_md`), CI (GitHub Actions, on by default) and, optionally, the GitHub
+repository for the issue check. Existing
 files are not overwritten. Afterwards
 
 ```bash

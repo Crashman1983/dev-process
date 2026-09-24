@@ -27,7 +27,7 @@ the superseding record *what* becomes better and *why that holds long-term*
 effort as the code that assumes it (mandatory rule 4) — never as silent
 drift the record no longer describes. The same principle applies to
 capability contracts: a contract may change for the same reasons, versioned,
-with every consumer updated in the same change (`modules/contract-first.md`).
+with every consumer updated in the same change.
 A record nobody may ever touch does not protect the architecture; it dares
 people to route around it.
 

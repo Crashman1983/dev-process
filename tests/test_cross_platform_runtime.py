@@ -80,8 +80,7 @@ def test_portable_python_helpers_render(render, tmp_path):
     cfg = (out / ".pre-commit-config.yaml").read_text(encoding="utf-8")
     assert "no-commit-to-branch" in cfg
     assert "gate_runner.py" in cfg and "pre-push" in cfg
-    assert (out / "scripts/process/new_issue.py").is_file()
-    text = (out / "scripts/process/new_issue.py").read_text(encoding="utf-8")
+    text = (out / "scripts/process/gate_runner.py").read_text(encoding="utf-8")
     assert '# requires-python = ">=3.11"' in text
 
     subprocess.run(["git", "init", "-q", "-b", "main"], cwd=out, check=True)
@@ -92,14 +91,6 @@ def test_portable_python_helpers_render(render, tmp_path):
         text=True,
     )
     assert gates.returncode == 0, gates.stdout + gates.stderr
-    issue = subprocess.run(
-        ["uv", "run", "scripts/process/new_issue.py", "feature"],
-
-        cwd=out,
-        capture_output=True,
-        text=True,
-    )
-    assert issue.returncode == 0, issue.stderr
 
 
 def test_ci_has_linux_macos_windows_smoke_matrix():

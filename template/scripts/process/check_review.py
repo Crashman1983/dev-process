@@ -67,7 +67,7 @@ VERDICTS = {"pass", "block"}
 # tolerant of a leading list bullet and **bold**/_emphasis_ on the key, and of
 # a trailing annotation — a bulleted `- tier: 3` must not escape the presence
 # check (a false-green). This gate OWNS the plan-field grammar; the issue gate
-# and trace.py import these matchers instead of keeping copies in sync.
+# imports these matchers instead of keeping a copy in sync.
 _LEAD = r"^\s*(?:[-*+]\s+)?[*_]*"
 TIER_DECL = re.compile(_LEAD + r"tier[*_]*\s*:\s*[*_]*\s*(\d+)\b", re.IGNORECASE | re.MULTILINE)
 ISSUE_DECL = re.compile(_LEAD + r"issue[*_]*\s*:\s*(\S+)", re.IGNORECASE | re.MULTILINE)

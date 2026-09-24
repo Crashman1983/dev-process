@@ -1,0 +1,118 @@
+#!/usr/bin/env python3
+"""ac-text-drift — an acceptance criterion reads the same in the spec and in
+the feature inventory.
+
+The spec (`specs/<dir>/spec.md`, lines `- AC-1: …`) and the inventory entry
+(`docs/process/feature-registry/*.json`, `acceptance: [{id, text}]`) both
+carry the criterion's wording; when one is edited and the other is not, the
+test proves one sentence while the inventory promises another (observed
+downstream, where this gate was born). Binding: a plan (active or archived)
+names the spec (`specs/<dir>`) and its `issue:`; the inventory entry names the
+same issue. Per AC present on both sides, the whitespace-normalized text must
+match; `AC1`, `AC-1` and `AC-01` are the same id.
+
+Exit 0 = green (notes allowed), 1 = drift. Usage: check_ac_text_drift.py [root]
+Stdlib only.
+"""
+from __future__ import annotations
+
+import json
+import re
+import sys
+from pathlib import Path
+
+GATE = "ac-text-drift"
+REGISTRY = "docs/process/feature-registry"
+SPECS = "specs"
+PLANS = (".process-work/plans", ".process-work/plans/archive")
+SPEC_REF = re.compile(r"\bspecs/([\w][\w.-]*)")
+ISSUE = re.compile(r"^\s*(?:[-*+]\s+)?[*_]*issue[*_]*\s*:\s*\S*?#?(\d+)\b", re.IGNORECASE | re.MULTILINE)
+REG_ISSUE = re.compile(r"(?:/issues/|#)(\d+)\b")
+SPEC_AC = re.compile(r"^\s*[-*+]\s+\**(AC-?[\d.]+)\**\s*:\**\s*(.+)$", re.IGNORECASE)
+
+
+def ac_key(raw: str) -> str:
+    """'AC1', 'AC-1', 'AC-01' -> '1'; 'AC-1.2' -> '1.2'."""
+    digits = re.sub(r"(?i)^ac-?", "", raw.strip().strip("*"))
+    return ".".join(str(int(p)) for p in digits.split(".") if p.isdigit())
+
+
+def norm(text: str) -> str:
+    return re.sub(r"\s+", " ", text.replace("**", "")).strip()
+
+
+def spec_criteria(text: str) -> dict[str, str]:
+    out: dict[str, str] = {}
+    fenced = False
+    for line in text.splitlines():
+        if line.lstrip().startswith(("```", "~~~")):
+            fenced = not fenced
+            continue
+        m = None if fenced else SPEC_AC.match(line)
+        if m and ac_key(m.group(1)):
+            out.setdefault(ac_key(m.group(1)), norm(m.group(2)))
+    return out
+
+
+def spec_issues(root: Path) -> dict[str, set[int]]:
+    """spec dir -> issue numbers of the plans that name it."""
+    found: dict[str, set[int]] = {}
+    for d in PLANS:
+        for plan in sorted((root / d).glob("*.md")) if (root / d).is_dir() else []:
+            text = plan.read_text(encoding="utf-8", errors="replace")
+            issues = {int(n) for n in ISSUE.findall(text)}
+            for spec in set(SPEC_REF.findall(text)):
+                found.setdefault(spec, set()).update(issues)
+    return found
+
+
+def registry_by_issue(root: Path) -> dict[int, list[tuple[str, dict[str, str]]]]:
+    out: dict[int, list[tuple[str, dict[str, str]]]] = {}
+    reg = root / REGISTRY
+    for f in sorted(reg.glob("*.json")) if reg.is_dir() else []:
+        if ".example." in f.name:
+            continue
+        try:
+            entry = json.loads(f.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue  # the feature-registry gate owns malformed entries
+        m = REG_ISSUE.search(str(entry.get("issue") or ""))
+        if not m or not isinstance(entry.get("acceptance"), list):
+            continue
+        acs = {ac_key(str(a.get("id", ""))): norm(str(a.get("text", "")))
+               for a in entry["acceptance"] if isinstance(a, dict)}
+        out.setdefault(int(m.group(1)), []).append((f.name, {k: v for k, v in acs.items() if k}))
+    return out
+
+
+def drift(root: Path) -> list[str]:
+    registry = registry_by_issue(root)
+    findings: list[str] = []
+    for spec, issues in sorted(spec_issues(root).items()):
+        spec_md = root / SPECS / spec / "spec.md"
+        if not spec_md.is_file():
+            continue
+        ours = spec_criteria(spec_md.read_text(encoding="utf-8", errors="replace"))
+        for n in sorted(issues):
+            for name, theirs in registry.get(n, []):
+                for key in sorted(set(ours) & set(theirs)):
+                    if ours[key] != theirs[key]:
+                        findings.append(
+                            f"{GATE}: AC-{key} of #{n} differs — specs/{spec}/spec.md says "
+                            f"{ours[key]!r}, {REGISTRY}/{name} says {theirs[key]!r}; "
+                            f"one wording, amended in both places in the same change")
+    return findings
+
+
+def main(argv: list[str]) -> int:
+    root = Path(argv[0] if argv else ".").resolve()
+    findings = drift(root)
+    for f in findings:
+        print(f)
+    if not findings:
+        print(f"{GATE}: OK")
+    return 1 if findings else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))
