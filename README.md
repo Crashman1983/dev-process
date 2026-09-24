@@ -25,9 +25,8 @@ window.
 | What the process is, why it works this way, what is still open | **[Overview](docs/OVERVIEW.md)** · [Überblick (German)](docs/UEBERBLICK.md) · [PDF (German)](docs/Entwicklungsprozess-mit-KI-Agenten.pdf) |
 | Setting it up, headless or in a dialogue, and updating it | [`BOOTSTRAP.md`](BOOTSTRAP.md) |
 | What the machine and CI need (German) | [`docs/SYSTEM-REQUIREMENTS.md`](docs/SYSTEM-REQUIREMENTS.md) |
-| Day-to-day work for developers and management (German) | [`docs/CAPABILITIES.md`](docs/CAPABILITIES.md) |
 | This repository's dependencies (generated, also as CycloneDX) | [`docs/SBOM.md`](docs/SBOM.md) · [`docs/sbom.cdx.json`](docs/sbom.cdx.json) |
-| Decisions and designs | [`docs/design/`](docs/design/) · [`docs/analysis/`](docs/analysis/) |
+| Why the standard stack (Spec Kit comparison and design, German) | [`docs/analysis/`](docs/analysis/) |
 
 ## The essentials
 
@@ -85,9 +84,9 @@ single-session work, the overhead outweighs the benefit.
 ## Origin
 
 The process grew over many iterations in a private repository in production
-use (the "reference project" in the documents). References to its internals
-in `docs/design/` and `docs/plans/` are project history; everything the
-template ships is independent of it and neutral.
+use (the "reference project" in the documents). The history of that growth
+is in [`CHANGELOG.md`](CHANGELOG.md) and the git log; everything the template
+ships is independent of that project and neutral.
 
 ## License
 
