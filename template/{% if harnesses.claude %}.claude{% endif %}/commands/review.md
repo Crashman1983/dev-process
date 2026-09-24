@@ -20,7 +20,7 @@ Record the result with the writer, never by hand:
 
     python scripts/process/attest.py --work <id> --tier <n> --reviewer <id> \
       --model <family> --independence bundle,non-implementing[,cross-model] \
-      --verdict pass|block --round <n> --bundle /tmp/bundle.md
+      --verdict pass|block --bundle /tmp/bundle.md   # [--plan-review]
 
 It recomputes the digest from the bundle's base/head with the gate's formula,
 refuses a stale bundle, validates the grammar and appends the `REVIEW` line to
@@ -67,3 +67,22 @@ Round economy — a failed round must not re-pay the whole chain:
   tool refuses delta-only there).
 - **Rebase once**, before the first review round — every later rebase changes
   the tree and voids the bundle digests, forcing a fresh full round.
+- **The round is counted, not claimed.** `attest.py` numbers it: 1 + the
+  blocks recorded for the work. Every blocking round gets its REVIEW line
+  (`--verdict block`); a re-check after a pass, a rebase or a short look is
+  no new round. Plan reviews count apart (`--plan-review`).
+- **Cause before fix.** Before the next round, the fixer writes
+  `ROOT-CAUSE work=<id> round=<r>: <cause> — <the test that failed before
+  the fix>` into the journal or the plan; `attest.py` refuses the next round
+  without it. The test comes first and fails on the old code. Downstream,
+  the largest source of extra rounds was a fix that created the next
+  blocker — the same rule patched three times.
+- **The same spot blocks twice → a fresh session fixes it.** The
+  implementing session has twice missed what is wrong there; it is not the
+  one to try a third time.
+- **Size.** The bundle warns above 30 files / 1,500 lines
+  (`PROCESS_REVIEW_MAX_FILES`/`_LINES`). Split before round 1 where the plan
+  allows; works of 3,000+ lines ran five to seven rounds downstream.
+- **Exceptions are recorded.** Where the owner overrides a rule above,
+  `attest.py --exception "<reason>"` writes a `REVIEW-EXCEPTION` line —
+  countable, never silent.

@@ -1166,6 +1166,13 @@ ein Wächter-Test gegen doppelte Klammern ohne Leerzeichen in Python-Vorlagen.
 Wer v2.27.1 oder v2.28.0 installiert hat und am Push scheitert: auf v2.28.1
 aktualisieren, `v2.28.1`.
 
+**v2.30.0 — weniger Review-Runden: gezählt statt behauptet, erst die Ursache, dann der Fix.** Die Analyse im Referenzprojekt ergab: Arbeiten mit drei oder mehr Runden stiegen von 11 % (1.–15.09.) auf 23 % (16.–24.09.). Die größte Ursache waren Fixes, die den nächsten Blocker selbst erzeugten; dazu kamen ein aufgeblähter Zähler (Nachprüfungen als Runden, fehlende Block-Zeilen, Plan- und Code-Runden auf einem Zähler) und Arbeiten mit 3.000–5.500 Zeilen.
+- **Gezählte Runde:** `attest.py` zählt die Runde selbst, als 1 plus die für die Arbeit schon erfassten Blocks. Eine behauptete, abweichende Runde wird abgelehnt. Nachprüfungen nach einem Pass und Rebases bleiben in derselben Runde. Plan-Reviews zählen getrennt (`--plan-review` schreibt `work=<id>-plan`).
+- **Ursache vor dem Fix:** Vor jeder Runde nach einem Block verlangt `attest.py` pro Block eine Zeile `ROOT-CAUSE work=<id> round=<r>: …` im Journal oder im Plan.
+- **Ausnahmen:** `--exception` hebt beide Regeln auf und schreibt dafür eine zählbare `REVIEW-EXCEPTION`-Zeile.
+- **Größenwarnung:** Das Review-Bündel warnt ab 30 Dateien oder 1.500 Zeilen (`PROCESS_REVIEW_MAX_FILES`/`_LINES`); Lock-Dateien und `.process-work/` zählen nicht mit.
+- **`review.md`:** Blockiert dieselbe Stelle zweimal, übernimmt eine frische Sitzung den Fix.
+
 **v2.29.0 — nur die eigene Arbeit gibt einen Branch frei; leere Belege, Worker-Umgebung, Rückweg aus der Cloud.**
 - **Zug (`train.py`):** Ein archivierter Plan gibt einen Branch nur frei, wenn es der eigene ist. Eigen heißt: Der Branch-Name trägt die Issue-Nummer oder den Slug des Plans, oder die Basis kannte den Plan nicht. Wer nur fremde, längst freigegebene Pläne archiviert, räumt auf und wird dadurch nicht freigegeben. Im Referenzprojekt war ein Template-Update-Branch so eingestiegen, während sein eigenes Review noch lief. Ein Branch, der `scripts/process/` oder `.githooks/` ändert, steigt nur mit einem REVIEW-Pass für die eigene Arbeit ein, unabhängig vom Tier. Regressionstests spielen genau diesen Fall nach.
 - **Review-Bündel:** `make_review_bundle.py` markiert ungültige Belege als VOID: byte-identische Vorher/Nachher-Paare, identische Bilder unter verschiedenen Namen und Bilder, die einem bekannten Leerzustand unter `docs/process/void-evidence/` gleichen (etwa dem Ladezustand).
