@@ -158,7 +158,7 @@ def test_code_after_the_reviewed_head_is_stale_on_the_merge_push(render, tmp_pat
 
 
 def test_a_fellow_passengers_files_are_not_this_works_late_code(render, tmp_path):
-    # train 34 downstream: two passengers, each reviewed; the merge push named
+    # a merge train with two reviewed passengers: the merge push named
     # the other passenger's files as unreviewed code of the first
     import os
     out, base, head = _repo(render, tmp_path)

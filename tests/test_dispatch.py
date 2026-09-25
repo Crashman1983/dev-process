@@ -40,7 +40,7 @@ def _fake_command(out: Path, script: str) -> None:
 
 
 def _fake_lane(out: Path, status: str) -> None:
-    # the project's own lane tool: one status line per lane, like Kenni's scripts/lane.py
+    # the project's own lane tool: one status line per lane (scripts/lane.py)
     lane = out / "scripts" / "lane.py"
     lane.write_text(f"import sys\nprint({status!r})\n")
 
@@ -279,7 +279,7 @@ def test_prompt_inside_a_token_and_env_stripped(render, tmp_path):
 
 @pytest.mark.parametrize("runner", ["detached", "tmux"])
 def test_policy_env_reaches_the_worker_only(render, tmp_path, runner):
-    # #2110: worker sessions run built-in subagents on a cheaper model; the
+    # worker sessions run built-in subagents on a cheaper model; the
     # steward's own CLAUDE_CODE_* is still stripped, the policy's value wins
     if runner == "tmux" and shutil.which("tmux") is None:
         pytest.skip("tmux not installed")

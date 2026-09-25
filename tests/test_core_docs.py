@@ -10,6 +10,7 @@ CORE = [
     "testing.md",
     "releases.md",
     "verification-independence.md",
+    "refute.md",
     "review-checklist.md",
     "definition-of-ready-and-done.md",
     "journal-state-plans.md",

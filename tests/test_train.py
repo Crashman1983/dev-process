@@ -169,7 +169,7 @@ def _main_commit(out: Path, files: dict[str, str], msg: str) -> None:
 
 
 def test_archiving_other_works_cleared_plans_is_no_clearance(render, tmp_path):
-    # train 20260924-1427: a template-update branch archived seven older,
+    # a template-update branch archived older,
     # already cleared plans and boarded on them while its own review ran
     out = render(tmp_path, {"project_name": "d", "modules": {}})
     _repo(out)
@@ -339,7 +339,7 @@ def test_conflicting_candidate_is_reported_blocked(render, tmp_path):
 
 
 def test_a_flaky_suite_is_retried_on_the_same_tree_not_bisected(render, tmp_path):
-    # train 31 downstream: two load-induced timeouts, then "base is red too"
+    # two load-induced timeouts, then "base is red too"
     out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
     _repo(out)
     _branch(out, "alpha", {"src/a.py": "a\n"})
@@ -353,7 +353,7 @@ def test_a_flaky_suite_is_retried_on_the_same_tree_not_bisected(render, tmp_path
 
 
 def test_a_suite_a_passenger_introduces_does_not_make_main_red(render, tmp_path):
-    # train 31 downstream: `make test-merge` came with a passenger; the base
+    # `make test-merge` came with a passenger; the base
     # run said "No rule to make target" and the train called main red
     out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
     _repo(out)
@@ -366,7 +366,7 @@ def test_a_suite_a_passenger_introduces_does_not_make_main_red(render, tmp_path)
 
 
 def test_a_local_hook_refusal_names_the_hook_and_its_reasons(render, tmp_path):
-    # train 34 downstream: the log said "branch protection?" while the local
+    # the log said "branch protection?" while the local
     # pre-push review gate had refused, for a reason only a manual run showed
     out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
     _repo(out)
@@ -386,7 +386,7 @@ def test_a_local_hook_refusal_names_the_hook_and_its_reasons(render, tmp_path):
 
 
 def test_a_command_not_found_inside_a_red_suite_is_red_not_undefined(render, tmp_path):
-    # downstream residual (#2155 AC-1): a test that shells out prints it
+    # a test that shells out prints it
     out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
     _repo(out)
     _branch(out, "alpha", {"src/a.py": "a\n"})
@@ -406,7 +406,7 @@ def _load_train(out):
 
 
 def test_after_a_drop_the_rest_gets_its_own_flake_rerun(render, tmp_path, monkeypatch):
-    # downstream residual (#2155 AC-2): combined red, retry red, base green,
+    # combined red, retry red, base green,
     # b1 dropped; the rest [b2] is red once, then green — a flake, not an offender
     from types import SimpleNamespace
     out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})

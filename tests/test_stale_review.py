@@ -1,4 +1,4 @@
-"""stale_review against the refutation of the ancestor fix (downstream #2144 r3/r4).
+"""stale_review against the refutation of the ancestor fix.
 
 Each scenario is one way unreviewed code reached a push while the review
 still counted — or one way a fellow merge-train passenger must NOT count.
@@ -192,7 +192,7 @@ def test_pushing_local_main_without_a_remote_ref_is_checked(repo):
 
 
 def test_a_conflict_resolved_to_the_other_side_is_stale(repo):
-    # downstream residual (#2155 AC-4): the result equals main's version, so the
+    # the result equals main's version, so the
     # combined diff is empty although the reviewed change was thrown away
     root, head = repo
     _git(root, "checkout", "-q", "main")

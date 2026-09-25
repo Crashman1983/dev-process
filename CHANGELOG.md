@@ -1166,6 +1166,13 @@ ein Wächter-Test gegen doppelte Klammern ohne Leerzeichen in Python-Vorlagen.
 Wer v2.27.1 oder v2.28.0 installiert hat und am Push scheitert: auf v2.28.1
 aktualisieren, `v2.28.1`.
 
+**v2.32.0 — Refute vor dem ersten Review für Gate-Code.** Ändert ein Diff `scripts/process/`, `.githooks/` oder die Gate-Konfiguration, greift ihn ein frischer Agent an, bevor der Review ihn sieht. Im Referenzprojekt brauchten Gate-Änderungen vier und mehr Runden; ein Refute-Durchlauf fand in zwei Läufen mehr als drei Review-Runden zuvor.
+- **`docs/process/refute.md` (neu):** Wann, wer, der Auftrag zum Kopieren und der Umgang mit Funden. Die Szenario-Klassen sind Umgehungen, Fehlalarme, stilles Durchlassen und die Umgebungsmatrix (make-Ebene, Hook, `gh` fehlt, flacher Klon, nur lokales main). Jeder Fund wird ein Regressionstest oder eine DECISION.
+- **Ergebniszeile:** `REFUTE work=<id> round=<r>: …` im Plan.
+- **Warnung im Review-Bündel:** Bei Gate-Code ohne REFUTE-Zeile warnt das Bündel. Das sperrt nicht: Die Regel wird erst beobachtet.
+- **Einbindung:** `review.md` und `verification-independence.md` verweisen auf die neue Regel.
+- **Neutrale Tests:** Die Template-Tests sind inhaltlich neutral, ohne Bezüge auf Issues, Züge oder Namen aus dem Referenzprojekt.
+
 **v2.31.7 — Suite nicht vorhanden, auf jeder MAKELEVEL.** v2.31.6 erkannte nur die Zeile `make:`. Läuft der Zug selbst unter make (`make train`, MAKELEVEL 1), meldet das make der Suite sich als `make[1]:`. Das hätte den Fall „der Passagier bringt das Ziel erst mit“ wieder rot gemacht. Aufgefallen ist das beim pre-push-Hook im Referenzprojekt, der pytest selbst unter make startet. Jetzt zählt die Ebene direkt unter der des Zugs. Tiefere Ebenen, etwa ein Test, der make aufruft, bleiben rot.
 
 **v2.31.6 — vier Restbefunde aus demselben Review.**
