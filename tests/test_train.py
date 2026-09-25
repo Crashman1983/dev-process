@@ -58,26 +58,38 @@ def test_plan_boards_cleared_branches_and_explains_the_rest(render, tmp_path):
     p = json.loads(r.stdout)
     by = {c["branch"]: c for c in p["candidates"]}
     assert by["alpha"]["eligible"] and "REVIEW pass" in by["alpha"]["by"]
-    assert not by["beta"]["eligible"] and "without a clearing REVIEW pass" in by["beta"]["reasons"][0]
+    assert not by["beta"]["eligible"] and "without a REVIEW pass covering the branch head" in by["beta"]["reasons"][0]
     assert not by["gamma"]["eligible"] and "overlaps" in by["gamma"]["reasons"][0]
     assert not by["delta"]["eligible"] and "run /finish first" in by["delta"]["reasons"][0]
     assert by["tiny"]["eligible"]
     assert p["ready"] is False and "waiting for 3" in p["why"]  # 2 aboard, fresh
     text = _train(out, "plan").stdout
     assert "✓ alpha" in text and "· beta" in text and "hold" in text
-    # a worker report is accepted as the pointer when nothing is archived
+    # a worker report is only the pointer: without a REVIEW pass it boards nothing
     subprocess.run([sys.executable, str(out / "scripts/process/report.py"), "review-pass", "--worker", "delta"],
                    cwd=out, check=True, capture_output=True)
     p2 = json.loads(_train(out, "plan", "--json").stdout)
     delta = next(c for c in p2["candidates"] if c["branch"] == "delta")
+    assert not delta["eligible"] and "no REVIEW pass for its own work covers the branch head" in delta["reasons"][0]
+    # with the pass on the branch, the report points at a real record
+    _git(out, "checkout", "-q", "delta")
+    j = out / ".process-work/journal"
+    j.mkdir(parents=True, exist_ok=True)
+    (j / "2026-09-20-delta.md").write_text(
+        "REVIEW work=delta tier=2 reviewer=fresh model=cross independence=bundle,non-implementing verdict=pass round=1\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "attest delta")
+    _git(out, "checkout", "-q", "main")
+    p3 = json.loads(_train(out, "plan", "--json").stdout)
+    delta = next(c for c in p3["candidates"] if c["branch"] == "delta")
     assert delta["eligible"] and "worker report review-pass" in delta["by"]
-    # but never as a substitute for a missing pass on an archived plan
+    # a `done` report never substitutes a missing pass on an archived plan
     subprocess.run([sys.executable, str(out / "scripts/process/report.py"), "done", "--worker", "beta"],
                    cwd=out, check=True, capture_output=True)
-    p3 = json.loads(_train(out, "plan", "--json").stdout)
-    beta = next(c for c in p3["candidates"] if c["branch"] == "beta")
-    assert not beta["eligible"] and "the report is not the record" in beta["reasons"][0]
-    assert p3["ready"] is True  # three aboard now
+    p4 = json.loads(_train(out, "plan", "--json").stdout)
+    beta = next(c for c in p4["candidates"] if c["branch"] == "beta")
+    assert not beta["eligible"] and "covering the branch head" in beta["reasons"][0]
+    assert p4["ready"] is True  # three aboard now
 
 
 def test_open_question_keeps_a_branch_off_the_train(render, tmp_path):
@@ -271,7 +283,7 @@ def test_a_same_named_old_pass_on_main_does_not_clear_a_new_plan(render, tmp_pat
     _branch(out, "login", {"src/l.py": "l\n"}, tier=3, reviewed=False)
     p = json.loads(_train(out, "plan", "--json").stdout)
     c = next(c for c in p["candidates"] if c["branch"] == "login")
-    assert not c["eligible"] and "without a clearing REVIEW pass" in c["reasons"][0]
+    assert not c["eligible"] and "without a REVIEW pass covering the branch head" in c["reasons"][0]
 
 
 def test_fenced_tier_example_is_not_a_declaration(render, tmp_path):
@@ -479,3 +491,53 @@ def test_an_offender_that_brought_the_suite_is_still_reported(render, tmp_path, 
     rc = train._run_batch(out, "main", p, ["b1", "b2"], "x", tmp_path / "t.log", suite="s", deploy=None,
                           push=False, keep_branches=True)
     assert rc == 1 and ("blocked", "b1") in written
+
+
+def _head_pass(out, work, head):
+    return (f"REVIEW work={work} tier=2 reviewer=fresh model=cross independence=bundle,non-implementing "
+            f"verdict=pass round=1 base={'0' * 40} head={head} diff={'0' * 64}\n")
+
+
+def test_a_merged_branch_with_new_commits_does_not_board_on_its_done_report(render, tmp_path):
+    # a train merged the branch at its reviewed head and wrote `done`; then the
+    # branch got new, unreviewed commits — they must not ride the next train
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _git(out, "checkout", "-q", "-b", "42-work", "main")
+    (out / "src").mkdir(exist_ok=True)
+    (out / "src/w.py").write_text("w = 1\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "work")
+    _git(out, "checkout", "-q", "main")
+    _git(out, "merge", "-q", "--no-ff", "--no-edit", "42-work")  # the train's merge
+    subprocess.run([sys.executable, str(out / "scripts/process/report.py"), "done", "--worker", "42-work"],
+                   cwd=out, check=True, capture_output=True)
+    _git(out, "checkout", "-q", "42-work")
+    (out / "src/w.py").write_text("w = 2\n")  # new, unreviewed commit after the merge
+    _git(out, "commit", "-q", "-am", "fix after merge")
+    _git(out, "checkout", "-q", "main")
+    by = {c["branch"]: c for c in json.loads(_train(out, "plan", "--json").stdout)["candidates"]}
+    c = by["42-work"]
+    assert not c["eligible"] and "report `done` boards nothing" in c["reasons"][0]
+
+
+def test_a_pass_behind_which_the_branch_moved_does_not_clear_it(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _branch(out, "43-work", {"src/x.py": "x = 1\n"}, reviewed=False)
+    head = _git(out, "rev-parse", "43-work").stdout.strip()
+    _git(out, "checkout", "-q", "43-work")
+    j = out / ".process-work/journal"
+    j.mkdir(parents=True, exist_ok=True)
+    (j / "2026-09-21-43.md").write_text(_head_pass(out, "43-work", head))
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "attest")  # bookkeeping after the head: still covered
+    _git(out, "checkout", "-q", "main")
+    by = {c["branch"]: c for c in json.loads(_train(out, "plan", "--json").stdout)["candidates"]}
+    assert by["43-work"]["eligible"], by["43-work"]
+    _git(out, "checkout", "-q", "43-work")
+    (out / "src/x.py").write_text("x = 2\n")
+    _git(out, "commit", "-q", "-am", "code after the review")
+    _git(out, "checkout", "-q", "main")
+    by = {c["branch"]: c for c in json.loads(_train(out, "plan", "--json").stdout)["candidates"]}
+    assert not by["43-work"]["eligible"] and "covering the branch head" in by["43-work"]["reasons"][0]
