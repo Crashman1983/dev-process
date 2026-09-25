@@ -461,13 +461,42 @@ def test_the_suites_own_make_is_recognised_at_any_makelevel(render, tmp_path, mo
     ("make: *** No rule to make target `test-merge'.  Stop.", "undefined"),   # GNU make 3.81 quoting
     ("gmake: *** No rule to make target 'test-merge'.  Stop.", "undefined"),
     ("make: *** No rule to make target 'test-merge'.", "undefined"),          # make -k: no "Stop."
+    # another name than the suite's target: a missing include or file
+    ("make: *** No rule to make target 'mk/missing.mk'.  Stop.", "red"),
 ])
 def test_the_undefined_line_reads_real_make_variants(render, tmp_path, monkeypatch, output, state):
+    # a stand-in `make` on PATH prints the variant; the suite asks for test-merge
     out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
     train = _load_train(out)
     monkeypatch.delenv("MAKELEVEL", raising=False)
-    cmd = "printf '%s\\n' " + __import__("shlex").quote(output) + "; exit 2"
-    assert train._sh(tmp_path, cmd, lambda _l: None) == state
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    for name in ("make", "gmake"):
+        fake = bin_dir / name
+        fake.write_text("#!/bin/sh\nprintf '%s\\n' " + __import__("shlex").quote(output) + "\nexit 2\n")
+        fake.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}:{__import__('os').environ['PATH']}")
+    assert train._sh(tmp_path, "make test-merge", lambda _l: None) == state
+    assert train._sh(tmp_path, "gmake -j 4 -C . test-merge", lambda _l: None) == state
+    # a command that is not a make call names no target: never undefined on rc 2
+    assert train._sh(tmp_path, "sh -c 'make test-merge'", lambda _l: None) == "red"
+
+
+def test_a_missing_include_is_a_red_tree_not_an_undefined_suite(render, tmp_path, monkeypatch):
+    # real make: the Makefile includes a file a passenger deleted
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    train = _load_train(out)
+    monkeypatch.delenv("MAKELEVEL", raising=False)
+    tree = tmp_path / "tree"
+    tree.mkdir()
+    (tree / "Makefile").write_text("include mk/missing.mk\ntest:\n\ttrue\n")
+    assert train._sh(tree, "make test", lambda _l: None) == "red"
+    (tree / "Makefile").write_text("include test\nother:\n\ttrue\n")  # include named like the target
+    assert train._sh(tree, "make test", lambda _l: None) == "red"
+    (tree / "Makefile").write_text("other:\n\ttrue\n")
+    assert train._sh(tree, "make test", lambda _l: None) == "undefined"
+    (tree / "Makefile").write_text("lint:\n\ttrue\n")  # every target of a chain is the suite's
+    assert train._sh(tree, "make lint && make test", lambda _l: None) == "undefined"
 
 
 def test_an_offender_that_brought_the_suite_is_still_reported(render, tmp_path, monkeypatch):

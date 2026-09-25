@@ -65,9 +65,10 @@ the test lanes are free where the project has a lane script (see `tower.md`, lan
    twice: the base itself is checked once (a red main blames nobody and
    aborts), then a bisection over boarding-order prefixes names the first
    offender; it is dropped, gets a `blocked` report, and the rest is
-   rebuilt. A suite that does not exist on a tree (`No rule to make
-   target`, exit 127 — a passenger introduces the make target) makes that
-   tree *not comparable*, never red: the base is not called red, a prefix
+   rebuilt. A suite that does not exist on a tree (make's `No rule to make
+   target` for a target the suite command names, exit 127 — a passenger
+   introduces the make target) makes that tree *not comparable*, never red
+   (a missing include or prerequisite is a red tree): the base is not called red, a prefix
    is not blamed. Every red verdict logs the load average — a timeout under
    load 10 on 6 CPUs is a different finding from a broken test. A
    candidate dropped for a merge conflict is reported `blocked` too, with
