@@ -1,7 +1,7 @@
 {
   "bomFormat": "CycloneDX",
   "specVersion": "1.5",
-  "serialNumber": "urn:uuid:4186da95-2c80-5753-bbbe-100a9e4710a7",
+  "serialNumber": "urn:uuid:edd527c4-4c7b-54ee-9c32-d2bd648ba3f2",
   "version": 1,
   "metadata": {
     "tools": {
@@ -14,9 +14,9 @@
     },
     "component": {
       "type": "application",
-      "bom-ref": "pkg:github/Crashman1983/dev-process@2.31.1",
+      "bom-ref": "pkg:github/Crashman1983/dev-process@2.31.2",
       "name": "dev-process",
-      "version": "2.31.1",
+      "version": "2.31.2",
       "description": "Portable, harness-agnostic AI-assisted development process (copier template)",
       "licenses": [
         {
@@ -25,7 +25,7 @@
           }
         }
       ],
-      "purl": "pkg:github/Crashman1983/dev-process@2.31.1"
+      "purl": "pkg:github/Crashman1983/dev-process@2.31.2"
     }
   },
   "components": [
@@ -568,7 +568,7 @@
   ],
   "dependencies": [
     {
-      "ref": "pkg:github/Crashman1983/dev-process@2.31.1",
+      "ref": "pkg:github/Crashman1983/dev-process@2.31.2",
       "dependsOn": [
         "pkg:pypi/copier@9.16.0",
         "pkg:pypi/pytest@9.1.1",

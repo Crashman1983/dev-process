@@ -1166,6 +1166,8 @@ ein Wächter-Test gegen doppelte Klammern ohne Leerzeichen in Python-Vorlagen.
 Wer v2.27.1 oder v2.28.0 installiert hat und am Push scheitert: auf v2.28.1
 aktualisieren, `v2.28.1`.
 
+**v2.31.2 — Konfliktauflösungen in Merge-Commits zählen als ungeprüfter Code.** Befund aus Runde 2 des Reviews im Referenzprojekt: Der Fix aus v2.31.0 (`--no-merges`) übersah eine nach dem Review in einem Merge-Commit von Hand aufgelöste Konfliktstelle. `stale_review` liest Merges jetzt über ihren kombinierten Diff (`--cc`). Ein sauberer Merge trägt nichts bei; ein Ergebnis, das von allen Eltern abweicht (Konfliktauflösung, „evil merge“), zählt als Code der Arbeit. Je ein Test für beide Richtungen schlägt an, wenn die jeweilige Behandlung fehlt.
+
 **v2.31.1 — Befunde aus dem ersten Review des Rundenzählers.**
 - **Eindeutige Runden:** `attest.py` zählt eindeutige blockierte Runden statt Block-Zeilen. Mehrere Prüfer-Linsen einer Runde sind eine Runde (im Referenzprojekt hätten 21 doppelte Block-Zeilen überzählt). Weitere Prüfer der gerade blockierten Runde attestieren diese Runde mit `--round`.
 - **Ausnahmen immer erfasst:** `--exception` schreibt die `REVIEW-EXCEPTION`-Zeile auch dann, wenn keine attest-Regel greift, etwa bei einer Runde über die Kappe hinaus.
