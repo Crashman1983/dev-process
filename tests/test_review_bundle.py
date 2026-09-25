@@ -376,7 +376,7 @@ def test_bundle_lists_evidence_pair_and_changed_images(render, tmp_path):
 
 
 def test_bundle_names_identical_and_placeholder_evidence_as_void(render, tmp_path):
-    # #2093: both images of the pair showed only the loading state
+    # both images of a pair showed only the loading state
     out = render(tmp_path, {"project_name": "d", "modules": {}})
     _seed_repo(out)
     plans = out / ".process-work/plans"
@@ -449,3 +449,27 @@ def test_a_large_branch_gets_a_size_warning(render, tmp_path, monkeypatch):
     assert r.returncode == 0, r.stderr
     assert "**SIZE WARNING:** this branch changes 5 files / 42 lines" in r.stdout
     assert "SIZE WARNING" in r.stderr
+
+
+def test_gate_code_without_a_refute_line_gets_a_warning(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    gate = out / "scripts/process/new_gate.py"
+    gate.write_text("x = 1\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "feat: a new gate")
+    r = _run(out, "--base", "main")
+    assert r.returncode == 0, r.stderr
+    assert "**REFUTE WARNING:** this diff changes gate code (scripts/process/new_gate.py)" in r.stdout
+    assert "REFUTE WARNING" in r.stderr
+    plan = out / ".process-work/plans/2026-07-09-widget.md"
+    plan.write_text(plan.read_text() + "\nREFUTE work=9 round=1: 12 scenarios, 2 findings — fixed\n")
+    _git(out, "commit", "-q", "-am", "docs: refute recorded")
+    r = _run(out, "--base", "main")
+    assert "REFUTE WARNING" not in r.stdout + r.stderr
+
+
+def test_product_code_needs_no_refute(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    assert "REFUTE WARNING" not in _run(out, "--base", "main").stdout

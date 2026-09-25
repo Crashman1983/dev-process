@@ -526,7 +526,7 @@ INTEGRATION_TARGET_REFS = ("refs/heads/main", "refs/heads/master")
 PUSH_TARGETS_ENV = "PROCESS_PUSH_TARGETS"
 PRE_COMMIT_TARGET_ENV = "PRE_COMMIT_REMOTE_BRANCH"
 # The issue numbers a push CLAIMS, not every `#N` it mentions. A cross-reference
-# ("see #1288", "Merge pull request #1589") claims nothing — read as a claim it
+# ("see #12", "Merge pull request #34") claims nothing — read as a claim it
 # makes a foreign Tier 3 plan this push's proof to produce and reds a branch that
 # has nothing to do with it. Two forms count: a GitHub closing trailer anywhere
 # in the message, and the `… (#N)` subject convention.

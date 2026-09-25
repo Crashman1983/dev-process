@@ -258,6 +258,16 @@ SIZE_IGNORED = re.compile(r"^\.process-work/|(^|/)(package-lock\.json|uv\.lock|p
                           r"pnpm-lock\.yaml|Cargo\.lock|go\.sum)$")
 
 
+GATE_PATHS = ("scripts/process/", ".githooks/")
+REFUTE_LINE = re.compile(r"^\s*(?:[-*]\s+)?REFUTE\s+work=\S+", re.MULTILINE)
+
+
+def _gate_files(root: Path, base_ref: str) -> list[str]:
+    """Gate code the branch changes (`docs/process/refute.md`)."""
+    names = _git(root, "diff", "--name-only", f"{base_ref}...HEAD") or ""
+    return sorted(n for n in names.splitlines() if n.startswith(GATE_PATHS))
+
+
 def review_size(root: Path, base_ref: str) -> tuple[int, int]:
     """(files, changed lines) of the whole branch — process bookkeeping,
     lock files and binaries left out."""
@@ -304,6 +314,14 @@ def build(root: Path, base: str | None, plan_filter: str | None = None,
                 "Reviews this large ran five to seven rounds downstream. Split it before the "
                 "first round if the plan allows; otherwise say so in the verdict and review "
                 "it slice by slice.\n")
+
+    if sized is not None and not since:
+        gate_files = _gate_files(root, sized)
+        if gate_files and not any(REFUTE_LINE.search(t or "") for t in plan_texts.values()):
+            add(f"**REFUTE WARNING:** this diff changes gate code ({', '.join(gate_files[:3])}"
+                f"{', …' if len(gate_files) > 3 else ''}) and no plan carries a `REFUTE work=…` line — "
+                "gate code is attacked by a fresh agent before its first review round "
+                "(`docs/process/refute.md`). Say in the verdict that it was not.\n")
 
     kernel = _kernel_block(root)
     add("## The binding rules (kernel)\n")
@@ -553,8 +571,7 @@ def main(argv: list[str]) -> int:
             print(detail, file=sys.stderr)
             return status
     text = build(root, base, plan_filter, since)
-    warn = next((ln for ln in text.splitlines() if ln.startswith("**SIZE WARNING:**")), None)
-    if warn:
+    for warn in (ln for ln in text.splitlines() if ln.startswith(("**SIZE WARNING:**", "**REFUTE WARNING:**"))):
         print("make_review_bundle: " + warn.replace("**", ""), file=sys.stderr)
     if target is not None and partial is not None:
         try:  # atomic: a reader never sees half a bundle

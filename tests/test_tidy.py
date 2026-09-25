@@ -29,7 +29,7 @@ def _repo_with_residue(render, tmp_path):
     (out / "specs/007-finished/tasks.md").write_text("- [x] T001 done\n")
     (out / "specs/007-finished/spec.md").write_text("# Spec\n\n- SC-001 it works\n")
     (out / "specs/007-finished/plan.md").write_text("# Plan\n\nissue: #7\nsc-evidenced: SC-001 test_x\n")
-    # #2065 downstream: finished, but the pruner refuses these — owner decisions
+    # finished, but the pruner refuses these — owner decisions
     (out / "specs/009-noplan").mkdir(parents=True)
     (out / "specs/009-noplan/tasks.md").write_text("- [x] T001 done\n")
     (out / "specs/009-noplan/spec.md").write_text("# Spec\n")
@@ -110,7 +110,7 @@ def _tidy(out):
 
 
 def test_an_unreadable_plan_or_an_old_pruner_never_crashes_the_report(render, tmp_path, monkeypatch):
-    # downstream residual (#2155 AC-3)
+    # an unreadable plan or an older pruner must not crash the report
     from pathlib import Path
     out = render(tmp_path / "w", {"project_name": "d", "modules": {"speckit": True}})
     d = out / "specs/011-x"

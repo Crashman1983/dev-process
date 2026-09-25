@@ -193,3 +193,7 @@ One distinction matters here: an in-context self-grade is fine as an
 but it must not be *trusted as the gate* — read as assurance, a self-grade in
 the producing context is the worst of both, a model call that returns false
 comfort. Prefer one trustworthy independent check over several correlated ones.
+
+**Refute before review (gate code).** A change to the gates' own code is attacked by a fresh
+agent before its first review round — `refute.md` holds the brief and the scenario classes that
+broke downstream.
