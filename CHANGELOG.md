@@ -1166,6 +1166,12 @@ ein Wächter-Test gegen doppelte Klammern ohne Leerzeichen in Python-Vorlagen.
 Wer v2.27.1 oder v2.28.0 installiert hat und am Push scheitert: auf v2.28.1
 aktualisieren, `v2.28.1`.
 
+**v2.31.3 — gleiche Prüfer über alle Runden.** `review.md` ergänzt die Rundenökonomie:
+- **Ein Prüfer-Set pro Arbeit:** Runde 1 fährt das volle Set, das der Tier verlangt. Folgerunden nutzen dasselbe Set, ohne neue Linsen und ohne Wechsel der Modellfamilie. Fällt ein Prüfer aus, wird der Ersatz im Journal vermerkt.
+- **Folgerunden prüfen den Fix und sein Umfeld:** Ein älterer Befund außerhalb davon wird ein eigenes Issue, außer er blockiert diese Änderung.
+
+Anlass war die Analyse im Referenzprojekt: Ein neuer Prüfer in einer späteren Runde fand Altbefunde, und jeder davon wurde zu einer eigenen Runde.
+
 **v2.31.2 — Konfliktauflösungen in Merge-Commits zählen als ungeprüfter Code.** Befund aus Runde 2 des Reviews im Referenzprojekt: Der Fix aus v2.31.0 (`--no-merges`) übersah eine nach dem Review in einem Merge-Commit von Hand aufgelöste Konfliktstelle. `stale_review` liest Merges jetzt über ihren kombinierten Diff (`--cc`). Ein sauberer Merge trägt nichts bei; ein Ergebnis, das von allen Eltern abweicht (Konfliktauflösung, „evil merge“), zählt als Code der Arbeit. Je ein Test für beide Richtungen schlägt an, wenn die jeweilige Behandlung fehlt.
 
 **v2.31.1 — Befunde aus dem ersten Review des Rundenzählers.**
