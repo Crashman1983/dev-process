@@ -263,9 +263,12 @@ SIZE_IGNORED = re.compile(r"^\.process-work/|(^|/)(package-lock\.json|uv\.lock|p
 GATE_PATHS = ("scripts/process/", ".githooks/", ".github/workflows/")
 GATE_FILES = ("Makefile", ".pre-commit-config.yaml")
 # a real REFUTE line: at most three spaces of indent (four is a code block),
-# any list marker, and a work id that is not the brief's placeholder
+# any list marker, a work id that is not the brief's placeholder, a round and
+# what was found. A bare `REFUTE work=x` or a line in backticks is a mention,
+# not a record (downstream review: both switched the warning off)
 REFUTE_LINE = re.compile(
-    r"^ {0,3}(?:(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s+)?)?`?REFUTE\s+work=(?!<)(?!TODO\b)[\w#./-]+",
+    r"^ {0,3}(?:(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s+)?)?REFUTE\s+work=(?P<work>(?!<)(?!TODO\b)[\w#./-]+)"
+    r"\s+round=\d+:[ \t]*(?!<)\S.*$",
     re.MULTILINE)
 HTML_COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
 
@@ -282,11 +285,28 @@ def _gate_files(root: Path, base_ref: str) -> list[str] | None:
                   if n and (n.startswith(GATE_PATHS) or n in GATE_FILES))
 
 
-def _refuted(plan_texts) -> bool:
-    """A REFUTE line outside fenced blocks and HTML comments — an example
-    quoted from the brief does not count."""
-    return any(REFUTE_LINE.search(_review_gate._unfenced(HTML_COMMENT.sub("", t or "")))
-               for t in plan_texts)
+def _refute_lines(text: str) -> dict[str, set[str]]:
+    """REFUTE lines outside fenced blocks and HTML comments, by work id — an
+    example quoted from the brief does not count."""
+    found: dict[str, set[str]] = {}
+    for m in REFUTE_LINE.finditer(_review_gate._unfenced(HTML_COMMENT.sub("", text or ""))):
+        found.setdefault(m.group("work"), set()).add(m.group(0).strip())
+    return found
+
+
+def _unrefuted(plans: dict[Path, str], before: dict[Path, str] | None = None) -> list[str]:
+    """Plans without a REFUTE line of their OWN work — a line of one stacked
+    plan does not cover another (downstream review). With `before` (a delta
+    re-review), the line must be new since then: the fix gets refuted."""
+    missing: list[str] = []
+    for plan, text in plans.items():
+        ids = _review_gate._plan_work_ids(plan.stem, text, include_dedated=True)
+        lines = set().union(*(v for k, v in _refute_lines(text).items() if k in ids))
+        if before is not None:
+            lines -= set().union(set(), *_refute_lines(before.get(plan, "")).values())
+        if not lines:
+            missing.append(plan.name)
+    return missing
 
 
 def review_size(root: Path, base_ref: str) -> tuple[int, int]:
@@ -336,16 +356,22 @@ def build(root: Path, base: str | None, plan_filter: str | None = None,
                 "first round if the plan allows; otherwise say so in the verdict and review "
                 "it slice by slice.\n")
 
-    if sized is not None and not since:
-        gate_files = _gate_files(root, sized)
+    if sized is not None:
+        # a delta re-review: the fix round's own gate code, refuted anew
+        gate_files = _gate_files(root, since or sized)
+        before = ({plan: _git(root, "show", f"{since}:{plan.relative_to(root).as_posix()}") or ""
+                   for plan in plan_texts} if since else None)
+        missing = _unrefuted(plan_texts, before) if plan_texts else ["(no active plan)"]
         if gate_files is None:
             add("*(REFUTE check unavailable: git could not list the branch's files — a shallow clone "
                 "or no merge base; check by hand whether gate code changed)*\n")
-        elif gate_files and not _refuted(plan_texts.values()):
-            add(f"**REFUTE WARNING:** this diff changes gate code ({', '.join(gate_files[:3])}"
-                f"{', …' if len(gate_files) > 3 else ''}) and no plan carries a `REFUTE work=…` line — "
-                "gate code is attacked by a fresh agent before its first review round "
-                "(`docs/process/refute.md`). Say in the verdict that it was not.\n")
+        elif gate_files and missing:
+            add(f"**REFUTE WARNING:** this {'delta' if since else 'diff'} changes gate code "
+                f"({', '.join(gate_files[:3])}{', …' if len(gate_files) > 3 else ''}) and "
+                f"{', '.join(missing[:3])}{' …' if len(missing) > 3 else ''} carries no "
+                f"{'new ' if since else ''}`REFUTE work=<its id> round=<r>: …` line — gate code is "
+                "attacked by a fresh agent before its first review round, and a fix round's gate "
+                "code again (`docs/process/refute.md`). Say in the verdict that it was not.\n")
 
     kernel = _kernel_block(root)
     add("## The binding rules (kernel)\n")

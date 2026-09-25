@@ -510,7 +510,12 @@ def test_an_example_refute_line_does_not_count(render, tmp_path):
                     "\n<!-- REFUTE work=9 round=1: done -->\n",
                     "\n    REFUTE work=9 round=1: indented code block\n",
                     "\nREFUTE work=<id> round=<r>: placeholder\n",
-                    "\nREFUTE work=TODO round=1: later\n"):
+                    "\nREFUTE work=TODO round=1: later\n",
+                    # a mention is not a record: no round, no content, backticks
+                    "\nREFUTE work=9\n",
+                    "\nREFUTE work=9 round=1:\n",
+                    "\n`REFUTE work=9 round=1: done`\n",
+                    "\nSee `REFUTE work=9 round=1: done` in the brief.\n"):
         plan.write_text(base + example)
         _git(out, "commit", "-q", "-am", "plan")
         assert "**REFUTE WARNING:**" in _run(out, "--base", "main").stdout, example
@@ -523,10 +528,51 @@ def test_list_styles_of_a_real_refute_line_count(render, tmp_path):
     plan = out / ".process-work/plans/2026-07-09-widget.md"
     base = plan.read_text()
     for line in ("- [x] REFUTE work=9 round=1: done", "+ REFUTE work=9 round=1: done",
-                 "1. REFUTE work=9 round=1: done", "`REFUTE work=9 round=1: done`"):
+                 "1. REFUTE work=9 round=1: done", "REFUTE work=2026-07-09-widget round=2: `x` held"):
         plan.write_text(base + "\n" + line + "\n")
         _git(out, "commit", "-q", "-am", "plan")
         assert "REFUTE WARNING" not in _run(out, "--base", "main").stdout, line
+
+
+def test_a_refute_line_of_another_plan_does_not_cover_this_one(render, tmp_path):
+    # stacked plans: each one records its own refute
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    _gate_commit(out, "scripts/process/g.py")
+    plans = out / ".process-work/plans"
+    (plans / "2026-07-10-other.md").write_text("# Other\n\ntier: 2\nissue: #10\n\n"
+                                               "REFUTE work=10 round=1: 5 scenarios, 0 findings\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "stacked plan")
+    t = _run(out, "--base", "main").stdout
+    assert "**REFUTE WARNING:**" in t and "2026-07-09-widget.md" in t and "2026-07-10-other.md carries" not in t
+    widget = plans / "2026-07-09-widget.md"
+    widget.write_text(widget.read_text() + "\nREFUTE work=10 round=1: borrowed\n")
+    _git(out, "commit", "-q", "-am", "a line naming the other work")
+    assert "**REFUTE WARNING:**" in _run(out, "--base", "main").stdout
+
+
+def test_a_delta_re_review_of_gate_code_needs_a_new_refute_line(render, tmp_path):
+    # the fix round's gate code gets refuted, not the first round's line reused
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    plan = out / ".process-work/plans/2026-07-09-widget.md"
+    plan.write_text(plan.read_text() + "\nREFUTE work=9 round=1: 12 scenarios, 2 findings — fixed\n")
+    _gate_commit(out, "scripts/process/g.py")
+    reviewed = _git(out, "rev-parse", "HEAD").stdout.strip()
+    assert "REFUTE WARNING" not in _run(out, "--base", "main").stdout
+    _gate_commit(out, "scripts/process/g.py", "x = 2\n", "fix round")
+    r = _run(out, "--base", "main", "--since", reviewed)
+    assert r.returncode == 0, r.stderr
+    assert "**REFUTE WARNING:** this delta changes gate code" in r.stdout and "REFUTE WARNING" in r.stderr
+    plan.write_text(plan.read_text() + "REFUTE work=9 round=2: 6 scenarios, 0 findings\n")
+    _git(out, "commit", "-q", "-am", "docs: refute of the fix")
+    assert "REFUTE WARNING" not in _run(out, "--base", "main", "--since", reviewed).stdout
+    # a delta without gate code needs none
+    (out / "widget.py").write_text("def widget():\n    return 43\n")
+    _git(out, "commit", "-q", "-am", "product fix")
+    head = _git(out, "rev-parse", "HEAD~1").stdout.strip()
+    assert "REFUTE WARNING" not in _run(out, "--base", "main", "--since", head).stdout
 
 
 def test_no_merge_base_says_the_refute_check_did_not_run(render, tmp_path, monkeypatch):

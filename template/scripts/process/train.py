@@ -342,7 +342,50 @@ def plan(root: Path, *, min_candidates: int, max_wait_hours: float) -> dict:
 # "command not found" printed by a test that shells out, is a red suite
 # (downstream review residual; the MAKELEVEL case was found by the pre-push
 # hook, which itself runs pytest under make).
-def _undefined_line() -> re.Pattern[str]:
+# make options that take their value as the next word
+_MAKE_VALUE_OPTS = {"-C", "-f", "-I", "-o", "-W", "--directory", "--file", "--makefile", "--include-dir",
+                    "--old-file", "--assume-old", "--what-if", "--new-file", "--assume-new"}
+_SHELL_OPS = {"&&", "||", ";", "|", "&"}
+
+
+def _make_targets(cmd: str) -> set[str]:
+    """The targets the suite command asks make for — `make test`, `make -C x
+    a b`, `gmake …`, several in a `&&` chain. Empty when the command is not
+    a make call the train can read (then no make line reads undefined)."""
+    try:
+        words = shlex.split(cmd)
+    except ValueError:
+        return set()
+    targets: set[str] = set()
+    in_make = skip = False
+    for w in words:
+        if w in _SHELL_OPS or w.endswith(";"):
+            in_make = False
+            continue
+        if skip:
+            skip = False
+            continue
+        if not in_make:
+            in_make = Path(w).name in ("make", "gmake")
+            continue
+        if w in _MAKE_VALUE_OPTS or w in ("-j", "-l"):
+            skip = w not in ("-j", "-l")
+            continue
+        if w.startswith("-") or "=" in w:
+            continue
+        if w.isdigit():  # `-j 4`
+            continue
+        targets.add(w)
+    return targets
+
+
+def _undefined_line(targets: set[str]) -> re.Pattern[str] | None:
+    """make's own "no such target" line for one of the suite's targets —
+    None when the command names none. A missing include or prerequisite
+    prints the same words for ITS name; bound to the target, it reads red
+    (downstream review: `include mk/missing.mk` read as an undefined suite)."""
+    if not targets:
+        return None
     level = os.environ.get("MAKELEVEL", "0")
     level = level if level.isascii() and level.isdigit() else "0"
     prefix = "make" if int(level) == 0 else f"make\\[{int(level)}\\]"  # (g)make
@@ -351,8 +394,24 @@ def _undefined_line() -> re.Pattern[str]:
     # under -k omits "Stop.", some systems call it gmake. A translated make
     # (a non-English locale) is not recognised and reads red — run the train
     # with LC_ALL=C or LANG=C if the suite is introduced by a passenger.
-    return re.compile(rf"^(?:g?{prefix}): \*\*\* No rule to make target [`'][^'`]+'\.(?:\s+Stop\.)?$",
+    names = "|".join(re.escape(t) for t in sorted(targets))
+    return re.compile(rf"^(?:g?{prefix}): \*\*\* No rule to make target [`'](?:{names})'\.(?:\s+Stop\.)?$",
                       re.MULTILINE)
+
+
+def _undefined(cmd: str, rc: int, tail: list[str]) -> bool:
+    if rc == 127:
+        return True
+    line = _undefined_line(_make_targets(cmd)) if rc == 2 else None
+    if line is None:
+        return False
+    text = "\n".join(tail)
+    m = line.search(text)
+    if m is None:
+        return False
+    # an include of the same name as the target: make says it cannot find the file first
+    name = re.search(r"target [`'](.+)'\.", m.group(0)).group(1)
+    return not re.search(rf"(?m)^[^\n]*: {re.escape(name)}: No such file or directory$", text)
 
 
 def _load() -> str:
@@ -376,7 +435,7 @@ def _sh(cwd: Path, cmd: str, log) -> str:
         tail = (tail + [line.rstrip("\n")])[-40:]
     rc = proc.wait()
     state = "green" if rc == 0 else (
-        "undefined" if rc == 127 or (rc == 2 and _undefined_line().search("\n".join(tail))) else "red")
+        "undefined" if _undefined(cmd, rc, tail) else "red")
     log(f"$ {cmd} → exit {rc} ({state}{'' if rc == 0 else ', ' + _load()})")
     return state
 

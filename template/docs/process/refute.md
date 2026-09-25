@@ -61,10 +61,17 @@ naming why. Then one line in the plan, so the reviewer sees what was attacked:
 
     REFUTE work=<id> round=<r>: <n> scenarios, <k> findings — <fixed / DECISION …>
 
-The review bundle warns when a diff touches gate code and the plan carries no
-`REFUTE` line (a warning, not a block: the rule is observed before it gates).
+Each plan records its own: the line names that plan's work (its file name,
+with or without the date, or its issue), a round and what was found. A line
+of one stacked plan does not cover another, and a bare `REFUTE work=<id>`
+is a mention, not a record. After a fix round, the delta re-review
+(`--since`) wants a new line: the fix gets refuted, not the first line reused.
+
+The review bundle warns when a diff touches gate code and a plan carries no
+such line (a warning, not a block: the rule is observed before it gates).
 It approximates gate code by path — `scripts/process/`, `.githooks/`,
 `.github/workflows/`, `Makefile`, `.pre-commit-config.yaml` — so a Makefile
-change to a product target warns too; say so in the plan instead of refuting
+change to a product target warns too; say so in the plan (the warning stays,
+the reviewer weighs it) instead of refuting
 it. A line quoted as an example (in a code block, a comment, or with the
-brief's `<id>` placeholder) does not count.
+brief's `<id>` placeholder, or wrapped in backticks) does not count.
