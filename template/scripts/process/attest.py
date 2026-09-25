@@ -103,18 +103,27 @@ def _texts(root: Path, journal_dir: Path) -> list[str]:
 def round_problems(args, root: Path, journal_dir: Path) -> tuple[int, list[str]]:
     """(the counted round, what is wrong with the claimed one)."""
     texts = _texts(root, journal_dir)
-    blocks = sorted(int(f["round"]) for t in texts for _ln, f in parse_review_lines(t)[0]
-                    if f["work"] == args.work and f["verdict"] == "block")
+    # distinct rounds, not lines: several reviewers (lenses) of one round each
+    # write their block line — that is one round (observed downstream: 21
+    # duplicated block lines would have over-counted)
+    blocks = sorted({int(f["round"]) for t in texts for _ln, f in parse_review_lines(t)[0]
+                     if f["work"] == args.work and f["verdict"] == "block"})
     counted = 1 + len(blocks)
+    last = blocks[-1] if blocks else None
     problems: list[str] = []
-    if args.round_ is not None and str(args.round_) != str(counted):
+    claimed = str(args.round_) if args.round_ is not None else str(counted)
+    # the next round, or another reviewer (lens) of the round that just blocked
+    allowed = {str(counted)} | ({str(last)} if last is not None else set())
+    if claimed not in allowed:
         problems.append(
-            f"round {args.round_} claimed, but {len(blocks)} blocking REVIEW line(s) are recorded for "
-            f"work={args.work} — this is round {counted}. A re-check after a pass or a rebase keeps "
-            f"the round; a block that was never attested is attested first (its own --base/--head); "
-            f"omit --round to use the count")
+            f"round {args.round_} claimed, but {len(blocks)} blocking round(s) are recorded for "
+            f"work={args.work} — this is round {counted}"
+            + (f" (or {last}, for another reviewer of that round)" if last is not None else "")
+            + ". A re-check after a pass or a rebase keeps the round; a block that was never "
+            "attested is attested first (its own --base/--head); omit --round to use the count")
+    target = int(claimed) if claimed.isdigit() else counted
     causes = {(m.group("work"), int(m.group("round"))) for t in texts for m in ROOT_CAUSE.finditer(t)}
-    missing = [r for r in blocks if (args.work, r) not in causes]
+    missing = [r for r in blocks if r < target and (args.work, r) not in causes]
     if missing:
         problems.append(
             "no root cause for the fix of blocking round(s) " + ", ".join(map(str, missing))
@@ -189,9 +198,12 @@ def main() -> int:
         args.work += "-plan"
     counted, round_issues = round_problems(args, root, journal_dir)
     exception_note = ""
-    if round_issues and args.exception:
-        exception_note = (f"REVIEW-EXCEPTION work={args.work} round={counted}: {args.exception} "
-                          f"(overrides: {'; '.join(round_issues)})")
+    if args.exception:
+        # always written: an owner exception that trips no rule here (a round
+        # beyond the cap) must be countable too, never lost in silence
+        overrides = "; ".join(round_issues) if round_issues else "no attest rule tripped"
+        exception_note = (f"REVIEW-EXCEPTION work={args.work} round={args.round_ or counted}: "
+                          f"{args.exception} (overrides: {overrides})")
         round_issues = []
     args.round_ = counted if args.round_ is None else args.round_
     line, problems = build_line(args, root)

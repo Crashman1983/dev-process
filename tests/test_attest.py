@@ -238,3 +238,23 @@ def test_an_exception_is_recorded_and_plan_reviews_count_apart(render, tmp_path)
     r = _attest(out, *ab, "--plan-review", "--round", "1")
     assert r.returncode == 0, r.stderr
     assert "work=widget-plan" in r.stdout and "round=1" in r.stdout
+
+
+def test_several_lenses_blocking_one_round_count_once(render, tmp_path):
+    out, base, head = _repo(render, tmp_path)
+    ab = ("--base", base, "--head", head)
+    for reviewer in ("lens-a", "lens-b", "lens-c"):
+        assert _attest(out, *ab, "--verdict", "block", "--reviewer", reviewer).returncode == 0
+    plan = out / ".process-work/plans/2026-09-10-widget.md"
+    plan.write_text(plan.read_text() + "\nROOT-CAUSE work=widget round=1: x — test_x\n")
+    r = _attest(out, *ab, "--round", "2")
+    assert r.returncode == 0, r.stderr
+
+
+def test_an_exception_is_written_even_when_no_rule_trips(render, tmp_path):
+    # a third round granted by the owner trips no attest rule — still counted
+    out, base, head = _repo(render, tmp_path)
+    r = _attest(out, "--base", base, "--head", head, "--exception", "owner: third round granted")
+    assert r.returncode == 0, r.stderr
+    assert ("REVIEW-EXCEPTION work=widget round=1: owner: third round granted "
+            "(overrides: no attest rule tripped)") in _journal(out)

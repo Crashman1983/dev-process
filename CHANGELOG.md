@@ -1166,6 +1166,11 @@ ein Wächter-Test gegen doppelte Klammern ohne Leerzeichen in Python-Vorlagen.
 Wer v2.27.1 oder v2.28.0 installiert hat und am Push scheitert: auf v2.28.1
 aktualisieren, `v2.28.1`.
 
+**v2.31.1 — Befunde aus dem ersten Review des Rundenzählers.**
+- **Eindeutige Runden:** `attest.py` zählt eindeutige blockierte Runden statt Block-Zeilen. Mehrere Prüfer-Linsen einer Runde sind eine Runde (im Referenzprojekt hätten 21 doppelte Block-Zeilen überzählt). Weitere Prüfer der gerade blockierten Runde attestieren diese Runde mit `--round`.
+- **Ausnahmen immer erfasst:** `--exception` schreibt die `REVIEW-EXCEPTION`-Zeile auch dann, wenn keine attest-Regel greift, etwa bei einer Runde über die Kappe hinaus.
+- **Klarere Begründung im Zug:** Die Ablehnung eines Branches mit Gate-Code nennt jetzt die geforderte Stufe (REVIEW-Pass ab Tier 2).
+
 **v2.31.0 — der Zug unterscheidet Flake, fehlende Suite und fremde Passagiere; tidy wählt nur, was der Pruner annimmt.** Befunde aus dem Referenzprojekt (Zug 31 und 34).
 - **Flake:** Ist der kombinierte Baum rot, läuft derselbe Baum ein zweites Mal, bevor jemand beschuldigt wird. Ist er dann grün, meldet der Zug FLAKY und merged; eine Bisektion über einen Flake beschuldigt sonst, wer gerade im Präfix sitzt.
 - **Fehlende Suite:** Gibt es die Suite auf einem Baum nicht (`No rule to make target`, Exit 127, weil ein Passagier das Make-Ziel erst mitbringt), ist dieser Baum nicht vergleichbar statt rot. main gilt dann nicht als rot, und kein Präfix wird beschuldigt.
