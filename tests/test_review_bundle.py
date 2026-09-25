@@ -473,3 +473,70 @@ def test_product_code_needs_no_refute(render, tmp_path):
     out = render(tmp_path, {"project_name": "d", "modules": {}})
     _seed_repo(out)
     assert "REFUTE WARNING" not in _run(out, "--base", "main").stdout
+
+
+def _gate_commit(out, rel, text="x = 1\n", msg="gate change"):
+    f = out / rel
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text(text)
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", msg)
+
+
+def test_moving_a_gate_file_out_of_the_gate_paths_warns(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    _git(out, "mv", "scripts/process/tidy.py", "tidy_elsewhere.py")
+    _git(out, "commit", "-q", "-m", "move a gate away")
+    assert "**REFUTE WARNING:**" in _run(out, "--base", "main").stdout
+
+
+def test_gate_starters_and_non_ascii_names_warn(render, tmp_path):
+    for rel in ("Makefile", ".pre-commit-config.yaml", ".github/workflows/gates.yml",
+                "scripts/process/prüfung.py"):
+        out = render(tmp_path / rel.replace("/", "_"), {"project_name": "d", "modules": {}})
+        _seed_repo(out)
+        _gate_commit(out, rel)
+        assert "**REFUTE WARNING:**" in _run(out, "--base", "main").stdout, rel
+
+
+def test_an_example_refute_line_does_not_count(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    _gate_commit(out, "scripts/process/g.py")
+    plan = out / ".process-work/plans/2026-07-09-widget.md"
+    base = plan.read_text()
+    for example in ("\n```\nREFUTE work=9 round=1: done\n```\n",
+                    "\n<!-- REFUTE work=9 round=1: done -->\n",
+                    "\n    REFUTE work=9 round=1: indented code block\n",
+                    "\nREFUTE work=<id> round=<r>: placeholder\n",
+                    "\nREFUTE work=TODO round=1: later\n"):
+        plan.write_text(base + example)
+        _git(out, "commit", "-q", "-am", "plan")
+        assert "**REFUTE WARNING:**" in _run(out, "--base", "main").stdout, example
+
+
+def test_list_styles_of_a_real_refute_line_count(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    _gate_commit(out, "scripts/process/g.py")
+    plan = out / ".process-work/plans/2026-07-09-widget.md"
+    base = plan.read_text()
+    for line in ("- [x] REFUTE work=9 round=1: done", "+ REFUTE work=9 round=1: done",
+                 "1. REFUTE work=9 round=1: done", "`REFUTE work=9 round=1: done`"):
+        plan.write_text(base + "\n" + line + "\n")
+        _git(out, "commit", "-q", "-am", "plan")
+        assert "REFUTE WARNING" not in _run(out, "--base", "main").stdout, line
+
+
+def test_no_merge_base_says_the_refute_check_did_not_run(render, tmp_path, monkeypatch):
+    import importlib.util
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    sys.dont_write_bytecode = True
+    sys.path.insert(0, str(out / "scripts/process"))
+    spec = importlib.util.spec_from_file_location("mrb_under_test", out / "scripts/process/make_review_bundle.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    monkeypatch.setattr(mod, "_gate_files", lambda root, base: None)
+    assert "REFUTE check unavailable" in mod.build(out, "main")

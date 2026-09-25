@@ -1166,6 +1166,14 @@ ein Wächter-Test gegen doppelte Klammern ohne Leerzeichen in Python-Vorlagen.
 Wer v2.27.1 oder v2.28.0 installiert hat und am Push scheitert: auf v2.28.1
 aktualisieren, `v2.28.1`.
 
+**v2.32.1 — der erste Refute-Lauf, gegen die eigene Warnung.** Die Regel aus v2.32.0 wurde gleich auf ihre eigene Umsetzung angewandt: Ein frischer Agent fand an der REFUTE-Warnung drei Majors und drei Minors, alle behoben und je mit einem Test belegt, der gegen v2.32.0 fällt.
+- **Umbenennung aus dem Gate-Pfad:** Eine aus dem Gate-Pfad wegbewegte Datei warnt jetzt (`--no-renames`).
+- **REFUTE-Zeile als Beispiel:** Eine Zeile im Codeblock, im HTML-Kommentar, eingerückt oder mit Platzhalter (`<id>`, `TODO`) zählt nicht mehr.
+- **Gate-Pfade:** Umfassen jetzt auch `Makefile`, `.github/workflows/` und `.pre-commit-config.yaml`.
+- **Dateinamen:** Nicht-ASCII-Namen werden erkannt (`-z`).
+- **Listenformen:** `- [x]`, `+`, `1.` und Backticks werden erkannt.
+- **Flacher Klon oder keine Merge-Basis:** Das Bündel sagt, dass die Prüfung nicht lief.
+
 **v2.32.0 — Refute vor dem ersten Review für Gate-Code.** Ändert ein Diff `scripts/process/`, `.githooks/` oder die Gate-Konfiguration, greift ihn ein frischer Agent an, bevor der Review ihn sieht. Im Referenzprojekt brauchten Gate-Änderungen vier und mehr Runden; ein Refute-Durchlauf fand in zwei Läufen mehr als drei Review-Runden zuvor.
 - **`docs/process/refute.md` (neu):** Wann, wer, der Auftrag zum Kopieren und der Umgang mit Funden. Die Szenario-Klassen sind Umgehungen, Fehlalarme, stilles Durchlassen und die Umgebungsmatrix (make-Ebene, Hook, `gh` fehlt, flacher Klon, nur lokales main). Jeder Fund wird ein Regressionstest oder eine DECISION.
 - **Ergebniszeile:** `REFUTE work=<id> round=<r>: …` im Plan.
