@@ -1166,6 +1166,16 @@ ein Wächter-Test gegen doppelte Klammern ohne Leerzeichen in Python-Vorlagen.
 Wer v2.27.1 oder v2.28.0 installiert hat und am Push scheitert: auf v2.28.1
 aktualisieren, `v2.28.1`.
 
+**v2.32.4 — Review-Befunde zum Refute-Port, samt Refute des Fixes.** Ein Review des Ports im Referenzprojekt blockierte. Danach griff ein frischer Agent den Fix mit rund 165 Szenarien an und fand keinen Blocker, aber drei Majors. Alles unten ist behoben, jeweils mit einem Test, der gegen die Vorfassung fällt:
+- **REFUTE-Zeile ist ein Beleg, keine Erwähnung:** Sie braucht `round=<n>:` und Inhalt. Nicht mehr zählen ein nacktes `REFUTE work=…`, eine Zeile in Backticks, ein offenes `- [ ]`, Platzhalter-Inhalt (`TODO`, `…`) und alles hinter einem nicht geschlossenen `<!--`.
+- **Jeder Plan belegt seinen eigenen Refute:** Die Zeile muss die work-id ihres Plans nennen. Die Zeile eines gestapelten Plans deckt keinen anderen, die Warnung nennt die Pläne ohne Zeile.
+- **Delta-Review (`--since`):** Ändert der Delta Gate-Code, braucht jeder Plan eine Runde, die keine frühere Fassung von ihm schon hatte. Eine umformatierte alte Zeile oder ein umbenannter Plan zählt nicht als neuer Refute. Ohne auflösbare Basis prüft `--since` trotzdem.
+- **Zug, „Suite nicht vorhanden“:** Das gilt nur für ein Ziel, das das Suite-Kommando selbst nennt (auch in `(cd x && make test)`, `make test;`, `gmake -C x …`). Ein fehlendes include ist ein roter Baum; das erkennt der Zug an make's eigener Zeile `Makefile:N: <name>: No such file or directory`.
+- **Bekannt, nicht behoben:** Die folgenden Fälle sind im Code dokumentiert:
+  - Verschachtelte Listen mit vier Leerzeichen zählen nicht (Fehlalarm).
+  - `**issue:**` wird nicht erkannt; das kommt aus der Issue-Erkennung des Review-Gates.
+  - Druckt ein Test genau make's Zeile, oder löscht ein verschachteltes make `MAKELEVEL`, liest sich der Baum als „nicht vorhanden“. Das bricht ab und merged nichts.
+
 **v2.32.3 — der Zug nimmt nur mit, was ein Review am Branch-Kopf deckt.** Ein Branch, den ein Zug schon gemergt hatte, bekam danach neue Commits und stand im nächsten Zug als einstiegsbereit da: Der alte Bericht `done` und der alte REVIEW-Pass galten weiter. Ein Refute vor dem Review fand dazu einen Blocker, zwei Majors und einen Minor. Alles ist behoben, jeweils mit einem Test, der gegen die alte Fassung fällt:
 - **Deckung am Kopf:** Ein REVIEW-Pass boardet einen Branch nur, wenn sein geprüfter Kopf im Branch liegt und dahinter kein ungeprüfter Code steht. Die Regel ist dieselbe wie im Stale-Check des Review-Gates.
 - **`done` boardet nichts:** `done` schreibt der Zug nach dem Merge. Für Commits danach braucht es einen eigenen REVIEW-Pass.

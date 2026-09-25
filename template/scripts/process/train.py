@@ -345,22 +345,25 @@ def plan(root: Path, *, min_candidates: int, max_wait_hours: float) -> dict:
 # make options that take their value as the next word
 _MAKE_VALUE_OPTS = {"-C", "-f", "-I", "-o", "-W", "--directory", "--file", "--makefile", "--include-dir",
                     "--old-file", "--assume-old", "--what-if", "--new-file", "--assume-new"}
-_SHELL_OPS = {"&&", "||", ";", "|", "&"}
+_SHELL_PUNCT = set("();<>|&")
 
 
 def _make_targets(cmd: str) -> set[str]:
     """The targets the suite command asks make for — `make test`, `make -C x
-    a b`, `gmake …`, several in a `&&` chain. Empty when the command is not
-    a make call the train can read (then no make line reads undefined)."""
+    a b`, `(cd x && make test)`, `gmake …`, several in a `&&` chain. Empty
+    when the command is not a make call the train can read (then no make
+    line reads undefined)."""
     try:
-        words = shlex.split(cmd)
+        lex = shlex.shlex(cmd, posix=True, punctuation_chars=True)
+        lex.whitespace_split = True
+        words = list(lex)
     except ValueError:
         return set()
     targets: set[str] = set()
     in_make = skip = False
     for w in words:
-        if w in _SHELL_OPS or w.endswith(";"):
-            in_make = False
+        if set(w) <= _SHELL_PUNCT:  # an operator, a subshell, a redirection
+            in_make = skip = False
             continue
         if skip:
             skip = False
@@ -368,12 +371,10 @@ def _make_targets(cmd: str) -> set[str]:
         if not in_make:
             in_make = Path(w).name in ("make", "gmake")
             continue
-        if w in _MAKE_VALUE_OPTS or w in ("-j", "-l"):
-            skip = w not in ("-j", "-l")
+        if w in _MAKE_VALUE_OPTS or w in ("-l", "--load-average", "-E", "--eval"):
+            skip = True
             continue
-        if w.startswith("-") or "=" in w:
-            continue
-        if w.isdigit():  # `-j 4`
+        if w.startswith("-") or "=" in w or w.replace(".", "").isdigit():  # options, variables, `-j 4`
             continue
         targets.add(w)
     return targets
@@ -400,6 +401,9 @@ def _undefined_line(targets: set[str]) -> re.Pattern[str] | None:
 
 
 def _undefined(cmd: str, rc: int, tail: list[str]) -> bool:
+    # Known limit: this reads text — a test printing make's exact line, or a nested
+    # make with MAKELEVEL cleared, reads undefined; the train then aborts or
+    # excuses a prefix, it never merges on it.
     if rc == 127:
         return True
     line = _undefined_line(_make_targets(cmd)) if rc == 2 else None
@@ -411,7 +415,8 @@ def _undefined(cmd: str, rc: int, tail: list[str]) -> bool:
         return False
     # an include of the same name as the target: make says it cannot find the file first
     name = re.search(r"target [`'](.+)'\.", m.group(0)).group(1)
-    return not re.search(rf"(?m)^[^\n]*: {re.escape(name)}: No such file or directory$", text)
+    # make's own include line: `Makefile:3: <name>: No such file or directory`
+    return not re.search(rf"(?m)^[^\s:]+:\d+: {re.escape(name)}: No such file or directory$", text)
 
 
 def _load() -> str:
