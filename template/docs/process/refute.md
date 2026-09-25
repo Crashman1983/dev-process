@@ -63,3 +63,8 @@ naming why. Then one line in the plan, so the reviewer sees what was attacked:
 
 The review bundle warns when a diff touches gate code and the plan carries no
 `REFUTE` line (a warning, not a block: the rule is observed before it gates).
+It approximates gate code by path — `scripts/process/`, `.githooks/`,
+`.github/workflows/`, `Makefile`, `.pre-commit-config.yaml` — so a Makefile
+change to a product target warns too; say so in the plan instead of refuting
+it. A line quoted as an example (in a code block, a comment, or with the
+brief's `<id>` placeholder) does not count.

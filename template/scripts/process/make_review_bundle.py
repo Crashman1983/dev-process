@@ -258,14 +258,35 @@ SIZE_IGNORED = re.compile(r"^\.process-work/|(^|/)(package-lock\.json|uv\.lock|p
                           r"pnpm-lock\.yaml|Cargo\.lock|go\.sum)$")
 
 
-GATE_PATHS = ("scripts/process/", ".githooks/")
-REFUTE_LINE = re.compile(r"^\s*(?:[-*]\s+)?REFUTE\s+work=\S+", re.MULTILINE)
+# gate code as `docs/process/refute.md` defines it, approximated by path: the
+# gates, the hooks, and what starts them (make targets, CI, pre-commit)
+GATE_PATHS = ("scripts/process/", ".githooks/", ".github/workflows/")
+GATE_FILES = ("Makefile", ".pre-commit-config.yaml")
+# a real REFUTE line: at most three spaces of indent (four is a code block),
+# any list marker, and a work id that is not the brief's placeholder
+REFUTE_LINE = re.compile(
+    r"^ {0,3}(?:(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s+)?)?`?REFUTE\s+work=(?!<)(?!TODO\b)[\w#./-]+",
+    re.MULTILINE)
+HTML_COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
 
 
-def _gate_files(root: Path, base_ref: str) -> list[str]:
-    """Gate code the branch changes (`docs/process/refute.md`)."""
-    names = _git(root, "diff", "--name-only", f"{base_ref}...HEAD") or ""
-    return sorted(n for n in names.splitlines() if n.startswith(GATE_PATHS))
+def _gate_files(root: Path, base_ref: str) -> list[str] | None:
+    """Gate code the branch changes (`docs/process/refute.md`) — None when git
+    cannot tell. `--no-renames`: a gate file moved out of the gate paths is a
+    deletion there, not a silent new name elsewhere; `-z`: non-ASCII names
+    arrive unquoted."""
+    out = _git(root, "diff", "--name-only", "--no-renames", "-z", f"{base_ref}...HEAD")
+    if out is None:
+        return None
+    return sorted(n for n in out.split("\0")
+                  if n and (n.startswith(GATE_PATHS) or n in GATE_FILES))
+
+
+def _refuted(plan_texts) -> bool:
+    """A REFUTE line outside fenced blocks and HTML comments — an example
+    quoted from the brief does not count."""
+    return any(REFUTE_LINE.search(_review_gate._unfenced(HTML_COMMENT.sub("", t or "")))
+               for t in plan_texts)
 
 
 def review_size(root: Path, base_ref: str) -> tuple[int, int]:
@@ -317,7 +338,10 @@ def build(root: Path, base: str | None, plan_filter: str | None = None,
 
     if sized is not None and not since:
         gate_files = _gate_files(root, sized)
-        if gate_files and not any(REFUTE_LINE.search(t or "") for t in plan_texts.values()):
+        if gate_files is None:
+            add("*(REFUTE check unavailable: git could not list the branch's files — a shallow clone "
+                "or no merge base; check by hand whether gate code changed)*\n")
+        elif gate_files and not _refuted(plan_texts.values()):
             add(f"**REFUTE WARNING:** this diff changes gate code ({', '.join(gate_files[:3])}"
                 f"{', …' if len(gate_files) > 3 else ''}) and no plan carries a `REFUTE work=…` line — "
                 "gate code is attacked by a fresh agent before its first review round "
