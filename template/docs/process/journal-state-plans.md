@@ -209,6 +209,8 @@ REVIEW work=42 tier=2 reviewer=fresh-agent model=same independence=bundle,non-im
 | `head` | optional: reviewed branch head |
 | `diff` | optional: SHA-256 of the raw `git diff --binary base...head` bytes — the gate recomputes and verifies it |
 
+The journal only grows, and `.process-work/journal/.gitattributes` says so to git (`*.md merge=union`): two branches that append to the same file merge by keeping both sides' lines — no conflict in the merge train. It is scoped to the journal directory; a project's own root `.gitattributes` is untouched.
+
 Two companion lines. `ROOT-CAUSE work=<id> round=<r>: <cause> — <the test that failed before the fix>` (journal or plan): each blocking round's fix names its cause before the next round, or `attest.py` refuses it. `REVIEW-EXCEPTION work=<id> round=<n>: <reason> …`: written by `attest.py --exception` when the owner overrides either rule — countable, never silent.
 
 A `REVIEW` inside a ```-fenced block is a quotation and is ignored (quote

@@ -1,0 +1,6 @@
+# The journal only grows: two branches that append to the same daily file
+# must merge by keeping both sides' lines, never conflict (observed
+# downstream: two reviewed branches blocked each other in the merge train over
+# appended REVIEW lines). Scoped to this directory, so a project's own root
+# .gitattributes is untouched.
+*.md merge=union
