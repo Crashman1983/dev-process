@@ -267,10 +267,13 @@ GATE_FILES = ("Makefile", ".pre-commit-config.yaml")
 # what was found. A bare `REFUTE work=x` or a line in backticks is a mention,
 # not a record (downstream review: both switched the warning off)
 REFUTE_LINE = re.compile(
-    r"^ {0,3}(?:(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s+)?)?REFUTE\s+work=(?P<work>(?!<)(?!TODO\b)[\w#./-]+)"
-    r"\s+round=\d+:[ \t]*(?!<)\S.*$",
+    r"^ {0,3}(?:(?:[-*+]|\d+[.)])[ \t]+(?:\[[xX]\][ \t]+)?)?REFUTE[ \t]+work=(?P<work>(?!<)(?!TODO\b)[\w#./-]+)"
+    r"[ \t]+round=(?P<round>\d+):[ \t]*(?!<|TODO\b|…|\.\.\.)\S.*$",
     re.MULTILINE)
-HTML_COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
+# Known limit: an item nested four spaces deep reads as a code block and does
+# not count (a false warning, never a silent pass).
+# an unclosed comment hides the rest of the file, as Markdown renders it
+HTML_COMMENT = re.compile(r"<!--.*?(?:-->|\Z)", re.DOTALL)
 
 
 def _gate_files(root: Path, base_ref: str) -> list[str] | None:
@@ -285,26 +288,45 @@ def _gate_files(root: Path, base_ref: str) -> list[str] | None:
                   if n and (n.startswith(GATE_PATHS) or n in GATE_FILES))
 
 
-def _refute_lines(text: str) -> dict[str, set[str]]:
-    """REFUTE lines outside fenced blocks and HTML comments, by work id — an
-    example quoted from the brief does not count."""
-    found: dict[str, set[str]] = {}
-    for m in REFUTE_LINE.finditer(_review_gate._unfenced(HTML_COMMENT.sub("", text or ""))):
-        found.setdefault(m.group("work"), set()).add(m.group(0).strip())
-    return found
+def _refute_records(text: str) -> set[tuple[str, int]]:
+    """(work, round) of the REFUTE lines outside fenced blocks and HTML
+    comments — an example quoted from the brief does not count; an unchecked
+    `- [ ]` item is a to-do, not a record."""
+    return {(m.group("work"), int(m.group("round")))
+            for m in REFUTE_LINE.finditer(HTML_COMMENT.sub("", _review_gate._unfenced(text or "")))}
 
 
-def _unrefuted(plans: dict[Path, str], before: dict[Path, str] | None = None) -> list[str]:
+def _own_rounds(stem: str, text: str) -> tuple[set[str], set[int]]:
+    ids = _review_gate._plan_work_ids(stem, text, include_dedated=True)
+    return ids, {r for w, r in _refute_records(text) if w in ids}
+
+
+def _plans_at(root: Path, ref: str) -> list[tuple[set[str], set[int]]] | None:
+    """Every plan at `ref` (active and archived) as (work ids, refuted
+    rounds) — None when git cannot tell."""
+    names = _git(root, "ls-tree", "-r", "-z", "--name-only", ref, "--", PLANS)
+    if names is None:
+        return None
+    out = []
+    for rel in (n for n in names.split("\0") if n.endswith(".md")):
+        text = _git(root, "show", f"{ref}:{rel}")
+        if text is None:
+            return None
+        out.append(_own_rounds(Path(rel).stem, text))
+    return out
+
+
+def _unrefuted(plans: dict[Path, str], before: list[tuple[set[str], set[int]]] | None = None) -> list[str]:
     """Plans without a REFUTE line of their OWN work — a line of one stacked
-    plan does not cover another (downstream review). With `before` (a delta
-    re-review), the line must be new since then: the fix gets refuted."""
+    plan does not cover another (downstream review). With `before` (the plans
+    at the delta's start), the plan needs a round none of its earlier selves
+    recorded — a reformatted old line or a renamed plan is no new refute."""
     missing: list[str] = []
     for plan, text in plans.items():
-        ids = _review_gate._plan_work_ids(plan.stem, text, include_dedated=True)
-        lines = set().union(*(v for k, v in _refute_lines(text).items() if k in ids))
+        ids, rounds = _own_rounds(plan.stem, text)
         if before is not None:
-            lines -= set().union(set(), *_refute_lines(before.get(plan, "")).values())
-        if not lines:
+            rounds -= {r for old_ids, old_rounds in before if old_ids & ids for r in old_rounds}
+        if not rounds:
             missing.append(plan.name)
     return missing
 
@@ -356,11 +378,12 @@ def build(root: Path, base: str | None, plan_filter: str | None = None,
                 "first round if the plan allows; otherwise say so in the verdict and review "
                 "it slice by slice.\n")
 
-    if sized is not None:
+    if sized is not None or since:
         # a delta re-review: the fix round's own gate code, refuted anew
         gate_files = _gate_files(root, since or sized)
-        before = ({plan: _git(root, "show", f"{since}:{plan.relative_to(root).as_posix()}") or ""
-                   for plan in plan_texts} if since else None)
+        before = _plans_at(root, since) if since else None
+        if since and before is None:
+            gate_files = None
         missing = _unrefuted(plan_texts, before) if plan_texts else ["(no active plan)"]
         if gate_files is None:
             add("*(REFUTE check unavailable: git could not list the branch's files — a shallow clone "
