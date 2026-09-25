@@ -1166,6 +1166,8 @@ ein Wächter-Test gegen doppelte Klammern ohne Leerzeichen in Python-Vorlagen.
 Wer v2.27.1 oder v2.28.0 installiert hat und am Push scheitert: auf v2.28.1
 aktualisieren, `v2.28.1`.
 
+**v2.31.7 — Suite nicht vorhanden, auf jeder MAKELEVEL.** v2.31.6 erkannte nur die Zeile `make:`. Läuft der Zug selbst unter make (`make train`, MAKELEVEL 1), meldet das make der Suite sich als `make[1]:`. Das hätte den Fall „der Passagier bringt das Ziel erst mit“ wieder rot gemacht. Aufgefallen ist das beim pre-push-Hook im Referenzprojekt, der pytest selbst unter make startet. Jetzt zählt die Ebene direkt unter der des Zugs. Tiefere Ebenen, etwa ein Test, der make aufruft, bleiben rot.
+
 **v2.31.6 — vier Restbefunde aus demselben Review.**
 - **Zug, „nicht vorhanden“:** Als „Suite nicht vorhanden“ gilt nur noch Exit 127 oder die eigene „No rule“-Stoppzeile des obersten `make`. Ein „command not found“ aus einem Test heißt rot.
 - **Zug, nach einem Abwurf:** Die verbleibende Kombination bekommt wieder ihre eigene Flake-Wiederholung.

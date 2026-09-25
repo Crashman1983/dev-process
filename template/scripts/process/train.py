@@ -291,12 +291,19 @@ def plan(root: Path, *, min_candidates: int, max_wait_hours: float) -> dict:
 # --- the run -------------------------------------------------------------------------------
 
 # the suite command does not exist on this tree (a passenger introduces the
-# make target): that tree cannot be judged — it is not red. Only the top-level
-# signals count: the shell's exit 127 for a missing command, or the TOP make's
-# own "No rule" stop line (a sub-make prints `make[1]:`). A "command not found"
-# printed by a test that shells out is a red suite, not an undefined one
-# (downstream review residual).
-UNDEFINED = re.compile(r"^make: \*\*\* No rule to make target '[^']+'.*Stop\.$", re.MULTILINE)
+# make target): that tree cannot be judged — it is not red. Only the suite's
+# own signals count: the shell's exit 127 for a missing command, or the "No
+# rule" stop line of the suite's OWN make — the level right below the one the
+# train runs at (`make train` puts the train at MAKELEVEL 1, so the suite's
+# make prints `make[1]:`; run bare, it prints `make:`). A deeper make, or a
+# "command not found" printed by a test that shells out, is a red suite
+# (downstream review residual; the MAKELEVEL case was found by the pre-push
+# hook, which itself runs pytest under make).
+def _undefined_line() -> re.Pattern[str]:
+    level = os.environ.get("MAKELEVEL", "0")
+    level = level if level.isascii() and level.isdigit() else "0"
+    prefix = "make" if int(level) == 0 else f"make\\[{int(level)}\\]"
+    return re.compile(rf"^{prefix}: \*\*\* No rule to make target '[^']+'.*Stop\.$", re.MULTILINE)
 
 
 def _load() -> str:
@@ -320,7 +327,7 @@ def _sh(cwd: Path, cmd: str, log) -> str:
         tail = (tail + [line.rstrip("\n")])[-40:]
     rc = proc.wait()
     state = "green" if rc == 0 else (
-        "undefined" if rc == 127 or (rc == 2 and UNDEFINED.search("\n".join(tail))) else "red")
+        "undefined" if rc == 127 or (rc == 2 and _undefined_line().search("\n".join(tail))) else "red")
     log(f"$ {cmd} → exit {rc} ({state}{'' if rc == 0 else ', ' + _load()})")
     return state
 
