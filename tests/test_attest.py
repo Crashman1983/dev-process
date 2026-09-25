@@ -169,7 +169,7 @@ def test_a_fellow_passengers_files_are_not_this_works_late_code(render, tmp_path
     (out / "other.py").write_text("x = 1\n")
     _git(out, "add", "-A")
     _git(out, "commit", "-q", "-m", "feat: other passenger")
-    _git(out, "checkout", "-q", "-b", "train", "main")
+    _git(out, "checkout", "-q", "-b", "train/a", "main")
     _git(out, "merge", "-q", "--no-ff", "--no-edit", "feature")
     _git(out, "merge", "-q", "--no-ff", "--no-edit", "other")
     gate = [sys.executable, str(out / "scripts/process/check_review.py"), "."]
@@ -181,7 +181,7 @@ def test_a_fellow_passengers_files_are_not_this_works_late_code(render, tmp_path
     (out / "widget.py").write_text("def widget():\n    return 45\n")
     _git(out, "add", "-A")
     _git(out, "commit", "-q", "-m", "fix: after the review")
-    _git(out, "checkout", "-q", "train")
+    _git(out, "checkout", "-q", "train/a")
     _git(out, "merge", "-q", "--no-ff", "--no-edit", "feature")
     r = subprocess.run(gate, cwd=out, capture_output=True, text=True, env=env)
     assert "code changed after the reviewed head (widget.py)" in r.stdout, r.stdout

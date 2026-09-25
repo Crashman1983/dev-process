@@ -114,13 +114,13 @@ def test_fellow_train_passengers_do_not_count_but_a_fix_does(repo):
     root, head = repo
     _git(root, "checkout", "-q", "-b", "other", "main")
     _commit(root, "o.py", "o = 1\n", "other passenger (tier 1, no review)")
-    _git(root, "checkout", "-q", "-b", "train", "main")
+    _git(root, "checkout", "-q", "-b", "train/a", "main")
     _git(root, "merge", "-q", "--no-ff", "--no-edit", "feat")
     _git(root, "merge", "-q", "--no-ff", "--no-edit", "other")
     assert _stale(root, head) is None
     _git(root, "checkout", "-q", "feat")
     _commit(root, "a.py", "a = 3\n", "fix after the review")
-    _git(root, "checkout", "-q", "-B", "train2", "main")
+    _git(root, "checkout", "-q", "-B", "train/b", "main")
     _git(root, "merge", "-q", "--no-ff", "--no-edit", "feat")
     _git(root, "merge", "-q", "--no-ff", "--no-edit", "other")
     assert "a.py" in _stale(root, head) and "o.py" not in _stale(root, head)
@@ -128,7 +128,7 @@ def test_fellow_train_passengers_do_not_count_but_a_fix_does(repo):
 
 def test_an_evil_train_merge_is_stale(repo):
     root, head = repo
-    _git(root, "checkout", "-q", "-b", "train", "main")
+    _git(root, "checkout", "-q", "-b", "train/a", "main")
     _git(root, "merge", "-q", "--no-ff", "--no-commit", "feat")
     (root / "a.py").write_text("a = 666\n")
     _git(root, "add", "-A")
@@ -160,7 +160,7 @@ def test_evil_content_in_a_fellow_passengers_train_merge_is_stale(repo):
     root, head = repo
     _git(root, "checkout", "-q", "-b", "other", "main")
     _commit(root, "o.py", "o = 1\n", "other passenger")
-    _git(root, "checkout", "-q", "-b", "train", "main")
+    _git(root, "checkout", "-q", "-b", "train/a", "main")
     _git(root, "merge", "-q", "--no-ff", "--no-commit", "other")
     (root / "evil.py").write_text("u = 1\n")
     _git(root, "add", "-A")
@@ -173,7 +173,7 @@ def test_a_crafted_chain_merge_with_an_evil_tree_is_stale(repo):
     root, head = repo
     _git(root, "checkout", "-q", "main")
     _commit(root, "m.py", "m = 1\n", "main moves on")  # main~1 exists now
-    _git(root, "checkout", "-q", "-b", "train", "main")
+    _git(root, "checkout", "-q", "-b", "train/a", "main")
     (root / "evil.py").write_text("u = 1\n")
     _git(root, "add", "evil.py")
     tree = _git(root, "write-tree")
@@ -253,6 +253,42 @@ def test_main_already_carrying_the_reviewed_change_merges_clean(tmp_path):
     later = reviewed.copy()
     later[19] = "line19 = 'later'\n"
     _commit(root, "f.py", "".join(later), "a later edit")
+    _git(root, "checkout", "-q", "feat")
+    _git(root, "merge", "-q", "--no-edit", "main")
+    assert _stale(root, head) is None
+
+
+def test_a_work_branch_of_merges_only_is_no_train(repo):
+    # the work branch holds only merges: the reviewed sub-branch and, after
+    # the review, a side branch — the chain looks like a train's, but it is
+    # not the train's staging branch, so the side branch's code is unreviewed
+    root, head = repo
+    _git(root, "checkout", "-q", "-b", "side", "main")
+    _commit(root, "s.py", "s = 1\n", "side work, never reviewed")
+    _git(root, "checkout", "-q", "-b", "work", "main")
+    _git(root, "merge", "-q", "--no-ff", "--no-edit", "feat")
+    _git(root, "merge", "-q", "--no-ff", "--no-edit", "side")
+    assert "s.py" in _stale(root, head)
+
+
+def test_a_headless_pass_does_not_clear_once_a_pass_records_a_head(repo):
+    root, head = repo
+    _commit(root, "b.py", "b = 1\n", "after")
+    passes = [{"work": "w", "tier": "2"}, {"work": "w", "tier": "1", "head": head}]
+    found = _mod().stale_review(root, passes, {"w"}, 2, set())
+    assert found is not None and "records the reviewed head" in found
+
+
+def test_local_main_ahead_of_origin_is_the_base(repo):
+    # a train merged another passenger into local main and has not pushed yet;
+    # the work then merged local main — measured against the stale origin/main
+    # the passenger's code read as this work's unreviewed code
+    root, head = repo
+    _git(root, "update-ref", "refs/remotes/origin/main", "main")
+    _git(root, "checkout", "-q", "-b", "other", "main")
+    _commit(root, "o.py", "o = 1\n", "other passenger")
+    _git(root, "checkout", "-q", "main")
+    _git(root, "merge", "-q", "--no-ff", "--no-edit", "other")
     _git(root, "checkout", "-q", "feat")
     _git(root, "merge", "-q", "--no-edit", "main")
     assert _stale(root, head) is None

@@ -541,3 +541,38 @@ def test_a_pass_behind_which_the_branch_moved_does_not_clear_it(render, tmp_path
     _git(out, "checkout", "-q", "main")
     by = {c["branch"]: c for c in json.loads(_train(out, "plan", "--json").stdout)["candidates"]}
     assert not by["43-work"]["eligible"] and "covering the branch head" in by["43-work"]["reasons"][0]
+
+
+def test_a_headless_pass_on_main_does_not_vouch_for_new_commits(render, tmp_path):
+    # an older, headless pass merged to main was written for the earlier
+    # commits; a review-pass report cannot carry new gate code on it
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _branch(out, "45-gate", {"scripts/process/g.py": "g = 1\n"}, archive=False)
+    _git(out, "merge", "-q", "--no-ff", "--no-edit", "45-gate")
+    _git(out, "checkout", "-q", "45-gate")
+    (out / "scripts/process/g.py").write_text("g = 2\n")
+    _git(out, "commit", "-q", "-am", "gate change after the merge")
+    _git(out, "checkout", "-q", "main")
+    subprocess.run([sys.executable, str(out / "scripts/process/report.py"), "review-pass", "--worker", "45-gate"],
+                   cwd=out, check=True, capture_output=True)
+    c = next(c for c in json.loads(_train(out, "plan", "--json").stdout)["candidates"] if c["branch"] == "45-gate")
+    assert not c["eligible"] and "changes the gates' code" in c["reasons"][0], c
+
+
+def test_a_headless_pass_does_not_count_once_the_work_has_a_head_pass(render, tmp_path):
+    # the headless rule looks at every pass of the work, whatever its tier:
+    # a tier-1 pass with a head outdates a headless tier-2 one
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _branch(out, "46-work", {"src/y.py": "y = 1\n"})
+    head = _git(out, "rev-parse", "46-work").stdout.strip()
+    _git(out, "checkout", "-q", "46-work")
+    (out / "src/y.py").write_text("y = 2\n")
+    j = out / ".process-work/journal/2026-09-22-46.md"
+    j.write_text(_head_pass(out, "46-work", head).replace("tier=2", "tier=1"))
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "code after the review, tier-1 attest")
+    _git(out, "checkout", "-q", "main")
+    c = next(c for c in json.loads(_train(out, "plan", "--json").stdout)["candidates"] if c["branch"] == "46-work")
+    assert not c["eligible"], c

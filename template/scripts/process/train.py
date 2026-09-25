@@ -177,7 +177,8 @@ def candidates(root: Path, local: str, base: str) -> list[dict]:
         c["hours_waiting"] = round((time.time() - int(last)) / 3600, 1) if last.isdigit() else None
         archived = [p for p in _out(root, "diff", "--name-only", "--diff-filter=A", f"{base}...{b}",
                                      "--", ARCHIVE).splitlines() if p.endswith(".md")]
-        passes = passes_root + _journal_passes_branch(root, base, b)
+        branch_passes = _journal_passes_branch(root, base, b)
+        passes = passes_root + branch_passes
         touches_process = sorted(f for f in files if f.startswith(PROCESS_PATHS))
         own_ids = _branch_work_ids(b)
         housekeeping: list[str] = []
@@ -195,8 +196,8 @@ def candidates(root: Path, local: str, base: str) -> list[dict]:
             own_archived.append(rel)
             own_ids |= ids
             waived = bool(_review.WAIVED.search(text))
-            ok = tier < 2 or waived or _covers(root, passes, ids, tier, b)
-            if touches_process and not _covers(root, passes, ids, 2, b):
+            ok = tier < 2 or waived or _covers(root, passes, ids, tier, b, branch_passes)
+            if touches_process and not _covers(root, passes, ids, 2, b, branch_passes):
                 ok = False
             c["plans"].append({"path": rel, "tier": tier, "cleared": ok, "waived": waived})
         archived = own_archived
@@ -210,7 +211,7 @@ def candidates(root: Path, local: str, base: str) -> list[dict]:
         if open_q:
             c["reasons"].append(f"open DECISION NEEDED in {open_q[0]} — answer it as a DECISION line before merging")
         rep = reports.get(b)
-        process_unreviewed = bool(touches_process) and not _covers(root, passes, own_ids, 2, b)
+        process_unreviewed = bool(touches_process) and not _covers(root, passes, own_ids, 2, b, branch_passes)
         if process_unreviewed:
             more = f" and {len(touches_process) - 1} more" if len(touches_process) > 1 else ""
             c["reasons"].append(f"changes the gates' code ({touches_process[0]}{more}) without a REVIEW pass "
@@ -224,7 +225,7 @@ def candidates(root: Path, local: str, base: str) -> list[dict]:
             if archived and not cleared_all:
                 c["reasons"].append("archived Tier 2+ plan without a REVIEW pass covering the branch head "
                                     "— the report is not the record")
-            elif _covers(root, passes, own_ids, 0, b) and any(r["work"] in own_ids for r in passes):
+            elif _covers(root, passes, own_ids, 0, b, branch_passes) and any(r["work"] in own_ids for r in passes):
                 c["by"] = f"worker report review-pass ({rep['minutes_ago']} min ago) + REVIEW pass covering the head"
             else:
                 c["reasons"].append("report review-pass, but no REVIEW pass for its own work covers the branch "
@@ -262,19 +263,26 @@ def _journal_passes_tree(root: Path, ref: str) -> list[dict]:
     return passes
 
 
-def _covers(root: Path, passes: list[dict], ids: set[str], tier: int, tip: str) -> bool:
+def _covers(root: Path, passes: list[dict], ids: set[str], tier: int, tip: str,
+            own: list[dict] | None = None) -> bool:
     """Does a clearing REVIEW pass cover the branch as it stands NOW? A pass
     whose reviewed head is not in the branch, or behind which the branch
     carries code nobody reviewed, clears the plan but not these commits —
     downstream, a branch merged by one train got new commits and boarded the
     next on its old clearance. The same rule as the review gate's stale check
     (`check_review._unreviewed_paths`), judged at the branch tip. Passes
-    without a head (older records) count only when no pass has one."""
+    without a head (older records) count only when no pass for the work has
+    one, and only from the branch's OWN journal (`own`): a headless pass on
+    main was written for earlier work and cannot vouch for new commits
+    (downstream refutation)."""
     req = min(tier, 3)
     clearing = [r for r in passes if r["work"] in ids and int(r["tier"]) >= req]
     with_head = [r for r in clearing if r.get("head")]
     if not with_head:
-        return bool(clearing)
+        if any(r.get("head") for r in passes if r["work"] in ids):
+            return False
+        own_ids = {id(r) for r in (own or [])}
+        return any(id(r) in own_ids for r in clearing)
     for r in with_head:
         if _git(root, "merge-base", "--is-ancestor", r["head"], tip).returncode != 0:
             continue
