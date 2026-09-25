@@ -12,9 +12,11 @@ Boarding (all computed): a local branch that is not the integration
 branch, is ahead of it, and
   * carries an archived plan of its OWN (added on the branch — `/finish`
     did its archive step) whose Tier 2+ plan is cleared by a REVIEW pass on
-    the branch's journal (or is waived), OR whose worker reported
-    `review-pass`/`done` (`report.py`) — the pass is then the record, the
-    report only the pointer. Own = the plan names the branch (its issue
+    the branch's journal that COVERS the branch head (or is waived), OR whose
+    worker reported `review-pass` and a REVIEW pass for its own work covers
+    the head — the pass is the record, the report only the pointer. A `done`
+    report (what a train writes after merging) boards nothing: new commits
+    after a merge need their own review. Own = the plan names the branch (its issue
     number or slug is in the branch name) or did not exist on the base; a
     plan of other work the branch merely archives is housekeeping and
     clears nothing;
@@ -193,8 +195,8 @@ def candidates(root: Path, local: str, base: str) -> list[dict]:
             own_archived.append(rel)
             own_ids |= ids
             waived = bool(_review.WAIVED.search(text))
-            ok = tier < 2 or waived or _review._cleared(passes, ids, tier)
-            if touches_process and not _review._cleared(passes, ids, 2):
+            ok = tier < 2 or waived or _covers(root, passes, ids, tier, b)
+            if touches_process and not _covers(root, passes, ids, 2, b):
                 ok = False
             c["plans"].append({"path": rel, "tier": tier, "cleared": ok, "waived": waived})
         archived = own_archived
@@ -208,7 +210,7 @@ def candidates(root: Path, local: str, base: str) -> list[dict]:
         if open_q:
             c["reasons"].append(f"open DECISION NEEDED in {open_q[0]} — answer it as a DECISION line before merging")
         rep = reports.get(b)
-        process_unreviewed = bool(touches_process) and not _review._cleared(passes, own_ids, 2)
+        process_unreviewed = bool(touches_process) and not _covers(root, passes, own_ids, 2, b)
         if process_unreviewed:
             more = f" and {len(touches_process) - 1} more" if len(touches_process) > 1 else ""
             c["reasons"].append(f"changes the gates' code ({touches_process[0]}{more}) without a REVIEW pass "
@@ -218,13 +220,24 @@ def candidates(root: Path, local: str, base: str) -> list[dict]:
             needs_review = [p for p in c["plans"] if p["tier"] is not None and p["tier"] >= 2 and not p["waived"]]
             c["by"] = ("archived plan + REVIEW pass" if needs_review
                        else "archived plan (Tier 0-1 or waived: no review required)")
-        elif rep and rep["state"] in ("review-pass", "done"):
-            c["by"] = f"worker report {rep['state']} ({rep['minutes_ago']} min ago)"
+        elif rep and rep["state"] == "review-pass":
             if archived and not cleared_all:
-                c["reasons"].append("archived Tier 2+ plan without a clearing REVIEW pass — the report is not the record")
-                c["by"] = None
+                c["reasons"].append("archived Tier 2+ plan without a REVIEW pass covering the branch head "
+                                    "— the report is not the record")
+            elif _covers(root, passes, own_ids, 0, b) and any(r["work"] in own_ids for r in passes):
+                c["by"] = f"worker report review-pass ({rep['minutes_ago']} min ago) + REVIEW pass covering the head"
+            else:
+                c["reasons"].append("report review-pass, but no REVIEW pass for its own work covers the branch "
+                                    "head — code after the reviewed head, or no attestation")
         elif archived:
-            c["reasons"].append("archived Tier 2+ plan without a clearing REVIEW pass (run /review, then attest)")
+            c["reasons"].append("archived Tier 2+ plan without a REVIEW pass covering the branch head "
+                                "(run /review, then attest)")
+        elif rep and rep["state"] == "done":
+            # `done` is what a train writes after merging: it clears nothing
+            # the branch committed since (downstream: a merged branch got new
+            # commits and showed as boardable on the old report)
+            c["reasons"].append("report `done` boards nothing — commits after a merge need their own "
+                                "REVIEW pass (review the new commits, then attest)")
         elif housekeeping:
             c["reasons"].append(f"archives {len(housekeeping)} plan(s) of other work only — none is this "
                                 "branch's own, and another work's clearance does not clear this branch")
@@ -247,6 +260,28 @@ def _journal_passes_tree(root: Path, ref: str) -> list[dict]:
             records, _e = _review.parse_review_lines(_show(root, ref, rel))
             passes += [r for _ln, r in records if r.get("verdict") == "pass"]
     return passes
+
+
+def _covers(root: Path, passes: list[dict], ids: set[str], tier: int, tip: str) -> bool:
+    """Does a clearing REVIEW pass cover the branch as it stands NOW? A pass
+    whose reviewed head is not in the branch, or behind which the branch
+    carries code nobody reviewed, clears the plan but not these commits —
+    downstream, a branch merged by one train got new commits and boarded the
+    next on its old clearance. The same rule as the review gate's stale check
+    (`check_review._unreviewed_paths`), judged at the branch tip. Passes
+    without a head (older records) count only when no pass has one."""
+    req = min(tier, 3)
+    clearing = [r for r in passes if r["work"] in ids and int(r["tier"]) >= req]
+    with_head = [r for r in clearing if r.get("head")]
+    if not with_head:
+        return bool(clearing)
+    for r in with_head:
+        if _git(root, "merge-base", "--is-ancestor", r["head"], tip).returncode != 0:
+            continue
+        late = _review._unreviewed_paths(root, r["head"], tip)
+        if late is not None and not late:
+            return True
+    return False
 
 
 def _journal_passes_branch(root: Path, base: str, branch: str) -> list[dict]:

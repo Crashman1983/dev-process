@@ -623,7 +623,7 @@ def paths_in_flight(root: Path) -> set[str]:
 BOOKKEEPING = ".process-work/"
 
 
-def _integration_ref(root: Path) -> str | None:
+def _integration_ref(root: Path, tip: str = "HEAD") -> str | None:
     """The integration branch as it stands BEFORE this push. A ref that already
     contains HEAD cannot be that — pushing local `main` without an
     `origin/main` would otherwise exclude everything (downstream refutation);
@@ -632,17 +632,18 @@ def _integration_ref(root: Path) -> str | None:
         out = _git_bytes(root, "rev-parse", "--verify", "-q", f"{ref}^{{commit}}")
         if out is None or not out.strip():
             continue
-        if _git_bytes(root, "merge-base", "--is-ancestor", "HEAD", ref) is not None:
+        if _git_bytes(root, "merge-base", "--is-ancestor", tip, ref) is not None:
             continue
         return ref
     return None
 
 
-def _unreviewed_paths(root: Path, head: str) -> set[str] | None:
+def _unreviewed_paths(root: Path, head: str, tip: str = "HEAD") -> set[str] | None:
     """Paths of code in HEAD that neither the reviewed head nor the
     integration branch carries — None when git cannot tell.
 
-    Everything reachable from HEAD but not from the reviewed head or from
+    `tip` is what is judged — HEAD for a push, a branch for the merge train's
+    boarding. Everything reachable from it but not from the reviewed head or from
     main is code of this push that the review never saw: later commits, a
     side branch merged in, an amended commit merged back next to the
     reviewed one, the content an `-s ours` merge kept (downstream refutation:
@@ -659,13 +660,13 @@ def _unreviewed_paths(root: Path, head: str) -> set[str] | None:
     is code nobody reviewed. By design, a passenger without a plan or below
     Tier 2 is not this work's concern: the train's boarding rules and the
     per-plan gate own what may ride."""
-    integ = _integration_ref(root)
-    walk = _git_bytes(root, "rev-list", "--first-parent", "--parents", "HEAD",
+    integ = _integration_ref(root, tip)
+    walk = _git_bytes(root, "rev-list", "--first-parent", "--parents", tip,
                       *([f"^{integ}"] if integ else []))
     if walk is None:
         return None
     chain = [ln.split() for ln in walk.decode(errors="replace").splitlines() if ln.strip()]
-    tips, carriers = ["HEAD"], []
+    tips, carriers = [tip], []
     if chain and all(len(c) >= 3 for c in chain):  # merges only: a train's staging chain
         for c in chain:
             for parent in c[2:]:
