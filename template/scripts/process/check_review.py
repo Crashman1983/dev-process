@@ -643,12 +643,15 @@ def stale_review(root: Path, passes: list[dict], ids: set[str], tier: int,
         head = r.get("head")
         if not head or _git_bytes(root, "cat-file", "-e", f"{head}^{{commit}}") is None:
             return None
-        # only commits that descend from the reviewed head and are not merges:
-        # the work's own later commits. A plain `diff head HEAD` also carries
-        # what the integration branch and fellow passengers of a merge train
-        # brought in (observed downstream: every multi-passenger train refused,
-        # naming another passenger's files as this work's unreviewed code)
-        out = _git_bytes(root, "--no-optional-locks", "log", "--no-merges", "--ancestry-path",
+        # only commits that descend from the reviewed head: the work's own
+        # later commits. A plain `diff head HEAD` also carries what the
+        # integration branch and fellow passengers of a merge train brought in
+        # (observed downstream: every multi-passenger train refused, naming
+        # another passenger's files as this work's unreviewed code). Merges
+        # count by their combined diff (`--cc`): a clean merge adds nothing,
+        # a conflict resolution or an evil merge — a result that differs from
+        # every parent — is code nobody reviewed (downstream review finding)
+        out = _git_bytes(root, "--no-optional-locks", "log", "--ancestry-path", "--cc",
                          "--format=", "--name-only", f"{head}..HEAD")
         if out is None:
             return None

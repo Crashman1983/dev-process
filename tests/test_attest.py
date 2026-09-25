@@ -258,3 +258,30 @@ def test_an_exception_is_written_even_when_no_rule_trips(render, tmp_path):
     assert r.returncode == 0, r.stderr
     assert ("REVIEW-EXCEPTION work=widget round=1: owner: third round granted "
             "(overrides: no attest rule tripped)") in _journal(out)
+
+
+def test_a_conflict_resolution_after_the_review_is_unreviewed_code(render, tmp_path):
+    # a merge of main whose result differs from both parents (a hand-resolved
+    # conflict, an evil merge) carries code the review never saw
+    import os
+    out, base, head = _repo(render, tmp_path)
+    assert _attest(out, "--base", base, "--head", head).returncode == 0
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "docs: attest")
+    _git(out, "checkout", "-q", "main")
+    (out / "main_only.py").write_text("m = 1\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "main moves on")
+    _git(out, "checkout", "-q", "feature")
+    gate = [sys.executable, str(out / "scripts/process/check_review.py"), "."]
+    env = {**os.environ, "PROCESS_PUSH_TARGETS": "refs/heads/main"}
+    _git(out, "merge", "-q", "--no-ff", "--no-edit", "main")  # clean: main's file is not ours
+    r = subprocess.run(gate, cwd=out, capture_output=True, text=True, env=env)
+    assert "code changed after the reviewed head" not in r.stdout, r.stdout
+    _git(out, "reset", "-q", "--hard", "HEAD~1")
+    _git(out, "merge", "-q", "--no-ff", "--no-commit", "main")
+    (out / "widget.py").write_text("def widget():\n    return 99\n")  # resolved in the merge
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "--no-edit")
+    r = subprocess.run(gate, cwd=out, capture_output=True, text=True, env=env)
+    assert "code changed after the reviewed head (widget.py)" in r.stdout, r.stdout
