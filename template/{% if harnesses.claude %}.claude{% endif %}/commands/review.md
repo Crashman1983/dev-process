@@ -79,6 +79,18 @@ Round economy — a failed round must not re-pay the whole chain:
   without it. The test comes first and fails on the old code. Downstream,
   the largest source of extra rounds was a fix that created the next
   blocker — the same rule patched three times.
+- **One reviewer set per work.** Round 1 runs the full set the tier
+  requires (including any full-tool refuter lenses); later rounds use the
+  same set — no new lenses, no swapped model family. A reviewer that
+  becomes unavailable is replaced with a journal note, and its first round
+  counts as round 1 for that lens. Downstream, a new reviewer in a later
+  round found older defects the first set never looked at, and each became
+  a round.
+- **Later rounds judge the fix, not the whole branch again.** A round ≥2
+  checks the fix diff and its surroundings (callers, tests, the rule it
+  touches). An older defect found outside that is its own issue — unless it
+  is a BLOCKER for this change; then it goes into the verdict marked
+  "pre-existing, found in round N".
 - **The same spot blocks twice → a fresh session fixes it.** The
   implementing session has twice missed what is wrong there; it is not the
   one to try a third time.
