@@ -684,7 +684,55 @@ def _unreviewed_paths(root: Path, head: str) -> set[str] | None:
         if own is None:
             return None
         paths |= {ln.strip() for ln in own.decode(errors="replace").splitlines() if ln.strip()}
+    # merges that resolved to the other side: every merge in the range, and
+    # the train chain's merges
+    merges = _git_bytes(root, "rev-list", "--merges", *tips, f"^{head}",
+                        *([f"^{integ}"] if integ else []))
+    if merges is None:
+        return None
+    candidates = [ln.strip() for ln in merges.decode(errors="replace").splitlines() if ln.strip()]
+    candidates += [c[0] for c in chain] if carriers else []
+    for merge in dict.fromkeys(candidates):
+        dropped = _dropped_by_merge(root, merge, head)
+        if dropped is None:
+            return None
+        paths |= dropped
     return {p for p in paths if not p.startswith(BOOKKEEPING)}
+
+
+def _blob(root: Path, commit: str, path: str) -> str | None:
+    out = _git_bytes(root, "rev-parse", "--verify", "-q", f"{commit}:{path}")
+    return out.decode(errors="replace").strip() if out else None
+
+
+def _dropped_by_merge(root: Path, merge: str, head: str) -> set[str] | None:
+    """Paths where a merge threw the reviewed work's change away: the result
+    equals another parent's version although the parent carrying the reviewed
+    head had changed the file. `--cc` is blind to this — the result equals one
+    parent, so the combined diff is empty (downstream review residual)."""
+    line = _git_bytes(root, "rev-list", "--parents", "-n", "1", merge)
+    if line is None:
+        return None
+    parents = line.decode(errors="replace").split()[1:]
+    ours = [p for p in parents
+            if _git_bytes(root, "merge-base", "--is-ancestor", head, p) is not None]
+    if not ours:
+        return set()
+    our = ours[0]
+    changed = _git_bytes(root, "diff", "--name-only", our, merge)
+    if changed is None:
+        return None
+    dropped: set[str] = set()
+    for other in (p for p in parents if p != our):
+        base = _git_bytes(root, "merge-base", our, other)
+        if base is None:
+            return None
+        base_s = base.decode(errors="replace").strip()
+        for path in (ln.strip() for ln in changed.decode(errors="replace").splitlines() if ln.strip()):
+            result, mine, theirs = _blob(root, merge, path), _blob(root, our, path), _blob(root, other, path)
+            if result == theirs and mine != theirs and mine != _blob(root, base_s, path):
+                dropped.add(path)
+    return dropped
 
 
 def stale_review(root: Path, passes: list[dict], ids: set[str], tier: int,

@@ -291,8 +291,12 @@ def plan(root: Path, *, min_candidates: int, max_wait_hours: float) -> dict:
 # --- the run -------------------------------------------------------------------------------
 
 # the suite command does not exist on this tree (a passenger introduces the
-# make target): that tree cannot be judged — it is not red
-UNDEFINED = re.compile(r"No rule to make target|command not found|: not found$", re.MULTILINE)
+# make target): that tree cannot be judged — it is not red. Only the top-level
+# signals count: the shell's exit 127 for a missing command, or the TOP make's
+# own "No rule" stop line (a sub-make prints `make[1]:`). A "command not found"
+# printed by a test that shells out is a red suite, not an undefined one
+# (downstream review residual).
+UNDEFINED = re.compile(r"^make: \*\*\* No rule to make target '[^']+'.*Stop\.$", re.MULTILINE)
 
 
 def _load() -> str:
@@ -316,7 +320,7 @@ def _sh(cwd: Path, cmd: str, log) -> str:
         tail = (tail + [line.rstrip("\n")])[-40:]
     rc = proc.wait()
     state = "green" if rc == 0 else (
-        "undefined" if rc == 127 or UNDEFINED.search("\n".join(tail)) else "red")
+        "undefined" if rc == 127 or (rc == 2 and UNDEFINED.search("\n".join(tail))) else "red")
     log(f"$ {cmd} → exit {rc} ({state}{'' if rc == 0 else ', ' + _load()})")
     return state
 
@@ -516,6 +520,9 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
                 hi = mid
         offender = aboard[lo - 1]
         blamed.append(offender)
+        # the rest is a new combination: it earns its own flake re-run (the
+        # base does not change — its verdict is kept)
+        retried = False
         log(f"red with {offender} aboard — dropped, rebuilding")
         print(f"train: red with {offender} aboard — dropping it and rebuilding")
         aboard = [b for b in aboard if b != offender]

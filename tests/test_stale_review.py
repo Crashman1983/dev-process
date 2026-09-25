@@ -189,3 +189,17 @@ def test_pushing_local_main_without_a_remote_ref_is_checked(repo):
     _git(root, "merge", "-q", "--ff-only", "feat")
     _commit(root, "a.py", "a = 5\n", "unreviewed on main")
     assert "a.py" in _stale(root, head)
+
+
+def test_a_conflict_resolved_to_the_other_side_is_stale(repo):
+    # downstream residual (#2155 AC-4): the result equals main's version, so the
+    # combined diff is empty although the reviewed change was thrown away
+    root, head = repo
+    _git(root, "checkout", "-q", "main")
+    _commit(root, "a.py", "a = 'main'\n", "main edits the same line")
+    _git(root, "checkout", "-q", "feat")
+    subprocess.run(["git", "merge", "--no-edit", "main"], cwd=root, capture_output=True)
+    _git(root, "checkout", "--theirs", "a.py")
+    _git(root, "add", "a.py")
+    _git(root, "commit", "-q", "--no-edit")
+    assert "a.py" in _stale(root, head)
