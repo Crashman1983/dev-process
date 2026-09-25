@@ -383,3 +383,46 @@ def test_a_local_hook_refusal_names_the_hook_and_its_reasons(render, tmp_path):
     assert r.returncode == 1
     assert "the local pre-push hook refused it" in r.stderr
     assert "code changed after the reviewed head" in r.stderr
+
+
+def test_a_command_not_found_inside_a_red_suite_is_red_not_undefined(render, tmp_path):
+    # downstream residual (#2155 AC-1): a test that shells out prints it
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    _branch(out, "alpha", {"src/a.py": "a\n"})
+    r = _train(out, "run", "--force", "--suite", "echo 'sh: 1: frob: not found'; echo 'frob: command not found'; exit 1")
+    assert "does not exist" not in r.stdout + r.stderr
+    assert "fix main first" in r.stderr or "red with alpha aboard" in r.stdout, r.stdout + r.stderr
+
+
+def _load_train(out):
+    import importlib.util
+    sys.dont_write_bytecode = True
+    sys.path.insert(0, str(out / "scripts/process"))
+    spec = importlib.util.spec_from_file_location("train_under_test", out / "scripts/process/train.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_after_a_drop_the_rest_gets_its_own_flake_rerun(render, tmp_path, monkeypatch):
+    # downstream residual (#2155 AC-2): combined red, retry red, base green,
+    # b1 dropped; the rest [b2] is red once, then green — a flake, not an offender
+    from types import SimpleNamespace
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    train = _load_train(out)
+    states = iter(["red", "red", "green", "red", "red", "green"])
+    wt = tmp_path / "wt"
+    wt.mkdir()
+    monkeypatch.setattr(train, "build_train", lambda root, base, subset, stamp, log: (wt, "train/x", list(subset), []))
+    monkeypatch.setattr(train, "_run_gates", lambda w, log: True)
+    monkeypatch.setattr(train, "_sh", lambda cwd, cmd, log: next(states))
+    monkeypatch.setattr(train, "_git", lambda *a, **k: SimpleNamespace(returncode=0, stdout="", stderr=""))
+    monkeypatch.setattr(train, "_out", lambda *a, **k: "")
+    monkeypatch.setattr(train, "_cleanup", lambda *a: None)
+    monkeypatch.setattr(train, "_write", lambda *a, **k: None)
+    p = {"base": "origin/main", "candidates": [{"branch": "b1", "hours_waiting": 2}, {"branch": "b2", "hours_waiting": 1}]}
+    rc = train._run_batch(out, "main", p, ["b1", "b2"], "x", tmp_path / "t.log", suite="s", deploy=None,
+                          push=False, keep_branches=True)
+    assert rc == 0
+    assert "flaky" in (tmp_path / "t.log").read_text()

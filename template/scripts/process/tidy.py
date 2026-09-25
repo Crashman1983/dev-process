@@ -128,11 +128,18 @@ def spec_blocker(root: Path, name: str) -> str | None:
         spec.loader.exec_module(mod)
     except Exception:  # noqa: BLE001 — a broken pruner is its own finding at --apply
         return None
-    plan_text = (d / "plan.md").read_text(encoding="utf-8", errors="replace")
-    spec_text = (d / "spec.md").read_text(encoding="utf-8", errors="replace")
-    if not mod._issue_number(plan_text):
+    try:
+        plan_text = (d / "plan.md").read_text(encoding="utf-8", errors="replace")
+        spec_text = (d / "spec.md").read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        return f"plan.md/spec.md unreadable ({exc.strerror or exc})"
+    try:
+        issue = mod._issue_number(plan_text)
+        unaccounted = mod._unaccounted_scs(spec_text, plan_text)
+    except Exception:  # noqa: BLE001 — a pruner without these helpers is its own finding at --apply
+        return None
+    if not issue:
         return "plan.md has no issue: ref"
-    unaccounted = mod._unaccounted_scs(spec_text, plan_text)
     if unaccounted:
         return "unaccounted Success Criteria " + ", ".join(unaccounted)
     return None

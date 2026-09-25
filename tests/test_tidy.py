@@ -98,3 +98,36 @@ def test_keep_glob_protects_branches(render, tmp_path):
     out, _bare = _repo_with_residue(render, tmp_path)
     r = _run(out, "--keep", "agent/*")
     assert "remote branches already merged into the default branch: 0" in r.stdout
+
+
+def _tidy(out):
+    import importlib.util
+    sys.dont_write_bytecode = True
+    spec = importlib.util.spec_from_file_location("tidy_under_test", out / "scripts/process/tidy.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_an_unreadable_plan_or_an_old_pruner_never_crashes_the_report(render, tmp_path, monkeypatch):
+    # downstream residual (#2155 AC-3)
+    from pathlib import Path
+    out = render(tmp_path / "w", {"project_name": "d", "modules": {"speckit": True}})
+    d = out / "specs/011-x"
+    d.mkdir(parents=True)
+    (d / "tasks.md").write_text("- [x] T001\n")
+    (d / "spec.md").write_text("# Spec\n")
+    (d / "plan.md").write_text("# Plan\n\nissue: #11\n")
+    tidy = _tidy(out)
+    real = Path.read_text
+
+    def unreadable(self, *a, **k):
+        if self.name == "plan.md":
+            raise PermissionError(13, "Permission denied")
+        return real(self, *a, **k)
+
+    monkeypatch.setattr(Path, "read_text", unreadable)
+    assert "unreadable" in tidy.spec_blocker(out, "011-x")
+    monkeypatch.setattr(Path, "read_text", real)
+    (out / "scripts/process/publish_and_prune.py").write_text("x = 1\n")  # an old pruner without the helpers
+    assert tidy.spec_blocker(out, "011-x") is None

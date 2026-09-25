@@ -1166,6 +1166,14 @@ ein Wächter-Test gegen doppelte Klammern ohne Leerzeichen in Python-Vorlagen.
 Wer v2.27.1 oder v2.28.0 installiert hat und am Push scheitert: auf v2.28.1
 aktualisieren, `v2.28.1`.
 
+**v2.31.6 — vier Restbefunde aus demselben Review.**
+- **Zug, „nicht vorhanden“:** Als „Suite nicht vorhanden“ gilt nur noch Exit 127 oder die eigene „No rule“-Stoppzeile des obersten `make`. Ein „command not found“ aus einem Test heißt rot.
+- **Zug, nach einem Abwurf:** Die verbleibende Kombination bekommt wieder ihre eigene Flake-Wiederholung.
+- **tidy:** Ein unlesbares `plan.md` oder `spec.md` und ein älterer Pruner ohne die Hilfsfunktionen lassen den Bericht nicht mehr abstürzen.
+- **`stale_review`:** Erkennt einen Merge, der einen Konflikt vollständig zugunsten der anderen Seite aufgelöst und damit die geprüfte Änderung verworfen hat. Das kombinierte Diff ist dafür blind.
+
+Je ein Test schlägt an, wenn die jeweilige Behandlung fehlt.
+
 **v2.31.5 — `stale_review` fasst die Regel statt des Symptoms.** Befund aus Runde 3 des Reviews im Referenzprojekt: Nach `commit --amend` oder Rebase liegt der geprüfte Stand nicht mehr in der Vorgeschichte, und die Prüfung ließ es durch.
 - **Stand nicht in der Vorgeschichte:** Das Review ist dann ungültig.
 - **Sonst:** Ungeprüft ist alles, was HEAD trägt und weder der geprüfte Stand noch main trägt. Damit fallen auch ein eingemergter Nebenbranch, ein Amend neben dem geprüften Stand und ein Merge mit `-s ours` auf; Merges zählen über ihren kombinierten Diff.
