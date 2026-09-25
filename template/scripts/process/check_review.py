@@ -623,46 +623,118 @@ def paths_in_flight(root: Path) -> set[str]:
 BOOKKEEPING = ".process-work/"
 
 
-def stale_review(root: Path, passes: list[dict], ids: set[str], tier: int,
-                 in_flight: set[str]) -> str | None:
-    """Why the clearing reviews of a plan no longer cover the code — None when
-    one of them still does (or none can be checked).
+def _integration_ref(root: Path) -> str | None:
+    """The integration branch as it stands BEFORE this push. A ref that already
+    contains HEAD cannot be that — pushing local `main` without an
+    `origin/main` would otherwise exclude everything (downstream refutation);
+    then there is no base, and the check stays conservative."""
+    for ref in INTEGRATION_REFS:
+        out = _git_bytes(root, "rev-parse", "--verify", "-q", f"{ref}^{{commit}}")
+        if out is None or not out.strip():
+            continue
+        if _git_bytes(root, "merge-base", "--is-ancestor", "HEAD", ref) is not None:
+            continue
+        return ref
+    return None
 
-    A pass records the `head` it reviewed. Code committed after it, in a path
-    this push carries, was never reviewed — observed downstream: a fix after
-    the attested pass merged green. Bookkeeping (journal, plans) is exempt: the
-    attestation commit itself lands after the reviewed head. A pass without
-    `head` (older records) or whose head is not in this clone cannot be
-    checked and counts as current — the digest check owns those."""
+
+def _unreviewed_paths(root: Path, head: str) -> set[str] | None:
+    """Paths of code in HEAD that neither the reviewed head nor the
+    integration branch carries — None when git cannot tell.
+
+    Everything reachable from HEAD but not from the reviewed head or from
+    main is code of this push that the review never saw: later commits, a
+    side branch merged in, an amended commit merged back next to the
+    reviewed one, the content an `-s ours` merge kept (downstream refutation:
+    each of these passed a "descends from the reviewed head" rule). Merges
+    count by their combined diff (`--cc`): a clean merge adds nothing, a
+    conflict resolution or evil merge does.
+
+    A merge train is the one exception: its staging commits are a chain of
+    merges on top of main, one per passenger. Fellow passengers' commits are
+    not this work's code (they carry their own reviews, or need none at
+    Tier 0-1), so on such a chain only the merged-in tip that carries the
+    reviewed head counts — plus the combined diff of EVERY merge in the chain:
+    a clean passenger merge adds nothing, content written into any of them
+    is code nobody reviewed. By design, a passenger without a plan or below
+    Tier 2 is not this work's concern: the train's boarding rules and the
+    per-plan gate own what may ride."""
+    integ = _integration_ref(root)
+    walk = _git_bytes(root, "rev-list", "--first-parent", "--parents", "HEAD",
+                      *([f"^{integ}"] if integ else []))
+    if walk is None:
+        return None
+    chain = [ln.split() for ln in walk.decode(errors="replace").splitlines() if ln.strip()]
+    tips, carriers = ["HEAD"], []
+    if chain and all(len(c) >= 3 for c in chain):  # merges only: a train's staging chain
+        for c in chain:
+            for parent in c[2:]:
+                if _git_bytes(root, "merge-base", "--is-ancestor", head, parent) is not None:
+                    carriers.append(c[0])
+                    tips.append(parent)
+        if carriers:
+            tips = tips[1:]
+    out = _git_bytes(root, "--no-optional-locks", "log", "--cc", "--format=", "--name-only",
+                     *tips, f"^{head}", *([f"^{integ}"] if integ else []))
+    if out is None:
+        return None
+    paths = {ln.strip() for ln in out.decode(errors="replace").splitlines() if ln.strip()}
+    for merge in ([c[0] for c in chain] if carriers else []):
+        own = _git_bytes(root, "show", "--cc", "--format=", "--name-only", merge)
+        if own is None:
+            return None
+        paths |= {ln.strip() for ln in own.decode(errors="replace").splitlines() if ln.strip()}
+    return {p for p in paths if not p.startswith(BOOKKEEPING)}
+
+
+def stale_review(root: Path, passes: list[dict], ids: set[str], tier: int,
+                 in_flight: set[str] | None = None) -> str | None:
+    """Why the clearing reviews of a plan no longer cover the code — None when
+    one of them still does.
+
+    A pass records the `head` it reviewed. The reviewed head must lie in the
+    history of what is pushed — after a `commit --amend` or a rebase it does
+    not, and the review covers none of it. If it does, every commit the push
+    carries beyond the reviewed head and main is unreviewed code
+    (`_unreviewed_paths`); bookkeeping (journal, plans) is exempt, the
+    attestation commit itself lands after the reviewed head.
+
+    Fails closed: when git cannot answer, the review is not taken as current.
+    A pass without `head` (older records) counts as current only when no
+    pass for the work has one; a head missing from a shallow clone counts as
+    current — the digest check names the shallow clone. `in_flight` is kept
+    for callers and no longer narrows the check: the range above is the
+    push's own code, and an empty set must never mean "nothing to check"."""
     req = min(tier, 3)
     clearing = [r for r in passes if r["work"] in ids and int(r["tier"]) >= req]
     if not clearing:
         return None
-    changed_after: list[str] = []
-    for r in clearing:
-        head = r.get("head")
-        if not head or _git_bytes(root, "cat-file", "-e", f"{head}^{{commit}}") is None:
-            return None
-        # only commits that descend from the reviewed head: the work's own
-        # later commits. A plain `diff head HEAD` also carries what the
-        # integration branch and fellow passengers of a merge train brought in
-        # (observed downstream: every multi-passenger train refused, naming
-        # another passenger's files as this work's unreviewed code). Merges
-        # count by their combined diff (`--cc`): a clean merge adds nothing,
-        # a conflict resolution or an evil merge — a result that differs from
-        # every parent — is code nobody reviewed (downstream review finding)
-        out = _git_bytes(root, "--no-optional-locks", "log", "--ancestry-path", "--cc",
-                         "--format=", "--name-only", f"{head}..HEAD")
-        if out is None:
-            return None
-        paths = {p.strip() for p in out.decode(errors="replace").splitlines() if p.strip()}
-        late = sorted(p for p in paths & in_flight if not p.startswith(BOOKKEEPING))
+    with_head = [r for r in clearing if r.get("head")]
+    if not with_head:
+        return None
+    reasons: list[str] = []
+    for r in with_head:
+        head = r["head"]
+        if _git_bytes(root, "merge-base", "--is-ancestor", head, "HEAD") is None:
+            shallow = (_git_bytes(root, "rev-parse", "--is-shallow-repository") or b"").strip() == b"true"
+            if shallow and _git_bytes(root, "cat-file", "-e", f"{head}^{{commit}}") is None:
+                return None
+            reasons.append(f"the reviewed head {head[:9]} is not in the history of what is pushed "
+                           f"(commit --amend or a rebase replaced the reviewed commits) — the review "
+                           f"covers none of it; review again and attest the new head")
+            continue
+        late = _unreviewed_paths(root, head)
+        if late is None:
+            reasons.append(f"cannot determine what changed after the reviewed head {head[:9]} "
+                           f"(git did not answer) — not taken as reviewed")
+            continue
         if not late:
             return None
-        changed_after = late
-    return (f"code changed after the reviewed head ({', '.join(changed_after[:4])}"
-            f"{', …' if len(changed_after) > 4 else ''}) — the review does not cover it; "
-            f"re-review the delta (`make_review_bundle.py --since <head>`) and attest again")
+        shown = sorted(late)
+        reasons.append(f"code changed after the reviewed head ({', '.join(shown[:4])}"
+                       f"{', …' if len(shown) > 4 else ''}) — the review does not cover it; "
+                       f"re-review the delta (`make_review_bundle.py --since <head>`) and attest again")
+    return reasons[-1] if reasons else None
 
 
 def issues_on_integration(root: Path, limit: int = 2000) -> set[int]:
