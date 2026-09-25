@@ -27,6 +27,16 @@ def _repo_with_residue(render, tmp_path):
     (out / ".process-work/plans/archive" / f"{old}-done.md").write_text("# Plan\n\ntier: 1\n")
     (out / "specs/007-finished").mkdir(parents=True)
     (out / "specs/007-finished/tasks.md").write_text("- [x] T001 done\n")
+    (out / "specs/007-finished/spec.md").write_text("# Spec\n\n- SC-001 it works\n")
+    (out / "specs/007-finished/plan.md").write_text("# Plan\n\nissue: #7\nsc-evidenced: SC-001 test_x\n")
+    # #2065 downstream: finished, but the pruner refuses these — owner decisions
+    (out / "specs/009-noplan").mkdir(parents=True)
+    (out / "specs/009-noplan/tasks.md").write_text("- [x] T001 done\n")
+    (out / "specs/009-noplan/spec.md").write_text("# Spec\n")
+    (out / "specs/010-sc").mkdir(parents=True)
+    (out / "specs/010-sc/tasks.md").write_text("- [x] T001 done\n")
+    (out / "specs/010-sc/spec.md").write_text("# Spec\n\n- SC-001 a\n- SC-002 b\n")
+    (out / "specs/010-sc/plan.md").write_text("# Plan\n\nissue: #10\nsc-waived: SC-001 no\n")
     (out / "specs/008-open").mkdir(parents=True)
     (out / "specs/008-open/tasks.md").write_text("- [ ] T001 todo\n")
     (out / ".process-work/template-delta/v9").mkdir(parents=True)
@@ -58,6 +68,8 @@ def test_dry_run_reports_every_kind_of_residue(render, tmp_path):
     assert "remote branches already merged into the default branch: 1" in r.stdout
     assert "agent/merged-work" in r.stdout and "still-open" not in r.stdout
     assert "fully ticked but not published/pruned: 1 (007-finished)" in r.stdout
+    assert ("publish_and_prune would refuse: 2 (009-noplan: no plan.md; "
+            "010-sc: unaccounted Success Criteria SC-002)") in r.stdout
     assert "active plans older than 30 days: 1" in r.stdout and "YOUR call" in r.stdout
     assert "archived plans older than 30 days: 1" in r.stdout
     assert "template-delta/ left over" in r.stdout
@@ -77,6 +89,9 @@ def test_apply_removes_the_safe_part_and_keeps_owner_decisions(render, tmp_path)
     assert not list((out / ".process-work/plans/archive").glob("*-done.md"))
     assert list((out / ".process-work/plans").glob("*-abandoned.md"))  # owner's call, kept
     assert (out / "specs/008-open").is_dir()
+    assert "publish_and_prune.py 009-noplan" not in r.stdout  # never handed to the pruner
+    assert "publish_and_prune.py 007-finished" in r.stdout
+    assert (out / "specs/009-noplan").is_dir() and (out / "specs/010-sc").is_dir()
 
 
 def test_keep_glob_protects_branches(render, tmp_path):

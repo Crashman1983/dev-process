@@ -289,11 +289,35 @@ def plan(root: Path, *, min_candidates: int, max_wait_hours: float) -> dict:
 
 # --- the run -------------------------------------------------------------------------------
 
-def _sh(cwd: Path, cmd: str, log) -> bool:
+# the suite command does not exist on this tree (a passenger introduces the
+# make target): that tree cannot be judged — it is not red
+UNDEFINED = re.compile(r"No rule to make target|command not found|: not found$", re.MULTILINE)
+
+
+def _load() -> str:
+    try:
+        one, _five, _fifteen = os.getloadavg()
+    except OSError:
+        return "load unknown"
+    return f"load {one:.1f} on {os.cpu_count() or '?'} CPUs"
+
+
+def _sh(cwd: Path, cmd: str, log) -> str:
+    """Run cmd, streaming its output; "green", "red" or "undefined" (the
+    command or make target does not exist on this tree)."""
     print(f"train: $ {cmd}", flush=True)
-    r = subprocess.run(["sh", "-c", cmd], cwd=cwd)
-    log(f"$ {cmd} → exit {r.returncode}")
-    return r.returncode == 0
+    tail: list[str] = []
+    proc = subprocess.Popen(["sh", "-c", cmd], cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                            text=True, errors="replace")
+    assert proc.stdout is not None
+    for line in proc.stdout:
+        print(line, end="", flush=True)
+        tail = (tail + [line.rstrip("\n")])[-40:]
+    rc = proc.wait()
+    state = "green" if rc == 0 else (
+        "undefined" if rc == 127 or UNDEFINED.search("\n".join(tail)) else "red")
+    log(f"$ {cmd} → exit {rc} ({state}{'' if rc == 0 else ', ' + _load()})")
+    return state
 
 
 GATE_RUNNER_REL = "scripts/process/gate_runner.py"
@@ -307,7 +331,7 @@ def _run_gates(wt: Path, log) -> bool:
     if not (wt / GATE_RUNNER_REL).is_file():
         return True
     argv = gate_runner_argv(wt)
-    return argv is not None and _sh(wt, shlex.join(argv), log)
+    return argv is not None and _sh(wt, shlex.join(argv), log) == "green"
 
 
 def _train_dir(root: Path) -> Path:
@@ -415,36 +439,53 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
     conflicted: list[str] = []
     branch = ""
 
-    def attempt(subset: list[str]) -> tuple[bool, list[str], str]:
+    def judge(wt: Path) -> str:
+        """"green", "red" or "undefined" (the suite does not exist on this tree)."""
+        if not _run_gates(wt, log):
+            return "red"
+        return _sh(wt, suite, log) if suite else "green"
+
+    def attempt(subset: list[str]) -> tuple[str, list[str], str]:
         wt, br, merged, dropped = build_train(root, base, subset, stamp, log)
         for d in dropped:
             if d not in conflicted:
                 conflicted.append(d)
-        if not merged:
-            return len(subset) == 0 and _base_green(wt), merged, br
-        return _run_gates(wt, log) and (_sh(wt, suite, log) if suite else True), merged, br
+        if not merged and subset:
+            return "red", merged, br  # everybody conflicted: nothing to judge
+        return judge(wt), merged, br
 
-    def _base_green(wt: Path) -> bool:
-        return _run_gates(wt, log) and (_sh(wt, suite, log) if suite else True)
-
-    base_checked = False
+    base_checked = retried = False
     while aboard:
-        ok, merged, branch = attempt(aboard)
+        state, merged, branch = attempt(aboard)
         aboard = merged
-        if ok or not aboard:
+        if state == "green" or not aboard:
             break
+        if state == "undefined":
+            print(f"train: the suite `{suite}` does not exist on the combined tree — fix --suite; "
+                  "nothing merged", file=sys.stderr)
+            log("suite undefined on the combined tree — aborted without blame")
+            _cleanup(root, stamp)
+            return 1
+        if not retried:
+            # one more run of the SAME tree before anybody is blamed: red then
+            # green on identical code is a flaky test (observed downstream: a
+            # 5 s lock wait and a 5.1 s UI test under load 10 on 6 CPUs), not
+            # an offender — bisecting a flake blames whoever sits in the prefix
+            retried = True
+            log(f"red — retry of the same combined tree ({_load()})")
+            state, merged, branch = attempt(aboard)
+            aboard = merged
+            if state == "green":
+                print("train: FLAKY — the combined tree was red, then green on the identical tree; "
+                      f"merging, but the suite has a flaky test (see {logfile}; {_load()})", file=sys.stderr)
+                log("red then green on the identical tree — flaky suite, merging")
+                break
         if not base_checked:
-            # before blaming anybody: is the base itself red (a broken main,
-            # a flaky suite)? Then no candidate is the offender.
+            # before blaming anybody: is the base itself red (a broken main)?
+            # Then no candidate is the offender.
             base_checked = True
-            if not attempt([])[0]:
-                # a red base does not clear the combination either: one more run
-                # of the combined tree tells a flaky suite from a broken main
-                log("base red — retry of the combined tree")
-                ok, merged, branch = attempt(aboard)
-                aboard = merged
-                if ok:
-                    break
+            base_state = attempt([])[0]
+            if base_state == "red":
                 print("train: the combined tree is red twice and the base is red too — the "
                       "integration branch itself is red (gates or suite fail with nobody aboard); "
                       "no candidate blamed, "
@@ -452,6 +493,12 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
                 log("base red and combined red on retry — aborted without blame")
                 _cleanup(root, stamp)
                 return 1
+            if base_state == "undefined":
+                # a passenger introduces the suite (its make target): the base
+                # cannot be judged by it — that is not a red main
+                log("suite undefined on the base (a passenger introduces it) — base not comparable")
+                print(f"train: `{suite}` does not exist on the base — a passenger introduces it; "
+                      "the base is not judged red, the offender search continues")
         # the combination is red: find the first candidate whose prefix turns
         # it red (bisection over prefixes — O(log n) suite runs per offender),
         # drop it, and try the rest. Order is boarding order, so "first red
@@ -459,8 +506,10 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
         lo, hi = 1, len(aboard)
         while lo < hi:
             mid = (lo + hi) // 2
-            pok, pmerged, _br = attempt(aboard[:mid])
-            if pok and len(pmerged) == mid:
+            pstate, pmerged, _br = attempt(aboard[:mid])
+            # a prefix without the passenger that defines the suite cannot be
+            # judged by it — it is not the offender
+            if pstate in ("green", "undefined") and len(pmerged) == mid:
                 lo = mid + 1
             else:
                 hi = mid
@@ -498,9 +547,12 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
         if r.returncode != 0:
             log(f"push of {branch} to origin/{local} rejected: {r.stderr.strip()}")
             _git(root, "worktree", "remove", "--force", str(_train_worktree(root)))
-            print(f"train: origin rejected the push to {local} — nothing merged locally; the train "
-                  f"branch {branch} stays for inspection (branch protection? then open a PR from it):\n"
-                  f"{r.stderr.strip()}", file=sys.stderr)
+            said = "\n".join((r.stdout.strip() + "\n" + r.stderr.strip()).strip().splitlines()[-30:])
+            remote = "[remote rejected]" in r.stderr or "protected branch" in r.stderr.lower()
+            why = ("origin rejected it (branch protection? then open a PR from it)" if remote else
+                   "the local pre-push hook refused it — its reasons are below; they name the gate")
+            print(f"train: the push to {local} failed: {why}. Nothing merged locally; the train "
+                  f"branch {branch} stays for inspection:\n{said}", file=sys.stderr)
             return 1
         log(f"pushed {branch} as origin/{local}")
     _git(root, "merge", "--ff-only", branch, check=True)
@@ -529,7 +581,7 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
     _cleanup(root, stamp)
     _report_dropped()
     if deploy:
-        if not _sh(root, deploy, log):
+        if _sh(root, deploy, log) != "green":
             print("train: deploy failed — the merge stands, the deploy does not; see " + str(logfile), file=sys.stderr)
             return 1
     return 0
