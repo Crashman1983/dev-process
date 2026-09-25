@@ -243,7 +243,7 @@ def test_rejected_push_leaves_local_main_untouched_and_keeps_the_train(render, t
     hook.chmod(0o755)
     head = _git(out, "rev-parse", "main").stdout
     r = _train(out, "run", "--force", "--push", "--suite", "true")
-    assert r.returncode == 1 and "origin rejected the push" in r.stderr
+    assert r.returncode == 1 and "origin rejected it" in r.stderr
     assert _git(out, "rev-parse", "main").stdout == head  # local main untouched
     branches = _git(out, "branch", "--list", "--format=%(refname:short)").stdout.split()
     assert "alpha" in branches and any(b.startswith("train/") for b in branches)
@@ -336,3 +336,50 @@ def test_conflicting_candidate_is_reported_blocked(render, tmp_path):
     assert states["beta"] == "blocked"
     branches = _git(out, "branch", "--list", "--format=%(refname:short)").stdout.split()
     assert "beta" in branches and not any(b.startswith("train/") for b in branches)
+
+
+def test_a_flaky_suite_is_retried_on_the_same_tree_not_bisected(render, tmp_path):
+    # train 31 downstream: two load-induced timeouts, then "base is red too"
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    _branch(out, "alpha", {"src/a.py": "a\n"})
+    _branch(out, "beta", {"src/b.py": "b\n"})
+    marker = tmp_path / "ran-once"
+    suite = f"if [ -f {marker} ]; then exit 0; else touch {marker}; exit 1; fi"
+    r = _train(out, "run", "--force", "--suite", suite)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "FLAKY" in r.stderr and "dropping" not in r.stdout
+    assert (out / "src/a.py").exists() and (out / "src/b.py").exists()
+
+
+def test_a_suite_a_passenger_introduces_does_not_make_main_red(render, tmp_path):
+    # train 31 downstream: `make test-merge` came with a passenger; the base
+    # run said "No rule to make target" and the train called main red
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    _branch(out, "alpha", {"src/a.py": "a\n"})
+    _branch(out, "beta", {"Makefile": "test-merge:\n\texit 1\n"})
+    r = _train(out, "run", "--force", "--suite", "make test-merge")
+    assert "does not exist on the base" in r.stdout, r.stdout + r.stderr
+    assert "fix main first" not in r.stderr
+    assert "red with beta aboard" in r.stdout
+
+
+def test_a_local_hook_refusal_names_the_hook_and_its_reasons(render, tmp_path):
+    # train 34 downstream: the log said "branch protection?" while the local
+    # pre-push review gate had refused, for a reason only a manual run showed
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    bare = tmp_path / "origin.git"
+    _git(out, "clone", "-q", "--bare", str(out), str(bare))
+    _git(out, "remote", "add", "origin", str(bare))
+    _git(out, "fetch", "-q", "origin")
+    _git(out, "branch", "-q", "--set-upstream-to=origin/main", "main")
+    _branch(out, "alpha", {"src/a.py": "a\n"})
+    hook = out / ".git/hooks/pre-push"
+    hook.write_text("#!/bin/sh\necho 'review gate: code changed after the reviewed head' >&2\nexit 1\n")
+    hook.chmod(0o755)
+    r = _train(out, "run", "--force", "--push", "--suite", "true")
+    assert r.returncode == 1
+    assert "the local pre-push hook refused it" in r.stderr
+    assert "code changed after the reviewed head" in r.stderr

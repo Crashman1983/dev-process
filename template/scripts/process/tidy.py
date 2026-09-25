@@ -107,6 +107,37 @@ def finished_spec_dirs(root: Path) -> list[str]:
     return out
 
 
+def spec_blocker(root: Path, name: str) -> str | None:
+    """Why publish_and_prune would refuse this finished directory — None when
+    it would accept it. The same preconditions, asked before `--apply`: a
+    "safe" bucket that the pruner then refuses lists the same residue forever
+    (observed downstream: 8 of 9 selected directories had no plan.md)."""
+    d = root / SPECS / name
+    missing = [f for f in ("plan.md", "spec.md") if not (d / f).is_file()]
+    if missing:
+        return "no " + " and no ".join(missing)
+    pp = root / "scripts/process/publish_and_prune.py"
+    if not pp.is_file():
+        return None
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("_tidy_publish_and_prune", pp)
+    if spec is None or spec.loader is None:
+        return None
+    mod = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(mod)
+    except Exception:  # noqa: BLE001 — a broken pruner is its own finding at --apply
+        return None
+    plan_text = (d / "plan.md").read_text(encoding="utf-8", errors="replace")
+    spec_text = (d / "spec.md").read_text(encoding="utf-8", errors="replace")
+    if not mod._issue_number(plan_text):
+        return "plan.md has no issue: ref"
+    unaccounted = mod._unaccounted_scs(spec_text, plan_text)
+    if unaccounted:
+        return "unaccounted Success Criteria " + ", ".join(unaccounted)
+    return None
+
+
 def stale_active_plans(root: Path, days: int) -> list[str]:
     cutoff = dt.date.today() - dt.timedelta(days=days)
     pdir = root / PLANS_ACTIVE
@@ -177,7 +208,10 @@ def report(root: Path, days: int, keep: tuple[str, ...] = DEFAULT_KEEP,
         items["branches"] = merged_remote_branches(root, keep)
     else:
         items["branches"] = []
-    items["specs"] = finished_spec_dirs(root)
+    finished = finished_spec_dirs(root)
+    blockers = {d: spec_blocker(root, d) for d in finished}
+    items["specs"] = [d for d in finished if blockers[d] is None]
+    items["specs_blocked"] = {d: why for d, why in blockers.items() if why}
     items["stale_plans"] = stale_active_plans(root, days)
     items["old_archive"] = old_archived_plans(root, days)
     items["journal"] = old_journal_shards(root, days)
@@ -192,6 +226,12 @@ def report(root: Path, days: int, keep: tuple[str, ...] = DEFAULT_KEEP,
     lines.append(f"- spec directories fully ticked but not published/pruned: {len(s)}"
                  + (f" ({', '.join(s[:4])}{', …' if len(s) > 4 else ''}) — `tidy.py --apply` "
                     f"runs publish_and_prune per directory" if s else ""))
+    sb = items["specs_blocked"]
+    if sb:
+        shown = "; ".join(f"{d}: {why}" for d, why in list(sb.items())[:4])
+        lines.append(f"- spec directories fully ticked that publish_and_prune would refuse: {len(sb)} "
+                     f"({shown}{'; …' if len(sb) > 4 else ''}) — YOUR call: add the missing piece, "
+                     f"or delete the directory (git history keeps it); `--apply` leaves them")
     p = items["stale_plans"]
     lines.append(f"- active plans older than {days} days: {len(p)}"
                  + (f" ({', '.join(p[:4])}{', …' if len(p) > 4 else ''}) — YOUR call: "

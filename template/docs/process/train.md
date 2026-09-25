@@ -59,14 +59,23 @@ the test lanes are free where the project has a lane script (see `tower.md`, lan
 2. Candidates merged in order (`--no-ff`); a conflict drops that candidate
    and continues.
 3. The process gates, then the full suite, run **once** on the combined
-   tree. Red: the base itself is checked once (a red main blames nobody
-   and aborts), then a bisection over boarding-order prefixes names the
-   first offender; it is dropped, gets a `blocked` report, and the rest is
-   rebuilt. A candidate dropped for a merge conflict is reported `blocked`
-   too, with "rebase" as the reason.
+   tree. Red: the **same tree runs once more** — red then green on
+   identical code is a flaky test, reported as FLAKY and merged, never
+   bisected (bisecting a flake blames whoever sits in the prefix). Red
+   twice: the base itself is checked once (a red main blames nobody and
+   aborts), then a bisection over boarding-order prefixes names the first
+   offender; it is dropped, gets a `blocked` report, and the rest is
+   rebuilt. A suite that does not exist on a tree (`No rule to make
+   target`, exit 127 — a passenger introduces the make target) makes that
+   tree *not comparable*, never red: the base is not called red, a prefix
+   is not blamed. Every red verdict logs the load average — a timeout under
+   load 10 on 6 CPUs is a different finding from a broken test. A
+   candidate dropped for a merge conflict is reported `blocked` too, with
+   "rebase" as the reason.
 4. Green: with `--push` the train is pushed as the integration branch
-   *first* (a rejected push — branch protection, a race — leaves local
-   main untouched and keeps the train branch for a PR); then local main
+   *first* (a rejected push — branch protection, a race, the local
+   pre-push hook — leaves local main untouched and keeps the train branch;
+   the message says which of them refused and quotes its reasons); then local main
    fast-forwards. Local main carrying commits that are not on origin
    refuses to depart. Merged branches are deleted (`--keep-branches`
    keeps them; a branch checked out elsewhere is kept, locally and on

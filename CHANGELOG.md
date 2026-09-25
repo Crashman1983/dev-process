@@ -1166,6 +1166,14 @@ ein Wächter-Test gegen doppelte Klammern ohne Leerzeichen in Python-Vorlagen.
 Wer v2.27.1 oder v2.28.0 installiert hat und am Push scheitert: auf v2.28.1
 aktualisieren, `v2.28.1`.
 
+**v2.31.0 — der Zug unterscheidet Flake, fehlende Suite und fremde Passagiere; tidy wählt nur, was der Pruner annimmt.** Befunde aus dem Referenzprojekt (Zug 31 und 34).
+- **Flake:** Ist der kombinierte Baum rot, läuft derselbe Baum ein zweites Mal, bevor jemand beschuldigt wird. Ist er dann grün, meldet der Zug FLAKY und merged; eine Bisektion über einen Flake beschuldigt sonst, wer gerade im Präfix sitzt.
+- **Fehlende Suite:** Gibt es die Suite auf einem Baum nicht (`No rule to make target`, Exit 127, weil ein Passagier das Make-Ziel erst mitbringt), ist dieser Baum nicht vergleichbar statt rot. main gilt dann nicht als rot, und kein Präfix wird beschuldigt.
+- **Last:** Jedes Rot-Urteil protokolliert die Systemlast.
+- **Abgelehnter Push:** Die Meldung sagt, ob origin oder der lokale pre-push-Hook abgelehnt hat, und zitiert die Gründe.
+- **Review-Gate:** „Code nach dem geprüften Stand geändert“ zählt nur noch Nicht-Merge-Commits, die vom geprüften Stand abstammen. Bisher lehnte der Merge-Push jeden Zug mit mehreren Passagieren ab, weil er die Dateien eines Mitpassagiers als ungeprüften Code des anderen las.
+- **tidy:** `tidy.py` trennt fertige Spec-Verzeichnisse, die `publish_and_prune` annehmen würde, von denen, die es ablehnen würde (kein `plan.md`, keine `issue:`-Zeile, nicht verbuchte Success Criteria). Die zweite Gruppe wird mit dem fehlenden Teil als Owner-Entscheidung gelistet, und `--apply` übergibt sie nicht mehr.
+
 **v2.30.0 — weniger Review-Runden: gezählt statt behauptet, erst die Ursache, dann der Fix.** Die Analyse im Referenzprojekt ergab: Arbeiten mit drei oder mehr Runden stiegen von 11 % (1.–15.09.) auf 23 % (16.–24.09.). Die größte Ursache waren Fixes, die den nächsten Blocker selbst erzeugten; dazu kamen ein aufgeblähter Zähler (Nachprüfungen als Runden, fehlende Block-Zeilen, Plan- und Code-Runden auf einem Zähler) und Arbeiten mit 3.000–5.500 Zeilen.
 - **Gezählte Runde:** `attest.py` zählt die Runde selbst, als 1 plus die für die Arbeit schon erfassten Blocks. Eine behauptete, abweichende Runde wird abgelehnt. Nachprüfungen nach einem Pass und Rebases bleiben in derselben Runde. Plan-Reviews zählen getrennt (`--plan-review` schreibt `work=<id>-plan`).
 - **Ursache vor dem Fix:** Vor jeder Runde nach einem Block verlangt `attest.py` pro Block eine Zeile `ROOT-CAUSE work=<id> round=<r>: …` im Journal oder im Plan.

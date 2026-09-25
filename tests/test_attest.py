@@ -157,6 +157,35 @@ def test_code_after_the_reviewed_head_is_stale_on_the_merge_push(render, tmp_pat
     assert r.returncode == 1 and "code changed after the reviewed head (widget.py)" in r.stdout, r.stdout
 
 
+def test_a_fellow_passengers_files_are_not_this_works_late_code(render, tmp_path):
+    # train 34 downstream: two passengers, each reviewed; the merge push named
+    # the other passenger's files as unreviewed code of the first
+    import os
+    out, base, head = _repo(render, tmp_path)
+    assert _attest(out, "--base", base, "--head", head).returncode == 0
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "docs: attest")
+    _git(out, "checkout", "-q", "-b", "other", "main")
+    (out / "other.py").write_text("x = 1\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "feat: other passenger")
+    _git(out, "checkout", "-q", "-b", "train", "main")
+    _git(out, "merge", "-q", "--no-ff", "--no-edit", "feature")
+    _git(out, "merge", "-q", "--no-ff", "--no-edit", "other")
+    gate = [sys.executable, str(out / "scripts/process/check_review.py"), "."]
+    env = {**os.environ, "PROCESS_PUSH_TARGETS": "refs/heads/main"}
+    r = subprocess.run(gate, cwd=out, capture_output=True, text=True, env=env)
+    assert "code changed after the reviewed head" not in r.stdout, r.stdout
+    # the work's own fix after the review still counts, merged or not
+    _git(out, "checkout", "-q", "feature")
+    (out / "widget.py").write_text("def widget():\n    return 45\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "fix: after the review")
+    _git(out, "checkout", "-q", "train")
+    _git(out, "merge", "-q", "--no-ff", "--no-edit", "feature")
+    r = subprocess.run(gate, cwd=out, capture_output=True, text=True, env=env)
+    assert "code changed after the reviewed head (widget.py)" in r.stdout, r.stdout
+
 def test_finish_blocks_a_stale_review(render, tmp_path):
     out, base, head = _repo(render, tmp_path)
     assert _attest(out, "--base", base, "--head", head).returncode == 0
