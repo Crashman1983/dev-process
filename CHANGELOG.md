@@ -1166,6 +1166,8 @@ ein Wächter-Test gegen doppelte Klammern ohne Leerzeichen in Python-Vorlagen.
 Wer v2.27.1 oder v2.28.0 installiert hat und am Push scheitert: auf v2.28.1
 aktualisieren, `v2.28.1`.
 
+**v2.31.4 — Journal-Zeilen zweier Branches mergen ohne Konflikt.** `.process-work/journal/.gitattributes` setzt `*.md merge=union`: Hängen zwei Branches an dieselbe Tagesdatei an, behält der Merge beide Zeilen. Im Referenzprojekt blockierten sich zwei geprüfte Branches im Zug über angehängte REVIEW-Zeilen. Die Regel gilt nur für das Journal-Verzeichnis, eine eigene Root-`.gitattributes` des Projekts bleibt unberührt. Ein Test merged zwei Branches mit angehängten Zeilen.
+
 **v2.31.3 — gleiche Prüfer über alle Runden.** `review.md` ergänzt die Rundenökonomie:
 - **Ein Prüfer-Set pro Arbeit:** Runde 1 fährt das volle Set, das der Tier verlangt. Folgerunden nutzen dasselbe Set, ohne neue Linsen und ohne Wechsel der Modellfamilie. Fällt ein Prüfer aus, wird der Ersatz im Journal vermerkt.
 - **Folgerunden prüfen den Fix und sein Umfeld:** Ein älterer Befund außerhalb davon wird ein eigenes Issue, außer er blockiert diese Änderung.

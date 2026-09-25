@@ -285,3 +285,23 @@ def test_a_conflict_resolution_after_the_review_is_unreviewed_code(render, tmp_p
     _git(out, "commit", "-q", "--no-edit")
     r = subprocess.run(gate, cwd=out, capture_output=True, text=True, env=env)
     assert "code changed after the reviewed head (widget.py)" in r.stdout, r.stdout
+
+
+def test_appended_journal_lines_of_two_branches_merge_without_conflict(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d"})
+    assert (out / ".process-work/journal/.gitattributes").read_text().strip().endswith("*.md merge=union")
+    _git(out, "init", "-q", "-b", "main")
+    _git(out, "config", "user.email", "t@t")
+    _git(out, "config", "user.name", "t")
+    day = out / ".process-work/journal/2026-09-24.md"
+    day.write_text("# 2026-09-24\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "base")
+    for name in ("a", "b"):
+        _git(out, "checkout", "-q", "-b", name, "main")
+        with day.open("a") as fh:
+            fh.write(f"REVIEW work={name}\n")
+        _git(out, "commit", "-q", "-am", name)
+    _git(out, "merge", "-q", "--no-edit", "a")  # on b
+    text = day.read_text()
+    assert "REVIEW work=a" in text and "REVIEW work=b" in text
