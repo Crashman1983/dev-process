@@ -126,7 +126,7 @@ def spec_blocker(root: Path, name: str) -> str | None:
     mod = importlib.util.module_from_spec(spec)
     try:
         spec.loader.exec_module(mod)
-    except Exception:  # noqa: BLE001 — a broken pruner is its own finding at --apply
+    except (Exception, SystemExit):  # noqa: BLE001 — a broken pruner is its own finding at --apply
         return None
     try:
         plan_text = (d / "plan.md").read_text(encoding="utf-8", errors="replace")
@@ -136,7 +136,7 @@ def spec_blocker(root: Path, name: str) -> str | None:
     try:
         issue = mod._issue_number(plan_text)
         unaccounted = mod._unaccounted_scs(spec_text, plan_text)
-    except Exception:  # noqa: BLE001 — a pruner without these helpers is its own finding at --apply
+    except (Exception, SystemExit):  # noqa: BLE001 — a pruner without these helpers is its own finding at --apply
         return None
     if not issue:
         return "plan.md has no issue: ref"

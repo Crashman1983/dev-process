@@ -203,3 +203,56 @@ def test_a_conflict_resolved_to_the_other_side_is_stale(repo):
     _git(root, "add", "a.py")
     _git(root, "commit", "-q", "--no-edit")
     assert "a.py" in _stale(root, head)
+
+
+def test_a_rename_on_main_resolved_to_mains_side_is_stale(tmp_path):
+    # main renames and edits the file; git sees the rename, the content
+    # conflicts, the resolution takes main's side — the reviewed edit is gone
+    root = tmp_path / "r3"
+    root.mkdir()
+    _git(root, "init", "-q", "-b", "main")
+    _git(root, "config", "user.email", "t@t")
+    _git(root, "config", "user.name", "t")
+    lines = [f"line{i} = {i}\n" for i in range(20)]
+    _commit(root, "f.py", "".join(lines), "base")
+    _git(root, "checkout", "-q", "-b", "feat")
+    mine = lines.copy()
+    mine[0] = "line0 = 'reviewed'\n"
+    head = _commit(root, "f.py", "".join(mine), "reviewed work")
+    _git(root, "checkout", "-q", "main")
+    _git(root, "mv", "f.py", "g.py")
+    theirs = lines.copy()
+    theirs[0] = "line0 = 'main'\n"
+    (root / "g.py").write_text("".join(theirs))
+    _git(root, "commit", "-q", "-am", "main renames and edits")
+    _git(root, "checkout", "-q", "feat")
+    subprocess.run(["git", "merge", "--no-edit", "main"], cwd=root, capture_output=True)
+    _git(root, "checkout", "--theirs", "g.py")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "--no-edit")
+    assert _stale(root, head) is not None
+
+
+def test_main_already_carrying_the_reviewed_change_merges_clean(tmp_path):
+    # a squash/cherry-pick of the reviewed change landed on main, then a later
+    # edit further down the same file; the branch merges main cleanly —
+    # nothing was thrown away
+    root = tmp_path / "r2"
+    root.mkdir()
+    _git(root, "init", "-q", "-b", "main")
+    _git(root, "config", "user.email", "t@t")
+    _git(root, "config", "user.name", "t")
+    lines = [f"line{i} = {i}\n" for i in range(20)]
+    _commit(root, "f.py", "".join(lines), "base")
+    _git(root, "checkout", "-q", "-b", "feat")
+    reviewed = lines.copy()
+    reviewed[0] = "line0 = 'reviewed'\n"
+    head = _commit(root, "f.py", "".join(reviewed), "reviewed work")
+    _git(root, "checkout", "-q", "main")
+    _commit(root, "f.py", "".join(reviewed), "the reviewed change, squashed")
+    later = reviewed.copy()
+    later[19] = "line19 = 'later'\n"
+    _commit(root, "f.py", "".join(later), "a later edit")
+    _git(root, "checkout", "-q", "feat")
+    _git(root, "merge", "-q", "--no-edit", "main")
+    assert _stale(root, head) is None

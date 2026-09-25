@@ -302,8 +302,14 @@ def plan(root: Path, *, min_candidates: int, max_wait_hours: float) -> dict:
 def _undefined_line() -> re.Pattern[str]:
     level = os.environ.get("MAKELEVEL", "0")
     level = level if level.isascii() and level.isdigit() else "0"
-    prefix = "make" if int(level) == 0 else f"make\\[{int(level)}\\]"
-    return re.compile(rf"^{prefix}: \*\*\* No rule to make target '[^']+'.*Stop\.$", re.MULTILINE)
+    prefix = "make" if int(level) == 0 else f"make\\[{int(level)}\\]"  # (g)make
+    # the target itself, not a prerequisite (", needed by …" is a red tree: a
+    # passenger deleted a file a rule needs); GNU make 3.81 quotes `x', make
+    # under -k omits "Stop.", some systems call it gmake. A translated make
+    # (a non-English locale) is not recognised and reads red — run the train
+    # with LC_ALL=C or LANG=C if the suite is introduced by a passenger.
+    return re.compile(rf"^(?:g?{prefix}): \*\*\* No rule to make target [`'][^'`]+'\.(?:\s+Stop\.)?$",
+                      re.MULTILINE)
 
 
 def _load() -> str:
@@ -466,6 +472,14 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
             return "red", merged, br  # everybody conflicted: nothing to judge
         return judge(wt), merged, br
 
+    def _report_dropped() -> None:
+        for b in conflicted:
+            print(f"train: {b} did not board — merge conflict with the batch; its worker rebases (report: blocked)")
+            _write(root, "blocked", f"dropped from train {stamp}: merge conflict — rebase onto {local}", b)
+        for b in blamed:
+            print(f"train: {b} was dropped as the offender — its worker owes a fix (report: blocked)")
+            _write(root, "blocked", f"dropped from train {stamp}: red with it aboard", b)
+
     base_checked = retried = False
     while aboard:
         state, merged, branch = attempt(aboard)
@@ -476,6 +490,9 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
             print(f"train: the suite `{suite}` does not exist on the combined tree — fix --suite; "
                   "nothing merged", file=sys.stderr)
             log("suite undefined on the combined tree — aborted without blame")
+            # an offender dropped earlier may have been the one that brought
+            # the suite in: it still owes its fix, say so (downstream refutation)
+            _report_dropped()
             _cleanup(root, stamp)
             return 1
         if not retried:
@@ -533,14 +550,6 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
         log(f"red with {offender} aboard — dropped, rebuilding")
         print(f"train: red with {offender} aboard — dropping it and rebuilding")
         aboard = [b for b in aboard if b != offender]
-    def _report_dropped() -> None:
-        for b in conflicted:
-            print(f"train: {b} did not board — merge conflict with the batch; its worker rebases (report: blocked)")
-            _write(root, "blocked", f"dropped from train {stamp}: merge conflict — rebase onto {local}", b)
-        for b in blamed:
-            print(f"train: {b} was dropped as the offender — its worker owes a fix (report: blocked)")
-            _write(root, "blocked", f"dropped from train {stamp}: red with it aboard", b)
-
     if not aboard:
         print("train: nothing survived — see " + str(logfile), file=sys.stderr)
         _report_dropped()

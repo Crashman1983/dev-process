@@ -1,6 +1,8 @@
 import json
 import subprocess
 import sys
+
+import pytest
 from pathlib import Path
 
 
@@ -439,3 +441,41 @@ def test_the_suites_own_make_is_recognised_at_any_makelevel(render, tmp_path, mo
     monkeypatch.setenv("MAKELEVEL", "1")
     assert train._sh(tmp_path, "make -f /dev/null missing-target", log) == "undefined"
     assert train._sh(tmp_path, "MAKELEVEL=2 make -f /dev/null missing-target", log) == "red"
+
+
+@pytest.mark.parametrize("output,state", [
+    # a prerequisite a passenger deleted is a red tree, not an undefined suite
+    ("make: *** No rule to make target 'fixture.txt', needed by 'check'.  Stop.", "red"),
+    ("make: *** No rule to make target `test-merge'.  Stop.", "undefined"),   # GNU make 3.81 quoting
+    ("gmake: *** No rule to make target 'test-merge'.  Stop.", "undefined"),
+    ("make: *** No rule to make target 'test-merge'.", "undefined"),          # make -k: no "Stop."
+])
+def test_the_undefined_line_reads_real_make_variants(render, tmp_path, monkeypatch, output, state):
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    train = _load_train(out)
+    monkeypatch.delenv("MAKELEVEL", raising=False)
+    cmd = "printf '%s\\n' " + __import__("shlex").quote(output) + "; exit 2"
+    assert train._sh(tmp_path, cmd, lambda _l: None) == state
+
+
+def test_an_offender_that_brought_the_suite_is_still_reported(render, tmp_path, monkeypatch):
+    # combined red, retry red, base undefined; b1 (which brought the suite) is
+    # dropped; the rest cannot run the suite — b1 must still get its report
+    from types import SimpleNamespace
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    train = _load_train(out)
+    states = iter(["red", "red", "undefined", "red", "undefined"])
+    wt = tmp_path / "wt"
+    wt.mkdir()
+    written = []
+    monkeypatch.setattr(train, "build_train", lambda root, base, subset, stamp, log: (wt, "train/x", list(subset), []))
+    monkeypatch.setattr(train, "_run_gates", lambda w, log: True)
+    monkeypatch.setattr(train, "_sh", lambda cwd, cmd, log: next(states))
+    monkeypatch.setattr(train, "_git", lambda *a, **k: SimpleNamespace(returncode=0, stdout="", stderr=""))
+    monkeypatch.setattr(train, "_out", lambda *a, **k: "")
+    monkeypatch.setattr(train, "_cleanup", lambda *a: None)
+    monkeypatch.setattr(train, "_write", lambda root, state, note, worker: written.append((state, worker)))
+    p = {"base": "origin/main", "candidates": [{"branch": "b1", "hours_waiting": 2}, {"branch": "b2", "hours_waiting": 1}]}
+    rc = train._run_batch(out, "main", p, ["b1", "b2"], "x", tmp_path / "t.log", suite="s", deploy=None,
+                          push=False, keep_branches=True)
+    assert rc == 1 and ("blocked", "b1") in written
