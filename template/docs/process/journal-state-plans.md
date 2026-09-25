@@ -204,7 +204,7 @@ REVIEW work=42 tier=2 reviewer=fresh-agent model=same independence=bundle,non-im
 | `model` | reviewing model-family slug, or `same` if the producer's family |
 | `independence` | comma set ⊆ `bundle,non-implementing,cross-model,single-family` |
 | `verdict` | `pass` \| `block` |
-| `round` | 1 + the blocking REVIEW lines already recorded for this `work` — counted by `attest.py`, not claimed: a re-check after a pass or a rebase keeps the round; plan reviews count apart as `work=<id>-plan` |
+| `round` | 1 + the distinct blocked rounds already recorded for this `work` (further reviewers of the round that just blocked attest that round) — counted by `attest.py`, not claimed: a re-check after a pass or a rebase keeps the round; plan reviews count apart as `work=<id>-plan` |
 | `base` | optional: merge-base commit the bundle diffed from |
 | `head` | optional: reviewed branch head |
 | `diff` | optional: SHA-256 of the raw `git diff --binary base...head` bytes — the gate recomputes and verifies it |

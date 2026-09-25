@@ -212,7 +212,8 @@ def candidates(root: Path, local: str, base: str) -> list[dict]:
         if process_unreviewed:
             more = f" and {len(touches_process) - 1} more" if len(touches_process) > 1 else ""
             c["reasons"].append(f"changes the gates' code ({touches_process[0]}{more}) without a REVIEW pass "
-                                f"for its own work (work= one of {', '.join(sorted(own_ids))})")
+                                f"at tier 2 or higher for its own work (work= one of {', '.join(sorted(own_ids))}) "
+                                f"— gate code needs it whatever the plan's tier")
         elif archived and cleared_all:
             needs_review = [p for p in c["plans"] if p["tier"] is not None and p["tier"] >= 2 and not p["waived"]]
             c["by"] = ("archived plan + REVIEW pass" if needs_review

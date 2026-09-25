@@ -68,9 +68,11 @@ Round economy — a failed round must not re-pay the whole chain:
 - **Rebase once**, before the first review round — every later rebase changes
   the tree and voids the bundle digests, forcing a fresh full round.
 - **The round is counted, not claimed.** `attest.py` numbers it: 1 + the
-  blocks recorded for the work. Every blocking round gets its REVIEW line
-  (`--verdict block`); a re-check after a pass, a rebase or a short look is
-  no new round. Plan reviews count apart (`--plan-review`).
+  distinct blocked rounds recorded for the work. Every blocking round gets
+  its REVIEW line (`--verdict block`); several reviewers (lenses) of one
+  round each attest it with `--round <that round>`; a re-check after a
+  pass, a rebase or a short look is no new round. Plan reviews count apart
+  (`--plan-review`).
 - **Cause before fix.** Before the next round, the fixer writes
   `ROOT-CAUSE work=<id> round=<r>: <cause> — <the test that failed before
   the fix>` into the journal or the plan; `attest.py` refuses the next round
@@ -85,4 +87,5 @@ Round economy — a failed round must not re-pay the whole chain:
   allows; works of 3,000+ lines ran five to seven rounds downstream.
 - **Exceptions are recorded.** Where the owner overrides a rule above,
   `attest.py --exception "<reason>"` writes a `REVIEW-EXCEPTION` line —
-  countable, never silent.
+  also when no attest rule trips (a round beyond the cap) — countable,
+  never silent.

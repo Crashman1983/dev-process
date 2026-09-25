@@ -211,7 +211,7 @@ def test_gate_code_boards_only_on_its_own_review_pass(render, tmp_path):
                        "verdict=pass round=1\n"}, "login")
     _git(out, "checkout", "-q", "main")
     by = {c["branch"]: c for c in json.loads(_train(out, "plan", "--json").stdout)["candidates"]}
-    assert not by["gatefix"]["eligible"] and "without a REVIEW pass" in by["gatefix"]["reasons"][0]
+    assert not by["gatefix"]["eligible"] and "without a REVIEW pass at tier 2 or higher" in by["gatefix"]["reasons"][0]
     assert by["42-fix-login"]["eligible"], by["42-fix-login"]
     _git(out, "checkout", "-q", "gatefix")
     _main_commit(out, {".process-work/journal/2026-09-21-gatefix.md":
