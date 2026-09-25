@@ -426,3 +426,16 @@ def test_after_a_drop_the_rest_gets_its_own_flake_rerun(render, tmp_path, monkey
                           push=False, keep_branches=True)
     assert rc == 0
     assert "flaky" in (tmp_path / "t.log").read_text()
+
+
+def test_the_suites_own_make_is_recognised_at_any_makelevel(render, tmp_path, monkeypatch):
+    # `make train` runs the train at MAKELEVEL 1: the suite's make prints
+    # `make[1]:` — still undefined; a deeper make inside a test stays red
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    train = _load_train(out)
+    log = lambda _l: None  # noqa: E731
+    monkeypatch.delenv("MAKELEVEL", raising=False)
+    assert train._sh(tmp_path, "make -f /dev/null missing-target", log) == "undefined"
+    monkeypatch.setenv("MAKELEVEL", "1")
+    assert train._sh(tmp_path, "make -f /dev/null missing-target", log) == "undefined"
+    assert train._sh(tmp_path, "MAKELEVEL=2 make -f /dev/null missing-target", log) == "red"
