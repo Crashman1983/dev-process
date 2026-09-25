@@ -305,3 +305,49 @@ def test_appended_journal_lines_of_two_branches_merge_without_conflict(render, t
     _git(out, "merge", "-q", "--no-edit", "a")  # on b
     text = day.read_text()
     assert "REVIEW work=a" in text and "REVIEW work=b" in text
+
+
+def _stale_gate(out):
+    import os
+    env = {**os.environ, "PROCESS_PUSH_TARGETS": "refs/heads/main"}
+    return subprocess.run([sys.executable, str(out / "scripts/process/check_review.py"), "."],
+                          cwd=out, capture_output=True, text=True, env=env)
+
+
+def test_an_amended_reviewed_commit_is_a_stale_review(render, tmp_path):
+    # downstream review finding: after `commit --amend` the reviewed head is not
+    # in the history at all — there is no later code to diff, and it passed
+    out, base, head = _repo(render, tmp_path)
+    assert _attest(out, "--base", base, "--head", head).returncode == 0
+    journal = [str(p.relative_to(out)) for p in (out / ".process-work/journal").rglob("*.md")]
+    (out / "widget.py").write_text("def widget():\n    return 7\n")  # unreviewed change
+    _git(out, "add", "widget.py", *journal)
+    _git(out, "commit", "-q", "--amend", "--no-edit")
+    r = _stale_gate(out)
+    assert "is not in the history of what is pushed" in r.stdout, r.stdout
+
+
+def test_a_rebased_and_amended_review_is_stale(render, tmp_path):
+    out, base, head = _repo(render, tmp_path)
+    assert _attest(out, "--base", base, "--head", head).returncode == 0
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "docs: attest")
+    _git(out, "checkout", "-q", "main")
+    (out / "main_only.py").write_text("m = 1\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "main moves on")
+    _git(out, "checkout", "-q", "feature")
+    _git(out, "rebase", "-q", "main")
+    (out / "widget.py").write_text("def widget():\n    return 8\n")
+    _git(out, "commit", "-q", "-a", "--amend", "--no-edit")
+    r = _stale_gate(out)
+    assert "is not in the history of what is pushed" in r.stdout, r.stdout
+
+
+def test_the_reviewed_head_in_the_history_is_not_stale(render, tmp_path):
+    out, base, head = _repo(render, tmp_path)
+    assert _attest(out, "--base", base, "--head", head).returncode == 0
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "docs: attest")
+    r = _stale_gate(out)
+    assert "reviewed head" not in r.stdout and "code changed after" not in r.stdout, r.stdout

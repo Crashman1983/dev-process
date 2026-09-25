@@ -1166,6 +1166,14 @@ ein Wächter-Test gegen doppelte Klammern ohne Leerzeichen in Python-Vorlagen.
 Wer v2.27.1 oder v2.28.0 installiert hat und am Push scheitert: auf v2.28.1
 aktualisieren, `v2.28.1`.
 
+**v2.31.5 — `stale_review` fasst die Regel statt des Symptoms.** Befund aus Runde 3 des Reviews im Referenzprojekt: Nach `commit --amend` oder Rebase liegt der geprüfte Stand nicht mehr in der Vorgeschichte, und die Prüfung ließ es durch.
+- **Stand nicht in der Vorgeschichte:** Das Review ist dann ungültig.
+- **Sonst:** Ungeprüft ist alles, was HEAD trägt und weder der geprüfte Stand noch main trägt. Damit fallen auch ein eingemergter Nebenbranch, ein Amend neben dem geprüften Stand und ein Merge mit `-s ours` auf; Merges zählen über ihren kombinierten Diff.
+- **Zug:** Bei der Merge-Kette eines Zugs zählt vom geprüften Werk nur der Stand, der den geprüften Stand trägt, plus der kombinierte Diff aller Merges der Kette. Mitpassagiere zählen nicht, eingeschmuggelter Inhalt in einem ihrer Merges aber schon.
+- **Fail-closed:** Git-Fehler führen zur Ablehnung. Eine Integrations-Ref, die HEAD schon enthält, gilt nicht als Basis. Ein Pass ohne `head` hebt keinen veralteten Pass mehr auf. `in_flight` engt nicht mehr ein; ein leeres Set hieß vorher „nichts zu prüfen“.
+- **Geprüft:** Ein unabhängiger Refute-Agent hat den Fix in zwei Runden angegriffen, mit 27 und 38 Szenarien. Seine Funde sind als Regressionstests abgelegt (`tests/test_stale_review.py`), und jeder schlägt gegen die jeweils vorige Fassung an.
+- **Bewusst nicht erfasst:** ein Mitpassagier ohne Plan oder unter Tier 2, der die Einstiegsregeln des Zugs umgeht. Eine Konfliktauflösung zugunsten der anderen Seite folgt separat.
+
 **v2.31.4 — Journal-Zeilen zweier Branches mergen ohne Konflikt.** `.process-work/journal/.gitattributes` setzt `*.md merge=union`: Hängen zwei Branches an dieselbe Tagesdatei an, behält der Merge beide Zeilen. Im Referenzprojekt blockierten sich zwei geprüfte Branches im Zug über angehängte REVIEW-Zeilen. Die Regel gilt nur für das Journal-Verzeichnis, eine eigene Root-`.gitattributes` des Projekts bleibt unberührt. Ein Test merged zwei Branches mit angehängten Zeilen.
 
 **v2.31.3 — gleiche Prüfer über alle Runden.** `review.md` ergänzt die Rundenökonomie:
