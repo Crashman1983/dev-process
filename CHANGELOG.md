@@ -1166,6 +1166,13 @@ ein Wächter-Test gegen doppelte Klammern ohne Leerzeichen in Python-Vorlagen.
 Wer v2.27.1 oder v2.28.0 installiert hat und am Push scheitert: auf v2.28.1
 aktualisieren, `v2.28.1`.
 
+**v2.32.3 — der Zug nimmt nur mit, was ein Review am Branch-Kopf deckt.** Ein Branch, den ein Zug schon gemergt hatte, bekam danach neue Commits und stand im nächsten Zug als einstiegsbereit da: Der alte Bericht `done` und der alte REVIEW-Pass galten weiter. Ein Refute vor dem Review fand dazu einen Blocker, zwei Majors und einen Minor. Alles ist behoben, jeweils mit einem Test, der gegen die alte Fassung fällt:
+- **Deckung am Kopf:** Ein REVIEW-Pass boardet einen Branch nur, wenn sein geprüfter Kopf im Branch liegt und dahinter kein ungeprüfter Code steht. Die Regel ist dieselbe wie im Stale-Check des Review-Gates.
+- **`done` boardet nichts:** `done` schreibt der Zug nach dem Merge. Für Commits danach braucht es einen eigenen REVIEW-Pass.
+- **Nur Merges ist kein Zug:** Die Passagier-Ausnahme gilt nur auf dem Staging-Branch des Zugs (`train/<stamp>`). Ein Arbeits-Branch, der nur aus Merges besteht, versteckte sonst einen hineingemergten Seiten-Branch.
+- **Kopflose Pässe:** Ein älterer Pass ohne Kopf zählt nur, solange kein Pass der Arbeit einen Kopf trägt, egal welcher Tier. Im Zug zählt er außerdem nur aus dem eigenen Journal des Branches: Ein kopfloser Pass auf main bürgt nicht für neue Commits.
+- **Lokales main vor origin/main:** Als Basis gilt die am weitesten fortgeschrittene Integrationsreferenz. Was ein Zug lokal schon gemergt, aber noch nicht gepusht hat, zählt so nicht als ungeprüfter Code der Arbeit.
+
 **v2.32.2 — Refute der Restbefund-Fixes (v2.31.6/7).** Ein frischer Agent prüfte 27 Szenarien, davon fielen 8 durch. Behoben ist alles, was im Rahmen der Änderung lag, jeweils mit Test gegen die alte Fassung:
 - **Merge zur anderen Seite:** Eine Konfliktauflösung auf die Seite eines Umbenenners wird jetzt erkannt (`--no-renames`). Ob ein Merge etwas verworfen hat, misst sich an git's eigenem Merge (`merge-tree`). Ein sauberer Merge ist dadurch kein Fund mehr, auch wenn main die geprüfte Änderung schon trägt (Squash, Cherry-Pick).
 - **Suite nicht vorhanden:** Eine fehlende Vorbedingung (`…, needed by …`) heißt rot, nicht „nicht vorhanden“. Erkannt werden jetzt auch make 3.81 (Backtick-Quote), `gmake` und `make -k` (ohne „Stop.“).

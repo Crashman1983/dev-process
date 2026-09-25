@@ -628,14 +628,22 @@ def _integration_ref(root: Path, tip: str = "HEAD") -> str | None:
     contains HEAD cannot be that — pushing local `main` without an
     `origin/main` would otherwise exclude everything (downstream refutation);
     then there is no base, and the check stays conservative."""
+    valid = []
     for ref in INTEGRATION_REFS:
         out = _git_bytes(root, "rev-parse", "--verify", "-q", f"{ref}^{{commit}}")
         if out is None or not out.strip():
             continue
         if _git_bytes(root, "merge-base", "--is-ancestor", tip, ref) is not None:
             continue
-        return ref
-    return None
+        valid.append(ref)
+    # the most advanced of them: a local main ahead of origin/main (a train
+    # that merged but has not pushed yet) already carries what it merged —
+    # measured against the stale origin, that would read as unreviewed
+    # (downstream refutation)
+    for ref in valid:
+        if all(_git_bytes(root, "merge-base", "--is-ancestor", other, ref) is not None for other in valid):
+            return ref
+    return valid[0] if valid else None
 
 
 def _unreviewed_paths(root: Path, head: str, tip: str = "HEAD") -> set[str] | None:
@@ -667,7 +675,13 @@ def _unreviewed_paths(root: Path, head: str, tip: str = "HEAD") -> set[str] | No
         return None
     chain = [ln.split() for ln in walk.decode(errors="replace").splitlines() if ln.strip()]
     tips, carriers = [tip], []
-    if chain and all(len(c) >= 3 for c in chain):  # merges only: a train's staging chain
+    # only the merge train's own staging branch (`train/<stamp>`, pushed from its
+    # worktree) gets the passenger exemption — a work branch made of merges
+    # only is not a train, and treating it as one hid a side branch merged
+    # into it (downstream refutation)
+    staging = tip == "HEAD" and (_git_bytes(root, "symbolic-ref", "--short", "-q", "HEAD") or b"") \
+        .decode(errors="replace").strip().startswith("train/")
+    if staging and chain and all(len(c) >= 3 for c in chain):  # merges only: the train's chain
         for c in chain:
             for parent in c[2:]:
                 if _git_bytes(root, "merge-base", "--is-ancestor", head, parent) is not None:
@@ -786,6 +800,10 @@ def stale_review(root: Path, passes: list[dict], ids: set[str], tier: int,
         return None
     with_head = [r for r in clearing if r.get("head")]
     if not with_head:
+        # a headless (older) pass counts only while no pass for the work —
+        # of any tier — records a head
+        if any(r.get("head") for r in passes if r["work"] in ids):
+            return "no clearing REVIEW pass records the reviewed head, and a pass that does exists — attest the current head"
         return None
     reasons: list[str] = []
     for r in with_head:
