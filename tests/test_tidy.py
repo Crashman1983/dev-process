@@ -131,3 +131,13 @@ def test_an_unreadable_plan_or_an_old_pruner_never_crashes_the_report(render, tm
     monkeypatch.setattr(Path, "read_text", real)
     (out / "scripts/process/publish_and_prune.py").write_text("x = 1\n")  # an old pruner without the helpers
     assert tidy.spec_blocker(out, "011-x") is None
+
+
+def test_a_pruner_that_exits_on_import_does_not_crash_the_report(render, tmp_path):
+    out = render(tmp_path / "w", {"project_name": "d", "modules": {"speckit": True}})
+    d = out / "specs/012-x"
+    d.mkdir(parents=True)
+    (d / "spec.md").write_text("# Spec\n")
+    (d / "plan.md").write_text("# Plan\n\nissue: #12\n")
+    (out / "scripts/process/publish_and_prune.py").write_text("import sys\nsys.exit(3)\n")
+    assert _tidy(out).spec_blocker(out, "012-x") is None

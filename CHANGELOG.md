@@ -1166,6 +1166,13 @@ ein Wächter-Test gegen doppelte Klammern ohne Leerzeichen in Python-Vorlagen.
 Wer v2.27.1 oder v2.28.0 installiert hat und am Push scheitert: auf v2.28.1
 aktualisieren, `v2.28.1`.
 
+**v2.32.2 — Refute der Restbefund-Fixes (v2.31.6/7).** Ein frischer Agent prüfte 27 Szenarien, davon fielen 8 durch. Behoben ist alles, was im Rahmen der Änderung lag, jeweils mit Test gegen die alte Fassung:
+- **Merge zur anderen Seite:** Eine Konfliktauflösung auf die Seite eines Umbenenners wird jetzt erkannt (`--no-renames`). Ob ein Merge etwas verworfen hat, misst sich an git's eigenem Merge (`merge-tree`). Ein sauberer Merge ist dadurch kein Fund mehr, auch wenn main die geprüfte Änderung schon trägt (Squash, Cherry-Pick).
+- **Suite nicht vorhanden:** Eine fehlende Vorbedingung (`…, needed by …`) heißt rot, nicht „nicht vorhanden“. Erkannt werden jetzt auch make 3.81 (Backtick-Quote), `gmake` und `make -k` (ohne „Stop.“).
+- **Zug-Bericht:** Ein aus dem Zug geworfener Branch bekommt seinen Bericht auch dann, wenn der Rest danach nicht laufen kann.
+- **tidy:** Ein Pruner, der beim Import `sys.exit` ruft, lässt den Bericht nicht mehr abstürzen.
+- **Bekannt, nicht behoben:** Eine übersetzte make-Ausgabe (nicht-englische Locale) wird nicht erkannt und heißt rot; sie ist im Code dokumentiert. Ein Flake in einem Bisektions-Präfix kann weiter einen Unbeteiligten beschuldigen; das lag außerhalb dieser Änderung.
+
 **v2.32.1 — der erste Refute-Lauf, gegen die eigene Warnung.** Die Regel aus v2.32.0 wurde gleich auf ihre eigene Umsetzung angewandt: Ein frischer Agent fand an der REFUTE-Warnung drei Majors und drei Minors, alle behoben und je mit einem Test belegt, der gegen v2.32.0 fällt.
 - **Umbenennung aus dem Gate-Pfad:** Eine aus dem Gate-Pfad wegbewegte Datei warnt jetzt (`--no-renames`).
 - **REFUTE-Zeile als Beispiel:** Eine Zeile im Codeblock, im HTML-Kommentar, eingerückt oder mit Platzhalter (`<id>`, `TODO`) zählt nicht mehr.

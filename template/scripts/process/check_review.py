@@ -705,11 +705,34 @@ def _blob(root: Path, commit: str, path: str) -> str | None:
     return out.decode(errors="replace").strip() if out else None
 
 
+def _auto_merge(root: Path, ours: str, other: str) -> tuple[str, set[str]] | None:
+    """What git would have merged on its own: (tree, conflicted paths) — None
+    when git cannot tell (an old git without `merge-tree --write-tree`)."""
+    try:
+        r = subprocess.run(["git", "-C", str(root), "merge-tree", "--write-tree", "--name-only",
+                            "--no-messages", ours, other], capture_output=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if r.returncode not in (0, 1):
+        return None
+    lines = r.stdout.decode(errors="replace").splitlines()
+    if not lines:
+        return None
+    return lines[0].strip(), {ln.strip() for ln in lines[1:] if ln.strip()}
+
+
 def _dropped_by_merge(root: Path, merge: str, head: str) -> set[str] | None:
-    """Paths where a merge threw the reviewed work's change away: the result
-    equals another parent's version although the parent carrying the reviewed
-    head had changed the file. `--cc` is blind to this — the result equals one
-    parent, so the combined diff is empty (downstream review residual)."""
+    """Paths where a merge threw the reviewed work's change away in favour of
+    another parent's version. `--cc` is blind to this — the result equals one
+    parent, so the combined diff is empty (downstream review residual).
+
+    Judged against what git would have merged on its own: a conflicted path
+    resolved wholesale to the other side, or a clean path whose result was
+    turned back to the other side against the automatic merge. A clean merge
+    that keeps git's own result is never a drop — also not when main already
+    carries the reviewed change plus later edits (a squash or cherry-pick
+    before a stacked branch merges main; downstream refutation).
+    `--no-renames`: a file main renamed is compared under both names."""
     line = _git_bytes(root, "rev-list", "--parents", "-n", "1", merge)
     if line is None:
         return None
@@ -719,18 +742,21 @@ def _dropped_by_merge(root: Path, merge: str, head: str) -> set[str] | None:
     if not ours:
         return set()
     our = ours[0]
-    changed = _git_bytes(root, "diff", "--name-only", our, merge)
+    changed = _git_bytes(root, "diff", "--name-only", "--no-renames", our, merge)
     if changed is None:
         return None
+    paths = [ln.strip() for ln in changed.decode(errors="replace").splitlines() if ln.strip()]
     dropped: set[str] = set()
     for other in (p for p in parents if p != our):
-        base = _git_bytes(root, "merge-base", our, other)
-        if base is None:
+        auto = _auto_merge(root, our, other)
+        if auto is None:
             return None
-        base_s = base.decode(errors="replace").strip()
-        for path in (ln.strip() for ln in changed.decode(errors="replace").splitlines() if ln.strip()):
+        tree, conflicted = auto
+        for path in paths:
             result, mine, theirs = _blob(root, merge, path), _blob(root, our, path), _blob(root, other, path)
-            if result == theirs and mine != theirs and mine != _blob(root, base_s, path):
+            if result != theirs or mine == theirs:
+                continue
+            if path in conflicted or result != _blob(root, tree, path):
                 dropped.add(path)
     return dropped
 
