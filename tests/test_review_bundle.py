@@ -981,3 +981,19 @@ def test_a_non_utf8_byte_does_not_empty_a_plan(render, tmp_path):
     _git(out, "commit", "-q", "-am", "plan")
     t = _bundle(out, "--base", "main").stdout
     assert "REFUTE WARNING" not in t and "tier: 2" in t
+
+
+def test_an_old_round_moved_with_a_new_id_is_not_new(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    plans = out / ".process-work/plans"
+    plan = plans / "2026-07-09-widget.md"
+    plan.write_text(plan.read_text() + "\nREFUTE work=widget round=1: 12 scenarios, 2 findings — fixed\n")
+    _gate_commit(out, "scripts/process/g.py")
+    reviewed = _git(out, "rev-parse", "HEAD").stdout.strip()
+    _gate_commit(out, "scripts/process/g.py", "x = 2\n", "fix round")
+    _git(out, "mv", str(plan), str(plans / "2026-07-09-widget-v2.md"))
+    moved = plans / "2026-07-09-widget-v2.md"
+    moved.write_text(moved.read_text().replace("work=widget round", "work=widget-v2 round"))
+    _git(out, "commit", "-q", "-am", "rename, id changed along")
+    assert "**REFUTE WARNING:** this delta" in _run(out, "--base", "main", "--since", reviewed).stdout

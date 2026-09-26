@@ -102,10 +102,11 @@ def _journal_target(root: Path, journal_dir: Path) -> Path:
 def _texts(root: Path, journal_dir: Path) -> list[str]:
     """Every file where REVIEW and ROOT-CAUSE lines live — journal shards,
     plans (active and archived), Spec Kit plans; check_review owns the list.
-    Read as rendered: fenced blocks and HTML comments hold quotations, not
-    records. `--journal-dir` replaces the repository's journal (it does not
-    add to it) — a known limit of the override, meant for tests and dry runs."""
-    return [readable(text) for _rel, text in record_texts(root, journal_dir=journal_dir) or []]
+    Raw, as the gate reads REVIEW lines: a block the gate counts is a block
+    here too, or a round slips through without its root cause (refutation).
+    `--journal-dir` replaces the repository's journal (it does not add to
+    it) — a known limit of the override, meant for tests and dry runs."""
+    return [text for _rel, text in record_texts(root, journal_dir=journal_dir) or []]
 
 
 def round_problems(args, root: Path, journal_dir: Path) -> tuple[int, list[str]]:
@@ -130,7 +131,8 @@ def round_problems(args, root: Path, journal_dir: Path) -> tuple[int, list[str]]
             + ". A re-check after a pass or a rebase keeps the round; a block that was never "
             "attested is attested first (its own --base/--head); omit --round to use the count")
     target = int(claimed) if claimed.isdigit() else counted
-    causes = {(m.group("work"), int(m.group("round"))) for t in texts for m in ROOT_CAUSE.finditer(t)}
+    # a cause is read as rendered: a quoted example or a commented line is no cause
+    causes = {(m.group("work"), int(m.group("round"))) for t in texts for m in ROOT_CAUSE.finditer(readable(t))}
     missing = [r for r in blocks if r < target and (args.work, r) not in causes]
     if missing:
         problems.append(

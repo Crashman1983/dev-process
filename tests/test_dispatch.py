@@ -539,7 +539,7 @@ BOX = "╭──────╮\n│ > {} │\n╰──────╯\n"
 
 def test_say_presses_enter_again_until_the_text_left_the_input_line(render, tmp_path, monkeypatch):
     stuck, empty = BOX.format("Lane a is free for you"), BOX.format("")
-    out, mod, pane = _say_setup(render, tmp_path, monkeypatch, [stuck, stuck, empty])
+    out, mod, pane = _say_setup(render, tmp_path, monkeypatch, [empty, stuck, stuck, empty])  # first: before typing
     assert mod.say(out, "w1", "Lane a is free for you") == 0
     assert pane.keys == ["Lane a is free for you", "Enter", "Enter", "Enter"]
 
@@ -851,11 +851,16 @@ def test_a_missing_harness_is_a_refusal_and_assignments_survive_nice(render, tmp
 # --- second refute of the chain ---
 
 
-def test_say_never_presses_enter_into_a_dialog(render, tmp_path, monkeypatch):
-    screen = "> run the migration now\nDo you want to proceed?\n❯ 1. Yes\n  2. No\n"
-    out, mod, pane = _say_setup(render, tmp_path, monkeypatch, [screen])
-    assert mod.say(out, "w1", "run the migration now") == 5
-    assert pane.keys == ["run the migration now", "Enter"]  # the one Enter of sending, nothing more
+def test_say_never_types_or_presses_enter_into_a_dialog(render, tmp_path, monkeypatch):
+    dialog = "> earlier\nDo you want to proceed?\n❯ 1. Yes\n  2. No\n"
+    out, mod, pane = _say_setup(render, tmp_path, monkeypatch, [dialog])
+    assert mod.say(out, "w1", "1 more thing: stop") == 5 and pane.keys == []  # open before: nothing typed
+    typed_then_dialog = BOX.format("run it") + "Do you want to proceed?\n❯ 1. Yes\n"
+    out2, mod2, pane2 = _say_setup(render, tmp_path / "b", monkeypatch, [BOX.format(""), typed_then_dialog])
+    assert mod2.say(out2, "w1", "run it") == 5 and pane2.keys == ["run it", "Enter"]  # no extra Enter
+    delivered = "> Do you want to know more?\n" + BOX.format("")
+    out3, mod3, _p3 = _say_setup(render, tmp_path / "c", monkeypatch, [BOX.format(""), delivered])
+    assert mod3.say(out3, "w1", "Do you want to know more?") == 0  # delivered text is no dialog
 
 
 def test_work_complete_reads_only_the_branchs_own_plan_and_skips_fenced_examples(render, tmp_path):
@@ -904,6 +909,9 @@ def test_queue_lines_are_strict_and_a_branch_named_queue_does_not_collide(render
     q.write_text(json.dumps({"not": "a list"}))
     assert mod.queue_load(out) == [] and list(q.parent.glob("queue.corrupt-*.json"))
     assert mod._record_path(out, "queue") != q
+    rec = mod._record_path(out, "queue")
+    rec.write_text(json.dumps({"branch": "queue", "issue": 1, "phase": "plan", "pid": 0}))
+    assert [r["branch"] for r in mod.records(out)] == ["queue"]  # a branch named queue is a record
 
 
 def test_a_bulleted_review_line_is_an_attestation(render, tmp_path):

@@ -561,10 +561,23 @@ def _entry_files(words: list[str]) -> list[str]:
                 j += 1 if val is None else 2
             return files
         elif _INTERPRETERS.match(name):
-            start = i + 1
-            i = skip_options(start, {"-W", "-X", "-o", "+o"})
-            # a program text (`sh -c`, `sh -ec`) or a module (`python -m`): no file
-            if any(o[:2] != "--" and ("c" in o or "m" in o) for o in words[start:i] if o.startswith("-")):
+            start, j, opts = i + 1, i + 1, []
+            while j < len(words) and words[j][:1] in "-+" and words[j] not in ("-", "+"):
+                o = words[j]
+                opts.append(o)
+                # an option that takes the next word: `-o pipefail`, `-eo pipefail`
+                # (a short cluster ending in o), `-W x`, `-X x`, node `-r mod`, perl `-I dir`
+                takes = o in ("-W", "-X", "-o", "+o", "-r", "--require", "-I", "--import", "--loader") or (
+                    o[:2] != "--" and len(o) > 2 and o.endswith("o"))
+                j += 2 if takes else 1
+            i = j
+            del start
+            # a program text (`sh -c`, `sh -ec`, `perl -e`, `node -e`) or a module
+            # (`python -m`): no file to ask the tree for
+            text_flags = ("c" if name in ("sh", "bash", "dash", "zsh", "ksh") else
+                          "cm" if name.startswith("python") else "ep" if name == "node" else "eE")
+            if any(o[:2] != "--" and o[:1] == "-" and set(o[1:]) & set(text_flags) for o in opts) or \
+                    any(o in ("--eval", "--print", "--command") for o in opts):
                 return []
             return words[i:i + 1]
         else:
@@ -766,6 +779,17 @@ def build_train(root: Path, base: str, aboard: list[str], stamp: str, log) -> tu
     return wt, branch, merged, dropped
 
 
+_LOCAL_ISSUE = re.compile(r"^#?(\d+)[.,;:]?$")
+
+
+def _local_issues(text: str) -> set[int]:
+    """The issues of THIS repository a plan declares (`issue: #7`, `issue: 7`).
+    `issue: other/repo#7` is another repository's #7 — a `Closes #7` in this
+    repository would close the wrong issue (refutation)."""
+    return {int(m.group(1)) for d in _review.ISSUE_DECL.finditer(text)
+            for m in [_LOCAL_ISSUE.match(d.group(1))] if m}
+
+
 STAYS_ACTIVE = re.compile(_review._LEAD + r"plan-stays-active[*_]*\s*:\s*[*_]*\s*\S",
                           re.IGNORECASE | re.MULTILINE)
 _OPEN_TASK = re.compile(r"^\s*[-*+] \[ \]", re.MULTILINE)
@@ -819,8 +843,13 @@ def _settle_plans(wt: Path, base: str, branch: str, log) -> tuple[list[str], set
         stem = Path(rel).stem
         unique = dedated.get(_review.DATE_PREFIX.sub("", stem), 0) <= 1
         ids = _review._plan_work_ids(stem, plain, include_dedated=unique)
-        numbers = {str(n) for n in _review._plan_issue_numbers(plain)}
+        numbers = {str(n) for n in _local_issues(plain)}
         added = letter == "A"
+        if letter == "R" and source:
+            # git pairs a deleted old plan with a new, similar one as a rename:
+            # a plan for other issues is a new plan, not the old one moved
+            old = _review._unfenced(_out(wt, "show", f"{base}:{source}"))
+            added = _local_issues(old) != _local_issues(plain)
         if not added and not (numbers & branch_issue):
             continue  # another work's plan: touched, renamed or archived here
         if STAYS_ACTIVE.search(plain):
@@ -841,7 +870,7 @@ def _settle_plans(wt: Path, base: str, branch: str, log) -> tuple[list[str], set
                 log(f"{rel}: not archived — git mv failed")
                 continue
             archived.append(dest)
-        issues |= _review._plan_issue_numbers(plain)
+        issues |= _local_issues(plain)
     return archived, issues
 
 

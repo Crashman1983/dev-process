@@ -291,6 +291,9 @@ def _review_report_for(root: Path, slugs: list[str], issues: list[IssueKey]) -> 
 _HEADER_KEY = re.compile(r"^\s*(?:[-*+]\s+)?[*_]*(review|audit|work)[*_]*\s*:\s*(\S+)", re.IGNORECASE)
 
 
+_MD_LINK = re.compile(r"\[([^\]]*)\]\([^)]*\)")
+
+
 def _report_header(path: Path) -> dict[str, list[str]]:
     """The `review:`/`audit:`/`work:` values of a report's header block — the
     lines from the top to the first blank one (the documented report format,
@@ -309,7 +312,10 @@ def _report_header(path: Path) -> dict[str, list[str]]:
         m = _HEADER_KEY.match(line)
         if m:
             key = "review" if m.group(1).lower() == "audit" else m.group(1).lower()
-            out.setdefault(key, []).append(_DATED.sub("", m.group(2)))
+            # `[#9](url)` names #9, and `#9,` too — a link or a trailing
+            # comma must not unbind the report from its work (refutation)
+            value = _MD_LINK.sub(r"\1", m.group(2)).strip().rstrip(".,;:")
+            out.setdefault(key, []).append(_DATED.sub("", value))
     return out
 
 
@@ -439,10 +445,10 @@ def _unrefuted(root: Path, plans: dict[Path, str], before: dict[str, str] | None
       - the plan's own path at the start already had that round for one of
         the plan's CURRENT work ids (a reformatted or edited old line; a line
         that only starts to count because the plan gained an id), or
-      - any plan at the start carried the same record — same work id of this
-        plan, same round, same text after the colon (whitespace aside): the
+      - any plan at the start carried the same record — same round, same text
+        after the colon (whitespace aside), whatever work id it named: the
         line was moved or copied with a rename, an archive, a merge of two
-        plans or a copy.
+        plans or a copy, maybe with the id changed along (refutation).
     No similarity score decides it (git's rename detection flipped with the
     edit size, downstream refute), and a second plan of one issue neither
     lends nor takes a round: its own new line differs in what it found.
@@ -456,7 +462,7 @@ def _unrefuted(root: Path, plans: dict[Path, str], before: dict[str, str] | None
         records = {(r, t) for w, r, t in _refute_entries(text) if w in ids}
         if before is not None:
             old_rounds = {r for w, r, _t in earlier.get(rel, ()) if w in ids}
-            pool = {(r, t) for entries in earlier.values() for w, r, t in entries if w in ids}
+            pool = {(r, t) for entries in earlier.values() for _w, r, t in entries}
             records = {(r, t) for r, t in records if r not in old_rounds and (r, t) not in pool}
         if not records:
             missing.append(_label(root, plan))

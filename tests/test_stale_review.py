@@ -543,3 +543,16 @@ def test_another_review_covers_its_range_not_the_history_below_its_base(repo):
     # a review whose range starts below the unreviewed commit covers it
     assert mod.stale_review(root, [{"work": "w", "tier": "2", "head": head}], {"w"}, 2, set(),
                             ((head, b_head),)) is None
+
+
+def test_a_plan_review_or_a_pass_of_no_plan_covers_no_code(repo, tmp_path):
+    root, head = repo
+    late = _commit(root, "a.py", "a = 2\n", "unreviewed")
+    mod = _mod()
+    passes = [{"work": "w", "tier": "2", "head": head},
+              {"work": "w-plan", "tier": "2", "base": head, "head": late},
+              {"work": "ghost", "tier": "2", "base": head, "head": late}]
+    known = {"w"}
+    reviewed = mod._reviewed_heads(passes, 2, known)
+    assert reviewed == ()
+    assert "a.py" in mod.stale_review(root, passes, {"w"}, 2, set(), reviewed)
