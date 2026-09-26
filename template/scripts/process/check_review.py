@@ -1173,7 +1173,7 @@ def _known_work(root: Path) -> set[str]:
     known: set[str] = set()
     for rel, text in record_texts(root, PLAN_KINDS + ("plan-archive",)) or []:
         stem = Path(rel).parent.name if rel.startswith(SPECS_DIR + "/") else Path(rel).stem
-        known |= _plan_work_ids(stem, text, include_dedated=True)
+        known |= _plan_work_ids(stem, _unfenced(text), include_dedated=True)  # an example is no id
     return known
 
 

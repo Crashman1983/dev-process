@@ -472,7 +472,7 @@ def test_gate_code_without_a_refute_line_gets_a_warning(render, tmp_path):
 def test_product_code_needs_no_refute(render, tmp_path):
     out = render(tmp_path, {"project_name": "d", "modules": {}})
     _seed_repo(out)
-    assert "REFUTE WARNING" not in _run(out, "--base", "main").stdout
+    assert "REFUTE WARNING" not in _bundle(out, "--base", "main").stdout
 
 
 def _gate_commit(out, rel, text="x = 1\n", msg="gate change"):
@@ -538,7 +538,7 @@ def test_list_styles_of_a_real_refute_line_count(render, tmp_path):
                  "1. REFUTE work=9 round=1: done", "REFUTE work=2026-07-09-widget round=2: `x` held"):
         plan.write_text(base + "\n" + line + "\n")
         _git(out, "commit", "-q", "-am", "plan")
-        assert "REFUTE WARNING" not in _run(out, "--base", "main").stdout, line
+        assert "REFUTE WARNING" not in _bundle(out, "--base", "main").stdout, line
 
 
 def test_a_refute_line_of_another_plan_does_not_cover_this_one(render, tmp_path):
@@ -567,19 +567,19 @@ def test_a_delta_re_review_of_gate_code_needs_a_new_refute_line(render, tmp_path
     plan.write_text(plan.read_text() + "\nREFUTE work=9 round=1: 12 scenarios, 2 findings — fixed\n")
     _gate_commit(out, "scripts/process/g.py")
     reviewed = _git(out, "rev-parse", "HEAD").stdout.strip()
-    assert "REFUTE WARNING" not in _run(out, "--base", "main").stdout
+    assert "REFUTE WARNING" not in _bundle(out, "--base", "main").stdout
     _gate_commit(out, "scripts/process/g.py", "x = 2\n", "fix round")
     r = _run(out, "--base", "main", "--since", reviewed)
     assert r.returncode == 0, r.stderr
     assert "**REFUTE WARNING:** this delta changes gate code" in r.stdout and "REFUTE WARNING" in r.stderr
     plan.write_text(plan.read_text() + "REFUTE work=9 round=2: 6 scenarios, 0 findings\n")
     _git(out, "commit", "-q", "-am", "docs: refute of the fix")
-    assert "REFUTE WARNING" not in _run(out, "--base", "main", "--since", reviewed).stdout
+    assert "REFUTE WARNING" not in _bundle(out, "--base", "main", "--since", reviewed).stdout
     # a delta without gate code needs none
     (out / "widget.py").write_text("def widget():\n    return 43\n")
     _git(out, "commit", "-q", "-am", "product fix")
     head = _git(out, "rev-parse", "HEAD~1").stdout.strip()
-    assert "REFUTE WARNING" not in _run(out, "--base", "main", "--since", head).stdout
+    assert "REFUTE WARNING" not in _bundle(out, "--base", "main", "--since", head).stdout
 
 
 def test_a_comment_across_two_fences_does_not_hide_a_real_line(render, tmp_path):
@@ -590,7 +590,7 @@ def test_a_comment_across_two_fences_does_not_hide_a_real_line(render, tmp_path)
     plan.write_text(plan.read_text() + "\n```\n<!--\n```\n\nREFUTE work=9 round=1: 4 scenarios, 0 findings\n"
                     "\n```\n-->\n```\n")
     _git(out, "commit", "-q", "-am", "plan")
-    assert "REFUTE WARNING" not in _run(out, "--base", "main").stdout
+    assert "REFUTE WARNING" not in _bundle(out, "--base", "main").stdout
 
 
 def test_a_delta_does_not_take_a_reformatted_or_moved_old_line_as_new(render, tmp_path):
@@ -611,7 +611,7 @@ def test_a_delta_does_not_take_a_reformatted_or_moved_old_line_as_new(render, tm
     moved = plans / "2026-07-11-widget.md"
     moved.write_text(moved.read_text() + "REFUTE work=9 round=2: 6 scenarios, 0 findings\n")
     _git(out, "commit", "-q", "-am", "refute of the fix")
-    assert "REFUTE WARNING" not in _run(out, "--base", "main", "--since", reviewed).stdout
+    assert "REFUTE WARNING" not in _bundle(out, "--base", "main", "--since", reviewed).stdout
 
 
 def test_a_delta_without_a_base_still_checks_refute(render, tmp_path):
@@ -997,3 +997,18 @@ def test_an_old_round_moved_with_a_new_id_is_not_new(render, tmp_path):
     moved.write_text(moved.read_text().replace("work=widget round", "work=widget-v2 round"))
     _git(out, "commit", "-q", "-am", "rename, id changed along")
     assert "**REFUTE WARNING:** this delta" in _run(out, "--base", "main", "--since", reviewed).stdout
+
+
+def test_another_works_identical_line_in_a_plan_in_place_is_not_this_plans_old_round(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    archive = out / ".process-work/plans/archive"
+    archive.mkdir(parents=True, exist_ok=True)
+    (archive / "2026-06-01-a.md").write_text("# a\n\ntier: 2\nissue: #3\n\nREFUTE work=3 round=1: 5 scenarios, 0 findings\n")
+    _gate_commit(out, "scripts/process/g.py")
+    reviewed = _git(out, "rev-parse", "HEAD").stdout.strip()
+    _gate_commit(out, "scripts/process/g.py", "x = 2\n", "fix round")
+    plan = out / ".process-work/plans/2026-07-09-widget.md"
+    plan.write_text(plan.read_text() + "\nREFUTE work=9 round=1: 5 scenarios, 0 findings\n")
+    _git(out, "commit", "-q", "-am", "own refute")
+    assert "REFUTE WARNING" not in _bundle(out, "--base", "main", "--since", reviewed).stdout

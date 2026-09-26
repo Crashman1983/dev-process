@@ -58,6 +58,7 @@ from check_review import (  # noqa: E402  (one owner for grammar, digest, record
     artifact_digest,
     parse_review_lines,
     readable,
+    record_kind,
     record_texts,
 )
 
@@ -102,11 +103,14 @@ def _journal_target(root: Path, journal_dir: Path) -> Path:
 def _texts(root: Path, journal_dir: Path) -> list[str]:
     """Every file where REVIEW and ROOT-CAUSE lines live — journal shards,
     plans (active and archived), Spec Kit plans; check_review owns the list.
-    Raw, as the gate reads REVIEW lines: a block the gate counts is a block
-    here too, or a round slips through without its root cause (refutation).
+    The journal raw, as the gate reads REVIEW lines there: a block the gate
+    counts is a block here too, or a round slips through without its root
+    cause (refutation). Plans, which the gate does not read for REVIEW
+    lines, as rendered: a commented example there is no round.
     `--journal-dir` replaces the repository's journal (it does not add to
     it) — a known limit of the override, meant for tests and dry runs."""
-    return [text for _rel, text in record_texts(root, journal_dir=journal_dir) or []]
+    return [text if record_kind(rel) == "journal" or rel.startswith(str(journal_dir)) else readable(text)
+            for rel, text in record_texts(root, journal_dir=journal_dir) or []]
 
 
 def round_problems(args, root: Path, journal_dir: Path) -> tuple[int, list[str]]:
@@ -204,7 +208,9 @@ def main() -> int:
     args = ap.parse_args()
     root = Path(args.root).resolve()
     journal_dir = Path(args.journal_dir) if args.journal_dir else root / JOURNAL_DIR
-    if args.plan_review and not args.work.endswith("-plan"):
+    if args.plan_review:
+        # always: a plan whose own id ends in `-plan` would otherwise have its
+        # plan review clear its code (refutation)
         args.work += "-plan"
     counted, round_issues = round_problems(args, root, journal_dir)
     exception_note = ""

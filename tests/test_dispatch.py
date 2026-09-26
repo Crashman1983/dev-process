@@ -922,3 +922,26 @@ def test_a_bulleted_review_line_is_an_attestation(render, tmp_path):
     _commit_file(work, ".process-work/journal/j.md", "- REVIEW work=w verdict=pass\n", "attest")
     _git(work, "push", "-q", "origin", "w")
     assert mod.new_code_on_origin(work, "w") is False and mod.attest_on_origin(work, "w")
+
+
+def test_say_answers_a_question_asked_in_prose(render, tmp_path, monkeypatch):
+    question = "● Do you want to keep the old API or drop it?\n" + BOX.format("")
+    out, mod, pane = _say_setup(render, tmp_path, monkeypatch, [question, question])
+    assert mod.say(out, "w1", "keep it") == 0 and pane.keys == ["keep it", "Enter"]
+
+
+def test_an_archived_foreign_plan_is_not_the_branchs_own(render, tmp_path):
+    out = render(tmp_path / "p", {"project_name": "d", "modules": {}})
+    mod = _load_dispatch(out)
+    work = _origin_pair(tmp_path)
+    _git(work, "checkout", "-q", "main")
+    _commit_file(work, ".process-work/plans/2026-01-01-other.md", "# other\n\ntier: 3\nissue: #5\n\n- [ ] open\n", "x")
+    _git(work, "push", "-q", "origin", "main")
+    _git(work, "fetch", "-q", "origin")
+    _git(work, "checkout", "-q", "w")
+    _git(work, "merge", "-q", "--no-edit", "main")
+    (work / ".process-work/plans/archive").mkdir(parents=True, exist_ok=True)
+    _git(work, "mv", ".process-work/plans/2026-01-01-other.md", ".process-work/plans/archive/2026-01-01-other.md")
+    _commit_file(work, ".process-work/plans/2026-01-02-w.md", "# w\n\ntier: 1\nissue: #6\n\n- [x] done\n", "own")
+    _git(work, "push", "-q", "origin", "w")
+    assert mod.work_complete_on_origin(work, "w") is True and mod.plan_tier_on_origin(work, "w") == 1

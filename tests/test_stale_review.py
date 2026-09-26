@@ -556,3 +556,9 @@ def test_a_plan_review_or_a_pass_of_no_plan_covers_no_code(repo, tmp_path):
     reviewed = mod._reviewed_heads(passes, 2, known)
     assert reviewed == ()
     assert "a.py" in mod.stale_review(root, passes, {"w"}, 2, set(), reviewed)
+
+
+def test_a_fenced_example_id_names_no_work(repo):
+    root, _head = repo
+    _commit(root, ".process-work/plans/2026-01-01-w.md", "# w\ntier: 2\n\n```\nissue: 77\n```\n", "plan")
+    assert "77" not in _mod()._known_work(root)

@@ -445,10 +445,11 @@ def _unrefuted(root: Path, plans: dict[Path, str], before: dict[str, str] | None
       - the plan's own path at the start already had that round for one of
         the plan's CURRENT work ids (a reformatted or edited old line; a line
         that only starts to count because the plan gained an id), or
-      - any plan at the start carried the same record — same round, same text
-        after the colon (whitespace aside), whatever work id it named: the
-        line was moved or copied with a rename, an archive, a merge of two
-        plans or a copy, maybe with the id changed along (refutation).
+      - a plan at the start carried the same record — same round, same text
+        after the colon (whitespace aside) — for this plan's work, or in a
+        plan that is gone from its path since (moved, archived or merged,
+        its id maybe changed along). A plan still in place keeps its lines:
+        another work's identical line is not this plan's (refutation).
     No similarity score decides it (git's rename detection flipped with the
     edit size, downstream refute), and a second plan of one issue neither
     lends nor takes a round: its own new line differs in what it found.
@@ -462,7 +463,11 @@ def _unrefuted(root: Path, plans: dict[Path, str], before: dict[str, str] | None
         records = {(r, t) for w, r, t in _refute_entries(text) if w in ids}
         if before is not None:
             old_rounds = {r for w, r, _t in earlier.get(rel, ()) if w in ids}
-            pool = {(r, t) for entries in earlier.values() for _w, r, t in entries}
+            # a line of this work anywhere; any line of a plan that is gone
+            # from its path since (moved, archived, merged — its id may have
+            # changed along); a plan still in place keeps its lines to itself
+            pool = {(r, t) for old, entries in earlier.items() for w, r, t in entries
+                    if w in ids or not (root / old).exists()}
             records = {(r, t) for r, t in records if r not in old_rounds and (r, t) not in pool}
         if not records:
             missing.append(_label(root, plan))
