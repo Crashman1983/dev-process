@@ -57,7 +57,16 @@ the test lanes are free where the project has a lane script (see `tower.md`, lan
    `.git` segment would see an empty tree there) — the root worktree is
    not touched until the end.
 2. Candidates merged in order (`--no-ff`); a conflict drops that candidate
-   and continues.
+   and continues. The merge finishes the passenger's work: its own active
+   plans with a clearing review (or none required) move to the archive
+   inside the merge commit — the chain stays merges only — and the merge
+   message says `Closes #N` for the issues of its own plans, so the forge
+   closes them when the merge lands. A plan left active after its merge
+   kept claiming its files, and the review gate blamed later, separately
+   reviewed changes on it; it now names such a plan as residue instead. A
+   plan that must outlive the merge says `plan-stays-active: <why>`; it
+   stays, and its issue stays open. Another work's plan the passenger only
+   touched is left alone.
 3. The process gates, then the full suite, run **once** on the combined
    tree. Red: the **same tree runs once more** — red then green on
    identical code is a flaky test, reported as FLAKY and merged, never

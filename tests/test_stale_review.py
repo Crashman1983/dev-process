@@ -512,3 +512,19 @@ def test_a_local_master_pointed_at_unreviewed_work_hides_nothing(repo):
     _commit(root, ".process-work/journal/j.md", "REVIEW …\n", "attest")
     found = _stale(root, head)
     assert found is not None and "u.py" in found
+
+
+def test_a_plan_of_merged_work_is_residue_not_a_blame(repo):
+    # the plan sits on main and its reviewed head is in main: later changes are not its code
+    root, head = repo
+    plan = ".process-work/plans/2026-01-01-w.md"
+    _commit(root, plan, "# w\ntier: 2\n", "plan")
+    _git(root, "checkout", "-q", "main")
+    _git(root, "merge", "-q", "--no-ff", "--no-edit", "feat")
+    _git(root, "checkout", "-q", "-b", "later")
+    _commit(root, "a.py", "a = 9\n", "later, separately reviewed work")
+    passes = [{"work": "w", "tier": "2", "head": head}]
+    mod = _mod()
+    assert mod.merged_work(root, plan, passes, {"w"}, 2)
+    _git(root, "checkout", "-q", "-b", "unmerged", head)
+    assert not mod.merged_work(root, ".process-work/plans/none.md", passes, {"w"}, 2)

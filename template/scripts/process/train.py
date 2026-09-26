@@ -546,15 +546,82 @@ def build_train(root: Path, base: str, aboard: list[str], stamp: str, log) -> tu
     merged: list[str] = []
     dropped: list[str] = []
     for b in aboard:
-        r = _git(wt, "merge", "--no-ff", "--no-edit", "-m", f"train: merge {b}", b)
+        r = _git(wt, "merge", "--no-ff", "--no-commit", b)
+        if r.returncode == 0:
+            archived, issues = _settle_plans(wt, base, b, log)
+            message = f"train: merge {b}"
+            if issues:
+                message += "\n\n" + "\n".join(f"Closes #{n}" for n in sorted(issues))
+            r = _git(wt, "commit", "-q", "-m", message)
         if r.returncode == 0:
             merged.append(b)
-            log(f"merged {b}")
+            log(f"merged {b}" + (f" — archived {', '.join(archived)}" if archived else "")
+                + (f" — closes {', '.join(f'#{n}' for n in sorted(issues))}" if issues else ""))
         else:
             _git(wt, "merge", "--abort")
             dropped.append(b)
             log(f"conflict: {b} dropped ({r.stderr.strip().splitlines()[-1] if r.stderr.strip() else 'merge failed'})")
     return wt, branch, merged, dropped
+
+
+STAYS_ACTIVE = re.compile(r"^\s*[-*]?\s*plan-stays-active\s*:\s*\S", re.IGNORECASE | re.MULTILINE)
+
+
+def _settle_plans(wt: Path, base: str, branch: str, log) -> tuple[list[str], set[int]]:
+    """What merging `branch` finishes: its own active plans with a clearing
+    review (or none required) move to the archive in the merge itself, and
+    the issues of its own plans are closed by the merge message (`Closes
+    #N` — the forge closes them when the merge lands on the default branch).
+
+    Downstream, a plan left active after its train merge kept claiming its
+    files, and the review gate blamed every later, separately reviewed
+    change to them on it; and merged issues stayed open, because a train
+    merge carries no closing keyword. A plan that must outlive the merge
+    (work in several merges) says `plan-stays-active: <why>`: it stays, and
+    its issue stays open. Another work's plan the branch only touched is
+    not the branch's to finish."""
+    records = _review.record_texts(wt, ("journal",)) or []
+    passes = [r for _rel, text in records for _ln, r in _review.parse_review_lines(text)[0]
+              if r.get("verdict") == "pass"]
+    on_base = set(_out(wt, "ls-tree", "-r", "--name-only", base, "--", PLANS).splitlines())
+    changed = [n for n in _out(wt, "diff", "--name-only", "--no-renames", "-z", f"{base}...{branch}", "--",
+                               PLANS).split("\0") if n.endswith(".md")]
+    stems = [Path(n).stem for n in _out(wt, "ls-files", "--", PLANS).splitlines() if n.endswith(".md")]
+    dedated: dict[str, int] = {}
+    for stem in stems:
+        key = _review.DATE_PREFIX.sub("", stem)
+        dedated[key] = dedated.get(key, 0) + 1
+    archived: list[str] = []
+    issues: set[int] = set()
+    for rel in changed:
+        f = wt / rel
+        if not f.is_file():
+            continue
+        text = f.read_text(encoding="utf-8", errors="replace")
+        stem = Path(rel).stem
+        unique = dedated.get(_review.DATE_PREFIX.sub("", stem), 0) <= 1
+        ids = _review._plan_work_ids(stem, text, include_dedated=unique)
+        if rel in on_base and not _names_branch(branch, ids):
+            continue  # another work's plan
+        if STAYS_ACTIVE.search(text):
+            continue
+        plain = _review._unfenced(text)
+        tier_m = _review.TIER_DECL.search(plain)
+        tier = int(tier_m.group(1)) if tier_m else 0
+        if _review.record_kind(rel) == "plan":
+            if not (tier < 2 or _review.WAIVED.search(plain) or _review._cleared(passes, ids, tier)):
+                continue  # not cleared: it stays active, and its issue open
+            dest = f"{ARCHIVE}/{Path(rel).name}"
+            if (wt / dest).exists():
+                log(f"{rel}: not archived — {dest} exists already")
+                continue
+            (wt / ARCHIVE).mkdir(parents=True, exist_ok=True)
+            if _git(wt, "mv", rel, dest).returncode != 0:
+                log(f"{rel}: not archived — git mv failed")
+                continue
+            archived.append(dest)
+        issues |= _review._plan_issue_numbers(plain)
+    return archived, issues
 
 
 def run(root: Path, *, suite: str | None, deploy: str | None, push: bool, min_candidates: int,

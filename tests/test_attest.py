@@ -391,3 +391,26 @@ def test_the_reviewed_head_in_the_history_is_not_stale(render, tmp_path):
     _git(out, "commit", "-q", "-m", "docs: attest")
     r = _stale_gate(out)
     assert "reviewed head" not in r.stdout and "code changed after" not in r.stdout, r.stdout
+
+
+def test_a_merged_plan_left_active_is_residue_not_a_refusal(render, tmp_path):
+    # the widget work is merged with its plan still active; a later branch
+    # changes widget.py and touches the plan — the merge push names the plan
+    # as residue instead of refusing for code the plan never owned
+    import os
+    out, base, head = _repo(render, tmp_path)
+    assert _attest(out, "--base", base, "--head", head).returncode == 0
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "docs: attest")
+    _git(out, "checkout", "-q", "main")
+    _git(out, "merge", "-q", "--no-ff", "--no-edit", "feature")
+    _git(out, "checkout", "-q", "-b", "later")
+    (out / "widget.py").write_text("def widget():\n    return 43\n")
+    plan = out / ".process-work/plans/2026-09-10-widget.md"
+    plan.write_text(plan.read_text() + "- a note from later work\n")
+    _git(out, "commit", "-q", "-am", "later work")
+    env = {**os.environ, "PROCESS_PUSH_TARGETS": "refs/heads/main"}
+    r = subprocess.run([sys.executable, str(out / "scripts/process/check_review.py"), "."],
+                       cwd=out, capture_output=True, text=True, env=env)
+    assert "code changed after the reviewed head" not in r.stdout, r.stdout
+    assert "belongs to work already merged" in r.stdout, r.stdout

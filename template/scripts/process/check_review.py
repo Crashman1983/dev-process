@@ -1012,6 +1012,26 @@ def _dropped_by_merge(root: Path, merge: str, head: str) -> set[str] | None:
     return dropped
 
 
+def merged_work(root: Path, rel: str, passes: list[dict], ids: set[str], tier: int) -> bool:
+    """Does this plan belong to work the integration branch already carries?
+    The plan file is on the integration ref and every clearing review's head
+    is in it. Such a plan still claims its files — left active after its
+    merge, it blamed every later, separately reviewed change to them as its
+    own unreviewed code (downstream: a train refused for a merged plan)."""
+    integ = _integration_ref(root)
+    if integ is None or _git_bytes(root, "cat-file", "-e", f"{integ}:{rel}") is None:
+        return False
+    heads = [r["head"] for r in passes if r["work"] in ids and int(r["tier"]) >= min(tier, 3) and r.get("head")]
+    return bool(heads) and all(
+        _git_bytes(root, "merge-base", "--is-ancestor", h, integ) is not None for h in heads)
+
+
+def _residue(rel: str) -> str:
+    return (f"{rel}: belongs to work already merged (its reviewed head is on the integration "
+            f"branch) — later changes are not its code; archive the plan (a merge that "
+            f"carries a cleared plan archives it)")
+
+
 def stale_review(root: Path, passes: list[dict], ids: set[str], tier: int,
                  in_flight: set[str] | None = None) -> str | None:
     """Why the clearing reviews of a plan no longer cover the code — None when
@@ -1350,6 +1370,9 @@ def check(root: Path) -> tuple[list[str], list[str]]:
                          f"tier>={min(tier, 3)}) and no 'review-waived:' line — from "
                          f"Tier 2 on the proof is due before the merge")
                 continue
+            if merged_work(root, rel, passes, ids, tier):
+                soft.append(_residue(rel))
+                continue
             stale = stale_review(root, passes, ids, tier, in_flight)
             if stale:
                 presence(f"{rel}: {stale}")
@@ -1382,6 +1405,8 @@ def check(root: Path) -> tuple[list[str], list[str]]:
                          f"(verdict=pass, work in {sorted(ids)}, tier>={min(tier, 3)}) and "
                          f"no 'review-waived:' line")
                 continue
+            if merged_work(root, rel, passes, ids, tier):
+                continue  # named once as residue above
             stale = stale_review(root, passes, ids, tier, in_flight)
             if stale:
                 presence(f"#{number} ({rel}): {stale}")
