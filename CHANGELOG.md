@@ -1166,7 +1166,7 @@ ein Wächter-Test gegen doppelte Klammern ohne Leerzeichen in Python-Vorlagen.
 Wer v2.27.1 oder v2.28.0 installiert hat und am Push scheitert: auf v2.28.1
 aktualisieren, `v2.28.1`.
 
-**v2.33.0 — fünf Prozess-Baustellen in einem Zug, jede refutiert.** Fünf Pakete kommen aus Befunden des Referenzprojekts. Jedes ist vor dem Release von einem frischen Agenten angegriffen worden, die Fix-Runden ebenso. Jeder Fund ist behoben und mit einem Test belegt, der gegen die Vorfassung fällt, oder als bekannte Grenze dokumentiert.
+**v2.33.0 — fünf Prozess-Baustellen in einem Zug, jede refutiert.** Fünf Pakete kommen aus Befunden des Referenzprojekts. Jedes ist vor dem Release von einem frischen Agenten angegriffen worden, die Fix-Runden ebenso; die letzte, kleine Fix-Runde ist mit Regressionstests belegt, aber nicht noch einmal refutiert. Jeder Fund ist behoben und mit einem Test belegt, der gegen die Vorfassung fällt, oder als bekannte Grenze dokumentiert.
 - **Wo Prozess-Belege liegen, legt eine Stelle fest:** `check_review` bestimmt, wo REVIEW-, ROOT-CAUSE- und REFUTE-Zeilen stehen: Journal, aktive und archivierte Pläne, Spec-Kit-Pläne. attest, das Review-Bündel und das Gate lesen alle über diese eine Stelle.
   - attest zählt Block-Runden roh wie das Gate. ROOT-CAUSE-Zeilen liest es so, wie sie gerendert werden: ein Beispiel im Codeblock, eine auskommentierte Zeile oder ein Platzhalter zählt nicht.
   - Ein Spec-Kit-Plan ist nur unter Review, solange an ihm gearbeitet wird.
