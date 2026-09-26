@@ -1157,12 +1157,24 @@ def merged_work(root: Path, rel: str, passes: list[dict], ids: set[str], tier: i
         _git_bytes(root, "merge-base", "--is-ancestor", h, integ) is not None for h in heads)
 
 
-def _reviewed_heads(passes: list[dict], tier: int) -> tuple[tuple[str, str], ...]:
-    """(base, head) of every clearing pass at this plan's tier or above that
-    records both — the commits of each range count as reviewed for any
-    plan's stale check; a pass without a base covers nothing."""
+def _reviewed_heads(passes: list[dict], tier: int, known: set[str]) -> tuple[tuple[str, str], ...]:
+    """(base, head) of every clearing CODE review at this plan's tier or
+    above that records both, for work a plan names (`known`) — the commits of
+    each range count as reviewed for any plan's stale check. A plan review
+    (`work=<id>-plan`) saw no code, and a pass for work no plan names is
+    nobody's review (refutation: both whitewashed unreviewed code)."""
     return tuple(dict.fromkeys((r["base"], r["head"]) for r in passes
-                               if r.get("head") and r.get("base") and int(r["tier"]) >= min(tier, 3)))
+                               if r.get("head") and r.get("base") and int(r["tier"]) >= min(tier, 3)
+                               and r["work"] in known and not r["work"].endswith("-plan")))
+
+
+def _known_work(root: Path) -> set[str]:
+    """Every work id any plan names — active, archived or Spec Kit."""
+    known: set[str] = set()
+    for rel, text in record_texts(root, PLAN_KINDS + ("plan-archive",)) or []:
+        stem = Path(rel).parent.name if rel.startswith(SPECS_DIR + "/") else Path(rel).stem
+        known |= _plan_work_ids(stem, text, include_dedated=True)
+    return known
 
 
 def _residue(rel: str) -> str:
@@ -1360,6 +1372,7 @@ def check(root: Path) -> tuple[list[str], list[str]]:
                     f"`--full` or {INTEGRITY_ENV}=all re-verifies everything")
 
     passes = [f for _ln, f in all_records if f["verdict"] == "pass"]
+    known_work = _known_work(root)
 
     # --- presence: archived (merged) plans that declare Tier 2+ ---
     adir = root / PLANS_ARCHIVE
@@ -1512,7 +1525,7 @@ def check(root: Path) -> tuple[list[str], list[str]]:
                 continue
             if merged_work(root, rel, passes, ids, tier):
                 soft.append(_residue(rel))
-            stale = stale_review(root, passes, ids, tier, in_flight, _reviewed_heads(passes, tier))
+            stale = stale_review(root, passes, ids, tier, in_flight, _reviewed_heads(passes, tier, known_work))
             if stale:
                 presence(f"{rel}: {stale}")
         if active_tier2:
@@ -1544,7 +1557,7 @@ def check(root: Path) -> tuple[list[str], list[str]]:
                          f"(verdict=pass, work in {sorted(ids)}, tier>={min(tier, 3)}) and "
                          f"no 'review-waived:' line")
                 continue
-            stale = stale_review(root, passes, ids, tier, in_flight, _reviewed_heads(passes, tier))
+            stale = stale_review(root, passes, ids, tier, in_flight, _reviewed_heads(passes, tier, known_work))
             if stale:
                 presence(f"#{number} ({rel}): {stale}")
 

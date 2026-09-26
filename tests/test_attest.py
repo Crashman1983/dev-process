@@ -267,17 +267,19 @@ def test_a_quoted_or_placeholder_root_cause_is_no_cause(render, tmp_path):
     assert _attest(out, *ab, "--round", "2", "--dry-run").returncode == 0
 
 
-def test_a_commented_block_line_is_no_round(render, tmp_path):
-    # A8: a blocking REVIEW line inside an HTML comment is a quotation
+def test_attest_counts_blocks_the_way_the_gate_does(render, tmp_path):
+    # refutation: attest read REVIEW lines as rendered while the gate counts
+    # them raw — a block behind an unclosed comment was a round for the gate
+    # and none for attest, so the next pass skipped its root cause
     out, base, head = _repo(render, tmp_path)
     ab = ("--base", base, "--head", head)
     line = ("REVIEW work=widget tier=2 reviewer=fresh model=cross independence=bundle,non-implementing "
             "verdict=block round=1")
-    spec = out / "specs/001-widget"
-    spec.mkdir(parents=True)
-    (spec / "plan.md").write_text(f"# Plan\n\ntier: 2\n\n<!-- example:\n{line}\n-->\n")
+    j = out / ".process-work/journal"
+    j.mkdir(parents=True, exist_ok=True)
+    (j / "2026-09-10.md").write_text(f"<!-- reviewer notes follow\n{line}\n")
     r = _attest(out, *ab, "--round", "2", "--dry-run")
-    assert r.returncode == 1 and "this is round 1" in r.stderr, r.stderr
+    assert r.returncode == 1 and "no root cause" in r.stderr, r.stderr
 
 
 def test_every_record_home_is_read_from_one_owner(render, tmp_path):

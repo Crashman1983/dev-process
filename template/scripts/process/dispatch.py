@@ -434,7 +434,7 @@ def _pane_state(window_id: str) -> str:
 def records(root: Path) -> list[dict]:
     out = []
     for p in sorted(_records_dir(root).glob("*.json")):
-        if p.name in (ISSUES_FILE, QUEUE_FILE):
+        if p.name == ISSUES_FILE:
             continue
         try:
             rec = json.loads(p.read_text(encoding="utf-8"))
@@ -761,6 +761,11 @@ def say(root: Path, branch: str, text: str) -> int:
         print(f"dispatch: {branch} is {state} — nobody is listening", file=sys.stderr)
         return 3
     window = rec["tmux_window"]
+    if _dialog_open(_screen(window)):
+        # typing now would answer the dialog, not reach the worker (refutation)
+        print(f"dispatch: {branch} shows a dialog — nothing typed; answer it first: {text[:80]}",
+              file=sys.stderr)
+        return 5
     r = _tmux("send-keys", "-t", window, "-l", text)
     r2 = _tmux("send-keys", "-t", window, "Enter")
     if r.returncode != 0 or r2.returncode != 0:
@@ -781,18 +786,18 @@ def say(root: Path, branch: str, text: str) -> int:
     for attempt in range(SAY_RETRIES + 1):
         _sleep(SAY_WAIT_S * (attempt + 1))
         screen = _screen(window)
-        if _dialog_open(screen):
-            # an Enter would answer the dialog, not send the text (refutation)
-            print(f"dispatch: {branch} shows a dialog — not pressing Enter; the text may be unsent: {text[:80]}",
-                  file=sys.stderr)
-            return 5
         line = _input_line(screen, pattern)
         if line is None:
             print(f"dispatch: said to {branch}: {text[:80]} (not verified — the input line could not be read)")
             return 0
         if not _still_typed(line, text):
-            print(f"dispatch: said to {branch}: {text[:80]}")
+            print(f"dispatch: said to {branch}: {text[:80]}")  # delivered, whatever the output says
             return 0
+        if _dialog_open(screen):
+            # still typed and a dialog opened: an Enter would answer it (refutation)
+            print(f"dispatch: {branch} shows a dialog — not pressing Enter; the text is unsent: {text[:80]}",
+                  file=sys.stderr)
+            return 5
         if attempt < SAY_RETRIES:
             _tmux("send-keys", "-t", window, "Enter")  # a busy worker queues it now
     print(f"dispatch: {branch} — the text is still in the input line after {SAY_RETRIES} more Enter; "
@@ -862,6 +867,15 @@ JOURNAL = ".process-work/journal/"
 def _queue_dir(root: Path) -> Path:
     d = _records_dir(root) / "queue"  # not beside the records: a branch named `queue` would collide
     d.mkdir(parents=True, exist_ok=True)
+    old = _records_dir(root) / QUEUE_FILE
+    if not (d / QUEUE_FILE).exists():
+        try:
+            data = json.loads(old.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            data = None
+        if isinstance(data, list):  # the queue of an older dispatch: carried over, not dropped
+            (d / QUEUE_FILE).write_text(json.dumps(data, indent=2), encoding="utf-8")
+            old.unlink()
     return d
 
 
@@ -1038,7 +1052,7 @@ def _own_plans_on_origin(root: Path, branch: str) -> tuple[str, list[str]]:
     base = _integration_base(root, tip)
     if not base:
         return tip, []
-    added = _out(root, "diff", "--name-only", "--diff-filter=A", f"{base}...{tip}").splitlines()
+    added = _out(root, "diff", "--name-only", "--no-renames", "--diff-filter=A", f"{base}...{tip}").splitlines()
     plans = [f for f in added if (f.startswith(".process-work/plans/") and f.endswith(".md"))
              or re.fullmatch(r"specs/[^/]+/tasks\.md", f)]
     return tip, plans

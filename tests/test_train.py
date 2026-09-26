@@ -1110,3 +1110,39 @@ def test_a_stacked_passenger_already_contained_counts_as_merged(render, tmp_path
         assert merged == ["41-b", "40-a"] and not dropped
     finally:
         _git(out, "worktree", "remove", "--force", str(wt))
+
+
+def test_interpreter_options_are_not_taken_for_the_suite_file(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    train = _load_train(out)
+    import shlex
+    cases = {"bash -eo pipefail scripts/t.sh": ["scripts/t.sh"], "bash -euxo pipefail scripts/t.sh": ["scripts/t.sh"],
+             "node -r ts-node/register x.js": ["x.js"], "perl -I vendor/lib t.pl": ["t.pl"],
+             "perl -e 'print 1'": [], "node -e 'x'": [], "bash -e scripts/t.sh": ["scripts/t.sh"]}
+    for cmd, files in cases.items():
+        assert train._entry_files(shlex.split(cmd)) == files, cmd
+
+
+def test_another_repositorys_issue_is_not_closed_and_a_paired_new_plan_is_own(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _active_plan_branch(out, "17-ext", issue=7, tier=1)
+    _git(out, "checkout", "-q", "17-ext")
+    p = out / ".process-work/plans/2026-09-20-17-ext.md"
+    p.write_text(p.read_text().replace("issue: #7", "issue: acme/lib#7"))
+    _git(out, "commit", "-q", "-am", "the issue lives elsewhere")
+    _git(out, "checkout", "-q", "main")
+    body = "# plan\n\ntier: 1\nissue: #{n}\n\nsome shared words for a similar file\n" * 3
+    _plan_on_main(out, "2026-09-01-old.md", body.format(n=20))
+    _git(out, "checkout", "-q", "-b", "21-new", "main")
+    _git(out, "rm", "-q", ".process-work/plans/2026-09-01-old.md")
+    (out / ".process-work/plans/2026-09-21-new.md").write_text(body.format(n=22))
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "replace the old plan with a new one")
+    _git(out, "checkout", "-q", "main")
+    wt, merged, _d, msgs = _settle(out, ["17-ext", "21-new"], "t7")
+    try:
+        assert len(merged) == 2
+        assert "Closes #7" not in msgs and "Closes #22" in msgs and "Closes #20" not in msgs
+    finally:
+        _git(out, "worktree", "remove", "--force", str(wt))
