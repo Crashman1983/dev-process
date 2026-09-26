@@ -955,7 +955,8 @@ def _merge_own(root: Path, merge: str) -> set[str] | None:
     return own
 
 
-def _history(root: Path, head: str, tip: str = "HEAD", reviewed: tuple[str, ...] = ()) -> History:
+def _history(root: Path, head: str, tip: str = "HEAD",
+             reviewed: tuple[tuple[str, str], ...] = ()) -> History:
     """Gather the facts `decide` judges for one reviewed head.
 
     `tip` is what is judged — HEAD for a push, a branch for the merge train's
@@ -987,11 +988,17 @@ def _history(root: Path, head: str, tip: str = "HEAD", reviewed: tuple[str, ...]
     # code another clearing review has seen is not unreviewed code of this
     # push — a later, separately reviewed change to files of a merged plan
     # is covered by its own review (downstream: a merged plan left active
-    # blamed it); code no review has seen stays unreviewed, whatever plan
-    # it lands under
-    for other in reviewed:
-        if other != head and _git_bytes(root, "merge-base", "--is-ancestor", other, tip) is not None:
-            not_integ.append(f"^{other}")
+    # blamed it). A review covers the commits of ITS range, base..head — not
+    # the history below its base; code no review has seen stays unreviewed,
+    # whatever plan it lands under
+    covered: set[str] = set()
+    for other_base, other_head in reviewed:
+        if other_head == head or _git_bytes(root, "merge-base", "--is-ancestor", other_head, tip) is None:
+            continue
+        seen = _git_bytes(root, "rev-list", other_head, f"^{other_base}")
+        if seen is None:
+            continue  # its base is unknown here: it covers nothing
+        covered |= {ln.strip() for ln in seen.decode(errors="replace").splitlines() if ln.strip()}
     walk = _git_bytes(root, "rev-list", "--first-parent", "--parents", tip, *not_integ)
     if walk is None:
         return error
@@ -1011,13 +1018,21 @@ def _history(root: Path, head: str, tip: str = "HEAD", reviewed: tuple[str, ...]
                     tips.append(parent)
         if carriers:
             tips = tips[1:]
-    late = _names(_git_bytes(root, "--no-optional-locks", "-c", "log.showRoot=true", "log", "--no-merges",
-                             "--format=", "--name-only", "--no-renames", "--ignore-submodules=none", "-z",
-                             *tips, f"^{head}", *not_integ))
+    commits_out = _git_bytes(root, "rev-list", "--no-merges", *tips, f"^{head}", *not_integ)
     merges_out = _git_bytes(root, "rev-list", "--merges", *tips, f"^{head}", *not_integ)
-    if late is None or merges_out is None:
+    if commits_out is None or merges_out is None:
         return error
-    in_range = [ln.strip() for ln in merges_out.decode(errors="replace").splitlines() if ln.strip()]
+    own_commits = [c for c in (ln.strip() for ln in commits_out.decode(errors="replace").splitlines())
+                   if c and c not in covered]
+    late: set[str] | None = set()
+    if own_commits:
+        late = _names(_git_bytes(root, "--no-optional-locks", "-c", "log.showRoot=true", "log", "--no-walk=unsorted",
+                                 "--format=", "--name-only", "--no-renames", "--ignore-submodules=none", "-z",
+                                 *own_commits))
+        if late is None:
+            return error
+    in_range = [c for c in (ln.strip() for ln in merges_out.decode(errors="replace").splitlines())
+                if c and c not in covered]
     chain_merges = [c[0] for c in chain] if carriers else []
     fellow = []
     for merge in dict.fromkeys(in_range + chain_merges):
@@ -1142,11 +1157,12 @@ def merged_work(root: Path, rel: str, passes: list[dict], ids: set[str], tier: i
         _git_bytes(root, "merge-base", "--is-ancestor", h, integ) is not None for h in heads)
 
 
-def _reviewed_heads(passes: list[dict], tier: int) -> tuple[str, ...]:
-    """The heads of every clearing pass at this plan's tier or above — the
-    code each of them saw counts as reviewed for any plan's stale check."""
-    return tuple(dict.fromkeys(r["head"] for r in passes
-                               if r.get("head") and int(r["tier"]) >= min(tier, 3)))
+def _reviewed_heads(passes: list[dict], tier: int) -> tuple[tuple[str, str], ...]:
+    """(base, head) of every clearing pass at this plan's tier or above that
+    records both — the commits of each range count as reviewed for any
+    plan's stale check; a pass without a base covers nothing."""
+    return tuple(dict.fromkeys((r["base"], r["head"]) for r in passes
+                               if r.get("head") and r.get("base") and int(r["tier"]) >= min(tier, 3)))
 
 
 def _residue(rel: str) -> str:
@@ -1156,7 +1172,8 @@ def _residue(rel: str) -> str:
 
 
 def stale_review(root: Path, passes: list[dict], ids: set[str], tier: int,
-                 in_flight: set[str] | None = None, reviewed: tuple[str, ...] = ()) -> str | None:
+                 in_flight: set[str] | None = None,
+                 reviewed: tuple[tuple[str, str], ...] = ()) -> str | None:
     """Why the clearing reviews of a plan no longer cover the code — None when
     one of them still does.
 
