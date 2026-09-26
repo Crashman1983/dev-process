@@ -1118,7 +1118,14 @@ def test_interpreter_options_are_not_taken_for_the_suite_file(render, tmp_path):
     import shlex
     cases = {"bash -eo pipefail scripts/t.sh": ["scripts/t.sh"], "bash -euxo pipefail scripts/t.sh": ["scripts/t.sh"],
              "node -r ts-node/register x.js": ["x.js"], "perl -I vendor/lib t.pl": ["t.pl"],
-             "perl -e 'print 1'": [], "node -e 'x'": [], "bash -e scripts/t.sh": ["scripts/t.sh"]}
+             "perl -e 'print 1'": [], "node -e 'x'": [], "bash -e scripts/t.sh": ["scripts/t.sh"],
+             # final refute: options are the interpreter's own, attached values are values
+             "python3 -I -m pytest": [], "python3 -I tests/run.py": ["tests/run.py"],
+             "bash -r scripts/t.sh": ["scripts/t.sh"], "perl -X t/run.pl": ["t/run.pl"],
+             "ruby -Itest test/all.rb": ["test/all.rb"], "ruby -rbundler/setup t.rb": ["t.rb"],
+             "perl -MTest::More t/run.pl": ["t/run.pl"], "perl -Ilib/proto t/run.pl -v": ["t/run.pl"],
+             "node --experimental-loader ./loader.mjs test/run.js": ["test/run.js"],
+             "bash -O extglob s.sh": ["s.sh"], "bash --rcfile x s.sh": ["s.sh"]}
     for cmd, files in cases.items():
         assert train._entry_files(shlex.split(cmd)) == files, cmd
 

@@ -561,25 +561,35 @@ def _entry_files(words: list[str]) -> list[str]:
                 j += 1 if val is None else 2
             return files
         elif _INTERPRETERS.match(name):
-            start, j, opts = i + 1, i + 1, []
-            while j < len(words) and words[j][:1] in "-+" and words[j] not in ("-", "+"):
+            shell = name in ("sh", "bash", "dash", "zsh", "ksh")
+            kind = "sh" if shell else "python" if name.startswith("python") else name
+            # letters that run program text, letters that take a value (attached,
+            # or the next word when last in the cluster), long options with a value
+            text_flags = {"sh": "c", "python": "cm", "node": "ep"}.get(kind, "eE")
+            valued = {"sh": "oO", "python": "WX", "node": "r", "perl": "IMmx", "ruby": "Irx"}.get(kind, "")
+            long_valued = {"--require", "--import", "--loader", "--experimental-loader", "--rcfile",
+                           "--init-file", "-o", "+o", "-O", "+O"}
+            long_text = {"--eval", "--print", "--command"}
+            j, program = i + 1, False
+            while j < len(words) and words[j][:1] in "-+" and words[j] not in ("-", "+", "--"):
                 o = words[j]
-                opts.append(o)
-                # an option that takes the next word: `-o pipefail`, `-eo pipefail`
-                # (a short cluster ending in o), `-W x`, `-X x`, node `-r mod`, perl `-I dir`
-                takes = o in ("-W", "-X", "-o", "+o", "-r", "--require", "-I", "--import", "--loader") or (
-                    o[:2] != "--" and len(o) > 2 and o.endswith("o"))
-                j += 2 if takes else 1
-            i = j
-            del start
-            # a program text (`sh -c`, `sh -ec`, `perl -e`, `node -e`) or a module
-            # (`python -m`): no file to ask the tree for
-            text_flags = ("c" if name in ("sh", "bash", "dash", "zsh", "ksh") else
-                          "cm" if name.startswith("python") else "ep" if name == "node" else "eE")
-            if any(o[:2] != "--" and o[:1] == "-" and set(o[1:]) & set(text_flags) for o in opts) or \
-                    any(o in ("--eval", "--print", "--command") for o in opts):
-                return []
-            return words[i:i + 1]
+                j += 1
+                if o.startswith("--") or o in long_valued:
+                    program = program or o in long_text
+                    if o in long_valued or (o.startswith("--") and "=" not in o and o in long_valued):
+                        j += 1
+                    continue
+                for k, letter in enumerate(o[1:], start=1):
+                    if letter in text_flags:
+                        program = True
+                        break
+                    if letter in valued:
+                        if k == len(o) - 1:
+                            j += 1  # its value is the next word
+                        break  # the rest of the cluster is the value
+            if program:
+                return []  # a program text or a module: no file to ask the tree for
+            return words[j:j + 1]
         else:
             return [w] if "/" in w else []
     return []
@@ -848,7 +858,8 @@ def _settle_plans(wt: Path, base: str, branch: str, log) -> tuple[list[str], set
         if letter == "R" and source:
             # git pairs a deleted old plan with a new, similar one as a rename:
             # a plan for other issues is a new plan, not the old one moved
-            old = _review._unfenced(_out(wt, "show", f"{base}:{source}"))
+            fork = _out(wt, "merge-base", base, branch) or base
+            old = _review._unfenced(_out(wt, "show", f"{fork}:{source}"))
             added = _local_issues(old) != _local_issues(plain)
         if not added and not (numbers & branch_issue):
             continue  # another work's plan: touched, renamed or archived here

@@ -738,8 +738,15 @@ _PASTED = re.compile(r"^\[Pasted text")
 _DIALOG = re.compile(r"^\s*[❯>]?\s*\d+\.\s+(Yes|No)\b|Do you want to|\(y/n\)|\[y/N\]", re.IGNORECASE | re.MULTILINE)
 
 
-def _dialog_open(lines: list[str] | None) -> bool:
-    return bool(lines) and bool(_DIALOG.search("\n".join(lines[-12:])))
+def _dialog_open(lines: list[str] | None, pattern: re.Pattern[str] = _PROMPT_LINE) -> bool:
+    """A dialog replaces or sits below the input line; the same words in the
+    transcript above it are the worker's text (a question asked in prose, an
+    earlier message) — answering those is what `say` is for (refutation)."""
+    if not lines:
+        return False
+    last_prompt = max((k for k, ln in enumerate(lines) if pattern.match(ln)), default=-1)
+    below = lines[last_prompt + 1:] if last_prompt >= 0 else lines[-12:]
+    return bool(_DIALOG.search("\n".join(below)))
 
 
 def _still_typed(line: str, text: str) -> bool:
@@ -760,17 +767,6 @@ def say(root: Path, branch: str, text: str) -> int:
     if state != "live":
         print(f"dispatch: {branch} is {state} — nobody is listening", file=sys.stderr)
         return 3
-    window = rec["tmux_window"]
-    if _dialog_open(_screen(window)):
-        # typing now would answer the dialog, not reach the worker (refutation)
-        print(f"dispatch: {branch} shows a dialog — nothing typed; answer it first: {text[:80]}",
-              file=sys.stderr)
-        return 5
-    r = _tmux("send-keys", "-t", window, "-l", text)
-    r2 = _tmux("send-keys", "-t", window, "Enter")
-    if r.returncode != 0 or r2.returncode != 0:
-        print(f"dispatch: send-keys failed: {(r.stderr or r2.stderr).strip()}", file=sys.stderr)
-        return 1
     pattern = _PROMPT_LINE
     try:
         custom = load_policy(root).get("say_prompt")
@@ -783,6 +779,17 @@ def say(root: Path, branch: str, text: str) -> int:
                       file=sys.stderr)
     except (re.error, SystemExit):
         pass
+    window = rec["tmux_window"]
+    if _dialog_open(_screen(window), pattern):
+        # typing now would answer the dialog, not reach the worker (refutation)
+        print(f"dispatch: {branch} shows a dialog — nothing typed; answer it first: {text[:80]}",
+              file=sys.stderr)
+        return 5
+    r = _tmux("send-keys", "-t", window, "-l", text)
+    r2 = _tmux("send-keys", "-t", window, "Enter")
+    if r.returncode != 0 or r2.returncode != 0:
+        print(f"dispatch: send-keys failed: {(r.stderr or r2.stderr).strip()}", file=sys.stderr)
+        return 1
     for attempt in range(SAY_RETRIES + 1):
         _sleep(SAY_WAIT_S * (attempt + 1))
         screen = _screen(window)
@@ -793,7 +800,7 @@ def say(root: Path, branch: str, text: str) -> int:
         if not _still_typed(line, text):
             print(f"dispatch: said to {branch}: {text[:80]}")  # delivered, whatever the output says
             return 0
-        if _dialog_open(screen):
+        if _dialog_open(screen, pattern):
             # still typed and a dialog opened: an Enter would answer it (refutation)
             print(f"dispatch: {branch} shows a dialog — not pressing Enter; the text is unsent: {text[:80]}",
                   file=sys.stderr)
@@ -867,16 +874,22 @@ JOURNAL = ".process-work/journal/"
 def _queue_dir(root: Path) -> Path:
     d = _records_dir(root) / "queue"  # not beside the records: a branch named `queue` would collide
     d.mkdir(parents=True, exist_ok=True)
-    old = _records_dir(root) / QUEUE_FILE
-    if not (d / QUEUE_FILE).exists():
-        try:
-            data = json.loads(old.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            data = None
-        if isinstance(data, list):  # the queue of an older dispatch: carried over, not dropped
-            (d / QUEUE_FILE).write_text(json.dumps(data, indent=2), encoding="utf-8")
-            old.unlink()
     return d
+
+
+def _migrate_queue(root: Path) -> None:
+    """The queue of an older dispatch (beside the records): carried over, not
+    dropped — under the queue lock, so two processes do not race on it."""
+    old, new = _records_dir(root) / QUEUE_FILE, _queue_path(root)
+    if new.exists() or not old.exists():
+        return
+    try:
+        data = json.loads(old.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return
+    if isinstance(data, list):
+        new.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        old.unlink(missing_ok=True)
 
 
 def _queue_path(root: Path) -> Path:
@@ -888,6 +901,7 @@ class _QueueLock:
     add` and a second drain would otherwise lose lines or start one twice."""
 
     def __init__(self, root: Path):
+        self.root = root
         self.path = _queue_dir(root) / "queue.lock"
         self.fh = None
 
@@ -895,6 +909,7 @@ class _QueueLock:
         import fcntl
         self.fh = open(self.path, "a+")
         fcntl.flock(self.fh.fileno(), fcntl.LOCK_EX)
+        _migrate_queue(self.root)
         return self
 
     def __exit__(self, *_exc):
@@ -1052,10 +1067,25 @@ def _own_plans_on_origin(root: Path, branch: str) -> tuple[str, list[str]]:
     base = _integration_base(root, tip)
     if not base:
         return tip, []
-    added = _out(root, "diff", "--name-only", "--no-renames", "--diff-filter=A", f"{base}...{tip}").splitlines()
-    plans = [f for f in added if (f.startswith(".process-work/plans/") and f.endswith(".md"))
-             or re.fullmatch(r"specs/[^/]+/tasks\.md", f)]
+    # added by the branch, git's rename detection on: another work's plan the
+    # branch archived or moved is not its own (refutation); a rename pairing
+    # an old plan with a new one for other issues is a new plan
+    status = _out(root, "diff", "--name-status", "-M", f"{base}...{tip}").splitlines()
+    added = []
+    for line in status:
+        parts = line.split("\t")
+        if parts[0] == "A":
+            added.append(parts[1])
+        elif parts[0].startswith("R") and len(parts) == 3:
+            before, after = _out(root, "show", f"{base}:{parts[1]}"), _out(root, "show", f"{tip}:{parts[2]}")
+            if set(_ISSUE.findall(before)) != set(_ISSUE.findall(after)):
+                added.append(parts[2])
+    plans = [f for f in added if (f.startswith(".process-work/plans/") and "/archive/" not in f
+                                  and f.endswith(".md")) or re.fullmatch(r"specs/[^/]+/tasks\.md", f)]
     return tip, plans
+
+
+_ISSUE = re.compile(r"^\s*(?:[-*+]\s+)?[*_]*issue[*_]*\s*:\s*(\S+)", re.IGNORECASE | re.MULTILINE)
 
 
 def work_complete_on_origin(root: Path, branch: str) -> bool | None:

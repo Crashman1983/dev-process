@@ -68,10 +68,12 @@ round and what was found. A line of one stacked plan does not cover another,
 and a bare `REFUTE work=<id>` is a mention, not a record. After a fix round,
 the delta re-review (`--since`) wants a new line: the fix gets refuted, not
 the first line reused. A line is old when the plan's own path at the delta's
-start already had that round, or when any plan at the start (archived ones
-included) carried the same line — same work, same round, same text after the
-colon. So a reformatted, moved, archived-and-copied or merged old line is no
-new round, and a second plan of the same issue neither lends nor takes one:
+start already had that round, or when a plan at the start (archived ones
+included) carried the same line — same round, same text after the colon —
+for this plan's work, or in a plan that has left its path since (moved,
+archived or merged; its id may have changed along). So a reformatted, moved,
+archived-and-copied or merged old line is no new round, another work's
+identical line in a plan still in place does not make this plan's new line old, and a second plan of the same issue neither lends nor takes one:
 its own new line says what it found. An old line whose text is edited and
 that moves to another path reads as new — edit a record, and it is yours.
 

@@ -485,3 +485,22 @@ def test_unreviewed_follow_up_under_a_merged_plan_is_still_refused(render, tmp_p
     out = _merged_widget_then_later(render, tmp_path, touch_plan=touch_plan)
     r = _main_push_gate(out)
     assert r.returncode != 0 and "code changed after the reviewed head" in r.stdout, r.stdout
+
+
+def test_a_plan_review_of_a_plan_named_plan_does_not_clear_its_code(render, tmp_path):
+    out, base, head = _repo(render, tmp_path)
+    r = subprocess.run([sys.executable, str(out / "scripts/process/attest.py"), "--work", "deploy-plan", "--tier", "2",
+                        "--reviewer", "fresh", "--model", "cross", "--independence", "bundle,non-implementing",
+                        "--verdict", "pass", "--round", "1", "--plan-review", "--base", base, "--head", head,
+                        "--dry-run", "."], cwd=out, capture_output=True, text=True)
+    assert "work=deploy-plan-plan" in r.stdout + r.stderr, r.stdout + r.stderr
+
+
+def test_a_commented_block_in_a_plan_is_no_round(render, tmp_path):
+    out, base, head = _repo(render, tmp_path)
+    line = ("REVIEW work=widget tier=2 reviewer=fresh model=cross independence=bundle,non-implementing "
+            "verdict=block round=1")
+    plan = out / ".process-work/plans/2026-09-10-widget.md"
+    plan.write_text(plan.read_text() + f"\n<!-- example:\n{line}\n-->\n")
+    r = _attest(out, "--base", base, "--head", head, "--round", "2", "--dry-run")
+    assert r.returncode == 1 and "this is round 1" in r.stderr, r.stderr
