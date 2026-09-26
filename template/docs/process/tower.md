@@ -119,14 +119,18 @@ every worker.
 
 Phases chain themselves: `dispatch.py chain` (from the steward's tick)
 stops a `planned` plan session and queues `execute`; stops a `pushed`
-execute session and queues `review` when origin carries code beyond the
-last attestation (an attestation-only push reviews nothing); stops a
-`review-pass` review session once its attestation is on origin — the
-report is the train's ticket. `blocked` queues nothing: the steward
-decides. A chained stop keeps the worker's report. `dispatch.py queue add`
+execute session and queues `review` once the branch's plan on origin has
+no open task (`pushed` comes at the first push) and origin carries code
+beyond the last attestation (a commit recording a REVIEW line — an
+attestation-only push reviews nothing); stops a `review-pass` review
+session once its attestation is on origin — the report is the train's
+ticket. `blocked` queues nothing: the steward decides. A report older than
+the session, a worker with uncommitted work, or a pane tmux cannot be
+asked about is left alone. A chained stop keeps the worker's report. `dispatch.py queue add`
 queues a phase by hand, `dispatch.py drain` starts what may start now, in
-order: a line the caps or lanes refuse stays queued and does not hold the
-lines behind it.
+order, under a lock (two steward ticks never start a line twice): a line
+the caps or lanes refuse, or whose start fails, stays queued and does not
+hold the lines behind it; one line per issue and phase.
 
 A phase may run on another host. The policy's `phases.<phase>` overrides
 `command` and `runner` for that phase; `remote: true` makes dispatch hand

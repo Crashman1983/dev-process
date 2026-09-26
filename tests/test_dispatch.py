@@ -584,12 +584,12 @@ def test_chain_moves_each_report_to_its_next_phase(render, tmp_path, monkeypatch
     _repo(out)
     mod = _load_dispatch(out)
     recs = [
-        {"branch": "a", "issue": 1, "tier": 2, "phase": "plan"},
-        {"branch": "b", "issue": 2, "tier": 2, "phase": "execute"},
-        {"branch": "c", "issue": 3, "tier": 2, "phase": "execute"},
-        {"branch": "d", "issue": 4, "tier": 2, "phase": "review"},
-        {"branch": "e", "issue": 5, "tier": 2, "phase": "review"},
-        {"branch": "f", "issue": 6, "tier": 2, "phase": "execute"},
+        {"branch": "a", "issue": 1, "tier": 2, "phase": "plan", "started": 1},
+        {"branch": "b", "issue": 2, "tier": 2, "phase": "execute", "started": 1},
+        {"branch": "c", "issue": 3, "tier": 2, "phase": "execute", "started": 1},
+        {"branch": "d", "issue": 4, "tier": 2, "phase": "review", "started": 1},
+        {"branch": "e", "issue": 5, "tier": 2, "phase": "review", "started": 1},
+        {"branch": "f", "issue": 6, "tier": 2, "phase": "execute", "started": 1},
     ]
     reports = [{"worker": "a", "state": "planned", "epoch": 1}, {"worker": "b", "state": "pushed", "epoch": 1},
                {"worker": "c", "state": "pushed", "epoch": 1}, {"worker": "d", "state": "review-pass", "epoch": 1},
@@ -597,7 +597,8 @@ def test_chain_moves_each_report_to_its_next_phase(render, tmp_path, monkeypatch
     stopped, started = [], []
     monkeypatch.setattr(mod, "records", lambda root: recs)
     monkeypatch.setattr(mod._report, "read_reports", lambda root, **_kw: reports)
-    monkeypatch.setattr(mod, "new_code_on_origin", lambda root, b: b == "b")  # c pushed only an attestation
+    monkeypatch.setattr(mod, "new_code_on_origin", lambda root, b, **_kw: b == "b")  # c: an attestation only
+    monkeypatch.setattr(mod, "work_complete_on_origin", lambda root, b: True)
     monkeypatch.setattr(mod, "attest_on_origin", lambda root, b: b == "d")    # e's attestation is not pushed
     monkeypatch.setattr(mod, "stop", lambda root, b, **kw: stopped.append((b, kw.get("keep_report"))) or 0)
     monkeypatch.setattr(mod, "start", lambda root, *, issue, phase, **_kw: started.append((issue, phase)) or 0)
@@ -653,8 +654,193 @@ def test_local_workers_start_niced(render, tmp_path):
     out = render(tmp_path, {"project_name": "d", "modules": {}})
     mod = _load_dispatch(out)
     if shutil.which("nice"):
-        assert mod.niced({}, ["claude", "x"]) == ["nice", "-n", "10", "claude", "x"]
-        assert mod.niced({"worker_nice": 5}, ["claude"]) == ["nice", "-n", "5", "claude"]
+        assert mod.niced({}, ["claude", "x"]) == ["nice", "-n", "10", "env", "claude", "x"]
+        assert mod.niced({"worker_nice": 5}, ["claude"]) == ["nice", "-n", "5", "env", "claude"]
+        assert mod.niced({"worker_nice": None}, ["c"]) == ["nice", "-n", "10", "env", "c"]
     assert mod.niced({"worker_nice": 0}, ["claude"]) == ["claude"]
-    with pytest.raises(SystemExit):
-        mod.niced({"worker_nice": "high"}, ["claude"])
+    for bad in ("high", 5.9, True):
+        with pytest.raises(SystemExit):
+            mod.niced({"worker_nice": bad}, ["claude"])
+
+
+# --- refute of the chain: each case a downstream way it went wrong ---
+
+
+def test_a_queue_file_does_not_break_the_records(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    mod = _load_dispatch(out)
+    mod.queue_add(out, issue=1, phase="plan", tier=1, branch=None)
+    assert mod.records(out) == []
+    assert _dispatch(out, "list").returncode == 0
+
+
+def test_chain_waits_for_open_tasks_and_ignores_old_reports(render, tmp_path, monkeypatch):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    mod = _load_dispatch(out)
+    recs = [{"branch": "x", "issue": 1, "tier": 2, "phase": "execute", "started": 100},
+            {"branch": "y", "issue": 2, "tier": 2, "phase": "plan", "started": 100},
+            {"branch": "z", "issue": 3, "tier": 2, "phase": "plan", "started": 100, "state": "unknown"}]
+    reports = [{"worker": "x", "state": "pushed", "epoch": 200},
+               {"worker": "y", "state": "planned", "epoch": 50},    # from before this session
+               {"worker": "z", "state": "planned", "epoch": 200}]   # tmux cannot be asked
+    stopped = []
+    monkeypatch.setattr(mod, "records", lambda root: recs)
+    monkeypatch.setattr(mod._report, "read_reports", lambda root, **_kw: reports)
+    monkeypatch.setattr(mod, "new_code_on_origin", lambda root, b, **_kw: True)
+    monkeypatch.setattr(mod, "work_complete_on_origin", lambda root, b: False)  # first push, tasks open
+    monkeypatch.setattr(mod, "stop", lambda root, b, **kw: stopped.append(b) or 0)
+    monkeypatch.setattr(mod, "start", lambda root, **_kw: 0)
+    mod.chain(out)
+    assert stopped == [] and mod.queue_load(out) == []
+
+
+def test_an_unknown_pane_is_not_stopped(render, tmp_path, monkeypatch):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    mod = _load_dispatch(out)
+    rec = tmp_path / "rec.json"
+    rec.write_text("{}")
+    monkeypatch.setattr(mod, "_load_record", lambda root, b: (rec, {"state": "unknown", "branch": b}))
+    assert mod.stop(out, "w", force=False) == 3 and rec.exists()
+
+
+def test_the_queue_keeps_one_line_per_issue_and_phase(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    mod = _load_dispatch(out)
+    mod.queue_add(out, issue=4, phase="execute", tier=None, branch=None)
+    mod.queue_add(out, issue=4, phase="execute", tier=2, branch="issue-4")
+    assert len(mod.queue_load(out)) == 1
+
+
+def test_a_start_that_exits_does_not_wedge_the_queue(render, tmp_path, monkeypatch):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    mod = _load_dispatch(out)
+    for issue in (10, 11, 12):
+        mod.queue_add(out, issue=issue, phase="plan", tier=1, branch=None)
+
+    def fake_start(root, *, issue, **_kw):
+        if issue == 11:
+            raise SystemExit("worktree path taken")
+        return 0
+
+    monkeypatch.setattr(mod, "start", fake_start)
+    mod.drain(out)
+    assert [e["issue"] for e in mod.queue_load(out)] == [11]
+
+
+def test_two_drains_start_each_line_once_and_adds_are_not_lost(render, tmp_path, monkeypatch):
+    import threading
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    mod = _load_dispatch(out)
+    for issue in range(5):
+        mod.queue_add(out, issue=issue + 1, phase="plan", tier=1, branch=None)
+    started, lock = [], threading.Lock()
+
+    def slow_start(root, *, issue, **_kw):
+        time.sleep(0.05)
+        with lock:
+            started.append(issue)
+        return 0
+
+    monkeypatch.setattr(mod, "start", slow_start)
+    threads = [threading.Thread(target=mod.drain, args=(out,)) for _ in range(2)]
+    threads += [threading.Thread(target=mod.queue_add, args=(out,),
+                                 kwargs={"issue": 100 + i, "phase": "review", "tier": 2, "branch": None})
+                for i in range(20)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert sorted(started) == sorted(set(started))  # nothing started twice
+    left = {e["issue"] for e in mod.queue_load(out)}
+    assert all(i in set(started) | left for i in range(100, 120))  # no add lost
+
+
+def test_a_corrupt_queue_is_kept_aside_not_dropped(render, tmp_path, capsys):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    mod = _load_dispatch(out)
+    q = mod._queue_path(out)
+    q.write_text("{not json")
+    assert mod.queue_load(out) == []
+    assert list(q.parent.glob("queue.corrupt-*.json")) and "kept as" in capsys.readouterr().err
+    q.write_text(json.dumps([{"issue": "abc", "phase": "plan"}, {"issue": 2, "phase": "plan", "tier": "zz"},
+                             {"issue": 3, "phase": "plan", "branch": 5}, {"issue": 4, "phase": "plan"}]))
+    assert [e["issue"] for e in mod.queue_load(out)] == [4]
+
+
+def test_a_journal_note_is_no_attestation_and_a_merge_counts_its_own_code(render, tmp_path):
+    out = render(tmp_path / "p", {"project_name": "d", "modules": {}})
+    mod = _load_dispatch(out)
+    work = _origin_pair(tmp_path)
+    _commit_file(work, "a.py", "a = 1\n", "code")
+    _commit_file(work, ".process-work/journal/j.md", "why I chose X\n", "journal note mid-work")
+    _git(work, "push", "-q", "origin", "w")
+    assert mod.new_code_on_origin(work, "w")
+    _commit_file(work, ".process-work/journal/j.md", "why I chose X\nREVIEW work=w verdict=pass\n", "attest")
+    _git(work, "push", "-q", "origin", "w")
+    assert mod.new_code_on_origin(work, "w") is False
+    # a merge whose conflict resolution writes code after the attestation
+    _git(work, "checkout", "-q", "-b", "side", "main")
+    _commit_file(work, "a.py", "a = 'side'\n", "side")
+    _git(work, "checkout", "-q", "w")
+    subprocess.run(["git", "merge", "-q", "--no-edit", "side"], cwd=work, capture_output=True)
+    (work / "a.py").write_text("a = 'resolved'\n")
+    _git(work, "commit", "-q", "-am", "merge side")
+    _git(work, "push", "-q", "origin", "w")
+    assert mod.new_code_on_origin(work, "w")
+    assert mod.new_code_on_origin(work, "nosuch") is None
+
+
+def test_open_tasks_on_origin_mean_the_work_is_not_done(render, tmp_path):
+    out = render(tmp_path / "p", {"project_name": "d", "modules": {}})
+    mod = _load_dispatch(out)
+    work = _origin_pair(tmp_path)
+    _commit_file(work, ".process-work/plans/2026-01-01-w.md", "# w\n\n- [x] one\n- [ ] two\n", "plan")
+    _git(work, "push", "-q", "origin", "w")
+    assert mod.work_complete_on_origin(work, "w") is False
+    _commit_file(work, ".process-work/plans/2026-01-01-w.md", "# w\n\n- [x] one\n- [x] two\n", "done")
+    _git(work, "push", "-q", "origin", "w")
+    assert mod.work_complete_on_origin(work, "w") is True
+
+
+def test_origin_is_asked_for_exactly_this_branch(render, tmp_path):
+    out = render(tmp_path / "p", {"project_name": "d", "modules": {}})
+    mod = _load_dispatch(out)
+    work = _origin_pair(tmp_path)
+    _git(work, "push", "-q", "origin", "HEAD:refs/heads/feat/w")
+    assert mod._remote_head(work, "w") == ""
+    _git(work, "push", "-q", "origin", "w")
+    assert mod._remote_head(work, "w") == _git(work, "rev-parse", "w").stdout.strip()
+
+
+def test_say_finds_a_long_wrapped_input_and_a_pasted_placeholder(render, tmp_path, monkeypatch):
+    long = "x" * 900
+    wrapped = "> earlier message\n" + "│ > " + long[:70] + " │\n" + "".join(f"│ {long[i:i + 70]} │\n"
+                                                                     for i in range(70, 900, 70))
+    out, mod, pane = _say_setup(render, tmp_path, monkeypatch, [wrapped])
+    assert mod.say(out, "w1", long) == 4
+    out2, mod2, _pane = _say_setup(render, tmp_path / "b", monkeypatch, [BOX.format("[Pasted text #1 +3 lines]")])
+    assert mod2.say(out2, "w1", "a\nb\nc") == 4
+
+
+def test_a_say_prompt_without_a_group_falls_back(render, tmp_path, monkeypatch):
+    out, mod, _pane = _say_setup(render, tmp_path, monkeypatch, ["> \n"])
+    monkeypatch.setattr(mod, "load_policy", lambda root: {"say_prompt": "^>"})
+    assert mod.say(out, "w1", "hello") == 0
+
+
+def test_a_missing_harness_is_a_refusal_and_assignments_survive_nice(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    mod = _load_dispatch(out)
+    assert mod.runnable(["no-such-harness-xyz", "p"]) is not None
+    assert mod.runnable(["FOO=bar", "sh", "-c", "true"]) is None
+    assert mod.runnable(["/nonexistent/claude"]) is not None
+    if shutil.which("nice"):
+        argv = mod.niced({}, ["FOO=bar", "sh", "-c", 'test "$FOO" = bar'])
+        assert subprocess.run(argv).returncode == 0
