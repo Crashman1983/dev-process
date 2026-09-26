@@ -834,3 +834,96 @@ def test_a_train_merge_leaves_another_works_plan_alone(render, tmp_path):
         assert "Closes" not in _git(wt, "log", "-1", "--format=%B").stdout
     finally:
         _git(out, "worktree", "remove", "--force", str(wt))
+
+
+def _plan_on_main(out, name, body):
+    plans = out / ".process-work/plans"
+    plans.mkdir(parents=True, exist_ok=True)
+    (plans / name).write_text(body)
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", f"plan {name} on main")
+
+
+def _settle(out, branches, stamp):
+    train = _load_train(out)
+    wt, _b, merged, dropped = train.build_train(out, "main", branches, stamp, lambda _m: None)
+    msgs = _git(wt, "log", "--format=%B%x00", "main..HEAD").stdout
+    return wt, merged, dropped, msgs
+
+
+def test_another_works_plan_renamed_or_named_like_the_branch_is_not_finished(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _plan_on_main(out, "2026-09-01-login.md", "# login\n\ntier: 1\nissue: #3\n\n- [ ] open\n")
+    _git(out, "checkout", "-q", "-b", "12-login-typo", "main")  # names "login", issue 12
+    _git(out, "mv", ".process-work/plans/2026-09-01-login.md", ".process-work/plans/2026-09-02-login.md")
+    _git(out, "commit", "-q", "-m", "rename another work's plan")
+    _git(out, "checkout", "-q", "main")
+    wt, merged, _d, msgs = _settle(out, ["12-login-typo"], "t3")
+    try:
+        assert merged == ["12-login-typo"] and "Closes" not in msgs
+        assert (wt / ".process-work/plans/2026-09-02-login.md").is_file()
+    finally:
+        _git(out, "worktree", "remove", "--force", str(wt))
+
+
+def test_a_plan_without_tier_or_with_open_tasks_is_not_finished(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _active_plan_branch(out, "13-notier", issue=13, tier=1)
+    _git(out, "checkout", "-q", "13-notier")
+    p = out / ".process-work/plans/2026-09-20-13-notier.md"
+    p.write_text(p.read_text().replace("tier: 1", "Risk tier 1"))
+    _git(out, "commit", "-q", "-am", "no tier line")
+    _git(out, "checkout", "-q", "main")
+    _active_plan_branch(out, "14-open", issue=14, tier=1, extra="- [x] a\n- [ ] b\n")
+    _active_plan_branch(out, "15-bold", issue=15, tier=1, extra="- **plan-stays-active**: part two follows\n")
+    wt, merged, _d, msgs = _settle(out, ["13-notier", "14-open", "15-bold"], "t4")
+    try:
+        assert len(merged) == 3 and "Closes" not in msgs
+    finally:
+        _git(out, "worktree", "remove", "--force", str(wt))
+
+
+def test_the_merge_commit_skips_the_pre_commit_hook(render, tmp_path, monkeypatch):
+    # the old `git merge` auto-commit ran no pre-commit hook; the merge commit
+    # after --no-commit must not either, or a broken hook install empties the
+    # train (refutation). Git runs no hooks in this test environment, so the
+    # call itself is pinned.
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _active_plan_branch(out, "16-a", issue=16)
+    train = _load_train(out)
+    calls = []
+    real = train._git
+
+    def spy(root, *args, **kw):
+        calls.append(args)
+        return real(root, *args, **kw)
+
+    monkeypatch.setattr(train, "_git", spy)
+    wt, _b, merged, _d = train.build_train(out, "main", ["16-a"], "t5", lambda _m: None)
+    try:
+        commits = [a for a in calls if a and a[0] == "commit"]
+        assert merged == ["16-a"] and commits and all("--no-verify" in a for a in commits)
+    finally:
+        _git(out, "worktree", "remove", "--force", str(wt))
+
+
+def test_a_stacked_passenger_already_contained_counts_as_merged(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _git(out, "checkout", "-q", "-b", "40-a", "main")
+    (out / "a.txt").write_text("a\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "a")
+    _git(out, "checkout", "-q", "-b", "41-b")
+    (out / "b.txt").write_text("b\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "b")
+    _git(out, "checkout", "-q", "main")
+    wt, merged, dropped, _msgs = _settle(out, ["41-b", "40-a"], "t6")
+    try:
+        assert merged == ["41-b", "40-a"] and not dropped
+    finally:
+        _git(out, "worktree", "remove", "--force", str(wt))

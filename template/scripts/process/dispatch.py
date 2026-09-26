@@ -716,12 +716,15 @@ _PROMPT_LINE = re.compile(r"^[\s│|╭╰─]*>\s?(.*?)[\s│|]*$")
 _sleep = time.sleep
 
 
-def _input_line(window_id: str, pattern: re.Pattern[str]) -> str | None:
-    """What the worker's input line holds now — None when it cannot be read."""
+def _screen(window_id: str) -> list[str] | None:
     r = _tmux("capture-pane", "-p", "-t", window_id)
-    if r.returncode != 0:
+    return [ln for ln in r.stdout.splitlines() if ln.strip()] if r.returncode == 0 else None
+
+
+def _input_line(lines: list[str] | None, pattern: re.Pattern[str]) -> str | None:
+    """What the worker's input line holds now — None when it cannot be read."""
+    if lines is None:
         return None
-    lines = [ln for ln in r.stdout.splitlines() if ln.strip()]
     for ln in reversed(lines):  # the bottom-most prompt line; a long input wraps below it
         m = pattern.match(ln)
         if m:
@@ -730,6 +733,13 @@ def _input_line(window_id: str, pattern: re.Pattern[str]) -> str | None:
 
 
 _PASTED = re.compile(r"^\[Pasted text")
+
+
+_DIALOG = re.compile(r"^\s*[❯>]?\s*\d+\.\s+(Yes|No)\b|Do you want to|\(y/n\)|\[y/N\]", re.IGNORECASE | re.MULTILINE)
+
+
+def _dialog_open(lines: list[str] | None) -> bool:
+    return bool(lines) and bool(_DIALOG.search("\n".join(lines[-12:])))
 
 
 def _still_typed(line: str, text: str) -> bool:
@@ -770,7 +780,13 @@ def say(root: Path, branch: str, text: str) -> int:
         pass
     for attempt in range(SAY_RETRIES + 1):
         _sleep(SAY_WAIT_S * (attempt + 1))
-        line = _input_line(window, pattern)
+        screen = _screen(window)
+        if _dialog_open(screen):
+            # an Enter would answer the dialog, not send the text (refutation)
+            print(f"dispatch: {branch} shows a dialog — not pressing Enter; the text may be unsent: {text[:80]}",
+                  file=sys.stderr)
+            return 5
+        line = _input_line(screen, pattern)
         if line is None:
             print(f"dispatch: said to {branch}: {text[:80]} (not verified — the input line could not be read)")
             return 0
@@ -843,8 +859,14 @@ BOOKKEEPING = ".process-work/"
 JOURNAL = ".process-work/journal/"
 
 
+def _queue_dir(root: Path) -> Path:
+    d = _records_dir(root) / "queue"  # not beside the records: a branch named `queue` would collide
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
 def _queue_path(root: Path) -> Path:
-    return _records_dir(root) / QUEUE_FILE
+    return _queue_dir(root) / QUEUE_FILE
 
 
 class _QueueLock:
@@ -852,7 +874,7 @@ class _QueueLock:
     add` and a second drain would otherwise lose lines or start one twice."""
 
     def __init__(self, root: Path):
-        self.path = _records_dir(root) / "queue.lock"
+        self.path = _queue_dir(root) / "queue.lock"
         self.fh = None
 
     def __enter__(self):
@@ -870,10 +892,15 @@ class _QueueLock:
 def _valid_entry(e: object) -> dict | None:
     if not isinstance(e, dict) or e.get("phase") not in PHASES:
         return None
-    try:
-        issue = int(e.get("issue"))
-        tier = None if e.get("tier") is None else int(e.get("tier"))
-    except (TypeError, ValueError):
+    def as_int(v: object) -> int | None:
+        if isinstance(v, bool):
+            return None
+        if isinstance(v, int):
+            return v
+        return int(v) if isinstance(v, str) and v.isdigit() else None
+    issue = as_int(e.get("issue"))
+    tier = None if e.get("tier") is None else as_int(e.get("tier"))
+    if issue is None or (e.get("tier") is not None and tier is None):
         return None
     branch = e.get("branch")
     if branch is not None and not isinstance(branch, str):
@@ -888,11 +915,11 @@ def queue_load(root: Path) -> list[dict]:
     except OSError:
         return []
     except ValueError:
-        aside = path.with_name(f"queue.corrupt-{int(time.time())}.json")
+        data = None
+    if not isinstance(data, list):
+        aside = path.with_name(f"queue.corrupt-{time.time_ns()}-{os.getpid()}.json")
         path.replace(aside)
         print(f"dispatch: the queue was unreadable — kept as {aside.name}, starting empty", file=sys.stderr)
-        return []
-    if not isinstance(data, list):
         return []
     out = []
     for e in data:
@@ -953,7 +980,7 @@ def _commit_touches(root: Path, commit: str) -> list[str]:
     return [f for f in out.splitlines() if f]
 
 
-_REVIEW_ADDED = re.compile(r"^\+REVIEW\s", re.MULTILINE)
+_REVIEW_ADDED = re.compile(r"^\+\s*(?:[-*+]\s+)?REVIEW\s", re.MULTILINE)
 
 
 def _is_attestation(root: Path, commit: str) -> bool:
@@ -999,20 +1026,45 @@ def new_code_on_origin(root: Path, branch: str, *, fetch: bool = True) -> bool |
 _OPEN_TASK = re.compile(r"^\s*[-*] \[ \]", re.MULTILINE)
 
 
-def work_complete_on_origin(root: Path, branch: str) -> bool | None:
-    """Are the branch's own plan tasks all ticked at origin's tip? `pushed`
-    is reported at the FIRST push — the tasks tell when the work is done.
-    None when there is no plan to read."""
+_FENCE = re.compile(r"^(```|~~~).*?^\1[^\n]*$", re.MULTILINE | re.DOTALL)
+
+
+def _own_plans_on_origin(root: Path, branch: str) -> tuple[str, list[str]]:
+    """(origin's tip, the plans this branch added — active, archived or Spec
+    Kit tasks); another work's plan the branch only touched is not its own."""
     tip = _remote_head(root, branch)
     if not tip:
-        return None
+        return "", []
     base = _integration_base(root, tip)
-    changed = _out(root, "diff", "--name-only", f"{base}...{tip}" if base else tip).splitlines()
-    plans = [f for f in changed if (f.startswith(".process-work/plans/") and "/archive/" not in f
-                                    and f.endswith(".md")) or re.fullmatch(r"specs/[^/]+/tasks\.md", f)]
+    if not base:
+        return tip, []
+    added = _out(root, "diff", "--name-only", "--diff-filter=A", f"{base}...{tip}").splitlines()
+    plans = [f for f in added if (f.startswith(".process-work/plans/") and f.endswith(".md"))
+             or re.fullmatch(r"specs/[^/]+/tasks\.md", f)]
+    return tip, plans
+
+
+def work_complete_on_origin(root: Path, branch: str) -> bool | None:
+    """Are the tasks of the branch's own plans all ticked at origin's tip?
+    `pushed` is reported at the FIRST push — the tasks tell when the work is
+    done. A task inside a fenced example does not count. None when the
+    branch added no plan to read."""
+    tip, plans = _own_plans_on_origin(root, branch)
     if not plans:
         return None
-    return not any(_OPEN_TASK.search(_out(root, "show", f"{tip}:{f}")) for f in plans)
+    return not any(_OPEN_TASK.search(_FENCE.sub("", _out(root, "show", f"{tip}:{f}"))) for f in plans)
+
+
+_TIER = re.compile(r"^\s*(?:[-*+]\s+)?[*_]*tier[*_]*\s*:\s*[*_]*\s*(\d+)\b", re.IGNORECASE | re.MULTILINE)
+
+
+def plan_tier_on_origin(root: Path, branch: str) -> int | None:
+    """The tier the branch's own plan declares — the next phase runs on the
+    model for that tier, not the plan session's (often unset) one."""
+    tip, plans = _own_plans_on_origin(root, branch)
+    tiers = [int(m.group(1)) for f in plans if f.endswith(".md") and not f.endswith("tasks.md")
+             for m in [_TIER.search(_FENCE.sub("", _out(root, "show", f"{tip}:{f}")))] if m]
+    return max(tiers) if tiers else None
 
 
 def attest_on_origin(root: Path, branch: str) -> bool:
@@ -1023,7 +1075,20 @@ def attest_on_origin(root: Path, branch: str) -> bool:
     return _is_attestation(root, local)
 
 
+class _ChainLock(_QueueLock):
+    def __init__(self, root: Path):
+        super().__init__(root)
+        self.path = _queue_dir(root) / "chain.lock"
+
+
 def chain(root: Path, *, dry_run: bool = False) -> int:
+    """One chain run at a time (two overlapping runs judged stale snapshots
+    and stopped a fresh session — refutation)."""
+    with _ChainLock(root):
+        return _chain(root, dry_run=dry_run)
+
+
+def _chain(root: Path, *, dry_run: bool = False) -> int:
     latest: dict[str, dict] = {}
     for r in sorted(_report.read_reports(root), key=lambda r: r.get("epoch", 0)):
         latest[r.get("worker", "")] = r
@@ -1052,7 +1117,8 @@ def chain(root: Path, *, dry_run: bool = False) -> int:
                       "not queuing a review", file=sys.stderr)
                 continue
             if not done:
-                continue  # `pushed` comes at the first push: open tasks, the worker is still at it
+                print(f"dispatch: {branch} reported pushed — its plan still has open tasks; the worker is at it")
+                continue  # `pushed` comes at the first push
             if not code:
                 print(f"dispatch: {branch} reported pushed, but origin has no code beyond its last "
                       "attestation — not queuing a review")
@@ -1073,10 +1139,19 @@ def chain(root: Path, *, dry_run: bool = False) -> int:
         if dry_run:
             print(f"dispatch: would stop {branch} ({phase})" + (f" and queue {nxt}" if nxt else ""))
             continue
+        current = _load_record(root, branch)
+        if current is None or current[1].get("started") != rec.get("started") or current[1].get("phase") != phase:
+            continue  # the session changed since it was judged
         if stop(root, branch, force=False, keep_report=True) != 0:
             continue
         if nxt:
-            queue_add(root, issue=issue, phase=nxt, tier=rec.get("tier"), branch=branch)
+            tier = rec.get("tier") if rec.get("tier") is not None else plan_tier_on_origin(root, branch)
+            try:
+                queue_add(root, issue=issue, phase=nxt, tier=tier, branch=branch)
+            except OSError as exc:
+                print(f"dispatch: {branch} stopped, but {nxt} could not be queued ({exc}) — queue it by hand: "
+                      f"dispatch.py queue add --issue {issue} --phase {nxt}"
+                      + (f" --tier {tier}" if tier is not None else "") + f" --branch {branch}", file=sys.stderr)
     return 0 if dry_run else drain(root)
 
 

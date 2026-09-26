@@ -546,13 +546,21 @@ def build_train(root: Path, base: str, aboard: list[str], stamp: str, log) -> tu
     merged: list[str] = []
     dropped: list[str] = []
     for b in aboard:
+        issues: set[int] = set()
+        archived: list[str] = []
         r = _git(wt, "merge", "--no-ff", "--no-commit", b)
+        if r.returncode == 0 and _git(wt, "rev-parse", "-q", "--verify", "MERGE_HEAD").returncode != 0:
+            merged.append(b)  # already contained (a stacked passenger merged before it)
+            log(f"merged {b} — already contained")
+            continue
         if r.returncode == 0:
             archived, issues = _settle_plans(wt, base, b, log)
             message = f"train: merge {b}"
             if issues:
                 message += "\n\n" + "\n".join(f"Closes #{n}" for n in sorted(issues))
-            r = _git(wt, "commit", "-q", "-m", message)
+            # --no-verify: the old auto-commit of `git merge` ran no pre-commit
+            # hook; a broken hook install must not empty the train (refutation)
+            r = _git(wt, "commit", "-q", "--no-verify", "-m", message)
         if r.returncode == 0:
             merged.append(b)
             log(f"merged {b}" + (f" — archived {', '.join(archived)}" if archived else "")
@@ -564,50 +572,69 @@ def build_train(root: Path, base: str, aboard: list[str], stamp: str, log) -> tu
     return wt, branch, merged, dropped
 
 
-STAYS_ACTIVE = re.compile(r"^\s*[-*]?\s*plan-stays-active\s*:\s*\S", re.IGNORECASE | re.MULTILINE)
+STAYS_ACTIVE = re.compile(_review._LEAD + r"plan-stays-active[*_]*\s*:\s*[*_]*\s*\S",
+                          re.IGNORECASE | re.MULTILINE)
+_OPEN_TASK = re.compile(r"^\s*[-*+] \[ \]", re.MULTILINE)
 
 
 def _settle_plans(wt: Path, base: str, branch: str, log) -> tuple[list[str], set[int]]:
-    """What merging `branch` finishes: its own active plans with a clearing
-    review (or none required) move to the archive in the merge itself, and
-    the issues of its own plans are closed by the merge message (`Closes
-    #N` — the forge closes them when the merge lands on the default branch).
+    """What merging `branch` finishes: its own active plans that are done —
+    a declared tier, no open task, a clearing review (or none required) —
+    move to the archive in the merge itself, and the issues of its own
+    finished plans are closed by the merge message (`Closes #N` — the forge
+    closes them when the merge lands on the default branch).
 
     Downstream, a plan left active after its train merge kept claiming its
-    files, and the review gate blamed every later, separately reviewed
-    change to them on it; and merged issues stayed open, because a train
-    merge carries no closing keyword. A plan that must outlive the merge
-    (work in several merges) says `plan-stays-active: <why>`: it stays, and
-    its issue stays open. Another work's plan the branch only touched is
-    not the branch's to finish."""
+    files, and merged issues stayed open, because a train merge carries no
+    closing keyword. A plan that must outlive the merge (work in several
+    merges) says `plan-stays-active: <why>`: it stays, its issue stays open.
+
+    Own means: added by the branch (git's rename detection: a plan the branch
+    only renamed or moved is not new), or already on the base with the
+    branch's issue number among its issues — another work's plan the branch
+    touched, renamed or archived is never the branch's to finish (a
+    refutation closed issues through a slug in a branch name)."""
     records = _review.record_texts(wt, ("journal",)) or []
     passes = [r for _rel, text in records for _ln, r in _review.parse_review_lines(text)[0]
               if r.get("verdict") == "pass"]
-    on_base = set(_out(wt, "ls-tree", "-r", "--name-only", base, "--", PLANS).splitlines())
-    changed = [n for n in _out(wt, "diff", "--name-only", "--no-renames", "-z", f"{base}...{branch}", "--",
-                               PLANS).split("\0") if n.endswith(".md")]
+    status = _out(wt, "diff", "--name-status", "-M", "-z", f"{base}...{branch}", "--", PLANS).split("\0")
+    entries: list[tuple[str, str, str]] = []  # (status letter, source on base or "", path now)
+    i = 0
+    while i < len(status) and status[i]:
+        letter = status[i][:1]
+        if letter in ("R", "C"):
+            entries.append((letter, status[i + 1], status[i + 2]))
+            i += 3
+        else:
+            entries.append((letter, "", status[i + 1]))
+            i += 2
     stems = [Path(n).stem for n in _out(wt, "ls-files", "--", PLANS).splitlines() if n.endswith(".md")]
     dedated: dict[str, int] = {}
     for stem in stems:
         key = _review.DATE_PREFIX.sub("", stem)
         dedated[key] = dedated.get(key, 0) + 1
+    branch_issue = (_branch_work_ids(branch) - {branch, branch.rsplit("/", 1)[-1]})
     archived: list[str] = []
     issues: set[int] = set()
-    for rel in changed:
+    for letter, source, rel in entries:
         f = wt / rel
-        if not f.is_file():
+        if letter == "D" or not rel.endswith(".md") or not f.is_file():
             continue
         text = f.read_text(encoding="utf-8", errors="replace")
+        plain = _review._unfenced(text)
         stem = Path(rel).stem
         unique = dedated.get(_review.DATE_PREFIX.sub("", stem), 0) <= 1
-        ids = _review._plan_work_ids(stem, text, include_dedated=unique)
-        if rel in on_base and not _names_branch(branch, ids):
-            continue  # another work's plan
-        if STAYS_ACTIVE.search(text):
+        ids = _review._plan_work_ids(stem, plain, include_dedated=unique)
+        numbers = {str(n) for n in _review._plan_issue_numbers(plain)}
+        added = letter == "A"
+        if not added and not (numbers & branch_issue):
+            continue  # another work's plan: touched, renamed or archived here
+        if STAYS_ACTIVE.search(plain):
             continue
-        plain = _review._unfenced(text)
         tier_m = _review.TIER_DECL.search(plain)
-        tier = int(tier_m.group(1)) if tier_m else 0
+        if tier_m is None or _OPEN_TASK.search(plain):
+            continue  # no tier (the gate's finding) or tasks still open: not finished
+        tier = int(tier_m.group(1))
         if _review.record_kind(rel) == "plan":
             if not (tier < 2 or _review.WAIVED.search(plain) or _review._cleared(passes, ids, tier)):
                 continue  # not cleared: it stays active, and its issue open

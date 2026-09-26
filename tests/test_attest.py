@@ -3,6 +3,8 @@ with the gate's own digest; the gate names a digest no formula produces."""
 import hashlib
 import importlib.util
 import subprocess
+
+import pytest
 import sys
 
 sys.dont_write_bytecode = True
@@ -393,24 +395,56 @@ def test_the_reviewed_head_in_the_history_is_not_stale(render, tmp_path):
     assert "reviewed head" not in r.stdout and "code changed after" not in r.stdout, r.stdout
 
 
-def test_a_merged_plan_left_active_is_residue_not_a_refusal(render, tmp_path):
-    # the widget work is merged with its plan still active; a later branch
-    # changes widget.py and touches the plan — the merge push names the plan
-    # as residue instead of refusing for code the plan never owned
-    import os
+def _merged_widget_then_later(render, tmp_path, *, touch_plan=True):
     out, base, head = _repo(render, tmp_path)
     assert _attest(out, "--base", base, "--head", head).returncode == 0
     _git(out, "add", "-A")
     _git(out, "commit", "-q", "-m", "docs: attest")
     _git(out, "checkout", "-q", "main")
     _git(out, "merge", "-q", "--no-ff", "--no-edit", "feature")
+    plan = out / ".process-work/plans/2026-09-10-widget.md"
+    if not touch_plan:  # the plan names its issue on main; the push only claims it
+        plan.write_text(plan.read_text().replace("tier: 2", "tier: 2\nissue: #5"))
+        _git(out, "commit", "-q", "-am", "plan names its issue")
     _git(out, "checkout", "-q", "-b", "later")
     (out / "widget.py").write_text("def widget():\n    return 43\n")
-    plan = out / ".process-work/plans/2026-09-10-widget.md"
-    plan.write_text(plan.read_text() + "- a note from later work\n")
-    _git(out, "commit", "-q", "-am", "later work")
+    if touch_plan:
+        plan.write_text(plan.read_text() + "- a note from later work\n")
+    _git(out, "commit", "-q", "-am", "later work" if touch_plan else "fix: widget\n\nCloses #5")
+    return out
+
+
+def _main_push_gate(out):
+    import os
     env = {**os.environ, "PROCESS_PUSH_TARGETS": "refs/heads/main"}
-    r = subprocess.run([sys.executable, str(out / "scripts/process/check_review.py"), "."],
-                       cwd=out, capture_output=True, text=True, env=env)
+    return subprocess.run([sys.executable, str(out / "scripts/process/check_review.py"), "."],
+                          cwd=out, capture_output=True, text=True, env=env)
+
+
+def test_later_reviewed_work_is_not_blamed_on_a_merged_plan(render, tmp_path):
+    # the later work carries its own plan and review: the merged plan left
+    # active is named as residue, the later code is covered by its review
+    out = _merged_widget_then_later(render, tmp_path)
+    (out / ".process-work/plans/2026-09-11-later.md").write_text("# Later\n\ntier: 2\n\n## Decisions\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "later plan")
+    later_base = _git(out, "merge-base", "main", "HEAD").stdout.strip()
+    later_head = _git(out, "rev-parse", "HEAD").stdout.strip()
+    r = subprocess.run([sys.executable, str(out / "scripts/process/attest.py"), "--work", "later", "--tier", "2",
+                        "--reviewer", "fresh", "--model", "cross", "--independence", "bundle,non-implementing",
+                        "--verdict", "pass", "--round", "1", "--base", later_base, "--head", later_head, "."],
+                       cwd=out, capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "docs: attest later")
+    r = _main_push_gate(out)
     assert "code changed after the reviewed head" not in r.stdout, r.stdout
     assert "belongs to work already merged" in r.stdout, r.stdout
+
+
+@pytest.mark.parametrize("touch_plan", [True, False])
+def test_unreviewed_follow_up_under_a_merged_plan_is_still_refused(render, tmp_path, touch_plan):
+    # refutation: a skip for "merged work" let unreviewed follow-up code through
+    out = _merged_widget_then_later(render, tmp_path, touch_plan=touch_plan)
+    r = _main_push_gate(out)
+    assert r.returncode != 0 and "code changed after the reviewed head" in r.stdout, r.stdout
