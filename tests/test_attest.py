@@ -226,6 +226,46 @@ def test_the_round_is_counted_from_recorded_blocks_not_claimed(render, tmp_path)
     assert _attest(out, *ab, "--round", "2").returncode == 0
 
 
+def test_a_root_cause_in_a_spec_kit_plan_counts(render, tmp_path):
+    # Spec Kit keeps its plan in specs/<dir>/plan.md — a cause recorded there
+    # is recorded; a REVIEW line quoted in two homes is still one round
+    out, base, head = _repo(render, tmp_path)
+    ab = ("--base", base, "--head", head)
+    assert _attest(out, *ab, "--verdict", "block").returncode == 0
+    block = next(ln for ln in _journal(out).splitlines() if ln.startswith("REVIEW "))
+    spec = out / "specs/001-widget"
+    spec.mkdir(parents=True)
+    (spec / "plan.md").write_text(f"# Plan\n\ntier: 2\n\n{block}\n\nROOT-CAUSE work=widget round=1: the "
+                                  "cache key ignored the tenant — test_widget_per_tenant failed before\n")
+    r = _attest(out, *ab, "--round", "2", "--dry-run")
+    assert r.returncode == 0, r.stderr
+    r = _attest(out, *ab, "--round", "3", "--dry-run")
+    assert r.returncode == 1 and "this is round 2" in r.stderr
+
+
+def test_every_record_home_is_read_from_one_owner(render, tmp_path):
+    out, base, head = _repo(render, tmp_path)
+    gate = _load_gate(out)
+    homes = {".process-work/journal/b/2026-09-10.md": "journal",
+             ".process-work/plans/2026-09-10-widget.md": "plan",
+             ".process-work/plans/archive/2026-09-01-old.md": "plan-archive",
+             "specs/001-widget/plan.md": "spec-plan"}
+    for rel in homes:
+        (out / rel).parent.mkdir(parents=True, exist_ok=True)
+        (out / rel).write_text(f"record in {rel}\n")
+    for rel in ("specs/001-widget/spec.md", "specs/plan.md", "docs/plan.md"):
+        assert gate.record_kind(rel) is None, rel
+    assert {rel: gate.record_kind(rel) for rel in homes} == homes
+    now = dict(gate.record_texts(out))
+    assert set(homes) <= set(now) and now["specs/001-widget/plan.md"] == "record in specs/001-widget/plan.md\n"
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "records")
+    assert dict(gate.record_texts(out, ref="HEAD")) == now
+    assert gate.record_texts(out, ref="no-such-ref") is None
+    assert [rel for rel, _t in gate.record_texts(out, gate.PLAN_KINDS)] == [
+        ".process-work/plans/2026-09-10-widget.md", "specs/001-widget/plan.md"]
+
+
 def test_an_exception_is_recorded_and_plan_reviews_count_apart(render, tmp_path):
     out, base, head = _repo(render, tmp_path)
     ab = ("--base", base, "--head", head)

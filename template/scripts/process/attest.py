@@ -30,7 +30,7 @@ records work=<id>-plan).
 
 Before any round after a block, each block's fix names its cause: a line
 `ROOT-CAUSE work=<id> round=<r>: <cause> — <the test that failed before the fix>`
-in the journal or the plan. A fix that names no cause is a patch, and
+in the journal or the plan (a Spec Kit plan too). A fix that names no cause is a patch, and
 patches on patches were the largest source of extra rounds downstream.
 `--exception TEXT` overrides either rule; the reason is written above the
 line as `REVIEW-EXCEPTION`, where it can be counted.
@@ -53,11 +53,11 @@ from pathlib import Path
 sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling import
-from check_review import (  # noqa: E402  (one owner for grammar + digest)
+from check_review import (  # noqa: E402  (one owner for grammar, digest, record homes)
     JOURNAL_DIR,
-    PLANS_ACTIVE,
     artifact_digest,
     parse_review_lines,
+    record_texts,
 )
 
 ROOT_CAUSE = re.compile(r"^\s*(?:[-*]\s+)?ROOT-CAUSE\s+work=(?P<work>\S+)\s+round=(?P<round>\d+):\s*\S",
@@ -91,13 +91,9 @@ def _journal_target(root: Path, journal_dir: Path) -> Path:
 
 
 def _texts(root: Path, journal_dir: Path) -> list[str]:
-    """Journal shards (root and branch directories) and plans (active and
-    archived): where REVIEW and ROOT-CAUSE lines live."""
-    out: list[str] = []
-    for d in (journal_dir, root / PLANS_ACTIVE):
-        if d.is_dir():
-            out += [f.read_text(encoding="utf-8", errors="replace") for f in sorted(d.rglob("*.md"))]
-    return out
+    """Every file where REVIEW and ROOT-CAUSE lines live — journal shards,
+    plans (active and archived), Spec Kit plans; check_review owns the list."""
+    return [text for _rel, text in record_texts(root, journal_dir=journal_dir) or []]
 
 
 def round_problems(args, root: Path, journal_dir: Path) -> tuple[int, list[str]]:

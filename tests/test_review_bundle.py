@@ -634,3 +634,122 @@ def test_no_merge_base_says_the_refute_check_did_not_run(render, tmp_path, monke
     spec.loader.exec_module(mod)
     monkeypatch.setattr(mod, "_gate_files", lambda root, base: None)
     assert "REFUTE check unavailable" in mod.build(out, "main")
+
+
+# --- one owner for the record homes: Spec Kit plans count, in full and delta
+
+
+def _spec_kit_repo(out):
+    """The widget work planned the Spec Kit way: specs/<dir>/plan.md only."""
+    _seed_repo(out)
+    _git(out, "rm", "-q", ".process-work/plans/2026-07-09-widget.md")
+    spec = out / "specs/001-widget"
+    spec.mkdir(parents=True)
+    (spec / "plan.md").write_text("# Plan\n\ntier: 2\nissue: #9\n\n"
+                                  "REFUTE work=9 round=1: 12 scenarios, 2 findings — fixed\n")
+    _gate_commit(out, "scripts/process/g.py", msg="gate change with a spec kit plan")
+    return spec / "plan.md"
+
+
+def test_a_spec_kit_plan_is_under_review_and_carries_its_refute_line(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _spec_kit_repo(out)
+    t = _run(out, "--base", "main").stdout
+    assert "### specs/001-widget/plan.md" in t and "REFUTE WARNING" not in t
+    assert "### specs/001-widget/plan.md" in _run(out, "--base", "main", "--plan", "001-widget").stdout
+
+
+def test_a_delta_needs_a_new_refute_line_in_a_spec_kit_plan(render, tmp_path):
+    # the delta pre-state read only the plan folder: the old round=1 line of a
+    # Spec Kit plan passed as new
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    plan = _spec_kit_repo(out)
+    reviewed = _git(out, "rev-parse", "HEAD").stdout.strip()
+    _gate_commit(out, "scripts/process/g.py", "x = 2\n", "fix round")
+    t = _run(out, "--base", "main", "--since", reviewed).stdout
+    assert "**REFUTE WARNING:** this delta" in t and "specs/001-widget/plan.md carries no new" in t
+    plan.write_text(plan.read_text() + "REFUTE work=9 round=2: 6 scenarios, 0 findings\n")
+    _git(out, "commit", "-q", "-am", "refute of the fix")
+    assert "REFUTE WARNING" not in _run(out, "--base", "main", "--since", reviewed).stdout
+
+
+def test_stacked_plans_of_one_issue_do_not_cancel_each_others_new_round(render, tmp_path):
+    # the earlier self of a plan is found by identity (path or rename), not by
+    # a work id another plan shares
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    plans = out / ".process-work/plans"
+    widget = plans / "2026-07-09-widget.md"
+    widget.write_text(widget.read_text() + "\nREFUTE work=9 round=1: 12 scenarios, 2 findings — fixed\n")
+    other = plans / "2026-07-10-other.md"
+    other.write_text("# Other\n\ntier: 2\nissue: #9\n\nThe second slice of the same issue.\n")
+    _gate_commit(out, "scripts/process/g.py")
+    reviewed = _git(out, "rev-parse", "HEAD").stdout.strip()
+    _gate_commit(out, "scripts/process/g.py", "x = 2\n", "fix round")
+    widget.write_text(widget.read_text() + "REFUTE work=9 round=2: 6 scenarios, 0 findings\n")
+    _git(out, "commit", "-q", "-am", "refute of the fix, first plan")
+    t = _run(out, "--base", "main", "--since", reviewed).stdout
+    assert "**REFUTE WARNING:**" in t and "2026-07-10-other.md carries" in t
+    other.write_text(other.read_text() + "\nREFUTE work=9 round=1: 5 scenarios, 0 findings\n")
+    _git(out, "commit", "-q", "-am", "refute of the fix, second plan")
+    assert "REFUTE WARNING" not in _run(out, "--base", "main", "--since", reviewed).stdout
+
+
+def test_a_renamed_and_rewritten_plan_does_not_turn_its_old_line_new(render, tmp_path):
+    # past git's rename threshold the old plan is gone, not renamed: its work
+    # ids still find it
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    plans = out / ".process-work/plans"
+    plan = plans / "2026-07-09-widget.md"
+    plan.write_text(plan.read_text() + "\nREFUTE work=9 round=1: 12 scenarios, 2 findings — fixed\n")
+    _gate_commit(out, "scripts/process/g.py")
+    reviewed = _git(out, "rev-parse", "HEAD").stdout.strip()
+    _gate_commit(out, "scripts/process/g.py", "x = 2\n", "fix round")
+    _git(out, "rm", "-q", str(plan))
+    (plans / "2026-07-12-widget-v2.md").write_text(
+        "# A rewritten plan\n\ntier: 2\nissue: #9\n\n" + "".join(f"- step {i}\n" for i in range(40))
+        + "\nREFUTE work=9 round=1: 12 scenarios, 2 findings — fixed\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "rewrite the plan")
+    assert "**REFUTE WARNING:** this delta" in _run(out, "--base", "main", "--since", reviewed).stdout
+
+
+def test_an_inline_comment_opener_in_prose_does_not_hide_a_real_line(render, tmp_path):
+    # CommonMark: an unclosed `<!--` hides the rest only when it starts a line
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    _gate_commit(out, "scripts/process/g.py")
+    plan = out / ".process-work/plans/2026-07-09-widget.md"
+    base = plan.read_text()
+    line = "REFUTE work=9 round=1: 4 scenarios, 0 findings\n"
+    for prose in ("\nWrite <!-- to start a comment.\n\n" + line,
+                  "\nWrite `<!--` to start a comment.\n\n" + line + "\n<!-- a closed note -->\n",
+                  "\nA closed <!-- aside --> comment in running text.\n\n" + line):
+        plan.write_text(base + prose)
+        _git(out, "commit", "-q", "-am", "plan")
+        assert "REFUTE WARNING" not in _run(out, "--base", "main").stdout, prose
+    # a comment closed later in the same paragraph still hides what it spans
+    plan.write_text(base + "\nNote <!-- hidden\n" + line + "--> end.\n")
+    _git(out, "commit", "-q", "-am", "plan")
+    assert "**REFUTE WARNING:**" in _run(out, "--base", "main").stdout
+
+
+def test_a_delta_finds_the_previous_report_by_its_header(render, tmp_path):
+    # the documented report names its work in the header (`work: #N`); its
+    # file name carries the review's own slug
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    previous = _git(out, "rev-parse", "HEAD").stdout.strip()
+    reports = out / ".process-work/reviews"
+    reports.mkdir(parents=True)
+    (reports / "2026-07-10-round-one.md").write_text(
+        "review: round-one\nwork: #9\npublish-waived: local\n\n## Findings\nFINDING prior finding\n")
+    (reports / "2026-07-11-round-one-elsewhere.md").write_text(
+        "review: round-one-elsewhere\nwork: #10\n\n## Findings\nFINDING stranger's finding\n")
+    (out / "widget.py").write_text("def widget():\n    return 43\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "fix: widget")
+    text = _run(out, "--base", "main", "--since", previous).stdout
+    findings = text.split("## Findings from the previous round", 1)[1].split("## Diff under review", 1)[0]
+    assert "FINDING prior finding" in findings and "stranger" not in findings
