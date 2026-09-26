@@ -769,3 +769,68 @@ def test_a_headless_pass_does_not_count_once_the_work_has_a_head_pass(render, tm
     _git(out, "checkout", "-q", "main")
     c = next(c for c in json.loads(_train(out, "plan", "--json").stdout)["candidates"] if c["branch"] == "46-work")
     assert not c["eligible"], c
+
+
+# --- a merge finishes its work: plans archived, issues closed ---
+
+def _active_plan_branch(out, name, *, issue, tier=2, reviewed=True, extra=""):
+    _git(out, "checkout", "-q", "-b", name, "main")
+    (out / "src").mkdir(exist_ok=True)
+    (out / f"src/{name}.py").write_text("x = 1\n")
+    plans = out / ".process-work/plans"
+    plans.mkdir(parents=True, exist_ok=True)
+    (plans / f"2026-09-20-{name}.md").write_text(f"# {name}\n\ntier: {tier}\nissue: #{issue}\n{extra}\n## Decisions\n")
+    if reviewed:
+        j = out / ".process-work/journal"
+        j.mkdir(parents=True, exist_ok=True)
+        (j / f"2026-09-20-{name}.md").write_text(
+            f"REVIEW work={name} tier={tier} reviewer=fresh model=cross "
+            f"independence=bundle,non-implementing verdict=pass round=1\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", f"feat: {name}")
+    _git(out, "checkout", "-q", "main")
+
+
+def test_a_train_merge_archives_the_cleared_plan_and_closes_its_issue(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _active_plan_branch(out, "7-done", issue=7)
+    _active_plan_branch(out, "8-open", issue=8, reviewed=False)
+    _active_plan_branch(out, "9-multi", issue=9, extra="plan-stays-active: second merge follows\n")
+    train = _load_train(out)
+    wt, _branch_name, merged, _dropped = train.build_train(out, "main", ["7-done", "8-open", "9-multi"], "t1",
+                                                           lambda _m: None)
+    try:
+        assert merged == ["7-done", "8-open", "9-multi"]
+        log = _git(wt, "log", "--format=%B%x00", "main..HEAD").stdout
+        assert "Closes #7" in log and "#8" not in log and "#9" not in log
+        assert (wt / ".process-work/plans/archive/2026-09-20-7-done.md").is_file()
+        assert not (wt / ".process-work/plans/2026-09-20-7-done.md").exists()
+        assert (wt / ".process-work/plans/2026-09-20-8-open.md").is_file()   # not cleared: stays active
+        assert (wt / ".process-work/plans/2026-09-20-9-multi.md").is_file()  # says it stays
+        # the chain stays merges only: the archive lives inside the merge commit
+        assert _git(wt, "rev-list", "--first-parent", "--no-merges", "main..HEAD").stdout.strip() == ""
+    finally:
+        _git(out, "worktree", "remove", "--force", str(wt))
+
+
+def test_a_train_merge_leaves_another_works_plan_alone(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    plans = out / ".process-work/plans"
+    plans.mkdir(parents=True, exist_ok=True)
+    (plans / "2026-09-01-older.md").write_text("# older\n\ntier: 1\nissue: #3\n\n## Decisions\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "an older plan on main")
+    _git(out, "checkout", "-q", "-b", "10-touch", "main")
+    (plans / "2026-09-01-older.md").write_text("# older\n\ntier: 1\nissue: #3\n\n## Decisions\n- a note\n")
+    _git(out, "commit", "-q", "-am", "touch the older plan")
+    _git(out, "checkout", "-q", "main")
+    train = _load_train(out)
+    wt, _b, merged, _d = train.build_train(out, "main", ["10-touch"], "t2", lambda _m: None)
+    try:
+        assert merged == ["10-touch"]
+        assert (wt / ".process-work/plans/2026-09-01-older.md").is_file()
+        assert "Closes" not in _git(wt, "log", "-1", "--format=%B").stdout
+    finally:
+        _git(out, "worktree", "remove", "--force", str(wt))
