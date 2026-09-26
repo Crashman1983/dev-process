@@ -51,6 +51,7 @@ import argparse
 import datetime as _dt
 import json
 import os
+import posixpath
 import re
 import shlex
 import shutil
@@ -58,7 +59,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import NamedTuple
+from typing import Callable, NamedTuple
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling imports
@@ -335,21 +336,31 @@ def plan(root: Path, *, min_candidates: int, max_wait_hours: float) -> dict:
 # --- the run -------------------------------------------------------------------------------
 
 # A suite run is judged by ONE rule, `decide`, over facts `read_facts` takes
-# from the command and the run's output. "undefined" — the suite does not
-# exist on this tree (a passenger introduces the make target or the script) —
-# makes the tree *not comparable*: never red, nobody blamed. Every other
-# failure is red. The rule was patched once per case downstream; each case is
-# now a row of `decide` and a row of its table test (tests/test_train.py).
-# Only the suite's own signals count: the stop lines of the suite's OWN make —
-# the level right below the one the train runs at (`make train` puts the train
-# at MAKELEVEL 1, so the suite's make prints `make[1]:`; run bare, `make:`) —
-# and the train's own `sh` saying a first word of the suite command is not
-# found. A deeper make, or a "not found" printed by a test that shells out,
-# is red. Known limit: this reads text — a test printing make's exact stop
-# line, or a nested make with MAKELEVEL cleared, can read undefined; the train
-# then aborts or excuses a prefix, it never merges on it. A translated make (a
-# non-English locale) is not recognised and reads red — run the train with
-# LC_ALL=C if a passenger introduces the suite.
+# from the command, the run's output and the tree. "undefined" — the suite
+# does not exist on this tree (a passenger introduces the make target or the
+# script) — makes the tree *not comparable*: never red, nobody blamed. Every
+# other failure is red. The rule was patched once per case downstream; each
+# case is now a row of `decide` and a row of its table test
+# (tests/test_train.py). Only the suite's own signals count: the stop lines of
+# the suite's OWN make — the level right below the one the train runs at
+# (`make train` puts the train at MAKELEVEL 1, so the suite's make prints
+# `make[1]:`; run bare, `make:`) —, the train's own `sh` saying a command of
+# the suite is not found, and the suite's own entry file missing from the
+# tree. A deeper make, or a "not found" printed by a test that shells out, is
+# red. `_run_batch` checks the base when a combined tree reads undefined: a
+# base that HAS the suite makes that undefined a passenger's removal — red.
+# Known limits, each read red (fail closed) unless said otherwise: a
+# translated make (run the train with LC_ALL=C if a passenger introduces the
+# suite); output redirected away from the train (`make test > log`); a
+# target spelled through the shell (`make test-${X}`); a suite behind `;` or
+# `||` (only the start of the command and what follows `&&` is the suite's
+# own command); `python -m pytest tests/new` (a missing path is a tool's
+# argument, not the suite's file). `make nope test` stops before `test` runs:
+# undefined, as the suite as written does not exist. A pipe masks the exit
+# code (`make test | tee log` is green if tee is) — the command's business.
+# This reads text: a test printing make's exact stop line, or a nested make
+# with MAKELEVEL cleared, can read undefined; the train then aborts or excuses
+# a prefix, it never merges on it.
 
 # make options that take their value as the next word
 _MAKE_VALUE_OPTS = {"-C", "-f", "-I", "-o", "-W", "--directory", "--file", "--makefile", "--include-dir",
@@ -357,8 +368,11 @@ _MAKE_VALUE_OPTS = {"-C", "-f", "-I", "-o", "-W", "--directory", "--file", "--ma
                     "-l", "--load-average", "-E", "--eval"}
 _SHELL_PUNCT = set("();<>|&")
 _ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
-# a line that can carry a fact: make's `***` lines, make's include line, sh's "not found"
+# a line that can carry a fact: make's `***` lines, make's include line, "not found"
 _FACT_LINE = re.compile(r"\*\*\* |: No such file or directory$|: (?:command )?not found$")
+# a line that makes a run red whatever follows: kept without a cap
+_RED_LINE = re.compile(r"\*\*\* \[|\*\*\* Waiting for unfinished jobs|, needed by ")
+_INTERPRETERS = re.compile(r"^(?:sh|bash|dash|zsh|ksh|python[0-9.]*|node|ruby|perl)$")
 
 
 class SuiteFacts(NamedTuple):
@@ -367,12 +381,13 @@ class SuiteFacts(NamedTuple):
     over every make call of the command."""
     rc: int                                    # the command's exit code
     targets: frozenset = frozenset()           # what the command asks make for (empty: no make call it can read)
-    words: frozenset = frozenset()             # the command's own first words (`./scripts/x.sh`, `make`, `uv`)
+    words: frozenset = frozenset()             # first words of the suite's own commands, not files in the tree
     recipe_failed: bool = False                # `make: *** [file:N: target] Error n`: a defined target failed
     needed_by: bool = False                    # `No rule to make target 'x', needed by 'y'`: a missing prerequisite
     no_rule: frozenset = frozenset()           # `No rule to make target 'T'.`: names make has no rule for
     missing_includes: frozenset = frozenset()  # `Makefile:N: x: No such file or directory`: make's include line
     not_found: frozenset = frozenset()         # the train's `sh: 1: w: not found`: words the shell did not find
+    absent: frozenset = frozenset()            # the suite's entry file or directory, missing from the tree
 
 
 def decide(f: SuiteFacts) -> tuple[str, str]:
@@ -389,10 +404,13 @@ def decide(f: SuiteFacts) -> tuple[str, str]:
     # make names the include it cannot find first — also one named like the target
     if f.no_rule & f.missing_includes:
         return "red", "a missing include"
+    # the script, makefile or directory the suite starts with is not on this tree
+    if f.absent:
+        return "undefined", "the suite's own file is not on this tree"
     # every stop is for a target the suite command names: its make target is not here
     if f.rc == 2 and f.no_rule and f.no_rule <= f.targets:
         return "undefined", "no rule for a target the suite command names"
-    # the suite command's own first word (a script a passenger introduces) is not here
+    # the suite's own command is not found (and is no file in the tree: that one is broken)
     if f.rc == 127 and f.not_found & f.words:
         return "undefined", "the suite command itself is not found"
     if f.rc == 127:
@@ -400,30 +418,74 @@ def decide(f: SuiteFacts) -> tuple[str, str]:
     return "red", f"exit {f.rc}"
 
 
-def _simple_commands(cmd: str) -> list[list[str]]:
-    """The command's simple commands as word lists — `(cd x && make t) > log`
-    is `[["cd", "x"], ["make", "t"]]`; a redirection's target is no word.
-    Empty when the shell words cannot be read."""
+def _without_substitutions(cmd: str) -> str:
+    """`$(…)`, `$((…))` and backticks become the word `0`: their parentheses
+    do not split the command (`make -j$(nproc) test` is one make call)."""
+    out: list[str] = []
+    i, single, double = 0, False, False
+    while i < len(cmd):
+        c = cmd[i]
+        if single:
+            single = c != "'"
+        elif c == "\\":
+            out.append(cmd[i:i + 2])
+            i += 2
+            continue
+        elif c == "'" and not double:
+            single = True
+        elif c == '"':
+            double = not double
+        elif cmd.startswith("$(", i) or c == "`":
+            j, depth = i + (2 if c == "$" else 1), 1
+            while j < len(cmd) and depth:
+                if c == "`":
+                    depth = 0 if cmd[j] == "`" else 1
+                else:
+                    depth += {"(": 1, ")": -1}.get(cmd[j], 0)
+                j += 1
+            out.append("0")
+            i = j
+            continue
+        out.append(c)
+        i += 1
+    return "".join(out)
+
+
+def _simple_commands(cmd: str) -> list[tuple[str, list[str]]]:
+    """The command's simple commands as (operator before it, words) —
+    `(cd x && make t) > log` is `[("", ["cd", "x"]), ("&&", ["make", "t"])]`;
+    a redirection's target is no word. Empty when the words cannot be read."""
     try:
-        lex = shlex.shlex(cmd, posix=True, punctuation_chars=True)
+        lex = shlex.shlex(_without_substitutions(cmd), posix=True, punctuation_chars=True)
         lex.whitespace_split = True
         tokens = list(lex)
     except ValueError:
         return []
-    out: list[list[str]] = [[]]
+    out: list[tuple[str, list[str]]] = []
+    cur: list[str] = []
+    sep = pending = ""
     redirect = False
     for w in tokens:
         if set(w) <= _SHELL_PUNCT:  # an operator, a subshell, a redirection
-            if "<" in w or ">" in w:
+            op = w.replace("(", "").replace(")", "")
+            is_redirect = "<" in op or ">" in op
+            if cur and ((op and not is_redirect) or op != w):
+                out.append((sep, cur))
+                cur = []
+            if is_redirect:
                 redirect = True
-            elif out[-1]:
-                out.append([])
+            elif op:
+                pending = op
             continue
         if redirect:
             redirect = False
             continue
-        out[-1].append(w)
-    return [c for c in out if c]
+        if not cur:
+            sep, pending = pending, ""
+        cur.append(w)
+    if cur:
+        out.append((sep, cur))
+    return out
 
 
 def _make_targets(words: list[str]) -> set[str]:
@@ -448,29 +510,144 @@ def _make_targets(words: list[str]) -> set[str]:
     return targets
 
 
-def read_facts(cmd: str, rc: int, lines: list[str], makelevel: str = "0") -> SuiteFacts:
-    """The facts of one run from the command, its exit code, its output lines
-    and the MAKELEVEL the train runs at."""
+def _entry_files(words: list[str]) -> list[str]:
+    """The files one command starts from, as written: the script
+    (`./scripts/x.sh`, `sh scripts/x.sh`, `python3 x.py`, `uv run x.py`, behind
+    `timeout 600`, `nice`, `env`, `exec`, `command`, `time`, `nohup`), or
+    make's `-C dir` and `-f file`. Empty for a bare command (`pytest`)."""
+    i = 0
+    while i < len(words) and _ASSIGNMENT.match(words[i]):
+        i += 1
+
+    def skip_options(i: int, valued: set[str]) -> int:
+        while i < len(words) and words[i].startswith("-") and words[i] != "-":
+            i += 2 if words[i] in valued else 1
+        return i
+
+    while i < len(words):
+        w, name = words[i], Path(words[i]).name
+        if name == "timeout":
+            i = skip_options(i + 1, {"-s", "-k", "--signal", "--kill-after"}) + 1  # and the duration
+        elif name == "nice":
+            i = skip_options(i + 1, {"-n", "--adjustment"})
+        elif name == "env":
+            i = skip_options(i + 1, {"-u", "--unset", "-C", "--chdir", "-S", "--split-string"})
+            while i < len(words) and _ASSIGNMENT.match(words[i]):
+                i += 1
+        elif name in ("exec", "command", "time", "nohup"):
+            i = skip_options(i + 1, set())
+        elif name == "uv" and words[i + 1:i + 2] == ["run"]:
+            i = skip_options(i + 2, {"--with", "--python", "-p", "--project", "--directory", "--package",
+                                     "--extra", "--group", "--env-file", "--with-requirements"})
+        elif name in ("make", "gmake"):
+            files, d, j = [], "", i + 1
+            while j < len(words):
+                opt = words[j]
+                val = words[j + 1] if j + 1 < len(words) else ""
+                if opt in ("-C", "--directory"):
+                    d = posixpath.join(d, val)
+                    files.append(d)
+                elif opt in ("-f", "--file", "--makefile"):
+                    files.append(posixpath.join(d, val))
+                elif opt.startswith("-C") and len(opt) > 2:
+                    d = posixpath.join(d, opt[2:])
+                    files.append(d)
+                    val = None
+                elif opt.startswith("-f") and len(opt) > 2 and not opt.startswith("--"):
+                    files.append(posixpath.join(d, opt[2:]))
+                    val = None
+                else:
+                    val = None
+                j += 1 if val is None else 2
+            return files
+        elif _INTERPRETERS.match(name):
+            start = i + 1
+            i = skip_options(start, {"-W", "-X", "-o", "+o"})
+            # a program text (`sh -c`, `sh -ec`) or a module (`python -m`): no file
+            if any(o[:2] != "--" and ("c" in o or "m" in o) for o in words[start:i] if o.startswith("-")):
+                return []
+            return words[i:i + 1]
+        else:
+            return [w] if "/" in w else []
+    return []
+
+
+def _in_tree(base: str, path: str) -> str | None:
+    """`path` relative to the tree, or None when it is none of the tree's
+    (absolute, `~`, `$VAR`, outside)."""
+    if not path or path[0] in "/~$":
+        return None
+    p = posixpath.normpath(posixpath.join(base, path))
+    return None if p == ".." or p.startswith("../") else p
+
+
+def read_facts(cmd: str, rc: int, lines: list[str], makelevel: str = "0",
+               exists: Callable[[str], bool] | None = None) -> SuiteFacts:
+    """The facts of one run from the command, its exit code, its output lines,
+    the MAKELEVEL the train runs at and the tree (`exists` answers for a path
+    relative to it; None: the tree is not asked)."""
     commands = _simple_commands(cmd)
-    targets: set[str] = set().union(*(_make_targets(c) for c in commands))
-    words = {next((w for w in c if not _ASSIGNMENT.match(w)), "") for c in commands} - {""}
+    targets: set[str] = set().union(*(_make_targets(c) for _sep, c in commands))
+    # the suite's own commands: the start and whatever follows `&&` — behind
+    # `;` or `||` an earlier failure is hidden, a missing fallback proves nothing
+    own: list[tuple[str, list[str]]] = []
+    for sep, c in commands:
+        if sep not in ("", "&&"):
+            break
+        own.append((sep, c))
+    is_file = exists or (lambda _p: False)
+    words, absent, base = set(), set(), ""
+    for _sep, c in own:
+        first = next((w for w in c if not _ASSIGNMENT.match(w)), "")
+        rel = _in_tree(base, first) if "/" in first else None
+        if first and not (rel and is_file(rel)):
+            words.add(first)
+        if first == "cd" and len(c) > 1:
+            d = _in_tree(base, c[c.index("cd") + 1])
+            if d is None:
+                break
+            base = d
+    # the file the suite starts from: only where nothing else could have run —
+    # a single chain of `&&` (an absent first file stops it)
+    if exists is not None and own == commands:
+        base = ""
+        for _sep, c in own:
+            first = next((w for w in c if not _ASSIGNMENT.match(w)), "")
+            if first == "cd":
+                d = _in_tree(base, c[c.index("cd") + 1]) if len(c) > c.index("cd") + 1 else None
+                if d is None:
+                    break
+                if not exists(d):
+                    absent.add(d)
+                    break
+                base = d
+                continue
+            for f in _entry_files(c):
+                p = _in_tree(base, f)
+                if p is not None and not exists(p):
+                    absent.add(p)
+            break
     level = makelevel if makelevel.isascii() and makelevel.isdigit() else "0"
-    stop = "^g?make" + ("" if int(level) == 0 else rf"\[{int(level)}\]") + r": \*\*\* "
+    # make's marker is found anywhere in a line: a recipe's output without a
+    # final newline, or -j progress dots, run into it (`FAILEDmake: *** [...]`)
+    mark = "g?make" + ("" if int(level) == 0 else rf"\[{int(level)}\]") + r": \*\*\* "
     text = "\n".join(lines)
     # GNU make 3.81 quotes `x', make under -k omits "Stop."
-    no_rule = re.compile(stop + r"No rule to make target [`'](.+)'\.(?:\s+Stop\.)?$", re.MULTILINE)
-    needed = re.compile(stop + r"No rule to make target [`'].*', needed by [`'].*'\.(?:\s+Stop\.)?$", re.MULTILINE)
+    no_rule = re.compile(mark + r"No rule to make target [`'](.+)'\.(?:\s+Stop\.)?$", re.MULTILINE)
+    needed = re.compile(mark + r"No rule to make target [`'].*', needed by [`'].*'\.(?:\s+Stop\.)?$", re.MULTILINE)
     return SuiteFacts(
         rc=rc,
         targets=frozenset(targets),
         words=frozenset(words),
-        # 4.x `[Makefile:2: test] Error 1`, 3.81 `[test] Error 1`, a signal `[…] Killed`
-        recipe_failed=bool(re.search(stop + r"\[.+\] \S", text, re.MULTILINE)),
+        # 4.x `[Makefile:2: test] Error 1`, 3.81 `[test] Error 1`, a signal `[…] Killed`;
+        # -j prints "Waiting for unfinished jobs" once a job failed
+        recipe_failed=bool(re.search(mark + r"(?:\[.+\] \S|Waiting for unfinished jobs)", text)),
         needed_by=bool(needed.search(text)),
         no_rule=frozenset(m.group(1) for m in no_rule.finditer(text) if not needed.match(m.group(0))),
         missing_includes=frozenset(re.findall(r"(?m)^[^\s:]+:\d+: (.+): No such file or directory$", text)),
         not_found=frozenset(re.findall(
             r"(?m)^sh: (?:line )?\d+: (.+): (?:not found|command not found|No such file or directory)$", text)),
+        absent=frozenset(absent),
     )
 
 
@@ -482,20 +659,37 @@ def _load() -> str:
     return f"load {one:.1f} on {os.cpu_count() or '?'} CPUs"
 
 
+def _echo(text: str, end: str = "\n") -> None:
+    """Print what the suite prints, also where stdout cannot encode it (an
+    ASCII terminal and a `€` in a test name): replaced, never a traceback."""
+    try:
+        print(text, end=end, flush=True)
+    except UnicodeEncodeError:
+        enc = getattr(sys.stdout, "encoding", None) or "ascii"
+        print(text.encode(enc, "replace").decode(enc), end=end, flush=True)
+
+
 def _sh(cwd: Path, cmd: str, log) -> str:
     """Run cmd, streaming its output; "green", "red" or "undefined" (the
     command or make target does not exist on this tree) — `decide`'s verdict."""
-    print(f"train: $ {cmd}", flush=True)
-    kept: list[str] = []  # the lines that can carry a fact, over the whole run
+    _echo(f"train: $ {cmd}")
+    # the lines that can carry a fact, over the whole run: those that make a
+    # run red whatever follows without a cap, the others the last 400
+    red: dict[str, None] = {}
+    kept: list[str] = []
     proc = subprocess.Popen(["sh", "-c", cmd], cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                             text=True, errors="replace")
     assert proc.stdout is not None
     for line in proc.stdout:
-        print(line, end="", flush=True)
-        if _FACT_LINE.search(line.rstrip("\n")):
-            kept = (kept + [line.rstrip("\n")])[-400:]
+        _echo(line, end="")
+        line = line.rstrip("\n")
+        if _RED_LINE.search(line):
+            red[line] = None
+        elif _FACT_LINE.search(line):
+            kept = (kept + [line])[-400:]
     rc = proc.wait()
-    state, why = decide(read_facts(cmd, rc, kept, os.environ.get("MAKELEVEL", "0")))
+    state, why = decide(read_facts(cmd, rc, [*red, *kept], os.environ.get("MAKELEVEL", "0"),
+                                   lambda p: (cwd / p).exists()))
     log(f"$ {cmd} → exit {rc} ({state}{'' if rc == 0 else ' — ' + why + ', ' + _load()})")
     return state
 
@@ -736,21 +930,38 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
             print(f"train: {b} was dropped as the offender — its worker owes a fix (report: blocked)")
             _write(root, "blocked", f"dropped from train {stamp}: red with it aboard", b)
 
-    base_checked = retried = False
+    base_state = ""  # the base's verdict, checked once ("": not yet)
+    retried = told = False
+
+    def check_base() -> str:
+        nonlocal base_state
+        if not base_state:
+            base_state = attempt([])[0]
+        return base_state
+
     while aboard:
         state, merged, branch = attempt(aboard)
         aboard = merged
         if state == "green" or not aboard:
             break
         if state == "undefined":
-            print(f"train: the suite `{suite}` does not exist on the combined tree — fix --suite; "
-                  "nothing merged", file=sys.stderr)
-            log("suite undefined on the combined tree — aborted without blame")
-            # an offender dropped earlier may have been the one that brought
-            # the suite in: it still owes its fix, say so (downstream refutation)
-            _report_dropped()
-            _cleanup(root, stamp)
-            return 1
+            if check_base() == "undefined":
+                print(f"train: the suite `{suite}` does not exist on the combined tree — fix --suite; "
+                      "nothing merged", file=sys.stderr)
+                log("suite undefined on the combined tree and on the base — aborted without blame")
+                # an offender dropped earlier may have been the one that brought
+                # the suite in: it still owes its fix, say so (downstream refutation)
+                _report_dropped()
+                _cleanup(root, stamp)
+                return 1
+            # the base HAS the suite: a passenger removed or broke it (deleted
+            # the make target, a script with CRLF line ends) — red, and no
+            # flake re-run: a missing suite is not flaky (downstream refutation)
+            log(f"suite undefined on the combined tree but defined on the base ({base_state}) — "
+                "a passenger removed or broke it: red")
+            print(f"train: `{suite}` exists on the base but not on the combined tree — a passenger "
+                  "removed or broke it; searching for it")
+            retried = True
         if not retried:
             # one more run of the SAME tree before anybody is blamed: red then
             # green on identical code is a flaky test (observed downstream: a
@@ -765,25 +976,23 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
                       f"merging, but the suite has a flaky test (see {logfile}; {_load()})", file=sys.stderr)
                 log("red then green on the identical tree — flaky suite, merging")
                 break
-        if not base_checked:
-            # before blaming anybody: is the base itself red (a broken main)?
-            # Then no candidate is the offender.
-            base_checked = True
-            base_state = attempt([])[0]
-            if base_state == "red":
-                print("train: the combined tree is red twice and the base is red too — the "
-                      "integration branch itself is red (gates or suite fail with nobody aboard); "
-                      "no candidate blamed, "
-                      "nothing merged — fix main first", file=sys.stderr)
-                log("base red and combined red on retry — aborted without blame")
-                _cleanup(root, stamp)
-                return 1
-            if base_state == "undefined":
-                # a passenger introduces the suite (its make target): the base
-                # cannot be judged by it — that is not a red main
-                log("suite undefined on the base (a passenger introduces it) — base not comparable")
-                print(f"train: `{suite}` does not exist on the base — a passenger introduces it; "
-                      "the base is not judged red, the offender search continues")
+        # before blaming anybody: is the base itself red (a broken main)?
+        # Then no candidate is the offender.
+        if check_base() == "red":
+            print("train: the combined tree is red and the base is red too — the "
+                  "integration branch itself is red (gates or suite fail with nobody aboard); "
+                  "no candidate blamed, "
+                  "nothing merged — fix main first", file=sys.stderr)
+            log("base red and combined red — aborted without blame")
+            _cleanup(root, stamp)
+            return 1
+        if base_state == "undefined" and not told:
+            # a passenger introduces the suite (its make target): the base
+            # cannot be judged by it — that is not a red main
+            told = True
+            log("suite undefined on the base (a passenger introduces it) — base not comparable")
+            print(f"train: `{suite}` does not exist on the base — a passenger introduces it; "
+                  "the base is not judged red, the offender search continues")
         # the combination is red: find the first candidate whose prefix turns
         # it red (bisection over prefixes — O(log n) suite runs per offender),
         # drop it, and try the rest. Order is boarding order, so "first red
@@ -793,8 +1002,10 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
             mid = (lo + hi) // 2
             pstate, pmerged, _br = attempt(aboard[:mid])
             # a prefix without the passenger that defines the suite cannot be
-            # judged by it — it is not the offender
-            if pstate in ("green", "undefined") and len(pmerged) == mid:
+            # judged by it — it is not the offender; where the base has the
+            # suite, a prefix without it lost it: red
+            if (pstate == "green" or (pstate == "undefined" and base_state == "undefined")) \
+                    and len(pmerged) == mid:
                 lo = mid + 1
             else:
                 hi = mid

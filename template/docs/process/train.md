@@ -76,18 +76,34 @@ the test lanes are free where the project has a lane script (see `tower.md`, lan
    offender; it is dropped, gets a `blocked` report, and the rest is
    rebuilt. A suite that does not exist on a tree — a passenger introduces
    it — makes that tree *not comparable*, never red: the base is not called
-   red, a prefix is not blamed. One rule decides (`decide()` in `train.py`,
-   one table row per case), first row that applies: exit 0 is green; any
-   make call of the suite failing on a defined target (`*** [file:N:
-   target] Error n`) is red, even when a later call finds no rule; a
-   missing prerequisite (`…, needed by …`) or a missing include is red;
-   every `No rule to make target` stop naming a target the suite command
-   itself names (exit 2) is undefined; exit 127 is undefined only when the
-   train's shell did not find the suite command's own first word (a script a
-   passenger introduces, `sh: 1: ./scripts/x.sh: not found`) — a tool
-   missing inside the suite is red; anything else is red. Only the suite's
-   own make level counts (`make:` run bare, `make[1]:` under `make train`);
-   a translated make reads red — run the train with `LC_ALL=C`. Every red verdict logs the load average — a timeout under
+   red, a prefix is not blamed. A combined tree that reads undefined has the
+   base checked: a base that HAS the suite makes it a passenger's removal
+   (a deleted make target, a broken script) — red, and the search blames
+   whoever loses it; a base without it aborts ("fix --suite"). One rule
+   decides (`decide()` in `train.py`, one table row per case), first row
+   that applies: exit 0 is green; any make call of the suite failing on a
+   defined target (`*** [file:N: target] Error n`, also run into output
+   without a final newline, or make's "Waiting for unfinished jobs") is
+   red, even when a later call finds no rule; a missing prerequisite
+   (`…, needed by …`) or a missing include is red; the suite's own entry
+   file missing from the tree is undefined — the script it starts with
+   (run by its path, or by `sh`, `bash`, `python3`, `uv run`, also
+   behind `timeout`, `nice`, `env`, `exec`, `command`), make's `-C dir` or
+   `-f file`, or a `cd dir &&` in front — when the command is one `&&`
+   chain; every `No rule to make target` stop naming a target the suite
+   command itself names (exit 2) is undefined; exit 127 is undefined only
+   when the train's shell did not find a command of the suite's own `&&`
+   chain that is no file in the tree (a script that is there but broken —
+   CRLF line ends, a missing interpreter — is red); a tool missing inside
+   the suite is red; anything else is red. Only the suite's own make level
+   counts (`make:` run bare, `make[1]:` under `make train`). Read red on
+   purpose: a translated make (run the train with `LC_ALL=C`), output
+   redirected away from the train (`make test > log`), a target spelled
+   through the shell (`make test-${X}`), a missing file behind `;` or `||`
+   (an earlier failure may hide there), `python -m pytest tests/new` (the
+   path is the tool's argument, not the suite's file). `make nope test`
+   stops before `test` runs and reads undefined; a pipe hides the exit
+   code (`make test | tee log` is green when `tee` is). Every red verdict logs the load average — a timeout under
    load 10 on 6 CPUs is a different finding from a broken test. A
    candidate dropped for a merge conflict is reported `blocked` too, with
    "rebase" as the reason.
