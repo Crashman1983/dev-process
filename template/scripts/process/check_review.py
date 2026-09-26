@@ -624,34 +624,45 @@ def paths_in_flight(root: Path) -> set[str]:
 BOOKKEEPING = ".process-work/"
 
 
+REMOTE_INTEGRATION_REFS = ("origin/main", "origin/master")
+
+
 def _integration_ref(root: Path, tip: str = "HEAD") -> str | None:
     """The integration branch as it stands BEFORE this push. A ref that already
     contains HEAD cannot be that — pushing local `main` without an
     `origin/main` would otherwise exclude everything (downstream refutation);
-    then there is no base, and the check stays conservative."""
-    valid = []
-    for ref in INTEGRATION_REFS:
+    then there is no base, and the check stays conservative.
+
+    The remote ref is the authority. A local main ahead of it counts only
+    when all it adds are merges on its first-parent chain — a train that
+    merged but has not pushed yet; measured against the stale origin, those
+    passengers would read as unreviewed. Anything else a local main carries
+    (a commit made on main by mistake, a `master` pointed at unreviewed work)
+    is not integrated, and does not hide code (downstream refutation)."""
+    def usable(ref: str) -> bool:
         out = _git_bytes(root, "rev-parse", "--verify", "-q", f"{ref}^{{commit}}")
-        if out is None or not out.strip():
+        return bool(out and out.strip()) and \
+            _git_bytes(root, "merge-base", "--is-ancestor", tip, ref) is None
+    remote = next((r for r in REMOTE_INTEGRATION_REFS if usable(r)), None)
+    for local in (r for r in INTEGRATION_REFS if r not in REMOTE_INTEGRATION_REFS and usable(r)):
+        if remote is None:
+            return local
+        if _git_bytes(root, "merge-base", "--is-ancestor", remote, local) is None:
             continue
-        if _git_bytes(root, "merge-base", "--is-ancestor", tip, ref) is not None:
-            continue
-        valid.append(ref)
-    # the most advanced of them: a local main ahead of origin/main (a train
-    # that merged but has not pushed yet) already carries what it merged —
-    # measured against the stale origin, that would read as unreviewed
-    # (downstream refutation)
-    for ref in valid:
-        if all(_git_bytes(root, "merge-base", "--is-ancestor", other, ref) is not None for other in valid):
-            return ref
-    return valid[0] if valid else None
+        extra = _git_bytes(root, "rev-list", "--first-parent", "--no-merges", local, f"^{remote}")
+        if extra is not None and not extra.strip():
+            return local
+    return remote
 
 
 def _names(out: bytes | None) -> set[str] | None:
     """NUL-separated path names (`-z`): non-ASCII names arrive unquoted."""
     if out is None:
         return None
-    return {n for n in out.decode(errors="replace").split("\0") if n.strip()}
+    # surrogateescape: a name that is not UTF-8 goes back to git byte for
+    # byte; nothing but the empty field is dropped (a name of whitespace is a
+    # name) — downstream refutation
+    return {n for n in out.decode(errors="surrogateescape").split("\0") if n}
 
 
 class History(NamedTuple):
@@ -717,15 +728,20 @@ def _merge_own(root: Path, merge: str) -> set[str] | None:
         return None
     auto = _auto_merge(root, parents[0], parents[1]) if len(parents) == 2 else None
     if auto is None:
-        return _names(_git_bytes(root, "show", "--cc", "--format=", "--name-only", "-z", merge))
+        return _names(_git_bytes(root, "show", "--cc", "--format=", "--name-only",
+                                 "--ignore-submodules=none", "-z", merge))
     tree, conflicted = auto
-    differs = _names(_git_bytes(root, "diff", "--name-only", "--no-renames", "-z", tree, merge))
+    differs = _names(_git_bytes(root, "diff", "--name-only", "--no-renames", "--ignore-submodules=none",
+                                "-z", tree, merge))
     if differs is None:
         return None
     own = set()
     for path in differs:
         result = _blob(root, merge, path)
-        if path in conflicted and result in (_blob(root, p, path) for p in parents):
+        sides = [_blob(root, p, path) for p in parents]
+        if result is None or None in sides:
+            return None
+        if path in conflicted and result in sides:
             continue
         own.add(path)
     return own
@@ -779,8 +795,9 @@ def _history(root: Path, head: str, tip: str = "HEAD") -> History:
                     tips.append(parent)
         if carriers:
             tips = tips[1:]
-    late = _names(_git_bytes(root, "--no-optional-locks", "log", "--no-merges", "--format=",
-                             "--name-only", "--no-renames", "-z", *tips, f"^{head}", *not_integ))
+    late = _names(_git_bytes(root, "--no-optional-locks", "-c", "log.showRoot=true", "log", "--no-merges",
+                             "--format=", "--name-only", "--no-renames", "--ignore-submodules=none", "-z",
+                             *tips, f"^{head}", *not_integ))
     merges_out = _git_bytes(root, "rev-list", "--merges", *tips, f"^{head}", *not_integ)
     if late is None or merges_out is None:
         return error
@@ -817,22 +834,32 @@ def _unreviewed_paths(root: Path, head: str, tip: str = "HEAD") -> set[str] | No
     return set(h.late | h.dropped).union(*(paths for _m, paths in h.fellow))
 
 
+_ABSENT = ""
+
+
 def _blob(root: Path, commit: str, path: str) -> str | None:
-    out = _git_bytes(root, "rev-parse", "--verify", "-q", f"{commit}:{path}")
-    return out.decode(errors="replace").strip() if out else None
+    """The object at `path` in `commit`: its id, `_ABSENT` when the path does
+    not exist there, None when git cannot tell — a failure must never read as
+    "both sides lack the file" (downstream refutation: a non-UTF-8 name made
+    every lookup fail, and any resolution passed as unchanged)."""
+    out = _git_bytes(root, "--literal-pathspecs", "ls-tree", "-z", commit, "--", path)
+    if out is None:
+        return None
+    entry = out.split(b"\0", 1)[0]
+    return entry.split(b"\t", 1)[0].split()[2].decode() if entry else _ABSENT
 
 
 def _auto_merge(root: Path, ours: str, other: str) -> tuple[str, set[str]] | None:
     """What git would have merged on its own: (tree, conflicted paths) — None
     when git cannot tell (an old git without `merge-tree --write-tree`)."""
     try:
-        r = subprocess.run(["git", "-C", str(root), "merge-tree", "--write-tree", "--name-only", "-z",
+        r = subprocess.run(["git", "-C", str(root), "merge-tree", "--write-tree", "--allow-unrelated-histories", "--name-only", "-z",
                             "--no-messages", ours, other], capture_output=True, timeout=60)
     except (OSError, subprocess.TimeoutExpired):
         return None
     if r.returncode not in (0, 1):
         return None
-    fields = [f for f in r.stdout.decode(errors="replace").split("\0") if f.strip()]
+    fields = [f for f in r.stdout.decode(errors="surrogateescape").split("\0") if f]
     if not fields:
         return None
     return fields[0].strip(), set(fields[1:])
@@ -860,7 +887,8 @@ def _dropped_by_merge(root: Path, merge: str, head: str) -> set[str] | None:
     if not ours:
         return set()
     our = ours[0]
-    paths = _names(_git_bytes(root, "diff", "--name-only", "--no-renames", "-z", our, merge))
+    paths = _names(_git_bytes(root, "diff", "--name-only", "--no-renames", "--ignore-submodules=none",
+                              "-z", our, merge))
     if paths is None:
         return None
     dropped: set[str] = set()
@@ -871,9 +899,14 @@ def _dropped_by_merge(root: Path, merge: str, head: str) -> set[str] | None:
         tree, conflicted = auto
         for path in paths:
             result, mine, theirs = _blob(root, merge, path), _blob(root, our, path), _blob(root, other, path)
+            if None in (result, mine, theirs):
+                return None
             if result != theirs or mine == theirs:
                 continue
-            if path in conflicted or result != _blob(root, tree, path):
+            auto_blob = _blob(root, tree, path)
+            if auto_blob is None:
+                return None
+            if path in conflicted or result != auto_blob:
                 dropped.add(path)
     return dropped
 

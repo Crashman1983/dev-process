@@ -418,3 +418,97 @@ def test_decide_table(case, facts, verdict, words):
     mod = _mod()
     got, reason = mod.decide(mod.History(**facts), _H)
     assert got == verdict and words in reason, case
+
+
+# --- refute of the decide() table ---
+
+
+def _raw(root, name: bytes, text: bytes):
+    import os
+    with open(os.path.join(os.fsencode(str(root)), name), "wb") as f:
+        f.write(text)
+
+
+def test_a_non_utf8_name_cannot_take_any_resolution(tmp_path):
+    name = b"lat\xe9.py"
+    for resolution in (b"x=1\nevil()\n", None):  # an evil resolution, and a drop to main's side
+        root = tmp_path / ("r1" if resolution else "r2")
+        root.mkdir()
+        _git(root, "init", "-q", "-b", "main")
+        _git(root, "config", "user.email", "t@t")
+        _git(root, "config", "user.name", "t")
+        _raw(root, name, b"x=0\n")
+        _git(root, "add", "-A")
+        _git(root, "commit", "-q", "-m", "base")
+        _git(root, "checkout", "-q", "-b", "feat")
+        _raw(root, name, b"x=1\n")
+        _git(root, "commit", "-q", "-am", "reviewed")
+        head = _git(root, "rev-parse", "HEAD")
+        _git(root, "checkout", "-q", "main")
+        _raw(root, name, b"x=2\n")
+        _git(root, "commit", "-q", "-am", "main")
+        _git(root, "checkout", "-q", "feat")
+        subprocess.run(["git", "merge", "-q", "--no-edit", "main"], cwd=root, capture_output=True)
+        _raw(root, name, resolution or b"x=2\n")
+        _git(root, "commit", "-q", "-am", "merge")
+        assert _stale(root, head) is not None, resolution
+
+
+def test_a_file_named_only_whitespace_is_code(repo):
+    root, head = repo
+    for name in ("\t", " "):
+        (root / name).write_text("evil\n")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "late")
+    assert _stale(root, head) is not None
+
+
+def test_a_submodule_bump_hidden_by_ignore_all_is_late_code(repo):
+    root, head = repo
+    sha = _git(root, "rev-parse", "HEAD")
+    (root / ".gitmodules").write_text('[submodule "lib"]\n\tpath = vendor/lib\n\turl = ./x\n\tignore = all\n')
+    _git(root, "add", ".gitmodules")
+    _git(root, "update-index", "--add", "--cacheinfo", f"160000,{sha},vendor/lib")
+    _git(root, "commit", "-q", "-m", "add submodule")
+    head = _git(root, "rev-parse", "HEAD")
+    _git(root, "update-index", "--cacheinfo", f"160000,{_git(root, 'rev-parse', 'main')},vendor/lib")
+    _git(root, "commit", "-q", "-m", "bump")
+    found = _stale(root, head)
+    assert found is not None and "vendor/lib" in found
+
+
+def test_a_root_commit_merged_in_counts_whatever_log_showroot_says(repo):
+    root, head = repo
+    _git(root, "config", "log.showRoot", "false")
+    _git(root, "checkout", "-q", "--orphan", "stray")
+    _git(root, "rm", "-rq", "--cached", ".")
+    (root / "stray.py").write_text("s = 1\n")
+    _git(root, "add", "stray.py")
+    _git(root, "commit", "-q", "-m", "unrelated root")
+    _git(root, "checkout", "-q", "-f", "feat")
+    _git(root, "merge", "-q", "--no-edit", "--allow-unrelated-histories", "stray")
+    found = _stale(root, head)
+    assert found is not None and "stray.py" in found
+
+
+def test_a_commit_made_on_local_main_by_mistake_is_not_integrated(repo):
+    # the remote is the authority: a local main only counts beyond it for merges
+    root, head = repo
+    _git(root, "checkout", "-q", "main")
+    _git(root, "update-ref", "refs/remotes/origin/main", "main")
+    _git(root, "merge", "-q", "--ff-only", "feat")
+    _commit(root, "u.py", "u = 1\n", "unreviewed, on local main by mistake")
+    _git(root, "checkout", "-q", "-b", "feat2")
+    _commit(root, ".process-work/journal/j.md", "REVIEW …\n", "attest")
+    found = _stale(root, head)
+    assert found is not None and "u.py" in found
+
+
+def test_a_local_master_pointed_at_unreviewed_work_hides_nothing(repo):
+    root, head = repo
+    _git(root, "update-ref", "refs/remotes/origin/main", "main")
+    unreviewed = _commit(root, "u.py", "u = 1\n", "unreviewed")
+    _git(root, "branch", "master", unreviewed)
+    _commit(root, ".process-work/journal/j.md", "REVIEW …\n", "attest")
+    found = _stale(root, head)
+    assert found is not None and "u.py" in found

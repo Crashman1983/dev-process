@@ -1166,6 +1166,15 @@ ein Wächter-Test gegen doppelte Klammern ohne Leerzeichen in Python-Vorlagen.
 Wer v2.27.1 oder v2.28.0 installiert hat und am Push scheitert: auf v2.28.1
 aktualisieren, `v2.28.1`.
 
+**v2.32.5 — der Stale-Check als Entscheidungstabelle.** Nach der dritten Flickung sammelt `_history` jetzt die Fakten aus git, und `decide` urteilt nach einer Tabelle, die Zeile für Zeile gepinnt ist. Jeder entfernte Zweig macht eine Zeile rot. Anlass war, dass Züge im Referenzprojekt täglich abgelehnt wurden. Ein Refute des Umbaus lief über 126 Szenarien; alle Funde sind behoben, jeweils mit einem Test, der gegen die Vorfassung fällt:
+- **Saubere Merges:** Ein Merge zählt nur mit dem, was er über git's eigenen Merge (`merge-tree`) hinaus hinzufügt. Ändern beide Seiten verschiedene Stellen derselben Datei, ist das kein ungeprüfter Code mehr; `--cc --name-only` hatte solche Dateien genannt. Eine Konfliktauflösung, die keiner Seite entspricht, und eine böse Stelle im Merge bleiben ungeprüft.
+- **Mitpassagiere:** Fügt der Zug-Merge eines anderen Passagiers eigenen Code hinzu, blockiert das weiter, heißt aber so und wird nicht dieser Arbeit angelastet.
+- **Flacher Klon:** Fehlt dort der geprüfte Kopf, ist das Review veraltet und nicht mehr aktuell (fail-closed).
+- **Dateinamen:** Alle Pfade werden mit `-z` gelesen, und Namen, die kein UTF-8 sind, gehen byte-genau an git zurück. Eine gescheiterte Abfrage liest sich nicht mehr als „Datei fehlt auf beiden Seiten“; so ließen sich sonst eine böse Auflösung und ein verworfener Review durchschmuggeln. Ein Name aus Leerzeichen ist ein Name.
+- **Versteckte Änderungen:** Submodul-Sprünge zählen auch mit `ignore = all` (`--ignore-submodules=none`), Wurzel-Commits auch mit `log.showRoot=false`, und ein Merge fremder Geschichte wird beurteilt statt abgelehnt.
+- **Integrations-Ref:** Der Remote-Ref gilt. Ein lokales main zählt darüber hinaus nur mit Merges auf seiner Hauptkette, also mit einem Zug, der gemergt, aber noch nicht gepusht hat. Ein versehentlich auf main gemachter Commit oder ein auf ungeprüfte Arbeit gesetztes `master` versteckt nichts mehr.
+- **Bekannt, nicht behoben:** Jeder kann einen Branch `train/…` nennen, und die Passagier-Ausnahme gilt dann für ihn. Was auf main landet, entscheiden Zug und Push-Regeln. Ohne Remote-Ref gilt ein lokales main weiter als Basis.
+
 **v2.32.4 — Review-Befunde zum Refute-Port, samt Refute des Fixes.** Ein Review des Ports im Referenzprojekt blockierte. Danach griff ein frischer Agent den Fix mit rund 165 Szenarien an und fand keinen Blocker, aber drei Majors. Alles unten ist behoben, jeweils mit einem Test, der gegen die Vorfassung fällt:
 - **REFUTE-Zeile ist ein Beleg, keine Erwähnung:** Sie braucht `round=<n>:` und Inhalt. Nicht mehr zählen ein nacktes `REFUTE work=…`, eine Zeile in Backticks, ein offenes `- [ ]`, Platzhalter-Inhalt (`TODO`, `…`) und alles hinter einem nicht geschlossenen `<!--`.
 - **Jeder Plan belegt seinen eigenen Refute:** Die Zeile muss die work-id ihres Plans nennen. Die Zeile eines gestapelten Plans deckt keinen anderen, die Warnung nennt die Pläne ohne Zeile.
