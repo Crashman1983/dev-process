@@ -58,6 +58,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import NamedTuple
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling imports
@@ -333,90 +334,144 @@ def plan(root: Path, *, min_candidates: int, max_wait_hours: float) -> dict:
 
 # --- the run -------------------------------------------------------------------------------
 
-# the suite command does not exist on this tree (a passenger introduces the
-# make target): that tree cannot be judged — it is not red. Only the suite's
-# own signals count: the shell's exit 127 for a missing command, or the "No
-# rule" stop line of the suite's OWN make — the level right below the one the
-# train runs at (`make train` puts the train at MAKELEVEL 1, so the suite's
-# make prints `make[1]:`; run bare, it prints `make:`). A deeper make, or a
-# "command not found" printed by a test that shells out, is a red suite
-# (downstream review residual; the MAKELEVEL case was found by the pre-push
-# hook, which itself runs pytest under make).
+# A suite run is judged by ONE rule, `decide`, over facts `read_facts` takes
+# from the command and the run's output. "undefined" — the suite does not
+# exist on this tree (a passenger introduces the make target or the script) —
+# makes the tree *not comparable*: never red, nobody blamed. Every other
+# failure is red. The rule was patched once per case downstream; each case is
+# now a row of `decide` and a row of its table test (tests/test_train.py).
+# Only the suite's own signals count: the stop lines of the suite's OWN make —
+# the level right below the one the train runs at (`make train` puts the train
+# at MAKELEVEL 1, so the suite's make prints `make[1]:`; run bare, `make:`) —
+# and the train's own `sh` saying a first word of the suite command is not
+# found. A deeper make, or a "not found" printed by a test that shells out,
+# is red. Known limit: this reads text — a test printing make's exact stop
+# line, or a nested make with MAKELEVEL cleared, can read undefined; the train
+# then aborts or excuses a prefix, it never merges on it. A translated make (a
+# non-English locale) is not recognised and reads red — run the train with
+# LC_ALL=C if a passenger introduces the suite.
+
 # make options that take their value as the next word
 _MAKE_VALUE_OPTS = {"-C", "-f", "-I", "-o", "-W", "--directory", "--file", "--makefile", "--include-dir",
-                    "--old-file", "--assume-old", "--what-if", "--new-file", "--assume-new"}
+                    "--old-file", "--assume-old", "--what-if", "--new-file", "--assume-new",
+                    "-l", "--load-average", "-E", "--eval"}
 _SHELL_PUNCT = set("();<>|&")
+_ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+# a line that can carry a fact: make's `***` lines, make's include line, sh's "not found"
+_FACT_LINE = re.compile(r"\*\*\* |: No such file or directory$|: (?:command )?not found$")
 
 
-def _make_targets(cmd: str) -> set[str]:
-    """The targets the suite command asks make for — `make test`, `make -C x
-    a b`, `(cd x && make test)`, `gmake …`, several in a `&&` chain. Empty
-    when the command is not a make call the train can read (then no make
-    line reads undefined)."""
+class SuiteFacts(NamedTuple):
+    """What one suite run says about itself — the inputs of `decide`, gathered
+    by `read_facts`. The make facts are read at the suite's own make level,
+    over every make call of the command."""
+    rc: int                                    # the command's exit code
+    targets: frozenset = frozenset()           # what the command asks make for (empty: no make call it can read)
+    words: frozenset = frozenset()             # the command's own first words (`./scripts/x.sh`, `make`, `uv`)
+    recipe_failed: bool = False                # `make: *** [file:N: target] Error n`: a defined target failed
+    needed_by: bool = False                    # `No rule to make target 'x', needed by 'y'`: a missing prerequisite
+    no_rule: frozenset = frozenset()           # `No rule to make target 'T'.`: names make has no rule for
+    missing_includes: frozenset = frozenset()  # `Makefile:N: x: No such file or directory`: make's include line
+    not_found: frozenset = frozenset()         # the train's `sh: 1: w: not found`: words the shell did not find
+
+
+def decide(f: SuiteFacts) -> tuple[str, str]:
+    """`(state, reason)`, state "green", "red" or "undefined" — the whole rule;
+    the first row that applies decides."""
+    if f.rc == 0:
+        return "green", "exit 0"
+    # any make call failing on a defined target makes the tree red, even when
+    # a later call finds no rule (`make test; make -C examples test`)
+    if f.recipe_failed:
+        return "red", "a make call failed on a defined target"
+    if f.needed_by:
+        return "red", "a missing prerequisite (a rule needs a file that is gone)"
+    # make names the include it cannot find first — also one named like the target
+    if f.no_rule & f.missing_includes:
+        return "red", "a missing include"
+    # every stop is for a target the suite command names: its make target is not here
+    if f.rc == 2 and f.no_rule and f.no_rule <= f.targets:
+        return "undefined", "no rule for a target the suite command names"
+    # the suite command's own first word (a script a passenger introduces) is not here
+    if f.rc == 127 and f.not_found & f.words:
+        return "undefined", "the suite command itself is not found"
+    if f.rc == 127:
+        return "red", "exit 127 from a command inside the suite"
+    return "red", f"exit {f.rc}"
+
+
+def _simple_commands(cmd: str) -> list[list[str]]:
+    """The command's simple commands as word lists — `(cd x && make t) > log`
+    is `[["cd", "x"], ["make", "t"]]`; a redirection's target is no word.
+    Empty when the shell words cannot be read."""
     try:
         lex = shlex.shlex(cmd, posix=True, punctuation_chars=True)
         lex.whitespace_split = True
-        words = list(lex)
+        tokens = list(lex)
     except ValueError:
-        return set()
+        return []
+    out: list[list[str]] = [[]]
+    redirect = False
+    for w in tokens:
+        if set(w) <= _SHELL_PUNCT:  # an operator, a subshell, a redirection
+            if "<" in w or ">" in w:
+                redirect = True
+            elif out[-1]:
+                out.append([])
+            continue
+        if redirect:
+            redirect = False
+            continue
+        out[-1].append(w)
+    return [c for c in out if c]
+
+
+def _make_targets(words: list[str]) -> set[str]:
+    """The targets one simple command asks make for — `make test`, `make -C x
+    a b`, `uv run make test`, `gmake …`. Empty when it is no make call (`sh -c
+    'make test'` is one word to sh: no make call the train can read)."""
     targets: set[str] = set()
     in_make = skip = False
     for w in words:
-        if set(w) <= _SHELL_PUNCT:  # an operator, a subshell, a redirection
-            in_make = skip = False
-            continue
         if skip:
             skip = False
             continue
         if not in_make:
             in_make = Path(w).name in ("make", "gmake")
             continue
-        if w in _MAKE_VALUE_OPTS or w in ("-l", "--load-average", "-E", "--eval"):
+        if w in _MAKE_VALUE_OPTS:
             skip = True
             continue
-        if w.startswith("-") or "=" in w or w.replace(".", "").isdigit():  # options, variables, `-j 4`
+        if w.startswith("-") or "=" in w or w.replace(".", "").isdigit():  # options, variables, `-j 4`, `2>&1`
             continue
         targets.add(w)
     return targets
 
 
-def _undefined_line(targets: set[str]) -> re.Pattern[str] | None:
-    """make's own "no such target" line for one of the suite's targets —
-    None when the command names none. A missing include or prerequisite
-    prints the same words for ITS name; bound to the target, it reads red
-    (downstream review: `include mk/missing.mk` read as an undefined suite)."""
-    if not targets:
-        return None
-    level = os.environ.get("MAKELEVEL", "0")
-    level = level if level.isascii() and level.isdigit() else "0"
-    prefix = "make" if int(level) == 0 else f"make\\[{int(level)}\\]"  # (g)make
-    # the target itself, not a prerequisite (", needed by …" is a red tree: a
-    # passenger deleted a file a rule needs); GNU make 3.81 quotes `x', make
-    # under -k omits "Stop.", some systems call it gmake. A translated make
-    # (a non-English locale) is not recognised and reads red — run the train
-    # with LC_ALL=C or LANG=C if the suite is introduced by a passenger.
-    names = "|".join(re.escape(t) for t in sorted(targets))
-    return re.compile(rf"^(?:g?{prefix}): \*\*\* No rule to make target [`'](?:{names})'\.(?:\s+Stop\.)?$",
-                      re.MULTILINE)
-
-
-def _undefined(cmd: str, rc: int, tail: list[str]) -> bool:
-    # Known limit: this reads text — a test printing make's exact line, or a nested
-    # make with MAKELEVEL cleared, reads undefined; the train then aborts or
-    # excuses a prefix, it never merges on it.
-    if rc == 127:
-        return True
-    line = _undefined_line(_make_targets(cmd)) if rc == 2 else None
-    if line is None:
-        return False
-    text = "\n".join(tail)
-    m = line.search(text)
-    if m is None:
-        return False
-    # an include of the same name as the target: make says it cannot find the file first
-    name = re.search(r"target [`'](.+)'\.", m.group(0)).group(1)
-    # make's own include line: `Makefile:3: <name>: No such file or directory`
-    return not re.search(rf"(?m)^[^\s:]+:\d+: {re.escape(name)}: No such file or directory$", text)
+def read_facts(cmd: str, rc: int, lines: list[str], makelevel: str = "0") -> SuiteFacts:
+    """The facts of one run from the command, its exit code, its output lines
+    and the MAKELEVEL the train runs at."""
+    commands = _simple_commands(cmd)
+    targets: set[str] = set().union(*(_make_targets(c) for c in commands))
+    words = {next((w for w in c if not _ASSIGNMENT.match(w)), "") for c in commands} - {""}
+    level = makelevel if makelevel.isascii() and makelevel.isdigit() else "0"
+    stop = "^g?make" + ("" if int(level) == 0 else rf"\[{int(level)}\]") + r": \*\*\* "
+    text = "\n".join(lines)
+    # GNU make 3.81 quotes `x', make under -k omits "Stop."
+    no_rule = re.compile(stop + r"No rule to make target [`'](.+)'\.(?:\s+Stop\.)?$", re.MULTILINE)
+    needed = re.compile(stop + r"No rule to make target [`'].*', needed by [`'].*'\.(?:\s+Stop\.)?$", re.MULTILINE)
+    return SuiteFacts(
+        rc=rc,
+        targets=frozenset(targets),
+        words=frozenset(words),
+        # 4.x `[Makefile:2: test] Error 1`, 3.81 `[test] Error 1`, a signal `[…] Killed`
+        recipe_failed=bool(re.search(stop + r"\[.+\] \S", text, re.MULTILINE)),
+        needed_by=bool(needed.search(text)),
+        no_rule=frozenset(m.group(1) for m in no_rule.finditer(text) if not needed.match(m.group(0))),
+        missing_includes=frozenset(re.findall(r"(?m)^[^\s:]+:\d+: (.+): No such file or directory$", text)),
+        not_found=frozenset(re.findall(
+            r"(?m)^sh: (?:line )?\d+: (.+): (?:not found|command not found|No such file or directory)$", text)),
+    )
 
 
 def _load() -> str:
@@ -429,19 +484,19 @@ def _load() -> str:
 
 def _sh(cwd: Path, cmd: str, log) -> str:
     """Run cmd, streaming its output; "green", "red" or "undefined" (the
-    command or make target does not exist on this tree)."""
+    command or make target does not exist on this tree) — `decide`'s verdict."""
     print(f"train: $ {cmd}", flush=True)
-    tail: list[str] = []
+    kept: list[str] = []  # the lines that can carry a fact, over the whole run
     proc = subprocess.Popen(["sh", "-c", cmd], cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                             text=True, errors="replace")
     assert proc.stdout is not None
     for line in proc.stdout:
         print(line, end="", flush=True)
-        tail = (tail + [line.rstrip("\n")])[-40:]
+        if _FACT_LINE.search(line.rstrip("\n")):
+            kept = (kept + [line.rstrip("\n")])[-400:]
     rc = proc.wait()
-    state = "green" if rc == 0 else (
-        "undefined" if _undefined(cmd, rc, tail) else "red")
-    log(f"$ {cmd} → exit {rc} ({state}{'' if rc == 0 else ', ' + _load()})")
+    state, why = decide(read_facts(cmd, rc, kept, os.environ.get("MAKELEVEL", "0")))
+    log(f"$ {cmd} → exit {rc} ({state}{'' if rc == 0 else ' — ' + why + ', ' + _load()})")
     return state
 
 

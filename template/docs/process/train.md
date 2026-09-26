@@ -65,11 +65,20 @@ the test lanes are free where the project has a lane script (see `tower.md`, lan
    twice: the base itself is checked once (a red main blames nobody and
    aborts), then a bisection over boarding-order prefixes names the first
    offender; it is dropped, gets a `blocked` report, and the rest is
-   rebuilt. A suite that does not exist on a tree (make's `No rule to make
-   target` for a target the suite command names, exit 127 — a passenger
-   introduces the make target) makes that tree *not comparable*, never red
-   (a missing include or prerequisite is a red tree): the base is not called red, a prefix
-   is not blamed. Every red verdict logs the load average — a timeout under
+   rebuilt. A suite that does not exist on a tree — a passenger introduces
+   it — makes that tree *not comparable*, never red: the base is not called
+   red, a prefix is not blamed. One rule decides (`decide()` in `train.py`,
+   one table row per case), first row that applies: exit 0 is green; any
+   make call of the suite failing on a defined target (`*** [file:N:
+   target] Error n`) is red, even when a later call finds no rule; a
+   missing prerequisite (`…, needed by …`) or a missing include is red;
+   every `No rule to make target` stop naming a target the suite command
+   itself names (exit 2) is undefined; exit 127 is undefined only when the
+   train's shell did not find the suite command's own first word (a script a
+   passenger introduces, `sh: 1: ./scripts/x.sh: not found`) — a tool
+   missing inside the suite is red; anything else is red. Only the suite's
+   own make level counts (`make:` run bare, `make[1]:` under `make train`);
+   a translated make reads red — run the train with `LC_ALL=C`. Every red verdict logs the load average — a timeout under
    load 10 on 6 CPUs is a different finding from a broken test. A
    candidate dropped for a merge conflict is reported `blocked` too, with
    "rebase" as the reason.

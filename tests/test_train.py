@@ -506,6 +506,163 @@ def test_a_missing_include_is_a_red_tree_not_an_undefined_suite(render, tmp_path
     assert train._sh(tree, "make lint && make test", lambda _l: None) == "undefined"
 
 
+# --- the suite verdict: read_facts + decide() table ---
+
+_NO_RULE = "make: *** No rule to make target 'test-merge'.  Stop."
+_SUITE_TABLE = [
+    # (case, command, exit code, output, MAKELEVEL, state, words of the reason)
+    ("green", "make test", 0, [], "0", "green", "exit 0"),
+    ("recipe error on a defined target", "make test", 2,
+     ["make: *** [Makefile:2: test] Error 1"], "0", "red", "defined target"),
+    ("GNU make 3.81 recipe error", "make test", 2, ["make: *** [test] Error 1"], "0", "red", "defined target"),
+    ("a red call, then a call without the target", "make test; make -C examples test", 2,
+     ["make: *** [Makefile:2: test] Error 1", "make: Entering directory '/w/examples'",
+      "make: *** No rule to make target 'test'.  Stop.", "make: Leaving directory '/w/examples'"],
+     "0", "red", "defined target"),
+    ("a call without the target, then a red call", "make -C examples test; make test", 2,
+     ["make: *** No rule to make target 'test'.  Stop.", "make: *** [Makefile:2: test] Error 1"],
+     "0", "red", "defined target"),
+    ("make -k: a red target and an undefined one", "make -k lint test-merge", 2,
+     ["make: *** [Makefile:2: lint] Error 1", "make: *** No rule to make target 'test-merge'.",
+      "make: Target 'lint' not remade because of errors."], "0", "red", "defined target"),
+    ("a recipe's tool not found", "make test", 2,
+     ["/bin/sh: 1: frob: not found", "make: *** [Makefile:2: test] Error 127"], "0", "red", "defined target"),
+    ("a red make call, then the suite's script not found", "make test; ./scripts/x.sh", 127,
+     ["make: *** [Makefile:2: test] Error 1", "sh: 1: ./scripts/x.sh: not found"], "0", "red", "defined target"),
+    ("missing prerequisite", "make check", 2,
+     ["make: *** No rule to make target 'fixture.txt', needed by 'check'.  Stop."], "0", "red", "prerequisite"),
+    ("missing prerequisite, then a call without the target", "make check; make test-merge", 2,
+     ["make: *** No rule to make target 'fixture.txt', needed by 'check'.  Stop.", _NO_RULE],
+     "0", "red", "prerequisite"),
+    ("missing include", "make test", 2,
+     ["Makefile:1: mk/missing.mk: No such file or directory",
+      "make: *** No rule to make target 'mk/missing.mk'.  Stop."], "0", "red", "missing include"),
+    ("include named like the target", "make test", 2,
+     ["Makefile:1: test: No such file or directory", "make: *** No rule to make target 'test'.  Stop."],
+     "0", "red", "missing include"),
+    ("missing include in one call, no target in the next", "make -C sub lint; make test-merge", 2,
+     ["Makefile:1: mk/missing.mk: No such file or directory",
+      "make: *** No rule to make target 'mk/missing.mk'.  Stop.", _NO_RULE], "0", "red", "missing include"),
+    ("an earlier step echoes make's include line", "make lint && make test-merge", 2,
+     ["x: test-merge: No such file or directory", _NO_RULE], "0", "undefined", "names"),
+    ("MAKELEVEL 0", "make test-merge", 2, [_NO_RULE], "0", "undefined", "names"),
+    ("MAKELEVEL 1", "make test-merge", 2,
+     ["make[1]: *** No rule to make target 'test-merge'.  Stop."], "1", "undefined", "names"),
+    ("MAKELEVEL 2", "make test-merge", 2,
+     ["make[2]: *** No rule to make target 'test-merge'.  Stop."], "2", "undefined", "names"),
+    ("a deeper make's stop line", "make test-merge", 2,
+     ["make[2]: *** No rule to make target 'test-merge'.  Stop."], "0", "red", "exit 2"),
+    ("a bare make line under make train", "make test-merge", 2, [_NO_RULE], "1", "red", "exit 2"),
+    ("GNU make 3.81 quoting", "make test-merge", 2,
+     ["make: *** No rule to make target `test-merge'.  Stop."], "0", "undefined", "names"),
+    ("gmake", "gmake -j 4 -C . test-merge", 2,
+     ["gmake: *** No rule to make target 'test-merge'.  Stop."], "0", "undefined", "names"),
+    ("make -k without Stop.", "make -k test-merge", 2,
+     ["make: *** No rule to make target 'test-merge'."], "0", "undefined", "names"),
+    ("no rule for another name", "make test-merge", 2,
+     ["make: *** No rule to make target 'other'.  Stop."], "0", "red", "exit 2"),
+    ("a chain: every target is the suite's", "make lint && make test", 2,
+     ["make: *** No rule to make target 'test'.  Stop."], "0", "undefined", "names"),
+    ("subshell", "(cd x && make test)", 2,
+     ["make: *** No rule to make target 'test'.  Stop."], "0", "undefined", "names"),
+    ("trailing ;", "make test;", 2, ["make: *** No rule to make target 'test'.  Stop."], "0", "undefined", "names"),
+    ("no spaces around &&", "cd x&&make test", 2,
+     ["make: *** No rule to make target 'test'.  Stop."], "0", "undefined", "names"),
+    ("uv run make", "uv run make test", 2,
+     ["make: *** No rule to make target 'test'.  Stop."], "0", "undefined", "names"),
+    ("redirection and pipe", "make test-merge 2>&1 | cat; exit 2", 2, [_NO_RULE], "0", "undefined", "names"),
+    ("sh -c is no make call the train reads", "sh -c 'make test'", 2,
+     ["make: *** No rule to make target 'test'.  Stop."], "0", "red", "exit 2"),
+    ("exit 1 with a stop line", "make test-merge || exit 1", 1, [_NO_RULE], "0", "red", "exit 1"),
+    ("the suite's script not found (dash)", "./scripts/x.sh", 127,
+     ["sh: 1: ./scripts/x.sh: not found"], "0", "undefined", "itself"),
+    ("the suite's script not found (bash as sh)", "./scripts/x.sh", 127,
+     ["sh: line 1: ./scripts/x.sh: No such file or directory"], "0", "undefined", "itself"),
+    ("the suite's command not found", "pytest -q", 127,
+     ["sh: line 1: pytest: command not found"], "0", "undefined", "itself"),
+    ("the suite's script behind an assignment", "CI=1 ./scripts/x.sh", 127,
+     ["sh: 1: ./scripts/x.sh: not found"], "0", "undefined", "itself"),
+    ("the suite's script after a green make call", "make lint && ./scripts/x.sh", 127,
+     ["sh: 1: ./scripts/x.sh: not found"], "0", "undefined", "itself"),
+    ("a tool inside the suite not found", "./run.sh", 127, ["./run.sh: 2: frob: not found"], "0", "red", "inside"),
+    ("a test prints sh's line for another word", "./run.sh", 127,
+     ["sh: 1: frob: not found"], "0", "red", "inside"),
+    ("the missing word is only an argument", "./run.sh ./scripts/x.sh", 127,
+     ["sh: 1: ./scripts/x.sh: not found"], "0", "red", "inside"),
+    ("exit 127 without a message", "./run.sh", 127, [], "0", "red", "inside"),
+]
+
+
+@pytest.mark.parametrize("case,cmd,rc,output,level,state,words", _SUITE_TABLE, ids=[r[0] for r in _SUITE_TABLE])
+def test_suite_decide_table(render, tmp_path, case, cmd, rc, output, level, state, words):
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    train = _load_train(out)
+    got, reason = train.decide(train.read_facts(cmd, rc, output, level))
+    assert (got, words in reason) == (state, True), (case, got, reason)
+
+
+def test_every_row_of_decide_has_a_table_case(render, tmp_path):
+    # a row added to decide() without a case in the table fails here
+    import inspect
+    import re
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    train = _load_train(out)
+    reasons = re.findall(r'return "\w+", f?"([^"{]+)', inspect.getsource(train.decide))
+    reached = {train.decide(train.read_facts(c, rc, o, lv))[1] for _n, c, rc, o, lv, _s, _w in _SUITE_TABLE}
+    for r in reasons:
+        assert any(x.startswith(r) for x in reached), r
+
+
+def _real_make(monkeypatch, tmp_path):
+    # real GNU make, untranslated, run as the train's suite at MAKELEVEL 0
+    monkeypatch.setenv("PATH", f"/usr/local/bin:{__import__('os').environ['PATH']}")
+    monkeypatch.setenv("LC_ALL", "C")
+    monkeypatch.delenv("MAKELEVEL", raising=False)
+    monkeypatch.delenv("MAKEFLAGS", raising=False)
+    if __import__("shutil").which("make") is None:
+        pytest.skip("no make")
+    tree = tmp_path / "tree"
+    tree.mkdir()
+    return tree
+
+
+def test_a_red_make_call_is_red_even_if_a_later_call_has_no_such_target(render, tmp_path, monkeypatch):
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    train = _load_train(out)
+    tree = _real_make(monkeypatch, tmp_path)
+    (tree / "Makefile").write_text("test:\n\texit 1\n")
+    (tree / "examples").mkdir()
+    (tree / "examples/Makefile").write_text("other:\n\ttrue\n")
+    assert train._sh(tree, "make test; make -C examples test", lambda _l: None) == "red"
+    assert train._sh(tree, "make -C examples test; make test", lambda _l: None) == "red"
+    (tree / "Makefile").write_text("test:\n\ttrue\n")  # the first call green: the examples' target is missing
+    assert train._sh(tree, "make test; make -C examples test", lambda _l: None) == "undefined"
+
+
+def test_a_broken_make_call_is_red_even_if_a_later_call_has_no_such_target(render, tmp_path, monkeypatch):
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    train = _load_train(out)
+    tree = _real_make(monkeypatch, tmp_path)
+    (tree / "Makefile").write_text("check: fixture.txt\n\ttrue\n")  # a prerequisite a passenger deleted
+    assert train._sh(tree, "make check; make test-merge", lambda _l: None) == "red"
+    (tree / "sub").mkdir()
+    (tree / "sub/Makefile").write_text("include mk/missing.mk\nlint:\n\ttrue\n")
+    assert train._sh(tree, "make -C sub lint; make test-merge", lambda _l: None) == "red"
+
+
+def test_exit_127_is_undefined_only_for_the_suites_own_command(render, tmp_path, monkeypatch):
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    train = _load_train(out)
+    tree = _real_make(monkeypatch, tmp_path)
+    # the script a passenger introduces is not on this tree: not comparable
+    assert train._sh(tree, "./scripts/x.sh", lambda _l: None) == "undefined"
+    # a tool missing inside the suite: red
+    (tree / "run.sh").write_text("#!/bin/sh\nfrob-missing-tool\n")
+    (tree / "run.sh").chmod(0o755)
+    assert train._sh(tree, "./run.sh", lambda _l: None) == "red"
+    assert train._sh(tree, "echo 'sh: 1: frob: not found'; exit 127", lambda _l: None) == "red"
+
+
 def test_an_offender_that_brought_the_suite_is_still_reported(render, tmp_path, monkeypatch):
     # combined red, retry red, base undefined; b1 (which brought the suite) is
     # dropped; the rest cannot run the suite — b1 must still get its report
