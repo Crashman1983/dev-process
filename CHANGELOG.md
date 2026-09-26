@@ -1166,6 +1166,36 @@ ein Wächter-Test gegen doppelte Klammern ohne Leerzeichen in Python-Vorlagen.
 Wer v2.27.1 oder v2.28.0 installiert hat und am Push scheitert: auf v2.28.1
 aktualisieren, `v2.28.1`.
 
+**v2.33.0 — fünf Prozess-Baustellen in einem Zug, jede refutiert.** Fünf Pakete kommen aus Befunden des Referenzprojekts. Jedes ist vor dem Release von einem frischen Agenten angegriffen worden, die Fix-Runden ebenso. Jeder Fund ist behoben und mit einem Test belegt, der gegen die Vorfassung fällt, oder als bekannte Grenze dokumentiert.
+- **Wo Prozess-Belege liegen, legt eine Stelle fest:** `check_review` bestimmt, wo REVIEW-, ROOT-CAUSE- und REFUTE-Zeilen stehen: Journal, aktive und archivierte Pläne, Spec-Kit-Pläne. attest, das Review-Bündel und das Gate lesen alle über diese eine Stelle.
+  - attest zählt Block-Runden roh wie das Gate. ROOT-CAUSE-Zeilen liest es so, wie sie gerendert werden: ein Beispiel im Codeblock, eine auskommentierte Zeile oder ein Platzhalter zählt nicht.
+  - Ein Spec-Kit-Plan ist nur unter Review, solange an ihm gearbeitet wird.
+  - Eine neue REFUTE-Runde wird an ihrer Identität erkannt (Runde und Text), nicht an git's Umbenennungs-Erkennung. Umbenennen, Archivieren, Kopieren oder Zusammenführen macht eine alte Runde nicht neu.
+  - Der Bericht der Vorrunde wird über seinen Kopf gefunden (`work:`, genauer Wert).
+  - Kommentare werden gelesen, wie CommonMark sie rendert, in linearer Zeit.
+- **Zug, Urteil über die Suite:** `read_facts` liest die Fakten, `decide` urteilt nach einer Tabelle; jeder entfernte Zweig macht Tabellenzeilen rot.
+  - Ein roter make-Aufruf bleibt rot, auch wenn ein späterer „No rule“ meldet oder die Fehlerzeile an Ausgabe klebt.
+  - „Nicht vorhanden“ gilt nur für die eigene Datei oder das eigene Ziel der Suite, auch hinter `sh`, `python`, `uv run`, `timeout`, `nice` oder `env`.
+  - Hat die Basis die Suite und der kombinierte Baum nicht, hat ein Passagier sie entfernt: Das ist rot und wird ihm angelastet.
+- **Ein Zug-Merge schließt die Arbeit ab:** Eigene fertige Pläne (Tier angegeben, keine offene Aufgabe, geklärt) werden im Merge-Commit archiviert. Die Merge-Nachricht schließt die Issues dieses Repositorys (`Closes #N`).
+  - `plan-stays-active:` hält einen Plan offen.
+  - Den Plan einer anderen Arbeit fasst der Zug nicht an.
+- **Stale-Check und gemergte Pläne:** Code, den ein anderes Code-Review in seinem Bereich `base..head` gesehen hat, zählt als geprüft. Code, den kein Review gesehen hat, bleibt veraltet, unter welchem Plan auch immer.
+  - Ein aktiv gebliebener Plan einer gemergten Arbeit wird nur als Rest benannt.
+  - Plan-Reviews und Pässe ohne Plan decken keinen Code.
+- **dispatch:**
+  - `say` prüft, ob der Text die Eingabezeile verlassen hat, und drückt sonst erneut Enter. In einen offenen Dialog tippt es nie.
+  - `chain` schiebt Phasen aus den Berichten weiter: `pushed` erst, wenn die Aufgaben des eigenen Plans auf origin abgehakt sind und Code über das letzte Attest hinaus liegt.
+  - Die Warteschlange ist gesperrt und dedupliziert, eine abgelehnte Zeile blockiert die folgenden nicht.
+  - Worker laufen unter `nice` (`worker_nice`), damit der Zug seine CPU behält.
+- **Bekannt, nicht behoben (dokumentiert):**
+  - Einzelne CommonMark-Sonderfälle.
+  - `--journal-dir` ersetzt das Journal, statt es zu ergänzen.
+  - Eine übersetzte make-Ausgabe.
+  - Ein Ziel, das die Shell zusammensetzt.
+  - Ein Pipe, der den Exit-Code verdeckt.
+  - Der Dialog eines Harness, den `say` nicht erkennt.
+
 **v2.32.5 — der Stale-Check als Entscheidungstabelle.** Nach der dritten Flickung sammelt `_history` jetzt die Fakten aus git, und `decide` urteilt nach einer Tabelle, die Zeile für Zeile gepinnt ist. Jeder entfernte Zweig macht eine Zeile rot. Anlass war, dass Züge im Referenzprojekt täglich abgelehnt wurden. Ein Refute des Umbaus lief über 126 Szenarien; alle Funde sind behoben, jeweils mit einem Test, der gegen die Vorfassung fällt:
 - **Saubere Merges:** Ein Merge zählt nur mit dem, was er über git's eigenen Merge (`merge-tree`) hinaus hinzufügt. Ändern beide Seiten verschiedene Stellen derselben Datei, ist das kein ungeprüfter Code mehr; `--cc --name-only` hatte solche Dateien genannt. Eine Konfliktauflösung, die keiner Seite entspricht, und eine böse Stelle im Merge bleiben ungeprüft.
 - **Mitpassagiere:** Fügt der Zug-Merge eines anderen Passagiers eigenen Code hinzu, blockiert das weiter, heißt aber so und wird nicht dieser Arbeit angelastet.
