@@ -59,6 +59,107 @@ from pathlib import Path
 JOURNAL_DIR = ".process-work/journal"
 PLANS_ACTIVE = ".process-work/plans"
 PLANS_ARCHIVE = ".process-work/plans/archive"
+SPECS_DIR = "specs"
+SPEC_PLAN = "plan.md"
+
+# --- where the process records live: ONE owner ------------------------------
+# REVIEW, ROOT-CAUSE and REFUTE lines are written into journal shards, into
+# plans and into Spec Kit plans (`specs/<dir>/plan.md`, which never archive).
+# Every tool that reads those records — this gate, attest.py (rounds, root
+# causes), make_review_bundle.py (the REFUTE check and its delta pre-state) —
+# asks here, so no tool can forget a home (observed downstream: the delta
+# pre-state read only the plan folder, and an old REFUTE line in a Spec Kit
+# plan passed as new).
+RECORD_KINDS = ("journal", "plan", "plan-archive", "spec-plan")
+PLAN_KINDS = ("plan", "spec-plan")  # plans under work: not archived
+
+
+def record_kind(rel: str) -> str | None:
+    """The record kind of a repo-relative posix path, None for any other file:
+    `journal` (any shard under the journal), `plan` (an active plan, directly
+    in the plan folder), `plan-archive` (a plan in a subfolder of it — the
+    archive), `spec-plan` (`specs/<dir>/plan.md`)."""
+    if not rel.endswith(".md"):
+        return None
+    if rel.startswith(JOURNAL_DIR + "/"):
+        return "journal"
+    if rel.startswith(PLANS_ACTIVE + "/"):
+        return "plan" if "/" not in rel[len(PLANS_ACTIVE) + 1:] else "plan-archive"
+    parts = rel.split("/")
+    if len(parts) == 3 and parts[0] == SPECS_DIR and parts[2] == SPEC_PLAN:
+        return "spec-plan"
+    return None
+
+
+def plan_stem(rel: str) -> str:
+    """A plan's name for work ids: the file stem, or the spec directory's name
+    for a Spec Kit plan (every one of them is called plan.md)."""
+    parts = rel.split("/")
+    if record_kind(rel) == "spec-plan":
+        return parts[1]
+    return parts[-1][:-3] if parts[-1].endswith(".md") else parts[-1]
+
+
+def record_files(root: Path, kinds: tuple[str, ...] = RECORD_KINDS, *,
+                 journal_dir: Path | None = None) -> list[tuple[str, Path]]:
+    """(repo-relative path, file) of every record file of `kinds` in the
+    worktree, sorted per home. `journal_dir` overrides the journal's place
+    (attest --journal-dir); its files keep their path relative to the root
+    where they sit under it, else their absolute path."""
+    out: list[tuple[str, Path]] = []
+
+    def rel_of(f: Path) -> str:
+        try:
+            return f.relative_to(root).as_posix()
+        except ValueError:
+            return f.as_posix()
+
+    if "journal" in kinds:
+        jdir = journal_dir if journal_dir is not None else root / JOURNAL_DIR
+        if jdir.is_dir():
+            out += [(rel_of(f), f) for f in sorted(jdir.glob("**/*.md"))]
+    pdir = root / PLANS_ACTIVE
+    if pdir.is_dir() and ("plan" in kinds or "plan-archive" in kinds):
+        for f in sorted(pdir.glob("**/*.md")):
+            rel = f"{PLANS_ACTIVE}/{f.relative_to(pdir).as_posix()}"
+            if record_kind(rel) in kinds:
+                out.append((rel, f))
+    sdir = root / SPECS_DIR
+    if "spec-plan" in kinds and sdir.is_dir():
+        out += [(f"{SPECS_DIR}/{f.parent.name}/{SPEC_PLAN}", f)
+                for f in sorted(sdir.glob(f"*/{SPEC_PLAN}")) if f.is_file()]
+    return out
+
+
+def record_texts(root: Path, kinds: tuple[str, ...] = RECORD_KINDS, *,
+                 ref: str | None = None,
+                 journal_dir: Path | None = None) -> list[tuple[str, str]] | None:
+    """(repo-relative path, text) of every record file of `kinds` — in the
+    worktree, or at the git `ref`. None when git cannot tell (a missing ref,
+    an unreadable blob): the caller must not read "no records" into that.
+    Unreadable worktree files are skipped (the gate diagnoses them)."""
+    if ref is None:
+        out: list[tuple[str, str]] = []
+        for rel, f in record_files(root, kinds, journal_dir=journal_dir):
+            try:
+                out.append((rel, f.read_text(encoding="utf-8", errors="replace")))
+            except OSError:
+                continue
+        return out
+    names = _git_bytes(root, "ls-tree", "-r", "-z", "--name-only", ref, "--",
+                       JOURNAL_DIR, PLANS_ACTIVE, SPECS_DIR)
+    if names is None:
+        return None
+    out = []
+    for raw in names.split(b"\0"):
+        rel = raw.decode("utf-8", errors="surrogateescape")
+        if not raw or record_kind(rel) not in kinds:
+            continue
+        blob = _git_bytes(root, "cat-file", "blob", f"{ref}:{rel}")
+        if blob is None:
+            return None
+        out.append((rel, blob.decode("utf-8", errors="replace")))
+    return out
 
 REQUIRED = {"work", "tier", "reviewer", "model", "independence", "verdict", "round"}
 # optional integrity fields — all three or none (a partial claim is malformed)
@@ -1002,8 +1103,7 @@ def _plan_work_ids(stem: str, text: str, *, include_dedated: bool) -> set[str]:
     return ids
 
 
-SPECS_DIR = "specs"
-UNCHECKED = re.compile(r"^\s*- \[ \] ", re.MULTILINE)
+UNCHECKED =re.compile(r"^\s*- \[ \] ", re.MULTILINE)
 DECISIONS_HEADING = re.compile(r"^#{2,4}\s+Decisions\b", re.IGNORECASE | re.MULTILINE)
 
 
@@ -1018,12 +1118,10 @@ def speckit_unreviewed(root: Path, passes: list[dict]) -> list[tuple[str, int, s
     reports it as a note (a hard gate would red every push between the last
     tick and the review that must follow it)."""
     out: list[tuple[str, int, set[str]]] = []
-    sdir = root / SPECS_DIR
-    if not sdir.is_dir():
-        return out
-    for d in sorted(p for p in sdir.iterdir() if p.is_dir()):
-        plan, tasks = d / "plan.md", d / "tasks.md"
-        if not plan.is_file() or not tasks.is_file():
+    for _rel, plan in record_files(root, ("spec-plan",)):
+        d = plan.parent
+        tasks = d / "tasks.md"
+        if not tasks.is_file():
             continue
         ttext = tasks.read_text(encoding="utf-8", errors="replace")
         if UNCHECKED.search(ttext) or not re.search(r"^\s*- \[[xX]\] ", ttext,
@@ -1071,30 +1169,28 @@ def check(root: Path) -> tuple[list[str], list[str]]:
         if ledger_path is not None else None
     fetched_at = _fetch_stamp(root) if ledger is not None else 0.0
     reused_total = 0
-    jdir = root / JOURNAL_DIR
-    if jdir.is_dir():
-        for f in sorted(jdir.glob("**/*.md")):
-            rel = f"{JOURNAL_DIR}/{f.relative_to(jdir)}"
-            try:
-                text = f.read_text(encoding="utf-8")
-            except UnicodeDecodeError:
-                hard.append(f"{rel}: not valid UTF-8")
-                continue
-            except OSError as exc:  # broken symlink, directory named *.md, …
-                hard.append(f"{rel}: could not read: {exc}")
-                continue
-            records, errors = parse_review_lines(text)
-            for lineno, msg in errors:
-                hard.append(f"{rel}:{lineno}: malformed REVIEW line — {msg}")
-            hard.extend(_arithmetic_violations(rel, records))
-            ih, isoft, reused = _integrity_scoped(
-                rel, root, records, ledger=ledger, mode=integrity_mode,
-                fetched_at=fetched_at,
-                fresh=(scope_base is None or rel in changed_shards))
-            reused_total += reused
-            hard.extend(ih)
-            soft.extend(isoft)
-            all_records.extend(records)
+    # the journal's shards — record_files owns where records live
+    for rel, f in record_files(root, ("journal",)):
+        try:
+            text = f.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            hard.append(f"{rel}: not valid UTF-8")
+            continue
+        except OSError as exc:  # broken symlink, directory named *.md, …
+            hard.append(f"{rel}: could not read: {exc}")
+            continue
+        records, errors = parse_review_lines(text)
+        for lineno, msg in errors:
+            hard.append(f"{rel}:{lineno}: malformed REVIEW line — {msg}")
+        hard.extend(_arithmetic_violations(rel, records))
+        ih, isoft, reused = _integrity_scoped(
+            rel, root, records, ledger=ledger, mode=integrity_mode,
+            fetched_at=fetched_at,
+            fresh=(scope_base is None or rel in changed_shards))
+        reused_total += reused
+        hard.extend(ih)
+        soft.extend(isoft)
+        all_records.extend(records)
     if ledger is not None:
         _save_integrity_ledger(ledger_path, ledger)
     if reused_total:
@@ -1151,24 +1247,19 @@ def check(root: Path) -> tuple[list[str], list[str]]:
                             f"tier>={tier}) and no 'review-waived:' line")
 
     # the speckit path's plans: the decisions ledger is a note there too
-    sdir = root / SPECS_DIR
-    if sdir.is_dir():
-        for d in sorted(p for p in sdir.iterdir() if p.is_dir()):
-            plan = d / "plan.md"
-            if not plan.is_file():
-                continue
-            ptext = _unfenced(plan.read_text(encoding="utf-8", errors="replace"))
-            tm = TIER_DECL.search(ptext)
-            if not tm:
-                hard.append(f"{SPECS_DIR}/{d.name}/plan.md: no 'tier: N' declaration — "
-                            f"the review, speckit and issue gates all key on it; a "
-                            f"plan without a tier is off by omission (add the line, "
-                            f"`/plan` puts it there)")
-                continue
-            if int(tm.group(1)) >= 2 and not DECISIONS_HEADING.search(ptext):
-                soft.append(f"{SPECS_DIR}/{d.name}/plan.md: no '## Decisions' section "
-                            f"— decisions made in dialogue have no home here and do "
-                            f"not survive a compaction (journal-state-plans.md, Plans)")
+    for rel, plan in record_files(root, ("spec-plan",)):
+        ptext = _unfenced(plan.read_text(encoding="utf-8", errors="replace"))
+        tm = TIER_DECL.search(ptext)
+        if not tm:
+            hard.append(f"{rel}: no 'tier: N' declaration — "
+                        f"the review, speckit and issue gates all key on it; a "
+                        f"plan without a tier is off by omission (add the line, "
+                        f"`/plan` puts it there)")
+            continue
+        if int(tm.group(1)) >= 2 and not DECISIONS_HEADING.search(ptext):
+            soft.append(f"{rel}: no '## Decisions' section "
+                        f"— decisions made in dialogue have no home here and do "
+                        f"not survive a compaction (journal-state-plans.md, Plans)")
 
     # the speckit path's plans never enter the archive — surface the same
     # presence question there as a note (finish.py is the hard stop)
@@ -1184,16 +1275,16 @@ def check(root: Path) -> tuple[list[str], list[str]]:
     # touches (paths_in_flight). Tier 2 keeps the archive-time threshold:
     # "forgot to archive on merge" and that design are indistinguishable and
     # silent, so the gap is at least made visible.
-    pdir = root / PLANS_ACTIVE
+    active = [p for _rel, p in record_files(root, ("plan",))]
     in_flight = paths_in_flight(root)
     merged_issues = issues_on_integration(root)
-    if pdir.is_dir():
+    if (root / PLANS_ACTIVE).is_dir():
         active_tier2 = 0
         active_dedated: dict[str, int] = {}
-        for p in pdir.glob("*.md"):
+        for p in active:
             key = DATE_PREFIX.sub("", p.stem)
             active_dedated[key] = active_dedated.get(key, 0) + 1
-        for p in sorted(pdir.glob("*.md")):
+        for p in active:
             if p.name.startswith("design-"):
                 continue
             try:

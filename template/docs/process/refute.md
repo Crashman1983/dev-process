@@ -61,11 +61,16 @@ naming why. Then one line in the plan, so the reviewer sees what was attacked:
 
     REFUTE work=<id> round=<r>: <n> scenarios, <k> findings — <fixed / DECISION …>
 
-Each plan records its own: the line names that plan's work (its file name,
-with or without the date, or its issue), a round and what was found. A line
-of one stacked plan does not cover another, and a bare `REFUTE work=<id>`
-is a mention, not a record. After a fix round, the delta re-review
-(`--since`) wants a new line: the fix gets refuted, not the first line reused.
+Each plan records its own — an active plan under `.process-work/plans/` or a
+Spec Kit plan `specs/<dir>/plan.md`: the line names that plan's work (its file
+name, with or without the date, the spec directory's name, or its issue), a
+round and what was found. A line of one stacked plan does not cover another,
+and a bare `REFUTE work=<id>` is a mention, not a record. After a fix round,
+the delta re-review (`--since`) wants a new line: the fix gets refuted, not
+the first line reused. "New" is judged against the same plan at the delta's
+start — the same path, or the path git says it was renamed from — so a
+reformatted or moved old line is no new round, and a second plan of the same
+issue neither lends nor takes one.
 
 The review bundle warns when a diff touches gate code and a plan carries no
 such line (a warning, not a block: the rule is observed before it gates).
@@ -74,4 +79,7 @@ It approximates gate code by path — `scripts/process/`, `.githooks/`,
 change to a product target warns too; say so in the plan (the warning stays,
 the reviewer weighs it) instead of refuting
 it. A line quoted as an example (in a code block, a comment, or with the
-brief's `<id>` placeholder, or wrapped in backticks) does not count.
+brief's `<id>` placeholder, or wrapped in backticks) does not count. Comments
+are read as Markdown renders them: `<!--` at the start of a line hides
+everything up to `-->` (the rest of the file when it never closes); inside
+running text only a comment closed in the same paragraph hides anything.
