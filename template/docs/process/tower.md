@@ -104,13 +104,29 @@ shell pid. `dispatch.py list` shows state and each worker's last line
 (the live screen for a tmux worker — a TUI's log is escape codes),
 `dispatch.py log <branch>` more of it, `dispatch.py say <branch> "…"`
 types a line into a tmux worker (the owner's answer to a question, a
-redirect). `dispatch.py stop <branch>` stops only what dispatch started,
+redirect) and checks that it left the input line — a busy worker leaves
+typed text sitting there, so `say` presses Enter again and exits non-zero,
+naming the branch, when the text still has not gone. `dispatch.py stop <branch>` stops only what dispatch started,
 only when the recorded process is still the recorded one (pid and start
 time), and refuses while the worktree has uncommitted or untracked work
 (a plan not committed dies with the process). `max_workers` caps live
 sessions per host; a held lane counts as no free CPU: a held `full` lane blocks only execute, a held `scoped` (or unknown) lane blocks every phase, and a remote phase sees neither cap nor lane. Both runners strip
 the steward's own `CLAUDECODE`/`CLAUDE_CODE_*` variables from the
-worker's environment: a worker is a session of its own.
+worker's environment: a worker is a session of its own. Local workers
+start under `nice` (policy `worker_nice`, default 10, 0 = off): the merge
+train's suite keeps its CPU while workers test, instead of a pause for
+every worker.
+
+Phases chain themselves: `dispatch.py chain` (from the steward's tick)
+stops a `planned` plan session and queues `execute`; stops a `pushed`
+execute session and queues `review` when origin carries code beyond the
+last attestation (an attestation-only push reviews nothing); stops a
+`review-pass` review session once its attestation is on origin — the
+report is the train's ticket. `blocked` queues nothing: the steward
+decides. A chained stop keeps the worker's report. `dispatch.py queue add`
+queues a phase by hand, `dispatch.py drain` starts what may start now, in
+order: a line the caps or lanes refuse stays queued and does not hold the
+lines behind it.
 
 A phase may run on another host. The policy's `phases.<phase>` overrides
 `command` and `runner` for that phase; `remote: true` makes dispatch hand

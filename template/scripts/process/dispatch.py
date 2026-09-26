@@ -7,6 +7,9 @@ phase, with the model the policy assigns.
     uv run scripts/process/dispatch.py log <branch> [--lines N]   # what the worker shows right now
     uv run scripts/process/dispatch.py say <branch> "<text>"      # a line into an interactive worker
     uv run scripts/process/dispatch.py stop <branch> [--force]
+    uv run scripts/process/dispatch.py chain [--dry-run]           # next phase from the reports, then drain
+    uv run scripts/process/dispatch.py queue add --issue N --phase P [--tier T] [--branch B] | list
+    uv run scripts/process/dispatch.py drain                       # start what the queue may start now
     uv run scripts/process/dispatch.py policy [--tier T]          # what would run
 
 A phase is a session: `plan` opens a worktree on a fresh branch (or reuses
@@ -28,7 +31,24 @@ rc files, no history; `remain-on-exit` keeps a finished worker's last
 screen. Liveness is the pane's own state (`pane_dead`), never a shell
 pid. `log` shows the live screen of a tmux worker (escape codes are not
 the worker's words) and the log tail of a detached one; `say` types a
-line into a tmux worker.
+line into a tmux worker and checks it left the input line: a busy worker
+leaves typed text sitting there (downstream: sessions idled up to 90
+minutes on an unsent line), so `say` presses Enter again, and exits
+non-zero naming the branch when the text still has not gone.
+
+Phases chain themselves (`chain`, run it from the steward's tick): a
+`planned` plan session is stopped and `execute` queued; a `pushed` execute
+session with new code on origin beyond the last attestation is stopped and
+`review` queued; a `review-pass` review session whose attestation is on
+origin is stopped — its report is the train's ticket. `blocked` queues
+nothing: that decision is the steward's. A chained stop keeps the worker's
+report (a plain `stop` writes `idle`). The queue (`queue.json` beside the
+records) is drained in order, and a line the caps or lanes refuse is
+skipped, not waited on: a plan or review behind a refused execute still
+starts. Local workers start under `nice` (policy `worker_nice`, default
+10; 0 = off): the merge train's suite, run at normal priority, keeps its
+CPU while workers test (downstream: timeouts under load dropped innocent
+passengers).
 
 Records live in `<git common dir>/process-dispatch/`: one JSON per
 branch (pid + process start time, tmux window id, phase, model, log) and
@@ -54,6 +74,7 @@ import json
 import os
 import re
 import shlex
+import shutil
 import signal
 import subprocess
 import sys
@@ -178,6 +199,17 @@ def build_argv(policy: dict, model: str, prompt: str, branch: str = "", issue: i
             a = a.replace(k, v)
         out.append(a)
     return out
+
+
+def niced(policy: dict, argv: list[str]) -> list[str]:
+    """A local worker's argv under `nice` (policy `worker_nice`, default 10)."""
+    try:
+        level = int(policy.get("worker_nice", 10))
+    except (TypeError, ValueError):
+        raise SystemExit(f"dispatch: worker_nice in {POLICY} must be an integer") from None
+    if level <= 0 or not shutil.which("nice"):
+        return argv
+    return ["nice", "-n", str(min(level, 19)), *argv]
 
 
 # --- branches and worktrees --------------------------------------------------------
@@ -499,6 +531,8 @@ def start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str |
         return 3
     prompt = prompt_for(phase, issue, tier, branch, model, remote=remote)
     argv = build_argv(policy, model, prompt, branch, issue, phase)
+    if not remote:
+        argv = niced(policy, argv)
     if dry_run:
         held = sorted(held_lanes(root)) if not remote else []
         print(f"dispatch: lane rule allowed — held: {', '.join(held) or 'none'}, phase {phase}"
@@ -641,6 +675,31 @@ def show_log(root: Path, branch: str, lines: int) -> int:
     return 0
 
 
+SAY_RETRIES = 3
+SAY_WAIT_S = 1.5
+# the input line of an interactive harness: a `>` prompt, maybe inside a box
+_PROMPT_LINE = re.compile(r"^[\s│|╭╰─]*>\s?(.*?)[\s│|]*$")
+_sleep = time.sleep
+
+
+def _input_line(window_id: str, pattern: re.Pattern[str]) -> str | None:
+    """What the worker's input line holds now — None when it cannot be read."""
+    r = _tmux("capture-pane", "-p", "-t", window_id)
+    if r.returncode != 0:
+        return None
+    lines = [ln for ln in r.stdout.splitlines() if ln.strip()]
+    for ln in reversed(lines[-12:]):
+        m = pattern.match(ln)
+        if m:
+            return m.group(1)
+    return None
+
+
+def _still_typed(line: str, text: str) -> bool:
+    head = " ".join(text.split())[:20]
+    return bool(head) and " ".join(line.split()).startswith(head)
+
+
 def say(root: Path, branch: str, text: str) -> int:
     found = _load_record(root, branch)
     if found is None or not found[1].get("tmux_window"):
@@ -651,16 +710,33 @@ def say(root: Path, branch: str, text: str) -> int:
     if state != "live":
         print(f"dispatch: {branch} is {state} — nobody is listening", file=sys.stderr)
         return 3
-    r = _tmux("send-keys", "-t", rec["tmux_window"], "-l", text)
-    r2 = _tmux("send-keys", "-t", rec["tmux_window"], "Enter")
+    window = rec["tmux_window"]
+    r = _tmux("send-keys", "-t", window, "-l", text)
+    r2 = _tmux("send-keys", "-t", window, "Enter")
     if r.returncode != 0 or r2.returncode != 0:
         print(f"dispatch: send-keys failed: {(r.stderr or r2.stderr).strip()}", file=sys.stderr)
         return 1
-    print(f"dispatch: said to {branch}: {text[:80]}")
-    return 0
+    try:
+        pattern = re.compile(load_policy(root).get("say_prompt") or _PROMPT_LINE.pattern)
+    except (re.error, SystemExit):
+        pattern = _PROMPT_LINE
+    for attempt in range(SAY_RETRIES + 1):
+        _sleep(SAY_WAIT_S * (attempt + 1))
+        line = _input_line(window, pattern)
+        if line is None:
+            print(f"dispatch: said to {branch}: {text[:80]} (not verified — the input line could not be read)")
+            return 0
+        if not _still_typed(line, text):
+            print(f"dispatch: said to {branch}: {text[:80]}")
+            return 0
+        if attempt < SAY_RETRIES:
+            _tmux("send-keys", "-t", window, "Enter")  # a busy worker queues it now
+    print(f"dispatch: {branch} — the text is still in the input line after {SAY_RETRIES} more Enter; "
+          f"not delivered: {text[:80]}", file=sys.stderr)
+    return 4
 
 
-def stop(root: Path, branch: str, *, force: bool) -> int:
+def stop(root: Path, branch: str, *, force: bool, keep_report: bool = False) -> int:
     found = _load_record(root, branch)
     if found is None:
         print(f"dispatch: {branch} was not started by this tool — stop only what you started", file=sys.stderr)
@@ -698,14 +774,139 @@ def stop(root: Path, branch: str, *, force: bool) -> int:
                 os.kill(pid, signal.SIGKILL)
             except (ProcessLookupError, PermissionError):
                 pass
-    try:
-        _report.write_report(root, "idle", issue=rec.get("issue"), note=f"stopped by dispatch ({rec.get('phase')})",
-                             worker=branch)
-    except SystemExit:
-        pass
+    if not keep_report:
+        try:
+            _report.write_report(root, "idle", issue=rec.get("issue"),
+                                 note=f"stopped by dispatch ({rec.get('phase')})", worker=branch)
+        except SystemExit:
+            pass
     p.unlink()
     print(f"dispatch: stopped {branch}")
     return 0
+
+
+# --- the phase chain and its queue -----------------------------------------------------
+
+QUEUE_FILE = "queue.json"
+BOOKKEEPING = ".process-work/"
+JOURNAL = ".process-work/journal/"
+
+
+def _queue_path(root: Path) -> Path:
+    return _records_dir(root) / QUEUE_FILE
+
+
+def queue_load(root: Path) -> list[dict]:
+    try:
+        data = json.loads(_queue_path(root).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    return [e for e in data if isinstance(e, dict) and e.get("phase") in PHASES and e.get("issue")] \
+        if isinstance(data, list) else []
+
+
+def _queue_save(root: Path, entries: list[dict]) -> None:
+    path = _queue_path(root)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(entries, indent=2), encoding="utf-8")
+    tmp.replace(path)
+
+
+def queue_add(root: Path, *, issue: int, phase: str, tier: int | None, branch: str | None) -> None:
+    entries = queue_load(root)
+    entry = {"issue": issue, "phase": phase, "tier": tier, "branch": branch}
+    if entry not in entries:
+        entries.append(entry)
+        _queue_save(root, entries)
+
+
+def drain(root: Path) -> int:
+    """Start every queued line the caps and lanes allow now, in order; a
+    refused line stays queued and does not hold the ones behind it."""
+    entries = queue_load(root)
+    kept: list[dict] = []
+    for e in entries:
+        rc = start(root, issue=int(e["issue"]), phase=e["phase"], tier=e.get("tier"), branch=e.get("branch"),
+                   title=None, dry_run=False)
+        if rc != 0:
+            kept.append(e)
+    _queue_save(root, kept)
+    print(f"dispatch: queue drained — {len(entries) - len(kept)} started, {len(kept)} waiting")
+    return 0
+
+
+def _commit_touches(root: Path, commit: str) -> tuple[str, list[str]]:
+    subject = _out(root, "log", "-1", "--format=%s", commit)
+    files = _out(root, "diff-tree", "--no-commit-id", "--name-only", "-r", "--root", commit).splitlines()
+    return subject, [f for f in files if f]
+
+
+def new_code_on_origin(root: Path, branch: str) -> bool:
+    """Does origin carry code on `branch` beyond its last attestation (a
+    commit that only touches bookkeeping)? A `pushed` report over an
+    attestation-only push is premature (downstream: two such reports sent
+    workers to review nothing)."""
+    if _git(root, "fetch", "-q", "origin", branch).returncode != 0:
+        return False
+    tip = _out(root, "rev-parse", "FETCH_HEAD")
+    base = ""
+    for ref in ("origin/main", "origin/master", "main", "master"):
+        base = _out(root, "merge-base", tip, ref)
+        if base:
+            break
+    commits = _out(root, "rev-list", tip, *([f"^{base}"] if base else [])).splitlines()
+    for c in commits:  # newest first: code before the last attestation is found → new code
+        _subject, files = _commit_touches(root, c)
+        if any(not f.startswith(BOOKKEEPING) for f in files):
+            return True
+        if any(f.startswith(JOURNAL) for f in files):
+            return False  # the last attestation; everything newer was bookkeeping
+    return False
+
+
+def attest_on_origin(root: Path, branch: str) -> bool:
+    """Is the branch's local head — its attestation — what origin holds?"""
+    line = _out(root, "ls-remote", "--heads", "origin", branch)
+    local = _out(root, "rev-parse", "--verify", "-q", f"refs/heads/{branch}")
+    if not line or not local or line.split()[0] != local:
+        return False
+    _subject, files = _commit_touches(root, local)
+    return bool(files) and all(f.startswith(BOOKKEEPING) for f in files) and any(f.startswith(JOURNAL) for f in files)
+
+
+def chain(root: Path, *, dry_run: bool = False) -> int:
+    latest: dict[str, dict] = {}
+    for r in sorted(_report.read_reports(root), key=lambda r: r.get("epoch", 0)):
+        latest[r.get("worker", "")] = r
+    for rec in records(root):
+        if rec.get("remote"):
+            continue  # its reports and liveness live on the other host
+        branch, phase = rec["branch"], rec.get("phase")
+        state = (latest.get(branch) or {}).get("state")
+        nxt = None
+        if state == "planned" and phase == "plan":
+            nxt = "execute"
+        elif state == "pushed" and phase == "execute":
+            if not new_code_on_origin(root, branch):
+                print(f"dispatch: {branch} reported pushed, but origin has no code beyond its last "
+                      "attestation — not queuing a review")
+                continue
+            nxt = "review"
+        elif state == "review-pass" and phase == "review":
+            if not attest_on_origin(root, branch):
+                print(f"dispatch: {branch} passed review — waiting for its attestation on origin")
+                continue
+            print(f"dispatch: {branch} passed review, attestation on origin — a train candidate")
+        else:
+            continue  # blocked and everything else: the steward decides
+        if dry_run:
+            print(f"dispatch: would stop {branch} ({phase})" + (f" and queue {nxt}" if nxt else ""))
+            continue
+        if stop(root, branch, force=False, keep_report=True) != 0:
+            continue  # uncommitted work: the worker commits first
+        if nxt:
+            queue_add(root, issue=int(rec["issue"]), phase=nxt, tier=rec.get("tier"), branch=branch)
+    return 0 if dry_run else drain(root)
 
 
 def main(argv: list[str]) -> int:
@@ -729,6 +930,17 @@ def main(argv: list[str]) -> int:
     st = sub.add_parser("stop")
     st.add_argument("branch")
     st.add_argument("--force", action="store_true")
+    ch = sub.add_parser("chain")
+    ch.add_argument("--dry-run", action="store_true")
+    qu = sub.add_parser("queue")
+    qsub = qu.add_subparsers(dest="queue_command", required=True)
+    qa = qsub.add_parser("add")
+    qa.add_argument("--issue", type=int, required=True)
+    qa.add_argument("--phase", choices=PHASES, required=True)
+    qa.add_argument("--tier", type=int)
+    qa.add_argument("--branch")
+    qsub.add_parser("list")
+    sub.add_parser("drain")
     po = sub.add_parser("policy")
     po.add_argument("--tier", type=int)
     a = p.parse_args(argv)
@@ -744,6 +956,17 @@ def main(argv: list[str]) -> int:
         return say(root, a.branch, a.text)
     if a.command == "stop":
         return stop(root, a.branch, force=a.force)
+    if a.command == "chain":
+        return chain(root, dry_run=a.dry_run)
+    if a.command == "queue":
+        if a.queue_command == "add":
+            queue_add(root, issue=a.issue, phase=a.phase, tier=a.tier, branch=a.branch)
+        for e in queue_load(root):
+            print(f"#{e['issue']} {e['phase']}" + (f" tier {e['tier']}" if e.get("tier") is not None else "")
+                  + (f" on {e['branch']}" if e.get("branch") else ""))
+        return 0
+    if a.command == "drain":
+        return drain(root)
     policy = load_policy(root)
     for ph in PHASES:
         print(f"{ph}: {model_for(policy, a.tier, ph)}")

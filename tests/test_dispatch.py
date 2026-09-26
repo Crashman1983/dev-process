@@ -501,3 +501,160 @@ def test_remote_hand_over_names_the_session_it_started(render, tmp_path):
     data["phases"]["review"]["handover_id"] = "(unclosed"
     pol.write_text(json.dumps(data))
     assert "not a regex" in _dispatch(out, "policy").stderr
+
+
+# --- say checks delivery; phases chain; the queue skips; workers run niced ---
+
+class _Pane:
+    """A fake tmux pane: send-keys are recorded, capture-pane shows `screens`
+    one after the other (the last one repeats)."""
+
+    def __init__(self, screens):
+        self.screens, self.keys = list(screens), []
+
+    def __call__(self, *args):
+        if args[0] == "send-keys":
+            self.keys.append(args[-1])
+            return subprocess.CompletedProcess(args, 0, "", "")
+        if args[0] == "capture-pane":
+            screen = self.screens.pop(0) if len(self.screens) > 1 else self.screens[0]
+            return subprocess.CompletedProcess(args, 0, screen, "")
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+
+def _say_setup(render, tmp_path, monkeypatch, screens):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    mod = _load_dispatch(out)
+    pane = _Pane(screens)
+    monkeypatch.setattr(mod, "_tmux", pane)
+    monkeypatch.setattr(mod, "_sleep", lambda _s: None)
+    monkeypatch.setattr(mod, "_load_record", lambda root, b: (tmp_path / "r.json",
+                                                              {"tmux_window": "@1", "state": "live"}))
+    return out, mod, pane
+
+
+BOX = "╭──────╮\n│ > {} │\n╰──────╯\n"
+
+
+def test_say_presses_enter_again_until_the_text_left_the_input_line(render, tmp_path, monkeypatch):
+    stuck, empty = BOX.format("Lane a is free for you"), BOX.format("")
+    out, mod, pane = _say_setup(render, tmp_path, monkeypatch, [stuck, stuck, empty])
+    assert mod.say(out, "w1", "Lane a is free for you") == 0
+    assert pane.keys == ["Lane a is free for you", "Enter", "Enter", "Enter"]
+
+
+def test_say_fails_naming_the_branch_when_the_text_never_leaves(render, tmp_path, monkeypatch, capsys):
+    out, mod, pane = _say_setup(render, tmp_path, monkeypatch, [BOX.format("the train is through")])
+    assert mod.say(out, "w1", "the train is through") == 4
+    assert pane.keys.count("Enter") == 1 + mod.SAY_RETRIES
+    assert "w1" in capsys.readouterr().err
+
+
+def test_say_counts_a_queued_message_as_delivered(render, tmp_path, monkeypatch):
+    # mid-turn: the harness shows the message above an empty input line
+    screen = "> decision text\n  (queued)\n" + BOX.format("")
+    out, mod, pane = _say_setup(render, tmp_path, monkeypatch, [screen])
+    assert mod.say(out, "w1", "decision text") == 0
+    assert pane.keys == ["decision text", "Enter"]
+
+
+def test_drain_skips_a_refused_line_instead_of_waiting_on_it(render, tmp_path, monkeypatch):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    mod = _load_dispatch(out)
+    for issue, phase in ((1, "execute"), (2, "plan"), (3, "review")):
+        mod.queue_add(out, issue=issue, phase=phase, tier=2, branch=None)
+    started = []
+
+    def fake_start(root, *, issue, phase, **_kw):
+        if phase == "execute":
+            return 3  # a held lane refuses execute
+        started.append((issue, phase))
+        return 0
+
+    monkeypatch.setattr(mod, "start", fake_start)
+    mod.drain(out)
+    assert started == [(2, "plan"), (3, "review")]
+    assert [e["issue"] for e in mod.queue_load(out)] == [1]
+
+
+def test_chain_moves_each_report_to_its_next_phase(render, tmp_path, monkeypatch):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    mod = _load_dispatch(out)
+    recs = [
+        {"branch": "a", "issue": 1, "tier": 2, "phase": "plan"},
+        {"branch": "b", "issue": 2, "tier": 2, "phase": "execute"},
+        {"branch": "c", "issue": 3, "tier": 2, "phase": "execute"},
+        {"branch": "d", "issue": 4, "tier": 2, "phase": "review"},
+        {"branch": "e", "issue": 5, "tier": 2, "phase": "review"},
+        {"branch": "f", "issue": 6, "tier": 2, "phase": "execute"},
+    ]
+    reports = [{"worker": "a", "state": "planned", "epoch": 1}, {"worker": "b", "state": "pushed", "epoch": 1},
+               {"worker": "c", "state": "pushed", "epoch": 1}, {"worker": "d", "state": "review-pass", "epoch": 1},
+               {"worker": "e", "state": "review-pass", "epoch": 1}, {"worker": "f", "state": "blocked", "epoch": 1}]
+    stopped, started = [], []
+    monkeypatch.setattr(mod, "records", lambda root: recs)
+    monkeypatch.setattr(mod._report, "read_reports", lambda root, **_kw: reports)
+    monkeypatch.setattr(mod, "new_code_on_origin", lambda root, b: b == "b")  # c pushed only an attestation
+    monkeypatch.setattr(mod, "attest_on_origin", lambda root, b: b == "d")    # e's attestation is not pushed
+    monkeypatch.setattr(mod, "stop", lambda root, b, **kw: stopped.append((b, kw.get("keep_report"))) or 0)
+    monkeypatch.setattr(mod, "start", lambda root, *, issue, phase, **_kw: started.append((issue, phase)) or 0)
+    mod.chain(out)
+    assert stopped == [("a", True), ("b", True), ("d", True)]
+    assert started == [(1, "execute"), (2, "review")]
+
+
+def _origin_pair(tmp_path):
+    origin = tmp_path / "origin.git"
+    subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(origin)], check=True)
+    work = tmp_path / "work"
+    work.mkdir()
+    _git(work, "init", "-q", "-b", "main")
+    _git(work, "config", "user.email", "t@t")
+    _git(work, "config", "user.name", "t")
+    (work / "a.py").write_text("a = 0\n")
+    _git(work, "add", "-A")
+    _git(work, "commit", "-q", "-m", "base")
+    _git(work, "remote", "add", "origin", str(origin))
+    _git(work, "push", "-q", "origin", "main")
+    _git(work, "fetch", "-q", "origin")
+    _git(work, "checkout", "-q", "-b", "w")
+    return work
+
+
+def _commit_file(root, rel, text, msg):
+    (root / rel).parent.mkdir(parents=True, exist_ok=True)
+    (root / rel).write_text(text)
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", msg)
+
+
+def test_new_code_on_origin_sees_past_bookkeeping_and_stops_at_the_attestation(render, tmp_path):
+    out = render(tmp_path / "p", {"project_name": "d", "modules": {}})
+    mod = _load_dispatch(out)
+    work = _origin_pair(tmp_path)
+    _commit_file(work, "a.py", "a = 1\n", "code")
+    _git(work, "push", "-q", "origin", "w")
+    assert mod.new_code_on_origin(work, "w")
+    _commit_file(work, ".process-work/journal/j.md", "REVIEW …\n", "docs: attest")
+    _git(work, "push", "-q", "origin", "w")
+    assert not mod.new_code_on_origin(work, "w")  # an attestation-only push is no work for a review
+    assert mod.attest_on_origin(work, "w")
+    _commit_file(work, ".process-work/plans/p.md", "# plan\n", "plan note")
+    _commit_file(work, "a.py", "a = 2\n", "more code")
+    assert not mod.attest_on_origin(work, "w")  # local head moved past what origin holds
+    _git(work, "push", "-q", "origin", "w")
+    assert mod.new_code_on_origin(work, "w")
+
+
+def test_local_workers_start_niced(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    mod = _load_dispatch(out)
+    if shutil.which("nice"):
+        assert mod.niced({}, ["claude", "x"]) == ["nice", "-n", "10", "claude", "x"]
+        assert mod.niced({"worker_nice": 5}, ["claude"]) == ["nice", "-n", "5", "claude"]
+    assert mod.niced({"worker_nice": 0}, ["claude"]) == ["claude"]
+    with pytest.raises(SystemExit):
+        mod.niced({"worker_nice": "high"}, ["claude"])
