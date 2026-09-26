@@ -67,10 +67,20 @@ name, with or without the date, the spec directory's name, or its issue), a
 round and what was found. A line of one stacked plan does not cover another,
 and a bare `REFUTE work=<id>` is a mention, not a record. After a fix round,
 the delta re-review (`--since`) wants a new line: the fix gets refuted, not
-the first line reused. "New" is judged against the same plan at the delta's
-start — the same path, or the path git says it was renamed from — so a
-reformatted or moved old line is no new round, and a second plan of the same
-issue neither lends nor takes one.
+the first line reused. A line is old when the plan's own path at the delta's
+start already had that round, or when any plan at the start (archived ones
+included) carried the same line — same work, same round, same text after the
+colon. So a reformatted, moved, archived-and-copied or merged old line is no
+new round, and a second plan of the same issue neither lends nor takes one:
+its own new line says what it found. An old line whose text is edited and
+that moves to another path reads as new — edit a record, and it is yours.
+
+Which plans are checked: every active plan in `.process-work/plans/`, and a
+Spec Kit plan `specs/<dir>/plan.md` only while it is under work — the branch
+changes `specs/<dir>/`, or its `tasks.md` has an unticked task. Spec Kit plans
+never archive; a finished one (or a product document at `specs/<x>/plan.md`)
+is not asked for a new round in every later delta. `--plan <name>` bundles
+what it names either way (a Spec Kit plan by its directory or its label).
 
 The review bundle warns when a diff touches gate code and a plan carries no
 such line (a warning, not a block: the rule is observed before it gates).
@@ -82,4 +92,9 @@ it. A line quoted as an example (in a code block, a comment, or with the
 brief's `<id>` placeholder, or wrapped in backticks) does not count. Comments
 are read as Markdown renders them: `<!--` at the start of a line hides
 everything up to `-->` (the rest of the file when it never closes); inside
-running text only a comment closed in the same paragraph hides anything.
+running text only a comment closed in the same paragraph hides anything, and
+a `<!--` inside backticks is code. Known limits (`check_review.readable`):
+the `<!-->` form, comments inside block quotes or deep list items, other HTML
+block kinds and entity-escaped markers are not modelled. `attest.py` reads
+`ROOT-CAUSE` lines the same way: a fenced, commented or placeholder
+(`<cause>`) line is no cause.

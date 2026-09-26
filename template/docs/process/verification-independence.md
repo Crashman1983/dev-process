@@ -72,9 +72,10 @@ attestation: a fresh process over the bundle is `bundle,non-implementing`; add
 
 **Delta rounds.** After a failed round, `--since <head the last round
 reviewed>` builds a bundle whose diff is only the fixes since that head, plus
-the prior round's report from `.process-work/reviews/` (the newest one whose
-header `work:`/`review:` or file name names this work — its plan slug or
-issue; never another item's) and the full-branch
+the prior round's report from `.process-work/reviews/` (the newest one of
+this work: a header `work:` equal to one of its issues — same repository — or
+plan slugs; without a `work:` header, a file name or `review:` value naming
+it as a whole word; issues first; never another item's) and the full-branch
 stat — the reviewer re-reads what changed and what it was told, not the whole
 branch again. The full-branch digest fields stay in the bundle, so the
 attestation still binds the verdict to the complete artifact. Tier 3 is the

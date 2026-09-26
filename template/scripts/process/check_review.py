@@ -263,6 +263,113 @@ def _unfenced(text: str) -> str:
     return "\n".join(out)
 
 
+# HTML comments as CommonMark renders them. A line starting with `<!--` (at
+# most three spaces in) opens an HTML block that ends at the line carrying
+# `-->`; unclosed, it hides the rest of the file. In running text a comment is
+# hidden only when it closes within its paragraph — an unclosed `<!--` there
+# is literal text (downstream: "write `<!--` to start a comment" in prose
+# swallowed a real record below it). Scanned left to right, the way the
+# renderer does: a code span (`<!--` in backticks) is code, a comment opened
+# first hides the backticks inside it, `\`` and `\<` are escaped characters.
+# Linear time: once no `-->` (or no closing backtick run of a length) follows,
+# none is searched again.
+# Known limits (a record may be read where a renderer hides it, or the other
+# way round): the `<!-->` / `<!--->` forms, comments inside container blocks
+# (block quotes, list items indented past three spaces), HTML blocks of other
+# kinds (`<div>`, `<pre>`, `<script>`), indented code blocks, entity-escaped
+# markers, and setext/table edge cases are not modelled.
+_BLOCK_COMMENT = re.compile(r"^ {0,3}<!--")
+_ASCII_PUNCT = set("!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~")
+
+
+def _closing_run(para: str, run: int, pos: int) -> int:
+    """Start of the next backtick run of exactly `run` from `pos`, or -1."""
+    ticks = "`" * run
+    while True:
+        k = para.find(ticks, pos)
+        if k < 0:
+            return -1
+        end = k + run
+        while end < len(para) and para[end] == "`":
+            end += 1
+        if end - k == run:
+            return k
+        pos = end
+
+
+def _inline_uncommented(para: str) -> str:
+    out: list[str] = []
+    start = i = 0
+    n = len(para)
+    no_comment_close = False
+    no_tick_close: set[int] = set()
+    while i < n:
+        c = para[i]
+        if c == "\\" and i + 1 < n and para[i + 1] in _ASCII_PUNCT:
+            i += 2
+            continue
+        if c == "`":
+            j = i
+            while j < n and para[j] == "`":
+                j += 1
+            run = j - i
+            if run not in no_tick_close:
+                k = _closing_run(para, run, j)
+                if k >= 0:
+                    i = k + run
+                    continue
+                no_tick_close.add(run)
+            i = j
+            continue
+        if c == "<" and not no_comment_close and para.startswith("<!--", i):
+            k = para.find("-->", i + 4)
+            if k < 0:
+                no_comment_close = True
+                i += 4
+                continue
+            out.append(para[start:i])
+            start = i = k + 3
+            continue
+        i += 1
+    out.append(para[start:])
+    return "".join(out)
+
+
+def uncommented(text: str) -> str:
+    """`text` without what an HTML comment hides when rendered."""
+    out: list[str] = []
+    para: list[str] = []
+
+    def flush() -> None:
+        if para:
+            out.append(_inline_uncommented("\n".join(para)))
+            para.clear()
+
+    in_block = False
+    for line in text.splitlines():
+        if in_block:
+            in_block = "-->" not in line
+            continue
+        if _BLOCK_COMMENT.match(line):
+            flush()
+            in_block = "-->" not in line[line.index("<!--") + 4:]
+            continue
+        if not line.strip():
+            flush()
+            out.append("")
+            continue
+        para.append(line)
+    flush()
+    return "\n".join(out)
+
+
+def readable(text: str) -> str:
+    """What a reader of the rendered Markdown sees of a record file: fenced
+    blocks and HTML comments removed — REFUTE and ROOT-CAUSE lines (and a
+    tool's view of REVIEW lines in plans) are read through this."""
+    return uncommented(_unfenced(text))
+
+
 def parse_review_lines(text: str) -> tuple[list[tuple[int, dict]], list[tuple[int, str]]]:
     """Return (records, errors). A record is (lineno, field-dict) for a
     well-formed REVIEW line (optionally bulleted); an error is (lineno,
@@ -1139,7 +1246,7 @@ def _plan_work_ids(stem: str, text: str, *, include_dedated: bool) -> set[str]:
     return ids
 
 
-UNCHECKED =re.compile(r"^\s*- \[ \] ", re.MULTILINE)
+UNCHECKED = re.compile(r"^\s*- \[ \] ", re.MULTILINE)
 DECISIONS_HEADING = re.compile(r"^#{2,4}\s+Decisions\b", re.IGNORECASE | re.MULTILINE)
 
 

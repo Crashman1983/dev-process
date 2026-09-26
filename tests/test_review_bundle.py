@@ -654,9 +654,9 @@ def _spec_kit_repo(out):
 def test_a_spec_kit_plan_is_under_review_and_carries_its_refute_line(render, tmp_path):
     out = render(tmp_path, {"project_name": "d", "modules": {}})
     _spec_kit_repo(out)
-    t = _run(out, "--base", "main").stdout
+    t = _bundle(out, "--base", "main").stdout
     assert "### specs/001-widget/plan.md" in t and "REFUTE WARNING" not in t
-    assert "### specs/001-widget/plan.md" in _run(out, "--base", "main", "--plan", "001-widget").stdout
+    assert "### specs/001-widget/plan.md" in _bundle(out, "--base", "main", "--plan", "001-widget").stdout
 
 
 def test_a_delta_needs_a_new_refute_line_in_a_spec_kit_plan(render, tmp_path):
@@ -666,11 +666,11 @@ def test_a_delta_needs_a_new_refute_line_in_a_spec_kit_plan(render, tmp_path):
     plan = _spec_kit_repo(out)
     reviewed = _git(out, "rev-parse", "HEAD").stdout.strip()
     _gate_commit(out, "scripts/process/g.py", "x = 2\n", "fix round")
-    t = _run(out, "--base", "main", "--since", reviewed).stdout
+    t = _bundle(out, "--base", "main", "--since", reviewed).stdout
     assert "**REFUTE WARNING:** this delta" in t and "specs/001-widget/plan.md carries no new" in t
     plan.write_text(plan.read_text() + "REFUTE work=9 round=2: 6 scenarios, 0 findings\n")
     _git(out, "commit", "-q", "-am", "refute of the fix")
-    assert "REFUTE WARNING" not in _run(out, "--base", "main", "--since", reviewed).stdout
+    assert "REFUTE WARNING" not in _bundle(out, "--base", "main", "--since", reviewed).stdout
 
 
 def test_stacked_plans_of_one_issue_do_not_cancel_each_others_new_round(render, tmp_path):
@@ -688,11 +688,11 @@ def test_stacked_plans_of_one_issue_do_not_cancel_each_others_new_round(render, 
     _gate_commit(out, "scripts/process/g.py", "x = 2\n", "fix round")
     widget.write_text(widget.read_text() + "REFUTE work=9 round=2: 6 scenarios, 0 findings\n")
     _git(out, "commit", "-q", "-am", "refute of the fix, first plan")
-    t = _run(out, "--base", "main", "--since", reviewed).stdout
+    t = _bundle(out, "--base", "main", "--since", reviewed).stdout
     assert "**REFUTE WARNING:**" in t and "2026-07-10-other.md carries" in t
     other.write_text(other.read_text() + "\nREFUTE work=9 round=1: 5 scenarios, 0 findings\n")
     _git(out, "commit", "-q", "-am", "refute of the fix, second plan")
-    assert "REFUTE WARNING" not in _run(out, "--base", "main", "--since", reviewed).stdout
+    assert "REFUTE WARNING" not in _bundle(out, "--base", "main", "--since", reviewed).stdout
 
 
 def test_a_renamed_and_rewritten_plan_does_not_turn_its_old_line_new(render, tmp_path):
@@ -712,7 +712,7 @@ def test_a_renamed_and_rewritten_plan_does_not_turn_its_old_line_new(render, tmp
         + "\nREFUTE work=9 round=1: 12 scenarios, 2 findings — fixed\n")
     _git(out, "add", "-A")
     _git(out, "commit", "-q", "-m", "rewrite the plan")
-    assert "**REFUTE WARNING:** this delta" in _run(out, "--base", "main", "--since", reviewed).stdout
+    assert "**REFUTE WARNING:** this delta" in _bundle(out, "--base", "main", "--since", reviewed).stdout
 
 
 def test_an_inline_comment_opener_in_prose_does_not_hide_a_real_line(render, tmp_path):
@@ -728,11 +728,11 @@ def test_an_inline_comment_opener_in_prose_does_not_hide_a_real_line(render, tmp
                   "\nA closed <!-- aside --> comment in running text.\n\n" + line):
         plan.write_text(base + prose)
         _git(out, "commit", "-q", "-am", "plan")
-        assert "REFUTE WARNING" not in _run(out, "--base", "main").stdout, prose
+        assert "REFUTE WARNING" not in _bundle(out, "--base", "main").stdout, prose
     # a comment closed later in the same paragraph still hides what it spans
     plan.write_text(base + "\nNote <!-- hidden\n" + line + "--> end.\n")
     _git(out, "commit", "-q", "-am", "plan")
-    assert "**REFUTE WARNING:**" in _run(out, "--base", "main").stdout
+    assert "**REFUTE WARNING:**" in _bundle(out, "--base", "main").stdout
 
 
 def test_a_delta_finds_the_previous_report_by_its_header(render, tmp_path):
@@ -750,6 +750,234 @@ def test_a_delta_finds_the_previous_report_by_its_header(render, tmp_path):
     (out / "widget.py").write_text("def widget():\n    return 43\n")
     _git(out, "add", "-A")
     _git(out, "commit", "-q", "-m", "fix: widget")
-    text = _run(out, "--base", "main", "--since", previous).stdout
+    text = _bundle(out, "--base", "main", "--since", previous).stdout
     findings = text.split("## Findings from the previous round", 1)[1].split("## Diff under review", 1)[0]
     assert "FINDING prior finding" in findings and "stranger" not in findings
+
+
+# --- refute of the record-homes fix
+
+
+def _bundle(out, *args):
+    """A bundle that was really built — a `not in` on an empty stdout proves nothing."""
+    r = _run(out, *args, "--skip-preflight")
+    assert r.returncode == 0 and "# Review bundle" in r.stdout, r.stdout[-400:] + r.stderr
+    return r
+
+
+R1_LINE = "REFUTE work=9 round=1: 12 scenarios, 2 findings — fixed\n"
+
+
+def _findings(text):
+    return text.split("## Findings from the previous round", 1)[1].split("## Diff under review", 1)[0]
+
+
+def _spec(out, name, plan, tasks=None):
+    d = out / "specs" / name
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "plan.md").write_text(plan)
+    if tasks is not None:
+        (d / "tasks.md").write_text(tasks)
+    return d / "plan.md"
+
+
+def _spec_only_repo(out, on_main=()):
+    """main carries `on_main` (spec dirs written before the base commit); the
+    branch works on specs/002-new only."""
+    for name, plan, tasks in on_main:
+        _spec(out, name, plan, tasks)
+    _seed_repo(out)
+    _git(out, "rm", "-q", ".process-work/plans/2026-07-09-widget.md")
+    plan = _spec(out, "002-new", "# Plan\n\ntier: 2\nissue: #9\n\n" + R1_LINE, "- [ ] T1 build it\n")
+    _gate_commit(out, "scripts/process/g.py", msg="gate change")
+    return plan
+
+
+def test_a_finished_spec_kit_plan_is_not_under_review(render, tmp_path):
+    # E1: Spec Kit plans never archive — a finished one is not this branch's work
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    plan = _spec_only_repo(out, [("001-old", "# Old\n\ntier: 2\nissue: #3\n\n"
+                                  "REFUTE work=3 round=1: 4 scenarios, 0 findings\n", "- [x] T1 done\n")])
+    reviewed = _git(out, "rev-parse", "HEAD").stdout.strip()
+    _gate_commit(out, "scripts/process/g.py", "x = 2\n", "fix round")
+    plan.write_text(plan.read_text() + "REFUTE work=9 round=2: 6 scenarios, 0 findings\n")
+    _git(out, "commit", "-q", "-am", "refute of the fix")
+    t = _bundle(out, "--base", "main", "--since", reviewed).stdout
+    assert "REFUTE WARNING" not in t and "specs/001-old" not in t, t[:600]
+    assert "### specs/002-new/plan.md" in t
+    # asked for by name, it is bundled
+    assert "### specs/001-old/plan.md" in _bundle(out, "--base", "main", "--plan", "001-old").stdout
+
+
+def test_an_unfinished_spec_kit_plan_elsewhere_is_under_review(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _spec_only_repo(out, [("003-wip", "# Wip\n\ntier: 2\nissue: #4\n", "- [x] T1\n- [ ] T2\n")])
+    assert "### specs/003-wip/plan.md" in _bundle(out, "--base", "main").stdout
+
+
+def test_an_unrelated_tier_three_spec_plan_does_not_refuse_a_delta(render, tmp_path):
+    # E2: a product document at specs/api/plan.md, no speckit module
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _spec_only_repo(out, [("api", "# API plan\n\ntier: 3\n", None)])
+    r = _bundle(out, "--base", "main", "--since", "HEAD~1")
+    assert r.returncode == 0, r.stderr
+    assert "specs/api" not in r.stdout and "REFUTE WARNING" not in _bundle(out, "--base", "main").stdout
+    # a Tier 3 plan under review still refuses — and says how to narrow
+    r = _run(out, "--base", "main", "--since", "HEAD~1", "--plan", "api")
+    assert r.returncode != 0 and "specs/api/plan.md declares tier: 3" in r.stderr and "--plan" in r.stderr
+
+
+def test_the_printed_label_of_a_spec_kit_plan_works_as_plan_filter(render, tmp_path):
+    # D13b
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _spec_only_repo(out)
+    assert "### specs/002-new/plan.md" in _bundle(out, "--base", "main", "--plan", "specs/002-new").stdout
+
+
+def test_a_report_of_another_work_is_never_this_items(render, tmp_path):
+    # R1: `review:` matched inside another word, `work:` naming another issue
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    reports = out / ".process-work/reviews"
+    reports.mkdir(parents=True)
+    (reports / "2026-07-10-r.md").write_text("review: widgets-fix\nwork: #12\n\nFINDING stranger's finding\n")
+    (reports / "2026-07-11-widget.md").write_text("review: widget\nwork: #12\n\nFINDING stranger's too\n")
+    t = _bundle(out, "--base", "main", "--since", "HEAD").stdout
+    assert "stranger" not in _findings(t) and "no review report for this work item" in t
+    # issues are tried first: a report of #9 beats a newer one named after the slug
+    (reports / "2026-07-12-a.md").write_text("review: a\nwork: #9\n\nFINDING by issue\n")
+    (reports / "2026-07-13-widget-notes.md").write_text("FINDING by name\n")
+    assert "FINDING by issue" in _findings(_bundle(out, "--base", "main", "--since", "HEAD").stdout)
+
+
+def test_another_repositorys_issue_is_not_this_repos(render, tmp_path):
+    # R2
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    reports = out / ".process-work/reviews"
+    reports.mkdir(parents=True)
+    (reports / "2026-07-10-r.md").write_text("review: r\nwork: other/repo#9\n\nFINDING stranger's finding\n")
+    assert "stranger" not in _findings(_bundle(out, "--base", "main", "--since", "HEAD").stdout)
+
+
+def _delta_repo(out):
+    """widget (#9) with round 1 reviewed at `reviewed`, then a fix round of
+    gate code."""
+    _seed_repo(out)
+    plans = out / ".process-work/plans"
+    widget = plans / "2026-07-09-widget.md"
+    widget.write_text(widget.read_text() + "\n" + R1_LINE)
+    _gate_commit(out, "scripts/process/g.py")
+    reviewed = _git(out, "rev-parse", "HEAD").stdout.strip()
+    _gate_commit(out, "scripts/process/g.py", "x = 2\n", "fix round")
+    return plans, widget, reviewed
+
+
+def test_an_archived_plan_line_copied_into_a_new_plan_is_not_new(render, tmp_path):
+    # D3: a pure move to archive/ is a rename to git; the copied line is old
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    plans, widget, reviewed = _delta_repo(out)
+    (plans / "archive").mkdir(exist_ok=True)
+    _git(out, "mv", str(widget), str(plans / "archive" / widget.name))
+    (plans / "2026-07-11-next.md").write_text("# Next\n\ntier: 2\nissue: #9\n\nA fresh approach.\n\n" + R1_LINE)
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "archive and replan")
+    assert "**REFUTE WARNING:** this delta" in _bundle(out, "--base", "main", "--since", reviewed).stdout
+
+
+def test_a_new_stacked_plan_keeps_its_round_when_the_old_one_is_archived_with_edits(render, tmp_path):
+    # D9: no similarity score decides — the new plan's own line is new
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    plans, widget, reviewed = _delta_repo(out)
+    (plans / "archive").mkdir(exist_ok=True)
+    (plans / "archive" / widget.name).write_text(
+        "# Archived\n\ntier: 2\nissue: #9\n\n" + "".join(f"- outcome {i}\n" for i in range(30)) + R1_LINE)
+    _git(out, "rm", "-q", str(widget))
+    (plans / "2026-07-11-next.md").write_text(
+        "# Next\n\ntier: 2\nissue: #9\n\nREFUTE work=9 round=1: 7 scenarios, 1 finding — fixed\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "archive with edits, stacked plan")
+    assert "REFUTE WARNING" not in _bundle(out, "--base", "main", "--since", reviewed).stdout
+
+
+def test_a_line_that_starts_to_count_with_a_new_id_is_not_new(render, tmp_path):
+    # D6/D11: old rounds are read with the plan's CURRENT ids
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    widget = out / ".process-work/plans/2026-07-09-widget.md"
+    widget.write_text(widget.read_text() + "\nREFUTE work=12 round=1: 5 scenarios, 0 findings\n")
+    _gate_commit(out, "scripts/process/g.py")
+    reviewed = _git(out, "rev-parse", "HEAD").stdout.strip()
+    _gate_commit(out, "scripts/process/g.py", "x = 2\n", "fix round")
+    widget.write_text(widget.read_text().replace("issue: #9\n", "issue: #9\nissue: #12\n"))
+    _git(out, "commit", "-q", "-am", "the plan takes over #12")
+    assert "**REFUTE WARNING:** this delta" in _bundle(out, "--base", "main", "--since", reviewed).stdout
+
+
+def test_a_copied_plan_brings_no_new_round(render, tmp_path):
+    # D1: a copy keeping the old line
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    plans, widget, reviewed = _delta_repo(out)
+    widget.write_text(widget.read_text() + "REFUTE work=9 round=2: 6 scenarios, 0 findings\n")
+    _git(out, "commit", "-q", "-am", "refute of the fix")
+    assert "REFUTE WARNING" not in _bundle(out, "--base", "main", "--since", reviewed).stdout
+    (plans / "2026-07-11-copy.md").write_text("# Copy\n\ntier: 2\nissue: #9\n\n" + R1_LINE)
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "a copy of the plan")
+    t = _bundle(out, "--base", "main", "--since", reviewed).stdout
+    assert "**REFUTE WARNING:**" in t and "2026-07-11-copy.md carries" in t
+
+
+def test_a_stacked_plans_old_round_merged_into_the_other_is_not_new(render, tmp_path):
+    # D2
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    plans, widget, _ = _delta_repo(out)
+    other = plans / "2026-07-10-other.md"
+    other.write_text("# Other\n\ntier: 2\nissue: #9\n\nREFUTE work=9 round=2: 3 scenarios, 0 findings\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "stacked plan")
+    reviewed = _git(out, "rev-parse", "HEAD").stdout.strip()
+    _gate_commit(out, "scripts/process/g.py", "x = 3\n", "second fix round")
+    widget.write_text(widget.read_text() + "REFUTE work=9 round=2: 3 scenarios, 0 findings\n")
+    _git(out, "rm", "-q", str(other))
+    _git(out, "commit", "-q", "-am", "merge the stacked plan into the widget")
+    assert "**REFUTE WARNING:** this delta" in _bundle(out, "--base", "main", "--since", reviewed).stdout
+
+
+def test_a_backtick_inside_a_comment_does_not_unhide_it(render, tmp_path):
+    # C1/C2: the comment opened first wins; an escaped backtick opens no span
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    _gate_commit(out, "scripts/process/g.py")
+    plan = out / ".process-work/plans/2026-07-09-widget.md"
+    base = plan.read_text()
+    for hidden in ("\nNote <!-- a `tick\n" + R1_LINE + "--> and `more` here.\n",
+                   "\nEscaped \\` then <!-- hidden\n" + R1_LINE + "--> and ` here.\n"):
+        plan.write_text(base + hidden)
+        _git(out, "commit", "-q", "-am", "plan")
+        assert "**REFUTE WARNING:**" in _bundle(out, "--base", "main").stdout, hidden
+
+
+def test_many_unclosed_comment_openers_are_read_in_linear_time(render, tmp_path):
+    # F5: 40k unclosed `<!--` in one paragraph took 39 s
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    _gate_commit(out, "scripts/process/g.py")
+    plan = out / ".process-work/plans/2026-07-09-widget.md"
+    plan.write_text(plan.read_text() + "\nprose " + "x <!-- " * 40000 + "\n\n" + R1_LINE)
+    _git(out, "commit", "-q", "-am", "plan")
+    r = subprocess.run([sys.executable, str(out / "scripts/process/make_review_bundle.py"), "--base", "main",
+                        "--skip-preflight"], cwd=out, capture_output=True, text=True, timeout=15)
+    assert r.returncode == 0 and "REFUTE WARNING" not in r.stdout
+
+
+def test_a_non_utf8_byte_does_not_empty_a_plan(render, tmp_path):
+    # F6
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    _gate_commit(out, "scripts/process/g.py")
+    plan = out / ".process-work/plans/2026-07-09-widget.md"
+    plan.write_bytes(plan.read_bytes() + "caf\xe9\n\n".encode("latin-1") + R1_LINE.encode())
+    _git(out, "commit", "-q", "-am", "plan")
+    t = _bundle(out, "--base", "main").stdout
+    assert "REFUTE WARNING" not in t and "tier: 2" in t

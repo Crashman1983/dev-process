@@ -40,7 +40,6 @@ import re
 import subprocess
 import sys
 from pathlib import Path
-from typing import NamedTuple
 
 # check_review.py owns the REVIEW grammar; check_kernel.py owns kernel-block
 # extraction — importing both keeps this tool byte-honest with the gates
@@ -144,6 +143,16 @@ def _preflight(root: Path) -> tuple[bool, int, str]:
     return True, 0, ""
 
 
+def _read_plan(plan: Path) -> str:
+    """A plan's text; a byte that is not UTF-8 becomes a replacement char —
+    the rest of the plan (its tier, its REFUTE lines) must not vanish with
+    it (downstream refute: one bad byte read the whole plan as empty)."""
+    try:
+        return plan.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+
+
 def _rel(root: Path, plan: Path) -> str:
     return plan.relative_to(root).as_posix()
 
@@ -155,16 +164,49 @@ def _label(root: Path, plan: Path) -> str:
     return rel if _review_gate.record_kind(rel) == "spec-plan" else plan.name
 
 
-def _active_plans(root: Path, plan_filter: str | None) -> list[Path]:
-    """The plans under work — the active plans and the Spec Kit plans, as
-    check_review lists them (archive/ is finished work)."""
-    plans = [f for _rel_, f in _review_gate.record_files(root, _review_gate.PLAN_KINDS)]
-    if plan_filter:
-        # parallel efforts: 8 active plans would bury the reviewer in 7
-        # irrelevant ones — --plan narrows to the effort under review
-        # (a Spec Kit plan by its directory: every one is called plan.md)
-        plans = [p for p in plans if plan_filter in (
-            p.parent.name if _review_gate.record_kind(_rel(root, p)) == "spec-plan" else p.name)]
+def _spec_dirs_touched(root: Path, base_ref: str | None) -> set[str]:
+    """Spec directories the branch changes (`base_ref...HEAD`); empty when
+    there is no base or git cannot tell (the in-flight rule still holds)."""
+    if not base_ref:
+        return set()
+    out = _git_bytes(root, "diff", "--name-only", "--no-renames", "-z", f"{base_ref}...HEAD",
+                     "--", _review_gate.SPECS_DIR)
+    names = (n.decode("utf-8", errors="surrogateescape") for n in (out or b"").split(b"\0"))
+    return {n.split("/")[1] for n in names if n.count("/") >= 2}
+
+
+def _spec_in_flight(plan: Path) -> bool:
+    """Its tasks.md still has an unticked task."""
+    try:
+        tasks = (plan.parent / "tasks.md").read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+    return bool(_review_gate.UNCHECKED.search(_review_gate._unfenced(tasks)))
+
+
+def _active_plans(root: Path, plan_filter: str | None, base_ref: str | None = None) -> list[Path]:
+    """The plans under review — as check_review lists the homes:
+      - every active plan in `.process-work/plans/` (archive/ is finished
+        work — the archive step is what ends a plan's review life);
+      - a Spec Kit plan `specs/<dir>/plan.md` only when this branch touches
+        `specs/<dir>/` (`base...HEAD`) or its tasks.md has an unticked task.
+        Spec Kit plans are never archived, so a finished one — or a product
+        document that happens to live at specs/<x>/plan.md — would otherwise
+        be bundled, refuted and tier-checked forever (downstream refute);
+      - with `--plan`, whatever matches it, under review or not: asked for
+        by name (a plan's file name; a Spec Kit plan's directory or its
+        printed label `specs/<dir>/plan.md`)."""
+    touched = _spec_dirs_touched(root, base_ref)
+    plans: list[Path] = []
+    for rel, f in _review_gate.record_files(root, _review_gate.PLAN_KINDS):
+        spec = _review_gate.record_kind(rel) == "spec-plan"
+        if plan_filter:
+            # parallel efforts: 8 active plans would bury the reviewer in 7
+            # irrelevant ones — --plan narrows to the effort under review
+            if plan_filter in (rel if spec else f.name):
+                plans.append(f)
+        elif not spec or f.parent.name in touched or _spec_in_flight(f):
+            plans.append(f)
     return plans
 
 
@@ -179,33 +221,71 @@ def _declared_tier(texts: list[str]) -> int | None:
 _DATED = re.compile(r"^\d{4}-\d{2}-\d{2}-")
 
 
-def _review_report_for(root: Path, slugs: list[str], issues: list[str]) -> Path | None:
+IssueKey = tuple[str | None, int]  # (owner/repo lowercased, or None for this repo's `#N`; number)
+
+
+def _issue_key(ref: str) -> IssueKey | None:
+    """An issue ref as a comparable key: `#9` and `9` are this repository's
+    issue 9; `owner/repo#9` and the issue URL name that repository's."""
+    parsed = _review_gate.parse_issue_ref(ref)
+    if parsed is not None:
+        return (parsed[0].lower() if parsed[0] else None, parsed[1])
+    return (None, int(ref)) if ref.isascii() and ref.isdigit() else None
+
+
+def _plan_issue_keys(text: str) -> list[IssueKey]:
+    keys = (_issue_key(m.group(1)) for m in _review_gate.ISSUE_DECL.finditer(_review_gate._unfenced(text or "")))
+    return list(dict.fromkeys(k for k in keys if k is not None))
+
+
+def _slug_in_name(slug: str, stem: str) -> bool:
+    """`slug` is the file stem or a whole dash-separated part run of it —
+    `api` names `api-round-2`, not `rapid-fix`."""
+    return stem == slug or re.search(rf"(?:^|-){re.escape(slug)}(?:-|$)", stem) is not None
+
+
+def _review_report_for(root: Path, slugs: list[str], issues: list[IssueKey]) -> Path | None:
     """The previous round's report of THIS work item — never another one's.
 
-    Reports are `YYYY-MM-DD-<slug>.md`; the newest whose name (without the
-    date) carries a plan slug of this bundle, or starts with / names one of its
-    issue numbers (`<N>-…`, `issue-<N>`). Taking simply the newest report put
-    an unrelated item's findings into a delta bundle (observed downstream).
-    No match means no report, said so — not a stranger's."""
+    Reports are `YYYY-MM-DD-<slug>.md` with a header block (`review: <slug>`,
+    `work: <issue or plan slug>`). A report whose header names its `work:`
+    belongs to that work alone: it is this item's when a value is one of this
+    item's issues (the same repository: `other/repo#9` is not this repo's #9)
+    or plan slugs, exactly, and never otherwise, whatever its name says.
+    Without a `work:` header the file name decides: `<N>-…`, `issue-<N>` or a
+    whole slug part; or the `review:` value equals a plan slug. Issues are
+    tried before slugs; the newest match wins. Taking simply the newest
+    report put an unrelated item's findings into a delta bundle (observed
+    downstream), and so did a slug matched inside another word. No match
+    means no report, said so — not a stranger's."""
     if not (root / REVIEWS).is_dir():
         return None
     reports = sorted(p for p in (root / REVIEWS).rglob("*.md") if p.is_file())
+    slugs = [s for s in dict.fromkeys(slugs) if s]
+    bare = {n for repo, n in issues if repo is None}
+
     def stem(p: Path) -> str:
         return _DATED.sub("", p.stem)
-    heads = {p: _report_header(p) for p in reports}
-    for slug in (s for s in slugs if s):
-        hits = [p for p in reports if slug == stem(p) or slug in stem(p)
-                or any(slug in v for v in heads[p].get("review", []))
-                or slug in heads[p].get("work", [])]
-        if hits:
-            return hits[-1]
-    for n in (i for i in issues if i):
-        hits = [p for p in reports
-                if stem(p).startswith(f"{n}-") or stem(p) == n or f"issue-{n}" in stem(p)
-                or n in {_issue_number(v) for v in heads[p].get("work", [])}]
-        if hits:
-            return hits[-1]
-    return None
+
+    by_issue: list[Path] = []
+    by_slug: list[Path] = []
+    for p in reports:
+        head = _report_header(p)
+        works = head.get("work", [])
+        if works:
+            if any(_issue_key(w) in issues for w in works):
+                by_issue.append(p)
+            elif any(w in slugs for w in works):
+                by_slug.append(p)
+            continue  # another work's report, whatever its file name says
+        s = stem(p)
+        if any(s == str(n) or s.startswith(f"{n}-") or _slug_in_name(f"issue-{n}", s) for n in bare):
+            by_issue.append(p)
+        elif any(_slug_in_name(slug, s) for slug in slugs) or \
+                any(v in slugs for v in head.get("review", [])):
+            by_slug.append(p)
+    hits = by_issue or by_slug
+    return hits[-1] if hits else None
 
 
 _HEADER_KEY = re.compile(r"^\s*(?:[-*+]\s+)?[*_]*(review|audit|work)[*_]*\s*:\s*(\S+)", re.IGNORECASE)
@@ -231,11 +311,6 @@ def _report_header(path: Path) -> dict[str, list[str]]:
             key = "review" if m.group(1).lower() == "audit" else m.group(1).lower()
             out.setdefault(key, []).append(_DATED.sub("", m.group(2)))
     return out
-
-
-def _issue_number(ref: str) -> str | None:
-    parsed = _review_gate.parse_issue_ref(ref)
-    return str(parsed[1]) if parsed else (ref if ref.isascii() and ref.isdigit() else None)
 
 
 def _review_artifact(root: Path, base_ref: str, *, delta: bool = False) -> tuple[str, str, str, bytes] | None:
@@ -314,56 +389,12 @@ GATE_FILES = ("Makefile", ".pre-commit-config.yaml")
 # not a record (downstream review: both switched the warning off)
 REFUTE_LINE = re.compile(
     r"^ {0,3}(?:(?:[-*+]|\d+[.)])[ \t]+(?:\[[xX]\][ \t]+)?)?REFUTE[ \t]+work=(?P<work>(?!<)(?!TODO\b)[\w#./-]+)"
-    r"[ \t]+round=(?P<round>\d+):[ \t]*(?!<|TODO\b|…|\.\.\.)\S.*$",
+    r"[ \t]+round=(?P<round>\d+):[ \t]*(?P<text>(?!<|TODO\b|…|\.\.\.)\S.*)$",
     re.MULTILINE)
 # Known limit: an item nested four spaces deep reads as a code block and does
-# not count (a false warning, never a silent pass).
-# HTML comments as CommonMark renders them: a line starting with `<!--` (at
-# most three spaces in) opens an HTML block that ends at the line carrying
-# `-->` — unclosed, it hides the rest of the file; inside running text a
-# comment closed within its paragraph is hidden, an unclosed `<!--` there is
-# literal text (downstream review: "write `<!--` to start a comment" in prose
-# swallowed the real REFUTE line below it)
-_BLOCK_COMMENT = re.compile(r"^ {0,3}<!--")
-_INLINE_COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
-_CODE_SPAN = re.compile(r"(`+)(?!`).*?(?<!`)\1(?!`)", re.DOTALL)
-
-
-def _uncommented(text: str) -> str:
-    """`text` without what an HTML comment hides when rendered."""
-    out: list[str] = []
-    para: list[str] = []
-
-    def flush() -> None:
-        if not para:
-            return
-        joined = "\n".join(para)
-        # a `<!--` inside a code span is code, not a comment opener
-        masked = _CODE_SPAN.sub(lambda m: re.sub(r"[^\n]", " ", m.group(0)), joined)
-        kept, at = [], 0
-        for m in _INLINE_COMMENT.finditer(masked):
-            kept.append(joined[at:m.start()])
-            at = m.end()
-        kept.append(joined[at:])
-        out.append("".join(kept))
-        para.clear()
-
-    in_block = False
-    for line in text.splitlines():
-        if in_block:
-            in_block = "-->" not in line
-            continue
-        if _BLOCK_COMMENT.match(line):
-            flush()
-            in_block = "-->" not in line[line.index("<!--") + 4:]
-            continue
-        if not line.strip():
-            flush()
-            out.append("")
-            continue
-        para.append(line)
-    flush()
-    return "\n".join(out)
+# not count (a false warning, never a silent pass). Fenced blocks and HTML
+# comments are removed first, as check_review.readable renders them (its
+# known limits apply here too).
 
 
 def _gate_files(root: Path, base_ref: str) -> list[str] | None:
@@ -378,77 +409,56 @@ def _gate_files(root: Path, base_ref: str) -> list[str] | None:
                   if n and (n.startswith(GATE_PATHS) or n in GATE_FILES))
 
 
-def _refute_records(text: str) -> set[tuple[str, int]]:
-    """(work, round) of the REFUTE lines outside fenced blocks and HTML
-    comments — an example quoted from the brief does not count; an unchecked
-    `- [ ]` item is a to-do, not a record."""
-    return {(m.group("work"), int(m.group("round")))
-            for m in REFUTE_LINE.finditer(_uncommented(_review_gate._unfenced(text or "")))}
+def _refute_entries(text: str) -> set[tuple[str, int, str]]:
+    """(work, round, what was found — whitespace-normalized) of the REFUTE
+    lines a reader sees: outside fenced blocks and HTML comments — an example
+    quoted from the brief does not count; an unchecked `- [ ]` item is a
+    to-do, not a record."""
+    return {(m.group("work"), int(m.group("round")), " ".join(m.group("text").split()))
+            for m in REFUTE_LINE.finditer(_review_gate.readable(text or ""))}
 
 
-def _own_rounds(stem: str, text: str) -> tuple[set[str], set[int]]:
-    ids = _review_gate._plan_work_ids(stem, text, include_dedated=True)
-    return ids, {r for w, r in _refute_records(text) if w in ids}
+def _plan_ids(rel: str, text: str) -> set[str]:
+    return _review_gate._plan_work_ids(_review_gate.plan_stem(rel), text, include_dedated=True)
 
 
-class _Before(NamedTuple):
-    """The plans at the delta's start (path -> text) and the renames since
-    (new path -> old path)."""
-    texts: dict[str, str]
-    renamed_from: dict[str, str]
-
-
-def _plans_at(root: Path, ref: str) -> _Before | None:
+def _plans_at(root: Path, ref: str) -> dict[str, str] | None:
     """Every plan at `ref` — active, archived and Spec Kit, as check_review
-    lists them — and the renames between `ref` and the worktree (git's
-    rename detection). None when git cannot tell."""
+    lists them (path -> text). None when git cannot tell."""
     texts = _review_gate.record_texts(
         root, (*_review_gate.PLAN_KINDS, "plan-archive"), ref=ref)
-    status = _git_bytes(root, "diff", "--name-status", "-M", "-z", "--no-ext-diff",
-                        ref, "--", _review_gate.PLANS_ACTIVE, _review_gate.SPECS_DIR)
-    if texts is None or status is None:
-        return None
-    renamed: dict[str, str] = {}
-    toks = [t.decode("utf-8", errors="surrogateescape") for t in status.split(b"\0")]
-    i = 0
-    while i < len(toks) and toks[i]:
-        if toks[i][0] in "RC":  # R<score> old new / C<score> old new
-            if toks[i][0] == "R":
-                renamed[toks[i + 2]] = toks[i + 1]
-            i += 3
-        else:
-            i += 2
-    return _Before(dict(texts), renamed)
+    return None if texts is None else dict(texts)
 
 
-def _unrefuted(root: Path, plans: dict[Path, str], before: _Before | None = None) -> list[str]:
+def _unrefuted(root: Path, plans: dict[Path, str], before: dict[str, str] | None = None) -> list[str]:
     """Plans without a REFUTE line of their OWN work — a line of one stacked
-    plan does not cover another (downstream review). With `before` (the plans
-    at the delta's start), the plan needs a round its earlier self did not
-    record — a reformatted old line or a renamed plan is no new refute.
+    plan does not cover another (downstream review).
 
-    The earlier self is found by identity: the same path at the start, else
-    the path git says it was renamed from. Only a plan with neither (a rename
-    rewritten past git's similarity threshold) falls back to the work ids of
-    a plan that is gone since — never of one still here, so two stacked plans
-    of one issue do not cancel each other's new round (downstream review)."""
+    With `before` (every plan at the delta's start, archived ones included),
+    the plan needs a NEW record of its own work. A record is old when
+      - the plan's own path at the start already had that round for one of
+        the plan's CURRENT work ids (a reformatted or edited old line; a line
+        that only starts to count because the plan gained an id), or
+      - any plan at the start carried the same record — same work id of this
+        plan, same round, same text after the colon (whitespace aside): the
+        line was moved or copied with a rename, an archive, a merge of two
+        plans or a copy.
+    No similarity score decides it (git's rename detection flipped with the
+    edit size, downstream refute), and a second plan of one issue neither
+    lends nor takes a round: its own new line differs in what it found.
+    Known limit: an old line whose text is edited AND that moved to another
+    path reads as new."""
     missing: list[str] = []
-    gone: list[str] = []
-    if before is not None:
-        sources = set(before.renamed_from.values())
-        gone = sorted(rel for rel in before.texts
-                      if rel not in sources and not (root / rel).exists())
+    earlier = {old: _refute_entries(t) for old, t in (before or {}).items()}
     for plan, text in plans.items():
         rel = _rel(root, plan)
-        ids, rounds = _own_rounds(_review_gate.plan_stem(rel), text)
+        ids = _plan_ids(rel, text)
+        records = {(r, t) for w, r, t in _refute_entries(text) if w in ids}
         if before is not None:
-            earlier = [r for r in (rel, before.renamed_from.get(rel)) if r in before.texts]
-            if not earlier:
-                earlier = [g for g in gone
-                           if _own_rounds(_review_gate.plan_stem(g), before.texts[g])[0] & ids]
-            for old in earlier:
-                rounds -= _own_rounds(_review_gate.plan_stem(old), before.texts[old])[1]
-        if not rounds:
+            old_rounds = {r for w, r, _t in earlier.get(rel, ()) if w in ids}
+            pool = {(r, t) for entries in earlier.values() for w, r, t in entries if w in ids}
+            records = {(r, t) for r, t in records if r not in old_rounds and (r, t) not in pool}
+        if not records:
             missing.append(_label(root, plan))
     return missing
 
@@ -471,13 +481,16 @@ def build(root: Path, base: str | None, plan_filter: str | None = None,
           since: str | None = None) -> str:
     out: list[str] = []
     add = out.append
-    plans = _active_plans(root, plan_filter)
-    plan_texts = {plan: (_read(root, _rel(root, plan)) or "") for plan in plans}
+    sized = _resolve_base(root, base)
+    plans = _active_plans(root, plan_filter, sized or since)
+    plan_texts = {plan: _read_plan(plan) for plan in plans}
     tier = _declared_tier(list(plan_texts.values()))
     if since and tier is not None and tier > DELTA_MAX_TIER:
+        top = next(_label(root, p) for p, t in plan_texts.items() if _declared_tier([t]) == tier)
         raise SystemExit(
-            f"make_review_bundle: --since refused — bundled plan declares tier: {tier}; "
-            "Tier 3 reviews require a full diff"
+            f"make_review_bundle: --since refused — bundled plan {top} declares tier: {tier}; "
+            "Tier 3 reviews require a full diff. If that plan is not the work under review, "
+            "name the one that is with --plan <name>"
         )
 
     add("# Review bundle — read-only\n")
@@ -490,7 +503,6 @@ def build(root: Path, base: str | None, plan_filter: str | None = None,
             f"`{since}`. Previous findings and the full branch file surface are "
             "included so fixes are judged in their original scope.\n")
 
-    sized = _resolve_base(root, base)
     if sized is not None:
         files, lines = review_size(root, sized)
         if files > REVIEW_MAX_FILES or lines > REVIEW_MAX_LINES:
@@ -546,15 +558,14 @@ def build(root: Path, base: str | None, plan_filter: str | None = None,
         add("## Findings from the previous round\n")
         slugs = [_DATED.sub("", plan_filter)] if plan_filter else []
         slugs += [_DATED.sub("", _review_gate.plan_stem(_rel(root, p))) for p in plan_texts]
-        issues = [str(n) for text in plan_texts.values()
-                  for n in sorted(_review_gate._plan_issue_numbers(_review_gate._unfenced(text or "")))]
+        issues = list(dict.fromkeys(k for text in plan_texts.values() for k in _plan_issue_keys(text)))
         report = _review_report_for(root, slugs, issues)
         report_text = _read(root, str(report.relative_to(root))) if report else None
         if report_text:
             add(f"### {report.relative_to(root)}\n{report_text}\n")
         else:
-            named = ", ".join([*dict.fromkeys(s for s in slugs if s), *(f"#{n}" for n in issues)]) \
-                or "no plan or issue"
+            named = ", ".join([*dict.fromkeys(s for s in slugs if s),
+                               *(f"{repo or ''}#{n}" for repo, n in issues)]) or "no plan or issue"
             add(f"*(no review report for this work item ({named}) under {REVIEWS}; prior "
                 f"findings unavailable — deliberately not another item's report)*\n")
 

@@ -245,6 +245,41 @@ def test_a_root_cause_in_a_spec_kit_plan_counts(render, tmp_path):
     assert r.returncode == 1 and "this is round 2" in r.stderr
 
 
+def test_a_quoted_or_placeholder_root_cause_is_no_cause(render, tmp_path):
+    # A5/A6/A7: a fenced, a commented and the brief's placeholder line each
+    # let round 2 pass
+    out, base, head = _repo(render, tmp_path)
+    ab = ("--base", base, "--head", head)
+    assert _attest(out, *ab, "--verdict", "block").returncode == 0
+    plan = out / ".process-work/plans/2026-09-10-widget.md"
+    original = plan.read_text()
+    real = "ROOT-CAUSE work=widget round=1: the cache key ignored the tenant — test_x failed before\n"
+    for quoted in ("```\n" + real + "```\n",
+                   "<!--\n" + real + "-->\n",
+                   "Note <!-- " + real + "--> end.\n",
+                   "ROOT-CAUSE work=widget round=1: <cause> — <the test that failed before the fix>\n",
+                   "ROOT-CAUSE work=<id> round=1: the cache key — test_x\n",
+                   "    " + real):
+        plan.write_text(original + "\n" + quoted)
+        r = _attest(out, *ab, "--round", "2", "--dry-run")
+        assert r.returncode == 1 and "no root cause" in r.stderr, quoted
+    plan.write_text(original + "\n- " + real)
+    assert _attest(out, *ab, "--round", "2", "--dry-run").returncode == 0
+
+
+def test_a_commented_block_line_is_no_round(render, tmp_path):
+    # A8: a blocking REVIEW line inside an HTML comment is a quotation
+    out, base, head = _repo(render, tmp_path)
+    ab = ("--base", base, "--head", head)
+    line = ("REVIEW work=widget tier=2 reviewer=fresh model=cross independence=bundle,non-implementing "
+            "verdict=block round=1")
+    spec = out / "specs/001-widget"
+    spec.mkdir(parents=True)
+    (spec / "plan.md").write_text(f"# Plan\n\ntier: 2\n\n<!-- example:\n{line}\n-->\n")
+    r = _attest(out, *ab, "--round", "2", "--dry-run")
+    assert r.returncode == 1 and "this is round 1" in r.stderr, r.stderr
+
+
 def test_every_record_home_is_read_from_one_owner(render, tmp_path):
     out, base, head = _repo(render, tmp_path)
     gate = _load_gate(out)

@@ -57,11 +57,20 @@ from check_review import (  # noqa: E402  (one owner for grammar, digest, record
     JOURNAL_DIR,
     artifact_digest,
     parse_review_lines,
+    readable,
     record_texts,
 )
 
-ROOT_CAUSE = re.compile(r"^\s*(?:[-*]\s+)?ROOT-CAUSE\s+work=(?P<work>\S+)\s+round=(?P<round>\d+):\s*\S",
-                        re.MULTILINE)
+# read like a REFUTE line (make_review_bundle.REFUTE_LINE): at most three
+# spaces in (four is a code block), an optional list marker, a real work id
+# and real content — the brief's `<cause>` placeholder, a TODO or an ellipsis
+# is a template, not a cause. Fenced blocks and HTML comments are removed
+# before (check_review.readable): a quoted example is no record (downstream
+# refute: a fenced, a commented and a placeholder line each passed round 2).
+ROOT_CAUSE = re.compile(
+    r"^ {0,3}(?:(?:[-*+]|\d+[.)])[ \t]+(?:\[[xX]\][ \t]+)?)?ROOT-CAUSE[ \t]+"
+    r"work=(?P<work>(?!<)(?!TODO\b)\S+)[ \t]+round=(?P<round>\d+):[ \t]*(?!<|TODO\b|…|\.\.\.)\S",
+    re.MULTILINE)
 
 ARTIFACT_LINE = re.compile(
     r"^REVIEW_ARTIFACT\s+base=(?P<base>\S+)\s+head=(?P<head>\S+)\s+diff=(?P<diff>\S+)\s*$",
@@ -92,8 +101,11 @@ def _journal_target(root: Path, journal_dir: Path) -> Path:
 
 def _texts(root: Path, journal_dir: Path) -> list[str]:
     """Every file where REVIEW and ROOT-CAUSE lines live — journal shards,
-    plans (active and archived), Spec Kit plans; check_review owns the list."""
-    return [text for _rel, text in record_texts(root, journal_dir=journal_dir) or []]
+    plans (active and archived), Spec Kit plans; check_review owns the list.
+    Read as rendered: fenced blocks and HTML comments hold quotations, not
+    records. `--journal-dir` replaces the repository's journal (it does not
+    add to it) — a known limit of the override, meant for tests and dry runs."""
+    return [readable(text) for _rel, text in record_texts(root, journal_dir=journal_dir) or []]
 
 
 def round_problems(args, root: Path, journal_dir: Path) -> tuple[int, list[str]]:
