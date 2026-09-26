@@ -590,14 +590,74 @@ _SUITE_TABLE = [
     ("the missing word is only an argument", "./run.sh ./scripts/x.sh", 127,
      ["sh: 1: ./scripts/x.sh: not found"], "0", "red", "inside"),
     ("exit 127 without a message", "./run.sh", 127, [], "0", "red", "inside"),
+    # refute of the table: make's marker glued onto output without a newline
+    ("recipe error glued onto a recipe's output", "make nonl; make -C examples test", 2,
+     ["FAILED 3 testsmake: *** [Makefile:2: nonl] Error 1", "make: *** No rule to make target 'test'.  Stop."],
+     "0", "red", "defined target"),
+    ("recipe error glued onto -j progress dots", "make -j4 -k lint test ex", 2,
+     ["make: *** No rule to make target 'ex'.", "..make: *** [Makefile:4: lint] Error 1"],
+     "0", "red", "defined target"),
+    ("-j: waiting for unfinished jobs", "make -j4 lint test ex", 2,
+     ["make: *** No rule to make target 'ex'.  Stop.", "make: *** Waiting for unfinished jobs...."],
+     "0", "red", "defined target"),
+    # a command substitution does not split the command
+    ("make -j$(nproc)", "make -j$(nproc) test-merge", 2, [_NO_RULE], "0", "undefined", "names"),
+    ("make -j $(nproc)", "make -j $(nproc) test-merge", 2, [_NO_RULE], "0", "undefined", "names"),
+    ("make -j`nproc`", "make -j`nproc` test-merge", 2, [_NO_RULE], "0", "undefined", "names"),
+    # the suite's own file, asked of the tree (the last column: the files it has)
+    ("the suite's script is in the tree but broken (CRLF)", "./scripts/ci.sh", 127,
+     ["sh: 1: ./scripts/ci.sh: not found"], "0", "red", "inside", {"scripts/ci.sh"}),
+    ("sh scripts/new.sh", "sh scripts/new.sh", 2,
+     ["sh: 0: cannot open scripts/new.sh: No such file"], "0", "undefined", "own file", set()),
+    ("bash scripts/new.sh", "bash scripts/new.sh", 127,
+     ["bash: scripts/new.sh: No such file or directory"], "0", "undefined", "own file", set()),
+    ("timeout 600 ./scripts/new.sh", "timeout 600 ./scripts/new.sh", 127,
+     ["timeout: failed to run command './scripts/new.sh': No such file or directory"],
+     "0", "undefined", "own file", set()),
+    ("nice -n 5 ./scripts/new.sh", "nice -n 5 ./scripts/new.sh", 127, [], "0", "undefined", "own file", set()),
+    ("env FOO=1 ./scripts/new.sh", "env FOO=1 ./scripts/new.sh", 127, [], "0", "undefined", "own file", set()),
+    ("exec ./scripts/new.sh", "exec ./scripts/new.sh", 127,
+     ["sh: 1: exec: ./scripts/new.sh: not found"], "0", "undefined", "own file", set()),
+    ("command ./scripts/new.sh", "command ./scripts/new.sh", 127, [], "0", "undefined", "own file", set()),
+    ("python3 scripts/new.py", "python3 scripts/new.py", 2, [], "0", "undefined", "own file", set()),
+    ("uv run scripts/new.py", "uv run scripts/new.py", 2, [], "0", "undefined", "own file", set()),
+    ("python -m: a missing path is the tool's argument", "python -m pytest tests/merge", 4, [],
+     "0", "red", "exit 4", set()),
+    ("sh -ec: a program text, no file", "sh -ec 'make test'", 2, [], "0", "red", "exit 2", set()),
+    ("make -C a directory not on the tree", "make -C newdir test", 2,
+     ["make: *** newdir: No such file or directory.  Stop."], "0", "undefined", "own file", set()),
+    ("cd into a directory not on the tree", "cd newdir && make test", 2,
+     ["sh: 1: cd: can't cd to newdir"], "0", "undefined", "own file", set()),
+    ("make -f a makefile not on the tree", "make -f new.mk test", 2,
+     ["make: new.mk: No such file or directory", "make: *** No rule to make target 'new.mk'.  Stop."],
+     "0", "undefined", "own file", set()),
+    ("make -C a directory on the tree", "make -C sub test", 2,
+     ["make: *** No rule to make target 'other'.  Stop."], "0", "red", "exit 2", {"sub"}),
+    ("an absent file behind a red first command", "./scripts/red.sh && ./scripts/new.sh", 1, [],
+     "0", "red", "exit 1", {"scripts/red.sh"}),
+    ("an absent first file behind ; is not the whole suite", "./scripts/new.sh; ./scripts/red.sh", 1, [],
+     "0", "red", "exit 1", {"scripts/red.sh"}),
+    ("a missing fallback after ||", "./scripts/red.sh || ./scripts/on-failure.sh", 127,
+     ["sh: 1: ./scripts/on-failure.sh: not found"], "0", "red", "inside", {"scripts/red.sh"}),
+    ("a missing command after ;", "./scripts/red.sh; ./scripts/x.sh", 127,
+     ["sh: 1: ./scripts/x.sh: not found"], "0", "red", "inside", {"scripts/red.sh"}),
+    # documented limits
+    ("make stops at an undefined target before a red one", "make nope test", 2,
+     ["make: *** No rule to make target 'nope'.  Stop."], "0", "undefined", "names"),
+    ("output redirected away from the train", "make test > log 2>&1", 2, [], "0", "red", "exit 2"),
+    ("a target spelled through the shell", "make test-$${X:-new}", 2,
+     ["make: *** No rule to make target 'test-4242{X:-new}'.  Stop."], "0", "red", "exit 2"),
 ]
+_SUITE_TABLE = [r if len(r) == 8 else (*r, None) for r in _SUITE_TABLE]
 
 
-@pytest.mark.parametrize("case,cmd,rc,output,level,state,words", _SUITE_TABLE, ids=[r[0] for r in _SUITE_TABLE])
-def test_suite_decide_table(render, tmp_path, case, cmd, rc, output, level, state, words):
+@pytest.mark.parametrize("case,cmd,rc,output,level,state,words,present", _SUITE_TABLE,
+                         ids=[r[0] for r in _SUITE_TABLE])
+def test_suite_decide_table(render, tmp_path, case, cmd, rc, output, level, state, words, present):
     out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
     train = _load_train(out)
-    got, reason = train.decide(train.read_facts(cmd, rc, output, level))
+    exists = None if present is None else present.__contains__
+    got, reason = train.decide(train.read_facts(cmd, rc, output, level, exists))
     assert (got, words in reason) == (state, True), (case, got, reason)
 
 
@@ -608,7 +668,8 @@ def test_every_row_of_decide_has_a_table_case(render, tmp_path):
     out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
     train = _load_train(out)
     reasons = re.findall(r'return "\w+", f?"([^"{]+)', inspect.getsource(train.decide))
-    reached = {train.decide(train.read_facts(c, rc, o, lv))[1] for _n, c, rc, o, lv, _s, _w in _SUITE_TABLE}
+    reached = {train.decide(train.read_facts(c, rc, o, lv, None if p is None else p.__contains__))[1]
+               for _n, c, rc, o, lv, _s, _w, p in _SUITE_TABLE}
     for r in reasons:
         assert any(x.startswith(r) for x in reached), r
 
@@ -661,6 +722,128 @@ def test_exit_127_is_undefined_only_for_the_suites_own_command(render, tmp_path,
     (tree / "run.sh").chmod(0o755)
     assert train._sh(tree, "./run.sh", lambda _l: None) == "red"
     assert train._sh(tree, "echo 'sh: 1: frob: not found'; exit 127", lambda _l: None) == "red"
+
+
+def test_a_recipe_error_glued_onto_output_is_red(render, tmp_path, monkeypatch):
+    # refute: a recipe without a final newline, or -j progress dots, run into
+    # make's error line; a later "No rule" then excused the red tree
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    train = _load_train(out)
+    tree = _real_make(monkeypatch, tmp_path)
+    (tree / "Makefile").write_text(
+        "nonl:\n\t@printf 'FAILED 3 tests'; exit 1\n"
+        "lint:\n\t@sleep 0.3; exit 1\n"
+        "dots:\n\t@for i in 1 2 3 4 5 6; do printf .; sleep 0.1; done\n")
+    (tree / "examples").mkdir()
+    (tree / "examples/Makefile").write_text("other:\n\ttrue\n")
+    for cmd in ("make nonl; make -C examples test", "make -k nonl nope", "make -j4 -k lint dots nope",
+                "make -j4 lint dots nope"):
+        assert train._sh(tree, cmd, lambda _l: None) == "red", cmd
+
+
+def test_a_flood_of_output_does_not_push_the_red_line_out(render, tmp_path, monkeypatch):
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    train = _load_train(out)
+    tree = _real_make(monkeypatch, tmp_path)
+    (tree / "Makefile").write_text("test:\n\texit 1\nflood:\n\t@for i in $$(seq 450); do echo \"x$$i: not found\"; done\n")
+    assert train._sh(tree, "make test; make flood; make nope", lambda _l: None) == "red"
+
+
+def test_a_missing_fallback_or_later_command_does_not_excuse_a_red_run(render, tmp_path, monkeypatch):
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    train = _load_train(out)
+    tree = _real_make(monkeypatch, tmp_path)
+    (tree / "scripts").mkdir()
+    (tree / "scripts/red.sh").write_text("#!/bin/sh\nexit 1\n")
+    (tree / "scripts/red.sh").chmod(0o755)
+    assert train._sh(tree, "./scripts/red.sh || ./scripts/on-failure.sh", lambda _l: None) == "red"
+    assert train._sh(tree, "./scripts/red.sh; ./scripts/next.sh", lambda _l: None) == "red"
+
+
+def test_a_command_substitution_does_not_split_the_make_call(render, tmp_path, monkeypatch):
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    train = _load_train(out)
+    tree = _real_make(monkeypatch, tmp_path)
+    (tree / "Makefile").write_text("other:\n\ttrue\n")
+    for cmd in ("make -j$(nproc) test-merge", "make -j $(nproc) test-merge", "make -j`nproc` test-merge"):
+        assert train._sh(tree, cmd, lambda _l: None) == "undefined", cmd
+
+
+def test_a_suite_file_a_passenger_introduces_is_undefined_behind_wrappers(render, tmp_path, monkeypatch):
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    train = _load_train(out)
+    tree = _real_make(monkeypatch, tmp_path)
+    (tree / "Makefile").write_text("other:\n\ttrue\n")
+    for cmd in ("sh scripts/new.sh", "bash scripts/new.sh", "timeout 600 ./scripts/new.sh", "nice ./scripts/new.sh",
+                "env FOO=1 ./scripts/new.sh", "exec ./scripts/new.sh", "command ./scripts/new.sh",
+                f"{sys.executable} scripts/new.py", "make -C newdir test", "cd newdir && make test",
+                "make -f new.mk test"):
+        assert train._sh(tree, cmd, lambda _l: None) == "undefined", cmd
+    # a tool's missing argument is no suite file: red
+    assert train._sh(tree, f"{sys.executable} -m no_such_module_here tests/merge", lambda _l: None) == "red"
+
+
+def test_a_broken_suite_script_in_the_tree_is_red_not_missing(render, tmp_path, monkeypatch):
+    # CRLF line ends: dash says "not found" for a script that is there
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    train = _load_train(out)
+    tree = _real_make(monkeypatch, tmp_path)
+    (tree / "scripts").mkdir()
+    (tree / "scripts/ci.sh").write_bytes(b"#!/bin/sh\r\nexit 0\r\n")
+    (tree / "scripts/ci.sh").chmod(0o755)
+    (tree / "scripts/py.sh").write_text("#!/nonexistent/interpreter\n")
+    (tree / "scripts/py.sh").chmod(0o755)
+    assert train._sh(tree, "./scripts/ci.sh", lambda _l: None) == "red"
+    assert train._sh(tree, "./scripts/py.sh", lambda _l: None) == "red"
+
+
+def test_output_the_terminal_cannot_encode_is_replaced_not_a_traceback(render, tmp_path, monkeypatch):
+    import io
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    train = _load_train(out)
+    stream = io.TextIOWrapper(io.BytesIO(), encoding="ascii")
+    monkeypatch.setattr(sys, "stdout", stream)
+    assert train._sh(tmp_path, "echo 'price: 5 €'", lambda _l: None) == "green"
+    stream.flush()
+    assert b"price: 5 ?" in stream.buffer.getvalue()
+
+
+def test_a_suite_the_base_has_but_the_combined_tree_lost_is_red(render, tmp_path, monkeypatch):
+    # combined undefined, base green: a passenger removed the suite — the
+    # search blames the prefix that loses it ([b1] undefined), [b2] merges
+    from types import SimpleNamespace
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    train = _load_train(out)
+    states = iter(["undefined", "green", "undefined", "green"])
+    wt = tmp_path / "wt"
+    wt.mkdir()
+    written = []
+    monkeypatch.setattr(train, "build_train", lambda root, base, subset, stamp, log: (wt, "train/x", list(subset), []))
+    monkeypatch.setattr(train, "_run_gates", lambda w, log: True)
+    monkeypatch.setattr(train, "_sh", lambda cwd, cmd, log: next(states))
+    monkeypatch.setattr(train, "_git", lambda *a, **k: SimpleNamespace(returncode=0, stdout="", stderr=""))
+    monkeypatch.setattr(train, "_out", lambda *a, **k: "")
+    monkeypatch.setattr(train, "_cleanup", lambda *a: None)
+    monkeypatch.setattr(train, "_write", lambda root, state, note, worker: written.append((state, worker)))
+    p = {"base": "origin/main", "candidates": [{"branch": "b1", "hours_waiting": 2}, {"branch": "b2", "hours_waiting": 1}]}
+    rc = train._run_batch(out, "main", p, ["b1", "b2"], "x", tmp_path / "t.log", suite="s", deploy=None,
+                          push=False, keep_branches=True)
+    assert rc == 0 and ("blocked", "b1") in written and ("blocked", "b2") not in written
+
+
+def test_a_passenger_that_deletes_the_suite_target_is_blamed(render, tmp_path, monkeypatch):
+    monkeypatch.setenv("LC_ALL", "C")
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    (out / "ci.mk").write_text("check:\n\ttrue\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "ci")
+    _branch(out, "alpha", {"src/a.py": "a\n"})
+    _branch(out, "beta", {"ci.mk": "other:\n\ttrue\n"})
+    r = _train(out, "run", "--force", "--suite", "make -f ci.mk check")
+    assert "red with beta aboard" in r.stdout, r.stdout + r.stderr
+    assert "fix --suite" not in r.stderr
+    assert (out / "src/a.py").exists()
 
 
 def test_an_offender_that_brought_the_suite_is_still_reported(render, tmp_path, monkeypatch):
