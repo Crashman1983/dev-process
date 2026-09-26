@@ -528,3 +528,18 @@ def test_a_plan_of_merged_work_is_residue_not_a_blame(repo):
     assert mod.merged_work(root, plan, passes, {"w"}, 2)
     _git(root, "checkout", "-q", "-b", "unmerged", head)
     assert not mod.merged_work(root, ".process-work/plans/none.md", passes, {"w"}, 2)
+
+
+def test_another_review_covers_its_range_not_the_history_below_its_base(repo):
+    # work A reviewed at `head`, then an unreviewed commit; work B stacked on
+    # top and reviewed from there: B's review saw B's range only
+    root, head = repo
+    below = _commit(root, "a.py", "a = 2\n", "unreviewed A code")
+    b_head = _commit(root, "b.py", "b = 1\n", "work B, reviewed")
+    mod = _mod()
+    reviewed = ((below, b_head),)
+    found = mod.stale_review(root, [{"work": "w", "tier": "2", "head": head}], {"w"}, 2, set(), reviewed)
+    assert found is not None and "a.py" in found and "b.py" not in found
+    # a review whose range starts below the unreviewed commit covers it
+    assert mod.stale_review(root, [{"work": "w", "tier": "2", "head": head}], {"w"}, 2, set(),
+                            ((head, b_head),)) is None
