@@ -292,3 +292,129 @@ def test_local_main_ahead_of_origin_is_the_base(repo):
     _git(root, "checkout", "-q", "feat")
     _git(root, "merge", "-q", "--no-edit", "main")
     assert _stale(root, head) is None
+
+
+# --- clean merges of hunks from both sides, fellow passengers, decide() table ---
+
+_LINES = "".join(f"l{i} = {i}\n" for i in range(12))
+
+
+@pytest.fixture
+def shared(tmp_path):
+    """A reviewed branch and main each change a different hunk of one file
+    after the review (a shared inventory file, downstream)."""
+    root = tmp_path / "s"
+    root.mkdir()
+    _git(root, "init", "-q", "-b", "main")
+    _git(root, "config", "user.email", "t@t")
+    _git(root, "config", "user.name", "t")
+    _commit(root, "inv.md", _LINES, "base")
+    _git(root, "checkout", "-q", "-b", "feat")
+    head = _commit(root, "inv.md", _LINES.replace("l0 = 0", "l0 = 'feat'"), "reviewed work")
+    _git(root, "checkout", "-q", "main")
+    _commit(root, "inv.md", _LINES.replace("l11 = 11", "l11 = 'main'"), "main edits another hunk")
+    return root, head
+
+
+def test_a_clean_merge_of_hunks_from_both_sides_is_not_late_code(shared):
+    root, head = shared
+    _git(root, "checkout", "-q", "feat")
+    _git(root, "merge", "-q", "--no-edit", "main")
+    assert _stale(root, head) is None
+
+
+def test_a_train_with_a_passenger_on_a_file_main_changed_blames_nobody(shared):
+    # two passengers; one touches the file main changed since its review
+    root, head = shared
+    _git(root, "checkout", "-q", "-b", "other", "main")
+    other_head = _commit(root, "o.py", "o = 1\n", "other passenger")
+    _git(root, "checkout", "-q", "-b", "train/a", "main")
+    _git(root, "merge", "-q", "--no-ff", "--no-edit", "feat")
+    _git(root, "merge", "-q", "--no-ff", "--no-edit", "other")
+    assert _stale(root, head) is None
+    assert _stale(root, other_head) is None
+
+
+def test_a_hunk_of_its_own_in_a_clean_merge_is_still_late_code(shared):
+    root, head = shared
+    _git(root, "checkout", "-q", "feat")
+    _git(root, "merge", "-q", "--no-commit", "main")
+    text = (root / "inv.md").read_text().replace("l5 = 5", "l5 = 'evil'")
+    (root / "inv.md").write_text(text)
+    _git(root, "commit", "-q", "-am", "merge main")
+    assert "inv.md" in _stale(root, head)
+
+
+def test_a_fellow_passengers_evil_merge_is_named_as_such_not_as_this_works_code(repo):
+    root, head = repo
+    _git(root, "checkout", "-q", "-b", "other", "main")
+    _commit(root, "o.py", "o = 1\n", "other passenger")
+    _git(root, "checkout", "-q", "-b", "train/a", "main")
+    _git(root, "merge", "-q", "--no-ff", "--no-edit", "feat")
+    _git(root, "merge", "-q", "--no-ff", "--no-commit", "other")
+    (root / "evil.py").write_text("u = 1\n")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "--no-edit")
+    found = _stale(root, head)
+    assert "evil.py" in found and "of another passenger" in found
+    assert "code changed after the reviewed head" not in found
+
+
+def test_a_merge_dropping_a_reviewed_change_to_a_non_ascii_file_is_stale(tmp_path):
+    root = tmp_path / "u"
+    root.mkdir()
+    _git(root, "init", "-q", "-b", "main")
+    _git(root, "config", "user.email", "t@t")
+    _git(root, "config", "user.name", "t")
+    _commit(root, "prüfung.py", "p = 0\n", "base")
+    _git(root, "checkout", "-q", "-b", "feat")
+    head = _commit(root, "prüfung.py", "p = 1\n", "reviewed work")
+    _git(root, "checkout", "-q", "main")
+    _commit(root, "prüfung.py", "p = 'main'\n", "main edits the same line")
+    _git(root, "checkout", "-q", "feat")
+    subprocess.run(["git", "merge", "-q", "--no-edit", "main"], cwd=root, capture_output=True)
+    _git(root, "checkout", "--theirs", "prüfung.py")
+    _git(root, "commit", "-q", "-am", "resolved to main's side")
+    found = _stale(root, head)
+    assert found is not None and "prüfung.py" in found
+
+
+def test_a_head_missing_from_a_shallow_clone_is_stale(repo, tmp_path):
+    root, head = repo
+    _commit(root, "b.py", "b = 1\n", "after")
+    clone = tmp_path / "shallow"
+    subprocess.run(["git", "clone", "-q", "--depth", "1", "--branch", "feat", f"file://{root}", str(clone)],
+                   check=True, capture_output=True)
+    found = _stale(clone, head)
+    assert found is not None and "shallow clone" in found
+
+
+_H = "a" * 40
+
+
+@pytest.mark.parametrize("case,facts,verdict,words", [
+    ("reviewed head in history, nothing after", {}, "fresh", ""),
+    ("amend", {"in_history": False}, "stale", "not in the history"),
+    ("rebase", {"in_history": False}, "stale", "not in the history"),
+    ("clean main merge", {}, "fresh", ""),
+    ("clean merge of hunks from both sides", {}, "fresh", ""),
+    ("conflict resolution", {"late": frozenset({"a.py"})}, "stale", "code changed after"),
+    ("resolution to the other side", {"dropped": frozenset({"a.py"})}, "stale", "threw the reviewed change away"),
+    ("-s ours", {"dropped": frozenset({"a.py"})}, "stale", "threw the reviewed change away"),
+    ("train --no-ff staging", {}, "fresh", ""),
+    ("fellow passenger's evil merge", {"fellow": (("b" * 40, frozenset({"e.py"})),)}, "stale", "another passenger"),
+    ("later code commit", {"late": frozenset({"b.py"})}, "stale", "code changed after"),
+    ("git error", {"git_error": True}, "stale", "git did not answer"),
+    ("shallow clone", {"shallow_missing": True}, "stale", "shallow clone"),
+    # precedence: the first fact that decides names the reason
+    ("git error beats everything", {"git_error": True, "in_history": False, "late": frozenset({"x"})},
+     "stale", "git did not answer"),
+    ("not in history beats late", {"in_history": False, "late": frozenset({"x"})}, "stale", "not in the history"),
+    ("a drop beats late", {"dropped": frozenset({"d"}), "late": frozenset({"x"})}, "stale", "threw"),
+    ("own code beats a fellow's", {"late": frozenset({"x"}), "fellow": (("b" * 40, frozenset({"e"})),)},
+     "stale", "code changed after"),
+])
+def test_decide_table(case, facts, verdict, words):
+    mod = _mod()
+    got, reason = mod.decide(mod.History(**facts), _H)
+    assert got == verdict and words in reason, case
