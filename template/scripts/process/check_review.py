@@ -848,7 +848,7 @@ def _merge_own(root: Path, merge: str) -> set[str] | None:
     return own
 
 
-def _history(root: Path, head: str, tip: str = "HEAD") -> History:
+def _history(root: Path, head: str, tip: str = "HEAD", reviewed: tuple[str, ...] = ()) -> History:
     """Gather the facts `decide` judges for one reviewed head.
 
     `tip` is what is judged — HEAD for a push, a branch for the merge train's
@@ -877,6 +877,14 @@ def _history(root: Path, head: str, tip: str = "HEAD") -> History:
     error = History(git_error=True)
     integ = _integration_ref(root, tip)
     not_integ = [f"^{integ}"] if integ else []
+    # code another clearing review has seen is not unreviewed code of this
+    # push — a later, separately reviewed change to files of a merged plan
+    # is covered by its own review (downstream: a merged plan left active
+    # blamed it); code no review has seen stays unreviewed, whatever plan
+    # it lands under
+    for other in reviewed:
+        if other != head and _git_bytes(root, "merge-base", "--is-ancestor", other, tip) is not None:
+            not_integ.append(f"^{other}")
     walk = _git_bytes(root, "rev-list", "--first-parent", "--parents", tip, *not_integ)
     if walk is None:
         return error
@@ -1015,15 +1023,23 @@ def _dropped_by_merge(root: Path, merge: str, head: str) -> set[str] | None:
 def merged_work(root: Path, rel: str, passes: list[dict], ids: set[str], tier: int) -> bool:
     """Does this plan belong to work the integration branch already carries?
     The plan file is on the integration ref and every clearing review's head
-    is in it. Such a plan still claims its files — left active after its
-    merge, it blamed every later, separately reviewed change to them as its
-    own unreviewed code (downstream: a train refused for a merged plan)."""
+    is in it. Only a note: its stale check still runs — later code no review
+    has seen is unreviewed whatever plan it lands under (a refutation showed
+    a skip let unreviewed follow-up work through); later code another review
+    saw is covered by that review (`reviewed` in `_history`)."""
     integ = _integration_ref(root)
     if integ is None or _git_bytes(root, "cat-file", "-e", f"{integ}:{rel}") is None:
         return False
     heads = [r["head"] for r in passes if r["work"] in ids and int(r["tier"]) >= min(tier, 3) and r.get("head")]
     return bool(heads) and all(
         _git_bytes(root, "merge-base", "--is-ancestor", h, integ) is not None for h in heads)
+
+
+def _reviewed_heads(passes: list[dict], tier: int) -> tuple[str, ...]:
+    """The heads of every clearing pass at this plan's tier or above — the
+    code each of them saw counts as reviewed for any plan's stale check."""
+    return tuple(dict.fromkeys(r["head"] for r in passes
+                               if r.get("head") and int(r["tier"]) >= min(tier, 3)))
 
 
 def _residue(rel: str) -> str:
@@ -1033,7 +1049,7 @@ def _residue(rel: str) -> str:
 
 
 def stale_review(root: Path, passes: list[dict], ids: set[str], tier: int,
-                 in_flight: set[str] | None = None) -> str | None:
+                 in_flight: set[str] | None = None, reviewed: tuple[str, ...] = ()) -> str | None:
     """Why the clearing reviews of a plan no longer cover the code — None when
     one of them still does.
 
@@ -1060,7 +1076,7 @@ def stale_review(root: Path, passes: list[dict], ids: set[str], tier: int,
         return None
     reason = None
     for r in with_head:
-        verdict, why = decide(_history(root, r["head"]), r["head"])
+        verdict, why = decide(_history(root, r["head"], reviewed=reviewed), r["head"])
         if verdict == "fresh":
             return None
         reason = why
@@ -1372,8 +1388,7 @@ def check(root: Path) -> tuple[list[str], list[str]]:
                 continue
             if merged_work(root, rel, passes, ids, tier):
                 soft.append(_residue(rel))
-                continue
-            stale = stale_review(root, passes, ids, tier, in_flight)
+            stale = stale_review(root, passes, ids, tier, in_flight, _reviewed_heads(passes, tier))
             if stale:
                 presence(f"{rel}: {stale}")
         if active_tier2:
@@ -1405,9 +1420,7 @@ def check(root: Path) -> tuple[list[str], list[str]]:
                          f"(verdict=pass, work in {sorted(ids)}, tier>={min(tier, 3)}) and "
                          f"no 'review-waived:' line")
                 continue
-            if merged_work(root, rel, passes, ids, tier):
-                continue  # named once as residue above
-            stale = stale_review(root, passes, ids, tier, in_flight)
+            stale = stale_review(root, passes, ids, tier, in_flight, _reviewed_heads(passes, tier))
             if stale:
                 presence(f"#{number} ({rel}): {stale}")
 

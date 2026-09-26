@@ -596,6 +596,8 @@ def test_chain_moves_each_report_to_its_next_phase(render, tmp_path, monkeypatch
                {"worker": "e", "state": "review-pass", "epoch": 1}, {"worker": "f", "state": "blocked", "epoch": 1}]
     stopped, started = [], []
     monkeypatch.setattr(mod, "records", lambda root: recs)
+    monkeypatch.setattr(mod, "_load_record", lambda root, b: (None, next(r for r in recs if r["branch"] == b)))
+    monkeypatch.setattr(mod, "plan_tier_on_origin", lambda root, b: None)
     monkeypatch.setattr(mod._report, "read_reports", lambda root, **_kw: reports)
     monkeypatch.setattr(mod, "new_code_on_origin", lambda root, b, **_kw: b == "b")  # c: an attestation only
     monkeypatch.setattr(mod, "work_complete_on_origin", lambda root, b: True)
@@ -844,3 +846,71 @@ def test_a_missing_harness_is_a_refusal_and_assignments_survive_nice(render, tmp
     if shutil.which("nice"):
         argv = mod.niced({}, ["FOO=bar", "sh", "-c", 'test "$FOO" = bar'])
         assert subprocess.run(argv).returncode == 0
+
+
+# --- second refute of the chain ---
+
+
+def test_say_never_presses_enter_into_a_dialog(render, tmp_path, monkeypatch):
+    screen = "> run the migration now\nDo you want to proceed?\n❯ 1. Yes\n  2. No\n"
+    out, mod, pane = _say_setup(render, tmp_path, monkeypatch, [screen])
+    assert mod.say(out, "w1", "run the migration now") == 5
+    assert pane.keys == ["run the migration now", "Enter"]  # the one Enter of sending, nothing more
+
+
+def test_work_complete_reads_only_the_branchs_own_plan_and_skips_fenced_examples(render, tmp_path):
+    out = render(tmp_path / "p", {"project_name": "d", "modules": {}})
+    mod = _load_dispatch(out)
+    work = _origin_pair(tmp_path)
+    _git(work, "checkout", "-q", "main")
+    _commit_file(work, ".process-work/plans/2026-01-01-other.md", "# other\n\n- [ ] not mine\n", "other plan")
+    _git(work, "push", "-q", "origin", "main")
+    _git(work, "fetch", "-q", "origin")
+    _git(work, "checkout", "-q", "w")
+    _git(work, "merge", "-q", "--no-edit", "main")
+    _commit_file(work, ".process-work/plans/2026-01-01-other.md", "# other\n\n- [ ] not mine\n- note\n", "touch")
+    _commit_file(work, ".process-work/plans/2026-01-02-w.md",
+                 "# w\n\ntier: 3\n\n- [x] done\n\n```\n- [ ] an example\n```\n", "own plan")
+    _git(work, "push", "-q", "origin", "w")
+    assert mod.work_complete_on_origin(work, "w") is True
+    assert mod.plan_tier_on_origin(work, "w") == 3
+
+
+def test_chain_does_not_stop_a_session_that_changed_since_it_was_judged(render, tmp_path, monkeypatch):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    mod = _load_dispatch(out)
+    judged = [{"branch": "a", "issue": 1, "tier": 2, "phase": "plan", "started": 1}]
+    now = {"branch": "a", "issue": 1, "tier": 2, "phase": "execute", "started": 5}  # restarted meanwhile
+    stopped = []
+    monkeypatch.setattr(mod, "records", lambda root: judged)
+    monkeypatch.setattr(mod, "_load_record", lambda root, b: (None, now))
+    monkeypatch.setattr(mod._report, "read_reports",
+                        lambda root, **_kw: [{"worker": "a", "state": "planned", "epoch": 3}])
+    monkeypatch.setattr(mod, "stop", lambda root, b, **kw: stopped.append(b) or 0)
+    monkeypatch.setattr(mod, "start", lambda root, **_kw: 0)
+    mod.chain(out)
+    assert stopped == []
+
+
+def test_queue_lines_are_strict_and_a_branch_named_queue_does_not_collide(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    mod = _load_dispatch(out)
+    q = mod._queue_path(out)
+    q.write_text(json.dumps([{"issue": True, "phase": "plan"}, {"issue": 7.9, "phase": "plan"},
+                             {"issue": "8", "phase": "plan"}]))
+    assert [e["issue"] for e in mod.queue_load(out)] == [8]
+    q.write_text(json.dumps({"not": "a list"}))
+    assert mod.queue_load(out) == [] and list(q.parent.glob("queue.corrupt-*.json"))
+    assert mod._record_path(out, "queue") != q
+
+
+def test_a_bulleted_review_line_is_an_attestation(render, tmp_path):
+    out = render(tmp_path / "p", {"project_name": "d", "modules": {}})
+    mod = _load_dispatch(out)
+    work = _origin_pair(tmp_path)
+    _commit_file(work, "a.py", "a = 1\n", "code")
+    _commit_file(work, ".process-work/journal/j.md", "- REVIEW work=w verdict=pass\n", "attest")
+    _git(work, "push", "-q", "origin", "w")
+    assert mod.new_code_on_origin(work, "w") is False and mod.attest_on_origin(work, "w")
