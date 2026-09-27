@@ -1027,29 +1027,6 @@ def test_work_bases_are_this_works_code_rounds_only():
 
 # --- fourth refutation: a headless record proves nothing, a rename on both sides ---
 
-def test_a_headless_record_does_not_widen_a_stacked_branchs_work(tmp_path):
-    # stacked b2 (base=below) plus an older pass of the same work recording neither
-    # head nor base; merge takes main's squash of b1's file (not b2's code)
-    root = _fresh(tmp_path)
-    _commit(root, "f.py", "".join(_ROWS), "base")
-    _git(root, "checkout", "-q", "-b", "b1")
-    below = _commit(root, "f.py", _edit_line(0, "b1-draft"), "B1 draft")
-    _git(root, "checkout", "-q", "-b", "b2")
-    head = _commit(root, "g.py", "g = 'b2'\n", "B2 reviewed")
-    _git(root, "checkout", "-q", "b1")
-    _commit(root, "f.py", _edit_line(0, "b1-final"), "B1 fix-up")
-    _git(root, "checkout", "-q", "main")
-    _git(root, "merge", "-q", "--squash", "b1")
-    _git(root, "commit", "-q", "-m", "B1 (squash)")
-    _git(root, "checkout", "-q", "b2")
-    _merge(root, "main")
-    _resolve_theirs(root, "f.py")
-    legacy = {"work": "w", "tier": "1"}
-    rec = {"work": "w", "tier": "2", "head": head, "base": below}
-    found = _mod().stale_review(root, [legacy, rec], {"w"}, 2, set(), ())
-    assert found is None, found
-
-
 def test_a_dropped_mode_counts_when_both_sides_renamed_the_file(tmp_path):
     # work renames a.sh->w.sh with +x; main renames a.sh->m.sh (rename/rename conflict)
     root = _fresh(tmp_path)
@@ -1093,3 +1070,80 @@ def test_a_dropped_edit_counts_when_both_sides_renamed_the_file(tmp_path):
     _finish(root)
     found = _judged(root, head, covered=_covered_b(root, head))
     assert found is not None and "w.sh" in found, found
+
+
+# --- fifth refutation: names-only conflicts, rename chains, headless records fail closed ---
+
+def _rr(root, work_text, work_mode, main_text, main_mode=None, main_name="m.sh"):
+    """a.sh at fork; feat renames a.sh->w.sh (work_text, work_mode); main renames a.sh->main_name."""
+    _commit(root, "a.sh", "".join(_ROWS), "base")
+    _git(root, "checkout", "-q", "-b", "feat")
+    _git(root, "mv", "a.sh", "w.sh")
+    head = _write(root, "w.sh", work_text, work_mode, "reviewed: rename")
+    _git(root, "checkout", "-q", "main")
+    _git(root, "mv", "a.sh", main_name)
+    _write(root, main_name, main_text, main_mode, "main rename")
+    _git(root, "checkout", "-q", "feat")
+    _merge(root, "main")
+    return head
+
+
+def _keep_only(root, keep, text, mode=None, drop=("m.sh", "a.sh")):
+    _git(root, "rm", "-q", "--cached", "--ignore-unmatch", *drop)
+    for n in drop:
+        (root / n).unlink(missing_ok=True)
+    (root / keep).write_text(text)
+    if mode is not None:
+        (root / keep).chmod(mode)
+    return _finish(root)
+
+
+def test_a_rename_on_both_sides_keeping_gits_merged_content_is_no_drop(tmp_path):
+    root = _fresh(tmp_path)
+    head = _rr(root, "".join(_ROWS), None, _edit_line(10, "main"))
+    _keep_only(root, "w.sh", _edit_line(10, "main"))
+    assert _judged(root, head) is None
+
+
+def test_a_rename_on_both_sides_keeping_mains_copy_of_the_reviewed_edit_is_no_drop(tmp_path):
+    root = _fresh(tmp_path)
+    both = _edit_line(0, "w").replace("line10 = 10", "line10 = 'main'")
+    head = _rr(root, _edit_line(0, "w"), None, both)
+    _keep_only(root, "w.sh", both)
+    assert _judged(root, head) is None
+
+
+def test_a_rename_chain_across_rounds_keeps_the_oldest_name(tmp_path):
+    root = _fresh(tmp_path)
+    fork = _commit(root, "a.sh", "".join(_ROWS), "base")
+    _git(root, "checkout", "-q", "-b", "feat")
+    _git(root, "mv", "a.sh", "b.sh")
+    h1 = _write(root, "b.sh", _edit_line(0, "w"), None, "round 1")
+    _git(root, "mv", "b.sh", "w.sh")
+    _git(root, "commit", "-q", "-m", "round 2")
+    h2 = _git(root, "rev-parse", "HEAD")
+    _git(root, "checkout", "-q", "main")
+    _commit(root, "a.sh", _edit_line(0, "main"), "main edits line 0")
+    _git(root, "checkout", "-q", "feat")
+    _merge(root, "main")
+    _keep_only(root, "w.sh", _edit_line(0, "main"), drop=("a.sh", "b.sh"))
+    r1 = {"work": "w", "tier": "2", "head": h1, "base": fork}
+    r2 = {"work": "w", "tier": "2", "head": h2, "base": h1}
+    found = _mod().stale_review(root, [r1, r2], {"w"}, 2, set(), _covered_b(root, h2))
+    assert found is not None and "w.sh" in found, found
+
+
+def test_a_headless_record_keeps_the_first_rounds_code_next_to_a_delta_round(tmp_path):
+    root = _fresh(tmp_path)
+    _two_sided(root)
+    h1 = _commit(root, "f.py", _edit_line(0, "reviewed"), "round 1")
+    h2 = _commit(root, "b.py", "b\n", "round 2")
+    _git(root, "checkout", "-q", "main")
+    _commit(root, "f.py", _edit_line(0, "main"), "main")
+    _git(root, "checkout", "-q", "feat")
+    _merge(root, "main")
+    _resolve_theirs(root, "f.py")
+    r1 = {"work": "w", "tier": "2"}  # legacy: no head, no base
+    r2 = {"work": "w", "tier": "2", "head": h2, "base": h1}
+    found = _mod().stale_review(root, [r1, r2], {"w"}, 2, set(), ())
+    assert found is not None and "f.py" in found, found
