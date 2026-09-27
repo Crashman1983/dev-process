@@ -956,7 +956,7 @@ def _merge_own(root: Path, merge: str) -> set[str] | None:
 
 
 def _history(root: Path, head: str, tip: str = "HEAD",
-             reviewed: tuple[tuple[str, str], ...] = ()) -> History:
+             reviewed: tuple[tuple[str, str], ...] = (), base: str | None = None) -> History:
     """Gather the facts `decide` judges for one reviewed head.
 
     `tip` is what is judged — HEAD for a push, a branch for the merge train's
@@ -1050,7 +1050,7 @@ def _history(root: Path, head: str, tip: str = "HEAD",
     # the train chain's merges
     dropped: set[str] = set()
     for merge in dict.fromkeys(all_merges + chain_merges):
-        d = _dropped_by_merge(root, merge, head)
+        d = _dropped_by_merge(root, merge, head, base)
         if d is None:
             return error
         dropped |= d
@@ -1058,10 +1058,10 @@ def _history(root: Path, head: str, tip: str = "HEAD",
     return History(late=keep(late), dropped=keep(dropped), fellow=tuple(fellow))
 
 
-def _unreviewed_paths(root: Path, head: str, tip: str = "HEAD") -> set[str] | None:
+def _unreviewed_paths(root: Path, head: str, tip: str = "HEAD", base: str | None = None) -> set[str] | None:
     """Paths of code in `tip` that no review covers — None when git cannot
     tell (the merge train's boarding judges a branch by this)."""
-    h = _history(root, head, tip)
+    h = _history(root, head, tip, base=base)
     if h.git_error or h.shallow_missing or not h.in_history:
         return None  # not "nothing unreviewed": the review covers none of it
     return set(h.late | h.dropped).union(*(paths for _m, paths in h.fellow))
@@ -1071,15 +1071,20 @@ _ABSENT = ""
 
 
 def _blob(root: Path, commit: str, path: str) -> str | None:
-    """The object at `path` in `commit`: its id, `_ABSENT` when the path does
-    not exist there, None when git cannot tell — a failure must never read as
-    "both sides lack the file" (downstream refutation: a non-UTF-8 name made
-    every lookup fail, and any resolution passed as unchanged)."""
+    """The object at `path` in `commit`: its mode and id, `_ABSENT` when the
+    path does not exist there, None when git cannot tell — a failure must
+    never read as "both sides lack the file" (downstream refutation: a
+    non-UTF-8 name made every lookup fail, and any resolution passed as
+    unchanged). The mode counts: a merge that takes the executable bit away
+    changed the file (refutation: a dropped `+x` read as unchanged)."""
     out = _git_bytes(root, "--literal-pathspecs", "ls-tree", "-z", commit, "--", path)
     if out is None:
         return None
     entry = out.split(b"\0", 1)[0]
-    return entry.split(b"\t", 1)[0].split()[2].decode() if entry else _ABSENT
+    if not entry:
+        return _ABSENT
+    mode, _kind, oid = entry.split(b"\t", 1)[0].split()
+    return f"{mode.decode()} {oid.decode()}"
 
 
 def _auto_merge(root: Path, ours: str, other: str) -> tuple[str, set[str]] | None:
@@ -1101,7 +1106,22 @@ def _auto_merge(root: Path, ours: str, other: str) -> tuple[str, set[str]] | Non
 _EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"  # no common history: all of it is the work's
 
 
-def _dropped_by_merge(root: Path, merge: str, head: str) -> set[str] | None:
+def _renames(out: bytes | None) -> dict[str, str] | None:
+    """`diff --name-status -M -z` read as {old name: new name}."""
+    if out is None:
+        return None
+    fields, i, moved = out.decode(errors="surrogateescape").split("\0"), 0, {}
+    while i < len(fields) and fields[i]:
+        if fields[i][:1] in ("R", "C") and i + 2 < len(fields):
+            if fields[i][:1] == "R":
+                moved[fields[i + 1]] = fields[i + 2]
+            i += 3
+        else:
+            i += 2
+    return moved
+
+
+def _dropped_by_merge(root: Path, merge: str, head: str, base: str | None = None) -> set[str] | None:
     """Paths where a merge threw the reviewed work's change away in favour of
     another parent's version. `--cc` is blind to this — the result equals one
     parent, so the combined diff is empty (downstream review residual).
@@ -1112,12 +1132,17 @@ def _dropped_by_merge(root: Path, merge: str, head: str) -> set[str] | None:
     that keeps git's own result is never a drop — also not when main already
     carries the reviewed change plus later edits (a squash or cherry-pick
     before a stacked branch merges main; downstream refutation).
-    Only this work's own paths can be dropped (what it changed since it
-    forked from the other side, followed through the other side's renames),
-    and a side that already carries the reviewed head drops nothing. Known
-    limit: inside another review's range, a conflict on this work's line
-    resolved to a third value is that review's judgement — textually it is
-    indistinguishable from a sensible resolution.
+    Only this work's own paths can be dropped: what its review saw change
+    (`base..head`; without a known base, what it changed since it forked from
+    the other side), followed through renames on both sides — a file this
+    work renamed is compared with the other side's file under its old name,
+    and a file the other side renamed is this work's under its new name. A
+    file of this work that git's own merge kept, even moved into a renamed
+    directory, and that the merge deleted, is dropped. A side that already
+    carries the reviewed head drops nothing. Known limit: inside another
+    review's range, a conflict on this work's line resolved to a third value
+    is that review's judgement — textually it is indistinguishable from a
+    sensible resolution.
     `--no-renames`: a file main renamed is compared under both names; `-z`:
     a non-ASCII name arrives unquoted, or its blobs are never found and the
     drop passes (downstream review)."""
@@ -1133,6 +1158,10 @@ def _dropped_by_merge(root: Path, merge: str, head: str) -> set[str] | None:
                               "-z", our, merge))
     if paths is None:
         return None
+    # the review's own range: a stacked branch's review does not own the
+    # branch below it, and an unrelated import brings no work of its own
+    # (refutation: both read a merge taking main's side of such a file as a drop)
+    known_base = base if base and _git_bytes(root, "cat-file", "-e", f"{base}^{{commit}}") is not None else None
     dropped: set[str] = set()
     for other in (p for p in parents if p != our):
         if _git_bytes(root, "merge-base", "--is-ancestor", head, other) is not None:
@@ -1141,34 +1170,44 @@ def _dropped_by_merge(root: Path, merge: str, head: str) -> set[str] | None:
         # branch edited and the merge took main's side of is not this work's
         # (refutation: a stacked branch's "take main's version" read as a drop)
         fork = (_git_bytes(root, "merge-base", head, other) or b"").decode().strip() or _EMPTY_TREE
+        start = known_base or fork
         work = _names(_git_bytes(root, "diff", "--name-only", "--no-renames", "--ignore-submodules=none",
-                                 "-z", fork, head))
-        moved = _git_bytes(root, "diff", "--name-status", "-M", "-z", fork, other)
-        if work is None or moved is None:
+                                 "-z", start, head))
+        mine_moved = _renames(_git_bytes(root, "diff", "--name-status", "-M", "-z", start, head))
+        theirs_moved = _renames(_git_bytes(root, "diff", "--name-status", "-M", "-z", fork, other))
+        if work is None or mine_moved is None or theirs_moved is None:
             return None
         # a file of this work the other side renamed is this work's under its new name
-        fields, i = moved.decode(errors="surrogateescape").split("\0"), 0
-        while i < len(fields) and fields[i]:
-            status = fields[i]
-            if status[:1] in ("R", "C") and i + 2 < len(fields):
-                if status[:1] == "R" and fields[i + 1] in work:
-                    work.add(fields[i + 2])
-                i += 3
-            else:
-                i += 2
+        work |= {new for old, new in theirs_moved.items() if old in work}
+        old_name = {new: old for old, new in mine_moved.items()}
         auto = _auto_merge(root, our, other)
         if auto is None:
             return None
         tree, conflicted = auto
+        auto_moved = _renames(_git_bytes(root, "diff", "--name-status", "-M", "-z", our, tree))
+        if auto_moved is None:
+            return None
         for path in paths & work:
             result, mine, theirs = _blob(root, merge, path), _blob(root, our, path), _blob(root, other, path)
             if None in (result, mine, theirs):
                 return None
-            if result != theirs or mine == theirs:
-                continue
+            if theirs == _ABSENT and path in old_name:
+                theirs = _blob(root, other, old_name[path])  # this work renamed it: the other side's is the old name
+                if theirs is None:
+                    return None
             auto_blob = _blob(root, tree, path)
             if auto_blob is None:
                 return None
+            if result == _ABSENT and mine != _ABSENT and auto_blob == _ABSENT and path in auto_moved:
+                # git's own merge moved the file (a directory the other side renamed): judged where it went
+                kept = _blob(root, merge, auto_moved[path])
+                if kept is None:
+                    return None
+                if kept == _ABSENT:
+                    dropped.add(path)
+                continue
+            if result != theirs or mine == theirs:
+                continue
             if path in conflicted or result != auto_blob:
                 dropped.add(path)
     return dropped
@@ -1244,7 +1283,7 @@ def stale_review(root: Path, passes: list[dict], ids: set[str], tier: int,
         return None
     reason = None
     for r in with_head:
-        verdict, why = decide(_history(root, r["head"], reviewed=reviewed), r["head"])
+        verdict, why = decide(_history(root, r["head"], reviewed=reviewed, base=r.get("base")), r["head"])
         if verdict == "fresh":
             return None
         reason = why
