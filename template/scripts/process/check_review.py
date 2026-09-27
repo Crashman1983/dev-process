@@ -1098,6 +1098,9 @@ def _auto_merge(root: Path, ours: str, other: str) -> tuple[str, set[str]] | Non
     return fields[0].strip(), set(fields[1:])
 
 
+_EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"  # no common history: all of it is the work's
+
+
 def _dropped_by_merge(root: Path, merge: str, head: str) -> set[str] | None:
     """Paths where a merge threw the reviewed work's change away in favour of
     another parent's version. `--cc` is blind to this — the result equals one
@@ -1109,6 +1112,12 @@ def _dropped_by_merge(root: Path, merge: str, head: str) -> set[str] | None:
     that keeps git's own result is never a drop — also not when main already
     carries the reviewed change plus later edits (a squash or cherry-pick
     before a stacked branch merges main; downstream refutation).
+    Only this work's own paths can be dropped (what it changed since it
+    forked from the other side, followed through the other side's renames),
+    and a side that already carries the reviewed head drops nothing. Known
+    limit: inside another review's range, a conflict on this work's line
+    resolved to a third value is that review's judgement — textually it is
+    indistinguishable from a sensible resolution.
     `--no-renames`: a file main renamed is compared under both names; `-z`:
     a non-ASCII name arrives unquoted, or its blobs are never found and the
     drop passes (downstream review)."""
@@ -1126,11 +1135,32 @@ def _dropped_by_merge(root: Path, merge: str, head: str) -> set[str] | None:
         return None
     dropped: set[str] = set()
     for other in (p for p in parents if p != our):
+        if _git_bytes(root, "merge-base", "--is-ancestor", head, other) is not None:
+            continue  # the other side carries the reviewed change itself: nothing of it to drop
+        # only what THIS work changed can be thrown away: a file another
+        # branch edited and the merge took main's side of is not this work's
+        # (refutation: a stacked branch's "take main's version" read as a drop)
+        fork = (_git_bytes(root, "merge-base", head, other) or b"").decode().strip() or _EMPTY_TREE
+        work = _names(_git_bytes(root, "diff", "--name-only", "--no-renames", "--ignore-submodules=none",
+                                 "-z", fork, head))
+        moved = _git_bytes(root, "diff", "--name-status", "-M", "-z", fork, other)
+        if work is None or moved is None:
+            return None
+        # a file of this work the other side renamed is this work's under its new name
+        fields, i = moved.decode(errors="surrogateescape").split("\0"), 0
+        while i < len(fields) and fields[i]:
+            status = fields[i]
+            if status[:1] in ("R", "C") and i + 2 < len(fields):
+                if status[:1] == "R" and fields[i + 1] in work:
+                    work.add(fields[i + 2])
+                i += 3
+            else:
+                i += 2
         auto = _auto_merge(root, our, other)
         if auto is None:
             return None
         tree, conflicted = auto
-        for path in paths:
+        for path in paths & work:
             result, mine, theirs = _blob(root, merge, path), _blob(root, our, path), _blob(root, other, path)
             if None in (result, mine, theirs):
                 return None

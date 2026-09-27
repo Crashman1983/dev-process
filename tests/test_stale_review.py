@@ -585,3 +585,25 @@ def test_unreviewed_paths_never_reads_an_amended_head_as_covered(repo):
     root, head = repo
     _git(root, "commit", "-q", "--amend", "-m", "amended")
     assert _mod()._unreviewed_paths(root, head, "HEAD") is None
+
+
+def test_taking_mains_side_of_a_file_this_work_never_changed_is_no_drop(repo):
+    # refutation S4: a stacked branch merges main and takes main's version of
+    # a file another branch edited — not this work's change
+    root, head = repo
+    _git(root, "checkout", "-q", "main")
+    _commit(root, "x.py", "x = 0\n", "x on main")
+    _git(root, "checkout", "-q", "feat")
+    _git(root, "merge", "-q", "--no-edit", "main")
+    b_base = _commit(root, "x.py", "x = 'b'\n", "B edits x")
+    _git(root, "checkout", "-q", "main")
+    _commit(root, "x.py", "x = 'main'\n", "main edits x")
+    _git(root, "checkout", "-q", "feat")
+    subprocess.run(["git", "merge", "-q", "--no-edit", "main"], cwd=root, capture_output=True)
+    _git(root, "checkout", "--theirs", "x.py")
+    _git(root, "commit", "-q", "-am", "take main's x")
+    b_head = _git(root, "rev-parse", "HEAD")
+    found = _mod().stale_review(root, [{"work": "w", "tier": "2", "head": head}], {"w"}, 2, set(),
+                                ((head, b_head),))
+    assert found is None, found
+    assert b_base
