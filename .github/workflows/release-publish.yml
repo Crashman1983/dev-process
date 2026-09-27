@@ -1,0 +1,37 @@
+# Publishes the GitHub release of an existing tag, with the tag's CHANGELOG
+# entry as notes (tools/release_notes.py). release-tag.yml creates the tag;
+# this makes it visible as a release. A tag without a CHANGELOG entry is not
+# published. Trigger with the tag name; `latest` marks it the latest release.
+name: release-publish
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to publish (e.g. v2.33.0)"
+        required: true
+        type: string
+permissions:
+  contents: write
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - env:
+          TAG: ${{ inputs.tag }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          case "$TAG" in v[0-9]*) ;; *) echo "tag must look like vX.Y.Z"; exit 1;; esac
+          git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null \
+            || { echo "tag $TAG does not exist — create it with release-tag first"; exit 1; }
+          git show "$TAG:CHANGELOG.md" > /tmp/changelog.md
+          python3 tools/release_notes.py "$TAG" /tmp/changelog.md > /tmp/notes.txt
+          title="$TAG — $(head -1 /tmp/notes.txt)"
+          tail -n +2 /tmp/notes.txt > /tmp/notes.md
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --title "$title" --notes-file /tmp/notes.md --draft=false --latest
+          else
+            gh release create "$TAG" --verify-tag --title "$title" --notes-file /tmp/notes.md --latest
+          fi
