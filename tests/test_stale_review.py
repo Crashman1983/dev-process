@@ -562,3 +562,26 @@ def test_a_fenced_example_id_names_no_work(repo):
     root, _head = repo
     _commit(root, ".process-work/plans/2026-01-01-w.md", "# w\ntier: 2\n\n```\nissue: 77\n```\n", "plan")
     assert "77" not in _mod()._known_work(root)
+
+
+def test_a_drop_inside_another_reviews_range_is_still_a_drop(repo):
+    # work B's review covers a merge that resolved THIS work's reviewed line
+    # to main's side: B saw the merge, it did not review the drop for w
+    root, head = repo
+    _git(root, "checkout", "-q", "main")
+    _commit(root, "a.py", "a = 'main'\n", "main edits the same line")
+    _git(root, "checkout", "-q", "feat")
+    b_base = _git(root, "rev-parse", "HEAD")
+    subprocess.run(["git", "merge", "-q", "--no-edit", "main"], cwd=root, capture_output=True)
+    _git(root, "checkout", "--theirs", "a.py")
+    _git(root, "commit", "-q", "-am", "merge main, resolved to main's side")
+    b_head = _commit(root, "b.py", "b = 1\n", "work B")
+    found = _mod().stale_review(root, [{"work": "w", "tier": "2", "head": head}], {"w"}, 2, set(),
+                                ((b_base, b_head),))
+    assert found is not None and "a.py" in found
+
+
+def test_unreviewed_paths_never_reads_an_amended_head_as_covered(repo):
+    root, head = repo
+    _git(root, "commit", "-q", "--amend", "-m", "amended")
+    assert _mod()._unreviewed_paths(root, head, "HEAD") is None
