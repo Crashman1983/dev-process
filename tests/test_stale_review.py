@@ -735,8 +735,8 @@ def test_a_stacked_branch_taking_mains_squash_of_the_branch_below_is_no_drop(tmp
     found = _judged(root, head, base=first)
     assert found is not None and "f.py" in found
     # the merge train's boarding judges by the same range
-    assert _mod()._unreviewed_paths(root, head, "HEAD", below) == set()
-    assert "f.py" in _mod()._unreviewed_paths(root, head, "HEAD", first)
+    assert _mod()._unreviewed_paths(root, head, "HEAD", (below,)) == set()
+    assert "f.py" in _mod()._unreviewed_paths(root, head, "HEAD", (first,))
     train = _train()
     record = {"work": "w", "tier": "2", "head": head, "base": below}
     assert train._covers(root, [record], {"w"}, 2, "HEAD")
@@ -758,3 +758,133 @@ def test_an_unrelated_import_taking_its_own_file_is_no_drop_of_this_work(tmp_pat
     _git(root, "commit", "-q", "--no-edit")
     merged = _git(root, "rev-parse", "HEAD")
     assert _judged(root, head, base=base, covered=((head, merged),)) is None
+
+
+# --- second refutation: every round's range, a base that proves nothing, modes apart, moved onto main's file ---
+
+def _two_sided(root):
+    """fork -> feat edits f.py line 0; main edits line 0 too (a conflict)."""
+    fork = _commit(root, "f.py", "".join(_ROWS), "base")
+    _git(root, "checkout", "-q", "-b", "feat")
+    return fork
+
+
+def _resolve_theirs(root, *paths):
+    for p in paths:
+        _git(root, "checkout", "--theirs", p)
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "--no-edit")
+
+
+def test_a_delta_rounds_base_does_not_hide_a_drop_of_the_first_rounds_code(tmp_path):
+    # round 1 reviewed fork..h1; round 2 is a delta review (make_review_bundle --since h1): base=h1
+    root = _fresh(tmp_path)
+    fork = _two_sided(root)
+    h1 = _commit(root, "f.py", _edit_line(0, "reviewed"), "round 1")
+    h2 = _commit(root, "b.py", "b = 1\n", "round 2")
+    _git(root, "checkout", "-q", "main")
+    _commit(root, "f.py", _edit_line(0, "main"), "main edits line 0")
+    _git(root, "checkout", "-q", "feat")
+    _merge(root, "main")
+    _resolve_theirs(root, "f.py")
+    r1 = {"work": "w", "tier": "2", "head": h1, "base": fork}
+    r2 = {"work": "w", "tier": "2", "head": h2, "base": h1}
+    found = _mod().stale_review(root, [r1, r2], {"w"}, 2, set(), ((fork, h1), (h1, h2)))
+    assert found is not None and "f.py" in found, found
+
+
+def test_the_train_judges_a_delta_round_like_the_gate(tmp_path):
+    root = _fresh(tmp_path)
+    fork = _two_sided(root)
+    h1 = _commit(root, "f.py", _edit_line(0, "reviewed"), "round 1")
+    h2 = _commit(root, "b.py", "b = 1\n", "round 2")
+    _git(root, "checkout", "-q", "main")
+    _commit(root, "f.py", _edit_line(0, "main"), "main edits line 0")
+    _git(root, "checkout", "-q", "feat")
+    _merge(root, "main")
+    _resolve_theirs(root, "f.py")
+    r1 = {"work": "w", "tier": "2", "head": h1, "base": fork}
+    r2 = {"work": "w", "tier": "2", "head": h2, "base": h1}
+    assert not _train()._covers(root, [r1, r2], {"w"}, 2, "HEAD")
+
+
+def test_a_base_equal_to_head_proves_nothing(tmp_path):
+    root = _fresh(tmp_path)
+    _two_sided(root)
+    head = _commit(root, "f.py", _edit_line(0, "reviewed"), "reviewed")
+    _git(root, "checkout", "-q", "main")
+    _commit(root, "f.py", _edit_line(0, "main"), "main edits line 0")
+    _git(root, "checkout", "-q", "feat")
+    _merge(root, "main")
+    _resolve_theirs(root, "f.py")
+    found = _judged(root, head, base=head)
+    assert found is not None and "f.py" in found, found
+
+
+def test_mains_content_under_the_reviewed_mode_is_a_drop(tmp_path):
+    # work edits run.sh and makes it +x; main edits the same line. The merge takes
+    # main's content with the +x git itself would keep: the reviewed edit is gone.
+    root = _fresh(tmp_path)
+    _commit(root, "run.sh", "".join(_ROWS), "base")
+    _git(root, "checkout", "-q", "-b", "feat")
+    (root / "run.sh").write_text(_edit_line(0, "reviewed"))
+    (root / "run.sh").chmod(0o755)
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "reviewed")
+    head = _git(root, "rev-parse", "HEAD")
+    _git(root, "checkout", "-q", "main")
+    _commit(root, "run.sh", _edit_line(0, "main"), "main")
+    _git(root, "checkout", "-q", "feat")
+    _merge(root, "main")
+    (root / "run.sh").write_text(_edit_line(0, "main"))
+    (root / "run.sh").chmod(0o755)
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "--no-edit")
+    b_head = _commit(root, "b.py", "b = 1\n", "work B")
+    found = _judged(root, head, covered=((head, b_head),))
+    assert found is not None and "run.sh" in found, found
+
+
+def test_a_file_git_moved_onto_mains_own_and_resolved_to_mains_is_a_drop(tmp_path):
+    # work adds d/new.py; main moves d/ -> e/ and adds its own e/new.py. git moves the
+    # work's file onto e/new.py (conflict); the merge takes main's. No covering review.
+    root = _fresh(tmp_path)
+    _commit(root, "d/a.py", "".join(_ROWS), "base")
+    _git(root, "checkout", "-q", "-b", "feat")
+    head = _commit(root, "d/new.py", "new = 'reviewed'\n" + "".join(_ROWS), "reviewed: new file")
+    _git(root, "checkout", "-q", "main")
+    _git(root, "mv", "d", "e")
+    _commit(root, "e/new.py", "new = 'main'\n" + "".join(_ROWS), "main moves d/ to e/, adds its new.py")
+    _git(root, "checkout", "-q", "feat")
+    _merge(root, "main")
+    (root / "e/new.py").write_text("new = 'main'\n" + "".join(_ROWS))
+    _git(root, "rm", "-q", "--cached", "--ignore-unmatch", "d/new.py")
+    (root / "d/new.py").unlink(missing_ok=True)
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "--no-edit")
+    assert _git(root, "show", "HEAD:e/new.py").startswith("new = 'main'")
+    found = _judged(root, head)
+    assert found is not None and "new.py" in found, found
+
+
+def test_the_reviewed_content_under_mains_mode_is_no_code_of_the_merge(tmp_path):
+    # main edits the same line and makes the file +x; the merge keeps the reviewed
+    # content with main's +x — exactly git's own mode merge. No new code.
+    root = _fresh(tmp_path)
+    _commit(root, "run.sh", "".join(_ROWS), "base")
+    _git(root, "checkout", "-q", "-b", "feat")
+    head = _commit(root, "run.sh", _edit_line(0, "reviewed"), "reviewed")
+    _git(root, "checkout", "-q", "main")
+    (root / "run.sh").write_text(_edit_line(0, "main"))
+    (root / "run.sh").chmod(0o755)
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "main edits and +x")
+    _git(root, "checkout", "-q", "feat")
+    _merge(root, "main")
+    (root / "run.sh").write_text(_edit_line(0, "reviewed"))
+    (root / "run.sh").chmod(0o755)
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "--no-edit")
+    assert _git(root, "ls-tree", "HEAD", "run.sh").startswith("100755")
+    found = _judged(root, head)
+    assert found is None, found

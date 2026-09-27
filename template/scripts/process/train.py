@@ -288,7 +288,7 @@ def _covers(root: Path, passes: list[dict], ids: set[str], tier: int, tip: str,
     for r in with_head:
         if _git(root, "merge-base", "--is-ancestor", r["head"], tip).returncode != 0:
             continue
-        late = _review._unreviewed_paths(root, r["head"], tip, r.get("base"))
+        late = _review._unreviewed_paths(root, r["head"], tip, _review.work_bases(passes, ids))
         if late is not None and not late:
             return True
     return False
