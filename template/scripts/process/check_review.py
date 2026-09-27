@@ -1031,8 +1031,8 @@ def _history(root: Path, head: str, tip: str = "HEAD",
                                  *own_commits))
         if late is None:
             return error
-    in_range = [c for c in (ln.strip() for ln in merges_out.decode(errors="replace").splitlines())
-                if c and c not in covered]
+    all_merges = [c for c in (ln.strip() for ln in merges_out.decode(errors="replace").splitlines()) if c]
+    in_range = [c for c in all_merges if c not in covered]
     chain_merges = [c[0] for c in chain] if carriers else []
     fellow = []
     for merge in dict.fromkeys(in_range + chain_merges):
@@ -1044,10 +1044,12 @@ def _history(root: Path, head: str, tip: str = "HEAD",
                 fellow.append((merge, frozenset(own)))
         else:
             late |= own
-    # merges that resolved to the other side: every merge in the range, and
+    # merges that resolved to the other side: every merge in the range —
+    # also one another review covered: that review saw its code, not that
+    # it threw THIS work's reviewed change away (downstream review) — and
     # the train chain's merges
     dropped: set[str] = set()
-    for merge in dict.fromkeys(in_range + chain_merges):
+    for merge in dict.fromkeys(all_merges + chain_merges):
         d = _dropped_by_merge(root, merge, head)
         if d is None:
             return error
@@ -1060,8 +1062,8 @@ def _unreviewed_paths(root: Path, head: str, tip: str = "HEAD") -> set[str] | No
     """Paths of code in `tip` that no review covers — None when git cannot
     tell (the merge train's boarding judges a branch by this)."""
     h = _history(root, head, tip)
-    if h.git_error or h.shallow_missing:
-        return None
+    if h.git_error or h.shallow_missing or not h.in_history:
+        return None  # not "nothing unreviewed": the review covers none of it
     return set(h.late | h.dropped).union(*(paths for _m, paths in h.fellow))
 
 
