@@ -27,6 +27,20 @@ def _mod():
     return mod
 
 
+def _train():
+    before = sys.dont_write_bytecode
+    sys.dont_write_bytecode = True
+    sys.path.insert(0, str(_SCRIPT.parent))  # train imports its siblings
+    try:
+        spec = importlib.util.spec_from_file_location("train_stale", _SCRIPT.parent / "train.py")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+    finally:
+        sys.path.remove(str(_SCRIPT.parent))
+        sys.dont_write_bytecode = before
+    return mod
+
+
 def _git(root, *args):
     return subprocess.run(["git", *args], cwd=root, capture_output=True, text=True, check=True).stdout.strip()
 
@@ -607,3 +621,140 @@ def test_taking_mains_side_of_a_file_this_work_never_changed_is_no_drop(repo):
                                 ((head, b_head),))
     assert found is None, found
     assert b_base
+
+
+# --- refutation of the narrowed drop check: renames, modes, the review's own range ---
+
+_ROWS = [f"line{i} = {i}\n" for i in range(20)]
+
+
+def _edit_line(i, value):
+    out = _ROWS.copy()
+    out[i] = f"line{i} = {value!r}\n"
+    return "".join(out)
+
+
+def _fresh(tmp_path):
+    root = tmp_path / "r"
+    root.mkdir()
+    _git(root, "init", "-q", "-b", "main")
+    _git(root, "config", "user.email", "t@t")
+    _git(root, "config", "user.name", "t")
+    return root
+
+
+def _merge(root, *args):
+    subprocess.run(["git", "merge", "--no-edit", *args], cwd=root, capture_output=True)
+
+
+def _judged(root, head, base=None, covered=()):
+    record = {"work": "w", "tier": "2", "head": head, **({"base": base} if base else {})}
+    return _mod().stale_review(root, [record], {"w"}, 2, set(), covered)
+
+
+def test_a_file_this_work_renamed_and_the_merge_turned_back_to_mains_old_one_is_a_drop(tmp_path):
+    root = _fresh(tmp_path)
+    _commit(root, "f.py", "".join(_ROWS), "base")
+    _git(root, "checkout", "-q", "-b", "feat")
+    _git(root, "mv", "f.py", "g.py")
+    head = _commit(root, "g.py", _edit_line(0, "reviewed"), "reviewed: rename and edit")
+    _git(root, "checkout", "-q", "main")
+    _commit(root, "f.py", _edit_line(0, "main"), "main edits line 0")
+    _git(root, "checkout", "-q", "feat")
+    _merge(root, "main")
+    (root / "g.py").write_text(_edit_line(0, "main"))
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "--no-edit")
+    b_head = _commit(root, "b.py", "b = 1\n", "work B")
+    found = _judged(root, head, covered=((head, b_head),))
+    assert found is not None and "g.py" in found
+
+
+@pytest.mark.parametrize("covered", [False, True])
+def test_a_new_file_git_moved_into_a_renamed_directory_and_the_merge_deleted_is_a_drop(tmp_path, covered):
+    root = _fresh(tmp_path)
+    _commit(root, "d/a.py", "a = 0\n", "base")
+    _git(root, "checkout", "-q", "-b", "feat")
+    head = _commit(root, "d/new.py", "new = 'reviewed'\n", "reviewed: new file")
+    _git(root, "checkout", "-q", "main")
+    _git(root, "mv", "d", "e")
+    _git(root, "commit", "-q", "-m", "main moves d/ to e/")
+    _git(root, "checkout", "-q", "feat")
+    _merge(root, "main")
+    _git(root, "rm", "-q", "--cached", "--ignore-unmatch", "e/new.py", "d/new.py")
+    for rel in ("e/new.py", "d/new.py"):
+        (root / rel).unlink(missing_ok=True)
+    _git(root, "commit", "-q", "--no-edit")
+    b_head = _commit(root, "b.py", "b = 1\n", "work B")
+    found = _judged(root, head, covered=((head, b_head),) if covered else ())
+    assert found is not None and "d/new.py" in found
+
+
+def test_a_merge_that_takes_the_executable_bit_back_is_a_drop(tmp_path):
+    root = _fresh(tmp_path)
+    _commit(root, "run.sh", "echo hi\n", "base")
+    _git(root, "checkout", "-q", "-b", "feat")
+    (root / "run.sh").chmod(0o755)
+    _git(root, "add", "run.sh")
+    _git(root, "commit", "-q", "-m", "reviewed: run.sh executable")
+    head = _git(root, "rev-parse", "HEAD")
+    _git(root, "checkout", "-q", "main")
+    _commit(root, "m.py", "m = 1\n", "main moves on")
+    _git(root, "checkout", "-q", "feat")
+    _git(root, "merge", "-q", "--no-commit", "main")
+    (root / "run.sh").chmod(0o644)
+    _git(root, "add", "run.sh")
+    _git(root, "commit", "-q", "--no-edit")
+    b_head = _commit(root, "b.py", "b = 1\n", "work B")
+    found = _judged(root, head, covered=((head, b_head),))
+    assert found is not None and "run.sh" in found
+
+
+def test_a_stacked_branch_taking_mains_squash_of_the_branch_below_is_no_drop(tmp_path):
+    # this work's review starts at the branch below (base..head): that
+    # branch's file is not this work's, even if merge-base says so
+    root = _fresh(tmp_path)
+    _commit(root, "f.py", "".join(_ROWS), "base")
+    _git(root, "checkout", "-q", "-b", "b1")
+    below = _commit(root, "f.py", _edit_line(0, "b1-draft"), "B1 draft")
+    _git(root, "checkout", "-q", "-b", "b2")
+    head = _commit(root, "g.py", "g = 'b2'\n", "B2 reviewed")
+    _git(root, "checkout", "-q", "b1")
+    _commit(root, "f.py", _edit_line(0, "b1-final"), "B1 review fix-up")
+    _git(root, "checkout", "-q", "main")
+    _git(root, "merge", "-q", "--squash", "b1")
+    _git(root, "commit", "-q", "-m", "B1 (squash)")
+    _git(root, "checkout", "-q", "b2")
+    _merge(root, "main")
+    _git(root, "checkout", "--theirs", "f.py")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "--no-edit")
+    assert _judged(root, head, base=below) is None
+    # the review that saw B1's change as well still owns it
+    first = _git(root, "rev-list", "--max-parents=0", "HEAD")
+    found = _judged(root, head, base=first)
+    assert found is not None and "f.py" in found
+    # the merge train's boarding judges by the same range
+    assert _mod()._unreviewed_paths(root, head, "HEAD", below) == set()
+    assert "f.py" in _mod()._unreviewed_paths(root, head, "HEAD", first)
+    train = _train()
+    record = {"work": "w", "tier": "2", "head": head, "base": below}
+    assert train._covers(root, [record], {"w"}, 2, "HEAD")
+    assert not train._covers(root, [{**record, "base": first}], {"w"}, 2, "HEAD")
+
+
+def test_an_unrelated_import_taking_its_own_file_is_no_drop_of_this_work(tmp_path):
+    root = _fresh(tmp_path)
+    base = _commit(root, "LICENSE", "ours\n", "base")
+    _git(root, "checkout", "-q", "-b", "feat")
+    head = _commit(root, "a.py", "a = 1\n", "reviewed")
+    _git(root, "checkout", "-q", "--orphan", "vendor")
+    _git(root, "rm", "-rfq", ".")
+    _commit(root, "LICENSE", "theirs\n", "vendor root")
+    _git(root, "checkout", "-q", "feat")
+    _merge(root, "--allow-unrelated-histories", "vendor")
+    _git(root, "checkout", "--theirs", "LICENSE")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "--no-edit")
+    merged = _git(root, "rev-parse", "HEAD")
+    assert _judged(root, head, base=base, covered=((head, merged),)) is None
