@@ -1166,18 +1166,24 @@ ein Wächter-Test gegen doppelte Klammern ohne Leerzeichen in Python-Vorlagen.
 Wer v2.27.1 oder v2.28.0 installiert hat und am Push scheitert: auf v2.28.1
 aktualisieren, `v2.28.1`.
 
-**v2.33.1 — Verwerfen im Stale-Check, auch im Bereich eines anderen Reviews.** Aus dem Review des Referenzprojekts und zwei Refute-Runden. Jeder Fund ist mit einem Test belegt, der gegen die Vorfassung fällt.
-- **Ein Merge im Bereich `base..head` eines anderen Reviews wird wieder auf Verwerfen geprüft.** Der Bereich entschuldigt nur Inhalt, den das andere Review gesehen hat. Dass ein Merge den geprüften Code dieser Arbeit zur anderen Seite auflöst, entschuldigt er nicht.
-- **Verwerfen kann nur, was diese Arbeit geändert hat:** Die Pfade kommen aus dem Bereich `base..head` des eigenen Reviews; ohne bekannte Basis aus dem, was die Arbeit seit ihrer Abzweigung geändert hat.
-  - Ein gestapelter Branch, der die Squash-Fassung des Branches darunter von main übernimmt, verwirft nichts. Ebenso ein Import ohne gemeinsame Historie, der seine eigene Datei nimmt.
+**v2.33.1 — Verwerfen im Stale-Check, auch im Bereich eines anderen Reviews.** Anlass war ein Review im Referenzprojekt. Danach griffen drei Refute-Runden jede Fix-Runde erneut an. Jeder Fund ist mit einem Test belegt, der gegen die Vorfassung fällt, oder als Grenze dokumentiert.
+- **Merges im Bereich eines anderen Reviews:** Ein Merge im Bereich `base..head` eines anderen Reviews wird wieder auf Verwerfen geprüft. Der Bereich entschuldigt nur Inhalt, den das andere Review gesehen hat. Er entschuldigt nicht, dass ein Merge den geprüften Code dieser Arbeit zur anderen Seite auflöst.
+- **Verwerfen kann nur, was diese Arbeit geändert hat:** Jedes Review der Arbeit bringt seinen Bereich `base..head` ein (`work_bases`). Bringt es keine Basis unter dem Kopf mit, oder liegt sein Kopf nicht mehr in der Historie, zählt alles seit der Abzweigung (fail closed).
+  - Ein gestapelter Branch verwirft nichts, wenn er die Squash-Fassung des Branches darunter von main übernimmt.
+  - Ein Import ohne gemeinsame Historie verwirft nichts, wenn er seine eigene Datei nimmt.
+  - Die Basis einer Delta-Runde versteckt den Code der ersten Runde nicht.
   - Eine Seite, die den geprüften Kopf schon enthält, verwirft nichts.
-  - Der Zug urteilt beim Einsteigen über denselben Bereich.
-- **Umbenennungen und Modi:**
-  - Eine Datei, die diese Arbeit umbenannt hat, wird mit der Datei der anderen Seite unter ihrem alten Namen verglichen. Eine Datei, die die andere Seite umbenannt hat, gehört dieser Arbeit unter ihrem neuen Namen.
-  - Eine neue Datei, die git's eigener Merge in ein umbenanntes Verzeichnis verschoben hat und die der Merge löscht, ist verworfen.
-  - Der Modus zählt mit: ein Merge, der das Ausführungsrecht zurücknimmt, hat die Datei geändert.
-- **Ein nachträglich geänderter Kopf gilt nie als geprüft:** Liegt der geprüfte Kopf nicht mehr in der Historie, liefert `_unreviewed_paths` „nicht beurteilbar“ statt „nichts ungeprüft“.
+  - Der Zug urteilt beim Einsteigen über dieselben Bereiche.
+- **Umbenennungen, verschobene Dateien, Modi:**
+  - Eine Datei, die diese Arbeit umbenannt hat, wird mit der Datei der anderen Seite unter ihrem alten Namen verglichen.
+  - Eine Datei, die die andere Seite umbenannt hat, gehört dieser Arbeit unter ihrem neuen Namen.
+  - Eine Datei, die git's eigener Merge verschoben hat (in ein umbenanntes Verzeichnis, auch auf eine Datei von main), wird dort beurteilt, wo git sie hingelegt hat. Löscht der Merge sie dort, ist sie verworfen.
+  - Der Modus wird getrennt vom Inhalt beurteilt. Nimmt ein Merge das Ausführungsrecht gegen git's eigenen Merge zurück, ist das ein Verwerfen, egal was aus dem Inhalt wurde. Übernimmt der Merge den Modus von main so, wie git ihn mergt, ist das kein eigener Code des Merges.
+- **Ein nachträglich geänderter Kopf gilt nie als geprüft:** Liegt der geprüfte Kopf nicht mehr in der Historie, meldet `_unreviewed_paths` „nicht beurteilbar“ statt „nichts ungeprüft“.
 - **Releases:** Ein Tag wird als GitHub-Release veröffentlicht, mit seinem CHANGELOG-Eintrag als Text (`release-publish.yml`, `tools/release_notes.py`).
+- **Bekannt, nicht behoben (dokumentiert):**
+  - Im Bereich eines anderen Reviews gilt ein dritter Wert (keine Seite, nicht git's Merge) als Urteil dieses Reviews.
+  - Nach einem Rebase kann ein Merge, der die Seite eines anderen Branches für eine Datei nimmt, die main geändert hat, als Verwerfen gelesen werden.
 
 **v2.33.0 — fünf Prozess-Baustellen in einem Zug, jede refutiert.** Fünf Pakete kommen aus Befunden des Referenzprojekts. Jedes ist vor dem Release von einem frischen Agenten angegriffen worden, die Fix-Runden ebenso; die letzte, kleine Fix-Runde ist mit Regressionstests belegt, aber nicht noch einmal refutiert. Jeder Fund ist behoben und mit einem Test belegt, der gegen die Vorfassung fällt, oder als bekannte Grenze dokumentiert.
 - **Wo Prozess-Belege liegen, legt eine Stelle fest:** `check_review` bestimmt, wo REVIEW-, ROOT-CAUSE- und REFUTE-Zeilen stehen: Journal, aktive und archivierte Pläne, Spec-Kit-Pläne. attest, das Review-Bündel und das Gate lesen alle über diese eine Stelle.
