@@ -735,8 +735,8 @@ def test_a_stacked_branch_taking_mains_squash_of_the_branch_below_is_no_drop(tmp
     found = _judged(root, head, base=first)
     assert found is not None and "f.py" in found
     # the merge train's boarding judges by the same range
-    assert _mod()._unreviewed_paths(root, head, "HEAD", (below,)) == set()
-    assert "f.py" in _mod()._unreviewed_paths(root, head, "HEAD", (first,))
+    assert _mod()._unreviewed_paths(root, head, "HEAD", ((below, head),)) == set()
+    assert "f.py" in _mod()._unreviewed_paths(root, head, "HEAD", ((first, head),))
     train = _train()
     record = {"work": "w", "tier": "2", "head": head, "base": below}
     assert train._covers(root, [record], {"w"}, 2, "HEAD")
@@ -888,3 +888,138 @@ def test_the_reviewed_content_under_mains_mode_is_no_code_of_the_merge(tmp_path)
     assert _git(root, "ls-tree", "HEAD", "run.sh").startswith("100755")
     found = _judged(root, head)
     assert found is None, found
+
+
+# --- third refutation: the mode apart from any content, every round owns its code ---
+
+def _write(root, rel, text, mode=None, msg=None):
+    p = root / rel
+    p.parent.mkdir(parents=True, exist_ok=True)
+    if p.is_symlink():
+        p.unlink()
+    p.write_text(text)
+    if mode is not None:
+        p.chmod(mode)
+    _git(root, "add", "-A")
+    if msg:
+        _git(root, "commit", "-q", "-m", msg)
+        return _git(root, "rev-parse", "HEAD")
+
+
+def _finish(root):
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "--no-edit")
+    return _git(root, "rev-parse", "HEAD")
+
+
+def _covered_b(root, head):
+    b_head = _commit(root, "b.py", "b = 1\n", "work B")
+    return ((head, b_head),)
+
+
+def test_a_dropped_mode_counts_when_main_changed_the_content(tmp_path):
+    root = _fresh(tmp_path)
+    _commit(root, "run.sh", "".join(_ROWS), "base")
+    _git(root, "checkout", "-q", "-b", "feat")
+    head = _write(root, "run.sh", "".join(_ROWS), 0o755, "reviewed: +x")
+    _git(root, "checkout", "-q", "main")
+    _write(root, "run.sh", _edit_line(10, "main"), 0o644, "main edits content")
+    _git(root, "checkout", "-q", "feat")
+    _merge(root, "--no-commit", "main")
+    assert _git(root, "ls-files", "-s", "run.sh").startswith("100755")
+    (root / "run.sh").chmod(0o644)
+    _finish(root)
+    found = _judged(root, head, covered=_covered_b(root, head))
+    assert found is not None and "run.sh" in found, found
+
+
+def test_a_dropped_mode_counts_under_gits_merged_content(tmp_path):
+    root = _fresh(tmp_path)
+    _commit(root, "run.sh", "".join(_ROWS), "base")
+    _git(root, "checkout", "-q", "-b", "feat")
+    head = _write(root, "run.sh", _edit_line(0, "reviewed"), 0o755, "reviewed")
+    _git(root, "checkout", "-q", "main")
+    _write(root, "run.sh", _edit_line(10, "main"), 0o644, "main")
+    _git(root, "checkout", "-q", "feat")
+    _merge(root, "--no-commit", "main")
+    (root / "run.sh").chmod(0o644)
+    _finish(root)
+    found = _judged(root, head, covered=_covered_b(root, head))
+    assert found is not None and "run.sh" in found, found
+
+
+def test_a_dropped_mode_counts_through_this_works_rename(tmp_path):
+    root = _fresh(tmp_path)
+    _commit(root, "a.sh", "".join(_ROWS), "base")
+    _git(root, "checkout", "-q", "-b", "feat")
+    _git(root, "mv", "a.sh", "b.sh")
+    head = _write(root, "b.sh", "".join(_ROWS), 0o755, "reviewed: rename, +x")
+    _git(root, "checkout", "-q", "main")
+    _write(root, "a.sh", _edit_line(10, "main"), 0o644, "main edits")
+    _git(root, "checkout", "-q", "feat")
+    _merge(root, "--no-commit", "main")
+    assert _git(root, "ls-files", "-s", "b.sh").startswith("100755")
+    (root / "b.sh").chmod(0o644)
+    _finish(root)
+    found = _judged(root, head, covered=((head, _commit(root, "z.py", "z\n", "B")),))
+    assert found is not None and "b.sh" in found, found
+
+
+def test_a_round_without_a_base_keeps_its_code_next_to_a_delta_round(tmp_path):
+    # base names a commit ABOVE the reviewed change (ancestor of head) — only
+    # a later record; the earlier round had no base at all
+    root = _fresh(tmp_path)
+    _two_sided(root)
+    h1 = _commit(root, "f.py", _edit_line(0, "reviewed"), "round 1")
+    h2 = _commit(root, "b.py", "b\n", "round 2")
+    _git(root, "checkout", "-q", "main")
+    _commit(root, "f.py", _edit_line(0, "main"), "main")
+    _git(root, "checkout", "-q", "feat")
+    _merge(root, "main")
+    _resolve_theirs(root, "f.py")
+    r1 = {"work": "w", "tier": "2", "head": h1}  # older record, no base
+    r2 = {"work": "w", "tier": "2", "head": h2, "base": h1}
+    found = _mod().stale_review(root, [r1, r2], {"w"}, 2, set(), ((h1, h2),))
+    assert found is not None and "f.py" in found, found
+
+
+def test_a_round_rebased_away_keeps_its_code_next_to_a_delta_round(tmp_path):
+    root = _fresh(tmp_path)
+    _two_sided(root)
+    h1 = _commit(root, "f.py", _edit_line(0, "reviewed"), "round 1")
+    h2 = _commit(root, "b.py", "b\n", "round 2")
+    _git(root, "checkout", "-q", "main")
+    _commit(root, "f.py", _edit_line(0, "main"), "main")
+    _git(root, "checkout", "-q", "feat")
+    _merge(root, "main")
+    _resolve_theirs(root, "f.py")
+    r1 = {"work": "w", "tier": "2", "head": "1" * 40, "base": "2" * 40}
+    r2 = {"work": "w", "tier": "2", "head": h2, "base": h1}
+    found = _mod().stale_review(root, [r1, r2], {"w"}, 2, set(), ((h1, h2),))
+    assert found is not None and "f.py" in found, found
+
+
+def test_the_train_and_the_gate_agree_on_a_dropped_mode(tmp_path):
+    root = _fresh(tmp_path)
+    _commit(root, "run.sh", "".join(_ROWS), "base")
+    _git(root, "checkout", "-q", "-b", "feat")
+    head = _write(root, "run.sh", "".join(_ROWS), 0o755, "reviewed: +x")
+    _git(root, "checkout", "-q", "main")
+    _write(root, "run.sh", _edit_line(10, "main"), 0o644, "main edits content")
+    _git(root, "checkout", "-q", "feat")
+    _merge(root, "--no-commit", "main")
+    (root / "run.sh").chmod(0o644)
+    _finish(root)
+    rec = {"work": "w", "tier": "2", "head": head}
+    gate = _mod().stale_review(root, [rec], {"w"}, 2, set(), ())
+    train = _train()._covers(root, [rec], {"w"}, 2, "HEAD")
+    assert (gate is None) == train, (gate, train)
+    assert gate is not None
+
+
+def test_work_bases_are_this_works_code_rounds_only():
+    passes = [{"work": "w", "tier": "2", "head": "h", "base": "b1"},
+              {"work": "w", "tier": "2", "head": "h2"},
+              {"work": "w-plan", "tier": "2", "head": "h", "base": "bp"},
+              {"work": "v", "tier": "2", "head": "h", "base": "bv"}]
+    assert _mod().work_bases(passes, {"w"}) == (("b1", "h"), ("", "h2"))
