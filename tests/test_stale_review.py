@@ -1023,3 +1023,73 @@ def test_work_bases_are_this_works_code_rounds_only():
               {"work": "w-plan", "tier": "2", "head": "h", "base": "bp"},
               {"work": "v", "tier": "2", "head": "h", "base": "bv"}]
     assert _mod().work_bases(passes, {"w"}) == (("b1", "h"), ("", "h2"))
+
+
+# --- fourth refutation: a headless record proves nothing, a rename on both sides ---
+
+def test_a_headless_record_does_not_widen_a_stacked_branchs_work(tmp_path):
+    # stacked b2 (base=below) plus an older pass of the same work recording neither
+    # head nor base; merge takes main's squash of b1's file (not b2's code)
+    root = _fresh(tmp_path)
+    _commit(root, "f.py", "".join(_ROWS), "base")
+    _git(root, "checkout", "-q", "-b", "b1")
+    below = _commit(root, "f.py", _edit_line(0, "b1-draft"), "B1 draft")
+    _git(root, "checkout", "-q", "-b", "b2")
+    head = _commit(root, "g.py", "g = 'b2'\n", "B2 reviewed")
+    _git(root, "checkout", "-q", "b1")
+    _commit(root, "f.py", _edit_line(0, "b1-final"), "B1 fix-up")
+    _git(root, "checkout", "-q", "main")
+    _git(root, "merge", "-q", "--squash", "b1")
+    _git(root, "commit", "-q", "-m", "B1 (squash)")
+    _git(root, "checkout", "-q", "b2")
+    _merge(root, "main")
+    _resolve_theirs(root, "f.py")
+    legacy = {"work": "w", "tier": "1"}
+    rec = {"work": "w", "tier": "2", "head": head, "base": below}
+    found = _mod().stale_review(root, [legacy, rec], {"w"}, 2, set(), ())
+    assert found is None, found
+
+
+def test_a_dropped_mode_counts_when_both_sides_renamed_the_file(tmp_path):
+    # work renames a.sh->w.sh with +x; main renames a.sh->m.sh (rename/rename conflict)
+    root = _fresh(tmp_path)
+    _commit(root, "a.sh", "".join(_ROWS), "base")
+    _git(root, "checkout", "-q", "-b", "feat")
+    _git(root, "mv", "a.sh", "w.sh")
+    head = _write(root, "w.sh", "".join(_ROWS), 0o755, "reviewed: rename +x")
+    _git(root, "checkout", "-q", "main")
+    _git(root, "mv", "a.sh", "m.sh")
+    _git(root, "commit", "-q", "-m", "main rename")
+    _git(root, "checkout", "-q", "feat")
+    _merge(root, "main")
+    # resolver keeps work's name but main's mode
+    _git(root, "rm", "-q", "--cached", "--ignore-unmatch", "m.sh", "a.sh")
+    for n in ("m.sh", "a.sh"):
+        (root / n).unlink(missing_ok=True)
+    (root / "w.sh").write_text("".join(_ROWS))
+    (root / "w.sh").chmod(0o644)
+    _finish(root)
+    found = _judged(root, head, covered=_covered_b(root, head))
+    assert found is not None and "w.sh" in found, found
+
+
+def test_a_dropped_edit_counts_when_both_sides_renamed_the_file(tmp_path):
+    # companion: same rename/rename, work also edited line 0; resolver keeps
+    # w.sh (work's name) with the base text — the reviewed edit is gone
+    root = _fresh(tmp_path)
+    _commit(root, "a.sh", "".join(_ROWS), "base")
+    _git(root, "checkout", "-q", "-b", "feat")
+    _git(root, "mv", "a.sh", "w.sh")
+    head = _write(root, "w.sh", _edit_line(0, "w"), None, "reviewed: rename + edit")
+    _git(root, "checkout", "-q", "main")
+    _git(root, "mv", "a.sh", "m.sh")
+    _git(root, "commit", "-q", "-m", "main rename")
+    _git(root, "checkout", "-q", "feat")
+    _merge(root, "main")
+    _git(root, "rm", "-q", "--cached", "--ignore-unmatch", "m.sh", "a.sh")
+    for n in ("m.sh", "a.sh"):
+        (root / n).unlink(missing_ok=True)
+    (root / "w.sh").write_text("".join(_ROWS))
+    _finish(root)
+    found = _judged(root, head, covered=_covered_b(root, head))
+    assert found is not None and "w.sh" in found, found

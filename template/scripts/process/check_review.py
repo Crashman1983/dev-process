@@ -1169,9 +1169,10 @@ def _dropped_by_merge(root: Path, merge: str, head: str,
     # (refutation: both read a merge taking main's side of such a file as a
     # drop). A base that is head itself, or not below it, proves nothing
     # (refutation: a round without a usable base lost its own code). A round
-    # whose head is not in this history (rebased away) proves no range:
-    # everything since the fork is this work's — fail closed; known limit: a
-    # merge then taking another branch's side of a file main changed reads
+    # without a base, or whose head is not in this history (rebased away),
+    # proves no range: everything since the fork is this work's — fail
+    # closed; known limit: on a stacked branch, or after such a rebase, a
+    # merge taking another branch's side of a file main changed then reads
     # as a drop
     def commit_id(rev: str) -> str:
         if not rev or rev.startswith("-"):
@@ -1234,8 +1235,13 @@ def _dropped_by_merge(root: Path, merge: str, head: str,
                 continue
             theirs_at = where
             if theirs == _ABSENT and where == path and path in old_name:
-                theirs_at = old_name[path]  # this work renamed it: the other side's is the old name
+                # this work renamed it: the other side's is the old name — or,
+                # renamed there too, the other side's new name for it
+                theirs_at = old_name[path]
                 theirs = _blob(root, other, theirs_at)
+                if theirs == _ABSENT and theirs_at in theirs_moved:
+                    theirs_at = theirs_moved[theirs_at]
+                    theirs = _blob(root, other, theirs_at)
                 if theirs is None:
                     return None
             if result == theirs and mine != theirs and (where in conflicted or result != auto_blob):
@@ -1298,11 +1304,14 @@ def _residue(rel: str) -> str:
 
 
 def work_bases(passes: list[dict], ids: set[str]) -> tuple[tuple[str, str], ...]:
-    """(base, head) of every review of this work, "" where one is not
-    recorded — its drop check owns what any of them saw change (refutation:
-    a delta round's base alone hid a drop of the first round's code)."""
-    return tuple(dict.fromkeys((r.get("base") or "", r.get("head") or "")
-                               for r in passes if r["work"] in ids))
+    """(base, head) of every review of this work that records the head it
+    saw, base "" where none is recorded — its drop check owns what any of
+    them saw change (refutation: a delta round's base alone hid a drop of
+    the first round's code). A record without a head (older records) saw no
+    range, and proves nothing either way (refutation: it widened a stacked
+    branch's work to the branch below)."""
+    return tuple(dict.fromkeys((r.get("base") or "", r["head"])
+                               for r in passes if r["work"] in ids and r.get("head")))
 
 
 def stale_review(root: Path, passes: list[dict], ids: set[str], tier: int,
