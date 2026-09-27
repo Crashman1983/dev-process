@@ -956,7 +956,7 @@ def _merge_own(root: Path, merge: str) -> set[str] | None:
 
 
 def _history(root: Path, head: str, tip: str = "HEAD",
-             reviewed: tuple[tuple[str, str], ...] = (), bases: tuple[str, ...] = ()) -> History:
+             reviewed: tuple[tuple[str, str], ...] = (), bases: tuple[tuple[str, str], ...] = ()) -> History:
     """Gather the facts `decide` judges for one reviewed head.
 
     `tip` is what is judged — HEAD for a push, a branch for the merge train's
@@ -1058,7 +1058,8 @@ def _history(root: Path, head: str, tip: str = "HEAD",
     return History(late=keep(late), dropped=keep(dropped), fellow=tuple(fellow))
 
 
-def _unreviewed_paths(root: Path, head: str, tip: str = "HEAD", bases: tuple[str, ...] = ()) -> set[str] | None:
+def _unreviewed_paths(root: Path, head: str, tip: str = "HEAD",
+                      bases: tuple[tuple[str, str], ...] = ()) -> set[str] | None:
     """Paths of code in `tip` that no review covers — None when git cannot
     tell (the merge train's boarding judges a branch by this)."""
     h = _history(root, head, tip, bases=bases)
@@ -1121,7 +1122,8 @@ def _renames(out: bytes | None) -> dict[str, str] | None:
     return moved
 
 
-def _dropped_by_merge(root: Path, merge: str, head: str, bases: tuple[str, ...] = ()) -> set[str] | None:
+def _dropped_by_merge(root: Path, merge: str, head: str,
+                      bases: tuple[tuple[str, str], ...] = ()) -> set[str] | None:
     """Paths where a merge threw the reviewed work's change away in favour of
     another parent's version. `--cc` is blind to this — the result equals one
     parent, so the combined diff is empty (downstream review residual).
@@ -1133,9 +1135,11 @@ def _dropped_by_merge(root: Path, merge: str, head: str, bases: tuple[str, ...] 
     A clean merge that keeps git's own result is never a drop — also not when
     main already carries the reviewed change plus later edits (a squash or
     cherry-pick before a stacked branch merges main; downstream refutation).
-    Only this work's own paths can be dropped: what its reviews saw change
-    (`base..head` of each, for a base that is a proper ancestor of head;
-    without one, what it changed since it forked from the other side),
+    Only this work's own paths can be dropped: what its reviews saw change —
+    each review adds its `base..head`, or, without a base that is a proper
+    ancestor of head or with a head not in this history, everything the work
+    changed since it forked from the other side (so does a call that knows
+    no review),
     followed through renames — a file this work renamed is compared with the
     other side's file under its old name, a file the other side renamed is
     this work's under its new name, and a file git's own merge moved (into a
@@ -1164,13 +1168,28 @@ def _dropped_by_merge(root: Path, merge: str, head: str, bases: tuple[str, ...] 
     # branch below it, and an unrelated import brings no work of its own
     # (refutation: both read a merge taking main's side of such a file as a
     # drop). A base that is head itself, or not below it, proves nothing
-    head_id = (_git_bytes(root, "rev-parse", "--verify", "-q", f"{head}^{{commit}}") or b"").decode().strip()
-    starts = []
-    for base in bases:
-        base_id = (_git_bytes(root, "rev-parse", "--verify", "-q", f"{base}^{{commit}}") or b"").decode().strip()
-        if base_id and base_id != head_id \
-                and _git_bytes(root, "merge-base", "--is-ancestor", base_id, head) is not None:
-            starts.append(base_id)
+    # (refutation: a round without a usable base lost its own code). A round
+    # whose head is not in this history (rebased away) proves no range:
+    # everything since the fork is this work's — fail closed; known limit: a
+    # merge then taking another branch's side of a file main changed reads
+    # as a drop
+    def commit_id(rev: str) -> str:
+        if not rev or rev.startswith("-"):
+            return ""
+        return (_git_bytes(root, "rev-parse", "--verify", "-q", f"{rev}^{{commit}}") or b"").decode().strip()
+
+    def below(rev: str, top: str) -> bool:
+        return _git_bytes(root, "merge-base", "--is-ancestor", rev, top) is not None
+
+    head_id = commit_id(head)
+    starts: list[str | None] = []  # None: the fork point with the other side
+    for base, rec_head in bases or (("", ""),):
+        rec_id = commit_id(rec_head)
+        if rec_head and not (rec_id and below(rec_id, head_id or head)):
+            starts.append(None)
+            continue
+        base_id = commit_id(base)
+        starts.append(base_id if base_id and base_id != head_id and below(base_id, head_id or head) else None)
     dropped: set[str] = set()
     for other in (p for p in parents if p != our):
         if _git_bytes(root, "merge-base", "--is-ancestor", head, other) is not None:
@@ -1181,7 +1200,7 @@ def _dropped_by_merge(root: Path, merge: str, head: str, bases: tuple[str, ...] 
         fork = (_git_bytes(root, "merge-base", head, other) or b"").decode().strip() or _EMPTY_TREE
         work: set[str] = set()
         old_name: dict[str, str] = {}
-        for start in starts or [fork]:
+        for start in dict.fromkeys(s or fork for s in starts or [None]):
             names = _names(_git_bytes(root, "diff", "--name-only", "--no-renames", "--ignore-submodules=none",
                                       "-z", start, head))
             renamed = _renames(_git_bytes(root, "diff", "--name-status", "-M", "-z", start, head))
@@ -1222,9 +1241,11 @@ def _dropped_by_merge(root: Path, merge: str, head: str, bases: tuple[str, ...] 
             if result == theirs and mine != theirs and (where in conflicted or result != auto_blob):
                 dropped.add(path)
                 continue
-            if _ABSENT in (result, mine, theirs, auto_blob) or result != mine:
+            if _ABSENT in (result, mine, theirs, auto_blob):
                 continue
-            # the reviewed content kept: was its mode turned back against git's own merge?
+            # apart from the content, whatever it came to: was the mode turned
+            # back against git's own merge? (refutation: judged only on the
+            # reviewed content, main's edit hid a dropped `+x`)
             modes = [_blob(root, c, p, mode=True)
                      for c, p in ((merge, where), (our, path), (other, theirs_at), (tree, where))]
             if None in modes:
@@ -1276,11 +1297,12 @@ def _residue(rel: str) -> str:
             f"carries a cleared plan archives it)")
 
 
-def work_bases(passes: list[dict], ids: set[str]) -> tuple[str, ...]:
-    """The base of every review of this work that records one — its drop
-    check owns what any of them saw change (refutation: a delta round's
-    base alone hid a drop of the first round's code)."""
-    return tuple(dict.fromkeys(r["base"] for r in passes if r["work"] in ids and r.get("base")))
+def work_bases(passes: list[dict], ids: set[str]) -> tuple[tuple[str, str], ...]:
+    """(base, head) of every review of this work, "" where one is not
+    recorded — its drop check owns what any of them saw change (refutation:
+    a delta round's base alone hid a drop of the first round's code)."""
+    return tuple(dict.fromkeys((r.get("base") or "", r.get("head") or "")
+                               for r in passes if r["work"] in ids))
 
 
 def stale_review(root: Path, passes: list[dict], ids: set[str], tier: int,
