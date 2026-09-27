@@ -121,3 +121,17 @@ def test_bootstrap_documents_complete_optional_harness_mapping():
     text = (root / "BOOTSTRAP.md").read_text(encoding="utf-8")
     assert "Claude Code is always installed" not in text
     assert "--data harness=agents_md" in text and "--data harness=claude" in text
+
+
+def test_release_notes_come_from_the_changelog_entry_of_the_tag(tmp_path):
+    import subprocess
+    import sys
+    root = Path(__file__).parents[1]
+    log = tmp_path / "CHANGELOG.md"
+    log.write_text("# Changelog\n\n**v1.2.0 — neu.** Text eins.\n- Punkt\n\n**v1.1.0 — alt.** Alt.\n")
+    tool = [sys.executable, str(root / "tools/release_notes.py")]
+    r = subprocess.run([*tool, "v1.2.0", str(log)], capture_output=True, text=True)
+    assert r.returncode == 0 and r.stdout.splitlines()[0] == "neu" and "Punkt" in r.stdout and "Alt" not in r.stdout
+    assert subprocess.run([*tool, "v9.9.9", str(log)], capture_output=True, text=True).returncode == 1
+    wf = (root / ".github/workflows/release-publish.yml").read_text(encoding="utf-8")
+    assert "tools/release_notes.py" in wf and "--verify-tag" in wf
