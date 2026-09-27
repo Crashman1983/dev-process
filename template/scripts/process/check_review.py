@@ -1221,7 +1221,7 @@ def _dropped_by_merge(root: Path, merge: str, head: str,
         auto = _auto_merge(root, our, other)
         if auto is None:
             return None
-        tree, _conflicted = auto
+        tree, conflicted = auto
         auto_moved = _renames(_git_bytes(root, "diff", "--name-status", "-M", "-z", our, tree))
         if auto_moved is None:
             return None
@@ -1251,8 +1251,11 @@ def _dropped_by_merge(root: Path, merge: str, head: str,
             # turned to the other side against git's own merge: a content
             # conflict leaves markers in git's result, so a resolution never
             # equals it; a conflict of names only (renamed on both sides)
-            # keeping git's merged content is no drop (refutation)
-            if result == theirs and mine != theirs and result != auto_blob:
+            # keeping git's merged content is no drop (refutation). A delete
+            # conflict leaves no markers: git keeps the surviving file, so
+            # where this work deleted it, keeping it is the drop (refutation)
+            if result == theirs and mine != theirs and (
+                    result != auto_blob or (mine == _ABSENT and where in conflicted)):
                 dropped.add(path)
                 continue
             if _ABSENT in (result, mine, theirs, auto_blob):
