@@ -1187,6 +1187,7 @@ aktualisieren, `v2.28.1`.
   - Im Bereich eines anderen Reviews gilt ein dritter Wert (keine Seite, nicht git's Merge) als Urteil dieses Reviews.
   - Nach einer Umbenennung auf beiden Seiten braucht ein Merge, der nur den Namen von main behält, ein Review des Merges.
   - Zwei inhaltsgleiche Dateien kann git's Umbenennungs-Erkennung vertauschen.
+  - Legt diese Arbeit eine Datei an, wo main ein Verzeichnis anlegt, zählt es nicht als Verwerfen, wenn der Merge die Kopie löscht, die git dafür anlegt.
   - Hat eine Runde keine Basis oder keinen Kopf, oder liegt ihr Kopf nach einem Rebase nicht mehr in der Historie, zählt alles seit der Abzweigung. Auf einem gestapelten Branch kann dann ein Merge, der für eine Datei, die main geändert hat, die Seite eines anderen Branches nimmt, als Verwerfen gelesen werden.
 
 **v2.33.0 — fünf Prozess-Baustellen in einem Zug, jede refutiert.** Fünf Pakete kommen aus Befunden des Referenzprojekts. Jedes ist vor dem Release von einem frischen Agenten angegriffen worden, die Fix-Runden ebenso; die letzte, kleine Fix-Runde ist mit Regressionstests belegt, aber nicht noch einmal refutiert. Jeder Fund ist behoben und mit einem Test belegt, der gegen die Vorfassung fällt, oder als bekannte Grenze dokumentiert.

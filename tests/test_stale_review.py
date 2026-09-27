@@ -1147,3 +1147,39 @@ def test_a_headless_record_keeps_the_first_rounds_code_next_to_a_delta_round(tmp
     r2 = {"work": "w", "tier": "2", "head": h2, "base": h1}
     found = _mod().stale_review(root, [r1, r2], {"w"}, 2, set(), ())
     assert found is not None and "f.py" in found, found
+
+
+# --- sixth refutation: a delete conflict leaves no markers ---
+
+def test_keeping_mains_edit_of_a_file_this_work_deleted_is_a_drop(tmp_path):
+    root = _fresh(tmp_path)
+    _two_sided(root)
+    _git(root, "rm", "-q", "f.py")
+    _git(root, "commit", "-q", "-m", "reviewed: delete f.py")
+    head = _git(root, "rev-parse", "HEAD")
+    _git(root, "checkout", "-q", "main")
+    _commit(root, "f.py", _edit_line(0, "main"), "main edits")
+    _git(root, "checkout", "-q", "feat")
+    _merge(root, "main")
+    _git(root, "add", "f.py")  # keep main's edited file
+    _finish(root)
+    found = _judged(root, head, covered=_covered_b(root, head))
+    assert found is not None and "f.py" in found, found
+
+
+def test_keeping_mains_renamed_copy_of_a_file_this_work_deleted_is_a_drop(tmp_path):
+    root = _fresh(tmp_path)
+    _commit(root, "a.py", "".join(_ROWS), "base")
+    _git(root, "checkout", "-q", "-b", "feat")
+    _git(root, "rm", "-q", "a.py")
+    head = _commit(root, "k.py", "k\n", "reviewed: delete a.py")
+    _git(root, "checkout", "-q", "main")
+    _git(root, "mv", "a.py", "b.py")
+    _commit(root, "b.py", _edit_line(0, "main"), "main renames and edits")
+    _git(root, "checkout", "-q", "feat")
+    _merge(root, "main")
+    _git(root, "add", "-A")
+    _finish(root)
+    assert _git(root, "cat-file", "-e", "HEAD:b.py") == ""
+    found = _mod()._dropped_by_merge(root, _git(root, "rev-parse", "HEAD"), head)
+    assert found == {"b.py"}, found
