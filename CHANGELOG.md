@@ -1166,6 +1166,24 @@ ein Wächter-Test gegen doppelte Klammern ohne Leerzeichen in Python-Vorlagen.
 Wer v2.27.1 oder v2.28.0 installiert hat und am Push scheitert: auf v2.28.1
 aktualisieren, `v2.28.1`.
 
+**v2.34.0 — ein Refuter ab Tier 2: zuerst der Owner-Check, dann Grenzfälle aus einem Katalog.** Refute war bisher nur für Gate-Code Pflicht. Er hat sich aber auch darüber hinaus bewährt: Beim Stale-Check fand jede Runde echte Fehler, etwa die Hälfte davon aus der vorherigen Fix-Runde. Die teuersten Blocker im Referenzprojekt kamen von einem zweiten Owner einer Regel.
+- **Staffel nach Tier** (`refute.md`, `risk-tiers.md`):
+  - Tier 0: kein Refute.
+  - Tier 1: optional, lohnt bei Parsern und Nebenläufigkeit; die Zeile steht dann im Journal.
+  - Tier 2: ein Lauf vor der ersten Review-Runde; eine Fix-Runde bekommt Regressionstests, keinen neuen Lauf.
+  - Tier 3 und Gate-Code auf jedem Tier: jede Fix-Runde erneut.
+- **Was der Refuter prüft, in dieser Reihenfolge:**
+  1. Gibt es schon einen Owner? Belegt wird das mit einem Differenztest, einer Eingabe, bei der neuer Code und Owner verschieden urteilen.
+  2. Wird ein Fehler als Erfolg gelesen?
+  3. Grenzfälle aus einem Katalog, der mit jeder neuen Klasse wächst.
+  4. Stichprobe: Hält der Beleg?
+
+  Jeder Fund ist entweder bestätigt (mit rotem Test, als NEU oder VORBESTEHEND markiert) oder er hält. Vorbestehende Funde werden Issues, nicht Teil der Fix-Runde.
+- **Ein zweiter Owner sperrt auf jedem Tier**, außer eine `DECISION` im Plan nennt den Grund (Review-Kommando, Checkliste).
+- **Das Review-Bündel warnt**, wenn ein gebündelter Plan Tier 2 oder höher angibt und keine eigene REFUTE-Zeile trägt, auch ohne Basis. Ein Delta verlangt deswegen keine neue Zeile.
+- **Ein Owner für den Tier eines Plans:** `check_review.plan_tier` und `review_waived`. Das Bündel liest Tier und Verzicht jetzt wie das Gate. Vorher warnte es bei einem Beispiel im Codeblock oder einer zweiten `tier:`-Zeile und verweigerte bei einem Tier 3 im Codeblock das Delta. Diesen Owner fand der Refuter selbst: Er war im ersten Lauf nach dem neuen Auftrag gleich der erste Fund.
+- **Bekannt, nicht behoben (Issue):** Die Delta-Verweigerung zählt Design-Dokumente und Pläne mit Review-Verzicht noch mit. `dispatch` und Teile der Werkzeuge lesen den Tier noch mit eigener Logik.
+
 **v2.33.1 — Verwerfen im Stale-Check, auch im Bereich eines anderen Reviews.** Anlass war ein Review im Referenzprojekt. Danach griffen drei Refute-Runden jede Fix-Runde erneut an. Jeder Fund ist mit einem Test belegt, der gegen die Vorfassung fällt, oder als Grenze dokumentiert.
 - **Merges im Bereich eines anderen Reviews:** Ein Merge im Bereich `base..head` eines anderen Reviews wird wieder auf Verwerfen geprüft. Der Bereich entschuldigt nur Inhalt, den das andere Review gesehen hat. Er entschuldigt nicht, dass ein Merge den geprüften Code dieser Arbeit zur anderen Seite auflöst.
 - **Verwerfen kann nur, was diese Arbeit geändert hat:** Jedes Review der Arbeit bringt seinen Bereich `base..head` ein (`work_bases`). Bringt es keine Basis unter dem Kopf oder keinen Kopf mit, oder liegt sein Kopf nicht mehr in der Historie, zählt alles seit der Abzweigung (fail closed).
