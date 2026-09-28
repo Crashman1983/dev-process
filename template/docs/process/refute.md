@@ -1,29 +1,98 @@
-# Refute — attack gate code before the first review round
+# Refute — attack a change before its first review round
 
-Gate code decides what may reach the integration branch: `scripts/process/`,
-`.githooks/`, the gate runner's configuration and the make targets a hook or
-the merge train calls. A defect there does not break one feature, it lets
-every later defect through — or blocks every later push.
+A refute is a fresh agent whose only job is to break the change. Tests
+written by the author test the author's picture of reality; the refuter tests
+a different one — and costs minutes, not a review round. Downstream it found
+more than the review rounds before it, again and again: half of what one
+run found had been introduced by the previous fix round, and the most
+expensive blockers came from a second owner of a rule the change did not
+know about.
 
-Downstream, gate changes needed four and more review rounds, and nearly every
-round found a case the author had not thought of: an amend next to the
-reviewed commit, a merge train whose suite runs one make level deeper, a check
-that said "OK" because a tool was missing. Tests written by the author test
-the author's picture of reality. A fresh agent whose only job is to break the
-change tests a different one — and costs minutes, not a review round.
+Gate code needs it most. It decides what may reach the integration branch —
+`scripts/process/`, `.githooks/`, the gate runner's configuration and the
+make targets a hook or the merge train calls — so a defect there does not
+break one feature, it lets every later defect through, or blocks every later
+push.
 
 ## When
 
-Before the first review round of every change that touches gate code. Again
-after a fix round that changed gate code (the fix gets refuted, not the whole
-branch). Not for plain documentation or product code.
+Scaled to the tier (`risk-tiers.md`):
+
+| Tier | Refute |
+|---|---|
+| 0 | none |
+| 1 | optional — worth one run when the change parses input or runs concurrently (persistence, paths and subprocesses already lift a change to Tier 2); record the line in the journal, there is no plan or bundle |
+| 2 | one run before the first review round; a fix round gets regression tests, not a new run |
+| 3, and gate code at any tier | before the first review round, and again after every fix round that changed code (the fix gets refuted, not the whole branch) |
+
+Plain documentation needs none.
 
 ## Who
 
 A fresh agent — not the implementing session, no access to its context. It
-reads the change and its tests, builds scratch repositories outside the
-project, and never edits the project or pushes. Same model family is fine;
-the stance (refute) is what counts.
+reads the change, its plan and tests, builds scratch repositories outside
+the project, and never edits the project or pushes. Same model family is
+fine; the stance (refute) is what counts. It gets the diff, the plan with
+its acceptance criteria and this document — not the previous round's
+report, so it does not search where the last one did.
+
+## What the refuter checks, in this order
+
+One run is about fifteen scenarios; spend them in this order, and skip what
+the change does not touch.
+
+1. **Is there already an owner?** Does the diff introduce a rule, a path
+   list, a pattern, a parser or a lookup that existing code already owns
+   (mandatory rule 4)? Search the repository for it. A finding is a
+   **differential test**: an input on which the new code and the existing
+   owner judge differently. "Looks similar" is a note, not a finding. Only
+   what the diff introduces is checked; a duplicate merely noticed on the
+   way becomes an issue.
+2. **Is a failure read as success?** Make the things the change relies on
+   fail — a command exits non-zero, a tool is missing, a reference does not
+   exist, a call times out — and check that the result fails closed, never
+   "nothing found" and green.
+3. **Edge cases**, from the catalogue below: only the classes the change
+   touches.
+4. **Does the evidence hold?** Remove one branch of the new code: does a
+   test go red? Are the plan's red/green claims true?
+
+Gate code adds, within the same run:
+
+- **Bypasses** — what should be refused but passes. Build the shapes real
+  work produces: amend, rebase, reset + recommit, cherry-pick, a side branch
+  merged in, merges with main (clean and with conflicts, resolved each way),
+  the merge train's staging chain with several passengers, passengers
+  without review, octopus and `-s ours` merges.
+- **False refusals** — what should pass but is refused: the normal daily
+  flows above, the attestation commit, fast-forwards, main moving on.
+- **The environment matrix** — run it the way production runs it: through
+  the make target (MAKELEVEL 1), inside the pre-push hook, with and without
+  `gh`, in a shallow clone, with only a local main, with a default branch
+  not called main.
+
+The refuter writes no fixes, no style remarks and no design opinions — that
+is the review's and the implementing session's work.
+
+## Edge-case catalogue
+
+Classes that found real defects. When a confirmed finding belongs to a class
+not listed here, the change that fixes it adds the class.
+
+- **Names:** non-UTF-8 bytes, spaces, a newline, a leading `-`, a name that
+  looks like an option or a revision.
+- **Empty, missing, equal:** an empty input or range, a missing file versus a
+  command that failed, a base equal to the head, a record without the field
+  the code expects.
+- **Rename, move, mode:** renamed on one side, on both sides, across rounds;
+  a directory renamed; a file moved by the tool itself; the executable bit;
+  a symlink or submodule in place of a file.
+- **Conflicts without markers:** modify/delete, rename/delete, a file where
+  the other side has a directory.
+- **Environment:** locale (translated tool output), a shallow clone, another
+  version of git, make or the interpreter, a missing optional tool.
+- **Text as rendered:** an example in a code block or comment, a placeholder,
+  a mention in backticks — read as a reader sees it.
 
 ## The brief
 
@@ -33,31 +102,41 @@ Copy, fill in the angle brackets, hand it over:
     directories outside the repository; do not modify it, do not push.
     When loading project modules directly, set sys.dont_write_bytecode first.
 
-    Subject: <files / functions> — intended semantics: <two to five rules>.
+    Subject: <files / functions> — intended semantics: <two to five rules,
+    or the plan's acceptance criteria>.
 
-    Try hard to find, with concrete reproductions:
-    (a) BYPASSES — what should be refused but passes. Build the shapes real
-        work produces: amend, rebase, reset + recommit, cherry-pick, a side
-        branch merged in, merges with main (clean and with conflicts, resolved
-        each way), the merge train's staging chain with several passengers,
-        passengers without review, octopus and `-s ours` merges.
-    (b) FALSE POSITIVES — what should pass but is refused: the normal daily
-        flows above, the attestation commit, fast-forwards, main moving on.
-    (c) FAIL-OPEN — errors, timeouts, missing tools that make it pass silently.
-    (d) THE ENVIRONMENT MATRIX — run it the way production runs it: through
-        the make target (MAKELEVEL 1), inside the pre-push hook, with and
-        without `gh`, in a shallow clone, with only a local main, with a
-        default branch not called main.
+    In this order, about fifteen scenarios in all:
+    1. OWNER — does the diff re-implement a rule existing code already owns?
+       Prove it with an input on which both judge differently.
+    2. FAIL-OPEN — make what it relies on fail (non-zero exit, missing tool,
+       missing reference, timeout); it must fail closed.
+    3. EDGE CASES — the classes of docs/process/refute.md's catalogue that
+       the change touches.
+    4. EVIDENCE — remove one branch: does a test go red? Are the plan's
+       red/green claims true?
+    <gate code only: 5. BYPASSES, FALSE REFUSALS and the ENVIRONMENT MATRIX
+    as docs/process/refute.md lists them.>
 
-    Report per scenario PASS/FAIL against the intended semantics, the exact
-    commands for every failure, a severity (BLOCKER/MAJOR/MINOR), and what you
-    could not test.
+    Run every scenario against the change AND against the integration
+    branch. Report each as CONFIRMED (with the failing test, its output, and
+    NEW — passes on the integration branch — or PRE-EXISTING) or HELD, with a
+    severity (BLOCKER/MAJOR/MINOR) and what you could not test. No fixes.
 
 ## What happens with the findings
 
-Every FAIL is fixed and becomes a regression test that fails against the
-version before the fix — or it is accepted on purpose with a `DECISION` line
-naming why. Then one line in the plan, so the reviewer sees what was attacked:
+Every NEW finding is fixed and becomes a regression test that fails against
+the version before the fix — or it is accepted on purpose with a `DECISION`
+line naming why. A PRE-EXISTING finding becomes an issue; it is not this
+work's fix round.
+
+A second owner proven by a differential test blocks at every tier, unless the
+plan carries a `DECISION` naming why the rule has two owners — a deliberate
+copy across a boundary whose divergences are named and tested, a technical
+boundary (a stdlib-only script, a hook without the project's environment),
+or a double check that takes its rule from one source. Otherwise the fix
+reuses the owner; that is usually less code than the copy.
+
+Then one line in the plan, so the reviewer sees what was attacked:
 
     REFUTE work=<id> round=<r>: <n> scenarios, <k> findings — <fixed / DECISION …>
 
@@ -84,8 +163,11 @@ never archive; a finished one (or a product document at `specs/<x>/plan.md`)
 is not asked for a new round in every later delta. `--plan <name>` bundles
 what it names either way (a Spec Kit plan by its directory or its label).
 
-The review bundle warns when a diff touches gate code and a plan carries no
-such line (a warning, not a block: the rule is observed before it gates).
+The review bundle warns when a bundled plan declares Tier 2 or higher, or a
+diff touches gate code, and a plan carries no such line (a warning, not a
+block: the rule is observed before it gates). A delta re-review asks for a
+new line only when the delta touches gate code — below Tier 3 there is one
+run, and a Tier 3 review never takes a delta.
 It approximates gate code by path — `scripts/process/`, `.githooks/`,
 `.github/workflows/`, `Makefile`, `.pre-commit-config.yaml` — so a Makefile
 change to a product target warns too; say so in the plan (the warning stays,

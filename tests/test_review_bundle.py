@@ -469,10 +469,50 @@ def test_gate_code_without_a_refute_line_gets_a_warning(render, tmp_path):
     assert "REFUTE WARNING" not in r.stdout + r.stderr
 
 
-def test_product_code_needs_no_refute(render, tmp_path):
+def test_tier_one_product_code_needs_no_refute(render, tmp_path):
     out = render(tmp_path, {"project_name": "d", "modules": {}})
     _seed_repo(out)
+    plan = out / ".process-work/plans/2026-07-09-widget.md"
+    plan.write_text(plan.read_text().replace("tier: 2", "tier: 1"))
+    _git(out, "commit", "-q", "-am", "tier 1")
     assert "REFUTE WARNING" not in _bundle(out, "--base", "main").stdout
+
+
+def test_tier_two_product_code_is_refuted_once_before_its_first_round(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    r = _bundle(out, "--base", "main")
+    assert ("**REFUTE WARNING:** 2026-07-09-widget.md (tier: 2) carries no `REFUTE work=<its id> "
+            "round=<r>: …` line") in r.stdout
+    assert "REFUTE WARNING" in r.stderr
+    plan = out / ".process-work/plans/2026-07-09-widget.md"
+    plan.write_text(plan.read_text() + "\n" + R1_LINE)
+    _git(out, "commit", "-q", "-am", "docs: refute recorded")
+    reviewed = _git(out, "rev-parse", "HEAD").stdout.strip()
+    assert "REFUTE WARNING" not in _bundle(out, "--base", "main").stdout
+    # a fix round of product code below Tier 3 asks no new round
+    (out / "widget.py").write_text("def widget():\n    return 43\n")
+    _git(out, "commit", "-q", "-am", "fix: widget")
+    assert "REFUTE WARNING" not in _bundle(out, "--base", "main", "--since", reviewed).stdout
+
+
+def test_a_tier_two_plan_without_a_line_is_named_next_to_a_refuted_one(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    plans = out / ".process-work/plans"
+    (plans / "2026-07-09-widget.md").write_text("# Plan\n\ntier: 2\nissue: #9\n\n" + R1_LINE)
+    (plans / "2026-07-10-small.md").write_text("# Small\n\ntier: 1\nissue: #11\n")
+    (plans / "2026-07-10-other.md").write_text("# Other\n\ntier: 3\nissue: #10\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "three plans")
+    t = _bundle(out, "--base", "main").stdout
+    assert "**REFUTE WARNING:** 2026-07-10-other.md (tier: 3) carries no" in t
+    assert "widget.md (tier" not in t and "small.md (tier" not in t
+    # an example line in a code block is no record
+    (plans / "2026-07-10-other.md").write_text(
+        "# Other\n\ntier: 3\nissue: #10\n\n```\nREFUTE work=10 round=1: 5 scenarios, 0 findings\n```\n")
+    _git(out, "commit", "-q", "-am", "example only")
+    assert "2026-07-10-other.md (tier: 3) carries no" in _bundle(out, "--base", "main").stdout
 
 
 def _gate_commit(out, rel, text="x = 1\n", msg="gate change"):

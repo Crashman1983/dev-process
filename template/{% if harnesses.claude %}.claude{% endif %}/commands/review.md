@@ -79,10 +79,14 @@ Round economy — a failed round must not re-pay the whole chain:
   without it. The test comes first and fails on the old code. Downstream,
   the largest source of extra rounds was a fix that created the next
   blocker — the same rule patched three times.
-- **Gate code is refuted before round 1.** A diff that touches `scripts/process/`, `.githooks/` or
-  the gate configuration goes to a fresh refute agent first (`docs/process/refute.md`: the brief,
-  the scenario classes, the `REFUTE` line). Downstream, gate changes took four and more rounds;
-  a refute pass found more in two runs than three review rounds had.
+- **Refute before round 1, from Tier 2 on.** A fresh refute agent attacks the change first —
+  owner check, fail-open, edge cases, evidence (`docs/process/refute.md`: the scale by tier, the
+  brief, the catalogue, the `REFUTE` line). Gate code (`scripts/process/`, `.githooks/`, the gate
+  configuration) is refuted at any tier, and its fix rounds again. Downstream, a refute pass found
+  more in two runs than three review rounds had.
+- **A second owner blocks.** A rule the change re-implements although existing code owns it,
+  proven by a differential test, is a blocking finding at every tier — unless the plan's
+  `DECISION` names why the rule has two owners.
 - **One reviewer set per work.** Round 1 runs the full set the tier
   requires (including any full-tool refuter lenses); later rounds use the
   same set — no new lenses, no swapped model family. A reviewer that
