@@ -282,6 +282,24 @@ _BLOCK_COMMENT = re.compile(r"^ {0,3}<!--")
 _ASCII_PUNCT = set("!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~")
 
 
+
+# a design doc next to the plans (`design-<x>.md`) is not a plan: no tier, no review
+DESIGN_DOC_PREFIX = "design-"
+
+
+def plan_tier(text: str) -> int | None:
+    """The tier a plan declares, as the tier-keyed gates read it: the first
+    `tier:` line a reader sees — not one in a fenced block (an example), not
+    a second one further down (a note on a tier considered)."""
+    m = TIER_DECL.search(_unfenced(text or ""))
+    return int(m.group(1)) if m else None
+
+
+def review_waived(text: str) -> bool:
+    """Does the plan waive its review (`review-waived: <reason>`) — read as
+    the presence gate reads it."""
+    return WAIVED.search(_unfenced(text or "")) is not None
+
 def _closing_run(para: str, run: int, pos: int) -> int:
     """Start of the next backtick run of exactly `run` from `pos`, or -1."""
     ticks = "`" * run

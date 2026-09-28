@@ -210,11 +210,12 @@ def _active_plans(root: Path, plan_filter: str | None, base_ref: str | None = No
     return plans
 
 
-_TIER_RE = _review_gate.TIER_DECL
-
-
 def _declared_tier(texts: list[str]) -> int | None:
-    tiers = [int(match.group(1)) for text in texts for match in _TIER_RE.finditer(text)]
+    """The highest tier the plans declare, each read as the review gate reads
+    it (`check_review.plan_tier`) — a fenced example or a second `tier:` line
+    is no declaration (refutation: the bundle warned and refused on tiers the
+    gate never saw)."""
+    tiers = [t for t in (_review_gate.plan_tier(text) for text in texts) if t is not None]
     return max(tiers) if tiers else None
 
 
@@ -474,6 +475,14 @@ def _unrefuted(root: Path, plans: dict[Path, str], before: dict[str, str] | None
     return missing
 
 
+def _tier_warning(by_tier: list[str], tiers: dict[str, int | None]) -> str:
+    named = ", ".join(f"{label} (tier: {tiers[label]})" for label in by_tier[:3])
+    return (f"**REFUTE WARNING:** {named}{' …' if len(by_tier) > 3 else ''} carries no "
+            "`REFUTE work=<its id> round=<r>: …` line — from Tier 2 on, a fresh agent attacks "
+            "the change before its first review round (`docs/process/refute.md`). Say in the "
+            "verdict that it was not.\n")
+
+
 def review_size(root: Path, base_ref: str) -> tuple[int, int]:
     """(files, changed lines) of the whole branch — process bookkeeping,
     lock files and binaries left out."""
@@ -496,7 +505,10 @@ def build(root: Path, base: str | None, plan_filter: str | None = None,
     plans = _active_plans(root, plan_filter, sized or since)
     plan_texts = {plan: _read_plan(plan) for plan in plans}
     tier = _declared_tier(list(plan_texts.values()))
-    tiers = {_label(root, plan): _declared_tier([text]) for plan, text in plan_texts.items()}
+    # the plans a refute is asked of by tier: not a design doc, not a plan
+    # that waives its review — as the review gate judges both
+    tiers = {_label(root, plan): _review_gate.plan_tier(text) for plan, text in plan_texts.items()
+             if not plan.name.startswith(_review_gate.DESIGN_DOC_PREFIX) and not _review_gate.review_waived(text)}
     if since and tier is not None and tier > DELTA_MAX_TIER:
         top = next(_label(root, p) for p, t in plan_texts.items() if _declared_tier([t]) == tier)
         raise SystemExit(
@@ -524,6 +536,13 @@ def build(root: Path, base: str | None, plan_filter: str | None = None,
                 "first round if the plan allows; otherwise say so in the verdict and review "
                 "it slice by slice.\n")
 
+    if sized is None and not since and plan_texts:
+        # no base, so no gate-code check — the tier needs no git (refutation:
+        # the tier warning vanished silently without a base)
+        missing = _unrefuted(root, plan_texts)
+        by_tier = [label for label in missing if (tiers.get(label) or 0) >= 2]
+        if by_tier:
+            add(_tier_warning(by_tier, tiers))
     if sized is not None or since:
         # a delta re-review: the fix round's own gate code, refuted anew
         gate_files = _gate_files(root, since or sized)
@@ -547,11 +566,7 @@ def build(root: Path, base: str | None, plan_filter: str | None = None,
                 "code again (`docs/process/refute.md`). Say in the verdict that it was not.\n")
             by_tier = []
         if by_tier:
-            named = ", ".join(f"{label} (tier: {tiers[label]})" for label in by_tier[:3])
-            add(f"**REFUTE WARNING:** {named}{' …' if len(by_tier) > 3 else ''} carries no "
-                "`REFUTE work=<its id> round=<r>: …` line — from Tier 2 on, a fresh agent attacks "
-                "the change before its first review round (`docs/process/refute.md`). Say in the "
-                "verdict that it was not.\n")
+            add(_tier_warning(by_tier, tiers))
 
     kernel = _kernel_block(root)
     add("## The binding rules (kernel)\n")
