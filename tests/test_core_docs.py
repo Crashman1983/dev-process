@@ -494,3 +494,34 @@ def test_workflow_carries_spike_path(render, tmp_path):
     assert "timebox" in text
     assert "knowledge, never product\ncode" in text or "never product code" in text
     assert "re-enters through the normal cycle" in text
+
+
+def test_refute_scales_with_the_tier_and_checks_owner_first(render, tmp_path):
+    out = render(tmp_path, {"project_name": "demo"})
+    text = (out / "docs/process/refute.md").read_text()
+    # the scale: one row per tier, gate code at any tier
+    for row in ("| 0 | none |", "| 1 | optional", "| 2 | one run before the first review round",
+                "| 3, and gate code at any tier |"):
+        assert row in text, row
+    # the brief, in its order: owner, fail-open, edge cases, evidence
+    brief = text.split("## The brief", 1)[1]
+    order = [brief.index(k) for k in ("1. OWNER", "2. FAIL-OPEN", "3. EDGE CASES", "4. EVIDENCE")]
+    assert order == sorted(order)
+    assert "differential test" in text and "NEW" in brief and "PRE-EXISTING" in brief
+    catalogue = text.split("## Edge-case catalogue", 1)[1].split("\n## ", 1)[0]
+    for cls in ("**Names:**", "**Empty, missing, equal:**", "**Rename, move, mode:**",
+                "**Conflicts without markers:**", "**Environment:**", "**Text as rendered:**"):
+        assert cls in catalogue, cls
+    assert "adds the class" in catalogue
+    # a second owner blocks at every tier unless a DECISION names why
+    assert "blocks at every tier" in text and "DECISION" in text
+
+
+def test_review_command_and_checklist_name_the_second_owner_block(render, tmp_path):
+    out = render(tmp_path, {"project_name": "demo"})
+    review = (out / ".claude/commands/review.md").read_text()
+    assert "Refute before round 1, from Tier 2 on" in review and "A second owner blocks" in review
+    checklist = (out / "docs/process/review-checklist.md").read_text()
+    assert "differential test" in checklist and "blocks at every tier" in checklist
+    tiers = (out / "docs/process/risk-tiers.md").read_text()
+    assert "one run at Tier 2" in tiers and "refute.md" in tiers

@@ -496,6 +496,7 @@ def build(root: Path, base: str | None, plan_filter: str | None = None,
     plans = _active_plans(root, plan_filter, sized or since)
     plan_texts = {plan: _read_plan(plan) for plan in plans}
     tier = _declared_tier(list(plan_texts.values()))
+    tiers = {_label(root, plan): _declared_tier([text]) for plan, text in plan_texts.items()}
     if since and tier is not None and tier > DELTA_MAX_TIER:
         top = next(_label(root, p) for p, t in plan_texts.items() if _declared_tier([t]) == tier)
         raise SystemExit(
@@ -530,6 +531,10 @@ def build(root: Path, base: str | None, plan_filter: str | None = None,
         if since and before is None:
             gate_files = None
         missing = _unrefuted(root, plan_texts, before) if plan_texts else ["(no active plan)"]
+        # by tier (`docs/process/refute.md`): from Tier 2 on, one refute before
+        # the first review round. A delta asks no new one — below Tier 3 there
+        # is one run, and a Tier 3 review never takes a delta (DELTA_MAX_TIER)
+        by_tier = [] if since else [label for label in missing if (tiers.get(label) or 0) >= 2]
         if gate_files is None:
             add("*(REFUTE check unavailable: git could not list the branch's files — a shallow clone "
                 "or no merge base; check by hand whether gate code changed)*\n")
@@ -540,6 +545,13 @@ def build(root: Path, base: str | None, plan_filter: str | None = None,
                 f"{'new ' if since else ''}`REFUTE work=<its id> round=<r>: …` line — gate code is "
                 "attacked by a fresh agent before its first review round, and a fix round's gate "
                 "code again (`docs/process/refute.md`). Say in the verdict that it was not.\n")
+            by_tier = []
+        if by_tier:
+            named = ", ".join(f"{label} (tier: {tiers[label]})" for label in by_tier[:3])
+            add(f"**REFUTE WARNING:** {named}{' …' if len(by_tier) > 3 else ''} carries no "
+                "`REFUTE work=<its id> round=<r>: …` line — from Tier 2 on, a fresh agent attacks "
+                "the change before its first review round (`docs/process/refute.md`). Say in the "
+                "verdict that it was not.\n")
 
     kernel = _kernel_block(root)
     add("## The binding rules (kernel)\n")

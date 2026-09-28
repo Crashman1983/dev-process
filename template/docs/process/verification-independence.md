@@ -197,6 +197,7 @@ but it must not be *trusted as the gate* — read as assurance, a self-grade in
 the producing context is the worst of both, a model call that returns false
 comfort. Prefer one trustworthy independent check over several correlated ones.
 
-**Refute before review (gate code).** A change to the gates' own code is attacked by a fresh
-agent before its first review round — `refute.md` holds the brief and the scenario classes that
-broke downstream.
+**Refute before review.** From Tier 2 on, and for the gates' own code at any tier, a change is
+attacked by a fresh agent before its first review round — one run below Tier 3, every fix round
+again at Tier 3 and for gate code. `refute.md` holds the scale, the brief and the edge-case
+catalogue that broke downstream.

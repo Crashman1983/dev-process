@@ -87,7 +87,9 @@ is not ready to pass.
 - Does this change **duplicate** an existing behavior instead of changing its
   owner? A second function, flag, wrapper, or fallback that overlaps something
   already there adds accretion — find the owning layer and change it there
-  (mandatory rule 4).
+  (mandatory rule 4). A second owner proven by a differential test (an input
+  on which both judge differently, `refute.md`) blocks at every tier unless
+  the plan's `DECISION` names why the rule has two owners.
 - Is the code **readable** — intention-revealing names, small single-purpose
   units, no magic values (mandatory rule 9, `code-craft.md`)?
 
