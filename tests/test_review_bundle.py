@@ -1107,6 +1107,13 @@ def test_a_design_doc_or_a_waived_plan_asks_no_refute(render, tmp_path):
     assert "REFUTE WARNING" not in t, [ln for ln in t.splitlines() if "REFUTE" in ln]
 
 
+def test_a_waiver_quoted_in_a_code_block_waives_nothing(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    _plan_commit(out, "# Plan\n\ntier: 2\nissue: #9\n\n```\nreview-waived: docs only, #12\n```\n")
+    assert "2026-07-09-widget.md (tier: 2) carries no" in _bundle(out, "--base", "main").stdout
+
+
 def test_the_tier_warning_needs_no_base(render, tmp_path):
     out = render(tmp_path, {"project_name": "d", "modules": {}})
     _seed_repo(out)
