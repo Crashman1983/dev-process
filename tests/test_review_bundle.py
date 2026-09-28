@@ -1,8 +1,11 @@
 import hashlib
+import importlib.util
 import re
 import subprocess
 import sys
 from pathlib import Path
+
+import pytest
 
 
 def _run(out: Path, *args):
@@ -1052,3 +1055,77 @@ def test_another_works_identical_line_in_a_plan_in_place_is_not_this_plans_old_r
     plan.write_text(plan.read_text() + "\nREFUTE work=9 round=1: 5 scenarios, 0 findings\n")
     _git(out, "commit", "-q", "-am", "own refute")
     assert "REFUTE WARNING" not in _bundle(out, "--base", "main", "--since", reviewed).stdout
+
+
+# --- refute of the tier warning: the tier is read by the gate's own owner
+
+_PLANS = ".process-work/plans"
+_FENCED_TIER = "# Plan\n\ntier: 1\nissue: #9\n\nExample:\n\n```\ntier: 3\n```\n"
+_SECOND_TIER = "# Plan\n\ntier: 1\nissue: #9\n\n## Decisions\n\n- tier: 2 was considered, kept at 1\n"
+
+
+def _plan_commit(out, text, name="2026-07-09-widget.md"):
+    (out / _PLANS / name).write_text(text)
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "plan edit")
+
+
+def test_the_bundle_reads_a_plans_tier_as_the_review_gate_does(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    sys.path.insert(0, str(out / "scripts/process"))
+    try:
+        spec = importlib.util.spec_from_file_location("mrb_tier", out / "scripts/process/make_review_bundle.py")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+    finally:
+        sys.path.remove(str(out / "scripts/process"))
+    gate = mod._review_gate
+    for text in (_FENCED_TIER, _SECOND_TIER, "- tier: 2\n", "**tier:** 2\n", "Tier: 2\n", "tier: 2a\n",
+                 "<!--\ntier: 2\n-->\n", "    tier: 2\n", "tier: 2\n\ntier: 1\n"):
+        m = gate.TIER_DECL.search(gate._unfenced(text))  # how the presence gate reads it
+        assert mod._declared_tier([text]) == (int(m.group(1)) if m else None), text
+
+
+@pytest.mark.parametrize("text", [_FENCED_TIER, _SECOND_TIER])
+def test_an_example_or_a_second_tier_line_asks_no_refute(render, tmp_path, text):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    _plan_commit(out, text)
+    assert "REFUTE WARNING" not in _bundle(out, "--base", "main").stdout
+    # and a fenced tier 3 no longer refuses a delta
+    r = _run(out, "--base", "main", "--since", "HEAD~1", "--skip-preflight")
+    assert r.returncode == 0, r.stderr
+
+
+def test_a_design_doc_or_a_waived_plan_asks_no_refute(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    _plan_commit(out, "# Plan\n\ntier: 2\nissue: #9\n\n" + R1_LINE)
+    _plan_commit(out, "# Design\n\ntier: 2\n", "design-widget.md")
+    _plan_commit(out, "# Docs\n\ntier: 2\nissue: #12\nreview-waived: docs only, #12\n", "2026-07-10-docs.md")
+    t = _bundle(out, "--base", "main").stdout
+    assert "REFUTE WARNING" not in t, [ln for ln in t.splitlines() if "REFUTE" in ln]
+
+
+def test_the_tier_warning_needs_no_base(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    r = _bundle(out, "--base", "nosuchbase")
+    assert "**REFUTE WARNING:** 2026-07-09-widget.md (tier: 2) carries no" in r.stdout
+    assert "REFUTE WARNING" in r.stderr
+
+
+def test_gate_code_warns_once_and_a_long_list_is_cut(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    _gate_commit(out, "scripts/process/g.py")
+    r = _bundle(out, "--base", "main")
+    assert r.stdout.count("**REFUTE WARNING:**") == 1 and "changes gate code" in r.stdout
+    assert r.stderr.count("REFUTE WARNING") == 1
+    out = render(tmp_path / "many", {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    for i in range(4):
+        _plan_commit(out, f"# P{i}\n\ntier: 2\nissue: #{20 + i}\n", f"2026-07-1{i}-p{i}.md")
+    line = [ln for ln in _bundle(out, "--base", "main").stdout.splitlines()
+            if ln.startswith("**REFUTE WARNING:**")]
+    assert len(line) == 1 and line[0].count("(tier: 2)") == 3 and " … carries no" in line[0], line
