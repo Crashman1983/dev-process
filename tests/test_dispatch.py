@@ -976,3 +976,32 @@ def test_the_policy_decision_channel_reaches_the_prompt(render, tmp_path, monkey
         mod.start(out, issue=7, phase="plan", tier=2, branch="7-work", title=None, dry_run=True)
         assert seen[-1] == expected, channel
 
+
+# --- the session's own report, and whether its phase is over: one answer for chain and tower ---
+
+def test_a_report_from_before_the_session_is_not_its_word(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    mod = _load_dispatch(out)
+    rec = {"branch": "7-work", "started": 100}
+    reports = [{"worker": "7-work", "state": "planned", "epoch": 50},
+               {"worker": "other", "state": "blocked", "epoch": 200}]
+    assert mod.session_report(rec, reports) is None
+    reports.append({"worker": "7-work", "state": "pushed", "epoch": 120})
+    reports.append({"worker": "7-work", "state": "blocked", "epoch": 110})
+    assert mod.session_report(rec, reports)["state"] == "pushed"
+
+
+def test_phase_over_follows_each_phase_and_the_tasks_on_origin(render, tmp_path, monkeypatch):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    mod = _load_dispatch(out)
+
+    def over(phase, state):
+        return mod.phase_over(out, {"branch": "7-work", "phase": phase}, {"state": state} if state else None)
+
+    assert over("plan", "planned") and over("review", "review-pass") and over("review", "blocked")
+    assert over("execute", "done") and over("plan", "idle")
+    assert not over("plan", None) and not over("execute", "blocked") and not over("plan", "pushed")
+    for done, expected in ((True, True), (False, False), (None, False)):
+        monkeypatch.setattr(mod, "work_complete_on_origin", lambda _root, _b, d=done: d)
+        assert over("execute", "pushed") is expected, done
+
