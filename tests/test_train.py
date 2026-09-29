@@ -1380,7 +1380,8 @@ def test_forgetting_keeps_a_live_or_unaskable_worker_and_ignores_a_boolean_issue
     assert (_records_dir(out) / "70-live.json").is_file() and (_records_dir(out) / "70-unknown.json").is_file()
 
 
-def test_an_unwritable_issue_map_does_not_abort_a_landed_train(render, tmp_path):
+@pytest.mark.parametrize("error", ["OSError(28, 'No space left on device')", "ValueError('No space left: bad map')"])
+def test_an_unwritable_issue_map_does_not_abort_a_landed_train(render, tmp_path, error):
     out = render(tmp_path, {"project_name": "d", "modules": {}})
     _repo(out)
     _branch(out, "alpha", {"src/a.py": "a\n"})
@@ -1388,7 +1389,7 @@ def test_an_unwritable_issue_map_does_not_abort_a_landed_train(render, tmp_path)
     # disk, a read-only .git): forgetting raises
     d = out / "scripts/process/dispatch.py"
     d.write_text(d.read_text() + "\n\ndef forget_branch(root, branch):\n"
-                 "    raise OSError(28, 'No space left on device')\n")
+                 f"    raise {error}\n")
     _git(out, "commit", "-q", "-am", "a dispatch whose map cannot be written")
     r = _train(out, "run", "--force", "--suite", "true")
     assert r.returncode == 0, r.stdout[-800:] + r.stderr[-800:]
@@ -1425,4 +1426,21 @@ def test_a_remote_worker_of_the_merged_issue_keeps_its_record(render, tmp_path):
     r = _train(out, "run", "--force", "--suite", "true")
     assert r.returncode == 0, r.stdout[-800:] + r.stderr[-800:]
     assert (_records_dir(out) / "70-p1-remote.json").is_file()
+
+
+def test_a_kept_remote_record_does_not_bring_the_merged_issue_back(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _base_plan(out, "2026-09-20-p1", 71)
+    _package_on_base_plan(out, "70-p1-slice", "71", "2026-09-20-p1")
+    _report(out, "70-p1-slice")
+    (_records_dir(out) / "70-p1-old.json").write_text(json.dumps({"branch": "70-p1-old", "issue": 71, "remote": True}))
+    _dispatched(out, 71, "70-p1-slice")
+    assert _train(out, "run", "--force", "--suite", "true").returncode == 0
+    d = _dispatch_module(out)
+    assert d.find_branch(out, 71) is None and d.issues_of(out, "70-p1-old") == set()
+    assert (_records_dir(out) / "70-p1-old.json").is_file()  # the worker on the other host keeps its record
+    # dispatched again, the issue lives on its new branch
+    _dispatched(out, 71, "70-p1-again")
+    assert d.find_branch(out, 71) == "70-p1-again"
 
