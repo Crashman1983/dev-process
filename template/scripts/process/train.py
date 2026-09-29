@@ -1119,7 +1119,7 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
         import dispatch as _dispatch  # lazily, as tower does
         try:
             _dispatch.forget_branch(root, b)  # merged: its issues are placed on it no more
-        except OSError as exc:  # bookkeeping after the merge: say so, never abort a landed train
+        except Exception as exc:  # noqa: BLE001 — bookkeeping after the merge: say so, never abort a landed train
             print(f"train: dispatch still places {b}'s issues on it — could not forget it: {exc}",
                   file=sys.stderr)
         if not keep_branches:

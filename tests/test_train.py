@@ -1395,3 +1395,34 @@ def test_an_unwritable_issue_map_does_not_abort_a_landed_train(render, tmp_path)
     assert "train: merge alpha" in _git(out, "log", "--oneline", "main").stdout
     assert "could not forget it" in r.stderr and "No space left" in r.stderr
     assert "alpha" not in _git(out, "branch", "--list", "--format=%(refname:short)").stdout.split()
+
+
+# --- fourth refutation: a malformed record, a remote worker ---
+
+@pytest.mark.parametrize("issue", [[71], {"n": 71}, 71.0])
+def test_a_malformed_record_neither_aborts_nor_is_taken_for_the_issue(render, tmp_path, issue):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _base_plan(out, "2026-09-20-p1", 71)
+    _package_on_base_plan(out, "70-p1-slice", "71", "2026-09-20-p1")
+    _report(out, "70-p1-slice")
+    _dispatched(out, 71, "70-p1-slice")
+    (_records_dir(out) / "zz-broken.json").write_text(json.dumps({"branch": "zz-broken", "issue": issue, "pid": 999999999}))
+    r = _train(out, "run", "--force", "--suite", "true")
+    assert r.returncode == 0, r.stdout[-800:] + r.stderr[-800:]
+    assert (_records_dir(out) / "zz-broken.json").is_file()  # not this issue's record
+
+
+def test_a_remote_worker_of_the_merged_issue_keeps_its_record(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _base_plan(out, "2026-09-20-p1", 71)
+    _package_on_base_plan(out, "70-p1-slice", "71", "2026-09-20-p1")
+    _report(out, "70-p1-slice")
+    _dispatched(out, 71, "70-p1-slice")
+    (_records_dir(out) / "70-p1-remote.json").write_text(
+        json.dumps({"branch": "70-p1-remote", "issue": 71, "remote": True}))
+    r = _train(out, "run", "--force", "--suite", "true")
+    assert r.returncode == 0, r.stdout[-800:] + r.stderr[-800:]
+    assert (_records_dir(out) / "70-p1-remote.json").is_file()
+
