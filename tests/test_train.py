@@ -1153,3 +1153,63 @@ def test_another_repositorys_issue_is_not_closed_and_a_paired_new_plan_is_own(re
         assert "Closes #7" not in msgs and "Closes #22" in msgs and "Closes #20" not in msgs
     finally:
         _git(out, "worktree", "remove", "--force", str(wt))
+
+
+# --- a package branch of a larger issue: its work id is the issue its worker reports ---
+
+def _package_branch(out, name, work):
+    """A branch named after the epic, attested under its package's issue —
+    its plan not archived yet: it boards on its worker's review-pass report."""
+    _git(out, "checkout", "-q", "-b", name, "main")
+    (out / "src").mkdir(exist_ok=True)
+    (out / "src/pkg.py").write_text("pkg = 1\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "feat: package")
+    head = _git(out, "rev-parse", "HEAD").stdout.strip()
+    j = out / ".process-work/journal"
+    j.mkdir(parents=True, exist_ok=True)
+    (j / f"2026-09-21-{name}.md").write_text(_head_pass(out, work, head))
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "attest")
+    _git(out, "checkout", "-q", "main")
+
+
+def _report(out, worker, issue=None, state="review-pass"):
+    extra = ["--issue", str(issue)] if issue is not None else []
+    subprocess.run([sys.executable, str(out / "scripts/process/report.py"), state, "--worker", worker, *extra],
+                   cwd=out, check=True, capture_output=True)
+
+
+def _candidate(out, name):
+    return next(c for c in json.loads(_train(out, "plan", "--json").stdout)["candidates"] if c["branch"] == name)
+
+
+def test_a_package_branch_boards_on_the_issue_its_worker_reports(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _package_branch(out, "70-p1-slice", "71")
+    # the name carries the epic's number only: without the issue, the package's pass is not its own
+    _report(out, "70-p1-slice")
+    c = _candidate(out, "70-p1-slice")
+    assert not c["eligible"] and "no REVIEW pass for its own work" in c["reasons"][0], c
+    _report(out, "70-p1-slice", issue=71)
+    c = _candidate(out, "70-p1-slice")
+    assert c["eligible"] and "worker report review-pass" in c["by"], c
+    # the latest report NAMING an issue counts: one without an issue changes nothing
+    _report(out, "70-p1-slice")
+    assert _candidate(out, "70-p1-slice")["eligible"]
+
+
+def test_a_reported_issue_opens_no_other_works_pass(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _package_branch(out, "70-p2-slice", "72")
+    # a report of another issue, or another worker's report, is no key to this pass
+    _report(out, "70-p2-slice", issue=73)
+    _report(out, "someone-else", issue=72)
+    assert not _candidate(out, "70-p2-slice")["eligible"]
+    # the worker's latest report decides
+    _report(out, "70-p2-slice", issue=72)
+    assert _candidate(out, "70-p2-slice")["eligible"]
+    _report(out, "70-p2-slice", issue=73)
+    assert not _candidate(out, "70-p2-slice")["eligible"]
