@@ -286,6 +286,19 @@ def find_branch(root: Path, issue: int) -> str | None:
     return None
 
 
+def issues_of(root: Path, branch: str) -> set[int]:
+    """The issues dispatch placed on `branch` — the inverse of find_branch,
+    from the same records (the issue map, then the dispatch records). A
+    branch can carry another issue than the number its name leads with: a
+    package of a larger issue is dispatched onto `<epic>-<package>-…`."""
+    out = {int(k) for k, v in _issue_map(root).items() if v == branch and k.isdigit() and int(k) > 0}
+    for rec in records(root):
+        issue = rec.get("issue")
+        if rec.get("branch") == branch and isinstance(issue, int) and not isinstance(issue, bool) and issue > 0:
+            out.add(issue)
+    return out
+
+
 def _worktrees(root: Path) -> dict[str, Path]:
     """branch → worktree path, from git itself."""
     out: dict[str, Path] = {}
