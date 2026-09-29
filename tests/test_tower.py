@@ -401,3 +401,49 @@ def test_a_worker_whose_phase_is_over_or_that_is_busy_is_not_waiting(render, tmp
     assert _kinds(tower, _table([_session(alive=False)])) == []
     assert _kinds(tower, _table([_session(phase="plan", open_tasks=0)])) == [("question-unrouted", "high")]
 
+
+# --- names git quotes without -z: local and remote compare, output never crashes ---
+
+def _wt_with(out: Path, name: str, raw: bytes) -> Path:
+    import os
+    wt = out.parent / f"wt-{name}"
+    _git(out, "worktree", "add", "-q", "-b", name, str(wt), "main")
+    d = os.fsencode(str(wt / "src"))
+    os.makedirs(d, exist_ok=True)
+    with open(os.path.join(d, raw), "w") as f:
+        f.write(name)
+    _git(wt, "add", "-A")
+    _git(wt, "commit", "-q", "-m", name)
+    return wt
+
+
+def test_a_non_ascii_file_on_a_local_and_a_remote_branch_is_an_overlap(render, tmp_path):
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    origin = tmp_path / "origin.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(origin)], check=True)
+    _git(out, "remote", "add", "origin", str(origin))
+    _git(out, "push", "-q", "origin", "main")
+    _wt_with(out, "alpha", "größe.py".encode())
+    wtb = _wt_with(out, "beta", "größe.py".encode())
+    _git(wtb, "push", "-q", "origin", "beta")
+    _git(out, "worktree", "remove", "--force", str(wtb))
+    _git(out, "branch", "-D", "beta")
+    r = _tower(out, "--json", "--remote")
+    assert r.returncode == 0, r.stderr[-600:]
+    t = json.loads(r.stdout)
+    assert t["elsewhere"] and any("src/größe.py" in o["paths"] for o in t["overlaps"]), t["overlaps"]
+
+
+def test_a_name_that_is_not_utf8_is_printed_escaped(render, tmp_path):
+    import os
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    _wt_with(out, "alpha", b"\xff.py")
+    _wt_with(out, "beta", b"\xff.py")
+    for args in ((), ("--json",)):
+        r = subprocess.run([sys.executable, str(out / "scripts/process/tower.py"), *args], cwd=out,
+                           capture_output=True, text=True, env={**os.environ, "PYTHONIOENCODING": "utf-8:strict"})
+        assert r.returncode == 0, r.stderr[-600:]
+        assert "overlap" in r.stdout
+
