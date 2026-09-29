@@ -53,7 +53,7 @@ passengers).
 Records live in `<git common dir>/process-dispatch/`: one JSON per
 branch (pid + process start time, tmux window id, phase, model, log) and
 `issues.json` (issue → branch, so the next phase finds the branch after
-a stop). `stop` acts only on what this tool started, only when the
+a stop; an empty branch marks an issue the train merged). `stop` acts only on what this tool started, only when the
 recorded process is the recorded one (pid + start time; never pid 0), and
 refuses while the worktree has uncommitted or untracked work unless
 `--force` — a plan not committed dies with the process. `max_workers`
@@ -280,15 +280,20 @@ def _record_issue(rec: dict) -> int | None:
 def _placed(root: Path) -> dict[int, str]:
     """issue -> the branch dispatch placed it on: the issue map first (it
     outlives stop, and a re-dispatch re-points it), then the first dispatch
-    record naming the issue. One answer for find_branch and issues_of."""
+    record naming the issue. An issue the map marks merged (an empty branch,
+    written by forget_branch) is placed nowhere, whatever a record left on
+    another host still says. One answer for find_branch and issues_of."""
     placed: dict[int, str] = {}
     for rec in _record_files(root):
         issue = _record_issue(rec)
         if issue is not None:
             placed.setdefault(issue, rec["branch"])
     for k, v in _issue_map(root).items():
-        if k.isdigit() and int(k) > 0 and v:
-            placed[int(k)] = v
+        if k.isdigit() and int(k) > 0:
+            if v:
+                placed[int(k)] = v
+            else:
+                placed.pop(int(k), None)
     return placed
 
 
@@ -326,7 +331,10 @@ def forget_branch(root: Path, branch: str) -> None:
     purpose, so the next phase finds the branch."""
     done = issues_of(root, branch)
     m = _issue_map(root)
-    kept = {k: v for k, v in m.items() if v != branch}
+    # merged: an empty branch marks the issue done, so a record kept for a
+    # worker on another host cannot place it again (refutation); a later
+    # dispatch of the issue overwrites the mark
+    kept = {**{k: v for k, v in m.items() if v != branch}, **{str(i): "" for i in done}}
     if kept != m:
         _issues_path(root).write_text(json.dumps(kept, indent=2), encoding="utf-8")
     for rec in records(root):
