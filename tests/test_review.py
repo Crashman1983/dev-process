@@ -563,6 +563,18 @@ def test_tier3_active_plan_in_flight_is_hard_on_merge_push(render, tmp_path):
     assert "[note only:" not in r.stdout
 
 
+def test_a_tier3_plan_whose_name_git_quotes_is_in_flight(render, tmp_path):
+    # a non-ASCII plan name, quoted by git without -z, read as not in flight:
+    # the merge push passed without the proof (downstream refutation)
+    import os
+    out = _feature_repo_with_active_plan(render, tmp_path)
+    _git(out, "mv", ".process-work/plans/2026-09-07-widget.md", ".process-work/plans/2026-09-07-größe.md")
+    _git(out, "commit", "-q", "-m", "rename the plan")
+    r = _run(out, env={**os.environ, "PROCESS_PUSH_TARGETS": "refs/heads/main"})
+    assert r.returncode == 1, r.stdout
+    assert "proof is due before the merge" in r.stdout
+
+
 def test_pre_commit_remote_branch_is_read_without_wiring(render, tmp_path):
     # the pre-commit framework sets PRE_COMMIT_REMOTE_BRANCH for its pre-push
     # stage — the gate reads it, so the rendered config needs no hook script

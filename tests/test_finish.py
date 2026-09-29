@@ -4,6 +4,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 JOURNAL = ".process-work/journal"
 PLANS = ".process-work/plans"
 
@@ -63,6 +65,19 @@ def test_blocked_without_clearing_pass(render, tmp_path):
     r = _run(out)
     assert r.returncode == 1
     assert "no clearing REVIEW" in r.stdout and "/review before /finish" in r.stdout
+
+
+@pytest.mark.parametrize("name", ["2026-07-04-größe.md", "2026-07-04-two words.md"])
+def test_a_plan_whose_name_git_quotes_is_still_this_branchs(render, tmp_path, name):
+    # without -z git prints such a name quoted; the plan read as another
+    # work's and finished without its review (downstream refutation)
+    out = _repo_on_feature(render, tmp_path)
+    _active_plan(out, name, "# Plan\n\ntier: 2\nissue: none\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "feat: plan with a quoted name")
+    r = _run(out)
+    assert r.returncode == 1, r.stdout
+    assert "no clearing REVIEW" in r.stdout
 
 
 def test_ready_with_pass_prints_ordered_tail(render, tmp_path):
