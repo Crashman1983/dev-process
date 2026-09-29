@@ -1001,7 +1001,37 @@ def test_phase_over_follows_each_phase_and_the_tasks_on_origin(render, tmp_path,
     assert over("plan", "planned") and over("review", "review-pass") and over("review", "blocked")
     assert over("execute", "done") and over("plan", "idle")
     assert not over("plan", None) and not over("execute", "blocked") and not over("plan", "pushed")
-    for done, expected in ((True, True), (False, False), (None, False)):
-        monkeypatch.setattr(mod, "work_complete_on_origin", lambda _root, _b, d=done: d)
+    for done, expected in ((True, True), (False, False), (None, None)):
+        monkeypatch.setattr(mod, "work_complete_on_origin", lambda _root, _b, _local=False, d=done: d)
         assert over("execute", "pushed") is expected, done
+
+
+def test_of_two_reports_in_one_second_the_later_line_wins(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    mod = _load_dispatch(out)
+    reports = [{"worker": "7-work", "state": "pushed", "epoch": 150}, {"worker": "7-work", "state": "done", "epoch": 150}]
+    assert mod.session_report({"branch": "7-work", "started": 100}, reports)["state"] == "done"
+
+
+def test_phase_over_reads_the_local_branch_without_origin_and_says_unknown_when_it_cannot_tell(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=out, check=True)
+    for k, v in (("user.email", "t@t"), ("user.name", "t")):
+        subprocess.run(["git", "config", k, v], cwd=out, check=True)
+    subprocess.run(["git", "add", "-A"], cwd=out, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "base"], cwd=out, check=True)
+    subprocess.run(["git", "update-ref", "refs/remotes/origin/main", "HEAD"], cwd=out, check=True)
+    subprocess.run(["git", "checkout", "-q", "-b", "7-work"], cwd=out, check=True)
+    plan = out / ".process-work/plans/2026-09-29-work.md"
+    plan.parent.mkdir(parents=True, exist_ok=True)
+    plan.write_text("# Work\n\ntier: 2\nissue: #7\n\n- [x] one\n- [ ] two\n")
+    subprocess.run(["git", "add", "-A"], cwd=out, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "plan"], cwd=out, check=True)
+    mod = _load_dispatch(out)
+    rec, rep = {"branch": "7-work", "phase": "execute"}, {"state": "pushed"}
+    assert mod.phase_over(out, rec, rep, local=True) is False  # an open task, read locally
+    plan.write_text(plan.read_text().replace("- [ ] two", "- [x] two"))
+    subprocess.run(["git", "commit", "-q", "-am", "done"], cwd=out, check=True)
+    assert mod.phase_over(out, rec, rep, local=True) is True
+    assert mod.phase_over(out, rec, rep) is None  # no origin to read: unknown, not "not over"
 

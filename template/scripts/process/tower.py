@@ -274,7 +274,7 @@ def sessions(root: Path) -> list[dict]:
                     # the session's own word and whether its phase is over — dispatch's
                     # answer, the one chain acts on; asked only of a quiet live worker
                     "report_state": (rep or {}).get("state"),
-                    "phase_over": (_dispatch.phase_over(root, rec, rep)
+                    "phase_over": (_dispatch.phase_over(root, rec, rep, local=True)
                                    if rec["alive"] and since is not None and since >= WAIT_MINUTES
                                    and hasattr(_dispatch, "phase_over") else None)})
     return out
@@ -463,8 +463,8 @@ def findings(table: dict, stale_minutes: int) -> list[dict]:
     asked = {q.get("branch") for q in table.get("questions", [])}
     for s in table.get("sessions", []):
         quiet = s.get("minutes_since_output")
-        if not s.get("alive") or quiet is None or quiet < WAIT_MINUTES or s.get("phase_over"):
-            continue
+        if not s.get("alive") or quiet is None or quiet < WAIT_MINUTES or s.get("phase_over") is not False:
+            continue  # over, or not to be told (None): no alarm on a guess
         state = s.get("report_state")
         shown = f": {s['last_output'][-120:]}" if s.get("last_output") else ""
         if s["branch"] in asked or state == "blocked":
