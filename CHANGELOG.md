@@ -1166,6 +1166,22 @@ ein Wächter-Test gegen doppelte Klammern ohne Leerzeichen in Python-Vorlagen.
 Wer v2.27.1 oder v2.28.0 installiert hat und am Push scheitert: auf v2.28.1
 aktualisieren, `v2.28.1`.
 
+**v2.35.0 — der Zug kennt die Issue eines Paket-Branches.** Ein Branch, der nach einem größeren Issue benannt ist (`<epic>-<paket>-…`), aber unter dem Issue seines Pakets geprüft wurde, stieg nie in den Zug ein. Sein Name trägt nur die Nummer des Epics. Fünf Refute-Runden; jeder neue Fund ist mit einem Test belegt, der gegen die Vorfassung rot ist, oder als Grenze dokumentiert.
+- **Ein Owner für „zu welcher Issue gehört der Branch“:** `dispatch.issues_of`, die genaue Umkehrung von `find_branch`, aus dem Issue-Map und den dispatch-Records (`_placed`). Der Zug fragt es an allen drei Stellen, über `_branch_issues`:
+  - beim Einsteigen;
+  - bei der Frage, welche Pläne dem Branch gehören;
+  - beim `Closes #N` des Merges.
+
+  Vorher stieg ein Paket-Branch über seine Issue ein, und sein Merge schloss nichts. Eine selbst gemeldete Issue aus dem Worker-Bericht zählt nicht; maßgeblich ist, was `dispatch` eingetragen hat.
+- **Ein gemergter Branch wird vergessen:** Nach dem Merge entfernt der Zug seine Einträge und die toten Records seiner Issues (`forget_branch`). Die Issue steht dann als erledigt im Map, und ein erneutes `dispatch` überschreibt das.
+  - Ein wiederverwendeter Branch-Name erbt keine alten Issues mehr.
+  - Ein alter Record bringt die Issue nicht an einen verlassenen Branch zurück, auch nicht der Record eines Workers auf einem anderen Host.
+  - Ein Fehler dabei bricht einen gelandeten Zug nie ab.
+- **Lesen ohne Nebenwirkung:** Wer das Map und die Records liest, legt kein Verzeichnis an, fragt keinen Worker ab und überspringt kaputte Einträge. Die Issue eines Records liest eine Stelle (`_record_issue`: nur positive ganze Zahlen).
+- **Bekannt, nicht behoben (dokumentiert):**
+  - Ein Branch, der außerhalb des Zugs gemergt wurde, behält seine Einträge, bis seine Issue neu vergeben wird.
+  - Ein zweiter, noch laufender Versuch auf einem anderen Branch verliert seine Zuordnung, sobald die Issue gemergt ist.
+
 **v2.34.0 — ein Refuter ab Tier 2: zuerst der Owner-Check, dann Grenzfälle aus einem Katalog.** Refute war bisher nur für Gate-Code Pflicht. Er hat sich aber auch darüber hinaus bewährt: Beim Stale-Check fand jede Runde echte Fehler, etwa die Hälfte davon aus der vorherigen Fix-Runde. Die teuersten Blocker im Referenzprojekt kamen von einem zweiten Owner einer Regel.
 - **Staffel nach Tier** (`refute.md`, `risk-tiers.md`):
   - Tier 0: kein Refute.
