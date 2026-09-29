@@ -945,3 +945,34 @@ def test_an_archived_foreign_plan_is_not_the_branchs_own(render, tmp_path):
     _commit_file(work, ".process-work/plans/2026-01-02-w.md", "# w\n\ntier: 1\nissue: #6\n\n- [x] done\n", "own")
     _git(work, "push", "-q", "origin", "w")
     assert mod.work_complete_on_origin(work, "w") is True and mod.plan_tier_on_origin(work, "w") == 1
+
+
+# --- the start prompt names the steward as decision partner ---
+
+def test_the_start_prompt_names_the_steward_and_the_execute_duties(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    mod = _load_dispatch(out)
+    for phase in ("plan", "execute", "review"):
+        text = mod.prompt_for(phase, 7, 2, "7-work", "m")
+        assert "Your decision partner is the steward, not the owner" in text, phase
+        assert "DECISION NEEDED" in text and "report.py blocked" in text and "never a question in chat" in text
+        assert "reach the steward live" not in text
+    execute = mod.prompt_for("execute", 7, 2, "7-work", "m")
+    assert "ROOT-CAUSE work=<id> round=<r>: <cause> — <test that failed before the fix>" in execute
+    assert "attest.py --dry-run" in execute and "The duties before `pushed` are in /execute" in execute
+    live = mod.prompt_for("plan", 7, 2, "7-work", "m", channel="SendMessage to 'steward'")
+    assert "reach the steward live via SendMessage to 'steward'" in live
+
+
+def test_the_policy_decision_channel_reaches_the_prompt(render, tmp_path, monkeypatch):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    mod = _load_dispatch(out)
+    seen = []
+    monkeypatch.setattr(mod, "prompt_for", lambda *a, **k: seen.append(k.get("channel")) or "p")
+    for channel, expected in (("SendMessage to 'steward'", "SendMessage to 'steward'"), ("  ", None), (7, None)):
+        policy = json.loads((out / "docs/process/model-policy.json").read_text())
+        policy["decision_channel"] = channel
+        monkeypatch.setattr(mod, "load_policy", lambda _root, p=policy: p)
+        mod.start(out, issue=7, phase="plan", tier=2, branch="7-work", title=None, dry_run=True)
+        assert seen[-1] == expected, channel
+

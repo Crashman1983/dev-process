@@ -525,3 +525,21 @@ def test_review_command_and_checklist_name_the_second_owner_block(render, tmp_pa
     assert "differential test" in checklist and "blocks at every tier" in checklist
     tiers = (out / "docs/process/risk-tiers.md").read_text()
     assert "one run at Tier 2" in tiers and "refute.md" in tiers
+
+
+def test_execute_names_its_duties_before_pushed_and_testing_owns_the_own_conditions_rule(render, tmp_path):
+    out = render(tmp_path, {"project_name": "demo"})
+    execute = (out / ".claude/commands/execute.md").read_text()
+    duties = execute.split("**Before you report `pushed`:**", 1)[1].split("\n\n", 1)[0]
+    for duty in ("A contradiction is a question, not a note", "enumerated by sink",
+                 "runs once under its own conditions", "After a blocking review round"):
+        assert duty in duties, duty
+    assert "ROOT-CAUSE work=<id> round=<r>: <cause> — <test that failed before the fix>" in duties
+    assert "attest.py --dry-run" in duties
+    assert "decision partner" in execute
+    testing = (out / "docs/process/testing.md").read_text()
+    assert "## Test under the conditions the change creates" in testing
+    refute = (out / "docs/process/refute.md").read_text()
+    assert "Test under the conditions the change creates" in refute  # the catalogue points to the one home
+    tower = (out / "docs/process/tower.md").read_text()
+    assert "question-unrouted" in tower and "decision_channel" in tower

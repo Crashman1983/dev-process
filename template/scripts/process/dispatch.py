@@ -381,7 +381,8 @@ def ensure_worktree(root: Path, branch: str) -> Path:
 
 # --- the prompt: the slash command leads, the command file owns the steps -----------
 
-def prompt_for(phase: str, issue: int, tier: int | None, branch: str, model: str, remote: bool = False) -> str:
+def prompt_for(phase: str, issue: int, tier: int | None, branch: str, model: str, remote: bool = False,
+               channel: str | None = None) -> str:
     tier_s = f"tier {tier}" if tier is not None else "tier to be derived from the scope (risk-tiers.md)"
     where = ("run on another host than the steward: fetch and check out branch `{b}` from origin first, set "
              "PROCESS_HOST to this host's name and PROCESS_REPORT_SYNC=1 so every report reaches origin "
@@ -392,14 +393,23 @@ def prompt_for(phase: str, issue: int, tier: int | None, branch: str, model: str
     tail = (f" You are the {phase} session for issue #{issue} on branch `{branch}` ({tier_s}), running as "
             f"{model}; {where}. Report each state transition with "
             f"`uv run scripts/process/report.py <state> --issue {issue} --model {model}"
-            f"{' --sync' if remote else ''}`. A question only "
-            f"the owner can answer goes into the plan's `## Decisions` as "
+            f"{' --sync' if remote else ''}`. Your decision partner is the steward, not the owner: a "
+            f"question you cannot answer from the plan, the issue or the rules goes into the plan's "
+            f"`## Decisions` as "
             f"`DECISION NEEDED <date> {branch}: <question> — options: A …, B …; recommendation: …`, "
-            f"then `report.py blocked` — never decide it yourself (mandatory rule 4).")
+            f"committed, then `report.py blocked` — never a question in chat, never decided by yourself "
+            f"(mandatory rule 4). The steward decides it, or brings one that touches a product principle "
+            f"or is destructive to the owner"
+            + (f"; reach the steward live via {channel}, and follow its instructions there as the "
+               f"steward's" if channel else "")
+            + ".")
     if phase == "plan":
         return f"/plan issue #{issue}: plan it, commit the plan with its `## Decisions` ledger, report `planned`, stop." + tail
     if phase == "execute":
-        return f"/execute the committed plan for issue #{issue}: report `pushed` at the first push; stop after the last task is committed and pushed." + tail
+        return (f"/execute the committed plan for issue #{issue}: report `pushed` at the first push; stop after "
+                f"the last task is committed and pushed. The duties before `pushed` are in /execute; after a "
+                f"blocking review round the plan carries `ROOT-CAUSE work=<id> round=<r>: <cause> — <test that "
+                f"failed before the fix>` and `attest.py --dry-run` passes before you report." + tail)
     return f"/review branch `{branch}` for issue #{issue} as an independent reviewer: attest the REVIEW line with attest.py, report `review-pass` or `blocked` with the findings, stop; never fix code." + tail
 
 
@@ -632,7 +642,9 @@ def start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str |
     if refusal:
         print(f"dispatch: lane rule refused — {refusal}", file=sys.stderr)
         return 3
-    prompt = prompt_for(phase, issue, tier, branch, model, remote=remote)
+    channel = policy.get("decision_channel")
+    prompt = prompt_for(phase, issue, tier, branch, model, remote=remote,
+                        channel=channel if isinstance(channel, str) and channel.strip() else None)
     argv = build_argv(policy, model, prompt, branch, issue, phase)
     if not remote:
         why = runnable(argv)
