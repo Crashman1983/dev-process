@@ -827,7 +827,7 @@ def issue_refs_in_range(root: Path) -> set[int]:
     return refs
 
 
-def paths_in_flight(root: Path) -> set[str]:
+def paths_in_flight(root: Path) -> set[str] | None:
     """Repo-relative paths this push carries: the committed range
     `{base}...HEAD`, nothing else. An unscoped "every active Tier 3 plan"
     reds every push in the repo for a plan the pusher does not own (measured
@@ -838,13 +838,23 @@ def paths_in_flight(root: Path) -> set[str]:
     take `index.lock` out from under a concurrent commit. `-z`, read by
     `_names`: git quotes a non-ASCII name without it, the quoted name matches
     no plan, and the plan read as somebody else's — a Tier 2 plan finished
-    without a review (downstream refutation)."""
+    without a review (downstream refutation).
+
+    No base is "nothing in flight" (the plan-anchored arms still run); a base
+    whose diff git cannot list is None = cannot tell. Read as empty, a failing
+    `git diff` (a missing tree object) made every plan somebody else's: finish
+    called a Tier 2 plan without review ready, and a Tier 3 merge push went
+    through without proof (downstream refutation). Callers treat None as
+    "every active plan is in flight" and say so."""
     base = merge_base(root)
     if base is None:
         return set()
-    names = _names(_git_bytes(root, "--no-optional-locks", "diff", "--name-only", "-z",
-                              f"{base}...HEAD"))
-    return names if names is not None else set()
+    return _names(_git_bytes(root, "--no-optional-locks", "diff", "--name-only", "-z",
+                             f"{base}...HEAD"))
+
+
+IN_FLIGHT_UNKNOWN = ("git could not list the paths this push carries (`git diff "
+                     "<base>...HEAD` failed)")
 
 
 BOOKKEEPING = ".process-work/"
@@ -1125,19 +1135,33 @@ def _auto_merge(root: Path, ours: str, other: str) -> tuple[str, set[str]] | Non
 _EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"  # no common history: all of it is the work's
 
 
-def _renames(out: bytes | None) -> dict[str, str] | None:
-    """`diff --name-status -M -z` read as {old name: new name}."""
+def name_status(out: bytes | None) -> list[tuple[str, str, str]] | None:
+    """`--name-status -z` read as (status letter, source, path): the source is
+    the old name of a rename or copy, else "". The one reader of that format —
+    every tool that needs the status of a path asks here, with `-z`, decoded as
+    `_names` decodes (without `-z` git quotes a non-ASCII name, and the quoted
+    name matches no plan; downstream refutation). None when git failed."""
     if out is None:
         return None
-    fields, i, moved = out.decode(errors="surrogateescape").split("\0"), 0, {}
-    while i < len(fields) and fields[i]:
-        if fields[i][:1] in ("R", "C") and i + 2 < len(fields):
-            if fields[i][:1] == "R":
-                moved[fields[i + 1]] = fields[i + 2]
+    fields, i = out.decode(errors="surrogateescape").split("\0"), 0
+    entries: list[tuple[str, str, str]] = []
+    while i + 1 < len(fields) and fields[i]:
+        letter = fields[i][:1]
+        if letter in ("R", "C") and i + 2 < len(fields):
+            entries.append((letter, fields[i + 1], fields[i + 2]))
             i += 3
         else:
+            entries.append((letter, "", fields[i + 1]))
             i += 2
-    return moved
+    return entries
+
+
+def _renames(out: bytes | None) -> dict[str, str] | None:
+    """`diff --name-status -M -z` read as {old name: new name}."""
+    entries = name_status(out)
+    if entries is None:
+        return None
+    return {source: path for letter, source, path in entries if letter == "R"}
 
 
 def _dropped_by_merge(root: Path, merge: str, head: str,
@@ -1492,6 +1516,10 @@ def check(root: Path) -> tuple[list[str], list[str]]:
     integrity_mode = "all" if "--full" in sys.argv else os.environ.get(INTEGRITY_ENV, "ledger")
     scope_base = merge_base(root)
     changed_shards = paths_in_flight(root) if scope_base is not None else set()
+    if changed_shards is None:
+        # cannot tell which shards changed: recompute every one, reuse none
+        soft.append(f"{IN_FLIGHT_UNKNOWN} — every journal shard is recomputed")
+        scope_base = None
     ledger_path = _integrity_ledger_path(root) if integrity_mode in ("ledger", "all") else None
     # `all` recomputes every record AND rewrites the ledger from that — a
     # poisoned or stale entry does not survive a --full run
@@ -1608,6 +1636,9 @@ def check(root: Path) -> tuple[list[str], list[str]]:
     # silent, so the gap is at least made visible.
     active = [p for _rel, p in record_files(root, ("plan",))]
     in_flight = paths_in_flight(root)
+    if in_flight is None:
+        soft.append(f"{IN_FLIGHT_UNKNOWN} — every active plan is treated as in flight")
+        in_flight = {f"{PLANS_ACTIVE}/{p.name}" for p in active}
     merged_issues = issues_on_integration(root)
     if (root / PLANS_ACTIVE).is_dir():
         active_tier2 = 0

@@ -52,6 +52,7 @@ from check_review import (  # noqa: E402  (one owner for grammar + arithmetic)
     PLANS_ARCHIVE,
     SPECS_DIR,
     TIER_DECL,
+    IN_FLIGHT_UNKNOWN,
     WAIVED,
     _cleared,
     _plan_issue_numbers,
@@ -112,7 +113,13 @@ def check(root: Path) -> tuple[list[str], list[str]]:
     passes = _journal_passes(root)
     # the same scope as the review gate's push-anchored arm: a plan is this
     # branch's business when the branch carries its file or claims its issue
-    in_flight = paths_in_flight(root) if merge_base(root) is not None else None
+    # a base whose diff git cannot list leaves in_flight None: every active
+    # plan counts as this branch's (fail closed), and the broken read is named
+    has_base = merge_base(root) is not None
+    in_flight = paths_in_flight(root) if has_base else None
+    if has_base and in_flight is None:
+        blockers.append(f"{IN_FLIGHT_UNKNOWN} — every active plan counts as this branch's; "
+                        f"repair the clone (`git fsck`, fetch) and run finish again")
     claimed_issues = issue_refs_in_range(root)
     to_archive: list[str] = []
     pdir = root / PLANS_ACTIVE

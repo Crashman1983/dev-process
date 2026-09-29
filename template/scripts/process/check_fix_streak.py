@@ -26,26 +26,34 @@ BASES = ("origin/main", "main", "origin/master", "master")
 
 
 def _git(root: Path, *args: str) -> str | None:
-    proc = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True)
-    return proc.stdout if proc.returncode == 0 else None
+    proc = subprocess.run(["git", "-C", str(root), *args], capture_output=True)
+    # surrogateescape, as check_review._names reads names: a non-UTF-8 name
+    # stays one name instead of a replacement-character guess
+    return proc.stdout.decode(errors="surrogateescape") if proc.returncode == 0 else None
 
 
 def fix_streaks(log: str, threshold: int = THRESHOLD) -> dict[str, int]:
     """file -> number of fix commits touching it, only entries >= threshold.
-    `log` is `git log --pretty=%x01%s --name-only` output: commit blocks whose
-    subject line is marked with \\x01."""
+    `log` is `git log -z --pretty=%x01%s --name-only` output: NUL-separated
+    fields, a subject marked with \x01, the first name after it led by the
+    newline git puts between header and names. `-z`: without it git quotes a
+    non-ASCII name, and the same file under a quoted and a plain name counted
+    as two (downstream refutation)."""
     counts: defaultdict[str, int] = defaultdict(int)
     is_fix = False
     seen: set[str] = set()
-    for line in log.splitlines():
-        if line.startswith("\x01"):
-            subject = line[1:]
+    after_subject = False
+    for field in log.split("\0"):
+        if field.startswith("\x01"):
+            subject = field[1:]
             # the conventional prefix, not any "fix…": `fixup!` and `fixture:`
             # are not behaviour fixes
             is_fix = subject.startswith(("fix:", "fix("))
             seen = set()
+            after_subject = True
             continue
-        path = line.strip()
+        path = field[1:] if after_subject and field.startswith("\n") else field
+        after_subject = False
         if not is_fix or not path or path in seen:
             continue
         # process bookkeeping (journal, plans) rides along with fixes but owns
@@ -70,7 +78,7 @@ def main(argv: list[str]) -> int:
             break
     if not base:
         return 0
-    log = _git(root, "log", "--no-merges", "--pretty=%x01%s", "--name-only", f"{base}..HEAD")
+    log = _git(root, "log", "-z", "--no-merges", "--pretty=%x01%s", "--name-only", f"{base}..HEAD")
     if log is None:
         return 0
     streaks = fix_streaks(log)

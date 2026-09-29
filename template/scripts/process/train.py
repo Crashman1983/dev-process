@@ -96,6 +96,26 @@ def _out(root: Path, *args: str) -> str:
     return r.stdout.strip() if r.returncode == 0 else ""
 
 
+def _git_bytes(root: Path, *args: str) -> bytes | None:
+    """git's raw stdout (for `-z` output), None when git failed."""
+    try:
+        r = subprocess.run(["git", "-C", str(root), *args], capture_output=True, timeout=300, env=_GIT_ENV)
+    except subprocess.TimeoutExpired:
+        return None
+    return r.stdout if r.returncode == 0 else None
+
+
+def _paths(root: Path, *args: str) -> list[str] | None:
+    """The path names a git command lists, read NUL-separated through the
+    owner (`check_review._names`); every caller passes `-z`. Without it git
+    quotes a non-ASCII name, `_show` reads nothing under the quoted name, the
+    tier reads 0 and a Tier 2 branch boards unreviewed (downstream
+    refutation). None when git failed — the caller refuses, it does not read
+    "no files"."""
+    names = _review._names(_git_bytes(root, *args))
+    return sorted(names) if names is not None else None
+
+
 def local_integration(root: Path) -> str | None:
     for name in ("main", "master"):
         if _git(root, "rev-parse", "--verify", "--quiet", f"refs/heads/{name}").returncode == 0:
@@ -165,16 +185,26 @@ def candidates(root: Path, local: str, base: str) -> list[dict]:
     # is unique across the archive — count them over main's archive and every
     # candidate's additions, so one old pass cannot clear a same-named new plan
     dedated: dict[str, int] = {}
-    archived_stems = [Path(r).stem for r in _out(root, "ls-tree", "-r", "--name-only", local, "--", ARCHIVE).splitlines()]
+    # a name list git could not produce is no empty list: without it the
+    # uniqueness count and the base's plans are unknown, and nothing boards
+    unreadable: list[str] = []
+    listed = _paths(root, "ls-tree", "-r", "-z", "--name-only", local, "--", ARCHIVE)
+    if listed is None:
+        unreadable.append(f"the archive on {local}")
+    archived_stems = [Path(r).stem for r in listed or ()]
+    added_by: dict[str, list[str] | None] = {}
     for b in branches:
-        archived_stems += [Path(r).stem for r in _out(root, "diff", "--name-only", "--diff-filter=A",
-                                                        f"{base}...{b}", "--", ARCHIVE).splitlines()]
+        added_by[b] = _paths(root, "diff", "--name-only", "-z", "--diff-filter=A", f"{base}...{b}", "--", ARCHIVE)
+        archived_stems += [Path(r).stem for r in added_by[b] or ()]
     for st in archived_stems:
         key = _review.DATE_PREFIX.sub("", st)
         dedated[key] = dedated.get(key, 0) + 1
     # a plan the base already carries (active or archived) is another work's —
     # archiving it on a branch is housekeeping, not this branch's clearance
-    base_plan_stems = {Path(r).stem for r in _out(root, "ls-tree", "-r", "--name-only", base, "--", PLANS).splitlines()}
+    listed = _paths(root, "ls-tree", "-r", "-z", "--name-only", base, "--", PLANS)
+    if listed is None:
+        unreadable.append(f"the plans on {base}")
+    base_plan_stems = {Path(r).stem for r in listed or ()}
     boarded_files: set[str] = set()
     out: list[dict] = []
     for b in sorted(branches):
@@ -184,12 +214,14 @@ def candidates(root: Path, local: str, base: str) -> list[dict]:
                    "reasons": [], "plans": [], "by": None}
         if int(ahead) == 0:
             continue  # already merged (or empty) — residue for tidy.py, not a candidate
-        files = set(_out(root, "diff", "--name-only", f"{base}...{b}").splitlines())
+        listed = _paths(root, "diff", "--name-only", "-z", f"{base}...{b}")
+        files = set(listed or ())
         c["files"] = len(files)
         last = _out(root, "log", "-1", "--format=%ct", b)
         c["hours_waiting"] = round((time.time() - int(last)) / 3600, 1) if last.isdigit() else None
-        archived = [p for p in _out(root, "diff", "--name-only", "--diff-filter=A", f"{base}...{b}",
-                                     "--", ARCHIVE).splitlines() if p.endswith(".md")]
+        archived = [p for p in added_by[b] or () if p.endswith(".md")]
+        branch_unreadable = unreadable + [what for what, names in (
+            (f"the files of {b}", listed), (f"the plans {b} archives", added_by[b])) if names is None]
         branch_passes = _journal_passes_branch(root, base, b)
         passes = passes_root + branch_passes
         touches_process = sorted(f for f in files if f.startswith(PROCESS_PATHS))
@@ -200,7 +232,11 @@ def candidates(root: Path, local: str, base: str) -> list[dict]:
         housekeeping: list[str] = []
         own_archived: list[str] = []
         for rel in archived:
-            text = _review._unfenced(_show(root, b, rel))  # a fenced example is not a declaration
+            shown = _git(root, "show", f"{b}:{rel}")
+            if shown.returncode != 0:
+                branch_unreadable.append(f"{rel} on {b}")  # an unread plan is no Tier 0 plan
+                continue
+            text = _review._unfenced(shown.stdout)  # a fenced example is not a declaration
             stem = Path(rel).stem
             tier_m = _review.TIER_DECL.search(text)
             tier = int(tier_m.group(1)) if tier_m else 0
@@ -222,10 +258,16 @@ def candidates(root: Path, local: str, base: str) -> list[dict]:
             c["housekeeping"] = housekeeping
         # a question the owner never answered rides no train: the branch
         # was built on an assumption — answer it (DECISION line) first
-        open_q = [rel for rel in _out(root, "diff", "--name-only", f"{base}...{b}", "--", _tower.PLANS_ACTIVE, _tower.SPECS_DIR).splitlines()
+        active = _paths(root, "diff", "--name-only", "-z", f"{base}...{b}", "--", _tower.PLANS_ACTIVE, _tower.SPECS_DIR)
+        if active is None:
+            branch_unreadable.append(f"the active plans of {b}")
+        open_q = [rel for rel in active or ()
                   if rel.endswith(".md") and _tower.QUESTION_LINE.search(_review._unfenced(_show(root, b, rel)))]
         if open_q:
             c["reasons"].append(f"open DECISION NEEDED in {open_q[0]} — answer it as a DECISION line before merging")
+        if branch_unreadable:
+            c["reasons"].append(f"git could not read {', '.join(branch_unreadable)} — an unread name or plan "
+                                f"is no Tier 0 plan; repair the clone (`git fsck`, fetch) and run the train again")
         rep = reports.get(b)
         process_unreviewed = bool(touches_process) and not _covers(root, passes, own_ids, 2, b, branch_passes)
         if process_unreviewed:
@@ -263,7 +305,7 @@ def candidates(root: Path, local: str, base: str) -> list[dict]:
         overlap = sorted(files & boarded_files)
         if overlap:
             c["reasons"].append(f"overlaps {len(overlap)} file(s) with a branch already aboard: {', '.join(overlap[:3])}")
-        if c["by"] and not overlap and not open_q:
+        if c["by"] and not overlap and not open_q and not branch_unreadable:
             c["eligible"] = True
             boarded_files |= files
         out.append(c)
@@ -272,7 +314,7 @@ def candidates(root: Path, local: str, base: str) -> list[dict]:
 
 def _journal_passes_tree(root: Path, ref: str) -> list[dict]:
     passes: list[dict] = []
-    for rel in _out(root, "ls-tree", "-r", "--name-only", ref, "--", JOURNAL).splitlines():
+    for rel in _paths(root, "ls-tree", "-r", "-z", "--name-only", ref, "--", JOURNAL) or ():
         if rel.endswith(".md"):
             records, _e = _review.parse_review_lines(_show(root, ref, rel))
             passes += [r for _ln, r in records if r.get("verdict") == "pass"]
@@ -310,7 +352,7 @@ def _covers(root: Path, passes: list[dict], ids: set[str], tier: int, tip: str,
 
 def _journal_passes_branch(root: Path, base: str, branch: str) -> list[dict]:
     passes: list[dict] = []
-    for rel in _out(root, "diff", "--name-only", f"{base}...{branch}", "--", JOURNAL).splitlines():
+    for rel in _paths(root, "diff", "--name-only", "-z", f"{base}...{branch}", "--", JOURNAL) or ():
         if rel.endswith(".md"):
             records, _e = _review.parse_review_lines(_show(root, branch, rel))
             passes += [r for _ln, r in records if r.get("verdict") == "pass"]
@@ -839,18 +881,10 @@ def _settle_plans(wt: Path, base: str, branch: str, log) -> tuple[list[str], set
     records = _review.record_texts(wt, ("journal",)) or []
     passes = [r for _rel, text in records for _ln, r in _review.parse_review_lines(text)[0]
               if r.get("verdict") == "pass"]
-    status = _out(wt, "diff", "--name-status", "-M", "-z", f"{base}...{branch}", "--", PLANS).split("\0")
-    entries: list[tuple[str, str, str]] = []  # (status letter, source on base or "", path now)
-    i = 0
-    while i < len(status) and status[i]:
-        letter = status[i][:1]
-        if letter in ("R", "C"):
-            entries.append((letter, status[i + 1], status[i + 2]))
-            i += 3
-        else:
-            entries.append((letter, "", status[i + 1]))
-            i += 2
-    stems = [Path(n).stem for n in _out(wt, "ls-files", "--", PLANS).splitlines() if n.endswith(".md")]
+    # (status letter, source on base or "", path now) — the owner reads the -z form
+    listed = _git_bytes(wt, "diff", "--name-status", "-M", "-z", f"{base}...{branch}", "--", PLANS)
+    entries = _review.name_status(listed) or []
+    stems = [Path(n).stem for n in _paths(wt, "ls-files", "-z", "--", PLANS) or () if n.endswith(".md")]
     dedated: dict[str, int] = {}
     for stem in stems:
         key = _review.DATE_PREFIX.sub("", stem)

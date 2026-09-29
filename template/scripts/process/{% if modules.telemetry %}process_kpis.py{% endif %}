@@ -421,22 +421,26 @@ def _default_branch() -> str:
 
 
 def _git_commits(branch: str, limit: int = _GIT_LIMIT) -> list[dict]:
+    # -z: without it git quotes a non-ASCII name, and the same file under a
+    # quoted and a plain name reads as two. Fields are NUL-separated; a
+    # commit's header carries its first name after a newline.
     proc = subprocess.run(
-        ["git", "log", branch, "--no-merges", "-n", str(limit), "--name-only",
+        ["git", "log", branch, "-z", "--no-merges", "-n", str(limit), "--name-only",
          "--pretty=format:\x01%ct\x01%s"],
-        capture_output=True, text=True, check=True, cwd=str(ROOT),
+        capture_output=True, check=True, cwd=str(ROOT),
     )
     commits: list[dict] = []
     cur: dict | None = None
-    for line in proc.stdout.splitlines():
-        if line.startswith("\x01"):
-            _, ct, subject = line.split("\x01", 2)
+    for field in proc.stdout.decode(errors="surrogateescape").split("\0"):
+        if field.startswith("\x01"):
+            header, _nl, field = field.partition("\n")
+            _, ct, subject = header.split("\x01", 2)
             cur = {"subject": subject,
                    "ts": datetime.fromtimestamp(int(ct), tz=timezone.utc),
                    "files": set()}
             commits.append(cur)
-        elif line.strip() and cur is not None:
-            cur["files"].add(line.strip())
+        if field and cur is not None:
+            cur["files"].add(field)
     return commits
 
 
