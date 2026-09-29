@@ -128,6 +128,11 @@ BOOKKEEPING = (".process-work/",)  # every branch writes here; sharing it is not
 INTEGRATION_NAMES = ("main", "master")
 
 
+def _in_flight_count(wt: dict) -> str:
+    """"3 file(s)", or "files unknown" when git could not list them."""
+    return "files unknown" if wt.get("in_flight_unknown") else f"{len(wt.get('in_flight', []))} file(s)"
+
+
 def overlaps(wts: list[dict]) -> list[dict]:
     out: list[dict] = []
     wts = [w for w in wts if w.get("branch") not in INTEGRATION_NAMES and not w.get("missing")]
@@ -550,11 +555,11 @@ def render(table: dict) -> str:
             lines.append(f"  - {wt['branch']}: (missing)")
             continue
         lines.append(f"  - {wt['branch']}: +{wt.get('ahead', 0)}/-{wt.get('behind', 0)}, "
-                     f"{len(wt.get('in_flight', []))} file(s) in flight, {wt.get('dirty', 0)} dirty, "
+                     f"{_in_flight_count(wt)} in flight, {wt.get('dirty', 0)} dirty, "
                      f"last commit {wt.get('minutes_since_commit', '?')} min ago")
     for wt in table.get("elsewhere", []):
         lines.append(f"  - {wt['branch']} (another host): +{wt['ahead']}/-{wt['behind']}, "
-                     f"{len(wt['in_flight'])} file(s) in flight, last commit {wt['minutes_since_commit']} min ago")
+                     f"{_in_flight_count(wt)} in flight, last commit {wt['minutes_since_commit']} min ago")
     active = [p for p in table["plans"]]
     lines.append(f"plans ({len(active)}): " + ", ".join(
         f"{Path(p['path']).stem}[t{p['tier'] if p['tier'] is not None else '?'}"

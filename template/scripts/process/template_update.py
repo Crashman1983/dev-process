@@ -190,8 +190,8 @@ def leftover_conflicts(root: Path, owned: list[str]) -> list[str]:
         if len(entry) < 4:
             continue
         rel = entry[3:]
-        if entry[0] in "RC":
-            next(entries, None)  # the old name
+        if {"R", "C"} & set(entry[:2]):
+            next(entries, None)  # the old name (a rename in either column)
         p = root / rel
         if p.is_file() and not is_owned(rel, owned):
             try:

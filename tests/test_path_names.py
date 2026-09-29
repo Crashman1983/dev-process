@@ -144,7 +144,8 @@ def test_bundle_names_a_changed_image_under_its_real_name(render, tmp_path, name
 
     text = _load(out, "make_review_bundle")._ui_evidence(out, "main", [])
 
-    assert f"- A shot-{name}.png" in text, text
+    shown = name.replace("\n", "\\n")  # a newline is escaped so the bullet stays one line
+    assert f"- A shot-{shown}.png" in text, text
 
 
 @pytest.mark.parametrize("name", NAMES, ids=["umlaut", "newline"])
@@ -304,3 +305,96 @@ def test_kpi_cockpit_reads_a_non_ascii_file_under_its_real_name(render, tmp_path
 
     assert commits[0]["subject"] == "fix: size"
     assert commits[0]["files"] == {"src/größe.py"}, commits[0]
+
+
+# --- refute of this change ---
+
+
+def _drop_blob(out: Path, rev: str) -> None:
+    """Remove a blob's loose object: git can no longer show it."""
+    sha = _git(out, "rev-parse", rev).strip()
+    (out / ".git/objects" / sha[:2] / sha[2:]).unlink()
+
+
+def test_train_boards_nothing_when_an_open_question_plan_cannot_be_read(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _git(out, "checkout", "-q", "-b", "1-a")
+    _write(out, ".process-work/plans/archive/2026-09-20-a.md", "# Plan\n\ntier: 1\nissue: #1\n")
+    _write(out, "specs/x/spec.md", "- DECISION NEEDED 2026-09-20 owner: which db?\n")
+    _commit(out, "feat: a (#1)")
+    _git(out, "checkout", "-q", "main")
+    _drop_blob(out, "1-a:specs/x/spec.md")
+
+    c = _train_plan(out)["1-a"]
+
+    assert not c["eligible"], c
+    assert any("specs/x/spec.md" in r for r in c["reasons"]), c
+
+
+def test_review_size_leaves_out_a_lock_file_whose_name_git_quotes(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _git(out, "checkout", "-q", "-b", "1-a")
+    for folder in ("dür", "plain"):
+        _write(out, f"{folder}/package-lock.json", "x\n" * 500)
+    _commit(out, "chore: locks")
+
+    assert _load(out, "make_review_bundle").review_size(out, "main") == (0, 0)
+
+
+def test_review_size_follows_a_rename(render, tmp_path):
+    """Twin: the -z rename form names the new path."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _write(out, "src/a.py", "x\n" * 50)
+    _commit(out, "feat: a")
+    _git(out, "checkout", "-q", "-b", "1-a")
+    _git(out, "mv", "src/a.py", "src/größe.py")
+    _commit(out, "refactor: rename")
+
+    assert _load(out, "make_review_bundle").review_size(out, "main") == (1, 0)
+
+
+def test_bundle_writes_a_newline_in_an_image_name_escaped(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _git(out, "checkout", "-q", "-b", "1-a")
+    (out / "new\nline.png").write_bytes(b"\x89PNG")
+    _commit(out, "feat: shot")
+
+    text = _load(out, "make_review_bundle")._ui_evidence(out, "main", [])
+
+    assert "- A new\\nline.png" in text, text
+
+
+def test_dispatch_commit_touches_is_none_when_git_cannot_read_the_commit(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+
+    assert _load(out, "dispatch")._commit_touches(out, "0" * 40) is None
+
+
+def test_template_update_skips_the_old_name_of_a_worktree_rename(render, tmp_path):
+    out = _update_repo(render, tmp_path)
+    _write(out, "docs/oldname.txt", "x\n")
+    _commit(out, "docs: file")
+    (out / "docs/oldname.txt").rename(out / "docs/neuü.txt")
+    # the old name read as an entry of its own, three characters cut: "s/oldname.txt"
+    _write(out, "s/oldname.txt", "<<<<<<< ours\n")
+    _git(out, "add", "-N", "docs/neuü.txt")
+
+    assert _load(out, "template_update").leftover_conflicts(out, []) == []
+
+
+def test_tower_says_files_unknown_when_git_cannot_list_them(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    tower = _load(out, "tower")
+    wt = {"branch": "1-thing", "ahead": 1, "behind": 0, "in_flight": [], "in_flight_unknown": True,
+          "dirty": 0, "minutes_since_commit": 1}
+    table = {"generated": "now", "integration_ref": "main", "worktrees": [wt], "elsewhere": [], "plans": [], "questions": [], "sessions": [],
+             "reports": [], "reviews": {"pass": {}, "block": {}}, "lanes": [], "findings": [], "overlaps": [], "gates": []}
+
+    text = tower.render(table)
+
+    assert "files unknown in flight" in text and "0 file(s) in flight" not in text, text

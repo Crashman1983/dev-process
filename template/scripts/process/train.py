@@ -261,8 +261,13 @@ def candidates(root: Path, local: str, base: str) -> list[dict]:
         active = _paths(root, "diff", "--name-only", "-z", f"{base}...{b}", "--", _tower.PLANS_ACTIVE, _tower.SPECS_DIR)
         if active is None:
             branch_unreadable.append(f"the active plans of {b}")
-        open_q = [rel for rel in active or ()
-                  if rel.endswith(".md") and _tower.QUESTION_LINE.search(_review._unfenced(_show(root, b, rel)))]
+        open_q = []
+        for rel in (r for r in active or () if r.endswith(".md")):
+            shown = _git(root, "show", f"{b}:{rel}")
+            if shown.returncode != 0:
+                branch_unreadable.append(f"{rel} on {b}")  # an unread plan hides its open question
+            elif _tower.QUESTION_LINE.search(_review._unfenced(shown.stdout)):
+                open_q.append(rel)
         if open_q:
             c["reasons"].append(f"open DECISION NEEDED in {open_q[0]} — answer it as a DECISION line before merging")
         if branch_unreadable:
@@ -884,7 +889,8 @@ def _settle_plans(wt: Path, base: str, branch: str, log) -> tuple[list[str], set
     # (status letter, source on base or "", path now) — the owner reads the -z form
     listed = _git_bytes(wt, "diff", "--name-status", "-M", "-z", f"{base}...{branch}", "--", PLANS)
     entries = _review.name_status(listed) or []
-    stems = [Path(n).stem for n in _paths(wt, "ls-files", "-z", "--", PLANS) or () if n.endswith(".md")]
+    listed = _paths(wt, "ls-files", "-z", "--", PLANS)
+    stems = [Path(n).stem for n in listed or () if n.endswith(".md")]
     dedated: dict[str, int] = {}
     for stem in stems:
         key = _review.DATE_PREFIX.sub("", stem)
@@ -899,7 +905,8 @@ def _settle_plans(wt: Path, base: str, branch: str, log) -> tuple[list[str], set
         text = f.read_text(encoding="utf-8", errors="replace")
         plain = _review._unfenced(text)
         stem = Path(rel).stem
-        unique = dedated.get(_review.DATE_PREFIX.sub("", stem), 0) <= 1
+        # without the listing no de-dated slug is known to be unique
+        unique = listed is not None and dedated.get(_review.DATE_PREFIX.sub("", stem), 0) <= 1
         ids = _review._plan_work_ids(stem, plain, include_dedated=unique)
         numbers = {str(n) for n in _local_issues(plain)}
         added = letter == "A"

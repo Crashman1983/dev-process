@@ -1088,13 +1088,15 @@ def drain(root: Path) -> int:
     return 0
 
 
-def _commit_touches(root: Path, commit: str) -> list[str]:
+def _commit_touches(root: Path, commit: str) -> list[str] | None:
     """The files a commit changes — a merge by what it adds of its own (`--cc`).
     `-z` through the owner of names (`check_review._names`): git quotes a
-    non-ASCII name otherwise, and the file matches nothing it is compared to."""
+    non-ASCII name otherwise, and the file matches nothing it is compared to.
+    None when git cannot tell — never "touches nothing"."""
     import check_review as _review  # noqa: PLC0415  (lazily, as tower imports dispatch)
-    return sorted(_review._names(_review._git_bytes(
-        root, "diff-tree", "-z", "--no-commit-id", "--name-only", "-r", "--root", "--cc", commit)) or ())
+    names = _review._names(_review._git_bytes(
+        root, "diff-tree", "-z", "--no-commit-id", "--name-only", "-r", "--root", "--cc", commit))
+    return sorted(names) if names is not None else None
 
 
 _REVIEW_ADDED = re.compile(r"^\+\s*(?:[-*+]\s+)?REVIEW\s", re.MULTILINE)
@@ -1133,7 +1135,10 @@ def new_code_on_origin(root: Path, branch: str, *, fetch: bool = True) -> bool |
         return None
     base = _integration_base(root, tip)
     for c in _out(root, "rev-list", tip, *([f"^{base}"] if base else [])).splitlines():  # newest first
-        if any(not f.startswith(BOOKKEEPING) for f in _commit_touches(root, c)):
+        touched = _commit_touches(root, c)
+        if touched is None:
+            return None  # a commit git cannot read is no "attestation only"
+        if any(not f.startswith(BOOKKEEPING) for f in touched):
             return True
         if _is_attestation(root, c):
             return False
