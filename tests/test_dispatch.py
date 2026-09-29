@@ -1029,9 +1029,18 @@ def test_phase_over_reads_the_local_branch_without_origin_and_says_unknown_when_
     subprocess.run(["git", "commit", "-q", "-m", "plan"], cwd=out, check=True)
     mod = _load_dispatch(out)
     rec, rep = {"branch": "7-work", "phase": "execute"}, {"state": "pushed"}
-    assert mod.phase_over(out, rec, rep, local=True) is False  # an open task, read locally
+
+    def fetched():  # what `git push` / `git fetch` leave: origin's tip as last seen
+        subprocess.run(["git", "update-ref", "refs/remotes/origin/7-work", "HEAD"], cwd=out, check=True)
+
+    assert mod.phase_over(out, rec, rep, local=True) is None  # never pushed: cannot be told
+    fetched()
+    assert mod.phase_over(out, rec, rep, local=True) is False  # an open task on origin
     plan.write_text(plan.read_text().replace("- [ ] two", "- [x] two"))
     subprocess.run(["git", "commit", "-q", "-am", "done"], cwd=out, check=True)
+    # ticked but not pushed: origin still has the open task, as chain sees it
+    assert mod.phase_over(out, rec, rep, local=True) is False
+    fetched()
     assert mod.phase_over(out, rec, rep, local=True) is True
-    assert mod.phase_over(out, rec, rep) is None  # no origin to read: unknown, not "not over"
+    assert mod.phase_over(out, rec, rep) is None  # live origin cannot be asked here: unknown
 

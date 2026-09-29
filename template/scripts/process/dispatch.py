@@ -1144,10 +1144,13 @@ _FENCE = re.compile(r"^(```|~~~).*?^\1[^\n]*$", re.MULTILINE | re.DOTALL)
 
 
 def _own_plans_on_origin(root: Path, branch: str, local: bool = False) -> tuple[str, list[str]]:
-    """(origin's tip — or, with `local`, the local branch's — and the plans
-    this branch added: active, archived or Spec Kit tasks); another work's
-    plan the branch only touched is not its own."""
-    tip = (_out(root, "rev-parse", "--verify", "-q", f"refs/heads/{branch}") if local
+    """(origin's tip — or, with `local`, origin's tip as last fetched, no
+    network — and the plans this branch added: active, archived or Spec Kit
+    tasks); another work's plan the branch only touched is not its own. A
+    task ticked but not pushed is open for both: what counts is what origin
+    holds (refutation: the local branch read a worker finished that chain
+    never advanced)."""
+    tip = (_out(root, "rev-parse", "--verify", "-q", f"refs/remotes/origin/{branch}") if local
            else _remote_head(root, branch))
     if not tip:
         return "", []
@@ -1177,8 +1180,7 @@ _ISSUE = re.compile(r"^\s*(?:[-*+]\s+)?[*_]*issue[*_]*\s*:\s*(\S+)", re.IGNORECA
 
 def work_complete_on_origin(root: Path, branch: str, local: bool = False) -> bool | None:
     """Are the tasks of the branch's own plans all ticked at origin's tip
-    (with `local`: at the local branch — what the worker committed, no
-    network)? `pushed` is reported at the FIRST push — the tasks tell when
+    (with `local`: origin's tip as last fetched — no network)? `pushed` is reported at the FIRST push — the tasks tell when
     the work is done. A task inside a fenced example does not count. None
     when the branch added no plan to read, or git cannot tell."""
     tip, plans = _own_plans_on_origin(root, branch, local)
@@ -1224,10 +1226,8 @@ def phase_over(root: Path, rec: dict, rep: dict | None, *, local: bool = False) 
     """Has this session's phase ended? Its own final report says so — a plan
     `planned`, a review `review-pass` or `blocked` (it stops either way), any
     phase `done` or `idle` — or, for an execute session, `pushed` with every
-    task of the branch's own plans ticked (on origin; with `local`, on the
-    local branch — no network). None when that cannot be told: an unknown is
-    no alarm and no verdict (refutation: an unreachable origin made a
-    finished worker a high finding)."""
+    task of the branch's own plans ticked on origin (with `local`: as last
+    fetched — no network). None when that cannot be told."""
     state, phase = (rep or {}).get("state"), rec.get("phase")
     if state in ("done", "idle"):
         return True

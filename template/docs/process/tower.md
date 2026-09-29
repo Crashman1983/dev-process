@@ -127,8 +127,9 @@ when it routed its question (an open `DECISION NEEDED`, a `blocked`
 report), `question-unrouted` when it did not — then the question sits on
 its screen, where nobody reads it. "Its phase is over" and "its own report"
 are dispatch's answers (`phase_over`, `session_report`), the ones `chain`
-acts on. A worker on another host shows no screen here; its reports speak
-for it.
+acts on — the tasks read at origin as last fetched, no network. When the
+phase end cannot be read, the finding is still raised, at medium. A worker
+on another host shows no screen here; its reports speak for it.
 
 Phases chain themselves: `dispatch.py chain` (from the steward's tick)
 stops a `planned` plan session and queues `execute`; stops a `pushed`
