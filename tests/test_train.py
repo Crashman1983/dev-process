@@ -1339,3 +1339,59 @@ def test_reading_the_branch_issues_creates_nothing_and_skips_a_broken_record(ren
     r = _train(out, "plan", "--json")
     assert r.returncode == 0, r.stderr[-600:]
 
+
+# --- third refutation: the merged issue is done everywhere; bookkeeping never aborts a landed train ---
+
+def test_a_merged_issue_does_not_return_to_its_abandoned_branch(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _base_plan(out, "2026-09-20-p1", 71)
+    _package_on_base_plan(out, "70-p1-slice", "71", "2026-09-20-p1")
+    _report(out, "70-p1-slice")
+    _stale_record(out, "70-p1-old", 71)  # the first placement: its worker died, nobody stopped it
+    _dispatched(out, 71, "70-p1-slice")
+    r = _train(out, "run", "--force", "--suite", "true")
+    assert r.returncode == 0, r.stdout[-800:] + r.stderr[-800:]
+    d = _dispatch_module(out)
+    assert d.find_branch(out, 71) is None and d.issues_of(out, "70-p1-old") == set()
+
+
+def test_forgetting_keeps_a_live_or_unaskable_worker_and_ignores_a_boolean_issue(render, tmp_path, monkeypatch):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    d = _dispatch_module(out)
+    _stale_record(out, "70-live", 71)
+    _stale_record(out, "70-unknown", 71)
+    (_records_dir(out) / "70-bool.json").write_text(json.dumps({"branch": "70-bool", "issue": True}))
+    assert d.find_branch(out, 1) is None  # True is not issue 1
+    _dispatched(out, 71, "70-slice")
+    states = {"70-live": ("live", True), "70-unknown": ("unknown", False)}
+    real = d.records
+
+    def records(root):
+        recs = real(root)
+        for rec in recs:
+            if rec["branch"] in states:
+                rec["state"], rec["alive"] = states[rec["branch"]]
+        return recs
+
+    monkeypatch.setattr(d, "records", records)
+    d.forget_branch(out, "70-slice")
+    assert (_records_dir(out) / "70-live.json").is_file() and (_records_dir(out) / "70-unknown.json").is_file()
+
+
+def test_an_unwritable_issue_map_does_not_abort_a_landed_train(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _branch(out, "alpha", {"src/a.py": "a\n"})
+    # the rendered dispatch of this scratch repo cannot write its map (a full
+    # disk, a read-only .git): forgetting raises
+    d = out / "scripts/process/dispatch.py"
+    d.write_text(d.read_text() + "\n\ndef forget_branch(root, branch):\n"
+                 "    raise OSError(28, 'No space left on device')\n")
+    _git(out, "commit", "-q", "-am", "a dispatch whose map cannot be written")
+    r = _train(out, "run", "--force", "--suite", "true")
+    assert r.returncode == 0, r.stdout[-800:] + r.stderr[-800:]
+    assert "train: merge alpha" in _git(out, "log", "--oneline", "main").stdout
+    assert "could not forget it" in r.stderr and "No space left" in r.stderr
+    assert "alpha" not in _git(out, "branch", "--list", "--format=%(refname:short)").stdout.split()
