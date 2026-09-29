@@ -393,7 +393,8 @@ def test_a_worker_whose_phase_is_over_or_that_is_busy_is_not_waiting(render, tmp
     out = render(tmp_path, {"project_name": "d", "modules": {}})
     tower = _load_tower(out)
     assert _kinds(tower, _table([_session(phase_over=True)])) == []  # dispatch.phase_over decides
-    assert _kinds(tower, _table([_session(phase_over=None)])) == []  # cannot be told: no alarm on a guess
+    # cannot be told: still said, but not as a certainty
+    assert _kinds(tower, _table([_session(phase_over=None)])) == [("question-unrouted", "medium")]
     assert _kinds(tower, _table([_session(quiet=29)])) == []  # still printing
     assert _kinds(tower, _table([_session(quiet=30)])) == [("question-unrouted", "high")]
     assert _kinds(tower, _table([_session(quiet=None)])) == []  # nothing to measure

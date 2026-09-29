@@ -463,8 +463,12 @@ def findings(table: dict, stale_minutes: int) -> list[dict]:
     asked = {q.get("branch") for q in table.get("questions", [])}
     for s in table.get("sessions", []):
         quiet = s.get("minutes_since_output")
-        if not s.get("alive") or quiet is None or quiet < WAIT_MINUTES or s.get("phase_over") is not False:
-            continue  # over, or not to be told (None): no alarm on a guess
+        if not s.get("alive") or quiet is None or quiet < WAIT_MINUTES or s.get("phase_over") is True:
+            continue
+        # its phase end cannot be read (no plan of its own, origin not
+        # fetched): still said — a missed waiting worker is the failure this
+        # finding exists for — but not as a certainty (refutation both ways)
+        unsure = s.get("phase_over") is None
         state = s.get("report_state")
         shown = f": {s['last_output'][-120:]}" if s.get("last_output") else ""
         if s["branch"] in asked or state == "blocked":
@@ -474,9 +478,10 @@ def findings(table: dict, stale_minutes: int) -> list[dict]:
                         "because": "the question is routed — the steward decides and writes the answer back as a "
                                    "DECISION line, or relays it to the owner"})
         else:
-            out.append({"kind": "question-unrouted", "severity": "high",
+            out.append({"kind": "question-unrouted", "severity": "medium" if unsure else "high",
                         "what": f"{s['branch']} ({s.get('phase')}) waits for input for {quiet} min, and its plan "
-                                f"carries no DECISION NEEDED{shown}",
+                                f"carries no DECISION NEEDED"
+                                f"{' (whether its phase is over cannot be read)' if unsure else ''}{shown}",
                         "because": "a question on a worker's screen reaches nobody — have it write the question "
                                    "into the plan as DECISION NEEDED and report blocked; the steward decides"})
     for rep in table["reports"]:
