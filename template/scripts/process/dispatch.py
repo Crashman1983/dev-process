@@ -256,7 +256,7 @@ def _issues_path(root: Path) -> Path:
 
 
 def _issue_map(root: Path) -> dict[str, str]:
-    p = _issues_path(root)
+    p = common_dir(root) / DISPATCH_DIR / ISSUES_FILE  # a read creates nothing
     try:
         data = json.loads(p.read_text(encoding="utf-8"))
         return {str(k): str(v) for k, v in data.items()} if isinstance(data, dict) else {}
@@ -270,15 +270,27 @@ def _remember_issue(root: Path, issue: int, branch: str) -> None:
     _issues_path(root).write_text(json.dumps(m, indent=2), encoding="utf-8")
 
 
+def _placed(root: Path) -> dict[int, str]:
+    """issue -> the branch dispatch placed it on: the issue map first (it
+    outlives stop, and a re-dispatch re-points it), then the first dispatch
+    record naming the issue. One answer for find_branch and issues_of."""
+    placed: dict[int, str] = {}
+    for rec in _record_files(root):
+        issue = rec.get("issue")
+        if isinstance(issue, int) and not isinstance(issue, bool) and issue > 0:
+            placed.setdefault(issue, rec["branch"])
+    for k, v in _issue_map(root).items():
+        if k.isdigit() and int(k) > 0 and v:
+            placed[int(k)] = v
+    return placed
+
+
 def find_branch(root: Path, issue: int) -> str | None:
     """The branch an issue lives on: the issue map (outlives stop), a
     dispatch record, then a local branch named `<issue>-…` or `issue-<issue>`."""
-    known = _issue_map(root).get(str(issue))
+    known = _placed(root).get(issue)
     if known:
         return known
-    for rec in records(root):
-        if rec.get("issue") == issue:
-            return rec["branch"]
     for b in _out(root, "branch", "--list", "--format=%(refname:short)").splitlines():
         b = b.strip()
         if b == f"issue-{issue}" or b.startswith(f"{issue}-"):
@@ -287,16 +299,31 @@ def find_branch(root: Path, issue: int) -> str | None:
 
 
 def issues_of(root: Path, branch: str) -> set[int]:
-    """The issues dispatch placed on `branch` — the inverse of find_branch,
-    from the same records (the issue map, then the dispatch records). A
-    branch can carry another issue than the number its name leads with: a
-    package of a larger issue is dispatched onto `<epic>-<package>-…`."""
-    out = {int(k) for k, v in _issue_map(root).items() if v == branch and k.isdigit() and int(k) > 0}
+    """The issues dispatch placed on `branch` — exactly those find_branch
+    resolves to it (refutation: a record left from before a re-dispatch kept
+    an issue on its old branch). A branch can carry another issue than the
+    number its name leads with: a package of a larger issue is dispatched
+    onto `<epic>-<package>-…`. Reading creates nothing and asks no worker."""
+    return {issue for issue, b in _placed(root).items() if b == branch}
+
+
+def forget_branch(root: Path, branch: str) -> None:
+    """The branch's work is merged: its issues are no longer placed on it —
+    a later branch of the same name starts clean (refutation: a reused name
+    inherited old issues, and its merge closed them). A live worker's record
+    stays; `stop` owns it. Known limit: a branch merged outside the train
+    keeps its entries until its issue is dispatched again — the map outlives
+    `stop` on purpose, so the next phase finds the branch."""
+    m = _issue_map(root)
+    kept = {k: v for k, v in m.items() if v != branch}
+    if kept != m:
+        _issues_path(root).write_text(json.dumps(kept, indent=2), encoding="utf-8")
     for rec in records(root):
-        issue = rec.get("issue")
-        if rec.get("branch") == branch and isinstance(issue, int) and not isinstance(issue, bool) and issue > 0:
-            out.add(issue)
-    return out
+        if rec["branch"] == branch and not rec["alive"] and rec.get("state") != "unknown":
+            try:
+                _record_path(root, branch).unlink()
+            except OSError:
+                pass
 
 
 def _worktrees(root: Path) -> dict[str, Path]:
@@ -444,17 +471,26 @@ def _pane_state(window_id: str) -> str:
     return "dead" if r.stdout.strip() == "1" else "live"
 
 
-def records(root: Path) -> list[dict]:
+def _record_files(root: Path) -> list[dict]:
+    """The dispatch records as written — no liveness asked, nothing created;
+    an unreadable entry (bad JSON, a directory named *.json) is skipped."""
+    d = common_dir(root) / DISPATCH_DIR
     out = []
-    for p in sorted(_records_dir(root).glob("*.json")):
+    for p in sorted(d.glob("*.json")) if d.is_dir() else []:
         if p.name == ISSUES_FILE:
             continue
         try:
             rec = json.loads(p.read_text(encoding="utf-8"))
-        except ValueError:
+        except (OSError, ValueError):
             continue
-        if not isinstance(rec, dict) or not rec.get("branch"):
-            continue
+        if isinstance(rec, dict) and isinstance(rec.get("branch"), str) and rec["branch"]:
+            out.append(rec)
+    return out
+
+
+def records(root: Path) -> list[dict]:
+    out = []
+    for rec in _record_files(root):
         if rec.get("remote"):
             rec["state"] = "remote"  # liveness lives on the other host; its reports say
         elif rec.get("tmux_window"):

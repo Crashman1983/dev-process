@@ -1275,3 +1275,67 @@ def test_the_merge_closes_the_issue_the_branch_boarded_on(render, tmp_path, arch
     messages, active = _merge_messages(out, "70-p1-slice")
     assert "Closes #71" in messages and "#70" not in messages, messages
     assert "2026-09-20-p1.md" not in active
+
+
+# --- second refutation: the map is find_branch's, merged branches are forgotten, reading has no side effects ---
+
+def _dispatch_module(out):
+    import importlib.util
+    sys.dont_write_bytecode = True
+    sys.path.insert(0, str(out / "scripts/process"))
+    spec = importlib.util.spec_from_file_location("dispatch_under_test", out / "scripts/process/dispatch.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _records_dir(out):
+    d = out / ".git/process-dispatch"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _stale_record(out, branch, issue):
+    """A dispatch record whose worker is gone and that nobody stopped."""
+    (_records_dir(out) / f"{branch.replace('/', '__')}.json").write_text(json.dumps(
+        {"branch": branch, "issue": issue, "phase": "execute", "pid": 999999999, "started": 1}))
+
+
+def test_an_issue_re_dispatched_elsewhere_leaves_its_old_branch(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _package_branch(out, "70-p2-slice", "72")
+    _report(out, "70-p2-slice")
+    _stale_record(out, "70-p2-slice", 72)
+    _dispatched(out, 72, "70-p2-new")
+    d = _dispatch_module(out)
+    assert d.find_branch(out, 72) == "70-p2-new" and 72 not in d.issues_of(out, "70-p2-slice")
+    assert not _candidate(out, "70-p2-slice")["eligible"]
+
+
+def test_a_merged_branch_is_forgotten_so_its_name_starts_clean(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _base_plan(out, "2026-09-20-p1", 71)
+    _package_on_base_plan(out, "70-p1-slice", "71", "2026-09-20-p1")
+    _report(out, "70-p1-slice")
+    _dispatched(out, 71, "70-p1-slice")
+    _stale_record(out, "70-p1-slice", 71)
+    r = _train(out, "run", "--force", "--suite", "true")
+    assert r.returncode == 0, r.stdout[-800:] + r.stderr[-800:]
+    d = _dispatch_module(out)
+    assert d.issues_of(out, "70-p1-slice") == set() and d.find_branch(out, 71) != "70-p1-slice"
+    assert not (_records_dir(out) / "70-p1-slice.json").exists()
+
+
+def test_reading_the_branch_issues_creates_nothing_and_skips_a_broken_record(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _package_branch(out, "70-p1-slice", "71")
+    assert _train(out, "plan", "--json").returncode == 0
+    assert not (out / ".git/process-dispatch").exists()
+    (_records_dir(out) / "weird.json").mkdir()
+    (_records_dir(out) / "bad.json").write_text("{not json")
+    r = _train(out, "plan", "--json")
+    assert r.returncode == 0, r.stderr[-600:]
+
