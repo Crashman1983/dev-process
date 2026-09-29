@@ -1,6 +1,12 @@
 # /execute
 
-At the first push of the branch, `uv run scripts/process/report.py pushed --issue N` (`/report`); when you cannot proceed, `report.py blocked --note "<why>"` the moment it happens — that line is what gets you unblocked. A question only the owner can answer is not a chat message: write it into the plan's `## Decisions` as `DECISION NEEDED <date> <you>: <question> — options: A …, B …; recommendation: …`, commit, report `blocked` with the same text, and carry on with tasks the answer does not touch (or stop). The steward relays it with context and writes the answer back as a `DECISION` line; read the plan again before the task that depends on it.
+At the first push of the branch, `uv run scripts/process/report.py pushed --issue N` (`/report`); when you cannot proceed, `report.py blocked --note "<why>"` the moment it happens — that line is what gets you unblocked. A question only the owner can answer is not a chat message: write it into the plan's `## Decisions` as `DECISION NEEDED <date> <you>: <question> — options: A …, B …; recommendation: …`, commit, report `blocked` with the same text, and carry on with tasks the answer does not touch (or stop). The steward is your decision partner: it decides, or brings a question that touches a product principle or is destructive to the owner, and writes the answer back as a `DECISION` line; read the plan again before the task that depends on it.
+
+**Before you report `pushed`:**
+1. **A contradiction is a question, not a note.** When what you observe contradicts an acceptance criterion or the contract (the criterion says "no visual change" and your change drops an animation), write a `DECISION NEEDED`, not a journal line, and do not report `pushed` while it is open.
+2. **A removed or renamed capability is enumerated by sink.** List every place it is named — user-facing text, identifiers and ids, unit, end-to-end and visual tests with their baselines, stories, docs, registries — and fix each; then measure the test floor (how many tests of each kind) against the base. A grep for the identifier alone misses most of them.
+3. **Gate, train, finish or hook code runs once under its own conditions** (`docs/process/testing.md`, "Test under the conditions the change creates"): the variables it sets, the real entry point.
+4. **After a blocking review round** the plan carries `ROOT-CAUSE work=<id> round=<r>: <cause> — <test that failed before the fix>`, and `attest.py --dry-run` passes before you report — a malformed line is refused at the next attest and costs a whole round.
 
 Build the plan task by task, test-driven. Re-read the kernel
 (`docs/process/kernel.md`) and `docs/process/mandatory-rules.md` first — a long

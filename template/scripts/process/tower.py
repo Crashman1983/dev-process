@@ -56,6 +56,8 @@ QUESTION_LINE = re.compile(r"^\s*(?:[-*+]\s+)?[*_]*DECISION NEEDED[*_]*\s+(\d{4}
 BEHIND_LIMIT = 50
 PLAN_NAME = re.compile(r"^(\d{4}-\d{2}-\d{2}-|design-)")
 RED_AGE_DAYS = 2
+# a live worker that printed nothing for this long waits for input
+WAIT_MINUTES = 30
 
 
 def _git(root: Path, *args: str) -> str | None:
@@ -173,6 +175,7 @@ def plans(root: Path) -> list[dict]:
             "has_decisions_section": bool(_review.DECISIONS_HEADING.search(text)),
             "design_contract": dc.group(1).strip("`'\"") if dc else None,
             "waived": bool(_review.WAIVED.search(text)),
+            "open_tasks": len(_review.UNCHECKED.findall(text)),
             "age_days": int((time.time() - p.stat().st_mtime) // 86400),
         })
     return out
@@ -389,8 +392,9 @@ def findings(table: dict, stale_minutes: int) -> list[dict]:
                     "what": f"{q['who']} asks on {q['plan']}"
                             f"{' [' + q['branch'] + (', another host' if q.get('remote') else '') + ']' if q.get('branch') else ''}"
                             f"{' (' + q['issue'] + ')' if q.get('issue') else ''}: {q['question']}",
-                    "because": "a worker is waiting for a decision only the owner can take — relay it with its "
-                               "options now, write the answer back as a DECISION line"})
+                    "because": "a worker is waiting for a decision — decide it, or relay one that touches a "
+                               "product principle or is destructive to the owner with its options; write the "
+                               "answer back as a DECISION line"})
     for o in table["overlaps"]:
         out.append({"kind": "overlap", "severity": "high" if o["kind"] == "file" else "low",
                     "what": f"{o['a']} and {o['b']} both carry {o['kind']}(s): {', '.join(o['paths'][:5])}",
@@ -441,6 +445,33 @@ def findings(table: dict, stale_minutes: int) -> list[dict]:
                             f"{ELSEWHERE_DAYS} days, not shown as in flight",
                     "because": "a branch nobody has touched for weeks is residue, not work — tidy.py "
                                "prunes merged ones; unmerged ones need an owner or a delete"})
+    # a live worker quiet for WAIT_MINUTES waits for input — unless its phase
+    # is over (it reported so, or an execute worker's plan has no open task).
+    # Waiting on a question it routed (DECISION NEEDED, a blocked report) is
+    # the steward's turn; waiting on one it only asked on its screen reaches
+    # nobody (downstream: two questions sat six hours unanswered)
+    asked = {q.get("branch") for q in table.get("questions", [])}
+    for s in table.get("sessions", []):
+        quiet = s.get("minutes_since_output")
+        if not s.get("alive") or quiet is None or quiet < WAIT_MINUTES:
+            continue
+        rep = reported.get(s["branch"])
+        state = rep["state"] if rep else None
+        if state in ("planned", "review-pass", "done", "idle") or (s.get("phase") == "execute" and s.get("open_tasks") == 0):
+            continue
+        shown = f": {s['last_output'][-120:]}" if s.get("last_output") else ""
+        if s["branch"] in asked or state == "blocked":
+            out.append({"kind": "waiting-for-input", "severity": "medium",
+                        "what": f"{s['branch']} ({s.get('phase')}) waits for input for {quiet} min on its "
+                                f"{'open question' if s['branch'] in asked else 'blocked report'}",
+                        "because": "the question is routed — the steward decides and writes the answer back as a "
+                                   "DECISION line, or relays it to the owner"})
+        else:
+            out.append({"kind": "question-unrouted", "severity": "high",
+                        "what": f"{s['branch']} ({s.get('phase')}) waits for input for {quiet} min, and its plan "
+                                f"carries no DECISION NEEDED{shown}",
+                        "because": "a question on a worker's screen reaches nobody — have it write the question "
+                                   "into the plan as DECISION NEEDED and report blocked; the steward decides"})
     for rep in table["reports"]:
         if rep["state"] == "blocked" and rep["minutes_ago"] >= stale_minutes:
             out.append({"kind": "blocked", "severity": "high",
@@ -451,6 +482,18 @@ def findings(table: dict, stale_minutes: int) -> list[dict]:
 
 
 # --- assembly -------------------------------------------------------------------------
+
+def _with_open_tasks(sessions_: list[dict], wts: list[dict]) -> list[dict]:
+    """Each session with the open tasks of the plans in ITS worktree — None
+    when this host has no worktree for the branch (a remote worker)."""
+    paths = {w.get("branch"): w["path"] for w in wts if not w.get("missing")}
+    out = []
+    for s in sessions_:
+        wt = paths.get(s["branch"])
+        open_tasks = sum(p["open_tasks"] for p in plans(Path(wt))) if wt and Path(wt).is_dir() else None
+        out.append({**s, "open_tasks": open_tasks})
+    return out
+
 
 def build(root: Path, stale_minutes: int = 60, *, remote: bool = False) -> dict:
     fetch_ok = True
@@ -470,7 +513,7 @@ def build(root: Path, stale_minutes: int = 60, *, remote: bool = False) -> dict:
         "overlaps": overlaps(wts + elsewhere),
         "plans": plans_everywhere(root, wts),
         "questions": questions(root, wts, elsewhere),
-        "sessions": sessions(root),
+        "sessions": _with_open_tasks(sessions(root), wts),
         "reviews": reviews_today(root),
         "gates": red_gates(root),
         "lanes": lanes(root),

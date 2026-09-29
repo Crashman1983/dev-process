@@ -343,3 +343,61 @@ def test_a_workers_plan_without_issue_is_found_in_its_worktree(render, tmp_path)
     assert any(p["path"].endswith("2026-09-20-w1.md") and p["branch"] == "w1" for p in t["plans"])
     kinds = [(f["kind"], f["what"]) for f in t["findings"]]
     assert any(k == "plan-without-issue" and "on w1" in w for k, w in kinds), kinds
+
+
+# --- a worker waiting for input: routed or not ---
+
+def _load_tower(out: Path):
+    import importlib.util
+    sys.dont_write_bytecode = True
+    sys.path.insert(0, str(out / "scripts/process"))
+    spec = importlib.util.spec_from_file_location("tower_under_test", out / "scripts/process/tower.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _table(sessions, questions=(), reports=()):
+    return {"questions": list(questions), "overlaps": [], "plans": [], "gates": [], "worktrees": [],
+            "elsewhere": [], "reports": list(reports), "sessions": sessions}
+
+
+def _session(branch="7-work", phase="execute", quiet=45, alive=True, open_tasks=2, last="Which option, A or B?"):
+    return {"branch": branch, "phase": phase, "alive": alive, "minutes_since_output": quiet,
+            "open_tasks": open_tasks, "last_output": last}
+
+
+def _kinds(tower, table):
+    return [(f["kind"], f["severity"]) for f in tower.findings(table, 60)
+            if f["kind"] in ("question-unrouted", "waiting-for-input")]
+
+
+def test_a_quiet_worker_with_no_routed_question_is_unrouted(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    tower = _load_tower(out)
+    f = [x for x in tower.findings(_table([_session()]), 60) if x["kind"] == "question-unrouted"]
+    assert len(f) == 1 and f[0]["severity"] == "high" and "Which option, A or B?" in f[0]["what"]
+    assert "DECISION NEEDED" in f[0]["because"]
+
+
+def test_a_routed_question_is_waiting_for_the_steward(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    tower = _load_tower(out)
+    asked = [{"branch": "7-work", "plan": "p.md", "who": "w", "question": "A or B?", "date": "2026-09-29"}]
+    assert _kinds(tower, _table([_session()], questions=asked)) == [("waiting-for-input", "medium")]
+    blocked = [{"worker": "7-work", "state": "blocked", "minutes_ago": 5, "note": "A or B"}]
+    assert _kinds(tower, _table([_session()], reports=blocked)) == [("waiting-for-input", "medium")]
+
+
+def test_a_worker_whose_phase_is_over_or_that_is_busy_is_not_waiting(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    tower = _load_tower(out)
+    for state in ("planned", "review-pass", "done", "idle"):
+        rep = [{"worker": "7-work", "state": state, "minutes_ago": 40}]
+        assert _kinds(tower, _table([_session()], reports=rep)) == [], state
+    assert _kinds(tower, _table([_session(open_tasks=0)])) == []  # execute done: every task ticked
+    assert _kinds(tower, _table([_session(quiet=29)])) == []  # still printing
+    assert _kinds(tower, _table([_session(quiet=None)])) == []  # nothing to measure
+    assert _kinds(tower, _table([_session(alive=False)])) == []
+    assert _kinds(tower, _table([_session(phase="plan", open_tasks=0)])) == [("question-unrouted", "high")]
+

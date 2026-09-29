@@ -90,7 +90,9 @@ not listed here, the change that fixes it adds the class.
 - **Conflicts without markers:** modify/delete, rename/delete, a file where
   the other side has a directory.
 - **Environment:** locale (translated tool output), a shallow clone, another
-  version of git, make or the interpreter, a missing optional tool.
+  version of git, make or the interpreter, a missing optional tool — and the
+  conditions the change creates itself (`testing.md`,
+  "Test under the conditions the change creates").
 - **Text as rendered:** an example in a code block or comment, a placeholder,
   a mention in backticks — read as a reader sees it.
 

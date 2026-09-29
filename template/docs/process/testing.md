@@ -177,6 +177,22 @@ that cannot start apart from a runner that ran red.
 - Test code is code: mandatory rule 9 (written to be read) applies — a test
   nobody understands proves nothing when it fails.
 
+## Test under the conditions the change creates
+
+A test run in the author's shell tests the author's environment. A change
+that sets an environment variable, starts a subprocess, writes where a
+hook or the merge train later reads, or only runs on a push path is
+proven only by one run under the conditions it creates itself: the
+variables it sets present, the real entry point (the make target, the
+hook, the push, the train's worktree), not a direct call of the function.
+Downstream, a variable a gate set for its own run leaked into the test
+suite it started, and every test that passed in the author's shell failed
+under the hook.
+
+For gate, train, finish and hook code this run is required before
+`pushed` (`/execute`). The refuter attacks the same rule from the other
+side — the *environment* class of its catalogue (`refute.md`).
+
 ## Gates must survive a fresh checkout
 
 A project-level gate is trustworthy only if a fresh checkout can bootstrap and

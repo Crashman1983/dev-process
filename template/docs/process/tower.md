@@ -117,6 +117,16 @@ start under `nice` (policy `worker_nice`, default 10, 0 = off): the merge
 train's suite keeps its CPU while workers test, instead of a pause for
 every worker.
 
+A worker's decision partner is the steward: its start prompt says so, and
+names the live channel when the policy sets one (`decision_channel`). A
+question goes into the plan as `DECISION NEEDED` with a `blocked` report;
+the steward decides it, or brings one that touches a product principle or
+is destructive to the owner. The tower flags a live worker that printed
+nothing for 30 minutes while its phase is not over: `waiting-for-input`
+when it routed its question (an open `DECISION NEEDED`, a `blocked`
+report), `question-unrouted` when it did not — then the question sits on
+its screen, where nobody reads it.
+
 Phases chain themselves: `dispatch.py chain` (from the steward's tick)
 stops a `planned` plan session and queues `execute`; stops a `pushed`
 execute session and queues `review` once the branch's plan on origin has
