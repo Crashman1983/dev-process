@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 import sys
 
@@ -1155,7 +1156,7 @@ def test_another_repositorys_issue_is_not_closed_and_a_paired_new_plan_is_own(re
         _git(out, "worktree", "remove", "--force", str(wt))
 
 
-# --- a package branch of a larger issue: its work id is the issue its worker reports ---
+# --- a package branch of a larger issue: its issues are the ones dispatch placed on it ---
 
 def _package_branch(out, name, work):
     """A branch named after the epic, attested under its package's issue —
@@ -1180,36 +1181,97 @@ def _report(out, worker, issue=None, state="review-pass"):
                    cwd=out, check=True, capture_output=True)
 
 
+def _dispatched(out, issue, branch):
+    """What `dispatch start --issue <issue> --branch <branch>` records."""
+    subprocess.run([sys.executable, "-c", "import sys; from pathlib import Path; "
+                    "sys.path.insert(0, 'scripts/process'); import dispatch; "
+                    f"dispatch._remember_issue(Path('.'), {issue}, {branch!r})"],
+                   cwd=out, check=True, capture_output=True, env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
+
+
 def _candidate(out, name):
     return next(c for c in json.loads(_train(out, "plan", "--json").stdout)["candidates"] if c["branch"] == name)
 
 
-def test_a_package_branch_boards_on_the_issue_its_worker_reports(render, tmp_path):
+def test_a_package_branch_boards_on_the_issue_dispatch_placed_on_it(render, tmp_path):
     out = render(tmp_path, {"project_name": "d", "modules": {}})
     _repo(out)
     _package_branch(out, "70-p1-slice", "71")
-    # the name carries the epic's number only: without the issue, the package's pass is not its own
     _report(out, "70-p1-slice")
+    # the name carries the epic's number only: the package's pass is not its own
     c = _candidate(out, "70-p1-slice")
     assert not c["eligible"] and "no REVIEW pass for its own work" in c["reasons"][0], c
+    # a worker's own claim is not the record: the report names the issue, dispatch did not
     _report(out, "70-p1-slice", issue=71)
+    assert not _candidate(out, "70-p1-slice")["eligible"]
+    _dispatched(out, 71, "70-p1-slice")
     c = _candidate(out, "70-p1-slice")
     assert c["eligible"] and "worker report review-pass" in c["by"], c
-    # the latest report NAMING an issue counts: one without an issue changes nothing
-    _report(out, "70-p1-slice")
-    assert _candidate(out, "70-p1-slice")["eligible"]
 
 
-def test_a_reported_issue_opens_no_other_works_pass(render, tmp_path):
+def test_an_issue_on_another_branch_opens_no_pass(render, tmp_path):
     out = render(tmp_path, {"project_name": "d", "modules": {}})
     _repo(out)
     _package_branch(out, "70-p2-slice", "72")
-    # a report of another issue, or another worker's report, is no key to this pass
-    _report(out, "70-p2-slice", issue=73)
-    _report(out, "someone-else", issue=72)
+    _report(out, "70-p2-slice")
+    _dispatched(out, 72, "someone-else")
+    _dispatched(out, 73, "70-p2-slice")
     assert not _candidate(out, "70-p2-slice")["eligible"]
-    # the worker's latest report decides
-    _report(out, "70-p2-slice", issue=72)
-    assert _candidate(out, "70-p2-slice")["eligible"]
-    _report(out, "70-p2-slice", issue=73)
-    assert not _candidate(out, "70-p2-slice")["eligible"]
+
+
+def _base_plan(out, stem, issue):
+    p = out / ".process-work/plans"
+    p.mkdir(parents=True, exist_ok=True)
+    (p / f"{stem}.md").write_text(f"# {stem}\n\ntier: 2\nissue: #{issue}\n\n- [ ] do it\n\n## Decisions\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", f"plan {stem}")
+
+
+def _package_on_base_plan(out, name, work, stem, *, archive=False):
+    """The package's plan was written on main; the branch ticks (or archives)
+    it and attests work=<package issue> at its head."""
+    _git(out, "checkout", "-q", "-b", name, "main")
+    (out / "src").mkdir(exist_ok=True)
+    (out / f"src/{name}.py").write_text("x = 1\n")
+    plan = out / f".process-work/plans/{stem}.md"
+    plan.write_text(plan.read_text().replace("- [ ] do it", "- [x] do it"))
+    _git(out, "add", "-A")
+    if archive:
+        (out / ".process-work/plans/archive").mkdir(parents=True, exist_ok=True)
+        _git(out, "mv", str(plan), str(out / f".process-work/plans/archive/{stem}.md"))
+    _git(out, "commit", "-q", "-m", "work")
+    head = _git(out, "rev-parse", "HEAD").stdout.strip()
+    j = out / ".process-work/journal"
+    j.mkdir(parents=True, exist_ok=True)
+    (j / f"2026-09-21-{name}.md").write_text(_head_pass(out, work, head))
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "attest")
+    _git(out, "checkout", "-q", "main")
+
+
+def _merge_messages(out, branch):
+    train = _load_train(out)
+    wt, _b, merged, _d = train.build_train(out, "main", [branch], "t1", lambda _m: None)
+    try:
+        assert merged == [branch]
+        return (_git(wt, "log", "--format=%B%x00", "main..HEAD").stdout,
+                sorted(p.name for p in (wt / ".process-work/plans").glob("*.md")))
+    finally:
+        _git(out, "worktree", "remove", "--force", str(wt))
+
+
+@pytest.mark.parametrize("archive", [False, True])
+def test_the_merge_closes_the_issue_the_branch_boarded_on(render, tmp_path, archive):
+    # boarding, the branch's own plans and the issue its merge closes answer
+    # one question — the train boarded on #71 and closed nothing (refutation)
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _base_plan(out, "2026-09-20-p1", 71)
+    _package_on_base_plan(out, "70-p1-slice", "71", "2026-09-20-p1", archive=archive)
+    _report(out, "70-p1-slice")
+    _dispatched(out, 71, "70-p1-slice")
+    c = _candidate(out, "70-p1-slice")
+    assert c["eligible"] and not c.get("housekeeping"), c
+    messages, active = _merge_messages(out, "70-p1-slice")
+    assert "Closes #71" in messages and "#70" not in messages, messages
+    assert "2026-09-20-p1.md" not in active

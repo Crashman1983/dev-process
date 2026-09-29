@@ -129,31 +129,27 @@ def _branch_work_ids(branch: str) -> set[str]:
     return {branch, leaf} | ({m.group(1)} if m else set())
 
 
-def _reported_issues(root: Path) -> dict[str, str]:
-    """Worker -> the issue its latest report naming one names. A dispatched
-    worker reports under its branch's name; a package branch of a larger
-    issue (`<epic>-<package>-…`) carries its own issue only there — its name
-    leads with the epic's number (downstream: a correctly attested package
-    branch never boarded)."""
-    out: dict[str, str] = {}
-    for rec in sorted(_report.read_reports(root), key=lambda r: r.get("epoch", 0)):
-        issue, worker = rec.get("issue"), rec.get("worker")
-        if isinstance(issue, int) and not isinstance(issue, bool) and issue > 0 \
-                and isinstance(worker, str) and worker:
-            out[worker] = str(issue)
-    return out
-
-
-def _names_branch(branch: str, ids: set[str]) -> bool:
-    """Does a plan with these work ids belong to this branch? Its issue number
-    is the branch's, or its slug is in the branch name (or, long enough to
-    mean something, the other way round)."""
+def _branch_issues(root: Path, branch: str) -> set[str]:
+    """The issues a branch belongs to: the number its name leads with, and
+    every issue dispatch placed on it (`dispatch.issues_of`, the owner of
+    that map). Boarding, the plans counted as the branch's own and the
+    issues its merge closes all ask this one question (refutation: the
+    train boarded a package branch on its issue, then closed the epic's)."""
+    import dispatch as _dispatch  # lazily, as tower does
     leaf = branch.rsplit("/", 1)[-1]
     m = BRANCH_ISSUE.match(leaf)
+    return ({m.group(1)} if m else set()) | {str(i) for i in _dispatch.issues_of(root, branch)}
+
+
+def _names_branch(branch: str, ids: set[str], issues: set[str]) -> bool:
+    """Does a plan with these work ids belong to this branch? Its issue number
+    is one of the branch's (`_branch_issues`), or its slug is in the branch
+    name (or, long enough to mean something, the other way round)."""
+    leaf = branch.rsplit("/", 1)[-1]
     for i in ids:
         tail = i.rsplit("#", 1)[-1]
         if tail.isdigit():
-            if m and tail == m.group(1):
+            if tail in issues:
                 return True
         elif len(i) >= 3 and (i in leaf or (len(leaf) >= 8 and leaf in i)):
             return True
@@ -164,7 +160,6 @@ def candidates(root: Path, local: str, base: str) -> list[dict]:
     branches = [b.strip().lstrip("* ").strip() for b in _out(root, "branch", "--list", "--format=%(refname:short)").splitlines()]
     branches = [b for b in branches if b and b not in (local,) and not b.startswith("train/")]
     reports = {r["worker"]: r for r in _tower.latest_reports(root)}
-    reported = _reported_issues(root)
     passes_root = _journal_passes_tree(root, local)
     # the review gate's rule: a de-dated slug may act as a work id only when it
     # is unique across the archive — count them over main's archive and every
@@ -198,9 +193,10 @@ def candidates(root: Path, local: str, base: str) -> list[dict]:
         branch_passes = _journal_passes_branch(root, base, b)
         passes = passes_root + branch_passes
         touches_process = sorted(f for f in files if f.startswith(PROCESS_PATHS))
-        # the branch's name, and the issue its worker reports: a REVIEW line of
-        # any other work is not this branch's
-        own_ids = _branch_work_ids(b) | ({reported[b]} if b in reported else set())
+        # the branch's name and its issues: a REVIEW line of any other work
+        # is not this branch's
+        issues = _branch_issues(root, b)
+        own_ids = _branch_work_ids(b) | issues
         housekeeping: list[str] = []
         own_archived: list[str] = []
         for rel in archived:
@@ -210,7 +206,7 @@ def candidates(root: Path, local: str, base: str) -> list[dict]:
             tier = int(tier_m.group(1)) if tier_m else 0
             unique = dedated.get(_review.DATE_PREFIX.sub("", stem), 0) <= 1
             ids = _review._plan_work_ids(stem, text, include_dedated=unique)
-            if not (_names_branch(b, ids) or stem not in base_plan_stems):
+            if not (_names_branch(b, ids, issues) or stem not in base_plan_stems):
                 housekeeping.append(rel)  # another work's plan, only moved to the archive here
                 continue
             own_archived.append(rel)
@@ -859,7 +855,7 @@ def _settle_plans(wt: Path, base: str, branch: str, log) -> tuple[list[str], set
     for stem in stems:
         key = _review.DATE_PREFIX.sub("", stem)
         dedated[key] = dedated.get(key, 0) + 1
-    branch_issue = (_branch_work_ids(branch) - {branch, branch.rsplit("/", 1)[-1]})
+    branch_issue = _branch_issues(wt, branch)
     archived: list[str] = []
     issues: set[int] = set()
     for letter, source, rel in entries:
