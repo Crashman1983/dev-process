@@ -393,6 +393,7 @@ def test_a_worker_whose_phase_is_over_or_that_is_busy_is_not_waiting(render, tmp
     out = render(tmp_path, {"project_name": "d", "modules": {}})
     tower = _load_tower(out)
     assert _kinds(tower, _table([_session(phase_over=True)])) == []  # dispatch.phase_over decides
+    assert _kinds(tower, _table([_session(phase_over=None)])) == []  # cannot be told: no alarm on a guess
     assert _kinds(tower, _table([_session(quiet=29)])) == []  # still printing
     assert _kinds(tower, _table([_session(quiet=30)])) == [("question-unrouted", "high")]
     assert _kinds(tower, _table([_session(quiet=None)])) == []  # nothing to measure
@@ -409,13 +410,13 @@ def test_the_tower_asks_dispatch_whether_a_quiet_workers_phase_is_over(render, t
     monkeypatch.setattr(d, "records", lambda _root: [dict(rec)])
     monkeypatch.setattr(d, "last_output", lambda _rec: ("Which option?", 45))
     asked = []
-    monkeypatch.setattr(d, "phase_over", lambda _root, r, rep: asked.append((r["branch"], rep)) or True)
+    monkeypatch.setattr(d, "phase_over", lambda _root, r, rep, local=False: asked.append((r["branch"], rep, local)) or True)
     monkeypatch.setattr(tower._report, "read_reports", lambda _root: [
         {"worker": "7-work", "state": "planned", "epoch": 50},     # the plan session's word
         {"worker": "7-work", "state": "blocked", "epoch": 150}])  # this session's
     s = tower.sessions(out)[0]
     assert s["phase_over"] is True and s["report_state"] == "blocked"
-    assert asked == [("7-work", {"worker": "7-work", "state": "blocked", "epoch": 150})]
+    assert asked == [("7-work", {"worker": "7-work", "state": "blocked", "epoch": 150}, True)]  # local: no network
     monkeypatch.setattr(d, "last_output", lambda _rec: ("working", 5))  # busy: dispatch is not asked
     assert tower.sessions(out)[0]["phase_over"] is None and len(asked) == 1
 

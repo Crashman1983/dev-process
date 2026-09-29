@@ -1143,10 +1143,12 @@ _OPEN_TASK = re.compile(r"^\s*[-*] \[ \]", re.MULTILINE)
 _FENCE = re.compile(r"^(```|~~~).*?^\1[^\n]*$", re.MULTILINE | re.DOTALL)
 
 
-def _own_plans_on_origin(root: Path, branch: str) -> tuple[str, list[str]]:
-    """(origin's tip, the plans this branch added — active, archived or Spec
-    Kit tasks); another work's plan the branch only touched is not its own."""
-    tip = _remote_head(root, branch)
+def _own_plans_on_origin(root: Path, branch: str, local: bool = False) -> tuple[str, list[str]]:
+    """(origin's tip — or, with `local`, the local branch's — and the plans
+    this branch added: active, archived or Spec Kit tasks); another work's
+    plan the branch only touched is not its own."""
+    tip = (_out(root, "rev-parse", "--verify", "-q", f"refs/heads/{branch}") if local
+           else _remote_head(root, branch))
     if not tip:
         return "", []
     base = _integration_base(root, tip)
@@ -1173,12 +1175,13 @@ def _own_plans_on_origin(root: Path, branch: str) -> tuple[str, list[str]]:
 _ISSUE = re.compile(r"^\s*(?:[-*+]\s+)?[*_]*issue[*_]*\s*:\s*(\S+)", re.IGNORECASE | re.MULTILINE)
 
 
-def work_complete_on_origin(root: Path, branch: str) -> bool | None:
-    """Are the tasks of the branch's own plans all ticked at origin's tip?
-    `pushed` is reported at the FIRST push — the tasks tell when the work is
-    done. A task inside a fenced example does not count. None when the
-    branch added no plan to read."""
-    tip, plans = _own_plans_on_origin(root, branch)
+def work_complete_on_origin(root: Path, branch: str, local: bool = False) -> bool | None:
+    """Are the tasks of the branch's own plans all ticked at origin's tip
+    (with `local`: at the local branch — what the worker committed, no
+    network)? `pushed` is reported at the FIRST push — the tasks tell when
+    the work is done. A task inside a fenced example does not count. None
+    when the branch added no plan to read, or git cannot tell."""
+    tip, plans = _own_plans_on_origin(root, branch, local)
     if not plans:
         return None
     return not any(_OPEN_TASK.search(_FENCE.sub("", _out(root, "show", f"{tip}:{f}"))) for f in plans)
@@ -1209,22 +1212,30 @@ def session_report(rec: dict, reports: list[dict]) -> dict | None:
     started — an older one is the previous phase's word (a plan session's
     `planned` is not what its execute session said)."""
     started = int(rec.get("started") or 0)
-    mine = [r for r in reports if r.get("worker") == rec.get("branch") and int(r.get("epoch") or 0) >= started]
-    return max(mine, key=lambda r: int(r.get("epoch") or 0)) if mine else None
+    best = None
+    for r in reports:  # file order: of two reports in one second, the later line wins
+        if r.get("worker") == rec.get("branch") and int(r.get("epoch") or 0) >= started \
+                and (best is None or int(r.get("epoch") or 0) >= int(best.get("epoch") or 0)):
+            best = r
+    return best
 
 
-def phase_over(root: Path, rec: dict, rep: dict | None) -> bool:
+def phase_over(root: Path, rec: dict, rep: dict | None, *, local: bool = False) -> bool | None:
     """Has this session's phase ended? Its own final report says so — a plan
     `planned`, a review `review-pass` or `blocked` (it stops either way), any
     phase `done` or `idle` — or, for an execute session, `pushed` with every
-    task of the branch's own plans ticked on origin (`pushed` comes at the
-    first push). The one answer for chain and the tower."""
+    task of the branch's own plans ticked (on origin; with `local`, on the
+    local branch — no network). None when that cannot be told: an unknown is
+    no alarm and no verdict (refutation: an unreachable origin made a
+    finished worker a high finding)."""
     state, phase = (rep or {}).get("state"), rec.get("phase")
     if state in ("done", "idle"):
         return True
     if (phase, state) in (("plan", "planned"), ("review", "review-pass"), ("review", "blocked")):
         return True
-    return phase == "execute" and state == "pushed" and work_complete_on_origin(root, rec["branch"]) is True
+    if phase == "execute" and state == "pushed":
+        return work_complete_on_origin(root, rec["branch"], local)
+    return False
 
 
 class _ChainLock(_QueueLock):
