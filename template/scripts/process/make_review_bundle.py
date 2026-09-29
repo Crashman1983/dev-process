@@ -483,13 +483,30 @@ def _tier_warning(by_tier: list[str], tiers: dict[str, int | None]) -> str:
             "verdict that it was not.\n")
 
 
+def _shown(path: str) -> str:
+    """A path as a Markdown line can carry it: a control character (a newline
+    in a file name) is escaped, so the bullet stays one line."""
+    return "".join(c if c.isprintable() else repr(c)[1:-1] for c in path)
+
+
 def review_size(root: Path, base_ref: str) -> tuple[int, int]:
     """(files, changed lines) of the whole branch — process bookkeeping,
     lock files and binaries left out."""
     files = lines = 0
-    for ln in (_git(root, "diff", "--numstat", f"{base_ref}...HEAD") or "").splitlines():
-        parts = ln.split("\t")
-        if len(parts) < 3 or SIZE_IGNORED.search(parts[2]):
+    # -z: a quoted non-ASCII lock file escaped the filter. Each entry is
+    # "added\tdeleted\tpath"; a rename leaves the path empty and names the old
+    # and the new path in the next two fields.
+    out = _review_gate._git_bytes(root, "diff", "--numstat", "-z", f"{base_ref}...HEAD") or b""
+    fields = iter(out.decode(errors="surrogateescape").split("\0"))
+    for field in fields:
+        parts = field.split("\t", 2)
+        if len(parts) < 3:
+            continue
+        path = parts[2]
+        if not path:
+            next(fields, None)
+            path = next(fields, "")
+        if SIZE_IGNORED.search(path):
             continue
         files += 1
         if parts[0].isdigit() and parts[1].isdigit():
@@ -732,7 +749,7 @@ def _ui_evidence(root: Path, base_ref: str | None, plans: list[Path]) -> str:
         # to a path that does not exist
         entries = _review_gate.name_status(_review_gate._git_bytes(root, "diff", "--name-status", "-z",
                                                                    f"{base_ref}...HEAD")) or []
-        changed += [f"- {letter} {path}" for letter, _source, path in entries if IMAGE_RE.search(path)]
+        changed += [f"- {letter} {_shown(path)}" for letter, _source, path in entries if IMAGE_RE.search(path)]
     if changed:
         lines.append(f"Images added/modified/deleted by the diff ({len(changed)}):")
         lines += changed[:60]

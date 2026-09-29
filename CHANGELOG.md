@@ -1179,8 +1179,14 @@ aktualisieren, `v2.28.1`.
 - **Kann git nicht lesen, entscheidet nichts „leer“:**
   - `paths_in_flight` gibt `None` zurück, wenn es eine Basis gibt, der Diff aber scheitert. Das Review-Gate zählt dann jeden aktiven Plan als Teil des Pushs und sagt warum. Der Journal-Cache wird dann nicht genutzt. `finish` blockiert mit Begründung.
   - Der Zug lässt einen Branch nicht einsteigen, dessen Dateien, Pläne oder Plantexte git nicht lesen kann. Ein ungelesener Plan ist kein Tier-0-Plan.
-  - tower meldet einen Branch, dessen Dateien git nicht auflisten kann (`paths-unknown`), statt eine Überschneidung stillschweigend auszuschließen.
-- **Bekannt, nicht behoben:** `git worktree list --porcelain` liest Worktree-Pfade weiterhin zeilenweise (Pfade außerhalb des Repos, nicht Dateinamen darin).
+  - Der Zug lässt auch einen Branch nicht einsteigen, dessen Plan mit offener Frage git nicht lesen kann.
+  - tower meldet einen Branch, dessen Dateien git nicht auflisten kann (`paths-unknown`, im Text „files unknown"), statt eine Überschneidung stillschweigend auszuschließen.
+  - `dispatch._commit_touches` gibt bei einem git-Fehler `None` zurück; `new_code_on_origin` antwortet dann „nicht zu sagen" statt „nur Attestierung".
+  - Beim Archivieren gilt kein de-datierter Slug als eindeutig, wenn `ls-files` scheitert.
+- **Außerdem aus dem Refute:** `review_size` liest `--numstat -z` (eine Lock-Datei unter einem Umlaut-Pfad zählte mit); `leftover_conflicts` erkennt eine Umbenennung auch in der Worktree-Spalte; ein Zeilenumbruch im Bildnamen erscheint im Bündel maskiert.
+- **Bekannt, nicht behoben:**
+  - `git worktree list --porcelain` liest Worktree-Pfade weiterhin zeilenweise (Pfade außerhalb des Repos, nicht Dateinamen darin).
+  - `dispatch._own_plans_on_origin` und `tower._plan_paths_in_ref` lesen einen git-Fehler weiter als „keine Pläne". Folge: die nächste Phase läuft mit dem Standardmodell statt dem Modell ihres Tiers, und tower zeigt keine Pläne. Beides entscheidet keinen Merge.
 
 **v2.36.0 — Worker wissen, wen sie fragen; der tower sieht eine Frage, die niemand liest; Plannamen mit Umlaut.** Anlass war das Referenzprojekt: Eine Frage eines Workers an den Owner stand sechs Stunden unbeantwortet im Chat, und mehrere Fix-Runden kosteten je eine Schleife extra. Beide Pakete wurden refutiert, die Fix-Runden ebenso; jeder neue Fund ist mit einem Test belegt, der gegen die Vorfassung rot ist.
 - **Der Steward ist der Entscheidungspartner:** Der Startprompt von `dispatch` sagt das; den Owner fragt der Worker nur bei Produktgrundsätzen oder destruktiven Schritten. Eine Frage kommt als `DECISION NEEDED` in den Plan, mit `blocked`, nie in den Chat. Den Live-Kanal nennt die Policy (`decision_channel`).
