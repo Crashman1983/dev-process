@@ -129,6 +129,21 @@ def _branch_work_ids(branch: str) -> set[str]:
     return {branch, leaf} | ({m.group(1)} if m else set())
 
 
+def _reported_issues(root: Path) -> dict[str, str]:
+    """Worker -> the issue its latest report naming one names. A dispatched
+    worker reports under its branch's name; a package branch of a larger
+    issue (`<epic>-<package>-…`) carries its own issue only there — its name
+    leads with the epic's number (downstream: a correctly attested package
+    branch never boarded)."""
+    out: dict[str, str] = {}
+    for rec in sorted(_report.read_reports(root), key=lambda r: r.get("epoch", 0)):
+        issue, worker = rec.get("issue"), rec.get("worker")
+        if isinstance(issue, int) and not isinstance(issue, bool) and issue > 0 \
+                and isinstance(worker, str) and worker:
+            out[worker] = str(issue)
+    return out
+
+
 def _names_branch(branch: str, ids: set[str]) -> bool:
     """Does a plan with these work ids belong to this branch? Its issue number
     is the branch's, or its slug is in the branch name (or, long enough to
@@ -149,6 +164,7 @@ def candidates(root: Path, local: str, base: str) -> list[dict]:
     branches = [b.strip().lstrip("* ").strip() for b in _out(root, "branch", "--list", "--format=%(refname:short)").splitlines()]
     branches = [b for b in branches if b and b not in (local,) and not b.startswith("train/")]
     reports = {r["worker"]: r for r in _tower.latest_reports(root)}
+    reported = _reported_issues(root)
     passes_root = _journal_passes_tree(root, local)
     # the review gate's rule: a de-dated slug may act as a work id only when it
     # is unique across the archive — count them over main's archive and every
@@ -182,7 +198,9 @@ def candidates(root: Path, local: str, base: str) -> list[dict]:
         branch_passes = _journal_passes_branch(root, base, b)
         passes = passes_root + branch_passes
         touches_process = sorted(f for f in files if f.startswith(PROCESS_PATHS))
-        own_ids = _branch_work_ids(b)
+        # the branch's name, and the issue its worker reports: a REVIEW line of
+        # any other work is not this branch's
+        own_ids = _branch_work_ids(b) | ({reported[b]} if b in reported else set())
         housekeeping: list[str] = []
         own_archived: list[str] = []
         for rel in archived:
