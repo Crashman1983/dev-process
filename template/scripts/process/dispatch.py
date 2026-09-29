@@ -326,9 +326,12 @@ def forget_branch(root: Path, branch: str) -> None:
     them), and a dead record from before a re-dispatch does not bring the
     merged issue back to its abandoned branch (refutation). A live worker's
     record stays, and so does one whose liveness cannot be asked here (tmux
-    unknown, a worker on another host); `stop` owns them. Known limit: a branch merged outside the train keeps its
-    entries until its issue is dispatched again — the map outlives `stop` on
-    purpose, so the next phase finds the branch."""
+    unknown, a worker on another host); `stop` owns them. Known limits: a
+    branch merged outside the train keeps its entries until its issue is
+    dispatched again — the map outlives `stop` on purpose, so the next phase
+    finds the branch; and a second attempt still running on another branch
+    for the merged issue is placed nowhere once the issue is marked done —
+    reading the map asks no worker's liveness."""
     done = issues_of(root, branch)
     m = _issue_map(root)
     # merged: an empty branch marks the issue done, so a record kept for a
