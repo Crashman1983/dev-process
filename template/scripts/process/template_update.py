@@ -167,10 +167,11 @@ def write_deltas(old: Path, new: Path, owned: list[str], out_dir: Path,
 
 def restore_owned(root: Path, owned: list[str]) -> list[str]:
     """Put every owned tracked file back to HEAD; returns what was restored."""
-    ls = subprocess.run(["git", "-C", str(root), "ls-files"], capture_output=True,
-                        text=True)
+    # -z: a quoted non-ASCII name matched no owned pattern and was not restored,
+    # so the update overwrote a file the project owns
+    ls = subprocess.run(["git", "-C", str(root), "ls-files", "-z"], capture_output=True)
     restored: list[str] = []
-    for rel in ls.stdout.splitlines():
+    for rel in (n for n in ls.stdout.decode(errors="surrogateescape").split("\0") if n):
         if is_owned(rel, owned):
             subprocess.run(["git", "-C", str(root), "checkout", "HEAD", "--", rel],
                            capture_output=True)
@@ -179,11 +180,18 @@ def restore_owned(root: Path, owned: list[str]) -> list[str]:
 
 
 def leftover_conflicts(root: Path, owned: list[str]) -> list[str]:
-    st = subprocess.run(["git", "-C", str(root), "status", "--porcelain"],
-                        capture_output=True, text=True)
+    # -z: a quoted name named no file, and its conflict markers went unseen.
+    # Entries are "XY path"; a rename or copy is followed by its old name.
+    st = subprocess.run(["git", "-C", str(root), "status", "--porcelain", "-z"],
+                        capture_output=True)
+    entries = iter(st.stdout.decode(errors="surrogateescape").split("\0"))
     hits: list[str] = []
-    for line in st.stdout.splitlines():
-        rel = line[3:].strip()
+    for entry in entries:
+        if len(entry) < 4:
+            continue
+        rel = entry[3:]
+        if entry[0] in "RC":
+            next(entries, None)  # the old name
         p = root / rel
         if p.is_file() and not is_owned(rel, owned):
             try:

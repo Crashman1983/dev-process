@@ -1166,6 +1166,22 @@ ein Wächter-Test gegen doppelte Klammern ohne Leerzeichen in Python-Vorlagen.
 Wer v2.27.1 oder v2.28.0 installiert hat und am Push scheitert: auf v2.28.1
 aktualisieren, `v2.28.1`.
 
+**v2.37.0 — Jedes Prozess-Werkzeug liest Pfadnamen mit `-z`; eine Liste, die git nicht liefern kann, ist keine leere Liste.** Anlass war das Referenzprojekt: Ohne `-z` setzt git einen Namen mit Umlaut, Zeilenumbruch oder Tab in Anführungszeichen, und der zitierte Name trifft keine Datei. Der Zug las so einen archivierten Tier-2-Plan unter dem zitierten Namen; `git show` lieferte nichts, das Tier las sich als 0, und der Branch stieg ohne Review ein. Jeder Fund ist mit einem Test belegt, der gegen die Vorfassung rot ist.
+- **Ein Owner für Namen:** `check_review._names` (Namenslisten) und neu `check_review.name_status` (`--name-status -z`, mit Quelle bei Umbenennung und Kopie). `_renames`, der Zug, das Review-Bündel und `dispatch` lesen `--name-status` darüber, statt die Felder selbst zu zerlegen.
+- **Umgestellt auf `-z`:**
+  - der Zug: archivierte Pläne, Pläne der Basis, Dateien des Branches, offene Fragen, Journal-Leser, `ls-files` beim Archivieren;
+  - tower: die aktiven Pläne und Specs eines Refs;
+  - das Review-Bündel: geänderte Bilder;
+  - `dispatch`: die Dateien eines Commits und die eigenen Pläne eines Branches;
+  - Digest: Testdateien und Screenshots;
+  - `check_fix_streak`, das KPI-Cockpit (`telemetry`);
+  - `template_update`: das Zurücksetzen eigener Dateien und die Suche nach Konfliktmarkern. Vorher überschrieb ein Update eine eigene Datei mit Umlaut im Namen, und Konfliktmarker in so einer Datei blieben unbemerkt.
+- **Kann git nicht lesen, entscheidet nichts „leer“:**
+  - `paths_in_flight` gibt `None` zurück, wenn es eine Basis gibt, der Diff aber scheitert. Das Review-Gate zählt dann jeden aktiven Plan als Teil des Pushs und sagt warum. Der Journal-Cache wird dann nicht genutzt. `finish` blockiert mit Begründung.
+  - Der Zug lässt einen Branch nicht einsteigen, dessen Dateien, Pläne oder Plantexte git nicht lesen kann. Ein ungelesener Plan ist kein Tier-0-Plan.
+  - tower meldet einen Branch, dessen Dateien git nicht auflisten kann (`paths-unknown`), statt eine Überschneidung stillschweigend auszuschließen.
+- **Bekannt, nicht behoben:** `git worktree list --porcelain` liest Worktree-Pfade weiterhin zeilenweise (Pfade außerhalb des Repos, nicht Dateinamen darin).
+
 **v2.36.0 — Worker wissen, wen sie fragen; der tower sieht eine Frage, die niemand liest; Plannamen mit Umlaut.** Anlass war das Referenzprojekt: Eine Frage eines Workers an den Owner stand sechs Stunden unbeantwortet im Chat, und mehrere Fix-Runden kosteten je eine Schleife extra. Beide Pakete wurden refutiert, die Fix-Runden ebenso; jeder neue Fund ist mit einem Test belegt, der gegen die Vorfassung rot ist.
 - **Der Steward ist der Entscheidungspartner:** Der Startprompt von `dispatch` sagt das; den Owner fragt der Worker nur bei Produktgrundsätzen oder destruktiven Schritten. Eine Frage kommt als `DECISION NEEDED` in den Plan, mit `blocked`, nie in den Chat. Den Live-Kanal nennt die Policy (`decision_channel`).
 - **`/execute`, vier Pflichten vor `pushed`:**

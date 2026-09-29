@@ -1089,9 +1089,12 @@ def drain(root: Path) -> int:
 
 
 def _commit_touches(root: Path, commit: str) -> list[str]:
-    """The files a commit changes — a merge by what it adds of its own (`--cc`)."""
-    out = _out(root, "diff-tree", "--no-commit-id", "--name-only", "-r", "--root", "--cc", commit)
-    return [f for f in out.splitlines() if f]
+    """The files a commit changes — a merge by what it adds of its own (`--cc`).
+    `-z` through the owner of names (`check_review._names`): git quotes a
+    non-ASCII name otherwise, and the file matches nothing it is compared to."""
+    import check_review as _review  # noqa: PLC0415  (lazily, as tower imports dispatch)
+    return sorted(_review._names(_review._git_bytes(
+        root, "diff-tree", "-z", "--no-commit-id", "--name-only", "-r", "--root", "--cc", commit)) or ())
 
 
 _REVIEW_ADDED = re.compile(r"^\+\s*(?:[-*+]\s+)?REVIEW\s", re.MULTILINE)
@@ -1160,16 +1163,19 @@ def _own_plans_on_origin(root: Path, branch: str, local: bool = False) -> tuple[
     # added by the branch, git's rename detection on: another work's plan the
     # branch archived or moved is not its own (refutation); a rename pairing
     # an old plan with a new one for other issues is a new plan
-    status = _out(root, "diff", "--name-status", "-M", f"{base}...{tip}").splitlines()
+    # -z through the owner (`check_review.name_status`): a plan with a
+    # non-ASCII name came back quoted and was never the branch's
+    import check_review as _review  # noqa: PLC0415
+    status = _review.name_status(_review._git_bytes(root, "diff", "--name-status", "-M", "-z",
+                                                    f"{base}...{tip}")) or []
     added = []
-    for line in status:
-        parts = line.split("\t")
-        if parts[0] == "A":
-            added.append(parts[1])
-        elif parts[0].startswith("R") and len(parts) == 3:
-            before, after = _out(root, "show", f"{base}:{parts[1]}"), _out(root, "show", f"{tip}:{parts[2]}")
+    for letter, source, path in status:
+        if letter == "A":
+            added.append(path)
+        elif letter == "R":
+            before, after = _out(root, "show", f"{base}:{source}"), _out(root, "show", f"{tip}:{path}")
             if set(_ISSUE.findall(before)) != set(_ISSUE.findall(after)):
-                added.append(parts[2])
+                added.append(path)
     plans = [f for f in added if (f.startswith(".process-work/plans/") and "/archive/" not in f
                                   and f.endswith(".md")) or re.fullmatch(r"specs/[^/]+/tasks\.md", f)]
     return tip, plans

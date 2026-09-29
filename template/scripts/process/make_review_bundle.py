@@ -728,11 +728,11 @@ def _ui_evidence(root: Path, base_ref: str | None, plans: list[Path]) -> str:
                 break
     changed: list[str] = []
     if base_ref:
-        names = _git(root, "diff", "--name-status", f"{base_ref}...HEAD") or ""
-        for ln in names.splitlines():
-            parts = ln.split("\t")
-            if len(parts) >= 2 and IMAGE_RE.search(parts[-1]):
-                changed.append(f"- {parts[0][0]} {parts[-1]}")
+        # -z through the owner: a quoted non-ASCII name sends the reviewer
+        # to a path that does not exist
+        entries = _review_gate.name_status(_review_gate._git_bytes(root, "diff", "--name-status", "-z",
+                                                                   f"{base_ref}...HEAD")) or []
+        changed += [f"- {letter} {path}" for letter, _source, path in entries if IMAGE_RE.search(path)]
     if changed:
         lines.append(f"Images added/modified/deleted by the diff ({len(changed)}):")
         lines += changed[:60]

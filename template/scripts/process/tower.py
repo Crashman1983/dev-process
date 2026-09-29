@@ -112,7 +112,10 @@ def describe_worktree(wt: dict, ref: str | None) -> dict:
         if counts:
             behind, ahead = (counts.split() + ["0", "0"])[:2]
             d["ahead"], d["behind"] = int(ahead), int(behind)
-    d["in_flight"] = sorted(_review.paths_in_flight(path))
+    in_flight = _review.paths_in_flight(path)
+    d["in_flight"] = sorted(in_flight or ())
+    if in_flight is None:
+        d["in_flight_unknown"] = True  # git failed: an overlap here cannot be ruled out
     status = _git(path, "status", "--porcelain")
     d["dirty"] = len([ln for ln in (status or "").splitlines() if ln.strip()])
     last = _git(path, "log", "-1", "--format=%ct")
@@ -210,7 +213,10 @@ def _questions_in(text: str, plan: str, branch: str | None, issue: str | None) -
 
 
 def _plan_paths_in_ref(root: Path, ref: str) -> list[str]:
-    names = (_git(root, "ls-tree", "-r", "--name-only", ref, "--", PLANS_ACTIVE, SPECS_DIR) or "").splitlines()
+    # -z: a non-ASCII plan name comes back quoted otherwise, and the plan
+    # stays unseen (downstream refutation)
+    names = sorted(_review._names(_review._git_bytes(
+        root, "ls-tree", "-r", "-z", "--name-only", ref, "--", PLANS_ACTIVE, SPECS_DIR)) or ())
     return [n for n in names if (n.startswith(PLANS_ACTIVE + "/") and PLAN_NAME.match(Path(n).name))
             or (n.startswith(SPECS_DIR + "/") and Path(n).name == "plan.md")]
 
@@ -385,10 +391,10 @@ def remote_branches(root: Path, ref: str | None, local_branches: set[str],
             continue
         # -z, as paths_in_flight reads the local worktrees: a quoted remote
         # name never meets its local twin (refutation: the overlap vanished)
-        files = _review._names(_review._git_bytes(root, "diff", "--name-only", "-z", f"{ref}...{full}")) or set()
+        files = _review._names(_review._git_bytes(root, "diff", "--name-only", "-z", f"{ref}...{full}"))
         out.append({"branch": b, "remote": True, "ahead": int(ahead), "behind": int(behind),
-                    "in_flight": sorted(files), "dirty": 0,
-                    "minutes_since_commit": minutes})
+                    "in_flight": sorted(files or ()), "dirty": 0,
+                    "minutes_since_commit": minutes, **({"in_flight_unknown": True} if files is None else {})})
     return out, old
 
 
@@ -444,6 +450,12 @@ def findings(table: dict, stale_minutes: int) -> list[dict]:
                                 f"{'no report' if rep is None else 'last report ' + str(rep['minutes_ago']) + ' min ago (' + rep['state'] + ')'}",
                         "because": "a worker that neither commits nor reports is idle, waiting on a lane, "
                                    "or looping — ask, reassign, or stop it"})
+        if wt.get("in_flight_unknown"):
+            out.append({"kind": "paths-unknown", "severity": "medium",
+                        "what": f"{wt['branch']}{' (another host)' if wt.get('remote') else ''}: git could not "
+                                f"list the files it carries",
+                        "because": "an overlap with this branch cannot be ruled out — repair the clone "
+                                   "(`git fsck`, fetch) before it rides a train"})
         if wt.get("behind", 0) >= BEHIND_LIMIT:
             out.append({"kind": "far-behind", "severity": "low",
                         "what": f"{wt['branch']} is {wt['behind']} commits behind the integration branch",

@@ -175,12 +175,14 @@ def _test_counts(root: Path, ref: str) -> tuple[int, int] | None:
     """(unit/integration files, e2e files) among tracked test files at ref.
     Split by path: anything under a directory containing 'e2e' is the
     expensive tip; everything else is base/middle."""
-    proc = subprocess.run(["git", "ls-tree", "-r", "--name-only", ref],
-                          capture_output=True, text=True, cwd=str(root))
+    # -z: a quoted non-ASCII name still counts once, but `-z` is how every
+    # process tool reads names (one decoding, `_names` in check_review)
+    proc = subprocess.run(["git", "ls-tree", "-r", "-z", "--name-only", ref],
+                          capture_output=True, cwd=str(root))
     if proc.returncode != 0:
         return None
     unit = e2e = 0
-    for f in proc.stdout.splitlines():
+    for f in proc.stdout.decode(errors="surrogateescape").split("\0"):
         if TEST_FILE.search(f):
             if "e2e" in f.lower():
                 e2e += 1
@@ -328,17 +330,23 @@ def section_ui_evidence(root: Path, days: int) -> list[str]:
     under .process-work/reviews/<slug>/ first, pixel baselines after. Paths,
     not pictures: a digest cannot carry pixels, but it can say exactly what
     to open."""
-    proc = subprocess.run(["git", "-C", str(root), "log", f"--since={days} days ago",
+    # -z: without it a screenshot under a non-ASCII path is printed quoted,
+    # and the owner opens a path that does not exist
+    proc = subprocess.run(["git", "-C", str(root), "log", "-z", f"--since={days} days ago",
                            "--name-status", "--format=", "--diff-filter=AM", "--",
                            "*.png", "*.jpg", "*.jpeg", "*.webp", "*.gif"],
-                          capture_output=True, text=True)
+                          capture_output=True)
     if proc.returncode != 0:
         return ["(no git history to read screenshots from)"]
     seen: dict[str, str] = {}
-    for ln in proc.stdout.splitlines():
-        parts = ln.split("\t")
-        if len(parts) >= 2 and IMAGE_RE.search(parts[-1]):
-            seen.setdefault(parts[-1], parts[0][0])
+    fields = iter(proc.stdout.decode(errors="surrogateescape").split("\0"))
+    for letter in fields:
+        letter = letter.lstrip("\n")  # git may separate commits by an empty line
+        if not letter:
+            continue
+        path = next(fields, "")
+        if IMAGE_RE.search(path):
+            seen.setdefault(path, letter[0])
     if not seen:
         return [f"(no screenshot added or changed in the last {days} days — for "
                 f"merged UI stories that is itself worth a question: DoD D8 asks "
