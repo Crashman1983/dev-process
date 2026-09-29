@@ -270,14 +270,21 @@ def _remember_issue(root: Path, issue: int, branch: str) -> None:
     _issues_path(root).write_text(json.dumps(m, indent=2), encoding="utf-8")
 
 
+def _record_issue(rec: dict) -> int | None:
+    """The issue a record names — a positive int, nothing else (a boolean,
+    a float, a list are no issue)."""
+    issue = rec.get("issue")
+    return issue if type(issue) is int and issue > 0 else None
+
+
 def _placed(root: Path) -> dict[int, str]:
     """issue -> the branch dispatch placed it on: the issue map first (it
     outlives stop, and a re-dispatch re-points it), then the first dispatch
     record naming the issue. One answer for find_branch and issues_of."""
     placed: dict[int, str] = {}
     for rec in _record_files(root):
-        issue = rec.get("issue")
-        if isinstance(issue, int) and not isinstance(issue, bool) and issue > 0:
+        issue = _record_issue(rec)
+        if issue is not None:
             placed.setdefault(issue, rec["branch"])
     for k, v in _issue_map(root).items():
         if k.isdigit() and int(k) > 0 and v:
@@ -313,8 +320,8 @@ def forget_branch(root: Path, branch: str) -> None:
     (refutation: a reused name inherited old issues, and its merge closed
     them), and a dead record from before a re-dispatch does not bring the
     merged issue back to its abandoned branch (refutation). A live worker's
-    record stays, and so does one whose liveness cannot be asked; `stop`
-    owns them. Known limit: a branch merged outside the train keeps its
+    record stays, and so does one whose liveness cannot be asked here (tmux
+    unknown, a worker on another host); `stop` owns them. Known limit: a branch merged outside the train keeps its
     entries until its issue is dispatched again — the map outlives `stop` on
     purpose, so the next phase finds the branch."""
     done = issues_of(root, branch)
@@ -325,7 +332,8 @@ def forget_branch(root: Path, branch: str) -> None:
     for rec in records(root):
         if rec["alive"] or rec.get("state") == "unknown":
             continue
-        if rec["branch"] == branch or rec.get("issue") in done:
+        own = rec["branch"] == branch
+        if own or (rec.get("state") != "remote" and _record_issue(rec) in done):
             try:
                 _record_path(root, rec["branch"]).unlink()
             except OSError:
