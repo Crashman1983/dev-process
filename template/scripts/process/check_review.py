@@ -835,16 +835,16 @@ def paths_in_flight(root: Path) -> set[str]:
     blocked an unrelated branch). Untracked, staged and modified files are
     deliberately NOT in flight: a push transports commits, and an uncommitted
     plan draft travels with nothing. `--no-optional-locks`: a gate must never
-    take `index.lock` out from under a concurrent commit."""
+    take `index.lock` out from under a concurrent commit. `-z`, read by
+    `_names`: git quotes a non-ASCII name without it, the quoted name matches
+    no plan, and the plan read as somebody else's — a Tier 2 plan finished
+    without a review (downstream refutation)."""
     base = merge_base(root)
     if base is None:
         return set()
-    out = _git_bytes(root, "--no-optional-locks", "diff", "--name-only",
-                     f"{base}...HEAD")
-    if out is None:
-        return set()
-    return {line.strip() for line in out.decode(errors="replace").splitlines()
-            if line.strip()}
+    names = _names(_git_bytes(root, "--no-optional-locks", "diff", "--name-only", "-z",
+                              f"{base}...HEAD"))
+    return names if names is not None else set()
 
 
 BOOKKEEPING = ".process-work/"
