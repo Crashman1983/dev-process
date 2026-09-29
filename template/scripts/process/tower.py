@@ -175,7 +175,6 @@ def plans(root: Path) -> list[dict]:
             "has_decisions_section": bool(_review.DECISIONS_HEADING.search(text)),
             "design_contract": dc.group(1).strip("`'\"") if dc else None,
             "waived": bool(_review.WAIVED.search(text)),
-            "open_tasks": len(_review.UNCHECKED.findall(text)),
             "age_days": int((time.time() - p.stat().st_mtime) // 86400),
         })
     return out
@@ -260,8 +259,10 @@ def sessions(root: Path) -> list[dict]:
     except ImportError:
         return []
     out = []
+    reports = _report.read_reports(root)
     for rec in _dispatch.records(root):
         last, since = _dispatch.last_output(rec)
+        rep = _dispatch.session_report(rec, reports) if hasattr(_dispatch, "session_report") else None
         sid = _dispatch.handover_session(rec) if hasattr(_dispatch, "handover_session") else ""
         where = (f"another host (reports via origin{', session ' + sid if sid else ''})" if rec.get("remote") else
                  f"tmux {rec.get('tmux_session')}:{rec.get('tmux_name')}" if rec.get("tmux_window")
@@ -269,7 +270,13 @@ def sessions(root: Path) -> list[dict]:
         out.append({"branch": rec["branch"], "phase": rec.get("phase"), "issue": rec.get("issue"),
                     "model": rec.get("model"), "alive": rec["alive"], "state": rec["state"], "where": where,
                     "minutes_since_start": int((time.time() - int(rec.get("started") or time.time())) // 60),
-                    "last_output": last[-200:], "minutes_since_output": since})
+                    "last_output": last[-200:], "minutes_since_output": since,
+                    # the session's own word and whether its phase is over — dispatch's
+                    # answer, the one chain acts on; asked only of a quiet live worker
+                    "report_state": (rep or {}).get("state"),
+                    "phase_over": (_dispatch.phase_over(root, rec, rep)
+                                   if rec["alive"] and since is not None and since >= WAIT_MINUTES
+                                   and hasattr(_dispatch, "phase_over") else None)})
     return out
 
 
@@ -448,19 +455,17 @@ def findings(table: dict, stale_minutes: int) -> list[dict]:
                     "because": "a branch nobody has touched for weeks is residue, not work — tidy.py "
                                "prunes merged ones; unmerged ones need an owner or a delete"})
     # a live worker quiet for WAIT_MINUTES waits for input — unless its phase
-    # is over (it reported so, or an execute worker's plan has no open task).
-    # Waiting on a question it routed (DECISION NEEDED, a blocked report) is
-    # the steward's turn; waiting on one it only asked on its screen reaches
-    # nobody (downstream: two questions sat six hours unanswered)
+    # is over (`dispatch.phase_over`, on the session's own report). Waiting on
+    # a question it routed (DECISION NEEDED, its own blocked report) is the
+    # steward's turn; waiting on one it only asked on its screen reaches
+    # nobody (downstream: two questions sat six hours unanswered). A worker
+    # on another host shows no screen here: its reports speak for it
     asked = {q.get("branch") for q in table.get("questions", [])}
     for s in table.get("sessions", []):
         quiet = s.get("minutes_since_output")
-        if not s.get("alive") or quiet is None or quiet < WAIT_MINUTES:
+        if not s.get("alive") or quiet is None or quiet < WAIT_MINUTES or s.get("phase_over"):
             continue
-        rep = reported.get(s["branch"])
-        state = rep["state"] if rep else None
-        if state in ("planned", "review-pass", "done", "idle") or (s.get("phase") == "execute" and s.get("open_tasks") == 0):
-            continue
+        state = s.get("report_state")
         shown = f": {s['last_output'][-120:]}" if s.get("last_output") else ""
         if s["branch"] in asked or state == "blocked":
             out.append({"kind": "waiting-for-input", "severity": "medium",
@@ -485,18 +490,6 @@ def findings(table: dict, stale_minutes: int) -> list[dict]:
 
 # --- assembly -------------------------------------------------------------------------
 
-def _with_open_tasks(sessions_: list[dict], wts: list[dict]) -> list[dict]:
-    """Each session with the open tasks of the plans in ITS worktree — None
-    when this host has no worktree for the branch (a remote worker)."""
-    paths = {w.get("branch"): w["path"] for w in wts if not w.get("missing")}
-    out = []
-    for s in sessions_:
-        wt = paths.get(s["branch"])
-        open_tasks = sum(p["open_tasks"] for p in plans(Path(wt))) if wt and Path(wt).is_dir() else None
-        out.append({**s, "open_tasks": open_tasks})
-    return out
-
-
 def build(root: Path, stale_minutes: int = 60, *, remote: bool = False) -> dict:
     fetch_ok = True
     if remote:
@@ -515,7 +508,7 @@ def build(root: Path, stale_minutes: int = 60, *, remote: bool = False) -> dict:
         "overlaps": overlaps(wts + elsewhere),
         "plans": plans_everywhere(root, wts),
         "questions": questions(root, wts, elsewhere),
-        "sessions": _with_open_tasks(sessions(root), wts),
+        "sessions": sessions(root),
         "reviews": reviews_today(root),
         "gates": red_gates(root),
         "lanes": lanes(root),

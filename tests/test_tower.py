@@ -362,10 +362,10 @@ def _table(sessions, questions=(), reports=()):
             "elsewhere": [], "reports": list(reports), "sessions": sessions}
 
 
-def _session(branch="7-work", phase="execute", quiet=45, alive=True, open_tasks=2, last="Which option, A or B?"):
+def _session(branch="7-work", phase="execute", quiet=45, alive=True, phase_over=False, report_state=None,
+             last="Which option, A or B?"):
     return {"branch": branch, "phase": phase, "alive": alive, "minutes_since_output": quiet,
-            "open_tasks": open_tasks, "last_output": last}
-
+            "phase_over": phase_over, "report_state": report_state, "last_output": last}
 
 def _kinds(tower, table):
     return [(f["kind"], f["severity"]) for f in tower.findings(table, 60)
@@ -385,22 +385,39 @@ def test_a_routed_question_is_waiting_for_the_steward(render, tmp_path):
     tower = _load_tower(out)
     asked = [{"branch": "7-work", "plan": "p.md", "who": "w", "question": "A or B?", "date": "2026-09-29"}]
     assert _kinds(tower, _table([_session()], questions=asked)) == [("waiting-for-input", "medium")]
-    blocked = [{"worker": "7-work", "state": "blocked", "minutes_ago": 5, "note": "A or B"}]
-    assert _kinds(tower, _table([_session()], reports=blocked)) == [("waiting-for-input", "medium")]
+    # its OWN blocked report routes it (dispatch.session_report: since the session started)
+    assert _kinds(tower, _table([_session(report_state="blocked")])) == [("waiting-for-input", "medium")]
 
 
 def test_a_worker_whose_phase_is_over_or_that_is_busy_is_not_waiting(render, tmp_path):
     out = render(tmp_path, {"project_name": "d", "modules": {}})
     tower = _load_tower(out)
-    for state in ("planned", "review-pass", "done", "idle"):
-        rep = [{"worker": "7-work", "state": state, "minutes_ago": 40}]
-        assert _kinds(tower, _table([_session()], reports=rep)) == [], state
-    assert _kinds(tower, _table([_session(open_tasks=0)])) == []  # execute done: every task ticked
+    assert _kinds(tower, _table([_session(phase_over=True)])) == []  # dispatch.phase_over decides
     assert _kinds(tower, _table([_session(quiet=29)])) == []  # still printing
+    assert _kinds(tower, _table([_session(quiet=30)])) == [("question-unrouted", "high")]
     assert _kinds(tower, _table([_session(quiet=None)])) == []  # nothing to measure
-    assert _kinds(tower, _table([_session(alive=False)])) == []
-    assert _kinds(tower, _table([_session(phase="plan", open_tasks=0)])) == [("question-unrouted", "high")]
+    assert _kinds(tower, _table([_session(alive=False)])) == []  # gone, or on another host
+    # a report of the previous phase is not this session's: report_state stays None
+    assert _kinds(tower, _table([_session(report_state=None)])) == [("question-unrouted", "high")]
 
+
+def test_the_tower_asks_dispatch_whether_a_quiet_workers_phase_is_over(render, tmp_path, monkeypatch):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    tower = _load_tower(out)
+    import dispatch as d
+    rec = {"branch": "7-work", "phase": "execute", "alive": True, "state": "live", "started": 100}
+    monkeypatch.setattr(d, "records", lambda _root: [dict(rec)])
+    monkeypatch.setattr(d, "last_output", lambda _rec: ("Which option?", 45))
+    asked = []
+    monkeypatch.setattr(d, "phase_over", lambda _root, r, rep: asked.append((r["branch"], rep)) or True)
+    monkeypatch.setattr(tower._report, "read_reports", lambda _root: [
+        {"worker": "7-work", "state": "planned", "epoch": 50},     # the plan session's word
+        {"worker": "7-work", "state": "blocked", "epoch": 150}])  # this session's
+    s = tower.sessions(out)[0]
+    assert s["phase_over"] is True and s["report_state"] == "blocked"
+    assert asked == [("7-work", {"worker": "7-work", "state": "blocked", "epoch": 150})]
+    monkeypatch.setattr(d, "last_output", lambda _rec: ("working", 5))  # busy: dispatch is not asked
+    assert tower.sessions(out)[0]["phase_over"] is None and len(asked) == 1
 
 # --- names git quotes without -z: local and remote compare, output never crashes ---
 

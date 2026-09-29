@@ -1204,6 +1204,29 @@ def attest_on_origin(root: Path, branch: str) -> bool:
     return _is_attestation(root, local)
 
 
+def session_report(rec: dict, reports: list[dict]) -> dict | None:
+    """The latest report of a session's branch written since the session
+    started — an older one is the previous phase's word (a plan session's
+    `planned` is not what its execute session said)."""
+    started = int(rec.get("started") or 0)
+    mine = [r for r in reports if r.get("worker") == rec.get("branch") and int(r.get("epoch") or 0) >= started]
+    return max(mine, key=lambda r: int(r.get("epoch") or 0)) if mine else None
+
+
+def phase_over(root: Path, rec: dict, rep: dict | None) -> bool:
+    """Has this session's phase ended? Its own final report says so — a plan
+    `planned`, a review `review-pass` or `blocked` (it stops either way), any
+    phase `done` or `idle` — or, for an execute session, `pushed` with every
+    task of the branch's own plans ticked on origin (`pushed` comes at the
+    first push). The one answer for chain and the tower."""
+    state, phase = (rep or {}).get("state"), rec.get("phase")
+    if state in ("done", "idle"):
+        return True
+    if (phase, state) in (("plan", "planned"), ("review", "review-pass"), ("review", "blocked")):
+        return True
+    return phase == "execute" and state == "pushed" and work_complete_on_origin(root, rec["branch"]) is True
+
+
 class _ChainLock(_QueueLock):
     def __init__(self, root: Path):
         super().__init__(root)
@@ -1218,15 +1241,13 @@ def chain(root: Path, *, dry_run: bool = False) -> int:
 
 
 def _chain(root: Path, *, dry_run: bool = False) -> int:
-    latest: dict[str, dict] = {}
-    for r in sorted(_report.read_reports(root), key=lambda r: r.get("epoch", 0)):
-        latest[r.get("worker", "")] = r
+    reports = _report.read_reports(root)
     for rec in records(root):
         if rec.get("remote") or rec.get("state") == "unknown":
             continue  # liveness lives elsewhere, or cannot be asked: act on nothing
         branch, phase = rec["branch"], rec.get("phase")
-        rep = latest.get(branch) or {}
-        if int(rep.get("epoch") or 0) < int(rec.get("started") or 0):
+        rep = session_report(rec, reports)
+        if rep is None:
             continue  # a report from before this session started is not this session's word
         try:
             issue = int(rec["issue"])

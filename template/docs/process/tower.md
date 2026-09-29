@@ -125,7 +125,10 @@ is destructive to the owner. The tower flags a live worker that printed
 nothing for 30 minutes while its phase is not over: `waiting-for-input`
 when it routed its question (an open `DECISION NEEDED`, a `blocked`
 report), `question-unrouted` when it did not — then the question sits on
-its screen, where nobody reads it.
+its screen, where nobody reads it. "Its phase is over" and "its own report"
+are dispatch's answers (`phase_over`, `session_report`), the ones `chain`
+acts on. A worker on another host shows no screen here; its reports speak
+for it.
 
 Phases chain themselves: `dispatch.py chain` (from the steward's tick)
 stops a `planned` plan session and queues `execute`; stops a `pushed`
