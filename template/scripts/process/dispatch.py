@@ -1134,7 +1134,10 @@ def new_code_on_origin(root: Path, branch: str, *, fetch: bool = True) -> bool |
     if not tip:
         return None
     base = _integration_base(root, tip)
-    for c in _out(root, "rev-list", tip, *([f"^{base}"] if base else [])).splitlines():  # newest first
+    listed = _git(root, "rev-list", tip, *([f"^{base}"] if base else []))
+    if listed.returncode != 0:
+        return None  # a commit list git cannot give is no "nothing beyond the attestation"
+    for c in listed.stdout.split():  # newest first
         touched = _commit_touches(root, c)
         if touched is None:
             return None  # a commit git cannot read is no "attestation only"

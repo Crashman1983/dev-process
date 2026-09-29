@@ -398,3 +398,15 @@ def test_tower_says_files_unknown_when_git_cannot_list_them(render, tmp_path):
     text = tower.render(table)
 
     assert "files unknown in flight" in text and "0 file(s) in flight" not in text, text
+
+
+def test_new_code_on_origin_is_none_when_git_cannot_list_the_commits(render, tmp_path, monkeypatch):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    dispatch = _load(out, "dispatch")
+    real = dispatch._git
+    monkeypatch.setattr(dispatch, "_tip_on_origin", lambda root, branch, fetch=True: _git(out, "rev-parse", "HEAD").strip())
+    monkeypatch.setattr(dispatch, "_git", lambda root, *a: subprocess.CompletedProcess(a, 128, "", "boom")
+                        if a[:1] == ("rev-list",) else real(root, *a))
+
+    assert dispatch.new_code_on_origin(out, "main", fetch=False) is None
