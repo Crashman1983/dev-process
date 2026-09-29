@@ -1166,6 +1166,23 @@ ein Wächter-Test gegen doppelte Klammern ohne Leerzeichen in Python-Vorlagen.
 Wer v2.27.1 oder v2.28.0 installiert hat und am Push scheitert: auf v2.28.1
 aktualisieren, `v2.28.1`.
 
+**v2.36.0 — Worker wissen, wen sie fragen; der tower sieht eine Frage, die niemand liest; Plannamen mit Umlaut.** Anlass war das Referenzprojekt: Eine Frage eines Workers an den Owner stand sechs Stunden unbeantwortet im Chat, und mehrere Fix-Runden kosteten je eine Schleife extra. Beide Pakete wurden refutiert, die Fix-Runden ebenso; jeder neue Fund ist mit einem Test belegt, der gegen die Vorfassung rot ist.
+- **Der Steward ist der Entscheidungspartner:** Der Startprompt von `dispatch` sagt das; den Owner fragt der Worker nur bei Produktgrundsätzen oder destruktiven Schritten. Eine Frage kommt als `DECISION NEEDED` in den Plan, mit `blocked`, nie in den Chat. Den Live-Kanal nennt die Policy (`decision_channel`).
+- **`/execute`, vier Pflichten vor `pushed`:**
+  - Ein Widerspruch zu einem Kriterium wird eine Frage, keine Notiz.
+  - Eine entfernte oder umbenannte Fähigkeit wird an jeder Stelle gesucht, an der sie vorkommt; dazu wird die Test-Untergrenze gemessen.
+  - Gate-, Zug-, finish- und Hook-Code läuft einmal unter den Bedingungen, die er selbst erzeugt.
+  - Nach einer blockierten Runde steht eine wohlgeformte `ROOT-CAUSE`-Zeile, geprüft mit `attest.py --dry-run`.
+- **„Test unter den Bedingungen der Änderung“** hat einen Ort, `testing.md`; die Klasse *Umgebung* im Refute-Katalog verweist dorthin.
+- **tower:** Ein lebender Worker, der seit 30 Minuten nichts ausgibt und dessen Phase nicht vorbei ist, ist `waiting-for-input`, wenn seine Frage geleitet ist, sonst `question-unrouted`. Kann das Phasenende nicht gelesen werden, bleibt der Fund, mit mittlerer Schwere.
+  - Welcher Bericht zu einer Session gehört und wann ihre Phase vorbei ist, entscheiden `dispatch.session_report` und `dispatch.phase_over`. `chain` fragt dieselben.
+  - Die Aufgaben liest tower am zuletzt geholten Stand von origin, ohne Netz.
+- **Plannamen, die git in Anführungszeichen setzt:** `paths_in_flight` liest die Pfade NUL-getrennt. Vorher meldete `finish` einen Tier-2-Plan mit Umlaut im Namen ohne Review als fertig, und das Review-Gate ließ den Merge-Push eines Tier-3-Plans ohne Nachweis durch. tower liest die Pfade entfernter Branches ebenso und gibt Namen, die kein UTF-8 sind, maskiert aus.
+- **Bekannt, nicht behoben (dokumentiert):**
+  - Andere Werkzeuge lesen Pfade noch ohne `-z` (Zug, Bündel, dispatch, Digest). Das ist ein eigenes Issue im Referenzprojekt.
+  - Scheitert `git diff`, liest `paths_in_flight` „nichts in Arbeit“.
+  - Ein Worker auf einem anderen Host zeigt hier keinen Bildschirm.
+
 **v2.35.0 — der Zug kennt die Issue eines Paket-Branches.** Ein Branch, der nach einem größeren Issue benannt ist (`<epic>-<paket>-…`), aber unter dem Issue seines Pakets geprüft wurde, stieg nie in den Zug ein. Sein Name trägt nur die Nummer des Epics. Fünf Refute-Runden; jeder neue Fund ist mit einem Test belegt, der gegen die Vorfassung rot ist, oder als Grenze dokumentiert.
 - **Ein Owner für „zu welcher Issue gehört der Branch“:** `dispatch.issues_of`, die genaue Umkehrung von `find_branch`, aus dem Issue-Map und den dispatch-Records (`_placed`). Der Zug fragt es an allen drei Stellen, über `_branch_issues`:
   - beim Einsteigen;
