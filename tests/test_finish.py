@@ -67,7 +67,7 @@ def test_blocked_without_clearing_pass(render, tmp_path):
     assert "no clearing REVIEW" in r.stdout and "/review before /finish" in r.stdout
 
 
-@pytest.mark.parametrize("name", ["2026-07-04-größe.md", "2026-07-04-two words.md"])
+@pytest.mark.parametrize("name", ["2026-07-04-größe.md", "2026-07-04-new\nline.md"])
 def test_a_plan_whose_name_git_quotes_is_still_this_branchs(render, tmp_path, name):
     # without -z git prints such a name quoted; the plan read as another
     # work's and finished without its review (downstream refutation)

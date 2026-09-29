@@ -376,9 +376,11 @@ def remote_branches(root: Path, ref: str | None, local_branches: set[str],
         if minutes > max_age_days * 24 * 60:
             old += 1
             continue
-        files = (_git(root, "diff", "--name-only", f"{ref}...{full}") or "").splitlines()
+        # -z, as paths_in_flight reads the local worktrees: a quoted remote
+        # name never meets its local twin (refutation: the overlap vanished)
+        files = _review._names(_review._git_bytes(root, "diff", "--name-only", "-z", f"{ref}...{full}")) or set()
         out.append({"branch": b, "remote": True, "ahead": int(ahead), "behind": int(behind),
-                    "in_flight": sorted(f for f in files if f.strip()), "dirty": 0,
+                    "in_flight": sorted(files), "dirty": 0,
                     "minutes_since_commit": minutes})
     return out, old
 
@@ -577,6 +579,10 @@ def render(table: dict) -> str:
 
 
 def main(argv: list[str]) -> int:
+    # a path that is not UTF-8 reaches the output as its own bytes
+    # (surrogateescape): escaped, never a crash (refutation)
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(errors="backslashreplace")
     p = argparse.ArgumentParser(prog="tower.py", description=__doc__.split("\n\n")[0])
     p.add_argument("--json", action="store_true")
     p.add_argument("--stale-minutes", type=int, default=int(os.environ.get("PROCESS_STALE_MINUTES", "60")))
