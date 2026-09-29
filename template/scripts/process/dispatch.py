@@ -308,23 +308,28 @@ def issues_of(root: Path, branch: str) -> set[int]:
 
 
 def forget_branch(root: Path, branch: str) -> None:
-    """The branch's work is merged: its issues are no longer placed on it —
-    a later branch of the same name starts clean (refutation: a reused name
-    inherited old issues, and its merge closed them). A live worker's record
-    stays; `stop` owns it. Known limit: a branch merged outside the train
-    keeps its entries until its issue is dispatched again — the map outlives
-    `stop` on purpose, so the next phase finds the branch."""
+    """The branch's work is merged: its issues are placed on it no more, and
+    on no other branch either — a later branch of the same name starts clean
+    (refutation: a reused name inherited old issues, and its merge closed
+    them), and a dead record from before a re-dispatch does not bring the
+    merged issue back to its abandoned branch (refutation). A live worker's
+    record stays, and so does one whose liveness cannot be asked; `stop`
+    owns them. Known limit: a branch merged outside the train keeps its
+    entries until its issue is dispatched again — the map outlives `stop` on
+    purpose, so the next phase finds the branch."""
+    done = issues_of(root, branch)
     m = _issue_map(root)
     kept = {k: v for k, v in m.items() if v != branch}
     if kept != m:
         _issues_path(root).write_text(json.dumps(kept, indent=2), encoding="utf-8")
     for rec in records(root):
-        if rec["branch"] == branch and not rec["alive"] and rec.get("state") != "unknown":
+        if rec["alive"] or rec.get("state") == "unknown":
+            continue
+        if rec["branch"] == branch or rec.get("issue") in done:
             try:
-                _record_path(root, branch).unlink()
+                _record_path(root, rec["branch"]).unlink()
             except OSError:
                 pass
-
 
 def _worktrees(root: Path) -> dict[str, Path]:
     """branch → worktree path, from git itself."""

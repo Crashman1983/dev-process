@@ -1117,7 +1117,11 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
         except SystemExit:
             pass
         import dispatch as _dispatch  # lazily, as tower does
-        _dispatch.forget_branch(root, b)  # merged: its issues are placed on it no more
+        try:
+            _dispatch.forget_branch(root, b)  # merged: its issues are placed on it no more
+        except OSError as exc:  # bookkeeping after the merge: say so, never abort a landed train
+            print(f"train: dispatch still places {b}'s issues on it — could not forget it: {exc}",
+                  file=sys.stderr)
         if not keep_branches:
             d = _git(root, "branch", "-d", b)
             if d.returncode != 0:
