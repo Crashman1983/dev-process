@@ -849,15 +849,37 @@ def merge_base(root: Path, tip: str = "HEAD", *, strict: bool = False) -> str | 
     `strict` drops the `tip~1` rung: a one-commit range is a guess, and a
     caller that must not lose a commit of the push (the standing-block arm)
     refuses on None instead of reading a shortened range as "nothing
-    claimed"."""
+    claimed". It also asks every remote's main/master, not only `origin`'s,
+    and skips a ref that already contains `tip`: that ref cannot be the state
+    before this push — a local main fast-forwarded onto the pushed commit
+    emptied the range, and a block rode through (downstream refutation, a
+    remote not named `origin`)."""
+    if strict:
+        return _strict_merge_base(root, tip)
     for ref in INTEGRATION_REFS:
         out = _git_bytes(root, "merge-base", tip, ref)
         if out is not None and out.strip():
             return out.decode(errors="replace").strip()
-    if strict:
-        return None
     out = _git_bytes(root, "rev-parse", f"{tip}~1")
     if out is not None and out.strip():
+        return out.decode(errors="replace").strip()
+    return None
+
+
+def _strict_merge_base(root: Path, tip: str) -> str | None:
+    tip_sha = (_git_bytes(root, "rev-parse", "--verify", "-q", f"{tip}^{{commit}}") or b"").strip()
+    if not tip_sha:
+        return None
+    listed = _git_bytes(root, "for-each-ref", "--format=%(refname:short)",
+                        "refs/remotes/*/main", "refs/remotes/*/master")
+    others = [r for r in (listed or b"").decode(errors="replace").split()
+              if r not in INTEGRATION_REFS]
+    remotes = [r for r in INTEGRATION_REFS if "/" in r]
+    local = [r for r in INTEGRATION_REFS if "/" not in r]
+    for ref in [*remotes, *sorted(others), *local]:
+        out = _git_bytes(root, "merge-base", tip, ref)
+        if out is None or not out.strip() or out.strip() == tip_sha:
+            continue
         return out.decode(errors="replace").strip()
     return None
 
@@ -1185,6 +1207,13 @@ def standing_block_findings(root: Path, tip: str = "HEAD", *, remote_sha: str | 
                           f"review records cannot be read is refused" for lineno, message in errors]
     if malformed:
         return malformed
+    if remote_sha is not None and GIT_SHA.fullmatch(remote_sha) and not remote_sha.strip("0"):
+        # the remote has no such ref: this push creates main and carries its
+        # whole history, so every work standing blocked at the tip is carried
+        return [f"work {work}: the latest REVIEW is verdict=block (round {rec['round']}, "
+                f"{loc}) and this push creates the integration branch with that work — a "
+                f"later round with verdict=pass has to clear it before the merge"
+                for work, (loc, rec) in sorted(_blocks(at_tip).items())]
     if remote_sha is None:
         base, bases = merge_base(root, tip, strict=True), INTEGRATION_REFS
     else:
