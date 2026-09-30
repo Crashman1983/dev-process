@@ -68,3 +68,15 @@ def test_a_local_value_replaces_a_scalar_and_a_list_whole(render, tmp_path):
 
     assert policy["command"] == "mine --model {model} {prompt}" and policy["max_workers"] == 2
     assert policy["tiers"]["3"]["review"] == "claude-fable-5-1"
+
+
+@pytest.mark.parametrize("key", ["SKIP", "GIT_CONFIG_COUNT", "GIT_DIR", "PRE_COMMIT_ALLOW_NO_CONFIG"])
+def test_worker_env_cannot_switch_hooks_off(render, tmp_path, key):
+    """Refute of #130 (older than it): `env: {"SKIP": "merge-route,process-gates"}` or a
+    GIT_CONFIG_* that sets core.hooksPath let a worker push past every local guard."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _local(out, {"phases": {"execute": {"env": {key: "x"}}}})
+
+    r = _dispatch(out, "policy")
+
+    assert r.returncode != 0 and key in r.stdout + r.stderr, r.stdout + r.stderr

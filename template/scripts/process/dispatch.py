@@ -168,6 +168,12 @@ def _check_env(env: object, where: str) -> None:
         raise SystemExit(f"dispatch: {POLICY} `{where}` must map names to strings")
     if any(k.startswith("PROCESS_") for k in env):
         raise SystemExit(f"dispatch: {POLICY} `{where}` must not set PROCESS_* — dispatch owns those")
+    # a worker's environment must not switch the local guards off: pre-commit's SKIP,
+    # git's own configuration (GIT_CONFIG_* can set core.hooksPath), pre-commit's knobs
+    hooks = sorted(k for k in env if k == "SKIP" or k.startswith(("GIT_", "PRE_COMMIT")))
+    if hooks:
+        raise SystemExit(f"dispatch: {POLICY} `{where}` must not set {', '.join(hooks)} — "
+                         f"it would switch the hooks off for every worker")
 
 
 def phase_base(root: Path, branch: str) -> str:
