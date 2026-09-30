@@ -56,6 +56,12 @@ the change does not touch.
    touches.
 4. **Does the evidence hold?** Remove one branch of the new code: does a
    test go red? Are the plan's red/green claims true?
+5. **Is there a pattern?** After the findings, one line: do they share a
+   cause — the same kind of input read the same wrong way — that one owner
+   would close? Name that owner, or write "no common cause". Findings that
+   share a cause, fixed one by one, come back in the next round in another
+   form (downstream: four review rounds on one guard, one cause, and the
+   rewrite came only in the fourth).
 
 Gate code adds, within the same run:
 
@@ -118,6 +124,8 @@ Copy, fill in the angle brackets, hand it over:
        red/green claims true?
     <gate code only: 5. BYPASSES, FALSE REFUSALS and the ENVIRONMENT MATRIX
     as docs/process/refute.md lists them.>
+    Then PATTERN — one line: the cause the confirmed findings share and the
+    one owner that would close them all, or "no common cause".
 
     Run every scenario against the change AND against the integration
     branch. Report each as CONFIRMED (with the failing test, its output, and
