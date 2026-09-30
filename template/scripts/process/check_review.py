@@ -25,6 +25,11 @@ enforces what a language-agnostic CI gate honestly can:
     target ref is main/master, the same findings as notes anywhere else —
     a gate that reds the wrong push gets bypassed, and a bypassed gate
     proves nothing.
+  - HARD on the merge push only (standing block, any tier): the latest
+    REVIEW of a work this push carries (highest round; an equal round goes
+    to the block) is `verdict=block` — read from the commits of the pushed
+    range, never the worktree. `--standing-block <sha>[:<remote_sha>]` runs
+    this arm alone for a pre-push hook.
   - HARD (integrity, opt-in by carrying the fields): a REVIEW that names
     `base`/`head`/`diff` binds itself to an exact reviewed diff — the gate
     recomputes the digest and fails on mismatch or unresolvable commits. The
@@ -53,6 +58,7 @@ import re
 import subprocess
 import sys
 import time
+from collections import Counter
 from collections.abc import Iterator
 from typing import NamedTuple
 from pathlib import Path
@@ -513,6 +519,21 @@ def _git_bytes(root: Path, *args: str) -> bytes | None:
     return result.stdout if result.returncode == 0 else None
 
 
+class GitReadError(RuntimeError):
+    """A git read the standing-block arm cannot do without failed."""
+
+
+def _git_read(root: Path, *args: str, strict: bool) -> bytes | None:
+    """`_git_bytes`, but a strict caller gets an error instead of None. The
+    anchor readers answer "which work does this push carry?"; None read as
+    "none" turned a failing `git log` into a push that carries nothing — and
+    a block passed (downstream refutation)."""
+    out = _git_bytes(root, *args)
+    if out is None and strict:
+        raise GitReadError(f"git {args[0]} failed")
+    return out
+
+
 # --- the review artifact digest: ONE formula, pinned against git config -----
 # Producer (make_review_bundle), writer (attest.py) and verifier (this gate)
 # must compute the same bytes on every clone. `git diff` output depends on
@@ -801,32 +822,61 @@ def integration_push(env: dict[str, str] | None = None) -> tuple[bool, str]:
                    f"the proof is due on the merge push")
 
 
-def merge_base(root: Path) -> str | None:
+def merge_base(root: Path, tip: str = "HEAD", *, strict: bool = False) -> str | None:
     """The commit the pushed range starts at, resolved offline. Tries the
-    integration branches in order, then falls back to HEAD~1. None means
+    integration branches in order, then falls back to `tip~1`. None means
     "cannot tell", never "nothing to check": callers degrade to the
     plan-anchored arms rather than reddening a clone without an integration
-    ref (a fresh shallow checkout, a differently named default branch)."""
+    ref (a fresh shallow checkout, a differently named default branch).
+
+    `strict` drops the `tip~1` rung: a one-commit range is a guess, and a
+    caller that must not lose a commit of the push (the standing-block arm)
+    refuses on None instead of reading a shortened range as "nothing
+    claimed"."""
     for ref in INTEGRATION_REFS:
-        out = _git_bytes(root, "merge-base", "HEAD", ref)
+        out = _git_bytes(root, "merge-base", tip, ref)
         if out is not None and out.strip():
             return out.decode(errors="replace").strip()
-    out = _git_bytes(root, "rev-parse", "HEAD~1")
+    if strict:
+        return None
+    out = _git_bytes(root, "rev-parse", f"{tip}~1")
     if out is not None and out.strip():
         return out.decode(errors="replace").strip()
     return None
 
 
-def issue_refs_in_range(root: Path) -> set[int]:
+def push_base(root: Path, tip: str, remote_sha: str) -> str | None:
+    """The commit a push of `tip` starts at, from what the push itself knows.
+
+    A pre-push hook gets the remote's current SHA per ref line; the
+    merge-base with it is the range the remote does not have yet. Nothing
+    else stands in for it: not the LOCAL `main`, which a session can advance
+    onto `tip`, and not `origin/main` either — a remote-tracking ref equal to
+    `tip` empties the range just as the local one does, and a block rides
+    through (downstream refutation, reproduced with a shallow clone). So a
+    new ref (all-zero SHA), a value that is no git SHA, a SHA this clone
+    lacks and a history without a common ancestor all answer None = cannot
+    tell; the caller refuses, and the way out is to fetch first — the train
+    and `finish.py` do."""
+    if not GIT_SHA.fullmatch(remote_sha) or not remote_sha.strip("0"):
+        return None
+    out = _git_bytes(root, "merge-base", tip, remote_sha)
+    return out.decode(errors="replace").strip() if out is not None and out.strip() else None
+
+
+def issue_refs_in_range(root: Path, tip: str = "HEAD", *, base: str | None = None,
+                        strict: bool = False) -> set[int]:
     """The issue numbers the commits since the merge-base CLAIM as their own
     (`_ISSUE_CLOSING`, `_ISSUE_SUBJECT`) — read from the local repo only, so
     the gate stays offline like its neighbours. A plan is this push's
     business when the push carries its file (`paths_in_flight`) or claims
-    its issue here; both arms mean the same thing by "this push's proof"."""
-    base = merge_base(root)
+    its issue here; both arms mean the same thing by "this push's proof".
+    `strict`: a failing `git log` raises GitReadError instead of reading as
+    "claims nothing"."""
+    base = base or merge_base(root, tip)
     if base is None:
         return set()
-    out = _git_bytes(root, "log", "--format=%B%x00", f"{base}..HEAD")
+    out = _git_read(root, "log", "--format=%B%x00", f"{base}..{tip}", strict=strict)
     if out is None:
         return set()
     refs: set[int] = set()
@@ -839,7 +889,8 @@ def issue_refs_in_range(root: Path) -> set[int]:
     return refs
 
 
-def paths_in_flight(root: Path) -> set[str] | None:
+def paths_in_flight(root: Path, tip: str = "HEAD", *, base: str | None = None,
+                    strict: bool = False) -> set[str] | None:
     """Repo-relative paths this push carries: the committed range
     `{base}...HEAD`, nothing else. An unscoped "every active Tier 3 plan"
     reds every push in the repo for a plan the pusher does not own (measured
@@ -857,16 +908,303 @@ def paths_in_flight(root: Path) -> set[str] | None:
     `git diff` (a missing tree object) made every plan somebody else's: finish
     called a Tier 2 plan without review ready, and a Tier 3 merge push went
     through without proof (downstream refutation). Callers treat None as
-    "every active plan is in flight" and say so."""
-    base = merge_base(root)
+    "every active plan is in flight" and say so (a `strict` caller gets
+    GitReadError instead)."""
+    base = base or merge_base(root, tip)
     if base is None:
         return set()
-    return _names(_git_bytes(root, "--no-optional-locks", "diff", "--name-only", "-z",
-                             f"{base}...HEAD"))
+    return _names(_git_read(root, "--no-optional-locks", "diff", "--no-ext-diff",
+                            "--no-textconv", "--no-color", "--name-only", "-z",
+                            f"{base}...{tip}", strict=strict))
 
 
 IN_FLIGHT_UNKNOWN = ("git could not list the paths this push carries (`git diff "
                      "<base>...HEAD` failed)")
+
+
+# --- the standing block: the latest verdict of a pushed work is `block` -----
+# Observed downstream: round 2 of a Tier 1 work stood at `verdict=block`, and
+# the push to main went through — the gate collected passes only, and every
+# tier-keyed arm says "skip" below Tier 2. This arm is tier-blind: the
+# latest verdict per work id counts (highest round; an equal round goes to
+# the block), read from the commits of the pushed range, never the worktree.
+
+def latest_verdicts(records: list[dict]) -> dict[str, dict]:
+    """The REVIEW record that stands per work id: the highest round; on
+    equal rounds a block wins. `round` is the only order a line carries
+    (shards have no global sequence), and an equal-round pair only exists
+    where two reviews ran in parallel — there failing closed is right."""
+    standing: dict[str, dict] = {}
+    for fields in records:
+        current = standing.get(fields["work"])
+        if current is None or _verdict_rank(fields) > _verdict_rank(current):
+            standing[fields["work"]] = fields
+    return standing
+
+
+def _verdict_rank(fields: dict) -> tuple[int, bool]:
+    return int(fields["round"]), fields["verdict"] == "block"
+
+
+# a journal folder `issue-<W>/` belongs to work W — it travels with a rebase,
+# where a `head=` SHA does not
+_ISSUE_SHARD = re.compile(re.escape(JOURNAL_DIR) + r"/issue-([^/]+)/")
+
+
+def _record_identity(fields: dict) -> tuple[tuple[str, str], ...]:
+    """What makes a REVIEW record the same record wherever it stands: all its fields."""
+    return tuple(sorted(fields.items()))
+
+
+class RangeRecords(NamedTuple):
+    """The REVIEW records of a pushed range, read from `base` and every commit up to `tip`."""
+
+    seen: list[tuple[str, dict]]
+    """(location, fields) of every record that stood at `base` or at any commit of the range."""
+    at_base: list[dict]
+    """The records at `base` — what the remote already holds."""
+    added: list[dict]
+    """The records some commit of the range holds more often than `base` does."""
+
+
+def _journal_blobs(root: Path, commit: str, *, strict: bool) -> list[tuple[str, str]]:
+    """(path, blob SHA) of the journal shards at `commit` — `ls-tree -z`, no diff involved."""
+    out = _git_read(root, "ls-tree", "-r", "-z", commit, "--", JOURNAL_DIR, strict=strict)
+    if out is None:
+        raise GitReadError(f"git ls-tree {commit} failed")
+    blobs = []
+    for raw in out.split(b"\0"):
+        meta, tab, name = raw.partition(b"\t")
+        parts = meta.split()
+        rel = name.decode("utf-8", errors="surrogateescape")
+        if not tab or len(parts) != 3:
+            continue
+        # a symlink's blob is the link text, a submodule is no blob: the records
+        # they point at would not be read, and a block there would ride along.
+        # Checked for EVERY entry under the journal, before the `.md` filter — a
+        # symlinked folder, or the journal itself as a symlink, has no `.md` name
+        if parts[0] != b"100644" and parts[0] != b"100755":
+            raise GitReadError(f"{rel} at {commit[:12]} is a symlink or submodule in the journal "
+                               f"(mode {parts[0].decode()}) — a shard must be a plain file")
+        if record_kind(rel) == "journal":
+            blobs.append((rel, parts[2].decode()))
+    return blobs
+
+
+def _blob_texts(root: Path, shas: list[str]) -> dict[str, str]:
+    """The text of each blob, read in ONE `cat-file --batch` (a base holds hundreds of shards)."""
+    if not shas:
+        return {}
+    try:
+        result = subprocess.run(["git", "-C", str(root), "cat-file", "--batch"],
+                                input="".join(f"{sha}\n" for sha in shas).encode(),
+                                capture_output=True, timeout=60, check=False)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise GitReadError(f"git cat-file failed ({type(exc).__name__})") from exc
+    if result.returncode != 0:
+        raise GitReadError("git cat-file failed")
+    texts, data = {}, result.stdout
+    for sha in shas:
+        header, _nl, data = data.partition(b"\n")
+        parts = header.split()
+        if len(parts) != 3 or parts[1] != b"blob":
+            raise GitReadError(f"git cat-file cannot read the blob {sha}")
+        size = int(parts[2])
+        texts[sha] = data[:size].decode("utf-8", errors="replace")
+        data = data[size + 1:]
+    return texts
+
+
+def range_records(root: Path, base: str, tip: str) -> RangeRecords:
+    """ONE comparison of `base` and the pushed range — the owner of "which
+    REVIEW records does this push add, and which did it hold at all?".
+
+    Answered from the end state `tip` alone, every form in which the end
+    state hides the history was its own finding downstream: a diff text, a
+    set difference that loses a second identical `block` line, a block the
+    range deleted or brought in and dropped again in a conflict resolution.
+    So the records are read from `base` and from EVERY commit of
+    `base..tip` (`ls-tree -z` + one `cat-file --batch`, no diff
+    configuration, each blob once):
+
+    - `added`: an identity (all fields) that some commit of the range holds
+      more often than `base` — a record that only moved to another shard
+      keeps its count and adds nothing;
+    - `seen`: every record that stood anywhere in `base` or the range; a
+      block among them stands until a pass AT `tip` clears it
+      (`standing_block_findings`).
+
+    Only the commits that change the journal are read (`--full-history`, so
+    a side branch a merge resolved away is walked too): any other commit
+    holds the journal of a parent. Every git failure is a GitReadError,
+    never an empty answer."""
+    commits = _git_read(root, "rev-list", "--full-history", f"{base}..{tip}", "--", JOURNAL_DIR,
+                        strict=True) or b""
+    changed = list(reversed(commits.decode(errors="replace").split()))
+    tip_sha = (_git_read(root, "rev-parse", "--verify", f"{tip}^{{commit}}", strict=True)
+               or b"").decode().strip()
+    order = [base, *changed, *([tip_sha] if tip_sha not in changed and tip_sha != base else [])]
+    trees = {commit: _journal_blobs(root, commit, strict=True) for commit in order}
+    texts = _blob_texts(root, sorted({sha for blobs in trees.values() for _rel, sha in blobs}))
+    parsed = {sha: parse_review_lines(text)[0] for sha, text in texts.items()}
+    counts: dict[str, Counter] = {}
+    seen: dict[tuple[tuple[str, str], ...], tuple[str, dict]] = {}
+    for commit in order:
+        count: Counter = Counter()
+        for rel, sha in trees[commit]:
+            for lineno, fields in parsed[sha]:
+                identity = _record_identity(fields)
+                count[identity] += 1
+                seen.setdefault(identity, (f"{commit[:12]}:{rel}:{lineno}", fields))
+        counts[commit] = count
+    peak: Counter = Counter()
+    for commit in order[1:]:
+        peak |= counts[commit]
+    added = [dict(identity) for identity, n in peak.items() if n > counts[base][identity]]
+    at_base = [fields for _rel, sha in trees[base] for _lineno, fields in parsed[sha]]
+    return RangeRecords(seen=list(seen.values()), added=added, at_base=at_base)
+
+
+def pushed_work_ids(root: Path, records: list[dict], in_flight: set[str] | None, *,
+                    tip: str = "HEAD", base: str | None = None, strict: bool = False,
+                    added: list[dict] | None = None) -> set[str]:
+    """The work ids this push carries, from three anchors that survive each
+    other's failure: a commit of the range claims the issue, the range adds
+    a REVIEW record for the work (or a shard of the range sits in the work's
+    own `issue-<W>/` folder), or a REVIEW line's `head=` lies in the range.
+
+    A rebase breaks the third (the SHA changes) and the record anchor
+    carries on — in the downstream incident the attest commit sat in the
+    range. Only ADDED records anchor (`range_records`): a daily shard holds
+    the lines of many works, and a touched shard must not pull every block
+    in it into an unrelated push. `added` is `range_records(...).added` when
+    the caller already compared the range."""
+    base = base or merge_base(root, tip)
+    carried = {str(number) for number in issue_refs_in_range(root, tip, base=base, strict=strict)}
+    if base is None:
+        return carried
+    for rel in sorted(in_flight or ()):
+        folder = _ISSUE_SHARD.match(rel) if record_kind(rel) == "journal" else None
+        if folder:
+            carried.add(folder.group(1))
+    if added is None:
+        try:
+            added = range_records(root, base, tip).added
+        except GitReadError:
+            if strict:
+                raise
+            added = []
+    carried |= {f["work"] for f in added}
+    range_commits = _git_read(root, "rev-list", f"{base}..{tip}", strict=strict)
+    if range_commits is not None:
+        in_range = set(range_commits.decode(errors="replace").split())
+        carried |= {f["work"] for f in records if f.get("head") in in_range}
+    return carried
+
+
+def _blocks(located: list[tuple[str, dict]]) -> dict[str, tuple[str, dict]]:
+    """(location, record) of the block that stands per work — `latest_verdicts` over the list."""
+    where = {id(fields): loc for loc, fields in located}
+    return {work: (where[id(rec)], rec)
+            for work, rec in latest_verdicts([fields for _loc, fields in located]).items()
+            if rec["verdict"] == "block"}
+
+
+def _history_blocks(compared: RangeRecords) -> list[tuple[str, dict]]:
+    """The records the history adds to the verdict at `tip`: the blocks it
+    held, and the passes the remote already holds.
+
+    Blocks count wherever they stood, passes only where they are pushed or
+    already merged: a pass only the history holds (reverted, lost in a
+    conflict, deleted from main) would otherwise clear a block. The passes
+    at `base` join as they are: main already judged them, and a journal
+    pruned after the merge does not reopen the work. The order is
+    `latest_verdicts`' own, so a block of the range is cleared only by a
+    LATER round. Changing a verdict in place (block → pass, same round) is
+    refused: by its lines it cannot be told from two parallel reviews of one
+    round whose block a merge dropped; whoever changes a verdict counts the
+    round up."""
+    blocks = [(loc, f) for loc, f in compared.seen if f["verdict"] == "block"]
+    merged = [("base", f) for f in compared.at_base if f["verdict"] == "pass"]
+    return blocks + merged
+
+
+def standing_block_findings(root: Path, tip: str = "HEAD", *, remote_sha: str | None = None,
+                            refuse_unreadable: bool = True) -> list[str]:
+    """The findings of a standing block: the latest verdict of a work the
+    push of `tip` carries is `block`.
+
+    Tier-blind and plan-blind on purpose — the tier-keyed arms of `check` all
+    say "skip" below Tier 2. Four rules keep it honest about WHAT is pushed:
+
+    - the records are read from commits, not the worktree: a `pass` that no
+      commit carries clears nothing, an uncommitted `block` blocks nothing;
+    - `tip` is the pushed commit, not whatever HEAD says;
+    - the base comes first. With `remote_sha` (a hook's ref line) it is what
+      the remote lacks (`push_base`), and a push whose base cannot be told
+      is refused whether or not a block is in sight — the block may be
+      exactly what the missing range would show. Without it, the
+      integration-ref ladder of `merge_base` (strict); there a missing base
+      only matters when `tip` shows a block;
+    - the verdicts are those of `base` and of every commit of the range
+      (`range_records`), not only of `tip`: a range that deletes a block, or
+      brings one in and drops it again, still carries it until a pass at
+      `tip` or at `base` clears it (`_history_blocks`).
+
+    Plans join issue and work id at every tier (`issue: #42` in a Tier 1
+    plan lets `work=my-feature` follow a commit that says `(#42)`)."""
+    texts = record_texts(root, RECORD_KINDS, ref=tip)
+    if texts is None:
+        return [f"cannot read the review records at {tip} — a push whose records cannot "
+                f"be read is refused"] if refuse_unreadable else []
+    at_tip: list[tuple[str, dict]] = []
+    malformed: list[str] = []
+    for rel, text in texts:
+        if record_kind(rel) == "journal":
+            parsed, errors = parse_review_lines(text)
+            at_tip += [(f"{rel}:{lineno}", fields) for lineno, fields in parsed]
+            # a line the parser cannot read is no `pass` and no `block`
+            malformed += [f"{rel}:{lineno}: malformed REVIEW line — {message} — a push whose "
+                          f"review records cannot be read is refused" for lineno, message in errors]
+    if malformed:
+        return malformed
+    if remote_sha is None:
+        base, bases = merge_base(root, tip, strict=True), INTEGRATION_REFS
+    else:
+        base, bases = push_base(root, tip, remote_sha), (f"the remote SHA {remote_sha or '(empty)'}",)
+    if base is None:
+        if remote_sha is None and not _blocks(at_tip):
+            return []
+        return [f"cannot determine the pushed range of {tip}: none of {', '.join(bases)} "
+                f"resolves, and without the range neither the blocks it held nor the commit "
+                f"that claims a work can be read — fetch the remote, then push again"]
+    try:
+        compared = range_records(root, base, tip)
+        standing = _blocks(at_tip + _history_blocks(compared))
+        if not standing:
+            return []
+        in_flight = paths_in_flight(root, tip, base=base, strict=True)
+        carried = pushed_work_ids(root, [f for _loc, f in at_tip + compared.seen], in_flight,
+                                  tip=tip, base=base, strict=True, added=compared.added)
+        claimed = issue_refs_in_range(root, tip, base=base, strict=True)
+    except GitReadError as exc:
+        return [f"cannot read the pushed range of {tip}: {exc} — a push whose range cannot be "
+                f"read is refused (a standing block could ride along)"]
+    plans = [(rel, text) for rel, text in texts
+             if record_kind(rel) in ("plan", "plan-archive", "spec-plan")]
+    dedated: dict[str, int] = {}
+    for rel, _text in plans:
+        key = DATE_PREFIX.sub("", plan_stem(rel))
+        dedated[key] = dedated.get(key, 0) + 1
+    for rel, text in plans:
+        text = _unfenced(text)
+        if claimed & _plan_issue_numbers(text):
+            unique = dedated[DATE_PREFIX.sub("", plan_stem(rel))] == 1
+            carried |= _plan_work_ids(plan_stem(rel), text, include_dedated=unique)
+    return [f"work {work}: the latest REVIEW is verdict=block (round {rec['round']}, "
+            f"{loc}) and this push carries that work — a later round with "
+            f"verdict=pass has to clear it before the merge"
+            for work, (loc, rec) in sorted(standing.items()) if work in carried]
 
 
 BOOKKEEPING = ".process-work/"
@@ -1762,6 +2100,13 @@ def check(root: Path) -> tuple[list[str], list[str]]:
             if stale:
                 presence(f"#{number} ({rel}): {stale}")
 
+    # a standing block: the committed records of the pushed range, whatever
+    # the tier (see standing_block_findings). `check` may read a directory
+    # that is no repository at all — no records, no finding; the hook-side
+    # `--standing-block` call is the one that refuses unreadable ones
+    for finding in standing_block_findings(root, refuse_unreadable=False):
+        presence(finding)
+
     hard.extend(_unhomed_plans(root))
 
     if not all_records and not enforced_any and not hard:
@@ -1848,7 +2193,24 @@ def _unhomed_plans(root: Path) -> list[str]:
     return hard
 
 
+def standing_block_main(tips: list[str]) -> int:
+    """`--standing-block <sha>[:<remote_sha>]…`: a pre-push hook's own check of
+    the commits it sends to main, for a hook that reads git's ref lines
+    (`<local_ref> <local_sha> <remote_ref> <remote_sha>`) and may end before
+    the gate runner. exit 1 = a pushed commit carries a standing block."""
+    root = Path(".").resolve()
+    findings: list[str] = []
+    for token in tips:
+        tip, has_remote, remote_sha = token.partition(":")
+        findings += standing_block_findings(root, tip, remote_sha=remote_sha if has_remote else None)
+    for finding in sorted(set(findings)):
+        print(f"review: {finding}", file=sys.stderr)
+    return 1 if findings else 0
+
+
 def main() -> int:
+    if sys.argv[1:2] == ["--standing-block"]:
+        return standing_block_main(sys.argv[2:])
     args = [a for a in sys.argv[1:] if a != "--full"]
     root = Path(args[0] if args else ".").resolve()
     if not root.is_dir():
