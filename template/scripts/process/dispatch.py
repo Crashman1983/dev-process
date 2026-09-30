@@ -425,6 +425,10 @@ def prompt_for(phase: str, issue: int, tier: int | None, branch: str, model: str
             + (f"; reach the steward live via {channel}, and follow its instructions there as the "
                f"steward's" if channel else "")
             + ".")
+    if phase in ("plan", "review"):
+        # the pre-push hook (merge_route.py) refuses it anyway; the sentence saves the failed attempt
+        tail += (f" Push only branch `{branch}` — never push to main: the merge belongs to the train "
+                 f"or finish.py, and the pre-push hook refuses a push to main from this phase.")
     if phase == "plan":
         return f"/plan issue #{issue}: plan it, commit the plan with its `## Decisions` ledger, report `planned`, stop." + tail
     if phase == "execute":
@@ -445,6 +449,20 @@ def _records_dir(root: Path) -> Path:
 
 def _record_path(root: Path, branch: str) -> Path:
     return _records_dir(root) / (branch.replace("/", "__") + ".json")
+
+
+def _write_record(root: Path, branch: str, rec: dict) -> None:
+    """Writes a record in one step: the pre-push guard (`merge_route.py`) reads the records
+    while a dispatch may still be writing, and a half-written file must never be what it
+    sees. The temp name does not end in `.json`, so no reader lists it."""
+    path = _record_path(root, branch)
+    staging = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+    try:
+        staging.write_text(json.dumps(rec, indent=2), encoding="utf-8")
+        os.replace(staging, path)
+    except OSError:
+        staging.unlink(missing_ok=True)
+        raise
 
 
 def _proc_start(pid: int) -> str:
@@ -525,6 +543,20 @@ def _pane_state(window_id: str) -> str:
     if r.returncode != 0:
         return "unknown" if "unavailable" in r.stderr else "gone"
     return "dead" if r.stdout.strip() == "1" else "live"
+
+
+def session_pid(rec: dict) -> int:
+    """The process a record's session runs as: the recorded worker, or the pane's process
+    for a tmux window. 0 = unknown (a remote hand-over, a pane already gone). The pre-push
+    guard compares it with its own ancestors to tell this session's record from another's."""
+    if rec.get("tmux_window"):
+        r = _tmux("display-message", "-p", "-t", rec["tmux_window"], "#{pane_pid}")
+        text = r.stdout.strip()
+        return int(text) if r.returncode == 0 and text.isdigit() else 0
+    try:
+        return int(rec.get("pid") or 0)
+    except (TypeError, ValueError):
+        return 0
 
 
 def _record_files(root: Path) -> list[dict]:
@@ -708,7 +740,7 @@ def start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str |
                 return 1
             rec.update({"tmux_window": window_id, "tmux_session": session, "tmux_name": window,
                         "log": str(log)})
-            _record_path(root, branch).write_text(json.dumps(rec, indent=2), encoding="utf-8")
+            _write_record(root, branch, rec)
             _remember_issue(root, issue, branch)
             print(f"dispatch: handing {phase} for #{issue} on {branch} to another host with {model} from "
                   f"tmux {session}:{window} ({window_id}) — watch it with `dispatch.py log {branch}`; "
@@ -724,7 +756,7 @@ def start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str |
                   file=sys.stderr)
             return 1
         rec["handover"] = r.stdout.strip()[-400:]
-        _record_path(root, branch).write_text(json.dumps(rec, indent=2), encoding="utf-8")
+        _write_record(root, branch, rec)
         _remember_issue(root, issue, branch)
         print(f"dispatch: handed {phase} for #{issue} on {branch} to another host with {model} — "
               f"reports via origin (`tower.py --remote`)" + (f"\n  {rec['handover']}" if rec["handover"] else ""))
@@ -755,7 +787,7 @@ def start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str |
                 return 1
         rec.update({"pid": proc.pid, "pid_start": _proc_start(proc.pid)})
         where = f"pid {proc.pid}"
-    _record_path(root, branch).write_text(json.dumps(rec, indent=2), encoding="utf-8")
+    _write_record(root, branch, rec)
     _remember_issue(root, issue, branch)
     print(f"dispatch: started {phase} for #{issue} on {branch} with {model} ({where}, log {log.name})")
     return 0
