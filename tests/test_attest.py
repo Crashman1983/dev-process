@@ -596,7 +596,11 @@ def test_a_spec_kit_plan_is_archived_under_its_feature_name(render, tmp_path):
     _git(out, "add", "-A")
     _git(out, "commit", "-q", "-m", "spec")
 
-    r = _attest(out, "--base", base, "--head", head, "--archive", "specs/003-login/plan.md")
+    r = subprocess.run([sys.executable, str(out / "scripts/process/attest.py"),
+                        "--work", "003-login", "--tier", "2", "--model", "cross",
+                        "--independence", "bundle,non-implementing", "--verdict", "pass",
+                        "--base", base, "--head", head, "--archive", "specs/003-login/plan.md", "."],
+                       cwd=out, capture_output=True, text=True)
 
     assert r.returncode == 0, r.stderr
     assert (out / ".process-work/plans/archive/003-login.md").is_file()
@@ -608,3 +612,69 @@ def test_without_archive_or_commit_nothing_is_staged(render, tmp_path):
 
     assert _attest(out, "--base", base, "--head", head).returncode == 0
     assert _git(out, "diff", "--cached", "--name-only").stdout == ""
+
+
+# --- refute of #130 ---
+
+
+@pytest.mark.parametrize("name, issue", [
+    ("7-login", "7"), ("issue-7", "7"), ("7", "7"), ("feat/7-login", "7"),
+    ("7/x", None), ("70s-look", None), ("2026-09-30-login", None), ("process-v2.28.0", None),
+])
+def test_one_owner_names_a_branchs_issue(render, tmp_path, name, issue):
+    """F10: attest and the train read `feat/7-login` and `7/x` differently, and every
+    date-prefixed branch shared the shard `issue-2026`."""
+    out = render(tmp_path, {"project_name": "d"})
+    gate = _load_gate(out)
+    sys.path.insert(0, str(out / "scripts/process"))
+    try:
+        import importlib
+
+        import train
+        importlib.reload(train)
+        assert gate.branch_issue(name) == issue
+        assert (issue in train._branch_work_ids(name)) if issue else not (
+            train._branch_work_ids(name) - {name, name.rsplit("/", 1)[-1]})
+    finally:
+        sys.path.pop(0)
+        for m in ("train", "check_review", "dispatch", "report"):
+            sys.modules.pop(m, None)
+
+
+def test_commit_carries_only_the_attestation(render, tmp_path):
+    """F7: a staged unrelated file rode along into the attest commit."""
+    out, base, head = _repo(render, tmp_path)
+    (out / "widget.py").write_text("def widget():\n    return 43\n")
+    _git(out, "add", "widget.py")
+
+    r = _attest(out, "--base", base, "--head", head, "--commit")
+
+    assert r.returncode == 0, r.stderr
+    assert "widget.py" not in _git(out, "show", "--name-only", "--format=", "HEAD").stdout
+    assert _git(out, "diff", "--cached", "--name-only").stdout.strip() == "widget.py"
+
+
+def test_archive_refuses_an_untracked_plan_before_writing(render, tmp_path):
+    """F8: git mv failed after the line was written."""
+    out, base, head = _repo(render, tmp_path)
+    (out / ".process-work/plans/2026-09-11-widget.md").write_text("# Plan\n\ntier: 2\n")
+
+    r = _attest(out, "--base", base, "--head", head,
+                "--archive", ".process-work/plans/2026-09-11-widget.md")
+
+    assert r.returncode == 1 and "not tracked" in r.stderr, r.stderr
+    assert not list((out / ".process-work/journal").rglob("*.md"))
+
+
+@pytest.mark.parametrize("target", ["PRODUCT.md", ".process-work/plans/2026-09-10-other.md"])
+def test_archive_takes_only_this_works_plan(render, tmp_path, target):
+    """F9: `--archive PRODUCT.md` moved the product frame; another work's plan went too."""
+    out, base, head = _repo(render, tmp_path)
+    (out / ".process-work/plans/2026-09-10-other.md").write_text("# Plan\n\ntier: 3\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "other plan")
+
+    r = _attest(out, "--base", base, "--head", head, "--archive", target)
+
+    assert r.returncode == 1 and "REFUSED" in r.stderr, r.stderr
+    assert (out / target).is_file()

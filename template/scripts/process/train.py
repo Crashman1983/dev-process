@@ -146,16 +146,13 @@ def _show(root: Path, branch: str, path: str) -> str:
 
 # --- boarding ---------------------------------------------------------------------
 
-BRANCH_ISSUE = re.compile(r"^(?:issue-)?([0-9]+)(?:-|$)")
-
-
 def _branch_work_ids(branch: str) -> set[str]:
     """The work ids a branch name carries: the name, its last segment and the
     issue number dispatch puts in front (`42-fix-login`, `issue-42`) — not
     every number in it (`process-v2.28.0` names no issue 28)."""
     leaf = branch.rsplit("/", 1)[-1]
-    m = BRANCH_ISSUE.match(leaf)
-    return {branch, leaf} | ({m.group(1)} if m else set())
+    issue = _review.branch_issue(branch)
+    return {branch, leaf} | ({issue} if issue else set())
 
 
 def _branch_issues(root: Path, branch: str) -> set[str]:
@@ -165,9 +162,8 @@ def _branch_issues(root: Path, branch: str) -> set[str]:
     issues its merge closes all ask this one question (refutation: the
     train boarded a package branch on its issue, then closed the epic's)."""
     import dispatch as _dispatch  # lazily, as tower does
-    leaf = branch.rsplit("/", 1)[-1]
-    m = BRANCH_ISSUE.match(leaf)
-    return ({m.group(1)} if m else set()) | {str(i) for i in _dispatch.issues_of(root, branch)}
+    issue = _review.branch_issue(branch)
+    return ({issue} if issue else set()) | {str(i) for i in _dispatch.issues_of(root, branch)}
 
 
 def _names_branch(branch: str, ids: set[str], issues: set[str]) -> bool:

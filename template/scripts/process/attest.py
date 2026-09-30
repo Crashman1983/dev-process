@@ -60,6 +60,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling import
 from check_review import (  # noqa: E402  (one owner for grammar, digest, record homes)
     JOURNAL_DIR,
     PLANS_ARCHIVE,
+    _plan_work_ids,
+    branch_issue,
+    plan_stem,
+    PLANS_ACTIVE,
     SPEC_PLAN,
     SPECS_DIR,
     artifact_digest,
@@ -91,8 +95,6 @@ def _git(root: Path, *args: str) -> str | None:
 
 
 INTEGRATION_BRANCHES = ("main", "master")
-# a branch that starts with an issue number (`7`, `7-login`, `issue-7`, `7/x`)
-ISSUE_BRANCH = re.compile(r"^(?:issue-)?(\d+)(?:$|[-/])")
 
 
 def _journal_target(root: Path, journal_dir: Path) -> Path:
@@ -105,9 +107,9 @@ def _journal_target(root: Path, journal_dir: Path) -> Path:
     its slug; the integration branch or a detached HEAD, the flat daily file."""
     today = dt.date.today().isoformat()
     branch = _git(root, "symbolic-ref", "--short", "HEAD") or ""
-    m = ISSUE_BRANCH.match(branch)
-    if m:
-        return journal_dir / f"issue-{m.group(1)}" / f"{today}.md"
+    issue = branch_issue(branch)
+    if issue:
+        return journal_dir / f"issue-{issue}" / f"{today}.md"
     slug = branch.replace("/", "-")
     if slug and slug not in INTEGRATION_BRANCHES:
         return journal_dir / slug / f"{today}.md"
@@ -135,6 +137,21 @@ def archive_problems(args, root: Path) -> list[str]:
     plan = root / args.archive
     if not plan.is_file():
         return [f"--archive: plan not found: {args.archive}"]
+    rel = plan.resolve().relative_to(root.resolve()).as_posix() \
+        if plan.resolve().is_relative_to(root.resolve()) else ""
+    if record_kind(rel) not in ("plan", "spec-plan"):
+        return [f"--archive: {args.archive} is no active plan (a file in {PLANS_ACTIVE}/ or "
+                f"{SPECS_DIR}/<feature>/{SPEC_PLAN}) — only a plan is archived"]
+    if args.plan_review:
+        return ["--archive goes with the code review's pass, not the plan review's"]
+    ids = _plan_work_ids(plan_stem(rel), plan.read_text(encoding="utf-8", errors="replace"),
+                         include_dedated=True)
+    if args.work not in ids:
+        return [f"--archive: {args.archive} is not the plan of work={args.work} (its ids: "
+                f"{', '.join(sorted(ids))}) — archive a plan with its own work's pass"]
+    if _git(root, "ls-files", "--error-unmatch", "--", rel) is None:
+        return [f"--archive: {args.archive} is not tracked — commit it first; `git mv` would "
+                f"fail after the line is written"]
     if args.verdict != "pass":
         return [f"--archive only with verdict=pass — a plan is archived when its work "
                 f"merges, not during a review round (verdict={args.verdict})"]
@@ -305,12 +322,16 @@ def main() -> int:
         if not _git_ok(root, "mv", args.archive, str(dest)):
             return 1
         print(f"attest: archived {args.archive} as {_shown(root, dest)}")
-    if staged and not _git_ok(root, "add", *staged):
+    if staged and not _git_ok(root, "add", "--", *staged):
         return 1
+    if args.archive:
+        staged += [str(root / args.archive), str(dest)]  # the rename, staged by git mv
     message = f"docs: attest {args.work} round {args.round_}" + (
         " and archive the plan" if args.archive else "")
     if args.commit:
-        if not _git_ok(root, "commit", "-q", "-m", message):
+        # only the attestation's own paths: anything else staged stays staged
+        # (refutation: a staged source file rode along into this commit)
+        if not _git_ok(root, "commit", "-q", "-m", message, "--", *staged):
             return 1
         print(f"attest: committed: {message}")
     else:

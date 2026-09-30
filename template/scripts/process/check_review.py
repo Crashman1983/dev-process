@@ -98,6 +98,23 @@ def record_kind(rel: str) -> str | None:
     return None
 
 
+# a branch named after its issue: `7`, `7-login`, `issue-7`, `feat/7-login` (the last
+# segment decides) — never a date (`2026-09-30-login` is no issue 2026)
+_BRANCH_ISSUE = re.compile(r"^(?:issue-)?([0-9]+)(?:-|$)")
+_DATED_BRANCH = re.compile(r"^\d{4}-\d{2}-\d{2}(?:-|$)")
+
+
+def branch_issue(branch: str) -> str | None:
+    """The issue number a branch name leads with, or None — the one owner; the train,
+    attest's journal shard and the merge guard ask it (refutation: two rules read
+    `feat/7-login` and `7/x` differently)."""
+    leaf = branch.rsplit("/", 1)[-1]
+    if _DATED_BRANCH.match(leaf):
+        return None
+    m = _BRANCH_ISSUE.match(leaf)
+    return m.group(1) if m else None
+
+
 def plan_stem(rel: str) -> str:
     """A plan's name for work ids: the file stem, or the spec directory's name
     for a Spec Kit plan (every one of them is called plan.md)."""
