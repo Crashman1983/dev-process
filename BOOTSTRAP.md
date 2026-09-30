@@ -173,7 +173,9 @@ the scripts; three steps switch it on:
 1. **Set the model policy.** `docs/process/model-policy.json` names the model
    per phase and tier, the command that starts a worker session, the runner
    (`detached` headless, or `tmux` for visible windows a human can open) and
-   `max_workers`. Its `_comment` explains every key. It is executable
+   `max_workers`. Its `_comment` explains every key; `decision_channel` names
+   how a worker reaches the steward live (without it, questions go through
+   the plan only). It is executable
    configuration: review changes to it like CI configuration.
 2. **Keep the kernel loaded across compaction** (Claude Code): run
    `python3 scripts/process/rehydrate.py --install` once and commit the

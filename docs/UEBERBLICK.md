@@ -12,7 +12,7 @@ Vorlage öffentlich auf GitHub: [github.com/Crashman1983/dev-process](https://gi
 
 Der Prozess ist in vielen Iterationen im laufenden Betrieb entstanden und verbessert worden; in der Fläche muss er sich noch beweisen. Ein möglicher nächster Schritt ist ein Pilot, etwa auf GitHub mit Copilot. Dieses Dokument beschreibt, was heute umgesetzt ist, unterscheidet zwischen hart geprüften und weich gehaltenen Regeln, zeigt, wie sich die Bausteine auf eine solche Plattform übertragen ließen, und sammelt offene Fragen am Ende. Betriebsdetails des Referenzprojekts sind Beispiele, keine Vorgaben.
 
-> Inhaltsgleich als PDF: [Entwicklungsprozess-mit-KI-Agenten.pdf](Entwicklungsprozess-mit-KI-Agenten.pdf).
+> Gestaltet als PDF: [Entwicklungsprozess-mit-KI-Agenten.pdf](Entwicklungsprozess-mit-KI-Agenten.pdf) – Stand v2.28.0; dieser Text ist neuer.
 > Einrichten: [`BOOTSTRAP.md`](../BOOTSTRAP.md) · Systemumgebung: [`SYSTEM-REQUIREMENTS.md`](SYSTEM-REQUIREMENTS.md).
 
 ---
@@ -27,7 +27,7 @@ Der Prozess ist in vielen Iterationen im laufenden Betrieb entstanden und verbes
 | Behaupten statt prüfen: Aussagen über vorhandenen Code kommen aus dem Gedächtnis. | Der Agent baut auf einer Funktion auf, die es gar nicht gibt – oder übersieht eine vorhandene und schreibt sie ein zweites Mal. Die Folge sind doppelter Code und Verweise ins Leere. | Regel 1: Jede Aussage braucht einen Nachweis oder wird als Annahme markiert. Für die Dokumentation prüft zusätzlich ein Gate (eine automatische Prüfung vor dem Merge), dass sie nur auf existierende Dateien verweist. |
 | Symptome flicken: Ein Fehler wird dort behoben, wo er sichtbar wird. | Die Ursache bleibt; ihr Symptom wird an fünf Stellen einzeln geflickt, die Fehlerrate steigt. | Regel 6: Nach höchstens zwei Versuchen am Symptom wird nach der Ursache gesucht. Ein Gate fragt schon beim zweiten Fix an derselben Datei, ob umgebaut statt weiter geflickt werden muss (Regel 4), und meldet den dritten als fehlende Ursache; die Kennzahlen zeigen, wo dieselbe Stelle immer wieder korrigiert wird. |
 | Selbstabnahme: Der Agent, der gebaut hat, beurteilt auch, ob es gut ist. | Die Prüfung wird zur Formsache; Mängel fallen erst im Betrieb auf. | Unabhängige Prüfung durch eine unbeteiligte Instanz; das Ergebnis wird als Attest (schriftlicher Prüfvermerk im Journal, dem fortlaufenden Arbeitsprotokoll im Repository) festgehalten und vom Gate verlangt. |
-| Parallelität ohne Absprache: Mehrere Agenten ändern dieselben Dateien. | Die letzte Änderung überschreibt die vorherige; Arbeit geht verloren. | Eine Übersicht aller laufenden Vorgänge (Lagetabelle) zeigt Überschneidungen; zwei Vorhaben am selben Problem werden abgestimmt statt parallel bearbeitet. |
+| Parallelität ohne Absprache: Mehrere Agenten ändern dieselben Dateien. | Die letzte Änderung überschreibt die vorherige; Arbeit geht verloren. | Eine Übersicht aller laufenden Vorgänge (Lagetabelle) zeigt Überschneidungen; zwei Vorhaben am selben Problem werden abgestimmt statt parallel bearbeitet. Sie meldet auch einen Arbeiter, der wartet, und eine Frage, die niemand liest. |
 
 ### Das Wesentliche in fünf Sätzen
 
@@ -44,8 +44,8 @@ Der Prozess ist in vielen Iterationen im laufenden Betrieb entstanden und verbes
 | Ebene | Was dort geschieht |
 |---|---|
 | **Mensch (Owner)** | priorisiert, entscheidet, gibt Designs frei, prüft wöchentlich eine Stichprobe, schreibt die Regeln fort |
-| **Koordinator** | verschafft sich den Überblick, weist Vorgänge zu, startet und stoppt Arbeiter, leitet Fragen an den Menschen weiter, stößt den Merge an – schreibt und prüft selbst keinen Code |
-| **Arbeiter und Prüfer** | je Vorgang und Phase eine eigene Sitzung auf eigenem Branch; der Prüfer ist immer eine andere Instanz als der Arbeiter |
+| **Koordinator** | verschafft sich den Überblick, weist Vorgänge zu, startet und stoppt Arbeiter, entscheidet Fragen der Arbeiter oder leitet sie weiter, stößt den Merge an – schreibt und prüft selbst keinen Code |
+| **Arbeiter, Refuter und Prüfer** | je Vorgang und Phase eine eigene Sitzung auf eigenem Branch; ab Tier 2 greift ein Refuter die Änderung an, dessen einziger Auftrag Fehler sind; der Prüfer ist immer eine andere Instanz als der Arbeiter |
 | **Gates** | fünfzehn Prüfprogramme vor jedem Merge: Regeln intakt, Entscheidungen getroffen, Attest vorhanden und zum Code passend, Designverträge und Akzeptanzkriterien einheitlich, Lizenzen erlaubt, Dokumentation gültig |
 | **Repository** | Regelkern, Pläne mit Entscheidungslisten, Journal mit Attesten, Lagetabelle, Verträge, Kennzahlen – die einzige Quelle, aus der jede Ebene liest |
 
@@ -78,7 +78,7 @@ Der Prozess wird als Vorlage (dev-process) ausgeliefert. Aus ihr entsteht ein fe
 
 > Ein Prüfurteil zählt nur, wenn es unabhängig entstanden und an genau den geprüften Code gebunden ist. Was Agenten wissen müssen – Entscheidungen, Ziele, Kennzahlen – steht in Dateien und wird ihnen nach jeder Kürzung erneut vorgelegt.
 
-**Prüfung.** Ab Tier 2 erhält eine unbeteiligte Instanz ein schreibgeschütztes Bundle – Änderungen, Plan, Tests, Bilder – und nicht das Gespräch, in dem die Arbeit entstand. Ihr Attest im Journal nennt Vorgang, Tier, Prüfer, Modell, Unabhängigkeitsmerkmale, Verdikt, Runde und die Prüfsummen des Codes. Das Gate prüft, ob ein Attest vorliegt, ob seine Merkmale zum Tier passen und ob es zum gemergten Code gehört. Was es nicht prüfen kann: ob der Prüfer wirklich eine andere Instanz war. Das beruht auf der Angabe des Prüfers – deshalb die wöchentliche Stichprobe durch den Menschen.
+**Prüfung.** Ab Tier 2 erhält eine unbeteiligte Instanz ein schreibgeschütztes Bundle – Änderungen, Plan, Tests, Bilder – und nicht das Gespräch, in dem die Arbeit entstand. Ihr Attest im Journal nennt Vorgang, Tier, Prüfer, Modell, Unabhängigkeitsmerkmale, Verdikt, Runde und die Prüfsummen des Codes. Das Gate prüft, ob ein Attest vorliegt, ob seine Merkmale zum Tier passen und ob es zum gemergten Code gehört. Bilder, die nichts beweisen (identisch vorher und nachher, ein leerer Ladezustand), markiert das Bundle als nichtig. Vor jeder Runde nach einem Block nennt eine ROOT-CAUSE-Zeile die Ursache; ein Werkzeug misst dafür den Test, der vorher rot war und jetzt grün ist. Was es nicht prüfen kann: ob der Prüfer wirklich eine andere Instanz war. Das beruht auf der Angabe des Prüfers – deshalb die wöchentliche Stichprobe durch den Menschen.
 
 **Gedächtnis.** Plan mit Entscheidungsliste, Journal und Aufgabenliste liegen im Repository. Ein Kommando liefert daraus, was in Arbeit ist, was als Nächstes kommt, welche Entscheidungen gelten und welche Frage offen ist. Nach jeder Kürzung einer Sitzung spielt ein Programm die neun Regeln im Wortlaut und die letzten zwölf Entscheidungen automatisch neu ein. Der Anlass war eine Beobachtung aus dem Betrieb: Die bloße Anweisung, nach einer Kürzung die Regeln neu zu lesen, wurde selbst mit weggekürzt.
 
@@ -86,7 +86,7 @@ Der Prozess wird als Vorlage (dev-process) ausgeliefert. Aus ihr entsteht ein fe
 
 **Messung.** Ein Cockpit (Auswertungsskript im Repository) liest Journal, Git-Historie und Meldungen; jede Zahl nennt ihre Aussagekraft. Vier Kennzahlen sind maßgeblich:
 
-- **Prüfrunden bis zur Freigabe.** Ziel: höchstens zwei bei 90 % der Vorgänge. Wird in Runde 3 noch abgelehnt, wird eine Regel festgehalten oder der Vorgang geteilt.
+- **Prüfrunden bis zur Freigabe.** Ziel: höchstens zwei bei 90 % der Vorgänge. Die Runde zählt ein Programm, nicht der Prüfer. Nach zwei gescheiterten Runden geht die Arbeit zurück in den Plan; blockiert dieselbe Stelle zweimal, übernimmt eine frische Sitzung. Eine weitere Runde ist eine Ausnahme mit vermerktem Grund.
 - **Korrekturquote.** Anteil der Features, die binnen sieben Tagen korrigiert werden mussten; nur der Trend zählt.
 - **Korrektur-Häufungen.** Stellen, die immer wieder korrigiert werden – Regel 6 in Zahlen.
 - **Prüfrunden je Modell.** Zeigt, welches Modell sich in welcher Phase bewährt.
@@ -115,7 +115,7 @@ Der Prozess wird als Vorlage (dev-process) ausgeliefert. Aus ihr entsteht ein fe
 **Fünf Aufgaben des Owners**
 
 - **Priorisieren.** Er legt fest, was als Nächstes freigegeben wird. Legt ein Agent Dutzende Vorgänge an, beginnt die Arbeit erst, wenn der Owner sie sortiert hat.
-- **Entscheiden.** Jede Produkt-, Architektur- oder Risikofrage kommt als Auswahl mit Optionen und Empfehlung; die Antwort wird zur Entscheidungszeile im Plan.
+- **Entscheiden.** Jede Frage zu Produktgrundsätzen oder zu destruktiven Schritten kommt als Auswahl mit Optionen und Empfehlung; die Antwort wird zur Entscheidungszeile im Plan.
 - **Designs freigeben.** Bei Tier 3 wird nicht gebaut, bevor das Design freigegeben ist. Der Merge selbst braucht seine Zustimmung nicht; dafür sorgen Gates und Attest.
 - **Stichprobe prüfen.** Einmal pro Woche einen bereits gemergten Vorgang gründlich lesen; welcher es ist, bestimmt die Kalenderwoche. Kein Agent weiß vorher, welcher gezogen wird.
 - **Regeln fortschreiben.** Start- und Abnahmeliste werden laufend ergänzt: Eine Vorgabe des Owners wird dauerhaft Teil des Prozesses, nicht nur Einzelfall.
@@ -128,11 +128,11 @@ Der Owner arbeitet über die Oberfläche seiner Harness: auf GitHub etwa über I
 
 | Ready | Plan | Umsetzung | Review | Merge | Deploy |
 |---|---|---|---|---|---|
-| Owner gibt frei | Plan + Entscheidungen | Test zuerst, je Aufgabe ein Commit | unbeteiligte Instanz, Attest | Merge Queue: Gates und Tests einmal | ein Deploy je Queue-Lauf |
+| Owner gibt frei | Plan + Entscheidungen | Test zuerst, je Aufgabe ein Commit | ab Tier 2 Refute, dann unbeteiligte Instanz, Attest | Merge Queue: Gates und Tests einmal | ein Deploy je Queue-Lauf |
 
-**Fragen.** Kann nur der Owner entscheiden, trägt der Arbeiter die Frage mit Optionen und Empfehlung in den Plan ein und meldet „blockiert“. Der Koordinator legt sie dem Owner als Auswahl vor, die Antwort wird als Entscheidung im Plan vermerkt, und der Arbeiter macht weiter.
+**Fragen.** Kann der Arbeiter eine Frage nicht aus Plan, Issue oder Regeln beantworten, trägt er sie mit Optionen und Empfehlung in den Plan ein und meldet „blockiert“ – nie als Frage im Chat. Der Koordinator entscheidet sie selbst; nur Produktgrundsätze und destruktive Schritte legt er dem Owner als Auswahl vor. Die Antwort wird als Entscheidung im Plan vermerkt, und der Arbeiter macht weiter.
 
-**Merge.** Freigegebene Branches werden in einer Merge Queue gesammelt, einmal gemeinsam durch Gates und Testsuite geführt und der Reihe nach gemergt. Scheitert der gemeinsame Lauf, wird der verursachende Branch ermittelt, aus der Queue genommen und an seinen Arbeiter zurückgemeldet.
+**Merge.** Freigegebene Branches werden in einer Merge Queue gesammelt, einmal gemeinsam durch Gates und Testsuite geführt und der Reihe nach gemergt. Einsteigen darf nur ein Branch, dessen Stand ein Review deckt. Ist der gemeinsame Lauf rot, läuft er ein zweites Mal; erst dann wird der verursachende Branch ermittelt, aus der Queue genommen und an seinen Arbeiter zurückgemeldet. Der Merge archiviert fertige Pläne und schließt ihre Issues.
 
 **Ausfall des Koordinators.** Nichts geht verloren: Der Zustand liegt in Git; Arbeiter halten an, wenn sie eine Entscheidung brauchen; ein neuer Koordinator hat den Stand in einer Minute eingelesen.
 
@@ -152,7 +152,7 @@ Die folgende Tabelle zeigt, wie sich die Bausteine abbilden ließen und was davo
 | Vorgänge | Issues mit Typ und Akzeptanzkriterien; ein Gate prüft, dass Pläne ihr Issue nennen und Tier-3-Arbeit nicht ohne Issue beginnt. | in der Vorlage |
 | Arbeiter | Denkbar ist eine Copilot-Sitzung je Issue auf eigenem Branch – im Editor oder als Copilot Coding Agent, der einen Pull Request öffnet. | vorgesehen, nicht erprobt |
 | Prüfung | Unbeteiligter Prüfer mit Review-Prompt und Bundle, Attest im Journal; Copilot Code Review als zusätzliche Stimme. Da Copilot Modelle mehrerer Hersteller anbietet, wäre das zweite Modell nur ein Konfigurationseintrag. | Prompt und Gate in der Vorlage |
-| Merge Queue | Die Merge Queue könnte freigegebene Pull Requests sammeln, gemeinsam prüfen und der Reihe nach mergen. | GitHub-Funktion; nicht erprobt (Referenzprojekt: eigener Merge Train) |
+| Merge Queue | Die Merge Queue könnte freigegebene Pull Requests sammeln, gemeinsam prüfen und der Reihe nach mergen. | GitHub-Funktion; nicht erprobt (die Vorlage bringt einen eigenen Merge Train mit) |
 | Überblick und Aufräumen | Owner-Digest und Kennzahlen laufen als Actions-Workflows; erledigte Branches, Specs und Journale räumt ein Skript (tidy) auf. | in der Vorlage |
 | Koordinator | Übersicht und Statusmeldungen lassen sich als Actions ausführen. Offen ist, wer auf GitHub die Sitzungen startet und stoppt. | offen (Kapitel 11) |
 
@@ -162,7 +162,7 @@ Die folgende Tabelle zeigt, wie sich die Bausteine abbilden ließen und was davo
 
 > Die Einheit des Prozesses ist das Repository. Maschinen skalieren mit; die Grenze ist die Zahl der Entscheidungen, die ein Owner treffen kann.
 
-**Was mitwächst:** Jedes Repository erhält die Vorlage mit seinen eigenen Gates, seiner Modellpolitik und seiner Lagetabelle. Die Vorlage wird zentral versioniert und enthält organisationsweite Regeln wie Schichtenregeln oder die erlaubten Lizenzen; ein Update kommt als Pull Request in jedes Repository. Gates laufen zentral, etwa in GitHub Actions, und wachsen mit der Organisation. Arbeiter sind Sitzungen der Harness, zum Beispiel eine je Issue, und die Modellpolitik legt neben den Modellen auch fest, wie viele davon gleichzeitig laufen.
+**Was mitwächst:** Jedes Repository erhält die Vorlage mit seinen eigenen Gates, seiner Modellpolitik und seiner Lagetabelle. Die Vorlage wird zentral versioniert und enthält organisationsweite Regeln wie Schichtenregeln oder die erlaubten Lizenzen; ein Update kommt als Pull Request in jedes Repository. Gates laufen zentral, etwa in GitHub Actions, und wachsen mit der Organisation. Arbeiter sind Sitzungen der Harness, zum Beispiel eine je Issue, und die Modellpolitik legt neben den Modellen auch fest, wie viele davon gleichzeitig laufen, mit welcher Priorität, und ob eine Phase – etwa die Prüfung – auf einem anderen Rechner oder in der Cloud läuft.
 
 **Was nicht von selbst mitwächst:** Jedes Repository braucht einen Owner, und jeder Vorgang braucht im Mittel ein bis zwei seiner Entscheidungen. Wie viele parallele Vorgänge ein Owner trägt, ist die eigentliche Kapazitätsgrenze – und heute nicht gemessen. Ebenso offen ist, wo der Koordinator in einer größeren Umgebung läuft und ob ein Koordinator mehrere Repositories führen kann.
 
@@ -180,7 +180,7 @@ Die folgende Tabelle zeigt, wie sich die Bausteine abbilden ließen und was davo
 | Modellpolitik ist Code | Die Datei enthält auch den Startbefehl der Sitzungen; wer sie ändert, kann Befehle auf dem startenden Rechner ausführen. | Wird wie die Konfiguration der Prüfumgebung behandelt: Jede Änderung durchläuft die Prüfung. |
 | Anbieterbindung | Die Koordinationsschicht (Lagetabelle, Koordinator, Merge Train) ist bisher nur mit Claude Code erprobt. | Die Prozessdateien sind anbieterneutral; die Vorlage bringt Anpassungen für Copilot, Claude Code und AGENTS.md mit. |
 | Ein Mensch | Fällt der Owner aus, bleiben Entscheidungen aus. | Alles Wissen liegt in Dateien; eine Vertretung ist noch nicht geregelt. |
-| Junge Koordinationsschicht | Lagetabelle, Koordinator und Merge Train (die eigene Merge Queue des Referenzprojekts) sind neu und wurden in kurzer Folge achtmal überarbeitet. | Zwei unabhängige Reviews mit 45 Befunden, alle eingearbeitet; Vorsatz: vor jeder Erweiterung eine Woche Betrieb. |
+| Junge Koordinationsschicht | Lagetabelle, Koordinator und Merge Train (die eigene Merge Queue des Referenzprojekts) sind neu und wurden in kurzer Folge oft überarbeitet. | Jede Änderung an Gate-, Zug- und Hook-Code wird vor dem Review und nach jeder Fix-Runde widerlegt; jeder Fund bekommt einen Test, der gegen die Vorfassung rot ist. |
 
 | Maß (Referenzprojekt) | Wert | Einordnung |
 |---|---|---|
@@ -190,7 +190,7 @@ Die folgende Tabelle zeigt, wie sich die Bausteine abbilden ließen und was davo
 | Korrekturquote (Features, die binnen 7 Tagen korrigiert wurden) | 44,4 % (20 von 45 Features) | DORA-Band „medium“, nahe an „low“; aussagekräftig ist erst der Verlauf über drei Zeiträume. |
 | Korrektur-Häufung | 11 Korrekturen an 5 Stellen | Eine fachliche Regel im Code wurde Stelle für Stelle nachgebessert; sie bekommt jetzt einen zuständigen Baustein und einen Test. |
 
-Der Kern – Gates, Prüfung, Regelkern, Journal, Design-Verträge – ist stabil; was im Referenzprojekt nicht trug, ist gestrichen. Die Koordinationsschicht ist die jüngste. Aus ihren acht schnellen Überarbeitungen folgt ein Vorsatz, noch keine Regel: eine Betriebswoche vor jeder Erweiterung, und Änderungen an der Koordinationsschicht durchlaufen dieselben Tiers wie Produktcode.
+Der Kern – Gates, Prüfung, Regelkern, Journal, Design-Verträge – ist stabil; was im Referenzprojekt nicht trug, ist gestrichen. Die Koordinationsschicht ist die jüngste. Aus ihren vielen schnellen Überarbeitungen folgt eine Regel: Änderungen an der Koordinationsschicht durchlaufen dieselben Tiers wie Produktcode, und ihr Code wird in jeder Fix-Runde widerlegt.
 
 ## 11. Offene Fragen und Ausblick
 

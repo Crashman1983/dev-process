@@ -39,7 +39,8 @@ VERSION = re.compile(r"^v(\d+\.\d+\.\d+)$")
 # (file, pattern with one group around the version) — every place a release
 # names its version. tests/test_release_tool.py fails when the repository
 # carries the current version anywhere else, so a new location cannot be
-# forgotten here.
+# forgotten here. Not here on purpose: docs/OVERVIEW.md and docs/UEBERBLICK.md
+# name the version they were last checked against — a release does not re-check them.
 LOCATIONS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("pyproject.toml", re.compile(r'^version = "(\d+\.\d+\.\d+)"$', re.MULTILINE)),
     ("uv.lock", re.compile(r'^name = "dev-process"\nversion = "(\d+\.\d+\.\d+)"$', re.MULTILINE)),
