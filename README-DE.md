@@ -15,13 +15,13 @@ Repositories. Er ändert nicht die Agenten, sondern ihre Arbeitsbedingungen:
 Regeln prüft ein Programm, der Aufwand folgt dem Risiko, niemand nimmt die
 eigene Arbeit ab, und das Gedächtnis liegt in Dateien statt im Kontext.
 
-> **Status:** `v2.38.0` — Sub-Projekte SP1–SP75. Historie: [`CHANGELOG.md`](CHANGELOG.md).
+> **Status:** `v2.38.0` — Sub-Projekte SP1–SP75. Historie: [`CHANGELOG.md`](CHANGELOG.md); Releases entstehen mit `tools/release.py` (`--check` nennt, was nicht auf der Version steht).
 
 ## Einstieg
 
 | Wofür | Dokument |
 |---|---|
-| Was der Prozess ist, warum er so ist, was offen ist | **[Überblick](docs/UEBERBLICK.md)** · [Overview (English)](docs/OVERVIEW.md) · [PDF](docs/Entwicklungsprozess-mit-KI-Agenten.pdf) |
+| Was der Prozess ist, warum er so ist, was offen ist | **[Überblick](docs/UEBERBLICK.md)** · [Overview (English)](docs/OVERVIEW.md) · [PDF (Stand v2.28.0)](docs/Entwicklungsprozess-mit-KI-Agenten.pdf) |
 | Einrichten, headless oder im Dialog, und aktualisieren | [`BOOTSTRAP.md`](BOOTSTRAP.md) |
 | Was auf dem Rechner und in CI gebraucht wird | [`docs/SYSTEM-REQUIREMENTS.md`](docs/SYSTEM-REQUIREMENTS.md) |
 | Abhängigkeiten dieses Repositorys (erzeugt, auch als CycloneDX) | [`docs/SBOM.md`](docs/SBOM.md) · [`docs/sbom.cdx.json`](docs/sbom.cdx.json) |
@@ -44,8 +44,9 @@ eigene Arbeit ab, und das Gedächtnis liegt in Dateien statt im Kontext.
 - **Spezifikation mit [Spec Kit](https://github.com/github/spec-kit).** Ab
   Tier 2 führt der Weg über Spec Kit, gepinnt und mit eigenen Overrides.
 - **Parallele Agenten, optional.** Ein Steward teilt Issues zu, startet je
-  Phase eine Agentensitzung mit dem Modell aus der Modellpolitik, legt dem
-  Owner Fragen als Auswahl vor und merget fertige Branches gebündelt.
+  Phase eine Agentensitzung mit dem Modell aus der Modellpolitik, entscheidet
+  die Fragen der Agenten (nur Produktgrundsätze legt er dem Owner als Auswahl
+  vor) und merget fertige Branches gebündelt.
 - **Drei Harnesses.** Claude Code, GitHub Copilot oder eine neutrale
   `AGENTS.md`; Methodik und Gates sind in allen dieselben.
 

@@ -25,9 +25,12 @@ CURRENT = re.search(r'^version = "(.+)"$', (REPO / "pyproject.toml").read_text()
 
 def test_every_place_the_repository_names_its_version_is_a_location():
     """A new location cannot be forgotten: the current version, anywhere in a tracked
-    file outside the history and the generated SBOM, must be one of LOCATIONS."""
+    file outside the history and the generated SBOM, must be one of LOCATIONS.
+    The overviews name the version they were last checked against — a review stamp,
+    not a release location: bumped by the release, it would claim a check nobody did."""
     out = subprocess.run(["git", "grep", "-n", "-F", CURRENT, "--", ".",
-                          ":!CHANGELOG.md", ":!docs/sbom.cdx.json", ":!docs/SBOM.md", ":!tests/"],
+                          ":!CHANGELOG.md", ":!docs/sbom.cdx.json", ":!docs/SBOM.md", ":!tests/",
+                          ":!docs/OVERVIEW.md", ":!docs/UEBERBLICK.md"],
                          cwd=REPO, capture_output=True, text=True).stdout
     files = {line.split(":", 1)[0] for line in out.splitlines()}
     assert files == {path for path, _ in rel.LOCATIONS}, files

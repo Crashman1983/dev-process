@@ -16,13 +16,13 @@ work under: a program checks the rules, the effort follows the risk, nobody
 signs off their own work, and memory lives in files instead of the context
 window.
 
-> **Status:** `v2.38.0` — sub-projects SP1–SP75. History (German): [`CHANGELOG.md`](CHANGELOG.md).
+> **Status:** `v2.38.0` — sub-projects SP1–SP75. History (German): [`CHANGELOG.md`](CHANGELOG.md); releases are cut with `tools/release.py` (`--check` lists what is not at the version).
 
 ## Where to start
 
 | For | Document |
 |---|---|
-| What the process is, why it works this way, what is still open | **[Overview](docs/OVERVIEW.md)** · [Überblick (German)](docs/UEBERBLICK.md) · [PDF (German)](docs/Entwicklungsprozess-mit-KI-Agenten.pdf) |
+| What the process is, why it works this way, what is still open | **[Overview](docs/OVERVIEW.md)** · [Überblick (German)](docs/UEBERBLICK.md) · [PDF (German, v2.28.0)](docs/Entwicklungsprozess-mit-KI-Agenten.pdf) |
 | Setting it up, headless or in a dialogue, and updating it | [`BOOTSTRAP.md`](BOOTSTRAP.md) |
 | What the machine and CI need (German) | [`docs/SYSTEM-REQUIREMENTS.md`](docs/SYSTEM-REQUIREMENTS.md) |
 | This repository's dependencies (generated, also as CycloneDX) | [`docs/SBOM.md`](docs/SBOM.md) · [`docs/sbom.cdx.json`](docs/sbom.cdx.json) |
@@ -43,8 +43,9 @@ window.
 - **Specification with [Spec Kit](https://github.com/github/spec-kit).** From
   Tier 2 on, work goes through Spec Kit, pinned and with its own overrides.
 - **Parallel agents, optional.** A steward assigns issues, starts one agent
-  session per phase with the model from the model policy, puts questions to
-  the owner as a choice, and merges finished branches as a batch.
+  session per phase with the model from the model policy, decides the
+  agents' questions (only product principles go to the owner as a choice),
+  and merges finished branches as a batch.
 - **Three harnesses.** Claude Code, GitHub Copilot or a neutral `AGENTS.md`;
   methodology and gates are the same in all of them.
 
