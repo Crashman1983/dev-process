@@ -231,5 +231,9 @@ question is still worth asking — just untracked.
 ## Extending this list
 
 This is the neutral floor. A project with a specific stack or risk surface
-should extend it in its own anchor — add the framework's known footguns, the
-domain's invariants — but never *remove* a category to make a review pass.
+extends it in `docs/process/review.local.md` — the framework's known footguns,
+the domain's invariants, its layering rules, where its stack guides live. The
+review command and the review bundle carry that file right after this list, so
+a dispatched reviewer sees it too. It sharpens, it never *removes* a category to
+make a review pass — and the project never has to own this file or the review
+command.
