@@ -22,7 +22,7 @@ window.
 
 | For | Document |
 |---|---|
-| What the process is, why it works this way, what is still open | **[Overview](docs/OVERVIEW.md)** · [Überblick (German)](docs/UEBERBLICK.md) · [PDF (German, v2.28.0)](docs/Entwicklungsprozess-mit-KI-Agenten.pdf) |
+| What the process is, why it works this way, what is still open | **[Overview](docs/OVERVIEW.md)** · [Überblick (German)](docs/UEBERBLICK.md) · [PDF (German)](docs/Entwicklungsprozess-mit-KI-Agenten.pdf) |
 | Setting it up, headless or in a dialogue, and updating it | [`BOOTSTRAP.md`](BOOTSTRAP.md) |
 | What the machine and CI need (German) | [`docs/SYSTEM-REQUIREMENTS.md`](docs/SYSTEM-REQUIREMENTS.md) |
 | This repository's dependencies (generated, also as CycloneDX) | [`docs/SBOM.md`](docs/SBOM.md) · [`docs/sbom.cdx.json`](docs/sbom.cdx.json) |
