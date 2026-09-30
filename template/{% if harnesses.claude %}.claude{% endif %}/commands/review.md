@@ -35,6 +35,12 @@ module is installed; the report grammar either way).
 
 After a clearing pass is attested, `uv run scripts/process/report.py review-pass --issue N` — the branch may now board the merge train (`docs/process/train.md`).
 
+**Push only your own branch, never main.** The review pushes the attest
+commit to its branch; the merge belongs to the train or `finish.py`, and the
+pre-push hook (`merge_route.py`) refuses a push to main from a review
+session — no route marker and no override applies to it
+(`docs/process/train.md`, "Who pushes to main").
+
 To dispatch a fresh (or cross-model) reviewer, do not hand-craft its input:
 `python scripts/process/make_review_bundle.py -o /tmp/bundle.md` assembles the
 complete read-only bundle — rules, checklist, product frame, plan, diff, and

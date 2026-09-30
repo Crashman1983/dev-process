@@ -15,4 +15,6 @@ findings-producing or Tier 3 review — `FINDING sev=… action=… issue=… ga
 in a `.process-work/reviews/` report. To dispatch a fresh or cross-model
 reviewer, assemble its complete input with
 `python scripts/process/make_review_bundle.py -o /tmp/bundle.md`
-(`docs/process/verification-independence.md`).
+(`docs/process/verification-independence.md`). Push only your own branch,
+never main: the merge belongs to the train or `finish.py`, and the pre-push
+hook refuses a push to main from a review session (`docs/process/train.md`).

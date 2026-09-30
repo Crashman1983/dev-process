@@ -435,3 +435,21 @@ def test_a_remote_execute_record_lets_finish_through(render, tmp_path):
     root = _repo(render, tmp_path)
     _write(root, {"branch": BRANCH, "phase": "execute", "remote": True})
     assert _run(root, MAIN, env={"PROCESS_MERGE_ROUTE": "finish"}).returncode == 0
+
+
+# --- the words around it --------------------------------------------------------------
+
+def test_the_review_command_pushes_only_its_own_branch(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "harnesses": {"copilot": True}})
+    for rel in (".claude/commands/review.md", ".github/prompts/review.prompt.md"):
+        text = " ".join((out / rel).read_text(encoding="utf-8").split())
+        assert "Push only your own branch, never main" in text, rel
+
+
+def test_the_train_doc_owns_the_merge_route(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    text = " ".join((out / "docs/process/train.md").read_text(encoding="utf-8").split())
+    for term in ("PROCESS_MERGE_ROUTE=train|finish", 'PROCESS_OWNER_OVERRIDE="<reason>"',
+                 "process-owner-overrides.log", "SKIP=process-gates", "--standing-block",
+                 "Plan and review sessions never push to main"):
+        assert term in text, term
