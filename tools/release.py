@@ -76,7 +76,12 @@ RELEASE_FILES = ("CHANGELOG.md", *(rel for rel, _ in LOCATIONS), "docs/sbom.cdx.
 
 
 def _current(root: Path) -> tuple[int, ...]:
-    found = LOCATIONS[0][1].findall((root / LOCATIONS[0][0]).read_text(encoding="utf-8"))
+    """The released version: the committed one — a failed run leaves the files bumped, and
+    read from them the rerun it asks for was refused as "not above" (refute of #123)."""
+    shown = subprocess.run(["git", "-C", str(root), "show", f"HEAD:{LOCATIONS[0][0]}"],
+                           capture_output=True, text=True)
+    text = shown.stdout if shown.returncode == 0 else (root / LOCATIONS[0][0]).read_text(encoding="utf-8")
+    found = LOCATIONS[0][1].findall(text)
     return tuple(int(x) for x in found[0].split(".")) if found else (0,)
 
 
@@ -116,7 +121,12 @@ def release(root: Path, tag: str, *, suite: bool = True) -> None:
                             capture_output=True, text=True)
     if status.returncode != 0:
         raise SystemExit("release: git cannot tell whether the tree is clean — not releasing")
-    others = [e[3:] for e in status.stdout.split("\0") if len(e) > 3 and e[3:] not in RELEASE_FILES]
+    others, entries = [], iter(status.stdout.split("\0"))
+    for entry in entries:
+        if len(entry) > 3 and entry[3:] not in RELEASE_FILES:
+            others.append(entry[3:])
+        if {"R", "C"} & set(entry[:2]):
+            next(entries, None)  # the old name of a rename or copy, in its own field
     if others:
         raise SystemExit("release: the tree is not clean outside the release's own files — "
                          "commit or stash first: " + ", ".join(sorted(others)[:5]))

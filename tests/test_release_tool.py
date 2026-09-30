@@ -146,3 +146,26 @@ def test_check_reports_a_stale_sbom(monkeypatch):
 
     assert "docs/sbom.cdx.json / docs/SBOM.md: stale (tools/gen_sbom.py --check)" in rel.check(REPO, f"v{CURRENT}")
     assert any("gen_sbom.py" in " ".join(map(str, a)) and "--check" in a for a in calls), calls
+
+
+def test_a_rerun_after_a_failed_step_is_not_refused_as_a_downgrade(tmp_path, monkeypatch):
+    """G2: the failed run left the files bumped; the version guard read the bump as current."""
+    root = _git_repo(tmp_path)
+    real = subprocess.run
+    monkeypatch.setattr(rel.subprocess, "run", lambda argv, **kw: real(argv, **kw) if argv[0] == "git"
+                        else subprocess.CompletedProcess(argv, 1 if "ruff" in argv else 0, stdout="", stderr=""))
+    with pytest.raises(SystemExit, match="lint failed"):
+        rel.release(root, "v9.9.9", suite=False)
+
+    with pytest.raises(SystemExit, match="lint failed"):  # the same step fails again — no downgrade refusal
+        rel.release(root, "v9.9.9", suite=False)
+
+
+def test_a_rename_is_named_by_its_new_path(tmp_path):
+    """G5: porcelain -z puts the old name in its own field; it was read as a cut path."""
+    root = _git_repo(tmp_path)
+    subprocess.run(["git", "mv", "README.md", "README-OLD.md"], cwd=root, check=True)
+
+    with pytest.raises(SystemExit) as refused:
+        rel.release(root, "v9.9.9", suite=False)
+    assert "README-OLD.md" in str(refused.value) and "DME.md" not in str(refused.value), refused.value
