@@ -19,6 +19,12 @@ second gate. The tools that evaluate a row differ per harness and per installed
 module; the checklist items do not. Where a named mechanism's module is not
 installed, the item is carried by review judgment instead.
 
+A **stack guide** is a project document that sharpens a row for its stack —
+which viewports and states D8 needs, where R5's contract paths live, which
+evidence D7 accepts. It never weakens a row. The project names its stack guides
+in `docs/process/review.local.md`, which every review reads, so this file stays
+the template's and a project does not have to own it.
+
 ## Bindingness
 
 Both are **always evaluated** at their gate, and **followed by default**. Every

@@ -78,6 +78,27 @@ def test_bundle_assembles_all_sections(render, tmp_path):
     assert "FINDING sev=<blocker|major|minor|nit>" in t
 
 
+def test_the_projects_review_dimensions_ride_along(render, tmp_path):
+    """#130 P3: a project's own review dimensions reach a dispatched reviewer, who reads
+    only the bundle — the project owned review.md for them before."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)  # the file stays out of the diff, so its one occurrence is the section
+    (out / "docs/process/review.local.md").write_text("# Ours\n\nLayering: routes never import repos.\n")
+
+    t = _run(out, "--base", "main").stdout
+
+    local = t.index("Layering: routes never import repos.")
+    assert t.index("# Review Checklist") < local < t.index("## Product frame (judge direction"), t[:400]
+    assert "sharpen" in t[t.index("# Review Checklist"):local] and "never weaken" in t
+
+
+def test_without_local_dimensions_no_section(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+
+    assert "This project's review dimensions" not in _run(out, "--base", "main").stdout
+
+
 def test_bundle_fingerprint_matches_binary_diff(render, tmp_path):
     out = render(tmp_path, {"project_name": "d", "modules": {}})
     _seed_repo(out)

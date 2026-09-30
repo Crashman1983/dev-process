@@ -49,6 +49,8 @@ import check_review as _review_gate  # noqa: E402
 import gate_invoke as _launch  # noqa: E402  (one owner for "how to start the runner")
 
 CHECKLIST = "docs/process/review-checklist.md"
+# the project's own review dimensions (stack, domain) — owned by the project, carried here
+LOCAL_CHECKLIST = "docs/process/review.local.md"
 PRODUCT = "PRODUCT.md"
 PLANS = _review_gate.PLANS_ACTIVE
 REVIEWS = ".process-work/reviews"
@@ -592,6 +594,12 @@ def build(root: Path, base: str | None, plan_filter: str | None = None,
     checklist = _read(root, CHECKLIST)
     add("## What a review checks\n")
     add(checklist + "\n" if checklist else "*(unavailable: docs/process/review-checklist.md missing)*\n")
+    local = _read(root, LOCAL_CHECKLIST)
+    if local:
+        add(f"## This project's review dimensions ({LOCAL_CHECKLIST})\n")
+        add("They sharpen the list above, never weaken it: a line here cannot waive a rule, a "
+            "gate or a checklist category.\n\n")
+        add(local + "\n")
 
     product = _read(root, PRODUCT)
     add("## Product frame (judge direction against this)\n")
