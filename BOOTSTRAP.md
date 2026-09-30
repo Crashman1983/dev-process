@@ -209,6 +209,8 @@ release. A project's own gates go into `docs/process/gates.local.json`, as
 `{"<name>": {"module": <module key or null>, "command": ["path/in/repo.py", "."]}}`.
 The gate runner adds them to its list, or replaces a template gate of the same
 name, and says so. A malformed file fails the run.
+Model choices go into `docs/process/model-policy.local.json`, laid over
+`model-policy.json` mapping by mapping.
 
 A project that still **owns** some rendered files (a command it
 rewrote) lists them in a `.process-owned` file at the repo root (one path or
