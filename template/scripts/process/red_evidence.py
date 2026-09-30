@@ -89,7 +89,8 @@ def pytest_sessionfinish(session):
 """
 
 
-def _run(command: list[str], cwd: Path, probe_dir: Path, out: Path, timeout: int) -> tuple[int, dict[str, str]]:
+def _run(command: list[str], cwd: Path, probe_dir: Path, out: Path,
+         timeout: int) -> tuple[int, dict[str, str] | None]:
     """(exit code, node id -> passed/failed/error) of one pytest run, reported by the probe."""
     env = dict(os.environ, RED_EVIDENCE_OUT=str(out),
                PYTHONPATH=os.pathsep.join(p for p in (str(probe_dir), os.environ.get("PYTHONPATH", "")) if p))
@@ -98,7 +99,9 @@ def _run(command: list[str], cwd: Path, probe_dir: Path, out: Path, timeout: int
                               cwd=cwd, capture_output=True, text=True, timeout=timeout, env=env)
     except subprocess.TimeoutExpired:
         raise SystemExit(f"red_evidence: the run in {cwd} took longer than {timeout} s") from None
-    seen = json.loads(out.read_text(encoding="utf-8")) if out.is_file() else {}
+    # no report is no outcome: the probe did not load (a command that ignores PYTHONPATH,
+    # `python -I`) or pytest died — never "no test ran red" (refute of #124)
+    seen = json.loads(out.read_text(encoding="utf-8")) if out.is_file() else None
     return proc.returncode, seen
 
 
@@ -152,6 +155,19 @@ def _is_test_file(rel: str) -> bool:
     return name == "conftest.py" or (name.endswith(".py") and (name.startswith("test_") or name.endswith("_test.py")))
 
 
+_TEST_DIRS = {"tests", "test", "testing"}
+
+
+def _not_test_content(folder: str, names: list[str]) -> set[str]:
+    """What a carried directory leaves behind: caches, and source files. Inside a `tests`
+    folder every .py is test code (helpers, base classes, `__init__`); outside one only test
+    files and conftest.py are."""
+    in_tests = bool(_TEST_DIRS & set(Path(folder).parts))
+    return {n for n in names if n == "__pycache__"
+            or (n.endswith(".py") and not in_tests and not _is_test_file(n)
+                and not (Path(folder) / n).is_dir())}
+
+
 def _take_along(root: Path, tree: Path, rels: list[str]) -> None:
     """Directories and test files travel into the old tree; a source file named on the command
     (`--doctest-modules calc.py`) does not — carried along, the old run exercised the new code."""
@@ -159,7 +175,9 @@ def _take_along(root: Path, tree: Path, rels: list[str]) -> None:
         src, dst = root / rel, tree / rel
         dst.parent.mkdir(parents=True, exist_ok=True)
         if src.is_dir():
-            shutil.copytree(src, dst, dirs_exist_ok=True, ignore=shutil.ignore_patterns("__pycache__"))
+            # by what it holds, not where it is: a named `backend/` carried the fixed source
+            # along, and the old run tested the new code (refute of #124)
+            shutil.copytree(src, dst, dirs_exist_ok=True, ignore=_not_test_content)
         elif _is_test_file(rel) or not rel.endswith(".py"):
             shutil.copy2(src, dst)
 
@@ -186,12 +204,18 @@ def measure(root: Path, before: str, command: list[str], copy: list[str], timeou
             subprocess.run(["git", "-C", str(root), "worktree", "remove", "--force", str(tree)],
                            capture_output=True)
         exit_after, now = _run(command, root, probe, Path(tmp) / "after.json", timeout)
+    missing = [side for side, seen in ((f"at {before}", was), ("now", now)) if seen is None]
+    was, now = was or {}, now or {}
     return {"command": command, "before": before, "exit_before": exit_before, "exit_after": exit_after,
             "red_to_green": sorted(t for t, s in now.items() if s == PASSED and was.get(t) == FAILED),
-            "still_red": sorted(t for t, s in now.items() if s != PASSED), "carried": carried}
+            "still_red": sorted(t for t, s in now.items() if s != PASSED), "carried": carried,
+            "no_report": missing}
 
 
 def refusals(m: dict) -> list[str]:
+    if m["no_report"]:
+        return [f"the probe wrote no report {' and '.join(m['no_report'])} — pytest died, or the "
+                f"command ignores PYTHONPATH (`python -I`) and the probe never loaded; cannot tell"]
     out = []
     if m["exit_before"] in NOT_RUN:
         out.append(f"at {m['before']} {NOT_RUN[m['exit_before']]} (exit {m['exit_before']}) — the "
