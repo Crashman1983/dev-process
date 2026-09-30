@@ -1166,6 +1166,23 @@ ein Wächter-Test gegen doppelte Klammern ohne Leerzeichen in Python-Vorlagen.
 Wer v2.27.1 oder v2.28.0 installiert hat und am Push scheitert: auf v2.28.1
 aktualisieren, `v2.28.1`.
 
+**v2.38.0 — Kürzere Wege von der Fix-Runde zum Release: die Umbau-Frage kommt früher, Belege werden gemessen statt getippt, das Release-Ritual ist ein Skript.** Anlass war eine Retrospektive im Referenzprojekt: Ein Wächter brauchte vier Review-Runden, obwohl alle Befunde ab Runde 2 dieselbe Ursache hatten. Dazu kamen Rot-Belege und ROOT-CAUSE-Zeilen, von Hand geschrieben, mit Fehlern, und ein Release-Ritual aus einem Dutzend Handschritten. Alle drei Teile wurden refutiert (12 Szenarien, 8 Funde, alle behoben); jeder Fund ist mit einem Test belegt, der gegen die Vorfassung rot ist.
+- **Die Umbau-Frage beim zweiten Treffer (Regel 4):**
+  - `check_fix_streak` meldet schon den zweiten `fix`-Commit auf derselben Datei: eine DECISION „Inkrement oder Umbau“ vor dem nächsten Flicken. Ab dem dritten bleibt es bei Regel 6 (Ursache fehlt).
+  - Eine Markdown-Datei (CHANGELOG, Doku), die zwei Fixes nur mitberühren, zählt beim zweiten Treffer nicht.
+  - `fix!:` zählt jetzt als Fix.
+- **Der Refuter nennt das Muster:** Nach den Befunden kommt eine Zeile MUSTER. Sie nennt die gemeinsame Ursache und den einen Owner, der alle Befunde schließt, oder „no common cause“. Der erste Einsatz in diesem Release zeigte gleich drei Befunde mit einer Ursache.
+- **`red_evidence.py` misst den Rot-Beleg:**
+  - Es fährt eine pytest-Auswahl gegen den alten Stand, in einem temporären Worktree mit den neuen Testdateien, und gegen den Arbeitsbaum.
+  - Es schreibt den Journal-Block und mit `--cause` die ROOT-CAUSE-Zeile; die Testnamen kommen als pytest-Node-ID aus dem Lauf.
+  - Es verweigert, wenn kein Test vorher gelaufen und rot war, wenn der alte Stand nicht sammelt, oder wenn danach noch etwas rot ist.
+  - `/execute` und die Journal-Doku verweisen darauf.
+- **`tools/release.py`:**
+  - Der lokale Teil eines Template-Releases in einem Lauf: CHANGELOG-Prüfung über denselben Leser wie der Publish-Workflow, Versionssprung an allen Stellen, SBOM, ruff, Suite, Commit.
+  - Es verweigert einen schmutzigen Baum außerhalb seiner eigenen Dateien und eine Version, die nicht über der aktuellen liegt.
+  - `--check` meldet jede Stelle, die nicht auf der Version steht, samt SBOM; ein Test schlägt an, wenn die Version im Repo irgendwo sonst steht.
+- **Bekannt, nicht umgesetzt:** Die REFUTE-Zeile wird noch nicht aus dem Refute-Bericht erzeugt (#124, AC-3); dafür fehlt ein festes Berichtsformat.
+
 **v2.37.0 — Jedes Prozess-Werkzeug liest Pfadnamen mit `-z`; eine Liste, die git nicht liefern kann, ist keine leere Liste.** Anlass war das Referenzprojekt: Ohne `-z` setzt git einen Namen mit Umlaut, Zeilenumbruch oder Tab in Anführungszeichen, und der zitierte Name trifft keine Datei. Der Zug las so einen archivierten Tier-2-Plan unter dem zitierten Namen; `git show` lieferte nichts, das Tier las sich als 0, und der Branch stieg ohne Review ein. Jeder Fund ist mit einem Test belegt, der gegen die Vorfassung rot ist.
 - **Ein Owner für Namen:** `check_review._names` (Namenslisten) und neu `check_review.name_status` (`--name-status -z`, mit Quelle bei Umbenennung und Kopie). `_renames`, der Zug, das Review-Bündel und `dispatch` lesen `--name-status` darüber, statt die Felder selbst zu zerlegen.
 - **Umgestellt auf `-z`:**
