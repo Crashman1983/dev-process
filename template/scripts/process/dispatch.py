@@ -18,7 +18,8 @@ build session in that worktree; `review` a fresh reviewing session there.
 Between phases the artifacts carry the state (the plan and its `##
 Decisions` ledger, the bundle) — the model may change, the worktree stays.
 Which model runs which phase comes from `docs/process/model-policy.json`
-(tier × phase); the project's own start command is the `command` template
+(tier × phase), with `model-policy.local.json` laid over it when the project
+has one; the project's own start command is the `command` template
 there. `{model}` and `{prompt}` are substituted inside the argv the
 template splits into; the prompt is one argv element.
 
@@ -86,6 +87,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling imports
 import report as _report  # noqa: E402
 
 POLICY = "docs/process/model-policy.json"
+# the project's own choices over the template's policy, mapping by mapping — so a
+# release that edits model-policy.json reaches the project and its own ids stay
+LOCAL_POLICY = "docs/process/model-policy.local.json"
 DISPATCH_DIR = "process-dispatch"
 ISSUES_FILE = "issues.json"
 QUEUE_FILE = "queue.json"
@@ -121,6 +125,15 @@ def load_policy(root: Path) -> dict:
         data = json.loads(p.read_text(encoding="utf-8"))
     except ValueError as exc:
         raise SystemExit(f"dispatch: {POLICY} is not valid JSON: {exc}")
+    local = root / LOCAL_POLICY
+    if local.is_file():
+        try:
+            over = json.loads(local.read_text(encoding="utf-8"))
+        except ValueError as exc:
+            raise SystemExit(f"dispatch: {LOCAL_POLICY} is not valid JSON: {exc}")
+        if not isinstance(over, dict):
+            raise SystemExit(f"dispatch: {LOCAL_POLICY} must be an object laid over {POLICY}")
+        data = _merged(data, over)
     if not isinstance(data.get("command"), str) or "{prompt}" not in data["command"]:
         raise SystemExit(f"dispatch: {POLICY} needs a `command` template containing {{prompt}}")
     _check_env(data.get("env"), "env")
@@ -137,6 +150,15 @@ def load_policy(root: Path) -> dict:
             except re.error as exc:
                 raise SystemExit(f"dispatch: {POLICY} phases.{ph}.handover_id is not a regex: {exc}")
     return data
+
+
+def _merged(base: dict, over: dict) -> dict:
+    """`over` laid on `base`: mappings merge key by key, anything else replaces whole."""
+    out = dict(base)
+    for key, value in over.items():
+        out[key] = (_merged(out[key], value)
+                    if isinstance(value, dict) and isinstance(out.get(key), dict) else value)
+    return out
 
 
 def _check_env(env: object, where: str) -> None:
