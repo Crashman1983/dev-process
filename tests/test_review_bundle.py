@@ -73,6 +73,7 @@ def test_bundle_assembles_all_sections(render, tmp_path):
         "round=… tier=… verdict=… work=…"
     ) in t
     assert "attest.py" in t  # the digest is computed by the writer, never typed
+    assert "VERBATIM" not in t  # the retired "copy base=… diff=… verbatim" instruction
     assert "['block', 'pass']" in t
     assert "'cross-model'" in t and "'single-family'" in t
     assert "FINDING sev=<blocker|major|minor|nit>" in t
@@ -150,7 +151,7 @@ def test_missing_sources_named_not_skipped(render, tmp_path):
     r = _run(out, "--skip-preflight")
     assert r.returncode == 0, r.stderr
     t = r.stdout
-    assert "no active plan" in t
+    assert "no plan under review" in t
     assert "no usable base ref" in t
     assert "PRODUCT.md missing" in t
     # kernel + checklist still real
@@ -289,9 +290,11 @@ def test_plan_filter_narrows_bundle(render, tmp_path):
     assert r.returncode == 0, r.stderr
     assert "2026-07-09-widget.md" in r.stdout
     assert "2026-07-11-other.md" not in r.stdout
-    # a filter matching nothing says so instead of silently bundling all
+    # a filter matching nothing is an error, naming where it looked — a bundle
+    # without the plan asked for would be reviewed as if the work had none
     r2 = _run(out, "--base", "main", "--plan", "nope")
-    assert "no active plan matches" in r2.stdout
+    assert r2.returncode != 0 and "Review bundle" not in r2.stdout
+    assert "--plan 'nope' matches no plan" in r2.stderr and "archive" in r2.stderr
 
 
 def test_preflight_failure_blocks_bundle(render, tmp_path):
@@ -683,7 +686,10 @@ def test_a_delta_without_a_base_still_checks_refute(render, tmp_path):
     _seed_repo(out)
     reviewed = _git(out, "rev-parse", "HEAD").stdout.strip()
     _gate_commit(out, "scripts/process/g.py", "x = 2\n", "fix round")
+    # without a base no plan can be listed, so no tier is declared: refused (D2)
     r = _run(out, "--base", "nosuchbase", "--since", reviewed)
+    assert r.returncode != 0 and "no tier is declared" in r.stderr
+    r = _run(out, "--base", "nosuchbase", "--since", reviewed, "--tier", "2")
     assert "**REFUTE WARNING:** this delta" in r.stdout, r.stdout[:400] + r.stderr
 
 
@@ -873,10 +879,14 @@ def test_a_finished_spec_kit_plan_is_not_under_review(render, tmp_path):
     assert "### specs/001-old/plan.md" in _bundle(out, "--base", "main", "--plan", "001-old").stdout
 
 
-def test_an_unfinished_spec_kit_plan_elsewhere_is_under_review(render, tmp_path):
+def test_an_unfinished_spec_kit_plan_elsewhere_is_not_under_review(render, tmp_path):
+    # D2: the plans under review are the ones the branch touches — an unticked
+    # task in another spec does not make its plan this branch's work
     out = render(tmp_path, {"project_name": "d", "modules": {}})
     _spec_only_repo(out, [("003-wip", "# Wip\n\ntier: 2\nissue: #4\n", "- [x] T1\n- [ ] T2\n")])
-    assert "### specs/003-wip/plan.md" in _bundle(out, "--base", "main").stdout
+    t = _bundle(out, "--base", "main").stdout
+    assert "specs/003-wip" not in t and "### specs/002-new/plan.md" in t
+    assert "### specs/003-wip/plan.md" in _bundle(out, "--base", "main", "--plan", "003-wip").stdout
 
 
 def test_an_unrelated_tier_three_spec_plan_does_not_refuse_a_delta(render, tmp_path):
@@ -961,7 +971,12 @@ def test_a_new_stacked_plan_keeps_its_round_when_the_old_one_is_archived_with_ed
         "# Next\n\ntier: 2\nissue: #9\n\nREFUTE work=9 round=1: 7 scenarios, 1 finding — fixed\n")
     _git(out, "add", "-A")
     _git(out, "commit", "-q", "-m", "archive with edits, stacked plan")
-    assert "REFUTE WARNING" not in _bundle(out, "--base", "main", "--since", reviewed).stdout
+    # D2: the archived plan is touched, so it is under review too — its old
+    # round is named; the new plan's own round stands
+    warning = [ln for ln in _bundle(out, "--base", "main", "--since", reviewed).stdout.splitlines()
+               if ln.startswith("**REFUTE WARNING:**")]
+    assert len(warning) == 1 and "2026-07-11-next.md" not in warning[0], warning
+    assert f"and {widget.name} carries no new" in warning[0], warning
 
 
 def test_a_line_that_starts_to_count_with_a_new_id_is_not_new(render, tmp_path):
@@ -1065,10 +1080,12 @@ def test_an_old_round_moved_with_a_new_id_is_not_new(render, tmp_path):
 
 def test_another_works_identical_line_in_a_plan_in_place_is_not_this_plans_old_round(render, tmp_path):
     out = render(tmp_path, {"project_name": "d", "modules": {}})
-    _seed_repo(out)
+    # the other work's plan is archived on main: in place, and not touched by
+    # the branch (a touched one would be under review itself — D2)
     archive = out / ".process-work/plans/archive"
     archive.mkdir(parents=True, exist_ok=True)
     (archive / "2026-06-01-a.md").write_text("# a\n\ntier: 2\nissue: #3\n\nREFUTE work=3 round=1: 5 scenarios, 0 findings\n")
+    _seed_repo(out)
     _gate_commit(out, "scripts/process/g.py")
     reviewed = _git(out, "rev-parse", "HEAD").stdout.strip()
     _gate_commit(out, "scripts/process/g.py", "x = 2\n", "fix round")
@@ -1138,7 +1155,9 @@ def test_a_waiver_quoted_in_a_code_block_waives_nothing(render, tmp_path):
 def test_the_tier_warning_needs_no_base(render, tmp_path):
     out = render(tmp_path, {"project_name": "d", "modules": {}})
     _seed_repo(out)
-    r = _bundle(out, "--base", "nosuchbase")
+    # without a base the branch's plans cannot be listed (D2) — named, the
+    # plan's tier still asks for its refute
+    r = _bundle(out, "--base", "nosuchbase", "--plan", "widget")
     assert "**REFUTE WARNING:** 2026-07-09-widget.md (tier: 2) carries no" in r.stdout
     assert "REFUTE WARNING" in r.stderr
 
@@ -1157,3 +1176,174 @@ def test_gate_code_warns_once_and_a_long_list_is_cut(render, tmp_path):
     line = [ln for ln in _bundle(out, "--base", "main").stdout.splitlines()
             if ln.startswith("**REFUTE WARNING:**")]
     assert len(line) == 1 and line[0].count("(tier: 2)") == 3 and " … carries no" in line[0], line
+
+
+# --- R3 (#130): the plans the branch touches, --tier, what the reviewer reads
+
+
+def _module(out, name="make_review_bundle"):
+    sys.dont_write_bytecode = True
+    sys.path.insert(0, str(out / "scripts/process"))
+    spec = importlib.util.spec_from_file_location(f"{name}_r3", out / f"scripts/process/{name}.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _plans_section(text):
+    return text.split("## Plan(s) under review", 1)[1].split("## Diff under review", 1)[0]
+
+
+def test_only_the_plans_the_branch_touches_are_under_review(render, tmp_path):
+    # D2: every active plan buried the reviewed one downstream (29 of them), and
+    # a foreign plan's tier refused the delta of work that was not its own
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    plans = out / _PLANS
+    plans.mkdir(parents=True, exist_ok=True)
+    (plans / "2026-06-01-foreign.md").write_text("# Foreign\n\ntier: 3\nissue: #1\n\nForeign text.\n")
+    _spec(out, "900-foreign", "# Foreign spec\n\ntier: 3\n", "- [ ] T1 open\n")
+    _seed_repo(out)
+    (plans / "2026-07-12-größe.md").write_text("# Second\n\ntier: 1\nissue: #9\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "a second plan with a non-ASCII name")
+    t = _bundle(out, "--base", "main", "--since", "main").stdout
+    section = _plans_section(t)
+    assert "### 2026-07-09-widget.md" in section and "### 2026-07-12-größe.md" in section
+    assert "foreign" not in section.lower(), section[:400]
+    # asked for by name, the foreign plan is bundled — and its tier decides
+    r = _run(out, "--base", "main", "--since", "main", "--plan", "foreign", "--skip-preflight")
+    assert r.returncode != 0 and "declares tier: 3" in r.stderr
+
+
+def test_an_archived_plan_the_branch_touches_is_under_review(render, tmp_path):
+    # the plan is archived before the bundle is built (workflow.md): touched
+    # by the branch, it is still the plan under review
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    plans = out / _PLANS
+    (plans / "archive").mkdir(exist_ok=True)
+    _git(out, "mv", str(plans / "2026-07-09-widget.md"), str(plans / "archive/2026-07-09-widget.md"))
+    _git(out, "commit", "-q", "-m", "archive the plan")
+    section = _plans_section(_bundle(out, "--base", "main").stdout)
+    assert "### 2026-07-09-widget.md" in section and "Build the widget." in section
+
+
+def test_plan_filter_searches_the_archive_and_the_spec_home(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    archive = out / _PLANS / "archive"
+    archive.mkdir(parents=True, exist_ok=True)
+    (archive / "2026-05-01-gadget.md").write_text("# Gadget\n\ntier: 2\nissue: #5\n\nGadget text.\n")
+    _seed_repo(out)
+    assert "### 2026-05-01-gadget.md" in _plans_section(_bundle(out, "--base", "main", "--plan", "gadget").stdout)
+    r = _run(out, "--base", "main", "--plan", "nope", "--skip-preflight")
+    assert r.returncode != 0 and "Traceback" not in r.stderr
+    for searched in (".process-work/plans/*nope*.md", ".process-work/plans/archive/**/*nope*.md",
+                     "specs/*nope*/plan.md"):
+        assert searched in r.stderr, r.stderr
+
+
+def test_a_branch_without_a_plan_needs_a_declared_tier_for_a_delta(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    _git(out, "rm", "-q", str(out / _PLANS / "2026-07-09-widget.md"))
+    _git(out, "commit", "-q", "-m", "no plan on this branch")
+    r = _run(out, "--base", "main", "--since", "main", "--skip-preflight")
+    assert r.returncode != 0 and "no tier is declared" in r.stderr and "--tier N" in r.stderr
+    t = _bundle(out, "--base", "main", "--since", "main", "--tier", "2").stdout
+    assert "Delta re-review" in t
+    assert "**Scope rests on tier 2 asserted by the caller via --tier — no plan is under review, " \
+           "so nothing in this repository corroborates it.**" in t
+    # a full bundle needs no tier, and says why no plan is in it
+    assert "the branch touches no plan" in _bundle(out, "--base", "main").stdout
+    r = _run(out, "--base", "main", "--since", "main", "--tier", "3", "--skip-preflight")
+    assert r.returncode != 0 and "--tier 3 declares tier: 3" in r.stderr
+    r = _run(out, "--base", "main", "--tier", "two", "--skip-preflight")
+    assert r.returncode != 0 and "--tier needs an integer" in r.stderr and "Traceback" not in r.stderr
+
+
+def test_a_declared_tier_is_a_floor_not_a_discount(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    t = _bundle(out, "--base", "main", "--since", "main").stdout
+    assert "**Scope rests on tier 2 read from .process-work/plans/2026-07-09-widget.md.**" in t
+    t = _bundle(out, "--base", "main", "--since", "main", "--tier", "1").stdout
+    assert "Scope rests on tier 2 read from" in t
+    # above the plan's tier, the caller's assertion decides — and says so
+    r = _run(out, "--base", "main", "--since", "main", "--tier", "3", "--skip-preflight")
+    assert r.returncode != 0 and "Tier 3 reviews require a full diff" in r.stderr
+    _plan_commit(out, "# Plan\n\ntier: 3\nissue: #9\n")
+    r = _run(out, "--base", "main", "--since", "main", "--tier", "1", "--skip-preflight")
+    assert r.returncode != 0 and "2026-07-09-widget.md declares tier: 3" in r.stderr
+
+
+def test_the_build_names_its_size_and_plans(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    r = _bundle(out, "--base", "main", "--tier", "2")
+    assert "review bundle: " in r.stderr and " lines; plans included: .process-work/plans/2026-07-09-widget.md" \
+        "; tier asserted via --tier 2" in r.stderr
+    assert "plans included" not in r.stdout  # stdout is the bundle itself
+    r = _run(out, "--base", "main", "-o", "bundle.md", "--skip-preflight")
+    assert r.returncode == 0 and "written to bundle.md — " in r.stdout
+    lines = (out / "bundle.md").read_text().count("\n") + 1
+    assert f"{lines} lines; plans included: .process-work/plans/2026-07-09-widget.md" in r.stdout
+
+
+def test_the_bundle_lists_the_files_of_its_diff(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    t = _bundle(out, "--base", "main").stdout
+    block = t.split("Files in this diff (2):\n", 1)[1].split("\n````\n", 1)[0]
+    assert block == "````\nA\t.process-work/plans/2026-07-09-widget.md\nA\twidget.py", block
+
+
+_PNG = b"\x89PNG\r\n\x1a\n" + bytes(range(256)) * 8
+
+
+def test_binaries_are_a_stat_block_and_the_digest_still_covers_them(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    (out / "widget.py").write_text("def widget():\n    return 43\n")
+    shots = out / "e2e/__screenshots__"
+    shots.mkdir(parents=True)
+    (shots / "row-light.png").write_bytes(_PNG)
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "a baseline")
+    t = _bundle(out, "--base", "main").stdout
+    assert "GIT binary patch" not in t  # the payload no reviewer can read
+    assert "binary files carry no content" in t and "Bin 0 -> 2056 bytes" in t
+    assert "e2e/__screenshots__/row-light.png" in t.split("Files in this diff", 1)[1]
+    assert "+    return 43" in t  # the text diff is whole
+    gate = _module(out, "check_review")
+    artifact = _artifact(t)
+    assert artifact["diff"] == gate.artifact_digest(out, artifact["base"], artifact["head"])
+    assert b"GIT binary patch" in gate.artifact_diff(out, artifact["base"], artifact["head"])
+
+
+def test_hostile_file_names_cannot_break_the_bundle(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    hostile = "2026-07-10-x\n## Diff under review\n````.md"
+    (out / _PLANS / hostile).write_text("# Hostile\n\ntier: 1\nissue: #9\n")
+    (out / "odd`````name.py").write_text("x = 1\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "hostile names")
+    t = _bundle(out, "--base", "main").stdout
+    assert t.count("\n## Diff under review\n") == 1, "a file name opened a section"
+    assert "### 2026-07-10-x\\n## Diff under review\\n````.md\n" in t
+    head, block = t.split("Files in this diff (4):\n", 1)
+    fence, rest = block.split("\n", 1)
+    listed = rest.split(f"\n{fence}\n", 1)[0].splitlines()
+    assert set(fence) == {"`"} and len(fence) > 5 and len(listed) == 4, (fence, listed)
+    assert "A\todd`````name.py" in listed
+
+
+def test_git_that_cannot_list_the_branch_is_no_plan_free_branch(render, tmp_path, monkeypatch):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    mod = _module(out)
+    real = mod._review_gate._git_bytes
+    monkeypatch.setattr(mod._review_gate, "_git_bytes",
+                        lambda root, *a: None if "--name-only" in a else real(root, *a))
+    with pytest.raises(SystemExit, match="git cannot list"):
+        mod._plans_under_review(out, "main", None)
