@@ -889,6 +889,21 @@ def test_an_unfinished_spec_kit_plan_elsewhere_is_not_under_review(render, tmp_p
     assert "### specs/003-wip/plan.md" in _bundle(out, "--base", "main", "--plan", "003-wip").stdout
 
 
+def test_a_branch_that_only_ticks_tasks_brings_its_spec_plan(render, tmp_path):
+    """D2: a feature is touched when any file of its spec directory changes — a branch
+    that only ticks tasks.md implements that plan; without it the bundle had no plan,
+    no tier and no refute warning."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _spec_only_repo(out, [("003-wip", "# Wip\n\ntier: 2\nissue: #4\n", "- [ ] T1\n- [ ] T2\n")])
+    tasks = out / "specs/003-wip/tasks.md"
+    tasks.write_text("- [x] T1\n- [ ] T2\n")
+    _git(out, "commit", "-q", "-am", "T1")
+
+    t = _bundle(out, "--base", "main").stdout
+
+    assert "### specs/003-wip/plan.md" in t and "### specs/002-new/plan.md" in t, t[:600]
+
+
 def test_an_unrelated_tier_three_spec_plan_does_not_refuse_a_delta(render, tmp_path):
     # E2: a product document at specs/api/plan.md, no speckit module
     out = render(tmp_path, {"project_name": "d", "modules": {}})
