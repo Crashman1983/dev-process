@@ -220,8 +220,17 @@ def _plans_under_review(root: Path, base_ref: str | None, plan_filter: str | Non
         # carry no plan, no tier and no refute warning, and say nothing
         raise SystemExit(f"make_review_bundle: git cannot list the files of {base_ref}...HEAD "
                          "— repair the clone (`git fsck`, fetch) and build again")
-    return [root / rel for rel in sorted(names)
-            if _review_gate.record_kind(rel) in PLAN_HOMES and (root / rel).is_file()]
+    plans = {rel for rel in names
+             if _review_gate.record_kind(rel) in PLAN_HOMES and (root / rel).is_file()}
+    # a feature is touched when any file of its spec directory changes: a branch that
+    # only ticks tasks.md implements that plan (it had no plan, tier or refute warning)
+    specs = _review_gate.SPECS_DIR + "/"
+    for rel in names:
+        parts = rel[len(specs):].split("/") if rel.startswith(specs) else []
+        spec_plan = f"{specs}{parts[0]}/{_review_gate.SPEC_PLAN}" if len(parts) > 1 else ""
+        if spec_plan and (root / spec_plan).is_file():
+            plans.add(spec_plan)
+    return [root / rel for rel in sorted(plans)]
 
 
 def _declared_tier(texts: list[str]) -> int | None:
