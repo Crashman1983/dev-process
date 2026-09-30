@@ -32,7 +32,7 @@ import re
 import shutil
 import subprocess
 import sys
-from importlib.util import find_spec
+from importlib.util import find_spec, module_from_spec, spec_from_file_location
 from pathlib import Path
 
 RUNNER_REL = "scripts/process/gate_runner.py"
@@ -125,6 +125,20 @@ def _git(root: Path, *args: str) -> str | None:
     return proc.stdout.strip() if proc.returncode == 0 else None
 
 
+def _framework_only(root: Path) -> tuple[bool, bool]:
+    """(pre-commit's pre-push hook is installed, True) — for a clone without the
+    git-hooks module's merge guard, which then has nothing to check."""
+    hooks_dir = _git(root, "rev-parse", "--git-path", "hooks")
+    if not hooks_dir:
+        return False, True
+    hook = Path(hooks_dir) if Path(hooks_dir).is_absolute() else root / hooks_dir
+    try:
+        text = (hook / "pre-push").read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False, True
+    return "pre-commit" in text, True
+
+
 def hook_wiring_findings(root: Path) -> tuple[list[str], list[str]]:
     """(hard, soft) about whether the registered local hooks can run at all.
 
@@ -169,15 +183,16 @@ def hook_wiring_findings(root: Path) -> tuple[list[str], list[str]]:
             f"drop the config")
         return hard, soft
     # one owner for "is the framework's hook there, and the merge guard before it"
-    sys.path.insert(0, str(Path(__file__).resolve().parent))
-    try:
-        from install_hooks import guard_state  # noqa: PLC0415
-    except ImportError:
-        hard.append(f"{INSTALL_HOOKS_REL} is missing from this checkout — the merge "
-                    f"guard cannot be checked or installed")
-        return hard, soft
-    finally:
-        sys.path.pop(0)
+    # read from this checkout by path: no git-hooks module (a project's own
+    # pre-commit config) ships no guard, and then none is expected
+    installer = Path(__file__).resolve().parent / "install_hooks.py"
+    guard_state = _framework_only
+    if installer.is_file():
+        spec = spec_from_file_location("install_hooks_doctor", installer)
+        if spec is not None and spec.loader is not None:
+            module = module_from_spec(spec)
+            spec.loader.exec_module(module)
+            guard_state = module.guard_state
     installed, guarded = guard_state(root)
     if not installed:
         soft.append(
