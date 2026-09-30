@@ -21,18 +21,20 @@ when a test is still red after. The journal gets the block; with `--cause`
 also the `ROOT-CAUSE work=W round=R: <cause> — <tests>` line attest.py asks
 for, the test names filled in from the run. The why is the only free text.
 
-The command after `--` is pytest's (`python3 -m pytest …`, `uv run pytest …`);
-`--junitxml` is added to read the outcome per test. Stdlib only.
+The command after `--` is pytest's (`python3 -m pytest …`, `uv run pytest …`); a
+small probe plugin (`-p red_evidence_probe`, on PYTHONPATH) records pytest's own node
+ids and what each test's setup and call did. Stdlib only.
 """
 from __future__ import annotations
 
 import argparse
+import json
+import os
 import shutil
 import signal
 import subprocess
 import sys
 import tempfile
-import xml.etree.ElementTree as ET
 from pathlib import Path
 
 sys.dont_write_bytecode = True
@@ -52,54 +54,52 @@ _VALUED = {"-c", "-k", "-m", "-p", "-o", "-W", "--rootdir", "--confcutdir", "--b
 TIMEOUT = 1800
 
 
-PASSED, FAILED, NOT_RUN_CASE = "passed", "failed", "error"
+PASSED, FAILED, ERROR = "passed", "failed", "error"
+
+# asked of pytest itself, not guessed from a report: its own node id (relative to its own
+# rootdir, a doctest's id, a dot in a directory name all as pytest has them) and what each
+# phase did. Refute of #124, three rounds of guessing — the junit report's `classname` is
+# rootdir-relative and dotted, its `file` names where a test is defined, its `<error>` mixes
+# a setup error with a run — so the probe below records the facts where pytest decides them.
+_PROBE = """
+import json, os
+
+_seen = {}
 
 
-def _module_file(classname: str, tree: Path) -> tuple[str, list[str]] | None:
-    """(the collecting module's path, the class chain) for a junit classname, found by the
-    longest dotted prefix that is a file in `tree` — the module that ran the test, not the one
-    that defines it (an inherited test's `file` names its base class's module)."""
-    parts = classname.split(".")
-    for i in range(len(parts), 0, -1):
-        rel = "/".join(parts[:i]) + ".py"
-        if (tree / rel).is_file():
-            return rel, parts[i:]
-    return None
+def pytest_runtest_logreport(report):
+    if report.when == "call":
+        if report.passed:
+            _seen.setdefault(report.nodeid, "passed")
+        elif report.failed:
+            _seen[report.nodeid] = "failed"
+        else:
+            _seen[report.nodeid] = "skipped"
+    elif report.failed:
+        # setup or teardown failed: the test's own code did not prove anything
+        if _seen.get(report.nodeid) != "failed":
+            _seen[report.nodeid] = "error"
+    elif report.skipped:
+        _seen[report.nodeid] = "skipped"
 
 
-def outcomes(xml_path: Path, tree: Path) -> dict[str, str]:
-    """pytest node id (`path::Class::test[param]`) -> passed / failed / error, from a junit
-    XML report. Skipped tests and collection errors are left out; a missing report is no
-    outcome.
-
-    One table, and it reads the facts, not a proxy (refute of #124): the node id comes from
-    the module that collected the test (`classname` in `tree`), and only a `<failure>` is a
-    failed run — an `<error>` in setup means the test's own code never ran, so it proves
-    nothing about the old code. A test absent from the before-run was never red there."""
-    if not xml_path.is_file():
-        return {}
-    result: dict[str, str] = {}
-    for case in ET.parse(xml_path).getroot().iter("testcase"):
-        if any(child.tag == "skipped" for child in case):
-            continue
-        located = _module_file(case.get("classname") or "", tree)
-        if located is None:
-            continue  # a collection error, or a test outside the tree
-        path, klass = located
-        node = "::".join([path, *klass, case.get("name", "")])
-        tags = {child.tag for child in case}
-        result[node] = FAILED if "failure" in tags else NOT_RUN_CASE if "error" in tags else PASSED
-    return result
+def pytest_sessionfinish(session):
+    with open(os.environ["RED_EVIDENCE_OUT"], "w", encoding="utf-8") as fh:
+        json.dump({k: v for k, v in _seen.items() if v != "skipped"}, fh)
+"""
 
 
-def _run(command: list[str], cwd: Path, report: Path, timeout: int) -> tuple[int, dict[str, str]]:
+def _run(command: list[str], cwd: Path, probe_dir: Path, out: Path, timeout: int) -> tuple[int, dict[str, str]]:
+    """(exit code, node id -> passed/failed/error) of one pytest run, reported by the probe."""
+    env = dict(os.environ, RED_EVIDENCE_OUT=str(out),
+               PYTHONPATH=os.pathsep.join(p for p in (str(probe_dir), os.environ.get("PYTHONPATH", "")) if p))
     try:
-        proc = subprocess.run([*command, "-p", "no:cacheprovider",
-                               f"--junitxml={report}"], cwd=cwd, capture_output=True, text=True,
-                              timeout=timeout)
+        proc = subprocess.run([*command, "-p", "no:cacheprovider", "-p", "red_evidence_probe"],
+                              cwd=cwd, capture_output=True, text=True, timeout=timeout, env=env)
     except subprocess.TimeoutExpired:
         raise SystemExit(f"red_evidence: the run in {cwd} took longer than {timeout} s") from None
-    return proc.returncode, outcomes(report, cwd)
+    seen = json.loads(out.read_text(encoding="utf-8")) if out.is_file() else {}
+    return proc.returncode, seen
 
 
 def _portable(command: list[str], root: Path) -> list[str]:
@@ -147,22 +147,33 @@ def test_paths(root: Path, command: list[str], copy: list[str]) -> list[str]:
     return sorted(found)
 
 
+def _is_test_file(rel: str) -> bool:
+    name = Path(rel).name
+    return name == "conftest.py" or (name.endswith(".py") and (name.startswith("test_") or name.endswith("_test.py")))
+
+
 def _take_along(root: Path, tree: Path, rels: list[str]) -> None:
+    """Directories and test files travel into the old tree; a source file named on the command
+    (`--doctest-modules calc.py`) does not — carried along, the old run exercised the new code."""
     for rel in rels:
         src, dst = root / rel, tree / rel
         dst.parent.mkdir(parents=True, exist_ok=True)
         if src.is_dir():
             shutil.copytree(src, dst, dirs_exist_ok=True, ignore=shutil.ignore_patterns("__pycache__"))
-        else:
+        elif _is_test_file(rel) or not rel.endswith(".py"):
             shutil.copy2(src, dst)
 
 
 def measure(root: Path, before: str, command: list[str], copy: list[str], timeout: int = TIMEOUT) -> dict:
     command = _portable(command, root)
-    carried = test_paths(root, command, copy)
+    carried = [r for r in test_paths(root, command, copy)
+               if (root / r).is_dir() or _is_test_file(r) or not r.endswith(".py")]
     # a worktree a killed run left behind is registered but gone: prune it first
     subprocess.run(["git", "-C", str(root), "worktree", "prune"], capture_output=True)
     with tempfile.TemporaryDirectory(prefix="red-evidence-") as tmp:
+        probe = Path(tmp) / "probe"
+        probe.mkdir()
+        (probe / "red_evidence_probe.py").write_text(_PROBE, encoding="utf-8")
         tree = Path(tmp) / "before"
         add = subprocess.run(["git", "-C", str(root), "worktree", "add", "--detach", "-q", str(tree), before],
                              capture_output=True, text=True)
@@ -170,11 +181,11 @@ def measure(root: Path, before: str, command: list[str], copy: list[str], timeou
             raise SystemExit(f"red_evidence: cannot check out {before}: {add.stderr.strip()}")
         try:
             _take_along(root, tree, carried)
-            exit_before, was = _run(command, tree, Path(tmp) / "before.xml", timeout)
+            exit_before, was = _run(command, tree, probe, Path(tmp) / "before.json", timeout)
         finally:
             subprocess.run(["git", "-C", str(root), "worktree", "remove", "--force", str(tree)],
                            capture_output=True)
-        exit_after, now = _run(command, root, Path(tmp) / "after.xml", timeout)
+        exit_after, now = _run(command, root, probe, Path(tmp) / "after.json", timeout)
     return {"command": command, "before": before, "exit_before": exit_before, "exit_after": exit_after,
             "red_to_green": sorted(t for t, s in now.items() if s == PASSED and was.get(t) == FAILED),
             "still_red": sorted(t for t, s in now.items() if s != PASSED), "carried": carried}
