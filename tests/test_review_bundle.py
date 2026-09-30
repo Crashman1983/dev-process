@@ -1362,3 +1362,40 @@ def test_git_that_cannot_list_the_branch_is_no_plan_free_branch(render, tmp_path
                         lambda root, *a: None if "--name-only" in a else real(root, *a))
     with pytest.raises(SystemExit, match="git cannot list"):
         mod._plans_under_review(out, "main", None)
+
+
+def test_a_plan_whose_issue_the_range_claims_is_under_review(render, tmp_path):
+    # refutation (finding 6): the gate joins a plan to the work by the issue a
+    # commit claims too — the bundle showed no plan and took a delta on --tier 2
+    # while the gate enforced the plan's Tier 3
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    plans = out / _PLANS
+    plans.mkdir(parents=True, exist_ok=True)
+    (plans / "2026-06-01-auth.md").write_text("# Auth\n\ntier: 3\nissue: #42\n\nAuth plan.\n")
+    (plans / "2026-06-02-other.md").write_text("# Other\n\ntier: 3\nissue: #43\n\nOther plan.\n")
+    _git(out, "init", "-q", "-b", "main")
+    _git(out, "config", "user.email", "t@t")
+    _git(out, "config", "user.name", "t")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "base")
+    _git(out, "checkout", "-q", "-b", "feat")
+    (out / "auth.py").write_text("x = 1\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "feat: auth (#42)")
+    r = _bundle(out, "--base", "main")
+    section = _plans_section(r.stdout)
+    assert "### 2026-06-01-auth.md" in section and "Auth plan." in section
+    assert "plans included: .process-work/plans/2026-06-01-auth.md" in r.stderr
+    # D2 still holds: a plan of an issue the range does not claim stays out
+    assert "other" not in section.lower() and "2026-06-02-other" not in r.stderr
+    r = _run(out, "--base", "main", "--since", "HEAD~1", "--tier", "2", "--skip-preflight")
+    assert r.returncode != 0 and "2026-06-01-auth.md declares tier: 3" in r.stderr
+
+
+@pytest.mark.parametrize("config", ["docs/process/gates.local.json", "docs/process/model-policy.local.json"])
+def test_the_local_gate_configuration_is_gate_code(render, tmp_path, config):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    _gate_commit(out, config, "{}\n", "configure the gates")
+    t = _bundle(out, "--base", "main").stdout
+    assert f"changes gate code ({config})" in t, t[:600]

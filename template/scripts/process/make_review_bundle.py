@@ -201,7 +201,8 @@ def _plans_from_filter(root: Path, plan_filter: str) -> list[Path]:
 def _plans_under_review(root: Path, base_ref: str | None, plan_filter: str | None) -> list[Path]:
     """The plans this review is about: with `--plan`, the ones it names;
     otherwise the plans the branch touches (`base_ref...HEAD`) — active,
-    archived or Spec Kit — and nothing else.
+    archived or Spec Kit — plus every plan whose issue a commit of the range
+    claims (the review gate's own join), and nothing else.
 
     Bundling every active plan buried the reviewed one downstream (29 active
     plans, some 12,000 lines of other work's text) and let a foreign plan's
@@ -230,6 +231,22 @@ def _plans_under_review(root: Path, base_ref: str | None, plan_filter: str | Non
         spec_plan = f"{specs}{parts[0]}/{_review_gate.SPEC_PLAN}" if len(parts) > 1 else ""
         if spec_plan and (root / spec_plan).is_file():
             plans.add(spec_plan)
+    # the gate's second join: a plan is this work's when a commit of the range
+    # CLAIMS its issue (`check_review.issue_refs_in_range`), touched or not —
+    # otherwise the gate enforced a Tier 3 plan the bundle never showed, and a
+    # delta was accepted on a caller's --tier 2 (refutation)
+    fork = _git(root, "merge-base", base_ref, "HEAD")
+    try:
+        claimed = _review_gate.issue_refs_in_range(root, "HEAD", base=fork.strip(), strict=True) \
+            if fork and fork.strip() else set()
+    except _review_gate.GitReadError:
+        raise SystemExit(f"make_review_bundle: git cannot read the commits of {base_ref}..HEAD "
+                         "— repair the clone and build again") from None
+    if claimed:
+        for rel, f in _review_gate.record_files(root, PLAN_HOMES):
+            text = _review_gate._unfenced(_read_plan(f))
+            if claimed & _review_gate._plan_issue_numbers(text):
+                plans.add(rel)
     return [root / rel for rel in sorted(plans)]
 
 
@@ -469,7 +486,9 @@ SIZE_IGNORED = re.compile(r"^\.process-work/|(^|/)(package-lock\.json|uv\.lock|p
 # gate code as `docs/process/refute.md` defines it, approximated by path: the
 # gates, the hooks, and what starts them (make targets, CI, pre-commit)
 GATE_PATHS = ("scripts/process/", ".githooks/", ".github/workflows/")
-GATE_FILES = ("Makefile", ".pre-commit-config.yaml")
+# ...and the local gate configuration: which gates run, which models review
+GATE_FILES = ("Makefile", ".pre-commit-config.yaml",
+              "docs/process/gates.local.json", "docs/process/model-policy.local.json")
 # a real REFUTE line: at most three spaces of indent (four is a code block),
 # any list marker, a work id that is not the brief's placeholder, a round and
 # what was found. A bare `REFUTE work=x` or a line in backticks is a mention,
