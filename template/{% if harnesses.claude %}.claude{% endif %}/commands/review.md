@@ -13,7 +13,7 @@ compacted them out of context. Then read
 rule adherence against the plan or spec, working through
 `docs/process/review-checklist.md` (what a review actually checks —
 completeness, correctness, security, design, decisions, product frame, tests).
-If `docs/process/review.local.md` exists, read it next: the project's own
+If `review.local.md` in `docs/process/` exists, read it next: the project's own
 review dimensions. They sharpen the checklist and never weaken it.
 Fixes loop back through `/execute` and then `/review` again until the branch is
 clean.
