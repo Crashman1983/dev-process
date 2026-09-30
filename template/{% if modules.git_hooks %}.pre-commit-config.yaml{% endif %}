@@ -18,6 +18,17 @@ repos:
         stages: [pre-commit]
   - repo: local
     hooks:
+      # a push to main needs its route (PROCESS_MERGE_ROUTE, set by the train
+      # and finish.py) or a logged owner override; plan and review sessions
+      # never push to main. Its own hook, so SKIP=process-gates does not skip
+      # it — it logs that bypass instead (docs/process/train.md, merge route)
+      - id: merge-route
+        name: dev-process merge route (pushes to main)
+        entry: uv run scripts/process/merge_route.py
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
       - id: process-gates
         name: dev-process gates (gate_runner)
         entry: uv run scripts/process/gate_runner.py

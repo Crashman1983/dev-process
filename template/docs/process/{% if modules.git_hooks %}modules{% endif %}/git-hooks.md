@@ -8,11 +8,16 @@ already know.
 
 ## What it ships
 
-A rendered `.pre-commit-config.yaml` with two hooks:
+A rendered `.pre-commit-config.yaml` with three hooks:
 
 - **`no-commit-to-branch`** (pre-commit stage, upstream standard hook):
   blocks direct commits to `main`/`master` — branch discipline
   (`commits.md`).
+- **`merge-route`** (pre-push stage, local hook): runs
+  `scripts/process/merge_route.py` on the push target the framework names
+  (`PRE_COMMIT_REMOTE_BRANCH`). A push to main needs its route (the train
+  or `finish.py --apply`) or a logged owner override, and never comes from
+  a plan or review session (`train.md`, "Who pushes to main").
 - **`process-gates`** (pre-push stage, local hook): runs
   `uv run scripts/process/gate_runner.py` — the same manifest-aware gates CI
   runs, so a push that would fail CI fails at your machine first.
@@ -24,7 +29,7 @@ uvx pre-commit install --hook-type pre-commit --hook-type pre-push
 ```
 
 `pre-commit` manages `.git/hooks` itself and reads ONE config file. A project
-that already had a `.pre-commit-config.yaml` keeps it and adds the two process
+that already had a `.pre-commit-config.yaml` keeps it and adds the three process
 hooks to it (BOOTSTRAP, brownfield notes). Re-run the same command after a
 `copier update`; it is idempotent.
 
@@ -35,6 +40,11 @@ hooks to it (BOOTSTRAP, brownfield notes). Re-run the same command after a
 - Anything else (`--no-verify`, `SKIP=process-gates`) is a skipped gate:
   allowed in an emergency, documented in the commit body (mandatory rule 8),
   and caught by CI on push anyway.
+- `SKIP=process-gates` does not skip `merge-route`: on a push to main the
+  guard still bars plan and review sessions, refuses the skip from any
+  dispatched session, and logs it in `<git-common-dir>/process-owner-overrides.log`.
+  `SKIP=merge-route` and `--no-verify` skip the guard itself — the same
+  class as a clone without hooks.
 
 ## One hook manager — and a doctor for it
 

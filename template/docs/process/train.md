@@ -121,6 +121,38 @@ the test lanes are free where the project has a lane script (see `tower.md`, lan
 Run from the root worktree on the integration branch with a clean tree.
 The log lives in the clone's git common dir (`process-train/<stamp>.log`).
 
+## Who pushes to main — the merge route
+
+A push to main is the merge, and the pre-push guard
+(`scripts/process/merge_route.py`, the `merge-route` hook of the
+git-hooks module) decides it before any gate. Observed downstream: a review
+session reset its branch onto main and published 16 commits past a `block`.
+
+- **Plan and review sessions never push to main.** The phase is the
+  strictest of `PROCESS_PHASE` and every live dispatch record of this
+  session (same worktree, same branch, or an ancestor process). A record the
+  guard cannot read — or a phase it cannot determine — refuses the push;
+  `dispatch.py stop <branch>` clears a record whose session has ended.
+- **The route is named.** The train and `finish.py --apply` set
+  `PROCESS_MERGE_ROUTE=train|finish` for their own push to main and for
+  nothing else. Any other push to main is refused.
+- **The owner override** — `PROCESS_OWNER_OVERRIDE="<reason>" git push …` —
+  passes a push past the train. It needs a reason, is refused from a
+  dispatched session, and appends one line (time, user, host, branch, head,
+  kind, reason, targets) to `<git-common-dir>/process-owner-overrides.log`.
+- **Skipped gates** (`SKIP=process-gates`, or `--bypass NAME` from a
+  project's own hook switch) on a push to main keep the phase bar, need no
+  route, are refused from a dispatched session, and land in the same ledger.
+
+The review gate adds the verdict: on the merge push, a work whose latest
+REVIEW (highest round; a tie goes to the block) is `verdict=block` stops the
+push, whatever its tier, read from the commits of the pushed range
+(`check_review.py`; `--standing-block <sha>[:<remote_sha>]` for a custom
+hook that reads git's ref lines). The markers are environment variables and
+can be forged; the guard makes the intent explicit and the bypasses
+visible. `--no-verify`, `SKIP=merge-route` and a clone without hooks stay
+out of its reach.
+
 ## What the train does not do
 
 It does not review, attest or certify. It merges what the process already

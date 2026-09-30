@@ -120,8 +120,8 @@ existing file and add a pointer to `docs/process/start-here.md`.
 **Merge the other skipped files** (render the template once into an empty
 scratch directory to have the originals at hand):
 - `.pre-commit-config.yaml` — pre-commit reads one config: add the template's
-  two hooks (`no-commit-to-branch` at the pre-commit stage, the local
-  `process-gates` hook at pre-push) to yours.
+  three hooks (`no-commit-to-branch` at the pre-commit stage, the local
+  `merge-route` and `process-gates` hooks at pre-push) to yours.
 - `PRODUCT.md` — the product-frame gate reads the template's layout
   (`status:` line and sections); move your content into it.
 - `ARCHITECTURE.md` — add the template's `arch` block (inert example first)
