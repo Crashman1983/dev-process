@@ -1044,3 +1044,51 @@ def test_phase_over_reads_the_local_branch_without_origin_and_says_unknown_when_
     assert mod.phase_over(out, rec, rep, local=True) is True
     assert mod.phase_over(out, rec, rep) is None  # live origin cannot be asked here: unknown
 
+
+# --- the merge guard's side of dispatch (merge_route.py) ------------------------------
+
+@pytest.mark.parametrize("phase", ["plan", "review"])
+@pytest.mark.parametrize("remote", [False, True])
+def test_plan_and_review_prompts_forbid_the_push_to_main(render, tmp_path, phase, remote):
+    # a supplement, not the enforcement (the pre-push hook is): observed downstream, a
+    # review prompt that only said "never fix code" ended with its branch pushed to main
+    mod = _load_dispatch(render(tmp_path, {"project_name": "d", "modules": {}}))
+    text = mod.prompt_for(phase, 7, 2, "7-work", "m", remote=remote)
+    assert "never push to main" in text and "Push only branch `7-work`" in text
+
+
+def test_the_execute_prompt_keeps_the_merge_tail_open(render, tmp_path):
+    mod = _load_dispatch(render(tmp_path, {"project_name": "d", "modules": {}}))
+    assert "never push to main" not in mod.prompt_for("execute", 7, 2, "7-work", "m")
+
+
+def test_a_record_is_replaced_in_one_step(render, tmp_path, monkeypatch):
+    # the guard reads the records while a dispatch may be writing one: a half file
+    # must never be what it sees, and a failed write leaves the old record whole
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    mod = _load_dispatch(out)
+    mod._write_record(out, "7-work", {"branch": "7-work", "phase": "review", "pid": 1})
+    folder = out / ".git" / "process-dispatch"
+    assert [p.name for p in folder.iterdir()] == ["7-work.json"]
+
+    def broken(*_a, **_k):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(mod.os, "replace", broken)
+    with pytest.raises(OSError):
+        mod._write_record(out, "7-work", {"branch": "7-work", "phase": "execute", "pid": 2})
+    assert [p.name for p in folder.iterdir()] == ["7-work.json"]
+    assert json.loads((folder / "7-work.json").read_text())["phase"] == "review"
+
+
+def test_session_pid_is_the_worker_or_the_pane(render, tmp_path, monkeypatch):
+    mod = _load_dispatch(render(tmp_path, {"project_name": "d", "modules": {}}))
+    assert mod.session_pid({"pid": 4242}) == 4242
+    assert mod.session_pid({"remote": True}) == 0
+    assert mod.session_pid({"pid": "junk"}) == 0
+    monkeypatch.setattr(mod, "_tmux", lambda *a: subprocess.CompletedProcess(a, 0, "777\n", ""))
+    assert mod.session_pid({"tmux_window": "@3", "pid": 1}) == 777
+    monkeypatch.setattr(mod, "_tmux", lambda *a: subprocess.CompletedProcess(a, 1, "", "gone"))
+    assert mod.session_pid({"tmux_window": "@3"}) == 0
+
