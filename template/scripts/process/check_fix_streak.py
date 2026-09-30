@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
-"""check_fix_streak — the mechanical arm of mandatory rule 6 (root cause
-before symptom): the third `fix` commit on the same file in a branch asks the
-structural question before the next patch is stacked.
+"""check_fix_streak — the mechanical arm of mandatory rules 4 and 6: fix
+commits piling up on one file ask the structural question before the next
+patch is stacked.
 
 The rule stood as a convention and did not fire on its own: downstream, one
 branch collected six fix commits on the same owner before anyone asked
-whether the design was wrong. This gate counts conventional `fix:`/`fix(…)`
-commits per touched file on the current branch against the integration
-branch and prints a note from three on. Note-only (exit 0 always): it makes
-the pattern visible, it does not block. A no-op on the integration branch and
-in clones without a merge base.
+whether the design was wrong, and a gate took four review rounds whose
+findings all had one cause — the rewrite came only in the fourth. This gate
+counts conventional `fix:`/`fix(…)` commits per touched file on the current
+branch against the integration branch. The second on one file asks rule 4's
+increment-vs-rewrite call, recorded as a DECISION before the next patch; from
+the third on, rule 6: the root cause is missing. Note-only (exit 0 always):
+it makes the pattern visible, it does not block. A no-op on the integration
+branch and in clones without a merge base.
 
 Usage: check_fix_streak.py [root]      Stdlib only.
 """
@@ -20,7 +23,8 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
-THRESHOLD = 3
+THRESHOLD = 2
+ROOT_CAUSE_AT = 3
 INTEGRATION = ("main", "master")
 BASES = ("origin/main", "main", "origin/master", "master")
 
@@ -83,8 +87,13 @@ def main(argv: list[str]) -> int:
         return 0
     streaks = fix_streaks(log)
     for path, n in sorted(streaks.items(), key=lambda kv: (-kv[1], kv[0])):
-        print(f"fix-streak: note: {n} fix commits on {path} in this branch — mandatory rule 6: "
-              f"find the root cause (or record the structural decision) before the next patch")
+        if n >= ROOT_CAUSE_AT:
+            print(f"fix-streak: note: {n} fix commits on {path} in this branch — mandatory rule 6: "
+                  f"find the root cause (or record the structural decision) before the next patch")
+        else:
+            print(f"fix-streak: note: {n} fix commits on {path} in this branch — mandatory rule 4: "
+                  f"record the increment-vs-rewrite call as a DECISION before the next patch — do "
+                  f"the findings share one cause that one owner would close?")
     if not streaks:
         print("fix-streak: OK")
     return 0

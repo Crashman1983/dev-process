@@ -112,6 +112,8 @@ def test_mandatory_rules_names_decision_records_and_patch_count(render, tmp_path
     assert "product" in text and "process" in text  # decisions are typed, not just architecture
     assert "increment vs. rewrite" in text.lower() or "increment vs rewrite" in text.lower()
     assert "third patch" in text.lower()
+    # the question comes at the SECOND hit on the same spot, recorded before the next patch
+    assert "second fix" in text.lower() and "decision" in text.lower()
 
 
 def test_start_here_reads_decision_records_before_planning(render, tmp_path):
@@ -508,6 +510,12 @@ def test_refute_scales_with_the_tier_and_checks_owner_first(render, tmp_path):
     order = [brief.index(k) for k in ("1. OWNER", "2. FAIL-OPEN", "3. EDGE CASES", "4. EVIDENCE")]
     assert order == sorted(order)
     assert "differential test" in text and "NEW" in brief and "PRE-EXISTING" in brief
+    # after the findings, one line on the pattern across them — the rewrite a fix round needs
+    # is visible there, not in the fourth round (downstream: four rounds, one cause)
+    assert brief.index("PATTERN") > brief.index("4. EVIDENCE")
+    assert "no common cause" in brief
+    checks = text.split("## What the refuter checks", 1)[1].split("\n## ", 1)[0]
+    assert "pattern" in checks.lower() and "one owner" in checks
     catalogue = text.split("## Edge-case catalogue", 1)[1].split("\n## ", 1)[0]
     for cls in ("**Names:**", "**Empty, missing, equal:**", "**Rename, move, mode:**",
                 "**Conflicts without markers:**", "**Environment:**", "**Text as rendered:**"):
