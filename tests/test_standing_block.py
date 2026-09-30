@@ -294,8 +294,8 @@ def test_the_cli_takes_the_remote_sha_as_its_second_part(tmp_path):
 
 
 @pytest.mark.parametrize("origin", [None, "remote", "tip"])
-@pytest.mark.parametrize("remote_sha", ["0" * 40, "ab" * 20, "", "  ", "zz" * 20, "abc"],
-                         ids=["new-ref", "not-in-clone", "empty", "blank", "no-hex", "short"])
+@pytest.mark.parametrize("remote_sha", ["ab" * 20, "", "  ", "zz" * 20, "abc"],
+                         ids=["not-in-clone", "empty", "blank", "no-hex", "short"])
 def test_an_unusable_remote_sha_refuses_whatever_origin_says(tmp_path, origin, remote_sha):
     # neither the local main nor origin/main stands in for the base the remote has
     root, tip, real = _advanced_local_main(tmp_path)
@@ -321,11 +321,43 @@ def test_a_resolvable_remote_sha_stays_the_base(tmp_path):
     assert _blocked(mod.standing_block_findings(root, tip, remote_sha=remote_sha), "42")
 
 
-@pytest.mark.parametrize("remote_sha", ["zz" * 20, "0" * 40, "ab" * 20, ""])
+@pytest.mark.parametrize("remote_sha", ["zz" * 20, "ab" * 20, ""])
 def test_an_unusable_remote_sha_refuses_even_without_a_block(tmp_path, remote_sha):
     # the base is decided before the question "is there a block?"
     root, tip, _real = _advanced_local_main(tmp_path, verdict="pass")
     assert _cannot_tell(mod.standing_block_findings(root, tip, remote_sha=remote_sha))
+
+
+@pytest.mark.parametrize("origin", [None, "tip"])
+@pytest.mark.parametrize("verdict", ["block", "pass"])
+def test_a_push_that_creates_main_carries_every_work_at_its_tip(tmp_path, origin, verdict):
+    # an all-zero remote SHA: the remote has no main yet, the whole history is pushed —
+    # no ref stands in for a base, and every block standing at the tip is carried
+    root, tip, _real = _advanced_local_main(tmp_path, verdict=verdict)
+    if origin:
+        _git(root, "update-ref", "refs/remotes/origin/main", tip)
+    findings = mod.standing_block_findings(root, tip, remote_sha="0" * 40)
+    assert _blocked(findings, "42") is (verdict == "block"), findings
+    assert not _cannot_tell(findings)
+
+
+@pytest.mark.parametrize("remote", ["origin", "upstream"])
+def test_the_ladder_never_takes_a_ref_that_already_holds_the_tip(tmp_path, remote):
+    # refuted: a remote not named origin, local main fast-forwarded onto the pushed
+    # commit — the range was empty and the block rode a finish push through check()
+    root = _repo(tmp_path)
+    _git(root, "update-ref", f"refs/remotes/{remote}/main", "main")
+    _write(root, SHARD, _line("2168", "block", 2) + "\n")
+    tip = _commit(root, "docs: attest (#2168)")
+    _git(root, "checkout", "-q", "main")
+    _git(root, "merge", "-q", "--ff-only", tip)
+    assert _blocked(mod.check(root)[0], "2168")
+    assert _blocked(mod.standing_block_findings(root, tip), "2168")
+
+
+def test_without_any_ref_before_the_tip_a_block_cannot_be_ruled_out(tmp_path):
+    root, tip, _real = _advanced_local_main(tmp_path)  # main == tip, no remote refs
+    assert _cannot_tell(mod.standing_block_findings(root, tip))
 
 
 def test_a_later_pass_clears_the_block_with_a_remote_sha_too(tmp_path):
