@@ -12,7 +12,7 @@ Template published on GitHub: [github.com/Crashman1983/dev-process](https://gith
 
 The process was built and improved over many iterations in live operation; it has yet to prove itself at scale. One possible next step is a pilot, for example on GitHub with Copilot. This document describes what is implemented today, separates hard-checked rules from those kept soft, shows how the building blocks could be carried over to such a platform, and collects open questions at the end. Operational details of the reference project are examples, not requirements.
 
-> German version: [UEBERBLICK.md](UEBERBLICK.md) · PDF (German, as of v2.28.0; this text is newer): [Entwicklungsprozess-mit-KI-Agenten.pdf](Entwicklungsprozess-mit-KI-Agenten.pdf).
+> German version: [UEBERBLICK.md](UEBERBLICK.md) · PDF (German): [Entwicklungsprozess-mit-KI-Agenten.pdf](Entwicklungsprozess-mit-KI-Agenten.pdf).
 > Setup: [`BOOTSTRAP.md`](../BOOTSTRAP.md) · System requirements (German): [`SYSTEM-REQUIREMENTS.md`](SYSTEM-REQUIREMENTS.md).
 
 ---

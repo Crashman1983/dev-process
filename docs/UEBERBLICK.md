@@ -12,7 +12,7 @@ Vorlage öffentlich auf GitHub: [github.com/Crashman1983/dev-process](https://gi
 
 Der Prozess ist in vielen Iterationen im laufenden Betrieb entstanden und verbessert worden; in der Fläche muss er sich noch beweisen. Ein möglicher nächster Schritt ist ein Pilot, etwa auf GitHub mit Copilot. Dieses Dokument beschreibt, was heute umgesetzt ist, unterscheidet zwischen hart geprüften und weich gehaltenen Regeln, zeigt, wie sich die Bausteine auf eine solche Plattform übertragen ließen, und sammelt offene Fragen am Ende. Betriebsdetails des Referenzprojekts sind Beispiele, keine Vorgaben.
 
-> Gestaltet als PDF: [Entwicklungsprozess-mit-KI-Agenten.pdf](Entwicklungsprozess-mit-KI-Agenten.pdf) – Stand v2.28.0; dieser Text ist neuer.
+> Inhaltsgleich als PDF: [Entwicklungsprozess-mit-KI-Agenten.pdf](Entwicklungsprozess-mit-KI-Agenten.pdf) (gebaut mit `tools/build_overview_pdf.py`).
 > Einrichten: [`BOOTSTRAP.md`](../BOOTSTRAP.md) · Systemumgebung: [`SYSTEM-REQUIREMENTS.md`](SYSTEM-REQUIREMENTS.md).
 
 ---

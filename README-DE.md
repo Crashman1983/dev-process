@@ -21,7 +21,7 @@ eigene Arbeit ab, und das Gedächtnis liegt in Dateien statt im Kontext.
 
 | Wofür | Dokument |
 |---|---|
-| Was der Prozess ist, warum er so ist, was offen ist | **[Überblick](docs/UEBERBLICK.md)** · [Overview (English)](docs/OVERVIEW.md) · [PDF (Stand v2.28.0)](docs/Entwicklungsprozess-mit-KI-Agenten.pdf) |
+| Was der Prozess ist, warum er so ist, was offen ist | **[Überblick](docs/UEBERBLICK.md)** · [Overview (English)](docs/OVERVIEW.md) · [PDF](docs/Entwicklungsprozess-mit-KI-Agenten.pdf) |
 | Einrichten, headless oder im Dialog, und aktualisieren | [`BOOTSTRAP.md`](BOOTSTRAP.md) |
 | Was auf dem Rechner und in CI gebraucht wird | [`docs/SYSTEM-REQUIREMENTS.md`](docs/SYSTEM-REQUIREMENTS.md) |
 | Abhängigkeiten dieses Repositorys (erzeugt, auch als CycloneDX) | [`docs/SBOM.md`](docs/SBOM.md) · [`docs/sbom.cdx.json`](docs/sbom.cdx.json) |
