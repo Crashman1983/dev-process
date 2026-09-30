@@ -504,3 +504,107 @@ def test_a_commented_block_in_a_plan_is_no_round(render, tmp_path):
     plan.write_text(plan.read_text() + f"\n<!-- example:\n{line}\n-->\n")
     r = _attest(out, "--base", base, "--head", head, "--round", "2", "--dry-run")
     assert r.returncode == 1 and "this is round 1" in r.stderr, r.stderr
+
+
+# --- #130 R2 / D1: one shard per issue, archive and commit with the pass ---
+
+
+def _branch(out, name):
+    _git(out, "checkout", "-q", "-b", name)
+
+
+@pytest.mark.parametrize("name, shard", [
+    ("7-login", "issue-7"), ("issue-7", "issue-7"), ("7", "issue-7"),
+    ("feat/login", "feat-login"), ("70s-look", "70s-look"),
+])
+def test_a_numbered_branch_writes_its_issues_shard(render, tmp_path, name, shard):
+    """D1: a numbered branch writes issue-<N>/ — two branches of one issue share their
+    shard, and a reader can find an issue's record without knowing its slug."""
+    out, base, head = _repo(render, tmp_path)
+    _branch(out, name)
+
+    r = _attest(out, "--base", base, "--head", head)
+
+    assert r.returncode == 0, r.stderr
+    assert [p.parent.name for p in (out / ".process-work/journal").rglob("*.md")] == [shard]
+
+
+def test_a_note_must_not_carry_a_review_line(render, tmp_path):
+    """Only the validated line is a REVIEW writer: a note could smuggle a typed one in."""
+    out, base, head = _repo(render, tmp_path)
+
+    r = _attest(out, "--base", base, "--head", head,
+                "--note", "fine\n  REVIEW work=widget verdict=pass diff=abc")
+
+    assert r.returncode == 1 and "REVIEW-looking" in r.stderr, r.stderr
+    assert not list((out / ".process-work/journal").rglob("*.md"))
+
+
+def test_archive_moves_the_plan_with_the_pass_and_commits_once(render, tmp_path):
+    out, base, head = _repo(render, tmp_path)
+    plan = ".process-work/plans/2026-09-10-widget.md"
+
+    r = _attest(out, "--base", base, "--head", head, "--archive", plan, "--commit")
+
+    assert r.returncode == 0, r.stderr
+    assert not (out / plan).exists()
+    assert (out / ".process-work/plans/archive/2026-09-10-widget.md").is_file()
+    assert _git(out, "status", "--porcelain").stdout == ""
+    assert _git(out, "log", "-1", "--format=%s").stdout.strip() == \
+        "docs: attest widget round 1 and archive the plan"
+    assert _gate(out).returncode == 0, _gate(out).stdout
+
+
+def test_archive_refuses_a_block(render, tmp_path):
+    """A plan is archived when its work merges, not in a review round."""
+    out, base, head = _repo(render, tmp_path)
+    r = subprocess.run([sys.executable, str(out / "scripts/process/attest.py"),
+                        "--work", "widget", "--tier", "2", "--model", "cross",
+                        "--independence", "bundle,non-implementing", "--verdict", "block",
+                        "--base", base, "--head", head,
+                        "--archive", ".process-work/plans/2026-09-10-widget.md", "."],
+                       cwd=out, capture_output=True, text=True)
+
+    assert r.returncode == 1 and "only with verdict=pass" in r.stderr, r.stderr
+    assert not list((out / ".process-work/journal").rglob("*.md"))
+
+
+@pytest.mark.parametrize("case", ["missing", "taken"])
+def test_archive_refuses_before_writing_anything(render, tmp_path, case):
+    """Every precondition before the first write: a late failure left a written line,
+    and the corrected rerun doubled it."""
+    out, base, head = _repo(render, tmp_path)
+    plan = ".process-work/plans/2026-09-10-widget.md"
+    if case == "missing":
+        plan = ".process-work/plans/nope.md"
+    else:
+        (out / ".process-work/plans/archive").mkdir(parents=True, exist_ok=True)
+        (out / ".process-work/plans/archive/2026-09-10-widget.md").write_text("# other\n")
+
+    r = _attest(out, "--base", base, "--head", head, "--archive", plan)
+
+    assert r.returncode == 1 and "REFUSED" in r.stderr, r.stderr
+    assert not list((out / ".process-work/journal").rglob("*.md"))
+
+
+def test_a_spec_kit_plan_is_archived_under_its_feature_name(render, tmp_path):
+    """Every Spec Kit plan is plan.md: named alone, they would collide in the archive."""
+    out, base, head = _repo(render, tmp_path)
+    spec = out / "specs/003-login/plan.md"
+    spec.parent.mkdir(parents=True)
+    spec.write_text("# Plan\n\ntier: 2\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "spec")
+
+    r = _attest(out, "--base", base, "--head", head, "--archive", "specs/003-login/plan.md")
+
+    assert r.returncode == 0, r.stderr
+    assert (out / ".process-work/plans/archive/003-login.md").is_file()
+    assert "git commit" in r.stdout  # staged, the commit is named
+
+
+def test_without_archive_or_commit_nothing_is_staged(render, tmp_path):
+    out, base, head = _repo(render, tmp_path)
+
+    assert _attest(out, "--base", base, "--head", head).returncode == 0
+    assert _git(out, "diff", "--cached", "--name-only").stdout == ""
