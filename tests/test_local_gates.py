@@ -53,15 +53,43 @@ def test_a_local_gate_of_an_inactive_module_does_not_run(render, tmp_path):
     assert "x" not in _run(out, "--list").stdout.split()
 
 
-def test_replacing_a_template_gate_by_name_is_said(render, tmp_path):
-    out = _project(render, tmp_path, {"fix-streak": {"module": None,
-                                                     "command": ["scripts/my_streak.py", "."]}})
-    _gate(out, "scripts/my_streak.py", 0, "mine: OK")
+def _speckit_project(render, tmp_path: Path, local: object) -> Path:
+    out = render(tmp_path / "p", {"project_name": "d", "modules": {"speckit": True}})
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=out, check=True)
+    (out / "docs/process/gates.local.json").write_text(json.dumps(local), encoding="utf-8")
+    return out
+
+
+def test_replacing_a_module_gate_by_name_is_said_where_a_passing_hook_shows_it(render, tmp_path):
+    """stderr: pre-commit hides a passing hook's stdout, and the replacement must be seen."""
+    out = _speckit_project(render, tmp_path, {"speckit": {"module": "speckit",
+                                                          "command": ["scripts/my_spec.py", "."]}})
+    _gate(out, "scripts/my_spec.py", 0, "mine: OK")
 
     r = _run(out)
 
     assert r.returncode == 0 and "mine: OK" in r.stdout, r.stdout + r.stderr
-    assert "gates.local.json replaces the template's fix-streak gate" in r.stdout
+    assert "gates.local.json replaces the template's speckit gate" in r.stderr
+
+
+@pytest.mark.parametrize("core", ["review", "kernel", "fix-streak"])
+def test_a_core_gate_cannot_be_replaced(render, tmp_path, core):
+    """Refute F2: a branch's own gates.local.json replaced `review` with a script that
+    exits 0 — and with it the standing block — and the push to main passed."""
+    out = _project(render, tmp_path, {core: {"module": None, "command": ["scripts/ok.py"]}})
+    _gate(out, "scripts/ok.py", 0, "ok")
+
+    r = _run(out)
+
+    assert r.returncode == 1 and f"{core} is a core gate" in r.stderr, r.stdout + r.stderr
+
+
+def test_a_core_gate_cannot_be_moved_into_a_module(render, tmp_path):
+    out = _project(render, tmp_path, {"review": {"module": "sbom", "command": ["scripts/ok.py"]}})
+
+    r = _run(out, "--list")
+
+    assert r.returncode == 1 and "review is a core gate" in r.stderr, r.stdout + r.stderr
 
 
 @pytest.mark.parametrize("bad", [
