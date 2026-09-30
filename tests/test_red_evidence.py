@@ -220,3 +220,55 @@ def test_an_inherited_test_is_named_by_its_collecting_module(render, tmp_path):
 
     assert r.returncode == 0, r.stdout + r.stderr
     assert "tests/pkg/test_a.py::TestImpl::test_shared" in r.stdout, r.stdout
+
+
+# --- third look: ask pytest for its own facts (node ids, rootdir, what is a test) ---
+
+
+def test_a_test_under_its_own_rootdir_is_measured(render, tmp_path):
+    """H1: `backend/pytest.ini` makes backend/ the rootdir; the test is not dropped."""
+    out, before = _repo(render, tmp_path)
+    (out / "backend/tests").mkdir(parents=True)
+    (out / "backend/pytest.ini").write_text("[pytest]\npythonpath = ..\n", encoding="utf-8")
+    (out / "test_calc.py").rename(out / "backend/tests/test_b.py")
+
+    r = _tool(out, "--work", "7", "--round", "1", "--before", before, "--dry-run", "--copy",
+              "backend/pytest.ini", "--", sys.executable, "-m", "pytest", "backend/tests/test_b.py")
+
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "test_b.py::test_add" in r.stdout, r.stdout
+
+
+def test_a_dot_in_a_directory_name_is_no_package_separator(render, tmp_path):
+    """H1: `tests/v1.2/` was split on its dot and the test vanished."""
+    out, before = _repo(render, tmp_path)
+    (out / "tests/v1.2").mkdir(parents=True)
+    (out / "test_calc.py").rename(out / "tests/v1.2/test_d.py")
+    (out / "conftest.py").write_text("", encoding="utf-8")
+
+    r = _tool(out, "--work", "7", "--round", "1", "--before", before, "--dry-run", "--copy",
+              "conftest.py", "--", sys.executable, "-m", "pytest", "tests/v1.2/test_d.py")
+
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "tests/v1.2/test_d.py::test_add" in r.stdout, r.stdout
+
+
+def test_a_named_source_file_is_not_taken_into_the_old_tree(render, tmp_path):
+    """H2: `--doctest-modules calc.py` carried the fixed source along, and the old run
+    exercised the new code. Only test files travel; the doctest runs against the old code."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _git(out, "init", "-q", "-b", "main")
+    _git(out, "config", "user.email", "t@t")
+    _git(out, "config", "user.name", "t")
+    doc = 'def add(a, b):\n    """\n    >>> add(1, 2)\n    3\n    """\n'
+    (out / "calc.py").write_text(doc + "    return a - b\n", encoding="utf-8")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "base")
+    before = _git(out, "rev-parse", "HEAD")
+    (out / "calc.py").write_text(doc + "    return a + b\n", encoding="utf-8")
+
+    r = _tool(out, "--work", "7", "--round", "1", "--before", before, "--dry-run", "--",
+              sys.executable, "-m", "pytest", "--doctest-modules", "calc.py")
+
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "calc.py::calc.add" in r.stdout, r.stdout
