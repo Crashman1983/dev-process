@@ -35,6 +35,7 @@ Pure stdlib + sibling imports.
 """
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 import sys
@@ -236,10 +237,19 @@ def check(root: Path) -> tuple[list[str], list[str]]:
     return [], tail
 
 
-def _sh(root: Path, argv: list[str]) -> bool:
+# The route marker the pre-push guard reads to tell finish's push to main
+# from any other (owner of the name: merge_route.py). Set for that one push only.
+MERGE_ROUTE_ENV = "PROCESS_MERGE_ROUTE"
+MERGE_ROUTE = "finish"
+
+
+def _sh(root: Path, argv: list[str], env: dict[str, str] | None = None) -> bool:
     """Run one tail command visibly; False on failure (the caller stops)."""
     print(f"finish: $ {' '.join(argv)}")
-    return subprocess.run(argv, cwd=str(root)).returncode == 0
+    # a marker inherited from an enclosing push (gates running under the hook)
+    # must not mark a step that never asked for it
+    inherited = {k: v for k, v in os.environ.items() if k != MERGE_ROUTE_ENV}
+    return subprocess.run(argv, cwd=str(root), env={**inherited, **(env or {})}).returncode == 0
 
 
 def apply(root: Path, *, tests: str | None, tests_passed: bool) -> int:
@@ -300,11 +310,12 @@ def apply(root: Path, *, tests: str | None, tests_passed: bool) -> int:
               "`--apply --tests-passed` (or pass `--tests CMD` to run it here)")
         return 0
     # 4. merge ff-only, push, delete the remote branch
-    for argv in (["git", "checkout", "-q", default],
-                 ["git", "merge", "--ff-only", branch],
-                 ["git", "push", "-q", "origin", default],
-                 ["git", "push", "-q", "origin", "--delete", branch]):
-        if not _sh(root, argv):
+    route = {MERGE_ROUTE_ENV: MERGE_ROUTE}
+    for argv, env in ((["git", "checkout", "-q", default], None),
+                      (["git", "merge", "--ff-only", branch], None),
+                      (["git", "push", "-q", "origin", default], route),
+                      (["git", "push", "-q", "origin", "--delete", branch], None)):
+        if not _sh(root, argv, env):
             return 1
     print(f"finish: merged {branch} into {default} and pushed. Remaining by "
           f"hand: remove the worktree if one carried the branch "

@@ -77,13 +77,22 @@ JOURNAL = ".process-work/journal"
 TRAIN_DIR = "process-train"
 
 
-_GIT_ENV = dict(os.environ, GIT_TERMINAL_PROMPT="0")
+# The route marker the pre-push guard reads to tell the train's push to main
+# from any other (owner of the name: merge_route.py). Set for that one push
+# only, never in _GIT_ENV — and never inherited: the train's own push runs the
+# gates under this marker, so a train started there would otherwise carry it
+# into every git call.
+MERGE_ROUTE_ENV = "PROCESS_MERGE_ROUTE"
+MERGE_ROUTE = "train"
+_GIT_ENV = {**{k: v for k, v in os.environ.items() if k != MERGE_ROUTE_ENV},
+            "GIT_TERMINAL_PROMPT": "0"}
 
 
-def _git(root: Path, *args: str, check: bool = False) -> subprocess.CompletedProcess:
+def _git(root: Path, *args: str, check: bool = False,
+         env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
     try:
         r = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True,
-                           timeout=300, env=_GIT_ENV)
+                           timeout=300, env=_GIT_ENV if env is None else {**_GIT_ENV, **env})
     except subprocess.TimeoutExpired:
         r = subprocess.CompletedProcess(args, 124, "", f"git {' '.join(args)}: timed out after 300 s")
     if check and r.returncode != 0:
@@ -1129,7 +1138,10 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
         # train branch in place — never a local main ahead of origin
         # from the staging worktree: a pre-push hook checks the pushed commit
         # against HEAD of the checkout it runs in — from the root that is main
-        r = _git(_train_worktree(root), "push", "origin", f"HEAD:{local}")
+        # the route marker rides on this one push: the pre-push guard
+        # (merge_route.py) refuses a push to main that does not name its route
+        r = _git(_train_worktree(root), "push", "origin", f"HEAD:{local}",
+                 env={MERGE_ROUTE_ENV: MERGE_ROUTE})
         if r.returncode != 0:
             log(f"push of {branch} to origin/{local} rejected: {r.stderr.strip()}")
             _git(root, "worktree", "remove", "--force", str(_train_worktree(root)))
