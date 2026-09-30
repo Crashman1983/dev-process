@@ -6,7 +6,7 @@
 
 Prinzipien, Mechanik und der Weg in die Fläche
 
-Prozessvorlage dev-process v2.28.0 · erprobt in einem realen, produktiv genutzten Repository (Referenzprojekt)
+Prozessvorlage dev-process v2.38.0 · erprobt in einem realen, produktiv genutzten Repository (Referenzprojekt)
 
 Vorlage öffentlich auf GitHub: [github.com/Crashman1983/dev-process](https://github.com/Crashman1983/dev-process)
 
@@ -25,14 +25,14 @@ Der Prozess ist in vielen Iterationen im laufenden Betrieb entstanden und verbes
 |---|---|---|
 | Kein Langzeitgedächtnis: Nach einer Pause oder einer automatischen Kürzung des Gesprächs sind Regeln und Absprachen weg. | Der Agent verletzt Vereinbarungen von vor einer Stunde und trifft bereits gefallene Entscheidungen erneut, womöglich anders. | Die wichtigsten Regeln stehen in der Startdatei, die jeder Agent zu Beginn liest, Entscheidungen als Liste im Plan. Nach jeder Kürzung spielt ein Programm beides automatisch wieder ein. |
 | Behaupten statt prüfen: Aussagen über vorhandenen Code kommen aus dem Gedächtnis. | Der Agent baut auf einer Funktion auf, die es gar nicht gibt – oder übersieht eine vorhandene und schreibt sie ein zweites Mal. Die Folge sind doppelter Code und Verweise ins Leere. | Regel 1: Jede Aussage braucht einen Nachweis oder wird als Annahme markiert. Für die Dokumentation prüft zusätzlich ein Gate (eine automatische Prüfung vor dem Merge), dass sie nur auf existierende Dateien verweist. |
-| Symptome flicken: Ein Fehler wird dort behoben, wo er sichtbar wird. | Die Ursache bleibt; ihr Symptom wird an fünf Stellen einzeln geflickt, die Fehlerrate steigt. | Regel 6: Nach höchstens zwei Versuchen am Symptom wird nach der Ursache gesucht. Ein Gate meldet den dritten Fix an derselben Datei, und die Kennzahlen zeigen, wo dieselbe Stelle immer wieder korrigiert wird. |
+| Symptome flicken: Ein Fehler wird dort behoben, wo er sichtbar wird. | Die Ursache bleibt; ihr Symptom wird an fünf Stellen einzeln geflickt, die Fehlerrate steigt. | Regel 6: Nach höchstens zwei Versuchen am Symptom wird nach der Ursache gesucht. Ein Gate fragt schon beim zweiten Fix an derselben Datei, ob umgebaut statt weiter geflickt werden muss (Regel 4), und meldet den dritten als fehlende Ursache; die Kennzahlen zeigen, wo dieselbe Stelle immer wieder korrigiert wird. |
 | Selbstabnahme: Der Agent, der gebaut hat, beurteilt auch, ob es gut ist. | Die Prüfung wird zur Formsache; Mängel fallen erst im Betrieb auf. | Unabhängige Prüfung durch eine unbeteiligte Instanz; das Ergebnis wird als Attest (schriftlicher Prüfvermerk im Journal, dem fortlaufenden Arbeitsprotokoll im Repository) festgehalten und vom Gate verlangt. |
 | Parallelität ohne Absprache: Mehrere Agenten ändern dieselben Dateien. | Die letzte Änderung überschreibt die vorherige; Arbeit geht verloren. | Eine Übersicht aller laufenden Vorgänge (Lagetabelle) zeigt Überschneidungen; zwei Vorhaben am selben Problem werden abgestimmt statt parallel bearbeitet. |
 
 ### Das Wesentliche in fünf Sätzen
 
 1. **Die Regeln prüft ein Programm, niemand muss sie im Kopf behalten.** Fünfzehn automatische Prüfungen („Gates“) laufen vor jedem Merge; was nicht besteht, wird nicht gemergt.
-1. **Das Risiko bestimmt den Aufwand.** Vier Risikostufen – Tier 0 bis 3 – legen fest, ob eine Änderung direkt gemergt werden darf oder Plan, unabhängige Prüfung und bei Tier 3 zusätzlich eine Widerlegungsprüfung (gezielte Fehlersuche) braucht.
+1. **Das Risiko bestimmt den Aufwand.** Vier Risikostufen – Tier 0 bis 3 – legen fest, ob eine Änderung direkt gemergt werden darf oder Plan, Widerlegungsprüfung (gezielte Fehlersuche) und unabhängige Prüfung braucht; bei Tier 3 wird auch jede Fix-Runde widerlegt.
 1. **Die Prüfung ist immer unabhängig.** Wer baut, nimmt nicht selbst ab; ab Tier 2 prüft eine unbeteiligte Instanz (eine eigene Agentensitzung), und ihr Urteil gilt nur für genau den geprüften Code.
 1. **Alles Wissen steht in Dateien.** Pläne, Entscheidungen und Journale liegen im Repository und werden jedem Agenten automatisch erneut vorgelegt, sobald sein Gedächtnis gekürzt wurde.
 1. **Der Mensch entscheidet, die Agenten arbeiten.** Ein Koordinator-Agent verteilt die Arbeit an Arbeiter-Agenten; der Mensch priorisiert, entscheidet, gibt Designs frei und prüft wöchentlich eine Stichprobe.
@@ -70,9 +70,9 @@ Der Prozess wird als Vorlage (dev-process) ausgeliefert. Aus ihr entsteht ein fe
 | Tier 0 | Tier 1 | Tier 2 | Tier 3 |
 |---|---|---|---|
 | Keine Verhaltensänderung, oder lokal und umkehrbar | Kleine, in sich geschlossene Änderung | Etwas, wovon andere abhängen: Schnittstelle, Schema | Zugriffsschutz, Datenhaltung, Sicherheitsgrenze |
-| direkt mergen | Kurzverfahren (Ziel, Dateien und Risiko in einem Satz, kein schriftlicher Plan) plus ein Test | Plan, Umsetzung, unabhängige Prüfung | zusätzlich: freigegebenes Design, Bedrohungsfrage, Widerlegungsprüfung, zweites Modell (wo verfügbar) |
+| direkt mergen | Kurzverfahren (Ziel, Dateien und Risiko in einem Satz, kein schriftlicher Plan) plus ein Test; Widerlegung nach Bedarf | Plan, Umsetzung, Widerlegungsprüfung (ein Lauf), unabhängige Prüfung | zusätzlich: freigegebenes Design, Bedrohungsfrage, Widerlegung auch jeder Fix-Runde, zweites Modell (wo verfügbar) |
 
-**Widerlegungsprüfung** heißt: Bei Tier 3 prüft zusätzlich eine Instanz, deren einziger Auftrag es ist, Fehler zu finden. **Zweites Modell** heißt: ein Modell eines anderen Herstellers, wo eines verfügbar ist; ist keines verfügbar, sagt das Attest das ausdrücklich. Das Gate verlangt das zweite Modell nicht, aber es verlangt, dass sein Fehlen offen angegeben wird.
+**Widerlegungsprüfung** heißt: Bevor die unabhängige Prüfung beginnt, greift eine frische Instanz die Änderung an; ihr einziger Auftrag ist, Fehler zu finden. Ab Tier 2 geschieht das einmal; bei Tier 3 und bei Code der Gates in jedem Tier auch nach jeder Fix-Runde. Am Ende nennt sie die gemeinsame Ursache ihrer Funde, damit eine Fix-Runde die Ursache schließt statt ein weiteres Symptom. **Zweites Modell** heißt: ein Modell eines anderen Herstellers, wo eines verfügbar ist; ist keines verfügbar, sagt das Attest das ausdrücklich. Das Gate verlangt das zweite Modell nicht, aber es verlangt, dass sein Fehlen offen angegeben wird.
 
 ## 4. Prüfung, Gedächtnis, Ziele und Messung
 
@@ -101,7 +101,7 @@ Der Prozess wird als Vorlage (dev-process) ausgeliefert. Aus ihr entsteht ein fe
 | Schnittstellen zuerst | Eine Schnittstelle wird beschrieben, bevor jemand sie nutzt (Regel 3). Ob die Beschreibung existiert und der Code sie einhält, prüfen Tests und Prüfer. | weich: Review und Tests | aktiv |
 | Oberflächen nach Vertrag | Ein Design-Vertrag benennt Abstände, Farben und Zustände mit IDs; Referenzbilder sind per Prüfsumme versiegelt. Ein Gate prüft IDs und Siegel, der Prüfer vergleicht das Ergebnis mit dem Bild. | hart: IDs und Siegel; weich: Aussehen | aktiv |
 | Schichten, Abhängigkeits­richtung | Die Architekturbeschreibung legt fest, welche Schicht welche andere nicht verwenden darf. Maschinell geprüft wird das nur mit einem Arch-Linter. | hart nur mit Linter | Linter nicht eingerichtet |
-| Sicherheit | Tier 3 verlangt Bedrohungsfrage, Widerlegungsprüfung und – wo verfügbar – ein zweites Modell. Dazu kommt eine SBOM (Liste aller Fremdkomponenten), deren Lizenzen ein Gate gegen eine erlaubte Liste prüft. | hart: Tier-3-Ablauf, SBOM-Lizenzen | aktiv; die Lizenzliste legt jedes Projekt an |
+| Sicherheit | Tier 3 verlangt Bedrohungsfrage, Widerlegung auch jeder Fix-Runde und – wo verfügbar – ein zweites Modell. Dazu kommt eine SBOM (Liste aller Fremdkomponenten), deren Lizenzen ein Gate gegen eine erlaubte Liste prüft. | hart: Tier-3-Ablauf, SBOM-Lizenzen | aktiv; die Lizenzliste legt jedes Projekt an |
 | Performance | Die Review-Checkliste fragt nach Performance. Was nicht gemessen wird, lässt keine Prüfung scheitern. | weich | keine Zielwerte festgelegt |
 | Wartbarkeit, Dokumentation | Wartbarkeit beurteilt der Prüfer nach den Regeln 4, 6 und 9; die Kennzahlen zeigen wiederholte Korrekturen. Für die Dokumentation prüfen Gates, ob genannte Dateien und Verweise existieren. | weich; hart für Verweise | aktiv |
 | Legacy | Bestehende Verstöße werden in einer Baseline festgehalten und geduldet, neue nicht. Die Baseline darf nur kleiner werden. | hart, sobald eine Baseline existiert | Verfahren in der Vorlage |

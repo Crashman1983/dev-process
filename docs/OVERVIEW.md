@@ -6,7 +6,7 @@
 
 Principles, mechanics and the path to broad rollout
 
-Process template dev-process v2.28.0 · tested in a real repository in production use (reference project)
+Process template dev-process v2.38.0 · tested in a real repository in production use (reference project)
 
 Template published on GitHub: [github.com/Crashman1983/dev-process](https://github.com/Crashman1983/dev-process)
 
@@ -25,14 +25,14 @@ The process was built and improved over many iterations in live operation; it ha
 |---|---|---|
 | No long-term memory: after a break or an automatic shortening of the conversation, rules and agreements are gone. | The agent breaks agreements made an hour ago and reopens decisions already taken, possibly deciding differently. | The key rules are in the startup file that every agent reads first; decisions are a list in the plan. After every shortening, a program automatically feeds both back in. |
 | Asserting instead of checking: statements about existing code come from memory. | The agent builds on a function that does not exist – or misses an existing one and writes it a second time. The result is duplicate code and dangling references. | Rule 1: every statement needs evidence or is marked as an assumption. For documentation, a Gate (an automatic check before the Merge) also verifies that it only references files that exist. |
-| Patching symptoms: a fault is fixed where it becomes visible. | The cause stays; its symptom is patched separately in five places, and the fault rate rises. | Rule 6: after at most two attempts at the symptom, look for the cause. A Gate names the third fix on the same file, and the metrics show where the same spot is corrected again and again. |
+| Patching symptoms: a fault is fixed where it becomes visible. | The cause stays; its symptom is patched separately in five places, and the fault rate rises. | Rule 6: after at most two attempts at the symptom, look for the cause. A Gate asks at the second fix on the same file whether to rebuild instead of patching again (rule 4), and names the third as a missing cause; the metrics show where the same spot is corrected again and again. |
 | Self-acceptance: the agent that built something also judges whether it is good. | Review becomes a formality; defects only surface in production. | Independent review by an uninvolved instance; the result is recorded as an attestation (a written review record in the journal, the running work log in the repository) and required by the Gate. |
 | Parallel work without coordination: several agents change the same files. | The last change overwrites the one before; work is lost. | An overview of all running work items (the situation table) shows overlaps; two efforts on the same problem are coordinated instead of worked on in parallel. |
 
 ### The essentials in five sentences
 
 1. **A program checks the rules, so nobody has to keep them in mind.** Fifteen automatic checks (“Gates”) run before every Merge; whatever fails is not merged.
-1. **Risk sets the effort.** Four risk tiers – Tier 0 to 3 – decide whether a change may be merged directly or needs a plan, independent review and, at Tier 3, also a refutation review (targeted search for faults).
+1. **Risk sets the effort.** Four risk tiers – Tier 0 to 3 – decide whether a change may be merged directly or needs a plan, a refutation review (targeted search for faults) and independent review; at Tier 3, every fix round is refuted as well.
 1. **Review is always independent.** Whoever builds does not accept their own work; from Tier 2 on, an uninvolved instance (a separate agent session) reviews, and its verdict applies only to exactly the code it reviewed.
 1. **All knowledge lives in files.** Plans, decisions and journals are in the repository and are automatically shown to every agent again as soon as its memory has been shortened.
 1. **The human decides, the agents work.** A coordinator agent hands out work to worker agents; the human prioritises, decides, approves designs and reviews a sample every week.
@@ -70,9 +70,9 @@ The process ships as a template (dev-process). From it you get a fully set-up re
 | Tier 0 | Tier 1 | Tier 2 | Tier 3 |
 |---|---|---|---|
 | No change in behaviour, or local and reversible | Small, self-contained change | Something others depend on: interface, schema | Access control, data storage, security boundary |
-| merge directly | Short procedure (goal, files and risk in one sentence, no written plan) plus one test | Plan, implementation, independent review | in addition: approved design, threat question, refutation review, second model (where available) |
+| merge directly | Short procedure (goal, files and risk in one sentence, no written plan) plus one test; refutation as needed | Plan, implementation, refutation review (one run), independent review | in addition: approved design, threat question, refutation of every fix round too, second model (where available) |
 
-**Refutation review** means: at Tier 3, an additional instance reviews the change, and its only job is to find faults. **Second model** means: a model from a different vendor, where one is available; if none is available, the attestation says so explicitly. The Gate does not require the second model, but it does require that its absence is stated openly.
+**Refutation review** means: before the independent review starts, a fresh instance attacks the change; its only job is to find faults. From Tier 2 on this happens once; at Tier 3, and for the Gates' own code at any tier, also after every fix round. At the end it names the cause its findings share, so that a fix round closes the cause instead of one more symptom. **Second model** means: a model from a different vendor, where one is available; if none is available, the attestation says so explicitly. The Gate does not require the second model, but it does require that its absence is stated openly.
 
 ## 4. Review, memory, goals and measurement
 
@@ -101,7 +101,7 @@ The process ships as a template (dev-process). From it you get a fully set-up re
 | Interfaces first | An interface is specified before anyone uses it (rule 3). Tests and reviewers check that the specification exists and that the code complies with it. | soft: review and tests | active |
 | User interfaces by contract | A design contract names spacing, colours and states with IDs; reference images are sealed with a checksum. A Gate checks IDs and seals; the reviewer compares the result with the image. | hard: IDs and seals; soft: appearance | active |
 | Layers, dependency direction | The architecture description defines which layer must not use which other layer. This is only checked by machine with an architecture linter. | hard only with a linter | linter not set up |
-| Security | Tier 3 requires a threat question, a refutation review and – where available – a second model. In addition there is an SBOM (a list of all third-party components) whose licences a Gate checks against an allowed list. | hard: Tier 3 flow, SBOM licences | active; each project sets up its licence list |
+| Security | Tier 3 requires a threat question, refutation of every fix round too and – where available – a second model. In addition there is an SBOM (a list of all third-party components) whose licences a Gate checks against an allowed list. | hard: Tier 3 flow, SBOM licences | active; each project sets up its licence list |
 | Performance | The review checklist asks about performance. What is not measured cannot make a check fail. | soft | no target values set |
 | Maintainability, documentation | The reviewer judges maintainability against Rules 4, 6 and 9; the metrics show repeated corrections. For documentation, Gates check whether the files and references it names exist. | soft; hard for references | active |
 | Legacy | Existing violations are recorded in a Baseline and tolerated; new ones are not. The Baseline may only shrink. | hard as soon as a Baseline exists | procedure in the template |
