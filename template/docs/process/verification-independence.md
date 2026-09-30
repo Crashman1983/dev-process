@@ -48,8 +48,11 @@ check mean anything. Scale it to the tier (`risk-tiers.md`):
 The read-only bundle is the seam that makes independence *and* model diversity
 practical: one self-contained markdown document that is the reviewer's complete
 input. `scripts/process/make_review_bundle.py` assembles it — reviewer preamble,
-the kernel block, the review checklist, the product frame, the active plan(s),
-the diff against a base ref, and the output grammar: the `REVIEW` line is
+the kernel block, the review checklist, the product frame, the plan(s) under
+review — the plans the branch touches, active or archived (`--plan <slug>`
+names them instead, archive included) — the diff against a base ref with the
+list of its files (a binary shows as path and size; the digest still covers
+its bytes), and the output grammar: the `REVIEW` line is
 imported from `check_review.py` itself (that half cannot drift from the gate),
 the `FINDING` line's owner is the github-issues report gate and its tokens are
 pinned to that gate by a template test. Sources it cannot read are named in
@@ -80,7 +83,9 @@ stat — the reviewer re-reads what changed and what it was told, not the whole
 branch again. The full-branch digest fields stay in the bundle, so the
 attestation still binds the verdict to the complete artifact. Tier 3 is the
 exception: the tool refuses a delta-only bundle there — the highest tier
-re-reads in full every round. Pair this with batching: one fix pass and one
+re-reads in full every round. A delta needs a declared tier: a plan's, or
+`--tier N` for a branch without one (a floor, never a discount — the bundle
+names where the tier came from). Pair this with batching: one fix pass and one
 push per round, never a drip of per-finding commits that each re-pay the
 push-time gates and tests.
 
@@ -92,9 +97,9 @@ the raw binary diff from the resolved merge base to the reviewed head:
 
     REVIEW_ARTIFACT base=<git-sha> head=<git-sha> diff=<sha256>
 
-The reviewer copies those three fields — verbatim, never invented — onto the
-`REVIEW` line. The gate then recomputes the digest from git and hard-fails a
-mismatch or an unresolvable commit: the verdict is bound to the exact diff
+`attest.py --bundle` writes those three fields onto the `REVIEW` line,
+recomputing the digest itself — never typed, never invented. The gate then
+recomputes the digest from git and hard-fails a mismatch or an unresolvable commit: the verdict is bound to the exact diff
 that was reviewed. Perform the final rebase *before* the review — a rebase
 after it changes the diff, and the recorded digest honestly stops matching
 the merged content; loop back to a fresh bundle and review instead.
