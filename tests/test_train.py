@@ -1444,3 +1444,39 @@ def test_a_kept_remote_record_does_not_bring_the_merged_issue_back(render, tmp_p
     _dispatched(out, 71, "70-p1-again")
     assert d.find_branch(out, 71) == "70-p1-again"
 
+
+def test_the_train_marks_only_its_own_push_to_main(render, tmp_path):
+    # the pre-push guard (merge_route.py) refuses a push to main without a route; the
+    # train names it for that one push and strips a marker it inherited from every
+    # other git call (the branch deletion, the staging worktree's checkout)
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    bare = tmp_path / "origin.git"
+    _git(out, "clone", "-q", "--bare", str(out), str(bare))
+    _git(out, "remote", "add", "origin", str(bare))
+    _git(out, "fetch", "-q", "origin")
+    _git(out, "branch", "-q", "--set-upstream-to=origin/main", "main")
+    _branch(out, "alpha", {"src/a.py": "a\n"})
+    _git(out, "push", "-q", "origin", "alpha")
+    seen = tmp_path / "seen.log"
+    hooks = out / ".git/hooks"
+    (hooks / "post-checkout").write_text(
+        f'#!/bin/sh\necho "post-checkout ${{PROCESS_MERGE_ROUTE:-unset}}" >> "{seen}"\n')
+    (hooks / "pre-push").write_text(
+        "#!/bin/sh\ntargets=''\n"
+        "while read lref lsha rref rsha; do targets=\"$targets $rref\"; "
+        f'echo "push $rref ${{PROCESS_MERGE_ROUTE:-unset}}" >> "{seen}"; done\n'
+        f'exec "{sys.executable}" scripts/process/merge_route.py $targets\n')
+    for hook in ("post-checkout", "pre-push"):
+        (hooks / hook).chmod(0o755)
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("PROCESS_", "SKIP"))}
+    r = subprocess.run([sys.executable, str(out / "scripts/process/train.py"), "run", "--force",
+                        "--push", "--suite", "true"], cwd=out, capture_output=True, text=True,
+                       env={**env, "PROCESS_MERGE_ROUTE": "inherited"})
+    assert r.returncode == 0, r.stdout[-800:] + r.stderr[-800:]
+    lines = seen.read_text().splitlines()
+    assert "push refs/heads/main train" in lines
+    assert "push refs/heads/alpha unset" in lines  # the merged branch's deletion is no merge
+    assert "post-checkout unset" in lines
+    assert not [ln for ln in lines if ln.endswith("inherited")], lines
+

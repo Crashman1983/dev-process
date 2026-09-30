@@ -1,5 +1,6 @@
 """SP62: the /finish tail checker — blocked without a clearing pass, ready
 with one, and the printed tail carries the ritual order."""
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -268,3 +269,42 @@ def test_tail_names_the_full_suite_before_merge(render, tmp_path):
     fi = r.stdout.index("FULL test suite")
     mi = r.stdout.index("merge:")
     assert fi < mi  # the batch pays completeness before it merges
+
+
+def _route_hooks(out: Path, seen: Path) -> None:
+    """Hooks that log the route marker each git step sees; the pre-push one is the
+    merge guard itself, fed the remote refs from stdin as a hook wrapper does."""
+    hooks = out / ".git/hooks"
+    for name in ("post-checkout", "post-merge"):
+        (hooks / name).write_text(
+            f'#!/bin/sh\necho "{name} ${{PROCESS_MERGE_ROUTE:-unset}}" >> "{seen}"\n')
+        (hooks / name).chmod(0o755)
+    (hooks / "pre-push").write_text(
+        "#!/bin/sh\ntargets=''\n"
+        "while read lref lsha rref rsha; do targets=\"$targets $rref\"; "
+        f'echo "push $rref ${{PROCESS_MERGE_ROUTE:-unset}}" >> "{seen}"; done\n'
+        f'exec "{sys.executable}" scripts/process/merge_route.py $targets\n')
+    (hooks / "pre-push").chmod(0o755)
+
+
+def test_apply_marks_only_its_own_push_to_main(render, tmp_path):
+    # the pre-push guard (merge_route.py) refuses a push to main without a route;
+    # finish names it for that one push and strips a marker it inherited
+    out, bare = _repo_with_origin(render, tmp_path)
+    seen = tmp_path / "seen.log"
+    _route_hooks(out, seen)
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("PROCESS_", "SKIP"))}
+    r = subprocess.run([sys.executable, str(out / "scripts/process/finish.py"), "--apply",
+                        "--tests-passed", "."], cwd=out, capture_output=True, text=True,
+                       env={**env, "PROCESS_MERGE_ROUTE": "inherited"})
+    assert r.returncode == 0, r.stdout + r.stderr
+    lines = seen.read_text().splitlines()
+    assert "push refs/heads/main finish" in lines
+    assert "push refs/heads/feature unset" in lines  # the branch deletion is no merge
+    assert not [ln for ln in lines if ln.endswith("inherited")], lines
+    assert "post-checkout unset" in lines and "post-merge unset" in lines
+    # without finish, the same guard refuses a hand push to main
+    _git(out, "commit", "-q", "--allow-empty", "-m", "by hand")
+    hand = subprocess.run(["git", "push", "-q", "origin", "main"], cwd=out, capture_output=True,
+                          text=True, env=env)
+    assert hand.returncode != 0 and "merge_route" in hand.stderr
