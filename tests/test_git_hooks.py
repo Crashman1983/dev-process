@@ -73,24 +73,29 @@ def test_the_merge_route_guard_is_its_own_pre_push_hook(render, tmp_path):
     ids = [h["id"] for h in local]
     assert ids.index("merge-route") < ids.index("process-gates")
     guard = local[ids.index("merge-route")]
-    assert guard["entry"].endswith("scripts/process/merge_route.py")
+    assert guard["entry"].endswith("scripts/process/merge_route.py --hook-check")
     assert guard["stages"] == ["pre-push"]
     assert guard["always_run"] is True and guard["pass_filenames"] is False
     for k, v in (("init", "-q"), ("config", "user.email t@t"), ("config", "user.name t")):
         subprocess.run(["git", k, *v.split()], cwd=out, check=True)
     subprocess.run(["git", "add", "-A"], cwd=out, check=True)
     subprocess.run(["git", "commit", "-q", "-m", "base"], cwd=out, check=True)
-    main = {"PRE_COMMIT_REMOTE_BRANCH": "refs/heads/main"}
-    refused = _hook_run(out, guard["entry"], main)
-    assert refused.returncode == 1 and "PROCESS_MERGE_ROUTE" in refused.stderr
-    assert _hook_run(out, guard["entry"], {**main, "PROCESS_MERGE_ROUTE": "train"}).returncode == 0
+    head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=out, capture_output=True,
+                          text=True, check=True).stdout.strip()
+    main = {"PRE_COMMIT_REMOTE_BRANCH": "refs/heads/main", "PRE_COMMIT_TO_REF": head}
+    # the stdin guard did not run for this push: main is refused, a route does not help
+    refused = _hook_run(out, guard["entry"], {**main, "PROCESS_MERGE_ROUTE": "train"})
+    assert refused.returncode == 1 and "install_hooks.py" in refused.stderr
     assert _hook_run(out, guard["entry"], {"PRE_COMMIT_REMOTE_BRANCH": "refs/heads/7-x"}).returncode == 0
-    skipped = _hook_run(out, guard["entry"], {**main, "SKIP": "process-gates"})
-    assert skipped.returncode == 0, skipped.stderr
-    ledger = (out / ".git/process-owner-overrides.log").read_text(encoding="utf-8")
-    assert "\tSKIP=process-gates\t" in ledger
-    barred = _hook_run(out, guard["entry"], {**main, "SKIP": "process-gates", "PROCESS_PHASE": "review"})
-    assert barred.returncode == 1
+    # the guard (pre-push.legacy) saw the line: the hook passes, once
+    line = f"refs/heads/main {head} refs/heads/main {'0' * 40}\n"
+    clean = {k: v for k, v in os.environ.items() if not k.startswith(("PROCESS_", "PRE_COMMIT_", "SKIP"))}
+    ran = subprocess.run([sys.executable, "scripts/process/merge_route.py", "--stdin", "origin", "url"],
+                         cwd=out, input=line, capture_output=True, text=True,
+                         env={**clean, "PROCESS_MERGE_ROUTE": "train"})
+    assert ran.returncode == 0, ran.stderr
+    assert _hook_run(out, guard["entry"], main).returncode == 0
+    assert _hook_run(out, guard["entry"], main).returncode == 1  # the stamp was consumed
 
 
 def test_the_module_doc_names_the_guard_and_its_bypass(render, tmp_path):
@@ -98,3 +103,6 @@ def test_the_module_doc_names_the_guard_and_its_bypass(render, tmp_path):
     doc = (out / "docs/process/modules/git-hooks.md").read_text(encoding="utf-8")
     assert "merge-route" in doc and "SKIP=merge-route" in doc
     assert "process-owner-overrides.log" in doc
+    # the install line installs the guard too, after pre-commit
+    assert ("pre-commit install --hook-type pre-commit --hook-type pre-push\n"
+            "python3 scripts/process/install_hooks.py") in doc

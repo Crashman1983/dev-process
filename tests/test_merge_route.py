@@ -217,6 +217,50 @@ def test_targets_come_from_the_hook_environment(render, tmp_path, var):
     assert _run(root, env={var: f"refs/heads/{BRANCH}"}).returncode == 0
 
 
+@pytest.mark.parametrize("args,env", [
+    ((), {"PROCESS_PUSH_TARGETS": f"refs/heads/{BRANCH}", "PRE_COMMIT_REMOTE_BRANCH": MAIN}),
+    ((f"refs/heads/{BRANCH}",), {"PRE_COMMIT_REMOTE_BRANCH": MAIN}),
+    ((MAIN,), {"PROCESS_PUSH_TARGETS": f"refs/heads/{BRANCH}"}),
+], ids=["forged-variable", "argument-and-framework", "argument-and-variable"])
+def test_the_targets_are_a_union_so_nothing_hides_main(render, tmp_path, args, env):
+    # a forged PROCESS_PUSH_TARGETS once won over pre-commit's own variable
+    r = _run(_repo(render, tmp_path), *args, env=env)
+    assert r.returncode == 1 and "PROCESS_MERGE_ROUTE" in r.stderr, r.stderr
+
+
+def test_the_guard_knows_the_phases_dispatch_knows(render, tmp_path):
+    root = _repo(render, tmp_path)
+    sys.path.insert(0, str(root / "scripts/process"))
+    try:
+        import importlib.util
+        mods = {}
+        for name in ("dispatch", "merge_route"):
+            spec = importlib.util.spec_from_file_location(f"{name}_phases",
+                                                          root / f"scripts/process/{name}.py")
+            mods[name] = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mods[name])
+    finally:
+        sys.path.remove(str(root / "scripts/process"))
+    assert tuple(mods["merge_route"].KNOWN_PHASES) == tuple(mods["dispatch"].PHASES)
+
+
+@pytest.mark.parametrize("phase,refused", [("Review", True), ("PLAN", True), ("deploy", True),
+                                           ("Execute", False)])
+def test_the_env_phase_is_compared_case_insensitively_and_validated(render, tmp_path, phase,
+                                                                     refused):
+    r = _run(_repo(render, tmp_path), MAIN,
+             env={"PROCESS_PHASE": phase, "PROCESS_MERGE_ROUTE": "train"})
+    assert (r.returncode == 1) is refused, r.stderr
+
+
+def test_a_malformed_ref_line_on_stdin_refuses(render, tmp_path):
+    root = _repo(render, tmp_path)
+    r = subprocess.run([sys.executable, str(root / "scripts/process/merge_route.py"), "--stdin"],
+                       cwd=root, input="refs/heads/main deadbeef\n", capture_output=True,
+                       text=True, env=_env({"PROCESS_MERGE_ROUTE": "train"}))
+    assert r.returncode == 1 and "not a pre-push ref line" in r.stderr
+
+
 # --- skipped gates: allowed, never silent ---------------------------------------------
 
 def test_a_bypass_on_main_passes_and_is_logged(render, tmp_path):

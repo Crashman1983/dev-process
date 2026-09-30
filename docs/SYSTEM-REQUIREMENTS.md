@@ -63,6 +63,7 @@ Die plattformneutralen Befehle sind:
 ```bash
 uv run scripts/process/gate_runner.py
 uvx pre-commit install --hook-type pre-commit --hook-type pre-push
+python3 scripts/process/install_hooks.py
 ```
 
 Die lokalen Hooks verwaltet das Standard-Framework `pre-commit`

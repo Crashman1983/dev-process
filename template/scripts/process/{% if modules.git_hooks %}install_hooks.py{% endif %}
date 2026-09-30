@@ -1,0 +1,115 @@
+#!/usr/bin/env python3
+"""install_hooks: put the merge guard where it sees git's pre-push ref lines.
+
+git hands a pre-push hook one line per pushed ref on stdin (`<local_ref>
+<local_sha> <remote_ref> <remote_sha>`). The pre-commit framework owns
+`.git/hooks/pre-push`, reads those lines itself and hands its hooks only the
+FIRST line with something to push (`PRE_COMMIT_REMOTE_BRANCH`) — and runs no
+hook at all when the pushed commit is already on the remote (observed in a
+refutation: `git push -f origin feature:main` of a published branch, and
+`git push origin HEAD:main feature`, both moved main past the guard).
+
+pre-commit's own chaining closes that: an executable `pre-push.legacy` next to
+its hook runs FIRST, with git's stdin, and its failure fails the push. This
+script installs the guard there — a small sh script that runs
+`scripts/process/merge_route.py --stdin` of the checkout being pushed (and
+refuses a push to main when that file or python is missing). Run it after
+`pre-commit install`, and again after a `copier update`; it is idempotent. Run
+before `pre-commit install`, it installs the guard as `pre-push`, which
+pre-commit then moves to `pre-push.legacy` itself — both orders end the same.
+
+`gate_invoke.hook_wiring_findings` reports a pre-commit pre-push hook without
+the guard as a hard finding, and pre-commit's `merge-route` hook refuses a
+push to main the guard did not see. Pure stdlib.
+"""
+from __future__ import annotations
+
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+GUARD_MARKER = "dev-process merge guard"
+PRE_COMMIT_MARKER = "pre-commit"
+
+GUARD = f"""#!/bin/sh
+# {GUARD_MARKER} — installed by scripts/process/install_hooks.py; do not edit.
+# pre-commit runs it as pre-push.legacy with git's ref lines on stdin, before
+# its own hooks and before its "nothing to push" shortcut.
+lines=$(cat)
+top=$(git rev-parse --show-toplevel 2>/dev/null)
+guard="$top/scripts/process/merge_route.py"
+py=$(command -v python3 || command -v python)
+if [ -n "$top" ] && [ -f "$guard" ] && [ -n "$py" ]; then
+  printf '%s\\n' "$lines" | "$py" "$guard" --stdin "$@"
+  exit $?
+fi
+case "$lines" in
+  *" refs/heads/main "*|*" refs/heads/master "*)
+    echo "merge guard: scripts/process/merge_route.py or python is missing - push to main refused" >&2
+    exit 1 ;;
+esac
+exit 0
+"""
+
+
+def hooks_dir(root: Path) -> Path | None:
+    try:
+        out = subprocess.run(["git", "-C", str(root), "rev-parse", "--git-path", "hooks"],
+                             capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if out.returncode != 0 or not out.stdout.strip():
+        return None
+    path = Path(out.stdout.strip())
+    return path if path.is_absolute() else root / path
+
+
+def _text(path: Path) -> str:
+    try:
+        return path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+
+
+def is_guard(path: Path) -> bool:
+    return path.is_file() and os.access(path, os.X_OK) and GUARD_MARKER in _text(path)
+
+
+def guard_state(root: Path) -> tuple[bool, bool]:
+    """(pre-commit's pre-push hook is installed, the guard runs before it)."""
+    hooks = hooks_dir(root)
+    if hooks is None:
+        return False, False
+    pre_push = hooks / "pre-push"
+    framework = pre_push.is_file() and PRE_COMMIT_MARKER in _text(pre_push) \
+        and GUARD_MARKER not in _text(pre_push)
+    return framework, is_guard(hooks / "pre-push.legacy") if framework else is_guard(pre_push)
+
+
+def install(root: Path) -> tuple[int, str]:
+    hooks = hooks_dir(root)
+    if hooks is None:
+        return 1, "install_hooks: not a git checkout"
+    framework, _ = guard_state(root)
+    target = hooks / ("pre-push.legacy" if framework else "pre-push")
+    if target.exists() and not is_guard(target) and GUARD_MARKER not in _text(target):
+        return 1, (f"install_hooks: {target} is another hook — chain it by hand (the guard "
+                   f"must read git's stdin first), or move it away and run this again")
+    hooks.mkdir(parents=True, exist_ok=True)
+    target.write_text(GUARD, encoding="utf-8", newline="\n")
+    target.chmod(0o755)
+    where = ("pre-commit runs it before its hooks" if framework else
+             "`pre-commit install` moves it to pre-push.legacy and runs it before its hooks")
+    return 0, f"install_hooks: merge guard installed at {target} ({where})"
+
+
+def main(argv: list[str]) -> int:
+    root = Path(argv[0] if argv else ".").resolve()
+    code, message = install(root)
+    print(message, file=sys.stderr if code else sys.stdout)
+    return code
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

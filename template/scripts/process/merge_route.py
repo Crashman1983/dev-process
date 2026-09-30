@@ -40,13 +40,22 @@ The markers are environment variables because the hook learns nothing else
 about its caller. They can be forged; what the guard enforces is that the
 intent is stated in the call and that the bypasses it sees (`SKIP`,
 `PROCESS_OWNER_OVERRIDE`) land in the ledger. Out of its reach: `git push
---no-verify`, `SKIP=merge-route`, a clone without the hooks installed, and a
-denied phase in a process without a record.
+--no-verify`, a clone without the hooks installed (or without the guard AND
+with `SKIP=merge-route`), and a denied phase in a process without a record.
 
-Targets: the arguments (remote refs), else `PROCESS_PUSH_TARGETS`, else the
-pre-commit framework's `PRE_COMMIT_REMOTE_BRANCH`. Exit 0 = may push, exit 1
-= refused (one message on stderr: why, and the next step). Pure stdlib plus
-sibling imports.
+Targets and base come from git's own pre-push lines (`--stdin`: `<local_ref>
+<local_sha> <remote_ref> <remote_sha>` per pushed ref), which only the hook
+owning git's stdin sees. Under pre-commit that is `pre-push.legacy`, installed
+by `install_hooks.py`: pre-commit runs it with the lines before its own hooks
+and before its "nothing to push" shortcut (which otherwise runs no hook at all
+for a published commit force-pushed onto main). With the lines, each commit
+pushed to main also passes check_review's standing-block arm, based on the
+remote's SHA. pre-commit's `merge-route` hook (`--hook-check`) refuses a push
+to main the guard did not see. Without stdin (positional targets from a
+custom hook, or the environment), the targets are the UNION of the arguments,
+`PROCESS_PUSH_TARGETS` and `PRE_COMMIT_REMOTE_BRANCH` — a forged variable can
+add a target, never hide main. Exit 0 = may push, exit 1 = refused (one
+message on stderr: why, and the next step). Pure stdlib plus sibling imports.
 """
 from __future__ import annotations
 
@@ -56,6 +65,7 @@ import os
 import socket
 import subprocess
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import NamedTuple
@@ -72,6 +82,9 @@ PHASE_ENV = "PROCESS_PHASE"
 ROUTE_ENV = "PROCESS_MERGE_ROUTE"
 OVERRIDE_ENV = "PROCESS_OWNER_OVERRIDE"
 BARRED_PHASES = ("plan", "review")
+# dispatch.PHASES, repeated so that a broken dispatch import cannot widen what
+# the environment may claim (test_merge_route pins the two equal)
+KNOWN_PHASES = ("plan", "execute", "review")
 ROUTES = ("train", "finish")
 LEDGER_NAME = "process-owner-overrides.log"
 OVERRIDE_KIND = "override"
@@ -217,7 +230,13 @@ def session_phases(root: Path, env: dict[str, str]) -> tuple[set[str], str]:
     """Every phase this session claims: the environment AND the records — the
     strictest decides, neither hides the other."""
     recorded, problem = recorded_phases(root)
-    declared = env.get(PHASE_ENV, "").strip()
+    # compared case-insensitively (`Review` is a review), and a value that names
+    # no phase is "cannot tell", never "no phase" — it would otherwise pass as
+    # an undispatched session
+    declared = env.get(PHASE_ENV, "").strip().lower()
+    if declared and declared not in KNOWN_PHASES:
+        return recorded, (f"{PHASE_ENV}={env.get(PHASE_ENV, '').strip()!r} names no phase "
+                          f"(one of {', '.join(KNOWN_PHASES)}) — unset it or name the phase")
     return recorded | ({declared} if declared else set()), problem
 
 
@@ -265,8 +284,7 @@ def check(root: Path, targets: list[str], env: dict[str, str], *, bypass: str = 
 
 
 def _ledger_path(root: Path) -> Path:
-    common = Path(_git(root, "rev-parse", "--git-common-dir") or ".git")
-    return (common if common.is_absolute() else root / common) / LEDGER_NAME
+    return _common_dir(root) / LEDGER_NAME
 
 
 def append_ledger(root: Path, kind: str, reason: str, targets: list[str]) -> None:
@@ -291,21 +309,169 @@ def _skipped_gates(env: dict[str, str]) -> str:
     return f"{SKIP_ENV}={hit}" if hit else ""
 
 
+class RefLine(NamedTuple):
+    """One line git hands a pre-push hook on stdin."""
+    local_ref: str
+    local_sha: str
+    remote_ref: str
+    remote_sha: str
+
+
+def parse_ref_lines(text: str) -> list[RefLine]:
+    """git's pre-push stdin: `<local_ref> <local_sha> <remote_ref> <remote_sha>`
+    per pushed ref. A line of another shape is an error, never skipped — the
+    skipped line could be the one to main."""
+    lines = []
+    for raw in text.splitlines():
+        if not raw.strip():
+            continue
+        parts = raw.split()
+        if len(parts) != 4:
+            raise ValueError(f"not a pre-push ref line: {raw!r}")
+        lines.append(RefLine(*parts))
+    return lines
+
+
+def push_targets(env: dict[str, str], *sources: list[str]) -> list[str]:
+    """Every remote ref any source names: the arguments, git's ref lines and BOTH
+    environment variables. A union, so a forged `PROCESS_PUSH_TARGETS` can add a
+    target but never hide main, and pre-commit's `PRE_COMMIT_REMOTE_BRANCH` (the
+    first ref line with something to push, nothing else) can never be all there is."""
+    seen: list[str] = []
+    for target in [*(t for source in sources for t in source),
+                   *env.get(PUSH_TARGETS_ENV, "").split(),
+                   *env.get(PRE_COMMIT_TARGET_ENV, "").split()]:
+        if target not in seen:
+            seen.append(target)
+    return seen
+
+
+def standing_blocks(root: Path, lines: list[RefLine]) -> list[str]:
+    """check_review's standing-block arm for every ref line to main: tip = the
+    pushed commit, base = what the remote holds (its SHA on the line; all zeros
+    = the push creates main and carries every work at the tip)."""
+    from check_review import standing_block_findings  # noqa: PLC0415
+
+    findings: list[str] = []
+    for line in lines:
+        if line.remote_ref not in INTEGRATION_TARGET_REFS or not line.local_sha.strip("0"):
+            continue  # another ref, or the deletion of main (the route check owns that)
+        if not _git(root, "rev-parse", "--verify", "--quiet", f"{line.local_sha}^{{commit}}"):
+            findings.append(f"{line.local_sha} pushed to {line.remote_ref} is no commit of this "
+                            f"clone — its records cannot be read, so the push is refused")
+            continue
+        findings += standing_block_findings(root, line.local_sha, remote_sha=line.remote_sha)
+    return findings
+
+
+# --- did the stdin guard run for this push? ---------------------------------
+# The ref lines reach only a hook that owns git's stdin. Under pre-commit that is
+# `pre-push.legacy` (install_hooks.py puts this guard there): pre-commit runs it
+# with the lines before its own hooks and before its "nothing to push" shortcut.
+# pre-commit's `merge-route` hook then asks here whether that happened for this
+# push — a guard that is not installed must be noticed, not assumed.
+STAMP_DIR = "process-merge-guard"
+STAMP_TTL_S = 600
+
+
+def _common_dir(root: Path) -> Path:
+    common = Path(_git(root, "rev-parse", "--git-common-dir") or ".git")
+    return common if common.is_absolute() else root / common
+
+
+def stamp_guard_run(root: Path, lines: list[RefLine]) -> None:
+    folder = _common_dir(root) / STAMP_DIR
+    try:
+        folder.mkdir(exist_ok=True)
+        (folder / f"{os.getpid()}-{time.time_ns()}").write_text(
+            "".join(" ".join(line) + "\n" for line in lines), encoding="utf-8")
+    except OSError:
+        pass  # the hook check then refuses a push to main: loud, not silent
+
+
+def guard_ran(root: Path, env: dict[str, str]) -> bool:
+    """True when the stdin guard stamped the ref line pre-commit names
+    (`PRE_COMMIT_REMOTE_BRANCH`, `PRE_COMMIT_TO_REF`) in the last minutes; the
+    stamp is consumed. Stale stamps are cleared on the way."""
+    remote_ref = env.get(PRE_COMMIT_TARGET_ENV, "").strip()
+    to_ref = env.get("PRE_COMMIT_TO_REF", "").strip()
+    folder = _common_dir(root) / STAMP_DIR
+    try:
+        stamps = sorted(folder.iterdir())
+    except OSError:
+        return False
+    now = time.time()
+    for stamp in stamps:
+        try:
+            if now - stamp.stat().st_mtime > STAMP_TTL_S:
+                stamp.unlink(missing_ok=True)
+                continue
+            lines = parse_ref_lines(stamp.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if any(line.remote_ref == remote_ref and (not to_ref or line.local_sha == to_ref)
+               for line in lines):
+            stamp.unlink(missing_ok=True)
+            return True
+    return False
+
+
+INSTALL_HINT = "python3 scripts/process/install_hooks.py"
+
+
+def hook_check(root: Path, env: dict[str, str]) -> int:
+    """pre-commit's `merge-route` hook: the stdin guard must have run for this push."""
+    if guard_ran(root, env):
+        return 0
+    targets = push_targets(env)
+    if pushes_to_integration(targets):
+        print(f"merge_route: the merge guard did not see this push's ref lines (it runs as "
+              f"pre-push.legacy under pre-commit) — install it with `{INSTALL_HINT}` "
+              f"after `pre-commit install`; a push to main without it is refused",
+              file=sys.stderr)
+        return 1
+    print(f"merge_route: note — the merge guard is not installed in this clone "
+          f"(`{INSTALL_HINT}`); pushes to main are refused until it is", file=sys.stderr)
+    return 0
+
+
 def main(argv: list[str]) -> int:
     env = dict(os.environ)
+    root = Path(_git(Path.cwd(), "rev-parse", "--show-toplevel") or ".")
+    if argv[:1] == ["--hook-check"]:
+        return hook_check(root, env)
     bypass = ""
     if argv[:1] == ["--bypass"]:
         bypass, argv = (argv[1] if len(argv) > 1 else ""), argv[2:]
     bypass = bypass or _skipped_gates(env)
-    targets = " ".join(argv).split() or (
-        env.get(PUSH_TARGETS_ENV, "") or env.get(PRE_COMMIT_TARGET_ENV, "")).split()
-    root = Path(_git(Path.cwd(), "rev-parse", "--show-toplevel") or ".")
+    lines: list[RefLine] = []
+    from_stdin = argv[:1] == ["--stdin"]
+    if from_stdin:
+        # the remaining arguments are git's (remote name, url), no refs
+        argv = []
+        try:
+            lines = parse_ref_lines(sys.stdin.read())
+        except ValueError as exc:
+            print(f"merge_route: {exc} — the push is refused", file=sys.stderr)
+            return 1
+        stamp_guard_run(root, lines)
+    targets = push_targets(env, " ".join(argv).split(), [line.remote_ref for line in lines])
     verdict = check(root, targets, env, bypass=bypass)
     if verdict.message:
         print(verdict.message, file=sys.stderr)
-    if verdict.ok and verdict.ledger:
+    if not verdict.ok:
+        return 1
+    # the verdict of the review records travels with the ref lines; a skipped gate
+    # (logged above) skips it too — the owner's emergency exit
+    if lines and not bypass:
+        findings = standing_blocks(root, lines)
+        for finding in sorted(set(findings)):
+            print(f"review: {finding}", file=sys.stderr)
+        if findings:
+            return 1
+    if verdict.ledger:
         append_ledger(root, *verdict.ledger, targets)
-    return 0 if verdict.ok else 1
+    return 0
 
 
 if __name__ == "__main__":

@@ -38,6 +38,7 @@ from pathlib import Path
 RUNNER_REL = "scripts/process/gate_runner.py"
 PRE_COMMIT_CONFIG = ".pre-commit-config.yaml"
 GITHOOKS_DIR = ".githooks"
+INSTALL_HOOKS_REL = "scripts/process/install_hooks.py"
 
 # The PEP-723 block: `# /// script` … `# ///`, every line a comment.
 _PEP723_BLOCK = re.compile(r"^# /// script\s*$(?P<body>.*?)^# ///\s*$",
@@ -164,25 +165,33 @@ def hook_wiring_findings(root: Path) -> tuple[list[str], list[str]]:
             f"registration is inert and no local gate has run at push. One "
             f"hook manager: `git config --unset core.hooksPath` and reinstall "
             f"(`uvx pre-commit install --hook-type pre-commit --hook-type "
-            f"pre-push`), or move the registrations into {hooks_path} and "
+            f"pre-push && python3 {INSTALL_HOOKS_REL}`), or move the registrations into {hooks_path} and "
             f"drop the config")
         return hard, soft
-    hooks_dir = _git(root, "rev-parse", "--git-path", "hooks")
-    pre_push = Path(hooks_dir) if hooks_dir else None
-    if pre_push is not None and not pre_push.is_absolute():
-        pre_push = root / pre_push
-    installed = False
-    if pre_push is not None:
-        hook = pre_push / "pre-push"
-        try:
-            installed = hook.is_file() and "pre-commit" in hook.read_text(
-                encoding="utf-8", errors="replace")
-        except OSError:
-            installed = False
+    # one owner for "is the framework's hook there, and the merge guard before it"
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    try:
+        from install_hooks import guard_state  # noqa: PLC0415
+    except ImportError:
+        hard.append(f"{INSTALL_HOOKS_REL} is missing from this checkout — the merge "
+                    f"guard cannot be checked or installed")
+        return hard, soft
+    finally:
+        sys.path.pop(0)
+    installed, guarded = guard_state(root)
     if not installed:
         soft.append(
             f"{PRE_COMMIT_CONFIG} registers a pre-push gate but this clone "
             f"never installed it — `uvx pre-commit install --hook-type "
-            f"pre-commit --hook-type pre-push`; until then no gate runs "
-            f"locally before a push (CI remains the authority)")
+            f"pre-commit --hook-type pre-push && python3 {INSTALL_HOOKS_REL}`; "
+            f"until then no gate runs locally before a push (CI remains the "
+            f"authority)")
+    elif not guarded:
+        # pre-commit hands its hooks only the first ref line with something to
+        # push, and none at all for a published commit pushed onto main: without
+        # the guard reading git's lines the merge route is not checked
+        hard.append(
+            f"pre-commit's pre-push hook is installed without the merge guard — "
+            f"`python3 {INSTALL_HOOKS_REL}` (after `pre-commit install`); until "
+            f"then a push to main is refused")
     return hard, soft
