@@ -204,7 +204,13 @@ recorded answer, so no module silently changes:
 
     uv run scripts/process/template_update.py            # add --ref <tag> to pick a release
 
-A project that **owns** some rendered files (a gate it extended, a command it
+**Extend before you own.** Every owned file is a hand port on every
+release. A project's own gates go into `docs/process/gates.local.json`, as
+`{"<name>": {"module": <module key or null>, "command": ["path/in/repo.py", "."]}}`.
+The gate runner adds them to its list, or replaces a template gate of the same
+name, and says so. A malformed file fails the run.
+
+A project that still **owns** some rendered files (a command it
 rewrote) lists them in a `.process-owned` file at the repo root (one path or
 glob per line). The helper keeps every owned file as committed and writes the
 template's own change to each of them (old release render → new release

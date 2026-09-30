@@ -59,6 +59,45 @@ KNOWN_MODULES = {key for key, _command in GATES.values() if key is not None} | {
 # may still name them — accepted, never run
 RETIRED_MODULES = {"contracts", "security_floor", "arch_docs", "github_master"}
 KNOWN_HARNESSES = {"claude", "copilot", "agents_md"}
+# a project's own gates, without owning this runner: {name: {"module": key or null,
+# "command": ["path/in/repo.py", args...]}} — added to GATES, or replacing one by name
+LOCAL_GATES = "docs/process/gates.local.json"
+
+
+def _local_refused(why: str) -> SystemExit:
+    print(f"gate-runner: {LOCAL_GATES}: {why} — fix the file; a broken list must not "
+          f"read as 'no local gates'", file=sys.stderr)
+    return SystemExit(1)
+
+
+def with_local_gates(root: Path) -> tuple[dict, dict]:
+    """(GATES with the project's gates merged in, the local entries). Load-bearing like
+    the manifest: anything malformed is a hard failure."""
+    import json
+
+    f = root / LOCAL_GATES
+    if not f.is_file():
+        return dict(GATES), {}
+    try:
+        data = json.loads(f.read_text(encoding="utf-8"))
+    except (ValueError, UnicodeDecodeError) as exc:
+        raise _local_refused(f"unparseable ({exc})")
+    if not isinstance(data, dict):
+        raise _local_refused("must be a mapping {name: {module, command}}")
+    local = {}
+    for name, entry in data.items():
+        if not isinstance(entry, dict) or "module" not in entry or "command" not in entry:
+            raise _local_refused(f"{name}: needs 'module' (a module key or null) and 'command'")
+        key, cmd = entry["module"], entry["command"]
+        if key is not None and key not in KNOWN_MODULES:
+            raise _local_refused(f"{name}: unknown module {key!r}")
+        if not isinstance(cmd, list) or not cmd or not all(isinstance(a, str) and a for a in cmd):
+            raise _local_refused(f"{name}: 'command' must be a non-empty list of strings")
+        script = Path(cmd[0])
+        if script.is_absolute() or ".." in script.parts:
+            raise _local_refused(f"{name}: {cmd[0]} must be a path inside the repository")
+        local[name] = (key, [sys.executable, *cmd])
+    return {**GATES, **local}, local
 
 
 def _validate_boolean_mapping(
@@ -238,8 +277,9 @@ def main() -> int:
         )
         return 1
     mods = load_modules(root)
+    gates, local = with_local_gates(root)
     # core gates (key is None) always run; module gates run when their key is on
-    active = [name for name, (key, _cmd) in GATES.items() if key is None or mods.get(key)]
+    active = [name for name, (key, _cmd) in gates.items() if key is None or mods.get(key)]
     if "--list" in sys.argv:
         for g in active:
             print(g)
@@ -277,9 +317,16 @@ def main() -> int:
             failed.append("pushed-tree")
     # don't litter the repo with __pycache__ from the gates' sibling imports
     env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
+    for name in sorted(set(local) & set(GATES)):
+        print(f"gate-runner: {LOCAL_GATES} replaces the template's {name} gate")
     for name in active:
-        _key, cmd = GATES[name]
+        _key, cmd = gates[name]
         script = root / cmd[1]
+        if name in local and not script.is_file():
+            print(f"gate-runner: {name} is named in {LOCAL_GATES} but {cmd[1]} is missing",
+                  file=sys.stderr)
+            failed.append(name)
+            continue
         if not script.is_file():
             # a module enabled in the manifest whose gate script is missing is
             # almost always a hand-edited .copier-answers.yml (copier then never
