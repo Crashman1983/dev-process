@@ -2,6 +2,7 @@
 owner override (observed downstream: a review session reset its branch onto
 main and published 16 commits past a `block` verdict). Each test runs the
 rendered script as the pre-push hook does."""
+import importlib.util
 import json
 import os
 import subprocess
@@ -497,3 +498,17 @@ def test_the_train_doc_owns_the_merge_route(render, tmp_path):
                  "process-owner-overrides.log", "SKIP=process-gates", "--standing-block",
                  "Plan and review sessions never push to main"):
         assert term in text, term
+
+
+def test_the_review_gate_reads_push_targets_from_the_same_owner(render, tmp_path):
+    """Refute round 2, F1: the guard took the union of both variables, the review gate
+    the first one set — a forged PROCESS_PUSH_TARGETS hid main from the gate."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    spec = importlib.util.spec_from_file_location("cr_targets", out / "scripts/process/check_review.py")
+    cr = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(cr)
+
+    merge, _why = cr.integration_push({"PROCESS_PUSH_TARGETS": "refs/heads/feature",
+                                       "PRE_COMMIT_REMOTE_BRANCH": "refs/heads/main"})
+
+    assert merge is True

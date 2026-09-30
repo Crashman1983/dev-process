@@ -75,7 +75,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling imports
 from check_review import (  # noqa: E402  (one owner for "what is main" and "where does it go")
     INTEGRATION_TARGET_REFS,
     PRE_COMMIT_TARGET_ENV,
-    PUSH_TARGETS_ENV,
 )
 
 PHASE_ENV = "PROCESS_PHASE"
@@ -333,17 +332,10 @@ def parse_ref_lines(text: str) -> list[RefLine]:
 
 
 def push_targets(env: dict[str, str], *sources: list[str]) -> list[str]:
-    """Every remote ref any source names: the arguments, git's ref lines and BOTH
-    environment variables. A union, so a forged `PROCESS_PUSH_TARGETS` can add a
-    target but never hide main, and pre-commit's `PRE_COMMIT_REMOTE_BRANCH` (the
-    first ref line with something to push, nothing else) can never be all there is."""
-    seen: list[str] = []
-    for target in [*(t for source in sources for t in source),
-                   *env.get(PUSH_TARGETS_ENV, "").split(),
-                   *env.get(PRE_COMMIT_TARGET_ENV, "").split()]:
-        if target not in seen:
-            seen.append(target)
-    return seen
+    """check_review.push_targets — the one owner the review gate asks too."""
+    from check_review import push_targets as owner  # noqa: PLC0415
+
+    return owner(env, *sources)
 
 
 def standing_blocks(root: Path, lines: list[RefLine]) -> list[str]:

@@ -1092,3 +1092,28 @@ def test_session_pid_is_the_worker_or_the_pane(render, tmp_path, monkeypatch):
     monkeypatch.setattr(mod, "_tmux", lambda *a: subprocess.CompletedProcess(a, 1, "", "gone"))
     assert mod.session_pid({"tmux_window": "@3"}) == 0
 
+
+
+@pytest.mark.parametrize("branch, issue, found", [
+    ("feat/7-login", 7, True), ("7-login", 7, True), ("issue-7", 7, True),
+    ("2026-09-30-login", 2026, False), ("70s-look", 70, False),
+])
+def test_find_branch_reads_the_issue_as_its_owner_does(render, tmp_path, branch, issue, found):
+    """Refute round 2, F3: dispatch read issue numbers from branch names its own way —
+    `feat/7-login` was no branch of #7, a dated branch one of #2026."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _git(out, "branch", branch)
+    sys.path.insert(0, str(out / "scripts/process"))
+    try:
+        import importlib
+
+        import dispatch
+        importlib.reload(dispatch)
+        got = dispatch.find_branch(out, issue)
+    finally:
+        sys.path.pop(0)
+        for m in ("dispatch", "report", "check_review"):
+            sys.modules.pop(m, None)
+
+    assert (got == branch) if found else got is None, got

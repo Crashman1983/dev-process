@@ -80,3 +80,15 @@ def test_worker_env_cannot_switch_hooks_off(render, tmp_path, key):
     r = _dispatch(out, "policy")
 
     assert r.returncode != 0 and key in r.stdout + r.stderr, r.stdout + r.stderr
+
+
+@pytest.mark.parametrize("key", ["skip", "HOME", "XDG_CONFIG_HOME", "PATH", "LD_PRELOAD"])
+def test_worker_env_cannot_redirect_git_config_or_executables(render, tmp_path, key):
+    """Refute round 2, F2: HOME / XDG_CONFIG_HOME carry a git config with core.hooksPath,
+    PATH another git, and `skip` is SKIP on case-insensitive systems."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _local(out, {"env": {key: "x"}})
+
+    r = _dispatch(out, "policy")
+
+    assert r.returncode != 0 and key in r.stdout + r.stderr, r.stdout + r.stderr

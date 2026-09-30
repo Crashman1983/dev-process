@@ -170,10 +170,16 @@ def _check_env(env: object, where: str) -> None:
         raise SystemExit(f"dispatch: {POLICY} `{where}` must not set PROCESS_* — dispatch owns those")
     # a worker's environment must not switch the local guards off: pre-commit's SKIP,
     # git's own configuration (GIT_CONFIG_* can set core.hooksPath), pre-commit's knobs
-    hooks = sorted(k for k in env if k == "SKIP" or k.startswith(("GIT_", "PRE_COMMIT")))
+    # HOME and XDG_* carry a git config (core.hooksPath), PATH another git, LD_*/DYLD_*
+    # code into every process; names compared case-insensitively (`skip` is SKIP on a
+    # case-insensitive system). The policy is trusted configuration all the same —
+    # `command` can run anything — so this closes the easy path, and a change to the
+    # policy files is gate code to the review bundle
+    hooks = sorted(k for k in env if k.upper() in ("SKIP", "HOME", "PATH")
+                   or k.upper().startswith(("GIT_", "PRE_COMMIT", "XDG_", "LD_", "DYLD_")))
     if hooks:
         raise SystemExit(f"dispatch: {POLICY} `{where}` must not set {', '.join(hooks)} — "
-                         f"it would switch the hooks off for every worker")
+                         f"it would switch the hooks off or redirect git for every worker")
 
 
 def phase_base(root: Path, branch: str) -> str:
@@ -331,9 +337,11 @@ def find_branch(root: Path, issue: int) -> str | None:
     known = _placed(root).get(issue)
     if known:
         return known
+    from check_review import branch_issue  # noqa: PLC0415  (the one owner of a branch's issue)
+
     for b in _out(root, "branch", "--list", "--format=%(refname:short)").splitlines():
         b = b.strip()
-        if b == f"issue-{issue}" or b.startswith(f"{issue}-"):
+        if branch_issue(b) == str(issue):
             return b
     return None
 
