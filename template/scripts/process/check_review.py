@@ -1794,8 +1794,31 @@ def _declared_anywhere(root: Path) -> set[int]:
     return found
 
 
+def _gitignored(root: Path, rels: list[str]) -> set[str]:
+    """The subset of `rels` git ignores. An ignored path is not part of the
+    repository — most often another agent's worktree nested under the
+    checkout, whose plans are in no commit yet failed the push of whoever
+    pushed next (observed downstream). `.gitignore` stays the one owner of
+    what belongs to the repo; an untracked plan that is NOT ignored stays in
+    scope on purpose — a plan just written to the wrong place is what the
+    scan exists for. Fails open: git absent or erroring ignores nothing."""
+    if not rels:
+        return set()
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(root), "check-ignore", "-z", "--stdin"],
+            input="\0".join(rels).encode(errors="surrogateescape"),
+            capture_output=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired):
+        return set()
+    # 0 = some path ignored, 1 = none ignored, >1 = an error (fail open)
+    if result.returncode > 1:
+        return set()
+    return {n for n in result.stdout.decode(errors="surrogateescape").split("\0") if n}
+
+
 def _unhomed_plans(root: Path) -> list[str]:
-    hard: list[str] = []
+    candidates: list[tuple[Path, str]] = []
     for p in sorted(root.rglob("*.md")):
         rel = p.relative_to(root)
         parts = rel.parts
@@ -1804,6 +1827,12 @@ def _unhomed_plans(root: Path) -> list[str]:
         rel_s = str(rel).replace("\\", "/")
         if any(rel_s == s or rel_s.startswith(s + "/")
                for s in _UNHOMED_SANCTIONED):
+            continue
+        candidates.append((p, rel_s))
+    ignored = _gitignored(root, [rel_s for _, rel_s in candidates])
+    hard: list[str] = []
+    for p, rel_s in candidates:
+        if rel_s in ignored:
             continue
         try:
             text = _unfenced(p.read_text(encoding="utf-8", errors="replace"))

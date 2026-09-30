@@ -723,6 +723,45 @@ def test_homed_and_archived_plans_are_not_unhomed(render, tmp_path):
     assert r.returncode == 0, r.stdout
 
 
+def test_a_gitignored_plan_is_not_unhomed_but_an_untracked_one_is(render, tmp_path):
+    # another agent's worktree nested under the checkout: ignored, in no
+    # commit — it failed the push of whoever pushed next (observed downstream)
+    out = render(tmp_path, {"project_name": "d"})
+    _git(out, "init", "-q", "-b", "main")
+    (out / ".gitignore").write_text((out / ".gitignore").read_text() + "\n.worktrees/\n"
+                                    if (out / ".gitignore").is_file() else ".worktrees/\n")
+    nested = out / ".worktrees/other-agent"
+    nested.mkdir(parents=True)
+    _git(nested, "init", "-q")
+    (nested / "notes").mkdir()
+    (nested / "notes/2026-08-10-their-plan.md").write_text("# Plan\n\ntier: 5\n")
+    r = _run(out)
+    assert "their-plan" not in r.stdout, r.stdout
+    # a plan just written to the wrong place is untracked, not ignored: caught
+    (out / "notes").mkdir()
+    (out / "notes/2026-08-10-stray-plan.md").write_text("# Plan\n\ntier: 3\n")
+    r = _run(out)
+    assert r.returncode == 1 and "notes/2026-08-10-stray-plan.md: declares 'tier: 3' outside" in r.stdout
+    assert "their-plan" not in r.stdout
+
+
+def test_without_git_nothing_counts_as_ignored(render, tmp_path):
+    # fail open: a broken ignore check must not silence the scan
+    out = render(tmp_path, {"project_name": "d"})
+    sys.path.insert(0, str(out / "scripts/process"))
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("check_review_ign", out / "scripts/process/check_review.py")
+        gate = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(gate)
+    finally:
+        sys.path.pop(0)
+    (out / "notes").mkdir()
+    (out / "notes/stray.md").write_text("tier: 4\n")
+    assert gate._gitignored(out, ["notes/stray.md"]) == set()
+    assert len(gate._unhomed_plans(out)) == 1
+
+
 def test_prose_tier_without_declaration_is_a_loud_note(render, tmp_path):
     # third-party plan writers know tiers, not the grammar — a plan saying
     # "Tier 4" in prose but declaring nothing sits outside every tier-keyed gate
