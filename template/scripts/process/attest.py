@@ -40,6 +40,10 @@ Usage:
             --verdict pass|block [--round N] [--plan-review]
             [--bundle FILE | --base SHA --head SHA] [--note TEXT]
             [--exception TEXT] [--journal-dir DIR] [--dry-run]
+            [--archive PLAN] [--commit]
+
+`--archive PLAN` (a pass only) moves the plan into the archive with the line;
+`--commit` makes that one commit. Every refusal comes before the first write.
 """
 from __future__ import annotations
 
@@ -55,6 +59,9 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling import
 from check_review import (  # noqa: E402  (one owner for grammar, digest, record homes)
     JOURNAL_DIR,
+    PLANS_ARCHIVE,
+    SPEC_PLAN,
+    SPECS_DIR,
     artifact_digest,
     parse_review_lines,
     readable,
@@ -84,20 +91,58 @@ def _git(root: Path, *args: str) -> str | None:
 
 
 INTEGRATION_BRANCHES = ("main", "master")
+# a branch that starts with an issue number (`7`, `7-login`, `issue-7`, `7/x`)
+ISSUE_BRANCH = re.compile(r"^(?:issue-)?(\d+)(?:$|[-/])")
 
 
 def _journal_target(root: Path, journal_dir: Path) -> Path:
-    """Today's shard: on a work branch always the branch's own directory
+    """Today's shard: on a work branch always its own directory
     (journal-state-plans.md) — two parallel branches appending one shared daily
     file collide at merge (observed downstream: attestations of parallel
-    reviews conflicting in the same file); on the integration branch or a
-    detached HEAD, the flat daily file."""
+    reviews conflicting in the same file). A numbered branch writes
+    `issue-<N>/`: one issue, one shard, found without knowing the slug (two
+    branches of one issue wrote two shards downstream). Any other branch writes
+    its slug; the integration branch or a detached HEAD, the flat daily file."""
     today = dt.date.today().isoformat()
     branch = _git(root, "symbolic-ref", "--short", "HEAD") or ""
+    m = ISSUE_BRANCH.match(branch)
+    if m:
+        return journal_dir / f"issue-{m.group(1)}" / f"{today}.md"
     slug = branch.replace("/", "-")
     if slug and slug not in INTEGRATION_BRANCHES:
         return journal_dir / slug / f"{today}.md"
     return journal_dir / f"{today}.md"
+
+
+def _archive_target(root: Path, plan: Path) -> Path:
+    """Where `--archive` moves a plan. A Spec Kit plan is always `plan.md`: it takes
+    its feature directory's name, or every Spec Kit plan would collide in the archive."""
+    resolved = plan.resolve()
+    if resolved.name == SPEC_PLAN and resolved.parent.parent == (root / SPECS_DIR).resolve():
+        return root / PLANS_ARCHIVE / f"{resolved.parent.name}.md"
+    return root / PLANS_ARCHIVE / plan.name
+
+
+def _shown(root: Path, p: Path) -> str:
+    return str(p.relative_to(root)) if p.is_relative_to(root) else str(p)
+
+
+def archive_problems(args, root: Path) -> list[str]:
+    """Checked before anything is written: a late failure left a written line, and the
+    corrected rerun doubled it (downstream)."""
+    if not args.archive:
+        return []
+    plan = root / args.archive
+    if not plan.is_file():
+        return [f"--archive: plan not found: {args.archive}"]
+    if args.verdict != "pass":
+        return [f"--archive only with verdict=pass — a plan is archived when its work "
+                f"merges, not during a review round (verdict={args.verdict})"]
+    target = _archive_target(root, plan)
+    if target.exists():
+        return [f"--archive: {_shown(root, target)} exists already — the move would "
+                f"overwrite another plan"]
+    return []
 
 
 def _texts(root: Path, journal_dir: Path) -> list[str]:
@@ -202,6 +247,10 @@ def main() -> int:
     ap.add_argument("--base")
     ap.add_argument("--head")
     ap.add_argument("--note", help="prose paragraph written above the line")
+    ap.add_argument("--archive", help="with a pass: git-mv this plan into the archive")
+    ap.add_argument("--commit", action="store_true",
+                    help="one commit of the line (and the archived plan); default with "
+                         "--archive: staged, the commit named")
     ap.add_argument("--journal-dir", default=None)
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("root", nargs="?", default=str(ROOT))
@@ -223,7 +272,10 @@ def main() -> int:
         round_issues = []
     args.round_ = counted if args.round_ is None else args.round_
     line, problems = build_line(args, root)
-    problems = round_issues + problems
+    problems = round_issues + problems + archive_problems(args, root)
+    if args.note and any(ln.lstrip().startswith("REVIEW") for ln in args.note.splitlines()):
+        problems.append("the note carries REVIEW-looking lines — the validated line is the "
+                        "only REVIEW writer")
     if problems:
         print("attest: REFUSED — nothing written:", file=sys.stderr)
         for p in problems:
@@ -243,8 +295,35 @@ def main() -> int:
         if args.note:
             fh.write(args.note.rstrip() + "\n\n")
         fh.write(line + "\n")
-    print(f"attest: appended to {target.relative_to(root) if target.is_relative_to(root) else target}")
+    print(f"attest: appended to {_shown(root, target)}")
+    if not (args.archive or args.commit):
+        return 0
+    staged = [str(target)] if target.is_relative_to(root) else []
+    if args.archive:
+        dest = _archive_target(root, root / args.archive)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        if not _git_ok(root, "mv", args.archive, str(dest)):
+            return 1
+        print(f"attest: archived {args.archive} as {_shown(root, dest)}")
+    if staged and not _git_ok(root, "add", *staged):
+        return 1
+    message = f"docs: attest {args.work} round {args.round_}" + (
+        " and archive the plan" if args.archive else "")
+    if args.commit:
+        if not _git_ok(root, "commit", "-q", "-m", message):
+            return 1
+        print(f"attest: committed: {message}")
+    else:
+        print(f'attest: staged — commit with: git commit -m "{message}"')
     return 0
+
+
+def _git_ok(root: Path, *args: str) -> bool:
+    r = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True)
+    if r.returncode != 0:
+        print(f"attest: git {' '.join(args)} failed: {r.stderr.strip()} — the line is "
+              f"written; finish the step by hand", file=sys.stderr)
+    return r.returncode == 0
 
 
 if __name__ == "__main__":

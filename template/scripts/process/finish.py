@@ -204,7 +204,8 @@ def check(root: Path) -> tuple[list[str], list[str]]:
     for name in to_archive:
         tail.append(f"git mv {PLANS_ACTIVE}/{name} {PLANS_ARCHIVE}/{name} "
                     f"&& git commit  # archive the plan ON the branch (last "
-                    f"commit before merge)")
+                    f"commit before merge); attesting the clearing pass with "
+                    f"`attest.py … --archive {PLANS_ACTIVE}/{name} --commit` does both in one")
     behind = _git("rev-list", "--count", f"{branch}..origin/{default}")
     if behind and behind != "0":
         tail.append(f"git fetch origin {default} && git rebase origin/{default}"

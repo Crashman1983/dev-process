@@ -14,7 +14,9 @@ are made, not at the end. Convert relative dates ("yesterday") to absolute ones.
 shared daily file is the one piece of working memory that two parallel efforts both
 append to, so they conflict on merge. When more than one effort is in flight, write to
 `.process-work/journal/<branch-slug>/YYYY-MM-DD.md` — per-branch, exactly as state and
-plans are already sharded, so parallel efforts never touch the same file. The
+plans are already sharded, so parallel efforts never touch the same file. A branch
+that starts with an issue number (`7-login`, `issue-7`) writes `issue-7/` instead:
+one issue, one shard, found without knowing the slug (`attest.py` does this). The
 cross-project daily view is recovered by globbing the shards; tooling that reads
 journals does so recursively.
 
