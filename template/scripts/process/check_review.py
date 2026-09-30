@@ -812,6 +812,21 @@ _ISSUE_CLOSING = re.compile(
 _ISSUE_SUBJECT = re.compile(r"\(#(\d+)\)\s*$")
 
 
+def push_targets(env: dict[str, str], *sources: list[str]) -> list[str]:
+    """Every remote ref any source names: the arguments, git's ref lines and BOTH
+    environment variables — the one owner of "where does this push go". A union, so a
+    forged `PROCESS_PUSH_TARGETS` can add a target but never hide main, and pre-commit's
+    `PRE_COMMIT_REMOTE_BRANCH` (the first ref line with something to push, nothing
+    else) can never be all there is (refutation: the gate read the first one set)."""
+    seen: list[str] = []
+    for target in [*(t for source in sources for t in source),
+                   *env.get(PUSH_TARGETS_ENV, "").split(),
+                   *env.get(PRE_COMMIT_TARGET_ENV, "").split()]:
+        if target not in seen:
+            seen.append(target)
+    return seen
+
+
 def integration_push(env: dict[str, str] | None = None) -> tuple[bool, str]:
     """(is this push a merge?, why not) — the switch between hard and note.
 
@@ -827,9 +842,7 @@ def integration_push(env: dict[str, str] | None = None) -> tuple[bool, str]:
     pushes main from a clone, so this switch never fires for that route —
     there, finish.py (run before the PR) is the stop, and the archive arm
     above catches the residue on main."""
-    source = os.environ if env is None else env
-    raw = source.get(PUSH_TARGETS_ENV, "") or source.get(PRE_COMMIT_TARGET_ENV, "")
-    targets = raw.split()
+    targets = push_targets(dict(os.environ) if env is None else env)
     if not targets:
         return False, (f"no push target known ({PUSH_TARGETS_ENV} unset) — hard "
                        f"only on a push to main/master")

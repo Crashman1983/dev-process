@@ -204,8 +204,10 @@ def hook_wiring_findings(root: Path) -> tuple[list[str], list[str]]:
     elif not guarded:
         # pre-commit hands its hooks only the first ref line with something to
         # push, and none at all for a published commit pushed onto main: without
-        # the guard reading git's lines the merge route is not checked
-        hard.append(
+        # the guard reading git's lines the merge route is not checked. A note:
+        # `merge_route --hook-check` refuses the push to main the guard did not
+        # see, and a hard finding here refused every branch push too (refutation)
+        soft.append(
             f"pre-commit's pre-push hook is installed without the merge guard — "
             f"`python3 {INSTALL_HOOKS_REL}` (after `pre-commit install`); until "
             f"then a push to main is refused")
