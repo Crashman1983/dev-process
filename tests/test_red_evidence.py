@@ -272,3 +272,37 @@ def test_a_named_source_file_is_not_taken_into_the_old_tree(render, tmp_path):
 
     assert r.returncode == 0, r.stdout + r.stderr
     assert "calc.py::calc.add" in r.stdout, r.stdout
+
+
+def test_a_named_directory_carries_only_its_tests(render, tmp_path):
+    """J1: `pytest backend` copied the fixed backend/calc.py into the old tree."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _git(out, "init", "-q", "-b", "main")
+    _git(out, "config", "user.email", "t@t")
+    _git(out, "config", "user.name", "t")
+    (out / "backend").mkdir()
+    (out / "backend/pytest.ini").write_text("[pytest]\npythonpath = .\n", encoding="utf-8")
+    (out / "backend/calc.py").write_text("def add(a, b):\n    return a - b\n", encoding="utf-8")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "base")
+    before = _git(out, "rev-parse", "HEAD")
+    (out / "backend/calc.py").write_text("def add(a, b):\n    return a + b\n", encoding="utf-8")
+    (out / "backend/tests").mkdir()
+    (out / "backend/tests/test_b.py").write_text(
+        "from calc import add\n\n\ndef test_b():\n    assert add(1, 2) == 3\n", encoding="utf-8")
+
+    r = _tool(out, "--work", "7", "--round", "1", "--before", before, "--dry-run", "--",
+              sys.executable, "-m", "pytest", "backend")
+
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "tests/test_b.py::test_b" in r.stdout, r.stdout
+
+
+def test_a_missing_probe_report_is_named(render, tmp_path):
+    """J2: `python -I` ignores PYTHONPATH, the probe never loads — say so."""
+    out, before = _repo(render, tmp_path)
+
+    r = _tool(out, "--work", "7", "--round", "1", "--before", before, "--",
+              sys.executable, "-I", "-m", "pytest", "test_calc.py")
+
+    assert r.returncode == 1 and "probe" in r.stderr, r.stderr

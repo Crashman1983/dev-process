@@ -1166,14 +1166,14 @@ ein Wächter-Test gegen doppelte Klammern ohne Leerzeichen in Python-Vorlagen.
 Wer v2.27.1 oder v2.28.0 installiert hat und am Push scheitert: auf v2.28.1
 aktualisieren, `v2.28.1`.
 
-**v2.38.0 — Kürzere Wege von der Fix-Runde zum Release: die Umbau-Frage kommt früher, Belege werden gemessen statt getippt, das Release-Ritual ist ein Skript.** Anlass war eine Retrospektive im Referenzprojekt: Ein Wächter brauchte vier Review-Runden, obwohl alle Befunde ab Runde 2 dieselbe Ursache hatten. Dazu kamen Rot-Belege und ROOT-CAUSE-Zeilen, von Hand geschrieben, mit Fehlern, und ein Release-Ritual aus einem Dutzend Handschritten. Alle drei Teile wurden refutiert (12 Szenarien, 8 Funde, alle behoben); jeder Fund ist mit einem Test belegt, der gegen die Vorfassung rot ist.
+**v2.38.0 — Kürzere Wege von der Fix-Runde zum Release: die Umbau-Frage kommt früher, Belege werden gemessen statt getippt, das Release-Ritual ist ein Skript.** Anlass war eine Retrospektive im Referenzprojekt: Ein Wächter brauchte vier Review-Runden, obwohl alle Befunde ab Runde 2 dieselbe Ursache hatten. Dazu kamen Rot-Belege und ROOT-CAUSE-Zeilen, von Hand geschrieben, mit Fehlern, und ein Release-Ritual aus einem Dutzend Handschritten. Alle drei Teile wurden refutiert, jede Fix-Runde erneut (vier Durchgänge, 61 Szenarien, 17 Funde, alle behoben); jeder Fund ist mit einem Test belegt, der gegen die Vorfassung rot ist. Die neue MUSTER-Zeile wirkte gleich: Nach der dritten Runde am selben Owner war die gemeinsame Ursache benannt („rät pytests Fakten“), und `red_evidence` wurde umgebaut statt ein viertes Mal geflickt.
 - **Die Umbau-Frage beim zweiten Treffer (Regel 4):**
   - `check_fix_streak` meldet schon den zweiten `fix`-Commit auf derselben Datei: eine DECISION „Inkrement oder Umbau“ vor dem nächsten Flicken. Ab dem dritten bleibt es bei Regel 6 (Ursache fehlt).
   - Eine Markdown-Datei (CHANGELOG, Doku), die zwei Fixes nur mitberühren, zählt beim zweiten Treffer nicht.
   - `fix!:` zählt jetzt als Fix.
 - **Der Refuter nennt das Muster:** Nach den Befunden kommt eine Zeile MUSTER. Sie nennt die gemeinsame Ursache und den einen Owner, der alle Befunde schließt, oder „no common cause“. Der erste Einsatz in diesem Release zeigte gleich drei Befunde mit einer Ursache.
 - **`red_evidence.py` misst den Rot-Beleg:**
-  - Es fährt eine pytest-Auswahl gegen den alten Stand, in einem temporären Worktree mit den neuen Testdateien, und gegen den Arbeitsbaum.
+  - Es fährt eine pytest-Auswahl gegen den alten Stand, in einem temporären Worktree mit den neuen Testdateien, und gegen den Arbeitsbaum. Ein kleines Probe-Plugin meldet pytests eigene Node-IDs und was Setup und Aufruf je Test taten; nur ein im Aufruf gescheiterter Test zählt als „rot vorher“.
   - Es schreibt den Journal-Block und mit `--cause` die ROOT-CAUSE-Zeile; die Testnamen kommen als pytest-Node-ID aus dem Lauf.
   - Es verweigert, wenn kein Test vorher gelaufen und rot war, wenn der alte Stand nicht sammelt, oder wenn danach noch etwas rot ist.
   - `/execute` und die Journal-Doku verweisen darauf.
