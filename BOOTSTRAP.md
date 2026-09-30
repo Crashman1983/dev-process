@@ -222,7 +222,8 @@ to port by hand, without the noise of the local divergence. Delete that
 directory once ported; it is working memory, not a commit.
 
 After any update, re-run
-`uvx pre-commit install --hook-type pre-commit --hook-type pre-push` (the
+`uvx pre-commit install --hook-type pre-commit --hook-type pre-push` and
+`python3 scripts/process/install_hooks.py` (the merge guard; the
 `git-hooks` module is part of the standard set), then the gate runner.
 
 **Plain copier, if you must.** `modules` is a derived answer (`when: false`):
@@ -258,3 +259,4 @@ Install the git hooks once per clone (they live in host-local `.git/hooks`,
 not version control):
 
     uvx pre-commit install --hook-type pre-commit --hook-type pre-push
+    python3 scripts/process/install_hooks.py   # the merge guard, after pre-commit

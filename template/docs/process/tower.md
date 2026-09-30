@@ -189,6 +189,7 @@ a script such as
     command -v uv >/dev/null || pip install --quiet uv
     uv sync                        # or the project's own setup target
     uvx pre-commit install --hook-type pre-commit --hook-type pre-push  # the session pushes too
+    python3 scripts/process/install_hooks.py   # the merge guard (git-hooks module)
     # export PATH additions for the session's shells via "$CLAUDE_ENV_FILE"
 
 Make it idempotent and fast on a second start; a review that cannot run the

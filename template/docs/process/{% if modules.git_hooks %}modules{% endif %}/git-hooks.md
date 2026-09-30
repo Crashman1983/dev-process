@@ -13,25 +13,38 @@ A rendered `.pre-commit-config.yaml` with three hooks:
 - **`no-commit-to-branch`** (pre-commit stage, upstream standard hook):
   blocks direct commits to `main`/`master` — branch discipline
   (`commits.md`).
-- **`merge-route`** (pre-push stage, local hook): runs
-  `scripts/process/merge_route.py` on the push target the framework names
-  (`PRE_COMMIT_REMOTE_BRANCH`). A push to main needs its route (the train
-  or `finish.py --apply`) or a logged owner override, and never comes from
-  a plan or review session (`train.md`, "Who pushes to main").
+- **`merge-route`** (pre-push stage, local hook): checks that the merge
+  guard saw this push (below). A push to main needs its route (the train or
+  `finish.py --apply`) or a logged owner override, and never comes from a
+  plan or review session (`train.md`, "Who pushes to main").
 - **`process-gates`** (pre-push stage, local hook): runs
   `uv run scripts/process/gate_runner.py` — the same manifest-aware gates CI
   runs, so a push that would fail CI fails at your machine first.
+
+Plus the **merge guard** (`scripts/process/install_hooks.py`). pre-commit
+reads git's pre-push lines itself and hands its hooks only the first ref
+with something to push — and runs no hook at all when the pushed commit is
+already on the remote. Observed in a refutation: `git push origin HEAD:main
+feature` and `git push -f origin feature:main` of a published branch both
+moved main past a guard that ran as an ordinary hook. The guard therefore
+runs as `pre-push.legacy`, which pre-commit starts first with git's stdin:
+it checks every ref line (`merge_route.py --stdin`) and runs the review
+gate's standing-block check for each commit pushed to main, based on the
+SHA the remote holds.
 
 ## Install (once per clone)
 
 ```
 uvx pre-commit install --hook-type pre-commit --hook-type pre-push
+python3 scripts/process/install_hooks.py
 ```
 
 `pre-commit` manages `.git/hooks` itself and reads ONE config file. A project
 that already had a `.pre-commit-config.yaml` keeps it and adds the three process
-hooks to it (BOOTSTRAP, brownfield notes). Re-run the same command after a
-`copier update`; it is idempotent.
+hooks to it (BOOTSTRAP, brownfield notes). Re-run both commands after a
+`copier update`; they are idempotent. A pre-commit pre-push hook without the
+guard is a hard finding of the hook doctor, and the `merge-route` hook
+refuses a push to main the guard did not see.
 
 ## Bypass — sanctioned and otherwise
 
@@ -43,8 +56,8 @@ hooks to it (BOOTSTRAP, brownfield notes). Re-run the same command after a
 - `SKIP=process-gates` does not skip `merge-route`: on a push to main the
   guard still bars plan and review sessions, refuses the skip from any
   dispatched session, and logs it in `<git-common-dir>/process-owner-overrides.log`.
-  `SKIP=merge-route` and `--no-verify` skip the guard itself — the same
-  class as a clone without hooks.
+  `SKIP=merge-route` skips only the check that the guard ran; `--no-verify`
+  skips the guard itself — the same class as a clone without hooks.
 
 ## One hook manager — and a doctor for it
 

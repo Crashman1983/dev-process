@@ -124,8 +124,9 @@ The log lives in the clone's git common dir (`process-train/<stamp>.log`).
 ## Who pushes to main — the merge route
 
 A push to main is the merge, and the pre-push guard
-(`scripts/process/merge_route.py`, the `merge-route` hook of the
-git-hooks module) decides it before any gate. Observed downstream: a review
+(`scripts/process/merge_route.py`, installed by `install_hooks.py` where it
+reads git's own pre-push ref lines — every ref of the push, and the SHA
+the remote holds) decides it before any gate. Observed downstream: a review
 session reset its branch onto main and published 16 commits past a `block`.
 
 - **Plan and review sessions never push to main.** The phase is the
@@ -142,7 +143,8 @@ session reset its branch onto main and published 16 commits past a `block`.
   kind, reason, targets) to `<git-common-dir>/process-owner-overrides.log`.
 - **Skipped gates** (`SKIP=process-gates`, or `--bypass NAME` from a
   project's own hook switch) on a push to main keep the phase bar, need no
-  route, are refused from a dispatched session, and land in the same ledger.
+  route, skip the standing-block check with the gates, are refused from a
+  dispatched session, and land in the same ledger.
 
 The review gate adds the verdict: on the merge push, a work whose latest
 REVIEW (highest round; a tie goes to the block) is `verdict=block` stops the

@@ -2,6 +2,7 @@
 # (https://pre-commit.com). Install once per clone:
 #
 #     uvx pre-commit install --hook-type pre-commit --hook-type pre-push
+#     python3 scripts/process/install_hooks.py   # the merge guard (pre-push.legacy)
 #
 # Bypass for the sanctioned onboarding case (the process-baseline commit on
 # main): SKIP=no-commit-to-branch git commit ...  — any other bypass
@@ -20,11 +21,13 @@ repos:
     hooks:
       # a push to main needs its route (PROCESS_MERGE_ROUTE, set by the train
       # and finish.py) or a logged owner override; plan and review sessions
-      # never push to main. Its own hook, so SKIP=process-gates does not skip
-      # it — it logs that bypass instead (docs/process/train.md, merge route)
+      # never push to main (docs/process/train.md, merge route). The guard
+      # itself reads git's ref lines as pre-push.legacy — install it once per
+      # clone AFTER `pre-commit install`: python3 scripts/process/install_hooks.py
+      # This hook refuses a push to main that guard did not see.
       - id: merge-route
         name: dev-process merge route (pushes to main)
-        entry: uv run scripts/process/merge_route.py
+        entry: uv run scripts/process/merge_route.py --hook-check
         language: system
         pass_filenames: false
         always_run: true
