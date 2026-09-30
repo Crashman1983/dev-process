@@ -92,3 +92,19 @@ def test_breaking_fix_subjects_count(render, tmp_path):
     gate = [sys.executable, str(out / "scripts/process/check_fix_streak.py"), "."]
     r = subprocess.run(gate, cwd=out, capture_output=True, text=True)
     assert "2 fix commits on a.py" in r.stdout, r.stdout
+
+
+def test_a_process_doc_fixed_twice_is_an_owner(render, tmp_path):
+    """G4: the process rules live in Markdown — two fixes on one rule file are a pattern."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _git(out, "init", "-q", "-b", "main")
+    _git(out, "config", "user.email", "t@t")
+    _git(out, "config", "user.name", "t")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "base")
+    _git(out, "checkout", "-q", "-b", "7-thing")
+    for subject in ("fix(refute): a", "fix(refute): b"):
+        _commit(out, "docs/process/refute.md", subject)
+    gate = [sys.executable, str(out / "scripts/process/check_fix_streak.py"), "."]
+    r = subprocess.run(gate, cwd=out, capture_output=True, text=True)
+    assert "2 fix commits on docs/process/refute.md" in r.stdout, r.stdout

@@ -52,36 +52,54 @@ _VALUED = {"-c", "-k", "-m", "-p", "-o", "-W", "--rootdir", "--confcutdir", "--b
 TIMEOUT = 1800
 
 
-def outcomes(xml_path: Path) -> dict[str, bool]:
-    """pytest node id (`path::Class::test[param]`) -> passed, from a junit XML report
-    written with `junit_family=xunit1`, which carries each test's file. Skipped tests and
-    collection errors (no file) are left out. A missing report is no outcome.
+PASSED, FAILED, NOT_RUN_CASE = "passed", "failed", "error"
 
-    The node id is the one key: a test present in the before-run with a failure is red
-    before, and nothing else is — a test that did not run there (a new file, a directory
-    that was not taken along) proved nothing about the old code (refute of #124)."""
+
+def _module_file(classname: str, tree: Path) -> tuple[str, list[str]] | None:
+    """(the collecting module's path, the class chain) for a junit classname, found by the
+    longest dotted prefix that is a file in `tree` — the module that ran the test, not the one
+    that defines it (an inherited test's `file` names its base class's module)."""
+    parts = classname.split(".")
+    for i in range(len(parts), 0, -1):
+        rel = "/".join(parts[:i]) + ".py"
+        if (tree / rel).is_file():
+            return rel, parts[i:]
+    return None
+
+
+def outcomes(xml_path: Path, tree: Path) -> dict[str, str]:
+    """pytest node id (`path::Class::test[param]`) -> passed / failed / error, from a junit
+    XML report. Skipped tests and collection errors are left out; a missing report is no
+    outcome.
+
+    One table, and it reads the facts, not a proxy (refute of #124): the node id comes from
+    the module that collected the test (`classname` in `tree`), and only a `<failure>` is a
+    failed run — an `<error>` in setup means the test's own code never ran, so it proves
+    nothing about the old code. A test absent from the before-run was never red there."""
     if not xml_path.is_file():
         return {}
-    result: dict[str, bool] = {}
+    result: dict[str, str] = {}
     for case in ET.parse(xml_path).getroot().iter("testcase"):
-        path = case.get("file")
-        if not path or any(child.tag == "skipped" for child in case):
+        if any(child.tag == "skipped" for child in case):
             continue
-        module = path.removesuffix(".py").replace("/", ".")
-        klass = (case.get("classname") or "").removeprefix(module).strip(".")
-        node = "::".join(p for p in (path, *(klass.split(".") if klass else ()), case.get("name", "")) if p)
-        result[node] = not any(child.tag in ("failure", "error") for child in case)
+        located = _module_file(case.get("classname") or "", tree)
+        if located is None:
+            continue  # a collection error, or a test outside the tree
+        path, klass = located
+        node = "::".join([path, *klass, case.get("name", "")])
+        tags = {child.tag for child in case}
+        result[node] = FAILED if "failure" in tags else NOT_RUN_CASE if "error" in tags else PASSED
     return result
 
 
-def _run(command: list[str], cwd: Path, report: Path, timeout: int) -> tuple[int, dict[str, bool]]:
+def _run(command: list[str], cwd: Path, report: Path, timeout: int) -> tuple[int, dict[str, str]]:
     try:
-        proc = subprocess.run([*command, "-p", "no:cacheprovider", "-o", "junit_family=xunit1",
+        proc = subprocess.run([*command, "-p", "no:cacheprovider",
                                f"--junitxml={report}"], cwd=cwd, capture_output=True, text=True,
                               timeout=timeout)
     except subprocess.TimeoutExpired:
         raise SystemExit(f"red_evidence: the run in {cwd} took longer than {timeout} s") from None
-    return proc.returncode, outcomes(report)
+    return proc.returncode, outcomes(report, cwd)
 
 
 def _portable(command: list[str], root: Path) -> list[str]:
@@ -158,8 +176,8 @@ def measure(root: Path, before: str, command: list[str], copy: list[str], timeou
                            capture_output=True)
         exit_after, now = _run(command, root, Path(tmp) / "after.xml", timeout)
     return {"command": command, "before": before, "exit_before": exit_before, "exit_after": exit_after,
-            "red_to_green": sorted(t for t, ok in now.items() if ok and was.get(t) is False),
-            "still_red": sorted(t for t, ok in now.items() if not ok), "carried": carried}
+            "red_to_green": sorted(t for t, s in now.items() if s == PASSED and was.get(t) == FAILED),
+            "still_red": sorted(t for t, s in now.items() if s != PASSED), "carried": carried}
 
 
 def refusals(m: dict) -> list[str]:

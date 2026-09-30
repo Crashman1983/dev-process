@@ -183,3 +183,40 @@ def test_a_stale_worktree_of_an_earlier_run_is_pruned(render, tmp_path):
           sys.executable, "-m", "pytest", "test_calc.py")
 
     assert len(_git(out, "worktree", "list").splitlines()) == 1
+
+
+# --- refute of the fix round: read the fact, not a proxy ---
+
+
+def test_a_setup_error_before_is_no_red(render, tmp_path):
+    """G1: an error in setup (a fixture the old tree lacks) is no run of the test's code."""
+    out, before = _repo(render, tmp_path)
+    (out / "tests/pkg").mkdir(parents=True)
+    (out / "tests/pkg/conftest.py").write_text(
+        "import pytest\n\n\n@pytest.fixture\ndef newfix():\n    return 1\n", encoding="utf-8")
+    (out / "tests/pkg/test_t.py").write_text("def test_trivial(newfix):\n    assert True\n",
+                                             encoding="utf-8")
+
+    r = _tool(out, "--work", "7", "--round", "1", "--before", before, "--",
+              sys.executable, "-m", "pytest", "tests/pkg/test_t.py")
+
+    assert r.returncode == 1 and "proves no fix" in r.stderr, r.stdout + r.stderr
+
+
+def test_an_inherited_test_is_named_by_its_collecting_module(render, tmp_path):
+    """G3: xunit1's `file` names where the function is defined, not the module that runs it."""
+    out, before = _repo(render, tmp_path)
+    (out / "tests/pkg").mkdir(parents=True)
+    (out / "tests/__init__.py").write_text("", encoding="utf-8")
+    (out / "tests/pkg/__init__.py").write_text("", encoding="utf-8")
+    (out / "tests/base.py").write_text(
+        "from calc import add\n\n\nclass Base:\n    def test_shared(self):\n        assert add(1, 2) == 3\n",
+        encoding="utf-8")
+    (out / "tests/pkg/test_a.py").write_text(
+        "from tests.base import Base\n\n\nclass TestImpl(Base):\n    pass\n", encoding="utf-8")
+
+    r = _tool(out, "--work", "7", "--round", "1", "--before", before, "--dry-run", "--copy", "tests",
+              "--", sys.executable, "-m", "pytest", "tests/pkg/test_a.py")
+
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "tests/pkg/test_a.py::TestImpl::test_shared" in r.stdout, r.stdout
