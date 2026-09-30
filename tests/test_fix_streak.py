@@ -56,3 +56,39 @@ def test_one_fix_each_on_two_files_stays_quiet(render, tmp_path):
     gate = [sys.executable, str(out / "scripts/process/check_fix_streak.py"), "."]
     r = subprocess.run(gate, cwd=out, capture_output=True, text=True)
     assert r.returncode == 0 and "fix-streak: OK" in r.stdout, r.stdout
+
+
+def test_a_shared_changelog_is_no_owner_at_two(render, tmp_path):
+    """Refute F8: two unrelated fixes that both touch the CHANGELOG are no pattern."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _git(out, "init", "-q", "-b", "main")
+    _git(out, "config", "user.email", "t@t")
+    _git(out, "config", "user.name", "t")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "base")
+    _git(out, "checkout", "-q", "-b", "7-thing")
+    for name in ("b.py", "c.py"):
+        (out / name).write_text("x\n")
+        p = out / "CHANGELOG.md"
+        p.write_text((p.read_text() if p.exists() else "") + name + "\n")
+        _git(out, "add", "-A")
+        _git(out, "commit", "-q", "-m", f"fix: {name}")
+    gate = [sys.executable, str(out / "scripts/process/check_fix_streak.py"), "."]
+    r = subprocess.run(gate, cwd=out, capture_output=True, text=True)
+    assert "CHANGELOG.md" not in r.stdout, r.stdout
+
+
+def test_breaking_fix_subjects_count(render, tmp_path):
+    """Refute F8 (pre-existing): `fix!:` is a conventional fix too."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _git(out, "init", "-q", "-b", "main")
+    _git(out, "config", "user.email", "t@t")
+    _git(out, "config", "user.name", "t")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "base")
+    _git(out, "checkout", "-q", "-b", "7-thing")
+    for subject in ("fix!: a", "fix(core)!: b"):
+        _commit(out, "a.py", subject)
+    gate = [sys.executable, str(out / "scripts/process/check_fix_streak.py"), "."]
+    r = subprocess.run(gate, cwd=out, capture_output=True, text=True)
+    assert "2 fix commits on a.py" in r.stdout, r.stdout

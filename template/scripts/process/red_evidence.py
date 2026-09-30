@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import argparse
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -41,37 +42,108 @@ from attest import ROOT_CAUSE, _journal_target  # noqa: E402  (one grammar, one 
 from check_review import JOURNAL_DIR, readable  # noqa: E402
 
 
+# pytest exit codes that mean "the tests did not run as asked": interrupted
+# (a collection error), internal error, usage error
+NOT_RUN = {2: "collection was interrupted (a collection error)", 3: "pytest hit an internal error",
+           4: "pytest was called wrongly"}
+# options whose next argument is a value, not a test path
+_VALUED = {"-c", "-k", "-m", "-p", "-o", "-W", "--rootdir", "--confcutdir", "--basetemp",
+           "--junitxml", "--deselect", "--ignore", "--ignore-glob", "--timeout"}
+TIMEOUT = 1800
+
+
 def outcomes(xml_path: Path) -> dict[str, bool]:
-    """test id -> passed, from a junit XML report. A missing report is no outcome."""
+    """pytest node id (`path::Class::test[param]`) -> passed, from a junit XML report
+    written with `junit_family=xunit1`, which carries each test's file. Skipped tests and
+    collection errors (no file) are left out. A missing report is no outcome.
+
+    The node id is the one key: a test present in the before-run with a failure is red
+    before, and nothing else is — a test that did not run there (a new file, a directory
+    that was not taken along) proved nothing about the old code (refute of #124)."""
     if not xml_path.is_file():
         return {}
     result: dict[str, bool] = {}
     for case in ET.parse(xml_path).getroot().iter("testcase"):
-        name = f"{case.get('classname', '')}::{case.get('name', '')}".lstrip(":")
-        bad = any(child.tag in ("failure", "error") for child in case)
-        skipped = any(child.tag == "skipped" for child in case)
-        if not skipped:
-            result[name] = not bad
+        path = case.get("file")
+        if not path or any(child.tag == "skipped" for child in case):
+            continue
+        module = path.removesuffix(".py").replace("/", ".")
+        klass = (case.get("classname") or "").removeprefix(module).strip(".")
+        node = "::".join(p for p in (path, *(klass.split(".") if klass else ()), case.get("name", "")) if p)
+        result[node] = not any(child.tag in ("failure", "error") for child in case)
     return result
 
 
-def _run(command: list[str], cwd: Path, report: Path) -> tuple[int, dict[str, bool]]:
-    proc = subprocess.run([*command, "-p", "no:cacheprovider", f"--junitxml={report}"],
-                          cwd=cwd, capture_output=True, text=True)
+def _run(command: list[str], cwd: Path, report: Path, timeout: int) -> tuple[int, dict[str, bool]]:
+    try:
+        proc = subprocess.run([*command, "-p", "no:cacheprovider", "-o", "junit_family=xunit1",
+                               f"--junitxml={report}"], cwd=cwd, capture_output=True, text=True,
+                              timeout=timeout)
+    except subprocess.TimeoutExpired:
+        raise SystemExit(f"red_evidence: the run in {cwd} took longer than {timeout} s") from None
     return proc.returncode, outcomes(report)
 
 
-def _absolute_interpreter(command: list[str], root: Path) -> list[str]:
-    """A relative interpreter (`backend/.venv/bin/python`) points into the working tree;
-    the temporary worktree has no virtualenv."""
+def _portable(command: list[str], root: Path) -> list[str]:
+    """The command as both trees can run it. A relative interpreter (`backend/.venv/bin/python`)
+    points into the working tree — the temporary worktree has no virtualenv — so it is made
+    absolute. An absolute test path inside the root is made relative, or the old tree would
+    run the working tree's file."""
     first = root / command[0]
-    return [str(first), *command[1:]] if "/" in command[0] and first.exists() else command
+    head = str(first) if "/" in command[0] and first.exists() else command[0]
+    rest = []
+    for arg in command[1:]:
+        path, sep, node = arg.partition("::")
+        if Path(path).is_absolute():
+            try:
+                arg = str(Path(path).resolve().relative_to(root.resolve())) + sep + node
+            except ValueError:
+                pass
+        rest.append(arg)
+    return [head, *rest]
 
 
-def measure(root: Path, before: str, command: list[str], copy: list[str]) -> dict:
-    command = _absolute_interpreter(command, root)
-    paths = [a.split("::", 1)[0] for a in command[1:] if not a.startswith("-")]
-    carried = sorted({p for p in [*paths, *copy] if (root / p).is_file()})
+def test_paths(root: Path, command: list[str], copy: list[str]) -> list[str]:
+    """The files and directories the command names, relative to the root — what the old
+    tree needs from the working tree. An option's value is no path; an absolute path inside
+    the root is made relative (it crashed the copy); one outside is not the repo's."""
+    found: set[str] = set()
+    skip = False
+    for arg in [*command[1:], *copy]:
+        if skip:
+            skip = False
+            continue
+        if arg in _VALUED:
+            skip = True
+            continue
+        if arg.startswith("-"):
+            continue
+        path = Path(arg.split("::", 1)[0])
+        full = path if path.is_absolute() else root / path
+        try:
+            rel = full.resolve().relative_to(root.resolve())
+        except ValueError:
+            continue
+        if full.exists() and str(rel) != ".":
+            found.add(str(rel))
+    return sorted(found)
+
+
+def _take_along(root: Path, tree: Path, rels: list[str]) -> None:
+    for rel in rels:
+        src, dst = root / rel, tree / rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        if src.is_dir():
+            shutil.copytree(src, dst, dirs_exist_ok=True, ignore=shutil.ignore_patterns("__pycache__"))
+        else:
+            shutil.copy2(src, dst)
+
+
+def measure(root: Path, before: str, command: list[str], copy: list[str], timeout: int = TIMEOUT) -> dict:
+    command = _portable(command, root)
+    carried = test_paths(root, command, copy)
+    # a worktree a killed run left behind is registered but gone: prune it first
+    subprocess.run(["git", "-C", str(root), "worktree", "prune"], capture_output=True)
     with tempfile.TemporaryDirectory(prefix="red-evidence-") as tmp:
         tree = Path(tmp) / "before"
         add = subprocess.run(["git", "-C", str(root), "worktree", "add", "--detach", "-q", str(tree), before],
@@ -79,22 +151,24 @@ def measure(root: Path, before: str, command: list[str], copy: list[str]) -> dic
         if add.returncode != 0:
             raise SystemExit(f"red_evidence: cannot check out {before}: {add.stderr.strip()}")
         try:
-            for rel in carried:
-                (tree / rel).parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(root / rel, tree / rel)
-            exit_before, was = _run(command, tree, Path(tmp) / "before.xml")
+            _take_along(root, tree, carried)
+            exit_before, was = _run(command, tree, Path(tmp) / "before.xml", timeout)
         finally:
             subprocess.run(["git", "-C", str(root), "worktree", "remove", "--force", str(tree)],
                            capture_output=True)
-        exit_after, now = _run(command, root, Path(tmp) / "after.xml")
+        exit_after, now = _run(command, root, Path(tmp) / "after.xml", timeout)
     return {"command": command, "before": before, "exit_before": exit_before, "exit_after": exit_after,
-            "red_to_green": sorted(t for t, ok in now.items() if ok and not was.get(t, False)),
+            "red_to_green": sorted(t for t, ok in now.items() if ok and was.get(t) is False),
             "still_red": sorted(t for t, ok in now.items() if not ok), "carried": carried}
 
 
 def refusals(m: dict) -> list[str]:
     out = []
-    if not m["red_to_green"]:
+    if m["exit_before"] in NOT_RUN:
+        out.append(f"at {m['before']} {NOT_RUN[m['exit_before']]} (exit {m['exit_before']}) — the "
+                   f"tests never ran against the old code; select tests that collect there (a new "
+                   f"module belongs in its own test run)")
+    elif not m["red_to_green"]:
         out.append(f"no test went from red at {m['before']} to green now — the run proves no fix "
                    f"(exit before {m['exit_before']}, after {m['exit_after']})")
     if m["still_red"] or m["exit_after"] != 0:
@@ -104,7 +178,7 @@ def refusals(m: dict) -> list[str]:
 
 
 def block(m: dict, work: str, round_: int, cause: str | None) -> str:
-    tests = [t.rsplit("::", 1)[-1] for t in m["red_to_green"]]
+    tests = m["red_to_green"]
     lines = [f"Red evidence work={work} round={round_} (red_evidence.py):", "", "```",
              " ".join(m["command"]),
              f"at {m['before']}: exit={m['exit_before']}   now: exit={m['exit_after']}",
@@ -127,6 +201,7 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--before", required=True, help="the ref before the fix")
     ap.add_argument("--cause", help="the root cause, one sentence; writes the ROOT-CAUSE line")
     ap.add_argument("--copy", action="append", default=[], help="another file for the old tree")
+    ap.add_argument("--timeout", type=int, default=TIMEOUT, help="seconds per run")
     ap.add_argument("--journal-dir", default=None)
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("root", nargs="?", default=str(ROOT))
@@ -136,7 +211,9 @@ def main(argv: list[str]) -> int:
         print("red_evidence: no command after `--`", file=sys.stderr)
         return 2
     root = Path(args.root).resolve()
-    m = measure(root, args.before, command, args.copy)
+    # a kill runs the cleanup too: the temporary worktree is removed in `measure`'s finally
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(128 + signal.SIGTERM))
+    m = measure(root, args.before, command, args.copy, args.timeout)
     problems = refusals(m)
     if problems:
         for p in problems:

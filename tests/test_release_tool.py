@@ -84,9 +84,9 @@ def test_a_failing_step_stops_before_the_commit(tmp_path, monkeypatch):
     (root / "CHANGELOG.md").write_text("**v9.9.9 — t.** body\n", encoding="utf-8")
     calls = []
 
-    def fake_run(argv, cwd):
+    def fake_run(argv, **kw):
         calls.append(argv)
-        return subprocess.CompletedProcess(argv, 1 if "ruff" in argv else 0)
+        return subprocess.CompletedProcess(argv, 1 if "ruff" in argv else 0, stdout="", stderr="")
 
     monkeypatch.setattr(rel.subprocess, "run", fake_run)
 
@@ -99,3 +99,50 @@ def test_cli_check_reports_ok_at_the_current_version():
     r = subprocess.run([sys.executable, str(REPO / "tools/release.py"), f"v{CURRENT}", "--check"],
                        capture_output=True, text=True)
     assert r.returncode == 0 and "release: OK" in r.stdout, r.stdout + r.stderr
+
+
+# --- refute ---
+
+
+def _git_repo(tmp_path: Path) -> Path:
+    root = _copy(tmp_path)
+    (root / "CHANGELOG.md").write_text("**v9.9.9 — t.** body\n", encoding="utf-8")
+    for args in (["init", "-q", "-b", "main"], ["config", "user.email", "t@t"],
+                 ["config", "user.name", "t"], ["add", "-A"], ["commit", "-q", "-m", "base"]):
+        subprocess.run(["git", *args], cwd=root, check=True, capture_output=True)
+    return root
+
+
+def test_release_refuses_a_dirty_tree(tmp_path):
+    """F6: a staged file rode along into the release commit."""
+    root = _git_repo(tmp_path)
+    (root / "WIP.txt").write_text("x\n", encoding="utf-8")
+    subprocess.run(["git", "add", "WIP.txt"], cwd=root, check=True)
+
+    with pytest.raises(SystemExit, match="not clean"):
+        rel.release(root, "v9.9.9", suite=False)
+    assert rel.mismatches(root, CURRENT) == []
+
+
+def test_release_refuses_a_version_not_above_the_current_one(tmp_path):
+    root = _git_repo(tmp_path)
+
+    with pytest.raises(SystemExit, match="not above"):
+        rel.release(root, "v0.0.1", suite=False)
+
+
+def test_cli_refuses_an_unknown_flag():
+    """F6: `--chek` ran a full release."""
+    r = subprocess.run([sys.executable, str(REPO / "tools/release.py"), "v9.9.9", "--chek"],
+                       capture_output=True, text=True)
+    assert r.returncode == 2 and "unrecognized" in r.stderr, r.stderr
+
+
+def test_check_reports_a_stale_sbom(monkeypatch):
+    """F7: `--check` said OK while the SBOM still named the old version."""
+    calls = []
+    monkeypatch.setattr(rel.subprocess, "run",
+                        lambda argv, **kw: calls.append(argv) or subprocess.CompletedProcess(argv, 1))
+
+    assert "docs/sbom.cdx.json / docs/SBOM.md: stale (tools/gen_sbom.py --check)" in rel.check(REPO, f"v{CURRENT}")
+    assert any("gen_sbom.py" in " ".join(map(str, a)) and "--check" in a for a in calls), calls

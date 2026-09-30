@@ -23,6 +23,7 @@ Stdlib only.
 """
 from __future__ import annotations
 
+import argparse
 import re
 import shutil
 import subprocess
@@ -70,6 +71,30 @@ def bump(root: Path, number: str) -> None:
         path.write_text(text[:m.start(1)] + number + text[m.end(1):], encoding="utf-8")
 
 
+# what the release commit carries: a tree dirty anywhere else would ride along
+RELEASE_FILES = ("CHANGELOG.md", *(rel for rel, _ in LOCATIONS), "docs/sbom.cdx.json", "docs/SBOM.md")
+
+
+def _current(root: Path) -> tuple[int, ...]:
+    found = LOCATIONS[0][1].findall((root / LOCATIONS[0][0]).read_text(encoding="utf-8"))
+    return tuple(int(x) for x in found[0].split(".")) if found else (0,)
+
+
+def check(root: Path, tag: str) -> list[str]:
+    """What is not at `tag` yet: the locations, the CHANGELOG entry and the SBOM (its own
+    `--check`; the SBOM names the version too, and `--check` said OK while it was stale)."""
+    m = VERSION.match(tag)
+    if not m:
+        return [f"{tag!r} is no version (expected vX.Y.Z)"]
+    left = mismatches(root, m.group(1))
+    if notes((root / "CHANGELOG.md").read_text(encoding="utf-8"), tag) is None:
+        left.append(f"CHANGELOG.md: no entry for {tag}")
+    sbom = subprocess.run([sys.executable, "tools/gen_sbom.py", "--check"], cwd=root, capture_output=True)
+    if sbom.returncode != 0:
+        left.append("docs/sbom.cdx.json / docs/SBOM.md: stale (tools/gen_sbom.py --check)")
+    return left
+
+
 def _run(root: Path, what: str, *argv: str) -> None:
     print(f"release: {what}: {' '.join(argv)}", flush=True)
     if subprocess.run(argv, cwd=root).returncode != 0:
@@ -81,9 +106,20 @@ def release(root: Path, tag: str, *, suite: bool = True) -> None:
     if not m:
         raise SystemExit(f"release: {tag!r} is no version (expected vX.Y.Z)")
     number = m.group(1)
+    if tuple(int(x) for x in number.split(".")) <= _current(root):
+        raise SystemExit(f"release: {tag} is not above the current version "
+                         f"{'.'.join(map(str, _current(root)))}")
     if notes((root / "CHANGELOG.md").read_text(encoding="utf-8"), tag) is None:
         raise SystemExit(f"release: CHANGELOG.md has no entry for {tag} — write it first "
                          f"(`**{tag} — <title>.**`); a release without notes is not published")
+    status = subprocess.run(["git", "-C", str(root), "status", "--porcelain", "-z"],
+                            capture_output=True, text=True)
+    if status.returncode != 0:
+        raise SystemExit("release: git cannot tell whether the tree is clean — not releasing")
+    others = [e[3:] for e in status.stdout.split("\0") if len(e) > 3 and e[3:] not in RELEASE_FILES]
+    if others:
+        raise SystemExit("release: the tree is not clean outside the release's own files — "
+                         "commit or stash first: " + ", ".join(sorted(others)[:5]))
     bump(root, number)
     left = mismatches(root, number)
     if left:
@@ -93,8 +129,7 @@ def release(root: Path, tag: str, *, suite: bool = True) -> None:
     if suite:
         _run(root, "suite", sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider")
     shutil.rmtree(root / "template/scripts/process/__pycache__", ignore_errors=True)
-    _run(root, "stage", "git", "add", "-A", "CHANGELOG.md", "pyproject.toml", "uv.lock",
-         "README.md", "README-DE.md", "docs/sbom.cdx.json", "docs/SBOM.md")
+    _run(root, "stage", "git", "add", "-A", *RELEASE_FILES)
     _run(root, "commit", "git", "commit", "-q", "-m", f"release: {tag}")
     print(f"""release: {tag} committed. Remote steps:
   1. push the branch, open the PR, merge it (rebase)
@@ -104,24 +139,18 @@ def release(root: Path, tag: str, *, suite: bool = True) -> None:
 
 
 def main(argv: list[str]) -> int:
-    args = [a for a in argv if not a.startswith("--")]
-    if len(args) != 1:
-        print(__doc__.strip().splitlines()[2].strip(), file=sys.stderr)
-        return 2
-    tag = args[0]
-    if "--check" in argv:
-        m = VERSION.match(tag)
-        if not m:
-            print(f"release: {tag!r} is no version (expected vX.Y.Z)", file=sys.stderr)
-            return 2
-        left = mismatches(ROOT, m.group(1))
-        if notes((ROOT / "CHANGELOG.md").read_text(encoding="utf-8"), tag) is None:
-            left.append(f"CHANGELOG.md: no entry for {tag}")
+    ap = argparse.ArgumentParser(prog="release.py", description="the local part of a template release")
+    ap.add_argument("tag", help="vX.Y.Z")
+    ap.add_argument("--check", action="store_true", help="report what is not at the version, change nothing")
+    ap.add_argument("--no-suite", action="store_true", help="skip the full suite (it ran already)")
+    args = ap.parse_args(argv)  # an unknown flag (`--chek`) stops here, before anything runs
+    if args.check:
+        left = check(ROOT, args.tag)
         for line in left:
             print(f"release: {line}")
-        print("release: OK" if not left else f"release: {len(left)} location(s) not at {tag}")
+        print("release: OK" if not left else f"release: {len(left)} item(s) not at {args.tag}")
         return 1 if left else 0
-    release(ROOT, tag, suite="--no-suite" not in argv)
+    release(ROOT, args.tag, suite=not args.no_suite)
     return 0
 
 

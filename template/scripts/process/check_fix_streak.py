@@ -52,7 +52,7 @@ def fix_streaks(log: str, threshold: int = THRESHOLD) -> dict[str, int]:
             subject = field[1:]
             # the conventional prefix, not any "fix…": `fixup!` and `fixture:`
             # are not behaviour fixes
-            is_fix = subject.startswith(("fix:", "fix("))
+            is_fix = subject.startswith(("fix:", "fix(", "fix!:"))
             seen = set()
             after_subject = True
             continue
@@ -86,6 +86,8 @@ def main(argv: list[str]) -> int:
     if log is None:
         return 0
     streaks = fix_streaks(log)
+    # a CHANGELOG or a doc two fixes both touch is no owner (refute of #126)
+    streaks = {p: n for p, n in streaks.items() if n >= ROOT_CAUSE_AT or not p.endswith(".md")}
     for path, n in sorted(streaks.items(), key=lambda kv: (-kv[1], kv[0])):
         if n >= ROOT_CAUSE_AT:
             print(f"fix-streak: note: {n} fix commits on {path} in this branch — mandatory rule 6: "
