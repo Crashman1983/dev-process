@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """release — the local part of a template release in one run.
 
-    python3 tools/release.py v2.38.0            bump, regenerate, check, commit
-    python3 tools/release.py v2.38.0 --check    report what does not carry the version
-    python3 tools/release.py v2.38.0 --no-suite skip the full suite (it ran already)
+    python3 tools/release.py vX.Y.Z             bump, regenerate, check, commit
+    python3 tools/release.py vX.Y.Z --check     report what does not carry the version
+    python3 tools/release.py vX.Y.Z --no-suite  skip the full suite (it ran already)
 
 The ritual was a dozen hand steps, and a missed one showed late: a README
 still naming the old version, a tag on a SHA without its CHANGELOG entry. The
