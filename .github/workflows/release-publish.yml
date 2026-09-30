@@ -1,6 +1,7 @@
 # Publishes the GitHub release of an existing tag, with the tag's CHANGELOG
 # entry as notes (tools/release_notes.py). release-tag.yml creates the tag;
-# this makes it visible as a release. A tag without a CHANGELOG entry is not
+# this makes it visible as a release. The local part before both (version
+# bump, SBOM, suite, commit) is tools/release.py. A tag without a CHANGELOG entry is not
 # published. Trigger with the tag name; `latest` marks it the latest release.
 name: release-publish
 on:
