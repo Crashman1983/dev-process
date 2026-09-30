@@ -6,7 +6,7 @@ those rules, and a long session may have compacted them out. Then read
 `docs/process/workflow.md` (Review) and
 `docs/process/risk-tiers.md`. Check completeness, correctness, and rule
 adherence against the plan or spec, working through
-`docs/process/review-checklist.md`, plus `docs/process/review.local.md`
+`docs/process/review-checklist.md`, plus `review.local.md` in `docs/process/`
 where the project has one (it sharpens the checklist, never weakens it). Record the result in the exact grammar
 (`journal-state-plans.md`): a
 `REVIEW work=… tier=… reviewer=… model=… independence=… verdict=… round=…`
