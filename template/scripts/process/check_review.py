@@ -53,6 +53,7 @@ import re
 import subprocess
 import sys
 import time
+from collections.abc import Iterator
 from typing import NamedTuple
 from pathlib import Path
 
@@ -520,7 +521,8 @@ def _git_bytes(root: Path, *args: str) -> bytes | None:
 # textconv — so a digest computed on one machine can honestly fail on another
 # (observed downstream: an attest at core.abbrev=9 red-ed a fresh clone at 7).
 # The canonical form pins every knob on the command line. Legacy digests
-# (plain `git diff --binary`, produced before the pin) stay verifiable.
+# (plain `git diff --binary`, the `--full-index` form, and the index lines at
+# every core.abbrev from 4 to 16 — produced before the pin) stay verifiable.
 CANONICAL_DIFF = (
     "-c", "diff.algorithm=myers", "-c", "diff.renames=false",
     "-c", "diff.noprefix=false", "-c", "diff.mnemonicPrefix=false",
@@ -542,15 +544,25 @@ def artifact_digest(root: Path, base: str, head: str) -> str | None:
     return hashlib.sha256(diff).hexdigest() if diff is not None else None
 
 
-def _legacy_digests(root: Path, base: str, head: str) -> set[str]:
-    """Digests older records may carry: the unpinned `git diff --binary` in
-    both range forms, as this clone's config renders them today."""
-    out: set[str] = set()
-    for rng in (f"{base}...{head}", f"{base}..{head}"):
-        diff = _git_bytes(root, "diff", "--binary", rng)
+LEGACY_ABBREVS = range(4, 17)  # git's minimum core.abbrev .. a generous ceiling
+
+
+def _legacy_digests(root: Path, base: str, head: str) -> Iterator[str]:
+    """Digests older records may carry, cheapest first (lazily — a match stops
+    the sweep): the unpinned `git diff --binary` in both range forms as this
+    clone's config renders them today; `--full-index` (the form before every
+    knob was pinned); and the auto-abbreviated index lines at every
+    `core.abbrev` from 4 to 16. git abbreviates by the clone's object count,
+    so a record attested at abbrev=9 hashed differently in a fresh clone at 7
+    (observed downstream) — the sweep keeps such a record verifiable."""
+    three = f"{base}...{head}"
+    forms: list[tuple[str, ...]] = [("diff", "--binary", three), ("diff", "--binary", f"{base}..{head}"),
+                                    ("diff", "--binary", "--full-index", three)]
+    forms += [("-c", f"core.abbrev={n}", "diff", "--binary", three) for n in LEGACY_ABBREVS]
+    for args in forms:
+        diff = _git_bytes(root, *args)
         if diff is not None:
-            out.add(hashlib.sha256(diff).hexdigest())
-    return out
+            yield hashlib.sha256(diff).hexdigest()
 
 
 def _integrity_violations(rel: str, root: Path,
@@ -597,8 +609,8 @@ def _integrity_violations(rel: str, root: Path,
         # were typed to look right, never computed. Name it as what it is.
         hard.append(f"{rel}:{lineno}: review artifact digest {f['diff'][:12]}… "
                     f"matches no formula for {f['base'][:9]}...{f['head'][:9]} "
-                    f"(canonical {actual[:12]}…) — no byte stream of this diff "
-                    f"produces it; a digest that was typed rather than computed "
+                    f"(canonical {actual[:12]}…, legacy forms and abbrev 4–16 tried) — "
+                    f"no byte stream of this diff produces it; a digest that was typed rather than computed "
                     f"is a FABRICATED attestation, and this review counts as "
                     f"absent. Write REVIEW lines with scripts/process/attest.py, "
                     f"which computes the digest itself")

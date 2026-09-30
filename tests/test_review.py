@@ -3,6 +3,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 JOURNAL = ".process-work/journal"
 ARCHIVE = ".process-work/plans/archive"
 
@@ -306,6 +308,24 @@ def test_wrong_digest_is_hard(render, tmp_path):
     r = _run(out)
     assert r.returncode == 1
     assert "matches no formula" in r.stdout
+    assert "abbrev 4–16 tried" in r.stdout
+
+
+@pytest.mark.parametrize("form", [("diff", "--binary", "--full-index"),
+                                  ("-c", "core.abbrev=11", "diff", "--binary"),
+                                  ("-c", "core.abbrev=4", "diff", "--binary"),
+                                  ("-c", "core.abbrev=16", "diff", "--binary")],
+                         ids=["full-index", "abbrev-11", "abbrev-4", "abbrev-16"])
+def test_a_legacy_record_of_any_abbrev_stays_verifiable(render, tmp_path, form):
+    # git abbreviates index lines by the clone's object count: a record
+    # attested at abbrev=9 red-ed a fresh clone at 7 (observed downstream);
+    # the union of the old forms keeps every one of them verifiable
+    out = render(tmp_path, {"project_name": "demo"})
+    base, head, _digest = _init_git_repo(out, work="bound")
+    raw = _git(out, *form, f"{base}...{head}", text=False).stdout
+    _journal(out, _review(work="bound", artifact=(base, head, hashlib.sha256(raw).hexdigest())))
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
 
 
 def test_unresolvable_artifact_commit_is_note_not_hard(render, tmp_path):
