@@ -448,14 +448,53 @@ def _disposable(entry: str) -> bool:
     return any(fnmatch.fnmatchcase(name, pat) for pat in DISPOSABLE_IGNORED)
 
 
+_CREATED = "branch: Created from "
+_SHA = re.compile(r"[0-9a-f]{7,64}")
+
+
+def _from_integration(source: str) -> bool:
+    """A branch's creation source that carries no work of its own: the integration
+    branch (main/master, also as `origin/main`, `refs/remotes/origin/main`), HEAD
+    (what it pointed at is not recorded) or a bare commit id."""
+    s = source.strip()
+    if s == "HEAD" or _SHA.fullmatch(s):
+        return True
+    s = re.sub(r"^refs/(?:heads|remotes)/", "", s)
+    return s.count("/") <= 1 and s.rsplit("/", 1)[-1] in ("main", "master")
+
+
 def _has_own_commits(root: Path, branch: str) -> bool:
-    """False when the branch's reflog shows nothing but its creation — a fresh branch
-    sits at its base's tip and so reads as "contained", but no work of it was merged
-    (a dispatched worker that died before its first commit). An empty or expired
-    reflog proves nothing either way: the branch is older than the reflog — True."""
+    """False when the branch's reflog shows nothing but its creation from the
+    integration branch — a fresh branch sits at its base's tip and so reads as
+    "contained", but no work of it was merged (a dispatched worker that died before
+    its first commit). Created from any other ref (`origin/remotework`, a worker's
+    push), it carries that ref's work: True. An empty or expired reflog proves
+    nothing either way: the branch is older than the reflog — True."""
     r = _git(root, "reflog", "show", "--format=%gs", f"refs/heads/{branch}", "--")
     entries = [ln for ln in r.stdout.splitlines() if ln.strip()] if r.returncode == 0 else []
-    return not entries or not all(ln.startswith("branch: Created from") for ln in entries)
+    return not entries or not all(ln.startswith(_CREATED) and _from_integration(ln[len(_CREATED):])
+                                  for ln in entries)
+
+
+def _nested_repository(top: Path) -> Path | None:
+    """The first `.git` (directory or file) under the worktree `top` other than its
+    own top-level `.git` file — a clone inside node_modules or build/_deps that git
+    status reports only as one ignored directory. Symlinks are not followed."""
+    stack = [top]
+    while stack:
+        try:
+            with os.scandir(stack.pop()) as it:
+                for e in it:
+                    if e.name == ".git" and Path(e.path) != top / ".git":
+                        return Path(e.path).parent
+                    try:
+                        if e.is_dir(follow_symlinks=False):
+                            stack.append(Path(e.path))
+                    except OSError:
+                        continue
+        except OSError:
+            continue
+    return None
 
 
 def worktree_keep_reason(root: Path, wt: dict, base: str, recs: list[dict],
@@ -468,8 +507,10 @@ def worktree_keep_reason(root: Path, wt: dict, base: str, recs: list[dict],
     reflog shows more than its creation, or has expired — see
     `_has_own_commits`), no live dispatch session on it, no uncommitted
     change, no untracked file git does not ignore (an uncommitted journal
-    shard is work), and every ignored entry a regenerable environment or cache
-    (`DISPOSABLE_IGNORED`; `.env` or a note excluded by .git/info/exclude is not)."""
+    shard is work), every ignored entry a regenerable environment or cache
+    (`DISPOSABLE_IGNORED`; `.env` or a note excluded by .git/info/exclude is not),
+    and nothing git status cannot see: no assume-unchanged/skip-worktree entry,
+    no submodule, no nested repository (a clone inside node_modules)."""
     path, branch = wt["path"], wt["branch"]
     if wt["main"]:
         return "the main worktree"
@@ -515,6 +556,19 @@ def worktree_keep_reason(root: Path, wt: dict, base: str, recs: list[dict],
     if kept:
         return f"ignored files that are not a regenerable environment or cache ({kept[0]}" \
                f"{f', +{len(kept) - 1} more' if len(kept) > 1 else ''})"
+    # what status cannot see: edits it is told to skip, submodules, nested clones
+    lv = _git(path, "ls-files", "-v", "-z")
+    if lv.returncode != 0:
+        return f"cannot list the index: {lv.stderr.strip()[-200:]}"
+    hidden = [e[2:] for e in lv.stdout.split("\0") if e[:1].islower() or e[:1] == "S"]
+    if hidden:
+        return f"hidden edits possible (assume-unchanged/skip-worktree on {hidden[0]})"
+    gitlinks = _git(path, "ls-files", "-s", "-z")
+    if (path / ".gitmodules").exists() or any(e.startswith("160000 ") for e in gitlinks.stdout.split("\0")):
+        return "has submodules"
+    nested = _nested_repository(path)
+    if nested is not None:
+        return f"holds a nested repository {nested}"
     return None
 
 
