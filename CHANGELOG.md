@@ -1166,6 +1166,12 @@ ein Wächter-Test gegen doppelte Klammern ohne Leerzeichen in Python-Vorlagen.
 Wer v2.27.1 oder v2.28.0 installiert hat und am Push scheitert: auf v2.28.1
 aktualisieren, `v2.28.1`.
 
+**v2.40.0 — Was das Referenzprojekt in nicht-eigenen Dateien noch anders hatte, ist geprüft übernommen.** Nach dem Port auf v2.39.0 hatte das Referenzprojekt keine eigenen Dateien mehr. Vier Dateien trugen aber noch eigene Änderungen, die ein künftiges Update überschrieben hätte. Jede wurde geprüft, bevor sie ins Template kam; jede hat einen Test, der gegen die Vorfassung rot ist.
+- **doc-drift prüft Symbol-Zeiger:** In `` `pfad/datei.py::symbol` `` wurde der Pfad bisher nie geprüft, weil die Endung nicht direkt vor dem Backtick steht. Ein veralteter Zeiger fällt jetzt auf. Wer solche Zeiger in den geprüften Dokumenten hat, kann nach dem Update tote finden.
+- **Der Owner-Digest nennt jeden Waiver:** jede `<gate>-waived:`-Zeile, nicht nur `review-waived` und `spec-waived`. Damit steht auch der Waiver eines projekteigenen Gates (`gates.local.json`) als offene Schuld auf der Seite.
+- **`check_architecture` und `check_issues` deklarieren PyYAML (PEP 723):** Allein gestartet liefen sie bisher nur, wo PyYAML zufällig installiert war.
+- **Nicht übernommen:** die Markierung `doc-drift-base` des Referenzprojekts. Sie ist dort ungenutzt und wurde im Review schon einmal als Umgehung entfernt.
+
 **v2.39.0 — Ein Projekt braucht keine eigenen Prozessdateien mehr: Erweiterungen haben einen Ort, und der Wächter vor main kommt aus dem Template.** Anlass war das Referenzprojekt: 14 Dateien standen in `.process-owned`, jede ein Handport bei jedem Release. Eine Inventur sortierte jede Abweichung ein (Stil, Template neuer, Upstream-Kandidat, Projektkonfiguration, veraltet). Das Template übernimmt die Upstream-Kandidaten und bietet für den Rest drei lokale Dateien; danach kann die Liste leer sein. Refutiert in zwei Runden (24 und etwa 40 echte Pushes durch pre-commit, 11 und 4 Funde, alle behoben); jeder Fund ist mit einem Test belegt, der gegen die Vorfassung rot ist.
 - **Drei lokale Dateien statt eigener Kopien:**
   - `docs/process/gates.local.json`: eigene Gates (`{name: {module, command}}`). Ein Modul-Gate darf gleichnamig ersetzt werden und wird auf stderr genannt; ein Kern-Gate (review, kernel …) nicht. Eine kaputte Datei lässt den Lauf scheitern.
