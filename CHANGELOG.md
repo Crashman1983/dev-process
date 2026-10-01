@@ -1166,6 +1166,18 @@ ein Wächter-Test gegen doppelte Klammern ohne Leerzeichen in Python-Vorlagen.
 Wer v2.27.1 oder v2.28.0 installiert hat und am Push scheitert: auf v2.28.1
 aktualisieren, `v2.28.1`.
 
+**v2.41.0 — Gemergte Worktrees werden entfernt, aber nie Arbeit (#136).** Anlass war das Referenzprojekt: 111 nie entfernte Dispatch-Worktrees, jeder mit eigenem venv und `node_modules`, belegten etwa 57 GB. Die Platte lief voll, und alle Sitzungen standen still. Refutiert in drei Runden mit echten Worktrees; jede Runde fand einen weiteren Weg, Arbeit zu verlieren, und jeder ist mit einem Test belegt, der gegen die Vorfassung rot ist.
+- **Der Zug entfernt die Worktrees der Branches, die er gemergt hat**, aber erst nach dem erfolgreichen Push. Jeden behaltenen Worktree nennt er mit Grund; ein Fehler beim Entfernen ist nur ein Hinweis. **`tidy.py`** listet gemergte Worktrees mit Größe, `--apply` entfernt sie.
+- **Ein Worktree bleibt stehen, wenn er Arbeit tragen könnte:**
+  - uncommittete oder unversionierte Dateien;
+  - ignorierte Dateien außerhalb einer festen Liste regenerierbarer Umgebungen und Caches (venv, node_modules, `__pycache__` …; `build/`, `dist/` und `.cache` bewusst nicht);
+  - ein verschachtelter Worktree oder ein verschachteltes Repository;
+  - per `assume-unchanged` oder `skip-worktree` versteckte Änderungen, oder Submodule;
+  - ein Commit, der nur in der HEAD-Historie des Worktrees steht;
+  - ein Branch ohne eigenen Commit;
+  - eine laufende Sitzung, ein gesperrter, losgelöster, der Haupt- oder der aktuelle Worktree.
+- **`dispatch.py start` verweigert ab 90 % Plattenbelegung** und nennt den Aufräumbefehl (`PROCESS_DISK_LIMIT_PCT`; ein ungültiger Wert verweigert statt still abzuschalten).
+
 **v2.40.1 — Hinweise und Doku nennen den Hook-Installer, den das Projekt wirklich hat.** Ein Review im Referenzprojekt fand Hinweise, die dort nicht stimmten. Das Projekt verwaltet seine Hooks in `.githooks/`, ohne das git-hooks-Modul. Der Hook-Doktor und die Doku schickten es trotzdem zu `scripts/process/install_hooks.py`, das nur dieses Modul mitbringt. Und `tower.md` riet noch, `model-policy.json` ins `.process-owned` zu nehmen, was seit v2.39.0 überholt ist. Die Urteile des Doktors waren richtig, nur die Hinweise nicht (#134).
 - **Der Reparatur-Hinweis nennt den Installer des Projekts:** `scripts/install_hooks.sh`, ein `make hooks`-Ziel, sonst `git config core.hooksPath .githooks`. `install_hooks.py` steht nur dort in pre-commits Installationszeile, wo das Modul es mitbringt.
 - **`tower.md` verweist auf `model-policy.local.json`.** `start-here.md` nennt den Weg für eigene Hooks.

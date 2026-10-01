@@ -340,3 +340,40 @@ def test_an_unaskable_session_or_an_unreadable_worktree_keeps_it(render, tmp_pat
     (wts["clean"] / ".git").write_text(f"gitdir: {tmp_path / 'nowhere'}\n")  # git cannot read it
     assert "git status failed" in d.worktree_keep_reason(out, entry, "main", [])
     assert (tmp_path / "work-detached").is_dir() and out.is_dir()
+
+
+def test_a_commit_only_in_the_worktrees_head_history_keeps_it(render, tmp_path):
+    """Refute round 3: a commit made on a detached HEAD in the worktree lives only in its
+    HEAD reflog, which `git worktree remove` deletes — it would hang off no ref. A worktree
+    whose old commits were rebased onto main (same patches) stays removable."""
+    out, wts = _worktree_landscape(render, tmp_path)
+    d = _dispatch_of(out)
+    for name in ("detached-work", "rebased"):
+        wt = tmp_path / f"work-{name}"
+        _git(out, "worktree", "add", "-q", "-b", name, str(wt), "main")
+        wts[name] = wt
+    # detached work, then back on the branch, which is then merged
+    dw = wts["detached-work"]
+    (dw / "a.txt").write_text("a\n")
+    _git(dw, "add", "-A")
+    _git(dw, "commit", "-q", "-m", "feat: a")
+    _git(dw, "switch", "-q", "--detach")
+    (dw / "only-here.txt").write_text("precious\n")
+    _git(dw, "add", "-A")
+    _git(dw, "commit", "-q", "-m", "experiment")
+    _git(dw, "switch", "-q", "detached-work")
+    _git(out, "merge", "-q", "--no-ff", "-m", "merge detached-work", "detached-work")
+    # rebased: a commit, main moves, the branch is rebased onto it, then merged
+    rb = wts["rebased"]
+    (rb / "r.txt").write_text("r\n")
+    _git(rb, "add", "-A")
+    _git(rb, "commit", "-q", "-m", "feat: r")
+    (out / "m.txt").write_text("m\n")
+    _git(out, "add", "m.txt")
+    _git(out, "commit", "-q", "-m", "main moves")
+    _git(rb, "rebase", "-q", "main")
+    _git(out, "merge", "-q", "--ff-only", "rebased")
+    verdicts = {str(w.get("path")): reason for w, reason in d.merged_worktrees(out, "main")}
+
+    assert "only in this worktree's HEAD history" in (verdicts.get(str(dw)) or ""), verdicts
+    assert verdicts.get(str(rb)) is None, verdicts
