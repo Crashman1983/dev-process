@@ -280,8 +280,9 @@ one owner: `scripts/process/tidy.py` reports every kind of residue with the
 command that removes it — merged remote branches, finished spec
 directories, old archived plans, old journal shards (folded, records kept),
 a leftover template-delta directory, worktrees of merged branches (kept,
-with the reason, while they hold uncommitted or untracked work, a live
-session or a lock) — and `--apply` executes the safe part.
+with the reason, while they hold uncommitted, untracked or ignored-but-not-
+regenerable files, a nested worktree, a live session or a lock) — and
+`--apply` executes the safe part.
 Active plans past the window and quiet open issues are only listed: they
 are the owner's call. The weekly digest carries the same report, so the
 numbers are seen before they are felt.

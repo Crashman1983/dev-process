@@ -76,7 +76,9 @@ from __future__ import annotations
 
 import argparse
 import datetime as _dt
+import fnmatch
 import json
+import math
 import os
 import re
 import shlex
@@ -430,24 +432,65 @@ def _toplevel(path: Path) -> Path | None:
     return Path(top).resolve() if top else None
 
 
-def worktree_keep_reason(root: Path, wt: dict, base: str, recs: list[dict]) -> str | None:
+# What may be destroyed with a merged worktree: environments and caches a command
+# regenerates — matched against the name of each ignored entry git lists (the
+# entry itself, not a parent: `build/notes.md` listed alone is a file somebody kept).
+# Anything else ignored (`.env`, notes excluded via .git/info/exclude) keeps it.
+DISPOSABLE_IGNORED = (
+    ".venv", "venv", "node_modules", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache",
+    ".hypothesis", ".tox", ".nox", ".coverage", ".coverage.*", "htmlcov", "dist", "build", "*.egg-info",
+    ".next", ".turbo", ".parcel-cache", ".cache", "*.pyc", "*.pyo", ".DS_Store",
+)
+
+
+def _disposable(entry: str) -> bool:
+    name = entry.rstrip("/").rsplit("/", 1)[-1]
+    return any(fnmatch.fnmatchcase(name, pat) for pat in DISPOSABLE_IGNORED)
+
+
+def _has_own_commits(root: Path, branch: str) -> bool:
+    """False when the branch's reflog shows nothing but its creation — a fresh branch
+    sits at its base's tip and so reads as "contained", but no work of it was merged
+    (a dispatched worker that died before its first commit). An empty or expired
+    reflog proves nothing either way: the branch is older than the reflog — True."""
+    r = _git(root, "reflog", "show", "--format=%gs", f"refs/heads/{branch}", "--")
+    entries = [ln for ln in r.stdout.splitlines() if ln.strip()] if r.returncode == 0 else []
+    return not entries or not all(ln.startswith("branch: Created from") for ln in entries)
+
+
+def worktree_keep_reason(root: Path, wt: dict, base: str, recs: list[dict],
+                         others: list[Path] | None = None) -> str | None:
     """None when the worktree `wt` (a `worktree_entries` item) may be removed;
-    otherwise why it stays. Removable means: a branch's worktree (not the main
-    one, not the one we run in, not detached, not locked), the branch contained
-    in `base`, no live dispatch session on it, no uncommitted change and no
-    untracked file git does not ignore (an uncommitted journal shard is work)."""
+    otherwise why it stays. What may go is named, not inferred: a branch's
+    worktree (not the main one, not the one we run in, not detached, not
+    locked) holding no other registered worktree (`others`, default: all git
+    lists), its branch contained in `base` AND with commits of its own (its
+    reflog shows more than its creation, or has expired — see
+    `_has_own_commits`), no live dispatch session on it, no uncommitted
+    change, no untracked file git does not ignore (an uncommitted journal
+    shard is work), and every ignored entry a regenerable environment or cache
+    (`DISPOSABLE_IGNORED`; `.env` or a note excluded by .git/info/exclude is not)."""
     path, branch = wt["path"], wt["branch"]
     if wt["main"]:
         return "the main worktree"
     here = {p for p in (_toplevel(root), _toplevel(Path.cwd())) if p}
-    if path.resolve() in here:
+    real = path.resolve()
+    if real in here:
         return "the current worktree"
     if wt["locked"]:
         return "locked (`git worktree lock`)"
+    if others is None:
+        others = [e["path"] for e in worktree_entries(root)]
+    for other in others:
+        o = other.resolve()
+        if o != real and o.is_relative_to(real):
+            return f"holds worktree {other}"
     if not branch:
         return "detached HEAD — not a branch's worktree"
     if _git(root, "merge-base", "--is-ancestor", f"refs/heads/{branch}", base).returncode != 0:
         return f"{branch} is not contained in {base}"
+    if not _has_own_commits(root, branch):
+        return f"no commits of its own — {branch} was only created, never worked on"
     for rec in recs:
         same = rec["branch"] == branch or (rec.get("worktree") and Path(rec["worktree"]).resolve() == path.resolve())
         if same and (rec.get("alive") or rec.get("state") == "unknown"):
@@ -455,17 +498,23 @@ def worktree_keep_reason(root: Path, wt: dict, base: str, recs: list[dict]) -> s
                    f"({rec.get('phase') or '?'})"
     if not path.is_dir():
         return None  # gone already: `git worktree prune` forgets it
-    st = _git(path, "status", "--porcelain", "--untracked-files=no")
+    # one status: `??` untracked, `!!` ignored — `matching`: the path the ignore rule
+    # names (`src/__pycache__/`), not a parent holding only ignored files (`src/`) —
+    # anything else a change; -z keeps paths unquoted
+    st = _git(path, "status", "--porcelain", "-z", "--ignored=matching", "--untracked-files=normal")
     if st.returncode != 0:
         return f"git status failed there: {st.stderr.strip()[-200:]}"
-    if st.stdout.strip():
-        return f"uncommitted changes ({len(st.stdout.strip().splitlines())} path(s))"
-    un = _git(path, "ls-files", "--others", "--exclude-standard", "--directory")
-    if un.returncode != 0:
-        return f"cannot list untracked files: {un.stderr.strip()[-200:]}"
-    untracked = un.stdout.splitlines()
+    entries = [e for e in st.stdout.split("\0") if e]
+    changed = [e for e in entries if not e.startswith(("?? ", "!! "))]
+    if changed:
+        return f"uncommitted changes ({len(changed)} path(s))"
+    untracked = [e[3:] for e in entries if e.startswith("?? ")]
     if untracked:
         return f"untracked files not ignored ({', '.join(untracked[:3])}{', …' if len(untracked) > 3 else ''})"
+    kept = [e[3:] for e in entries if e.startswith("!! ") and not _disposable(e[3:])]
+    if kept:
+        return f"ignored files that are not a regenerable environment or cache ({kept[0]}" \
+               f"{f', +{len(kept) - 1} more' if len(kept) > 1 else ''})"
     return None
 
 
@@ -474,8 +523,10 @@ def merged_worktrees(root: Path, base: str, branches: list[str] | None = None) -
     without `branches` — of every branch contained in `base`. The main worktree is
     never a candidate; detached worktrees are no branch's and are not listed."""
     recs = records(root)
+    entries = worktree_entries(root)
+    others = [e["path"] for e in entries]
     out = []
-    for wt in worktree_entries(root):
+    for wt in entries:
         if wt["main"] or not wt["branch"]:
             continue
         if branches is not None:
@@ -483,7 +534,7 @@ def merged_worktrees(root: Path, base: str, branches: list[str] | None = None) -
                 continue
         elif _git(root, "merge-base", "--is-ancestor", f"refs/heads/{wt['branch']}", base).returncode != 0:
             continue
-        out.append((wt, worktree_keep_reason(root, wt, base, recs)))
+        out.append((wt, worktree_keep_reason(root, wt, base, recs, others)))
     return out
 
 
@@ -491,8 +542,8 @@ def remove_worktree(root: Path, path: Path) -> str | None:
     """Remove one worktree that `worktree_keep_reason` cleared; None or why it failed.
     No `--force`: plain `git worktree remove` deletes ignored files (venv,
     node_modules, caches) with the tree but refuses a change, an untracked file or a
-    lock — git checks again what the keep check saw, so a file written in between
-    is not lost."""
+    lock — git checks those again, so such a file written after the keep check is
+    not lost (an ignored one written in that window is not re-checked)."""
     r = _git(root, "worktree", "remove", str(path)) if path.is_dir() else None
     _git(root, "worktree", "prune")
     if r is not None and r.returncode != 0:
@@ -502,14 +553,21 @@ def remove_worktree(root: Path, path: Path) -> str | None:
 
 def disk_refusal(path: Path) -> str | None:
     """Why no session may start while the filesystem holding `path` is too full
-    (use = used / (used + available), as `df` counts it), or None."""
+    (use = used / (used + available), as `df` counts it), or None. A limit that is no
+    percentage in (0, 100] refuses too: a misconfigured guard is neither silently off
+    nor silently the default. A usage that cannot be read lets the start through,
+    with a note."""
+    raw = os.environ.get(DISK_LIMIT_ENV, "").strip()
     try:
-        limit = float(os.environ.get(DISK_LIMIT_ENV) or DISK_LIMIT_PCT)
+        limit = float(raw) if raw else float(DISK_LIMIT_PCT)
     except ValueError:
-        limit = DISK_LIMIT_PCT
+        limit = math.nan
+    if not (math.isfinite(limit) and 0 < limit <= 100):
+        return f"{DISK_LIMIT_ENV}={raw!r} is no percentage in (0, 100] — fix or unset it (default {DISK_LIMIT_PCT})"
     try:
         u = shutil.disk_usage(path)
-    except OSError:
+    except OSError as exc:
+        print(f"dispatch: note — disk use of {path} not checked: {exc}", file=sys.stderr)
         return None
     if u.used + u.free <= 0:
         return None

@@ -1144,11 +1144,33 @@ def test_a_full_disk_refuses_a_local_start_and_names_the_cleanup(render, tmp_pat
         assert rc == 0 and "full" not in err
 
 
+@pytest.mark.parametrize("value", ["abc", "0", "-5", "150", "nan", "inf"])
+def test_a_misconfigured_disk_limit_refuses_naming_it(render, tmp_path, monkeypatch, value):
+    d = _load_dispatch(render(tmp_path, {"project_name": "d", "modules": {}}))
+    monkeypatch.setattr(d.shutil, "disk_usage", lambda p: _usage(10))
+    monkeypatch.setenv(d.DISK_LIMIT_ENV, value)
+    why = d.disk_refusal(tmp_path)
+    assert why and d.DISK_LIMIT_ENV in why and repr(value) in why
+
+
+def test_an_unreadable_disk_use_lets_the_start_through_with_a_note(render, tmp_path, monkeypatch, capsys):
+    d = _load_dispatch(render(tmp_path, {"project_name": "d", "modules": {}}))
+    monkeypatch.delenv(d.DISK_LIMIT_ENV, raising=False)
+
+    def broken(_p):
+        raise OSError(5, "I/O error")
+
+    monkeypatch.setattr(d.shutil, "disk_usage", broken)
+    assert d.disk_refusal(tmp_path) is None
+    err = capsys.readouterr().err
+    assert "not checked" in err and "I/O error" in err
+
+
 def test_the_disk_limit_reaches_the_command_line(render, tmp_path):
     out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
     _repo(out)
     _fake_command(out, "sleep 30\n")
     r = _dispatch(out, "start", "--issue", "4", "--phase", "plan", "--branch", "b4",
-                  env={**os.environ, "PROCESS_DISK_LIMIT_PCT": "0"})
-    assert r.returncode == 3 and "% full (limit 0%" in r.stderr and "tidy.py --apply" in r.stderr
+                  env={**os.environ, "PROCESS_DISK_LIMIT_PCT": "0.001"})
+    assert r.returncode == 3 and "% full (limit 0.001%" in r.stderr and "tidy.py --apply" in r.stderr
     assert not (tmp_path / "repo-b4").exists()  # no worktree, no session

@@ -115,8 +115,11 @@ the test lanes are free where the project has a lane script (see `tower.md`, lan
    refuses to depart. The worktree of each merged branch is removed
    (each carries its own venv/node_modules; downstream, 111 left behind
    filled the disk) unless it holds an uncommitted change, an untracked
-   file git does not ignore (an uncommitted journal shard), a live
-   dispatch session or a lock — the train names each one it kept and why,
+   file git does not ignore (an uncommitted journal shard), an ignored
+   file that is no regenerable environment or cache (`.env`, a note in
+   `.git/info/exclude`), another worktree nested inside it, a live
+   dispatch session or a lock, or its branch has no commits of its own —
+   the train names each one it kept and why,
    and a failed removal is a note, never a failed train; `dispatch.py`
    owns that verdict, `tidy.py` asks the same. Merged branches are deleted (`--keep-branches`
    keeps them; a branch checked out elsewhere is kept, locally and on

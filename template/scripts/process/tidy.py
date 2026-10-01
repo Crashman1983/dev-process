@@ -25,9 +25,10 @@ Dry run by default: a report with counts and the exact command per item.
   - remove .process-work/template-delta/ (working memory of an update)
   - remove the worktrees of branches contained in origin/<default> (each
     carries its own venv/node_modules) — only where dispatch.py says so: no
-    uncommitted change, no untracked file git does not ignore, no live
-    dispatch session, not locked, not the main or current worktree; the
-    report names each one kept and why
+    uncommitted change, no untracked file git does not ignore, no ignored
+    file but regenerable environments and caches, no worktree nested inside,
+    commits of its own on the branch, no live dispatch session, not locked,
+    not the main or current worktree; the report names each one kept and why
 Two things it only LISTS, because they are the owner's decision: active
 plans older than the window (abandoned, or just slow?) and open issues
 untouched for a while (needs `gh`; skipped without it).
