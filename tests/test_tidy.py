@@ -141,3 +141,78 @@ def test_a_pruner_that_exits_on_import_does_not_crash_the_report(render, tmp_pat
     (d / "plan.md").write_text("# Plan\n\nissue: #12\n")
     (out / "scripts/process/publish_and_prune.py").write_text("import sys\nsys.exit(3)\n")
     assert _tidy(out).spec_blocker(out, "012-x") is None
+
+
+# --- #136: merged worktrees (each with its own venv/node_modules) are residue -----------
+
+def _worktree_landscape(render, tmp_path):
+    """A clone with origin and one worktree per case; every branch but `open` merged."""
+    import importlib.util
+    import json
+    import os
+    out = render(tmp_path / "work", {"project_name": "d", "modules": {}})
+    bare = tmp_path / "origin.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(bare)], check=True)
+    _git(out, "init", "-q", "-b", "main")
+    _git(out, "config", "user.email", "t@t")
+    _git(out, "config", "user.name", "t")
+    (out / ".gitignore").write_text("venv/\nnode_modules/\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "base")
+    _git(out, "remote", "add", "origin", str(bare))
+    _git(out, "push", "-q", "-u", "origin", "main")
+    wts = {}
+    for name in ("clean", "untracked", "dirty", "locked", "live", "open"):
+        wt = tmp_path / f"work-{name}"
+        _git(out, "worktree", "add", "-q", "-b", name, str(wt), "main")
+        (wt / f"{name}.txt").write_text(f"{name}\n")
+        _git(wt, "add", "-A")
+        _git(wt, "commit", "-q", "-m", f"feat: {name}")
+        (wt / "venv").mkdir()
+        (wt / "venv" / "big.bin").write_bytes(b"x" * 300_000)  # ignored: an environment, not work
+        wts[name] = wt
+        if name != "open":
+            _git(out, "merge", "-q", "--no-ff", "-m", f"merge {name}", name)
+    _git(out, "push", "-q", "origin", "main")
+    # an uncommitted journal shard is work, though the tracked files are clean
+    shard = wts["untracked"] / ".process-work/journal/2026-10-01-untracked.md"
+    shard.parent.mkdir(parents=True, exist_ok=True)
+    shard.write_text("DECISION kept\n")
+    (wts["dirty"] / "dirty.txt").write_text("changed\n")
+    _git(out, "worktree", "lock", str(wts["locked"]))
+    _git(out, "worktree", "add", "-q", "--detach", str(tmp_path / "work-detached"), "main")
+    # a live dispatch session on `live`: this very test process is its worker
+    spec = importlib.util.spec_from_file_location("dispatch_for_tidy", out / "scripts/process/dispatch.py")
+    d = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(d)
+    recs = out / ".git/process-dispatch"
+    recs.mkdir(parents=True, exist_ok=True)
+    (recs / "live.json").write_text(json.dumps({
+        "branch": "live", "issue": 5, "phase": "execute", "worktree": str(wts["live"]),
+        "pid": os.getpid(), "pid_start": d._proc_start(os.getpid())}))
+    return out, wts
+
+
+def test_merged_worktrees_are_listed_with_size_and_removed_only_when_nothing_is_lost(render, tmp_path):
+    out, wts = _worktree_landscape(render, tmp_path)
+    r = _run(out)
+    assert r.returncode == 0, r.stderr
+    assert "worktrees of merged branches: 1, " in r.stdout
+    assert f"{wts['clean']} (" in r.stdout and "iB)" in r.stdout  # its size, venv included
+    kept = {ln.split(" — ")[0].split("kept: ")[1]: ln for ln in r.stdout.splitlines() if "kept: " in ln}
+    assert "untracked files not ignored" in kept[str(wts["untracked"])]
+    assert "uncommitted changes" in kept[str(wts["dirty"])]
+    assert "locked" in kept[str(wts["locked"])]
+    assert "dispatch session is live" in kept[str(wts["live"])]
+    assert str(wts["open"]) not in r.stdout and "work-detached" not in r.stdout  # not merged / no branch's
+    assert wts["clean"].is_dir()  # a dry run removes nothing
+
+    r = _run(out, "--apply")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert not wts["clean"].exists()
+    listed = _git(out, "worktree", "list").stdout
+    assert str(wts["clean"]) not in listed
+    for name in ("untracked", "dirty", "locked", "live", "open"):
+        assert wts[name].is_dir() and str(wts[name]) in listed, name
+    assert (wts["untracked"] / ".process-work/journal/2026-10-01-untracked.md").is_file()
+    assert (tmp_path / "work-detached").is_dir() and out.is_dir()

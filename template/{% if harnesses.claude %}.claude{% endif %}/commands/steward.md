@@ -102,7 +102,8 @@ back to Ready. You never fix a finding yourself.
 Once a day: `uv run scripts/process/tidy.py` (report), then
 `tidy.py --apply` for the safe part — merged remote branches, fully
 ticked spec directories, journal shards past the window, archived plans
-past retention, template-update residue. What tidy only lists is a
+past retention, template-update residue, worktrees of merged branches
+(a full disk stops `dispatch.py start`). What tidy only lists is a
 decision: an active plan older than the window gets its owner asked
 once, then archived with a `review-waived:` line or deleted; an
 untouched open issue gets a comment naming the question. Then

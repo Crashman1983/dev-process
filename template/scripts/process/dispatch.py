@@ -60,7 +60,12 @@ refuses while the worktree has uncommitted or untracked work unless
 `--force` — a plan not committed dies with the process. `max_workers`
 caps live children on this host; a held lane counts as no free CPU —
 a held full lane blocks only execute, a held scoped (or unknown) lane
-blocks every phase, and a remote phase sees neither cap nor lane.
+blocks every phase, and a remote phase sees neither cap nor lane. A
+local start also refuses while the filesystem holding the worktrees is
+at or above 90% use (`PROCESS_DISK_LIMIT_PCT`) and names `tidy.py
+--apply`: each worktree carries its own venv/node_modules (downstream:
+111 merged worktrees filled the disk). Whether a merged worktree may be
+removed has one owner here (`merged_worktrees`); the train and tidy ask it.
 
 Trust boundary, plainly: the policy's `command` is executed on the
 machine that runs dispatch. It is a repository file — whoever can merge
@@ -386,16 +391,133 @@ def forget_branch(root: Path, branch: str) -> None:
             except OSError:
                 pass
 
-def _worktrees(root: Path) -> dict[str, Path]:
-    """branch → worktree path, from git itself."""
-    out: dict[str, Path] = {}
-    cur: Path | None = None
+def worktree_entries(root: Path) -> list[dict]:
+    """Every worktree git knows, in its order: path, branch (None when detached),
+    locked, main (git lists the main worktree first)."""
+    out: list[dict] = []
+    cur: dict | None = None
     for line in _out(root, "worktree", "list", "--porcelain").splitlines():
         if line.startswith("worktree "):
-            cur = Path(line[len("worktree "):])
-        elif line.startswith("branch refs/heads/") and cur is not None:
-            out[line[len("branch refs/heads/"):]] = cur
+            cur = {"path": Path(line[len("worktree "):]), "branch": None, "locked": False, "main": not out}
+            out.append(cur)
+        elif cur is None:
+            continue
+        elif line.startswith("branch refs/heads/"):
+            cur["branch"] = line[len("branch refs/heads/"):]
+        elif line == "locked" or line.startswith("locked "):
+            cur["locked"] = True
     return out
+
+
+def _worktrees(root: Path) -> dict[str, Path]:
+    """branch → worktree path, from git itself."""
+    return {e["branch"]: e["path"] for e in worktree_entries(root) if e["branch"]}
+
+
+# --- removing merged worktrees (#136) ---------------------------------------------------
+# Every dispatched issue gets a worktree with its own venv/node_modules; nothing
+# removed them after the merge (downstream: 111 worktrees, ~57G, a full disk and
+# every session stalled). The train (after its merge) and tidy (`--apply`) remove
+# them — and both ask this one owner whether a worktree may go, and if not, why.
+
+DISK_LIMIT_PCT = 90  # `start` refuses while the worktrees' filesystem is this full
+DISK_LIMIT_ENV = "PROCESS_DISK_LIMIT_PCT"
+CLEANUP_CMD = "python3 scripts/process/tidy.py --apply"
+
+
+def _toplevel(path: Path) -> Path | None:
+    top = _out(path, "rev-parse", "--show-toplevel")
+    return Path(top).resolve() if top else None
+
+
+def worktree_keep_reason(root: Path, wt: dict, base: str, recs: list[dict]) -> str | None:
+    """None when the worktree `wt` (a `worktree_entries` item) may be removed;
+    otherwise why it stays. Removable means: a branch's worktree (not the main
+    one, not the one we run in, not detached, not locked), the branch contained
+    in `base`, no live dispatch session on it, no uncommitted change and no
+    untracked file git does not ignore (an uncommitted journal shard is work)."""
+    path, branch = wt["path"], wt["branch"]
+    if wt["main"]:
+        return "the main worktree"
+    here = {p for p in (_toplevel(root), _toplevel(Path.cwd())) if p}
+    if path.resolve() in here:
+        return "the current worktree"
+    if wt["locked"]:
+        return "locked (`git worktree lock`)"
+    if not branch:
+        return "detached HEAD — not a branch's worktree"
+    if _git(root, "merge-base", "--is-ancestor", f"refs/heads/{branch}", base).returncode != 0:
+        return f"{branch} is not contained in {base}"
+    for rec in recs:
+        same = rec["branch"] == branch or (rec.get("worktree") and Path(rec["worktree"]).resolve() == path.resolve())
+        if same and (rec.get("alive") or rec.get("state") == "unknown"):
+            return f"a dispatch session is {'live' if rec.get('alive') else 'not askable (tmux)'} on it " \
+                   f"({rec.get('phase') or '?'})"
+    if not path.is_dir():
+        return None  # gone already: `git worktree prune` forgets it
+    st = _git(path, "status", "--porcelain", "--untracked-files=no")
+    if st.returncode != 0:
+        return f"git status failed there: {st.stderr.strip()[-200:]}"
+    if st.stdout.strip():
+        return f"uncommitted changes ({len(st.stdout.strip().splitlines())} path(s))"
+    un = _git(path, "ls-files", "--others", "--exclude-standard", "--directory")
+    if un.returncode != 0:
+        return f"cannot list untracked files: {un.stderr.strip()[-200:]}"
+    untracked = un.stdout.splitlines()
+    if untracked:
+        return f"untracked files not ignored ({', '.join(untracked[:3])}{', …' if len(untracked) > 3 else ''})"
+    return None
+
+
+def merged_worktrees(root: Path, base: str, branches: list[str] | None = None) -> list[tuple[dict, str | None]]:
+    """(worktree, keep reason or None) for the worktree of each of `branches`, or —
+    without `branches` — of every branch contained in `base`. The main worktree is
+    never a candidate; detached worktrees are no branch's and are not listed."""
+    recs = records(root)
+    out = []
+    for wt in worktree_entries(root):
+        if wt["main"] or not wt["branch"]:
+            continue
+        if branches is not None:
+            if wt["branch"] not in branches:
+                continue
+        elif _git(root, "merge-base", "--is-ancestor", f"refs/heads/{wt['branch']}", base).returncode != 0:
+            continue
+        out.append((wt, worktree_keep_reason(root, wt, base, recs)))
+    return out
+
+
+def remove_worktree(root: Path, path: Path) -> str | None:
+    """Remove one worktree that `worktree_keep_reason` cleared; None or why it failed.
+    No `--force`: plain `git worktree remove` deletes ignored files (venv,
+    node_modules, caches) with the tree but refuses a change, an untracked file or a
+    lock — git checks again what the keep check saw, so a file written in between
+    is not lost."""
+    r = _git(root, "worktree", "remove", str(path)) if path.is_dir() else None
+    _git(root, "worktree", "prune")
+    if r is not None and r.returncode != 0:
+        return r.stderr.strip() or f"git worktree remove exited {r.returncode}"
+    return None
+
+
+def disk_refusal(path: Path) -> str | None:
+    """Why no session may start while the filesystem holding `path` is too full
+    (use = used / (used + available), as `df` counts it), or None."""
+    try:
+        limit = float(os.environ.get(DISK_LIMIT_ENV) or DISK_LIMIT_PCT)
+    except ValueError:
+        limit = DISK_LIMIT_PCT
+    try:
+        u = shutil.disk_usage(path)
+    except OSError:
+        return None
+    if u.used + u.free <= 0:
+        return None
+    pct = 100.0 * u.used / (u.used + u.free)
+    if pct < limit:
+        return None
+    return (f"the filesystem holding {path} is {pct:.0f}% full (limit {limit:g}%, {u.free / 2**30:.1f} GiB free) — "
+            f"every worktree carries its own environments; remove the merged ones with `{CLEANUP_CMD}`")
 
 
 def ensure_worktree(root: Path, branch: str) -> Path:
@@ -709,6 +831,10 @@ def start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str |
     refusal = None if remote else lane_verdict(held_lanes(root), phase)
     if refusal:
         print(f"dispatch: lane rule refused — {refusal}", file=sys.stderr)
+        return 3
+    full = None if remote else disk_refusal(root.parent)  # where ensure_worktree puts the worktree
+    if full:
+        print(f"dispatch: not starting — {full}", file=sys.stderr)
         return 3
     channel = policy.get("decision_channel")
     prompt = prompt_for(phase, issue, tier, branch, model, remote=remote,

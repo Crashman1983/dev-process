@@ -23,6 +23,11 @@ Dry run by default: a report with counts and the exact command per item.
     keeps them; the review gate reads the journal's REVIEW lines, which
     compaction preserves)
   - remove .process-work/template-delta/ (working memory of an update)
+  - remove the worktrees of branches contained in origin/<default> (each
+    carries its own venv/node_modules) — only where dispatch.py says so: no
+    uncommitted change, no untracked file git does not ignore, no live
+    dispatch session, not locked, not the main or current worktree; the
+    report names each one kept and why
 Two things it only LISTS, because they are the owner's decision: active
 plans older than the window (abandoned, or just slow?) and open issues
 untouched for a while (needs `gh`; skipped without it).
@@ -33,17 +38,22 @@ from __future__ import annotations
 
 import datetime as dt
 import fnmatch
+import os
 import re
 import shutil
 import subprocess
 import sys
 from pathlib import Path
 
+sys.dont_write_bytecode = True
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling imports
+
 PLANS_ACTIVE = ".process-work/plans"
 PLANS_ARCHIVE = ".process-work/plans/archive"
 SPECS = "specs"
 DELTA_DIR = ".process-work/template-delta"
 DATE_PREFIX = re.compile(r"^(\d{4}-\d{2}-\d{2})")
+SIZE_CAP = 200_000  # directory entries counted per worktree before the size reads "≥"
 DEFAULT_KEEP = ("main", "master", "HEAD", "release/*", "gh-pages")
 
 
@@ -90,6 +100,48 @@ def merged_remote_branches(root: Path, keep: tuple[str, ...]) -> list[str]:
             continue
         names.append(name)
     return names
+
+
+def merged_worktrees(root: Path) -> list[tuple[dict, str | None]]:
+    """(worktree, keep reason or None) per worktree whose branch is contained in
+    origin/<default> (local <default> without origin) — dispatch.py owns the verdict."""
+    default = _default_branch(root)
+    base = f"origin/{default}" if _git(root, "rev-parse", "--verify", "--quiet", f"origin/{default}") else default
+    try:
+        import dispatch as _dispatch  # noqa: E402  (sibling; one owner for the worktrees)
+    except ImportError:
+        return []
+    return _dispatch.merged_worktrees(root, base)
+
+
+def tree_size(path: Path, cap: int = SIZE_CAP) -> tuple[int, bool]:
+    """(bytes, complete) under `path`, symlinks not followed; stops after `cap` entries."""
+    total, seen, stack = 0, 0, [str(path)]
+    while stack:
+        try:
+            with os.scandir(stack.pop()) as it:
+                for e in it:
+                    seen += 1
+                    if seen > cap:
+                        return total, False
+                    try:
+                        if e.is_dir(follow_symlinks=False):
+                            stack.append(e.path)
+                        else:
+                            total += e.stat(follow_symlinks=False).st_size
+                    except OSError:
+                        continue
+        except OSError:
+            continue
+    return total, True
+
+
+def _human(n: float) -> str:
+    for unit in ("B", "KiB", "MiB"):
+        if n < 1024:
+            return f"{n:.0f} B" if unit == "B" else f"{n:.1f} {unit}"
+        n /= 1024
+    return f"{n:.1f} GiB"
 
 
 def finished_spec_dirs(root: Path) -> list[str]:
@@ -207,8 +259,9 @@ def quiet_open_issues(root: Path, days: int) -> list[str] | None:
 # --- report and apply -----------------------------------------------------------
 
 def report(root: Path, days: int, keep: tuple[str, ...] = DEFAULT_KEEP,
-           *, with_remote: bool = True) -> tuple[list[str], dict]:
-    """(lines, items) — the digest section and the raw findings."""
+           *, with_remote: bool = True, sizes: bool | None = None) -> tuple[list[str], dict]:
+    """(lines, items) — the digest section and the raw findings. `sizes` (default:
+    `with_remote`) walks each merged worktree for its size — the offline digest skips it."""
     items: dict = {}
     lines: list[str] = []
     if with_remote and _git(root, "remote", "get-url", "origin"):
@@ -224,6 +277,9 @@ def report(root: Path, days: int, keep: tuple[str, ...] = DEFAULT_KEEP,
     items["journal"] = old_journal_shards(root, days)
     items["delta"] = (root / DELTA_DIR).is_dir()
     items["issues"] = quiet_open_issues(root, days)
+    wts = merged_worktrees(root)
+    items["worktrees"] = [wt["path"] for wt, why in wts if why is None]
+    items["worktrees_kept"] = {str(wt["path"]): why for wt, why in wts if why}
 
     b = items["branches"]
     lines.append(f"- remote branches already merged into the default branch: {len(b)}"
@@ -251,6 +307,19 @@ def report(root: Path, days: int, keep: tuple[str, ...] = DEFAULT_KEEP,
                  + (" — `tidy.py --apply` folds them (REVIEW/GRADE lines kept)" if j else ""))
     if items["delta"]:
         lines.append(f"- {DELTA_DIR}/ left over from a template update — `tidy.py --apply` removes it")
+    w = items["worktrees"]
+    if sizes if sizes is not None else with_remote:
+        measured = [(p, tree_size(p)) for p in w]
+        partial = not all(complete for _p, (_n, complete) in measured)
+        held = f", {'≥ ' if partial else ''}{_human(sum(n for _p, (n, _c) in measured))}" if w else ""
+        shown = [f"{p} ({'' if c else '≥ '}{_human(n)})" for p, (n, c) in measured]
+    else:
+        shown, held = [str(p) for p in w], ""
+    lines.append(f"- worktrees of merged branches: {len(w)}{held}"
+                 + (" — `tidy.py --apply` removes them" if w else ""))
+    lines.extend(f"    {x}" for x in shown)
+    for path, why in items["worktrees_kept"].items():
+        lines.append(f"    kept: {path} — {why}")
     iss = items["issues"]
     if iss is None:
         lines.append(f"- open issues untouched for {days} days: (needs `gh` on PATH — not checked)")
@@ -296,6 +365,14 @@ def apply(root: Path, items: dict, days: int) -> int:
                            capture_output=True, text=True)
         if r.returncode != 0:
             (root / PLANS_ARCHIVE / name).unlink(missing_ok=True)
+    if items["worktrees"]:
+        import dispatch as _dispatch  # noqa: E402  (sibling; one owner for the worktrees)
+        for path in items["worktrees"]:
+            print(f"tidy: $ git worktree remove {path}")
+            failed = _dispatch.remove_worktree(root, path)
+            if failed:
+                print(f"tidy: could not remove {path}: {failed}")
+                rc = 1
     if items["delta"]:
         print(f"tidy: rm -r {DELTA_DIR}")
         shutil.rmtree(root / DELTA_DIR, ignore_errors=True)
@@ -328,7 +405,7 @@ def main() -> int:
         print(ln)
     if not do_apply:
         print("tidy: dry run — re-run with --apply to execute the safe part "
-              "(branches, finished specs, journal, old archive, delta dir)")
+              "(branches, finished specs, journal, old archive, delta dir, merged worktrees)")
         return 0
     return apply(root, items, days)
 

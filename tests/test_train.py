@@ -1480,3 +1480,41 @@ def test_the_train_marks_only_its_own_push_to_main(render, tmp_path):
     assert "post-checkout unset" in lines
     assert not [ln for ln in lines if ln.endswith("inherited")], lines
 
+
+def test_a_pushed_train_removes_the_merged_worktrees_that_hold_no_work(render, tmp_path):
+    # #136: a worktree per dispatched issue, each with its own venv, was never removed
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    (out / ".gitignore").write_text("venv/\n")
+    _repo(out)
+    bare = tmp_path / "origin.git"
+    _git(out, "clone", "-q", "--bare", str(out), str(bare))
+    _git(out, "remote", "add", "origin", str(bare))
+    _git(out, "fetch", "-q", "origin")
+    _git(out, "branch", "-q", "--set-upstream-to=origin/main", "main")
+    wts = {}
+    for name in ("alpha", "beta", "gamma"):
+        _branch(out, name, {f"src/{name}.py": f"{name}\n"})
+        wts[name] = tmp_path / f"repo-{name}"
+        _git(out, "worktree", "add", "-q", str(wts[name]), name)
+        (wts[name] / "venv").mkdir()
+        (wts[name] / "venv/lib.bin").write_bytes(b"x" * 1000)  # ignored: removed with the tree
+    shard = wts["beta"] / ".process-work/journal/2026-10-01-beta-notes.md"
+    shard.write_text("DECISION not yet committed\n")  # untracked work: never removed automatically
+    d = _dispatch_module(out)
+    (_records_dir(out) / "gamma.json").write_text(json.dumps({
+        "branch": "gamma", "issue": 9, "phase": "review", "worktree": str(wts["gamma"]),
+        "pid": os.getpid(), "pid_start": d._proc_start(os.getpid())}))  # a live session on gamma
+    r = _train(out, "run", "--force", "--push", "--suite", "true")
+    assert r.returncode == 0, r.stdout[-800:] + r.stderr[-800:]
+    assert "alpha, beta, gamma (pushed)" in r.stdout
+    assert f"worktree {wts['alpha']} of alpha removed" in r.stdout
+    assert not wts["alpha"].exists()
+    assert f"worktree {wts['beta']} of beta kept — untracked files not ignored" in r.stdout
+    assert shard.is_file()
+    assert f"worktree {wts['gamma']} of gamma kept — a dispatch session is live" in r.stdout
+    assert wts["gamma"].is_dir()
+    listed = _git(out, "worktree", "list").stdout
+    assert str(wts["alpha"]) not in listed and str(wts["beta"]) in listed
+    branches = _git(out, "branch", "--list", "--format=%(refname:short)").stdout.split()
+    assert "alpha" not in branches  # its worktree gone, the merged branch could be deleted too
+
