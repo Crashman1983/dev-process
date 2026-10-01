@@ -162,7 +162,8 @@ def _worktree_landscape(render, tmp_path):
     _git(out, "remote", "add", "origin", str(bare))
     _git(out, "push", "-q", "-u", "origin", "main")
     wts = {}
-    for name in ("clean", "cache", "untracked", "dirty", "locked", "live", "env", "excl", "outer", "open", "fresh"):
+    for name in ("clean", "cache", "untracked", "dirty", "locked", "live", "env", "excl", "outer", "open", "fresh",
+                 "built"):
         wt = tmp_path / f"work-{name}"
         _git(out, "worktree", "add", "-q", "-b", name, str(wt), "main")
         wts[name] = wt
@@ -177,10 +178,13 @@ def _worktree_landscape(render, tmp_path):
             _git(out, "merge", "-q", "--no-ff", "-m", f"merge {name}", name)
     _git(out, "push", "-q", "origin", "main")
     # regenerable caches go with the tree; a secret or a note git ignores does not
-    for rel in ("__pycache__/m.cpython-312.pyc", "build/out.bin", "node_modules/x/index.js", "src/__pycache__/n.pyc"):
+    for rel in ("__pycache__/m.cpython-312.pyc", "node_modules/x/index.js", "src/__pycache__/n.pyc"):
         (wts["cache"] / rel).parent.mkdir(parents=True, exist_ok=True)
         (wts["cache"] / rel).write_text("regenerable\n")
     (wts["env"] / ".env").write_text("SECRET=1\n")
+    # build/ holds hand-written files as often as output (refutation): not disposable
+    (wts["built"] / "build").mkdir()
+    (wts["built"] / "build/handwritten.txt").write_text("by hand\n")
     (out / ".git/info/exclude").write_text("notes.md\n**/.claude/worktrees/\n")
     (wts["excl"] / "notes.md").write_text("my notes\n")
     # a subagent's worktree inside a merged one: its own branch, unmerged, with uncommitted edits
@@ -226,6 +230,7 @@ def test_merged_worktrees_are_listed_with_size_and_removed_only_when_nothing_is_
     assert "not a regenerable environment or cache (notes.md)" in kept[str(wts["excl"])]
     assert f"holds worktree {wts['nested']}" in kept[str(wts["outer"])]
     assert "no commits of its own" in kept[str(wts["fresh"])]
+    assert "not a regenerable environment or cache (build" in kept[str(wts["built"])]
     assert str(wts["open"]) not in r.stdout and "work-detached" not in r.stdout  # not merged / no branch's
     assert wts["clean"].is_dir()  # a dry run removes nothing
 
@@ -234,7 +239,7 @@ def test_merged_worktrees_are_listed_with_size_and_removed_only_when_nothing_is_
     assert not wts["clean"].exists() and not wts["cache"].exists()
     listed = _git(out, "worktree", "list").stdout
     assert str(wts["clean"]) not in listed
-    for name in ("untracked", "dirty", "locked", "live", "env", "excl", "outer", "nested", "open", "fresh"):
+    for name in ("untracked", "dirty", "locked", "live", "env", "excl", "outer", "nested", "open", "fresh", "built"):
         assert wts[name].is_dir() and str(wts[name]) in listed, name
     assert (wts["untracked"] / ".process-work/journal/2026-10-01-untracked.md").is_file()
     assert (wts["nested"] / "agent.txt").read_text() == "uncommitted edit\n"

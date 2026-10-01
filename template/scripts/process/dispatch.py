@@ -436,10 +436,13 @@ def _toplevel(path: Path) -> Path | None:
 # regenerates — matched against the name of each ignored entry git lists (the
 # entry itself, not a parent: `build/notes.md` listed alone is a file somebody kept).
 # Anything else ignored (`.env`, notes excluded via .git/info/exclude) keeps it.
+# not here on purpose: build/, dist/ and .cache/ — they hold hand-written files, release
+# artifacts or credentials as often as regenerable output (refutation); a worktree that
+# carries them is kept and named, a person decides
 DISPOSABLE_IGNORED = (
     ".venv", "venv", "node_modules", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache",
-    ".hypothesis", ".tox", ".nox", ".coverage", ".coverage.*", "htmlcov", "dist", "build", "*.egg-info",
-    ".next", ".turbo", ".parcel-cache", ".cache", "*.pyc", "*.pyo", ".DS_Store",
+    ".hypothesis", ".tox", ".nox", ".coverage", ".coverage.*", "htmlcov", "*.egg-info",
+    ".next", ".turbo", ".parcel-cache", "*.pyc", "*.pyo", ".DS_Store",
 )
 
 
