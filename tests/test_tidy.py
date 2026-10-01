@@ -156,24 +156,41 @@ def _worktree_landscape(render, tmp_path):
     _git(out, "init", "-q", "-b", "main")
     _git(out, "config", "user.email", "t@t")
     _git(out, "config", "user.name", "t")
-    (out / ".gitignore").write_text("venv/\nnode_modules/\n")
+    (out / ".gitignore").write_text("venv/\nnode_modules/\n.env\nbuild/\n__pycache__/\n")
     _git(out, "add", "-A")
     _git(out, "commit", "-q", "-m", "base")
     _git(out, "remote", "add", "origin", str(bare))
     _git(out, "push", "-q", "-u", "origin", "main")
     wts = {}
-    for name in ("clean", "untracked", "dirty", "locked", "live", "open"):
+    for name in ("clean", "cache", "untracked", "dirty", "locked", "live", "env", "excl", "outer", "open", "fresh"):
         wt = tmp_path / f"work-{name}"
         _git(out, "worktree", "add", "-q", "-b", name, str(wt), "main")
+        wts[name] = wt
+        if name == "fresh":
+            continue  # dispatched, its worker died before the first commit: at main's tip, nothing merged
         (wt / f"{name}.txt").write_text(f"{name}\n")
         _git(wt, "add", "-A")
         _git(wt, "commit", "-q", "-m", f"feat: {name}")
         (wt / "venv").mkdir()
         (wt / "venv" / "big.bin").write_bytes(b"x" * 300_000)  # ignored: an environment, not work
-        wts[name] = wt
         if name != "open":
             _git(out, "merge", "-q", "--no-ff", "-m", f"merge {name}", name)
     _git(out, "push", "-q", "origin", "main")
+    # regenerable caches go with the tree; a secret or a note git ignores does not
+    for rel in ("__pycache__/m.cpython-312.pyc", "build/out.bin", "node_modules/x/index.js", "src/__pycache__/n.pyc"):
+        (wts["cache"] / rel).parent.mkdir(parents=True, exist_ok=True)
+        (wts["cache"] / rel).write_text("regenerable\n")
+    (wts["env"] / ".env").write_text("SECRET=1\n")
+    (out / ".git/info/exclude").write_text("notes.md\n**/.claude/worktrees/\n")
+    (wts["excl"] / "notes.md").write_text("my notes\n")
+    # a subagent's worktree inside a merged one: its own branch, unmerged, with uncommitted edits
+    nested = wts["outer"] / ".claude/worktrees/agent-x"
+    _git(out, "worktree", "add", "-q", "-b", "agent-x", str(nested), "main")
+    (nested / "agent.txt").write_text("committed\n")
+    _git(nested, "add", "-A")
+    _git(nested, "commit", "-q", "-m", "agent work")
+    (nested / "agent.txt").write_text("uncommitted edit\n")
+    wts["nested"] = nested
     # an uncommitted journal shard is work, though the tracked files are clean
     shard = wts["untracked"] / ".process-work/journal/2026-10-01-untracked.md"
     shard.parent.mkdir(parents=True, exist_ok=True)
@@ -197,22 +214,58 @@ def test_merged_worktrees_are_listed_with_size_and_removed_only_when_nothing_is_
     out, wts = _worktree_landscape(render, tmp_path)
     r = _run(out)
     assert r.returncode == 0, r.stderr
-    assert "worktrees of merged branches: 1, " in r.stdout
+    assert "worktrees of merged branches: 2, " in r.stdout
     assert f"{wts['clean']} (" in r.stdout and "iB)" in r.stdout  # its size, venv included
+    assert f"{wts['cache']} (" in r.stdout
     kept = {ln.split(" — ")[0].split("kept: ")[1]: ln for ln in r.stdout.splitlines() if "kept: " in ln}
     assert "untracked files not ignored" in kept[str(wts["untracked"])]
     assert "uncommitted changes" in kept[str(wts["dirty"])]
     assert "locked" in kept[str(wts["locked"])]
     assert "dispatch session is live" in kept[str(wts["live"])]
+    assert "not a regenerable environment or cache (.env)" in kept[str(wts["env"])]
+    assert "not a regenerable environment or cache (notes.md)" in kept[str(wts["excl"])]
+    assert f"holds worktree {wts['nested']}" in kept[str(wts["outer"])]
+    assert "no commits of its own" in kept[str(wts["fresh"])]
     assert str(wts["open"]) not in r.stdout and "work-detached" not in r.stdout  # not merged / no branch's
     assert wts["clean"].is_dir()  # a dry run removes nothing
 
     r = _run(out, "--apply")
     assert r.returncode == 0, r.stdout + r.stderr
-    assert not wts["clean"].exists()
+    assert not wts["clean"].exists() and not wts["cache"].exists()
     listed = _git(out, "worktree", "list").stdout
     assert str(wts["clean"]) not in listed
-    for name in ("untracked", "dirty", "locked", "live", "open"):
+    for name in ("untracked", "dirty", "locked", "live", "env", "excl", "outer", "nested", "open", "fresh"):
         assert wts[name].is_dir() and str(wts[name]) in listed, name
     assert (wts["untracked"] / ".process-work/journal/2026-10-01-untracked.md").is_file()
+    assert (wts["nested"] / "agent.txt").read_text() == "uncommitted edit\n"
+    assert (wts["env"] / ".env").is_file() and (wts["excl"] / "notes.md").is_file()
+
+
+def _dispatch_of(out):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("dispatch_for_tidy", out / "scripts/process/dispatch.py")
+    d = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(d)
+    return d
+
+
+def test_the_worktree_tidy_runs_in_is_never_removed(render, tmp_path):
+    out, wts = _worktree_landscape(render, tmp_path)
+    here = wts["clean"]
+    r = subprocess.run([sys.executable, str(out / "scripts/process/tidy.py"), "--apply", "."],
+                       cwd=here, capture_output=True, text=True)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert f"kept: {here} — the current worktree" in r.stdout
+    assert here.is_dir() and not wts["cache"].exists()  # the others still go
+
+
+def test_an_unaskable_session_or_an_unreadable_worktree_keeps_it(render, tmp_path):
+    out, wts = _worktree_landscape(render, tmp_path)
+    d = _dispatch_of(out)
+    entry = next(e for e in d.worktree_entries(out) if e["branch"] == "clean")
+    assert d.worktree_keep_reason(out, entry, "main", []) is None
+    unknown = [{"branch": "clean", "alive": False, "state": "unknown", "phase": "execute"}]
+    assert "not askable" in d.worktree_keep_reason(out, entry, "main", unknown)
+    (wts["clean"] / ".git").write_text(f"gitdir: {tmp_path / 'nowhere'}\n")  # git cannot read it
+    assert "git status failed" in d.worktree_keep_reason(out, entry, "main", [])
     assert (tmp_path / "work-detached").is_dir() and out.is_dir()
