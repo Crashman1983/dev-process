@@ -112,7 +112,13 @@ the test lanes are free where the project has a lane script (see `tower.md`, lan
    pre-push hook — leaves local main untouched and keeps the train branch;
    the message says which of them refused and quotes its reasons); then local main
    fast-forwards. Local main carrying commits that are not on origin
-   refuses to depart. Merged branches are deleted (`--keep-branches`
+   refuses to depart. The worktree of each merged branch is removed
+   (each carries its own venv/node_modules; downstream, 111 left behind
+   filled the disk) unless it holds an uncommitted change, an untracked
+   file git does not ignore (an uncommitted journal shard), a live
+   dispatch session or a lock — the train names each one it kept and why,
+   and a failed removal is a note, never a failed train; `dispatch.py`
+   owns that verdict, `tidy.py` asks the same. Merged branches are deleted (`--keep-branches`
    keeps them; a branch checked out elsewhere is kept, locally and on
    origin, and said so); every merged worker gets a `done` report;
    `--deploy` runs once. A failed deploy leaves the merge standing and

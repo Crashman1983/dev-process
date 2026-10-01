@@ -1117,3 +1117,38 @@ def test_find_branch_reads_the_issue_as_its_owner_does(render, tmp_path, branch,
             sys.modules.pop(m, None)
 
     assert (got == branch) if found else got is None, got
+
+
+def _usage(pct):
+    import collections
+    usage = collections.namedtuple("usage", "total used free")
+    return usage(100 * 2**30, pct * 2**30, (100 - pct) * 2**30)
+
+
+@pytest.mark.parametrize("pct,refused", [(95, True), (90, True), (89, False), (40, False)])
+def test_a_full_disk_refuses_a_local_start_and_names_the_cleanup(render, tmp_path, monkeypatch, capsys, pct, refused):
+    # #136: 111 merged worktrees, each with its own venv, filled the disk and stalled every session
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    _fake_command(out, "sleep 30\n")
+    d = _load_dispatch(out)
+    monkeypatch.delenv(d.DISK_LIMIT_ENV, raising=False)
+    seen = []
+    monkeypatch.setattr(d.shutil, "disk_usage", lambda p: seen.append(Path(p)) or _usage(pct))
+    rc = d.start(out, issue=4, phase="plan", tier=None, branch="b4", title=None, dry_run=True)
+    err = capsys.readouterr().err
+    assert seen and seen[0] == out.parent  # the filesystem the worktrees go to
+    if refused:
+        assert rc == 3 and f"{pct}% full" in err and "python3 scripts/process/tidy.py --apply" in err
+    else:
+        assert rc == 0 and "full" not in err
+
+
+def test_the_disk_limit_reaches_the_command_line(render, tmp_path):
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    _fake_command(out, "sleep 30\n")
+    r = _dispatch(out, "start", "--issue", "4", "--phase", "plan", "--branch", "b4",
+                  env={**os.environ, "PROCESS_DISK_LIMIT_PCT": "0"})
+    assert r.returncode == 3 and "% full (limit 0%" in r.stderr and "tidy.py --apply" in r.stderr
+    assert not (tmp_path / "repo-b4").exists()  # no worktree, no session

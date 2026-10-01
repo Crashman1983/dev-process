@@ -1153,6 +1153,14 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
     log(f"{local} fast-forwarded to {branch} ({_out(root, 'rev-parse', '--short', 'HEAD')})")
     print(f"train: {local} → {_out(root, 'rev-parse', '--short', 'HEAD')} with {', '.join(aboard)}"
           + (" (pushed)" if push else ""))
+    import dispatch as _dispatch  # lazily, as tower does
+    try:
+        # merged now: their worktrees (each with its own venv/node_modules) are
+        # residue — dispatch says which may go; asked before forget_branch drops records
+        worktrees = {wt["branch"]: (wt, why) for wt, why in _dispatch.merged_worktrees(root, local, aboard)}
+    except Exception as exc:  # noqa: BLE001 — cleanup after the merge: say so, never abort a landed train
+        print(f"train: merged worktrees not checked — {exc}", file=sys.stderr)
+        worktrees = {}
     for b in aboard:
         refs = sorted({int(n) for n in re.findall(r"(?<![\w/])#(\d+)\b",
                                                   _out(root, "log", "--format=%B", f"{base}..{b}"))})
@@ -1165,12 +1173,22 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
                                  note=f"merged by train {stamp}" + (f"; issues {refs}" if refs else ""), worker=b)
         except SystemExit:
             pass
-        import dispatch as _dispatch  # lazily, as tower does
         try:
             _dispatch.forget_branch(root, b)  # merged: its issues are placed on it no more
         except Exception as exc:  # noqa: BLE001 — bookkeeping after the merge: say so, never abort a landed train
             print(f"train: dispatch still places {b}'s issues on it — could not forget it: {exc}",
                   file=sys.stderr)
+        if b in worktrees:
+            wt, why = worktrees[b]
+            if why:
+                print(f"train: worktree {wt['path']} of {b} kept — {why}")
+            else:
+                try:
+                    failed = _dispatch.remove_worktree(root, wt["path"])
+                except Exception as exc:  # noqa: BLE001 — a note, never a train failure
+                    failed = str(exc)
+                print(f"train: worktree {wt['path']} of {b} " + (f"not removed — {failed}" if failed else "removed"))
+                log(f"worktree {wt['path']} of {b}: {failed or 'removed'}")
         if not keep_branches:
             d = _git(root, "branch", "-d", b)
             if d.returncode != 0:
