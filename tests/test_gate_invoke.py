@@ -163,3 +163,53 @@ def test_hook_doctor_stays_quiet_in_ci(render, tmp_path, monkeypatch):
     assert gi.hook_wiring_findings(out)[0]
     monkeypatch.setenv("GITHUB_ACTIONS", "true")
     assert gi.hook_wiring_findings(out) == ([], [])
+
+
+# --- #134: the repair hint names the installer the project has ---
+
+
+def _githooks_project(render, tmp_path, installer: str | None):
+    out = _repo(render, tmp_path, git_hooks=False)  # no install_hooks.py, no pre-commit config
+    (out / ".githooks").mkdir()
+    (out / ".githooks/pre-push").write_text("#!/bin/sh\nexit 0\n")
+    if installer == "script":
+        (out / "scripts/install_hooks.sh").write_text("#!/bin/sh\ngit config core.hooksPath .githooks\n")
+    elif installer == "make":
+        (out / "Makefile").write_text("hooks:\n\tgit config core.hooksPath .githooks\n")
+    return out
+
+
+def test_tracked_hooks_hint_names_the_projects_installer(render, tmp_path):
+    out = _githooks_project(render, tmp_path, "script")
+
+    hard, _soft = _load(out).hook_wiring_findings(out)
+
+    assert hard and "scripts/install_hooks.sh" in hard[0], hard
+
+
+def test_tracked_hooks_hint_names_a_make_target(render, tmp_path):
+    out = _githooks_project(render, tmp_path, "make")
+
+    hard, _soft = _load(out).hook_wiring_findings(out)
+
+    assert hard and "make hooks" in hard[0], hard
+
+
+def test_tracked_hooks_without_an_installer_get_the_git_config_line(render, tmp_path):
+    out = _githooks_project(render, tmp_path, None)
+
+    hard, _soft = _load(out).hook_wiring_findings(out)
+
+    assert hard and "git config core.hooksPath .githooks" in hard[0], hard
+
+
+def test_no_hint_names_an_installer_the_project_does_not_have(render, tmp_path):
+    """Downstream refute: a project with its own .githooks (no git-hooks module) was told
+    to run `scripts/process/install_hooks.py`, which it does not have."""
+    out = _githooks_project(render, tmp_path, "script")
+    _git(out, "config", "core.hooksPath", ".githooks")
+    (out / ".pre-commit-config.yaml").write_text("repos: []\n")
+
+    hard, soft = _load(out).hook_wiring_findings(out)
+
+    assert hard and not any("install_hooks.py" in f for f in hard + soft), (hard, soft)
