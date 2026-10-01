@@ -1166,6 +1166,10 @@ ein Wächter-Test gegen doppelte Klammern ohne Leerzeichen in Python-Vorlagen.
 Wer v2.27.1 oder v2.28.0 installiert hat und am Push scheitert: auf v2.28.1
 aktualisieren, `v2.28.1`.
 
+**v2.40.1 — Hinweise und Doku nennen den Hook-Installer, den das Projekt wirklich hat.** Ein Review im Referenzprojekt fand Hinweise, die dort nicht stimmten. Das Projekt verwaltet seine Hooks in `.githooks/`, ohne das git-hooks-Modul. Der Hook-Doktor und die Doku schickten es trotzdem zu `scripts/process/install_hooks.py`, das nur dieses Modul mitbringt. Und `tower.md` riet noch, `model-policy.json` ins `.process-owned` zu nehmen, was seit v2.39.0 überholt ist. Die Urteile des Doktors waren richtig, nur die Hinweise nicht (#134).
+- **Der Reparatur-Hinweis nennt den Installer des Projekts:** `scripts/install_hooks.sh`, ein `make hooks`-Ziel, sonst `git config core.hooksPath .githooks`. `install_hooks.py` steht nur dort in pre-commits Installationszeile, wo das Modul es mitbringt.
+- **`tower.md` verweist auf `model-policy.local.json`.** `start-here.md` nennt den Weg für eigene Hooks.
+
 **v2.40.0 — Was das Referenzprojekt in nicht-eigenen Dateien noch anders hatte, ist geprüft übernommen.** Nach dem Port auf v2.39.0 hatte das Referenzprojekt keine eigenen Dateien mehr. Vier Dateien trugen aber noch eigene Änderungen, die ein künftiges Update überschrieben hätte. Jede wurde geprüft, bevor sie ins Template kam; jede hat einen Test, der gegen die Vorfassung rot ist.
 - **doc-drift prüft Symbol-Zeiger:** In `` `pfad/datei.py::symbol` `` wurde der Pfad bisher nie geprüft, weil die Endung nicht direkt vor dem Backtick steht. Ein veralteter Zeiger fällt jetzt auf. Wer solche Zeiger in den geprüften Dokumenten hat, kann nach dem Update tote finden.
 - **Der Owner-Digest nennt jeden Waiver:** jede `<gate>-waived:`-Zeile, nicht nur `review-waived` und `spec-waived`. Damit steht auch der Waiver eines projekteigenen Gates (`gates.local.json`) als offene Schuld auf der Seite.
