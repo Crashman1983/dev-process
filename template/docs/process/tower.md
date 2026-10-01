@@ -212,7 +212,7 @@ directory beforehand.
 Trust boundary: the policy's `command` is executed on the machine that
 runs dispatch. It is a repository file — whoever can merge to it can run
 code on the steward's host. Review a change to it like CI configuration.
-The project's own choices go into `docs/process/model-policy.local.json`,
+The project's own choices go into `model-policy.local.json` in `docs/process/`,
 laid over this policy mapping by mapping — never into a project-owned copy
 of the policy, so a template update still reaches it. Sessions report their model
 (`report.py … --model`, or `PROCESS_MODEL` set by dispatch), and the
