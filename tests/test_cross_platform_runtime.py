@@ -135,3 +135,13 @@ def test_release_notes_come_from_the_changelog_entry_of_the_tag(tmp_path):
     assert subprocess.run([*tool, "v9.9.9", str(log)], capture_output=True, text=True).returncode == 1
     wf = (root / ".github/workflows/release-publish.yml").read_text(encoding="utf-8")
     assert "tools/release_notes.py" in wf and "--verify-tag" in wf
+
+
+@pytest.mark.parametrize("module, script", [
+    ("arch_onboarding", "check_architecture.py"), ("github_issues", "check_issues.py")])
+def test_a_gate_that_imports_yaml_declares_it(render, tmp_path, module, script):
+    """A gate run alone (`uv run scripts/process/<gate>.py`) resolves what it imports;
+    without the declaration it worked only where PyYAML happened to be installed."""
+    out = render(tmp_path, {"project_name": "d", "modules": {module: True}})
+    text = (out / "scripts/process" / script).read_text(encoding="utf-8")
+    assert "import yaml" in text and "# /// script" in text and "pyyaml" in text
