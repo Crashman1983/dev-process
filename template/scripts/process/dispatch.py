@@ -572,6 +572,31 @@ def worktree_keep_reason(root: Path, wt: dict, base: str, recs: list[dict],
     nested = _nested_repository(path)
     if nested is not None:
         return f"holds a nested repository {nested}"
+    orphan = _head_history_only(path, base)
+    if orphan is not None:
+        return orphan
+    return None
+
+
+def _head_history_only(path: Path, base: str) -> str | None:
+    """A commit reachable only through this worktree's HEAD reflog — work on a detached
+    HEAD, say. `git worktree remove` deletes that reflog, so the commit would hang off no
+    ref (refutation). A commit in `base`, on any ref, or whose patch `base` already
+    carries (a branch rebased before its merge) is not lost; anything else keeps it."""
+    log = _git(path, "reflog", "show", "--format=%H", "HEAD")
+    if log.returncode != 0:
+        return f"cannot read this worktree's HEAD history: {log.stderr.strip()[-200:]}"
+    for sha in dict.fromkeys(log.stdout.split()):
+        if _git(path, "merge-base", "--is-ancestor", sha, base).returncode == 0:
+            continue
+        if _git(path, "for-each-ref", "--count=1", "--contains", sha).stdout.strip():
+            continue
+        parent = _git(path, "rev-parse", "--verify", "--quiet", f"{sha}^")
+        if parent.returncode != 0:
+            continue  # a root commit: nothing to compare a patch against
+        cherry = _git(path, "cherry", base, sha, parent.stdout.strip())
+        if cherry.returncode != 0 or any(ln.startswith("+") for ln in cherry.stdout.splitlines()):
+            return f"a commit only in this worktree's HEAD history ({sha[:10]}) — it would hang off no ref"
     return None
 
 
