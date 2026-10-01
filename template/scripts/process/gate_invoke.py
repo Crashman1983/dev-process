@@ -39,6 +39,34 @@ RUNNER_REL = "scripts/process/gate_runner.py"
 PRE_COMMIT_CONFIG = ".pre-commit-config.yaml"
 GITHOOKS_DIR = ".githooks"
 INSTALL_HOOKS_REL = "scripts/process/install_hooks.py"
+# a project's own installer for tracked hooks, where it has one
+PROJECT_INSTALLERS = ("scripts/install_hooks.sh", "scripts/install-hooks.sh")
+_MAKE_HOOKS = re.compile(r"^hooks\s*:", re.MULTILINE)
+
+
+def _tracked_hooks_installer(root: Path) -> str:
+    """How THIS project points git at its tracked hooks: its own installer script, a
+    `make hooks` target, or the plain git line — never an installer it does not have
+    (downstream refute: a project with its own .githooks was told to run
+    install_hooks.py, which only the git-hooks module ships)."""
+    for rel in PROJECT_INSTALLERS:
+        if (root / rel).is_file():
+            return f"`bash {rel}`"
+    makefile = root / "Makefile"
+    try:
+        if makefile.is_file() and _MAKE_HOOKS.search(makefile.read_text(encoding="utf-8")):
+            return "`make hooks`"
+    except (OSError, UnicodeDecodeError):
+        pass
+    return f"`git config core.hooksPath {GITHOOKS_DIR}`"
+
+
+def _framework_install(root: Path) -> str:
+    """pre-commit's install line, plus the merge guard where the module ships it."""
+    line = "uvx pre-commit install --hook-type pre-commit --hook-type pre-push"
+    if (root / INSTALL_HOOKS_REL).is_file():
+        line += f" && python3 {INSTALL_HOOKS_REL}"
+    return f"`{line}`"
 
 # The PEP-723 block: `# /// script` … `# ///`, every line a comment.
 _PEP723_BLOCK = re.compile(r"^# /// script\s*$(?P<body>.*?)^# ///\s*$",
@@ -169,7 +197,7 @@ def hook_wiring_findings(root: Path) -> tuple[list[str], list[str]]:
                 f"{GITHOOKS_DIR}/ holds tracked hooks but core.hooksPath is "
                 f"{hooks_path or 'unset'} — git never reads them; whatever sits "
                 f"in .git/hooks runs instead (a stale copy, or nothing). "
-                f"`git config core.hooksPath {GITHOOKS_DIR}` in this clone")
+                f"{_tracked_hooks_installer(root)} in this clone")
     if not (root / PRE_COMMIT_CONFIG).is_file():
         return hard, soft
     if hooks_path:
@@ -178,8 +206,7 @@ def hook_wiring_findings(root: Path) -> tuple[list[str], list[str]]:
             f"registers hooks — git ignores .git/hooks, so every pre-commit "
             f"registration is inert and no local gate has run at push. One "
             f"hook manager: `git config --unset core.hooksPath` and reinstall "
-            f"(`uvx pre-commit install --hook-type pre-commit --hook-type "
-            f"pre-push && python3 {INSTALL_HOOKS_REL}`), or move the registrations into {hooks_path} and "
+            f"({_framework_install(root)}), or move the registrations into {hooks_path} and "
             f"drop the config")
         return hard, soft
     # one owner for "is the framework's hook there, and the merge guard before it"
@@ -197,8 +224,7 @@ def hook_wiring_findings(root: Path) -> tuple[list[str], list[str]]:
     if not installed:
         soft.append(
             f"{PRE_COMMIT_CONFIG} registers a pre-push gate but this clone "
-            f"never installed it — `uvx pre-commit install --hook-type "
-            f"pre-commit --hook-type pre-push && python3 {INSTALL_HOOKS_REL}`; "
+            f"never installed it — {_framework_install(root)}; "
             f"until then no gate runs locally before a push (CI remains the "
             f"authority)")
     elif not guarded:

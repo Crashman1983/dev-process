@@ -189,7 +189,8 @@ a script such as
     command -v uv >/dev/null || pip install --quiet uv
     uv sync                        # or the project's own setup target
     uvx pre-commit install --hook-type pre-commit --hook-type pre-push  # the session pushes too
-    python3 scripts/process/install_hooks.py   # the merge guard (git-hooks module)
+    python3 scripts/process/install_hooks.py   # the merge guard (git-hooks module);
+                                               # own .githooks: the project's installer
     # export PATH additions for the session's shells via "$CLAUDE_ENV_FILE"
 
 Make it idempotent and fast on a second start; a review that cannot run the
@@ -211,8 +212,9 @@ directory beforehand.
 Trust boundary: the policy's `command` is executed on the machine that
 runs dispatch. It is a repository file — whoever can merge to it can run
 code on the steward's host. Review a change to it like CI configuration.
-The policy is project-owned (list it in `.process-owned` so a template
-update never overwrites it). Sessions report their model
+The project's own choices go into `docs/process/model-policy.local.json`,
+laid over this policy mapping by mapping — never into a project-owned copy
+of the policy, so a template update still reaches it. Sessions report their model
 (`report.py … --model`, or `PROCESS_MODEL` set by dispatch), and the
 telemetry module's `process_kpis.py models` cuts rounds-to-pass and
 blocks by tier × phase × model — one issue is one unit, the last model

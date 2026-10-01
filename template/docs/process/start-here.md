@@ -58,7 +58,9 @@ price of the guarantee it buys (no unreviewed Tier 2+ merge).
 5. Create the process-baseline commit before product work starts.
 6. Install local hooks if the `git-hooks` module is active:
    `uvx pre-commit install --hook-type pre-commit --hook-type pre-push`,
-   then `python3 scripts/process/install_hooks.py` (the merge guard).
+   then `python3 scripts/process/install_hooks.py` (the merge guard). A
+   project with its own tracked hooks (`.githooks/`) runs its own installer
+   instead — the hook doctor in the gate runner names it.
    Installing *after* the baseline commit avoids the no-direct-main hook
    blocking it; if the hooks were installed first,
    `SKIP=no-commit-to-branch git commit …` is the sanctioned onboarding
