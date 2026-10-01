@@ -249,6 +249,72 @@ def _dispatch_of(out):
     return d
 
 
+def test_what_git_status_cannot_see_keeps_the_worktree(render, tmp_path):
+    out, wts = _worktree_landscape(render, tmp_path)
+    for name in ("clone", "assumed", "skipped", "submod"):
+        wt = tmp_path / f"work-{name}"
+        _git(out, "worktree", "add", "-q", "-b", name, str(wt), "main")
+        (wt / f"{name}.txt").write_text(f"{name}\n")
+        _git(wt, "add", "-A")
+        _git(wt, "commit", "-q", "-m", f"feat: {name}")
+        wts[name] = wt
+    # a fork cloned into node_modules: status shows only `!! node_modules/`
+    fork = wts["clone"] / "node_modules/forked"
+    fork.mkdir(parents=True)
+    _git(fork, "init", "-q")
+    (fork / "patch.js").write_text("uncommitted fork work\n")
+    # edits status is told not to look at
+    _git(wts["assumed"], "update-index", "--assume-unchanged", "assumed.txt")
+    (wts["assumed"] / "assumed.txt").write_text("hidden edit\n")
+    _git(wts["skipped"], "update-index", "--skip-worktree", "skipped.txt")
+    (wts["skipped"] / "skipped.txt").write_text("hidden edit\n")
+    # a submodule: `git worktree remove` refuses it on every run
+    lib = tmp_path / "libsrc"
+    _git(tmp_path, "init", "-q", "-b", "main", str(lib))
+    (lib / "s.txt").write_text("s\n")
+    _git(lib, "-c", "user.email=t@t", "-c", "user.name=t", "add", "-A")
+    _git(lib, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "s")
+    _git(wts["submod"], "-c", "protocol.file.allow=always", "submodule", "add", "-q", str(lib), "lib")
+    _git(wts["submod"], "commit", "-q", "-m", "lib")
+    # a branch taken over from a remote worker: created from its origin ref, no local commit
+    other = tmp_path / "other"
+    _git(tmp_path, "clone", "-q", "-b", "main", str(tmp_path / "origin.git"), str(other))
+    _git(other, "switch", "-qc", "remotework")
+    (other / "rw.txt").write_text("rw\n")
+    _git(other, "add", "-A")
+    _git(other, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "rw")
+    _git(other, "push", "-q", "origin", "remotework")
+    _git(out, "fetch", "-q", "origin")
+    wts["remote"] = tmp_path / "work-remote"
+    _git(out, "worktree", "add", "-q", str(wts["remote"]), "remotework")
+    for name in ("clone", "assumed", "skipped", "submod", "remotework"):
+        _git(out, "merge", "-q", "--no-ff", "-m", f"merge {name}", name)
+    _git(out, "push", "-q", "origin", "main")
+
+    r = _run(out)
+    assert r.returncode == 0, r.stderr
+    kept = {ln.split(" — ")[0].split("kept: ")[1]: ln for ln in r.stdout.splitlines() if "kept: " in ln}
+    assert f"holds a nested repository {fork}" in kept[str(wts["clone"])]
+    assert "hidden edits possible (assume-unchanged/skip-worktree on assumed.txt)" in kept[str(wts["assumed"])]
+    assert "hidden edits possible (assume-unchanged/skip-worktree on skipped.txt)" in kept[str(wts["skipped"])]
+    assert "has submodules" in kept[str(wts["submod"])]
+    assert str(wts["remote"]) not in kept and f"{wts['remote']} (" in r.stdout  # its work is merged
+    r = _run(out, "--apply")
+    assert r.returncode == 0, r.stdout + r.stderr  # no removal that fails on every run
+    assert (fork / "patch.js").is_file()
+    assert (wts["assumed"] / "assumed.txt").read_text() == "hidden edit\n"
+    assert (wts["skipped"] / "skipped.txt").read_text() == "hidden edit\n"
+    assert wts["submod"].is_dir() and not wts["remote"].exists()
+
+
+def test_only_a_branch_created_from_the_integration_branch_is_fresh(render, tmp_path):
+    d = _dispatch_of(render(tmp_path / "w", {"project_name": "d", "modules": {}}))
+    for src in ("main", "master", "origin/main", "refs/remotes/origin/main", "refs/heads/main", "HEAD", "1a2b3c4d"):
+        assert d._from_integration(src), src
+    for src in ("refs/remotes/origin/remotework", "origin/remotework", "feature", "release/main/x"):
+        assert not d._from_integration(src), src
+
+
 def test_the_worktree_tidy_runs_in_is_never_removed(render, tmp_path):
     out, wts = _worktree_landscape(render, tmp_path)
     here = wts["clean"]
