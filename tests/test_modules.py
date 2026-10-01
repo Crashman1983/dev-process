@@ -137,3 +137,18 @@ def test_gate_runner_dates_a_chronic_red(render, tmp_path):
     (out / ".process-work/journal/x.md").unlink()
     r3 = subprocess.run(runner, cwd=out, capture_output=True, text=True)
     assert r3.returncode == 0 and ledger.read_text() == ""  # green: the clock stops
+
+
+def test_gate_checks_the_path_of_a_symbol_pointer(render, tmp_path):
+    """`path/file.py::symbol` names a file the same way `path/file.py` does: the path
+    was never checked (the extension is not at the backtick), so a stale pointer
+    passed — adopted from a downstream project."""
+    out = render(tmp_path, {"project_name": "d", "modules": {"doc_drift_gate": True}})
+    script = out / "scripts/process/check_doc_drift.py"
+    (out / "docs/process/pointers.md").write_text(
+        "Owner: `scripts/process/check_kernel.py::main`.\n", encoding="utf-8")
+    assert subprocess.run([sys.executable, str(script), str(out)]).returncode == 0
+    (out / "docs/process/pointers.md").write_text(
+        "Owner: `scripts/process/gone.py::main`.\n", encoding="utf-8")
+    r = subprocess.run([sys.executable, str(script), str(out)], capture_output=True, text=True)
+    assert r.returncode != 0 and "scripts/process/gone.py" in r.stdout + r.stderr, r.stdout

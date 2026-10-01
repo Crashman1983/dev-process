@@ -126,3 +126,20 @@ def test_digest_carries_the_residue_report(render, tmp_path):
     assert "Residue" in r.stdout and "template-delta/ left over" in r.stdout
     assert "tidy.py" in r.stdout
     assert not (out / "scripts/process/__pycache__").exists()
+
+
+def test_digest_lists_the_waiver_of_any_gate(render, tmp_path):
+    """A project's own gate (gates.local.json) with its own `<gate>-waived:` grammar:
+    the debt belongs on the owner's page as much as a review waiver does."""
+    import datetime
+    out = render(tmp_path, {"project_name": "demo"})
+    adir = out / ".process-work/plans/archive"
+    adir.mkdir(parents=True, exist_ok=True)
+    today = datetime.date.today().isoformat()
+    (adir / f"{today}-ac.md").write_text(
+        "# Plan\n\ntier: 2\nissue: #8\nac-waived: AC-3 — measured in the next release\n",
+        encoding="utf-8")
+
+    r = _run(out)
+
+    assert f"{today}-ac.md: ac-waived: AC-3 — measured in the next release" in r.stdout, r.stdout

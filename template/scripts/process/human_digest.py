@@ -13,7 +13,7 @@ Sections, in reading order:
      five plain-language sentences the spec template mandates.
   2. MERGED — archived plans of the last N days (slug, tier, issue), the
      pool the sampling audit draws from, with a deterministic weekly pick.
-  3. OPEN DEBTS — review-waived:/spec-waived: lines still standing; a
+  3. OPEN DEBTS — `<gate>-waived:` lines still standing; a
      degradation is a debt with an owner (journal-state-plans.md).
   4. FIX CLUSTERS — the rule-6-across-sessions advisory, inlined from
      process_kpis.py where the telemetry module is installed.
@@ -44,7 +44,8 @@ TIER = re.compile(r"^\s*(?:[-*+]\s+)?[*_]*tier[*_]*\s*:\s*[*_]*\s*(\d+)\b",
 ISSUE = re.compile(r"^\s*(?:[-*+]\s+)?[*_]*issue[*_]*\s*:\s*(\S+)",
                    re.IGNORECASE | re.MULTILINE)
 MARKER = re.compile(r"\[NEEDS CLARIFICATION[^\]]*\]")
-WAIVER = re.compile(r"^\s*(?:[-*+]\s+)?[*_]*(review-waived|spec-waived)"
+# any gate's waiver (`review-waived:`, `spec-waived:`, a local gate's `ac-waived:` …)
+WAIVER = re.compile(r"^\s*(?:[-*+]\s+)?[*_]*([a-z][a-z-]*-waived)"
                     r"[*_]*\s*:\s*(.+)$", re.IGNORECASE | re.MULTILINE)
 BRIEF_HEADING = re.compile(r"^#{1,6}\s+Owner brief\b.*$", re.IGNORECASE)
 
