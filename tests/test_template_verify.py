@@ -335,3 +335,20 @@ def test_owned_glob_keeps_even_identical_template_and_answers_as_project_delta(u
     assert '.copier-answers.yml' in proof['project_delta']
     assert 'docs/process/example.md' in proof['project_delta']
     assert not proof['identical']
+
+
+
+def test_release_notes_use_pinned_changes_with_the_templates_bold_version_format(update):
+    root, source, base, verifier = update
+    p = source / 'CHANGELOG.md'
+    p.write_text('**v1.2.0 — New behavior.**\n\nOwner must know this.\n\n' + p.read_text())
+    commit(source)
+    git(source, 'tag', 'v1.2.0')
+    p = root / '.copier-answers.yml'
+    p.write_text(p.read_text().replace('v1.1.0', 'v1.2.0'))
+    commit(root)
+    proof = verifier.verify(root, base)
+    assert not proof['errors'], proof
+    assert 'Owner must know this.' in proof['release_notes']
+    assert 'Changed behavior.' in proof['release_notes']
+    assert 'Initial release.' not in proof['release_notes']
