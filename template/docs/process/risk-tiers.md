@@ -27,7 +27,7 @@ A yes to any of these lifts the change to **Tier 2+ regardless of diff size** â€
 ## Template updates
 
 A pure template update uses computed provenance instead of another review of
-released template code. `template_update.py --verify --base <integration-base>`
+released template code. `uv run --script scripts/process/template_verify.py --base <integration-base>`
 re-renders both pinned releases with the recorded answers. It compares the
 old project files too: deleting a local duty during an update is project delta,
 even when the result is identical to the new release.
@@ -44,7 +44,7 @@ even when the result is identical to the new release.
   in `scripts/process/` are conservatively treated as migrations.
 
 The owner or steward acknowledges the release behavior notes with
-`template_update.py --verify --base <integration-base> --ack <owner>`; commit
+`uv run --script scripts/process/template_verify.py --base <integration-base> --ack <owner>`; commit
 the generated acknowledgment. This attests a decision, not file coverage.
 A missing render, changed source, mutable HEAD pin or mismatched file cannot
 use the exemption. `releases.md` gives the update sequence.

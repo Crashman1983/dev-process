@@ -6,7 +6,7 @@
 
 Prinzipien, Mechanik und der Weg in die Fläche
 
-Prozessvorlage dev-process v2.38.0 · erprobt in einem realen, produktiv genutzten Repository (Referenzprojekt)
+Prozessvorlage dev-process v2.43.1 · erprobt in einem realen, produktiv genutzten Repository (Referenzprojekt)
 
 Vorlage öffentlich auf GitHub: [github.com/Crashman1983/dev-process](https://github.com/Crashman1983/dev-process)
 
@@ -33,7 +33,7 @@ Der Prozess ist in vielen Iterationen im laufenden Betrieb entstanden und verbes
 
 1. **Die Regeln prüft ein Programm, niemand muss sie im Kopf behalten.** Fünfzehn automatische Prüfungen („Gates“) laufen vor jedem Merge; was nicht besteht, wird nicht gemergt.
 1. **Das Risiko bestimmt den Aufwand.** Vier Risikostufen – Tier 0 bis 3 – legen fest, ob eine Änderung direkt gemergt werden darf oder Plan, Widerlegungsprüfung (gezielte Fehlersuche) und unabhängige Prüfung braucht; bei Tier 3 wird auch jede Fix-Runde widerlegt.
-1. **Die Prüfung ist immer unabhängig.** Wer baut, nimmt nicht selbst ab; ab Tier 2 prüft eine unbeteiligte Instanz (eine eigene Agentensitzung), und ihr Urteil gilt nur für genau den geprüften Code.
+1. **Die Unabhängigkeit der Prüfung richtet sich nach dem Risiko.** Tier 0–1 nutzen einen Selbstcheck; ab Tier 2 prüft eine unbeteiligte Instanz (eine eigene Agentensitzung), und ihr Urteil gilt nur für genau den geprüften Code. Für nachgewiesene reine Vorlagen-Updates gilt der Herkunftsnachweis aus Kapitel 9.
 1. **Alles Wissen steht in Dateien.** Pläne, Entscheidungen und Journale liegen im Repository und werden jedem Agenten automatisch erneut vorgelegt, sobald sein Gedächtnis gekürzt wurde.
 1. **Der Mensch entscheidet, die Agenten arbeiten.** Ein Koordinator-Agent verteilt die Arbeit an Arbeiter-Agenten; der Mensch priorisiert, entscheidet, gibt Designs frei und prüft wöchentlich eine Stichprobe.
 
@@ -132,7 +132,7 @@ Der Owner arbeitet über die Oberfläche seiner Harness: auf GitHub etwa über I
 
 **Fragen.** Kann der Arbeiter eine Frage nicht aus Plan, Issue oder Regeln beantworten, trägt er sie mit Optionen und Empfehlung in den Plan ein und meldet „blockiert“ – nie als Frage im Chat. Der Koordinator entscheidet sie selbst; nur Produktgrundsätze und destruktive Schritte legt er dem Owner als Auswahl vor. Die Antwort wird als Entscheidung im Plan vermerkt, und der Arbeiter macht weiter.
 
-**Merge.** Freigegebene Branches werden in einer Merge Queue gesammelt, einmal gemeinsam durch Gates und Testsuite geführt und der Reihe nach gemergt. Einsteigen darf nur ein Branch, dessen Stand ein Review deckt. Ist der gemeinsame Lauf rot, läuft er ein zweites Mal; erst dann wird der verursachende Branch ermittelt, aus der Queue genommen und an seinen Arbeiter zurückgemeldet. Der Merge archiviert fertige Pläne und schließt ihre Issues.
+**Merge.** Freigegebene Branches werden in einer Merge Queue gesammelt, einmal gemeinsam durch Gates und Testsuite geführt und der Reihe nach gemergt. Einsteigen darf ein Tier-2+-Branch nur, wenn ein Review seinen Stand deckt oder er ein nachgewiesenes reines Vorlagen-Update mit Bestätigung des Owners ist (Kapitel 9). Ist der gemeinsame Lauf rot, läuft er ein zweites Mal; erst dann wird der verursachende Branch ermittelt, aus der Queue genommen und an seinen Arbeiter zurückgemeldet. Der Merge archiviert fertige Pläne und schließt ihre Issues.
 
 **Ausfall des Koordinators.** Nichts geht verloren: Der Zustand liegt in Git; Arbeiter halten an, wenn sie eine Entscheidung brauchen; ein neuer Koordinator hat den Stand in einer Minute eingelesen.
 
@@ -164,6 +164,8 @@ Die folgende Tabelle zeigt, wie sich die Bausteine abbilden ließen und was davo
 
 **Was mitwächst:** Jedes Repository erhält die Vorlage mit seinen eigenen Gates, seiner Modellpolitik und seiner Lagetabelle. Die Vorlage wird zentral versioniert und enthält organisationsweite Regeln wie Schichtenregeln oder die erlaubten Lizenzen; ein Update kommt als Pull Request in jedes Repository. Gates laufen zentral, etwa in GitHub Actions, und wachsen mit der Organisation. Arbeiter sind Sitzungen der Harness, zum Beispiel eine je Issue, und die Modellpolitik legt neben den Modellen auch fest, wie viele davon gleichzeitig laufen, mit welcher Priorität, und ob eine Phase – etwa die Prüfung – auf einem anderen Rechner oder in der Cloud läuft.
 
+**Vorlagen-Updates.** Seit v2.43.0 erzeugt die Verifikation beide fest referenzierten Releases mit den gespeicherten Projektantworten neu und vergleicht das Projekt mit beiden. Ein reines Update braucht grüne Gates und Projekttests sowie die Bestätigung der Release-Verhaltenshinweise durch Owner oder Steward; release-identische Dateien brauchen kein neues Review. Lokale Anpassungen, eigene Dateien, Hooks, Makefiles sowie bearbeitete oder gelöschte Tests bleiben Projektdelta und brauchen ein unabhängiges Tier-2-Review. Änderungen an Prozessskripten oder der Durchsetzungskonfiguration bleiben Tier 3. Scheitert der Herkunftsnachweis, gibt es keine Ausnahme. Projekterweiterungen haben eigene lokale Dateien für Gates, Modellpolitik und Review-Dimensionen. Einrichtung und genaue Update-Schritte stehen in [`BOOTSTRAP.md`](../BOOTSTRAP.md) und [`releases.md`](../template/docs/process/releases.md).
+
 **Was nicht von selbst mitwächst:** Jedes Repository braucht einen Owner, und jeder Vorgang braucht im Mittel ein bis zwei seiner Entscheidungen. Wie viele parallele Vorgänge ein Owner trägt, ist die eigentliche Kapazitätsgrenze – und heute nicht gemessen. Ebenso offen ist, wo der Koordinator in einer größeren Umgebung läuft und ob ein Koordinator mehrere Repositories führen kann.
 
 **Was sich für Entwickler ändert:** Sie übernehmen die Owner-Rolle eines Repositorys, prüfen Stichproben und schreiben Akzeptanzkriterien, Verträge und Entscheidungen. Rollenbild, Qualifizierung und Vertretung sind noch zu beschreiben (Kapitel 11).
@@ -181,6 +183,8 @@ Die folgende Tabelle zeigt, wie sich die Bausteine abbilden ließen und was davo
 | Anbieterbindung | Die Koordinationsschicht (Lagetabelle, Koordinator, Merge Train) ist bisher nur mit Claude Code erprobt. | Die Prozessdateien sind anbieterneutral; die Vorlage bringt Anpassungen für Copilot, Claude Code und AGENTS.md mit. |
 | Ein Mensch | Fällt der Owner aus, bleiben Entscheidungen aus. | Alles Wissen liegt in Dateien; eine Vertretung ist noch nicht geregelt. |
 | Junge Koordinationsschicht | Lagetabelle, Koordinator und Merge Train (die eigene Merge Queue des Referenzprojekts) sind neu und wurden in kurzer Folge oft überarbeitet. | Jede Änderung an Gate-, Zug- und Hook-Code wird vor dem Review und nach jeder Fix-Runde widerlegt; jeder Fund bekommt einen Test, der gegen die Vorfassung rot ist. |
+
+Die folgenden Zahlen des Referenzprojekts sind die historische Baseline aus dem Überblick zu v2.38.0, keine neue Messung für v2.43.0. Aktuelle Messungen zur Vorlagen-Wartung und ihre Grenzen stehen im [Wartungsbericht](maintenance-2026-10-02.md).
 
 | Maß (Referenzprojekt) | Wert | Einordnung |
 |---|---|---|
