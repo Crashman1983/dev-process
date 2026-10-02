@@ -126,15 +126,26 @@ def _data_args(data: dict[str, str]) -> list[str]:
     return [arg for key, value in data.items() for arg in ("--data", f"{key}={value}")]
 
 
-def _copier(*args: str) -> subprocess.CompletedProcess:
+def _copier(*args: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
     exe = shutil.which("copier")
     argv = [exe, *args] if exe else ["uvx", "copier", *args]
-    return subprocess.run(argv, capture_output=True, text=True, timeout=120)
+    return subprocess.run(argv, capture_output=True, text=True, timeout=120, env=env)
 
 
-def render(src: str, ref: str, data: dict[str, str], dst: Path) -> bool:
-    r = _copier("copy", "--trust", "--defaults", "-r", ref, *_data_args(data),
-                "--quiet", src, str(dst))
+def render(src: str, ref: str, data: dict[str, str], dst: Path, *, trusted: bool = True) -> bool:
+    # Explicit updates retain operator-approved tasks/extensions. Automatic
+    # provenance must neither run tasks nor inherit local Copier trust/defaults.
+    with tempfile.TemporaryDirectory(prefix="copier-settings-") as temp:
+        settings = Path(temp) / "settings.yml"
+        settings.write_text("{}\n", encoding="utf-8")
+        env = None
+        flags = ["--trust"] if trusted else ["--skip-tasks"]
+        if not trusted:
+            from process_git import git_environment
+            env = git_environment()
+            env["COPIER_SETTINGS_PATH"] = str(settings)
+        r = _copier("copy", *flags, "--defaults", "-r", ref, *_data_args(data),
+                    "--quiet", src, str(dst), env=env)
     if r.returncode != 0:
         print(f"template-update: render of {ref} failed:\n{r.stderr.strip()}",
               file=sys.stderr)

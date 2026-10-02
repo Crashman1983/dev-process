@@ -24,7 +24,12 @@ from pathlib import Path
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from process_git import git_environment  # noqa: E402
-from template_update import ANSWERS, OWNED_FILE, answers, is_owned, owned_patterns, render  # noqa: E402
+from template_update import ANSWERS, OWNED_FILE, answers, is_owned, owned_patterns, render as template_render  # noqa: E402
+
+
+def render(src: str, ref: str, data: dict[str, str], dst: Path) -> bool:
+    return template_render(src, ref, data, dst, trusted=False)
+
 
 ACK = '.process-work/template-update-ack.json'
 PIN = re.compile(r'(?:v?\d+\.\d+\.\d+(?:[-+][\w.-]+)?|[0-9a-f]{40})\Z')
@@ -178,7 +183,7 @@ def _verify(root: Path, base: str, tip: str, *, worktree: bool = False) -> dict:
                              {k: v for k, v in new_record.items() if k != '_commit'}
                              and not is_owned(rel, owned))
                 result['identical' if exact else 'project_delta'].append(rel)
-                if _enforcement(rel) and old_render != new_render:
+                if _enforcement(rel) and (old_render != new_render or actual_old != actual_new):
                     result['migration'] = True
             # Acknowledgment is attested, like reviewer identity; file coverage is computed.
             ack_raw = _file(root, ACK) if worktree else _entry(root, tip, ACK)

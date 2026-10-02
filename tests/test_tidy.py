@@ -377,3 +377,49 @@ def test_a_commit_only_in_the_worktrees_head_history_keeps_it(render, tmp_path):
 
     assert "only in this worktree's HEAD history" in (verdicts.get(str(dw)) or ""), verdicts
     assert verdicts.get(str(rb)) is None, verdicts
+
+
+def test_tidy_apply_rechecks_ignored_work_created_after_report(render, tmp_path):
+    import importlib.util
+    out, wts = _worktree_landscape(render, tmp_path)
+    d = _dispatch_of(out)
+    spec = importlib.util.spec_from_file_location('tidy_revalidation', out / 'scripts/process/tidy.py')
+    tidy = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(tidy)
+    _, items = tidy.report(out, 30, with_remote=False, sizes=False)
+    assert wts['clean'] in items['worktrees']
+    items['worktrees'] = [wts['clean']]
+    items['specs'] = []
+    items['old_archive'] = []
+    secret = wts['clean'] / '.env'
+    secret.write_text('KEEP_THIS_SECRET\n')
+    assert tidy.apply(out, items, 30) == 1
+    assert secret.read_text() == 'KEEP_THIS_SECRET\n'
+    assert d.worktree_entries(out)
+
+
+def test_removal_rechecks_live_session_after_initial_clearance(render, tmp_path):
+    import json
+    import os
+    out, wts = _worktree_landscape(render, tmp_path)
+    d = _dispatch_of(out)
+    entry = next(e for e in d.worktree_entries(out) if e['branch'] == 'clean')
+    assert d.worktree_keep_reason(out, entry, 'main', []) is None
+    (out / '.git/process-dispatch/clean.json').write_text(json.dumps({
+        'branch': 'clean', 'issue': 50, 'phase': 'execute', 'worktree': str(wts['clean']),
+        'pid': os.getpid(), 'pid_start': d._proc_start(os.getpid()),
+    }))
+    assert 'live' in d.remove_worktree(out, wts['clean'], 'main')
+    assert wts['clean'].is_dir()
+
+
+def test_removal_rechecks_branch_containment_in_supplied_base(render, tmp_path):
+    out, wts = _worktree_landscape(render, tmp_path)
+    d = _dispatch_of(out)
+    entry = next(e for e in d.worktree_entries(out) if e['branch'] == 'clean')
+    assert d.worktree_keep_reason(out, entry, 'main', []) is None
+    (wts['clean'] / 'new-work.txt').write_text('new branch work\n')
+    _git(wts['clean'], 'add', 'new-work.txt')
+    _git(wts['clean'], 'commit', '-qm', 'new work after clearance')
+    assert 'not contained' in d.remove_worktree(out, wts['clean'], 'main')
+    assert (wts['clean'] / 'new-work.txt').read_text() == 'new branch work\n'

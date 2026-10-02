@@ -352,3 +352,61 @@ def test_release_notes_use_pinned_changes_with_the_templates_bold_version_format
     assert 'Owner must know this.' in proof['release_notes']
     assert 'Changed behavior.' in proof['release_notes']
     assert 'Initial release.' not in proof['release_notes']
+
+
+@pytest.mark.parametrize('rel,worktree', [
+    ('scripts/process/local_gate.py', False),
+    ('.process-gates.yml', False),
+    ('scripts/process/local_helper.py', True),
+])
+def test_doc_release_with_project_enforcement_delta_requires_tier3(update, monkeypatch, rel, worktree):
+    root, _, base, verifier = update
+    write(root, rel, '# project enforcement change\n')
+    if not worktree:
+        commit(root)
+    proof = verifier.verify(root, base, worktree=worktree)
+    assert not proof['errors'], proof
+    assert rel in proof['project_delta'] and proof['migration'], proof
+    if not worktree:
+        hard, _ = check(root, monkeypatch)
+        assert any('tier 3 digest-bound REVIEW required' in h for h in hard), hard
+
+
+@pytest.mark.parametrize('trusted', [False, True])
+def test_automatic_render_skips_tasks_but_explicit_update_retains_operator_contract(update, tmp_path, trusted):
+    import yaml
+    _, source, _, verifier = update
+    marker = tmp_path / 'task-ran'
+    config = yaml.safe_load((source / 'copier.yml').read_text())
+    config['_tasks'] = [[sys.executable, '-c', f'from pathlib import Path; Path({str(marker)!r}).write_text("ran")']]
+    write(source, 'copier.yml', yaml.safe_dump(config))
+    sha = commit(source)
+    target = tmp_path / 'task-render'
+    if trusted:
+        assert verifier.template_render(str(source), sha, {}, target)
+    else:
+        assert verifier.render(str(source), sha, {}, target)
+    assert marker.exists() is trusted
+
+
+def test_automatic_render_ignores_local_settings_trust_for_extensions(update, tmp_path, monkeypatch):
+    import yaml
+    _, source, _, verifier = update
+    marker = tmp_path / 'extension-imported'
+    extension = tmp_path / 'probe_extension.py'
+    extension.write_text('from pathlib import Path\nfrom jinja2.ext import Extension\n'
+                         f'Path({str(marker)!r}).write_text("imported")\n'
+                         'class Probe(Extension):\n    pass\n')
+    config = yaml.safe_load((source / 'copier.yml').read_text())
+    config['_jinja_extensions'] = ['probe_extension.Probe']
+    write(source, 'copier.yml', yaml.safe_dump(config))
+    sha = commit(source)
+    settings = write(tmp_path, 'settings.yml', yaml.safe_dump({'trust': [str(source)]}))
+    monkeypatch.setenv('COPIER_SETTINGS_PATH', str(settings))
+    monkeypatch.setenv('PYTHONPATH', str(tmp_path))
+    assert not verifier.render(str(source), sha, {}, tmp_path / 'automatic')
+    assert not marker.exists()
+    # Prove the settings and extension form a real executable fixture.
+    operator = load('template_update')
+    assert operator.render(str(source), sha, {}, tmp_path / 'explicit')
+    assert marker.exists()

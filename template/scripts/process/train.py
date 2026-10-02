@@ -1208,7 +1208,7 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
                 print(f"train: worktree {wt['path']} of {b} kept — {why}")
             else:
                 try:
-                    failed = _dispatch.remove_worktree(root, wt["path"])
+                    failed = _dispatch.remove_worktree(root, wt["path"], local)
                 except Exception as exc:  # noqa: BLE001 — a note, never a train failure
                     failed = str(exc)
                 print(f"train: worktree {wt['path']} of {b} " + (f"not removed — {failed}" if failed else "removed"))

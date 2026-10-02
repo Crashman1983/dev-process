@@ -121,7 +121,11 @@ the test lanes are free where the project has a lane script (see `tower.md`, lan
    dispatch session or a lock, or its branch has no commits of its own —
    the train names each one it kept and why,
    and a failed removal is a note, never a failed train; `dispatch.py`
-   owns that verdict, `tidy.py` asks the same. Merged branches are deleted (`--keep-branches`
+   owns that verdict, `tidy.py` asks the same. Immediately before removal,
+   dispatch rechecks the full keep policy against the caller's integration
+   base, with fresh worktree and session records. External writes during
+   Git's deletion remain a non-atomic boundary; stop external writers before
+   cleanup when that matters. Merged branches are deleted (`--keep-branches`
    keeps them; a branch checked out elsewhere is kept, locally and on
    origin, and said so); every merged worker gets a `done` report;
    `--deploy` runs once. A failed deploy leaves the merge standing and
