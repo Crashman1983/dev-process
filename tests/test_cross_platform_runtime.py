@@ -128,7 +128,7 @@ def test_release_notes_come_from_the_changelog_entry_of_the_tag(tmp_path):
     import sys
     root = Path(__file__).parents[1]
     log = tmp_path / "CHANGELOG.md"
-    log.write_text("# Changelog\n\n**v1.2.0 — neu.** Text eins.\n- Punkt\n\n**v1.1.0 — alt.** Alt.\n")
+    log.write_text("# Changelog\n\n**v1.2.0 — neu.** Text eins.\n- Punkt\n\n**v1.1.0 — alt.** Alt.\n", encoding="utf-8")
     tool = [sys.executable, str(root / "tools/release_notes.py")]
     r = subprocess.run([*tool, "v1.2.0", str(log)], capture_output=True, text=True)
     assert r.returncode == 0 and r.stdout.splitlines()[0] == "neu" and "Punkt" in r.stdout and "Alt" not in r.stdout
