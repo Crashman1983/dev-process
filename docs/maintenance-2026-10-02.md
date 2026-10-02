@@ -33,8 +33,10 @@ Datei bleibt beim selben Worker. Render-Caches bleiben pro Worker isoliert.
   keine statistische Langzeitmessung.
 - Zwei Worker: **1.389 bestanden, 183,34 Sekunden** (rund 43 % weniger
   Laufzeit als seriell). Anschließend kam ein zusätzlicher Ownership-Regressionstest
-  hinzu; die abschließende Suite besteht mit **1.390 Tests in 100,45 Sekunden**
+  hinzu; die Vollsuite danach besteht mit **1.390 Tests in 100,45 Sekunden**
   bei vier Workern.
+- Anschließender Changelog-Format-Fix: **28 Verifikations-/Update-Regressionen
+  bestanden**; die aktuelle Testsammlung umfasst 1.391 Fälle.
 - CI verwendet zwei Worker. Der portable Linux/macOS/Windows-Smoke bleibt
   seriell; für dessen kleine Testmenge lohnt sich der zusätzliche Startaufwand nicht.
 - Die frühen parallelen Läufe zeigten Cache-Dateien aus einem CLI-Import und
@@ -82,6 +84,8 @@ innerhalb eines Aufrufs zwischengespeichert.
 Ein reines, bestätigtes Update braucht Gates und Projekttests, keinen REVIEW.
 Projektdelta braucht ein frisches, digestgebundenes Tier-2-Review; Änderungen
 an Gate-Skripten, Helfern oder Konfiguration bleiben konservativ Tier 3.
+Die Verhaltenshinweise sind der berechnete Changelog-Diff der beiden Release-SHAs;
+das funktioniert auch mit den fett gesetzten Versionsabschnitten dieses Templates.
 Der Owner/Steward bestätigt die ausgegebenen Release-Verhaltenshinweise mit
 einem an Baseline und Release-SHA gebundenen Acknowledgment. Diese Bestätigung
 ist eine attestierte Entscheidung; Dateiprovenienz wird weiterhin berechnet.

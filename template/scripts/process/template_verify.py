@@ -195,16 +195,12 @@ def _verify(root: Path, base: str, tip: str, *, worktree: bool = False) -> dict:
                                env=git_environment())
             if r.returncode:
                 raise ValueError('cannot read the release notes')
-            changelog = _entry(notes, new_sha, 'CHANGELOG.md')
-            if changelog:
-                text = changelog[1].decode('utf-8')
-                # Include entries from the new release down to the old pin's tag.
-                start = re.search(r'^## \[?' + re.escape(new_ref.removeprefix('v')) + r'\b',
-                                  text, re.M)
-                stop = re.search(r'^## \[?' + re.escape(old_ref.removeprefix('v')) + r'\b',
-                                 text, re.M)
-                result['release_notes'] = text[start.start() if start else 0:
-                                                stop.start() if stop else len(text)]
+            # Compare the actual pinned changelog blobs. This also handles this
+            # template's bold version entries and chronological/mixed ordering,
+            # and never sends an entire historical changelog into the review.
+            result['release_notes'] = git(
+                notes, 'diff', '--no-ext-diff', '--no-textconv', '--no-color',
+                '--unified=0', old_sha, new_sha, '--', 'CHANGELOG.md').decode('utf-8')
     except (ValueError, OSError, subprocess.TimeoutExpired) as exc:
         result['errors'].append(str(exc))
         result['identical'] = []  # any failure withdraws every exemption
