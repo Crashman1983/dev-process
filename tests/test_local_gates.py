@@ -118,3 +118,16 @@ def test_without_a_local_file_nothing_changes(render, tmp_path):
     r = _run(out)
 
     assert r.returncode == 0 and "gates.local.json" not in r.stdout + r.stderr, r.stdout + r.stderr
+
+
+def test_child_output_is_utf8_even_when_the_runners_locale_is_cp1252(render, tmp_path):
+    import os
+    out = _project(render, tmp_path, {'unicode': {'module': None,
+                                                 'command': ['scripts/unicode_gate.py']}})
+    _gate(out, 'scripts/unicode_gate.py', 0, 'unicode: €')
+    result = subprocess.run(
+        [sys.executable, str(out / 'scripts/process/gate_runner.py')], cwd=out,
+        capture_output=True, text=True, encoding='cp1252',
+        env={**os.environ, 'PYTHONIOENCODING': 'cp1252'})
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert 'unicode: €' in result.stdout
