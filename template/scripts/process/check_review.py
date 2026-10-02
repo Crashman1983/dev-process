@@ -63,6 +63,10 @@ from collections.abc import Iterator
 from typing import NamedTuple
 from pathlib import Path
 
+sys.dont_write_bytecode = True
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from process_git import git_environment  # noqa: E402
+
 JOURNAL_DIR = ".process-work/journal"
 PLANS_ACTIVE = ".process-work/plans"
 PLANS_ARCHIVE = ".process-work/plans/archive"
@@ -454,6 +458,11 @@ def parse_review_lines(text: str) -> tuple[list[tuple[int, dict]], list[tuple[in
         shape = set(fields)
         artifact = shape & ARTIFACT_FIELDS
         expected = REQUIRED | (ARTIFACT_FIELDS if artifact else set())
+        if "mode" in shape and artifact:
+            expected |= {"mode"}
+        if "mode" in shape and fields["mode"] not in ("full", "delta"):
+            errors.append((i, "mode must be full or delta"))
+            continue
         if shape != expected:
             missing = expected - shape
             extra = shape - expected
@@ -487,6 +496,9 @@ def parse_review_lines(text: str) -> tuple[list[tuple[int, dict]], list[tuple[in
         # `>= tier` — over-declaring must be malformed, not a bypass
         if not 0 <= int(fields["tier"]) <= 3:
             errors.append((i, f"tier {fields['tier']} outside the 0-3 scale"))
+            continue
+        if fields.get("mode") == "delta" and int(fields["tier"]) > 2:
+            errors.append((i, "Tier 3 requires a full diff, never mode=delta"))
             continue
         if fields["verdict"] not in VERDICTS:
             errors.append((i, f"verdict {fields['verdict']!r} not in {sorted(VERDICTS)}"))
@@ -530,6 +542,7 @@ def _git_bytes(root: Path, *args: str) -> bytes | None:
             ["git", "-C", str(root), *args],
             capture_output=True,
             timeout=60,
+            env=git_environment(),
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
@@ -571,14 +584,66 @@ CANONICAL_DIFF = (
 )
 
 
-def artifact_diff(root: Path, base: str, head: str) -> bytes | None:
-    """The exact bytes the digest is computed from: the canonical three-dot
-    diff `base...head` (what the branch adds over the merge base)."""
+def delta_commands(root: Path, base: str, head: str, *, binary: bool = True,
+                   names: bool = False) -> list[tuple[str, ...]] | None:
+    """Own first-parent commits plus merge resolutions, never the imported side."""
+    ancestors = _git_bytes(root, "rev-list", "--first-parent", head)
+    if ancestors is None or base.encode() not in ancestors.splitlines():
+        return None
+    commits = _git_bytes(root, "rev-list", "--first-parent", "--reverse", f"{base}..{head}")
+    if commits is None:
+        return None
+    flags = [a for a in CANONICAL_DIFF if binary or a not in ("--binary", "--full-index")]
+    index = flags.index("diff")
+    config, options = flags[:index], flags[index + 1:]
+    if names:
+        options = ["--name-status", "-z", "--no-renames", "--no-ext-diff", "--no-textconv"]
+    commands = []
+    for commit in commits.decode().splitlines():
+        parents = _git_bytes(root, "rev-list", "--parents", "-n", "1", commit)
+        if parents is None:
+            return None
+        parents = parents.decode().split()[1:]
+        if len(parents) == 1:
+            commands.append(tuple([*config, "diff", *options, parents[0], commit]))
+        elif len(parents) == 2:
+            # Only integration-side changes may be omitted. A feature-side
+            # merge could otherwise hide entirely unreviewed implementation.
+            if not any(_git_bytes(root, "merge-base", "--is-ancestor", parents[1], ref) is not None
+                       for ref in integration_refs(root)):
+                return None
+            commands.append(tuple([*config, "-c", "merge.conflictStyle=merge", "show", "--format=",
+                                   "--remerge-diff", *options, commit]))
+        else:
+            return None  # octopus/rewrite shapes need a full review
+    return commands
+
+
+def delta_diff(root: Path, base: str, head: str, *, binary: bool = True,
+               names: bool = False) -> bytes | None:
+    commands = delta_commands(root, base, head, binary=binary, names=names)
+    if commands is None:
+        return None
+    parts = []
+    for command in commands:
+        out = _git_bytes(root, *command)
+        if out is None:
+            return None
+        parts.append(out)
+    return b"".join(parts)
+
+
+def artifact_diff(root: Path, base: str, head: str, *, mode: str = "full") -> bytes | None:
+    if mode == "delta":
+        out = delta_diff(root, base, head)
+        return b"REVIEW_DIFF delta-v1\n" + out if out is not None else None
+    if mode != "full":
+        return None
     return _git_bytes(root, *CANONICAL_DIFF, f"{base}...{head}")
 
 
-def artifact_digest(root: Path, base: str, head: str) -> str | None:
-    diff = artifact_diff(root, base, head)
+def artifact_digest(root: Path, base: str, head: str, *, mode: str = "full") -> str | None:
+    diff = artifact_diff(root, base, head, mode=mode)
     return hashlib.sha256(diff).hexdigest() if diff is not None else None
 
 
@@ -628,7 +693,7 @@ def _integrity_violations(rel: str, root: Path,
                         f"rebase-merge + branch delete); verified at merge "
                         f"time or not at all")
             continue
-        actual = artifact_digest(root, f["base"], f["head"])
+        actual = artifact_digest(root, f["base"], f["head"], mode=f.get("mode", "full"))
         if actual is None:
             shallow = (_git_bytes(root, "rev-parse", "--is-shallow-repository") or b"").strip() == b"true"
             if shallow:
@@ -639,7 +704,8 @@ def _integrity_violations(rel: str, root: Path,
             else:
                 hard.append(f"{rel}:{lineno}: review artifact diff could not be computed")
             continue
-        if f["diff"] == actual or f["diff"] in _legacy_digests(root, f["base"], f["head"]):
+        if f["diff"] == actual or (f.get("mode", "full") == "full"
+                                  and f["diff"] in _legacy_digests(root, f["base"], f["head"])):
             continue
         # neither the canonical nor any legacy formula produces this value:
         # no byte stream of this diff hashes to it. Observed downstream: 15
@@ -689,7 +755,7 @@ def _load_integrity_ledger(path: Path | None) -> dict[str, str]:
     out: dict[str, str] = {}
     for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
         key, sep, verdict = line.partition("\t")
-        if sep and key.count(" ") == 2:
+        if sep and key.count(" ") == 3 and key.rsplit(" ", 1)[-1] in ("full", "delta"):
             out[key] = verdict
     return out
 
@@ -735,7 +801,7 @@ def _integrity_scoped(rel: str, root: Path, records: list[tuple[int, dict]], *,
     soft: list[str] = []
     reused = 0
     for ln, f in bound:
-        key = f"{f['base']} {f['head']} {f['diff']}"
+        key = f"{f['base']} {f['head']} {f['diff']} {f.get('mode', 'full')}"
         cached = ledger.get(key)
         if cached is not None and cached.startswith("missing:"):
             checked_at = float(cached.split(":", 2)[1] or 0)
@@ -764,7 +830,7 @@ def _integrity_scoped(rel: str, root: Path, records: list[tuple[int, dict]], *,
 def _remember(rel: str, root: Path, bound: list[tuple[int, dict]], ledger: dict[str, str]) -> None:
     """Store the recomputed verdict of every bound record (used by --full)."""
     for ln, f in bound:
-        key = f"{f['base']} {f['head']} {f['diff']}"
+        key = f"{f['base']} {f['head']} {f['diff']} {f.get('mode', 'full')}"
         h, s = _integrity_violations(rel, root, [(ln, f)])
         prefix = f"{rel}:{ln}: "
         if h:
@@ -794,8 +860,27 @@ def _cleared(passes: list[dict], ids: set[str], tier: int) -> bool:
 
 
 # --- push anchoring: what THIS push carries ---------------------------------
-INTEGRATION_REFS = ("origin/main", "origin/master", "main", "master")
-INTEGRATION_TARGET_REFS = ("refs/heads/main", "refs/heads/master")
+INTEGRATION_NAMES = ("main", "master")
+INTEGRATION_REFS = tuple(f"origin/{name}" for name in INTEGRATION_NAMES) + INTEGRATION_NAMES
+INTEGRATION_TARGET_REFS = tuple(f"refs/heads/{name}" for name in INTEGRATION_NAMES)
+
+
+def _remote_defaults(root: Path) -> list[str]:
+    heads = (_git_bytes(root, "for-each-ref", "--format=%(symref)", "refs/remotes") or b"").decode().splitlines()
+    return [ref.removeprefix("refs/remotes/") for ref in heads if ref.startswith("refs/remotes/")]
+
+
+def integration_refs(root: Path) -> tuple[str, ...]:
+    """Configured remote default branches first, with the legacy names as fallbacks."""
+    defaults = _remote_defaults(root)
+    names = [ref.split("/", 1)[1] for ref in defaults if "/" in ref]
+    return tuple(dict.fromkeys([*defaults, *names, *INTEGRATION_REFS]))
+
+
+def integration_targets(root: Path) -> tuple[str, ...]:
+    names = [ref.split("/", 1)[1] for ref in _remote_defaults(root) if "/" in ref]
+    return tuple(dict.fromkeys(f"refs/heads/{name}" for name in [*names, *INTEGRATION_NAMES]))
+
 # the remote refs a push lands on. A hook exports PROCESS_PUSH_TARGETS from
 # what git hands it on stdin (`<local_ref> <local_sha> <remote_ref>
 # <remote_sha>`); the pre-commit framework sets PRE_COMMIT_REMOTE_BRANCH for
@@ -827,7 +912,7 @@ def push_targets(env: dict[str, str], *sources: list[str]) -> list[str]:
     return seen
 
 
-def integration_push(env: dict[str, str] | None = None) -> tuple[bool, str]:
+def integration_push(env: dict[str, str] | None = None, root: Path | None = None) -> tuple[bool, str]:
     """(is this push a merge?, why not) — the switch between hard and note.
 
     The push-anchored arms promise something that hangs on the MERGE, not on
@@ -846,37 +931,20 @@ def integration_push(env: dict[str, str] | None = None) -> tuple[bool, str]:
     if not targets:
         return False, (f"no push target known ({PUSH_TARGETS_ENV} unset) — hard "
                        f"only on a push to main/master")
-    if any(t in INTEGRATION_TARGET_REFS for t in targets):
+    if any(t in integration_targets(root or Path.cwd()) for t in targets):
         return True, ""
     return False, (f"push targets {' '.join(targets)}, no integration branch — "
                    f"the proof is due on the merge push")
 
 
 def merge_base(root: Path, tip: str = "HEAD", *, strict: bool = False) -> str | None:
-    """The commit the pushed range starts at, resolved offline. Tries the
-    integration branches in order, then falls back to `tip~1`. None means
-    "cannot tell", never "nothing to check": callers degrade to the
-    plan-anchored arms rather than reddening a clone without an integration
-    ref (a fresh shallow checkout, a differently named default branch).
+    """A proper integration ancestor of tip, resolved offline.
 
-    `strict` drops the `tip~1` rung: a one-commit range is a guess, and a
-    caller that must not lose a commit of the push (the standing-block arm)
-    refuses on None instead of reading a shortened range as "nothing
-    claimed". It also asks every remote's main/master, not only `origin`'s,
-    and skips a ref that already contains `tip`: that ref cannot be the state
-    before this push — a local main fast-forwarded onto the pushed commit
-    emptied the range, and a block rode through (downstream refutation, a
-    remote not named `origin`)."""
-    if strict:
-        return _strict_merge_base(root, tip)
-    for ref in INTEGRATION_REFS:
-        out = _git_bytes(root, "merge-base", tip, ref)
-        if out is not None and out.strip():
-            return out.decode(errors="replace").strip()
-    out = _git_bytes(root, "rev-parse", f"{tip}~1")
-    if out is not None and out.strip():
-        return out.decode(errors="replace").strip()
-    return None
+    Refuse a missing base or a ref already containing tip: neither bounds
+    the incoming range. Never guess tip~1. Both callers use this rule;
+    `strict` remains accepted for compatibility with existing integrations.
+    """
+    return _strict_merge_base(root, tip)
 
 
 def _strict_merge_base(root: Path, tip: str) -> str | None:
@@ -886,9 +954,10 @@ def _strict_merge_base(root: Path, tip: str) -> str | None:
     listed = _git_bytes(root, "for-each-ref", "--format=%(refname:short)",
                         "refs/remotes/*/main", "refs/remotes/*/master")
     others = [r for r in (listed or b"").decode(errors="replace").split()
-              if r not in INTEGRATION_REFS]
-    remotes = [r for r in INTEGRATION_REFS if "/" in r]
-    local = [r for r in INTEGRATION_REFS if "/" not in r]
+              if r not in integration_refs(root)]
+    remote_names = set(_remote_defaults(root)) | {f"origin/{n}" for n in INTEGRATION_NAMES}
+    remotes = [r for r in integration_refs(root) if r in remote_names]
+    local = [r for r in integration_refs(root) if r not in remote_names]
     for ref in [*remotes, *sorted(others), *local]:
         out = _git_bytes(root, "merge-base", tip, ref)
         if out is None or not out.strip() or out.strip() == tip_sha:
@@ -911,6 +980,8 @@ def push_base(root: Path, tip: str, remote_sha: str) -> str | None:
     tell; the caller refuses, and the way out is to fetch first — the train
     and `finish.py` do."""
     if not GIT_SHA.fullmatch(remote_sha) or not remote_sha.strip("0"):
+        return None
+    if _git_bytes(root, "merge-base", "--is-ancestor", remote_sha, tip) is None:
         return None
     out = _git_bytes(root, "merge-base", tip, remote_sha)
     return out.decode(errors="replace").strip() if out is not None and out.strip() else None
@@ -964,7 +1035,11 @@ def paths_in_flight(root: Path, tip: str = "HEAD", *, base: str | None = None,
     GitReadError instead)."""
     base = base or merge_base(root, tip)
     if base is None:
-        return set()
+        if _git_bytes(root, "rev-parse", "--verify", f"{tip}^{{commit}}") is not None:
+            if strict:
+                raise GitReadError("no proper integration base; fetch the remote default branch")
+            return None
+        return set()  # unborn repositories carry no pushed commits
     return _names(_git_read(root, "--no-optional-locks", "diff", "--no-ext-diff",
                             "--no-textconv", "--no-color", "--name-only", "-z",
                             f"{base}...{tip}", strict=strict))
@@ -1050,7 +1125,7 @@ def _blob_texts(root: Path, shas: list[str]) -> dict[str, str]:
     try:
         result = subprocess.run(["git", "-C", str(root), "cat-file", "--batch"],
                                 input="".join(f"{sha}\n" for sha in shas).encode(),
-                                capture_output=True, timeout=60, check=False)
+                                capture_output=True, timeout=60, check=False, env=git_environment())
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise GitReadError(f"git cat-file failed ({type(exc).__name__})") from exc
     if result.returncode != 0:
@@ -1182,7 +1257,7 @@ def _history_blocks(compared: RangeRecords) -> list[tuple[str, dict]]:
 
 
 def standing_block_findings(root: Path, tip: str = "HEAD", *, remote_sha: str | None = None,
-                            refuse_unreadable: bool = True) -> list[str]:
+                            refuse_unreadable: bool = True, allow_non_fast_forward: bool = False) -> list[str]:
     """The findings of a standing block: the latest verdict of a work the
     push of `tip` carries is `block`.
 
@@ -1228,9 +1303,13 @@ def standing_block_findings(root: Path, tip: str = "HEAD", *, remote_sha: str | 
                 f"later round with verdict=pass has to clear it before the merge"
                 for work, (loc, rec) in sorted(_blocks(at_tip).items())]
     if remote_sha is None:
-        base, bases = merge_base(root, tip, strict=True), INTEGRATION_REFS
+        base, bases = merge_base(root, tip, strict=True), integration_refs(root)
     else:
-        base, bases = push_base(root, tip, remote_sha), (f"the remote SHA {remote_sha or '(empty)'}",)
+        base = push_base(root, tip, remote_sha)
+        if base is None and allow_non_fast_forward:
+            common = _git_bytes(root, "merge-base", tip, remote_sha)
+            base = common.decode().strip() if common else None
+        bases = (f"the remote SHA {remote_sha or '(empty)'}",)
     if base is None:
         if remote_sha is None and not _blocks(at_tip):
             return []
@@ -1269,7 +1348,7 @@ def standing_block_findings(root: Path, tip: str = "HEAD", *, remote_sha: str | 
 BOOKKEEPING = ".process-work/"
 
 
-REMOTE_INTEGRATION_REFS = ("origin/main", "origin/master")
+REMOTE_INTEGRATION_REFS = tuple(ref for ref in INTEGRATION_REFS if "/" in ref)
 
 
 def _integration_ref(root: Path, tip: str = "HEAD") -> str | None:
@@ -1288,8 +1367,9 @@ def _integration_ref(root: Path, tip: str = "HEAD") -> str | None:
         out = _git_bytes(root, "rev-parse", "--verify", "-q", f"{ref}^{{commit}}")
         return bool(out and out.strip()) and \
             _git_bytes(root, "merge-base", "--is-ancestor", tip, ref) is None
-    remote = next((r for r in REMOTE_INTEGRATION_REFS if usable(r)), None)
-    for local in (r for r in INTEGRATION_REFS if r not in REMOTE_INTEGRATION_REFS and usable(r)):
+    remote_names = set(_remote_defaults(root)) | {f"origin/{n}" for n in INTEGRATION_NAMES}
+    remote = next((r for r in integration_refs(root) if r in remote_names and usable(r)), None)
+    for local in (r for r in integration_refs(root) if r not in remote_names and usable(r)):
         if remote is None:
             return local
         if _git_bytes(root, "merge-base", "--is-ancestor", remote, local) is None:
@@ -1496,10 +1576,11 @@ def _history(root: Path, head: str, tip: str = "HEAD",
 
 
 def _unreviewed_paths(root: Path, head: str, tip: str = "HEAD",
-                      bases: tuple[tuple[str, str], ...] = ()) -> set[str] | None:
+                      bases: tuple[tuple[str, str], ...] = (),
+                      reviewed: tuple[tuple[str, str], ...] = ()) -> set[str] | None:
     """Paths of code in `tip` that no review covers — None when git cannot
     tell (the merge train's boarding judges a branch by this)."""
-    h = _history(root, head, tip, bases=bases)
+    h = _history(root, head, tip, bases=bases, reviewed=reviewed)
     if h.git_error or h.shallow_missing or not h.in_history:
         return None  # not "nothing unreviewed": the review covers none of it
     return set(h.late | h.dropped).union(*(paths for _m, paths in h.fellow))
@@ -1530,7 +1611,7 @@ def _auto_merge(root: Path, ours: str, other: str) -> tuple[str, set[str]] | Non
     when git cannot tell (an old git without `merge-tree --write-tree`)."""
     try:
         r = subprocess.run(["git", "-C", str(root), "merge-tree", "--write-tree", "--allow-unrelated-histories", "--name-only", "-z",
-                            "--no-messages", ours, other], capture_output=True, timeout=60)
+                            "--no-messages", ours, other], capture_output=True, timeout=60, env=git_environment())
     except (OSError, subprocess.TimeoutExpired):
         return None
     if r.returncode not in (0, 1):
@@ -1747,13 +1828,14 @@ def _reviewed_heads(passes: list[dict], tier: int, known: set[str]) -> tuple[tup
     nobody's review (refutation: both whitewashed unreviewed code)."""
     return tuple(dict.fromkeys((r["base"], r["head"]) for r in passes
                                if r.get("head") and r.get("base") and int(r["tier"]) >= min(tier, 3)
-                               and r["work"] in known and not r["work"].endswith("-plan")))
+                               and r["work"] in known and not r["work"].endswith("-plan")
+                               and r.get("mode", "full") == "full"))
 
 
-def _known_work(root: Path) -> set[str]:
+def _known_work(root: Path, *, ref: str | None = None) -> set[str]:
     """Every work id any plan names — active, archived or Spec Kit."""
     known: set[str] = set()
-    for rel, text in record_texts(root, PLAN_KINDS + ("plan-archive",)) or []:
+    for rel, text in record_texts(root, PLAN_KINDS + ("plan-archive",), ref=ref) or []:
         stem = Path(rel).parent.name if rel.startswith(SPECS_DIR + "/") else Path(rel).stem
         known |= _plan_work_ids(stem, _unfenced(text), include_dedated=True)  # an example is no id
     return known
@@ -1813,7 +1895,7 @@ def stale_review(root: Path, passes: list[dict], ids: set[str], tier: int,
 def issues_on_integration(root: Path, limit: int = 2000) -> set[int]:
     """Issue numbers claimed (closing trailer or `(#N)` subject) by commits
     already on the integration branch — the record of what was merged."""
-    for ref in INTEGRATION_REFS:
+    for ref in integration_refs(root):
         out = _git_bytes(root, "log", "--format=%B%x00", f"-{limit}", ref)
         if out is not None:
             refs: set[int] = set()
@@ -1891,10 +1973,9 @@ def speckit_unreviewed(root: Path, passes: list[dict]) -> list[tuple[str, int, s
                                                     re.MULTILINE):
             continue  # in flight, or no checkbox grammar at all
         ptext = _unfenced(plan.read_text(encoding="utf-8", errors="replace"))
-        m = TIER_DECL.search(ptext)
-        if not m or int(m.group(1)) < 2 or WAIVED.search(ptext):
+        tier = plan_tier(ptext)
+        if tier is None or tier < 2 or review_waived(ptext):
             continue
-        tier = int(m.group(1))
         # the REVIEW grammar caps tier at 3 — a plan on an extended downstream
         # scale (tier 4/5) clears at the gated ceiling, not an unmeetable bar
         req = min(tier, 3)
@@ -1910,7 +1991,7 @@ def check(root: Path) -> tuple[list[str], list[str]]:
 
     # the push-anchored arms below are the merge's condition, not every
     # push's — see integration_push()
-    to_integration, not_a_merge = integration_push()
+    to_integration, not_a_merge = integration_push(root=root)
 
     def presence(finding: str) -> None:
         """A push-anchored presence finding: hard on the merge push, a
@@ -1993,16 +2074,15 @@ def check(root: Path) -> tuple[list[str], list[str]]:
                 soft.append(f"{PLANS_ARCHIVE}/{p.name}: 'review-binding:' is retired "
                             f"(lean pass) — a single attestation mode remains; "
                             f"digest binding is opt-in per REVIEW line")
-            m = TIER_DECL.search(text)
-            if not m:
+            tier = plan_tier(text)
+            if tier is None:
                 soft.append(f"{PLANS_ARCHIVE}/{p.name}: no 'tier:' declaration "
                             f"— review presence not enforced for this plan")
                 continue
-            tier = int(m.group(1))
             if tier < 2:
                 continue
             enforced_any = True
-            if WAIVED.search(text):
+            if review_waived(text):
                 soft += waiver_debt_notes(f"{PLANS_ARCHIVE}/{p.name}", text,
                                           WAIVED, "review-waived")
                 continue
@@ -2017,14 +2097,14 @@ def check(root: Path) -> tuple[list[str], list[str]]:
     # the speckit path's plans: the decisions ledger is a note there too
     for rel, plan in record_files(root, ("spec-plan",)):
         ptext = _unfenced(plan.read_text(encoding="utf-8", errors="replace"))
-        tm = TIER_DECL.search(ptext)
-        if not tm:
+        tier = plan_tier(ptext)
+        if tier is None:
             hard.append(f"{rel}: no 'tier: N' declaration — "
                         f"the review, speckit and issue gates all key on it; a "
                         f"plan without a tier is off by omission (add the line, "
                         f"`/plan` puts it there)")
             continue
-        if int(tm.group(1)) >= 2 and not DECISIONS_HEADING.search(ptext):
+        if tier >= 2 and not DECISIONS_HEADING.search(ptext):
             soft.append(f"{rel}: no '## Decisions' section "
                         f"— decisions made in dialogue have no home here and do "
                         f"not survive a compaction (journal-state-plans.md, Plans)")
@@ -2046,6 +2126,12 @@ def check(root: Path) -> tuple[list[str], list[str]]:
     active = [p for _rel, p in record_files(root, ("plan",))]
     in_flight = paths_in_flight(root)
     if in_flight is None:
+        review_required = any(
+            not rel.startswith(f"{PLANS_ACTIVE}/design-")
+            and (plan_tier(text) or 0) >= 2 and not review_waived(text)
+            for rel, text in record_texts(root, PLAN_KINDS) or [])
+        if merge_base(root) is None and review_required:
+            hard.append("no proper integration base — fetch origin/main (or the remote default branch); cannot bound the pushed range")
         soft.append(f"{IN_FLIGHT_UNKNOWN} — every active plan is treated as in flight")
         in_flight = {f"{PLANS_ACTIVE}/{p.name}" for p in active}
     merged_issues = issues_on_integration(root)
@@ -2062,12 +2148,12 @@ def check(root: Path) -> tuple[list[str], list[str]]:
                 text = _unfenced(p.read_text(encoding="utf-8", errors="replace"))
             except OSError:
                 continue  # unreadable active plan; the archive path diagnoses
-            m = TIER_DECL.search(text)
+            tier = plan_tier(text)
             # a plan that TALKS about its tier but never declares it sits outside
             # every tier-keyed gate (presence, spec-before-plan, issue-before-code)
             # — the third-party-plan-writer failure mode: the engine knows tiers,
             # not this grammar. Loud note, not hard: prose mentions are heuristic.
-            if not m:
+            if tier is None:
                 # Off by omission was the escape: every tier-keyed duty (review
                 # presence, spec-before-plan, issue-before-code) is silent for a
                 # plan that declares no tier — observed downstream, two plans
@@ -2081,7 +2167,6 @@ def check(root: Path) -> tuple[list[str], list[str]]:
                             f"plan without a tier is off by omission. Declare it "
                             f"(risk-tiers.md), or move a non-plan out of the plan home")
                 continue
-            tier = int(m.group(1))
             if tier < 2:
                 continue
             if tier == 2:
@@ -2097,7 +2182,7 @@ def check(root: Path) -> tuple[list[str], list[str]]:
             ids = _plan_work_ids(p.stem, text,
                                  include_dedated=active_dedated.get(DATE_PREFIX.sub("", p.stem), 0) == 1)
             tiered_plans.append((rel, text, tier, ids))
-            if WAIVED.search(text):
+            if review_waived(text):
                 soft += waiver_debt_notes(rel, text, WAIVED, "review-waived")
                 continue
             # after the fact: a Tier 3 plan still active while commits claiming
@@ -2147,7 +2232,7 @@ def check(root: Path) -> tuple[list[str], list[str]]:
             # a plan below Tier 2 or a waived one declares it: nothing to enforce
             continue
         for rel, text, tier, ids in matching:
-            if tier < 2 or WAIVED.search(text):
+            if tier < 2 or review_waived(text):
                 continue
             if not _cleared(passes, ids, tier):
                 presence(f"a commit in the pushed range claims #{number}, whose "
@@ -2212,7 +2297,7 @@ def _gitignored(root: Path, rels: list[str]) -> set[str]:
         result = subprocess.run(
             ["git", "-C", str(root), "check-ignore", "-z", "--stdin"],
             input="\0".join(rels).encode(errors="surrogateescape"),
-            capture_output=True, timeout=60)
+            capture_output=True, timeout=60, env=git_environment())
     except (OSError, subprocess.TimeoutExpired):
         return set()
     # 0 = some path ignored, 1 = none ignored, >1 = an error (fail open)
@@ -2242,10 +2327,10 @@ def _unhomed_plans(root: Path) -> list[str]:
             text = _unfenced(p.read_text(encoding="utf-8", errors="replace"))
         except OSError:
             continue
-        m = TIER_DECL.search(text)
-        if m and int(m.group(1)) >= 2:
+        tier = plan_tier(text)
+        if tier is not None and tier >= 2:
             hard.append(
-                f"{rel_s}: declares 'tier: {m.group(1)}' outside the plan home "
+                f"{rel_s}: declares 'tier: {tier}' outside the plan home "
                 f"— the review-presence gate only sees {PLANS_ACTIVE}; move the "
                 f"plan there (or the spec to specs/), or fence the line if it "
                 f"is a quotation")

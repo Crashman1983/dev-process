@@ -498,3 +498,18 @@ def test_nested_manifest_names_are_content(render, tmp_path):
     assert r.returncode == 1 and "content differs" in r.stdout
     _write(out, f"{ROUND}/boards/sub/manifest.sha256", "x")
     assert "not in the seal" in _seal(out, "--verify", ROUND).stdout
+
+
+def test_notes_only_cite_the_current_seal_or_explicit_history(render, tmp_path):
+    out = _render(render, tmp_path)
+    _entry(out)
+    _write(out, ROUND + '/board.svg', '<svg/>\n')
+    assert _seal(out, '--seal', ROUND, '--dep', CONTRACT).returncode == 0
+    current = (out / ROUND / 'manifest.sha256').read_text().split()[0]
+    _entry(out, reference=ROUND, notes='manifest.sha256 = ' + 'f' * 64)
+    r = _gate(out)
+    assert r.returncode == 1 and 'notes' in r.stdout and 'historical' in r.stdout
+    _entry(out, reference=ROUND, notes=f'Current manifest.sha256 = {current[:12]}')
+    assert _gate(out).returncode == 0
+    _entry(out, reference=ROUND, notes='historical manifest.sha256 = ' + 'f' * 64)
+    assert _gate(out).returncode == 0

@@ -35,7 +35,7 @@ REVIEWS_DIR = ".process-work/reviews"  # review/audit reports
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling import
 from check_review import _LEAD, _unfenced, parse_issue_ref  # noqa: E402
 from check_review import ISSUE_DECL as _PLAN_ISSUE  # noqa: E402
-from check_review import TIER_DECL as _PLAN_TIER  # noqa: E402
+from check_review import plan_tier as _plan_tier  # noqa: E402
 
 _PLAN_WAIVED = re.compile(_LEAD + r"issue-waived[*_]*\s*:\s*\S", re.IGNORECASE | re.MULTILINE)
 
@@ -95,15 +95,15 @@ def _check_plans(root: Path) -> tuple[list[str], list[str]]:
         except OSError as exc:  # broken symlink, directory named *.md, …
             hard.append(f"{PLANS_DIR}/{p.name}: could not read: {exc}")
             continue
-        m = _PLAN_TIER.search(text)
-        if not m or int(m.group(1)) < 2:
+        tier = _plan_tier(text)
+        if tier is None or tier < 2:
             continue
         rel = f"{PLANS_DIR}/{p.name}"
         if _PLAN_WAIVED.search(text):
             continue
         im = _PLAN_ISSUE.search(text)
         if not im:
-            hard.append(f"{rel}: tier {int(m.group(1))} plan has no 'issue:' link "
+            hard.append(f"{rel}: tier {tier} plan has no 'issue:' link "
                         f"(issue-before-code) and no 'issue-waived:' — track it before coding")
             continue
         if parse_issue_ref(im.group(1)) is None:

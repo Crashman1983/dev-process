@@ -23,7 +23,7 @@ def _git(out: Path, *args, **kwargs):
 def _artifact(text: str) -> dict[str, str]:
     match = re.search(
         r"^REVIEW_ARTIFACT base=(?P<base>[0-9a-f]{40,64}) "
-        r"head=(?P<head>[0-9a-f]{40,64}) diff=(?P<diff>[0-9a-f]{64})$",
+        r"head=(?P<head>[0-9a-f]{40,64}) diff=(?P<diff>[0-9a-f]{64})(?: mode=delta)?$",
         text,
         re.MULTILINE,
     )
@@ -340,14 +340,13 @@ def test_delta_bundle_carries_findings_and_exact_delta_artifact(render, tmp_path
     _git(out, "commit", "-q", "-m", "fix: widget", check=True)
     text = _run(out, "--base", "main", "--since", previous).stdout
     artifact = _artifact(text)
-    # one formula: the gate's canonical three-dot diff (`since` is an
-    # ancestor of HEAD, so it carries exactly the delta)
+    # The digest binds the gate's reduced delta and its mode.
     import importlib.util
     spec = importlib.util.spec_from_file_location("check_review", out / "scripts/process/check_review.py")
     gate = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(gate)
     assert artifact["base"] == previous
-    assert artifact["diff"] == gate.artifact_digest(out, previous, "HEAD")
+    assert artifact["diff"] == gate.artifact_digest(out, previous, "HEAD", mode="delta")
     findings = text.split("## Findings from the previous round", 1)[1].split("## Diff under review", 1)[0]
     assert "FINDING prior finding" in findings
     assert "stranger" not in findings  # the reports are in the diff, not in the findings

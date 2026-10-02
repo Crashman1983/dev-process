@@ -57,8 +57,10 @@ from pathlib import Path
 sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling import
+from process_git import git_environment  # noqa: E402
 from check_review import (  # noqa: E402  (one owner for grammar, digest, record homes)
     JOURNAL_DIR,
+    integration_targets,
     PLANS_ARCHIVE,
     _plan_work_ids,
     branch_issue,
@@ -85,16 +87,13 @@ ROOT_CAUSE = re.compile(
     re.MULTILINE)
 
 ARTIFACT_LINE = re.compile(
-    r"^REVIEW_ARTIFACT\s+base=(?P<base>\S+)\s+head=(?P<head>\S+)\s+diff=(?P<diff>\S+)\s*$",
+    r"^REVIEW_ARTIFACT\s+base=(?P<base>\S+)\s+head=(?P<head>\S+)\s+diff=(?P<diff>\S+)(?:\s+mode=(?P<mode>full|delta))?\s*$",
     re.MULTILINE)
 
 
 def _git(root: Path, *args: str) -> str | None:
-    r = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True)
+    r = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, env=git_environment())
     return r.stdout.strip() if r.returncode == 0 else None
-
-
-INTEGRATION_BRANCHES = ("main", "master")
 
 
 def _journal_target(root: Path, journal_dir: Path) -> Path:
@@ -111,7 +110,7 @@ def _journal_target(root: Path, journal_dir: Path) -> Path:
     if issue:
         return journal_dir / f"issue-{issue}" / f"{today}.md"
     slug = branch.replace("/", "-")
-    if slug and slug not in INTEGRATION_BRANCHES:
+    if slug and f"refs/heads/{branch}" not in integration_targets(root):
         return journal_dir / slug / f"{today}.md"
     return journal_dir / f"{today}.md"
 
@@ -217,6 +216,7 @@ def build_line(args, root: Path) -> tuple[str, list[str]]:
               f"verdict={args.verdict}", f"round={args.round_}"]
     base = head = None
     bundle_digest = None
+    mode = "full"
     if args.bundle:
         text = Path(args.bundle).read_text(encoding="utf-8", errors="replace")
         m = ARTIFACT_LINE.search(text)
@@ -224,12 +224,13 @@ def build_line(args, root: Path) -> tuple[str, list[str]]:
             problems.append(f"no REVIEW_ARTIFACT line in {args.bundle}")
         else:
             base, head, bundle_digest = m.group("base"), m.group("head"), m.group("diff")
+            mode = m.group("mode") or "full"
     if args.base or args.head:
         if not (args.base and args.head):
             problems.append("--base and --head go together")
         base, head = args.base, args.head
     if base and head and not problems:
-        digest = artifact_digest(root, base, head)
+        digest = artifact_digest(root, base, head, mode=mode)
         if digest is None:
             problems.append(f"cannot compute the diff {base[:9]}...{head[:9]} in this "
                             f"clone — the commits must exist here")
@@ -240,6 +241,8 @@ def build_line(args, root: Path) -> tuple[str, list[str]]:
                                 f"the bundle is stale or its line was edited; rebuild "
                                 f"the bundle and review again")
             fields += [f"base={base}", f"head={head}", f"diff={digest}"]
+            if mode == "delta":
+                fields.append("mode=delta")
     line = "REVIEW " + " ".join(fields)
     records, errors = parse_review_lines(line)
     for _ln, msg in errors:
@@ -273,7 +276,10 @@ def main() -> int:
     ap.add_argument("root", nargs="?", default=str(ROOT))
     args = ap.parse_args()
     root = Path(args.root).resolve()
-    journal_dir = Path(args.journal_dir) if args.journal_dir else root / JOURNAL_DIR
+    journal_dir = Path(args.journal_dir) if args.journal_dir else Path(JOURNAL_DIR)
+    if not journal_dir.is_absolute():
+        journal_dir = root / journal_dir
+    journal_dir = journal_dir.resolve()
     if args.plan_review:
         # always: a plan whose own id ends in `-plan` would otherwise have its
         # plan review clear its code (refutation)
@@ -340,7 +346,7 @@ def main() -> int:
 
 
 def _git_ok(root: Path, *args: str) -> bool:
-    r = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True)
+    r = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, env=git_environment())
     if r.returncode != 0:
         print(f"attest: git {' '.join(args)} failed: {r.stderr.strip()} — the line is "
               f"written; finish the step by hand", file=sys.stderr)

@@ -130,7 +130,7 @@ def test_an_uncomputable_digest_in_a_shallow_clone_is_a_note(render, tmp_path, m
     out, base, head = _repo(render, tmp_path)
     gate = _load_gate(out)
     record = [(1, {"base": base, "head": head, "diff": "sha256:" + "0" * 64})]
-    monkeypatch.setattr(gate, "artifact_digest", lambda *a: None)
+    monkeypatch.setattr(gate, "artifact_digest", lambda *a, **kw: None)
     hard, soft = gate._integrity_violations("j.md", out, record)
     assert hard and "could not be computed" in hard[0]
     real = gate._git_bytes

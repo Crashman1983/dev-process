@@ -20,13 +20,15 @@ import subprocess
 import sys
 from pathlib import Path
 
+sys.dont_write_bytecode = True
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from check_review import plan_tier  # noqa: E402
+
 PLANS = ".process-work/plans"
 STATE = ".process-work/state"
 INBOX = ".process-work/inbox.md"
 SPECS = "specs"
 
-TIER = re.compile(r"^\s*(?:[-*+]\s+)?[*_]*tier[*_]*\s*:\s*[*_]*\s*(\d+)\b",
-                  re.IGNORECASE | re.MULTILINE)
 ISSUE = re.compile(r"^\s*(?:[-*+]\s+)?issue\s*:\s*(\S+)", re.IGNORECASE | re.MULTILINE)
 UNCHECKED = re.compile(r"^\s*- \[ \] (.+)$", re.MULTILINE)
 CHECKED = re.compile(r"^\s*- \[[xX]\] ", re.MULTILINE)
@@ -60,9 +62,9 @@ def _read(p: Path) -> str:
 
 def _plan_info(p: Path) -> dict:
     text = _read(p)
-    tier = TIER.search(text)
+    tier = plan_tier(text)
     issue = ISSUE.search(text)
-    return {"file": str(p), "tier": int(tier.group(1)) if tier else None,
+    return {"file": str(p), "tier": tier,
             "issue": issue.group(1) if issue else None,
             "decisions": [f"{d} {who}: {what}" for d, who, what in DECISION.findall(text)],
             "open_questions": [f"{d} {who or 'worker'}: {what}" for d, who, what in QUESTION.findall(text)],

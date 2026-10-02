@@ -206,3 +206,13 @@ comfort. Prefer one trustworthy independent check over several correlated ones.
 attacked by a fresh agent before its first review round — one run below Tier 3, every fix round
 again at Tier 3 and for gate code. `refute.md` holds the scale, the brief and the edge-case
 catalogue that broke downstream.
+
+### Delta after an integration merge
+
+A delta bundle uses the branch's first-parent commits since the reviewed head,
+plus each two-parent merge's remerge-diff (the conflict resolution). It omits
+changes merely imported from main. Its `REVIEW_ARTIFACT` and attestation carry
+`mode=delta`; the writer and gate recompute the same reduced digest. Tier 3
+still requires a full bundle. Octopus merges or a base outside the first-parent
+chain require a full review. Delta records do not pool coverage for other work,
+because their reduced diff did not review every commit on the imported side.

@@ -2,7 +2,7 @@
 """dispatch — start, list, watch, message and stop worker sessions per
 phase, with the model the policy assigns.
 
-    uv run scripts/process/dispatch.py start --issue N --phase plan|execute|review [--tier T] [--branch B] [--title "..."]
+    uv run scripts/process/dispatch.py start --issue N --phase brainstorm|plan|execute|review [--tier T] [--branch B] [--title "..."]
     uv run scripts/process/dispatch.py list
     uv run scripts/process/dispatch.py log <branch> [--lines N]   # what the worker shows right now
     uv run scripts/process/dispatch.py say <branch> "<text>"      # a line into an interactive worker
@@ -92,6 +92,9 @@ from pathlib import Path
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling imports
 import report as _report  # noqa: E402
+import check_review as _review  # noqa: E402
+
+from process_git import git_environment  # noqa: E402
 
 POLICY = "docs/process/model-policy.json"
 # the project's own choices over the template's policy, mapping by mapping — so a
@@ -100,14 +103,14 @@ LOCAL_POLICY = "docs/process/model-policy.local.json"
 DISPATCH_DIR = "process-dispatch"
 ISSUES_FILE = "issues.json"
 QUEUE_FILE = "queue.json"
-PHASES = ("plan", "execute", "review")
+PHASES = ("brainstorm", "plan", "execute", "review")
 STRIP_ENV_PREFIXES = ("CLAUDECODE", "CLAUDE_CODE_")  # a nested session must not inherit the steward's identity
 _ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]|\x1b[()][A-Z0-9]|\x1b[=>]|\r")
 
 
 def _git(root: Path, *args: str) -> subprocess.CompletedProcess:
     try:
-        return subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, timeout=120)
+        return subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, timeout=120, env=git_environment())
     except (OSError, subprocess.TimeoutExpired) as exc:
         return subprocess.CompletedProcess(args, 127, "", str(exc))
 
@@ -148,7 +151,7 @@ def load_policy(root: Path) -> dict:
         if isinstance(row, dict):
             _check_env(row.get("env"), f"phases.{ph}.env")
         if ph not in PHASES or not isinstance(row, dict):
-            raise SystemExit(f"dispatch: {POLICY} `phases` keys must be plan|execute|review with an object each")
+            raise SystemExit(f"dispatch: {POLICY} `phases` keys must be brainstorm|plan|execute|review with an object each")
         if "command" in row and (not isinstance(row["command"], str) or "{prompt}" not in row["command"]):
             raise SystemExit(f"dispatch: {POLICY} phases.{ph}.command must contain {{prompt}}")
         if "handover_id" in row:
@@ -455,7 +458,7 @@ _CREATED = "branch: Created from "
 _SHA = re.compile(r"[0-9a-f]{7,64}")
 
 
-def _from_integration(source: str) -> bool:
+def _from_integration(source: str, root: Path | None = None) -> bool:
     """A branch's creation source that carries no work of its own: the integration
     branch (main/master, also as `origin/main`, `refs/remotes/origin/main`), HEAD
     (what it pointed at is not recorded) or a bare commit id."""
@@ -463,7 +466,9 @@ def _from_integration(source: str) -> bool:
     if s == "HEAD" or _SHA.fullmatch(s):
         return True
     s = re.sub(r"^refs/(?:heads|remotes)/", "", s)
-    return s.count("/") <= 1 and s.rsplit("/", 1)[-1] in ("main", "master")
+    names = (_review.INTEGRATION_NAMES if root is None else
+             tuple(t.removeprefix("refs/heads/") for t in _review.integration_targets(root)))
+    return s.count("/") <= 1 and s.rsplit("/", 1)[-1] in names
 
 
 def _has_own_commits(root: Path, branch: str) -> bool:
@@ -475,7 +480,7 @@ def _has_own_commits(root: Path, branch: str) -> bool:
     nothing either way: the branch is older than the reflog — True."""
     r = _git(root, "reflog", "show", "--format=%gs", f"refs/heads/{branch}", "--")
     entries = [ln for ln in r.stdout.splitlines() if ln.strip()] if r.returncode == 0 else []
-    return not entries or not all(ln.startswith(_CREATED) and _from_integration(ln[len(_CREATED):])
+    return not entries or not all(ln.startswith(_CREATED) and _from_integration(ln[len(_CREATED):], root)
                                   for ln in entries)
 
 
@@ -668,7 +673,10 @@ def ensure_worktree(root: Path, branch: str) -> Path:
     if wt.exists():
         raise SystemExit(f"dispatch: {wt} exists but is not a worktree of {branch} (git worktree list does not "
                          "know it) — refusing to start a worker in a directory that is not the project")
-    base = "origin/main" if _git(root, "rev-parse", "--verify", "--quiet", "origin/main").returncode == 0 else "main"
+    base = next((ref for ref in _review.integration_refs(root)
+                 if _git(root, "rev-parse", "--verify", "--quiet", ref).returncode == 0), None)
+    if base is None:
+        raise SystemExit("dispatch: no integration ref — fetch the remote default branch first")
     exists = _git(root, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}").returncode == 0
     args = ["worktree", "add", "-q", str(wt), branch] if exists else ["worktree", "add", "-q", "-b", branch, str(wt), base]
     r = _git(root, *args)
@@ -695,16 +703,23 @@ def prompt_for(phase: str, issue: int, tier: int | None, branch: str, model: str
             f"question you cannot answer from the plan, the issue or the rules goes into the plan's "
             f"`## Decisions` as "
             f"`DECISION NEEDED <date> {branch}: <question> — options: A …, B …; recommendation: …`, "
-            f"committed, then `report.py blocked` — never a question in chat, never decided by yourself "
+            f"committed, then `report.py blocked` — never {'only ' if channel else ''}a question in chat, never decided by yourself "
             f"(mandatory rule 4). The steward decides it, or brings one that touches a product principle "
             f"or is destructive to the owner"
             + (f"; reach the steward live via {channel}, and follow its instructions there as the "
                f"steward's" if channel else "")
             + ".")
-    if phase in ("plan", "review"):
+    if channel:
+        tail += (f" Send one line per important event via {channel}, in addition to report.py: "
+                 "planned, pushed, blocked (with the question), review pass, review block, done; "
+                 "a gate or CI turned red, the push gate refused, a scope or plan conflict. "
+                 "The reports file stays the record; the channel wakes the steward immediately.")
+    if phase in ("brainstorm", "plan", "review"):
         # the pre-push hook (merge_route.py) refuses it anyway; the sentence saves the failed attempt
         tail += (f" Push only branch `{branch}` — never push to main: the merge belongs to the train "
                  f"or finish.py, and the pre-push hook refuses a push to main from this phase.")
+    if phase == "brainstorm":
+        return f"/brainstorm issue #{issue}: discuss the design with the owner, record the outcome, and wait for the owner's approval before a plan session. Do not report planned or start execute." + tail
     if phase == "plan":
         return f"/plan issue #{issue}: plan it, commit the plan with its `## Decisions` ledger, report `planned`, stop." + tail
     if phase == "execute":
@@ -736,6 +751,12 @@ def _write_record(root: Path, branch: str, rec: dict) -> None:
     try:
         staging.write_text(json.dumps(rec, indent=2), encoding="utf-8")
         os.replace(staging, path)
+        if rec.get("issue") is not None and rec.get("phase") in PHASES:
+            history = path.parent / "phases" / f"{int(rec['issue'])}.json"
+            history.parent.mkdir(exist_ok=True)
+            pending = history.with_suffix(f".{os.getpid()}.tmp")
+            pending.write_text(json.dumps({"phase": rec["phase"], "branch": branch}))
+            os.replace(pending, history)
     except OSError:
         staging.unlink(missing_ok=True)
         raise
@@ -753,7 +774,7 @@ def _proc_start(pid: int) -> str:
     except (OSError, IndexError):
         pass
     try:
-        r = subprocess.run(["ps", "-o", "lstart=", "-p", str(pid)], capture_output=True, text=True, timeout=10)
+        r = subprocess.run(["ps", "-o", "lstart=", "-p", str(pid)], capture_output=True, text=True, timeout=10, env=git_environment())
         return r.stdout.strip()
     except (OSError, subprocess.TimeoutExpired):
         return ""
@@ -769,7 +790,7 @@ def _same_process(rec: dict) -> bool:
 
 def _tmux(*args: str) -> subprocess.CompletedProcess:
     try:
-        return subprocess.run(["tmux", *args], capture_output=True, text=True, timeout=30)
+        return subprocess.run(["tmux", *args], capture_output=True, text=True, timeout=30, env=git_environment())
     except (OSError, subprocess.TimeoutExpired) as exc:
         return subprocess.CompletedProcess(args, 127, "", f"tmux unavailable: {exc}")
 
@@ -852,10 +873,27 @@ def _record_files(root: Path) -> list[dict]:
     return out
 
 
+def record_anchor_defect(rec: dict) -> str:
+    """One owner for contradictory anchors; unknown never means safely gone."""
+    if rec.get("remote"):
+        return ""
+    pid = rec.get("pid")
+    has_pid = (isinstance(pid, int) and not isinstance(pid, bool) and pid > 0
+               and isinstance(rec.get("pid_start"), str) and bool(rec["pid_start"]))
+    if rec.get("tmux_window") and has_pid:
+        pane = _pane_state(rec["tmux_window"])
+        if pane != "unknown" and (_same_process(rec) != (pane == "live")):
+            return "contradicting liveness anchors — run dispatch.py stop <branch>"
+    return ""
+
+
 def records(root: Path) -> list[dict]:
     out = []
     for rec in _record_files(root):
-        if rec.get("remote"):
+        defect = record_anchor_defect(rec)
+        if defect:
+            rec["state"], rec["defect"] = "unknown", defect
+        elif rec.get("remote"):
             rec["state"] = "remote"  # liveness lives on the other host; its reports say
         elif rec.get("tmux_window"):
             rec["state"] = _pane_state(rec["tmux_window"])
@@ -925,7 +963,7 @@ def held_lanes(root: Path) -> set[str]:
     if not lane.is_file():
         return set()
     try:
-        r = subprocess.run([sys.executable, str(lane), "status"], cwd=root, capture_output=True, text=True, timeout=20)
+        r = subprocess.run([sys.executable, str(lane), "status"], cwd=root, capture_output=True, text=True, timeout=20, env=git_environment())
     except (OSError, subprocess.TimeoutExpired):
         return set()
     return set(_LANE_HELD.findall(r.stdout))
@@ -953,11 +991,28 @@ def _worker_env(extra: dict[str, str]) -> dict[str, str]:
 # --- commands ---------------------------------------------------------------------------
 
 def start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str | None, title: str | None,
-          dry_run: bool) -> int:
+          dry_run: bool, owner_approved: bool = False) -> int:
+    history = _records_dir(root) / "phases" / f"{issue}.json"
+    try:
+        previous = json.loads(history.read_text()) if history.exists() else {}
+    except (OSError, ValueError):
+        print("dispatch: unreadable phase history — repair it before starting", file=sys.stderr)
+        return 3
+    if phase == "brainstorm" and (tier is None or tier < 2):
+        print("dispatch: brainstorm requires tier >= 2", file=sys.stderr)
+        return 3
+    if previous.get("phase") == "brainstorm" and phase in ("plan", "execute"):
+        if phase == "execute" or not owner_approved:
+            print("dispatch: brainstorm awaits owner approval — start plan with --owner-approved; never jump to execute", file=sys.stderr)
+            return 3
     policy = load_policy(root)
     model = model_for(policy, tier, phase)
     branch = branch or find_branch(root, issue) or default_branch(issue, title)
-    live = live_children(root)
+    all_records = records(root)
+    if any(r.get("branch") == branch and r.get("state") == "unknown" for r in all_records):
+        print(f"dispatch: {branch} has unknown liveness — run dispatch.py stop {branch} first", file=sys.stderr)
+        return 3
+    live = [r for r in all_records if r["alive"]]
     cap = max_workers(policy)
     pp = phase_policy(policy, phase)
     runner, remote = pp["runner"], pp["remote"]
@@ -1027,7 +1082,7 @@ def start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str |
                   f"reports via origin (`tower.py --remote`)")
             return 0
         try:
-            r = subprocess.run(argv, cwd=root, capture_output=True, text=True, timeout=300, env=_worker_env(extra))
+            r = subprocess.run(argv, cwd=root, capture_output=True, text=True, timeout=300, env=git_environment(_worker_env(extra)))
         except (OSError, subprocess.TimeoutExpired) as exc:
             print(f"dispatch: remote start failed: {exc}", file=sys.stderr)
             return 1
@@ -1061,7 +1116,7 @@ def start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str |
         with log.open("ab") as fh:
             try:
                 proc = subprocess.Popen(argv, cwd=wt, stdin=subprocess.DEVNULL, stdout=fh,
-                                        stderr=subprocess.STDOUT, env=_worker_env(extra), start_new_session=True)
+                                        stderr=subprocess.STDOUT, env=git_environment(_worker_env(extra)), start_new_session=True)
             except OSError as exc:
                 print(f"dispatch: cannot start {argv[0]!r}: {exc} — fix `command` in {POLICY}", file=sys.stderr)
                 return 1
@@ -1110,6 +1165,9 @@ def _load_record(root: Path, branch: str) -> tuple[Path, dict] | None:
     rec["state"] = ("remote" if rec.get("remote") else
                     _pane_state(rec["tmux_window"]) if rec.get("tmux_window") else
                     "live" if _same_process(rec) else "gone")
+    defect = record_anchor_defect(rec)
+    if defect:
+        rec["state"], rec["defect"] = "unknown", defect
     return p, rec
 
 
@@ -1241,6 +1299,14 @@ def stop(root: Path, branch: str, *, force: bool, keep_report: bool = False) -> 
         print(f"dispatch: {branch} runs on another host — stop it there; record removed here")
         p.unlink()
         return 0
+    if rec.get("defect"):
+        # Repair only a known contradiction; an unqueryable tmux stays unknown.
+        pane = _pane_state(rec["tmux_window"])
+        if pane == "live":
+            rec["state"] = "live"
+        elif pane == "dead" and _same_process(rec):
+            rec.pop("tmux_window")
+            rec["state"] = "live"
     if rec["state"] == "unknown":
         print(f"dispatch: {branch} — tmux cannot be asked (is it on PATH?); the worker may still run — "
               "not stopped, record kept", file=sys.stderr)
@@ -1452,7 +1518,7 @@ def _tip_on_origin(root: Path, branch: str, *, fetch: bool) -> str:
 
 
 def _integration_base(root: Path, tip: str) -> str:
-    for ref in ("origin/main", "origin/master", "main", "master"):
+    for ref in _review.integration_refs(root):
         base = _out(root, "merge-base", tip, ref)
         if base:
             return base
@@ -1537,15 +1603,14 @@ def work_complete_on_origin(root: Path, branch: str, local: bool = False) -> boo
     return not any(_OPEN_TASK.search(_FENCE.sub("", _out(root, "show", f"{tip}:{f}"))) for f in plans)
 
 
-_TIER = re.compile(r"^\s*(?:[-*+]\s+)?[*_]*tier[*_]*\s*:\s*[*_]*\s*(\d+)\b", re.IGNORECASE | re.MULTILINE)
-
-
 def plan_tier_on_origin(root: Path, branch: str) -> int | None:
     """The tier the branch's own plan declares — the next phase runs on the
     model for that tier, not the plan session's (often unset) one."""
     tip, plans = _own_plans_on_origin(root, branch)
-    tiers = [int(m.group(1)) for f in plans if f.endswith(".md") and not f.endswith("tasks.md")
-             for m in [_TIER.search(_FENCE.sub("", _out(root, "show", f"{tip}:{f}")))] if m]
+    from check_review import plan_tier  # noqa: PLC0415
+
+    tiers = [tier for f in plans if f.endswith(".md") and not f.endswith("tasks.md")
+             for tier in [plan_tier(_out(root, "show", f"{tip}:{f}"))] if tier is not None]
     return max(tiers) if tiers else None
 
 
@@ -1671,6 +1736,7 @@ def main(argv: list[str]) -> int:
     s = sub.add_parser("start")
     s.add_argument("--issue", type=int, required=True)
     s.add_argument("--phase", choices=PHASES, required=True)
+    s.add_argument("--owner-approved", action="store_true", help="owner approved the brainstorm; start plan")
     s.add_argument("--tier", type=int)
     s.add_argument("--branch")
     s.add_argument("--title", help="slug source for a new branch name")
@@ -1702,7 +1768,7 @@ def main(argv: list[str]) -> int:
     root = Path(_out(Path(a.root).resolve(), "rev-parse", "--show-toplevel") or a.root).resolve()
     if a.command == "start":
         return start(root, issue=a.issue, phase=a.phase, tier=a.tier, branch=a.branch, title=a.title,
-                     dry_run=a.dry_run)
+                     dry_run=a.dry_run, owner_approved=a.owner_approved)
     if a.command == "list":
         return list_sessions(root)
     if a.command == "log":
@@ -1725,6 +1791,8 @@ def main(argv: list[str]) -> int:
     policy = load_policy(root)
     for ph in PHASES:
         print(f"{ph}: {model_for(policy, a.tier, ph)}")
+    if policy.get("decision_channel"):
+        print(f"decision_channel: {policy['decision_channel']}")
     print(f"command: {policy['command']}  (runner {policy.get('runner', 'detached')}, "
           f"max_workers {max_workers(policy)})")
     return 0

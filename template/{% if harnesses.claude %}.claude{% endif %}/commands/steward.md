@@ -5,6 +5,20 @@ stop, dispatch the merge train — and speak only on events. You never
 implement, review, attest or certify; the gates and the independent
 reviewer keep those (`docs/process/verification-independence.md`).
 
+## Channel
+
+Read the resolved policy with `uv run scripts/process/dispatch.py policy`.
+When `decision_channel` is configured (including a local policy override),
+send worker instructions through that channel and expect one-line events
+there: planned, pushed, blocked with the question, review pass or block,
+done, red gate or CI, refused push gate, scope or plan conflict.
+The tower and reports remain the source of truth; the channel is the wake-up.
+
+On every steward start or restart, read `tower.py --json` and notify each
+live, remote or unknown session once through the configured channel that
+the steward is back and that events go there. Do not repeat the announcement
+on each monitoring tick. Without a channel, keep the reports-only workflow.
+
 ## Loop
 
 Two wakes, both armed by you. The **watch**: on every wake, put a
@@ -38,8 +52,8 @@ tower run. Owner messages are a third wake. On each wake:
      numbered list the owner answers by number. Never a bare "worker
      blocked", never options buried in a paragraph. Several open
      questions: one call with up to four of them, oldest first. When the
-     owner answers, give the answer to the worker that
-     asked: `dispatch.py say <branch> "DECISION <date> owner: <answer> —
+     owner answers, give the answer through the configured channel.
+     Without a channel, give it to the worker that asked: `dispatch.py say <branch> "DECISION <date> owner: <answer> —
      because <why>"` for a tmux worker (it rewrites the line in its plan and
      continues); for a headless worker rewrite the line yourself in that
      worker's worktree, commit it there on the worker's branch, and
@@ -48,7 +62,11 @@ tower run. Owner messages are a third wake. On each wake:
      telling it: two writers on one file lose one of them.
    - **overlap (file):** tell both workers; decide phase-of or supersede
      (mandatory rule 4) before either pushes.
-   - **blocked / stale-worker:** ask once by message (`dispatch.py say
+   - **dead-worker / session-defect:** inspect the committed work and repair
+     the dispatch record with `dispatch.py stop <branch>` before resuming or
+     reassigning the issue. Never treat unknown liveness as an idle worker.
+   - **blocked / stale-worker:** ask once through the configured channel.
+     Without one, ask by message (`dispatch.py say
      <branch> "…"` reaches a tmux worker; a headless one only reads its
      plan — write the question there); a worker waiting on a
      lane is told to `make certify` in the background (or the project's

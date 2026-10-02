@@ -34,6 +34,7 @@ import datetime as _dt
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 import time
@@ -44,7 +45,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling imports
 import check_review as _review  # noqa: E402
 import report as _report  # noqa: E402
 
-INTEGRATION = ("origin/main", "origin/master", "main", "master")
+from process_git import git_environment  # noqa: E402
+
+INTEGRATION = _review.INTEGRATION_REFS
 PLANS_ACTIVE = ".process-work/plans"
 SPECS_DIR = "specs"
 DESIGN_CONTRACT = re.compile(r"^\s*(?:[-*+]\s+)?[*_]*design-contract[*_]*\s*:\s*(\S+)",
@@ -63,14 +66,14 @@ WAIT_MINUTES = 30
 def _git(root: Path, *args: str) -> str | None:
     try:
         r = subprocess.run(["git", "-C", str(root), "--no-optional-locks", *args],
-                           capture_output=True, text=True, timeout=30)
+                           capture_output=True, text=True, timeout=30, env=git_environment())
     except (OSError, subprocess.TimeoutExpired):
         return None
     return r.stdout if r.returncode == 0 else None
 
 
 def integration_ref(root: Path) -> str | None:
-    for ref in INTEGRATION:
+    for ref in _review.integration_refs(root):
         if _git(root, "rev-parse", "--verify", "--quiet", ref) is not None:
             return ref
     return None
@@ -125,7 +128,7 @@ def describe_worktree(wt: dict, ref: str | None) -> dict:
 
 
 BOOKKEEPING = (".process-work/",)  # every branch writes here; sharing it is not a collision
-INTEGRATION_NAMES = ("main", "master")
+INTEGRATION_NAMES = _review.INTEGRATION_NAMES
 
 
 def _in_flight_count(wt: dict) -> str:
@@ -133,9 +136,9 @@ def _in_flight_count(wt: dict) -> str:
     return "files unknown" if wt.get("in_flight_unknown") else f"{len(wt.get('in_flight', []))} file(s)"
 
 
-def overlaps(wts: list[dict]) -> list[dict]:
+def overlaps(wts: list[dict], integration_names: tuple[str, ...] = INTEGRATION_NAMES) -> list[dict]:
     out: list[dict] = []
-    wts = [w for w in wts if w.get("branch") not in INTEGRATION_NAMES and not w.get("missing")]
+    wts = [w for w in wts if w.get("branch") not in integration_names and not w.get("missing")]
     for i, a in enumerate(wts):
         for b in wts[i + 1:]:
             fa, fb = set(a.get("in_flight", [])), set(b.get("in_flight", []))
@@ -171,18 +174,18 @@ def plans(root: Path) -> list[dict]:
             text = _review._unfenced(p.read_text(encoding="utf-8", errors="replace"))
         except OSError:
             continue
-        tier = _review.TIER_DECL.search(text)
+        tier = _review.plan_tier(text)
         issues = sorted(_review._plan_issue_numbers(text))
         dc = DESIGN_CONTRACT.search(text)
         out.append({
             "path": str(p.relative_to(root)),
             "kind": "design" if p.stem.startswith("design-") else "plan",
-            "tier": int(tier.group(1)) if tier else None,
+            "tier": tier,
             "issue": f"#{issues[0]}" if issues else None,
             "decisions": len(DECISION_LINE.findall(text)),
             "has_decisions_section": bool(_review.DECISIONS_HEADING.search(text)),
             "design_contract": dc.group(1).strip("`'\"") if dc else None,
-            "waived": bool(_review.WAIVED.search(text)),
+            "waived": _review.review_waived(text),
             "age_days": int((time.time() - p.stat().st_mtime) // 86400),
         })
     return out
@@ -279,7 +282,7 @@ def sessions(root: Path) -> list[dict]:
                  f"tmux {rec.get('tmux_session')}:{rec.get('tmux_name')}" if rec.get("tmux_window")
                  else f"pid {rec.get('pid')}")
         out.append({"branch": rec["branch"], "phase": rec.get("phase"), "issue": rec.get("issue"),
-                    "model": rec.get("model"), "alive": rec["alive"], "state": rec["state"], "where": where,
+                    "model": rec.get("model"), "defect": rec.get("defect"), "alive": rec["alive"], "state": rec["state"], "where": where,
                     "minutes_since_start": int((time.time() - int(rec.get("started") or time.time())) // 60),
                     "last_output": last[-200:], "minutes_since_output": since,
                     # the session's own word and whether its phase is over — dispatch's
@@ -337,7 +340,7 @@ def lanes(root: Path) -> list[str]:
         return []
     try:
         r = subprocess.run([sys.executable, str(lane), "status"], cwd=root,
-                           capture_output=True, text=True, timeout=20)
+                           capture_output=True, text=True, timeout=20, env=git_environment())
     except (OSError, subprocess.TimeoutExpired):
         return []
     return [ln for ln in r.stdout.splitlines() if ln.strip()]
@@ -379,7 +382,7 @@ def remote_branches(root: Path, ref: str | None, local_branches: set[str],
     for entry in names:
         full, _, sha = entry.partition(" ")
         b = full.replace("origin/", "", 1)
-        if not b or b in ("HEAD", "main", "master") or b.startswith("train/") or b in local_branches:
+        if not b or b == "HEAD" or full in _review.integration_refs(root) or b.startswith("train/") or b in local_branches:
             continue
         if sha in local_heads or full in upstreams:
             continue  # a local worktree carries this tip under another name, or tracks it
@@ -441,9 +444,12 @@ def findings(table: dict, stale_minutes: int) -> list[dict]:
             out.append({"kind": "chronic-red", "severity": "high",
                         "what": f"gate {g['gate']} red since {g['since']} ({g['age_days']} days)",
                         "because": "a gate red for days is read by nobody; fix it or waive it with a named owner"})
+    integration_names = set(INTEGRATION_NAMES)
+    ref = table.get("integration_ref") or table.get("integration") or ""
+    integration_names.add(ref.removeprefix("origin/"))
     reported = {r["worker"]: r for r in table["reports"]}
     for wt in table["worktrees"] + table.get("elsewhere", []):
-        if wt.get("missing") or wt["branch"] in ("main", "master", "detached"):
+        if wt.get("missing") or wt["branch"] in integration_names | {"detached"}:
             continue
         rep = reported.get(wt["branch"])
         quiet_commit = wt.get("minutes_since_commit", 0) >= stale_minutes
@@ -479,6 +485,13 @@ def findings(table: dict, stale_minutes: int) -> list[dict]:
     # on another host shows no screen here: its reports speak for it
     asked = {q.get("branch") for q in table.get("questions", [])}
     for s in table.get("sessions", []):
+        if s.get("state") in ("dead", "gone") and s.get("report_state") != "done":
+            out.append({"kind": "dead-worker", "severity": "high",
+                        "what": f"{s['branch']} ({s.get('phase')}): session {s['state']}, work not done",
+                        "because": "the worker cannot report or progress — inspect its work and resume or reassign it"})
+        if s.get("defect"):
+            out.append({"kind": "session-defect", "severity": "high", "what": s["branch"],
+                        "because": s["defect"]})
         quiet = s.get("minutes_since_output")
         if not s.get("alive") or quiet is None or quiet < WAIT_MINUTES or s.get("phase_over") is True:
             continue
@@ -510,6 +523,43 @@ def findings(table: dict, stale_minutes: int) -> list[dict]:
     return sorted(out, key=lambda f: order[f["severity"]])
 
 
+def local_findings(root: Path) -> list[dict]:
+    """Additive project checks. Like local gates, these commands are reviewed code."""
+    path = root / "docs/process/tower.local.json"
+    if not path.exists():
+        return []
+    out = []
+    def error(name, why):
+        return {"kind": "local-findings-error", "severity": "high", "what": name,
+                "because": why}
+    try:
+        config = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(config, dict):
+            raise ValueError("expected an object mapping names to commands")
+    except (OSError, ValueError) as exc:
+        return [error(str(path.relative_to(root)), str(exc))]
+    for name, item in config.items():
+        try:
+            command = item.get("command") if isinstance(item, dict) else None
+            argv = shlex.split(command) if isinstance(command, str) else command
+            if not isinstance(argv, list) or not argv or not all(isinstance(a, str) and a for a in argv):
+                raise ValueError("command must be a nonempty argv list or quoted command string")
+            result = subprocess.run(argv, cwd=root, capture_output=True, text=True, timeout=30,
+                                    env=git_environment())
+            if result.returncode != 0:
+                raise ValueError(f"exit {result.returncode}: {result.stderr[-1000:]}")
+            found = json.loads(result.stdout)
+            if not isinstance(found, list) or not all(
+                    isinstance(f, dict) and f.get("severity") in ("high", "medium", "low")
+                    and all(isinstance(f.get(key), str) and f[key].strip() for key in ("kind", "what", "because"))
+                    for f in found):
+                raise ValueError("output must be a JSON list of kind/severity/what/because findings")
+            out.extend({**f, "source": name} for f in found)
+        except (OSError, ValueError, subprocess.TimeoutExpired) as exc:
+            out.append(error(name, str(exc)))
+    return out
+
+
 # --- assembly -------------------------------------------------------------------------
 
 def build(root: Path, stale_minutes: int = 60, *, remote: bool = False) -> dict:
@@ -527,7 +577,8 @@ def build(root: Path, stale_minutes: int = 60, *, remote: bool = False) -> dict:
         "worktrees": wts,
         "elsewhere": elsewhere,
         "elsewhere_residue": old_remote,
-        "overlaps": overlaps(wts + elsewhere),
+        "overlaps": overlaps(wts + elsewhere, tuple(t.removeprefix("refs/heads/")
+                                                    for t in _review.integration_targets(root))),
         "plans": plans_everywhere(root, wts),
         "questions": questions(root, wts, elsewhere),
         "sessions": sessions(root),
@@ -537,7 +588,7 @@ def build(root: Path, stale_minutes: int = 60, *, remote: bool = False) -> dict:
         "reports": latest_reports(root, remote=remote),
         "remote_fetched": fetch_ok if remote else None,
     }
-    table["findings"] = findings(table, stale_minutes)
+    table["findings"] = findings(table, stale_minutes) + local_findings(root)
     if remote and not fetch_ok:
         table["findings"].insert(0, {"kind": "remote-unreachable", "severity": "high",
                                      "what": "fetch from origin failed or timed out — `elsewhere` and "

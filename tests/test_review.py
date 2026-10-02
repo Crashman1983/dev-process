@@ -899,7 +899,7 @@ def test_integrity_ledger_reuses_verdicts_and_keeps_a_mismatch_red(render, tmp_p
     assert "answered from this clone's ledger" not in r1.stdout  # nothing reused yet
     ledger = out / ".git/process-review-integrity"
     text = ledger.read_text()
-    assert f"{base} {head} {digest}\tok" in text and "\thard:" in text
+    assert f"{base} {head} {digest} full\tok" in text and "\thard:" in text
     r2 = _run(out)
     assert r2.returncode == 1 and "matches no formula" in r2.stdout  # red persists, from cache
     assert "2 digest-bound record(s) in unchanged shards answered from this clone's ledger" in r2.stdout
@@ -908,7 +908,7 @@ def test_integrity_ledger_reuses_verdicts_and_keeps_a_mismatch_red(render, tmp_p
     r3b = _run(out, env=dict(os.environ, PROCESS_REVIEW_INTEGRITY="all"))
     assert "answered from" not in r3b.stdout
     # a shard the push carries is verified fresh even when the ledger lies
-    ledger.write_text(f"{base} {head} {'0' * 64}\tok\n")
+    ledger.write_text(f"{base} {head} {'0' * 64} full\tok\n")
     _git(out, "add", "-A")
     _git(out, "commit", "-q", "-m", "journal")
     r4 = _run(out)
@@ -957,7 +957,7 @@ def test_full_rewrites_a_poisoned_ledger(render, tmp_path):
     _journal(out, _review(work="bound", artifact=(base, head, "0" * 64)))
     assert _run(out).returncode == 1
     ledger = out / ".git/process-review-integrity"
-    ledger.write_text(f"{base} {head} {'0' * 64}\tok\n")  # poisoned
+    ledger.write_text(f"{base} {head} {'0' * 64} full\tok\n")  # poisoned
     assert _run(out).returncode == 0  # hidden — the documented remedy is --full
     r = _run_args(out, "--full")
     assert r.returncode == 1 and "matches no formula" in r.stdout
