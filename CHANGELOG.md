@@ -1166,6 +1166,31 @@ ein Wächter-Test gegen doppelte Klammern ohne Leerzeichen in Python-Vorlagen.
 Wer v2.27.1 oder v2.28.0 installiert hat und am Push scheitert: auf v2.28.1
 aktualisieren, `v2.28.1`.
 
+**v2.43.0 — Verified template updates and faster maintenance checks.**
+
+- Re-render both pinned template releases against the integration baseline's
+  trusted source. Compare project files with both renders, including executable
+  bits and symlink targets, so lost local customizations remain project delta.
+- Let pure, owner-acknowledged template updates pass without re-reviewing released
+  template files. Require a fresh, digest-bound Tier-2 review for project delta;
+  gate scripts, helpers and configuration changes conservatively retain Tier 3.
+  The review gate, finish and the merge train share the computed verification.
+- Keep owned/local files, hooks, Makefiles and edited or deleted tests under
+  project review. Failed provenance or forged saved reports grant no exemption.
+  Show only the pinned changelog changes as behavior notes and bind the owner
+  acknowledgment to the baseline and resolved release SHA.
+- Run CI tests with two workers grouped by test file: measured runtime drops
+  from 322 to 183 seconds. Add a repeatable gate benchmark and record its scope
+  and limitations in the maintenance report.
+- Complete the audit remnants: prime reads inbox content in all three harness
+  adapters, language checks cover every current module, and the gate workflow
+  names its required check explicitly. Pin complete three-plan review coverage
+  against late unreviewed commits and fabricated digests.
+- **Update guidance:** verification requires reachable release tags or full Git
+  SHAs in the recorded baseline and target. Unpinned HEAD/describe references
+  fail closed. Follow the template-update sequence in `docs/process/releases.md`,
+  include the computed delta and behavior notes, and commit the acknowledgment.
+
 **v2.42.0 — Downstream process fixes and worker channels.**
 
 - Fix the downstream residuals tracked in #142: fail-closed integration ranges,
