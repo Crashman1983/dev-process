@@ -1180,6 +1180,8 @@ aktualisieren, `v2.28.1`.
 - Allow long pre-push gates with a configurable 30-minute train push timeout (#83),
   and document worker channel events plus steward restart feedback (#139).
 
+- Make gate subprocesses emit UTF-8, matching the runner's decoder even when
+  Windows redirects the parent's output using CP1252.
 - Write the portable release-note test fixture as UTF-8 on every platform,
   matching the release-note reader rather than the Windows locale.
 - **Update guidance:** update the bundle producer, attestation writer and review gate together;

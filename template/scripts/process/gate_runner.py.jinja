@@ -321,8 +321,10 @@ def main() -> int:
                   f"{head[:10]} — the gates would check a tree that is not being pushed; "
                   f"push from the checkout of that commit (its worktree)", file=sys.stderr)
             failed.append("pushed-tree")
-    # don't litter the repo with __pycache__ from the gates' sibling imports
-    env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
+    # Child output is decoded as UTF-8 below, including on Windows. Keep
+    # that protocol independent of the runner's own console encoding.
+    # Don't litter the repo with __pycache__ from the gates' sibling imports.
+    env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1", "PYTHONIOENCODING": "utf-8"}
     for name in sorted(set(local) & set(GATES)):
         # stderr: pre-commit shows a passing hook's stdout to nobody
         print(f"gate-runner: {LOCAL_GATES} replaces the template's {name} gate", file=sys.stderr)
