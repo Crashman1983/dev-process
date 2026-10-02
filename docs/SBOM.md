@@ -18,6 +18,7 @@ Das Repository ist ein copier-Template. Es liefert keinen Laufzeitcode als Paket
 |---|---|
 | `copier` | `>=9.4` |
 | `pytest` | `>=8` |
+| `pytest-xdist` | `>=3.6,<4` |
 | `pyyaml` | `>=6` |
 | `ruff` | `>=0.6` |
 
@@ -31,6 +32,7 @@ Alle aus `https://pypi.org/simple`. Abhängigkeiten mit Plattform- oder Versions
 | `colorama` | `0.4.6` | nein | - |
 | `copier` | `9.16.0` | ja | `colorama`, `dunamai`, `funcy`, `jinja2`, `jinja2-ansible-filters`, `packaging`, `pathspec`, `platformdirs`, `plumbum`, `pydantic`, `pygments`, `pyyaml`, `questionary` |
 | `dunamai` | `1.26.1` | nein | `packaging` |
+| `execnet` | `2.1.2` | nein | - |
 | `funcy` | `2.0` | nein | - |
 | `iniconfig` | `2.3.0` | nein | - |
 | `jinja2` | `3.1.6` | nein | `markupsafe` |
@@ -46,6 +48,7 @@ Alle aus `https://pypi.org/simple`. Abhängigkeiten mit Plattform- oder Versions
 | `pydantic-core` | `2.46.4` | nein | `typing-extensions` |
 | `pygments` | `2.20.0` | nein | - |
 | `pytest` | `9.1.1` | ja | `colorama`*, `iniconfig`, `packaging`, `pluggy`, `pygments` |
+| `pytest-xdist` | `3.8.0` | ja | `execnet`, `pytest` |
 | `pyyaml` | `6.0.3` | ja | - |
 | `questionary` | `2.1.1` | nein | `prompt-toolkit` |
 | `ruff` | `0.15.20` | ja | - |

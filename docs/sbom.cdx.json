@@ -1,7 +1,7 @@
 {
   "bomFormat": "CycloneDX",
   "specVersion": "1.5",
-  "serialNumber": "urn:uuid:19629f43-f62c-57a1-8ae5-24e4e80d698e",
+  "serialNumber": "urn:uuid:55c7fe80-e7a5-52a0-adc5-feeba414bb61",
   "version": 1,
   "metadata": {
     "tools": {
@@ -106,6 +106,26 @@
         {
           "type": "distribution",
           "url": "https://files.pythonhosted.org/packages/9f/67/d5611975faaa5e4a920f4b19e4caccd5df0facb925687850f1e45f5876f2/dunamai-1.26.1.tar.gz"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:pypi/execnet@2.1.2",
+      "name": "execnet",
+      "version": "2.1.2",
+      "purl": "pkg:pypi/execnet@2.1.2",
+      "scope": "optional",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "63d83bfdd9a23e35b9c6a3261412324f964c2ec8dcd8d3c6916ee9373e0befcd"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://files.pythonhosted.org/packages/bf/89/780e11f9588d9e7128a3f87788354c7946a9cbb1401ad38a48c4db9a4f07/execnet-2.1.2.tar.gz"
         }
       ]
     },
@@ -411,6 +431,26 @@
     },
     {
       "type": "library",
+      "bom-ref": "pkg:pypi/pytest-xdist@3.8.0",
+      "name": "pytest-xdist",
+      "version": "3.8.0",
+      "purl": "pkg:pypi/pytest-xdist@3.8.0",
+      "scope": "optional",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "7e578125ec9bc6050861aa93f2d59f1d8d085595d6551c2c90b6f4fad8d3a9f1"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://files.pythonhosted.org/packages/78/b4/439b179d1ff526791eb921115fca8e44e596a13efeda518b9d845a619450/pytest_xdist-3.8.0.tar.gz"
+        }
+      ]
+    },
+    {
+      "type": "library",
       "bom-ref": "pkg:pypi/pyyaml@6.0.3",
       "name": "pyyaml",
       "version": "6.0.3",
@@ -571,6 +611,7 @@
       "ref": "pkg:github/Crashman1983/dev-process@2.42.0",
       "dependsOn": [
         "pkg:pypi/copier@9.16.0",
+        "pkg:pypi/pytest-xdist@3.8.0",
         "pkg:pypi/pytest@9.1.1",
         "pkg:pypi/pyyaml@6.0.3",
         "pkg:pypi/ruff@0.15.20"
@@ -607,6 +648,10 @@
       "dependsOn": [
         "pkg:pypi/packaging@26.2"
       ]
+    },
+    {
+      "ref": "pkg:pypi/execnet@2.1.2",
+      "dependsOn": []
     },
     {
       "ref": "pkg:pypi/funcy@2.0",
@@ -688,6 +733,13 @@
         "pkg:pypi/packaging@26.2",
         "pkg:pypi/pluggy@1.6.0",
         "pkg:pypi/pygments@2.20.0"
+      ]
+    },
+    {
+      "ref": "pkg:pypi/pytest-xdist@3.8.0",
+      "dependsOn": [
+        "pkg:pypi/execnet@2.1.2",
+        "pkg:pypi/pytest@9.1.1"
       ]
     },
     {
