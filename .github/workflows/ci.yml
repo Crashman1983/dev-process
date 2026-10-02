@@ -26,4 +26,19 @@ jobs:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
       - run: uv sync --group dev
-      - run: uv run pytest tests/test_cross_platform_runtime.py -v
+      - run: uv run pytest tests/test_cross_platform_runtime.py -v --junitxml=portable-smoke.xml
+      - name: Annotate portable smoke failures
+        if: failure()
+        run: |
+          python - <<'PYREPORT'
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+
+          report = Path("portable-smoke.xml")
+          if report.is_file():
+              for case in ET.parse(report).iter("testcase"):
+                  for failure in [*case.findall("failure"), *case.findall("error")]:
+                      text = (failure.text or failure.get("message", ""))[:12000]
+                      text = text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+                      print(f"::error::{case.get('name')}: {text}")
+          PYREPORT
