@@ -29,6 +29,9 @@ jobs:
       - run: uv run pytest tests/test_cross_platform_runtime.py -v --junitxml=portable-smoke.xml
       - name: Annotate portable smoke failures
         if: failure()
+        shell: bash
+        env:
+          PYTHONIOENCODING: utf-8
         run: |
           python - <<'PYREPORT'
           import xml.etree.ElementTree as ET
