@@ -1166,6 +1166,18 @@ ein Wächter-Test gegen doppelte Klammern ohne Leerzeichen in Python-Vorlagen.
 Wer v2.27.1 oder v2.28.0 installiert hat und am Push scheitert: auf v2.28.1
 aktualisieren, `v2.28.1`.
 
+**v2.43.1 — Documentation aligned with verified template updates.**
+
+- Refresh the English and German overviews and rebuild the German PDF for
+  the current template. Explain owner acknowledgment, pure update provenance,
+  project-delta review and enforcement migrations.
+- Correct review enforcement guidance: active plans and commit-claimed issues
+  need review before integration; pure verified updates use computed provenance.
+  Keep the applicable Done checks, gates and project tests explicit.
+- Use the dependency-declaring standalone verification command in tier guidance.
+  Label reference-project figures as the historical baseline from v2.38.0.
+- Documentation only; no runtime behavior changes.
+
 **v2.43.0 — Verified template updates and faster maintenance checks.**
 
 - Re-render both pinned template releases against the integration baseline's
