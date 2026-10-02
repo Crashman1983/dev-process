@@ -260,3 +260,10 @@ not version control):
 
     uvx pre-commit install --hook-type pre-commit --hook-type pre-push
     python3 scripts/process/install_hooks.py   # the merge guard, after pre-commit
+
+
+For a process-template update, separate released template code from project
+changes with `uv run --script scripts/process/template_verify.py --base <baseline-sha>`.
+The rendered `docs/process/releases.md` explains the computed provenance,
+owner acknowledgment and review duties. Pure updates still run project tests
+and gates; gate-enforcement migrations retain Tier 3.

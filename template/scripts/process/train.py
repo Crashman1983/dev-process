@@ -263,10 +263,12 @@ def candidates(root: Path, local: str, base: str) -> list[dict]:
             own_archived.append(rel)
             own_ids |= ids
             waived = _review.review_waived(text)
-            ok = tier < 2 or waived or _covers(root, passes, ids, tier, b, branch_passes)
+            pure_template = _review.verified_template_plan(root, rel, text, tip=b)
+            ok = tier < 2 or waived or pure_template or _covers(root, passes, ids, tier, b, branch_passes)
             if touches_process and not _covers(root, passes, ids, 2, b, branch_passes):
                 ok = False
-            c["plans"].append({"path": rel, "tier": tier, "cleared": ok, "waived": waived})
+            c["plans"].append({"path": rel, "tier": tier, "cleared": ok, "waived": waived,
+                               **({"verified_template": True} if pure_template else {})})
         archived = own_archived
         cleared_all = bool(archived) and all(p["cleared"] for p in c["plans"])
         if housekeeping:
@@ -288,6 +290,16 @@ def candidates(root: Path, local: str, base: str) -> list[dict]:
         if branch_unreadable:
             c["reasons"].append(f"git could not read {', '.join(branch_unreadable)} — an unread name or plan "
                                 f"is no Tier 0 plan; repair the clone (`git fsck`, fetch) and run the train again")
+        from template_verify import verify
+        template_blocked = False
+        try:
+            update = verify(root, base, b)
+            template_findings = _review.template_review_findings(root, update, passes, tip=b)
+            template_blocked = bool(template_findings)
+            c["reasons"].extend(template_findings)
+        except (ValueError, OSError, subprocess.TimeoutExpired) as exc:
+            template_blocked = True
+            c["reasons"].append(f'template verification failed: {exc}')
         rep = reports.get(b)
         process_unreviewed = bool(touches_process) and not _covers(root, passes, own_ids, 2, b, branch_passes)
         if process_unreviewed:
@@ -297,7 +309,9 @@ def candidates(root: Path, local: str, base: str) -> list[dict]:
                                 f"— gate code needs it whatever the plan's tier")
         elif archived and cleared_all:
             needs_review = [p for p in c["plans"] if p["tier"] is not None and p["tier"] >= 2 and not p["waived"]]
-            c["by"] = ("archived plan + REVIEW pass" if needs_review
+            c["by"] = ("archived plan + verified template render"
+                       if any(p.get("verified_template") for p in c["plans"])
+                       else "archived plan + REVIEW pass" if needs_review
                        else "archived plan (Tier 0-1 or waived: no review required)")
         elif rep and rep["state"] == "review-pass":
             if archived and not cleared_all:
@@ -325,7 +339,7 @@ def candidates(root: Path, local: str, base: str) -> list[dict]:
         overlap = sorted(files & boarded_files)
         if overlap:
             c["reasons"].append(f"overlaps {len(overlap)} file(s) with a branch already aboard: {', '.join(overlap[:3])}")
-        if c["by"] and not overlap and not open_q and not branch_unreadable:
+        if c["by"] and not overlap and not open_q and not branch_unreadable and not template_blocked:
             c["eligible"] = True
             boarded_files |= files
         out.append(c)

@@ -23,3 +23,28 @@ Scope — not code volume — sets the tier. A change that another component, co
 A yes to any of these lifts the change to **Tier 2+ regardless of diff size** — a ten-line redirect that reads a stored URL is Tier 2, not Tier 0. When in doubt, tier up; the cost of an unneeded review is small next to the cost of an escaped defect.
 
 **Verification scales too.** The tier sets not just *how much* review but *how independent* it must be (`verification-independence.md`): Tier 0–1 an in-context self-check; Tier 2 a fresh process reviewing a read-only bundle, not the producing context; Tier 3 additionally cross-model (where a second family is available) plus adversarial review. A refute — a fresh agent that tries to break the change before its first review round — scales with it (`refute.md`): optional at Tier 1, one run at Tier 2, every fix round again at Tier 3 and for gate code. Production (plan, execute) runs in one warm context by design — independence is spent on verification, not manufactured during production.
+
+## Template updates
+
+A pure template update uses computed provenance instead of another review of
+released template code. `template_update.py --verify --base <integration-base>`
+re-renders both pinned releases with the recorded answers. It compares the
+old project files too: deleting a local duty during an update is project delta,
+even when the result is identical to the new release.
+
+- **Pure update:** gates and project tests must pass; no REVIEW is needed for
+  release-identical files. Mark its plan `template-update: true`. This is an
+  opt-in to verification, not a waiver; the gate recomputes the evidence.
+- **Project delta:** one independent Tier 2 reviewer covers that delta, with
+  a digest-bound REVIEW of the update range; no panel. Local files, owned
+  files, hooks, Makefiles, deleted or edited tests and conflict resolutions
+  stay project work. Answer changes stay project delta too.
+- **Enforcement migration:** changes to gate code or its configuration stay
+  Tier 3. Helpers can change enforcement transitively, so changes anywhere
+  in `scripts/process/` are conservatively treated as migrations.
+
+The owner or steward acknowledges the release behavior notes with
+`template_update.py --verify --base <integration-base> --ack <owner>`; commit
+the generated acknowledgment. This attests a decision, not file coverage.
+A missing render, changed source, mutable HEAD pin or mismatched file cannot
+use the exemption. `releases.md` gives the update sequence.

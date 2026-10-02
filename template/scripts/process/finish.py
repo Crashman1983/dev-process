@@ -67,6 +67,8 @@ from check_review import (  # noqa: E402  (one owner for grammar + arithmetic)
     paths_in_flight,
     speckit_unreviewed,
     stale_review,
+    verified_template_plan,
+    template_review_findings,
 )
 from gate_invoke import (  # noqa: E402  (one owner for "how to launch")
     gate_runner_argv,
@@ -122,6 +124,13 @@ def check(root: Path) -> tuple[list[str], list[str]]:
     # plan counts as this branch's (fail closed), and the broken read is named
     has_base = merge_base(root) is not None
     in_flight = paths_in_flight(root) if has_base else None
+    if has_base:
+        from template_verify import verify
+        try:
+            update = verify(root, merge_base(root))
+            blockers.extend(template_review_findings(root, update, passes))
+        except (ValueError, OSError, subprocess.TimeoutExpired) as exc:
+            blockers.append(f'template verification failed: {exc}')
     if has_base and in_flight is None:
         blockers.append(f"{IN_FLIGHT_UNKNOWN} — every active plan counts as this branch's; "
                         f"repair the clone (`git fsck`, fetch) and run finish again")
@@ -141,6 +150,9 @@ def check(root: Path) -> tuple[list[str], list[str]]:
             if tier is None:
                 continue
             if tier < 2:
+                to_archive.append(p.name)
+                continue
+            if verified_template_plan(root, f"{PLANS_ACTIVE}/{p.name}", text):
                 to_archive.append(p.name)
                 continue
             if review_waived(text):
