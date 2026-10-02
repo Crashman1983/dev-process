@@ -1166,6 +1166,20 @@ ein Wächter-Test gegen doppelte Klammern ohne Leerzeichen in Python-Vorlagen.
 Wer v2.27.1 oder v2.28.0 installiert hat und am Push scheitert: auf v2.28.1
 aktualisieren, `v2.28.1`.
 
+**v2.43.2 — Safe automatic template verification and cleanup revalidation.**
+
+- Classify actual project changes to process enforcement as Tier 3 migrations,
+  including local additions during documentation-only template upgrades.
+- Skip tasks during automatic provenance rendering and isolate Copier settings
+  without trust, preventing locally trusted Jinja extensions from executing
+  before review. Explicit updates retain their operator-approved contract.
+- Revalidate the full worktree keep policy immediately before removal using
+  fresh worktree/session records and the integration base from tidy or train.
+  Preserve ignored work created after initial cleanup clearance.
+- Add nine real Git/Copier regressions and document independent Codex review.
+  External writes during inspection and Git deletion remain non-atomic;
+  a required downstream Claude review is still outstanding.
+
 **v2.43.1 — Documentation aligned with verified template updates.**
 
 - Refresh the English and German overviews and rebuild the German PDF for

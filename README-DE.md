@@ -15,7 +15,7 @@ Repositories. Er ändert nicht die Agenten, sondern ihre Arbeitsbedingungen:
 Regeln prüft ein Programm, der Aufwand folgt dem Risiko, niemand nimmt die
 eigene Arbeit ab, und das Gedächtnis liegt in Dateien statt im Kontext.
 
-> **Status:** `v2.43.1` — Sub-Projekte SP1–SP75. Historie: [`CHANGELOG.md`](CHANGELOG.md); Releases entstehen mit `tools/release.py` (`--check` nennt, was nicht auf der Version steht).
+> **Status:** `v2.43.2` — Sub-Projekte SP1–SP75. Historie: [`CHANGELOG.md`](CHANGELOG.md); Releases entstehen mit `tools/release.py` (`--check` nennt, was nicht auf der Version steht).
 
 ## Einstieg
 
