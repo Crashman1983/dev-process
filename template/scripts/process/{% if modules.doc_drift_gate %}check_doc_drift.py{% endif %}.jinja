@@ -14,6 +14,7 @@ thin, and anchors regrow silently. An anchor over the line budget is a note,
 never a failure — the budget flags accretion for a human, it does not block."""
 from __future__ import annotations
 
+import ast
 import os
 import re
 import sys
@@ -21,7 +22,7 @@ from pathlib import Path
 
 LINK = re.compile(r"\[[^\]]+\]\(([^)]+)\)")          # markdown links
 BACKTICK = re.compile(r"`([^`]+\.[a-z]{1,5})`")      # `path/to/file.ext`
-POINTER = re.compile(r"`([^`]+?\.[a-z]{1,5})::[^`]*`")  # `path/to/file.ext::symbol`
+POINTER = re.compile(r"`([^`]+?\.[a-z]{1,5})::([^`]*)`")  # `path/to/file.ext::symbol`
 PLACEHOLDER = re.compile(r"[<>*]|YYYY|NNNN")         # illustrative, not literal
 SCAN_DIRS = ["docs/process", ".claude/commands", ".github/prompts"]
 SCAN_FILES = ["CLAUDE.md", "AGENTS.md", ".github/copilot-instructions.md",
@@ -54,10 +55,10 @@ def _candidates(text: str):
     for m in BACKTICK.finditer(text):
         yield m.group(1)
     for m in POINTER.finditer(text):
-        yield m.group(1)
+        yield m.group(1) + "::" + m.group(2)
 
 
-def _is_local_path(ref: str) -> bool:
+def _is_local_path(ref: str, *, pointer: bool = False) -> bool:
     if ref.startswith(("http://", "https://", "#", "mailto:")):
         return False
     if " " in ref:          # a command or prose fragment, not a path
@@ -66,7 +67,7 @@ def _is_local_path(ref: str) -> bool:
         return False
     if ".process-work/" in ref:  # runtime working memory, created at runtime, never shipped
         return False
-    return "/" in ref
+    return "/" in ref or pointer
 
 
 def find_drift(root: Path) -> list[str]:
@@ -89,14 +90,33 @@ def find_drift(root: Path) -> list[str]:
             problems.append(f"{doc.relative_to(root)} -> not valid UTF-8: {exc}")
             continue
         for ref in _candidates(text):
-            ref_clean = ref.split("#", 1)[0].strip()
-            if not _is_local_path(ref_clean):
+            ref_clean, _, symbol = ref.split("#", 1)[0].strip().partition("::")
+            if not _is_local_path(ref_clean, pointer=bool(symbol)):
                 continue
             # standard markdown: ./ and ../ are document-relative; bare paths
             # keep the repo-root convention
             base = doc.parent if ref_clean.startswith(("./", "../")) else root
-            if not (base / ref_clean).resolve().exists():
+            target = (base / ref_clean).resolve()
+            if not target.exists():
                 problems.append(f"{doc.relative_to(root)} -> missing '{ref_clean}'")
+            elif symbol and target.suffix == ".py":
+                name = symbol.split("(", 1)[0].strip()
+                try:
+                    tree = ast.parse(target.read_text(encoding="utf-8"))
+                    definitions = set()
+                    def visit(node, prefix=""):
+                        for child in ast.iter_child_nodes(node):
+                            if isinstance(child, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+                                qualified = prefix + child.name
+                                definitions.add(qualified)
+                                visit(child, qualified + ".")
+                            else:
+                                visit(child, prefix)
+                    visit(tree)
+                    if name not in definitions:
+                        problems.append(f"{doc.relative_to(root)} -> missing symbol '{name}' in '{ref_clean}'")
+                except (OSError, UnicodeError, SyntaxError) as exc:
+                    problems.append(f"{doc.relative_to(root)} -> cannot check symbol '{name}' in '{ref_clean}': {exc}")
     return problems
 
 

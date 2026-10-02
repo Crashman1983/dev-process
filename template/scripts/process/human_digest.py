@@ -34,13 +34,15 @@ from pathlib import Path
 
 sys.dont_write_bytecode = True  # the reader must not dirty the tree
 
+sys.dont_write_bytecode = True
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from check_review import plan_tier  # noqa: E402
+
 ROOT = Path(__file__).resolve().parents[2]
 SPECS = "specs"
 PLANS_ARCHIVE = ".process-work/plans/archive"
 PLANS_ACTIVE = ".process-work/plans"
 DATE_PREFIX = re.compile(r"^(\d{4}-\d{2}-\d{2})-")
-TIER = re.compile(r"^\s*(?:[-*+]\s+)?[*_]*tier[*_]*\s*:\s*[*_]*\s*(\d+)\b",
-                  re.IGNORECASE | re.MULTILINE)
 ISSUE = re.compile(r"^\s*(?:[-*+]\s+)?[*_]*issue[*_]*\s*:\s*(\S+)",
                    re.IGNORECASE | re.MULTILINE)
 MARKER = re.compile(r"\[NEEDS CLARIFICATION[^\]]*\]")
@@ -127,8 +129,8 @@ def section_merged(root: Path, days: int) -> tuple[list[str], list[str]]:
         if d < cutoff:
             continue
         text = _read(p)
-        tm, im = TIER.search(text), ISSUE.search(text)
-        tier = tm.group(1) if tm else "?"
+        tier, im = plan_tier(text), ISSUE.search(text)
+        tier = str(tier) if tier is not None else "?"
         issue = im.group(1) if im else "-"
         out.append(f"- {p.name} · tier {tier} · issue {issue}")
         candidates.append(p.name)

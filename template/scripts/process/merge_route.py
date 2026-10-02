@@ -72,18 +72,20 @@ from typing import NamedTuple
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling imports
+from process_git import git_environment  # noqa: E402
 from check_review import (  # noqa: E402  (one owner for "what is main" and "where does it go")
     INTEGRATION_TARGET_REFS,
+    integration_targets,
     PRE_COMMIT_TARGET_ENV,
 )
 
 PHASE_ENV = "PROCESS_PHASE"
 ROUTE_ENV = "PROCESS_MERGE_ROUTE"
 OVERRIDE_ENV = "PROCESS_OWNER_OVERRIDE"
-BARRED_PHASES = ("plan", "review")
+BARRED_PHASES = ("brainstorm", "plan", "review")
 # dispatch.PHASES, repeated so that a broken dispatch import cannot widen what
 # the environment may claim (test_merge_route pins the two equal)
-KNOWN_PHASES = ("plan", "execute", "review")
+KNOWN_PHASES = ("brainstorm", "plan", "execute", "review")
 ROUTES = ("train", "finish")
 LEDGER_NAME = "process-owner-overrides.log"
 OVERRIDE_KIND = "override"
@@ -103,14 +105,15 @@ class Verdict(NamedTuple):
 def _git(root: Path, *args: str) -> str:
     try:
         result = subprocess.run(["git", "-C", str(root), *args], capture_output=True,
-                                text=True, timeout=60, check=False)
+                                text=True, timeout=60, check=False, env=git_environment())
     except (OSError, subprocess.TimeoutExpired):
         return ""
     return result.stdout.strip() if result.returncode == 0 else ""
 
 
-def pushes_to_integration(targets: list[str]) -> bool:
-    return any(t in INTEGRATION_TARGET_REFS for t in targets)
+def pushes_to_integration(targets: list[str], root: Path | None = None) -> bool:
+    return any(t in integration_targets(root) if root is not None else t in INTEGRATION_TARGET_REFS
+               for t in targets)
 
 
 def _ancestor_pids() -> set[int]:
@@ -127,7 +130,7 @@ def _ancestor_pids() -> set[int]:
         except (OSError, ValueError, IndexError):
             try:
                 ps = subprocess.run(["ps", "-o", "ppid=", "-p", str(pid)], capture_output=True,
-                                    text=True, timeout=10, check=False)
+                                    text=True, timeout=10, check=False, env=git_environment())
             except (OSError, subprocess.TimeoutExpired):
                 break
             pid = int(ps.stdout.strip()) if ps.stdout.strip().isdigit() else 0
@@ -163,7 +166,7 @@ def _record_defect(path: Path) -> str:
                   or (isinstance(record.get("tmux_window"), str) and bool(record["tmux_window"]))
                   or (isinstance(pid, int) and not isinstance(pid, bool) and pid > 0
                       and isinstance(pid_start, str) and bool(pid_start)))
-    return "" if has_anchor else "without a liveness anchor (`tmux_window`, `remote` or `pid` + `pid_start`)"
+    return dispatch.record_anchor_defect(record) if has_anchor else "without a liveness anchor (`tmux_window`, `remote` or `pid` + `pid_start`)"
 
 
 def record_defects(root: Path) -> list[str]:
@@ -205,8 +208,8 @@ def recorded_phases(root: Path) -> tuple[set[str], str]:
 
         defects = record_defects(root)
         if defects:
-            return set(), (f"the dispatch record {', '.join(defects)} cannot be read — check or "
-                           f"delete the file under <git-common-dir>/{dispatch.DISPATCH_DIR}/, "
+            return set(), (f"the dispatch record {', '.join(defects)} cannot be read — run `dispatch.py stop <branch>` or repair "
+                           f"the file under <git-common-dir>/{dispatch.DISPATCH_DIR}/, "
                            f"then push")
         ancestors = _ancestor_pids()
         phases: set[str] = set()
@@ -240,7 +243,7 @@ def session_phases(root: Path, env: dict[str, str]) -> tuple[set[str], str]:
 
 
 def check(root: Path, targets: list[str], env: dict[str, str], *, bypass: str = "") -> Verdict:
-    if not pushes_to_integration(targets):
+    if not pushes_to_integration(targets, root):
         return Verdict(True)
     phases, problem = session_phases(root, env)
     barred = sorted(phases & set(BARRED_PHASES))
@@ -338,7 +341,31 @@ def push_targets(env: dict[str, str], *sources: list[str]) -> list[str]:
     return owner(env, *sources)
 
 
-def standing_blocks(root: Path, lines: list[RefLine]) -> list[str]:
+def ref_update_verdict(root: Path, lines: list[RefLine], env: dict[str, str]) -> Verdict:
+    """Remote-only history is never lost behind a merge-base or a skipped gate."""
+    from check_review import _git_bytes, standing_block_findings  # noqa: PLC0415
+
+    overridden = False
+    reason = " ".join(env.get(OVERRIDE_ENV, "").split())
+    for line in lines:
+        if line.remote_ref not in integration_targets(root) or not line.remote_sha.strip("0"):
+            continue
+        if _git_bytes(root, "merge-base", "--is-ancestor", line.remote_sha, line.local_sha) is not None:
+            continue
+        common = _git_bytes(root, "merge-base", line.remote_sha, line.local_sha)
+        if not common:
+            return Verdict(False, f"merge_route: cannot bound the non-fast-forward update of {line.remote_ref}; fetch the remote and retry")
+        lost = standing_block_findings(root, line.remote_sha, remote_sha=common.decode().strip())
+        if lost:
+            return Verdict(False, "merge_route: non-fast-forward would discard remote review history: " + "; ".join(lost))
+        phases, problem = session_phases(root, env)
+        if not reason or phases or problem:
+            return Verdict(False, f"merge_route: update of {line.remote_ref} is not fast-forward — only a named {OVERRIDE_ENV} from the owner can override it")
+        overridden = True
+    return Verdict(True, ledger=(OVERRIDE_KIND, reason) if overridden else None)
+
+
+def standing_blocks(root: Path, lines: list[RefLine], *, allow_non_fast_forward: bool = False) -> list[str]:
     """check_review's standing-block arm for every ref line to main: tip = the
     pushed commit, base = what the remote holds (its SHA on the line; all zeros
     = the push creates main and carries every work at the tip)."""
@@ -346,13 +373,14 @@ def standing_blocks(root: Path, lines: list[RefLine]) -> list[str]:
 
     findings: list[str] = []
     for line in lines:
-        if line.remote_ref not in INTEGRATION_TARGET_REFS or not line.local_sha.strip("0"):
+        if line.remote_ref not in integration_targets(root) or not line.local_sha.strip("0"):
             continue  # another ref, or the deletion of main (the route check owns that)
         if not _git(root, "rev-parse", "--verify", "--quiet", f"{line.local_sha}^{{commit}}"):
             findings.append(f"{line.local_sha} pushed to {line.remote_ref} is no commit of this "
                             f"clone — its records cannot be read, so the push is refused")
             continue
-        findings += standing_block_findings(root, line.local_sha, remote_sha=line.remote_sha)
+        findings += standing_block_findings(root, line.local_sha, remote_sha=line.remote_sha,
+                                            allow_non_fast_forward=allow_non_fast_forward)
     return findings
 
 
@@ -416,7 +444,7 @@ def hook_check(root: Path, env: dict[str, str]) -> int:
     if guard_ran(root, env):
         return 0
     targets = push_targets(env)
-    if pushes_to_integration(targets):
+    if pushes_to_integration(targets, root):
         print(f"merge_route: the merge guard did not see this push's ref lines (it runs as "
               f"pre-push.legacy under pre-commit) — install it with `{INSTALL_HINT}` "
               f"after `pre-commit install`; a push to main without it is refused",
@@ -453,10 +481,16 @@ def main(argv: list[str]) -> int:
         print(verdict.message, file=sys.stderr)
     if not verdict.ok:
         return 1
+    updates = ref_update_verdict(root, lines, env)
+    if not updates.ok:
+        print(updates.message, file=sys.stderr)
+        return 1
+    if updates.ledger:
+        verdict = updates
     # the verdict of the review records travels with the ref lines; a skipped gate
     # (logged above) skips it too — the owner's emergency exit
     if lines and not bypass:
-        findings = standing_blocks(root, lines)
+        findings = standing_blocks(root, lines, allow_non_fast_forward=bool(updates.ledger))
         for finding in sorted(set(findings)):
             print(f"review: {finding}", file=sys.stderr)
         if findings:

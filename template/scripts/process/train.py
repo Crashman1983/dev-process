@@ -68,6 +68,8 @@ from gate_invoke import gate_runner_argv, not_runnable_reason  # noqa: E402
 import report as _report  # noqa: E402
 import tower as _tower  # noqa: E402
 
+from process_git import git_environment  # noqa: E402
+
 ARCHIVE = ".process-work/plans/archive"
 PLANS = ".process-work/plans"
 # the gates' own code: a branch that changes it boards only on a REVIEW pass
@@ -90,11 +92,19 @@ _GIT_ENV = {**{k: v for k, v in os.environ.items() if k != MERGE_ROUTE_ENV},
 
 def _git(root: Path, *args: str, check: bool = False,
          env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
+    timeout = 300
+    if args and args[0] == "push":
+        try:
+            timeout = int(os.environ.get("PROCESS_TRAIN_PUSH_TIMEOUT_SECONDS", "1800"))
+            if timeout <= 0:
+                raise ValueError
+        except ValueError:
+            return subprocess.CompletedProcess(args, 2, "", "PROCESS_TRAIN_PUSH_TIMEOUT_SECONDS must be a positive integer")
     try:
         r = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True,
-                           timeout=300, env=_GIT_ENV if env is None else {**_GIT_ENV, **env})
+                           timeout=timeout, env=git_environment(_GIT_ENV if env is None else {**_GIT_ENV, **env}))
     except subprocess.TimeoutExpired:
-        r = subprocess.CompletedProcess(args, 124, "", f"git {' '.join(args)}: timed out after 300 s")
+        r = subprocess.CompletedProcess(args, 124, "", f"git {' '.join(args)}: timed out after {timeout} s")
     if check and r.returncode != 0:
         raise SystemExit(f"train: git {' '.join(args)} failed:\n{r.stderr.strip()}")
     return r
@@ -108,7 +118,7 @@ def _out(root: Path, *args: str) -> str:
 def _git_bytes(root: Path, *args: str) -> bytes | None:
     """git's raw stdout (for `-z` output), None when git failed."""
     try:
-        r = subprocess.run(["git", "-C", str(root), *args], capture_output=True, timeout=300, env=_GIT_ENV)
+        r = subprocess.run(["git", "-C", str(root), *args], capture_output=True, timeout=300, env=git_environment(_GIT_ENV))
     except subprocess.TimeoutExpired:
         return None
     return r.stdout if r.returncode == 0 else None
@@ -126,7 +136,8 @@ def _paths(root: Path, *args: str) -> list[str] | None:
 
 
 def local_integration(root: Path) -> str | None:
-    for name in ("main", "master"):
+    for target in _review.integration_targets(root):
+        name = target.removeprefix("refs/heads/")
         if _git(root, "rev-parse", "--verify", "--quiet", f"refs/heads/{name}").returncode == 0:
             return name
     return None
@@ -243,8 +254,7 @@ def candidates(root: Path, local: str, base: str) -> list[dict]:
                 continue
             text = _review._unfenced(shown.stdout)  # a fenced example is not a declaration
             stem = Path(rel).stem
-            tier_m = _review.TIER_DECL.search(text)
-            tier = int(tier_m.group(1)) if tier_m else 0
+            tier = _review.plan_tier(text) or 0
             unique = dedated.get(_review.DATE_PREFIX.sub("", stem), 0) <= 1
             ids = _review._plan_work_ids(stem, text, include_dedated=unique)
             if not (_names_branch(b, ids, issues) or stem not in base_plan_stems):
@@ -252,7 +262,7 @@ def candidates(root: Path, local: str, base: str) -> list[dict]:
                 continue
             own_archived.append(rel)
             own_ids |= ids
-            waived = bool(_review.WAIVED.search(text))
+            waived = _review.review_waived(text)
             ok = tier < 2 or waived or _covers(root, passes, ids, tier, b, branch_passes)
             if touches_process and not _covers(root, passes, ids, 2, b, branch_passes):
                 ok = False
@@ -354,7 +364,8 @@ def _covers(root: Path, passes: list[dict], ids: set[str], tier: int, tip: str,
     for r in with_head:
         if _git(root, "merge-base", "--is-ancestor", r["head"], tip).returncode != 0:
             continue
-        late = _review._unreviewed_paths(root, r["head"], tip, _review.work_bases(passes, ids))
+        late = _review._unreviewed_paths(root, r["head"], tip, _review.work_bases(passes, ids),
+                                          _review._reviewed_heads(passes, tier, _review._known_work(root, ref=tip)))
         if late is not None and not late:
             return True
     return False
@@ -767,7 +778,7 @@ def _sh(cwd: Path, cmd: str, log) -> str:
     red: dict[str, None] = {}
     kept: list[str] = []
     proc = subprocess.Popen(["sh", "-c", cmd], cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                            text=True, errors="replace")
+                            text=True, errors="replace", env=git_environment())
     assert proc.stdout is not None
     for line in proc.stdout:
         _echo(line, end="")
@@ -925,12 +936,11 @@ def _settle_plans(wt: Path, base: str, branch: str, log) -> tuple[list[str], set
             continue  # another work's plan: touched, renamed or archived here
         if STAYS_ACTIVE.search(plain):
             continue
-        tier_m = _review.TIER_DECL.search(plain)
-        if tier_m is None or _OPEN_TASK.search(plain):
+        tier = _review.plan_tier(plain)
+        if tier is None or _OPEN_TASK.search(plain):
             continue  # no tier (the gate's finding) or tasks still open: not finished
-        tier = int(tier_m.group(1))
         if _review.record_kind(rel) == "plan":
-            if not (tier < 2 or _review.WAIVED.search(plain) or _review._cleared(passes, ids, tier)):
+            if not (tier < 2 or _review.review_waived(plain) or _review._cleared(passes, ids, tier)):
                 continue  # not cleared: it stays active, and its issue open
             dest = f"{ARCHIVE}/{Path(rel).name}"
             if (wt / dest).exists():

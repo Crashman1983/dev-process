@@ -253,3 +253,34 @@ def test_through_pre_commit_without_the_guard_main_is_refused(framework):
     assert r.returncode != 0 and "install_hooks.py" in (r.stdout + r.stderr)
     assert _remote_head(bare) == before
     assert _push(out, "-q", "origin", "feature").returncode == 0  # a branch push: a note
+
+
+@pytest.mark.parametrize('remote_block', [False, True])
+def test_non_fast_forward_needs_an_owner_and_never_discards_a_remote_block(render, tmp_path, remote_block):
+    out, bare = _project(render, tmp_path)
+    assert _install_guard(out).returncode == 0
+    writer = tmp_path / 'other'
+    _git(out, 'clone', '-q', str(bare), str(writer))
+    _git(writer, 'config', 'user.name', 'Other')
+    _git(writer, 'config', 'user.email', 'other@example.com')
+    (writer / 'remote.txt').write_text('remote work\n')
+    if remote_block:
+        journal = writer / '.process-work/journal/remote-block.md'
+        journal.parent.mkdir(parents=True, exist_ok=True)
+        journal.write_text(BLOCK)
+    _git(writer, 'add', '-A')
+    _git(writer, 'commit', '-qm', 'remote work (#2168)')
+    _git(writer, 'push', '-q', 'origin', 'main')
+    _git(out, 'fetch', '-q', 'origin')
+    before = _remote_head(bare)
+    refused = _push(out, '-f', 'origin', 'HEAD:main', env={'PROCESS_MERGE_ROUTE': 'finish'})
+    assert refused.returncode != 0 and 'fast-forward' in refused.stderr
+    assert _remote_head(bare) == before
+    approved = _push(out, '-f', 'origin', 'HEAD:main',
+                     env={'PROCESS_OWNER_OVERRIDE': 'restore the approved feature head'})
+    if remote_block:
+        assert approved.returncode != 0 and '2168' in approved.stderr and 'verdict=block' in approved.stderr
+        assert _remote_head(bare) == before
+    else:
+        assert approved.returncode == 0, approved.stderr
+        assert 'restore the approved feature head' in (out / '.git/process-owner-overrides.log').read_text()

@@ -47,3 +47,12 @@ process file.
 Active optional modules — read the module doc for the area you touch:
 {% for _slug in _active %}- `docs/process/modules/{{ _slug }}.md`
 {% endfor %}{%- endif %}
+
+## Steward channel
+
+When acting as steward, read the resolved `decision_channel` using
+`uv run scripts/process/dispatch.py policy`. Send instructions and receive
+worker events there; the tower and reports remain the source of truth.
+On start or restart, notify each live, remote or unknown worker once that
+the steward is back and events go there. Without a channel, use reports only.
+The protocol is in `docs/process/tower.md`.

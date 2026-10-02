@@ -296,6 +296,22 @@ def _check_one(root: Path, path: Path, plans: dict[str, str], in_flight: set[str
         soft.append(f"{rel}: no sealed reference — the reviewer judges AFTER pictures "
                     "against the contract text alone")
 
+    # Notes may cite older seals only when their sentence says historical.
+    notes = data.get("notes", "")
+    if isinstance(notes, str):
+        current = ""
+        seal_path = _inside(root, ref + "/manifest.sha256") if ref else None
+        if seal_path and seal_path.is_file():
+            current = (seal_path.read_text(encoding="utf-8").split() or [""])[0]
+        for sentence in re.split(r"\n|;|(?<=[.!?])\s+", notes):
+            if re.search(r"\b(?:historical|historisch)\b", sentence, re.IGNORECASE):
+                continue
+            # Support the abbreviated hashes used by design-review notes.
+            hashes = re.findall(r"(?<![0-9a-f])([0-9a-f]{8,64})(?![0-9a-f])", sentence)
+            for cited in hashes:
+                if not current or not current.startswith(cited):
+                    hard.append(f"{rel}: notes cite seal {cited}, which is not current — mark the citation historical or cite manifest.sha256")
+
     # --- in flight: a UI change under the surface must cite what it implements ---
     globs = [_glob_re(g.strip()) for g in data.get("paths", [])]
     if globs and in_flight:

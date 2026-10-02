@@ -54,6 +54,7 @@ from typing import NamedTuple
 # check_review.py owns the REVIEW grammar; check_kernel.py owns kernel-block
 # extraction — importing both keeps this tool byte-honest with the gates
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling import
+from process_git import git_environment  # noqa: E402
 import check_kernel as _kernel_gate  # noqa: E402
 import check_review as _review_gate  # noqa: E402
 import gate_invoke as _launch  # noqa: E402  (one owner for "how to start the runner")
@@ -67,7 +68,7 @@ PLANS = _review_gate.PLANS_ACTIVE
 # before the bundle is built — workflow.md), or a Spec Kit plan
 PLAN_HOMES = (*_review_gate.PLAN_KINDS, "plan-archive")
 REVIEWS = ".process-work/reviews"
-DEFAULT_BASES = ("origin/main", "main", "origin/master", "master")
+DEFAULT_BASES = _review_gate.INTEGRATION_REFS
 PREFLIGHT_TIMEOUT_S = 600
 DELTA_MAX_TIER = 2
 
@@ -97,7 +98,7 @@ def _git(root: Path, *args: str) -> str | None:
         # replacement chars in the diff, not crash the whole bundle
         r = subprocess.run(["git", "-C", str(root), *args],
                            capture_output=True, text=True, timeout=60,
-                           encoding="utf-8", errors="replace")
+                           encoding="utf-8", errors="replace", env=git_environment())
     except (OSError, subprocess.TimeoutExpired):
         return None
     return r.stdout if r.returncode == 0 else None
@@ -110,6 +111,7 @@ def _git_bytes(root: Path, *args: str) -> bytes | None:
             ["git", "-C", str(root), *args],
             capture_output=True,
             timeout=60,
+            env=git_environment(),
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
@@ -124,7 +126,7 @@ def _repo_root(cwd: Path) -> Path:
 
 
 def _resolve_base(root: Path, base: str | None) -> str | None:
-    candidates = (base,) if base else DEFAULT_BASES
+    candidates = (base,) if base else _review_gate.integration_refs(root)
     for c in candidates:
         if c and _git(root, "rev-parse", "--verify", "--quiet", f"{c}^{{commit}}") is not None:
             return c
@@ -143,6 +145,7 @@ def _preflight(root: Path) -> tuple[bool, int, str]:
         result = subprocess.run(
             argv, cwd=root, capture_output=True, text=True,
             timeout=PREFLIGHT_TIMEOUT_S, encoding="utf-8", errors="replace",
+            env=git_environment(),
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         return False, 2, (
@@ -395,10 +398,11 @@ def _review_artifact(root: Path, base_ref: str, *, delta: bool = False) -> _Revi
     head_sha = head.strip()
     # ONE formula, owned by the gate that verifies it (check_review.artifact_diff):
     # canonical three-dot diff with every git-config knob pinned. A delta bundle
-    # (`since` is an ancestor of HEAD) yields the same bytes as `since..HEAD`.
+    # uses own first-parent changes and integration merge resolutions.
     range_spec = f"{base_sha}...{head_sha}"
-    raw = _review_gate.artifact_diff(root, base_sha, head_sha)
-    shown = _git_bytes(root, *READABLE_DIFF, range_spec)
+    raw = _review_gate.artifact_diff(root, base_sha, head_sha, mode="delta" if delta else "full")
+    shown = (_review_gate.delta_diff(root, base_sha, head_sha, binary=False) if delta
+             else _git_bytes(root, *READABLE_DIFF, range_spec))
     if raw is None or shown is None:
         return None
     text = shown.decode("utf-8", errors="replace")
@@ -624,7 +628,9 @@ def build(root: Path, base: str | None, plan_filter: str | None = None,
     if plans is None:
         plans = _plans_under_review(root, resolved, plan_filter)
     plan_texts = {plan: _read_plan(plan) for plan in plans}
-    plan_tier = _declared_tier(list(plan_texts.values()))
+    plan_tier = _declared_tier([text for plan, text in plan_texts.items()
+                                  if not plan.name.startswith(_review_gate.DESIGN_DOC_PREFIX)
+                                  and not _review_gate.review_waived(text)])
     # a caller's --tier is a floor, never a discount: the higher one decides
     tier = plan_tier if declared_tier is None else max(plan_tier or 0, declared_tier)
     # the plans a refute is asked of by tier: not a design doc, not a plan
@@ -758,10 +764,13 @@ def build(root: Path, base: str | None, plan_filter: str | None = None,
             "git may be absent or the repo unborn)*\n")
     else:
         artifact = _review_artifact(root, since or resolved, delta=bool(since))
+        if artifact is None and since:
+            raise SystemExit("make_review_bundle: cannot bound this delta — use a full review "
+                             "for non-first-parent, feature merge or octopus histories")
         if artifact is None:
             add(f"*(unavailable: `git diff {resolved}...HEAD` failed)*\n")
         else:
-            add(f"REVIEW_ARTIFACT base={artifact.base} head={artifact.head} diff={artifact.digest}\n")
+            add(f"REVIEW_ARTIFACT base={artifact.base} head={artifact.head} diff={artifact.digest}{' mode=delta' if since else ''}\n")
             if since:
                 add(f"REVIEW_SCOPE mode=delta since={artifact.base} head={artifact.head}\n")
             diff = artifact.text
@@ -777,8 +786,11 @@ def build(root: Path, base: str | None, plan_filter: str | None = None,
                 # hunting `diff --git` lines (downstream: two reviewers spent a
                 # full round on an artifact that lacked five files); -z through
                 # the owner, so a name arrives unquoted
-                entries = _review_gate.name_status(_review_gate._git_bytes(
-                    root, "diff", "--name-status", "--no-renames", "-z", artifact.range_spec))
+                entries = _review_gate.name_status(
+                    _review_gate.delta_diff(root, artifact.base, artifact.head, names=True) if since
+                    else _review_gate._git_bytes(root, "diff", "--name-status", "--no-renames", "-z", artifact.range_spec))
+                if entries is not None:
+                    entries = list(dict.fromkeys(entries))
                 if entries is None:
                     raise SystemExit(f"make_review_bundle: git cannot list the files of "
                                      f"{artifact.range_spec} — repair the clone and build again")
@@ -793,7 +805,8 @@ def build(root: Path, base: str | None, plan_filter: str | None = None,
                     # a binary reads as `Binary files … differ`, without a size:
                     # the stat block names path and bytes, so the gap is not
                     # mistaken for completeness. The digest still covers them.
-                    stat = _git(root, "diff", "--stat=200", "--no-renames", artifact.range_spec)
+                    stat = ("\n".join(artifact.text.splitlines()) if since
+                            else _git(root, "diff", "--stat=200", "--no-renames", artifact.range_spec))
                     add("*(binary files carry no content in this bundle — their encoded payload "
                         "is unreadable to you, and the digest above still covers it. Judge them "
                         "by path, status and size:)*\n")

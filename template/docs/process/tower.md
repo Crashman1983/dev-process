@@ -232,3 +232,37 @@ same on every run — so that the agent's tokens go into judgment (assign,
 redirect, stop) and not into asking thirteen workers how they are doing.
 The orchestrator never implements, reviews, or certifies: those stay with
 the gates and the independent reviewer (`verification-independence.md`).
+
+## Brainstorm and approval
+
+`dispatch.py start --phase brainstorm --tier 2` (or Tier 3) starts a
+`/brainstorm` design dialogue with the owner. Its model comes from the same
+policy as the other phases. A `planned` report from this phase never chains
+to execute. After the owner approves, the steward stops the brainstorm and
+starts `--phase plan --owner-approved` for the same issue. A persistent phase
+history prevents execute from bypassing this step even after stop or restart.
+
+## Local findings
+
+Project checks live in `tower.local.json` under docs/process, when needed:
+
+```json
+{"servers": {"command": ["python3", "scripts/check_unclaimed_servers.py"]}}
+```
+
+Each command runs from the repo root with a 30-second timeout and prints a
+JSON list of objects with `kind`, `severity` (`high`, `medium`, `low`), `what`
+and `because`. For an orphan server, include its port, pid, start time and
+working directory in `what`, and claim/issue status in `because`. These checks
+are read-only: they do not stop servers. Findings are added to core findings;
+a malformed configuration, timeout or failed command becomes a high-severity
+`local-findings-error`. Commands are trusted project code, reviewed like CI.
+
+## Channel and restart
+
+The resolved policy's `decision_channel` carries worker instructions and
+one-line events: planned, pushed, blocked with the question, review pass or
+block, done, red gate or CI, refused push gate, and scope or plan conflict.
+The tower and reports stay the record. On steward start or restart, notify
+all live, remote or unknown sessions once that the steward is back and events
+go there. Without a channel, keep reports only.

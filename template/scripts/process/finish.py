@@ -47,14 +47,16 @@ sys.dont_write_bytecode = True
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling import
+from process_git import git_environment  # noqa: E402
 from check_review import (  # noqa: E402  (one owner for grammar + arithmetic)
     JOURNAL_DIR,
     PLANS_ACTIVE,
+    integration_targets,
     PLANS_ARCHIVE,
     SPECS_DIR,
-    TIER_DECL,
+    plan_tier,
+    review_waived,
     IN_FLIGHT_UNKNOWN,
-    WAIVED,
     _cleared,
     _plan_issue_numbers,
     _plan_work_ids,
@@ -75,7 +77,7 @@ from gate_invoke import (  # noqa: E402  (one owner for "how to launch")
 
 def _git(*args: str) -> str | None:
     proc = subprocess.run(["git", *args], capture_output=True, text=True,
-                          cwd=str(ROOT))
+                          cwd=str(ROOT), env=git_environment())
     return proc.stdout.strip() if proc.returncode == 0 else None
 
 
@@ -99,10 +101,12 @@ def check(root: Path) -> tuple[list[str], list[str]]:
     blockers: list[str] = []
     tail: list[str] = []
 
+    global ROOT
+    ROOT = root
     branch = _git("rev-parse", "--abbrev-ref", "HEAD")
     if branch is None:
         return ["not a git repository (or git missing)"], []
-    if branch in {"main", "master"}:
+    if f"refs/heads/{branch}" in integration_targets(root):
         return [f"on {branch} — there is no feature branch to finish"], []
 
     dirty = _git("status", "--porcelain")
@@ -133,14 +137,13 @@ def check(root: Path) -> tuple[list[str], list[str]]:
                     and f"{PLANS_ACTIVE}/{p.name}" not in in_flight
                     and not (_plan_issue_numbers(text) & claimed_issues)):
                 continue  # somebody else's plan — not this branch's tail
-            m = TIER_DECL.search(text)
-            if not m:
+            tier = plan_tier(text)
+            if tier is None:
                 continue
-            tier = int(m.group(1))
             if tier < 2:
                 to_archive.append(p.name)
                 continue
-            if WAIVED.search(text):
+            if review_waived(text):
                 to_archive.append(p.name)
                 continue
             ids = _plan_work_ids(p.stem, text, include_dedated=True)
@@ -189,7 +192,7 @@ def check(root: Path) -> tuple[list[str], list[str]]:
         blockers.append(f"gate suite NOT RUNNABLE (not red): "
                         f"{not_runnable_reason(root)}")
     else:
-        gr = subprocess.run(argv, cwd=str(root), capture_output=True, text=True)
+        gr = subprocess.run(argv, cwd=str(root), capture_output=True, text=True, env=git_environment())
         if gr.returncode != 0:
             last = [ln for ln in (gr.stdout + gr.stderr).splitlines()
                     if ln.strip()][-3:]
@@ -249,7 +252,7 @@ def _sh(root: Path, argv: list[str], env: dict[str, str] | None = None) -> bool:
     # a marker inherited from an enclosing push (gates running under the hook)
     # must not mark a step that never asked for it
     inherited = {k: v for k, v in os.environ.items() if k != MERGE_ROUTE_ENV}
-    return subprocess.run(argv, cwd=str(root), env={**inherited, **(env or {})}).returncode == 0
+    return subprocess.run(argv, cwd=str(root), env=git_environment({**inherited, **(env or {})})).returncode == 0
 
 
 def apply(root: Path, *, tests: str | None, tests_passed: bool) -> int:
@@ -271,14 +274,27 @@ def apply(root: Path, *, tests: str | None, tests_passed: bool) -> int:
     # 1. archive the branch-owned plans ON the branch
     to_archive = list(getattr(check, "last_archive", []))
     if to_archive:
-        (root / PLANS_ARCHIVE).mkdir(parents=True, exist_ok=True)
+        # Validate the whole batch before staging the first rename.
         for name in to_archive:
-            if not _sh(root, ["git", "mv", f"{PLANS_ACTIVE}/{name}",
-                              f"{PLANS_ARCHIVE}/{name}"]):
+            source, target = root / PLANS_ACTIVE / name, root / PLANS_ARCHIVE / name
+            if not source.is_file() or target.exists():
+                print(f"finish: cannot archive {name}: source missing or target exists; nothing moved", file=sys.stderr)
                 return 1
-        if not _sh(root, ["git", "commit", "-q", "-m",
-                          f"docs: archive plan(s) on merge — "
-                          f"{', '.join(to_archive)}"]):
+        (root / PLANS_ARCHIVE).mkdir(parents=True, exist_ok=True)
+        moved = []
+        for name in to_archive:
+            if not _sh(root, ["git", "mv", f"{PLANS_ACTIVE}/{name}", f"{PLANS_ARCHIVE}/{name}"]):
+                print(f"finish: cannot archive {name}: git mv failed; rolling back earlier moves", file=sys.stderr)
+                for previous in reversed(moved):
+                    if not _sh(root, ["git", "mv", f"{PLANS_ARCHIVE}/{previous}", f"{PLANS_ACTIVE}/{previous}"]):
+                        print(f"finish: rollback failed for {previous}; restore that plan before retrying", file=sys.stderr)
+                return 1
+            moved.append(name)
+        if not _sh(root, ["git", "commit", "-q", "-m", f"docs: archive plan(s) on merge — {', '.join(to_archive)}"]):
+            print(f"finish: archive commit failed for {to_archive}; rolling back moves", file=sys.stderr)
+            for name in reversed(moved):
+                if not _sh(root, ["git", "mv", f"{PLANS_ARCHIVE}/{name}", f"{PLANS_ACTIVE}/{name}"]):
+                    print(f"finish: rollback failed for {name}; restore it before retrying", file=sys.stderr)
             return 1
     # 2. rebase onto the moved integration branch (gates re-run below)
     if _git("rev-parse", "--verify", "--quiet", f"origin/{default}") is not None:
@@ -301,7 +317,7 @@ def apply(root: Path, *, tests: str | None, tests_passed: bool) -> int:
     # 3. the batch pays completeness once, here
     if tests:
         print(f"finish: $ {tests}   # the FULL suite, once per batch")
-        if subprocess.run(tests, shell=True, cwd=str(root)).returncode != 0:
+        if subprocess.run(tests, shell=True, cwd=str(root), env=git_environment()).returncode != 0:
             print("finish: full suite red — not merging")
             return 1
     elif not tests_passed:
@@ -309,14 +325,47 @@ def apply(root: Path, *, tests: str | None, tests_passed: bool) -> int:
               "run the FULL test suite now, then re-run with "
               "`--apply --tests-passed` (or pass `--tests CMD` to run it here)")
         return 0
-    # 4. merge ff-only, push, delete the remote branch
+    # 4. A worktree must not check out main while another checkout owns it.
     route = {MERGE_ROUTE_ENV: MERGE_ROUTE}
-    for argv, env in ((["git", "checkout", "-q", default], None),
-                      (["git", "merge", "--ff-only", branch], None),
-                      (["git", "push", "-q", "origin", default], route),
-                      (["git", "push", "-q", "origin", "--delete", branch], None)):
-        if not _sh(root, argv, env):
+    raw_worktrees = _git("worktree", "list", "--porcelain", "-z") or ""
+    integration_checkout = None
+    path = None
+    for field in raw_worktrees.split("\0"):
+        if field.startswith("worktree "):
+            path = Path(field.removeprefix("worktree "))
+        elif field == f"branch refs/heads/{default}" and path is not None:
+            integration_checkout = path
+    elsewhere = integration_checkout is not None and integration_checkout.resolve() != root.resolve()
+    if elsewhere:
+        if _git("merge-base", "--is-ancestor", f"origin/{default}", "HEAD") is None:
+            print(f"finish: origin/{default} is not an ancestor of HEAD — rebase onto origin/{default}, re-review and retry", file=sys.stderr)
             return 1
+        if not _sh(root, ["git", "push", "-q", "origin", f"HEAD:{default}"], route):
+            return 1
+        # Keep the other checkout's files and ref together; never move a ref under it.
+        other_status = subprocess.run(["git", "-C", str(integration_checkout), "status", "--porcelain"],
+                                      capture_output=True, text=True, env=git_environment())
+        other_branch = subprocess.run(
+            ["git", "-C", str(integration_checkout), "symbolic-ref", "--quiet", "--short", "HEAD"],
+            capture_output=True, text=True, env=git_environment())
+        if (other_status.returncode == 0 and not other_status.stdout.strip()
+                and other_branch.returncode == 0 and other_branch.stdout.strip() == default):
+            if not _sh(integration_checkout, ["git", "merge", "--ff-only", f"origin/{default}"]):
+                print(f"finish: push succeeded; refresh {integration_checkout} manually", file=sys.stderr)
+        else:
+            print(f"finish: push succeeded; {integration_checkout} was kept unchanged; refresh it manually")
+    else:
+        for argv, env in ((["git", "checkout", "-q", default], None),
+                          (["git", "merge", "--ff-only", branch], None),
+                          (["git", "push", "-q", "origin", default], route)):
+            if not _sh(root, argv, env):
+                return 1
+    remote_branch = _git("ls-remote", "--heads", "origin", f"refs/heads/{branch}")
+    if remote_branch:
+        if not _sh(root, ["git", "push", "-q", "origin", "--delete", branch]):
+            return 1
+    else:
+        print(f"finish: remote branch {branch} absent or unreadable — no remote delete")
     print(f"finish: merged {branch} into {default} and pushed. Remaining by "
           f"hand: remove the worktree if one carried the branch "
           f"(`git worktree remove <path> && git worktree prune`), "

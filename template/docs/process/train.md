@@ -170,3 +170,10 @@ It does not review, attest or certify. It merges what the process already
 cleared, and it earns the one thing a batch must earn: the full suite on
 the *combination*, which no branch could have run alone. The coverage
 certificate, where the project keeps one, comes from that same run.
+
+## Push timeout
+
+Git pushes get 1800 seconds by default so full pre-push hooks can finish.
+Set `PROCESS_TRAIN_PUSH_TIMEOUT_SECONDS` to a positive integer to change it,
+for example `PROCESS_TRAIN_PUSH_TIMEOUT_SECONDS=2400 uv run scripts/process/train.py run --push`.
+An invalid value refuses the push; other Git operations keep their 300-second timeout.
