@@ -1166,6 +1166,25 @@ ein Wächter-Test gegen doppelte Klammern ohne Leerzeichen in Python-Vorlagen.
 Wer v2.27.1 oder v2.28.0 installiert hat und am Push scheitert: auf v2.28.1
 aktualisieren, `v2.28.1`.
 
+**v2.42.0 — Downstream process fixes and worker channels.**
+
+- Fix the downstream residuals tracked in #142: fail-closed integration ranges,
+  pooled review coverage, replacement-resistant Git reads, guarded non-fast-forward
+  pushes, consistent tier parsing, and delta artifacts that exclude imported main
+  changes while binding merge resolutions.
+- Add an owner-approved brainstorm-to-plan transition, diagnose contradictory worker
+  anchors and dead workers, and support additive project-local tower findings.
+- Make finish safe across worktrees and archive batches; resolve explicit-root journals,
+  verify Python symbol pointers and current design-note seals, and let model policy own
+  phase selection.
+- Allow long pre-push gates with a configurable 30-minute train push timeout (#83),
+  and document worker channel events plus steward restart feedback (#139).
+
+- **Update guidance:** update the bundle producer, attestation writer and review gate together;
+  new delta attestations carry `mode=delta`. Existing full-review records remain valid.
+  Fetch the remote default branch before a guarded push; non-fast-forward integration
+  pushes require a named owner override and cannot discard a remote standing block.
+
 **v2.41.0 — Gemergte Worktrees werden entfernt, aber nie Arbeit (#136).** Anlass war das Referenzprojekt: 111 nie entfernte Dispatch-Worktrees, jeder mit eigenem venv und `node_modules`, belegten etwa 57 GB. Die Platte lief voll, und alle Sitzungen standen still. Refutiert in drei Runden mit echten Worktrees; jede Runde fand einen weiteren Weg, Arbeit zu verlieren, und jeder ist mit einem Test belegt, der gegen die Vorfassung rot ist.
 - **Der Zug entfernt die Worktrees der Branches, die er gemergt hat**, aber erst nach dem erfolgreichen Push. Jeden behaltenen Worktree nennt er mit Grund; ein Fehler beim Entfernen ist nur ein Hinweis. **`tidy.py`** listet gemergte Worktrees mit Größe, `--apply` entfernt sie.
 - **Ein Worktree bleibt stehen, wenn er Arbeit tragen könnte:**
