@@ -33,7 +33,8 @@ Datei bleibt beim selben Worker. Render-Caches bleiben pro Worker isoliert.
   keine statistische Langzeitmessung.
 - Zwei Worker: **1.389 bestanden, 183,34 Sekunden** (rund 43 % weniger
   Laufzeit als seriell). Anschließend kam ein zusätzlicher Ownership-Regressionstest
-  hinzu; die abschließende Suite enthält 1.390 Tests.
+  hinzu; die abschließende Suite besteht mit **1.390 Tests in 100,45 Sekunden**
+  bei vier Workern.
 - CI verwendet zwei Worker. Der portable Linux/macOS/Windows-Smoke bleibt
   seriell; für dessen kleine Testmenge lohnt sich der zusätzliche Startaufwand nicht.
 - Die frühen parallelen Läufe zeigten Cache-Dateien aus einem CLI-Import und
