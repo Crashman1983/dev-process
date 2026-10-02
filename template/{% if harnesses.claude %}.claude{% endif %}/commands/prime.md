@@ -15,4 +15,5 @@ markers, and the inbox size — and read ONLY what it names: the branch state
 file, the latest journal shard of THIS branch (never the whole journal
 history), the active plan. Read `PRODUCT.md` only when the next action is
 product-shaped. Answer: what is in flight? What is the next concrete action?
-Any inbox item to triage?
+When the inbox size is nonzero, read `.process-work/inbox.md` and name any item
+to triage.

@@ -452,3 +452,29 @@ def test_stop_repairs_a_live_pid_with_a_stale_tmux_anchor(repo, monkeypatch):
     assert dispatch.records(repo)[0]['state'] == 'unknown'
     assert dispatch.stop(repo, 'work', force=False, keep_report=True) == 0
     assert killed == [12345] and not path.exists()
+
+
+def test_three_stacked_reviews_cover_overlapping_files_but_not_a_late_commit(repo, monkeypatch):
+    """#132: the complete merge gate checks three real, digest-bound review ranges."""
+    review = load('check_review')
+    git(repo, 'checkout', '-qb', 'stack')
+    records = []
+    for name in ['a', 'b', 'c']:
+        commit(repo, f'.process-work/plans/{name}.md', '# Plan\ntier: 2\n\n## Decisions\n')
+        base = git(repo, 'rev-parse', 'HEAD')
+        head = commit(repo, 'code.py', f'value = {name!r}\n')
+        digest = review.artifact_digest(repo, base, head)
+        records.append(f'REVIEW work={name} tier=2 reviewer=fresh model=same '
+                       'independence=bundle,non-implementing verdict=pass round=1 '
+                       f'base={base} head={head} diff={digest}')
+        commit(repo, '.process-work/journal/stack.md', '\n'.join(records) + '\n')
+    monkeypatch.setenv('PROCESS_PUSH_TARGETS', 'refs/heads/main')
+    hard, _ = review.check(repo)
+    assert not hard, hard
+    commit(repo, 'code.py', 'unreviewed = True\n')
+    hard, _ = review.check(repo)
+    assert sum('code changed after the reviewed head' in h for h in hard) >= 3, hard
+    records[-1] = records[-1].split(' diff=')[0] + ' diff=' + '0' * 64
+    commit(repo, '.process-work/journal/stack.md', '\n'.join(records) + '\n')
+    hard, _ = review.check(repo)
+    assert any('digest' in h for h in hard), hard

@@ -12,6 +12,7 @@ ALL_ON = {
         "doc_drift_gate": True, "arch_onboarding": True, "feature_registry": True,
         "github_issues": True, "contracts": True, "git_hooks": True,
         "security_floor": True, "design_contracts": True,
+        "speckit": True, "sbom": True, "telemetry": True,
     },
     "ci": {"github": True},
 }

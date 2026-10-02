@@ -7,3 +7,6 @@ dropped the always-on rules. Then run
 (branch state file, this branch's latest journal shard, the active plan);
 read `PRODUCT.md` only when the next action is product-shaped.
 Name current state and the next concrete action.
+
+When the inbox size is nonzero, read `.process-work/inbox.md` and name any item
+to triage.
