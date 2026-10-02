@@ -103,11 +103,15 @@ def merged_remote_branches(root: Path, keep: tuple[str, ...]) -> list[str]:
     return names
 
 
+def worktree_base(root: Path) -> str:
+    default = _default_branch(root)
+    return f"origin/{default}" if _git(root, "rev-parse", "--verify", "--quiet", f"origin/{default}") else default
+
+
 def merged_worktrees(root: Path) -> list[tuple[dict, str | None]]:
     """(worktree, keep reason or None) per worktree whose branch is contained in
     origin/<default> (local <default> without origin) — dispatch.py owns the verdict."""
-    default = _default_branch(root)
-    base = f"origin/{default}" if _git(root, "rev-parse", "--verify", "--quiet", f"origin/{default}") else default
+    base = worktree_base(root)
     try:
         import dispatch as _dispatch  # noqa: E402  (sibling; one owner for the worktrees)
     except ImportError:
@@ -370,7 +374,7 @@ def apply(root: Path, items: dict, days: int) -> int:
         import dispatch as _dispatch  # noqa: E402  (sibling; one owner for the worktrees)
         for path in items["worktrees"]:
             print(f"tidy: $ git worktree remove {path}")
-            failed = _dispatch.remove_worktree(root, path)
+            failed = _dispatch.remove_worktree(root, path, worktree_base(root))
             if failed:
                 print(f"tidy: could not remove {path}: {failed}")
                 rc = 1

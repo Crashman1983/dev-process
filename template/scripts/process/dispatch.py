@@ -625,12 +625,21 @@ def merged_worktrees(root: Path, base: str, branches: list[str] | None = None) -
     return out
 
 
-def remove_worktree(root: Path, path: Path) -> str | None:
-    """Remove one worktree that `worktree_keep_reason` cleared; None or why it failed.
-    No `--force`: plain `git worktree remove` deletes ignored files (venv,
-    node_modules, caches) with the tree but refuses a change, an untracked file or a
-    lock — git checks those again, so such a file written after the keep check is
-    not lost (an ignored one written in that window is not re-checked)."""
+def remove_worktree(root: Path, path: Path, base: str) -> str | None:
+    """Revalidate the full keep policy immediately before removal.
+
+    Plain Git removal checks tracked/untracked changes and locks again, but
+    ignores ignored files. External writers during Git deletion remain a
+    non-atomic boundary; stop them before cleanup when that matters.
+    """
+    entries = worktree_entries(root)
+    wt = next((e for e in entries if e["path"].resolve() == path.resolve()), None)
+    if wt is None:
+        return "not a registered worktree — refusing removal"
+    reason = worktree_keep_reason(root, wt, base, records(root),
+                                  [e["path"] for e in entries])
+    if reason:
+        return reason
     r = _git(root, "worktree", "remove", str(path)) if path.is_dir() else None
     _git(root, "worktree", "prune")
     if r is not None and r.returncode != 0:

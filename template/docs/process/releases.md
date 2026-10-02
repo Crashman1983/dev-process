@@ -59,6 +59,10 @@ record, not an accident.
    The two pinned renders identify template provenance; no saved report
    can exempt a file from review. Verification needs Copier and Git access
    to the recorded template source; unavailable provenance fails closed.
+   Automatic verification skips template tasks and uses isolated empty Copier
+   settings, without `--trust`; templates requiring Jinja extensions fail
+   closed. The explicit update in step 2 retains its operator-approved task
+   and extension contract.
 4. Read those behavior notes and acknowledge them with the same command plus
    `--ack <owner-or-steward>`. Commit the generated acknowledgment under
    `.process-work/`, along with the update. Its baseline and resolved release
