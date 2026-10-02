@@ -47,3 +47,27 @@ No release branches, no train, no cadence promise — merge when green, release
 when there is something worth depending on. If the project later needs
 parallel maintained majors, that is a process decision worth a decision
 record, not an accident.
+
+## Updating the process template
+
+1. Fetch the integration branch and record its SHA before updating. Keep
+   that baseline through the update, review and acknowledgment.
+2. Run `uv run scripts/process/template_update.py --ref <release>` on a clean
+   branch. Resolve conflicts and port owned-file deltas deliberately.
+3. Run `uv run --script scripts/process/template_verify.py --base <baseline-sha>`.
+   Include its computed file listing and `release_notes` in the update PR.
+   The two pinned renders identify template provenance; no saved report
+   can exempt a file from review. Verification needs Copier and Git access
+   to the recorded template source; unavailable provenance fails closed.
+4. Read those behavior notes and acknowledge them with the same command plus
+   `--ack <owner-or-steward>`. Commit the generated acknowledgment under
+   `.process-work/`, along with the update. Its baseline and resolved release
+   SHA must match the verifier's result.
+5. Apply the template-update tier rules in `risk-tiers.md`: pure updates need
+   gates and project tests, project deltas need one Tier 2 review, enforcement
+   migrations retain Tier 3. Use `template-update: true` on the update's plan.
+   Archive it before merging; finish and the merge train use the same proof.
+
+Verification also catches a release-pin bump that leaves a changed template
+file at the old version. Template deletions qualify only when the old project
+file matched the old render; deleting a project test always needs review.

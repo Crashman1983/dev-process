@@ -34,6 +34,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+sys.dont_write_bytecode = True
+
 OWNED_FILE = ".process-owned"
 ANSWERS = ".copier-answers.yml"
 DELTA_DIR = ".process-work/template-delta"
@@ -67,7 +69,7 @@ def _migrate(loaded: dict) -> None:
             mods["sbom"] = True
 
 
-def answers(root: Path) -> tuple[str | None, str | None, dict[str, str]]:
+def answers(root: Path, *, migrate: bool = True) -> tuple[str | None, str | None, dict[str, str]]:
     """(src_path, commit, {answer: yaml-flow-value}) — the recorded answers,
     re-asserted on every copier call. Copier recomputes `when: false`
     questions (the template's derived `modules`/`harnesses` mappings) from
@@ -83,7 +85,8 @@ def answers(root: Path) -> tuple[str | None, str | None, dict[str, str]]:
     try:
         import yaml  # copier's own dependency; present wherever copier runs
         loaded = yaml.safe_load(text) or {}
-        _migrate(loaded)
+        if migrate:
+            _migrate(loaded)
         for key, value in loaded.items():
             if key == "_src_path":
                 src = str(value)
@@ -126,7 +129,7 @@ def _data_args(data: dict[str, str]) -> list[str]:
 def _copier(*args: str) -> subprocess.CompletedProcess:
     exe = shutil.which("copier")
     argv = [exe, *args] if exe else ["uvx", "copier", *args]
-    return subprocess.run(argv, capture_output=True, text=True)
+    return subprocess.run(argv, capture_output=True, text=True, timeout=120)
 
 
 def render(src: str, ref: str, data: dict[str, str], dst: Path) -> bool:
@@ -204,6 +207,10 @@ def leftover_conflicts(root: Path, owned: list[str]) -> list[str]:
 
 def main() -> int:
     args = sys.argv[1:]
+    if "--verify" in args:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from template_verify import main as verify_main
+        return verify_main([a for a in args if a != "--verify"])
     ref: str | None = None
     if "--ref" in args:
         i = args.index("--ref")

@@ -66,6 +66,7 @@ from pathlib import Path
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from process_git import git_environment  # noqa: E402
+from template_verify import verify  # noqa: E402
 
 JOURNAL_DIR = ".process-work/journal"
 PLANS_ACTIVE = ".process-work/plans"
@@ -1572,6 +1573,14 @@ def _history(root: Path, head: str, tip: str = "HEAD",
             return error
         dropped |= d
     keep = lambda paths: frozenset(p for p in paths if not p.startswith(BOOKKEEPING))  # noqa: E731
+    base = merge_base(root, tip)
+    if base:
+        try:
+            update = verify(root, base, tip)
+            if update['update'] and not update['errors'] and not update['migration']:
+                late -= set(update['identical'])
+        except (ValueError, OSError, subprocess.TimeoutExpired):
+            pass  # unverifiable provenance never grants coverage
     return History(late=keep(late), dropped=keep(dropped), fellow=tuple(fellow))
 
 
@@ -1985,6 +1994,49 @@ def speckit_unreviewed(root: Path, passes: list[dict]) -> list[tuple[str, int, s
     return out
 
 
+def verified_template_plan(root: Path, rel: str, text: str, *, tip: str = "HEAD",
+                           update: dict | None = None) -> bool:
+    """Shared exemption for a marked plan of a computed, acknowledged pure update."""
+    if not re.search(r'^template-update:\s*true\s*$', text, re.M):
+        return False
+    base = merge_base(root, tip)
+    if not base:
+        return False
+    if update is None:
+        try:
+            update = verify(root, base, tip)
+        except (ValueError, OSError, subprocess.TimeoutExpired):
+            return False
+    pure = (update['update'] and not update['errors'] and not update['project_delta']
+            and not update['migration'] and update.get('acknowledged'))
+    return bool(pure and rel in (paths_in_flight(root, tip, base=base) or set()))
+
+
+def template_review_findings(root: Path, update: dict, passes: list[dict],
+                             *, tip: str = "HEAD") -> list[str]:
+    """One owner for the update's review duty, used by gate, finish and train."""
+    if not update['update']:
+        return []
+    findings = [f'template verification failed: {e}' for e in update['errors']]
+    if not update.get('acknowledged'):
+        findings.append('template update: owner/steward must acknowledge the behavior notes '
+                        '(template_update.py --verify --base <integration-base> --ack <owner>)')
+    if update['project_delta'] or update['migration']:
+        tier = 3 if update['migration'] else 2
+        known = _known_work(root, ref=tip)
+        covering = [r for r in passes if int(r['tier']) >= tier
+                    and r.get('base') == update['base'] and r.get('head')
+                    and r.get('diff') and r.get('mode', 'full') == 'full' and r['work'] in known
+                    and r['diff'] == artifact_digest(root, r['base'], r['head'])]
+        if not any(_unreviewed_paths(root, r['head'], tip, work_bases(passes, {r['work']}),
+                                     _reviewed_heads(passes, tier, known)) == set()
+                   for r in covering):
+            findings.append(f'template update: tier {tier} digest-bound REVIEW required for '
+                            + ('the enforcement migration' if update['migration'] else
+                               'project delta: ' + ', '.join(update['project_delta'])))
+    return findings
+
+
 def check(root: Path) -> tuple[list[str], list[str]]:
     hard: list[str] = []
     soft: list[str] = []
@@ -2050,6 +2102,25 @@ def check(root: Path) -> tuple[list[str], list[str]]:
     passes = [f for _ln, f in all_records if f["verdict"] == "pass"]
     known_work = _known_work(root)
 
+    # A report is presentation, never authority. Recompute from the trusted
+    # integration baseline and release renders; template loss is project delta.
+    update = None
+    if scope_base:
+        try:
+            dirty = bool(_git_bytes(root, 'diff', '--name-only', 'HEAD'))
+            update = verify(root, scope_base, worktree=dirty)
+        except (ValueError, OSError, subprocess.TimeoutExpired) as exc:
+            hard.append(f'template verification failed: {exc}')
+    if update and update['update']:
+        for finding in template_review_findings(root, update, passes):
+            if finding.startswith('template verification failed:'):
+                hard.append(finding)
+            else:
+                presence(finding)
+        soft.append('template verification: ' + str(len(update['identical']))
+                    + ' release-identical path(s), ' + str(len(update['project_delta']))
+                    + ' project delta path(s)')
+
     # --- presence: archived (merged) plans that declare Tier 2+ ---
     adir = root / PLANS_ARCHIVE
     enforced_any = False
@@ -2080,6 +2151,9 @@ def check(root: Path) -> tuple[list[str], list[str]]:
                             f"— review presence not enforced for this plan")
                 continue
             if tier < 2:
+                continue
+            if verified_template_plan(root, f'{PLANS_ARCHIVE}/{p.name}', text, update=update):
+                soft.append(f'{PLANS_ARCHIVE}/{p.name}: pure template update verified by re-render')
                 continue
             enforced_any = True
             if review_waived(text):
@@ -2168,6 +2242,9 @@ def check(root: Path) -> tuple[list[str], list[str]]:
                             f"(risk-tiers.md), or move a non-plan out of the plan home")
                 continue
             if tier < 2:
+                continue
+            if verified_template_plan(root, f'{PLANS_ACTIVE}/{p.name}', text, update=update):
+                soft.append(f'{PLANS_ACTIVE}/{p.name}: pure template update verified by re-render')
                 continue
             if tier == 2:
                 active_tier2 += 1
