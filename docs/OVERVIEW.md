@@ -6,7 +6,7 @@
 
 Principles, mechanics and the path to broad rollout
 
-Process template dev-process v2.38.0 · tested in a real repository in production use (reference project)
+Process template dev-process v2.43.1 · tested in a real repository in production use (reference project)
 
 Template published on GitHub: [github.com/Crashman1983/dev-process](https://github.com/Crashman1983/dev-process)
 
@@ -33,7 +33,7 @@ The process was built and improved over many iterations in live operation; it ha
 
 1. **A program checks the rules, so nobody has to keep them in mind.** Fifteen automatic checks (“Gates”) run before every Merge; whatever fails is not merged.
 1. **Risk sets the effort.** Four risk tiers – Tier 0 to 3 – decide whether a change may be merged directly or needs a plan, a refutation review (targeted search for faults) and independent review; at Tier 3, every fix round is refuted as well.
-1. **Review is always independent.** Whoever builds does not accept their own work; from Tier 2 on, an uninvolved instance (a separate agent session) reviews, and its verdict applies only to exactly the code it reviewed.
+1. **Review independence scales with risk.** Tier 0–1 use a self-check; from Tier 2 on, an uninvolved instance (a separate agent session) reviews, and its verdict applies only to exactly the code it reviewed. Verified pure template updates use the provenance check described in chapter 9.
 1. **All knowledge lives in files.** Plans, decisions and journals are in the repository and are automatically shown to every agent again as soon as its memory has been shortened.
 1. **The human decides, the agents work.** A coordinator agent hands out work to worker agents; the human prioritises, decides, approves designs and reviews a sample every week.
 
@@ -132,7 +132,7 @@ The Owner works through the interface of their Harness: on GitHub, for example, 
 
 **Questions.** If the worker cannot answer a question from the plan, the Issue or the rules, it enters the question with options and a recommendation in the plan and reports “blocked” – never as a question in the chat. The coordinator decides it itself; only product principles and destructive steps go to the Owner as a choice. The answer is recorded as a decision in the plan, and the worker continues.
 
-**Merge.** Approved Branches are collected in a Merge Queue, run together through the Gates and the test suite once, and merged one after the other. A Branch boards only if a Review covers its current state. If the joint run is red, it runs a second time; only then is the Branch that caused it identified, taken out of the queue and reported back to its worker. The Merge archives finished plans and closes their Issues.
+**Merge.** Approved Branches are collected in a Merge Queue, run together through the Gates and the test suite once, and merged one after the other. A Tier 2+ Branch boards only if a Review covers its current state, or it is a verified pure template update with the Owner’s acknowledgment (chapter 9). If the joint run is red, it runs a second time; only then is the Branch that caused it identified, taken out of the queue and reported back to its worker. The Merge archives finished plans and closes their Issues.
 
 **Coordinator failure.** Nothing is lost: the state is in Git; workers stop when they need a decision; a new coordinator has read in the current state within a minute.
 
@@ -164,6 +164,8 @@ The following table shows how the building blocks could be mapped and which of t
 
 **What scales along:** every repository gets the template with its own Gates, its own model policy and its own situation table. The template is versioned centrally and contains organisation-wide rules such as layering rules or the allowed licences; an update arrives as a Pull Request in every repository. Gates run centrally, for example in GitHub Actions, and grow with the organisation. Workers are sessions of the Harness, for example one per Issue, and besides the models the model policy also sets how many of them run at the same time, at what priority, and whether a phase – the review, for example – runs on another machine or in the cloud.
 
+**Template updates.** Since v2.43.0, verification re-renders both pinned releases with the recorded project answers and compares the project against both. A pure update needs passing Gates and project tests plus an Owner or steward acknowledgment of the release behavior notes; it needs no new Review of release-identical files. Local customizations, owned files, hooks, Makefiles and edited or deleted tests remain project delta and need one independent Tier 2 Review. Changes to process scripts or enforcement configuration retain Tier 3. Failed provenance grants no exemption. Project extensions have dedicated local files for Gates, model policy and review dimensions. Setup and the exact update sequence are in [`BOOTSTRAP.md`](../BOOTSTRAP.md) and [`releases.md`](../template/docs/process/releases.md).
+
 **What does not scale by itself:** every repository needs an Owner, and every work item needs on average one or two of that Owner's decisions. How many parallel work items one Owner can carry is the real capacity limit – and it is not measured today. It is also open where the coordinator runs in a larger environment and whether one coordinator can run several repositories.
 
 **What changes for developers:** they take on the Owner role for a repository, review samples, and write acceptance criteria, contracts and decisions. Role profile, training and cover still need to be described (chapter 11).
@@ -181,6 +183,8 @@ The following table shows how the building blocks could be mapped and which of t
 | Vendor lock-in | The coordination layer (situation table, coordinator, Merge Train) has so far only been tested with Claude Code. | The process files are vendor-neutral; the template ships adaptations for Copilot, Claude Code and AGENTS.md. |
 | A single human | If the Owner is unavailable, decisions are not made. | All knowledge is in files; cover is not yet arranged. |
 | Young coordination layer | The situation table, coordinator and Merge Train (the reference project's own Merge Queue) are new and were reworked often in quick succession. | Every change to gate, train and hook code is refuted before review and after every fix round; each finding gets a test that is red against the version before. |
+
+The following reference-project figures are the historical baseline from the v2.38.0 overview, not a new measurement for v2.43.0. Current template maintenance measurements and their limits are recorded in [the maintenance report](maintenance-2026-10-02.md).
 
 | Measure (reference project) | Value | Interpretation |
 |---|---|---|

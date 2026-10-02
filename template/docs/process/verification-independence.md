@@ -154,11 +154,21 @@ enforces what a language-agnostic gate honestly can, and no more:
   (`bundle` absent) cannot clear Tier 2+, and a Tier 3 pass must carry
   `cross-model` or the explicit `single-family` acknowledgment. This is the
   independence expectation above, turned from prose into a check.
-- **Presence.** A plan is archived on merge; an **archived** plan that declares
-  `tier: N` with N ≥ 2 must carry a clearing `verdict=pass` `REVIEW` (matching
-  `work`, `tier ≥ N`) or an explicit `review-waived: <reason>` line. So a
-  Tier 2+ change cannot merge with no independent review — or it merges as a
-  named, auditable exception.
+- **Presence.** Archived plans declaring `tier: N` with N ≥ 2 need a clearing
+  `verdict=pass` `REVIEW` matching their work and tier, or an explicit
+  `review-waived: <reason>` line. The gate also checks active Tier 2+ plans
+  touched by the pushed range and plans whose issues its commits claim:
+  review is due before the integration push, not only after archival. Missing
+  review is a hard failure on an integration push and a note on other branch
+  pushes; archived-plan failures remain hard. An active Tier 3 plan whose
+  issue is already claimed on the integration branch also fails without a
+  clearing review or waiver.
+- **Verified template updates.** A plan marked `template-update: true` may
+  replace a new REVIEW with computed provenance only for a pure,
+  owner/steward-acknowledged update. Both pinned releases are re-rendered;
+  local project delta still needs a fresh, digest-bound Tier 2 REVIEW, and
+  enforcement migrations retain Tier 3. Failed provenance or a saved report
+  cannot grant an exemption (`risk-tiers.md`, `releases.md`).
 - **Artifact identity.** A `REVIEW` carrying `base`/`head`/`diff` is verified:
   the gate recomputes the raw binary-diff digest from git and fails a mismatch
   or unresolvable commits — a claimed digest that cannot be checked is treated
@@ -168,9 +178,9 @@ What the gate **cannot** do is verify the reviewer was *truthfully* a different
 agent or model — it never sees the review runtime. That claim stays attested.
 The gate makes a weak, absent, or over-claiming attestation *block the merge*
 instead of being weighed by a human; it does not pretend to check identity.
-Presence keys on archived plans (not in-flight ones), so it never reds CI
-mid-development, and the `review-waived:` escape keeps honest single-agent
-setups unblocked.
+The gate also checks review coverage for later changes and standing block
+verdicts in the pushed range. The `review-waived:` escape records an explicit,
+auditable exception; it does not prove independent review.
 
 ## Sampling audit — the human reviews by exception
 

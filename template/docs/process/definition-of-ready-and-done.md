@@ -95,7 +95,9 @@ A change is done when:
 
 The **Review** phase (`workflow.md`, `review-checklist.md`) owns the DoD gate: it
 does not pass unless each applicable item is met or a documented deviation is
-present.
+present. A verified pure template update uses computed provenance and an
+owner/steward acknowledgment instead of a new REVIEW (`risk-tiers.md`,
+`releases.md`); the applicable Done items, gates and project tests still apply.
 
 ## Amending these checklists
 
