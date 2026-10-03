@@ -11,9 +11,14 @@ At the first push of the branch, `uv run scripts/process/report.py pushed --issu
 Build the plan task by task, test-driven. Re-read the kernel
 (`docs/process/kernel.md`) and `docs/process/mandatory-rules.md` first — a long
 build compacts, and the rules bind every task, not just the first. Run
-`uv run scripts/process/process_context.py` for the next unchecked task and
-load only `tasks.md` plus the files that task names — never `specs/`
-recursively. Then read
+`uv run scripts/process/process_context.py` for the next unchecked task.
+Start with the task's files. Before adding or changing a rule, parser or
+helper, inspect the existing owner and its relevant callers and tests
+(mandatory rule 4) — a targeted search, not a full repository read. Follow
+only relevant references. Update the task's affected-file list when
+necessary; a changed scope or contract goes through the existing workflow
+(`DECISION NEEDED`, back to `/plan`). Do not load `specs/` recursively.
+Then read
 `docs/process/workflow.md` (Execute) and `docs/process/commits.md`. Per task:
 write the failing test, see it fail, implement the minimum, see it pass, then
 make one atomic conventional commit, and tick the task's checkbox in
