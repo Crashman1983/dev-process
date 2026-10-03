@@ -130,3 +130,14 @@ def test_gate_runner_registers_clarification_as_core(render, tmp_path):
     )
     assert r.returncode == 0, r.stdout + r.stderr
     assert "clarification" in r.stdout.splitlines()
+
+
+def test_a_differently_cased_plan_or_tasks_file_still_blocks(render, tmp_path):
+    """Refute of the companion-note change: `Plan.md` / `TASKS.md` matched no decision
+    file by exact name and fell to a note — on a case-sensitive filesystem the open
+    decision reached execute unblocked."""
+    for name in ("Plan.md", "TASKS.md"):
+        out = render(tmp_path / name, {"project_name": "demo"})
+        _spec(out, name, f"# X\n\n{MARKER}\n")
+        r = _run(out)
+        assert r.returncode == 1, (name, r.stdout)

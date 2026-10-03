@@ -84,12 +84,13 @@ def _check_specs(root: Path, hard: list[str], soft: list[str]) -> None:
         lines = _marker_lines(text)
         if not lines:
             continue
-        if p.name == "spec.md":
+        name = p.name.lower()  # `Plan.md` is the plan on a case-sensitive filesystem too
+        if name == "spec.md":
             soft.append(
                 f"{rel}: {len(lines)} unresolved [NEEDS CLARIFICATION] marker(s) "
                 f"(line(s) {', '.join(map(str, lines))}) — run /speckit-clarify "
                 f"and resolve before /speckit-plan")
-        elif p.name not in SPEC_DECISION_FILES:
+        elif name not in SPEC_DECISION_FILES:
             for lineno in lines:
                 soft.append(
                     f"{rel}:{lineno}: unresolved [NEEDS CLARIFICATION] marker in a "
