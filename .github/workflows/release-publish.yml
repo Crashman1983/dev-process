@@ -17,6 +17,8 @@ permissions:
   actions: read  # tools/ci_evidence.py reads the CI runs
 jobs:
   publish:
+    # the release tools of main decide, not a branch's copy of them
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

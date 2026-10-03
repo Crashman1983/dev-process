@@ -27,6 +27,8 @@ permissions:
   actions: read  # tools/ci_evidence.py reads the CI runs
 jobs:
   tag:
+    # the release tools of main decide, not a branch's copy of them
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -42,7 +44,7 @@ jobs:
           # validate the inputs: a value starting with '-' would parse as a git
           # option (e.g. sha=--delete), so both are format-checked before use.
           case "$TAG" in v[0-9]*) ;; *) echo "tag must look like vX.Y.Z"; exit 1;; esac
-          case "$SHA" in "" | *[!0-9a-fA-F]* ) SHA="";; esac  # hex-only, else ignore
+          case "$SHA" in *[!0-9a-fA-F]*) echo "sha must be hex, got '$SHA'"; exit 1;; esac
           target="$(git rev-parse --verify "${SHA:-HEAD}^{commit}")" || exit 1
           export TARGET="$target"
           uv run python - <<'PY'
