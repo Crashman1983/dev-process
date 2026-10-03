@@ -553,6 +553,25 @@ def test_execute_names_its_duties_before_pushed_and_testing_owns_the_own_conditi
     assert "question-unrouted" in tower and "decision_channel" in tower
 
 
+def test_execute_reads_the_owner_and_callers_not_only_the_task_files(render, tmp_path):
+    # the absolute "load only tasks.md plus the files that task names" hid the
+    # existing owner (mandatory rule 4) — replaced by a targeted owner/caller
+    # search that still forbids a full repository read and recursive specs/
+    out = render(tmp_path, {"project_name": "demo"})
+    execute = (out / ".claude/commands/execute.md").read_text()
+    workflow = (out / "docs/process/workflow.md").read_text()
+    assert "load only `tasks.md` plus the files that task names" not in execute
+    for text in (execute, workflow):
+        flat = " ".join(text.split())
+        assert "Start with the task's files." in flat
+        assert ("Before adding or changing a rule, parser or helper, inspect the existing "
+                "owner and its relevant callers and tests") in flat
+        assert "not a full repository read" in flat
+        assert "Follow only relevant references" in flat or "follow only relevant references" in flat
+        assert "Update the task's affected-file list when necessary" in flat
+        assert "Do not load `specs/` recursively." in flat
+
+
 def test_rename_remove_move_inventory_lives_in_plan_and_execute_only_compares(render, tmp_path):
     # the inventory moved from execute's "before pushed" into planning: the
     # affected duties are captured before code (worked move example) and
