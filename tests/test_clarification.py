@@ -72,6 +72,56 @@ def test_case_and_bare_form_do_not_escape(render, tmp_path):
     assert r.returncode == 1
 
 
+# --- specs/: only the build input (plan.md, tasks.md) blocks; companions note ---
+
+def _spec(root, rel, body):
+    p = root / "specs/001-widget" / rel
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(body, encoding="utf-8")
+
+
+def test_marker_in_research_is_note_with_file_and_line(render, tmp_path):
+    out = render(tmp_path, {"project_name": "demo"})
+    _spec(out, "research.md", f"# Research\n\n{MARKER}\n\n[needs clarification]\n")
+    _spec(out, "data-model.md", f"# Data model\n{MARKER}\n")
+    r = _run(out)
+    assert r.returncode == 0, r.stdout + r.stderr
+    # one note per marker, clickable file:line; case-insensitive like everywhere
+    assert "specs/001-widget/research.md:3:" in r.stdout
+    assert "specs/001-widget/research.md:5:" in r.stdout
+    assert "specs/001-widget/data-model.md:2:" in r.stdout
+    assert "not a permission" in r.stdout  # a note never licenses an open load-bearing decision
+
+
+def test_marker_in_spec_plan_and_tasks_still_blocks(render, tmp_path):
+    for name in ("plan.md", "tasks.md"):
+        out = render(tmp_path / name, {"project_name": "demo"})
+        _spec(out, "research.md", f"{MARKER}\n")
+        _spec(out, name, "# X\n\n[Needs Clarification: which store?]\n")
+        r = _run(out)
+        assert r.returncode == 1, name
+        assert f"specs/001-widget/{name}:3" in r.stdout
+        assert "research.md:1:" in r.stdout  # the companion note still prints beside the failure
+
+
+def test_fenced_marker_in_specs_is_quotation(render, tmp_path):
+    out = render(tmp_path, {"project_name": "demo"})
+    _spec(out, "plan.md", f"# Plan\n\n```\n{MARKER}\n```\n")
+    _spec(out, "research.md", f"# Research\n\n~~~\n{MARKER}\n~~~\n")
+    r = _run(out)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "research.md" not in r.stdout
+
+
+def test_unreadable_spec_artifact_fails_not_passes(render, tmp_path):
+    # a read error must never count as a passing check — for a companion too
+    out = render(tmp_path, {"project_name": "demo"})
+    (out / "specs/001-widget/research.md").mkdir(parents=True)  # unreadable as a file
+    r = _run(out)
+    assert r.returncode == 1
+    assert "research.md: could not read" in r.stdout
+
+
 def test_gate_runner_registers_clarification_as_core(render, tmp_path):
     out = render(tmp_path, {"project_name": "demo"})
     r = subprocess.run(

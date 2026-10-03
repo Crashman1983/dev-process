@@ -11,10 +11,19 @@ the one line a machine can honestly draw:
     excluding `design-*` and the archive) — a plan carrying an open question
     was built from an unapproved design. The same line holds on the Spec Kit
     surface: a marker in `specs/*/plan.md` or `specs/*/tasks.md` is hard —
-    planning consumed an unclarified spec.
+    planning consumed an unclarified spec. Only these two are decision-
+    relevant: they are what execute builds from.
   - SOFT (note only): markers in active `design-*` files and in
     `specs/*/spec.md` — an in-progress design/spec legitimately carries
     them; the note keeps them visible, mid-flight CI stays green.
+  - SOFT (note per marker, file:line): markers in the other companion
+    artifacts of a feature (`specs/*/research.md`, `data-model.md`,
+    `quickstart.md`, …) — research records open questions by design. The
+    note is not a permission: an unresolved load-bearing implementation
+    decision still has to be resolved (spec, or a plan DECISION) before the
+    task that depends on it.
+  - HARD: a file the gate cannot read — an unread file never counts as a
+    passing check.
   - Archived plans and designs are history and are not checked: the convention
     postdates them, and the active check already blocked the merge path.
 
@@ -56,6 +65,11 @@ def _marker_lines(text: str) -> list[int]:
     return hits
 
 
+# the artifacts execute builds from — a marker here is an open decision in
+# the build input; every other specs/*/ companion is context (note only)
+SPEC_DECISION_FILES = ("plan.md", "tasks.md")
+
+
 def _check_specs(root: Path, hard: list[str], soft: list[str]) -> None:
     sdir = root / "specs"
     if not sdir.is_dir():
@@ -75,6 +89,13 @@ def _check_specs(root: Path, hard: list[str], soft: list[str]) -> None:
                 f"{rel}: {len(lines)} unresolved [NEEDS CLARIFICATION] marker(s) "
                 f"(line(s) {', '.join(map(str, lines))}) — run /speckit-clarify "
                 f"and resolve before /speckit-plan")
+        elif p.name not in SPEC_DECISION_FILES:
+            for lineno in lines:
+                soft.append(
+                    f"{rel}:{lineno}: unresolved [NEEDS CLARIFICATION] marker in a "
+                    f"companion artifact — a note, not a permission: a load-bearing "
+                    f"implementation decision it leaves open is resolved in spec.md "
+                    f"or as a plan DECISION before the task that depends on it")
         else:
             for lineno in lines:
                 hard.append(
