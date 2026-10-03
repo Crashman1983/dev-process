@@ -20,7 +20,8 @@ jobs:
   portable-smoke:
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        # Linux runs in job `test` (full suite incl. this file; --dist loadfile keeps it on one worker)
+        os: [macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
