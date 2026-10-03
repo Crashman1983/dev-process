@@ -1166,6 +1166,19 @@ ein Wächter-Test gegen doppelte Klammern ohne Leerzeichen in Python-Vorlagen.
 Wer v2.27.1 oder v2.28.0 installiert hat und am Push scheitert: auf v2.28.1
 aktualisieren, `v2.28.1`.
 
+**v2.44.1 — Ein Owner für Aufgaben-Zuschnitt und `[P]`, der Commit-Widerspruch aufgelöst.** Nachtrag zu v2.44.0 auf Wunsch des Owners, vorab von einem unabhängigen Modell kritisch geprüft. Nur Doku und Vorlagen; kein neues Gate, keine neue Phase, kein Feld, keine Commit-Regel.
+- **Commit-Widerspruch aufgelöst:** `/execute`, `workflow.md`, die Tasks-Vorlage und die Speckit-Moduldoku sagten „ein atomarer Commit pro Task“, `/plan` und `commits.md` „zwei Commits sind okay“. Jetzt gilt überall: Eine Aufgabe ist fertig, wenn ihr Verhalten grün ist; Test und Umsetzung landen in einem oder zwei Commits.
+- **Tasks-Vorlage:** ein Ablehnungsfall als Beispiel (`test_expired_invite_is_refused`).
+- **`testing.md`:** Bei Freigabe, Trust, Löschen und Nebenläufigkeit deckt der erste Verhaltenstest den kritischen Grenzfall auf dem Weg ab, den echte Aufrufer nehmen, auf der günstigsten Ebene, die ihn erreicht. Das ist eine Risiko-, keine Ebenen-Vorgabe.
+- **`/execute`:** Rot zählt nur, wenn der Test seine Prüfung ausgeführt hat (`red_evidence.py` verweigert den Rest). Die ROOT-CAUSE-Zeile nennt die verletzte Erwartung und ihre Ursache.
+- **`[P]` hat einen Owner, `/plan`:**
+  - Disjunkte Dateien sind notwendig, nicht hinreichend.
+  - Producer und Consumer laufen erst parallel, wenn ihr gemeinsamer Vertrag (Schema, Fehlerverhalten, Timing) feststeht.
+  - Gemeinsame Ressourcen zählen mit: Datenbankzustand, Ports, Fixtures, generierte Dateien, Lockfiles.
+  - Beide Beispiele stehen dabei, und die integrierte Kombination wird weiter geprüft.
+  - `/execute`, `workflow.md` und die Tasks-Vorlage verweisen nur noch auf `/plan`; auch der Plan-Zweig ohne Speckit hat jetzt den Verweis.
+- Vermiedene Pflichtarbeit ist benannt, nicht gemessen.
+
 **v2.44.0 — Fehler früher vermeiden, ohne neue Pflichtschritte.** Fünf Änderungen auf Wunsch des Owners, alle in vorhandenen Prozessschritten; keine neuen Pflichtabschnitte, Gates oder Review-Runden.
 - **Spec Kit: eine Aufgabe pro Verhalten.** Test schreiben, Rot sehen, implementieren, Grün sehen in einem Task, wie `/plan` es schon verlangt. Die Tasks-Vorlage, die Gate-Meldung, die Workflow-Doku und die Constitution sagen jetzt dasselbe. Getrennte Test- und Umsetzungsaufgaben in bestehenden Plänen bestehen das Gate weiter; eine Story ohne Testbezug fällt weiter durch.
 - **Inventur für Umbenennen, Entfernen, Verschieben im Plan statt vor dem Push:** Aufrufer, Regeln, IDs, Tests, Baselines, Doku und Registries kommen in die vorhandenen Aufgaben, verschobene Regeln mit ihrem neuen Ort. `/execute` gleicht vor dem Push nur noch den Diff mit dem Plan ab.
