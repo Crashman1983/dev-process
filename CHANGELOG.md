@@ -1166,6 +1166,19 @@ ein Wächter-Test gegen doppelte Klammern ohne Leerzeichen in Python-Vorlagen.
 Wer v2.27.1 oder v2.28.0 installiert hat und am Push scheitert: auf v2.28.1
 aktualisieren, `v2.28.1`.
 
+**v2.44.0 — Fehler früher vermeiden, ohne neue Pflichtschritte.** Fünf Änderungen auf Wunsch des Owners, alle in vorhandenen Prozessschritten; keine neuen Pflichtabschnitte, Gates oder Review-Runden.
+- **Spec Kit: eine Aufgabe pro Verhalten.** Test schreiben, Rot sehen, implementieren, Grün sehen in einem Task, wie `/plan` es schon verlangt. Die Tasks-Vorlage, die Gate-Meldung, die Workflow-Doku und die Constitution sagen jetzt dasselbe. Getrennte Test- und Umsetzungsaufgaben in bestehenden Plänen bestehen das Gate weiter; eine Story ohne Testbezug fällt weiter durch.
+- **Inventur für Umbenennen, Entfernen, Verschieben im Plan statt vor dem Push:** Aufrufer, Regeln, IDs, Tests, Baselines, Doku und Registries kommen in die vorhandenen Aufgaben, verschobene Regeln mit ihrem neuen Ort. `/execute` gleicht vor dem Push nur noch den Diff mit dem Plan ab.
+- **`/execute` liest gezielt** den bestehenden Owner, seine Aufrufer und Tests, bevor es eine Regel, einen Parser oder Helfer anlegt oder ändert, statt nur die Dateien des Tasks. `specs/` wird nicht rekursiv geladen.
+- **Clarification-Gate auf tragende Dateien begrenzt.** Offene Marker in `plan.md` und `tasks.md` blockieren weiter, auch bei anderer Schreibweise des Dateinamens; Lesefehler auch. Marker in `research.md` und anderen Begleitdateien eines Spec-Ordners sind Hinweise mit Datei und Zeile. Ein solcher Hinweis erlaubt keine offene tragende Entscheidung.
+- **E2E nach Risiko statt Stückzahl.** „One per feature — floor AND ceiling“ entfällt. Geänderte kritische Verträge brauchen einen passenden Nachweis ihrer Wirkung; vorhandene Tests dürfen mehrere Features abdecken; neue Tests auf der günstigsten ausreichenden Ebene. Bestehende Tests bleiben.
+- **Aufgelöste Widersprüche:**
+  - die Leseregel von `/execute` gegen „Check existing code first“;
+  - die Tasks-Vorlage gegen `/plan`;
+  - `testing.md` gegen sich selbst (Untergrenze und Obergrenze);
+  - die Speckit-Doku gegen das Gate, das jede Begleitdatei hart scheitern ließ.
+- Die Einsparungen sind erwartet, nicht gemessen.
+
 **v2.43.2 — Safe automatic template verification and cleanup revalidation.**
 
 - Classify actual project changes to process enforcement as Tier 3 migrations,
