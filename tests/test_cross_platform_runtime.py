@@ -1,6 +1,7 @@
 import itertools
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -93,18 +94,28 @@ def test_portable_python_helpers_render(render, tmp_path):
     assert gates.returncode == 0, gates.stdout + gates.stderr
 
 
-def test_ci_has_linux_macos_windows_smoke_matrix():
+def test_ci_smoke_runs_macos_windows_and_linux_via_full_suite():
+    """Linux smoke left the matrix: job `test` must still run this file there, unfiltered."""
     root = Path(__file__).parents[1]
     workflow = yaml.load(
         (root / ".github/workflows/ci.yml").read_text(encoding="utf-8"),
         Loader=yaml.BaseLoader,
     )
-    job = workflow["jobs"]["portable-smoke"]
-    assert job["strategy"]["matrix"]["os"] == [
-        "ubuntu-latest",
-        "macos-latest",
-        "windows-latest",
-    ]
+    smoke = workflow["jobs"]["portable-smoke"]
+    assert set(smoke["strategy"]["matrix"]["os"]) == {"macos-latest", "windows-latest"}
+    test = workflow["jobs"]["test"]
+    assert test["runs-on"] == "ubuntu-latest"
+    [cmd] = [s["run"] for s in test["steps"] if "pytest" in s.get("run", "")]
+    words = cmd.split()
+    args = words[words.index("pytest") + 1:]
+    for flag in ("-k", "-m", "--deselect", "--ignore"):
+        assert not any(a == flag or a.startswith(flag + "=") for a in args), cmd
+    valued = {"-n", "--dist"}  # options whose value is the next word
+    positional = [a for prev, a in zip(["", *args], args)
+                  if not a.startswith("-") and prev not in valued]
+    assert positional == [], cmd
+    pyproject = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
+    assert pyproject["tool"]["pytest"]["ini_options"]["testpaths"] == ["tests"]
 
 
 def test_release_workflow_requires_tag_to_match_project_version():
