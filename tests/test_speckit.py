@@ -112,6 +112,10 @@ def test_tasks_template_teaches_one_task_per_behaviour(render, tmp_path):
     assert "One task = one behaviour, test AND implementation" in tasks_ovr
     assert "(red) → implement in src/… (green)" in tasks_ovr
     assert "Test: failing test(s)" not in tasks_ovr  # the split example is gone
+    # one example asserts a refusal path, with its test and files named
+    assert ("test `test_expired_invite_is_refused` in tests/test_invites.py asserts the error"
+            in tasks_ovr)
+    assert "One atomic commit per task" not in tasks_ovr  # test + impl may be two commits (/plan)
     plan = (out / ".claude/commands/plan.md").read_text()
     assert "one task = one behaviour, test AND implementation" in plan  # same rule, one source
 

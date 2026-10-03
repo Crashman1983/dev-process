@@ -6,7 +6,7 @@ At the first push of the branch, `uv run scripts/process/report.py pushed --issu
 1. **A contradiction is a question, not a note.** When what you observe contradicts an acceptance criterion or the contract (the criterion says "no visual change" and your change drops an animation), write a `DECISION NEEDED`, not a journal line, and do not report `pushed` while it is open.
 2. **A rename, removal or move matches its planned inventory.** `/plan` put the affected callers, rules, IDs, tests, baselines, docs and registries into the tasks before any code. Now compare only the actual diff against those planned changes and the dependencies you discovered while building (each one fixed, or added to its task): every planned place is touched, every moved duty is still fulfilled at its named new owner, and the test floor (how many tests of each kind) has not dropped against the base. No second full inventory; a dependency the plan missed goes into its task, not a new table.
 3. **Gate, train, finish or hook code runs once under its own conditions** (`docs/process/testing.md`, "Test under the conditions the change creates"): the variables it sets, the real entry point.
-4. **After a blocking review round** the plan carries `ROOT-CAUSE work=<id> round=<r>: <cause> — <test that failed before the fix>`, and `attest.py --dry-run` passes before you report — a malformed line is refused at the next attest and costs a whole round. Measure it instead of typing it: `scripts/process/red_evidence.py --work <id> --round <r> --before <ref> --cause "<cause>" -- <pytest command>` runs the tests against the old and the new code and writes the evidence block and the line, test names included.
+4. **After a blocking review round** the plan carries `ROOT-CAUSE work=<id> round=<r>: <cause> — <test that failed before the fix>`, and `attest.py --dry-run` passes before you report — a malformed line is refused at the next attest and costs a whole round. Measure it instead of typing it: `scripts/process/red_evidence.py --work <id> --round <r> --before <ref> --cause "<cause>" -- <pytest command>` runs the tests against the old and the new code and writes the evidence block and the line, test names included. Red counts only when the test ran its assertion — a missing test, or a collection, fixture or startup error, is not red (`red_evidence.py` refuses it); the `<cause>` names the violated expectation and why it was violated.
 
 Build the plan task by task, test-driven. Re-read the kernel
 (`docs/process/kernel.md`) and `docs/process/mandatory-rules.md` first — a long
@@ -20,10 +20,11 @@ necessary; a changed scope or contract goes through the existing workflow
 (`DECISION NEEDED`, back to `/plan`). Do not load `specs/` recursively.
 Then read
 `docs/process/workflow.md` (Execute) and `docs/process/commits.md`. Per task:
-write the failing test, see it fail, implement the minimum, see it pass, then
-make one atomic conventional commit, and tick the task's checkbox in
-`tasks.md` in the same commit (the checkboxes are the canonical progress
-state). Keep tasks isolated so each is independently reviewable. A decision
+write the failing test, see it fail, implement the minimum, see it pass —
+the task closes when its behaviour is green. Test and implementation land in
+one or two conventional commits (`commits.md`, Atomicity); tick the task's
+checkbox in `tasks.md` in the last of them (the checkboxes are the canonical
+progress state). Keep tasks isolated so each is independently reviewable. A decision
 taken with the owner in dialogue is written to the plan's `## Decisions`
 ledger before the next tool call — `process_context.py` prints the ledger
 back after every compaction; the conversation it came from is gone by then.
