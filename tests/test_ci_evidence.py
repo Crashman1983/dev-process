@@ -108,8 +108,30 @@ def test_required_jobs_match_ci_yml():
 
 @pytest.mark.parametrize("workflow", ["release-tag.yml", "release-publish.yml"])
 def test_release_workflows_check_ci_evidence_before_they_act(workflow):
-    text = (REPO / ".github/workflows" / workflow).read_text(encoding="utf-8")
-    assert "actions: read" in text
-    check = text.index("python3 tools/ci_evidence.py")
-    acts = [text.find(word) for word in ("git tag", "gh release", "git push origin")]
-    assert check < min(i for i in acts if i >= 0), workflow
+    """Refute: a text search also passed with `|| true`, `set +e` or the call in a comment."""
+    wf = yaml.safe_load((REPO / ".github/workflows" / workflow).read_text(encoding="utf-8"))
+    assert wf["permissions"]["actions"] == "read"
+    (job,) = wf["jobs"].values()
+    assert job["if"] == "github.ref == 'refs/heads/main'"
+    lines = [ln.strip() for step in job["steps"] for ln in step.get("run", "").splitlines()]
+    assert not any("set +e" in ln for ln in lines)
+    calls = [i for i, ln in enumerate(lines) if ln.startswith("python3 tools/ci_evidence.py")]
+    assert len(calls) == 1 and lines[calls[0]] in (
+        'python3 tools/ci_evidence.py "$target"', 'python3 tools/ci_evidence.py "$sha"'), lines
+    acts = [i for i, ln in enumerate(lines)
+            if ln.startswith(("git tag", "gh release", "git push origin"))]
+    assert acts and calls[0] < min(acts), workflow
+
+
+def test_a_truncated_listing_refuses_instead_of_deciding_on_a_part(monkeypatch):
+    """Refute: past the page cap, an unseen newer red run could be the decisive one."""
+    page = {"total_count": 250, "workflow_runs": [{}] * 100}
+    monkeypatch.setattr(ev, "_get", lambda url, token: page)
+    with pytest.raises(OSError, match="250 entries"):
+        ev._all("https://x/runs?per_page=100", "workflow_runs", "t", pages=2)
+
+
+def test_release_tag_refuses_a_malformed_sha_instead_of_tagging_head():
+    """Refute: `abc123x` or a pasted space used to fall back to HEAD silently."""
+    text = (REPO / ".github/workflows/release-tag.yml").read_text(encoding="utf-8")
+    assert 'SHA="";; esac' not in text and "sha must be hex" in text

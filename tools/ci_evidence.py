@@ -76,11 +76,16 @@ def _get(url: str, token: str) -> dict:
 def _all(url: str, key: str, token: str, pages: int = 10) -> list[dict]:
     """Every item of a paginated list endpoint (per_page=100; capped — defensive)."""
     out: list[dict] = []
+    total = 0
     for page in range(1, pages + 1):
-        items = _get(f"{url}&page={page}", token).get(key) or []
+        body = _get(f"{url}&page={page}", token)
+        total = body.get("total_count") or 0
+        items = body.get(key) or []
         out.extend(items)
         if len(items) < 100:
             break
+    if total > len(out):  # truncated: an unseen run or job could be the decisive one
+        raise OSError(f"{total} entries, read only {len(out)}")
     return out
 
 
