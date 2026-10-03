@@ -425,6 +425,25 @@ def test_testing_doc_carries_the_methodology(render, tmp_path):
     assert "testing.md" in checklist
 
 
+def test_e2e_evidence_is_risk_based_not_a_per_feature_count(render, tmp_path):
+    out = render(tmp_path, {"project_name": "demo"})
+    testing = " ".join((out / "docs/process/testing.md").read_text().split())
+    checklist = " ".join((out / "docs/process/review-checklist.md").read_text().split())
+    # the rigid count is gone everywhere it was repeated
+    for text in (testing, checklist):
+        assert "floor AND ceiling" not in text
+        assert "one end-to-end proof" not in text
+    assert "E2E evidence is risk-based, not counted per feature" in testing
+    assert "One test may serve several features" in testing
+    assert "cheapest sufficient level" in testing
+    assert "The rule is no reason to delete tests" in testing
+    # the two worked examples: covered contract -> no duplicate; second flow not excluded
+    assert "so no duplicate E2E test is written" in testing
+    assert "no count limit excludes it" in testing
+    assert "changed critical contract" in checklist and "fitting evidence of its actual effect" in checklist
+    assert "a contract already covered needs no duplicate E2E test" in checklist
+
+
 def test_bound_review_and_fresh_checkout_contracts_render(render, tmp_path):
     out = render(tmp_path, {"project_name": "d", "modules": {"git_hooks": True}})
     verification = (out / "docs/process/verification-independence.md").read_text()

@@ -18,9 +18,13 @@ implementing agent does not self-certify.
   dead data.
 - Are **all execution paths** handled: the happy path, the error path, the retry
   path, and any async/deferred path?
-- Is there **one end-to-end proof** (a test or a manual trace) that input
-  becomes the intended durable state or visible outcome — not just a unit test
-  of one piece in isolation?
+- Does every **changed critical contract** have **fitting evidence of its
+  actual effect** (`testing.md`) — an end-to-end or real-effect integration
+  test, an existing test named because it already covers the contract, or a
+  manual trace — that input becomes the intended durable state or visible
+  outcome, not just a unit test of one piece in isolation? No count applies:
+  a contract already covered needs no duplicate E2E test, and a second
+  independent critical flow gets its own evidence.
 
 ## Correctness
 

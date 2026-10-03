@@ -14,25 +14,45 @@ heuristic, not a quota:
 - **Integration** (the middle): components together — a route hitting a real
   (test) database, a parser over real files. Slower, fewer, and the layer
   that catches wiring mistakes units cannot see.
-- **End-to-end** (the tip): a handful of whole-workflow proofs. At least
-  **one end-to-end proof per feature** that input becomes the intended
-  durable state or visible outcome — the review checklist's completeness
-  section asks for this (there, a manual trace may stand in); unit tests
-  alone do not satisfy it.
+- **End-to-end** (the tip): a handful of whole-workflow proofs, chosen by
+  risk. Every changed **critical contract** — a path from input to durable
+  state or visible outcome that users or other components depend on —
+  needs fitting evidence of its *actual effect*: an end-to-end test, an
+  integration test that exercises the real effect, or a manual trace where
+  the review checklist's completeness section allows one; unit tests of one
+  piece in isolation alone do not show the effect.
 
 Inverting the shape (many E2E, few units) makes the suite slow and flaky and
 is the most common failure mode. When an E2E test and a unit test would prove
-the same thing, prefer the unit test and keep the E2E count flat.
+the same thing, prefer the unit test.
 
-**The E2E budget per feature is one — floor AND ceiling.** The DoD's "one
-end-to-end proof per feature" is not a minimum to build on: when a feature
-grows, its E2E proof is *replaced*, not joined by a sibling, and a platform
-variant (mobile/desktop) earns a spec only where the *behaviour* differs,
-not merely the rendering (the visual baseline owns rendering). The suite is
-a managed asset: growth is reviewed like code growth, and a periodic
-consolidation pass that retires double proofs is maintenance, not loss —
-every retired test must be covered by a named cheaper test, never merely
-deleted.
+**E2E evidence is risk-based, not counted per feature** — there is no
+per-feature floor and no per-feature ceiling:
+
+- **Fitting evidence per changed critical contract.** Name the test (or
+  trace) that shows the contract's actual effect.
+- **One test may serve several features** when its evidence fits the
+  changed contract — name it instead of writing a duplicate.
+- **New tests at the cheapest sufficient level.** Add an E2E test only for a
+  critical flow that no cheaper test evidences sufficiently.
+- **The rule is no reason to delete tests.** Existing E2E tests stay; a
+  consolidation pass may retire a double proof only when a named cheaper
+  test covers it, never merely deleted.
+
+Two examples. *Already covered:* a change to checkout price rounding — the
+existing checkout E2E test already asserts the charged total end to end; a
+unit test pins the rounding rule and the existing E2E test is named as the
+effect evidence, so no duplicate E2E test is written. *Second independent
+flow:* the same feature adds a refund that writes a different ledger and
+notifies another service — a second critical flow no existing test
+evidences; it gets its own E2E (or real-effect integration) test, and no
+count limit excludes it.
+
+A platform variant (mobile/desktop) earns its own E2E test only where the
+*behaviour* differs, not merely the rendering (the visual baseline owns
+rendering). The suite is a managed asset: growth is reviewed like code
+growth, and a periodic consolidation pass that retires double proofs is
+maintenance, not loss.
 
 ## What earns a test beyond the happy path
 
@@ -208,6 +228,6 @@ gate, but they have different owners and fixes. A command that passes only in a
 warm development tree is not a reproducible gate.
 
 Review binding: the review checklist's "Tests prove acceptance" section is
-where this document is enforced — mapping per criterion, the E2E proof, and the
+where this document is enforced — mapping per criterion, the effect evidence for changed critical contracts, and the
 negative/edge/authorization/invalidation cases are review questions, not
 suggestions.

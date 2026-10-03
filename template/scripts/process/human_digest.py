@@ -211,9 +211,9 @@ def section_test_estate(root: Path) -> list[str]:
             line += (f"  (14 d ago: {then[0]} · {then[1]} — "
                      f"Δ {now[0] - then[0]:+d} · {now[1] - then[1]:+d})")
     out = [line]
-    out.append("the E2E budget per feature is one, floor AND ceiling; a "
-               "growing tip is the usual reason tests FEEL slow "
-               "(testing.md, pyramid)")
+    out.append("E2E tests are added by risk, not by count — only for a "
+               "critical flow no cheaper test evidences; a growing tip is "
+               "the usual reason tests FEEL slow (testing.md, pyramid)")
     return out
 
 
