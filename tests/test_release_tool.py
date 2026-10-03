@@ -164,6 +164,19 @@ def test_a_rerun_after_a_failed_step_is_not_refused_as_a_downgrade(tmp_path, mon
         rel.release(root, "v9.9.9", suite=False)
 
 
+def test_the_remote_steps_wait_for_ci_on_main_before_the_tag(tmp_path, monkeypatch, capsys):
+    """release-tag refuses a SHA without a green CI run on main; the steps must say so."""
+    root = _git_repo(tmp_path)
+    real = subprocess.run
+    monkeypatch.setattr(rel.subprocess, "run", lambda argv, **kw: real(argv, **kw)
+                        if argv[:2] == ["git", "-C"] else subprocess.CompletedProcess(argv, 0))
+    rel.release(root, "v9.9.9")
+
+    out = capsys.readouterr().out
+    assert "wait for CI on main" in out
+    assert out.index("wait for CI on main") < out.index("release-tag.yml"), out
+
+
 def test_a_rename_is_named_by_its_new_path(tmp_path):
     """G5: porcelain -z puts the old name in its own field; it was read as a cut path."""
     root = _git_repo(tmp_path)

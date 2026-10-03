@@ -17,8 +17,14 @@ steps, in order, stopping at the first failure:
 5. the template's `__pycache__` is gone;
 6. one commit `release: <version>`.
 
-The remote part (PR, merge, tag on the merged SHA, publish) is printed at the
-end: it needs the host's GitHub access, which this script does not assume.
+The suite runs by default: it tests the bumped tree with the new SBOM before the
+commit — skipped, a broken release commit can reach main, and the version is then
+refused as "not above". `--no-suite` only when it just ran on this tree.
+
+The remote part (PR, merge, wait for CI on main to be green for the merged SHA,
+tag it, publish) is printed at the end: it needs the host's GitHub access, which
+this script does not assume. release-tag.yml refuses a SHA without a green CI
+run on main, release-publish.yml re-checks the tag's commit (tools/ci_evidence.py).
 Stdlib only.
 """
 from __future__ import annotations
@@ -144,9 +150,10 @@ def release(root: Path, tag: str, *, suite: bool = True) -> None:
     _run(root, "commit", "git", "commit", "-q", "-m", f"release: {tag}")
     print(f"""release: {tag} committed. Remote steps:
   1. push the branch, open the PR, merge it (rebase)
-  2. release-tag.yml with tag={tag} and sha=<the merged SHA on main>
-  3. once the tag exists: release-publish.yml with tag={tag}
-  4. rebase the working branch onto origin/main""")
+  2. wait for CI on main to be green for the merged SHA (release-tag refuses otherwise)
+  3. release-tag.yml with tag={tag} and sha=<the merged SHA on main>
+  4. once the tag exists: release-publish.yml with tag={tag} (re-checks the tag's commit)
+  5. rebase the working branch onto origin/main""")
 
 
 def main(argv: list[str]) -> int:
