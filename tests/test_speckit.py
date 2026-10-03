@@ -120,6 +120,24 @@ def test_tasks_template_teaches_one_task_per_behaviour(render, tmp_path):
     assert "one task = one behaviour, test AND implementation" in plan  # same rule, one source
 
 
+
+def test_parallel_marker_has_one_owner_with_both_examples(render, tmp_path):
+    out = _render(render, tmp_path)
+    plan = " ".join((out / ".claude/commands/plan.md").read_text().split())
+    assert "Disjoint files are necessary, not sufficient." in plan
+    assert "the file format is still open — no `[P]`" in plan  # unsettled contract
+    assert "no shared port — `[P]`" in plan  # fixed contract, conflict-free resources
+    execute = (out / ".claude/commands/execute.md").read_text()
+    tasks_ovr = (out / OVR / "tasks-template.md").read_text()
+    for consumer in (execute, tasks_ovr):
+        assert "(different files, no dependencies)" not in consumer
+        assert "disjoint files and a fixed shared contract" in " ".join(consumer.split())
+    # the non-speckit plan command carries the task grain and the [P] pointer too
+    plain = " ".join((_render(render, tmp_path / "off", on=False)
+                      / ".claude/commands/plan.md").read_text().split())
+    assert "One task = one behaviour" in plain
+    assert "disjoint files and a fixed shared contract" in plain
+
 def test_gate_passes_story_phase_with_test_task(render, tmp_path):
     # an existing split-style tasks.md (test task, then implement task) stays
     # compatible — the floor is the test reference, not the shape

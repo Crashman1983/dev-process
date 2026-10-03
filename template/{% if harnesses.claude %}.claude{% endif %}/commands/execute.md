@@ -59,10 +59,9 @@ three invariants make that safe:
    checkbox tick in `tasks.md` in that commit, gate run — in dependency
    order, not wallclock order. Every existing invariant holds verbatim;
    only the thinking and writing runs in parallel.
-3. **`[P]` means no shared touchpoint at all** — not "different features":
-   two tasks that each add a line to the same barrel export, manifest, or
-   generated index are NOT `[P]` (`/plan` sets the markers under that
-   definition; trust them, do not re-derive).
+3. **`[P]` means disjoint files and a fixed shared contract, no shared
+   resource** — not "different features" or "different files" alone
+   (`/plan` defines it and sets the markers; trust them, do not re-derive).
 
 **Calibrate the engine's review spend** (review cost is the budget lever):
 per-task reviews only for owner/integration tasks — mechanical tasks
