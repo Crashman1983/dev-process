@@ -36,10 +36,45 @@ def test_third_fix_on_one_file_is_named_and_never_blocks(render, tmp_path):
     r = subprocess.run(gate, cwd=out, capture_output=True, text=True)
     assert r.returncode == 0
     assert "fix-streak: note: 3 fix commits on src.py" in r.stdout and "rule 6" in r.stdout
-    # the runner lists it as a core gate
-    r = subprocess.run([sys.executable, str(out / "scripts/process/gate_runner.py")],
+
+
+def _bundle(out: Path) -> str:
+    r = subprocess.run([sys.executable, str(out / "scripts/process/make_review_bundle.py"),
+                        "--base", "main", "--skip-preflight"],
                        cwd=out, capture_output=True, text=True)
-    assert r.returncode == 0 and "fix-streak" in r.stdout
+    assert r.returncode == 0, r.stderr
+    return r.stdout
+
+
+def test_the_note_lives_in_the_review_bundle_not_the_runner(render, tmp_path):
+    """The runner hides a passing gate's output — a note-only gate there said nothing."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _git(out, "init", "-q", "-b", "main")
+    _git(out, "config", "user.email", "t@t")
+    _git(out, "config", "user.name", "t")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "base")
+    _git(out, "checkout", "-q", "-b", "7-thing")
+    r = subprocess.run([sys.executable, str(out / "scripts/process/gate_runner.py"), "--list"],
+                       cwd=out, capture_output=True, text=True)
+    assert r.returncode == 0 and "fix-streak" not in r.stdout, r.stdout
+    _commit(out, "src.py", "fix: a")
+    assert "Fix streak" not in _bundle(out) and "fix-streak" not in _bundle(out)
+    _commit(out, "src.py", "fix: b")
+    text = _bundle(out)
+    assert "## Fix streak\nfix-streak: note: 2 fix commits on src.py" in text, text[:2000]
+
+
+def test_a_crashing_streak_check_does_not_block_the_bundle(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _git(out, "init", "-q", "-b", "main")
+    _git(out, "config", "user.email", "t@t")
+    _git(out, "config", "user.name", "t")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "base")
+    (out / "scripts/process/check_fix_streak.py").write_text("raise SystemExit('boom')\n")
+
+    assert "fix-streak: not evaluated (boom)" in _bundle(out)
 
 
 def test_one_fix_each_on_two_files_stays_quiet(render, tmp_path):

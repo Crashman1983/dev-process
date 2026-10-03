@@ -20,6 +20,9 @@ take as its whole input. This tool assembles it:
      owner is the github-issues module's report gate (journal-state-plans.md);
      a template test pins the FINDING tokens to that gate's enums.
 
+Plus the fix-streak note (check_fix_streak.py, rules 4 and 6) when the branch
+has one — its only call site, once per review round.
+
 Sources that cannot be read are named in place, never silently skipped.
 
 Usage:
@@ -159,6 +162,25 @@ def _preflight(root: Path) -> tuple[bool, int, str]:
             + (f"\n{detail}" if detail else "")
         )
     return True, 0, ""
+
+
+FIX_STREAK = Path(__file__).resolve().parent / "check_fix_streak.py"
+
+
+def _fix_streak(root: Path) -> str:
+    """Rules 4/6 as a note in the bundle — once per review round, never blocking. Not a
+    gate: the runner's output stays hidden unless it fails, and the note never fails."""
+    try:
+        r = subprocess.run([sys.executable, str(FIX_STREAK), "."], cwd=root,
+                           capture_output=True, text=True, timeout=60,
+                           encoding="utf-8", errors="replace", env=git_environment())
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return f"## Fix streak\nfix-streak: not evaluated ({type(exc).__name__})\n"
+    if r.returncode:
+        why = (r.stderr.strip().splitlines() or [f"exit {r.returncode}"])[-1]
+        return f"## Fix streak\nfix-streak: not evaluated ({why})\n"
+    notes = [ln for ln in r.stdout.splitlines() if ln.startswith("fix-streak: note:")]
+    return "## Fix streak\n" + "\n".join(notes) + "\n" if notes else ""
 
 
 def _read_plan(plan: Path) -> str:
@@ -711,6 +733,10 @@ def build(root: Path, base: str | None, plan_filter: str | None = None,
             by_tier = []
         if by_tier:
             add(_tier_warning(by_tier, tiers))
+
+    streak = _fix_streak(root)
+    if streak:
+        add(streak)
 
     kernel = _kernel_block(root)
     add("## The binding rules (kernel)\n")
