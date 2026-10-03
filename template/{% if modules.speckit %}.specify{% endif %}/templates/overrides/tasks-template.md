@@ -10,10 +10,13 @@ description: "Task list template for feature implementation (dev-process overrid
 
 **Prerequisites**: plan.md (required), spec.md (required for user stories)
 
-**Tests are MANDATORY**: every user story phase carries the test tasks that
-prove its acceptance criteria (mandatory rule 5, `docs/process/testing.md`) —
-written first, watched failing, then implemented (the execute flow's TDD
-order). A story phase without a test task fails the `speckit` gate.
+**Tests are MANDATORY**: every user story phase carries the tests that
+prove its acceptance criteria (mandatory rule 5, `docs/process/testing.md`).
+**One task = one behaviour, test AND implementation** (the `/plan` rule):
+inside the same task, write the test, watch it fail (red), implement, watch
+it pass (green), then tick the box — never a "write tests" task followed by
+an "implement" task. Each behaviour task names its test file. A story phase
+with no task that references a test fails the `speckit` gate.
 
 **Organization**: tasks are grouped by user story so each story is an
 independently implementable, testable, deliverable slice — P1 first (MVP).
@@ -34,8 +37,8 @@ independently implementable, testable, deliverable slice — P1 first (MVP).
 
 ## Phase 3: User Story 1 — [title] (P1)
 
-- [ ] T003 [US1] Test: failing test(s) for AC-1 … in tests/…
-- [ ] T004 [US1] Implement … in src/…
+- [ ] T003 [US1] AC-1 <behaviour>: test in tests/… (red) → implement in src/… (green)
+- [ ] T004 [US1] AC-2 <behaviour>: test in tests/… (red) → implement in src/… (green)
 
 **Checkpoint**: US1 is independently functional — validate the slice against
 its acceptance criteria and Success Criteria before starting US2; where the
@@ -45,7 +48,7 @@ at slice cost, not at review after 100% of the work.
 
 ## Phase N: User Story N — [title] (PN)
 
-(same shape: test tasks first, then implementation, then the checkpoint)
+(same shape: one task per behaviour, each red → green inside the task, then the checkpoint)
 
 ## Final phase: Polish & cross-cutting concerns
 

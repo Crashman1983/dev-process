@@ -14,7 +14,7 @@ is the dev-process methodology, and this file only points at it so every
   spec that serves no stated goal or violates a non-goal changes the frame
   in the same effort or does not proceed.
 - **Quality bars:** `docs/process/testing.md` (tests prove acceptance —
-  test tasks are NEVER optional), `docs/process/review-checklist.md`,
+  tests are NEVER optional), `docs/process/review-checklist.md`,
   `docs/process/definition-of-ready-and-done.md`.
 
 Do NOT run `/speckit-constitution` — it would replace this pointer with

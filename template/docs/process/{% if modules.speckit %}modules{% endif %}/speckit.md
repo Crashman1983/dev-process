@@ -109,9 +109,12 @@ so worktrees stay independent and merges never conflict on it.
 ## What the gate enforces (`check_speckit.py`)
 
 - **Hard:** the constitution pointer marker removed/replaced (a second
-  truth); a user-story phase in an active `specs/*/tasks.md` without a test
-  task (rule 5 must not hang on prompt obedience — upstream declares "tests
-  optional", the override plus this gate say otherwise).
+  truth); a user-story phase in an active `specs/*/tasks.md` with no task
+  that references a test (rule 5 must not hang on prompt obedience — upstream
+  declares "tests optional", the override plus this gate say otherwise). The
+  task grain is one behaviour per task, test and implementation together
+  (red → green inside the task, `/plan`); older split-style lists with a
+  separate test task still pass.
 - **Hard:** an active Tier 2+ plan with neither a `specs/` reference nor a
   `spec-waived: <reason>` line — spec-before-plan is a recorded decision.
 - **Soft:** no `.specify/` yet (pre-init), named every run.

@@ -9,11 +9,16 @@ design review's F3/F7 conditions — prompts alone must not carry rule 5):
     .specify/memory/constitution.md — someone ran /speckit-constitution (or
     edited the file) and replaced the pointer with generated principles: a
     second truth beside the gated one. Restore the pointer.
-  - HARD: a user-story phase in an active specs/*/tasks.md carries no test
-    task — "tests are optional" upstream must never survive into rendered
-    tasks (mandatory rule 5). Heuristic and honest about it: a phase heading
-    that names a user story must contain at least one task line mentioning a
-    test; semantic adequacy stays review judgment.
+  - HARD: a user-story phase in an active specs/*/tasks.md has no task that
+    references a test — "tests are optional" upstream must never survive into
+    rendered tasks (mandatory rule 5). Heuristic and honest about it: a phase
+    heading that names a user story must contain at least one task line
+    mentioning a test. The task grain is /plan's "one task = one behaviour,
+    test AND implementation" (red → green inside the task); a combined
+    behaviour task with a test reference passes, and so does an older
+    split-style list (separate test task, then implement task) — the floor
+    is the test reference, not the shape. Semantic adequacy stays review
+    judgment.
   - HARD: an active Tier 2+ plan in .process-work/plans that neither
     references a specs/ directory nor carries a `spec-waived: <reason>` line —
     with the speckit module on, the spec interrogation (stories, EARS twins,
@@ -99,9 +104,11 @@ def check(root: Path) -> tuple[list[str], list[str]]:
             rel = tasks.relative_to(root)
             text = tasks.read_text(encoding="utf-8", errors="replace")
             for phase in _story_phases_without_tests(text):
-                hard.append(f"{rel}: {phase!r} has no test task — tests prove "
-                            f"acceptance (mandatory rule 5); add the failing "
-                            f"test task(s) before implementation")
+                hard.append(f"{rel}: {phase!r} has no task that references a "
+                            f"test — tests prove acceptance (mandatory rule 5); "
+                            f"one task per behaviour names its test file and "
+                            f"runs red → green inside the task (write the "
+                            f"test, watch it fail, implement, watch it pass)")
             open_tasks = len(re.findall(r"^\s*- \[ \] ", text, re.MULTILINE))
             if open_tasks:
                 soft.append(f"{rel}: {open_tasks} unchecked task(s) — the "
