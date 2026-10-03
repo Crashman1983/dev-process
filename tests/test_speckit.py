@@ -77,10 +77,48 @@ def test_gate_fails_story_phase_without_test_task(render, tmp_path):
         "- [ ] T001 [US1] Implement widget in src/widget.py\n")
     r = _gate(out)
     assert r.returncode == 1
-    assert "no test task" in r.stdout and "rule 5" in r.stdout
+    assert "no task that references a test" in r.stdout and "rule 5" in r.stdout
+    # the message teaches /plan's grain, not a separate test task
+    assert "one task per behaviour" in r.stdout and "red → green" in r.stdout
+
+
+def test_gate_passes_combined_behaviour_task(render, tmp_path):
+    # /plan's grain: one task = one behaviour, test AND implementation —
+    # the test reference inside the combined task satisfies the floor
+    out = _render(render, tmp_path)
+    d = out / "specs/001-widget"
+    d.mkdir(parents=True)
+    (d / "tasks.md").write_text(
+        "# Tasks\n\n## Phase 3: User Story 1 — widget (P1)\n\n"
+        "- [ ] T001 [US1] AC-1 widget saves: test in tests/test_widget.py "
+        "(red) → implement in src/widget.py (green)\n"
+        "\n## Phase 4: User Story 2 — export (P2)\n\n"
+        "- [ ] T002 [US2] AC-3 export csv: implement in src/export.py\n")
+    r = _gate(out)
+    # US1 (combined, with test) passes; US2 (no test reference) still fails
+    assert r.returncode == 1
+    assert "User Story 2" in r.stdout and "User Story 1" not in r.stdout
+    (d / "tasks.md").write_text(
+        "# Tasks\n\n## Phase 3: User Story 1 — widget (P1)\n\n"
+        "- [ ] T001 [US1] AC-1 widget saves: test in tests/test_widget.py "
+        "(red) → implement in src/widget.py (green)\n")
+    r = _gate(out)
+    assert r.returncode == 0, r.stdout
+
+
+def test_tasks_template_teaches_one_task_per_behaviour(render, tmp_path):
+    out = _render(render, tmp_path)
+    tasks_ovr = (out / OVR / "tasks-template.md").read_text()
+    assert "One task = one behaviour, test AND implementation" in tasks_ovr
+    assert "(red) → implement in src/… (green)" in tasks_ovr
+    assert "Test: failing test(s)" not in tasks_ovr  # the split example is gone
+    plan = (out / ".claude/commands/plan.md").read_text()
+    assert "one task = one behaviour, test AND implementation" in plan  # same rule, one source
 
 
 def test_gate_passes_story_phase_with_test_task(render, tmp_path):
+    # an existing split-style tasks.md (test task, then implement task) stays
+    # compatible — the floor is the test reference, not the shape
     out = _render(render, tmp_path)
     d = out / "specs/001-widget"
     d.mkdir(parents=True)
