@@ -95,7 +95,8 @@ def test_digest_counts_the_test_estate(render, tmp_path):
     assert r.returncode == 0, r.stdout + r.stderr
     assert "Test estate" in r.stdout
     assert "1 e2e" in r.stdout
-    assert "floor AND ceiling" in r.stdout
+    assert "by risk, not by count" in r.stdout
+    assert "floor AND ceiling" not in r.stdout
 
 
 def test_digest_points_at_screenshots_to_open(render, tmp_path):
