@@ -2,7 +2,8 @@
 # entry as notes (tools/release_notes.py). release-tag.yml creates the tag;
 # this makes it visible as a release. The local part before both (version
 # bump, SBOM, suite, commit) is tools/release.py. A tag without a CHANGELOG entry is not
-# published. Trigger with the tag name; `latest` marks it the latest release.
+# published, nor one whose commit has no green CI run on main
+# (tools/ci_evidence.py). Trigger with the tag name; `latest` marks it the latest release.
 name: release-publish
 on:
   workflow_dispatch:
@@ -13,6 +14,7 @@ on:
         type: string
 permissions:
   contents: write
+  actions: read  # tools/ci_evidence.py reads the CI runs
 jobs:
   publish:
     runs-on: ubuntu-latest
@@ -27,6 +29,9 @@ jobs:
           case "$TAG" in v[0-9]*) ;; *) echo "tag must look like vX.Y.Z"; exit 1;; esac
           git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null \
             || { echo "tag $TAG does not exist — create it with release-tag first"; exit 1; }
+          # re-check: the tag may have been moved since release-tag checked it
+          sha="$(git rev-parse --verify "$TAG^{commit}")" || exit 1
+          python3 tools/ci_evidence.py "$sha"
           git show "$TAG:CHANGELOG.md" > /tmp/changelog.md
           python3 tools/release_notes.py "$TAG" /tmp/changelog.md > /tmp/notes.txt
           title="$TAG — $(head -1 /tmp/notes.txt)"

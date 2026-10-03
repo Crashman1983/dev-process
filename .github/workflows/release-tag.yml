@@ -2,6 +2,8 @@
 # (including agents) may have branch-scoped push rights that cannot push
 # refs/tags — the Actions token can. Trigger with the tag name and optionally
 # the commit SHA to tag (defaults to the HEAD of the ref the run starts from).
+# Refused unless that commit has a green push run of ci.yml on main
+# (tools/ci_evidence.py) — wait for CI after the merge.
 name: release-tag
 on:
   workflow_dispatch:
@@ -22,6 +24,7 @@ on:
         type: boolean
 permissions:
   contents: write
+  actions: read  # tools/ci_evidence.py reads the CI runs
 jobs:
   tag:
     runs-on: ubuntu-latest
@@ -34,12 +37,13 @@ jobs:
           TAG: ${{ inputs.tag }}
           SHA: ${{ inputs.sha }}
           REPLACE: ${{ inputs.replace }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           # validate the inputs: a value starting with '-' would parse as a git
           # option (e.g. sha=--delete), so both are format-checked before use.
           case "$TAG" in v[0-9]*) ;; *) echo "tag must look like vX.Y.Z"; exit 1;; esac
           case "$SHA" in "" | *[!0-9a-fA-F]* ) SHA="";; esac  # hex-only, else ignore
-          target="${SHA:-$(git rev-parse HEAD)}"
+          target="$(git rev-parse --verify "${SHA:-HEAD}^{commit}")" || exit 1
           export TARGET="$target"
           uv run python - <<'PY'
           import os
@@ -55,6 +59,8 @@ jobs:
           if tag != expected:
               raise SystemExit(f"tag {tag!r} does not match project version {expected!r}")
           PY
+          # binding proof: a green push run of ci.yml on main for exactly this SHA
+          python3 tools/ci_evidence.py "$target"
           # an existing tag is moved only on explicit opt-in — a release tag
           # silently changing meaning is exactly what this guard prevents
           if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null; then
