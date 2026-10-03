@@ -23,7 +23,8 @@ independently implementable, testable, deliverable slice — P1 first (MVP).
 
 ## Format: `[ID] [P?] [Story] Description`
 
-- **[P]**: can run in parallel (different files, no dependencies)
+- **[P]**: can run in parallel — disjoint files and a fixed shared contract,
+  no shared resource (see `/plan`)
 - **[Story]**: which user story this task belongs to (e.g. US1, US2)
 - Include exact file paths in descriptions; a task cites the AC-IDs it serves.
 
