@@ -72,7 +72,7 @@ def test_replacing_a_module_gate_by_name_is_said_where_a_passing_hook_shows_it(r
     assert "gates.local.json replaces the template's speckit gate" in r.stderr
 
 
-@pytest.mark.parametrize("core", ["review", "kernel", "fix-streak"])
+@pytest.mark.parametrize("core", ["review", "kernel", "decision-records"])
 def test_a_core_gate_cannot_be_replaced(render, tmp_path, core):
     """Refute F2: a branch's own gates.local.json replaced `review` with a script that
     exits 0 — and with it the standing block — and the push to main passed."""

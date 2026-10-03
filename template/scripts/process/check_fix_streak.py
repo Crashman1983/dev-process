@@ -6,13 +6,15 @@ patch is stacked.
 The rule stood as a convention and did not fire on its own: downstream, one
 branch collected six fix commits on the same owner before anyone asked
 whether the design was wrong, and a gate took four review rounds whose
-findings all had one cause — the rewrite came only in the fourth. This gate
+findings all had one cause — the rewrite came only in the fourth. This check
 counts conventional `fix:`/`fix(…)` commits per touched file on the current
 branch against the integration branch. The second on one file asks rule 4's
 increment-vs-rewrite call, recorded as a DECISION before the next patch; from
 the third on, rule 6: the root cause is missing. Note-only (exit 0 always):
 it makes the pattern visible, it does not block. A no-op on the integration
-branch and in clones without a merge base.
+branch and in clones without a merge base. Not a gate: make_review_bundle.py
+runs it once per review round and puts the note into the bundle — the gate
+runner shows a passing gate's output nowhere.
 
 Usage: check_fix_streak.py [root]      Stdlib only.
 """
