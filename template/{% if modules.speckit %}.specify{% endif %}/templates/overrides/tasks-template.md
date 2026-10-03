@@ -39,6 +39,7 @@ independently implementable, testable, deliverable slice — P1 first (MVP).
 
 - [ ] T003 [US1] AC-1 <behaviour>: test in tests/… (red) → implement in src/… (green)
 - [ ] T004 [US1] AC-2 <behaviour>: test in tests/… (red) → implement in src/… (green)
+- [ ] T005 [US1] AC-3 an expired invite is refused with `InviteExpired`, nothing is created: test `test_expired_invite_is_refused` in tests/test_invites.py asserts the error and the unchanged member list (red) → implement the expiry check in src/invites.py (green)
 
 **Checkpoint**: US1 is independently functional — validate the slice against
 its acceptance criteria and Success Criteria before starting US2; where the
@@ -59,6 +60,7 @@ at slice cost, not at review after 100% of the work.
 - Mark a task `[X]` in THIS file the moment it completes — the checkboxes
   are the canonical progress state (session re-entry: next task = first
   unchecked box).
-- One atomic commit per task (`docs/process/commits.md`).
+- A task closes when its behaviour is green; its test and implementation land
+  in one or two commits (`docs/process/commits.md`, Atomicity).
 - Execution runs through the dev-process execute flow — `/speckit-implement`
   is not installed (it would bypass the commit and TDD discipline).

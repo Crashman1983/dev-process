@@ -59,7 +59,10 @@ maintenance, not loss.
 Acceptance decomposition (Definition of Ready, R2) already names them: the
 **negative** case, the **edge** case, the **authorization** case, and the
 **invalidation/cleanup** case. The missing negative twin is
-where a bug most often hides. Two patterns worth reaching for:
+where a bug most often hides. For a change to approval or release, trust,
+deletion or concurrency, the first behaviour test covers the critical edge
+case — the refusal, the revoked grant, the competing write — through the
+path real callers take, at the cheapest level that reaches it. Two patterns worth reaching for:
 
 - **Property-based testing** where the input space is large (parsers,
   serializers, calculations): state an invariant and let the framework
