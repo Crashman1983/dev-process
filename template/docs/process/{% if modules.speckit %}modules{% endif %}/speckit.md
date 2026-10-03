@@ -119,7 +119,13 @@ so worktrees stay independent and merges never conflict on it.
   `spec-waived: <reason>` line — spec-before-plan is a recorded decision.
 - **Soft:** no `.specify/` yet (pre-init), named every run.
 - The clarification gate additionally treats `specs/*/spec.md` markers as
-  notes and `specs/*/plan.md`/`tasks.md` markers as hard.
+  notes and `specs/*/plan.md`/`tasks.md` markers as hard (the build input).
+  Markers in the other companions (`research.md`, `data-model.md`,
+  `quickstart.md`, …) are notes with file and line — research records open
+  questions by design. A note is not a permission: an unresolved
+  load-bearing implementation decision is resolved (spec, or a plan
+  `DECISION`) before the task that depends on it. A file the gate cannot
+  read fails it.
 
 ## Model routing (recommendation, enforced by nothing)
 
