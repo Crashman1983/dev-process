@@ -35,6 +35,20 @@ survive into the plan (the `clarification` gate blocks it). Write small
 tasks with concrete files, code, and test commands. Required for every Tier 2+
 change.
 {% endif %}
+**A rename, removal or move is inventoried here, before any code.** For
+each renamed, removed or moved capability, rule or identifier, find what
+depends on it — callers, rules, IDs, unit/end-to-end/visual tests with
+their baselines, docs, registries — and put each into the existing task
+that changes it (its file list), not into a separate table. A grep for the
+identifier alone misses most of them. A moved rule's task also names where
+each of its duties is fulfilled afterwards (`duty: <what> → <new owner>,
+pinned by <test>`). Example — moving the "marker in a plan blocks" check
+from gate A to gate B: the task lists gate B's check and its test, gate A's
+removed check and its test, the doc that names gate A as the owner, and
+the gate registry entry, plus `duty: marker in plan blocks → gate B, pinned
+by test_marker_in_plan_is_hard`. `/execute` compares the final diff against
+this inventory before `pushed`; it does not build a second one.
+
 When the plan is committed, `uv run scripts/process/report.py planned --issue N` (`/report`) — one line to the tower. An open question for the owner goes into the plan as `DECISION NEEDED <date> <you>: <question> — options: …; recommendation: …` plus `report.py blocked`; the steward relays it and writes the answer back as a `DECISION` line.
 
 **Open the `## Decisions` ledger in the plan** (`journal-state-plans.md`,

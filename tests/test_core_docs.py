@@ -539,7 +539,7 @@ def test_execute_names_its_duties_before_pushed_and_testing_owns_the_own_conditi
     out = render(tmp_path, {"project_name": "demo"})
     execute = (out / ".claude/commands/execute.md").read_text()
     duties = execute.split("**Before you report `pushed`:**", 1)[1].split("\n\n", 1)[0]
-    for duty in ("A contradiction is a question, not a note", "enumerated by sink",
+    for duty in ("A contradiction is a question, not a note", "matches its planned inventory",
                  "runs once under its own conditions", "After a blocking review round"):
         assert duty in duties, duty
     assert "ROOT-CAUSE work=<id> round=<r>: <cause> — <test that failed before the fix>" in duties
@@ -551,3 +551,25 @@ def test_execute_names_its_duties_before_pushed_and_testing_owns_the_own_conditi
     assert "Test under the conditions the change creates" in refute  # the catalogue points to the one home
     tower = (out / "docs/process/tower.md").read_text()
     assert "question-unrouted" in tower and "decision_channel" in tower
+
+
+def test_rename_remove_move_inventory_lives_in_plan_and_execute_only_compares(render, tmp_path):
+    # the inventory moved from execute's "before pushed" into planning: the
+    # affected duties are captured before code (worked move example) and
+    # execute only compares the diff against them — no second inventory
+    for speckit in (True, False):
+        out = render(tmp_path / str(speckit), {"project_name": "demo", "modules": {"speckit": speckit}})
+        plan = (out / ".claude/commands/plan.md").read_text()
+        assert "A rename, removal or move is inventoried here, before any code" in plan
+        for sink in ("callers", "rules", "IDs", "baselines", "docs", "registries"):
+            assert sink in plan, sink
+        assert "existing task" in plan and "not into a separate table" in plan
+        # the moved rule's duties stay recognisable at their new owner
+        assert "duty: marker in plan blocks → gate B, pinned" in plan
+        execute = (out / ".claude/commands/execute.md").read_text()
+        assert "enumerated by sink" not in execute
+        assert "compare only the actual diff against those planned changes" in execute
+        assert "moved duty is still fulfilled at its named new owner" in execute
+        assert "No second full inventory" in execute
+        workflow = (out / "docs/process/workflow.md").read_text()
+        assert "A rename, removal or move is inventoried here, before code" in workflow
