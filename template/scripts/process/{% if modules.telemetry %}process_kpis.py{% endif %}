@@ -488,9 +488,12 @@ def _reports_by_worker(root: Path) -> dict[str, list[dict]]:
 
 
 def _model(rec: dict) -> str:
-    """The reported model, "" when the report says it was not measured."""
+    """The reported model with its effort when one was set (`model (effort)`,
+    a cell of its own), "" when the report says the model was not measured."""
     m = rec.get("model") or ""
-    return "" if m == "not measured" else m  # report.UNMEASURED
+    if m == "not measured":  # report.UNMEASURED
+        return ""
+    return f"{m} ({rec['effort']})" if rec.get("effort") else m
 
 
 def _review_rounds(root: Path) -> dict[str, dict]:
@@ -549,7 +552,7 @@ def models(root: Path | None = None) -> int:
         last_model: dict[str, str] = {}
         for r in sorted(recs, key=lambda x: x.get("epoch", 0)):
             if _model(r) and r.get("phase"):
-                last_model[r["phase"]] = r["model"]
+                last_model[r["phase"]] = _model(r)
         tier = rounds[issue].get("tier") if issue and issue in rounds else None
         for r in recs:
             m, ph = _model(r), r.get("phase") or ""

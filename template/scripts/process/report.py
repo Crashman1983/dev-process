@@ -80,7 +80,7 @@ UNMEASURED = "not measured"
 
 
 def write_report(root: Path, state: str, *, issue: int | None, note: str, worker: str | None,
-                 model: str | None = None) -> dict:
+                 model: str | None = None, effort: str | None = None) -> dict:
     # never empty: an empty model was indistinguishable from a lost field downstream
     model = (model or os.environ.get("PROCESS_MODEL") or "").strip()
     if not model:
@@ -95,6 +95,8 @@ def write_report(root: Path, state: str, *, issue: int | None, note: str, worker
         "issue": issue,
         "state": state,
         "model": model,
+        # the cell's reasoning effort when dispatch set one; absent: the harness default
+        **({"effort": e} if (e := (effort or os.environ.get("PROCESS_EFFORT") or "").strip()) else {}),
         "phase": os.environ.get("PROCESS_PHASE") or "",
         "note": note.strip()[:1000],
         "cwd": str(root),
@@ -194,6 +196,7 @@ def main(argv: list[str]) -> int:
     p.add_argument("--note", default="")
     p.add_argument("--worker", help="name (default: PROCESS_WORKER or the branch)")
     p.add_argument("--model", help="the model doing this phase (default: PROCESS_MODEL) — what the KPIs cut by")
+    p.add_argument("--effort", help="the reasoning effort of this phase's cell (default: PROCESS_EFFORT)")
     p.add_argument("--root", default=".")
     p.add_argument("--force", action="store_true",
                    help="record `pushed` without the origin check (marked unverified)")
@@ -209,7 +212,7 @@ def main(argv: list[str]) -> int:
             return 2
         if why:
             note = f"[unverified: {why}] {note}".strip()
-    rec = write_report(root, a.state, issue=a.issue, note=note, worker=a.worker, model=a.model)
+    rec = write_report(root, a.state, issue=a.issue, note=note, worker=a.worker, model=a.model, effort=a.effort)
     print(f"report: {rec['worker']}@{rec['host']} → {rec['state']}"
           + (f" #{rec['issue']}" if rec["issue"] else "") + (f" — {rec['note']}" if rec["note"] else ""))
     if a.sync or os.environ.get("PROCESS_REPORT_SYNC") == "1":

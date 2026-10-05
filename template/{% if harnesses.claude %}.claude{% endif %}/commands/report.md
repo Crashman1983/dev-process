@@ -12,6 +12,7 @@ whole budget.
 
 `--model` is your own model id, verbatim (a dispatched session has it in
 `PROCESS_MODEL`); without either the report records `not measured`.
+`--effort <level>` (or `PROCESS_EFFORT`) records the cell's effort when dispatch set one.
 Send `planned` when the plan is committed, `pushed` after the phase's work
 is committed AND pushed (the script checks origin and refuses otherwise —
 push, then report; never `--force` to get past it while origin is reachable),
