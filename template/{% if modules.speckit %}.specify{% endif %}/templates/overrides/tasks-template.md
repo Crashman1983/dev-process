@@ -21,11 +21,13 @@ with no task that references a test fails the `speckit` gate.
 **Organization**: tasks are grouped by user story so each story is an
 independently implementable, testable, deliverable slice — P1 first (MVP).
 
-## Format: `[ID] [P?] [Story] Description`
+## Format: `[ID] [P?] [Story] [class?] Description`
 
 - **[P]**: can run in parallel — disjoint files and a fixed shared contract,
   no shared resource (see `/plan`)
 - **[Story]**: which user story this task belongs to (e.g. US1, US2)
+- **[class]**: `[mechanical]` or `[design]`; omitted is standard — picks the
+  model (`docs/process/tower.md`, "Model by task class")
 - Include exact file paths in descriptions; a task cites the AC-IDs it serves.
 
 ## Phase 1: Setup (shared infrastructure — only if genuinely needed)

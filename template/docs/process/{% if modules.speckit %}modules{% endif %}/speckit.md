@@ -128,21 +128,11 @@ so worktrees stay independent and merges never conflict on it.
   `DECISION`) before the task that depends on it. A file the gate cannot
   read fails it.
 
-## Model routing (recommendation, enforced by nothing)
+## Model routing
 
-specify/clarify and plan: strongest model (judgment density — a spec or plan
-error costs its multiple downstream) ·
-tasks generation + execution against tasks.md: the session's workhorse model,
-with small models for mechanical subagent tasks (zero-context tasks
-with exact paths; `process_context.py` hands the next task and the files it
-names — no orientation guesswork; it scopes to the spec dir named like the
-branch or whose spec.md `issue:` is the one in `--issue N`) · review: per
-`verification-independence.md` — Tier 3 crosses the model family,
-non-negotiable. The Claude harness carries these defaults as `model:`
-frontmatter on the phase commands (`/brainstorm`, `/plan`, `/review`) — a
-per-invocation switch, the session model stays untouched; execution inherits
-the session model. Do not add frontmatter to the `/speckit-*` commands
-themselves — a Spec Kit update overwrites them; the routing lives in the
-wrapper commands. Measure the effect against your
-own baseline (telemetry: convergence, cost, CFR) instead of trusting this
-paragraph.
+Which model runs a phase, a tier and a task class (`[mechanical]`,
+`[design]` beside `[P] [US1]` on a tasks.md line) is the model policy's,
+read through `dispatch.py policy` — `docs/process/tower.md`, "Dispatch and
+the model policy". Any per-command model setting belongs on the wrapper
+commands, never on the `/speckit-*` commands themselves: a Spec Kit update
+overwrites them.

@@ -92,3 +92,15 @@ def test_worker_env_cannot_redirect_git_config_or_executables(render, tmp_path, 
     r = _dispatch(out, "policy")
 
     assert r.returncode != 0 and key in r.stdout + r.stderr, r.stdout + r.stderr
+
+
+def test_the_local_file_changes_one_class_cell(render, tmp_path):
+    """A project re-points one class without copying the template's classes."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _local(out, {"classes": {"design": {"execute": "my-large"}}})
+
+    design = _dispatch(out, "policy", "--class", "design")
+    mech = _dispatch(out, "policy", "--class", "mechanical")
+
+    assert design.returncode == 0 and "execute: my-large" in design.stdout, design.stdout + design.stderr
+    assert mech.returncode == 0 and "execute: claude-sonnet-5" in mech.stdout, mech.stdout + mech.stderr
