@@ -280,6 +280,8 @@ def sessions(root: Path) -> list[dict]:
         return []
     out = []
     reports = _report.read_reports(root)
+    # model drift is read only where the policy names the harness's transcripts
+    pattern = _dispatch.transcripts_pattern(root) if hasattr(_dispatch, "model_drift") else None
     for rec in _dispatch.records(root):
         last, since = _dispatch.last_output(rec)
         rep = _dispatch.session_report(rec, reports) if hasattr(_dispatch, "session_report") else None
@@ -288,7 +290,9 @@ def sessions(root: Path) -> list[dict]:
                  f"tmux {rec.get('tmux_session')}:{rec.get('tmux_name')}" if rec.get("tmux_window")
                  else f"pid {rec.get('pid')}")
         out.append({"branch": rec["branch"], "phase": rec.get("phase"), "issue": rec.get("issue"),
-                    "model": rec.get("model"), "defect": rec.get("defect"), "alive": rec["alive"], "state": rec["state"], "where": where,
+                    "model": rec.get("model"), "effort": rec.get("effort"),
+                    "model_drift": _dispatch.model_drift(root, rec, pattern) if pattern else [],
+                    "defect": rec.get("defect"), "alive": rec["alive"], "state": rec["state"], "where": where,
                     "minutes_since_start": int((time.time() - int(rec.get("started") or time.time())) // 60),
                     "last_output": last[-200:], "minutes_since_output": since,
                     # the session's own word and whether its phase is over — dispatch's
@@ -499,6 +503,13 @@ def findings(table: dict, stale_minutes: int) -> list[dict]:
             out.append({"kind": "dead-worker", "severity": "high",
                         "what": f"{s['branch']} ({s.get('phase')}): session {s['state']}, work not done",
                         "because": "the worker cannot report or progress — inspect its work and resume or reassign it"})
+        if s.get("model_drift"):
+            out.append({"kind": "model-drift", "severity": "high",
+                        "what": f"{s['branch']} ({s.get('phase')}): dispatched {s.get('model')}, its transcript "
+                                f"shows {', '.join(s['model_drift'])}",
+                        "because": "something overrode the policy (a command file's `model:` frontmatter, a "
+                                   "harness default) — one owner for the model: remove the override, "
+                                   "model-policy*.json decides"})
         if s.get("defect"):
             out.append({"kind": "session-defect", "severity": "high", "what": s["branch"],
                         "because": s["defect"]})
