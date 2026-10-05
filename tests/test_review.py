@@ -333,8 +333,8 @@ def test_unresolvable_artifact_commit_is_note_not_hard(render, tmp_path):
     # fresh clone — hard-failing there would red every clone retroactively
     # for every properly bound historical review (observed in production)
     out = render(tmp_path, {"project_name": "demo"})
-    _base, head, digest = _init_git_repo(out, work="bound")
-    _journal(out, _review(work="bound", artifact=("d" * 40, head, digest)))
+    _base, _head, digest = _init_git_repo(out, work="bound")
+    _journal(out, _review(work="bound", artifact=("d" * 40, "e" * 40, digest)))
     r = _run(out)
     assert r.returncode == 0, r.stdout
     assert "not present in this clone" in r.stdout
@@ -929,8 +929,8 @@ def test_integrity_ledger_remembers_a_missing_commit_until_the_next_fetch(render
     import os
     import time
     out = render(tmp_path, {"project_name": "demo"})
-    _base, head, digest = _init_git_repo(out, work="bound")
-    _journal(out, _review(work="bound", artifact=("d" * 40, head, digest)))
+    _base, _head, digest = _init_git_repo(out, work="bound")
+    _journal(out, _review(work="bound", artifact=("d" * 40, "e" * 40, digest)))
     r1 = _run(out)
     assert r1.returncode == 0 and "not present in this clone" in r1.stdout
     ledger = out / ".git/process-review-integrity"
@@ -1174,3 +1174,146 @@ def test_a_missing_integration_base_is_a_presence_finding(render, tmp_path):
     merge = _run(out, {**env, "PROCESS_PUSH_TARGETS": "refs/heads/main"})
     assert merge.returncode == 1
     assert "no proper integration base" in merge.stdout.split("review: FAILED:")[-1], merge.stdout
+
+
+# --- #160 gate side: a full round vouching for the pushed range starts at the fork point ---
+
+_CR = Path(__file__).resolve().parents[1] / "template/scripts/process/check_review.py"
+_T3 = "bundle,non-implementing,cross-model"
+
+
+def _cr():
+    # loaded straight from the template tree: no __pycache__ may land there
+    import importlib.util
+    before = sys.dont_write_bytecode
+    sys.dont_write_bytecode = True
+    try:
+        spec = importlib.util.spec_from_file_location("cr_fork_point", _CR)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+    finally:
+        sys.dont_write_bytecode = before
+    return module
+
+
+def _commit_file(root, rel, body):
+    (root / rel).parent.mkdir(parents=True, exist_ok=True)
+    (root / rel).write_text(body, encoding="utf-8")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", f"add {rel}")
+    return _git(root, "rev-parse", "HEAD").stdout.strip()
+
+
+def _fork_repo(root, work="forked"):
+    """main at the fork, `feature` with the archived plan and two commits:
+    (fork, first, head)."""
+    root.mkdir()
+    _git(root, "init", "-q", "-b", "main")
+    _git(root, "config", "user.email", "t@example.com")
+    _git(root, "config", "user.name", "Test")
+    fork = _commit_file(root, "README.md", "base\n")
+    _git(root, "checkout", "-q", "-b", "feature")
+    _archived_plan(root, f"2026-07-19-{work}.md", "# Plan\n\ntier: 2\n")
+    first = _commit_file(root, "a.py", "a = 1\n")
+    head = _commit_file(root, "b.py", "b = 1\n")
+    return fork, first, head
+
+
+def _full(cr, root, base, head, work="forked", tier="2", independence="bundle,non-implementing"):
+    return _review(work=work, tier=tier, independence=independence,
+                   artifact=(base, head, cr.artifact_digest(root, base, head)))
+
+
+def _merge_check(cr, root, monkeypatch):
+    monkeypatch.setenv("PROCESS_PUSH_TARGETS", "refs/heads/main")
+    return cr.check(root)
+
+
+def test_an_unmerged_full_round_off_the_fork_point_is_hard_and_clears_nothing(tmp_path, monkeypatch):
+    cr, root = _cr(), tmp_path / "p"
+    _fork, first, head = _fork_repo(root)
+    _journal(root, _full(cr, root, first, head))
+    hard, _ = _merge_check(cr, root, monkeypatch)
+    assert any("malformed REVIEW line" in h and "is not the fork point" in h for h in hard), hard
+    assert any("no clearing REVIEW" in h and "forked" in h for h in hard), hard
+
+
+def test_a_full_round_at_the_fork_point_clears_the_plan(tmp_path, monkeypatch):
+    cr, root = _cr(), tmp_path / "p"
+    fork, _first, head = _fork_repo(root)
+    _journal(root, _full(cr, root, fork, head))
+    hard, _ = _merge_check(cr, root, monkeypatch)
+    assert hard == [], hard
+
+
+def test_a_merged_legacy_full_round_stands_as_main_judged_it(tmp_path, monkeypatch):
+    cr, root = _cr(), tmp_path / "p"
+    _fork, first, head = _fork_repo(root)
+    _git(root, "checkout", "-q", "main")
+    _git(root, "merge", "-q", "--no-ff", "-m", "merge feature", "feature")
+    _git(root, "checkout", "-q", "-b", "next")
+    _journal(root, _full(cr, root, first, head))  # base = the previous head, pre-#160
+    _commit_file(root, ".process-work/journal/2026-07-04.md",
+                 (root / JOURNAL / "2026-07-04.md").read_text())
+    hard, soft = _merge_check(cr, root, monkeypatch)
+    assert hard == [], hard
+    assert not any("legacy full-round" in s for s in soft), soft
+
+
+def test_an_off_fork_record_of_a_stale_branch_is_one_note_and_still_clears(tmp_path, monkeypatch):
+    """Downstream: records of stale branches whose plans are archived on main —
+    their heads are no part of this push; judging them would red every push."""
+    cr, root = _cr(), tmp_path / "p"
+    root.mkdir()
+    _git(root, "init", "-q", "-b", "main")
+    _git(root, "config", "user.email", "t@example.com")
+    _git(root, "config", "user.name", "Test")
+    _commit_file(root, "README.md", "base\n")
+    _git(root, "checkout", "-q", "-b", "stale")
+    first = _commit_file(root, "s1.py", "s = 1\n")
+    head = _commit_file(root, "s2.py", "s = 2\n")
+    _git(root, "checkout", "-q", "main")
+    _archived_plan(root, "2026-07-19-stale.md", "# Plan\n\ntier: 2\n")
+    _journal(root, _full(cr, root, first, head, work="stale"))
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "archive stale")
+    _git(root, "checkout", "-q", "-b", "next")
+    _commit_file(root, "docs/notes.md", "unrelated\n")
+    hard, soft = _merge_check(cr, root, monkeypatch)
+    assert not any("fork point" in h or "stale" in h for h in hard), hard
+    assert any(s.startswith("1 legacy full-round record(s) not checked against the fork point: "
+                            "head not in this push's history") for s in soft), soft
+
+
+def test_a_tier3_delta_anchored_on_an_off_fork_full_round_is_refused(tmp_path):
+    cr, root = _cr(), tmp_path / "p"
+    fork, first, head = _fork_repo(root)
+    later = _commit_file(root, "c.py", "c = 1\n")
+    delta = _review(work="forked", tier="3", independence=_T3, rnd="2",
+                    artifact=(head, later, "0" * 64)) + " mode=delta"
+    for base, refused in ((first, True), (fork, False)):
+        records = [f for _ln, f in cr.parse_review_lines(
+            _full(cr, root, base, head, tier="3", independence=_T3) + "\n" + delta + "\n")[0]]
+        why = cr.invalid_deltas(root, records).get(id(records[1]), "")
+        assert (cr.tier3_delta_refusal(head) in why) is refused, (base, why)
+
+
+def test_a_criss_cross_head_names_the_ambiguous_fork_point(tmp_path):
+    cr, root = _cr(), tmp_path / "p"
+    root.mkdir()
+    _git(root, "init", "-q", "-b", "main")
+    _git(root, "config", "user.email", "t@example.com")
+    _git(root, "config", "user.name", "Test")
+    base = _commit_file(root, "README.md", "base\n")
+    _git(root, "checkout", "-q", "-b", "feature")
+    a1 = _commit_file(root, "feature.md", "a1\n")
+    _git(root, "checkout", "-q", "main")
+    b1 = _commit_file(root, "main.md", "b1\n")
+    _git(root, "merge", "-q", "--no-ff", "-m", "main takes feature", a1)
+    _git(root, "checkout", "-q", "feature")
+    _git(root, "merge", "-q", "--no-ff", "-m", "feature takes main", b1)
+    tip = _git(root, "rev-parse", "HEAD").stdout.strip()
+    records = [f for _ln, f in cr.parse_review_lines(_review(
+        work="x", artifact=(base, tip, "0" * 64)) + "\n")[0]]
+    why = cr.invalid_full_rounds(root, records, tip)[id(records[0])]
+    assert "one fork point" in why and "merge bases" in why, why

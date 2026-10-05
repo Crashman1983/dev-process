@@ -791,8 +791,10 @@ def _scope_growth(root_s: str, slugs: tuple, issues: tuple, since: str, head: st
 
 def tier3_delta_problem(root: Path, records: list[dict], works: set[str],
                         since: str, head: str, keys: tuple | None = None) -> str | None:
-    """Anchor, then containment — why this Tier 3 delta clears nothing."""
-    if not tier3_delta_anchor(records, works, since):
+    """Anchor, then containment — why this Tier 3 delta clears nothing. A
+    full round off its fork point anchors nothing (`invalid_full_rounds`)."""
+    off_fork = invalid_full_rounds(root, records, head) if head else {}
+    if not tier3_delta_anchor([r for r in records if id(r) not in off_fork], works, since):
         return tier3_delta_refusal(since)
     return tier3_delta_scope_growth(root, works, since, head, keys)
 
@@ -805,15 +807,90 @@ def invalid_deltas(root: Path, records: list[dict]) -> dict[int, str]:
                                             r.get("head") or "")] if why}
 
 
-def valid_passes(root: Path, records: list[dict]) -> list[dict]:
-    """The passes among these records, invalid Tier 3 deltas left out."""
-    bad = invalid_deltas(root, records)
+def _commit_sha(root: Path, ref: str) -> str | None:
+    out = _git_bytes(root, "rev-parse", "--verify", "-q", f"{ref}^{{commit}}")
+    return out.decode().strip() if out else None
+
+
+@functools.lru_cache(maxsize=64)
+def _unmerged_history(root_s: str, tip_sha: str, merged: tuple[str, ...]) -> frozenset[str] | None:
+    """The commits of tip's history no integration ref holds (`merged`: their
+    SHAs) — the range a push vouches for. None: git cannot list them."""
+    out = _git_bytes(Path(root_s), "rev-list", tip_sha, "--not", *merged, "--")
+    return None if out is None else frozenset(out.decode().split())
+
+
+@functools.lru_cache(maxsize=1024)
+def _base_problem(root_s: str, base: str, head: str, merged: tuple[str, ...]) -> str | None:
+    """`full_round_base_problem`, once per (base, head) and integration state."""
+    return full_round_base_problem(Path(root_s), base, head)
+
+
+def _full_rounds_split(root: Path, records: list[dict], tip: str
+                       ) -> tuple[dict[int, str], list[dict], tuple[str, ...]]:
+    """(invalid, outside, merged): the full rounds whose head the push of
+    `tip` carries unmerged, judged against the fork point; the full rounds
+    whose head it does not carry, unjudged; the integration SHAs."""
+    full = [r for r in records
+            if r.get("mode", "full") == "full" and r.get("base") and r.get("head")]
+    tip_sha = _commit_sha(root, tip) if full else None
+    if tip_sha is None:
+        return {}, [], ()
+    merged = tuple(sorted({sha for ref in integration_refs(root)
+                           for sha in [_commit_sha(root, ref)] if sha}))
+    pushed = _unmerged_history(str(root), tip_sha, merged)
+    invalid: dict[int, str] = {}
+    outside: list[dict] = []
+    for r in full:
+        if pushed is not None and r["head"] not in pushed:
+            outside.append(r)  # merged, missing or another branch's: not this push's range
+            continue
+        why = _base_problem(str(root), r["base"], r["head"], merged)
+        if why:
+            invalid[id(r)] = why
+    return invalid, outside, merged
+
+
+def invalid_full_rounds(root: Path, records: list[dict], tip: str = "HEAD") -> dict[int, str]:
+    """id(record) → why, for every full-round REVIEW whose base is not the
+    fork point of its head (`full_round_base_problem`, #160) — it clears
+    nothing and anchors no delta. Judged are the records that vouch for the
+    pushed range: head in `tip`'s history and in no integration ref (git
+    unable to list that range: every record). A merged record stands as main
+    judged it; a missing head or another branch's is not this push's
+    (`unchecked_full_rounds` counts the latter)."""
+    return _full_rounds_split(root, records, tip)[0]
+
+
+def unchecked_full_rounds(root: Path, records: list[dict], tip: str = "HEAD") -> int:
+    """How many full rounds off their fork point stay unjudged: head present
+    and unmerged, but outside `tip`'s history (a stale branch's record)."""
+    _invalid, outside, merged = _full_rounds_split(root, records, tip)
+    if not outside:
+        return 0
+    listed = _git_bytes(root, "rev-list", "--all", "--not", *merged, "--")
+    unmerged = set((listed or b"").decode().split())
+    return sum(1 for r in outside if r["head"] in unmerged
+               and _base_problem(str(root), r["base"], r["head"], merged))
+
+
+def invalid_records(root: Path, records: list[dict], tip: str = "HEAD") -> dict[int, str]:
+    """id(record) → why, for every REVIEW record that clears nothing: Tier 3
+    deltas (`invalid_deltas`) and full rounds off their fork point
+    (`invalid_full_rounds`) — the gate, the standing-block arm and the
+    train read passes through here."""
+    return {**invalid_full_rounds(root, records, tip), **invalid_deltas(root, records)}
+
+
+def valid_passes(root: Path, records: list[dict], tip: str = "HEAD") -> list[dict]:
+    """The passes among these records, invalid ones (`invalid_records`) left out."""
+    bad = invalid_records(root, records, tip)
     return [r for r in records if r.get("verdict") == "pass" and id(r) not in bad]
 
 
-def review_passes(root: Path, texts) -> list[dict]:
-    """The valid passes of these journal texts."""
-    return valid_passes(root, [f for text in texts for _ln, f in parse_review_lines(text)[0]])
+def review_passes(root: Path, texts, tip: str = "HEAD") -> list[dict]:
+    """The valid passes of these journal texts, judged for the push of `tip`."""
+    return valid_passes(root, [f for text in texts for _ln, f in parse_review_lines(text)[0]], tip)
 
 
 def _git_bytes(root: Path, *args: str) -> bytes | None:
@@ -1295,8 +1372,8 @@ def full_round_base_problem(root: Path, base: str, head: str) -> str | None:
     the review bundle) refuse it; a fork that cannot be told is refused with
     the reason. A head no integration ref forks and one contains is an audit
     of a merged range: no fork bounds it, and any base stands (a forged ref
-    at the head does not count while another ref still forks it). The gate's reading
-    of existing records is unchanged."""
+    at the head does not count while another ref still forks it). The gate
+    judges existing records through `invalid_full_rounds`."""
     try:
         found = _integration_base(root, head)
     except GitReadError as exc:
@@ -1592,7 +1669,7 @@ def _blocks(located: list[tuple[str, dict]]) -> dict[str, tuple[str, dict]]:
             if rec["verdict"] == "block"}
 
 
-def _history_blocks(compared: RangeRecords, root: Path) -> list[tuple[str, dict]]:
+def _history_blocks(compared: RangeRecords, root: Path, tip: str = "HEAD") -> list[tuple[str, dict]]:
     """The records the history adds to the verdict at `tip`: the blocks it
     held, and the passes the remote already holds.
 
@@ -1607,7 +1684,7 @@ def _history_blocks(compared: RangeRecords, root: Path) -> list[tuple[str, dict]
     round whose block a merge dropped; whoever changes a verdict counts the
     round up."""
     blocks = [(loc, f) for loc, f in compared.seen if f["verdict"] == "block"]
-    merged = [("base", f) for f in valid_passes(root, compared.at_base)]
+    merged = [("base", f) for f in valid_passes(root, compared.at_base, tip)]
     return blocks + merged
 
 
@@ -1650,8 +1727,8 @@ def standing_block_findings(root: Path, tip: str = "HEAD", *, remote_sha: str | 
                           f"review records cannot be read is refused" for lineno, message in errors]
     if malformed:
         return malformed
-    # an invalid Tier 3 delta pass clears no block (`invalid_deltas`)
-    bad = invalid_deltas(root, [f for _loc, f in at_tip])
+    # an invalid pass clears no block (`invalid_records`)
+    bad = invalid_records(root, [f for _loc, f in at_tip], tip)
     at_tip = [(loc, f) for loc, f in at_tip if id(f) not in bad or f["verdict"] != "pass"]
     if remote_sha is not None and GIT_SHA.fullmatch(remote_sha) and not remote_sha.strip("0"):
         # the remote has no such ref: this push creates main and carries its
@@ -1680,7 +1757,7 @@ def standing_block_findings(root: Path, tip: str = "HEAD", *, remote_sha: str | 
                 f"that claims a work can be read — fetch the remote, then push again"]
     try:
         compared = range_records(root, base, tip)
-        standing = _blocks(at_tip + _history_blocks(compared, root))
+        standing = _blocks(at_tip + _history_blocks(compared, root, tip))
         if not standing:
             return []
         in_flight = paths_in_flight(root, tip, base=base, strict=True)
@@ -2493,11 +2570,15 @@ def check(root: Path) -> tuple[list[str], list[str]]:
         soft.extend(isoft)
         all_records.extend(records)
         located += [(rel, lineno, f) for lineno, f in records]
-    invalid = invalid_deltas(root, [f for _ln, f in all_records])
+    invalid = invalid_records(root, [f for _ln, f in all_records])
     for rel, lineno, f in located:
         if id(f) in invalid:
             hard.append(f"{rel}:{lineno}: malformed REVIEW line — {invalid[id(f)]}")
-    # an invalid delta clears nothing; its block still stands
+    unchecked = unchecked_full_rounds(root, [f for _ln, f in all_records])
+    if unchecked:
+        soft.append(f"{unchecked} legacy full-round record(s) not checked against the fork "
+                    f"point: head not in this push's history")
+    # an invalid delta or full round clears nothing; its block still stands
     all_records = [(ln, f) for ln, f in all_records
                    if id(f) not in invalid or f["verdict"] != "pass"]
     if ledger is not None:

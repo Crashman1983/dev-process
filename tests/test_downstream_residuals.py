@@ -467,9 +467,10 @@ def test_three_stacked_reviews_cover_overlapping_files_but_not_a_late_commit(rep
     review = load('check_review')
     git(repo, 'checkout', '-qb', 'stack')
     records = []
+    # every full round reviews the whole branch: its base is the fork point (#160)
+    base = git(repo, 'rev-parse', 'HEAD')
     for name in ['a', 'b', 'c']:
         commit(repo, f'.process-work/plans/{name}.md', '# Plan\ntier: 2\n\n## Decisions\n')
-        base = git(repo, 'rev-parse', 'HEAD')
         head = commit(repo, 'code.py', f'value = {name!r}\n')
         digest = review.artifact_digest(repo, base, head)
         records.append(f'REVIEW work={name} tier=2 reviewer=fresh model=same '
