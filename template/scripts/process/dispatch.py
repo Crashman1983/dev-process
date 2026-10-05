@@ -21,7 +21,9 @@ Which model runs which phase comes from `docs/process/model-policy.json`
 (tier × phase), with `model-policy.local.json` laid over it when the project
 has one; the project's own start command is the `command` template
 there. `{model}` and `{prompt}` are substituted inside the argv the
-template splits into; the prompt is one argv element.
+template splits into; the prompt is one argv element. A cell is a model
+or `{"model": …, "effort": …}`; `{effort}` is substituted likewise, and
+an element carrying it is dropped when the cell sets no effort.
 
 Two runners (policy `runner`): `detached` starts the argv headless (own
 session, output to a log). `tmux` starts it as a window of one tmux
@@ -105,6 +107,7 @@ DISPATCH_DIR = "process-dispatch"
 ISSUES_FILE = "issues.json"
 QUEUE_FILE = "queue.json"
 PHASES = ("brainstorm", "plan", "execute", "review")
+EFFORTS = ("low", "medium", "high", "xhigh", "max")  # the reasoning-effort levels a cell may name
 STRIP_ENV_PREFIXES = ("CLAUDECODE", "CLAUDE_CODE_")  # a nested session must not inherit the steward's identity
 _ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]|\x1b[()][A-Z0-9]|\x1b[=>]|\r")
 
@@ -163,19 +166,46 @@ def load_policy(root: Path) -> dict:
     classes = data.get("classes")
     if classes is not None and not (
             isinstance(classes, dict) and all(
-                isinstance(row, dict) and all(ph in PHASES and isinstance(m, str) and m for ph, m in row.items())
-                for row in classes.values())):
+                isinstance(row, dict) and all(ph in PHASES for ph in row) for row in classes.values())):
         raise SystemExit(f"dispatch: {POLICY} `classes` must map each task class to "
                          f"{{phase: model}} with phases brainstorm|plan|execute|review")
+    rows = [("default", data.get("default")),
+            *((f"tiers.{t}", row) for t, row in (data.get("tiers") or {}).items()),
+            *((f"classes.{c}", row) for c, row in (classes or {}).items())]
+    for where, row in rows:
+        for ph, cell in (row.items() if isinstance(row, dict) else ()):
+            if ph in PHASES:
+                _cell(cell, f"{where}.{ph}")
     return data
 
 
-def _merged(base: dict, over: dict) -> dict:
-    """`over` laid on `base`: mappings merge key by key, anything else replaces whole."""
+def _cell(cell: object, where: str) -> tuple[str, str | None]:
+    """(model, effort) of one policy cell — a model id, or `{"model": …,
+    "effort": …}` with an effort from EFFORTS; anything else is refused
+    naming the cell (checked after the local overlay: the project's cells too)."""
+    if isinstance(cell, str) and cell:
+        return cell, None
+    if (isinstance(cell, dict) and set(cell) <= {"model", "effort"}
+            and isinstance(cell.get("model"), str) and cell["model"]):
+        effort = cell.get("effort")
+        if effort is None or effort in EFFORTS:
+            return cell["model"], effort
+        raise SystemExit(f"dispatch: {POLICY} {where}: effort {effort!r} is not one of {', '.join(EFFORTS)}")
+    raise SystemExit(f"dispatch: {POLICY} {where} must be a model id or "
+                     f'{{"model": "…", "effort": "{"|".join(EFFORTS)}"}}, got {cell!r}')
+
+
+def _merged(base: dict, over: dict, path: tuple[str, ...] = ()) -> dict:
+    """`over` laid on `base`: mappings merge key by key, anything else replaces
+    whole — and so does a policy cell (`default.P`, `tiers.N.P`, `classes.C.P`),
+    so a local `{"model": …}` does not inherit the template cell's effort."""
     out = dict(base)
     for key, value in over.items():
-        out[key] = (_merged(out[key], value)
-                    if isinstance(value, dict) and isinstance(out.get(key), dict) else value)
+        where = (*path, key)
+        cell = key in PHASES and ((len(where) == 2 and where[0] == "default")
+                                  or (len(where) == 3 and where[0] in ("tiers", "classes")))
+        out[key] = (_merged(out[key], value, where)
+                    if isinstance(value, dict) and isinstance(out.get(key), dict) and not cell else value)
     return out
 
 
@@ -232,9 +262,10 @@ def phase_policy(policy: dict, phase: str) -> dict:
             "env": {**(policy.get("env") or {}), **(row.get("env") or {})}}
 
 
-def model_for(policy: dict, tier: int | None, phase: str, cls: str | None = None) -> str:
-    """The model for one phase: `classes[cls][phase]` first, then the tier's
-    cell, then `default` — the one owner of that precedence."""
+def cell_for(policy: dict, tier: int | None, phase: str, cls: str | None = None) -> tuple[str, str | None]:
+    """(model, effort) for one phase: `classes[cls][phase]` first, then the
+    tier's cell, then `default` — the one owner of that precedence. A cell
+    wins whole: a class cell without an effort does not inherit the tier's."""
     classes = policy.get("classes") or {}
     if cls and cls != "standard" and cls not in classes:
         raise SystemExit(f"dispatch: policy names no task class {cls!r} "
@@ -242,10 +273,29 @@ def model_for(policy: dict, tier: int | None, phase: str, cls: str | None = None
     by_class = (classes.get(cls) or {}).get(phase) if cls else None
     tiers = policy.get("tiers") or {}
     row = (tiers.get(str(tier)) if tier is not None else None) or {}
-    model = by_class or row.get(phase) or (policy.get("default") or {}).get(phase)  # per-phase fallback
-    if not model:
+    cell = by_class or row.get(phase) or (policy.get("default") or {}).get(phase)  # per-phase fallback
+    if not cell:
         raise SystemExit(f"dispatch: policy names no model for tier {tier} phase {phase}")
-    return str(model)
+    return _cell(cell, f"tier {tier} phase {phase}")
+
+
+def model_for(policy: dict, tier: int | None, phase: str, cls: str | None = None) -> str:
+    """The model of `cell_for`'s cell."""
+    return cell_for(policy, tier, phase, cls)[0]
+
+
+def labelled(model: str, effort: str | None) -> str:
+    """`model (effort)` — how messages name a cell."""
+    return f"{model} ({effort})" if effort else model
+
+
+def effort_refusal(policy: dict, phase: str, effort: str | None) -> str | None:
+    """Why the phase's command cannot carry the cell's effort, None when it
+    can: an effort the command never passes would be silently ignored."""
+    if effort and "{effort}" not in phase_policy(policy, phase)["command"]:
+        return (f"the {phase} cell sets effort {effort!r} but the {phase} command has no {{effort}} "
+                f"placeholder — add it to `command` in {POLICY} (e.g. `--effort={{effort}}`)")
+    return None
 
 
 def max_workers(policy: dict) -> int:
@@ -257,13 +307,23 @@ def max_workers(policy: dict) -> int:
 
 
 def build_argv(policy: dict, model: str, prompt: str, branch: str = "", issue: int | None = None,
-               phase: str | None = None) -> list[str]:
+               phase: str | None = None, effort: str | None = None) -> list[str]:
     # {branch}/{issue} name the session for a harness that labels sessions
     # (e.g. `--remote-control={branch}` — the `=` form, or the flag eats the prompt)
-    subs = {"{model}": model, "{prompt}": prompt, "{branch}": branch, "{issue}": str(issue or "")}
+    subs = {"{model}": model, "{prompt}": prompt, "{branch}": branch, "{issue}": str(issue or ""),
+            "{effort}": effort or ""}
     command = phase_policy(policy, phase)["command"] if phase else policy["command"]
-    out = []
+    out: list[str] = []
+    raw: list[str] = []
     for a in shlex.split(command):
+        if "{effort}" in a and not effort:
+            # no effort in the cell: the harness default applies — drop the
+            # element, and the flag before a bare value (`-c x={effort}`)
+            if not a.startswith("-") and raw and raw[-1].startswith("-") and "=" not in raw[-1]:
+                out.pop()
+                raw.pop()
+            continue
+        raw.append(a)
         for k, v in subs.items():
             a = a.replace(k, v)
         out.append(a)
@@ -712,7 +772,7 @@ def ensure_worktree(root: Path, branch: str) -> Path:
 # --- the prompt: the slash command leads, the command file owns the steps -----------
 
 def prompt_for(phase: str, issue: int, tier: int | None, branch: str, model: str, remote: bool = False,
-               channel: str | None = None) -> str:
+               channel: str | None = None, effort: str | None = None) -> str:
     tier_s = f"tier {tier}" if tier is not None else "tier to be derived from the scope (risk-tiers.md)"
     where = ("run on another host than the steward: fetch and check out branch `{b}` from origin first, set "
              "PROCESS_HOST to this host's name and PROCESS_REPORT_SYNC=1 so every report reaches origin "
@@ -721,8 +781,9 @@ def prompt_for(phase: str, issue: int, tier: int | None, branch: str, model: str
              "only what the phase produces"
              .format(b=branch) if remote else "work only in this worktree")
     tail = (f" You are the {phase} session for issue #{issue} on branch `{branch}` ({tier_s}), running as "
-            f"{model}; {where}. Report each state transition with "
+            f"{labelled(model, effort)}; {where}. Report each state transition with "
             f"`uv run scripts/process/report.py <state> --issue {issue} --model {model}"
+            f"{f' --effort {effort}' if effort else ''}"
             f"{' --sync' if remote else ''}`. Your decision partner is the steward, not the owner: a "
             f"question you cannot answer from the plan, the issue or the rules goes into the plan's "
             f"`## Decisions` as "
@@ -1067,7 +1128,12 @@ def start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str |
             print("dispatch: brainstorm awaits owner approval — start plan with --owner-approved; never jump to execute", file=sys.stderr)
             return 3
     policy = load_policy(root)
-    model = model_for(policy, tier, phase)
+    model, effort = cell_for(policy, tier, phase)
+    why = effort_refusal(policy, phase, effort)
+    if why:
+        print(f"dispatch: not starting — {why}", file=sys.stderr)
+        return 3
+    label = labelled(model, effort)
     branch = branch or find_branch(root, issue) or default_branch(issue, title)
     all_records = records(root)
     if any(r.get("branch") == branch and r.get("state") == "unknown" for r in all_records):
@@ -1094,8 +1160,11 @@ def start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str |
         return 3
     channel = policy.get("decision_channel")
     prompt = prompt_for(phase, issue, tier, branch, model, remote=remote,
-                        channel=channel if isinstance(channel, str) and channel.strip() else None)
-    argv = build_argv(policy, model, prompt, branch, issue, phase)
+                        channel=channel if isinstance(channel, str) and channel.strip() else None, effort=effort)
+    argv = build_argv(policy, model, prompt, branch, issue, phase, effort)
+    # PROCESS_EFFORT always set, empty without an effort: a stale one from the steward's env must not leak
+    worker_vars = {**pp["env"], "PROCESS_WORKER": branch, "PROCESS_PHASE": phase, "PROCESS_MODEL": model,
+                   "PROCESS_EFFORT": effort or "", "PROCESS_ISSUE": str(issue)}
     if not remote:
         why = runnable(argv)
         if why and not dry_run:
@@ -1107,7 +1176,7 @@ def start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str |
         print(f"dispatch: lane rule allowed — held: {', '.join(held) or 'none'}, phase {phase}"
               + (" (remote: local lanes do not apply)" if remote else ""))
         shown = [a if a != prompt else f"<prompt {len(prompt)} chars>" for a in argv]
-        print(f"dispatch: would start {phase} for #{issue} on {branch} with {model} "
+        print(f"dispatch: would start {phase} for #{issue} on {branch} with {label} "
               f"({'remote, ' if remote else ''}{runner}):\n  {shown}")
         return 0
     if remote:
@@ -1118,9 +1187,8 @@ def start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str |
             print(f"dispatch: {branch} is not on origin — a remote {phase} session needs the branch pushed first",
                   file=sys.stderr)
             return 3
-        extra = {**pp["env"], "PROCESS_WORKER": branch, "PROCESS_PHASE": phase, "PROCESS_MODEL": model, "PROCESS_ISSUE": str(issue),
-             "PROCESS_PHASE_BASE": phase_base(root, branch)}
-        rec = {"branch": branch, "issue": issue, "phase": phase, "tier": tier, "model": model, "remote": True,
+        extra = {**worker_vars, "PROCESS_PHASE_BASE": phase_base(root, branch)}
+        rec = {"branch": branch, "issue": issue, "phase": phase, "tier": tier, "model": model, "effort": effort, "remote": True,
                "started": int(time.time()), "ts": _dt.datetime.now().isoformat(timespec="seconds"),
                "runner": runner, "handover_id": pp["handover_id"]}
         if runner == "tmux":
@@ -1138,7 +1206,7 @@ def start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str |
                         "log": str(log)})
             _write_record(root, branch, rec)
             _remember_issue(root, issue, branch)
-            print(f"dispatch: handing {phase} for #{issue} on {branch} to another host with {model} from "
+            print(f"dispatch: handing {phase} for #{issue} on {branch} to another host with {label} from "
                   f"tmux {session}:{window} ({window_id}) — watch it with `dispatch.py log {branch}`; "
                   f"reports via origin (`tower.py --remote`)")
             return 0
@@ -1154,14 +1222,13 @@ def start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str |
         rec["handover"] = r.stdout.strip()[-400:]
         _write_record(root, branch, rec)
         _remember_issue(root, issue, branch)
-        print(f"dispatch: handed {phase} for #{issue} on {branch} to another host with {model} — "
+        print(f"dispatch: handed {phase} for #{issue} on {branch} to another host with {label} — "
               f"reports via origin (`tower.py --remote`)" + (f"\n  {rec['handover']}" if rec["handover"] else ""))
         return 0
     wt = ensure_worktree(root, branch)
     log = _records_dir(root) / f"{branch.replace('/', '__')}-{phase}-{_dt.datetime.now():%Y%m%d-%H%M%S}.log"
-    extra = {**pp["env"], "PROCESS_WORKER": branch, "PROCESS_PHASE": phase, "PROCESS_MODEL": model, "PROCESS_ISSUE": str(issue),
-             "PROCESS_PHASE_BASE": phase_base(root, branch)}
-    rec = {"branch": branch, "issue": issue, "phase": phase, "tier": tier, "model": model,
+    extra = {**worker_vars, "PROCESS_PHASE_BASE": phase_base(root, branch)}
+    rec = {"branch": branch, "issue": issue, "phase": phase, "tier": tier, "model": model, "effort": effort,
            "worktree": str(wt), "log": str(log), "started": int(time.time()),
            "ts": _dt.datetime.now().isoformat(timespec="seconds"), "runner": runner}
     if runner == "tmux":
@@ -1185,7 +1252,7 @@ def start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str |
         where = f"pid {proc.pid}"
     _write_record(root, branch, rec)
     _remember_issue(root, issue, branch)
-    print(f"dispatch: started {phase} for #{issue} on {branch} with {model} ({where}, log {log.name})")
+    print(f"dispatch: started {phase} for #{issue} on {branch} with {label} ({where}, log {log.name})")
     return 0
 
 
@@ -1853,7 +1920,9 @@ def main(argv: list[str]) -> int:
         return drain(root)
     policy = load_policy(root)
     for ph in PHASES:
-        print(f"{ph}: {model_for(policy, a.tier, ph, a.cls)}")
+        model, effort = cell_for(policy, a.tier, ph, a.cls)
+        why = effort_refusal(policy, ph, effort)
+        print(f"{ph}: {labelled(model, effort)}" + (f"  WARNING: {why}" if why else ""))
     if policy.get("decision_channel"):
         print(f"decision_channel: {policy['decision_channel']}")
     print(f"command: {policy['command']}  (runner {policy.get('runner', 'detached')}, "
