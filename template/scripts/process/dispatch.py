@@ -317,31 +317,43 @@ def effort_refusal(policy: dict, phase: str, cell: Cell) -> str | None:
     return None
 
 
-# a harness's file for a phase command, where the harness is rendered: its
-# frontmatter `model:`/`effort:` would override what the policy dispatched
-PHASE_FILES = (".claude/commands/{phase}.md", ".github/prompts/{phase}.prompt.md")
-_OVERRIDE_KEY = re.compile(r"^(model|effort)\s*:", re.M)
+# the phase command file of the harness a command starts (by its command
+# word): its frontmatter `model:`/`effort:` would override the dispatched cell
+PHASE_FILES = {"claude": ".claude/commands/{phase}.md", "copilot": ".github/prompts/{phase}.prompt.md"}
+_FRONTMATTER = re.compile(r"\A\ufeff?---\r?\n(.*?)^---[ \t]*\r?$", re.M | re.S)
+_OVERRIDE_KEY = re.compile(r"""^(["']?)(model|effort)\1[ \t]*:[ \t]*(.*?)[ \t]*\r?$""", re.M)
 
 
-def frontmatter_overrides(path: Path) -> list[str]:
-    """The `model:`/`effort:` keys a command file's YAML frontmatter declares."""
-    try:
-        text = path.read_text(encoding="utf-8", errors="replace")
-    except OSError:
+def frontmatter_overrides(text: str) -> list[str]:
+    """The `model:`/`effort:` keys a command file's YAML frontmatter sets to
+    something other than `inherit` — frontmatter only when the file opens
+    with `---` and a `---` line closes it (a horizontal rule is no header)."""
+    m = _FRONTMATTER.match(text)
+    if not m:
         return []
-    end = text.find("\n---", 3) if text.startswith("---") else -1
-    return sorted(set(_OVERRIDE_KEY.findall(text[3:end]))) if end >= 0 else []
+    return sorted({k for _q, k, v in _OVERRIDE_KEY.findall(m.group(1)) if v.strip("\"'") != "inherit"})
 
 
-def override_refusal(root: Path, phase: str, model: str) -> str | None:
-    """Why the phase's command file would override the dispatched cell, None
-    when it does not: model-policy*.json is the one owner of the model."""
-    for pattern in PHASE_FILES:
-        rel = pattern.format(phase=phase)
-        keys = frontmatter_overrides(root / rel)
+def override_refusal(root: Path, phase: str, model: str, argv: list[str], branch: str,
+                     remote: bool = False) -> str | None:
+    """Why the phase's command file, as the worker will see it (the branch
+    tip, else its base), would override the dispatched cell; None when it
+    does not or the command's harness has no such file. model-policy*.json
+    is the one owner of the model."""
+    pattern = PHASE_FILES.get(os.path.basename(_command_word(argv)))
+    if pattern is None:
+        return None
+    rel = pattern.format(phase=phase)
+    tips = [f"origin/{branch}", branch] if remote else [branch, f"origin/{branch}"]
+    for ref in [*tips, *_review.integration_refs(root)]:
+        if _git(root, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}").returncode != 0:
+            continue
+        shown = _git(root, "show", f"{ref}:{rel}")
+        keys = frontmatter_overrides(shown.stdout) if shown.returncode == 0 else []
         if keys:
             return (f"one owner for the model: {rel} declares {' and '.join(k + ':' for k in keys)}, which "
                     f"overrides the dispatched {model}; remove it (model-policy*.json owns this)")
+        return None
     return None
 
 
@@ -351,6 +363,9 @@ def max_workers(policy: dict) -> int:
     except (TypeError, ValueError):
         raise SystemExit(f"dispatch: max_workers must be an integer, got {policy.get('max_workers')!r}")
     return n if n > 0 else 4
+
+
+_EFFORT_VALUE = re.compile(r"(?:[A-Za-z_][\w.]*=)?\{effort\}")
 
 
 def build_argv(policy: dict, model: str, prompt: str, branch: str = "", issue: int | None = None,
@@ -365,8 +380,9 @@ def build_argv(policy: dict, model: str, prompt: str, branch: str = "", issue: i
     for a in shlex.split(command):
         if "{effort}" in a and not effort:
             # no effort in the cell: the harness default applies — drop the
-            # element, and the flag before a bare value (`-c x={effort}`)
-            if not a.startswith("-") and raw and raw[-1].startswith("-") and "=" not in raw[-1]:
+            # element; a value that is only the effort (`--effort {effort}`,
+            # `-c key={effort}`) takes its flag along, or the flag eats the next one
+            if _EFFORT_VALUE.fullmatch(a) and raw and raw[-1].startswith("-") and "=" not in raw[-1]:
                 out.pop()
                 raw.pop()
             continue
@@ -944,9 +960,58 @@ def _epoch(ts: object) -> float:
         return math.inf
 
 
+MODEL_ALIASES = ("opus", "sonnet", "haiku", "fable")  # a harness's unversioned names for a family
+
+
+def _bare_model(model: str) -> str:
+    """Without a context suffix (`[1m]`) and a date (`-20261001`)."""
+    return re.sub(r"-\d{8}$", "", re.sub(r"\[[^\]]*\]$", "", model.strip()))
+
+
 def _same_model(seen: str, dispatched: str) -> bool:
-    """A harness may report a dated id (`<model>-20261001`) for an alias."""
-    return seen == dispatched or re.fullmatch(re.escape(dispatched) + r"-\d{8}", seen) is not None
+    """The transcript's model is the dispatched one: equal without suffixes,
+    or of the family an unversioned alias names."""
+    seen, dispatched = _bare_model(seen), _bare_model(dispatched)
+    if dispatched in MODEL_ALIASES:
+        return f"-{dispatched}-" in seen or seen.startswith(f"claude-{dispatched}")
+    return seen == dispatched
+
+
+def is_alias(model: str) -> bool:
+    return _bare_model(model) in MODEL_ALIASES
+
+
+_TRANSCRIPTS: dict[tuple[str, float, int], list[tuple[float, str]]] = {}
+
+
+def _assistant_models(path: str) -> list[tuple[float, str]]:
+    """(epoch, model) of a transcript's own assistant messages (sidechains and
+    `<synthetic>` left out), read once per file version within a process."""
+    try:
+        st = os.stat(path)
+    except OSError:
+        return []
+    key = (path, st.st_mtime, st.st_size)
+    if key not in _TRANSCRIPTS:
+        got: list[tuple[float, str]] = []
+        try:
+            lines = Path(path).read_text(encoding="utf-8", errors="ignore").splitlines()
+        except OSError:
+            lines = []
+        for line in lines:
+            if '"assistant"' not in line:
+                continue
+            try:
+                ev = json.loads(line)
+            except ValueError:
+                continue
+            msg = ev.get("message") if isinstance(ev, dict) else None
+            model = msg.get("model") if isinstance(msg, dict) else None
+            if (ev.get("type") == "assistant" and not ev.get("isSidechain") and isinstance(model, str)
+                    and model and not model.startswith("<")):
+                got.append((_epoch(ev.get("timestamp")), model))
+        _TRANSCRIPTS[key] = got
+    return _TRANSCRIPTS[key]
 
 
 def model_drift(root: Path, rec: dict, pattern: str | None = None) -> list[str]:
@@ -965,23 +1030,9 @@ def model_drift(root: Path, rec: dict, pattern: str | None = None) -> list[str]:
         try:
             if os.path.getmtime(f) < started:
                 continue
-            lines = Path(f).read_text(encoding="utf-8", errors="ignore").splitlines()
         except OSError:
             continue
-        for line in lines:
-            if '"assistant"' not in line:
-                continue
-            try:
-                ev = json.loads(line)
-            except ValueError:
-                continue
-            if not isinstance(ev, dict) or _epoch(ev.get("timestamp")) < started:
-                continue
-            msg = ev.get("message")
-            model = msg.get("model") if isinstance(msg, dict) else None
-            if (ev.get("type") == "assistant" and not ev.get("isSidechain") and isinstance(model, str)
-                    and model and not model.startswith("<") and not _same_model(model, dispatched)):
-                seen.add(model)
+        seen |= {m for ts, m in _assistant_models(f) if ts >= started and not _same_model(m, dispatched)}
     return sorted(seen)
 
 
@@ -1236,7 +1287,7 @@ def start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str |
     policy = load_policy(root)
     cell = cell_for(policy, tier, phase)
     model, effort = cell.model, cell.effort
-    why = effort_refusal(policy, phase, cell) or override_refusal(root, phase, model)
+    why = effort_refusal(policy, phase, cell)
     if why:
         print(f"dispatch: not starting — {why}", file=sys.stderr)
         return 3
@@ -1269,6 +1320,10 @@ def start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str |
     prompt = prompt_for(phase, issue, tier, branch, model, remote=remote,
                         channel=channel if isinstance(channel, str) and channel.strip() else None, effort=effort)
     argv = build_argv(policy, model, prompt, branch, issue, phase, effort, cell.command)
+    why = override_refusal(root, phase, model, argv, branch, remote)
+    if why:
+        print(f"dispatch: not starting — {why}", file=sys.stderr)
+        return 3
     # PROCESS_EFFORT always set, empty without an effort: a stale one from the steward's env must not leak
     worker_vars = {**pp["env"], "PROCESS_WORKER": branch, "PROCESS_PHASE": phase, "PROCESS_MODEL": model,
                    "PROCESS_EFFORT": effort or "", "PROCESS_ISSUE": str(issue)}

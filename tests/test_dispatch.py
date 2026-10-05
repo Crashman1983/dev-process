@@ -1,4 +1,5 @@
 import json
+import math
 import os
 import shutil
 import subprocess
@@ -1267,6 +1268,10 @@ def test_the_effort_element_is_dropped_without_an_effort(render, tmp_path):
     assert d.build_argv(policy, "m", "P") == ["h", "--model", "m", "P"]
     assert d.build_argv(policy, "m", "P", effort="max") == [
         "h", "--model", "m", "--effort=max", "-c", "reason=max", "--x", "max", "P"]
+    # an element that merely contains the effort goes alone; the flag before it stays
+    assert d.build_argv({"command": "c --flag {effort}x {prompt}"}, "m", "P") == ["c", "--flag", "P"]
+    assert d.build_argv({"command": "c -p --effort={effort} {prompt}"}, "m", "P") == ["c", "-p", "P"]
+    assert d.build_argv({"command": "c --a=b {effort} {prompt}"}, "m", "P") == ["c", "--a=b", "P"]
 
 
 def test_an_effort_the_command_cannot_carry_refuses_the_start(render, tmp_path):
@@ -1349,6 +1354,7 @@ def test_a_phase_command_file_that_overrides_the_model_refuses_the_start(render,
     _repo(out)
     cmd = out / ".claude/commands/plan.md"
     cmd.write_text(f"---\ndescription: plan\n{key}: haiku\n---\n" + cmd.read_text())
+    _git(out, "commit", "-qam", "override")  # the worker sees the committed file
     r = _dispatch(out, "start", "--issue", "3", "--phase", "plan", "--tier", "2", "--dry-run")
     assert r.returncode == 3 and "one owner for the model" in r.stderr and f"{key}:" in r.stderr, r.stderr
     r = _dispatch(out, "start", "--issue", "3", "--phase", "execute", "--tier", "2", "--dry-run")
@@ -1363,7 +1369,7 @@ def test_no_rendered_command_or_skill_declares_model_or_effort(render_raw, tmp_p
     d = _load_dispatch(out)
     files = [p for p in out.rglob("*.md") if {"commands", "prompts", "skills"} & set(p.relative_to(out).parts)]
     assert files or harness == "agents_md"
-    assert not [(str(p.relative_to(out)), k) for p in files for k in d.frontmatter_overrides(p)]
+    assert not [(str(p.relative_to(out)), k) for p in files for k in d.frontmatter_overrides(p.read_text())]
 
 
 def _transcript(path: Path, *models: str, started: float = 0, sidechain: str = "") -> None:
@@ -1421,5 +1427,111 @@ def test_the_tower_reports_model_drift_only_with_transcripts(render, tmp_path):
         pol.write_text(json.dumps(data))
         drift = tower()
         assert len(drift) == 1 and "claude-opus-5" in drift[0]["what"] and "claude-haiku-5" in drift[0]["what"], drift
+        assert drift[0]["severity"] == "high"
     finally:
         _dispatch(out, "stop", "b7", "--force")
+
+
+@pytest.mark.parametrize(("text", "keys"), [
+    ("---\nmodel: inherit\neffort: 'inherit'\n---\nbody", []),
+    ("# Title\n\n---\nmodel: haiku\n---\n", []),
+    ("---\nmodel: haiku\n", []),
+    ("\ufeff---\n\"model\": x\n---\n", ["model"]),
+    ("---\r\neffort: low\r\n---\r\n", ["effort"]),
+    ("---\n  model: nested\nModel: x\n---\n", []),
+], ids=["inherit", "horizontal-rule", "unclosed", "bom-quoted-key", "crlf", "nested-or-other-case"])
+def test_only_a_real_frontmatter_override_counts(render, tmp_path, text, keys):
+    """`inherit` defers to the dispatched model, and a `---` rule in a body
+    is no header — refusing those would block a correct start."""
+    d = _load_dispatch(render(tmp_path, {"project_name": "d", "modules": {}}))
+    assert d.frontmatter_overrides(text) == keys
+
+
+def test_the_override_check_reads_the_workers_branch_and_harness(render, tmp_path):
+    """The worker runs the branch tip, not the steward's checkout; a Codex
+    command never reads Claude's command file."""
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    cmd = out / ".claude/commands/plan.md"
+    clean = cmd.read_text()
+    cmd.write_text("---\nmodel: haiku\n---\n" + clean)
+    _git(out, "commit", "-qam", "override on main")
+    _git(out, "checkout", "-qb", "b5")
+    cmd.write_text(clean)
+    _git(out, "commit", "-qam", "clean on the branch")
+    _git(out, "checkout", "-q", "main")
+    start = ("start", "--issue", "5", "--phase", "plan", "--tier", "2", "--dry-run")
+    r = _dispatch(out, *start, "--branch", "b5")
+    assert r.returncode == 0, r.stderr  # the branch decides
+    r = _dispatch(out, *start, "--branch", "b6")
+    assert r.returncode == 3 and "one owner" in r.stderr  # a new branch starts from main
+    pol = out / "docs/process/model-policy.json"
+    data = json.loads(pol.read_text())
+    data["command"] = "codex exec --model {model} {prompt}"
+    pol.write_text(json.dumps(data))
+    r = _dispatch(out, *start, "--branch", "b6")
+    assert r.returncode == 0, r.stderr
+
+
+@pytest.mark.parametrize(("seen", "dispatched", "same"), [
+    ("claude-opus-5-20261001", "claude-opus-5", True),
+    ("claude-opus-5[1m]", "claude-opus-5", True),
+    ("claude-opus-5", "claude-opus-5[1m]", True),
+    ("claude-opus-5-5", "claude-opus-5", False),
+    ("claude-opus-5-5", "opus", True),
+    ("claude-sonnet-5", "opus", False),
+    ("anthropic.claude-haiku-5-v1", "haiku", True),
+])
+def test_same_model_normalises_suffixes_and_aliases(render, tmp_path, seen, dispatched, same):
+    """A context suffix, a date, or a family alias is the same dispatch, not drift."""
+    d = _load_dispatch(render(tmp_path, {"project_name": "d", "modules": {}}))
+    assert d._same_model(seen, dispatched) is same
+
+
+def test_model_drift_reads_each_transcript_once(render, tmp_path):
+    """The tower asks per session; a large transcript is parsed once per version."""
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    d = _load_dispatch(out)
+    rec = {"model": "claude-opus-5", "worktree": str(tmp_path / "wt"), "started": time.time() - 60}
+    f = tmp_path / "t" / "wt" / "a.jsonl"
+    _transcript(f, "claude-opus-5", started=rec["started"])
+    pattern = str(tmp_path / "t" / "*" / "*.jsonl")
+    assert d.model_drift(out, rec, pattern) == []
+    (key,) = [k for k in d._TRANSCRIPTS if k[0] == str(f)]
+    d._TRANSCRIPTS[key] = [(math.inf, "from-the-cache")]
+    assert d.model_drift(out, rec, pattern) == ["from-the-cache"]
+
+
+def test_report_validates_the_effort_against_dispatchs_levels(render, tmp_path):
+    """A typo must not become a KPI cell: the flag refuses, the env is noted and dropped."""
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    cli = [sys.executable, str(out / "scripts/process/report.py"), "idle", "--model", "m"]
+    r = subprocess.run([*cli, "--effort", "turbo"], cwd=out, capture_output=True, text=True)
+    assert r.returncode == 2 and "turbo" in r.stderr
+    r = subprocess.run(cli, cwd=out, capture_output=True, text=True, env={**os.environ, "PROCESS_EFFORT": "turbo"})
+    assert r.returncode == 0 and "PROCESS_EFFORT" in r.stderr, r.stderr
+    r = subprocess.run([*cli, "--effort", "minimal"], cwd=out, capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    recs = [json.loads(x) for x in (out / ".git/process-tower/reports.jsonl").read_text().splitlines()]
+    assert "effort" not in recs[0] and recs[1]["effort"] == "minimal"
+
+
+def test_drift_from_an_unversioned_alias_is_low(render, tmp_path):
+    """An alias lets the harness pick the version: another member of the family
+    is no drift, another family is worth a look but no alarm."""
+    import importlib.util
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    sys.path.insert(0, str(out / "scripts/process"))
+    try:
+        spec = importlib.util.spec_from_file_location("tower_under_test", out / "scripts/process/tower.py")
+        tower = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(tower)
+    finally:
+        sys.path.remove(str(out / "scripts/process"))
+    table = {"overlaps": [], "plans": [], "gates": [], "worktrees": [], "reports": [],
+             "sessions": [{"branch": "b", "phase": "plan", "model": m, "model_drift": ["claude-sonnet-5"],
+                           "model_alias": alias, "alive": False, "state": "dead", "report_state": "done"}
+                          for m, alias in (("opus", True), ("claude-opus-5", False))]}
+    drift = [f["severity"] for f in tower.findings(table, 60) if f["kind"] == "model-drift"]
+    assert sorted(drift) == ["high", "low"]
