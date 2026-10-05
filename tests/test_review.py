@@ -190,6 +190,17 @@ def test_presence_archived_tier2_without_review_hard(render, tmp_path):
     assert r.returncode == 1 and "no clearing REVIEW" in r.stdout
 
 
+def test_a_missing_review_names_both_ways_out(render, tmp_path):
+    """The archived-plan finding named only the waiver; attest is the other way out."""
+    out = render(tmp_path, {"project_name": "demo"})
+    _archived_plan(out, "2026-07-04-feature.md", "# Plan\n\ntier: 2\n")
+    r = _run(out)
+    line = next(ln for ln in r.stdout.splitlines() if "2026-07-04-feature.md" in ln
+                and "no clearing REVIEW" in ln)
+    assert "attest.py --work feature --tier 2" in line and "--verdict pass" in line, line
+    assert "review-waived: <reason> #<issue>" in line and "journal-state-plans.md" in line, line
+
+
 def test_presence_cleared_by_matching_review(render, tmp_path):
     out = render(tmp_path, {"project_name": "demo"})
     _archived_plan(out, "2026-07-04-feature.md", "# Plan\n\ntier: 2\n")

@@ -66,6 +66,7 @@ from check_review import (  # noqa: E402  (one owner for grammar + arithmetic)
     integration_ref,
     issue_refs_in_range,
     merge_base,
+    no_clearing_review,
     paths_in_flight,
     review_passes,
     speckit_unreviewed,
@@ -177,10 +178,8 @@ def check(root: Path) -> tuple[list[str], list[str]]:
                 else:
                     to_archive.append(p.name)
             else:
-                blockers.append(
-                    f"{PLANS_ACTIVE}/{p.name}: tier {tier} plan has no clearing "
-                    f"REVIEW (verdict=pass, work in {sorted(ids)}, tier>={tier}) "
-                    f"and no 'review-waived:' line — run /review before /finish")
+                blockers.append(no_clearing_review(f"{PLANS_ACTIVE}/{p.name}", tier, ids)
+                                + " — run /review before /finish")
 
     # --- speckit-path plans: same presence question, different home — the
     # spec dir's plan never enters the archive, its completion signal is the
@@ -189,11 +188,8 @@ def check(root: Path) -> tuple[list[str], list[str]]:
     sdir = root / SPECS_DIR
     if sdir.is_dir():
         for name, tier, ids in speckit_unreviewed(root, passes):
-            blockers.append(
-                f"{SPECS_DIR}/{name}: tasks all ticked, plan declares tier "
-                f"{tier}, but no clearing REVIEW (verdict=pass, work in "
-                f"{sorted(ids)}, tier>={tier}) and no 'review-waived:' line — "
-                f"run /review before /finish")
+            blockers.append(no_clearing_review(f"{SPECS_DIR}/{name}", tier, ids)
+                            + " — its tasks are all ticked; run /review before /finish")
         for d in sorted(p for p in sdir.iterdir() if p.is_dir()):
             tasks = d / "tasks.md"
             if tasks.is_file():
