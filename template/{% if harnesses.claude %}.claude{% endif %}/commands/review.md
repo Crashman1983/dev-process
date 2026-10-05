@@ -72,8 +72,9 @@ Round economy — a failed round must not re-pay the whole chain:
 - **Round 2+ reviews the delta.** Rebuild with
   `make_review_bundle.py --since <head the last round reviewed>`: the reviewer
   reads the fix diff plus the prior round's findings, while the bundle still
-  binds the full-branch digest (Tier 3 gets a full bundle every round — the
-  tool refuses delta-only there).
+  binds the full-branch digest (at Tier 3 only from a full round's head and
+  without scope growth — `docs/process/verification-independence.md`, "What
+  each round judges").
 - **Rebase once**, before the first review round — every later rebase changes
   the tree and voids the bundle digests, forcing a fresh full round.
 - **The round is counted, not claimed.** `attest.py` numbers it: 1 + the
@@ -95,9 +96,11 @@ Round economy — a failed round must not re-pay the whole chain:
 - **A second owner blocks.** A rule the change re-implements although existing code owns it,
   proven by a differential test, is a blocking finding at every tier — unless the plan's
   `DECISION` names why the rule has two owners.
-- **One reviewer set per work.** Round 1 runs the full set the tier
-  requires (including any full-tool refuter lenses); later rounds use the
-  same set — no new lenses, no swapped model family. A reviewer that
+- **One reviewer set per work.** Round 1 runs the full lens set the tier
+  requires (including any full-tool refuter lenses); a delta round re-runs
+  the lenses whose prior report has an open finding or names a file in the
+  bundle's `DELTA_TOUCHES` line, plus the attesting reviewer — no new
+  lenses, no swapped model family. Lens sets stay project-owned. A reviewer that
   becomes unavailable is replaced with a journal note, and its first round
   counts as round 1 for that lens. Downstream, a new reviewer in a later
   round found older defects the first set never looked at, and each became

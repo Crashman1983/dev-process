@@ -161,9 +161,8 @@ touches gate code at any tier, and a plan carries no such line (a warning,
 not a block: the rule is observed before it gates). A Tier 2 plan that names
 data loss or concurrency is not detected — the reviewer checks its line. A
 Tier 2 bundle carries the brief's questions for the reviewer to answer. A
-delta re-review asks for a new line only when the delta touches gate code —
-below Tier 3 there is at most one run, and a Tier 3 review never takes a
-delta.
+delta re-review asks for a new line at Tier 3, and below it when the delta
+touches gate code — the table's fix-round run.
 It approximates gate code by path — `scripts/process/`, `.githooks/`,
 `.github/workflows/`, `Makefile`, `.pre-commit-config.yaml` — so a Makefile
 change to a product target warns too; say so in the plan (the warning stays,

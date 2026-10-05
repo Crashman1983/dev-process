@@ -18,7 +18,9 @@ lives *inside* the task (failing test first, watched, then the code; two
 commits stay fine). The task is the unit of planning, checkboxes, gate
 runs, and reporting, and every task pays that ritual overhead once — a
 50-task list that could be 30 pays it twenty times for nothing. Split
-tasks by ownership and dependency, never by TDD phase.
+tasks by ownership and dependency, never by TDD phase. An expected review
+surface above the bundle size limit (`/review`, "Size") is split along
+contracts into stacked plans (*phase-of*).
 
 **A `[P]` marker is a no-shared-touchpoint claim, not a vibe.** Disjoint
 files are necessary, not sufficient. Mark two tasks parallel only when

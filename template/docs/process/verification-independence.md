@@ -90,9 +90,7 @@ plan slugs; without a `work:` header, a file name or `review:` value naming
 it as a whole word; issues first; never another item's) and the full-branch
 stat — the reviewer re-reads what changed and what it was told, not the whole
 branch again. The full-branch digest fields stay in the bundle, so the
-attestation still binds the verdict to the complete artifact. Tier 3 is the
-exception: the tool refuses a delta-only bundle there — the highest tier
-re-reads in full every round. A delta needs a declared tier: a plan's, or
+attestation still binds the verdict to the complete artifact. A delta needs a declared tier: a plan's, or
 `--tier N` for a branch without one (a floor, never a discount — the bundle
 names where the tier came from). Pair this with batching: one fix pass and one
 push per round, never a drip of per-finding commits that each re-pay the
@@ -105,9 +103,17 @@ findings, and re-checks the fixed failure class everywhere it can recur, not
 only at the fixed spot (downstream, a fifth of the blockers were introduced
 by the previous fix). An older defect found outside that is its own issue —
 unless it is a BLOCKER for this change; then it goes into the verdict marked
-"pre-existing, found in round N". If the fix changed a contract, the
-architecture or the risk scope, the reviewer says so and asks for a full
-bundle instead of judging the delta.
+"pre-existing, found in round N". The worker never decides a delta's
+scope. At Tier 3 the bundle refuses `--since <sha>` unless a full Tier 3
+REVIEW of this work recorded `head=<sha>` (or an unbroken chain of Tier 3
+delta REVIEWs leads back to one — the gate holds a Tier 3 `mode=delta` line
+to the same anchor), and asks for a full bundle when the fix touches a file
+the prior round's report does not name, the plan's `## Decisions` or `tier:`
+line, gate code, or a contract (`docs/process/design-contracts/`,
+`specs/*/contracts/`); an unreadable report is a full bundle. Its
+`DELTA_TOUCHES` line lists the files the delta changes. At any tier, if the
+fix changed a contract, the architecture or the risk scope, the reviewer says
+so and asks for a full bundle instead of judging the delta.
 
 ## Bind the verdict to the reviewed artifact
 
@@ -241,7 +247,6 @@ are in `docs/process/failure-catalog.md`.
 A delta bundle uses the branch's first-parent commits since the reviewed head,
 plus each two-parent merge's remerge-diff (the conflict resolution). It omits
 changes merely imported from main. Its `REVIEW_ARTIFACT` and attestation carry
-`mode=delta`; the writer and gate recompute the same reduced digest. Tier 3
-still requires a full bundle. Octopus merges or a base outside the first-parent
+`mode=delta`; the writer and gate recompute the same reduced digest. Octopus merges or a base outside the first-parent
 chain require a full review. Delta records do not pool coverage for other work,
 because their reduced diff did not review every commit on the imported side.
