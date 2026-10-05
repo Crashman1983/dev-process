@@ -1306,7 +1306,9 @@ def test_a_tier3_delta_anchored_on_an_off_fork_full_round_is_refused(tmp_path):
         records = [f for _ln, f in cr.parse_review_lines(
             _full(cr, root, base, head, tier="3", independence=_T3) + "\n" + delta + "\n")[0]]
         why = cr.invalid_deltas(root, records).get(id(records[1]), "")
-        assert (cr.tier3_delta_refusal(head) in why) is refused, (base, why)
+        assert (f"Tier 3 delta needs a full round at {head}" in why) is refused, (base, why)
+        if refused:  # the off-fork round anchors nothing, so it is not offered either
+            assert "none is recorded" in why, why
 
 
 def test_a_criss_cross_head_names_the_ambiguous_fork_point(tmp_path):
