@@ -278,10 +278,12 @@ like any shard — and drops the prose, which git still holds. Dry run by
 default, `--apply` writes. Decision records are never pruned (they are not
 working memory at all). Review reports (the audit trail the review gate's
 waivers point at) go only by one rule, owned by `tidy.py`
-(`old_review_reports`): a top-level report older than the window, without a
-`campaign:` header, of a closed work (latest journal `REVIEW` verdict pass,
-no active plan names it), not that work's newest report, and named by no
-plan, archived plan or journal shard. Evidence directories
+(`old_review_reports`), decided per report: a top-level report older than
+the window, without a `campaign:` header, that every way of reaching it
+leads to closed work (latest journal `REVIEW` verdict pass, no active plan
+reaches or names it), that is not its work's newest report, that no plan,
+archived plan or journal shard names, and that is tracked and unchanged
+against HEAD (`git rm`, never a plain delete). Evidence directories
 (`reviews/<slug>/`) stay. Deletion by commit shrinks the checkout and what
 each gate run reads; history keeps the rest.
 

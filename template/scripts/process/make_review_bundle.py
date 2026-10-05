@@ -288,12 +288,6 @@ def _declared_tier(texts: list[str]) -> int | None:
 _DATED = re.compile(r"^\d{4}-\d{2}-\d{2}-")
 
 
-def _plan_issue_keys(text: str) -> list:
-    keys = (_review_gate.issue_key(m.group(1))
-            for m in _review_gate.ISSUE_DECL.finditer(_review_gate._unfenced(text or "")))
-    return list(dict.fromkeys(k for k in keys if k is not None))
-
-
 class _ReviewedDiff(NamedTuple):
     """What the digest is computed from, apart from what the reviewer reads.
 
@@ -571,9 +565,12 @@ def review_size(root: Path, base_ref: str) -> tuple[int, int]:
 def _report_keys(root: Path, plan_filter: str | None, plan_texts: dict[Path, str]):
     """(slugs, issues) that name this work's report (`check_review.report_of`)."""
     slugs = [_DATED.sub("", plan_filter)] if plan_filter else []
-    slugs += [_DATED.sub("", _review_gate.plan_stem(_rel(root, p))) for p in plan_texts]
-    issues = list(dict.fromkeys(k for text in plan_texts.values() for k in _plan_issue_keys(text)))
-    return tuple(dict.fromkeys(s for s in slugs if s)), tuple(issues)
+    issues: list = []
+    for p, text in plan_texts.items():
+        s, i = _review_gate.plan_report_keys(_rel(root, p), text)
+        slugs += s
+        issues += i
+    return tuple(dict.fromkeys(s for s in slugs if s)), tuple(dict.fromkeys(issues))
 
 
 def _since_head(root: Path, since: str) -> tuple[str, str]:

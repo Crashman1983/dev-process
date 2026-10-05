@@ -481,3 +481,78 @@ def test_apply_removes_only_superseded_reports_of_closed_work(render, tmp_path):
     assert (rv / "w1/after-login-desktop-light.png").is_file()
     staged = _git(out, "diff", "--cached", "--name-only").stdout.split()
     assert staged == [f".process-work/reviews/{old}-w1-round-1.md"]
+
+
+def _bare_reviews(tmp_path, reports, journal, plans):
+    root = tmp_path / "r"
+    for sub in ("reviews", "journal", "plans"):
+        (root / ".process-work" / sub).mkdir(parents=True)
+    for name, text in reports.items():
+        (root / ".process-work/reviews" / name).write_text(text)
+    (root / ".process-work/journal/j.md").write_text(journal)
+    for name, text in plans.items():
+        (root / ".process-work/plans" / name).write_text(text)
+    _git(root.parent, "init", "-q", str(root))
+    _git(root, "add", "-A")
+    _git(root, "-c", "user.email=a@b", "-c", "user.name=a", "commit", "-qm", "x")
+    return root
+
+
+_TIDY = __import__("pathlib").Path(__file__).resolve().parents[1] / "template/scripts/process"
+_LINE = ("REVIEW work={w} tier=2 reviewer=f model=x independence=bundle,non-implementing "
+         "verdict={v} round={n}\n")
+
+
+def _days_ago(n):
+    return (dt.date.today() - dt.timedelta(days=n)).isoformat()
+
+
+def _tidy_mod():
+    sys.dont_write_bytecode = True
+    if str(_TIDY) not in sys.path:
+        sys.path.insert(0, str(_TIDY))
+    import tidy
+    return tidy
+
+
+def test_a_closed_works_name_match_never_takes_an_open_works_only_report(tmp_path):
+    """Refute: closed `login` reached `<date>-login-v2.md` by a whole-part name
+    match while it is the only report of open #9 (plan login-v2) — the one the
+    bundle's prior-report lookup picks. Ownership is decided per report."""
+    tidy = _tidy_mod()
+    root = _bare_reviews(tmp_path, {
+        f"{_days_ago(90)}-login.md": "review: login\n\nx\n",
+        f"{_days_ago(60)}-login-v2.md": "review: login-v2\n\nfindings\n",
+        f"{_days_ago(40)}-login.md": "review: login\n\nx\n"},
+        _LINE.format(w="login", v="pass", n=2) + _LINE.format(w="#9", v="block", n=1),
+        {f"{_days_ago(70)}-login-v2.md": "# Plan\n\ntier: 2\nissue: #9\n"})
+    assert tidy.old_review_reports(root, 30) == [f".process-work/reviews/{_days_ago(90)}-login.md"]
+
+
+def test_a_work_named_in_an_active_plans_review_line_is_open(tmp_path):
+    """A plan whose stem differs from its REVIEW work= id still holds that work open."""
+    tidy = _tidy_mod()
+    root = _bare_reviews(tmp_path, {
+        f"{_days_ago(90)}-a.md": "work: other\n\nold\n",
+        f"{_days_ago(80)}-b.md": "work: other\n\nnew\n"},
+        _LINE.format(w="other", v="pass", n=2),
+        {f"{_days_ago(70)}-plan-x.md": "# Plan\n\ntier: 2\n\n" + _LINE.format(w="other", v="pass", n=1)})
+    assert tidy.old_review_reports(root, 30) == []
+
+
+def test_untracked_or_locally_changed_reports_are_never_deleted(tmp_path):
+    """Refute: the `git rm` fallback unlinked an untracked report and one with
+    local edits — the only copies. Both are kept, named, and apply exits 1."""
+    tidy = _tidy_mod()
+    old, mid, new = _days_ago(90), _days_ago(85), _days_ago(80)
+    root = _bare_reviews(tmp_path, {f"{old}-w.md": "work: #1\n\nold\n", f"{new}-w-r2.md": "work: #1\n\nnew\n"},
+                         _LINE.format(w="#1", v="pass", n=2), {})
+    (root / f".process-work/reviews/{mid}-w-r1b.md").write_text("work: #1\n\nUNTRACKED notes\n")
+    (root / f".process-work/reviews/{old}-w.md").write_text("work: #1\n\nold + LOCAL EDIT\n")
+    _lines, items = tidy.report(root, 30, with_remote=False, sizes=False)
+    assert items["reviews"] == []
+    assert set(items["reviews_skipped"]) == {f".process-work/reviews/{old}-w.md",
+                                             f".process-work/reviews/{mid}-w-r1b.md"}
+    assert tidy.apply(root, items, 30) == 1
+    assert "LOCAL EDIT" in (root / f".process-work/reviews/{old}-w.md").read_text()
+    assert "UNTRACKED" in (root / f".process-work/reviews/{mid}-w-r1b.md").read_text()

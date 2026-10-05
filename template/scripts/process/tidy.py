@@ -261,13 +261,16 @@ def _report_date(root: Path, rel: str) -> dt.date | None:
 def old_review_reports(root: Path, days: int) -> list[str]:
     """Top-level review reports that are residue — the one owner of that rule.
 
-    A report goes only when ALL hold: older than `days`; no `campaign:`
-    header; its work is known (`check_review.report_of`, the rule that finds
-    a work's report) and closed — the latest journal REVIEW verdict is pass
-    and no active plan or `specs/*/plan.md` names it; it is not the newest
-    report of that work (the next delta round reads that one); and no plan,
-    archived plan or journal shard names its file. Evidence directories
-    (`reviews/<slug>/`) are never candidates. Anything unknown keeps it."""
+    Decided per report, through `check_review.report_of` (the rule the
+    review bundle uses to find a work's prior report): it goes only when
+    EVERY way of reaching it leads to closed work and ALL hold: older than
+    `days`; no `campaign:` header; reached by a journal work whose latest
+    REVIEW verdict is pass, which no active plan names (in its REVIEW lines
+    or text), and of which it is not the newest report; reached by no
+    active plan or `specs/*/plan.md` (`check_review.plan_report_keys`); and
+    no plan, archived plan or journal shard names its file. Evidence
+    directories (`reviews/<slug>/`) are never candidates. Anything unknown
+    keeps it. `unremovable` then keeps what git could not give back."""
     rdir = root / _review_mod().REVIEW_REPORTS
     if not rdir.is_dir():
         return []
@@ -286,33 +289,31 @@ def old_review_reports(root: Path, days: int) -> list[str]:
     archive = cr.record_texts(root, ("plan-archive",)) or []
     records = [fields for _rel, text in journal for _n, fields in cr.parse_review_lines(text)[0]]
     standing = cr.latest_verdicts(records)
-    open_slugs: set[str] = set()
-    open_issues: set = set()
-    for rel, text in plans:
-        open_slugs.add(cr.DATE_PREFIX.sub("", cr.plan_stem(rel)))
-        open_issues.update(k for m in cr.ISSUE_DECL.finditer(text) if (k := cr.issue_key(m.group(1).rstrip(".,;:"))))
-        for _n, fields in cr.parse_review_lines(text)[0]:
-            open_slugs.add(cr.DATE_PREFIX.sub("", fields["work"]))
-            if (k := cr.issue_key(fields["work"])):
-                open_issues.add(k)
-    keep: set[str] = set()
-    drop: set[str] = set()
-    plan_text = "\n".join(text for _rel, text in plans)
-    for work, fields in standing.items():
-        slugs, issues = cr.work_keys([work])
-        if re.search(rf"(?<![\w#/.-]){re.escape(work)}(?![\w-])", plan_text):
-            open_slugs.update(slugs)  # named anywhere in an open plan: open
-            open_issues.update(issues)
-        remaining = list(reports)
-        members: list[str] = []
+
+    def reached(slugs, issues) -> list[str]:
+        """Every report `report_of` reaches by these keys, newest first."""
+        remaining, members = list(reports), []
         while (hit := cr.report_of(remaining, slugs, issues)) is not None:
             members.append(hit[0])
             remaining.remove(hit)
+        return members
+
+    # decided per report: kept when ANY way of reaching it is open work
+    keep: set[str] = set()
+    open_works: set[str] = set()
+    plan_text = "\n".join(text for _rel, text in plans)
+    for rel, text in plans:  # an active plan reaches its reports by the bundle's keys
+        keep.update(reached(*cr.plan_report_keys(rel, text)))
+        open_works.update(fields["work"] for _n, fields in cr.parse_review_lines(text)[0])
+    drop: set[str] = set()
+    for work, fields in standing.items():
+        slugs, issues = cr.work_keys([work])
+        members = reached(slugs, issues)
         if not members:
             continue
-        closed = (fields["verdict"] == "pass" and not set(slugs) & open_slugs
-                  and not set(issues) & open_issues)
-        keep.add(members[0])  # the newest of this work
+        keep.add(members[0])  # the newest of this work: the next delta reads it
+        named_in_plan = re.search(rf"(?<![\w#/.-]){re.escape(work)}(?![\w-])", plan_text)
+        closed = fields["verdict"] == "pass" and work not in open_works and not named_in_plan
         (drop if closed else keep).update(members[1:])
     named = "\n".join(text for _rel, text in journal + plans + archive)
     out: list[str] = []
@@ -323,6 +324,19 @@ def old_review_reports(root: Path, days: int) -> list[str]:
         d = _report_date(root, rel)
         if d is not None and d < cutoff:
             out.append(rel)
+    return out
+
+
+def unremovable(root: Path, rels: list[str]) -> dict[str, str]:
+    """Why each of `rels` must not be removed — untracked, or changed against
+    HEAD: deleting it would destroy what git cannot give back."""
+    out: dict[str, str] = {}
+    for rel in rels:
+        if _git(root, "ls-files", "--error-unmatch", "--", rel) is None:
+            out[rel] = "not tracked by git"
+        elif subprocess.run(["git", "-C", str(root), "diff", "--quiet", "HEAD", "--", rel],
+                            capture_output=True).returncode != 0:
+            out[rel] = "changed against HEAD"
     return out
 
 
@@ -387,7 +401,9 @@ def report(root: Path, days: int, keep: tuple[str, ...] = DEFAULT_KEEP,
     items["stale_plans"] = stale_active_plans(root, days)
     items["old_archive"] = old_archived_plans(root, days)
     items["journal"] = old_journal_shards(root, days)
-    items["reviews"] = old_review_reports(root, days)
+    old_reports = old_review_reports(root, days)
+    items["reviews_skipped"] = unremovable(root, old_reports)
+    items["reviews"] = [r for r in old_reports if r not in items["reviews_skipped"]]
     items["delta"] = (root / DELTA_DIR).is_dir()
     items["issues"] = quiet_open_issues(root, days)
     wts = merged_worktrees(root)
@@ -421,12 +437,15 @@ def report(root: Path, days: int, keep: tuple[str, ...] = DEFAULT_KEEP,
     rv = items["reviews"]
     gone, md, other = review_sizes(root, rv)
     lines.append(f"- review reports of closed work older than {days} days: {len(rv)} ({_human(gone)})"
-                 + (" — `tidy.py --apply` removes them (git history keeps them)" if rv else "")
+                 + (" — `tidy.py --apply` removes them with `git rm` (tracked and unchanged, so "
+                    "git history keeps them)" if rv else "")
                  + f"; the reviews folder holds {_human(md)} markdown, {_human(other)} other "
                    f"(evidence, never removed)")
     lines.extend(f"    {x}" for x in rv[:10])
     if len(rv) > 10:
         lines.append("    …")
+    for rel, why in items["reviews_skipped"].items():
+        lines.append(f"    kept: {rel} — {why}; YOUR call (commit or discard the change first)")
     if items["delta"]:
         lines.append(f"- {DELTA_DIR}/ left over from a template update — `tidy.py --apply` removes it")
     w = items["worktrees"]
@@ -487,11 +506,17 @@ def apply(root: Path, items: dict, days: int) -> int:
                            capture_output=True, text=True)
         if r.returncode != 0:
             (root / PLANS_ARCHIVE / name).unlink(missing_ok=True)
+    for rel, why in items.get("reviews_skipped", {}).items():
+        print(f"tidy: kept {rel} — {why}")
+        rc = 1
     for rel in items.get("reviews", []):
         print(f"tidy: $ git rm -q {rel}")
-        r = subprocess.run(["git", "-C", str(root), "rm", "-q", rel], capture_output=True, text=True)
+        # never a plain unlink: git rm refuses an untracked or locally changed file,
+        # and that refusal is what keeps the only copy
+        r = subprocess.run(["git", "-C", str(root), "rm", "-q", "--", rel], capture_output=True, text=True)
         if r.returncode != 0:
-            (root / rel).unlink(missing_ok=True)
+            print(f"tidy: could not remove {rel}: {r.stderr.strip()}")
+            rc = 1
     if items["worktrees"]:
         import dispatch as _dispatch  # noqa: E402  (sibling; one owner for the worktrees)
         for path in items["worktrees"]:
