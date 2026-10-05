@@ -670,6 +670,18 @@ def test_execute_names_its_duties_before_pushed_and_testing_owns_the_own_conditi
     assert "question-unrouted" in tower and "decision_channel" in tower
 
 
+def test_execute_exercises_named_host_preconditions_before_review(render, tmp_path):
+    """Review rounds failed on credentials and fixtures nobody ran first; extended, no new duty item."""
+    out = render(tmp_path, {"project_name": "demo"})
+    execute = (out / ".claude/commands/execute.md").read_text()
+    duties = execute.split("**Before you report `pushed`:**", 1)[1].split("\n\n", 1)[0]
+    item3 = duties.split("\n3. ", 1)[1].split("\n4. ", 1)[0]
+    assert "a host capability, a credential or an integration fixture the plan names" in item3
+    assert "exercised on this host before the review" in item3
+    assert "is a `DECISION NEEDED` (item 1), not a note" in item3
+    assert "\n5. " not in duties
+
+
 def test_execute_reads_the_owner_and_callers_not_only_the_task_files(render, tmp_path):
     # the absolute "load only tasks.md plus the files that task names" hid the
     # existing owner (mandatory rule 4) — replaced by a targeted owner/caller
