@@ -214,7 +214,8 @@ under the hook.
 
 For gate, train, finish and hook code this run is required before
 `pushed` (`/execute`). The refuter attacks the same rule from the other
-side — the *environment* class of its catalogue (`refute.md`).
+side — the *environment* class of the failure catalog
+(`docs/process/failure-catalog.md`).
 
 ## Gates must survive a fresh checkout
 

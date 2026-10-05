@@ -34,6 +34,8 @@ implementing agent does not self-certify.
 - Is **error handling** deliberate — does a failure surface, retry, or roll
   back, rather than being swallowed or crashing on the next line?
 - If the operation can be retried, is it **idempotent**?
+- The input shapes and failure classes behind these questions, with how to
+  test each: `docs/process/failure-catalog.md`.
 
 ## Performance & efficiency
 

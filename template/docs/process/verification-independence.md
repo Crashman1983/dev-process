@@ -222,8 +222,8 @@ comfort. Prefer one trustworthy independent check over several correlated ones.
 
 **Refute before review.** From Tier 2 on, and for the gates' own code at any tier, a change is
 attacked by a fresh agent before its first review round — one run below Tier 3, every fix round
-again at Tier 3 and for gate code. `refute.md` holds the scale, the brief and the edge-case
-catalogue that broke downstream.
+again at Tier 3 and for gate code. `refute.md` holds the scale and the brief; the edge cases that broke
+downstream are in `docs/process/failure-catalog.md`.
 
 ### Delta after an integration merge
 

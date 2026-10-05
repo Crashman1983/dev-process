@@ -684,7 +684,8 @@ def build(root: Path, base: str | None, plan_filter: str | None = None,
     add("You are an INDEPENDENT reviewer. This bundle is your complete input: "
         "do not consult the implementing agent's context, do not edit anything, "
         "and do not trust claims you can check in the diff. Your deliverable is "
-        "a verdict plus findings in the exact grammar at the end.\n")
+        "a verdict plus findings in the exact grammar at the end. The edge cases to try are "
+        "the classes of `docs/process/failure-catalog.md` the change touches.\n")
     if since:
         add("**Delta re-review.** The diff below is limited to changes since "
             f"`{since}`. Previous findings and the full branch file surface are "

@@ -52,8 +52,8 @@ the change does not touch.
    fail — a command exits non-zero, a tool is missing, a reference does not
    exist, a call times out — and check that the result fails closed, never
    "nothing found" and green.
-3. **Edge cases**, from the catalogue below: only the classes the change
-   touches.
+3. **Edge cases**, from the failure catalog
+   (`docs/process/failure-catalog.md`): only the classes the change touches.
 4. **Does the evidence hold?** Remove one branch of the new code: does a
    test go red? Are the plan's red/green claims true?
 5. **Is there a pattern?** After the findings, one line: do they share a
@@ -80,27 +80,10 @@ Gate code adds, within the same run:
 The refuter writes no fixes, no style remarks and no design opinions — that
 is the review's and the implementing session's work.
 
-## Edge-case catalogue
+## Edge cases
 
-Classes that found real defects. When a confirmed finding belongs to a class
-not listed here, the change that fixes it adds the class.
-
-- **Names:** non-UTF-8 bytes, spaces, a newline, a leading `-`, a name that
-  looks like an option or a revision.
-- **Empty, missing, equal:** an empty input or range, a missing file versus a
-  command that failed, a base equal to the head, a record without the field
-  the code expects.
-- **Rename, move, mode:** renamed on one side, on both sides, across rounds;
-  a directory renamed; a file moved by the tool itself; the executable bit;
-  a symlink or submodule in place of a file.
-- **Conflicts without markers:** modify/delete, rename/delete, a file where
-  the other side has a directory.
-- **Environment:** locale (translated tool output), a shallow clone, another
-  version of git, make or the interpreter, a missing optional tool — and the
-  conditions the change creates itself (`testing.md`,
-  "Test under the conditions the change creates").
-- **Text as rendered:** an example in a code block or comment, a placeholder,
-  a mention in backticks — read as a reader sees it.
+The classes come from `docs/process/failure-catalog.md` — the one list; a
+confirmed finding of a class not listed there adds the class in the fix.
 
 ## The brief
 
@@ -118,7 +101,7 @@ Copy, fill in the angle brackets, hand it over:
        Prove it with an input on which both judge differently.
     2. FAIL-OPEN — make what it relies on fail (non-zero exit, missing tool,
        missing reference, timeout); it must fail closed.
-    3. EDGE CASES — the classes of docs/process/refute.md's catalogue that
+    3. EDGE CASES — the classes of docs/process/failure-catalog.md that
        the change touches.
     4. EVIDENCE — remove one branch: does a test go red? Are the plan's
        red/green claims true?
