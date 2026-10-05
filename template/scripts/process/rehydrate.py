@@ -12,8 +12,9 @@ compaction it warns about is not a mechanism. This is one: Claude Code runs
 resume, and feeds their stdout to the session as context. The hook prints
 exactly what /prime reads and nothing more (every compaction pays for it):
 the kernel block, the mandatory rules, and the branch's working memory
-(`process_context.py`: active plans with tier, issue, DECISION ledger,
-open DECISION NEEDED questions, the next unchecked task).
+(`process_context.py`, scoped to the branch: its plans with tier, issue,
+DECISION ledger, open DECISION NEEDED questions, the next unchecked task;
+every other plan and spec dir as one capped index line).
 
 `--install` merges one hook entry into `.claude/settings.json` (matcher
 `compact|resume`) without touching anything else there; the file stays
@@ -32,6 +33,7 @@ HOOK_CMD = "python3 scripts/process/rehydrate.py"
 MATCHER = "compact|resume"
 START, END = "<!-- KERNEL:START -->", "<!-- KERNEL:END -->"
 MAX_DECISIONS = 12  # the latest ones; older decisions are in the plan, which the session reads on demand
+MAX_INDEX = 10  # other work, one line; the full index is a process_context.py call away
 
 
 def _read(p: Path) -> str:
@@ -79,6 +81,17 @@ def render(root: Path) -> str:
             nxt = f.get("next_task")
             out.append(f"- spec `{f['dir']}`: {f.get('tasks_done')} done, {f.get('tasks_open')} open"
                        + (f" — next: {nxt}" if nxt else ""))
+        def ref(n: int | None) -> str:
+            return f"#{n}" if n is not None else "no issue"
+        others = [f"`{p['file']}` {ref(p['issue'])}" for p in ctx.get("other_plans", [])] + [
+            f"`{s['dir']}` {ref(s['issue'])}" + (" done" if s.get("done") else "")
+            for s in ctx.get("other_specs", [])]
+        if others:
+            head = ("not this branch's work" if ctx.get("scope", {}).get("source") != "none"
+                    else "no issue in scope")
+            more = f" … +{len(others) - MAX_INDEX} more" if len(others) > MAX_INDEX else ""
+            out.append(f"- other plans/specs ({head}; `process_context.py --issue N` for one): "
+                       + ", ".join(others[:MAX_INDEX]) + more)
         for key in ("state_file", "latest_journal"):
             if ctx.get(key):
                 out.append(f"- {key.replace('_', ' ')}: `{ctx[key]}` (read it before the next tool call)")
