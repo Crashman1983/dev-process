@@ -1615,3 +1615,49 @@ def test_plan_report_keys_read_decorated_issue_tokens_but_not_spec_md(render, tm
     finally:
         sys.path.remove(str(out / "scripts/process"))
 
+
+# --- advisory: a fix round's regression pin (testing.md) ---
+
+def _fix_round(out: Path, files: dict[str, str], subject: str = "fix: widget") -> str:
+    """The seeded branch, reviewed at its head, then a fix commit: the round's `since`."""
+    _seed_repo(out)
+    reviewed = _git(out, "rev-parse", "HEAD").stdout.strip()
+    for rel, body in files.items():
+        (out / rel).parent.mkdir(parents=True, exist_ok=True)
+        (out / rel).write_text(body)
+    _git(out, "add", "-A", check=True)
+    _git(out, "commit", "-q", "-m", subject, check=True)
+    return reviewed
+
+
+PIN_NOTE = "regression pin missing for the fixed findings (testing.md)"
+
+
+def test_a_code_only_fix_round_notes_the_missing_regression_pin(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    reviewed = _fix_round(out, {"widget.py": "def widget():\n    return 43\n",
+                                "docs/widget.md": "fixed\n", "pyproject.toml": "[x]\n"})
+    r = _run(out, "--base", "main", "--since", reviewed, "--skip-preflight")
+    assert r.returncode == 0, r.stderr
+    assert f"{PIN_NOTE}: 1 code file(s) changed, no test file" in r.stdout
+
+
+@pytest.mark.parametrize("test_file", ["tests/test_widget.py", "src/widget.spec.ts",
+                                       "pkg/__tests__/w.js", "conftest.py", "widget_test.go"])
+def test_a_fix_round_with_a_test_carries_no_pin_note(render, tmp_path, test_file):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    reviewed = _fix_round(out, {"widget.py": "def widget():\n    return 43\n", test_file: "pin\n"})
+    r = _run(out, "--base", "main", "--since", reviewed, "--skip-preflight")
+    assert r.returncode == 0, r.stderr
+    assert PIN_NOTE not in r.stdout
+
+
+def test_a_delta_bundle_carries_the_fix_streak(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    reviewed = _fix_round(out, {"widget.py": "def widget():\n    return 43\n"})
+    (out / "widget.py").write_text("def widget():\n    return 44\n")
+    _git(out, "commit", "-q", "-am", "fix: widget again", check=True)
+    r = _run(out, "--base", "main", "--since", reviewed, "--skip-preflight")
+    assert r.returncode == 0, r.stderr
+    assert "## Fix streak\nfix-streak: note: 2 fix commits on widget.py" in r.stdout
+
