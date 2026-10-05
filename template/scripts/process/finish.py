@@ -61,7 +61,9 @@ from check_review import (  # noqa: E402  (one owner for grammar + arithmetic)
     _plan_issue_numbers,
     _plan_work_ids,
     _unfenced,
+    GitReadError,
     branch_issue,
+    integration_ref,
     issue_refs_in_range,
     merge_base,
     paths_in_flight,
@@ -121,19 +123,29 @@ def check(root: Path) -> tuple[list[str], list[str]]:
     # branch's business when the branch carries its file or claims its issue
     # a base whose diff git cannot list leaves in_flight None: every active
     # plan counts as this branch's (fail closed), and the broken read is named
-    has_base = merge_base(root) is not None
+    # an ambiguous fork point is a blocker, never "no base" (downstream #2381)
+    try:
+        has_base = merge_base(root) is not None
+        base_error = None
+    except GitReadError as exc:
+        has_base, base_error = False, exc
+        blockers.append(f"cannot bound this branch's range: {exc}")
     in_flight = paths_in_flight(root) if has_base else None
     if has_base:
         from template_verify import verify
         try:
-            update = verify(root, merge_base(root))
+            # the ref, not the fork SHA: verify demands one fork point itself
+            ref = integration_ref(root)
+            if ref is None:
+                raise ValueError('the integration ref behind the merge base disappeared')
+            update = verify(root, ref)
             blockers.extend(template_review_findings(root, update, passes))
-        except (ValueError, OSError, subprocess.TimeoutExpired) as exc:
+        except (GitReadError, ValueError, OSError, subprocess.TimeoutExpired) as exc:
             blockers.append(f'template verification failed: {exc}')
     if has_base and in_flight is None:
         blockers.append(f"{IN_FLIGHT_UNKNOWN} — every active plan counts as this branch's; "
                         f"repair the clone (`git fsck`, fetch) and run finish again")
-    claimed_issues = issue_refs_in_range(root)
+    claimed_issues = issue_refs_in_range(root) if base_error is None else set()
     to_archive: list[str] = []
     pdir = root / PLANS_ACTIVE
     if pdir.is_dir():

@@ -118,7 +118,10 @@ def describe_worktree(wt: dict, ref: str | None) -> dict:
         if counts:
             behind, ahead = (counts.split() + ["0", "0"])[:2]
             d["ahead"], d["behind"] = int(ahead), int(behind)
-    in_flight = _review.paths_in_flight(path)
+    try:
+        in_flight = _review.paths_in_flight(path)
+    except _review.GitReadError:
+        in_flight = None  # an ambiguous fork point: an overlap cannot be ruled out
     d["in_flight"] = sorted(in_flight or ())
     if in_flight is None:
         d["in_flight_unknown"] = True  # git failed: an overlap here cannot be ruled out

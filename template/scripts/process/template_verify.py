@@ -26,7 +26,7 @@ from pathlib import Path
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from process_git import git_environment  # noqa: E402
+from process_git import fork_point, git_environment  # noqa: E402
 from template_update import ANSWERS, OWNED_FILE, answers, is_owned, owned_patterns, render as template_render  # noqa: E402
 
 
@@ -295,6 +295,11 @@ def verify(root: Path, base: str, tip: str = 'HEAD', *, worktree: bool = False) 
     root = root.resolve()
     base_sha = git(root, 'rev-parse', '--verify', base + '^{commit}').decode().strip()
     tip_sha = git(root, 'rev-parse', '--verify', tip + '^{commit}').decode().strip()
+    # The baseline is the fork point, whichever integration ref the caller
+    # names: REVIEW and ack bind it, and the ref's later commits are no delta.
+    # Callers pass the ref, not a pre-picked SHA: a SHA already in tip's
+    # history has one merge base with it, and a criss-cross would hide.
+    base_sha = fork_point(root, base_sha, tip_sha)
     if worktree:
         key = _worktree_key(root, base_sha, tip_sha)
         # every file _verify read from disk is read again: an ignored file

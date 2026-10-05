@@ -66,7 +66,7 @@ from pathlib import Path
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from process_git import git_environment  # noqa: E402
+from process_git import NoForkPoint, fork_point, git_environment  # noqa: E402
 from template_verify import verify  # noqa: E402
 
 JOURNAL_DIR = ".process-work/journal"
@@ -1218,16 +1218,34 @@ def integration_push(env: dict[str, str] | None = None, root: Path | None = None
 
 
 def merge_base(root: Path, tip: str = "HEAD", *, strict: bool = False) -> str | None:
-    """A proper integration ancestor of tip, resolved offline.
+    """A proper integration ancestor of tip, resolved offline: the fork point's SHA.
 
     Refuse a missing base or a ref already containing tip: neither bounds
-    the incoming range. Never guess tip~1. Both callers use this rule;
-    `strict` remains accepted for compatibility with existing integrations.
+    the incoming range. Never guess tip~1. An ambiguous fork point (a
+    criss-cross merge) raises GitReadError instead of answering None or one
+    silently picked base (`_integration_base`). `strict` remains accepted for
+    compatibility with existing integrations.
     """
-    return _strict_merge_base(root, tip)
+    found = _integration_base(root, tip)
+    return found[1] if found else None
 
 
-def _strict_merge_base(root: Path, tip: str) -> str | None:
+def integration_ref(root: Path, tip: str = "HEAD") -> str | None:
+    """The integration ref whose fork point `merge_base` reports.
+
+    Template verification takes this ref, not the fork SHA: a SHA already in
+    tip's history has exactly one merge base with it, so a criss-cross would
+    stay invisible to `git merge-base --all`."""
+    found = _integration_base(root, tip)
+    return found[0] if found else None
+
+
+def _integration_base(root: Path, tip: str) -> tuple[str, str] | None:
+    """(integration ref, fork point SHA) of tip — `process_git.fork_point`
+    owns the fork. None when no ref bounds tip (none resolves, none shares a
+    commit, or the ref already contains tip). An ambiguous fork point is no
+    None: read as "no base" it turned the gate's arms off (downstream #2381) —
+    it raises GitReadError, which the gate, finish and the train name."""
     tip_sha = (_git_bytes(root, "rev-parse", "--verify", "-q", f"{tip}^{{commit}}") or b"").strip()
     if not tip_sha:
         return None
@@ -1239,10 +1257,17 @@ def _strict_merge_base(root: Path, tip: str) -> str | None:
     remotes = [r for r in integration_refs(root) if r in remote_names]
     local = [r for r in integration_refs(root) if r not in remote_names]
     for ref in [*remotes, *sorted(others), *local]:
-        out = _git_bytes(root, "merge-base", tip, ref)
-        if out is None or not out.strip() or out.strip() == tip_sha:
+        if _git_bytes(root, "rev-parse", "--verify", "-q", f"{ref}^{{commit}}") is None:
             continue
-        return out.decode(errors="replace").strip()
+        try:
+            fork = fork_point(root, ref, tip_sha.decode())
+        except NoForkPoint:
+            continue
+        except ValueError as exc:
+            raise GitReadError(f"integration base of {tip} on {ref}: {exc}") from None
+        if fork.encode() == tip_sha:
+            continue
+        return ref, fork
     return None
 
 
@@ -1586,7 +1611,11 @@ def standing_block_findings(root: Path, tip: str = "HEAD", *, remote_sha: str | 
                 f"later round with verdict=pass has to clear it before the merge"
                 for work, (loc, rec) in sorted(_blocks(at_tip).items())]
     if remote_sha is None:
-        base, bases = merge_base(root, tip, strict=True), integration_refs(root)
+        try:
+            base, bases = merge_base(root, tip, strict=True), integration_refs(root)
+        except GitReadError as exc:
+            # an ambiguous fork point bounds no range: refused, blocks or not
+            return [f"cannot determine the pushed range of {tip}: {exc}"]
     else:
         base = push_base(root, tip, remote_sha)
         if base is None and allow_non_fast_forward:
@@ -1856,14 +1885,15 @@ def _history(root: Path, head: str, tip: str = "HEAD",
             return error
         dropped |= d
     keep = lambda paths: frozenset(p for p in paths if not p.startswith(BOOKKEEPING))  # noqa: E731
-    base = merge_base(root, tip)
-    if base:
-        try:
-            update = verify(root, base, tip)
+    try:
+        # the ref, not its fork SHA: verify demands one fork point (`fork_point`)
+        ref = integration_ref(root, tip)
+        if ref:
+            update = verify(root, ref, tip)
             if update['update'] and not update['errors'] and not update['migration']:
                 late -= set(update['identical'])
-        except (ValueError, OSError, subprocess.TimeoutExpired):
-            pass  # unverifiable provenance never grants coverage
+    except (GitReadError, ValueError, OSError, subprocess.TimeoutExpired):
+        pass  # unverifiable provenance never grants coverage
     return History(late=keep(late), dropped=keep(dropped), fellow=tuple(fellow))
 
 
@@ -2304,12 +2334,16 @@ def verified_template_plan(root: Path, rel: str, text: str, *, tip: str = "HEAD"
     """Shared exemption for a marked plan of a computed, acknowledged pure update."""
     if not re.search(r'^template-update:\s*true\s*$', text, re.M):
         return False
-    base = merge_base(root, tip)
-    if not base:
+    try:
+        found = _integration_base(root, tip)
+    except GitReadError:
+        return False  # an ambiguous fork point exempts nothing; the gate names it
+    if not found:
         return False
+    ref, base = found
     if update is None:
         try:
-            update = verify(root, base, tip)
+            update = verify(root, ref, tip)
         except (ValueError, OSError, subprocess.TimeoutExpired):
             return False
     pure = (update['update'] and not update['errors'] and not update['project_delta']
@@ -2320,9 +2354,10 @@ def verified_template_plan(root: Path, rel: str, text: str, *, tip: str = "HEAD"
 def template_review_findings(root: Path, update: dict, passes: list[dict],
                              *, tip: str = "HEAD") -> list[str]:
     """One owner for the update's review duty, used by gate, finish and train."""
-    if not update['update']:
-        return []
     findings = [f'template verification failed: {e}' for e in update['errors']]
+    # a failure before the update is established still withdraws everything
+    if not update['update']:
+        return findings
     if not update.get('acknowledged'):
         findings.append('template update: owner/steward must acknowledge the behavior notes '
                         '(template_update.py --verify --base <integration-base> --ack <owner>)')
@@ -2362,7 +2397,17 @@ def check(root: Path) -> tuple[list[str], list[str]]:
     all_records: list[tuple[int, dict]] = []
     located: list[tuple[str, int, dict]] = []
     integrity_mode = "all" if "--full" in sys.argv else os.environ.get(INTEGRITY_ENV, "ledger")
-    scope_base = merge_base(root)
+    # an ambiguous fork point is a finding, never "no base": every arm keyed
+    # on the pushed range would otherwise read nothing (downstream #2381)
+    base_error = None
+    try:
+        scope_base = merge_base(root)
+    except GitReadError as exc:
+        base_error = exc
+        scope_base = None
+        hard.append(f"cannot bound the pushed range: {exc}")
+    # no ref bounds HEAD at all (not: its shards could not be listed below)
+    no_base = scope_base is None and base_error is None
     changed_shards = paths_in_flight(root) if scope_base is not None else set()
     if changed_shards is None:
         # cannot tell which shards changed: recompute every one, reuse none
@@ -2422,10 +2467,14 @@ def check(root: Path) -> tuple[list[str], list[str]]:
     if scope_base:
         try:
             dirty = bool(_git_bytes(root, 'diff', '--name-only', 'HEAD'))
-            update = verify(root, scope_base, worktree=dirty)
-        except (ValueError, OSError, subprocess.TimeoutExpired) as exc:
+            # the ref, not scope_base: verify demands one fork point itself
+            ref = integration_ref(root)
+            if ref is None:
+                raise ValueError('the integration ref behind the merge base disappeared')
+            update = verify(root, ref, worktree=dirty)
+        except (GitReadError, ValueError, OSError, subprocess.TimeoutExpired) as exc:
             hard.append(f'template verification failed: {exc}')
-    if update and update['update']:
+    if update and (update['update'] or update['errors']):
         for finding in template_review_findings(root, update, passes):
             if finding.startswith('template verification failed:'):
                 hard.append(finding)
@@ -2512,13 +2561,13 @@ def check(root: Path) -> tuple[list[str], list[str]]:
     # "forgot to archive on merge" and that design are indistinguishable and
     # silent, so the gap is at least made visible.
     active = [p for _rel, p in record_files(root, ("plan",))]
-    in_flight = paths_in_flight(root)
+    in_flight = paths_in_flight(root) if base_error is None else None
     if in_flight is None:
         review_required = any(
             not rel.startswith(f"{PLANS_ACTIVE}/design-")
             and (plan_tier(text) or 0) >= 2 and not review_waived(text)
             for rel, text in record_texts(root, PLAN_KINDS) or [])
-        if merge_base(root) is None and review_required:
+        if no_base and review_required:
             hard.append("no proper integration base — fetch origin/main (or the remote default branch); cannot bound the pushed range")
         soft.append(f"{IN_FLIGHT_UNKNOWN} — every active plan is treated as in flight")
         in_flight = {f"{PLANS_ACTIVE}/{p.name}" for p in active}
@@ -2612,7 +2661,7 @@ def check(root: Path) -> tuple[list[str], list[str]]:
     # The tier still comes from the plan — a gate that invents its own tier
     # would be worse than the gap it closes — so a claimed issue without a
     # findable plan is a note, not a failure.
-    for number in sorted(issue_refs_in_range(root)):
+    for number in sorted(issue_refs_in_range(root) if base_error is None else ()):
         matching = [(rel, text, tier, ids) for rel, text, tier, ids in tiered_plans
                     if number in _plan_issue_numbers(text)]
         if not matching:

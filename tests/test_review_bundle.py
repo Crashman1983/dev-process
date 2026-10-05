@@ -158,6 +158,24 @@ def test_missing_sources_named_not_skipped(render, tmp_path):
     assert "Mandatory rules" in t and "# Review Checklist" in t
 
 
+def test_bundle_refuses_an_ambiguous_fork_point(render, tmp_path):
+    """A criss-cross has two merge bases; the bundle must not pick one silently."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    feature = _git(out, "rev-parse", "HEAD").stdout.strip()
+    _git(out, "checkout", "-q", "main")
+    (out / "main.md").write_text("b1\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "main moves")
+    main_tip = _git(out, "rev-parse", "HEAD").stdout.strip()
+    _git(out, "merge", "-q", "--no-ff", "-m", "main takes feat", feature)
+    _git(out, "checkout", "-q", "feat")
+    _git(out, "merge", "-q", "--no-ff", "-m", "feat takes main", main_tip)
+    r = _run(out, "--skip-preflight", "--base", "main")
+    assert r.returncode != 0
+    assert "merge bases" in r.stderr and "REVIEW_ARTIFACT" not in r.stdout, r.stderr
+
+
 def test_empty_diff_stated(render, tmp_path):
     out = render(tmp_path, {"project_name": "d", "modules": {}})
     _git(out, "init", "-q", "-b", "main")

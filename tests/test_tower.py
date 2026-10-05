@@ -558,3 +558,23 @@ def test_a_name_that_is_not_utf8_is_printed_escaped(render, tmp_path):
         assert r.returncode == 0, r.stderr[-600:]
         assert "overlap" in r.stdout
 
+
+def test_a_criss_cross_worktree_has_unknown_files_not_a_crash(render, tmp_path):
+    """An ambiguous fork point raises in the review gate; the tower says 'unknown'."""
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    _git(out, "checkout", "-q", "-b", "feat")
+    (out / "a.md").write_text("a\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "a")
+    _git(out, "checkout", "-q", "main")
+    (out / "b.md").write_text("b\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "b")
+    _git(out, "merge", "-q", "--no-ff", "-m", "main takes feat", "feat")
+    _git(out, "checkout", "-q", "feat")
+    _git(out, "merge", "-q", "--no-ff", "-m", "feat takes main", "main~1")
+    tower = _load_tower(out)
+    d = tower.describe_worktree({"path": str(out), "branch": "feat"}, None)
+    assert d["in_flight_unknown"] is True and d["in_flight"] == []
+
