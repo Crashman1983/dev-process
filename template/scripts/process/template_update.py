@@ -148,7 +148,13 @@ def _data_args(data: dict[str, str]) -> list[str]:
 
 def _copier(*args: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
     exe = shutil.which("copier")
-    argv = [exe, *args] if exe else ["uvx", "copier", *args]
+    if exe:
+        argv = [exe, *args]
+    elif shutil.which("uvx"):
+        argv = ["uvx", "copier", *args]
+    else:
+        # named, not a FileNotFoundError traceback: no render, no exemption
+        raise ValueError("copier required: install copier or uv (uvx)")
     return subprocess.run(argv, capture_output=True, text=True, timeout=120, env=env)
 
 
@@ -276,8 +282,12 @@ def main() -> int:
         return 2
     if dry:
         return 0
-    upd = _copier("update", "--trust", "--defaults", "--conflict", "inline",
-                  *_data_args(data), *(["-r", ref] if ref else []), str(root))
+    try:
+        upd = _copier("update", "--trust", "--defaults", "--conflict", "inline",
+                      *_data_args(data), *(["-r", ref] if ref else []), str(root))
+    except ValueError as exc:
+        print(f"template-update: {exc}", file=sys.stderr)
+        return 2
     if upd.returncode != 0:
         print(upd.stderr.strip(), file=sys.stderr)
         return 1

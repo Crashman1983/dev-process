@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.11"
+# dependencies = ["PyYAML>=6"]
+# ///
 """review gate (core, always-on): make the review-independence attestation a
 gated artifact instead of prose.
 

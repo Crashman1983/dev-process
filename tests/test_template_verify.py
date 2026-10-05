@@ -670,3 +670,22 @@ def test_an_option_shaped_template_source_never_reaches_git_or_copier(update, mo
     with pytest.raises(ValueError, match='unsupported template source'):
         verifier._source(src)
     assert load('template_update').render(src, 'v1.0.0', {}, root.parent / 'never') is False
+
+
+def test_without_copier_or_uvx_the_render_names_copier(update, monkeypatch):
+    """#161: no Copier and no uvx was a FileNotFoundError deep in a gate run."""
+    root, _, base, verifier = update
+    updater = sys.modules['template_update']
+    monkeypatch.setattr(updater.shutil, 'which', lambda _name: None)
+    with pytest.raises(ValueError, match='copier required'):
+        updater._copier('--version')
+    proof = verifier.verify(root, base)
+    assert any('copier required' in e for e in proof['errors']), proof
+    assert not proof['identical']
+
+
+@pytest.mark.parametrize('script', ['check_review.py', 'finish.py', 'template_verify.py'])
+def test_scripts_that_verify_templates_declare_pyyaml(script):
+    """They reach template_verify, which reads answers with PyYAML: `uv run` must resolve it."""
+    head = (SCRIPTS / script).read_text(encoding='utf-8').split('"""', 1)[0]
+    assert '# /// script' in head and 'PyYAML>=6' in head, head

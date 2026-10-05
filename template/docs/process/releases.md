@@ -57,8 +57,12 @@ record, not an accident.
 3. Run `uv run --script scripts/process/template_verify.py --base <baseline-sha>`.
    Include its computed file listing and `release_notes` in the update PR.
    The two pinned renders identify template provenance; no saved report
-   can exempt a file from review. Verification needs Copier and Git access
-   to the recorded template source; unavailable provenance fails closed.
+   can exempt a file from review. Verification needs Copier (on `PATH`, or
+   `uvx` from uv to fetch it), PyYAML (declared as script metadata, so
+   `uv run` resolves it for the review gate and `finish.py` too) and network
+   access to the recorded template source; the GitHub workflow's `setup-uv`
+   step provides all three. Without Copier or uvx the gate says so;
+   unavailable provenance fails closed.
    Offline or unreachable, it names the source and release and fails. Within
    one process, tag lookups and release notes share one clone and an
    unchanged tree is not re-verified; nothing is cached across runs.
