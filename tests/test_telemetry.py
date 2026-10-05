@@ -510,3 +510,61 @@ def test_clusters_blind_without_conventional_commits(render, tmp_path):
     r = _kpis(out, "clusters")
     assert r.returncode == 0, r.stdout + r.stderr
     assert "blind, not green" in r.stdout
+
+
+# --- rounds: rounds to pass and blockers by origin ---------------------------
+
+def _review(work, rnd, verdict, tier=2):
+    return (f"REVIEW work={work} tier={tier} reviewer=r model=m "
+            f"independence=bundle,non-implementing verdict={verdict} round={rnd}\n")
+
+
+ROUNDS_JOURNAL = (_review(9, 1, "block") + _review(9, 2, "block") + _review(9, 3, "pass")
+                  + _review("widget", 1, "pass", tier=3))
+ROUNDS_REPORT = ("review: widget-fix\nwork: #9\npublish-waived: test\n\n## Findings\n"
+                 "FINDING sev=blocker action=fix issue=- origin=draft owner read twice\n"
+                 "FINDING sev=blocker action=fix issue=- origin=fix guard re-broken\n"
+                 "FINDING sev=blocker action=fix issue=- origin=fix guard re-broken again\n"
+                 "FINDING sev=blocker action=fix issue=- no origin given\n"
+                 "FINDING sev=major action=fix issue=- origin=late not a blocker\n"
+                 "FINDING sev=blocker action=fix issue=- origin=bogus refused, not counted\n"
+                 "```\nFINDING sev=blocker action=fix issue=- origin=late quoted, not counted\n```\n")
+
+
+def _rounds(out: Path):
+    r = subprocess.run([sys.executable, str(out / "scripts/process/process_kpis.py"), "rounds"],
+                       cwd=out, capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    return r.stdout
+
+
+def test_rounds_counts_rounds_to_pass_and_blockers_by_origin(render, tmp_path):
+    """Tier-3 features took 3-7 rounds downstream and nobody could say whether the blockers
+    came from the draft or from the fixes — `rounds` reads it from REVIEW and FINDING lines."""
+    out = _render(render, tmp_path, github_issues=True)
+    _journal(out, ROUNDS_JOURNAL)
+    reviews = out / ".process-work/reviews"
+    reviews.mkdir(parents=True)
+    (reviews / "2026-07-05-widget-fix.md").write_text(ROUNDS_REPORT, encoding="utf-8")
+    text = _rounds(out)
+    row = next(ln for ln in text.splitlines() if ln.split()[:1] == ["9"])
+    # tier 2, passed in round 3, two blocked rounds, four blockers: draft 1, fix 2, one unmarked
+    assert row.split()[1:4] == ["2", "3", "2"], row
+    assert row.endswith("4 (draft 1, fix 2, unmarked 1)"), row
+    other = next(ln for ln in text.splitlines() if ln.split()[:1] == ["widget"])
+    assert other.split()[1:5] == ["3", "1", "0", "0"], other
+    assert "all blockers: 4 (draft 1, fix 2, unmarked 1)" in text
+    assert "confidence: low" in text
+    doc = (out / "docs/process/modules/telemetry.md").read_text()
+    assert "| `rounds` |" in doc and "origin=draft" in doc
+
+
+def test_rounds_without_the_finding_reader_says_blockers_not_read(render, tmp_path):
+    """Without check_issues the FINDING lines are not read — the column says so instead
+    of reading as zero blockers (a missing input must not read as the OK state)."""
+    out = _render(render, tmp_path)
+    _journal(out, _review(9, 1, "block") + _review(9, 2, "block"))
+    text = _rounds(out)
+    row = next(ln for ln in text.splitlines() if ln.split()[:1] == ["9"])
+    assert row.split()[1:4] == ["2", "open", "2"] and row.endswith("not read"), row
+    assert "blockers: not read" in text

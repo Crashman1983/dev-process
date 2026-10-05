@@ -155,7 +155,11 @@ FINDING_ACTIONS = {"fix", "accept", "follow-up"}
 # the gate set), so it is recorded, not checked.
 FINDING_GATE_JUDGEMENT = "judgement"
 FINDING_GATE_POSSIBLE = "possible"
-FINDING_KEYS = ("sev", "action", "issue", "gate")
+# Where a finding's defect came from, optional: `draft` = in the change as first
+# reviewed, `fix` = introduced by a fix round, `late` = in the draft but found
+# only in a later round. `process_kpis.py rounds` counts blockers by it.
+FINDING_ORIGINS = {"draft", "fix", "late"}
+FINDING_KEYS = ("sev", "action", "issue", "gate", "origin")
 
 
 # a FINDING may be written as a Markdown bullet — `- FINDING ...` must not
@@ -177,7 +181,8 @@ def _parse_finding(match: re.Match) -> tuple[dict | None, str | None]:
     parsed; everything from the first other token on is the title — so a
     title may itself contain `=` (e.g. 'user_id=1 hardcoded'). Requires sev=
     and action= with valid enums; issue= optional, '-' meaning none; gate=
-    optional, free-form (see FINDING_GATE_*)."""
+    optional, free-form (see FINDING_GATE_*); origin= optional, one of
+    FINDING_ORIGINS."""
     fields: dict = {}
     tokens = match.group(1).split()
     i = 0
@@ -195,6 +200,8 @@ def _parse_finding(match: re.Match) -> tuple[dict | None, str | None]:
         return None, f"sev={fields.get('sev')!r} not in {sorted(FINDING_SEVS)}"
     if fields.get("action") not in FINDING_ACTIONS:
         return None, f"action={fields.get('action')!r} not in {sorted(FINDING_ACTIONS)}"
+    if "origin" in fields and fields["origin"] not in FINDING_ORIGINS:
+        return None, f"origin={fields['origin']!r} not in {sorted(FINDING_ORIGINS)}"
     issue = fields.get("issue", "-")
     if issue != "-" and parse_issue_ref(issue) is None:
         return None, f"issue={issue!r} is neither '-' nor a valid ref"
@@ -204,6 +211,19 @@ def _parse_finding(match: re.Match) -> tuple[dict | None, str | None]:
     fields["title"] = title
     fields.setdefault("gate", "")
     return fields, None
+
+
+def report_findings(text: str) -> list[tuple[dict | None, str | None, str]]:
+    """(fields, error, line) for every intended FINDING line of a report, read
+    outside fences — the one reader of findings; this gate and the KPI cockpit
+    ask it."""
+    out: list[tuple[dict | None, str | None, str]] = []
+    for line in _unfenced(text).splitlines():
+        fmatch = _intended_finding(line)
+        if fmatch:
+            fields, err = _parse_finding(fmatch)
+            out.append((fields, err, line))
+    return out
 
 
 def _canon_ref(ref: str, default_repo: str | None) -> str:
@@ -288,11 +308,7 @@ def _check_reports(root: Path, default_repo: str | None) -> tuple[list[str], lis
                             f"report but no 'campaign-issue:' ref — the bundle "
                             f"parent must be named")
         ratchet: list[str] = []
-        for line in text.splitlines():
-            fmatch = _intended_finding(line)
-            if not fmatch:
-                continue
-            fields, err = _parse_finding(fmatch)
+        for fields, err, line in report_findings(raw):
             if err:
                 hard.append(f"{rel}: malformed FINDING line ({err}): {line.strip()!r}")
                 continue

@@ -66,7 +66,7 @@ its documented threshold instead of a confidence tag.
 
 Lean pass: the cockpit carries exactly the three KPIs the process goals name
 — convergence (error rate at the gate), cost, and CFR (error rate after
-merge) — plus one advisory reader, `clusters`.
+merge) — plus the advisory readers `clusters`, `models` and `rounds`.
 
 | family | measures | action (threshold → act) |
 |---|---|---|
@@ -74,6 +74,7 @@ merge) — plus one advisory reader, `clusters`.
 | `cost` | rework episodes (kickback round>1 → fixed); optional `--transcripts DIR` token medians (harness-specific, `~approx`) | rework>0 → find the criterion that kicks back repeatedly |
 | `cfr` | DORA change failure rate: `feat:` with a corrective `fix:` ≤7 d sharing a code file (proxy) | trend over ≥3 windows only; rising despite catch>0 → tighten the test/review gate |
 | `clusters` | rule 6 across sessions: `fix:` commits (14 d) sharing a subject token — each session sees its fix as a first attempt; git sees the series | a cluster ≥3 → stop path-patching, write the invariant record (Type: invariant) with its table test (`workflow.md`, Debug) |
+| `rounds` | per work item: tier, rounds to the first pass and blocked rounds (journal `REVIEW` lines); blockers per `FINDING`, by `origin=draft\|fix\|late` where the reports carry it — read through `check_issues.py` when the `github-issues` module is installed, else "not read" | proxy; within one tier over time: `fix` blockers dominate → regression tests and a re-check of the fixed class (`verification-independence.md`, "What each round judges"); `late` dominates → a more complete round 1 |
 
 A KPI without a trigger does not exist — the cockpit only helps if something
 runs it. With GitHub CI the `process-kpis` workflow runs `report` monthly
@@ -113,7 +114,8 @@ not cancel out across projects. The consequences are binding:
 ## One owner per behavior
 
 This module owns the GRADE grammar (`check_telemetry.py`; the cockpit imports
-the parser from it) and reads no other module's artifacts. It measures the
+the parser from it) and reads another module's artifacts only through that
+module's own reader (`rounds` asks `check_issues.py` for FINDING lines). It measures the
 process; it does not define acceptance criteria (`feature-registry`), issues
 (`github-issues`), or review depth (`risk-tiers.md`). Thresholds are
 documented constants in the rendered scripts — this module owns them, adjust
