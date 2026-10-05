@@ -28,8 +28,36 @@ def test_the_local_file_overrides_one_cell_and_keeps_the_rest(render, tmp_path):
     dflt = _dispatch(out, "policy")
 
     assert t3.returncode == 0, t3.stderr
-    assert "execute: my-sonnet" in t3.stdout and "review: claude-fable-5-1" in t3.stdout, t3.stdout
+    assert "execute: my-sonnet" in t3.stdout and "review: claude-opus-5 (xhigh)" in t3.stdout, t3.stdout
     assert "plan: my-opus" in dflt.stdout and "execute: claude-sonnet-5" in dflt.stdout, dflt.stdout
+
+
+@pytest.mark.parametrize(("cell", "shown"), [
+    ({"model": "my-opus", "effort": "max"}, "review: my-opus (max)\n"),
+    ("my-fable", "review: my-fable\n"),
+    ({"model": "my-opus"}, "review: my-opus\n"),
+], ids=["object-for-object", "string-for-object", "no-inherited-effort"])
+def test_a_local_cell_replaces_the_template_cell_whole(render, tmp_path, cell, shown):
+    """An overlay cell is one choice: a local `{"model": …}` over the template's
+    Tier 3 review must not keep the template's effort behind the project's back."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _local(out, {"tiers": {"3": {"review": cell}, "2": {"execute": {"model": "x", "effort": "low"}}}})
+
+    t3 = _dispatch(out, "policy", "--tier", "3")
+    t2 = _dispatch(out, "policy", "--tier", "2")
+
+    assert t3.returncode == 0 and shown in t3.stdout, t3.stdout + t3.stderr
+    assert "execute: x (low)\n" in t2.stdout, t2.stdout
+
+
+def test_a_local_cell_with_an_unknown_effort_refuses_naming_it(render, tmp_path):
+    """The overlay is validated after the merge, like the template's own cells."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _local(out, {"classes": {"design": {"plan": {"model": "x", "effort": "turbo"}}}})
+
+    r = _dispatch(out, "policy")
+
+    assert r.returncode != 0 and "classes.design.plan" in r.stderr and "turbo" in r.stderr, r.stderr
 
 
 def test_the_merged_policy_is_validated(render, tmp_path):
@@ -67,7 +95,7 @@ def test_a_local_value_replaces_a_scalar_and_a_list_whole(render, tmp_path):
         sys.modules.pop("dispatch", None)
 
     assert policy["command"] == "mine --model {model} {prompt}" and policy["max_workers"] == 2
-    assert policy["tiers"]["3"]["review"] == "claude-fable-5-1"
+    assert policy["tiers"]["3"]["review"] == {"model": "claude-opus-5", "effort": "xhigh"}
 
 
 @pytest.mark.parametrize("key", ["SKIP", "GIT_CONFIG_COUNT", "GIT_DIR", "PRE_COMMIT_ALLOW_NO_CONFIG"])

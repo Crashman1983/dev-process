@@ -90,7 +90,7 @@ A phase is a session. `scripts/process/dispatch.py start --issue N --phase
 plan|execute|review [--tier T]` opens (or reuses) the branch's worktree and
 starts a session with the model `docs/process/model-policy.json` assigns
 to that tier and phase; the project's own start command is the policy's
-`command` template (`{model}`, `{prompt}` are substituted inside the argv
+`command` template (`{model}`, `{effort}`, `{prompt}` are substituted inside the argv
 the template splits into; the prompt is one argv element, and it begins
 with the phase's slash command so the command file owns the steps).
 Between phases the artifacts carry the state: the plan and its
@@ -121,6 +121,16 @@ worker's environment: a worker is a session of its own. Local workers
 start under `nice` (policy `worker_nice`, default 10, 0 = off): the merge
 train's suite keeps its CPU while workers test, instead of a pause for
 every worker.
+
+**Effort per cell.** A policy cell is a model id or `{"model": …,
+"effort": "low|medium|high|xhigh|max"}` — the template runs the Tier 3
+review on Opus at `xhigh`. `{effort}` in `command` is substituted like
+`{model}`; for a cell without an effort the argv element carrying it is
+dropped and the harness default applies. A cell whose effort the phase's
+command cannot carry (no `{effort}`) refuses the start and is flagged by
+`dispatch.py policy`: an effort is never silently ignored. Workers get
+`PROCESS_EFFORT`, reports record it, and `process_kpis.py models` keeps
+`model (effort)` as a cell of its own.
 
 **Model by task class.** A task line may carry a class as a bracket token
 after its id, beside `[P]` and `[US1]`: `[mechanical]` (zero-context, exact
