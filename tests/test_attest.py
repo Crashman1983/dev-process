@@ -265,6 +265,22 @@ def _journal(out):
     return "".join(f.read_text() for f in (out / ".process-work/journal").rglob("*.md"))
 
 
+def test_a_number_no_plan_names_is_refused_as_a_likely_pr_number(render, tmp_path):
+    """Rounds attested as work=<PR number> matched no plan, so no gate counted them."""
+    out, base, head = _repo(render, tmp_path)
+    r = _attest(out, "--base", base, "--head", head, "--work", "26")
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert "work=26 names no plan or issue — it looks like a PR number" in r.stderr
+    assert "Active plans: 2026-09-10-widget, widget" in r.stderr
+    assert not (out / ".process-work/journal").exists() or "work=26" not in _journal(out)
+    r = _attest(out, "--base", base, "--head", head, "--work", "gizmo")  # a slug: a note only
+    assert r.returncode == 0 and "work=gizmo names no plan" in r.stderr, r.stderr
+    _git(out, "checkout", "-q", "-b", "26-fix")  # the branch leads with the issue
+    r = _attest(out, "--base", base, "--head", head, "--work", "26")
+    assert r.returncode == 0, r.stderr
+    assert "REVIEW work=26 " in _journal(out)
+
+
 def test_the_round_is_counted_from_recorded_blocks_not_claimed(render, tmp_path):
     # downstream: re-checks after a pass and rebases were counted as rounds,
     # and blocking rounds were skipped in the journal
