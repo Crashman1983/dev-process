@@ -176,8 +176,7 @@ def test_bundle_refuses_an_ambiguous_fork_point(render, tmp_path):
     assert "merge bases" in r.stderr and "REVIEW_ARTIFACT" not in r.stdout, r.stderr
 
 
-def test_a_head_the_integration_branch_contains_gets_no_full_bundle(render, tmp_path):
-    """#160: an empty range has no fork point to bind a full round to — refused, named."""
+def test_empty_diff_stated(render, tmp_path):
     out = render(tmp_path, {"project_name": "d", "modules": {}})
     _git(out, "init", "-q", "-b", "main")
     _git(out, "config", "user.email", "t@t")
@@ -185,8 +184,7 @@ def test_a_head_the_integration_branch_contains_gets_no_full_bundle(render, tmp_
     _git(out, "add", "-A")
     _git(out, "commit", "-q", "-m", "base")
     r = _run(out, "--base", "main")
-    assert r.returncode != 0 and "REVIEW_ARTIFACT" not in r.stdout
-    assert "full bundle refused" in r.stderr and "none resolves" in r.stderr, r.stderr
+    assert "HEAD adds nothing over main" in r.stdout
 
 
 def test_a_full_bundle_against_a_slice_base_is_refused(render, tmp_path):

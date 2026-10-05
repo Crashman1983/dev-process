@@ -792,8 +792,7 @@ def build(root: Path, base: str | None, plan_filter: str | None = None,
                if artifact is not None and not since else None)
         if why:
             # a full bundle against another base reviews a slice as the whole (#160)
-            raise SystemExit(f"make_review_bundle: full bundle refused — {why}; build it "
-                             "against the integration branch, or a delta with --since")
+            raise SystemExit(f"make_review_bundle: full bundle refused — {why}")
         if artifact is None:
             add(f"*(unavailable: `git diff {resolved}...HEAD` failed)*\n")
         else:

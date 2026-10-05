@@ -87,11 +87,31 @@ def test_a_full_round_is_written_only_against_the_fork_point(render, tmp_path):
     assert f"base={base}" in r.stdout
 
 
-def test_a_full_round_without_a_resolvable_fork_is_refused(render, tmp_path):
+def test_a_full_round_of_an_integrated_head_is_an_audit_and_stands(render, tmp_path):
+    """Refute: a head main already contains (an audit of a merged range) has no fork to bind."""
     out, base, head = _repo(render, tmp_path)
-    _git(out, "branch", "-f", "main", head)  # main contains the head: no fork to bind
+    _git(out, "branch", "-f", "main", head)
     r = _attest(out, "--base", base, "--head", head)
-    assert r.returncode == 1 and "none resolves" in r.stderr, r.stderr
+    assert r.returncode == 0, r.stderr
+
+
+def test_a_full_round_without_an_integration_ref_names_set_head(render, tmp_path):
+    out, base, head = _repo(render, tmp_path)
+    _git(out, "branch", "-m", "main", "trunk")  # no main, no origin/HEAD
+    r = _attest(out, "--base", base, "--head", head)
+    assert r.returncode == 1 and "git remote set-head origin -a" in r.stderr, r.stderr
+
+
+def test_a_stacked_branch_is_told_to_rebase_onto_the_integration_branch(render, tmp_path):
+    out, _base, lower = _repo(render, tmp_path)
+    _git(out, "checkout", "-q", "-b", "stacked")
+    (out / "more.py").write_text("x = 1\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-qm", "feat: more")
+    head = _git(out, "rev-parse", "HEAD").stdout.strip()
+    r = _attest(out, "--base", lower, "--head", head)
+    assert r.returncode == 1 and "is not the fork point" in r.stderr, r.stderr
+    assert "stacked branch rebases onto" in r.stderr and "Tier 3" in r.stderr, r.stderr
 
 
 def test_attest_refuses_a_stale_bundle(render, tmp_path):
