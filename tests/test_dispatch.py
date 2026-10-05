@@ -1174,3 +1174,45 @@ def test_the_disk_limit_reaches_the_command_line(render, tmp_path):
                   env={**os.environ, "PROCESS_DISK_LIMIT_PCT": "0.001"})
     assert r.returncode == 3 and "% full (limit 0.001%" in r.stderr and "tidy.py --apply" in r.stderr
     assert not (tmp_path / "repo-b4").exists()  # no worktree, no session
+
+
+def test_a_task_class_row_wins_over_the_tier_and_the_default(render, tmp_path):
+    """A spawn names its model from the class row; the tier and the default
+    only fill what the class leaves open (one precedence, one owner)."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    pol = out / "docs/process/model-policy.json"
+    data = json.loads(pol.read_text())
+    data["classes"] = {"mechanical": {"execute": "small-x"}}
+    pol.write_text(json.dumps(data))
+    sys.path.insert(0, str(out / "scripts/process"))
+    try:
+        import importlib
+        d = importlib.import_module("dispatch")
+        policy = d.load_policy(out)
+        assert d.model_for(policy, 3, "execute", "mechanical") == "small-x"
+        assert d.model_for(policy, 3, "review", "mechanical") == data["tiers"]["3"]["review"]
+        assert d.model_for(policy, 3, "execute", "standard") == data["tiers"]["3"]["execute"]
+        assert d.model_for(policy, 9, "execute") == data["default"]["execute"]
+    finally:
+        sys.path.remove(str(out / "scripts/process"))
+        sys.modules.pop("dispatch", None)
+    r = _dispatch(out, "policy", "--tier", "3", "--class", "mechanical")
+    assert r.returncode == 0 and "execute: small-x" in r.stdout, r.stdout + r.stderr
+
+
+def test_an_unknown_task_class_refuses_naming_it(render, tmp_path):
+    """A typo in a class must not silently fall back to the tier's model."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    r = _dispatch(out, "policy", "--class", "mechanicl")
+    assert r.returncode != 0 and "mechanicl" in r.stdout + r.stderr
+
+
+def test_a_malformed_classes_block_refuses(render, tmp_path):
+    """`classes` is validated like the rest of the policy: phase keys, string models."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    pol = out / "docs/process/model-policy.json"
+    data = json.loads(pol.read_text())
+    data["classes"] = {"mechanical": {"deploy": "x"}}
+    pol.write_text(json.dumps(data))
+    r = _dispatch(out, "policy")
+    assert r.returncode != 0 and "classes" in r.stdout + r.stderr

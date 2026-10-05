@@ -58,6 +58,38 @@ QUESTION = re.compile(r"^\s*(?:[-*+]\s+)?[*_]*DECISION NEEDED[*_]*\s+(\d{4}-\d{2
                       re.MULTILINE)
 
 
+# a task line's class (`[mechanical]`, `[design]`; unmarked: standard) picks the
+# model a spawn names — docs/process/tower.md, "Dispatch and the model policy"
+TASK_CLASS = re.compile(r"\[(mechanical|design)\]")
+
+
+def _policy(root: Path) -> dict | None:
+    """The resolved model policy, or None — orientation never fails on it."""
+    try:
+        import dispatch as _dispatch  # noqa: E402  (sibling; one owner for the policy)
+        return _dispatch.load_policy(root)
+    except (Exception, SystemExit):  # noqa: BLE001
+        return None
+
+
+def _next_task(text: str, tier: int | None, policy: dict | None) -> dict:
+    """The first unchecked task with its class and, when the policy loads, its
+    execute model (dispatch.model_for)."""
+    unchecked = UNCHECKED.findall(text)
+    if not unchecked:
+        return {"next_task": None}
+    line = unchecked[0].strip()
+    m = TASK_CLASS.search(line)
+    entry = {"next_task": line, "next_task_class": m.group(1) if m else "standard"}
+    if policy is not None:
+        try:
+            import dispatch as _dispatch  # noqa: E402
+            entry["next_task_model"] = _dispatch.model_for(policy, tier, "execute", entry["next_task_class"])
+        except (Exception, SystemExit):  # noqa: BLE001
+            pass
+    return entry
+
+
 def _branch(root: Path) -> str | None:
     r = subprocess.run(["git", "-C", str(root), "symbolic-ref", "--short", "HEAD"],
                        capture_output=True, text=True)
@@ -130,13 +162,16 @@ def main(argv: list[str] | None = None) -> int:
 
     # collect everything first: --cost measures the whole set, the scope only
     # decides what is printed in full
+    policy = _policy(root)
     pdir = root / PLANS
     plans = []  # (detail, declared issue numbers, open checkboxes)
     for p in (sorted(pdir.glob("*.md")) if pdir.is_dir() else []):
         if p.name.startswith("design-"):
             continue
         text = _read(p)
-        plans.append(({**_plan_info(p), "file": str(p.relative_to(root))},
+        info = _plan_info(p)
+        plans.append(({**info, "file": str(p.relative_to(root)),
+                       **_next_task(text, info["tier"], policy)},
                       declared_issue_numbers(text), len(UNCHECKED.findall(text))))
     out["active_plans"] = [d for d, _nums, _open in plans]
 
@@ -147,13 +182,14 @@ def main(argv: list[str] | None = None) -> int:
         for fdir in sorted(d for d in sdir.iterdir() if d.is_dir()):
             tasks = _read(fdir / "tasks.md")
             unchecked = UNCHECKED.findall(tasks)
+            plan = ({k: v for k, v in _plan_info(fdir / "plan.md").items()
+                     if k != "file"} if (fdir / "plan.md").is_file() else {})
             info = {
                 "dir": str(fdir.relative_to(root)),
-                **({k: v for k, v in _plan_info(fdir / "plan.md").items()
-                    if k != "file"} if (fdir / "plan.md").is_file() else {}),
+                **plan,
                 "tasks_done": len(CHECKED.findall(tasks)),
                 "tasks_open": len(unchecked),
-                "next_task": unchecked[0].strip() if unchecked else None,
+                **_next_task(tasks, plan.get("tier"), policy),
                 "unresolved_markers": sum(
                     len(MARKER.findall(_read(f))) for f in fdir.glob("*.md")),
             }

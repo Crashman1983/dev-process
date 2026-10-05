@@ -207,3 +207,47 @@ def test_help_names_the_scope_flags(render, tmp_path):
     r = subprocess.run([sys.executable, str(out / "scripts/process/process_context.py"), "--help"],
                        cwd=out, capture_output=True, text=True)
     assert r.returncode == 0 and "--issue" in r.stdout and "--all" in r.stdout
+
+
+def test_next_task_names_its_class_and_model_in_a_core_plan(render, tmp_path):
+    """A `[mechanical]` task resolves through the policy's class row, so the
+    spawn names its model instead of taking the harness default."""
+    out = render(tmp_path, {"project_name": "d"})
+    p = out / ".process-work/plans"
+    p.mkdir(parents=True, exist_ok=True)
+    (p / "2026-08-06-thing.md").write_text(
+        "# Plan\n\ntier: 3\nissue: #9\n\n- [x] T1 done\n- [ ] T2 [mechanical] rename the helper\n")
+    plan = _run(out, "--issue", "9")["active_plans"][0]
+    assert plan["next_task"].startswith("T2")
+    assert plan["next_task_class"] == "mechanical" and plan["next_task_model"] == "claude-sonnet-5"
+
+
+def test_next_task_class_in_a_speckit_line_and_the_gate_still_counts_it(render, tmp_path):
+    """The class token sits beside `[P] [US1]`; readers keyed on `- [ ] ` are unaffected."""
+    import importlib.util
+    out = render(tmp_path, {"project_name": "d", "modules": {"speckit": True}})
+    _git(out)
+    d = out / "specs/001-widget"
+    d.mkdir(parents=True)
+    (d / "plan.md").write_text("# Plan\n\ntier: 2\nissue: #7\n")
+    (d / "tasks.md").write_text("# Tasks\n\n- [ ] T001 [P] [US1] [design] Shape the API in src/api.py\n"
+                                "- [ ] T002 Docs\n")
+    feat = _run(out, "--all")["spec_features"][0]
+    assert feat["next_task_class"] == "design" and feat["next_task_model"] == "claude-opus-5"
+    (out / ".specify").mkdir(exist_ok=True)
+    spec = importlib.util.spec_from_file_location("check_speckit_cls", out / "scripts/process/check_speckit.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    _hard, soft = mod.check(out)
+    assert any("2 unchecked task(s)" in s for s in soft)
+
+
+def test_next_task_without_a_policy_omits_the_model(render, tmp_path):
+    """Orientation never fails on a broken policy: the class stays, the model is left out."""
+    out = render(tmp_path, {"project_name": "d"})
+    (out / "docs/process/model-policy.json").write_text("{nope")
+    p = out / ".process-work/plans"
+    p.mkdir(parents=True, exist_ok=True)
+    (p / "2026-08-06-thing.md").write_text("# Plan\n\ntier: 1\nissue: #9\n\n- [ ] T1 plain\n")
+    plan = _run(out, "--issue", "9")["active_plans"][0]
+    assert plan["next_task_class"] == "standard" and "next_task_model" not in plan

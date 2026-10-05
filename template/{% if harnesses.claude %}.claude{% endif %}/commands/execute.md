@@ -71,5 +71,7 @@ per-task reviews only for owner/integration tasks — mechanical tasks
 the delta (`make_review_bundle.py --since`); and let the engine's final
 whole-branch review BE the attested merge review (fresh process on the
 bundle, REVIEW line) — one deep review on the strongest model, not two.
+A subagent spawn names its model for the task's class
+(`process_context.py` gives it; `docs/process/tower.md`, "Model by task class").
 
 Next: `/review`.

@@ -160,6 +160,13 @@ def load_policy(root: Path) -> dict:
                 re.compile(str(row["handover_id"]))
             except re.error as exc:
                 raise SystemExit(f"dispatch: {POLICY} phases.{ph}.handover_id is not a regex: {exc}")
+    classes = data.get("classes")
+    if classes is not None and not (
+            isinstance(classes, dict) and all(
+                isinstance(row, dict) and all(ph in PHASES and isinstance(m, str) and m for ph, m in row.items())
+                for row in classes.values())):
+        raise SystemExit(f"dispatch: {POLICY} `classes` must map each task class to "
+                         f"{{phase: model}} with phases brainstorm|plan|execute|review")
     return data
 
 
@@ -225,10 +232,17 @@ def phase_policy(policy: dict, phase: str) -> dict:
             "env": {**(policy.get("env") or {}), **(row.get("env") or {})}}
 
 
-def model_for(policy: dict, tier: int | None, phase: str) -> str:
+def model_for(policy: dict, tier: int | None, phase: str, cls: str | None = None) -> str:
+    """The model for one phase: `classes[cls][phase]` first, then the tier's
+    cell, then `default` — the one owner of that precedence."""
+    classes = policy.get("classes") or {}
+    if cls and cls != "standard" and cls not in classes:
+        raise SystemExit(f"dispatch: policy names no task class {cls!r} "
+                         f"(known: {', '.join(['standard', *classes])})")
+    by_class = (classes.get(cls) or {}).get(phase) if cls else None
     tiers = policy.get("tiers") or {}
     row = (tiers.get(str(tier)) if tier is not None else None) or {}
-    model = row.get(phase) or (policy.get("default") or {}).get(phase)  # per-phase fallback
+    model = by_class or row.get(phase) or (policy.get("default") or {}).get(phase)  # per-phase fallback
     if not model:
         raise SystemExit(f"dispatch: policy names no model for tier {tier} phase {phase}")
     return str(model)
@@ -1811,6 +1825,8 @@ def main(argv: list[str]) -> int:
     sub.add_parser("drain")
     po = sub.add_parser("policy")
     po.add_argument("--tier", type=int)
+    po.add_argument("--class", dest="cls", metavar="CLASS",
+                    help="task class (mechanical, design, …): its row wins over the tier")
     a = p.parse_args(argv)
     root = Path(_out(Path(a.root).resolve(), "rev-parse", "--show-toplevel") or a.root).resolve()
     if a.command == "start":
@@ -1837,7 +1853,7 @@ def main(argv: list[str]) -> int:
         return drain(root)
     policy = load_policy(root)
     for ph in PHASES:
-        print(f"{ph}: {model_for(policy, a.tier, ph)}")
+        print(f"{ph}: {model_for(policy, a.tier, ph, a.cls)}")
     if policy.get("decision_channel"):
         print(f"decision_channel: {policy['decision_channel']}")
     print(f"command: {policy['command']}  (runner {policy.get('runner', 'detached')}, "

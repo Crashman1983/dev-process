@@ -141,7 +141,8 @@ you cannot see is idle — `elsewhere` in the table says what it carries.
 
 Concurrency follows the lanes and the load, not the wish list. Which model
 runs which phase is the policy's call, not yours: change the policy file,
-not the command line. Judge the policy by numbers — `process_kpis.py models`
+not the command line; per task class too (`docs/process/tower.md`, "Model
+by task class"). Judge the policy by numbers — `process_kpis.py models`
 (telemetry module) shows rounds-to-pass and blocks per tier × phase ×
 model; a cheaper execute model that costs an extra review round every time
 is not cheaper. A worker over twice its tier's usual cost is reported, not
