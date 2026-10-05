@@ -95,11 +95,12 @@ def _needles(rel: str, *, is_dir: bool = False) -> list[str]:
 
 
 def _tokens(rel_dir: str, files: list[str]) -> dict[str, str]:
-    """{whole token: key} that name the directory without its path: the spec
-    directory's name (`Path("specs") / "<feature>"`, `Path("specs", "<feature>")`)
-    and the bare stem of each module in it (`import_module("<stem>")`,
-    `pytest_plugins = ["<stem>"]`, `import <stem>` after a sys.path insert).
-    The examples here are placeholders on purpose: this file is tracked too. Dunder stems (`__init__`) name no module by themselves."""
+    """{token: key} that name the directory without its path: the spec
+    directory's name as a whole word (`Path("specs") / "<feature>"`,
+    `Path("specs", "<feature>")`), and the bare stem of each module in it —
+    only where it is imported (`_imported`): a stem like `main` or `config` is
+    a word in every YAML file. The examples here are placeholders on purpose:
+    this file is tracked too. Dunder stems (`__init__`) name no module."""
     tokens = {rel_dir.rsplit("/", 1)[-1]: rel_dir + "/"}
     for rel in files:
         stem = rel.rsplit("/", 1)[-1][:-3] if rel.endswith(".py") else ""
@@ -110,6 +111,21 @@ def _tokens(rel_dir: str, files: list[str]) -> dict[str, str]:
 
 def _whole(token: str, text: str) -> bool:
     return re.search(rf"(?<![\w-]){re.escape(token)}(?![\w-])", text) is not None
+
+
+def _imported(stem: str, rel: str, text: str) -> bool:
+    """An import statement naming <stem> (`import <stem>`, `from <stem> import …`,
+    `from <its parent dir> import <stem>` — statements, not prose like "from
+    main", and not `from other import main`), `import_module("<stem>")`,
+    `__import__("<stem>")`, or a `pytest_plugins` line quoting it."""
+    s = re.escape(stem)
+    parent = re.escape(rel.split("/")[-2]) if rel.count("/") > 2 else None
+    return (re.search(rf"^\s*import\s+(?:[\w.]+\s*,\s*)*{s}(?![\w-])", text) is not None
+            or re.search(rf"^\s*from\s+{s}(?:\.[\w.]+)?\s+import\b", text) is not None
+            or (parent is not None and re.search(
+                rf"^\s*from\s+(?:[\w.]+\.)?{parent}\s+import\s+\(?[\w\s,]*\b{s}\b", text) is not None)
+            or re.search(rf"\b(?:import_module|__import__)\(\s*['\"]{s}['\"]", text) is not None
+            or ("pytest_plugins" in text and re.search(rf"['\"]{s}['\"]", text) is not None))
 
 
 # a path under the spec root with a wildcard or a variable in a segment: `*`,
@@ -135,10 +151,14 @@ def _glob_matches(segs: list[str], parts: list[str]) -> bool:
 def _glob_target(token: str, files: list[str]) -> str | None:
     """The file or subdirectory of the spec directory that the glob `token`
     reaches — never the spec directory itself or a Markdown artifact: process
-    tools glob `specs/*/plan.md` and the like, and the ritual publishes those."""
+    tools glob `specs/*/plan.md` and the like, and the ritual publishes those.
+    A glob of wildcard segments only covers the spec root wholesale (a CI
+    `paths-ignore`, .gitattributes, CODEOWNERS) and names nothing in it."""
     if not any(c in token for c in "*?[{<$"):
         return None
     segs = _glob_segments(token)
+    if all(re.fullmatch(r"[*?]+", s) for s in segs[1:]):
+        return None  # the spec root wholesale (`paths-ignore`, CODEOWNERS): names nothing in it
     for rel in files:
         parts = rel.split("/")
         for depth in range(3, len(parts) + 1):  # a subdirectory, then the file
@@ -182,8 +202,8 @@ def referenced_files(root: Path, fdir: Path) -> dict[str, str]:
         if matched:
             hits.setdefault(max(matched)[1], f"{path}:{lineno}")
             continue
-        for token, key in tokens.items():
-            if _whole(token, line):
+        for token, key in tokens.items():  # the directory's name, then module stems
+            if _whole(token, line) if key.endswith("/") else _imported(token, key, line):
                 hits.setdefault(key, f"{path}:{lineno}, names {token!r}")
                 break
     for line, path, lineno in _grep(root, "-E", "-e", _GLOB_HIT, *scope):

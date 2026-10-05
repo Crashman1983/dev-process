@@ -413,6 +413,30 @@ def test_prune_refuses_a_reference_by_name_stem_or_glob(render, tmp_path, rel, b
     assert (d / "probes/egress_probe.py").is_file() and not log.exists()
 
 
+@pytest.mark.parametrize("rel,body,refused", [
+    (".github/workflows/ci.yml", "on:\n  push:\n    paths-ignore: [\"specs/**\"]\n", False),
+    (".gitattributes", "specs/* linguist-documentation\nspecs/**/* -diff\n", False),
+    (".github/workflows/ci.yml", "jobs:\n  main:\n    runs-on: ubuntu-latest\n", False),
+    ("tests/test_y.py", "import os\nimport main\n", True),
+])
+def test_wholesale_globs_and_bare_words_are_no_reference(render, tmp_path, rel, body, refused):
+    """Refute round 2: `specs/**` in a workflow and the word `main` in YAML refused every prune."""
+    out, d, log, prune = _probe_repo(render, tmp_path, "def test_x():\n    assert True\n")
+    (d / "contracts").mkdir()
+    (d / "contracts/api.json").write_text("{}\n")
+    (d / "probes/main.py").write_text("OK = True\n")
+    (out / rel).parent.mkdir(parents=True, exist_ok=True)
+    (out / rel).write_text(body)
+    subprocess.run(["git", "add", "-A"], cwd=out, check=True)
+    subprocess.run(["git", "commit", "-qm", "referrer"], cwd=out, check=True)
+    r = prune()
+    if refused:
+        assert r.returncode == 1 and "probes/main.py (referenced at tests/test_y.py:2" in r.stderr, r.stderr
+        assert d.is_dir()
+    else:
+        assert r.returncode == 0 and not d.exists(), r.stdout + r.stderr
+
+
 def test_prune_of_an_unreferenced_spec_dir_works_as_before(render, tmp_path):
     out, d, log, prune = _probe_repo(render, tmp_path, "def test_x():\n    assert True\n")
     r = prune()
