@@ -514,22 +514,30 @@ def test_tier_one_product_code_needs_no_refute(render, tmp_path):
     assert "REFUTE WARNING" not in _bundle(out, "--base", "main").stdout
 
 
-def test_tier_two_product_code_is_refuted_once_before_its_first_round(render, tmp_path):
+def test_tier_two_product_code_is_attacked_inside_the_review(render, tmp_path):
+    """Review depth by risk class: a separate refute run before every Tier 2 review
+    cost a round of its own; the Tier 2 reviewer answers the refuter's brief instead.
+    Tier 3 still warns without a REFUTE line, gate code at any tier (test above)."""
     out = render(tmp_path, {"project_name": "d", "modules": {}})
     _seed_repo(out)
     r = _bundle(out, "--base", "main")
-    assert ("**REFUTE WARNING:** 2026-07-09-widget.md (tier: 2) carries no `REFUTE work=<its id> "
-            "round=<r>: …` line") in r.stdout
-    assert "REFUTE WARNING" in r.stderr
-    plan = out / ".process-work/plans/2026-07-09-widget.md"
-    plan.write_text(plan.read_text() + "\n" + R1_LINE)
-    _git(out, "commit", "-q", "-am", "docs: refute recorded")
+    assert "REFUTE WARNING" not in r.stdout + r.stderr
+    brief = r.stdout.split("## The binding rules", 1)[0]
+    assert "**Tier 2: the review is also the attack.**" in brief
+    order = [brief.index(k) for k in ("OWNER", "FAIL-OPEN", "EDGE CASES", "EVIDENCE")]
+    assert order == sorted(order)
+    assert "docs/process/failure-catalog.md" in brief
     reviewed = _git(out, "rev-parse", "HEAD").stdout.strip()
-    assert "REFUTE WARNING" not in _bundle(out, "--base", "main").stdout
-    # a fix round of product code below Tier 3 asks no new round
+    # a fix round of product code below Tier 3 asks no refute either
     (out / "widget.py").write_text("def widget():\n    return 43\n")
     _git(out, "commit", "-q", "-am", "fix: widget")
     assert "REFUTE WARNING" not in _bundle(out, "--base", "main", "--since", reviewed).stdout
+    # Tier 3 runs a separate refute and carries no Tier 2 brief
+    _plan_commit(out, "# Plan\n\ntier: 3\nissue: #9\n")
+    r = _bundle(out, "--base", "main")
+    assert ("**REFUTE WARNING:** 2026-07-09-widget.md (tier: 3) carries no `REFUTE work=<its id> "
+            "round=<r>: …` line — from Tier 3 on") in r.stdout
+    assert "Tier 2: the review is also the attack" not in r.stdout
 
 
 def test_a_tier_two_plan_without_a_line_is_named_next_to_a_refuted_one(render, tmp_path):
@@ -1172,8 +1180,8 @@ def test_a_design_doc_or_a_waived_plan_asks_no_refute(render, tmp_path):
 def test_a_waiver_quoted_in_a_code_block_waives_nothing(render, tmp_path):
     out = render(tmp_path, {"project_name": "d", "modules": {}})
     _seed_repo(out)
-    _plan_commit(out, "# Plan\n\ntier: 2\nissue: #9\n\n```\nreview-waived: docs only, #12\n```\n")
-    assert "2026-07-09-widget.md (tier: 2) carries no" in _bundle(out, "--base", "main").stdout
+    _plan_commit(out, "# Plan\n\ntier: 3\nissue: #9\n\n```\nreview-waived: docs only, #12\n```\n")
+    assert "2026-07-09-widget.md (tier: 3) carries no" in _bundle(out, "--base", "main").stdout
 
 
 def test_the_tier_warning_needs_no_base(render, tmp_path):
@@ -1181,8 +1189,9 @@ def test_the_tier_warning_needs_no_base(render, tmp_path):
     _seed_repo(out)
     # without a base the branch's plans cannot be listed (D2) — named, the
     # plan's tier still asks for its refute
+    _plan_commit(out, "# Plan\n\ntier: 3\nissue: #9\n")
     r = _bundle(out, "--base", "nosuchbase", "--plan", "widget")
-    assert "**REFUTE WARNING:** 2026-07-09-widget.md (tier: 2) carries no" in r.stdout
+    assert "**REFUTE WARNING:** 2026-07-09-widget.md (tier: 3) carries no" in r.stdout
     assert "REFUTE WARNING" in r.stderr
 
 
@@ -1196,10 +1205,10 @@ def test_gate_code_warns_once_and_a_long_list_is_cut(render, tmp_path):
     out = render(tmp_path / "many", {"project_name": "d", "modules": {}})
     _seed_repo(out)
     for i in range(4):
-        _plan_commit(out, f"# P{i}\n\ntier: 2\nissue: #{20 + i}\n", f"2026-07-1{i}-p{i}.md")
+        _plan_commit(out, f"# P{i}\n\ntier: 3\nissue: #{20 + i}\n", f"2026-07-1{i}-p{i}.md")
     line = [ln for ln in _bundle(out, "--base", "main").stdout.splitlines()
             if ln.startswith("**REFUTE WARNING:**")]
-    assert len(line) == 1 and line[0].count("(tier: 2)") == 3 and " … carries no" in line[0], line
+    assert len(line) == 1 and line[0].count("(tier: 3)") == 3 and " … carries no" in line[0], line
 
 
 # --- R3 (#130): the plans the branch touches, --tier, what the reviewer reads

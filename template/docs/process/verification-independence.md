@@ -47,9 +47,10 @@ check mean anything. Scale it to the tier (`risk-tiers.md`):
   declare the `single-family` limitation in the attestation (below); the
   recorded flag is the honest degradation the process uses for every other
   environment-dependent gate, and the gate accepts it as the explicit
-  alternative to `cross-model`. Add adversarial verification:
-  independent reviewers try to *refute* the change rather than confirm it, and
-  a majority refutation blocks the merge.
+  alternative to `cross-model`. Add adversarial verification (`refute.md`)
+  and, where configured, a second-opinion review: independent reviewers try
+  to *refute* the change rather than confirm it, and a majority refutation
+  blocks the merge.
 
 ## The review bundle — the portable interface to any reviewer
 
@@ -231,10 +232,9 @@ but it must not be *trusted as the gate* — read as assurance, a self-grade in
 the producing context is the worst of both, a model call that returns false
 comfort. Prefer one trustworthy independent check over several correlated ones.
 
-**Refute before review.** From Tier 2 on, and for the gates' own code at any tier, a change is
-attacked by a fresh agent before its first review round — one run below Tier 3, every fix round
-again at Tier 3 and for gate code. `refute.md` holds the scale and the brief; the edge cases that broke
-downstream are in `docs/process/failure-catalog.md`.
+**Refute before review.** How hard a change is attacked before and during its review scales
+with the tier — `refute.md` owns the table and the brief; the edge cases that broke downstream
+are in `docs/process/failure-catalog.md`.
 
 ### Delta after an integration merge
 
