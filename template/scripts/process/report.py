@@ -79,6 +79,21 @@ def default_worker(root: Path) -> str:
 UNMEASURED = "not measured"
 
 
+def efforts() -> tuple[str, ...]:
+    """The effort levels — dispatch owns them (imported late: dispatch imports this module)."""
+    from dispatch import EFFORTS
+    return EFFORTS
+
+
+def _env_effort() -> str:
+    """PROCESS_EFFORT when it names a level; another value is noted and left out."""
+    e = os.environ.get("PROCESS_EFFORT", "").strip()
+    if e and e not in efforts():
+        print(f"report: PROCESS_EFFORT={e!r} is not one of {', '.join(efforts())} — not recorded", file=sys.stderr)
+        return ""
+    return e
+
+
 def write_report(root: Path, state: str, *, issue: int | None, note: str, worker: str | None,
                  model: str | None = None, effort: str | None = None) -> dict:
     # never empty: an empty model was indistinguishable from a lost field downstream
@@ -96,7 +111,7 @@ def write_report(root: Path, state: str, *, issue: int | None, note: str, worker
         "state": state,
         "model": model,
         # the cell's reasoning effort when dispatch set one; absent: the harness default
-        **({"effort": e} if (e := (effort or os.environ.get("PROCESS_EFFORT") or "").strip()) else {}),
+        **({"effort": e} if (e := effort or _env_effort()) else {}),
         "phase": os.environ.get("PROCESS_PHASE") or "",
         "note": note.strip()[:1000],
         "cwd": str(root),
@@ -204,6 +219,9 @@ def main(argv: list[str]) -> int:
                    help="publish this host's reports to origin (refs/process/reports/<host>)")
     a = p.parse_args(argv)
     root = Path(a.root).resolve()
+    if a.effort is not None and a.effort not in efforts():
+        print(f"report: --effort {a.effort!r} is not one of {', '.join(efforts())}", file=sys.stderr)
+        return 2
     note = a.note
     if a.state == "pushed":
         why = pushed_refusal(root)
