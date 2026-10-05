@@ -40,3 +40,12 @@ defaults, not dogma: match the surrounding code when it already sets a conventio
 - Things that change together live together; unrelated concerns live apart.
 - Consistency inside a file beats personal preference — a reader should not have to
   re-learn conventions per screen.
+
+## State the reader can trust
+
+- Decide on the current projected state: project the events first, then decide —
+  never on a raw event or a cached field that may be stale.
+- Append and replay share one function. Two code paths that build the same state
+  drift apart, and the replayed state stops matching the live one.
+- Make illegal states unrepresentable — an enum, a tagged union, a type per state —
+  instead of documenting the limit in a comment the next caller does not read.

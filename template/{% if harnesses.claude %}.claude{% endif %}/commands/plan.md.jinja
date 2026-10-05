@@ -57,7 +57,11 @@ pinned by <test>`). Example — moving the "marker in a plan blocks" check
 from gate A to gate B: the task lists gate B's check and its test, gate A's
 removed check and its test, the doc that names gate A as the owner, and
 the gate registry entry, plus `duty: marker in plan blocks → gate B, pinned
-by test_marker_in_plan_is_hard`. `/execute` compares the final diff against
+by test_marker_in_plan_is_hard`. The same holds for a change to how a
+fact is computed (an issue number, a target, a tier): grep every reader of
+that fact, name its one owner, and give each reader's task the move to ask
+that owner — a second reader left behind judges the next input differently
+(`docs/process/failure-catalog.md`). `/execute` compares the final diff against
 this inventory before `pushed`; it does not build a second one.
 
 When the plan is committed, `uv run scripts/process/report.py planned --issue N` (`/report`) — one line to the tower. An open question for the owner goes into the plan as `DECISION NEEDED <date> <you>: <question> — options: …; recommendation: …` plus `report.py blocked`; the steward relays it and writes the answer back as a `DECISION` line.

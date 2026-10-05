@@ -19,7 +19,8 @@ A marker is a first-class part of the draft: it makes the open question visible
 instead of burying a silent assumption in prose. Brainstorm ends only when every
 marker is **resolved** — answered by the user, or converted into a written,
 named assumption in the design (or into a spike, `workflow.md`, Spike, when the
-answer needs investigation). The `clarification` gate (core) enforces the floor
+answer needs investigation). An assumption about an external tool's behaviour
+names the probe that confirmed it. The `clarification` gate (core) enforces the floor
 mechanically: an unresolved marker in an **active plan** fails CI — a plan is
 built from an *approved* design, so open questions must not survive into it.
 Markers in an in-progress design are legitimate and only reported, never
@@ -62,10 +63,22 @@ significant, hard-to-reverse decision becomes a decision record instead
 The [NEEDS CLARIFICATION: …] markers still unresolved, gathered here so the
 approval conversation sees them in one place. Empty at approval.
 
-## Threat question (Tier 3)
+## Threat and failure question (Tier 3; Tier 2 for gate code, data loss, authorization, migration, concurrency)
 What could an attacker do with this change? Assets touched, new inputs, trust
 boundaries crossed (`workflow.md`, Brainstorm; `review-checklist.md`,
-Security). The failure classes to walk: `docs/process/failure-catalog.md`.
+Security). How can it lose data, be bypassed, fail open — what does a
+missing or unresolved input read as? Walk the classes of
+`docs/process/failure-catalog.md` the change touches; name the ones that apply.
+
+## Transitions (state machines and event-driven work only)
+A table instead of prose invariants: state × event → result, including the
+forbidden transitions and when a derived assignment expires (its basis gone
+or changed). One test per equivalence class of rows, a negative test per
+forbidden transition. Other work omits this section.
+
+| State | Event | Result |
+|---|---|---|
+| … | … | … / forbidden |
 ```
 
 ## Why a template and not a gate

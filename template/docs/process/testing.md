@@ -67,6 +67,9 @@ path real callers take, at the cheapest level that reaches it. Two patterns wort
 - **Property-based testing** where the input space is large (parsers,
   serializers, calculations): state an invariant and let the framework
   search for counterexamples (Hypothesis, fast-check, jqwik, proptest …).
+  Replay-capable or event-sourced logic gets a property or model test over
+  random event sequences: append and replay give the same state, one refresh
+  equals two, and the allowed reorderings do not change the result.
 - **Regression pins**: every bug fixed — and every finding whose fix changes
   behavior — gets a test that fails on the old behavior; the suite is the
   ratchet that keeps a caught defect caught.
