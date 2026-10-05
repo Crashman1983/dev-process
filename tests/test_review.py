@@ -1149,3 +1149,28 @@ def test_a_longer_name_does_not_name_the_path(render, tmp_path):
     for text, rel in (("fix Dockerfile.", "Dockerfile"), ("a.py:12 is wrong", "a.py"),
                       ("(src/a.py)", "src/a.py"), ("`a.py`", "a.py")):
         assert gate._named(text, rel), (text, rel)
+
+
+def test_a_missing_integration_base_is_a_presence_finding(render, tmp_path):
+    """#161: no base is hard on the merge push and a note on a branch push, as
+    verification-independence.md promises for every presence finding."""
+    import os
+    out = render(tmp_path, {"project_name": "demo"})
+    plans = out / ".process-work/plans"
+    plans.mkdir(parents=True, exist_ok=True)
+    (plans / "2026-10-05-work.md").write_text("# Plan\n\ntier: 2\n\n## Decisions\n",
+                                              encoding="utf-8")
+    _git(out, "init", "-q", "-b", "main")
+    _git(out, "config", "user.email", "t@example.com")
+    _git(out, "config", "user.name", "Test")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "base")  # HEAD is main: no ref bounds the range
+    env = {k: v for k, v in os.environ.items()
+           if k not in ("PROCESS_PUSH_TARGETS", "PRE_COMMIT_REMOTE_BRANCH")}
+    branch = _run(out, env)
+    failed = branch.stdout.split("review: FAILED:")[-1] if "FAILED" in branch.stdout else ""
+    assert "no proper integration base" in branch.stdout, branch.stdout
+    assert "no proper integration base" not in failed, branch.stdout
+    merge = _run(out, {**env, "PROCESS_PUSH_TARGETS": "refs/heads/main"})
+    assert merge.returncode == 1
+    assert "no proper integration base" in merge.stdout.split("review: FAILED:")[-1], merge.stdout
