@@ -292,6 +292,7 @@ def sessions(root: Path) -> list[dict]:
         out.append({"branch": rec["branch"], "phase": rec.get("phase"), "issue": rec.get("issue"),
                     "model": rec.get("model"), "effort": rec.get("effort"),
                     "model_drift": _dispatch.model_drift(root, rec, pattern) if pattern else [],
+                    "model_alias": bool(pattern) and _dispatch.is_alias(str(rec.get("model") or "")),
                     "defect": rec.get("defect"), "alive": rec["alive"], "state": rec["state"], "where": where,
                     "minutes_since_start": int((time.time() - int(rec.get("started") or time.time())) // 60),
                     "last_output": last[-200:], "minutes_since_output": since,
@@ -504,7 +505,8 @@ def findings(table: dict, stale_minutes: int) -> list[dict]:
                         "what": f"{s['branch']} ({s.get('phase')}): session {s['state']}, work not done",
                         "because": "the worker cannot report or progress — inspect its work and resume or reassign it"})
         if s.get("model_drift"):
-            out.append({"kind": "model-drift", "severity": "high",
+            # an unversioned alias dispatched: the harness resolved the family itself — worth a look, no alarm
+            out.append({"kind": "model-drift", "severity": "low" if s.get("model_alias") else "high",
                         "what": f"{s['branch']} ({s.get('phase')}): dispatched {s.get('model')}, its transcript "
                                 f"shows {', '.join(s['model_drift'])}",
                         "because": "something overrode the policy (a command file's `model:` frontmatter, a "
