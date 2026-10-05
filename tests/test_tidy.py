@@ -423,3 +423,61 @@ def test_removal_rechecks_branch_containment_in_supplied_base(render, tmp_path):
     _git(wts['clean'], 'commit', '-qm', 'new work after clearance')
     assert 'not contained' in d.remove_worktree(out, wts['clean'], 'main')
     assert (wts['clean'] / 'new-work.txt').read_text() == 'new branch work\n'
+
+
+def _review_landscape(render, tmp_path):
+    out = render(tmp_path / "rv", {"project_name": "d", "modules": {}})
+    _git(out, "init", "-q", "-b", "main")
+    _git(out, "config", "user.email", "t@t")
+    _git(out, "config", "user.name", "t")
+    old = (dt.date.today() - dt.timedelta(days=60)).isoformat()
+    newer = (dt.date.today() - dt.timedelta(days=50)).isoformat()
+    today = dt.date.today().isoformat()
+    rv = out / ".process-work/reviews"
+    (rv / "w1").mkdir(parents=True)
+    (rv / "w1/after-login-desktop-light.png").write_bytes(b"\x89PNG" + b"0" * 2048)
+    for n in (1, 2, 3, 4, 5):
+        (rv / f"{old}-w{n}-round-1.md").write_text(f"# Review\nwork: #{n}\n\nfindings\n")
+        (rv / f"{newer}-w{n}-round-2.md").write_text(f"# Review\nwork: #{n}\n\nfindings\n")
+    (rv / f"{old}-w5-round-1.md").write_text("# Review\nwork: #5\ncampaign: sweep\n\nfindings\n")
+    (rv / f"{today}-w6-round-1.md").write_text("# Review\nwork: #6\n\nfindings\n")
+    (rv / f"{today}-w6-round-2.md").write_text("# Review\nwork: #6\n\nfindings\n")
+    line = "REVIEW work=#{n} tier=2 reviewer=fresh model=cross independence=bundle verdict={v} round=2"
+    (out / ".process-work/journal").mkdir(parents=True, exist_ok=True)
+    (out / ".process-work/journal/reviews.md").write_text("\n".join(
+        line.format(n=n, v="block" if n == 3 else "pass") for n in (1, 2, 3, 4, 5, 6)) + "\n")
+    (out / ".process-work/plans/archive").mkdir(parents=True, exist_ok=True)
+    (out / ".process-work/plans" / f"{today}-two.md").write_text("# Plan\n\ntier: 2\nissue: #2\n")
+    (out / ".process-work/plans/archive" / f"{today}-four.md").write_text(
+        f"# Plan\n\ntier: 2\nissue: #4\nsee .process-work/reviews/{old}-w4-round-1.md\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "base")
+    return out, old
+
+
+def test_old_review_reports_of_closed_work_are_listed_with_sizes(render, tmp_path):
+    """Reports are tracked and read on every gate run; the dry run names only
+    the residue — a closed work's superseded report — and shows the size split."""
+    out, old = _review_landscape(render, tmp_path)
+    r = _run(out, "--days", "30")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "review reports of closed work older than 30 days: 1 (" in r.stdout
+    assert f"{old}-w1-round-1.md" in r.stdout
+    assert "markdown," in r.stdout and "other (evidence, never removed)" in r.stdout
+    assert (out / f".process-work/reviews/{old}-w1-round-1.md").is_file()
+
+
+def test_apply_removes_only_superseded_reports_of_closed_work(render, tmp_path):
+    """Kept: the newest report per work (the next delta reads it), open work
+    (active plan or a block), a report a record names, campaign reports,
+    evidence directories, and anything inside the window."""
+    out, old = _review_landscape(render, tmp_path)
+    r = _run(out, "--apply")
+    assert r.returncode == 0, r.stdout + r.stderr
+    rv = out / ".process-work/reviews"
+    left = {p.name for p in rv.glob("*.md")}
+    assert f"{old}-w1-round-1.md" not in left
+    assert len(left) == 11  # 12 reports, one removed
+    assert (rv / "w1/after-login-desktop-light.png").is_file()
+    staged = _git(out, "diff", "--cached", "--name-only").stdout.split()
+    assert staged == [f".process-work/reviews/{old}-w1-round-1.md"]
