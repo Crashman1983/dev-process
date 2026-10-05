@@ -265,11 +265,14 @@ def old_review_reports(root: Path, days: int) -> list[str]:
     Fail-closed: a report goes only when ALL hold — its header names exactly
     one work (`work:`, else `review:`; `check_review.report_header` — a file
     name never decides a deletion); that work's latest journal REVIEW
-    verdict is pass; no active plan or `specs/*/plan.md` references it
-    (`check_review.plan_report_keys` and the plans' REVIEW lines; issues
-    compared by number, whatever repository spelling, slugs exactly); it is
-    not that work's newest report; it is older than `days`; no `campaign:`
-    header; and no plan, archived plan or journal shard names its file.
+    verdict is pass; no active plan, `specs/*/plan.md` or spec.md references
+    it (`check_review.plan_report_keys`, the plans' REVIEW lines,
+    `spec_dir_issue`, or a plain `#N` / `issues/N` / whole-slug mention —
+    issue numbers repository-insensitive here only); no open key reaches its
+    file name (`check_review.report_of`'s name rule); it is not that work's
+    newest report (works grouped as `report_of` compares them); it is older
+    than `days`; no `campaign:` header; and no plan, archived plan or
+    journal shard names its file.
     Evidence directories (`reviews/<slug>/`) are never candidates.
     `unremovable` then keeps what git could not give back."""
     rdir = root / _review_mod().REVIEW_REPORTS
@@ -290,20 +293,46 @@ def old_review_reports(root: Path, days: int) -> list[str]:
     archive = cr.record_texts(root, ("plan-archive",)) or []
 
     def key(ref: str):
-        """A work's identity: an issue by its NUMBER (repository spelling
-        ignored — failing closed), else the slug exactly."""
-        k = cr.issue_key(ref)
-        return ("#", k[1]) if k is not None else ("slug", cr.DATE_PREFIX.sub("", ref))
+        """A work's identity for grouping and verdicts: an issue as
+        `report_of` compares it (bare `#N` is this repository's, `other/repo#N`
+        another's), else the slug exactly."""
+        k = cr.issue_key(cr.ref_token(ref))
+        return ("#", k) if k is not None else ("slug", cr.DATE_PREFIX.sub("", cr.ref_token(ref)))
 
     records = [{**fields, "work": key(fields["work"])}
                for _rel, text in journal for _n, fields in cr.parse_review_lines(text)[0]]
     standing = cr.latest_verdicts(records)
-    open_keys: set = set()
+    # what keeps a work open — repository-insensitive and by plain text
+    # mention: wrong only toward keeping
+    open_text = "\n".join(text for _rel, text in plans)
+    open_slugs: set[str] = set()
+    open_numbers: set[int] = set()
     for rel, text in plans:
-        slugs, issues = cr.plan_report_keys(rel, text, root)
-        open_keys.update(("slug", s) for s in slugs)
-        open_keys.update(("#", n) for _repo, n in issues)
-        open_keys.update(key(fields["work"]) for _n, fields in cr.parse_review_lines(text)[0])
+        slugs, issues = cr.plan_report_keys(rel, text)
+        open_slugs.update(slugs)
+        open_numbers.update(n for _repo, n in issues)
+        for _n, fields in cr.parse_review_lines(text)[0]:
+            kind, value = key(fields["work"])
+            if kind == "#":
+                open_numbers.add(value[1])
+            else:
+                open_slugs.add(value)
+    sdir = root / cr.SPECS_DIR
+    for fdir in (sorted(p for p in sdir.iterdir() if p.is_dir()) if sdir.is_dir() else []):
+        spec = fdir / "spec.md"
+        if spec.is_file():
+            open_text += "\n" + spec.read_text(encoding="utf-8", errors="replace")
+        if (n := cr.spec_dir_issue(fdir)) is not None:
+            open_numbers.add(n)
+    open_numbers.update(int(n) for n in re.findall(r"(?:#|/issues/)(\d+)(?!\d)", open_text))
+
+    def is_open(work) -> bool:
+        kind, value = work
+        if kind == "#":
+            return value[1] in open_numbers
+        return value in open_slugs or re.search(
+            rf"(?<![\w-]){re.escape(value)}(?![\w-])", open_text) is not None
+
     by_work: dict = {}
     for rel, text in reports:  # sorted by name: the last one is the newest
         head = cr.report_header(text)
@@ -312,14 +341,17 @@ def old_review_reports(root: Path, days: int) -> list[str]:
             continue  # headerless, several works, a campaign: never removed
         by_work.setdefault(key(works.pop()), []).append(rel)
     named = "\n".join(text for _rel, text in journal + plans + archive)
+    by_name = (tuple(sorted(open_slugs)), tuple((None, n) for n in sorted(open_numbers)))
     out: list[str] = []
     for work, rels in by_work.items():
         verdict = standing.get(work)
-        if verdict is None or verdict["verdict"] != "pass" or work in open_keys:
+        if verdict is None or verdict["verdict"] != "pass" or is_open(work):
             continue
         for rel in rels[:-1]:  # the newest stays: the next delta round reads it
             if rel.rsplit("/", 1)[-1] in named:
                 continue
+            if cr.report_of([(rel, "")], *by_name) is not None:
+                continue  # its file name reaches it for open work (report_of's name rule)
             d = _report_date(root, rel)
             if d is not None and d < cutoff:
                 out.append(rel)

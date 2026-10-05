@@ -1560,9 +1560,10 @@ def test_tier2_delta_keeps_its_behaviour_and_lists_its_files(render, tmp_path):
     assert _touches(t) == "other.py" and "REFUTE WARNING" not in t
 
 
-def test_a_spec_plans_report_keys_include_the_spec_md_issue(render, tmp_path):
-    """A Spec Kit dir declares its issue in spec.md first; the prior-report
-    lookup must reach a `work: #9` report through it (check_review.plan_report_keys)."""
+def test_plan_report_keys_read_decorated_issue_tokens_but_not_spec_md(render, tmp_path):
+    """`issue: **#9**,` and `[#9](url)` name #9 (one normaliser with report
+    headers); spec.md's issue is NOT a bundle key — adding it changed which
+    prior report the Tier-3 anchor picks (refute round 3)."""
     out = render(tmp_path, {"project_name": "d", "modules": {"speckit": True}})
     d = out / "specs/001-x"
     d.mkdir(parents=True)
@@ -1575,6 +1576,10 @@ def test_a_spec_plans_report_keys_include_the_spec_md_issue(render, tmp_path):
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
         slugs, issues = mod._report_keys(out, None, {d / "plan.md": (d / "plan.md").read_text()})
+        assert slugs == ("001-x",) and issues == ()
+        for token in ("**#9**,", "[#9](https://x/9)", "#9.", "<#9>"):
+            _s, got = mod._review_gate.plan_report_keys(".process-work/plans/p.md", f"issue: {token}\n")
+            assert got == ((None, 9),), token
     finally:
         sys.path.remove(str(out / "scripts/process"))
-    assert "001-x" in slugs and (None, 9) in issues
+

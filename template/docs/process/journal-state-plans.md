@@ -281,8 +281,9 @@ waivers point at) go only by one rule, owned by `tidy.py`
 (`old_review_reports`), failing closed: a top-level report whose header
 names exactly one work (`work:`, else `review:` — a file name never
 decides), of closed work (latest journal `REVIEW` verdict pass, and no
-active plan or `specs/*/plan.md` references it — issues compared by number,
-spec.md's issue included), not that work's newest report, older than the
+active plan, `specs/*/plan.md` or spec.md references or mentions it —
+issues by number, whatever repository), whose file name no open work
+reaches, not that work's newest report, older than the
 window, without a `campaign:` header, named by no plan, archived plan or
 journal shard, and tracked with its working bytes equal to HEAD's blob
 (`git rm`, never a plain delete). A headerless report is kept. Evidence directories
