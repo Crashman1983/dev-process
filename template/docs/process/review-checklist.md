@@ -242,4 +242,6 @@ the domain's invariants, its layering rules, where its stack guides live. The
 review command and the review bundle carry that file right after this list, so
 a dispatched reviewer sees it too. It sharpens, it never *removes* a category to
 make a review pass — and the project never has to own this file or the review
-command.
+command. A line `transitions-vocabulary: saga, ledger` there adds the
+project's own state-machine words to those the bundle looks for when it notes
+a likely missing transitions table.
