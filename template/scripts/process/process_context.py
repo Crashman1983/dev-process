@@ -9,11 +9,22 @@ counts, and the untriaged inbox size. The token saving is the point: /prime
 and /execute call this instead of exploring, which is also what makes small
 models robust in those phases (no orientation guesswork).
 
+Scoped by default: only the current work's plans and spec dirs carry full
+detail (`active_plans`, `spec_features`); every other one is a one-line entry
+in `other_plans` / `other_specs`, so nothing is dropped and a repo with forty
+plans does not print forty ledgers. The current work is `--issue N`, else the
+branch: a spec dir named like the branch leaf (speckit.md, Branching), else
+the issue the branch name leads with (check_review.branch_issue). `scope`
+says which. `--all` prints every item in full (the unscoped shape).
+
+    process_context.py [root] [--issue N | --all] [--cost]
+
 Read-only, never a gate, pure stdlib. Borrowed pattern: Spec Kit's
 check-prerequisites --json (deterministic context bootstrap).
 """
 from __future__ import annotations
 
+import argparse
 import json
 import re
 import subprocess
@@ -22,7 +33,7 @@ from pathlib import Path
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from check_review import plan_tier  # noqa: E402
+from check_review import branch_issue, declared_issue_numbers, plan_tier, spec_dir_issue  # noqa: E402
 
 PLANS = ".process-work/plans"
 STATE = ".process-work/state"
@@ -71,9 +82,38 @@ def _plan_info(p: Path) -> dict:
             "decisions_section": bool(DECISIONS_HEADING.search(text))}
 
 
-def main() -> int:
-    positional = [a for a in sys.argv[1:] if not a.startswith("--")]
-    root = Path(positional[0] if positional else ".").resolve()
+def _args(argv: list[str]) -> argparse.Namespace:
+    ap = argparse.ArgumentParser(prog="process_context.py", description=(
+        "Session orientation as one JSON object, scoped to the current work "
+        "(--issue N, else the branch); every other plan and spec dir is a one-line index entry."))
+    ap.add_argument("root", nargs="?", default=".", help="repository root (default: .)")
+    scope = ap.add_mutually_exclusive_group()
+    scope.add_argument("--issue", type=int, metavar="N", help="scope to issue N (beats the branch)")
+    scope.add_argument("--all", action="store_true", help="every plan and spec dir in full detail")
+    ap.add_argument("--cost", action="store_true",
+                    help="add context_cost: approx tokens a session reads (always over everything)")
+    return ap.parse_args(argv)
+
+
+def _scope(issue: int | None, branch: str | None,
+           spec_issues: dict[str, int | None]) -> tuple[dict, str | None]:
+    """(scope, the spec dir named like the branch leaf). A spec branch is
+    named after its dir (`003-chat`), so that match comes before the
+    leading-number read, which would take `003` for issue 3."""
+    if issue is not None:
+        return {"issue": issue, "source": "--issue"}, None
+    leaf = (branch or "").rsplit("/", 1)[-1]
+    if leaf in spec_issues:
+        return {"issue": spec_issues[leaf], "source": "branch"}, leaf
+    number = branch_issue(branch) if branch else None
+    if number is not None:
+        return {"issue": int(number), "source": "branch"}, None
+    return {"issue": None, "source": "none"}, None
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _args(sys.argv[1:] if argv is None else argv)
+    root = Path(args.root).resolve()
     branch = _branch(root)
     out: dict = {"branch": branch}
 
@@ -88,14 +128,20 @@ def main() -> int:
     latest = (shard_files or flat)
     out["latest_journal"] = str(latest[-1].relative_to(root)) if latest else None
 
+    # collect everything first: --cost measures the whole set, the scope only
+    # decides what is printed in full
     pdir = root / PLANS
-    out["active_plans"] = [
-        {**_plan_info(p), "file": str(p.relative_to(root))}
-        for p in sorted(pdir.glob("*.md"))
-        if not p.name.startswith("design-")
-    ] if pdir.is_dir() else []
+    plans = []  # (detail, declared issue numbers, open checkboxes)
+    for p in (sorted(pdir.glob("*.md")) if pdir.is_dir() else []):
+        if p.name.startswith("design-"):
+            continue
+        text = _read(p)
+        plans.append(({**_plan_info(p), "file": str(p.relative_to(root))},
+                      declared_issue_numbers(text), len(UNCHECKED.findall(text))))
+    out["active_plans"] = [d for d, _nums, _open in plans]
 
     features = []
+    spec_issues: dict[str, int | None] = {}
     sdir = root / SPECS
     if sdir.is_dir():
         for fdir in sorted(d for d in sdir.iterdir() if d.is_dir()):
@@ -112,6 +158,7 @@ def main() -> int:
                     len(MARKER.findall(_read(f))) for f in fdir.glob("*.md")),
             }
             features.append(info)
+            spec_issues[fdir.name] = spec_dir_issue(fdir)
     out["spec_features"] = features
 
     inbox = root / INBOX
@@ -119,8 +166,28 @@ def main() -> int:
         1 for line in _read(inbox).splitlines() if line.strip().startswith(("-", "*"))
     ) if inbox.is_file() else 0
 
-    if "--cost" in sys.argv:
+    if args.cost:
         out["context_cost"] = context_cost(root, out)
+
+    if not args.all:
+        out["scope"], spec_dir = _scope(args.issue, branch, spec_issues)
+        n = out["scope"]["issue"]
+        mine = [n is not None and n in nums for _d, nums, _open in plans]
+        out["active_plans"] = [d for (d, _nums, _open), m in zip(plans, mine) if m]
+        out["other_plans"] = [{"file": d["file"], "issue": nums[0] if nums else None,
+                               "tier": d["tier"], "tasks_open": opened}
+                              for (d, nums, opened), m in zip(plans, mine) if not m]
+        names = [Path(f["dir"]).name for f in features]
+        mine = [name == spec_dir or (n is not None and spec_issues[name] == n) for name in names]
+        out["spec_features"] = [f for f, m in zip(features, mine) if m]
+        # a finished spec dir nobody pruned stays visible, marked
+        out["other_specs"] = [{"dir": f["dir"], "issue": spec_issues[name], "tier": f.get("tier"),
+                               "tasks_open": f["tasks_open"],
+                               **({"done": True} if f["tasks_done"] and not f["tasks_open"] else {})}
+                              for f, name, m in zip(features, names, mine) if not m]
+        if n is None and spec_dir is None:
+            out["hint"] = ("no current work in scope (main or an issue-less branch) — "
+                           "pass --issue N for one item's detail, --all for every item")
 
     print(json.dumps(out, indent=2))
     return 0
@@ -143,29 +210,37 @@ def _tokens(paths: list[Path]) -> dict:
 
 
 def context_cost(root: Path, ctx: dict) -> dict:
-    groups: dict[str, list[Path]] = {}
-    groups["anchor"] = [root / a for a in ANCHORS]
-    groups["commands"] = [p for d in COMMAND_DIRS
-                          for p in sorted((root / d).glob("*.md"))
-                          if (root / d).is_dir()]
-    groups["process_docs"] = sorted((root / "docs/process").rglob("*.md")) \
-        if (root / "docs/process").is_dir() else []
-    groups["product_frame"] = [root / "PRODUCT.md"]
-    groups["active_plans"] = [root / p["file"] for p in ctx.get("active_plans", [])]
-    groups["state_and_latest_journal"] = [root / f for f in
-                                          (ctx.get("state_file"), ctx.get("latest_journal"))
-                                          if f]
+    """Token sizes over the UNSCOPED context (every plan and spec dir), split
+    into what every session loads (`mandatory`) and what it reads on demand
+    (`available`)."""
+    pdocs = root / "docs/process"
+    mandatory: dict[str, list[Path]] = {
+        "anchor": [root / a for a in ANCHORS],
+        "kernel": [pdocs / "kernel.md"],
+        "mandatory_rules": [pdocs / "mandatory-rules.md"],
+        "commands": [p for d in COMMAND_DIRS for p in sorted((root / d).glob("*.md"))
+                     if (root / d).is_dir()]}
     jdir = root / ".process-work/journal"
-    groups["all_journal_shards"] = sorted(jdir.rglob("*.md")) if jdir.is_dir() else []
-    groups["spec_dirs"] = [p for f in ctx.get("spec_features", [])
-                           for p in sorted((root / f["dir"]).glob("*.md"))]
-    report = {name: _tokens(paths) for name, paths in groups.items()}
-    # what /prime actually loads: anchor + commands + the branch's own working
+    available: dict[str, list[Path]] = {
+        "process_docs": [p for p in sorted(pdocs.rglob("*.md"))
+                         if p not in (*mandatory["kernel"], *mandatory["mandatory_rules"])]
+        if pdocs.is_dir() else [],
+        "product_frame": [root / "PRODUCT.md"],
+        "active_plans": [root / p["file"] for p in ctx.get("active_plans", [])],
+        "state_and_latest_journal": [root / f for f in
+                                     (ctx.get("state_file"), ctx.get("latest_journal")) if f],
+        "all_journal_shards": sorted(jdir.rglob("*.md")) if jdir.is_dir() else [],
+        "spec_dirs": [p for f in ctx.get("spec_features", [])
+                      for p in sorted((root / f["dir"]).glob("*.md"))]}
+    report: dict = {"mandatory": {k: _tokens(v) for k, v in mandatory.items()},
+                    "available": {k: _tokens(v) for k, v in available.items()}}
+    # what /prime actually loads: the mandatory set + the branch's own working
     # memory — the process docs are read on demand, the journal never whole
-    session = sum(report[k]["tokens"] for k in
-                  ("anchor", "commands", "product_frame", "active_plans",
-                   "state_and_latest_journal"))
+    session = sum(g["tokens"] for g in report["mandatory"].values()) + sum(
+        report["available"][k]["tokens"] for k in
+        ("product_frame", "active_plans", "state_and_latest_journal"))
     report["session_start_estimate_tokens"] = session
+    groups = {**mandatory, **available}
     everything = sorted({p for ps in groups.values() for p in ps if p.is_file()},
                         key=lambda p: -len(_read(p)))
     report["largest"] = [{"file": str(p.relative_to(root)),
