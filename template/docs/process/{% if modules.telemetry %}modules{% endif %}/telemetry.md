@@ -66,7 +66,7 @@ its documented threshold instead of a confidence tag.
 
 Lean pass: the cockpit carries exactly the three KPIs the process goals name
 — convergence (error rate at the gate), cost, and CFR (error rate after
-merge) — plus the advisory readers `clusters`, `models` and `rounds`.
+merge) — plus the advisory readers `clusters`, `models` and `rounds`. `models` and `rounds` file a work item under the highest tier any of its review rounds declared.
 
 | family | measures | action (threshold → act) |
 |---|---|---|

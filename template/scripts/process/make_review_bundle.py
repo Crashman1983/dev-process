@@ -738,6 +738,11 @@ def build(root: Path, base: str | None, plan_filter: str | None = None,
         by_tier = [label for label in missing if (tiers.get(label) or 0) >= REFUTE_RUN_TIER]
         if by_tier:
             add(_tier_warning(by_tier, tiers))
+        elif missing and any((tiers.get(label) or 0) == 2 for label in missing):
+            # refute v2.47: Tier 2 needs no refute run — unless the diff is gate
+            # code, which nobody can tell without a base; say so instead of nothing
+            add("*(REFUTE check unavailable: no base ref, so gate code cannot be detected — "
+                "if this Tier 2 change touches gate code, it needs a `REFUTE` line)*\n")
     if resolved is not None or since:
         # a delta re-review: the fix round's own gate code, refuted anew
         gate_files = _gate_files(root, since or resolved)
