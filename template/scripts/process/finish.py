@@ -1,8 +1,4 @@
 #!/usr/bin/env python3
-# /// script
-# requires-python = ">=3.11"
-# dependencies = ["PyYAML>=6"]
-# ///
 """finish: the merge-tail checker — is this branch actually done?
 
 The failures this exists for are all tail failures observed in production:

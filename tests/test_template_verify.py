@@ -292,6 +292,7 @@ def test_missing_yaml_fails_closed_before_rendering(update, monkeypatch):
     proof = verifier.verify(root, base)
     assert proof['update'] and proof['errors'] and not proof['identical']
     assert 'PyYAML required' in proof['errors'][0]
+    assert 'scripts/process/template_verify.py' in proof['errors'][0]  # names the tool to run
 
 
 def test_other_copier_metadata_is_project_delta(update):
@@ -697,11 +698,13 @@ def test_without_copier_or_uvx_the_render_names_copier(update, monkeypatch):
     assert not proof['identical']
 
 
-@pytest.mark.parametrize('script', ['check_review.py', 'finish.py', 'template_verify.py'])
-def test_scripts_that_verify_templates_declare_pyyaml(script):
-    """They reach template_verify, which reads answers with PyYAML: `uv run` must resolve it."""
-    head = (SCRIPTS / script).read_text(encoding='utf-8').split('"""', 1)[0]
-    assert '# /// script' in head and 'PyYAML>=6' in head, head
+def test_only_template_verify_declares_pyyaml_the_gates_import_it_lazily():
+    """The gate and finish reach PyYAML only through template_verify's lazy import,
+    whose error names the tool; a header on them would make every gate run `uv run`."""
+    for script, declared in (('template_verify.py', True), ('check_review.py', False),
+                             ('finish.py', False)):
+        head = (SCRIPTS / script).read_text(encoding='utf-8').split('"""', 1)[0]
+        assert ('# /// script' in head) is declared, script
 
 
 @pytest.mark.parametrize('src', ['-a@h:p', 'gh:-x/y', 'git@host:-x', 'https://-x/y', 'ext::sh -c x',
