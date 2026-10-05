@@ -27,7 +27,7 @@ from pathlib import Path, PureWindowsPath
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from process_git import fork_point, git_environment  # noqa: E402
-from template_update import ANSWERS, OWNED_FILE, answers, is_owned, owned_patterns, render as template_render  # noqa: E402
+from template_update import ANSWERS, OWNED_FILE, answers, is_owned, owned_patterns, render as template_render, template_source  # noqa: E402
 
 
 def render(src: str, ref: str, data: dict[str, str], dst: Path) -> bool:
@@ -47,6 +47,7 @@ def git(root: Path, *args: str) -> bytes:
 
 
 def _source(src: str) -> str:
+    template_source(src)  # never an option to git: refused before any clone
     if src.startswith('gh:'):
         return 'https://github.com/' + src[3:].removesuffix('.git') + '.git'
     return src
@@ -69,7 +70,7 @@ def _clone(src: str, ref: str) -> Path:
         dst = Path(_TEMP[0].name) / str(len(_CLONES))
         for extra in (['--filter=blob:none'], []):  # a server may refuse the filter
             shutil.rmtree(dst, ignore_errors=True)
-            r = subprocess.run(['git', 'clone', '--quiet', '--bare', *extra, _source(src),
+            r = subprocess.run(['git', 'clone', '--quiet', '--bare', *extra, '--', _source(src),
                                 str(dst)], capture_output=True, timeout=120,
                                env=git_environment())
             if not r.returncode:
@@ -205,6 +206,7 @@ def _verify(root: Path, base: str, tip: str, *, worktree: bool = False,
             result['update'] = True
             if not src or not old_ref or not new_ref or src != new_src:
                 raise ValueError('template source changed or release metadata is missing')
+            template_source(src)  # before any clone or render reads it
             old_sha, new_sha = _release(src, old_ref), _release(src, new_ref)
             result.update(old_release=old_sha, new_release=new_sha)
             old, new = d / 'old', d / 'new'

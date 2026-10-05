@@ -122,6 +122,26 @@ def answers(root: Path, *, migrate: bool = True) -> tuple[str | None, str | None
     return src, commit, data
 
 
+# The template sources a render or clone may name. `_src_path` is read from
+# the project's answers file: a value like `--upload-pack=<cmd>` would reach
+# git or Copier as an option, so anything else is refused before either runs.
+_REMOTE_SOURCE = re.compile(
+    r"(?:gh:[\w.-]+/[\w.-]+"
+    r"|(?:https|ssh)://[\w.@:~-]+(?:/[\w.~%+-]+)*/?"
+    r"|[\w.-]+@[\w.-]+:[\w.~%+-][\w.~%+/-]*)\Z")
+
+
+def template_source(src: str) -> str:
+    """`src` when it is a supported template source; ValueError otherwise."""
+    # a local path: absolute (an unreachable one is reported as offline, by
+    # name), or an existing directory; never one that reads as an option
+    local = not src.startswith("-") and (Path(src).is_absolute() or Path(src).is_dir())
+    if _REMOTE_SOURCE.match(src) or local:
+        return src
+    raise ValueError(f"unsupported template source {src!r}: expected gh:<owner>/<repo>, "
+                     "https://, ssh://, git@<host>:<path> or a local directory")
+
+
 def _data_args(data: dict[str, str]) -> list[str]:
     return [arg for key, value in data.items() for arg in ("--data", f"{key}={value}")]
 
@@ -135,6 +155,11 @@ def _copier(*args: str, env: dict[str, str] | None = None) -> subprocess.Complet
 def render(src: str, ref: str, data: dict[str, str], dst: Path, *, trusted: bool = True) -> bool:
     # Explicit updates retain operator-approved tasks/extensions. Automatic
     # provenance must neither run tasks nor inherit local Copier trust/defaults.
+    try:
+        template_source(src)
+    except ValueError as exc:
+        print(f"template-update: {exc}", file=sys.stderr)
+        return False
     with tempfile.TemporaryDirectory(prefix="copier-settings-") as temp:
         settings = Path(temp) / "settings.yml"
         settings.write_text("{}\n", encoding="utf-8")
