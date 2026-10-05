@@ -352,6 +352,16 @@ def test_delta_bundle_carries_findings_and_exact_delta_artifact(render, tmp_path
     assert "stranger" not in findings  # the reports are in the diff, not in the findings
     assert "REVIEW_SCOPE mode=delta" in text
     assert "Full branch surface:" in text
+    # a fix round re-checks the fixed class, not just the spot (downstream, 2 of 10
+    # blockers came from the previous fix), and asks for a full bundle when the fix
+    # moved a contract — round 1's "name every blocker" is not repeated here
+    preamble = text.split("## The binding rules", 1)[0]
+    assert "re-check the fixed failure class everywhere it can recur" in preamble
+    assert "ask for a full bundle" in preamble
+    assert "Name every blocker you find, not the first" not in preamble
+    first = _run(out, "--base", "main").stdout.split("## The binding rules", 1)[0]
+    assert "Name every blocker you find, not the first" in first
+    assert "re-check the fixed failure class" not in first
 
 
 def test_delta_bundle_says_so_when_this_item_has_no_report(render, tmp_path):

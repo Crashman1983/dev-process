@@ -97,6 +97,17 @@ names where the tier came from). Pair this with batching: one fix pass and one
 push per round, never a drip of per-finding commits that each re-pay the
 push-time gates and tests.
 
+**What each round judges.** This paragraph owns the rule; `/review` and the
+bundle preamble carry it. Round 1 names every blocker, not the first — a
+blocker held back is a round. A delta round judges the fix diff and the open
+findings, and re-checks the fixed failure class everywhere it can recur, not
+only at the fixed spot (downstream, a fifth of the blockers were introduced
+by the previous fix). An older defect found outside that is its own issue —
+unless it is a BLOCKER for this change; then it goes into the verdict marked
+"pre-existing, found in round N". If the fix changed a contract, the
+architecture or the risk scope, the reviewer says so and asks for a full
+bundle instead of judging the delta.
+
 ## Bind the verdict to the reviewed artifact
 
 Independence is incomplete if the branch can change after review without
