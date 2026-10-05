@@ -37,6 +37,10 @@ import subprocess
 import sys
 from pathlib import Path
 
+sys.dont_write_bytecode = True
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from check_review import spec_dir_issue  # noqa: E402
+
 SPECS = "specs"
 ARCHIVE = ".process-work/plans/archive"
 COMMENT_LIMIT = 60000  # under GitHub's 65536, leaving header room
@@ -158,10 +162,8 @@ def _stage(root: Path, fdir: Path) -> int:
               file=sys.stderr)
         return 1
     spec_text = spec.read_text(encoding="utf-8", errors="replace")
-    plan = fdir / "plan.md"
-    issue = _issue_number(spec_text) or (
-        _issue_number(plan.read_text(encoding="utf-8", errors="replace"))
-        if plan.is_file() else None)
+    number = spec_dir_issue(fdir)
+    issue = str(number) if number is not None else None
     if not issue:
         print("publish_and_prune: no issue: ref in spec.md (or plan.md) — create "
               "the tracking issue at idea time and record it (issue-before-spec)",

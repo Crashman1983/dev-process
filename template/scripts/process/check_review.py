@@ -1918,19 +1918,38 @@ def issues_on_integration(root: Path, limit: int = 2000) -> set[int]:
     return set()
 
 
-def _plan_issue_numbers(text: str) -> set[int]:
-    """The issue numbers a plan declares — the join between a pushed commit
-    and the tier only the plan knows."""
-    numbers: set[int] = set()
+def declared_issue_numbers(text: str) -> list[int]:
+    """The issue numbers a plan or spec declares, in file order — bare `7`,
+    `#7`, `owner/repo#7` or an issue URL; `issue: none` declares nothing."""
+    numbers: list[int] = []
     for m in ISSUE_DECL.finditer(text):
         tok = m.group(1)
         if tok.isascii() and tok.isdigit():
-            numbers.add(int(tok))
+            numbers.append(int(tok))
             continue
         parsed = parse_issue_ref(tok)
         if parsed is not None:
-            numbers.add(parsed[1])
+            numbers.append(parsed[1])
     return numbers
+
+
+def _plan_issue_numbers(text: str) -> set[int]:
+    """The issue numbers a plan declares — the join between a pushed commit
+    and the tier only the plan knows."""
+    return set(declared_issue_numbers(text))
+
+
+def spec_dir_issue(fdir: Path) -> int | None:
+    """A spec directory's issue: spec.md's `issue:` first (issue-before-spec),
+    plan.md's as fallback — the one owner (publish_and_prune --stage and
+    process_context ask it)."""
+    for name in ("spec.md", "plan.md"):
+        p = fdir / name
+        numbers = declared_issue_numbers(p.read_text(encoding="utf-8", errors="replace")) \
+            if p.is_file() else []
+        if numbers:
+            return numbers[0]
+    return None
 
 
 def _plan_work_ids(stem: str, text: str, *, include_dedated: bool) -> set[str]:
