@@ -65,6 +65,35 @@ def test_attest_computes_digest_and_gate_verifies_it(render, tmp_path):
     assert _gate(out).returncode == 0, _gate(out).stdout
 
 
+def test_a_full_round_is_written_only_against_the_fork_point(render, tmp_path):
+    """#160: base=head^ reviews a slice and recorded it as the whole branch."""
+    out, base, head = _repo(render, tmp_path)
+    (out / "widget.py").write_text("def widget():\n    return 43\n")
+    _git(out, "commit", "-qam", "fix: widget")
+    head = _git(out, "rev-parse", "HEAD").stdout.strip()
+    slice_base = _git(out, "rev-parse", "HEAD^").stdout.strip()
+    r = _attest(out, "--base", slice_base, "--head", head)
+    assert r.returncode == 1 and "is not the fork point" in r.stderr, r.stderr
+    assert not any("REVIEW work=widget" in p.read_text()
+                   for p in (out / ".process-work/journal").rglob("*.md"))
+    bundle =out / ".process-work/bundle.md"
+    gate = _load_gate(out)
+    bundle.write_text(f"REVIEW_ARTIFACT base={slice_base} head={head} "
+                      f"diff={gate.artifact_digest(out, slice_base, head)}\n")
+    r = _attest(out, "--bundle", str(bundle))
+    assert r.returncode == 1 and "is not the fork point" in r.stderr, r.stderr
+    r = _attest(out, "--base", base, "--head", head)
+    assert r.returncode == 0, r.stderr
+    assert f"base={base}" in r.stdout
+
+
+def test_a_full_round_without_a_resolvable_fork_is_refused(render, tmp_path):
+    out, base, head = _repo(render, tmp_path)
+    _git(out, "branch", "-f", "main", head)  # main contains the head: no fork to bind
+    r = _attest(out, "--base", base, "--head", head)
+    assert r.returncode == 1 and "none resolves" in r.stderr, r.stderr
+
+
 def test_attest_refuses_a_stale_bundle(render, tmp_path):
     out, base, head = _repo(render, tmp_path)
     bundle = out / ".process-work/bundle.md"

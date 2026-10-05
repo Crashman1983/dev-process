@@ -1275,6 +1275,29 @@ def _integration_base(root: Path, tip: str) -> tuple[str, str] | None:
     return None
 
 
+def full_round_base_problem(root: Path, base: str, head: str) -> str | None:
+    """Why `base` cannot carry a FULL review round of `head` — None when it can.
+
+    A full round reviews the whole branch: its base is the fork point of
+    `head` from the integration branch (`_integration_base`). Any other base
+    reviews a slice and records it as the whole (#160). The writers (attest,
+    the review bundle) refuse it; a fork that cannot be told is refused with
+    the reason. The gate's reading of existing records is unchanged."""
+    try:
+        found = _integration_base(root, head)
+    except GitReadError as exc:
+        return f"a full round's base must be the fork point of the head: {exc}"
+    if found is None:
+        return (f"a full round's base must be the fork point of {head[:12]} from the "
+                f"integration branch, and none resolves (no integration ref, or it already "
+                f"contains the head) — fetch it")
+    ref, fork = found
+    resolved = (_git_bytes(root, "rev-parse", "--verify", "-q", f"{base}^{{commit}}") or b"").strip()
+    if resolved.decode(errors="replace") != fork:
+        return f"base {base[:12]} is not the fork point {fork[:12]} of {head[:12]} from {ref}"
+    return None
+
+
 def push_base(root: Path, tip: str, remote_sha: str) -> str | None:
     """The commit a push of `tip` starts at, from what the push itself knows.
 

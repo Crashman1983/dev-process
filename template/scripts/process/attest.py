@@ -60,6 +60,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling import
 from process_git import git_environment  # noqa: E402
 from check_review import (  # noqa: E402  (one owner for grammar, digest, record homes)
     JOURNAL_DIR,
+    full_round_base_problem,
     integration_targets,
     PLANS_ARCHIVE,
     _plan_work_ids,
@@ -230,6 +231,11 @@ def build_line(args, root: Path, journal_dir: Path | None = None) -> tuple[str, 
         if not (args.base and args.head):
             problems.append("--base and --head go together")
         base, head = args.base, args.head
+    if base and head and not problems and mode == "full":
+        why = full_round_base_problem(root, base, head)
+        if why:
+            problems.append(f"{why} — rebuild the bundle against the integration branch, "
+                            "or review the slice as a delta round (--since)")
     if base and head and not problems:
         digest = artifact_digest(root, base, head, mode=mode)
         if digest is None:

@@ -176,7 +176,8 @@ def test_bundle_refuses_an_ambiguous_fork_point(render, tmp_path):
     assert "merge bases" in r.stderr and "REVIEW_ARTIFACT" not in r.stdout, r.stderr
 
 
-def test_empty_diff_stated(render, tmp_path):
+def test_a_head_the_integration_branch_contains_gets_no_full_bundle(render, tmp_path):
+    """#160: an empty range has no fork point to bind a full round to — refused, named."""
     out = render(tmp_path, {"project_name": "d", "modules": {}})
     _git(out, "init", "-q", "-b", "main")
     _git(out, "config", "user.email", "t@t")
@@ -184,7 +185,22 @@ def test_empty_diff_stated(render, tmp_path):
     _git(out, "add", "-A")
     _git(out, "commit", "-q", "-m", "base")
     r = _run(out, "--base", "main")
-    assert "HEAD adds nothing over main" in r.stdout
+    assert r.returncode != 0 and "REVIEW_ARTIFACT" not in r.stdout
+    assert "full bundle refused" in r.stderr and "none resolves" in r.stderr, r.stderr
+
+
+def test_a_full_bundle_against_a_slice_base_is_refused(render, tmp_path):
+    """#160: --base HEAD^ bound a full round to a slice of the branch."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    (out / "widget.py").write_text("def widget():\n    return 43\n")
+    _git(out, "commit", "-qam", "fix: widget")
+    r = _run(out, "--skip-preflight", "--base", "HEAD^")
+    assert r.returncode != 0 and "REVIEW_ARTIFACT" not in r.stdout
+    assert "is not the fork point" in r.stderr, r.stderr
+    r = _run(out, "--skip-preflight", "--base", "main")
+    assert r.returncode == 0, r.stderr
+    assert _artifact(r.stdout)["base"] == _git(out, "merge-base", "main", "HEAD").stdout.strip()
 
 
 def test_finding_tokens_pinned_to_their_owning_gate(render, tmp_path):
