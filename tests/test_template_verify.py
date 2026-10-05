@@ -702,3 +702,28 @@ def test_scripts_that_verify_templates_declare_pyyaml(script):
     """They reach template_verify, which reads answers with PyYAML: `uv run` must resolve it."""
     head = (SCRIPTS / script).read_text(encoding='utf-8').split('"""', 1)[0]
     assert '# /// script' in head and 'PyYAML>=6' in head, head
+
+
+@pytest.mark.parametrize('src', ['-a@h:p', 'gh:-x/y', 'git@host:-x', 'https://-x/y', 'ext::sh -c x',
+                                 'https://h/a::b', 'relative/dir', '.', '--x'])
+def test_template_source_refuses_every_option_or_helper_form(src):
+    with pytest.raises(ValueError, match='unsupported template source'):
+        load('template_update').template_source(src)
+
+
+@pytest.mark.parametrize('src', ['gh:owner/repo', 'https://github.com/o/r.git', 'ssh://git@host/o/r.git',
+                                 'git@github.com:o/r.git'])
+def test_template_source_accepts_the_supported_forms(src, tmp_path):
+    updater = load('template_update')
+    assert updater.template_source(src) == src
+    assert updater.template_source(str(tmp_path)) == str(tmp_path)
+
+
+def test_copier_gets_the_source_after_an_end_of_options_marker(monkeypatch, tmp_path):
+    updater = load('template_update')
+    seen = []
+    monkeypatch.setattr(updater, '_copier', lambda *a, **k: seen.append(a) or
+                        subprocess.CompletedProcess(a, 0, '', ''))
+    assert updater.render(str(tmp_path), 'v1', {}, tmp_path / 'dst', trusted=False)
+    argv = list(seen[0])
+    assert argv[argv.index('--') + 1] == str(tmp_path), argv

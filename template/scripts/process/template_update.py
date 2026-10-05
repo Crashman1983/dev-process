@@ -124,22 +124,23 @@ def answers(root: Path, *, migrate: bool = True) -> tuple[str | None, str | None
 
 # The template sources a render or clone may name. `_src_path` is read from
 # the project's answers file: a value like `--upload-pack=<cmd>` would reach
-# git or Copier as an option, so anything else is refused before either runs.
+# git or Copier as an option, and `ext::<cmd>` runs a transport helper. Every
+# accepted form starts with a word character (or is an absolute path), `::`
+# is refused anywhere, and the argv puts `--` before it besides.
 _REMOTE_SOURCE = re.compile(
-    r"(?:gh:[\w.-]+/[\w.-]+"
-    r"|(?:https|ssh)://[\w.@:~-]+(?:/[\w.~%+-]+)*/?"
-    r"|[\w.-]+@[\w.-]+:[\w.~%+-][\w.~%+/-]*)\Z")
+    r"(?:gh:\w[\w.-]*/\w[\w.-]*"
+    r"|(?:https|ssh)://\w[\w.@:~-]*(?:/[\w.~%+-]+)*/?"
+    r"|\w[\w.-]*@\w[\w.-]*:\w[\w.~%+/-]*)\Z")
 
 
 def template_source(src: str) -> str:
     """`src` when it is a supported template source; ValueError otherwise."""
-    # a local path: absolute (an unreachable one is reported as offline, by
-    # name), or an existing directory; never one that reads as an option
-    local = not src.startswith("-") and (Path(src).is_absolute() or Path(src).is_dir())
-    if _REMOTE_SOURCE.match(src) or local:
+    # a local path is absolute (an unreachable one is reported as offline, by
+    # name): a relative one would resolve against wherever the gate runs
+    if "::" not in src and (_REMOTE_SOURCE.match(src) or Path(src).is_absolute()):
         return src
     raise ValueError(f"unsupported template source {src!r}: expected gh:<owner>/<repo>, "
-                     "https://, ssh://, git@<host>:<path> or a local directory")
+                     "https://, ssh://, git@<host>:<path> or an absolute local path")
 
 
 def _data_args(data: dict[str, str]) -> list[str]:
@@ -176,7 +177,7 @@ def render(src: str, ref: str, data: dict[str, str], dst: Path, *, trusted: bool
             env = git_environment()
             env["COPIER_SETTINGS_PATH"] = str(settings)
         r = _copier("copy", *flags, "--defaults", "-r", ref, *_data_args(data),
-                    "--quiet", src, str(dst), env=env)
+                    "--quiet", "--", src, str(dst), env=env)
     if r.returncode != 0:
         print(f"template-update: render of {ref} failed:\n{r.stderr.strip()}",
               file=sys.stderr)
@@ -284,7 +285,7 @@ def main() -> int:
         return 0
     try:
         upd = _copier("update", "--trust", "--defaults", "--conflict", "inline",
-                      *_data_args(data), *(["-r", ref] if ref else []), str(root))
+                      *_data_args(data), *(["-r", ref] if ref else []), "--", str(root))
     except ValueError as exc:
         print(f"template-update: {exc}", file=sys.stderr)
         return 2
