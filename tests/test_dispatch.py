@@ -100,7 +100,8 @@ def test_policy_resolves_by_tier_and_phase(render, tmp_path):
     out = render(tmp_path, {"project_name": "d", "modules": {}})
     r = _dispatch(out, "policy", "--tier", "3")
     assert r.returncode == 0, r.stderr
-    assert "plan: claude-opus-5" in r.stdout and "review: claude-fable-5-1" in r.stdout
+    assert "plan: claude-opus-5" in r.stdout and "review: claude-opus-5 (xhigh)" in r.stdout
+    assert "execute: claude-opus-5\n" in r.stdout  # a plain cell prints no effort
     r = _dispatch(out, "policy", "--tier", "1")
     assert "execute: claude-sonnet-5" in r.stdout
     r = _dispatch(out, "policy")  # no tier: default row
@@ -176,13 +177,13 @@ def test_remote_phase_hands_over_without_a_worktree(render, tmp_path):
     pol = out / "docs/process/model-policy.json"
     data = json.loads(pol.read_text())
     cloud = out.parent / "start-cloud.sh"
-    cloud.write_text(f'#!/bin/sh\nprintf "%s|%s|%s|%s" "$1" "$2" "$3" "$PROCESS_PHASE" > {marker}\necho session-abc\n')
+    cloud.write_text(f'#!/bin/sh\nprintf "%s|%s|%s|%s|%s|%s" "$1" "$2" "$3" "$PROCESS_PHASE" "$4" "$PROCESS_EFFORT" > {marker}\necho session-abc\n')
     cloud.chmod(0o755)
     local = out.parent / "local.sh"
     local.write_text("#!/bin/sh\nsleep 30\n")
     local.chmod(0o755)
     data["command"] = f"{local} {{prompt}}"
-    data["phases"] = {"review": {"command": f"{cloud} {{branch}} {{model}} {{prompt}}", "remote": True}}
+    data["phases"] = {"review": {"command": f"{cloud} {{branch}} {{model}} {{prompt}} {{effort}}", "remote": True}}
     pol.write_text(json.dumps(data))
     # the branch must be on origin first — a review of unpushed work is nothing
     r = _dispatch(out, "start", "--issue", "4", "--phase", "review", "--branch", "b4")
@@ -193,7 +194,8 @@ def test_remote_phase_hands_over_without_a_worktree(render, tmp_path):
     assert r.returncode == 0, r.stderr
     assert "handed review for #4" in r.stdout and "session-abc" in r.stdout
     seen = marker.read_text().split("|")
-    assert seen[0] == "b4" and seen[1] == "claude-fable-5-1" and seen[3] == "review"
+    assert seen[0] == "b4" and seen[1] == "claude-opus-5" and seen[3] == "review"
+    assert seen[4:] == ["xhigh", "xhigh"]  # the Tier 3 review cell's effort: argv and env
     assert "--sync" in seen[2] and "PROCESS_REPORT_SYNC=1" in seen[2] and "/review" in seen[2]
     assert not (out.parent / "repo-b4").exists()  # no local worktree for a remote phase
     r = _dispatch(out, "list")
@@ -328,7 +330,8 @@ def test_dry_run_and_bad_policy(render, tmp_path):
     out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
     _repo(out)
     r = _dispatch(out, "start", "--issue", "3", "--phase", "review", "--tier", "3", "--dry-run")
-    assert r.returncode == 0 and "would start review for #3" in r.stdout and "claude-fable-5-1" in r.stdout
+    assert r.returncode == 0 and "would start review for #3" in r.stdout and "claude-opus-5 (xhigh)" in r.stdout
+    assert "--effort=xhigh" in r.stdout  # the default command carries the cell's effort
     assert not (out.parent / "repo-issue-3").exists()
     pol = out / "docs/process/model-policy.json"
     pol.write_text('{"command": "claude -p"}')
@@ -374,6 +377,15 @@ def test_report_carries_model_and_kpis_cut_by_it(render, tmp_path):
     r = subprocess.run([sys.executable, str(out / "scripts/process/process_kpis.py"), "models"],
                        cwd=out, capture_output=True, text=True)
     assert "claude-opus-5" in r.stdout and "claude-sonnet-5" not in r.stdout
+    # the effort is part of the cell: the same model at another effort is another row
+    subprocess.run([sys.executable, str(out / "scripts/process/report.py"), "pushed", "--issue", "5",
+                    "--worker", "w5", "--model", "claude-opus-5", "--force"], cwd=out, capture_output=True, text=True,
+                   env={**env, "PROCESS_EFFORT": "xhigh"})
+    recs = [json.loads(x) for x in (out / ".git/process-tower/reports.jsonl").read_text().splitlines()]
+    assert recs[-1]["effort"] == "xhigh" and "effort" not in recs[0]  # absent when unset: records unchanged
+    r = subprocess.run([sys.executable, str(out / "scripts/process/process_kpis.py"), "models"],
+                       cwd=out, capture_output=True, text=True)
+    assert "claude-opus-5 (xhigh)" in r.stdout, r.stdout
 
 
 @pytest.mark.skipif(shutil.which("tmux") is None, reason="tmux not installed")
@@ -1190,7 +1202,7 @@ def test_a_task_class_row_wins_over_the_tier_and_the_default(render, tmp_path):
         d = importlib.import_module("dispatch")
         policy = d.load_policy(out)
         assert d.model_for(policy, 3, "execute", "mechanical") == "small-x"
-        assert d.model_for(policy, 3, "review", "mechanical") == data["tiers"]["3"]["review"]
+        assert d.cell_for(policy, 3, "review", "mechanical") == ("claude-opus-5", "xhigh")
         assert d.model_for(policy, 3, "execute", "standard") == data["tiers"]["3"]["execute"]
         assert d.model_for(policy, 9, "execute") == data["default"]["execute"]
     finally:
@@ -1216,3 +1228,81 @@ def test_a_malformed_classes_block_refuses(render, tmp_path):
     pol.write_text(json.dumps(data))
     r = _dispatch(out, "policy")
     assert r.returncode != 0 and "classes" in r.stdout + r.stderr
+
+
+# --- effort per cell ------------------------------------------------------------------
+
+def test_an_effort_cell_follows_the_one_precedence_and_wins_whole(render, tmp_path):
+    """Class over tier over default, as for models; the winning cell is taken
+    whole — a class cell without an effort must not borrow the tier's."""
+    d = _load_dispatch(render(tmp_path, {"project_name": "d", "modules": {}}))
+    policy = {"default": {"execute": {"model": "dm", "effort": "low"}},
+              "tiers": {"3": {"execute": {"model": "tm", "effort": "high"}}},
+              "classes": {"mechanical": {"execute": "cm"}}}
+    assert d.cell_for(policy, 3, "execute", "mechanical") == ("cm", None)
+    assert d.cell_for(policy, 3, "execute") == ("tm", "high")
+    assert d.cell_for(policy, 9, "execute") == ("dm", "low")
+    assert d.model_for(policy, 3, "execute") == "tm"  # the thin wrapper keeps its callers
+
+
+@pytest.mark.parametrize("cell", [{"model": "x", "effort": "ultra"}, {"effort": "low"},
+                                  {"model": "x", "effort": "low", "speed": 1}, 7],
+                         ids=["unknown-level", "no-model", "unknown-key", "not-a-cell"])
+def test_a_malformed_cell_refuses_naming_it(render, tmp_path, cell):
+    """A typo in an effort must not fall back to the harness default unseen."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    pol = out / "docs/process/model-policy.json"
+    data = json.loads(pol.read_text())
+    data["tiers"]["2"]["review"] = cell
+    pol.write_text(json.dumps(data))
+    r = _dispatch(out, "policy")
+    assert r.returncode != 0 and "tiers.2.review" in r.stderr, r.stdout + r.stderr
+
+
+def test_the_effort_element_is_dropped_without_an_effort(render, tmp_path):
+    """A cell without an effort leaves the harness default: neither an empty
+    `--effort=` nor a dangling flag that would eat the next argument."""
+    d = _load_dispatch(render(tmp_path, {"project_name": "d", "modules": {}}))
+    policy = {"command": "h --model {model} --effort={effort} -c reason={effort} --x {effort} {prompt}"}
+    assert d.build_argv(policy, "m", "P") == ["h", "--model", "m", "P"]
+    assert d.build_argv(policy, "m", "P", effort="max") == [
+        "h", "--model", "m", "--effort=max", "-c", "reason=max", "--x", "max", "P"]
+
+
+def test_an_effort_the_command_cannot_carry_refuses_the_start(render, tmp_path):
+    """An effort set in the policy but never passed would be silently ignored:
+    the start refuses and `policy` flags the cell."""
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    _fake_command(out, "exit 0\n")  # `--model {model} {prompt}`: no {effort}
+    r = _dispatch(out, "start", "--issue", "3", "--phase", "review", "--tier", "3", "--dry-run")
+    assert r.returncode == 3 and "{effort}" in r.stderr, r.stdout + r.stderr
+    r = _dispatch(out, "start", "--issue", "3", "--phase", "plan", "--tier", "3", "--dry-run")
+    assert r.returncode == 0, r.stderr  # a cell without effort still starts
+    r = _dispatch(out, "policy", "--tier", "3")
+    assert r.returncode == 0 and "review: claude-opus-5 (xhigh)  WARNING" in r.stdout, r.stdout
+
+
+def test_a_worker_gets_its_cells_effort(render, tmp_path):
+    """PROCESS_EFFORT lets report.py record the effort; a cell without one sets
+    it empty, so a value from the steward's own environment cannot leak in."""
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    marker = tmp_path / "seen"
+    _fake_command(out, f'echo "$* effort=$PROCESS_EFFORT" >> {marker}\n')
+    pol = out / "docs/process/model-policy.json"
+    data = json.loads(pol.read_text())
+    data["command"] = data["command"].replace("{prompt}", "--effort={effort} {prompt}")
+    data["tiers"]["2"]["plan"] = {"model": "m2", "effort": "high"}
+    pol.write_text(json.dumps(data))
+    env = {**os.environ, "PROCESS_EFFORT": "stale"}
+    r = _dispatch(out, "start", "--issue", "7", "--phase", "plan", "--tier", "2", env=env)
+    assert r.returncode == 0 and "with m2 (high)" in r.stdout, r.stdout + r.stderr
+    r = _dispatch(out, "start", "--issue", "8", "--phase", "plan", "--tier", "1", env=env)
+    assert r.returncode == 0, r.stderr
+    deadline = time.time() + 10
+    while time.time() < deadline and (not marker.exists() or len(marker.read_text().splitlines()) < 2):
+        time.sleep(0.1)
+    lines = sorted(marker.read_text().splitlines(), key=lambda s: "m2" not in s)
+    assert "--model m2 --effort=high" in lines[0] and lines[0].endswith("effort=high")
+    assert "--effort" not in lines[1] and lines[1].endswith("effort=")
