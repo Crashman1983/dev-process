@@ -145,7 +145,11 @@ ref) and whose base is not that head's one fork point is a malformed
 `REVIEW` line: it clears no plan, lifts no block, boards no train and
 anchors no Tier 3 delta. A merged record stands as main judged it; a
 record whose head is missing or lies on another branch is not this push's,
-and those off their fork point are counted in one note.
+and those off their fork point are counted in one note. The range is
+bounded by the remote-tracking integration refs that do not contain the tip
+(local names only without one): a local main fast-forwarded to the branch
+hides nothing. Without any integration ref nothing is judged, and the gate
+says so once.
 
 (Lean pass: the former `review-binding: artifact-v1` mode — tree-empty
 certificate commits and CI candidate binding — is retired; the per-line

@@ -1317,3 +1317,40 @@ def test_a_criss_cross_head_names_the_ambiguous_fork_point(tmp_path):
         work="x", artifact=(base, tip, "0" * 64)) + "\n")[0]]
     why = cr.invalid_full_rounds(root, records, tip)[id(records[0])]
     assert "one fork point" in why and "merge bases" in why, why
+
+
+@pytest.mark.parametrize("shape", ["ff-main", "forged-master"])
+def test_a_local_ref_at_the_tip_does_not_hide_the_pushed_range(tmp_path, monkeypatch, shape):
+    """finish.py fast-forwards local main to the branch before the push; a
+    local ref containing the tip bounds nothing — origin/main, behind, does."""
+    cr, root = _cr(), tmp_path / "p"
+    fork, first, head = _fork_repo(root)
+    _git(root, "update-ref", "refs/remotes/origin/main", fork)  # fetched, behind the push
+    if shape == "ff-main":
+        _git(root, "checkout", "-q", "main")
+        _git(root, "merge", "-q", "--ff-only", "feature")
+    else:
+        _git(root, "update-ref", "refs/heads/master", head)
+    _journal(root, _full(cr, root, first, head))
+    hard, _ = _merge_check(cr, root, monkeypatch)
+    assert any("malformed REVIEW line" in h and "is not the fork point" in h for h in hard), hard
+
+
+@pytest.mark.parametrize("target,hard_side", [("refs/heads/main", True), ("refs/heads/7-x", False)])
+def test_without_any_integration_ref_one_finding_not_one_per_record(tmp_path, monkeypatch,
+                                                                    target, hard_side):
+    cr, root = _cr(), tmp_path / "p"
+    root.mkdir()
+    _git(root, "init", "-q", "-b", "trunk")
+    _git(root, "config", "user.email", "t@example.com")
+    _git(root, "config", "user.name", "Test")
+    fork = _commit_file(root, "README.md", "base\n")
+    _git(root, "checkout", "-q", "-b", "feature")
+    first = _commit_file(root, "a.py", "a = 1\n")
+    head = _commit_file(root, "b.py", "b = 1\n")
+    _journal(root, _full(cr, root, fork, first, work="one"), _full(cr, root, first, head, work="two"))
+    monkeypatch.setenv("PROCESS_PUSH_TARGETS", target)
+    hard, soft = cr.check(root)
+    assert not any("integration ref resolves" in h and "malformed" in h for h in hard), hard
+    found = [f for f in (hard if hard_side else soft) if cr.NO_INTEGRATION_REF in f]
+    assert len(found) == 1, (hard, soft)
