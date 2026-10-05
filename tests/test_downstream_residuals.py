@@ -47,13 +47,20 @@ def repo(tmp_path):
     return tmp_path
 
 
-def test_main_without_remote_never_has_an_empty_self_base(repo):
+def test_main_without_remote_never_has_an_empty_self_base(repo, monkeypatch):
     review = load('check_review')
     commit(repo, '.process-work/plans/2026-10-02-42.md', '# Plan\ntier: 3\nissue: #42\n')
     assert review.merge_base(repo) is None
     assert review.paths_in_flight(repo) is None
+    # a presence finding (#161): hard on the merge push, a note elsewhere
+    monkeypatch.setenv('PROCESS_PUSH_TARGETS', 'refs/heads/main')
     hard, _ = review.check(repo)
     assert any('integration' in x and 'base' in x for x in hard), hard
+    monkeypatch.setenv('PROCESS_PUSH_TARGETS', 'refs/heads/7-work')
+    monkeypatch.delenv('PRE_COMMIT_REMOTE_BRANCH', raising=False)
+    hard, soft = review.check(repo)
+    assert not any('integration' in x and 'base' in x for x in hard), hard
+    assert any('no proper integration base' in x and 'note only' in x for x in soft), soft
 
 
 @pytest.mark.parametrize("default", ["trunk", "release/stable"])

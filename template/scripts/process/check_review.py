@@ -2568,7 +2568,9 @@ def check(root: Path) -> tuple[list[str], list[str]]:
             and (plan_tier(text) or 0) >= 2 and not review_waived(text)
             for rel, text in record_texts(root, PLAN_KINDS) or [])
         if no_base and review_required:
-            hard.append("no proper integration base — fetch origin/main (or the remote default branch); cannot bound the pushed range")
+            # a presence finding like the arms it disarms: hard on the merge
+            # push, a note on a branch push (verification-independence.md)
+            presence("no proper integration base — fetch origin/main (or the remote default branch); cannot bound the pushed range")
         soft.append(f"{IN_FLIGHT_UNKNOWN} — every active plan is treated as in flight")
         in_flight = {f"{PLANS_ACTIVE}/{p.name}" for p in active}
     merged_issues = issues_on_integration(root)
