@@ -1551,6 +1551,21 @@ def test_tier3_delta_without_a_full_round_at_its_start_is_refused(render, tmp_pa
     assert "Delta re-review" in _bundle(out, "--base", "main", "--since", middle).stdout
 
 
+def test_an_unanchored_tier3_delta_names_the_full_rounds_to_start_from(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    head = _t3_full_round(out)
+    _fix(out, "widget.py", "def widget():\n    return 43\n")
+    r = _run(out, "--base", "main", "--since", "HEAD", "--skip-preflight")
+    assert r.returncode != 0
+    assert f"full rounds of this work: {head[:12]} (use --since {head})" in r.stderr, r.stderr
+    journal = out / ".process-work/journal/review.md"
+    journal.write_text(journal.read_text().replace("work=9", "work=77"))  # another work's round
+    _git(out, "commit", "-qam", "another work")
+    r = _run(out, "--base", "main", "--since", head, "--skip-preflight")
+    assert r.returncode != 0 and "none is recorded — build the full bundle" in r.stderr, r.stderr
+
+
 @pytest.mark.parametrize("rel,body,why", [
     ("other.py", "x = 1\n", "other.py outside the prior round's findings"),
     (f"{_PLANS}/2026-07-09-widget.md", _T3_PLAN + "- also cache it\n", "## Decisions or tier: line"),

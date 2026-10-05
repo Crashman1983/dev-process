@@ -566,8 +566,18 @@ def _tier3_independent(r: dict) -> bool:
     return "non-implementing" in indep and bool(indep & {"cross-model", "single-family"})
 
 
-def tier3_delta_refusal(since: str) -> str:
-    return f"Tier 3 delta needs a full round at {since}"
+def tier3_delta_refusal(since: str, records: list[dict], works) -> str:
+    """The refusal of an unanchored Tier 3 delta, naming the heads it could
+    start from: the full independent Tier 3 rounds of this work, oldest first."""
+    keys = {work_key(w) for w in works}
+    heads = list(dict.fromkeys(
+        r["head"] for r in records
+        if r.get("head") and work_key(r.get("work") or "") in keys and int(r["tier"]) >= 3
+        and r.get("mode", "full") == "full" and _tier3_independent(r)))
+    if not heads:
+        return f"Tier 3 delta needs a full round at {since}; none is recorded — build the full bundle"
+    return (f"Tier 3 delta needs a full round at {since}; full rounds of this work: "
+            f"{', '.join(h[:12] for h in heads)} (use --since {heads[-1]})")
 
 
 # gate code as `docs/process/refute.md` defines it, approximated by path: the
@@ -840,8 +850,9 @@ def tier3_delta_problem(root: Path, records: list[dict], works: set[str],
     it has, never its own idea of the work's other names."""
     ids, keys = expand_work(root, works, ref=head or None)
     off_fork = invalid_full_rounds(root, records, head) if head else {}
-    if not tier3_delta_anchor([r for r in records if id(r) not in off_fork], ids, since):
-        return tier3_delta_refusal(since)
+    anchors = [r for r in records if id(r) not in off_fork]
+    if not tier3_delta_anchor(anchors, ids, since):
+        return tier3_delta_refusal(since, anchors, ids)
     return tier3_delta_scope_growth(root, ids, since, head, keys)
 
 

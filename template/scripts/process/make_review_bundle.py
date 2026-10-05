@@ -670,10 +670,11 @@ def _tier3_delta_refusal(root: Path, since: str, plan_filter: str | None,
     sha, head = _since_head(root, since)
     records = [f for _r, t in _review_gate.record_texts(root, ("journal",)) or []
                for _l, f in _review_gate.parse_review_lines(t)[0]]
+    works = _bundled_work(root, plan_filter, plan_texts)
     if not sha or not head:
-        return _review_gate.tier3_delta_refusal(sha or since)
-    return _review_gate.tier3_delta_problem(root, records, _bundled_work(root, plan_filter, plan_texts),
-                                            sha, head)
+        return _review_gate.tier3_delta_refusal(
+            sha or since, records, _review_gate.expand_work(root, works)[0])
+    return _review_gate.tier3_delta_problem(root, records, works, sha, head)
 
 
 def build(root: Path, base: str | None, plan_filter: str | None = None,
