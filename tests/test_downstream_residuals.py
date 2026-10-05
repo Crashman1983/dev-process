@@ -478,3 +478,25 @@ def test_three_stacked_reviews_cover_overlapping_files_but_not_a_late_commit(rep
     commit(repo, '.process-work/journal/stack.md', '\n'.join(records) + '\n')
     hard, _ = review.check(repo)
     assert any('digest' in h for h in hard), hard
+
+
+@pytest.mark.parametrize('spec, plan, want', [
+    ('issue: #12\n', 'issue: #7\n', 12),
+    ('issue: GH-12\n', 'issue: #7\n', None),          # refute: went to plan's #7
+    ('issue: GH-12\n- issue: #3\n', '', None),        # refute: a later line won
+    ('issue: none\nissue: #5\n', '', None),
+    ('# no issue line\n', 'issue: #7\n', 7),          # no spec decl → plan.md
+    ('', '', None),
+], ids=['spec', 'unparseable-spec-no-plan-fallback', 'unparseable-first-line',
+        'none-first', 'plan-fallback', 'nothing'])
+def test_a_spec_dirs_first_issue_line_decides(tmp_path, spec, plan, want):
+    """Refute of v2.46: the shared helper took any later or plan.md ref when the
+    spec's first `issue:` line was unparseable — a snapshot went to the wrong issue."""
+    cr = load('check_review')
+    d = tmp_path / '003-x'
+    d.mkdir()
+    if spec:
+        (d / 'spec.md').write_text(spec)
+    if plan:
+        (d / 'plan.md').write_text(plan)
+    assert cr.spec_dir_issue(d) == want
