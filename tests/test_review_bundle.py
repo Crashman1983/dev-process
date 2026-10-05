@@ -1510,7 +1510,7 @@ def test_tier3_delta_without_a_full_round_at_its_start_is_refused(render, tmp_pa
 
 
 @pytest.mark.parametrize("rel,body,why", [
-    ("other.py", "x = 1\n", "outside round 1's findings"),
+    ("other.py", "x = 1\n", "other.py outside the prior round's findings"),
     (f"{_PLANS}/2026-07-09-widget.md", _T3_PLAN + "- also cache it\n", "## Decisions or tier: line"),
     (f"{_PLANS}/2026-07-09-widget.md", _T3_PLAN.replace("tier: 3", "tier: 2"), "## Decisions or tier: line"),
     (f"{_PLANS}/2026-07-09-widget.md", _T3_PLAN.replace("Build", "Build") + "\n## Notes\n\nfixed\n", None),
@@ -1538,7 +1538,7 @@ def test_tier3_delta_without_a_readable_report_needs_the_full_bundle(render, tmp
     head = _t3_full_round(out, report=False)
     _fix(out, "widget.py", "def widget():\n    return 43\n")
     r = _run(out, "--base", "main", "--since", head, "--skip-preflight")
-    assert r.returncode != 0 and "no readable report of round 1" in r.stderr, r.stderr
+    assert r.returncode != 0 and "no readable report of the round at" in r.stderr, r.stderr
 
 
 def test_tier2_delta_keeps_its_behaviour_and_lists_its_files(render, tmp_path):

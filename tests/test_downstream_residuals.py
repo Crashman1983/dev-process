@@ -370,7 +370,7 @@ def test_delta_carries_conflict_resolution_and_the_gate_verifies_its_mode(repo):
     wrong, _ = review.parse_review_lines(line.replace(' mode=delta', ''))
     assert review._integrity_violations('journal', repo, wrong)[0]
     tier3, errors = review.parse_review_lines(line.replace('tier=2', 'tier=3'))
-    assert not errors and review.unanchored_deltas([f for _ln, f in tier3])  # no full round at `since`
+    assert not errors and review.invalid_deltas(repo, [f for _ln, f in tier3])  # no full round at `since`
 
 
 def test_delta_refuses_to_hide_an_unreviewed_feature_merge(repo):

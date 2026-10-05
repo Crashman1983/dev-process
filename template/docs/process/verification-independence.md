@@ -104,14 +104,17 @@ only at the fixed spot (downstream, a fifth of the blockers were introduced
 by the previous fix). An older defect found outside that is its own issue —
 unless it is a BLOCKER for this change; then it goes into the verdict marked
 "pre-existing, found in round N". The worker never decides a delta's
-scope. At Tier 3 the bundle refuses `--since <sha>` unless a full Tier 3
-REVIEW of this work recorded `head=<sha>` (or an unbroken chain of Tier 3
-delta REVIEWs leads back to one — the gate holds a Tier 3 `mode=delta` line
-to the same anchor), and asks for a full bundle when the fix touches a file
-the prior round's report does not name, the plan's `## Decisions` or `tier:`
-line, gate code, or a contract (`docs/process/design-contracts/`,
-`specs/*/contracts/`); an unreadable report is a full bundle. Its
-`DELTA_TOUCHES` line lists the files the delta changes. At any tier, if the
+scope. At Tier 3 a delta from `<sha>` needs a full Tier 3 REVIEW of this
+work that recorded `head=<sha>` (or an unbroken chain of Tier 3 delta REVIEWs
+back to one), each with `non-implementing` and `cross-model` or
+`single-family` — a block anchors too. It needs a full bundle when the fix
+touches a file the prior round's report does not name as a whole path (the
+report as committed at `<sha>`, or as the delta first added it), the plan's
+`## Decisions` or `tier:` line, gate code, or a contract
+(`docs/process/design-contracts/`, `specs/*/contracts/`); no readable report
+is a full bundle. The bundle refuses such a delta, `attest.py` does not write
+it, and the gate, `/finish` and the train do not count it — a malformed line.
+Its `DELTA_TOUCHES` line lists the files the delta changes. At any tier, if the
 fix changed a contract, the architecture or the risk scope, the reviewer says
 so and asks for a full bundle instead of judging the delta.
 

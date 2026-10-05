@@ -973,6 +973,11 @@ def _tier3_rounds(out, fixes=1):
     base, _head, _digest = _init_git_repo(out)
     (out / ARCHIVE / "2026-07-19-bound.md").write_text("# Plan\n\ntier: 3\n", encoding="utf-8")
     (out / "payload.txt").write_text("round 1\n", encoding="utf-8")
+    reports = out / ".process-work/reviews"
+    reports.mkdir(parents=True, exist_ok=True)
+    (reports / "2026-07-19-bound.md").write_text(
+        "review: bound\nwork: bound\n\nFINDING sev=blocker action=fix issue=- gate=judgement "
+        "payload.txt is wrong\n", encoding="utf-8")
     _git(out, "add", "-A")
     _git(out, "commit", "-q", "-m", "feat: tier 3")
     heads = [_git(out, "rev-parse", "HEAD").stdout.strip()]
@@ -1042,3 +1047,68 @@ def test_tier3_delta_chain_back_to_the_full_round_clears(render, tmp_path):
              _t3(gate, out, heads[1], heads[2], verdict="pass", rnd=3, mode="delta"))
     r = _run(out)
     assert r.returncode == 1 and f"needs a full round at {heads[1]}" in r.stdout, r.stdout
+
+
+def _fix_commit(out, files):
+    for rel, body in files.items():
+        p = out / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(body, encoding="utf-8")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "fix")
+    return _git(out, "rev-parse", "HEAD").stdout.strip()
+
+
+def test_tier3_delta_pass_with_scope_growth_is_hard_at_the_gate(render, tmp_path):
+    """Refute: the bundle refused scope growth, but a hand-attested delta pass that
+    weakened gate code and added an unreported file cleared at the gate."""
+    out = render(tmp_path, {"project_name": "demo"})
+    base, heads, gate = _tier3_rounds(out)
+    gate_src = (out / "scripts/process/check_review.py").read_text() + "\n# weakened\n"
+    h2 = _fix_commit(out, {"scripts/process/check_review.py": gate_src,
+                           "src_new.py": "print('never in any report')\n"})
+    _journal(out, _t3(gate, out, base, heads[0], verdict="block", rnd=1),
+             _t3(gate, out, heads[0], h2, verdict="pass", rnd=2, mode="delta"))
+    r = _run(out)
+    assert r.returncode == 1 and "full bundle required" in r.stdout, r.stdout
+    assert "gate code (scripts/process/check_review.py)" in r.stdout
+    assert "src_new.py outside the prior round's findings" in r.stdout
+
+
+def test_tier3_delta_scope_reads_the_committed_report_as_whole_paths(render, tmp_path):
+    """Refute: the report was read from the working tree and matched as a substring,
+    so an edited report or a longer name containing the path contained anything."""
+    out = render(tmp_path, {"project_name": "demo"})
+    base, heads, gate = _tier3_rounds(out)
+    h2 = _fix_commit(out, {"old_payload.txt.bak": "x\n"})
+    report = out / ".process-work/reviews/2026-07-19-bound.md"
+    report.write_text(report.read_text() + "old_payload.txt.bak\n", encoding="utf-8")  # uncommitted
+    _journal(out, _t3(gate, out, base, heads[0], verdict="block", rnd=1),
+             _t3(gate, out, heads[0], h2, verdict="pass", rnd=2, mode="delta"))
+    r = _run(out)
+    assert r.returncode == 1 and "old_payload.txt.bak outside" in r.stdout, r.stdout
+    assert not gate._named("FINDING src/payload.txt is wrong", "payload.txt")
+    assert gate._named("FINDING payload.txt:3 is wrong.", "payload.txt")
+
+
+def test_tier3_anchor_must_meet_tier3_independence(render, tmp_path):
+    """Refute: a self-reviewed full block (independence=bundle) anchored a cross-model delta pass."""
+    out = render(tmp_path, {"project_name": "demo"})
+    base, heads, gate = _tier3_rounds(out)
+    _journal(out, _t3(gate, out, base, heads[0], verdict="block", rnd=1, independence="bundle"),
+             _t3(gate, out, heads[0], heads[1], verdict="pass", rnd=2, mode="delta"))
+    r = _run(out)
+    assert r.returncode == 1 and f"needs a full round at {heads[0]}" in r.stdout, r.stdout
+
+
+def test_an_invalid_tier3_delta_pass_does_not_lift_a_standing_block(render, tmp_path):
+    """Refute: the merge guard's standing-block arm counted an unanchored delta pass as clearing."""
+    out = render(tmp_path, {"project_name": "demo"})
+    base, heads, gate = _tier3_rounds(out)
+    _journal(out, _t3(gate, out, base, heads[0], verdict="block", rnd=1, independence="bundle"),
+             _t3(gate, out, heads[0], heads[1], verdict="pass", rnd=2, mode="delta"))
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "journal")
+    findings = gate.standing_block_findings(out, "HEAD")
+    assert any("work bound" in f and "verdict=block" in f for f in findings), findings
+    assert gate.review_passes(out, [(out / JOURNAL / "2026-07-04.md").read_text()]) == []
