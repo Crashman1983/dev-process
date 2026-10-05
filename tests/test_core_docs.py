@@ -494,6 +494,35 @@ def test_threat_question_at_tier3(render, tmp_path):
     assert "what could an attacker do" in workflow.lower()
 
 
+def test_design_asks_the_failure_question_before_the_review_does(render, tmp_path):
+    """Downstream blockers came from the draft more than from fixes (6 of 10), clustered on
+    fail-open defaults, missing expiry and forbidden transitions — the design answers them
+    where the risk calls for it, in sections that other work omits (no new form)."""
+    out = render(tmp_path, {"project_name": "demo"})
+    design = (out / "docs/process/design-template.md").read_text()
+    assert "## Threat question (Tier 3)" not in design
+    question = design.split("## Threat and failure question", 1)[1].split("\n## ", 1)[0]
+    for scope in ("Tier 3", "Tier 2 for gate code, data loss, authorization, migration, concurrency"):
+        assert scope in question, scope
+    assert "fail open" in question and "missing or unresolved input read as" in question
+    assert "docs/process/failure-catalog.md" in question
+    transitions = design.split("## Transitions (state machines and event-driven work only)", 1)[1]
+    transitions = transitions.split("\n## ", 1)[0]
+    assert "forbidden transitions" in transitions and "expires" in transitions
+    assert "Other work omits this section." in transitions
+    assert "names the probe that confirmed it" in design
+    workflow = (out / "docs/process/workflow.md").read_text()
+    assert "threat and failure question (`design-template.md`)" in workflow
+    assert "Tier 3 threat question" not in workflow
+    plan = (out / ".claude/commands/plan.md").read_text()
+    assert "a change to how a" in plan and "fact is computed" in plan and "one owner" in plan
+    testing = (out / "docs/process/testing.md").read_text()
+    assert "append and replay give the same state" in testing and "one refresh\n  equals two" in testing
+    craft = (out / "docs/process/code-craft.md").read_text()
+    assert "Append and replay share one function" in craft
+    assert "Make illegal states unrepresentable" in craft
+
+
 def test_branch_lifetime_guidance(render, tmp_path):
     out = render(tmp_path, {"project_name": "demo"})
     commits = (out / "docs/process/commits.md").read_text()
