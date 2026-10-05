@@ -125,12 +125,13 @@ def answers(root: Path, *, migrate: bool = True) -> tuple[str | None, str | None
 # The template sources a render or clone may name. `_src_path` is read from
 # the project's answers file: a value like `--upload-pack=<cmd>` would reach
 # git or Copier as an option, and `ext::<cmd>` runs a transport helper. Every
-# accepted form starts with a word character (or is an absolute path), `::`
+# accepted form starts with a word character (or is an absolute path; the
+# path of the scp form may start with `~` or `/`, never `-`), `::`
 # is refused anywhere, and the argv puts `--` before it besides.
 _REMOTE_SOURCE = re.compile(
     r"(?:gh:\w[\w.-]*/\w[\w.-]*"
     r"|(?:https|ssh)://\w[\w.@:~-]*(?:/[\w.~%+-]+)*/?"
-    r"|\w[\w.-]*@\w[\w.-]*:\w[\w.~%+/-]*)\Z")
+    r"|\w[\w.-]*@\w[\w.-]*:[\w~/][\w.~%+/-]*)\Z")  # scp form: `:~/r`, `:/abs` too
 
 
 def template_source(src: str) -> str:
