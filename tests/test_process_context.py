@@ -242,6 +242,25 @@ def test_next_task_class_in_a_speckit_line_and_the_gate_still_counts_it(render, 
     assert any("2 unchecked task(s)" in s for s in soft)
 
 
+def test_class_is_a_leading_token_of_a_policy_defined_class(render, tmp_path):
+    """Refute: `[design]` inside the description was read as the class, and a
+    class the policy defines was not. Only bracket tokens after the id count."""
+    import json as _json
+    out = render(tmp_path, {"project_name": "d"})
+    pol = out / "docs/process/model-policy.json"
+    data = _json.loads(pol.read_text())
+    data["classes"]["docs"] = {"execute": "tiny-x"}
+    pol.write_text(_json.dumps(data))
+    p = out / ".process-work/plans"
+    p.mkdir(parents=True, exist_ok=True)
+    plan = p / "2026-08-06-thing.md"
+    plan.write_text("# Plan\n\ntier: 2\nissue: #9\n\n- [ ] T1 Explain the [design] markers in README\n")
+    assert _run(out, "--issue", "9")["active_plans"][0]["next_task_class"] == "standard"
+    plan.write_text("# Plan\n\ntier: 2\nissue: #9\n\n- [ ] T1 [P] [docs] Explain the markers\n")
+    got = _run(out, "--issue", "9")["active_plans"][0]
+    assert got["next_task_class"] == "docs" and got["next_task_model"] == "tiny-x"
+
+
 def test_next_task_without_a_policy_omits_the_model(render, tmp_path):
     """Orientation never fails on a broken policy: the class stays, the model is left out."""
     out = render(tmp_path, {"project_name": "d"})

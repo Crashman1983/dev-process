@@ -122,11 +122,13 @@ start under `nice` (policy `worker_nice`, default 10, 0 = off): the merge
 train's suite keeps its CPU while workers test, instead of a pause for
 every worker.
 
-**Model by task class.** A task line may carry a class: `[mechanical]`
-(zero-context, exact paths) or `[design]` (an interface, a data shape, a
-trade-off); unmarked is `standard`. The policy's `classes` row for that
-class wins over the tier's cell, the tier over `default`
-(`dispatch.model_for`, the one owner of the precedence);
+**Model by task class.** A task line may carry a class as a bracket token
+after its id, beside `[P]` and `[US1]`: `[mechanical]` (zero-context, exact
+paths), `[design]` (an interface, a data shape, a trade-off), or another
+class the policy's `classes` defines; unmarked is `standard`. The class row
+wins over the tier's cell — at every tier, so a `[mechanical]` task in a
+Tier 3 plan runs on the cheaper model on purpose — and the tier over
+`default` (`dispatch.model_for`, the one owner of the precedence);
 `process_context.py` names the next task's class and resolved model.
 A subagent spawn names its model from `dispatch.py policy [--tier T]
 --class C` — the harness default is not a choice. Review and refutation

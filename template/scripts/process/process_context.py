@@ -58,9 +58,12 @@ QUESTION = re.compile(r"^\s*(?:[-*+]\s+)?[*_]*DECISION NEEDED[*_]*\s+(\d{4}-\d{2
                       re.MULTILINE)
 
 
-# a task line's class (`[mechanical]`, `[design]`; unmarked: standard) picks the
-# model a spawn names — docs/process/tower.md, "Dispatch and the model policy"
-TASK_CLASS = re.compile(r"\[(mechanical|design)\]")
+# a task line's class (a class the policy defines; unmarked: standard) picks the
+# model a spawn names — docs/process/tower.md, "Model by task class". Read only
+# from the bracket tokens after the task id, like `[P]` and `[US1]`, never from
+# the description
+TASK_TOKENS = re.compile(r"^(?:[A-Za-z]*\d[\w.]*\s+)?((?:\[[^\]\s]+\]\s*)+)")
+DEFAULT_CLASSES = ("mechanical", "design")
 
 
 def _policy(root: Path) -> dict | None:
@@ -79,8 +82,11 @@ def _next_task(text: str, tier: int | None, policy: dict | None) -> dict:
     if not unchecked:
         return {"next_task": None}
     line = unchecked[0].strip()
-    m = TASK_CLASS.search(line)
-    entry = {"next_task": line, "next_task_class": m.group(1) if m else "standard"}
+    known = tuple((policy or {}).get("classes") or DEFAULT_CLASSES)
+    m = TASK_TOKENS.match(line)
+    tokens = re.findall(r"\[([^\]\s]+)\]", m.group(1)) if m else []
+    entry = {"next_task": line,
+             "next_task_class": next((t for t in tokens if t in known), "standard")}
     if policy is not None:
         try:
             import dispatch as _dispatch  # noqa: E402
