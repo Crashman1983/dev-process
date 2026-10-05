@@ -11,13 +11,13 @@ def _run(out, *args):
                           cwd=out, capture_output=True, text=True)
 
 
-def _git(out):
-    subprocess.run(["git", "init", "-q", "-b", "feat-x"], cwd=out, check=True)
+def _git(out, branch="feat-x"):
+    subprocess.run(["git", "init", "-q", "-b", branch], cwd=out, check=True)
 
 
 def test_hook_prints_kernel_rules_and_ledger_only(render, tmp_path):
     out = render(tmp_path, {"project_name": "d"})
-    _git(out)
+    _git(out, "feat/12-panel")
     d = out / ".process-work/plans"
     d.mkdir(parents=True, exist_ok=True)
     (d / "2026-09-10-panel.md").write_text(
@@ -31,14 +31,36 @@ def test_hook_prints_kernel_rules_and_ledger_only(render, tmp_path):
     assert "## Mandatory rules (full text)" in text and "Verify before asserting" in text
     assert "DECISION 2026-09-10 owner: variant B" in text
     assert "OPEN QUESTION (do not decide it yourself): DECISION NEEDED 2026-09-11 panel: keep CSV?" in text
-    assert "feat-x" in text
+    assert "feat/12-panel" in text
     assert "<!-- KERNEL:START -->" not in text  # the block, not the file around it
     assert len(text) < 12000  # every compaction pays for this
     # a plan that became a log (113 decisions downstream): only the latest ride along
     (d / "2026-09-11-log.md").write_text(
-        "# L\n\ntier: 2\n\n## Decisions\n" + "".join(f"- DECISION 2026-09-11 owner: d{i} — because\n" for i in range(40)))
+        "# L\n\ntier: 2\nissue: #12\n\n## Decisions\n" + "".join(f"- DECISION 2026-09-11 owner: d{i} — because\n" for i in range(40)))
     text = _run(out).stdout
     assert "28 earlier decisions in the plan" in text and "d39" in text and "d11" not in text
+
+
+def test_hook_stays_bounded_with_forty_plans_and_specs(render, tmp_path):
+    """every compaction re-rendered every plan and spec; downstream that grew with the repo"""
+    out = render(tmp_path, {"project_name": "d", "modules": {"speckit": True}})
+    _git(out, "feat/7-login")
+    plans = out / ".process-work/plans"
+    plans.mkdir(parents=True, exist_ok=True)
+    ledger = "".join(f"- DECISION 2026-10-01 owner: choice {i} — because reason\n" for i in range(12))
+    for i in range(1, 41):
+        (plans / f"2026-10-01-p{i}.md").write_text(f"# P\n\ntier: 2\nissue: #{i}\n\n## Decisions\n{ledger}")
+        s = out / "specs" / f"{i:03d}-s{i}"
+        s.mkdir(parents=True)
+        (s / "spec.md").write_text(f"# S\n\nissue: #{100 + i}\n")
+        (s / "tasks.md").write_text("- [ ] T001 a\n")
+    (plans / "2026-10-01-p7.md").write_text("# P\n\ntier: 2\nissue: #7\n\n## Decisions\n"
+                                            "- DECISION 2026-10-01 owner: in-scope marker — because test\n")
+    text = _run(out).stdout
+    assert "DECISION 2026-10-01 owner: in-scope marker" in text  # the branch's own plan, in full
+    assert "+69 more" in text  # the other 79 items: one capped line
+    assert "choice 3" not in text  # no other plan's ledger
+    assert len(text) < 13000  # unscoped, this fixture prints well over 40k
 
 
 def test_install_is_idempotent_and_keeps_the_projects_settings(render, tmp_path):
