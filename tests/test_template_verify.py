@@ -1,6 +1,7 @@
 """Real release renders and Git history: template provenance cannot whitewash project code."""
 import importlib.util
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -781,3 +782,22 @@ def test_the_shared_clone_works_under_safe_bare_repository_explicit(tmp_path, mo
     verifier = load('template_verify')
     sha = git(src, 'rev-parse', 'HEAD')
     assert verifier._fetched(str(src), 'v1.0.0', 'v1.0.0') == sha
+
+
+@pytest.mark.parametrize('src', ['ext::x', 'git+ext::x', '--upload-pack=x', 'ssh://-oProxyCommand=x',
+                                 'file:///x', 'relative/x'])
+def test_template_update_refuses_an_unsupported_source_before_copier_runs(tmp_path, src):
+    """#167: main() ran `copier update` on whatever `_src_path` the answers named."""
+    root, bin_dir, log = tmp_path / 'project', tmp_path / 'bin', tmp_path / 'copier.log'
+    init(root)
+    write(root, '.copier-answers.yml', f"_src_path: '{src}'\n_commit: v1.0.0\n")
+    commit(root)
+    stub = write(bin_dir, 'copier', f'#!/bin/sh\necho "$@" >> {log}\nexit 0\n')
+    stub.chmod(0o755)
+    env = {**os.environ, 'PATH': f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+           'PYTHONDONTWRITEBYTECODE': '1'}
+    r = subprocess.run([sys.executable, str(SCRIPTS / 'template_update.py'), str(root)],
+                       capture_output=True, text=True, env=env)
+    assert r.returncode == 2, r.stdout + r.stderr
+    assert 'unsupported template source' in r.stderr
+    assert not log.exists()
