@@ -711,6 +711,8 @@ def main(argv: list[str]) -> int:
     a = p.parse_args(argv)
     if a.section and not a.json:
         p.error("--section needs --json")
+    if a.wait and (a.json or a.section):
+        p.error("--wait prints report lines, never the table: drop --json/--section")
     root = Path(a.root).resolve()
     top = _git(root, "rev-parse", "--show-toplevel")
     if top:
