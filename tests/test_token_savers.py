@@ -38,9 +38,11 @@ def test_context_cost_is_opt_in_and_names_the_largest_files(render, tmp_path):
     r = _py(out, "process_context.py", "--cost")
     assert r.returncode == 0, r.stdout + r.stderr
     cost = json.loads(r.stdout)["context_cost"]
-    assert cost["anchor"]["files"] == 1 and cost["anchor"]["tokens"] > 100
-    assert cost["process_docs"]["files"] > 10
-    assert cost["session_start_estimate_tokens"] > cost["anchor"]["tokens"]
+    must, may = cost["mandatory"], cost["available"]
+    assert must["anchor"]["files"] == 1 and must["anchor"]["tokens"] > 100
+    assert must["kernel"]["files"] == 1 and must["mandatory_rules"]["files"] == 1
+    assert may["process_docs"]["files"] > 10
+    assert cost["session_start_estimate_tokens"] > sum(g["tokens"] for g in must.values())
     assert cost["largest"] and "tokens" in cost["largest"][0]
     assert "chars / 4" in cost["unit"]
 
