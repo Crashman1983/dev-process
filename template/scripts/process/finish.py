@@ -87,6 +87,29 @@ def _git(*args: str) -> str | None:
     return proc.stdout.strip() if proc.returncode == 0 else None
 
 
+def _branches_to_finish(root: Path, default: str, limit: int = 8) -> str:
+    """Where the work to finish is, when finish runs on the integration branch:
+    each branch not merged into it — in the worktree that holds it, or to check
+    out (observed: finish run from the main checkout while the work sat in a
+    dispatched worktree)."""
+    out = _git("branch", "--no-merged", default, "--format=%(refname:short)")
+    if out is None:
+        return f"git cannot list the branches not merged into {default} — check out the branch first"
+    unmerged = [b for b in out.splitlines() if b.strip()]
+    if not unmerged:
+        return f"no branch is left unmerged into {default}"
+    try:
+        import dispatch as _dispatch  # lazy, as `usage`: a listing never blocks the message
+        held = {e["branch"]: e["path"] for e in _dispatch.worktree_entries(root) if e["branch"]}
+    except Exception:  # noqa: BLE001
+        held = {}
+    ways = [f"cd {held[b]} (holds {b})" if b in held else f"git checkout {b}"
+            for b in unmerged[:limit]]
+    more = f" | … {len(unmerged) - limit} more (git branch --no-merged {default})" \
+        if len(unmerged) > limit else ""
+    return "check out the branch first: " + " | ".join(ways) + more
+
+
 def _journal_passes(root: Path) -> list[dict]:
     texts: list[str] = []
     jdir = root / JOURNAL_DIR
@@ -111,7 +134,8 @@ def check(root: Path) -> tuple[list[str], list[str]]:
     if branch is None:
         return ["not a git repository (or git missing)"], []
     if f"refs/heads/{branch}" in integration_targets(root):
-        return [f"on {branch} — there is no feature branch to finish"], []
+        return [f"on {branch} — there is no feature branch to finish; "
+                + _branches_to_finish(root, branch)], []
 
     dirty = _git("status", "--porcelain")
     if dirty:
