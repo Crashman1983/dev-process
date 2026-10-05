@@ -281,6 +281,39 @@ def test_a_number_no_plan_names_is_refused_as_a_likely_pr_number(render, tmp_pat
     assert "REVIEW work=26 " in _journal(out)
 
 
+_BLOCK = ("REVIEW work={w} tier=2 reviewer=r model=m independence=bundle,non-implementing "
+          "verdict=block round=1\n")
+
+
+def test_rounds_of_another_plan_of_the_same_issue_do_not_count(render, tmp_path):
+    """Refute: expanding `--work 26` over every plan of issue 26 lent an archived plan's
+    blocked round (and its ROOT-CAUSE) to the active plan."""
+    out, base, head = _repo(render, tmp_path)
+    plans = out / ".process-work/plans"
+    (plans / "archive").mkdir(exist_ok=True)
+    (plans / "archive/2026-08-01-alpha.md").write_text("# Plan\n\ntier: 2\nissue: #26\n")
+    widget = plans / "2026-09-10-widget.md"
+    widget.write_text(widget.read_text().replace("tier: 2\n", "tier: 2\nissue: #26\n"))
+    (out / ".process-work/journal").mkdir(parents=True, exist_ok=True)
+    (out / ".process-work/journal/old.md").write_text(
+        _BLOCK.format(w="alpha") + "ROOT-CAUSE work=alpha round=1: x — test_x failed before\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-qm", "two plans of #26")
+    # a claimed round 2 is refused: no round of THIS work blocked (_attest claims round 1 otherwise)
+    r = _attest(out, "--base", base, "--head", head, "--work", "26", "--round", "2", "--dry-run")
+    assert r.returncode == 1 and "this is round 1" in r.stderr, r.stdout + r.stderr
+    # two ACTIVE plans of #26: the branch's slug picks one, else the literal id alone
+    (plans / "2026-09-11-gizmo.md").write_text("# Plan\n\ntier: 2\nissue: #26\n")
+    (out / ".process-work/journal/old.md").write_text(_BLOCK.format(w="widget"))
+    _git(out, "add", "-A")
+    _git(out, "commit", "-qm", "gizmo")
+    r = _attest(out, "--base", base, "--head", head, "--work", "26", "--round", "2", "--dry-run")
+    assert r.returncode == 1 and "this is round 1" in r.stderr, r.stderr  # ambiguous: literal
+    _git(out, "checkout", "-q", "-b", "26-widget")
+    r = _attest(out, "--base", base, "--head", head, "--work", "26", "--round", "2", "--dry-run")
+    assert r.returncode == 1 and "this is round 1" not in r.stderr and "no root cause for the fix of blocking round(s) 1" in r.stderr, r.stderr
+
+
 def test_an_owner_exception_attests_planless_issue_work(render, tmp_path):
     out, base, head = _repo(render, tmp_path)
     r = _attest(out, "--base", base, "--head", head, "--work", "26")
