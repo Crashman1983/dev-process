@@ -268,6 +268,11 @@ def main() -> int:
     if not src or not old_ref:
         print(f"template-update: {ANSWERS} lacks _src_path/_commit", file=sys.stderr)
         return 2
+    try:  # the answers file is project data: an option or helper form never reaches copier
+        template_source(src)
+    except ValueError as exc:
+        print(f"template-update: {exc}", file=sys.stderr)
+        return 2
     if subprocess.run(["git", "-C", str(root), "status", "--porcelain"],
                       capture_output=True, text=True).stdout.strip():
         print("template-update: worktree not clean — commit or stash first",
