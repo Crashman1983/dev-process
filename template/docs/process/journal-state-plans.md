@@ -275,15 +275,21 @@ does the routine form of it: shards older than N weeks (default 8) are folded
 into a monthly `journal/archive/YYYY-MM.md` that keeps exactly the machine-read
 records (`REVIEW`, `GRADE`) verbatim — the gates glob the archive
 like any shard — and drops the prose, which git still holds. Dry run by
-default, `--apply` writes. Two things should NOT be
-pruned casually: review reports (the audit trail the review gate's waivers
-point at) and the decision records (which are not working memory at all).
+default, `--apply` writes. Decision records are never pruned (they are not
+working memory at all). Review reports (the audit trail the review gate's
+waivers point at) go only by one rule, owned by `tidy.py`
+(`old_review_reports`): a top-level report older than the window, without a
+`campaign:` header, of a closed work (latest journal `REVIEW` verdict pass,
+no active plan names it), not that work's newest report, and named by no
+plan, archived plan or journal shard. Evidence directories
+(`reviews/<slug>/`) stay. Deletion by commit shrinks the checkout and what
+each gate run reads; history keeps the rest.
 
 Residue accrues where removal depends on remembering, so the pruning has
 one owner: `scripts/process/tidy.py` reports every kind of residue with the
 command that removes it — merged remote branches, finished spec
 directories, old archived plans, old journal shards (folded, records kept),
-a leftover template-delta directory, worktrees of merged branches (kept,
+superseded review reports of closed work (the rule above), a leftover template-delta directory, worktrees of merged branches (kept,
 with the reason, while they hold uncommitted, untracked or ignored-but-not-
 regenerable files, a nested worktree, a live session or a lock) — and
 `--apply` executes the safe part.
