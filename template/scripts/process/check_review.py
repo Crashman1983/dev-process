@@ -541,7 +541,9 @@ def tier3_delta_anchor(records: list[dict], works: set[str], since: str) -> bool
     """May a Tier 3 delta start at `since`? Only when a REVIEW of this work
     with `mode=full`, tier 3 and `head=<since>` exists — or an unbroken chain
     of Tier 3 delta REVIEWs back to one (each delta's base the previous
-    head). One owner: the bundle, attest and the gate ask here."""
+    head). One owner: the bundle, attest and the gate ask here. `works` is
+    compared as `work_key` reads it (`#26`, `26` and the issue URL are one)."""
+    keys = {work_key(w) for w in works}
     todo, seen = [since], set()
     while todo:
         sha = todo.pop()
@@ -549,7 +551,7 @@ def tier3_delta_anchor(records: list[dict], works: set[str], since: str) -> bool
             continue
         seen.add(sha)
         for r in records:
-            if (r.get("work") in works and r.get("head") == sha and int(r["tier"]) >= 3
+            if (work_key(r.get("work") or "") in keys and r.get("head") == sha and int(r["tier"]) >= 3
                     and _tier3_independent(r)):
                 if r.get("mode", "full") == "full":
                     return True
@@ -626,6 +628,47 @@ def work_keys(works) -> tuple[tuple[str, ...], tuple[IssueKey, ...]]:
         else:
             slugs.append(DATE_PREFIX.sub("", w))
     return tuple(slugs), tuple(issues)
+
+
+def work_key(work: str):
+    """A REVIEW work id as compared across records: an issue ref by its number
+    (`#26`, `26`, `owner/repo#26` and the issue URL are one — as `_plan_work_ids`
+    lets `work=26` match `issue: owner/repo#26`), any other id as itself."""
+    k = issue_key(work)
+    return ("#", k[1]) if k is not None else work
+
+
+@functools.lru_cache(maxsize=64)
+def _plans_at_ref(root_s: str, ref: str) -> tuple[tuple[str, str], ...] | None:
+    texts = record_texts(Path(root_s), PLAN_KINDS + ("plan-archive",), ref=ref)
+    return None if texts is None else tuple(texts)
+
+
+def expand_work(root: Path, works, ref: str | None = None
+                ) -> tuple[set[str], tuple[tuple[str, ...], tuple[IssueKey, ...]]]:
+    """(ids, (slugs, issues)) of the work the REVIEW ids `works` name — the one
+    owner of "which records are this work's" for a Tier 3 delta: every plan
+    (active, archived, Spec Kit; at `ref`, else the worktree) one of whose ids
+    (`_plan_work_ids`) is one of `works` lends all its ids and its report keys
+    (`plan_report_keys`); `work_keys(works)` always counts. A plan's slug and
+    its `issue:` name one work: the bundle, attest and the gate read a round
+    attested as `work=widget` and one as `work=26` of the plan `widget` with
+    `issue: #26` alike (refutation: they disagreed, so a delta the bundle built
+    could not be attested). When git cannot list the plans, `works` alone."""
+    works = {w for w in works if w}
+    want = {work_key(w) for w in works}
+    ids = set(works)
+    slugs, issues = (list(k) for k in work_keys(works))
+    plans = (record_texts(root, PLAN_KINDS + ("plan-archive",)) if ref is None
+             else _plans_at_ref(str(root), ref)) or ()
+    for rel, text in plans:
+        pids = _plan_work_ids(plan_stem(rel), _unfenced(text), include_dedated=True)
+        if want & {work_key(p) for p in pids}:
+            ids |= pids
+            s, i = plan_report_keys(rel, text)
+            slugs += s
+            issues += i
+    return ids, (tuple(dict.fromkeys(s for s in slugs if s)), tuple(dict.fromkeys(issues)))
 
 
 def ref_token(value: str) -> str:
@@ -790,13 +833,16 @@ def _scope_growth(root_s: str, slugs: tuple, issues: tuple, since: str, head: st
 
 
 def tier3_delta_problem(root: Path, records: list[dict], works: set[str],
-                        since: str, head: str, keys: tuple | None = None) -> str | None:
+                        since: str, head: str) -> str | None:
     """Anchor, then containment — why this Tier 3 delta clears nothing. A
-    full round off its fork point anchors nothing (`invalid_full_rounds`)."""
+    full round off its fork point anchors nothing (`invalid_full_rounds`).
+    The work is what `expand_work` reads at `head`: the caller passes the ids
+    it has, never its own idea of the work's other names."""
+    ids, keys = expand_work(root, works, ref=head or None)
     off_fork = invalid_full_rounds(root, records, head) if head else {}
-    if not tier3_delta_anchor([r for r in records if id(r) not in off_fork], works, since):
+    if not tier3_delta_anchor([r for r in records if id(r) not in off_fork], ids, since):
         return tier3_delta_refusal(since)
-    return tier3_delta_scope_growth(root, works, since, head, keys)
+    return tier3_delta_scope_growth(root, ids, since, head, keys)
 
 
 def invalid_deltas(root: Path, records: list[dict]) -> dict[int, str]:
