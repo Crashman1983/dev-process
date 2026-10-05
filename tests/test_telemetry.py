@@ -240,6 +240,22 @@ def test_cost_counts_rework(render, tmp_path):
 
 
 
+def test_cost_per_issue_reads_the_policy_transcripts_or_says_not_measured(render, tmp_path):
+    """Tokens per issue were never recorded downstream; the cockpit reads dispatch's count."""
+    import json
+    out = _render(render, tmp_path)
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=out, check=True)
+    r = _kpis(out, "cost", "--issue", "7")
+    assert r.returncode == 0 and "issue #7" in r.stdout and "tokens: not measured" in r.stdout, r.stdout + r.stderr
+    (tmp_path / "t").mkdir()
+    (tmp_path / "t" / "s.jsonl").write_text('{"output_tokens": 5}\n')
+    (out / ".git/process-dispatch").mkdir()
+    (out / ".git/process-dispatch/7-x.json").write_text(json.dumps({"issue": 7, "worktree": str(tmp_path)}))
+    (out / "docs/process/model-policy.local.json").write_text(json.dumps({"transcripts": "{worktree}/t/*.jsonl"}))
+    r = _kpis(out, "cost", "--issue", "7")
+    assert "tokens: 5 output over 1 sessions" in r.stdout, r.stdout + r.stderr
+
+
 def test_cfr_flags_code_overlap_only(render, tmp_path):
     out = _render(render, tmp_path)
     env_git = ["git", "-C", str(out)]

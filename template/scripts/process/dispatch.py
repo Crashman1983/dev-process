@@ -77,6 +77,7 @@ from __future__ import annotations
 import argparse
 import datetime as _dt
 import fnmatch
+import glob
 import json
 import math
 import os
@@ -769,6 +770,43 @@ def _write_record(root: Path, branch: str, rec: dict) -> None:
     except OSError:
         staging.unlink(missing_ok=True)
         raise
+
+
+# the transcript shape is harness-specific; this is the one reader of it
+OUTPUT_TOKENS = re.compile(r'"output_tokens":\s*(\d+)')
+
+
+def issue_tokens(root: Path, issue: int) -> tuple[int, int] | None:
+    """(output tokens, sessions) of the issue's dispatched worktrees — None
+    when not measured: no `transcripts` glob in the policy (`{worktree}` is
+    substituted; default none), no dispatch record, or no transcript."""
+    try:
+        pattern = load_policy(root).get("transcripts")
+    except SystemExit:
+        return None
+    if not isinstance(pattern, str) or not pattern.strip():
+        return None
+    files: set[str] = set()
+    for p in sorted((common_dir(root) / DISPATCH_DIR).glob("*.json")):  # read-only: no mkdir
+        try:
+            rec = json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if isinstance(rec, dict) and str(rec.get("issue")) == str(issue) and rec.get("worktree"):
+            files |= set(glob.glob(os.path.expanduser(
+                pattern.replace("{worktree}", glob.escape(str(rec["worktree"]))))))
+    total = 0
+    for f in sorted(files):
+        try:
+            total += sum(int(m) for m in OUTPUT_TOKENS.findall(Path(f).read_text(errors="ignore")))
+        except OSError:
+            continue
+    return (total, len(files)) if files else None
+
+
+def tokens_line(root: Path, issue: int | None) -> str:
+    got = issue_tokens(root, issue) if issue is not None else None
+    return f"tokens: {got[0]} output over {got[1]} sessions" if got else "tokens: not measured"
 
 
 def _proc_start(pid: int) -> str:
