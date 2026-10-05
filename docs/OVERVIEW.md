@@ -45,7 +45,7 @@ The process was built and improved over many iterations in live operation; it ha
 |---|---|
 | **Human (Owner)** | prioritises, decides, approves designs, reviews a sample every week, evolves the rules |
 | **Coordinator** | gets the overview, assigns work items, starts and stops workers, decides workers' questions or passes them on, triggers the Merge – writes and reviews no code itself |
-| **Workers, refuters and reviewers** | a separate session on its own Branch for each work item and phase; from Tier 2 on a refuter attacks the change, and its only job is finding faults; the reviewer is always a different instance from the worker |
+| **Workers, refuters and reviewers** | a separate session on its own Branch for each work item and phase; at Tier 2 the reviewer attacks the change with the refuter's brief, at Tier 3 and for gate code a separate refuter does, its only job finding faults; the reviewer is always a different instance from the worker |
 | **Gates** | fifteen check programs before every Merge: rules intact, decisions taken, attestation present and matching the code, design contracts and acceptance criteria consistent, licences allowed, documentation valid |
 | **Repository** | rule kernel, plans with decision lists, journal with attestations, situation table, contracts, metrics – the single source every layer reads from |
 
@@ -70,9 +70,9 @@ The process ships as a template (dev-process). From it you get a fully set-up re
 | Tier 0 | Tier 1 | Tier 2 | Tier 3 |
 |---|---|---|---|
 | No change in behaviour, or local and reversible | Small, self-contained change | Something others depend on: interface, schema | Access control, data storage, security boundary |
-| merge directly | Short procedure (goal, files and risk in one sentence, no written plan) plus one test; refutation as needed | Plan, implementation, refutation review (one run), independent review | in addition: approved design, threat question, refutation of every fix round too, second model (where available) |
+| merge directly | Short procedure (goal, files and risk in one sentence, no written plan) plus one test; refutation as needed | Plan, implementation, independent review with the refutation brief (a separate refutation for gate code, data loss, concurrency) | in addition: approved design, threat question, refutation of every fix round too, second model (where available) |
 
-**Refutation review** means: before the independent review starts, a fresh instance attacks the change; its only job is to find faults. From Tier 2 on this happens once; at Tier 3, and for the Gates' own code at any tier, also after every fix round. At the end it names the cause its findings share, so that a fix round closes the cause instead of one more symptom. **Second model** means: a model from a different vendor, where one is available; if none is available, the attestation says so explicitly. The Gate does not require the second model, but it does require that its absence is stated openly.
+**Refutation review** means: before the independent review starts, a fresh instance attacks the change; its only job is to find faults. At Tier 2 the independent review itself answers the refuter's questions (one run; a separate refutation only for data loss or concurrency); at Tier 3, and for the Gates' own code at any tier, a separate refutation runs, also after every fix round. At the end it names the cause its findings share, so that a fix round closes the cause instead of one more symptom. **Second model** means: a model from a different vendor, where one is available; if none is available, the attestation says so explicitly. The Gate does not require the second model, but it does require that its absence is stated openly.
 
 ## 4. Review, memory, goals and measurement
 
@@ -128,7 +128,7 @@ The Owner works through the interface of their Harness: on GitHub, for example, 
 
 | Ready | Plan | Implementation | Review | Merge | Deploy |
 |---|---|---|---|---|---|
-| Owner releases | Plan + decisions | Test first, one commit per task | from Tier 2 refute, then uninvolved instance, attestation | Merge Queue: Gates and tests once | one deploy per queue run |
+| Owner releases | Plan + decisions | Test first, one commit per task | uninvolved instance with refutation brief (separate refute at Tier 3 and for gate code), attestation | Merge Queue: Gates and tests once | one deploy per queue run |
 
 **Questions.** If the worker cannot answer a question from the plan, the Issue or the rules, it enters the question with options and a recommendation in the plan and reports “blocked” – never as a question in the chat. The coordinator decides it itself; only product principles and destructive steps go to the Owner as a choice. The answer is recorded as a decision in the plan, and the worker continues.
 

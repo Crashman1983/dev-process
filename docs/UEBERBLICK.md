@@ -45,7 +45,7 @@ Der Prozess ist in vielen Iterationen im laufenden Betrieb entstanden und verbes
 |---|---|
 | **Mensch (Owner)** | priorisiert, entscheidet, gibt Designs frei, prüft wöchentlich eine Stichprobe, schreibt die Regeln fort |
 | **Koordinator** | verschafft sich den Überblick, weist Vorgänge zu, startet und stoppt Arbeiter, entscheidet Fragen der Arbeiter oder leitet sie weiter, stößt den Merge an – schreibt und prüft selbst keinen Code |
-| **Arbeiter, Refuter und Prüfer** | je Vorgang und Phase eine eigene Sitzung auf eigenem Branch; ab Tier 2 greift ein Refuter die Änderung an, dessen einziger Auftrag Fehler sind; der Prüfer ist immer eine andere Instanz als der Arbeiter |
+| **Arbeiter, Refuter und Prüfer** | je Vorgang und Phase eine eigene Sitzung auf eigenem Branch; bei Tier 2 greift der Prüfer die Änderung mit dem Refuter-Auftrag an, bei Tier 3 und bei Gate-Code ein eigener Refuter, dessen einziger Auftrag Fehler sind; der Prüfer ist immer eine andere Instanz als der Arbeiter |
 | **Gates** | fünfzehn Prüfprogramme vor jedem Merge: Regeln intakt, Entscheidungen getroffen, Attest vorhanden und zum Code passend, Designverträge und Akzeptanzkriterien einheitlich, Lizenzen erlaubt, Dokumentation gültig |
 | **Repository** | Regelkern, Pläne mit Entscheidungslisten, Journal mit Attesten, Lagetabelle, Verträge, Kennzahlen – die einzige Quelle, aus der jede Ebene liest |
 
@@ -70,9 +70,9 @@ Der Prozess wird als Vorlage (dev-process) ausgeliefert. Aus ihr entsteht ein fe
 | Tier 0 | Tier 1 | Tier 2 | Tier 3 |
 |---|---|---|---|
 | Keine Verhaltensänderung, oder lokal und umkehrbar | Kleine, in sich geschlossene Änderung | Etwas, wovon andere abhängen: Schnittstelle, Schema | Zugriffsschutz, Datenhaltung, Sicherheitsgrenze |
-| direkt mergen | Kurzverfahren (Ziel, Dateien und Risiko in einem Satz, kein schriftlicher Plan) plus ein Test; Widerlegung nach Bedarf | Plan, Umsetzung, Widerlegungsprüfung (ein Lauf), unabhängige Prüfung | zusätzlich: freigegebenes Design, Bedrohungsfrage, Widerlegung auch jeder Fix-Runde, zweites Modell (wo verfügbar) |
+| direkt mergen | Kurzverfahren (Ziel, Dateien und Risiko in einem Satz, kein schriftlicher Plan) plus ein Test; Widerlegung nach Bedarf | Plan, Umsetzung, unabhängige Prüfung mit Widerlegungsauftrag (eigene Widerlegung bei Gate-Code, Datenverlust, Nebenläufigkeit) | zusätzlich: freigegebenes Design, Bedrohungsfrage, Widerlegung auch jeder Fix-Runde, zweites Modell (wo verfügbar) |
 
-**Widerlegungsprüfung** heißt: Bevor die unabhängige Prüfung beginnt, greift eine frische Instanz die Änderung an; ihr einziger Auftrag ist, Fehler zu finden. Ab Tier 2 geschieht das einmal; bei Tier 3 und bei Code der Gates in jedem Tier auch nach jeder Fix-Runde. Am Ende nennt sie die gemeinsame Ursache ihrer Funde, damit eine Fix-Runde die Ursache schließt statt ein weiteres Symptom. **Zweites Modell** heißt: ein Modell eines anderen Herstellers, wo eines verfügbar ist; ist keines verfügbar, sagt das Attest das ausdrücklich. Das Gate verlangt das zweite Modell nicht, aber es verlangt, dass sein Fehlen offen angegeben wird.
+**Widerlegungsprüfung** heißt: Bevor die unabhängige Prüfung beginnt, greift eine frische Instanz die Änderung an; ihr einziger Auftrag ist, Fehler zu finden. Bei Tier 2 beantwortet die unabhängige Prüfung selbst die Fragen des Refuters (ein Lauf; eine eigene Widerlegung nur bei Datenverlust oder Nebenläufigkeit); bei Tier 3 und bei Code der Gates in jedem Tier läuft eine eigene Widerlegung, auch nach jeder Fix-Runde. Am Ende nennt sie die gemeinsame Ursache ihrer Funde, damit eine Fix-Runde die Ursache schließt statt ein weiteres Symptom. **Zweites Modell** heißt: ein Modell eines anderen Herstellers, wo eines verfügbar ist; ist keines verfügbar, sagt das Attest das ausdrücklich. Das Gate verlangt das zweite Modell nicht, aber es verlangt, dass sein Fehlen offen angegeben wird.
 
 ## 4. Prüfung, Gedächtnis, Ziele und Messung
 
@@ -128,7 +128,7 @@ Der Owner arbeitet über die Oberfläche seiner Harness: auf GitHub etwa über I
 
 | Ready | Plan | Umsetzung | Review | Merge | Deploy |
 |---|---|---|---|---|---|
-| Owner gibt frei | Plan + Entscheidungen | Test zuerst, je Aufgabe ein Commit | ab Tier 2 Refute, dann unbeteiligte Instanz, Attest | Merge Queue: Gates und Tests einmal | ein Deploy je Queue-Lauf |
+| Owner gibt frei | Plan + Entscheidungen | Test zuerst, je Aufgabe ein Commit | unbeteiligte Instanz mit Widerlegungsauftrag (eigener Refute bei Tier 3 und Gate-Code), Attest | Merge Queue: Gates und Tests einmal | ein Deploy je Queue-Lauf |
 
 **Fragen.** Kann der Arbeiter eine Frage nicht aus Plan, Issue oder Regeln beantworten, trägt er sie mit Optionen und Empfehlung in den Plan ein und meldet „blockiert“ – nie als Frage im Chat. Der Koordinator entscheidet sie selbst; nur Produktgrundsätze und destruktive Schritte legt er dem Owner als Auswahl vor. Die Antwort wird als Entscheidung im Plan vermerkt, und der Arbeiter macht weiter.
 
