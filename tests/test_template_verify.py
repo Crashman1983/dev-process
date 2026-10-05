@@ -574,6 +574,25 @@ def test_a_tip_the_integration_ref_contains_never_reads_a_fallback(tmp_path, mon
     assert not any('merge bases' in h for h in hard), hard
 
 
+def test_a_forged_primary_ref_at_the_tip_does_not_switch_the_base_off(tmp_path, monkeypatch):
+    """Refute 2: origin/main forged to HEAD made the base None and every base-scoped arm
+    (the template verification among them) silent; local main still forks the tip."""
+    root = tmp_path / 'p'
+    init(root)
+    write(root, 'README.md', 'base\n')
+    fork = commit(root)
+    git(root, 'checkout', '-qb', 'feature')
+    write(root, 'feature.md', 'x\n')
+    tip = commit(root)
+    git(root, 'update-ref', 'refs/remotes/origin/main', tip)
+    review = load('check_review')
+    assert review.merge_base(root) == fork and review.integration_ref(root) == 'main'
+    calls = recording(review, monkeypatch)
+    monkeypatch.setenv('PROCESS_PUSH_TARGETS', 'refs/heads/main')
+    review.check(root)
+    assert calls and calls[0][1] == 'main', calls  # the template arm ran
+
+
 def test_callers_hand_verify_the_integration_ref(update, monkeypatch):
     """Gate, finish, _history and the plan exemption pass the ref; verify forks it."""
     root, _, base, _ = update
