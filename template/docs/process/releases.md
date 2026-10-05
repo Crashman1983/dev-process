@@ -59,6 +59,9 @@ record, not an accident.
    The two pinned renders identify template provenance; no saved report
    can exempt a file from review. Verification needs Copier and Git access
    to the recorded template source; unavailable provenance fails closed.
+   Offline or unreachable, it names the source and release and fails. Within
+   one process, tag lookups and release notes share one clone and an
+   unchanged tree is not re-verified; nothing is cached across runs.
    Automatic verification skips template tasks and uses isolated empty Copier
    settings, without `--trust`; templates requiring Jinja extensions fail
    closed. The explicit update in step 2 retains its operator-approved task

@@ -410,3 +410,50 @@ def test_automatic_render_ignores_local_settings_trust_for_extensions(update, tm
     operator = load('template_update')
     assert operator.render(str(source), sha, {}, tmp_path / 'explicit')
     assert marker.exists()
+
+
+def test_second_gate_run_in_one_process_reuses_release_lookups(update, monkeypatch):
+    """Kenni #2375: a dirty tree re-verified on every gate run re-fetched the template each time."""
+    root, _, _, _ = update
+    review = load('check_review')
+    import template_verify as shared
+    calls = []
+    real_run, real_render = shared.subprocess.run, shared.render
+
+    def run(argv, *a, **kw):
+        if any(word in argv for word in ('clone', 'fetch', 'ls-remote')):
+            calls.append(argv)
+        return real_run(argv, *a, **kw)
+
+    def render(*a, **kw):
+        calls.append('render')
+        return real_render(*a, **kw)
+
+    monkeypatch.setattr(shared.subprocess, 'run', run)
+    monkeypatch.setattr(shared, 'render', render)
+    write(root, 'scratch.txt', 'tracked\n')
+    commit(root)
+    write(root, 'scratch.txt', 'dirty\n')
+    monkeypatch.setenv('PROCESS_PUSH_TARGETS', 'refs/heads/main')
+    review.check(root)
+    first = len(calls)
+    assert first and sum('clone' in c for c in calls if c != 'render') == 1, calls
+    review.check(root)
+    assert len(calls) == first, calls[first:]
+    write(root, 'scratch.txt', 'edited\n')
+    review.check(root)
+    assert len(calls) > first, 'a changed worktree must be verified again'
+    assert sum('clone' in c for c in calls if c != 'render') == 1, calls
+
+
+def test_unreachable_source_names_source_and_ref_and_fails_closed(update, monkeypatch):
+    """An offline run said only 'cannot resolve release'; the operator needs the source."""
+    root, source, base, verifier = update
+    missing = str(source)
+    source.rename(source.with_name('gone'))
+    proof = verifier.verify(root, base)
+    assert not proof['identical'], proof
+    assert any(missing in e and 'v1.0.0' in e and 'fails closed' in e
+               for e in proof['errors']), proof['errors']
+    hard, _ = check(root, monkeypatch)
+    assert any('template verification failed' in h and missing in h for h in hard), hard

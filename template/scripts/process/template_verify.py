@@ -12,10 +12,13 @@ Git blobs, executable bits and symlink targets are compared, not decoded text.
 from __future__ import annotations
 
 import argparse
+import copy
 import functools
+import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -49,18 +52,64 @@ def _source(src: str) -> str:
     return src
 
 
+def _offline(src: str, ref: str) -> ValueError:
+    return ValueError(f'template source {src} at {ref}: unreachable or offline '
+                      '— verification fails closed')
+
+
+_CLONES: dict[str, Path] = {}
+_TEMP: list[tempfile.TemporaryDirectory] = []
+
+
+def _clone(src: str, ref: str) -> Path:
+    """One bare clone per source and process; it serves tags and release notes."""
+    if src not in _CLONES:
+        if not _TEMP:
+            _TEMP.append(tempfile.TemporaryDirectory(prefix='template-verify-'))
+        dst = Path(_TEMP[0].name) / str(len(_CLONES))
+        for extra in (['--filter=blob:none'], []):  # a server may refuse the filter
+            shutil.rmtree(dst, ignore_errors=True)
+            r = subprocess.run(['git', 'clone', '--quiet', '--bare', *extra, _source(src),
+                                str(dst)], capture_output=True, timeout=120,
+                               env=git_environment())
+            if not r.returncode:
+                break
+        else:
+            raise _offline(src, ref)
+        _CLONES[src] = dst
+    return _CLONES[src]
+
+
+def _has(clone: Path, rev: str) -> str | None:
+    r = subprocess.run(['git', '-C', str(clone), 'rev-parse', '--verify', '--quiet',
+                        rev + '^{commit}'], capture_output=True, text=True,
+                       timeout=60, env=git_environment())
+    return None if r.returncode else r.stdout.strip()
+
+
+def _fetched(src: str, ref: str, rev: str) -> str:
+    """Resolve `rev` in the shared clone; refresh it once when it is missing."""
+    clone = _clone(src, ref)
+    found = _has(clone, rev)
+    if found is None:
+        r = subprocess.run(['git', '-C', str(clone), 'fetch', '--quiet', '--tags', '--force',
+                            'origin', '+refs/heads/*:refs/heads/*'], capture_output=True,
+                           timeout=120, env=git_environment())
+        if r.returncode:
+            raise _offline(src, ref)
+        found = _has(clone, rev)
+    if found is None:
+        raise ValueError(f'template source {src}: release {ref} not found')
+    return found
+
+
+@functools.lru_cache(maxsize=64)
 def _release(src: str, ref: str) -> str:
     if not PIN.fullmatch(ref):
         raise ValueError('release must be a version tag or a full Git SHA (not HEAD)')
     if re.fullmatch('[0-9a-f]{40}', ref):
         return ref
-    r = subprocess.run(['git', 'ls-remote', _source(src),
-                        f'refs/tags/{ref}', f'refs/tags/{ref}^{{}}'],
-                       capture_output=True, text=True, timeout=60, env=git_environment())
-    lines = r.stdout.splitlines()
-    if r.returncode or not lines:
-        raise ValueError(f'cannot resolve release {ref}')
-    return lines[-1].split()[0]  # annotated tag: its peeled commit
+    return _fetched(src, ref, f'refs/tags/{ref}')  # annotated tag: its peeled commit
 
 
 def _entry(root: Path, ref: str, rel: str) -> tuple[str, bytes] | None:
@@ -193,13 +242,10 @@ def _verify(root: Path, base: str, tip: str, *, worktree: bool = False) -> dict:
                                       and isinstance(ack.get('owner'), str)
                                       and bool(ack['owner'].strip()))
             # Releases' behavior notes travel in the report even when the render has
-            # no changelog. Read them from a separate, pinned template clone.
-            notes = d / 'source'
-            r = subprocess.run(['git', 'clone', '--quiet', '--no-checkout', _source(src),
-                                str(notes)], capture_output=True, timeout=60,
-                               env=git_environment())
-            if r.returncode:
-                raise ValueError('cannot read the release notes')
+            # no changelog. Read them from the shared clone at the pinned commits.
+            notes = _clone(src, new_ref)
+            _fetched(src, old_ref, old_sha)
+            _fetched(src, new_ref, new_sha)
             # Compare the actual pinned changelog blobs. This also handles this
             # template's bold version entries and chronological/mixed ordering,
             # and never sends an entire historical changelog into the review.
@@ -219,13 +265,35 @@ def _committed(root: str, base: str, tip: str) -> dict:
     return _verify(Path(root), base, tip)
 
 
+_WORKTREE: dict[tuple, dict] = {}
+
+
+def _worktree_key(root: Path, base: str, tip: str) -> tuple:
+    # Content, not names: any edit to a dirty, untracked or bookkeeping file
+    # changes the key. The memo lives for this process only.
+    digest = hashlib.sha256()
+    dirty = {os.fsdecode(p) for p in git(root, 'diff', '--name-only', '-z', tip).split(b'\0') if p}
+    dirty |= {os.fsdecode(p) for p in git(root, 'ls-files', '--others', '--exclude-standard',
+                                          '-z').split(b'\0') if p}
+    for rel in sorted(dirty | {ANSWERS, ACK, OWNED_FILE}):
+        try:
+            entry = _file(root, rel)
+        except (ValueError, OSError) as exc:
+            entry = ('error', str(exc).encode())
+        digest.update(rel.encode() + b'\0' + repr(entry).encode() + b'\0')
+    return str(root), base, tip, digest.hexdigest()
+
+
 def verify(root: Path, base: str, tip: str = 'HEAD', *, worktree: bool = False) -> dict:
     root = root.resolve()
     base_sha = git(root, 'rev-parse', '--verify', base + '^{commit}').decode().strip()
     tip_sha = git(root, 'rev-parse', '--verify', tip + '^{commit}').decode().strip()
     if worktree:
-        return _verify(root, base_sha, tip_sha, worktree=True)
-    return _committed(str(root), base_sha, tip_sha)
+        key = _worktree_key(root, base_sha, tip_sha)
+        if key not in _WORKTREE:
+            _WORKTREE[key] = _verify(root, base_sha, tip_sha, worktree=True)
+        return copy.deepcopy(_WORKTREE[key])
+    return copy.deepcopy(_committed(str(root), base_sha, tip_sha))
 
 
 def main(argv: list[str] | None = None) -> int:
