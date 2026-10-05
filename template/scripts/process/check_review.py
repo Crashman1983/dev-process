@@ -1247,7 +1247,8 @@ def integration_ref(root: Path, tip: str = "HEAD") -> str | None:
 def _integration_base(root: Path, tip: str) -> tuple[str, str] | None:
     """(integration ref, fork point SHA) of tip — `process_git.fork_point`
     owns the fork. None when no ref bounds tip (none resolves, none shares a
-    commit, or the ref already contains tip). An ambiguous fork point is no
+    commit, or the ref already contains tip — a primary one ends the search).
+    An ambiguous fork point of the ref that would be chosen is no
     None: read as "no base" it turned the gate's arms off (downstream #2381) —
     it raises GitReadError, which the gate, finish and the train name."""
     tip_sha = (_git_bytes(root, "rev-parse", "--verify", "-q", f"{tip}^{{commit}}") or b"").strip()
@@ -1260,6 +1261,13 @@ def _integration_base(root: Path, tip: str) -> tuple[str, str] | None:
     remote_names = set(_remote_defaults(root)) | {f"origin/{n}" for n in INTEGRATION_NAMES}
     remotes = [r for r in integration_refs(root) if r in remote_names]
     local = [r for r in integration_refs(root) if r not in remote_names]
+    # a primary integration ref that already contains tip (on main, CI's push
+    # to main, a merged branch): no range to bound — None, as before. Never on
+    # to a fallback remote, whose criss-cross would red main itself
+    for ref in remotes:
+        if (_git_bytes(root, "rev-parse", "--verify", "-q", f"{ref}^{{commit}}") is not None
+                and _git_bytes(root, "merge-base", "--is-ancestor", tip_sha.decode(), ref) is not None):
+            return None
     for ref in [*remotes, *sorted(others), *local]:
         if _git_bytes(root, "rev-parse", "--verify", "-q", f"{ref}^{{commit}}") is None:
             continue
