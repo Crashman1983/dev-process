@@ -145,6 +145,28 @@ def test_a_pruner_that_exits_on_import_does_not_crash_the_report(render, tmp_pat
     assert _tidy(out).spec_blocker(out, "012-x") is None
 
 
+def test_a_spec_dir_a_tracked_test_still_uses_is_listed_not_applied(render, tmp_path):
+    """Kenni #2382: --apply pruned a spec directory whose probe a test imported."""
+    out, _bare = _repo_with_residue(render, tmp_path)
+    d = out / "specs/014-probe"
+    (d / "probes").mkdir(parents=True)
+    (d / "tasks.md").write_text("- [x] T001 done\n")
+    (d / "spec.md").write_text("# Spec\n")
+    (d / "plan.md").write_text("# Plan\n\nissue: #14\n")
+    (d / "probes/egress.py").write_text("OK = True\n")
+    (out / "tests").mkdir(exist_ok=True)
+    (out / "tests/test_probe.py").write_text("import os\nP = 'specs/014-probe/probes/egress.py'\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "probe")
+    r = _run(out)
+    assert ("014-probe: still referenced: specs/014-probe/probes/egress.py by "
+            "tests/test_probe.py:2") in r.stdout, r.stdout
+    assert "fully ticked but not published/pruned: 1 (007-finished)" in r.stdout
+    r = _run(out, "--apply")
+    assert "publish_and_prune.py 014-probe" not in r.stdout
+    assert (d / "probes/egress.py").is_file()
+
+
 # --- #136: merged worktrees (each with its own venv/node_modules) are residue -----------
 
 def _worktree_landscape(render, tmp_path):

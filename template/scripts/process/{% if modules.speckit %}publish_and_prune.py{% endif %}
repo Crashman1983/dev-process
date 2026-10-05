@@ -7,11 +7,15 @@ Order and safety (the independent design review's F5 conditions):
   2. account for every SC-ID in spec.md: each must appear in the plan's
      `sc-evidenced:`/`sc-followup:`/`sc-waived:` lines — an unaccounted SC
      would vanish silently, so the ritual refuses (the SC lifecycle);
+  2b. refuse while the directory holds uncommitted or untracked content, or
+     while a tracked file outside it (code, tests, Makefile, hooks — not
+     Markdown, not .process-work/) names a file in it (`referenced_files`);
   3. publish spec.md, tasks.md (and research/data-model, if present) as
      comments on the issue, split under GitHub's comment size limit;
   4. VERIFY the publish by reading the comment ids back — only then
   5. delete specs/<feature>/ (git rm) so main stays clean; on any publish
-     failure the directory stays (flow-forward degradation, stated loudly).
+     failure, or when git refuses the removal, the directory stays
+     (flow-forward degradation, stated loudly) — never a forced delete.
 
 The plan itself is archived by the normal merge ritual
 (`.process-work/plans/archive/` — the review gate keys on it); this tool
@@ -63,6 +67,78 @@ def _unaccounted_scs(spec_text: str, plan_text: str) -> list[str]:
     declared = sorted(set(SC_ID.findall(spec_text)))
     accounted = {m.group(2).upper() for m in SC_ACCOUNT.finditer(plan_text)}
     return [sc for sc in declared if sc.upper() not in accounted]
+
+
+def _git_out(root: Path, *args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(["git", "-C", str(root), *args], capture_output=True)
+
+
+def _needles(rel: str, *, is_dir: bool = False) -> list[str]:
+    """The strings a reference to `rel` (specs/<feature>/...) contains. A file:
+    its root-relative path, the path below specs/, its name with its parent
+    directory, for a module its dotted path (whole and from the parent). A
+    directory: its root-relative path, and for a subdirectory the path below
+    specs/ too (`sys.path.insert(…/probes)` names no file)."""
+    parts = rel.split("/")
+    if is_dir:
+        return [rel] if len(parts) <= 2 else [rel, "/".join(parts[1:])]
+    found = [rel, "/".join(parts[1:])]
+    if len(parts) > 3:
+        found.append("/".join(parts[-2:]))
+    if rel.endswith(".py"):
+        dotted = [*parts[:-1], parts[-1][:-3]]
+        found.append(".".join(dotted))
+        if len(parts) > 3:
+            found.append(".".join(dotted[-2:]))
+    return list(dict.fromkeys(found))
+
+
+def referenced_files(root: Path, fdir: Path) -> dict[str, str]:
+    """{tracked file or directory (`…/`) under `fdir`: "referrer:line"} — what
+    the prune would delete although a tracked file outside it (not
+    .process-work/, not Markdown) still names it. Observed downstream: a test
+    imported a probe under specs/<feature>/probes/, the prune deleted it, the
+    suite went red. RuntimeError when git cannot answer — no answer, no prune."""
+    rel_dir = fdir.relative_to(root).as_posix()
+    ls = _git_out(root, "ls-files", "-z", "--", rel_dir)
+    if ls.returncode != 0:
+        raise RuntimeError(f"git ls-files failed: {ls.stderr.decode(errors='replace').strip()}")
+    files = [rel for rel in ls.stdout.decode(errors="surrogateescape").split("\0") if rel]
+    if not files:
+        return {}
+    needles: dict[str, list[str]] = {rel: _needles(rel) for rel in files}
+    for rel in files:
+        parent = rel.rsplit("/", 1)[0]
+        while len(parent) >= len(rel_dir):
+            needles.setdefault(parent + "/", _needles(parent, is_dir=True))
+            parent = parent.rsplit("/", 1)[0]
+    pats = dict.fromkeys(n for ns in needles.values() for n in ns)
+    r = _git_out(root, "grep", "-n", "-z", "-I", "-F", "--no-color",
+                 *[a for n in pats for a in ("-e", n)],
+                 "--", ".", ":(exclude).process-work", f":(exclude){rel_dir}", ":(exclude)*.md")
+    if r.returncode not in (0, 1):  # 1: no match
+        raise RuntimeError(f"git grep failed: {r.stderr.decode(errors='replace').strip()}")
+    hits: dict[str, str] = {}
+    for line in r.stdout.decode(errors="surrogateescape").splitlines():
+        fields = line.split("\0", 2)
+        if len(fields) != 3:
+            continue
+        path, lineno, text = fields
+        # the most specific name on the line: a file's path also names its directories
+        matched = [(len(n), key) for key, ns in needles.items() for n in ns if n in text]
+        if matched:
+            hits.setdefault(max(matched)[1], f"{path}:{lineno}")
+    return hits
+
+
+def _dirty(root: Path, fdir: Path) -> list[str]:
+    """Modified, staged or untracked entries under `fdir` — content `git rm`
+    would refuse or leave behind; RuntimeError when git cannot answer."""
+    st = _git_out(root, "status", "--porcelain", "-z", "--untracked-files=all", "--",
+                  fdir.relative_to(root).as_posix())
+    if st.returncode != 0:
+        raise RuntimeError(f"git status failed: {st.stderr.decode(errors='replace').strip()}")
+    return [e[3:] for e in st.stdout.decode(errors="surrogateescape").split("\0") if len(e) > 3]
 
 
 def _gh(gh: str, *args: str) -> subprocess.CompletedProcess:
@@ -225,6 +301,24 @@ def main() -> int:
               f"prune (silent disappearance is not an option): {', '.join(missing)}",
               file=sys.stderr)
         return 1
+    try:
+        dirty = _dirty(root, fdir)
+        refs = referenced_files(root, fdir)
+    except RuntimeError as exc:
+        print(f"publish_and_prune: {exc} — nothing pruned", file=sys.stderr)
+        return 1
+    if dirty:
+        print(f"publish_and_prune: {SPECS}/{fdir.name}/ holds uncommitted or untracked "
+              f"content ({', '.join(dirty[:5])}{', …' if len(dirty) > 5 else ''}) — commit "
+              f"or remove it first; nothing pruned", file=sys.stderr)
+        return 1
+    if refs:
+        print(f"publish_and_prune: tracked files outside {SPECS}/{fdir.name}/ still reference "
+              f"what the prune would delete — move it out of the spec directory or drop the "
+              f"reference; nothing pruned:", file=sys.stderr)
+        for rel, where in sorted(refs.items()):
+            print(f"  - {rel} (referenced at {where})", file=sys.stderr)
+        return 1
 
     gh = shutil.which("gh")
     if not gh:
@@ -255,8 +349,11 @@ def main() -> int:
         shutil.copy2(plan, target)
     r = subprocess.run(["git", "rm", "-r", "-q", str(fdir.relative_to(root))],
                        cwd=root, capture_output=True, text=True)
-    if r.returncode != 0:
-        shutil.rmtree(fdir)
+    if r.returncode != 0:  # never a forced delete: what git refuses may be uncommitted work
+        print(f"publish_and_prune: published to issue #{issue}, but `git rm` refused "
+              f"{SPECS}/{fdir.name}/ ({r.stderr.strip()}) — nothing pruned; resolve and "
+              f"re-run", file=sys.stderr)
+        return 1
     print(f"publish_and_prune: published to issue #{issue}, archived plan to "
           f"{ARCHIVE}/{fdir.name}.md, pruned {SPECS}/{fdir.name}/ — commit the result")
     return 0
