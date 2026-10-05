@@ -3,6 +3,8 @@ import datetime as dt
 import subprocess
 import sys
 
+import pytest
+
 
 def _git(root, *args):
     return subprocess.run(["git", *args], cwd=root, capture_output=True, text=True, check=True)
@@ -538,6 +540,78 @@ def test_a_work_named_in_an_active_plans_review_line_is_open(tmp_path):
         _LINE.format(w="other", v="pass", n=2),
         {f"{_days_ago(70)}-plan-x.md": "# Plan\n\ntier: 2\n\n" + _LINE.format(w="other", v="pass", n=1)})
     assert tidy.old_review_reports(root, 30) == []
+
+
+def _round2_case(tmp_path, case):
+    old, mid, new = _days_ago(90), _days_ago(80), _days_ago(70)
+    pair = {f"{old}-a.md": "work: #9\n\nold\n", f"{mid}-b.md": "work: #9\n\nnew\n"}
+    if case == "headerless":  # a file name never decides a deletion
+        return _bare_reviews(tmp_path, {f"{old}-login.md": "x\n", f"{mid}-login-v2.md": "findings\n",
+                                        f"{_days_ago(40)}-login.md": "x\n"},
+                             _LINE.format(w="login", v="pass", n=2), {})
+    if case == "url-issue":  # the plan spells the issue as a URL: same number, open
+        return _bare_reviews(tmp_path, pair, _LINE.format(w="#9", v="pass", n=2),
+                             {f"{new}-p.md": "# P\n\nissue: https://github.com/o/r/issues/9\n"})
+    if case == "spec-md-issue":  # the spec dir's issue lives in spec.md only
+        root = _bare_reviews(tmp_path, pair, _LINE.format(w="#9", v="pass", n=2), {})
+        (root / "specs/001-x").mkdir(parents=True)
+        (root / "specs/001-x/plan.md").write_text("# plan\n")
+        (root / "specs/001-x/spec.md").write_text("issue: #9\n")
+        return root
+    if case == "blocked":
+        return _bare_reviews(tmp_path, pair, _LINE.format(w="#9", v="block", n=2), {})
+    if case == "review-header-active-plan":
+        return _bare_reviews(tmp_path, {f"{old}-a.md": "review: foo\n\nold\n", f"{mid}-b.md": "review: foo\n\nnew\n",
+                                        f"{new}-c.md": "review: foo\n\nnewer\n"},
+                             _LINE.format(w="foo", v="pass", n=2), {f"{_days_ago(10)}-foo.md": "# P\n"})
+    if case == "two-works":
+        return _bare_reviews(tmp_path, {f"{old}-a.md": "work: #9\nwork: #8\n\nold\n", f"{mid}-b.md": "work: #9\n\nnew\n"},
+                             _LINE.format(w="#9", v="pass", n=2) + _LINE.format(w="#8", v="pass", n=2), {})
+    raise AssertionError(case)
+
+
+@pytest.mark.parametrize("case", ["headerless", "url-issue", "spec-md-issue", "blocked",
+                                  "review-header-active-plan", "two-works"])
+def test_open_unknown_or_ambiguous_work_keeps_every_report(tmp_path, case):
+    """Refute round 2: heuristics dropped open work's reports. Fail-closed —
+    only a single-work header of closed work (by issue number, any spelling;
+    spec.md's issue included) makes a report removable."""
+    tidy = _tidy_mod()
+    assert tidy.old_review_reports(_round2_case(tmp_path, case), 30) == []
+
+
+def test_a_name_with_spaces_is_removed_with_git_rm(tmp_path):
+    """A closed work's superseded report is removed even with a space in its name."""
+    tidy = _tidy_mod()
+    rel = f".process-work/reviews/{_days_ago(90)}-a b.md"
+    root = _bare_reviews(tmp_path, {f"{_days_ago(90)}-a b.md": "work: #1\n\nold\n",
+                                    f"{_days_ago(80)}-b.md": "work: #1\n\nnew\n"},
+                         _LINE.format(w="#1", v="pass", n=2), {})
+    _lines, items = tidy.report(root, 30, with_remote=False, sizes=False)
+    assert items["reviews"] == [rel] and tidy.apply(root, items, 30) == 0
+    assert _git(root, "diff", "--cached", "--name-only").stdout.strip().strip('"') == rel
+
+
+@pytest.mark.parametrize("how", ["staged-rename", "assume-unchanged"])
+def test_a_report_git_cannot_give_back_is_kept(tmp_path, how):
+    """A renamed (not in HEAD) or hidden-edited (assume-unchanged) report is
+    compared by blob hash with HEAD, kept and named; apply exits 1."""
+    tidy = _tidy_mod()
+    old = _days_ago(90)
+    root = _bare_reviews(tmp_path, {f"{old}-a.md": "work: #1\n\nold\n", f"{_days_ago(80)}-b.md": "work: #1\n\nnew\n"},
+                         _LINE.format(w="#1", v="pass", n=2), {})
+    rv = ".process-work/reviews"
+    if how == "staged-rename":
+        _git(root, "mv", f"{rv}/{old}-a.md", f"{rv}/{_days_ago(91)}-a.md")
+        kept = f"{rv}/{_days_ago(91)}-a.md"
+    else:
+        _git(root, "update-index", "--assume-unchanged", f"{rv}/{old}-a.md")
+        with (root / rv / f"{old}-a.md").open("a") as fh:
+            fh.write("EDIT\n")
+        kept = f"{rv}/{old}-a.md"
+    _lines, items = tidy.report(root, 30, with_remote=False, sizes=False)
+    assert items["reviews"] == [] and kept in items["reviews_skipped"]
+    assert tidy.apply(root, items, 30) == 1 and (root / kept).is_file()
 
 
 def test_untracked_or_locally_changed_reports_are_never_deleted(tmp_path):

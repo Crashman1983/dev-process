@@ -567,7 +567,7 @@ def _report_keys(root: Path, plan_filter: str | None, plan_texts: dict[Path, str
     slugs = [_DATED.sub("", plan_filter)] if plan_filter else []
     issues: list = []
     for p, text in plan_texts.items():
-        s, i = _review_gate.plan_report_keys(_rel(root, p), text)
+        s, i = _review_gate.plan_report_keys(_rel(root, p), text, root)
         slugs += s
         issues += i
     return tuple(dict.fromkeys(s for s in slugs if s)), tuple(dict.fromkeys(issues))

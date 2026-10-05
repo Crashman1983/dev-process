@@ -1558,3 +1558,23 @@ def test_tier2_delta_keeps_its_behaviour_and_lists_its_files(render, tmp_path):
     _fix(out, "other.py", "x = 1\n")
     t = _bundle(out, "--base", "main", "--since", "HEAD~1").stdout
     assert _touches(t) == "other.py" and "REFUTE WARNING" not in t
+
+
+def test_a_spec_plans_report_keys_include_the_spec_md_issue(render, tmp_path):
+    """A Spec Kit dir declares its issue in spec.md first; the prior-report
+    lookup must reach a `work: #9` report through it (check_review.plan_report_keys)."""
+    out = render(tmp_path, {"project_name": "d", "modules": {"speckit": True}})
+    d = out / "specs/001-x"
+    d.mkdir(parents=True)
+    (d / "plan.md").write_text("# Plan\n\ntier: 2\n")
+    (d / "spec.md").write_text("# Spec\n\nissue: #9\n")
+    sys.dont_write_bytecode = True
+    sys.path.insert(0, str(out / "scripts/process"))
+    try:
+        spec = importlib.util.spec_from_file_location("bundle_keys", out / "scripts/process/make_review_bundle.py")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        slugs, issues = mod._report_keys(out, None, {d / "plan.md": (d / "plan.md").read_text()})
+    finally:
+        sys.path.remove(str(out / "scripts/process"))
+    assert "001-x" in slugs and (None, 9) in issues

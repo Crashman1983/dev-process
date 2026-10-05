@@ -44,6 +44,7 @@ import datetime as dt
 import fnmatch
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -261,16 +262,16 @@ def _report_date(root: Path, rel: str) -> dt.date | None:
 def old_review_reports(root: Path, days: int) -> list[str]:
     """Top-level review reports that are residue — the one owner of that rule.
 
-    Decided per report, through `check_review.report_of` (the rule the
-    review bundle uses to find a work's prior report): it goes only when
-    EVERY way of reaching it leads to closed work and ALL hold: older than
-    `days`; no `campaign:` header; reached by a journal work whose latest
-    REVIEW verdict is pass, which no active plan names (in its REVIEW lines
-    or text), and of which it is not the newest report; reached by no
-    active plan or `specs/*/plan.md` (`check_review.plan_report_keys`); and
-    no plan, archived plan or journal shard names its file. Evidence
-    directories (`reviews/<slug>/`) are never candidates. Anything unknown
-    keeps it. `unremovable` then keeps what git could not give back."""
+    Fail-closed: a report goes only when ALL hold — its header names exactly
+    one work (`work:`, else `review:`; `check_review.report_header` — a file
+    name never decides a deletion); that work's latest journal REVIEW
+    verdict is pass; no active plan or `specs/*/plan.md` references it
+    (`check_review.plan_report_keys` and the plans' REVIEW lines; issues
+    compared by number, whatever repository spelling, slugs exactly); it is
+    not that work's newest report; it is older than `days`; no `campaign:`
+    header; and no plan, archived plan or journal shard names its file.
+    Evidence directories (`reviews/<slug>/`) are never candidates.
+    `unremovable` then keeps what git could not give back."""
     rdir = root / _review_mod().REVIEW_REPORTS
     if not rdir.is_dir():
         return []
@@ -287,55 +288,59 @@ def old_review_reports(root: Path, days: int) -> list[str]:
     journal = cr.record_texts(root, ("journal",)) or []
     plans = cr.record_texts(root, cr.PLAN_KINDS) or []
     archive = cr.record_texts(root, ("plan-archive",)) or []
-    records = [fields for _rel, text in journal for _n, fields in cr.parse_review_lines(text)[0]]
+
+    def key(ref: str):
+        """A work's identity: an issue by its NUMBER (repository spelling
+        ignored — failing closed), else the slug exactly."""
+        k = cr.issue_key(ref)
+        return ("#", k[1]) if k is not None else ("slug", cr.DATE_PREFIX.sub("", ref))
+
+    records = [{**fields, "work": key(fields["work"])}
+               for _rel, text in journal for _n, fields in cr.parse_review_lines(text)[0]]
     standing = cr.latest_verdicts(records)
-
-    def reached(slugs, issues) -> list[str]:
-        """Every report `report_of` reaches by these keys, newest first."""
-        remaining, members = list(reports), []
-        while (hit := cr.report_of(remaining, slugs, issues)) is not None:
-            members.append(hit[0])
-            remaining.remove(hit)
-        return members
-
-    # decided per report: kept when ANY way of reaching it is open work
-    keep: set[str] = set()
-    open_works: set[str] = set()
-    plan_text = "\n".join(text for _rel, text in plans)
-    for rel, text in plans:  # an active plan reaches its reports by the bundle's keys
-        keep.update(reached(*cr.plan_report_keys(rel, text)))
-        open_works.update(fields["work"] for _n, fields in cr.parse_review_lines(text)[0])
-    drop: set[str] = set()
-    for work, fields in standing.items():
-        slugs, issues = cr.work_keys([work])
-        members = reached(slugs, issues)
-        if not members:
-            continue
-        keep.add(members[0])  # the newest of this work: the next delta reads it
-        named_in_plan = re.search(rf"(?<![\w#/.-]){re.escape(work)}(?![\w-])", plan_text)
-        closed = fields["verdict"] == "pass" and work not in open_works and not named_in_plan
-        (drop if closed else keep).update(members[1:])
+    open_keys: set = set()
+    for rel, text in plans:
+        slugs, issues = cr.plan_report_keys(rel, text, root)
+        open_keys.update(("slug", s) for s in slugs)
+        open_keys.update(("#", n) for _repo, n in issues)
+        open_keys.update(key(fields["work"]) for _n, fields in cr.parse_review_lines(text)[0])
+    by_work: dict = {}
+    for rel, text in reports:  # sorted by name: the last one is the newest
+        head = cr.report_header(text)
+        works = set(head.get("work") or head.get("review") or [])
+        if len(works) != 1 or _CAMPAIGN.search(text):
+            continue  # headerless, several works, a campaign: never removed
+        by_work.setdefault(key(works.pop()), []).append(rel)
     named = "\n".join(text for _rel, text in journal + plans + archive)
     out: list[str] = []
-    for rel, text in reports:
-        name = rel.rsplit("/", 1)[-1]
-        if rel not in drop or rel in keep or _CAMPAIGN.search(text) or name in named:
+    for work, rels in by_work.items():
+        verdict = standing.get(work)
+        if verdict is None or verdict["verdict"] != "pass" or work in open_keys:
             continue
-        d = _report_date(root, rel)
-        if d is not None and d < cutoff:
-            out.append(rel)
-    return out
+        for rel in rels[:-1]:  # the newest stays: the next delta round reads it
+            if rel.rsplit("/", 1)[-1] in named:
+                continue
+            d = _report_date(root, rel)
+            if d is not None and d < cutoff:
+                out.append(rel)
+    return sorted(out)
 
 
 def unremovable(root: Path, rels: list[str]) -> dict[str, str]:
-    """Why each of `rels` must not be removed — untracked, or changed against
-    HEAD: deleting it would destroy what git cannot give back."""
+    """Why each of `rels` must not be removed — untracked, not in HEAD, or its
+    working bytes differ from HEAD's blob (also under assume-unchanged or
+    skip-worktree, which hide an edit from `git diff`): deleting it would
+    destroy what git cannot give back."""
     out: dict[str, str] = {}
     for rel in rels:
         if _git(root, "ls-files", "--error-unmatch", "--", rel) is None:
             out[rel] = "not tracked by git"
-        elif subprocess.run(["git", "-C", str(root), "diff", "--quiet", "HEAD", "--", rel],
-                            capture_output=True).returncode != 0:
+            continue
+        committed = (_git(root, "rev-parse", "--verify", "--quiet", f"HEAD:{rel}") or "").strip()
+        working = (_git(root, "hash-object", "--", rel) or "").strip()
+        if not committed:
+            out[rel] = "not in HEAD"
+        elif working != committed:
             out[rel] = "changed against HEAD"
     return out
 
@@ -510,7 +515,7 @@ def apply(root: Path, items: dict, days: int) -> int:
         print(f"tidy: kept {rel} — {why}")
         rc = 1
     for rel in items.get("reviews", []):
-        print(f"tidy: $ git rm -q {rel}")
+        print(f"tidy: $ git rm -q -- {shlex.quote(rel)}")
         # never a plain unlink: git rm refuses an untracked or locally changed file,
         # and that refusal is what keeps the only copy
         r = subprocess.run(["git", "-C", str(root), "rm", "-q", "--", rel], capture_output=True, text=True)
