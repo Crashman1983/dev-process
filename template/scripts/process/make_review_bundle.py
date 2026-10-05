@@ -606,6 +606,38 @@ def _delta_files(root: Path, since: str) -> list[str] | None:
     return None if entries is None else list(dict.fromkeys(path for _l, _s, path in entries))
 
 
+# words of state-machine and event-driven work: a plan using two or more of
+# them without a `## Transitions` table likely lacks one (design-template.md);
+# a project adds its own with `transitions-vocabulary: a, b` in LOCAL_CHECKLIST
+TRANSITION_VOCABULARY = ("state", "event", "transition", "replay", "projection",
+                         "append", "expire", "revoke")
+_TRANSITIONS_HEADING = re.compile(r"^##+\s+Transitions\b", re.MULTILINE)
+_LOCAL_VOCABULARY = re.compile(r"^\s*transitions-vocabulary\s*:(.*)$", re.MULTILINE | re.IGNORECASE)
+_VOCABULARY_WORD = re.compile(r"[a-z][\w-]*")
+
+
+def _transition_vocabulary(local: str | None) -> tuple[str, ...]:
+    """The built-in words plus the project's (`transitions-vocabulary:` lines
+    of LOCAL_CHECKLIST); a token that is no plain word is ignored."""
+    extra = [w for m in _LOCAL_VOCABULARY.finditer(local or "")
+             for w in (t.strip().lower() for t in m.group(1).split(","))
+             if _VOCABULARY_WORD.fullmatch(w)]
+    return tuple(dict.fromkeys([*TRANSITION_VOCABULARY, *extra]))
+
+
+def _transitions_note(text: str, vocabulary: tuple[str, ...]) -> str | None:
+    """Advisory: a plan that speaks of states and events (two or more distinct
+    vocabulary words outside fenced blocks) but has no `## Transitions` table."""
+    body = _review_gate._unfenced(text)
+    if _TRANSITIONS_HEADING.search(body):
+        return None
+    hits = [w for w in vocabulary if re.search(rf"\b{re.escape(w)}\b", body, re.IGNORECASE)]
+    if len(hits) < 2:
+        return None
+    return (f"*(note: transitions table likely missing — the plan speaks of {', '.join(hits)} "
+            "but has no `## Transitions` section; design-template.md asks for state × event → result)*\n")
+
+
 _TEST_DIRS = frozenset({"test", "tests", "spec", "specs", "__tests__"})
 _TEST_NAME = re.compile(r"^(?:test_.+\..+|.+_test\..+|.+\.spec\..+|.+\.test\..+|conftest\.py)$")
 _PROSE = (".md", ".rst", ".txt")
@@ -786,9 +818,16 @@ def build(root: Path, base: str | None, plan_filter: str | None = None,
 
     add("## Plan(s) under review\n")
     if plans:
+        vocabulary = _transition_vocabulary(local)
         for p in plans:
             add(f"### {_label(root, p)}\n")
             add((plan_texts[p] or "*(unreadable)*") + "\n")
+            text = plan_texts[p]
+            note = (_transitions_note(text, vocabulary) if text
+                    and not p.name.startswith(_review_gate.DESIGN_DOC_PREFIX)
+                    and not _review_gate.review_waived(text) else None)
+            if note:
+                add(note)
     else:
         why = ("the branch touches no plan" if resolved is not None else
                "without a base ref the plans the branch touches cannot be listed")

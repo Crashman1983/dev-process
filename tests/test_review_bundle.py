@@ -1661,3 +1661,47 @@ def test_a_delta_bundle_carries_the_fix_streak(render, tmp_path):
     assert r.returncode == 0, r.stderr
     assert "## Fix streak\nfix-streak: note: 2 fix commits on widget.py" in r.stdout
 
+
+# --- advisory: a state-machine plan without a transitions table (design-template.md) ---
+
+TRANSITIONS_NOTE = "transitions table likely missing"
+
+
+def _plan_bundle(out: Path, body: str, local: str | None = None) -> str:
+    _seed_repo(out)
+    plan = out / ".process-work/plans/2026-07-09-widget.md"
+    plan.write_text("# Plan\n\ntier: 2\nissue: #9\n\n" + body)
+    if local is not None:
+        (out / "docs/process/review.local.md").write_text(local)
+    _git(out, "add", "-A", check=True)
+    _git(out, "commit", "-q", "-m", "plan", check=True)
+    r = _run(out, "--base", "main", "--skip-preflight")
+    assert r.returncode == 0, r.stderr
+    return r.stdout
+
+
+def test_a_plan_of_states_and_events_without_a_table_gets_the_note(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    text = _plan_bundle(out, "Each Event moves the order State; a stale grant must expire.\n")
+    plans = text.split("## Plan(s) under review", 1)[1].split("## Diff under review", 1)[0]
+    assert f"*(note: {TRANSITIONS_NOTE} — the plan speaks of state, event, expire" in plans
+
+
+@pytest.mark.parametrize("body", [
+    "Each event moves the state.\n\n## Transitions\n\n| State | Event | Result |\n",
+    "Render the widget in blue.\n",
+    "Rename the event handler.\n\n```\nstate transition replay\n```\n",  # fenced: a quotation
+], ids=["with-table", "unrelated", "fenced"])
+def test_no_transitions_note_with_a_table_or_without_the_vocabulary(render, tmp_path, body):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    assert TRANSITIONS_NOTE not in _plan_bundle(out, body)
+
+
+def test_a_project_word_from_review_local_counts(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    body = "The saga emits an event per step.\n"
+    assert TRANSITIONS_NOTE not in _plan_bundle(out, body)
+    out2 = render(tmp_path / "local", {"project_name": "d", "modules": {}})
+    text = _plan_bundle(out2, body, local="# Local\n\ntransitions-vocabulary: Saga, not a word!\n")
+    assert f"{TRANSITIONS_NOTE} — the plan speaks of event, saga " in text
+

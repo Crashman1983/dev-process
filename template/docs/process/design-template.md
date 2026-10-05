@@ -74,7 +74,9 @@ missing or unresolved input read as? Walk the classes of
 A table instead of prose invariants: state × event → result, including the
 forbidden transitions and when a derived assignment expires (its basis gone
 or changed). One test per equivalence class of rows, a negative test per
-forbidden transition. Other work omits this section.
+forbidden transition. Other work omits this section. The review bundle notes
+a likely missing table when a plan speaks of states, events or expiry and has
+no such section.
 
 | State | Event | Result |
 |---|---|---|
