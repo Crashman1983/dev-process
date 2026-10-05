@@ -73,7 +73,8 @@ from check_review import (  # noqa: E402  (one owner for grammar, digest, record
     SPEC_PLAN,
     SPECS_DIR,
     artifact_digest,
-    expand_work,
+    DATE_PREFIX,
+    _slug_in_name,
     work_key,
     parse_review_lines,
     readable,
@@ -202,13 +203,34 @@ def _texts(root: Path, journal_dir: Path) -> list[str]:
             for rel, text in record_texts(root, journal_dir=journal_dir) or []]
 
 
+def round_ids(args, root: Path) -> set[str]:
+    """The work ids whose rounds and root causes are this round's: a plan's slug
+    and its issue are one work — switching `--work 9` to `--work widget`
+    restarted the count at round 1 and skipped the root cause (refutation). But
+    only within ONE plan: an issue shared by several plans would lend plan A's
+    rounds to plan B (refutation). A slug names its plan (an active one first);
+    an issue names the active plans declaring it, narrowed to the one whose slug
+    the branch carries when several do. No single plan: the literal id alone."""
+    work = args.work
+    if work.endswith("-plan"):  # plan reviews count apart, literally
+        return {work}
+    key = work_key(work)
+    plans = [(rel, _plan_work_ids(plan_stem(rel), _unfenced(text), include_dedated=True))
+             for rel, text in record_texts(root, PLAN_KINDS + ("plan-archive",)) or []]
+    hits = [(rel, ids) for rel, ids in plans if key in {work_key(i) for i in ids}]
+    active = [(rel, ids) for rel, ids in hits if record_kind(rel) != "plan-archive"]
+    cands = active if (isinstance(key, tuple) or active) else hits
+    if len(cands) > 1:
+        leaf = (_git(root, "symbolic-ref", "--short", "HEAD") or "").rsplit("/", 1)[-1]
+        cands = [(rel, ids) for rel, ids in cands
+                 if _slug_in_name(DATE_PREFIX.sub("", plan_stem(rel)), leaf)]
+    return {work} | cands[0][1] if len(cands) == 1 else {work}
+
+
 def round_problems(args, root: Path, journal_dir: Path) -> tuple[int, list[str]]:
     """(the counted round, what is wrong with the claimed one)."""
     texts = _texts(root, journal_dir)
-    # the work as the Tier-3 anchor reads it (`expand_work`): a plan's slug and its
-    # issue are one work — switching `--work 9` to `--work widget` restarted the
-    # count at round 1 and skipped the root cause (refutation)
-    mine = {work_key(w) for w in expand_work(root, {args.work})[0]}
+    mine = {work_key(w) for w in round_ids(args, root)}
     # distinct rounds, not lines: several reviewers (lenses) of one round each
     # write their block line — that is one round (observed downstream: 21
     # duplicated block lines would have over-counted)
