@@ -2516,8 +2516,10 @@ def _plan_work_ids(stem: str, text: str, *, include_dedated: bool) -> set[str]:
     for m in ISSUE_DECL.finditer(text):
         # only a real issue ref may act as a clearing work-id — `issue: v2.0`
         # or `issue: none` must not let an unrelated REVIEW clear this plan
-        # (and `none` twice would let ONE review clear two plans)
-        tok = m.group(1)
+        # (and `none` twice would let ONE review clear two plans). Read through
+        # `ref_token`, as report headers and plan keys are: `**#42**`, `[#42](url)`
+        # and `#42,` name issue 42
+        tok = ref_token(m.group(1))
         if tok.isascii() and tok.isdigit():
             ids.add(tok)  # bare number, the historical form
             continue
