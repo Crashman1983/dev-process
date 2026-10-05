@@ -265,7 +265,8 @@ def check(root: Path) -> tuple[list[str], list[str]]:
                 f"`git checkout {default} && git merge --ff-only {branch} "
                 f"&& git push`")
     tail.append(f"git push origin --delete {branch}  # or let the platform "
-                f"auto-delete / `tidy.py --apply`")
+                f"auto-delete / `tidy.py --apply` (retarget a PR stacked on it "
+                f"first — GitHub closes a PR whose base vanishes)")
     tail.append("git worktree remove <path> && git worktree prune  # if this "
                 "branch rode a worktree")
     if (root / "scripts/process/publish_and_prune.py").is_file():

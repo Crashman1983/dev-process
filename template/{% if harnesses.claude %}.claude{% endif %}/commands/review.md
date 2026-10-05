@@ -123,3 +123,11 @@ Round economy — a failed round must not re-pay the whole chain:
   `attest.py --exception "<reason>"` writes a `REVIEW-EXCEPTION` line —
   also when no attest rule trips (a round beyond the cap) — countable,
   never silent.
+
+  Example: the second lens of round 2 reports after the fix for that round
+  has already landed. It still attests round 2, from the round-2 bundle, and
+  says why: `attest.py --work 42 --round 2 --bundle <round-2 bundle> …
+  --verdict block --exception "second lens attested after the fix landed"`
+  writes `REVIEW-EXCEPTION work=42 round=2: second lens attested after the
+  fix landed (overrides: …)` above its `REVIEW` line — the
+  overridden rule is named, or "no attest rule tripped".

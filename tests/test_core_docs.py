@@ -688,8 +688,10 @@ def test_execute_names_its_duties_before_pushed_and_testing_owns_the_own_conditi
     assert "attest.py --dry-run" in duties
     # a planned transition table is checked row class by row class — missing forbidden
     # transitions were a downstream blocker cluster; no general self-refute step is added
-    assert ("every row class has a test and every forbidden transition a negative test"
-            in duties.split("matches its planned inventory", 1)[1].split("\n3. ", 1)[0])
+    item2 = duties.split("matches its planned inventory", 1)[1].split("\n3. ", 1)[0]
+    assert "every row class has a test and every forbidden transition a negative test" in item2
+    # a fix covers its failure class, not the reported line — what the delta round judges
+    assert "covers the failure class everywhere it can recur" in item2 and "What each round judges" in item2
     assert "decision partner" in execute
     testing = (out / "docs/process/testing.md").read_text()
     assert "## Test under the conditions the change creates" in testing
@@ -697,6 +699,17 @@ def test_execute_names_its_duties_before_pushed_and_testing_owns_the_own_conditi
     assert "Test under the conditions the change creates" in catalog  # the catalog points to the one home
     tower = (out / "docs/process/tower.md").read_text()
     assert "question-unrouted" in tower and "decision_channel" in tower
+
+
+def test_round_economy_shows_an_exception_and_merge_residue_names_stacked_prs(render, tmp_path):
+    out = render(tmp_path, {"project_name": "demo"})
+    review = (out / ".claude/commands/review.md").read_text()
+    economy = review.split("Round economy", 1)[1]
+    assert ('--exception "second lens attested after the fix landed"' in economy
+            and "REVIEW-EXCEPTION work=42 round=2:" in economy)
+    commits = (out / "docs/process/commits.md").read_text()
+    merge = commits.split("**Merge leaves no residue.**", 1)[1].split("\n\n", 1)[0]
+    assert "Retarget a PR stacked on the branch before deleting it" in merge
 
 
 def test_execute_exercises_named_host_preconditions_before_review(render, tmp_path):

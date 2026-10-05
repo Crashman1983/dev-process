@@ -120,6 +120,8 @@ def test_ready_with_pass_prints_ordered_tail(render, tmp_path):
     di = r.stdout.index("--delete")
     assert ai < mi < di
     assert "worktree" in r.stdout
+    # deleting the base of a stacked PR closes it on GitHub — the tail says so
+    assert "retarget a PR stacked on it first" in r.stdout[di:].split("\n", 1)[0]
 
 
 def test_blocked_on_dirty_worktree(render, tmp_path):
