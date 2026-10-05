@@ -17,7 +17,9 @@ Dry run by default: a report with counts and the exact command per item.
   - delete remote branches whose tip is already contained in the default
     branch (nothing unmerged can be lost; `--keep GLOB` protects patterns)
   - publish and prune spec directories whose tasks.md is fully ticked
-    (via publish_and_prune.py, where the speckit module is installed)
+    (via publish_and_prune.py, where the speckit module is installed) —
+    a directory the pruner would refuse (no plan, an unaccounted SC, a file
+    in it a tracked file outside still references) is listed, not applied
   - fold journal shards older than the window (compact_journal.py)
   - remove archived plans older than the retention window (git history
     keeps them; the review gate reads the journal's REVIEW lines, which
@@ -203,6 +205,16 @@ def spec_blocker(root: Path, name: str) -> str | None:
         return "plan.md has no issue: ref"
     if unaccounted:
         return "unaccounted Success Criteria " + ", ".join(unaccounted)
+    referenced = getattr(mod, "referenced_files", None)
+    if referenced is None:  # an older pruner: it decides at --apply
+        return None
+    try:
+        refs = referenced(root, d)
+    except (Exception, SystemExit) as exc:  # noqa: BLE001 — no answer is a refusal, named
+        return f"reference check failed ({exc})"
+    if refs:
+        return "still referenced: " + ", ".join(f"{rel} by {where}"
+                                                for rel, where in sorted(refs.items()))
     return None
 
 
@@ -460,7 +472,8 @@ def report(root: Path, days: int, keep: tuple[str, ...] = DEFAULT_KEEP,
         shown = "; ".join(f"{d}: {why}" for d, why in list(sb.items())[:4])
         lines.append(f"- spec directories fully ticked that publish_and_prune would refuse: {len(sb)} "
                      f"({shown}{'; …' if len(sb) > 4 else ''}) — YOUR call: add the missing piece, "
-                     f"or delete the directory (git history keeps it); `--apply` leaves them")
+                     f"move what is still referenced out of {SPECS}/, or delete the directory "
+                     f"once nothing references it (git history keeps it); `--apply` leaves them")
     p = items["stale_plans"]
     lines.append(f"- active plans older than {days} days: {len(p)}"
                  + (f" ({', '.join(p[:4])}{', …' if len(p) > 4 else ''}) — YOUR call: "

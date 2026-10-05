@@ -5,6 +5,8 @@ prune merge ritual."""
 import subprocess
 import sys
 
+import pytest
+
 CONST = ".specify/memory/constitution.md"
 OVR = ".specify/templates/overrides"
 
@@ -338,3 +340,68 @@ def test_publish_refuses_on_denylist_hit(render, tmp_path):
     assert r.returncode == 1
     assert "REFUSED" in r.stderr and "line 5" in r.stderr and "acme-" in r.stderr
     assert not log.exists()  # nothing was posted
+
+
+# --- Kenni #2382: the prune never deletes what tracked code still uses, nor uncommitted work
+
+def _probe_repo(render, tmp_path, test_body):
+    import os
+    out = _render(render, tmp_path)
+    d = out / "specs/013-probe"
+    (d / "probes").mkdir(parents=True)
+    (d / "spec.md").write_text("# Spec\n")
+    (d / "plan.md").write_text("# Plan\n\nissue: #13\n")
+    (d / "tasks.md").write_text("- [x] T001 done\n")
+    (d / "probes/egress_probe.py").write_text("OK = True\n")
+    (out / "tests").mkdir(exist_ok=True)
+    (out / "tests/test_x.py").write_text(test_body)
+    for args in (("init", "-q", "-b", "main"), ("config", "user.email", "t@t"),
+                 ("config", "user.name", "t"), ("add", "-A"), ("commit", "-q", "-m", "base")):
+        subprocess.run(["git", *args], cwd=out, check=True, capture_output=True)
+    binpath, log = _fake_gh(tmp_path, comment_fails=False)
+    env = {**os.environ, "PATH": f"{binpath}:{os.environ['PATH']}"}
+    prune = [sys.executable, str(out / "scripts/process/publish_and_prune.py"), "013-probe"]
+    return out, d, log, lambda: subprocess.run(prune, cwd=out, capture_output=True,
+                                               text=True, env=env)
+
+
+IMPORTS_PROBE = ("import sys\nfrom pathlib import Path\n"
+                 "sys.path.insert(0, str(Path(__file__).parents[1] / 'specs/013-probe/probes'))\n"
+                 "import egress_probe\n")
+
+
+def test_prune_refuses_a_spec_dir_whose_probe_a_tracked_test_imports(render, tmp_path):
+    out, d, log, prune = _probe_repo(render, tmp_path, IMPORTS_PROBE)
+    r = prune()
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert "tests/test_x.py:3" in r.stderr and "specs/013-probe/probes/" in r.stderr
+    assert (d / "probes/egress_probe.py").is_file() and not log.exists()
+
+
+@pytest.mark.parametrize("line", ["p = 'specs/013-probe/probes/egress_probe.py'\n",
+                                  "from probes.egress_probe import OK\n"])
+def test_prune_names_a_file_reference_by_path_or_module(render, tmp_path, line):
+    out, d, log, prune = _probe_repo(render, tmp_path, "import os\n" + line)
+    r = prune()
+    assert r.returncode == 1
+    assert "specs/013-probe/probes/egress_probe.py (referenced at tests/test_x.py:2)" in r.stderr
+    assert d.is_dir()
+
+
+def test_prune_of_an_unreferenced_spec_dir_works_as_before(render, tmp_path):
+    out, d, log, prune = _probe_repo(render, tmp_path, "def test_x():\n    assert True\n")
+    r = prune()
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert not d.exists() and "pruned specs/013-probe/" in r.stdout
+
+
+@pytest.mark.parametrize("dirty", ["untracked", "modified"])
+def test_prune_refuses_uncommitted_content_and_deletes_nothing(render, tmp_path, dirty):
+    out, d, log, prune = _probe_repo(render, tmp_path, "def test_x():\n    assert True\n")
+    target = d / ("probes/notes.txt" if dirty == "untracked" else "probes/egress_probe.py")
+    target.write_text("work in progress\n")
+    r = prune()
+    assert r.returncode == 1
+    assert "uncommitted or untracked" in r.stderr and "nothing pruned" in r.stderr
+    assert target.read_text() == "work in progress\n" and (d / "spec.md").is_file()
+    assert not log.exists()
