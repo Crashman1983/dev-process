@@ -234,8 +234,7 @@ def build_line(args, root: Path, journal_dir: Path | None = None) -> tuple[str, 
     if base and head and not problems and mode == "full":
         why = full_round_base_problem(root, base, head)
         if why:
-            problems.append(f"{why} — rebuild the bundle against the integration branch, "
-                            "or review the slice as a delta round (--since)")
+            problems.append(why)
     if base and head and not problems:
         digest = artifact_digest(root, base, head, mode=mode)
         if digest is None:

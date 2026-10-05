@@ -1290,19 +1290,29 @@ def full_round_base_problem(root: Path, base: str, head: str) -> str | None:
     `head` from the integration branch (`_integration_base`). Any other base
     reviews a slice and records it as the whole (#160). The writers (attest,
     the review bundle) refuse it; a fork that cannot be told is refused with
-    the reason. The gate's reading of existing records is unchanged."""
+    the reason. A head an integration ref already contains is an audit of a
+    merged range: no fork bounds it, and any base stands. The gate's reading
+    of existing records is unchanged."""
+    for ref in integration_refs(root):
+        if (_git_bytes(root, "rev-parse", "--verify", "-q", f"{ref}^{{commit}}") is not None
+                and _git_bytes(root, "merge-base", "--is-ancestor", head, ref) is not None):
+            return None  # already integrated: an audit of a merged range
     try:
         found = _integration_base(root, head)
     except GitReadError as exc:
-        return f"a full round's base must be the fork point of the head: {exc}"
+        return (f"a full round's base must be the one fork point of the head: {exc}")
     if found is None:
         return (f"a full round's base must be the fork point of {head[:12]} from the "
-                f"integration branch, and none resolves (no integration ref, or it already "
-                f"contains the head) — fetch it")
+                f"integration branch, and no integration ref resolves — fetch it; if the "
+                f"remote's default branch is not main/master, run `git remote set-head "
+                f"origin -a` so origin/HEAD names it")
     ref, fork = found
     resolved = (_git_bytes(root, "rev-parse", "--verify", "-q", f"{base}^{{commit}}") or b"").strip()
     if resolved.decode(errors="replace") != fork:
-        return f"base {base[:12]} is not the fork point {fork[:12]} of {head[:12]} from {ref}"
+        return (f"base {base[:12]} is not the fork point {fork[:12]} of {head[:12]} from {ref} "
+                f"— a full round reviews the whole branch from the integration branch (Tier 3 "
+                f"needs one); a stacked branch rebases onto {ref} first, a slice is reviewed "
+                f"as a delta round (--since)")
     return None
 
 
