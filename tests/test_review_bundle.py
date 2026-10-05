@@ -1199,6 +1199,17 @@ def test_the_tier_warning_needs_no_base(render, tmp_path):
     assert "REFUTE WARNING" in r.stderr
 
 
+def test_a_tier_two_plan_without_a_base_is_told_gate_code_went_unchecked(render, tmp_path):
+    """Refute of v2.47: Tier 2 needs no refute run, but without a base nobody can
+    see gate code — the bundle said nothing at all."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    _plan_commit(out, "# Plan\n\ntier: 2\nissue: #9\n")
+    r = _bundle(out, "--base", "nosuchbase", "--plan", "widget")
+    assert "REFUTE check unavailable: no base ref, so gate code cannot be detected" in r.stdout
+    assert "**REFUTE WARNING:**" not in r.stdout
+
+
 def test_gate_code_warns_once_and_a_long_list_is_cut(render, tmp_path):
     out = render(tmp_path, {"project_name": "d", "modules": {}})
     _seed_repo(out)
