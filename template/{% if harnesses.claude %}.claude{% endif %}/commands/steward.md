@@ -21,15 +21,14 @@ on each monitoring tick. Without a channel, keep the reports-only workflow.
 
 ## Loop
 
-Two wakes, both armed by you. The **watch**: on every wake, put a
-monitor on the reports file (the `reports.jsonl` inside the
-`process-tower` folder of the git common dir — Claude Code: the `Monitor`
-tool on `tail -f` of that file) so a `planned`, `pushed`, `blocked`,
-`review-pass` or `done` line wakes you the moment it is written, not at
-the next tick. A monitor lives at most thirty minutes: re-arm it on every
-wake, first thing. The **tick**: `/loop 30m /steward`, the owner sets it
+Two wakes, both armed by you. The **watch**: on every wake, first thing,
+run `uv run scripts/process/tower.py --wait --timeout 1800 --states
+planned,pushed,blocked,review-pass,done` as a background command; its
+exit is the wake — a report line the moment it is written (exit 0, the
+record on stdout), or thirty quiet minutes (exit 3). Re-arm it on every
+wake. The **tick**: `/loop 30m /steward`, the owner sets it
 once; it catches what no file shows (a stale worker, a train ready to
-depart, a monitor that expired). Neither replaces the other: a
+depart, a watch that was not re-armed). Neither replaces the other: a
 `DECISION NEEDED` without a `blocked` report is seen only by the tick's
 tower run. Owner messages are a third wake. On each wake:
 

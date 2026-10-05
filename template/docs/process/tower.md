@@ -24,6 +24,7 @@ conversations.
 | `sessions` | every worker `dispatch.py` started: phase, model, where (tmux window or pid), alive, last printed line and when | the look at the workers; `dispatch.py log <branch>` for more |
 | `questions` | open `DECISION NEEDED` lines in active plans | what only the owner can answer — relayed with options, answered as a `DECISION` line |
 | `findings` | deterministic, each with a *because* | the list to act on |
+| `--wait`, `--section` (flags) | `--wait [--timeout S] [--states a,b]` blocks on this host's reports file and prints each new matching line as JSON (exit 0; 3 on timeout; 2 outside a clone); `--json --section NAME` (repeatable) prints only those keys | the steward's harness-neutral watch (`/steward`); a small read instead of the whole table |
 
 ## Findings (deterministic)
 
