@@ -649,3 +649,24 @@ def test_file_refuses_every_escape_below_the_root(tmp_path, rel):
     (root / 'inner' / 'escape').symlink_to(outside, target_is_directory=True)
     with pytest.raises(ValueError):
         load('template_verify')._file(root, rel)
+
+
+@pytest.mark.parametrize('src', ['--upload-pack=touch pwned', '-u x', 'ext::sh -c touch% pwned'])
+def test_an_option_shaped_template_source_never_reaches_git_or_copier(update, monkeypatch, src):
+    """`_src_path` comes from the project's answers; as an option it would run a command."""
+    root, source, base, verifier = update
+    answers = root / '.copier-answers.yml'
+    git(root, 'checkout', '-qb', 'injected', base)
+    answers.write_text(answers.read_text().replace(str(source), src))
+    forged_base = commit(root)
+    answers.write_text(answers.read_text().replace('v1.0.0', 'v1.1.0'))
+    commit(root)
+    ran = []
+    monkeypatch.setattr(verifier, 'render', lambda *a, **k: ran.append(a) or False)
+    monkeypatch.setattr(verifier, '_clone', lambda *a, **k: ran.append(a) or root)
+    proof = verifier.verify(root, forged_base)
+    assert any('unsupported template source' in e for e in proof['errors']), proof
+    assert not proof['identical'] and ran == []
+    with pytest.raises(ValueError, match='unsupported template source'):
+        verifier._source(src)
+    assert load('template_update').render(src, 'v1.0.0', {}, root.parent / 'never') is False
