@@ -34,6 +34,7 @@ the human reads BEFORE planning starts. The issue ref comes from spec.md's
 """
 from __future__ import annotations
 
+import fnmatch
 import json
 import re
 import shutil
@@ -93,12 +94,71 @@ def _needles(rel: str, *, is_dir: bool = False) -> list[str]:
     return list(dict.fromkeys(found))
 
 
+def _tokens(rel_dir: str, files: list[str]) -> dict[str, str]:
+    """{whole token: key} that name the directory without its path: the spec
+    directory's name (`Path("specs") / "<feature>"`, `Path("specs", "<feature>")`)
+    and the bare stem of each module in it (`import_module("<stem>")`,
+    `pytest_plugins = ["<stem>"]`, `import <stem>` after a sys.path insert).
+    The examples here are placeholders on purpose: this file is tracked too. Dunder stems (`__init__`) name no module by themselves."""
+    tokens = {rel_dir.rsplit("/", 1)[-1]: rel_dir + "/"}
+    for rel in files:
+        stem = rel.rsplit("/", 1)[-1][:-3] if rel.endswith(".py") else ""
+        if stem and not (stem.startswith("__") and stem.endswith("__")):
+            tokens.setdefault(stem, rel)
+    return tokens
+
+
+def _whole(token: str, text: str) -> bool:
+    return re.search(rf"(?<![\w-]){re.escape(token)}(?![\w-])", text) is not None
+
+
+# a path under the spec root with a wildcard or a variable in a segment: `*`,
+# `?`, `**`, `[…]`, `{a,b}`, `<name>`, Makefile `$(F)`, shell `${F}`
+_GLOB = re.compile(r"specs/(?:\$\([^)\s]*\)|\$\{[^}\s]*\}|\{[^}\s]*\}|<[^>\s]*>|[^\s'\"`,;(){}<>])+")
+_GLOB_HIT = r"specs/[^[:space:]]*([][*?{<]|[$][({])"
+
+
+def _glob_segments(token: str) -> list[str]:
+    token = re.sub(r"\$\([^)]*\)|\$\{[^}]*\}|\{[^}]*\}|<[^>]*>", "*", token)
+    return token.rstrip("/").split("/")
+
+
+def _glob_matches(segs: list[str], parts: list[str]) -> bool:
+    """Segment-wise: `*` and `?` stay inside one path segment, `**` spans any."""
+    if not segs:
+        return not parts
+    if segs[0] == "**":
+        return any(_glob_matches(segs[1:], parts[i:]) for i in range(len(parts) + 1))
+    return bool(parts) and fnmatch.fnmatchcase(parts[0], segs[0]) and _glob_matches(segs[1:], parts[1:])
+
+
+def _glob_target(token: str, files: list[str]) -> str | None:
+    """The file or subdirectory of the spec directory that the glob `token`
+    reaches — never the spec directory itself or a Markdown artifact: process
+    tools glob `specs/*/plan.md` and the like, and the ritual publishes those."""
+    if not any(c in token for c in "*?[{<$"):
+        return None
+    segs = _glob_segments(token)
+    for rel in files:
+        parts = rel.split("/")
+        for depth in range(3, len(parts) + 1):  # a subdirectory, then the file
+            if depth == len(parts) and rel.endswith(".md"):
+                continue
+            if _glob_matches(segs, parts[:depth]):
+                return "/".join(parts[:depth]) + ("/" if depth < len(parts) else "")
+    return None
+
+
 def referenced_files(root: Path, fdir: Path) -> dict[str, str]:
     """{tracked file or directory (`…/`) under `fdir`: "referrer:line"} — what
     the prune would delete although a tracked file outside it (not
-    .process-work/, not Markdown) still names it. Observed downstream: a test
-    imported a probe under specs/<feature>/probes/, the prune deleted it, the
-    suite went red. RuntimeError when git cannot answer — no answer, no prune."""
+    .process-work/, not Markdown — a doctest or snippet in a .md file is not
+    read) still names it: by path, by dotted module path, by the directory's
+    name or a module's bare stem as a whole token, or by a glob over specs/
+    that reaches a non-Markdown file or a subdirectory in it. Over-refusing is
+    cheap — the referrer is named; a deleted probe a test imports is not
+    (observed downstream). RuntimeError when git cannot answer — no answer,
+    no prune."""
     rel_dir = fdir.relative_to(root).as_posix()
     ls = _git_out(root, "ls-files", "-z", "--", rel_dir)
     if ls.returncode != 0:
@@ -112,23 +172,40 @@ def referenced_files(root: Path, fdir: Path) -> dict[str, str]:
         while len(parent) >= len(rel_dir):
             needles.setdefault(parent + "/", _needles(parent, is_dir=True))
             parent = parent.rsplit("/", 1)[0]
-    pats = dict.fromkeys(n for ns in needles.values() for n in ns)
-    r = _git_out(root, "grep", "-n", "-z", "-I", "-F", "--no-color",
-                 *[a for n in pats for a in ("-e", n)],
-                 "--", ".", ":(exclude).process-work", f":(exclude){rel_dir}", ":(exclude)*.md")
-    if r.returncode not in (0, 1):  # 1: no match
-        raise RuntimeError(f"git grep failed: {r.stderr.decode(errors='replace').strip()}")
+    tokens = _tokens(rel_dir, files)
+    pats = dict.fromkeys([*(n for ns in needles.values() for n in ns), *tokens])
+    scope = ("--", ".", ":(exclude).process-work", f":(exclude){rel_dir}", ":(exclude)*.md")
     hits: dict[str, str] = {}
-    for line in r.stdout.decode(errors="surrogateescape").splitlines():
-        fields = line.split("\0", 2)
-        if len(fields) != 3:
-            continue
-        path, lineno, text = fields
+    for line, path, lineno in _grep(root, "-F", *[a for n in pats for a in ("-e", n)], *scope):
         # the most specific name on the line: a file's path also names its directories
-        matched = [(len(n), key) for key, ns in needles.items() for n in ns if n in text]
+        matched = [(len(n), key) for key, ns in needles.items() for n in ns if n in line]
         if matched:
             hits.setdefault(max(matched)[1], f"{path}:{lineno}")
+            continue
+        for token, key in tokens.items():
+            if _whole(token, line):
+                hits.setdefault(key, f"{path}:{lineno}, names {token!r}")
+                break
+    for line, path, lineno in _grep(root, "-E", "-e", _GLOB_HIT, *scope):
+        for token in _GLOB.findall(line):
+            target = _glob_target(token, files)
+            if target:
+                hits.setdefault(target, f"{path}:{lineno}, glob {token}")
+                break
     return hits
+
+
+def _grep(root: Path, *args: str) -> list[tuple[str, str, str]]:
+    """(text, path, line number) of each tracked line `git grep` matches."""
+    r = _git_out(root, "grep", "-n", "-z", "-I", "--no-color", *args)
+    if r.returncode not in (0, 1):  # 1: no match
+        raise RuntimeError(f"git grep failed: {r.stderr.decode(errors='replace').strip()}")
+    out = []
+    for raw in r.stdout.decode(errors="surrogateescape").splitlines():
+        fields = raw.split("\0", 2)
+        if len(fields) == 3:
+            out.append((fields[2], fields[0], fields[1]))
+    return out
 
 
 def _dirty(root: Path, fdir: Path) -> list[str]:

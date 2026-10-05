@@ -388,6 +388,31 @@ def test_prune_names_a_file_reference_by_path_or_module(render, tmp_path, line):
     assert d.is_dir()
 
 
+@pytest.mark.parametrize("rel,body,named", [
+    ("tests/test_y.py", "from pathlib import Path\nP = Path('specs') / '013-probe' / 'probes'\n",
+     "specs/013-probe/ (referenced at tests/test_y.py:2, names '013-probe')"),
+    ("tests/test_y.py", "from pathlib import Path\nP = Path('specs', '013-probe', 'probes')\n",
+     "specs/013-probe/ (referenced at tests/test_y.py:2, names '013-probe')"),
+    ("tests/test_y.py", "import importlib\nM = importlib.import_module('egress_probe')\n",
+     "specs/013-probe/probes/egress_probe.py (referenced at tests/test_y.py:2, names 'egress_probe')"),
+    ("tests/conftest.py", "import os\npytest_plugins = ['egress_probe']\n",
+     "specs/013-probe/probes/egress_probe.py (referenced at tests/conftest.py:2, names 'egress_probe')"),
+    ("tests/test_y.py", "import glob\nP = glob.glob('specs/*/probes/*.py')\n",
+     "(referenced at tests/test_y.py:2, glob specs/*/probes/*.py)"),
+    ("Makefile", "probe:\n\tPYTHONPATH=specs/$(F)/probes pytest\n",
+     "specs/013-probe/probes/ (referenced at Makefile:2, glob specs/$(F)/probes)"),
+])
+def test_prune_refuses_a_reference_by_name_stem_or_glob(render, tmp_path, rel, body, named):
+    """Refute of #2382: a reference that spells no path still uses the directory."""
+    out, d, log, prune = _probe_repo(render, tmp_path, "def test_x():\n    assert True\n")
+    (out / rel).write_text(body)
+    subprocess.run(["git", "add", "-A"], cwd=out, check=True)
+    subprocess.run(["git", "commit", "-qm", "referrer"], cwd=out, check=True)
+    r = prune()
+    assert r.returncode == 1 and named in r.stderr, r.stderr
+    assert (d / "probes/egress_probe.py").is_file() and not log.exists()
+
+
 def test_prune_of_an_unreferenced_spec_dir_works_as_before(render, tmp_path):
     out, d, log, prune = _probe_repo(render, tmp_path, "def test_x():\n    assert True\n")
     r = prune()
