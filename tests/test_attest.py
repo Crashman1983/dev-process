@@ -336,6 +336,8 @@ def test_attest_writes_a_tier3_delta_only_on_an_anchored_full_round(render, tmp_
     (out / ".process-work/reviews").mkdir(parents=True)
     (out / ".process-work/reviews/2026-09-11-widget.md").write_text(
         "work: widget\n\nFINDING sev=blocker action=fix issue=- gate=judgement widget.py returns 42\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "review round 1")  # the report lands before the fix
     (out / "widget.py").write_text("def widget():\n    return 43\n")
     _git(out, "add", "-A")
     _git(out, "commit", "-q", "-m", "fix: widget")

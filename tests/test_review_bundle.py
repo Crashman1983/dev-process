@@ -339,6 +339,8 @@ def test_delta_bundle_carries_findings_and_exact_delta_artifact(render, tmp_path
     (reports / "2026-07-10-widget.md").write_text("FINDING prior finding\n")
     # a newer report of ANOTHER work item must not stand in for this one's
     (reports / "2026-07-11-gadget.md").write_text("FINDING stranger's finding\n")
+    _git(out, "add", "-A", check=True)  # the report lands before the fix (the gate's rule)
+    _git(out, "commit", "-q", "-m", "review round 1", check=True)
     (out / "widget.py").write_text("def widget():\n    return 43\n")
     _git(out, "add", "-A", check=True)
     _git(out, "commit", "-q", "-m", "fix: widget", check=True)
@@ -838,6 +840,8 @@ def test_a_delta_finds_the_previous_report_by_its_header(render, tmp_path):
         "review: round-one\nwork: #9\npublish-waived: local\n\n## Findings\nFINDING prior finding\n")
     (reports / "2026-07-11-round-one-elsewhere.md").write_text(
         "review: round-one-elsewhere\nwork: #10\n\n## Findings\nFINDING stranger's finding\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "review round 1")
     (out / "widget.py").write_text("def widget():\n    return 43\n")
     _git(out, "add", "-A")
     _git(out, "commit", "-q", "-m", "fix: widget")
@@ -953,11 +957,15 @@ def test_a_report_of_another_work_is_never_this_items(render, tmp_path):
     reports.mkdir(parents=True)
     (reports / "2026-07-10-r.md").write_text("review: widgets-fix\nwork: #12\n\nFINDING stranger's finding\n")
     (reports / "2026-07-11-widget.md").write_text("review: widget\nwork: #12\n\nFINDING stranger's too\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "reports")  # only committed reports count
     t = _bundle(out, "--base", "main", "--since", "HEAD").stdout
     assert "stranger" not in _findings(t) and "no review report for this work item" in t
     # issues are tried first: a report of #9 beats a newer one named after the slug
     (reports / "2026-07-12-a.md").write_text("review: a\nwork: #9\n\nFINDING by issue\n")
     (reports / "2026-07-13-widget-notes.md").write_text("FINDING by name\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "more reports")
     assert "FINDING by issue" in _findings(_bundle(out, "--base", "main", "--since", "HEAD").stdout)
 
 
@@ -968,6 +976,8 @@ def test_another_repositorys_issue_is_not_this_repos(render, tmp_path):
     reports = out / ".process-work/reviews"
     reports.mkdir(parents=True)
     (reports / "2026-07-10-r.md").write_text("review: r\nwork: other/repo#9\n\nFINDING stranger's finding\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "report")
     assert "stranger" not in _findings(_bundle(out, "--base", "main", "--since", "HEAD").stdout)
 
 
