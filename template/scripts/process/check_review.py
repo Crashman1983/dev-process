@@ -2394,8 +2394,8 @@ def no_clearing_review(rel: str, tier: int, ids) -> str:
     work = sorted(ids)
     pick = min(work, key=lambda i: (len(i), i)) if work else "<id>"
     return (f"{rel}: tier {tier} plan has no clearing REVIEW (verdict=pass, work in {work}, "
-            f"tier>={tier}). Two ways out: review it and attest (attest.py --work {pick} "
-            f"--tier {tier} … --verdict pass), or record the exception in the plan: "
+            f"tier>={min(tier, 3)}). Two ways out: review it and attest (attest.py --work {pick} "
+            f"--tier {min(tier, 3)} … --verdict pass), or record the exception in the plan: "
             f"'review-waived: <reason> #<issue>' (journal-state-plans.md)")
 
 
