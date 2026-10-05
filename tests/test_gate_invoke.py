@@ -35,7 +35,7 @@ def test_declared_dependencies_read_textually(render, tmp_path):
     gi = _load(out)
     deps = gi.declared_dependencies(out / "scripts/process/gate_runner.py")
     assert any(d.lower().startswith("pyyaml") for d in deps), deps
-    assert gi.declared_dependencies(out / "scripts/process/check_kernel.py") == []
+    assert gi.declared_dependencies(out / "scripts/process/check_review.py") == []
 
 
 def test_child_argv_routes_declaring_scripts_through_uv(render, tmp_path, monkeypatch):
@@ -45,7 +45,7 @@ def test_child_argv_routes_declaring_scripts_through_uv(render, tmp_path, monkey
     runner = ["python", "scripts/process/gate_runner.py", "--list"]
     assert gi.child_argv(out, runner)[:3] == ["uv", "run", "--script"]
     assert gi.child_argv(out, runner)[-1] == "--list"
-    plain = ["python", "scripts/process/check_kernel.py", "."]
+    plain = ["python", "scripts/process/check_review.py", "."]
     assert gi.child_argv(out, plain) == plain  # no declaration: unchanged
     monkeypatch.setattr(gi.shutil, "which", lambda name: None)
     assert gi.child_argv(out, runner) == runner  # no uv: pre-existing behaviour
