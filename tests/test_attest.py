@@ -95,6 +95,17 @@ def test_a_full_round_of_an_integrated_head_is_an_audit_and_stands(render, tmp_p
     assert r.returncode == 0, r.stderr
 
 
+def test_a_forged_integration_ref_at_the_head_is_no_audit(render, tmp_path):
+    """Refute 2: origin/main forged to the head read as 'merged'; local main still forks it."""
+    out, _base, _head = _repo(render, tmp_path)
+    (out / "widget.py").write_text("def widget():\n    return 43\n")
+    _git(out, "commit", "-qam", "fix: widget")
+    head = _git(out, "rev-parse", "HEAD").stdout.strip()
+    _git(out, "update-ref", "refs/remotes/origin/main", head)
+    r = _attest(out, "--base", _git(out, "rev-parse", "HEAD^").stdout.strip(), "--head", head)
+    assert r.returncode == 1 and "is not the fork point" in r.stderr, r.stderr
+
+
 def test_a_full_round_without_an_integration_ref_names_set_head(render, tmp_path):
     out, base, head = _repo(render, tmp_path)
     _git(out, "branch", "-m", "main", "trunk")  # no main, no origin/HEAD

@@ -1242,14 +1242,21 @@ def integration_ref(root: Path, tip: str = "HEAD") -> str | None:
 
 def _integration_base(root: Path, tip: str) -> tuple[str, str] | None:
     """(integration ref, fork point SHA) of tip — `process_git.fork_point`
-    owns the fork. None when no ref bounds tip (none resolves, none shares a
-    commit, or the ref already contains tip — a primary one ends the search).
-    An ambiguous fork point of the ref that would be chosen is no
-    None: read as "no base" it turned the gate's arms off (downstream #2381) —
-    it raises GitReadError, which the gate, finish and the train name."""
+    owns the fork. Every candidate is scanned in order (primary remotes,
+    other remotes, local names); a ref that already contains tip is skipped,
+    never terminal: a forged or stale `origin/main` at HEAD must not switch
+    the base-scoped arms off. None only when no other ref yields a fork.
+
+    An ambiguous fork point is no None either: read as "no base" it turned
+    the gate's arms off (downstream #2381). On a primary ref that does not
+    contain tip it raises GitReadError (the gate, finish and the train name
+    it). On a fallback it is skipped when another ref answers — a later
+    unique fork, or a ref containing tip (on main, a criss-crossed upstream
+    must not red main) — and raises when nothing does."""
     tip_sha = (_git_bytes(root, "rev-parse", "--verify", "-q", f"{tip}^{{commit}}") or b"").strip()
     if not tip_sha:
         return None
+    tip_hex = tip_sha.decode()
     listed = _git_bytes(root, "for-each-ref", "--format=%(refname:short)",
                         "refs/remotes/*/main", "refs/remotes/*/master")
     others = [r for r in (listed or b"").decode(errors="replace").split()
@@ -1257,25 +1264,25 @@ def _integration_base(root: Path, tip: str) -> tuple[str, str] | None:
     remote_names = set(_remote_defaults(root)) | {f"origin/{n}" for n in INTEGRATION_NAMES}
     remotes = [r for r in integration_refs(root) if r in remote_names]
     local = [r for r in integration_refs(root) if r not in remote_names]
-    # a primary integration ref that already contains tip (on main, CI's push
-    # to main, a merged branch): no range to bound — None, as before. Never on
-    # to a fallback remote, whose criss-cross would red main itself
-    for ref in remotes:
-        if (_git_bytes(root, "rev-parse", "--verify", "-q", f"{ref}^{{commit}}") is not None
-                and _git_bytes(root, "merge-base", "--is-ancestor", tip_sha.decode(), ref) is not None):
-            return None
+    contained = False
+    ambiguous: GitReadError | None = None
     for ref in [*remotes, *sorted(others), *local]:
         if _git_bytes(root, "rev-parse", "--verify", "-q", f"{ref}^{{commit}}") is None:
             continue
+        if _git_bytes(root, "merge-base", "--is-ancestor", tip_hex, ref) is not None:
+            contained = True  # integrated here: bounds nothing, decides nothing
+            continue
         try:
-            fork = fork_point(root, ref, tip_sha.decode())
+            return ref, fork_point(root, ref, tip_hex)
         except NoForkPoint:
             continue
         except ValueError as exc:
-            raise GitReadError(f"integration base of {tip} on {ref}: {exc}") from None
-        if fork.encode() == tip_sha:
-            continue
-        return ref, fork
+            error = GitReadError(f"integration base of {tip} on {ref}: {exc}")
+            if ref in remotes:
+                raise error from None  # the primary ref is the one chosen
+            ambiguous = ambiguous or error
+    if ambiguous is not None and not contained:
+        raise ambiguous
     return None
 
 
@@ -1286,17 +1293,19 @@ def full_round_base_problem(root: Path, base: str, head: str) -> str | None:
     `head` from the integration branch (`_integration_base`). Any other base
     reviews a slice and records it as the whole (#160). The writers (attest,
     the review bundle) refuse it; a fork that cannot be told is refused with
-    the reason. A head an integration ref already contains is an audit of a
-    merged range: no fork bounds it, and any base stands. The gate's reading
+    the reason. A head no integration ref forks and one contains is an audit
+    of a merged range: no fork bounds it, and any base stands (a forged ref
+    at the head does not count while another ref still forks it). The gate's reading
     of existing records is unchanged."""
-    for ref in integration_refs(root):
-        if (_git_bytes(root, "rev-parse", "--verify", "-q", f"{ref}^{{commit}}") is not None
-                and _git_bytes(root, "merge-base", "--is-ancestor", head, ref) is not None):
-            return None  # already integrated: an audit of a merged range
     try:
         found = _integration_base(root, head)
     except GitReadError as exc:
         return (f"a full round's base must be the one fork point of the head: {exc}")
+    if found is None and any(
+            _git_bytes(root, "rev-parse", "--verify", "-q", f"{ref}^{{commit}}") is not None
+            and _git_bytes(root, "merge-base", "--is-ancestor", head, ref) is not None
+            for ref in integration_refs(root)):
+        return None  # no ref forks it, one contains it: an audit of a merged range
     if found is None:
         return (f"a full round's base must be the fork point of {head[:12]} from the "
                 f"integration branch, and no integration ref resolves — fetch it; if the "
