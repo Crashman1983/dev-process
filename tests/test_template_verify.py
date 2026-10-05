@@ -620,3 +620,32 @@ def test_gate_without_the_integration_ref_never_falls_back_to_the_sha(update, mo
     assert any('integration ref behind the merge base disappeared' in h for h in hard), hard
     # the plan exemption resolves its own ref; nothing ever verifies a fork SHA
     assert all(c[1] == 'main' for c in calls), calls
+
+
+# --- _file: below the root, whatever the path flavour; host symlinks above it are fine ---
+
+def test_verification_tolerates_a_symlinked_temp_ancestor(update, tmp_path, monkeypatch):
+    """macOS puts temp under /var (a symlink); that is no render-path error."""
+    import tempfile
+    root, _, base, verifier = update
+    real = tmp_path / 'real-tmp'
+    real.mkdir()
+    link = tmp_path / 'linked-tmp'
+    link.symlink_to(real, target_is_directory=True)
+    monkeypatch.setattr(tempfile, 'tempdir', str(link))
+    proof = verifier.verify(root, base, worktree=True)
+    assert proof['errors'] == [], proof
+    assert 'docs/process/example.md' in proof['identical']
+
+
+@pytest.mark.parametrize('rel', ['inner/escape/file', '../outside/file', 'inner/../../outside/file',
+                                 '\\outside\\file', 'C:x', 'C:\\x', 'C:/x'])
+def test_file_refuses_every_escape_below_the_root(tmp_path, rel):
+    outside = tmp_path / 'outside'
+    outside.mkdir()
+    (outside / 'file').write_text('secret', encoding='utf-8')
+    root = tmp_path / 'render'
+    (root / 'inner').mkdir(parents=True)
+    (root / 'inner' / 'escape').symlink_to(outside, target_is_directory=True)
+    with pytest.raises(ValueError):
+        load('template_verify')._file(root, rel)
