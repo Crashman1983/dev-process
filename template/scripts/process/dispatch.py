@@ -22,8 +22,9 @@ Which model runs which phase comes from `docs/process/model-policy.json`
 has one; the project's own start command is the `command` template
 there. `{model}` and `{prompt}` are substituted inside the argv the
 template splits into; the prompt is one argv element. A cell is a model
-or `{"model": …, "effort": …}`; `{effort}` is substituted likewise, and
-an element carrying it is dropped when the cell sets no effort.
+or `{"model": …, "effort": …, "command": …}`; `{effort}` is substituted
+likewise, an element carrying it is dropped when the cell sets no effort,
+and a cell's own command wins over the phase's and the top-level one.
 
 Two runners (policy `runner`): `detached` starts the argv headless (own
 session, output to a log). `tmux` starts it as a window of one tmux
@@ -91,6 +92,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import NamedTuple
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling imports
@@ -107,7 +109,7 @@ DISPATCH_DIR = "process-dispatch"
 ISSUES_FILE = "issues.json"
 QUEUE_FILE = "queue.json"
 PHASES = ("brainstorm", "plan", "execute", "review")
-EFFORTS = ("low", "medium", "high", "xhigh", "max")  # the reasoning-effort levels a cell may name
+EFFORTS = ("minimal", "low", "medium", "high", "xhigh", "max")  # the reasoning-effort levels a cell may name
 STRIP_ENV_PREFIXES = ("CLAUDECODE", "CLAUDE_CODE_")  # a nested session must not inherit the steward's identity
 _ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]|\x1b[()][A-Z0-9]|\x1b[=>]|\r")
 
@@ -179,20 +181,29 @@ def load_policy(root: Path) -> dict:
     return data
 
 
-def _cell(cell: object, where: str) -> tuple[str, str | None]:
-    """(model, effort) of one policy cell — a model id, or `{"model": …,
-    "effort": …}` with an effort from EFFORTS; anything else is refused
-    naming the cell (checked after the local overlay: the project's cells too)."""
+class Cell(NamedTuple):
+    model: str
+    effort: str | None = None
+    command: str | None = None  # the cell's own start command, over phases.<phase>.command and `command`
+
+
+def _cell(cell: object, where: str) -> Cell:
+    """One policy cell — a model id, or `{"model": …, "effort": …, "command":
+    …}` with an effort from EFFORTS and a command carrying {model} and
+    {prompt}; anything else is refused naming the cell (checked after the
+    local overlay: the project's cells too)."""
     if isinstance(cell, str) and cell:
-        return cell, None
-    if (isinstance(cell, dict) and set(cell) <= {"model", "effort"}
+        return Cell(cell)
+    if (isinstance(cell, dict) and set(cell) <= {"model", "effort", "command"}
             and isinstance(cell.get("model"), str) and cell["model"]):
-        effort = cell.get("effort")
-        if effort is None or effort in EFFORTS:
-            return cell["model"], effort
-        raise SystemExit(f"dispatch: {POLICY} {where}: effort {effort!r} is not one of {', '.join(EFFORTS)}")
+        effort, command = cell.get("effort"), cell.get("command")
+        if effort is not None and effort not in EFFORTS:
+            raise SystemExit(f"dispatch: {POLICY} {where}: effort {effort!r} is not one of {', '.join(EFFORTS)}")
+        if command is not None and not (isinstance(command, str) and "{model}" in command and "{prompt}" in command):
+            raise SystemExit(f"dispatch: {POLICY} {where}.command must be a string containing {{model}} and {{prompt}}")
+        return Cell(cell["model"], effort, command)
     raise SystemExit(f"dispatch: {POLICY} {where} must be a model id or "
-                     f'{{"model": "…", "effort": "{"|".join(EFFORTS)}"}}, got {cell!r}')
+                     f'{{"model": "…", "effort": "{"|".join(EFFORTS)}", "command": "…"}}, got {cell!r}')
 
 
 def _merged(base: dict, over: dict, path: tuple[str, ...] = ()) -> dict:
@@ -262,10 +273,11 @@ def phase_policy(policy: dict, phase: str) -> dict:
             "env": {**(policy.get("env") or {}), **(row.get("env") or {})}}
 
 
-def cell_for(policy: dict, tier: int | None, phase: str, cls: str | None = None) -> tuple[str, str | None]:
-    """(model, effort) for one phase: `classes[cls][phase]` first, then the
-    tier's cell, then `default` — the one owner of that precedence. A cell
-    wins whole: a class cell without an effort does not inherit the tier's."""
+def cell_for(policy: dict, tier: int | None, phase: str, cls: str | None = None) -> Cell:
+    """The cell (model, effort, command) for one phase: `classes[cls][phase]`
+    first, then the tier's cell, then `default` — the one owner of that
+    precedence. A cell wins whole: a class cell without an effort does not
+    inherit the tier's."""
     classes = policy.get("classes") or {}
     if cls and cls != "standard" and cls not in classes:
         raise SystemExit(f"dispatch: policy names no task class {cls!r} "
@@ -281,7 +293,7 @@ def cell_for(policy: dict, tier: int | None, phase: str, cls: str | None = None)
 
 def model_for(policy: dict, tier: int | None, phase: str, cls: str | None = None) -> str:
     """The model of `cell_for`'s cell."""
-    return cell_for(policy, tier, phase, cls)[0]
+    return cell_for(policy, tier, phase, cls).model
 
 
 def labelled(model: str, effort: str | None) -> str:
@@ -289,12 +301,47 @@ def labelled(model: str, effort: str | None) -> str:
     return f"{model} ({effort})" if effort else model
 
 
-def effort_refusal(policy: dict, phase: str, effort: str | None) -> str | None:
-    """Why the phase's command cannot carry the cell's effort, None when it
-    can: an effort the command never passes would be silently ignored."""
-    if effort and "{effort}" not in phase_policy(policy, phase)["command"]:
-        return (f"the {phase} cell sets effort {effort!r} but the {phase} command has no {{effort}} "
-                f"placeholder — add it to `command` in {POLICY} (e.g. `--effort={{effort}}`)")
+def command_of(policy: dict, phase: str, cell: Cell) -> str:
+    """The start command for a cell: its own `command`, else
+    `phases.<phase>.command`, else the top-level `command` (runner, host and
+    env stay the phase's)."""
+    return cell.command or phase_policy(policy, phase)["command"]
+
+
+def effort_refusal(policy: dict, phase: str, cell: Cell) -> str | None:
+    """Why the cell's command cannot carry its effort, None when it can: an
+    effort the command never passes would be silently ignored."""
+    if cell.effort and "{effort}" not in command_of(policy, phase, cell):
+        return (f"the {phase} cell sets effort {cell.effort!r} but its command has no {{effort}} "
+                f"placeholder — add it to the command in {POLICY} (e.g. `--effort={{effort}}`)")
+    return None
+
+
+# a harness's file for a phase command, where the harness is rendered: its
+# frontmatter `model:`/`effort:` would override what the policy dispatched
+PHASE_FILES = (".claude/commands/{phase}.md", ".github/prompts/{phase}.prompt.md")
+_OVERRIDE_KEY = re.compile(r"^(model|effort)\s*:", re.M)
+
+
+def frontmatter_overrides(path: Path) -> list[str]:
+    """The `model:`/`effort:` keys a command file's YAML frontmatter declares."""
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return []
+    end = text.find("\n---", 3) if text.startswith("---") else -1
+    return sorted(set(_OVERRIDE_KEY.findall(text[3:end]))) if end >= 0 else []
+
+
+def override_refusal(root: Path, phase: str, model: str) -> str | None:
+    """Why the phase's command file would override the dispatched cell, None
+    when it does not: model-policy*.json is the one owner of the model."""
+    for pattern in PHASE_FILES:
+        rel = pattern.format(phase=phase)
+        keys = frontmatter_overrides(root / rel)
+        if keys:
+            return (f"one owner for the model: {rel} declares {' and '.join(k + ':' for k in keys)}, which "
+                    f"overrides the dispatched {model}; remove it (model-policy*.json owns this)")
     return None
 
 
@@ -307,12 +354,12 @@ def max_workers(policy: dict) -> int:
 
 
 def build_argv(policy: dict, model: str, prompt: str, branch: str = "", issue: int | None = None,
-               phase: str | None = None, effort: str | None = None) -> list[str]:
+               phase: str | None = None, effort: str | None = None, command: str | None = None) -> list[str]:
     # {branch}/{issue} name the session for a harness that labels sessions
     # (e.g. `--remote-control={branch}` — the `=` form, or the flag eats the prompt)
     subs = {"{model}": model, "{prompt}": prompt, "{branch}": branch, "{issue}": str(issue or ""),
             "{effort}": effort or ""}
-    command = phase_policy(policy, phase)["command"] if phase else policy["command"]
+    command = command or (phase_policy(policy, phase)["command"] if phase else policy["command"])
     out: list[str] = []
     raw: list[str] = []
     for a in shlex.split(command):
@@ -855,11 +902,8 @@ def issue_tokens(root: Path, issue: int) -> tuple[int, int] | None:
     """(output tokens, sessions) of the issue's dispatched worktrees — None
     when not measured: no `transcripts` glob in the policy (`{worktree}` is
     substituted; default none), no dispatch record, or no transcript."""
-    try:
-        pattern = load_policy(root).get("transcripts")
-    except SystemExit:
-        return None
-    if not isinstance(pattern, str) or not pattern.strip():
+    pattern = transcripts_pattern(root)
+    if pattern is None:
         return None
     files: set[str] = set()
     for p in sorted((common_dir(root) / DISPATCH_DIR).glob("*.json")):  # read-only: no mkdir
@@ -867,9 +911,8 @@ def issue_tokens(root: Path, issue: int) -> tuple[int, int] | None:
             rec = json.loads(p.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             continue
-        if isinstance(rec, dict) and str(rec.get("issue")) == str(issue) and rec.get("worktree"):
-            files |= set(glob.glob(os.path.expanduser(
-                pattern.replace("{worktree}", glob.escape(str(rec["worktree"]))))))
+        if isinstance(rec, dict) and str(rec.get("issue")) == str(issue):
+            files |= _transcript_files(pattern, rec)
     total = 0
     for f in sorted(files):
         try:
@@ -877,6 +920,69 @@ def issue_tokens(root: Path, issue: int) -> tuple[int, int] | None:
         except OSError:
             continue
     return (total, len(files)) if files else None
+
+
+def transcripts_pattern(root: Path) -> str | None:
+    try:
+        pattern = load_policy(root).get("transcripts")
+    except SystemExit:
+        return None
+    return pattern if isinstance(pattern, str) and pattern.strip() else None
+
+
+def _transcript_files(pattern: str, rec: dict) -> set[str]:
+    if not rec.get("worktree"):
+        return set()
+    return set(glob.glob(os.path.expanduser(pattern.replace("{worktree}", glob.escape(str(rec["worktree"]))))))
+
+
+def _epoch(ts: object) -> float:
+    """An ISO timestamp as epoch seconds; +inf when absent or unreadable (kept)."""
+    try:
+        return _dt.datetime.fromisoformat(str(ts).replace("Z", "+00:00")).timestamp() if ts else math.inf
+    except ValueError:
+        return math.inf
+
+
+def _same_model(seen: str, dispatched: str) -> bool:
+    """A harness may report a dated id (`<model>-20261001`) for an alias."""
+    return seen == dispatched or re.fullmatch(re.escape(dispatched) + r"-\d{8}", seen) is not None
+
+
+def model_drift(root: Path, rec: dict, pattern: str | None = None) -> list[str]:
+    """Models a dispatched session's transcripts show on its own assistant
+    messages (`message.model`, sidechains and `<synthetic>` left out) other
+    than the dispatched one — an override (a command file's frontmatter, a
+    harness default) beat the policy. Empty without a `transcripts` glob."""
+    pattern = pattern or transcripts_pattern(root)
+    dispatched = str(rec.get("model") or "")
+    if pattern is None or not dispatched:
+        return []
+    # one worktree carries every phase's transcripts: only this session's count
+    started = float(rec.get("started") or 0)
+    seen: set[str] = set()
+    for f in sorted(_transcript_files(pattern, rec)):
+        try:
+            if os.path.getmtime(f) < started:
+                continue
+            lines = Path(f).read_text(encoding="utf-8", errors="ignore").splitlines()
+        except OSError:
+            continue
+        for line in lines:
+            if '"assistant"' not in line:
+                continue
+            try:
+                ev = json.loads(line)
+            except ValueError:
+                continue
+            if not isinstance(ev, dict) or _epoch(ev.get("timestamp")) < started:
+                continue
+            msg = ev.get("message")
+            model = msg.get("model") if isinstance(msg, dict) else None
+            if (ev.get("type") == "assistant" and not ev.get("isSidechain") and isinstance(model, str)
+                    and model and not model.startswith("<") and not _same_model(model, dispatched)):
+                seen.add(model)
+    return sorted(seen)
 
 
 def tokens_line(root: Path, issue: int | None) -> str:
@@ -1128,8 +1234,9 @@ def start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str |
             print("dispatch: brainstorm awaits owner approval — start plan with --owner-approved; never jump to execute", file=sys.stderr)
             return 3
     policy = load_policy(root)
-    model, effort = cell_for(policy, tier, phase)
-    why = effort_refusal(policy, phase, effort)
+    cell = cell_for(policy, tier, phase)
+    model, effort = cell.model, cell.effort
+    why = effort_refusal(policy, phase, cell) or override_refusal(root, phase, model)
     if why:
         print(f"dispatch: not starting — {why}", file=sys.stderr)
         return 3
@@ -1161,7 +1268,7 @@ def start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str |
     channel = policy.get("decision_channel")
     prompt = prompt_for(phase, issue, tier, branch, model, remote=remote,
                         channel=channel if isinstance(channel, str) and channel.strip() else None, effort=effort)
-    argv = build_argv(policy, model, prompt, branch, issue, phase, effort)
+    argv = build_argv(policy, model, prompt, branch, issue, phase, effort, cell.command)
     # PROCESS_EFFORT always set, empty without an effort: a stale one from the steward's env must not leak
     worker_vars = {**pp["env"], "PROCESS_WORKER": branch, "PROCESS_PHASE": phase, "PROCESS_MODEL": model,
                    "PROCESS_EFFORT": effort or "", "PROCESS_ISSUE": str(issue)}
@@ -1920,9 +2027,10 @@ def main(argv: list[str]) -> int:
         return drain(root)
     policy = load_policy(root)
     for ph in PHASES:
-        model, effort = cell_for(policy, a.tier, ph, a.cls)
-        why = effort_refusal(policy, ph, effort)
-        print(f"{ph}: {labelled(model, effort)}" + (f"  WARNING: {why}" if why else ""))
+        cell = cell_for(policy, a.tier, ph, a.cls)
+        why = effort_refusal(policy, ph, cell)
+        print(f"{ph}: {labelled(cell.model, cell.effort)}" + (f"  via `{cell.command}`" if cell.command else "")
+              + (f"  WARNING: {why}" if why else ""))
     if policy.get("decision_channel"):
         print(f"decision_channel: {policy['decision_channel']}")
     print(f"command: {policy['command']}  (runner {policy.get('runner', 'detached')}, "
