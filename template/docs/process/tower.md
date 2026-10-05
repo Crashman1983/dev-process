@@ -126,8 +126,8 @@ every worker.
 "effort": "minimal|low|medium|high|xhigh|max", "command": …}` — the
 template runs the Tier 3 review on Opus at `xhigh`. `{effort}` in `command` is substituted like
 `{model}`; for a cell without an effort the argv element carrying it is
-dropped and the harness default applies. A cell whose effort the phase's
-command cannot carry (no `{effort}`) refuses the start and is flagged by
+dropped and the harness default applies. A cell whose effort its command
+cannot carry (no `{effort}`) refuses the start and is flagged by
 `dispatch.py policy`: an effort is never silently ignored. Workers get
 `PROCESS_EFFORT`, reports record it, and `process_kpis.py models` keeps
 `model (effort)` as a cell of its own. A cell's own `command` (with
