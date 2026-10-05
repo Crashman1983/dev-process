@@ -1942,13 +1942,16 @@ def _plan_issue_numbers(text: str) -> set[int]:
 def spec_dir_issue(fdir: Path) -> int | None:
     """A spec directory's issue: spec.md's `issue:` first (issue-before-spec),
     plan.md's as fallback — the one owner (publish_and_prune --stage and
-    process_context ask it)."""
+    process_context ask it). A file's FIRST `issue:` line decides: unparseable
+    there (`GH-12`, `none`) is None, never a later line or plan.md — refute: a
+    spec snapshot went to the plan's issue instead of being refused."""
     for name in ("spec.md", "plan.md"):
         p = fdir / name
-        numbers = declared_issue_numbers(p.read_text(encoding="utf-8", errors="replace")) \
-            if p.is_file() else []
-        if numbers:
-            return numbers[0]
+        m = ISSUE_DECL.search(p.read_text(encoding="utf-8", errors="replace")) \
+            if p.is_file() else None
+        if m:
+            numbers = declared_issue_numbers(m.group(0))
+            return numbers[0] if numbers else None
     return None
 
 
