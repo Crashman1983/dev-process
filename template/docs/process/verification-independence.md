@@ -129,7 +129,11 @@ the raw binary diff from the resolved merge base to the reviewed head:
     REVIEW_ARTIFACT base=<git-sha> head=<git-sha> diff=<sha256>
 
 `attest.py --bundle` writes those three fields onto the `REVIEW` line,
-recomputing the digest itself — never typed, never invented. The gate then
+recomputing the digest itself — never typed, never invented. A full round's
+base is the head's one fork point from the integration branch: the bundle
+does not build, and `attest.py` does not write, a full round against any
+other base (a slice recorded as the whole branch) or against a fork point
+that is ambiguous or cannot be resolved; review a slice as a delta. The gate then
 recomputes the digest from git and hard-fails a mismatch or an unresolvable commit: the verdict is bound to the exact diff
 that was reviewed. Perform the final rebase *before* the review — a rebase
 after it changes the diff, and the recorded digest honestly stops matching

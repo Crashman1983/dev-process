@@ -72,6 +72,9 @@ def test_a_crashing_streak_check_does_not_block_the_bundle(render, tmp_path):
     _git(out, "config", "user.name", "t")
     _git(out, "add", "-A")
     _git(out, "commit", "-q", "-m", "base")
+    # a branch off main: a full bundle binds the head's fork point (#160)
+    _git(out, "checkout", "-q", "-b", "7-thing")
+    _commit(out, "src.py", "feat: a")
     (out / "scripts/process/check_fix_streak.py").write_text("raise SystemExit('boom')\n")
 
     assert "fix-streak: not evaluated (boom)" in _bundle(out)
