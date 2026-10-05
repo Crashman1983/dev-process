@@ -33,6 +33,26 @@ def test_gate_skips_runtime_process_work_paths(render, tmp_path):
     assert subprocess.run([sys.executable, str(script), str(out)]).returncode == 0
 
 
+def test_gate_skips_absent_local_files_but_checks_present_ones(render, tmp_path):
+    """a `*.local.*` file is a checkout's own: a fresh clone without it is not drift"""
+    out = render(tmp_path, {"project_name": "d", "modules": {"doc_drift_gate": True}})
+    script = out / "scripts/process/check_doc_drift.py"
+
+    def gate():
+        return subprocess.run([sys.executable, str(script), str(out)],
+                              capture_output=True, text=True)
+    doc = out / "docs/process/local.md"
+    doc.write_text("Override in `docs/process/gates.local.json` and `.claude/settings.local.json`;\n"
+                   "see `scripts/process/hook.local.py::absent_fn`.\n")
+    assert gate().returncode == 0, gate().stdout
+    # present, a local file is checked like any other: its missing symbol is red
+    (out / "scripts/process/hook.local.py").write_text("def other():\n    pass\n")
+    assert "missing symbol 'absent_fn'" in gate().stdout
+    # and a non-local missing file is still red
+    doc.write_text("See `docs/process/gates.json.bak/missing.md`.\n")
+    assert gate().returncode == 1
+
+
 def test_gate_skips_decision_records(render, tmp_path):
     # ADRs are point-in-time records owned by the decision-records gate; their
     # historical code refs must not read as drift
