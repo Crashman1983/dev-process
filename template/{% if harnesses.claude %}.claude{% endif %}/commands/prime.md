@@ -7,9 +7,12 @@ printed the kernel, the rules and the ledger into this session —
 /prime is for the cases the hook does not cover.) Re-read the kernel
 (`docs/process/kernel.md`) and `docs/process/mandatory-rules.md` first — a break
 or compaction may have dropped the always-on rules from context. Then run
-`uv run scripts/process/process_context.py` (add `--cost` when the question is
-what a session start costs in tokens — measure before cutting) — one JSON with branch, state
-file, active plans (tier/issue and their `DECISION` ledger — the choices
+`uv run scripts/process/process_context.py` — pass `--issue N` when you know
+the issue; without it the branch name decides, and on `main` you get only the
+index of all plans and specs (`other_plans`/`other_specs`) — pick one and run
+again with `--issue N`. Add `--cost` when the question is
+what a session start costs in tokens — measure before cutting. One JSON with branch, state
+file, the current work's plans (tier/issue and their `DECISION` ledger — the choices
 made in dialogue that a compaction would have dropped), the next unchecked task, unresolved
 markers, and the inbox size — and read ONLY what it names: the branch state
 file, the latest journal shard of THIS branch (never the whole journal

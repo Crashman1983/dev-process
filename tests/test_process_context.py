@@ -69,6 +69,7 @@ def test_prime_and_execute_point_to_context_tool(render, tmp_path):
     assert "never the whole journal" in prime  # the prime diet
     assert "process_context.py" in execute
     assert "checkbox" in execute  # progress-in-the-artifact
+    assert "--issue N" in prime and "--issue N" in execute  # the scope, when known
 
 
 def test_context_prints_the_decisions_ledger(render, tmp_path):

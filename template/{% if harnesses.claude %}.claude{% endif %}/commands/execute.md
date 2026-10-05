@@ -11,7 +11,8 @@ At the first push of the branch, `uv run scripts/process/report.py pushed --issu
 Build the plan task by task, test-driven. Re-read the kernel
 (`docs/process/kernel.md`) and `docs/process/mandatory-rules.md` first — a long
 build compacts, and the rules bind every task, not just the first. Run
-`uv run scripts/process/process_context.py` for the next unchecked task.
+`uv run scripts/process/process_context.py --issue N` (the issue you
+execute; the branch decides when you omit it) for the next unchecked task.
 Start with the task's files. Before adding or changing a rule, parser or
 helper, inspect the existing owner and its relevant callers and tests
 (mandatory rule 4) — a targeted search, not a full repository read. Follow
