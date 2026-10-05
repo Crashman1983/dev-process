@@ -578,9 +578,12 @@ def test_refute_scales_with_the_tier_and_checks_owner_first(render, tmp_path):
     out = render(tmp_path, {"project_name": "demo"})
     text = (out / "docs/process/refute.md").read_text()
     # the scale: one row per tier, gate code at any tier
-    for row in ("| 0 | none |", "| 1 | optional", "| 2 | one run before the first review round",
-                "| 3, and gate code at any tier |"):
+    for row in ("| 0 | none |", "| 1 | optional", "| 2 | no separate run: the review itself works "
+                "through the brief", "| 3, and gate code at any tier |"):
         assert row in text, row
+    # Tier 2 runs a separate refute only where the plan names data loss or concurrency
+    tier2 = text.split("| 2 |", 1)[1].split("\n", 1)[0]
+    assert "names data loss or concurrency" in tier2 and "answers it in its report" in tier2
     # the brief, in its order: owner, fail-open, edge cases, evidence
     brief = text.split("## The brief", 1)[1]
     order = [brief.index(k) for k in ("1. OWNER", "2. FAIL-OPEN", "3. EDGE CASES", "4. EVIDENCE")]
@@ -630,11 +633,19 @@ def test_failure_catalog_is_the_one_home_of_the_edge_cases(render, tmp_path):
 def test_review_command_and_checklist_name_the_second_owner_block(render, tmp_path):
     out = render(tmp_path, {"project_name": "demo"})
     review = (out / ".claude/commands/review.md").read_text()
-    assert "Refute before round 1, from Tier 2 on" in review and "A second owner blocks" in review
+    assert "Attack before or within round 1, by tier" in review and "A second owner blocks" in review
     checklist = (out / "docs/process/review-checklist.md").read_text()
     assert "differential test" in checklist and "blocks at every tier" in checklist
+    # the refute table has one owner; the tier, independence and review docs point to it
     tiers = (out / "docs/process/risk-tiers.md").read_text()
-    assert "one run at Tier 2" in tiers and "refute.md" in tiers
+    vi = (out / "docs/process/verification-independence.md").read_text()
+    for doc in (tiers, vi, review):
+        assert "refute.md" in doc
+        assert "one run at Tier 2" not in doc and "From Tier 2 on, and for the gates" not in doc
+    assert "`refute.md` owns that table" in tiers and "`refute.md` owns the table" in vi
+    # Tier 3's second opinion reads the same in both docs
+    assert "(where configured) second-opinion review" in tiers
+    assert "where configured, a second-opinion review" in vi
 
 
 def test_execute_names_its_duties_before_pushed_and_testing_owns_the_own_conditions_rule(render, tmp_path):

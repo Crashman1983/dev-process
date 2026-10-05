@@ -22,7 +22,7 @@ Scaled to the tier (`risk-tiers.md`):
 |---|---|
 | 0 | none |
 | 1 | optional — worth one run when the change parses input or runs concurrently (persistence, paths and subprocesses already lift a change to Tier 2); record the line in the journal, there is no plan or bundle |
-| 2 | one run before the first review round; a fix round gets regression tests, not a new run |
+| 2 | no separate run: the review itself works through the brief below — owner and second reader, fail-open, the catalog's edge cases, evidence — and answers it in its report. A separate run before the first review round only where the plan's threat and failure question names data loss or concurrency (gate code: next row); a fix round gets regression tests, not a new run |
 | 3, and gate code at any tier | before the first review round, and again after every fix round that changed code (the fix gets refuted, not the whole branch) |
 
 Plain documentation needs none.
@@ -156,11 +156,14 @@ never archive; a finished one (or a product document at `specs/<x>/plan.md`)
 is not asked for a new round in every later delta. `--plan <name>` bundles
 what it names either way (a Spec Kit plan by its directory or its label).
 
-The review bundle warns when a bundled plan declares Tier 2 or higher, or a
-diff touches gate code, and a plan carries no such line (a warning, not a
-block: the rule is observed before it gates). A delta re-review asks for a
-new line only when the delta touches gate code — below Tier 3 there is one
-run, and a Tier 3 review never takes a delta.
+The review bundle warns when a bundled plan declares Tier 3, or a diff
+touches gate code at any tier, and a plan carries no such line (a warning,
+not a block: the rule is observed before it gates). A Tier 2 plan that names
+data loss or concurrency is not detected — the reviewer checks its line. A
+Tier 2 bundle carries the brief's questions for the reviewer to answer. A
+delta re-review asks for a new line only when the delta touches gate code —
+below Tier 3 there is at most one run, and a Tier 3 review never takes a
+delta.
 It approximates gate code by path — `scripts/process/`, `.githooks/`,
 `.github/workflows/`, `Makefile`, `.pre-commit-config.yaml` — so a Makefile
 change to a product target warns too; say so in the plan (the warning stays,

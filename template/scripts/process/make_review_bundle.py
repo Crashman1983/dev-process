@@ -501,6 +501,18 @@ def _tier_provenance(root: Path, tier: int | None, plan_tier: int | None,
             "review, so nothing in this repository corroborates it")
 
 
+# the tier from which a plan without a REFUTE line is warned about; gate code
+# warns at any tier (`docs/process/refute.md`, the table)
+REFUTE_RUN_TIER = 3
+# at Tier 2 the review itself answers the refuter's brief (`docs/process/refute.md`)
+TIER_TWO_BRIEF = (
+    "**Tier 2: the review is also the attack.** Answer each in your report, with evidence: "
+    "OWNER — does the diff re-implement a fact or rule existing code already owns (a second "
+    "reader)? Prove it with an input on which both judge differently. FAIL-OPEN — what does a "
+    "missing, failing or unresolved input read as? It must not read as the OK state. EDGE "
+    "CASES — the classes of `docs/process/failure-catalog.md` the change touches. EVIDENCE — "
+    "would a test go red if one branch of the new code were removed?")
+
 # what each round judges — owned by verification-independence.md ("What each
 # round judges"); a template test pins these to that paragraph
 FIRST_ROUND_RULE = ("Name every blocker you find, not the first — a blocker held back is "
@@ -613,7 +625,7 @@ def _unrefuted(root: Path, plans: dict[Path, str], before: dict[str, str] | None
 def _tier_warning(by_tier: list[str], tiers: dict[str, int | None]) -> str:
     named = ", ".join(f"{label} (tier: {tiers[label]})" for label in by_tier[:3])
     return (f"**REFUTE WARNING:** {named}{' …' if len(by_tier) > 3 else ''} carries no "
-            "`REFUTE work=<its id> round=<r>: …` line — from Tier 2 on, a fresh agent attacks "
+            "`REFUTE work=<its id> round=<r>: …` line — from Tier 3 on, a fresh agent attacks "
             "the change before its first review round (`docs/process/refute.md`). Say in the "
             "verdict that it was not.\n")
 
@@ -705,6 +717,8 @@ def build(root: Path, base: str | None, plan_filter: str | None = None,
             "bundle is too narrow — say so instead of reviewing it.\n")
     else:
         add(FIRST_ROUND_RULE + "\n")
+    if tier == 2:
+        add(TIER_TWO_BRIEF + "\n")
 
     if resolved is not None:
         files, lines = review_size(root, resolved)
@@ -719,7 +733,7 @@ def build(root: Path, base: str | None, plan_filter: str | None = None,
         # no base, so no gate-code check — the tier needs no git (refutation:
         # the tier warning vanished silently without a base)
         missing = _unrefuted(root, plan_texts)
-        by_tier = [label for label in missing if (tiers.get(label) or 0) >= 2]
+        by_tier = [label for label in missing if (tiers.get(label) or 0) >= REFUTE_RUN_TIER]
         if by_tier:
             add(_tier_warning(by_tier, tiers))
     if resolved is not None or since:
@@ -729,10 +743,11 @@ def build(root: Path, base: str | None, plan_filter: str | None = None,
         if since and before is None:
             gate_files = None
         missing = _unrefuted(root, plan_texts, before) if plan_texts else ["(no plan under review)"]
-        # by tier (`docs/process/refute.md`): from Tier 2 on, one refute before
-        # the first review round. A delta asks no new one — below Tier 3 there
-        # is one run, and a Tier 3 review never takes a delta (DELTA_MAX_TIER)
-        by_tier = [] if since else [label for label in missing if (tiers.get(label) or 0) >= 2]
+        # by tier (`docs/process/refute.md`): from Tier 3 on, a refute before the
+        # first review round (Tier 2 answers the brief inside the review). A delta
+        # asks no new one — a Tier 3 review never takes a delta (DELTA_MAX_TIER)
+        by_tier = [] if since else [label for label in missing
+                                    if (tiers.get(label) or 0) >= REFUTE_RUN_TIER]
         if gate_files is None:
             add("*(REFUTE check unavailable: git could not list the branch's files — a shallow clone "
                 "or no merge base; check by hand whether gate code changed)*\n")
