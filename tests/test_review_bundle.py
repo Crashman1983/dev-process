@@ -388,7 +388,7 @@ def test_delta_bundle_refuses_tier_three(render, tmp_path):
     plan.write_text("# Plan\n\ntier: 3\nissue: #9\n")
     r = _run(out, "--base", "main", "--since", "main")
     assert r.returncode != 0
-    assert "Tier 3 reviews require a full diff" in (r.stdout + r.stderr)
+    assert "Tier 3 delta needs a full round at" in (r.stdout + r.stderr)
 
 
 # --- SP67: the bundle names the UI evidence (paths — it cannot carry pixels)
@@ -935,6 +935,7 @@ def test_an_unrelated_tier_three_spec_plan_does_not_refuse_a_delta(render, tmp_p
     # a Tier 3 plan under review still refuses — and says how to narrow
     r = _run(out, "--base", "main", "--since", "HEAD~1", "--plan", "api")
     assert r.returncode != 0 and "specs/api/plan.md declares tier: 3" in r.stderr and "--plan" in r.stderr
+    assert "Tier 3 delta needs a full round at" in r.stderr
 
 
 def test_the_printed_label_of_a_spec_kit_plan_works_as_plan_filter(render, tmp_path):
@@ -1305,6 +1306,7 @@ def test_a_branch_without_a_plan_needs_a_declared_tier_for_a_delta(render, tmp_p
     assert "the branch touches no plan" in _bundle(out, "--base", "main").stdout
     r = _run(out, "--base", "main", "--since", "main", "--tier", "3", "--skip-preflight")
     assert r.returncode != 0 and "--tier 3 declares tier: 3" in r.stderr
+    assert "Tier 3 delta needs a full round at" in r.stderr  # no full round anchors it
     r = _run(out, "--base", "main", "--tier", "two", "--skip-preflight")
     assert r.returncode != 0 and "--tier needs an integer" in r.stderr and "Traceback" not in r.stderr
 
@@ -1318,7 +1320,7 @@ def test_a_declared_tier_is_a_floor_not_a_discount(render, tmp_path):
     assert "Scope rests on tier 2 read from" in t
     # above the plan's tier, the caller's assertion decides — and says so
     r = _run(out, "--base", "main", "--since", "main", "--tier", "3", "--skip-preflight")
-    assert r.returncode != 0 and "Tier 3 reviews require a full diff" in r.stderr
+    assert r.returncode != 0 and "Tier 3 delta needs a full round at" in r.stderr
     _plan_commit(out, "# Plan\n\ntier: 3\nissue: #9\n")
     r = _run(out, "--base", "main", "--since", "main", "--tier", "1", "--skip-preflight")
     assert r.returncode != 0 and "2026-07-09-widget.md declares tier: 3" in r.stderr
@@ -1432,3 +1434,117 @@ def test_the_local_gate_configuration_is_gate_code(render, tmp_path, config):
     _gate_commit(out, config, "{}\n", "configure the gates")
     t = _bundle(out, "--base", "main").stdout
     assert f"changes gate code ({config})" in t, t[:600]
+
+
+# --- Tier 3 delta: anchored on a full round, refused on scope growth
+
+_T3_PLAN = "# Plan\n\ntier: 3\nissue: #9\n\n## Decisions\n\n- keep the widget pure\n"
+
+
+def _t3_record(base, head, *, mode="", verdict="block", rnd=1):
+    return (f"REVIEW work=9 tier=3 reviewer=r model=m independence=bundle,non-implementing,cross-model "
+            f"verdict={verdict} round={rnd} base={base} head={head} diff={'0' * 64}{mode}\n")
+
+
+def _t3_full_round(out, *, report=True):
+    """A Tier 3 work whose full round 1 blocked on widget.py at the returned head."""
+    _plan_commit(out, _T3_PLAN)
+    head = _git(out, "rev-parse", "HEAD").stdout.strip()
+    base = _git(out, "merge-base", "main", "HEAD").stdout.strip()
+    journal = out / ".process-work/journal"
+    journal.mkdir(parents=True, exist_ok=True)
+    (journal / "review.md").write_text(_t3_record(base, head))
+    if report:
+        reports = out / ".process-work/reviews"
+        reports.mkdir(parents=True, exist_ok=True)
+        (reports / "2026-07-10-widget.md").write_text(
+            "review: widget\nwork: #9\n\nFINDING sev=blocker action=fix issue=- gate=judgement "
+            "widget.py returns the wrong value\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "review round 1")
+    return head
+
+
+def _fix(out, rel, body):
+    p = out / rel
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(body)
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "fix: round 1")
+
+
+def _touches(text):
+    return text.split("DELTA_TOUCHES files=", 1)[1].split("\n", 1)[0]
+
+
+def test_tier3_delta_from_a_full_round_builds_and_lists_its_files(render, tmp_path):
+    """Downstream, Tier 3 re-read 10-13k-line full bundles every round; an anchored fix
+    round reads the fix, names the files it touches, and asks for a new refute."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    head = _t3_full_round(out)
+    _fix(out, "widget.py", "def widget():\n    return 43\n")
+    r = _bundle(out, "--base", "main", "--since", head)
+    assert "Delta re-review" in r.stdout and "REVIEW_SCOPE mode=delta" in r.stdout
+    assert "widget.py" in _touches(r.stdout)
+    assert "make_review_bundle: DELTA_TOUCHES files=" in r.stderr
+    assert "**REFUTE WARNING:**" in r.stdout and "each delta round" in r.stdout
+
+
+def test_tier3_delta_without_a_full_round_at_its_start_is_refused(render, tmp_path):
+    """A Tier 3 delta from an arbitrary commit would shrink the reviewed artifact without
+    a full round having seen the rest; a chain of delta REVIEWs back to one anchors it."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    head = _t3_full_round(out)
+    _fix(out, "widget.py", "def widget():\n    return 43\n")
+    middle = _git(out, "rev-parse", "HEAD").stdout.strip()
+    _fix(out, "widget.py", "def widget():\n    return 44\n")
+    r = _run(out, "--base", "main", "--since", middle, "--skip-preflight")
+    assert r.returncode != 0 and f"Tier 3 delta needs a full round at {middle}" in r.stderr
+    journal = out / ".process-work/journal/review.md"
+    journal.write_text(journal.read_text() + _t3_record(head, middle, mode=" mode=delta", rnd=2))
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "review round 2")
+    assert "Delta re-review" in _bundle(out, "--base", "main", "--since", middle).stdout
+
+
+@pytest.mark.parametrize("rel,body,why", [
+    ("other.py", "x = 1\n", "outside round 1's findings"),
+    (f"{_PLANS}/2026-07-09-widget.md", _T3_PLAN + "- also cache it\n", "## Decisions or tier: line"),
+    (f"{_PLANS}/2026-07-09-widget.md", _T3_PLAN.replace("tier: 3", "tier: 2"), "## Decisions or tier: line"),
+    (f"{_PLANS}/2026-07-09-widget.md", _T3_PLAN.replace("Build", "Build") + "\n## Notes\n\nfixed\n", None),
+    ("scripts/process/check_widget.py", "# gate\n", "the fix changes gate code"),
+    ("docs/process/design-contracts/widget.md", "# contract\n", "the fix changes contracts"),
+])
+def test_tier3_delta_refuses_scope_growth(render, tmp_path, rel, body, why):
+    """The worker never decides containment: a fix that reaches past the prior findings,
+    the decisions or tier, gate code or a contract needs the full bundle."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    head = _t3_full_round(out)
+    _fix(out, rel, body)
+    r = _run(out, "--base", "main", "--since", head, "--skip-preflight")
+    if why is None:  # a plan edit outside Decisions and tier: is bookkeeping
+        assert r.returncode == 0, r.stderr
+        return
+    assert r.returncode != 0 and "full bundle required" in r.stderr and why in r.stderr, r.stderr
+
+
+def test_tier3_delta_without_a_readable_report_needs_the_full_bundle(render, tmp_path):
+    """Containment is judged against the prior report; none to read is doubt, and doubt is a full bundle."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    head = _t3_full_round(out, report=False)
+    _fix(out, "widget.py", "def widget():\n    return 43\n")
+    r = _run(out, "--base", "main", "--since", head, "--skip-preflight")
+    assert r.returncode != 0 and "no readable report of round 1" in r.stderr, r.stderr
+
+
+def test_tier2_delta_keeps_its_behaviour_and_lists_its_files(render, tmp_path):
+    """Scope growth is judged at Tier 3 only; a Tier 2 delta only gains DELTA_TOUCHES."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    _fix(out, "other.py", "x = 1\n")
+    t = _bundle(out, "--base", "main", "--since", "HEAD~1").stdout
+    assert _touches(t) == "other.py" and "REFUTE WARNING" not in t

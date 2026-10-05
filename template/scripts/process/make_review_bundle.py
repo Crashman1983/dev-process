@@ -37,7 +37,8 @@ plan: its path) contains SLUG, archived ones included; no match is an error.
 --tier asserts the caller's tier — a floor, never a discount: where a bundled
 plan declares a higher one, that one wins. --since limits the diff to the
 changes since REF (a delta re-review); it demands a declared tier (a plan's,
-or --tier for a branch without one) of at most 2.
+or --tier for a branch without one); at Tier 3 a full round at REF and no
+scope growth (verification-independence.md, "What each round judges").
 
 --base defaults to the first of origin/main, main, origin/master, master that
 git can resolve. Output goes to stdout unless -o is given. The repo root is
@@ -73,7 +74,7 @@ PLAN_HOMES = (*_review_gate.PLAN_KINDS, "plan-archive")
 REVIEWS = ".process-work/reviews"
 DEFAULT_BASES = _review_gate.INTEGRATION_REFS
 PREFLIGHT_TIMEOUT_S = 600
-DELTA_MAX_TIER = 2
+DELTA_MAX_TIER = 3
 
 
 def _read(root: Path, rel: str) -> str | None:
@@ -628,8 +629,8 @@ def _tier_warning(by_tier: list[str], tiers: dict[str, int | None]) -> str:
     named = ", ".join(f"{label} (tier: {tiers[label]})" for label in by_tier[:3])
     return (f"**REFUTE WARNING:** {named}{' …' if len(by_tier) > 3 else ''} carries no "
             "`REFUTE work=<its id> round=<r>: …` line — from Tier 3 on, a fresh agent attacks "
-            "the change before its first review round (`docs/process/refute.md`). Say in the "
-            "verdict that it was not.\n")
+            "the change before its first review round and each delta round "
+            "(`docs/process/refute.md`). Say in the verdict that it was not.\n")
 
 
 def _shown(path: str) -> str:
@@ -663,6 +664,94 @@ def review_size(root: Path, base_ref: str) -> tuple[int, int]:
     return files, lines
 
 
+def _prior_report(root: Path, plan_filter: str | None, plan_texts: dict[Path, str]):
+    """(report, its text, slugs, issues) of the previous round of this work."""
+    slugs = [_DATED.sub("", plan_filter)] if plan_filter else []
+    slugs += [_DATED.sub("", _review_gate.plan_stem(_rel(root, p))) for p in plan_texts]
+    issues = list(dict.fromkeys(k for text in plan_texts.values() for k in _plan_issue_keys(text)))
+    report = _review_report_for(root, slugs, issues)
+    return report, (_read(root, str(report.relative_to(root))) if report else None), slugs, issues
+
+
+CONTRACT_PATHS = re.compile(r"^(docs/process/design-contracts/|specs/[^/]+/contracts/)")
+_HEADING = re.compile(r"^#{1,4}\s", re.MULTILINE)
+_RECORD_LINE = re.compile(r"^.*\b(ROOT-CAUSE|REFUTE)\b.*$\n?", re.MULTILINE)
+
+
+def _plan_scope(text: str | None) -> tuple | None:
+    """What a fix round may not change in a plan: `## Decisions` and `tier:`
+    (record lines a fix round adds there aside)."""
+    if text is None:
+        return None
+    m = _review_gate.DECISIONS_HEADING.search(text)
+    section = ""
+    if m:
+        end = _HEADING.search(text, m.end())
+        section = text[m.start():end.start() if end else len(text)]
+    return " ".join(_RECORD_LINE.sub("", section).split()), _review_gate.plan_tier(text)
+
+
+def _tier_at(root: Path, ref: str, plans: list[Path]) -> int:
+    """The highest tier these plans declared at `ref` (0 when none did), read
+    as `build` reads it: no design doc, no plan that waives its review."""
+    texts = [_git(root, "show", f"{ref}:{_rel(root, p)}") for p in plans
+             if not p.name.startswith(_review_gate.DESIGN_DOC_PREFIX)]
+    return _declared_tier([t for t in texts if t and not _review_gate.review_waived(t)]) or 0
+
+
+def _delta_files(root: Path, since: str) -> list[str] | None:
+    sha = _git(root, "rev-parse", "--verify", "--quiet", f"{since}^{{commit}}")
+    head = _git(root, "rev-parse", "HEAD")
+    if not sha or not head:
+        return None
+    entries = _review_gate.name_status(
+        _review_gate.delta_diff(root, sha.strip(), head.strip(), names=True))
+    return None if entries is None else list(dict.fromkeys(path for _l, _s, path in entries))
+
+
+def _tier3_delta_refusal(root: Path, since: str, plan_texts: dict[Path, str],
+                         plan_filter: str | None, touches: list[str] | None) -> str | None:
+    """Why this Tier 3 delta needs a full bundle — None when it may run. The
+    tool decides containment, never the worker; any doubt is a full bundle."""
+    sha = (_git(root, "rev-parse", "--verify", "--quiet", f"{since}^{{commit}}") or "").strip()
+    ids = {i for p, t in plan_texts.items() if t for i in _plan_ids(_rel(root, p), t)}
+    records = [f for _r, t in _review_gate.record_texts(root, ("journal",)) or []
+               for _l, f in _review_gate.parse_review_lines(t)[0]]
+    if not sha or not _review_gate.tier3_delta_anchor(records, ids, sha):
+        return _review_gate.tier3_delta_refusal(sha or since)
+    if touches is None:
+        return "full bundle required: git cannot list the delta's files"
+    rounds = sorted({int(f["round"]) for f in records if f["work"] in ids})
+    n = rounds[-1] if rounds else "the previous round"
+    why: list[str] = []
+
+    def named(paths: list[str]) -> str:
+        return ", ".join(_shown(p) for p in paths[:4]) + (", …" if len(paths) > 4 else "")
+
+    gate = [p for p in touches if p.startswith(GATE_PATHS) or p in GATE_FILES]
+    if gate:
+        why.append(f"the fix changes gate code ({named(gate)})")
+    contracts = [p for p in touches if CONTRACT_PATHS.match(p)]
+    if contracts:
+        why.append(f"the fix changes contracts ({named(contracts)})")
+    plans = [p for p in touches if _review_gate.record_kind(p) in PLAN_HOMES]
+    before = {p: _plan_scope(_git(root, "show", f"{sha}:{p}")) for p in plans}
+    scope = [p for p in plans
+             if before[p] is None or before[p] != _plan_scope(_git(root, "show", f"HEAD:{p}"))]
+    if scope:
+        why.append(f"the fix changes the plan's ## Decisions or tier: line ({named(scope)})")
+    _report, text, _s, _i = _prior_report(root, plan_filter, plan_texts)
+    code = [p for p in touches if not p.startswith(".process-work/") and p not in plans]
+    if text is None:
+        if code:
+            why.append(f"no readable report of round {n} to bound {named(code)}")
+    else:
+        outside = [p for p in code if p not in text]
+        if outside:
+            why.append(f"the fix changes {named(outside)} outside round {n}'s findings")
+    return "full bundle required: " + "; ".join(why) if why else None
+
+
 def build(root: Path, base: str | None, plan_filter: str | None = None,
           since: str | None = None, plans: list[Path] | None = None,
           declared_tier: int | None = None) -> str:
@@ -693,16 +782,19 @@ def build(root: Path, base: str | None, plan_filter: str | None = None,
             f"{_review_gate.SPECS_DIR}/<dir>/{_review_gate.SPEC_PLAN}), declare the tier with "
             "--tier N for a branch without a plan, or build the full bundle without --since")
     if since and tier is not None and tier > DELTA_MAX_TIER:
-        if plan_tier == tier:
-            top = next(_label(root, p) for p, t in plan_texts.items() if _declared_tier([t]) == tier)
-            raise SystemExit(
-                f"make_review_bundle: --since refused — bundled plan {top} declares tier: {tier}; "
-                "Tier 3 reviews require a full diff. If that plan is not the work under review, "
-                "name the one that is with --plan <name>"
-            )
-        raise SystemExit(
-            f"make_review_bundle: --since refused — --tier {declared_tier} declares tier: {tier}; "
-            "Tier 3 reviews require a full diff")
+        raise SystemExit(f"make_review_bundle: --since refused — tier {tier} is above the "
+                         f"Tier {DELTA_MAX_TIER} scale; build the full bundle")
+    touches = _delta_files(root, since) if since else None
+    # a fix round that lowers the tier is judged at the tier it started from
+    if since and tier is not None and (tier >= 3 or _tier_at(root, since, plans) >= 3):
+        # Tier 3: anchored on a full round, and no scope growth (verification-independence.md)
+        refusal = _tier3_delta_refusal(root, since, plan_texts, plan_filter, touches)
+        if refusal:
+            who = (f"bundled plan {next(_label(root, p) for p, t in plan_texts.items() if _declared_tier([t]) == tier)}"
+                   if plan_tier == tier else f"--tier {declared_tier}")
+            raise SystemExit(f"make_review_bundle: --since refused — {who} declares tier: {tier}; "
+                             f"{refusal}. If that plan is not the work under review, name the one "
+                             "that is with --plan <name>")
 
     add("# Review bundle — read-only\n")
     add("You are an INDEPENDENT reviewer. This bundle is your complete input: "
@@ -715,8 +807,10 @@ def build(root: Path, base: str | None, plan_filter: str | None = None,
             f"`{since}`. Previous findings and the full branch file surface are "
             "included so fixes are judged in their original scope. " + DELTA_ROUND_RULE + "\n")
         add(f"**Scope rests on {_tier_provenance(root, tier, plan_tier, declared_tier, plans)}.** "
-            f"A delta is only permitted up to Tier {DELTA_MAX_TIER}; if that tier is wrong, this "
-            "bundle is too narrow — say so instead of reviewing it.\n")
+            "A Tier 3 delta needs a full round at its start and no scope growth; if that tier is "
+            "wrong, this bundle is too narrow — say so instead of reviewing it.\n")
+        add("DELTA_TOUCHES files=" + (",".join(_shown(p) for p in touches)
+                                      if touches is not None else "(unknown)") + "\n")
     else:
         add(FIRST_ROUND_RULE + "\n")
     if tier == 2:
@@ -751,10 +845,9 @@ def build(root: Path, base: str | None, plan_filter: str | None = None,
             gate_files = None
         missing = _unrefuted(root, plan_texts, before) if plan_texts else ["(no plan under review)"]
         # by tier (`docs/process/refute.md`): from Tier 3 on, a refute before the
-        # first review round (Tier 2 answers the brief inside the review). A delta
-        # asks no new one — a Tier 3 review never takes a delta (DELTA_MAX_TIER)
-        by_tier = [] if since else [label for label in missing
-                                    if (tiers.get(label) or 0) >= REFUTE_RUN_TIER]
+        # first review round and again before each delta round (Tier 2 answers
+        # the brief inside the review)
+        by_tier = [label for label in missing if (tiers.get(label) or 0) >= REFUTE_RUN_TIER]
         if gate_files is None:
             add("*(REFUTE check unavailable: git could not list the branch's files — a shallow clone "
                 "or no merge base; check by hand whether gate code changed)*\n")
@@ -806,12 +899,8 @@ def build(root: Path, base: str | None, plan_filter: str | None = None,
 
     if since:
         add("## Findings from the previous round\n")
-        slugs = [_DATED.sub("", plan_filter)] if plan_filter else []
-        slugs += [_DATED.sub("", _review_gate.plan_stem(_rel(root, p))) for p in plan_texts]
-        issues = list(dict.fromkeys(k for text in plan_texts.values() for k in _plan_issue_keys(text)))
-        report = _review_report_for(root, slugs, issues)
-        report_text = _read(root, str(report.relative_to(root))) if report else None
-        if report_text:
+        report, report_text, slugs, issues = _prior_report(root, plan_filter, plan_texts)
+        if report and report_text:
             add(f"### {report.relative_to(root)}\n{report_text}\n")
         else:
             named = ", ".join([*dict.fromkeys(s for s in slugs if s),
@@ -1057,7 +1146,7 @@ def main(argv: list[str]) -> int:
             return status
     included = _plans_under_review(root, _resolve_base(root, base), plan_filter)
     text = build(root, base, plan_filter, since, included, declared_tier)
-    for warn in (ln for ln in text.splitlines() if ln.startswith(("**SIZE WARNING:**", "**REFUTE WARNING:**"))):
+    for warn in (ln for ln in text.splitlines() if ln.startswith(("**SIZE WARNING:**", "**REFUTE WARNING:**", "DELTA_TOUCHES "))):
         print("make_review_bundle: " + warn.replace("**", ""), file=sys.stderr)
     # an over-wide bundle was invisible until a reviewer read it (downstream:
     # 14,103 lines, mostly other work's plans) — say size and plans at build time
