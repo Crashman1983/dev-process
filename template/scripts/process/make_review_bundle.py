@@ -501,6 +501,16 @@ def _tier_provenance(root: Path, tier: int | None, plan_tier: int | None,
             "review, so nothing in this repository corroborates it")
 
 
+# what each round judges — owned by verification-independence.md ("What each
+# round judges"); a template test pins these to that paragraph
+FIRST_ROUND_RULE = ("Name every blocker you find, not the first — a blocker held back is "
+                    "a round.")
+DELTA_ROUND_RULE = ("Judge the fix diff and the open findings, and re-check the fixed failure "
+                    "class everywhere it can recur, not only at the fixed spot. If the fix "
+                    "changed a contract, the architecture or the risk scope, say so and ask "
+                    "for a full bundle instead of judging the delta.")
+
+
 # above this a review stops being one review: downstream, the works that ran
 # five to seven rounds were 3,000–5,500 changed lines or a batch of issues
 REVIEW_MAX_FILES = int(os.environ.get("PROCESS_REVIEW_MAX_FILES", "30"))
@@ -689,10 +699,12 @@ def build(root: Path, base: str | None, plan_filter: str | None = None,
     if since:
         add("**Delta re-review.** The diff below is limited to changes since "
             f"`{since}`. Previous findings and the full branch file surface are "
-            "included so fixes are judged in their original scope.\n")
+            "included so fixes are judged in their original scope. " + DELTA_ROUND_RULE + "\n")
         add(f"**Scope rests on {_tier_provenance(root, tier, plan_tier, declared_tier, plans)}.** "
             f"A delta is only permitted up to Tier {DELTA_MAX_TIER}; if that tier is wrong, this "
             "bundle is too narrow — say so instead of reviewing it.\n")
+    else:
+        add(FIRST_ROUND_RULE + "\n")
 
     if resolved is not None:
         files, lines = review_size(root, resolved)

@@ -30,7 +30,9 @@ fabricated attestation; the gate names it as such and counts the review as
 absent. For a
 findings-producing or Tier 3 review — `FINDING sev=… action=… issue=…` lines
 in a `.process-work/reviews/` report (gate-linted where the `github-issues`
-module is installed; the report grammar either way).
+module is installed; the report grammar either way). A `block` verdict always
+has findings, so it always writes the report: the next delta bundle reads the
+open findings from it.
 
 After a clearing pass is attested, `uv run scripts/process/report.py review-pass --issue N` — the branch may now board the merge train (`docs/process/train.md`).
 
@@ -101,11 +103,11 @@ Round economy — a failed round must not re-pay the whole chain:
   counts as round 1 for that lens. Downstream, a new reviewer in a later
   round found older defects the first set never looked at, and each became
   a round.
-- **Later rounds judge the fix, not the whole branch again.** A round ≥2
-  checks the fix diff and its surroundings (callers, tests, the rule it
-  touches). An older defect found outside that is its own issue — unless it
-  is a BLOCKER for this change; then it goes into the verdict marked
-  "pre-existing, found in round N".
+- **Round 1 names every blocker; later rounds judge the fix and its class.**
+  A delta round re-checks the fixed failure class everywhere it can recur and
+  asks for a full bundle when the fix changed a contract, the architecture or
+  the risk scope (`docs/process/verification-independence.md`, "What each
+  round judges").
 - **The same spot blocks twice → a fresh session fixes it.** The
   implementing session has twice missed what is wrong there; it is not the
   one to try a third time.

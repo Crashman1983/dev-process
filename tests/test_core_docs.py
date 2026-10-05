@@ -523,6 +523,31 @@ def test_design_asks_the_failure_question_before_the_review_does(render, tmp_pat
     assert "Make illegal states unrepresentable" in craft
 
 
+def test_what_each_round_judges_has_one_owner_the_bundle_carries(render, tmp_path):
+    """Tier-3 work ran 3-7 rounds downstream, and blockers held back in round 1 or
+    re-introduced by a fix each cost one — the rule lives once in
+    verification-independence.md; /review points there and the bundle preamble
+    carries the same words to the reviewer."""
+    out = render(tmp_path, {"project_name": "demo"})
+    vi = (out / "docs/process/verification-independence.md").read_text()
+    rule = " ".join(vi.split("**What each round judges.**", 1)[1].split("\n\n", 1)[0].split())
+    for phrase in ("Round 1 names every blocker, not the first — a blocker held back is a round",
+                   "re-checks the fixed failure class everywhere it can recur",
+                   "changed a contract, the architecture or the risk scope"):
+        assert phrase in rule, phrase
+    # the bundle's constants, their string literals joined as Python joins them
+    src = re.sub(r'"\s*\n\s*"', "", (out / "scripts/process/make_review_bundle.py").read_text())
+    for phrase in ("Name every blocker you find, not the first — a blocker held back is a round",
+                   "re-check the fixed failure class everywhere it can recur",
+                   "changed a contract, the architecture or the risk scope"):
+        assert phrase in src, phrase
+    review = (out / ".claude/commands/review.md").read_text()
+    assert '"What each\n  round judges"' in review
+    assert "Later rounds judge the fix, not the whole branch again" not in review
+    # a block writes its report: the next delta needs the open findings
+    assert "A `block` verdict always\nhas findings, so it always writes the report" in review
+
+
 def test_branch_lifetime_guidance(render, tmp_path):
     out = render(tmp_path, {"project_name": "demo"})
     commits = (out / "docs/process/commits.md").read_text()
