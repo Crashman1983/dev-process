@@ -6,17 +6,25 @@ that produced it, inherits that context's framing and blind spots — it tends t
 confirm rather than catch. Preventing that is the whole reason a review gate
 exists, so the gate's value is bounded by how independent it actually is.
 
-The process spends independence like a budget: production runs warm,
+The process spends independence like a budget: production needs none,
 verification runs independent, and the degree of independence scales with the
 tier.
 
-## Production runs warm
+## Production needs no independence
 
 Brainstorm, plan, and execute are production. They live on coherence — the plan
-follows from the design, the code from the plan. Running them in one continuous
-context is correct and efficient; forcing a fresh session between them discards
-that coherence and pays a re-priming cost for nothing. Do not manufacture
-independence here.
+follows from the design, the code from the plan. Independence is not
+manufactured here, but where the coherence lives depends on who drives:
+
+- **An interactive session** that plans may continue into execute in the
+  same session — warm, no re-priming. This is the one place "warm" applies.
+- **The dispatch chain** (`dispatch.py chain`, `tower.md`) hands plan →
+  execute over in a fresh session: the committed plan with its `##
+  Decisions` ledger is the hand-over artifact, so a plan the next session
+  cannot execute without the conversation is an incomplete plan.
+
+Review is never warm, whoever drives (below). This section owns the
+statement; the workflow and tier docs point here.
 
 ## Verification runs independent
 
@@ -199,7 +207,7 @@ finding real defects is the signal to tighten the gates, not to sample more.
 ## Why this is efficient, not just safe
 
 Independence costs tokens and wall-clock, so the process buys it only where it
-pays: at verification, scaled by risk. Production stays warm and fast; the
+pays: at verification, scaled by risk. Production stays fast; the
 expensive fresh, cross-model, adversarial pass fires only at the tier where an
 escaped defect is most expensive. The saving is real where a team currently
 re-primes between production steps or runs several correlated checks; for a
