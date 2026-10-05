@@ -1202,7 +1202,7 @@ def test_a_task_class_row_wins_over_the_tier_and_the_default(render, tmp_path):
         d = importlib.import_module("dispatch")
         policy = d.load_policy(out)
         assert d.model_for(policy, 3, "execute", "mechanical") == "small-x"
-        assert d.cell_for(policy, 3, "review", "mechanical") == ("claude-opus-5", "xhigh")
+        assert d.cell_for(policy, 3, "review", "mechanical") == ("claude-opus-5", "xhigh", None)
         assert d.model_for(policy, 3, "execute", "standard") == data["tiers"]["3"]["execute"]
         assert d.model_for(policy, 9, "execute") == data["default"]["execute"]
     finally:
@@ -1239,9 +1239,9 @@ def test_an_effort_cell_follows_the_one_precedence_and_wins_whole(render, tmp_pa
     policy = {"default": {"execute": {"model": "dm", "effort": "low"}},
               "tiers": {"3": {"execute": {"model": "tm", "effort": "high"}}},
               "classes": {"mechanical": {"execute": "cm"}}}
-    assert d.cell_for(policy, 3, "execute", "mechanical") == ("cm", None)
-    assert d.cell_for(policy, 3, "execute") == ("tm", "high")
-    assert d.cell_for(policy, 9, "execute") == ("dm", "low")
+    assert d.cell_for(policy, 3, "execute", "mechanical") == ("cm", None, None)
+    assert d.cell_for(policy, 3, "execute") == ("tm", "high", None)
+    assert d.cell_for(policy, 9, "execute") == ("dm", "low", None)
     assert d.model_for(policy, 3, "execute") == "tm"  # the thin wrapper keeps its callers
 
 
@@ -1306,3 +1306,120 @@ def test_a_worker_gets_its_cells_effort(render, tmp_path):
     lines = sorted(marker.read_text().splitlines(), key=lambda s: "m2" not in s)
     assert "--model m2 --effort=high" in lines[0] and lines[0].endswith("effort=high")
     assert "--effort" not in lines[1] and lines[1].endswith("effort=")
+
+
+def test_a_cell_command_wins_over_the_phase_and_the_top_level_command(render, tmp_path):
+    """A second family is one cell: its own CLI, while the phase keeps its
+    runner and host — and {effort} is substituted in it like anywhere."""
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    pol = out / "docs/process/model-policy.json"
+    data = json.loads(pol.read_text())
+    data["phases"] = {"review": {"command": "phase-cli --model {model} {prompt}"}}
+    data["tiers"]["3"]["review"] = {"model": "other-1", "effort": "minimal",
+                                    "command": "sh -c true --model {model} -c reasoning={effort} {prompt}"}
+    pol.write_text(json.dumps(data))
+    r = _dispatch(out, "start", "--issue", "3", "--phase", "review", "--tier", "3", "--dry-run")
+    assert r.returncode == 0, r.stderr
+    assert "with other-1 (minimal)" in r.stdout and "'reasoning=minimal'" in r.stdout and "phase-cli" not in r.stdout
+    r = _dispatch(out, "start", "--issue", "3", "--phase", "review", "--tier", "2", "--dry-run")
+    assert "phase-cli" in r.stdout  # a plain cell keeps the phase's command
+    r = _dispatch(out, "policy", "--tier", "3")
+    assert "review: other-1 (minimal)  via `sh -c true" in r.stdout and "WARNING" not in r.stdout, r.stdout
+
+
+@pytest.mark.parametrize("command", ["cli {prompt}", "cli --model {model}", 7], ids=["no-model", "no-prompt", "not-a-string"])
+def test_a_cell_command_without_model_or_prompt_refuses_naming_the_cell(render, tmp_path, command):
+    """A cell command that cannot carry the model or the prompt would start
+    the wrong session or none — refused like the top-level command."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    pol = out / "docs/process/model-policy.json"
+    data = json.loads(pol.read_text())
+    data["tiers"]["3"]["review"] = {"model": "x", "command": command}
+    pol.write_text(json.dumps(data))
+    r = _dispatch(out, "policy")
+    assert r.returncode != 0 and "tiers.3.review.command" in r.stderr, r.stdout + r.stderr
+
+
+@pytest.mark.parametrize("key", ["model", "effort"])
+def test_a_phase_command_file_that_overrides_the_model_refuses_the_start(render, tmp_path, key):
+    """Kenni #2317: `model:` frontmatter on a command silently replaced the
+    dispatched model; `effort:` would do the same to the cell's effort."""
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    cmd = out / ".claude/commands/plan.md"
+    cmd.write_text(f"---\ndescription: plan\n{key}: haiku\n---\n" + cmd.read_text())
+    r = _dispatch(out, "start", "--issue", "3", "--phase", "plan", "--tier", "2", "--dry-run")
+    assert r.returncode == 3 and "one owner for the model" in r.stderr and f"{key}:" in r.stderr, r.stderr
+    r = _dispatch(out, "start", "--issue", "3", "--phase", "execute", "--tier", "2", "--dry-run")
+    assert r.returncode == 0, r.stderr  # only the phase's own file counts
+
+
+@pytest.mark.parametrize("harness", ["claude", "copilot", "agents_md"])
+def test_no_rendered_command_or_skill_declares_model_or_effort(render_raw, tmp_path, harness):
+    """The policy is the one owner of model and effort: a rendered command,
+    prompt or skill file with such frontmatter would override every dispatch."""
+    out = render_raw(tmp_path, {"project_name": "d", "harness": harness})
+    d = _load_dispatch(out)
+    files = [p for p in out.rglob("*.md") if {"commands", "prompts", "skills"} & set(p.relative_to(out).parts)]
+    assert files or harness == "agents_md"
+    assert not [(str(p.relative_to(out)), k) for p in files for k in d.frontmatter_overrides(p)]
+
+
+def _transcript(path: Path, *models: str, started: float = 0, sidechain: str = "") -> None:
+    import datetime
+    ts = datetime.datetime.fromtimestamp(started + 5, datetime.timezone.utc).isoformat()
+    lines = [json.dumps({"type": "assistant", "timestamp": ts, "message": {"model": m}}) for m in models]
+    if sidechain:
+        lines.append(json.dumps({"type": "assistant", "isSidechain": True, "timestamp": ts,
+                                 "message": {"model": sidechain}}))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(lines) + "\n")
+
+
+def test_model_drift_reads_the_sessions_own_assistant_messages(render, tmp_path):
+    """A dated id is the dispatched alias; a subagent (sidechain) on another
+    model is a choice, not drift; without `transcripts` nothing is read."""
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    d = _load_dispatch(out)
+    wt = tmp_path / "wt"
+    rec = {"model": "claude-opus-5", "worktree": str(wt), "started": time.time() - 60}
+    _transcript(tmp_path / "t" / "wt" / "a.jsonl", "claude-opus-5-20261001", "<synthetic>",
+                started=rec["started"], sidechain="claude-sonnet-5")
+    pattern = str(tmp_path / "t" / "*" / "*.jsonl")
+    assert d.model_drift(out, rec) == []  # no transcripts glob in the policy
+    assert d.model_drift(out, rec, pattern) == []
+    _transcript(tmp_path / "t" / "wt" / "b.jsonl", "claude-haiku-5", started=rec["started"])
+    assert d.model_drift(out, rec, pattern) == ["claude-haiku-5"]
+    # an earlier phase's transcript in the same worktree is not this session's
+    assert d.model_drift(out, {**rec, "started": time.time() + 3600}, pattern) == []
+
+
+def test_the_tower_reports_model_drift_only_with_transcripts(render, tmp_path):
+    """Visible drift where the harness's transcripts are configured; no new
+    noise where they are not."""
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    _fake_command(out, "sleep 30\n")
+    r = _dispatch(out, "start", "--issue", "7", "--phase", "plan", "--tier", "2", "--branch", "b7")
+    assert r.returncode == 0, r.stderr
+    rec = next(x for x in _load_dispatch(out).records(out) if x["branch"] == "b7")
+    # the harness keeps transcripts per working directory: `{worktree}` names it
+    _transcript(Path(str(tmp_path / "t") + rec["worktree"]) / "s.jsonl", "claude-haiku-5", started=rec["started"])
+
+    def tower():
+        r = subprocess.run([sys.executable, str(out / "scripts/process/tower.py"), "--json", "--section", "findings"],
+                           cwd=out, capture_output=True, text=True)
+        assert r.returncode == 0, r.stderr
+        return [f for f in json.loads(r.stdout)["findings"] if f["kind"] == "model-drift"]
+
+    try:
+        assert tower() == []
+        pol = out / "docs/process/model-policy.json"
+        data = json.loads(pol.read_text())
+        data["transcripts"] = str(tmp_path / "t") + "{worktree}/*.jsonl"
+        pol.write_text(json.dumps(data))
+        drift = tower()
+        assert len(drift) == 1 and "claude-opus-5" in drift[0]["what"] and "claude-haiku-5" in drift[0]["what"], drift
+    finally:
+        _dispatch(out, "stop", "b7", "--force")
