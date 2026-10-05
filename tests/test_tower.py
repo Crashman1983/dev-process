@@ -137,6 +137,25 @@ def test_red_ledger_age_is_a_finding(render, tmp_path):
     assert any(f["kind"] == "chronic-red" and "review" in f["what"] for f in t["findings"])
 
 
+def test_a_report_never_records_an_empty_model(render, tmp_path):
+    """Downstream, 21 tower events carried no model name; the KPIs cut by model could not use them."""
+    import os
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    env = {k: v for k, v in os.environ.items() if k != "PROCESS_MODEL"}
+    run = lambda *a, **e: subprocess.run(  # noqa: E731
+        [sys.executable, str(out / "scripts/process/report.py"), *a],
+        cwd=out, capture_output=True, text=True, env={**env, **e})
+    r = run("idle")
+    assert r.returncode == 0 and "model not measured" in r.stderr and "--model" in r.stderr
+    assert run("idle", PROCESS_MODEL="env-model").returncode == 0
+    assert run("idle", "--model", "flag-model", PROCESS_MODEL="env-model").returncode == 0
+    common = _git(out, "rev-parse", "--git-common-dir").stdout.strip()
+    ledger = Path(common if Path(common).is_absolute() else out / common) / "process-tower/reports.jsonl"
+    models = [json.loads(line)["model"] for line in ledger.read_text().splitlines()]
+    assert models == ["not measured", "env-model", "flag-model"]
+
+
 def test_report_rejects_unknown_state(render, tmp_path):
     out = render(tmp_path, {"project_name": "d", "modules": {}})
     _repo(out)

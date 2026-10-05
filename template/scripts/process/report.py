@@ -76,8 +76,16 @@ def default_worker(root: Path) -> str:
             or root.name)
 
 
+UNMEASURED = "not measured"
+
+
 def write_report(root: Path, state: str, *, issue: int | None, note: str, worker: str | None,
                  model: str | None = None) -> dict:
+    # never empty: an empty model was indistinguishable from a lost field downstream
+    model = (model or os.environ.get("PROCESS_MODEL") or "").strip()
+    if not model:
+        model = UNMEASURED
+        print(f"report: model {UNMEASURED} — pass --model <id> (or set PROCESS_MODEL)", file=sys.stderr)
     record = {
         "ts": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
         "epoch": int(time.time()),
@@ -86,7 +94,7 @@ def write_report(root: Path, state: str, *, issue: int | None, note: str, worker
         "branch": _git(root, "rev-parse", "--abbrev-ref", "HEAD"),
         "issue": issue,
         "state": state,
-        "model": model or os.environ.get("PROCESS_MODEL") or "",
+        "model": model,
         "phase": os.environ.get("PROCESS_PHASE") or "",
         "note": note.strip()[:1000],
         "cwd": str(root),
