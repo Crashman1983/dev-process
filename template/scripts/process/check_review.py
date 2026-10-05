@@ -2377,6 +2377,17 @@ def _known_work(root: Path, *, ref: str | None = None) -> set[str]:
     return known
 
 
+def no_clearing_review(rel: str, tier: int, ids) -> str:
+    """The one wording of "this plan's review is missing" — with both ways out,
+    so no site names only one (the gate and finish.py ask here)."""
+    work = sorted(ids)
+    pick = min(work, key=lambda i: (len(i), i)) if work else "<id>"
+    return (f"{rel}: tier {tier} plan has no clearing REVIEW (verdict=pass, work in {work}, "
+            f"tier>={tier}). Two ways out: review it and attest (attest.py --work {pick} "
+            f"--tier {tier} … --verdict pass), or record the exception in the plan: "
+            f"'review-waived: <reason> #<issue>' (journal-state-plans.md)")
+
+
 def _residue(rel: str) -> str:
     return (f"{rel}: belongs to work already merged (its reviewed head is on the integration "
             f"branch) — later changes are not its code; archive the plan (a merge that "
@@ -2748,9 +2759,7 @@ def check(root: Path) -> tuple[list[str], list[str]]:
             ids = _plan_work_ids(p.stem, text, include_dedated=unique)
             tiered_plans.append((f"{PLANS_ARCHIVE}/{p.name}", text, tier, ids))
             if not _cleared(passes, ids, tier):
-                hard.append(f"{PLANS_ARCHIVE}/{p.name}: archived plan declares tier {tier} "
-                            f"but has no clearing REVIEW (verdict=pass, work in {sorted(ids)}, "
-                            f"tier>={tier}) and no 'review-waived:' line")
+                hard.append(no_clearing_review(f"{PLANS_ARCHIVE}/{p.name}", tier, ids))
 
     # the speckit path's plans: the decisions ledger is a note there too
     for rel, plan in record_files(root, ("spec-plan",)):
@@ -2770,10 +2779,8 @@ def check(root: Path) -> tuple[list[str], list[str]]:
     # the speckit path's plans never enter the archive — surface the same
     # presence question there as a note (finish.py is the hard stop)
     for name, tier, ids in speckit_unreviewed(root, passes):
-        soft.append(f"{SPECS_DIR}/{name}: tasks all ticked and plan declares "
-                    f"tier {tier}, but no clearing REVIEW (verdict=pass, work "
-                    f"in {sorted(ids)}, tier>={tier}) and no 'review-waived:' "
-                    f"— run /review before merging; finish.py blocks on this")
+        soft.append(no_clearing_review(f"{SPECS_DIR}/{name}", tier, ids)
+                    + " — its tasks are all ticked; finish.py blocks on this")
 
     # ACTIVE plans this push carries. Waiting for the archive step means the
     # proof arrives after the merge it was supposed to gate — so Tier 3 is
@@ -2864,10 +2871,8 @@ def check(root: Path) -> tuple[list[str], list[str]]:
                 # push — not this push's proof to produce
                 continue
             if not _cleared(passes, ids, tier):
-                presence(f"{rel}: active plan declares tier {tier} but has no "
-                         f"clearing REVIEW (verdict=pass, work in {sorted(ids)}, "
-                         f"tier>={min(tier, 3)}) and no 'review-waived:' line — from "
-                         f"Tier 2 on the proof is due before the merge")
+                presence(no_clearing_review(rel, min(tier, 3), ids)
+                         + " — from Tier 2 on the proof is due before the merge")
                 continue
             if merged_work(root, rel, passes, ids, tier):
                 soft.append(_residue(rel))
@@ -2898,10 +2903,8 @@ def check(root: Path) -> tuple[list[str], list[str]]:
             if tier < 2 or review_waived(text):
                 continue
             if not _cleared(passes, ids, tier):
-                presence(f"a commit in the pushed range claims #{number}, whose "
-                         f"plan {rel} declares tier {tier}, but no clearing REVIEW "
-                         f"(verdict=pass, work in {sorted(ids)}, tier>={min(tier, 3)}) and "
-                         f"no 'review-waived:' line")
+                presence(f"a commit in the pushed range claims #{number} — "
+                         + no_clearing_review(rel, min(tier, 3), ids))
                 continue
             stale = stale_review(root, passes, ids, tier, in_flight, _reviewed_heads(passes, tier, known_work))
             if stale:
