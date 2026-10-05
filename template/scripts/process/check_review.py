@@ -628,11 +628,18 @@ def work_keys(works) -> tuple[tuple[str, ...], tuple[IssueKey, ...]]:
     return tuple(slugs), tuple(issues)
 
 
-def plan_report_keys(rel: str, text: str) -> tuple[tuple[str, ...], tuple[IssueKey, ...]]:
+def plan_report_keys(rel: str, text: str, root: Path | None = None
+                     ) -> tuple[tuple[str, ...], tuple[IssueKey, ...]]:
     """(slugs, issues) by which a plan reaches its review reports through
     `report_of`: the plan's stem without its date, and the issues it declares
-    — the one owner; the review bundle and tidy ask it."""
-    issues = (issue_key(m.group(1)) for m in ISSUE_DECL.finditer(_unfenced(text or "")))
+    — for a Spec Kit plan also its directory's issue (`spec_dir_issue`,
+    spec.md first; needs `root`). The one owner; the review bundle and tidy
+    ask it."""
+    issues = [issue_key(m.group(1)) for m in ISSUE_DECL.finditer(_unfenced(text or ""))]
+    if root is not None and record_kind(rel) == "spec-plan":
+        n = spec_dir_issue(root / SPECS_DIR / plan_stem(rel))
+        if n is not None:
+            issues.append((None, n))
     slug = DATE_PREFIX.sub("", plan_stem(rel))
     return ((slug,) if slug else ()), tuple(dict.fromkeys(k for k in issues if k is not None))
 
