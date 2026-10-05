@@ -826,19 +826,50 @@ def _base_problem(root_s: str, base: str, head: str, merged: tuple[str, ...]) ->
     return full_round_base_problem(Path(root_s), base, head)
 
 
+NO_INTEGRATION_REF = (
+    "full-round REVIEW records not checked against the fork point: no integration ref "
+    "resolves — fetch origin/main (or the remote default branch; `git remote set-head "
+    "origin -a` names it)")
+
+
+def _integration_bounds(root: Path, tip_sha: str) -> tuple[str, ...] | None:
+    """The SHAs that bound what a push of `tip_sha` vouches for: the
+    remote-tracking integration refs that do not contain it; only when none
+    exists, the local names that do not. A ref containing the tip bounds
+    nothing (`_integration_base`'s principle): a local main fast-forwarded
+    to the tip (finish.py) or a forged `master` at HEAD would otherwise hide
+    the whole range. () when every resolving ref contains the tip — it is
+    integrated, nothing is vouched for; None when no integration ref resolves."""
+    listed = _git_bytes(root, "for-each-ref", "--format=%(refname:short)",
+                        "refs/remotes/*/main", "refs/remotes/*/master")
+    remote_names = {*_remote_defaults(root), *(f"origin/{n}" for n in INTEGRATION_NAMES),
+                    *(listed or b"").decode(errors="replace").split()}
+    refs = [*integration_refs(root), *sorted(remote_names)]
+    resolved = {ref: sha for ref in dict.fromkeys(refs) for sha in [_commit_sha(root, ref)] if sha}
+    if not resolved:
+        return None
+    outside = {ref: sha for ref, sha in resolved.items()
+               if _git_bytes(root, "merge-base", "--is-ancestor", tip_sha, sha) is None}
+    remotes = [sha for ref, sha in outside.items() if ref in remote_names]
+    local = [sha for ref, sha in outside.items() if ref not in remote_names]
+    return tuple(sorted(set(remotes or local)))
+
+
 def _full_rounds_split(root: Path, records: list[dict], tip: str
-                       ) -> tuple[dict[int, str], list[dict], tuple[str, ...]]:
-    """(invalid, outside, merged): the full rounds whose head the push of
-    `tip` carries unmerged, judged against the fork point; the full rounds
-    whose head it does not carry, unjudged; the integration SHAs."""
+                       ) -> tuple[dict[int, str], list[dict], tuple[str, ...], bool]:
+    """(invalid, outside, merged, unbounded): the full rounds whose head the
+    push of `tip` carries unmerged, judged against the fork point; the full
+    rounds whose head it does not carry, unjudged; the bounding integration
+    SHAs; whether full rounds went unjudged because no integration ref resolves."""
     full = [r for r in records
             if r.get("mode", "full") == "full" and r.get("base") and r.get("head")]
     tip_sha = _commit_sha(root, tip) if full else None
     if tip_sha is None:
-        return {}, [], ()
-    merged = tuple(sorted({sha for ref in integration_refs(root)
-                           for sha in [_commit_sha(root, ref)] if sha}))
-    pushed = _unmerged_history(str(root), tip_sha, merged)
+        return {}, [], (), False
+    merged = _integration_bounds(root, tip_sha)
+    if merged is None:
+        return {}, [], (), True  # one finding (`check`), never one per record
+    pushed = (_unmerged_history(str(root), tip_sha, merged) if merged else frozenset())
     invalid: dict[int, str] = {}
     outside: list[dict] = []
     for r in full:
@@ -848,7 +879,7 @@ def _full_rounds_split(root: Path, records: list[dict], tip: str
         why = _base_problem(str(root), r["base"], r["head"], merged)
         if why:
             invalid[id(r)] = why
-    return invalid, outside, merged
+    return invalid, outside, merged, False
 
 
 def invalid_full_rounds(root: Path, records: list[dict], tip: str = "HEAD") -> dict[int, str]:
@@ -858,15 +889,21 @@ def invalid_full_rounds(root: Path, records: list[dict], tip: str = "HEAD") -> d
     pushed range: head in `tip`'s history and in no integration ref (git
     unable to list that range: every record). A merged record stands as main
     judged it; a missing head or another branch's is not this push's
-    (`unchecked_full_rounds` counts the latter)."""
+    (`unchecked_full_rounds` counts the latter). Without any integration ref
+    nothing is judged (`unbounded_full_rounds`)."""
     return _full_rounds_split(root, records, tip)[0]
+
+
+def unbounded_full_rounds(root: Path, records: list[dict], tip: str = "HEAD") -> bool:
+    """Did full rounds go unjudged because no integration ref resolves?"""
+    return _full_rounds_split(root, records, tip)[3]
 
 
 def unchecked_full_rounds(root: Path, records: list[dict], tip: str = "HEAD") -> int:
     """How many full rounds off their fork point stay unjudged: head present
     and unmerged, but outside `tip`'s history (a stale branch's record)."""
-    _invalid, outside, merged = _full_rounds_split(root, records, tip)
-    if not outside:
+    _invalid, outside, merged, _unbounded = _full_rounds_split(root, records, tip)
+    if not outside or not merged:  # no bound: the tip is integrated, nothing is this push's
         return 0
     listed = _git_bytes(root, "rev-list", "--all", "--not", *merged, "--")
     unmerged = set((listed or b"").decode().split())
@@ -2575,6 +2612,8 @@ def check(root: Path) -> tuple[list[str], list[str]]:
         if id(f) in invalid:
             hard.append(f"{rel}:{lineno}: malformed REVIEW line — {invalid[id(f)]}")
     unchecked = unchecked_full_rounds(root, [f for _ln, f in all_records])
+    if unbounded_full_rounds(root, [f for _ln, f in all_records]):
+        presence(NO_INTEGRATION_REF)
     if unchecked:
         soft.append(f"{unchecked} legacy full-round record(s) not checked against the fork "
                     f"point: head not in this push's history")
