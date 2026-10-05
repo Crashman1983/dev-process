@@ -155,7 +155,8 @@ def _enforcement(rel: str) -> bool:
                        'docs/process/risk-tiers.md'})
 
 
-def _verify(root: Path, base: str, tip: str, *, worktree: bool = False) -> dict:
+def _verify(root: Path, base: str, tip: str, *, worktree: bool = False,
+            reads: set[str] | None = None) -> dict:
     result = dict(base=base, head=tip, update=False, identical=[], project_delta=[],
                   migration=False, errors=[], release_notes='')
     try:
@@ -222,6 +223,8 @@ def _verify(root: Path, base: str, tip: str, *, worktree: bool = False) -> dict:
                                         '.process-work/state/'))):
                     continue  # existing review bookkeeping, not template evidence
                 actual_old = _entry(root, base, rel)
+                if reads is not None:
+                    reads.add(rel)  # the memo re-reads it (verify)
                 actual_new = _file(root, rel) if worktree else _entry(root, tip, rel)
                 old_render, new_render = _file(old, rel), _file(new, rel)
                 exact = (actual_old == old_render and actual_new == new_render
@@ -265,23 +268,27 @@ def _committed(root: str, base: str, tip: str) -> dict:
     return _verify(Path(root), base, tip)
 
 
-_WORKTREE: dict[tuple, dict] = {}
+_WORKTREE: dict[tuple, tuple[frozenset, str, dict]] = {}
 
 
-def _worktree_key(root: Path, base: str, tip: str) -> tuple:
-    # Content, not names: any edit to a dirty, untracked or bookkeeping file
-    # changes the key. The memo lives for this process only.
+def _digest(root: Path, rels) -> str:
     digest = hashlib.sha256()
-    dirty = {os.fsdecode(p) for p in git(root, 'diff', '--name-only', '-z', tip).split(b'\0') if p}
-    dirty |= {os.fsdecode(p) for p in git(root, 'ls-files', '--others', '--exclude-standard',
-                                          '-z').split(b'\0') if p}
-    for rel in sorted(dirty | {ANSWERS, ACK, OWNED_FILE}):
+    for rel in sorted(rels):
         try:
             entry = _file(root, rel)
         except (ValueError, OSError) as exc:
             entry = ('error', str(exc).encode())
         digest.update(rel.encode() + b'\0' + repr(entry).encode() + b'\0')
-    return str(root), base, tip, digest.hexdigest()
+    return digest.hexdigest()
+
+
+def _worktree_key(root: Path, base: str, tip: str) -> tuple:
+    # Content, not names: any edit to a dirty, untracked or bookkeeping file
+    # changes the key. The memo lives for this process only.
+    dirty = {os.fsdecode(p) for p in git(root, 'diff', '--name-only', '-z', tip).split(b'\0') if p}
+    dirty |= {os.fsdecode(p) for p in git(root, 'ls-files', '--others', '--exclude-standard',
+                                          '-z').split(b'\0') if p}
+    return str(root), base, tip, _digest(root, dirty | {ANSWERS, ACK, OWNED_FILE})
 
 
 def verify(root: Path, base: str, tip: str = 'HEAD', *, worktree: bool = False) -> dict:
@@ -290,9 +297,14 @@ def verify(root: Path, base: str, tip: str = 'HEAD', *, worktree: bool = False) 
     tip_sha = git(root, 'rev-parse', '--verify', tip + '^{commit}').decode().strip()
     if worktree:
         key = _worktree_key(root, base_sha, tip_sha)
-        if key not in _WORKTREE:
-            _WORKTREE[key] = _verify(root, base_sha, tip_sha, worktree=True)
-        return copy.deepcopy(_WORKTREE[key])
+        # every file _verify read from disk is read again: an ignored file
+        # that is also a rendered path is in no dirty set (refutation)
+        hit = _WORKTREE.get(key)
+        if hit is None or _digest(root, hit[0]) != hit[1]:
+            reads: set[str] = set()
+            result = _verify(root, base_sha, tip_sha, worktree=True, reads=reads)
+            hit = _WORKTREE[key] = (frozenset(reads), _digest(root, reads), result)
+        return copy.deepcopy(hit[2])
     return copy.deepcopy(_committed(str(root), base_sha, tip_sha))
 
 

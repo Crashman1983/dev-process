@@ -457,3 +457,23 @@ def test_unreachable_source_names_source_and_ref_and_fails_closed(update, monkey
                for e in proof['errors']), proof['errors']
     hard, _ = check(root, monkeypatch)
     assert any('template verification failed' in h and missing in h for h in hard), hard
+
+
+def test_worktree_memo_rereads_an_ignored_rendered_file(update, monkeypatch):
+    """Refute: an ignored file that is also a rendered path is read from disk but sits in
+    no dirty set; editing it must not be answered from the memo."""
+    root, _, base, verifier = update
+    git(root, 'rm', '-q', '--cached', 'docs/process/example.md')
+    write(root, '.gitignore', 'docs/process/example.md\n')
+    commit(root)
+    renders = []
+    real = verifier.render
+    monkeypatch.setattr(verifier, 'render', lambda *a: renders.append(a) or real(*a))
+    first = verifier.verify(root, base, worktree=True)
+    assert renders and 'docs/process/example.md' in first['project_delta'] + first['identical']
+    seen = len(renders)
+    verifier.verify(root, base, worktree=True)
+    assert len(renders) == seen  # unchanged: answered from the memo
+    write(root, 'docs/process/example.md', 'edited, ignored\n')
+    verifier.verify(root, base, worktree=True)
+    assert len(renders) > seen

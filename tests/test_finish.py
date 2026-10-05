@@ -260,6 +260,41 @@ def test_finish_names_tokens_and_apply_writes_them_into_done(render, tmp_path):
     assert done[-1]["worker"] == "feature"
 
 
+def test_done_is_written_once_the_merge_is_pushed_even_if_the_branch_delete_fails(render, tmp_path):
+    """Refute: `done` came only after the remote branch delete; a refused delete left a
+    pushed merge without it."""
+    import json
+    out, bare = _repo_with_origin(render, tmp_path)
+    hook = bare / "hooks/pre-receive"
+    hook.write_text("#!/bin/sh\nwhile read old new ref; do\n"
+                    "  [ \"$new\" = 0000000000000000000000000000000000000000 ] && exit 1\n"
+                    "done\nexit 0\n")
+    hook.chmod(0o755)
+    r = _run_args(out, "--apply", "--tests-passed")
+    assert r.returncode == 1 and "Traceback" not in r.stderr, r.stdout + r.stderr
+    remote_log = subprocess.run(["git", "--git-dir", str(bare), "log", "-1", "--format=%s", "main"],
+                                capture_output=True, text=True).stdout
+    assert "archive plan(s)" in remote_log  # the merge is pushed
+    done = [json.loads(line) for line in (out / ".git/process-tower/reports.jsonl").read_text().splitlines()]
+    assert done[-1]["state"] == "done" and done[-1]["note"] == "tokens: not measured"
+
+
+def test_a_failing_done_report_does_not_end_a_pushed_merge_in_a_traceback(render, tmp_path, monkeypatch):
+    """A merged change must not end in a traceback over bookkeeping."""
+    import importlib.util
+    out = _repo_on_feature(render, tmp_path)
+    sys.path.insert(0, str(out / "scripts/process"))
+    spec = importlib.util.spec_from_file_location("finish_done", out / "scripts/process/finish.py")
+    finish = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(finish)
+    import report
+
+    def boom(*a, **k):
+        raise OSError("disk full")
+    monkeypatch.setattr(report, "write_report", boom)
+    finish._done(out, "feature")  # no exception
+
+
 def test_issue_tokens_sum_the_policy_transcripts_of_its_worktrees(render, tmp_path):
     """The count is read, never estimated: the policy's `transcripts` glob per dispatched worktree."""
     import importlib.util
