@@ -98,6 +98,25 @@ def test_a_failing_step_stops_before_the_commit(tmp_path, monkeypatch):
     assert not any("commit" in argv for argv in calls), calls
 
 
+@pytest.mark.parametrize("xdist", [True, False])
+def test_suite_runs_on_four_workers_only_with_xdist(tmp_path, monkeypatch, xdist):
+    """serial the suite took ~5 min; loadfile because the render caches are per worker"""
+    root = _copy(tmp_path)
+    (root / "CHANGELOG.md").write_text("**v9.9.9 — t.** body\n", encoding="utf-8")
+    calls = []
+
+    def fake_run(argv, **kw):
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(rel.subprocess, "run", fake_run)
+    monkeypatch.setattr(rel.importlib.util, "find_spec", lambda name: object() if xdist else None)
+    rel.release(root, "v9.9.9")
+    suite = next(argv for argv in calls if "pytest" in argv)
+    assert (list(suite[-4:]) == ["-n", "4", "--dist", "loadfile"]) is xdist
+    assert ("-n" in suite) is xdist
+
+
 def test_cli_check_reports_ok_at_the_current_version():
     r = subprocess.run([sys.executable, str(REPO / "tools/release.py"), f"v{CURRENT}", "--check"],
                        capture_output=True, text=True)

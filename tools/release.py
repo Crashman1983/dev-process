@@ -19,7 +19,10 @@ steps, in order, stopping at the first failure:
 
 The suite runs by default: it tests the bumped tree with the new SBOM before the
 commit — skipped, a broken release commit can reach main, and the version is then
-refused as "not above". `--no-suite` only when it just ran on this tree.
+refused as "not above". `--no-suite` only when it just ran on this tree. With
+pytest-xdist installed it runs on four workers with `--dist loadfile` (the render
+caches are per worker, so a file's tests stay on one; docs/maintenance-2026-10-02.md,
+Laufzeiten); without it, serially.
 
 The remote part (PR, merge, wait for CI on main to be green for the merged SHA,
 tag it, publish) is printed at the end: it needs the host's GitHub access, which
@@ -30,6 +33,7 @@ Stdlib only.
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import re
 import shutil
 import subprocess
@@ -113,6 +117,12 @@ def _run(root: Path, what: str, *argv: str) -> None:
         raise SystemExit(f"release: {what} failed — nothing committed; fix it and run again")
 
 
+def _parallel() -> list[str]:
+    """xdist arguments when it is installed: four workers, not auto (a release
+    must not take the whole host), files kept whole (per-worker render caches)."""
+    return ["-n", "4", "--dist", "loadfile"] if importlib.util.find_spec("xdist") else []
+
+
 def release(root: Path, tag: str, *, suite: bool = True) -> None:
     m = VERSION.match(tag)
     if not m:
@@ -144,7 +154,7 @@ def release(root: Path, tag: str, *, suite: bool = True) -> None:
     _run(root, "sbom", sys.executable, "tools/gen_sbom.py")
     _run(root, "lint", "ruff", "check", ".")
     if suite:
-        _run(root, "suite", sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider")
+        _run(root, "suite", sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", *_parallel())
     shutil.rmtree(root / "template/scripts/process/__pycache__", ignore_errors=True)
     _run(root, "stage", "git", "add", "-A", *RELEASE_FILES)
     _run(root, "commit", "git", "commit", "-q", "-m", f"release: {tag}")
