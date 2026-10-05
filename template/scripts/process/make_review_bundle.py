@@ -534,12 +534,8 @@ SIZE_IGNORED = re.compile(r"^\.process-work/|(^|/)(package-lock\.json|uv\.lock|p
                           r"pnpm-lock\.yaml|Cargo\.lock|go\.sum)$")
 
 
-# gate code as `docs/process/refute.md` defines it, approximated by path: the
-# gates, the hooks, and what starts them (make targets, CI, pre-commit)
-GATE_PATHS = ("scripts/process/", ".githooks/", ".github/workflows/")
-# ...and the local gate configuration: which gates run, which models review
-GATE_FILES = ("Makefile", ".pre-commit-config.yaml",
-              "docs/process/gates.local.json", "docs/process/model-policy.local.json")
+# gate code as `docs/process/refute.md` defines it — the review gate owns the paths
+GATE_PATHS, GATE_FILES = _review_gate.GATE_PATHS, _review_gate.GATE_FILES
 # a real REFUTE line: at most three spaces of indent (four is a code block),
 # any list marker, a work id that is not the brief's placeholder, a round and
 # what was found. A bare `REFUTE work=x` or a line in backticks is a mention,
@@ -563,7 +559,7 @@ def _gate_files(root: Path, base_ref: str) -> list[str] | None:
     if out is None:
         return None
     return sorted(n for n in out.split("\0")
-                  if n and (n.startswith(GATE_PATHS) or n in GATE_FILES))
+                  if n and _review_gate.is_gate_path(n))
 
 
 def _refute_entries(text: str) -> set[tuple[str, int, str]]:
@@ -673,24 +669,6 @@ def _prior_report(root: Path, plan_filter: str | None, plan_texts: dict[Path, st
     return report, (_read(root, str(report.relative_to(root))) if report else None), slugs, issues
 
 
-CONTRACT_PATHS = re.compile(r"^(docs/process/design-contracts/|specs/[^/]+/contracts/)")
-_HEADING = re.compile(r"^#{1,4}\s", re.MULTILINE)
-_RECORD_LINE = re.compile(r"^.*\b(ROOT-CAUSE|REFUTE)\b.*$\n?", re.MULTILINE)
-
-
-def _plan_scope(text: str | None) -> tuple | None:
-    """What a fix round may not change in a plan: `## Decisions` and `tier:`
-    (record lines a fix round adds there aside)."""
-    if text is None:
-        return None
-    m = _review_gate.DECISIONS_HEADING.search(text)
-    section = ""
-    if m:
-        end = _HEADING.search(text, m.end())
-        section = text[m.start():end.start() if end else len(text)]
-    return " ".join(_RECORD_LINE.sub("", section).split()), _review_gate.plan_tier(text)
-
-
 def _tier_at(root: Path, ref: str, plans: list[Path]) -> int:
     """The highest tier these plans declared at `ref` (0 when none did), read
     as `build` reads it: no design doc, no plan that waives its review."""
@@ -709,47 +687,17 @@ def _delta_files(root: Path, since: str) -> list[str] | None:
     return None if entries is None else list(dict.fromkeys(path for _l, _s, path in entries))
 
 
-def _tier3_delta_refusal(root: Path, since: str, plan_texts: dict[Path, str],
-                         plan_filter: str | None, touches: list[str] | None) -> str | None:
+def _tier3_delta_refusal(root: Path, since: str, plan_texts: dict[Path, str]) -> str | None:
     """Why this Tier 3 delta needs a full bundle — None when it may run. The
-    tool decides containment, never the worker; any doubt is a full bundle."""
+    gate's owner decides (`check_review.tier3_delta_problem`), never the worker."""
     sha = (_git(root, "rev-parse", "--verify", "--quiet", f"{since}^{{commit}}") or "").strip()
+    head = (_git(root, "rev-parse", "HEAD") or "").strip()
     ids = {i for p, t in plan_texts.items() if t for i in _plan_ids(_rel(root, p), t)}
     records = [f for _r, t in _review_gate.record_texts(root, ("journal",)) or []
                for _l, f in _review_gate.parse_review_lines(t)[0]]
-    if not sha or not _review_gate.tier3_delta_anchor(records, ids, sha):
+    if not sha or not head:
         return _review_gate.tier3_delta_refusal(sha or since)
-    if touches is None:
-        return "full bundle required: git cannot list the delta's files"
-    rounds = sorted({int(f["round"]) for f in records if f["work"] in ids})
-    n = rounds[-1] if rounds else "the previous round"
-    why: list[str] = []
-
-    def named(paths: list[str]) -> str:
-        return ", ".join(_shown(p) for p in paths[:4]) + (", …" if len(paths) > 4 else "")
-
-    gate = [p for p in touches if p.startswith(GATE_PATHS) or p in GATE_FILES]
-    if gate:
-        why.append(f"the fix changes gate code ({named(gate)})")
-    contracts = [p for p in touches if CONTRACT_PATHS.match(p)]
-    if contracts:
-        why.append(f"the fix changes contracts ({named(contracts)})")
-    plans = [p for p in touches if _review_gate.record_kind(p) in PLAN_HOMES]
-    before = {p: _plan_scope(_git(root, "show", f"{sha}:{p}")) for p in plans}
-    scope = [p for p in plans
-             if before[p] is None or before[p] != _plan_scope(_git(root, "show", f"HEAD:{p}"))]
-    if scope:
-        why.append(f"the fix changes the plan's ## Decisions or tier: line ({named(scope)})")
-    _report, text, _s, _i = _prior_report(root, plan_filter, plan_texts)
-    code = [p for p in touches if not p.startswith(".process-work/") and p not in plans]
-    if text is None:
-        if code:
-            why.append(f"no readable report of round {n} to bound {named(code)}")
-    else:
-        outside = [p for p in code if p not in text]
-        if outside:
-            why.append(f"the fix changes {named(outside)} outside round {n}'s findings")
-    return "full bundle required: " + "; ".join(why) if why else None
+    return _review_gate.tier3_delta_problem(root, records, ids, sha, head)
 
 
 def build(root: Path, base: str | None, plan_filter: str | None = None,
@@ -788,7 +736,7 @@ def build(root: Path, base: str | None, plan_filter: str | None = None,
     # a fix round that lowers the tier is judged at the tier it started from
     if since and tier is not None and (tier >= 3 or _tier_at(root, since, plans) >= 3):
         # Tier 3: anchored on a full round, and no scope growth (verification-independence.md)
-        refusal = _tier3_delta_refusal(root, since, plan_texts, plan_filter, touches)
+        refusal = _tier3_delta_refusal(root, since, plan_texts)
         if refusal:
             who = (f"bundled plan {next(_label(root, p) for p, t in plan_texts.items() if _declared_tier([t]) == tier)}"
                    if plan_tier == tier else f"--tier {declared_tier}")

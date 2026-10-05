@@ -556,7 +556,7 @@ def test_tier3_delta_rule_is_mechanical_and_owned_once(render, tmp_path):
     rule = " ".join(vi.split("**What each round judges.**", 1)[1].split("\n\n", 1)[0].split())
     for phrase in ("The worker never decides a delta's scope", "`head=<sha>`",
                    "unbroken chain of Tier 3 delta REVIEWs", "`## Decisions` or `tier:`",
-                   "gate code", "`specs/*/contracts/`", "an unreadable report is a full bundle",
+                   "gate code", "`specs/*/contracts/`", "no readable report is a full bundle", "as a whole path", "a block anchors too",
                    "`DELTA_TOUCHES`"):
         assert phrase in rule, phrase
     flat = " ".join(vi.split())

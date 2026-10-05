@@ -73,8 +73,7 @@ from check_review import (  # noqa: E402  (one owner for grammar, digest, record
     readable,
     record_kind,
     record_texts,
-    tier3_delta_anchor,
-    tier3_delta_refusal,
+    tier3_delta_problem,
 )
 
 # read like a REFUTE line (make_review_bundle.REFUTE_LINE): at most three
@@ -253,8 +252,9 @@ def build_line(args, root: Path, journal_dir: Path | None = None) -> tuple[str, 
         if f.get("mode") == "delta" and int(f["tier"]) >= 3:
             known = [r for t in _texts(root, journal_dir or (root / JOURNAL_DIR).resolve())
                      for _l, r in parse_review_lines(t)[0]]
-            if not tier3_delta_anchor(known, {f["work"]}, f["base"]):
-                problems.append(f"malformed: {tier3_delta_refusal(f['base'])}")
+            why = tier3_delta_problem(root, known, {f["work"]}, f["base"], f["head"])
+            if why:
+                problems.append(f"malformed: {why}")
     return line, problems
 
 

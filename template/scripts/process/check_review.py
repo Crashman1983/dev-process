@@ -52,6 +52,7 @@ Pure stdlib. Owns the `REVIEW` grammar; shares nothing with telemetry's `GRADE`.
 """
 from __future__ import annotations
 
+import functools
 import hashlib
 import os
 import re
@@ -499,7 +500,7 @@ def parse_review_lines(text: str) -> tuple[list[tuple[int, dict]], list[tuple[in
             errors.append((i, f"tier {fields['tier']} outside the 0-3 scale"))
             continue
         # a Tier 3 delta parses; whether a full round anchors it is a journal
-        # question (`unanchored_deltas`), not one line's
+        # question (`invalid_deltas`), not one line's
         if fields["verdict"] not in VERDICTS:
             errors.append((i, f"verdict {fields['verdict']!r} not in {sorted(VERDICTS)}"))
             continue
@@ -548,28 +549,169 @@ def tier3_delta_anchor(records: list[dict], works: set[str], since: str) -> bool
             continue
         seen.add(sha)
         for r in records:
-            if r.get("work") in works and r.get("head") == sha and int(r["tier"]) >= 3:
+            if (r.get("work") in works and r.get("head") == sha and int(r["tier"]) >= 3
+                    and _tier3_independent(r)):
                 if r.get("mode", "full") == "full":
                     return True
                 todo.append(r.get("base") or "")
     return False
 
 
+def _tier3_independent(r: dict) -> bool:
+    """A link of the chain meets Tier 3 independence — a block anchors too,
+    a self-review does not."""
+    indep = set(r.get("independence", "").split(","))
+    return "non-implementing" in indep and bool(indep & {"cross-model", "single-family"})
+
+
 def tier3_delta_refusal(since: str) -> str:
     return f"Tier 3 delta needs a full round at {since}"
 
 
-def unanchored_deltas(records: list[dict]) -> list[dict]:
-    """Tier 3 delta REVIEWs no full round anchors — they clear nothing."""
-    return [r for r in records if r.get("mode") == "delta" and int(r["tier"]) >= 3
-            and not tier3_delta_anchor(records, {r["work"]}, r.get("base") or "")]
+# gate code as `docs/process/refute.md` defines it, approximated by path: the
+# gates, the hooks, and what starts them (make targets, CI, pre-commit) —
+# and the local gate configuration: which gates run, which models review
+GATE_PATHS = ("scripts/process/", ".githooks/", ".github/workflows/")
+GATE_FILES = ("Makefile", ".pre-commit-config.yaml",
+              "docs/process/gates.local.json", "docs/process/model-policy.local.json")
+CONTRACT_PATHS = re.compile(r"^(docs/process/design-contracts/|specs/[^/]+/contracts/)")
+REVIEW_REPORTS = ".process-work/reviews"
+_HEADING = re.compile(r"^#{1,4}\s", re.MULTILINE)
+_RECORD_LINE = re.compile(r"^.*\b(ROOT-CAUSE|REFUTE)\b.*$\n?", re.MULTILINE)
+_REPORT_KEY = re.compile(r"^\s*(?:[-*+]\s+)?[*_]*(review|audit|work)[*_]*\s*:\s*(\S+)", re.IGNORECASE)
 
 
-def review_passes(texts) -> list[dict]:
-    """The passes of these journal texts, unanchored Tier 3 deltas left out."""
-    records = [f for text in texts for _ln, f in parse_review_lines(text)[0]]
-    bad = {id(r) for r in unanchored_deltas(records)}
+def is_gate_path(rel: str) -> bool:
+    return rel.startswith(GATE_PATHS) or rel in GATE_FILES
+
+
+def plan_scope(text: str | None) -> tuple | None:
+    """What a fix round may not change in a plan: the Decisions section and
+    `tier:` (record lines a fix round adds there aside). None: no plan."""
+    if text is None:
+        return None
+    m = DECISIONS_HEADING.search(text)
+    section = ""
+    if m:
+        end = _HEADING.search(text, m.end())
+        section = text[m.start():end.start() if end else len(text)]
+    return " ".join(_RECORD_LINE.sub("", section).split()), plan_tier(text)
+
+
+def _show(root: Path, ref: str, rel: str) -> str | None:
+    out = _git_bytes(root, "show", f"{ref}:{rel}")
+    return None if out is None else out.decode("utf-8", errors="replace")
+
+
+def _work_key(value: str) -> str:
+    return re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", value).strip().rstrip(".,;:").lstrip("#")
+
+
+def _prior_report(root: Path, works: set[str], since: str, head: str) -> str | None:
+    """The previous round's report of this work as committed: present at
+    `since`, or as the delta first added it — never the working tree, never
+    a later edit. Its header `work:` (or, without one, its de-dated file
+    name) names the work; the newest by name wins; None when none does."""
+    keys = {_work_key(w) for w in works}
+    listed = _git_bytes(root, "ls-tree", "-r", "-z", "--name-only", head, "--", REVIEW_REPORTS)
+    if listed is None:
+        return None
+    found: list[tuple[str, str]] = []
+    for rel in sorted(p for p in listed.decode(errors="surrogateescape").split("\0") if p.endswith(".md")):
+        text = _show(root, since, rel)
+        if text is None:  # added by the delta: its first committed version
+            added = _git_bytes(root, "log", "--reverse", "--format=%H", "--diff-filter=A",
+                               f"{since}..{head}", "--", rel)
+            first = (added or b"").decode().split()
+            text = _show(root, first[0], rel) if first else None
+        if text is None:
+            continue
+        header: list[str] = []
+        for line in _unfenced(text).splitlines():
+            if not line.strip():
+                break
+            m = _REPORT_KEY.match(line)
+            if m and m.group(1).lower() == "work":
+                header.append(_work_key(m.group(2)))
+        stem = DATE_PREFIX.sub("", Path(rel).stem)
+        if (set(header) & keys) if header else (stem in keys or any(stem.startswith(f"{k}-") for k in keys)):
+            found.append((rel, text))
+    return found[-1][1] if found else None
+
+
+def _named(text: str, rel: str) -> bool:
+    """`rel` as a whole path in the report — `widget.py` is not `src/widget.py`."""
+    return re.search(rf"(?<![\w./-]){re.escape(rel)}(?![\w/-])", text) is not None
+
+
+def tier3_delta_scope_growth(root: Path, works: set[str], since: str, head: str) -> str | None:
+    """Why the Tier 3 delta `since..head` needs a full round — None when it is
+    contained. One owner: the bundle refuses, attest does not write, the gate
+    does not count. Computed from the delta's own commits and the prior
+    report as committed; any doubt is growth."""
+    return _scope_growth(str(root), frozenset(works), since, head)
+
+
+@functools.lru_cache(maxsize=256)
+def _scope_growth(root_s: str, works: frozenset, since: str, head: str) -> str | None:
+    root = Path(root_s)
+    entries = name_status(delta_diff(root, since, head, names=True))
+    if entries is None:
+        return "git cannot list the delta's files"
+    touches = list(dict.fromkeys(path for _l, _s, path in entries))
+
+    def named(paths: list[str]) -> str:
+        return ", ".join(paths[:4]) + (", …" if len(paths) > 4 else "")
+
+    why: list[str] = []
+    gate = [p for p in touches if is_gate_path(p)]
+    if gate:
+        why.append(f"the fix changes gate code ({named(gate)})")
+    contracts = [p for p in touches if CONTRACT_PATHS.match(p)]
+    if contracts:
+        why.append(f"the fix changes contracts ({named(contracts)})")
+    plans = [p for p in touches if record_kind(p) in (*PLAN_KINDS, "plan-archive")]
+    scope = [p for p in plans
+             if plan_scope(_show(root, since, p)) is None
+             or plan_scope(_show(root, since, p)) != plan_scope(_show(root, head, p))]
+    if scope:
+        why.append(f"the fix changes the plan's ## Decisions or tier: line ({named(scope)})")
+    code = [p for p in touches if not p.startswith(BOOKKEEPING) and p not in plans]
+    report = _prior_report(root, set(works), since, head)
+    if code and report is None:
+        why.append(f"no readable report of the round at {since[:12]} to bound {named(code)}")
+    elif report is not None:
+        outside = [p for p in code if not _named(report, p)]
+        if outside:
+            why.append(f"the fix changes {named(outside)} outside the prior round's findings")
+    return "full bundle required: " + "; ".join(why) if why else None
+
+
+def tier3_delta_problem(root: Path, records: list[dict], works: set[str],
+                        since: str, head: str) -> str | None:
+    """Anchor, then containment — why this Tier 3 delta clears nothing."""
+    if not tier3_delta_anchor(records, works, since):
+        return tier3_delta_refusal(since)
+    return tier3_delta_scope_growth(root, works, since, head)
+
+
+def invalid_deltas(root: Path, records: list[dict]) -> dict[int, str]:
+    """id(record) → why, for every Tier 3 delta REVIEW without an anchoring
+    full round or with scope growth — they clear nothing."""
+    return {id(r): why for r in records if r.get("mode") == "delta" and int(r["tier"]) >= 3
+            for why in [tier3_delta_problem(root, records, {r["work"]}, r.get("base") or "",
+                                            r.get("head") or "")] if why}
+
+
+def valid_passes(root: Path, records: list[dict]) -> list[dict]:
+    """The passes among these records, invalid Tier 3 deltas left out."""
+    bad = invalid_deltas(root, records)
     return [r for r in records if r.get("verdict") == "pass" and id(r) not in bad]
+
+
+def review_passes(root: Path, texts) -> list[dict]:
+    """The valid passes of these journal texts."""
+    return valid_passes(root, [f for text in texts for _ln, f in parse_review_lines(text)[0]])
 
 
 def _git_bytes(root: Path, *args: str) -> bytes | None:
@@ -1273,7 +1415,7 @@ def _blocks(located: list[tuple[str, dict]]) -> dict[str, tuple[str, dict]]:
             if rec["verdict"] == "block"}
 
 
-def _history_blocks(compared: RangeRecords) -> list[tuple[str, dict]]:
+def _history_blocks(compared: RangeRecords, root: Path) -> list[tuple[str, dict]]:
     """The records the history adds to the verdict at `tip`: the blocks it
     held, and the passes the remote already holds.
 
@@ -1288,7 +1430,7 @@ def _history_blocks(compared: RangeRecords) -> list[tuple[str, dict]]:
     round whose block a merge dropped; whoever changes a verdict counts the
     round up."""
     blocks = [(loc, f) for loc, f in compared.seen if f["verdict"] == "block"]
-    merged = [("base", f) for f in compared.at_base if f["verdict"] == "pass"]
+    merged = [("base", f) for f in valid_passes(root, compared.at_base)]
     return blocks + merged
 
 
@@ -1331,6 +1473,9 @@ def standing_block_findings(root: Path, tip: str = "HEAD", *, remote_sha: str | 
                           f"review records cannot be read is refused" for lineno, message in errors]
     if malformed:
         return malformed
+    # an invalid Tier 3 delta pass clears no block (`invalid_deltas`)
+    bad = invalid_deltas(root, [f for _loc, f in at_tip])
+    at_tip = [(loc, f) for loc, f in at_tip if id(f) not in bad or f["verdict"] != "pass"]
     if remote_sha is not None and GIT_SHA.fullmatch(remote_sha) and not remote_sha.strip("0"):
         # the remote has no such ref: this push creates main and carries its
         # whole history, so every work standing blocked at the tip is carried
@@ -1354,7 +1499,7 @@ def standing_block_findings(root: Path, tip: str = "HEAD", *, remote_sha: str | 
                 f"that claims a work can be read — fetch the remote, then push again"]
     try:
         compared = range_records(root, base, tip)
-        standing = _blocks(at_tip + _history_blocks(compared))
+        standing = _blocks(at_tip + _history_blocks(compared, root))
         if not standing:
             return []
         in_flight = paths_in_flight(root, tip, base=base, strict=True)
@@ -2151,11 +2296,13 @@ def check(root: Path) -> tuple[list[str], list[str]]:
         soft.extend(isoft)
         all_records.extend(records)
         located += [(rel, lineno, f) for lineno, f in records]
-    unanchored = {id(r) for r in unanchored_deltas([f for _ln, f in all_records])}
+    invalid = invalid_deltas(root, [f for _ln, f in all_records])
     for rel, lineno, f in located:
-        if id(f) in unanchored:
-            hard.append(f"{rel}:{lineno}: malformed REVIEW line — {tier3_delta_refusal(f['base'])}")
-    all_records = [(ln, f) for ln, f in all_records if id(f) not in unanchored]
+        if id(f) in invalid:
+            hard.append(f"{rel}:{lineno}: malformed REVIEW line — {invalid[id(f)]}")
+    # an invalid delta clears nothing; its block still stands
+    all_records = [(ln, f) for ln, f in all_records
+                   if id(f) not in invalid or f["verdict"] != "pass"]
     if ledger is not None:
         _save_integrity_ledger(ledger_path, ledger)
     if reused_total:

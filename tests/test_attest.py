@@ -333,6 +333,9 @@ def test_several_lenses_blocking_one_round_count_once(render, tmp_path):
 def test_attest_writes_a_tier3_delta_only_on_an_anchored_full_round(render, tmp_path):
     """The writer asks the gate's anchor rule, so an unanchored Tier 3 delta never reaches the journal."""
     out, base, head = _repo(render, tmp_path)
+    (out / ".process-work/reviews").mkdir(parents=True)
+    (out / ".process-work/reviews/2026-09-11-widget.md").write_text(
+        "work: widget\n\nFINDING sev=blocker action=fix issue=- gate=judgement widget.py returns 42\n")
     (out / "widget.py").write_text("def widget():\n    return 43\n")
     _git(out, "add", "-A")
     _git(out, "commit", "-q", "-m", "fix: widget")
@@ -347,6 +350,15 @@ def test_attest_writes_a_tier3_delta_only_on_an_anchored_full_round(render, tmp_
     r = _attest(out, *t3, "--bundle", str(bundle))
     assert r.returncode == 0, r.stderr
     assert "mode=delta" in _journal(out)
+    # scope growth: the next delta adds a file round 1 never named — attest refuses it too
+    (out / "extra.py").write_text("x = 1\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "fix: more")
+    grown = _git(out, "rev-parse", "HEAD").stdout.strip()
+    digest = _load_gate(out).artifact_digest(out, fix, grown, mode="delta")
+    bundle.write_text(f"REVIEW_ARTIFACT base={fix} head={grown} diff={digest} mode=delta\n")
+    r = _attest(out, *t3, "--bundle", str(bundle))
+    assert r.returncode == 1 and "extra.py outside the prior round's findings" in r.stderr, r.stderr
 
 
 def test_an_exception_is_written_even_when_no_rule_trips(render, tmp_path):

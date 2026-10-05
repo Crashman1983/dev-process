@@ -94,7 +94,7 @@ def _journal_passes(root: Path) -> list[dict]:
             texts.append(f.read_text(encoding="utf-8", errors="replace"))
         except OSError:
             continue
-    return review_passes(texts)
+    return review_passes(root, texts)
 
 
 def check(root: Path) -> tuple[list[str], list[str]]:
@@ -371,26 +371,33 @@ def apply(root: Path, *, tests: str | None, tests_passed: bool) -> int:
                           (["git", "push", "-q", "origin", default], route)):
             if not _sh(root, argv, env):
                 return 1
+    _done(root, branch)  # the merge is pushed: whatever fails next, it is done
     remote_branch = _git("ls-remote", "--heads", "origin", f"refs/heads/{branch}")
     if remote_branch:
         if not _sh(root, ["git", "push", "-q", "origin", "--delete", branch]):
             return 1
     else:
         print(f"finish: remote branch {branch} absent or unreadable — no remote delete")
-    issue, tokens = usage(root, branch)
-    try:  # the worker's `done`, written here with the usage line as its note
-        import report as _report
-        _report.write_report(root, "done", issue=issue, note=tokens,
-                             worker=os.environ.get("PROCESS_WORKER") or branch)
-    except SystemExit:
-        pass
-    print(f"finish: {tokens}")
     print(f"finish: merged {branch} into {default} and pushed. Remaining by "
           f"hand: remove the worktree if one carried the branch "
           f"(`git worktree remove <path> && git worktree prune`), "
           f"publish/prune finished spec dirs, close the tracking issue with "
           f"the merge commit ref (DoD)")
     return 0
+
+
+def _done(root: Path, branch: str) -> None:
+    """The worker's `done`, with the usage line as its note. A pushed merge
+    never ends in a traceback over bookkeeping."""
+    issue, tokens = usage(root, branch)
+    print(f"finish: {tokens}")
+    try:
+        import report as _report
+        _report.write_report(root, "done", issue=issue, note=tokens,
+                             worker=os.environ.get("PROCESS_WORKER") or branch)
+    except (Exception, SystemExit) as exc:  # noqa: BLE001
+        print(f"finish: merged, but the `done` report was not written ({exc}) — "
+              f"`report.py done --issue N` by hand", file=sys.stderr)
 
 
 def usage(root: Path, branch: str | None) -> tuple[int | None, str]:
