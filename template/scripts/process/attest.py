@@ -62,8 +62,11 @@ from check_review import (  # noqa: E402  (one owner for grammar, digest, record
     JOURNAL_DIR,
     full_round_base_problem,
     integration_targets,
+    PLAN_KINDS,
     PLANS_ARCHIVE,
+    _known_work,
     _plan_work_ids,
+    _unfenced,
     branch_issue,
     plan_stem,
     PLANS_ACTIVE,
@@ -160,6 +163,26 @@ def archive_problems(args, root: Path) -> list[str]:
     if target.exists():
         return [f"--archive: {_shown(root, target)} exists already — the move would "
                 f"overwrite another plan"]
+    return []
+
+
+def work_problems(args, root: Path) -> list[str]:
+    """A `--work` no plan names clears nothing. A number no plan declares and the
+    branch does not lead with is most likely the PR's number (observed: rounds
+    attested as work=<PR>, which no gate ever matched) — refused; any other
+    unknown id is a note, since a plan may still be written."""
+    work = args.work[:-len("-plan")] if args.work.endswith("-plan") else args.work
+    if work in _known_work(root):
+        return []
+    branch = _git(root, "symbolic-ref", "--short", "HEAD") or ""
+    if work.isascii() and work.isdigit() and branch_issue(branch) != work:
+        active = sorted({i for rel, text in record_texts(root, PLAN_KINDS) or []
+                         for i in _plan_work_ids(plan_stem(rel), _unfenced(text), include_dedated=True)})
+        return [f"work={work} names no plan or issue — it looks like a PR number; the work id "
+                f"is the plan slug or its issue: line. Active plans: "
+                f"{', '.join(active) if active else 'none'}"]
+    print(f"attest: note — work={work} names no plan (active, archived or Spec Kit) yet; "
+          f"no plan's review is cleared by it until one does", file=sys.stderr)
     return []
 
 
@@ -308,7 +331,7 @@ def main() -> int:
         round_issues = []
     args.round_ = counted if args.round_ is None else args.round_
     line, problems = build_line(args, root, journal_dir)
-    problems = round_issues + problems + archive_problems(args, root)
+    problems = round_issues + problems + archive_problems(args, root) + work_problems(args, root)
     if args.note and any(ln.lstrip().startswith("REVIEW") for ln in args.note.splitlines()):
         problems.append("the note carries REVIEW-looking lines — the validated line is the "
                         "only REVIEW writer")
