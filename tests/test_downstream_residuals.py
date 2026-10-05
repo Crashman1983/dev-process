@@ -73,7 +73,8 @@ def test_default_branch_is_an_integration_target(repo, default):
     assert not verdict.ok and 'review' in verdict.message
     assert guard.hook_check(repo, {'PRE_COMMIT_REMOTE_BRANCH': 'refs/heads/' + default}) == 1
     assert load('train').local_integration(repo) == default
-    assert load('finish').check(repo)[0] == [f'on {default} — there is no feature branch to finish']
+    assert load('finish').check(repo)[0] == [f'on {default} — there is no feature branch to finish; '
+                                             f'no branch is left unmerged into {default}']
     attest = load('attest')
     assert attest._journal_target(repo, repo / 'journal').parent == repo / 'journal'
     assert 'refs/heads/stable' not in load('check_review').integration_targets(repo)
@@ -214,7 +215,7 @@ def test_attest_commits_a_relative_journal_under_the_explicit_root(render, tmp_p
     git(root, 'config', 'user.email', 'test@example.com')
     commit(root, 'base.txt', 'base\n')
     result = subprocess.run([sys.executable, str(root / 'scripts/process/attest.py'),
-                             '--work', '42', '--tier', '1', '--reviewer', 'fresh', '--model', 'm',
+                             '--work', 'widget', '--tier', '1', '--reviewer', 'fresh', '--model', 'm',
                              '--independence', 'non-implementing', '--verdict', 'pass',
                              '--journal-dir', 'custom-journal', '--commit', str(root)],
                             cwd=tmp_path, capture_output=True, text=True)
