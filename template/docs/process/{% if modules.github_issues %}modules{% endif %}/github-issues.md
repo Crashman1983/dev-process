@@ -147,9 +147,17 @@ FINDING sev=minor action=follow-up issue=#61 gate=judgement story refs resolve b
 ~~~
 
 `FINDING sev=<blocker|major|minor|nit> action=<fix|accept|follow-up>
-issue=<ref|-> gate=<judgement|possible|name> <title>` — `fix` was resolved
-within the reviewed change, `accept` is a conscious acceptance (reason in
-prose), `follow-up` becomes tracked work and **must** carry an issue ref.
+issue=<ref|-> gate=<judgement|possible|name> [origin=<draft|fix|late>] <title>`
+— `fix` was resolved within the reviewed change, `accept` is a conscious
+acceptance (reason in prose), `follow-up` becomes tracked work and **must**
+carry an issue ref.
+
+`origin` is optional and says where the defect came from: `draft` — in the
+change as first reviewed; `fix` — introduced by a fix round; `late` — in the
+draft, found only in a later round. Another value is refused like any enum.
+`process_kpis.py rounds` (telemetry module) counts blockers by it: many `fix`
+blockers ask for regression tests and a re-check of the fixed class, many
+`late` ones for a more complete round 1.
 
 `gate` is the **ratchet field**, and it answers one question per finding:
 *could a linter, type checker or gate rule have produced this?*
@@ -171,7 +179,7 @@ The field is optional; omitting it is not a lie, it is an un-asked question. Fen
 and are ignored, as everywhere — **fence the Prompt section** when it quotes
 the grammar or header-like lines (`issue:`, `campaign:`), or the gate lints
 the quotes as claims. A title may contain `=` (`USER_ID=1 hardcoded` is fine);
-only leading `sev=`/`action=`/`issue=`/`gate=` tokens are parsed as fields.
+only leading `sev=`/`action=`/`issue=`/`gate=`/`origin=` tokens are parsed as fields.
 
 **The publish tool** — `bash scripts/process/publish_review.sh <report.md>
 [--campaign <title>]` creates the issue with the full report as body (prompt,

@@ -940,6 +940,23 @@ def test_gate_token_after_title_is_not_a_field(render, tmp_path):
     assert "marked gate=possible" not in r.stdout
 
 
+def test_finding_origin_is_an_optional_enum(render, tmp_path):
+    """Downstream blockers split draft=6 / fix=2 / late=2 only by hand — `origin=` records it
+    where the finding is written; absent is fine, an unknown value is refused like sev."""
+    cases = (("origin=fix guard re-broken", True),
+             ("origin=late missed in round 1", True),
+             ("no origin given", True),
+             ("origin=review not an origin", False))
+    for i, (rest, ok) in enumerate(cases):
+        line = f"FINDING sev=blocker action=fix issue=- {rest}\n"
+        out = _render(render, tmp_path / str(i))
+        _report(out, "2026-07-05-x.md", VALID_REPORT + line)
+        r = _run(out)
+        assert (r.returncode == 0) is ok, (line, r.stdout)
+        if not ok:
+            assert "origin='review' not in ['draft', 'fix', 'late']" in r.stdout
+
+
 # --- issue-before-spec: the influence window needs a readable home -----------
 
 def test_active_spec_without_issue_ref_is_hard(render, tmp_path):

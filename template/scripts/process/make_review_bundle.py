@@ -470,13 +470,15 @@ these values.
 
 For each finding, one line:
 
-    FINDING sev=<blocker|major|minor|nit> action=<fix|accept|follow-up> issue=<ref|-> gate=<judgement|possible|name> <title>
+    FINDING sev=<blocker|major|minor|nit> action=<fix|accept|follow-up> issue=<ref|-> gate=<judgement|possible|name> [origin=<draft|fix|late>] <title>
 
 - `gate`: could a linter, type checker or gate rule have produced this finding?
   `judgement` = no, it needed a reader; `possible` = yes, but no rule exists
   yet; otherwise the name of the rule that now catches it. `possible` is the
   one that matters: it marks a finding every future change will pay a reader
   to rediscover until somebody writes the rule.
+- `origin` (optional): `draft` = in the change as first reviewed, `fix` =
+  introduced by a fix round, `late` = in the draft but found only now.
 
 Judge against the checklist and the rules above; cite file:line evidence; a
 `pass` with unfixed blockers is a false green — verdict `block` instead."""

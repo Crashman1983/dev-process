@@ -184,6 +184,10 @@ def test_finding_tokens_pinned_to_their_owning_gate(render, tmp_path):
     act_line = "action=<" + "|".join(sorted(gate.FINDING_ACTIONS, key="fix accept follow-up".split().index)) + ">"
     assert sev_line in bundle_src, sev_line
     assert act_line in bundle_src, act_line
+    # the optional origin (blockers by draft/fix/late for `process_kpis.py rounds`)
+    org_line = "[origin=<" + "|".join(sorted(gate.FINDING_ORIGINS, key="draft fix late".split().index)) + ">]"
+    assert org_line in bundle_src, org_line
+    assert "origin" in gate.FINDING_KEYS
 
 
 def test_option_missing_value_is_usage_not_traceback(render, tmp_path):
