@@ -281,6 +281,29 @@ def test_a_number_no_plan_names_is_refused_as_a_likely_pr_number(render, tmp_pat
     assert "REVIEW work=26 " in _journal(out)
 
 
+def test_an_owner_exception_attests_planless_issue_work(render, tmp_path):
+    out, base, head = _repo(render, tmp_path)
+    r = _attest(out, "--base", base, "--head", head, "--work", "26")
+    assert r.returncode == 1 and '--exception "<reason>"' in r.stderr, r.stderr
+    r = _attest(out, "--base", base, "--head", head, "--work", "26",
+                "--exception", "hotfix issue without a plan")
+    assert r.returncode == 0, r.stderr
+    journal = _journal(out)
+    assert "REVIEW-EXCEPTION work=26 round=1: hotfix issue without a plan (overrides: work=26 " in journal
+    assert "REVIEW work=26 " in journal
+
+
+@pytest.mark.parametrize("decl", ["**#42**", "[#42](https://github.com/o/r/issues/42)", "#42,"])
+def test_a_decorated_issue_line_is_a_work_id(render, tmp_path, decl):
+    out, base, head = _repo(render, tmp_path)
+    plan = out / ".process-work/plans/2026-09-10-widget.md"
+    plan.write_text(plan.read_text().replace("tier: 2\n", f"tier: 2\nissue: {decl}\n"))
+    _git(out, "commit", "-qam", "issue line")
+    r = _attest(out, "--base", base, "--head", head, "--work", "42")
+    assert r.returncode == 0, r.stderr
+    assert "42" in _load_gate(out)._plan_work_ids("2026-09-10-widget", plan.read_text(), include_dedated=True)
+
+
 def test_the_round_is_counted_from_recorded_blocks_not_claimed(render, tmp_path):
     # downstream: re-checks after a pass and rebases were counted as rounds,
     # and blocking rounds were skipped in the journal

@@ -182,7 +182,8 @@ def work_problems(args, root: Path) -> list[str]:
                          for i in _plan_work_ids(plan_stem(rel), _unfenced(text), include_dedated=True)})
         return [f"work={work} names no plan or issue — it looks like a PR number; the work id "
                 f"is the plan slug or its issue: line. Active plans: "
-                f"{', '.join(active) if active else 'none'}"]
+                f"{', '.join(active) if active else 'none'}. Issue work without a plan: "
+                f"attest with --exception \"<reason>\""]
     print(f"attest: note — work={work} names no plan (active, archived or Spec Kit) yet; "
           f"no plan's review is cleared by it until one does", file=sys.stderr)
     return []
@@ -328,6 +329,7 @@ def main() -> int:
         # plan review clear its code (refutation)
         args.work += "-plan"
     counted, round_issues = round_problems(args, root, journal_dir)
+    round_issues += work_problems(args, root)  # an owner exception overrides it too
     exception_note = ""
     if args.exception:
         # always written: an owner exception that trips no rule here (a round
@@ -338,7 +340,7 @@ def main() -> int:
         round_issues = []
     args.round_ = counted if args.round_ is None else args.round_
     line, problems = build_line(args, root, journal_dir)
-    problems = round_issues + problems + archive_problems(args, root) + work_problems(args, root)
+    problems = round_issues + problems + archive_problems(args, root)
     if args.note and any(ln.lstrip().startswith("REVIEW") for ln in args.note.splitlines()):
         problems.append("the note carries REVIEW-looking lines — the validated line is the "
                         "only REVIEW writer")
