@@ -1592,6 +1592,69 @@ def test_tier2_delta_keeps_its_behaviour_and_lists_its_files(render, tmp_path):
     assert _touches(t) == "other.py" and "REFUTE WARNING" not in t
 
 
+def _t3_round_of(out, work):
+    """A Tier 3 full round 1 attested as `work=<work>` (the plan is `widget`, issue #9),
+    its report headed `work: #9`, and a fix of widget.py after it; returns the round's head."""
+    _plan_commit(out, _T3_PLAN)
+    head = _git(out, "rev-parse", "HEAD").stdout.strip()
+    base = _git(out, "merge-base", "main", "HEAD").stdout.strip()
+    journal = out / ".process-work/journal"
+    journal.mkdir(parents=True, exist_ok=True)
+    (journal / "review.md").write_text(_t3_record(base, head).replace("work=9", f"work={work}"))
+    (out / ".process-work/reviews").mkdir(parents=True, exist_ok=True)
+    (out / ".process-work/reviews/2026-07-10-round-1.md").write_text(
+        "work: #9\n\nFINDING sev=blocker action=fix issue=- gate=judgement widget.py is wrong\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "review round 1")
+    _fix(out, "widget.py", "def widget():\n    return 43\n")
+    return head
+
+
+@pytest.mark.parametrize("full,delta", [("9", "widget"), ("widget", "9"), ("9", "#9"),
+                                        ("2026-07-09-widget", "#9")])
+def test_bundle_attest_and_gate_read_a_tier3_deltas_work_alike(render, tmp_path, full, delta):
+    """#168: the bundle passed every bundled plan id, attest and the gate the literal
+    `work=` — a delta the bundle built for `widget` (issue #9) could not be attested
+    as `work=widget` when the full round said `work=9`. One owner: `expand_work`."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    since = _t3_round_of(out, full)
+    bundle = tmp_path / "delta.bundle.md"
+    bundle.write_text(_bundle(out, "--base", "main", "--since", since).stdout)
+    assert "widget.py is wrong" in _findings(bundle.read_text())
+    r = subprocess.run([sys.executable, str(out / "scripts/process/attest.py"), "--work", delta,
+                        "--tier", "3", "--model", "m", "--verdict", "pass",
+                        "--independence", "bundle,non-implementing,cross-model",
+                        "--bundle", str(bundle), "."], cwd=out, capture_output=True, text=True)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "mode=delta" in r.stdout
+    gate = _module(out, "check_review")
+    records = [f for _r, t in gate.record_texts(out, ("journal",)) for _l, f in gate.parse_review_lines(t)[0]]
+    assert len(records) == 2 and gate.invalid_deltas(out, records) == {}
+
+
+def test_a_tier3_delta_of_another_work_stays_unanchored_everywhere(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    since = _t3_round_of(out, "77")  # another work's full round at the same head
+    r = _run(out, "--base", "main", "--since", since, "--skip-preflight")
+    assert r.returncode != 0 and f"Tier 3 delta needs a full round at {since}" in r.stderr
+    gate = _module(out, "check_review")
+    fix = _git(out, "rev-parse", "HEAD").stdout.strip()
+    digest = gate.artifact_digest(out, since, fix, mode="delta")
+    bundle = tmp_path / "delta.bundle.md"
+    bundle.write_text(f"REVIEW_ARTIFACT base={since} head={fix} diff={digest} mode=delta\n")
+    r = subprocess.run([sys.executable, str(out / "scripts/process/attest.py"), "--work", "widget",
+                        "--tier", "3", "--model", "m", "--verdict", "pass",
+                        "--independence", "bundle,non-implementing,cross-model",
+                        "--bundle", str(bundle), "."], cwd=out, capture_output=True, text=True)
+    assert r.returncode == 1 and "Tier 3 delta needs a full round" in r.stderr
+    delta = gate.parse_review_lines(_t3_record(since, fix, mode=" mode=delta", rnd=2)
+                                    .replace("work=9", "work=widget"))[0][0][1]
+    full = [f for _r, t in gate.record_texts(out, ("journal",)) for _l, f in gate.parse_review_lines(t)[0]]
+    assert id(delta) in gate.invalid_deltas(out, [*full, delta])
+
+
 def test_plan_report_keys_read_decorated_issue_tokens_but_not_spec_md(render, tmp_path):
     """`issue: **#9**,` and `[#9](url)` name #9 (one normaliser with report
     headers); spec.md's issue is NOT a bundle key — adding it changed which
@@ -1607,7 +1670,8 @@ def test_plan_report_keys_read_decorated_issue_tokens_but_not_spec_md(render, tm
         spec = importlib.util.spec_from_file_location("bundle_keys", out / "scripts/process/make_review_bundle.py")
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
-        slugs, issues = mod._report_keys(out, None, {d / "plan.md": (d / "plan.md").read_text()})
+        work = mod._bundled_work(out, None, {d / "plan.md": (d / "plan.md").read_text()})
+        slugs, issues = mod._review_gate.expand_work(out, work)[1]
         assert slugs == ("001-x",) and issues == ()
         for token in ("**#9**,", "[#9](https://x/9)", "#9.", "<#9>"):
             _s, got = mod._review_gate.plan_report_keys(".process-work/plans/p.md", f"issue: {token}\n")

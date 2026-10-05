@@ -572,15 +572,11 @@ def review_size(root: Path, base_ref: str) -> tuple[int, int]:
     return files, lines
 
 
-def _report_keys(root: Path, plan_filter: str | None, plan_texts: dict[Path, str]):
-    """(slugs, issues) that name this work's report (`check_review.report_of`)."""
-    slugs = [_DATED.sub("", plan_filter)] if plan_filter else []
-    issues: list = []
-    for p, text in plan_texts.items():
-        s, i = _review_gate.plan_report_keys(_rel(root, p), text)
-        slugs += s
-        issues += i
-    return tuple(dict.fromkeys(s for s in slugs if s)), tuple(dict.fromkeys(issues))
+def _bundled_work(root: Path, plan_filter: str | None, plan_texts: dict[Path, str]) -> set[str]:
+    """The work ids of the bundled plans (`--plan`'s slug when none is bundled) —
+    what this bundle hands `check_review.expand_work`, the owner of the rest."""
+    ids = {i for p, t in plan_texts.items() if t for i in _plan_ids(_rel(root, p), t)}
+    return ids or ({_DATED.sub("", plan_filter)} if plan_filter else set())
 
 
 def _since_head(root: Path, since: str) -> tuple[str, str]:
@@ -672,13 +668,12 @@ def _tier3_delta_refusal(root: Path, since: str, plan_filter: str | None,
     """Why this Tier 3 delta needs a full bundle — None when it may run. The
     gate's owner decides (`check_review.tier3_delta_problem`), never the worker."""
     sha, head = _since_head(root, since)
-    ids = {i for p, t in plan_texts.items() if t for i in _plan_ids(_rel(root, p), t)}
     records = [f for _r, t in _review_gate.record_texts(root, ("journal",)) or []
                for _l, f in _review_gate.parse_review_lines(t)[0]]
     if not sha or not head:
         return _review_gate.tier3_delta_refusal(sha or since)
-    return _review_gate.tier3_delta_problem(root, records, ids, sha, head,
-                                            _report_keys(root, plan_filter, plan_texts))
+    return _review_gate.tier3_delta_problem(root, records, _bundled_work(root, plan_filter, plan_texts),
+                                            sha, head)
 
 
 def build(root: Path, base: str | None, plan_filter: str | None = None,
@@ -839,8 +834,9 @@ def build(root: Path, base: str | None, plan_filter: str | None = None,
     if since:
         add("## Findings from the previous round\n")
         # the gate's rule: the report as committed, never one the fix brought
-        slugs, issues = _report_keys(root, plan_filter, plan_texts)
         sha, head = _since_head(root, since)
+        slugs, issues = _review_gate.expand_work(root, _bundled_work(root, plan_filter, plan_texts),
+                                                 ref=head or None)[1]
         found = _review_gate.prior_report(root, slugs, issues, sha, head) if sha and head else None
         if found:
             add(f"### {_shown(found[0])}\n{found[1]}\n")
