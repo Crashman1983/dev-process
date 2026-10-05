@@ -477,3 +477,146 @@ def test_worktree_memo_rereads_an_ignored_rendered_file(update, monkeypatch):
     write(root, 'docs/process/example.md', 'edited, ignored\n')
     verifier.verify(root, base, worktree=True)
     assert len(renders) > seen
+
+
+# --- the fork point: one owner (process_git.fork_point), callers pass the ref ---
+
+def criss_cross(root):
+    """main and feature merged each other: two merge bases (Kenni #2352)."""
+    init(root)
+    write(root, 'README.md', 'base\n')
+    commit(root)
+    git(root, 'checkout', '-qb', 'feature')
+    write(root, 'feature.md', 'a1\n')
+    a1 = commit(root)
+    git(root, 'checkout', '-q', 'main')
+    write(root, 'main.md', 'b1\n')
+    b1 = commit(root)
+    git(root, 'merge', '-q', '--no-ff', '-m', 'main takes feature', a1)
+    git(root, 'checkout', '-q', 'feature')
+    git(root, 'merge', '-q', '--no-ff', '-m', 'feature takes main', b1)
+    tip = git(root, 'rev-parse', 'HEAD')
+    assert len(git(root, 'merge-base', '--all', 'main', tip).split()) == 2
+    return tip
+
+
+def recording(module, monkeypatch):
+    calls = []
+    real = module.verify
+
+    def record(*args, **kwargs):
+        calls.append(args)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(module, 'verify', record)
+    return calls
+
+
+def move_main(root):
+    git(root, 'checkout', '-q', 'main')
+    write(root, 'unrelated/main-only.md', 'later on main\n')
+    commit(root)
+    git(root, 'checkout', '-q', 'update')
+
+
+def test_verify_refuses_an_ambiguous_fork_point(tmp_path):
+    tip = criss_cross(tmp_path / 'p')
+    with pytest.raises(ValueError, match='merge bases'):
+        load('template_verify').verify(tmp_path / 'p', 'main', tip)
+
+
+def test_verify_names_a_missing_fork_point(tmp_path):
+    root = tmp_path / 'p'
+    init(root)
+    write(root, 'README.md', 'main\n')
+    commit(root)
+    git(root, 'checkout', '-q', '--orphan', 'other')
+    write(root, 'other.md', 'other\n')
+    tip = commit(root)
+    with pytest.raises(ValueError, match='no common ancestor'):
+        load('template_verify').verify(root, 'main', tip)
+
+
+def test_gate_finish_and_history_refuse_a_criss_cross(tmp_path, monkeypatch):
+    """Ambiguity is a finding, never 'no base' (Kenni #2381: None turned the arms off)."""
+    root = tmp_path / 'p'
+    tip = criss_cross(root)
+    review = load('check_review')
+    calls = recording(review, monkeypatch)
+    monkeypatch.delenv('PROCESS_PUSH_TARGETS', raising=False)
+    hard, _ = review.check(root)
+    assert any('merge bases' in h and 'rebase onto the integration branch' in h for h in hard), hard
+    with pytest.raises(review.GitReadError, match='merge bases'):
+        review.merge_base(root)
+    # the hook's own standing-block check refuses the range instead of crashing
+    assert any('merge bases' in f for f in review.standing_block_findings(root)), \
+        review.standing_block_findings(root)
+    # _history grants no template coverage, and never binds a picked SHA
+    review._history(root, git(root, 'rev-parse', 'feature~1'), tip)
+    assert all(c[1] == 'main' for c in calls), calls
+    finish = load('finish')
+    monkeypatch.setattr(finish, 'gate_runner_argv', lambda root: [sys.executable, '-c', 'pass'])
+    blockers, _ = finish.check(root)
+    assert any('merge bases' in b for b in blockers), blockers
+
+
+def test_callers_hand_verify_the_integration_ref(update, monkeypatch):
+    """Gate, finish, _history and the plan exemption pass the ref; verify forks it."""
+    root, _, base, _ = update
+    move_main(root)
+    review = load('check_review')
+    calls = recording(review, monkeypatch)
+    monkeypatch.setenv('PROCESS_PUSH_TARGETS', 'refs/heads/main')
+    hard, _ = review.check(root)
+    assert hard == [], hard
+    text = (root / '.process-work/plans/update.md').read_text()
+    assert review.verified_template_plan(root, '.process-work/plans/update.md', text)
+    review._history(root, base, 'HEAD')
+    assert calls and all(c[1] == 'main' for c in calls), calls
+    import template_verify as shared
+    finish_calls = recording(shared, monkeypatch)
+    finish = load('finish')
+    monkeypatch.setattr(finish, 'gate_runner_argv', lambda root: [sys.executable, '-c', 'pass'])
+    finish.check(root)
+    assert finish_calls and all(c[1] == 'main' for c in finish_calls), finish_calls
+
+
+def test_verify_binds_the_fork_point_when_integration_moved_on(update):
+    root, _, base, verifier = update
+    move_main(root)
+    tip = git(root, 'rev-parse', 'HEAD')
+    report = verifier.verify(root, 'main', tip)
+    assert report['errors'] == [] and report['base'] == base
+    assert report['acknowledged'] is True
+    assert 'unrelated/main-only.md' not in report['project_delta']
+    assert load('check_review').template_review_findings(root, report, [], tip=tip) == []
+
+
+def test_template_findings_never_drop_errors_before_the_update(tmp_path):
+    report = dict(base='x', head='y', update=False, identical=[], project_delta=[],
+                  migration=False, errors=['cannot read base'], release_notes='')
+    assert load('check_review').template_review_findings(tmp_path, report, []) == [
+        'template verification failed: cannot read base']
+
+
+def test_gate_reports_verification_errors_without_an_update(update, monkeypatch):
+    root, _, _, _ = update
+    review = load('check_review')
+    failed = dict(base='x', head='y', update=False, identical=[], project_delta=[],
+                  migration=False, errors=['cannot read base'], release_notes='')
+    monkeypatch.setattr(review, 'verify', lambda *a, **k: dict(failed))
+    monkeypatch.setenv('PROCESS_PUSH_TARGETS', 'refs/heads/main')
+    hard, _ = review.check(root)
+    assert 'template verification failed: cannot read base' in hard, hard
+
+
+def test_gate_without_the_integration_ref_never_falls_back_to_the_sha(update, monkeypatch):
+    root, _, _, _ = update
+    review = load('check_review')
+    calls = recording(review, monkeypatch)
+    monkeypatch.setattr(review, 'integration_ref', lambda *a, **k: None)
+    monkeypatch.setenv('PROCESS_PUSH_TARGETS', 'refs/heads/main')
+    hard, _ = review.check(root)
+    assert any('integration ref behind the merge base disappeared' in h for h in hard), hard
+    # the plan exemption resolves its own ref; nothing ever verifies a fork SHA
+    assert all(c[1] == 'main' for c in calls), calls

@@ -58,7 +58,7 @@ from typing import NamedTuple
 # check_review.py owns the REVIEW grammar; check_kernel.py owns kernel-block
 # extraction — importing both keeps this tool byte-honest with the gates
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling import
-from process_git import git_environment  # noqa: E402
+from process_git import fork_point, git_environment  # noqa: E402
 import check_kernel as _kernel_gate  # noqa: E402
 import check_review as _review_gate  # noqa: E402
 import gate_invoke as _launch  # noqa: E402  (one owner for "how to start the runner")
@@ -133,8 +133,19 @@ def _resolve_base(root: Path, base: str | None) -> str | None:
     candidates = (base,) if base else _review_gate.integration_refs(root)
     for c in candidates:
         if c and _git(root, "rev-parse", "--verify", "--quiet", f"{c}^{{commit}}") is not None:
+            _fork(root, c)  # a range without one fork point is refused here, by name
             return c
     return None
+
+
+def _fork(root: Path, base_ref: str) -> str:
+    """The fork point of HEAD from `base_ref` (`process_git.fork_point`, the
+    one owner): a criss-cross picked one base silently, and the bundle bound
+    a range the gate and the template check read differently."""
+    try:
+        return fork_point(root, base_ref, "HEAD")
+    except ValueError as exc:
+        raise SystemExit(f"make_review_bundle: cannot bound {base_ref}...HEAD — {exc}") from None
 
 
 def _preflight(root: Path) -> tuple[bool, int, str]:
@@ -261,10 +272,9 @@ def _plans_under_review(root: Path, base_ref: str | None, plan_filter: str | Non
     # CLAIMS its issue (`check_review.issue_refs_in_range`), touched or not —
     # otherwise the gate enforced a Tier 3 plan the bundle never showed, and a
     # delta was accepted on a caller's --tier 2 (refutation)
-    fork = _git(root, "merge-base", base_ref, "HEAD")
+    fork = _fork(root, base_ref)
     try:
-        claimed = _review_gate.issue_refs_in_range(root, "HEAD", base=fork.strip(), strict=True) \
-            if fork and fork.strip() else set()
+        claimed = _review_gate.issue_refs_in_range(root, "HEAD", base=fork, strict=True)
     except _review_gate.GitReadError:
         raise SystemExit(f"make_review_bundle: git cannot read the commits of {base_ref}..HEAD "
                          "— repair the clone and build again") from None
@@ -315,7 +325,7 @@ _BINARY_LINE = re.compile(r"^Binary files .* differ$", re.MULTILINE)
 
 def _review_artifact(root: Path, base_ref: str, *, delta: bool = False) -> _ReviewedDiff | None:
     """Resolved endpoints, SHA-256 of the reviewed diff, and its readable text."""
-    base = _git(root, "rev-parse", base_ref) if delta else _git(root, "merge-base", base_ref, "HEAD")
+    base = _git(root, "rev-parse", base_ref) if delta else _fork(root, base_ref)
     head = _git(root, "rev-parse", "HEAD")
     if not base or not head:
         return None
