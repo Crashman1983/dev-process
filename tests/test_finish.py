@@ -245,6 +245,44 @@ def test_apply_with_asserted_suite_merges_pushes_and_deletes_branch(render, tmp_
     assert "archive plan(s)" in remote_log
 
 
+def test_finish_names_tokens_and_apply_writes_them_into_done(render, tmp_path):
+    """No tokens per issue were recorded downstream; finish says the count or `not measured`
+    and its `done` report carries the same line — no new form."""
+    import json
+    out, _bare = _repo_with_origin(render, tmp_path)
+    r = _run(out)
+    assert r.returncode == 0 and "finish: tokens: not measured" in r.stdout, r.stdout
+    r = _run_args(out, "--apply", "--tests-passed")
+    assert r.returncode == 0 and "finish: tokens: not measured" in r.stdout, r.stdout + r.stderr
+    ledger = out / ".git/process-tower/reports.jsonl"
+    done = [json.loads(line) for line in ledger.read_text().splitlines()]
+    assert done[-1]["state"] == "done" and done[-1]["note"] == "tokens: not measured"
+    assert done[-1]["worker"] == "feature"
+
+
+def test_issue_tokens_sum_the_policy_transcripts_of_its_worktrees(render, tmp_path):
+    """The count is read, never estimated: the policy's `transcripts` glob per dispatched worktree."""
+    import importlib.util
+    import json
+    out = _repo_on_feature(render, tmp_path)
+    sys.path.insert(0, str(out / "scripts/process"))
+    spec = importlib.util.spec_from_file_location("finish_t", out / "scripts/process/finish.py")
+    finish = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(finish)
+    assert finish.usage(out, "7-widget") == (7, "tokens: not measured")
+    wt = tmp_path / "wt [7]"  # glob characters in a worktree path are literal
+    (wt / "t").mkdir(parents=True)
+    (wt / "t" / "a.jsonl").write_text('{"usage": {"output_tokens": 40}}\n{"output_tokens": 2}\n')
+    (wt / "t" / "b.jsonl").write_text('{"output_tokens": 100}\n')
+    records = out / ".git/process-dispatch"
+    records.mkdir(parents=True, exist_ok=True)
+    (records / "7-widget.json").write_text(json.dumps({"issue": 7, "worktree": str(wt), "phase": "review"}))
+    (records / "8-other.json").write_text(json.dumps({"issue": 8, "worktree": str(tmp_path), "phase": "plan"}))
+    (out / "docs/process/model-policy.local.json").write_text(json.dumps({"transcripts": "{worktree}/t/*.jsonl"}))
+    assert finish.usage(out, "7-widget") == (7, "tokens: 142 output over 2 sessions")
+    assert finish.usage(out, "feature") == (None, "tokens: not measured")
+
+
 def test_apply_red_suite_does_not_merge(render, tmp_path):
     out, _bare = _repo_with_origin(render, tmp_path)
     r = _run_args(out, "--apply", "--tests", "false")

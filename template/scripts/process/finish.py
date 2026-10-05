@@ -61,6 +61,7 @@ from check_review import (  # noqa: E402  (one owner for grammar + arithmetic)
     _plan_issue_numbers,
     _plan_work_ids,
     _unfenced,
+    branch_issue,
     issue_refs_in_range,
     merge_base,
     paths_in_flight,
@@ -376,12 +377,32 @@ def apply(root: Path, *, tests: str | None, tests_passed: bool) -> int:
             return 1
     else:
         print(f"finish: remote branch {branch} absent or unreadable — no remote delete")
+    issue, tokens = usage(root, branch)
+    try:  # the worker's `done`, written here with the usage line as its note
+        import report as _report
+        _report.write_report(root, "done", issue=issue, note=tokens,
+                             worker=os.environ.get("PROCESS_WORKER") or branch)
+    except SystemExit:
+        pass
+    print(f"finish: {tokens}")
     print(f"finish: merged {branch} into {default} and pushed. Remaining by "
           f"hand: remove the worktree if one carried the branch "
           f"(`git worktree remove <path> && git worktree prune`), "
           f"publish/prune finished spec dirs, close the tracking issue with "
           f"the merge commit ref (DoD)")
     return 0
+
+
+def usage(root: Path, branch: str | None) -> tuple[int | None, str]:
+    """(issue, `tokens: …` line) — the issue the branch name leads with; the
+    count is dispatch's (`issue_tokens`), `not measured` when it cannot tell."""
+    number = branch_issue(branch) if branch else None
+    issue = int(number) if number else None
+    try:
+        import dispatch as _dispatch
+        return issue, _dispatch.tokens_line(root, issue)
+    except Exception:  # noqa: BLE001 — a usage line never blocks the merge
+        return issue, "tokens: not measured"
 
 
 def main() -> int:
@@ -409,6 +430,7 @@ def main() -> int:
     print("finish: `--apply` executes archive + rebase (+ merge, push, branch "
           "delete once the full suite is asserted via --tests CMD or "
           "--tests-passed)")
+    print(f"finish: {usage(root, _git('rev-parse', '--abbrev-ref', 'HEAD'))[1]}")
     return 0
 
 

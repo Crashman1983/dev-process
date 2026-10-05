@@ -21,7 +21,7 @@ comparison is meaningless — criterion granularity and domain dominate the
 difference. See "honest ceiling" in the module doc.
 
   process_kpis.py convergence   [JOURNAL ...]   # do kickbacks converge?
-  process_kpis.py cost          [JOURNAL ...] [--transcripts DIR]
+  process_kpis.py cost          [JOURNAL ...] [--transcripts DIR] [--issue N]
   process_kpis.py cfr           [--branch B]
   process_kpis.py clusters      [--branch B] [--window D] [--min N]
                                                 # fix clusters (rule 6 across sessions)
@@ -76,7 +76,6 @@ _CODE_EXT = {
     ".c", ".cc", ".cpp", ".h", ".hpp", ".m", ".mm", ".swift", ".css",
 }
 _CONV_COMMIT = re.compile(r"^(feat|fix)(\(.+?\))?!?:", re.IGNORECASE)
-_OUTPUT_TOKENS = re.compile(r'"output_tokens":\s*(\d+)')
 
 CONVERGED = {"satisfied", "out_of_scope"}
 DANGER_GT = {"not_satisfied", "partial"}     # ground truth: a real gap
@@ -214,11 +213,12 @@ def rework_episodes(rows: list[dict]) -> int:
 def session_output_tokens(transcript_dir: Path) -> dict[str, int]:
     """Output tokens per transcript file (~approx: per session, not per work
     item; the JSONL 'output_tokens' shape is harness-specific)."""
+    from dispatch import OUTPUT_TOKENS  # one reader of the transcript shape
     out: dict[str, int] = {}
     if not transcript_dir.is_dir():
         return out
     for f in sorted(transcript_dir.glob("*.jsonl")):
-        total = sum(int(m) for m in _OUTPUT_TOKENS.findall(f.read_text(errors="ignore")))
+        total = sum(int(m) for m in OUTPUT_TOKENS.findall(f.read_text(errors="ignore")))
         if total:
             out[f.stem] = total
     return out
@@ -481,6 +481,12 @@ def _reports_by_worker(root: Path) -> dict[str, list[dict]]:
     return by
 
 
+def _model(rec: dict) -> str:
+    """The reported model, "" when the report says it was not measured."""
+    m = rec.get("model") or ""
+    return "" if m == "not measured" else m  # report.UNMEASURED
+
+
 def _review_rounds(root: Path) -> dict[str, dict]:
     """work id → {max_round, passed, tier, pass_round, blocked} from every REVIEW
     line in the journal: `pass_round` is the first passing round (None before
@@ -536,11 +542,11 @@ def models(root: Path | None = None) -> int:
         unit = issue or worker
         last_model: dict[str, str] = {}
         for r in sorted(recs, key=lambda x: x.get("epoch", 0)):
-            if r.get("model") and r.get("phase"):
+            if _model(r) and r.get("phase"):
                 last_model[r["phase"]] = r["model"]
         tier = rounds[issue].get("tier") if issue and issue in rounds else None
         for r in recs:
-            m, ph = r.get("model") or "", r.get("phase") or ""
+            m, ph = _model(r), r.get("phase") or ""
             if not m or not ph or last_model.get(ph) != m:
                 continue
             cell = cells.setdefault((str(tier), ph, m), {"issues": set(), "blocked": 0, "rounds": [], "passed": 0})
@@ -660,6 +666,8 @@ def main() -> int:
     k = sub.add_parser("cost")
     k.add_argument("journals", nargs="*")
     k.add_argument("--transcripts")
+    k.add_argument("--issue", type=int,
+                   help="one issue's dispatched sessions (policy `transcripts`)")
     c = sub.add_parser("cfr")
     c.add_argument("--branch")
     cl = sub.add_parser("clusters")
@@ -680,6 +688,10 @@ def main() -> int:
 
     if args.cmd == "convergence":
         return convergence(args.journals)
+    if args.cmd == "cost" and args.issue is not None:
+        import dispatch  # one reader of dispatch records, policy and transcripts
+        print(f"[cost] issue #{args.issue} ~approx — {dispatch.tokens_line(ROOT, args.issue)}")
+        return 0
     if args.cmd == "cost":
         return cost(args.journals, args.transcripts)
     if args.cmd == "cfr":
