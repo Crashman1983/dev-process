@@ -963,3 +963,82 @@ def test_full_rewrites_a_poisoned_ledger(render, tmp_path):
     assert r.returncode == 1 and "matches no formula" in r.stdout
     assert "\thard:" in ledger.read_text() and "\tok" not in ledger.read_text()
     assert _run(out).returncode == 1  # and it stays red afterwards
+
+
+# --- Tier 3 delta: accepted only on an anchored full round ---
+
+def _tier3_rounds(out, fixes=1):
+    """A Tier 3 work: full round at heads[0], then one fix commit per round."""
+    import importlib.util
+    base, _head, _digest = _init_git_repo(out)
+    (out / ARCHIVE / "2026-07-19-bound.md").write_text("# Plan\n\ntier: 3\n", encoding="utf-8")
+    (out / "payload.txt").write_text("round 1\n", encoding="utf-8")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "feat: tier 3")
+    heads = [_git(out, "rev-parse", "HEAD").stdout.strip()]
+    for n in range(fixes):
+        (out / "payload.txt").write_text(f"fix {n}\n", encoding="utf-8")
+        _git(out, "add", "-A")
+        _git(out, "commit", "-q", "-m", f"fix: round {n + 1}")
+        heads.append(_git(out, "rev-parse", "HEAD").stdout.strip())
+    spec = importlib.util.spec_from_file_location("cr_t3", out / "scripts/process/check_review.py")
+    gate = importlib.util.module_from_spec(spec)
+    sys.path.insert(0, str(out / "scripts/process"))
+    spec.loader.exec_module(gate)
+    return base, heads, gate
+
+
+_CROSS = "bundle,non-implementing,cross-model"
+
+
+def _t3(gate, out, base, head, *, verdict, rnd, mode="full", independence=_CROSS):
+    digest = gate.artifact_digest(out, base, head, mode=mode)
+    line = _review(work="bound", tier="3", independence=independence, verdict=verdict,
+                   rnd=str(rnd), artifact=(base, head, digest))
+    return line + (" mode=delta" if mode == "delta" else "")
+
+
+def test_tier3_delta_pass_without_a_full_round_is_hard(render, tmp_path):
+    """A Tier 3 delta from no full round would clear the highest tier on a partial read."""
+    out = render(tmp_path, {"project_name": "demo"})
+    _base, heads, gate = _tier3_rounds(out)
+    _journal(out, _t3(gate, out, heads[0], heads[1], verdict="pass", rnd=2, mode="delta"))
+    r = _run(out)
+    assert r.returncode == 1 and f"Tier 3 delta needs a full round at {heads[0]}" in r.stdout, r.stdout
+
+
+def test_tier3_delta_pass_on_an_anchored_full_round_clears(render, tmp_path):
+    """Round economy: after a full Tier 3 round, the fix round may be a delta."""
+    out = render(tmp_path, {"project_name": "demo"})
+    base, heads, gate = _tier3_rounds(out)
+    _journal(out, _t3(gate, out, base, heads[0], verdict="block", rnd=1),
+             _t3(gate, out, heads[0], heads[1], verdict="pass", rnd=2, mode="delta"))
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+
+
+def test_tier3_delta_pass_still_needs_cross_model(render, tmp_path):
+    """The delta changes what is read, never who must read it: the arithmetic is unchanged."""
+    out = render(tmp_path, {"project_name": "demo"})
+    base, heads, gate = _tier3_rounds(out)
+    _journal(out, _t3(gate, out, base, heads[0], verdict="block", rnd=1),
+             _t3(gate, out, heads[0], heads[1], verdict="pass", rnd=2, mode="delta",
+                 independence="bundle,non-implementing"))
+    r = _run(out)
+    assert r.returncode == 1 and "without 'cross-model'" in r.stdout, r.stdout
+
+
+def test_tier3_delta_chain_back_to_the_full_round_clears(render, tmp_path):
+    """Each delta's base is the previous round's head; an unbroken chain keeps the anchor."""
+    out = render(tmp_path, {"project_name": "demo"})
+    base, heads, gate = _tier3_rounds(out, fixes=2)
+    _journal(out, _t3(gate, out, base, heads[0], verdict="block", rnd=1),
+             _t3(gate, out, heads[0], heads[1], verdict="block", rnd=2, mode="delta"),
+             _t3(gate, out, heads[1], heads[2], verdict="pass", rnd=3, mode="delta"))
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+    # a broken chain (round 2 missing) leaves round 3 without an anchor
+    _journal(out, _t3(gate, out, base, heads[0], verdict="block", rnd=1),
+             _t3(gate, out, heads[1], heads[2], verdict="pass", rnd=3, mode="delta"))
+    r = _run(out)
+    assert r.returncode == 1 and f"needs a full round at {heads[1]}" in r.stdout, r.stdout

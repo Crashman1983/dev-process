@@ -347,12 +347,9 @@ def candidates(root: Path, local: str, base: str) -> list[dict]:
 
 
 def _journal_passes_tree(root: Path, ref: str) -> list[dict]:
-    passes: list[dict] = []
-    for rel in _paths(root, "ls-tree", "-r", "-z", "--name-only", ref, "--", JOURNAL) or ():
-        if rel.endswith(".md"):
-            records, _e = _review.parse_review_lines(_show(root, ref, rel))
-            passes += [r for _ln, r in records if r.get("verdict") == "pass"]
-    return passes
+    return _review.review_passes(
+        _show(root, ref, rel) for rel in _paths(root, "ls-tree", "-r", "-z", "--name-only", ref,
+                                                 "--", JOURNAL) or () if rel.endswith(".md"))
 
 
 def _covers(root: Path, passes: list[dict], ids: set[str], tier: int, tip: str,
@@ -386,12 +383,10 @@ def _covers(root: Path, passes: list[dict], ids: set[str], tier: int, tip: str,
 
 
 def _journal_passes_branch(root: Path, base: str, branch: str) -> list[dict]:
-    passes: list[dict] = []
-    for rel in _paths(root, "diff", "--name-only", "-z", f"{base}...{branch}", "--", JOURNAL) or ():
-        if rel.endswith(".md"):
-            records, _e = _review.parse_review_lines(_show(root, branch, rel))
-            passes += [r for _ln, r in records if r.get("verdict") == "pass"]
-    return passes
+    return _review.review_passes(
+        _show(root, branch, rel) for rel in _paths(root, "diff", "--name-only", "-z",
+                                                    f"{base}...{branch}", "--", JOURNAL) or ()
+        if rel.endswith(".md"))
 
 
 def departure(cands: list[dict], root: Path, *, min_candidates: int, max_wait_hours: float) -> tuple[bool, str]:
@@ -914,8 +909,7 @@ def _settle_plans(wt: Path, base: str, branch: str, log) -> tuple[list[str], set
     touched, renamed or archived is never the branch's to finish (a
     refutation closed issues through a slug in a branch name)."""
     records = _review.record_texts(wt, ("journal",)) or []
-    passes = [r for _rel, text in records for _ln, r in _review.parse_review_lines(text)[0]
-              if r.get("verdict") == "pass"]
+    passes = _review.review_passes(text for _rel, text in records)
     # (status letter, source on base or "", path now) — the owner reads the -z form
     listed = _git_bytes(wt, "diff", "--name-status", "-M", "-z", f"{base}...{branch}", "--", PLANS)
     entries = _review.name_status(listed) or []

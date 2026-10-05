@@ -63,8 +63,8 @@ from check_review import (  # noqa: E402  (one owner for grammar + arithmetic)
     _unfenced,
     issue_refs_in_range,
     merge_base,
-    parse_review_lines,
     paths_in_flight,
+    review_passes,
     speckit_unreviewed,
     stale_review,
     verified_template_plan,
@@ -84,18 +84,16 @@ def _git(*args: str) -> str | None:
 
 
 def _journal_passes(root: Path) -> list[dict]:
-    passes: list[dict] = []
+    texts: list[str] = []
     jdir = root / JOURNAL_DIR
     if not jdir.is_dir():
-        return passes
+        return []
     for f in sorted(jdir.glob("**/*.md")):
         try:
-            text = f.read_text(encoding="utf-8", errors="replace")
+            texts.append(f.read_text(encoding="utf-8", errors="replace"))
         except OSError:
             continue
-        records, _ = parse_review_lines(text)
-        passes += [r for _ln, r in records if r.get("verdict") == "pass"]
-    return passes
+    return review_passes(texts)
 
 
 def check(root: Path) -> tuple[list[str], list[str]]:

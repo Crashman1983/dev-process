@@ -330,6 +330,25 @@ def test_several_lenses_blocking_one_round_count_once(render, tmp_path):
     assert r.returncode == 0, r.stderr
 
 
+def test_attest_writes_a_tier3_delta_only_on_an_anchored_full_round(render, tmp_path):
+    """The writer asks the gate's anchor rule, so an unanchored Tier 3 delta never reaches the journal."""
+    out, base, head = _repo(render, tmp_path)
+    (out / "widget.py").write_text("def widget():\n    return 43\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "fix: widget")
+    fix = _git(out, "rev-parse", "HEAD").stdout.strip()
+    digest = _load_gate(out).artifact_digest(out, head, fix, mode="delta")
+    bundle = out / ".process-work/bundle.md"
+    bundle.write_text(f"REVIEW_ARTIFACT base={head} head={fix} diff={digest} mode=delta\n")
+    t3 = ("--tier", "3", "--independence", "bundle,non-implementing,cross-model")
+    r = _attest(out, *t3, "--bundle", str(bundle))
+    assert r.returncode == 1 and f"Tier 3 delta needs a full round at {head}" in r.stderr
+    assert _attest(out, *t3, "--base", base, "--head", head).returncode == 0
+    r = _attest(out, *t3, "--bundle", str(bundle))
+    assert r.returncode == 0, r.stderr
+    assert "mode=delta" in _journal(out)
+
+
 def test_an_exception_is_written_even_when_no_rule_trips(render, tmp_path):
     # a third round granted by the owner trips no attest rule — still counted
     out, base, head = _repo(render, tmp_path)

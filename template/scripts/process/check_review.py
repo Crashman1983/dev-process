@@ -498,9 +498,8 @@ def parse_review_lines(text: str) -> tuple[list[tuple[int, dict]], list[tuple[in
         if not 0 <= int(fields["tier"]) <= 3:
             errors.append((i, f"tier {fields['tier']} outside the 0-3 scale"))
             continue
-        if fields.get("mode") == "delta" and int(fields["tier"]) > 2:
-            errors.append((i, "Tier 3 requires a full diff, never mode=delta"))
-            continue
+        # a Tier 3 delta parses; whether a full round anchors it is a journal
+        # question (`unanchored_deltas`), not one line's
         if fields["verdict"] not in VERDICTS:
             errors.append((i, f"verdict {fields['verdict']!r} not in {sorted(VERDICTS)}"))
             continue
@@ -535,6 +534,42 @@ def _arithmetic_violations(rel: str, records: list[tuple[int, dict]]) -> list[st
             hard.append(f"{rel}:{lineno}: pass at tier 3 without 'cross-model' or "
                         f"'single-family' — Tier 3 must cross the model family or declare it could not")
     return hard
+
+
+def tier3_delta_anchor(records: list[dict], works: set[str], since: str) -> bool:
+    """May a Tier 3 delta start at `since`? Only when a REVIEW of this work
+    with `mode=full`, tier 3 and `head=<since>` exists — or an unbroken chain
+    of Tier 3 delta REVIEWs back to one (each delta's base the previous
+    head). One owner: the bundle, attest and the gate ask here."""
+    todo, seen = [since], set()
+    while todo:
+        sha = todo.pop()
+        if sha in seen:
+            continue
+        seen.add(sha)
+        for r in records:
+            if r.get("work") in works and r.get("head") == sha and int(r["tier"]) >= 3:
+                if r.get("mode", "full") == "full":
+                    return True
+                todo.append(r.get("base") or "")
+    return False
+
+
+def tier3_delta_refusal(since: str) -> str:
+    return f"Tier 3 delta needs a full round at {since}"
+
+
+def unanchored_deltas(records: list[dict]) -> list[dict]:
+    """Tier 3 delta REVIEWs no full round anchors — they clear nothing."""
+    return [r for r in records if r.get("mode") == "delta" and int(r["tier"]) >= 3
+            and not tier3_delta_anchor(records, {r["work"]}, r.get("base") or "")]
+
+
+def review_passes(texts) -> list[dict]:
+    """The passes of these journal texts, unanchored Tier 3 deltas left out."""
+    records = [f for text in texts for _ln, f in parse_review_lines(text)[0]]
+    bad = {id(r) for r in unanchored_deltas(records)}
+    return [r for r in records if r.get("verdict") == "pass" and id(r) not in bad]
 
 
 def _git_bytes(root: Path, *args: str) -> bytes | None:
@@ -1424,7 +1459,8 @@ def decide(h: History, head: str) -> tuple[str, str]:
         shown = sorted(h.late)
         return "stale", (f"code changed after the reviewed head ({', '.join(shown[:4])}"
                          f"{', …' if len(shown) > 4 else ''}) — the review does not cover it; "
-                         f"re-review the delta (`make_review_bundle.py --since <head>`) and attest again")
+                         f"re-review the delta (`make_review_bundle.py --since <head>`; at Tier 3 "
+                         f"only from a full round's head) and attest again")
     if h.fellow:
         merge, paths = h.fellow[0]
         shown = sorted(paths)
@@ -2077,6 +2113,7 @@ def check(root: Path) -> tuple[list[str], list[str]]:
 
     # --- parse all REVIEW attestations from the (recursive) journal ---
     all_records: list[tuple[int, dict]] = []
+    located: list[tuple[str, int, dict]] = []
     integrity_mode = "all" if "--full" in sys.argv else os.environ.get(INTEGRITY_ENV, "ledger")
     scope_base = merge_base(root)
     changed_shards = paths_in_flight(root) if scope_base is not None else set()
@@ -2113,6 +2150,12 @@ def check(root: Path) -> tuple[list[str], list[str]]:
         hard.extend(ih)
         soft.extend(isoft)
         all_records.extend(records)
+        located += [(rel, lineno, f) for lineno, f in records]
+    unanchored = {id(r) for r in unanchored_deltas([f for _ln, f in all_records])}
+    for rel, lineno, f in located:
+        if id(f) in unanchored:
+            hard.append(f"{rel}:{lineno}: malformed REVIEW line — {tier3_delta_refusal(f['base'])}")
+    all_records = [(ln, f) for ln, f in all_records if id(f) not in unanchored]
     if ledger is not None:
         _save_integrity_ledger(ledger_path, ledger)
     if reused_total:

@@ -73,6 +73,8 @@ from check_review import (  # noqa: E402  (one owner for grammar, digest, record
     readable,
     record_kind,
     record_texts,
+    tier3_delta_anchor,
+    tier3_delta_refusal,
 )
 
 # read like a REFUTE line (make_review_bundle.REFUTE_LINE): at most three
@@ -208,7 +210,7 @@ def round_problems(args, root: Path, journal_dir: Path) -> tuple[int, list[str]]
     return counted, problems
 
 
-def build_line(args, root: Path) -> tuple[str, list[str]]:
+def build_line(args, root: Path, journal_dir: Path | None = None) -> tuple[str, list[str]]:
     """(REVIEW line, problems). The digest is computed here, never copied."""
     problems: list[str] = []
     fields = [f"work={args.work}", f"tier={args.tier}", f"reviewer={args.reviewer}",
@@ -247,6 +249,12 @@ def build_line(args, root: Path) -> tuple[str, list[str]]:
     records, errors = parse_review_lines(line)
     for _ln, msg in errors:
         problems.append(f"malformed: {msg}")
+    for _ln, f in records:
+        if f.get("mode") == "delta" and int(f["tier"]) >= 3:
+            known = [r for t in _texts(root, journal_dir or (root / JOURNAL_DIR).resolve())
+                     for _l, r in parse_review_lines(t)[0]]
+            if not tier3_delta_anchor(known, {f["work"]}, f["base"]):
+                problems.append(f"malformed: {tier3_delta_refusal(f['base'])}")
     return line, problems
 
 
@@ -294,7 +302,7 @@ def main() -> int:
                           f"{args.exception} (overrides: {overrides})")
         round_issues = []
     args.round_ = counted if args.round_ is None else args.round_
-    line, problems = build_line(args, root)
+    line, problems = build_line(args, root, journal_dir)
     problems = round_issues + problems + archive_problems(args, root)
     if args.note and any(ln.lstrip().startswith("REVIEW") for ln in args.note.splitlines()):
         problems.append("the note carries REVIEW-looking lines — the validated line is the "
