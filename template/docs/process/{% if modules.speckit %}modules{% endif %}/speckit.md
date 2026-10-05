@@ -135,7 +135,8 @@ error costs its multiple downstream) ·
 tasks generation + execution against tasks.md: the session's workhorse model,
 with small models for mechanical subagent tasks (zero-context tasks
 with exact paths; `process_context.py` hands the next task and the files it
-names — no orientation guesswork) · review: per
+names — no orientation guesswork; it scopes to the spec dir named like the
+branch or whose spec.md `issue:` is the one in `--issue N`) · review: per
 `verification-independence.md` — Tier 3 crosses the model family,
 non-negotiable. The Claude harness carries these defaults as `model:`
 frontmatter on the phase commands (`/brainstorm`, `/plan`, `/review`) — a

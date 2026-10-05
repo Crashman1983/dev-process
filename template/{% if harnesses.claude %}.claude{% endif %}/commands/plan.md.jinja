@@ -66,6 +66,8 @@ When the plan is committed, `uv run scripts/process/report.py planned --issue N`
 Plans): one `DECISION <date> <who>: <what> — because <why>` line per choice
 made in dialogue, written before the next step. The conversation is what a
 compaction summarizes; the plan is what `process_context.py` prints back at
-every re-hydration.
+every re-hydration — in full only while it is the current work, so the plan
+carries `issue: <ref>` and the branch is named after the issue
+(`process_context.py --issue N` otherwise).
 
 Next: `/execute`.

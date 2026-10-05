@@ -39,7 +39,8 @@ process file.
 - **debug** — root cause before fix (`docs/process/workflow.md`)
 - **commit** — atomic conventional commit (`docs/process/commits.md`)
 - **prime** — restore context (`docs/process/journal-state-plans.md`); run
-  `uv run scripts/process/process_context.py` and read `.process-work/inbox.md`
+  `uv run scripts/process/process_context.py` (`--issue N` when known; on `main`
+  it lists only the index) and read `.process-work/inbox.md`
   when its reported size is nonzero
 {%- set _mod_slugs = {"speckit": ["speckit"], "doc_drift_gate": ["doc-drift-gate"], "arch_onboarding": ["arch-onboarding"], "feature_registry": ["feature-registry"], "github_issues": ["github-issues"], "git_hooks": ["git-hooks"], "sbom": ["sbom"], "telemetry": ["telemetry"], "design_contracts": ["design-contracts"]} %}
 {%- set _active = [] %}

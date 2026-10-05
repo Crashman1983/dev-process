@@ -85,6 +85,10 @@ A conversation is the one artifact a compaction summarizes, and the
 sentence carrying a decision is the first to go; the plan is re-read at
 every re-hydration (`process_context.py` prints the ledger for `/prime`,
 `/execute` and `/review`, and the kernel's compaction directive names it).
+It prints full detail only for the current work — `--issue N`, else the
+issue the branch is named after, else the spec dir named like the branch;
+every other plan and spec dir is a one-line index entry (`--all` prints
+them all in full). On `main` without `--issue` there is only the index.
 A Tier 2+ plan without the section gets a note from the review gate: the
 gate cannot know a decision is missing, but a reviewer who sees an empty
 ledger asks.
