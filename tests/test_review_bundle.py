@@ -48,6 +48,24 @@ def _seed_repo(out: Path):
     _git(out, "commit", "-q", "-m", "feat: widget")
 
 
+def test_a_bundle_under_process_work_is_ignored_and_one_elsewhere_in_the_tree_is_named(render, tmp_path):
+    """Downstream: a bundle written into the tree was an untracked file — finish.py
+    reported the tree dirty and the review gate read its tier: line as an unhomed plan."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    gate = [sys.executable, str(out / "scripts/process/check_review.py"), "."]
+    rel = ".process-work/reviews/w/r1.bundle.md"
+    r = _run(out, "--base", "main", "-o", rel, "--skip-preflight")
+    assert r.returncode == 0 and (out / rel).is_file(), r.stderr
+    assert "untracked in the worktree" not in r.stderr
+    assert _git(out, "status", "--porcelain").stdout == ""
+    assert "r1.bundle.md" not in subprocess.run(gate, cwd=out, capture_output=True, text=True).stdout
+    r = _run(out, "--base", "main", "-o", "bundle.md", "--skip-preflight")
+    assert r.returncode == 0
+    assert "bundle.md is untracked in the worktree" in r.stderr and ".process-work/reviews/" in r.stderr
+    assert "bundle.md" in subprocess.run(gate, cwd=out, capture_output=True, text=True).stdout
+
+
 def test_core_tool_present_on_minimal(render, tmp_path):
     out = render(tmp_path, {"project_name": "d", "modules": {}})
     assert (out / "scripts/process/make_review_bundle.py").is_file()

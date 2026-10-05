@@ -1,3 +1,7 @@
 # template_update.py writes the per-release delta of owned files here: working
 # memory to port by hand, never committed
 template-delta/
+# make_review_bundle.py -o .process-work/reviews/<slug>.bundle.md: a reviewer's
+# input, rebuilt per round — never committed (an untracked one dirties the tree
+# and reads as an unhomed plan)
+*.bundle.md

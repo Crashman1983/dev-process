@@ -46,7 +46,10 @@ To dispatch a fresh (or cross-model) reviewer, do not hand-craft its input:
 `python scripts/process/make_review_bundle.py -o /tmp/bundle.md` assembles the
 complete read-only bundle — rules, checklist, product frame, plan, diff, and
 the exact output grammar — ready to feed any model
-(`docs/process/verification-independence.md`, "The review bundle").
+(`docs/process/verification-independence.md`, "The review bundle"). Inside
+the tree, write it as `.process-work/reviews/<slug>.bundle.md` — git ignores
+`*.bundle.md` there; anywhere else in the tree it is an untracked file that
+`finish.py` reports dirty and the review gate reads as an unhomed plan.
 
 UI stories: the bundle ends with a **UI evidence** section — the story's
 before/after pair (DoD D8) and every image the diff touches. Open them. The

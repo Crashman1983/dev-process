@@ -1052,6 +1052,23 @@ def _opt(argv: list[str], flag: str) -> str | None:
     return argv[i + 1]
 
 
+def _untracked_bundle_note(root: Path, target: Path) -> str | None:
+    """A bundle written into the worktree where git does not ignore it is an
+    untracked file: finish.py reports the tree dirty, and the review gate reads
+    the bundled plan's `tier:` line as a plan without a home (observed
+    downstream). `.process-work/` ignores `*.bundle.md`."""
+    path = target.resolve()
+    if not path.is_relative_to(root.resolve()):
+        return None
+    r = subprocess.run(["git", "-C", str(root), "check-ignore", "-q", "--", str(path)],
+                       capture_output=True)
+    if r.returncode != 1:  # 0: ignored; 128: git cannot tell — nothing to say
+        return None
+    return (f"make_review_bundle: note — {target} is untracked in the worktree — finish.py "
+            f"reports it dirty and the review gate reads its tier: line as an unhomed plan; "
+            f"write <slug>.bundle.md under {REVIEWS}/ or outside the tree")
+
+
 def main(argv: list[str]) -> int:
     if "-h" in argv or "--help" in argv:
         print(USAGE)
@@ -1099,11 +1116,15 @@ def main(argv: list[str]) -> int:
                + (f"; tier asserted via --tier {declared_tier}" if declared_tier is not None else ""))
     if target is not None and partial is not None:
         try:  # atomic: a reader never sees half a bundle
+            partial.parent.mkdir(parents=True, exist_ok=True)
             partial.write_text(text, encoding="utf-8")
             os.replace(partial, target)
         finally:
             partial.unlink(missing_ok=True)
         print(f"review bundle written to {out_file} — {summary}")
+        note = _untracked_bundle_note(root, target)
+        if note:
+            print(note, file=sys.stderr)
     else:
         print(text)
         # stderr: stdout is the bundle itself (attest.py --bundle reads it)
