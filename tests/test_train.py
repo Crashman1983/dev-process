@@ -870,9 +870,17 @@ def test_an_offender_that_brought_the_suite_is_still_reported(render, tmp_path, 
     assert rc == 1 and ("blocked", "b1") in written
 
 
-def _head_pass(out, work, head):
+def _head_pass(out, work, head, base=None):
+    # a full round's base is the head's fork point from main (#160), its digest computed
+    base = base or _git(out, "merge-base", "main", head).stdout.strip()
+    digest = subprocess.run(
+        [sys.executable, "-c", "import sys; from pathlib import Path; sys.path.insert(0, sys.argv[1]); "
+         "import check_review as r; print(r.artifact_digest(Path(sys.argv[2]), sys.argv[3], sys.argv[4]))",
+         str(out / "scripts/process"), str(out), base, head],
+        capture_output=True, text=True, check=True, env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+    ).stdout.strip()
     return (f"REVIEW work={work} tier=2 reviewer=fresh model=cross independence=bundle,non-implementing "
-            f"verdict=pass round=1 base={'0' * 40} head={head} diff={'0' * 64}\n")
+            f"verdict=pass round=1 base={base} head={head} diff={digest}\n")
 
 
 def test_a_merged_branch_with_new_commits_does_not_board_on_its_done_report(render, tmp_path):
@@ -918,6 +926,29 @@ def test_a_pass_behind_which_the_branch_moved_does_not_clear_it(render, tmp_path
     _git(out, "checkout", "-q", "main")
     by = {c["branch"]: c for c in json.loads(_train(out, "plan", "--json").stdout)["candidates"]}
     assert not by["43-work"]["eligible"] and "covering the branch head" in by["43-work"]["reasons"][0]
+
+
+@pytest.mark.parametrize("mid_branch", [True, False], ids=["mid-branch", "fork-point"])
+def test_a_pass_from_mid_branch_does_not_board_it(render, tmp_path, mid_branch):
+    # #160: a full round based mid-branch reviewed a slice; the train reads
+    # passes for the branch it boards, so the slice clears nothing
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _branch(out, "44-work", {"src/y.py": "y = 1\n"}, reviewed=False)
+    _git(out, "checkout", "-q", "44-work")
+    first = _git(out, "rev-parse", "HEAD").stdout.strip()
+    (out / "src/z.py").write_text("z = 1\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "more work")
+    head = _git(out, "rev-parse", "HEAD").stdout.strip()
+    j = out / ".process-work/journal"
+    j.mkdir(parents=True, exist_ok=True)
+    (j / "2026-09-21-44.md").write_text(_head_pass(out, "44-work", head, first if mid_branch else None))
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "attest")
+    _git(out, "checkout", "-q", "main")
+    by = {c["branch"]: c for c in json.loads(_train(out, "plan", "--json").stdout)["candidates"]}
+    assert by["44-work"]["eligible"] is not mid_branch, by["44-work"]
 
 
 def test_a_headless_pass_on_main_does_not_vouch_for_new_commits(render, tmp_path):

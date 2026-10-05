@@ -139,6 +139,14 @@ that was reviewed. Perform the final rebase *before* the review — a rebase
 after it changes the diff, and the recorded digest honestly stops matching
 the merged content; loop back to a fresh bundle and review instead.
 
+The gate reads existing records by the same rule. A full round whose head
+the push carries unmerged (in the pushed tip's history, in no integration
+ref) and whose base is not that head's one fork point is a malformed
+`REVIEW` line: it clears no plan, lifts no block, boards no train and
+anchors no Tier 3 delta. A merged record stands as main judged it; a
+record whose head is missing or lies on another branch is not this push's,
+and those off their fork point are counted in one note.
+
 (Lean pass: the former `review-binding: artifact-v1` mode — tree-empty
 certificate commits and CI candidate binding — is retired; the per-line
 digest keeps the diff-exact guarantee without the ritual.)

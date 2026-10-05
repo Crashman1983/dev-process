@@ -674,3 +674,17 @@ def test_a_symlink_in_the_journal_refuses(tmp_path, where):
     tip = _commit(root, "feat: x (#42)")
     findings = mod.standing_block_findings(root, tip, remote_sha=remote_sha)
     assert any("symlink" in f for f in findings), findings
+
+
+@pytest.mark.parametrize("off_fork", [True, False], ids=["off-fork", "at-fork"])
+def test_a_pass_whose_base_is_not_the_fork_point_clears_no_block(tmp_path, off_fork):
+    """#160: a full round from mid-branch reviewed a slice; it clears nothing."""
+    root = _repo(tmp_path)
+    fork = _git(root, "rev-parse", "HEAD")
+    first = _commit(root, "feat: first (#2168)")
+    head = _commit(root, "feat: second (#2168)")
+    base = first if off_fork else fork
+    _write(root, SHARD, _line("2168", "block", 1) + "\n" + _line("2168", "pass", 2)
+           + f" base={base} head={head} diff={'0' * 64}\n")
+    _commit(root, "docs: attest round 2")
+    assert _blocked(mod.standing_block_findings(root), "2168") is off_fork
