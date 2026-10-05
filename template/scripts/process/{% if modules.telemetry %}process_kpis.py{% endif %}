@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.11"
+# dependencies = ["pyyaml>=6,<7"]
+# ///
 """Process KPI cockpit — a read-only aggregator over EXISTING traces.
 
 Reads the artifacts the workflow already produces (GRADE lines in journals,
@@ -35,7 +39,9 @@ merge). The removed families (effectiveness, calibration suite, tempo,
 friction) live in git history if a project ever needs them back.
 
 GRADE parsing is imported from check_telemetry (one owner for the grammar).
-Pure stdlib. Reads only; never writes.
+Stdlib itself; the header declares PyYAML for `rounds`, whose FINDING reader
+(check_issues) imports it — `uv run` resolves it, and without it `rounds`
+names the missing dependency. Not a gate. Reads only; never writes.
 """
 from __future__ import annotations
 
@@ -573,16 +579,28 @@ def models(root: Path | None = None) -> int:
 
 
 # --- rounds: how many review rounds a work item took, and where its blockers came from
-def _blockers_by_work(root: Path) -> dict[str, dict[str, int]] | None:
-    """work id → {origin or "-": blocker count} over the review reports, or None
-    when the FINDING reader (check_issues, github-issues module) is not there.
+_NO_FINDING_READER = "FINDING lines are read by check_issues — the github-issues module"
+
+
+def _blockers_by_work(root: Path) -> dict[str, dict[str, int]] | str:
+    """work id → {origin or "-": blocker count} over the review reports, or why
+    they were not read: the FINDING reader (check_issues, github-issues module)
+    is not installed, or it is and cannot import (a missing dependency is named,
+    never read as "module not there").
     A report names its work in its `work:` header (check_review reads
     that header); a report without one counts under "(no work: header)"."""
+    if not (Path(__file__).resolve().parent / "check_issues.py").is_file():
+        return _NO_FINDING_READER
     try:
         import check_issues as _issues  # sibling; the one FINDING reader
         import check_review as _review  # sibling; the one report-header reader
-    except ImportError:
-        return None
+    except ModuleNotFoundError as exc:
+        if exc.name in ("check_issues", "check_review"):
+            return _NO_FINDING_READER
+        return (f"check_issues needs {exc.name} — run with it installed "
+                f"(e.g. uv run --with pyyaml …)")
+    except ImportError as exc:
+        return f"check_issues does not import ({exc})"
     out: dict[str, dict[str, int]] = {}
     rdir = root / _issues.REVIEWS_DIR
     if not rdir.is_dir():
@@ -628,7 +646,7 @@ def rounds(root: Path | None = None) -> int:
     totals: dict[str, int] = {}
     for work, e in sorted(rnds.items()):
         to_pass = str(e["pass_round"]) if e["pass_round"] is not None else "open"
-        if blockers is None:
+        if isinstance(blockers, str):
             found = "not read"
         else:
             counts = blockers.get(work.lstrip("#"), {})
@@ -636,8 +654,8 @@ def rounds(root: Path | None = None) -> int:
                 totals[o] = totals.get(o, 0) + n
             found = _origin_text(counts) if counts else "0"
         print(f"  {work:<24} {str(e['tier'] or '?'):>4} {to_pass:>11} {len(e['blocked']):>7}  {found}")
-    if blockers is None:
-        print("  blockers: not read (FINDING lines are read by check_issues — the github-issues module)")
+    if isinstance(blockers, str):
+        print(f"  blockers: not read ({blockers})")
     elif totals:
         print(f"  all blockers: {_origin_text(totals)}")
     n = len(rnds)

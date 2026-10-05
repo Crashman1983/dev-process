@@ -583,4 +583,26 @@ def test_rounds_without_the_finding_reader_says_blockers_not_read(render, tmp_pa
     text = _rounds(out)
     row = next(ln for ln in text.splitlines() if ln.split()[:1] == ["9"])
     assert row.split()[1:4] == ["2", "open", "2"] and row.endswith("not read"), row
-    assert "blockers: not read" in text
+    assert "blockers: not read (FINDING lines are read by check_issues — the github-issues module)" in text
+
+
+def test_rounds_names_a_missing_dependency_of_an_installed_finding_reader(render, tmp_path, monkeypatch,
+                                                                          capsys):
+    """#169: check_issues installed but PyYAML missing read as "module not there"."""
+    import importlib.util
+    out = _render(render, tmp_path, github_issues=True)
+    _journal(out, _review(9, 1, "block"))
+    monkeypatch.setattr(sys, "path", list(sys.path))
+    for name in ("check_issues", "check_review", "check_telemetry"):
+        monkeypatch.delitem(sys.modules, name, raising=False)
+    monkeypatch.setitem(sys.modules, "yaml", None)  # `import yaml` raises ModuleNotFoundError
+    monkeypatch.setattr(sys, "dont_write_bytecode", True)
+    spec = importlib.util.spec_from_file_location("kpis_169", out / "scripts/process/process_kpis.py")
+    kpis = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(kpis)
+    why = kpis._blockers_by_work(out)
+    assert why == "check_issues needs yaml — run with it installed (e.g. uv run --with pyyaml …)", why
+    assert kpis.rounds(out) == 0
+    assert "blockers: not read (check_issues needs yaml" in capsys.readouterr().out
+    head = (out / "scripts/process/process_kpis.py").read_text(encoding="utf-8").split('"""', 1)[0]
+    assert "# /// script" in head and "pyyaml" in head
