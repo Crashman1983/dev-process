@@ -147,8 +147,9 @@ anchors no Tier 3 delta. A merged record stands as main judged it; a
 record whose head is missing or lies on another branch is not this push's,
 and those off their fork point are counted in one note. The range is
 bounded by the remote-tracking integration refs that do not contain the tip
-(local names only without one): a local main fast-forwarded to the branch
-hides nothing. Without any integration ref nothing is judged, and the gate
+(local names only when no remote-tracking one exists): a local main
+fast-forwarded to the branch hides nothing, and a tip every remote ref
+already contains is integrated — a stale local main reopens nothing. Without any integration ref nothing is judged, and the gate
 says so once.
 
 (Lean pass: the former `review-binding: artifact-v1` mode — tree-empty

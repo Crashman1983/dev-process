@@ -1336,6 +1336,22 @@ def test_a_local_ref_at_the_tip_does_not_hide_the_pushed_range(tmp_path, monkeyp
     assert any("malformed REVIEW line" in h and "is not the fork point" in h for h in hard), hard
 
 
+def test_a_stale_local_main_behind_an_integrated_tip_reopens_nothing(tmp_path, monkeypatch):
+    """Kenni main push: HEAD == origin/main, local main far behind — main's
+    own history is integrated, its legacy records are not this push's."""
+    cr, root = _cr(), tmp_path / "p"
+    fork, first, head = _fork_repo(root)
+    _journal(root, _full(cr, root, first, head))  # pre-#160 base: the previous head
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "attest")
+    tip = _git(root, "rev-parse", "HEAD").stdout.strip()
+    _git(root, "update-ref", "refs/remotes/origin/main", tip)  # the tip is merged upstream
+    assert _git(root, "rev-parse", "main").stdout.strip() == fork  # local main stale
+    hard, soft = _merge_check(cr, root, monkeypatch)
+    assert not any("fork point" in h for h in hard), hard
+    assert not any("legacy full-round" in s for s in soft), soft
+
+
 @pytest.mark.parametrize("target,hard_side", [("refs/heads/main", True), ("refs/heads/7-x", False)])
 def test_without_any_integration_ref_one_finding_not_one_per_record(tmp_path, monkeypatch,
                                                                     target, hard_side):

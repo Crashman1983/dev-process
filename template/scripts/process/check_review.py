@@ -834,12 +834,14 @@ NO_INTEGRATION_REF = (
 
 def _integration_bounds(root: Path, tip_sha: str) -> tuple[str, ...] | None:
     """The SHAs that bound what a push of `tip_sha` vouches for: the
-    remote-tracking integration refs that do not contain it; only when none
-    exists, the local names that do not. A ref containing the tip bounds
-    nothing (`_integration_base`'s principle): a local main fast-forwarded
-    to the tip (finish.py) or a forged `master` at HEAD would otherwise hide
-    the whole range. () when every resolving ref contains the tip — it is
-    integrated, nothing is vouched for; None when no integration ref resolves."""
+    remote-tracking integration refs that do not contain it; only when no
+    remote-tracking integration ref resolves at all, the local names that do
+    not. A ref containing the tip bounds nothing (`_integration_base`'s
+    principle): a local main fast-forwarded to the tip (finish.py) or a
+    forged `master` at HEAD would otherwise hide the whole range. () when
+    the deciding refs all contain the tip — it is integrated, nothing is
+    vouched for (a stale local main behind origin/main does not reopen
+    main's history); None when no integration ref resolves."""
     listed = _git_bytes(root, "for-each-ref", "--format=%(refname:short)",
                         "refs/remotes/*/main", "refs/remotes/*/master")
     remote_names = {*_remote_defaults(root), *(f"origin/{n}" for n in INTEGRATION_NAMES),
@@ -850,9 +852,11 @@ def _integration_bounds(root: Path, tip_sha: str) -> tuple[str, ...] | None:
         return None
     outside = {ref: sha for ref, sha in resolved.items()
                if _git_bytes(root, "merge-base", "--is-ancestor", tip_sha, sha) is None}
-    remotes = [sha for ref, sha in outside.items() if ref in remote_names]
-    local = [sha for ref, sha in outside.items() if ref not in remote_names]
-    return tuple(sorted(set(remotes or local)))
+    if any(ref in remote_names for ref in resolved):
+        # a remote ref decides alone: all of them containing the tip means it is
+        # integrated — a stale local main behind it bounds nothing
+        return tuple(sorted({sha for ref, sha in outside.items() if ref in remote_names}))
+    return tuple(sorted(set(outside.values())))
 
 
 def _full_rounds_split(root: Path, records: list[dict], tip: str
