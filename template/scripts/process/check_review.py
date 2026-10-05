@@ -603,57 +603,138 @@ def _show(root: Path, ref: str, rel: str) -> str | None:
     return None if out is None else out.decode("utf-8", errors="replace")
 
 
-def _work_key(value: str) -> str:
-    return re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", value).strip().rstrip(".,;:").lstrip("#")
+IssueKey = tuple  # (owner/repo lowercased, or None for this repo's `#N`; number)
+_MD_LINK = re.compile(r"\[([^\]]*)\]\([^)]*\)")
 
 
-def _prior_report(root: Path, works: set[str], since: str, head: str) -> str | None:
-    """The previous round's report of this work as committed: present at
-    `since`, or as the delta first added it — never the working tree, never
-    a later edit. Its header `work:` (or, without one, its de-dated file
-    name) names the work; the newest by name wins; None when none does."""
-    keys = {_work_key(w) for w in works}
+def issue_key(ref: str) -> IssueKey | None:
+    """An issue ref as a comparable key: `#9` and `9` are this repository's
+    issue 9; `owner/repo#9` and the issue URL name that repository's."""
+    parsed = parse_issue_ref(ref)
+    if parsed is not None:
+        return (parsed[0].lower() if parsed[0] else None, parsed[1])
+    return (None, int(ref)) if ref.isascii() and ref.isdigit() else None
+
+
+def work_keys(works) -> tuple[tuple[str, ...], tuple[IssueKey, ...]]:
+    """(slugs, issues) of REVIEW work ids, for `report_of`."""
+    slugs, issues = [], []
+    for w in sorted(works):
+        k = issue_key(w)
+        if k is not None:
+            issues.append(k)
+        else:
+            slugs.append(DATE_PREFIX.sub("", w))
+    return tuple(slugs), tuple(issues)
+
+
+def _slug_in_name(slug: str, stem: str) -> bool:
+    """`slug` is the file stem or a whole dash-separated part run of it —
+    `api` names `api-round-2`, not `rapid-fix`."""
+    return stem == slug or re.search(rf"(?:^|-){re.escape(slug)}(?:-|$)", stem) is not None
+
+
+def report_header(text: str) -> dict[str, list[str]]:
+    """The `review:`/`audit:`/`work:` values of a report's header block — the
+    lines from the top to the first blank one (journal-state-plans.md). The
+    report names its work there, not necessarily in its file name."""
+    out: dict[str, list[str]] = {}
+    for line in _unfenced(text).splitlines():
+        if not line.strip():
+            break
+        m = _REPORT_KEY.match(line)
+        if m:
+            key = "review" if m.group(1).lower() == "audit" else m.group(1).lower()
+            # `[#9](url)` names #9, and `#9,` too (refutation)
+            value = _MD_LINK.sub(r"\1", m.group(2)).strip().rstrip(".,;:")
+            out.setdefault(key, []).append(DATE_PREFIX.sub("", value))
+    return out
+
+
+def report_of(candidates: list[tuple[str, str]], slugs, issues) -> tuple[str, str] | None:
+    """The previous round's report of THIS work item among (path, text)
+    candidates — never another one's; the one owner of that rule.
+
+    A report whose header names its `work:` belongs to that work alone: it is
+    this item's when a value is one of this item's issues (the same
+    repository: `other/repo#9` is not this repo's #9) or plan slugs, exactly.
+    Without a `work:` header the file name decides: `<N>-…`, `issue-<N>` or a
+    whole slug part; or the `review:` value equals a plan slug. Issues are
+    tried before slugs; the newest by name wins. Taking simply the newest
+    report put an unrelated item's findings into a delta bundle (observed
+    downstream), and so did a slug matched inside another word."""
+    slugs = [s for s in dict.fromkeys(slugs) if s]
+    issues = list(issues)
+    bare = {n for repo, n in issues if repo is None}
+    by_issue: list[tuple[str, str]] = []
+    by_slug: list[tuple[str, str]] = []
+    for rel, text in sorted(candidates):
+        head = report_header(text)
+        works = head.get("work", [])
+        if works:
+            if any(issue_key(w) in issues for w in works):
+                by_issue.append((rel, text))
+            elif any(w in slugs for w in works):
+                by_slug.append((rel, text))
+            continue  # another work's report, whatever its file name says
+        s = DATE_PREFIX.sub("", Path(rel).stem)
+        if any(s == str(n) or s.startswith(f"{n}-") or _slug_in_name(f"issue-{n}", s) for n in bare):
+            by_issue.append((rel, text))
+        elif any(_slug_in_name(slug, s) for slug in slugs) or \
+                any(v in slugs for v in head.get("review", [])):
+            by_slug.append((rel, text))
+    hits = by_issue or by_slug
+    return hits[-1] if hits else None
+
+
+def prior_report(root: Path, slugs, issues, since: str, head: str) -> tuple[str, str] | None:
+    """(path, text) of the previous round's report of this work, as committed.
+
+    Candidates: the reports present at `since` (that version), and a report
+    the delta adds only while everything from `since` up to the commit
+    adding it touches `.process-work/` alone — the report lands before any
+    fix code, so a fix cannot bring its own report. `report_of` picks among
+    them; None when none is this work's (callers treat that as doubt)."""
     listed = _git_bytes(root, "ls-tree", "-r", "-z", "--name-only", head, "--", REVIEW_REPORTS)
     if listed is None:
         return None
-    found: list[tuple[str, str]] = []
+    candidates: list[tuple[str, str]] = []
     for rel in sorted(p for p in listed.decode(errors="surrogateescape").split("\0") if p.endswith(".md")):
         text = _show(root, since, rel)
-        if text is None:  # added by the delta: its first committed version
+        if text is None:  # added by the delta: only ahead of any fix code
             added = _git_bytes(root, "log", "--reverse", "--format=%H", "--diff-filter=A",
                                f"{since}..{head}", "--", rel)
             first = (added or b"").decode().split()
-            text = _show(root, first[0], rel) if first else None
-        if text is None:
-            continue
-        header: list[str] = []
-        for line in _unfenced(text).splitlines():
-            if not line.strip():
-                break
-            m = _REPORT_KEY.match(line)
-            if m and m.group(1).lower() == "work":
-                header.append(_work_key(m.group(2)))
-        stem = DATE_PREFIX.sub("", Path(rel).stem)
-        if (set(header) & keys) if header else (stem in keys or any(stem.startswith(f"{k}-") for k in keys)):
-            found.append((rel, text))
-    return found[-1][1] if found else None
+            before = _git_bytes(root, "diff", "--name-only", "-z", "--no-renames",
+                                since, first[0]) if first else None
+            if before is None or any(not p.startswith(BOOKKEEPING)
+                                     for p in before.decode(errors="surrogateescape").split("\0") if p):
+                continue
+            text = _show(root, first[0], rel)
+        if text is not None:
+            candidates.append((rel, text))
+    return report_of(candidates, slugs, issues)
 
 
 def _named(text: str, rel: str) -> bool:
-    """`rel` as a whole path in the report — `widget.py` is not `src/widget.py`."""
-    return re.search(rf"(?<![\w./-]){re.escape(rel)}(?![\w/-])", text) is not None
+    """`rel` as a whole path in the report — `widget.py` is neither
+    `src/widget.py` nor `widget.py.orig`."""
+    return re.search(rf"(?<![\w./-]){re.escape(rel)}(?!\.?[\w/-])", text) is not None
 
 
-def tier3_delta_scope_growth(root: Path, works: set[str], since: str, head: str) -> str | None:
+def tier3_delta_scope_growth(root: Path, works: set[str], since: str, head: str,
+                             keys: tuple | None = None) -> str | None:
     """Why the Tier 3 delta `since..head` needs a full round — None when it is
     contained. One owner: the bundle refuses, attest does not write, the gate
     does not count. Computed from the delta's own commits and the prior
-    report as committed; any doubt is growth."""
-    return _scope_growth(str(root), frozenset(works), since, head)
+    report as committed; any doubt is growth. `keys`: (slugs, issues) that
+    name the work's report — default `work_keys(works)`."""
+    slugs, issues = keys if keys is not None else work_keys(works)
+    return _scope_growth(str(root), tuple(slugs), tuple(issues), since, head)
 
 
 @functools.lru_cache(maxsize=256)
-def _scope_growth(root_s: str, works: frozenset, since: str, head: str) -> str | None:
+def _scope_growth(root_s: str, slugs: tuple, issues: tuple, since: str, head: str) -> str | None:
     root = Path(root_s)
     entries = name_status(delta_diff(root, since, head, names=True))
     if entries is None:
@@ -677,7 +758,8 @@ def _scope_growth(root_s: str, works: frozenset, since: str, head: str) -> str |
     if scope:
         why.append(f"the fix changes the plan's ## Decisions or tier: line ({named(scope)})")
     code = [p for p in touches if not p.startswith(BOOKKEEPING) and p not in plans]
-    report = _prior_report(root, set(works), since, head)
+    found = prior_report(root, slugs, issues, since, head)
+    report = found[1] if found else None
     if code and report is None:
         why.append(f"no readable report of the round at {since[:12]} to bound {named(code)}")
     elif report is not None:
@@ -688,11 +770,11 @@ def _scope_growth(root_s: str, works: frozenset, since: str, head: str) -> str |
 
 
 def tier3_delta_problem(root: Path, records: list[dict], works: set[str],
-                        since: str, head: str) -> str | None:
+                        since: str, head: str, keys: tuple | None = None) -> str | None:
     """Anchor, then containment — why this Tier 3 delta clears nothing."""
     if not tier3_delta_anchor(records, works, since):
         return tier3_delta_refusal(since)
-    return tier3_delta_scope_growth(root, works, since, head)
+    return tier3_delta_scope_growth(root, works, since, head, keys)
 
 
 def invalid_deltas(root: Path, records: list[dict]) -> dict[int, str]:

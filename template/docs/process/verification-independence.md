@@ -109,7 +109,8 @@ work that recorded `head=<sha>` (or an unbroken chain of Tier 3 delta REVIEWs
 back to one), each with `non-implementing` and `cross-model` or
 `single-family` — a block anchors too. It needs a full bundle when the fix
 touches a file the prior round's report does not name as a whole path (the
-report as committed at `<sha>`, or as the delta first added it), the plan's
+report as committed at `<sha>`, or added by the delta before any fix code —
+a fix cannot bring its own report), the plan's
 `## Decisions` or `tier:` line, gate code, or a contract
 (`docs/process/design-contracts/`, `specs/*/contracts/`); no readable report
 is a full bundle. The bundle refuses such a delta, `attest.py` does not write

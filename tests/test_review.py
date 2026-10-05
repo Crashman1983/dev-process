@@ -1112,3 +1112,40 @@ def test_an_invalid_tier3_delta_pass_does_not_lift_a_standing_block(render, tmp_
     findings = gate.standing_block_findings(out, "HEAD")
     assert any("work bound" in f and "verdict=block" in f for f in findings), findings
     assert gate.review_passes(out, [(out / JOURNAL / "2026-07-04.md").read_text()]) == []
+
+
+def test_a_fix_round_cannot_bring_its_own_report(render, tmp_path):
+    """Refute 2: a report first added inside the delta, next to the fix code or after it,
+    widened the scope it was meant to bound."""
+    out = render(tmp_path, {"project_name": "demo"})
+    base, heads, gate = _tier3_rounds(out)
+    newer = ".process-work/reviews/2026-07-20-bound.md"
+    disposition = "work: bound\n\nround 1 dispositions: payload.txt fixed; logic moved to src_new.py\n"
+    h2 = _fix_commit(out, {"src_new.py": "print('unreviewed')\n", newer: disposition})
+    _journal(out, _t3(gate, out, base, heads[0], verdict="block", rnd=1),
+             _t3(gate, out, heads[0], h2, verdict="pass", rnd=2, mode="delta"))
+    r = _run(out)
+    assert r.returncode == 1 and "src_new.py outside the prior round's findings" in r.stdout, r.stdout
+    assert gate.prior_report(out, ("bound",), (), heads[0], h2)[0] == ".process-work/reviews/2026-07-19-bound.md"
+    # landed before any fix code, a report-only commit is the round's report
+    _git(out, "reset", "-q", "--hard", heads[0])
+    _fix_commit(out, {newer: disposition})
+    h3 = _fix_commit(out, {"src_new.py": "print('reviewed scope')\n"})
+    assert gate.prior_report(out, ("bound",), (), heads[0], h3)[0] == newer
+    assert gate.tier3_delta_scope_growth(out, {"bound"}, heads[0], h3) is None
+
+
+def test_a_longer_name_does_not_name_the_path(render, tmp_path):
+    """Refute 2: `Dockerfile.dev` named `Dockerfile`, `a.py.orig` named `a.py`."""
+    import importlib.util
+    out = render(tmp_path, {"project_name": "demo"})
+    spec = importlib.util.spec_from_file_location("cr_named", out / "scripts/process/check_review.py")
+    gate = importlib.util.module_from_spec(spec)
+    sys.path.insert(0, str(out / "scripts/process"))
+    spec.loader.exec_module(gate)
+    for text, rel in (("FINDING Dockerfile.dev is wrong", "Dockerfile"), ("see bin/tool.py", "bin/tool"),
+                      ("a.py.orig left behind", "a.py"), ("in src/a.py", "a.py")):
+        assert not gate._named(text, rel), (text, rel)
+    for text, rel in (("fix Dockerfile.", "Dockerfile"), ("a.py:12 is wrong", "a.py"),
+                      ("(src/a.py)", "src/a.py"), ("`a.py`", "a.py")):
+        assert gate._named(text, rel), (text, rel)
