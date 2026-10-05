@@ -22,7 +22,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -123,9 +123,20 @@ def _entry(root: Path, ref: str, rel: str) -> tuple[str, bytes] | None:
 
 
 def _file(root: Path, rel: str) -> tuple[str, bytes] | None:
+    # Read rel with both path flavours: a drive or root component (`\x`,
+    # `C:x`, `C:/x`) leaves the root on Windows even where POSIX sees a name.
+    win = PureWindowsPath(rel)
+    if (Path(rel).is_absolute() or win.drive or win.root
+            or '..' in Path(rel).parts or '..' in win.parts):
+        raise ValueError(f'{rel}: path leaves the root')
     p = root / rel
-    # A parent symlink could read outside the render/project; never follow it.
-    if any(parent.is_symlink() for parent in p.parents if parent != root.parent):
+    # Lexical containment, independent of the component checks above.
+    norm, top = Path(os.path.normpath(p)), Path(os.path.normpath(root))
+    if norm == top or not norm.is_relative_to(top):
+        raise ValueError(f'{rel}: path leaves the root')
+    # A parent symlink below root could read outside the render/project; never
+    # follow it. Ancestors of root (macOS /var, a symlinked temp) are the host's.
+    if any(parent.is_symlink() for parent in p.parents if parent.is_relative_to(root)):
         raise ValueError(f'{rel}: symlink parent')
     if p.is_symlink():
         return '120000', os.fsencode(os.readlink(p))

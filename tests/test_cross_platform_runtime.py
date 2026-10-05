@@ -148,6 +148,28 @@ def test_release_notes_come_from_the_changelog_entry_of_the_tag(tmp_path):
     assert "tools/release_notes.py" in wf and "--verify-tag" in wf
 
 
+@pytest.mark.parametrize("rel", ["../x", "\\x", "C:x", "C:\\x", "C:/x", "/x"])
+def test_template_file_reads_never_leave_the_root_on_any_os(tmp_path, rel):
+    """template_verify._file: a drive or root component leaves the root on Windows
+    even where POSIX sees a name — refused on every OS, here in the portable smoke."""
+    import importlib.util
+    scripts = Path(__file__).parents[1] / "template/scripts/process"
+    sys.dont_write_bytecode = True
+    sys.path.insert(0, str(scripts))
+    try:
+        spec = importlib.util.spec_from_file_location("smoke_template_verify", scripts / "template_verify.py")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+    finally:
+        sys.path.remove(str(scripts))
+    root = tmp_path / "render"
+    (root / "inner").mkdir(parents=True)
+    (root / "inner" / "ok.md").write_text("inside\n", encoding="utf-8")
+    assert mod._file(root, "inner/ok.md")[1].replace(b"\r\n", b"\n") == b"inside\n"
+    with pytest.raises(ValueError, match="leaves the root"):
+        mod._file(root, rel)
+
+
 @pytest.mark.parametrize("module, script", [
     ("arch_onboarding", "check_architecture.py"), ("github_issues", "check_issues.py")])
 def test_a_gate_that_imports_yaml_declares_it(render, tmp_path, module, script):
