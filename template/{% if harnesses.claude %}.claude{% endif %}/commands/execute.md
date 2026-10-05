@@ -21,7 +21,8 @@ necessary; a changed scope or contract goes through the existing workflow
 (`DECISION NEEDED`, back to `/plan`). Do not load `specs/` recursively.
 Then read
 `docs/process/workflow.md` (Execute) and `docs/process/commits.md`. Per task:
-write the failing test, see it fail, implement the minimum, see it pass —
+write the failing test (its edge cases: the classes of
+`docs/process/failure-catalog.md` the task touches), see it fail, implement the minimum, see it pass —
 the task closes when its behaviour is green. Test and implementation land in
 one or two conventional commits (`commits.md`, Atomicity); tick the task's
 checkbox in `tasks.md` in the last of them (the checkboxes are the canonical

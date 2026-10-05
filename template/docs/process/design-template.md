@@ -65,7 +65,7 @@ approval conversation sees them in one place. Empty at approval.
 ## Threat question (Tier 3)
 What could an attacker do with this change? Assets touched, new inputs, trust
 boundaries crossed (`workflow.md`, Brainstorm; `review-checklist.md`,
-Security).
+Security). The failure classes to walk: `docs/process/failure-catalog.md`.
 ```
 
 ## Why a template and not a gate

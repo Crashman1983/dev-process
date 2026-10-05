@@ -88,7 +88,7 @@ Round economy — a failed round must not re-pay the whole chain:
   blocker — the same rule patched three times.
 - **Refute before round 1, from Tier 2 on.** A fresh refute agent attacks the change first —
   owner check, fail-open, edge cases, evidence (`docs/process/refute.md`: the scale by tier, the
-  brief, the catalogue, the `REFUTE` line). Gate code (`scripts/process/`, `.githooks/`, the gate
+  brief, the `REFUTE` line; the edge cases: `docs/process/failure-catalog.md`). Gate code (`scripts/process/`, `.githooks/`, the gate
   configuration) is refuted at any tier, and its fix rounds again. Downstream, a refute pass found
   more in two runs than three review rounds had.
 - **A second owner blocks.** A rule the change re-implements although existing code owns it,

@@ -1,4 +1,6 @@
 import re
+import subprocess
+import sys
 
 CORE = [
     "start-here.md",
@@ -11,6 +13,7 @@ CORE = [
     "releases.md",
     "verification-independence.md",
     "refute.md",
+    "failure-catalog.md",
     "review-checklist.md",
     "definition-of-ready-and-done.md",
     "journal-state-plans.md",
@@ -535,13 +538,39 @@ def test_refute_scales_with_the_tier_and_checks_owner_first(render, tmp_path):
     assert "no common cause" in brief
     checks = text.split("## What the refuter checks", 1)[1].split("\n## ", 1)[0]
     assert "pattern" in checks.lower() and "one owner" in checks
-    catalogue = text.split("## Edge-case catalogue", 1)[1].split("\n## ", 1)[0]
-    for cls in ("**Names:**", "**Empty, missing, equal:**", "**Rename, move, mode:**",
-                "**Conflicts without markers:**", "**Environment:**", "**Text as rendered:**"):
-        assert cls in catalogue, cls
-    assert "adds the class" in catalogue
+    assert "docs/process/failure-catalog.md" in brief  # the edge cases have one home
     # a second owner blocks at every tier unless a DECISION names why
     assert "blocks at every tier" in text and "DECISION" in text
+
+
+def test_failure_catalog_is_the_one_home_of_the_edge_cases(render, tmp_path):
+    """Review clusters downstream (a second reader of a fact, fail-open defaults, missing
+    expiry, replay parity) recurred because the classes lived only in the refuter's brief —
+    one catalog that design, build, refute and review all point to, rendered in every profile."""
+    out = render(tmp_path, {"project_name": "demo", "modules": {"doc_drift_gate": True}})
+    catalog = (out / "docs/process/failure-catalog.md").read_text()
+    for cls in ("**Names:**", "**Git refs and deletion:**", "**Empty, missing, equal:**",
+                "**Rename, move, mode:**", "**Conflicts without markers:**", "**Filesystem:**",
+                "**Text as rendered:**", "**Environment:**", "**Forged environment variables:**",
+                "**Guessed external-tool behaviour:**", "**A second reader of the same fact:**",
+                "**Fail-open defaults:**", "**Stale mapping and expiry:**",
+                "**Forbidden transitions:**", "**Replay parity:**", "**Event ordering:**",
+                "**Confidentiality in outputs:**"):
+        assert cls in catalog, cls
+    assert "adds the class" in catalog
+    # moved, not copied: the old home keeps a pointer only
+    refute = (out / "docs/process/refute.md").read_text()
+    assert "## Edge-case catalogue" not in refute and "**Names:**" not in refute
+    for rel in ("docs/process/refute.md", "docs/process/review-checklist.md",
+                "docs/process/design-template.md", ".claude/commands/execute.md",
+                "scripts/process/make_review_bundle.py"):
+        assert "docs/process/failure-catalog.md" in (out / rel).read_text(), rel
+    # the owners it names resolve: doc-drift checks every `path::symbol` pointer
+    r = subprocess.run([sys.executable, str(out / "scripts/process/check_doc_drift.py"), str(out)],
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stdout + r.stderr
+    minimal = render(tmp_path / "min", {"project_name": "demo", "harnesses": {"claude": False}})
+    assert (minimal / "docs/process/failure-catalog.md").is_file()
 
 
 def test_review_command_and_checklist_name_the_second_owner_block(render, tmp_path):
@@ -566,8 +595,8 @@ def test_execute_names_its_duties_before_pushed_and_testing_owns_the_own_conditi
     assert "decision partner" in execute
     testing = (out / "docs/process/testing.md").read_text()
     assert "## Test under the conditions the change creates" in testing
-    refute = (out / "docs/process/refute.md").read_text()
-    assert "Test under the conditions the change creates" in refute  # the catalogue points to the one home
+    catalog = (out / "docs/process/failure-catalog.md").read_text()
+    assert "Test under the conditions the change creates" in catalog  # the catalog points to the one home
     tower = (out / "docs/process/tower.md").read_text()
     assert "question-unrouted" in tower and "decision_channel" in tower
 
