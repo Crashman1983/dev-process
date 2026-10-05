@@ -443,8 +443,21 @@ def test_second_gate_run_in_one_process_reuses_release_lookups(update, monkeypat
     assert len(calls) == first, calls[first:]
     write(root, 'scratch.txt', 'edited\n')
     review.check(root)
-    assert len(calls) > first, 'a changed worktree must be verified again'
-    assert sum('clone' in c for c in calls if c != 'render') == 1, calls
+    assert len(calls) == first, 'the gate verifies the committed tip, never the worktree'
+
+
+def test_gate_ignores_an_uncommitted_answers_edit_until_it_is_committed(update, monkeypatch):
+    """#161: a dirty tree switched the gate to the worktree — it judged what is not pushed."""
+    root, _, _, _ = update
+    hard, _ = check(root, monkeypatch)
+    assert hard == [], hard
+    p = root / '.copier-answers.yml'
+    p.write_text(p.read_text() + '_project_option: new-value\n')
+    hard, _ = check(root, monkeypatch)
+    assert hard == [], hard
+    commit(root)
+    hard, _ = check(root, monkeypatch)
+    assert any('tier 2 digest-bound REVIEW required' in h for h in hard), hard
 
 
 def test_unreachable_source_names_source_and_ref_and_fails_closed(update, monkeypatch):

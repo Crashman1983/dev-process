@@ -2516,12 +2516,13 @@ def check(root: Path) -> tuple[list[str], list[str]]:
     update = None
     if scope_base:
         try:
-            dirty = bool(_git_bytes(root, 'diff', '--name-only', 'HEAD'))
             # the ref, not scope_base: verify demands one fork point itself
             ref = integration_ref(root)
             if ref is None:
                 raise ValueError('the integration ref behind the merge base disappeared')
-            update = verify(root, ref, worktree=dirty)
+            # the gate judges what is pushed: the committed tip, never the
+            # worktree (template_update refuses a dirty tree before updating)
+            update = verify(root, ref)
         except (GitReadError, ValueError, OSError, subprocess.TimeoutExpired) as exc:
             hard.append(f'template verification failed: {exc}')
     if update and (update['update'] or update['errors']):
