@@ -73,6 +73,8 @@ from check_review import (  # noqa: E402  (one owner for grammar, digest, record
     SPEC_PLAN,
     SPECS_DIR,
     artifact_digest,
+    expand_work,
+    work_key,
     parse_review_lines,
     readable,
     record_kind,
@@ -202,11 +204,15 @@ def _texts(root: Path, journal_dir: Path) -> list[str]:
 def round_problems(args, root: Path, journal_dir: Path) -> tuple[int, list[str]]:
     """(the counted round, what is wrong with the claimed one)."""
     texts = _texts(root, journal_dir)
+    # the work as the Tier-3 anchor reads it (`expand_work`): a plan's slug and its
+    # issue are one work — switching `--work 9` to `--work widget` restarted the
+    # count at round 1 and skipped the root cause (refutation)
+    mine = {work_key(w) for w in expand_work(root, {args.work})[0]}
     # distinct rounds, not lines: several reviewers (lenses) of one round each
     # write their block line — that is one round (observed downstream: 21
     # duplicated block lines would have over-counted)
     blocks = sorted({int(f["round"]) for t in texts for _ln, f in parse_review_lines(t)[0]
-                     if f["work"] == args.work and f["verdict"] == "block"})
+                     if work_key(f["work"]) in mine and f["verdict"] == "block"})
     counted = 1 + len(blocks)
     last = blocks[-1] if blocks else None
     problems: list[str] = []
@@ -222,8 +228,9 @@ def round_problems(args, root: Path, journal_dir: Path) -> tuple[int, list[str]]
             "attested is attested first (its own --base/--head); omit --round to use the count")
     target = int(claimed) if claimed.isdigit() else counted
     # a cause is read as rendered: a quoted example or a commented line is no cause
-    causes = {(m.group("work"), int(m.group("round"))) for t in texts for m in ROOT_CAUSE.finditer(readable(t))}
-    missing = [r for r in blocks if r < target and (args.work, r) not in causes]
+    causes = {int(m.group("round")) for t in texts for m in ROOT_CAUSE.finditer(readable(t))
+              if work_key(m.group("work")) in mine}
+    missing = [r for r in blocks if r < target and r not in causes]
     if missing:
         problems.append(
             "no root cause for the fix of blocking round(s) " + ", ".join(map(str, missing))

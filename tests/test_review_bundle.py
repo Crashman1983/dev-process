@@ -1655,12 +1655,19 @@ def test_bundle_attest_and_gate_read_a_tier3_deltas_work_alike(render, tmp_path,
     bundle = tmp_path / "delta.bundle.md"
     bundle.write_text(_bundle(out, "--base", "main", "--since", since).stdout)
     assert "widget.py is wrong" in _findings(bundle.read_text())
-    r = subprocess.run([sys.executable, str(out / "scripts/process/attest.py"), "--work", delta,
-                        "--tier", "3", "--model", "m", "--verdict", "pass",
-                        "--independence", "bundle,non-implementing,cross-model",
-                        "--bundle", str(bundle), "."], cwd=out, capture_output=True, text=True)
+    attest = [sys.executable, str(out / "scripts/process/attest.py"), "--work", delta,
+              "--tier", "3", "--model", "m", "--verdict", "pass",
+              "--independence", "bundle,non-implementing,cross-model", "--bundle", str(bundle), "."]
+    # the alias does not restart the count: round 1 blocked, so this is round 2 and
+    # needs the root cause of round 1 — recorded under either name
+    r = subprocess.run(attest, cwd=out, capture_output=True, text=True)
+    assert r.returncode == 1 and "no root cause for the fix of blocking round(s) 1" in r.stderr, r.stderr
+    journal = out / ".process-work/journal/review.md"
+    journal.write_text(journal.read_text() + f"\nROOT-CAUSE work={full} round=1: widget returned the "
+                       "wrong value — test_widget failed before the fix\n")
+    r = subprocess.run(attest, cwd=out, capture_output=True, text=True)
     assert r.returncode == 0, r.stdout + r.stderr
-    assert "mode=delta" in r.stdout
+    assert "mode=delta" in r.stdout and " round=2 " in r.stdout
     gate = _module(out, "check_review")
     records = [f for _r, t in gate.record_texts(out, ("journal",)) for _l, f in gate.parse_review_lines(t)[0]]
     assert len(records) == 2 and gate.invalid_deltas(out, records) == {}
