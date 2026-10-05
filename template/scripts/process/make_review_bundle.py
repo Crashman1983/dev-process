@@ -606,6 +606,35 @@ def _delta_files(root: Path, since: str) -> list[str] | None:
     return None if entries is None else list(dict.fromkeys(path for _l, _s, path in entries))
 
 
+_TEST_DIRS = frozenset({"test", "tests", "spec", "specs", "__tests__"})
+_TEST_NAME = re.compile(r"^(?:test_.+\..+|.+_test\..+|.+\.spec\..+|.+\.test\..+|conftest\.py)$")
+_PROSE = (".md", ".rst", ".txt")
+_CONFIG = (".json", ".yaml", ".yml", ".toml", ".lock", ".ini", ".cfg", ".env")
+
+
+def _is_test_path(rel: str) -> bool:
+    """A test file by path: a test directory segment or a test file name."""
+    *dirs, name = rel.split("/")
+    return any(d in _TEST_DIRS for d in dirs) or bool(_TEST_NAME.match(name))
+
+
+def _is_code_path(rel: str) -> bool:
+    """Code a fix may change: not bookkeeping, prose, docs, config or a test."""
+    name = rel.rsplit("/", 1)[-1].lower()
+    return not (rel.startswith(_review_gate.BOOKKEEPING) or rel.startswith("docs/")
+                or name.endswith(_PROSE) or name.endswith(_CONFIG) or _is_test_path(rel))
+
+
+def _regression_pin_note(touches: list[str]) -> str | None:
+    """A fix round that changes code but no test leaves its findings unpinned
+    (testing.md, regression pins) — advisory, never a refusal."""
+    code = [p for p in touches if _is_code_path(p)]
+    if not code or any(_is_test_path(p) for p in touches):
+        return None
+    return (f"*(note: regression pin missing for the fixed findings (testing.md): "
+            f"{len(code)} code file(s) changed, no test file)*\n")
+
+
 def _tier3_delta_refusal(root: Path, since: str, plan_filter: str | None,
                          plan_texts: dict[Path, str]) -> str | None:
     """Why this Tier 3 delta needs a full bundle — None when it may run. The
@@ -679,6 +708,9 @@ def build(root: Path, base: str | None, plan_filter: str | None = None,
             "wrong, this bundle is too narrow — say so instead of reviewing it.\n")
         add("DELTA_TOUCHES files=" + (",".join(_shown(p) for p in touches)
                                       if touches is not None else "(unknown)") + "\n")
+        pin = _regression_pin_note(touches or [])
+        if pin:
+            add(pin)
     else:
         add(FIRST_ROUND_RULE + "\n")
     if tier == 2:
