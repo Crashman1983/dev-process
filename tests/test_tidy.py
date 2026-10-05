@@ -614,6 +614,49 @@ def test_a_report_git_cannot_give_back_is_kept(tmp_path, how):
     assert tidy.apply(root, items, 30) == 1 and (root / kept).is_file()
 
 
+@pytest.mark.parametrize("plan", [
+    "issue: #9,", "issue: [#9](https://github.com/o/r/issues/9)", "issue: #9.", "issue: **#9**",
+    "issue: <#9>", "issue: none\n\nFollows up #9.", "issue: none\n\nSee https://github.com/o/r/issues/9 first.",
+], ids=["comma", "md-link", "period", "bold", "angle", "mention", "url-mention"])
+def test_a_decorated_or_mentioned_issue_keeps_the_work_open(tmp_path, plan):
+    """Refute round 3: decorated `issue:` tokens yielded no key, so the active
+    plan did not protect its work. Any `#N` / `issues/N` mention keeps it."""
+    tidy = _tidy_mod()
+    root = _bare_reviews(tmp_path, {f"{_days_ago(90)}-a.md": "work: #9\n\nold\n",
+                                    f"{_days_ago(80)}-b.md": "work: #9\n\nnew\n"},
+                         _LINE.format(w="#9", v="pass", n=2), {f"{_days_ago(5)}-p.md": f"# P\n\n{plan}\n"})
+    assert tidy.old_review_reports(root, 30) == []
+
+
+def test_a_slug_mentioned_in_an_active_plan_keeps_the_work_open(tmp_path):
+    """A whole-token slug mention in an active plan is enough to keep (fail-closed)."""
+    tidy = _tidy_mod()
+    root = _bare_reviews(tmp_path, {f"{_days_ago(90)}-a.md": "review: foo\n\nold\n",
+                                    f"{_days_ago(80)}-b.md": "review: foo\n\nnew\n"},
+                         _LINE.format(w="foo", v="pass", n=2), {f"{_days_ago(5)}-p.md": "# P\n\nreworks foo again\n"})
+    assert tidy.old_review_reports(root, 30) == []
+
+
+def test_issues_of_another_repository_are_separate_works(tmp_path):
+    """Grouping follows report_of: `other/repo#9` is not this repo's #9, so
+    each is its own work's newest report and both stay."""
+    tidy = _tidy_mod()
+    root = _bare_reviews(tmp_path, {f"{_days_ago(90)}-a.md": "work: other/repo#9\n\nold\n",
+                                    f"{_days_ago(80)}-b.md": "work: #9\n\nnew\n"},
+                         _LINE.format(w="#9", v="pass", n=2) + _LINE.format(w="other/repo#9", v="pass", n=2), {})
+    assert tidy.old_review_reports(root, 30) == []
+
+
+def test_a_report_whose_file_name_reaches_open_work_is_kept(tmp_path):
+    """`9-x.md` headed `review: foo` (foo closed) is what report_of's name rule
+    finds for open #9 — removing it would take #9's prior report."""
+    tidy = _tidy_mod()
+    root = _bare_reviews(tmp_path, {f"{_days_ago(90)}-9-x.md": "review: foo\n\nold\n",
+                                    f"{_days_ago(80)}-b.md": "review: foo\n\nnew\n"},
+                         _LINE.format(w="foo", v="pass", n=2), {f"{_days_ago(5)}-bar.md": "# P\n\nissue: 9\n"})
+    assert tidy.old_review_reports(root, 30) == []
+
+
 def test_untracked_or_locally_changed_reports_are_never_deleted(tmp_path):
     """Refute: the `git rm` fallback unlinked an untracked report and one with
     local edits — the only copies. Both are kept, named, and apply exits 1."""
