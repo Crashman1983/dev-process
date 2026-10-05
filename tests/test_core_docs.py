@@ -548,6 +548,31 @@ def test_what_each_round_judges_has_one_owner_the_bundle_carries(render, tmp_pat
     assert "A `block` verdict always\nhas findings, so it always writes the report" in review
 
 
+def test_tier3_delta_rule_is_mechanical_and_owned_once(render, tmp_path):
+    """Downstream Tier 3 took 5 rounds x 3 lenses on full 10-13k-line bundles; the delta
+    rule replaces "Tier 3 never takes a delta" in one owner, and the others point there."""
+    out = render(tmp_path, {"project_name": "demo", "modules": {"speckit": True}})
+    vi = (out / "docs/process/verification-independence.md").read_text()
+    rule = " ".join(vi.split("**What each round judges.**", 1)[1].split("\n\n", 1)[0].split())
+    for phrase in ("The worker never decides a delta's scope", "`head=<sha>`",
+                   "unbroken chain of Tier 3 delta REVIEWs", "`## Decisions` or `tier:`",
+                   "gate code", "`specs/*/contracts/`", "an unreadable report is a full bundle",
+                   "`DELTA_TOUCHES`"):
+        assert phrase in rule, phrase
+    flat = " ".join(vi.split())
+    assert "Tier 3 is the exception" not in flat and "Tier 3 still requires a full bundle" not in flat
+    review = " ".join((out / ".claude/commands/review.md").read_text().split())
+    assert "Tier 3 gets a full bundle every round" not in review
+    assert "later rounds use the same set" not in review
+    assert ("a delta round re-runs the lenses whose prior report has an open finding or names a "
+            "file in the bundle's `DELTA_TOUCHES` line, plus the attesting reviewer") in review
+    refute = " ".join((out / "docs/process/refute.md").read_text().split())
+    assert "a Tier 3 review never takes a delta" not in refute
+    assert "A delta re-review asks for a new line at Tier 3" in refute
+    plan = " ".join((out / ".claude/commands/plan.md").read_text().split())
+    assert "split along contracts into stacked plans (*phase-of*)" in plan
+
+
 def test_branch_lifetime_guidance(render, tmp_path):
     out = render(tmp_path, {"project_name": "demo"})
     commits = (out / "docs/process/commits.md").read_text()
