@@ -552,10 +552,13 @@ def apply(root: Path, items: dict, days: int) -> int:
             rc = 1
     for name in items["old_archive"]:
         print(f"tidy: $ git rm -q {PLANS_ARCHIVE}/{name}")
-        r = subprocess.run(["git", "-C", str(root), "rm", "-q", f"{PLANS_ARCHIVE}/{name}"],
+        r = subprocess.run(["git", "-C", str(root), "rm", "-q", "--", f"{PLANS_ARCHIVE}/{name}"],
                            capture_output=True, text=True)
+        # never a plain unlink: git rm refuses an untracked or locally changed
+        # plan, and that refusal is what keeps the only copy
         if r.returncode != 0:
-            (root / PLANS_ARCHIVE / name).unlink(missing_ok=True)
+            print(f"tidy: kept {PLANS_ARCHIVE}/{name} — git rm refused: {r.stderr.strip()}")
+            rc = 1
     for rel, why in items.get("reviews_skipped", {}).items():
         print(f"tidy: kept {rel} — {why}")
         rc = 1
