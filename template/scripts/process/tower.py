@@ -292,10 +292,11 @@ def sessions(root: Path) -> list[dict]:
                     "minutes_since_start": int((time.time() - int(rec.get("started") or time.time())) // 60),
                     "last_output": last[-200:], "minutes_since_output": since,
                     # the session's own word and whether its phase is over — dispatch's
-                    # answer, the one chain acts on; asked only of a quiet live worker
+                    # answer, the one chain acts on; asked of a quiet live worker and
+                    # of one that ended (a finished phase is no dead worker)
                     "report_state": (rep or {}).get("state"),
                     "phase_over": (_dispatch.phase_over(root, rec, rep, local=True)
-                                   if rec["alive"] and since is not None and since >= WAIT_MINUTES
+                                   if (not rec["alive"] or (since is not None and since >= WAIT_MINUTES))
                                    and hasattr(_dispatch, "phase_over") else None)})
     return out
 
@@ -491,7 +492,10 @@ def findings(table: dict, stale_minutes: int) -> list[dict]:
     # on another host shows no screen here: its reports speak for it
     asked = {q.get("branch") for q in table.get("questions", [])}
     for s in table.get("sessions", []):
-        if s.get("state") in ("dead", "gone") and s.get("report_state") != "done":
+        # a session that ended after its phase was over is done with it, not
+        # dead (#161); cannot be told (None) still reports
+        if (s.get("state") in ("dead", "gone") and s.get("report_state") != "done"
+                and s.get("phase_over") is not True):
             out.append({"kind": "dead-worker", "severity": "high",
                         "what": f"{s['branch']} ({s.get('phase')}): session {s['state']}, work not done",
                         "because": "the worker cannot report or progress — inspect its work and resume or reassign it"})

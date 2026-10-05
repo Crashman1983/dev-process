@@ -513,6 +513,30 @@ def test_the_tower_asks_dispatch_whether_a_quiet_workers_phase_is_over(render, t
     monkeypatch.setattr(d, "last_output", lambda _rec: ("working", 5))  # busy: dispatch is not asked
     assert tower.sessions(out)[0]["phase_over"] is None and len(asked) == 1
 
+def test_a_dead_session_whose_phase_is_over_is_no_dead_worker(render, tmp_path, monkeypatch):
+    """#161: every ended session without `done` was flagged, also one whose phase was over."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    tower = _load_tower(out)
+    import dispatch as d
+    rec = {"branch": "7-work", "phase": "plan", "alive": False, "state": "dead", "started": 100}
+    monkeypatch.setattr(d, "records", lambda _root: [dict(rec)])
+    monkeypatch.setattr(d, "last_output", lambda _rec: ("planned", 2))
+    monkeypatch.setattr(tower._report, "read_reports", lambda _root: [])
+    over = {"value": True}
+    monkeypatch.setattr(d, "phase_over", lambda *_a, **_k: over["value"])
+
+    def dead(sessions):
+        return [f for f in tower.findings(_table(sessions), 60) if f["kind"] == "dead-worker"]
+
+    s = tower.sessions(out)[0]
+    assert s["phase_over"] is True  # asked of an ended session too, however recent its output
+    assert dead([s]) == []
+    over["value"] = None  # cannot be told: still reported
+    assert len(dead([tower.sessions(out)[0]])) == 1
+    over["value"] = False
+    assert len(dead([tower.sessions(out)[0]])) == 1
+
+
 # --- names git quotes without -z: local and remote compare, output never crashes ---
 
 def _wt_with(out: Path, name: str, raw: bytes) -> Path:
