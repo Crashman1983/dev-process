@@ -734,7 +734,7 @@ def test_template_source_refuses_every_option_or_helper_form(src):
 
 
 @pytest.mark.parametrize('src', ['gh:owner/repo', 'https://github.com/o/r.git', 'ssh://git@host/o/r.git',
-                                 'git@github.com:o/r.git'])
+                                 'git@github.com:o/r.git', 'user@h:~/r', 'git@h:/abs/r.git'])
 def test_template_source_accepts_the_supported_forms(src, tmp_path):
     updater = load('template_update')
     assert updater.template_source(src) == src
