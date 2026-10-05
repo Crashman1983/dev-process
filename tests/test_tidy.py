@@ -96,6 +96,19 @@ def test_apply_removes_the_safe_part_and_keeps_owner_decisions(render, tmp_path)
     assert (out / "specs/009-noplan").is_dir() and (out / "specs/010-sc").is_dir()
 
 
+@pytest.mark.parametrize("state", ["untracked", "modified"])
+def test_apply_keeps_an_archived_plan_git_rm_refuses(render, tmp_path, state):
+    """The archive pruner fell back to unlink when git rm refused — deleting the only copy."""
+    out, _bare = _repo_with_residue(render, tmp_path)
+    old = (dt.date.today() - dt.timedelta(days=60)).isoformat()
+    plan = out / ".process-work/plans/archive" / f"{old}-{'loose' if state == 'untracked' else 'done'}.md"
+    plan.write_text("# Plan\n\ntier: 1\n\nlocal notes only here\n")
+    r = _run(out, "--apply")
+    assert plan.read_text().endswith("local notes only here\n")
+    assert f"tidy: kept .process-work/plans/archive/{plan.name} — git rm refused" in r.stdout, r.stdout
+    assert r.returncode == 1
+
+
 def test_keep_glob_protects_branches(render, tmp_path):
     out, _bare = _repo_with_residue(render, tmp_path)
     r = _run(out, "--keep", "agent/*")
