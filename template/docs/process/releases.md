@@ -73,7 +73,8 @@ record, not an accident.
 4. Read those behavior notes and acknowledge them with the same command plus
    `--ack <owner-or-steward>`. Commit the generated acknowledgment under
    `.process-work/`, along with the update. Its baseline and resolved release
-   SHA must match the verifier's result.
+   SHA must match the verifier's result. Re-acknowledge after every rebase:
+   it moves the baseline, so the earlier acknowledgment no longer matches.
 5. Apply the template-update tier rules in `risk-tiers.md`: pure updates need
    gates and project tests, project deltas need one Tier 2 review, enforcement
    migrations retain Tier 3. Use `template-update: true` on the update's plan.
