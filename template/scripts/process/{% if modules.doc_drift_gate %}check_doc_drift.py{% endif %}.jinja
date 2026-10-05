@@ -98,6 +98,10 @@ def find_drift(root: Path) -> list[str]:
             base = doc.parent if ref_clean.startswith(("./", "../")) else root
             target = (base / ref_clean).resolve()
             if not target.exists():
+                # a `*.local.*` file is a checkout's own, never shipped (the
+                # template_verify convention): absent is not drift; present, it is checked
+                if any('.local.' in part for part in Path(ref_clean).parts):
+                    continue
                 problems.append(f"{doc.relative_to(root)} -> missing '{ref_clean}'")
             elif symbol and target.suffix == ".py":
                 name = symbol.split("(", 1)[0].strip()
