@@ -762,3 +762,22 @@ def test_copier_gets_the_source_after_an_end_of_options_marker(monkeypatch, tmp_
     assert updater.render(str(tmp_path), 'v1', {}, tmp_path / 'dst', trusted=False)
     argv = list(seen[0])
     assert argv[argv.index('--') + 1] == str(tmp_path), argv
+
+
+def test_the_shared_clone_works_under_safe_bare_repository_explicit(tmp_path, monkeypatch):
+    """macOS downstream: `safe.bareRepository=explicit` refused `git -C <bare clone>`,
+    so the review gate failed before it read a single release."""
+    src = tmp_path / 'src'
+    src.mkdir()
+    git(src, 'init', '-q', '-b', 'main')
+    git(src, 'config', 'user.email', 't@example.invalid')
+    git(src, 'config', 'user.name', 'T')
+    write(src, 'CHANGELOG.md', 'v1\n')
+    commit(src)
+    git(src, 'tag', 'v1.0.0')
+    cfg = tmp_path / 'gitconfig'
+    cfg.write_text('[safe]\n\tbareRepository = explicit\n', encoding='utf-8')
+    monkeypatch.setenv('GIT_CONFIG_GLOBAL', str(cfg))
+    verifier = load('template_verify')
+    sha = git(src, 'rev-parse', 'HEAD')
+    assert verifier._fetched(str(src), 'v1.0.0', 'v1.0.0') == sha

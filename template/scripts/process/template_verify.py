@@ -81,8 +81,15 @@ def _clone(src: str, ref: str) -> Path:
     return _CLONES[src]
 
 
+def _bare(clone: Path) -> list[str]:
+    """A git command on the shared bare clone. `--git-dir` names it explicitly:
+    `-C <bare>` relies on repository discovery, which `safe.bareRepository=explicit`
+    (a hardening default on some hosts) refuses."""
+    return ['git', f'--git-dir={clone}']
+
+
 def _has(clone: Path, rev: str) -> str | None:
-    r = subprocess.run(['git', '-C', str(clone), 'rev-parse', '--verify', '--quiet',
+    r = subprocess.run([*_bare(clone), 'rev-parse', '--verify', '--quiet',
                         rev + '^{commit}'], capture_output=True, text=True,
                        timeout=60, env=git_environment())
     return None if r.returncode else r.stdout.strip()
@@ -93,7 +100,7 @@ def _fetched(src: str, ref: str, rev: str) -> str:
     clone = _clone(src, ref)
     found = _has(clone, rev)
     if found is None:
-        r = subprocess.run(['git', '-C', str(clone), 'fetch', '--quiet', '--tags', '--force',
+        r = subprocess.run([*_bare(clone), 'fetch', '--quiet', '--tags', '--force',
                             'origin', '+refs/heads/*:refs/heads/*'], capture_output=True,
                            timeout=120, env=git_environment())
         if r.returncode:
@@ -265,9 +272,13 @@ def _verify(root: Path, base: str, tip: str, *, worktree: bool = False,
             # Compare the actual pinned changelog blobs. This also handles this
             # template's bold version entries and chronological/mixed ordering,
             # and never sends an entire historical changelog into the review.
-            result['release_notes'] = git(
-                notes, 'diff', '--no-ext-diff', '--no-textconv', '--no-color',
-                '--unified=0', old_sha, new_sha, '--', 'CHANGELOG.md').decode('utf-8')
+            diff = subprocess.run(
+                [*_bare(notes), 'diff', '--no-ext-diff', '--no-textconv', '--no-color',
+                 '--unified=0', old_sha, new_sha, '--', 'CHANGELOG.md'],
+                capture_output=True, timeout=60, env=git_environment())
+            if diff.returncode:
+                raise ValueError(diff.stderr.decode(errors='replace').strip())
+            result['release_notes'] = diff.stdout.decode('utf-8')
     except (ValueError, OSError, subprocess.TimeoutExpired) as exc:
         result['errors'].append(str(exc))
         result['identical'] = []  # any failure withdraws every exemption
