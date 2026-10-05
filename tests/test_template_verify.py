@@ -560,6 +560,19 @@ def test_gate_finish_and_history_refuse_a_criss_cross(tmp_path, monkeypatch):
     assert any('merge bases' in b for b in blockers), blockers
 
 
+def test_a_tip_the_integration_ref_contains_never_reads_a_fallback(tmp_path, monkeypatch):
+    """Refute: on main (origin/main == HEAD) a criss-crossed upstream/main made main red."""
+    root = tmp_path / 'p'
+    tip = criss_cross(root)
+    git(root, 'update-ref', 'refs/remotes/origin/main', tip)
+    git(root, 'update-ref', 'refs/remotes/upstream/main', git(root, 'rev-parse', 'main'))
+    review = load('check_review')
+    assert review.merge_base(root) is None
+    monkeypatch.setenv('PROCESS_PUSH_TARGETS', 'refs/heads/main')
+    hard, _ = review.check(root)
+    assert not any('merge bases' in h for h in hard), hard
+
+
 def test_callers_hand_verify_the_integration_ref(update, monkeypatch):
     """Gate, finish, _history and the plan exemption pass the ref; verify forks it."""
     root, _, base, _ = update
