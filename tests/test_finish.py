@@ -58,6 +58,29 @@ def test_blocked_on_main(render, tmp_path):
     assert "no feature branch to finish" in r.stdout
 
 
+def test_on_main_names_the_unmerged_branches_and_their_worktrees(render, tmp_path):
+    out = render(tmp_path / "main", {"project_name": "demo"})
+    _git(out, "init", "-q", "-b", "main")
+    _git(out, "config", "user.email", "t@example.com")
+    _git(out, "config", "user.name", "Test")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "base")
+    r = _run(out)
+    assert "no branch is left unmerged into main" in r.stdout, r.stdout
+    wt = tmp_path / "wt-7"
+    _git(out, "worktree", "add", "-q", "-b", "7-widget", str(wt), "main")
+    (wt / "w.txt").write_text("w\n")
+    _git(wt, "add", "-A")
+    _git(wt, "commit", "-q", "-m", "feat: w")
+    _git(out, "branch", "8-gizmo", "7-widget")
+    _git(out, "branch", "merged-one", "main")  # merged: not offered
+    r = _run(out)
+    assert r.returncode == 1
+    assert (f"check out the branch first: cd {wt.resolve()} (holds 7-widget) | "
+            f"git checkout 8-gizmo") in r.stdout, r.stdout
+    assert "merged-one" not in r.stdout
+
+
 def test_blocked_without_clearing_pass(render, tmp_path):
     out = _repo_on_feature(render, tmp_path)
     _active_plan(out, "2026-07-04-widget.md", "# Plan\n\ntier: 2\nissue: none\n")
