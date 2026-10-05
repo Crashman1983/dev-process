@@ -621,6 +621,10 @@ def test_execute_names_its_duties_before_pushed_and_testing_owns_the_own_conditi
         assert duty in duties, duty
     assert "ROOT-CAUSE work=<id> round=<r>: <cause> — <test that failed before the fix>" in duties
     assert "attest.py --dry-run" in duties
+    # a planned transition table is checked row class by row class — missing forbidden
+    # transitions were a downstream blocker cluster; no general self-refute step is added
+    assert ("every row class has a test and every forbidden transition a negative test"
+            in duties.split("matches its planned inventory", 1)[1].split("\n3. ", 1)[0])
     assert "decision partner" in execute
     testing = (out / "docs/process/testing.md").read_text()
     assert "## Test under the conditions the change creates" in testing
