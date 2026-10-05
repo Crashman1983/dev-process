@@ -6,6 +6,9 @@ never narrated.
     uv run scripts/process/tower.py --json     # the full table for an agent
     uv run scripts/process/tower.py --stale-minutes 60
     uv run scripts/process/tower.py --remote   # other hosts: their branches on origin, their published reports
+    uv run scripts/process/tower.py --json --section findings   # only these keys
+    uv run scripts/process/tower.py --wait --timeout 1800 --states pushed,blocked
+                                               # block until a report line arrives: exit 0, 3 on timeout
 
 What it assembles (all from state the process already keeps):
   worktrees  — every `git worktree` of this clone: branch, ahead/behind the
@@ -644,6 +647,47 @@ def render(table: dict) -> str:
     return "\n".join(lines)
 
 
+def wait(root: Path, timeout: float, states: tuple[str, ...]) -> int:
+    """Block until this host's reports file gains a line in `states`; print the
+    matching records as JSON lines. Exit 0 on a match, 3 on timeout, 2 when
+    `root` is not a git clone. A harness-neutral wake: the caller runs it in
+    the background and treats its exit as the event. Local file only."""
+    path = _report.reports_path(root)
+    if path is None:
+        print("tower: not a git clone — no reports file to wait on", file=sys.stderr)
+        return 2
+    offset = path.stat().st_size if path.is_file() else 0
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        time.sleep(1)
+        size = path.stat().st_size if path.is_file() else 0
+        if size < offset:  # truncated or replaced: start over
+            offset = 0
+        if size <= offset:
+            continue
+        with path.open("rb") as fh:
+            fh.seek(offset)
+            chunk = fh.read(size - offset)
+        complete = chunk.rfind(b"\n") + 1  # a half-written line waits for its newline
+        offset += complete
+        text = chunk[:complete].decode("utf-8", errors="replace")
+        hits = [r for r in _report._parse(text, _report.host_name()) if r["state"] in states]
+        if hits:
+            for rec in hits:
+                print(json.dumps(rec, ensure_ascii=False))
+            return 0
+    return 3
+
+
+def _states(value: str) -> tuple[str, ...]:
+    picked = tuple(s.strip() for s in value.split(",") if s.strip())
+    bad = [s for s in picked if s not in _report.STATES]
+    if bad or not picked:
+        raise argparse.ArgumentTypeError(f"unknown state(s) {', '.join(bad) or '(none)'}; "
+                                         f"known: {', '.join(_report.STATES)}")
+    return picked
+
+
 def main(argv: list[str]) -> int:
     # a path that is not UTF-8 reaches the output as its own bytes
     # (surrogateescape): escaped, never a crash (refutation)
@@ -656,15 +700,31 @@ def main(argv: list[str]) -> int:
                    help="drop findings below this severity")
     p.add_argument("--remote", action="store_true", default=os.environ.get("PROCESS_TOWER_REMOTE") == "1",
                    help="fetch origin: branches and reports of other hosts join the table")
+    p.add_argument("--section", action="append", default=[], metavar="NAME",
+                   help="with --json: print only these top-level keys (repeatable)")
+    p.add_argument("--wait", action="store_true",
+                   help="block until a report line arrives; exit 0 on a match, 3 on timeout")
+    p.add_argument("--timeout", type=float, default=1800, help="--wait: seconds before exit 3")
+    p.add_argument("--states", type=_states, default=_report.STATES,
+                   help="--wait: comma-separated report states that end the wait")
     p.add_argument("root", nargs="?", default=".")
     a = p.parse_args(argv)
+    if a.section and not a.json:
+        p.error("--section needs --json")
     root = Path(a.root).resolve()
     top = _git(root, "rev-parse", "--show-toplevel")
     if top:
         root = Path(top.strip())
+    if a.wait:
+        return wait(root, a.timeout, a.states)
     table = build(root, a.stale_minutes, remote=a.remote)
     keep = {"high": ("high",), "medium": ("high", "medium"), "low": ("high", "medium", "low")}[a.min_severity]
     table["findings"] = [f for f in table["findings"] if f["severity"] in keep]
+    if a.section:
+        unknown = [k for k in a.section if k not in table]
+        if unknown:
+            p.error(f"unknown section(s) {', '.join(unknown)}; known: {', '.join(table)}")
+        table = {k: table[k] for k in a.section}
     print(json.dumps(table, indent=2, ensure_ascii=False) if a.json else render(table))
     return 0
 

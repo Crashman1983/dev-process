@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -124,6 +125,74 @@ def test_reports_feed_the_tower_and_stale_workers_are_found(render, tmp_path):
     assert blocked and "lane held" in blocked[0]["what"]
     # reports are never in the tree
     assert not [p for p in out.rglob("reports.jsonl") if ".git" not in p.parts]
+
+
+def _ledger(out: Path) -> Path:
+    common = _git(out, "rev-parse", "--git-common-dir").stdout.strip()
+    return Path(common if Path(common).is_absolute() else out / common) / "process-tower/reports.jsonl"
+
+
+def _wait_while_appending(out: Path, state: str, *args: str):
+    """Start `--wait`, then append one `state` line per second until it exits —
+    robust against a slow start that would miss a single early line."""
+    import time
+    proc = subprocess.Popen([sys.executable, str(out / "scripts/process/tower.py"), "--wait", *args],
+                            cwd=out, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    ledger = _ledger(out)
+    ledger.parent.mkdir(parents=True, exist_ok=True)
+    for n in range(30):
+        time.sleep(1)
+        if proc.poll() is not None:
+            break
+        with ledger.open("a") as fh:
+            fh.write(json.dumps({"epoch": n, "worker": "w", "issue": 4, "state": state}) + "\n")
+    out_, err = proc.communicate(timeout=30)
+    return proc.returncode, out_, err
+
+
+def test_wait_wakes_on_a_matching_report(render, tmp_path):
+    """The steward's watch is `tower.py --wait` in the background: a matching
+    report line must end it at once (exit 0) with the record as a JSON line."""
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    code, stdout, err = _wait_while_appending(out, "pushed", "--timeout", "60", "--states", "pushed,blocked")
+    assert code == 0, err
+    rec = json.loads(stdout.splitlines()[0])
+    assert rec["state"] == "pushed" and rec["issue"] == 4
+
+
+def test_wait_ignores_other_states_and_times_out(render, tmp_path):
+    """A state outside --states must not wake the steward; the timeout is exit 3
+    so the caller can tell a quiet period from an event."""
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    code, stdout, _ = _wait_while_appending(out, "planned", "--timeout", "3", "--states", "done")
+    assert code == 3 and stdout == ""
+    r = _tower(out, "--wait", "--timeout", "1")
+    assert r.returncode == 3
+    bad = _tower(out, "--wait", "--states", "nonsense")
+    assert bad.returncode != 0 and "nonsense" in bad.stderr
+
+
+def test_wait_outside_a_clone_exits_2(render, tmp_path):
+    """No git clone, no reports file: a distinct exit, never an endless wait."""
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})  # rendered, never `git init`
+    r = subprocess.run([sys.executable, str(out / "scripts/process/tower.py"), "--wait", "--timeout", "5"],
+                       cwd=out, capture_output=True, text=True,
+                       env={**os.environ, "GIT_CEILING_DIRECTORIES": str(tmp_path)})
+    assert r.returncode == 2, r.stderr
+
+
+def test_section_narrows_the_json_table(render, tmp_path):
+    """`--section` keeps a steward's read small; without --json it is an error,
+    not a silently ignored flag."""
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    r = _tower(out, "--json", "--section", "findings")
+    assert r.returncode == 0, r.stderr
+    assert list(json.loads(r.stdout)) == ["findings"]
+    assert _tower(out, "--section", "findings").returncode != 0
+    assert _tower(out, "--json", "--section", "nope").returncode != 0
 
 
 def test_red_ledger_age_is_a_finding(render, tmp_path):
