@@ -172,6 +172,10 @@ def test_wait_ignores_other_states_and_times_out(render, tmp_path):
     assert r.returncode == 3
     bad = _tower(out, "--wait", "--states", "nonsense")
     assert bad.returncode != 0 and "nonsense" in bad.stderr
+    # the table flags make no sense with --wait: refused, not silently ignored
+    for extra in (["--json"], ["--json", "--section", "findings"]):
+        r = _tower(out, "--wait", *extra, "--timeout", "1")
+        assert r.returncode == 2 and "drop --json" in r.stderr
 
 
 def test_wait_outside_a_clone_exits_2(render, tmp_path):
