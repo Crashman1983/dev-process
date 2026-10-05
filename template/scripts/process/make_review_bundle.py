@@ -288,102 +288,10 @@ def _declared_tier(texts: list[str]) -> int | None:
 _DATED = re.compile(r"^\d{4}-\d{2}-\d{2}-")
 
 
-IssueKey = tuple[str | None, int]  # (owner/repo lowercased, or None for this repo's `#N`; number)
-
-
-def _issue_key(ref: str) -> IssueKey | None:
-    """An issue ref as a comparable key: `#9` and `9` are this repository's
-    issue 9; `owner/repo#9` and the issue URL name that repository's."""
-    parsed = _review_gate.parse_issue_ref(ref)
-    if parsed is not None:
-        return (parsed[0].lower() if parsed[0] else None, parsed[1])
-    return (None, int(ref)) if ref.isascii() and ref.isdigit() else None
-
-
-def _plan_issue_keys(text: str) -> list[IssueKey]:
-    keys = (_issue_key(m.group(1)) for m in _review_gate.ISSUE_DECL.finditer(_review_gate._unfenced(text or "")))
+def _plan_issue_keys(text: str) -> list:
+    keys = (_review_gate.issue_key(m.group(1))
+            for m in _review_gate.ISSUE_DECL.finditer(_review_gate._unfenced(text or "")))
     return list(dict.fromkeys(k for k in keys if k is not None))
-
-
-def _slug_in_name(slug: str, stem: str) -> bool:
-    """`slug` is the file stem or a whole dash-separated part run of it —
-    `api` names `api-round-2`, not `rapid-fix`."""
-    return stem == slug or re.search(rf"(?:^|-){re.escape(slug)}(?:-|$)", stem) is not None
-
-
-def _review_report_for(root: Path, slugs: list[str], issues: list[IssueKey]) -> Path | None:
-    """The previous round's report of THIS work item — never another one's.
-
-    Reports are `YYYY-MM-DD-<slug>.md` with a header block (`review: <slug>`,
-    `work: <issue or plan slug>`). A report whose header names its `work:`
-    belongs to that work alone: it is this item's when a value is one of this
-    item's issues (the same repository: `other/repo#9` is not this repo's #9)
-    or plan slugs, exactly, and never otherwise, whatever its name says.
-    Without a `work:` header the file name decides: `<N>-…`, `issue-<N>` or a
-    whole slug part; or the `review:` value equals a plan slug. Issues are
-    tried before slugs; the newest match wins. Taking simply the newest
-    report put an unrelated item's findings into a delta bundle (observed
-    downstream), and so did a slug matched inside another word. No match
-    means no report, said so — not a stranger's."""
-    if not (root / REVIEWS).is_dir():
-        return None
-    reports = sorted(p for p in (root / REVIEWS).rglob("*.md") if p.is_file())
-    slugs = [s for s in dict.fromkeys(slugs) if s]
-    bare = {n for repo, n in issues if repo is None}
-
-    def stem(p: Path) -> str:
-        return _DATED.sub("", p.stem)
-
-    by_issue: list[Path] = []
-    by_slug: list[Path] = []
-    for p in reports:
-        head = _report_header(p)
-        works = head.get("work", [])
-        if works:
-            if any(_issue_key(w) in issues for w in works):
-                by_issue.append(p)
-            elif any(w in slugs for w in works):
-                by_slug.append(p)
-            continue  # another work's report, whatever its file name says
-        s = stem(p)
-        if any(s == str(n) or s.startswith(f"{n}-") or _slug_in_name(f"issue-{n}", s) for n in bare):
-            by_issue.append(p)
-        elif any(_slug_in_name(slug, s) for slug in slugs) or \
-                any(v in slugs for v in head.get("review", [])):
-            by_slug.append(p)
-    hits = by_issue or by_slug
-    return hits[-1] if hits else None
-
-
-_HEADER_KEY = re.compile(r"^\s*(?:[-*+]\s+)?[*_]*(review|audit|work)[*_]*\s*:\s*(\S+)", re.IGNORECASE)
-
-
-_MD_LINK = re.compile(r"\[([^\]]*)\]\([^)]*\)")
-
-
-def _report_header(path: Path) -> dict[str, list[str]]:
-    """The `review:`/`audit:`/`work:` values of a report's header block — the
-    lines from the top to the first blank one (the documented report format,
-    journal-state-plans.md; the report gate reads the same block). The report
-    names its work there, not necessarily in its file name (downstream: a
-    round-1 report named after the review, `work: #N` in the header, was not
-    found by the delta bundle)."""
-    try:
-        text = _review_gate._unfenced(path.read_text(encoding="utf-8", errors="replace"))
-    except OSError:
-        return {}
-    out: dict[str, list[str]] = {}
-    for line in text.splitlines():
-        if not line.strip():
-            break
-        m = _HEADER_KEY.match(line)
-        if m:
-            key = "review" if m.group(1).lower() == "audit" else m.group(1).lower()
-            # `[#9](url)` names #9, and `#9,` too — a link or a trailing
-            # comma must not unbind the report from its work (refutation)
-            value = _MD_LINK.sub(r"\1", m.group(2)).strip().rstrip(".,;:")
-            out.setdefault(key, []).append(_DATED.sub("", value))
-    return out
 
 
 class _ReviewedDiff(NamedTuple):
@@ -660,13 +568,17 @@ def review_size(root: Path, base_ref: str) -> tuple[int, int]:
     return files, lines
 
 
-def _prior_report(root: Path, plan_filter: str | None, plan_texts: dict[Path, str]):
-    """(report, its text, slugs, issues) of the previous round of this work."""
+def _report_keys(root: Path, plan_filter: str | None, plan_texts: dict[Path, str]):
+    """(slugs, issues) that name this work's report (`check_review.report_of`)."""
     slugs = [_DATED.sub("", plan_filter)] if plan_filter else []
     slugs += [_DATED.sub("", _review_gate.plan_stem(_rel(root, p))) for p in plan_texts]
     issues = list(dict.fromkeys(k for text in plan_texts.values() for k in _plan_issue_keys(text)))
-    report = _review_report_for(root, slugs, issues)
-    return report, (_read(root, str(report.relative_to(root))) if report else None), slugs, issues
+    return tuple(dict.fromkeys(s for s in slugs if s)), tuple(issues)
+
+
+def _since_head(root: Path, since: str) -> tuple[str, str]:
+    sha = (_git(root, "rev-parse", "--verify", "--quiet", f"{since}^{{commit}}") or "").strip()
+    return sha, (_git(root, "rev-parse", "HEAD") or "").strip()
 
 
 def _tier_at(root: Path, ref: str, plans: list[Path]) -> int:
@@ -687,17 +599,18 @@ def _delta_files(root: Path, since: str) -> list[str] | None:
     return None if entries is None else list(dict.fromkeys(path for _l, _s, path in entries))
 
 
-def _tier3_delta_refusal(root: Path, since: str, plan_texts: dict[Path, str]) -> str | None:
+def _tier3_delta_refusal(root: Path, since: str, plan_filter: str | None,
+                         plan_texts: dict[Path, str]) -> str | None:
     """Why this Tier 3 delta needs a full bundle — None when it may run. The
     gate's owner decides (`check_review.tier3_delta_problem`), never the worker."""
-    sha = (_git(root, "rev-parse", "--verify", "--quiet", f"{since}^{{commit}}") or "").strip()
-    head = (_git(root, "rev-parse", "HEAD") or "").strip()
+    sha, head = _since_head(root, since)
     ids = {i for p, t in plan_texts.items() if t for i in _plan_ids(_rel(root, p), t)}
     records = [f for _r, t in _review_gate.record_texts(root, ("journal",)) or []
                for _l, f in _review_gate.parse_review_lines(t)[0]]
     if not sha or not head:
         return _review_gate.tier3_delta_refusal(sha or since)
-    return _review_gate.tier3_delta_problem(root, records, ids, sha, head)
+    return _review_gate.tier3_delta_problem(root, records, ids, sha, head,
+                                            _report_keys(root, plan_filter, plan_texts))
 
 
 def build(root: Path, base: str | None, plan_filter: str | None = None,
@@ -736,7 +649,7 @@ def build(root: Path, base: str | None, plan_filter: str | None = None,
     # a fix round that lowers the tier is judged at the tier it started from
     if since and tier is not None and (tier >= 3 or _tier_at(root, since, plans) >= 3):
         # Tier 3: anchored on a full round, and no scope growth (verification-independence.md)
-        refusal = _tier3_delta_refusal(root, since, plan_texts)
+        refusal = _tier3_delta_refusal(root, since, plan_filter, plan_texts)
         if refusal:
             who = (f"bundled plan {next(_label(root, p) for p, t in plan_texts.items() if _declared_tier([t]) == tier)}"
                    if plan_tier == tier else f"--tier {declared_tier}")
@@ -847,9 +760,12 @@ def build(root: Path, base: str | None, plan_filter: str | None = None,
 
     if since:
         add("## Findings from the previous round\n")
-        report, report_text, slugs, issues = _prior_report(root, plan_filter, plan_texts)
-        if report and report_text:
-            add(f"### {report.relative_to(root)}\n{report_text}\n")
+        # the gate's rule: the report as committed, never one the fix brought
+        slugs, issues = _report_keys(root, plan_filter, plan_texts)
+        sha, head = _since_head(root, since)
+        found = _review_gate.prior_report(root, slugs, issues, sha, head) if sha and head else None
+        if found:
+            add(f"### {_shown(found[0])}\n{found[1]}\n")
         else:
             named = ", ".join([*dict.fromkeys(s for s in slugs if s),
                                *(f"{repo or ''}#{n}" for repo, n in issues)]) or "no plan or issue"
