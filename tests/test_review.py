@@ -201,6 +201,15 @@ def test_a_missing_review_names_both_ways_out(render, tmp_path):
     assert "review-waived: <reason> #<issue>" in line and "journal-state-plans.md" in line, line
 
 
+def test_a_missing_review_hint_names_a_tier_attest_accepts(render, tmp_path):
+    """A plan above the 0-3 scale is cleared at tier 3 — the hint must not suggest --tier 4."""
+    out = render(tmp_path, {"project_name": "demo"})
+    _archived_plan(out, "2026-07-04-feature.md", "# Plan\n\ntier: 4\n")
+    line = next(ln for ln in _run(out).stdout.splitlines()
+                if "2026-07-04-feature.md" in ln and "no clearing REVIEW" in ln)
+    assert "attest.py --work feature --tier 3 " in line and "tier>=3" in line and "--tier 4" not in line, line
+
+
 def test_presence_cleared_by_matching_review(render, tmp_path):
     out = render(tmp_path, {"project_name": "demo"})
     _archived_plan(out, "2026-07-04-feature.md", "# Plan\n\ntier: 2\n")
