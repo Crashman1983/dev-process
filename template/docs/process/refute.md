@@ -23,7 +23,7 @@ Scaled to the tier (`risk-tiers.md`):
 | 0 | none |
 | 1 | optional — worth one run when the change parses input or runs concurrently (persistence, paths and subprocesses already lift a change to Tier 2); record the line in the journal, there is no plan or bundle |
 | 2 | no separate run: the review itself works through the brief below — owner and second reader, fail-open, the catalog's edge cases, evidence — and answers it in its report. A separate run before the first review round only where the plan's threat and failure question names data loss or concurrency (gate code: next row); a fix round gets regression tests, not a new run |
-| 3, and gate code at any tier | before the first review round, and again after every fix round that changed code (the fix gets refuted, not the whole branch) |
+| 3, and gate code at any tier | before the first review round. A fix round gets regression tests and the delta review, not a new run — except a fix that changes gate code: that fix is refuted again (the fix, not the whole branch) |
 
 Plain documentation needs none.
 
@@ -161,8 +161,8 @@ touches gate code at any tier, and a plan carries no such line (a warning,
 not a block: the rule is observed before it gates). A Tier 2 plan that names
 data loss or concurrency is not detected — the reviewer checks its line. A
 Tier 2 bundle carries the brief's questions for the reviewer to answer. A
-delta re-review asks for a new line at Tier 3, and below it when the delta
-touches gate code — the table's fix-round run.
+delta re-review asks for a new line only when the delta touches gate code —
+the table's fix-round run; a Tier 3 fix round outside gate code asks none.
 It approximates gate code by path — `scripts/process/`, `.githooks/`,
 `.github/workflows/`, `Makefile`, `.pre-commit-config.yaml` — so a Makefile
 change to a product target warns too; say so in the plan (the warning stays,

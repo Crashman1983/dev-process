@@ -88,10 +88,11 @@ Round economy — a failed round must not re-pay the whole chain:
   (`--plan-review`).
 - **Cause before fix.** Before the next round, the fixer writes
   `ROOT-CAUSE work=<id> round=<r>: <cause> — <the test that failed before
-  the fix>` into the journal or the plan; `attest.py` refuses the next round
-  without it. The test comes first and fails on the old code. Downstream,
-  the largest source of extra rounds was a fix that created the next
-  blocker — the same rule patched three times.
+  the fix>` into the journal or the plan and checks it with `attest.py
+  --dry-run`; at the attest itself a missing or mislabelled line is a note,
+  never a refusal of a verdict already reached. The test comes first and
+  fails on the old code. Downstream, the largest source of extra rounds was
+  a fix that created the next blocker — the same rule patched three times.
 - **Attack before or within round 1, by tier.** Owner check, fail-open, edge cases, evidence —
   at Tier 2 inside the review, a separate refute run where the table asks for one
   (`docs/process/refute.md`: the table by tier, the brief, the `REFUTE` line). Downstream, a
@@ -113,9 +114,16 @@ Round economy — a failed round must not re-pay the whole chain:
   asks for a full bundle when the fix changed a contract, the architecture or
   the risk scope (`docs/process/verification-independence.md`, "What each
   round judges").
-- **The same spot blocks twice → a fresh session fixes it.** The
+- **The same spot blocks twice → a fresh session fixes it** and records
+  the increment-vs-rebuild call as a `DECISION` before the next round. The
   implementing session has twice missed what is wrong there; it is not the
   one to try a third time.
+- **Only what someone would hit blocks; three blocks reach the owner
+  once.** Plan text, report wording and tallies are nits; an all-minor
+  verdict is a pass with residuals. After the third blocking round the
+  owner decides once for the rest of the work
+  (`docs/process/verification-independence.md`, "What blocks, and when the
+  rounds stop").
 - **Size.** The bundle warns above 30 files / 1,500 lines
   (`PROCESS_REVIEW_MAX_FILES`/`_LINES`). Split before round 1 where the plan
   allows; works of 3,000+ lines ran five to seven rounds downstream.

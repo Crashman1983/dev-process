@@ -12,7 +12,10 @@ where the project has one (it sharpens the checklist, never weakens it). Record 
 `REVIEW work=… tier=… reviewer=… model=… independence=… verdict=… round=…`
 line in the journal (the core `review` gate parses it), and — for a
 findings-producing or Tier 3 review — `FINDING sev=… action=… issue=… gate=…` lines
-in a `.process-work/reviews/` report. To dispatch a fresh or cross-model
+in a `.process-work/reviews/` report. Block only for a defect someone would
+hit — plan or report wording is a nit, an all-minor verdict a pass with
+residuals (`docs/process/verification-independence.md`, "What blocks, and
+when the rounds stop"). To dispatch a fresh or cross-model
 reviewer, assemble its complete input with
 `python scripts/process/make_review_bundle.py -o /tmp/bundle.md`
 (`docs/process/verification-independence.md`). Push only your own branch,

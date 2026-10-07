@@ -432,6 +432,11 @@ TIER_TWO_BRIEF = (
 # round judges"); a template test pins these to that paragraph
 FIRST_ROUND_RULE = ("Name every blocker you find, not the first — a blocker held back is "
                     "a round.")
+BLOCK_RULE = ("Block only for a defect someone would hit — a user, a caller, the merge or an "
+              "attacker: in code, tests, a contract, security or the acceptance the plan claims. "
+              "Wording in the plan, a report, a tally or the PR text never blocks: record it as a "
+              "`nit`. A verdict whose findings are all minor or nit is a `pass` with residuals — "
+              "no new round.")
 DELTA_ROUND_RULE = ("Judge the fix diff and the open findings, and re-check the fixed failure "
                     "class everywhere it can recur, not only at the fixed spot. If the fix "
                     "changed a contract, the architecture or the risk scope, say so and ask "
@@ -537,7 +542,7 @@ def _tier_warning(by_tier: list[str], tiers: dict[str, int | None]) -> str:
     named = ", ".join(f"{label} (tier: {tiers[label]})" for label in by_tier[:3])
     return (f"**REFUTE WARNING:** {named}{' …' if len(by_tier) > 3 else ''} carries no "
             "`REFUTE work=<its id> round=<r>: …` line — from Tier 3 on, a fresh agent attacks "
-            "the change before its first review round and each delta round "
+            "the change before its first review round "
             "(`docs/process/refute.md`). Say in the verdict that it was not.\n")
 
 
@@ -731,6 +736,7 @@ def build(root: Path, base: str | None, plan_filter: str | None = None,
         add("**Delta re-review.** The diff below is limited to changes since "
             f"`{since}`. Previous findings and the full branch file surface are "
             "included so fixes are judged in their original scope. " + DELTA_ROUND_RULE + "\n")
+        add(BLOCK_RULE + "\n")
         add(f"**Scope rests on {_tier_provenance(root, tier, plan_tier, declared_tier, plans)}.** "
             "A Tier 3 delta needs a full round at its start and no scope growth; if that tier is "
             "wrong, this bundle is too narrow — say so instead of reviewing it.\n")
@@ -740,7 +746,7 @@ def build(root: Path, base: str | None, plan_filter: str | None = None,
         if pin:
             add(pin)
     else:
-        add(FIRST_ROUND_RULE + "\n")
+        add(FIRST_ROUND_RULE + " " + BLOCK_RULE + "\n")
     if tier == 2:
         add(TIER_TWO_BRIEF + "\n")
 
@@ -773,9 +779,12 @@ def build(root: Path, base: str | None, plan_filter: str | None = None,
             gate_files = None
         missing = _unrefuted(root, plan_texts, before) if plan_texts else ["(no plan under review)"]
         # by tier (`docs/process/refute.md`): from Tier 3 on, a refute before the
-        # first review round and again before each delta round (Tier 2 answers
-        # the brief inside the review)
-        by_tier = [label for label in missing if (tiers.get(label) or 0) >= REFUTE_RUN_TIER]
+        # first review round; a fix round outside gate code gets regression tests
+        # and the delta review, not another run (downstream, a refute after every
+        # fix round turned each Tier 3 round into two). Tier 2 answers the brief
+        # inside the review.
+        by_tier = [] if since else [label for label in missing
+                                    if (tiers.get(label) or 0) >= REFUTE_RUN_TIER]
         if gate_files is None:
             add("*(REFUTE check unavailable: git could not list the branch's files — a shallow clone "
                 "or no merge base; check by hand whether gate code changed)*\n")
