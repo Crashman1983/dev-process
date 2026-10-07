@@ -21,6 +21,7 @@ RETIRED = [
     "scripts/process/check_security_floor.py",
     "scripts/process/trace.py",
     "scripts/process/check_telemetry.py",
+    "scripts/process/check_ac_text_drift.py",
     "ARCHITECTURE-OVERVIEW.md",
 ]
 

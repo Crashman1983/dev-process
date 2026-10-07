@@ -34,9 +34,9 @@ entries diff and merge independently):
 - **story** — one sentence in EARS form: *As a `<role>`, when `<trigger>`,
   the system shall `<response>`.* Wording is graded by humans, not the gate.
 - **acceptance** — a non-empty list of `{id, text}`; each `text` is a
-  gradeable, testable statement. The `id` is a naming convention for
-  referencing criteria (plans, GRADE lines, the spec's `AC-n` lines — the
-  `ac-text-drift` gate matches them by it); this gate validates `text`.
+  gradeable, testable statement. The `id` is how everything else refers to
+  the criterion (plans, tasks, test names, review findings: `AC-n`); this
+  gate validates `text`.
 - **tests** — a **non-empty** list of paths (optionally with a `::node`
   selector) to the tests that prove the acceptance. An inventory entry
   without a resolvable test is a claim, not an inventory item.
@@ -62,8 +62,14 @@ but ≥5 mapped tests likely under-describes its tested behaviour). Whether a
 test *semantically* proves its criterion is review judgment
 (`review-checklist.md`, Tests prove acceptance) — the gate never fakes that.
 
-**One wording per criterion.** The `ac-text-drift` gate compares each
-criterion's text in the inventory entry with the same `AC-n` line in the spec
-(`specs/<dir>/spec.md`), bound through a plan that names both the spec and
-the issue the entry carries. Different wording fails: the test proves one
-sentence, the inventory would promise another. Amend both in the same change.
+**One owner per criterion.** A criterion's wording lives in one place at a
+time. While the work is in flight, the spec owns it (`specs/<dir>/spec.md`,
+or the issue where no spec is written). The change that delivers the
+capability writes the inventory entry from the spec's final `AC-n` lines,
+as its last step before the review bundle; from the merge on, the inventory
+owns the wording and the spec is pruned (the speckit merge ritual, where
+installed) or is history. Plans, tasks, tests and reports refer to a
+criterion by its id and never restate its text, so there is no second copy
+to drift. A later change to a shipped criterion edits the inventory entry.
+Whether the entry matches the spec it was promoted from is checked by the
+review, which sees both in the same diff (`review-checklist.md`).
