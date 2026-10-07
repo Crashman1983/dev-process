@@ -22,18 +22,23 @@ produced from the artifact it names.
 
 The round is counted, not claimed: round = 1 + the blocking REVIEW lines
 already recorded for this work. A re-check after a pass, a rebase or a
-"short look" keeps the round — only a block starts a new one — and a block
-that was never attested cannot be skipped over (observed downstream: rounds
-numbered 6 with one line in the journal, re-checks counted as rounds, plan
-and code rounds on one counter). Plan reviews count apart (`--plan-review`
-records work=<id>-plan).
+"short look" keeps the round — only a block starts a new one (observed
+downstream: rounds numbered 6 with one line in the journal, re-checks counted
+as rounds, plan and code rounds on one counter). Plan reviews count apart
+(`--plan-review` records work=<id>-plan). A claimed `--round` the count does
+not support is corrected to the count, with a note — never refused.
 
 Before any round after a block, each block's fix names its cause: a line
 `ROOT-CAUSE work=<id> round=<r>: <cause> — <the test that failed before the fix>`
 in the journal or the plan (a Spec Kit plan too). A fix that names no cause is a patch, and
-patches on patches were the largest source of extra rounds downstream.
-`--exception TEXT` overrides either rule; the reason is written above the
-line as `REVIEW-EXCEPTION`, where it can be counted.
+patches on patches were the largest source of extra rounds downstream. A
+missing cause is a note here, not a refusal: by the time a verdict is
+attested the review has run, and refusing its record bought no cause — only a
+mechanical round (downstream: a pass of two families refused over a cause
+labelled round=6 instead of 5). The duty sits where the fix is made: the
+execute session's `--dry-run` must name no missing cause before it reports.
+`--exception TEXT` records an owner's override as `REVIEW-EXCEPTION`, where it
+can be counted.
 
 Usage:
   attest.py --work ID --tier N --reviewer R --model M --independence a,b
@@ -229,7 +234,9 @@ def round_ids(args, root: Path) -> set[str]:
 
 
 def round_problems(args, root: Path, journal_dir: Path) -> tuple[int, list[str]]:
-    """(the counted round, what is wrong with the claimed one)."""
+    """(the round to write, notes on the claimed one). Notes never refuse: round
+    and cause are bookkeeping about a review that already ran — a refusal there
+    cost a whole mechanical round downstream and caught nothing."""
     texts = _texts(root, journal_dir)
     mine = {work_key(w) for w in round_ids(args, root)}
     # distinct rounds, not lines: several reviewers (lenses) of one round each
@@ -239,29 +246,28 @@ def round_problems(args, root: Path, journal_dir: Path) -> tuple[int, list[str]]
                      if work_key(f["work"]) in mine and f["verdict"] == "block"})
     counted = 1 + len(blocks)
     last = blocks[-1] if blocks else None
-    problems: list[str] = []
+    notes: list[str] = []
     claimed = str(args.round_) if args.round_ is not None else str(counted)
     # the next round, or another reviewer (lens) of the round that just blocked
     allowed = {str(counted)} | ({str(last)} if last is not None else set())
+    written = int(claimed) if claimed in allowed else counted
     if claimed not in allowed:
-        problems.append(
+        notes.append(
             f"round {args.round_} claimed, but {len(blocks)} blocking round(s) are recorded for "
-            f"work={args.work} — this is round {counted}"
-            + (f" (or {last}, for another reviewer of that round)" if last is not None else "")
-            + ". A re-check after a pass or a rebase keeps the round; a block that was never "
-            "attested is attested first (its own --base/--head); omit --round to use the count")
-    target = int(claimed) if claimed.isdigit() else counted
+            f"work={args.work} — written as round {counted}"
+            + (f" (pass --round {last} for another reviewer of that round)" if last is not None else "")
+            + "; a re-check after a pass or a rebase keeps the round")
     # a cause is read as rendered: a quoted example or a commented line is no cause
     causes = {int(m.group("round")) for t in texts for m in ROOT_CAUSE.finditer(readable(t))
               if work_key(m.group("work")) in mine}
-    missing = [r for r in blocks if r < target and r not in causes]
+    missing = [r for r in blocks if r < written and r not in causes]
     if missing:
-        problems.append(
+        notes.append(
             "no root cause for the fix of blocking round(s) " + ", ".join(map(str, missing))
-            + f" — before the next round write `ROOT-CAUSE work={args.work} round=<r>: <cause> — <the test "
-            "that failed before the fix>` into the journal or the plan (docs/process/review-checklist.md, "
+            + f" — record `ROOT-CAUSE work={args.work} round=<r>: <cause> — <the test "
+            "that failed before the fix>` in the journal or the plan (docs/process/review-checklist.md, "
             "round economy)")
-    return counted, problems
+    return written, notes
 
 
 def build_line(args, root: Path, journal_dir: Path | None = None) -> tuple[str, list[str]]:
@@ -326,10 +332,11 @@ def main() -> int:
     ap.add_argument("--independence", required=True)
     ap.add_argument("--verdict", required=True)
     ap.add_argument("--round", default=None, dest="round_",
-                    help="optional: checked against the count of recorded blocks for this work")
+                    help="optional: another reviewer of the last blocked round; a round the count of "
+                         "recorded blocks does not support is written as the counted one, with a note")
     ap.add_argument("--plan-review", action="store_true",
                     help="a review of the plan, not the code: counted apart as work=<id>-plan")
-    ap.add_argument("--exception", help="override the round/root-cause rules; the reason is recorded")
+    ap.add_argument("--exception", help="an owner's override, recorded as REVIEW-EXCEPTION with what it overrides")
     ap.add_argument("--bundle")
     ap.add_argument("--base")
     ap.add_argument("--head")
@@ -351,17 +358,20 @@ def main() -> int:
         # always: a plan whose own id ends in `-plan` would otherwise have its
         # plan review clear its code (refutation)
         args.work += "-plan"
-    counted, round_issues = round_problems(args, root, journal_dir)
-    round_issues += work_problems(args, root)  # an owner exception overrides it too
+    counted, round_notes = round_problems(args, root, journal_dir)
+    round_issues = work_problems(args, root)  # an owner exception overrides it too
     exception_note = ""
     if args.exception:
         # always written: an owner exception that trips no rule here (a round
         # beyond the cap) must be countable too, never lost in silence
-        overrides = "; ".join(round_issues) if round_issues else "no attest rule tripped"
-        exception_note = (f"REVIEW-EXCEPTION work={args.work} round={args.round_ or counted}: "
+        named = round_issues + round_notes
+        overrides = "; ".join(named) if named else "no attest rule tripped"
+        exception_note = (f"REVIEW-EXCEPTION work={args.work} round={counted}: "
                           f"{args.exception} (overrides: {overrides})")
-        round_issues = []
-    args.round_ = counted if args.round_ is None else args.round_
+        round_issues = round_notes = []
+    for note in round_notes:
+        print(f"attest: note — {note}", file=sys.stderr)
+    args.round_ = counted
     line, problems = build_line(args, root, journal_dir)
     problems = round_issues + problems + archive_problems(args, root)
     if args.note and any(ln.lstrip().startswith("REVIEW") for ln in args.note.splitlines()):
