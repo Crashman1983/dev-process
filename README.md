@@ -16,7 +16,7 @@ work under: a program checks the rules, the effort follows the risk, nobody
 signs off their own work, and memory lives in files instead of the context
 window.
 
-> **Status:** `v2.52.0` — sub-projects SP1–SP75. History (German): [`CHANGELOG.md`](CHANGELOG.md); releases are cut with `tools/release.py` (`--check` lists what is not at the version).
+> **Status:** `v2.53.0` — sub-projects SP1–SP75. History (German): [`CHANGELOG.md`](CHANGELOG.md); releases are cut with `tools/release.py` (`--check` lists what is not at the version).
 
 ## Where to start
 
