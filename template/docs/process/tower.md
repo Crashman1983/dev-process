@@ -111,7 +111,9 @@ naming the branch, when the text still has not gone. `dispatch.py stop <branch>`
 only when the recorded process is still the recorded one (pid and start
 time), and refuses while the worktree has uncommitted or untracked work
 (a plan not committed dies with the process). `max_workers` caps live
-sessions per host; a held lane counts as no free CPU: a held `full` lane blocks only execute, a held `scoped` (or unknown) lane blocks every phase, and a remote phase sees neither cap nor lane. A local start
+sessions per host (one whose phase is over by its own final report — a
+plan's `planned`, a review's verdict — holds no slot; one that cannot be
+told does); a held lane counts as no free CPU: a held `full` lane blocks only execute, a held `scoped` (or unknown) lane blocks every phase, and a remote phase sees neither cap nor lane. A local start
 also refuses while the filesystem holding the worktrees is at or above
 90% use (`PROCESS_DISK_LIMIT_PCT`), naming the usage and
 `python3 scripts/process/tidy.py --apply` — each worktree carries its own

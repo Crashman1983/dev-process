@@ -1397,8 +1397,14 @@ def start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str |
         print(f"dispatch: {branch} already has a live session — stop it first", file=sys.stderr)
         return 3
     # a remote phase puts its load on another host: neither this host's cap nor its lanes apply
+    # a session whose phase is over (its own final report) holds no slot; one
+    # that cannot be told (None) does
+    busy = live
     if not remote and len(live) >= cap:
-        print(f"dispatch: {len(live)} live sessions, policy max_workers={cap} — not starting", file=sys.stderr)
+        reports = _report.read_reports(root)
+        busy = [r for r in live if phase_over(root, r, session_report(r, reports), local=True) is not True]
+    if not remote and len(busy) >= cap:
+        print(f"dispatch: {len(busy)} live sessions, policy max_workers={cap} — not starting", file=sys.stderr)
         return 3
     refusal = None if remote else lane_verdict(held_lanes(root), phase)
     if refusal:
