@@ -31,7 +31,7 @@ The process was built and improved over many iterations in live operation; it ha
 
 ### The essentials in five sentences
 
-1. **A program checks the rules, so nobody has to keep them in mind.** Fifteen automatic checks (“Gates”) run before every Merge; whatever fails is not merged.
+1. **A program checks the rules, so nobody has to keep them in mind.** Twelve automatic checks (“Gates”) run before every Merge; whatever fails is not merged.
 1. **Risk sets the effort.** Four risk tiers – Tier 0 to 3 – decide whether a change may be merged directly or needs a plan, a refutation review (targeted search for faults) and independent review; at Tier 3 a refutation runs before the first review round, and a fix of gate code is refuted again.
 1. **Review independence scales with risk.** Tier 0–1 use a self-check; from Tier 2 on, an uninvolved instance (a separate agent session) reviews, and its verdict applies only to exactly the code it reviewed. Verified pure template updates use the provenance check described in chapter 9.
 1. **All knowledge lives in files.** Plans, decisions and journals are in the repository and are automatically shown to every agent again as soon as its memory has been shortened.
@@ -46,7 +46,7 @@ The process was built and improved over many iterations in live operation; it ha
 | **Human (Owner)** | prioritises, decides, approves designs, reviews a sample every week, evolves the rules |
 | **Coordinator** | gets the overview, assigns work items, starts and stops workers, decides workers' questions or passes them on, triggers the Merge – writes and reviews no code itself |
 | **Workers, refuters and reviewers** | a separate session on its own Branch for each work item and phase; at Tier 2 the reviewer attacks the change with the refuter's brief, at Tier 3 and for gate code a separate refuter does, its only job finding faults; the reviewer is always a different instance from the worker |
-| **Gates** | fifteen check programs before every Merge: rules intact, decisions taken, attestation present and matching the code, design contracts and acceptance criteria consistent, licences allowed, documentation valid |
+| **Gates** | twelve check programs before every Merge: rules intact, decisions taken, attestation present and matching the code, design contracts kept, every listed capability backed by a test, licences allowed, documentation valid |
 | **Repository** | rule kernel, plans with decision lists, journal with attestations, situation table, contracts, metrics – the single source every layer reads from |
 
 The process ships as a template (dev-process). From it you get a fully set-up repository: the startup file and phase commands for the chosen Harness (GitHub Copilot, Claude Code or a neutral AGENTS.md), the Gates, and GitHub Actions workflows for Gates, Owner-Digest and metrics. A repository pulls later versions of the template with one command; project-specific files stay untouched.
@@ -86,7 +86,7 @@ The process ships as a template (dev-process). From it you get a fully set-up re
 
 **Measurement.** A cockpit (an analysis script in the repository) reads the journal, the Git history and reports; every number states how much weight it carries. Four metrics matter:
 
-- **Review rounds to approval.** Target: at most two for 90 % of work items. A program counts the round, not the reviewer. After two failed rounds the work goes back to the plan; if the same spot blocks twice, a fresh session takes over. A further round is an exception with a recorded reason.
+- **Review rounds to approval.** Target: at most two for 90 % of work items. A program counts the round, not the reviewer. Only a real fault blocks, wording never does. If the same spot blocks twice, the fixing session decides between patching and rebuilding; after the third blocking round the Owner decides once: merge with named leftovers, cut scope, or rebuild.
 - **Correction rate.** Share of features that had to be corrected within seven days; only the trend counts.
 - **Correction hotspots.** Spots that are corrected again and again – Rule 6 in numbers.
 - **Review rounds per model.** Shows which model works well in which phase.

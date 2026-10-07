@@ -55,7 +55,7 @@ stellt Laufzeit und Abhaengigkeiten isoliert bereit.
 |---|---:|---|
 | `uv` | aktuelle stabile Version | startet Gates und portable Helfer samt isolierter Python-Abhaengigkeiten |
 | `git` | aktuelle stabile Version | lokale Hooks, normale Projektarbeit |
-| `gh` | aktuelle stabile Version | optional fuer best-effort GitHub-Issue-Existenzpruefung und die Tempo-Familie des KPI-Cockpits (`telemetry`) |
+| `gh` | aktuelle stabile Version | optional fuer best-effort GitHub-Issue-Existenzpruefung |
 | Architekturlinter | projektabhaengig | optional fuer `arch-onboarding` best-effort Layering-Pruefungen |
 
 Die plattformneutralen Befehle sind:
@@ -94,7 +94,7 @@ Das Standard-Setup rendert alle Module; es gibt keinen Modulschalter.
 | `feature-registry` | Python-Stdlib reicht |
 | `github-issues` | `PyYAML` (liest `.copier-answers.yml`); optional `gh` fuer best-effort Remote-Checks |
 | `git-hooks` | keine zusaetzlichen Werkzeuge ausser dem Core-Vertrag |
-| `telemetry` | Python-Stdlib fuer Gate und Cockpit-Kern; optional `gh` (Tempo-Familie) und `git` (CFR-Familie) |
+| `telemetry` | kein Gate; das KPI-Cockpit braucht `git` (`cfr`, `clusters`, `share`) und fuer `rounds` `PyYAML` (ueber `uv run`) |
 | `design-contracts` | Python-Stdlib reicht; die Referenz-Boards erzeugt das Projekt mit eigenen Werkzeugen |
 | `sbom` | `git` und Python-Stdlib; SBOM-Erzeugung braucht einen CycloneDX-Generator im Build (z. B. Maven-Plugin, `@cyclonedx/cyclonedx-npm`, `syft`) |
 

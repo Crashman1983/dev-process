@@ -30,7 +30,7 @@ window.
 
 ## The essentials
 
-- **Gates instead of memory.** Before every merge, 15 automatic checks run.
+- **Gates instead of memory.** Before every merge, 12 automatic checks run.
   What fails does not merge. The set was cut to what demonstrably carries
   weight in the reference project.
 - **Risk sets the effort.** Tier 0 to 3 decide whether a change merges

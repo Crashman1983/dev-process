@@ -52,7 +52,7 @@ GATES = {
     "design-contracts": ("design_contracts", [sys.executable, "scripts/process/check_design_contracts.py", "."]),
 }
 # modules without a gate of their own: git_hooks installs hooks, telemetry
-# ships the read-only KPI cockpit (its GRADE gate was retired in v2.54.0)
+# ships the read-only KPI cockpit (its GRADE gate is retired)
 KNOWN_MODULES = ({key for key, _command in GATES.values() if key is not None}
                  | {"git_hooks", "telemetry"})
 # modules the template no longer ships (v2.27.0 KISS pass): an older manifest

@@ -29,7 +29,7 @@ eigene Arbeit ab, und das Gedächtnis liegt in Dateien statt im Kontext.
 
 ## Das Wichtigste
 
-- **Gates statt Erinnerung.** Vor jedem Merge laufen 15 automatische
+- **Gates statt Erinnerung.** Vor jedem Merge laufen 12 automatische
   Prüfungen. Was nicht besteht, wird nicht gemergt. Der Umfang ist auf das
   reduziert, was im Referenzprojekt nachweislich trägt.
 - **Risiko bestimmt den Aufwand.** Tier 0 bis 3 legen fest, ob eine Änderung
