@@ -646,6 +646,14 @@ def test_template_findings_never_drop_errors_before_the_update(tmp_path):
         'template verification failed: cannot read base']
 
 
+def test_template_findings_with_errors_name_only_the_errors(tmp_path):
+    """#170: an update whose verification failed asked for an acknowledgement too."""
+    report = dict(base='x', head='y', update=True, identical=[], project_delta=['a.md'],
+                  migration=True, errors=['render failed'], release_notes='')
+    assert load('check_review').template_review_findings(tmp_path, report, []) == [
+        'template verification failed: render failed']
+
+
 def test_gate_reports_verification_errors_without_an_update(update, monkeypatch):
     root, _, _, _ = update
     review = load('check_review')

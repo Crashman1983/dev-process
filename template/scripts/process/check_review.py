@@ -2593,8 +2593,9 @@ def template_review_findings(root: Path, update: dict, passes: list[dict],
                              *, tip: str = "HEAD") -> list[str]:
     """One owner for the update's review duty, used by gate, finish and train."""
     findings = [f'template verification failed: {e}' for e in update['errors']]
-    # a failure before the update is established still withdraws everything
-    if not update['update']:
+    # a failure withdraws everything: the errors are the finding, and an
+    # unverified update has nothing to acknowledge or review yet (#170)
+    if findings or not update['update']:
         return findings
     if not update.get('acknowledged'):
         findings.append('template update: owner/steward must acknowledge the behavior notes '
