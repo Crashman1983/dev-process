@@ -7,12 +7,15 @@ those rules, and a long session may have compacted them out. Then read
 `docs/process/risk-tiers.md`. Check completeness, correctness, and rule
 adherence against the plan or spec, working through
 `docs/process/review-checklist.md`, plus `review.local.md` in `docs/process/`
-where the project has one (it sharpens the checklist, never weakens it). Record the result in the exact grammar
-(`journal-state-plans.md`): a
-`REVIEW work=… tier=… reviewer=… model=… independence=… verdict=… round=…`
-line in the journal (the core `review` gate parses it), and — for a
-findings-producing or Tier 3 review — `FINDING sev=… action=… issue=… gate=…` lines
-in a `.process-work/reviews/` report. Block only for a defect someone would
+where the project has one (it sharpens the checklist, never weakens it). Record the result with the
+writer, never by hand: `python scripts/process/attest.py --work <id> --tier <n>
+--reviewer <id> --model <family> --independence … --verdict pass|block
+--bundle <bundle>` takes the reviewed range (base, head) from the bundle and
+appends the `REVIEW` line the core `review` gate parses
+(`journal-state-plans.md`). A findings-producing or Tier 3 review also writes
+`FINDING sev=… action=… issue=… gate=…` lines in a `.process-work/reviews/`
+report; report and line are one commit (`attest.py … --commit --with
+<report>`). Block only for a defect someone would
 hit — plan or report wording is a nit, an all-minor verdict a pass with
 residuals (`docs/process/verification-independence.md`, "What blocks, and
 when the rounds stop"). To dispatch a fresh or cross-model
