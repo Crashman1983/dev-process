@@ -155,6 +155,33 @@ def test_hook_doctor_tracked_githooks_need_hooks_path(render, tmp_path):
     assert gi.hook_wiring_findings(out) == ([], [])
 
 
+def test_hook_doctor_accepts_the_main_checkouts_githooks_from_a_worktree(render, tmp_path):
+    """Kenni #2412: a linked worktree shares the main checkout's config; an
+    absolute core.hooksPath at the main checkout's .githooks was hard."""
+    out = render(tmp_path / "main", {"project_name": "demo"})
+    _git(out, "init", "-q", "-b", "main")
+    _git(out, "config", "user.email", "t@example.com")
+    _git(out, "config", "user.name", "Test")
+    (out / ".githooks").mkdir()
+    (out / ".githooks" / "pre-push").write_text("#!/bin/sh\nexit 0\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "base")
+    wt = tmp_path / "wt"
+    _git(out, "worktree", "add", "-q", "-b", "b1", str(wt))
+    _git(out, "config", "core.hooksPath", str(out / ".githooks"))
+    gi = _load(wt)
+    assert gi.hook_wiring_findings(wt) == ([], [])
+    assert gi.hook_wiring_findings(out) == ([], [])  # its own, absolute
+    (wt / ".githooks" / "pre-push").write_text("#!/bin/sh\nexit 1\n")
+    hard, soft = gi.hook_wiring_findings(wt)
+    assert not hard and soft and "differ from this worktree" in soft[0], (hard, soft)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    _git(out, "config", "core.hooksPath", str(elsewhere))
+    hard, _soft = gi.hook_wiring_findings(wt)
+    assert hard and "git never reads them" in hard[0], hard
+
+
 def test_hook_doctor_stays_quiet_in_ci(render, tmp_path, monkeypatch):
     # a CI checkout installs no local hooks and needs none: the job is the gate
     out = _repo(render, tmp_path)
