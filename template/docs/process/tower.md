@@ -139,7 +139,11 @@ review is a local cell, e.g. `{"model": "<codex model>", "effort": "xhigh",
 `cross-model`; the default Opus review is `single-family`
 (`verification-independence.md`). The model has one owner: `start`
 refuses while the phase's command file declares `model:` or `effort:` in
-its frontmatter, and where the policy names `transcripts` the tower
+its frontmatter — read as the worker sees it (an existing worktree's
+working copy, else the branch, else the integration ref), and refused too
+when that copy is unreadable or its frontmatter mentions model/effort in
+any form but a plain top-level `key: value` line (`model: inherit` is
+fine) — and where the policy names `transcripts` the tower
 reports `model-drift` when a dispatched session's own assistant messages
 show another model than the dispatched one.
 
