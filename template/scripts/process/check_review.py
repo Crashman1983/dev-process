@@ -806,9 +806,12 @@ def _full_rounds_split(root: Path, records: list[dict], tip: str
     """(invalid, outside, merged, unbounded): the full rounds whose head the
     push of `tip` carries unmerged, judged against the fork point; the full
     rounds whose head it does not carry, unjudged; the bounding integration
-    SHAs; whether full rounds went unjudged because no integration ref resolves."""
-    full = [r for r in records
-            if r.get("mode", "full") == "full" and r.get("base") and r.get("head")]
+    SHAs; whether full rounds went unjudged because no integration ref resolves.
+    Every record with a range is a full round since v2.53, `mode=delta` or not:
+    a REVIEW binds the whole branch, and a delta line the push carries would
+    otherwise clear a plan on a slice (refutation). Merged ones stand as main
+    judged them."""
+    full = [r for r in records if r.get("base") and r.get("head")]
     tip_sha = _commit_sha(root, tip) if full else None
     if tip_sha is None:
         return {}, [], (), False
@@ -1157,8 +1160,8 @@ def full_round_base_problem(root: Path, base: str, head: str) -> str | None:
     if resolved.decode(errors="replace") != fork:
         return (f"base {base[:12]} is not the fork point {fork[:12]} of {head[:12]} from {ref} "
                 f"— a full round reviews the whole branch from the integration branch (Tier 3 "
-                f"needs one); a stacked branch rebases onto {ref} first, a slice is reviewed "
-                f"as a delta round (--since)")
+                f"needs one); a stacked branch rebases onto {ref} first — a review always "
+                f"covers the whole branch from its fork point")
     return None
 
 
@@ -1614,8 +1617,8 @@ def decide(h: History, head: str) -> tuple[str, str]:
         shown = sorted(h.late)
         return "stale", (f"code changed after the reviewed head ({', '.join(shown[:4])}"
                          f"{', …' if len(shown) > 4 else ''}) — the review does not cover it; "
-                         f"re-review the delta (`make_review_bundle.py --since <head>`; at Tier 3 "
-                         f"only from a full round's head) and attest again")
+                         f"re-review (`make_review_bundle.py --since <head>` shows the reviewer "
+                         f"the delta) and attest the new head")
     if h.fellow:
         merge, paths = h.fellow[0]
         shown = sorted(paths)
