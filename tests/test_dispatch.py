@@ -1497,7 +1497,7 @@ def test_the_tower_reports_model_drift_only_with_transcripts(render, tmp_path):
     ("---\nmodel: inherit\neffort: 'inherit'\n---\nbody", []),
     ("# Title\n\n---\nmodel: haiku\n---\n", []),
     ("---\nmodel: haiku\n", []),
-    ("\ufeff---\n\"model\": x\n---\n", ["model"]),
+    ("\ufeff---\n\"model\": x\n---\n", None),
     ("---\r\neffort: low\r\n---\r\n", ["effort"]),
     ("---\nModel: x\ndescription: plan\n---\n", []),
     ("---\nmodel: inherit # the policy owns it\n---\n", []),
@@ -1513,9 +1513,26 @@ def test_the_tower_reports_model_drift_only_with_transcripts(render, tmp_path):
     ("---\ndescription: x\n...\nmodel: haiku\n---\n", None),
     ("---\ndescription: model: haiku\n---\n", None),
     ("---\nmodel: \"haiku\n---\n", None),
+    # refute of 64628bb..7ebd8ba: the region Claude Code reads (opener `^---\s*\n`
+    # in JavaScript's whitespace class, the end at the first `---`) is the one decided
+    ("---\xa0\nmodel: opus\n---\n", None),
+    ("---\ufeff\nmodel: opus\n---\n", None),
+    ("---\nmodel: opus\n----\n", None),
+    ("---\nmodel: opus\n--- end\n", None),
+    ("---\nmodel: opus\ndescription: x---\nbody\n", None),
+    ("---\nmodel: inherit\n  opus\n---\n", ["model"]),
+    ("---\nmodel:\n---\n", []),
+    ("---\nallowed-tools:\n- Bash\n- Read\ndescription: x\n---\n", []),
+    ("---\nmodel:\n- opus\n---\n", None),
+    ("---\nmodel: inherit\nmodel: opus\n---\n", None),
+    ("\ufeff---\ndescription: x\n---\n", []),
+    ("\ufeff---\r\nmodel: opus\r\n---\r\n", None),
 ], ids=["inherit", "horizontal-rule", "unclosed", "bom-quoted-key", "crlf", "other-case",
         "inherit-comment", "crlf-comment", "quoted-inherit", "quoted-comment", "nested", "flow-mapping",
-        "no-space", "flow-sequence", "tab-indent", "document-marker", "in-a-value", "unclosed-quote"])
+        "no-space", "flow-sequence", "tab-indent", "document-marker", "in-a-value", "unclosed-quote",
+        "nbsp-opener", "bom-in-opener", "four-dash-close", "close-with-text", "close-inline",
+        "inherit-continued", "empty-model", "block-list", "model-list", "duplicate", "bom-plain",
+        "bom-crlf-model"])
 def test_only_a_real_frontmatter_override_counts(render, tmp_path, text, keys):
     """`inherit` defers to the dispatched model, and a `---` rule in a body
     is no header — refusing those would block a correct start; a header the
@@ -1558,7 +1575,13 @@ def test_a_header_that_cannot_be_decided_refuses_the_start(render, tmp_path):
     cmd.write_text("---\n{model: haiku}\n---\n" + cmd.read_text())
     _git(out, "commit", "-qam", "flow")
     r = _dispatch(out, "start", "--issue", "3", "--phase", "plan", "--tier", "2", "--dry-run")
-    assert r.returncode == 3 and "cannot be parsed strictly" in r.stderr, r.stderr
+    assert r.returncode == 3 and "cannot be decided strictly" in r.stderr, r.stderr
+    assert "flow-style" in r.stderr
+    # a refusal names what could not be decided — no claim of a model mention
+    cmd.write_text("---\ndescription: a --- b\n---\nbody\n")
+    _git(out, "commit", "-qam", "ambiguous end")
+    r = _dispatch(out, "start", "--issue", "3", "--phase", "plan", "--tier", "2", "--dry-run")
+    assert r.returncode == 3 and "end is ambiguous" in r.stderr and "mentions model" not in r.stderr, r.stderr
 
 
 def test_an_existing_worktree_is_checked_on_disk(render, tmp_path):

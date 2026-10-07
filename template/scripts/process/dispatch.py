@@ -320,23 +320,41 @@ def effort_refusal(policy: dict, phase: str, cell: Cell) -> str | None:
 # the phase command file of the harness a command starts (by its command
 # word): its frontmatter `model:`/`effort:` would override the dispatched cell
 PHASE_FILES = {"claude": ".claude/commands/{phase}.md", "copilot": ".github/prompts/{phase}.prompt.md"}
-# a strict reading of the frontmatter, without a YAML dependency: a top-level
-# `key: value` block mapping is decided; anything else that mentions
-# model/effort is "cannot decide" (None) and refuses the start
+# a strict reading of the frontmatter, without a YAML dependency. The region
+# is the one Claude Code reads (an opener `^---\s*\n` in JavaScript's
+# whitespace class; it ends at the first `---` anywhere; a leading BOM is no
+# header); a `---` line must close it at the same place, else the header is
+# ambiguous. A top-level `key: value` block mapping is decided; anything else
+# that could carry model/effort is "cannot decide" (None) and refuses the start
+_JS_SPACE = ("\t\n\v\f\r \xa0 " + "".join(chr(c) for c in range(0x2000, 0x200B))
+             + "    　﻿")
+_JS_OPEN = re.compile("---[" + re.escape(_JS_SPACE) + "]*\n")
 _TOP_KEY = re.compile(r"""(?:"([^"]*)"|'([^']*)'|([A-Za-z0-9_][A-Za-z0-9_.\- ]*?))[ \t]*:(?:[ \t]+(.*))?""")
 _KEY_TOKEN = re.compile(r"""(?<![\w-])["']?(?:model|effort)["']?[ \t]*:""")
+_MENTION = re.compile(r"(?<![\w-])(?:model|effort)(?![\w-])")
+_OVERRIDE_KEYS = ("model", "effort")
 
 
-def _frontmatter_lines(text: str) -> list[str] | None:
-    """The lines between an opening `---` (optional BOM) and the first
-    closing `---` line; None when the file has no such header (a horizontal
-    rule in a body is none)."""
-    lines = text.removeprefix("﻿").splitlines()
-    if not lines or lines[0].rstrip(" \t") != "---":
+def _harness_region(text: str) -> str | None:
+    """The frontmatter as Claude Code reads it: after `---` and JavaScript
+    whitespace up to a newline, until the first `---` substring."""
+    m = _JS_OPEN.match(text)
+    if not m:
         return None
-    for i, line in enumerate(lines[1:], 1):
-        if line.rstrip(" \t") == "---":
-            return lines[1:i]
+    end = text.find("---", m.end())
+    return None if end < 0 else text[m.end():end]
+
+
+def _line_region(text: str) -> str | None:
+    """The text between a first line `---` and the next `---` line."""
+    lines = text.split("\n")
+    if lines[0].rstrip(" \t\r") != "---":
+        return None
+    start = pos = len(lines[0]) + 1
+    for line in lines[1:]:
+        if line.rstrip(" \t\r") == "---":
+            return text[start:pos]
+        pos += len(line) + 1
     return None
 
 
@@ -355,37 +373,73 @@ def _plain_value(raw: str) -> str | None:
     return re.split(r"[ \t]#", raw, maxsplit=1)[0].strip(" \t")
 
 
-def frontmatter_overrides(text: str) -> list[str] | None:
-    """The `model:`/`effort:` keys a command file's frontmatter sets to
-    something other than `inherit`; [] without frontmatter (it opens with
-    `---` and a `---` line closes it). None means "cannot decide": the header
-    is no plain top-level `key: value` mapping (flow style, a document
-    marker, tab indentation, another top-level form) or mentions model/effort
-    anywhere but as such a key — the caller refuses."""
-    body = _frontmatter_lines(text)
-    if body is None:
-        return []
-    keys: set[str] = set()
-    for line in body:
+def _mapping_overrides(region: str) -> tuple[list[str] | None, str]:
+    """(override keys, "") of a plain top-level block mapping; (None, why)
+    when it is none. A key's indented continuation lines belong to its value;
+    a column-0 `- ` list belongs to the key above it."""
+    values: dict[str, list[str]] = {}
+    current: str | None = None
+    for line in region.splitlines():
         stripped = line.strip(" \t")
         if not stripped or stripped.startswith("#"):
             continue
-        if line.startswith(("\t", "---", "...")) or stripped[0] in "{[":
-            return None
-        if line.startswith(" "):  # a continuation line: never a top-level key
-            if _KEY_TOKEN.search(line):
-                return None
+        if line.startswith(("\t", "---", "...")):
+            return None, "a tab-indented line or a document marker"
+        if stripped[0] in "{[" and not line.startswith(" "):
+            return None, "a flow-style mapping or list"
+        if _KEY_TOKEN.search(line) and (line.startswith((" ", "-")) or not _TOP_KEY.fullmatch(line.rstrip(" \t"))):
+            return None, "model/effort appears other than as a plain top-level key"
+        if line.startswith(" "):  # a continuation: part of the value above
+            if current is not None:
+                values[current].append(stripped)
+            continue
+        if line == "-" or line.startswith("- "):  # a block list item of the key above
+            if current is None or current in _OVERRIDE_KEYS:
+                return None, "a top-level list" if current is None else f"{current} given as a list"
             continue
         m = _TOP_KEY.fullmatch(line.rstrip(" \t"))
         if not m:
-            return None
-        key = next(g for g in m.groups()[:3] if g is not None)
+            return None, f"a top-level line that is no `key: value` ({stripped[:40]!r})"
+        current = next(g for g in m.groups()[:3] if g is not None)
         value = _plain_value(m.group(4) or "")
-        if value is None or _KEY_TOKEN.search(value):
-            return None
-        if key in ("model", "effort") and value != "inherit":
-            keys.add(key)
-    return sorted(keys)
+        if value is None:
+            return None, f"the value of {current} has unbalanced quotes"
+        if _KEY_TOKEN.search(value):
+            return None, "model/effort appears other than as a plain top-level key"
+        if current in _OVERRIDE_KEYS and current in values:
+            return None, f"{current} is declared twice"
+        values[current] = [value] if value else []
+    keys = []
+    for key in _OVERRIDE_KEYS:
+        value = " ".join(values.get(key, []))
+        if value and value != "inherit":  # empty: the harness ignores it
+            keys.append(key)
+    return sorted(keys), ""
+
+
+def frontmatter_reading(text: str) -> tuple[list[str] | None, str]:
+    """(the `model:`/`effort:` keys a command file's frontmatter sets to
+    something other than `inherit`, ""), [] without frontmatter; (None, what
+    could not be decided) when the reading is ambiguous — the caller refuses."""
+    if text.startswith("﻿"):
+        # Claude Code reads no header after a BOM; one that would set the
+        # model the moment the BOM goes is no "no override"
+        rest = text[1:]
+        if any(r is not None and _MENTION.search(r) for r in (_harness_region(rest), _line_region(rest))):
+            return None, "a byte-order mark precedes a header that mentions model/effort"
+        return [], ""
+    harness, lines = _harness_region(text), _line_region(text)
+    if harness is None and lines is None:
+        return [], ""
+    if harness is None or lines is None or harness != lines.lstrip(_JS_SPACE):
+        return None, ("its end is ambiguous: Claude Code ends it at the first `---` (or opens it "
+                      "after other whitespace), which is not where a `---` line closes it")
+    return _mapping_overrides(harness)
+
+
+def frontmatter_overrides(text: str) -> list[str] | None:
+    """The keys of `frontmatter_reading`; None means "cannot decide"."""
+    return frontmatter_reading(text)[0]
 
 
 def _override_source(root: Path, rel: str, branch: str, remote: bool) -> tuple[str | None, str | None]:
@@ -439,10 +493,11 @@ def override_refusal(root: Path, phase: str, model: str, argv: list[str], branch
         return f"one owner for the model: {why}; an override cannot be ruled out"
     if text is None:
         return None
-    keys = frontmatter_overrides(text)
+    keys, undecided = frontmatter_reading(text)
     if keys is None:
-        return (f"one owner for the model: frontmatter of {rel} cannot be parsed strictly; it mentions "
-                "model/effort — write `model: inherit` as a plain line or remove it")
+        return (f"one owner for the model: the frontmatter of {rel} cannot be decided strictly — "
+                f"{undecided}; make it a plain top-level `key: value` header closed by a `---` line "
+                "(`model: inherit` as a plain line, or no model line)")
     if keys:
         return (f"one owner for the model: {rel} declares {' and '.join(k + ':' for k in keys)}, which "
                 f"overrides the dispatched {model}; remove it (model-policy*.json owns this)")
