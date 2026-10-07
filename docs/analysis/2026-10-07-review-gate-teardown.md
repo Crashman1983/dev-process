@@ -1,6 +1,6 @@
 # Entscheidung: Review-Gate halbieren
 
-Datum: 2026-10-07 · Status: **freigegeben** (Owner, 2026-10-07); A, C, D, E und F umgesetzt in v2.53.0, B offen (siehe unten) ·
+Datum: 2026-10-07 · Status: **freigegeben** (Owner, 2026-10-07); A, C, D, E und F umgesetzt (CHANGELOG, Release nach v2.52), B offen (siehe unten) ·
 Vorgänger: Position 8 der Abbauliste
 (`docs/analysis/2026-08-06-lean-teardown-list.md`), damals beschlossen und
 nicht umgesetzt; seitdem ist `check_review.py` von 563 auf 3.080 Zeilen
@@ -188,7 +188,7 @@ durchlaufen.
   `bundle,non-implementing`, `cross-model` oder `single-family`.
 - **Die Pflicht zum Review je Tier bleibt unverändert.**
 
-## Nachtrag: Stand nach v2.53.0
+## Nachtrag: Stand nach der Umsetzung
 
 A, C, D, E und F sind umgesetzt. B (Inhaltsvergleich statt Historientabelle)
 ist bewusst noch nicht umgesetzt. Bei der Umsetzung zeigte sich eine Lücke
