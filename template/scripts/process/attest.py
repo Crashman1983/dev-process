@@ -46,9 +46,12 @@ Usage:
             --verdict pass|block [--round N] [--plan-review]
             [--bundle FILE | --base SHA --head SHA] [--note TEXT]
             [--exception TEXT] [--journal-dir DIR] [--dry-run]
-            [--archive PLAN] [--commit]
+            [--archive PLAN] [--commit] [--with PATH ...]
 
 `--archive PLAN` (a pass only) moves the plan into the archive with the line;
+`--with PATH` adds the round's other records — its review report, plan lines —
+so the round is one commit and one push (each bookkeeping push paid the
+push-time gates downstream; half the commits of two weeks were bookkeeping);
 `--commit` makes that one commit. Every refusal comes before the first write.
 """
 from __future__ import annotations
@@ -66,6 +69,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling import
 from process_git import git_environment  # noqa: E402
 from check_fix_streak import notes as fix_streak_notes  # noqa: E402
 from check_review import (  # noqa: E402  (one owner for grammar, digest, record homes)
+    BOOKKEEPING,
     JOURNAL_DIR,
     full_round_base_problem,
     integration_targets,
@@ -174,6 +178,22 @@ def archive_problems(args, root: Path) -> list[str]:
         return [f"--archive: {_shown(root, target)} exists already — the move would "
                 f"overwrite another plan"]
     return []
+
+
+def with_problems(args, root: Path) -> list[str]:
+    """`--with` carries records only: a source file riding an attestation commit
+    would be code no review saw, under a commit the tools read as bookkeeping."""
+    out = []
+    for rel in args.with_ or []:
+        p = (root / rel).resolve()
+        if not p.is_relative_to(root.resolve()) or not p.is_file():
+            out.append(f"--with: {rel} is no file in this repository")
+            continue
+        r = p.relative_to(root.resolve()).as_posix()
+        if not (r.startswith(BOOKKEEPING) or record_kind(r) is not None):
+            out.append(f"--with: {rel} is not a process record (under {BOOKKEEPING} or a plan) — "
+                       f"commit code with its own message")
+    return out
 
 
 def work_problems(args, root: Path) -> list[str]:
@@ -357,6 +377,9 @@ def main() -> int:
     ap.add_argument("--commit", action="store_true",
                     help="one commit of the line (and the archived plan); default with "
                          "--archive: staged, the commit named")
+    ap.add_argument("--with", dest="with_", action="append", metavar="PATH",
+                    help="another record of this round (its review report, the plan) — staged and "
+                         "committed with the line")
     ap.add_argument("--journal-dir", default=None)
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("root", nargs="?", default=str(ROOT))
@@ -385,7 +408,7 @@ def main() -> int:
         print(f"attest: note — {note}", file=sys.stderr)
     args.round_ = counted
     line, problems = build_line(args, root, journal_dir)
-    problems = round_issues + problems + archive_problems(args, root)
+    problems = round_issues + problems + archive_problems(args, root) + with_problems(args, root)
     if args.note and any(ln.lstrip().startswith("REVIEW") for ln in args.note.splitlines()):
         problems.append("the note carries REVIEW-looking lines — the validated line is the "
                         "only REVIEW writer")
@@ -411,9 +434,10 @@ def main() -> int:
         fh.write(line + "\n")
     print(f"attest: appended to {_shown(root, target)}")
     _fix_streak_notes(root, args.verdict)
-    if not (args.archive or args.commit):
+    if not (args.archive or args.commit or args.with_):
         return 0
-    staged = [str(target)] if target.is_relative_to(root) else []
+    staged = ([str(target)] if target.is_relative_to(root) else []) + [
+        str((root / rel).resolve()) for rel in args.with_ or []]
     if args.archive:
         dest = _archive_target(root, root / args.archive)
         dest.parent.mkdir(parents=True, exist_ok=True)

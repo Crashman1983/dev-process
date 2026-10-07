@@ -32,7 +32,8 @@ findings-producing or Tier 3 review — `FINDING sev=… action=… issue=…` l
 in a `.process-work/reviews/` report (gate-linted where the `github-issues`
 module is installed; the report grammar either way). A `block` verdict always
 has findings, so it always writes the report: the next delta bundle reads the
-open findings from it.
+open findings from it. Report and line are one commit — `attest.py … --commit
+--with .process-work/reviews/<report>.md` — and one push.
 
 After a clearing pass is attested, `uv run scripts/process/report.py review-pass --issue N` — the branch may now board the merge train (`docs/process/train.md`).
 

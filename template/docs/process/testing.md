@@ -140,6 +140,18 @@ and merge (the bundle preflight runs the process gates, never the
 suite). One full run per batch; every later gate reads the certificate
 instead of re-earning it.
 
+**A bookkeeping-only push runs no suite.** A push whose range changes
+nothing outside `.process-work/` and the plans — attest lines, review
+reports, decisions, root causes — changes no tested code: the project's push
+hook runs the process gates for it, not a test suite, and a certificate is
+keyed by the tree without those paths, so a bookkeeping commit on a green
+tree is a memo hit. Downstream, half the commits of two weeks were
+bookkeeping-only, and one docs-only pre-push held the scoped lane for
+fifteen minutes while queued sessions waited. Fewer such pushes help too:
+a review round's report and its `REVIEW` line are one commit
+(`attest.py --commit --with <report>`), a fix's `ROOT-CAUSE` line rides
+the fix commit, and a round is pushed once.
+
 **Test lanes are a shared resource — queue, do not thrash.** Several
 agents in several worktrees on one host each running "their" scoped suite
 at the same time do not finish faster; they crawl together (observed: load

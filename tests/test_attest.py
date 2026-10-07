@@ -393,6 +393,24 @@ def test_a_late_pass_of_an_old_round_is_refused_not_promoted(render, tmp_path):
     assert r.returncode == 1 and "this is round 3" in r.stderr and "REFUSED" in r.stderr, r.stderr
 
 
+def test_a_round_is_one_commit_with_its_report_and_never_with_code(render, tmp_path):
+    """Downstream half the commits of two weeks were bookkeeping, each pushed on its
+    own; `--with` puts a round's report into the attest commit. Code never rides it."""
+    out, base, head = _repo(render, tmp_path)
+    ab = ("--base", base, "--head", head)
+    report = out / ".process-work/reviews/2026-09-10-widget-r1.md"
+    report.parent.mkdir(parents=True, exist_ok=True)
+    report.write_text("work: widget\n\nFINDING sev=blocker action=fix issue=- gate=judgement x\n")
+    (out / "widget.py").write_text("def widget():\n    return 0\n")
+    r = _attest(out, *ab, "--verdict", "block", "--commit", "--with", "widget.py")
+    assert r.returncode == 1 and "is not a process record" in r.stderr, r.stderr
+    r = _attest(out, *ab, "--verdict", "block", "--commit", "--with", str(report.relative_to(out)))
+    assert r.returncode == 0, r.stderr
+    shown = _git(out, "show", "--name-only", "--format=%s", "HEAD").stdout
+    assert "docs: attest widget round 1" in shown and "reviews/2026-09-10-widget-r1.md" in shown
+    assert "widget.py" not in shown and "journal/" in shown
+
+
 def test_a_root_cause_in_a_spec_kit_plan_counts(render, tmp_path):
     # Spec Kit keeps its plan in specs/<dir>/plan.md — a cause recorded there
     # is recorded; a REVIEW line quoted in two homes is still one round
