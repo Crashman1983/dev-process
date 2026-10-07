@@ -739,13 +739,16 @@ def test_without_copier_or_uvx_the_render_names_copier(update, monkeypatch):
     assert not proof['identical']
 
 
-def test_only_template_verify_declares_pyyaml_the_gates_import_it_lazily():
-    """The gate and finish reach PyYAML only through template_verify's lazy import,
-    whose error names the tool; a header on them would make every gate run `uv run`."""
+def test_finish_and_train_declare_pyyaml_the_gate_imports_it_lazily():
+    """#170: finish and train verify a template update through template_verify,
+    which needs PyYAML — they are no push gates, so they declare it (`uv run`
+    brings it). check_review stays header-less: gate_runner runs it with its
+    own environment, and a header would make every gate run `uv run`."""
     for script, declared in (('template_verify.py', True), ('check_review.py', False),
-                             ('finish.py', False)):
+                             ('finish.py', True), ('train.py', True)):
         head = (SCRIPTS / script).read_text(encoding='utf-8').split('"""', 1)[0]
         assert ('# /// script' in head) is declared, script
+        assert ('pyyaml' in head.lower()) is declared, script
 
 
 @pytest.mark.parametrize('src', ['-a@h:p', 'gh:-x/y', 'git@host:-x', 'https://-x/y', 'ext::sh -c x',
