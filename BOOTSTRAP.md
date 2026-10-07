@@ -266,4 +266,5 @@ For a process-template update, separate released template code from project
 changes with `uv run --script scripts/process/template_verify.py --base <baseline-sha>`.
 The rendered `docs/process/releases.md` explains the computed provenance,
 owner acknowledgment and review duties. Pure updates still run project tests
-and gates; gate-enforcement migrations retain Tier 3.
+and gates, released gate code included; the project's own changes to gate
+code retain Tier 3. Update on a schedule (every two to four weeks), not per release.

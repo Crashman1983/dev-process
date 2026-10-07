@@ -20,7 +20,7 @@ Scope — not code volume — sets the tier. A change that another component, co
 - Does it touch **auth**, an **interface/contract** other code depends on, or **more than one surface**?
 - Could it **lose or corrupt data**, or is it a **repeated change to the same owner** (see mandatory rule 4)?
 
-A yes to any of these lifts the change to **Tier 2+ regardless of diff size** — a ten-line redirect that reads a stored URL is Tier 2, not Tier 0. When in doubt, tier up; the cost of an unneeded review is small next to the cost of an escaped defect.
+A yes to any of these lifts the change to **Tier 2+ regardless of diff size** — a ten-line redirect that reads a stored URL is Tier 2, not Tier 0. When in doubt, answer these questions for the concrete change: a yes lifts it, a no keeps it where its scope puts it. Size and importance are no reasons to tier up — a large change is split, not promoted; an unneeded Tier 3 costs a cross-model review, a refute and every round after them, and downstream that cost, not escaped defects, became the bottleneck.
 
 **Verification scales too.** The tier sets not just *how much* review but *how independent* it must be (`verification-independence.md`): Tier 0–1 an in-context self-check; Tier 2 a fresh process reviewing a read-only bundle, not the producing context; Tier 3 additionally cross-model (where a second family is available) plus adversarial review. How hard the change is attacked — a refute, a fresh agent that tries to break it — scales with it too; `refute.md` owns that table. Production (plan, execute) needs no independence — warm in an interactive session, handed over through the committed plan by the dispatch chain (`verification-independence.md`, "Production needs no independence"); independence is spent on verification.
 
@@ -39,9 +39,13 @@ even when the result is identical to the new release.
   a digest-bound REVIEW of the update range; no panel. Local files, owned
   files, hooks, Makefiles, deleted or edited tests and conflict resolutions
   stay project work. Answer changes stay project delta too.
-- **Enforcement migration:** changes to gate code or its configuration stay
-  Tier 3. Helpers can change enforcement transitively, so changes anywhere
-  in `scripts/process/` are conservatively treated as migrations.
+- **Enforcement migration:** the project's own change to gate code or its
+  configuration stays Tier 3 — a gate file that differs from the release
+  (helpers can change enforcement transitively, so anything in
+  `scripts/process/` counts). Gate code exactly as released is no
+  migration: the release was reviewed and refuted upstream, and the
+  acknowledgment covers its behavior notes (downstream, every release made
+  every update a Tier 3 review of code no project line had touched).
 
 The owner or steward acknowledges the release behavior notes with
 `uv run --script scripts/process/template_verify.py --base <integration-base> --ack <owner>`; commit

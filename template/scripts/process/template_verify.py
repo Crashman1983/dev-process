@@ -255,7 +255,12 @@ def _verify(root: Path, base: str, tip: str, *, worktree: bool = False,
                              {k: v for k, v in new_record.items() if k != '_commit'}
                              and not is_owned(rel, owned))
                 result['identical' if exact else 'project_delta'].append(rel)
-                if _enforcement(rel) and (old_render != new_render or actual_old != actual_new):
+                # Gate code exactly as released was reviewed and refuted upstream, and the
+                # owner acknowledges its behavior notes; only the project's own change to
+                # it migrates enforcement here (downstream, every release made every
+                # update a Tier 3 review of code no project line had touched).
+                if _enforcement(rel) and not exact and (old_render != new_render
+                                                        or actual_old != actual_new):
                     result['migration'] = True
             # Acknowledgment is attested, like reviewer identity; file coverage is computed.
             ack_raw = _file(root, ACK) if worktree else _entry(root, tip, ACK)
