@@ -8,12 +8,15 @@ branch collected six fix commits on the same owner before anyone asked
 whether the design was wrong, and a gate took four review rounds whose
 findings all had one cause — the rewrite came only in the fourth. This check
 counts conventional `fix:`/`fix(…)` commits per touched file on the current
-branch against the integration branch. The second on one file asks rule 4's
-increment-vs-rewrite call, recorded as a DECISION before the next patch; from
-the third on, rule 6: the root cause is missing. Note-only (exit 0 always):
-it makes the pattern visible, it does not block. A no-op on the integration
-branch and in clones without a merge base. Not a gate: make_review_bundle.py
-runs it once per review round and puts the note into the bundle — the gate
+branch against the integration branch — per file: a fix commit counts for
+each file it touches, and a fix touching other files adds nothing to this
+one's streak. The second on one file asks rule 4's increment-vs-rewrite call,
+recorded as a DECISION before the next patch (rebuilding the owning layer is
+one of its options); from the third on, rule 6: the root cause is missing.
+Note-only (exit 0 always): it makes the pattern visible, it does not block. A
+no-op on the integration branch and in clones without a merge base. Not a
+gate: make_review_bundle.py runs it once per review round and puts the note
+into the bundle, and attest.py prints it with a `block` verdict — the gate
 runner shows a passing gate's output nowhere.
 
 Usage: check_fix_streak.py [root]      Stdlib only.
@@ -71,11 +74,13 @@ def fix_streaks(log: str, threshold: int = THRESHOLD) -> dict[str, int]:
     return {p: n for p, n in counts.items() if n >= threshold}
 
 
-def main(argv: list[str]) -> int:
-    root = Path(argv[0] if argv else ".").resolve()
+def notes(root: Path) -> list[str] | None:
+    """The fix-streak note lines of the branch checked out at `root`; [] for
+    none, None where nothing is evaluated (the integration branch, a detached
+    HEAD, no merge base, an unreadable log)."""
     branch = (_git(root, "rev-parse", "--abbrev-ref", "HEAD") or "").strip()
     if branch in ("", "HEAD", *INTEGRATION):
-        return 0
+        return None
     base = ""
     # origin first: a local main lags in work clones and would count merged history
     for ref in BASES:
@@ -83,24 +88,35 @@ def main(argv: list[str]) -> int:
         if base:
             break
     if not base:
-        return 0
+        return None
     log = _git(root, "log", "-z", "--no-merges", "--pretty=%x01%s", "--name-only", f"{base}..HEAD")
     if log is None:
-        return 0
+        return None
     streaks = fix_streaks(log)
     # a CHANGELOG two fixes both touch is bookkeeping, no owner; a rule file in Markdown is
     # an owner (refute of #126: skipping every .md silenced the process docs)
     streaks = {p: n for p, n in streaks.items()
                if n >= ROOT_CAUSE_AT or not Path(p).name.upper().startswith("CHANGELOG")}
+    out = []
     for path, n in sorted(streaks.items(), key=lambda kv: (-kv[1], kv[0])):
         if n >= ROOT_CAUSE_AT:
-            print(f"fix-streak: note: {n} fix commits on {path} in this branch — mandatory rule 6: "
-                  f"find the root cause (or record the structural decision) before the next patch")
+            out.append(f"fix-streak: note: {n} fix commits on {path} in this branch — mandatory rule 6: "
+                       f"find the root cause (or record the structural decision) before the next patch")
         else:
-            print(f"fix-streak: note: {n} fix commits on {path} in this branch — mandatory rule 4: "
-                  f"record the increment-vs-rewrite call as a DECISION before the next patch — do "
-                  f"the findings share one cause that one owner would close?")
-    if not streaks:
+            out.append(f"fix-streak: note: {n} fix commits on {path} in this branch — mandatory rule 4: "
+                       f"record the increment-vs-rewrite call as a DECISION before the next patch — its "
+                       f"options include rebuilding the owning layer beside fix / merge / scope; do "
+                       f"the findings share one cause that one owner would close?")
+    return out
+
+
+def main(argv: list[str]) -> int:
+    found = notes(Path(argv[0] if argv else ".").resolve())
+    if found is None:
+        return 0
+    for line in found:
+        print(line)
+    if not found:
         print("fix-streak: OK")
     return 0
 

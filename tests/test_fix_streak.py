@@ -143,3 +143,31 @@ def test_a_process_doc_fixed_twice_is_an_owner(render, tmp_path):
     gate = [sys.executable, str(out / "scripts/process/check_fix_streak.py"), "."]
     r = subprocess.run(gate, cwd=out, capture_output=True, text=True)
     assert "2 fix commits on docs/process/refute.md" in r.stdout, r.stdout
+
+
+def test_a_block_attestation_prints_the_streak_note(render, tmp_path):
+    """Kenni #2411: the note reached only the bundle; the block verdict is
+    where the next patch is decided."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _git(out, "init", "-q", "-b", "main")
+    _git(out, "config", "user.email", "t@t")
+    _git(out, "config", "user.name", "t")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "base")
+    _git(out, "checkout", "-q", "-b", "7-thing")
+    (out / ".process-work/plans").mkdir(parents=True, exist_ok=True)
+    (out / ".process-work/plans/2026-09-10-thing.md").write_text("# Plan\n\ntier: 2\n\n## Decisions\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "docs: plan")
+    _commit(out, "src.py", "fix: a")
+    _commit(out, "src.py", "fix: b")
+    attest = [sys.executable, str(out / "scripts/process/attest.py"), "--work", "thing", "--tier", "2",
+              "--reviewer", "fresh", "--model", "cross", "--independence", "bundle,non-implementing",
+              "--round", "1"]
+    r = subprocess.run([*attest, "--verdict", "pass", "--dry-run", "."], cwd=out, capture_output=True, text=True)
+    assert r.returncode == 0 and "fix-streak" not in r.stderr, r.stderr  # a pass stacks no patch
+    for extra in (["--verdict", "block", "--dry-run"], ["--verdict", "block"]):
+        r = subprocess.run([*attest, *extra, "."], cwd=out, capture_output=True, text=True)
+        assert r.returncode == 0, r.stderr
+        assert "fix-streak: note: 2 fix commits on src.py" in r.stderr, r.stderr
+        assert "rebuilding the owning layer" in r.stderr

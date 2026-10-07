@@ -117,6 +117,12 @@ def test_mandatory_rules_names_decision_records_and_patch_count(render, tmp_path
     assert "third patch" in text.lower()
     # the question comes at the SECOND hit on the same spot, recorded before the next patch
     assert "second fix" in text.lower() and "decision" in text.lower()
+    # Kenni #2411: rebuilding is an option from the second finding, and the
+    # element is named by its cause, not its file
+    flat = " ".join(text.split())
+    assert "options include rebuilding the owning layer beside fix / merge / scope" in flat
+    assert "Name the element by its cause (the behaviour or invariant), not by the file it lives in" in flat
+    assert "counted per file" in flat
 
 
 def test_start_here_reads_decision_records_before_planning(render, tmp_path):

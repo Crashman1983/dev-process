@@ -58,6 +58,7 @@ sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling import
 from process_git import git_environment  # noqa: E402
+from check_fix_streak import notes as fix_streak_notes  # noqa: E402
 from check_review import (  # noqa: E402  (one owner for grammar, digest, record homes)
     JOURNAL_DIR,
     full_round_base_problem,
@@ -375,6 +376,7 @@ def main() -> int:
     print(line)
     if args.dry_run:
         print(f"attest: dry run — would append to {target.relative_to(root) if target.is_relative_to(root) else target}")
+        _fix_streak_notes(root, args.verdict)
         return 0
     target.parent.mkdir(parents=True, exist_ok=True)
     with target.open("a", encoding="utf-8") as fh:
@@ -386,6 +388,7 @@ def main() -> int:
             fh.write(args.note.rstrip() + "\n\n")
         fh.write(line + "\n")
     print(f"attest: appended to {_shown(root, target)}")
+    _fix_streak_notes(root, args.verdict)
     if not (args.archive or args.commit):
         return 0
     staged = [str(target)] if target.is_relative_to(root) else []
@@ -410,6 +413,19 @@ def main() -> int:
     else:
         print(f'attest: staged — commit with: git commit -m "{message}"')
     return 0
+
+
+def _fix_streak_notes(root: Path, verdict: str) -> None:
+    """A block is where the next patch gets stacked: rules 4/6 ask their
+    structural question there (check_fix_streak owns the note; never blocks)."""
+    if verdict != "block":
+        return
+    try:
+        found = fix_streak_notes(root) or []
+    except (OSError, ValueError):
+        return
+    for note in found:
+        print(note, file=sys.stderr)
 
 
 def _git_ok(root: Path, *args: str) -> bool:
