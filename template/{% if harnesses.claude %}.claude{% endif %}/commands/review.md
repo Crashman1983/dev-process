@@ -23,11 +23,10 @@ Record the result with the writer, never by hand:
       --model <family> --independence bundle,non-implementing[,cross-model] \
       --verdict pass|block --bundle /tmp/bundle.md   # [--plan-review]
 
-It recomputes the digest from the bundle's base/head with the gate's formula,
-refuses a stale bundle, validates the grammar and appends the `REVIEW` line to
-today's journal shard of the branch (`journal-state-plans.md`). A typed digest is a
-fabricated attestation; the gate names it as such and counts the review as
-absent. For a
+It takes the reviewed range (base, head) from the bundle, checks that a full
+round's base is the head's fork point, validates the grammar and appends the
+`REVIEW` line to today's journal shard of the branch (`journal-state-plans.md`).
+For a
 findings-producing or Tier 3 review — `FINDING sev=… action=… issue=…` lines
 in a `.process-work/reviews/` report (gate-linted where the `github-issues`
 module is installed; the report grammar either way). A `block` verdict always
@@ -75,12 +74,11 @@ Round economy — a failed round must not re-pay the whole chain:
   suite for nothing.
 - **Round 2+ reviews the delta.** Rebuild with
   `make_review_bundle.py --since <head the last round reviewed>`: the reviewer
-  reads the fix diff plus the prior round's findings, while the bundle still
-  binds the full-branch digest (at Tier 3 only from a full round's head and
-  without scope growth — `docs/process/verification-independence.md`, "What
-  each round judges").
-- **Rebase once**, before the first review round — every later rebase changes
-  the tree and voids the bundle digests, forcing a fresh full round.
+  reads the fix diff plus the prior round's findings, while the verdict
+  still binds the whole branch, at every tier
+  (`docs/process/verification-independence.md`, "What each round judges").
+- **Rebase once**, before the first review round — every later rebase moves
+  the head, and the review no longer covers what merges.
 - **The round is counted, not claimed.** `attest.py` numbers it: 1 + the
   distinct blocked rounds recorded for the work. Every blocking round gets
   its REVIEW line (`--verdict block`); several reviewers (lenses) of one

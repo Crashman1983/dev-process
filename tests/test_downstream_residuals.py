@@ -258,8 +258,8 @@ def test_tower_runs_local_findings_without_replacing_core_findings(render, tmp_p
     assert any(f['kind'] == 'local-findings-error' for f in json.loads(result.stdout)['findings'])
 
 
-def test_delta_excludes_imported_main_and_binds_the_reduced_diff(repo):
-    bundle, review = load('make_review_bundle'), load('check_review')
+def test_delta_excludes_imported_main_and_binds_the_whole_branch(repo):
+    bundle = load('make_review_bundle')
     git(repo, 'checkout', '-qb', 'feature')
     since = commit(repo, 'code.py', 'a = 1\n')
     commit(repo, 'feature.py', 'owned change\n')
@@ -267,9 +267,10 @@ def test_delta_excludes_imported_main_and_binds_the_reduced_diff(repo):
     commit(repo, 'main.py', 'main-only content\n')
     git(repo, 'checkout', 'feature')
     git(repo, 'merge', '--no-ff', '-m', 'bring main', 'main')
-    artifact = bundle._review_artifact(repo, since, delta=True)
+    artifact = bundle._review_artifact(repo, 'main', since)
     assert 'feature.py' in artifact.text and 'main.py' not in artifact.text
-    assert artifact.digest == review.artifact_digest(repo, since, git(repo, 'rev-parse', 'HEAD'), mode='delta')
+    # the reviewer reads the delta; the verdict binds the branch from its fork point
+    assert artifact.base == git(repo, 'merge-base', 'main', 'HEAD') and artifact.since == since
 
 
 def test_bundle_ignores_a_design_docs_tier_when_scoping_a_delta(repo):
@@ -279,7 +280,7 @@ def test_bundle_ignores_a_design_docs_tier_when_scoping_a_delta(repo):
     plan = repo / '.process-work/plans/design-look.md'
     commit(repo, str(plan.relative_to(repo)), '# Design\ntier: 3\n')
     text = bundle.build(repo, 'main', since=since, plans=[plan], declared_tier=2)
-    assert 'REVIEW_SCOPE mode=delta' in text
+    assert 'Delta re-review' in text
 
 
 def test_non_fast_forward_requires_a_logged_owner_override(repo, monkeypatch):
@@ -356,7 +357,7 @@ def test_dispatch_uses_the_owners_tier_grammar(repo, monkeypatch, text, expected
     assert dispatch.plan_tier_on_origin(repo, 'work') == expected
 
 
-def test_delta_carries_conflict_resolution_and_the_gate_verifies_its_mode(repo):
+def test_delta_carries_conflict_resolution_and_an_older_delta_line_still_parses(repo):
     bundle, review = load('make_review_bundle'), load('check_review')
     git(repo, 'checkout', '-qb', 'feature')
     since = commit(repo, 'own.py', 'own before review\n')
@@ -368,17 +369,13 @@ def test_delta_carries_conflict_resolution_and_the_gate_verifies_its_mode(repo):
     merged = subprocess.run(['git', '-C', str(repo), 'merge', 'main'], capture_output=True)
     assert merged.returncode != 0
     head = commit(repo, 'code.py', 'a = 3\n')
-    artifact = bundle._review_artifact(repo, since, delta=True)
+    artifact = bundle._review_artifact(repo, 'main', since)
     assert 'a = 3' in artifact.text and 'main-only content' not in artifact.text
+    # a record written before v2.53 carries a digest and mode=delta: still valid
     line = (f'REVIEW work=42 tier=2 reviewer=fresh model=m independence=bundle,non-implementing '
-            f'verdict=pass round=1 base={since} head={head} diff={artifact.digest} mode=delta')
+            f'verdict=pass round=1 base={since} head={head} diff={"0" * 64} mode=delta')
     records, errors = review.parse_review_lines(line)
-    assert not errors
-    assert review._integrity_violations('journal', repo, records) == ([], [])
-    wrong, _ = review.parse_review_lines(line.replace(' mode=delta', ''))
-    assert review._integrity_violations('journal', repo, wrong)[0]
-    tier3, errors = review.parse_review_lines(line.replace('tier=2', 'tier=3'))
-    assert not errors and review.invalid_deltas(repo, [f for _ln, f in tier3])  # no full round at `since`
+    assert records and not errors
 
 
 def test_delta_refuses_to_hide_an_unreviewed_feature_merge(repo):
@@ -390,8 +387,8 @@ def test_delta_refuses_to_hide_an_unreviewed_feature_merge(repo):
     git(repo, 'checkout', 'feature')
     commit(repo, 'own.py', 'own implementation\n')
     git(repo, 'merge', '--no-ff', '-m', 'other feature', 'other-feature')
-    assert bundle._review_artifact(repo, since, delta=True) is None
-    with pytest.raises(SystemExit, match='full review'):
+    assert bundle._review_artifact(repo, 'main', since) is None
+    with pytest.raises(SystemExit, match='full bundle'):
         bundle.build(repo, 'main', since=since, declared_tier=2)
 
 
@@ -464,7 +461,7 @@ def test_stop_repairs_a_live_pid_with_a_stale_tmux_anchor(repo, monkeypatch):
 
 
 def test_three_stacked_reviews_cover_overlapping_files_but_not_a_late_commit(repo, monkeypatch):
-    """#132: the complete merge gate checks three real, digest-bound review ranges."""
+    """#132: the complete merge gate checks three real review ranges."""
     review = load('check_review')
     git(repo, 'checkout', '-qb', 'stack')
     records = []
@@ -473,10 +470,9 @@ def test_three_stacked_reviews_cover_overlapping_files_but_not_a_late_commit(rep
     for name in ['a', 'b', 'c']:
         commit(repo, f'.process-work/plans/{name}.md', '# Plan\ntier: 2\n\n## Decisions\n')
         head = commit(repo, 'code.py', f'value = {name!r}\n')
-        digest = review.artifact_digest(repo, base, head)
         records.append(f'REVIEW work={name} tier=2 reviewer=fresh model=same '
                        'independence=bundle,non-implementing verdict=pass round=1 '
-                       f'base={base} head={head} diff={digest}')
+                       f'base={base} head={head}')
         commit(repo, '.process-work/journal/stack.md', '\n'.join(records) + '\n')
     monkeypatch.setenv('PROCESS_PUSH_TARGETS', 'refs/heads/main')
     hard, _ = review.check(repo)
@@ -484,10 +480,6 @@ def test_three_stacked_reviews_cover_overlapping_files_but_not_a_late_commit(rep
     commit(repo, 'code.py', 'unreviewed = True\n')
     hard, _ = review.check(repo)
     assert sum('code changed after the reviewed head' in h for h in hard) >= 3, hard
-    records[-1] = records[-1].split(' diff=')[0] + ' diff=' + '0' * 64
-    commit(repo, '.process-work/journal/stack.md', '\n'.join(records) + '\n')
-    hard, _ = review.check(repo)
-    assert any('digest' in h for h in hard), hard
 
 
 @pytest.mark.parametrize('spec, plan, want', [

@@ -134,9 +134,9 @@ reviewed or the exception is recorded. Where no CI enforces the gates, merge
 by pushing main from a clone (`finish.py`, the train) — never by a platform's
 merge button.
 
-Digest binding is opt-in per REVIEW line (below), not per plan — the former
-`review-binding: artifact-v1` plan field is retired; the gate reports a
-leftover as a note.
+The reviewed range is recorded per REVIEW line (below), not per plan — the
+former `review-binding: artifact-v1` plan field is retired; the gate reports
+a leftover as a note.
 
 With the `speckit` module on, an active Tier 2+ plan also either references
 its `specs/NNN-…` directory or carries a `spec-waived: <reason>` line — the
@@ -186,20 +186,15 @@ order, values without spaces:
 REVIEW work=42 tier=2 reviewer=fresh-agent model=same independence=bundle,non-implementing verdict=pass round=1
 ```
 
-A REVIEW may bind itself to the exact reviewed diff by carrying the three
-integrity fields. **Write the line with `scripts/process/attest.py`**
-(`--bundle <bundle file>` or `--base/--head`): it recomputes the digest with
-the gate's own formula, refuses a stale bundle, validates the grammar and
-appends to the branch's shard of today. Never type a digest. The gate names a digest that
-matches no formula for its base/head as what it is — a fabricated
-attestation — and counts the review as absent (observed on one deployment:
-15 of 16 recorded digests were never computed, and the gate said so on every
-run until nobody read it). The digest formula is pinned against git config
-(`check_review.CANONICAL_DIFF`), so a value computed on one clone verifies
-on every other:
+A REVIEW names the range it reviewed with `base` and `head`. **Write the
+line with `scripts/process/attest.py`** (`--bundle <bundle file>` or
+`--base/--head`): it checks both commits exist and that a full round's base
+is the head's fork point, validates the grammar and appends to the branch's
+shard of today. Never type the SHAs (observed on one deployment: 15 of 16
+typed integrity values matched no commit):
 
 ```
-REVIEW work=42 tier=2 reviewer=fresh-agent model=same independence=bundle,non-implementing verdict=pass round=1 base=<git-sha> head=<git-sha> diff=<sha256>
+REVIEW work=42 tier=2 reviewer=fresh-agent model=same independence=bundle,non-implementing verdict=pass round=1 base=<git-sha> head=<git-sha>
 ```
 
 | field | meaning |
@@ -211,9 +206,9 @@ REVIEW work=42 tier=2 reviewer=fresh-agent model=same independence=bundle,non-im
 | `independence` | comma set ⊆ `bundle,non-implementing,cross-model,single-family` |
 | `verdict` | `pass` \| `block` |
 | `round` | 1 + the distinct blocked rounds already recorded for this `work` (further reviewers of the round that just blocked attest that round) — counted by `attest.py`, not claimed: a re-check after a pass or a rebase keeps the round; plan reviews count apart as `work=<id>-plan` |
-| `base` | optional: merge-base commit the bundle diffed from |
-| `head` | optional: reviewed branch head |
-| `diff` | optional: SHA-256 of the raw `git diff --binary base...head` bytes — the gate recomputes and verifies it |
+| `base` | the head's fork point from the integration branch (with `head`; optional only on older, headless records) |
+| `head` | the reviewed branch head — code after it is unreviewed |
+| `diff`, `mode` | legacy, written until v2.53: a digest of `base...head` and `full`/`delta` — read and ignored |
 
 The journal only grows, and `.process-work/journal/.gitattributes` says so to git (`*.md merge=union`): two branches that append to the same file merge by keeping both sides' lines — no conflict in the merge train. It is scoped to the journal directory; a project's own root `.gitattributes` is untouched.
 

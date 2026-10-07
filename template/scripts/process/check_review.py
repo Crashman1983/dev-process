@@ -30,16 +30,17 @@ enforces what a language-agnostic CI gate honestly can:
     to the block) is `verdict=block` — read from the commits of the pushed
     range, never the worktree. `--standing-block <sha>[:<remote_sha>]` runs
     this arm alone for a pre-push hook.
-  - HARD (integrity, opt-in by carrying the fields): a REVIEW that names
-    `base`/`head`/`diff` binds itself to an exact reviewed diff — the gate
-    recomputes the digest and fails on mismatch or unresolvable commits. The
-    review bundle prints the three values (`REVIEW_ARTIFACT` line) so the
-    reviewer copies, never invents, them.
+  - The reviewed range: a REVIEW names `base` and `head` (the bundle prints
+    them in its `REVIEW_ARTIFACT` line, `attest.py` writes them). A full
+    round's `base` is the fork point of its `head`; code after the reviewed
+    head is unreviewed. Two SHAs name the reviewed change exactly — the
+    diff digest older records carry (`diff=`) is read and ignored (template
+    v2.53: it was a function of base and head, and its verification
+    machinery was a source of defects of its own).
 
 Lean pass: the former artifact-v1 mode (tree-empty certificate commits,
-candidate-target binding, two attestation modes) is retired — the optional
-digest above keeps the diff-exact guarantee at a fraction of the ritual. A
-plan's `review-binding:` line is reported as retired, never silently ignored.
+candidate-target binding, two attestation modes) is retired. A plan's
+`review-binding:` line is reported as retired, never silently ignored.
 
 It does NOT verify that the reviewer was truthfully a different agent or model —
 the gate never sees the review runtime. That claim stays *attested*; the gate
@@ -53,14 +54,11 @@ Pure stdlib. Owns the `REVIEW` grammar; shares nothing with telemetry's `GRADE`.
 from __future__ import annotations
 
 import functools
-import hashlib
 import os
 import re
 import subprocess
 import sys
-import time
 from collections import Counter
-from collections.abc import Iterator
 from typing import NamedTuple
 from pathlib import Path
 
@@ -192,8 +190,12 @@ def record_texts(root: Path, kinds: tuple[str, ...] = RECORD_KINDS, *,
     return out
 
 REQUIRED = {"work", "tier", "reviewer", "model", "independence", "verdict", "round"}
-# optional integrity fields — all three or none (a partial claim is malformed)
-ARTIFACT_FIELDS = {"base", "head", "diff"}
+# the reviewed range — both or none (a partial claim is malformed)
+ARTIFACT_FIELDS = {"base", "head"}
+# legacy fields older records carry next to base/head: read, never required,
+# never written (v2.52: a diff digest is a function of base and head — the
+# SHAs already name the reviewed change; `mode=delta` marked a delta bundle)
+LEGACY_FIELDS = {"diff", "mode"}
 INDEP_TOKENS = {"bundle", "non-implementing", "cross-model", "single-family"}
 VERDICTS = {"pass", "block"}
 # tolerant of a leading list bullet and **bold**/_emphasis_ on the key, and of
@@ -232,7 +234,6 @@ def waiver_debt_notes(rel: str, text: str, pattern: re.Pattern[str],
                          f"'issue:' link")
     return notes
 GIT_SHA = re.compile(r"^[0-9a-f]{40}(?:[0-9a-f]{24})?$")
-SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
 # issue-ref grammar — owned here (core) so both this gate and the issue gate
 # read the same shapes; only these count as issue declarations
@@ -483,8 +484,8 @@ def parse_review_lines(text: str) -> tuple[list[tuple[int, dict]], list[tuple[in
         shape = set(fields)
         artifact = shape & ARTIFACT_FIELDS
         expected = REQUIRED | (ARTIFACT_FIELDS if artifact else set())
-        if "mode" in shape and artifact:
-            expected |= {"mode"}
+        if artifact:
+            expected |= shape & LEGACY_FIELDS
         if "mode" in shape and fields["mode"] not in ("full", "delta"):
             errors.append((i, "mode must be full or delta"))
             continue
@@ -507,9 +508,6 @@ def parse_review_lines(text: str) -> tuple[list[tuple[int, dict]], list[tuple[in
                     break
             if bad:
                 continue
-            if not SHA256.fullmatch(fields["diff"]):
-                errors.append((i, "diff must be a 64-character lowercase SHA-256"))
-                continue
         # isascii guards unicode digits ("²"): isdigit() is True but int() raises
         # — the same trap telemetry's GRADE round check already names
         if not (fields["tier"].isascii() and fields["tier"].isdigit()) or \
@@ -522,8 +520,6 @@ def parse_review_lines(text: str) -> tuple[list[tuple[int, dict]], list[tuple[in
         if not 0 <= int(fields["tier"]) <= 3:
             errors.append((i, f"tier {fields['tier']} outside the 0-3 scale"))
             continue
-        # a Tier 3 delta parses; whether a full round anchors it is a journal
-        # question (`invalid_deltas`), not one line's
         if fields["verdict"] not in VERDICTS:
             errors.append((i, f"verdict {fields['verdict']!r} not in {sorted(VERDICTS)}"))
             continue
@@ -560,77 +556,18 @@ def _arithmetic_violations(rel: str, records: list[tuple[int, dict]]) -> list[st
     return hard
 
 
-def tier3_delta_anchor(records: list[dict], works: set[str], since: str) -> bool:
-    """May a Tier 3 delta start at `since`? Only when a REVIEW of this work
-    with `mode=full`, tier 3 and `head=<since>` exists — or an unbroken chain
-    of Tier 3 delta REVIEWs back to one (each delta's base the previous
-    head). One owner: the bundle, attest and the gate ask here. `works` is
-    compared as `work_key` reads it (`#26`, `26` and the issue URL are one)."""
-    keys = {work_key(w) for w in works}
-    todo, seen = [since], set()
-    while todo:
-        sha = todo.pop()
-        if sha in seen:
-            continue
-        seen.add(sha)
-        for r in records:
-            if (work_key(r.get("work") or "") in keys and r.get("head") == sha and int(r["tier"]) >= 3
-                    and _tier3_independent(r)):
-                if r.get("mode", "full") == "full":
-                    return True
-                todo.append(r.get("base") or "")
-    return False
-
-
-def _tier3_independent(r: dict) -> bool:
-    """A link of the chain meets Tier 3 independence — a block anchors too,
-    a self-review does not."""
-    indep = set(r.get("independence", "").split(","))
-    return "non-implementing" in indep and bool(indep & {"cross-model", "single-family"})
-
-
-def tier3_delta_refusal(since: str, records: list[dict], works) -> str:
-    """The refusal of an unanchored Tier 3 delta, naming the heads it could
-    start from: the full independent Tier 3 rounds of this work, oldest first."""
-    keys = {work_key(w) for w in works}
-    heads = list(dict.fromkeys(
-        r["head"] for r in records
-        if r.get("head") and work_key(r.get("work") or "") in keys and int(r["tier"]) >= 3
-        and r.get("mode", "full") == "full" and _tier3_independent(r)))
-    if not heads:
-        return f"Tier 3 delta needs a full round at {since}; none is recorded — build the full bundle"
-    return (f"Tier 3 delta needs a full round at {since}; full rounds of this work: "
-            f"{', '.join(h[:12] for h in heads)} (use --since {heads[-1]})")
-
-
 # gate code as `docs/process/refute.md` defines it, approximated by path: the
 # gates, the hooks, and what starts them (make targets, CI, pre-commit) —
 # and the local gate configuration: which gates run, which models review
 GATE_PATHS = ("scripts/process/", ".githooks/", ".github/workflows/")
 GATE_FILES = ("Makefile", ".pre-commit-config.yaml",
               "docs/process/gates.local.json", "docs/process/model-policy.local.json")
-CONTRACT_PATHS = re.compile(r"^(docs/process/design-contracts/|specs/[^/]+/contracts/)")
 REVIEW_REPORTS = ".process-work/reviews"
-_HEADING = re.compile(r"^#{1,4}\s", re.MULTILINE)
-_RECORD_LINE = re.compile(r"^.*\b(ROOT-CAUSE|REFUTE)\b.*$\n?", re.MULTILINE)
 _REPORT_KEY = re.compile(r"^\s*(?:[-*+]\s+)?[*_]*(review|audit|work)[*_]*\s*:\s*(\S+)", re.IGNORECASE)
 
 
 def is_gate_path(rel: str) -> bool:
     return rel.startswith(GATE_PATHS) or rel in GATE_FILES
-
-
-def plan_scope(text: str | None) -> tuple | None:
-    """What a fix round may not change in a plan: the Decisions section and
-    `tier:` (record lines a fix round adds there aside). None: no plan."""
-    if text is None:
-        return None
-    m = DECISIONS_HEADING.search(text)
-    section = ""
-    if m:
-        end = _HEADING.search(text, m.end())
-        section = text[m.start():end.start() if end else len(text)]
-    return " ".join(_RECORD_LINE.sub("", section).split()), plan_tier(text)
 
 
 def _show(root: Path, ref: str, rel: str) -> str | None:
@@ -812,81 +749,6 @@ def prior_report(root: Path, slugs, issues, since: str, head: str) -> tuple[str,
     return report_of(candidates, slugs, issues)
 
 
-def _named(text: str, rel: str) -> bool:
-    """`rel` as a whole path in the report — `widget.py` is neither
-    `src/widget.py` nor `widget.py.orig`."""
-    return re.search(rf"(?<![\w./-]){re.escape(rel)}(?!\.?[\w/-])", text) is not None
-
-
-def tier3_delta_scope_growth(root: Path, works: set[str], since: str, head: str,
-                             keys: tuple | None = None) -> str | None:
-    """Why the Tier 3 delta `since..head` needs a full round — None when it is
-    contained. One owner: the bundle refuses, attest does not write, the gate
-    does not count. Computed from the delta's own commits and the prior
-    report as committed; any doubt is growth. `keys`: (slugs, issues) that
-    name the work's report — default `work_keys(works)`."""
-    slugs, issues = keys if keys is not None else work_keys(works)
-    return _scope_growth(str(root), tuple(slugs), tuple(issues), since, head)
-
-
-@functools.lru_cache(maxsize=256)
-def _scope_growth(root_s: str, slugs: tuple, issues: tuple, since: str, head: str) -> str | None:
-    root = Path(root_s)
-    entries = name_status(delta_diff(root, since, head, names=True))
-    if entries is None:
-        return "git cannot list the delta's files"
-    touches = list(dict.fromkeys(path for _l, _s, path in entries))
-
-    def named(paths: list[str]) -> str:
-        return ", ".join(paths[:4]) + (", …" if len(paths) > 4 else "")
-
-    why: list[str] = []
-    gate = [p for p in touches if is_gate_path(p)]
-    if gate:
-        why.append(f"the fix changes gate code ({named(gate)})")
-    contracts = [p for p in touches if CONTRACT_PATHS.match(p)]
-    if contracts:
-        why.append(f"the fix changes contracts ({named(contracts)})")
-    plans = [p for p in touches if record_kind(p) in (*PLAN_KINDS, "plan-archive")]
-    scope = [p for p in plans
-             if plan_scope(_show(root, since, p)) is None
-             or plan_scope(_show(root, since, p)) != plan_scope(_show(root, head, p))]
-    if scope:
-        why.append(f"the fix changes the plan's ## Decisions or tier: line ({named(scope)})")
-    code = [p for p in touches if not p.startswith(BOOKKEEPING) and p not in plans]
-    found = prior_report(root, slugs, issues, since, head)
-    report = found[1] if found else None
-    if code and report is None:
-        why.append(f"no readable report of the round at {since[:12]} to bound {named(code)}")
-    elif report is not None:
-        outside = [p for p in code if not _named(report, p)]
-        if outside:
-            why.append(f"the fix changes {named(outside)} outside the prior round's findings")
-    return "full bundle required: " + "; ".join(why) if why else None
-
-
-def tier3_delta_problem(root: Path, records: list[dict], works: set[str],
-                        since: str, head: str) -> str | None:
-    """Anchor, then containment — why this Tier 3 delta clears nothing. A
-    full round off its fork point anchors nothing (`invalid_full_rounds`).
-    The work is what `expand_work` reads at `head`: the caller passes the ids
-    it has, never its own idea of the work's other names."""
-    ids, keys = expand_work(root, works, ref=head or None)
-    off_fork = invalid_full_rounds(root, records, head) if head else {}
-    anchors = [r for r in records if id(r) not in off_fork]
-    if not tier3_delta_anchor(anchors, ids, since):
-        return tier3_delta_refusal(since, anchors, ids)
-    return tier3_delta_scope_growth(root, ids, since, head, keys)
-
-
-def invalid_deltas(root: Path, records: list[dict]) -> dict[int, str]:
-    """id(record) → why, for every Tier 3 delta REVIEW without an anchoring
-    full round or with scope growth — they clear nothing."""
-    return {id(r): why for r in records if r.get("mode") == "delta" and int(r["tier"]) >= 3
-            for why in [tier3_delta_problem(root, records, {r["work"]}, r.get("base") or "",
-                                            r.get("head") or "")] if why}
-
-
 def _commit_sha(root: Path, ref: str) -> str | None:
     out = _git_bytes(root, "rev-parse", "--verify", "-q", f"{ref}^{{commit}}")
     return out.decode().strip() if out else None
@@ -996,11 +858,10 @@ def unchecked_full_rounds(root: Path, records: list[dict], tip: str = "HEAD") ->
 
 
 def invalid_records(root: Path, records: list[dict], tip: str = "HEAD") -> dict[int, str]:
-    """id(record) → why, for every REVIEW record that clears nothing: Tier 3
-    deltas (`invalid_deltas`) and full rounds off their fork point
-    (`invalid_full_rounds`) — the gate, the standing-block arm and the
-    train read passes through here."""
-    return {**invalid_full_rounds(root, records, tip), **invalid_deltas(root, records)}
+    """id(record) → why, for every REVIEW record that clears nothing: full
+    rounds off their fork point (`invalid_full_rounds`) — the gate, the
+    standing-block arm and the train read passes through here."""
+    return invalid_full_rounds(root, records, tip)
 
 
 def valid_passes(root: Path, records: list[dict], tip: str = "HEAD") -> list[dict]:
@@ -1109,224 +970,6 @@ def delta_diff(root: Path, base: str, head: str, *, binary: bool = True,
             return None
         parts.append(out)
     return b"".join(parts)
-
-
-def artifact_diff(root: Path, base: str, head: str, *, mode: str = "full") -> bytes | None:
-    if mode == "delta":
-        out = delta_diff(root, base, head)
-        return b"REVIEW_DIFF delta-v1\n" + out if out is not None else None
-    if mode != "full":
-        return None
-    return _git_bytes(root, *CANONICAL_DIFF, f"{base}...{head}")
-
-
-def artifact_digest(root: Path, base: str, head: str, *, mode: str = "full") -> str | None:
-    diff = artifact_diff(root, base, head, mode=mode)
-    return hashlib.sha256(diff).hexdigest() if diff is not None else None
-
-
-LEGACY_ABBREVS = range(4, 17)  # git's minimum core.abbrev .. a generous ceiling
-
-
-def _legacy_digests(root: Path, base: str, head: str) -> Iterator[str]:
-    """Digests older records may carry, cheapest first (lazily — a match stops
-    the sweep): the unpinned `git diff --binary` in both range forms as this
-    clone's config renders them today; `--full-index` (the form before every
-    knob was pinned); and the auto-abbreviated index lines at every
-    `core.abbrev` from 4 to 16. git abbreviates by the clone's object count,
-    so a record attested at abbrev=9 hashed differently in a fresh clone at 7
-    (observed downstream) — the sweep keeps such a record verifiable."""
-    three = f"{base}...{head}"
-    forms: list[tuple[str, ...]] = [("diff", "--binary", three), ("diff", "--binary", f"{base}..{head}"),
-                                    ("diff", "--binary", "--full-index", three)]
-    forms += [("-c", f"core.abbrev={n}", "diff", "--binary", three) for n in LEGACY_ABBREVS]
-    for args in forms:
-        diff = _git_bytes(root, *args)
-        if diff is not None:
-            yield hashlib.sha256(diff).hexdigest()
-
-
-def _integrity_violations(rel: str, root: Path,
-                          records: list[tuple[int, dict]]) -> tuple[list[str], list[str]]:
-    """A REVIEW carrying base/head/diff binds itself to an exact diff — verify
-    the claim where it CAN be verified. A mismatched digest is hard: the
-    bound artifact provably differs from what was reviewed. Commits that do
-    not resolve in THIS clone are a note, not a failure: after a rebase-merge
-    plus branch deletion the pre-merge SHAs legitimately exist in no fresh
-    clone, and hard-failing there would red every clone retroactively for
-    every properly bound historical review (observed in production). The
-    binding did its job at merge time; a later clone that cannot re-check it
-    says so honestly instead of crying wolf."""
-    hard: list[str] = []
-    soft: list[str] = []
-    for lineno, f in records:
-        if "diff" not in f:
-            continue
-        missing = [sha for sha in (f["base"], f["head"])
-                   if _git_bytes(root, "cat-file", "-e", f"{sha}^{{commit}}") is None]
-        if missing:
-            soft.append(f"{rel}:{lineno}: review artifact commit(s) not present "
-                        f"in this clone ({', '.join(missing)}) — digest "
-                        f"unverifiable here (pre-merge SHAs gone after "
-                        f"rebase-merge + branch delete); verified at merge "
-                        f"time or not at all")
-            continue
-        actual = artifact_digest(root, f["base"], f["head"], mode=f.get("mode", "full"))
-        if actual is None:
-            shallow = (_git_bytes(root, "rev-parse", "--is-shallow-repository") or b"").strip() == b"true"
-            if shallow:
-                # a shallow clone (a cloud session's default) cuts the history the
-                # three-dot diff needs — unverifiable here, not a fabrication
-                soft.append(f"{rel}:{lineno}: review artifact diff not computable in this "
-                            f"shallow clone — digest unverifiable here (`git fetch --unshallow`)")
-            else:
-                hard.append(f"{rel}:{lineno}: review artifact diff could not be computed")
-            continue
-        if f["diff"] == actual or (f.get("mode", "full") == "full"
-                                  and f["diff"] in _legacy_digests(root, f["base"], f["head"])):
-            continue
-        # neither the canonical nor any legacy formula produces this value:
-        # no byte stream of this diff hashes to it. Observed downstream: 15
-        # of 16 recorded digests matched no commit within five days — they
-        # were typed to look right, never computed. Name it as what it is.
-        hard.append(f"{rel}:{lineno}: review artifact digest {f['diff'][:12]}… "
-                    f"matches no formula for {f['base'][:9]}...{f['head'][:9]} "
-                    f"(canonical {actual[:12]}…, legacy forms and abbrev 4–16 tried) — "
-                    f"no byte stream of this diff produces it; a digest that was typed rather than computed "
-                    f"is a FABRICATED attestation, and this review counts as "
-                    f"absent. Write REVIEW lines with scripts/process/attest.py, "
-                    f"which computes the digest itself")
-    return hard, soft
-
-
-
-# --- integrity scope: verify what this push carries, remember the rest -------
-# Every digest-bound REVIEW record costs git diffs (canonical, then the
-# legacy forms). Re-verifying the whole journal on every push grows without
-# bound — measured downstream: 628 bound records, one canonical diff of a
-# large range ~3 s, a pre-push gate that no longer finished. The inputs of a
-# verification are immutable in a clone (commit objects, the recorded
-# digest), so its result is too: a record verified once in this clone is
-# taken from a ledger in .git/ afterwards — an "ok" as well as a mismatch,
-# so a fabricated digest stays red on every run without being recomputed.
-# Shards the push itself changes are always verified fresh; a record whose
-# commits are missing here is re-checked each run (a fetch may bring them).
-# PROCESS_REVIEW_INTEGRITY=all (or --full) re-verifies everything;
-# =in-flight verifies only the changed shards (a CI knob for huge journals).
-INTEGRITY_LEDGER = "process-review-integrity"
-INTEGRITY_ENV = "PROCESS_REVIEW_INTEGRITY"
-
-
-def _integrity_ledger_path(root: Path) -> Path | None:
-    out = _git_bytes(root, "rev-parse", "--git-dir")
-    if out is None:
-        return None
-    gitdir = Path(out.decode(errors="replace").strip())
-    if not gitdir.is_absolute():
-        gitdir = root / gitdir
-    return gitdir / INTEGRITY_LEDGER if gitdir.is_dir() else None
-
-
-def _load_integrity_ledger(path: Path | None) -> dict[str, str]:
-    if path is None or not path.is_file():
-        return {}
-    out: dict[str, str] = {}
-    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
-        key, sep, verdict = line.partition("\t")
-        if sep and key.count(" ") == 3 and key.rsplit(" ", 1)[-1] in ("full", "delta"):
-            out[key] = verdict
-    return out
-
-
-def _fetch_stamp(root: Path) -> float:
-    """When this clone last fetched — the only event that can bring a missing
-    artifact commit. Worktrees share FETCH_HEAD via the common dir."""
-    out = _git_bytes(root, "rev-parse", "--git-common-dir")
-    if out is None:
-        return 0.0
-    common = Path(out.decode(errors="replace").strip())
-    if not common.is_absolute():
-        common = root / common
-    try:
-        return (common / "FETCH_HEAD").stat().st_mtime
-    except OSError:
-        return 0.0
-
-
-def _integrity_scoped(rel: str, root: Path, records: list[tuple[int, dict]], *,
-                      fresh: bool, mode: str, ledger: dict[str, str] | None,
-                      fetched_at: float = 0.0) -> tuple[list[str], list[str], int]:
-    """(hard, soft, reused): integrity findings for one shard; `reused` counts
-    records answered from the ledger instead of recomputed. A record whose
-    commits are missing is remembered with the time of the check and looked
-    up again only after a later fetch — on a partial clone a miss costs
-    seconds (measured: ~8 s per lookup, 196 such records, ten minutes a run)."""
-    bound = [(ln, f) for ln, f in records if "diff" in f]
-    if not bound:
-        return [], [], 0
-    if mode == "in-flight" and not fresh:
-        return [], [], len(bound)
-    if fresh or ledger is None:
-        h, s = _integrity_violations(rel, root, records)
-        if mode == "all" and ledger is not None:
-            _remember(rel, root, bound, ledger)
-        return h, s, 0
-    if mode == "all":  # recompute everything, rewrite the ledger from scratch
-        h, s = _integrity_violations(rel, root, records)
-        _remember(rel, root, bound, ledger)
-        return h, s, 0
-    hard: list[str] = []
-    soft: list[str] = []
-    reused = 0
-    for ln, f in bound:
-        key = f"{f['base']} {f['head']} {f['diff']} {f.get('mode', 'full')}"
-        cached = ledger.get(key)
-        if cached is not None and cached.startswith("missing:"):
-            checked_at = float(cached.split(":", 2)[1] or 0)
-            if fetched_at > checked_at:
-                cached = None  # a fetch happened since: the commits may be here now
-        if cached is not None:
-            reused += 1
-            if cached.startswith("hard:"):
-                hard.append(f"{rel}:{ln}: {cached[5:]}")
-            elif cached.startswith("missing:"):
-                soft.append(f"{rel}:{ln}: {cached.split(':', 2)[2]}")
-            continue
-        h, s = _integrity_violations(rel, root, [(ln, f)])
-        hard += h
-        soft += s
-        prefix = f"{rel}:{ln}: "
-        if h:
-            ledger[key] = "hard:" + h[0].removeprefix(prefix)
-        elif s:
-            ledger[key] = f"missing:{int(time.time())}:" + s[0].removeprefix(prefix)
-        else:
-            ledger[key] = "ok"
-    return hard, soft, reused
-
-
-def _remember(rel: str, root: Path, bound: list[tuple[int, dict]], ledger: dict[str, str]) -> None:
-    """Store the recomputed verdict of every bound record (used by --full)."""
-    for ln, f in bound:
-        key = f"{f['base']} {f['head']} {f['diff']} {f.get('mode', 'full')}"
-        h, s = _integrity_violations(rel, root, [(ln, f)])
-        prefix = f"{rel}:{ln}: "
-        if h:
-            ledger[key] = "hard:" + h[0].removeprefix(prefix)
-        elif s:
-            ledger[key] = f"missing:{int(time.time())}:" + s[0].removeprefix(prefix)
-        else:
-            ledger[key] = "ok"
-
-
-def _save_integrity_ledger(path: Path | None, ledger: dict[str, str]) -> None:
-    if path is None:
-        return
-    try:
-        path.write_text("".join(f"{k}\t{v}\n" for k, v in sorted(ledger.items())),
-                        encoding="utf-8")
-    except OSError:
-        pass  # a read-only .git/ costs a recompute next run, never a finding
 
 
 def _cleared(passes: list[dict], ids: set[str], tier: int) -> bool:
@@ -1637,14 +1280,14 @@ def _record_identity(fields: dict) -> tuple[tuple[str, str], ...]:
 
 
 class RangeRecords(NamedTuple):
-    """The REVIEW records of a pushed range, read from `base` and every commit up to `tip`."""
+    """The REVIEW records of a pushed range, read from `base` and `tip`."""
 
     seen: list[tuple[str, dict]]
-    """(location, fields) of every record that stood at `base` or at any commit of the range."""
+    """(location, fields) of every record that stands at `base` or at `tip`."""
     at_base: list[dict]
     """The records at `base` — what the remote already holds."""
     added: list[dict]
-    """The records some commit of the range holds more often than `base` does."""
+    """The records `tip` holds more often than `base` does."""
 
 
 def _journal_blobs(root: Path, commit: str, *, strict: bool) -> list[tuple[str, str]]:
@@ -1696,34 +1339,23 @@ def _blob_texts(root: Path, shas: list[str]) -> dict[str, str]:
 
 
 def range_records(root: Path, base: str, tip: str) -> RangeRecords:
-    """ONE comparison of `base` and the pushed range — the owner of "which
-    REVIEW records does this push add, and which did it hold at all?".
+    """ONE comparison of `base` and `tip` — the owner of "which REVIEW
+    records does this push add, and which did it hold at all?".
 
-    Answered from the end state `tip` alone, every form in which the end
-    state hides the history was its own finding downstream: a diff text, a
-    set difference that loses a second identical `block` line, a block the
-    range deleted or brought in and dropped again in a conflict resolution.
-    So the records are read from `base` and from EVERY commit of
-    `base..tip` (`ls-tree -z` + one `cat-file --batch`, no diff
-    configuration, each blob once):
+    `added`: an identity (all fields) `tip` holds more often than `base` — a
+    record that only moved to another shard keeps its count and adds nothing
+    (a set difference lost a second identical `block` line downstream).
+    `seen`: every record that stands at `base` or `tip`; a block among them
+    stands until a pass AT `tip` clears it (`standing_block_findings`).
 
-    - `added`: an identity (all fields) that some commit of the range holds
-      more often than `base` — a record that only moved to another shard
-      keeps its count and adds nothing;
-    - `seen`: every record that stood anywhere in `base` or the range; a
-      block among them stands until a pass AT `tip` clears it
-      (`standing_block_findings`).
-
-    Only the commits that change the journal are read (`--full-history`, so
-    a side branch a merge resolved away is walked too): any other commit
-    holds the journal of a parent. Every git failure is a GitReadError,
-    never an empty answer."""
-    commits = _git_read(root, "rev-list", "--full-history", f"{base}..{tip}", "--", JOURNAL_DIR,
-                        strict=True) or b""
-    changed = list(reversed(commits.decode(errors="replace").split()))
+    Until v2.53 every commit of the range was read as well, so that a block
+    the range deleted, or brought in and dropped again, still stood. Deleting
+    a journal line is a visible diff, not a gap an agent slips through
+    unnoticed; reading the whole range cost a walk per push and its own
+    defects. Every git failure is a GitReadError, never an empty answer."""
     tip_sha = (_git_read(root, "rev-parse", "--verify", f"{tip}^{{commit}}", strict=True)
                or b"").decode().strip()
-    order = [base, *changed, *([tip_sha] if tip_sha not in changed and tip_sha != base else [])]
+    order = [base, *([tip_sha] if tip_sha != base else [])]
     trees = {commit: _journal_blobs(root, commit, strict=True) for commit in order}
     texts = _blob_texts(root, sorted({sha for blobs in trees.values() for _rel, sha in blobs}))
     parsed = {sha: parse_review_lines(text)[0] for sha, text in texts.items()}
@@ -1826,10 +1458,9 @@ def standing_block_findings(root: Path, tip: str = "HEAD", *, remote_sha: str | 
       exactly what the missing range would show. Without it, the
       integration-ref ladder of `merge_base` (strict); there a missing base
       only matters when `tip` shows a block;
-    - the verdicts are those of `base` and of every commit of the range
-      (`range_records`), not only of `tip`: a range that deletes a block, or
-      brings one in and drops it again, still carries it until a pass at
-      `tip` or at `base` clears it (`_history_blocks`).
+    - the verdicts are those of `base` and of `tip` (`range_records`): a
+      block that stands at either is cleared only by a pass at `tip` or at
+      `base` (`_history_blocks`).
 
     Plans join issue and work id at every tier (`issue: #42` in a Tier 1
     plan lets `work=my-feature` follow a commit that says `(#42)`)."""
@@ -2628,12 +2259,11 @@ def template_review_findings(root: Path, update: dict, passes: list[dict],
         known = _known_work(root, ref=tip)
         covering = [r for r in passes if int(r['tier']) >= tier
                     and r.get('base') == update['base'] and r.get('head')
-                    and r.get('diff') and r.get('mode', 'full') == 'full' and r['work'] in known
-                    and r['diff'] == artifact_digest(root, r['base'], r['head'])]
+                    and r.get('mode', 'full') == 'full' and r['work'] in known]
         if not any(_unreviewed_paths(root, r['head'], tip, work_bases(passes, {r['work']}),
                                      _reviewed_heads(passes, tier, known)) == set()
                    for r in covering):
-            findings.append(f'template update: tier {tier} digest-bound REVIEW required for '
+            findings.append(f'template update: tier {tier} REVIEW of the update range required for '
                             + ('the enforcement migration' if update['migration'] else
                                'project delta: ' + ', '.join(update['project_delta'])))
     return findings
@@ -2658,7 +2288,6 @@ def check(root: Path) -> tuple[list[str], list[str]]:
     # --- parse all REVIEW attestations from the (recursive) journal ---
     all_records: list[tuple[int, dict]] = []
     located: list[tuple[str, int, dict]] = []
-    integrity_mode = "all" if "--full" in sys.argv else os.environ.get(INTEGRITY_ENV, "ledger")
     # an ambiguous fork point is a finding, never "no base": every arm keyed
     # on the pushed range would otherwise read nothing (downstream #2381)
     base_error = None
@@ -2670,18 +2299,6 @@ def check(root: Path) -> tuple[list[str], list[str]]:
         hard.append(f"cannot bound the pushed range: {exc}")
     # no ref bounds HEAD at all (not: its shards could not be listed below)
     no_base = scope_base is None and base_error is None
-    changed_shards = paths_in_flight(root) if scope_base is not None else set()
-    if changed_shards is None:
-        # cannot tell which shards changed: recompute every one, reuse none
-        soft.append(f"{IN_FLIGHT_UNKNOWN} — every journal shard is recomputed")
-        scope_base = None
-    ledger_path = _integrity_ledger_path(root) if integrity_mode in ("ledger", "all") else None
-    # `all` recomputes every record AND rewrites the ledger from that — a
-    # poisoned or stale entry does not survive a --full run
-    ledger = ({} if integrity_mode == "all" else _load_integrity_ledger(ledger_path)) \
-        if ledger_path is not None else None
-    fetched_at = _fetch_stamp(root) if ledger is not None else 0.0
-    reused_total = 0
     # the journal's shards — record_files owns where records live
     for rel, f in record_files(root, ("journal",)):
         try:
@@ -2696,13 +2313,6 @@ def check(root: Path) -> tuple[list[str], list[str]]:
         for lineno, msg in errors:
             hard.append(f"{rel}:{lineno}: malformed REVIEW line — {msg}")
         hard.extend(_arithmetic_violations(rel, records))
-        ih, isoft, reused = _integrity_scoped(
-            rel, root, records, ledger=ledger, mode=integrity_mode,
-            fetched_at=fetched_at,
-            fresh=(scope_base is None or rel in changed_shards))
-        reused_total += reused
-        hard.extend(ih)
-        soft.extend(isoft)
         all_records.extend(records)
         located += [(rel, lineno, f) for lineno, f in records]
     invalid = invalid_records(root, [f for _ln, f in all_records])
@@ -2715,16 +2325,9 @@ def check(root: Path) -> tuple[list[str], list[str]]:
     if unchecked:
         soft.append(f"{unchecked} legacy full-round record(s) not checked against the fork "
                     f"point: head not in this push's history")
-    # an invalid delta or full round clears nothing; its block still stands
+    # a full round off its fork point clears nothing; its block still stands
     all_records = [(ln, f) for ln, f in all_records
                    if id(f) not in invalid or f["verdict"] != "pass"]
-    if ledger is not None:
-        _save_integrity_ledger(ledger_path, ledger)
-    if reused_total:
-        what = ("not re-verified (only the shards this push changes are)" if integrity_mode == "in-flight"
-                else "answered from this clone's ledger (verified here before; a mismatch stays red)")
-        soft.append(f"integrity: {reused_total} digest-bound record(s) in unchanged shards {what} — "
-                    f"`--full` or {INTEGRITY_ENV}=all re-verifies everything")
 
     passes = [f for _ln, f in all_records if f["verdict"] == "pass"]
     known_work = _known_work(root)

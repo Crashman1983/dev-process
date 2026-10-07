@@ -460,11 +460,11 @@ def test_bound_review_and_fresh_checkout_contracts_render(render, tmp_path):
     workflow = (out / "docs/process/workflow.md").read_text()
     testing = (out / "docs/process/testing.md").read_text()
 
-    assert "REVIEW_ARTIFACT base=<git-sha> head=<git-sha> diff=<sha256>" in verification
-    assert "recomputes" in verification  # digest verified, not trusted
-    assert "base=<git-sha> head=<git-sha> diff=<sha256>" in journal
+    assert "REVIEW_ARTIFACT base=<git-sha> head=<git-sha>\n" in verification
+    assert "diff=<sha256>" not in journal.split("| field |")[0]  # v2.53: no digest is written
+    assert "base=<git-sha> head=<git-sha>\n" in journal
     assert "final rebase" in workflow
-    assert "digest fields" in workflow
+    assert "the bundle's reviewed range" in workflow
     assert "fresh checkout" in testing
     assert ".venv" in testing and "node_modules" in testing
     assert "reproducible bootstrap" in testing
@@ -558,29 +558,25 @@ def test_what_each_round_judges_has_one_owner_the_bundle_carries(render, tmp_pat
     assert "A `block` verdict always\nhas findings, so it always writes the report" in review
 
 
-def test_tier3_delta_rule_is_mechanical_and_owned_once(render, tmp_path):
-    """Downstream Tier 3 took 5 rounds x 3 lenses on full 10-13k-line bundles; the delta
-    rule replaces "Tier 3 never takes a delta" in one owner, and the others point there."""
+def test_a_delta_is_a_reading_aid_at_every_tier(render, tmp_path):
+    """v2.53: a Tier 3 delta needed an anchoring full round and a containment check of
+    its files; both are gone — the verdict binds the whole branch either way."""
     out = render(tmp_path, {"project_name": "demo", "modules": {"speckit": True}})
     vi = (out / "docs/process/verification-independence.md").read_text()
     rule = " ".join(vi.split("**What each round judges.**", 1)[1].split("\n\n", 1)[0].split())
-    for phrase in ("The worker never decides a delta's scope", "`head=<sha>`",
-                   "unbroken chain of Tier 3 delta REVIEWs", "`## Decisions` or `tier:`",
-                   "gate code", "`specs/*/contracts/`", "no readable report is a full bundle", "as a whole path", "a block anchors too",
-                   "`DELTA_TOUCHES`"):
-        assert phrase in rule, phrase
+    assert "`DELTA_TOUCHES`" in rule and "ask" in rule and "full bundle" in rule
+    assert "unbroken chain of Tier 3 delta REVIEWs" not in rule
     flat = " ".join(vi.split())
-    assert "Tier 3 is the exception" not in flat and "Tier 3 still requires a full bundle" not in flat
+    assert "the verdict vouches for all of it" in flat
     review = " ".join((out / ".claude/commands/review.md").read_text().split())
     assert "Tier 3 gets a full bundle every round" not in review
-    assert "later rounds use the same set" not in review
     assert ("a delta round re-runs the lenses whose prior report has an open finding or names a "
             "file in the bundle's `DELTA_TOUCHES` line, plus the attesting reviewer") in review
     refute = " ".join((out / "docs/process/refute.md").read_text().split())
-    assert "a Tier 3 review never takes a delta" not in refute
-    # a Tier 3 fix round outside gate code asks no new refute (v2.52.0)
     assert "A delta re-review asks for a new line only when the delta touches gate code" in refute
     assert "a Tier 3 fix round outside gate code asks none" in refute
+    workflow = " ".join((out / "docs/process/workflow.md").read_text().split())
+    assert "Tier 3 re-reviews in full every round" not in workflow
     plan = " ".join((out / ".claude/commands/plan.md").read_text().split())
     assert "split along contracts into stacked plans (*phase-of*)" in plan
 

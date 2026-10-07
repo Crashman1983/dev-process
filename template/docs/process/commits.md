@@ -21,7 +21,7 @@ commits; pushing is a sync decision. The push-time gates price the *pushed
 range* (diff against the merge base), so five coherent commits in one push
 cost one gate run instead of five — batch by task group or review round.
 Three honest bounds on batching: push before building a review bundle (the
-digest binds to the pushed state), push before a session ends (unpushed work
+verdict binds to the pushed head), push before a session ends (unpushed work
 in an ephemeral environment is lost work), and push often enough that
 parallel sessions see your claims and progress on the remote.
 

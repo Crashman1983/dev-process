@@ -1,6 +1,5 @@
-"""SP70: evidence is computed, never typed — attest.py writes the REVIEW line
-with the gate's own digest; the gate names a digest no formula produces."""
-import hashlib
+"""SP70: evidence is written, never typed — attest.py writes the REVIEW line
+with the reviewed range (base, head); the gate reads what is committed after it."""
 import importlib.util
 import subprocess
 
@@ -53,16 +52,16 @@ def _gate(root):
                           cwd=root, capture_output=True, text=True)
 
 
-def test_attest_computes_digest_and_gate_verifies_it(render, tmp_path):
+def test_attest_writes_the_range_and_the_gate_accepts_it(render, tmp_path):
     out, base, head = _repo(render, tmp_path)
     r = _attest(out, "--base", base, "--head", head, "--note", "Reviewed from the bundle.")
     assert r.returncode == 0, r.stdout + r.stderr
-    gate = _load_gate(out)
-    assert f"diff={gate.artifact_digest(out, base, head)}" in r.stdout
+    assert f"base={base} head={head}" in r.stdout and "diff=" not in r.stdout
     shard = next((out / ".process-work/journal").rglob("*.md"))
     assert shard.parent.name == "feature"  # a work branch writes its own shard
     assert "Reviewed from the bundle." in shard.read_text()
     assert _gate(out).returncode == 0, _gate(out).stdout
+
 
 
 def test_a_full_round_is_written_only_against_the_fork_point(render, tmp_path):
@@ -76,15 +75,14 @@ def test_a_full_round_is_written_only_against_the_fork_point(render, tmp_path):
     assert r.returncode == 1 and "is not the fork point" in r.stderr, r.stderr
     assert not any("REVIEW work=widget" in p.read_text()
                    for p in (out / ".process-work/journal").rglob("*.md"))
-    bundle =out / ".process-work/bundle.md"
-    gate = _load_gate(out)
-    bundle.write_text(f"REVIEW_ARTIFACT base={slice_base} head={head} "
-                      f"diff={gate.artifact_digest(out, slice_base, head)}\n")
+    bundle = out / ".process-work/bundle.md"
+    bundle.write_text(f"REVIEW_ARTIFACT base={slice_base} head={head}\n")
     r = _attest(out, "--bundle", str(bundle))
     assert r.returncode == 1 and "is not the fork point" in r.stderr, r.stderr
     r = _attest(out, "--base", base, "--head", head)
     assert r.returncode == 0, r.stderr
     assert f"base={base}" in r.stdout
+
 
 
 def test_a_full_round_of_an_integrated_head_is_an_audit_and_stands(render, tmp_path):
@@ -125,13 +123,22 @@ def test_a_stacked_branch_is_told_to_rebase_onto_the_integration_branch(render, 
     assert "stacked branch rebases onto" in r.stderr and "Tier 3" in r.stderr, r.stderr
 
 
-def test_attest_refuses_a_stale_bundle(render, tmp_path):
+def test_attest_reads_an_older_bundle_line_and_refuses_an_older_delta(render, tmp_path):
+    """v2.53: a bundle's line carries base and head; an older line's `diff=` is read
+    past. An older delta bundle named the last round's head as its base — a slice."""
     out, base, head = _repo(render, tmp_path)
     bundle = out / ".process-work/bundle.md"
     bundle.write_text(f"# Review bundle\n\nREVIEW_ARTIFACT base={base} head={head} diff={'a' * 64}\n")
+    r = _attest(out, "--bundle", str(bundle), "--dry-run")
+    assert r.returncode == 0 and f"base={base} head={head}" in r.stdout, r.stderr
+    bundle.write_text(f"REVIEW_ARTIFACT base={base} head={head} diff={'a' * 64} mode=delta\n")
     r = _attest(out, "--bundle", str(bundle))
-    assert r.returncode == 1 and "REFUSED" in r.stderr and "stale" in r.stderr
-    assert not list((out / ".process-work/journal").glob("*.md"))
+    assert r.returncode == 1 and "older delta bundle" in r.stderr, r.stderr
+    missing = "f" * 40
+    r = _attest(out, "--base", base, "--head", missing)
+    assert r.returncode == 1 and "does not exist in this clone" in r.stderr, r.stderr
+    assert not list((out / ".process-work/journal").rglob("*.md"))
+
 
 
 def test_attest_takes_base_head_from_a_fresh_bundle(render, tmp_path):
@@ -147,57 +154,19 @@ def test_attest_takes_base_head_from_a_fresh_bundle(render, tmp_path):
     assert _gate(out).returncode == 0
 
 
-def test_fabricated_digest_is_named_and_hard(render, tmp_path):
+def test_an_older_record_with_a_digest_stays_valid(render, tmp_path):
+    """v2.53: the digest is read and ignored — it was a function of base and head.
+    No record written before turns invalid; a wrong one no longer reds the gate."""
     out, base, head = _repo(render, tmp_path)
     (out / ".process-work/journal").mkdir(parents=True, exist_ok=True)
     (out / ".process-work/journal/2026-09-10.md").write_text(
         f"REVIEW work=widget tier=2 reviewer=fresh model=cross "
         f"independence=bundle,non-implementing verdict=pass round=1 "
-        f"base={base} head={head} diff={'b' * 64}\n")
+        f"base={base} head={head} diff={'b' * 64} mode=full\n")
     r = _gate(out)
-    assert r.returncode == 1
-    assert "FABRICATED" in r.stdout and "matches no formula" in r.stdout
+    assert r.returncode == 0, r.stdout
+    assert "FABRICATED" not in r.stdout
 
-
-def test_legacy_unpinned_digest_still_verifies(render, tmp_path):
-    out, base, head = _repo(render, tmp_path)
-    raw = subprocess.run(["git", "diff", "--binary", f"{base}...{head}"], cwd=out,
-                         capture_output=True, check=True).stdout
-    (out / ".process-work/journal").mkdir(parents=True, exist_ok=True)
-    (out / ".process-work/journal/2026-09-10.md").write_text(
-        f"REVIEW work=widget tier=2 reviewer=fresh model=cross "
-        f"independence=bundle,non-implementing verdict=pass round=1 "
-        f"base={base} head={head} diff={hashlib.sha256(raw).hexdigest()}\n")
-    assert _gate(out).returncode == 0
-
-
-def test_canonical_digest_survives_git_config_drift(render, tmp_path):
-    # the other clone: patience diff, no prefix, short abbrev, renames on
-    out, base, head = _repo(render, tmp_path)
-    r = _attest(out, "--base", base, "--head", head)
-    assert r.returncode == 0, r.stderr
-    for k, v in (("diff.algorithm", "patience"), ("diff.noprefix", "true"),
-                 ("diff.mnemonicPrefix", "true"), ("core.abbrev", "7"),
-                 ("diff.renames", "true"), ("diff.context", "5")):
-        _git(out, "config", k, v)
-    g = _gate(out)
-    assert g.returncode == 0, g.stdout
-
-
-def test_an_uncomputable_digest_in_a_shallow_clone_is_a_note(render, tmp_path, monkeypatch):
-    # a cloud session clones shallow: the three-dot diff lacks history there —
-    # unverifiable, not fabricated; outside a shallow clone it stays hard
-    out, base, head = _repo(render, tmp_path)
-    gate = _load_gate(out)
-    record = [(1, {"base": base, "head": head, "diff": "sha256:" + "0" * 64})]
-    monkeypatch.setattr(gate, "artifact_digest", lambda *a, **kw: None)
-    hard, soft = gate._integrity_violations("j.md", out, record)
-    assert hard and "could not be computed" in hard[0]
-    real = gate._git_bytes
-    monkeypatch.setattr(gate, "_git_bytes", lambda root, *a: b"true\n"
-                        if a == ("rev-parse", "--is-shallow-repository") else real(root, *a))
-    hard, soft = gate._integrity_violations("j.md", out, record)
-    assert not hard and soft and "shallow clone" in soft[0]
 
 
 def test_code_after_the_reviewed_head_is_stale_on_the_merge_push(render, tmp_path):
@@ -513,38 +482,6 @@ def test_several_lenses_blocking_one_round_count_once(render, tmp_path):
     r = _attest(out, *ab, "--round", "2")
     assert r.returncode == 0 and "note —" not in r.stderr, r.stderr
 
-
-def test_attest_writes_a_tier3_delta_only_on_an_anchored_full_round(render, tmp_path):
-    """The writer asks the gate's anchor rule, so an unanchored Tier 3 delta never reaches the journal."""
-    out, base, head = _repo(render, tmp_path)
-    (out / ".process-work/reviews").mkdir(parents=True)
-    (out / ".process-work/reviews/2026-09-11-widget.md").write_text(
-        "work: widget\n\nFINDING sev=blocker action=fix issue=- gate=judgement widget.py returns 42\n")
-    _git(out, "add", "-A")
-    _git(out, "commit", "-q", "-m", "review round 1")  # the report lands before the fix
-    (out / "widget.py").write_text("def widget():\n    return 43\n")
-    _git(out, "add", "-A")
-    _git(out, "commit", "-q", "-m", "fix: widget")
-    fix = _git(out, "rev-parse", "HEAD").stdout.strip()
-    digest = _load_gate(out).artifact_digest(out, head, fix, mode="delta")
-    bundle = out / ".process-work/bundle.md"
-    bundle.write_text(f"REVIEW_ARTIFACT base={head} head={fix} diff={digest} mode=delta\n")
-    t3 = ("--tier", "3", "--independence", "bundle,non-implementing,cross-model")
-    r = _attest(out, *t3, "--bundle", str(bundle))
-    assert r.returncode == 1 and f"Tier 3 delta needs a full round at {head}" in r.stderr
-    assert _attest(out, *t3, "--base", base, "--head", head).returncode == 0
-    r = _attest(out, *t3, "--bundle", str(bundle))
-    assert r.returncode == 0, r.stderr
-    assert "mode=delta" in _journal(out)
-    # scope growth: the next delta adds a file round 1 never named — attest refuses it too
-    (out / "extra.py").write_text("x = 1\n")
-    _git(out, "add", "-A")
-    _git(out, "commit", "-q", "-m", "fix: more")
-    grown = _git(out, "rev-parse", "HEAD").stdout.strip()
-    digest = _load_gate(out).artifact_digest(out, fix, grown, mode="delta")
-    bundle.write_text(f"REVIEW_ARTIFACT base={fix} head={grown} diff={digest} mode=delta\n")
-    r = _attest(out, *t3, "--bundle", str(bundle))
-    assert r.returncode == 1 and "extra.py outside the prior round's findings" in r.stderr, r.stderr
 
 
 def test_an_exception_is_written_even_when_no_rule_trips(render, tmp_path):

@@ -60,8 +60,7 @@ input. `scripts/process/make_review_bundle.py` assembles it — reviewer preambl
 the kernel block, the review checklist, the product frame, the plan(s) under
 review — the plans the branch touches, active or archived (`--plan <slug>`
 names them instead, archive included) — the diff against a base ref with the
-list of its files (a binary shows as path and size; the digest still covers
-its bytes), and the output grammar: the `REVIEW` line is
+list of its files (a binary shows as path and size), and the output grammar: the `REVIEW` line is
 imported from `check_review.py` itself (that half cannot drift from the gate),
 the `FINDING` line's owner is the github-issues report gate and its tokens are
 pinned to that gate by a template test. Sources it cannot read are named in
@@ -92,10 +91,9 @@ this work: a header `work:` equal to one of its issues — same repository — o
 plan slugs; without a `work:` header, a file name or `review:` value naming
 it as a whole word; issues first; never another item's) and the full-branch
 stat — the reviewer re-reads what changed and what it was told, not the whole
-branch again. The full-branch digest fields stay in the bundle, so the
-attestation still binds the verdict to the complete artifact. A delta needs a declared tier: a plan's, or
-`--tier N` for a branch without one (a floor, never a discount — the bundle
-names where the tier came from). Pair this with batching: one fix pass and one
+branch again. The delta is a reading aid, at every tier: the bundle's
+`REVIEW_ARTIFACT` line still names the whole branch (fork point and head), so
+the verdict vouches for all of it. Pair this with batching: one fix pass and one
 push per round, never a drip of per-finding commits that each re-pay the
 push-time gates and tests.
 
@@ -106,22 +104,13 @@ findings, and re-checks the fixed failure class everywhere it can recur, not
 only at the fixed spot (downstream, a fifth of the blockers were introduced
 by the previous fix). An older defect found outside that is its own issue —
 unless it is a BLOCKER for this change; then it goes into the verdict marked
-"pre-existing, found in round N". The worker never decides a delta's
-scope. At Tier 3 a delta from `<sha>` needs a full Tier 3 REVIEW of this
-work that recorded `head=<sha>` (or an unbroken chain of Tier 3 delta REVIEWs
-back to one), each with `non-implementing` and `cross-model` or
-`single-family` — a block anchors too. It needs a full bundle when the fix
-touches a file the prior round's report does not name as a whole path (the
-report as committed at `<sha>`, or added by the delta before any fix code —
-a fix cannot bring its own report; a report is trusted like a REVIEW line —
-both are review artifacts, and forging one is outside what a gate can stop), the plan's
-`## Decisions` or `tier:` line, gate code, or a contract
-(`docs/process/design-contracts/`, `specs/*/contracts/`); no readable report
-is a full bundle. The bundle refuses such a delta, `attest.py` does not write
-it, and the gate, `/finish` and the train do not count it — a malformed line.
-Its `DELTA_TOUCHES` line lists the files the delta changes. At any tier, if the
-fix changed a contract, the architecture or the risk scope, the reviewer says
-so and asks for a full bundle instead of judging the delta.
+"pre-existing, found in round N". Its `DELTA_TOUCHES` line lists the files
+the delta changes. If the fix changed a contract, the architecture or the
+risk scope, the reviewer says so and asks for a full bundle instead of
+judging the delta. (Until v2.53 a Tier 3 delta needed an anchoring full
+round and a containment check of its files; both are gone — the verdict
+binds the whole branch either way, and the machinery that judged a delta's
+reach was a source of defects of its own.)
 
 **What blocks, and when the rounds stop.** This paragraph owns the rule;
 `/review` and the bundle preamble carry it. Block only for a defect someone
@@ -142,41 +131,40 @@ eight rounds, six owner decisions, and the rebuild came after round four).
 A project's `review.local.md` may tighten the cap; it keeps the one decision
 per cap, not one per round.
 
-## Bind the verdict to the reviewed artifact
+## Bind the verdict to the reviewed range
 
 Independence is incomplete if the branch can change after review without
-invalidating the verdict. The bundle therefore prints one fingerprint over
-the raw binary diff from the resolved merge base to the reviewed head:
+invalidating the verdict. The bundle therefore names the reviewed range —
+the head's fork point from the integration branch and the head:
 
-    REVIEW_ARTIFACT base=<git-sha> head=<git-sha> diff=<sha256>
+    REVIEW_ARTIFACT base=<git-sha> head=<git-sha>
 
-`attest.py --bundle` writes those three fields onto the `REVIEW` line,
-recomputing the digest itself — never typed, never invented. A full round's
-base is the head's one fork point from the integration branch: the bundle
-does not build, and `attest.py` does not write, a full round against any
-other base (a slice recorded as the whole branch) or against a fork point
-that is ambiguous or cannot be resolved; review a slice as a delta. The gate then
-recomputes the digest from git and hard-fails a mismatch or an unresolvable commit: the verdict is bound to the exact diff
-that was reviewed. Perform the final rebase *before* the review — a rebase
-after it changes the diff, and the recorded digest honestly stops matching
-the merged content; loop back to a fresh bundle and review instead.
+`attest.py --bundle` writes both onto the `REVIEW` line — never typed, never
+invented. Two commit SHAs name the reviewed change exactly; no digest is
+needed (one was recorded until v2.53 — `diff=<sha256>`, a function of base
+and head — and older records keep it; it is read and ignored). A full
+round's base is the head's one fork point: the bundle does not build, and
+`attest.py` does not write, a round against any other base (a slice
+recorded as the whole branch) or against a fork point that is ambiguous or
+cannot be resolved. Code committed after the reviewed head is unreviewed for
+the gate. Perform the final rebase *before* the review — a rebase after it
+moves the head, and the review no longer covers what merges.
 
 The gate reads existing records by the same rule. A full round whose head
 the push carries unmerged (in the pushed tip's history, in no integration
 ref) and whose base is not that head's one fork point is a malformed
-`REVIEW` line: it clears no plan, lifts no block, boards no train and
-anchors no Tier 3 delta. A merged record stands as main judged it; a
-record whose head is missing or lies on another branch is not this push's,
-and those off their fork point are counted in one note. The range is
-bounded by the remote-tracking integration refs that do not contain the tip
-(local names only when no remote-tracking one exists): a local main
-fast-forwarded to the branch hides nothing, and a tip every remote ref
-already contains is integrated — a stale local main reopens nothing. Without any integration ref nothing is judged, and the gate
-says so once.
+`REVIEW` line: it clears no plan, lifts no block and boards no train. A
+merged record stands as main judged it; a record whose head is missing or
+lies on another branch is not this push's, and those off their fork point
+are counted in one note. The range is bounded by the remote-tracking
+integration refs that do not contain the tip (local names only when no
+remote-tracking one exists): a local main fast-forwarded to the branch hides
+nothing, and a tip every remote ref already contains is integrated — a stale
+local main reopens nothing. Without any integration ref nothing is judged,
+and the gate says so once.
 
 (Lean pass: the former `review-binding: artifact-v1` mode — tree-empty
-certificate commits and CI candidate binding — is retired; the per-line
-digest keeps the diff-exact guarantee without the ritual.)
+certificate commits and CI candidate binding — is retired.)
 
 ## Independence is attested, not assumed
 
@@ -193,11 +181,9 @@ The record is a structured `REVIEW` line in the journal, one per review:
 REVIEW work=42 tier=2 reviewer=fresh-agent model=same independence=bundle,non-implementing verdict=pass round=1
 ```
 
-A digest-bound record additionally carries `base`, `head`, and `diff` (written
-by `scripts/process/attest.py`, which recomputes the digest from base/head with
-the gate's own formula — a digest typed by hand, or
-from the bundle's `REVIEW_ARTIFACT` line); the exact grammar is in
-`journal-state-plans.md`.
+A record written by `scripts/process/attest.py` additionally carries `base`
+and `head`, the reviewed range from the bundle's `REVIEW_ARTIFACT` line; the
+exact grammar is in `journal-state-plans.md`.
 
 `independence` is a comma set drawn from `bundle,non-implementing,cross-model,
 single-family`; `single-family` is the explicit honesty flag for "only one
@@ -236,14 +222,13 @@ enforces what a language-agnostic gate honestly can, and no more:
 - **Verified template updates.** A plan marked `template-update: true` may
   replace a new REVIEW with computed provenance only for a pure,
   owner/steward-acknowledged update. Both pinned releases are re-rendered;
-  local project delta still needs a fresh, digest-bound Tier 2 REVIEW, and
+  local project delta still needs a fresh Tier 2 REVIEW of the update range, and
   the project's own changes to gate code retain Tier 3 (released gate code
   is template provenance like any other file). Failed provenance or a saved report
   cannot grant an exemption (`risk-tiers.md`, `releases.md`).
-- **Artifact identity.** A `REVIEW` carrying `base`/`head`/`diff` is verified:
-  the gate recomputes the raw binary-diff digest from git and fails a mismatch
-  or unresolvable commits — a claimed digest that cannot be checked is treated
-  as false, never skipped.
+- **Reviewed range.** A `REVIEW` carrying `base`/`head` names what was
+  reviewed: a full round's base must be its head's fork point, and code
+  after the head is unreviewed.
 
 What the gate **cannot** do is verify the reviewer was *truthfully* a different
 agent or model — it never sees the review runtime. That claim stays attested.
@@ -289,9 +274,8 @@ are in `docs/process/failure-catalog.md`.
 
 ### Delta after an integration merge
 
-A delta bundle uses the branch's first-parent commits since the reviewed head,
+A delta bundle shows the branch's first-parent commits since the reviewed head,
 plus each two-parent merge's remerge-diff (the conflict resolution). It omits
-changes merely imported from main. Its `REVIEW_ARTIFACT` and attestation carry
-`mode=delta`; the writer and gate recompute the same reduced digest. Octopus merges or a base outside the first-parent
-chain require a full review. Delta records do not pool coverage for other work,
-because their reduced diff did not review every commit on the imported side.
+changes merely imported from main. Its `REVIEW_ARTIFACT` still names the whole
+branch. Octopus merges or a base outside the first-parent chain need a full
+bundle.

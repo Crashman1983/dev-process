@@ -25,8 +25,8 @@ def _review(work="42", tier="2", reviewer="fresh", model="cross",
     line = (f"REVIEW work={work} tier={tier} reviewer={reviewer} model={model} "
             f"independence={independence} verdict={verdict} round={rnd}")
     if artifact:
-        base, head, diff = artifact
-        line += f" base={base} head={head} diff={diff}"
+        base, head, *legacy = artifact
+        line += f" base={base} head={head}" + (f" diff={legacy[0]}" if legacy else "")
     return line
 
 
@@ -321,16 +321,6 @@ def test_valid_digest_record_clears_plan(render, tmp_path):
     assert r.returncode == 0, r.stdout
 
 
-def test_wrong_digest_is_hard(render, tmp_path):
-    out = render(tmp_path, {"project_name": "demo"})
-    base, head, _digest = _init_git_repo(out, work="bound")
-    _journal(out, _review(work="bound", artifact=(base, head, "0" * 64)))
-    r = _run(out)
-    assert r.returncode == 1
-    assert "matches no formula" in r.stdout
-    assert "abbrev 4–16 tried" in r.stdout
-
-
 @pytest.mark.parametrize("form", [("diff", "--binary", "--full-index"),
                                   ("-c", "core.abbrev=11", "diff", "--binary"),
                                   ("-c", "core.abbrev=4", "diff", "--binary"),
@@ -346,19 +336,6 @@ def test_a_legacy_record_of_any_abbrev_stays_verifiable(render, tmp_path, form):
     _journal(out, _review(work="bound", artifact=(base, head, hashlib.sha256(raw).hexdigest())))
     r = _run(out)
     assert r.returncode == 0, r.stdout
-
-
-def test_unresolvable_artifact_commit_is_note_not_hard(render, tmp_path):
-    # after a rebase-merge + branch delete the pre-merge SHAs exist in no
-    # fresh clone — hard-failing there would red every clone retroactively
-    # for every properly bound historical review (observed in production)
-    out = render(tmp_path, {"project_name": "demo"})
-    _base, _head, digest = _init_git_repo(out, work="bound")
-    _journal(out, _review(work="bound", artifact=("d" * 40, "e" * 40, digest)))
-    r = _run(out)
-    assert r.returncode == 0, r.stdout
-    assert "not present in this clone" in r.stdout
-    assert "unverifiable" in r.stdout
 
 
 def test_retired_review_binding_is_note_not_silent(render, tmp_path):
@@ -932,273 +909,6 @@ def _run_args(root, *args, env=None):
         cwd=root, capture_output=True, text=True, env=env)
 
 
-def test_integrity_ledger_reuses_verdicts_and_keeps_a_mismatch_red(render, tmp_path):
-    # downstream: 628 digest-bound records × several git diffs per push — the
-    # gate stopped finishing. A verification's inputs are immutable in a
-    # clone, so its verdict is remembered in .git/; a mismatch stays red
-    # without being recomputed, the shard a push changes is always fresh.
-    import os
-    out = render(tmp_path, {"project_name": "demo"})
-    base, head, digest = _init_git_repo(out, work="bound")
-    _journal(out, _review(work="bound", artifact=(base, head, digest)),
-             _review(work="bound", rnd="2", artifact=(base, head, "0" * 64)))
-    r1 = _run(out)
-    assert r1.returncode == 1 and "matches no formula" in r1.stdout
-    assert "answered from this clone's ledger" not in r1.stdout  # nothing reused yet
-    ledger = out / ".git/process-review-integrity"
-    text = ledger.read_text()
-    assert f"{base} {head} {digest} full\tok" in text and "\thard:" in text
-    r2 = _run(out)
-    assert r2.returncode == 1 and "matches no formula" in r2.stdout  # red persists, from cache
-    assert "2 digest-bound record(s) in unchanged shards answered from this clone's ledger" in r2.stdout
-    r3 = _run_args(out, "--full")
-    assert r3.returncode == 1 and "answered from" not in r3.stdout
-    r3b = _run(out, env=dict(os.environ, PROCESS_REVIEW_INTEGRITY="all"))
-    assert "answered from" not in r3b.stdout
-    # a shard the push carries is verified fresh even when the ledger lies
-    ledger.write_text(f"{base} {head} {'0' * 64} full\tok\n")
-    _git(out, "add", "-A")
-    _git(out, "commit", "-q", "-m", "journal")
-    r4 = _run(out)
-    assert r4.returncode == 1 and "matches no formula" in r4.stdout
-    # =in-flight: an unchanged (uncommitted, not in the pushed range) shard is
-    # skipped with a note — the CI knob for huge journals
-    _journal(out, _review(work="bound", rnd="3", artifact=(base, head, "1" * 64)),
-             name="2026-07-05.md")
-    r5 = _run(out, env=dict(os.environ, PROCESS_REVIEW_INTEGRITY="in-flight"))
-    assert "1 digest-bound record(s) in unchanged shards not re-verified" in r5.stdout
-    assert "2026-07-05.md" not in r5.stdout
-    assert not (out / "process-review-integrity").exists()  # lives in .git/
-
-
-def test_integrity_ledger_remembers_a_missing_commit_until_the_next_fetch(render, tmp_path):
-    # on a partial clone a lookup of a missing object costs seconds — the
-    # miss is remembered and retried only after a fetch (FETCH_HEAD moves)
-    import os
-    import time
-    out = render(tmp_path, {"project_name": "demo"})
-    _base, _head, digest = _init_git_repo(out, work="bound")
-    _journal(out, _review(work="bound", artifact=("d" * 40, "e" * 40, digest)))
-    r1 = _run(out)
-    assert r1.returncode == 0 and "not present in this clone" in r1.stdout
-    ledger = out / ".git/process-review-integrity"
-    entry = [ln for ln in ledger.read_text().splitlines() if "\tmissing:" in ln]
-    assert len(entry) == 1
-    r2 = _run(out)
-    assert "not present in this clone" in r2.stdout  # replayed, not recomputed
-    assert "1 digest-bound record(s) in unchanged shards answered from this clone's ledger" in r2.stdout
-    assert ledger.read_text().splitlines() == [*entry]
-    time.sleep(1.1)
-    (out / ".git/FETCH_HEAD").write_text("")  # a fetch happened
-    r3 = _run(out)
-    assert "not present in this clone" in r3.stdout
-    assert "answered from this clone's ledger" not in r3.stdout  # re-checked
-    assert ledger.read_text().splitlines() != [*entry]  # new stamp
-    assert os.path.getmtime(out / ".git/FETCH_HEAD") > 0
-
-
-def test_full_rewrites_a_poisoned_ledger(render, tmp_path):
-    # the ledger is a plain file in .git/: a wrong "ok" written there must not
-    # survive --full, which recomputes every record and rewrites the file
-    out = render(tmp_path, {"project_name": "demo"})
-    base, head, _digest = _init_git_repo(out, work="bound")
-    _journal(out, _review(work="bound", artifact=(base, head, "0" * 64)))
-    assert _run(out).returncode == 1
-    ledger = out / ".git/process-review-integrity"
-    ledger.write_text(f"{base} {head} {'0' * 64} full\tok\n")  # poisoned
-    assert _run(out).returncode == 0  # hidden — the documented remedy is --full
-    r = _run_args(out, "--full")
-    assert r.returncode == 1 and "matches no formula" in r.stdout
-    assert "\thard:" in ledger.read_text() and "\tok" not in ledger.read_text()
-    assert _run(out).returncode == 1  # and it stays red afterwards
-
-
-# --- Tier 3 delta: accepted only on an anchored full round ---
-
-def _tier3_rounds(out, fixes=1):
-    """A Tier 3 work: full round at heads[0], then one fix commit per round."""
-    import importlib.util
-    base, _head, _digest = _init_git_repo(out)
-    (out / ARCHIVE / "2026-07-19-bound.md").write_text("# Plan\n\ntier: 3\n", encoding="utf-8")
-    (out / "payload.txt").write_text("round 1\n", encoding="utf-8")
-    reports = out / ".process-work/reviews"
-    reports.mkdir(parents=True, exist_ok=True)
-    (reports / "2026-07-19-bound.md").write_text(
-        "review: bound\nwork: bound\n\nFINDING sev=blocker action=fix issue=- gate=judgement "
-        "payload.txt is wrong\n", encoding="utf-8")
-    _git(out, "add", "-A")
-    _git(out, "commit", "-q", "-m", "feat: tier 3")
-    heads = [_git(out, "rev-parse", "HEAD").stdout.strip()]
-    for n in range(fixes):
-        (out / "payload.txt").write_text(f"fix {n}\n", encoding="utf-8")
-        _git(out, "add", "-A")
-        _git(out, "commit", "-q", "-m", f"fix: round {n + 1}")
-        heads.append(_git(out, "rev-parse", "HEAD").stdout.strip())
-    spec = importlib.util.spec_from_file_location("cr_t3", out / "scripts/process/check_review.py")
-    gate = importlib.util.module_from_spec(spec)
-    sys.path.insert(0, str(out / "scripts/process"))
-    spec.loader.exec_module(gate)
-    return base, heads, gate
-
-
-_CROSS = "bundle,non-implementing,cross-model"
-
-
-def _t3(gate, out, base, head, *, verdict, rnd, mode="full", independence=_CROSS):
-    digest = gate.artifact_digest(out, base, head, mode=mode)
-    line = _review(work="bound", tier="3", independence=independence, verdict=verdict,
-                   rnd=str(rnd), artifact=(base, head, digest))
-    return line + (" mode=delta" if mode == "delta" else "")
-
-
-def test_tier3_delta_pass_without_a_full_round_is_hard(render, tmp_path):
-    """A Tier 3 delta from no full round would clear the highest tier on a partial read."""
-    out = render(tmp_path, {"project_name": "demo"})
-    _base, heads, gate = _tier3_rounds(out)
-    _journal(out, _t3(gate, out, heads[0], heads[1], verdict="pass", rnd=2, mode="delta"))
-    r = _run(out)
-    assert r.returncode == 1 and f"Tier 3 delta needs a full round at {heads[0]}" in r.stdout, r.stdout
-
-
-def test_tier3_delta_pass_on_an_anchored_full_round_clears(render, tmp_path):
-    """Round economy: after a full Tier 3 round, the fix round may be a delta."""
-    out = render(tmp_path, {"project_name": "demo"})
-    base, heads, gate = _tier3_rounds(out)
-    _journal(out, _t3(gate, out, base, heads[0], verdict="block", rnd=1),
-             _t3(gate, out, heads[0], heads[1], verdict="pass", rnd=2, mode="delta"))
-    r = _run(out)
-    assert r.returncode == 0, r.stdout
-
-
-def test_tier3_delta_pass_still_needs_cross_model(render, tmp_path):
-    """The delta changes what is read, never who must read it: the arithmetic is unchanged."""
-    out = render(tmp_path, {"project_name": "demo"})
-    base, heads, gate = _tier3_rounds(out)
-    _journal(out, _t3(gate, out, base, heads[0], verdict="block", rnd=1),
-             _t3(gate, out, heads[0], heads[1], verdict="pass", rnd=2, mode="delta",
-                 independence="bundle,non-implementing"))
-    r = _run(out)
-    assert r.returncode == 1 and "without 'cross-model'" in r.stdout, r.stdout
-
-
-def test_tier3_delta_chain_back_to_the_full_round_clears(render, tmp_path):
-    """Each delta's base is the previous round's head; an unbroken chain keeps the anchor."""
-    out = render(tmp_path, {"project_name": "demo"})
-    base, heads, gate = _tier3_rounds(out, fixes=2)
-    _journal(out, _t3(gate, out, base, heads[0], verdict="block", rnd=1),
-             _t3(gate, out, heads[0], heads[1], verdict="block", rnd=2, mode="delta"),
-             _t3(gate, out, heads[1], heads[2], verdict="pass", rnd=3, mode="delta"))
-    r = _run(out)
-    assert r.returncode == 0, r.stdout
-    # a broken chain (round 2 missing) leaves round 3 without an anchor
-    _journal(out, _t3(gate, out, base, heads[0], verdict="block", rnd=1),
-             _t3(gate, out, heads[1], heads[2], verdict="pass", rnd=3, mode="delta"))
-    r = _run(out)
-    assert r.returncode == 1 and f"needs a full round at {heads[1]}" in r.stdout, r.stdout
-
-
-def _fix_commit(out, files):
-    for rel, body in files.items():
-        p = out / rel
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(body, encoding="utf-8")
-    _git(out, "add", "-A")
-    _git(out, "commit", "-q", "-m", "fix")
-    return _git(out, "rev-parse", "HEAD").stdout.strip()
-
-
-def test_tier3_delta_pass_with_scope_growth_is_hard_at_the_gate(render, tmp_path):
-    """Refute: the bundle refused scope growth, but a hand-attested delta pass that
-    weakened gate code and added an unreported file cleared at the gate."""
-    out = render(tmp_path, {"project_name": "demo"})
-    base, heads, gate = _tier3_rounds(out)
-    gate_src = (out / "scripts/process/check_review.py").read_text() + "\n# weakened\n"
-    h2 = _fix_commit(out, {"scripts/process/check_review.py": gate_src,
-                           "src_new.py": "print('never in any report')\n"})
-    _journal(out, _t3(gate, out, base, heads[0], verdict="block", rnd=1),
-             _t3(gate, out, heads[0], h2, verdict="pass", rnd=2, mode="delta"))
-    r = _run(out)
-    assert r.returncode == 1 and "full bundle required" in r.stdout, r.stdout
-    assert "gate code (scripts/process/check_review.py)" in r.stdout
-    assert "src_new.py outside the prior round's findings" in r.stdout
-
-
-def test_tier3_delta_scope_reads_the_committed_report_as_whole_paths(render, tmp_path):
-    """Refute: the report was read from the working tree and matched as a substring,
-    so an edited report or a longer name containing the path contained anything."""
-    out = render(tmp_path, {"project_name": "demo"})
-    base, heads, gate = _tier3_rounds(out)
-    h2 = _fix_commit(out, {"old_payload.txt.bak": "x\n"})
-    report = out / ".process-work/reviews/2026-07-19-bound.md"
-    report.write_text(report.read_text() + "old_payload.txt.bak\n", encoding="utf-8")  # uncommitted
-    _journal(out, _t3(gate, out, base, heads[0], verdict="block", rnd=1),
-             _t3(gate, out, heads[0], h2, verdict="pass", rnd=2, mode="delta"))
-    r = _run(out)
-    assert r.returncode == 1 and "old_payload.txt.bak outside" in r.stdout, r.stdout
-    assert not gate._named("FINDING src/payload.txt is wrong", "payload.txt")
-    assert gate._named("FINDING payload.txt:3 is wrong.", "payload.txt")
-
-
-def test_tier3_anchor_must_meet_tier3_independence(render, tmp_path):
-    """Refute: a self-reviewed full block (independence=bundle) anchored a cross-model delta pass."""
-    out = render(tmp_path, {"project_name": "demo"})
-    base, heads, gate = _tier3_rounds(out)
-    _journal(out, _t3(gate, out, base, heads[0], verdict="block", rnd=1, independence="bundle"),
-             _t3(gate, out, heads[0], heads[1], verdict="pass", rnd=2, mode="delta"))
-    r = _run(out)
-    assert r.returncode == 1 and f"needs a full round at {heads[0]}" in r.stdout, r.stdout
-
-
-def test_an_invalid_tier3_delta_pass_does_not_lift_a_standing_block(render, tmp_path):
-    """Refute: the merge guard's standing-block arm counted an unanchored delta pass as clearing."""
-    out = render(tmp_path, {"project_name": "demo"})
-    base, heads, gate = _tier3_rounds(out)
-    _journal(out, _t3(gate, out, base, heads[0], verdict="block", rnd=1, independence="bundle"),
-             _t3(gate, out, heads[0], heads[1], verdict="pass", rnd=2, mode="delta"))
-    _git(out, "add", "-A")
-    _git(out, "commit", "-q", "-m", "journal")
-    findings = gate.standing_block_findings(out, "HEAD")
-    assert any("work bound" in f and "verdict=block" in f for f in findings), findings
-    assert gate.review_passes(out, [(out / JOURNAL / "2026-07-04.md").read_text()]) == []
-
-
-def test_a_fix_round_cannot_bring_its_own_report(render, tmp_path):
-    """Refute 2: a report first added inside the delta, next to the fix code or after it,
-    widened the scope it was meant to bound."""
-    out = render(tmp_path, {"project_name": "demo"})
-    base, heads, gate = _tier3_rounds(out)
-    newer = ".process-work/reviews/2026-07-20-bound.md"
-    disposition = "work: bound\n\nround 1 dispositions: payload.txt fixed; logic moved to src_new.py\n"
-    h2 = _fix_commit(out, {"src_new.py": "print('unreviewed')\n", newer: disposition})
-    _journal(out, _t3(gate, out, base, heads[0], verdict="block", rnd=1),
-             _t3(gate, out, heads[0], h2, verdict="pass", rnd=2, mode="delta"))
-    r = _run(out)
-    assert r.returncode == 1 and "src_new.py outside the prior round's findings" in r.stdout, r.stdout
-    assert gate.prior_report(out, ("bound",), (), heads[0], h2)[0] == ".process-work/reviews/2026-07-19-bound.md"
-    # landed before any fix code, a report-only commit is the round's report
-    _git(out, "reset", "-q", "--hard", heads[0])
-    _fix_commit(out, {newer: disposition})
-    h3 = _fix_commit(out, {"src_new.py": "print('reviewed scope')\n"})
-    assert gate.prior_report(out, ("bound",), (), heads[0], h3)[0] == newer
-    assert gate.tier3_delta_scope_growth(out, {"bound"}, heads[0], h3) is None
-
-
-def test_a_longer_name_does_not_name_the_path(render, tmp_path):
-    """Refute 2: `Dockerfile.dev` named `Dockerfile`, `a.py.orig` named `a.py`."""
-    import importlib.util
-    out = render(tmp_path, {"project_name": "demo"})
-    spec = importlib.util.spec_from_file_location("cr_named", out / "scripts/process/check_review.py")
-    gate = importlib.util.module_from_spec(spec)
-    sys.path.insert(0, str(out / "scripts/process"))
-    spec.loader.exec_module(gate)
-    for text, rel in (("FINDING Dockerfile.dev is wrong", "Dockerfile"), ("see bin/tool.py", "bin/tool"),
-                      ("a.py.orig left behind", "a.py"), ("in src/a.py", "a.py")):
-        assert not gate._named(text, rel), (text, rel)
-    for text, rel in (("fix Dockerfile.", "Dockerfile"), ("a.py:12 is wrong", "a.py"),
-                      ("(src/a.py)", "src/a.py"), ("`a.py`", "a.py")):
-        assert gate._named(text, rel), (text, rel)
-
-
 def test_a_missing_integration_base_is_a_presence_finding(render, tmp_path):
     """#161: no base is hard on the merge push and a note on a branch push, as
     verification-independence.md promises for every presence finding."""
@@ -1269,7 +979,7 @@ def _fork_repo(root, work="forked"):
 
 def _full(cr, root, base, head, work="forked", tier="2", independence="bundle,non-implementing"):
     return _review(work=work, tier=tier, independence=independence,
-                   artifact=(base, head, cr.artifact_digest(root, base, head)))
+                   artifact=(base, head))
 
 
 def _merge_check(cr, root, monkeypatch):
@@ -1331,21 +1041,6 @@ def test_an_off_fork_record_of_a_stale_branch_is_one_note_and_still_clears(tmp_p
     assert not any("fork point" in h or "stale" in h for h in hard), hard
     assert any(s.startswith("1 legacy full-round record(s) not checked against the fork point: "
                             "head not in this push's history") for s in soft), soft
-
-
-def test_a_tier3_delta_anchored_on_an_off_fork_full_round_is_refused(tmp_path):
-    cr, root = _cr(), tmp_path / "p"
-    fork, first, head = _fork_repo(root)
-    later = _commit_file(root, "c.py", "c = 1\n")
-    delta = _review(work="forked", tier="3", independence=_T3, rnd="2",
-                    artifact=(head, later, "0" * 64)) + " mode=delta"
-    for base, refused in ((first, True), (fork, False)):
-        records = [f for _ln, f in cr.parse_review_lines(
-            _full(cr, root, base, head, tier="3", independence=_T3) + "\n" + delta + "\n")[0]]
-        why = cr.invalid_deltas(root, records).get(id(records[1]), "")
-        assert (f"Tier 3 delta needs a full round at {head}" in why) is refused, (base, why)
-        if refused:  # the off-fork round anchors nothing, so it is not offered either
-            assert "none is recorded" in why, why
 
 
 def test_a_criss_cross_head_names_the_ambiguous_fork_point(tmp_path):

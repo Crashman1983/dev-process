@@ -36,7 +36,7 @@ even when the result is identical to the new release.
   release-identical files. Mark its plan `template-update: true`. This is an
   opt-in to verification, not a waiver; the gate recomputes the evidence.
 - **Project delta:** one independent Tier 2 reviewer covers that delta, with
-  a digest-bound REVIEW of the update range; no panel. Local files, owned
+  a REVIEW of the update range; no panel. Local files, owned
   files, hooks, Makefiles, deleted or edited tests and conflict resolutions
   stay project work. Answer changes stay project delta too.
 - **Enforcement migration:** the project's own change to gate code or its

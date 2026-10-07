@@ -909,16 +909,10 @@ def test_an_offender_that_brought_the_suite_is_still_reported(render, tmp_path, 
 
 
 def _head_pass(out, work, head, base=None):
-    # a full round's base is the head's fork point from main (#160), its digest computed
+    # a full round's base is the head's fork point from main (#160)
     base = base or _git(out, "merge-base", "main", head).stdout.strip()
-    digest = subprocess.run(
-        [sys.executable, "-c", "import sys; from pathlib import Path; sys.path.insert(0, sys.argv[1]); "
-         "import check_review as r; print(r.artifact_digest(Path(sys.argv[2]), sys.argv[3], sys.argv[4]))",
-         str(out / "scripts/process"), str(out), base, head],
-        capture_output=True, text=True, check=True, env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
-    ).stdout.strip()
     return (f"REVIEW work={work} tier=2 reviewer=fresh model=cross independence=bundle,non-implementing "
-            f"verdict=pass round=1 base={base} head={head} diff={digest}\n")
+            f"verdict=pass round=1 base={base} head={head}\n")
 
 
 def test_a_merged_branch_with_new_commits_does_not_board_on_its_done_report(render, tmp_path):

@@ -2,23 +2,18 @@
 """attest: write the REVIEW line — computed, validated, never typed.
 
 Why a writer exists: the REVIEW attestation is the artifact the review gate
-enforces, and every field of it was typed by hand. Two failure classes grew
-there. Malformed lines (the gate catches those). And digests that were never
-computed: on one deployment, 15 of 16 recorded `diff=` values matched no
-byte stream of any commit within five days of the record — plausible hex,
-written to look right. The gate reported the mismatch every run; because it
-stayed red for months, nobody read it any more. Evidence that can be typed
-will be typed.
+enforces, and every field of it was typed by hand — malformed lines, and
+values written to look right (downstream, 15 of 16 recorded digests matched
+no commit). Evidence that can be typed will be typed.
 
 This tool closes the typing path. It takes the review's fields as flags,
 takes base/head from the bundle's `REVIEW_ARTIFACT` line (or `--base`/
-`--head`), RECOMPUTES the digest with the gate's own formula
-(`check_review.artifact_digest` — one owner for producer, writer and
-verifier), refuses when the bundle's digest does not match (the tree moved
-since the bundle: rebuild it), validates the finished line through the
-gate's parser, and appends it to the journal shard. What this cannot do —
-and does not claim — is prove the review happened; it proves the line was
-produced from the artifact it names.
+`--head`), checks that both commits exist here and that a full round's base
+is the fork point of its head, validates the finished line through the
+gate's parser, and appends it to the journal shard. Two SHAs name the
+reviewed change exactly; the diff digest older lines carry is no longer
+written. What this cannot do — and does not claim — is prove the review
+happened; it proves the line names a range that exists.
 
 The round is counted, not claimed: round = 1 + the blocking REVIEW lines
 already recorded for this work. A re-check after a pass, a rebase or a
@@ -83,7 +78,6 @@ from check_review import (  # noqa: E402  (one owner for grammar, digest, record
     PLANS_ACTIVE,
     SPEC_PLAN,
     SPECS_DIR,
-    artifact_digest,
     DATE_PREFIX,
     _slug_in_name,
     work_key,
@@ -91,7 +85,6 @@ from check_review import (  # noqa: E402  (one owner for grammar, digest, record
     readable,
     record_kind,
     record_texts,
-    tier3_delta_problem,
 )
 
 # read like a REFUTE line (make_review_bundle.REFUTE_LINE): at most three
@@ -105,8 +98,9 @@ ROOT_CAUSE = re.compile(
     r"work=(?P<work>(?!<)(?!TODO\b)\S+)[ \t]+round=(?P<round>\d+):[ \t]*(?!<|TODO\b|…|\.\.\.)\S",
     re.MULTILINE)
 
+# an older bundle's line also carries `diff=` and `mode=` — read past, never used
 ARTIFACT_LINE = re.compile(
-    r"^REVIEW_ARTIFACT\s+base=(?P<base>\S+)\s+head=(?P<head>\S+)\s+diff=(?P<diff>\S+)(?:\s+mode=(?P<mode>full|delta))?\s*$",
+    r"^REVIEW_ARTIFACT\s+base=(?P<base>\S+)\s+head=(?P<head>\S+)(?:\s+diff=\S+)?(?:\s+mode=(?P<mode>full|delta))?\s*$",
     re.MULTILINE)
 
 
@@ -302,55 +296,39 @@ def round_problems(args, root: Path, journal_dir: Path) -> tuple[int, list[str],
 
 
 def build_line(args, root: Path, journal_dir: Path | None = None) -> tuple[str, list[str]]:
-    """(REVIEW line, problems). The digest is computed here, never copied."""
+    """(REVIEW line, problems). Base and head come from the bundle or the flags."""
     problems: list[str] = []
     fields = [f"work={args.work}", f"tier={args.tier}", f"reviewer={args.reviewer}",
               f"model={args.model}", f"independence={args.independence}",
               f"verdict={args.verdict}", f"round={args.round_}"]
     base = head = None
-    bundle_digest = None
-    mode = "full"
     if args.bundle:
         text = Path(args.bundle).read_text(encoding="utf-8", errors="replace")
         m = ARTIFACT_LINE.search(text)
         if not m:
             problems.append(f"no REVIEW_ARTIFACT line in {args.bundle}")
+        elif m.group("mode") == "delta":
+            problems.append(f"{args.bundle} is an older delta bundle (its base is the last round's "
+                            f"head) — rebuild it: a REVIEW binds the whole branch")
         else:
-            base, head, bundle_digest = m.group("base"), m.group("head"), m.group("diff")
-            mode = m.group("mode") or "full"
+            base, head = m.group("base"), m.group("head")
     if args.base or args.head:
         if not (args.base and args.head):
             problems.append("--base and --head go together")
         base, head = args.base, args.head
-    if base and head and not problems and mode == "full":
-        why = full_round_base_problem(root, base, head)
-        if why:
-            problems.append(why)
     if base and head and not problems:
-        digest = artifact_digest(root, base, head, mode=mode)
-        if digest is None:
-            problems.append(f"cannot compute the diff {base[:9]}...{head[:9]} in this "
-                            f"clone — the commits must exist here")
+        missing = [sha for sha in (base, head) if _git(root, "cat-file", "-e", f"{sha}^{{commit}}") is None]
+        if missing:
+            problems.append(f"commit {missing[0][:12]} does not exist in this clone — fetch it, "
+                            f"or rebuild the bundle here")
         else:
-            if bundle_digest and bundle_digest != digest:
-                problems.append(f"the bundle's digest {bundle_digest[:12]}… differs from "
-                                f"the recomputed {digest[:12]}… for the same base/head — "
-                                f"the bundle is stale or its line was edited; rebuild "
-                                f"the bundle and review again")
-            fields += [f"base={base}", f"head={head}", f"diff={digest}"]
-            if mode == "delta":
-                fields.append("mode=delta")
-    line = "REVIEW " + " ".join(fields)
-    records, errors = parse_review_lines(line)
-    for _ln, msg in errors:
-        problems.append(f"malformed: {msg}")
-    for _ln, f in records:
-        if f.get("mode") == "delta" and int(f["tier"]) >= 3:
-            known = [r for t in _texts(root, journal_dir or (root / JOURNAL_DIR).resolve())
-                     for _l, r in parse_review_lines(t)[0]]
-            why = tier3_delta_problem(root, known, {f["work"]}, f["base"], f["head"])
+            why = full_round_base_problem(root, base, head)
             if why:
-                problems.append(f"malformed: {why}")
+                problems.append(why)
+            fields += [f"base={base}", f"head={head}"]
+    line = "REVIEW " + " ".join(fields)
+    for _ln, msg in parse_review_lines(line)[1]:
+        problems.append(f"malformed: {msg}")
     return line, problems
 
 
