@@ -598,6 +598,15 @@ def test_say_counts_a_queued_message_as_delivered(render, tmp_path, monkeypatch)
     assert pane.keys == ["decision text", "Enter"]
 
 
+def test_say_fails_naming_the_branch_when_the_input_line_is_unreadable(render, tmp_path, monkeypatch, capsys):
+    """Kenni #2405: a screen without a prompt line was "said" (exit 0)."""
+    out, mod, pane = _say_setup(render, tmp_path, monkeypatch, ["some output\nno prompt here\n"])
+    assert mod.say(out, "w1", "decision text") == 6
+    err = capsys.readouterr().err
+    assert "w1" in err and "input line unreadable" in err and "say_prompt" in err, err
+    assert pane.keys == ["decision text", "Enter"]
+
+
 def test_drain_skips_a_refused_line_instead_of_waiting_on_it(render, tmp_path, monkeypatch):
     out = render(tmp_path, {"project_name": "d", "modules": {}})
     _repo(out)

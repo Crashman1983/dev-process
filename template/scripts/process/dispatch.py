@@ -1576,6 +1576,7 @@ def show_log(root: Path, branch: str, lines: int) -> int:
 
 SAY_RETRIES = 3
 SAY_WAIT_S = 1.5
+SAY_TYPE_SETTLE_S = 0.3  # the harness renders the typed text before Enter reaches it
 # the input line of an interactive harness: a `>` prompt, maybe inside a box
 _PROMPT_LINE = re.compile(r"^[\s│|╭╰─]*>\s?(.*?)[\s│|]*$")
 _sleep = time.sleep
@@ -1651,6 +1652,7 @@ def say(root: Path, branch: str, text: str) -> int:
               file=sys.stderr)
         return 5
     r = _tmux("send-keys", "-t", window, "-l", text)
+    _sleep(SAY_TYPE_SETTLE_S)
     r2 = _tmux("send-keys", "-t", window, "Enter")
     if r.returncode != 0 or r2.returncode != 0:
         print(f"dispatch: send-keys failed: {(r.stderr or r2.stderr).strip()}", file=sys.stderr)
@@ -1660,8 +1662,10 @@ def say(root: Path, branch: str, text: str) -> int:
         screen = _screen(window)
         line = _input_line(screen, pattern)
         if line is None:
-            print(f"dispatch: said to {branch}: {text[:80]} (not verified — the input line could not be read)")
-            return 0
+            # never a success: delivery is what `say` checks (Kenni #2405)
+            print(f"dispatch: {branch} — input line unreadable — set `say_prompt` in "
+                  f"model-policy.local.json; the text may be unsent: {text[:80]}", file=sys.stderr)
+            return 6
         if not _still_typed(line, text):
             print(f"dispatch: said to {branch}: {text[:80]}")  # delivered, whatever the output says
             return 0
