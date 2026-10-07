@@ -226,7 +226,6 @@ def test_project_delta_clears_with_one_exact_review_and_stales_after_another_edi
     root, _, base, verifier = update
     write(root, 'src/app.py', 'review_me = True\n')
     head = commit(root)
-    review = load('check_review')
     write(root, '.process-work/journal/review.md',
           'REVIEW work=update tier=2 reviewer=fresh model=same '
           'independence=bundle,non-implementing verdict=pass round=1 '
@@ -329,7 +328,6 @@ def test_migration_clears_only_with_tier3_exact_review(update, monkeypatch):
     _gate_release(root, source, base, verifier)
     write(root, 'scripts/process/check_something.py', '# enforcement, edited by the project\n')
     head = commit(root)
-    review = load('check_review')
     for tier in (2, 3):
         write(root, '.process-work/journal/review.md',
               f'REVIEW work=update tier={tier} reviewer=fresh model=cross '
