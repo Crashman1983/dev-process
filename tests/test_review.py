@@ -987,6 +987,17 @@ def _merge_check(cr, root, monkeypatch):
     return cr.check(root)
 
 
+def test_a_delta_line_the_push_carries_is_judged_at_the_fork_point(tmp_path, monkeypatch):
+    """Refutation of v2.53: with the anchor chain gone, a `mode=delta` line skipped the
+    fork-point check and cleared a plan on a slice. Every ranged record is a full round."""
+    cr, root = _cr(), tmp_path / "p"
+    _fork, first, head = _fork_repo(root)
+    _journal(root, _review(work="forked", artifact=(first, head)) + " mode=delta")
+    hard, _ = _merge_check(cr, root, monkeypatch)
+    assert any("malformed REVIEW line" in h and "is not the fork point" in h for h in hard), hard
+    assert any("no clearing REVIEW" in h and "forked" in h for h in hard), hard
+
+
 def test_an_unmerged_full_round_off_the_fork_point_is_hard_and_clears_nothing(tmp_path, monkeypatch):
     cr, root = _cr(), tmp_path / "p"
     _fork, first, head = _fork_repo(root)

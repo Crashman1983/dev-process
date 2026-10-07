@@ -791,6 +791,8 @@ def build(root: Path, base: str | None, plan_filter: str | None = None,
         add("*(unavailable: no usable base ref — pass --base explicitly; "
             "git may be absent or the repo unborn)*\n")
     else:
+        if since and not (_git(root, "rev-parse", "--verify", "--quiet", f"{since}^{{commit}}") or "").strip():
+            raise SystemExit(f"make_review_bundle: --since {since} names no commit in this clone")
         artifact = _review_artifact(root, resolved, since)
         if artifact is None and since:
             raise SystemExit("make_review_bundle: cannot read this delta — use a full bundle "
@@ -805,8 +807,17 @@ def build(root: Path, base: str | None, plan_filter: str | None = None,
         else:
             add(f"REVIEW_ARTIFACT base={artifact.base} head={artifact.head}\n")
             diff = artifact.text
+            if since:
+                # the verdict binds the whole branch: its surface is always shown,
+                # also when the delta is empty (refutation: an empty delta showed no
+                # code at all and still vouched for the branch)
+                stat = _git(root, "diff", "--stat", f"{resolved}...HEAD")
+                if stat and stat.strip():
+                    add("Full branch surface:\n```\n" + stat.rstrip() + "\n```\n")
             if not diff.strip():
-                add(f"*(empty: HEAD adds nothing over {resolved})*\n")
+                add(f"*(empty: nothing was committed since `{since}` — this round re-checks the "
+                    f"branch above; build a full bundle to read its code)*\n" if since
+                    else f"*(empty: HEAD adds nothing over {resolved})*\n")
             else:
                 lines = diff.count("\n")
                 label = (f"Delta: `{since}..HEAD`" if since else
@@ -828,10 +839,6 @@ def build(root: Path, base: str | None, plan_filter: str | None = None,
                 if entries:
                     add(f"Files in this diff ({len(entries)}):\n" + _fenced(
                         "\n".join(f"{letter}\t{_shown(path)}" for letter, _source, path in entries)))
-                if since:
-                    stat = _git(root, "diff", "--stat", f"{resolved}...HEAD")
-                    if stat and stat.strip():
-                        add("Full branch surface:\n```\n" + stat.rstrip() + "\n```\n")
                 if artifact.binaries:
                     # a binary reads as `Binary files … differ`, without a size:
                     # the stat block names path and bytes, so the gap is not

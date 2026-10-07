@@ -1443,6 +1443,19 @@ def _touches(text):
     return text.split("DELTA_TOUCHES files=", 1)[1].split("\n", 1)[0]
 
 
+def test_an_empty_delta_still_shows_the_branch_it_vouches_for(render, tmp_path):
+    """Refutation of v2.53: `--since HEAD` showed no code at all, and the bundle still
+    named the whole branch for the verdict. The branch surface is always shown; a
+    `--since` that names no commit says so."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    t = _bundle(out, "--base", "main", "--since", "HEAD").stdout
+    assert "Full branch surface:" in t and "widget.py" in t.split("Full branch surface:", 1)[1]
+    assert "nothing was committed since `HEAD`" in t and "HEAD adds nothing over" not in t
+    r = _run(out, "--base", "main", "--since", "no-such-ref", "--skip-preflight")
+    assert r.returncode != 0 and "--since no-such-ref names no commit" in r.stderr, r.stderr
+
+
 def test_tier3_delta_from_a_full_round_builds_and_lists_its_files(render, tmp_path):
     """Downstream, Tier 3 re-read 10-13k-line full bundles every round; a fix round
     reads the fix and names the files it touches. A fix outside gate code asks no new
