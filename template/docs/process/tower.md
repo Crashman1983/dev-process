@@ -22,7 +22,7 @@ conversations.
 | `lanes` | `scripts/lane.py status` where the project has it | who holds the test lanes |
 | `reports` | the latest `report.py` line per worker | state each worker claims, and how long ago |
 | `sessions` | every worker `dispatch.py` started: phase, model, where (tmux window or pid), alive, last printed line and when | the look at the workers; `dispatch.py log <branch>` for more |
-| `questions` | open `DECISION NEEDED` lines in active plans | what only the owner can answer — relayed with options, answered as a `DECISION` line |
+| `questions` | open `DECISION NEEDED` lines in active plans | what only the owner can answer — relayed with options, answered as a `DECISION` line (a question kept in place and marked `(answered …)` before its colon counts as answered too) |
 | `findings` | deterministic, each with a *because* | the list to act on |
 | `--wait`, `--section` (flags) | `--wait [--timeout S] [--states a,b]` blocks on this host's reports file and prints each new matching line as JSON (exit 0; 3 on timeout; 2 outside a clone); `--json --section NAME` (repeatable) prints only those keys | the steward's harness-neutral watch (`/steward`); a small read instead of the whole table |
 
@@ -112,7 +112,10 @@ cannot read (no `say_prompt` match) is no success either — exit 6, the
 text may be unsent. `dispatch.py stop <branch>` stops only what dispatch started,
 only when the recorded process is still the recorded one (pid and start
 time), and refuses while the worktree has uncommitted or untracked work
-(a plan not committed dies with the process). `max_workers` caps live
+(a plan not committed dies with the process). It reports the stopped
+session `idle` — unless the session's own final report already ended its
+phase (`review-pass`, `planned`, `done` …): that report stays, so a
+stopped finished review still boards the train. `max_workers` caps live
 sessions per host (one whose phase is over by its own final report — a
 plan's `planned`, a review's verdict — holds no slot; one that cannot be
 told does); a held lane counts as no free CPU: a held `full` lane blocks only execute, a held `scoped` (or unknown) lane blocks every phase, and a remote phase sees neither cap nor lane. A local start

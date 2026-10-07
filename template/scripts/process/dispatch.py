@@ -46,7 +46,8 @@ session with new code on origin beyond the last attestation is stopped and
 `review` queued; a `review-pass` review session whose attestation is on
 origin is stopped — its report is the train's ticket. `blocked` queues
 nothing: that decision is the steward's. A chained stop keeps the worker's
-report (a plain `stop` writes `idle`). The queue (`queue.json` beside the
+report (a plain `stop` writes `idle`, unless the session's own final
+report already ended its phase — that report stays). The queue (`queue.json` beside the
 records) is drained in order, and a line the caps or lanes refuse is
 skipped, not waited on: a plan or review behind a refused execute still
 starts. Local workers start under `nice` (policy `worker_nice`, default
@@ -1023,7 +1024,7 @@ def prompt_for(phase: str, issue: int, tier: int | None, branch: str, model: str
         return (f"/execute the committed plan for issue #{issue}: report `pushed` at the first push; stop after "
                 f"the last task is committed and pushed. The duties before `pushed` are in /execute; after a "
                 f"blocking review round the plan carries `ROOT-CAUSE work=<id> round=<r>: <cause> — <test that "
-                f"failed before the fix>` and `attest.py --dry-run` passes before you report." + tail)
+                f"failed before the fix>` and `attest.py --dry-run` names no missing root cause before you report." + tail)
     if not attests:
         return (f"/review branch `{branch}` for issue #{issue} as an independent reviewer: produce the verdict "
                 f"and findings as report text in your output; do not run attest.py or git — the steward "
@@ -1752,6 +1753,17 @@ def say(root: Path, branch: str, text: str) -> int:
     return 4
 
 
+def _phase_over_by_report(root: Path, rec: dict) -> bool:
+    """A session whose own final report ended its phase keeps that report: an
+    `idle` on top of a review's `review-pass` read as a lost pass, and the
+    finished branch dropped out of the train (downstream, three branches in
+    one day)."""
+    try:
+        return bool(phase_over(root, rec, session_report(rec, _report.read_reports(root)), local=True))
+    except (OSError, ValueError, SystemExit):
+        return False
+
+
 def stop(root: Path, branch: str, *, force: bool, keep_report: bool = False) -> int:
     found = _load_record(root, branch)
     if found is None:
@@ -1802,7 +1814,7 @@ def stop(root: Path, branch: str, *, force: bool, keep_report: bool = False) -> 
                 os.kill(pid, signal.SIGKILL)
             except (ProcessLookupError, PermissionError):
                 pass
-    if not keep_report:
+    if not keep_report and not _phase_over_by_report(root, rec):
         try:
             _report.write_report(root, "idle", issue=rec.get("issue"),
                                  note=f"stopped by dispatch ({rec.get('phase')})", worker=branch)
