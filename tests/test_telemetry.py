@@ -295,6 +295,24 @@ def test_report_end_to_end(render, tmp_path):
     assert "[cfr]" in r.stdout
 
 
+def test_share_prints_process_against_product_week_by_week(render, tmp_path):
+    out = _render(render, tmp_path)
+    for args in (["init", "-q", "-b", "main"], ["config", "user.email", "t@t"], ["config", "user.name", "t"],
+                 ["add", "-A"], ["commit", "-q", "-m", "base"]):
+        subprocess.run(["git", *args], cwd=out, check=True, capture_output=True)
+    for i, rel in enumerate([".process-work/journal/a.md", ".process-work/journal/a.md", "src/x.py"]):
+        p = out / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(f"{i}\n")
+        subprocess.run(["git", "add", "-A"], cwd=out, check=True)
+        subprocess.run(["git", "commit", "-q", "-m", f"c{i}"], cwd=out, check=True)
+    r = subprocess.run([sys.executable, str(out / "scripts/process/process_kpis.py"), "share", "--weeks", "2"],
+                       cwd=out, capture_output=True, text=True)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "week -0:    4 commits — process only  50%" in r.stdout, r.stdout
+    assert "week -1:    0 commits" in r.stdout and "confidence: low" in r.stdout
+
+
 # --- hygiene -----------------------------------------------------------------
 
 def test_neutral_no_kenni_terms(render, tmp_path):

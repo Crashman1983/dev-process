@@ -66,7 +66,7 @@ its documented threshold instead of a confidence tag.
 
 Lean pass: the cockpit carries exactly the three KPIs the process goals name
 — convergence (error rate at the gate), cost, and CFR (error rate after
-merge) — plus the advisory readers `clusters`, `models` and `rounds`. `models` and `rounds` file a work item under the highest tier any of its review rounds declared.
+merge) — plus the advisory readers `clusters`, `models`, `rounds` and `share`. `models` and `rounds` file a work item under the highest tier any of its review rounds declared.
 
 | family | measures | action (threshold → act) |
 |---|---|---|
@@ -75,6 +75,7 @@ merge) — plus the advisory readers `clusters`, `models` and `rounds`. `models`
 | `cfr` | DORA change failure rate: `feat:` with a corrective `fix:` ≤7 d sharing a code file (proxy) | trend over ≥3 windows only; rising despite catch>0 → tighten the test/review gate |
 | `clusters` | rule 6 across sessions: `fix:` commits (14 d) sharing a subject token — each session sees its fix as a first attempt; git sees the series | a cluster ≥3 → stop path-patching, write the invariant record (Type: invariant) with its table test (`workflow.md`, Debug) |
 | `rounds` | per work item: tier, rounds to the first pass and blocked rounds (journal `REVIEW` lines); blockers per `FINDING`, by `origin=draft\|fix\|late` where the reports carry it — read through `check_issues.py` when the `github-issues` module is installed, else "not read"; a reader that is installed but cannot import (PyYAML missing — `uv run` resolves the script's header) is named as such | proxy; within one tier over time: `fix` blockers dominate → regression tests and a re-check of the fixed class (`verification-independence.md`, "What each round judges"); `late` dominates → a more complete round 1 |
+| `share` | week by week on the integration branch: commits touching only process records, mixed and product only, and the landed changes that carried product code (`tower.py` owns the classification and shows the current week as `balance`) | proxy — paths, not effort; process-only above 40% for two weeks while product changes fall → look where the rounds go (`rounds`) and batch bookkeeping one commit per round (`testing.md`) |
 
 A KPI without a trigger does not exist — the cockpit only helps if something
 runs it. With GitHub CI the `process-kpis` workflow runs `report` monthly

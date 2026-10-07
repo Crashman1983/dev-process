@@ -602,3 +602,35 @@ def test_a_criss_cross_worktree_has_unknown_files_not_a_crash(render, tmp_path):
     d = tower.describe_worktree({"path": str(out), "branch": "feat"}, None)
     assert d["in_flight_unknown"] is True and d["in_flight"] == []
 
+
+
+def _commit_files(out: Path, n: int, files: dict[str, str], msg: str) -> None:
+    for i in range(n):
+        for rel, text in files.items():
+            p = out / rel
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(f"{text}{i}\n")
+        _git(out, "add", "-A")
+        _git(out, "commit", "-q", "-m", f"{msg} {i}")
+
+
+def test_balance_shows_how_much_of_what_lands_is_process(render, tmp_path):
+    """Downstream, 47 % of two weeks' commits touched only process records and 19 %
+    only product code, and nobody saw it until the owner asked. The tower shows
+    the balance and names a process-heavy week."""
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    _commit_files(out, 15, {".process-work/journal/2026-10-07.md": "REVIEW line "}, "docs: attest")
+    _commit_files(out, 5, {"src/app.py": "x = "}, "feat: app")
+    _commit_files(out, 3, {"src/app.py": "y = ", "specs/001-app/plan.md": "- [x] T"}, "feat: app task")
+    table = json.loads(_tower(out, "--json").stdout)
+    b = table["balance"]
+    # the rendered template's base commit carries both kinds: mixed
+    assert (b["commits"], b["process"], b["mixed"], b["product"]) == (24, 15, 4, 5), b
+    heavy = [f for f in table["findings"] if f["kind"] == "process-heavy"]
+    assert heavy and "15 of 24 commits" in heavy[0]["what"], table["findings"]
+    assert "balance (7 d on main): 24 commits — 62% process only" in _tower(out).stdout
+    # a product-led week raises nothing
+    _commit_files(out, 20, {"src/app.py": "z = "}, "feat: more")
+    table = json.loads(_tower(out, "--json").stdout)
+    assert not [f for f in table["findings"] if f["kind"] == "process-heavy"]

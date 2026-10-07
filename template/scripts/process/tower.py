@@ -344,6 +344,70 @@ def red_gates(root: Path) -> list[dict]:
     return out
 
 
+# --- balance: how much of what lands is process ---------------------------------
+
+# process records and the process itself — what a change to the product does not touch
+PROCESS_PATHS = (".process-work/", "docs/process/", "scripts/process/", ".githooks/", ".claude/",
+                 ".github/prompts/", ".github/instructions/", ".specify/", "specs/")
+PROCESS_FILES = (".copier-answers.yml", ".process-owned", ".pre-commit-config.yaml",
+                 "CLAUDE.md", "AGENTS.md")
+BALANCE_DAYS = 7
+# above this share of process-only commits, with enough of them to judge, the
+# process outweighs the product (downstream: 47 % process-only against 19 %
+# product in two weeks, and the steward's time over 90 % process)
+PROCESS_HEAVY_SHARE = 0.4
+BALANCE_MIN_COMMITS = 20
+
+
+def is_process_path(rel: str) -> bool:
+    return rel.startswith(PROCESS_PATHS) or rel in PROCESS_FILES
+
+
+def classify_commit(files: set[str]) -> str:
+    """`process` (only process paths), `product` (none) or `mixed`; no files: `empty`."""
+    if not files:
+        return "empty"
+    proc = sum(is_process_path(f) for f in files)
+    return "process" if proc == len(files) else "product" if proc == 0 else "mixed"
+
+
+def _commits_since(root: Path, ref: str, since: str, until: str | None, *extra: str) -> list[set[str]] | None:
+    window = [f"--since={since}"] + ([f"--until={until}"] if until else [])
+    out = _git(root, "log", ref, *window, "-z", "--name-only", "--format=%x01%H", *extra)
+    if out is None:
+        return None
+    commits: list[set[str]] = []
+    for field in out.split("\0"):
+        if field.startswith("\x01"):  # `\x01<sha>`, then its names, the first after a newline
+            commits.append(set())
+            continue
+        field = field.lstrip("\n")
+        if field and commits:
+            commits[-1].add(field)
+    return commits
+
+
+def balance(root: Path, ref: str | None, days: int = BALANCE_DAYS, offset: int = 0) -> dict | None:
+    """What landed on the integration branch in `days` ending `offset` days ago:
+    commits by process-only / mixed / product, and the first-parent changes
+    (merges included, as their diff to main) that carried product code."""
+    if not ref:
+        return None
+    since, until = f"{days + offset} days ago", (f"{offset} days ago" if offset else None)
+    commits = _commits_since(root, ref, since, until, "--no-merges")
+    landed = _commits_since(root, ref, since, until, "--first-parent", "-m")
+    if commits is None or landed is None:
+        return None
+    kinds = {"process": 0, "mixed": 0, "product": 0}
+    for files in commits:
+        kind = classify_commit(files)
+        if kind in kinds:
+            kinds[kind] += 1
+    return {"days": days, "commits": sum(kinds.values()), **kinds,
+            "landed": len(landed), "landed_product": sum(classify_commit(f) in ("product", "mixed")
+                                                         for f in landed)}
+
+
 def lanes(root: Path) -> list[str]:
     lane = root / "scripts" / "lane.py"
     if not lane.is_file():
@@ -420,6 +484,14 @@ def remote_branches(root: Path, ref: str | None, local_branches: set[str],
 
 def findings(table: dict, stale_minutes: int) -> list[dict]:
     out: list[dict] = []
+    b = table.get("balance")
+    if b and b["commits"] >= BALANCE_MIN_COMMITS and b["process"] / b["commits"] > PROCESS_HEAVY_SHARE:
+        out.append({"kind": "process-heavy", "severity": "low",
+                    "what": f"{b['process']} of {b['commits']} commits in {b['days']} days touch only process "
+                            f"records; {b['product']} only product code",
+                    "because": "the process is outweighing the work it guards — look where the rounds go "
+                               "(process_kpis.py rounds) and whether bookkeeping is batched one commit per "
+                               "round (testing.md, bookkeeping-only push)"})
     for q in table.get("questions", []):
         out.append({"kind": "question", "severity": "high",
                     "what": f"{q['who']} asks on {q['plan']}"
@@ -606,6 +678,7 @@ def build(root: Path, stale_minutes: int = 60, *, remote: bool = False) -> dict:
         "reviews": reviews_today(root),
         "gates": red_gates(root),
         "lanes": lanes(root),
+        "balance": balance(root, ref),
         "reports": latest_reports(root, remote=remote),
         "remote_fetched": fetch_ok if remote else None,
     }
@@ -652,6 +725,12 @@ def render(table: dict) -> str:
                          f"{' [' + q['branch'] + ']' if q.get('branch') else ''}: {q['question'][:160]}")
     if table["lanes"]:
         lines.append("lanes: " + "; ".join(table["lanes"]))
+    b = table.get("balance")
+    if b and b["commits"]:
+        pct = lambda n: f"{100 * n // b['commits']}%"  # noqa: E731
+        lines.append(f"balance ({b['days']} d on {table['integration_ref']}): {b['commits']} commits — "
+                     f"{pct(b['process'])} process only, {pct(b['mixed'])} mixed, {pct(b['product'])} "
+                     f"product; {b['landed_product']} of {b['landed']} landed changes carry product code")
     if table["reports"]:
         lines.append("reports: " + "; ".join(
             f"{r['worker']}@{r.get('host', '?')} {r['state']}{' #' + str(r['issue']) if r.get('issue') else ''} ({r['minutes_ago']} min)"
