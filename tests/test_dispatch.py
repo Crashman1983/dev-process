@@ -422,7 +422,9 @@ def test_tmux_runner_starts_a_window_with_log_and_stops_it(render, tmp_path):
     pol = out / "docs/process/model-policy.json"
     data = json.loads(pol.read_text())
     fake = out.parent / "fake-interactive.sh"
-    fake.write_text('#!/bin/sh\necho "hello from $PROCESS_WORKER phase=$PROCESS_PHASE"\necho "prompt-has-issue: $3"\nsleep 60\n')
+    # an input line `say` can read: an unreadable one is no success (Kenni #2405)
+    fake.write_text('#!/bin/sh\necho "hello from $PROCESS_WORKER phase=$PROCESS_PHASE"\necho "prompt-has-issue: $3"\n'
+                    'while :; do printf "> "; read line || sleep 60; echo "got: $line"; done\n')
     fake.chmod(0o755)
     session = f"t{os.getpid()}"
     data.update({"command": f"{fake} --model {{model}} {{prompt}}", "runner": "tmux", "tmux_session": session})
