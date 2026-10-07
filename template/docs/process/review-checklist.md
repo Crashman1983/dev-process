@@ -204,6 +204,10 @@ specifics (which token, which component library); it does not lower it.
 
 - Does a **test map to each acceptance criterion** the change claims? A feature
   without a test proving its acceptance is not done (mandatory rule 5).
+- Where the change promotes criteria into the feature inventory: does each
+  entry's text say what the spec's `AC-n` line says, and does nothing else in
+  the diff restate a criterion instead of naming its id
+  (feature-registry module, "One owner per criterion")?
 - Is the suite **shaped** right for what changed (`testing.md`): the new tests
   at the cheapest layer that proves the behavior, the negative/edge/
   authorization/invalidation twins present, and a bug fix carrying its regression pin?
