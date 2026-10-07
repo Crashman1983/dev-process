@@ -1539,7 +1539,9 @@ def _touches(text):
 
 def test_tier3_delta_from_a_full_round_builds_and_lists_its_files(render, tmp_path):
     """Downstream, Tier 3 re-read 10-13k-line full bundles every round; an anchored fix
-    round reads the fix, names the files it touches, and asks for a new refute."""
+    round reads the fix and names the files it touches. A fix outside gate code asks
+    no new refute: regression tests and the delta review (a refute after every fix
+    round turned each Tier 3 round into two)."""
     out = render(tmp_path, {"project_name": "d", "modules": {}})
     _seed_repo(out)
     head = _t3_full_round(out)
@@ -1548,7 +1550,7 @@ def test_tier3_delta_from_a_full_round_builds_and_lists_its_files(render, tmp_pa
     assert "Delta re-review" in r.stdout and "REVIEW_SCOPE mode=delta" in r.stdout
     assert "widget.py" in _touches(r.stdout)
     assert "make_review_bundle: DELTA_TOUCHES files=" in r.stderr
-    assert "**REFUTE WARNING:**" in r.stdout and "each delta round" in r.stdout
+    assert "REFUTE WARNING" not in r.stdout, r.stdout
 
 
 def test_tier3_delta_without_a_full_round_at_its_start_is_refused(render, tmp_path):
@@ -1660,13 +1662,14 @@ def test_bundle_attest_and_gate_read_a_tier3_deltas_work_alike(render, tmp_path,
               "--independence", "bundle,non-implementing,cross-model", "--bundle", str(bundle), "."]
     # the alias does not restart the count: round 1 blocked, so this is round 2 and
     # needs the root cause of round 1 — recorded under either name
-    r = subprocess.run(attest, cwd=out, capture_output=True, text=True)
-    assert r.returncode == 1 and "no root cause for the fix of blocking round(s) 1" in r.stderr, r.stderr
+    r = subprocess.run(attest[:-1] + ["--dry-run", "."], cwd=out, capture_output=True, text=True)
+    assert r.returncode == 0 and "no root cause for the fix of blocking round(s) 1" in r.stderr, r.stderr
+    assert " round=2 " in r.stdout, r.stdout
     journal = out / ".process-work/journal/review.md"
     journal.write_text(journal.read_text() + f"\nROOT-CAUSE work={full} round=1: widget returned the "
                        "wrong value — test_widget failed before the fix\n")
     r = subprocess.run(attest, cwd=out, capture_output=True, text=True)
-    assert r.returncode == 0, r.stdout + r.stderr
+    assert r.returncode == 0 and "no root cause" not in r.stderr, r.stdout + r.stderr
     assert "mode=delta" in r.stdout and " round=2 " in r.stdout
     gate = _module(out, "check_review")
     records = [f for _r, t in gate.record_texts(out, ("journal",)) for _l, f in gate.parse_review_lines(t)[0]]

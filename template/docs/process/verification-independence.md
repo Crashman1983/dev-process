@@ -123,6 +123,25 @@ Its `DELTA_TOUCHES` line lists the files the delta changes. At any tier, if the
 fix changed a contract, the architecture or the risk scope, the reviewer says
 so and asks for a full bundle instead of judging the delta.
 
+**What blocks, and when the rounds stop.** This paragraph owns the rule;
+`/review` and the bundle preamble carry it. Block only for a defect someone
+would hit — a user, a caller, the merge or an attacker: in code, tests, a
+contract, security or the acceptance the plan claims. Wording in the plan, a
+report, a tally or the PR text never blocks: record it as a `nit`. A verdict
+whose findings are all minor or nit is a `pass` with residuals — no new
+round (downstream, a Tier 3 update's second round blocked on two majors that
+were plan text only, its code already accepted). From the second block on
+the same element the fix session — a fresh one, on the model the policy
+names for the tier's plan phase — decides *increment vs. rebuild the owning
+layer* and records it as a `DECISION` before the next round (mandatory rule
+4); that is not an owner question. After the third blocking round the owner
+decides once — merge with named residuals, cut scope, or rebuild — and the
+decision covers the rest of the work: a later round goes back to the owner
+only when the decision's premise no longer holds (downstream: one feature,
+eight rounds, six owner decisions, and the rebuild came after round four).
+A project's `review.local.md` may tighten the cap; it keeps the one decision
+per cap, not one per round.
+
 ## Bind the verdict to the reviewed artifact
 
 Independence is incomplete if the branch can change after review without
@@ -218,7 +237,8 @@ enforces what a language-agnostic gate honestly can, and no more:
   replace a new REVIEW with computed provenance only for a pure,
   owner/steward-acknowledged update. Both pinned releases are re-rendered;
   local project delta still needs a fresh, digest-bound Tier 2 REVIEW, and
-  enforcement migrations retain Tier 3. Failed provenance or a saved report
+  the project's own changes to gate code retain Tier 3 (released gate code
+  is template provenance like any other file). Failed provenance or a saved report
   cannot grant an exemption (`risk-tiers.md`, `releases.md`).
 - **Artifact identity.** A `REVIEW` carrying `base`/`head`/`diff` is verified:
   the gate recomputes the raw binary-diff digest from git and fails a mismatch

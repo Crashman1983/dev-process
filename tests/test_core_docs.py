@@ -578,7 +578,9 @@ def test_tier3_delta_rule_is_mechanical_and_owned_once(render, tmp_path):
             "file in the bundle's `DELTA_TOUCHES` line, plus the attesting reviewer") in review
     refute = " ".join((out / "docs/process/refute.md").read_text().split())
     assert "a Tier 3 review never takes a delta" not in refute
-    assert "A delta re-review asks for a new line at Tier 3" in refute
+    # a Tier 3 fix round outside gate code asks no new refute (v2.52.0)
+    assert "A delta re-review asks for a new line only when the delta touches gate code" in refute
+    assert "a Tier 3 fix round outside gate code asks none" in refute
     plan = " ".join((out / ".claude/commands/plan.md").read_text().split())
     assert "split along contracts into stacked plans (*phase-of*)" in plan
 
