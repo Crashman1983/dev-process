@@ -170,8 +170,7 @@ _FINDING_LINE = re.compile(r"^\s*(?:[-*+]\s+)?[*_]*FINDING\s+(\S+=.*)$")
 def _intended_finding(line: str) -> re.Match | None:
     """A line meant as a structured finding: optional bullet, `FINDING`,
     whitespace, and a `key=value` first token — how every real FINDING line
-    begins. Prose that merely starts with the word is not linted (the
-    telemetry GRADE lesson). Residual blind spot: a botched line whose first
+    begins. Prose that merely starts with the word is not linted. Residual blind spot: a botched line whose first
     token is a bare word reads as prose."""
     return _FINDING_LINE.match(line)
 

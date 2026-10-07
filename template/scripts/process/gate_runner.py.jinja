@@ -50,10 +50,12 @@ GATES = {
     "ac-text-drift": ("feature_registry", [sys.executable, "scripts/process/check_ac_text_drift.py", "."]),
     "github-issues": ("github_issues", [sys.executable, "scripts/process/check_issues.py", "."]),
     "sbom": ("sbom", [sys.executable, "scripts/process/check_sbom.py", "."]),
-    "telemetry": ("telemetry", [sys.executable, "scripts/process/check_telemetry.py", "."]),
     "design-contracts": ("design_contracts", [sys.executable, "scripts/process/check_design_contracts.py", "."]),
 }
-KNOWN_MODULES = {key for key, _command in GATES.values() if key is not None} | {"git_hooks"}
+# modules without a gate of their own: git_hooks installs hooks, telemetry
+# ships the read-only KPI cockpit (its GRADE gate was retired in v2.54.0)
+KNOWN_MODULES = ({key for key, _command in GATES.values() if key is not None}
+                 | {"git_hooks", "telemetry"})
 # modules the template no longer ships (v2.27.0 KISS pass): an older manifest
 # may still name them — accepted, never run
 RETIRED_MODULES = {"contracts", "security_floor", "arch_docs", "github_master"}

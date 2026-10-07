@@ -10,7 +10,7 @@ STANDARD_ON = [
     "scripts/process/check_issues.py",
     "scripts/process/check_architecture.py",
     "scripts/process/check_sbom.py",
-    "scripts/process/check_telemetry.py",
+    "scripts/process/process_kpis.py",
     "scripts/process/check_design_contracts.py",
 ]
 RETIRED = [
@@ -20,6 +20,7 @@ RETIRED = [
     "scripts/process/check_arch_docs.py",
     "scripts/process/check_security_floor.py",
     "scripts/process/trace.py",
+    "scripts/process/check_telemetry.py",
     "ARCHITECTURE-OVERVIEW.md",
 ]
 

@@ -52,7 +52,7 @@ unchanged, forever if needed.
    LLM judgment is review input, never a gate).
 3. Execute through the normal execute flow, consuming `tasks.md`: checkboxes
    in the file are the canonical progress state, story checkpoints validate
-   each slice (GRADE lines where telemetry is on), TDD inside each task, which
+   each slice, TDD inside each task, which
    closes when its behaviour is green (test and implementation in one or two
    commits). Completeness at review time is deterministic first: the
    `speckit` gate reports unchecked tasks in an active `tasks.md` as a

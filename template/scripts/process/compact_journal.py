@@ -4,10 +4,11 @@ exactly what the gates read.
 
 Journals grow without bound by design (`journal-state-plans.md`, Retention)
 and are read by agents and tools alike — the KPI cockpit, the review
-and telemetry gates. Reasoning older than a few weeks is history: git has the
+gate. Reasoning older than a few weeks is history: git has the
 full text, and nobody resumes a session from it. What must survive is the
 machine-read record: `REVIEW` attestations (the review gate clears archived
-plans against them) and `GRADE` lines (telemetry). Everything else in an old
+plans against them) and `GRADE` lines (retired telemetry records, kept as
+history). Everything else in an old
 shard is prose that costs tokens on every recursive read.
 
 The archive keeps one section per folded shard (its original path as the

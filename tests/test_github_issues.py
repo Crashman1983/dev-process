@@ -533,7 +533,7 @@ def test_finding_without_title_hard(render, tmp_path):
 
 
 def test_prose_starting_with_finding_ignored(render, tmp_path):
-    # the telemetry GRADE lesson applied: first token after FINDING must be
+    # prose is not linted: the first token after FINDING must be
     # key=value, else it is prose
     out = _render(render, tmp_path)
     _report(out, "2026-07-05-x.md", VALID_REPORT +

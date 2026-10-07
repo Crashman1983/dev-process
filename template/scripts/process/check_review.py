@@ -7,7 +7,7 @@ gate always runs. It reads `REVIEW` attestation lines from the journal and
 enforces what a language-agnostic CI gate honestly can:
 
   - HARD: a malformed `REVIEW ` line (grammar, enums, numeric fields) — a
-    malformed attestation is silent loss, exactly as for telemetry `GRADE`.
+    malformed attestation is silent loss.
   - HARD (independence arithmetic on a `verdict=pass`): a self-review
     (`non-implementing` absent) or a warm review (`bundle` absent) cannot clear
     Tier 2+; a Tier 3 pass must carry `cross-model` or the explicit
@@ -49,7 +49,7 @@ than be weighed by a human. Presence is checked against archived plans (a plan i
 archived on merge), so the gate never reds CI mid-development and offers a
 named-exception escape (`review-waived:`) so it enforces without a footgun.
 
-Pure stdlib. Owns the `REVIEW` grammar; shares nothing with telemetry's `GRADE`.
+Pure stdlib. Owns the `REVIEW` grammar.
 """
 from __future__ import annotations
 
@@ -509,7 +509,6 @@ def parse_review_lines(text: str) -> tuple[list[tuple[int, dict]], list[tuple[in
             if bad:
                 continue
         # isascii guards unicode digits ("²"): isdigit() is True but int() raises
-        # — the same trap telemetry's GRADE round check already names
         if not (fields["tier"].isascii() and fields["tier"].isdigit()) or \
                 not (fields["round"].isascii() and fields["round"].isdigit()):
             errors.append((i, "tier and round must be integers"))
