@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.11"
+# dependencies = ["pyyaml>=6,<7"]
+# ///
 """train — collect finished branches and merge them as one batch behind ONE
 full suite, at a good moment, instead of every branch paying its own
 full run and deploy.
