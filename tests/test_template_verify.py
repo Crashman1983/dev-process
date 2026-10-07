@@ -116,19 +116,40 @@ def test_matching_new_render_does_not_hide_lost_project_customization(update):
     assert 'docs/process/example.md' in proof['project_delta']
 
 
-def test_template_enforcement_change_requires_tier3_even_with_no_plan(update, monkeypatch):
-    root, source, base, verifier = update
-    write(source, 'template/scripts/process/check_something.py', '# new enforcement\n')
+def _gate_release(root, source, base, verifier, body='# new enforcement\n'):
+    """A release that changes gate code, applied exactly as released and acknowledged."""
+    write(source, 'template/scripts/process/check_something.py', body)
     new = commit(source)
     git(source, 'tag', 'v1.2.0')
     import copier
     copier.run_copy(str(source), str(root), vcs_ref='v1.2.0', defaults=True,
                     overwrite=True, quiet=True)
-    shutil.rmtree(root / '.process-work/plans')
     write(root, verifier.ACK, json.dumps(dict(base=base, release=new, owner='owner')))
+    return new
+
+
+def test_release_identical_gate_code_is_a_pure_update(update, monkeypatch):
+    """Downstream every release changed scripts/process/, so every update was an
+    enforcement migration and paid a Tier 3 review of code no project line had
+    touched. Gate code exactly as released is template provenance like any other
+    file: gates, tests and the owner's acknowledgment, no review."""
+    root, source, base, verifier = update
+    _gate_release(root, source, base, verifier)
+    shutil.rmtree(root / '.process-work/plans')
     commit(root)
     proof = verifier.verify(root, base)
-    assert proof['migration']
+    assert not proof['migration'] and 'scripts/process/check_something.py' in proof['identical'], proof
+    hard, _ = check(root, monkeypatch)
+    assert not any('digest-bound REVIEW required' in h for h in hard), hard
+
+
+def test_project_edit_to_released_gate_code_requires_tier3(update, monkeypatch):
+    root, source, base, verifier = update
+    _gate_release(root, source, base, verifier)
+    write(root, 'scripts/process/check_something.py', '# released, then weakened locally\n')
+    commit(root)
+    proof = verifier.verify(root, base)
+    assert proof['migration'] and 'scripts/process/check_something.py' in proof['project_delta'], proof
     hard, _ = check(root, monkeypatch)
     assert any('tier 3 digest-bound REVIEW required' in h for h in hard), hard
 
@@ -306,13 +327,8 @@ def test_other_copier_metadata_is_project_delta(update):
 
 def test_migration_clears_only_with_tier3_exact_review(update, monkeypatch):
     root, source, base, verifier = update
-    write(source, 'template/scripts/process/check_something.py', '# enforcement\n')
-    release = commit(source)
-    git(source, 'tag', 'v1.2.0')
-    import copier
-    copier.run_copy(str(source), str(root), vcs_ref='v1.2.0', defaults=True,
-                    overwrite=True, quiet=True)
-    write(root, verifier.ACK, json.dumps(dict(base=base, release=release, owner='owner')))
+    _gate_release(root, source, base, verifier)
+    write(root, 'scripts/process/check_something.py', '# enforcement, edited by the project\n')
     head = commit(root)
     review = load('check_review')
     digest = review.artifact_digest(root, base, head)

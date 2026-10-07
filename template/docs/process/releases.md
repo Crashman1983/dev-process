@@ -77,9 +77,17 @@ record, not an accident.
    SHA must match the verifier's result. Re-acknowledge after every rebase:
    it moves the baseline, so the earlier acknowledgment no longer matches.
 5. Apply the template-update tier rules in `risk-tiers.md`: pure updates need
-   gates and project tests, project deltas need one Tier 2 review, enforcement
-   migrations retain Tier 3. Use `template-update: true` on the update's plan.
+   gates and project tests — released gate code included — project deltas need
+   one Tier 2 review, the project's own changes to gate code retain Tier 3.
+   Use `template-update: true` on the update's plan.
    Archive it before merging; finish and the merge train use the same proof.
+
+**When to update.** On a schedule, not per release: every two to four weeks,
+or sooner when a release fixes a defect that blocks you or names a security
+fix. Each update is a branch, an acknowledgment and a train run; taking every
+patch release as it comes turned the template's release rate into the
+project's process load downstream. Carry a local workaround for a known
+template defect until the next scheduled update rather than updating twice.
 
 Verification also catches a release-pin bump that leaves a changed template
 file at the old version. Template deletions qualify only when the old project
