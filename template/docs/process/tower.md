@@ -145,9 +145,10 @@ review is a local cell, e.g. `{"model": "<codex model>", "effort": "xhigh",
 refuses while the phase's command file declares `model:` or `effort:` in
 its frontmatter — read as the worker sees it (an existing worktree's
 working copy, else the branch, else the integration ref), and refused too
-when that copy is unreadable or its frontmatter mentions model/effort in
-any form but a plain top-level `key: value` line (`model: inherit` is
-fine) — and where the policy names `transcripts` the tower
+when that copy is unreadable, its frontmatter's end is ambiguous (Claude
+Code ends it at the first `---`, which must be a `---` line), or it
+carries model/effort in any form but a plain top-level `key: value` line
+(`model: inherit` is fine) — and where the policy names `transcripts` the tower
 reports `model-drift` when a dispatched session's own assistant messages
 show another model than the dispatched one.
 
