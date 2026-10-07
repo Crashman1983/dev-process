@@ -1,6 +1,6 @@
 # Entscheidung: Review-Gate halbieren
 
-Datum: 2026-10-07 · Status: **Entscheidungsvorlage** (Owner-Freigabe offen) ·
+Datum: 2026-10-07 · Status: **freigegeben** (Owner, 2026-10-07); A, C, D, E und F umgesetzt in v2.53.0, B offen (siehe unten) ·
 Vorgänger: Position 8 der Abbauliste
 (`docs/analysis/2026-08-06-lean-teardown-list.md`), damals beschlossen und
 nicht umgesetzt; seitdem ist `check_review.py` von 563 auf 3.080 Zeilen
@@ -187,3 +187,18 @@ durchlaufen.
 - **Die Unabhängigkeits-Arithmetik bleibt unverändert:**
   `bundle,non-implementing`, `cross-model` oder `single-family`.
 - **Die Pflicht zum Review je Tier bleibt unverändert.**
+
+## Nachtrag: Stand nach v2.53.0
+
+A, C, D, E und F sind umgesetzt. B (Inhaltsvergleich statt Historientabelle)
+ist bewusst noch nicht umgesetzt. Bei der Umsetzung zeigte sich eine Lücke
+der Regel, wie sie oben steht: Ändern Branch und `main` verschiedene Stellen
+derselben Datei, entspricht das zusammengeführte Ergebnis weder dem Head
+noch `main`. Die Regel würde es als ungeprüft melden, und jeder Merge von
+`main` in einen solchen Branch bräuchte ein neues Review. Die bisherige
+Logik rechnet dafür den Auto-Merge nach (`_merge_own`).
+
+B braucht deshalb als dritten erlaubten Stand den sauberen Auto-Merge von
+Head und `main` (und im Zug den der Passagiere). Danach muss B, wie unter
+„Reihenfolge“ vorgesehen, im Schattenbetrieb gegen Kennis echte Historie
+laufen. Das ist ein eigenes Paket mit Tier 3 und Refute.
