@@ -164,6 +164,7 @@ def test_hook_doctor_accepts_the_main_checkouts_githooks_from_a_worktree(render,
     _git(out, "config", "user.name", "Test")
     (out / ".githooks").mkdir()
     (out / ".githooks" / "pre-push").write_text("#!/bin/sh\nexit 0\n")
+    (out / ".githooks" / "pre-push").chmod(0o755)
     _git(out, "add", "-A")
     _git(out, "commit", "-q", "-m", "base")
     wt = tmp_path / "wt"
@@ -180,6 +181,35 @@ def test_hook_doctor_accepts_the_main_checkouts_githooks_from_a_worktree(render,
     _git(out, "config", "core.hooksPath", str(elsewhere))
     hard, _soft = gi.hook_wiring_findings(wt)
     assert hard and "git never reads them" in hard[0], hard
+
+
+def test_hook_doctor_refuses_a_main_githooks_that_runs_no_hook(render, tmp_path):
+    """Refute of the #2412 fix: a missing, empty or non-executable main
+    .githooks passed — git runs no hook from it."""
+    out = render(tmp_path / "main", {"project_name": "demo"})
+    _git(out, "init", "-q", "-b", "main")
+    _git(out, "config", "user.email", "t@example.com")
+    _git(out, "config", "user.name", "Test")
+    (out / ".githooks").mkdir()
+    hook = out / ".githooks" / "pre-push"
+    hook.write_text("#!/bin/sh\nexit 0\n")
+    hook.chmod(0o755)
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "base")
+    wt = tmp_path / "wt"
+    _git(out, "worktree", "add", "-q", "-b", "b1", str(wt))
+    _git(out, "config", "core.hooksPath", str(out / ".githooks"))
+    gi = _load(wt)
+    assert gi.hook_wiring_findings(wt) == ([], [])
+    hook.chmod(0o644)
+    hard, _soft = gi.hook_wiring_findings(wt)
+    assert hard and "lacks (or cannot execute) pre-push" in hard[0], hard
+    hook.unlink()  # empty
+    hard, _soft = gi.hook_wiring_findings(wt)
+    assert hard and "lacks (or cannot execute) pre-push" in hard[0], hard
+    (out / ".githooks").rmdir()  # missing
+    hard, _soft = gi.hook_wiring_findings(wt)
+    assert hard and "lacks (or cannot execute) pre-push" in hard[0], hard
 
 
 def test_hook_doctor_stays_quiet_in_ci(render, tmp_path, monkeypatch):

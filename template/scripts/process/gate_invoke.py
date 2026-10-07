@@ -175,11 +175,13 @@ def _hook_files(d: Path) -> dict[str, bytes]:
 
 
 def _tracked_hooks_wiring(root: Path, hooks_path: str | None) -> tuple[bool, str | None]:
-    """(core.hooksPath reaches the tracked hooks, a note). `.githooks`
+    """(core.hooksPath reaches the tracked hooks, a message). `.githooks`
     literally, or an absolute path that resolves to this checkout's
     `.githooks` or to the main checkout's (a linked worktree shares the
-    main checkout's config) — the latter with a note when its files are
-    not this worktree's tracked copy."""
+    main checkout's config). The latter only while that directory holds
+    every tracked hook, executable — else the message says what is missing
+    (hard) — and with a note (soft) when its files differ from this
+    worktree's tracked copy."""
     if not hooks_path:
         return False, None
     if hooks_path == GITHOOKS_DIR:
@@ -197,6 +199,13 @@ def _tracked_hooks_wiring(root: Path, hooks_path: str | None) -> tuple[bool, str
     main = common_dir.resolve().parent / GITHOOKS_DIR
     if target != main.resolve():
         return False, None
+    # git runs what sits there: a missing or partial directory runs no hook
+    names = sorted(p.name for p in tracked.iterdir() if p.is_file())
+    missing = [n for n in names if not ((main / n).is_file() and os.access(main / n, os.X_OK))]
+    if missing:
+        return False, (f"core.hooksPath={hooks_path} is the main checkout's {GITHOOKS_DIR}/, but it "
+                       f"lacks (or cannot execute) {', '.join(missing)} — git runs no such hook for "
+                       f"pushes from here. {_tracked_hooks_installer(root)} in the main checkout")
     if _hook_files(main) != _hook_files(tracked):
         return True, (f"core.hooksPath={hooks_path} is the main checkout's {GITHOOKS_DIR}/, "
                       f"whose hooks differ from this worktree's tracked copy — the main "
@@ -229,10 +238,12 @@ def hook_wiring_findings(root: Path) -> tuple[list[str], list[str]]:
     # flipped the real repo to core.bare=true through it.
     tracked = root / GITHOOKS_DIR
     if tracked.is_dir() and any(p.is_file() for p in tracked.iterdir()):
-        wired, note = _tracked_hooks_wiring(root, hooks_path)
-        if note:
-            soft.append(note)
-        if not wired:
+        wired, message = _tracked_hooks_wiring(root, hooks_path)
+        if wired and message:
+            soft.append(message)
+        elif message:
+            hard.append(message)
+        elif not wired:
             hard.append(
                 f"{GITHOOKS_DIR}/ holds tracked hooks but core.hooksPath is "
                 f"{hooks_path or 'unset'} — git never reads them; whatever sits "
