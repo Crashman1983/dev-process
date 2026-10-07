@@ -2789,6 +2789,9 @@ def check(root: Path) -> tuple[list[str], list[str]]:
             soft.append(f"{rel}: no '## Decisions' section "
                         f"— decisions made in dialogue have no home here and do "
                         f"not survive a compaction (journal-state-plans.md, Plans)")
+        if tier >= 2:  # the commit-anchored arm below joins on it too
+            tiered_plans.append((rel, ptext, tier,
+                                 _plan_work_ids(plan_stem(rel), ptext, include_dedated=False)))
 
     # the speckit path's plans never enter the archive — surface the same
     # presence question there as a note (finish.py is the hard stop)
@@ -2909,7 +2912,8 @@ def check(root: Path) -> tuple[list[str], list[str]]:
         if not matching:
             if number not in _declared_anywhere(root):
                 soft.append(f"a commit in the pushed range claims #{number}, but no "
-                            f"plan declares that issue — no tier to key on, so review "
+                            f"plan declares that issue (neither in {PLANS_ACTIVE} nor in "
+                            f"{SPECS_DIR}/*/{SPEC_PLAN}) — no tier to key on, so review "
                             f"presence is not enforced for it")
             # a plan below Tier 2 or a waived one declares it: nothing to enforce
             continue
@@ -2952,14 +2956,11 @@ _UNHOMED_SANCTIONED = (".process-work", "specs", "docs/process", ".github",
 
 
 def _declared_anywhere(root: Path) -> set[int]:
-    """Issue numbers any plan declares — active or archived, whatever its tier."""
+    """Issue numbers any plan declares — active, archived or a spec dir's,
+    whatever its tier."""
     found: set[int] = set()
-    for d in (root / PLANS_ACTIVE, root / PLANS_ARCHIVE):
-        for p in sorted(d.glob("*.md")) if d.is_dir() else []:
-            try:
-                found |= _plan_issue_numbers(_unfenced(p.read_text(encoding="utf-8", errors="replace")))
-            except OSError:
-                continue
+    for _rel, text in record_texts(root, ("plan", "plan-archive", "spec-plan")) or []:
+        found |= _plan_issue_numbers(_unfenced(text))
     return found
 
 
