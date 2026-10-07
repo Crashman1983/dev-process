@@ -678,6 +678,34 @@ def test_commit_claiming_issue_of_tier3_plan_is_hard_on_merge_push(render, tmp_p
     assert _run(out, env=env).returncode == 0
 
 
+def test_commit_claiming_issue_of_a_spec_plan_is_hard_on_merge_push(render, tmp_path):
+    """Kenni #2399: the commit arm joined only on .process-work plans — a
+    specs/<dir>/plan.md declaring the issue was "no plan declares", a note."""
+    import os
+    out = render(tmp_path, {"project_name": "demo"})
+    _git(out, "init", "-q", "-b", "main")
+    _git(out, "config", "user.email", "t@example.com")
+    _git(out, "config", "user.name", "Test")
+    d = out / "specs/7-x"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "plan.md").write_text("# Plan\n\ntier: 2\nissue: #7\n\n## Decisions\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "base with spec plan")
+    _git(out, "checkout", "-q", "-b", "feature")
+    (out / "payload.txt").write_text("mine\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "feat: implement it (#7)")
+    env = {**os.environ, "PROCESS_PUSH_TARGETS": "refs/heads/main"}
+    r = _run(out, env=env)
+    assert r.returncode == 1, r.stdout
+    assert "claims #7" in r.stdout and "specs/7-x/plan.md" in r.stdout, r.stdout
+    assert "no plan declares" not in r.stdout
+    _journal(out, _review(work="7", tier="2"))
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "docs: attest")
+    assert _run(out, env=env).returncode == 0
+
+
 def test_tier2_active_plan_is_hard_on_merge_push(render, tmp_path):
     # observed downstream: a Tier 2 plan merged to main without a review, every
     # gate green — from Tier 2 on the proof is due at the merge push
