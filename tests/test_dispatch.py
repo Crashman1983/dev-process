@@ -1025,6 +1025,29 @@ def test_the_policy_decision_channel_reaches_the_prompt(render, tmp_path, monkey
         assert seen[-1] == expected, channel
 
 
+def test_a_codex_cell_gets_no_live_channel_and_reports_instead_of_attesting(render, tmp_path, monkeypatch, capsys):
+    """#175: a Codex review cell was told to use the steward's SendMessage
+    channel and to run attest.py — neither exists in its read-only sandbox."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    mod = _load_dispatch(out)
+    policy = json.loads((out / "docs/process/model-policy.json").read_text())
+    policy["decision_channel"] = "SendMessage to 'steward'"
+    policy["tiers"]["3"]["review"] = {"model": "gpt-x", "command": "codex exec --model {model} --sandbox read-only {prompt}"}
+    monkeypatch.setattr(mod, "load_policy", lambda _root: policy)
+    monkeypatch.setattr(mod, "runnable", lambda _argv: None)
+    seen = []
+    real = mod.build_argv
+    monkeypatch.setattr(mod, "build_argv", lambda pol, model, prompt, *a, **k: seen.append(prompt) or real(pol, model, prompt, *a, **k))
+    assert mod.start(out, issue=7, phase="review", tier=3, branch="7-work", title=None, dry_run=True) == 0
+    prompt = seen[-1]
+    assert "SendMessage" not in prompt
+    assert "do not run attest.py or git" in prompt and "--model gpt-x" in prompt and "attest the REVIEW line" not in prompt
+    assert "decision_channel omitted: `codex` cell has no live channel" in capsys.readouterr().out
+    # the Claude cell keeps both
+    assert mod.start(out, issue=7, phase="review", tier=2, branch="7-work", title=None, dry_run=True) == 0
+    assert "SendMessage to 'steward'" in seen[-1] and "attest the REVIEW line" in seen[-1]
+
+
 # --- the session's own report, and whether its phase is over: one answer for chain and tower ---
 
 def test_a_report_from_before_the_session_is_not_its_word(render, tmp_path):

@@ -151,6 +151,15 @@ fine) — and where the policy names `transcripts` the tower
 reports `model-drift` when a dispatched session's own assistant messages
 show another model than the dispatched one.
 
+A local cell whose command is not `claude` (a Codex review cell) has no
+live channel and no attest step: `start` omits `decision_channel` from its
+prompt and says so, and a review prompt asks for the verdict and findings
+as report text in the output — no attest.py, no git; the steward attests
+with `--model <cell model>` from that output (`dispatch.py log`). Such a
+cell runs read-only and reports only; the end-to-end path with an
+attestation is Codex as a tool inside a Claude review
+(`verification-independence.md`).
+
 **Model by task class.** A task line may carry a class as a bracket token
 after its id, beside `[P]` and `[US1]`: `[mechanical]` (zero-context, exact
 paths), `[design]` (an interface, a data shape, a trade-off), or another
