@@ -112,6 +112,28 @@ def test_open_question_keeps_a_branch_off_the_train(render, tmp_path):
     assert by["asked"]["eligible"]
 
 
+@pytest.mark.parametrize("marked", [
+    "DECISION NEEDED 2026-09-21 asked (beantwortet, s. u.): drop the flag? — options: A, B",
+    "DECISION NEEDED (answered below) 2026-09-21 asked: drop the flag? — options: A, B",
+    "DECISION NEEDED 2026-09-21 asked: (answered) drop the flag? — options: A, B",
+    "~~DECISION NEEDED 2026-09-21 asked: drop the flag? — options: A, B~~",
+])
+def test_a_question_marked_answered_in_place_rides_the_train(render, tmp_path, marked):
+    """Downstream: workers kept answered questions in place, marked `(beantwortet)`;
+    behind the date the marker still read as open, and finished branches would
+    have dropped out of the train over where a word stood."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _branch(out, "asked", {"src/q.py": "q\n"})
+    _git(out, "checkout", "-q", "asked")
+    a = out / ".process-work/plans/archive/2026-09-20-asked.md"
+    a.write_text(a.read_text() + f"- {marked}\n- DECISION 2026-09-21 owner: drop it\n")
+    _git(out, "commit", "-q", "-am", "answered in place")
+    _git(out, "checkout", "-q", "main")
+    by = {c["branch"]: c for c in json.loads(_train(out, "plan", "--json").stdout)["candidates"]}
+    assert by["asked"]["eligible"], by["asked"]["reasons"]
+
+
 def test_run_merges_the_batch_behind_one_suite_and_drops_the_offender(render, tmp_path):
     out = render(tmp_path, {"project_name": "d", "modules": {}})
     _repo(out)

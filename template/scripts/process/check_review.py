@@ -293,6 +293,25 @@ def _unfenced(text: str) -> str:
     return "\n".join(out)
 
 
+# A worker's open question to the owner: `DECISION NEEDED <date> <who>: …`
+# (bold markers and a missing `who` are still a question). Answered is the line
+# rewritten to `DECISION`, struck through, or marked `(answered …)` anywhere
+# before its colon — downstream, workers marked answered questions in place,
+# and a marker after the date read as still open: three finished branches
+# would have dropped out of the train over its position.
+DECISION_NEEDED = re.compile(
+    r"^\s*(?:[-*+]\s+)?[*_]*DECISION NEEDED[*_]*\s+(\d{4}-\d{2}-\d{2})(?:\s+([^:\n]+?))?\s*:\s*(.+?)\s*$",
+    re.MULTILINE)
+ANSWERED_MARK = re.compile(r"\((?:answered|resolved|decided|beantwortet|entschieden|erledigt)\b", re.IGNORECASE)
+
+
+def open_questions(text: str) -> list[re.Match]:
+    """The still-open `DECISION NEEDED` lines of a plan, fenced examples left out."""
+    return [m for m in DECISION_NEEDED.finditer(_unfenced(text))
+            if not ANSWERED_MARK.search(m.group(2) or "")
+            and not ANSWERED_MARK.match(m.group(3))]
+
+
 # HTML comments as CommonMark renders them. A line starting with `<!--` (at
 # most three spaces in) opens an HTML block that ends at the line carrying
 # `-->`; unclosed, it hides the rest of the file. In running text a comment is

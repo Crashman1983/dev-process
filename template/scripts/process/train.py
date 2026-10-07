@@ -287,7 +287,7 @@ def candidates(root: Path, local: str, base: str) -> list[dict]:
             shown = _git(root, "show", f"{b}:{rel}")
             if shown.returncode != 0:
                 branch_unreadable.append(f"{rel} on {b}")  # an unread plan hides its open question
-            elif _tower.QUESTION_LINE.search(_review._unfenced(shown.stdout)):
+            elif _review.open_questions(shown.stdout):
                 open_q.append(rel)
         if open_q:
             c["reasons"].append(f"open DECISION NEEDED in {open_q[0]} — answer it as a DECISION line before merging")

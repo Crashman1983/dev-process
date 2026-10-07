@@ -56,9 +56,6 @@ SPECS_DIR = "specs"
 DESIGN_CONTRACT = re.compile(r"^\s*(?:[-*+]\s+)?[*_]*design-contract[*_]*\s*:\s*(\S+)",
                              re.IGNORECASE | re.MULTILINE)
 DECISION_LINE = re.compile(r"^\s*(?:[-*+]\s+)?DECISION\s+\d{4}-\d{2}-\d{2}\s", re.MULTILINE)
-# a worker's question to the owner — lives in the plan, not in a chat
-QUESTION_LINE = re.compile(r"^\s*(?:[-*+]\s+)?[*_]*DECISION NEEDED[*_]*\s+(\d{4}-\d{2}-\d{2})(?:\s+([^:\n]+?))?\s*:\s*(.+?)\s*$",
-                           re.MULTILINE)  # bold markers and a missing `who` are still a question
 BEHIND_LIMIT = 50
 PLAN_NAME = re.compile(r"^(\d{4}-\d{2}-\d{2}-|design-)")
 RED_AGE_DAYS = 2
@@ -220,7 +217,7 @@ def plans_everywhere(root: Path, wts: list[dict]) -> list[dict]:
 
 def _questions_in(text: str, plan: str, branch: str | None, issue: str | None) -> list[dict]:
     out = []
-    for m in QUESTION_LINE.finditer(_review._unfenced(text)):
+    for m in _review.open_questions(text):
         out.append({"plan": plan, "branch": branch, "issue": issue, "date": m.group(1),
                     "who": (m.group(2) or "worker").strip(), "question": m.group(3).strip()[:600]})
     return out
@@ -239,7 +236,8 @@ def questions(root: Path, wts: list[dict], elsewhere: list[dict] | None = None) 
     """Open `DECISION NEEDED <date> <who>: <question — options … recommendation …>`
     lines in active plans — in every worktree of this clone (a worker's plan
     lives in ITS worktree, not the steward's) and in the branches other hosts
-    pushed. Answered = the line was rewritten to DECISION. Uncommitted text
+    pushed. Answered = the line was rewritten to DECISION or marked answered
+    (`check_review.open_questions`). Uncommitted text
     counts on this host: the question is asked the moment it is written."""
     out: list[dict] = []
     seen: set[tuple] = set()
