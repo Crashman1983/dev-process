@@ -20,6 +20,7 @@ conversations.
 | `reviews` | today's `REVIEW` passes and blocks by work id | what cleared today |
 | `gates` | the runner's red ledger with age | chronic reds |
 | `lanes` | `scripts/lane.py status` where the project has it | who holds the test lanes |
+| `balance` | the last 7 days on the integration branch: commits touching only process records, mixed, product only; landed changes carrying product code | whether the process outweighs the work it guards |
 | `reports` | the latest `report.py` line per worker | state each worker claims, and how long ago |
 | `sessions` | every worker `dispatch.py` started: phase, model, where (tmux window or pid), alive, last printed line and when | the look at the workers; `dispatch.py log <branch>` for more |
 | `questions` | open `DECISION NEEDED` lines in active plans | what only the owner can answer — relayed with options, answered as a `DECISION` line (a question kept in place and marked `(answered …)` before its colon counts as answered too) |
@@ -38,6 +39,7 @@ conversations.
 - **remote-unreachable** — `--remote` could not fetch; the table may be stale
 - **remote-residue** — unmerged branches on origin untouched for 14 days, counted not listed
 - **blocked** — a worker that reported `blocked` an hour ago and nothing since
+- **process-heavy** (low) — more than 40% of at least 20 commits in the last 7 days touch only process records: look where the rounds go and whether bookkeeping is batched
 - **far-behind** — 50+ commits behind the integration branch
 
 Brainstorm papers (`design-*` plans) and waived stale plans are listed but

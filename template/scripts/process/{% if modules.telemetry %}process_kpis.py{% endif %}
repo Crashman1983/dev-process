@@ -31,6 +31,7 @@ difference. See "honest ceiling" in the module doc.
                                                 # fix clusters (rule 6 across sessions)
   process_kpis.py models                        # rounds-to-pass and blocks by phase model × tier
   process_kpis.py rounds                        # per work item: rounds to pass, blockers by origin
+  process_kpis.py share         [--weeks N]     # process vs product, week by week
   process_kpis.py report                        # all families
 
 Lean pass: the cockpit carries exactly the three KPIs the process goals name
@@ -667,6 +668,30 @@ def rounds(root: Path | None = None) -> int:
     return 0
 
 
+# --- share: how much of what lands is process ----------------------------------
+def share(weeks: int = 4) -> int:
+    """Week by week on the integration branch: process-only, mixed and product
+    commits, and the landed changes that carried product code. tower.py owns
+    the classification (one owner); this prints its trend."""
+    import tower  # noqa: E402  (sibling; owns PROCESS_PATHS and balance)
+    print("[share] process vs product on the integration branch")
+    ref = tower.integration_ref(ROOT)
+    rows = [tower.balance(ROOT, ref, 7, 7 * w) for w in range(weeks)]
+    if not ref or any(r is None for r in rows):
+        print("  no integration branch or git unreadable — share skipped")
+        return 0
+    for w, r in enumerate(rows):
+        n = r["commits"]
+        pct = (lambda k: f"{100 * r[k] // n:>3}%") if n else (lambda k: "  -")
+        print(f"  week -{w}: {n:>4} commits — process only {pct('process')}, mixed {pct('mixed')}, "
+              f"product {pct('product')}; {r['landed_product']}/{r['landed']} landed changes with product code")
+    n = sum(r["commits"] for r in rows)
+    heavy = n and sum(r["process"] for r in rows) / n > tower.PROCESS_HEAVY_SHARE
+    print(f"  {confidence(n, proxy=True)} — paths classify, not effort: a one-line plan edit counts like a feature")
+    print(f"  -> {action('low', '', thin='process-only above 40% over weeks: look where the rounds go (rounds) and batch bookkeeping one commit per round (testing.md); falling product changes with rising process share is the signal' if heavy else 'watch the trend; act when process-only stays above 40% for two weeks')}")
+    return 0
+
+
 def report() -> int:
     print("=== process KPI cockpit (read-only) ===\n")
     convergence([])
@@ -676,6 +701,8 @@ def report() -> int:
     cfr(None)
     print()
     clusters(None)
+    print()
+    share()
     return 0
 
 
@@ -699,6 +726,8 @@ def main() -> int:
                     help="minimum fixes to call it a cluster (default 3)")
     sub.add_parser("models")
     sub.add_parser("rounds")
+    sh = sub.add_parser("share")
+    sh.add_argument("--weeks", type=int, default=4)
     sub.add_parser("report")
     args = p.parse_args()
 
@@ -706,6 +735,8 @@ def main() -> int:
         return models()
     if args.cmd == "rounds":
         return rounds()
+    if args.cmd == "share":
+        return share(args.weeks)
 
     if args.cmd == "convergence":
         return convergence(args.journals)
