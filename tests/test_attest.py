@@ -379,6 +379,20 @@ def test_a_mislabelled_cause_after_a_pass_costs_no_round(render, tmp_path):
     assert _gate(out).returncode == 0, _gate(out).stdout
 
 
+def test_a_late_pass_of_an_old_round_is_refused_not_promoted(render, tmp_path):
+    """Refutation of the round correction: a second reviewer of round 1 passing after
+    round 2 blocked, written as round 3, would outrank every block since and clear
+    a head no pass ever saw. A claim below the last blocked round stays refused."""
+    out, base, head = _repo(render, tmp_path)
+    ab = ("--base", base, "--head", head)
+    assert _attest(out, *ab, "--verdict", "block").returncode == 0
+    plan = out / ".process-work/plans/2026-09-10-widget.md"
+    plan.write_text(plan.read_text() + "\nROOT-CAUSE work=widget round=1: x — test_x\n")
+    assert _attest(out, *ab, "--verdict", "block", "--round", "2").returncode == 0
+    r = _attest(out, *ab, "--round", "1", "--dry-run")
+    assert r.returncode == 1 and "this is round 3" in r.stderr and "REFUSED" in r.stderr, r.stderr
+
+
 def test_a_root_cause_in_a_spec_kit_plan_counts(render, tmp_path):
     # Spec Kit keeps its plan in specs/<dir>/plan.md — a cause recorded there
     # is recorded; a REVIEW line quoted in two homes is still one round

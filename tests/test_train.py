@@ -112,8 +112,24 @@ def test_open_question_keeps_a_branch_off_the_train(render, tmp_path):
     assert by["asked"]["eligible"]
 
 
-@pytest.mark.parametrize("marked", [
-    "DECISION NEEDED 2026-09-21 asked (beantwortet, s. u.): drop the flag? — options: A, B",
+def test_who_or_why_in_parentheses_is_no_answer_marker(render, tmp_path):
+    # refutation: `(decided by owner)` names who decides — the question is still open
+    import importlib.util
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    spec = importlib.util.spec_from_file_location("cr", out / "scripts/process/check_review.py")
+    cr = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(cr)
+    for still_open in ("DECISION NEEDED 2026-09-22 api (decided by owner): keep the export? — options: A, B",
+                       "DECISION NEEDED 2026-09-22 api (entschieden durch Seb): Export behalten?",
+                       "DECISION NEEDED 2026-09-22 api: (resolved vs. pending) which state wins?"):
+        assert len(cr.open_questions(still_open + "\n")) == 1, still_open
+    for answered in ("DECISION NEEDED 2026-09-22 api (answered): keep it?",
+                     "DECISION NEEDED 2026-09-22 api (beantwortet, s. u.): behalten?",
+                     "DECISION NEEDED 2026-09-22 api (answered 2026-09-23): keep it?"):
+        assert cr.open_questions(answered + "\n") == [], answered
+
+
+@pytest.mark.parametrize("marked", [    "DECISION NEEDED 2026-09-21 asked (beantwortet, s. u.): drop the flag? — options: A, B",
     "DECISION NEEDED (answered below) 2026-09-21 asked: drop the flag? — options: A, B",
     "DECISION NEEDED 2026-09-21 asked: (answered) drop the flag? — options: A, B",
     "~~DECISION NEEDED 2026-09-21 asked: drop the flag? — options: A, B~~",
