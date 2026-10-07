@@ -63,7 +63,7 @@ recorded process is the recorded one (pid + start time; never pid 0), and
 refuses while the worktree has uncommitted or untracked work unless
 `--force` — a plan not committed dies with the process. `max_workers`
 caps live children on this host; a held lane counts as no free CPU —
-a held full lane blocks only execute, a held scoped (or unknown) lane
+a held full or scoped lane blocks only execute, an unknown held lane
 blocks every phase, and a remote phase sees neither cap nor lane. A
 local start also refuses while the filesystem holding the worktrees is
 at or above 90% use (`PROCESS_DISK_LIMIT_PCT`) and names `tidy.py
@@ -1403,15 +1403,22 @@ def held_lanes(root: Path) -> set[str]:
     return set(_LANE_HELD.findall(r.stdout))
 
 
+# lanes whose holder is a test run: a plan, review or brainstorm session is
+# mostly model-bound and starts beside it, an execute session waits
+# (downstream: one docs-only pre-push held `scoped` 15 minutes while four
+# queued sessions waited on an idle 8-core host — #177)
+TEST_LANES = frozenset({"full", "scoped"})
+
+
 def lane_verdict(held: set[str], phase: str) -> str | None:
-    """None = start allowed, else why not. Only `full` held, for a plan or review, is
-    allowed (those run under the train); any other held lane fails closed."""
+    """None = start allowed, else why not. Only known test lanes held, for a
+    phase other than execute, is allowed; an unknown held lane fails closed."""
     if not held:
         return None
     names = ", ".join(sorted(held))
-    if held == {"full"} and phase != "execute":
+    if held <= TEST_LANES and phase != "execute":
         return None
-    if held == {"full"}:
+    if held <= TEST_LANES:
         return f"lane {names} is held — no free CPU for an execute session (phase {phase}); retry when lane-status says free"
     return f"lane {names} is held — no free CPU for a new session (phase {phase}); retry when lane-status says free"
 
