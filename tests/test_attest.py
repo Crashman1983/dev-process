@@ -299,19 +299,20 @@ def test_rounds_of_another_plan_of_the_same_issue_do_not_count(render, tmp_path)
         _BLOCK.format(w="alpha") + "ROOT-CAUSE work=alpha round=1: x — test_x failed before\n")
     _git(out, "add", "-A")
     _git(out, "commit", "-qm", "two plans of #26")
-    # a claimed round 2 is refused: no round of THIS work blocked (_attest claims round 1 otherwise)
+    # a claimed round 2 is written as round 1: no round of THIS work blocked
     r = _attest(out, "--base", base, "--head", head, "--work", "26", "--round", "2", "--dry-run")
-    assert r.returncode == 1 and "this is round 1" in r.stderr, r.stdout + r.stderr
+    assert r.returncode == 0 and "written as round 1" in r.stderr and "round=1" in r.stdout, r.stdout + r.stderr
     # two ACTIVE plans of #26: the branch's slug picks one, else the literal id alone
     (plans / "2026-09-11-gizmo.md").write_text("# Plan\n\ntier: 2\nissue: #26\n")
     (out / ".process-work/journal/old.md").write_text(_BLOCK.format(w="widget"))
     _git(out, "add", "-A")
     _git(out, "commit", "-qm", "gizmo")
     r = _attest(out, "--base", base, "--head", head, "--work", "26", "--round", "2", "--dry-run")
-    assert r.returncode == 1 and "this is round 1" in r.stderr, r.stderr  # ambiguous: literal
+    assert r.returncode == 0 and "written as round 1" in r.stderr, r.stderr  # ambiguous: literal
     _git(out, "checkout", "-q", "-b", "26-widget")
     r = _attest(out, "--base", base, "--head", head, "--work", "26", "--round", "2", "--dry-run")
-    assert r.returncode == 1 and "this is round 1" not in r.stderr and "no root cause for the fix of blocking round(s) 1" in r.stderr, r.stderr
+    assert r.returncode == 0 and "written as round" not in r.stderr, r.stderr
+    assert "no root cause for the fix of blocking round(s) 1" in r.stderr and "round=2" in r.stdout, r.stderr
 
 
 def test_an_owner_exception_attests_planless_issue_work(render, tmp_path):
@@ -343,21 +344,39 @@ def test_the_round_is_counted_from_recorded_blocks_not_claimed(render, tmp_path)
     out, base, head = _repo(render, tmp_path)
     ab = ("--base", base, "--head", head)
     assert _attest(out, *ab, "--verdict", "block").returncode == 0
-    r = _attest(out, *ab, "--round", "3")
-    assert r.returncode == 1 and "this is round 2" in r.stderr
-    # the fix of round 1 names no cause yet
-    r = _attest(out, *ab, "--round", "2")
-    assert r.returncode == 1 and "no root cause for the fix of blocking round(s) 1" in r.stderr
+    r = _attest(out, *ab, "--round", "3", "--dry-run")
+    assert r.returncode == 0 and "written as round 2" in r.stderr and "round=2" in r.stdout, r.stderr
+    # the fix of round 1 names no cause yet: a note, never a refusal
+    r = _attest(out, *ab, "--round", "2", "--dry-run")
+    assert r.returncode == 0 and "no root cause for the fix of blocking round(s) 1" in r.stderr
     plan = out / ".process-work/plans/2026-09-10-widget.md"
     plan.write_text(plan.read_text() + "\nROOT-CAUSE work=widget round=1: the cache key ignored the tenant "
                     "— test_widget_per_tenant failed before the fix\n")
     r = _attest(out, *ab, "--round", "2")
-    assert r.returncode == 0, r.stderr
+    assert r.returncode == 0 and "note —" not in r.stderr, r.stderr
     assert "verdict=pass round=2" in _journal(out)
     # a re-check after the pass (a rebase, a short look) keeps the round
     r = _attest(out, *ab, "--round", "3")
-    assert r.returncode == 1 and "this is round 2" in r.stderr
-    assert _attest(out, *ab, "--round", "2").returncode == 0
+    assert r.returncode == 0 and "written as round 2" in r.stderr
+    assert "round=3" not in _journal(out)
+
+
+def test_a_mislabelled_cause_after_a_pass_costs_no_round(render, tmp_path):
+    """Downstream (#2396 R6): two families passed, the fix was closed, and attest
+    refused the record because the ROOT-CAUSE line said round=6 instead of 5 —
+    a fix session and a re-check for a label. The verdict is written; the note
+    names what is off."""
+    out, base, head = _repo(render, tmp_path)
+    ab = ("--base", base, "--head", head)
+    assert _attest(out, *ab, "--verdict", "block").returncode == 0
+    plan = out / ".process-work/plans/2026-09-10-widget.md"
+    plan.write_text(plan.read_text() + "\nROOT-CAUSE work=widget round=2: the cache key ignored the tenant "
+                    "— test_widget_per_tenant failed before the fix\n")
+    r = _attest(out, *ab, "--round", "2", "--reviewer", "codex")
+    assert r.returncode == 0, r.stderr
+    assert "no root cause for the fix of blocking round(s) 1" in r.stderr
+    assert "verdict=pass round=2" in _journal(out)
+    assert _gate(out).returncode == 0, _gate(out).stdout
 
 
 def test_a_root_cause_in_a_spec_kit_plan_counts(render, tmp_path):
@@ -372,9 +391,9 @@ def test_a_root_cause_in_a_spec_kit_plan_counts(render, tmp_path):
     (spec / "plan.md").write_text(f"# Plan\n\ntier: 2\n\n{block}\n\nROOT-CAUSE work=widget round=1: the "
                                   "cache key ignored the tenant — test_widget_per_tenant failed before\n")
     r = _attest(out, *ab, "--round", "2", "--dry-run")
-    assert r.returncode == 0, r.stderr
+    assert r.returncode == 0 and "note —" not in r.stderr, r.stderr
     r = _attest(out, *ab, "--round", "3", "--dry-run")
-    assert r.returncode == 1 and "this is round 2" in r.stderr
+    assert r.returncode == 0 and "written as round 2" in r.stderr
 
 
 def test_a_quoted_or_placeholder_root_cause_is_no_cause(render, tmp_path):
@@ -394,9 +413,10 @@ def test_a_quoted_or_placeholder_root_cause_is_no_cause(render, tmp_path):
                    "    " + real):
         plan.write_text(original + "\n" + quoted)
         r = _attest(out, *ab, "--round", "2", "--dry-run")
-        assert r.returncode == 1 and "no root cause" in r.stderr, quoted
+        assert r.returncode == 0 and "no root cause" in r.stderr, quoted
     plan.write_text(original + "\n- " + real)
-    assert _attest(out, *ab, "--round", "2", "--dry-run").returncode == 0
+    r = _attest(out, *ab, "--round", "2", "--dry-run")
+    assert r.returncode == 0 and "no root cause" not in r.stderr, r.stderr
 
 
 def test_attest_counts_blocks_the_way_the_gate_does(render, tmp_path):
@@ -411,7 +431,7 @@ def test_attest_counts_blocks_the_way_the_gate_does(render, tmp_path):
     j.mkdir(parents=True, exist_ok=True)
     (j / "2026-09-10.md").write_text(f"<!-- reviewer notes follow\n{line}\n")
     r = _attest(out, *ab, "--round", "2", "--dry-run")
-    assert r.returncode == 1 and "no root cause" in r.stderr, r.stderr
+    assert r.returncode == 0 and "no root cause" in r.stderr, r.stderr
 
 
 def test_every_record_home_is_read_from_one_owner(render, tmp_path):
@@ -459,7 +479,7 @@ def test_several_lenses_blocking_one_round_count_once(render, tmp_path):
     plan = out / ".process-work/plans/2026-09-10-widget.md"
     plan.write_text(plan.read_text() + "\nROOT-CAUSE work=widget round=1: x — test_x\n")
     r = _attest(out, *ab, "--round", "2")
-    assert r.returncode == 0, r.stderr
+    assert r.returncode == 0 and "note —" not in r.stderr, r.stderr
 
 
 def test_attest_writes_a_tier3_delta_only_on_an_anchored_full_round(render, tmp_path):
@@ -668,7 +688,7 @@ def test_a_commented_block_in_a_plan_is_no_round(render, tmp_path):
     plan = out / ".process-work/plans/2026-09-10-widget.md"
     plan.write_text(plan.read_text() + f"\n<!-- example:\n{line}\n-->\n")
     r = _attest(out, "--base", base, "--head", head, "--round", "2", "--dry-run")
-    assert r.returncode == 1 and "this is round 1" in r.stderr, r.stderr
+    assert r.returncode == 0 and "written as round 1" in r.stderr, r.stderr
 
 
 # --- #130 R2 / D1: one shard per issue, archive and commit with the pass ---
