@@ -107,7 +107,9 @@ shell pid. `dispatch.py list` shows state and each worker's last line
 types a line into a tmux worker (the owner's answer to a question, a
 redirect) and checks that it left the input line — a busy worker leaves
 typed text sitting there, so `say` presses Enter again and exits non-zero,
-naming the branch, when the text still has not gone. `dispatch.py stop <branch>` stops only what dispatch started,
+naming the branch, when the text still has not gone; an input line it
+cannot read (no `say_prompt` match) is no success either — exit 6, the
+text may be unsent. `dispatch.py stop <branch>` stops only what dispatch started,
 only when the recorded process is still the recorded one (pid and start
 time), and refuses while the worktree has uncommitted or untracked work
 (a plan not committed dies with the process). `max_workers` caps live
