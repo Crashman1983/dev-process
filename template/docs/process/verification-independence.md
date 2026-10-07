@@ -74,7 +74,10 @@ Dispatching is harness-plumbing around that artifact — pick what exists:
 - **Claude Code:** `claude -p "$(cat /tmp/bundle.md)"` (a fresh process — not
   the implementing session).
 - **Codex CLI:** `codex exec "$(cat /tmp/bundle.md)"` — this is the cross-model
-  path when the implementer was a Claude, and vice versa.
+  path when the implementer was a Claude, and vice versa. A dispatched Codex
+  cell runs read-only and reports only (no channel, no attest.py — the
+  steward attests from its output); the end-to-end path with attestation is
+  Codex as a tool inside a Claude review.
 - **Any chat model:** paste the bundle as the whole prompt.
 
 The reviewer's independence flags follow from the dispatch, not from wishful

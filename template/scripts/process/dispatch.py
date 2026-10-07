@@ -927,7 +927,9 @@ def ensure_worktree(root: Path, branch: str) -> Path:
 # --- the prompt: the slash command leads, the command file owns the steps -----------
 
 def prompt_for(phase: str, issue: int, tier: int | None, branch: str, model: str, remote: bool = False,
-               channel: str | None = None, effort: str | None = None) -> str:
+               channel: str | None = None, effort: str | None = None, attests: bool = True) -> str:
+    """The start prompt. `attests=False`: a cell on another harness (a Codex
+    review runs read-only) reports its verdict as text; the steward attests."""
     tier_s = f"tier {tier}" if tier is not None else "tier to be derived from the scope (risk-tiers.md)"
     where = ("run on another host than the steward: fetch and check out branch `{b}` from origin first, set "
              "PROCESS_HOST to this host's name and PROCESS_REPORT_SYNC=1 so every report reaches origin "
@@ -967,6 +969,11 @@ def prompt_for(phase: str, issue: int, tier: int | None, branch: str, model: str
                 f"the last task is committed and pushed. The duties before `pushed` are in /execute; after a "
                 f"blocking review round the plan carries `ROOT-CAUSE work=<id> round=<r>: <cause> — <test that "
                 f"failed before the fix>` and `attest.py --dry-run` passes before you report." + tail)
+    if not attests:
+        return (f"/review branch `{branch}` for issue #{issue} as an independent reviewer: produce the verdict "
+                f"and findings as report text in your output; do not run attest.py or git — the steward "
+                f"attests with `--model {model}` from your output (`dispatch.py log`); stop; never fix code."
+                + tail)
     return f"/review branch `{branch}` for issue #{issue} as an independent reviewer: attest the REVIEW line with attest.py, report `review-pass` or `blocked` with the findings, stop; never fix code." + tail
 
 
@@ -1415,8 +1422,17 @@ def start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str |
         print(f"dispatch: not starting — {full}", file=sys.stderr)
         return 3
     channel = policy.get("decision_channel")
+    channel = channel if isinstance(channel, str) and channel.strip() else None
+    # the live channel and attest.py are Claude Code's: a local cell on another
+    # harness reaches neither (#175). Remote: the command is a hand-over, not the harness
+    word = "" if remote else os.path.basename(_command_word(
+        build_argv(policy, model, "", branch, issue, phase, effort, cell.command)))
+    other_harness = bool(word) and word != "claude"
+    if channel and other_harness:
+        print(f"dispatch: decision_channel omitted: `{word}` cell has no live channel; reports via report.py")
+        channel = None
     prompt = prompt_for(phase, issue, tier, branch, model, remote=remote,
-                        channel=channel if isinstance(channel, str) and channel.strip() else None, effort=effort)
+                        channel=channel, effort=effort, attests=not other_harness)
     argv = build_argv(policy, model, prompt, branch, issue, phase, effort, cell.command)
     why = override_refusal(root, phase, model, argv, branch, remote)
     if why:
