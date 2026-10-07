@@ -19,6 +19,11 @@ helper, inspect the existing owner and its relevant callers and tests
 only relevant references. Update the task's affected-file list when
 necessary; a changed scope or contract goes through the existing workflow
 (`DECISION NEEDED`, back to `/plan`). Do not load `specs/` recursively.
+Name an acceptance criterion by its id; never restate its text. Where the
+feature inventory is installed, the last task before the review bundle
+writes the inventory entry from the spec's final `AC-n` lines — the spec
+owns the wording until then, the inventory from the merge on
+(feature-registry module, "One owner per criterion").
 Then read
 `docs/process/workflow.md` (Execute) and `docs/process/commits.md`. Per task:
 write the failing test (its edge cases: the classes of

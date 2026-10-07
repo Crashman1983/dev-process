@@ -6,4 +6,7 @@ build compacts, and the rules bind every task. Run
 `uv run scripts/process/process_context.py --issue N` (the issue you execute)
 for the next unchecked task. Then read
 `docs/process/workflow.md` (Execute). Per task: failing test, see red, implement
-the minimum, see green, commit atomically.
+the minimum, see green, commit atomically. Name an acceptance criterion by
+its id, never restate its text; where the feature inventory is installed,
+the last task before review writes its entry from the spec's final `AC-n`
+lines (feature-registry module, "One owner per criterion").
