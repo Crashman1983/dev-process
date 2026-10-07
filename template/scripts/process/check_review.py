@@ -302,7 +302,11 @@ def _unfenced(text: str) -> str:
 DECISION_NEEDED = re.compile(
     r"^\s*(?:[-*+]\s+)?[*_]*DECISION NEEDED[*_]*\s+(\d{4}-\d{2}-\d{2})(?:\s+([^:\n]+?))?\s*:\s*(.+?)\s*$",
     re.MULTILINE)
-ANSWERED_MARK = re.compile(r"\((?:answered|resolved|decided|beantwortet|entschieden|erledigt)\b", re.IGNORECASE)
+# the marker is a status, not a phrase: `(decided by owner)` still asks (refutation)
+ANSWERED_MARK = re.compile(
+    r"\((?:answered|resolved|decided|beantwortet|entschieden|erledigt)"
+    r"(?=\s*[),;]|\s+(?:below|above|unten|oben|see|siehe|s\.\s*u\.|→|->|\d{4}-\d{2}-\d{2}))",
+    re.IGNORECASE)
 
 
 def open_questions(text: str) -> list[re.Match]:

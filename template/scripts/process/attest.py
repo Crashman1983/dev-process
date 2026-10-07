@@ -25,8 +25,9 @@ already recorded for this work. A re-check after a pass, a rebase or a
 "short look" keeps the round — only a block starts a new one (observed
 downstream: rounds numbered 6 with one line in the journal, re-checks counted
 as rounds, plan and code rounds on one counter). Plan reviews count apart
-(`--plan-review` records work=<id>-plan). A claimed `--round` the count does
-not support is corrected to the count, with a note — never refused.
+(`--plan-review` records work=<id>-plan). A claimed `--round` above the count
+is corrected to the count, with a note; one below the last blocked round is
+refused — a late pass of an old round must not outrank the blocks since.
 
 Before any round after a block, each block's fix names its cause: a line
 `ROOT-CAUSE work=<id> round=<r>: <cause> — <the test that failed before the fix>`
@@ -233,10 +234,12 @@ def round_ids(args, root: Path) -> set[str]:
     return {work} | cands[0][1] if len(cands) == 1 else {work}
 
 
-def round_problems(args, root: Path, journal_dir: Path) -> tuple[int, list[str]]:
-    """(the round to write, notes on the claimed one). Notes never refuse: round
-    and cause are bookkeeping about a review that already ran — a refusal there
-    cost a whole mechanical round downstream and caught nothing."""
+def round_problems(args, root: Path, journal_dir: Path) -> tuple[int, list[str], list[str]]:
+    """(the round to write, notes, refusals). A claim above the count and a
+    missing cause are bookkeeping about a review that already ran — notes, since
+    a refusal there cost a whole mechanical round downstream and caught nothing.
+    A claim below the last blocked round is refused: written as the count, a late
+    pass of an old round would outrank the blocks recorded since (refutation)."""
     texts = _texts(root, journal_dir)
     mine = {work_key(w) for w in round_ids(args, root)}
     # distinct rounds, not lines: several reviewers (lenses) of one round each
@@ -247,11 +250,19 @@ def round_problems(args, root: Path, journal_dir: Path) -> tuple[int, list[str]]
     counted = 1 + len(blocks)
     last = blocks[-1] if blocks else None
     notes: list[str] = []
+    refusals: list[str] = []
     claimed = str(args.round_) if args.round_ is not None else str(counted)
     # the next round, or another reviewer (lens) of the round that just blocked
     allowed = {str(counted)} | ({str(last)} if last is not None else set())
     written = int(claimed) if claimed in allowed else counted
-    if claimed not in allowed:
+    if claimed not in allowed and not (claimed.isdigit() and int(claimed) > counted):
+        refusals.append(
+            f"round {args.round_} claimed, but {len(blocks)} blocking round(s) are recorded for "
+            f"work={args.work} — this is round {counted}"
+            + (f" (or {last}, for another reviewer of that round)" if last is not None else "")
+            + "; a verdict on an older round no longer stands against the blocks since — "
+            "review the current head")
+    elif claimed not in allowed:
         notes.append(
             f"round {args.round_} claimed, but {len(blocks)} blocking round(s) are recorded for "
             f"work={args.work} — written as round {counted}"
@@ -267,7 +278,7 @@ def round_problems(args, root: Path, journal_dir: Path) -> tuple[int, list[str]]
             + f" — record `ROOT-CAUSE work={args.work} round=<r>: <cause> — <the test "
             "that failed before the fix>` in the journal or the plan (docs/process/review-checklist.md, "
             "round economy)")
-    return written, notes
+    return written, notes, refusals
 
 
 def build_line(args, root: Path, journal_dir: Path | None = None) -> tuple[str, list[str]]:
@@ -332,8 +343,9 @@ def main() -> int:
     ap.add_argument("--independence", required=True)
     ap.add_argument("--verdict", required=True)
     ap.add_argument("--round", default=None, dest="round_",
-                    help="optional: another reviewer of the last blocked round; a round the count of "
-                         "recorded blocks does not support is written as the counted one, with a note")
+                    help="optional: another reviewer of the last blocked round; a round above the count "
+                         "of recorded blocks is written as the counted one, one below the last block "
+                         "is refused")
     ap.add_argument("--plan-review", action="store_true",
                     help="a review of the plan, not the code: counted apart as work=<id>-plan")
     ap.add_argument("--exception", help="an owner's override, recorded as REVIEW-EXCEPTION with what it overrides")
@@ -358,8 +370,8 @@ def main() -> int:
         # always: a plan whose own id ends in `-plan` would otherwise have its
         # plan review clear its code (refutation)
         args.work += "-plan"
-    counted, round_notes = round_problems(args, root, journal_dir)
-    round_issues = work_problems(args, root)  # an owner exception overrides it too
+    counted, round_notes, round_issues = round_problems(args, root, journal_dir)
+    round_issues += work_problems(args, root)  # an owner exception overrides it too
     exception_note = ""
     if args.exception:
         # always written: an owner exception that trips no rule here (a round
