@@ -1369,7 +1369,8 @@ def test_no_rendered_command_or_skill_declares_model_or_effort(render_raw, tmp_p
     d = _load_dispatch(out)
     files = [p for p in out.rglob("*.md") if {"commands", "prompts", "skills"} & set(p.relative_to(out).parts)]
     assert files or harness == "agents_md"
-    assert not [(str(p.relative_to(out)), k) for p in files for k in d.frontmatter_overrides(p.read_text())]
+    assert not [(str(p.relative_to(out)), d.frontmatter_overrides(p.read_text())) for p in files
+                if d.frontmatter_overrides(p.read_text()) != []]
 
 
 def _transcript(path: Path, *models: str, started: float = 0, sidechain: str = "") -> None:
@@ -1438,11 +1439,27 @@ def test_the_tower_reports_model_drift_only_with_transcripts(render, tmp_path):
     ("---\nmodel: haiku\n", []),
     ("\ufeff---\n\"model\": x\n---\n", ["model"]),
     ("---\r\neffort: low\r\n---\r\n", ["effort"]),
-    ("---\n  model: nested\nModel: x\n---\n", []),
-], ids=["inherit", "horizontal-rule", "unclosed", "bom-quoted-key", "crlf", "nested-or-other-case"])
+    ("---\nModel: x\ndescription: plan\n---\n", []),
+    ("---\nmodel: inherit # the policy owns it\n---\n", []),
+    ("---\r\n# owner: policy\r\nmodel: inherit  # c\r\n---\r\n", []),
+    ("---\n\"model\": \"inherit\"\n---\n", []),
+    ("---\nmodel: 'haiku' # c\n---\n", ["model"]),
+    # #173/#174: what a strict reader cannot decide is no "no override"
+    ("---\ndescription: x\n  model: nested\n---\n", None),
+    ("---\n{model: haiku}\n---\n", None),
+    ("---\nmodel:inherit\n---\n", None),
+    ("---\n[model, haiku]\n---\n", None),
+    ("---\n\tmodel: haiku\n---\n", None),
+    ("---\ndescription: x\n...\nmodel: haiku\n---\n", None),
+    ("---\ndescription: model: haiku\n---\n", None),
+    ("---\nmodel: \"haiku\n---\n", None),
+], ids=["inherit", "horizontal-rule", "unclosed", "bom-quoted-key", "crlf", "other-case",
+        "inherit-comment", "crlf-comment", "quoted-inherit", "quoted-comment", "nested", "flow-mapping",
+        "no-space", "flow-sequence", "tab-indent", "document-marker", "in-a-value", "unclosed-quote"])
 def test_only_a_real_frontmatter_override_counts(render, tmp_path, text, keys):
     """`inherit` defers to the dispatched model, and a `---` rule in a body
-    is no header — refusing those would block a correct start."""
+    is no header — refusing those would block a correct start; a header the
+    strict reader cannot decide that mentions model/effort is None (refused)."""
     d = _load_dispatch(render(tmp_path, {"project_name": "d", "modules": {}}))
     assert d.frontmatter_overrides(text) == keys
 
@@ -1471,6 +1488,51 @@ def test_the_override_check_reads_the_workers_branch_and_harness(render, tmp_pat
     pol.write_text(json.dumps(data))
     r = _dispatch(out, *start, "--branch", "b6")
     assert r.returncode == 0, r.stderr
+
+
+def test_a_header_that_cannot_be_decided_refuses_the_start(render, tmp_path):
+    """#173: `{model: haiku}` slipped past the line pattern as no override."""
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    cmd = out / ".claude/commands/plan.md"
+    cmd.write_text("---\n{model: haiku}\n---\n" + cmd.read_text())
+    _git(out, "commit", "-qam", "flow")
+    r = _dispatch(out, "start", "--issue", "3", "--phase", "plan", "--tier", "2", "--dry-run")
+    assert r.returncode == 3 and "cannot be parsed strictly" in r.stderr, r.stderr
+
+
+def test_an_existing_worktree_is_checked_on_disk(render, tmp_path):
+    """#174: the worker runs the worktree's working copy, not the committed file."""
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    cmd = out / ".claude/commands/plan.md"
+    cmd.write_text("---\nmodel: inherit\n---\n" + cmd.read_text())
+    _git(out, "commit", "-qam", "inherit")
+    wt = tmp_path / "wt-b8"
+    _git(out, "worktree", "add", "-q", "-b", "b8", str(wt))
+    start = ("start", "--issue", "8", "--phase", "plan", "--tier", "2", "--branch", "b8", "--dry-run")
+    assert _dispatch(out, *start).returncode == 0
+    local = wt / ".claude/commands/plan.md"
+    local.write_text(local.read_text().replace("model: inherit", "model: haiku"))
+    r = _dispatch(out, *start)
+    assert r.returncode == 3 and "declares model:" in r.stderr, r.stderr
+    local.unlink()
+    assert _dispatch(out, *start).returncode == 0  # absent: nothing overrides
+
+
+def test_an_unreadable_command_blob_refuses_the_start(render, tmp_path):
+    """#174: a blob git cannot show was read as "no override"."""
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    cmd = out / ".claude/commands/plan.md"
+    cmd.write_text("---\nmodel: inherit\n---\nunique body 7f3a\n")
+    _git(out, "commit", "-qam", "inherit")
+    blob = _git(out, "rev-parse", "HEAD:.claude/commands/plan.md").stdout.strip()
+    obj = out / ".git/objects" / blob[:2] / blob[2:]
+    obj.chmod(0o644)
+    obj.write_bytes(b"corrupt")
+    r = _dispatch(out, "start", "--issue", "3", "--phase", "plan", "--tier", "2", "--dry-run")
+    assert r.returncode == 3 and "unreadable" in r.stderr, r.stderr
 
 
 @pytest.mark.parametrize(("seen", "dispatched", "same"), [

@@ -320,40 +320,132 @@ def effort_refusal(policy: dict, phase: str, cell: Cell) -> str | None:
 # the phase command file of the harness a command starts (by its command
 # word): its frontmatter `model:`/`effort:` would override the dispatched cell
 PHASE_FILES = {"claude": ".claude/commands/{phase}.md", "copilot": ".github/prompts/{phase}.prompt.md"}
-_FRONTMATTER = re.compile(r"\A\ufeff?---\r?\n(.*?)^---[ \t]*\r?$", re.M | re.S)
-_OVERRIDE_KEY = re.compile(r"""^(["']?)(model|effort)\1[ \t]*:[ \t]*(.*?)[ \t]*\r?$""", re.M)
+# a strict reading of the frontmatter, without a YAML dependency: a top-level
+# `key: value` block mapping is decided; anything else that mentions
+# model/effort is "cannot decide" (None) and refuses the start
+_TOP_KEY = re.compile(r"""(?:"([^"]*)"|'([^']*)'|([A-Za-z0-9_][A-Za-z0-9_.\- ]*?))[ \t]*:(?:[ \t]+(.*))?""")
+_KEY_TOKEN = re.compile(r"""(?<![\w-])["']?(?:model|effort)["']?[ \t]*:""")
 
 
-def frontmatter_overrides(text: str) -> list[str]:
-    """The `model:`/`effort:` keys a command file's YAML frontmatter sets to
-    something other than `inherit` — frontmatter only when the file opens
-    with `---` and a `---` line closes it (a horizontal rule is no header)."""
-    m = _FRONTMATTER.match(text)
-    if not m:
+def _frontmatter_lines(text: str) -> list[str] | None:
+    """The lines between an opening `---` (optional BOM) and the first
+    closing `---` line; None when the file has no such header (a horizontal
+    rule in a body is none)."""
+    lines = text.removeprefix("﻿").splitlines()
+    if not lines or lines[0].rstrip(" \t") != "---":
+        return None
+    for i, line in enumerate(lines[1:], 1):
+        if line.rstrip(" \t") == "---":
+            return lines[1:i]
+    return None
+
+
+def _plain_value(raw: str) -> str | None:
+    """A top-level value without its quotes and inline comment; None when
+    its quoting cannot be read strictly."""
+    raw = raw.strip(" \t")
+    if raw.startswith("#"):
+        return ""
+    if raw[:1] in ("'", '"'):
+        close = raw.find(raw[0], 1)
+        rest = raw[close + 1:].strip(" \t") if close > 0 else None
+        if rest is None or (rest and not rest.startswith("#")):
+            return None
+        return raw[1:close]
+    return re.split(r"[ \t]#", raw, maxsplit=1)[0].strip(" \t")
+
+
+def frontmatter_overrides(text: str) -> list[str] | None:
+    """The `model:`/`effort:` keys a command file's frontmatter sets to
+    something other than `inherit`; [] without frontmatter (it opens with
+    `---` and a `---` line closes it). None means "cannot decide": the header
+    is no plain top-level `key: value` mapping (flow style, a document
+    marker, tab indentation, another top-level form) or mentions model/effort
+    anywhere but as such a key — the caller refuses."""
+    body = _frontmatter_lines(text)
+    if body is None:
         return []
-    return sorted({k for _q, k, v in _OVERRIDE_KEY.findall(m.group(1)) if v.strip("\"'") != "inherit"})
+    keys: set[str] = set()
+    for line in body:
+        stripped = line.strip(" \t")
+        if not stripped or stripped.startswith("#"):
+            continue
+        if line.startswith(("\t", "---", "...")) or stripped[0] in "{[":
+            return None
+        if line.startswith(" "):  # a continuation line: never a top-level key
+            if _KEY_TOKEN.search(line):
+                return None
+            continue
+        m = _TOP_KEY.fullmatch(line.rstrip(" \t"))
+        if not m:
+            return None
+        key = next(g for g in m.groups()[:3] if g is not None)
+        value = _plain_value(m.group(4) or "")
+        if value is None or _KEY_TOKEN.search(value):
+            return None
+        if key in ("model", "effort") and value != "inherit":
+            keys.add(key)
+    return sorted(keys)
+
+
+def _override_source(root: Path, rel: str, branch: str, remote: bool) -> tuple[str | None, str | None]:
+    """(text, refusal) of the command file as the worker will see it; both
+    None when it is absent. A worktree that exists already is read on disk;
+    otherwise the ref the worktree starts from (the branch, else the
+    integration ref; remote: origin's branch first)."""
+    if not remote:
+        wt = _worktrees(root).get(branch)
+        if wt is not None:
+            path = Path(wt) / rel
+            try:
+                if not path.is_file():
+                    return None, None
+                return path.read_text(encoding="utf-8"), None
+            except (OSError, ValueError) as exc:
+                return None, f"cannot read {path} ({exc})"
+    tips = [f"origin/{branch}", f"refs/heads/{branch}"] if remote else [f"refs/heads/{branch}"]
+    for ref in [*tips, *_review.integration_refs(root)]:
+        if _git(root, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}").returncode != 0:
+            continue
+        listed = _git(root, "ls-tree", ref, "--", rel)
+        if listed.returncode != 0:
+            return None, f"cannot list {rel} at {ref} ({listed.stderr.strip() or 'git ls-tree failed'})"
+        if not listed.stdout.strip():
+            return None, None
+        mode, kind = listed.stdout.split()[:2]
+        if kind != "blob":
+            return None, None
+        if mode == "120000":
+            return None, f"{rel} is a symlink at {ref}, the file it names is not checked"
+        shown = _git(root, "show", f"{ref}:{rel}")
+        if shown.returncode != 0:
+            return None, f"{rel} at {ref} is unreadable ({shown.stderr.strip() or 'git show failed'})"
+        return shown.stdout, None
+    return None, None
 
 
 def override_refusal(root: Path, phase: str, model: str, argv: list[str], branch: str,
                      remote: bool = False) -> str | None:
-    """Why the phase's command file, as the worker will see it (the branch
-    tip, else its base), would override the dispatched cell; None when it
-    does not or the command's harness has no such file. model-policy*.json
-    is the one owner of the model."""
+    """Why the phase's command file, as the worker will see it, would (or
+    might) override the dispatched cell; None when it does not or the
+    command's harness has no such file. model-policy*.json is the one owner
+    of the model; what cannot be read or parsed strictly refuses."""
     pattern = PHASE_FILES.get(os.path.basename(_command_word(argv)))
     if pattern is None:
         return None
     rel = pattern.format(phase=phase)
-    tips = [f"origin/{branch}", branch] if remote else [branch, f"origin/{branch}"]
-    for ref in [*tips, *_review.integration_refs(root)]:
-        if _git(root, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}").returncode != 0:
-            continue
-        shown = _git(root, "show", f"{ref}:{rel}")
-        keys = frontmatter_overrides(shown.stdout) if shown.returncode == 0 else []
-        if keys:
-            return (f"one owner for the model: {rel} declares {' and '.join(k + ':' for k in keys)}, which "
-                    f"overrides the dispatched {model}; remove it (model-policy*.json owns this)")
+    text, why = _override_source(root, rel, branch, remote)
+    if why:
+        return f"one owner for the model: {why}; an override cannot be ruled out"
+    if text is None:
         return None
+    keys = frontmatter_overrides(text)
+    if keys is None:
+        return (f"one owner for the model: frontmatter of {rel} cannot be parsed strictly; it mentions "
+                "model/effort — write `model: inherit` as a plain line or remove it")
+    if keys:
+        return (f"one owner for the model: {rel} declares {' and '.join(k + ':' for k in keys)}, which "
+                f"overrides the dispatched {model}; remove it (model-policy*.json owns this)")
     return None
 
 
