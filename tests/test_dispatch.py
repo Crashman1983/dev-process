@@ -246,6 +246,32 @@ def test_remote_phase_skips_local_cap_and_lanes(render, tmp_path):
     _dispatch(out, "stop", "b6", "--force")
 
 
+def test_a_session_whose_phase_is_over_holds_no_slot(render, tmp_path):
+    """Kenni #2414: a plan session that reported `planned` still counted
+    against max_workers until somebody stopped it."""
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    _fake_command(out, "sleep 30\n")  # max_workers=2
+    try:
+        for b in ("b1", "b2"):
+            assert _dispatch(out, "start", "--issue", b[1:], "--phase", "plan", "--branch", b).returncode == 0
+        r = _dispatch(out, "start", "--issue", "3", "--phase", "plan", "--branch", "b3", "--dry-run")
+        assert r.returncode == 3 and "max_workers=2" in r.stderr
+        env = dict(os.environ, PROCESS_PHASE="plan")
+        r = subprocess.run([sys.executable, str(out / "scripts/process/report.py"), "planned", "--issue", "1",
+                            "--worker", "b1", "--model", "m", "--force"], cwd=out, capture_output=True,
+                           text=True, env=env)
+        assert r.returncode == 0, r.stderr
+        r = _dispatch(out, "start", "--issue", "3", "--phase", "plan", "--branch", "b3", "--dry-run")
+        assert r.returncode == 0, r.stderr
+        # the same branch's live session still refuses, phase over or not
+        r = _dispatch(out, "start", "--issue", "1", "--phase", "execute", "--branch", "b1", "--dry-run")
+        assert r.returncode == 3 and "already has a live session" in r.stderr
+    finally:
+        for b in ("b1", "b2"):
+            _dispatch(out, "stop", b, "--force")
+
+
 def test_worktree_path_taken_by_a_foreign_directory_is_refused(render, tmp_path):
     out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
     _repo(out)
