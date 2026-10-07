@@ -33,7 +33,7 @@ from pathlib import Path
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from check_review import branch_issue, declared_issue_numbers, plan_tier, spec_dir_issue  # noqa: E402
+from check_review import branch_issue, declared_issue_numbers, open_questions, plan_tier, spec_dir_issue  # noqa: E402
 
 PLANS = ".process-work/plans"
 STATE = ".process-work/state"
@@ -53,9 +53,7 @@ DECISION = re.compile(r"^\s*(?:[-*+]\s+)?DECISION\s+(\d{4}-\d{2}-\d{2})\s+([^:]+
 DECISIONS_HEADING = re.compile(r"^#{2,4}\s+Decisions\b", re.IGNORECASE | re.MULTILINE)
 # a question still open — `DECISION NEEDED <date> <who>: …` — is not a
 # decision; a re-hydrated session must see that it is waiting, not act as
-# if the plan were settled
-QUESTION = re.compile(r"^\s*(?:[-*+]\s+)?[*_]*DECISION NEEDED[*_]*\s+(\d{4}-\d{2}-\d{2})(?:\s+([^:\n]+?))?\s*:\s*(.+?)\s*$",
-                      re.MULTILINE)
+# if the plan were settled (check_review.open_questions owns the line)
 
 
 # a task line's class (a class the policy defines; unmarked: standard) picks the
@@ -116,7 +114,7 @@ def _plan_info(p: Path) -> dict:
     return {"file": str(p), "tier": tier,
             "issue": issue.group(1) if issue else None,
             "decisions": [f"{d} {who}: {what}" for d, who, what in DECISION.findall(text)],
-            "open_questions": [f"{d} {who or 'worker'}: {what}" for d, who, what in QUESTION.findall(text)],
+            "open_questions": [f"{m.group(1)} {m.group(2) or 'worker'}: {m.group(3)}" for m in open_questions(text)],
             "decisions_section": bool(DECISIONS_HEADING.search(text))}
 
 
