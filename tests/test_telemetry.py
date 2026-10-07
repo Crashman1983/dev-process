@@ -29,7 +29,7 @@ def _journal(out: Path, text: str, name: str = "2026-07-02.md"):
 
 def test_module_on_ships_cockpit_and_doc_without_a_gate(render, tmp_path):
     out = _render(render, tmp_path)
-    assert not (out / "scripts/process/check_telemetry.py").exists()  # retired in v2.54.0
+    assert not (out / "scripts/process/check_telemetry.py").exists()  # retired
     assert (out / "scripts/process/process_kpis.py").is_file()
     assert (out / "docs/process/modules/telemetry.md").is_file()
 

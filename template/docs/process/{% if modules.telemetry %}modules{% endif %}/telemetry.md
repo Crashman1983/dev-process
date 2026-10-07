@@ -8,7 +8,7 @@ cockpit never blocks.
 The module used to add a graded-acceptance trace (`GRADE` lines) with a gate
 of its own. Few projects wrote the lines, and the review records already
 carry what they measured (rounds to pass, blockers and their origin), so
-v2.54.0 retired both. Old `GRADE` lines stay in the journals as history;
+both are retired. Old `GRADE` lines stay in the journals as history;
 nothing reads them.
 
 ## The KPI cockpit

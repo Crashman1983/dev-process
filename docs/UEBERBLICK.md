@@ -31,7 +31,7 @@ Der Prozess ist in vielen Iterationen im laufenden Betrieb entstanden und verbes
 
 ### Das Wesentliche in fünf Sätzen
 
-1. **Die Regeln prüft ein Programm, niemand muss sie im Kopf behalten.** Fünfzehn automatische Prüfungen („Gates“) laufen vor jedem Merge; was nicht besteht, wird nicht gemergt.
+1. **Die Regeln prüft ein Programm, niemand muss sie im Kopf behalten.** Zwölf automatische Prüfungen („Gates“) laufen vor jedem Merge; was nicht besteht, wird nicht gemergt.
 1. **Das Risiko bestimmt den Aufwand.** Vier Risikostufen – Tier 0 bis 3 – legen fest, ob eine Änderung direkt gemergt werden darf oder Plan, Widerlegungsprüfung (gezielte Fehlersuche) und unabhängige Prüfung braucht; bei Tier 3 läuft die Widerlegung vor der ersten Prüfrunde, und ein Fix an Gate-Code wird erneut widerlegt.
 1. **Die Unabhängigkeit der Prüfung richtet sich nach dem Risiko.** Tier 0–1 nutzen einen Selbstcheck; ab Tier 2 prüft eine unbeteiligte Instanz (eine eigene Agentensitzung), und ihr Urteil gilt nur für genau den geprüften Code. Für nachgewiesene reine Vorlagen-Updates gilt der Herkunftsnachweis aus Kapitel 9.
 1. **Alles Wissen steht in Dateien.** Pläne, Entscheidungen und Journale liegen im Repository und werden jedem Agenten automatisch erneut vorgelegt, sobald sein Gedächtnis gekürzt wurde.
@@ -46,7 +46,7 @@ Der Prozess ist in vielen Iterationen im laufenden Betrieb entstanden und verbes
 | **Mensch (Owner)** | priorisiert, entscheidet, gibt Designs frei, prüft wöchentlich eine Stichprobe, schreibt die Regeln fort |
 | **Koordinator** | verschafft sich den Überblick, weist Vorgänge zu, startet und stoppt Arbeiter, entscheidet Fragen der Arbeiter oder leitet sie weiter, stößt den Merge an – schreibt und prüft selbst keinen Code |
 | **Arbeiter, Refuter und Prüfer** | je Vorgang und Phase eine eigene Sitzung auf eigenem Branch; bei Tier 2 greift der Prüfer die Änderung mit dem Refuter-Auftrag an, bei Tier 3 und bei Gate-Code ein eigener Refuter, dessen einziger Auftrag Fehler sind; der Prüfer ist immer eine andere Instanz als der Arbeiter |
-| **Gates** | fünfzehn Prüfprogramme vor jedem Merge: Regeln intakt, Entscheidungen getroffen, Attest vorhanden und zum Code passend, Designverträge und Akzeptanzkriterien einheitlich, Lizenzen erlaubt, Dokumentation gültig |
+| **Gates** | zwölf Prüfprogramme vor jedem Merge: Regeln intakt, Entscheidungen getroffen, Attest vorhanden und zum Code passend, Designverträge eingehalten, jede gelistete Fähigkeit durch einen Test belegt, Lizenzen erlaubt, Dokumentation gültig |
 | **Repository** | Regelkern, Pläne mit Entscheidungslisten, Journal mit Attesten, Lagetabelle, Verträge, Kennzahlen – die einzige Quelle, aus der jede Ebene liest |
 
 Der Prozess wird als Vorlage (dev-process) ausgeliefert. Aus ihr entsteht ein fertig eingerichtetes Repository: Startdatei und Phasenbefehle für die gewählte Harness (GitHub Copilot, Claude Code oder eine neutrale AGENTS.md), die Gates sowie GitHub Actions-Workflows für Gates, Owner-Digest und Kennzahlen. Spätere Versionen der Vorlage holt sich ein Repository mit einem Befehl; projekteigene Dateien bleiben unberührt.
@@ -86,7 +86,7 @@ Der Prozess wird als Vorlage (dev-process) ausgeliefert. Aus ihr entsteht ein fe
 
 **Messung.** Ein Cockpit (Auswertungsskript im Repository) liest Journal, Git-Historie und Meldungen; jede Zahl nennt ihre Aussagekraft. Vier Kennzahlen sind maßgeblich:
 
-- **Prüfrunden bis zur Freigabe.** Ziel: höchstens zwei bei 90 % der Vorgänge. Die Runde zählt ein Programm, nicht der Prüfer. Nach zwei gescheiterten Runden geht die Arbeit zurück in den Plan; blockiert dieselbe Stelle zweimal, übernimmt eine frische Sitzung. Eine weitere Runde ist eine Ausnahme mit vermerktem Grund.
+- **Prüfrunden bis zur Freigabe.** Ziel: höchstens zwei bei 90 % der Vorgänge. Die Runde zählt ein Programm, nicht der Prüfer. Blocken darf nur ein echter Fehler, nie eine Formulierung. Blockiert dieselbe Stelle zweimal, entscheidet die Fix-Sitzung zwischen Nachbessern und Umbau; nach der dritten blockierenden Runde entscheidet der Owner einmal: mergen mit benannten Restpunkten, Umfang schneiden oder umbauen.
 - **Korrekturquote.** Anteil der Features, die binnen sieben Tagen korrigiert werden mussten; nur der Trend zählt.
 - **Korrektur-Häufungen.** Stellen, die immer wieder korrigiert werden – Regel 6 in Zahlen.
 - **Prüfrunden je Modell.** Zeigt, welches Modell sich in welcher Phase bewährt.
