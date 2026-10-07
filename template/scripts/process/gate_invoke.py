@@ -167,6 +167,43 @@ def _framework_only(root: Path) -> tuple[bool, bool]:
     return "pre-commit" in text, True
 
 
+def _hook_files(d: Path) -> dict[str, bytes]:
+    try:
+        return {p.name: p.read_bytes() for p in d.iterdir() if p.is_file()}
+    except OSError:
+        return {}
+
+
+def _tracked_hooks_wiring(root: Path, hooks_path: str | None) -> tuple[bool, str | None]:
+    """(core.hooksPath reaches the tracked hooks, a note). `.githooks`
+    literally, or an absolute path that resolves to this checkout's
+    `.githooks` or to the main checkout's (a linked worktree shares the
+    main checkout's config) — the latter with a note when its files are
+    not this worktree's tracked copy."""
+    if not hooks_path:
+        return False, None
+    if hooks_path == GITHOOKS_DIR:
+        return True, None
+    if not Path(hooks_path).is_absolute():
+        return False, None
+    target = Path(hooks_path).resolve()
+    tracked = root / GITHOOKS_DIR
+    if target == tracked.resolve():
+        return True, None
+    common = _git(root, "rev-parse", "--git-common-dir")
+    if not common:
+        return False, None
+    common_dir = Path(common) if Path(common).is_absolute() else root / common
+    main = common_dir.resolve().parent / GITHOOKS_DIR
+    if target != main.resolve():
+        return False, None
+    if _hook_files(main) != _hook_files(tracked):
+        return True, (f"core.hooksPath={hooks_path} is the main checkout's {GITHOOKS_DIR}/, "
+                      f"whose hooks differ from this worktree's tracked copy — the main "
+                      f"checkout's version runs for pushes from here")
+    return True, None
+
+
 def hook_wiring_findings(root: Path) -> tuple[list[str], list[str]]:
     """(hard, soft) about whether the registered local hooks can run at all.
 
@@ -192,7 +229,10 @@ def hook_wiring_findings(root: Path) -> tuple[list[str], list[str]]:
     # flipped the real repo to core.bare=true through it.
     tracked = root / GITHOOKS_DIR
     if tracked.is_dir() and any(p.is_file() for p in tracked.iterdir()):
-        if hooks_path != GITHOOKS_DIR:
+        wired, note = _tracked_hooks_wiring(root, hooks_path)
+        if note:
+            soft.append(note)
+        if not wired:
             hard.append(
                 f"{GITHOOKS_DIR}/ holds tracked hooks but core.hooksPath is "
                 f"{hooks_path or 'unset'} — git never reads them; whatever sits "
