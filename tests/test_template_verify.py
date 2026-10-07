@@ -102,7 +102,7 @@ def test_hand_edit_or_local_infrastructure_is_delta_and_requires_review(update, 
     proof = verifier.verify(root, base)
     assert rel in proof['project_delta'], proof
     hard, _ = check(root, monkeypatch)
-    assert any('tier 2 digest-bound REVIEW required' in h for h in hard), hard
+    assert any('tier 2 REVIEW of the update range required' in h for h in hard), hard
 
 
 def test_matching_new_render_does_not_hide_lost_project_customization(update):
@@ -140,7 +140,7 @@ def test_release_identical_gate_code_is_a_pure_update(update, monkeypatch):
     proof = verifier.verify(root, base)
     assert not proof['migration'] and 'scripts/process/check_something.py' in proof['identical'], proof
     hard, _ = check(root, monkeypatch)
-    assert not any('digest-bound REVIEW required' in h for h in hard), hard
+    assert not any('REVIEW of the update range required' in h for h in hard), hard
 
 
 def test_project_edit_to_released_gate_code_requires_tier3(update, monkeypatch):
@@ -151,7 +151,7 @@ def test_project_edit_to_released_gate_code_requires_tier3(update, monkeypatch):
     proof = verifier.verify(root, base)
     assert proof['migration'] and 'scripts/process/check_something.py' in proof['project_delta'], proof
     hard, _ = check(root, monkeypatch)
-    assert any('tier 3 digest-bound REVIEW required' in h for h in hard), hard
+    assert any('tier 3 REVIEW of the update range required' in h for h in hard), hard
 
 
 def test_forged_report_and_changed_source_never_exempt_code(update, monkeypatch):
@@ -162,7 +162,7 @@ def test_forged_report_and_changed_source_never_exempt_code(update, monkeypatch)
     proof = verifier.verify(root, base)
     assert 'src/app.py' in proof['project_delta']
     hard, _ = check(root, monkeypatch)
-    assert any('digest-bound REVIEW required' in h for h in hard), hard
+    assert any('REVIEW of the update range required' in h for h in hard), hard
     p = root / '.copier-answers.yml'
     p.write_text(p.read_text().replace(str(update[1]), str(root / 'fake')))
     commit(root)
@@ -227,18 +227,17 @@ def test_project_delta_clears_with_one_exact_review_and_stales_after_another_edi
     write(root, 'src/app.py', 'review_me = True\n')
     head = commit(root)
     review = load('check_review')
-    digest = review.artifact_digest(root, base, head)
     write(root, '.process-work/journal/review.md',
           'REVIEW work=update tier=2 reviewer=fresh model=same '
           'independence=bundle,non-implementing verdict=pass round=1 '
-          f'base={base} head={head} diff={digest}\n')
+          f'base={base} head={head}\n')
     commit(root)
     hard, _ = check(root, monkeypatch)
     assert not hard, hard
     write(root, 'src/app.py', 'late_edit = True\n')
     commit(root)
     hard, _ = check(root, monkeypatch)
-    assert any('digest-bound REVIEW required' in h for h in hard), hard
+    assert any('REVIEW of the update range required' in h for h in hard), hard
 
 
 def test_pure_update_plan_uses_same_exemption_in_finish_and_train(update, monkeypatch):
@@ -331,16 +330,15 @@ def test_migration_clears_only_with_tier3_exact_review(update, monkeypatch):
     write(root, 'scripts/process/check_something.py', '# enforcement, edited by the project\n')
     head = commit(root)
     review = load('check_review')
-    digest = review.artifact_digest(root, base, head)
     for tier in (2, 3):
         write(root, '.process-work/journal/review.md',
               f'REVIEW work=update tier={tier} reviewer=fresh model=cross '
               'independence=bundle,non-implementing,cross-model verdict=pass round=1 '
-              f'base={base} head={head} diff={digest}\n')
+              f'base={base} head={head}\n')
         commit(root)
         hard, _ = check(root, monkeypatch)
         if tier == 2:
-            assert any('tier 3 digest-bound REVIEW required' in h for h in hard), hard
+            assert any('tier 3 REVIEW of the update range required' in h for h in hard), hard
         else:
             assert not hard, hard
 
@@ -387,7 +385,7 @@ def test_doc_release_with_project_enforcement_delta_requires_tier3(update, monke
     assert rel in proof['project_delta'] and proof['migration'], proof
     if not worktree:
         hard, _ = check(root, monkeypatch)
-        assert any('tier 3 digest-bound REVIEW required' in h for h in hard), hard
+        assert any('tier 3 REVIEW of the update range required' in h for h in hard), hard
 
 
 @pytest.mark.parametrize('trusted', [False, True])
@@ -474,7 +472,7 @@ def test_gate_ignores_an_uncommitted_answers_edit_until_it_is_committed(update, 
     assert hard == [], hard
     commit(root)
     hard, _ = check(root, monkeypatch)
-    assert any('tier 2 digest-bound REVIEW required' in h for h in hard), hard
+    assert any('tier 2 REVIEW of the update range required' in h for h in hard), hard
 
 
 def test_unreachable_source_names_source_and_ref_and_fails_closed(update, monkeypatch):

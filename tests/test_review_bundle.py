@@ -1,4 +1,3 @@
-import hashlib
 import importlib.util
 import re
 import subprocess
@@ -23,7 +22,7 @@ def _git(out: Path, *args, **kwargs):
 def _artifact(text: str) -> dict[str, str]:
     match = re.search(
         r"^REVIEW_ARTIFACT base=(?P<base>[0-9a-f]{40,64}) "
-        r"head=(?P<head>[0-9a-f]{40,64}) diff=(?P<diff>[0-9a-f]{64})(?: mode=delta)?$",
+        r"head=(?P<head>[0-9a-f]{40,64})$",
         text,
         re.MULTILINE,
     )
@@ -118,39 +117,18 @@ def test_without_local_dimensions_no_section(render, tmp_path):
     assert "This project's review dimensions" not in _run(out, "--base", "main").stdout
 
 
-def test_bundle_fingerprint_matches_binary_diff(render, tmp_path):
+def test_the_artifact_names_the_fork_point_and_the_head(render, tmp_path):
+    """v2.53: two SHAs name the reviewed change; the digest is gone."""
     out = render(tmp_path, {"project_name": "d", "modules": {}})
     _seed_repo(out)
-    text = _run(out, "--base", "main").stdout
-    artifact = _artifact(text)
-    merge_base = _git(out, "merge-base", "main", "HEAD").stdout.strip()
-    head = _git(out, "rev-parse", "HEAD").stdout.strip()
-    diff = subprocess.run(
-        ["git", "-c", "diff.algorithm=myers", "-c", "diff.renames=false", "-c", "diff.noprefix=false",
-         "-c", "diff.mnemonicPrefix=false", "-c", "diff.context=3", "-c", "diff.suppressBlankEmpty=false",
-         "-c", "core.quotePath=true",
-         "diff", "--binary", "--full-index", "--no-color", "--no-ext-diff", "--no-textconv", "--no-renames",
-         f"{merge_base}...{head}"],
-        cwd=out,
-        capture_output=True,
-        check=True,
-    ).stdout
-    assert artifact == {
-        "base": merge_base,
-        "head": head,
-        "diff": hashlib.sha256(diff).hexdigest(),
-    }
-
-
-def test_bundle_fingerprint_changes_with_committed_content(render, tmp_path):
-    out = render(tmp_path, {"project_name": "d", "modules": {}})
-    _seed_repo(out)
-    first = _artifact(_run(out, "--base", "main").stdout)["diff"]
+    first = _artifact(_run(out, "--base", "main").stdout)
+    assert first == {"base": _git(out, "merge-base", "main", "HEAD").stdout.strip(),
+                     "head": _git(out, "rev-parse", "HEAD").stdout.strip()}
     (out / "widget.py").write_text("def widget():\n    return 43\n")
     _git(out, "add", "widget.py", check=True)
     _git(out, "commit", "-q", "-m", "fix: change widget", check=True)
-    second = _artifact(_run(out, "--base", "main").stdout)["diff"]
-    assert first != second
+    second = _artifact(_run(out, "--base", "main").stdout)
+    assert second["base"] == first["base"] and second["head"] != first["head"]
 
 
 def test_output_file_option(render, tmp_path):
@@ -396,17 +374,15 @@ def test_delta_bundle_carries_findings_and_exact_delta_artifact(render, tmp_path
     _git(out, "commit", "-q", "-m", "fix: widget", check=True)
     text = _run(out, "--base", "main", "--since", previous).stdout
     artifact = _artifact(text)
-    # The digest binds the gate's reduced delta and its mode.
-    import importlib.util
-    spec = importlib.util.spec_from_file_location("check_review", out / "scripts/process/check_review.py")
-    gate = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(gate)
-    assert artifact["base"] == previous
-    assert artifact["diff"] == gate.artifact_digest(out, previous, "HEAD", mode="delta")
+    # v2.53: the delta is what the reviewer reads; the verdict binds the whole branch
+    assert artifact["base"] == _git(out, "merge-base", "main", "HEAD").stdout.strip()
+    assert artifact["head"] == _git(out, "rev-parse", "HEAD").stdout.strip()
+    shown = text.split("## Diff under review", 1)[1]
+    assert "+    return 43" in shown and "+    return 42" not in shown  # the fix, not round 1's code
     findings = text.split("## Findings from the previous round", 1)[1].split("## Diff under review", 1)[0]
     assert "FINDING prior finding" in findings
     assert "stranger" not in findings  # the reports are in the diff, not in the findings
-    assert "REVIEW_SCOPE mode=delta" in text
+    assert "REVIEW_SCOPE" not in text and "binds the whole branch" in text
     assert "Full branch surface:" in text
     # a fix round re-checks the fixed class, not just the spot (downstream, 2 of 10
     # blockers came from the previous fix), and asks for a full bundle when the fix
@@ -430,20 +406,6 @@ def test_delta_bundle_says_so_when_this_item_has_no_report(render, tmp_path):
     assert "stranger" not in text
     assert "no review report for this work item (widget, #9)" in text
 
-
-def test_delta_bundle_refuses_tier_three(render, tmp_path):
-    out = render(tmp_path, {"project_name": "d", "modules": {}})
-    _seed_repo(out)
-    r = _run(out, "--base", "main", "--since", "main")
-    assert r.returncode == 0, r.stderr
-    plan = out / ".process-work/plans/2026-07-09-widget.md"
-    plan.write_text("# Plan\n\ntier: 3\nissue: #9\n")
-    r = _run(out, "--base", "main", "--since", "main")
-    assert r.returncode != 0
-    assert "Tier 3 delta needs a full round at" in (r.stdout + r.stderr)
-
-
-# --- SP67: the bundle names the UI evidence (paths — it cannot carry pixels)
 
 def test_bundle_lists_evidence_pair_and_changed_images(render, tmp_path):
     out = render(tmp_path, {"project_name": "d", "modules": {}})
@@ -759,10 +721,8 @@ def test_a_delta_without_a_base_still_checks_refute(render, tmp_path):
     _seed_repo(out)
     reviewed = _git(out, "rev-parse", "HEAD").stdout.strip()
     _gate_commit(out, "scripts/process/g.py", "x = 2\n", "fix round")
-    # without a base no plan can be listed, so no tier is declared: refused (D2)
+    # v2.53: a delta needs no declared tier — it is a reading aid, not a review kind
     r = _run(out, "--base", "nosuchbase", "--since", reviewed)
-    assert r.returncode != 0 and "no tier is declared" in r.stderr
-    r = _run(out, "--base", "nosuchbase", "--since", reviewed, "--tier", "2")
     assert "**REFUTE WARNING:** this delta" in r.stdout, r.stdout[:400] + r.stderr
 
 
@@ -977,19 +937,6 @@ def test_a_branch_that_only_ticks_tasks_brings_its_spec_plan(render, tmp_path):
     t = _bundle(out, "--base", "main").stdout
 
     assert "### specs/003-wip/plan.md" in t and "### specs/002-new/plan.md" in t, t[:600]
-
-
-def test_an_unrelated_tier_three_spec_plan_does_not_refuse_a_delta(render, tmp_path):
-    # E2: a product document at specs/api/plan.md, no speckit module
-    out = render(tmp_path, {"project_name": "d", "modules": {}})
-    _spec_only_repo(out, [("api", "# API plan\n\ntier: 3\n", None)])
-    r = _bundle(out, "--base", "main", "--since", "HEAD~1")
-    assert r.returncode == 0, r.stderr
-    assert "specs/api" not in r.stdout and "REFUTE WARNING" not in _bundle(out, "--base", "main").stdout
-    # a Tier 3 plan under review still refuses — and says how to narrow
-    r = _run(out, "--base", "main", "--since", "HEAD~1", "--plan", "api")
-    assert r.returncode != 0 and "specs/api/plan.md declares tier: 3" in r.stderr and "--plan" in r.stderr
-    assert "Tier 3 delta needs a full round at" in r.stderr
 
 
 def test_the_printed_label_of_a_spec_kit_plan_works_as_plan_filter(render, tmp_path):
@@ -1319,9 +1266,9 @@ def test_only_the_plans_the_branch_touches_are_under_review(render, tmp_path):
     section = _plans_section(t)
     assert "### 2026-07-09-widget.md" in section and "### 2026-07-12-größe.md" in section
     assert "foreign" not in section.lower(), section[:400]
-    # asked for by name, the foreign plan is bundled — and its tier decides
+    # asked for by name, the foreign plan is bundled (its tier refuses no delta since v2.53)
     r = _run(out, "--base", "main", "--since", "main", "--plan", "foreign", "--skip-preflight")
-    assert r.returncode != 0 and "declares tier: 3" in r.stderr
+    assert r.returncode == 0 and "### 2026-06-01-foreign.md" in _plans_section(r.stdout), r.stderr
 
 
 def test_an_archived_plan_the_branch_touches_is_under_review(render, tmp_path):
@@ -1351,41 +1298,6 @@ def test_plan_filter_searches_the_archive_and_the_spec_home(render, tmp_path):
         assert searched in r.stderr, r.stderr
 
 
-def test_a_branch_without_a_plan_needs_a_declared_tier_for_a_delta(render, tmp_path):
-    out = render(tmp_path, {"project_name": "d", "modules": {}})
-    _seed_repo(out)
-    _git(out, "rm", "-q", str(out / _PLANS / "2026-07-09-widget.md"))
-    _git(out, "commit", "-q", "-m", "no plan on this branch")
-    r = _run(out, "--base", "main", "--since", "main", "--skip-preflight")
-    assert r.returncode != 0 and "no tier is declared" in r.stderr and "--tier N" in r.stderr
-    t = _bundle(out, "--base", "main", "--since", "main", "--tier", "2").stdout
-    assert "Delta re-review" in t
-    assert "**Scope rests on tier 2 asserted by the caller via --tier — no plan is under review, " \
-           "so nothing in this repository corroborates it.**" in t
-    # a full bundle needs no tier, and says why no plan is in it
-    assert "the branch touches no plan" in _bundle(out, "--base", "main").stdout
-    r = _run(out, "--base", "main", "--since", "main", "--tier", "3", "--skip-preflight")
-    assert r.returncode != 0 and "--tier 3 declares tier: 3" in r.stderr
-    assert "Tier 3 delta needs a full round at" in r.stderr  # no full round anchors it
-    r = _run(out, "--base", "main", "--tier", "two", "--skip-preflight")
-    assert r.returncode != 0 and "--tier needs an integer" in r.stderr and "Traceback" not in r.stderr
-
-
-def test_a_declared_tier_is_a_floor_not_a_discount(render, tmp_path):
-    out = render(tmp_path, {"project_name": "d", "modules": {}})
-    _seed_repo(out)
-    t = _bundle(out, "--base", "main", "--since", "main").stdout
-    assert "**Scope rests on tier 2 read from .process-work/plans/2026-07-09-widget.md.**" in t
-    t = _bundle(out, "--base", "main", "--since", "main", "--tier", "1").stdout
-    assert "Scope rests on tier 2 read from" in t
-    # above the plan's tier, the caller's assertion decides — and says so
-    r = _run(out, "--base", "main", "--since", "main", "--tier", "3", "--skip-preflight")
-    assert r.returncode != 0 and "Tier 3 delta needs a full round at" in r.stderr
-    _plan_commit(out, "# Plan\n\ntier: 3\nissue: #9\n")
-    r = _run(out, "--base", "main", "--since", "main", "--tier", "1", "--skip-preflight")
-    assert r.returncode != 0 and "2026-07-09-widget.md declares tier: 3" in r.stderr
-
-
 def test_the_build_names_its_size_and_plans(render, tmp_path):
     out = render(tmp_path, {"project_name": "d", "modules": {}})
     _seed_repo(out)
@@ -1410,7 +1322,7 @@ def test_the_bundle_lists_the_files_of_its_diff(render, tmp_path):
 _PNG = b"\x89PNG\r\n\x1a\n" + bytes(range(256)) * 8
 
 
-def test_binaries_are_a_stat_block_and_the_digest_still_covers_them(render, tmp_path):
+def test_binaries_are_a_stat_block(render, tmp_path):
     out = render(tmp_path, {"project_name": "d", "modules": {}})
     _seed_repo(out)
     (out / "widget.py").write_text("def widget():\n    return 43\n")
@@ -1424,10 +1336,6 @@ def test_binaries_are_a_stat_block_and_the_digest_still_covers_them(render, tmp_
     assert "binary files carry no content" in t and "Bin 0 -> 2056 bytes" in t
     assert "e2e/__screenshots__/row-light.png" in t.split("Files in this diff", 1)[1]
     assert "+    return 43" in t  # the text diff is whole
-    gate = _module(out, "check_review")
-    artifact = _artifact(t)
-    assert artifact["diff"] == gate.artifact_digest(out, artifact["base"], artifact["head"])
-    assert b"GIT binary patch" in gate.artifact_diff(out, artifact["base"], artifact["head"])
 
 
 def test_hostile_file_names_cannot_break_the_bundle(render, tmp_path):
@@ -1483,8 +1391,6 @@ def test_a_plan_whose_issue_the_range_claims_is_under_review(render, tmp_path):
     assert "plans included: .process-work/plans/2026-06-01-auth.md" in r.stderr
     # D2 still holds: a plan of an issue the range does not claim stays out
     assert "other" not in section.lower() and "2026-06-02-other" not in r.stderr
-    r = _run(out, "--base", "main", "--since", "HEAD~1", "--tier", "2", "--skip-preflight")
-    assert r.returncode != 0 and "2026-06-01-auth.md declares tier: 3" in r.stderr
 
 
 @pytest.mark.parametrize("config", ["docs/process/gates.local.json", "docs/process/model-policy.local.json"])
@@ -1538,84 +1444,20 @@ def _touches(text):
 
 
 def test_tier3_delta_from_a_full_round_builds_and_lists_its_files(render, tmp_path):
-    """Downstream, Tier 3 re-read 10-13k-line full bundles every round; an anchored fix
-    round reads the fix and names the files it touches. A fix outside gate code asks
-    no new refute: regression tests and the delta review (a refute after every fix
-    round turned each Tier 3 round into two)."""
+    """Downstream, Tier 3 re-read 10-13k-line full bundles every round; a fix round
+    reads the fix and names the files it touches. A fix outside gate code asks no new
+    refute: regression tests and the delta review (a refute after every fix round
+    turned each Tier 3 round into two). The verdict binds the whole branch."""
     out = render(tmp_path, {"project_name": "d", "modules": {}})
     _seed_repo(out)
     head = _t3_full_round(out)
     _fix(out, "widget.py", "def widget():\n    return 43\n")
     r = _bundle(out, "--base", "main", "--since", head)
-    assert "Delta re-review" in r.stdout and "REVIEW_SCOPE mode=delta" in r.stdout
+    assert "Delta re-review" in r.stdout and "REVIEW_SCOPE" not in r.stdout
+    assert _artifact(r.stdout)["base"] == _git(out, "merge-base", "main", "HEAD").stdout.strip()
     assert "widget.py" in _touches(r.stdout)
     assert "make_review_bundle: DELTA_TOUCHES files=" in r.stderr
     assert "REFUTE WARNING" not in r.stdout, r.stdout
-
-
-def test_tier3_delta_without_a_full_round_at_its_start_is_refused(render, tmp_path):
-    """A Tier 3 delta from an arbitrary commit would shrink the reviewed artifact without
-    a full round having seen the rest; a chain of delta REVIEWs back to one anchors it."""
-    out = render(tmp_path, {"project_name": "d", "modules": {}})
-    _seed_repo(out)
-    head = _t3_full_round(out)
-    _fix(out, "widget.py", "def widget():\n    return 43\n")
-    middle = _git(out, "rev-parse", "HEAD").stdout.strip()
-    _fix(out, "widget.py", "def widget():\n    return 44\n")
-    r = _run(out, "--base", "main", "--since", middle, "--skip-preflight")
-    assert r.returncode != 0 and f"Tier 3 delta needs a full round at {middle}" in r.stderr
-    journal = out / ".process-work/journal/review.md"
-    journal.write_text(journal.read_text() + _t3_record(head, middle, mode=" mode=delta", rnd=2))
-    _git(out, "add", "-A")
-    _git(out, "commit", "-q", "-m", "review round 2")
-    assert "Delta re-review" in _bundle(out, "--base", "main", "--since", middle).stdout
-
-
-def test_an_unanchored_tier3_delta_names_the_full_rounds_to_start_from(render, tmp_path):
-    out = render(tmp_path, {"project_name": "d", "modules": {}})
-    _seed_repo(out)
-    head = _t3_full_round(out)
-    _fix(out, "widget.py", "def widget():\n    return 43\n")
-    r = _run(out, "--base", "main", "--since", "HEAD", "--skip-preflight")
-    assert r.returncode != 0
-    assert f"full rounds of this work: {head[:12]} (use --since {head})" in r.stderr, r.stderr
-    journal = out / ".process-work/journal/review.md"
-    journal.write_text(journal.read_text().replace("work=9", "work=77"))  # another work's round
-    _git(out, "commit", "-qam", "another work")
-    r = _run(out, "--base", "main", "--since", head, "--skip-preflight")
-    assert r.returncode != 0 and "none is recorded — build the full bundle" in r.stderr, r.stderr
-
-
-@pytest.mark.parametrize("rel,body,why", [
-    ("other.py", "x = 1\n", "other.py outside the prior round's findings"),
-    (f"{_PLANS}/2026-07-09-widget.md", _T3_PLAN + "- also cache it\n", "## Decisions or tier: line"),
-    (f"{_PLANS}/2026-07-09-widget.md", _T3_PLAN.replace("tier: 3", "tier: 2"), "## Decisions or tier: line"),
-    (f"{_PLANS}/2026-07-09-widget.md", _T3_PLAN.replace("Build", "Build") + "\n## Notes\n\nfixed\n", None),
-    ("scripts/process/check_widget.py", "# gate\n", "the fix changes gate code"),
-    ("docs/process/design-contracts/widget.md", "# contract\n", "the fix changes contracts"),
-])
-def test_tier3_delta_refuses_scope_growth(render, tmp_path, rel, body, why):
-    """The worker never decides containment: a fix that reaches past the prior findings,
-    the decisions or tier, gate code or a contract needs the full bundle."""
-    out = render(tmp_path, {"project_name": "d", "modules": {}})
-    _seed_repo(out)
-    head = _t3_full_round(out)
-    _fix(out, rel, body)
-    r = _run(out, "--base", "main", "--since", head, "--skip-preflight")
-    if why is None:  # a plan edit outside Decisions and tier: is bookkeeping
-        assert r.returncode == 0, r.stderr
-        return
-    assert r.returncode != 0 and "full bundle required" in r.stderr and why in r.stderr, r.stderr
-
-
-def test_tier3_delta_without_a_readable_report_needs_the_full_bundle(render, tmp_path):
-    """Containment is judged against the prior report; none to read is doubt, and doubt is a full bundle."""
-    out = render(tmp_path, {"project_name": "d", "modules": {}})
-    _seed_repo(out)
-    head = _t3_full_round(out, report=False)
-    _fix(out, "widget.py", "def widget():\n    return 43\n")
-    r = _run(out, "--base", "main", "--since", head, "--skip-preflight")
-    assert r.returncode != 0 and "no readable report of the round at" in r.stderr, r.stderr
 
 
 def test_tier2_delta_keeps_its_behaviour_and_lists_its_files(render, tmp_path):
@@ -1643,59 +1485,6 @@ def _t3_round_of(out, work):
     _git(out, "commit", "-q", "-m", "review round 1")
     _fix(out, "widget.py", "def widget():\n    return 43\n")
     return head
-
-
-@pytest.mark.parametrize("full,delta", [("9", "widget"), ("widget", "9"), ("9", "#9"),
-                                        ("2026-07-09-widget", "#9")])
-def test_bundle_attest_and_gate_read_a_tier3_deltas_work_alike(render, tmp_path, full, delta):
-    """#168: the bundle passed every bundled plan id, attest and the gate the literal
-    `work=` — a delta the bundle built for `widget` (issue #9) could not be attested
-    as `work=widget` when the full round said `work=9`. One owner: `expand_work`."""
-    out = render(tmp_path, {"project_name": "d", "modules": {}})
-    _seed_repo(out)
-    since = _t3_round_of(out, full)
-    bundle = tmp_path / "delta.bundle.md"
-    bundle.write_text(_bundle(out, "--base", "main", "--since", since).stdout)
-    assert "widget.py is wrong" in _findings(bundle.read_text())
-    attest = [sys.executable, str(out / "scripts/process/attest.py"), "--work", delta,
-              "--tier", "3", "--model", "m", "--verdict", "pass",
-              "--independence", "bundle,non-implementing,cross-model", "--bundle", str(bundle), "."]
-    # the alias does not restart the count: round 1 blocked, so this is round 2 and
-    # needs the root cause of round 1 — recorded under either name
-    r = subprocess.run(attest[:-1] + ["--dry-run", "."], cwd=out, capture_output=True, text=True)
-    assert r.returncode == 0 and "no root cause for the fix of blocking round(s) 1" in r.stderr, r.stderr
-    assert " round=2 " in r.stdout, r.stdout
-    journal = out / ".process-work/journal/review.md"
-    journal.write_text(journal.read_text() + f"\nROOT-CAUSE work={full} round=1: widget returned the "
-                       "wrong value — test_widget failed before the fix\n")
-    r = subprocess.run(attest, cwd=out, capture_output=True, text=True)
-    assert r.returncode == 0 and "no root cause" not in r.stderr, r.stdout + r.stderr
-    assert "mode=delta" in r.stdout and " round=2 " in r.stdout
-    gate = _module(out, "check_review")
-    records = [f for _r, t in gate.record_texts(out, ("journal",)) for _l, f in gate.parse_review_lines(t)[0]]
-    assert len(records) == 2 and gate.invalid_deltas(out, records) == {}
-
-
-def test_a_tier3_delta_of_another_work_stays_unanchored_everywhere(render, tmp_path):
-    out = render(tmp_path, {"project_name": "d", "modules": {}})
-    _seed_repo(out)
-    since = _t3_round_of(out, "77")  # another work's full round at the same head
-    r = _run(out, "--base", "main", "--since", since, "--skip-preflight")
-    assert r.returncode != 0 and f"Tier 3 delta needs a full round at {since}" in r.stderr
-    gate = _module(out, "check_review")
-    fix = _git(out, "rev-parse", "HEAD").stdout.strip()
-    digest = gate.artifact_digest(out, since, fix, mode="delta")
-    bundle = tmp_path / "delta.bundle.md"
-    bundle.write_text(f"REVIEW_ARTIFACT base={since} head={fix} diff={digest} mode=delta\n")
-    r = subprocess.run([sys.executable, str(out / "scripts/process/attest.py"), "--work", "widget",
-                        "--tier", "3", "--model", "m", "--verdict", "pass",
-                        "--independence", "bundle,non-implementing,cross-model",
-                        "--bundle", str(bundle), "."], cwd=out, capture_output=True, text=True)
-    assert r.returncode == 1 and "Tier 3 delta needs a full round" in r.stderr
-    delta = gate.parse_review_lines(_t3_record(since, fix, mode=" mode=delta", rnd=2)
-                                    .replace("work=9", "work=widget"))[0][0][1]
-    full = [f for _r, t in gate.record_texts(out, ("journal",)) for _l, f in gate.parse_review_lines(t)[0]]
-    assert id(delta) in gate.invalid_deltas(out, [*full, delta])
 
 
 def test_plan_report_keys_read_decorated_issue_tokens_but_not_spec_md(render, tmp_path):

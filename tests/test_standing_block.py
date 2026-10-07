@@ -536,14 +536,17 @@ def test_a_base_block_the_range_deletes_still_stands(tmp_path):
     assert _blocked(mod.standing_block_findings(root, tip, remote_sha=remote_sha), "42")
 
 
-def test_a_block_brought_in_and_dropped_again_still_stands(tmp_path):
+def test_the_verdict_is_read_at_the_tip_not_from_the_ranges_history(tmp_path):
+    """v2.53: a block stands while the tip (or main) holds it — a block the range
+    deleted again no longer stands; deleting a journal line is a visible diff."""
     root = _repo(tmp_path)
     remote_sha = _git(root, "rev-parse", "main")
     _write(root, SHARD, _line("42", "block", 1) + "\n")
-    _commit(root, "docs: attest round 1")
+    tip = _commit(root, "docs: attest round 1 (#42)")
+    assert _blocked(mod.standing_block_findings(root, tip, remote_sha=remote_sha), "42")
     (root / SHARD).write_text("", encoding="utf-8")
     tip = _commit(root, "fix: something (#42)")
-    assert _blocked(mod.standing_block_findings(root, tip, remote_sha=remote_sha), "42")
+    assert not mod.standing_block_findings(root, tip, remote_sha=remote_sha)
 
 
 def test_a_deleted_block_with_a_higher_pass_is_cleared(tmp_path):
@@ -595,63 +598,6 @@ def test_pruning_an_issue_folder_main_already_cleared_does_not_stop(tmp_path):
     _git(root, "rm", "-rq", ".process-work/journal/issue-42")
     tip = _commit(root, "chore: prune old journal")
     assert mod.standing_block_findings(root, tip, remote_sha=remote_sha) == []
-
-
-def test_a_block_after_mains_pass_stands(tmp_path):
-    root = _repo(tmp_path)
-    shard = ".process-work/journal/issue-42/a.md"
-    _write(root, shard, _line("42", "pass", 1) + "\n")
-    remote_sha = _on_main(root, "docs: history")
-    _git(root, "checkout", "-q", "-b", "feature")
-    _write(root, shard, _line("42", "pass", 1) + "\n" + _line("42", "block", 2) + "\n")
-    _commit(root, "docs: attest 42 round 2")
-    _write(root, shard, _line("42", "pass", 1) + "\n")
-    tip = _commit(root, "fix: drop the block (#42)")
-    assert _blocked(mod.standing_block_findings(root, tip, remote_sha=remote_sha), "42")
-
-
-def test_a_block_rewritten_to_pass_in_the_same_round_refuses(tmp_path):
-    # indistinguishable from two parallel reviews of one round: count the round up
-    root = _repo(tmp_path)
-    remote_sha = _git(root, "rev-parse", "main")
-    _write(root, SHARD, _line("42", "block", 1) + "\n")
-    _commit(root, "feat: x (#42)")
-    _write(root, SHARD, _line("42", "pass", 1) + "\n")
-    tip = _commit(root, "docs: complete the review")
-    assert _blocked(mod.standing_block_findings(root, tip, remote_sha=remote_sha), "42")
-
-
-def test_a_parallel_block_a_merge_dropped_still_stands(tmp_path):
-    root = _repo(tmp_path)
-    remote_sha = _git(root, "rev-parse", "main")
-    shard = ".process-work/journal/a.md"
-    _write(root, shard, _line("42", "block", 1) + "\n")
-    _commit(root, "feat: x (#42)")
-    _git(root, "checkout", "-q", "-b", "rb")
-    _write(root, shard, _line("42", "block", 1) + "\n" + _line("42", "block", 2) + "\n")
-    _git(root, "commit", "-qam", "docs: review b round 2")
-    _git(root, "checkout", "-q", "feature")
-    _write(root, shard, _line("42", "block", 1) + "\n" + _line("42", "pass", 2) + "\n")
-    _git(root, "commit", "-qam", "docs: review a round 2")
-    subprocess.run(["git", "-C", str(root), "merge", "-q", "--no-edit", "rb"], capture_output=True)
-    _git(root, "checkout", "-q", "--ours", shard)
-    _git(root, "commit", "-qam", "merge")
-    tip = _git(root, "rev-parse", "HEAD")
-    assert _blocked(mod.standing_block_findings(root, tip, remote_sha=remote_sha), "42")
-
-
-def test_mains_pass_does_not_clear_a_new_block_of_its_round(tmp_path):
-    root = _repo(tmp_path)
-    shard = ".process-work/journal/a.md"
-    _write(root, shard, _line("42", "block", 1) + "\n" + _line("42", "pass", 2) + "\n")
-    remote_sha = _on_main(root, "docs: history")
-    _git(root, "checkout", "-q", "-b", "feature")
-    _write(root, shard, _line("42", "block", 1) + "\n" + _line("42", "pass", 2) + "\n"
-           + _line("42", "block", 2) + "\n")
-    _commit(root, "fix: y (#42)")
-    _write(root, shard, _line("42", "block", 1) + "\n" + _line("42", "pass", 2) + "\n")
-    tip = _commit(root, "docs: drop")
-    assert _blocked(mod.standing_block_findings(root, tip, remote_sha=remote_sha), "42")
 
 
 @pytest.mark.skipif(not hasattr(os, "symlink"), reason="needs symlinks")

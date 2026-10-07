@@ -35,10 +35,11 @@ active, archived or `specs/<dir>/plan.md` — never every plan in the repo.
 plan: its path) contains SLUG, archived ones included; no match is an error.
 
 --tier asserts the caller's tier — a floor, never a discount: where a bundled
-plan declares a higher one, that one wins. --since limits the diff to the
-changes since REF (a delta re-review); it demands a declared tier (a plan's,
-or --tier for a branch without one); at Tier 3 a full round at REF and no
-scope growth (verification-independence.md, "What each round judges").
+plan declares a higher one, that one wins. --since shows the reviewer only
+the changes since REF (a fix round), with the previous round's findings and
+the full branch's file surface — a reading aid: the REVIEW_ARTIFACT line, and
+so the verdict, always names the whole branch (verification-independence.md,
+"What each round judges").
 
 --base defaults to the first of origin/main, main, origin/master, master that
 git can resolve. Output goes to stdout unless -o is given. The repo root is
@@ -74,7 +75,6 @@ PLAN_HOMES = (*_review_gate.PLAN_KINDS, "plan-archive")
 REVIEWS = ".process-work/reviews"
 DEFAULT_BASES = _review_gate.INTEGRATION_REFS
 PREFLIGHT_TIMEOUT_S = 600
-DELTA_MAX_TIER = 3
 
 
 def _read(root: Path, rel: str) -> str | None:
@@ -299,50 +299,49 @@ _DATED = re.compile(r"^\d{4}-\d{2}-\d{2}-")
 
 
 class _ReviewedDiff(NamedTuple):
-    """What the digest is computed from, apart from what the reviewer reads.
+    """The reviewed range and what the reviewer reads of it.
 
-    `digest` is the SHA-256 of the canonical `--binary` bytes
-    (`check_review.artifact_diff`) — the identity of the reviewed change,
-    which the gate recomputes and every REVIEW record binds to. `text` is the
-    same diff without `--binary`: a binary file reads as one `Binary files …
-    differ` line instead of its base85 payload, which no reviewer can read
-    and which alone once pushed a bundle past a model's prompt limit
-    (downstream: 24 PNG baselines)."""
+    `base` is the fork point of `head` with the integration branch: a REVIEW
+    always binds the whole branch, also when the reviewer reads only a fix
+    round's delta (`since`). `text` is the diff without `--binary`: a binary
+    file reads as one `Binary files … differ` line instead of its base85
+    payload, which no reviewer can read and which alone once pushed a bundle
+    past a model's prompt limit (downstream: 24 PNG baselines)."""
 
     base: str
     head: str
-    digest: str
     text: str
     range_spec: str
     binaries: bool
+    since: str | None
 
 
-# the canonical formula minus the payload: every other knob stays pinned, so
-# the text read is the text hashed, binaries aside
+# every git-config knob pinned, so the text read is the same on every clone
 READABLE_DIFF = tuple(a for a in _review_gate.CANONICAL_DIFF if a not in ("--binary", "--full-index"))
 _BINARY_LINE = re.compile(r"^Binary files .* differ$", re.MULTILINE)
 
 
-def _review_artifact(root: Path, base_ref: str, *, delta: bool = False) -> _ReviewedDiff | None:
-    """Resolved endpoints, SHA-256 of the reviewed diff, and its readable text."""
-    base = _git(root, "rev-parse", base_ref) if delta else _fork(root, base_ref)
+def _review_artifact(root: Path, base_ref: str, since: str | None = None) -> _ReviewedDiff | None:
+    """The reviewed range (fork point..HEAD) and its readable text — with
+    `since`, the text of the fix round since that head only (a reading aid:
+    own first-parent changes and merge resolutions, never main's side)."""
+    base = _fork(root, base_ref)
     head = _git(root, "rev-parse", "HEAD")
     if not base or not head:
         return None
-    base_sha = base.strip()
-    head_sha = head.strip()
-    # ONE formula, owned by the gate that verifies it (check_review.artifact_diff):
-    # canonical three-dot diff with every git-config knob pinned. A delta bundle
-    # uses own first-parent changes and integration merge resolutions.
+    base_sha, head_sha = base.strip(), head.strip()
     range_spec = f"{base_sha}...{head_sha}"
-    raw = _review_gate.artifact_diff(root, base_sha, head_sha, mode="delta" if delta else "full")
-    shown = (_review_gate.delta_diff(root, base_sha, head_sha, binary=False) if delta
-             else _git_bytes(root, *READABLE_DIFF, range_spec))
-    if raw is None or shown is None:
+    since_sha = None
+    if since:
+        since_sha = (_git(root, "rev-parse", "--verify", "--quiet", f"{since}^{{commit}}") or "").strip()
+        shown = _review_gate.delta_diff(root, since_sha, head_sha, binary=False) if since_sha else None
+    else:
+        shown = _git_bytes(root, *READABLE_DIFF, range_spec)
+    if shown is None:
         return None
     text = shown.decode("utf-8", errors="replace")
-    return _ReviewedDiff(base_sha, head_sha, hashlib.sha256(raw).hexdigest(), text,
-                         range_spec, _BINARY_LINE.search(text) is not None)
+    return _ReviewedDiff(base_sha, head_sha, text, range_spec,
+                         _BINARY_LINE.search(text) is not None, since_sha)
 
 
 def _fenced(body: str, info: str = "") -> str:
@@ -365,12 +364,10 @@ free-form prose is invisible to them:
 
     REVIEW {fields}
 
-Bind your verdict to the exact artifact: do NOT type `base=… head=… diff=…`
+Bind your verdict to the reviewed range: do NOT type `base=… head=…`
 yourself — run `python scripts/process/attest.py --bundle <this file> …`,
-which recomputes the digest from base/head (a typed digest is a fabricated
-attestation the gate names as such). The `REVIEW_ARTIFACT` line binds to the exact
-reviewed diff (the gate recomputes and verifies the digest). Never invent
-these values.
+which takes them from the `REVIEW_ARTIFACT` line above. Code committed after
+that head is unreviewed for the gate. Never invent these values.
 
 - `verdict`: one of {sorted(_review_gate.VERDICTS)}.
 - `independence`: comma-joined tokens from {sorted(_review_gate.INDEP_TOKENS)} —
@@ -395,25 +392,6 @@ For each finding, one line:
 
 Judge against the checklist and the rules above; cite file:line evidence; a
 `pass` with unfixed blockers is a false green — verdict `block` instead."""
-
-
-def _tier_provenance(root: Path, tier: int | None, plan_tier: int | None,
-                     declared_tier: int | None, plans: list[Path]) -> str:
-    """Where the deciding tier came from. A tier the caller asserted with
-    `--tier` and no plan corroborates is legible as an assertion — otherwise
-    a delta's scope would rest on something the reviewer never sees."""
-    if tier is None:
-        return "no declared tier"
-    if plan_tier is not None and (declared_tier is None or plan_tier >= declared_tier):
-        return f"tier {tier} read from " + ", ".join(_shown(_rel(root, p)) for p in plans)
-    if plan_tier is not None:
-        return (f"tier {tier} asserted by the caller via --tier, above the tier "
-                f"{plan_tier} the bundled plan declares")
-    if plans:
-        return (f"tier {tier} asserted by the caller via --tier — the bundled plan "
-                "declares none")
-    return (f"tier {tier} asserted by the caller via --tier — no plan is under "
-            "review, so nothing in this repository corroborates it")
 
 
 # the tier from which a plan without a REFUTE line is warned about; gate code
@@ -584,19 +562,6 @@ def _bundled_work(root: Path, plan_filter: str | None, plan_texts: dict[Path, st
     return ids or ({_DATED.sub("", plan_filter)} if plan_filter else set())
 
 
-def _since_head(root: Path, since: str) -> tuple[str, str]:
-    sha = (_git(root, "rev-parse", "--verify", "--quiet", f"{since}^{{commit}}") or "").strip()
-    return sha, (_git(root, "rev-parse", "HEAD") or "").strip()
-
-
-def _tier_at(root: Path, ref: str, plans: list[Path]) -> int:
-    """The highest tier these plans declared at `ref` (0 when none did), read
-    as `build` reads it: no design doc, no plan that waives its review."""
-    texts = [_git(root, "show", f"{ref}:{_rel(root, p)}") for p in plans
-             if not p.name.startswith(_review_gate.DESIGN_DOC_PREFIX)]
-    return _declared_tier([t for t in texts if t and not _review_gate.review_waived(t)]) or 0
-
-
 def _delta_files(root: Path, since: str) -> list[str] | None:
     sha = _git(root, "rev-parse", "--verify", "--quiet", f"{since}^{{commit}}")
     head = _git(root, "rev-parse", "HEAD")
@@ -668,20 +633,6 @@ def _regression_pin_note(touches: list[str]) -> str | None:
             f"{len(code)} code file(s) changed, no test file)*\n")
 
 
-def _tier3_delta_refusal(root: Path, since: str, plan_filter: str | None,
-                         plan_texts: dict[Path, str]) -> str | None:
-    """Why this Tier 3 delta needs a full bundle — None when it may run. The
-    gate's owner decides (`check_review.tier3_delta_problem`), never the worker."""
-    sha, head = _since_head(root, since)
-    records = [f for _r, t in _review_gate.record_texts(root, ("journal",)) or []
-               for _l, f in _review_gate.parse_review_lines(t)[0]]
-    works = _bundled_work(root, plan_filter, plan_texts)
-    if not sha or not head:
-        return _review_gate.tier3_delta_refusal(
-            sha or since, records, _review_gate.expand_work(root, works)[0])
-    return _review_gate.tier3_delta_problem(root, records, works, sha, head)
-
-
 def build(root: Path, base: str | None, plan_filter: str | None = None,
           since: str | None = None, plans: list[Path] | None = None,
           declared_tier: int | None = None) -> str:
@@ -702,29 +653,7 @@ def build(root: Path, base: str | None, plan_filter: str | None = None,
     # that waives its review — as the review gate judges both
     tiers = {_label(root, plan): _review_gate.plan_tier(text) for plan, text in plan_texts.items()
              if not plan.name.startswith(_review_gate.DESIGN_DOC_PREFIX) and not _review_gate.review_waived(text)}
-    if since and tier is None:
-        # no plan under review, no --tier: an undeclared tier is no licence
-        # for a delta — scoping the plans to the branch would otherwise hand
-        # every planless branch the delta review Tier 3 forbids
-        raise SystemExit(
-            "make_review_bundle: --since refused — no tier is declared. Name the plan "
-            f"with --plan <slug> (in {PLANS}/, its archive, or "
-            f"{_review_gate.SPECS_DIR}/<dir>/{_review_gate.SPEC_PLAN}), declare the tier with "
-            "--tier N for a branch without a plan, or build the full bundle without --since")
-    if since and tier is not None and tier > DELTA_MAX_TIER:
-        raise SystemExit(f"make_review_bundle: --since refused — tier {tier} is above the "
-                         f"Tier {DELTA_MAX_TIER} scale; build the full bundle")
     touches = _delta_files(root, since) if since else None
-    # a fix round that lowers the tier is judged at the tier it started from
-    if since and tier is not None and (tier >= 3 or _tier_at(root, since, plans) >= 3):
-        # Tier 3: anchored on a full round, and no scope growth (verification-independence.md)
-        refusal = _tier3_delta_refusal(root, since, plan_filter, plan_texts)
-        if refusal:
-            who = (f"bundled plan {next(_label(root, p) for p, t in plan_texts.items() if _declared_tier([t]) == tier)}"
-                   if plan_tier == tier else f"--tier {declared_tier}")
-            raise SystemExit(f"make_review_bundle: --since refused — {who} declares tier: {tier}; "
-                             f"{refusal}. If that plan is not the work under review, name the one "
-                             "that is with --plan <name>")
 
     add("# Review bundle — read-only\n")
     add("You are an INDEPENDENT reviewer. This bundle is your complete input: "
@@ -737,9 +666,9 @@ def build(root: Path, base: str | None, plan_filter: str | None = None,
             f"`{since}`. Previous findings and the full branch file surface are "
             "included so fixes are judged in their original scope. " + DELTA_ROUND_RULE + "\n")
         add(BLOCK_RULE + "\n")
-        add(f"**Scope rests on {_tier_provenance(root, tier, plan_tier, declared_tier, plans)}.** "
-            "A Tier 3 delta needs a full round at its start and no scope growth; if that tier is "
-            "wrong, this bundle is too narrow — say so instead of reviewing it.\n")
+        add("Your verdict binds the whole branch (the `REVIEW_ARTIFACT` line): the delta is "
+            "where to look, not the limit of what you vouch for. If the fix changed a contract, "
+            "the architecture or the risk scope, ask for a full bundle instead.\n")
         add("DELTA_TOUCHES files=" + (",".join(_shown(p) for p in touches)
                                       if touches is not None else "(unknown)") + "\n")
         pin = _regression_pin_note(touches or [])
@@ -844,7 +773,8 @@ def build(root: Path, base: str | None, plan_filter: str | None = None,
     if since:
         add("## Findings from the previous round\n")
         # the gate's rule: the report as committed, never one the fix brought
-        sha, head = _since_head(root, since)
+        sha = (_git(root, "rev-parse", "--verify", "--quiet", f"{since}^{{commit}}") or "").strip()
+        head = (_git(root, "rev-parse", "HEAD") or "").strip()
         slugs, issues = _review_gate.expand_work(root, _bundled_work(root, plan_filter, plan_texts),
                                                  ref=head or None)[1]
         found = _review_gate.prior_report(root, slugs, issues, sha, head) if sha and head else None
@@ -861,21 +791,19 @@ def build(root: Path, base: str | None, plan_filter: str | None = None,
         add("*(unavailable: no usable base ref — pass --base explicitly; "
             "git may be absent or the repo unborn)*\n")
     else:
-        artifact = _review_artifact(root, since or resolved, delta=bool(since))
+        artifact = _review_artifact(root, resolved, since)
         if artifact is None and since:
-            raise SystemExit("make_review_bundle: cannot bound this delta — use a full review "
+            raise SystemExit("make_review_bundle: cannot read this delta — use a full bundle "
                              "for non-first-parent, feature merge or octopus histories")
         why = (_review_gate.full_round_base_problem(root, artifact.base, artifact.head)
-               if artifact is not None and not since else None)
+               if artifact is not None else None)
         if why:
-            # a full bundle against another base reviews a slice as the whole (#160)
-            raise SystemExit(f"make_review_bundle: full bundle refused — {why}")
+            # a bundle against another base reviews a slice as the whole (#160)
+            raise SystemExit(f"make_review_bundle: bundle refused — {why}")
         if artifact is None:
             add(f"*(unavailable: `git diff {resolved}...HEAD` failed)*\n")
         else:
-            add(f"REVIEW_ARTIFACT base={artifact.base} head={artifact.head} diff={artifact.digest}{' mode=delta' if since else ''}\n")
-            if since:
-                add(f"REVIEW_SCOPE mode=delta since={artifact.base} head={artifact.head}\n")
+            add(f"REVIEW_ARTIFACT base={artifact.base} head={artifact.head}\n")
             diff = artifact.text
             if not diff.strip():
                 add(f"*(empty: HEAD adds nothing over {resolved})*\n")
@@ -890,7 +818,7 @@ def build(root: Path, base: str | None, plan_filter: str | None = None,
                 # full round on an artifact that lacked five files); -z through
                 # the owner, so a name arrives unquoted
                 entries = _review_gate.name_status(
-                    _review_gate.delta_diff(root, artifact.base, artifact.head, names=True) if since
+                    _review_gate.delta_diff(root, artifact.since, artifact.head, names=True) if since
                     else _review_gate._git_bytes(root, "diff", "--name-status", "--no-renames", "-z", artifact.range_spec))
                 if entries is not None:
                     entries = list(dict.fromkeys(entries))
@@ -907,12 +835,11 @@ def build(root: Path, base: str | None, plan_filter: str | None = None,
                 if artifact.binaries:
                     # a binary reads as `Binary files … differ`, without a size:
                     # the stat block names path and bytes, so the gap is not
-                    # mistaken for completeness. The digest still covers them.
+                    # mistaken for completeness.
                     stat = ("\n".join(artifact.text.splitlines()) if since
                             else _git(root, "diff", "--stat=200", "--no-renames", artifact.range_spec))
                     add("*(binary files carry no content in this bundle — their encoded payload "
-                        "is unreadable to you, and the digest above still covers it. Judge them "
-                        "by path, status and size:)*\n")
+                        "is unreadable to you. Judge them by path, status and size:)*\n")
                     if stat and stat.strip():
                         add(_fenced(stat.rstrip()))
                 if lines > 4000:
@@ -1086,7 +1013,7 @@ def main(argv: list[str]) -> int:
     argv = [arg for arg in argv if arg != "--skip-preflight"]
     out_file = _opt(argv, "-o")
     # a stale output is unsafe whatever fails next (a bad flag, a red preflight):
-    # the caller could hand the previous bundle — old head, old digest — to a
+    # the caller could hand the previous bundle — an old head — to a
     # reviewer. Remove it before anything is validated (observed downstream).
     target = Path(out_file) if out_file else None
     partial = target.with_name(target.name + ".partial") if target else None
