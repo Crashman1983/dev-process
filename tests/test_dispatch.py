@@ -416,6 +416,26 @@ def test_report_carries_model_and_kpis_cut_by_it(render, tmp_path):
 
 
 @pytest.mark.skipif(shutil.which("tmux") is None, reason="tmux not installed")
+def test_stop_keeps_the_final_report_of_a_finished_phase(render, tmp_path):
+    """Downstream: `dispatch stop` wrote `idle` over a review's `review-pass`, and
+    three finished branches would have dropped out of the train. A session whose
+    own final report ended its phase keeps it; one that did not gets `idle`."""
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    _fake_command(out, "sleep 30\n")
+    assert _dispatch(out, "start", "--issue", "5", "--phase", "review", "--branch", "b5").returncode == 0
+    assert _dispatch(out, "start", "--issue", "6", "--phase", "plan", "--branch", "b6").returncode == 0
+    time.sleep(1.1)  # the report's epoch is in seconds: after the start, not in its second
+    subprocess.run([sys.executable, str(out / "scripts/process/report.py"), "review-pass", "--issue", "5",
+                    "--worker", "b5", "--model", "m"], cwd=out, check=True, capture_output=True)
+    assert _dispatch(out, "stop", "b5", "--force").returncode == 0
+    assert _dispatch(out, "stop", "b6", "--force").returncode == 0
+    reports = _load_dispatch(out)._report.read_reports(out)
+    last = {r["worker"]: r["state"] for r in reports}
+    assert last["b5"] == "review-pass", reports
+    assert last["b6"] == "idle", reports
+
+
 def test_tmux_runner_starts_a_window_with_log_and_stops_it(render, tmp_path):
     out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
     _repo(out)
