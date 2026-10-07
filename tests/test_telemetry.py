@@ -6,26 +6,10 @@ KENNI = ["Kenni", "KenniNext", "Seb", "Signal", "SvelteKit", "user_id=1", "surfa
 
 JOURNAL = ".process-work/journal"
 
-VALID_LINES = (
-    "GRADE work=42 checkpoint=1 criterion=AC-1 round=1 verdict=satisfied "
-    "action=satisfied source=execute\n"
-    "GRADE work=42 checkpoint=final criterion=AC-2 round=1 verdict=partial "
-    "action=fixed source=review\n"
-)
-
-
 def _render(render, tmp_path, **mods):
     m = {"telemetry": True}
     m.update(mods)
     return render(tmp_path, {"project_name": "d", "modules": m})
-
-
-def _gate(out: Path, root: Path | None = None):
-    return subprocess.run(
-        [sys.executable, str(out / "scripts/process/check_telemetry.py"),
-         str(root if root is not None else out)],
-        capture_output=True, text=True,
-    )
 
 
 def _kpis(out: Path, *args: str):
@@ -41,19 +25,17 @@ def _journal(out: Path, text: str, name: str = "2026-07-02.md"):
     (d / name).write_text(text, encoding="utf-8")
 
 
-
 # --- module wiring -----------------------------------------------------------
 
-def test_module_on_ships_gate_cockpit_doc_seed(render, tmp_path):
+def test_module_on_ships_cockpit_and_doc_without_a_gate(render, tmp_path):
     out = _render(render, tmp_path)
-    assert (out / "scripts/process/check_telemetry.py").is_file()
+    assert not (out / "scripts/process/check_telemetry.py").exists()  # retired in v2.54.0
     assert (out / "scripts/process/process_kpis.py").is_file()
     assert (out / "docs/process/modules/telemetry.md").is_file()
 
 
 def test_module_off_ships_nothing(render, tmp_path):
     out = render(tmp_path, {"project_name": "d"})
-    assert not (out / "scripts/process/check_telemetry.py").exists()
     assert not (out / "scripts/process/process_kpis.py").exists()
     assert not (out / "docs/process/modules/telemetry.md").exists()
     # module OFF ships nothing — not even the seed dir (Finding-D discipline)
@@ -77,167 +59,25 @@ def test_answers_records_telemetry(render, tmp_path):
     assert "telemetry: true" in (out / ".copier-answers.yml").read_text()
 
 
-def test_gate_runner_lists_telemetry(render, tmp_path):
+def test_gate_runner_runs_no_telemetry_gate_and_accepts_the_module(render, tmp_path):
     out = _render(render, tmp_path)
     r = subprocess.run(
         [sys.executable, str(out / "scripts/process/gate_runner.py"), "--list"],
         cwd=out, capture_output=True, text=True,
     )
     assert r.returncode == 0, r.stderr
-    assert "telemetry" in r.stdout
+    assert "telemetry" not in r.stdout
+    r = subprocess.run([sys.executable, str(out / "scripts/process/gate_runner.py")],
+                       cwd=out, capture_output=True, text=True)
+    assert "unknown module" not in (r.stdout + r.stderr), r.stdout + r.stderr
 
 
-def test_workflow_mentions_grade_only_with_module(render, tmp_path):
+def test_workflow_asks_for_no_grade_lines(render, tmp_path):
     on = _render(render, tmp_path / "on")
-    off = render(tmp_path / "off", {"project_name": "d"})
-    assert "GRADE" in (on / "docs/process/workflow.md").read_text()
-    assert "GRADE" not in (off / "docs/process/workflow.md").read_text()
+    assert "GRADE" not in (on / "docs/process/workflow.md").read_text()
 
 
-# --- gate: GRADE lint --------------------------------------------------------
-
-def test_no_grade_lines_soft_note(render, tmp_path):
-    out = _render(render, tmp_path)
-    r = _gate(out)
-    assert r.returncode == 0, r.stdout + r.stderr
-    assert "no GRADE lines yet" in r.stdout
-    assert "telemetry: OK" in r.stdout
-
-
-def test_valid_lines_pass(render, tmp_path):
-    out = _render(render, tmp_path)
-    _journal(out, "prose before\n" + VALID_LINES + "prose after\n")
-    r = _gate(out)
-    assert r.returncode == 0, r.stdout + r.stderr
-    assert "2 GRADE line(s) parseable" in r.stdout
-
-
-def test_malformed_line_fails_with_location(render, tmp_path):
-    out = _render(render, tmp_path)
-    # checkpoint= empty: the exact silent-loss shape the gate exists for
-    _journal(out, "GRADE work=42 checkpoint= criterion=AC-1 round=1 "
-                  "verdict=satisfied action=satisfied source=execute\n")
-    r = _gate(out)
-    assert r.returncode == 1
-    assert "2026-07-02.md:1" in r.stdout
-    assert "grammar" in r.stdout
-
-
-def test_out_of_enum_values_fail(render, tmp_path):
-    out = _render(render, tmp_path)
-    bad = [
-        ("verdict=maybe", "verdict=maybe not in"),
-        ("action=ignored", "action=ignored not in"),
-        ("source=nightly", "source=nightly not in"),
-    ]
-    for repl, expect in bad:
-        line = ("GRADE work=1 checkpoint=1 criterion=A round=1 "
-                "verdict=satisfied action=satisfied source=execute")
-        key = repl.split("=", 1)[0]
-        import re
-        line = re.sub(rf"{key}=\S+", repl, line)
-        _journal(out, line + "\n")
-        r = _gate(out)
-        assert r.returncode == 1, line
-        assert expect in r.stdout, r.stdout
-
-
-def test_non_numeric_round_fails(render, tmp_path):
-    out = _render(render, tmp_path)
-    _journal(out, "GRADE work=1 checkpoint=1 criterion=A round=one "
-                  "verdict=satisfied action=satisfied source=execute\n")
-    r = _gate(out)
-    assert r.returncode == 1
-    assert "round=one" in r.stdout
-
-
-def test_prose_mentioning_grade_ignored(render, tmp_path):
-    out = _render(render, tmp_path)
-    _journal(out, "The GRADE trace grew today.\n"
-                  "GRADE lines are appended per criterion.\n")
-    r = _gate(out)
-    assert r.returncode == 0, r.stdout
-
-
-def test_prose_starting_with_grade_and_later_equals_ignored(render, tmp_path):
-    # regression (audit): a prose line beginning 'GRADE ' with a '=' in a LATER
-    # word (not the first token) must NOT be linted — its first token is a bare
-    # word, so it is prose, not a GRADE line. Previously it hard-failed.
-    out = _render(render, tmp_path)
-    _journal(out, "GRADE totals for Q3 revenue=120k are in the report.\n")
-    r = _gate(out)
-    assert r.returncode == 0, r.stdout
-
-
-def test_grade_with_typoed_first_key_still_linted(render, tmp_path):
-    # the tightened predicate must NOT let a genuine-but-malformed GRADE line
-    # slip: 'GRADE wrok=…' has a key=value first token, so it reaches the grammar
-    # check and fails there.
-    out = _render(render, tmp_path)
-    _journal(out, "GRADE wrok=42 checkpoint=final criterion=AC-1 round=1 "
-                  "verdict=satisfied action=satisfied source=review\n")
-    r = _gate(out)
-    assert r.returncode == 1
-    assert "does not match the GRADE grammar" in r.stdout
-
-
-def test_out_of_scope_verdict_is_valid(render, tmp_path):
-    # audit coverage: out_of_scope is a first-class verdict driving the suite's
-    # "0 false-pass in the danger direction" logic — assert the grammar accepts it
-    out = _render(render, tmp_path)
-    _journal(out, "GRADE work=1 checkpoint=1 criterion=A round=1 "
-                  "verdict=out_of_scope action=disputed source=review\n")
-    r = _gate(out)
-    assert r.returncode == 0, r.stdout
-
-
-def test_non_utf8_journal_fails(render, tmp_path):
-    out = _render(render, tmp_path)
-    d = out / JOURNAL
-    d.mkdir(parents=True, exist_ok=True)
-    (d / "2026-07-02.md").write_bytes(b"\xff\xfe not utf8")
-    r = _gate(out)
-    assert r.returncode == 1
-    assert "UTF-8" in r.stdout
-
-
-
-
-def test_convergence_classification(render, tmp_path):
-    out = _render(render, tmp_path)
-    _journal(out, (
-        # converged in 2 rounds
-        "GRADE work=1 checkpoint=1 criterion=A round=1 verdict=partial action=fixed source=execute\n"
-        "GRADE work=1 checkpoint=1 criterion=A round=2 verdict=satisfied action=satisfied source=execute\n"
-        # thrash: converged but took 3 rounds
-        "GRADE work=1 checkpoint=1 criterion=B round=1 verdict=partial action=fixed source=execute\n"
-        "GRADE work=1 checkpoint=1 criterion=B round=2 verdict=partial action=fixed source=execute\n"
-        "GRADE work=1 checkpoint=1 criterion=B round=3 verdict=satisfied action=satisfied source=execute\n"
-        # unresolved
-        "GRADE work=1 checkpoint=1 criterion=C round=2 verdict=not_satisfied action=surfaced source=execute\n"
-        # first-try: not convergence data
-        "GRADE work=1 checkpoint=1 criterion=D round=1 verdict=satisfied action=satisfied source=execute\n"
-    ))
-    r = _kpis(out, "convergence")
-    assert r.returncode == 0, r.stdout + r.stderr
-    assert "1/3 kickback episodes" in r.stdout
-    assert "thrash=1" in r.stdout
-    assert "unresolved=1" in r.stdout
-    assert "first_try=1" in r.stdout
-
-
-
-
-def test_cost_counts_rework(render, tmp_path):
-    out = _render(render, tmp_path)
-    _journal(out, (
-        "GRADE work=1 checkpoint=1 criterion=A round=1 verdict=partial action=fixed source=execute\n"
-        "GRADE work=1 checkpoint=1 criterion=A round=2 verdict=satisfied action=satisfied source=execute\n"
-    ))
-    r = _kpis(out, "cost")
-    assert r.returncode == 0, r.stdout + r.stderr
-    assert "rework episodes (kickback round>1 -> fixed): 1" in r.stdout
-
+# --- cockpit -----------------------------------------------------------------
 
 
 def test_cost_per_issue_reads_the_policy_transcripts_or_says_not_measured(render, tmp_path):
@@ -287,10 +127,11 @@ def test_cfr_flags_code_overlap_only(render, tmp_path):
 
 def test_report_end_to_end(render, tmp_path):
     out = _render(render, tmp_path)
-    _journal(out, VALID_LINES)
+    _journal(out, "GRADE work=42 checkpoint=1 criterion=AC-1 round=1 verdict=satisfied "
+                  "action=satisfied source=execute\n")  # an old line is history, read by nothing
     r = _kpis(out, "report")
     assert r.returncode == 0, r.stdout + r.stderr
-    assert "[convergence]" in r.stdout
+    assert "convergence" not in r.stdout
     assert "[cost]" in r.stdout
     assert "[cfr]" in r.stdout
 
@@ -318,7 +159,6 @@ def test_share_prints_process_against_product_week_by_week(render, tmp_path):
 def test_neutral_no_kenni_terms(render, tmp_path):
     out = _render(render, tmp_path)
     for rel in [
-        "scripts/process/check_telemetry.py",
         "scripts/process/process_kpis.py",
         "docs/process/modules/telemetry.md",
         "docs/process/workflow.md",
@@ -338,116 +178,12 @@ def test_docdrift_green_with_module_doc(render, tmp_path):
     assert r.returncode == 0, r.stdout
 
 
-# --- audit round 2 (adversarial findings) --------------------------------
-
-def test_tab_after_grade_reaches_grammar_check(render, tmp_path):
-    # F2: filter derived from the grammar — GRADE\t… must not slip past the
-    # gate while the cockpit ingests it
-    out = _render(render, tmp_path)
-    _journal(out, "GRADE\twork=1 checkpoint=1 criterion=A round=1 "
-                  "verdict=bogus action=satisfied source=execute\n")
-    r = _gate(out)
-    assert r.returncode == 1
-    assert "verdict=bogus" in r.stdout
-
-
-def test_unicode_round_fails_gate_and_cockpit_survives(render, tmp_path):
-    # F3: "²" is isdigit() but int() raises — gate must fail it, and the
-    # cockpit must not crash even when fed such a journal directly
-    out = _render(render, tmp_path)
-    _journal(out, "GRADE work=1 checkpoint=1 criterion=A round=² "
-                  "verdict=satisfied action=satisfied source=execute\n")
-    r = _gate(out)
-    assert r.returncode == 1
-    assert "round=" in r.stdout
-    j = out / JOURNAL / "2026-07-02.md"
-    for cmd in (["convergence", str(j)], ["cost", str(j)]):
-        rc = _kpis(out, *cmd)
-        assert rc.returncode == 0, rc.stderr
-        assert "Traceback" not in rc.stderr
-
-
-
-
-def test_nonexistent_root_fails(render, tmp_path):
-    # F6: a typo'd root must not report green forever
-    out = _render(render, tmp_path)
-    r = _gate(out, root=out / "does-not-exist")
-    assert r.returncode == 1
-    assert "not a directory" in r.stdout
-
-
-def test_fenced_grade_examples_are_quotations(render, tmp_path):
-    # F8: fenced blocks are invisible to gate and cockpit
-    out = _render(render, tmp_path)
-    _journal(out, "```\nGRADE work=1 checkpoint= criterion=broken round=x "
-                  "verdict=nope action=nope source=nope\n```\n")
-    r = _gate(out)
-    assert r.returncode == 0, r.stdout
-    assert "no GRADE lines yet" in r.stdout
-    r = _kpis(out, "convergence")
-    assert r.returncode == 0, r.stderr
-
-
-
-
 def test_cfr_outside_git_diagnostic(render, tmp_path):
     out = _render(render, tmp_path)  # rendered repo is not a git repo
     r = _kpis(out, "cfr")
     assert r.returncode == 0, r.stderr
     assert "cfr skipped" in r.stdout
     assert "Traceback" not in r.stderr
-
-
-def test_non_utf8_journal_does_not_crash_cockpit(render, tmp_path):
-    out = _render(render, tmp_path)
-    d = out / JOURNAL
-    d.mkdir(parents=True, exist_ok=True)
-    (d / "2026-07-02.md").write_bytes(b"\xff\xfe garbage")
-    r = _kpis(out, "convergence")
-    assert r.returncode == 0, r.stderr
-    assert "Traceback" not in r.stderr
-
-
-
-def test_grade_lines_in_sharded_journal_are_read(render, tmp_path):
-    # SP17: journals may be sharded per branch — the gate and cockpit read
-    # .process-work/journal/**/*.md recursively, so a GRADE line in a per-branch
-    # shard must be counted, not lost.
-    out = _render(render, tmp_path)
-    d = out / JOURNAL / "feat-x-branch"
-    d.mkdir(parents=True, exist_ok=True)
-    (d / "2026-07-02.md").write_text(
-        "GRADE work=9 checkpoint=final criterion=AC-1 round=1 verdict=satisfied "
-        "action=satisfied source=execute\n", encoding="utf-8")
-    r = _gate(out)
-    assert r.returncode == 0, r.stdout + r.stderr
-    assert "1 GRADE line(s) parseable" in r.stdout
-
-
-def test_bulleted_grade_line_is_linted(render, tmp_path):
-    # audit: '- GRADE ...' silently vanished from both the gate and cockpit
-    out = render(tmp_path, {"project_name": "demo", "modules": {"telemetry": True}})
-    d = out / ".process-work" / "journal"
-    d.mkdir(parents=True, exist_ok=True)
-    (d / "2026-07-05.md").write_text(
-        "- GRADE work=x checkpoint=1 criterion=A round=1 verdict=satisfied "
-        "action=bogus source=review\n", encoding="utf-8")
-    r = subprocess.run([sys.executable, str(out / "scripts/process/check_telemetry.py"), str(out)],
-                       capture_output=True, text=True)
-    assert r.returncode == 1  # the bulleted line is seen and its bad action linted
-
-
-def test_tilde_fenced_grade_ignored(render, tmp_path):
-    out = render(tmp_path, {"project_name": "demo", "modules": {"telemetry": True}})
-    d = out / ".process-work" / "journal"
-    d.mkdir(parents=True, exist_ok=True)
-    (d / "2026-07-05.md").write_text(
-        "~~~\nGRADE work=x checkpoint=1 criterion=A round=1 verdict=satisfied "
-        "action=bogus source=review\n~~~\n", encoding="utf-8")
-    r = subprocess.run([sys.executable, str(out / "scripts/process/check_telemetry.py"), str(out)],
-                       capture_output=True, text=True)
-    assert r.returncode == 0, r.stdout  # quotation, not telemetry
 
 
 # --- SP62: fix clusters (rule 6 across sessions) ---------------------------
@@ -611,7 +347,7 @@ def test_rounds_names_a_missing_dependency_of_an_installed_finding_reader(render
     out = _render(render, tmp_path, github_issues=True)
     _journal(out, _review(9, 1, "block"))
     monkeypatch.setattr(sys, "path", list(sys.path))
-    for name in ("check_issues", "check_review", "check_telemetry"):
+    for name in ("check_issues", "check_review"):
         monkeypatch.delitem(sys.modules, name, raising=False)
     monkeypatch.setitem(sys.modules, "yaml", None)  # `import yaml` raises ModuleNotFoundError
     monkeypatch.setattr(sys, "dont_write_bytecode", True)

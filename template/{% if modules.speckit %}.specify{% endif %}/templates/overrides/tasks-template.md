@@ -45,9 +45,8 @@ independently implementable, testable, deliverable slice — P1 first (MVP).
 - [ ] T005 [US1] AC-3 an expired invite is refused with `InviteExpired`, nothing is created: test `test_expired_invite_is_refused` in tests/test_invites.py asserts the error and the unchanged member list (red) → implement the expiry check in src/invites.py (green)
 
 **Checkpoint**: US1 is independently functional — validate the slice against
-its acceptance criteria and Success Criteria before starting US2; where the
-telemetry module is installed, record one GRADE line per criterion in the
-journal (`docs/process/modules/telemetry.md`). A wrong direction dies here,
+its acceptance criteria and Success Criteria before starting US2. A wrong
+direction dies here,
 at slice cost, not at review after 100% of the work.
 
 ## Phase N: User Story N — [title] (PN)
