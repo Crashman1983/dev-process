@@ -118,7 +118,7 @@ phase (`review-pass`, `planned`, `done` …): that report stays, so a
 stopped finished review still boards the train. `max_workers` caps live
 sessions per host (one whose phase is over by its own final report — a
 plan's `planned`, a review's verdict — holds no slot; one that cannot be
-told does); a held lane counts as no free CPU: a held `full` lane blocks only execute, a held `scoped` (or unknown) lane blocks every phase, and a remote phase sees neither cap nor lane. A local start
+told does); a held lane counts as no free CPU: a held `full` or `scoped` lane blocks only execute (plan, review and brainstorm are mostly model-bound), an unknown held lane blocks every phase, and a remote phase sees neither cap nor lane. A local start
 also refuses while the filesystem holding the worktrees is at or above
 90% use (`PROCESS_DISK_LIMIT_PCT`), naming the usage and
 `python3 scripts/process/tidy.py --apply` — each worktree carries its own

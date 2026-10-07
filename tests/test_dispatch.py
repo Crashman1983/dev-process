@@ -60,18 +60,19 @@ def _load_dispatch(out: Path):
 LANE_TABLE = [
     (set(), {"plan": True, "execute": True, "review": True}),
     ({"full"}, {"plan": True, "execute": False, "review": True}),
-    ({"scoped"}, {"plan": False, "execute": False, "review": False}),
-    ({"scoped", "full"}, {"plan": False, "execute": False, "review": False}),
+    ({"scoped"}, {"plan": True, "execute": False, "review": True}),  # #177
+    ({"scoped", "full"}, {"plan": True, "execute": False, "review": True}),
     ({"gpu"}, {"plan": False, "execute": False, "review": False}),
+    ({"scoped", "gpu"}, {"plan": False, "execute": False, "review": False}),
 ]
 
 
 @pytest.mark.parametrize("held,allowed", LANE_TABLE)
-@pytest.mark.parametrize("phase", ["plan", "execute", "review"])
+@pytest.mark.parametrize("phase", ["plan", "execute", "review", "brainstorm"])
 def test_lane_rule_by_lane_and_phase(render, tmp_path, held, allowed, phase):
     d = _load_dispatch(render(tmp_path, {"project_name": "d", "modules": {}}))
     verdict = d.lane_verdict(held, phase)
-    assert (verdict is None) == allowed[phase], verdict
+    assert (verdict is None) == allowed.get(phase, allowed["plan"]), verdict
     if verdict:
         assert phase in verdict and any(name in verdict for name in held)
 
@@ -85,13 +86,18 @@ def test_lane_status_is_parsed_line_by_line(render, tmp_path):
     assert d.held_lanes(out) == set()
 
 
-def test_full_lane_held_lets_plan_start_but_not_execute(render, tmp_path):
+SCOPED_HELD = "scoped: held by pid 1 — pre-push (issue-9) since 09:28 (15 min)\nfull: free"
+
+
+@pytest.mark.parametrize("lanes,lane", [(FULL_HELD, "full"), (SCOPED_HELD, "scoped")])
+def test_a_held_test_lane_lets_plan_start_but_not_execute(render, tmp_path, lanes, lane):
+    # #177: a worker's pre-push holds `scoped`; plan and review are model-bound
     out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
     _repo(out)
     _fake_command(out, "sleep 30\n")
-    _fake_lane(out, FULL_HELD)
+    _fake_lane(out, lanes)
     r = _dispatch(out, "start", "--issue", "8", "--phase", "execute", "--branch", "b8")
-    assert r.returncode == 3 and "full" in r.stderr and "execute" in r.stderr
+    assert r.returncode == 3 and lane in r.stderr and "execute" in r.stderr
     r = _dispatch(out, "start", "--issue", "8", "--phase", "plan", "--branch", "b8")
     assert r.returncode == 0, r.stderr
     _dispatch(out, "stop", "b8", "--force")
