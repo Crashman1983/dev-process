@@ -76,7 +76,9 @@ a day downstream, with five reviewed candidates waiting.
    bisected (bisecting a flake blames whoever sits in the prefix). Red
    twice: the base itself is checked once (a red main blames nobody and
    aborts; its gates always run, its suite only when no earlier train saw
-   it green on that very tree, `green-suites` in the train's directory),
+   it green on that very tree, `green-suites` in the train's directory —
+   and before the first passenger would be blamed it runs anyway: main can
+   turn red outside the tree),
    then a bisection over boarding-order prefixes names the first
    offender; it is dropped, gets a `blocked` report, and the rest is
    rebuilt. A suite that does not exist on a tree — a passenger introduces

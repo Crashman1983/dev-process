@@ -1603,24 +1603,45 @@ def test_a_held_scoped_lane_does_not_hold_the_train(render, tmp_path, status, de
         assert why.startswith("lane busy")
 
 
-@pytest.mark.parametrize("seen", [True, False])
-def test_the_bare_base_skips_a_suite_this_train_saw_green(render, tmp_path, monkeypatch, seen):
-    # after a red batch the base is checked; it is the tree an earlier train
-    # fast-forwarded to — its suite (~26 min downstream) need not run again
+def _memo_batch(render, tmp_path, monkeypatch, *, seen, red):
     out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
     _repo(out)
     train = _load_train(out)
     if seen:
         train._remember_green_suite(out, train._suite_key(out, "s"))
-    runs = []
-    monkeypatch.setattr(train, "build_train", lambda root, base, subset, stamp, log: (out, "train/x", list(subset), []))
+    runs, current, written = [], [], []
+
+    def build(root, base, subset, stamp, log):
+        current[:] = subset
+        return out, "train/x", list(subset), []
+    monkeypatch.setattr(train, "build_train", build)
     monkeypatch.setattr(train, "_run_gates", lambda w, log: True)
-    monkeypatch.setattr(train, "_sh", lambda cwd, cmd, log: runs.append(cmd) or ("green" if len(runs) == 3 else "red"))
+    monkeypatch.setattr(train, "_sh", lambda cwd, cmd, log: runs.append(list(current)) or
+                        ("red" if red(current) else "green"))
     monkeypatch.setattr(train, "_cleanup", lambda *a: None)
-    monkeypatch.setattr(train, "_write", lambda *a, **k: None)
-    p = {"base": "main", "candidates": [{"branch": "b1", "hours_waiting": 1}]}
-    train._run_batch(out, "main", p, ["b1"], "x", tmp_path / "t.log", suite="s", deploy=None,
-                     push=False, keep_branches=True)
-    # combined red, retry red, then the base: from the memo, or run (third run green)
-    assert len(runs) == (2 if seen else 3)
+    monkeypatch.setattr(train, "_write", lambda root, state, *a, **k: written.append(state))
+    return out, train, runs, written
+
+
+@pytest.mark.parametrize("seen", [True, False])
+def test_the_bare_base_skips_a_suite_this_train_saw_green(render, tmp_path, monkeypatch, seen):
+    # after a red batch the base is checked; it is the tree an earlier train
+    # fast-forwarded to — its suite (~26 min downstream) need not run again
+    out, train, runs, _w = _memo_batch(render, tmp_path, monkeypatch, seen=seen, red=lambda sub: "b2" in sub)
+    p = {"base": "main", "candidates": [{"branch": "b1", "hours_waiting": 2}, {"branch": "b2", "hours_waiting": 1}]}
+    with pytest.raises(SystemExit):  # the stub train/x cannot be fast-forwarded; the judging is done
+        train._run_batch(out, "main", p, ["b1", "b2"], "x", tmp_path / "t.log", suite="s", deploy=None,
+                         push=False, keep_branches=True)
+    assert runs[-1] == ["b1"]  # b2 blamed, b1 green
+    assert ([] in runs) is not seen  # the bare base ran only without the memo
     assert ("not run again" in (tmp_path / "t.log").read_text()) is seen
+
+
+def test_a_remembered_base_runs_before_the_first_passenger_is_blamed(render, tmp_path, monkeypatch):
+    # refutation: main turned red outside the tree (a host upgrade) — on the
+    # memo alone the first passenger was blamed, then the next, and so on
+    out, train, runs, written = _memo_batch(render, tmp_path, monkeypatch, seen=True, red=lambda sub: True)
+    p = {"base": "main", "candidates": [{"branch": "b1", "hours_waiting": 1}]}
+    rc = train._run_batch(out, "main", p, ["b1"], "x", tmp_path / "t.log", suite="s", deploy=None,
+                          push=False, keep_branches=True)
+    assert rc == 1 and runs[-1] == [] and "blocked" not in written
