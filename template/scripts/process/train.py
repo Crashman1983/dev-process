@@ -378,7 +378,8 @@ def _covers(root: Path, passes: list[dict], ids: set[str], tier: int, tip: str,
         return any(id(r) in own_ids for r in clearing)
     for r in with_head:
         late = _review._unreviewed_paths(root, r["head"], tip,
-                                          _review._reviewed_heads(passes, tier, _review._known_work(root, ref=tip)))
+                                          _review._reviewed_heads(passes, tier, _review._known_work(root, ref=tip)),
+                                          r.get("base") or "")
         if late is not None and not late:
             return True
     return False
