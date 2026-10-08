@@ -486,6 +486,22 @@ def test_a_train_with_a_passenger_on_a_file_main_changed_blames_nobody(shared):
     assert _stale(root, other_head) is None
 
 
+
+def test_two_passengers_on_hunks_of_one_file_are_both_reviewed(shared):
+    # the train boards two reviewed works on one file (no overlap rule since
+    # v2.57.1); git merges their hunks cleanly — neither reads as late code
+    root, head = shared
+    _git(root, "checkout", "-q", "-b", "other", "main")
+    other_head = _commit(root, "inv.md", (root / "inv.md").read_text().replace("l6 = 6", "l6 = 'other'"),
+                         "other passenger, another hunk of the same file")
+    _git(root, "checkout", "-q", "-b", "train/b", "main")
+    _git(root, "merge", "-q", "--no-ff", "--no-edit", "feat")
+    _git(root, "merge", "-q", "--no-ff", "--no-edit", "other")
+    text = (root / "inv.md").read_text()
+    assert "l0 = 'feat'" in text and "l6 = 'other'" in text
+    assert _stale(root, head) is None
+    assert _stale(root, other_head) is None
+
 def test_a_hunk_of_its_own_in_a_clean_merge_is_still_late_code(shared):
     root, head = shared
     _git(root, "checkout", "-q", "feat")
