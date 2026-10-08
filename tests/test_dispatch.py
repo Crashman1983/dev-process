@@ -59,9 +59,9 @@ def _load_dispatch(out: Path):
 
 LANE_TABLE = [
     (set(), {"plan": True, "execute": True, "review": True}),
-    ({"full"}, {"plan": True, "execute": False, "review": True}),
-    ({"scoped"}, {"plan": True, "execute": False, "review": True}),  # #177
-    ({"scoped", "full"}, {"plan": True, "execute": False, "review": True}),
+    ({"full"}, {"plan": True, "execute": True, "review": True}),
+    ({"scoped"}, {"plan": True, "execute": True, "review": True}),  # #177; execute: its tests queue, not its start
+    ({"scoped", "full"}, {"plan": True, "execute": True, "review": True}),
     ({"gpu"}, {"plan": False, "execute": False, "review": False}),
     ({"scoped", "gpu"}, {"plan": False, "execute": False, "review": False}),
 ]
@@ -90,14 +90,16 @@ SCOPED_HELD = "scoped: held by pid 1 — pre-push (issue-9) since 09:28 (15 min)
 
 
 @pytest.mark.parametrize("lanes,lane", [(FULL_HELD, "full"), (SCOPED_HELD, "scoped")])
-def test_a_held_test_lane_lets_plan_start_but_not_execute(render, tmp_path, lanes, lane):
-    # #177: a worker's pre-push holds `scoped`; plan and review are model-bound
+def test_a_held_test_lane_refuses_no_start(render, tmp_path, lanes, lane):
+    # #177: a worker's pre-push holds `scoped`; plan and review are model-bound,
+    # and an execute session's tests queue on the lane, its start does not
     out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
     _repo(out)
     _fake_command(out, "sleep 30\n")
     _fake_lane(out, lanes)
     r = _dispatch(out, "start", "--issue", "8", "--phase", "execute", "--branch", "b8")
-    assert r.returncode == 3 and lane in r.stderr and "execute" in r.stderr
+    assert r.returncode == 0, r.stderr
+    _dispatch(out, "stop", "b8", "--force")
     r = _dispatch(out, "start", "--issue", "8", "--phase", "plan", "--branch", "b8")
     assert r.returncode == 0, r.stderr
     _dispatch(out, "stop", "b8", "--force")
@@ -379,6 +381,9 @@ def test_dry_run_names_the_lane_rule(render, tmp_path):
     r = _dispatch(out, "start", "--issue", "9", "--phase", "plan", "--dry-run")
     assert r.returncode == 0, r.stderr
     assert "lane rule" in r.stdout and "allowed" in r.stdout and "full" in r.stdout
+    r = _dispatch(out, "start", "--issue", "9", "--phase", "execute", "--dry-run")
+    assert r.returncode == 0, r.stderr  # a held test lane never refuses a start
+    _fake_lane(out, "gpu: held by pid 1 — render (issue-9) since 09:28 (15 min)")
     r = _dispatch(out, "start", "--issue", "9", "--phase", "execute", "--dry-run")
     assert r.returncode == 3  # a refusal is never a green dry run
     assert "lane rule" in r.stderr and "refused" in r.stderr
