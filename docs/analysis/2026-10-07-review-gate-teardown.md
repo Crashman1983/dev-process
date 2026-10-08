@@ -1,6 +1,6 @@
 # Entscheidung: Review-Gate halbieren
 
-Datum: 2026-10-07 · Status: **freigegeben** (Owner, 2026-10-07); A, C, D, E und F umgesetzt (CHANGELOG, Release nach v2.52), B offen (siehe unten) ·
+Datum: 2026-10-07 · Status: **freigegeben** (Owner, 2026-10-07); A, C, D, E und F umgesetzt (CHANGELOG, Release nach v2.52), B umgesetzt nach Schattenbetrieb (Nachtrag 2) ·
 Vorgänger: Position 8 der Abbauliste
 (`docs/analysis/2026-08-06-lean-teardown-list.md`), damals beschlossen und
 nicht umgesetzt; seitdem ist `check_review.py` von 563 auf 3.080 Zeilen
@@ -202,3 +202,52 @@ B braucht deshalb als dritten erlaubten Stand den sauberen Auto-Merge von
 Head und `main` (und im Zug den der Passagiere). Danach muss B, wie unter
 „Reihenfolge“ vorgesehen, im Schattenbetrieb gegen Kennis echte Historie
 laufen. Das ist ein eigenes Paket mit Tier 3 und Refute.
+
+## Nachtrag 2: B umgesetzt, wie die Regel jetzt lautet
+
+Die Regel aus dem Abschnitt B hielt dem Schattenbetrieb in zwei Punkten
+nicht stand. Die umgesetzte Fassung:
+
+**Erlaubte Stände.** Eine Datei am Tip gilt als geprüft, wenn ihr Inhalt
+(Modus und Objekt) einem dieser Stände entspricht:
+
+- git's eigenem Merge aus dem Integrationszweig dort, wo der Tip ihn zuletzt
+  traf (jede Merge-Basis von Tip und Integrations-Ref), mit dem geprüften
+  Head und dann mit jedem weiteren klärenden Review, dessen Head der Tip
+  enthält und dessen Basis auf `main` liegt;
+- dieser Merge-Basis selbst.
+
+Ein Review, dessen Basis über `main` liegt, bürgt nur für die Dateien seines
+eigenen Bereichs. Ohne Integrationszweig ist der Head der einzige geprüfte
+Stand. Jeder git-Fehler ist „veraltet“; einen schwächeren Ersatzvergleich
+gibt es nicht mehr. Damit ist auch Kenni #2439 erledigt: Ein
+`merge-tree`-Timeout las einen Revert-Merge als frisch.
+
+**Korrektur 1: Der Head allein ist kein geprüfter Stand.** Abschnitt B
+nahm an, ein `-s ours`-Merge entspreche weder dem Head noch `main`. Für
+Dateien, die nur `main` geändert hat, entspricht das Ergebnis aber genau dem
+Head. Ein Merge, der `main`s Fix still verwirft, wäre durchgekommen. Geprüft
+ist deshalb git's Merge von Head und `main`, nicht der Head. Ohne neuen
+`main`-Stand ist das derselbe Inhalt.
+
+**Korrektur 2: Mehrere geprüfte Arbeiten zusammen.** In Kennis Historie
+liegen drei Arbeiten auf einem Branch, und jede ändert die Feature-Registry.
+Ihr sauberer Merge entspricht keinem einzelnen Head. Die „bekannte Grenze“
+aus B trat also nicht nur im Zug auf. Der sauber gemergte Stand aller
+geprüften Heads gilt deshalb als geprüft. Das hebt auch die Grenze für
+Zug-Passagiere auf derselben Datei auf.
+
+**Was sich gegenüber der Historientabelle ändert:**
+
+- Ein Rebase oder Merge von `main` ohne Konflikt lässt das Review gültig
+  (#158). Ein Amend ohne Inhaltsänderung ebenso.
+- Ein Merge, der die geprüfte Änderung zugunsten von `main` verwirft, ist
+  kein Gate-Fund mehr, wie in B beschlossen.
+- Neu strenger: Ein Konflikt, der auf die eigene Seite aufgelöst wird,
+  verwirft `main`s Änderung und gilt als ungeprüft. Die Tabelle ließ das
+  durch. Für `main` ist das die sicherere Richtung.
+- Im Zug wird der Passagier wie bisher an seinem Branch-Tip beurteilt; jeder
+  Zug-Merge muss git's eigener Merge sein.
+
+Entfallen sind `_dropped_by_merge`, `_merge_own`, die Tabelle über die
+Historie, `work_bases` und das Feld `dropped`.
