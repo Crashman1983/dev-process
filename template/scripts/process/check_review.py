@@ -1711,17 +1711,20 @@ def _parents(root: Path, commit: str) -> list[str] | None:
 
 
 def _merge_own(root: Path, merge: str) -> set[str] | None:
-    """`_merge_own_uncached`, once per merge and run: it depends on no head."""
+    """`_merge_own_uncached`, once per merge and run: it depends on no head.
+    An answer that fell back to the combined diff because git's own merge
+    failed is not kept: the fallback is weaker, and one transient failure must
+    not weaken every later pass of the run (refutation)."""
     where = _addressed(root, (merge,))
     if where is not None and ("own", where) in _PURE:
         return set(_PURE[("own", where)])  # type: ignore[arg-type]
-    own = _merge_own_uncached(root, merge)
-    if own is not None and where is not None:
+    own, definite = _merge_own_uncached(root, merge)
+    if own is not None and definite and where is not None:
         _PURE[("own", where)] = frozenset(own)
     return own
 
 
-def _merge_own_uncached(root: Path, merge: str) -> set[str] | None:
+def _merge_own_uncached(root: Path, merge: str) -> tuple[set[str] | None, bool]:
     """The code a merge commit adds of its own: paths where its result is
     not what git merges on its own. A clean merge adds nothing — also when
     both sides changed different hunks of one file (downstream: `--cc
@@ -1730,29 +1733,31 @@ def _merge_own_uncached(root: Path, merge: str) -> set[str] | None:
     counts when the resolution equals neither parent; resolving to one side
     is `_dropped_by_merge`'s case. Octopus merges, or a git without
     `merge-tree --write-tree`, fall back to the combined diff — more, never
-    less."""
+    less. Also says whether the answer is definite, i.e. did not come from a
+    failed git merge."""
     parents = _parents(root, merge)
     if parents is None:
-        return None
+        return None, False
     auto = _auto_merge(root, parents[0], parents[1]) if len(parents) == 2 else None
     if auto is None:
-        return _names(_git_pure(root, (merge,), "show", "--cc", "--format=", "--name-only",
-                                "--ignore-submodules=none", "-z", merge))
+        combined = _names(_git_pure(root, (merge,), "show", "--cc", "--format=", "--name-only",
+                                    "--ignore-submodules=none", "-z", merge))
+        return combined, len(parents) != 2  # an octopus always takes this path
     tree, conflicted = auto
     differs = _names(_git_pure(root, (tree, merge), "diff", "--name-only", "--no-renames",
                                "--ignore-submodules=none", "-z", tree, merge))
     if differs is None:
-        return None
+        return None, False
     own = set()
     for path in differs:
         result = _blob(root, merge, path)
         sides = [_blob(root, p, path) for p in parents]
         if result is None or None in sides:
-            return None
+            return None, False
         if path in conflicted and result in sides:
             continue
         own.add(path)
-    return own
+    return own, True
 
 
 def _history(root: Path, head: str, tip: str = "HEAD",
@@ -1784,7 +1789,7 @@ def _history(root: Path, head: str, tip: str = "HEAD",
             return History(shallow_missing=True)
         return History(in_history=False)
     error = History(git_error=True)
-    carrying = _descendants(root, head, tip)  # one call answers "carries the head?" for every merge
+    carrying = _descendants(root, head, tip_id)  # one call answers "carries the head?" for every merge
     integ = _integration_ref(root, tip)
     not_integ = [f"^{integ}"] if integ else []
     # code another clearing review has seen is not unreviewed code of this
@@ -1801,11 +1806,11 @@ def _history(root: Path, head: str, tip: str = "HEAD",
         if seen is None:
             continue  # its base is unknown here: it covers nothing
         covered |= {ln.strip() for ln in seen.decode(errors="replace").splitlines() if ln.strip()}
-    walk = _git_bytes(root, "rev-list", "--first-parent", "--parents", tip, *not_integ)
+    walk = _git_bytes(root, "rev-list", "--first-parent", "--parents", tip_id, *not_integ)
     if walk is None:
         return error
     chain = [ln.split() for ln in walk.decode(errors="replace").splitlines() if ln.strip()]
-    tips, carriers = [tip], []
+    tips, carriers = [tip_id], []  # the snapshot `carrying` was taken of (refutation: a moving ref)
     # only the merge train's own staging branch (`train/<stamp>`, pushed from its
     # worktree) gets the passenger exemption — a work branch made of merges
     # only is not a train, and treating it as one hid a side branch merged
