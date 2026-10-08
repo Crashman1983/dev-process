@@ -62,9 +62,10 @@ a stop; an empty branch marks an issue the train merged). `stop` acts only on wh
 recorded process is the recorded one (pid + start time; never pid 0), and
 refuses while the worktree has uncommitted or untracked work unless
 `--force` — a plan not committed dies with the process. `max_workers`
-caps live children on this host; a held lane counts as no free CPU —
-a held full or scoped lane blocks only execute, an unknown held lane
-blocks every phase, and a remote phase sees neither cap nor lane. A
+caps live children on this host; a held full or scoped lane blocks no
+start (a session's own test runs queue on the lane, the session does
+not), an unknown held lane blocks every phase, and a remote phase sees
+neither cap nor lane. A
 local start also refuses while the filesystem holding the worktrees is
 at or above 90% use (`PROCESS_DISK_LIMIT_PCT`) and names `tidy.py
 --apply`: each worktree carries its own venv/node_modules (downstream:
@@ -1403,23 +1404,21 @@ def held_lanes(root: Path) -> set[str]:
     return set(_LANE_HELD.findall(r.stdout))
 
 
-# lanes whose holder is a test run: a plan, review or brainstorm session is
-# mostly model-bound and starts beside it, an execute session waits
-# (downstream: one docs-only pre-push held `scoped` 15 minutes while four
-# queued sessions waited on an idle 8-core host — #177)
+# lanes whose holder is a test run: no session start waits on them — a
+# plan, review or brainstorm session is mostly model-bound, and an execute
+# session's own test runs queue on the lane when they come (downstream: one
+# docs-only pre-push held `scoped` 15 minutes while four queued sessions
+# waited on an idle 8-core host — #177; an execute start was refused for a
+# whole morning behind serial pre-pushes)
 TEST_LANES = frozenset({"full", "scoped"})
 
 
 def lane_verdict(held: set[str], phase: str) -> str | None:
-    """None = start allowed, else why not. Only known test lanes held, for a
-    phase other than execute, is allowed; an unknown held lane fails closed."""
-    if not held:
+    """None = start allowed, else why not. Known test lanes never refuse a
+    start; an unknown held lane fails closed."""
+    if held <= TEST_LANES:
         return None
     names = ", ".join(sorted(held))
-    if held <= TEST_LANES and phase != "execute":
-        return None
-    if held <= TEST_LANES:
-        return f"lane {names} is held — no free CPU for an execute session (phase {phase}); retry when lane-status says free"
     return f"lane {names} is held — no free CPU for a new session (phase {phase}); retry when lane-status says free"
 
 
