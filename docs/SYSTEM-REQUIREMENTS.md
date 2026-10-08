@@ -54,7 +54,7 @@ stellt Laufzeit und Abhaengigkeiten isoliert bereit.
 | Voraussetzung | Version | Wann erforderlich |
 |---|---:|---|
 | `uv` | aktuelle stabile Version | startet Gates und portable Helfer samt isolierter Python-Abhaengigkeiten |
-| `git` | aktuelle stabile Version | lokale Hooks, normale Projektarbeit |
+| `git` | 2.38 oder neuer | lokale Hooks, normale Projektarbeit; das Review-Gate vergleicht Inhalte mit `merge-tree --write-tree` |
 | `gh` | aktuelle stabile Version | optional fuer best-effort GitHub-Issue-Existenzpruefung |
 | Architekturlinter | projektabhaengig | optional fuer `arch-onboarding` best-effort Layering-Pruefungen |
 

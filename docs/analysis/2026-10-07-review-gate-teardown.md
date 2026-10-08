@@ -205,49 +205,61 @@ laufen. Das ist ein eigenes Paket mit Tier 3 und Refute.
 
 ## Nachtrag 2: B umgesetzt, wie die Regel jetzt lautet
 
-Die Regel aus dem Abschnitt B hielt dem Schattenbetrieb in zwei Punkten
-nicht stand. Die umgesetzte Fassung:
+Die Regel aus dem Abschnitt B hielt dem Schattenbetrieb und dem Refute in
+mehreren Punkten nicht stand. Die umgesetzte Fassung:
 
-**Erlaubte Stände.** Eine Datei am Tip gilt als geprüft, wenn ihr Inhalt
-(Modus und Objekt) einem dieser Stände entspricht:
+**Der eine geprüfte Stand.** Eine Datei am Tip gilt als geprüft, wenn ihr
+Inhalt (Modus und Objekt) git's eigenem Merge entspricht: aus dem
+Integrationszweig dort, wo der Tip ihn zuletzt traf (jede Merge-Basis von
+Tip und Integrations-Ref), mit dem geprüften Head und mit jedem weiteren
+klärenden Review, dessen Head der Tip enthält. Ein Pfad, der in diesem Merge
+kollidiert, gilt nie als geprüft, auch nicht bei Konflikten ohne Marker
+(modify/delete, rename/delete, Datei wird Symlink).
 
-- git's eigenem Merge aus dem Integrationszweig dort, wo der Tip ihn zuletzt
-  traf (jede Merge-Basis von Tip und Integrations-Ref), mit dem geprüften
-  Head und dann mit jedem weiteren klärenden Review, dessen Head der Tip
-  enthält und dessen Basis auf `main` liegt;
-- dieser Merge-Basis selbst.
+**Wer ganz zählt.** Ein Review zählt ganz, wenn der Tip seinen Head enthält,
+wenn seine Basis auf `main` liegt, oder wenn seine Basis selbst geprüfter
+Inhalt ist: das, was die ganzen Reviews darunter gemergt ergeben,
+Buchhaltung ausgenommen. Es hat dann alles gesehen, was es über geprüften
+Inhalt hinaus bringt (Schattenbetrieb: Eine Arbeit, die ihren Merge von
+`main` geprüft hat, trug den Attest-Commit der vorigen Arbeit als Basis). Ein Review mit einer Basis über `main` bürgt nur für
+die Dateien seines eigenen Bereichs. Ein Head, den ein Rebase ersetzt hat,
+braucht seine Fork-Point-Basis, um ganz zu zählen. Ohne Integrationszweig
+ist der Head der einzige geprüfte Stand. Jeder git-Fehler ist „veraltet“;
+einen schwächeren Ersatzvergleich gibt es nicht mehr. Damit ist Kenni #2439
+erledigt: Ein `merge-tree`-Timeout las einen Revert-Merge als frisch.
 
-Ein Review, dessen Basis über `main` liegt, bürgt nur für die Dateien seines
-eigenen Bereichs. Ohne Integrationszweig ist der Head der einzige geprüfte
-Stand. Jeder git-Fehler ist „veraltet“; einen schwächeren Ersatzvergleich
-gibt es nicht mehr. Damit ist auch Kenni #2439 erledigt: Ein
-`merge-tree`-Timeout las einen Revert-Merge als frisch.
+**Korrekturen gegenüber Abschnitt B:**
 
-**Korrektur 1: Der Head allein ist kein geprüfter Stand.** Abschnitt B
-nahm an, ein `-s ours`-Merge entspreche weder dem Head noch `main`. Für
-Dateien, die nur `main` geändert hat, entspricht das Ergebnis aber genau dem
-Head. Ein Merge, der `main`s Fix still verwirft, wäre durchgekommen. Geprüft
-ist deshalb git's Merge von Head und `main`, nicht der Head. Ohne neuen
-`main`-Stand ist das derselbe Inhalt.
+1. **Der Head allein ist kein geprüfter Stand** (Schattenbetrieb). Für
+   Dateien, die nur `main` geändert hat, entspricht ein `-s ours`-Merge genau
+   dem Head; `main`s Fix wäre still verschwunden.
+2. **Mehrere geprüfte Arbeiten zusammen** (Schattenbetrieb). In Kennis
+   Historie liegen drei Arbeiten auf einem Branch, jede ändert die
+   Feature-Registry. Ihr sauberer gemeinsamer Merge gilt als geprüft. Das
+   hebt auch die Grenze für Zug-Passagiere auf derselben Datei auf. Gefaltet
+   werden nur die jüngsten Heads: Eine spätere Runde, die einen Merge von
+   `main` geprüft hat, deckt die Konfliktauflösung darin.
+3. **Drops bleiben ein Fund** (Refute). Abschnitt B wollte einen Merge, der
+   die geprüfte Änderung zugunsten von `main` verwirft, durchlassen. Dieselbe
+   Regel ließ aber auch einen späteren Commit durch, der eine geprüfte Datei
+   auf `main`s Stand zurücksetzt, etwa den Guard einer geprüften Route. Der
+   Stand „Merge-Basis selbst“ entfällt deshalb. Jede Konfliktauflösung, auf
+   welche Seite auch immer, braucht eine neue Runde.
+4. **Jeder Zug-Träger wird geprüft** (Refute). Tragen zwei Zug-Merges
+   denselben Head, wird jeder Passagier-Tip beurteilt, nicht nur der jüngste.
+5. **Ein Slice-Review, dessen Head ein Rebase ersetzt hat** (Refute), bürgt
+   nur für seinen Bereich. Sonst hätte ein ungeprüfter Commit unterhalb
+   seiner Basis als geprüft gegolten.
 
-**Korrektur 2: Mehrere geprüfte Arbeiten zusammen.** In Kennis Historie
-liegen drei Arbeiten auf einem Branch, und jede ändert die Feature-Registry.
-Ihr sauberer Merge entspricht keinem einzelnen Head. Die „bekannte Grenze“
-aus B trat also nicht nur im Zug auf. Der sauber gemergte Stand aller
-geprüften Heads gilt deshalb als geprüft. Das hebt auch die Grenze für
-Zug-Passagiere auf derselben Datei auf.
+**Was sich gegenüber der Historientabelle ändert:** Ein Rebase oder Merge
+von `main` ohne Konflikt lässt das Review gültig, wenn es eine
+Fork-Point-Basis hat (#158). Neu strenger: Ein Konflikt, der auf die eigene
+Seite aufgelöst wird, gilt als ungeprüft; die Tabelle ließ das durch.
+Voraussetzung ist git 2.38 (`merge-tree --write-tree`).
 
-**Was sich gegenüber der Historientabelle ändert:**
-
-- Ein Rebase oder Merge von `main` ohne Konflikt lässt das Review gültig
-  (#158). Ein Amend ohne Inhaltsänderung ebenso.
-- Ein Merge, der die geprüfte Änderung zugunsten von `main` verwirft, ist
-  kein Gate-Fund mehr, wie in B beschlossen.
-- Neu strenger: Ein Konflikt, der auf die eigene Seite aufgelöst wird,
-  verwirft `main`s Änderung und gilt als ungeprüft. Die Tabelle ließ das
-  durch. Für `main` ist das die sicherere Richtung.
-- Im Zug wird der Passagier wie bisher an seinem Branch-Tip beurteilt; jeder
-  Zug-Merge muss git's eigener Merge sein.
+**Offen, schon vorher so:** Ein lokales `main`, das `origin/main` nur um
+Merges voraus ist, gilt als Integrationsstand. Enthält es ungeprüften Code,
+sieht das Gate ihn nicht, weder mit der Tabelle noch mit dem Inhaltsvergleich.
 
 Entfallen sind `_dropped_by_merge`, `_merge_own`, die Tabelle über die
 Historie, `work_bases` und das Feld `dropped`.
