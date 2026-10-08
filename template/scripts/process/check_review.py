@@ -1713,7 +1713,13 @@ def _reviewed_merge(root: Path, base: str, heads: list[str]) -> str | None:
     if key[1] is not None and key in _PURE:
         return _PURE[key]  # type: ignore[return-value]
     current, tree = base, None
-    for head in dict.fromkeys(heads):
+    heads = list(dict.fromkeys(heads))
+    # a head another reviewed head contains adds nothing — merging it first
+    # would only fix its conflicts with main in place before the later
+    # review that resolved them (Kenni shadow run: a later round reviewed
+    # the merge of main, the first round's head conflicted with main)
+    latest = [h for h in heads if not any(o != h and _is_ancestor(root, h, o) for o in heads)]
+    for head in latest:
         if _is_ancestor(root, head, current):
             continue
         auto = _auto_merge(root, current, head)

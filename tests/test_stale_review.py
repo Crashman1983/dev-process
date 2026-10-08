@@ -908,3 +908,21 @@ def test_doubling_merges_and_passes_does_not_quadruple_the_git_work(tmp_path):
 
 
 
+
+
+def test_a_later_round_that_reviewed_the_merge_of_main_covers_its_resolution(repo):
+    # Kenni shadow run: round 1's head conflicts with main; round 2 reviewed the
+    # merge of main and its resolution — the merge is reviewed content
+    root, head = repo
+    _git(root, "checkout", "-q", "main")
+    _commit(root, "a.py", "a = 'main'\n", "main edits the same line")
+    main = _git(root, "rev-parse", "HEAD")
+    _git(root, "checkout", "-q", "feat")
+    subprocess.run(["git", "merge", "--no-edit", "main"], cwd=root, capture_output=True)
+    (root / "a.py").write_text("a = 1  # and 'main'\n")
+    _git(root, "add", "a.py")
+    _git(root, "commit", "-q", "--no-edit")
+    second = _git(root, "rev-parse", "HEAD")
+    passes = [{"work": "w", "tier": "2", "head": head}, {"work": "w", "tier": "2", "head": second, "base": main}]
+    assert _mod().stale_review(root, passes[:1], {"w"}, 2, set()) is not None  # round 1 alone: the resolution is unreviewed
+    assert _mod().stale_review(root, passes[:1], {"w"}, 2, set(), ((main, second),)) is None
