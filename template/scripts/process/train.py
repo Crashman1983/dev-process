@@ -26,8 +26,6 @@ branch, is ahead of it, and
     clears nothing;
   * changes the gates' code (`scripts/process/`, `.githooks/`) only with a
     REVIEW pass for its own work, whatever the tier;
-  * has no file overlap with a branch already boarded (the earlier
-    candidate keeps its seat; overlap = the same file in flight);
 
 Departure: at least `--min-candidates` aboard, or the oldest candidate
 has waited longer than `--max-wait-hours`; no lane but `scoped` is held
@@ -228,7 +226,6 @@ def candidates(root: Path, local: str, base: str) -> list[dict]:
     if listed is None:
         unreadable.append(f"the plans on {base}")
     base_plan_stems = {Path(r).stem for r in listed or ()}
-    boarded_files: set[str] = set()
     out: list[dict] = []
     for b in sorted(branches):
         counts = _out(root, "rev-list", "--left-right", "--count", f"{base}...{b}")
@@ -343,12 +340,13 @@ def candidates(root: Path, local: str, base: str) -> list[dict]:
                                 "branch's own, and another work's clearance does not clear this branch")
         else:
             c["reasons"].append("no archived plan on the branch and no review-pass report (run /finish first)")
-        overlap = sorted(files & boarded_files)
-        if overlap:
-            c["reasons"].append(f"overlaps {len(overlap)} file(s) with a branch already aboard: {', '.join(overlap[:3])}")
-        if c["by"] and not overlap and not open_q and not branch_unreadable and not template_blocked:
+        # a file shared with a branch aboard is no reason to wait: git merges
+        # the batch, a conflict drops the later candidate (`build_train`), and
+        # the gates read reviewed content as git's merge of the reviewed works
+        # (v2.55) — downstream three reviewed branches waited a train for a
+        # shared test, contract doc or registry file
+        if c["by"] and not open_q and not branch_unreadable and not template_blocked:
             c["eligible"] = True
-            boarded_files |= files
         out.append(c)
     return out
 

@@ -51,7 +51,7 @@ def test_plan_boards_cleared_branches_and_explains_the_rest(render, tmp_path):
     _repo(out)
     _branch(out, "alpha", {"src/a.py": "a\n"})
     _branch(out, "beta", {"src/b.py": "b\n"}, reviewed=False)                 # no pass
-    _branch(out, "gamma", {"src/a.py": "conflict\n", "src/g.py": "g\n"})       # overlaps alpha
+    _branch(out, "gamma", {"src/a.py": "conflict\n", "src/g.py": "g\n"})       # shares a file: boards too
     _branch(out, "delta", {"src/d.py": "d\n"}, archive=False, reviewed=False)  # not finished
     _branch(out, "tiny", {"README.md": "tiny\n"}, tier=1, reviewed=False)      # tier 1 needs no pass
     r = _train(out, "plan", "--json")
@@ -60,12 +60,12 @@ def test_plan_boards_cleared_branches_and_explains_the_rest(render, tmp_path):
     by = {c["branch"]: c for c in p["candidates"]}
     assert by["alpha"]["eligible"] and "REVIEW pass" in by["alpha"]["by"]
     assert not by["beta"]["eligible"] and "without a REVIEW pass covering the branch head" in by["beta"]["reasons"][0]
-    assert not by["gamma"]["eligible"] and "overlaps" in by["gamma"]["reasons"][0]
+    assert by["gamma"]["eligible"]  # a shared file is git's to merge, not a reason to wait
     assert not by["delta"]["eligible"] and "run /finish first" in by["delta"]["reasons"][0]
     assert by["tiny"]["eligible"]
-    assert p["ready"] is False and "waiting for 3" in p["why"]  # 2 aboard, fresh
+    assert p["ready"] is True  # alpha, gamma, tiny: 3 aboard
     text = _train(out, "plan").stdout
-    assert "✓ alpha" in text and "· beta" in text and "hold" in text
+    assert "✓ alpha" in text and "· beta" in text and "READY" in text
     # a worker report is only the pointer: without a REVIEW pass it boards nothing
     subprocess.run([sys.executable, str(out / "scripts/process/report.py"), "review-pass", "--worker", "delta"],
                    cwd=out, check=True, capture_output=True)
@@ -373,7 +373,7 @@ def test_local_main_ahead_of_origin_refuses_to_depart(render, tmp_path):
 
 def test_conflicting_candidate_is_reported_blocked(render, tmp_path):
     # a conflict arises when main moved on the same file after the branch
-    # forked (two candidates on one file never board together — overlap rule)
+    # forked, or two candidates aboard change the same lines
     out = render(tmp_path, {"project_name": "d", "modules": {}})
     _repo(out)
     _branch(out, "beta", {"shared.txt": "beta\n"})
@@ -1645,3 +1645,20 @@ def test_a_remembered_base_runs_before_the_first_passenger_is_blamed(render, tmp
     rc = train._run_batch(out, "main", p, ["b1"], "x", tmp_path / "t.log", suite="s", deploy=None,
                           push=False, keep_branches=True)
     assert rc == 1 and runs[-1] == [] and "blocked" not in written
+
+
+def test_two_reviewed_branches_on_one_file_ride_one_train(render, tmp_path):
+    # the former overlap rule held the later one a whole train back; git
+    # merges both cleanly and the gates read the merge of reviewed works
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    lines = [f"line {i}\n" for i in range(1, 10)]
+    (out / "shared.txt").write_text("".join(lines))
+    _repo(out)
+    _branch(out, "alpha", {"shared.txt": "".join(["alpha\n", *lines[1:]])})
+    _branch(out, "beta", {"shared.txt": "".join([*lines[:-1], "beta\n"])})
+    p = json.loads(_train(out, "plan", "--json").stdout)
+    assert all(c["eligible"] for c in p["candidates"]), p["candidates"]
+    r = _train(out, "run", "--force", "--suite", "true", "--keep-branches")
+    assert r.returncode == 0, r.stdout + r.stderr
+    merged = (out / "shared.txt").read_text()
+    assert merged.startswith("alpha\n") and merged.endswith("beta\n")
