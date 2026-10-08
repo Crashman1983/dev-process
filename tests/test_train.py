@@ -1601,3 +1601,26 @@ def test_a_held_scoped_lane_does_not_hold_the_train(render, tmp_path, status, de
     assert ready is departs, why
     if not departs:
         assert why.startswith("lane busy")
+
+
+@pytest.mark.parametrize("seen", [True, False])
+def test_the_bare_base_skips_a_suite_this_train_saw_green(render, tmp_path, monkeypatch, seen):
+    # after a red batch the base is checked; it is the tree an earlier train
+    # fast-forwarded to — its suite (~26 min downstream) need not run again
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    train = _load_train(out)
+    if seen:
+        train._remember_green_suite(out, train._suite_key(out, "s"))
+    runs = []
+    monkeypatch.setattr(train, "build_train", lambda root, base, subset, stamp, log: (out, "train/x", list(subset), []))
+    monkeypatch.setattr(train, "_run_gates", lambda w, log: True)
+    monkeypatch.setattr(train, "_sh", lambda cwd, cmd, log: runs.append(cmd) or ("green" if len(runs) == 3 else "red"))
+    monkeypatch.setattr(train, "_cleanup", lambda *a: None)
+    monkeypatch.setattr(train, "_write", lambda *a, **k: None)
+    p = {"base": "main", "candidates": [{"branch": "b1", "hours_waiting": 1}]}
+    train._run_batch(out, "main", p, ["b1"], "x", tmp_path / "t.log", suite="s", deploy=None,
+                     push=False, keep_branches=True)
+    # combined red, retry red, then the base: from the memo, or run (third run green)
+    assert len(runs) == (2 if seen else 3)
+    assert ("not run again" in (tmp_path / "t.log").read_text()) is seen

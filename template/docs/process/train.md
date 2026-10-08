@@ -75,7 +75,9 @@ a day downstream, with five reviewed candidates waiting.
    identical code is a flaky test, reported as FLAKY and merged, never
    bisected (bisecting a flake blames whoever sits in the prefix). Red
    twice: the base itself is checked once (a red main blames nobody and
-   aborts), then a bisection over boarding-order prefixes names the first
+   aborts; its gates always run, its suite only when no earlier train saw
+   it green on that very tree, `green-suites` in the train's directory),
+   then a bisection over boarding-order prefixes names the first
    offender; it is dropped, gets a `blocked` report, and the rest is
    rebuilt. A suite that does not exist on a tree — a passenger introduces
    it — makes that tree *not comparable*, never red: the base is not called

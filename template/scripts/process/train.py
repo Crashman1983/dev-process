@@ -39,7 +39,8 @@ The run: a staging branch `train/<stamp>` from the integration branch in
 its own worktree; candidates merged in order (a conflict drops that
 candidate and continues); the process gates and then the full suite run
 ONCE on the combined tree. If they fail, the base itself is checked once
-(a red main blames nobody), then a bisection over boarding-order prefixes
+(a red main blames nobody; the suite is skipped on a tree an earlier train
+saw green), then a bisection over boarding-order prefixes
 names the first offender, drops it, and the rest is rebuilt.
 On green: the integration branch fast-forwards to the train, `--push`
 pushes it, merged branches are deleted (unless `--keep-branches`), each
@@ -54,6 +55,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as _dt
+import hashlib
 import json
 import os
 import posixpath
@@ -827,6 +829,42 @@ def _run_gates(wt: Path, log) -> bool:
     return argv is not None and _sh(wt, shlex.join(argv), log) == "green"
 
 
+
+# trees whose suite this train saw green: the base it checks after a red batch
+# is the tree an earlier train fast-forwarded to, so the suite need not run on
+# it again (downstream a full suite took ~26 min). The gates still run: some
+# read state beyond the tree (the issue tracker, the red ledger).
+GREEN_SUITES = "green-suites"
+GREEN_SUITES_KEPT = 200
+
+
+def _suite_key(wt: Path, suite: str) -> str:
+    """`<tree> <suite digest>`, or "" when the tree cannot be read (no memo)."""
+    tree = _out(wt, "rev-parse", "HEAD^{tree}")
+    return f"{tree} {hashlib.sha256(suite.encode()).hexdigest()[:16]}" if tree else ""
+
+
+def _suite_seen_green(root: Path, key: str) -> bool:
+    if not key:
+        return False
+    try:
+        lines = (_train_dir(root) / GREEN_SUITES).read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return False
+    return key in lines
+
+
+def _remember_green_suite(root: Path, key: str) -> None:
+    f = _train_dir(root) / GREEN_SUITES
+    try:
+        lines = f.read_text(encoding="utf-8").splitlines() if f.is_file() else []
+        lines = [ln for ln in lines if ln != key][-(GREEN_SUITES_KEPT - 1):] + [key]
+        tmp = f.with_name(f"{f.name}.{os.getpid()}.tmp")
+        tmp.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        os.replace(tmp, f)
+    except OSError:
+        pass  # a memo that cannot be written only costs a later run
+
 def _train_dir(root: Path) -> Path:
     """Logs and bookkeeping: inside the git common dir, never committed."""
     common = Path(_out(root, "rev-parse", "--git-common-dir"))
@@ -1035,11 +1073,21 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
     conflicted: list[str] = []
     branch = ""
 
-    def judge(wt: Path) -> str:
-        """"green", "red" or "undefined" (the suite does not exist on this tree)."""
+    def judge(wt: Path, *, bare_base: bool = False) -> str:
+        """"green", "red" or "undefined" (the suite does not exist on this tree).
+        The bare base skips the suite when this train saw it green on that tree."""
         if not _run_gates(wt, log):
             return "red"
-        return _sh(wt, suite, log) if suite else "green"
+        if not suite:
+            return "green"
+        key = _suite_key(wt, suite)
+        if bare_base and _suite_seen_green(root, key):
+            log(f"base tree {key.split()[0][:12]}: suite green on an earlier train — not run again")
+            return "green"
+        state = _sh(wt, suite, log)
+        if state == "green" and key:
+            _remember_green_suite(root, key)
+        return state
 
     def attempt(subset: list[str]) -> tuple[str, list[str], str]:
         wt, br, merged, dropped = build_train(root, base, subset, stamp, log)
@@ -1048,7 +1096,7 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
                 conflicted.append(d)
         if not merged and subset:
             return "red", merged, br  # everybody conflicted: nothing to judge
-        return judge(wt), merged, br
+        return judge(wt, bare_base=not subset), merged, br
 
     def _report_dropped() -> None:
         for b in conflicted:
