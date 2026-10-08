@@ -7,9 +7,12 @@ Turn an idea or problem into an approved specification before building.
 {% if modules.speckit %}Derive the tier first (`docs/process/risk-tiers.md`) — Tier 0/1 takes the
 quick flow, no spec artifacts. For Tier 2+: read `PRODUCT.md` and the
 decision records for the touched area as constraints, then run
-`/speckit-specify` and iterate `/speckit-clarify` until no
+`/speckit-specify` and clarify in rounds until no
 `[NEEDS CLARIFICATION]` marker survives (the clarification gate blocks
-markers from reaching plan/tasks).
+markers from reaching plan/tasks): every open decision whose prerequisites
+are settled in one numbered round, each with your recommended answer; facts
+you look up yourself; `/speckit-clarify` records the answers
+(`docs/process/workflow.md`, Brainstorm).
 
 **Issue at idea time, not at plan time.** Before specifying, create the
 tracking issue (title + one-paragraph idea) — the human's influence window
@@ -27,8 +30,10 @@ before `/plan`: they are clarify input, not archaeology.
 See `docs/process/modules/speckit.md` for the full flow. Do not start
 implementation before approval.
 {% else %}Read `docs/process/workflow.md` and, for new or unclear projects, start with
-`docs/process/start-here.md`. Ask a few targeted questions, summarize
-assumptions, name trade-offs, and write the agreed design to a spec file using
+`docs/process/start-here.md`. Ask your questions in rounds — every open
+decision whose prerequisites are settled, numbered, each with your
+recommended answer; facts you look up yourself (`docs/process/workflow.md`,
+Brainstorm) — summarize assumptions, name trade-offs, and write the agreed design to a spec file using
 the scaffold in `docs/process/design-template.md`. Mark anything underspecified
 as `[NEEDS CLARIFICATION: <question>]` instead of guessing; resolve every
 marker before approval. Do not start implementation before approval.

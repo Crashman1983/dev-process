@@ -12,3 +12,9 @@ check whether this behaviour is already collecting fixes:
 the same behaviour stops the fix**: write the rule as an invariant record
 (Type: invariant, `docs/process/adr/template.md`) with a table/property test
 that pins the whole rule — then fix your case as one row of that table.
+
+Then follow the method in `docs/process/workflow.md` (Debug): a loop that
+goes red on this bug before any theory, reproduce and minimise, three to
+five falsifiable hypotheses, one variable per probe, the regression test at
+the seam where the bug happens — and the commit names the hypothesis that
+held.
