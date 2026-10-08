@@ -164,6 +164,11 @@ fifteen minutes while queued sessions waited. Fewer such pushes help too:
 a review round's report and its `REVIEW` line are one commit
 (`attest.py --commit --with <report>`), a fix's `ROOT-CAUSE` line rides
 the fix commit, and a round is pushed once.
+Two consequences keep the memo honest. A check that reads the bookkeeping
+paths (a journal scanned for client names) is a process gate, not a test:
+gates run on every push, a test behind the tree memo would not see a
+journal that changed. And a certificate written under a bypass (`SKIP_*`,
+`--no-verify`) certifies nothing: no later push may read it as a hit.
 
 **Test lanes are a shared resource — queue, do not thrash.** Several
 agents in several worktrees on one host each running "their" scoped suite
