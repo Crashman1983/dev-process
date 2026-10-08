@@ -206,7 +206,7 @@ def test_red_ledger_age_is_a_finding(render, tmp_path):
     old = (datetime.date.today() - datetime.timedelta(days=4)).isoformat()
     (out / ".git/process-red-ledger").write_text(f"review {old}\n")
     t = json.loads(_tower(out, "--json").stdout)
-    assert t["gates"] == [{"gate": "review", "since": old, "age_days": 4}]
+    assert t["gates"] == [{"gate": "review", "since": old, "age_days": 4, "reason": ""}]
     assert any(f["kind"] == "chronic-red" and "review" in f["what"] for f in t["findings"])
 
 

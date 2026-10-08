@@ -58,6 +58,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 from collections import Counter
 from typing import NamedTuple
 from pathlib import Path
@@ -2381,9 +2382,38 @@ def template_review_findings(root: Path, update: dict, passes: list[dict],
     return findings
 
 
+class _Phases:
+    """Marks which phase of `check` is running: one `gate-phase: <name>
+    start|done <monotonic seconds>` line each on stderr. `gate_runner` reads
+    them when it kills a gate that ran too long, so the red ledger names a slow
+    phase instead of a review finding (#182). Silent unless the CLI turned it on."""
+
+    def __init__(self, enabled: bool) -> None:
+        self.enabled = enabled
+        self.current: str | None = None
+
+    def _mark(self, name: str, kind: str) -> None:
+        if self.enabled:
+            print(f"gate-phase: {name} {kind} {time.monotonic():.3f}", file=sys.stderr, flush=True)
+
+    def enter(self, name: str) -> None:
+        self.leave()
+        self.current = name
+        self._mark(name, "start")
+
+    def leave(self) -> None:
+        if self.current is not None:
+            self._mark(self.current, "done")
+            self.current = None
+
+
+REPORT_PHASES = False  # `main` turns the phase lines on; library callers stay quiet
+
+
 def check(root: Path) -> tuple[list[str], list[str]]:
     hard: list[str] = []
     soft: list[str] = []
+    phases = _Phases(REPORT_PHASES)
 
     # the push-anchored arms below are the merge's condition, not every
     # push's — see integration_push()
@@ -2398,6 +2428,7 @@ def check(root: Path) -> tuple[list[str], list[str]]:
             soft.append(f"{finding} [note only: {not_a_merge}]")
 
     # --- parse all REVIEW attestations from the (recursive) journal ---
+    phases.enter("records")
     all_records: list[tuple[int, dict]] = []
     located: list[tuple[str, int, dict]] = []
     # an ambiguous fork point is a finding, never "no base": every arm keyed
@@ -2469,6 +2500,7 @@ def check(root: Path) -> tuple[list[str], list[str]]:
                     + ' project delta path(s)')
 
     # --- presence: archived (merged) plans that declare Tier 2+ ---
+    phases.enter("plans-archive")
     adir = root / PLANS_ARCHIVE
     enforced_any = False
     # a de-dated slug shared by two archived plans is ambiguous — one review
@@ -2556,6 +2588,7 @@ def check(root: Path) -> tuple[list[str], list[str]]:
             presence("no proper integration base — fetch origin/main (or the remote default branch); cannot bound the pushed range")
         soft.append(f"{IN_FLIGHT_UNKNOWN} — every active plan is treated as in flight")
         in_flight = {f"{PLANS_ACTIVE}/{p.name}" for p in active}
+    phases.enter("stale_review")
     merged_issues = issues_on_integration(root)
     if (root / PLANS_ACTIVE).is_dir():
         active_tier2 = 0
@@ -2644,6 +2677,7 @@ def check(root: Path) -> tuple[list[str], list[str]]:
     # The tier still comes from the plan — a gate that invents its own tier
     # would be worse than the gap it closes — so a claimed issue without a
     # findable plan is a note, not a failure.
+    phases.enter("stale_review-by-issue")
     for number in sorted(issue_refs_in_range(root) if base_error is None else ()):
         matching = [(rel, text, tier, ids) for rel, text, tier, ids in tiered_plans
                     if number in _plan_issue_numbers(text)]
@@ -2670,10 +2704,13 @@ def check(root: Path) -> tuple[list[str], list[str]]:
     # the tier (see standing_block_findings). `check` may read a directory
     # that is no repository at all — no records, no finding; the hook-side
     # `--standing-block` call is the one that refuses unreadable ones
+    phases.enter("standing_block")
     for finding in standing_block_findings(root, refuse_unreadable=False):
         presence(finding)
 
+    phases.enter("unhomed")
     hard.extend(_unhomed_plans(root))
+    phases.leave()
 
     if not all_records and not enforced_any and not hard:
         soft.append("no REVIEW attestations yet — expected pre-adoption")
@@ -2779,6 +2816,8 @@ def main() -> int:
     if not root.is_dir():
         print(f"review: FAILED:\n  - root {root} is not a directory")
         return 1
+    global REPORT_PHASES
+    REPORT_PHASES = True
     hard, soft = check(root)
     for note in soft:
         print(f"review: note: {note}")

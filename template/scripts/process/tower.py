@@ -321,6 +321,10 @@ def reviews_today(root: Path) -> dict:
 
 
 def red_gates(root: Path) -> list[dict]:
+    """The runner's red ledger: one `<gate> <first red day> [<reason>]` line per
+    red gate. The one reader of that file besides the runner; the reason is
+    there when the runner knew it (a gate killed by its timeout names the slow
+    phase)."""
     gitdir = _git(root, "rev-parse", "--git-dir")
     if not gitdir:
         return []
@@ -335,12 +339,13 @@ def red_gates(root: Path) -> list[dict]:
     for ln in ledger.read_text(encoding="utf-8", errors="replace").splitlines():
         if " " not in ln:
             continue
-        gate, day = ln.split(" ", 1)
+        gate, rest = ln.split(" ", 1)
+        day, _sep, reason = rest.strip().partition(" ")
         try:
-            age = (today - _dt.date.fromisoformat(day.strip())).days
+            age = (today - _dt.date.fromisoformat(day)).days
         except ValueError:
             age = 0
-        out.append({"gate": gate, "since": day.strip(), "age_days": age})
+        out.append({"gate": gate, "since": day, "age_days": age, "reason": reason.strip()})
     return out
 
 
@@ -524,7 +529,8 @@ def findings(table: dict, stale_minutes: int) -> list[dict]:
     for g in table["gates"]:
         if g["age_days"] >= RED_AGE_DAYS:
             out.append({"kind": "chronic-red", "severity": "high",
-                        "what": f"gate {g['gate']} red since {g['since']} ({g['age_days']} days)",
+                        "what": f"gate {g['gate']} red since {g['since']} ({g['age_days']} days)"
+                                + (f" — {g['reason']}" if g.get("reason") else ""),
                         "because": "a gate red for days is read by nobody; fix it or waive it with a named owner"})
     integration_names = set(INTEGRATION_NAMES)
     ref = table.get("integration_ref") or table.get("integration") or ""

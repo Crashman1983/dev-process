@@ -293,17 +293,16 @@ def section_red_gates(root: Path) -> list[str]:
     if not ledger.is_file():
         return ["(no gate has been red on this clone since the last green run — or "
                 "the runner never ran here)"]
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    try:
+        import tower as _tower  # noqa: E402  (sibling; one reader of the red ledger)
+    except ImportError:
+        return ["(tower.py not installed — the red ledger is read there)"]
     out: list[str] = []
-    today = _dt.date.today()
-    for ln in ledger.read_text(encoding="utf-8").splitlines():
-        if " " not in ln:
-            continue
-        gate, day = ln.split(" ", 1)
-        try:
-            age = (today - _dt.date.fromisoformat(day.strip())).days
-        except ValueError:
-            age = 0
-        out.append(f"- **{gate}** red since {day.strip()} ({age} day(s)) — "
+    for g in _tower.red_gates(root):
+        age = g["age_days"]
+        why = f" ({g['reason']})" if g["reason"] else ""
+        out.append(f"- **{g['gate']}** red since {g['since']} ({age} day(s)){why} — "
                    f"{'fix or waive with a named owner; a chronic red is read by nobody' if age >= 3 else 'fresh; watch it'}")
     return out or ["(ledger empty)"]
 

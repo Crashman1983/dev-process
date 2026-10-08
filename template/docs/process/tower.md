@@ -18,7 +18,7 @@ conversations.
 | `overlaps` | intersection of in-flight paths between worktrees (file: high; same directory: low) | decide phase-of / supersede before both push |
 | `plans` | active plans and `specs/*/plan.md`: tier, issue, `DECISION` count, `design-contract:` binding, waiver | what is planned, what lacks a ledger |
 | `reviews` | today's `REVIEW` passes and blocks by work id | what cleared today |
-| `gates` | the runner's red ledger with age | chronic reds |
+| `gates` | the runner's red ledger with age, and for a gate the runner killed at its timeout the phase that was slow | chronic reds |
 | `lanes` | `scripts/lane.py status` where the project has it | who holds the test lanes |
 | `balance` | the last 7 days on the integration branch: commits touching only process records, mixed, product only; landed changes carrying product code | whether the process outweighs the work it guards |
 | `reports` | the latest `report.py` line per worker | state each worker claims, and how long ago |

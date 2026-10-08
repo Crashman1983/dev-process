@@ -403,7 +403,8 @@ def departure(cands: list[dict], root: Path, *, min_candidates: int, max_wait_ho
         return False, f"lane busy: {busy[0]}"
     reds = [g for g in _tower.red_gates(root) if g["age_days"] >= 0]
     if reds:
-        return False, f"gate red on this clone: {', '.join(g['gate'] for g in reds)}"
+        return False, "gate red on this clone: " + ", ".join(
+            g["gate"] + (f" ({g['reason']})" if g.get("reason") else "") for g in reds)
     if len(aboard) >= min_candidates:
         return True, f"{len(aboard)} aboard (min {min_candidates})"
     oldest = max((c.get("hours_waiting") or 0) for c in aboard)
