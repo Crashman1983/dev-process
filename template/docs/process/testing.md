@@ -178,6 +178,26 @@ A merge commit of already-verified branches is not exempt by itself — the
 combination is new — but it is exactly what the boundary run certifies
 once, for every later gate to read.
 
+**A lane is held briefly, and once.** The scoped arm of a push is the
+lane's main tenant, so its shape decides how long everyone else waits.
+The project's selection and lane script follow four rules:
+
+- **Closest test package.** A changed source file selects the test
+  package that mirrors its full path (`src/<pkg>/<sub>/x.py` →
+  `tests/<pkg>/<sub>/`), not its top-level package. Without a match the
+  next enclosing one, and the hook names that fallback. Downstream, the
+  top-level mapping selected 61 % of all test files for a one-file change.
+- **Parallel, bounded.** A scoped run uses several workers (pytest-xdist
+  `-n`, the runner's own pool), a count derived from the host and
+  configurable; a project opts out by setting it to one.
+- **One hold per push.** A push takes the lane once for all its test
+  stages and releases it after the last. Released between stages, another
+  push takes it in the gap, and the first fails after its whole run
+  (downstream: 30 minutes of green pytest, then a refused vitest stage,
+  then the retry paid the 30 minutes again).
+- **Measured.** Lane hold time per push is recorded before and after a
+  change to the selection, so the gain is a number, not a hope.
+
 ## Ratchets — a threshold that only ever tightens
 
 Some qualities cannot be gated with one universal number on day one because

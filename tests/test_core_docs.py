@@ -805,3 +805,12 @@ def test_testing_names_tests_that_prove_nothing(render, tmp_path):
     out = render(tmp_path, {"project_name": "demo"})
     text = (out / "docs/process/testing.md").read_text()
     assert "**Tautological:**" in text and "Mock only at the system's boundary" in text
+
+
+def test_testing_pins_the_lane_contract(render, tmp_path):
+    # #184: selection granularity, parallelism and one lane hold per push
+    out = render(tmp_path, {"project_name": "demo"})
+    text = (out / "docs/process/testing.md").read_text()
+    for rule in ("**Closest test package.**", "**Parallel, bounded.**",
+                 "**One hold per push.**", "**Measured.**"):
+        assert rule in text
