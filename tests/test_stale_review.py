@@ -1183,3 +1183,68 @@ def test_keeping_mains_renamed_copy_of_a_file_this_work_deleted_is_a_drop(tmp_pa
     assert _git(root, "cat-file", "-e", "HEAD:b.py") == ""
     found = _mod()._dropped_by_merge(root, _git(root, "rev-parse", "HEAD"), head)
     assert found == {"b.py"}, found
+
+
+# --- #182: the git work does not grow with passes × merges -----------------
+
+def _counted(root, heads, plans=1):
+    """git subprocesses spawned by `plans` stale_review calls over the same
+    history, every pass stale (a full evaluation)."""
+    mod = _mod()
+    calls = [0]
+    real = mod.subprocess.run
+
+    def run(cmd, *a, **k):
+        if cmd and cmd[0] == "git":
+            calls[0] += 1
+        return real(cmd, *a, **k)
+
+    mod.subprocess.run = run
+    for _ in range(plans):
+        why = mod.stale_review(root, [{"work": "w", "tier": "2", "head": h} for h in heads], {"w"}, 2, set())
+        assert why and "late.py" in why, why
+    return calls[0]
+
+
+def _merged_history(tmp_path, merges, passes):
+    root = tmp_path / f"m{merges}p{passes}"
+    root.mkdir()
+    _git(root, "init", "-q", "-b", "main")
+    _git(root, "config", "user.email", "t@t")
+    _git(root, "config", "user.name", "t")
+    _commit(root, "a.py", "a = 0\n", "base")
+    _git(root, "checkout", "-q", "-b", "feat")
+    heads = [_commit(root, f"w{i}.py", f"w = {i}\n", f"round {i}") for i in range(passes)]
+    for i in range(merges):
+        _git(root, "checkout", "-q", "main")
+        _commit(root, f"m{i}.py", f"m = {i}\n", f"main {i}")
+        _git(root, "checkout", "-q", "feat")
+        _git(root, "merge", "-q", "--no-edit", "main")
+    _commit(root, "late.py", "x = 1\n", "unreviewed")
+    return root, heads
+
+
+def test_doubling_merges_and_passes_does_not_quadruple_the_git_work(tmp_path):
+    # downstream: 132,211 git calls and a killed gate, because every pass
+    # asked the same per-merge questions again (before the fix: x4.1 here)
+    small = _counted(*_merged_history(tmp_path, 4, 2))
+    large = _counted(*_merged_history(tmp_path, 8, 4))
+    assert large < 3 * small, (small, large)
+
+
+def test_a_second_plan_over_the_same_merges_reuses_the_answers(tmp_path):
+    root, heads = _merged_history(tmp_path, 4, 2)
+    one, two = _counted(root, heads), _counted(root, heads, plans=2)
+    assert two - one < one * 2 // 3, (one, two)  # before the fix: the second plan cost as much as the first
+
+
+def test_a_failed_git_read_is_asked_again_never_remembered(repo):
+    # "git could not tell" must stay "stale, fail closed" on the next ask,
+    # not become a cached answer
+    root, head = repo
+    mod = _mod()
+    real = mod._git_bytes
+    answers = iter([None])
+    mod._git_bytes = lambda r, *a: next(answers, real(r, *a)) if a[:1] == ("rev-list",) else real(r, *a)
+    assert mod._parents(root, head) is None
+    assert mod._parents(root, head) == [_git(root, "rev-parse", "main")]
