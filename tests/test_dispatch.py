@@ -1756,3 +1756,44 @@ def test_a_session_starts_on_what_origin_holds(render, tmp_path):
     _git(other, "push", "-q", "origin", "b9")
     r = _dispatch(out, "start", "--issue", "9", "--phase", "execute", "--branch", "b9")
     assert r.returncode == 3 and "diverged" in r.stderr
+
+
+def test_chain_queues_no_execute_while_the_plan_gates_are_red(render, tmp_path, monkeypatch):
+    # a plan session stops before it pushes: downstream a missing
+    # `design-contract:` line first turned the execute push red, thirty times
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    mod = _load_dispatch(out)
+    rec = {"branch": "a", "issue": 1, "tier": 2, "phase": "plan", "started": 1, "worktree": str(out)}
+    written, started, judged = [], [], []
+    verdicts = iter(["FAILED gates: design-contracts", None])
+    monkeypatch.setattr(mod, "records", lambda root: [rec])
+    monkeypatch.setattr(mod, "_load_record", lambda root, b: (None, rec))
+    monkeypatch.setattr(mod, "_write_record", lambda root, b, r: written.append(r) or rec.update(r))
+    monkeypatch.setattr(mod._report, "read_reports",
+                        lambda root, **_kw: [{"worker": "a", "state": "planned", "epoch": 1}])
+    monkeypatch.setattr(mod, "plan_gates", lambda wt: judged.append(wt) or next(verdicts))
+    monkeypatch.setattr(mod, "stop", lambda root, b, **kw: 0)
+    monkeypatch.setattr(mod, "start", lambda root, *, issue, phase, **_kw: started.append(phase) or 0)
+    mod.chain(out)
+    assert started == [] and len(judged) == 1
+    assert written[-1]["plan_gates_red"] == _git(out, "rev-parse", "HEAD").stdout.strip()
+    mod.chain(out)  # the same plan commit: not judged again
+    assert len(judged) == 1 and started == []
+    (out / "fix.md").write_text("design-contract: none\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "fix the plan")
+    mod.chain(out)  # a new plan commit is judged again, green: execute
+    assert len(judged) == 2 and started == ["execute"]
+
+
+def test_plan_gates_reads_the_runner_verdict(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    mod = _load_dispatch(out)
+    runner = out / "scripts/process/gate_runner.py"
+    runner.write_text("import sys\nprint('FAILED gates: design-contracts')\nsys.exit(1)\n")
+    assert mod.plan_gates(out) == "FAILED gates: design-contracts"
+    runner.write_text("print('all gates green')\n")
+    assert mod.plan_gates(out) is None
+    runner.unlink()
+    assert mod.plan_gates(out) is None  # no gates in this project

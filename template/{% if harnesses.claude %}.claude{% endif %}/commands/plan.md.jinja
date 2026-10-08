@@ -68,7 +68,7 @@ that owner — a second reader left behind judges the next input differently
 (`docs/process/failure-catalog.md`). `/execute` compares the final diff against
 this inventory before `pushed`; it does not build a second one.
 
-When the plan is committed, `uv run scripts/process/report.py planned --issue N` (`/report`) — one line to the tower. An open question for the owner goes into the plan as `DECISION NEEDED <date> <you>: <question> — options: …; recommendation: …` plus `report.py blocked`; the steward relays it and writes the answer back as a `DECISION` line.
+When the plan is committed, run the gates (`uv run scripts/process/gate_runner.py`) and fix in the plan what it turns red — a plan declaration a gate misses turns every execute push red, and dispatch queues no execute while they are red. Then `uv run scripts/process/report.py planned --issue N` (`/report`) — one line to the tower. An open question for the owner goes into the plan as `DECISION NEEDED <date> <you>: <question> — options: …; recommendation: …` plus `report.py blocked`; the steward relays it and writes the answer back as a `DECISION` line.
 
 **Open the `## Decisions` ledger in the plan** (`journal-state-plans.md`,
 Plans): one `DECISION <date> <who>: <what> — because <why>` line per choice
