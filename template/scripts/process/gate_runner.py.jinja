@@ -250,7 +250,7 @@ def _phase_marks(stderr: str | bytes | None) -> list[tuple[str, str, float]]:
 
 def timeout_reason(stderr: str | bytes | None, now: float) -> str:
     """Why a killed gate was slow: the phase running at the kill and the
-    longest one that finished. That is a performance problem, not a finding.
+    longest one that finished. A killed gate reached no verdict either way.
     `now` is the runner's `time.monotonic()`, the clock the child shares.
     Empty when the gate reported no phases."""
     started: dict[str, float] = {}
@@ -270,7 +270,7 @@ def timeout_reason(stderr: str | bytes | None, now: float) -> str:
     if finished:
         slow, took = max(finished.items(), key=lambda kv: kv[1])
         parts.append(f"longest finished phase `{slow}` {took:.0f} s")
-    return "; ".join(parts) + " — performance problem, not a review finding"
+    return "; ".join(parts) + " — the gate reached no verdict"
 
 
 def _ledger_path(root: Path) -> Path | None:
