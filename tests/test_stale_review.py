@@ -1248,3 +1248,30 @@ def test_a_failed_git_read_is_asked_again_never_remembered(repo):
     mod._git_bytes = lambda r, *a: next(answers, real(r, *a)) if a[:1] == ("rev-list",) else real(r, *a)
     assert mod._parents(root, head) is None
     assert mod._parents(root, head) == [_git(root, "rev-parse", "main")]
+
+
+def test_a_failed_git_merge_does_not_weaken_later_passes(repo):
+    # refutation of #182: `_merge_own` cached the weaker `--cc` fallback taken
+    # after one transient `merge-tree` failure, and every later plan of the run
+    # then passed a merge that silently reverted main's change
+    root, head = repo
+    _git(root, "checkout", "-q", "main")
+    _commit(root, "m.py", "m = 1\n", "main's fix")
+    _git(root, "checkout", "-q", "feat")
+    _git(root, "merge", "-q", "--no-commit", "main")
+    _git(root, "checkout", "HEAD", "--", ".")  # keep our side everywhere: main's fix is gone
+    (root / "m.py").unlink(missing_ok=True)
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "merge main")
+    mod = _mod()
+    passes = [{"work": "w", "tier": "2", "head": head}]
+    real = mod._auto_merge_uncached
+    calls = []
+
+    def flaky(*a):  # git's own merge fails once (a timeout, a failed fork), then works
+        calls.append(a)
+        return None if len(calls) == 1 else real(*a)
+
+    mod._auto_merge_uncached = flaky
+    mod.stale_review(root, passes, {"w"}, 2, set())  # the run's first plan meets the failure
+    assert "m.py" in (mod.stale_review(root, passes, {"w"}, 2, set()) or ""), "a later plan must judge afresh"
