@@ -1166,6 +1166,10 @@ ein Wächter-Test gegen doppelte Klammern ohne Leerzeichen in Python-Vorlagen.
 Wer v2.27.1 oder v2.28.0 installiert hat und am Push scheitert: auf v2.28.1
 aktualisieren, `v2.28.1`.
 
+**v2.57.1 — Eine gemeinsame Datei hält keinen geprüften Branch mehr zurück.** Bisher stieg ein Kandidat nicht ein, wenn er eine Datei mit einem Branch an Bord teilte. In Kenni wartete so gleich ein ganzer Zuglauf auf drei geprüfte Branches, nur wegen eines gemeinsamen Tests, eines Contract-Dokuments oder einer Registry-Datei. Tier 2, Review durch einen frischen Prozess: kein Block.
+- **Neu.** Git führt den Batch in Einstiegsreihenfolge zusammen. Ein echter Konflikt wirft den späteren Kandidaten mit einer `blocked`-Meldung hinaus, er rebased dann. Die volle Suite läuft auf dem kombinierten Baum. Seit v2.55 liest das Review-Gate die konfliktfreie Zusammenführung geprüfter Arbeiten als geprüft. Ein neuer Test stellt das für zwei Passagiere sicher, die verschiedene Stellen derselben Datei ändern.
+- **Bekannte Grenze.** Kollidiert C nur mit B, und B wird danach als Verursacher entfernt, verpasst C diesen Zug trotzdem und bekommt „rebase“ gemeldet. Ein Kandidat, der sicher kollidiert, zählt außerdem bei `--min-candidates` mit.
+
 **v2.57.0 — Pipeline-Stau: Zug und Sessions warten nicht mehr auf Pre-Pushes.** Aus Kennis Stau vom 08.10.: Serielle Pre-Pushes hielten die `scoped`-Lane den ganzen Vormittag. Ein execute-Start wurde stundenlang abgewiesen, und es fuhr nur ein Zug, während fünf Kandidaten mit bestandenem Review warteten. Tier 2, Review durch einen frischen Prozess; dessen blockierender Befund ist behoben (Punkt 5).
 - **Der Zug fährt neben Pre-Pushes.** `departure` wartet nicht mehr auf eine belegte `scoped`-Lane: Die Suite läuft auf `full`, mit `nice`, neben den kurzen Läufen. Eine belegte `full`- oder unbekannte Lane hält den Zug weiter.
 - **Ein Session-Start wartet auf keine Test-Lane.** Eine belegte `full`- oder `scoped`-Lane weist keinen Start mehr ab, auch execute nicht. Die Testläufe einer Session warten an der Lane, die Session selbst nicht. Eine unbekannte belegte Lane blockiert weiter jede Phase; die Worker-Obergrenze gilt weiter.
