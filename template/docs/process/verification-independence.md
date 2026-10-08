@@ -119,7 +119,19 @@ contract, security or the acceptance the plan claims. Wording in the plan, a
 report, a tally or the PR text never blocks: record it as a `nit`. A verdict
 whose findings are all minor or nit is a `pass` with residuals — no new
 round (downstream, a Tier 3 update's second round blocked on two majors that
-were plan text only, its code already accepted). From the second block on
+were plan text only, its code already accepted). **A block is verified
+before it counts** (adapted from Claude Code's `code-review` plugin): a
+finding that would block names its failure scenario — the input or state,
+the path through the changed code, the wrong outcome; a defect whose path
+never runs through the change is pre-existing, an issue rather than this
+work's block. Before a `block` is attested, a fresh
+process that did not write the finding (a cheap model suffices) checks each
+such finding against the bundle and scores it: 0 — does not survive a
+look; 25 — unverified; 50 — real but minor or rare; 75 — verified, will be
+hit; 100 — confirmed by the evidence. Below 80 the finding is a residual or
+a follow-up issue, not a block. Never a block: what a linter, type checker
+or the test suite catches, a quality wish no rule or criterion asks for, a
+change the plan intends. From the second block on
 the same element the fix session — a fresh one, on the model the policy
 names for the tier's plan phase — decides *increment vs. rebuild the owning
 layer* and records it as a `DECISION` before the next round (mandatory rule
