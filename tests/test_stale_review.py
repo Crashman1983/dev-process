@@ -108,11 +108,31 @@ def test_an_ours_merge_that_discards_the_review_is_stale(repo):
     assert "a.py" in _stale(root, head)
 
 
-def test_amend_and_rebase_are_stale(repo):
+def test_an_amend_with_new_content_is_stale(repo):
     root, head = repo
     (root / "a.py").write_text("a = 2\n")
     _git(root, "commit", "-q", "-a", "--amend", "--no-edit")
-    assert "is not in the history" in _stale(root, head)
+    assert "code changed after the reviewed head (a.py)" in _stale(root, head)
+
+
+def test_a_rebase_or_amend_that_changes_no_content_keeps_the_review(repo):
+    # #158: the review binds what was reviewed, not where it sat
+    root, head = repo
+    _git(root, "commit", "-q", "--amend", "-m", "reworded")
+    assert _stale(root, head) is None
+    _git(root, "checkout", "-q", "main")
+    _commit(root, "m.py", "m = 1\n", "main moves on")
+    _git(root, "checkout", "-q", "feat")
+    _git(root, "rebase", "-q", "main")
+    assert _stale(root, head) is None
+    (root / "a.py").write_text("a = 3\n")
+    _git(root, "commit", "-q", "-a", "--amend", "--no-edit")
+    assert "a.py" in _stale(root, head)
+
+
+def test_a_head_that_is_in_no_history_here_covers_nothing(repo):
+    root, _head = repo
+    assert "is not in this repository" in _stale(root, "b" * 40)
 
 
 def test_main_merged_in_cleanly_is_not_this_works_code(repo):
@@ -156,7 +176,7 @@ def test_git_failure_fails_closed(repo, monkeypatch):
     real = mod._git_bytes
 
     def broken(r, *args):
-        return None if args and args[0] in ("log", "rev-list") else real(r, *args)
+        return None if "ls-tree" in args or "diff" in args else real(r, *args)
 
     monkeypatch.setattr(mod, "_git_bytes", broken)
     found = mod.stale_review(root, [{"work": "w", "tier": "2", "head": head}], {"w"}, 2, set())
@@ -205,9 +225,9 @@ def test_pushing_local_main_without_a_remote_ref_is_checked(repo):
     assert "a.py" in _stale(root, head)
 
 
-def test_a_conflict_resolved_to_the_other_side_is_stale(repo):
-    # the result equals main's version, so the
-    # combined diff is empty although the reviewed change was thrown away
+def test_a_conflict_resolved_to_mains_side_is_not_this_gates_finding(repo):
+    # decision record B: the reviewed change is gone and main's reviewed
+    # content stands — the loss shows as a missing change, as a revert would
     root, head = repo
     _git(root, "checkout", "-q", "main")
     _commit(root, "a.py", "a = 'main'\n", "main edits the same line")
@@ -216,35 +236,95 @@ def test_a_conflict_resolved_to_the_other_side_is_stale(repo):
     _git(root, "checkout", "--theirs", "a.py")
     _git(root, "add", "a.py")
     _git(root, "commit", "-q", "--no-edit")
+    assert _stale(root, head) is None
+
+
+def test_a_conflict_resolved_to_this_side_throws_mains_change_away(repo):
+    root, head = repo
+    _git(root, "checkout", "-q", "main")
+    _commit(root, "a.py", "a = 'main'\n", "main edits the same line")
+    _git(root, "checkout", "-q", "feat")
+    subprocess.run(["git", "merge", "--no-edit", "main"], cwd=root, capture_output=True)
+    _git(root, "checkout", "--ours", "a.py")
+    _git(root, "add", "a.py")
+    _git(root, "commit", "-q", "--no-edit")
     assert "a.py" in _stale(root, head)
 
 
-def test_a_rename_on_main_resolved_to_mains_side_is_stale(tmp_path):
-    # main renames and edits the file; git sees the rename, the content
-    # conflicts, the resolution takes main's side — the reviewed edit is gone
-    root = tmp_path / "r3"
+def test_a_merge_of_main_that_quietly_keeps_the_heads_file_is_stale(repo):
+    # shadow run of step B: the tip equals the reviewed head here, but main's
+    # fix is gone — the head alone is no reviewed state once main moved
+    root, head = repo
+    _git(root, "checkout", "-q", "main")
+    _commit(root, "m.py", "m = 1  # main's fix\n", "main's fix")
+    _git(root, "checkout", "-q", "feat")
+    _git(root, "merge", "-q", "-s", "ours", "--no-edit", "main")
+    assert "m.py" in _stale(root, head)
+
+
+def test_a_failed_git_merge_is_stale_never_a_weaker_answer(repo):
+    # Kenni #2439: a merge-tree timeout read a revert merge as fresh
+    root, head = repo
+    _git(root, "checkout", "-q", "main")
+    _commit(root, "m.py", "m = 1\n", "main's fix")
+    _git(root, "checkout", "-q", "feat")
+    _git(root, "merge", "-q", "-s", "ours", "--no-edit", "main")
+    mod = _mod()
+    passes = [{"work": "w", "tier": "2", "head": head}]
+    real = mod._auto_merge_uncached
+    calls = []
+
+    def flaky(*a):  # git's own merge fails once (a timeout, a failed fork), then works
+        calls.append(a)
+        return None if len(calls) == 1 else real(*a)
+
+    mod._auto_merge_uncached = flaky
+    assert "cannot determine" in mod.stale_review(root, passes, {"w"}, 2, set())
+    assert "m.py" in mod.stale_review(root, passes, {"w"}, 2, set())
+
+
+def _works_on_one_branch(root, reviewed_also=True):
+    """Three works on one branch, each editing its own hunk of one shared file
+    (Kenni: three works merged together, each editing the feature registry)."""
+    _commit(root, "inv.md", _LINES, "base")
+    _git(root, "checkout", "-q", "-b", "w1", "main")
+    h1 = _commit(root, "inv.md", _LINES.replace("l0 = 0", "l0 = 'w1'"), "w1 reviewed")
+    _git(root, "checkout", "-q", "-b", "w2", "main")
+    h2 = _commit(root, "inv.md", _LINES.replace("l5 = 5", "l5 = 'w2'"), "w2 reviewed")
+    _git(root, "checkout", "-q", "-b", "w3", "main")
+    h3 = _commit(root, "inv.md", _LINES.replace("l10 = 10", "l10 = 'w3'"), "w3 reviewed")
+    _git(root, "merge", "-q", "--no-edit", "w1", "w2")
+    return h1, h2, h3
+
+
+def test_several_reviewed_works_merged_cleanly_on_one_branch_are_a_reviewed_state(tmp_path):
+    root = tmp_path / "r"
     root.mkdir()
     _git(root, "init", "-q", "-b", "main")
     _git(root, "config", "user.email", "t@t")
     _git(root, "config", "user.name", "t")
-    lines = [f"line{i} = {i}\n" for i in range(20)]
-    _commit(root, "f.py", "".join(lines), "base")
-    _git(root, "checkout", "-q", "-b", "feat")
-    mine = lines.copy()
-    mine[0] = "line0 = 'reviewed'\n"
-    head = _commit(root, "f.py", "".join(mine), "reviewed work")
-    _git(root, "checkout", "-q", "main")
-    _git(root, "mv", "f.py", "g.py")
-    theirs = lines.copy()
-    theirs[0] = "line0 = 'main'\n"
-    (root / "g.py").write_text("".join(theirs))
-    _git(root, "commit", "-q", "-am", "main renames and edits")
+    h1, h2, h3 = _works_on_one_branch(root)
+    passes = [{"work": f"w{i}", "tier": "2", "head": h, "base": _git(root, "rev-parse", "main")}
+              for i, h in enumerate((h1, h2, h3), 1)]
+    others = tuple((r["base"], r["head"]) for r in passes)
+    mod = _mod()
+    for r in passes:
+        assert mod.stale_review(root, passes, {r["work"]}, 2, set(), others) is None, r["work"]
+    # without the other works' reviews, their hunks are code nobody reviewed
+    assert "inv.md" in mod.stale_review(root, passes, {"w3"}, 2, set(), ())
+
+
+def test_another_review_counts_only_where_the_tip_contains_its_head(repo):
+    root, head = repo
+    _git(root, "checkout", "-q", "-b", "elsewhere", "main")
+    other = _commit(root, "b.py", "b = 1\n", "reviewed elsewhere, never merged here")
     _git(root, "checkout", "-q", "feat")
-    subprocess.run(["git", "merge", "--no-edit", "main"], cwd=root, capture_output=True)
-    _git(root, "checkout", "--theirs", "g.py")
-    _git(root, "add", "-A")
-    _git(root, "commit", "-q", "--no-edit")
-    assert _stale(root, head) is not None
+    _commit(root, "b.py", "b = 1\n", "the same content, committed here unreviewed")
+    found = _mod().stale_review(root, [{"work": "w", "tier": "2", "head": head}], {"w"}, 2, set(),
+                                ((_git(root, "rev-parse", "main"), other),))
+    assert "b.py" in found
+
+
 
 
 def test_main_already_carrying_the_reviewed_change_merges_clean(tmp_path):
@@ -374,23 +454,6 @@ def test_a_fellow_passengers_evil_merge_is_named_as_such_not_as_this_works_code(
     assert "code changed after the reviewed head" not in found
 
 
-def test_a_merge_dropping_a_reviewed_change_to_a_non_ascii_file_is_stale(tmp_path):
-    root = tmp_path / "u"
-    root.mkdir()
-    _git(root, "init", "-q", "-b", "main")
-    _git(root, "config", "user.email", "t@t")
-    _git(root, "config", "user.name", "t")
-    _commit(root, "prüfung.py", "p = 0\n", "base")
-    _git(root, "checkout", "-q", "-b", "feat")
-    head = _commit(root, "prüfung.py", "p = 1\n", "reviewed work")
-    _git(root, "checkout", "-q", "main")
-    _commit(root, "prüfung.py", "p = 'main'\n", "main edits the same line")
-    _git(root, "checkout", "-q", "feat")
-    subprocess.run(["git", "merge", "-q", "--no-edit", "main"], cwd=root, capture_output=True)
-    _git(root, "checkout", "--theirs", "prüfung.py")
-    _git(root, "commit", "-q", "-am", "resolved to main's side")
-    found = _stale(root, head)
-    assert found is not None and "prüfung.py" in found
 
 
 def test_a_head_missing_from_a_shallow_clone_is_stale(repo, tmp_path):
@@ -408,13 +471,10 @@ _H = "a" * 40
 
 @pytest.mark.parametrize("case,facts,verdict,words", [
     ("reviewed head in history, nothing after", {}, "fresh", ""),
-    ("amend", {"in_history": False}, "stale", "not in the history"),
-    ("rebase", {"in_history": False}, "stale", "not in the history"),
+    ("head in no history here", {"in_history": False}, "stale", "not in this repository"),
     ("clean main merge", {}, "fresh", ""),
     ("clean merge of hunks from both sides", {}, "fresh", ""),
     ("conflict resolution", {"late": frozenset({"a.py"})}, "stale", "code changed after"),
-    ("resolution to the other side", {"dropped": frozenset({"a.py"})}, "stale", "threw the reviewed change away"),
-    ("-s ours", {"dropped": frozenset({"a.py"})}, "stale", "threw the reviewed change away"),
     ("train --no-ff staging", {}, "fresh", ""),
     ("fellow passenger's evil merge", {"fellow": (("b" * 40, frozenset({"e.py"})),)}, "stale", "another passenger"),
     ("later code commit", {"late": frozenset({"b.py"})}, "stale", "code changed after"),
@@ -423,8 +483,8 @@ _H = "a" * 40
     # precedence: the first fact that decides names the reason
     ("git error beats everything", {"git_error": True, "in_history": False, "late": frozenset({"x"})},
      "stale", "git did not answer"),
-    ("not in history beats late", {"in_history": False, "late": frozenset({"x"})}, "stale", "not in the history"),
-    ("a drop beats late", {"dropped": frozenset({"d"}), "late": frozenset({"x"})}, "stale", "threw"),
+    ("not in this repository beats late", {"in_history": False, "late": frozenset({"x"})}, "stale",
+     "not in this repository"),
     ("own code beats a fellow's", {"late": frozenset({"x"}), "fellow": (("b" * 40, frozenset({"e"})),)},
      "stale", "code changed after"),
 ])
@@ -445,8 +505,8 @@ def _raw(root, name: bytes, text: bytes):
 
 def test_a_non_utf8_name_cannot_take_any_resolution(tmp_path):
     name = b"lat\xe9.py"
-    for resolution in (b"x=1\nevil()\n", None):  # an evil resolution, and a drop to main's side
-        root = tmp_path / ("r1" if resolution else "r2")
+    for resolution in (b"x=1\nevil()\n", b"x=1\n"):  # an evil resolution, and one to this side
+        root = tmp_path / ("evil" if b"evil" in resolution else "ours")
         root.mkdir()
         _git(root, "init", "-q", "-b", "main")
         _git(root, "config", "user.email", "t@t")
@@ -578,27 +638,13 @@ def test_a_fenced_example_id_names_no_work(repo):
     assert "77" not in _mod()._known_work(root)
 
 
-def test_a_drop_inside_another_reviews_range_is_still_a_drop(repo):
-    # work B's review covers a merge that resolved THIS work's reviewed line
-    # to main's side: B saw the merge, it did not review the drop for w
-    root, head = repo
-    _git(root, "checkout", "-q", "main")
-    _commit(root, "a.py", "a = 'main'\n", "main edits the same line")
-    _git(root, "checkout", "-q", "feat")
-    b_base = _git(root, "rev-parse", "HEAD")
-    subprocess.run(["git", "merge", "-q", "--no-edit", "main"], cwd=root, capture_output=True)
-    _git(root, "checkout", "--theirs", "a.py")
-    _git(root, "commit", "-q", "-am", "merge main, resolved to main's side")
-    b_head = _commit(root, "b.py", "b = 1\n", "work B")
-    found = _mod().stale_review(root, [{"work": "w", "tier": "2", "head": head}], {"w"}, 2, set(),
-                                ((b_base, b_head),))
-    assert found is not None and "a.py" in found
 
 
-def test_unreviewed_paths_never_reads_an_amended_head_as_covered(repo):
+def test_unreviewed_paths_reads_content_not_history(repo):
     root, head = repo
-    _git(root, "commit", "-q", "--amend", "-m", "amended")
-    assert _mod()._unreviewed_paths(root, head, "HEAD") is None
+    _git(root, "commit", "-q", "--amend", "-m", "amended, nothing else")
+    assert _mod()._unreviewed_paths(root, head, "HEAD") == set()
+    assert _mod()._unreviewed_paths(root, "b" * 40, "HEAD") is None  # a head in no history here
 
 
 def test_taking_mains_side_of_a_file_this_work_never_changed_is_no_drop(repo):
@@ -652,95 +698,12 @@ def _judged(root, head, base=None, covered=()):
     return _mod().stale_review(root, [record], {"w"}, 2, set(), covered)
 
 
-def test_a_file_this_work_renamed_and_the_merge_turned_back_to_mains_old_one_is_a_drop(tmp_path):
-    root = _fresh(tmp_path)
-    _commit(root, "f.py", "".join(_ROWS), "base")
-    _git(root, "checkout", "-q", "-b", "feat")
-    _git(root, "mv", "f.py", "g.py")
-    head = _commit(root, "g.py", _edit_line(0, "reviewed"), "reviewed: rename and edit")
-    _git(root, "checkout", "-q", "main")
-    _commit(root, "f.py", _edit_line(0, "main"), "main edits line 0")
-    _git(root, "checkout", "-q", "feat")
-    _merge(root, "main")
-    (root / "g.py").write_text(_edit_line(0, "main"))
-    _git(root, "add", "-A")
-    _git(root, "commit", "-q", "--no-edit")
-    b_head = _commit(root, "b.py", "b = 1\n", "work B")
-    found = _judged(root, head, covered=((head, b_head),))
-    assert found is not None and "g.py" in found
 
 
-@pytest.mark.parametrize("covered", [False, True])
-def test_a_new_file_git_moved_into_a_renamed_directory_and_the_merge_deleted_is_a_drop(tmp_path, covered):
-    root = _fresh(tmp_path)
-    _commit(root, "d/a.py", "a = 0\n", "base")
-    _git(root, "checkout", "-q", "-b", "feat")
-    head = _commit(root, "d/new.py", "new = 'reviewed'\n", "reviewed: new file")
-    _git(root, "checkout", "-q", "main")
-    _git(root, "mv", "d", "e")
-    _git(root, "commit", "-q", "-m", "main moves d/ to e/")
-    _git(root, "checkout", "-q", "feat")
-    _merge(root, "main")
-    _git(root, "rm", "-q", "--cached", "--ignore-unmatch", "e/new.py", "d/new.py")
-    for rel in ("e/new.py", "d/new.py"):
-        (root / rel).unlink(missing_ok=True)
-    _git(root, "commit", "-q", "--no-edit")
-    b_head = _commit(root, "b.py", "b = 1\n", "work B")
-    found = _judged(root, head, covered=((head, b_head),) if covered else ())
-    assert found is not None and "d/new.py" in found
 
 
-def test_a_merge_that_takes_the_executable_bit_back_is_a_drop(tmp_path):
-    root = _fresh(tmp_path)
-    _commit(root, "run.sh", "echo hi\n", "base")
-    _git(root, "checkout", "-q", "-b", "feat")
-    (root / "run.sh").chmod(0o755)
-    _git(root, "add", "run.sh")
-    _git(root, "commit", "-q", "-m", "reviewed: run.sh executable")
-    head = _git(root, "rev-parse", "HEAD")
-    _git(root, "checkout", "-q", "main")
-    _commit(root, "m.py", "m = 1\n", "main moves on")
-    _git(root, "checkout", "-q", "feat")
-    _git(root, "merge", "-q", "--no-commit", "main")
-    (root / "run.sh").chmod(0o644)
-    _git(root, "add", "run.sh")
-    _git(root, "commit", "-q", "--no-edit")
-    b_head = _commit(root, "b.py", "b = 1\n", "work B")
-    found = _judged(root, head, covered=((head, b_head),))
-    assert found is not None and "run.sh" in found
 
 
-def test_a_stacked_branch_taking_mains_squash_of_the_branch_below_is_no_drop(tmp_path):
-    # this work's review starts at the branch below (base..head): that
-    # branch's file is not this work's, even if merge-base says so
-    root = _fresh(tmp_path)
-    _commit(root, "f.py", "".join(_ROWS), "base")
-    _git(root, "checkout", "-q", "-b", "b1")
-    below = _commit(root, "f.py", _edit_line(0, "b1-draft"), "B1 draft")
-    _git(root, "checkout", "-q", "-b", "b2")
-    head = _commit(root, "g.py", "g = 'b2'\n", "B2 reviewed")
-    _git(root, "checkout", "-q", "b1")
-    _commit(root, "f.py", _edit_line(0, "b1-final"), "B1 review fix-up")
-    _git(root, "checkout", "-q", "main")
-    _git(root, "merge", "-q", "--squash", "b1")
-    _git(root, "commit", "-q", "-m", "B1 (squash)")
-    _git(root, "checkout", "-q", "b2")
-    _merge(root, "main")
-    _git(root, "checkout", "--theirs", "f.py")
-    _git(root, "add", "-A")
-    _git(root, "commit", "-q", "--no-edit")
-    assert _judged(root, head, base=below) is None
-    # the review that saw B1's change as well still owns it
-    first = _git(root, "rev-list", "--max-parents=0", "HEAD")
-    found = _judged(root, head, base=first)
-    assert found is not None and "f.py" in found
-    # the merge train's boarding judges by the same range
-    assert _mod()._unreviewed_paths(root, head, "HEAD", ((below, head),)) == set()
-    assert "f.py" in _mod()._unreviewed_paths(root, head, "HEAD", ((first, head),))
-    train = _train()
-    record = {"work": "w", "tier": "2", "head": head, "base": below}
-    assert train._covers(root, [record], {"w"}, 2, "HEAD")
-    assert not train._covers(root, [{**record, "base": first}], {"w"}, 2, "HEAD")
 
 
 def test_an_unrelated_import_taking_its_own_file_is_no_drop_of_this_work(tmp_path):
@@ -762,114 +725,23 @@ def test_an_unrelated_import_taking_its_own_file_is_no_drop_of_this_work(tmp_pat
 
 # --- second refutation: every round's range, a base that proves nothing, modes apart, moved onto main's file ---
 
-def _two_sided(root):
-    """fork -> feat edits f.py line 0; main edits line 0 too (a conflict)."""
-    fork = _commit(root, "f.py", "".join(_ROWS), "base")
-    _git(root, "checkout", "-q", "-b", "feat")
-    return fork
 
 
-def _resolve_theirs(root, *paths):
-    for p in paths:
-        _git(root, "checkout", "--theirs", p)
-    _git(root, "add", "-A")
-    _git(root, "commit", "-q", "--no-edit")
 
 
-def test_a_delta_rounds_base_does_not_hide_a_drop_of_the_first_rounds_code(tmp_path):
-    # round 1 reviewed fork..h1; round 2 is a delta review (make_review_bundle --since h1): base=h1
-    root = _fresh(tmp_path)
-    fork = _two_sided(root)
-    h1 = _commit(root, "f.py", _edit_line(0, "reviewed"), "round 1")
-    h2 = _commit(root, "b.py", "b = 1\n", "round 2")
-    _git(root, "checkout", "-q", "main")
-    _commit(root, "f.py", _edit_line(0, "main"), "main edits line 0")
-    _git(root, "checkout", "-q", "feat")
-    _merge(root, "main")
-    _resolve_theirs(root, "f.py")
-    r1 = {"work": "w", "tier": "2", "head": h1, "base": fork}
-    r2 = {"work": "w", "tier": "2", "head": h2, "base": h1}
-    found = _mod().stale_review(root, [r1, r2], {"w"}, 2, set(), ((fork, h1), (h1, h2)))
-    assert found is not None and "f.py" in found, found
 
 
-def test_the_train_judges_a_delta_round_like_the_gate(tmp_path):
-    root = _fresh(tmp_path)
-    fork = _two_sided(root)
-    h1 = _commit(root, "f.py", _edit_line(0, "reviewed"), "round 1")
-    h2 = _commit(root, "b.py", "b = 1\n", "round 2")
-    _git(root, "checkout", "-q", "main")
-    _commit(root, "f.py", _edit_line(0, "main"), "main edits line 0")
-    _git(root, "checkout", "-q", "feat")
-    _merge(root, "main")
-    _resolve_theirs(root, "f.py")
-    r1 = {"work": "w", "tier": "2", "head": h1, "base": fork}
-    r2 = {"work": "w", "tier": "2", "head": h2, "base": h1}
-    assert not _train()._covers(root, [r1, r2], {"w"}, 2, "HEAD")
 
 
-def test_a_base_equal_to_head_proves_nothing(tmp_path):
-    root = _fresh(tmp_path)
-    _two_sided(root)
-    head = _commit(root, "f.py", _edit_line(0, "reviewed"), "reviewed")
-    _git(root, "checkout", "-q", "main")
-    _commit(root, "f.py", _edit_line(0, "main"), "main edits line 0")
-    _git(root, "checkout", "-q", "feat")
-    _merge(root, "main")
-    _resolve_theirs(root, "f.py")
-    found = _judged(root, head, base=head)
-    assert found is not None and "f.py" in found, found
 
 
-def test_mains_content_under_the_reviewed_mode_is_a_drop(tmp_path):
-    # work edits run.sh and makes it +x; main edits the same line. The merge takes
-    # main's content with the +x git itself would keep: the reviewed edit is gone.
-    root = _fresh(tmp_path)
-    _commit(root, "run.sh", "".join(_ROWS), "base")
-    _git(root, "checkout", "-q", "-b", "feat")
-    (root / "run.sh").write_text(_edit_line(0, "reviewed"))
-    (root / "run.sh").chmod(0o755)
-    _git(root, "add", "-A")
-    _git(root, "commit", "-q", "-m", "reviewed")
-    head = _git(root, "rev-parse", "HEAD")
-    _git(root, "checkout", "-q", "main")
-    _commit(root, "run.sh", _edit_line(0, "main"), "main")
-    _git(root, "checkout", "-q", "feat")
-    _merge(root, "main")
-    (root / "run.sh").write_text(_edit_line(0, "main"))
-    (root / "run.sh").chmod(0o755)
-    _git(root, "add", "-A")
-    _git(root, "commit", "-q", "--no-edit")
-    b_head = _commit(root, "b.py", "b = 1\n", "work B")
-    found = _judged(root, head, covered=((head, b_head),))
-    assert found is not None and "run.sh" in found, found
 
 
-def test_a_file_git_moved_onto_mains_own_and_resolved_to_mains_is_a_drop(tmp_path):
-    # work adds d/new.py; main moves d/ -> e/ and adds its own e/new.py. git moves the
-    # work's file onto e/new.py (conflict); the merge takes main's. No covering review.
-    root = _fresh(tmp_path)
-    _commit(root, "d/a.py", "".join(_ROWS), "base")
-    _git(root, "checkout", "-q", "-b", "feat")
-    head = _commit(root, "d/new.py", "new = 'reviewed'\n" + "".join(_ROWS), "reviewed: new file")
-    _git(root, "checkout", "-q", "main")
-    _git(root, "mv", "d", "e")
-    _commit(root, "e/new.py", "new = 'main'\n" + "".join(_ROWS), "main moves d/ to e/, adds its new.py")
-    _git(root, "checkout", "-q", "feat")
-    _merge(root, "main")
-    (root / "e/new.py").write_text("new = 'main'\n" + "".join(_ROWS))
-    _git(root, "rm", "-q", "--cached", "--ignore-unmatch", "d/new.py")
-    (root / "d/new.py").unlink(missing_ok=True)
-    _git(root, "add", "-A")
-    _git(root, "commit", "-q", "--no-edit")
-    assert _git(root, "show", "HEAD:e/new.py").startswith("new = 'main'")
-    found = _judged(root, head)
-    assert found is not None and "new.py" in found, found
 
 
-def test_the_reviewed_content_under_mains_mode_is_no_code_of_the_merge(tmp_path):
-    # main edits the same line and makes the file +x; the merge keeps the reviewed
-    # content with main's +x — exactly git's own mode merge. No new code.
+def test_the_reviewed_content_under_mains_mode_still_throws_mains_line_away(tmp_path):
+    # main edits the same line and makes the file +x; the merge keeps the
+    # reviewed content with main's +x — main's edit of that line is gone
     root = _fresh(tmp_path)
     _commit(root, "run.sh", "".join(_ROWS), "base")
     _git(root, "checkout", "-q", "-b", "feat")
@@ -887,7 +759,7 @@ def test_the_reviewed_content_under_mains_mode_is_no_code_of_the_merge(tmp_path)
     _git(root, "commit", "-q", "--no-edit")
     assert _git(root, "ls-tree", "HEAD", "run.sh").startswith("100755")
     found = _judged(root, head)
-    assert found is None, found
+    assert found is not None and "run.sh" in found, found
 
 
 # --- third refutation: the mode apart from any content, every round owns its code ---
@@ -912,164 +784,26 @@ def _finish(root):
     return _git(root, "rev-parse", "HEAD")
 
 
-def _covered_b(root, head):
-    b_head = _commit(root, "b.py", "b = 1\n", "work B")
-    return ((head, b_head),)
 
 
-def test_a_dropped_mode_counts_when_main_changed_the_content(tmp_path):
-    root = _fresh(tmp_path)
-    _commit(root, "run.sh", "".join(_ROWS), "base")
-    _git(root, "checkout", "-q", "-b", "feat")
-    head = _write(root, "run.sh", "".join(_ROWS), 0o755, "reviewed: +x")
-    _git(root, "checkout", "-q", "main")
-    _write(root, "run.sh", _edit_line(10, "main"), 0o644, "main edits content")
-    _git(root, "checkout", "-q", "feat")
-    _merge(root, "--no-commit", "main")
-    assert _git(root, "ls-files", "-s", "run.sh").startswith("100755")
-    (root / "run.sh").chmod(0o644)
-    _finish(root)
-    found = _judged(root, head, covered=_covered_b(root, head))
-    assert found is not None and "run.sh" in found, found
 
 
-def test_a_dropped_mode_counts_under_gits_merged_content(tmp_path):
-    root = _fresh(tmp_path)
-    _commit(root, "run.sh", "".join(_ROWS), "base")
-    _git(root, "checkout", "-q", "-b", "feat")
-    head = _write(root, "run.sh", _edit_line(0, "reviewed"), 0o755, "reviewed")
-    _git(root, "checkout", "-q", "main")
-    _write(root, "run.sh", _edit_line(10, "main"), 0o644, "main")
-    _git(root, "checkout", "-q", "feat")
-    _merge(root, "--no-commit", "main")
-    (root / "run.sh").chmod(0o644)
-    _finish(root)
-    found = _judged(root, head, covered=_covered_b(root, head))
-    assert found is not None and "run.sh" in found, found
 
 
-def test_a_dropped_mode_counts_through_this_works_rename(tmp_path):
-    root = _fresh(tmp_path)
-    _commit(root, "a.sh", "".join(_ROWS), "base")
-    _git(root, "checkout", "-q", "-b", "feat")
-    _git(root, "mv", "a.sh", "b.sh")
-    head = _write(root, "b.sh", "".join(_ROWS), 0o755, "reviewed: rename, +x")
-    _git(root, "checkout", "-q", "main")
-    _write(root, "a.sh", _edit_line(10, "main"), 0o644, "main edits")
-    _git(root, "checkout", "-q", "feat")
-    _merge(root, "--no-commit", "main")
-    assert _git(root, "ls-files", "-s", "b.sh").startswith("100755")
-    (root / "b.sh").chmod(0o644)
-    _finish(root)
-    found = _judged(root, head, covered=((head, _commit(root, "z.py", "z\n", "B")),))
-    assert found is not None and "b.sh" in found, found
 
 
-def test_a_round_without_a_base_keeps_its_code_next_to_a_delta_round(tmp_path):
-    # base names a commit ABOVE the reviewed change (ancestor of head) — only
-    # a later record; the earlier round had no base at all
-    root = _fresh(tmp_path)
-    _two_sided(root)
-    h1 = _commit(root, "f.py", _edit_line(0, "reviewed"), "round 1")
-    h2 = _commit(root, "b.py", "b\n", "round 2")
-    _git(root, "checkout", "-q", "main")
-    _commit(root, "f.py", _edit_line(0, "main"), "main")
-    _git(root, "checkout", "-q", "feat")
-    _merge(root, "main")
-    _resolve_theirs(root, "f.py")
-    r1 = {"work": "w", "tier": "2", "head": h1}  # older record, no base
-    r2 = {"work": "w", "tier": "2", "head": h2, "base": h1}
-    found = _mod().stale_review(root, [r1, r2], {"w"}, 2, set(), ((h1, h2),))
-    assert found is not None and "f.py" in found, found
 
 
-def test_a_round_rebased_away_keeps_its_code_next_to_a_delta_round(tmp_path):
-    root = _fresh(tmp_path)
-    _two_sided(root)
-    h1 = _commit(root, "f.py", _edit_line(0, "reviewed"), "round 1")
-    h2 = _commit(root, "b.py", "b\n", "round 2")
-    _git(root, "checkout", "-q", "main")
-    _commit(root, "f.py", _edit_line(0, "main"), "main")
-    _git(root, "checkout", "-q", "feat")
-    _merge(root, "main")
-    _resolve_theirs(root, "f.py")
-    r1 = {"work": "w", "tier": "2", "head": "1" * 40, "base": "2" * 40}
-    r2 = {"work": "w", "tier": "2", "head": h2, "base": h1}
-    found = _mod().stale_review(root, [r1, r2], {"w"}, 2, set(), ((h1, h2),))
-    assert found is not None and "f.py" in found, found
 
 
-def test_the_train_and_the_gate_agree_on_a_dropped_mode(tmp_path):
-    root = _fresh(tmp_path)
-    _commit(root, "run.sh", "".join(_ROWS), "base")
-    _git(root, "checkout", "-q", "-b", "feat")
-    head = _write(root, "run.sh", "".join(_ROWS), 0o755, "reviewed: +x")
-    _git(root, "checkout", "-q", "main")
-    _write(root, "run.sh", _edit_line(10, "main"), 0o644, "main edits content")
-    _git(root, "checkout", "-q", "feat")
-    _merge(root, "--no-commit", "main")
-    (root / "run.sh").chmod(0o644)
-    _finish(root)
-    rec = {"work": "w", "tier": "2", "head": head}
-    gate = _mod().stale_review(root, [rec], {"w"}, 2, set(), ())
-    train = _train()._covers(root, [rec], {"w"}, 2, "HEAD")
-    assert (gate is None) == train, (gate, train)
-    assert gate is not None
 
 
-def test_work_bases_are_this_works_code_rounds_only():
-    passes = [{"work": "w", "tier": "2", "head": "h", "base": "b1"},
-              {"work": "w", "tier": "2", "head": "h2"},
-              {"work": "w-plan", "tier": "2", "head": "h", "base": "bp"},
-              {"work": "v", "tier": "2", "head": "h", "base": "bv"}]
-    assert _mod().work_bases(passes, {"w"}) == (("b1", "h"), ("", "h2"))
 
 
 # --- fourth refutation: a headless record proves nothing, a rename on both sides ---
 
-def test_a_dropped_mode_counts_when_both_sides_renamed_the_file(tmp_path):
-    # work renames a.sh->w.sh with +x; main renames a.sh->m.sh (rename/rename conflict)
-    root = _fresh(tmp_path)
-    _commit(root, "a.sh", "".join(_ROWS), "base")
-    _git(root, "checkout", "-q", "-b", "feat")
-    _git(root, "mv", "a.sh", "w.sh")
-    head = _write(root, "w.sh", "".join(_ROWS), 0o755, "reviewed: rename +x")
-    _git(root, "checkout", "-q", "main")
-    _git(root, "mv", "a.sh", "m.sh")
-    _git(root, "commit", "-q", "-m", "main rename")
-    _git(root, "checkout", "-q", "feat")
-    _merge(root, "main")
-    # resolver keeps work's name but main's mode
-    _git(root, "rm", "-q", "--cached", "--ignore-unmatch", "m.sh", "a.sh")
-    for n in ("m.sh", "a.sh"):
-        (root / n).unlink(missing_ok=True)
-    (root / "w.sh").write_text("".join(_ROWS))
-    (root / "w.sh").chmod(0o644)
-    _finish(root)
-    found = _judged(root, head, covered=_covered_b(root, head))
-    assert found is not None and "w.sh" in found, found
 
 
-def test_a_dropped_edit_counts_when_both_sides_renamed_the_file(tmp_path):
-    # companion: same rename/rename, work also edited line 0; resolver keeps
-    # w.sh (work's name) with the base text — the reviewed edit is gone
-    root = _fresh(tmp_path)
-    _commit(root, "a.sh", "".join(_ROWS), "base")
-    _git(root, "checkout", "-q", "-b", "feat")
-    _git(root, "mv", "a.sh", "w.sh")
-    head = _write(root, "w.sh", _edit_line(0, "w"), None, "reviewed: rename + edit")
-    _git(root, "checkout", "-q", "main")
-    _git(root, "mv", "a.sh", "m.sh")
-    _git(root, "commit", "-q", "-m", "main rename")
-    _git(root, "checkout", "-q", "feat")
-    _merge(root, "main")
-    _git(root, "rm", "-q", "--cached", "--ignore-unmatch", "m.sh", "a.sh")
-    for n in ("m.sh", "a.sh"):
-        (root / n).unlink(missing_ok=True)
-    (root / "w.sh").write_text("".join(_ROWS))
-    _finish(root)
-    found = _judged(root, head, covered=_covered_b(root, head))
-    assert found is not None and "w.sh" in found, found
 
 
 # --- fifth refutation: names-only conflicts, rename chains, headless records fail closed ---
@@ -1098,91 +832,29 @@ def _keep_only(root, keep, text, mode=None, drop=("m.sh", "a.sh")):
     return _finish(root)
 
 
-def test_a_rename_on_both_sides_keeping_gits_merged_content_is_no_drop(tmp_path):
+def test_a_rename_on_both_sides_keeping_only_this_name_throws_mains_rename_away(tmp_path):
     root = _fresh(tmp_path)
     head = _rr(root, "".join(_ROWS), None, _edit_line(10, "main"))
     _keep_only(root, "w.sh", _edit_line(10, "main"))
-    assert _judged(root, head) is None
+    assert "m.sh" in _judged(root, head)
 
 
-def test_a_rename_on_both_sides_keeping_mains_copy_of_the_reviewed_edit_is_no_drop(tmp_path):
+def test_a_rename_on_both_sides_keeping_both_edits_under_this_name_is_still_a_resolution(tmp_path):
     root = _fresh(tmp_path)
     both = _edit_line(0, "w").replace("line10 = 10", "line10 = 'main'")
     head = _rr(root, _edit_line(0, "w"), None, both)
     _keep_only(root, "w.sh", both)
-    assert _judged(root, head) is None
+    assert "m.sh" in _judged(root, head)
 
 
-def test_a_rename_chain_across_rounds_keeps_the_oldest_name(tmp_path):
-    root = _fresh(tmp_path)
-    fork = _commit(root, "a.sh", "".join(_ROWS), "base")
-    _git(root, "checkout", "-q", "-b", "feat")
-    _git(root, "mv", "a.sh", "b.sh")
-    h1 = _write(root, "b.sh", _edit_line(0, "w"), None, "round 1")
-    _git(root, "mv", "b.sh", "w.sh")
-    _git(root, "commit", "-q", "-m", "round 2")
-    h2 = _git(root, "rev-parse", "HEAD")
-    _git(root, "checkout", "-q", "main")
-    _commit(root, "a.sh", _edit_line(0, "main"), "main edits line 0")
-    _git(root, "checkout", "-q", "feat")
-    _merge(root, "main")
-    _keep_only(root, "w.sh", _edit_line(0, "main"), drop=("a.sh", "b.sh"))
-    r1 = {"work": "w", "tier": "2", "head": h1, "base": fork}
-    r2 = {"work": "w", "tier": "2", "head": h2, "base": h1}
-    found = _mod().stale_review(root, [r1, r2], {"w"}, 2, set(), _covered_b(root, h2))
-    assert found is not None and "w.sh" in found, found
 
 
-def test_a_headless_record_keeps_the_first_rounds_code_next_to_a_delta_round(tmp_path):
-    root = _fresh(tmp_path)
-    _two_sided(root)
-    h1 = _commit(root, "f.py", _edit_line(0, "reviewed"), "round 1")
-    h2 = _commit(root, "b.py", "b\n", "round 2")
-    _git(root, "checkout", "-q", "main")
-    _commit(root, "f.py", _edit_line(0, "main"), "main")
-    _git(root, "checkout", "-q", "feat")
-    _merge(root, "main")
-    _resolve_theirs(root, "f.py")
-    r1 = {"work": "w", "tier": "2"}  # legacy: no head, no base
-    r2 = {"work": "w", "tier": "2", "head": h2, "base": h1}
-    found = _mod().stale_review(root, [r1, r2], {"w"}, 2, set(), ())
-    assert found is not None and "f.py" in found, found
 
 
 # --- sixth refutation: a delete conflict leaves no markers ---
 
-def test_keeping_mains_edit_of_a_file_this_work_deleted_is_a_drop(tmp_path):
-    root = _fresh(tmp_path)
-    _two_sided(root)
-    _git(root, "rm", "-q", "f.py")
-    _git(root, "commit", "-q", "-m", "reviewed: delete f.py")
-    head = _git(root, "rev-parse", "HEAD")
-    _git(root, "checkout", "-q", "main")
-    _commit(root, "f.py", _edit_line(0, "main"), "main edits")
-    _git(root, "checkout", "-q", "feat")
-    _merge(root, "main")
-    _git(root, "add", "f.py")  # keep main's edited file
-    _finish(root)
-    found = _judged(root, head, covered=_covered_b(root, head))
-    assert found is not None and "f.py" in found, found
 
 
-def test_keeping_mains_renamed_copy_of_a_file_this_work_deleted_is_a_drop(tmp_path):
-    root = _fresh(tmp_path)
-    _commit(root, "a.py", "".join(_ROWS), "base")
-    _git(root, "checkout", "-q", "-b", "feat")
-    _git(root, "rm", "-q", "a.py")
-    head = _commit(root, "k.py", "k\n", "reviewed: delete a.py")
-    _git(root, "checkout", "-q", "main")
-    _git(root, "mv", "a.py", "b.py")
-    _commit(root, "b.py", _edit_line(0, "main"), "main renames and edits")
-    _git(root, "checkout", "-q", "feat")
-    _merge(root, "main")
-    _git(root, "add", "-A")
-    _finish(root)
-    assert _git(root, "cat-file", "-e", "HEAD:b.py") == ""
-    found = _mod()._dropped_by_merge(root, _git(root, "rev-parse", "HEAD"), head)
-    assert found == {"b.py"}, found
 
 
 # --- #182: the git work does not grow with passes × merges -----------------
@@ -1232,46 +904,7 @@ def test_doubling_merges_and_passes_does_not_quadruple_the_git_work(tmp_path):
     assert large < 3 * small, (small, large)
 
 
-def test_a_second_plan_over_the_same_merges_reuses_the_answers(tmp_path):
-    root, heads = _merged_history(tmp_path, 4, 2)
-    one, two = _counted(root, heads), _counted(root, heads, plans=2)
-    assert two - one < one * 2 // 3, (one, two)  # before the fix: the second plan cost as much as the first
 
 
-def test_a_failed_git_read_is_asked_again_never_remembered(repo):
-    # "git could not tell" must stay "stale, fail closed" on the next ask,
-    # not become a cached answer
-    root, head = repo
-    mod = _mod()
-    real = mod._git_bytes
-    answers = iter([None])
-    mod._git_bytes = lambda r, *a: next(answers, real(r, *a)) if a[:1] == ("rev-list",) else real(r, *a)
-    assert mod._parents(root, head) is None
-    assert mod._parents(root, head) == [_git(root, "rev-parse", "main")]
 
 
-def test_a_failed_git_merge_does_not_weaken_later_passes(repo):
-    # refutation of #182: `_merge_own` cached the weaker `--cc` fallback taken
-    # after one transient `merge-tree` failure, and every later plan of the run
-    # then passed a merge that silently reverted main's change
-    root, head = repo
-    _git(root, "checkout", "-q", "main")
-    _commit(root, "m.py", "m = 1\n", "main's fix")
-    _git(root, "checkout", "-q", "feat")
-    _git(root, "merge", "-q", "--no-commit", "main")
-    _git(root, "checkout", "HEAD", "--", ".")  # keep our side everywhere: main's fix is gone
-    (root / "m.py").unlink(missing_ok=True)
-    _git(root, "add", "-A")
-    _git(root, "commit", "-q", "-m", "merge main")
-    mod = _mod()
-    passes = [{"work": "w", "tier": "2", "head": head}]
-    real = mod._auto_merge_uncached
-    calls = []
-
-    def flaky(*a):  # git's own merge fails once (a timeout, a failed fork), then works
-        calls.append(a)
-        return None if len(calls) == 1 else real(*a)
-
-    mod._auto_merge_uncached = flaky
-    mod.stale_review(root, passes, {"w"}, 2, set())  # the run's first plan meets the failure
-    assert "m.py" in (mod.stale_review(root, passes, {"w"}, 2, set()) or ""), "a later plan must judge afresh"

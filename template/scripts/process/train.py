@@ -359,8 +359,8 @@ def _journal_passes_tree(root: Path, ref: str) -> list[dict]:
 def _covers(root: Path, passes: list[dict], ids: set[str], tier: int, tip: str,
             own: list[dict] | None = None) -> bool:
     """Does a clearing REVIEW pass cover the branch as it stands NOW? A pass
-    whose reviewed head is not in the branch, or behind which the branch
-    carries code nobody reviewed, clears the plan but not these commits —
+    whose reviewed content the branch no longer is — code nobody reviewed
+    came after it, or a merge changed it — clears the plan but not these commits —
     downstream, a branch merged by one train got new commits and boarded the
     next on its old clearance. The same rule as the review gate's stale check
     (`check_review._unreviewed_paths`), judged at the branch tip. Passes
@@ -377,9 +377,7 @@ def _covers(root: Path, passes: list[dict], ids: set[str], tier: int, tip: str,
         own_ids = {id(r) for r in (own or [])}
         return any(id(r) in own_ids for r in clearing)
     for r in with_head:
-        if _git(root, "merge-base", "--is-ancestor", r["head"], tip).returncode != 0:
-            continue
-        late = _review._unreviewed_paths(root, r["head"], tip, _review.work_bases(passes, ids),
+        late = _review._unreviewed_paths(root, r["head"], tip,
                                           _review._reviewed_heads(passes, tier, _review._known_work(root, ref=tip)))
         if late is not None and not late:
             return True
