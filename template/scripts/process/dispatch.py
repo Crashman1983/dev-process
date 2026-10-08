@@ -53,7 +53,9 @@ skipped, not waited on: a plan or review behind a refused execute still
 starts. Local workers start under `nice` (policy `worker_nice`, default
 10; 0 = off): the merge train's suite, run at normal priority, keeps its
 CPU while workers test (downstream: timeouts under load dropped innocent
-passengers).
+passengers). A local session starts on what origin holds: a worktree
+behind its pushed branch is fast-forwarded, a diverged one is refused,
+and a review refuses one ahead of origin (`sync_worktree`).
 
 Records live in `<git common dir>/process-dispatch/`: one JSON per
 branch (pid + process start time, tmux window id, phase, model, log) and
@@ -981,6 +983,41 @@ def ensure_worktree(root: Path, branch: str) -> Path:
     return wt
 
 
+
+def sync_worktree(root: Path, wt: Path, branch: str, phase: str) -> str | None:
+    """None, or why the start is refused. A session reads what origin holds:
+    a worktree behind its pushed branch (the work went on in another
+    worktree or on another host) is fast-forwarded first. Downstream a review
+    read the plan commit while the execute commits sat on origin (a lost
+    round). Not pushed yet: nothing to do. Diverged, or behind with local
+    changes: refused, the worktree is somebody's. A review also refuses a
+    worktree ahead of origin: it attests what is pushed."""
+    tip = _remote_head(root, branch)
+    if not tip:
+        return None
+    head = _out(wt, "rev-parse", "HEAD")
+    if head == tip:
+        return None
+    if _git(root, "fetch", "-q", "origin", f"refs/heads/{branch}").returncode != 0 \
+            or _git(root, "cat-file", "-e", f"{tip}^{{commit}}").returncode != 0:
+        return f"cannot fetch origin's {branch} ({tip[:12]}) — the worktree would start on a stale state"
+    if _git(root, "merge-base", "--is-ancestor", head, tip).returncode == 0:
+        if _out(wt, "status", "--porcelain"):
+            return (f"{wt} is behind origin's {branch} and has uncommitted changes — commit or discard "
+                    "them, then start again")
+        r = _git(wt, "merge", "-q", "--ff-only", tip)
+        if r.returncode != 0:
+            return f"cannot fast-forward {wt} to origin's {branch}: {r.stderr.strip()}"
+        print(f"dispatch: {branch} fast-forwarded to origin ({head[:12]} -> {tip[:12]})")
+        return None
+    if _git(root, "merge-base", "--is-ancestor", tip, head).returncode == 0:
+        if phase == "review":
+            return (f"{branch} is ahead of origin ({head[:12]} vs {tip[:12]}) — a review attests what is "
+                    "pushed: push first")
+        return None
+    return (f"{branch} and origin's {branch} diverged ({head[:12]} vs {tip[:12]}) — reconcile them "
+            "(merge, not force-push) before a session starts")
+
 # --- the prompt: the slash command leads, the command file owns the steps -----------
 
 def prompt_for(phase: str, issue: int, tier: int | None, branch: str, model: str, remote: bool = False,
@@ -1564,6 +1601,10 @@ def start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str |
               f"reports via origin (`tower.py --remote`)" + (f"\n  {rec['handover']}" if rec["handover"] else ""))
         return 0
     wt = ensure_worktree(root, branch)
+    refusal = sync_worktree(root, wt, branch, phase)
+    if refusal:
+        print(f"dispatch: {refusal}", file=sys.stderr)
+        return 3
     log = _records_dir(root) / f"{branch.replace('/', '__')}-{phase}-{_dt.datetime.now():%Y%m%d-%H%M%S}.log"
     extra = {**worker_vars, "PROCESS_PHASE_BASE": phase_base(root, branch)}
     rec = {"branch": branch, "issue": issue, "phase": phase, "tier": tier, "model": model, "effort": effort,
