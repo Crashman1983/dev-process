@@ -16,14 +16,15 @@ guesses — resolved before planning, gate-enforced). The tracking issue is
 created at *idea* time and the finished spec is published to it as a
 read-only snapshot comment (`publish_and_prune.py --stage`) — the human's
 influence window is spec/design, so those stages must be readable where the
-human reads; new issue comments are clarify input before `/plan`. The
+human reads; new issue comments are clarify input before `/plan`. Clarify
+asks in rounds (below); `/speckit-clarify` records the answers. The
 kernel duties stay:
 derive the tier first, read `PRODUCT.md` and the decision records as
 constraints (a design that overturns an endorsed decision names the
 supersession, mandatory rule 4), answer the threat and failure question in
 the spec (`design-template.md`). Full flow: `docs/process/modules/speckit.md`. The paragraph below
 remains the harness-neutral statement of WHAT the phase must achieve.
-{% endif %}Turns an idea into an approved design. Enters: a request or problem. Produces: a written design/spec the implementer can follow (scaffold: `design-template.md`), plus explicit approval. Use before any non-trivial new behavior — do not start building until the design is agreed. Prefer a few clarifying questions over guessing the intent — and where a point stays underspecified mid-draft, write a `[NEEDS CLARIFICATION: <question>]` marker into the design instead of a silent assumption (`design-template.md`). Brainstorm ends only when every marker is resolved: answered, converted into a written named assumption, or split off as a spike. Read the product frame (`PRODUCT.md`) and the decision records (`docs/process/adr/`) relevant to the area first — both are constraints, not open questions: a design that serves no stated goal or violates a non-goal says so and changes the frame in the same effort (or does not proceed); a design that overturns an endorsed decision names the supersession (mandatory rule 4). If the frame is still `not-onboarded`, the start-here onboarding dialogue fills it before product-shaped work. Brainstorm also decomposes the work's acceptance into concrete, testable criteria — including the negative, edge, authorization, and invalidation/cleanup cases the Definition of Ready names (R2, `definition-of-ready-and-done.md`); that readiness bar is binding, met before work starts or carried as a documented, justified deviation on the issue. At Tier 3, and at Tier 2 for gate code, data loss, authorization, migration or concurrency, the design also answers the threat and failure question (`design-template.md`) — *what could an attacker do with this change?* (assets touched, new inputs, trust boundaries crossed), and how it can lose data, be bypassed or fail open (`docs/process/failure-catalog.md`) — so the review (`review-checklist.md`, Security) checks an answer instead of discovering the question.
+{% endif %}Turns an idea into an approved design. Enters: a request or problem. Produces: a written design/spec the implementer can follow (scaffold: `design-template.md`), plus explicit approval. Use before any non-trivial new behavior — do not start building until the design is agreed. Prefer questions over guessing the intent, and ask them in rounds, not one at a time (adapted from Matt Pocock's `grilling`, MIT): map the open decisions as a tree; each round asks every decision whose prerequisites are already settled — numbered, each with the recommended answer — and the next round follows from the answers. Facts the environment holds (code, configuration, history) are looked up, by a subagent where it is a search, never asked. Clarifying ends when nothing is left silently assumed and the owner confirms the shared understanding; one well-prepared round early is cheaper than a decision surfacing as a review round later. Where a point stays underspecified mid-draft, write a `[NEEDS CLARIFICATION: <question>]` marker into the design instead of a silent assumption (`design-template.md`). Brainstorm ends only when every marker is resolved: answered, converted into a written named assumption, or split off as a spike. Read the product frame (`PRODUCT.md`) and the decision records (`docs/process/adr/`) relevant to the area first — both are constraints, not open questions: a design that serves no stated goal or violates a non-goal says so and changes the frame in the same effort (or does not proceed); a design that overturns an endorsed decision names the supersession (mandatory rule 4). If the frame is still `not-onboarded`, the start-here onboarding dialogue fills it before product-shaped work. Brainstorm also decomposes the work's acceptance into concrete, testable criteria — including the negative, edge, authorization, and invalidation/cleanup cases the Definition of Ready names (R2, `definition-of-ready-and-done.md`); that readiness bar is binding, met before work starts or carried as a documented, justified deviation on the issue. At Tier 3, and at Tier 2 for gate code, data loss, authorization, migration or concurrency, the design also answers the threat and failure question (`design-template.md`) — *what could an attacker do with this change?* (assets touched, new inputs, trust boundaries crossed), and how it can lose data, be bypassed or fail open (`docs/process/failure-catalog.md`) — so the review (`review-checklist.md`, Security) checks an answer instead of discovering the question.
 
 ## Plan
 
@@ -69,6 +70,35 @@ scope. The spike itself is not tier-routed work; the follow-up change is.
 The root-cause entry point (mandatory rule 6). Enters: a bug, test failure, or unexpected behavior. Produces: a root-cause analysis before any fix. After two failed attempts at a symptom, stop patching and investigate why it happens; fix the cause, not the symptom.
 
 Rule 6's counter must survive the session, or every new session sees its fix as a first attempt: the durable counter is the commit history. Before fixing, check whether the behaviour is already collecting fixes (`git log --grep` over recent `fix:` subjects{% if modules.telemetry %}, or `process_kpis.py clusters`{% endif %}). **The third fix on the same behaviour is not a debugging problem — it is a missing specification**: stop, write the rule as an invariant decision record (Type: invariant, `docs/process/adr/template.md`) whose `## Test` section names a table/property test pinning the *whole* rule, and land your case as one row of that table. A behaviour that spans features has no single spec to live in — the invariant record is its home; without one it gets discovered one path-fix at a time.
+
+**The method, in order** (adapted from Matt Pocock's `diagnosing-bugs`, MIT):
+
+1. **A loop that goes red on this bug, before any theory.** One command you
+   have run — a failing test at the seam that reaches the bug, a script
+   against the running service, a replayed captured request, a bisection
+   run — that drives the real code path, asserts the *reported* symptom
+   (not "does not crash"), gives the same verdict every run and takes
+   seconds. A flaky bug: raise the reproduction rate (loop it, add load,
+   narrow the timing) until it is debuggable. No such command yet means you
+   are guessing: say what you tried and ask for access, a captured artifact
+   or permission to instrument. Redact every secret in what you show.
+2. **Reproduce, then minimise.** Confirm it is the reported failure, not a
+   neighbour. Cut inputs, callers, config and steps one at a time until
+   every remaining element is needed to stay red.
+3. **Three to five falsifiable hypotheses, ranked**, each with its
+   prediction ("if X is the cause, changing Y makes it disappear"). One
+   hypothesis anchors on the first idea; a hypothesis without a prediction
+   is a guess.
+4. **Probe one variable at a time**, each probe tied to a prediction. Tag
+   temporary logs with one prefix (`[DEBUG-a4f2]`) so one grep removes them.
+   A performance regression: measure a baseline first, then bisect.
+5. **Regression test before the fix, at the seam where the bug happens.**
+   If no seam reproduces the real pattern, that is the finding — name it
+   rather than pinning a shallower test that gives false confidence.
+6. **Close:** the original loop is green, the debug logs are gone, and the
+   commit message names the hypothesis that held (`ROOT-CAUSE` where a
+   review round asked for one).
+
 {% if modules.github_issues %}
 ## Parallel agents
 
