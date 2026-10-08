@@ -1778,8 +1778,9 @@ def test_chain_queues_no_execute_while_the_plan_gates_are_red(render, tmp_path, 
     mod.chain(out)
     assert started == [] and len(judged) == 1
     assert written[-1]["plan_gates_red"] == _git(out, "rev-parse", "HEAD").stdout.strip()
-    mod.chain(out)  # the same plan commit: not judged again
+    mod.chain(out)  # the same plan commit: not judged again, but said again
     assert len(judged) == 1 and started == []
+    assert written[-1]["plan_gates_reason"] == "FAILED gates: design-contracts"
     (out / "fix.md").write_text("design-contract: none\n")
     _git(out, "add", "-A")
     _git(out, "commit", "-q", "-m", "fix the plan")

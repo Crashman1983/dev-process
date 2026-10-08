@@ -194,7 +194,9 @@ phase end cannot be read, the finding is still raised, at medium. A worker
 on another host shows no screen here; its reports speak for it.
 
 Phases chain themselves: `dispatch.py chain` (from the steward's tick)
-stops a `planned` plan session and queues `execute`; stops a `pushed`
+stops a `planned` plan session and queues `execute` once the process
+gates are green on the plan's worktree (a red verdict is said on every tick
+until a new plan commit); stops a `pushed`
 execute session and queues `review` once the branch's plan on origin has
 no open task (`pushed` comes at the first push) and origin carries code
 beyond the last attestation (a commit recording a REVIEW line — an
