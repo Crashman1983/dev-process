@@ -890,6 +890,83 @@ def _git_bytes(root: Path, *args: str) -> bytes | None:
     return result.stdout if result.returncode == 0 else None
 
 
+# --- per-run memo of git facts fixed by object ids (#182) -------------------
+# `_history` asks the same questions again for every clearing pass and every
+# plan: the parents of a merge, what git merges on its own, a blob at a path.
+# A fact addressed by full object ids cannot change, so git answers it once
+# per run. A failed read (None) is never kept: "git could not tell" stays
+# "stale, fail closed" on the next ask.
+_PURE: dict[tuple, object] = {}
+
+
+def clear_memo() -> None:
+    """Forget every memoized git fact (a long-lived caller after a fetch)."""
+    _PURE.clear()
+
+
+def _addressed(root: Path, revs: tuple[str, ...]) -> tuple | None:
+    """The memo key part for a question about `revs`; None when one of them is
+    not a full object id (a ref can move, so its answer is never kept)."""
+    if all(GIT_SHA.fullmatch(r) for r in revs):
+        return (str(root), revs)
+    return None
+
+
+def _git_pure(root: Path, revs: tuple[str, ...], *args: str) -> bytes | None:
+    """`_git_bytes(root, *args)` for a question fully determined by the object
+    ids in `revs` (every id the arguments name): answered once per run."""
+    where = _addressed(root, revs)
+    if where is None:
+        return _git_bytes(root, *args)
+    key = ("git", where, args)
+    if key in _PURE:
+        return _PURE[key]  # type: ignore[return-value]
+    out = _git_bytes(root, *args)
+    if out is not None:
+        _PURE[key] = out
+    return out
+
+
+def _is_ancestor(root: Path, ancestor: str, descendant: str) -> bool:
+    """Is `ancestor` reachable from `descendant`? A git failure reads as no,
+    as `_git_bytes(... --is-ancestor ...) is not None` always did; only a
+    definite answer about full ids is kept."""
+    where = _addressed(root, (ancestor, descendant))
+    if where is not None and ("anc", where) in _PURE:
+        return _PURE[("anc", where)]  # type: ignore[return-value]
+    try:
+        result = subprocess.run(["git", "-C", str(root), "merge-base", "--is-ancestor", ancestor, descendant],
+                                capture_output=True, timeout=60, env=git_environment())
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    if result.returncode not in (0, 1):
+        return False
+    if where is not None:
+        _PURE[("anc", where)] = result.returncode == 0
+    return result.returncode == 0
+
+
+def _commit_id(root: Path, rev: str) -> str:
+    """The full commit id `rev` names; "" when it names none (or an option)."""
+    if not rev or rev.startswith("-"):
+        return ""
+    return (_git_pure(root, (rev,), "rev-parse", "--verify", "-q", f"{rev}^{{commit}}") or b"").decode().strip()
+
+
+def _descendants(root: Path, head: str, tip: str) -> frozenset[str] | None:
+    """`head` and every commit of `tip`'s history that has it as an ancestor.
+    One git call answers "does this parent carry the reviewed head?" for every
+    merge of one pass. None when git cannot tell; the callers then ask per
+    commit."""
+    head_id = _commit_id(root, head)
+    if not head_id:
+        return None
+    out = _git_bytes(root, "rev-list", "--ancestry-path", f"{head_id}..{tip}")
+    if out is None:
+        return None
+    return frozenset(out.decode(errors="replace").split()) | {head_id}
+
+
 class GitReadError(RuntimeError):
     """A git read the standing-block arm cannot do without failed."""
 
@@ -1628,11 +1705,22 @@ def decide(h: History, head: str) -> tuple[str, str]:
 
 
 def _parents(root: Path, commit: str) -> list[str] | None:
-    line = _git_bytes(root, "rev-list", "--parents", "-n", "1", commit)
+    line = _git_pure(root, (commit,), "rev-list", "--parents", "-n", "1", commit)
     return None if line is None else line.decode(errors="replace").split()[1:]
 
 
 def _merge_own(root: Path, merge: str) -> set[str] | None:
+    """`_merge_own_uncached`, once per merge and run: it depends on no head."""
+    where = _addressed(root, (merge,))
+    if where is not None and ("own", where) in _PURE:
+        return set(_PURE[("own", where)])  # type: ignore[arg-type]
+    own = _merge_own_uncached(root, merge)
+    if own is not None and where is not None:
+        _PURE[("own", where)] = frozenset(own)
+    return own
+
+
+def _merge_own_uncached(root: Path, merge: str) -> set[str] | None:
     """The code a merge commit adds of its own: paths where its result is
     not what git merges on its own. A clean merge adds nothing — also when
     both sides changed different hunks of one file (downstream: `--cc
@@ -1647,11 +1735,11 @@ def _merge_own(root: Path, merge: str) -> set[str] | None:
         return None
     auto = _auto_merge(root, parents[0], parents[1]) if len(parents) == 2 else None
     if auto is None:
-        return _names(_git_bytes(root, "show", "--cc", "--format=", "--name-only",
-                                 "--ignore-submodules=none", "-z", merge))
+        return _names(_git_pure(root, (merge,), "show", "--cc", "--format=", "--name-only",
+                                "--ignore-submodules=none", "-z", merge))
     tree, conflicted = auto
-    differs = _names(_git_bytes(root, "diff", "--name-only", "--no-renames", "--ignore-submodules=none",
-                                "-z", tree, merge))
+    differs = _names(_git_pure(root, (tree, merge), "diff", "--name-only", "--no-renames",
+                               "--ignore-submodules=none", "-z", tree, merge))
     if differs is None:
         return None
     own = set()
@@ -1688,12 +1776,14 @@ def _history(root: Path, head: str, tip: str = "HEAD",
     work. By design, a passenger without a plan or below Tier 2 is not this
     work's concern: the train's boarding rules and the per-plan gate own
     what may ride."""
-    if _git_bytes(root, "merge-base", "--is-ancestor", head, tip) is None:
+    tip_id = _commit_id(root, tip) or tip
+    if not _is_ancestor(root, head, tip_id):
         shallow = (_git_bytes(root, "rev-parse", "--is-shallow-repository") or b"").strip() == b"true"
         if shallow and _git_bytes(root, "cat-file", "-e", f"{head}^{{commit}}") is None:
             return History(shallow_missing=True)
         return History(in_history=False)
     error = History(git_error=True)
+    carrying = _descendants(root, head, tip)  # one call answers "carries the head?" for every merge
     integ = _integration_ref(root, tip)
     not_integ = [f"^{integ}"] if integ else []
     # code another clearing review has seen is not unreviewed code of this
@@ -1704,9 +1794,9 @@ def _history(root: Path, head: str, tip: str = "HEAD",
     # whatever plan it lands under
     covered: set[str] = set()
     for other_base, other_head in reviewed:
-        if other_head == head or _git_bytes(root, "merge-base", "--is-ancestor", other_head, tip) is None:
+        if other_head == head or not _is_ancestor(root, other_head, tip_id):
             continue
-        seen = _git_bytes(root, "rev-list", other_head, f"^{other_base}")
+        seen = _git_pure(root, (other_head, other_base), "rev-list", other_head, f"^{other_base}")
         if seen is None:
             continue  # its base is unknown here: it covers nothing
         covered |= {ln.strip() for ln in seen.decode(errors="replace").splitlines() if ln.strip()}
@@ -1724,7 +1814,7 @@ def _history(root: Path, head: str, tip: str = "HEAD",
     if staging and chain and all(len(c) >= 3 for c in chain):  # merges only: the train's chain
         for c in chain:
             for parent in c[2:]:
-                if _git_bytes(root, "merge-base", "--is-ancestor", head, parent) is not None:
+                if (parent in carrying) if carrying is not None else _is_ancestor(root, head, parent):
                     carriers.append(c[0])
                     tips.append(parent)
         if carriers:
@@ -1761,7 +1851,7 @@ def _history(root: Path, head: str, tip: str = "HEAD",
     # the train chain's merges
     dropped: set[str] = set()
     for merge in dict.fromkeys(all_merges + chain_merges):
-        d = _dropped_by_merge(root, merge, head, bases)
+        d = _dropped_by_merge(root, merge, head, bases, carrying)
         if d is None:
             return error
         dropped |= d
@@ -1799,7 +1889,7 @@ def _blob(root: Path, commit: str, path: str, mode: bool = False) -> str | None:
     every lookup fail, and any resolution passed as unchanged). With `mode`,
     the file mode instead: judged apart from the content, or git's own mode
     merge (main's `+x` on the reviewed text) reads as a change of both."""
-    out = _git_bytes(root, "--literal-pathspecs", "ls-tree", "-z", commit, "--", path)
+    out = _git_pure(root, (commit,), "--literal-pathspecs", "ls-tree", "-z", commit, "--", path)
     if out is None:
         return None
     entry = out.split(b"\0", 1)[0]
@@ -1811,7 +1901,19 @@ def _blob(root: Path, commit: str, path: str, mode: bool = False) -> str | None:
 
 def _auto_merge(root: Path, ours: str, other: str) -> tuple[str, set[str]] | None:
     """What git would have merged on its own: (tree, conflicted paths) — None
-    when git cannot tell (an old git without `merge-tree --write-tree`)."""
+    when git cannot tell (an old git without `merge-tree --write-tree`). Once
+    per pair and run."""
+    where = _addressed(root, (ours, other))
+    if where is not None and ("auto", where) in _PURE:
+        tree, conflicted = _PURE[("auto", where)]  # type: ignore[misc]
+        return tree, set(conflicted)
+    merged = _auto_merge_uncached(root, ours, other)
+    if merged is not None and where is not None:
+        _PURE[("auto", where)] = (merged[0], frozenset(merged[1]))
+    return merged
+
+
+def _auto_merge_uncached(root: Path, ours: str, other: str) -> tuple[str, set[str]] | None:
     try:
         r = subprocess.run(["git", "-C", str(root), "merge-tree", "--write-tree", "--allow-unrelated-histories", "--name-only", "-z",
                             "--no-messages", ours, other], capture_output=True, timeout=60, env=git_environment())
@@ -1858,7 +1960,8 @@ def _renames(out: bytes | None) -> dict[str, str] | None:
 
 
 def _dropped_by_merge(root: Path, merge: str, head: str,
-                      bases: tuple[tuple[str, str], ...] = ()) -> set[str] | None:
+                      bases: tuple[tuple[str, str], ...] = (),
+                      descendants: frozenset[str] | None = None) -> set[str] | None:
     """Paths where a merge threw the reviewed work's change away in favour of
     another parent's version. `--cc` is blind to this — the result equals one
     parent, so the combined diff is empty (downstream review residual).
@@ -1889,17 +1992,24 @@ def _dropped_by_merge(root: Path, merge: str, head: str,
     (outside such a range it is the merge's own code, `_merge_own`).
     `--no-renames`: a file main renamed is compared under both names; `-z`:
     a non-ASCII name arrives unquoted, or its blobs are never found and the
-    drop passes (downstream review)."""
+    drop passes (downstream review).
+
+    `descendants` (`_descendants`) answers "does this parent carry the head?"
+    for every merge of one pass at once; without it each parent is asked."""
+    def carries_head(commit: str) -> bool:
+        if descendants is not None and GIT_SHA.fullmatch(commit):
+            return commit in descendants
+        return _is_ancestor(root, head, commit)
+
     parents = _parents(root, merge)
     if parents is None:
         return None
-    ours = [p for p in parents
-            if _git_bytes(root, "merge-base", "--is-ancestor", head, p) is not None]
+    ours = [p for p in parents if carries_head(p)]
     if not ours:
         return set()
     our = ours[0]
-    paths = _names(_git_bytes(root, "diff", "--name-only", "--no-renames", "--ignore-submodules=none",
-                              "-z", our, merge))
+    paths = _names(_git_pure(root, (our, merge), "diff", "--name-only", "--no-renames",
+                             "--ignore-submodules=none", "-z", our, merge))
     if paths is None:
         return None
     # the reviews' own ranges: a stacked branch's review does not own the
@@ -1913,12 +2023,10 @@ def _dropped_by_merge(root: Path, merge: str, head: str,
     # merge taking another branch's side of a file main changed then reads
     # as a drop
     def commit_id(rev: str) -> str:
-        if not rev or rev.startswith("-"):
-            return ""
-        return (_git_bytes(root, "rev-parse", "--verify", "-q", f"{rev}^{{commit}}") or b"").decode().strip()
+        return _commit_id(root, rev)
 
     def below(rev: str, top: str) -> bool:
-        return _git_bytes(root, "merge-base", "--is-ancestor", rev, top) is not None
+        return _is_ancestor(root, rev, top)
 
     head_id = commit_id(head)
     starts: list[str | None] = []  # None: the fork point with the other side
@@ -1931,24 +2039,26 @@ def _dropped_by_merge(root: Path, merge: str, head: str,
         starts.append(base_id if base_id and base_id != head_id and below(base_id, head_id or head) else None)
     dropped: set[str] = set()
     for other in (p for p in parents if p != our):
-        if _git_bytes(root, "merge-base", "--is-ancestor", head, other) is not None:
+        if carries_head(other):
             continue  # the other side carries the reviewed change itself: nothing of it to drop
         # only what THIS work changed can be thrown away: a file another
         # branch edited and the merge took main's side of is not this work's
         # (refutation: a stacked branch's "take main's version" read as a drop)
-        fork = (_git_bytes(root, "merge-base", head, other) or b"").decode().strip() or _EMPTY_TREE
+        fork_out = _git_pure(root, (head_id, other), "merge-base", head_id or head, other)
+        fork = (fork_out or b"").decode().strip() or _EMPTY_TREE
         work: set[str] = set()
         old_names: dict[str, list[str]] = {}  # every name a file had in any round
         for start in dict.fromkeys(s or fork for s in starts or [None]):
-            names = _names(_git_bytes(root, "diff", "--name-only", "--no-renames", "--ignore-submodules=none",
-                                      "-z", start, head))
-            renamed = _renames(_git_bytes(root, "diff", "--name-status", "-M", "-z", start, head))
+            names = _names(_git_pure(root, (start, head_id), "diff", "--name-only", "--no-renames",
+                                     "--ignore-submodules=none", "-z", start, head_id or head))
+            renamed = _renames(_git_pure(root, (start, head_id), "diff", "--name-status", "-M", "-z",
+                                         start, head_id or head))
             if names is None or renamed is None:
                 return None
             work |= names
             for old, new in renamed.items():
                 old_names.setdefault(new, []).append(old)
-        theirs_moved = _renames(_git_bytes(root, "diff", "--name-status", "-M", "-z", fork, other))
+        theirs_moved = _renames(_git_pure(root, (fork, other), "diff", "--name-status", "-M", "-z", fork, other))
         if theirs_moved is None:
             return None
         # a file of this work the other side renamed is this work's under its new name
@@ -1957,7 +2067,7 @@ def _dropped_by_merge(root: Path, merge: str, head: str,
         if auto is None:
             return None
         tree, conflicted = auto
-        auto_moved = _renames(_git_bytes(root, "diff", "--name-status", "-M", "-z", our, tree))
+        auto_moved = _renames(_git_pure(root, (our, tree), "diff", "--name-status", "-M", "-z", our, tree))
         if auto_moved is None:
             return None
         for path in paths & work:
