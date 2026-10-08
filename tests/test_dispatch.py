@@ -1711,3 +1711,48 @@ def test_drift_from_an_unversioned_alias_is_low(render, tmp_path):
                           for m, alias in (("opus", True), ("claude-opus-5", False))]}
     drift = [f["severity"] for f in tower.findings(table, 60) if f["kind"] == "model-drift"]
     assert sorted(drift) == ["high", "low"]
+
+
+def test_a_session_starts_on_what_origin_holds(render, tmp_path):
+    # downstream a review read the plan commit while the execute commits sat on
+    # origin (pushed from another worktree): the worktree is fast-forwarded first
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    _fake_command(out, "sleep 30\n")
+    bare = tmp_path / "origin.git"
+    _git(out, "clone", "-q", "--bare", str(out), str(bare))
+    _git(out, "remote", "add", "origin", str(bare))
+    assert _dispatch(out, "start", "--issue", "9", "--phase", "plan", "--branch", "b9").returncode == 0
+    _dispatch(out, "stop", "b9", "--force")
+    wt = out.parent / "repo-b9"
+    _git(wt, "push", "-q", "origin", "b9")
+    other = tmp_path / "other"
+    _git(tmp_path, "clone", "-q", "-b", "b9", str(bare), str(other))
+    for c in ("user.email=t@t", "user.name=t"):
+        _git(other, "config", *c.split("="))
+    (other / "work.txt").write_text("execute\n")
+    _git(other, "add", "-A")
+    _git(other, "commit", "-q", "-m", "execute")
+    _git(other, "push", "-q", "origin", "b9")
+    pushed = _git(other, "rev-parse", "HEAD").stdout.strip()
+    r = _dispatch(out, "start", "--issue", "9", "--phase", "review", "--branch", "b9")
+    assert r.returncode == 0, r.stderr
+    assert "fast-forwarded" in r.stdout
+    assert _git(wt, "rev-parse", "HEAD").stdout.strip() == pushed
+    _dispatch(out, "stop", "b9", "--force")
+    # ahead of origin: a review attests what is pushed, an execute goes on
+    (wt / "local.txt").write_text("unpushed\n")
+    _git(wt, "add", "-A")
+    _git(wt, "commit", "-q", "-m", "unpushed")
+    r = _dispatch(out, "start", "--issue", "9", "--phase", "review", "--branch", "b9")
+    assert r.returncode == 3 and "push first" in r.stderr
+    r = _dispatch(out, "start", "--issue", "9", "--phase", "execute", "--branch", "b9")
+    assert r.returncode == 0, r.stderr
+    _dispatch(out, "stop", "b9", "--force")
+    # diverged: refused for every phase
+    (other / "more.txt").write_text("more\n")
+    _git(other, "add", "-A")
+    _git(other, "commit", "-q", "-m", "more")
+    _git(other, "push", "-q", "origin", "b9")
+    r = _dispatch(out, "start", "--issue", "9", "--phase", "execute", "--branch", "b9")
+    assert r.returncode == 3 and "diverged" in r.stderr
