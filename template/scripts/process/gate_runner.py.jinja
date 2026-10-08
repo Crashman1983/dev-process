@@ -15,6 +15,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 GATE_TIMEOUT_S = 600  # a wedged gate (e.g. pathological regex) must fail, not hang CI
@@ -177,25 +178,39 @@ def _red_ledger_path(root: Path) -> Path | None:
     return p.with_name(RED_LEDGER_NAME) if p else None
 
 
-def _read_red(path: Path | None) -> dict[str, str]:
+def _read_red_entries(path: Path | None) -> dict[str, tuple[str, str]]:
+    """gate -> (first red day, reason). A line is `<gate> <day>` or
+    `<gate> <day> <reason>`; the older form reads with an empty reason."""
     if path is None or not path.is_file():
         return {}
-    out: dict[str, str] = {}
+    out: dict[str, tuple[str, str]] = {}
     try:
         for ln in path.read_text(encoding="utf-8").splitlines():
             if " " in ln:
-                gate, day = ln.split(" ", 1)
-                out[gate] = day.strip()
+                gate, rest = ln.split(" ", 1)
+                day, _sep, reason = rest.strip().partition(" ")
+                out[gate] = (day, reason.strip())
     except OSError:
         pass
     return out
 
 
-def _write_red(path: Path | None, red: dict[str, str]) -> None:
+def _read_red(path: Path | None) -> dict[str, str]:
+    return {gate: day for gate, (day, _reason) in _read_red_entries(path).items()}
+
+
+def _write_red(path: Path | None, red: dict[str, str],
+               reasons: dict[str, str] | None = None) -> None:
     if path is None:
         return
+    reasons = reasons or {}
+
+    def line(gate: str, day: str) -> str:
+        reason = " ".join(reasons.get(gate, "").split())  # one line, single spaces
+        return f"{gate} {day}{' ' + reason if reason else ''}\n"
+
     try:
-        path.write_text("".join(f"{g} {d}\n" for g, d in sorted(red.items())),
+        path.write_text("".join(line(g, d) for g, d in sorted(red.items())),
                         encoding="utf-8")
     except OSError:
         pass
@@ -211,6 +226,51 @@ def _red_age(red: dict[str, str], gate: str, today: str) -> str:
     except ValueError:
         return ""
     return f" (red since {since}, {days} day(s))"
+
+
+PHASE_MARK = "gate-phase:"  # `<name> start|done <monotonic seconds>` on a gate's stderr
+
+
+def _phase_marks(stderr: str | bytes | None) -> list[tuple[str, str, float]]:
+    """The phase lines a gate wrote. `TimeoutExpired.stderr` is bytes even
+    when the run was in text mode, so both are read."""
+    if stderr is None:
+        return []
+    text = stderr.decode("utf-8", errors="replace") if isinstance(stderr, bytes) else stderr
+    marks: list[tuple[str, str, float]] = []
+    for ln in text.splitlines():
+        fields = ln.split()
+        if len(fields) == 4 and fields[0] == PHASE_MARK and fields[2] in ("start", "done"):
+            try:
+                marks.append((fields[1], fields[2], float(fields[3])))
+            except ValueError:
+                continue
+    return marks
+
+
+def timeout_reason(stderr: str | bytes | None, now: float) -> str:
+    """Why a killed gate was slow: the phase running at the kill and the
+    longest one that finished. That is a performance problem, not a finding.
+    `now` is the runner's `time.monotonic()`, the clock the child shares.
+    Empty when the gate reported no phases."""
+    started: dict[str, float] = {}
+    finished: dict[str, float] = {}
+    running: str | None = None
+    for name, kind, at in _phase_marks(stderr):
+        if kind == "start":
+            started[name], running = at, name
+        elif name in started:
+            finished[name] = max(finished.get(name, 0.0), at - started[name])
+            running = None if running == name else running
+    if running is None and not finished:
+        return ""
+    parts = []
+    if running is not None:
+        parts.append(f"killed during phase `{running}` ({max(now - started[running], 0):.0f} s in)")
+    if finished:
+        slow, took = max(finished.items(), key=lambda kv: kv[1])
+        parts.append(f"longest finished phase `{slow}` {took:.0f} s")
+    return "; ".join(parts) + " — performance problem, not a review finding"
 
 
 def _ledger_path(root: Path) -> Path | None:
@@ -293,6 +353,7 @@ def main() -> int:
     warn = "--warn" in sys.argv
     show_all = "--all-notes" in sys.argv
     failed = []
+    reasons: dict[str, str] = {}  # why a gate failed, where this run knows
     ledger = _ledger_path(root)
     known = _read_ledger(ledger)
     seen: set[str] = set()
@@ -356,12 +417,19 @@ def main() -> int:
                                   text=True, encoding="utf-8", errors="replace")
             rc = proc.returncode
             suppressed += _emit(proc.stdout, known, seen, show_all)
-            if proc.stderr:
-                print(proc.stderr, end="" if proc.stderr.endswith("\n") else "\n",
-                      file=sys.stderr)
-        except subprocess.TimeoutExpired:
+            # phase marks are for a timeout (`timeout_reason`), not for the reader
+            err = "".join(ln for ln in proc.stderr.splitlines(keepends=True)
+                          if not ln.startswith(PHASE_MARK))
+            if err:
+                print(err, end="" if err.endswith("\n") else "\n", file=sys.stderr)
+        except subprocess.TimeoutExpired as exc:
+            killed_at = time.monotonic()
             print(f"gate-runner: {name} exceeded {GATE_TIMEOUT_S}s and was killed "
                   f"— a hanging gate is a failure, not a wait", file=sys.stderr)
+            why = timeout_reason(exc.stderr, killed_at)
+            if why:
+                print(f"gate-runner: {name}: {why}", file=sys.stderr)
+                reasons[name] = f"exceeded {GATE_TIMEOUT_S}s: {why}"
             rc = 1
         if rc != 0:
             failed.append(name)
@@ -378,12 +446,13 @@ def main() -> int:
             del red[name]  # green again: the clock stops
     for name in failed:
         red.setdefault(name, today)
-    _write_red(red_path, red)
+    _write_red(red_path, red, reasons)
     if failed:
         if warn:
             print(f"gate warnings (not blocking): {', '.join(failed)}")
             return 0
-        aged = [f"{n}{_red_age(red, n, today)}" for n in failed]
+        aged = [f"{n}{_red_age(red, n, today)}{' — ' + reasons[n] if n in reasons else ''}"
+                for n in failed]
         print(f"FAILED gates: {', '.join(aged)}")
         if any(_red_age(red, n, today) for n in failed):
             print("gate-runner: a gate red for days is wallpaper — nobody reads it, "
