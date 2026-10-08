@@ -41,7 +41,9 @@ minutes on an unsent line), so `say` presses Enter again, and exits
 non-zero naming the branch when the text still has not gone.
 
 Phases chain themselves (`chain`, run it from the steward's tick): a
-`planned` plan session is stopped and `execute` queued; a `pushed` execute
+`planned` plan session is stopped and `execute` queued — unless the
+process gates are red on its worktree (`plan_gates`: the plan session never
+pushes, so they would first see the plan at the execute push); a `pushed` execute
 session with new code on origin beyond the last attestation is stopped and
 `review` queued; a `review-pass` review session whose attestation is on
 origin is stopped — its report is the train's ticket. `blocked` queues
@@ -104,6 +106,7 @@ import report as _report  # noqa: E402
 import check_review as _review  # noqa: E402
 
 from process_git import git_environment  # noqa: E402
+from gate_invoke import RUNNER_REL, gate_runner_argv, not_runnable_reason  # noqa: E402
 
 POLICY = "docs/process/model-policy.json"
 # the project's own choices over the template's policy, mapping by mapping — so a
@@ -1057,7 +1060,9 @@ def prompt_for(phase: str, issue: int, tier: int | None, branch: str, model: str
     if phase == "brainstorm":
         return f"/brainstorm issue #{issue}: discuss the design with the owner, record the outcome, and wait for the owner's approval before a plan session. Do not report planned or start execute." + tail
     if phase == "plan":
-        return f"/plan issue #{issue}: plan it, commit the plan with its `## Decisions` ledger, report `planned`, stop." + tail
+        return (f"/plan issue #{issue}: plan it, commit the plan with its `## Decisions` ledger, run the gates "
+                f"(`uv run {RUNNER_REL}`) and fix in the plan what it turns red, report `planned`, stop."
+                + tail)
     if phase == "execute":
         return (f"/execute the committed plan for issue #{issue}: report `pushed` at the first push; stop after "
                 f"the last task is committed and pushed. The duties before `pushed` are in /execute; after a "
@@ -2173,6 +2178,31 @@ def phase_over(root: Path, rec: dict, rep: dict | None, *, local: bool = False) 
     return False
 
 
+
+PLAN_GATES_TIMEOUT = 900  # the gate runner's own per-gate cap is 600 s
+
+
+def plan_gates(wt: Path) -> str | None:
+    """None when the process gates are green on a plan's worktree, else why
+    not. A plan session stops before it pushes, so without this the gates
+    first saw a plan at the execute push — downstream a missing
+    `design-contract:` line turned that push red thirty times per branch. Not
+    runnable is a verdict too: the execute push would not run them either."""
+    if not (wt / RUNNER_REL).is_file():
+        return None  # the project has no gates
+    argv = gate_runner_argv(wt)
+    if argv is None:
+        return f"the gates cannot run: {not_runnable_reason(wt)}"
+    try:
+        r = subprocess.run(argv, cwd=wt, capture_output=True, text=True, timeout=PLAN_GATES_TIMEOUT,
+                           env=git_environment())
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return f"the gate runner did not finish ({exc})"
+    if r.returncode == 0:
+        return None
+    failed = [ln.strip() for ln in (r.stdout + r.stderr).splitlines() if ln.startswith("FAILED gates:")]
+    return failed[-1] if failed else f"the gate runner exited {r.returncode}"
+
 class _ChainLock(_QueueLock):
     def __init__(self, root: Path):
         super().__init__(root)
@@ -2235,6 +2265,20 @@ def _chain(root: Path, *, dry_run: bool = False) -> int:
         if dry_run:
             print(f"dispatch: would stop {branch} ({phase})" + (f" and queue {nxt}" if nxt else ""))
             continue
+        if nxt == "execute" and wt is not None and wt.is_dir():
+            head = _out(wt, "rev-parse", "HEAD")
+            if head and rec.get("plan_gates_red") == head:
+                continue  # red on this commit already said; a new plan commit is judged again
+            red = plan_gates(wt)
+            if red:
+                print(f"dispatch: {branch} reported planned, but the gates are red on its plan — {red}; "
+                      f"no execute queued: the plan session fixes its plan (`dispatch.py say {branch} …`) "
+                      "or the steward decides", file=sys.stderr)
+                current = _load_record(root, branch)
+                if current is not None and current[1].get("started") == rec.get("started"):
+                    kept = {k: v for k, v in current[1].items() if k != "state"}  # state is read live
+                    _write_record(root, branch, {**kept, "plan_gates_red": head})
+                continue
         current = _load_record(root, branch)
         if current is None or current[1].get("started") != rec.get("started") or current[1].get("phase") != phase:
             continue  # the session changed since it was judged
