@@ -115,19 +115,44 @@ def test_an_amend_with_new_content_is_stale(repo):
     assert "code changed after the reviewed head (a.py)" in _stale(root, head)
 
 
+def _with_base(root, head):
+    fork = _git(root, "merge-base", head, "main")
+    return _mod().stale_review(root, [{"work": "w", "tier": "2", "head": head, "base": fork}], {"w"}, 2, set())
+
+
 def test_a_rebase_or_amend_that_changes_no_content_keeps_the_review(repo):
-    # #158: the review binds what was reviewed, not where it sat
+    # #158: the review binds what was reviewed, not where it sat — for a
+    # review whose base is the fork point, so it saw everything it adds
     root, head = repo
     _git(root, "commit", "-q", "--amend", "-m", "reworded")
-    assert _stale(root, head) is None
+    assert _with_base(root, head) is None
+    assert "a.py" in _stale(root, head)  # without a base the review's reach is unknown
     _git(root, "checkout", "-q", "main")
     _commit(root, "m.py", "m = 1\n", "main moves on")
     _git(root, "checkout", "-q", "feat")
     _git(root, "rebase", "-q", "main")
-    assert _stale(root, head) is None
+    assert _with_base(root, head) is None
     (root / "a.py").write_text("a = 3\n")
     _git(root, "commit", "-q", "-a", "--amend", "--no-edit")
-    assert "a.py" in _stale(root, head)
+    assert "a.py" in _with_base(root, head)
+
+
+def test_a_slice_review_rebased_away_vouches_for_its_slice_only(repo):
+    # refutation of step B: a record whose base was not the fork point saw
+    # only base..head; once the head left the history, the content rule must
+    # not take the commit below the base as reviewed
+    root, head = repo
+    below = _git(root, "rev-parse", "HEAD")
+    _commit(root, "u.py", "u = 'unreviewed'\n", "below the slice")
+    sliced = _commit(root, "s.py", "s = 1\n", "the reviewed slice")
+    _git(root, "checkout", "-q", "main")
+    _commit(root, "m.py", "m = 1\n", "main moves on")
+    _git(root, "checkout", "-q", "feat")
+    _git(root, "rebase", "-q", "main")
+    record = {"work": "w", "tier": "2", "head": sliced, "base": _git(root, "rev-parse", f"{sliced}~1")}
+    found = _mod().stale_review(root, [record], {"w"}, 2, set())
+    assert found is not None and "u.py" in found and "s.py" not in found, found
+    assert below
 
 
 def test_a_head_that_is_in_no_history_here_covers_nothing(repo):
@@ -225,9 +250,10 @@ def test_pushing_local_main_without_a_remote_ref_is_checked(repo):
     assert "a.py" in _stale(root, head)
 
 
-def test_a_conflict_resolved_to_mains_side_is_not_this_gates_finding(repo):
-    # decision record B: the reviewed change is gone and main's reviewed
-    # content stands — the loss shows as a missing change, as a revert would
+def test_a_conflict_resolved_to_mains_side_is_stale(repo):
+    # every resolution is unreviewed — main's side included: taking main's
+    # version of a reviewed file is a revert nobody reviewed (refutation of
+    # step B, which first let such drops pass)
     root, head = repo
     _git(root, "checkout", "-q", "main")
     _commit(root, "a.py", "a = 'main'\n", "main edits the same line")
@@ -236,7 +262,38 @@ def test_a_conflict_resolved_to_mains_side_is_not_this_gates_finding(repo):
     _git(root, "checkout", "--theirs", "a.py")
     _git(root, "add", "a.py")
     _git(root, "commit", "-q", "--no-edit")
-    assert _stale(root, head) is None
+    assert "a.py" in _stale(root, head)
+
+
+def test_a_later_commit_setting_a_reviewed_file_back_to_mains_version_is_stale(repo):
+    # refutation of step B: the reviewed route stays, its guard is reverted —
+    # each file matched some reviewed state, the combination nobody reviewed
+    root, head = repo
+    _git(root, "checkout", "-q", "main", "--", "a.py")
+    _git(root, "commit", "-q", "-m", "revert the guard")
+    assert "a.py" in _stale(root, head)
+
+
+@pytest.mark.parametrize("kind", ["modify-delete", "file-to-symlink"])
+def test_a_conflict_without_markers_resolved_to_this_side_is_stale(repo, kind):
+    # refutation of step B: git writes this branch's side where no marker fits;
+    # keeping it silently undoes main's change
+    root, head = repo
+    _git(root, "checkout", "-q", "main")
+    if kind == "modify-delete":
+        _git(root, "rm", "-q", "a.py")
+        _git(root, "commit", "-q", "-m", "main deletes a.py")
+    else:
+        (root / "a.py").unlink()
+        (root / "a.py").symlink_to("elsewhere.py")
+        _git(root, "add", "-A")
+        _git(root, "commit", "-q", "-m", "main turns a.py into a symlink")
+    _git(root, "checkout", "-q", "feat")
+    subprocess.run(["git", "merge", "--no-edit", "main"], cwd=root, capture_output=True)
+    _git(root, "checkout", "-q", head, "--", "a.py")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "--no-edit")
+    assert "a.py" in _stale(root, head)
 
 
 def test_a_conflict_resolved_to_this_side_throws_mains_change_away(repo):
@@ -643,7 +700,8 @@ def test_a_fenced_example_id_names_no_work(repo):
 def test_unreviewed_paths_reads_content_not_history(repo):
     root, head = repo
     _git(root, "commit", "-q", "--amend", "-m", "amended, nothing else")
-    assert _mod()._unreviewed_paths(root, head, "HEAD") == set()
+    fork = _git(root, "merge-base", head, "main")
+    assert _mod()._unreviewed_paths(root, head, "HEAD", (), fork) == set()
     assert _mod()._unreviewed_paths(root, "b" * 40, "HEAD") is None  # a head in no history here
 
 
@@ -926,3 +984,53 @@ def test_a_later_round_that_reviewed_the_merge_of_main_covers_its_resolution(rep
     passes = [{"work": "w", "tier": "2", "head": head}, {"work": "w", "tier": "2", "head": second, "base": main}]
     assert _mod().stale_review(root, passes[:1], {"w"}, 2, set()) is not None  # round 1 alone: the resolution is unreviewed
     assert _mod().stale_review(root, passes[:1], {"w"}, 2, set(), ((main, second),)) is None
+
+
+def test_every_train_carrier_of_the_work_is_judged(repo):
+    # refutation of step B: two staging merges carry the reviewed head — the
+    # older one with an unreviewed commit on top; judging only the newest hid it
+    root, head = repo
+    _git(root, "checkout", "-q", "-b", "stacked", head)
+    other = _commit(root, "c.py", "c = 1\n", "stacked work, reviewed on its own")
+    _git(root, "checkout", "-q", "feat")
+    _commit(root, "b.py", "b = 'unreviewed'\n", "after the review")
+    _git(root, "checkout", "-q", "-b", "train/a", "main")
+    _git(root, "merge", "-q", "--no-ff", "--no-edit", "feat")
+    _git(root, "merge", "-q", "--no-ff", "--no-edit", "stacked")
+    fork = _git(root, "merge-base", head, "main")
+    found = _mod().stale_review(root, [{"work": "w", "tier": "2", "head": head}], {"w"}, 2, set(),
+                                ((fork, other),))
+    assert found is not None and "b.py" in found, found
+
+
+def test_a_review_based_on_reviewed_content_counts_whole(tmp_path):
+    # Kenni shadow run: work B started from work A's attest commit, so its
+    # recorded base lies above main; that base is A's reviewed content plus
+    # bookkeeping, so B counts whole and A, B and C merge into a reviewed state
+    root = tmp_path / "r"
+    root.mkdir()
+    _git(root, "init", "-q", "-b", "main")
+    _git(root, "config", "user.email", "t@t")
+    _git(root, "config", "user.name", "t")
+    fork = _commit(root, "inv.md", _LINES, "base")
+    _git(root, "checkout", "-q", "-b", "a")
+    h_a = _commit(root, "inv.md", _LINES.replace("l0 = 0", "l0 = 'a'"), "A reviewed")
+    attest_a = _commit(root, ".process-work/journal/a.md", "REVIEW …\n", "attest A")
+    h_b = _commit(root, "inv.md", _LINES.replace("l0 = 0", "l0 = 'a'").replace("l5 = 5", "l5 = 'b'"), "B reviewed")
+    _git(root, "checkout", "-q", "-b", "c", "main")
+    h_c = _commit(root, "inv.md", _LINES.replace("l10 = 10", "l10 = 'c'"), "C reviewed")
+    _git(root, "merge", "-q", "--no-edit", "a")
+    reviewed = ((fork, h_a), (attest_a, h_b), (fork, h_c))
+    mod = _mod()
+    assert mod.stale_review(root, [{"work": "c", "tier": "2", "head": h_c, "base": fork}], {"c"}, 2, set(),
+                            reviewed) is None
+    # a base with unreviewed code below it stays a slice
+    _git(root, "checkout", "-q", "-b", "d", attest_a)
+    _commit(root, "u.py", "u = 'unreviewed'\n", "below the slice")
+    below = _git(root, "rev-parse", "HEAD")
+    h_d = _commit(root, "d.py", "d = 1\n", "D reviewed from there")
+    _git(root, "checkout", "-q", "c")
+    _git(root, "merge", "-q", "--no-edit", "d")
+    found = mod.stale_review(root, [{"work": "c", "tier": "2", "head": h_c, "base": fork}], {"c"}, 2, set(),
+                             reviewed + ((below, h_d),))
+    assert found is not None and "u.py" in found and "d.py" not in found, found
