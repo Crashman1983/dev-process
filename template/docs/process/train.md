@@ -32,11 +32,16 @@ A local branch boards when it is ahead of the integration branch and
 - changes the gates' code (`scripts/process/`, `.githooks/`) only with a
   **REVIEW pass for its own work**, whatever its tier — no Tier 0-1 plan,
   waiver or report lets unreviewed gate code onto main;
-- has **no file overlap** with a branch already aboard — the earlier
-  candidate keeps its seat, the later one is told why;
 
 (The clone's red ledger naming no red gate is a *departure* condition for
 the whole train, not a per-candidate reason.)
+
+A file shared with a branch aboard holds nobody back: git merges the batch
+in boarding order, a real conflict drops the later candidate with a
+`blocked` report (it rebases), and the gates read the clean merge of
+reviewed works as reviewed (`verification-independence.md`). Downstream
+the former overlap rule kept three reviewed branches a whole train behind
+for one shared test, contract doc or registry file.
 
 `train.py plan` prints every candidate with its reasons; `--json` gives an
 orchestrator the same.
