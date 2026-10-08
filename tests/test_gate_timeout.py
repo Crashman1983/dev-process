@@ -49,7 +49,7 @@ def test_a_killed_gate_names_its_slow_phase_in_output_and_red_ledger(render, tmp
     assert r.returncode == 1
     assert "killed during phase `stale_review`" in r.stderr, r.stderr
     assert "longest finished phase `records`" in r.stderr
-    assert "performance problem, not a review finding" in r.stdout  # the FAILED gates line
+    assert "the gate reached no verdict" in r.stdout  # the FAILED gates line
     today = datetime.date.today().isoformat()
     line = next(ln for ln in (out / ".git/process-red-ledger").read_text().splitlines()
                 if ln.startswith("slow "))
