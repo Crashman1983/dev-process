@@ -1018,8 +1018,8 @@ def sync_worktree(root: Path, wt: Path, branch: str, phase: str) -> str | None:
             return (f"{branch} is ahead of origin ({head[:12]} vs {tip[:12]}) — a review attests what is "
                     "pushed: push first")
         return None
-    return (f"{branch} and origin's {branch} diverged ({head[:12]} vs {tip[:12]}) — reconcile them "
-            "(merge, not force-push) before a session starts")
+    return (f"{branch} and origin's {branch} diverged ({head[:12]} vs {tip[:12]}) — reconcile them before "
+            "a session starts: merge, or reset the worktree to origin if the branch was rebased there")
 
 # --- the prompt: the slash command leads, the command file owns the steps -----------
 
@@ -2268,16 +2268,22 @@ def _chain(root: Path, *, dry_run: bool = False) -> int:
         if nxt == "execute" and wt is not None and wt.is_dir():
             head = _out(wt, "rev-parse", "HEAD")
             if head and rec.get("plan_gates_red") == head:
-                continue  # red on this commit already said; a new plan commit is judged again
+                # judged red on this commit: say it again, do not re-run; a new plan commit is judged again
+                print(f"dispatch: {branch} — gates still red on its plan ({head[:12]}): "
+                      f"{rec.get('plan_gates_reason', '')}", file=sys.stderr)
+                continue
             red = plan_gates(wt)
             if red:
                 print(f"dispatch: {branch} reported planned, but the gates are red on its plan — {red}; "
                       f"no execute queued: the plan session fixes its plan (`dispatch.py say {branch} …`) "
                       "or the steward decides", file=sys.stderr)
+                # only the runner's own verdict is kept: a timeout or a runner that cannot
+                # start says nothing about the plan and is judged again next time
                 current = _load_record(root, branch)
-                if current is not None and current[1].get("started") == rec.get("started"):
+                if red.startswith("FAILED gates:") and current is not None \
+                        and current[1].get("started") == rec.get("started"):
                     kept = {k: v for k, v in current[1].items() if k != "state"}  # state is read live
-                    _write_record(root, branch, {**kept, "plan_gates_red": head})
+                    _write_record(root, branch, {**kept, "plan_gates_red": head, "plan_gates_reason": red})
                 continue
         current = _load_record(root, branch)
         if current is None or current[1].get("started") != rec.get("started") or current[1].get("phase") != phase:
