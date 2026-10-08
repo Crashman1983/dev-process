@@ -1073,30 +1073,35 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
     conflicted: list[str] = []
     branch = ""
 
-    def judge(wt: Path, *, bare_base: bool = False) -> str:
+    base_from_memo = False  # the base's green is the memo's, not a run's
+
+    def judge(wt: Path, *, bare_base: bool = False, memo: bool = True) -> str:
         """"green", "red" or "undefined" (the suite does not exist on this tree).
-        The bare base skips the suite when this train saw it green on that tree."""
+        The bare base skips the suite when this train saw it green on that tree —
+        provisionally: before the first passenger is blamed it runs for real."""
+        nonlocal base_from_memo
         if not _run_gates(wt, log):
             return "red"
         if not suite:
             return "green"
         key = _suite_key(wt, suite)
-        if bare_base and _suite_seen_green(root, key):
+        if bare_base and memo and _suite_seen_green(root, key):
             log(f"base tree {key.split()[0][:12]}: suite green on an earlier train — not run again")
+            base_from_memo = True
             return "green"
         state = _sh(wt, suite, log)
         if state == "green" and key:
             _remember_green_suite(root, key)
         return state
 
-    def attempt(subset: list[str]) -> tuple[str, list[str], str]:
+    def attempt(subset: list[str], *, memo: bool = True) -> tuple[str, list[str], str]:
         wt, br, merged, dropped = build_train(root, base, subset, stamp, log)
         for d in dropped:
             if d not in conflicted:
                 conflicted.append(d)
         if not merged and subset:
             return "red", merged, br  # everybody conflicted: nothing to judge
-        return judge(wt, bare_base=not subset), merged, br
+        return judge(wt, bare_base=not subset, memo=memo), merged, br
 
     def _report_dropped() -> None:
         for b in conflicted:
@@ -1114,6 +1119,15 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
         if not base_state:
             base_state = attempt([])[0]
         return base_state
+
+    def _red_base() -> int:
+        print("train: the combined tree is red and the base is red too — the "
+              "integration branch itself is red (gates or suite fail with nobody aboard); "
+              "no candidate blamed, "
+              "nothing merged — fix main first", file=sys.stderr)
+        log("base red and combined red — aborted without blame")
+        _cleanup(root, stamp)
+        return 1
 
     while aboard:
         state, merged, branch = attempt(aboard)
@@ -1155,13 +1169,7 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
         # before blaming anybody: is the base itself red (a broken main)?
         # Then no candidate is the offender.
         if check_base() == "red":
-            print("train: the combined tree is red and the base is red too — the "
-                  "integration branch itself is red (gates or suite fail with nobody aboard); "
-                  "no candidate blamed, "
-                  "nothing merged — fix main first", file=sys.stderr)
-            log("base red and combined red — aborted without blame")
-            _cleanup(root, stamp)
-            return 1
+            return _red_base()
         if base_state == "undefined" and not told:
             # a passenger introduces the suite (its make target): the base
             # cannot be judged by it — that is not a red main
@@ -1185,6 +1193,16 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
                 lo = mid + 1
             else:
                 hi = mid
+        if lo == 1 and base_from_memo:
+            # every prefix red and the base green only by the memo: main may
+            # have turned red outside the tree (a host or dependency upgrade,
+            # a date) — run the base for real before the first passenger is
+            # blamed (refutation: otherwise each one is dropped in turn)
+            base_from_memo = False
+            log("first passenger about to be blamed on a remembered base — running the base")
+            base_state = attempt([], memo=False)[0]
+            if base_state == "red":
+                return _red_base()
         offender = aboard[lo - 1]
         blamed.append(offender)
         # the rest is a new combination: it earns its own flake re-run (the
