@@ -767,3 +767,41 @@ def test_rename_remove_move_inventory_lives_in_plan_and_execute_only_compares(re
         assert "No second full inventory" in execute
         workflow = (out / "docs/process/workflow.md").read_text()
         assert "A rename, removal or move is inventoried here, before code" in workflow
+
+
+def test_a_block_is_verified_before_it_counts(render, tmp_path):
+    """v2.56: a third of downstream reviews blocked, some on paperwork; a block
+    names its failure scenario and survives an independent scored check."""
+    out = render(tmp_path, {"project_name": "demo", "harnesses": {"claude": True}})
+    vi = " ".join((out / "docs/process/verification-independence.md").read_text().split())
+    assert "A block is verified before it counts" in vi and "Below 80" in vi
+    assert "never runs through the change is pre-existing" in vi
+    review = " ".join((out / ".claude/commands/review.md").read_text().split())
+    assert "Verify every block before you attest it." in review
+    assert "Merge danger" in review and "at most ~400 words" in review
+    bundle = (out / "scripts/process/make_review_bundle.py").read_text()
+    assert "names its failure scenario" in bundle and "below 80 of 100" in bundle
+
+
+def test_review_checklist_walks_silent_failures(render, tmp_path):
+    out = render(tmp_path, {"project_name": "demo"})
+    text = (out / "docs/process/review-checklist.md").read_text()
+    assert "## Silent failures" in text
+    for probe in ("Catch blocks", "Fail open vs. closed", "Cleanup on the error path"):
+        assert probe in text, probe
+
+
+def test_debug_and_brainstorm_methods_have_one_owner(render, tmp_path):
+    out = render(tmp_path, {"project_name": "demo", "harnesses": {"claude": True}})
+    workflow = " ".join((out / "docs/process/workflow.md").read_text().split())
+    assert "A loop that goes red on this bug, before any theory." in workflow
+    assert "ask them in rounds, not one at a time" in workflow
+    debug = (out / ".claude/commands/debug.md").read_text()
+    assert "follow the method in `docs/process/workflow.md` (Debug)" in debug
+    assert "Three to five" not in debug  # the method lives in workflow.md only
+
+
+def test_testing_names_tests_that_prove_nothing(render, tmp_path):
+    out = render(tmp_path, {"project_name": "demo"})
+    text = (out / "docs/process/testing.md").read_text()
+    assert "**Tautological:**" in text and "Mock only at the system's boundary" in text
