@@ -45,7 +45,10 @@ orchestrator the same.
 
 The train departs when at least `--min-candidates` (default 3) are aboard,
 or the oldest has waited longer than `--max-wait-hours` (default 4), and
-the test lanes are free where the project has a lane script (see `tower.md`, lanes).
+no lane but `scoped` is held where the project has a lane script (see
+`tower.md`, lanes). The suite runs on `full`, niced beside the short
+`scoped` runs; a train that waited for every pre-push to finish left once
+a day downstream, with five reviewed candidates waiting.
 `--force` departs with whatever boarded. Environment:
 `PROCESS_TRAIN_MIN`, `PROCESS_TRAIN_MAX_WAIT_H`.
 

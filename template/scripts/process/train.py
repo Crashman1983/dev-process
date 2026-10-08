@@ -30,8 +30,9 @@ branch, is ahead of it, and
     candidate keeps its seat; overlap = the same file in flight);
 
 Departure: at least `--min-candidates` aboard, or the oldest candidate
-has waited longer than `--max-wait-hours`; the test lanes are free where
-the project has lanes; and the runner's red ledger names no red gate on
+has waited longer than `--max-wait-hours`; no lane but `scoped` is held
+where the project has lanes (the suite runs on `full`, beside the short
+runs); and the runner's red ledger names no red gate on
 this clone. `--force` departs with whatever boarded.
 
 The run: a staging branch `train/<stamp>` from the integration branch in
@@ -396,8 +397,13 @@ def departure(cands: list[dict], root: Path, *, min_candidates: int, max_wait_ho
     aboard = [c for c in cands if c["eligible"]]
     if not aboard:
         return False, "nobody aboard"
+    # a held `scoped` lane does not hold the train: the suite runs on `full`,
+    # niced beside the short runs (downstream: serial pre-pushes held `scoped`
+    # all morning and one train left in a day, five reviewed candidates
+    # waiting). A held `full` or unknown lane does: the suite would queue
+    # behind it and a lane timeout reads red.
     lanes = _tower.lanes(root)
-    busy = [ln for ln in lanes if "held by" in ln]
+    busy = [ln for ln in lanes if "held by" in ln and not ln.startswith("scoped:")]
     if busy:
         return False, f"lane busy: {busy[0]}"
     reds = [g for g in _tower.red_gates(root) if g["age_days"] >= 0]

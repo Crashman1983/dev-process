@@ -1581,3 +1581,23 @@ def test_a_pushed_train_removes_the_merged_worktrees_that_hold_no_work(render, t
     branches = _git(out, "branch", "--list", "--format=%(refname:short)").stdout.split()
     assert "alpha" not in branches  # its worktree gone, the merged branch could be deleted too
 
+
+
+@pytest.mark.parametrize("status,departs", [
+    ("scoped: free\nfull: free", True),
+    ("scoped: held by pid 1 — pre-push (issue-9) since 09:28 (15 min)\nfull: free", True),
+    ("scoped: free\nfull: held by pid 1 — coverage-gate since 09:28 (5 min)", False),
+    ("scoped: held by pid 1 — pre-push\nfull: held by pid 2 — test-boundary", False),
+    ("gpu: held by pid 1 — render", False),
+])
+def test_a_held_scoped_lane_does_not_hold_the_train(render, tmp_path, status, departs):
+    # the suite runs on `full`, niced beside the short runs; serial pre-pushes
+    # on `scoped` starved the train downstream (one departure in a day)
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    (out / "scripts" / "lane.py").write_text(f"print({status!r})\n")
+    train = _load_train(out)
+    ready, why = train.departure([{"eligible": True, "hours_waiting": 0}], out,
+                                 min_candidates=1, max_wait_hours=4)
+    assert ready is departs, why
+    if not departs:
+        assert why.startswith("lane busy")
