@@ -149,19 +149,22 @@ recorded as the whole branch) or against a fork point that is ambiguous or
 cannot be resolved.
 
 **What counts as reviewed is content, not history.** The gate compares
-every file of the pushed tip with the states the reviews make reviewed: git's
-own merge of the integration branch (where the tip last met it) with the
-reviewed head and with every other clearing review's head the tip carries,
-and that integration state itself. A file that equals one of them is
-reviewed, whatever commits led there. So a rebase or a merge of main that
-applies cleanly keeps the review, and several reviewed works that git merges
-cleanly are reviewed together. Everything else is unreviewed: code
-committed after the reviewed head, a conflict resolution, a merge that adds
-code of its own, and a merge that keeps the branch's file where main had
-changed it (that throws main's change away). A merge that throws the
-reviewed change away leaves main's content; that is not the gate's finding —
-the loss shows as a missing change, as a later revert would. Any git
-failure is stale: the gate never falls back to a weaker comparison.
+every file of the pushed tip with one state: git's own merge of the
+integration branch (where the tip last met it) with the reviewed head and
+with every other clearing review's head the tip carries. A file that equals
+it is reviewed, whatever commits led there; a file that conflicted in that
+merge never is. So a rebase or a merge of main that applies cleanly keeps
+the review, and several reviewed works that git merges cleanly are reviewed
+together. A review counts whole where the tip carries its head, where its
+base is the fork point, or where its base is itself reviewed content (what
+the whole reviews below it merge to, bookkeeping aside); a head that a
+rebase replaced needs such a base, and any other review vouches only for
+the files its own range changed.
+Everything else is unreviewed: code committed after the reviewed head — also
+a commit that sets a reviewed file back to main's version — any conflict
+resolution, whichever side it takes, and a merge that adds code of its own.
+Any git failure is stale: the gate never falls back to a weaker comparison.
+The comparison needs git 2.38 or later (`merge-tree --write-tree`).
 
 The gate reads existing records by the same rule. A full round whose head
 the push carries unmerged (in the pushed tip's history, in no integration
