@@ -37,6 +37,28 @@ implementing agent does not self-certify.
 - The input shapes and failure classes behind these questions, with how to
   test each: `docs/process/failure-catalog.md`.
 
+## Silent failures — the defect that passes every test
+
+The most expensive defects downstream were not crashes but failures nobody
+saw: a lock released while its owner could still write, an attachment lost
+without a trace, a check that failed open. Walk every place in the diff that
+handles a failure (adapted from Claude Code's `silent-failure-hunter`):
+
+- **Catch blocks:** does each catch only what it expects? Name what else it
+  would swallow. An empty catch, or one that only logs and continues, needs a
+  reason in the code.
+- **Fallbacks and defaults:** a default value, a retry that gives up, an
+  optional chain (`?.`, `.get(..., default)`) that skips a step — is the
+  caller or the user told, or does the result just look normal?
+- **Fail open vs. closed:** when an auth, permission, lock or validation
+  step errors, does the operation stop, or does it proceed as if the step
+  had passed?
+- **Cleanup on the error path:** is the lock released, the transaction
+  rolled back, the temporary file removed — and is anything released while
+  another party can still act on it?
+- **The message:** does the error name the operation and what to do, so the
+  next person can debug it from the log alone?
+
 ## Performance & efficiency
 
 - Does the change add work that grows with the input — an **N+1** query, a loop

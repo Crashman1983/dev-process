@@ -17,7 +17,8 @@ appends the `REVIEW` line the core `review` gate parses
 report; report and line are one commit (`attest.py … --commit --with
 <report>`). Block only for a defect someone would
 hit — plan or report wording is a nit, an all-minor verdict a pass with
-residuals (`docs/process/verification-independence.md`, "What blocks, and
+residuals, and each blocking finding names its failure scenario and is
+checked by a fresh process before it counts (below 80 of 100, a residual) (`docs/process/verification-independence.md`, "What blocks, and
 when the rounds stop"). To dispatch a fresh or cross-model
 reviewer, assemble its complete input with
 `python scripts/process/make_review_bundle.py -o /tmp/bundle.md`

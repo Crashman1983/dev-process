@@ -17,6 +17,16 @@ review dimensions. They sharpen the checklist and never weaken it.
 Fixes loop back through `/execute` and then `/review` again until the branch is
 clean.
 
+**Verify every block before you attest it.** Each finding that would block
+names its failure scenario (input or state, path through the change, wrong
+outcome). Hand each one to a fresh subagent that did not write it — a cheap
+model is enough — with the bundle and the scale in
+`docs/process/verification-independence.md` ("What blocks"); below 80 the
+finding is a residual or a follow-up issue, and a verdict left with none is
+a `pass`. The report ends with **Merge danger** in two lines: one-way or
+two-way door (can a revert undo it? a migration, deleted data or a published
+contract cannot) and the blast radius if it is wrong.
+
 Record the result with the writer, never by hand:
 
     python scripts/process/attest.py --work <id> --tier <n> --reviewer <id> \
@@ -100,6 +110,9 @@ Round economy — a failed round must not re-pay the whole chain:
 - **A second owner blocks.** A rule the change re-implements although existing code owns it,
   proven by a differential test, is a blocking finding at every tier — unless the plan's
   `DECISION` names why the rule has two owners.
+- **Short lenses.** Each lens reports in at most ~400 words, worst first, and
+  every finding cites the rule, the plan or spec line, or the failure
+  scenario it rests on — a finding that cites none is not one.
 - **One reviewer set per work.** Round 1 runs the full lens set the tier
   requires (including any full-tool refuter lenses); a delta round re-runs
   the lenses whose prior report has an open finding or names a file in the

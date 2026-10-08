@@ -414,7 +414,12 @@ BLOCK_RULE = ("Block only for a defect someone would hit — a user, a caller, t
               "attacker: in code, tests, a contract, security or the acceptance the plan claims. "
               "Wording in the plan, a report, a tally or the PR text never blocks: record it as a "
               "`nit`. A verdict whose findings are all minor or nit is a `pass` with residuals — "
-              "no new round.")
+              "no new round. A blocking finding names its failure scenario (input or state, the "
+              "path through the changed code, the wrong outcome); a defect whose path never runs "
+              "through the change is pre-existing — an issue, not a block. "
+              "What a linter, type checker or the test suite catches never blocks. Before a block "
+              "is attested, a fresh process scores each blocking finding; below 80 of 100 it is a "
+              "residual (`verification-independence.md`, \"What blocks\").")
 DELTA_ROUND_RULE = ("Judge the fix diff and the open findings, and re-check the fixed failure "
                     "class everywhere it can recur, not only at the fixed spot. If the fix "
                     "changed a contract, the architecture or the risk scope, say so and ask "
