@@ -257,6 +257,34 @@ Fork-Point-Basis hat (#158). Neu strenger: Ein Konflikt, der auf die eigene
 Seite aufgelöst wird, gilt als ungeprüft; die Tabelle ließ das durch.
 Voraussetzung ist git 2.38 (`merge-tree --write-tree`).
 
+**Schattenbetrieb gegen Kennis Historie.** 500 Urteile über die 250 zuletzt
+gelandeten Pässe, jeweils am Branch-Tip beim Einsteigen in den Zug und am
+gelandeten Merge auf `main`. Als andere Reviews zählten wie im Gate nur
+klärende Pässe. 494 Urteile stimmen überein, 6 weichen ab, alle erklärt:
+
+- **2 × alt veraltet, neu geprüft (Arbeit 2166).** Die Tabelle meldete einen
+  Drop, weil eine frühere Runde einen anderen Stand von `check_review.py`
+  und `.copier-answers.yml` gesehen hatte. Den Endstand beider Dateien
+  haben spätere klärende Pässe derselben Arbeit geprüft. Hier lag die
+  Tabelle falsch.
+- **4 × alt geprüft, neu veraltet (Arbeiten 1918 und 1919).** Beide bauen
+  auf Arbeit 1917 auf, deren einziger klärender Pass eine alte Delta-Runde
+  mit einer Basis ist, die kein Fork-Point ist. Solche Zeilen weist das Gate
+  seit v2.53 schon vorab als ungültig zurück; für neue Reviews kann das
+  nicht vorkommen.
+
+Unterwegs deckte der Schattenbetrieb drei Fehler des Entwurfs auf, die oben
+als Korrekturen stehen (der Head allein, mehrere Arbeiten zusammen, die
+Faltung nur der jüngsten Heads), und zwei weitere Verfeinerungen: Eine
+spätere Runde, die einen Merge von `main` als Head geprüft hat, deckt die
+Auflösung darin (Arbeit 2197), und eine Basis aus geprüftem Inhalt zählt
+ganz (Arbeiten 1917 bis 1919). Ein binärer Screenshot-Konflikt, der
+`main`s Neuaufnahme verwarf, wäre mit der Tabelle durchgerutscht; ohne
+die spätere Runde meldet ihn der Inhaltsvergleich.
+
+**Laufzeit.** Die Tabelle brauchte im Median 25 s pro Urteil, der
+Inhaltsvergleich 0,05 s, höchstens 2,3 s.
+
 **Offen, schon vorher so:** Ein lokales `main`, das `origin/main` nur um
 Merges voraus ist, gilt als Integrationsstand. Enthält es ungeprüften Code,
 sieht das Gate ihn nicht, weder mit der Tabelle noch mit dem Inhaltsvergleich.
