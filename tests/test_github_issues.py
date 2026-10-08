@@ -600,6 +600,21 @@ def test_report_non_utf8_hard(render, tmp_path):
     assert "not valid UTF-8" in r.stdout
 
 
+def test_reports_skip_what_git_ignores(render, tmp_path):
+    # #186: the reviewer's bundle lies next to the reports by design; git
+    # ignores it, so it is no report — a header-less file git sees still fails
+    out = _render(render, tmp_path)
+    subprocess.run(["git", "init", "-q", str(out)], check=True)
+    _report(out, "2026-10-08-x.bundle.md", "# Review bundle\n\nthe diff\n")
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+    _report(out, "2026-10-08-notes.md", "# Just some notes\n\nno header here\n")
+    r = _run(out)
+    assert r.returncode == 1
+    assert "2026-10-08-notes.md: no 'review:' or 'audit:' header" in r.stdout
+    assert "bundle.md" not in r.stdout
+
+
 def test_publish_tool_present_when_on_absent_when_off(render, tmp_path):
     on = _render(render, tmp_path / "on")
     assert (on / "scripts/process/publish_review.sh").is_file()

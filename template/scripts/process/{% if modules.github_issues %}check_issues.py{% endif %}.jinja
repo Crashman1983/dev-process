@@ -236,6 +236,25 @@ def _canon_ref(ref: str, default_repo: str | None) -> str:
     return f"{repo or default_repo}#{number}"
 
 
+def _git_ignored(root: Path, paths: list[Path]) -> set[Path]:
+    """The paths git ignores — a reviewer's `*.bundle.md` input lies next to
+    the reports by design and is never one (#186). Outside a repo, or when
+    git fails, nothing counts as ignored: the gate reads every file as before."""
+    if not paths:
+        return set()
+    try:
+        r = subprocess.run(
+            ["git", "-C", str(root), "check-ignore", "-z", "--stdin"],
+            input="\0".join(str(p.relative_to(root)) for p in paths) + "\0",
+            capture_output=True, text=True, timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return set()
+    if r.returncode not in (0, 1):  # 1 = none ignored, 128 = no repo / error
+        return set()
+    return {root / rel for rel in r.stdout.split("\0") if rel}
+
+
 def _check_reports(root: Path, default_repo: str | None) -> tuple[list[str], list[str]]:
     """Review/audit visibility binding, offline over committed report files.
     Opt-in by artifact existence: no reports directory or files -> silent.
@@ -251,7 +270,11 @@ def _check_reports(root: Path, default_repo: str | None) -> tuple[list[str], lis
     hard: list[str] = []
     soft: list[str] = []
     campaigns: dict[str, dict[str, str]] = {}  # slug -> {report: campaign-issue}
-    for p in sorted(rdir.glob("*.md")):
+    candidates = sorted(rdir.glob("*.md"))
+    ignored = _git_ignored(root, candidates)
+    for p in candidates:
+        if p in ignored:
+            continue
         rel = f"{REVIEWS_DIR}/{p.name}"
         try:
             raw = p.read_text(encoding="utf-8")
