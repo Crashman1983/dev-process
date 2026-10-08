@@ -77,8 +77,9 @@ Round economy — a failed round must not re-pay the whole chain:
   reads the fix diff plus the prior round's findings, while the verdict
   still binds the whole branch, at every tier
   (`docs/process/verification-independence.md`, "What each round judges").
-- **Rebase once**, before the first review round — every later rebase moves
-  the head, and the review no longer covers what merges.
+- **Rebase or merge main before the first review round.** A later rebase or
+  merge of main that applies cleanly keeps the review (the gate judges
+  content, not history); one that resolves a conflict is a new round.
 - **The round is counted, not claimed.** `attest.py` numbers it: 1 + the
   distinct blocked rounds recorded for the work. Every blocking round gets
   its REVIEW line (`--verdict block`); several reviewers (lenses) of one

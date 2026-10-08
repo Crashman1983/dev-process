@@ -954,20 +954,6 @@ def _commit_id(root: Path, rev: str) -> str:
     return (_git_pure(root, (rev,), "rev-parse", "--verify", "-q", f"{rev}^{{commit}}") or b"").decode().strip()
 
 
-def _descendants(root: Path, head: str, tip: str) -> frozenset[str] | None:
-    """`head` and every commit of `tip`'s history that has it as an ancestor.
-    One git call answers "does this parent carry the reviewed head?" for every
-    merge of one pass. None when git cannot tell; the callers then ask per
-    commit."""
-    head_id = _commit_id(root, head)
-    if not head_id:
-        return None
-    out = _git_bytes(root, "rev-list", "--ancestry-path", f"{head_id}..{tip}")
-    if out is None:
-        return None
-    return frozenset(out.decode(errors="replace").split()) | {head_id}
-
-
 class GitReadError(RuntimeError):
     """A git read the standing-block arm cannot do without failed."""
 
@@ -1667,9 +1653,8 @@ class History(NamedTuple):
     gate has met downstream (each one a patch before this table existed)."""
     git_error: bool = False           # git could not answer: fail closed
     shallow_missing: bool = False     # the head is not in a shallow clone
-    in_history: bool = True           # False: amend or rebase replaced it
-    late: frozenset = frozenset()     # this work's code after the head
-    dropped: frozenset = frozenset()  # a merge threw the reviewed change away
+    in_history: bool = True           # False: the head is in no history here
+    late: frozenset = frozenset()     # content at the tip that is no reviewed state
     fellow: tuple = ()                # (merge, paths): a train merge of another
     #                                   passenger that adds code of its own
 
@@ -1683,13 +1668,8 @@ def decide(h: History, head: str) -> tuple[str, str]:
         return "stale", (f"the reviewed head {head[:9]} is not in this shallow clone — cannot check "
                          f"the review; fetch the history (`git fetch --unshallow`)")
     if not h.in_history:
-        return "stale", (f"the reviewed head {head[:9]} is not in the history of what is pushed "
-                         f"(commit --amend or a rebase replaced the reviewed commits) — the review "
-                         f"covers none of it; review again and attest the new head")
-    if h.dropped:
-        shown = sorted(h.dropped)
-        return "stale", (f"a merge threw the reviewed change away ({', '.join(shown[:4])}"
-                         f"{', …' if len(shown) > 4 else ''}) — review the merge and attest again")
+        return "stale", (f"the reviewed head {head[:9]} is not in this repository — the review "
+                         f"covers nothing here; review again and attest the new head")
     if h.late:
         shown = sorted(h.late)
         return "stale", (f"code changed after the reviewed head ({', '.join(shown[:4])}"
@@ -1699,210 +1679,211 @@ def decide(h: History, head: str) -> tuple[str, str]:
     if h.fellow:
         merge, paths = h.fellow[0]
         shown = sorted(paths)
-        return "stale", (f"train merge {merge[:9]} of another passenger adds code of its own "
+        return "stale", (f"{'train merge ' + merge[:9] if merge else 'a train merge'} of another passenger adds code of its own "
                          f"({', '.join(shown[:4])}{', …' if len(shown) > 4 else ''}) — not this "
                          f"work's code, but no merge may carry code outside every review; rebuild the train")
     return "fresh", ""
 
 
-def _parents(root: Path, commit: str) -> list[str] | None:
-    line = _git_pure(root, (commit,), "rev-list", "--parents", "-n", "1", commit)
-    return None if line is None else line.decode(errors="replace").split()[1:]
+def _entries(root: Path, tree: str, paths) -> dict[str, str] | None:
+    """`path -> "<mode> <object>"` for each of `paths` present in `tree` (a
+    commit or tree id); a path absent there is absent here. None when git
+    cannot tell."""
+    out: dict[str, str] = {}
+    names = sorted(paths)
+    for i in range(0, len(names), 200):
+        raw = _git_pure(root, (tree,), "--literal-pathspecs", "ls-tree", "-z", tree, "--", *names[i:i + 200])
+        if raw is None:
+            return None
+        for entry in raw.split(b"\0"):
+            meta, _tab, name = entry.partition(b"\t")
+            fields = meta.split()
+            if len(fields) == 3:
+                out[name.decode(errors="surrogateescape")] = f"{fields[0].decode()} {fields[2].decode()}"
+    return out
 
 
-def _merge_own(root: Path, merge: str) -> set[str] | None:
-    """`_merge_own_uncached`, once per merge and run: it depends on no head.
-    An answer that fell back to the combined diff because git's own merge
-    failed is not kept: the fallback is weaker, and one transient failure must
-    not weaken every later pass of the run (refutation)."""
-    where = _addressed(root, (merge,))
-    if where is not None and ("own", where) in _PURE:
-        return set(_PURE[("own", where)])  # type: ignore[arg-type]
-    own, definite = _merge_own_uncached(root, merge)
-    if own is not None and definite and where is not None:
-        _PURE[("own", where)] = frozenset(own)
-    return own
-
-
-def _merge_own_uncached(root: Path, merge: str) -> tuple[set[str] | None, bool]:
-    """The code a merge commit adds of its own: paths where its result is
-    not what git merges on its own. A clean merge adds nothing — also when
-    both sides changed different hunks of one file (downstream: `--cc
-    --name-only` named such a file, and every train whose passenger touched a
-    file main had changed since the review was refused). A conflicted path
-    counts when the resolution equals neither parent; resolving to one side
-    is `_dropped_by_merge`'s case. Octopus merges, or a git without
-    `merge-tree --write-tree`, fall back to the combined diff — more, never
-    less. Also says whether the answer is definite, i.e. did not come from a
-    failed git merge."""
-    parents = _parents(root, merge)
-    if parents is None:
-        return None, False
-    auto = _auto_merge(root, parents[0], parents[1]) if len(parents) == 2 else None
-    if auto is None:
-        combined = _names(_git_pure(root, (merge,), "show", "--cc", "--format=", "--name-only",
-                                    "--ignore-submodules=none", "-z", merge))
-        return combined, len(parents) != 2  # an octopus always takes this path
-    tree, conflicted = auto
-    differs = _names(_git_pure(root, (tree, merge), "diff", "--name-only", "--no-renames",
-                               "--ignore-submodules=none", "-z", tree, merge))
-    if differs is None:
-        return None, False
-    own = set()
-    for path in differs:
-        result = _blob(root, merge, path)
-        sides = [_blob(root, p, path) for p in parents]
-        if result is None or None in sides:
-            return None, False
-        if path in conflicted and result in sides:
+def _reviewed_merge(root: Path, base: str, heads: list[str]) -> str | None:
+    """The tree git makes of `base` merged with each of `heads` in turn — the
+    state every one of these reviews saw its change land in, if they all
+    merge cleanly; a conflicted path keeps its markers and matches no
+    resolution. Intermediate states are written as unreferenced commits
+    (`merge-tree` needs commits); gc takes them. None when git cannot tell."""
+    key = ("merged", _addressed(root, (base, *heads)))
+    if key[1] is not None and key in _PURE:
+        return _PURE[key]  # type: ignore[return-value]
+    current, tree = base, None
+    for head in dict.fromkeys(heads):
+        if _is_ancestor(root, head, current):
             continue
-        own.add(path)
-    return own, True
+        auto = _auto_merge(root, current, head)
+        if auto is None:
+            return None
+        tree = auto[0]
+        made = _git_bytes(root, "-c", "user.name=review-gate", "-c", "user.email=review-gate@localhost",
+                          "commit-tree", "--no-gpg-sign", tree, "-p", current, "-p", head,
+                          "-m", "review gate: reviewed state")
+        if made is None:
+            return None
+        current = made.decode().strip()
+    if tree is None:  # every head is already in the base
+        out = _git_pure(root, (current,), "rev-parse", f"{current}^{{tree}}")
+        if out is None:
+            return None
+        tree = out.decode().strip()
+    if key[1] is not None:
+        _PURE[key] = tree
+    return tree
 
 
 def _history(root: Path, head: str, tip: str = "HEAD",
-             reviewed: tuple[tuple[str, str], ...] = (), bases: tuple[tuple[str, str], ...] = ()) -> History:
-    """Gather the facts `decide` judges for one reviewed head.
+             reviewed: tuple[tuple[str, str], ...] = ()) -> History:
+    """Step B of the review-gate teardown: what is pushed counts as reviewed
+    where its content is a reviewed state, not where its history reads right.
 
-    `tip` is what is judged — HEAD for a push, a branch for the merge train's
-    boarding. Everything reachable from it but not from the reviewed head or
-    from main is code of this push that the review never saw: later commits,
-    a side branch merged in, an amended commit merged back next to the
-    reviewed one, the content an `-s ours` merge kept (downstream refutation:
-    each of these passed a "descends from the reviewed head" rule). Merges
-    count by what they add of their own (`_merge_own`).
+    A path is reviewed when its content at the tip (mode and object) equals
+    one of:
+      - git's own merge of the integration branch where the tip last met it
+        (every merge base of tip and integration ref) with the reviewed head
+        and then with every other clearing review's head the tip contains —
+        the head itself where nothing else is in play; a conflicted path
+        carries the markers there, so a resolution never matches;
+      - that merge base itself.
+    Several reviewed works on one branch, or train passengers, that change
+    one file cleanly are a reviewed state together (Kenni's history: three
+    works on one branch, each editing the feature registry).
+    Without an integration branch the head is the one reviewed state.
 
-    A merge train is the one exception: its staging commits are a chain of
-    merges on top of main, one per passenger. Fellow passengers' commits are
-    not this work's code (they carry their own reviews, or need none at
-    Tier 0-1), so on such a chain only the merged-in tip that carries the
-    reviewed head counts. What a chain merge adds of its own is code nobody
-    reviewed: the carrier's merge counts as this work's, another passenger's
-    merge is named as such (`fellow`) — it blocks, but is not blamed on this
-    work. By design, a passenger without a plan or below Tier 2 is not this
-    work's concern: the train's boarding rules and the per-plan gate own
-    what may ride."""
-    tip_id = _commit_id(root, tip) or tip
-    if not _is_ancestor(root, head, tip_id):
-        shallow = (_git_bytes(root, "rev-parse", "--is-shallow-repository") or b"").strip() == b"true"
-        if shallow and _git_bytes(root, "cat-file", "-e", f"{head}^{{commit}}") is None:
-            return History(shallow_missing=True)
-        return History(in_history=False)
+    The head alone is not a reviewed state once the tip met a newer main:
+    a merge that kept the head's file where main had changed it throws
+    main's change away (`-s ours`, a conflict resolved to this side) — the
+    shadow run against the decision record found that. Everything else is
+    unreviewed too: later commits, amends with new content, other
+    resolutions, evil merges. A rebase or amend that changes no content stays
+    reviewed (#158). A merge that throws the reviewed change away leaves
+    main's content and is not this gate's finding (decision record B: the
+    loss shows as a missing change, as a later revert would).
+
+    On the merge train's staging branch the passenger is judged at its own
+    branch tip, and every train merge must be git's own merge: what a train
+    merge adds is the carrier's code (`late`) or another passenger's
+    (`fellow`). Any git failure is stale (fail closed), never a weaker answer."""
     error = History(git_error=True)
-    carrying = _descendants(root, head, tip_id)  # one call answers "carries the head?" for every merge
-    integ = _integration_ref(root, tip)
-    not_integ = [f"^{integ}"] if integ else []
-    # code another clearing review has seen is not unreviewed code of this
-    # push — a later, separately reviewed change to files of a merged plan
-    # is covered by its own review (downstream: a merged plan left active
-    # blamed it). A review covers the commits of ITS range, base..head — not
-    # the history below its base; code no review has seen stays unreviewed,
-    # whatever plan it lands under
-    covered: set[str] = set()
-    for other_base, other_head in reviewed:
-        if other_head == head or not _is_ancestor(root, other_head, tip_id):
-            continue
-        seen = _git_pure(root, (other_head, other_base), "rev-list", other_head, f"^{other_base}")
-        if seen is None:
-            continue  # its base is unknown here: it covers nothing
-        covered |= {ln.strip() for ln in seen.decode(errors="replace").splitlines() if ln.strip()}
-    walk = _git_bytes(root, "rev-list", "--first-parent", "--parents", tip_id, *not_integ)
-    if walk is None:
+    head_id = _commit_id(root, head)
+    if not head_id:
+        shallow = (_git_bytes(root, "rev-parse", "--is-shallow-repository") or b"").strip() == b"true"
+        return History(shallow_missing=True) if shallow else History(in_history=False)
+    tip_id = _commit_id(root, tip)
+    if not tip_id:
         return error
-    chain = [ln.split() for ln in walk.decode(errors="replace").splitlines() if ln.strip()]
-    tips, carriers = [tip_id], []  # the snapshot `carrying` was taken of (refutation: a moving ref)
-    # only the merge train's own staging branch (`train/<stamp>`, pushed from its
-    # worktree) gets the passenger exemption — a work branch made of merges
-    # only is not a train, and treating it as one hid a side branch merged
-    # into it (downstream refutation)
+    integ = _integration_ref(root, tip_id)
+    judged, fellow, carrier_own = tip_id, [], set()
     staging = tip == "HEAD" and (_git_bytes(root, "symbolic-ref", "--short", "-q", "HEAD") or b"") \
         .decode(errors="replace").strip().startswith("train/")
-    if staging and chain and all(len(c) >= 3 for c in chain):  # merges only: the train's chain
-        for c in chain:
-            for parent in c[2:]:
-                if (parent in carrying) if carrying is not None else _is_ancestor(root, head, parent):
-                    carriers.append(c[0])
-                    tips.append(parent)
-        if carriers:
-            tips = tips[1:]
-    commits_out = _git_bytes(root, "rev-list", "--no-merges", *tips, f"^{head}", *not_integ)
-    merges_out = _git_bytes(root, "rev-list", "--merges", *tips, f"^{head}", *not_integ)
-    if commits_out is None or merges_out is None:
+    if staging and integ:
+        walk = _git_bytes(root, "rev-list", "--first-parent", "--parents", tip_id, f"^{integ}")
+        if walk is None:
+            return error
+        chain = [ln.split() for ln in walk.decode(errors="replace").splitlines() if ln.strip()]
+        if chain and all(len(c) == 3 for c in chain):  # the train's chain: two-parent merges only
+            carriers = [c for c in chain if _is_ancestor(root, head_id, c[2])]
+            if carriers:
+                judged = carriers[0][2]  # the passenger's own branch tip, as it boarded
+                for merge, first, second in chain:
+                    auto = _auto_merge(root, first, second)
+                    if auto is None:
+                        return error
+                    added = _names(_git_pure(root, (auto[0], merge), "diff", "--name-only", "--no-renames",
+                                             "--ignore-submodules=none", "-z", auto[0], merge))
+                    if added is None:
+                        return error
+                    added = {p for p in added if not p.startswith(BOOKKEEPING)}
+                    if any(c[0] == merge for c in carriers):
+                        carrier_own |= added
+                    elif added:
+                        fellow.append((merge, frozenset(added)))
+    met: list[str] = []
+    if integ:
+        bases_out = _git_bytes(root, "merge-base", "--all", judged, integ)
+        if bases_out is None:
+            return error
+        met = bases_out.decode(errors="replace").split()
+    states: list[str] = []  # trees whose content counts as reviewed
+    partial: set[tuple[str, str]] = set()  # reviews that saw a range above main only
+    for base in met:
+        # the commits the judged tip adds over this base: one walk, not one
+        # question per review (Kenni: hundreds of reviews per run)
+        above = _git_pure(root, (judged, base), "rev-list", judged, f"^{base}")
+        if above is None:
+            return error
+        above_ids = set(above.decode(errors="replace").split())
+        whole = []
+        for other_base, other_head in reviewed:
+            other = other_head if GIT_SHA.fullmatch(other_head or "") else _commit_id(root, other_head)
+            if not other or other == head_id or other not in above_ids:
+                continue  # not in what the tip adds: on main already, or elsewhere
+            other_base = other_base if GIT_SHA.fullmatch(other_base or "") else _commit_id(root, other_base)
+            if other_base and _is_ancestor(root, other_base, base):
+                whole.append(other)  # it saw everything it adds over main
+            else:
+                partial.add((other_base, other))
+        merged = _reviewed_merge(root, base, [head_id, *whole])
+        if merged is None:
+            return error
+        states += [merged, base]
+    if not states:
+        states = [head_id]  # no integration branch to meet: the head is all there is
+    changed = _names(_git_pure(root, (states[0], judged), "diff", "--name-only", "--no-renames",
+                               "--ignore-submodules=none", "-z", states[0], judged))
+    if changed is None:
         return error
-    own_commits = [c for c in (ln.strip() for ln in commits_out.decode(errors="replace").splitlines())
-                   if c and c not in covered]
-    late: set[str] | None = set()
-    if own_commits:
-        late = _names(_git_bytes(root, "--no-optional-locks", "-c", "log.showRoot=true", "log", "--no-walk=unsorted",
-                                 "--format=", "--name-only", "--no-renames", "--ignore-submodules=none", "-z",
-                                 *own_commits))
-        if late is None:
+    left = {p for p in changed if not p.startswith(BOOKKEEPING)}
+    if left:
+        at_tip = _entries(root, judged, left)
+        if at_tip is None:
             return error
-    all_merges = [c for c in (ln.strip() for ln in merges_out.decode(errors="replace").splitlines()) if c]
-    in_range = [c for c in all_merges if c not in covered]
-    chain_merges = [c[0] for c in chain] if carriers else []
-    fellow = []
-    for merge in dict.fromkeys(in_range + chain_merges):
-        own = _merge_own(root, merge)
-        if own is None:
-            return error
-        if merge in chain_merges and merge not in carriers:
-            if own := {p for p in own if not p.startswith(BOOKKEEPING)}:
-                fellow.append((merge, frozenset(own)))
-        else:
-            late |= own
-    # merges that resolved to the other side: every merge in the range —
-    # also one another review covered: that review saw its code, not that
-    # it threw THIS work's reviewed change away (downstream review) — and
-    # the train chain's merges
-    dropped: set[str] = set()
-    for merge in dict.fromkeys(all_merges + chain_merges):
-        d = _dropped_by_merge(root, merge, head, bases, carrying)
-        if d is None:
-            return error
-        dropped |= d
-    keep = lambda paths: frozenset(p for p in paths if not p.startswith(BOOKKEEPING))  # noqa: E731
+        for state in states[1:]:
+            here = _entries(root, state, left)
+            if here is None:
+                return error
+            left = {p for p in left if at_tip.get(p) != here.get(p)}
+            if not left:
+                break
+        # a review whose base lies above main vouches only for the paths its
+        # own range changed, merged with main as git merges it
+        for other_base, other in sorted(partial):
+            if not left:
+                break
+            if not other_base:
+                continue  # a range nobody can name covers nothing
+            saw = _names(_git_pure(root, (other_base, other), "diff", "--name-only", "--no-renames",
+                                   "--ignore-submodules=none", "-z", other_base, other))
+            mine = left & saw if saw is not None else set()
+            for base in met if mine else []:
+                merged = _reviewed_merge(root, base, [other])
+                theirs = _entries(root, merged, mine) if merged is not None else None
+                if theirs is not None:
+                    left -= {p for p in mine if at_tip.get(p) == theirs.get(p)}
+    left |= carrier_own
     try:
-        # the ref, not its fork SHA: verify demands one fork point (`fork_point`)
         ref = integration_ref(root, tip)
-        if ref:
+        if ref and left:
             update = verify(root, ref, tip)
             if update['update'] and not update['errors'] and not update['migration']:
-                late -= set(update['identical'])
+                left -= set(update['identical'])
     except (GitReadError, ValueError, OSError, subprocess.TimeoutExpired):
         pass  # unverifiable provenance never grants coverage
-    return History(late=keep(late), dropped=keep(dropped), fellow=tuple(fellow))
+    return History(late=frozenset(left), fellow=tuple(fellow))
 
 
 def _unreviewed_paths(root: Path, head: str, tip: str = "HEAD",
-                      bases: tuple[tuple[str, str], ...] = (),
                       reviewed: tuple[tuple[str, str], ...] = ()) -> set[str] | None:
     """Paths of code in `tip` that no review covers — None when git cannot
     tell (the merge train's boarding judges a branch by this)."""
-    h = _history(root, head, tip, bases=bases, reviewed=reviewed)
+    h = _history(root, head, tip, reviewed=reviewed)
     if h.git_error or h.shallow_missing or not h.in_history:
         return None  # not "nothing unreviewed": the review covers none of it
-    return set(h.late | h.dropped).union(*(paths for _m, paths in h.fellow))
-
-
-_ABSENT = ""
-
-
-def _blob(root: Path, commit: str, path: str, mode: bool = False) -> str | None:
-    """The object at `path` in `commit`: its id, `_ABSENT` when the path does
-    not exist there, None when git cannot tell — a failure must never read as
-    "both sides lack the file" (downstream refutation: a non-UTF-8 name made
-    every lookup fail, and any resolution passed as unchanged). With `mode`,
-    the file mode instead: judged apart from the content, or git's own mode
-    merge (main's `+x` on the reviewed text) reads as a change of both."""
-    out = _git_pure(root, (commit,), "--literal-pathspecs", "ls-tree", "-z", commit, "--", path)
-    if out is None:
-        return None
-    entry = out.split(b"\0", 1)[0]
-    if not entry:
-        return _ABSENT
-    fields = entry.split(b"\t", 1)[0].split()
-    return (fields[0] if mode else fields[2]).decode()
+    return set(h.late).union(*(paths for _m, paths in h.fellow))
 
 
 def _auto_merge(root: Path, ours: str, other: str) -> tuple[str, set[str]] | None:
@@ -1933,9 +1914,6 @@ def _auto_merge_uncached(root: Path, ours: str, other: str) -> tuple[str, set[st
     return fields[0].strip(), set(fields[1:])
 
 
-_EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"  # no common history: all of it is the work's
-
-
 def name_status(out: bytes | None) -> list[tuple[str, str, str]] | None:
     """`--name-status -z` read as (status letter, source, path): the source is
     the old name of a rename or copy, else "". The one reader of that format —
@@ -1955,173 +1933,6 @@ def name_status(out: bytes | None) -> list[tuple[str, str, str]] | None:
             entries.append((letter, "", fields[i + 1]))
             i += 2
     return entries
-
-
-def _renames(out: bytes | None) -> dict[str, str] | None:
-    """`diff --name-status -M -z` read as {old name: new name}."""
-    entries = name_status(out)
-    if entries is None:
-        return None
-    return {source: path for letter, source, path in entries if letter == "R"}
-
-
-def _dropped_by_merge(root: Path, merge: str, head: str,
-                      bases: tuple[tuple[str, str], ...] = (),
-                      descendants: frozenset[str] | None = None) -> set[str] | None:
-    """Paths where a merge threw the reviewed work's change away in favour of
-    another parent's version. `--cc` is blind to this — the result equals one
-    parent, so the combined diff is empty (downstream review residual).
-
-    Judged against what git would have merged on its own: a conflicted path
-    resolved wholesale to the other side, or a clean path whose result was
-    turned back to the other side against the automatic merge — its content,
-    and apart from it its mode (a merge that takes the executable bit back).
-    A clean merge that keeps git's own result is never a drop — also not when
-    main already carries the reviewed change plus later edits (a squash or
-    cherry-pick before a stacked branch merges main; downstream refutation).
-    Only this work's own paths can be dropped: what its reviews saw change —
-    each review adds its `base..head`, or, without a base that is a proper
-    ancestor of head or with a head not in this history, everything the work
-    changed since it forked from the other side (so does a call that knows
-    no review),
-    followed through renames — a file this work renamed is compared with the
-    other side's file under its old name, a file the other side renamed is
-    this work's under its new name, and a file git's own merge moved (into a
-    directory the other side renamed) is judged where git put it. A file of
-    this work that git's own merge kept and the merge deleted is dropped —
-    also when it lives on under the other side's name after a rename on
-    both sides (known limit, fail closed: keeping main's name then needs a
-    review of the merge). A side that already carries the reviewed head drops
-    nothing. Known limit: inside another review's range, this work's file
-    set to a third value — neither side, not git's merge — is that review's
-    judgement; textually it is indistinguishable from a sensible resolution
-    (outside such a range it is the merge's own code, `_merge_own`).
-    `--no-renames`: a file main renamed is compared under both names; `-z`:
-    a non-ASCII name arrives unquoted, or its blobs are never found and the
-    drop passes (downstream review).
-
-    `descendants` (`_descendants`) answers "does this parent carry the head?"
-    for every merge of one pass at once; without it each parent is asked."""
-    def carries_head(commit: str) -> bool:
-        if descendants is not None and GIT_SHA.fullmatch(commit):
-            return commit in descendants
-        return _is_ancestor(root, head, commit)
-
-    parents = _parents(root, merge)
-    if parents is None:
-        return None
-    ours = [p for p in parents if carries_head(p)]
-    if not ours:
-        return set()
-    our = ours[0]
-    paths = _names(_git_pure(root, (our, merge), "diff", "--name-only", "--no-renames",
-                             "--ignore-submodules=none", "-z", our, merge))
-    if paths is None:
-        return None
-    # the reviews' own ranges: a stacked branch's review does not own the
-    # branch below it, and an unrelated import brings no work of its own
-    # (refutation: both read a merge taking main's side of such a file as a
-    # drop). A base that is head itself, or not below it, proves nothing
-    # (refutation: a round without a usable base lost its own code). A round
-    # without a head or a base, or whose head is not in this history (rebased
-    # away), proves no range: everything since the fork is this work's — fail
-    # closed; known limit: on a stacked branch, or after such a rebase, a
-    # merge taking another branch's side of a file main changed then reads
-    # as a drop
-    def commit_id(rev: str) -> str:
-        return _commit_id(root, rev)
-
-    def below(rev: str, top: str) -> bool:
-        return _is_ancestor(root, rev, top)
-
-    head_id = commit_id(head)
-    starts: list[str | None] = []  # None: the fork point with the other side
-    for base, rec_head in bases or (("", ""),):
-        rec_id = commit_id(rec_head)
-        if rec_head and not (rec_id and below(rec_id, head_id or head)):
-            starts.append(None)
-            continue
-        base_id = commit_id(base)
-        starts.append(base_id if base_id and base_id != head_id and below(base_id, head_id or head) else None)
-    dropped: set[str] = set()
-    for other in (p for p in parents if p != our):
-        if carries_head(other):
-            continue  # the other side carries the reviewed change itself: nothing of it to drop
-        # only what THIS work changed can be thrown away: a file another
-        # branch edited and the merge took main's side of is not this work's
-        # (refutation: a stacked branch's "take main's version" read as a drop)
-        fork_out = _git_pure(root, (head_id, other), "merge-base", head_id or head, other)
-        fork = (fork_out or b"").decode().strip() or _EMPTY_TREE
-        work: set[str] = set()
-        old_names: dict[str, list[str]] = {}  # every name a file had in any round
-        for start in dict.fromkeys(s or fork for s in starts or [None]):
-            names = _names(_git_pure(root, (start, head_id), "diff", "--name-only", "--no-renames",
-                                     "--ignore-submodules=none", "-z", start, head_id or head))
-            renamed = _renames(_git_pure(root, (start, head_id), "diff", "--name-status", "-M", "-z",
-                                         start, head_id or head))
-            if names is None or renamed is None:
-                return None
-            work |= names
-            for old, new in renamed.items():
-                old_names.setdefault(new, []).append(old)
-        theirs_moved = _renames(_git_pure(root, (fork, other), "diff", "--name-status", "-M", "-z", fork, other))
-        if theirs_moved is None:
-            return None
-        # a file of this work the other side renamed is this work's under its new name
-        work |= {new for old, new in theirs_moved.items() if old in work}
-        auto = _auto_merge(root, our, other)
-        if auto is None:
-            return None
-        tree, conflicted = auto
-        auto_moved = _renames(_git_pure(root, (our, tree), "diff", "--name-status", "-M", "-z", our, tree))
-        if auto_moved is None:
-            return None
-        for path in paths & work:
-            mine, at_path = _blob(root, our, path), _blob(root, tree, path)
-            if mine is None or at_path is None:
-                return None
-            # git's own merge moved the file: judged where git put it
-            where = auto_moved[path] if at_path == _ABSENT and mine != _ABSENT and path in auto_moved else path
-            result, theirs, auto_blob = _blob(root, merge, where), _blob(root, other, where), _blob(root, tree, where)
-            if None in (result, theirs, auto_blob):
-                return None
-            if result == _ABSENT and mine != _ABSENT and auto_blob != _ABSENT:
-                dropped.add(path)  # git kept it (where git put it), the merge deleted it
-                continue
-            theirs_at = where
-            if theirs == _ABSENT and where == path:
-                # this work renamed it: the other side's is under an old name —
-                # or, renamed there too, under the other side's new name for it
-                for old in old_names.get(path, []):
-                    for at in (old, theirs_moved.get(old)):
-                        if at and theirs == _ABSENT:
-                            found = _blob(root, other, at)
-                            if found is None:
-                                return None
-                            theirs, theirs_at = found, at
-            # turned to the other side against git's own merge: a content
-            # conflict leaves markers in git's result, so a resolution never
-            # equals it; a conflict of names only (renamed on both sides)
-            # keeping git's merged content is no drop (refutation). A delete
-            # conflict leaves no markers: git keeps the surviving file, so
-            # where this work deleted it, keeping it is the drop (refutation)
-            if result == theirs and mine != theirs and (
-                    result != auto_blob or (mine == _ABSENT and where in conflicted)):
-                dropped.add(path)
-                continue
-            if _ABSENT in (result, mine, theirs, auto_blob):
-                continue
-            # apart from the content, whatever it came to: was the mode turned
-            # back against git's own merge? (refutation: judged only on the
-            # reviewed content, main's edit hid a dropped `+x`)
-            modes = [_blob(root, c, p, mode=True)
-                     for c, p in ((merge, where), (our, path), (other, theirs_at), (tree, where))]
-            if None in modes:
-                return None
-            m_result, m_mine, m_theirs, m_auto = modes
-            if m_result == m_theirs and m_mine != m_theirs and m_result != m_auto:
-                dropped.add(path)
-    return dropped
 
 
 def merged_work(root: Path, rel: str, passes: list[dict], ids: set[str], tier: int) -> bool:
@@ -2177,23 +1988,15 @@ def _residue(rel: str) -> str:
             f"carries a cleared plan archives it)")
 
 
-def work_bases(passes: list[dict], ids: set[str]) -> tuple[tuple[str, str], ...]:
-    """(base, head) of every review of this work, "" where one is not
-    recorded — its drop check owns what any of them saw change (refutation:
-    a delta round's base alone hid a drop of the first round's code, also
-    next to an older record without a head)."""
-    return tuple(dict.fromkeys((r.get("base") or "", r.get("head") or "")
-                               for r in passes if r["work"] in ids))
-
-
 def stale_review(root: Path, passes: list[dict], ids: set[str], tier: int,
                  in_flight: set[str] | None = None,
                  reviewed: tuple[tuple[str, str], ...] = ()) -> str | None:
     """Why the clearing reviews of a plan no longer cover the code — None when
     one of them still does.
 
-    A pass records the `head` it reviewed; `_history` gathers what git says
-    about it and `decide` judges — one table, pinned row by row. Bookkeeping
+    A pass records the `head` it reviewed; `_history` compares what is
+    pushed with the states that head makes reviewed, and `decide` words the
+    verdict. Bookkeeping
     (journal, plans) is exempt: the attestation commit itself lands after the
     reviewed head. Fails closed: git errors and a head missing from a shallow
     clone are stale, not current.
@@ -2215,7 +2018,7 @@ def stale_review(root: Path, passes: list[dict], ids: set[str], tier: int,
         return None
     reason = None
     for r in with_head:
-        verdict, why = decide(_history(root, r["head"], reviewed=reviewed, bases=work_bases(passes, ids)), r["head"])
+        verdict, why = decide(_history(root, r["head"], reviewed=reviewed), r["head"])
         if verdict == "fresh":
             return None
         reason = why
@@ -2378,8 +2181,7 @@ def template_review_findings(root: Path, update: dict, passes: list[dict],
         covering = [r for r in passes if int(r['tier']) >= tier
                     and r.get('base') == update['base'] and r.get('head')
                     and r.get('mode', 'full') == 'full' and r['work'] in known]
-        if not any(_unreviewed_paths(root, r['head'], tip, work_bases(passes, {r['work']}),
-                                     _reviewed_heads(passes, tier, known)) == set()
+        if not any(_unreviewed_paths(root, r['head'], tip, _reviewed_heads(passes, tier, known)) == set()
                    for r in covering):
             findings.append(f'template update: tier {tier} REVIEW of the update range required for '
                             + ('the enforcement migration' if update['migration'] else

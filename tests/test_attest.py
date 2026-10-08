@@ -549,7 +549,7 @@ def _stale_gate(out):
 
 def test_an_amended_reviewed_commit_is_a_stale_review(render, tmp_path):
     # downstream review finding: after `commit --amend` the reviewed head is not
-    # in the history at all — there is no later code to diff, and it passed
+    # in the history at all; the content at the tip is what is judged
     out, base, head = _repo(render, tmp_path)
     assert _attest(out, "--base", base, "--head", head).returncode == 0
     journal = [str(p.relative_to(out)) for p in (out / ".process-work/journal").rglob("*.md")]
@@ -557,7 +557,7 @@ def test_an_amended_reviewed_commit_is_a_stale_review(render, tmp_path):
     _git(out, "add", "widget.py", *journal)
     _git(out, "commit", "-q", "--amend", "--no-edit")
     r = _stale_gate(out)
-    assert "is not in the history of what is pushed" in r.stdout, r.stdout
+    assert "code changed after the reviewed head (widget.py)" in r.stdout, r.stdout
 
 
 def test_a_rebased_and_amended_review_is_stale(render, tmp_path):
@@ -574,7 +574,7 @@ def test_a_rebased_and_amended_review_is_stale(render, tmp_path):
     (out / "widget.py").write_text("def widget():\n    return 8\n")
     _git(out, "commit", "-q", "-a", "--amend", "--no-edit")
     r = _stale_gate(out)
-    assert "is not in the history of what is pushed" in r.stdout, r.stdout
+    assert "code changed after the reviewed head (widget.py)" in r.stdout, r.stdout
 
 
 def test_the_reviewed_head_in_the_history_is_not_stale(render, tmp_path):
