@@ -74,6 +74,19 @@ path real callers take, at the cheapest level that reaches it. Two patterns wort
   behavior — gets a test that fails on the old behavior; the suite is the
   ratchet that keeps a caught defect caught.
 
+Two tests that pass and prove nothing (adapted from Matt Pocock's `tdd`, MIT):
+
+- **Tautological:** the expected value is computed the way the code computes
+  it (`assert add(a, b) == a + b`, a snapshot recorded from the code under
+  test), so it can never disagree. Expected values come from a source
+  independent of the code: a literal worked out by hand, an example from the
+  spec, a known-good output.
+- **Coupled to internals:** it mocks the code's own collaborators, calls
+  private functions, or checks a side channel (querying the table instead of
+  reading through the interface), so it breaks on a refactor and survives a
+  real regression. Mock only at the system's boundary — the network, the
+  clock, a third-party API — and assert what a caller can observe.
+
 ## Coverage numbers — the honest ceiling
 
 Line coverage measures *execution*, not *verification* — a suite can execute
