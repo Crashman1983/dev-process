@@ -86,8 +86,11 @@ a day downstream, with five reviewed candidates waiting.
    red stage never reached the later ones, and a retry of the failures
    alone would merge them untested (e.g. `pytest --lf`, which runs
    everything when nothing failed, per stage, after a `make -k` suite).
-   Downstream a deterministic red paid a second 24-minute suite before the
-   drop. Red
+   A run that left anything git sees in the worktree (a snapshot baseline
+   it generated, a rewritten lockfile) gets the rebuilt tree instead: the
+   retry would pass on that residue — keep the suite's own output
+   gitignored. Downstream a deterministic red paid a second 24-minute suite
+   before the drop. Red
    twice: the base itself is checked once (a red main blames nobody and
    aborts; its gates always run, its suite only when no earlier train saw
    it green on that very tree, `green-suites` in the train's directory —

@@ -1009,6 +1009,13 @@ def _settle_plans(wt: Path, base: str, branch: str, log) -> tuple[list[str], set
     return archived, issues
 
 
+def _changed_by_run(wt: Path) -> bool:
+    """Did a run leave anything git would see — a modified file or a new one
+    not ignored? Unreadable counts as changed."""
+    r = _git(wt, "status", "--porcelain")
+    return r.returncode != 0 or bool(r.stdout.strip())
+
+
 def retry_plan(red_in: str, retry: str | None) -> tuple[str, str]:
     """How a red combined tree is run once more before anybody is blamed —
     `(how, why)`, the whole rule: "gates" re-runs the process gates on the
@@ -1180,6 +1187,11 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
             # an offender — bisecting a flake blames whoever sits in the prefix
             retried = True
             how, why = retry_plan(red_in, retry)
+            if how != "full" and (last_wt is None or _changed_by_run(last_wt)):
+                # the first run wrote into the tree (a snapshot baseline it
+                # generated, a lockfile): the worktree is no longer the judged
+                # tree, and a retry there could pass on that residue (refutation)
+                how, why = "full", "the first run changed the worktree — rebuild and run the whole suite"
             log(f"red — retry of the same combined tree: {how} — {why} ({_load()})")
             if how == "gates" and last_wt is not None:
                 state = "green" if _run_gates(last_wt, log) else "red"
