@@ -77,6 +77,15 @@ and test for each spec risk, the test per acceptance criterion. Every
 signature, schema or API the plan cites is checked against the code
 (`file:line`), not recalled. No "n/a" rows: name only what the change touches.
 
+**Cut tasks for the smallest model.** Every decision the plan takes is one
+an executor does not have to: the best task is `[mechanical]` — exact files,
+the signature or contract to implement, the test to write with what makes it
+red, the command that proves it — and runs on the policy's mechanical cell, a
+small model (`docs/process/tower.md`, "Model by task class"). A task that
+still needs a judgment is `[design]` and names that judgment in one line;
+everything around it stays mechanical. Splitting a design task off its
+mechanical rest is cheaper than running the whole on the large model.
+
 **A plan is reviewed before `planned` (Tier 2+).** Build its bundle
 (`uv run scripts/process/make_review_bundle.py --plan <slug> -o
 .process-work/reviews/<slug>-plan.bundle.md`). **Tier 2:** hand the bundle
