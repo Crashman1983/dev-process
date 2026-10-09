@@ -38,7 +38,7 @@
   },
   "classes": {
     "mechanical": {
-      "execute": "claude-sonnet-5"
+      "execute": "claude-haiku-5"
     },
     "design": {
       "execute": "claude-opus-5"
