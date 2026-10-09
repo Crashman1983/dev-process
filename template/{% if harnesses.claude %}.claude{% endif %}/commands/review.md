@@ -115,7 +115,8 @@ Round economy — a failed round must not re-pay the whole chain:
   decided — a deviation is a finding — then the section's code questions. A
   plan review (`--plan-review`, a `-plan` bundle) reads only those Plan
   halves: is a dimension the change touches left undecided, is a cited
-  signature wrong against the code?
+  signature wrong against the code? Its pass (`work=<id>-plan`) clears the
+  plan for execute and boards nothing on the train.
 - **Short lenses.** Each lens reports in at most ~400 words, worst first, and
   every finding cites the rule, the plan or spec line, or the failure
   scenario it rests on — a finding that cites none is not one.
