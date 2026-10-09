@@ -21,7 +21,7 @@ Stdlib plus the `copier` CLI on PATH (uvx copier works; PyYAML, copier's
 own dependency, is used when importable). The two extra
 renders cost seconds; the manual port they replace cost an hour.
 
-Usage: template_update.py [root] [--ref <tag-or-sha>] [--dry-run]
+Usage: template_update.py [root] [--ref <tag-or-sha>] [--dry-run] | --verify …  (--help)
 """
 from __future__ import annotations
 
@@ -249,20 +249,29 @@ def leftover_conflicts(root: Path, owned: list[str]) -> list[str]:
     return hits
 
 
-def main() -> int:
-    args = sys.argv[1:]
+def main(argv: list[str] | None = None) -> int:
+    args = sys.argv[1:] if argv is None else argv
     if "--verify" in args:
         sys.path.insert(0, str(Path(__file__).resolve().parent))
         from template_verify import main as verify_main
         return verify_main([a for a in args if a != "--verify"])
-    ref: str | None = None
-    if "--ref" in args:
-        i = args.index("--ref")
-        ref = args[i + 1]
-        del args[i:i + 2]
-    dry = "--dry-run" in args
-    positional = [a for a in args if not a.startswith("--")]
-    root = Path(positional[0] if positional else ".").resolve()
+    # argparse, so `--help` prints and an unknown argument is refused: hand-read
+    # arguments let `--help` fall through to an update of the current checkout
+    # (downstream: copier output landed in a foreign checkout)
+    import argparse  # noqa: PLC0415
+    ap = argparse.ArgumentParser(prog="template_update.py",
+                                 description=__doc__.split("\n\n")[0].split(": ", 1)[-1])
+    ap.add_argument("root", nargs="?", default=".", help="the project to update (default: the current directory)")
+    ap.add_argument("--ref", help="the release tag or commit to update to (default: the latest release)")
+    ap.add_argument("--dry-run", action="store_true", help="check and report; change nothing")
+    ns = ap.parse_args(args)
+    ref: str | None = ns.ref
+    dry = ns.dry_run
+    root = Path(ns.root).resolve()
+    if not (root / ANSWERS).is_file():
+        print(f"template-update: {root} has no {ANSWERS} — not a project rendered from this template; "
+              "pass its root", file=sys.stderr)
+        return 2
     owned = owned_patterns(root)
     src, old_ref, data = answers(root)
     if not src or not old_ref:
