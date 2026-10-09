@@ -345,82 +345,68 @@ def _record_line(line: str) -> bool:
     return bool(records) and not errors
 
 
-_ATX_HEADING = re.compile(r" {0,3}#{1,6}(?:[ \t]|$)")
-_LIST_MARKER = re.compile(r"( {0,3})(?:[-*+]|\d{1,9}[.)])[ \t]")
-
-
-def _list_item(line: str) -> str | None:
-    """The indent of a list item line, None for any other line."""
-    m = _LIST_MARKER.match(line)
-    return m.group(1) if m else None
-
-
 # what `splitlines` reads as a line end and Markdown does not (refute #199:
 # U+0085 kept a closed fence open in the render)
 _ODD_LINE_ENDS = re.compile("[\x0b\x0c\x1c\x1d\x1e\x85\u2028\u2029]")
+_QUESTION = re.compile(r"[*_]*DECISION NEEDED\b")
+
+
+def _answer_in_place(question: str, answer: str) -> bool:
+    """Is `answer` the open `question` line answered where it stands: the same
+    prefix (indent, list marker) up to the question, then a dated DECISION?
+    The line stays the block it was — a list item stays that item."""
+    m = _QUESTION.search(question) if DECISION_NEEDED.match(question) else None
+    if m is None:
+        return False
+    prefix = question[:m.start()]
+    return answer.startswith(prefix) and bool(DECISION_LINE.match(answer)) \
+        and bool(re.match(r"[*_]*DECISION[*_]*[ \t]+\d{4}-\d{2}-\d{2}", answer[len(prefix):]))
 
 
 def records_only(before: str, after: str) -> bool:
-    """Is `after` the plan `before` plus records — REFUTE, ROOT-CAUSE, REVIEW
-    and DECISION lines added, an open `DECISION NEEDED` replaced by a
-    DECISION line — with every other line kept as it was? Such lines ride
-    the attestation commit after the reviewed head (`attest --with`,
+    """Is `after` the plan `before` plus records, and nothing else? Two shapes
+    count (#199): record lines — REFUTE, ROOT-CAUSE, REVIEW, a dated DECISION —
+    appended after the plan's last line, blank lines between them; and an open
+    `DECISION NEEDED` line answered in place (`_answer_in_place`). Such lines
+    ride the attestation commit after the reviewed head (`attest --with`,
     `--archive`); a Spec Kit plan is no bookkeeping, and they made its own
-    pass stale (#199). Prose, an edited or a deleted line is plan content:
-    not records only. So is a record line a reader does not see as one
-    (`readable`: inside a fence, an HTML comment, indented as code), and an
-    addition that joins or splits the paragraphs around it (refute #199: a
-    setext underline, a lazy continuation, a blank line that turned prose
-    into an invisible link definition): records go between blank lines,
-    next to other records, an open question or a heading, as a sibling list
-    item, or at the end of a list. The rendered plan, records aside, must
-    read exactly as before. Known limits: a record line's own inline markup
-    (a backtick closing a code span its record paragraph opened) is not
-    rendered here, and neither is list containment — a record list item
-    can turn an indented code block below it into list content (refute:
-    an indented `<!--` then hid a reviewed line)."""
+    pass stale. Anything else — prose, an edited, deleted or moved line, a
+    record inserted inside the plan — is plan content: a decision added in the
+    middle of a plan changes it, and a reviewer reads it.
+
+    Rebuilt after four refute rounds (DECISION in #199): rules that judged an
+    inserted record by the lines next to it kept letting a record regroup the
+    Markdown around it (a setext underline, a lazy continuation, a paragraph
+    split into a list whose item then opened a comment). At the end of the
+    plan nothing follows that a record could regroup; in place, the answered
+    line keeps its block. What renders must still match: an appended record a
+    reader does not see as one (inside an unclosed fence or comment, indented
+    as code) is content, and so is an answer whose inline markup hides text."""
     import difflib
     if _ODD_LINE_ENDS.findall(before) != _ODD_LINE_ENDS.findall(after):
         return False
     a, b = before.splitlines(), after.splitlines()
 
-    def blank(line: str | None) -> bool:
-        return line is None or not line.strip(" \t")  # U+00A0 is text to a renderer
-
-    def edge(line: str | None) -> bool:
-        # what a record may stand next to without regrouping it: a blank line,
-        # another record, the open question it answers, an ATX heading
-        return (blank(line) or _record_line(line) or bool(DECISION_NEEDED.match(line))
-                or bool(_ATX_HEADING.match(line)))
-
-    def sibling(line: str | None, record: str) -> bool:
-        # a record list item next to an item of the same list level
-        return line is not None and _list_item(line) is not None and _list_item(line) == _list_item(record)
+    def blank(line: str) -> bool:
+        return not line.strip(" \t")  # U+00A0 is text to a renderer
 
     added: list[str] = []
     answered: list[str] = []
     for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(None, a, b, autojunk=False).get_opcodes():
         if tag == "equal":
             continue
-        for line in a[i1:i2]:
-            if not DECISION_NEEDED.match(line):
-                return False
-            answered.append(line)
-        block = b[j1:j2]
-        records = [line for line in block if not blank(line)]
+        if tag == "replace" and i2 - i1 == j2 - j1 and \
+                all(_answer_in_place(q, r) for q, r in zip(a[i1:i2], b[j1:j2])):
+            answered += a[i1:i2]
+            added += b[j1:j2]
+            continue
+        if tag != "insert" or i1 != len(a):
+            return False  # a change inside the plan, not records after it
+        tail = b[j1:j2]
+        records = [line for line in tail if not blank(line)]
         if not records or not all(_record_line(line) for line in records):
-            return False  # prose, or blank lines alone (they regroup paragraphs)
-        prev = b[j1 - 1] if j1 > 0 else None
-        nxt = b[j2] if j2 < len(b) else None
-        left = (edge(prev) or (blank(block[0]) and blank(nxt)) or sibling(prev, block[0])
-                # the end of a list: the record continues its last item, visibly
-                or (_list_item(prev) is not None and not any(blank(x) for x in block) and blank(nxt)))
-        right = edge(nxt) or (blank(block[-1]) and blank(prev)) or sibling(nxt, block[-1])
-        if not (left and right):
-            return False  # it would join or split the paragraph next to it
+            return False
         added += records
-    if len(answered) > sum(1 for line in added if DECISION_LINE.match(line)):
-        return False  # a question dropped, not answered
 
     def content(text: str, drop: list[str]) -> tuple[list[str], Counter]:
         lines = [line for line in readable(text).splitlines() if not blank(line)]
