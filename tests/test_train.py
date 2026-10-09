@@ -1737,3 +1737,17 @@ def test_red_gates_rerun_the_gates_on_the_same_tree_then_the_suite(render, tmp_p
                          push=False, keep_branches=True, retry="make retry")
     assert len(builds) == 1 and runs == ["suite"]
     assert "gates —" in (tmp_path / "t.log").read_text()
+
+
+
+def test_a_run_that_wrote_into_the_tree_is_retried_on_a_rebuilt_one(render, tmp_path, monkeypatch):
+    # refutation: run 1 generated a snapshot baseline it then found missing;
+    # an in-place retry would pass on that file and merge a red tree
+    def sh(cmd, n):
+        if n == 1:
+            (tmp_path / "repo" / "baseline.png").write_text("written by the run")
+            return "red"
+        return "green"
+    builds, runs, log = _retry_batch(render, tmp_path, monkeypatch, retry="make retry", sh=sh)
+    assert runs[:2] == ["suite", "suite"] and builds[:2] == [["b1"], ["b1"]]
+    assert "changed the worktree" in log
