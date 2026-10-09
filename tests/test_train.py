@@ -1322,11 +1322,13 @@ def test_another_issues_active_plan_lends_the_branch_no_work_id(render, tmp_path
     assert not c["eligible"] and "no REVIEW pass for its own work" in " ".join(c["reasons"]), c
 
 
-def test_a_shared_slug_does_not_board_but_the_stem_does(render, tmp_path):
+@pytest.mark.parametrize("where", [".process-work/plans", ".process-work/plans/archive"])
+def test_a_shared_slug_does_not_board_but_the_stem_does(render, tmp_path, where):
+    """The gate takes a slug among the active plans now, and in the archive once
+    the merge archives the plan (refute #199: an archived namesake boarded)."""
     out = render(tmp_path, {"project_name": "d", "modules": {}})
     _repo(out)
-    # the gate's rule: a slug is the work id only where it is unique among the active plans
-    a = out / ".process-work/plans"
+    a = out / where
     a.mkdir(parents=True, exist_ok=True)
     (a / "2026-01-01-2260-work-expiry.md").write_text("# old\n\ntier: 2\nissue: #1\n")
     _git(out, "add", "-A")

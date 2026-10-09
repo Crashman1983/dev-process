@@ -1160,3 +1160,50 @@ def test_a_changed_byte_that_is_no_utf8_stays_late(spec_repo):
     _git(root, "add", "-A")
     _git(root, "commit", "-q", "-m", "byte edit and a record")
     assert _late(root, head) == {_SPEC}
+
+
+_TAIL = "\nREFUTE work=7-widget round=1: 3 scenarios, no findings\n"
+
+
+@pytest.mark.parametrize("change", [
+    # refute #199, second round: what regroups the paragraphs around a record
+    lambda t: t + "\n---\n" if "\n---\n" not in t else t,                                           # (base only)
+    lambda t: t.replace("## Tasks\n", "## Tasks\nprose\n[x]: http://evil\n").replace(
+        "prose\n", "prose\n\nREFUTE work=7-widget round=1: x\n\n"),                                    # link definition
+    lambda t: t + "\n \nREFUTE work=7-widget round=1: x\n",                                      # NBSP is text
+    lambda t: t + "\nREFUTE work=7-widget round=1: x\u0085\n",                                        # odd line end
+    lambda t: t + "\n\tREVIEW work=7-widget tier=2 reviewer=fresh model=cross independence=bundle verdict=pass round=1\n",
+    lambda t: t + "\n        REVIEW work=7-widget tier=2 reviewer=fresh model=cross independence=bundle verdict=pass round=1\n",
+    lambda t: t + "\nREVIEW work=7-widget tier=9 reviewer=fresh model=cross independence=bundle verdict=pass round=1\n",
+    lambda t: t + "\nDECISION 2026-10-02\n",                                                          # a date, no answer
+    lambda t: t + "\n\n\n",                                                                           # blank lines alone
+    lambda t: t.replace("- build it\n", "- build it\nREFUTE work=7-widget round=1: x\n"),            # joins the list item
+])
+def test_a_record_that_regroups_the_plan_stays_late(spec_repo, change):
+    root, _head = spec_repo
+    if change(_PLAN_TEXT).endswith("\n---\n"):
+        # setext: a record right above a thematic break turns into a heading
+        base = _PLAN_TEXT + "\n---\n"
+        head = _commit(root, _SPEC, base, "plan with a break")
+        _commit(root, _SPEC, base.replace("\n---\n", "\nREFUTE work=7-widget round=1: x\n---\n"), "late")
+        assert _late(root, head) == {_SPEC}
+        return
+    if "[x]: http://evil" in change(_PLAN_TEXT):
+        base = _PLAN_TEXT.replace("## Tasks\n", "## Tasks\nprose\n[x]: http://evil\n")
+        head = _commit(root, _SPEC, base, "plan with a reference-like line")
+    else:
+        head = _git(root, "rev-parse", "HEAD")
+    _commit(root, _SPEC, change(_PLAN_TEXT), "late")
+    assert _late(root, head) == {_SPEC}
+
+
+def test_a_record_next_to_records_keeps_the_review(spec_repo):
+    """The daily shape: one more bullet in the Decisions list."""
+    root, _head = spec_repo
+    listed = _PLAN_TEXT.replace("DECISION NEEDED 2026-10-01 seb: which store?",
+                                "- DECISION 2026-10-01: SQLite.")
+    head = _commit(root, _SPEC, listed, "reviewed plan")
+    _commit(root, _SPEC, listed.replace("- DECISION 2026-10-01: SQLite.\n",
+                                        "- DECISION 2026-10-01: SQLite.\n- DECISION 2026-10-03: Rest bleibt.\n"),
+            "attest")
+    assert _late(root, head) == set()

@@ -174,10 +174,14 @@ rebase replaced needs such a base, and any other review vouches only for
 the files its own range changed.
 A Spec Kit plan (`specs/<dir>/plan.md`) is no bookkeeping, but what the
 attestation commit adds to it is: REFUTE, ROOT-CAUSE, REVIEW and dated
-DECISION lines appended, an open `DECISION NEEDED` replaced by a DECISION,
-and its move to the archive with no more than that (`attest --with`,
-`--archive`; `check_review.records_only`). Any other line added, edited or
-deleted is plan content, and a fenced or indented record line is too.
+DECISION lines added between blank lines or next to other records, an open
+`DECISION NEEDED` replaced by a DECISION, and its move to the archive with
+no more than that (`attest --with`, `--archive`; `check_review.records_only`).
+Any other line added, edited or deleted is plan content; so is a record line
+a reader does not see as one (fenced, commented, indented as code) and one
+that joins or splits the paragraph next to it (a setext underline, a lazy
+continuation, a blank line that makes prose a link definition). A question
+marked answered in place, rather than rewritten to DECISION, is a change too.
 Everything else is unreviewed: code committed after the reviewed head — also
 a commit that sets a reviewed file back to main's version — any conflict
 resolution, whichever side it takes, and a merge that adds code of its own.

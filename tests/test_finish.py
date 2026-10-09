@@ -420,13 +420,14 @@ def _finish_module(out):
 def test_tests_run_without_a_shell(render, tmp_path):
     """#199: `--tests CMD` is argv, split once — no `shell=True` on argv text."""
     finish = _finish_module(_repo_on_feature(render, tmp_path))
-    assert finish.tests_argv("make test") == ["make", "test"]
-    assert finish.tests_argv("uv run pytest -k 'a or b|c'") == ["uv", "run", "pytest", "-k", "a or b|c"]
+    assert finish.tests_argv("make test") == (["make", "test"], {})
+    assert finish.tests_argv("uv run pytest -k 'a or b|c'") == (["uv", "run", "pytest", "-k", "a or b|c"], {})
+    assert finish.tests_argv("make test # note") == (["make", "test", "#", "note"], {})
     assert "shell=True" not in (Path(finish.__file__)).read_text()
 
 
 @pytest.mark.parametrize("cmd", ["make a && make b", "make test | tee log", "make test > log",
-                                 "make a; make b", "pytest 'unclosed", "   "])
+                                 "make a; make b", "pytest 'unclosed", "   ", "CI=1", "A=1 B=2"])
 def test_a_tests_command_that_needs_a_shell_is_refused(render, tmp_path, cmd):
     finish = _finish_module(_repo_on_feature(render, tmp_path))
     assert isinstance(finish.tests_argv(cmd), str)
@@ -440,11 +441,21 @@ def test_apply_refuses_a_shell_chain_before_merging(render, tmp_path):
 
 def test_tests_keep_an_env_prefix_and_refuse_a_newline(render, tmp_path):
     finish = _finish_module(_repo_on_feature(render, tmp_path))
-    assert finish.tests_argv("FOO=1 make test") == ["env", "FOO=1", "make", "test"]
+    assert finish.tests_argv("FOO=1 make test") == (["make", "test"], {"FOO": "1"})
     assert "newline" in finish.tests_argv("make test\nmake deploy")
 
 
-def test_apply_with_a_missing_tests_command_does_not_merge(render, tmp_path):
+@pytest.mark.parametrize("cmd", ["no-such-command-199", "FOO=1 no-such-command-199"])
+def test_apply_with_a_missing_tests_command_does_not_merge(render, tmp_path, cmd):
     out, _bare = _repo_with_origin(render, tmp_path)
-    r = _run_args(out, "--apply", "--tests", "no-such-command-199")
+    r = _run_args(out, "--apply", "--tests", cmd)
     assert r.returncode == 1 and "cannot run" in r.stdout and "Traceback" not in r.stderr, (r.stdout, r.stderr)
+
+
+def test_apply_with_an_assignment_alone_applies_nothing(render, tmp_path):
+    """Refute #199: `CI=1` alone ran `env`, exit 0, and merged."""
+    out, _bare = _repo_with_origin(render, tmp_path)
+    head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=out, capture_output=True, text=True).stdout
+    r = _run_args(out, "--apply", "--tests", "CI=1")
+    assert r.returncode == 1 and "names no command" in r.stdout and "nothing applied" in r.stdout, r.stdout
+    assert subprocess.run(["git", "rev-parse", "HEAD"], cwd=out, capture_output=True, text=True).stdout == head
