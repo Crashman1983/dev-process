@@ -46,7 +46,7 @@ wheels = [
 
 [[package]]
 name = "dev-process"
-version = "2.61.0"
+version = "2.62.0"
 source = { virtual = "." }
 
 [package.dev-dependencies]
