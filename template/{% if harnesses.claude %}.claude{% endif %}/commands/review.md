@@ -110,6 +110,12 @@ Round economy — a failed round must not re-pay the whole chain:
 - **A second owner blocks.** A rule the change re-implements although existing code owns it,
   proven by a differential test, is a blocking finding at every tier — unless the plan's
   `DECISION` names why the rule has two owners.
+- **The plan's decisions first.** Each section of `review-checklist.md`
+  opens with what the plan decides; check that the code does what the plan
+  decided — a deviation is a finding — then the section's code questions. A
+  plan review (`--plan-review`, a `-plan` bundle) reads only those Plan
+  halves: is a dimension the change touches left undecided, is a cited
+  signature wrong against the code?
 - **Short lenses.** Each lens reports in at most ~400 words, worst first, and
   every finding cites the rule, the plan or spec line, or the failure
   scenario it rests on — a finding that cites none is not one.

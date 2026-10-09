@@ -7,7 +7,7 @@ those rules, and a long session may have compacted them out. Then read
 `docs/process/risk-tiers.md`. Check completeness, correctness, and rule
 adherence against the plan or spec, working through
 `docs/process/review-checklist.md`, plus `review.local.md` in `docs/process/`
-where the project has one (it sharpens the checklist, never weakens it). Record the result with the
+where the project has one (it sharpens the checklist, never weakens it); each section's **Plan decides:** line first — does the code do what the plan decided? A plan review (`--plan-review`) reads only those lines. Record the result with the
 writer, never by hand: `python scripts/process/attest.py --work <id> --tier <n>
 --reviewer <id> --model <family> --independence … --verdict pass|block
 --bundle <bundle>` takes the reviewed range (base, head) from the bundle and
