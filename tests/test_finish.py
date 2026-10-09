@@ -436,3 +436,15 @@ def test_apply_refuses_a_shell_chain_before_merging(render, tmp_path):
     out, _bare = _repo_with_origin(render, tmp_path)
     r = _run_args(out, "--apply", "--tests", "true && true")
     assert r.returncode == 1 and "shell operator '&&'" in r.stdout, r.stdout
+
+
+def test_tests_keep_an_env_prefix_and_refuse_a_newline(render, tmp_path):
+    finish = _finish_module(_repo_on_feature(render, tmp_path))
+    assert finish.tests_argv("FOO=1 make test") == ["env", "FOO=1", "make", "test"]
+    assert "newline" in finish.tests_argv("make test\nmake deploy")
+
+
+def test_apply_with_a_missing_tests_command_does_not_merge(render, tmp_path):
+    out, _bare = _repo_with_origin(render, tmp_path)
+    r = _run_args(out, "--apply", "--tests", "no-such-command-199")
+    assert r.returncode == 1 and "cannot run" in r.stdout and "Traceback" not in r.stderr, (r.stdout, r.stderr)

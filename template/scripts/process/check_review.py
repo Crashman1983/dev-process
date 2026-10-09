@@ -311,38 +311,74 @@ ANSWERED_MARK = re.compile(
     re.IGNORECASE)
 
 
-# a line a plan carries as a record, not as plan content: a REFUTE, ROOT-CAUSE
-# or REVIEW line, or a dated DECISION (an open `DECISION NEEDED` is no answer)
-_RECORD_LEAD = r"^ {0,3}(?:(?:[-*+]|\d+[.)])[ \t]+(?:\[[xX]\][ \t]+)?)?[*_]*"
-_DECISION_RECORD = re.compile(_RECORD_LEAD + r"DECISION[*_]*[ \t]+\d{4}-\d{2}-\d{2}\b")
-_RECORD_LINE = re.compile(_RECORD_LEAD + r"(?:REFUTE|ROOT-CAUSE|REVIEW)[ \t]+work=\S")
+# The record lines a plan carries — one owner, read through `readable`:
+# at most three spaces of indent (four is a code block), any list marker, a
+# work id that is not the brief's placeholder, a round and what was found. A
+# bare `REFUTE work=x` or a line in backticks is a mention, not a record
+# (downstream review: both switched the refute warning off); the brief's
+# `<cause>` placeholder, a TODO or an ellipsis is a template, not a cause
+# (downstream refute: a fenced, a commented and a placeholder line each
+# passed). make_review_bundle reads REFUTE lines and attest ROOT-CAUSE lines
+# through these.
+_RECORD_LEAD = r"^ {0,3}(?:(?:[-*+]|\d+[.)])[ \t]+(?:\[[xX]\][ \t]+)?)?"
+REFUTE_LINE = re.compile(
+    _RECORD_LEAD + r"REFUTE[ \t]+work=(?P<work>(?!<)(?!TODO\b)[\w#./-]+)"
+    r"[ \t]+round=(?P<round>\d+):[ \t]*(?P<text>(?!<|TODO\b|…|\.\.\.)\S.*)$",
+    re.MULTILINE)
+ROOT_CAUSE_LINE = re.compile(
+    _RECORD_LEAD + r"ROOT-CAUSE[ \t]+"
+    r"work=(?P<work>(?!<)(?!TODO\b)\S+)[ \t]+round=(?P<round>\d+):[ \t]*(?!<|TODO\b|…|\.\.\.)\S",
+    re.MULTILINE)
+# a dated answer to the owner's question (an open `DECISION NEEDED` is none)
+DECISION_LINE = re.compile(_RECORD_LEAD + r"[*_]*DECISION[*_]*[ \t]+\d{4}-\d{2}-\d{2}\b\S*[ \t]*\S")
+
+
+def _record_line(line: str) -> bool:
+    """Is this one line a record — REFUTE, ROOT-CAUSE, a well-formed REVIEW
+    line or a dated DECISION?"""
+    if REFUTE_LINE.match(line) or ROOT_CAUSE_LINE.match(line) or DECISION_LINE.match(line):
+        return True
+    records, errors = parse_review_lines(line)
+    return bool(records) and not errors
 
 
 def records_only(before: str, after: str) -> bool:
     """Is `after` the plan `before` plus records — REFUTE, ROOT-CAUSE, REVIEW
     and DECISION lines and blank lines added, an open `DECISION NEEDED`
-    replaced by a DECISION line — with every other line kept in its order?
+    replaced by a DECISION line — with every other line kept as it was?
     Such lines ride the attestation commit after the reviewed head (`attest
     --with`, `--archive`); a Spec Kit plan is no bookkeeping, and they made
     its own pass stale (#199). Prose, an edited or a deleted line is plan
-    content: not records only. A fenced or indented record line reads as
-    content (its fence and indent are no record)."""
+    content: not records only. So is a record line a reader does not see as
+    one (`readable`: inside a fence, an HTML comment, indented as code) — the
+    rendered plan, records aside, must read exactly as before."""
     import difflib
     a, b = before.splitlines(), after.splitlines()
-    removed = decisions = 0
+    added: list[str] = []
+    answered: list[str] = []
     for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(None, a, b, autojunk=False).get_opcodes():
         if tag == "equal":
             continue
         for line in a[i1:i2]:
             if not DECISION_NEEDED.match(line):
                 return False
-            removed += 1
+            answered.append(line)
         for line in b[j1:j2]:
-            decision = bool(_DECISION_RECORD.match(line))
-            if line.strip() and not decision and not _RECORD_LINE.match(line):
+            if line.strip() and not _record_line(line):
                 return False
-            decisions += decision
-    return removed <= decisions
+            added += [line] if line.strip() else []
+    if len(answered) > sum(1 for line in added if DECISION_LINE.match(line)):
+        return False  # a question dropped, not answered
+
+    def content(text: str, drop: list[str]) -> tuple[list[str], Counter]:
+        lines = [line for line in readable(text).splitlines() if line.strip()]
+        records = Counter(line for line in lines if _record_line(line))
+        rest = Counter(lines) - records - Counter(drop)
+        return sorted(rest.elements()), records
+    rest_before, records_before = content(before, answered)
+    rest_after, records_after = content(after, [])
+    # every added record visible as written, nothing else read differently
+    return rest_before == rest_after and records_after - records_before == Counter(added)
 
 
 def open_questions(text: str) -> list[re.Match]:
@@ -916,7 +952,7 @@ def superseded_records(root: Path, records: list[dict], invalid: dict[int, str])
         if id(r) not in invalid or not r.get("head"):
             continue
         for v in sorted(later, key=lambda v: -int(v["round"])):
-            if (v["work"] == r["work"] and int(v["round"]) > int(r["round"])
+            if (work_key(v["work"]) == work_key(r["work"]) and int(v["round"]) > int(r["round"])
                     and _git_bytes(root, "merge-base", "--is-ancestor", r["head"], v["head"]) is not None
                     and full_round_base_problem(root, v["base"], v["head"]) is None):
                 out[id(r)] = f"round={v['round']} head={v['head'][:12]}"
@@ -1932,7 +1968,8 @@ def _records_since_review(root: Path, rel: str, judged: str,
     records only (`records_only`)? Unreadable is no."""
     def text(rev: str, path: str) -> str | None:
         raw = _git_bytes(root, "show", f"{rev}:{path}")
-        return raw.decode("utf-8", errors="replace") if raw is not None else None
+        # surrogateescape: a changed byte that is no UTF-8 stays a change
+        return raw.decode("utf-8", errors="surrogateescape") if raw is not None else None
     after = text(judged, rel)
     if after is None:
         after = text(judged, f"{PLANS_ARCHIVE}/{rel.split('/')[1]}.md")
@@ -2230,6 +2267,13 @@ def spec_dir_issue(fdir: Path) -> int | None:
             numbers = declared_issue_numbers(m.group(0))
             return numbers[0] if numbers else None
     return None
+
+
+def slug_counts(stems) -> Counter:
+    """How many of these plan stems share each de-dated slug — an active
+    plan's slug is its work id only where it is unique among the active plans
+    (the gate's rule; the train asks the same of a branch's active plans)."""
+    return Counter(DATE_PREFIX.sub("", stem) for stem in stems)
 
 
 def _plan_work_ids(stem: str, text: str, *, include_dedated: bool) -> set[str]:
@@ -2557,10 +2601,7 @@ def check(root: Path) -> tuple[list[str], list[str]]:
     merged_issues = issues_on_integration(root)
     if (root / PLANS_ACTIVE).is_dir():
         active_tier2 = 0
-        active_dedated: dict[str, int] = {}
-        for p in active:
-            key = DATE_PREFIX.sub("", p.stem)
-            active_dedated[key] = active_dedated.get(key, 0) + 1
+        active_dedated = slug_counts(p.stem for p in active)
         for p in active:
             if p.name.startswith("design-"):
                 continue

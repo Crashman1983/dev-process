@@ -436,14 +436,8 @@ SIZE_IGNORED = re.compile(r"^\.process-work/|(^|/)(package-lock\.json|uv\.lock|p
 
 # gate code as `docs/process/refute.md` defines it — the review gate owns the paths
 GATE_PATHS, GATE_FILES = _review_gate.GATE_PATHS, _review_gate.GATE_FILES
-# a real REFUTE line: at most three spaces of indent (four is a code block),
-# any list marker, a work id that is not the brief's placeholder, a round and
-# what was found. A bare `REFUTE work=x` or a line in backticks is a mention,
-# not a record (downstream review: both switched the warning off)
-REFUTE_LINE = re.compile(
-    r"^ {0,3}(?:(?:[-*+]|\d+[.)])[ \t]+(?:\[[xX]\][ \t]+)?)?REFUTE[ \t]+work=(?P<work>(?!<)(?!TODO\b)[\w#./-]+)"
-    r"[ \t]+round=(?P<round>\d+):[ \t]*(?P<text>(?!<|TODO\b|…|\.\.\.)\S.*)$",
-    re.MULTILINE)
+# a real REFUTE line — the review gate owns its shape (`check_review.REFUTE_LINE`)
+REFUTE_LINE = _review_gate.REFUTE_LINE
 # Known limit: an item nested four spaces deep reads as a code block and does
 # not count (a false warning, never a silent pass). Fenced blocks and HTML
 # comments are removed first, as check_review.readable renders them (its

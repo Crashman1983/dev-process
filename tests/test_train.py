@@ -1325,11 +1325,12 @@ def test_another_issues_active_plan_lends_the_branch_no_work_id(render, tmp_path
 def test_a_shared_slug_does_not_board_but_the_stem_does(render, tmp_path):
     out = render(tmp_path, {"project_name": "d", "modules": {}})
     _repo(out)
-    a = out / ".process-work/plans/archive"
+    # the gate's rule: a slug is the work id only where it is unique among the active plans
+    a = out / ".process-work/plans"
     a.mkdir(parents=True, exist_ok=True)
     (a / "2026-01-01-2260-work-expiry.md").write_text("# old\n\ntier: 2\nissue: #1\n")
     _git(out, "add", "-A")
-    _git(out, "commit", "-q", "-m", "an old plan with the same slug")
+    _git(out, "commit", "-q", "-m", "another active plan with the same slug")
     _slug_branch(out, "issue-2260", "2026-10-01-2260-work-expiry.md", issue=2260, work="2260-work-expiry",
                  files={"src/expiry.py": "x = 1\n"})
     _report(out, "issue-2260")

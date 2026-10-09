@@ -70,6 +70,7 @@ from check_review import (  # noqa: E402  (one owner for grammar, digest, record
     integration_targets,
     PLAN_KINDS,
     PLANS_ARCHIVE,
+    ROOT_CAUSE_LINE,
     _known_work,
     _plan_work_ids,
     _unfenced,
@@ -87,16 +88,9 @@ from check_review import (  # noqa: E402  (one owner for grammar, digest, record
     record_texts,
 )
 
-# read like a REFUTE line (make_review_bundle.REFUTE_LINE): at most three
-# spaces in (four is a code block), an optional list marker, a real work id
-# and real content — the brief's `<cause>` placeholder, a TODO or an ellipsis
-# is a template, not a cause. Fenced blocks and HTML comments are removed
-# before (check_review.readable): a quoted example is no record (downstream
-# refute: a fenced, a commented and a placeholder line each passed round 2).
-ROOT_CAUSE = re.compile(
-    r"^ {0,3}(?:(?:[-*+]|\d+[.)])[ \t]+(?:\[[xX]\][ \t]+)?)?ROOT-CAUSE[ \t]+"
-    r"work=(?P<work>(?!<)(?!TODO\b)\S+)[ \t]+round=(?P<round>\d+):[ \t]*(?!<|TODO\b|…|\.\.\.)\S",
-    re.MULTILINE)
+# a ROOT-CAUSE line — the review gate owns its shape (`check_review.ROOT_CAUSE_LINE`),
+# read through `readable`: a fenced, commented or placeholder line is no cause
+ROOT_CAUSE = ROOT_CAUSE_LINE
 
 # an older bundle's line also carries `diff=` and `mode=` — read past, never used
 ARTIFACT_LINE = re.compile(

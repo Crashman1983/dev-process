@@ -285,12 +285,16 @@ def candidates(root: Path, local: str, base: str) -> list[dict]:
         own_active = _own_plans(root, base, b, read)
         if own_active is None:
             branch_unreadable.append(f"the plans of {b}")
-        active_plans = [(r, t) for r, t in own_active or () if _review.record_kind(r) == "plan"]
-        active_slugs = [_review.DATE_PREFIX.sub("", Path(r).stem) for r, _t in active_plans]
-        for rel, plain in active_plans:
-            key = _review.DATE_PREFIX.sub("", Path(rel).stem)
-            unique = dedated.get(key, 0) + active_slugs.count(key) <= 1
-            own_ids |= _review._plan_work_ids(Path(rel).stem, plain, include_dedated=unique)
+        # a slug is unique among the active plans at the branch's tip, as the gate counts
+        at_tip = _paths(root, "ls-tree", "-r", "-z", "--name-only", b, "--", PLANS)
+        if at_tip is None:
+            branch_unreadable.append(f"the plans on {b}")
+        slugs = _review.slug_counts(Path(r).stem for r in at_tip or () if _review.record_kind(r) == "plan")
+        for rel, plain in own_active or ():
+            if _review.record_kind(rel) == "plan":
+                stem = Path(rel).stem
+                unique = at_tip is not None and slugs[_review.DATE_PREFIX.sub("", stem)] == 1
+                own_ids |= _review._plan_work_ids(stem, plain, include_dedated=unique)
         cleared_all = bool(archived) and all(p["cleared"] for p in c["plans"])
         if housekeeping:
             c["housekeeping"] = housekeeping
