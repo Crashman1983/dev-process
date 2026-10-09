@@ -31,8 +31,9 @@ A local branch boards when it is ahead of the integration branch and
   on seven such plans while its own review still ran). Its own **active**
   plan — added by the branch, or on the base with one of the branch's
   issues, the one rule the merge's archiving asks too — names its work as
-  well: a pass with `work=<stem>` or its unique slug is its own, as
-  `attest.py` accepts it (downstream, such a branch was refused until the
+  well: a pass with `work=<stem>` is its own, and one with its slug where
+  no other plan the merged tree may hold — the base's, active or archived,
+  or another candidate's new one — shares that slug (downstream, such a branch was refused until the
   pass said its issue number);
 - changes the gates' code (`scripts/process/`, `.githooks/`) only with a
   **REVIEW pass for its own work**, whatever its tier — no Tier 0-1 plan,

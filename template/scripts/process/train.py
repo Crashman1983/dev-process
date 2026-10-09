@@ -226,6 +226,18 @@ def candidates(root: Path, local: str, base: str) -> list[dict]:
     if listed is None:
         unreadable.append(f"the plans on {base}")
     base_plan_stems = {Path(r).stem for r in listed or ()}
+    # an active plan's slug is its work id where the gate takes it now and
+    # after the merge archives it: unique over what the merged tree may hold —
+    # the base's plans, active and archived, and every candidate's new ones
+    # (refute and review #199: a namesake on the base or on another car
+    # boarded the branch, then the gate refused its plan after the merge)
+    merged_stems = [Path(r).stem for r in listed or ()]
+    for b in branches:
+        new = _paths(root, "diff", "--name-only", "-z", "--diff-filter=A", f"{base}...{b}", "--", PLANS)
+        if new is None:
+            unreadable.append(f"the new plans of {b}")
+        merged_stems += [Path(r).stem for r in new or ()]
+    merged_slugs = _review.slug_counts(merged_stems)
     out: list[dict] = []
     for b in sorted(branches):
         counts = _out(root, "rev-list", "--left-right", "--count", f"{base}...{b}")
@@ -285,18 +297,10 @@ def candidates(root: Path, local: str, base: str) -> list[dict]:
         own_active = _own_plans(root, base, b, read)
         if own_active is None:
             branch_unreadable.append(f"the plans of {b}")
-        # a slug is its work id where the gate takes it now and after the merge
-        # archives the plan: unique among the active plans at the branch's tip,
-        # and in no archive this train sees (refute #199)
-        at_tip = _paths(root, "ls-tree", "-r", "-z", "--name-only", b, "--", PLANS)
-        if at_tip is None:
-            branch_unreadable.append(f"the plans on {b}")
-        slugs = _review.slug_counts(Path(r).stem for r in at_tip or () if _review.record_kind(r) == "plan")
         for rel, plain in own_active or ():
             if _review.record_kind(rel) == "plan":
                 stem = Path(rel).stem
-                key = _review.DATE_PREFIX.sub("", stem)
-                unique = at_tip is not None and slugs[key] == 1 and not dedated.get(key)
+                unique = merged_slugs[_review.DATE_PREFIX.sub("", stem)] == 1
                 own_ids |= _review._plan_work_ids(stem, plain, include_dedated=unique)
         cleared_all = bool(archived) and all(p["cleared"] for p in c["plans"])
         if housekeeping:
