@@ -7,4 +7,8 @@ lines to `specs/<feature>/plan.md`; `/speckit-analyze` at plan exit for Tier 3 o
 (`docs/process/modules/speckit.md`).
 {% else %}The design must be clarification-free: no unresolved `[NEEDS CLARIFICATION]`
 marker survives into a plan (the `clarification` gate blocks it).
-{% endif %}Required for Tier 2+.
+{% endif %}Required for Tier 2+. The plan names the decisions each touched section of
+`docs/process/review-checklist.md` asks for (its **Plan decides:** lines) and checks every
+signature it cites against the code. Before `planned`, a Tier 2+ plan is reviewed once,
+independently (`workflow.md`, Plan): Tier 2 by a fresh subagent on its bundle, attested with
+`attest.py --plan-review`; Tier 3 by a dispatched plan-review session.

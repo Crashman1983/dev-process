@@ -68,6 +68,28 @@ that owner — a second reader left behind judges the next input differently
 (`docs/process/failure-catalog.md`). `/execute` compares the final diff against
 this inventory before `pushed`; it does not build a second one.
 
+**The plan decides what the review will check.** Each section of
+`docs/process/review-checklist.md` opens with a **Plan decides:** line;
+for every dimension your change touches, the plan names that decision —
+bounds and a deadline for the whole operation, the error and return shape
+of each new interface, where untrusted input is validated, the countermeasure
+and test for each spec risk, the test per acceptance criterion. Every
+signature, schema or API the plan cites is checked against the code
+(`file:line`), not recalled. No "n/a" rows: name only what the change touches.
+
+**A plan is reviewed before `planned` (Tier 2+).** Build its bundle
+(`uv run scripts/process/make_review_bundle.py --plan <slug> -o
+.process-work/reviews/<slug>-plan.bundle.md`). **Tier 2:** hand the bundle
+to a fresh subagent that did not write the plan, with the Plan halves of the
+checklist as its brief — a cheap model is enough; blocks follow
+`verification-independence.md` ("What blocks"): a failure scenario, scored
+80 or more. Fix the plan, then attest the pass:
+`attest.py --plan-review --work <id> --tier 2 --model <family>
+--independence bundle,non-implementing --verdict pass --bundle <bundle>`.
+**Tier 3:** report `planned` without it — dispatch queues a plan-review
+session on a second model family, and execute only after its pass. Dispatch
+queues no execute for a Tier 2+ plan without a clearing plan pass.
+
 When the plan is committed, run the gates (`uv run scripts/process/gate_runner.py`) and fix in the plan what it turns red — a plan declaration a gate misses turns every execute push red, and dispatch queues no execute while they are red. Then `uv run scripts/process/report.py planned --issue N` (`/report`) — one line to the tower. An open question for the owner goes into the plan as `DECISION NEEDED <date> <you>: <question> — options: …; recommendation: …` plus `report.py blocked`; the steward relays it and writes the answer back as a `DECISION` line.
 
 **Open the `## Decisions` ledger in the plan** (`journal-state-plans.md`,

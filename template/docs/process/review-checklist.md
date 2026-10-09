@@ -10,7 +10,19 @@ pass over the relevant questions; Tier 2+ gets all of them; how *independent*
 the reviewer must be also scales (`verification-independence.md`) — the
 implementing agent does not self-certify.
 
+**One list, two halves.** Each section opens with what a **plan decides**,
+then asks what only the **code shows**. A plan names the decisions for the
+dimensions its change touches — no section is filled in with "n/a" — and the
+plan review (`workflow.md`, Plan) judges those halves: is a touched dimension
+left undecided? The code review reads both: first whether the code does what
+the plan decided (a deviation is itself a finding), then the questions below
+each line. A decision made only in code is found a round too late — that is
+what the Plan halves move forward.
+
 ## Completeness
+
+**Plan decides:** for every acceptance criterion by its id, the task that
+delivers it and the named test that proves it; where each new value ends up.
 
 - Does every new field, value, or side-effect reach its **terminal state**
   (persisted, emitted, displayed, or deliberately dropped)? Trace it from where
@@ -28,6 +40,12 @@ implementing agent does not self-certify.
 
 ## Correctness
 
+**Plan decides:** the error and return shape of every new or changed
+interface (what a caller gets on failure); idempotence where a call can be
+retried; for every risk the spec names, its countermeasure and the test that
+proves it; every signature, schema or API the plan cites, checked against the
+code with its place (`file:line`), not recalled.
+
 - What happens at the **boundaries**: empty input, a duplicate, a value at the
   limit, a concurrent caller, a collision? Each is a common source of a silent
   wrong answer or an unhandled crash.
@@ -38,6 +56,9 @@ implementing agent does not self-certify.
   test each: `docs/process/failure-catalog.md`.
 
 ## Silent failures — the defect that passes every test
+
+**Plan decides:** for each new failure path, whether the operation stops
+or proceeds (fail closed or open, and why), and who is told.
 
 The most expensive defects downstream were not crashes but failures nobody
 saw: a lock released while its owner could still write, an attachment lost
@@ -61,6 +82,10 @@ handles a failure (adapted from Claude Code's `silent-failure-hunter`):
 
 ## Performance & efficiency
 
+**Plan decides:** a bound on every external input and call — size, count,
+a timeout per call *and* a deadline for the whole operation — and how a load
+stays bounded (pagination, streaming).
+
 - Does the change add work that grows with the input — an **N+1** query, a loop
   that re-fetches or re-computes per item, an **unbounded** collection, a full
   scan where a keyed lookup exists?
@@ -72,6 +97,10 @@ handles a failure (adapted from Claude Code's `silent-failure-hunter`):
   gold-plate a cold one — flag premature optimization too.
 
 ## Security — untrusted input reaching a sink
+
+**Plan decides:** where untrusted input enters, which sinks it reaches and
+where it is validated — at Tier 2 as well; at Tier 3 also the threat answer
+below.
 
 The dangerous class a junior most often misses. Untrusted input is not only a
 web form — a request body, a CLI argument, a config value, a file, a queue
@@ -97,6 +126,10 @@ is not ready to pass.
 
 ## Observability & operability
 
+**Plan decides:** what is logged or measured at each new failure point,
+which new dependency or config fails fast at startup, and how the change is
+released and reverted (migration compatibility, rollback without a data fix).
+
 - When this **fails in production, will anyone know**? Is there a log, metric,
   or trace at the failure point carrying enough context to diagnose it — the
   ids, not the secrets?
@@ -111,6 +144,9 @@ is not ready to pass.
   data fix?
 
 ## Design — one owner per behavior
+
+**Plan decides:** the owner of each behavior the change adds or alters —
+the existing one extended, or a new one with its reason.
 
 - Does this change **duplicate** an existing behavior instead of changing its
   owner? A second function, flag, wrapper, or fallback that overlaps something
@@ -179,6 +215,9 @@ supply:
 
 ## Surfaces — the UI acceptance floor
 
+**Plan decides:** the four states, the reuse map (DoR R5) and the design
+contract IDs the surface follows.
+
 For any change with a UI surface. These are the defects that ship when nobody
 opens the page: each is cheap to see and expensive to discover from a user.
 Evidence is the rendered state (a browser, a screenshot, an in-page check),
@@ -223,6 +262,9 @@ Where a stack guide exists it sharpens this floor with the framework's
 specifics (which token, which component library); it does not lower it.
 
 ## Tests prove acceptance
+
+**Plan decides:** the test that goes red first for each criterion and risk,
+and the layer it runs at.
 
 - Does a **test map to each acceptance criterion** the change claims? A feature
   without a test proving its acceptance is not done (mandatory rule 5).
