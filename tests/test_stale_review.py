@@ -1050,3 +1050,78 @@ def test_a_review_based_on_reviewed_content_counts_whole(tmp_path):
     found = mod.stale_review(root, [{"work": "c", "tier": "2", "head": h_c, "base": fork}], {"c"}, 2, set(),
                              reviewed + ((below, h_d),))
     assert found is not None and "u.py" in found and "d.py" not in found, found
+
+
+# --- #199: a Spec Kit plan's records ride the attestation commit ---
+
+_SPEC = "specs/7-widget/plan.md"
+_PLAN_TEXT = "# Widget\n\ntier: 2\n\n## Decisions\n\nDECISION NEEDED 2026-10-01 seb: which store?\n\n## Tasks\n\n- build it\n"
+
+
+@pytest.fixture
+def spec_repo(repo):
+    root, _head = repo
+    head = _commit(root, _SPEC, _PLAN_TEXT, "plan and work")
+    return root, head
+
+
+def _late(root, head):
+    return _mod()._unreviewed_paths(root, head, "HEAD")
+
+
+@pytest.mark.parametrize("added", [
+    "REFUTE work=7-widget round=1: 14 scenarios, 2 findings — fixed\n",
+    "- DECISION 2026-10-02: Ein Finding bleibt, weil es nur lokal wirkt.\n",
+    "ROOT-CAUSE work=7-widget round=2: der Cache las den alten Stand\n\n"
+    "REVIEW work=7-widget tier=2 reviewer=fresh model=cross independence=bundle verdict=pass round=1\n",
+])
+def test_record_lines_appended_to_a_spec_plan_keep_its_review(spec_repo, added):
+    root, head = spec_repo
+    _commit(root, _SPEC, _PLAN_TEXT + "\n" + added, "attest")
+    assert _late(root, head) == set()
+
+
+def test_an_answered_decision_needed_keeps_the_review(spec_repo):
+    root, head = spec_repo
+    answered = _PLAN_TEXT.replace("DECISION NEEDED 2026-10-01 seb: which store?",
+                                  "DECISION 2026-10-02: SQLite, weil schon da.")
+    _commit(root, _SPEC, answered, "attest")
+    assert _late(root, head) == set()
+
+
+@pytest.mark.parametrize("change", [
+    lambda t: t + "\n- one more task\n",                                     # prose added
+    lambda t: t.replace("- build it", "- build it twice"),                   # a line edited
+    lambda t: t.replace("- build it\n", ""),                                 # a line deleted
+    lambda t: t.replace("DECISION NEEDED 2026-10-01 seb: which store?\n", ""),  # a question dropped
+    lambda t: t + "\n```\nREFUTE work=7-widget round=1: fenced\n```\n",      # a fenced record
+    lambda t: t + "\n    REFUTE work=7-widget round=1: indented\n",          # an indented one
+])
+def test_plan_content_after_the_review_stays_late(spec_repo, change):
+    root, head = spec_repo
+    _commit(root, _SPEC, change(_PLAN_TEXT), "late plan change")
+    assert _late(root, head) == {_SPEC}
+
+
+def test_a_spec_plan_archived_with_records_keeps_its_review(spec_repo):
+    root, head = spec_repo
+    (root / ".process-work/plans/archive").mkdir(parents=True)
+    _git(root, "mv", _SPEC, ".process-work/plans/archive/7-widget.md")
+    _commit(root, ".process-work/plans/archive/7-widget.md",
+            _PLAN_TEXT + "\nREFUTE work=7-widget round=1: 3 scenarios, no findings\n", "attest --archive")
+    assert _late(root, head) == set()
+
+
+def test_a_spec_plan_archived_with_new_content_stays_late(spec_repo):
+    root, head = spec_repo
+    (root / ".process-work/plans/archive").mkdir(parents=True)
+    _git(root, "mv", _SPEC, ".process-work/plans/archive/7-widget.md")
+    _commit(root, ".process-work/plans/archive/7-widget.md", _PLAN_TEXT + "\n- a new task\n", "archive")
+    assert _late(root, head) == {_SPEC}
+
+
+def test_a_spec_plan_deleted_without_archive_stays_late(spec_repo):
+    root, head = spec_repo
+    _git(root, "rm", "-q", _SPEC)
+    _git(root, "commit", "-q", "-m", "drop the plan")
+    assert _late(root, head) == {_SPEC}

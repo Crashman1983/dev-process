@@ -274,6 +274,23 @@ def candidates(root: Path, local: str, base: str) -> list[dict]:
             c["plans"].append({"path": rel, "tier": tier, "cleared": ok, "waived": waived,
                                **({"verified_template": True} if pure_template else {})})
         archived = own_archived
+        # its own active plans name its work too: the merge archives them
+        # (`_settle_plans`), and their REVIEW says `work=<stem>` or `<slug>`
+        def read(rel: str, b: str = b) -> str | None:
+            shown = _git(root, "show", f"{b}:{rel}")
+            if shown.returncode != 0:
+                branch_unreadable.append(f"{rel} on {b}")
+                return None
+            return shown.stdout
+        own_active = _own_plans(root, base, b, read)
+        if own_active is None:
+            branch_unreadable.append(f"the plans of {b}")
+        active_plans = [(r, t) for r, t in own_active or () if _review.record_kind(r) == "plan"]
+        active_slugs = [_review.DATE_PREFIX.sub("", Path(r).stem) for r, _t in active_plans]
+        for rel, plain in active_plans:
+            key = _review.DATE_PREFIX.sub("", Path(rel).stem)
+            unique = dedated.get(key, 0) + active_slugs.count(key) <= 1
+            own_ids |= _review._plan_work_ids(Path(rel).stem, plain, include_dedated=unique)
         cleared_all = bool(archived) and all(p["cleared"] for p in c["plans"])
         if housekeeping:
             c["housekeeping"] = housekeeping
@@ -937,6 +954,41 @@ STAYS_ACTIVE = re.compile(_review._LEAD + r"plan-stays-active[*_]*\s*:\s*[*_]*\s
 _OPEN_TASK = re.compile(r"^\s*[-*+] \[ \]", re.MULTILINE)
 
 
+def _own_plans(root: Path, base: str, branch: str, read) -> list[tuple[str, str]] | None:
+    """The plans under PLANS that are `branch`'s own, as (path, unfenced text):
+    added by the branch (git's rename detection: a plan the branch only
+    renamed or moved is not new), or already on the base with one of the
+    branch's issues among its issues — another work's plan the branch
+    touched, renamed or archived is never its own (a refutation closed issues
+    through a slug in a branch name). Boarding and the merge's settling ask
+    this one rule (#199: an active plan's ids counted only once archived, and
+    a `work=<slug>` pass did not board). `read(rel)` gives the text, None when
+    there is none; None when git cannot list the plans."""
+    entries = _review.name_status(
+        _git_bytes(root, "diff", "--name-status", "-M", "-z", f"{base}...{branch}", "--", PLANS))
+    if entries is None:
+        return None
+    issues = _branch_issues(root, branch)
+    own: list[tuple[str, str]] = []
+    for letter, source, rel in entries:
+        if letter == "D" or not rel.endswith(".md"):
+            continue
+        text = read(rel)
+        if text is None:
+            continue
+        plain = _review._unfenced(text)
+        added = letter == "A"
+        if letter == "R" and source:
+            # git pairs a deleted old plan with a new, similar one as a rename:
+            # a plan for other issues is a new plan, not the old one moved
+            fork = _out(root, "merge-base", base, branch) or base
+            old = _review._unfenced(_out(root, "show", f"{fork}:{source}"))
+            added = _local_issues(old) != _local_issues(plain)
+        if added or {str(n) for n in _local_issues(plain)} & issues:
+            own.append((rel, plain))
+    return own
+
+
 def _settle_plans(wt: Path, base: str, branch: str, log) -> tuple[list[str], set[int]]:
     """What merging `branch` finishes: its own active plans that are done —
     a declared tier, no open task, a clearing review (or none required) —
@@ -956,38 +1008,24 @@ def _settle_plans(wt: Path, base: str, branch: str, log) -> tuple[list[str], set
     refutation closed issues through a slug in a branch name)."""
     records = _review.record_texts(wt, ("journal",)) or []
     passes = _review.review_passes(wt, (text for _rel, text in records), branch)
-    # (status letter, source on base or "", path now) — the owner reads the -z form
-    listed = _git_bytes(wt, "diff", "--name-status", "-M", "-z", f"{base}...{branch}", "--", PLANS)
-    entries = _review.name_status(listed) or []
     listed = _paths(wt, "ls-files", "-z", "--", PLANS)
     stems = [Path(n).stem for n in listed or () if n.endswith(".md")]
     dedated: dict[str, int] = {}
     for stem in stems:
         key = _review.DATE_PREFIX.sub("", stem)
         dedated[key] = dedated.get(key, 0) + 1
-    branch_issue = _branch_issues(wt, branch)
+
+    def read(rel: str) -> str | None:
+        f = wt / rel
+        return f.read_text(encoding="utf-8", errors="replace") if f.is_file() else None
+
     archived: list[str] = []
     issues: set[int] = set()
-    for letter, source, rel in entries:
-        f = wt / rel
-        if letter == "D" or not rel.endswith(".md") or not f.is_file():
-            continue
-        text = f.read_text(encoding="utf-8", errors="replace")
-        plain = _review._unfenced(text)
+    for rel, plain in _own_plans(wt, base, branch, read) or []:
         stem = Path(rel).stem
         # without the listing no de-dated slug is known to be unique
         unique = listed is not None and dedated.get(_review.DATE_PREFIX.sub("", stem), 0) <= 1
         ids = _review._plan_work_ids(stem, plain, include_dedated=unique)
-        numbers = {str(n) for n in _local_issues(plain)}
-        added = letter == "A"
-        if letter == "R" and source:
-            # git pairs a deleted old plan with a new, similar one as a rename:
-            # a plan for other issues is a new plan, not the old one moved
-            fork = _out(wt, "merge-base", base, branch) or base
-            old = _review._unfenced(_out(wt, "show", f"{fork}:{source}"))
-            added = _local_issues(old) != _local_issues(plain)
-        if not added and not (numbers & branch_issue):
-            continue  # another work's plan: touched, renamed or archived here
         if STAYS_ACTIVE.search(plain):
             continue
         tier = _review.plan_tier(plain)

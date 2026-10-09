@@ -311,6 +311,40 @@ ANSWERED_MARK = re.compile(
     re.IGNORECASE)
 
 
+# a line a plan carries as a record, not as plan content: a REFUTE, ROOT-CAUSE
+# or REVIEW line, or a dated DECISION (an open `DECISION NEEDED` is no answer)
+_RECORD_LEAD = r"^ {0,3}(?:(?:[-*+]|\d+[.)])[ \t]+(?:\[[xX]\][ \t]+)?)?[*_]*"
+_DECISION_RECORD = re.compile(_RECORD_LEAD + r"DECISION[*_]*[ \t]+\d{4}-\d{2}-\d{2}\b")
+_RECORD_LINE = re.compile(_RECORD_LEAD + r"(?:REFUTE|ROOT-CAUSE|REVIEW)[ \t]+work=\S")
+
+
+def records_only(before: str, after: str) -> bool:
+    """Is `after` the plan `before` plus records — REFUTE, ROOT-CAUSE, REVIEW
+    and DECISION lines and blank lines added, an open `DECISION NEEDED`
+    replaced by a DECISION line — with every other line kept in its order?
+    Such lines ride the attestation commit after the reviewed head (`attest
+    --with`, `--archive`); a Spec Kit plan is no bookkeeping, and they made
+    its own pass stale (#199). Prose, an edited or a deleted line is plan
+    content: not records only. A fenced or indented record line reads as
+    content (its fence and indent are no record)."""
+    import difflib
+    a, b = before.splitlines(), after.splitlines()
+    removed = decisions = 0
+    for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(None, a, b, autojunk=False).get_opcodes():
+        if tag == "equal":
+            continue
+        for line in a[i1:i2]:
+            if not DECISION_NEEDED.match(line):
+                return False
+            removed += 1
+        for line in b[j1:j2]:
+            decision = bool(_DECISION_RECORD.match(line))
+            if line.strip() and not decision and not _RECORD_LINE.match(line):
+                return False
+            decisions += decision
+    return removed <= decisions
+
+
 def open_questions(text: str) -> list[re.Match]:
     """The still-open `DECISION NEEDED` lines of a plan, fenced examples left out."""
     return [m for m in DECISION_NEEDED.finditer(_unfenced(text))
@@ -865,6 +899,29 @@ def invalid_records(root: Path, records: list[dict], tip: str = "HEAD") -> dict[
     rounds off their fork point (`invalid_full_rounds`) — the gate, the
     standing-block arm and the train read passes through here."""
     return invalid_full_rounds(root, records, tip)
+
+
+def superseded_records(root: Path, records: list[dict], invalid: dict[int, str]) -> dict[int, str]:
+    """id(record) → the later round that supersedes it, for invalid records a
+    valid full round of the same work with a higher round covers: its base is
+    the fork point of its head (`full_round_base_problem`) and its head
+    descends from the invalid record's head. Such a round reviewed everything
+    from the fork point on, the off-fork line included, so the line hides no
+    unreviewed code — it stays invalid and clears nothing (a block stays a
+    block), but no longer stops every push (downstream: a pre-v2.53 delta
+    line held two branches after their merge of main)."""
+    later = [r for r in records if id(r) not in invalid and r.get("base") and r.get("head")]
+    out: dict[int, str] = {}
+    for r in records:
+        if id(r) not in invalid or not r.get("head"):
+            continue
+        for v in sorted(later, key=lambda v: -int(v["round"])):
+            if (v["work"] == r["work"] and int(v["round"]) > int(r["round"])
+                    and _git_bytes(root, "merge-base", "--is-ancestor", r["head"], v["head"]) is not None
+                    and full_round_base_problem(root, v["base"], v["head"]) is None):
+                out[id(r)] = f"round={v['round']} head={v['head'][:12]}"
+                break
+    return out
 
 
 def valid_passes(root: Path, records: list[dict], tip: str = "HEAD") -> list[dict]:
@@ -1862,7 +1919,30 @@ def _unreviewed_at(root: Path, head: str, head_base: str, judged: str, integ: st
             hit = matched(mine, merged) if merged is not None else None
             if hit:
                 left -= hit
+    for p in sorted(p for p in left if record_kind(p) == "spec-plan"):
+        if _records_since_review(root, p, judged, states):
+            left.discard(p)
     return left
+
+
+def _records_since_review(root: Path, rel: str, judged: str,
+                          states: list[tuple[str, frozenset[str]]]) -> bool:
+    """Is the Spec Kit plan `rel` at `judged` — or, gone from there, its
+    archived copy (`attest --archive`) — a reviewed state's version plus
+    records only (`records_only`)? Unreadable is no."""
+    def text(rev: str, path: str) -> str | None:
+        raw = _git_bytes(root, "show", f"{rev}:{path}")
+        return raw.decode("utf-8", errors="replace") if raw is not None else None
+    after = text(judged, rel)
+    if after is None:
+        after = text(judged, f"{PLANS_ARCHIVE}/{rel.split('/')[1]}.md")
+    if after is None:
+        return False
+    for commit, conflicted in states:
+        before = text(commit, rel) if rel not in conflicted else None
+        if before is not None and records_only(before, after):
+            return True
+    return False
 
 
 def _history(root: Path, head: str, tip: str = "HEAD",
@@ -2340,8 +2420,12 @@ def check(root: Path) -> tuple[list[str], list[str]]:
         all_records.extend(records)
         located += [(rel, lineno, f) for lineno, f in records]
     invalid = invalid_records(root, [f for _ln, f in all_records])
+    superseded = superseded_records(root, [f for _ln, f in all_records], invalid) if invalid else {}
     for rel, lineno, f in located:
-        if id(f) in invalid:
+        if id(f) in superseded:
+            soft.append(f"{rel}:{lineno}: REVIEW line clears nothing — {invalid[id(f)]}; "
+                        f"superseded by the valid {superseded[id(f)]}")
+        elif id(f) in invalid:
             hard.append(f"{rel}:{lineno}: malformed REVIEW line — {invalid[id(f)]}")
     unchecked = unchecked_full_rounds(root, [f for _ln, f in all_records])
     if unbounded_full_rounds(root, [f for _ln, f in all_records]):

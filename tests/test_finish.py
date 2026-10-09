@@ -406,3 +406,33 @@ def test_apply_marks_only_its_own_push_to_main(render, tmp_path):
     hand = subprocess.run(["git", "push", "-q", "origin", "main"], cwd=out, capture_output=True,
                           text=True, env=env)
     assert hand.returncode != 0 and "merge_route" in hand.stderr
+
+
+def _finish_module(out):
+    import importlib.util
+    sys.path.insert(0, str(out / "scripts/process"))
+    spec = importlib.util.spec_from_file_location("finish_argv", out / "scripts/process/finish.py")
+    finish = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(finish)
+    return finish
+
+
+def test_tests_run_without_a_shell(render, tmp_path):
+    """#199: `--tests CMD` is argv, split once — no `shell=True` on argv text."""
+    finish = _finish_module(_repo_on_feature(render, tmp_path))
+    assert finish.tests_argv("make test") == ["make", "test"]
+    assert finish.tests_argv("uv run pytest -k 'a or b|c'") == ["uv", "run", "pytest", "-k", "a or b|c"]
+    assert "shell=True" not in (Path(finish.__file__)).read_text()
+
+
+@pytest.mark.parametrize("cmd", ["make a && make b", "make test | tee log", "make test > log",
+                                 "make a; make b", "pytest 'unclosed", "   "])
+def test_a_tests_command_that_needs_a_shell_is_refused(render, tmp_path, cmd):
+    finish = _finish_module(_repo_on_feature(render, tmp_path))
+    assert isinstance(finish.tests_argv(cmd), str)
+
+
+def test_apply_refuses_a_shell_chain_before_merging(render, tmp_path):
+    out, _bare = _repo_with_origin(render, tmp_path)
+    r = _run_args(out, "--apply", "--tests", "true && true")
+    assert r.returncode == 1 and "shell operator '&&'" in r.stdout, r.stdout
