@@ -1869,3 +1869,23 @@ def test_a_tree_this_train_saw_green_is_not_run_again_after_the_drop(render, tmp
     # combined, its retry, the base, the probe [b1] — and no fifth run for the rebuilt [b1]
     assert runs == [["b1", "b2"], ["b1", "b2"], [], ["b1"]]
     assert "green earlier in this train" in (tmp_path / "t.log").read_text()
+
+
+@pytest.mark.parametrize("namesake", ["main-after-fork", "other-car"])
+def test_a_slug_another_plan_of_the_merged_tree_shares_does_not_board(render, tmp_path, namesake):
+    """Review #199: unique at the branch tip is not enough — the merged tree
+    decides whether the gate takes the slug after the merge archives the plan."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _slug_branch(out, "issue-2260", "2026-10-01-2260-work-expiry.md", issue=2260, work="2260-work-expiry",
+                 files={"src/expiry.py": "x = 1\n"})
+    if namesake == "main-after-fork":
+        plans = out / ".process-work/plans"
+        (plans / "2026-10-05-2260-work-expiry.md").write_text("# other\n\ntier: 2\nissue: #2300\n")
+        _git(out, "add", "-A")
+        _git(out, "commit", "-q", "-m", "a namesake on main")
+    else:
+        _slug_branch(out, "issue-2300", "2026-10-05-2260-work-expiry.md", issue=2300, work="x",
+                     files={"src/other.py": "y = 1\n"})
+    _report(out, "issue-2260")
+    assert not _candidate(out, "issue-2260")["eligible"]
