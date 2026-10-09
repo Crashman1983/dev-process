@@ -1800,6 +1800,19 @@ def test_plan_gates_reads_the_runner_verdict(render, tmp_path):
     assert mod.plan_gates(out) is None  # no gates in this project
 
 
+def _plan_pass(out: Path, tier: int, work: str = "2026-10-09-fetch") -> None:
+    """Attest a plan pass on the branch's current head, as attest.py writes it."""
+    base = _git(out, "merge-base", "main", "HEAD").stdout.strip()
+    head = _git(out, "rev-parse", "HEAD").stdout.strip()
+    j = out / ".process-work/journal"
+    j.mkdir(parents=True, exist_ok=True)
+    with (j / "2026-10-09-b.md").open("a") as fh:
+        fh.write(f"REVIEW work={work}-plan tier={tier} reviewer=fresh model=cross "
+                 f"independence=bundle,non-implementing verdict=pass round=1 base={base} head={head}\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "attest the plan")
+
+
 def _planned_branch(out: Path, tier: int, plan_pass: bool):
     """A branch adding a Tier `tier` plan, its session reported `planned`."""
     _repo(out)
@@ -1807,14 +1820,10 @@ def _planned_branch(out: Path, tier: int, plan_pass: bool):
     plans = out / ".process-work/plans"
     plans.mkdir(parents=True, exist_ok=True)
     (plans / "2026-10-09-fetch.md").write_text(f"# fetch\n\ntier: {tier}\nissue: #7\n\n## Decisions\n")
-    if plan_pass:
-        j = out / ".process-work/journal"
-        j.mkdir(parents=True, exist_ok=True)
-        (j / "2026-10-09-b.md").write_text(
-            f"REVIEW work=2026-10-09-fetch-plan tier={tier} reviewer=fresh model=cross "
-            "independence=bundle,non-implementing verdict=pass round=1\n")
     _git(out, "add", "-A")
     _git(out, "commit", "-q", "-m", "plan")
+    if plan_pass:
+        _plan_pass(out, tier)
 
 
 def _chain_planned(mod, out, monkeypatch, *, phase="plan", plan_review=False, state="planned"):
@@ -1870,3 +1879,24 @@ def test_a_plan_review_prompt_reviews_the_plan_not_the_code(render, tmp_path):
     p = mod.prompt_for("review", 7, 3, "b", "m", plan_review=True)
     assert "--plan-review" in p and "Refuting a plan" in p and "never edit the plan" in p
     assert "--plan-review" not in mod.prompt_for("review", 7, 3, "b", "m")
+
+
+def test_a_plan_pass_counts_for_the_plan_text_it_reviewed(render, tmp_path, monkeypatch):
+    # refutation: an issue id shared by two plans, or a plan edited after its
+    # review, must not ride on another text's pass
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _planned_branch(out, 2, plan_pass=True)
+    mod = _load_dispatch(out)
+    assert mod.plan_review_state(out, out) == (2, True)
+    plan = out / ".process-work/plans/2026-10-09-fetch.md"
+    plan.write_text(plan.read_text() + "\n- [ ] a task added after the review\n")
+    _git(out, "commit", "-q", "-am", "edit the plan after its review")
+    assert mod.plan_review_state(out, out) == (2, False)
+    # a second plan of the same issue: the first one's fresh pass does not clear it
+    _plan_pass(out, 2)
+    (out / ".process-work/plans/2026-10-09-ios.md").write_text("# ios\n\ntier: 2\nissue: #7\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "second plan, same issue")
+    assert mod.plan_review_state(out, out) == (2, False)
+    _plan_pass(out, 2, work="7")  # attested by issue id, on a head holding both texts
+    assert mod.plan_review_state(out, out) == (2, True)

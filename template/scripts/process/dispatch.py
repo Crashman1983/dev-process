@@ -42,12 +42,14 @@ non-zero naming the branch when the text still has not gone.
 
 Phases chain themselves (`chain`, run it from the steward's tick): a
 `planned` plan session is stopped and `execute` queued — unless the
-process gates are red on its worktree (`plan_gates`: the plan session never
-pushes, so they would first see the plan at the execute push), or its Tier
+process gates are red on its worktree (`plan_gates`: a plan session need not
+push, so they would first see the plan at the execute push), or its Tier
 2+ plan has no clearing `REVIEW work=<id>-plan` pass (`plan_review_state`):
 Tier 2 then waits for the plan session's own subagent review, Tier 3 gets a
 dispatched plan review (`review` with `plan_review`) whose pass queues
-execute; a `pushed` execute
+execute — a pass counts for the plan text it reviewed only; chain acts on
+local sessions, so after a remote plan review the steward queues execute;
+a `pushed` execute
 session with new code on origin beyond the last attestation is stopped and
 `review` queued; a `review-pass` review session whose attestation is on
 origin is stopped — its report is the train's ticket. `blocked` queues
@@ -1077,7 +1079,8 @@ def prompt_for(phase: str, issue: int, tier: int | None, branch: str, model: str
         verdict = ("attest the pass with `attest.py --plan-review` and report `review-pass`, or report "
                    "`blocked` with the findings" if attests else
                    "produce the verdict and findings as report text in your output; do not run attest.py or "
-                   f"git — the steward attests with `--plan-review --model {model}`")
+                   f"git — the steward attests in the branch's worktree with `--plan-review --model {model} "
+                   "--commit`")
         return (f"/review the plan of issue #{issue} on branch `{branch}` before any code exists: bundle it "
                 f"with `make_review_bundle.py --plan <its slug>` and attack it with the plan brief of "
                 f"docs/process/refute.md (\"Refuting a plan\"); {verdict}; stop; never edit the plan." + tail)
@@ -2224,7 +2227,7 @@ def plan_review_state(root: Path, wt: Path) -> tuple[int | None, bool]:
         text = _out(root, "show", f"{head}:{rel}")
         tier = _review.plan_tier(text)
         if tier is not None:
-            plans.append((tier, _review._plan_work_ids(_review.plan_stem(rel), text, include_dedated=True)))
+            plans.append((tier, rel, _review._plan_work_ids(_review.plan_stem(rel), text, include_dedated=True)))
     if not plans:
         return None, False
     journal = _review.JOURNAL_DIR
@@ -2232,18 +2235,24 @@ def plan_review_state(root: Path, wt: Path) -> tuple[int | None, bool]:
              if n.endswith(".md")]
     passes = _review.review_passes(root, (_out(root, "show", f"{head}:{n}") for n in names), head)
 
-    def cleared(tier: int, ids: set[str]) -> bool:
-        return any(r.get("work") in {f"{i}-plan" for i in ids} and str(r.get("tier", "")).isdigit()
-                   and int(r["tier"]) >= tier for r in passes)
-    top = max(t for t, _ids in plans)
-    return top, all(cleared(t, ids) for t, ids in plans if t >= 2)
+    def cleared(tier: int, rel: str, ids: set[str]) -> bool:
+        # a pass counts only for the plan text it reviewed: its head holds the
+        # same blob of this plan as HEAD — not another plan of the same issue,
+        # not an earlier draft (refutation: an issue id shared by two plans)
+        now = _out(root, "rev-parse", f"{head}:{rel}")
+        return bool(now) and any(
+            r.get("work") in {f"{i}-plan" for i in ids} and str(r.get("tier", "")).isdigit()
+            and int(r["tier"]) >= tier and r.get("head")
+            and _out(root, "rev-parse", f"{r['head']}:{rel}") == now for r in passes)
+    top = max(t for t, _rel, _ids in plans)
+    return top, all(cleared(t, rel, ids) for t, rel, ids in plans if t >= 2)
 
 PLAN_GATES_TIMEOUT = 900  # the gate runner's own per-gate cap is 600 s
 
 
 def plan_gates(wt: Path) -> str | None:
     """None when the process gates are green on a plan's worktree, else why
-    not. A plan session stops before it pushes, so without this the gates
+    not. A plan session need not push, so without this the gates
     first saw a plan at the execute push — downstream a missing
     `design-contract:` line turned that push red thirty times per branch. Not
     runnable is a verdict too: the execute push would not run them either."""
@@ -2375,6 +2384,7 @@ def _chain(root: Path, *, dry_run: bool = False) -> int:
             except OSError as exc:
                 print(f"dispatch: {branch} stopped, but {nxt} could not be queued ({exc}) — queue it by hand: "
                       f"dispatch.py queue add --issue {issue} --phase {nxt}"
+                      + (" --plan-review" if plan_review else "")
                       + (f" --tier {tier}" if tier is not None else "") + f" --branch {branch}", file=sys.stderr)
     return 0 if dry_run else drain(root)
 
@@ -2412,6 +2422,7 @@ def main(argv: list[str]) -> int:
     qa.add_argument("--phase", choices=PHASES, required=True)
     qa.add_argument("--tier", type=int)
     qa.add_argument("--branch")
+    qa.add_argument("--plan-review", action="store_true", help="with --phase review: a plan review")
     qsub.add_parser("list")
     sub.add_parser("drain")
     po = sub.add_parser("policy")
@@ -2435,7 +2446,8 @@ def main(argv: list[str]) -> int:
         return chain(root, dry_run=a.dry_run)
     if a.command == "queue":
         if a.queue_command == "add":
-            queue_add(root, issue=a.issue, phase=a.phase, tier=a.tier, branch=a.branch)
+            queue_add(root, issue=a.issue, phase=a.phase, tier=a.tier, branch=a.branch,
+                      plan_review=a.plan_review and a.phase == "review")
         for e in queue_load(root):
             print(f"#{e['issue']} {e['phase']}" + (f" tier {e['tier']}" if e.get("tier") is not None else "")
                   + (f" on {e['branch']}" if e.get("branch") else ""))

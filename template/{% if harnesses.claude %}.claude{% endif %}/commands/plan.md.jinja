@@ -86,21 +86,23 @@ still needs a judgment is `[design]` and names that judgment in one line;
 everything around it stays mechanical. Splitting a design task off its
 mechanical rest is cheaper than running the whole on the large model.
 
-**A plan is reviewed before `planned` (Tier 2+).** Build its bundle
-(`uv run scripts/process/make_review_bundle.py --plan <slug> -o
-.process-work/reviews/<slug>-plan.bundle.md`). **Tier 2:** hand the bundle
+**A plan is reviewed before `planned` (Tier 2+).** Commit the plan, then
+build its bundle (`uv run scripts/process/make_review_bundle.py --plan <slug>
+-o .process-work/reviews/<slug>-plan.bundle.md`). **Tier 2:** hand the bundle
 to a fresh subagent that did not write the plan, with the plan brief of
 `docs/process/refute.md` ("Refuting a plan") — owner, cited claims, fail-open,
-edge cases, the checklist's Plan halves — a cheap model is enough; blocks follow
-`verification-independence.md` ("What blocks"): a failure scenario, scored
-80 or more. Fix the plan, then attest the pass:
+edge cases, the checklist's Plan halves — a cheap model is enough; blocks
+follow `verification-independence.md` ("What blocks"): a failure scenario,
+scored 80 or more. Fix and commit the plan, rebuild the bundle and let the
+subagent check the fixes; then attest the pass on that bundle and commit it:
 `attest.py --plan-review --work <id> --tier 2 --model <family>
---independence bundle,non-implementing --verdict pass --bundle <bundle>`.
-**Tier 3:** push the branch and report `planned` without it — dispatch queues
-a plan-review session on a second model family (where the review phase runs
-on another host, it reads the plan from origin), and execute only after its
-pass. Dispatch
-queues no execute for a Tier 2+ plan without a clearing plan pass.
+--independence bundle,non-implementing --verdict pass --bundle <bundle>
+--commit`. A pass counts for the plan text it reviewed — edit the plan after
+it, and it is due again. **Tier 3:** report `planned` without it — dispatch
+queues a plan-review session on a second model family, and execute only
+after its pass. Where the review phase runs on another host, push the branch
+first; the steward then queues execute after the pass. Dispatch queues no
+execute for a Tier 2+ plan without a clearing plan pass.
 
 When the plan is committed, run the gates (`uv run scripts/process/gate_runner.py`) and fix in the plan what it turns red — a plan declaration a gate misses turns every execute push red, and dispatch queues no execute while they are red. Then `uv run scripts/process/report.py planned --issue N` (`/report`) — one line to the tower. An open question for the owner goes into the plan as `DECISION NEEDED <date> <you>: <question> — options: …; recommendation: …` plus `report.py blocked`; the steward relays it and writes the answer back as a `DECISION` line.
 
