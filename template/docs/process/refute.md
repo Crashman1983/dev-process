@@ -136,7 +136,10 @@ attack is on the plan's claims and gaps, each answered from the repository:
     5. GAPS — the Plan decides lines of docs/process/review-checklist.md
        for the dimensions the change touches: which is left undecided? Each
        spec risk without a countermeasure and a test is one.
-    <gate code only: 6. the BYPASSES and FALSE REFUSALS above, as the test
+    6. EXECUTABLE — could a small model run each `[mechanical]` task
+       without deciding anything? A task that hides a judgment is either
+       decided in the plan or marked `[design]` with that judgment named.
+    <gate code only: 7. the BYPASSES and FALSE REFUSALS above, as the test
     cases the plan must name.>
     Report each finding with its failure scenario (what an executor would
     build, and how it breaks); no rewrites of the plan, no style remarks.
