@@ -172,6 +172,12 @@ base is the fork point, or where its base is itself reviewed content (what
 the whole reviews below it merge to, bookkeeping aside); a head that a
 rebase replaced needs such a base, and any other review vouches only for
 the files its own range changed.
+A Spec Kit plan (`specs/<dir>/plan.md`) is no bookkeeping, but what the
+attestation commit adds to it is: REFUTE, ROOT-CAUSE, REVIEW and dated
+DECISION lines appended, an open `DECISION NEEDED` replaced by a DECISION,
+and its move to the archive with no more than that (`attest --with`,
+`--archive`; `check_review.records_only`). Any other line added, edited or
+deleted is plan content, and a fenced or indented record line is too.
 Everything else is unreviewed: code committed after the reviewed head — also
 a commit that sets a reviewed file back to main's version — any conflict
 resolution, whichever side it takes, and a merge that adds code of its own.
@@ -181,7 +187,12 @@ The comparison needs git 2.38 or later (`merge-tree --write-tree`).
 The gate reads existing records by the same rule. A full round whose head
 the push carries unmerged (in the pushed tip's history, in no integration
 ref) and whose base is not that head's one fork point is a malformed
-`REVIEW` line: it clears no plan, lifts no block and boards no train. A
+`REVIEW` line: it clears no plan, lifts no block and boards no train. Once
+a valid full round of the same work with a higher round follows it — its
+head descending from the old one — the line is a note, no longer a refusal:
+that round reviewed everything from the fork point on (downstream, a delta
+line from before v2.53 refused every push of two branches after their merge
+of main, whatever round came after). It still clears nothing. A
 merged record stands as main judged it; a record whose head is missing or
 lies on another branch is not this push's, and those off their fork point
 are counted in one note. The range is bounded by the remote-tracking

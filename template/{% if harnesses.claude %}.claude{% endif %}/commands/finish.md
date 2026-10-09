@@ -29,7 +29,8 @@ it:
 
 Every step prints its command; the first failure stops the run in a state
 git explains. The merge only happens behind the batch's FULL suite (test
-economy, `docs/process/testing.md`).
+economy, `docs/process/testing.md`). `--tests` runs one command without a
+shell: several stages (`&&`, a pipe) belong in one make target or script.
 
 BLOCKED means exactly one thing: the tail is not reachable yet — most often
 a missing clearing pass (run `/review`) or red gates. Do not merge around a

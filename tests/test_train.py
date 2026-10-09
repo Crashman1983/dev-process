@@ -1272,6 +1272,78 @@ def test_a_package_branch_boards_on_the_issue_dispatch_placed_on_it(render, tmp_
     assert c["eligible"] and "worker report review-pass" in c["by"], c
 
 
+def _slug_branch(out, branch, plan, *, issue, work, files, on_main=False):
+    """An active plan with `issue: #<issue>` and a REVIEW pass `work=<work>`;
+    `on_main` puts the plan on main first, the branch only touches it."""
+    plans = out / ".process-work/plans"
+    plans.mkdir(parents=True, exist_ok=True)
+    if on_main:
+        (plans / plan).write_text(f"# p\n\ntier: 2\nissue: #{issue}\n\n## Decisions\n")
+        _git(out, "add", "-A")
+        _git(out, "commit", "-q", "-m", "plan on main")
+    _git(out, "checkout", "-q", "-b", branch, "main")
+    (plans / plan).write_text(f"# p\n\ntier: 2\nissue: #{issue}\n\n## Decisions\n- touched\n")
+    for rel, text in files.items():
+        (out / rel).parent.mkdir(parents=True, exist_ok=True)
+        (out / rel).write_text(text)
+    j = out / ".process-work/journal"
+    j.mkdir(parents=True, exist_ok=True)
+    (j / f"2026-10-01-{branch}.md").write_text(
+        f"REVIEW work={work} tier=2 reviewer=fresh model=cross "
+        f"independence=bundle,non-implementing verdict=pass round=1\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", f"feat: {branch}")
+    _git(out, "checkout", "-q", "main")
+
+
+@pytest.mark.parametrize("work", ["2260-work-expiry", "2026-10-01-2260-work-expiry"])
+@pytest.mark.parametrize("gate_code", [False, True])
+def test_an_active_plans_slug_or_stem_is_the_branchs_own_work(render, tmp_path, work, gate_code):
+    """#199 (downstream): the train counted a plan's ids only once archived — an
+    active plan with `work=<slug>` was refused, though attest accepted the id."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    files = {"src/expiry.py": "x = 1\n"}
+    if gate_code:
+        files["scripts/process/extra.py"] = "y = 1\n"
+    _slug_branch(out, "issue-2260", "2026-10-01-2260-work-expiry.md", issue=2260, work=work, files=files)
+    _report(out, "issue-2260")
+    c = _candidate(out, "issue-2260")
+    assert c["eligible"] and "worker report review-pass" in c["by"], c
+
+
+def test_another_issues_active_plan_lends_the_branch_no_work_id(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _slug_branch(out, "issue-2260", "2026-10-01-2300-other.md", issue=2300, work="2300-other",
+                 files={"src/expiry.py": "x = 1\n"}, on_main=True)
+    _report(out, "issue-2260")
+    c = _candidate(out, "issue-2260")
+    assert not c["eligible"] and "no REVIEW pass for its own work" in " ".join(c["reasons"]), c
+
+
+def test_a_shared_slug_does_not_board_but_the_stem_does(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    a = out / ".process-work/plans/archive"
+    a.mkdir(parents=True, exist_ok=True)
+    (a / "2026-01-01-2260-work-expiry.md").write_text("# old\n\ntier: 2\nissue: #1\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "an old plan with the same slug")
+    _slug_branch(out, "issue-2260", "2026-10-01-2260-work-expiry.md", issue=2260, work="2260-work-expiry",
+                 files={"src/expiry.py": "x = 1\n"})
+    _report(out, "issue-2260")
+    assert not _candidate(out, "issue-2260")["eligible"]
+    j = out / ".process-work/journal/2026-10-02.md"
+    _git(out, "checkout", "-q", "issue-2260")
+    j.write_text("REVIEW work=2026-10-01-2260-work-expiry tier=2 reviewer=fresh model=cross "
+                 "independence=bundle,non-implementing verdict=pass round=2\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "attest the stem")
+    _git(out, "checkout", "-q", "main")
+    assert _candidate(out, "issue-2260")["eligible"]
+
+
 def test_an_issue_on_another_branch_opens_no_pass(render, tmp_path):
     out = render(tmp_path, {"project_name": "d", "modules": {}})
     _repo(out)

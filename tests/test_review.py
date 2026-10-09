@@ -1029,6 +1029,64 @@ def test_a_merged_legacy_full_round_stands_as_main_judged_it(tmp_path, monkeypat
     assert not any("legacy full-round" in s for s in soft), soft
 
 
+def _merged_main_repo(root):
+    """Downstream #2396: round 1 at the fork, a pre-v2.53 delta line off it,
+    then main moved and was merged in: (fork, first, head, merge, main_tip)."""
+    fork, first, head = _fork_repo(root)
+    _git(root, "checkout", "-q", "main")
+    main_tip = _commit_file(root, "c.py", "c = 1\n")
+    _git(root, "checkout", "-q", "feature")
+    _git(root, "merge", "-q", "--no-ff", "-m", "merge main", "main")
+    merge = _git(root, "rev-parse", "HEAD").stdout.strip()
+    return fork, first, head, merge, main_tip
+
+
+def test_an_off_fork_line_superseded_by_a_valid_round_is_a_note(tmp_path, monkeypatch):
+    """#199: a later valid full round of the same work reviewed everything from the
+    fork point on — the old delta line no longer stops every push."""
+    cr, root = _cr(), tmp_path / "p"
+    fork, first, head, merge, main_tip = _merged_main_repo(root)
+    _journal(root, _review(work="forked", artifact=(fork, first), rnd="1", verdict="block"),
+             _review(work="forked", artifact=(first, head), rnd="2") + " mode=delta",
+             _review(work="forked", artifact=(main_tip, merge), rnd="3"))
+    hard, soft = _merge_check(cr, root, monkeypatch)
+    assert hard == [], hard
+    assert any("clears nothing" in s and "superseded by the valid round=3" in s for s in soft), soft
+
+
+def test_an_off_fork_line_without_a_later_valid_round_stays_hard(tmp_path, monkeypatch):
+    cr, root = _cr(), tmp_path / "p"
+    fork, first, head, _merge, _main_tip = _merged_main_repo(root)
+    _journal(root, _review(work="forked", artifact=(fork, first), rnd="1", verdict="block"),
+             _review(work="forked", artifact=(first, head), rnd="2") + " mode=delta")
+    hard, _ = _merge_check(cr, root, monkeypatch)
+    assert any("malformed REVIEW line" in h and "is not the fork point" in h for h in hard), hard
+
+
+@pytest.mark.parametrize("later", ["off-fork", "other-work", "lower-round"])
+def test_an_off_fork_line_is_not_superseded_by_an_unfit_round(tmp_path, monkeypatch, later):
+    cr, root = _cr(), tmp_path / "p"
+    _fork, first, head, merge, main_tip = _merged_main_repo(root)
+    third = {"off-fork": _review(work="forked", artifact=(head, merge), rnd="3"),
+             "other-work": _review(work="other", artifact=(main_tip, merge), rnd="3"),
+             "lower-round": _review(work="forked", artifact=(main_tip, merge), rnd="1")}[later]
+    _journal(root, _review(work="forked", artifact=(first, head), rnd="2") + " mode=delta", third)
+    hard, _ = _merge_check(cr, root, monkeypatch)
+    assert any("malformed REVIEW line" in h and f"base {first[:12]}" in h for h in hard), hard
+
+
+def test_a_superseded_off_fork_pass_still_clears_nothing(tmp_path, monkeypatch):
+    """The later round is a block: the old pass may not stand in for it."""
+    cr, root = _cr(), tmp_path / "p"
+    _fork, first, head, merge, main_tip = _merged_main_repo(root)
+    _journal(root, _review(work="forked", artifact=(first, head), rnd="2") + " mode=delta",
+             _review(work="forked", artifact=(main_tip, merge), rnd="3", verdict="block"))
+    hard, soft = _merge_check(cr, root, monkeypatch)
+    assert not any("malformed REVIEW line" in h for h in hard), hard
+    assert any("forked" in h for h in hard), hard
+    assert any("superseded" in s for s in soft), soft
+
+
 def test_an_off_fork_record_of_a_stale_branch_is_one_note_and_still_clears(tmp_path, monkeypatch):
     """Downstream: records of stale branches whose plans are archived on main —
     their heads are no part of this push; judging them would red every push."""

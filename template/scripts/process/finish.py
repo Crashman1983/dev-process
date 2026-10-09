@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import os
 import re
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -303,6 +304,28 @@ def _sh(root: Path, argv: list[str], env: dict[str, str] | None = None) -> bool:
     return subprocess.run(argv, cwd=str(root), env=git_environment({**inherited, **(env or {})})).returncode == 0
 
 
+def tests_argv(cmd: str) -> list[str] | str:
+    """`--tests CMD` as the argv it runs, without a shell (#199: consumers'
+    security floors flagged a shell run of argv text) — or why it cannot run:
+    unbalanced quotes, nothing to run, or a shell operator (`&&`, `|`, `;`,
+    a redirection) a command without a shell would pass on as a word. Several
+    stages belong in one make target or script (`make test-merge`)."""
+    try:
+        lex = shlex.shlex(cmd, posix=True, punctuation_chars=True)
+        lex.whitespace_split = True
+        tokens = list(lex)
+        argv = shlex.split(cmd)
+    except ValueError as exc:
+        return f"cannot be read ({exc})"
+    operators = [t for t in tokens if t and set(t) <= set("();<>|&")]
+    if operators:
+        return (f"carries the shell operator {operators[0]!r}; it runs without a shell — "
+                f"put the stages in one make target or script")
+    if not argv:
+        return "names no command"
+    return argv
+
+
 def apply(root: Path, *, tests: str | None, tests_passed: bool) -> int:
     """--apply: execute the deterministic part of the tail instead of
     printing it for an agent to retype. Archive commit and rebase always;
@@ -364,8 +387,12 @@ def apply(root: Path, *, tests: str | None, tests_passed: bool) -> int:
                 return 1
     # 3. the batch pays completeness once, here
     if tests:
-        print(f"finish: $ {tests}   # the FULL suite, once per batch")
-        if subprocess.run(tests, shell=True, cwd=str(root), env=git_environment()).returncode != 0:
+        argv = tests_argv(tests)
+        if isinstance(argv, str):
+            print(f"finish: --tests {argv} — not merging")
+            return 1
+        print(f"finish: $ {shlex.join(argv)}   # the FULL suite, once per batch")
+        if subprocess.run(argv, cwd=str(root), env=git_environment()).returncode != 0:
             print("finish: full suite red — not merging")
             return 1
     elif not tests_passed:
