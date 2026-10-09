@@ -131,4 +131,4 @@ def test_the_local_file_changes_one_class_cell(render, tmp_path):
     mech = _dispatch(out, "policy", "--class", "mechanical")
 
     assert design.returncode == 0 and "execute: my-large" in design.stdout, design.stdout + design.stderr
-    assert mech.returncode == 0 and "execute: claude-sonnet-5" in mech.stdout, mech.stdout + mech.stderr
+    assert mech.returncode == 0 and "execute: claude-haiku-5" in mech.stdout, mech.stdout + mech.stderr

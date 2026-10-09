@@ -219,7 +219,7 @@ def test_next_task_names_its_class_and_model_in_a_core_plan(render, tmp_path):
         "# Plan\n\ntier: 3\nissue: #9\n\n- [x] T1 done\n- [ ] T2 [mechanical] rename the helper\n")
     plan = _run(out, "--issue", "9")["active_plans"][0]
     assert plan["next_task"].startswith("T2")
-    assert plan["next_task_class"] == "mechanical" and plan["next_task_model"] == "claude-sonnet-5"
+    assert plan["next_task_class"] == "mechanical" and plan["next_task_model"] == "claude-haiku-5"
 
 
 def test_next_task_class_in_a_speckit_line_and_the_gate_still_counts_it(render, tmp_path):
