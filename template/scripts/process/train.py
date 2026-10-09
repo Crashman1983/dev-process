@@ -8,7 +8,7 @@ full suite, at a good moment, instead of every branch paying its own
 full run and deploy.
 
     uv run scripts/process/train.py plan [--json]        # who may board, why not, ready to depart?
-    uv run scripts/process/train.py run --suite "<full suite cmd>" [--deploy "<cmd>"] [--push]
+    uv run scripts/process/train.py run --suite "<full suite cmd>" [--retry "<cmd>"] [--deploy "<cmd>"] [--push]
                                        [--min-candidates N] [--max-wait-hours H] [--force]
                                        [--keep-branches] [--dry-run]
 
@@ -1009,8 +1009,24 @@ def _settle_plans(wt: Path, base: str, branch: str, log) -> tuple[list[str], set
     return archived, issues
 
 
+def retry_plan(red_in: str, retry: str | None) -> tuple[str, str]:
+    """How a red combined tree is run once more before anybody is blamed —
+    `(how, why)`, the whole rule: "gates" re-runs the process gates on the
+    same worktree (minutes; a gate can read the network), "failed" runs the
+    project's `--retry` command there (what failed and what did not run),
+    "full" rebuilds the tree and runs the whole suite again. Downstream a
+    deterministic red cost a second 24-minute suite before the drop; a
+    flake under load stays a flake either way (#193)."""
+    if red_in == "gates":
+        return "gates", "the process gates are red — re-run them on the same tree"
+    if retry:
+        return "failed", "the suite is red — re-run what failed and what did not run (--retry)"
+    return "full", "the suite is red — no --retry: rebuild and run the whole suite again"
+
+
 def run(root: Path, *, suite: str | None, deploy: str | None, push: bool, min_candidates: int,
-        max_wait_hours: float, force: bool, keep_branches: bool, dry_run: bool) -> int:
+        max_wait_hours: float, force: bool, keep_branches: bool, dry_run: bool,
+        retry: str | None = None) -> int:
     local = local_integration(root)
     if local is None:
         print("train: no local main/master branch", file=sys.stderr)
@@ -1046,7 +1062,7 @@ def run(root: Path, *, suite: str | None, deploy: str | None, push: bool, min_ca
         return 0
     try:
         return _run_batch(root, local, p, aboard, stamp, logfile, suite=suite, deploy=deploy, push=push,
-                          keep_branches=keep_branches)
+                          keep_branches=keep_branches, retry=retry)
     except BaseException:
         wt = _train_worktree(root)
         if wt.exists():
@@ -1057,7 +1073,8 @@ def run(root: Path, *, suite: str | None, deploy: str | None, push: bool, min_ca
 
 
 def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, logfile: Path, *,
-               suite: str | None, deploy: str | None, push: bool, keep_branches: bool) -> int:
+               suite: str | None, deploy: str | None, push: bool, keep_branches: bool,
+               retry: str | None = None) -> int:
     def log(line: str) -> None:
         with logfile.open("a", encoding="utf-8") as fh:
             fh.write(f"{_dt.datetime.now().isoformat(timespec='seconds')} {line}\n")
@@ -1072,14 +1089,18 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
     branch = ""
 
     base_from_memo = False  # the base's green is the memo's, not a run's
+    red_in = ""             # where the last judged tree went red: "gates" or "suite"
+    last_wt: Path | None = None
 
     def judge(wt: Path, *, bare_base: bool = False, memo: bool = True) -> str:
         """"green", "red" or "undefined" (the suite does not exist on this tree).
         The bare base skips the suite when this train saw it green on that tree —
         provisionally: before the first passenger is blamed it runs for real."""
-        nonlocal base_from_memo
+        nonlocal base_from_memo, red_in
+        red_in = "gates"
         if not _run_gates(wt, log):
             return "red"
+        red_in = "suite"
         if not suite:
             return "green"
         key = _suite_key(wt, suite)
@@ -1093,7 +1114,9 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
         return state
 
     def attempt(subset: list[str], *, memo: bool = True) -> tuple[str, list[str], str]:
+        nonlocal last_wt
         wt, br, merged, dropped = build_train(root, base, subset, stamp, log)
+        last_wt = wt
         for d in dropped:
             if d not in conflicted:
                 conflicted.append(d)
@@ -1156,9 +1179,22 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
             # 5 s lock wait and a 5.1 s UI test under load 10 on 6 CPUs), not
             # an offender — bisecting a flake blames whoever sits in the prefix
             retried = True
-            log(f"red — retry of the same combined tree ({_load()})")
-            state, merged, branch = attempt(aboard)
-            aboard = merged
+            how, why = retry_plan(red_in, retry)
+            log(f"red — retry of the same combined tree: {how} — {why} ({_load()})")
+            if how == "gates" and last_wt is not None:
+                state = "green" if _run_gates(last_wt, log) else "red"
+                if state == "green" and suite:
+                    red_in = "suite"
+                    state = _sh(last_wt, suite, log)  # the suite never ran behind the red gates
+            elif how == "failed" and last_wt is not None:
+                state = _sh(last_wt, retry, log)
+                if state == "undefined":  # no such command on this tree: the whole suite, as before
+                    log("the --retry command does not exist on this tree — rebuilding for the whole suite")
+                    state, merged, branch = attempt(aboard)
+                    aboard = merged
+            else:
+                state, merged, branch = attempt(aboard)
+                aboard = merged
             if state == "green":
                 print("train: FLAKY — the combined tree was red, then green on the identical tree; "
                       f"merging, but the suite has a flaky test (see {logfile}; {_load()})", file=sys.stderr)
@@ -1334,6 +1370,8 @@ def main(argv: list[str]) -> int:
     sub.choices["plan"].add_argument("--json", action="store_true")
     r = sub.choices["run"]
     r.add_argument("--suite", help="the full suite command, run once on the combined tree")
+    r.add_argument("--retry", help="after a red suite: re-run what failed and what did not run, on the same "
+                                   "tree (default: the whole suite again)")
     r.add_argument("--deploy", help="run once after the fast-forward (and push)")
     r.add_argument("--push", action="store_true")
     r.add_argument("--force", action="store_true", help="depart regardless of min/max-wait")
@@ -1351,7 +1389,7 @@ def main(argv: list[str]) -> int:
         return 0
     return run(root, suite=a.suite, deploy=a.deploy, push=a.push, min_candidates=a.min_candidates,
                max_wait_hours=a.max_wait_hours, force=a.force, keep_branches=a.keep_branches,
-               dry_run=a.dry_run)
+               dry_run=a.dry_run, retry=a.retry)
 
 
 if __name__ == "__main__":

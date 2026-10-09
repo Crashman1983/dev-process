@@ -78,7 +78,16 @@ a day downstream, with five reviewed candidates waiting.
 3. The process gates, then the full suite, run **once** on the combined
    tree. Red: the **same tree runs once more** — red then green on
    identical code is a flaky test, reported as FLAKY and merged, never
-   bisected (bisecting a flake blames whoever sits in the prefix). Red
+   bisected (bisecting a flake blames whoever sits in the prefix). How
+   much runs again is one rule (`retry_plan`): red gates re-run the gates
+   on the same worktree; a red suite runs the project's `--retry` command
+   there, or, without one, the rebuilt tree's whole suite. `--retry` re-runs
+   **what failed and what did not run** — a suite that stops at its first
+   red stage never reached the later ones, and a retry of the failures
+   alone would merge them untested (e.g. `pytest --lf`, which runs
+   everything when nothing failed, per stage, after a `make -k` suite).
+   Downstream a deterministic red paid a second 24-minute suite before the
+   drop. Red
    twice: the base itself is checked once (a red main blames nobody and
    aborts; its gates always run, its suite only when no earlier train saw
    it green on that very tree, `green-suites` in the train's directory —

@@ -1662,3 +1662,78 @@ def test_two_reviewed_branches_on_one_file_ride_one_train(render, tmp_path):
     assert r.returncode == 0, r.stdout + r.stderr
     merged = (out / "shared.txt").read_text()
     assert merged.startswith("alpha\n") and merged.endswith("beta\n")
+
+
+@pytest.mark.parametrize("red_in,retry,how", [
+    ("gates", None, "gates"),          # a gate can read the network: re-run the gates only
+    ("gates", "make retry", "gates"),
+    ("suite", "make retry", "failed"),  # what failed and what did not run, same tree
+    ("suite", None, "full"),            # no --retry: the whole suite on a rebuilt tree
+])
+def test_retry_plan_is_one_rule(render, tmp_path, red_in, retry, how):
+    train = _load_train(render(tmp_path, {"project_name": "d", "modules": {}}))
+    got, why = train.retry_plan(red_in, retry)
+    assert got == how and why
+
+
+def _retry_batch(render, tmp_path, monkeypatch, *, retry, sh):
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    train = _load_train(out)
+    builds, runs = [], []
+
+    def build(root, base, subset, stamp, log):
+        builds.append(list(subset))
+        return out, "train/x", list(subset), []
+    monkeypatch.setattr(train, "build_train", build)
+    monkeypatch.setattr(train, "_run_gates", lambda w, log: True)
+    monkeypatch.setattr(train, "_sh", lambda cwd, cmd, log: runs.append(cmd) or sh(cmd, len(runs)))
+    monkeypatch.setattr(train, "_cleanup", lambda *a: None)
+    monkeypatch.setattr(train, "_write", lambda *a, **k: None)
+    p = {"base": "main", "candidates": [{"branch": "b1", "hours_waiting": 1}]}
+    try:
+        train._run_batch(out, "main", p, ["b1"], "x", tmp_path / "t.log", suite="suite", deploy=None,
+                         push=False, keep_branches=True, retry=retry)
+    except SystemExit:
+        pass  # the stub train/x cannot be fast-forwarded; the judging is done
+    return builds, runs, (tmp_path / "t.log").read_text()
+
+
+def test_a_red_suite_retries_only_what_failed_on_the_same_tree(render, tmp_path, monkeypatch):
+    # #193: the retry ran the whole 24-minute suite again on a deterministic red
+    builds, runs, log = _retry_batch(render, tmp_path, monkeypatch, retry="make retry",
+                                     sh=lambda cmd, n: "red" if n == 1 else "green")
+    assert runs[:2] == ["suite", "make retry"] and builds[:1] == [["b1"]] and len(builds) == 1
+    assert "flaky suite, merging" in log and "failed —" in log
+
+
+def test_without_retry_the_whole_suite_runs_on_a_rebuilt_tree(render, tmp_path, monkeypatch):
+    builds, runs, log = _retry_batch(render, tmp_path, monkeypatch, retry=None,
+                                     sh=lambda cmd, n: "red" if n == 1 else "green")
+    assert runs[:2] == ["suite", "suite"] and builds[:2] == [["b1"], ["b1"]]
+
+
+def test_a_retry_command_missing_on_the_tree_falls_back_to_the_suite(render, tmp_path, monkeypatch):
+    builds, runs, log = _retry_batch(render, tmp_path, monkeypatch, retry="make retry",
+                                     sh=lambda cmd, n: {1: "red", 2: "undefined"}.get(n, "green"))
+    assert runs[:3] == ["suite", "make retry", "suite"] and builds[:2] == [["b1"], ["b1"]]
+
+
+def test_red_gates_rerun_the_gates_on_the_same_tree_then_the_suite(render, tmp_path, monkeypatch):
+    # a gate that read the network red once is not worth a rebuilt tree
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    train = _load_train(out)
+    builds, runs, gates = [], [], iter([False, True])
+    monkeypatch.setattr(train, "build_train",
+                        lambda root, base, subset, stamp, log: builds.append(1) or (out, "train/x", list(subset), []))
+    monkeypatch.setattr(train, "_run_gates", lambda w, log: next(gates))
+    monkeypatch.setattr(train, "_sh", lambda cwd, cmd, log: runs.append(cmd) or "green")
+    monkeypatch.setattr(train, "_cleanup", lambda *a: None)
+    monkeypatch.setattr(train, "_write", lambda *a, **k: None)
+    p = {"base": "main", "candidates": [{"branch": "b1", "hours_waiting": 1}]}
+    with pytest.raises(SystemExit):
+        train._run_batch(out, "main", p, ["b1"], "x", tmp_path / "t.log", suite="suite", deploy=None,
+                         push=False, keep_branches=True, retry="make retry")
+    assert len(builds) == 1 and runs == ["suite"]
+    assert "gates —" in (tmp_path / "t.log").read_text()
