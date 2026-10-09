@@ -231,21 +231,20 @@ def candidates(root: Path, local: str, base: str) -> list[dict]:
     # the base's plans, active and archived, and every candidate's new ones
     # (refute and review #199: a namesake on the base or on another car
     # boarded the branch, then the gate refused its plan after the merge)
-    # By path, as the merge leaves them: each candidate's additions in, its
-    # deletions out, a rename both (refute: a plan the branch only renamed, or
-    # the same plan on stacked branches, counted twice)
+    # By path (refute: the same plan on stacked branches counted twice): the
+    # base's plans and every candidate's new names — and only the branch's own
+    # deletions and renames taken out (a plan it only renamed counts once); a
+    # car that deletes a namesake may not board, so its deletion counts for
+    # nobody else (review: that read a slug as unique the gate then refused)
+    gone_by: dict[str, set[str]] = {}
     merged_paths = set(listed or ())
     for b in branches:
         changes = _review.name_status(_git_bytes(root, "diff", "--name-status", "-M", "-z",
                                                  f"{base}...{b}", "--", PLANS))
         if changes is None:
             unreadable.append(f"the plan changes of {b}")
-        for letter, source, rel in changes or ():
-            if letter in ("D", "R"):
-                merged_paths.discard(source or rel)
-            if letter != "D":
-                merged_paths.add(rel)
-    merged_slugs = _review.slug_counts(Path(r).stem for r in merged_paths if r.endswith(".md"))
+        gone_by[b] = {source or rel for letter, source, rel in changes or () if letter in ("D", "R")}
+        merged_paths |= {rel for letter, _source, rel in changes or () if letter != "D"}
     out: list[dict] = []
     for b in sorted(branches):
         counts = _out(root, "rev-list", "--left-right", "--count", f"{base}...{b}")
@@ -305,6 +304,8 @@ def candidates(root: Path, local: str, base: str) -> list[dict]:
         own_active = _own_plans(root, base, b, read)
         if own_active is None:
             branch_unreadable.append(f"the plans of {b}")
+        merged_slugs = _review.slug_counts(Path(r).stem for r in merged_paths - gone_by.get(b, set())
+                                           if r.endswith(".md"))
         for rel, plain in own_active or ():
             if _review.record_kind(rel) == "plan":
                 stem = Path(rel).stem

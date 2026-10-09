@@ -429,7 +429,8 @@ def records_only(before: str, after: str) -> bool:
         if not records or not all(_record_line(line) for line in records):
             return False
         # a paragraph of its own: no table row, no lazy continuation, no code
-        # span or emphasis closing what the plan's last line opened (refute)
+        # span or emphasis closing what the plan's last line opened (refute) —
+        # right under a record it joins that record's paragraph, records only
         last = b[t0 - 1] if t0 > 0 else ""
         if not (blank(tail[0]) or blank(last) or _record_line(last)):
             return False
