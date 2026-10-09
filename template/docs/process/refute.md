@@ -123,11 +123,15 @@ attack is on the plan's claims and gaps, each answered from the repository:
 
     You review a plan before any code exists. Attack it; do not polish it.
     Plan: <bundle>. Spec and its acceptance criteria: <ref>.
+    0. TIER — does the declared tier hold? Name the boundary the change
+       touches and the guard that enforces it independently of this diff
+       (file:line); the changed code as its only enforcement is Tier 3.
     1. OWNER — does the plan add a rule, parser, path list or lookup the
        code already owns? Name the owner (file:line); the plan extends it.
     2. CLAIMS — is every signature, schema, API, existing test or behaviour
        the plan cites true in the code (file:line)? A wrong claim is the
-       cheapest finding there is.
+       cheapest finding there is. For a changed name, version, path or
+       constant, run the search for the old value: every hit is in a task.
     3. FAIL-OPEN — for each thing the plan relies on (a call, a tool, a
        file, a time limit): what happens when it fails or hangs? Does the
        plan decide fail closed, with a bound and a deadline?
