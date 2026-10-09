@@ -1889,3 +1889,18 @@ def test_a_slug_another_plan_of_the_merged_tree_shares_does_not_board(render, tm
                      files={"src/other.py": "y = 1\n"})
     _report(out, "issue-2260")
     assert not _candidate(out, "issue-2260")["eligible"]
+
+
+def test_a_stacked_branch_carrying_the_same_plan_does_not_double_count(render, tmp_path):
+    """Refute #199: the same added plan on two stacked branches is one file after the merge."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _slug_branch(out, "issue-2260", "2026-10-01-2260-work-expiry.md", issue=2260, work="2260-work-expiry",
+                 files={"src/expiry.py": "x = 1\n"})
+    _git(out, "checkout", "-q", "-b", "issue-2260-part2", "issue-2260")
+    (out / "src/part2.py").write_text("z = 1\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "part 2")
+    _git(out, "checkout", "-q", "main")
+    _report(out, "issue-2260")
+    assert _candidate(out, "issue-2260")["eligible"]

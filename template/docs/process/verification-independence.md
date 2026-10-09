@@ -172,17 +172,18 @@ base is the fork point, or where its base is itself reviewed content (what
 the whole reviews below it merge to, bookkeeping aside); a head that a
 rebase replaced needs such a base, and any other review vouches only for
 the files its own range changed.
-A Spec Kit plan (`specs/<dir>/plan.md`) is no bookkeeping, but what the
-attestation commit adds to it is: REFUTE, ROOT-CAUSE, REVIEW and dated
-DECISION lines added between blank lines, next to other records, an open
-question or a heading, as a sibling list item or at a list's end, an open
-`DECISION NEEDED` replaced by a DECISION, and its move to the archive with
-no more than that (`attest --with`, `--archive`; `check_review.records_only`).
-Any other line added, edited or deleted is plan content; so is a record line
-a reader does not see as one (fenced, commented, indented as code) and one
-that joins or splits the paragraph next to it (a setext underline, a lazy
-continuation, a blank line that makes prose a link definition). A question
-marked answered in place, rather than rewritten to DECISION, is a change too.
+A Spec Kit plan (`specs/<dir>/plan.md`) is no bookkeeping, but two shapes of
+what the attestation commit adds to it are (`attest --with`, `--archive`;
+`check_review.records_only`): REFUTE, ROOT-CAUSE, REVIEW and dated DECISION
+lines appended after the plan's last line, and an open `DECISION NEEDED`
+answered in place — the same line, same prefix and list marker, now a dated
+DECISION; also its move to the archive with no more than that. Anything else
+is plan content: prose, an edited, deleted or moved line, a decision or a
+record inserted inside the plan, a record a reader does not see as one
+(inside an unclosed fence or comment, indented as code). Four refute rounds
+showed that a record inserted in the middle can regroup the Markdown around
+it and hide reviewed text; after the end nothing follows that it could
+regroup.
 Everything else is unreviewed: code committed after the reviewed head — also
 a commit that sets a reviewed file back to main's version — any conflict
 resolution, whichever side it takes, and a merge that adds code of its own.

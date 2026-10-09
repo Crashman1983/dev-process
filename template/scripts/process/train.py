@@ -231,13 +231,16 @@ def candidates(root: Path, local: str, base: str) -> list[dict]:
     # the base's plans, active and archived, and every candidate's new ones
     # (refute and review #199: a namesake on the base or on another car
     # boarded the branch, then the gate refused its plan after the merge)
-    merged_stems = [Path(r).stem for r in listed or ()]
+    # By path: the same plan on stacked branches is one file in the merged tree;
+    # `--no-renames`: a plan renamed into the slug is a new name there
+    merged_paths = set(listed or ())
     for b in branches:
-        new = _paths(root, "diff", "--name-only", "-z", "--diff-filter=A", f"{base}...{b}", "--", PLANS)
+        new = _paths(root, "diff", "--name-only", "-z", "--no-renames", "--diff-filter=A",
+                     f"{base}...{b}", "--", PLANS)
         if new is None:
             unreadable.append(f"the new plans of {b}")
-        merged_stems += [Path(r).stem for r in new or ()]
-    merged_slugs = _review.slug_counts(merged_stems)
+        merged_paths |= set(new or ())
+    merged_slugs = _review.slug_counts(Path(r).stem for r in merged_paths if r.endswith(".md"))
     out: list[dict] = []
     for b in sorted(branches):
         counts = _out(root, "rev-list", "--left-right", "--count", f"{base}...{b}")
