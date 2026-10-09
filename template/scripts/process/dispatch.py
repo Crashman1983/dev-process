@@ -43,7 +43,11 @@ non-zero naming the branch when the text still has not gone.
 Phases chain themselves (`chain`, run it from the steward's tick): a
 `planned` plan session is stopped and `execute` queued — unless the
 process gates are red on its worktree (`plan_gates`: the plan session never
-pushes, so they would first see the plan at the execute push); a `pushed` execute
+pushes, so they would first see the plan at the execute push), or its Tier
+2+ plan has no clearing `REVIEW work=<id>-plan` pass (`plan_review_state`):
+Tier 2 then waits for the plan session's own subagent review, Tier 3 gets a
+dispatched plan review (`review` with `plan_review`) whose pass queues
+execute; a `pushed` execute
 session with new code on origin beyond the last attestation is stopped and
 `review` queued; a `review-pass` review session whose attestation is on
 origin is stopped — its report is the train's ticket. `blocked` queues
@@ -1024,7 +1028,8 @@ def sync_worktree(root: Path, wt: Path, branch: str, phase: str) -> str | None:
 # --- the prompt: the slash command leads, the command file owns the steps -----------
 
 def prompt_for(phase: str, issue: int, tier: int | None, branch: str, model: str, remote: bool = False,
-               channel: str | None = None, effort: str | None = None, attests: bool = True) -> str:
+               channel: str | None = None, effort: str | None = None, attests: bool = True,
+               plan_review: bool = False) -> str:
     """The start prompt. `attests=False`: a cell on another harness (a Codex
     review runs read-only) reports its verdict as text; the steward attests."""
     tier_s = f"tier {tier}" if tier is not None else "tier to be derived from the scope (risk-tiers.md)"
@@ -1068,6 +1073,14 @@ def prompt_for(phase: str, issue: int, tier: int | None, branch: str, model: str
                 f"the last task is committed and pushed. The duties before `pushed` are in /execute; after a "
                 f"blocking review round the plan carries `ROOT-CAUSE work=<id> round=<r>: <cause> — <test that "
                 f"failed before the fix>` and `attest.py --dry-run` names no missing root cause before you report." + tail)
+    if plan_review:
+        verdict = ("attest the pass with `attest.py --plan-review` and report `review-pass`, or report "
+                   "`blocked` with the findings" if attests else
+                   "produce the verdict and findings as report text in your output; do not run attest.py or "
+                   f"git — the steward attests with `--plan-review --model {model}`")
+        return (f"/review the plan of issue #{issue} on branch `{branch}` before any code exists: bundle it "
+                f"with `make_review_bundle.py --plan <its slug>` and attack it with the plan brief of "
+                f"docs/process/refute.md (\"Refuting a plan\"); {verdict}; stop; never edit the plan." + tail)
     if not attests:
         return (f"/review branch `{branch}` for issue #{issue} as an independent reviewer: produce the verdict "
                 f"and findings as report text in your output; do not run attest.py or git — the steward "
@@ -1473,7 +1486,7 @@ def _worker_env(extra: dict[str, str]) -> dict[str, str]:
 # --- commands ---------------------------------------------------------------------------
 
 def start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str | None, title: str | None,
-          dry_run: bool, owner_approved: bool = False) -> int:
+          dry_run: bool, owner_approved: bool = False, plan_review: bool = False) -> int:
     history = _records_dir(root) / "phases" / f"{issue}.json"
     try:
         previous = json.loads(history.read_text()) if history.exists() else {}
@@ -1535,8 +1548,9 @@ def start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str |
     if channel and other_harness:
         print(f"dispatch: decision_channel omitted: `{word}` cell has no live channel; reports via report.py")
         channel = None
+    plan_review = plan_review and phase == "review"
     prompt = prompt_for(phase, issue, tier, branch, model, remote=remote,
-                        channel=channel, effort=effort, attests=not other_harness)
+                        channel=channel, effort=effort, attests=not other_harness, plan_review=plan_review)
     argv = build_argv(policy, model, prompt, branch, issue, phase, effort, cell.command)
     why = override_refusal(root, phase, model, argv, branch, remote)
     if why:
@@ -1570,7 +1584,7 @@ def start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str |
         extra = {**worker_vars, "PROCESS_PHASE_BASE": phase_base(root, branch)}
         rec = {"branch": branch, "issue": issue, "phase": phase, "tier": tier, "model": model, "effort": effort, "remote": True,
                "started": int(time.time()), "ts": _dt.datetime.now().isoformat(timespec="seconds"),
-               "runner": runner, "handover_id": pp["handover_id"]}
+               "runner": runner, "handover_id": pp["handover_id"], "plan_review": plan_review}
         if runner == "tmux":
             # some hand-over CLIs refuse to start without a terminal (observed
             # downstream: a cloud-session start exited at once when detached) —
@@ -1606,7 +1620,8 @@ def start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str |
               f"reports via origin (`tower.py --remote`)" + (f"\n  {rec['handover']}" if rec["handover"] else ""))
         return 0
     wt = ensure_worktree(root, branch)
-    refusal = sync_worktree(root, wt, branch, phase)
+    # a plan review reads the plan on the worktree, which need not be pushed yet
+    refusal = sync_worktree(root, wt, branch, "plan-review" if plan_review else phase)
     if refusal:
         print(f"dispatch: {refusal}", file=sys.stderr)
         return 3
@@ -1614,7 +1629,7 @@ def start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str |
     extra = {**worker_vars, "PROCESS_PHASE_BASE": phase_base(root, branch)}
     rec = {"branch": branch, "issue": issue, "phase": phase, "tier": tier, "model": model, "effort": effort,
            "worktree": str(wt), "log": str(log), "started": int(time.time()),
-           "ts": _dt.datetime.now().isoformat(timespec="seconds"), "runner": runner}
+           "ts": _dt.datetime.now().isoformat(timespec="seconds"), "runner": runner, "plan_review": plan_review}
     if runner == "tmux":
         session = str(policy.get("tmux_session") or "workers")
         window = branch.replace("/", "-").replace(".", "-")[:40]
@@ -1946,7 +1961,10 @@ def _valid_entry(e: object) -> dict | None:
     branch = e.get("branch")
     if branch is not None and not isinstance(branch, str):
         return None
-    return {"issue": issue, "phase": e["phase"], "tier": tier, "branch": branch}
+    entry = {"issue": issue, "phase": e["phase"], "tier": tier, "branch": branch}
+    if e.get("plan_review") is True:
+        entry["plan_review"] = True
+    return entry
 
 
 def queue_load(root: Path) -> list[dict]:
@@ -1980,13 +1998,17 @@ def _queue_save(root: Path, entries: list[dict]) -> None:
 
 
 def _same_line(a: dict, b: dict) -> bool:
-    return a["issue"] == b["issue"] and a["phase"] == b["phase"]
+    return (a["issue"] == b["issue"] and a["phase"] == b["phase"]
+            and bool(a.get("plan_review")) == bool(b.get("plan_review")))
 
 
-def queue_add(root: Path, *, issue: int, phase: str, tier: int | None, branch: str | None) -> None:
+def queue_add(root: Path, *, issue: int, phase: str, tier: int | None, branch: str | None,
+              plan_review: bool = False) -> None:
     with _QueueLock(root):
         entries = queue_load(root)
         entry = {"issue": int(issue), "phase": phase, "tier": tier, "branch": branch}
+        if plan_review:
+            entry["plan_review"] = True
         if not any(_same_line(entry, e) for e in entries):  # one line per issue and phase
             entries.append(entry)
             _queue_save(root, entries)
@@ -2002,7 +2024,8 @@ def drain(root: Path) -> int:
         for e in list(entries):
             try:
                 rc = start(root, issue=e["issue"], phase=e["phase"], tier=e.get("tier"),
-                           branch=e.get("branch"), title=None, dry_run=False)
+                           branch=e.get("branch"), title=None, dry_run=False,
+                           plan_review=bool(e.get("plan_review")))
             except SystemExit as exc:
                 print(f"dispatch: queued #{e['issue']} {e['phase']} could not start: {exc}", file=sys.stderr)
                 rc = 1
@@ -2090,11 +2113,16 @@ def _own_plans_on_origin(root: Path, branch: str, local: bool = False) -> tuple[
     never advanced)."""
     tip = (_out(root, "rev-parse", "--verify", "-q", f"refs/remotes/origin/{branch}") if local
            else _remote_head(root, branch))
-    if not tip:
-        return "", []
+    return tip, own_plans_at(root, tip) if tip else []
+
+
+def own_plans_at(root: Path, tip: str) -> list[str]:
+    """The plans the commit `tip` adds over its integration base — active,
+    archived or Spec Kit tasks; another work's plan it only touched is not
+    its own."""
     base = _integration_base(root, tip)
     if not base:
-        return tip, []
+        return []
     # added by the branch, git's rename detection on: another work's plan the
     # branch archived or moved is not its own (refutation); a rename pairing
     # an old plan with a new one for other issues is a new plan
@@ -2113,7 +2141,7 @@ def _own_plans_on_origin(root: Path, branch: str, local: bool = False) -> tuple[
                 added.append(path)
     plans = [f for f in added if (f.startswith(".process-work/plans/") and "/archive/" not in f
                                   and f.endswith(".md")) or re.fullmatch(r"specs/[^/]+/tasks\.md", f)]
-    return tip, plans
+    return plans
 
 
 _ISSUE = re.compile(r"^\s*(?:[-*+]\s+)?[*_]*issue[*_]*\s*:\s*(\S+)", re.IGNORECASE | re.MULTILINE)
@@ -2179,6 +2207,37 @@ def phase_over(root: Path, rec: dict, rep: dict | None, *, local: bool = False) 
 
 
 
+
+def plan_review_state(root: Path, wt: Path) -> tuple[int | None, bool]:
+    """(the highest tier the branch's own plans declare on the worktree's
+    HEAD, whether a clearing plan pass — `REVIEW work=<id>-plan verdict=pass`
+    at that tier or higher — covers every Tier 2+ one). (None, False) when no
+    plan is found: the caller cannot judge it."""
+    import check_review as _review  # noqa: PLC0415
+    head = _out(wt, "rev-parse", "HEAD")
+    if not head:
+        return None, False
+    plans = []
+    for rel in own_plans_at(root, head):
+        if rel.endswith("/tasks.md"):  # a Spec Kit plan: its tier and ids live in plan.md
+            rel = rel[: -len("tasks.md")] + "plan.md"
+        text = _out(root, "show", f"{head}:{rel}")
+        tier = _review.plan_tier(text)
+        if tier is not None:
+            plans.append((tier, _review._plan_work_ids(_review.plan_stem(rel), text, include_dedated=True)))
+    if not plans:
+        return None, False
+    journal = _review.JOURNAL_DIR
+    names = [n for n in _out(root, "ls-tree", "-r", "--name-only", head, "--", journal).splitlines()
+             if n.endswith(".md")]
+    passes = _review.review_passes(root, (_out(root, "show", f"{head}:{n}") for n in names), head)
+
+    def cleared(tier: int, ids: set[str]) -> bool:
+        return any(r.get("work") in {f"{i}-plan" for i in ids} and str(r.get("tier", "")).isdigit()
+                   and int(r["tier"]) >= tier for r in passes)
+    top = max(t for t, _ids in plans)
+    return top, all(cleared(t, ids) for t, ids in plans if t >= 2)
+
 PLAN_GATES_TIMEOUT = 900  # the gate runner's own per-gate cap is 600 s
 
 
@@ -2231,6 +2290,7 @@ def _chain(root: Path, *, dry_run: bool = False) -> int:
             print(f"dispatch: {branch} — record without an issue, chain skips it", file=sys.stderr)
             continue
         state, nxt = rep.get("state"), None
+        wt_rec = Path(rec["worktree"]) if rec.get("worktree") else None  # Path("") would be the cwd
         if state == "planned" and phase == "plan":
             nxt = "execute"
         elif state == "pushed" and phase == "execute":
@@ -2250,6 +2310,12 @@ def _chain(root: Path, *, dry_run: bool = False) -> int:
                       "attestation — not queuing a review")
                 continue
             nxt = "review"
+        elif state == "review-pass" and phase == "review" and rec.get("plan_review"):
+            if wt_rec is None or not plan_review_state(root, wt_rec)[1]:
+                print(f"dispatch: {branch} passed its plan review — waiting for the `-plan` pass on its "
+                      "worktree")
+                continue
+            nxt = "execute"
         elif state == "review-pass" and phase == "review":
             if not attest_on_origin(root, branch):
                 print(f"dispatch: {branch} passed review — waiting for its attestation on origin")
@@ -2257,7 +2323,7 @@ def _chain(root: Path, *, dry_run: bool = False) -> int:
             print(f"dispatch: {branch} passed review, attestation on origin — a train candidate")
         else:
             continue  # blocked and everything else: the steward decides
-        wt = Path(rec["worktree"]) if rec.get("worktree") else None  # Path("") would be the cwd
+        wt = wt_rec
         if wt is not None and wt.is_dir() and _out(wt, "status", "--porcelain"):
             print(f"dispatch: {branch} has uncommitted work — the worker commits first; chain waits",
                   file=sys.stderr)
@@ -2265,7 +2331,17 @@ def _chain(root: Path, *, dry_run: bool = False) -> int:
         if dry_run:
             print(f"dispatch: would stop {branch} ({phase})" + (f" and queue {nxt}" if nxt else ""))
             continue
+        plan_review = False
         if nxt == "execute" and wt is not None and wt.is_dir():
+            # a Tier 2+ plan is read once, independently, before any code (#192) —
+            # asked first: it is a few git reads, the gates below take minutes
+            tier_of_plan, plan_cleared = plan_review_state(root, wt)
+            uncleared = tier_of_plan is not None and tier_of_plan >= 2 and not plan_cleared
+            if uncleared and tier_of_plan < 3:
+                print(f"dispatch: {branch} reported planned without a plan review — its Tier 2 plan "
+                      "session reviews the plan with a fresh subagent (refute.md, \"Refuting a plan\") "
+                      "and attests `attest.py --plan-review`; no execute queued", file=sys.stderr)
+                continue
             head = _out(wt, "rev-parse", "HEAD")
             if head and rec.get("plan_gates_red") == head:
                 # judged red on this commit: say it again, do not re-run; a new plan commit is judged again
@@ -2285,6 +2361,8 @@ def _chain(root: Path, *, dry_run: bool = False) -> int:
                     kept = {k: v for k, v in current[1].items() if k != "state"}  # state is read live
                     _write_record(root, branch, {**kept, "plan_gates_red": head, "plan_gates_reason": red})
                 continue
+            if uncleared:
+                nxt, plan_review = "review", True  # Tier 3: a dispatched plan review, then execute
         current = _load_record(root, branch)
         if current is None or current[1].get("started") != rec.get("started") or current[1].get("phase") != phase:
             continue  # the session changed since it was judged
@@ -2293,7 +2371,7 @@ def _chain(root: Path, *, dry_run: bool = False) -> int:
         if nxt:
             tier = rec.get("tier") if rec.get("tier") is not None else plan_tier_on_origin(root, branch)
             try:
-                queue_add(root, issue=issue, phase=nxt, tier=tier, branch=branch)
+                queue_add(root, issue=issue, phase=nxt, tier=tier, branch=branch, plan_review=plan_review)
             except OSError as exc:
                 print(f"dispatch: {branch} stopped, but {nxt} could not be queued ({exc}) — queue it by hand: "
                       f"dispatch.py queue add --issue {issue} --phase {nxt}"
@@ -2313,6 +2391,8 @@ def main(argv: list[str]) -> int:
     s.add_argument("--branch")
     s.add_argument("--title", help="slug source for a new branch name")
     s.add_argument("--dry-run", action="store_true")
+    s.add_argument("--plan-review", action="store_true",
+                   help="with --phase review: review the plan before execute, not the code")
     sub.add_parser("list")
     lg = sub.add_parser("log")
     lg.add_argument("branch")
@@ -2342,7 +2422,7 @@ def main(argv: list[str]) -> int:
     root = Path(_out(Path(a.root).resolve(), "rev-parse", "--show-toplevel") or a.root).resolve()
     if a.command == "start":
         return start(root, issue=a.issue, phase=a.phase, tier=a.tier, branch=a.branch, title=a.title,
-                     dry_run=a.dry_run, owner_approved=a.owner_approved)
+                     dry_run=a.dry_run, owner_approved=a.owner_approved, plan_review=a.plan_review)
     if a.command == "list":
         return list_sessions(root)
     if a.command == "log":

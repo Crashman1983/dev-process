@@ -1798,3 +1798,75 @@ def test_plan_gates_reads_the_runner_verdict(render, tmp_path):
     assert mod.plan_gates(out) is None
     runner.unlink()
     assert mod.plan_gates(out) is None  # no gates in this project
+
+
+def _planned_branch(out: Path, tier: int, plan_pass: bool):
+    """A branch adding a Tier `tier` plan, its session reported `planned`."""
+    _repo(out)
+    _git(out, "checkout", "-q", "-b", "b")
+    plans = out / ".process-work/plans"
+    plans.mkdir(parents=True, exist_ok=True)
+    (plans / "2026-10-09-fetch.md").write_text(f"# fetch\n\ntier: {tier}\nissue: #7\n\n## Decisions\n")
+    if plan_pass:
+        j = out / ".process-work/journal"
+        j.mkdir(parents=True, exist_ok=True)
+        (j / "2026-10-09-b.md").write_text(
+            f"REVIEW work=2026-10-09-fetch-plan tier={tier} reviewer=fresh model=cross "
+            "independence=bundle,non-implementing verdict=pass round=1\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "plan")
+
+
+def _chain_planned(mod, out, monkeypatch, *, phase="plan", plan_review=False, state="planned"):
+    rec = {"branch": "b", "issue": 7, "tier": None, "phase": phase, "started": 1, "worktree": str(out),
+           "plan_review": plan_review}
+    queued = []
+    monkeypatch.setattr(mod, "records", lambda root: [rec])
+    monkeypatch.setattr(mod, "_load_record", lambda root, b: (None, rec))
+    monkeypatch.setattr(mod._report, "read_reports",
+                        lambda root, **_kw: [{"worker": "b", "state": state, "epoch": 1}])
+    monkeypatch.setattr(mod, "plan_gates", lambda wt: None)
+    monkeypatch.setattr(mod, "stop", lambda root, b, **kw: 0)
+    monkeypatch.setattr(mod, "plan_tier_on_origin", lambda root, b: None)
+    monkeypatch.setattr(mod, "start", lambda root, *, issue, phase, plan_review=False, **_kw:
+                        queued.append((phase, plan_review)) or 0)
+    mod.chain(out)
+    return queued
+
+
+@pytest.mark.parametrize("tier,plan_pass,queued", [
+    (2, False, []),                         # Tier 2: the plan session owes its subagent review
+    (2, True, [("execute", False)]),
+    (3, False, [("review", True)]),         # Tier 3: a dispatched plan review first
+    (3, True, [("execute", False)]),
+    (1, False, [("execute", False)]),       # Tier 0-1: no plan review
+])
+def test_chain_queues_execute_only_after_a_plan_review(render, tmp_path, monkeypatch, tier, plan_pass, queued):
+    # #192: downstream a Tier 2 plan bounded bytes but not runtime and cited an
+    # incomplete signature — found only after execute would have run
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _planned_branch(out, tier, plan_pass)
+    assert _chain_planned(_load_dispatch(out), out, monkeypatch) == queued
+
+
+def test_a_passed_plan_review_queues_execute(render, tmp_path, monkeypatch):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _planned_branch(out, 3, plan_pass=True)
+    mod = _load_dispatch(out)
+    assert _chain_planned(mod, out, monkeypatch, phase="review", plan_review=True,
+                          state="review-pass") == [("execute", False)]
+
+
+def test_a_plan_review_pass_without_its_line_waits(render, tmp_path, monkeypatch):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _planned_branch(out, 3, plan_pass=False)
+    mod = _load_dispatch(out)
+    assert _chain_planned(mod, out, monkeypatch, phase="review", plan_review=True,
+                          state="review-pass") == []
+
+
+def test_a_plan_review_prompt_reviews_the_plan_not_the_code(render, tmp_path):
+    mod = _load_dispatch(render(tmp_path, {"project_name": "d", "modules": {}}))
+    p = mod.prompt_for("review", 7, 3, "b", "m", plan_review=True)
+    assert "--plan-review" in p and "Refuting a plan" in p and "never edit the plan" in p
+    assert "--plan-review" not in mod.prompt_for("review", 7, 3, "b", "m")
