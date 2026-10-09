@@ -345,6 +345,16 @@ def _record_line(line: str) -> bool:
     return bool(records) and not errors
 
 
+_ATX_HEADING = re.compile(r" {0,3}#{1,6}(?:[ \t]|$)")
+_LIST_MARKER = re.compile(r"( {0,3})(?:[-*+]|\d{1,9}[.)])[ \t]")
+
+
+def _list_item(line: str) -> str | None:
+    """The indent of a list item line, None for any other line."""
+    m = _LIST_MARKER.match(line)
+    return m.group(1) if m else None
+
+
 # what `splitlines` reads as a line end and Markdown does not (refute #199:
 # U+0085 kept a closed fence open in the render)
 _ODD_LINE_ENDS = re.compile("[\x0b\x0c\x1c\x1d\x1e\x85\u2028\u2029]")
@@ -362,10 +372,13 @@ def records_only(before: str, after: str) -> bool:
     addition that joins or splits the paragraphs around it (refute #199: a
     setext underline, a lazy continuation, a blank line that turned prose
     into an invisible link definition): records go between blank lines,
-    or next to other records. The rendered plan, records aside, must read
-    exactly as before. Known limit: a record line's own inline markup (a
-    backtick closing a code span its record paragraph opened) is not
-    rendered here."""
+    next to other records, an open question or a heading, as a sibling list
+    item, or at the end of a list. The rendered plan, records aside, must
+    read exactly as before. Known limits: a record line's own inline markup
+    (a backtick closing a code span its record paragraph opened) is not
+    rendered here, and neither is list containment — a record list item
+    can turn an indented code block below it into list content (refute:
+    an indented `<!--` then hid a reviewed line)."""
     import difflib
     if _ODD_LINE_ENDS.findall(before) != _ODD_LINE_ENDS.findall(after):
         return False
@@ -373,6 +386,16 @@ def records_only(before: str, after: str) -> bool:
 
     def blank(line: str | None) -> bool:
         return line is None or not line.strip(" \t")  # U+00A0 is text to a renderer
+
+    def edge(line: str | None) -> bool:
+        # what a record may stand next to without regrouping it: a blank line,
+        # another record, the open question it answers, an ATX heading
+        return (blank(line) or _record_line(line) or bool(DECISION_NEEDED.match(line))
+                or bool(_ATX_HEADING.match(line)))
+
+    def sibling(line: str | None, record: str) -> bool:
+        # a record list item next to an item of the same list level
+        return line is not None and _list_item(line) is not None and _list_item(line) == _list_item(record)
 
     added: list[str] = []
     answered: list[str] = []
@@ -389,10 +412,10 @@ def records_only(before: str, after: str) -> bool:
             return False  # prose, or blank lines alone (they regroup paragraphs)
         prev = b[j1 - 1] if j1 > 0 else None
         nxt = b[j2] if j2 < len(b) else None
-        # each side meets a blank line or a record — or the block opens (closes)
-        # with a blank line where nothing stood on the other side anyway
-        left = blank(prev) or _record_line(prev) or (blank(block[0]) and blank(nxt))
-        right = blank(nxt) or _record_line(nxt) or (blank(block[-1]) and blank(prev))
+        left = (edge(prev) or (blank(block[0]) and blank(nxt)) or sibling(prev, block[0])
+                # the end of a list: the record continues its last item, visibly
+                or (_list_item(prev) is not None and not any(blank(x) for x in block) and blank(nxt)))
+        right = edge(nxt) or (blank(block[-1]) and blank(prev)) or sibling(nxt, block[-1])
         if not (left and right):
             return False  # it would join or split the paragraph next to it
         added += records
