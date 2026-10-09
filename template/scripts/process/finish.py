@@ -304,6 +304,9 @@ def _sh(root: Path, argv: list[str], env: dict[str, str] | None = None) -> bool:
     return subprocess.run(argv, cwd=str(root), env=git_environment({**inherited, **(env or {})})).returncode == 0
 
 
+_ASSIGNMENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")
+
+
 def tests_argv(cmd: str) -> list[str] | str:
     """`--tests CMD` as the argv it runs, without a shell (#199: consumers'
     security floors flagged a shell run of argv text) — or why it cannot run:
@@ -318,11 +321,15 @@ def tests_argv(cmd: str) -> list[str] | str:
     except ValueError as exc:
         return f"cannot be read ({exc})"
     operators = [t for t in tokens if t and set(t) <= set("();<>|&")]
+    if "\n" in cmd or "\r" in cmd:
+        operators.insert(0, "newline")
     if operators:
         return (f"carries the shell operator {operators[0]!r}; it runs without a shell — "
                 f"put the stages in one make target or script")
     if not argv:
         return "names no command"
+    if _ASSIGNMENT.match(argv[0]):
+        argv = ["env", *argv]  # `FOO=1 make test`, as the shell ran it
     return argv
 
 
@@ -392,7 +399,12 @@ def apply(root: Path, *, tests: str | None, tests_passed: bool) -> int:
             print(f"finish: --tests {argv} — not merging")
             return 1
         print(f"finish: $ {shlex.join(argv)}   # the FULL suite, once per batch")
-        if subprocess.run(argv, cwd=str(root), env=git_environment()).returncode != 0:
+        try:
+            green = subprocess.run(argv, cwd=str(root), env=git_environment()).returncode == 0
+        except OSError as exc:  # no such command, not executable
+            print(f"finish: --tests cannot run ({exc}) — not merging")
+            return 1
+        if not green:
             print("finish: full suite red — not merging")
             return 1
     elif not tests_passed:

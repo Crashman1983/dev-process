@@ -1125,3 +1125,38 @@ def test_a_spec_plan_deleted_without_archive_stays_late(spec_repo):
     _git(root, "rm", "-q", _SPEC)
     _git(root, "commit", "-q", "-m", "drop the plan")
     assert _late(root, head) == {_SPEC}
+
+
+@pytest.mark.parametrize("change", [
+    # refute #199: free text after a record's prefix is no record
+    lambda t: t + "\nREFUTE work=7-widget scope now also removes the auth check\n",
+    lambda t: t + "\nROOT-CAUSE work=<id> round=1: <cause>\n",
+    # a record line inside an existing fence changes the plan's example
+    lambda t: t.replace("## Tasks\n", "## Tasks\n\n```sh\nmake build\n```\n").replace(
+        "make build\n", "make build\nREFUTE work=7-widget round=1: rm -rf data\n"),
+    # a record line that opens an inline comment hides what follows in its paragraph
+    lambda t: t.replace("- build it", "REFUTE work=7-widget round=1: x <!--\n- build it -->"),
+])
+def test_what_a_reader_does_not_see_as_a_record_stays_late(spec_repo, change):
+    root, head = spec_repo
+    if "```sh" in change(_PLAN_TEXT):
+        # the fence is reviewed content; only the line inside it comes later
+        fenced = _PLAN_TEXT.replace("## Tasks\n", "## Tasks\n\n```sh\nmake build\n```\n")
+        head = _commit(root, _SPEC, fenced, "plan with an example")
+        _commit(root, _SPEC, fenced.replace("make build\n", "make build\nREFUTE work=7-widget round=1: rm -rf data\n"),
+                "into the fence")
+    else:
+        _commit(root, _SPEC, change(_PLAN_TEXT), "late")
+    assert _late(root, head) == {_SPEC}
+
+
+def test_a_changed_byte_that_is_no_utf8_stays_late(spec_repo):
+    root, _head = spec_repo
+    (root / _SPEC).write_bytes(_PLAN_TEXT.encode() + b"\n5 \xb5s\n")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "latin-1 plan")
+    head = _git(root, "rev-parse", "HEAD")
+    (root / _SPEC).write_bytes(_PLAN_TEXT.encode() + b"\n5 \xb0s\n\nREFUTE work=7-widget round=1: ok\n")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "byte edit and a record")
+    assert _late(root, head) == {_SPEC}

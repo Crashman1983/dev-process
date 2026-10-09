@@ -1087,6 +1087,30 @@ def test_a_superseded_off_fork_pass_still_clears_nothing(tmp_path, monkeypatch):
     assert any("superseded" in s for s in soft), soft
 
 
+def test_a_round_whose_head_does_not_descend_supersedes_nothing(tmp_path, monkeypatch):
+    """Refute #199: the later round must have reviewed the old line's head."""
+    cr, root = _cr(), tmp_path / "p"
+    fork, first, head, _merge, _main_tip = _merged_main_repo(root)
+    _git(root, "checkout", "-q", "-b", "elsewhere", fork)
+    other = _commit_file(root, "o.py", "o = 1\n")
+    _git(root, "checkout", "-q", "feature")
+    _journal(root, _review(work="forked", artifact=(first, head), rnd="2") + " mode=delta",
+             _review(work="forked", artifact=(fork, other), rnd="3"))
+    hard, _ = _merge_check(cr, root, monkeypatch)
+    assert any("malformed REVIEW line" in h and f"base {first[:12]}" in h for h in hard), hard
+
+
+def test_an_issue_work_id_supersedes_in_any_spelling(tmp_path, monkeypatch):
+    cr, root = _cr(), tmp_path / "p"
+    _fork, first, head, merge, main_tip = _merged_main_repo(root)
+    _archived_plan(root, "2026-07-19-forked.md", "# Plan\n\ntier: 2\nissue: #26\n")
+    _journal(root, _review(work="26", artifact=(first, head), rnd="2") + " mode=delta",
+             _review(work="#26", artifact=(main_tip, merge), rnd="3"))
+    hard, soft = _merge_check(cr, root, monkeypatch)
+    assert not any("malformed REVIEW line" in h for h in hard), hard
+    assert any("superseded" in s for s in soft), soft
+
+
 def test_an_off_fork_record_of_a_stale_branch_is_one_note_and_still_clears(tmp_path, monkeypatch):
     """Downstream: records of stale branches whose plans are archived on main —
     their heads are no part of this push; judging them would red every push."""
