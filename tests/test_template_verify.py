@@ -824,3 +824,33 @@ def test_template_update_refuses_an_unsupported_source_before_copier_runs(tmp_pa
     assert r.returncode == 2, r.stdout + r.stderr
     assert 'unsupported template source' in r.stderr
     assert not log.exists()
+
+
+@pytest.mark.parametrize('argv,code,words', [
+    (['--help'], 0, 'usage: template_update.py'),
+    (['--bogus'], 2, 'unrecognized arguments'),
+])
+def test_template_update_help_and_unknown_arguments_never_update(tmp_path, argv, code, words):
+    """Downstream: `--help` fell through to an update of the current checkout,
+    and copier output landed in a foreign checkout."""
+    root, bin_dir, log = tmp_path / 'project', tmp_path / 'bin', tmp_path / 'copier.log'
+    init(root)
+    write(root, '.copier-answers.yml', "_src_path: 'https://github.com/o/r'\n_commit: v1.0.0\n")
+    commit(root)
+    stub = write(bin_dir, 'copier', f'#!/bin/sh\necho "$@" >> {log}\nexit 0\n')
+    stub.chmod(0o755)
+    env = {**os.environ, 'PATH': f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+           'PYTHONDONTWRITEBYTECODE': '1'}
+    r = subprocess.run([sys.executable, str(SCRIPTS / 'template_update.py'), *argv],
+                       capture_output=True, text=True, env=env, cwd=root)
+    assert r.returncode == code, r.stdout + r.stderr
+    assert words in r.stdout + r.stderr
+    assert not log.exists()
+
+
+def test_template_update_refuses_a_directory_that_is_no_rendered_project(tmp_path):
+    other = tmp_path / 'elsewhere'
+    init(other)
+    r = subprocess.run([sys.executable, str(SCRIPTS / 'template_update.py'), str(other)],
+                       capture_output=True, text=True)
+    assert r.returncode == 2 and 'no .copier-answers.yml' in r.stderr
