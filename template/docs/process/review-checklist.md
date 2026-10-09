@@ -19,15 +19,40 @@ the plan decided (a deviation is itself a finding), then the questions below
 each line. A decision made only in code is found a round too late — that is
 what the Plan halves move forward.
 
+## Does the declared tier hold?
+
+Asked first, from Tier 2 up, by the plan review and the code review alike:
+everything below scales with the tier, so a tier set too low skips exactly the
+checks that would have caught it (downstream: a Tier 2 plan rewrote the
+redirect path that held the only SSRF guard; nobody recomputed the tier, and
+the threat question below is asked at Tier 3 only).
+
+**Plan decides:** the tier with its reason, naming the boundary the change
+touches (auth, persistence, a contract, a security surface — `risk-tiers.md`)
+and the guard that enforces it independently of this diff, with its place
+(`file:line`). When the changed code is the only place a boundary is
+enforced, the change is Tier 3.
+
+- Recompute the tier from the diff, not from the plan's claim. A tier that
+  does not hold stops the review: the work is re-tiered and reviewed at the
+  tier it has.
+
 ## Completeness
 
 **Plan decides:** for every acceptance criterion by its id, the task that
-delivers it and the named test that proves it; where each new value ends up.
+delivers it and the named test that proves it; where each new value ends up;
+for a rename, removal, move, or a changed version, path or constant (an image
+tag, a pinned version, a port, a path a test or doc spells out), every reader
+— found by a search the plan quotes, not by recall.
 
 - Does every new field, value, or side-effect reach its **terminal state**
   (persisted, emitted, displayed, or deliberately dropped)? Trace it from where
   it is created to where it is used — a value that is produced and never read is
   dead data.
+- For a changed name, version, path or constant: **run the search for the
+  old value yourself** and quote it (command and hits) — any hit left outside
+  the intended ones is a finding; a blast radius asserted without a search is
+  not evidence.
 - Are **all execution paths** handled: the happy path, the error path, the retry
   path, and any async/deferred path?
 - Does every **changed critical contract** have **fitting evidence of its

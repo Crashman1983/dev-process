@@ -814,3 +814,15 @@ def test_testing_pins_the_lane_contract(render, tmp_path):
     for rule in ("**Closest test package.**", "**Parallel, bounded.**",
                  "**One hold per push.**", "**Measured.**"):
         assert rule in text
+
+
+def test_the_tier_is_rechecked_and_value_changes_are_inventoried(render, tmp_path):
+    # downstream: an under-tiered plan rewrote the only SSRF guard; an image tag
+    # pinned in Makefile, tests and docs changed without a search for its readers
+    out = render(tmp_path, {"project_name": "demo", "modules": {}, "harnesses": {"claude": True}})
+    checklist = (out / "docs/process/review-checklist.md").read_text()
+    assert "## Does the declared tier hold?" in checklist and "only place a boundary is" in checklist
+    assert "run the search for the\n  old value yourself" in checklist
+    plan = (out / ".claude/commands/plan.md").read_text()
+    assert "changed version, path or constant" in plan and "The tier carries its reason" in plan
+    assert "0. TIER" in (out / "docs/process/refute.md").read_text()
