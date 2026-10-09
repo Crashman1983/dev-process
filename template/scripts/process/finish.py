@@ -307,15 +307,19 @@ def _sh(root: Path, argv: list[str], env: dict[str, str] | None = None) -> bool:
 _ASSIGNMENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")
 
 
-def tests_argv(cmd: str) -> list[str] | str:
-    """`--tests CMD` as the argv it runs, without a shell (#199: consumers'
-    security floors flagged a shell run of argv text) — or why it cannot run:
-    unbalanced quotes, nothing to run, or a shell operator (`&&`, `|`, `;`,
-    a redirection) a command without a shell would pass on as a word. Several
-    stages belong in one make target or script (`make test-merge`)."""
+def tests_argv(cmd: str) -> tuple[list[str], dict[str, str]] | str:
+    """`--tests CMD` as (argv, leading variable assignments) it runs, without
+    a shell (#199: consumers' security floors flagged a shell run of argv
+    text) — or why it cannot run: unbalanced quotes, no command after the
+    assignments (refute: `CI=1` alone ran `env` and merged), or a shell
+    operator (`&&`, `|`, `;`, a redirection, a newline) a command without a
+    shell would pass on as a word. `#` is no comment here: it is an argument,
+    as `shlex.split` reads it. Several stages belong in one make target or
+    script (`make test-merge`)."""
     try:
         lex = shlex.shlex(cmd, posix=True, punctuation_chars=True)
         lex.whitespace_split = True
+        lex.commenters = ""
         tokens = list(lex)
         argv = shlex.split(cmd)
     except ValueError as exc:
@@ -326,11 +330,13 @@ def tests_argv(cmd: str) -> list[str] | str:
     if operators:
         return (f"carries the shell operator {operators[0]!r}; it runs without a shell — "
                 f"put the stages in one make target or script")
+    assigned: dict[str, str] = {}
+    while argv and _ASSIGNMENT.match(argv[0]):
+        name, _eq, value = argv.pop(0).partition("=")
+        assigned[name] = value  # `FOO=1 make test`, as the shell ran it
     if not argv:
         return "names no command"
-    if _ASSIGNMENT.match(argv[0]):
-        argv = ["env", *argv]  # `FOO=1 make test`, as the shell ran it
-    return argv
+    return argv, assigned
 
 
 def apply(root: Path, *, tests: str | None, tests_passed: bool) -> int:
@@ -340,6 +346,11 @@ def apply(root: Path, *, tests: str | None, tests_passed: bool) -> int:
     CMD, or asserted with --tests-passed. Every step prints its command and
     the first failure stops the run: the tree is then in a state git
     explains (a rebase conflict, a rejected push), never half-merged."""
+    run_tests = tests_argv(tests) if tests else ([], {})
+    if isinstance(run_tests, str):
+        # judged before step 1: a command that cannot run leaves no archive commit behind
+        print(f"finish: --tests {run_tests} — nothing applied")
+        return 1
     blockers, _tail = check(root)
     if blockers:
         print("finish: BLOCKED — nothing applied:")
@@ -394,13 +405,12 @@ def apply(root: Path, *, tests: str | None, tests_passed: bool) -> int:
                 return 1
     # 3. the batch pays completeness once, here
     if tests:
-        argv = tests_argv(tests)
-        if isinstance(argv, str):
-            print(f"finish: --tests {argv} — not merging")
-            return 1
-        print(f"finish: $ {shlex.join(argv)}   # the FULL suite, once per batch")
+        argv, assigned = run_tests
+        shown = shlex.join([*(f"{k}={v}" for k, v in assigned.items()), *argv])
+        print(f"finish: $ {shown}   # the FULL suite, once per batch")
         try:
-            green = subprocess.run(argv, cwd=str(root), env=git_environment()).returncode == 0
+            green = subprocess.run(argv, cwd=str(root),
+                                   env={**git_environment(), **assigned}).returncode == 0
         except OSError as exc:  # no such command, not executable
             print(f"finish: --tests cannot run ({exc}) — not merging")
             return 1

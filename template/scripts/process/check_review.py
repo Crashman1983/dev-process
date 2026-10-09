@@ -335,25 +335,45 @@ DECISION_LINE = re.compile(_RECORD_LEAD + r"[*_]*DECISION[*_]*[ \t]+\d{4}-\d{2}-
 
 def _record_line(line: str) -> bool:
     """Is this one line a record — REFUTE, ROOT-CAUSE, a well-formed REVIEW
-    line or a dated DECISION?"""
+    line or a dated DECISION — at most three spaces in (more, or a tab, is a
+    code block, refute #199)?"""
     if REFUTE_LINE.match(line) or ROOT_CAUSE_LINE.match(line) or DECISION_LINE.match(line):
         return True
+    if not re.match(r" {0,3}\S", line):
+        return False
     records, errors = parse_review_lines(line)
     return bool(records) and not errors
 
 
+# what `splitlines` reads as a line end and Markdown does not (refute #199:
+# U+0085 kept a closed fence open in the render)
+_ODD_LINE_ENDS = re.compile("[\x0b\x0c\x1c\x1d\x1e\x85\u2028\u2029]")
+
+
 def records_only(before: str, after: str) -> bool:
     """Is `after` the plan `before` plus records — REFUTE, ROOT-CAUSE, REVIEW
-    and DECISION lines and blank lines added, an open `DECISION NEEDED`
-    replaced by a DECISION line — with every other line kept as it was?
-    Such lines ride the attestation commit after the reviewed head (`attest
-    --with`, `--archive`); a Spec Kit plan is no bookkeeping, and they made
-    its own pass stale (#199). Prose, an edited or a deleted line is plan
-    content: not records only. So is a record line a reader does not see as
-    one (`readable`: inside a fence, an HTML comment, indented as code) — the
-    rendered plan, records aside, must read exactly as before."""
+    and DECISION lines added, an open `DECISION NEEDED` replaced by a
+    DECISION line — with every other line kept as it was? Such lines ride
+    the attestation commit after the reviewed head (`attest --with`,
+    `--archive`); a Spec Kit plan is no bookkeeping, and they made its own
+    pass stale (#199). Prose, an edited or a deleted line is plan content:
+    not records only. So is a record line a reader does not see as one
+    (`readable`: inside a fence, an HTML comment, indented as code), and an
+    addition that joins or splits the paragraphs around it (refute #199: a
+    setext underline, a lazy continuation, a blank line that turned prose
+    into an invisible link definition): records go between blank lines,
+    or next to other records. The rendered plan, records aside, must read
+    exactly as before. Known limit: a record line's own inline markup (a
+    backtick closing a code span its record paragraph opened) is not
+    rendered here."""
     import difflib
+    if _ODD_LINE_ENDS.findall(before) != _ODD_LINE_ENDS.findall(after):
+        return False
     a, b = before.splitlines(), after.splitlines()
+
+    def blank(line: str | None) -> bool:
+        return line is None or not line.strip(" \t")  # U+00A0 is text to a renderer
+
     added: list[str] = []
     answered: list[str] = []
     for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(None, a, b, autojunk=False).get_opcodes():
@@ -363,15 +383,24 @@ def records_only(before: str, after: str) -> bool:
             if not DECISION_NEEDED.match(line):
                 return False
             answered.append(line)
-        for line in b[j1:j2]:
-            if line.strip() and not _record_line(line):
-                return False
-            added += [line] if line.strip() else []
+        block = b[j1:j2]
+        records = [line for line in block if not blank(line)]
+        if not records or not all(_record_line(line) for line in records):
+            return False  # prose, or blank lines alone (they regroup paragraphs)
+        prev = b[j1 - 1] if j1 > 0 else None
+        nxt = b[j2] if j2 < len(b) else None
+        # each side meets a blank line or a record — or the block opens (closes)
+        # with a blank line where nothing stood on the other side anyway
+        left = blank(prev) or _record_line(prev) or (blank(block[0]) and blank(nxt))
+        right = blank(nxt) or _record_line(nxt) or (blank(block[-1]) and blank(prev))
+        if not (left and right):
+            return False  # it would join or split the paragraph next to it
+        added += records
     if len(answered) > sum(1 for line in added if DECISION_LINE.match(line)):
         return False  # a question dropped, not answered
 
     def content(text: str, drop: list[str]) -> tuple[list[str], Counter]:
-        lines = [line for line in readable(text).splitlines() if line.strip()]
+        lines = [line for line in readable(text).splitlines() if not blank(line)]
         records = Counter(line for line in lines if _record_line(line))
         rest = Counter(lines) - records - Counter(drop)
         return sorted(rest.elements()), records

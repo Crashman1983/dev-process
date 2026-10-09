@@ -285,7 +285,9 @@ def candidates(root: Path, local: str, base: str) -> list[dict]:
         own_active = _own_plans(root, base, b, read)
         if own_active is None:
             branch_unreadable.append(f"the plans of {b}")
-        # a slug is unique among the active plans at the branch's tip, as the gate counts
+        # a slug is its work id where the gate takes it now and after the merge
+        # archives the plan: unique among the active plans at the branch's tip,
+        # and in no archive this train sees (refute #199)
         at_tip = _paths(root, "ls-tree", "-r", "-z", "--name-only", b, "--", PLANS)
         if at_tip is None:
             branch_unreadable.append(f"the plans on {b}")
@@ -293,7 +295,8 @@ def candidates(root: Path, local: str, base: str) -> list[dict]:
         for rel, plain in own_active or ():
             if _review.record_kind(rel) == "plan":
                 stem = Path(rel).stem
-                unique = at_tip is not None and slugs[_review.DATE_PREFIX.sub("", stem)] == 1
+                key = _review.DATE_PREFIX.sub("", stem)
+                unique = at_tip is not None and slugs[key] == 1 and not dedated.get(key)
                 own_ids |= _review._plan_work_ids(stem, plain, include_dedated=unique)
         cleared_all = bool(archived) and all(p["cleared"] for p in c["plans"])
         if housekeeping:
