@@ -1098,6 +1098,7 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
     base_from_memo = False  # the base's green is the memo's, not a run's
     red_in = ""             # where the last judged tree went red: "gates" or "suite"
     last_wt: Path | None = None
+    green_here: set[str] = set()  # trees whose suite this run saw green
 
     def judge(wt: Path, *, bare_base: bool = False, memo: bool = True) -> str:
         """"green", "red" or "undefined" (the suite does not exist on this tree).
@@ -1111,6 +1112,13 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
         if not suite:
             return "green"
         key = _suite_key(wt, suite)
+        if key and key in green_here:
+            # a bisection probe went green on this very tree minutes ago; the
+            # rebuild after the drop is the same tree (downstream: ~25 minutes
+            # paid twice for one tree). Only this run's verdicts: an earlier
+            # train's green on a passenger's tree is not trusted for a merge
+            log(f"tree {key.split()[0][:12]}: suite green earlier in this train — not run again")
+            return "green"
         if bare_base and memo and _suite_seen_green(root, key):
             log(f"base tree {key.split()[0][:12]}: suite green on an earlier train — not run again")
             base_from_memo = True
@@ -1118,6 +1126,7 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
         state = _sh(wt, suite, log)
         if state == "green" and key:
             _remember_green_suite(root, key)
+            green_here.add(key)
         return state
 
     def attempt(subset: list[str], *, memo: bool = True) -> tuple[str, list[str], str]:
