@@ -1610,9 +1610,18 @@ def _memo_batch(render, tmp_path, monkeypatch, *, seen, red):
     if seen:
         train._remember_green_suite(out, train._suite_key(out, "s"))
     runs, current, written = [], [], []
+    # one tree per boarding prefix, as real merges give: [] main, [b1], [b1, b2]
+    for name, files in (("one", {"a.txt": "a\n"}), ("both", {"a.txt": "a\n", "b.txt": "b\n"})):
+        _git(out, "checkout", "-q", "-b", name, "main")
+        for rel, text in files.items():
+            (out / rel).write_text(text)
+        _git(out, "add", "-A")
+        _git(out, "commit", "-q", "-m", name)
+    _git(out, "checkout", "-q", "main")
 
     def build(root, base, subset, stamp, log):
         current[:] = subset
+        _git(out, "checkout", "-q", {0: "main", 1: "one", 2: "both"}[len(subset)])
         return out, "train/x", list(subset), []
     monkeypatch.setattr(train, "build_train", build)
     monkeypatch.setattr(train, "_run_gates", lambda w, log: True)
@@ -1634,7 +1643,7 @@ def test_the_bare_base_skips_a_suite_this_train_saw_green(render, tmp_path, monk
                          push=False, keep_branches=True)
     assert runs[-1] == ["b1"]  # b2 blamed, b1 green
     assert ([] in runs) is not seen  # the bare base ran only without the memo
-    assert ("not run again" in (tmp_path / "t.log").read_text()) is seen
+    assert ("green on an earlier train" in (tmp_path / "t.log").read_text()) is seen
 
 
 def test_a_remembered_base_runs_before_the_first_passenger_is_blamed(render, tmp_path, monkeypatch):
