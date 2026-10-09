@@ -80,8 +80,9 @@ signature, schema or API the plan cites is checked against the code
 **A plan is reviewed before `planned` (Tier 2+).** Build its bundle
 (`uv run scripts/process/make_review_bundle.py --plan <slug> -o
 .process-work/reviews/<slug>-plan.bundle.md`). **Tier 2:** hand the bundle
-to a fresh subagent that did not write the plan, with the Plan halves of the
-checklist as its brief — a cheap model is enough; blocks follow
+to a fresh subagent that did not write the plan, with the plan brief of
+`docs/process/refute.md` ("Refuting a plan") — owner, cited claims, fail-open,
+edge cases, the checklist's Plan halves — a cheap model is enough; blocks follow
 `verification-independence.md` ("What blocks"): a failure scenario, scored
 80 or more. Fix the plan, then attest the pass:
 `attest.py --plan-review --work <id> --tier 2 --model <family>

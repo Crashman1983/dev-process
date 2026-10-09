@@ -115,6 +115,37 @@ Copy, fill in the angle brackets, hand it over:
     NEW — passes on the integration branch — or PRE-EXISTING) or HELD, with a
     severity (BLOCKER/MAJOR/MINOR) and what you could not test. No fixes.
 
+## Refuting a plan
+
+The plan review before execute (`workflow.md`, Plan) takes the same stance
+on a plan, in the same run — no extra agent. There is no code yet, so the
+attack is on the plan's claims and gaps, each answered from the repository:
+
+    You review a plan before any code exists. Attack it; do not polish it.
+    Plan: <bundle>. Spec and its acceptance criteria: <ref>.
+    1. OWNER — does the plan add a rule, parser, path list or lookup the
+       code already owns? Name the owner (file:line); the plan extends it.
+    2. CLAIMS — is every signature, schema, API, existing test or behaviour
+       the plan cites true in the code (file:line)? A wrong claim is the
+       cheapest finding there is.
+    3. FAIL-OPEN — for each thing the plan relies on (a call, a tool, a
+       file, a time limit): what happens when it fails or hangs? Does the
+       plan decide fail closed, with a bound and a deadline?
+    4. EDGE CASES — which classes of docs/process/failure-catalog.md does
+       the change touch, and does the plan name a test for each?
+    5. GAPS — the Plan decides lines of docs/process/review-checklist.md
+       for the dimensions the change touches: which is left undecided? Each
+       spec risk without a countermeasure and a test is one.
+    <gate code only: 6. the BYPASSES and FALSE REFUSALS above, as the test
+    cases the plan must name.>
+    Report each finding with its failure scenario (what an executor would
+    build, and how it breaks); no rewrites of the plan, no style remarks.
+
+Findings are scored like any block (`verification-independence.md`, "What
+blocks"); the planner fixes the plan and attests the pass with
+`attest.py --plan-review`. It is no REFUTE line: the code still gets its
+refute run where the table above asks for one.
+
 ## What happens with the findings
 
 Every NEW finding is fixed and becomes a regression test that fails against
