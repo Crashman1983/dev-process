@@ -1751,3 +1751,37 @@ def test_a_run_that_wrote_into_the_tree_is_retried_on_a_rebuilt_one(render, tmp_
     builds, runs, log = _retry_batch(render, tmp_path, monkeypatch, retry="make retry", sh=sh)
     assert runs[:2] == ["suite", "suite"] and builds[:2] == [["b1"], ["b1"]]
     assert "changed the worktree" in log
+
+
+def test_a_tree_this_train_saw_green_is_not_run_again_after_the_drop(render, tmp_path, monkeypatch):
+    # downstream: the bisection probe main+#2445 went green, #2456 was dropped,
+    # and the rebuild — the same tree — paid the 25-minute suite once more
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    for name, files in (("one", {"a.txt": "a\n"}), ("both", {"a.txt": "a\n", "b.txt": "b\n"})):
+        _git(out, "checkout", "-q", "-b", name, "main")
+        for rel, text in files.items():
+            (out / rel).write_text(text)
+        _git(out, "add", "-A")
+        _git(out, "commit", "-q", "-m", name)
+    _git(out, "checkout", "-q", "main")
+    train = _load_train(out)
+    runs, current = [], []
+
+    def build(root, base, subset, stamp, log):
+        current[:] = subset
+        _git(out, "checkout", "-q", {0: "main", 1: "one", 2: "both"}[len(subset)])
+        return out, "train/x", list(subset), []
+    monkeypatch.setattr(train, "build_train", build)
+    monkeypatch.setattr(train, "_run_gates", lambda w, log: True)
+    monkeypatch.setattr(train, "_sh", lambda cwd, cmd, log: runs.append(list(current)) or
+                        ("red" if "b2" in current else "green"))
+    monkeypatch.setattr(train, "_cleanup", lambda *a: None)
+    monkeypatch.setattr(train, "_write", lambda *a, **k: None)
+    p = {"base": "main", "candidates": [{"branch": "b1", "hours_waiting": 2}, {"branch": "b2", "hours_waiting": 1}]}
+    with pytest.raises(SystemExit):  # the stub train/x cannot be fast-forwarded; the judging is done
+        train._run_batch(out, "main", p, ["b1", "b2"], "x", tmp_path / "t.log", suite="s", deploy=None,
+                         push=False, keep_branches=True)
+    # combined, its retry, the base, the probe [b1] — and no fifth run for the rebuilt [b1]
+    assert runs == [["b1", "b2"], ["b1", "b2"], [], ["b1"]]
+    assert "green earlier in this train" in (tmp_path / "t.log").read_text()
