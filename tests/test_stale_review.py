@@ -1176,7 +1176,6 @@ _TAIL = "\nREFUTE work=7-widget round=1: 3 scenarios, no findings\n"
     lambda t: t + "\n        REVIEW work=7-widget tier=2 reviewer=fresh model=cross independence=bundle verdict=pass round=1\n",
     lambda t: t + "\nREVIEW work=7-widget tier=9 reviewer=fresh model=cross independence=bundle verdict=pass round=1\n",
     lambda t: t + "\nDECISION 2026-10-02\n",                                                          # a date, no answer
-    lambda t: t + "\n\n\n",                                                                           # blank lines alone
     lambda t: t.replace("- build it\n", "- build it\nREFUTE work=7-widget round=1: x\n- test it\n"),  # inside a list
 ])
 def test_a_record_that_regroups_the_plan_stays_late(spec_repo, change):
@@ -1219,7 +1218,15 @@ _LISTED = ("# Widget\n\ntier: 2\n\n## Decisions\n\n- note: keep it small\n"
     # refute #199, third round: the daily ways of answering and recording
     (_LISTED, _LISTED.replace("- DECISION NEEDED 2026-10-01 seb: which store?", "- DECISION 2026-10-02: SQLite.")),
     (_LISTED, _LISTED.replace("- DECISION NEEDED 2026-10-01 seb: which port?", "- DECISION 2026-10-02: 8080.")),
-    (_LISTED, _LISTED + "REFUTE work=7-widget round=1: 3 scenarios, no findings\n"),
+    (_LISTED, _LISTED + "\nREFUTE work=7-widget round=1: 3 scenarios, no findings\n"),
+    # refute #199, fifth round: the last line answered and a record appended at once
+    ("# W\n\n## Decisions\n\nDECISION NEEDED 2026-10-01 seb: A or B?\n",
+     "# W\n\n## Decisions\n\nDECISION 2026-10-09 seb: A\n\nREFUTE work=x round=1: no findings\n"),
+    ("# W\n\n## Decisions\n\nDECISION NEEDED 2026-10-01 seb: A or B?\n",
+     "# W\n\n## Decisions\n\nDECISION 2026-10-09 seb: A\nREFUTE work=x round=1: no findings\n"),
+    # trailing blank lines: the record goes after the plan's last line
+    ("# W\n\n- build it\n\n\n", "# W\n\n- build it\n\nREFUTE work=x round=1: no findings\n"),
+    ("# W\n\n- build it\n\n\n", "# W\n\n- build it\n\nREFUTE work=x round=1: no findings\n\n\n"),
     ("# W\n\n## Decisions\nDECISION NEEDED 2026-10-01 seb: which store?\n\n## Tasks\n",
      "# W\n\n## Decisions\nDECISION 2026-10-02: SQLite.\n\n## Tasks\n"),
     ("Open questions:\n- DECISION NEEDED 2026-10-01 seb: which store?\n",
@@ -1243,6 +1250,18 @@ def test_answers_and_records_in_lists_keep_the_review(spec_repo, before, after):
     # an answer that leaves its list item, or drops the question
     (_LISTED, _LISTED.replace("- DECISION NEEDED 2026-10-01 seb: which store?", "DECISION 2026-10-02: SQLite.")),
     (_LISTED, _LISTED.replace("- DECISION NEEDED 2026-10-01 seb: which store?\n", "")),
+    # a record right under the plan's last line joins its block (a table row, a lazy line)
+    ("| h |\n|---|\n| one |\n", "| h |\n|---|\n| one |\nREFUTE work=x round=1: ok | BLOCKER: auth bypass\n"),
+    (_LISTED, _LISTED + "REFUTE work=7-widget round=1: 3 scenarios, no findings\n"),
+    # an answer with inline HTML, a table cell or an open code span
+    (_LISTED, _LISTED.replace("- DECISION NEEDED 2026-10-01 seb: which store?", "- DECISION 2026-10-02: A <details>")),
+    (_LISTED, _LISTED.replace("- DECISION NEEDED 2026-10-01 seb: which store?", "- DECISION 2026-10-02: A | B")),
+    (_LISTED, _LISTED.replace("- DECISION NEEDED 2026-10-01 seb: which store?", "- DECISION 2026-10-02: `A")),
+    # an answer plus a record inside the plan
+    (_LISTED, _LISTED.replace("- DECISION NEEDED 2026-10-01 seb: which store?",
+                              "- DECISION 2026-10-02: A\n- REFUTE work=x round=1: no findings")),
+    # a record a reader cannot see: the plan ends inside an open fence
+    ("# W\n\n```\ncode\n", "# W\n\n```\ncode\n\nREFUTE work=x round=1: no findings\n"),
     # an answer whose inline comment hides the next line of its paragraph
     ("Q:\nDECISION NEEDED 2026-10-01 seb: which store?\nkeep the auth check\n",
      "Q:\nDECISION 2026-10-02: SQLite <!--\nkeep the auth check -->\n"),

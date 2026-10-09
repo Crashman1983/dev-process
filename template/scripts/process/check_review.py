@@ -359,8 +359,12 @@ def _answer_in_place(question: str, answer: str) -> bool:
     if m is None:
         return False
     prefix = question[:m.start()]
+    # no inline HTML and no table cell (refute: `<details>` folded the rest of
+    # the plan away, a `|` made a reviewed table row drop a cell), no code
+    # span reaching into the next line
     return answer.startswith(prefix) and bool(DECISION_LINE.match(answer)) \
-        and bool(re.match(r"[*_]*DECISION[*_]*[ \t]+\d{4}-\d{2}-\d{2}", answer[len(prefix):]))
+        and bool(re.match(r"[*_]*DECISION[*_]*[ \t]+\d{4}-\d{2}-\d{2}", answer[len(prefix):])) \
+        and not set(answer) & {"<", "|"} and answer.count("`") % 2 == 0
 
 
 def records_only(before: str, after: str) -> bool:
@@ -381,7 +385,10 @@ def records_only(before: str, after: str) -> bool:
     plan nothing follows that a record could regroup; in place, the answered
     line keeps its block. What renders must still match: an appended record a
     reader does not see as one (inside an unclosed fence or comment, indented
-    as code) is content, and so is an answer whose inline markup hides text."""
+    as code) is content, and so is an answer with inline HTML, a table cell or
+    an open code span; an appended record starts its own paragraph (a blank
+    line before it, unless the plan already ends with a record). Known limit:
+    emphasis an answer closes across lines is not rendered here."""
     import difflib
     if _ODD_LINE_ENDS.findall(before) != _ODD_LINE_ENDS.findall(after):
         return False
@@ -392,19 +399,39 @@ def records_only(before: str, after: str) -> bool:
 
     added: list[str] = []
     answered: list[str] = []
+    # the plan ends at its last line that is not blank: records go after it
+    end = max((i + 1 for i, line in enumerate(a) if not blank(line)), default=0)
     for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(None, a, b, autojunk=False).get_opcodes():
         if tag == "equal":
             continue
-        if tag == "replace" and i2 - i1 == j2 - j1 and \
-                all(_answer_in_place(q, r) for q, r in zip(a[i1:i2], b[j1:j2])):
+        tail, t0 = b[j1:j2], j1
+        if i1 >= end and all(blank(line) for line in a[i1:i2]):
+            if not tail:
+                continue  # blank lines after the plan's end dropped
+        elif tag == "replace":
+            # questions answered in place — when the last one ends the plan,
+            # the records appended in the same commit come in the same block
+            n = i2 - i1
+            if len(tail) < n or not all(_answer_in_place(q, r) for q, r in zip(a[i1:i2], tail)):
+                return False
+            if len(tail) > n and i2 < end:
+                return False  # lines added inside the plan
             answered += a[i1:i2]
-            added += b[j1:j2]
-            continue
-        if tag != "insert" or i1 != len(a):
+            added += tail[:n]
+            tail, t0 = tail[n:], j1 + n
+            if not tail:
+                continue
+        else:
             return False  # a change inside the plan, not records after it
-        tail = b[j1:j2]
         records = [line for line in tail if not blank(line)]
+        if not records and i1 >= end:
+            continue  # blank lines after the plan's end
         if not records or not all(_record_line(line) for line in records):
+            return False
+        # a paragraph of its own: no table row, no lazy continuation, no code
+        # span or emphasis closing what the plan's last line opened (refute)
+        last = b[t0 - 1] if t0 > 0 else ""
+        if not (blank(tail[0]) or blank(last) or _record_line(last)):
             return False
         added += records
 

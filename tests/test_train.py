@@ -1904,3 +1904,29 @@ def test_a_stacked_branch_carrying_the_same_plan_does_not_double_count(render, t
     _git(out, "checkout", "-q", "main")
     _report(out, "issue-2260")
     assert _candidate(out, "issue-2260")["eligible"]
+
+
+def test_a_plan_the_branch_only_renamed_counts_once(render, tmp_path):
+    """Refute #199: a renamed plan is one file after the merge, its slug still unique."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    plans = out / ".process-work/plans"
+    plans.mkdir(parents=True, exist_ok=True)
+    (plans / "2026-10-01-2260-work-expiry.md").write_text("# p\n\ntier: 2\nissue: #2260\n\n## Decisions\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "plan on main")
+    _git(out, "checkout", "-q", "-b", "issue-2260", "main")
+    _git(out, "mv", ".process-work/plans/2026-10-01-2260-work-expiry.md",
+         ".process-work/plans/2026-10-08-2260-work-expiry.md")
+    (out / "src").mkdir(exist_ok=True)
+    (out / "src/expiry.py").write_text("x = 1\n")
+    j = out / ".process-work/journal"
+    j.mkdir(parents=True, exist_ok=True)
+    (j / "2026-10-08-issue-2260.md").write_text(
+        "REVIEW work=2260-work-expiry tier=2 reviewer=fresh model=cross "
+        "independence=bundle,non-implementing verdict=pass round=1\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "rename and work")
+    _git(out, "checkout", "-q", "main")
+    _report(out, "issue-2260")
+    assert _candidate(out, "issue-2260")["eligible"]

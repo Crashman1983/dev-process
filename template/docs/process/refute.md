@@ -167,7 +167,9 @@ boundary (a stdlib-only script, a hook without the project's environment),
 or a double check that takes its rule from one source. Otherwise the fix
 reuses the owner; that is usually less code than the copy.
 
-Then one line in the plan, so the reviewer sees what was attacked:
+Then one line in the plan, so the reviewer sees what was attacked — in a
+Spec Kit plan after its last line, where the attestation commit adds it
+without making the plan's own review stale (`verification-independence.md`):
 
     REFUTE work=<id> round=<r>: <n> scenarios, <k> findings — <fixed / DECISION …>
 
