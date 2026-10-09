@@ -387,7 +387,7 @@ def records_only(before: str, after: str) -> bool:
     reader does not see as one (inside an unclosed fence or comment, indented
     as code) is content, and so is an answer with inline HTML, a table cell or
     an open code span; an appended record starts its own paragraph (a blank
-    line before it, unless the plan already ends with a record). Known limit:
+    line before it). Known limit:
     emphasis an answer closes across lines is not rendered here."""
     import difflib
     if _ODD_LINE_ENDS.findall(before) != _ODD_LINE_ENDS.findall(after):
@@ -428,11 +428,12 @@ def records_only(before: str, after: str) -> bool:
             continue  # blank lines after the plan's end
         if not records or not all(_record_line(line) for line in records):
             return False
-        # a paragraph of its own: no table row, no lazy continuation, no code
-        # span or emphasis closing what the plan's last line opened (refute) —
-        # right under a record it joins that record's paragraph, records only
+        # a paragraph of its own, always: no table row, no lazy continuation,
+        # no code span, emphasis or HTML attribute closing what the line above
+        # opened — a record line above is no exception (refute: a record table
+        # row and an open `title="` above swallowed the appended record)
         last = b[t0 - 1] if t0 > 0 else ""
-        if not (blank(tail[0]) or blank(last) or _record_line(last)):
+        if not (blank(tail[0]) or blank(last)):
             return False
         added += records
 

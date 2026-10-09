@@ -176,7 +176,7 @@ A Spec Kit plan (`specs/<dir>/plan.md`) is no bookkeeping, but two shapes of
 what the attestation commit adds to it are (`attest --with`, `--archive`;
 `check_review.records_only`): REFUTE, ROOT-CAUSE, REVIEW and dated DECISION
 lines appended after the plan's last line as a paragraph of their own (a
-blank line before them, unless the plan ends with a record), and an open
+blank line before them), and an open
 `DECISION NEEDED` answered in place — the same line, same prefix and list
 marker, now a dated DECISION without inline HTML, a table cell or an open
 code span; also its move to the archive with no more than that. Anything

@@ -1222,8 +1222,6 @@ _LISTED = ("# Widget\n\ntier: 2\n\n## Decisions\n\n- note: keep it small\n"
     # refute #199, fifth round: the last line answered and a record appended at once
     ("# W\n\n## Decisions\n\nDECISION NEEDED 2026-10-01 seb: A or B?\n",
      "# W\n\n## Decisions\n\nDECISION 2026-10-09 seb: A\n\nREFUTE work=x round=1: no findings\n"),
-    ("# W\n\n## Decisions\n\nDECISION NEEDED 2026-10-01 seb: A or B?\n",
-     "# W\n\n## Decisions\n\nDECISION 2026-10-09 seb: A\nREFUTE work=x round=1: no findings\n"),
     # trailing blank lines: the record goes after the plan's last line
     ("# W\n\n- build it\n\n\n", "# W\n\n- build it\n\nREFUTE work=x round=1: no findings\n"),
     ("# W\n\n- build it\n\n\n", "# W\n\n- build it\n\nREFUTE work=x round=1: no findings\n\n\n"),
@@ -1250,6 +1248,14 @@ def test_answers_and_records_in_lists_keep_the_review(spec_repo, before, after):
     # an answer that leaves its list item, or drops the question
     (_LISTED, _LISTED.replace("- DECISION NEEDED 2026-10-01 seb: which store?", "DECISION 2026-10-02: SQLite.")),
     (_LISTED, _LISTED.replace("- DECISION NEEDED 2026-10-01 seb: which store?\n", "")),
+    # refute #199, sixth round: right under a record is no exception
+    ("# W\n\n## Decisions\n\nDECISION NEEDED 2026-10-01 seb: A or B?\n",
+     "# W\n\n## Decisions\n\nDECISION 2026-10-09 seb: A\nREFUTE work=x round=1: no findings\n"),
+    ("Date | Answer\n--- | ---\nDECISION 2026-10-01 | yes\n",
+     "Date | Answer\n--- | ---\nDECISION 2026-10-01 | yes\nREFUTE work=x round=1: ok | fine | BLOCKER: auth bypass\n"),
+    # two questions, one answer: a question disappears
+    ("Q:\nDECISION NEEDED 2026-10-01 seb: A?\nDECISION NEEDED 2026-10-01 seb: B?\n",
+     "Q:\nDECISION 2026-10-02: A\n"),
     # a record right under the plan's last line joins its block (a table row, a lazy line)
     ("| h |\n|---|\n| one |\n", "| h |\n|---|\n| one |\nREFUTE work=x round=1: ok | BLOCKER: auth bypass\n"),
     (_LISTED, _LISTED + "REFUTE work=7-widget round=1: 3 scenarios, no findings\n"),
