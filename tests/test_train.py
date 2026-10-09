@@ -1930,3 +1930,22 @@ def test_a_plan_the_branch_only_renamed_counts_once(render, tmp_path):
     _git(out, "checkout", "-q", "main")
     _report(out, "issue-2260")
     assert _candidate(out, "issue-2260")["eligible"]
+
+
+def test_another_cars_deletion_does_not_make_a_slug_unique(render, tmp_path):
+    """Review #199: a car that deletes a namesake may not board — its deletion counts for nobody else."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    plans = out / ".process-work/plans"
+    plans.mkdir(parents=True, exist_ok=True)
+    (plans / "2026-09-01-2260-work-expiry.md").write_text("# old\n\ntier: 2\nissue: #2300\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "a namesake on main")
+    _git(out, "checkout", "-q", "-b", "drop-old", "main")
+    _git(out, "rm", "-q", ".process-work/plans/2026-09-01-2260-work-expiry.md")
+    _git(out, "commit", "-q", "-m", "drop it, unreviewed")
+    _git(out, "checkout", "-q", "main")
+    _slug_branch(out, "issue-2260", "2026-10-01-2260-work-expiry.md", issue=2260, work="2260-work-expiry",
+                 files={"src/expiry.py": "x = 1\n"})
+    _report(out, "issue-2260")
+    assert not _candidate(out, "issue-2260")["eligible"]
