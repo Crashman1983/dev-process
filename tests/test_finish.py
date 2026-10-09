@@ -443,6 +443,7 @@ def test_tests_keep_an_env_prefix_and_refuse_a_newline(render, tmp_path):
     finish = _finish_module(_repo_on_feature(render, tmp_path))
     assert finish.tests_argv("FOO=1 make test") == (["make", "test"], {"FOO": "1"})
     assert "newline" in finish.tests_argv("make test\nmake deploy")
+    assert "shell operator" in finish.tests_argv("make test # && make deploy")  # `#` hides nothing
 
 
 @pytest.mark.parametrize("cmd", ["no-such-command-199", "FOO=1 no-such-command-199"])
@@ -459,3 +460,10 @@ def test_apply_with_an_assignment_alone_applies_nothing(render, tmp_path):
     r = _run_args(out, "--apply", "--tests", "CI=1")
     assert r.returncode == 1 and "names no command" in r.stdout and "nothing applied" in r.stdout, r.stdout
     assert subprocess.run(["git", "rev-parse", "HEAD"], cwd=out, capture_output=True, text=True).stdout == head
+
+
+def test_apply_runs_the_tests_with_their_assignments(render, tmp_path):
+    out, _bare = _repo_with_origin(render, tmp_path)
+    check = f"FOO=199 {sys.executable} -c 'import os, sys; sys.exit(os.environ.get(\"FOO\") != \"199\")'"
+    r = _run_args(out, "--apply", "--tests", check)
+    assert r.returncode == 0 and "full suite red" not in r.stdout, r.stdout

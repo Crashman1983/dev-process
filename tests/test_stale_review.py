@@ -1177,7 +1177,7 @@ _TAIL = "\nREFUTE work=7-widget round=1: 3 scenarios, no findings\n"
     lambda t: t + "\nREVIEW work=7-widget tier=9 reviewer=fresh model=cross independence=bundle verdict=pass round=1\n",
     lambda t: t + "\nDECISION 2026-10-02\n",                                                          # a date, no answer
     lambda t: t + "\n\n\n",                                                                           # blank lines alone
-    lambda t: t.replace("- build it\n", "- build it\nREFUTE work=7-widget round=1: x\n"),            # joins the list item
+    lambda t: t.replace("- build it\n", "- build it\nREFUTE work=7-widget round=1: x\n- test it\n"),  # inside a list
 ])
 def test_a_record_that_regroups_the_plan_stays_late(spec_repo, change):
     root, _head = spec_repo
@@ -1206,4 +1206,25 @@ def test_a_record_next_to_records_keeps_the_review(spec_repo):
     _commit(root, _SPEC, listed.replace("- DECISION 2026-10-01: SQLite.\n",
                                         "- DECISION 2026-10-01: SQLite.\n- DECISION 2026-10-03: Rest bleibt.\n"),
             "attest")
+    assert _late(root, head) == set()
+
+
+_LISTED = ("# Widget\n\ntier: 2\n\n## Decisions\n\n- note: keep it small\n"
+           "- DECISION NEEDED 2026-10-01 seb: which store?\n- DECISION NEEDED 2026-10-01 seb: which port?\n"
+           "\n## Tasks\n\n- build it\n")
+
+
+@pytest.mark.parametrize("before, after", [
+    # refute #199, third round: the daily ways of answering and recording
+    (_LISTED, _LISTED.replace("- DECISION NEEDED 2026-10-01 seb: which store?", "- DECISION 2026-10-02: SQLite.")),
+    (_LISTED, _LISTED.replace("- DECISION NEEDED 2026-10-01 seb: which port?", "- DECISION 2026-10-02: 8080.")),
+    (_LISTED, _LISTED.replace("- note: keep it small\n", "- note: keep it small\n- DECISION 2026-10-02: Rest bleibt.\n")),
+    (_LISTED, _LISTED + "REFUTE work=7-widget round=1: 3 scenarios, no findings\n"),
+    ("# W\n\n## Decisions\nDECISION NEEDED 2026-10-01 seb: which store?\n\n## Tasks\n",
+     "# W\n\n## Decisions\nDECISION 2026-10-02: SQLite.\n\n## Tasks\n"),
+])
+def test_answers_and_records_in_lists_keep_the_review(spec_repo, before, after):
+    root, _head = spec_repo
+    head = _commit(root, _SPEC, before, "reviewed plan")
+    _commit(root, _SPEC, after, "attest")
     assert _late(root, head) == set()

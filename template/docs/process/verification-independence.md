@@ -174,7 +174,8 @@ rebase replaced needs such a base, and any other review vouches only for
 the files its own range changed.
 A Spec Kit plan (`specs/<dir>/plan.md`) is no bookkeeping, but what the
 attestation commit adds to it is: REFUTE, ROOT-CAUSE, REVIEW and dated
-DECISION lines added between blank lines or next to other records, an open
+DECISION lines added between blank lines, next to other records, an open
+question or a heading, as a sibling list item or at a list's end, an open
 `DECISION NEEDED` replaced by a DECISION, and its move to the archive with
 no more than that (`attest --with`, `--archive`; `check_review.records_only`).
 Any other line added, edited or deleted is plan content; so is a record line
