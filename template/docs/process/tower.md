@@ -196,7 +196,9 @@ on another host shows no screen here; its reports speak for it.
 Phases chain themselves: `dispatch.py chain` (from the steward's tick)
 stops a `planned` plan session and queues `execute` once the process
 gates are green on the plan's worktree (a red verdict is said on every tick
-until a new plan commit); stops a `pushed`
+until a new plan commit) and a Tier 2+ plan carries its plan pass — at Tier
+3 it first queues a plan review (`review --plan-review`), whose pass queues
+execute; stops a `pushed`
 execute session and queues `review` once the branch's plan on origin has
 no open task (`pushed` comes at the first push) and origin carries code
 beyond the last attestation (a commit recording a REVIEW line — an
