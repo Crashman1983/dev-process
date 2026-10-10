@@ -1968,16 +1968,18 @@ def _phases(out: Path) -> list[dict]:
     return [json.loads(line) for line in f.read_text().splitlines()] if f.exists() else []
 
 
-def test_a_red_preflight_stops_the_train_and_blames_nobody(render, tmp_path):
+def test_a_red_preflight_stops_the_train_and_blames_nobody(render, tmp_path, tmp_path_factory):
+    # the suite log lives outside the worker's shared directory: other train tests write there too
+    logs = tmp_path_factory.mktemp("suite")
     out = render(tmp_path, {"project_name": "d", "modules": {}})
     _repo(out)
     _branch(out, "alpha", {"src/a.py": "a\n"})
     _branch(out, "beta", {"src/b.py": "b\n"})
     head = _git(out, "rev-parse", "main").stdout
-    r = _train(out, "run", "--force", "--suite", f"echo run >> {out.parent}/suite.log",
+    r = _train(out, "run", "--force", "--suite", f"echo run >> {logs}/suite.log",
                "--preflight", "exit 3")
     assert r.returncode == 1 and "preflight `exit 3` is red" in r.stderr and "nobody is blamed" in r.stderr, r.stderr
-    assert "dropping" not in r.stdout and not (out.parent / "suite.log").exists()
+    assert "dropping" not in r.stdout and not (logs / "suite.log").exists()
     assert _git(out, "rev-parse", "main").stdout == head
     branches = _git(out, "branch", "--list", "--format=%(refname:short)").stdout.split()
     assert {"alpha", "beta"} <= set(branches) and not [b for b in branches if b.startswith("train/")]
@@ -2009,15 +2011,16 @@ def test_a_suite_that_writes_into_the_tree_certifies_nothing(render, tmp_path):
     assert "the run changed the worktree — no merge certificate" in logs[-1].read_text()
 
 
-def test_the_suite_defaults_to_the_configured_merge_suite(render, tmp_path):
+def test_the_suite_defaults_to_the_configured_merge_suite(render, tmp_path, tmp_path_factory):
+    logs = tmp_path_factory.mktemp("suite")
     out = render(tmp_path, {"project_name": "d", "modules": {}})
     (out / "docs/process/testing.local.json").write_text(
-        json.dumps({"merge_suite": f"echo run >> {out.parent}/suite.log"}))
+        json.dumps({"merge_suite": f"echo run >> {logs}/suite.log"}))
     _repo(out)
     _branch(out, "alpha", {"src/a.py": "a\n"})
     r = _train(out, "run", "--force")
     assert r.returncode == 0 and "no --suite" not in r.stderr, r.stdout + r.stderr
-    assert "run" in (out.parent / "suite.log").read_text()
+    assert "run" in (logs / "suite.log").read_text()
 
 
 def test_a_broken_test_configuration_stops_the_train_before_it_departs(render, tmp_path):
