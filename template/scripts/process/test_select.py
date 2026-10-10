@@ -55,6 +55,11 @@ class Unjudgeable(RuntimeError):
     """No answer that could be trusted: say why, run nothing (exit 2)."""
 
 
+class NoForkPoint(Unjudgeable):
+    """No integration ref to fork from at all — the one case a caller may
+    bound the change otherwise (an ambiguous fork point is no such case)."""
+
+
 def repo_root() -> Path:
     r = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True)
     if r.returncode != 0:
@@ -83,7 +88,7 @@ def changed_paths(root: Path, base: str | None) -> set[str]:
                    for ref in integration_refs(root)
                    if _git_bytes(root, "rev-parse", "--verify", "-q", f"{ref}^{{commit}}") is not None):
                 return set()
-            raise Unjudgeable("no fork point from the integration branch — fetch it "
+            raise NoForkPoint("no fork point from the integration branch — fetch it "
                               "(`git fetch origin <default branch>`)")
     paths = paths_in_flight(root, base=base, no_renames=True)
     if paths is None:
