@@ -454,3 +454,18 @@ def test_prune_refuses_uncommitted_content_and_deletes_nothing(render, tmp_path,
     assert "uncommitted or untracked" in r.stderr and "nothing pruned" in r.stderr
     assert target.read_text() == "work in progress\n" and (d / "spec.md").is_file()
     assert not log.exists()
+
+
+@pytest.mark.parametrize("body, refused", [
+    # #206: the plan's archive copy outlives the prune — pointing at it is no reference
+    ("ARCHIVED = '.process-work/plans/archive/013-probe.md'\n", False),
+    ("ARCHIVED = '.process-work/plans/archive/013-probe.md'  # was specs/013-probe/\n", True),
+])
+def test_a_reference_to_the_archived_plan_is_no_reference_to_the_spec_dir(render, tmp_path, body, refused):
+    out, d, log, prune = _probe_repo(render, tmp_path, "def test_x():\n    assert True\n")
+    (out / "tools").mkdir(exist_ok=True)
+    (out / "tools/state.py").write_text(body)
+    subprocess.run(["git", "add", "-A"], cwd=out, check=True)
+    subprocess.run(["git", "commit", "-qm", "referrer"], cwd=out, check=True)
+    r = prune()
+    assert (r.returncode == 1) is refused, r.stdout + r.stderr
