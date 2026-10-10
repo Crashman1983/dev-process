@@ -4,7 +4,7 @@ DECISION 2026-10-10 Codex: publication phase of existing6fab082d source; no para
 
 REFUTE work=199-same-round round=1: survives — fresh non-implementing tools-on reviewer,9 permanent regression cases and11 full Git/main-push probes, meaningful guard mutant pristineGREEN→ASSERTIONRED→restoredGREEN. Exact report below.
 
-Actual verification: targeted tests/test_review.py98/0; immutablebase with new regression only1ASSERTION failure/3pass. Canonical tools/release.py v2.62.1 without --no-suite: Ruff0; full bumped-tree pytest1818/0 in359.91s. Release commit87606a0 changes only6 expected metadata/version/SBOM files (11+11). Sourcehashes from independent refute unchanged. No runtime change in release bump.
+Actual verification: targeted tests/test_review.py98/0; immutablebase with new regression only1ASSERTION failure/3pass. Canonical tools/release.py for release commit87606a0 without --no-suite: Ruff0; full bumped-tree pytest1818/0 in359.91s. Release commit87606a0 changes only6 expected metadata/version/SBOM files (11+11). Sourcehashes from independent refute unchanged. No runtime change in release bump.
 
 Two actual fresh CLI reviewers returned PASS, no independently confirmedHIGH/CRITICAL≥80. Claude tools-off Opus5.5 is the same family as original implementer, so earns bundle,non-implementing only; actual read-only Codex CLI is cross-model to originalClaude implementation. No fabricated attestation writer: this upstream repository has no installed own process and uses existing tools/release.py PR/rebase/CI/tag/publish route.
 
@@ -165,3 +165,5 @@ Exakt geprüfte Range:
 Merge-Gefahr: Dieses Verdict deckt weder spätere Release-Änderungen noch einen Merge oder eine Veröffentlichung vor erfolgreicher vollständiger Lint-/pytest-Suite und portablem CI ab.
 
 **PASS**
+
+CI record: first portable PR run passed macOS and Windows; Linux1817/1 failed solely the release version-location guard because this historical review repeated the current release version outside the declared owners. The report now identifies the release by immutable commit87606a0. Version and suite owners/tests remain unchanged.
