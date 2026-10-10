@@ -455,3 +455,15 @@ def test_a_gate_skip_and_a_non_fast_forward_override_are_two_ledger_lines(projec
     assert r.returncode == 0, r.stderr
     ledger = (out / ".git/process-owner-overrides.log").read_text()
     assert "PROCESS_SKIP=gates" in ledger and "fix main" in ledger, ledger
+
+
+def test_a_merge_push_runs_its_suite_even_when_the_selector_fails(project, tmp_path):
+    """Review F9: the merge class asks no selector — with the real change set."""
+    out, bare, git = project
+    _write(out, "docs/process/testing.local.json", json.dumps(
+        {"merge_suite": MERGE_SUITE,
+         "stacks": {"app": {**STACK, "select": [sys.executable, "-c", "raise SystemExit(3)"]}}}))
+    git("commit", "-qam", "failing selector")
+    r = _push(git, "origin", "HEAD:main", env=ROUTE)
+    assert r.returncode == 0, r.stderr
+    assert _probe(tmp_path) == ["g", "m"]

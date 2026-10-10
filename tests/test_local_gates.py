@@ -192,3 +192,17 @@ def test_a_malformed_exec_or_paths_entry_is_a_hard_failure(render, tmp_path, bad
     out = _project(render, tmp_path, bad)
     r = _run(out)
     assert r.returncode == 1 and "gates.local.json" in r.stderr, r.stdout + r.stderr
+
+
+def test_a_file_moved_out_of_the_trigger_paths_still_runs_the_gate(render, tmp_path):
+    """Review F10: git names only the new side of a rename unless asked for both."""
+    out = _project(render, tmp_path, {"lint": {"module": None, "command": ["scripts/lint.py"],
+                                               "paths": ["backend/**"]}})
+    _gate(out, "scripts/lint.py", 1, "lint: FAIL")
+    (out / "backend").mkdir()
+    (out / "backend/x.py").write_text("a = 1\nb = 2\nc = 3\n", encoding="utf-8")
+    _committed(out)
+    subprocess.run(["git", "mv", "backend/x.py", "docs/x.py"], cwd=out, check=True)
+    subprocess.run(["git", "-c", "commit.gpgsign=false", "commit", "-qm", "move"], cwd=out, check=True)
+    r = _run(out)
+    assert r.returncode == 1 and "lint: FAIL" in r.stdout, r.stdout + r.stderr

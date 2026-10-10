@@ -199,7 +199,8 @@ code. A project supplies data; the template owns the sequence:
   A malformed file refuses the push — a typo in a map must not skip tests.
 - **`scripts/process/test_select.py plan|run|check`** — the one selection
   rule, for the hook and by hand. A changed test file selects itself; a
-  path in no stack counts only for pins. `check` names stale pins and map
+  deleted file counts like a changed one; a path in no stack counts only
+  for pins. `check` names stale pins and map
   targets that match nothing.
 - **`scripts/process/pre_push.py`** — the one sequence of every push: the
   merge guard; branch updates only (tags and deletions end there); the

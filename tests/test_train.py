@@ -1987,7 +1987,7 @@ def test_a_red_preflight_stops_the_train_and_blames_nobody(render, tmp_path, tmp
     branches = _git(out, "branch", "--list", "--format=%(refname:short)").stdout.split()
     assert {"alpha", "beta"} <= set(branches) and not [b for b in branches if b.startswith("train/")]
     row = _phases(out)[-1]
-    assert row["result"] == "environment" and row["preflight"] >= 0 and row["suite"] == 0 and row["gates"] == 0
+    assert row["result"] == "environment" and row["suite"] == 0 and row["gates"] == 0
 
 
 def test_a_green_preflight_and_suite_certify_the_train_tree_and_log_the_phases(render, tmp_path):

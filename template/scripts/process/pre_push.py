@@ -116,7 +116,8 @@ def _changed(root: Path, updates: list) -> set[str]:
 
     try:
         return test_select.changed_paths(root, None)
-    except test_select.Unjudgeable:
+    except test_select.NoForkPoint:
+        # only without any integration ref: an ambiguous fork point stays a refusal
         for ln in updates:
             base = _git_out(root, "merge-base", "HEAD", ln.remote_sha) if ln.remote_sha.strip("0") else ""
             if base:
