@@ -129,7 +129,10 @@ process that did not write the finding (a cheap model suffices) checks each
 such finding against the bundle and scores it: 0 — does not survive a
 look; 25 — unverified; 50 — real but minor or rare; 75 — verified, will be
 hit; 100 — confirmed by the evidence. Below 80 the finding is a residual or
-a follow-up issue, not a block. Never a block: what a linter, type checker
+a follow-up issue, not a block. That holds for a plan review and for the
+verdict of a second model family alike: its `block` is a claim the score
+decides (downstream: a project rule let a Codex block stop a plan pass whose
+findings scored 75 and below). Never a block: what a linter, type checker
 or the test suite catches, a quality wish no rule or criterion asks for, a
 change the plan intends. From the second block on
 the same element the fix session — a fresh one, on the model the policy
@@ -140,8 +143,8 @@ decides once — merge with named residuals, cut scope, or rebuild — and the
 decision covers the rest of the work: a later round goes back to the owner
 only when the decision's premise no longer holds (downstream: one feature,
 eight rounds, six owner decisions, and the rebuild came after round four).
-A project's `review.local.md` may tighten the cap; it keeps the one decision
-per cap, not one per round.
+A project's `review.local.md` may tighten the cap — never the score
+threshold; it keeps the one decision per cap, not one per round.
 
 ## Bind the verdict to the reviewed range
 
