@@ -808,12 +808,17 @@ def test_testing_names_tests_that_prove_nothing(render, tmp_path):
 
 
 def test_testing_pins_the_lane_contract(render, tmp_path):
-    # #184: selection granularity, parallelism and one lane hold per push
+    # #184 → #206: the four project rules are shipped code now; the doc names
+    # each piece and keeps what the data must get right
     out = render(tmp_path, {"project_name": "demo"})
     text = (out / "docs/process/testing.md").read_text()
-    for rule in ("**Closest test package.**", "**Parallel, bounded.**",
-                 "**One hold per push.**", "**Measured.**"):
-        assert rule in text
+    for piece in ("**One test path", "`docs/process/testing.local.json`", "`scripts/process/test_select.py",
+                  "`scripts/process/pre_push.py`", "`scripts/process/lane.py`",
+                  "`scripts/process/certificate.py`", "**closest test package**", "**parallel, bounded**",
+                  "**measure**", "holds one lane once"):
+        assert piece in text, piece
+    for script in ("test_select.py", "pre_push.py", "lane.py", "certificate.py", "testing_config.py"):
+        assert (out / "scripts/process" / script).is_file(), script
 
 
 def test_the_tier_is_rechecked_and_value_changes_are_inventoried(render, tmp_path):

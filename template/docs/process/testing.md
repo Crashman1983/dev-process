@@ -183,25 +183,59 @@ A merge commit of already-verified branches is not exempt by itself — the
 combination is new — but it is exactly what the boundary run certifies
 once, for every later gate to read.
 
-**A lane is held briefly, and once.** The scoped arm of a push is the
-lane's main tenant, so its shape decides how long everyone else waits.
-The project's selection and lane script follow four rules:
+**One test path — shipped, not rewritten per project.** The ladder above is
+code. A project supplies data; the template owns the sequence:
 
-- **Closest test package.** A changed source file selects the test
-  package that mirrors its full path (`src/<pkg>/<sub>/x.py` →
-  `tests/<pkg>/<sub>/`), not its top-level package. Without a match the
-  next enclosing one, and the hook names that fallback. Downstream, the
-  top-level mapping selected 61 % of all test files for a one-file change.
-- **Parallel, bounded.** A scoped run uses several workers (pytest-xdist
-  `-n`, the runner's own pool), a count derived from the host and
-  configurable; a project opts out by setting it to one.
-- **One hold per push.** A push takes the lane once for all its test
-  stages and releases it after the last. Released between stages, another
-  push takes it in the gap, and the first fails after its whole run
-  (downstream: 30 minutes of green pytest, then a refused vitest stage,
-  then the retry paid the 30 minutes again).
-- **Measured.** Lane hold time per push is recorded before and after a
-  change to the selection, so the gain is a number, not a hope.
+- **`docs/process/testing.local.json`** — per stack: the `paths` it owns, a
+  `runner` argv with `{paths}`, its `full` command, the test globs (`tests`),
+  a `map` (`backend/src/app/{pkg}/{sub}/**` → `backend/tests/{pkg}/{sub}`,
+  `backend/tests/{pkg}`: the first target that exists wins, and the run
+  names the fallback), `pins` (subject → tests; a deleted subject fires
+  too), `unmapped` (`full` by default; `skip` only where every merge runs
+  a full suite), an optional local `select` command for what a map cannot
+  express (NUL-separated paths on stdin, targets on stdout), a `timeout`.
+  Beside the stacks: `merge_suite` (the train's default `--suite`),
+  `lanes`, `lane_dir`, `certificate_env`. No file: the gates run, no tests.
+  A malformed file refuses the push — a typo in a map must not skip tests.
+- **`scripts/process/test_select.py plan|run|check`** — the one selection
+  rule, for the hook and by hand. A changed test file selects itself; a
+  path in no stack counts only for pins. `check` names stale pins and map
+  targets that match nothing.
+- **`scripts/process/pre_push.py`** — the one sequence of every push: the
+  merge guard; branch updates only (tags and deletions end there); the
+  pushed commit is this checkout's HEAD; class `merge` when a branch update
+  lands on an integration branch, scope `process-only` when it changes
+  nothing outside `.process-work/`; the stamp; the process gates; the
+  tests; a stamp. Every installed guard reaches it (`merge_route.py
+  --stdin` hands the push over); a project with its own hook calls it
+  (`exec uv run scripts/process/pre_push.py "$@"`). Exit 0 may push, 1
+  refused, 2 cannot judge, 75 a lane stayed busy (nothing ran).
+- **`scripts/process/lane.py`** — lanes `scoped` and `full` per host
+  (`flock`; without it, unqueued and said once). A push holds one lane once
+  for all its stacks — released between stages, another push took the gap
+  and the first paid its 30-minute run twice (downstream). A run that
+  already holds the lane re-enters it.
+- **`scripts/process/certificate.py`** — `push` and `merge` certificates,
+  keyed by the evidence tree (without `.process-work/`) and what ran.
+  Written only on a clean tree that the run left unchanged, with no
+  `MAKEFLAGS` assignment and no `certificate_env` variable set.
+  `test_select.py run --certify` writes `push`; the train and `finish.py
+  --tests <merge_suite>` write `merge`; `finish --tests-passed` is a claim
+  and writes nothing. A branch push accepts either; a merge push only
+  `merge` — without one it runs `merge_suite`, else every stack's `full`,
+  else it is refused.
+- **Skipping** is the owner's: `PROCESS_SKIP=gates` is the guard's logged
+  bypass, `PROCESS_SKIP=tests` keeps the standing block; both are refused
+  from a dispatched session and write no stamp and no certificate.
+
+What the data must get right, from downstream measurements: map to the
+**closest test package** (a top-level mapping selected 61 % of all test
+files for a one-file change); let the runner run **parallel, bounded**
+(pytest-xdist `-n`, the runner's own pool); and **measure** — lane hold
+time per push, and the train's phases (`process_kpis.py train-phases`) —
+before and after changing a selection. Limits: a server-side PR merge
+passes no push hook; whether `merge_suite` covers every stack is the
+project's duty; a file git ignores is invisible to the clean-tree check.
 
 ## Ratchets — a threshold that only ever tightens
 

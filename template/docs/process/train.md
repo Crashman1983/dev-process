@@ -13,8 +13,16 @@ them as one batch behind **one** full suite at a good moment
 the repository ships. A stack the command leaves out is untested at the
 merge, and nothing downstream catches it when there is no CI. Put one make
 target behind it (e.g. `make test-merge` = frontend + backend) rather than a
-single stack's runner. Without `--suite` the train runs the process gates
-only and says so.
+single stack's runner. `--suite` defaults to `merge_suite` in
+`docs/process/testing.local.json`; that is also the command the push to main
+checks the merge certificate against (`testing.md`, "One test path").
+Without either the train runs the process gates only and says so.
+
+`--preflight "<cmd>"` checks the environment — tools, logins, disk — on the
+first combined tree, before any gate. Red there is the host's, not a
+passenger's: the run stops, nobody is blamed, nothing is retried or bisected,
+and no branch is reported blocked. Downstream, an expired login and a full
+disk each cost a whole release run that read as a red train.
 
 ## Boarding — computed, never claimed
 
@@ -137,7 +145,10 @@ a day downstream, with five reviewed candidates waiting.
    load 10 on 6 CPUs is a different finding from a broken test. A
    candidate dropped for a merge conflict is reported `blocked` too, with
    "rebase" as the reason.
-4. Green: with `--push` the train is pushed as the integration branch
+4. Green: a suite run that left the worktree as it found it writes the
+   `merge` certificate of that tree (`certificate.py`), so the push to main
+   runs no suite again; a run that wrote into the tree certifies nothing.
+   With `--push` the train is pushed as the integration branch
    *first* (a rejected push — branch protection, a race, the local
    pre-push hook — leaves local main untouched and keeps the train branch;
    the message says which of them refused and quotes its reasons); then local main
@@ -163,6 +174,10 @@ a day downstream, with five reviewed candidates waiting.
 
 Run from the root worktree on the integration branch with a clean tree.
 The log lives in the clone's git common dir (`process-train/<stamp>.log`).
+Each run ends with its phase times — preflight, gates, suite, retry,
+bisect, push, deploy — in the log and as one line of
+`<git-common-dir>/process-train/phases.jsonl`; `process_kpis.py train-phases` reads the
+median and maximum per phase, so a slow merge names its slow phase.
 
 ## Who pushes to main — the merge route
 
@@ -200,10 +215,11 @@ out of its reach.
 
 ## What the train does not do
 
-It does not review, attest or certify. It merges what the process already
-cleared, and it earns the one thing a batch must earn: the full suite on
-the *combination*, which no branch could have run alone. The coverage
-certificate, where the project keeps one, comes from that same run.
+It does not review or attest. It merges what the process already cleared,
+and it earns the one thing a batch must earn: the full suite on the
+*combination*, which no branch could have run alone. The merge certificate
+it writes records exactly that run; the coverage certificate, where the
+project keeps one, comes from the same run.
 
 ## Push timeout
 
