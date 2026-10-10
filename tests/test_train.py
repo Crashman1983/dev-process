@@ -2050,3 +2050,18 @@ def test_train_phases_reads_median_and_maximum_per_phase(render, tmp_path):
     assert r.returncode == 0, r.stderr
     assert "suite     median    200 s, max    300 s (in 3/3 runs)" in r.stdout, r.stdout
     assert "bisect" not in r.stdout and "1/3 runs ended red, 1 stopped by the preflight" in r.stdout
+
+
+def test_the_configured_preflight_is_the_trains_default(render, tmp_path, tmp_path_factory):
+    """#209: one environment check for push, certify and train."""
+    logs = tmp_path_factory.mktemp("suite")
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    (out / "docs/process/testing.local.json").write_text(json.dumps(
+        {"preflight": ["sh", "-c", "exit 6"], "merge_suite": f"echo run >> {logs}/suite.log"}))
+    _repo(out)
+    _branch(out, "alpha", {"src/a.py": "a\n"})
+    r = _train(out, "run", "--force")
+    assert r.returncode == 1 and "preflight `sh -c 'exit 6'` is red" in r.stderr, r.stderr
+    assert not (logs / "suite.log").exists()
+    r = _train(out, "run", "--force", "--preflight", "true")  # an explicit one wins
+    assert r.returncode == 0 and "run" in (logs / "suite.log").read_text(), r.stdout + r.stderr

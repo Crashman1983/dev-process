@@ -12,7 +12,8 @@ full run and deploy.
                                        [--preflight "<cmd>"] [--min-candidates N] [--max-wait-hours H]
                                        [--force] [--keep-branches] [--dry-run]
 
-`--suite` defaults to `merge_suite` of `docs/process/testing.local.json`.
+`--suite` defaults to `merge_suite` of `docs/process/testing.local.json`,
+`--preflight` to its `preflight`.
 `--preflight` checks the environment (tools, logins, disk) on the first
 combined tree before any gate: red there is the host's, not a passenger's —
 the run stops, nobody is blamed, nothing is retried or bisected.
@@ -1545,7 +1546,8 @@ def main(argv: list[str]) -> int:
     r.add_argument("--suite", help="the full suite command, run once on the combined tree "
                                    "(default: merge_suite of docs/process/testing.local.json)")
     r.add_argument("--preflight", help="an environment check run once before the gates; red stops the "
-                                       "run without blaming anybody")
+                                       "run without blaming anybody (default: preflight of "
+                                       "docs/process/testing.local.json)")
     r.add_argument("--retry", help="after a red suite: re-run what failed and what did not run, on the same "
                                    "tree (default: the whole suite again)")
     r.add_argument("--deploy", help="run once after the fast-forward (and push)")
@@ -1571,9 +1573,11 @@ def main(argv: list[str]) -> int:
         print(f"train: {exc} — fix it first; the suite and the certificates read it", file=sys.stderr)
         return 2
     suite = a.suite or (cfg["merge_suite"] if cfg else None)
+    # the configured environment check is the train's too; an explicit one wins
+    preflight = a.preflight or (shlex.join(cfg["preflight"]) if cfg and cfg["preflight"] else None)
     return run(root, suite=suite, deploy=a.deploy, push=a.push, min_candidates=a.min_candidates,
                max_wait_hours=a.max_wait_hours, force=a.force, keep_branches=a.keep_branches,
-               dry_run=a.dry_run, retry=a.retry, preflight=a.preflight,
+               dry_run=a.dry_run, retry=a.retry, preflight=preflight,
                certificate_env=cfg["certificate_env"] if cfg else [])
 
 

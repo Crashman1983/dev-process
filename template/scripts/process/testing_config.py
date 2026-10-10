@@ -18,6 +18,7 @@ CONFIG = "docs/process/testing.local.json"
 DEFAULT_LANES = {"scoped": {"wait": 300.0}, "full": {"wait": 3600.0, "nice": 10}}
 UNMAPPED = ("full", "skip")
 DEFAULT_TIMEOUT = 3600.0
+DEFAULT_PREFLIGHT_TIMEOUT = 600.0
 
 
 class ConfigError(ValueError):
@@ -125,7 +126,8 @@ def parse(data) -> dict:
     """The validated configuration from the decoded JSON."""
     if not isinstance(data, dict):
         raise ConfigError("the configuration must be a JSON object")
-    known = {"lane_dir", "lanes", "certificate_env", "merge_suite", "stacks"}
+    known = {"lane_dir", "lanes", "certificate_env", "merge_suite", "preflight", "preflight_timeout",
+             "stacks"}
     unknown = sorted(set(data) - known)
     if unknown:
         raise ConfigError(f"unknown key(s): {', '.join(unknown)} (known: {', '.join(sorted(known))})")
@@ -135,6 +137,10 @@ def parse(data) -> dict:
     suite = data.get("merge_suite")
     if suite is not None and not (isinstance(suite, str) and suite.strip()):
         raise ConfigError("merge_suite must be the train's suite command (a string, as --suite)")
+    preflight_timeout = data.get("preflight_timeout", DEFAULT_PREFLIGHT_TIMEOUT)
+    if isinstance(preflight_timeout, bool) or not isinstance(preflight_timeout, (int, float)) \
+            or preflight_timeout <= 0:
+        raise ConfigError("preflight_timeout must be seconds > 0")
     stacks_raw = data.get("stacks", {})
     if not isinstance(stacks_raw, dict):
         raise ConfigError("stacks must be an object of stack name → stack")
@@ -143,6 +149,9 @@ def parse(data) -> dict:
         "lanes": _lanes(data.get("lanes")),
         "certificate_env": _strings(data.get("certificate_env", []), "certificate_env"),
         "merge_suite": suite.strip() if suite else None,
+        # the environment check before any test runs: red is the host's, never a test's
+        "preflight": _argv(data.get("preflight"), "preflight", required=False),
+        "preflight_timeout": float(preflight_timeout),
         "stacks": [_stack(name, raw) for name, raw in stacks_raw.items()],
     }
 
