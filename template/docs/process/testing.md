@@ -234,7 +234,9 @@ files for a one-file change); let the runner run **parallel, bounded**
 (pytest-xdist `-n`, the runner's own pool); and **measure** — lane hold
 time per push, and the train's phases (`process_kpis.py train-phases`) —
 before and after changing a selection. Limits: a server-side PR merge
-passes no push hook; whether `merge_suite` covers every stack is the
+passes no push hook; a clone without any integration ref (single-branch)
+bounds a branch push by the remote's side of the update, so code that
+reached the remote branch past the hook is not selected again; whether `merge_suite` covers every stack is the
 project's duty; a file git ignores is invisible to the clean-tree check.
 
 ## Ratchets — a threshold that only ever tightens

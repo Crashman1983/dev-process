@@ -441,3 +441,17 @@ def test_the_gates_start_from_an_interpreter_without_their_dependencies(project,
                        capture_output=True, text=True, env=_env(tmp_path))
     assert r.returncode == 0, r.stdout + r.stderr
     assert _probe(tmp_path) == ["g", "t app_tests"]
+
+
+def test_a_gate_skip_and_a_non_fast_forward_override_are_two_ledger_lines(project, tmp_path):
+    """Refute round 2: the override's line replaced the skip's."""
+    out, bare, git = project
+    assert _push(git, "origin", "HEAD:main", env=ROUTE).returncode == 0
+    git("reset", "-q", "--hard", "HEAD~1")
+    _write(out, "app/code.py", "x = 5\n")
+    git("commit", "-qam", "rewrite")
+    r = _push(git, "-f", "origin", "HEAD:main",
+              env={"PROCESS_SKIP": "gates", "PROCESS_OWNER_OVERRIDE": "fix main"})
+    assert r.returncode == 0, r.stderr
+    ledger = (out / ".git/process-owner-overrides.log").read_text()
+    assert "PROCESS_SKIP=gates" in ledger and "fix main" in ledger, ledger
