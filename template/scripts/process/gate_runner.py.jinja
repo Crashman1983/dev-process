@@ -32,7 +32,7 @@ except ImportError:
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling import
 from gate_invoke import child_argv, hook_wiring_findings  # noqa: E402
-from process_git import pushed_commit_problem  # noqa: E402
+from process_git import path_matches, pushed_commit_problem  # noqa: E402
 
 # gate-name -> (module answer key, command relative to repo root).
 # A module key of None marks a *core* gate: it ships in core and always runs,
@@ -62,7 +62,10 @@ KNOWN_MODULES = ({key for key, _command in GATES.values() if key is not None}
 RETIRED_MODULES = {"contracts", "security_floor", "arch_docs", "github_master"}
 KNOWN_HARNESSES = {"claude", "copilot", "agents_md"}
 # a project's own gates, without owning this runner: {name: {"module": key or null,
-# "command": ["path/in/repo.py", args...]}} — added to GATES, or replacing one by name
+# "command": ["path/in/repo.py", args...]} or "exec": [argv as given, e.g. "make",
+# "lint"], optional "paths": [globs]}} — added to GATES, or replacing one by name.
+# With `paths` the gate runs only when a path in flight matches (`process_git`'s
+# glob); when git cannot tell which paths are in flight, it runs.
 LOCAL_GATES = "docs/process/gates.local.json"
 
 
@@ -73,8 +76,9 @@ def _local_refused(why: str) -> SystemExit:
 
 
 def with_local_gates(root: Path) -> tuple[dict, dict]:
-    """(GATES with the project's gates merged in, the local entries). Load-bearing like
-    the manifest: anything malformed is a hard failure."""
+    """(GATES with the project's gates merged in, the local entries as
+    {name: {"exec": bool, "paths": [globs] or None}}). Load-bearing like the
+    manifest: anything malformed is a hard failure."""
     import json
 
     f = root / LOCAL_GATES
@@ -85,27 +89,53 @@ def with_local_gates(root: Path) -> tuple[dict, dict]:
     except (ValueError, UnicodeDecodeError) as exc:
         raise _local_refused(f"unparseable ({exc})")
     if not isinstance(data, dict):
-        raise _local_refused("must be a mapping {name: {module, command}}")
-    local = {}
+        raise _local_refused("must be a mapping {name: {module, command or exec}}")
+    gates, local = {}, {}
     for name, entry in data.items():
-        if not isinstance(entry, dict) or "module" not in entry or "command" not in entry:
-            raise _local_refused(f"{name}: needs 'module' (a module key or null) and 'command'")
-        key, cmd = entry["module"], entry["command"]
+        if (not isinstance(entry, dict) or "module" not in entry
+                or ("command" in entry) == ("exec" in entry)):
+            raise _local_refused(f"{name}: needs 'module' (a module key or null) and one of "
+                                 f"'command' or 'exec'")
+        unknown = sorted(set(entry) - {"module", "command", "exec", "paths"})
+        if unknown:
+            raise _local_refused(f"{name}: unknown key(s) {', '.join(unknown)}")
+        key, field = entry["module"], "exec" if "exec" in entry else "command"
+        cmd = entry[field]
         if key is not None and key not in KNOWN_MODULES:
             raise _local_refused(f"{name}: unknown module {key!r}")
         if not isinstance(cmd, list) or not cmd or not all(isinstance(a, str) and a for a in cmd):
-            raise _local_refused(f"{name}: 'command' must be a non-empty list of strings")
-        script = Path(cmd[0])
-        if script.is_absolute() or ".." in script.parts:
-            raise _local_refused(f"{name}: {cmd[0]} must be a path inside the repository")
+            raise _local_refused(f"{name}: '{field}' must be a non-empty list of strings")
+        if field == "command":
+            script = Path(cmd[0])
+            if script.is_absolute() or ".." in script.parts:
+                raise _local_refused(f"{name}: {cmd[0]} must be a path inside the repository")
+        paths = entry.get("paths")
+        if paths is not None and not (isinstance(paths, list) and paths
+                                      and all(isinstance(g, str) and g for g in paths)):
+            raise _local_refused(f"{name}: 'paths' must be a non-empty list of globs")
         if name in GATES and GATES[name][0] is None:
             # a core gate guards what every project has (the review record, the
             # kernel); a branch's own file replaced `review` with a script that
             # exits 0 and pushed past a standing block (refutation)
             raise _local_refused(f"{name} is a core gate — it cannot be replaced or moved "
                                  f"into a module; add the project's check under its own name")
-        local[name] = (key, [sys.executable, *cmd])
-    return {**GATES, **local}, local
+        gates[name] = (key, list(cmd) if field == "exec" else [sys.executable, *cmd])
+        local[name] = {"exec": field == "exec", "paths": paths}
+    return {**GATES, **gates}, local
+
+
+def _untouched(root: Path, globs: list[str], memo: dict) -> bool:
+    """True when git names the paths in flight and none matches `globs`; a
+    path set git cannot tell runs the gate (fail closed)."""
+    if "paths" not in memo:
+        from check_review import paths_in_flight  # noqa: PLC0415
+
+        try:
+            memo["paths"] = paths_in_flight(root)
+        except Exception:  # noqa: BLE001 — an unreadable diff runs the gate
+            memo["paths"] = None
+    changed = memo["paths"]
+    return changed is not None and not any(path_matches(g, p) for g in globs for p in changed)
 
 
 def _validate_boolean_mapping(
@@ -330,6 +360,15 @@ def main() -> int:
             file=sys.stderr,
         )
         return 1
+    if "--unless-frame-ran" in sys.argv:
+        # pre-commit's own pre-push entry: the frame (`pre_push.py`, reached
+        # through the installed guard) already ran these gates for this ref
+        import merge_route  # noqa: PLC0415
+
+        if merge_route.frame_ran_gates(root, dict(os.environ)):
+            print("gate-runner: the pre-push frame ran the gates for this push — not again",
+                  file=sys.stderr)
+            return 0
     mods = load_modules(root)
     gates, local = with_local_gates(root)
     # core gates (key is None) always run; module gates run when their key is on
@@ -372,15 +411,21 @@ def main() -> int:
     for name in sorted(set(local) & set(GATES)):
         # stderr: pre-commit shows a passing hook's stdout to nobody
         print(f"gate-runner: {LOCAL_GATES} replaces the template's {name} gate", file=sys.stderr)
+    in_flight: dict = {}
     for name in active:
         _key, cmd = gates[name]
-        script = root / cmd[1]
-        if name in local and not script.is_file():
+        spec = local.get(name, {})
+        if spec.get("paths") and _untouched(root, spec["paths"], in_flight):
+            print(f"== {name}: no path in flight matches {', '.join(spec['paths'])} — not run ==")
+            continue
+        # an `exec` argv runs as given: the project owns what it names
+        script = None if spec.get("exec") else root / cmd[1]
+        if script is not None and name in local and not script.is_file():
             print(f"gate-runner: {name} is named in {LOCAL_GATES} but {cmd[1]} is missing",
                   file=sys.stderr)
             failed.append(name)
             continue
-        if not script.is_file():
+        if script is not None and not script.is_file():
             # a module enabled in the manifest whose gate script is missing is
             # almost always a hand-edited .copier-answers.yml (copier then never
             # renders the module) — name the cause, not just the missing file
@@ -395,7 +440,8 @@ def main() -> int:
             # a child that declares its own dependencies (PEP 723) runs through
             # the launcher that resolves them, not this runner's interpreter.
             # Output is captured so known notes can be held back (ledger).
-            proc = subprocess.run(child_argv(root, cmd), cwd=root, env=env,
+            argv = cmd if spec.get("exec") else child_argv(root, cmd)
+            proc = subprocess.run(argv, cwd=root, env=env,
                                   timeout=GATE_TIMEOUT_S, capture_output=True,
                                   text=True, encoding="utf-8", errors="replace")
             rc = proc.returncode

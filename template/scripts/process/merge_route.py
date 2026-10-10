@@ -304,11 +304,29 @@ def append_ledger(root: Path, kind: str, reason: str, targets: list[str]) -> Non
         os.close(fd)
 
 
+PROCESS_SKIP_ENV = "PROCESS_SKIP"
+SKIPPABLE = ("gates", "tests")
+
+
+def process_skips(env: dict[str, str]) -> set[str]:
+    """The phases of the pre-push frame the owner skips (`PROCESS_SKIP=gates,tests`;
+    pre-commit's `SKIP=process-gates` is `gates`). An unknown word is no skip."""
+    asked = {part.strip() for part in env.get(PROCESS_SKIP_ENV, "").split(",") if part.strip()}
+    skipped = {part.strip() for part in env.get(SKIP_ENV, "").split(",")}
+    if any(hook in skipped for hook in GATE_HOOK_IDS):
+        asked.add("gates")
+    return asked & set(SKIPPABLE)
+
+
 def _skipped_gates(env: dict[str, str]) -> str:
-    """The gate hook pre-commit was told to skip (`SKIP=process-gates`), as a bypass name."""
+    """A skipped gate run, as the bypass name this guard logs: pre-commit's
+    `SKIP=process-gates` or the frame's `PROCESS_SKIP=gates`. Skipping only the
+    tests is no bypass of this guard — the standing block still runs."""
     skipped = {part.strip() for part in env.get(SKIP_ENV, "").split(",")}
     hit = next((hook for hook in GATE_HOOK_IDS if hook in skipped), "")
-    return f"{SKIP_ENV}={hit}" if hit else ""
+    if hit:
+        return f"{SKIP_ENV}={hit}"
+    return f"{PROCESS_SKIP_ENV}=gates" if "gates" in process_skips(env) else ""
 
 
 class RefLine(NamedTuple):
@@ -399,8 +417,14 @@ def _common_dir(root: Path) -> Path:
     return common if common.is_absolute() else root / common
 
 
-def stamp_guard_run(root: Path, lines: list[RefLine]) -> None:
-    folder = _common_dir(root) / STAMP_DIR
+# the pre-push frame (`pre_push.py`) also stamps that it ran the process gates
+# for these ref lines: pre-commit's `process-gates` hook then does not run them
+# a second time (`gate_runner.py --unless-frame-ran`)
+GATES_STAMP_DIR = "process-merge-guard-gates"
+
+
+def stamp_guard_run(root: Path, lines: list[RefLine], folder_name: str = STAMP_DIR) -> None:
+    folder = _common_dir(root) / folder_name
     try:
         folder.mkdir(exist_ok=True)
         (folder / f"{os.getpid()}-{time.time_ns()}").write_text(
@@ -409,13 +433,19 @@ def stamp_guard_run(root: Path, lines: list[RefLine]) -> None:
         pass  # the hook check then refuses a push to main: loud, not silent
 
 
-def guard_ran(root: Path, env: dict[str, str]) -> bool:
+def frame_ran_gates(root: Path, env: dict[str, str]) -> bool:
+    """True when the pre-push frame ran the process gates for the ref line
+    pre-commit names; the stamp is consumed (`guard_ran`'s rules)."""
+    return guard_ran(root, env, GATES_STAMP_DIR)
+
+
+def guard_ran(root: Path, env: dict[str, str], folder_name: str = STAMP_DIR) -> bool:
     """True when the stdin guard stamped the ref line pre-commit names
     (`PRE_COMMIT_REMOTE_BRANCH`, `PRE_COMMIT_TO_REF`) in the last minutes; the
     stamp is consumed. Stale stamps are cleared on the way."""
     remote_ref = env.get(PRE_COMMIT_TARGET_ENV, "").strip()
     to_ref = env.get("PRE_COMMIT_TO_REF", "").strip()
-    folder = _common_dir(root) / STAMP_DIR
+    folder = _common_dir(root) / folder_name
     try:
         stamps = sorted(folder.iterdir())
     except OSError:
@@ -474,8 +504,21 @@ def main(argv: list[str]) -> int:
         except ValueError as exc:
             print(f"merge_route: {exc} — the push is refused", file=sys.stderr)
             return 1
+        if (Path(__file__).resolve().parent / "pre_push.py").is_file():
+            # every installed guard calls this entry: from here the whole push
+            # goes through the frame, without reinstalling a hook (#206)
+            import pre_push  # noqa: PLC0415
+
+            return pre_push.run(root, lines, env)
         stamp_guard_run(root, lines)
-    targets = push_targets(env, " ".join(argv).split(), [line.remote_ref for line in lines])
+    return guard(root, lines, " ".join(argv).split(), env, bypass)
+
+
+def guard(root: Path, lines: list[RefLine], args: list[str], env: dict[str, str], bypass: str) -> int:
+    """The guard's one sequence — route and phase, the ref update, the standing
+    block, the ledger: 0 may push, 1 refused (message on stderr). The pre-push
+    frame calls exactly this, never a part of it."""
+    targets = push_targets(env, args, [line.remote_ref for line in lines])
     verdict = check(root, targets, env, bypass=bypass)
     if verdict.message:
         print(verdict.message, file=sys.stderr)

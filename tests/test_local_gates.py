@@ -131,3 +131,64 @@ def test_child_output_is_utf8_even_when_the_runners_locale_is_cp1252(render, tmp
         env={**os.environ, 'PYTHONIOENCODING': 'cp1252'})
     assert result.returncode == 0, result.stdout + result.stderr
     assert 'unicode: €' in result.stdout
+
+
+def _committed(out: Path) -> None:
+    for args in (["config", "user.email", "t@t"], ["config", "user.name", "t"],
+                 ["config", "commit.gpgsign", "false"], ["add", "-A"], ["commit", "-qm", "base"],
+                 ["checkout", "-qb", "feature"]):
+        subprocess.run(["git", *args], cwd=out, check=True, capture_output=True)
+
+
+def _change(out: Path, rel: str) -> None:
+    p = out / rel
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text("x\n", encoding="utf-8")
+    subprocess.run(["git", "add", "-A"], cwd=out, check=True)
+    subprocess.run(["git", "-c", "commit.gpgsign=false", "commit", "-qm", "change"], cwd=out, check=True)
+
+
+def test_a_path_triggered_gate_runs_only_when_a_path_in_flight_matches(render, tmp_path):
+    """#206: a backend lint gate need not run for a docs-only push."""
+    out = _project(render, tmp_path, {"lint": {"module": None, "command": ["scripts/lint.py"],
+                                               "paths": ["backend/**"]}})
+    _gate(out, "scripts/lint.py", 1, "lint: FAIL")
+    _committed(out)
+    _change(out, "docs/note.md")
+    r = _run(out)
+    assert r.returncode == 0 and "lint: no path in flight matches" in r.stdout, r.stdout + r.stderr
+    _change(out, "backend/app/x.py")
+    r = _run(out)
+    assert r.returncode == 1 and "lint: FAIL" in r.stdout, r.stdout + r.stderr
+
+
+def test_a_path_triggered_gate_runs_when_git_cannot_name_the_paths(render, tmp_path):
+    """No integration base: the paths in flight are unknown, so the gate runs (fail closed)."""
+    out = _project(render, tmp_path, {"lint": {"module": None, "command": ["scripts/lint.py"],
+                                               "paths": ["backend/**"]}})
+    _gate(out, "scripts/lint.py", 1, "lint: FAIL")
+    _committed(out)
+    subprocess.run(["git", "branch", "-D", "main"], cwd=out, check=True, capture_output=True)
+    r = _run(out)
+    assert r.returncode == 1 and "lint: FAIL" in r.stdout, r.stdout + r.stderr
+
+
+def test_an_exec_gate_runs_its_argv_as_given(render, tmp_path):
+    out = _project(render, tmp_path, {"make-lint": {"module": None, "exec": [
+        sys.executable, "-c", "import sys; print('exec ran', sys.argv[1:]); sys.exit(1)", "a b"]}})
+    r = _run(out)
+    assert "exec ran ['a b']" in r.stdout and "FAILED gates: make-lint" in r.stdout, r.stdout + r.stderr
+
+
+@pytest.mark.parametrize("bad", [
+    {"x": {"module": None, "command": ["a.py"], "exec": ["make"]}},  # both
+    {"x": {"module": None}},                                          # neither
+    {"x": {"module": None, "exec": "make lint"}},                     # not an argv
+    {"x": {"module": None, "exec": ["make"], "paths": []}},           # empty trigger
+    {"x": {"module": None, "exec": ["make"], "paths": "backend/"}},
+    {"x": {"module": None, "exec": ["make"], "when": ["x"]}},         # unknown key
+], ids=["both", "neither", "exec-string", "paths-empty", "paths-string", "unknown-key"])
+def test_a_malformed_exec_or_paths_entry_is_a_hard_failure(render, tmp_path, bad):
+    out = _project(render, tmp_path, bad)
+    r = _run(out)
+    assert r.returncode == 1 and "gates.local.json" in r.stderr, r.stdout + r.stderr

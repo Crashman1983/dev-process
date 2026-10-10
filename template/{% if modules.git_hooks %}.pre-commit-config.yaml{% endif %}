@@ -32,9 +32,12 @@ repos:
         pass_filenames: false
         always_run: true
         stages: [pre-push]
+      # The guard hands every push to the pre-push frame (scripts/process/
+      # pre_push.py: guard, gates, selected tests); this entry runs the gates
+      # only when the frame did not (an old guard, no guard installed).
       - id: process-gates
         name: dev-process gates (gate_runner)
-        entry: uv run scripts/process/gate_runner.py
+        entry: uv run scripts/process/gate_runner.py --unless-frame-ran
         language: system
         pass_filenames: false
         always_run: true
