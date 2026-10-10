@@ -386,3 +386,46 @@ Die folgenden Entscheidungen ersetzen oder schärfen D1–D13. Wo sie widersprec
 13. `[mechanical]` Doku (`testing.md`, `train.md`, `failure-catalog.md`, `BOOTSTRAP.md`), CHANGELOG mit Migrationsschritten für Kenni.
 
 **Unabhängige Durchsetzung (Tier 3):** Die Garantien „kein Push auf main ohne Route“ und „kein stehender Block“ bleiben in `merge_route.guard`. Der Rahmen ruft ihn, die Garantien wandern nicht. `hook_check` im pre-commit-Framework prüft unabhängig, dass der Rahmen lief.
+
+## Plan-Review Runde 2 — Änderungen
+
+Diese Punkte ersetzen R1, R3, R4, R5, R7, R11 und R12, wo sie widersprechen.
+
+- **S1 Migration ohne Neuinstallation (F1, F5).**
+  - `merge_route.py --stdin` ist der Einstieg jedes installierten Guards. Er übergibt an `pre_push.run(lines, …)`, sobald `pre_push.py` neben ihm liegt. So läuft jeder alte Guard nach dem Template-Update durch den Rahmen.
+  - Es gibt keine Marker-Version. `install_hooks` bleibt unverändert, und die Widerlegung in gate_invoke.py:284 gilt weiter.
+- **S2 Der pre-commit-Eintrag `process-gates` bleibt (F1).**
+  - `gate_runner --unless-frame-ran` führt die Gates nicht noch einmal aus, wenn der Rahmen für diesen Push gestempelt hat, dass die Gates liefen.
+  - In Klonen ohne Guard laufen die Gates wie heute über das Framework.
+  - `hook_check` bleibt in seiner Strenge, wie es ist.
+- **S3 Rahmen-Stempel in `finally` (F9).**
+  - `pre_push.run` schreibt bei jedem Ausgang den Guard-Stempel (`stamp_guard_run`) mit Verdikt (`ok`/`red`/`busy`/`skipped`) und `gates_ran` in einem `finally`.
+  - `hook_check` meldet das Verdikt des Rahmens statt „guard not installed“.
+- **S4 Skip (F2).**
+  - Nur `gates` wird zum Bypass von `guard`. Das ist heute `SKIP=process-gates`, mit derselben Semantik inklusive Standing-Block.
+  - `tests` behandelt der Rahmen selbst: Ledger-Zeile, Verweigerung, wenn `session_phases` eine Phase **oder** ein Problem meldet, kein Stempel, kein Zertifikat.
+  - Der Standing-Block läuft bei `tests` weiter.
+- **S5 Branch-Update nach `remote_ref` (F4).**
+  - Branch-Update heißt: `remote_ref` beginnt mit `refs/heads/` und `local_sha` ≠ 0.
+  - Klasse `merge` gilt, wenn `remote_ref` ein Integrationsziel ist.
+  - Getestet wird `git push origin HEAD:main`.
+- **S6 Merge-Zertifikat und Memo getrennt, Schlüssel gemeinsam (F3).**
+  - Das `green-suites`-Memo des Zugs bleibt in Semantik und Ablage, wie es ist. Es dient der Basisprüfung und ist fail-safe.
+  - Das Merge-Zertifikat ist zusätzlich. Es wird nur geschrieben, wenn der Lauf nichts hinterließ, das git sieht (`_changed_by_run` ist falsch), und der Baum vorher sauber war.
+  - Der Schlüsselbau (`certificate.suite_key`) liegt bei `certificate`. Das Memo nutzt ihn mit vollem Baum, das Zertifikat mit dem Evidenzbaum.
+  - DECISION: zwei Ablagen, weil das Memo bei Rückständen weiter dienen soll, das Zertifikat aber nicht.
+- **S7 Merge-Push ohne Zertifikat (F3, F8).**
+  - Läuft `merge_suite`, falls konfiguriert. Sonst je Stack `full`. Sonst wird verweigert, mit Hinweis.
+  - `finish --tests-passed` schreibt kein Zertifikat, denn eine Behauptung ist keine Evidenz. Mit Testkonfiguration läuft die Suite dann im Push. Das steht im CHANGELOG als Vertragsänderung.
+- **S8 Lanes während der Migration (F6).**
+  - Der Rahmen hält Lanes nur mit dem Template-Skript, also wenn `testing_config.lane_script` auf `scripts/process/lane.py` zeigt.
+  - Hat das Projekt noch ein eigenes `scripts/lane.py`, hält der Rahmen keine Lane. Die Befehle des Projekts tun es dann selbst, wie heute.
+  - Das schließt den Selbst-Deadlock mit einem alten Skript ohne Wiedereintritt aus.
+- **S9 Basis (F7).**
+  - Enthält ein Integrationsref den Tip, ist die Änderungsmenge leer: keine Tests, Gates laufen.
+  - Nur wenn keine Basis bestimmbar ist und auch kein Integrationsref den Tip enthält, folgt Exit 2.
+- **S10 Kleinere Punkte (F10).**
+  - Pfade in keinem Stack zählen nur für Pins, sonst werden sie ignoriert (Doku, README). Sie sind nicht „unmapped“.
+  - `unmapped=full` verlangt `full` im Schema (umgesetzt).
+  - Ob `merge_suite` alle Stacks abdeckt, prüft der Code nicht. Das steht als Pflicht des Projekts in der Doku.
+  - Die Train-Phase `lane_wait` entfällt (der Zug hält keine Lane, die Suite tut es).

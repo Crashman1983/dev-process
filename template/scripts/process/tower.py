@@ -20,7 +20,7 @@ What it assembles (all from state the process already keeps):
                count, design-contract binding
   reviews    — clearing REVIEW passes today, by work id
   gates      — the runner's red ledger with age (a chronic red is wallpaper)
-  lanes      — `scripts/lane.py status` where the project has it
+  lanes      — `lane.py status` where the project has lanes (`testing_config.lane_script`)
   reports    — the latest state each worker reported (`report.py`)
   findings   — deterministic, each with a because: overlaps, a Tier 2+ plan
                without an issue, a plan without a Decisions ledger, a gate
@@ -414,15 +414,10 @@ def balance(root: Path, ref: str | None, days: int = BALANCE_DAYS, offset: int =
 
 
 def lanes(root: Path) -> list[str]:
-    lane = root / "scripts" / "lane.py"
-    if not lane.is_file():
-        return []
-    try:
-        r = subprocess.run([sys.executable, str(lane), "status"], cwd=root,
-                           capture_output=True, text=True, timeout=20, env=git_environment())
-    except (OSError, subprocess.TimeoutExpired):
-        return []
-    return [ln for ln in r.stdout.splitlines() if ln.strip()]
+    """The lane status lines (`testing_config.lane_status` owns where they come from)."""
+    import testing_config  # noqa: PLC0415
+
+    return testing_config.lane_status(root, env=git_environment())
 
 
 def latest_reports(root: Path, *, remote: bool = False) -> list[dict]:
