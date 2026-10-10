@@ -1451,15 +1451,11 @@ _LANE_HELD = re.compile(r"^(\S+): held by", re.MULTILINE)
 
 
 def held_lanes(root: Path) -> set[str]:
-    """Names of the lanes `scripts/lane.py status` reports as held (one line per lane)."""
-    lane = root / "scripts" / "lane.py"
-    if not lane.is_file():
-        return set()
-    try:
-        r = subprocess.run([sys.executable, str(lane), "status"], cwd=root, capture_output=True, text=True, timeout=20, env=git_environment())
-    except (OSError, subprocess.TimeoutExpired):
-        return set()
-    return set(_LANE_HELD.findall(r.stdout))
+    """Names of the lanes `lane.py status` reports as held (one line per lane;
+    `testing_config.lane_status` owns where they come from)."""
+    import testing_config  # noqa: PLC0415
+
+    return set(_LANE_HELD.findall("\n".join(testing_config.lane_status(root, env=git_environment()))))
 
 
 # lanes whose holder is a test run: no session start waits on them — a
