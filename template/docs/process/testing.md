@@ -209,7 +209,7 @@ code. A project supplies data; the template owns the sequence:
   tests; a stamp. Every installed guard reaches it (`merge_route.py
   --stdin` hands the push over); a project with its own hook calls it
   (`exec uv run scripts/process/pre_push.py "$@"`). Exit 0 may push, 1
-  refused, 2 cannot judge, 75 a lane stayed busy (nothing ran).
+  refused, 2 cannot judge, 75 a lane stayed busy (no test ran).
 - **`scripts/process/lane.py`** — lanes `scoped` and `full` per host
   (`flock`; without it, unqueued and said once). A push holds one lane once
   for all its stacks — released between stages, another push took the gap

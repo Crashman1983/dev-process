@@ -609,8 +609,9 @@ def train_phases(runs: int = 20) -> int:
         if ran:
             print(f"  {phase:<9} median {statistics.median(values):>6.0f} s, max {max(values):>6.0f} s "
                   f"(in {len(ran)}/{len(rows)} runs)")
-    red = sum(1 for row in rows if row.get("rc"))
-    print(f"  {red}/{len(rows)} runs ended red")
+    results = [row.get("result") for row in rows]
+    print(f"  {results.count('red')}/{len(rows)} runs ended red, "
+          f"{results.count('environment')} stopped by the preflight (the host, not a passenger)")
     n = len(rows)
     print(f"  {confidence(n)} · {action(_level(n, False, False, _N_THRESHOLD), 'shorten the phase with the largest median first: suite → test selection and certificates, bisect → smaller batches, retry → flaky tests (failure-catalog.md)', thin='let more trains run before acting on a phase')}")
     return 0

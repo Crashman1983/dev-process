@@ -157,11 +157,13 @@ def plan(root: Path, cfg: dict, changed: set[str], klass: str) -> list[dict]:
         fallbacks: list[str] = []
         unmapped: list[str] = []
         for path in mine:
-            if path not in tracked:
-                continue  # deleted: no test of its own to run (pins still see it)
             if _is_test(stack, path):
+                if path not in tracked:
+                    continue  # a deleted test has nothing left to run
                 targets.append(path)
                 continue
+            # a deleted source still maps: the tests that imported it must
+            # show they no longer need it
             for entry in stack["map"]:
                 caps = path_captures(entry["from"], path)
                 if caps is None:
@@ -264,7 +266,8 @@ def run(root: Path, cfg: dict, changed: set[str], klass: str, *, certify: bool) 
         before = certificate.evidence_tree(root) if not problem else None
         if problem:
             print(f"test_select: no certificate will be written — {problem}")
-    steps = plan(root, cfg, changed, klass)
+    # a merge push runs its whole suite: no selection, no local selector
+    steps = [] if klass == "merge" else plan(root, cfg, changed, klass)
     _report(steps)
     work: list[tuple[list[str], str, float, str]] = []
     if klass == "merge":

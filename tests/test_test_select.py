@@ -159,8 +159,9 @@ def _lane_repo(repo, tmp_path):
 
 def test_all_stacks_run_under_one_lane_hold(repo, tmp_path):
     env = _lane_repo(repo, tmp_path)
+    # `started` names one hold: a hold per stack would write a new one (same pid or not)
     probe = ("import json, pathlib, sys; rec = json.loads(pathlib.Path(sys.argv[1]).read_text()); "
-             "pathlib.Path(sys.argv[2]).write_text(str(rec['pid']))")
+             "pathlib.Path(sys.argv[2]).write_text(f\"{rec['pid']} {rec['started']}\")")
     status = str(tmp_path / "lanes/test-lane-scoped.status")
     cfg = {"stacks": {
         "backend": {**BACKEND, "runner": [sys.executable, "-c", probe, status, str(tmp_path / "pid-a"), "{paths}"]},
@@ -195,11 +196,34 @@ def test_a_busy_lane_runs_nothing_and_exits_75(repo, tmp_path):
         holder.wait()
 
 
-def test_red_stops_and_a_runner_past_its_time_is_red(repo):
+def test_red_stops_and_a_runner_past_its_time_is_red_and_frees_the_lane(repo, tmp_path):
+    env = _lane_repo(repo, tmp_path)
     _config(repo, runner=[sys.executable, "-c", "import time; time.sleep(5)", "{paths}"], timeout=0.5)
     _change(repo, "backend/tests/api/test_api.py")
-    r = _sel(repo, "run")
+    r = _sel(repo, "run", env=env)
     assert r.returncode == 1 and "exceeded" in r.stderr, r.stderr
+    status = subprocess.run([sys.executable, "scripts/process/lane.py", "status"], cwd=repo, capture_output=True,
+                            text=True, env={**os.environ, **env, "PYTHONDONTWRITEBYTECODE": "1"}).stdout
+    assert "scoped: free" in status, status
+
+
+def test_a_deleted_source_still_selects_the_tests_it_maps_to(repo):
+    """Refute #206: the deleted module's test package ran nothing, even with unmapped=full."""
+    _change(repo, delete=["backend/src/app/api/util.py"])
+    s = _plan(repo)["backend"]
+    assert s["action"] == "run" and s["targets"] == ["backend/tests/api"], s
+
+
+def test_the_merge_class_asks_no_selector(repo):
+    """A merge push runs its whole suite; a selector that fails cannot refuse it."""
+    _write(repo, "sel.py", "import sys\nsys.exit(3)\n")
+    _write(repo, "docs/process/testing.local.json", json.dumps(
+        {"merge_suite": f"{sys.executable} -c \"open('ran-merge','w')\"",
+         "stacks": {"backend": {**BACKEND, "select": [sys.executable, "sel.py"]}}}))
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "selector")
+    r = _sel(repo, "run", "--class", "merge")
+    assert r.returncode == 0 and (repo / "ran-merge").exists(), r.stdout + r.stderr
 
 
 def test_certify_writes_after_green_on_a_clean_tree_and_the_next_run_reads_it(repo):
