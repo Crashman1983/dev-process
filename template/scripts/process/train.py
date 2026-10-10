@@ -9,8 +9,13 @@ full run and deploy.
 
     uv run scripts/process/train.py plan [--json]        # who may board, why not, ready to depart?
     uv run scripts/process/train.py run --suite "<full suite cmd>" [--retry "<cmd>"] [--deploy "<cmd>"] [--push]
-                                       [--min-candidates N] [--max-wait-hours H] [--force]
-                                       [--keep-branches] [--dry-run]
+                                       [--preflight "<cmd>"] [--min-candidates N] [--max-wait-hours H]
+                                       [--force] [--keep-branches] [--dry-run]
+
+`--suite` defaults to `merge_suite` of `docs/process/testing.local.json`.
+`--preflight` checks the environment (tools, logins, disk) on the first
+combined tree before any gate: red there is the host's, not a passenger's —
+the run stops, nobody is blamed, nothing is retried or bisected.
 
 Boarding (all computed): a local branch that is not the integration
 branch, is ahead of it, and
@@ -40,11 +45,15 @@ ONCE on the combined tree. If they fail, the base itself is checked once
 (a red main blames nobody; the suite is skipped on a tree an earlier train
 saw green), then a bisection over boarding-order prefixes
 names the first offender, drops it, and the rest is rebuilt.
-On green: the integration branch fast-forwards to the train, `--push`
+On green: a suite run that left the tree as it found it writes the
+`merge` certificate of that tree (`certificate.py`) — the push to main then
+runs no suite again; the integration branch fast-forwards to the train, `--push`
 pushes it, merged branches are deleted (unless `--keep-branches`), each
 worker gets a `done` report, and `--deploy` runs once. The combination
 is new — that is why the batch, not the branch, earns the full run
-(`docs/process/testing.md`).
+(`docs/process/testing.md`). Each run logs its phase times (preflight,
+gates, suite, retry, bisect, push, deploy) and appends them to
+`<git-common-dir>/process-train/phases.jsonl` (`process_kpis.py train-phases`).
 
 Run from the root worktree on the integration branch with a clean tree.
 The train never reviews, never certifies by itself: it merges what the
@@ -68,6 +77,7 @@ from typing import Callable, NamedTuple
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling imports
+import certificate  # noqa: E402
 import check_review as _review  # noqa: E402
 from gate_invoke import gate_runner_argv, not_runnable_reason  # noqa: E402
 import report as _report  # noqa: E402
@@ -1074,6 +1084,37 @@ def _changed_by_run(wt: Path) -> bool:
     return r.returncode != 0 or bool(r.stdout.strip())
 
 
+PHASES = ("preflight", "gates", "suite", "retry", "bisect", "push", "deploy")
+PHASES_FILE = "phases.jsonl"
+
+
+class EnvironmentRed(Exception):
+    """`--preflight` failed: the host cannot run the suite — nobody aboard is to blame."""
+
+
+def _record_phases(root: Path, stamp: str, phases: dict[str, float], rc: int, aboard: list[str], log) -> None:
+    """One log line and one JSON line per run: where the train's time went."""
+    spent = {k: round(phases.get(k, 0.0), 1) for k in PHASES}
+    log("phases: " + ", ".join(f"{k} {v:.0f} s" for k, v in spent.items() if v))
+    try:
+        with (_train_dir(root) / PHASES_FILE).open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps({"stamp": stamp, "rc": rc, "aboard": len(aboard), **spent}) + "\n")
+    except OSError:
+        pass  # a lost timing line costs a KPI, never the merge
+
+
+def _certify_merge(wt: Path, suite: str, before: str | None, env_names: list[str], log) -> None:
+    """The `merge` certificate of the tree the suite just ran green on — only
+    when the run left the worktree as it found it (S6)."""
+    if not before:
+        return
+    if _changed_by_run(wt):
+        log("suite green, but the run changed the worktree — no merge certificate")
+        return
+    ok, why = certificate.write(wt, "merge", suite, before_tree=before, writer="train", env_names=env_names)
+    log(f"merge certificate {'written' if ok else 'not written — ' + why}")
+
+
 def retry_plan(red_in: str, retry: str | None) -> tuple[str, str]:
     """How a red combined tree is run once more before anybody is blamed —
     `(how, why)`, the whole rule: "gates" re-runs the process gates on the
@@ -1091,7 +1132,8 @@ def retry_plan(red_in: str, retry: str | None) -> tuple[str, str]:
 
 def run(root: Path, *, suite: str | None, deploy: str | None, push: bool, min_candidates: int,
         max_wait_hours: float, force: bool, keep_branches: bool, dry_run: bool,
-        retry: str | None = None) -> int:
+        retry: str | None = None, preflight: str | None = None,
+        certificate_env: list[str] | None = None) -> int:
     local = local_integration(root)
     if local is None:
         print("train: no local main/master branch", file=sys.stderr)
@@ -1125,9 +1167,18 @@ def run(root: Path, *, suite: str | None, deploy: str | None, push: bool, min_ca
     if dry_run:
         print("train: dry run — no merge, no suite")
         return 0
+    phases: dict[str, float] = {}
+    rc = 1
     try:
-        return _run_batch(root, local, p, aboard, stamp, logfile, suite=suite, deploy=deploy, push=push,
-                          keep_branches=keep_branches, retry=retry)
+        rc = _run_batch(root, local, p, aboard, stamp, logfile, suite=suite, deploy=deploy, push=push,
+                        keep_branches=keep_branches, retry=retry, preflight=preflight, phases=phases,
+                        certificate_env=certificate_env or [])
+        return rc
+    except EnvironmentRed as env_red:
+        print(f"train: the preflight `{env_red}` is red — the environment cannot run the suite; "
+              f"nobody is blamed, nothing merged, no retry (see {logfile})", file=sys.stderr)
+        _cleanup(root, stamp)
+        return rc
     except BaseException:
         wt = _train_worktree(root)
         if wt.exists():
@@ -1135,14 +1186,45 @@ def run(root: Path, *, suite: str | None, deploy: str | None, push: bool, min_ca
             print(f"train: aborted — staging worktree removed, branch train/{stamp} kept; log: {logfile}",
                   file=sys.stderr)
         raise
+    finally:
+        def _log(line: str) -> None:
+            with logfile.open("a", encoding="utf-8") as fh:
+                fh.write(f"{_dt.datetime.now().isoformat(timespec='seconds')} {line}\n")
+        _record_phases(root, stamp, phases, rc, aboard, _log)
 
 
 def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, logfile: Path, *,
                suite: str | None, deploy: str | None, push: bool, keep_branches: bool,
-               retry: str | None = None) -> int:
+               retry: str | None = None, preflight: str | None = None,
+               phases: dict[str, float] | None = None, certificate_env: list[str] | None = None) -> int:
     def log(line: str) -> None:
         with logfile.open("a", encoding="utf-8") as fh:
             fh.write(f"{_dt.datetime.now().isoformat(timespec='seconds')} {line}\n")
+
+    phases = {} if phases is None else phases
+    searching = ""  # "retry" or "bisect": a judged tree's time counts there
+
+    def timed(phase: str, fn, *args):
+        started = time.monotonic()
+        try:
+            return fn(*args)
+        finally:
+            name = searching if searching and phase in ("gates", "suite") else phase
+            phases[name] = phases.get(name, 0.0) + time.monotonic() - started
+
+    preflight_done = not preflight
+
+    def full_suite(wt: Path, key: str) -> str:
+        """The suite on `wt`, remembered and — on a tree it left as found — certified."""
+        clean = certificate.clean_tree_problem(wt) is None
+        before = certificate.evidence_tree(wt) if clean else None
+        state = timed("suite", _sh, wt, suite, log)
+        if state == "green" and key:
+            _remember_green_suite(root, key)
+            green_here.add(key)
+        if state == "green":
+            _certify_merge(wt, suite, before, certificate_env or [], log)
+        return state
 
     base = p["base"]
     # oldest first: boarding order is waiting order, and the bisection below
@@ -1162,9 +1244,13 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
         """"green", "red" or "undefined" (the suite does not exist on this tree).
         The bare base skips the suite when this train saw it green on that tree —
         provisionally: before the first passenger is blamed it runs for real."""
-        nonlocal base_from_memo, red_in
+        nonlocal base_from_memo, red_in, preflight_done
+        if not preflight_done:
+            if timed("preflight", _sh, wt, preflight, log) != "green":
+                raise EnvironmentRed(preflight)
+            preflight_done = True
         red_in = "gates"
-        if not _run_gates(wt, log):
+        if not timed("gates", _run_gates, wt, log):
             return "red"
         red_in = "suite"
         if not suite:
@@ -1181,11 +1267,7 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
             log(f"base tree {key.split()[0][:12]}: suite green on an earlier train — not run again")
             base_from_memo = True
             return "green"
-        state = _sh(wt, suite, log)
-        if state == "green" and key:
-            _remember_green_suite(root, key)
-            green_here.add(key)
-        return state
+        return full_suite(wt, key)
 
     def attempt(subset: list[str], *, memo: bool = True) -> tuple[str, list[str], str]:
         nonlocal last_wt
@@ -1247,6 +1329,7 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
             print(f"train: `{suite}` exists on the base but not on the combined tree — a passenger "
                   "removed or broke it; searching for it")
             retried = True
+        searching = "retry"
         if not retried:
             # one more run of the SAME tree before anybody is blamed: red then
             # green on identical code is a flaky test (observed downstream: a
@@ -1261,12 +1344,13 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
                 how, why = "full", "the first run changed the worktree — rebuild and run the whole suite"
             log(f"red — retry of the same combined tree: {how} — {why} ({_load()})")
             if how == "gates" and last_wt is not None:
-                state = "green" if _run_gates(last_wt, log) else "red"
+                state = "green" if timed("gates", _run_gates, last_wt, log) else "red"
                 if state == "green" and suite:
                     red_in = "suite"
-                    state = _sh(last_wt, suite, log)  # the suite never ran behind the red gates
+                    # the suite never ran behind the red gates
+                    state = full_suite(last_wt, _suite_key(last_wt, suite))
             elif how == "failed" and last_wt is not None:
-                state = _sh(last_wt, retry, log)
+                state = timed("retry", _sh, last_wt, retry, log)
                 if state == "undefined":  # no such command on this tree: the whole suite, as before
                     log("the --retry command does not exist on this tree — rebuilding for the whole suite")
                     state, merged, branch = attempt(aboard)
@@ -1274,6 +1358,7 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
             else:
                 state, merged, branch = attempt(aboard)
                 aboard = merged
+            searching = ""
             if state == "green":
                 print("train: FLAKY — the combined tree was red, then green on the identical tree; "
                       f"merging, but the suite has a flaky test (see {logfile}; {_load()})", file=sys.stderr)
@@ -1281,6 +1366,7 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
                 break
         # before blaming anybody: is the base itself red (a broken main)?
         # Then no candidate is the offender.
+        searching = "bisect"
         if check_base() == "red":
             return _red_base()
         if base_state == "undefined" and not told:
@@ -1321,6 +1407,7 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
         # the rest is a new combination: it earns its own flake re-run (the
         # base does not change — its verdict is kept)
         retried = False
+        searching = ""
         log(f"red with {offender} aboard — dropped, rebuilding")
         print(f"train: red with {offender} aboard — dropping it and rebuilding")
         aboard = [b for b in aboard if b != offender]
@@ -1343,8 +1430,8 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
         # against HEAD of the checkout it runs in — from the root that is main
         # the route marker rides on this one push: the pre-push guard
         # (merge_route.py) refuses a push to main that does not name its route
-        r = _git(_train_worktree(root), "push", "origin", f"HEAD:{local}",
-                 env={MERGE_ROUTE_ENV: MERGE_ROUTE})
+        r = timed("push", lambda: _git(_train_worktree(root), "push", "origin", f"HEAD:{local}",
+                                       env={MERGE_ROUTE_ENV: MERGE_ROUTE}))
         if r.returncode != 0:
             log(f"push of {branch} to origin/{local} rejected: {r.stderr.strip()}")
             _git(root, "worktree", "remove", "--force", str(_train_worktree(root)))
@@ -1406,7 +1493,7 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
     _cleanup(root, stamp)
     _report_dropped()
     if deploy:
-        if _sh(root, deploy, log) != "green":
+        if timed("deploy", _sh, root, deploy, log) != "green":
             print("train: deploy failed — the merge stands, the deploy does not; see " + str(logfile), file=sys.stderr)
             return 1
     return 0
@@ -1448,7 +1535,10 @@ def main(argv: list[str]) -> int:
         s.add_argument("--root", default=".")
     sub.choices["plan"].add_argument("--json", action="store_true")
     r = sub.choices["run"]
-    r.add_argument("--suite", help="the full suite command, run once on the combined tree")
+    r.add_argument("--suite", help="the full suite command, run once on the combined tree "
+                                   "(default: merge_suite of docs/process/testing.local.json)")
+    r.add_argument("--preflight", help="an environment check run once before the gates; red stops the "
+                                       "run without blaming anybody")
     r.add_argument("--retry", help="after a red suite: re-run what failed and what did not run, on the same "
                                    "tree (default: the whole suite again)")
     r.add_argument("--deploy", help="run once after the fast-forward (and push)")
@@ -1466,9 +1556,18 @@ def main(argv: list[str]) -> int:
         result = plan(root, min_candidates=a.min_candidates, max_wait_hours=a.max_wait_hours)
         print(json.dumps(result, indent=2) if a.json else render_plan(result))
         return 0
-    return run(root, suite=a.suite, deploy=a.deploy, push=a.push, min_candidates=a.min_candidates,
+    import testing_config  # noqa: PLC0415
+
+    try:
+        cfg = testing_config.load(root)
+    except testing_config.ConfigError as exc:
+        print(f"train: {exc} — fix it first; the suite and the certificates read it", file=sys.stderr)
+        return 2
+    suite = a.suite or (cfg["merge_suite"] if cfg else None)
+    return run(root, suite=suite, deploy=a.deploy, push=a.push, min_candidates=a.min_candidates,
                max_wait_hours=a.max_wait_hours, force=a.force, keep_branches=a.keep_branches,
-               dry_run=a.dry_run, retry=a.retry)
+               dry_run=a.dry_run, retry=a.retry, preflight=a.preflight,
+               certificate_env=cfg["certificate_env"] if cfg else [])
 
 
 if __name__ == "__main__":

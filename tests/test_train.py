@@ -1949,3 +1949,95 @@ def test_another_cars_deletion_does_not_make_a_slug_unique(render, tmp_path):
                  files={"src/expiry.py": "x = 1\n"})
     _report(out, "issue-2260")
     assert not _candidate(out, "issue-2260")["eligible"]
+
+
+# --- #206: preflight, merge certificate, phase times ---------------------------------
+
+def _find_merge_certificate(out: Path, evidence: str):
+    code = ("import sys, json; sys.path.insert(0, 'scripts/process'); import certificate; "
+            "from pathlib import Path; "
+            f"print(json.dumps(certificate.find(Path('.'), ('merge',), {{'merge': {evidence!r}}})))")
+    r = subprocess.run([sys.executable, "-c", code], cwd=out, capture_output=True, text=True,
+                       env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
+    assert r.returncode == 0, r.stderr
+    return json.loads(r.stdout)
+
+
+def _phases(out: Path) -> list[dict]:
+    f = out / ".git/process-train/phases.jsonl"
+    return [json.loads(line) for line in f.read_text().splitlines()] if f.exists() else []
+
+
+def test_a_red_preflight_stops_the_train_and_blames_nobody(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _branch(out, "alpha", {"src/a.py": "a\n"})
+    _branch(out, "beta", {"src/b.py": "b\n"})
+    head = _git(out, "rev-parse", "main").stdout
+    r = _train(out, "run", "--force", "--suite", f"echo run >> {out.parent}/suite.log",
+               "--preflight", "exit 3")
+    assert r.returncode == 1 and "preflight `exit 3` is red" in r.stderr and "nobody is blamed" in r.stderr, r.stderr
+    assert "dropping" not in r.stdout and not (out.parent / "suite.log").exists()
+    assert _git(out, "rev-parse", "main").stdout == head
+    branches = _git(out, "branch", "--list", "--format=%(refname:short)").stdout.split()
+    assert {"alpha", "beta"} <= set(branches) and not [b for b in branches if b.startswith("train/")]
+    assert _phases(out)[-1]["rc"] == 1 and "preflight" in _phases(out)[-1]
+
+
+def test_a_green_preflight_and_suite_certify_the_train_tree_and_log_the_phases(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _branch(out, "alpha", {"src/a.py": "a\n"})
+    r = _train(out, "run", "--force", "--suite", "true", "--preflight", "true")
+    assert r.returncode == 0, r.stdout + r.stderr
+    hit = _find_merge_certificate(out, "true")
+    assert hit and hit["writer"] == "train" and hit["head"] == _git(out, "rev-parse", "main").stdout.strip()
+    row = _phases(out)[-1]
+    assert row["rc"] == 0 and row["aboard"] == 1 and set(row) >= {"preflight", "gates", "suite", "push"}
+    logs = sorted((out / ".git/process-train").glob("*.log"))
+    assert "phases:" in logs[-1].read_text() and "merge certificate written" in logs[-1].read_text()
+
+
+def test_a_suite_that_writes_into_the_tree_certifies_nothing(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _branch(out, "alpha", {"src/a.py": "a\n"})
+    r = _train(out, "run", "--force", "--suite", "touch generated.txt")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert _find_merge_certificate(out, "touch generated.txt") is None
+    logs = sorted((out / ".git/process-train").glob("*.log"))
+    assert "the run changed the worktree — no merge certificate" in logs[-1].read_text()
+
+
+def test_the_suite_defaults_to_the_configured_merge_suite(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    (out / "docs/process/testing.local.json").write_text(
+        json.dumps({"merge_suite": f"echo run >> {out.parent}/suite.log"}))
+    _repo(out)
+    _branch(out, "alpha", {"src/a.py": "a\n"})
+    r = _train(out, "run", "--force")
+    assert r.returncode == 0 and "no --suite" not in r.stderr, r.stdout + r.stderr
+    assert "run" in (out.parent / "suite.log").read_text()
+
+
+def test_a_broken_test_configuration_stops_the_train_before_it_departs(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    (out / "docs/process/testing.local.json").write_text("{not json")
+    _repo(out)
+    r = _train(out, "run", "--force")
+    assert r.returncode == 2 and "testing.local.json" in r.stderr, r.stderr
+
+
+def test_train_phases_reads_median_and_maximum_per_phase(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {"telemetry": True}})
+    _repo(out)
+    d = out / ".git/process-train"
+    d.mkdir(parents=True)
+    rows = [{"stamp": f"s{i}", "rc": i % 2, "aboard": 2, "suite": 100.0 * (i + 1), "gates": 10.0,
+             "bisect": 0.0} for i in range(3)]
+    (d / "phases.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows) + "torn line\n")
+    r = subprocess.run([sys.executable, str(out / "scripts/process/process_kpis.py"), "train-phases"],
+                       cwd=out, capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    assert "suite     median    200 s, max    300 s (in 3/3 runs)" in r.stdout, r.stdout
+    assert "bisect" not in r.stdout and "1/3 runs ended red" in r.stdout
