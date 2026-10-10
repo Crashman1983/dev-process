@@ -544,8 +544,9 @@ def guard(root: Path, lines: list[RefLine], args: list[str], env: dict[str, str]
     if not updates.ok:
         print(updates.message, file=sys.stderr)
         return 1
-    if updates.ledger:
-        verdict = updates
+    # every bypass of this push gets its line: a gate skip and the override a
+    # non-fast-forward needs are two decisions (refutation: one replaced the other)
+    entries = [v.ledger for v in (verdict, updates) if v.ledger]
     # the verdict of the review records travels with the ref lines; a skipped gate
     # (logged above) skips it too — the owner's emergency exit
     if lines and not bypass:
@@ -554,8 +555,8 @@ def guard(root: Path, lines: list[RefLine], args: list[str], env: dict[str, str]
             print(f"review: {finding}", file=sys.stderr)
         if findings:
             return 1
-    if verdict.ledger:
-        append_ledger(root, *verdict.ledger, targets)
+    for entry in dict.fromkeys(entries):
+        append_ledger(root, *entry, targets)
     return 0
 
 
