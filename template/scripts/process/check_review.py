@@ -1440,7 +1440,7 @@ def issue_refs_in_range(root: Path, tip: str = "HEAD", *, base: str | None = Non
 
 
 def paths_in_flight(root: Path, tip: str = "HEAD", *, base: str | None = None,
-                    strict: bool = False) -> set[str] | None:
+                    strict: bool = False, no_renames: bool = False) -> set[str] | None:
     """Repo-relative paths this push carries: the committed range
     `{base}...HEAD`, nothing else. An unscoped "every active Tier 3 plan"
     reds every push in the repo for a plan the pusher does not own (measured
@@ -1467,8 +1467,11 @@ def paths_in_flight(root: Path, tip: str = "HEAD", *, base: str | None = None,
                 raise GitReadError("no proper integration base; fetch the remote default branch")
             return None
         return set()  # unborn repositories carry no pushed commits
+    # `no_renames`: both sides of a rename, as a deletion and an addition — a
+    # pin on the old path still fires (the test selector asks for it)
     return _names(_git_read(root, "--no-optional-locks", "diff", "--no-ext-diff",
                             "--no-textconv", "--no-color", "--name-only", "-z",
+                            *(["--no-renames"] if no_renames else []),
                             f"{base}...{tip}", strict=strict))
 
 

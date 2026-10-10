@@ -32,6 +32,7 @@ except ImportError:
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling import
 from gate_invoke import child_argv, hook_wiring_findings  # noqa: E402
+from process_git import pushed_commit_problem  # noqa: E402
 
 # gate-name -> (module answer key, command relative to repo root).
 # A module key of None marks a *core* gate: it ships in core and always runs,
@@ -320,19 +321,6 @@ def _emit(output: str, known: set[str], seen: set[str], show_all: bool) -> int:
     return suppressed
 
 
-def _commit_of(root: Path, ref: str) -> str:
-    # `^0` peels a tag to its commit — written without braces on purpose: this
-    # file is a Jinja template, and a doubled brace would render away
-    r = subprocess.run(["git", "-C", str(root), "rev-parse", "--verify", "-q", ref + "^0"],
-                       capture_output=True, text=True)
-    return r.stdout.strip() if r.returncode == 0 else ""
-
-
-def _head(root: Path) -> str:
-    r = subprocess.run(["git", "-C", str(root), "rev-parse", "HEAD"], capture_output=True, text=True)
-    return r.stdout.strip() if r.returncode == 0 else ""
-
-
 def main() -> int:
     root = Path(__file__).resolve().parents[2]
     if not (root / ".copier-answers.yml").is_file():
@@ -373,15 +361,10 @@ def main() -> int:
     # was pushed, and the hook passed a tree it never saw). pre-commit names the
     # pushed commit in PRE_COMMIT_TO_REF; a manual run has no such variable.
     pushed = os.environ.get("PRE_COMMIT_TO_REF", "").strip()
-    if pushed:
-        # an annotated tag names a tag object: compare the commit it points to
-        pushed = _commit_of(root, pushed) or pushed
-        head = _head(root)
-        if head and pushed != head:
-            print(f"gate-runner: the push carries {pushed[:10]} but this checkout is at "
-                  f"{head[:10]} — the gates would check a tree that is not being pushed; "
-                  f"push from the checkout of that commit (its worktree)", file=sys.stderr)
-            failed.append("pushed-tree")
+    problem = pushed_commit_problem(root, pushed) if pushed else None
+    if problem:
+        print(f"gate-runner: {problem}", file=sys.stderr)
+        failed.append("pushed-tree")
     # Child output is decoded as UTF-8 below, including on Windows. Keep
     # that protocol independent of the runner's own console encoding.
     # Don't litter the repo with __pycache__ from the gates' sibling imports.
