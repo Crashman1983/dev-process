@@ -202,8 +202,12 @@ def referenced_files(root: Path, fdir: Path) -> dict[str, str]:
         if matched:
             hits.setdefault(max(matched)[1], f"{path}:{lineno}")
             continue
+        # the plan's archive copy (`<ARCHIVE>/<feature>.md`) carries the feature's
+        # name and outlives the prune: a reference to it names no file pruned
+        # (downstream: a state note pointing at the archive refused the prune)
+        named = line.replace(f"{ARCHIVE}/{rel_dir.rsplit('/', 1)[-1]}.md", "")
         for token, key in tokens.items():  # the directory's name, then module stems
-            if _whole(token, line) if key.endswith("/") else _imported(token, key, line):
+            if _whole(token, named) if key.endswith("/") else _imported(token, key, line):
                 hits.setdefault(key, f"{path}:{lineno}, names {token!r}")
                 break
     for line, path, lineno in _grep(root, "-E", "-e", _GLOB_HIT, *scope):
