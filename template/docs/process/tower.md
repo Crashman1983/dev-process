@@ -198,7 +198,10 @@ stops a `planned` plan session and queues `execute` once the process
 gates are green on the plan's worktree (a red verdict is said on every tick
 until a new plan commit) and a Tier 2+ plan carries its plan pass — at Tier
 3 it first queues a plan review (`review --plan-review`), whose pass queues
-execute; stops a `pushed`
+execute. A `start --phase review` without the flag is a plan review on its
+own when the branch changes nothing beyond plans and bookkeeping and an own
+Tier 2+ plan has no pass for its current text (`plan_review_due`; downstream
+two sessions started for a changed plan stopped with "no code"); stops a `pushed`
 execute session and queues `review` once the branch's plan on origin has
 no open task (`pushed` comes at the first push) and origin carries code
 beyond the last attestation (a commit recording a REVIEW line — an

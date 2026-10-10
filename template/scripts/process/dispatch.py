@@ -1552,6 +1552,11 @@ def start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str |
         print(f"dispatch: decision_channel omitted: `{word}` cell has no live channel; reports via report.py")
         channel = None
     plan_review = plan_review and phase == "review"
+    if phase == "review" and not plan_review:
+        due = plan_review_due(root, branch)
+        if due:
+            print(f"dispatch: plan review — {due} (code review: add code first)")
+            plan_review = True
     prompt = prompt_for(phase, issue, tier, branch, model, remote=remote,
                         channel=channel, effort=effort, attests=not other_harness, plan_review=plan_review)
     argv = build_argv(policy, model, prompt, branch, issue, phase, effort, cell.command)
@@ -2216,8 +2221,12 @@ def plan_review_state(root: Path, wt: Path) -> tuple[int | None, bool]:
     HEAD, whether a clearing plan pass — `REVIEW work=<id>-plan verdict=pass`
     at that tier or higher — covers every Tier 2+ one). (None, False) when no
     plan is found: the caller cannot judge it."""
+    return plan_review_state_at(root, _out(wt, "rev-parse", "HEAD"))
+
+
+def plan_review_state_at(root: Path, head: str) -> tuple[int | None, bool]:
+    """`plan_review_state` for the commit `head`."""
     import check_review as _review  # noqa: PLC0415
-    head = _out(wt, "rev-parse", "HEAD")
     if not head:
         return None, False
     plans = []
@@ -2246,6 +2255,31 @@ def plan_review_state(root: Path, wt: Path) -> tuple[int | None, bool]:
             and _out(root, "rev-parse", f"{r['head']}:{rel}") == now for r in passes)
     top = max(t for t, _rel, _ids in plans)
     return top, all(cleared(t, rel, ids) for t, rel, ids in plans if t >= 2)
+
+def plan_review_due(root: Path, branch: str) -> str | None:
+    """Why a review of `branch` is a plan review, or None for a code review
+    (#203: a session started for a changed plan took it for a code review and
+    stopped with "no code"). A plan review is due when the branch changes
+    nothing beyond plans and bookkeeping since its fork and an own Tier 2+
+    plan has no clearing `-plan` pass for its current text. What git cannot
+    tell is a code review, as before — the session says when there is no
+    code; `--plan-review` forces the plan review."""
+    tip = _out(root, "rev-parse", "--verify", "-q", f"{branch}^{{commit}}") or \
+        _out(root, "rev-parse", "--verify", "-q", f"origin/{branch}^{{commit}}")
+    base = _integration_base(root, tip) if tip else ""
+    if not tip or not base:
+        return None
+    listed = _git(root, "diff", "--name-only", "-z", "--no-renames", base, tip)
+    if listed.returncode != 0:
+        return None
+    changed = [p for p in listed.stdout.split("\0") if p]
+    if any(not (p.startswith(BOOKKEEPING) or p.startswith(_review.SPECS_DIR + "/")) for p in changed):
+        return None  # code to review
+    tier, cleared = plan_review_state_at(root, tip)
+    if tier is None or tier < 2 or cleared:
+        return None
+    return f"{branch} changes only plans and bookkeeping, and its Tier {tier} plan has no pass for its current text"
+
 
 PLAN_GATES_TIMEOUT = 900  # the gate runner's own per-gate cap is 600 s
 

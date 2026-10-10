@@ -1900,3 +1900,40 @@ def test_a_plan_pass_counts_for_the_plan_text_it_reviewed(render, tmp_path, monk
     assert mod.plan_review_state(out, out) == (2, False)
     _plan_pass(out, 2, work="7")  # attested by issue id, on a head holding both texts
     assert mod.plan_review_state(out, out) == (2, True)
+
+
+@pytest.mark.parametrize("case, due", [
+    ("plan-no-pass", True),          # a first plan review
+    ("plan-changed-after-pass", True),  # downstream #2480/#2483: the delta plan round
+    ("plan-passed", False),
+    ("plan-and-code", False),        # code to review
+    ("tier-1", False),
+    ("no-branch", False),
+])
+def test_a_review_start_tells_a_plan_review_from_a_code_review(render, tmp_path, case, due):
+    """#203: a review session started for a changed plan took it for a code
+    review and stopped with "no code"."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _planned_branch(out, 1 if case == "tier-1" else 3, plan_pass=case in ("plan-passed", "plan-changed-after-pass"))
+    if case == "plan-changed-after-pass":
+        plan = out / ".process-work/plans/2026-10-09-fetch.md"
+        plan.write_text(plan.read_text() + "- DECISION 2026-10-10: Laufzeit begrenzt.\n")
+        _git(out, "commit", "-qam", "plan delta")
+    if case == "plan-and-code":
+        (out / "src").mkdir(exist_ok=True)
+        (out / "src/fetch.py").write_text("x = 1\n")
+        _git(out, "add", "-A")
+        _git(out, "commit", "-q", "-m", "code")
+    _git(out, "checkout", "-q", "main")
+    mod = _load_dispatch(out)
+    reason = mod.plan_review_due(out, "nope" if case == "no-branch" else "b")
+    assert bool(reason) is due, reason
+
+
+def test_a_review_start_on_a_changed_plan_starts_a_plan_review(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _planned_branch(out, 3, plan_pass=False)
+    _git(out, "checkout", "-q", "main")
+    r = _dispatch(out, "start", "--issue", "7", "--phase", "review", "--branch", "b", "--dry-run")
+    assert r.returncode == 0, r.stderr
+    assert "dispatch: plan review —" in r.stdout and "Tier 3 plan has no pass" in r.stdout, r.stdout
