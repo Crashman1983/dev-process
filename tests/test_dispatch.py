@@ -2008,3 +2008,34 @@ def test_plan_review_flag_forces_a_plan_review_on_a_branch_with_code(render, tmp
         assert mod.start(out, issue=7, phase="review", tier=3, branch="b", title=None, dry_run=True,
                          plan_review=forced) == 0
     assert seen == [False, True]
+
+
+def test_the_review_mode_reads_a_local_branch_ahead_of_origin(render, tmp_path):
+    """Refute #203: an unpushed plan delta on a branch whose pushed plan has its
+    pass — the worktree keeps the local state, so that decides."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _planned_branch(out, 3, plan_pass=True)
+    _with_origin(out, tmp_path)
+    plan = out / ".process-work/plans/2026-10-09-fetch.md"
+    plan.write_text(plan.read_text() + "- DECISION 2026-10-10: Laufzeit begrenzt.\n")
+    _git(out, "commit", "-qam", "plan delta, not pushed")
+    _git(out, "checkout", "-q", "main")
+    assert _load_dispatch(out).plan_review_due(out, "b")
+
+
+def test_the_review_mode_fetches_a_plan_delta_it_has_not_seen(render, tmp_path):
+    """The delta exists only on origin, pushed from another clone: it is fetched."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _planned_branch(out, 3, plan_pass=True)
+    bare = _with_origin(out, tmp_path)
+    other = tmp_path.parent / f"{tmp_path.name}-other"
+    subprocess.run(["git", "clone", "-q", "-b", "b", str(bare), str(other)], check=True)
+    _git(other, "config", "user.email", "t@t")
+    _git(other, "config", "user.name", "t")
+    _git(other, "config", "commit.gpgsign", "false")
+    plan = other / ".process-work/plans/2026-10-09-fetch.md"
+    plan.write_text(plan.read_text() + "- DECISION 2026-10-10: Laufzeit begrenzt.\n")
+    _git(other, "commit", "-qam", "plan delta elsewhere")
+    _git(other, "push", "-q", "origin", "b")
+    _git(out, "checkout", "-q", "main")
+    assert _load_dispatch(out).plan_review_due(out, "b")

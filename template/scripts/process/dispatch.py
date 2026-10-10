@@ -2264,17 +2264,20 @@ def plan_review_due(root: Path, branch: str) -> str | None:
     plan has no clearing `-plan` pass for its current text. Plans are
     `.process-work/` and Spec Kit's `specs/` here (`new_code_on_origin` counts
     `specs/` as code: the tower queues the review, this tells its kind). The
-    tip judged is the one the session reviews: origin's, as `sync_worktree`
-    brings the worktree there (refute: a stale local ref read a plan-only
-    branch while origin carried code); a branch origin does not have is
-    judged by its local ref. What git cannot tell is a code review, as
+    tip judged is the one the session reviews: origin's, where `sync_worktree`
+    brings the worktree (refute: a stale local ref read a plan-only branch
+    while origin carried code) — the local ref where it is ahead of origin
+    (`sync_worktree` leaves an ahead worktree as it is) or origin lacks the
+    branch. What git cannot tell is a code review, as
     before — the session says when there is no code; `--plan-review` forces
     the plan review."""
     tip = _remote_head(root, branch)
     if tip and _git(root, "cat-file", "-e", f"{tip}^{{commit}}").returncode != 0 \
             and _git(root, "fetch", "-q", "origin", f"refs/heads/{branch}").returncode != 0:
         return None
-    tip = tip or _out(root, "rev-parse", "--verify", "-q", f"{branch}^{{commit}}")
+    local = _out(root, "rev-parse", "--verify", "-q", f"{branch}^{{commit}}")
+    if not tip or (local and _git(root, "merge-base", "--is-ancestor", tip, local).returncode == 0):
+        tip = local
     base = _integration_base(root, tip) if tip else ""
     if not tip or not base:
         return None
