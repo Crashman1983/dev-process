@@ -1006,9 +1006,12 @@ def invalid_records(root: Path, records: list[dict], tip: str = "HEAD") -> dict[
 
 def superseded_records(root: Path, records: list[dict], invalid: dict[int, str]) -> dict[int, str]:
     """id(record) → the later round that supersedes it, for invalid records a
-    valid full round of the same work with a higher round covers: its base is
-    the fork point of its head (`full_round_base_problem`) and its head
-    descends from the invalid record's head. Such a round reviewed everything
+    valid full round of the same work covers: its base is the fork point of
+    its head (`full_round_base_problem`), its head descends from the invalid
+    record's head, and its round is higher — or the same with verdict pass:
+    attest counts round = 1 + the blocking rounds, so the round after a pass
+    carries the pass's number (downstream #2396: a valid round 6 left the old
+    round-6 delta line refusing every push). Such a round reviewed everything
     from the fork point on, the off-fork line included, so the line hides no
     unreviewed code — it stays invalid and clears nothing (a block stays a
     block), but no longer stops every push (downstream: a pre-v2.53 delta
@@ -1019,7 +1022,9 @@ def superseded_records(root: Path, records: list[dict], invalid: dict[int, str])
         if id(r) not in invalid or not r.get("head"):
             continue
         for v in sorted(later, key=lambda v: -int(v["round"])):
-            if (work_key(v["work"]) == work_key(r["work"]) and int(v["round"]) > int(r["round"])
+            later_round = int(v["round"]) > int(r["round"]) or (
+                int(v["round"]) == int(r["round"]) and v["verdict"] == "pass")
+            if (work_key(v["work"]) == work_key(r["work"]) and later_round
                     and _git_bytes(root, "merge-base", "--is-ancestor", r["head"], v["head"]) is not None
                     and full_round_base_problem(root, v["base"], v["head"]) is None):
                 out[id(r)] = f"round={v['round']} head={v['head'][:12]}"
