@@ -1,6 +1,6 @@
 # Plan: Ein Testpfad — Lane, Baum-Zertifikat, Selektor aus Daten, Hook-Rahmen
 
-Datum: 2026-10-10 · Issue: #206 · Release: v2.64.0 · Tier: 3 (Gate-Code: Pre-Push, Train, Gate-Runner)
+Datum: 2026-10-10 · Issue: #206 · Release: v2.64 · Tier: 3 (Gate-Code: Pre-Push, Train, Gate-Runner)
 Status: überarbeitet nach Plan-Review Runde 1 (2 BLOCKER, 11 MAJOR, alle eingearbeitet; siehe „Plan-Review“ am Ende)
 
 ## Anlass
