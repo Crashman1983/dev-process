@@ -275,9 +275,12 @@ def _preflight_cfg(repo, preflight, **more):
     _git(repo, "commit", "-qm", "preflight")
 
 
-@pytest.mark.parametrize("bad", [[], "make doctor", [""], {"run": ["x"]}])
-def test_a_malformed_preflight_is_a_broken_configuration(repo, bad):
-    _preflight_cfg(repo, bad)
+@pytest.mark.parametrize("bad,more", [([], {}), ("make doctor", {}), ([""], {}), ({"run": ["x"]}, {}),
+                                      (None, {"preflight_timeout": 5}),
+                                      (["true"], {"preflight_timeout": float("nan")})],
+                         ids=["empty", "string", "empty-arg", "object", "timeout-alone", "nan"])
+def test_a_malformed_preflight_is_a_broken_configuration(repo, bad, more):
+    _preflight_cfg(repo, bad, **more)
     r = _sel(repo, "plan")
     assert r.returncode == 2 and "preflight" in r.stderr, r.stderr
 
@@ -304,7 +307,7 @@ def test_a_preflight_past_its_time_cannot_judge(repo):
     _preflight_cfg(repo, [sys.executable, "-c", "import time; time.sleep(5)"], preflight_timeout=0.5)
     _change(repo, "backend/tests/api/test_api.py")
     r = _sel(repo, "run")
-    assert r.returncode == 2 and "did not finish in 0 s" in r.stderr, r.stderr
+    assert r.returncode == 2 and "did not finish in 0.5 s" in r.stderr, r.stderr
 
 
 def test_no_preflight_without_work_or_behind_a_certificate(repo):
@@ -329,3 +332,49 @@ def test_a_red_preflight_certifies_nothing(repo):
     # same tree: a certificate would be read before the preflight runs again
     r = _sel(repo, "run")
     assert r.returncode == 2 and "certificate of tree" not in r.stdout, r.stdout
+
+
+def test_a_preflight_that_cannot_start_is_the_environment_not_a_crash(repo):
+    _preflight_cfg(repo, ["no-such-doctor-209"])
+    _change(repo, "backend/tests/api/test_api.py")
+    r = _sel(repo, "run")
+    assert r.returncode == 2 and "the preflight cannot start" in r.stderr and "Traceback" not in r.stderr, r.stderr
+
+
+def test_the_preflight_runs_once_for_all_stacks_and_inside_the_lane(repo, tmp_path):
+    """Review #209: once per run, not per stack — and under the hold a busy lane refuses first."""
+    env = _lane_repo(repo, tmp_path)
+    status = tmp_path / "lanes/test-lane-scoped.status"
+    probe = ("import pathlib, sys; held = pathlib.Path(sys.argv[1]).exists(); p = pathlib.Path('preflight.log'); "
+             "p.write_text((p.read_text() if p.exists() else '') + ('held' if held else 'free') + '\\n')")
+    cfg = {"preflight": [sys.executable, "-c", probe, str(status)], "stacks": {
+        "backend": BACKEND,
+        "web": {"paths": ["web/"], "cwd": ".", "tests": ["web/**/*.test.ts"], "unmapped": "skip",
+                "runner": [sys.executable, "-c", "pass", "{paths}"]}}}
+    _write(repo, "docs/process/testing.local.json", json.dumps(cfg))
+    (repo / ".gitignore").write_text("preflight.log\nbackend/ran-*\n")
+    _change(repo, "backend/tests/api/test_api.py", "web/a.test.ts")
+    r = _sel(repo, "run", env=env)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert (repo / "preflight.log").read_text() == "held\n"
+
+
+def test_a_busy_lane_refuses_before_the_preflight_runs(repo, tmp_path):
+    env = _lane_repo(repo, tmp_path)
+    _preflight_cfg(repo, [sys.executable, "-c", "open('preflight.log', 'w')"],
+                   lanes={"scoped": {"wait": 0.3}, "full": {"wait": 1}})
+    _change(repo, "backend/tests/api/test_api.py")
+    holder = subprocess.Popen([sys.executable, str(repo / "scripts/process/lane.py"), "run", "--lane", "scoped",
+                               "--", sys.executable, "-c", "import time; time.sleep(20)"],
+                              cwd=repo, env={**os.environ, **env, "PYTHONDONTWRITEBYTECODE": "1"})
+    try:
+        import time
+        for _ in range(100):
+            if (tmp_path / "lanes/test-lane-scoped.status").exists():
+                break
+            time.sleep(0.05)
+        r = _sel(repo, "run", env=env)
+        assert r.returncode == 75 and not (repo / "preflight.log").exists(), r.stderr
+    finally:
+        holder.kill()
+        holder.wait()

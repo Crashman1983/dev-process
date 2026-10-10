@@ -9,6 +9,7 @@ silent default (a typo in a map would otherwise skip tests unnoticed).
 from __future__ import annotations
 
 import json
+import math
 import sys
 from pathlib import Path
 
@@ -139,8 +140,10 @@ def parse(data) -> dict:
         raise ConfigError("merge_suite must be the train's suite command (a string, as --suite)")
     preflight_timeout = data.get("preflight_timeout", DEFAULT_PREFLIGHT_TIMEOUT)
     if isinstance(preflight_timeout, bool) or not isinstance(preflight_timeout, (int, float)) \
-            or preflight_timeout <= 0:
-        raise ConfigError("preflight_timeout must be seconds > 0")
+            or not math.isfinite(preflight_timeout) or preflight_timeout <= 0:
+        raise ConfigError("preflight_timeout must be finite seconds > 0")
+    if "preflight_timeout" in data and data.get("preflight") is None:
+        raise ConfigError("preflight_timeout without a preflight times nothing")
     stacks_raw = data.get("stacks", {})
     if not isinstance(stacks_raw, dict):
         raise ConfigError("stacks must be an object of stack name → stack")

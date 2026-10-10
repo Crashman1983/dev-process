@@ -2065,3 +2065,21 @@ def test_the_configured_preflight_is_the_trains_default(render, tmp_path, tmp_pa
     assert not (logs / "suite.log").exists()
     r = _train(out, "run", "--force", "--preflight", "true")  # an explicit one wins
     assert r.returncode == 0 and "run" in (logs / "suite.log").read_text(), r.stdout + r.stderr
+
+
+def test_a_hung_preflight_is_killed_at_its_timeout_and_an_empty_one_runs_none(render, tmp_path, tmp_path_factory):
+    """Review #209: the train honours preflight_timeout; `--preflight ""` switches it off for one run."""
+    import time
+    logs = tmp_path_factory.mktemp("suite")
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    (out / "docs/process/testing.local.json").write_text(json.dumps(
+        {"preflight": ["sh", "-c", "sleep 30"], "preflight_timeout": 0.5,
+         "merge_suite": f"echo run >> {logs}/suite.log"}))
+    _repo(out)
+    _branch(out, "alpha", {"src/a.py": "a\n"})
+    started = time.monotonic()
+    r = _train(out, "run", "--force")
+    assert r.returncode == 1 and "is red" in r.stderr and time.monotonic() - started < 25, r.stderr
+    assert not (logs / "suite.log").exists()
+    r = _train(out, "run", "--force", "--preflight", "")
+    assert r.returncode == 0 and "run" in (logs / "suite.log").read_text(), r.stdout + r.stderr

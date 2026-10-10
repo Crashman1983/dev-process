@@ -197,7 +197,9 @@ code. A project supplies data; the template owns the sequence:
   Beside the stacks: `merge_suite` (the train's default `--suite`),
   `preflight` (an argv checking the environment — interpreter, venv, disk,
   logins — once before any test of a push, a `--certify` or the train;
-  `preflight_timeout`, default 600 s), `lanes`, `lane_dir`,
+  `preflight_timeout`, default 600 s, for the train's too; on a push the
+  process gates run first, so a host that breaks a gate is refused as that
+  gate), `lanes`, `lane_dir`,
   `certificate_env`. No file: the gates run, no tests.
   A malformed file refuses the push — a typo in a map must not skip tests.
 - **`scripts/process/test_select.py plan|run|check`** — the one selection

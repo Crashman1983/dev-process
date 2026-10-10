@@ -254,7 +254,7 @@ def _preflight_problem(root: Path, cfg: dict) -> str | None:
     try:
         rc = subprocess.run(argv, cwd=root, timeout=timeout, env=git_environment()).returncode
     except subprocess.TimeoutExpired:
-        return f"the preflight did not finish in {int(timeout)} s"
+        return f"the preflight did not finish in {timeout:g} s"
     except OSError as exc:
         return f"the preflight cannot start ({exc})"
     return f"the preflight exited {rc}" if rc else None

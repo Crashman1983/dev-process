@@ -21,7 +21,8 @@ Without either the train runs the process gates only and says so.
 `--preflight "<cmd>"` checks the environment — tools, logins, disk — on the
 first combined tree, before any gate; without it the train takes the
 `preflight` of `testing.local.json`, the same check a push and `--certify`
-run before their tests. Red there is the host's, not a
+run before their tests, limited by its `preflight_timeout` (600 s without
+one); `--preflight ""` runs none for this train. Red there is the host's, not a
 passenger's: the run stops, nobody is blamed, nothing is retried or bisected,
 and no branch is reported blocked. Downstream, an expired login and a full
 disk each cost a whole release run that read as a red train.
