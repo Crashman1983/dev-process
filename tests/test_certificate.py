@@ -1,6 +1,5 @@
 """certificate.py (#206): evidence paid once, only for a tree it describes."""
 import importlib.util
-import json
 import os
 import subprocess
 import sys
