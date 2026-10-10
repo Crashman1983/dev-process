@@ -214,7 +214,8 @@ malformed file fails the run. `"exec": ["make", "lint"]` in place of
 when a path in flight matches (always, when git cannot tell).
 The project's tests go into `docs/process/testing.local.json` — stacks,
 runner, map, pins, `merge_suite` (`docs/process/testing.md`, "One test
-path"). The pre-push frame selects, queues and certifies from it; without
+path"); its `preflight` checks the environment before any test runs. The
+pre-push frame selects, queues and certifies from it; without
 the file a push runs the gates and no tests. A project with its own pre-push
 hook calls the frame from it: `exec uv run scripts/process/pre_push.py "$@"`.
 Model choices go into `docs/process/model-policy.local.json`, laid over

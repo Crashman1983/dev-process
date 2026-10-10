@@ -24,10 +24,13 @@ red stack; a certificate of the tree (`certificate.py`) skips it all — a
 branch accepts `push` or `merge`, the merge class only `merge`. The merge
 class without a certificate runs the configured `merge_suite`, else each
 stack's `full`, on the `full` lane. `--certify` writes the `push`
-certificate after green on a clean tree.
+certificate after green on a clean tree. A configured `preflight` checks the
+environment once, under the hold, before the first test: red there runs no
+test and is the host's failure, never a red test.
 
 Exit: 0 green or nothing to run, 1 red, 2 cannot judge (no base, a broken
-configuration, a selector that failed to answer), 75 the lane stayed busy.
+configuration, a selector that failed to answer, a red preflight), 75 the
+lane stayed busy.
 """
 from __future__ import annotations
 
@@ -48,6 +51,7 @@ from check_review import GitReadError, _git_bytes, integration_refs, merge_base,
 from process_git import git_environment, path_captures, path_matches  # noqa: E402
 
 EX_TEMPFAIL = 75
+EX_CANNOT_JUDGE = 2
 SELECT_TIMEOUT_S = 600
 
 
@@ -241,6 +245,21 @@ def _run(root: Path, argv: list[str], cwd: str, timeout: float, label: str) -> i
         return 1
 
 
+def _preflight_problem(root: Path, cfg: dict) -> str | None:
+    """Why the configured environment check failed, or None (green or none)."""
+    argv, timeout = cfg["preflight"], cfg["preflight_timeout"]
+    if not argv:
+        return None
+    print(f"test_select: $ {shlex.join(argv)}   # preflight", flush=True)
+    try:
+        rc = subprocess.run(argv, cwd=root, timeout=timeout, env=git_environment()).returncode
+    except subprocess.TimeoutExpired:
+        return f"the preflight did not finish in {int(timeout)} s"
+    except OSError as exc:
+        return f"the preflight cannot start ({exc})"
+    return f"the preflight exited {rc}" if rc else None
+
+
 def _report(steps: list[dict]) -> None:
     for s in steps:
         for note in s["fallbacks"]:
@@ -305,6 +324,11 @@ def run(root: Path, cfg: dict, changed: set[str], klass: str, *, certify: bool) 
         hold = lane.hold(name, label=f"tests {klass}", settings=settings) \
             if testing_config.lane_script(root) == root / "scripts/process/lane.py" else _no_hold()
         with hold:
+            problem = _preflight_problem(root, cfg)
+            if problem:
+                print(f"test_select: environment — {problem}; no test ran, nothing certified "
+                      f"(fix the host, not the tests)", file=sys.stderr)
+                return EX_CANNOT_JUDGE
             for argv, cwd, timeout, label in work:
                 if _run(root, argv, cwd, timeout, label) != 0:
                     print(f"test_select: red — {label}", file=sys.stderr)

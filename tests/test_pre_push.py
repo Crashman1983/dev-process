@@ -467,3 +467,18 @@ def test_a_merge_push_runs_its_suite_even_when_the_selector_fails(project, tmp_p
     r = _push(git, "origin", "HEAD:main", env=ROUTE)
     assert r.returncode == 0, r.stderr
     assert _probe(tmp_path) == ["g", "m"]
+
+
+# --- #209: the environment preflight -------------------------------------------------
+
+@pytest.mark.parametrize("target", ["feature", "HEAD:main"])
+def test_a_red_preflight_refuses_the_push_without_a_test_or_a_stamp(project, tmp_path, target):
+    out, bare, git = project
+    cfg = {"preflight": [sys.executable, "-c", "raise SystemExit(5)"], "merge_suite": MERGE_SUITE,
+           "stacks": {"app": STACK}}
+    _write(out, "docs/process/testing.local.json", json.dumps(cfg))
+    git("commit", "-qam", "preflight")
+    r = _push(git, "origin", target, env=ROUTE)
+    assert r.returncode != 0 and "environment — the preflight exited 5" in r.stderr, r.stderr
+    assert _probe(tmp_path) == ["g"]  # gates ran, no test
+    assert not (out / ".git/process-push-ok").exists() or not (out / ".git/process-push-ok").read_text().strip()

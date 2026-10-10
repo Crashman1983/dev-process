@@ -264,3 +264,68 @@ def test_no_configuration_selects_nothing(repo):
     _git(repo, "commit", "-qm", "no config")
     r = _sel(repo, "run")
     assert r.returncode == 0 and "no test configuration" in r.stdout
+
+
+# --- #209: the environment preflight -------------------------------------------------
+
+def _preflight_cfg(repo, preflight, **more):
+    _write(repo, "docs/process/testing.local.json",
+           json.dumps({"preflight": preflight, **more, "stacks": {"backend": BACKEND}}))
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "preflight")
+
+
+@pytest.mark.parametrize("bad", [[], "make doctor", [""], {"run": ["x"]}])
+def test_a_malformed_preflight_is_a_broken_configuration(repo, bad):
+    _preflight_cfg(repo, bad)
+    r = _sel(repo, "plan")
+    assert r.returncode == 2 and "preflight" in r.stderr, r.stderr
+
+
+def test_a_red_preflight_runs_no_test_and_cannot_judge(repo):
+    _preflight_cfg(repo, [sys.executable, "-c", "raise SystemExit(4)"])
+    _change(repo, "backend/tests/api/test_api.py")
+    r = _sel(repo, "run")
+    assert r.returncode == 2 and "environment — the preflight exited 4; no test ran" in r.stderr, r.stderr
+    assert not (repo / "backend/ran-backend").exists()
+
+
+def test_a_green_preflight_runs_once_before_the_tests(repo):
+    probe = "import pathlib; p = pathlib.Path('preflight.log'); p.write_text(p.read_text() + 'x' if p.exists() else 'x')"
+    _preflight_cfg(repo, [sys.executable, "-c", probe])
+    (repo / ".gitignore").write_text("preflight.log\nbackend/ran-*\n")
+    _change(repo, "backend/tests/api/test_api.py", "backend/src/app/core/db.py")
+    r = _sel(repo, "run")
+    assert r.returncode == 0, r.stderr
+    assert (repo / "preflight.log").read_text() == "x" and (repo / "backend/ran-backend").exists()
+
+
+def test_a_preflight_past_its_time_cannot_judge(repo):
+    _preflight_cfg(repo, [sys.executable, "-c", "import time; time.sleep(5)"], preflight_timeout=0.5)
+    _change(repo, "backend/tests/api/test_api.py")
+    r = _sel(repo, "run")
+    assert r.returncode == 2 and "did not finish in 0 s" in r.stderr, r.stderr
+
+
+def test_no_preflight_without_work_or_behind_a_certificate(repo):
+    marker = "import pathlib; pathlib.Path('preflight.log').write_text('ran')"
+    _preflight_cfg(repo, [sys.executable, "-c", marker])
+    (repo / ".gitignore").write_text("preflight.log\nbackend/ran-*\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "ignore")
+    r = _sel(repo, "run")  # nothing changed on the branch: nothing to test
+    assert r.returncode == 0 and not (repo / "preflight.log").exists(), r.stdout + r.stderr
+    _change(repo, "backend/tests/api/test_api.py")
+    assert _sel(repo, "run", "--certify").returncode == 0
+    (repo / "preflight.log").unlink()
+    r = _sel(repo, "run")  # the certificate covers the tree
+    assert "push certificate of tree" in r.stdout and not (repo / "preflight.log").exists(), r.stdout
+
+
+def test_a_red_preflight_certifies_nothing(repo):
+    _preflight_cfg(repo, [sys.executable, "-c", "raise SystemExit(1)"])
+    _change(repo, "backend/tests/api/test_api.py")
+    assert _sel(repo, "run", "--certify").returncode == 2
+    # same tree: a certificate would be read before the preflight runs again
+    r = _sel(repo, "run")
+    assert r.returncode == 2 and "certificate of tree" not in r.stdout, r.stdout

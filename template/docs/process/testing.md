@@ -195,7 +195,10 @@ code. A project supplies data; the template owns the sequence:
   a full suite), an optional local `select` command for what a map cannot
   express (NUL-separated paths on stdin, targets on stdout), a `timeout`.
   Beside the stacks: `merge_suite` (the train's default `--suite`),
-  `lanes`, `lane_dir`, `certificate_env`. No file: the gates run, no tests.
+  `preflight` (an argv checking the environment — interpreter, venv, disk,
+  logins — once before any test of a push, a `--certify` or the train;
+  `preflight_timeout`, default 600 s), `lanes`, `lane_dir`,
+  `certificate_env`. No file: the gates run, no tests.
   A malformed file refuses the push — a typo in a map must not skip tests.
 - **`scripts/process/test_select.py plan|run|check`** — the one selection
   rule, for the hook and by hand. A changed test file selects itself; a
@@ -210,7 +213,9 @@ code. A project supplies data; the template owns the sequence:
   tests; a stamp. Every installed guard reaches it (`merge_route.py
   --stdin` hands the push over); a project with its own hook calls it
   (`exec uv run scripts/process/pre_push.py "$@"`). Exit 0 may push, 1
-  refused, 2 cannot judge, 75 a lane stayed busy (no test ran).
+  refused, 2 cannot judge (a red preflight among them: the host's failure,
+  no test ran, nothing stamped or certified), 75 a lane stayed busy (no
+  test ran).
 - **`scripts/process/lane.py`** — lanes `scoped` and `full` per host
   (`flock`; without it, unqueued and said once). A push holds one lane once
   for all its stacks — released between stages, another push took the gap
