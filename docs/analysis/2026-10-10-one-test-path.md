@@ -1,7 +1,7 @@
 # Plan: Ein Testpfad — Lane, Baum-Zertifikat, Selektor aus Daten, Hook-Rahmen
 
 Datum: 2026-10-10 · Issue: #206 · Release: v2.64.0 · Tier: 3 (Gate-Code: Pre-Push, Train, Gate-Runner)
-Status: Entwurf, vor dem Plan-Review
+Status: überarbeitet nach Plan-Review Runde 1 (2 BLOCKER, 11 MAJOR, alle eingearbeitet; siehe „Plan-Review“ am Ende)
 
 ## Anlass
 
@@ -251,3 +251,138 @@ Exit-Codes:
 - Kennis Launcher, E2E-Ports und Datenverzeichnisse.
 - Der vitest-related-Selektor bleibt Kennis `select`-Befehl.
 - Keine Gate-Abschaltung, keine künstlichen Zertifikate, keine erhöhten Ressourcenlimits.
+
+## Plan-Review Runde 1 — Änderungen
+
+Die folgenden Entscheidungen ersetzen oder schärfen D1–D13. Wo sie widersprechen, gilt diese Liste.
+
+- **R1 Merge-Zertifikat = Grün-Memo des Zugs (B1).**
+  - `testing.local.json` bekommt `"merge_suite"`, einen String wie `--suite`. Der Zug nimmt ihn als Default für `--suite`.
+  - `certificate.py` ersetzt `train._suite_key` / `green-suites` (train.py:872-901). Das Memo ist der Zertifikatsspeicher der Art `merge`, mit gleichem Schlüssel und gleicher Rotation (200).
+  - Der Hook bildet den Schlüssel aus `merge_suite`. Lief der Zug mit einem anderen `--suite`, passt der Schlüssel nicht. Dann läuft beim Merge-Push je Stack `full`, und zwar unter Lane `full`, nicht `scoped`.
+- **R2 Der Rahmen ruft den ganzen Guard (B2).**
+  - `merge_route.main` wird in `guard(root, lines, env, bypass) -> int` zerlegt. Das ist dieselbe Abfolge wie heute: `check` → `ref_update_verdict` → `standing_blocks` mit `remote_sha` → Ledger.
+  - `main` und `pre_push.py` rufen nur `guard`. Der Rahmen hat keine eigene Phase für Merge-Route oder Standing-Block.
+- **R3 Nur Branch-Updates werden geprüft (M1).**
+  - Branch-Update heißt: Ref-Zeile mit `refs/heads/*` und lokaler SHA ≠ 0.
+  - Für Branch-Updates gelten Commit-Identität, Klasse, Gates, Tests und Stempel.
+  - Tags, `refs/process/*`, andere Refs und Löschungen laufen nur durch `guard`.
+  - Neue Tests decken ab:
+    - Push eines Report-Blobs;
+    - Branch-Löschung aus dem main-Checkout (finish, tidy, train);
+    - Release-Tag von main.
+- **R4 Bypass (M2).**
+  - `PROCESS_SKIP=gates|tests|gates,tests`. `merge_route._skipped_gates` liest es als Eigentümer, und `SKIP=process-gates` wird zu `gates`.
+  - Push auf main: Es gilt die heutige Bypass-Semantik von `guard`. Der Bypass wird geloggt, aus einer dispatchten Session verweigert, und auch der Standing-Block entfällt (Notausgang des Owners, wie heute).
+  - Branch-Push: `pre_push.py` verweigert, wenn `merge_route.session_phases` eine Phase meldet, und schreibt sonst `append_ledger`.
+  - Ein Skip schreibt weder Stempel noch Zertifikat.
+- **R5 Migration fail closed (M3).**
+  - `install_hooks.GUARD_MARKER` bekommt eine Version. Ein Guard alter Version gilt als nicht installiert.
+  - Der pre-commit-Eintrag `merge-route --hook-check` bleibt, `process-gates` entfällt. `hook_check` verweigert dann jeden Push, auch auf Branches, wenn der Rahmen nicht lief.
+  - Den Guard-Stempel schreibt `pre_push.py` am Ende, also nach den Tests. Ein langer Lauf überschreitet die 600 s TTL nicht mehr.
+- **R6 Vorhandene Eigentümer (M4).**
+  - Geänderte Pfade: `check_review.paths_in_flight` bekommt `no_renames=True` (für Pins mit gelöschten Pfaden).
+  - Buchhaltung: `check_review.BOOKKEEPING`.
+  - Integrationsziele: `integration_targets`.
+  - Die Identitätsprüfung des Gate-Runners (gate_runner.py.jinja:374-386, Commit = HEAD) wird `process_git.pushed_commit_problem(root, sha)`. Gate-Runner und Rahmen rufen sie gemeinsam. Es gibt keine eigene Baum-Identität.
+- **R7 Basis (M5).**
+  - Basis ist `check_review.merge_base`. `GitReadError` ergibt Exit 2 mit Grund.
+  - Ohne Integrationsref (shallow, kein origin) gilt je Branch-Update `merge-base HEAD <remote_sha>`. Ist `remote_sha` null und kein Integrationsref da, folgt Exit 2 („integration branch fetchen“).
+- **R8 Sauberer Baum (M6, M11).**
+  - Eine Funktion `certificate.clean_tree_problem(root)` prüft, dass `git status --porcelain -z --untracked-files=normal` erfolgreich und leer ist. Scheitert git, gilt das als Problem.
+  - Diese Funktion bedingt Zertifikate **und** Stempel.
+  - Grenze: Ignorierte Dateien, auch über `.git/info/exclude`, sind nicht sichtbar. Das steht in `testing.md`.
+  - Bedrohungsmodell wie Kenni #2474: Versehen, kein Angreifer. Wer den Common-Dir schreiben kann, kann auch Code pushen.
+  - Die Zertifikatsdatei enthält Schreiber, Zeit und Befehl. Jeder Treffer wird mit diesem Inhalt ausgegeben.
+- **R9 Schlüssel und Rangfolge (M7).**
+  - Der Schlüsselbaum ist der Baum ohne Buchhaltung (`certificate.evidence_tree`). Er ist derselbe für Stempel und Zertifikat und folgt testing.md:157.
+  - Branch-Push: `push` **oder** `merge` gilt. Merge-Push: nur `merge`.
+- **R10 Plattform (M8).** `lane.py` importiert `fcntl` erst bei Bedarf. Ohne `fcntl` (Windows) läuft `hold()` ohne Sperre und sagt das einmal. Der Import ohne Testconfig berührt `lane` nicht.
+- **R11 Lanes (M9).**
+  - Wiedereintritt: `hold()` setzt `PROCESS_LANE_HELD=<dir>:<lane>` für Kindprozesse. Eine Haltung derselben Lane im selben Ordner ist dann ein No-op.
+  - Vorrang beim Ort: `PROCESS_LANE_DIR` > Config `lane_dir` > Default.
+  - Dateinamen (`test-lane-<lane>.lock/.status`) und Status-JSON-Schlüssel (`lane, label, pid, started, cwd, branch`) sind identisch mit Kennis `lane.py`. Alte und neue Fassung teilen auf einem Host dieselbe Sperre.
+- **R12 Unmapped-Default (M10).**
+  - Default ist `"unmapped": "full"`. `"skip"` ist opt-in und laut Doku nur sicher, wenn jeder Merge eine Vollsuite durchläuft (Zug oder `finish --tests`). Kenni setzt `skip`.
+  - `finish.py --tests CMD` schreibt das Merge-Zertifikat, wenn `CMD` gleich `merge_suite` ist und der Baum sauber ist.
+  - Server-seitige PR-Merges laufen an keinem Push vorbei, das steht als Grenze in `testing.md`.
+- **R13 Kleinere Punkte.**
+  - Ein Glob-Matcher `process_git.path_matches(pattern, path)`, segmentweise: `*` und `{name}` ohne `/`, `**` mit. Groß- und Kleinschreibung zählt. Ihn nutzen `test_select` und `gate_runner`.
+  - Mehrere Refs: Die Klasse ist `merge`, sobald ein Branch-Update ein Integrationsziel hat.
+  - Runner-Zeitlimit je Stack (`timeout`, Default 3600 s). Überschritten heißt rot, und die Lane wird freigegeben.
+  - Pfade, die mit `-` beginnen, bekommen `./` vorangestellt.
+  - Der `select`-stdin ist NUL-getrennt. Nicht-UTF-8-Pfade laufen als surrogateescape durch.
+  - Die Beschreibung der Evidenz für den Hash ist `json.dumps(…, sort_keys=True)`.
+  - Für jeden dieser Punkte ist ein Test benannt.
+
+## Tasks (ersetzt die Liste oben)
+
+1. `[design: Wiedereintritt, Plattform]` `lane.py` nach R10/R11.
+   - Tests:
+     - exklusiv über zwei Prozesse;
+     - Budget → 75 bzw. `LaneBusy`;
+     - Status-Format und JSON-Schlüssel wie Kenni;
+     - ein toter Halter gibt frei;
+     - Wiedereintritt ist No-op;
+     - ohne `fcntl` ohne Sperre;
+     - `nice` je Lane;
+     - Vorrang beim Ort.
+2. `[mechanical]` Leser der Lanes: `train.py:437`, `tower.py:416`, `dispatch.py:1453` lesen `scripts/process/lane.py status`, mit Rückfall auf `scripts/lane.py`. Tests: beide Orte, keine Datei.
+3. `[mechanical]` `process_git.path_matches`, `process_git.pushed_commit_problem` (Code aus gate_runner verschoben, Verhalten gleich, gate_runner ruft es), `check_review.paths_in_flight(no_renames=…)`. Tests: Matcher-Tabelle; bestehende gate_runner-Tests bleiben grün.
+4. `[design: Datenformat der Evidenz]` `certificate.py` nach R1/R8/R9.
+   - `train.py` ersetzt `green-suites` durch `certificate`. Bestehende Memo-Tests bleiben grün.
+   - Tests:
+     - Schlüssel hängt vom Befehl ab;
+     - Buchhaltungs-Commit trifft;
+     - je D13/R8-Bedingung kein Schreiben;
+     - `git status` scheitert → kein Schreiben;
+     - Rotation;
+     - Treffer wird ausgegeben.
+5. `[design: Mustersyntax, Rückfallkette]` `test_select.py plan/check` nach D6/R12/R13.
+   - Tests:
+     - Kartenrückfall;
+     - Kenni-Vorfall mit `skip` und mit `full`;
+     - Pins mit gelöschtem Subjekt;
+     - Testdateien wählen sich selbst;
+     - Stack-Zuordnung;
+     - veraltetes Ziel und veralteter Pin;
+     - Basisfälle nach R7;
+     - `select`-Fehler → rot;
+     - NUL-stdin und Nicht-UTF-8;
+     - `-`-Pfad.
+6. `[design: eine Haltung, Abbruch beim ersten Roten]` `test_select.py run/--certify` nach D7/R9.
+   - Tests:
+     - zwei Stacks, eine Haltung (ein zweiter Prozess wartet bis nach dem letzten Stack);
+     - Zertifikat-Rangfolge;
+     - `--certify` nur bei Grün und sauberem Baum;
+     - 75;
+     - Timeout → rot, Lane frei;
+     - Merge-Klasse ohne Zertifikat → `full` unter Lane `full`.
+7. `[design: Zerlegung ohne Verhaltensänderung]` `merge_route.guard`, `_skipped_gates` liest `PROCESS_SKIP`. Bestehende merge_route-Tests bleiben grün.
+8. `[design: Phasengrenzen]` `pre_push.py` nach R2–R5/R7/R8.
+   - Tests:
+     - Blob-Ref, Tag und Löschung → nur `guard`;
+     - Commit ≠ HEAD → verweigert;
+     - SHA-Stempel und Tree-Stempel;
+     - `process-only`;
+     - Skip auf Branch mit Ledger, dispatcht verweigert;
+     - Skip auf main mit heutiger Semantik;
+     - Force-Push auf main durch `guard` verweigert;
+     - Merge-Push mit und ohne Zertifikat;
+     - 75 durchgereicht;
+     - schmutziger Worktree → kein Stempel;
+     - ohne Config → nur `guard` + Gates;
+     - mehrere Refs.
+9. `[mechanical]` `install_hooks.py` mit versioniertem Marker, Guard ruft `pre_push.py`. `.pre-commit-config.yaml` ohne `process-gates`. `hook_check` nach R5. Tests: alter Guard → verweigert; Branch-Push ohne Rahmen → verweigert; langer Lauf > 600 s → kein Ablauf.
+10. `[design: Glob wie R13]` `gate_runner`: `paths` und `exec` in `gates.local.json`. Tests: passend, nicht passend, ohne Basis läuft, `exec`-argv, Schemafehler hart.
+11. `[design: was Umgebungsfehler heißt]` `train.py`:
+    - `--preflight`, Default-`--suite` aus `merge_suite`;
+    - Merge-Zertifikat;
+    - `phases.jsonl`;
+    - `finish.py` schreibt das Zertifikat nach R12.
+
+    Tests: Preflight rot → kein Blame, keine Bisektion, Ergebnis `environment`; Zertifikat nur bei grün; Phasen-Datei.
+12. `[mechanical]` `process_kpis.py train-phases`.
+13. `[mechanical]` Doku (`testing.md`, `train.md`, `failure-catalog.md`, `BOOTSTRAP.md`), CHANGELOG mit Migrationsschritten für Kenni.
+
+**Unabhängige Durchsetzung (Tier 3):** Die Garantien „kein Push auf main ohne Route“ und „kein stehender Block“ bleiben in `merge_route.guard`. Der Rahmen ruft ihn, die Garantien wandern nicht. `hook_check` im pre-commit-Framework prüft unabhängig, dass der Rahmen lief.
