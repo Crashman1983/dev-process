@@ -131,7 +131,8 @@ def _untouched(root: Path, globs: list[str], memo: dict) -> bool:
         from check_review import paths_in_flight  # noqa: PLC0415
 
         try:
-            memo["paths"] = paths_in_flight(root)
+            # both sides of a rename: a file moved out of `backend/` changed `backend/`
+            memo["paths"] = paths_in_flight(root, no_renames=True)
         except Exception:  # noqa: BLE001 — an unreadable diff runs the gate
             memo["paths"] = None
     changed = memo["paths"]

@@ -252,3 +252,192 @@ def test_the_pre_commit_gate_entry_does_not_run_the_gates_a_second_time(project,
     # the stamp is consumed: a second run is no push the frame saw
     r = subprocess.run(runner, cwd=out, capture_output=True, text=True, env=hook_env)
     assert r.returncode == 0 and _probe(tmp_path) == ["g"], r.stdout + r.stderr
+
+
+# --- review and refute of #206: every ref kind, every class, every stamp rule ---------
+
+ROUTE = {"PROCESS_MERGE_ROUTE": "finish"}
+
+
+def test_a_branch_deletion_is_judged_by_the_guard_alone(project, tmp_path):
+    out, bare, git = project
+    assert _push(git, "origin", "feature").returncode == 0
+    _probe(tmp_path)
+    r = _push(git, "origin", ":feature")
+    assert r.returncode == 0 and not _remote(bare, "feature"), r.stderr
+    assert _probe(tmp_path) == []
+
+
+def test_a_force_push_to_main_without_a_route_is_refused(project, tmp_path):
+    out, bare, git = project
+    before = _remote(bare, "main")
+    r = _push(git, "-f", "origin", "HEAD:main")
+    assert r.returncode != 0 and "merge_route" in r.stderr and _remote(bare, "main") == before, r.stderr
+
+
+def test_a_branch_and_main_in_one_push_are_a_merge(project, tmp_path):
+    out, bare, git = project
+    r = _push(git, "origin", "feature", "HEAD:main", env=ROUTE)
+    assert r.returncode == 0, r.stderr
+    assert _probe(tmp_path) == ["g", "m"]  # the merge suite, not the branch selection
+
+
+def test_a_merge_push_hands_the_gates_their_target(project, tmp_path):
+    """Refute B1: without the target the merge-only checks were notes, and the
+    pre-commit entry then skipped its strict run behind the frame's stamp."""
+    out, bare, git = project
+    _write(out, ".process-work/plans/2026-10-10-x.md", "# x\n\ntier: 3\nissue: #1\n")
+    git("add", "-A")
+    git("commit", "-qm", "plan")
+    before = _remote(bare, "main")
+    r = _push(git, "origin", "HEAD:main", env=ROUTE)
+    assert r.returncode != 0 and _remote(bare, "main") == before, r.stderr
+    assert "tier 3" in (r.stdout + r.stderr).lower()
+
+
+def test_a_merge_suite_without_stacks_runs_on_a_merge_push(project, tmp_path):
+    """Refute B2: the frame asked for stacks before it let the merge suite run."""
+    out, bare, git = project
+    _write(out, "docs/process/testing.local.json", json.dumps({"merge_suite": "echo m >> \"$PROBE\"; exit 1"}))
+    git("commit", "-qam", "suite only")
+    before = _remote(bare, "main")
+    r = _push(git, "origin", "HEAD:main", env=ROUTE)
+    assert r.returncode != 0 and _remote(bare, "main") == before, r.stderr
+    assert _probe(tmp_path) == ["g", "m"]
+
+
+def test_skipping_the_gates_on_main_is_the_guards_bypass_and_holds_for_pre_commit(project, tmp_path):
+    """F8: the owner's skip is not undone by pre-commit's gate entry."""
+    out, bare, git = project
+    r = _push(git, "origin", "HEAD:main", env={**ROUTE, "PROCESS_SKIP": "gates"})
+    assert r.returncode == 0, r.stderr
+    assert _probe(tmp_path) == ["m"]
+    assert "PROCESS_SKIP=gates" in (out / ".git/process-owner-overrides.log").read_text()
+    head = git("rev-parse", "HEAD").stdout.strip()
+    hook_env = _env(tmp_path, {"PRE_COMMIT_REMOTE_BRANCH": "refs/heads/main", "PRE_COMMIT_TO_REF": head})
+    r = subprocess.run([sys.executable, "scripts/process/gate_runner.py", "--unless-frame-ran"], cwd=out,
+                       capture_output=True, text=True, env=hook_env)
+    assert r.returncode == 0 and "not again" in r.stderr and _probe(tmp_path) == [], r.stdout + r.stderr
+
+
+def test_a_bookkeeping_only_branch_runs_no_tests(project, tmp_path):
+    out, bare, git = project
+    git("checkout", "-q", "-b", "notes", "main")
+    _write(out, ".process-work/journal/2026-10-10.md", "note\n")
+    git("add", "-A")
+    git("commit", "-qm", "journal")
+    r = _push(git, "origin", "notes")
+    assert r.returncode == 0, r.stderr
+    assert _probe(tmp_path) == ["g"]
+
+
+def _drop_integration_refs(out: Path, git) -> None:
+    git("update-ref", "-d", "refs/remotes/origin/main")
+    git("branch", "-D", "main")
+
+
+def test_without_any_base_a_branch_push_cannot_be_judged(project, tmp_path):
+    out, bare, git = project
+    _drop_integration_refs(out, git)
+    r = _push(git, "origin", "feature")
+    assert r.returncode != 0 and "cannot select tests" in r.stderr and not _remote(bare, "feature"), r.stderr
+
+
+def test_the_remote_side_of_an_update_bounds_the_change_without_a_base(project, tmp_path):
+    """R7: a single-branch clone pushing an existing remote branch."""
+    out, bare, git = project
+    assert _push(git, "origin", "feature").returncode == 0
+    _probe(tmp_path)
+    _drop_integration_refs(out, git)
+    _write(out, "app/code.py", "x = 4\n")
+    git("commit", "-qam", "more")
+    r = _push(git, "origin", "feature")
+    assert r.returncode == 0, r.stderr
+    assert _probe(tmp_path) == ["g", "t app_tests"]
+
+
+def test_a_failing_selector_cannot_judge_the_push(project, tmp_path):
+    """Refute m3: exit 2, not a frame crash."""
+    out, bare, git = project
+    _write(out, "docs/process/testing.local.json", json.dumps(
+        {"stacks": {"app": {**STACK, "select": [sys.executable, "-c", "raise SystemExit(3)"]}}}))
+    git("commit", "-qam", "selector")
+    head = git("rev-parse", "HEAD").stdout.strip()
+    r = subprocess.run([sys.executable, "scripts/process/pre_push.py", "origin", str(bare)], cwd=out,
+                       input=f"refs/heads/feature {head} refs/heads/feature {'0' * 40}\n",
+                       capture_output=True, text=True, env=_env(tmp_path))
+    assert r.returncode == 2 and "selector failed (3)" in r.stderr and "frame failed" not in r.stderr, r.stderr
+
+
+def test_a_variable_that_narrows_the_tests_writes_no_stamp(project, tmp_path):
+    """Refute M1: the stamp follows the certificate's environment rule."""
+    out, bare, git = project
+    _write(out, "docs/process/testing.local.json",
+           json.dumps({"certificate_env": ["NARROW"], "stacks": {"app": STACK}}))
+    git("commit", "-qam", "narrow")
+    r = _push(git, "origin", "feature", env={"NARROW": "1"})
+    assert r.returncode == 0 and "no stamp — NARROW is set" in r.stderr, r.stderr
+    _probe(tmp_path)
+    assert _push(git, "origin", "feature:refs/heads/copy").returncode == 0
+    assert _probe(tmp_path) == ["g", "t app_tests"]
+
+
+def test_a_commit_made_during_the_run_writes_no_stamp(project, tmp_path):
+    """Refute m1: the stamp names what the tests saw, or nothing."""
+    out, bare, git = project
+    commit = ("import os, subprocess; open(os.environ['PROBE'], 'a').write('t\\n'); "
+              "subprocess.run(['git', 'commit', '-q', '--allow-empty', '-m', 'during'], check=True)")
+    _write(out, "docs/process/testing.local.json",
+           json.dumps({"stacks": {"app": {**STACK, "runner": [sys.executable, "-c", commit, "{paths}"]}}}))
+    git("commit", "-qam", "committing runner")
+    head = git("rev-parse", "HEAD").stdout.strip()
+    r = subprocess.run([sys.executable, "scripts/process/pre_push.py", "origin", str(bare)], cwd=out,
+                       input=f"refs/heads/feature {head} refs/heads/feature {'0' * 40}\n",
+                       capture_output=True, text=True, env=_env(tmp_path))
+    assert r.returncode == 0 and "no stamp — HEAD or the tree moved" in r.stderr, r.stderr
+
+
+def test_an_untracked_configuration_change_is_no_stamp_hit(project, tmp_path):
+    """Refute m2: the stamp names the configuration it ran under."""
+    out, bare, git = project
+    git("rm", "-q", "--cached", "docs/process/testing.local.json")
+    (out / ".git/info/exclude").write_text("docs/process/testing.local.json\n")
+    git("commit", "-qm", "local config")
+    assert _push(git, "origin", "feature").returncode == 0
+    _write(out, "docs/process/testing.local.json", json.dumps(
+        {"stacks": {"app": {**STACK, "runner": [sys.executable, "-c", "raise SystemExit(1)", "{paths}"]}}}))
+    r = _push(git, "origin", "feature:refs/heads/copy")
+    assert r.returncode != 0 and not _remote(bare, "copy"), r.stderr
+
+
+def test_pre_commits_route_check_names_the_frames_refusal(project, tmp_path):
+    """S3: a refused push reads as refused, not as "guard not installed"."""
+    out, bare, git = project
+    cfg = {"stacks": {"app": {**STACK, "runner": [sys.executable, "-c", "raise SystemExit(1)", "{paths}"]}}}
+    _write(out, "docs/process/testing.local.json", json.dumps(cfg))
+    git("commit", "-qam", "red")
+    head = git("rev-parse", "HEAD").stdout.strip()
+    assert _push(git, "origin", "feature").returncode != 0
+    hook_env = _env(tmp_path, {"PRE_COMMIT_REMOTE_BRANCH": "refs/heads/feature", "PRE_COMMIT_TO_REF": head})
+    r = subprocess.run([sys.executable, "scripts/process/merge_route.py", "--hook-check"], cwd=out,
+                       capture_output=True, text=True, env=hook_env)
+    assert r.returncode == 1 and "refused this push (red)" in r.stderr, r.stderr
+
+
+def test_the_gates_start_from_an_interpreter_without_their_dependencies(project, tmp_path):
+    """Review F1: the guard runs as the system python3; the gate runner declares
+    PyYAML (PEP 723) — the frame launches it as gate_invoke says, not with its own interpreter."""
+    import shutil
+    if not shutil.which("uv"):
+        pytest.skip("uv resolves the runner's declaration")
+    out, bare, git = project
+    venv = tmp_path / "bare-python"
+    subprocess.run([sys.executable, "-m", "venv", "--without-pip", str(venv)], check=True)
+    python = venv / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    assert subprocess.run([str(python), "-c", "import yaml"], capture_output=True).returncode != 0
+    head = git("rev-parse", "HEAD").stdout.strip()
+    r = subprocess.run([str(python), "scripts/process/pre_push.py", "origin", str(bare)], cwd=out,
+                       input=f"refs/heads/feature {head} refs/heads/feature {'0' * 40}\n",
+                       capture_output=True, text=True, env=_env(tmp_path))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert _probe(tmp_path) == ["g", "t app_tests"]

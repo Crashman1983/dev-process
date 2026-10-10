@@ -170,6 +170,9 @@ def test_run_merges_the_batch_behind_one_suite_and_drops_the_offender(render, tm
     # one for the surviving batch — never one per branch
     assert (out.parent / "suite.log").read_text().count("run") == 3
     assert marker.exists()
+    # the offender search is filed under bisect, not under the suite
+    row = [json.loads(line) for line in (out / ".git/process-train/phases.jsonl").read_text().splitlines()][-1]
+    assert row["result"] == "green" and row["bisect"] > 0
     branches = _git(out, "branch", "--list", "--format=%(refname:short)").stdout.split()
     assert "alpha" not in branches and "beta" not in branches and "bad" in branches
     assert not [b for b in branches if b.startswith("train/")]
@@ -1983,21 +1986,24 @@ def test_a_red_preflight_stops_the_train_and_blames_nobody(render, tmp_path, tmp
     assert _git(out, "rev-parse", "main").stdout == head
     branches = _git(out, "branch", "--list", "--format=%(refname:short)").stdout.split()
     assert {"alpha", "beta"} <= set(branches) and not [b for b in branches if b.startswith("train/")]
-    assert _phases(out)[-1]["rc"] == 1 and "preflight" in _phases(out)[-1]
+    row = _phases(out)[-1]
+    assert row["result"] == "environment" and row["preflight"] >= 0 and row["suite"] == 0 and row["gates"] == 0
 
 
 def test_a_green_preflight_and_suite_certify_the_train_tree_and_log_the_phases(render, tmp_path):
     out = render(tmp_path, {"project_name": "d", "modules": {}})
     _repo(out)
     _branch(out, "alpha", {"src/a.py": "a\n"})
-    r = _train(out, "run", "--force", "--suite", "true", "--preflight", "true")
+    r = _train(out, "run", "--force", "--suite", "true ", "--preflight", "sleep 0.3")
     assert r.returncode == 0, r.stdout + r.stderr
     hit = _find_merge_certificate(out, "true")
     assert hit and hit["writer"] == "train" and hit["head"] == _git(out, "rev-parse", "main").stdout.strip()
     row = _phases(out)[-1]
-    assert row["rc"] == 0 and row["aboard"] == 1 and set(row) >= {"preflight", "gates", "suite", "push"}
+    # timed where it ran, nothing where it did not (no --push)
+    assert row["result"] == "green" and row["aboard"] == 1 and row["preflight"] >= 0.3
+    assert row["gates"] > 0 and row["push"] == 0 and row["bisect"] == 0
     logs = sorted((out / ".git/process-train").glob("*.log"))
-    assert "phases:" in logs[-1].read_text() and "merge certificate written" in logs[-1].read_text()
+    assert "phases (green):" in logs[-1].read_text() and "merge certificate written" in logs[-1].read_text()
 
 
 def test_a_suite_that_writes_into_the_tree_certifies_nothing(render, tmp_path):
@@ -2036,11 +2042,11 @@ def test_train_phases_reads_median_and_maximum_per_phase(render, tmp_path):
     _repo(out)
     d = out / ".git/process-train"
     d.mkdir(parents=True)
-    rows = [{"stamp": f"s{i}", "rc": i % 2, "aboard": 2, "suite": 100.0 * (i + 1), "gates": 10.0,
-             "bisect": 0.0} for i in range(3)]
+    rows = [{"stamp": f"s{i}", "result": ("green", "red", "environment")[i], "aboard": 2,
+             "suite": 100.0 * (i + 1), "gates": 10.0, "bisect": 0.0} for i in range(3)]
     (d / "phases.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows) + "torn line\n")
     r = subprocess.run([sys.executable, str(out / "scripts/process/process_kpis.py"), "train-phases"],
                        cwd=out, capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
     assert "suite     median    200 s, max    300 s (in 3/3 runs)" in r.stdout, r.stdout
-    assert "bisect" not in r.stdout and "1/3 runs ended red" in r.stdout
+    assert "bisect" not in r.stdout and "1/3 runs ended red, 1 stopped by the preflight" in r.stdout

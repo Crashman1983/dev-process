@@ -423,11 +423,17 @@ def _common_dir(root: Path) -> Path:
 GATES_STAMP_DIR = "process-merge-guard-gates"
 
 
-def stamp_guard_run(root: Path, lines: list[RefLine], folder_name: str = STAMP_DIR) -> None:
+# what the frame decided, carried in the stamp's name: `hook_check` passes
+# `ok`/`skipped` and names any other verdict instead of "guard not installed"
+PASSING_VERDICTS = ("", "ok", "skipped")
+
+
+def stamp_guard_run(root: Path, lines: list[RefLine], folder_name: str = STAMP_DIR,
+                    verdict: str = "") -> None:
     folder = _common_dir(root) / folder_name
     try:
         folder.mkdir(exist_ok=True)
-        (folder / f"{os.getpid()}-{time.time_ns()}").write_text(
+        (folder / f"{os.getpid()}-{time.time_ns()}{'.' + verdict if verdict else ''}").write_text(
             "".join(" ".join(line) + "\n" for line in lines), encoding="utf-8")
     except OSError:
         pass  # the hook check then refuses a push to main: loud, not silent
@@ -440,16 +446,21 @@ def frame_ran_gates(root: Path, env: dict[str, str]) -> bool:
 
 
 def guard_ran(root: Path, env: dict[str, str], folder_name: str = STAMP_DIR) -> bool:
-    """True when the stdin guard stamped the ref line pre-commit names
-    (`PRE_COMMIT_REMOTE_BRANCH`, `PRE_COMMIT_TO_REF`) in the last minutes; the
-    stamp is consumed. Stale stamps are cleared on the way."""
+    return guard_verdict(root, env, folder_name) is not None
+
+
+def guard_verdict(root: Path, env: dict[str, str], folder_name: str = STAMP_DIR) -> str | None:
+    """The verdict the stdin guard stamped for the ref line pre-commit names
+    (`PRE_COMMIT_REMOTE_BRANCH`, `PRE_COMMIT_TO_REF`) in the last minutes — ""
+    from a guard that records none — or None when it did not run; the stamp is
+    consumed. Stale stamps are cleared on the way."""
     remote_ref = env.get(PRE_COMMIT_TARGET_ENV, "").strip()
     to_ref = env.get("PRE_COMMIT_TO_REF", "").strip()
     folder = _common_dir(root) / folder_name
     try:
         stamps = sorted(folder.iterdir())
     except OSError:
-        return False
+        return None
     now = time.time()
     for stamp in stamps:
         try:
@@ -462,8 +473,8 @@ def guard_ran(root: Path, env: dict[str, str], folder_name: str = STAMP_DIR) -> 
         if any(line.remote_ref == remote_ref and (not to_ref or line.local_sha == to_ref)
                for line in lines):
             stamp.unlink(missing_ok=True)
-            return True
-    return False
+            return stamp.suffix[1:] if stamp.suffix else ""
+    return None
 
 
 INSTALL_HINT = "python3 scripts/process/install_hooks.py"
@@ -471,8 +482,13 @@ INSTALL_HINT = "python3 scripts/process/install_hooks.py"
 
 def hook_check(root: Path, env: dict[str, str]) -> int:
     """pre-commit's `merge-route` hook: the stdin guard must have run for this push."""
-    if guard_ran(root, env):
+    verdict = guard_verdict(root, env)
+    if verdict in PASSING_VERDICTS:
         return 0
+    if verdict is not None:
+        print(f"merge_route: the pre-push frame refused this push ({verdict}) — its reasons "
+              f"are printed above it", file=sys.stderr)
+        return 1
     targets = push_targets(env)
     if pushes_to_integration(targets, root):
         print(f"merge_route: the merge guard did not see this push's ref lines (it runs as "

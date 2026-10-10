@@ -62,7 +62,6 @@ from __future__ import annotations
 
 import argparse
 import datetime as _dt
-import hashlib
 import json
 import os
 import posixpath
@@ -886,7 +885,8 @@ GREEN_SUITES_KEPT = 200
 def _suite_key(wt: Path, suite: str) -> str:
     """`<tree> <suite digest>`, or "" when the tree cannot be read (no memo)."""
     tree = _out(wt, "rev-parse", "HEAD^{tree}")
-    return f"{tree} {hashlib.sha256(suite.encode()).hexdigest()[:16]}" if tree else ""
+    # the digest is certificate's: memo and merge certificate name a suite alike (S6)
+    return f"{tree} {certificate.evidence_hash(suite)}" if tree else ""
 
 
 def _suite_seen_green(root: Path, key: str) -> bool:
@@ -1092,13 +1092,15 @@ class EnvironmentRed(Exception):
     """`--preflight` failed: the host cannot run the suite — nobody aboard is to blame."""
 
 
-def _record_phases(root: Path, stamp: str, phases: dict[str, float], rc: int, aboard: list[str], log) -> None:
-    """One log line and one JSON line per run: where the train's time went."""
+def _record_phases(root: Path, stamp: str, phases: dict[str, float], result: str, aboard: list[str],
+                   log) -> None:
+    """One log line and one JSON line per run: where the train's time went.
+    `result`: green, red or environment (a red preflight — no red train)."""
     spent = {k: round(phases.get(k, 0.0), 1) for k in PHASES}
-    log("phases: " + ", ".join(f"{k} {v:.0f} s" for k, v in spent.items() if v))
+    log(f"phases ({result}): " + ", ".join(f"{k} {v:.0f} s" for k, v in spent.items() if v))
     try:
         with (_train_dir(root) / PHASES_FILE).open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps({"stamp": stamp, "rc": rc, "aboard": len(aboard), **spent}) + "\n")
+            fh.write(json.dumps({"stamp": stamp, "result": result, "aboard": len(aboard), **spent}) + "\n")
     except OSError:
         pass  # a lost timing line costs a KPI, never the merge
 
@@ -1111,7 +1113,9 @@ def _certify_merge(wt: Path, suite: str, before: str | None, env_names: list[str
     if _changed_by_run(wt):
         log("suite green, but the run changed the worktree — no merge certificate")
         return
-    ok, why = certificate.write(wt, "merge", suite, before_tree=before, writer="train", env_names=env_names)
+    # the hook reads `merge_suite` stripped: the same string, or no hit
+    ok, why = certificate.write(wt, "merge", suite.strip(), before_tree=before, writer="train",
+                                env_names=env_names)
     log(f"merge certificate {'written' if ok else 'not written — ' + why}")
 
 
@@ -1169,12 +1173,15 @@ def run(root: Path, *, suite: str | None, deploy: str | None, push: bool, min_ca
         return 0
     phases: dict[str, float] = {}
     rc = 1
+    result = "red"
     try:
         rc = _run_batch(root, local, p, aboard, stamp, logfile, suite=suite, deploy=deploy, push=push,
                         keep_branches=keep_branches, retry=retry, preflight=preflight, phases=phases,
                         certificate_env=certificate_env or [])
+        result = "green" if rc == 0 else "red"
         return rc
     except EnvironmentRed as env_red:
+        result = "environment"
         print(f"train: the preflight `{env_red}` is red — the environment cannot run the suite; "
               f"nobody is blamed, nothing merged, no retry (see {logfile})", file=sys.stderr)
         _cleanup(root, stamp)
@@ -1190,7 +1197,7 @@ def run(root: Path, *, suite: str | None, deploy: str | None, push: bool, min_ca
         def _log(line: str) -> None:
             with logfile.open("a", encoding="utf-8") as fh:
                 fh.write(f"{_dt.datetime.now().isoformat(timespec='seconds')} {line}\n")
-        _record_phases(root, stamp, phases, rc, aboard, _log)
+        _record_phases(root, stamp, phases, result, aboard, _log)
 
 
 def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, logfile: Path, *,
