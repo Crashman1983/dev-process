@@ -62,6 +62,7 @@ process already cleared. Sibling imports; stdlib only."""
 from __future__ import annotations
 
 import argparse
+import contextlib
 import datetime as _dt
 import json
 import os
@@ -69,8 +70,10 @@ import posixpath
 import re
 import shlex
 import shutil
+import signal
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Callable, NamedTuple
@@ -835,17 +838,33 @@ def _echo(text: str, end: str = "\n") -> None:
         print(text.encode(enc, "replace").decode(enc), end=end, flush=True)
 
 
-def _sh(cwd: Path, cmd: str, log) -> str:
+def _sh(cwd: Path, cmd: str, log, timeout: float | None = None) -> str:
     """Run cmd, streaming its output; "green", "red" or "undefined" (the
-    command or make target does not exist on this tree) — `decide`'s verdict."""
+    command or make target does not exist on this tree) — `decide`'s verdict.
+    Past `timeout` seconds its whole process group is killed: red."""
     _echo(f"train: $ {cmd}")
     # the lines that can carry a fact, over the whole run: those that make a
     # run red whatever follows without a cap, the others the last 400
     red: dict[str, None] = {}
     kept: list[str] = []
     proc = subprocess.Popen(["sh", "-c", cmd], cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                            text=True, errors="replace", env=git_environment())
+                            text=True, errors="replace", env=git_environment(),
+                            start_new_session=timeout is not None)
     assert proc.stdout is not None
+    expired = threading.Event()
+
+    def _expire() -> None:
+        # the group: a child of `sh` holding stdout open would outlive `sh` alone
+        expired.set()
+        with contextlib.suppress(OSError):
+            if hasattr(os, "killpg"):
+                os.killpg(proc.pid, signal.SIGKILL)
+            else:
+                proc.kill()
+
+    timer = threading.Timer(timeout, _expire) if timeout is not None else None
+    if timer:
+        timer.start()
     for line in proc.stdout:
         _echo(line, end="")
         line = line.rstrip("\n")
@@ -854,6 +873,12 @@ def _sh(cwd: Path, cmd: str, log) -> str:
         elif _FACT_LINE.search(line):
             kept = (kept + [line])[-400:]
     rc = proc.wait()
+    if timer:
+        timer.cancel()
+    if expired.is_set():
+        log(f"$ {cmd} → killed after {timeout:g} s (red)")
+        _echo(f"train: `{cmd}` did not finish in {timeout:g} s — killed")
+        return "red"
     state, why = decide(read_facts(cmd, rc, [*red, *kept], os.environ.get("MAKELEVEL", "0"),
                                    lambda p: (cwd / p).exists()))
     log(f"$ {cmd} → exit {rc} ({state}{'' if rc == 0 else ' — ' + why + ', ' + _load()})")
@@ -1138,7 +1163,7 @@ def retry_plan(red_in: str, retry: str | None) -> tuple[str, str]:
 def run(root: Path, *, suite: str | None, deploy: str | None, push: bool, min_candidates: int,
         max_wait_hours: float, force: bool, keep_branches: bool, dry_run: bool,
         retry: str | None = None, preflight: str | None = None,
-        certificate_env: list[str] | None = None) -> int:
+        certificate_env: list[str] | None = None, preflight_timeout: float | None = None) -> int:
     local = local_integration(root)
     if local is None:
         print("train: no local main/master branch", file=sys.stderr)
@@ -1178,7 +1203,7 @@ def run(root: Path, *, suite: str | None, deploy: str | None, push: bool, min_ca
     try:
         rc = _run_batch(root, local, p, aboard, stamp, logfile, suite=suite, deploy=deploy, push=push,
                         keep_branches=keep_branches, retry=retry, preflight=preflight, phases=phases,
-                        certificate_env=certificate_env or [])
+                        certificate_env=certificate_env or [], preflight_timeout=preflight_timeout)
         result = "green" if rc == 0 else "red"
         return rc
     except EnvironmentRed as env_red:
@@ -1204,7 +1229,8 @@ def run(root: Path, *, suite: str | None, deploy: str | None, push: bool, min_ca
 def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, logfile: Path, *,
                suite: str | None, deploy: str | None, push: bool, keep_branches: bool,
                retry: str | None = None, preflight: str | None = None,
-               phases: dict[str, float] | None = None, certificate_env: list[str] | None = None) -> int:
+               phases: dict[str, float] | None = None, certificate_env: list[str] | None = None,
+               preflight_timeout: float | None = None) -> int:
     def log(line: str) -> None:
         with logfile.open("a", encoding="utf-8") as fh:
             fh.write(f"{_dt.datetime.now().isoformat(timespec='seconds')} {line}\n")
@@ -1254,7 +1280,7 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
         provisionally: before the first passenger is blamed it runs for real."""
         nonlocal base_from_memo, red_in, preflight_done
         if not preflight_done:
-            if timed("preflight", _sh, wt, preflight, log) != "green":
+            if timed("preflight", _sh, wt, preflight, log, preflight_timeout) != "green":
                 raise EnvironmentRed(preflight)
             preflight_done = True
         red_in = "gates"
@@ -1573,12 +1599,15 @@ def main(argv: list[str]) -> int:
         print(f"train: {exc} — fix it first; the suite and the certificates read it", file=sys.stderr)
         return 2
     suite = a.suite or (cfg["merge_suite"] if cfg else None)
-    # the configured environment check is the train's too; an explicit one wins
-    preflight = a.preflight or (shlex.join(cfg["preflight"]) if cfg and cfg["preflight"] else None)
+    # the configured environment check is the train's too; an explicit one wins,
+    # `--preflight ""` included (none for this run)
+    preflight = a.preflight if a.preflight is not None else (
+        shlex.join(cfg["preflight"]) if cfg and cfg["preflight"] else None)
     return run(root, suite=suite, deploy=a.deploy, push=a.push, min_candidates=a.min_candidates,
                max_wait_hours=a.max_wait_hours, force=a.force, keep_branches=a.keep_branches,
                dry_run=a.dry_run, retry=a.retry, preflight=preflight,
-               certificate_env=cfg["certificate_env"] if cfg else [])
+               certificate_env=cfg["certificate_env"] if cfg else [],
+               preflight_timeout=cfg["preflight_timeout"] if cfg else testing_config.DEFAULT_PREFLIGHT_TIMEOUT)
 
 
 if __name__ == "__main__":
