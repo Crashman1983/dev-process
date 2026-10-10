@@ -1111,6 +1111,33 @@ def test_an_issue_work_id_supersedes_in_any_spelling(tmp_path, monkeypatch):
     assert any("superseded" in s for s in soft), soft
 
 
+@pytest.mark.parametrize("third, superseded", [
+    # #199 follow-up (downstream #2396): attest counts round = 1 + blocks, so the
+    # full round after a pass carries the pass's number
+    ("same-round-pass", True),
+    ("same-round-block", False),
+    ("same-round-not-descending", False),
+    ("higher-round-pass", True),
+])
+def test_a_valid_round_of_the_same_number_supersedes_only_as_a_pass(tmp_path, monkeypatch, third, superseded):
+    cr, root = _cr(), tmp_path / "p"
+    fork, first, head, merge, main_tip = _merged_main_repo(root)
+    if third == "same-round-not-descending":
+        _git(root, "checkout", "-q", "-b", "elsewhere", main_tip)
+        other = _commit_file(root, "o.py", "o = 1\n")
+        _git(root, "checkout", "-q", "feature")
+        line = _review(work="forked", artifact=(main_tip, other), rnd="2")
+    else:
+        rnd = "3" if third == "higher-round-pass" else "2"
+        verdict = "block" if third == "same-round-block" else "pass"
+        line = _review(work="forked", artifact=(main_tip, merge), rnd=rnd, verdict=verdict)
+    _journal(root, _review(work="forked", artifact=(first, head), rnd="2") + " mode=delta", line)
+    hard, soft = _merge_check(cr, root, monkeypatch)
+    malformed = [h for h in hard if "malformed REVIEW line" in h and f"base {first[:12]}" in h]
+    assert bool(malformed) is not superseded, (hard, soft)
+    assert any("superseded" in s for s in soft) is superseded, soft
+
+
 def test_an_off_fork_record_of_a_stale_branch_is_one_note_and_still_clears(tmp_path, monkeypatch):
     """Downstream: records of stale branches whose plans are archived on main —
     their heads are no part of this push; judging them would red every push."""
