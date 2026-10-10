@@ -467,3 +467,42 @@ def test_apply_runs_the_tests_with_their_assignments(render, tmp_path):
     check = f"FOO=199 {sys.executable} -c 'import os, sys; sys.exit(os.environ.get(\"FOO\") != \"199\")'"
     r = _run_args(out, "--apply", "--tests", check)
     assert r.returncode == 0 and "full suite red" not in r.stdout, r.stdout
+
+
+def _merge_certificate(out: Path, evidence: str):
+    import json
+    code = ("import sys, json; sys.path.insert(0, 'scripts/process'); import certificate; "
+            "from pathlib import Path; "
+            f"print(json.dumps(certificate.find(Path('.'), ('merge',), {{'merge': {evidence!r}}})))")
+    r = subprocess.run([sys.executable, "-c", code], cwd=out, capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    return json.loads(r.stdout)
+
+
+@pytest.mark.parametrize("configured", [True, False])
+def test_apply_with_the_merge_suite_certifies_the_merged_tree(render, tmp_path, configured):
+    """#206: the push to main then runs no suite again; any other command certifies nothing."""
+    import json
+    out, _bare = _repo_with_origin(render, tmp_path)
+    (out / "docs/process/testing.local.json").write_text(
+        json.dumps({"merge_suite": "true" if configured else "make suite"}))
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "test config")
+    r = _run_args(out, "--apply", "--tests", "true")
+    assert r.returncode == 0, r.stdout + r.stderr
+    hit = _merge_certificate(out, "true")
+    if configured:
+        assert "merge certificate written" in r.stdout and hit and hit["writer"] == "finish --tests"
+    else:
+        assert hit is None and "merge certificate" not in r.stdout
+
+
+def test_tests_passed_is_a_claim_and_certifies_nothing(render, tmp_path):
+    import json
+    out, _bare = _repo_with_origin(render, tmp_path)
+    (out / "docs/process/testing.local.json").write_text(json.dumps({"merge_suite": "true"}))
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "test config")
+    r = _run_args(out, "--apply", "--tests-passed")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert _merge_certificate(out, "true") is None

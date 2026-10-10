@@ -29,6 +29,7 @@ difference. See "honest ceiling" in the module doc.
   process_kpis.py models                        # rounds-to-pass and blocks by phase model × tier
   process_kpis.py rounds                        # per work item: rounds to pass, blockers by origin
   process_kpis.py share         [--weeks N]     # process vs product, week by week
+  process_kpis.py train-phases  [--runs N]      # where the merge train's time goes, phase by phase
   process_kpis.py report                        # all families
 
 Lean pass: the error rate at the gate is read from the review records
@@ -571,6 +572,50 @@ def share(weeks: int = 4) -> int:
     return 0
 
 
+# --- train-phases: where the merge train's time goes ---------------------------
+_TRAIN_PHASES = ("preflight", "gates", "suite", "retry", "bisect", "push", "deploy")
+
+
+def train_phases(runs: int = 20) -> int:
+    """Median and maximum seconds per phase over the last `runs` trains
+    (`process-train/phases.jsonl`, written by train.py): a slow merge is
+    a wait, a suite, a bisection or a deploy — each has its own lever."""
+    import json  # noqa: PLC0415
+
+    print(f"[train-phases] the last {runs} train runs")
+    r = subprocess.run(["git", "-C", str(ROOT), "rev-parse", "--git-common-dir"],
+                       capture_output=True, text=True)
+    common = Path(r.stdout.strip()) if r.returncode == 0 else None
+    if common is not None and not common.is_absolute():
+        common = ROOT / common
+    rows = []
+    try:
+        for line in (common / "process-train" / "phases.jsonl").read_text(encoding="utf-8").splitlines():
+            try:
+                row = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(row, dict):
+                rows.append(row)
+    except (OSError, TypeError):
+        pass
+    rows = rows[-runs:]
+    if not rows:
+        print("  no train run recorded yet — train-phases skipped")
+        return 0
+    for phase in _TRAIN_PHASES:
+        values = [float(row.get(phase) or 0) for row in rows]
+        ran = [v for v in values if v]
+        if ran:
+            print(f"  {phase:<9} median {statistics.median(values):>6.0f} s, max {max(values):>6.0f} s "
+                  f"(in {len(ran)}/{len(rows)} runs)")
+    red = sum(1 for row in rows if row.get("rc"))
+    print(f"  {red}/{len(rows)} runs ended red")
+    n = len(rows)
+    print(f"  {confidence(n)} · {action(_level(n, False, False, _N_THRESHOLD), 'shorten the phase with the largest median first: suite → test selection and certificates, bisect → smaller batches, retry → flaky tests (failure-catalog.md)', thin='let more trains run before acting on a phase')}")
+    return 0
+
+
 def report() -> int:
     print("=== process KPI cockpit (read-only) ===\n")
     cost(None)
@@ -602,6 +647,8 @@ def main() -> int:
     sub.add_parser("rounds")
     sh = sub.add_parser("share")
     sh.add_argument("--weeks", type=int, default=4)
+    tp = sub.add_parser("train-phases")
+    tp.add_argument("--runs", type=int, default=20)
     sub.add_parser("report")
     args = p.parse_args()
 
@@ -611,6 +658,8 @@ def main() -> int:
         return rounds()
     if args.cmd == "share":
         return share(args.weeks)
+    if args.cmd == "train-phases":
+        return train_phases(args.runs)
 
     if args.cmd == "cost" and args.issue is not None:
         import dispatch  # one reader of dispatch records, policy and transcripts

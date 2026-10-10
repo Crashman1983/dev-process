@@ -14,7 +14,11 @@ Read-only by default: it verifies and then PRINTS the exact remaining
 commands. With `--apply` it executes the deterministic part itself
 (archive commit, rebase; then merge, push and branch delete only behind the
 batch's full suite, `--tests CMD` or `--tests-passed`) — every step prints
-its command and the first failure stops in a state git explains.
+its command and the first failure stops in a state git explains. A green
+`--tests` that is the project's `merge_suite` (`testing.local.json`) on a
+clean tree writes the `merge` certificate, so the push to main runs no suite
+again; `--tests-passed` is a claim and certifies nothing — with a test
+configuration the push runs the suite itself.
 
 Checks, in order:
   1. on a feature branch (finishing main is meaningless)
@@ -53,6 +57,8 @@ sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling import
 from process_git import git_environment  # noqa: E402
+import certificate  # noqa: E402
+import testing_config  # noqa: E402
 from check_review import (  # noqa: E402  (one owner for grammar + arithmetic)
     JOURNAL_DIR,
     PLANS_ACTIVE,
@@ -339,6 +345,23 @@ def tests_argv(cmd: str) -> tuple[list[str], dict[str, str]] | str:
     return argv, assigned
 
 
+def _certifiable_tree(root: Path, tests: str) -> tuple[str, str, list[str]] | None:
+    """(evidence tree, merge_suite, certificate_env) when a green `--tests`
+    run may certify this tree for the merge push: the command is the
+    project's `merge_suite` and the worktree is clean. `--tests-passed` is a
+    claim, not evidence — it never certifies; the push then runs the suite."""
+    try:
+        cfg = testing_config.load(root)
+    except testing_config.ConfigError:
+        return None  # the push names the broken file
+    if not cfg or cfg["merge_suite"] != tests.strip():
+        return None
+    if certificate.clean_tree_problem(root) or certificate.env_problem(cfg["certificate_env"]):
+        return None
+    tree = certificate.evidence_tree(root)
+    return (tree, cfg["merge_suite"], cfg["certificate_env"]) if tree else None
+
+
 def apply(root: Path, *, tests: str | None, tests_passed: bool) -> int:
     """--apply: execute the deterministic part of the tail instead of
     printing it for an agent to retype. Archive commit and rebase always;
@@ -407,6 +430,7 @@ def apply(root: Path, *, tests: str | None, tests_passed: bool) -> int:
     if tests:
         argv, assigned = run_tests
         shown = shlex.join([*(f"{k}={v}" for k, v in assigned.items()), *argv])
+        before = _certifiable_tree(root, tests)
         print(f"finish: $ {shown}   # the FULL suite, once per batch")
         try:
             green = subprocess.run(argv, cwd=str(root),
@@ -417,6 +441,10 @@ def apply(root: Path, *, tests: str | None, tests_passed: bool) -> int:
         if not green:
             print("finish: full suite red — not merging")
             return 1
+        if before:
+            ok, why = certificate.write(root, "merge", before[1], before_tree=before[0],
+                                        writer="finish --tests", env_names=before[2])
+            print(f"finish: merge certificate {'written — the push runs no suite again' if ok else 'not written — ' + why}")
     elif not tests_passed:
         print("finish: applied archive + rebase; stopped before the merge — "
               "run the FULL test suite now, then re-run with "
