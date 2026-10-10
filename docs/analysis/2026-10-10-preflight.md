@@ -37,7 +37,7 @@ sieht aus wie einer im Code. Owner-Entscheidung 2026-10-10: als v2.65 bauen.
    schreibt und den Merge-Push genauso behandelt.
 4. `train`: Default aus der Konfiguration. Ein Test zeigt, dass der Zug ohne `--preflight`
    bei rotem konfiguriertem Preflight mit `environment` abbricht.
-5. Doku (`testing.md`, `train.md`, BOOTSTRAP), CHANGELOG v2.65.0, Refute und Review, Release.
+5. Doku (`testing.md`, `train.md`, BOOTSTRAP), CHANGELOG-Eintrag, Refute und Review, Release.
 
 ## Unabhängige Durchsetzung
 
