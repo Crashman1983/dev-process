@@ -57,6 +57,20 @@ reading the input its own way (mandatory rule 4).
   by hand and check it can widen nothing it should not. *Owner:*
   `scripts/process/check_review.py::push_targets` (a union: a variable can add
   a target, never hide one).
+- **Leaked resources:** a test that leaves a process, a port, a file handle
+  or a temp directory behind passes alone and fails the run after it —
+  under parallel workers, minutes later, in a test nobody touched
+  (downstream: "too many open files" in the commit signer of a later
+  test). *Test:* run the suite twice in one process with the leak check of
+  the runner (`-W error::ResourceWarning`, `--detect-open-handles`), and
+  count open descriptors before and after a fixture. *Owner:* the fixture
+  that opens it closes it, in its teardown.
+- **Fixed waits:** a `sleep` in a teardown or a poll with a fixed count is
+  a guess about the host's speed — green on a quiet laptop, red under
+  load 10 (`train.md` logs the load for this reason). *Test:* the same
+  test with the host loaded (`stress`, parallel workers). *Owner:* the
+  test waits for the condition (a status file, a socket, a process exit)
+  with a deadline, never for a time.
 - **Guessed external-tool behaviour:** an exit code, an output format or a
   default of git, a package manager or an API assumed, not observed. *Test:*
   a probe against the real tool, named in the design's assumption
