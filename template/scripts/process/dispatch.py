@@ -2261,11 +2261,20 @@ def plan_review_due(root: Path, branch: str) -> str | None:
     (#203: a session started for a changed plan took it for a code review and
     stopped with "no code"). A plan review is due when the branch changes
     nothing beyond plans and bookkeeping since its fork and an own Tier 2+
-    plan has no clearing `-plan` pass for its current text. What git cannot
-    tell is a code review, as before — the session says when there is no
-    code; `--plan-review` forces the plan review."""
-    tip = _out(root, "rev-parse", "--verify", "-q", f"{branch}^{{commit}}") or \
-        _out(root, "rev-parse", "--verify", "-q", f"origin/{branch}^{{commit}}")
+    plan has no clearing `-plan` pass for its current text. Plans are
+    `.process-work/` and Spec Kit's `specs/` here (`new_code_on_origin` counts
+    `specs/` as code: the tower queues the review, this tells its kind). The
+    tip judged is the one the session reviews: origin's, as `sync_worktree`
+    brings the worktree there (refute: a stale local ref read a plan-only
+    branch while origin carried code); a branch origin does not have is
+    judged by its local ref. What git cannot tell is a code review, as
+    before — the session says when there is no code; `--plan-review` forces
+    the plan review."""
+    tip = _remote_head(root, branch)
+    if tip and _git(root, "cat-file", "-e", f"{tip}^{{commit}}").returncode != 0 \
+            and _git(root, "fetch", "-q", "origin", f"refs/heads/{branch}").returncode != 0:
+        return None
+    tip = tip or _out(root, "rev-parse", "--verify", "-q", f"{branch}^{{commit}}")
     base = _integration_base(root, tip) if tip else ""
     if not tip or not base:
         return None

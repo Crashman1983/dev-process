@@ -179,7 +179,7 @@ def test_start_list_stop_lifecycle(render, tmp_path):
 def test_remote_phase_hands_over_without_a_worktree(render, tmp_path):
     out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
     _repo(out)
-    bare = tmp_path / "origin.git"
+    bare = tmp_path.parent / f"{tmp_path.name}-origin.git"  # outside the rendered tree
     _git(out, "clone", "-q", "--bare", str(out), str(bare))
     _git(out, "remote", "add", "origin", str(bare))
     marker = tmp_path / "handover"
@@ -224,7 +224,7 @@ def test_remote_phase_hands_over_without_a_worktree(render, tmp_path):
 def test_remote_phase_skips_local_cap_and_lanes(render, tmp_path):
     out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
     _repo(out)
-    bare = tmp_path / "origin.git"
+    bare = tmp_path.parent / f"{tmp_path.name}-origin.git"  # outside the rendered tree
     _git(out, "clone", "-q", "--bare", str(out), str(bare))
     _git(out, "remote", "add", "origin", str(bare))
     marker = tmp_path / "handover"
@@ -504,7 +504,7 @@ def test_remote_phase_with_tmux_runner_hands_over_from_a_terminal(render, tmp_pa
     # gives it one; a failed hand-over shows as FAILED, never as a running review
     out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
     _repo(out)
-    bare = tmp_path / "origin.git"
+    bare = tmp_path.parent / f"{tmp_path.name}-origin.git"  # outside the rendered tree
     _git(out, "clone", "-q", "--bare", str(out), str(bare))
     _git(out, "remote", "add", "origin", str(bare))
     _git(out, "branch", "b6")
@@ -548,7 +548,7 @@ def test_remote_hand_over_names_the_session_it_started(render, tmp_path):
     # text — by the policy's handover_id regex, else the first URL
     out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
     _repo(out)
-    bare = tmp_path / "origin.git"
+    bare = tmp_path.parent / f"{tmp_path.name}-origin.git"  # outside the rendered tree
     _git(out, "clone", "-q", "--bare", str(out), str(bare))
     _git(out, "remote", "add", "origin", str(bare))
     for b in ("b7", "b8"):
@@ -1719,7 +1719,7 @@ def test_a_session_starts_on_what_origin_holds(render, tmp_path):
     out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
     _repo(out)
     _fake_command(out, "sleep 30\n")
-    bare = tmp_path / "origin.git"
+    bare = tmp_path.parent / f"{tmp_path.name}-origin.git"  # outside the rendered tree
     _git(out, "clone", "-q", "--bare", str(out), str(bare))
     _git(out, "remote", "add", "origin", str(bare))
     assert _dispatch(out, "start", "--issue", "9", "--phase", "plan", "--branch", "b9").returncode == 0
@@ -1937,3 +1937,74 @@ def test_a_review_start_on_a_changed_plan_starts_a_plan_review(render, tmp_path)
     r = _dispatch(out, "start", "--issue", "7", "--phase", "review", "--branch", "b", "--dry-run")
     assert r.returncode == 0, r.stderr
     assert "dispatch: plan review —" in r.stdout and "Tier 3 plan has no pass" in r.stdout, r.stdout
+
+
+def _with_origin(out: Path, tmp_path: Path) -> Path:
+    bare = tmp_path.parent / f"{tmp_path.name}-origin.git"  # outside the rendered tree
+    subprocess.run(["git", "init", "-q", "--bare", str(bare)], check=True)
+    _git(out, "remote", "add", "origin", str(bare))
+    _git(out, "push", "-q", "origin", "main", "b")
+    return bare
+
+
+def test_the_review_mode_reads_origins_tip_not_a_stale_local_one(render, tmp_path):
+    """Refute #203: local `b` held only the plan while origin carried code — the
+    session reviews origin's state, so that decides."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _planned_branch(out, 3, plan_pass=False)
+    _with_origin(out, tmp_path)
+    plan_only = _git(out, "rev-parse", "HEAD").stdout.strip()
+    (out / "src").mkdir(exist_ok=True)
+    (out / "src/fetch.py").write_text("x = 1\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "code")
+    _git(out, "push", "-q", "origin", "b")
+    _git(out, "checkout", "-q", "main")
+    _git(out, "branch", "-f", "b", plan_only)  # the local ref is stale
+    _git(out, "update-ref", "-d", "refs/remotes/origin/b")  # and nothing fetched
+    mod = _load_dispatch(out)
+    assert mod.plan_review_due(out, "b") is None
+
+
+def test_the_review_mode_reads_a_plan_delta_pushed_from_elsewhere(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _planned_branch(out, 3, plan_pass=True)
+    _with_origin(out, tmp_path)
+    passed = _git(out, "rev-parse", "HEAD").stdout.strip()
+    plan = out / ".process-work/plans/2026-10-09-fetch.md"
+    plan.write_text(plan.read_text() + "- DECISION 2026-10-10: Laufzeit begrenzt.\n")
+    _git(out, "commit", "-qam", "plan delta")
+    _git(out, "push", "-q", "origin", "b")
+    _git(out, "checkout", "-q", "main")
+    _git(out, "branch", "-f", "b", passed)
+    mod = _load_dispatch(out)
+    assert mod.plan_review_due(out, "b")
+
+
+def test_a_spec_kit_document_is_plan_text_for_the_review_mode(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _planned_branch(out, 3, plan_pass=False)
+    (out / "specs/7-fetch").mkdir(parents=True)
+    (out / "specs/7-fetch/spec.md").write_text("# spec\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "spec")
+    _git(out, "checkout", "-q", "main")
+    assert _load_dispatch(out).plan_review_due(out, "b")
+
+
+def test_plan_review_flag_forces_a_plan_review_on_a_branch_with_code(render, tmp_path, monkeypatch):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _planned_branch(out, 3, plan_pass=False)
+    (out / "src").mkdir(exist_ok=True)
+    (out / "src/fetch.py").write_text("x = 1\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "code")
+    _git(out, "checkout", "-q", "main")
+    mod = _load_dispatch(out)
+    seen = []
+    real = mod.prompt_for
+    monkeypatch.setattr(mod, "prompt_for", lambda *a, **kw: seen.append(kw.get("plan_review")) or real(*a, **kw))
+    for forced in (False, True):
+        assert mod.start(out, issue=7, phase="review", tier=3, branch="b", title=None, dry_run=True,
+                         plan_review=forced) == 0
+    assert seen == [False, True]
