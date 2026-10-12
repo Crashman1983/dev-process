@@ -881,8 +881,10 @@ def flow_items(root: Path, *, issue: int | None = None, branch: str | None = Non
             window_open = None
         coverage = _dispatch.issue_token_coverage(root, n) if _dispatch else None
         tokens = coverage[:2] if coverage else None
-        # a field some usage events lack is a partial sum: estimated, never measured
-        partial = bool(coverage) and any(c < coverage[3] for c in coverage[2].values())
+        # a field some usage events lack, or a source that could not be read
+        # completely, makes a partial sum: estimated, never measured
+        partial = bool(coverage) and (coverage[4] > 0
+                                      or any(c < coverage[3] for c in coverage[2].values()))
         items.append({
             "issue": n, "branches": sorted(bs),
             "start": start, "merged": merged, "deployed": deployed,
@@ -894,6 +896,7 @@ def flow_items(root: Path, *, issue: int | None = None, branch: str | None = Non
                        "sessions": tokens[1] if tokens else 0,
                        "coverage": coverage[2] if coverage else {},
                        "events": coverage[3] if coverage else 0,
+                       "unknown_sources": coverage[4] if coverage else 0,
                        "quality": ("missing" if not (tokens and tokens[0]) else
                                    "estimated" if partial else "measured")},
             "owner_decisions": {"value": decisions.get(n, 0), "quality": "proxy"},

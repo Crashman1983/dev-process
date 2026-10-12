@@ -610,3 +610,14 @@ def test_flow_says_which_endpoint_and_how_complete_the_tokens_are(render, tmp_pa
     [it] = m.flow_items(out, issue=12)
     assert it["tokens"]["value"] == {"input_tokens": 110, "output_tokens": 64}
     assert it["tokens"]["quality"] == "estimated"
+    # only opaque lines: no field coverage at all is still not complete (refutation, round 3)
+    (wt / "t" / "a.jsonl").write_text('garbled "input_tokens": 3, "output_tokens": 4\n')
+    [it] = m.flow_items(out, issue=12)
+    assert it["tokens"]["coverage"] == {} and it["tokens"]["unknown_sources"] == 1
+    assert it["tokens"]["quality"] == "estimated"
+    # a matched transcript that cannot be read leaves the readable total partial
+    (wt / "t" / "a.jsonl").write_text('{"usage": {"input_tokens": 7, "output_tokens": 50}}\n')
+    (wt / "t" / "b.jsonl").mkdir()  # matches the glob, cannot be read as a file
+    [it] = m.flow_items(out, issue=12)
+    assert it["tokens"]["sessions"] == 2 and it["tokens"]["unknown_sources"] == 1
+    assert it["tokens"]["quality"] == "estimated"

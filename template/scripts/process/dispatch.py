@@ -1221,24 +1221,28 @@ def _usage_events(line: str) -> list[dict[str, int]] | None:
     return events
 
 
-def issue_token_coverage(root: Path, issue: int) -> tuple[dict[str, int], int, dict[str, int], int] | None:
-    """(totals, sessions, {field: usage events that carried it}, usage events).
+def issue_token_coverage(root: Path, issue: int) -> tuple[dict[str, int], int, dict[str, int], int, int] | None:
+    """(totals, sessions, {field: usage events that carried it}, usage events,
+    unknown sources: opaque lines plus unreadable transcripts).
     Completeness is counted per usage event, not per session: a call that
     lacks a field leaves that field a partial sum, even when another call in
     the same transcript carried it — a variant whose calls write fewer input
     fields would look cheaper (refutation, cross-model, rounds 1 and 2).
     Readers mark it so. A non-JSON line with token fields adds its counts but
-    covers no field; an unreadable transcript carries none."""
+    covers no field; an unreadable transcript carries none. Both count as
+    unknown sources: a total beside one is partial, whatever the field
+    coverage says (refutation, round 3, executed)."""
     files = _issue_transcripts(root, issue)
     if not files:
         return None
     totals: dict[str, int] = {}
     covered: dict[str, int] = {}
-    events = 0
+    events = unknown = 0
     for f in sorted(files):
         try:
             text = Path(f).read_text(errors="ignore")
         except OSError:
+            unknown += 1
             continue
         for line in text.splitlines():
             if not USAGE_TOKENS.search(line):
@@ -1246,6 +1250,7 @@ def issue_token_coverage(root: Path, issue: int) -> tuple[dict[str, int], int, d
             parsed = _usage_events(line)
             if parsed is None:  # opaque: its counts are real, its completeness unknown
                 events += 1
+                unknown += 1
                 for field, n in USAGE_TOKENS.findall(line):
                     totals[field] = totals.get(field, 0) + int(n)
                 continue
@@ -1254,7 +1259,7 @@ def issue_token_coverage(root: Path, issue: int) -> tuple[dict[str, int], int, d
                 for field, n in event.items():
                     totals[field] = totals.get(field, 0) + n
                     covered[field] = covered.get(field, 0) + 1
-    return totals, len(files), covered, events
+    return totals, len(files), covered, events, unknown
 
 
 def issue_tokens(root: Path, issue: int) -> tuple[int, int] | None:
