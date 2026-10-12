@@ -874,7 +874,8 @@ def flow_items(root: Path, *, issue: int | None = None, branch: str | None = Non
         lead = wait = None
         if start["value"] and end["value"]:
             lead = (end["value"] - start["value"]).total_seconds()
-            wait = max(0.0, lead - work)
+            # with no phase closed, working time is unknown, not zero — and so is the wait
+            wait = max(0.0, lead - work) if spans else None
         quality = ("missing" if lead is None else
                    "measured" if start["quality"] == end["quality"] == "measured" and not unended
                    and (endpoint == "deploy" or merge_by_design)
@@ -898,8 +899,8 @@ def flow_items(root: Path, *, issue: int | None = None, branch: str | None = Non
             "issue": n, "branches": sorted(bs),
             "start": start, "merged": merged, "deployed": deployed,
             "lead_s": {"value": lead, "quality": quality, "endpoint": endpoint},
-            "work_s": {"value": work if own_starts else None,
-                       "quality": "missing" if not own_starts else ("estimated" if unended else "measured")},
+            "work_s": {"value": work if spans else None,
+                       "quality": "missing" if not spans else ("estimated" if unended else "measured")},
             "wait_s": {"value": wait, "quality": quality},
             "tokens": {"value": tokens[0] if tokens and tokens[0] else None,
                        "sessions": tokens[1] if tokens else 0,
@@ -1078,9 +1079,9 @@ _QUALITY_ORDER = ("measured", "estimated", "proxy")
 CAUSES = ("regression", "preexisting", "unknown")
 CHANNELS = ("operator", "agent", "monitor", "other")
 _ISSUES_QUERY = """query($owner:String!,$name:String!){repository(owner:$owner,name:$name){
-issues(first:100,orderBy:{field:UPDATED_AT,direction:DESC}){nodes{number title state createdAt closedAt
-labels(first:30){nodes{name}} subIssuesSummary{total completed}
-subIssues(first:50){nodes{number title state closedAt labels(first:30){nodes{name}}}}}}}}"""
+issues(first:100,orderBy:{field:UPDATED_AT,direction:DESC}){nodes{number title state stateReason createdAt
+closedAt labels(first:30){nodes{name}} subIssuesSummary{total completed}
+subIssues(first:50){nodes{number title state stateReason closedAt labels(first:30){nodes{name}}}}}}}}"""
 
 
 def _gh_issues(root: Path) -> tuple[list[dict] | None, str | None]:
@@ -1099,7 +1100,7 @@ def _gh_issues(root: Path) -> tuple[list[dict] | None, str | None]:
             return None, "gh cannot name this repository"
         owner, name = repo.stdout.strip().split("/", 1)
         r = subprocess.run([gh, "api", "graphql", "-H", "GraphQL-Features: sub_issues",
-                            "-f", f"query={_ISSUES_QUERY}", "-F", f"owner={owner}", "-F", f"name={name}"],
+                            "-f", f"query={_ISSUES_QUERY}", "-f", f"owner={owner}", "-f", f"name={name}"],
                            capture_output=True, text=True, timeout=120, cwd=str(root))
     except (OSError, subprocess.TimeoutExpired) as exc:
         return None, f"gh failed ({exc})"
@@ -1112,6 +1113,7 @@ def _gh_issues(root: Path) -> tuple[list[dict] | None, str | None]:
 
     def _flat(n: dict) -> dict:
         return {"number": n.get("number"), "title": n.get("title") or "", "state": n.get("state"),
+                "stateReason": n.get("stateReason"),
                 "createdAt": n.get("createdAt"), "closedAt": n.get("closedAt"),
                 "labels": [lb.get("name") for lb in ((n.get("labels") or {}).get("nodes") or [])]}
     out = []
@@ -1124,14 +1126,33 @@ def _gh_issues(root: Path) -> tuple[list[dict] | None, str | None]:
     return out, None
 
 
-def _outcome_config(root: Path) -> dict:
+def _outcome_config(root: Path) -> tuple[dict, list[str]]:
+    """(the mandate's `outcomes` over the defaults, problems). A key of the
+    wrong type falls back to its default and is named — a string where a
+    list belongs would otherwise match single letters."""
     try:
         import optimize  # noqa: PLC0415 — the mandate's one reader
-        mandate, _why = optimize.load_mandate(root)
-    except Exception:  # noqa: BLE001 — a broken mandate falls back to the defaults, named below
-        mandate = None
+        mandate, why = optimize.load_mandate(root)
+    except Exception as exc:  # noqa: BLE001 — a broken mandate falls back to the defaults, named
+        mandate, why = None, f"mandate unreadable ({exc})"
+    problems = [why] if why and mandate is None and (root / "docs/process/optimization.local.json").is_file() else []
     given = (mandate or {}).get("outcomes")
-    return {**OUTCOME_DEFAULTS, **(given if isinstance(given, dict) else {})}
+    if given is not None and not isinstance(given, dict):
+        problems.append("outcomes must be a mapping — defaults used")
+        given = {}
+    cfg = dict(OUTCOME_DEFAULTS)
+    for key, value in (given or {}).items():
+        default = OUTCOME_DEFAULTS.get(key)
+        ok = (isinstance(value, str) if isinstance(default, str) else
+              isinstance(value, list) and all(isinstance(v, str) for v in value) if isinstance(default, list) else
+              isinstance(value, (int, float)) and not isinstance(value, bool) and 0 <= value <= 1
+              if isinstance(default, float) else False)
+        if ok:
+            cfg[key] = value
+        else:
+            problems.append(f"outcomes.{key}: {'unknown key' if default is None else 'wrong type'} — "
+                            f"{'ignored' if default is None else 'default used'}")
+    return cfg, problems
 
 
 def _days(a: datetime | None, b: datetime | None) -> float | None:
@@ -1142,7 +1163,7 @@ def outcomes_table(root: Path, *, days: int = _OUTCOME_DAYS, now: datetime | Non
                    fetch=None) -> dict:
     now = now or datetime.now(timezone.utc)
     since = now - timedelta(days=days)
-    cfg = _outcome_config(root)
+    cfg, config_problems = _outcome_config(root)
     issues, why = (fetch or _gh_issues)(root)
     if issues is None:
         return {"available": False, "reason": why, "days": days}
@@ -1153,10 +1174,16 @@ def outcomes_table(root: Path, *, days: int = _OUTCOME_DAYS, now: datetime | Non
         elif it["merged"]["value"]:
             delivered[it["issue"]] = (it["merged"]["value"], "estimated")
 
+    def _closed(issue: dict) -> datetime | None:
+        """A closure that means done: not a duplicate or `not planned`."""
+        if issue.get("state") != "CLOSED" or issue.get("stateReason") not in (None, "COMPLETED"):
+            return None
+        return _aware(issue.get("closedAt"))
+
     def _done(issue: dict) -> tuple[datetime | None, str]:
         if issue.get("number") in delivered:
             return delivered[issue["number"]]
-        closed = _aware(issue.get("closedAt")) if issue.get("state") == "CLOSED" else None
+        closed = _closed(issue)
         return closed, "proxy" if closed else "missing"
 
     usable = cfg["usable"]
@@ -1168,7 +1195,7 @@ def outcomes_table(root: Path, *, days: int = _OUTCOME_DAYS, now: datetime | Non
             continue
         created = _aware(it.get("createdAt"))
         if usable == "epic-closed":
-            at = _aware(it.get("closedAt")) if it.get("state") == "CLOSED" else None
+            at = _closed(it)
             quality = "proxy" if at else "open"
         else:
             kind, _, marker = str(usable).partition(":")
@@ -1182,9 +1209,12 @@ def outcomes_table(root: Path, *, days: int = _OUTCOME_DAYS, now: datetime | Non
                 quality = max((q for _w, q in done), key=_QUALITY_ORDER.index)  # the weakest evidence
             else:
                 at, quality = None, "open"
+        span = _days(created, at)
+        if span is not None and span < 0:  # grouped after the fact: the epic did not start the work
+            span, quality = 0.0, "estimated" if quality == "measured" else quality
         epics.append({"number": it["number"], "title": it["title"], "created": created,
                       "usable_at": at, "quality": quality,
-                      "days_to_usable": _days(created, at),
+                      "days_to_usable": span,
                       "sub_issues": {"total": it.get("sub_total", 0), "done": it.get("sub_done", 0)}})
     reached = [e for e in epics if e["usable_at"] and e["usable_at"] >= since]
     bugs = [it for it in issues if set(it["labels"]) & set(cfg["bug_labels"])
@@ -1214,7 +1244,7 @@ def outcomes_table(root: Path, *, days: int = _OUTCOME_DAYS, now: datetime | Non
                             "estimated" if qs <= {"measured", "estimated"} else "proxy")}
     return {
         "available": True, "days": days, "sample": "the 100 most recently updated issues",
-        "config": cfg,
+        "config": cfg, "config_problems": config_problems,
         "epics": epics,
         "o1_epic_usable": _median_block([(e["days_to_usable"], e["quality"]) for e in reached]),
         "o2_disruptive_fixed": {**_median_block(fixes), "open": len(disruptive) - len(fixes)},
@@ -1243,6 +1273,8 @@ def outcomes(root: Path | None = None, *, days: int = _OUTCOME_DAYS, as_json: bo
         print(f"  unavailable: {t['reason']} — outcomes skipped (not zero)")
         return 0
     o1, o2, bo = t["o1_epic_usable"], t["o2_disruptive_fixed"], t["bug_origin"]
+    for problem in t["config_problems"]:
+        print(f"  mandate: {problem}")
     print(f"  epics       {len(t['epics'])} seen; usable in the window: n={o1['n']}, median "
           f"{o1['median_days'] if o1['median_days'] is not None else '—'} d [{o1['quality']}] "
           f"(marker: {t['config']['usable']})")
@@ -1288,8 +1320,14 @@ def _gate_events(common: Path | None, since: datetime) -> list[dict]:
             except ValueError:
                 continue
             when = _aware(row.get("ts")) if isinstance(row, dict) else None
-            if when is not None and when >= since and isinstance(row.get("gate"), str):
-                rows.append(row)
+            if when is None or when < since or not isinstance(row.get("gate"), str):
+                continue
+            if not isinstance(row.get("head"), (str, type(None))):  # a hand-edited row: no input
+                row["head"] = None
+            if not isinstance(row.get("duration_s"), (int, float)) or isinstance(row.get("duration_s"), bool):
+                row["duration_s"] = 0.0
+                row["outcome"] = row.get("outcome") if row.get("outcome") in ("skipped", "missing") else "unreadable"
+            rows.append(row)
     return rows
 
 
@@ -1347,7 +1385,9 @@ def nodes_table(root: Path, *, days: int = _NODE_DAYS, now: datetime | None = No
         passed = {i for r in ran if r.get("outcome") == "pass" and (i := _input(r))}
         blocked = failed_inputs.get(gate, set())
         others = set().union(*(v for g, v in failed_inputs.items() if g != gate)) if len(failed_inputs) > 1 else set()
-        mine = [t for t in triage if t["gate"] == gate]
+        # a triage row counts for a block of this window; a short sha matches by prefix
+        mine = [t for t in triage if t["gate"] == gate and len(t["commit"]) >= 7
+                and any(b.startswith(t["commit"]) for b in blocked)]
         nodes.append({
             "gate": gate,
             "runs": len(ran),
@@ -1365,7 +1405,7 @@ def nodes_table(root: Path, *, days: int = _NODE_DAYS, now: datetime | None = No
             # passed and failed on the same commit: a flake signal, or a moving environment
             "flips": {"value": len(blocked & passed), "quality": "measured"},
             "triage": {"value": {c: sum(1 for t in mine if t["category"] == c) for c in TRIAGE_CATEGORIES},
-                       "of_blocked_inputs": len({t["commit"] for t in mine} & blocked),
+                       "of_blocked_inputs": len({b for b in blocked if any(b.startswith(t["commit"]) for t in mine)}),
                        "quality": "estimated" if mine else "missing"},
             "modes": sorted({str(r.get("mode")) for r in rows}),
         })

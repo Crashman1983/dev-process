@@ -349,8 +349,8 @@ _EVENTS_MAX_BYTES = 5_000_000  # then the log rolls over to .1 (one generation k
 
 def _git_out(root: Path, *args: str) -> str | None:
     try:
-        proc = subprocess.run(["git", "-C", str(root), *args],
-                              capture_output=True, text=True, timeout=30)
+        proc = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True,
+                              encoding="utf-8", errors="replace", timeout=30)
     except (OSError, subprocess.TimeoutExpired):
         return None
     return proc.stdout.strip() if proc.returncode == 0 else None
@@ -368,11 +368,9 @@ def _run_context(root: Path, pushed: str) -> dict:
     """What this run checked: the commit, whether the tree held more than it
     (the gates read the working tree), the branch, and where it ran."""
     head = _git_out(root, "rev-parse", "HEAD")
-    try:
-        dirty = subprocess.run(["git", "-C", str(root), "diff", "--quiet", "HEAD", "--"],
-                               capture_output=True, timeout=30).returncode == 1
-    except (OSError, subprocess.TimeoutExpired):
-        dirty = None
+    # untracked files count: a gate scans them, and no commit names them
+    status = _git_out(root, "status", "--porcelain", "--untracked-files=normal") if head else None
+    dirty = None if status is None else bool(status)
     branch = _git_out(root, "rev-parse", "--abbrev-ref", "HEAD")
     return {"head": head, "dirty": dirty, "pushed": pushed or None,
             "branch": None if branch in (None, "HEAD") else branch,
@@ -395,8 +393,8 @@ def _record_event(path: Path | None, context: dict, gate: str, *, mode: str,
             os.replace(path, path.with_name(path.name + ".1"))
         with path.open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(row) + "\n")
-    except OSError:
-        pass  # an unwritable log loses an observation, never a verdict
+    except Exception:  # noqa: BLE001 — an unwritable log loses an observation, never a verdict
+        pass
 
 
 def _emit(output: str, known: set[str], seen: set[str], show_all: bool) -> int:
@@ -474,8 +472,11 @@ def main() -> int:
         # stderr: pre-commit shows a passing hook's stdout to nobody
         print(f"gate-runner: {LOCAL_GATES} replaces the template's {name} gate", file=sys.stderr)
     in_flight: dict = {}
-    events = _events_path(root)
-    context = _run_context(root, pushed) if events is not None else {}
+    try:  # the log observes; nothing in it may stop a gate from running
+        events = _events_path(root)
+        context = _run_context(root, pushed) if events is not None else {}
+    except Exception:  # noqa: BLE001
+        events, context = None, {}
     mode = "warn" if warn else "block"
     for name in active:
         _key, cmd = gates[name]
