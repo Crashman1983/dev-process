@@ -1,15 +1,23 @@
-# Plan (Entwurf, zur Refutation): Verbesserungsregelkreis mit Ausgleich — v2.68
+# Plan (Entwurf, zur Refutation): Verbesserungsregelkreis mit Ausgleich — v2.68/v2.69
 
 Datum: 2026-10-12 · Status: **Entwurf, nicht umgesetzt** · Baut auf: v2.67
 (`docs/analysis/2026-10-12-self-improving-process.md`) · Tier: 3 (Messung,
 Aktivierung und Freigabe des Prozesses ändern sich selbst)
 
-Revision 2. Sie ersetzt den Entwurf D1–D11 nach zwei Eingaben:
+Revision 3. Sie folgt auf zwei Refutationsrunden auf PR #216, beide mit
+Verdict `block`:
 
-1. Codex-Refutation auf PR #216, Verdict `block`, zehn Befunde.
-2. Präzisierte Owner-Anforderung (unten).
+- Runde 1: zehn Befunde zum Entwurf D1–D11.
+- Runde 2: sieben Befunde zu Revision 2.
 
-Die Antwort auf jeden Codex-Befund steht in §9.
+Revision 3 zieht zwei Konsequenzen:
+
+1. **Weniger bauen.** v2.68 liefert nur, was ab Woche 1 nutzt und keine
+   Autorität verschiebt. Die Grenze für Live-Übernahmen folgt in v2.69.
+2. **Ein äußerer Rahmen gehört dem Owner.** Er legt fest, was als Erfolg
+   gilt. Die Schleifen dürfen nur benannte, typisierte Parameter verstellen.
+
+Wie jeder Befund beantwortet ist, steht in §10.
 
 ## 1. Anforderung
 
@@ -28,16 +36,15 @@ etabliert. Dazu gilt:
 - **Fehlende Signale schließt ein Regelkreis selbst.** Beispiel: Es gibt kein
   Merkmal, ob ein Bug ein Folgefehler oder neu entdeckt ist. Das soll in einem
   Regelkreis auffallen und dazu führen, dass das Merkmal eingeführt und künftig
-  ausgewertet wird. Dieses Beispiel ist Abnahmekriterium (§10, A6).
+  ausgewertet wird. Dieses Beispiel ist Abnahmekriterium (§11, A6).
 
 ## 2. Owner-Entscheidungen
 
 - **DECISION 2026-10-12 owner:** dev-process-Releases, die ausschließlich einen
   neuen, standardmäßig *ausgeschalteten* Mechanismus hinter einem Flag
   bringen, dürfen ohne Einzelfreigabe erscheinen — nach Gates, voller Suite und
-  unabhängigem Review. Alles, was Verhalten ändert, bleibt beim Owner. Umsetzung
-  siehe §9 Befund 2: Die Entscheidung wird erst ausübbar, wenn die
-  Inert-Grenze (P6) steht.
+  unabhängigem Review. Alles, was Verhalten ändert, bleibt beim Owner. Ausübbar
+  erst mit der Inert-Grenze (P6, §12).
 - **DECISION 2026-10-12 owner:** Der dev-process-Agent startet täglich per
   Routine, arbeitet aber nur, wenn ein offenes `optimization`-Issue wartet.
   Jeder Lauf zählt zum Optimierungsbudget.
@@ -50,433 +57,479 @@ etabliert. Dazu gilt:
   Ereignisklasse, keine Rohlogs.
 - **DECISION 2026-10-12 owner:** Der Plan schreibt keine festen Modelle vor.
   Jede Schleife und jede Prüfung muss mit Claude oder Codex ausführbar sein
-  (§6.7).
+  (§7.4).
 
 ## 3. Grundgedanke
 
 Der Kreislauf startet beim **Messen von Verlust und Wert**, nicht bei einem
 Mechanismus. Welcher Mechanismus zuerst gebaut wird, entscheiden die Daten des
-Projekts. Darum entfällt `scoped-handover` als vorab gewählter erster
-Mechanismus (Codex Befund 10).
+Projekts.
 
-Das System hat drei Schichten:
+Vier Ebenen mit getrennter Autorität:
 
-| Schicht | Takt | Wer | Darf ändern |
-|---|---|---|---|
-| Messung | laufend, deterministisch | Skripte | nichts (nur lesen und berechnen) |
-| Arbeitsschleife | wöchentlich | Steward-Sitzung (LLM) | Hebel wählen, Experiment vorschlagen bzw. stoppen; innerhalb der Regeln |
-| Meta-Schleife | monatlich | frische LLM-Sitzung, bei Rahmenänderung zusätzlich eine unabhängige Prüfsitzung (§6.7) | Regeln, Signale und Schleifen vorschlagen; Anwendung nach Rechte-Tabelle §7 |
-
-Die Schichten sind getrennt, weil eine Schleife ihren eigenen Maßstab nicht
-während der Messung verschieben darf (Codex Befund 1).
-
-## 4. Messung
-
-### 4.1 Verlustbuch — `process_kpis.py losses [--since] [--json]`
-
-Das Verlustbuch rechnet Kapazitätsverluste in eine gemeinsame Währung um:
-**Stunden**. Agentenzeit und Owner-Zeit werden getrennt ausgewiesen, weil eine
-Owner-Minute knapper ist als eine Agenten-Minute.
-
-| Klasse | Quelle (vorhandener Owner) | Datenqualität |
+| Ebene | Wer | Darf |
 |---|---|---|
-| Warten (Gate, Zug, Review-Warteschlange) | `train-phases`, `flow` | measured / estimated |
-| Nacharbeit (Review-Runden ab Runde 2) | `rounds`, Journal-REVIEW-Zeilen | measured |
-| Folgefehler (Regression-Fixes) | `Regression-of`-Trailer, Herkunftsmerkmal (§6.4) | measured, sobald Abdeckung erreicht |
-| Abbrüche (Zug-Rauswurf, verworfene Branches) | `train.py phases.jsonl`, Reports | measured |
-| Tokens | `issue_token_coverage` | measured / estimated mit Abdeckung |
-| Owner-Eingriffe | DECISION-Zeilen, Eskalationen | count; Minuten estimated |
+| Äußerer Rahmen (§4) | Owner | Bedeutung von Erfolg, Grundgesamtheiten, Untergrenzen, Höchstrechte, absolute Budgets festlegen |
+| Messung (§5) | deterministische Skripte, Wächter | beobachten und berechnen, nie entscheiden |
+| Arbeitsschleife (§7.1) | wöchentliche Steward-Sitzung | eine priorisierte Maßnahme vorschlagen; typisierte Parameter im Rahmen verstellen |
+| Meta-Schleife (§7.2) | monatliche Sitzung | nur beraten: Vorschläge zu Signalen, Regeln, Schleifen; Anwendung nach §8 |
 
-Jede Zeile trägt Belegzahl und Datenqualität. Bei Qualität `missing` wird nie
-null angenommen. Die Zuordnung zum Issue läuft über Branch bzw. Worker und
-nutzt die v2.67-Fallbacks der Reports. Das Verlustbuch erweitert
-`process_kpis.py`; ein zweiter Leser entsteht nicht (Codex Befund 5).
+Eine Ebene darf den Maßstab der darüberliegenden nicht verschieben. Diese
+Grenze wird mechanisch geprüft und hängt nicht am guten Willen einer Sitzung
+(R2-Befund 1).
 
-### 4.2 Wertsignale — `process_kpis.py outcomes [--json]`
+## 4. Äußerer Rahmen (Owner)
 
-- **O1 Epic nutzbar.** Ein Epic ist ein Issue mit nativen Sub-Issues.
-  Als Fallback dient ein konfigurierbarer Titelpräfix oder ein Label, denn
-  Projekte sind dort nicht einheitlich. „Nutzbar“ ist konfigurierbar, und zwar
-  als `epic-closed` oder als `acceptance:<label|titelmuster>`. Viele Epics
-  haben ein eigenes Abnahme-Issue, dann ist dessen Abschluss der Zeitpunkt.
-  Kennzahlen:
-  - Durchsatz geschlossener Sub-Issues pro Woche je Epic;
-  - Zeit vom Epic-Start bis „nutzbar“;
-  - Alter offener Epics.
-- **O2 Störender Fehler schnell behoben.** Erfasst werden Bugs mit Herkunft
-  `operator` (§6.4). Gemessen wird die Zeit von der Meldung bis zum
-  ausgelieferten Fix. Endpunkt ist Deploy, falls konfiguriert, sonst Merge.
-  Die Kennzeichnung übernimmt die v2.68-Logik von `flow`.
-- **O3 Betrieb (optional).** Ein projektseitiges Host-Skript schreibt
-  `.process-work/ops/YYYY-MM-DD.json` (Schema im Template): Zählwerte je
-  Ereignisklasse, Deploy- und Rollback-Ereignisse, Health-Ausfälle. Das
-  Template liefert Schema und Leser, das Skript gehört dem Projekt.
-- **Anteil.** `share` gibt es schon. Daraus wird der Prozessanteil an der
-  gesamten Lieferarbeit berechnet.
+Der Rahmen steht in einem eigenen Abschnitt `framework` des Mandats
+`docs/process/optimization.local.json`. Er enthält:
 
-### 4.3 Maßstab bleibt fest
+- **Geschützte Bedeutungen.** Definition von O1 und O2 (§5.2), Richtung jeder
+  Kennzahl, das Merkmal „störend“, das Merkmal „nutzbar“.
+- **Grundgesamtheiten.** Für jede Frage und jede Kennzahl ist festgelegt,
+  welche Elemente zählen (z. B. „Bugs mit Kanal `operator`“, nicht „alle
+  neuen Bugs“).
+- **Abdeckungs- und Prüfregeln.** Zielwerte für Abdeckung und Größe der
+  Prüfstichprobe für die Klassifikationsgüte.
+- **Untergrenzen.** Qualität, Sicherheit, Review-Unabhängigkeit, Abnahme. Sie
+  sind nicht verrechenbar.
+- **Höchstrechte** des Stewards und **absolute Budgets**: Agentenstunden und
+  Owner-Minuten pro Woche für Optimierung.
+- **`tunable`.** Die abschließende Liste der Parameter, die Schleifen
+  verstellen dürfen, jeweils mit Typ, Spanne, größter Schrittweite und
+  Mindestverweildauer.
 
-Metrikdefinitionen, Evaluator-Code und Grundgesamtheiten sind versioniert. Ein
-Experiment bindet sich an eine Version (§8.2). Eine geänderte Signaldefinition
-läuft **eine Periode parallel** zur alten. Beide Werte erscheinen im Bericht,
-erst danach gilt die neue.
+Der Owner revidiert den Rahmen ausdrücklich. Die Schleifen können ihn nicht
+mit ihren Parameterrechten ändern. `optimize.py register check` vergleicht
+jede Änderung mit diesem Rahmen, egal ob sie über `set`, `revert`, Ablauf oder
+eine direkte Dateibearbeitung entsteht. Eine Änderung ohne Log-Eintrag ist ein
+Fehler. Jede Änderung ist an eine Register-Revision und ein Wirksamkeitsdatum
+gebunden.
 
-## 5. Ausgleichsregeln
+## 5. Messung
 
-Die Regeln sind **Daten** im Register (§6.1). Jede Regel hat eine Prognose,
-ein Prüfdatum und eine Historie. Die Startwerte sind Vorschläge, die die
-Meta-Schleife überprüft:
+### 5.1 Verlustbuch — `process_kpis.py losses [--since] [--json]`
 
-- **R1 Budget.** Optimierungskapazität = clamp(5 %, 20 %, k × Prozessverlustanteil) der
-  Agentenkapazität, Start k = 0,5. Owner-Zeit für Optimierung ist eigens
-  begrenzt (Start: 30 min/Woche).
-- **R2 Rückzahlung.** Ein Experiment startet nur, wenn es seine Kosten
-  voraussichtlich innerhalb von **≤ 4 Wochen** zurückzahlt. Kosten sind
-  Entwurf, Evaluation, Review, Release und Betrieb. Die Rückzahlung bemisst
-  sich an eingesparten Verluststunden.
-- **R3 WIP 1.** Höchstens ein Live-Versuch pro Projekt. Das ist in v2.68 schon
-  durchgesetzt (`_conflicts`).
-- **R4 Produktvorrang.** Verschlechtern sich O1 oder O2 zwei Perioden lang und
-  erklärt der Prozessverlust das nicht, fällt das Budget auf das Minimum. Die
-  Arbeitsschleife meldet das dann als Produktsignal, nicht als
-  Prozessproblem.
-- **R5 Untergrenzen.** Qualität, Sicherheit, Review-Unabhängigkeit und Abnahme
-  sind nicht verrechenbar. Kein Effizienzgewinn wiegt eine Verletzung auf. Ist
-  eine Untergrenze nicht prüfbar, findet keine Übernahme statt.
-- **R6 Verfall.** Jede Regel hat ein `review_by`. Eine abgelaufene Regel fällt
-  auf den konservativen Startwert zurück und erscheint im Bericht.
+Das Verlustbuch führt **vier getrennte Maße**. Es rechnet sie nicht in eine
+gemeinsame Währung um (R2-Befund 3):
 
-**Vertrauensmaß.** Für jede Regeländerung und jedes Experiment wird
-festgehalten, wie Prognose und Ist zueinander standen (Trefferquote je
-Akteur). Liegt die Quote über einer Schwelle, darf der Steward mehr allein
-entscheiden. Liegt sie darunter, entscheidet er weniger allein. Das geschieht
-nur innerhalb der Grenzen, die der Owner setzt.
+| Maß | Einheit | Quelle | Bedeutung |
+|---|---|---|---|
+| Belegung | Agentenstunden | `flow` `work_s` | Kapazität, die tatsächlich verbraucht wurde |
+| Verzögerung | Issue-Stunden | `flow` `wait_s`, `train-phases` | Wartezeit je Issue; zwanzig Issues, die eine Stunde auf dieselbe Störung warten, sind 20 Issue-Stunden Verzögerung, aber keine 20 Agentenstunden |
+| Owner-Zeit | Owner-Minuten (geschätzt) und Zahl der Eingriffe | DECISION-Zeilen, Eskalationen | knappste Ressource |
+| Tokens | Tokens je Feld | `issue_token_coverage` (Vollständigkeit je Nutzungsereignis) | Rechenkosten |
 
-## 6. Register und Schleifen
+Dazu kommen **diagnostische Proxys** ohne Stundenwert:
 
-### 6.1 Register — `docs/process/improvement.local.json`
+- Review-Runden (`rounds`);
+- Pfad-Anteile (`share`);
+- Zug-Rauswürfe;
+- Folgefehler-Zählung.
 
-Eine Datei mit vier Abschnitten:
+Proxys zeigen, wo man nachsehen sollte. Sie gehen in keine Budgetformel ein.
 
-| Abschnitt | Inhalt |
-|---|---|
-| `signals` | Definition und Version |
-| `rules` | Ausgleichsregeln |
-| `loops` | Schleifen-Register |
-| `questions` | Fragen-Register |
+Dafür gelten feste Regeln:
 
-Jeder Eintrag trägt `id`, `version`, `prognosis`, `review_by` und `owner`.
+- **Keine Doppelzählung.** Belegung entsteht nur aus `work_s`. Nacharbeit
+  und Folgefehler sind Aufschlüsselungen dieser Belegung, kein Zusatz.
+- **Unvollständig bleibt unvollständig.** Fehlende Beobachtungen bleiben
+  sichtbar (`missing`, `estimated`, Abdeckung). `missing` heißt unbekannt,
+  nie null, und auch die Entscheidungswege behandeln es so (§7.3).
+- **Modellierte Werte sind geschätzt.** Eine Stundenumrechnung, etwa
+  Owner-Minuten je Eingriff, trägt immer die Qualität `estimated` und nennt
+  ihre Annahme.
 
-Geändert wird nur über `optimize.py register set|revert|check`. Der Befehl
-validiert streng: doppelte Schlüssel werden abgelehnt, ungültige Zahlen
-ebenfalls. Jede Änderung hängt eine Zeile an
-`.process-work/optimizations/register.log.jsonl` an: alt, neu, Begründung,
-Prognose, Akteur. `revert <id>` stellt die Vorversion wieder her. Eine
-Umkehrung kostet so einen Befehl. Die Datei ist in `.copier-answers`-
-Updates projekteigen, wie das Mandat.
+### 5.2 Wertsignale — `process_kpis.py outcomes [--json]`
 
-### 6.2 Arbeitsschleife (wöchentlich)
+- **O1 Epic nutzbar.**
+  - Ein Epic ist ein Issue mit nativen Sub-Issues. Als Fallback dient ein
+    konfigurierter Titelpräfix oder ein Label.
+  - **Nutzbar** heißt: Der im Rahmen festgelegte Abnahmenachweis liegt vor,
+    zum Beispiel ein geschlossenes Abnahme-Issue mit ausgeliefertem
+    Deploy-Nachweis.
+  - Ein administrativ geschlossenes Epic gilt nur als schwächerer Proxy und
+    wird so gekennzeichnet.
+  - Kennzahl: Zeit vom Epic-Start bis „nutzbar“.
+  - Diagnostisch, ohne Wertung: Durchsatz der Sub-Issues und Alter offener
+    Epics. Beides steigt oder fällt auch durch Aufteilen und bloßes Warten.
+  - „O1 verschlechtert sich“ ist im Rahmen definiert, und zwar über die
+    Zeit bis „nutzbar“ abgeschlossener Epics. Das Alter offener Epics zählt
+    dafür nicht.
+- **O2 Störender Fehler schnell behoben.**
+  - Gezählt werden Bugs mit Kanal `operator` (§6), die das Merkmal „störend“
+    des Rahmens tragen, etwa ein Prioritätslabel.
+  - Gemessen wird die Zeit von der Meldung bis zum ausgelieferten Fix.
+    Endpunkt ist Deploy, falls konfiguriert, sonst Merge, gekennzeichnet nach
+    der `flow`-Logik.
+- **O3 Betrieb (optional).** Schema für `.process-work/ops/YYYY-MM-DD.json`
+  aus dem projekteigenen Host-Skript; nur Zählwerte.
+- **Nicht verfügbar.** Ein Projekt ohne Epics, ohne Betriebsdaten oder ohne
+  Kanalfeld bekommt `unavailable` mit Grund, nie eine Null.
+
+### 5.3 Wächter
+
+Wächter sind billige deterministische Prüfungen. Sie laufen **unabhängig von
+jedem Optimierungsbudget**, unter einer kleinen reservierten Überwachungszulage
+im Rahmen. Sie prüfen:
+
+- **Untergrenzen:** Gates rot, Rollback, Abnahme verletzt.
+- **Stopp-Bedingungen** laufender Versuche.
+- **Folgefehler:** neue Folgefehler zu übernommenen Maßnahmen.
+- **Abdeckung:** Einbruch der Abdeckung eines Fragenfelds.
+- **Datenqualität:** Kennzahl kippt nach `missing`.
+
+Ein Wächter entscheidet nichts. Schlägt er an, weckt er die zuständige
+Schleife (§7.3).
+
+## 6. Herkunft von Bugs: zwei Achsen
+
+Ein einzelnes Herkunftsfeld kann einen vom Owner gemeldeten Folgefehler nicht
+abbilden (R2-Befund 4). Deshalb gibt es zwei Achsen:
+
+| Achse | Werte | Zweck |
+|---|---|---|
+| Ursache | `regression` (mit `Regression-of: #N`, eingeführt durch), `preexisting`, `unknown` | Folgefehlerquote |
+| Kanal | `operator`, `agent`, `monitor`, `other` | O2, Entdeckungswege |
+
+Dazu gehören:
+
+- **Zeitstempel und Konfidenz.** Erfasst werden Melde- und Entdeckungszeitpunkt
+  sowie die Konfidenz der Klassifikation.
+- **Unbekannt ist zulässig.** Eine spätere Korrektur auf Basis neuer Belege
+  hängt sich an und überschreibt die Historie nicht.
+- **Gesetzt wird dort, wo es bekannt ist.**
+  - Der Agent, der einen Folgefehler anlegt, setzt `regression`/`agent`.
+  - Die Steward-Sitzung setzt bei einer Owner-Meldung `operator` und eine
+    Ursache, falls sie bekannt ist, sonst `unknown`.
+
+  Wenn alle Issues über dasselbe Konto entstehen, trennt das Autor-Konto die
+  Fälle nicht.
+- **Abdeckung und Güte getrennt.**
+  - Abdeckung ist der Anteil der Elemente mit Feld.
+  - Güte wird an einer geprüften Stichprobe gemessen, die eine unabhängige
+    Sitzung gegen Commits und Belege klassifiziert.
+  - Die Folgefehlerquote bekommt die Qualität `measured` erst, wenn beide
+    Ziele des Rahmens erfüllt sind und das Beobachtungsfenster reif ist.
+  - Ein fehlender Trailer zählt nie als null Defekte.
+
+## 7. Schleifen
+
+### 7.1 Arbeitsschleife (wöchentlich)
 
 - **Auslöser:** Routine bzw. Steward-Sitzung, Auftrag
   `docs/process/improvement-weekly.md`.
-- **Ziel:** größter Hebel nach Verlustbuch × R2.
-- **Prüfung:** die Prognose des Vorwochen-Hebels gegen das Ist.
-- **Abbruchregel:** kein Hebel über R2 → Bericht „kein Eingriff“, fertig.
-- **Gedächtnis:** `.process-work/improvement/YYYY-Www.md` und das Register-Log.
+- **Eingang:** Verlustbuch, Wertsignale, Wächterbefunde, Fragen-Register.
+- **Ergebnis:** genau **eine priorisierte Maßnahme** mit Begründung, Prognose
+  und Kosten im absoluten Budget, oder „kein Eingriff“.
+  - Eine Maßnahme kann ein Experimentvorschlag, ein Produktsignal (ein Issue
+    für die Lieferarbeit) oder eine Frage für das Fragen-Register sein.
+- **Grenzen:** Die Schleife verstellt nur Parameter aus `tunable`.
+- **Gedächtnis:** `.process-work/improvement/YYYY-Www.md`, Register-Log.
 
-Ergebnis ist eine von drei Möglichkeiten:
+**Blinde Flecken finden.** Die Arbeitsschleife bildet dazu Hypothesen, in
+engen Grenzen (R2-Frage 3):
 
-1. Ein Experimentvorschlag (`optimize.py new`).
-2. Der Stopp eines laufenden Versuchs.
-3. „Kein Eingriff“.
+- **Stichprobe:** reproduzierbar, aus neuen Issues, Commits und Journalzeilen,
+  mit Negativbeispielen.
+- **Abgleich:** gegen vorhandene Fragen.
+- **Beleg und Abnehmer:** Ein Vorschlag braucht beides — Belege und eine
+  benannte Entscheidung, die die Antwort braucht.
+- **Vorläufige Frage:** Ein Fund wird zunächst eine vorläufige Frage, noch
+  kein Pflichtfeld.
+- **„Keine neue Frage“** ist ein zulässiges Ergebnis.
 
-Auch ein Produktsignal nach R4 ist möglich. Das ist dann ein Issue für die
-Lieferarbeit, kein Prozess-Experiment.
+Die Eskalation geht vom Hinweis über das Pflichtfeld im Issue-Helfer und die
+weiche Notiz bis zum Gate. In v2.68 wird jede Stufe **vorgeschlagen und
+manuell angewendet**: Stufen 1–2 vom Steward, ab Stufe 3 vom Owner. Eine
+automatische Eskalation ist zurückgestellt.
 
-### 6.3 Meta-Schleife (monatlich)
+### 7.2 Meta-Schleife (monatlich, beratend)
 
 Auftrag: `docs/process/improvement-monthly.md`. Die Schleife prüft:
 
-- **Signale:** Trägt jedes Signal noch? Gibt es Abdeckung, Streuung,
-  Manipulierbarkeit?
-- **Regeln:** Wie stehen Prognose und Ist zueinander, gilt das Prüfdatum noch?
-- **Maßnahmen:** Hält eine übernommene Maßnahme noch, wenn sich Modell,
-  Harness oder Projektphase geändert haben? Gegebenenfalls schlägt die
-  Schleife eine Ablation vor.
-- **Schleifen-Register:** siehe §6.6.
+- **Signale:** Abdeckung, Güte, Streuung, Manipulierbarkeit.
+- **Regeln:** Prognose gegen Ist.
+- **Maßnahmen:** ob eine übernommene Maßnahme unter neuem Modell, Harness oder
+  Projektstand noch trägt; gegebenenfalls ein Ablationsvorschlag.
+- **Schleifen:** Nutzen und Kosten.
 
-Sie schreibt Vorschläge als Register-Änderungen mit Prognose. Die Anwendung
-regelt §7. Ändert ein Vorschlag den **Rahmen**, prüft ihn vor der Anwendung
-eine unabhängige Prüfsitzung (§6.7). Rahmen sind:
+Sie schreibt **Vorschläge**, keine Änderungen. Angewendet wird nach §8.
 
-- die Spannen in R1;
-- die Untergrenzen R5;
-- die Evaluator-Version;
-- die Rechte-Tabelle.
+**Prognose-Trefferquoten sind beratend.** Sie erweitern keine Rechte
+(R2-Frage 7). Voraussetzung für eine spätere Kopplung an Rechte:
 
-### 6.4 Folgefehler-Schleife und Herkunftsmerkmal
+- vorregistrierte, quantifizierte Prognosen;
+- vollständige Zählung der aufgelösten und unaufgelösten Prognosen;
+- Kalibrierung *und* Nutzen.
 
-Herkunft eines Bugs, ein Wert pro Issue:
+### 7.3 Steuerung: Vorrang, Totband, Verweildauer, Wiederanlauf
 
-- `origin:regression` (zusätzlich `Regression-of: #N`, den es seit v2.67 gibt);
-- `origin:discovered` (vorhandener Fehler, neu gefunden);
-- `origin:operator` (vom Owner im Betrieb bemerkt).
+Die Steuerung folgt aus R2-Befund 7 und R2-Frage 5.
 
-Gesetzt wird die Herkunft dort, wo sie bekannt ist:
+- **Ein Schreiber.** Budgets und Parameter schreibt nur
+  `optimize.py register`. Es gilt eine feste Vorrangordnung:
+  1. Sicherheit und Stopp;
+  2. Pflichtbeobachtung (Wächter);
+  3. budgetierte Optimierung.
+- **Unbekannt ist kein Produktproblem.** Verschlechtern sich O1 oder O2, ohne
+  dass ein *gemessener* Prozessverlust das erklärt, aber Messdaten fehlen, so
+  lautet der Befund „unbekannt“. Die nächste Maßnahme ist dann, die Lücke zu
+  schließen, nicht das Prozessbudget zu kürzen.
+- **Totband, Mindestbeobachtungen, Schrittgrenzen, Verweildauer.** Ein
+  Parameter ändert sich nur:
+  - mit einer Mindestzahl Beobachtungen;
+  - wenn der Effekt außerhalb eines Totbands liegt;
+  - höchstens um die größte Schrittweite;
+  - frühestens nach seiner Mindestverweildauer.
 
-- Ein Agent, der einen Folgefehler anlegt, setzt `regression`.
-- Die Steward-Sitzung setzt `operator`, wenn der Owner einen Fehler im Chat
-  meldet.
+  Eine Gegenrichtung innerhalb der Verweildauer ist unzulässig.
+- **Verfall** (`review_by` erreicht) ist eine versionierte Entscheidung. Er
+  setzt auf den Rahmen-Startwert zurück und erweitert nie die aktuelle
+  Autorität.
+- **Pausieren statt abschalten.** Teure Analyse kann pausieren, Wächter laufen
+  weiter. Jede pausierte Schleife hat eine **ereignisbasierte
+  Wiederanlaufbedingung**, zum Beispiel: neuer Folgefehler → Folgefehler-Analyse
+  läuft wieder an.
+- **Rückbau nach Nutzen.** Eine Schleife wird nach geprüfter Abdeckung, Nutzen
+  und Kosten zurückgebaut, nicht nach der Zahl ihrer Eingriffe.
+- **Tests mit Störungen.** Wiedergegebene oder synthetische Störungen prüfen,
+  ob ein Ereignis übersehen wird, wie schnell die Reaktion kommt und ob die
+  Steuerung schwingt. Live-Streuung allein ist in kleinen Projekten schwache
+  Evidenz.
 
-Das GitHub-Konto des Autors trennt die Fälle nicht, wenn alle Issues über
-dasselbe Konto entstehen. Kennzahl: Folgefehler je gemergtem Issue, getrennt
-nach Tier, plus die Zeit bis zur Entdeckung. Ein fehlender Trailer zählt nicht
-als null Defekte. Stichproben gleichen ab (Codex Befund 5).
-
-### 6.5 Blinde-Flecken-Schleife
-
-Das ist die Antwort auf „fehlende Signale schließt ein Regelkreis selbst“. Das
-Fragen-Register hält fest, welche Frage jede Schleife beantwortet braucht und
-welches Feld sie liefert. Beispiel: „Anteil Folgefehler?“ ← `origin:*`.
-
-- **Abdeckung messen.** `optimize.py register check` berechnet je Frage, wie
-  viele der relevanten Elemente das Feld tragen. Elemente sind neue Bugs der
-  Periode. Liegt die Abdeckung unter dem Ziel, ist das ein blinder Fleck.
-- **Unbekannte Fragen finden.** Die Arbeitsschleife liest eine Stichprobe
-  neuer Issues, Commits und Journalzeilen (LLM). Sie sucht nach
-  wiederkehrenden Freitext-Mustern, die eine Dimension tragen, für die es kein
-  Feld gibt. Beispiele sind „follow-up of #N“, „after deploy of #N“ und
-  „review residuals“. Fund → neue Frage mit Feldvorschlag und Prognose, wofür
-  die Antwort gebraucht wird.
-- **Label-Hygiene.** Zwei Label-Familien für dieselbe Dimension werden
-  gemeldet, ebenso Pflichtfelder, die in der Praxis fehlen.
-- **Eskalationsleiter.** Jede Stufe folgt erst, wenn die Abdeckung zwei
-  Perioden unter Ziel lag:
-  1. Hinweis im Issue-Template bzw. Steward-Auftrag;
-  2. Pflichtfeld im Issue-Helfer des Projekts;
-  3. weiche Notiz in `check_issues.py`;
-  4. hartes Gate. Stufe 4 entscheidet der Owner.
-- **Rückbau.** Wertet keine Schleife ein Feld drei Perioden lang aus, schlägt
-  die Schleife vor, es zu entfernen.
-
-### 6.6 Kostenschleife und Sättigung
-
-- **Kosten.** Gezählt werden die Kosten der Verbesserungsmaschine selbst:
-  Routine-Läufe, Evaluationen, Reviews, Owner-Minuten. Sie laufen in das
-  R1-Budget ein, wobei Läufe ohne Arbeit mitzählen. Ist das Budget erschöpft,
-  laufen Routinen bis zur nächsten Periode nur noch als billiger Vorab-Check.
-- **Sättigung.** Jede Schleife im Register hat ein Gesundheitsmaß:
-  - Entscheidungen pro Periode;
-  - Prognose-Trefferquote;
-  - Kosten.
-
-  Drei Perioden ohne Entscheidung → die Schleife pausiert (die Meta-Schleife
-  schlägt es vor). Eine neue Schleife entsteht nur, wenn ein Verlust oder eine
-  Frage im Register nachweislich unabgedeckt ist. Die Obergrenze für aktive
-  Schleifen ist eine Regel (Start: 6). So zieht das System die Grenze „bis zu
-  einem gewissen Grad“ selbst und belegt sie.
-
-Startbestand im Schleifen-Register:
-
-1. Arbeitsschleife
-2. Meta-Schleife
-3. Folgefehler-Schleife
-4. Blinde-Flecken-Schleife
-5. Kostenschleife
-6. Ergebnisschleife (O1/O2 → R4)
-
-### 6.7 Wer die Schleifen ausführt
+### 7.4 Wer die Schleifen ausführt
 
 Der Plan legt kein Modell fest. Jede Schleife muss mit jedem unterstützten
 Harness laufen, mindestens mit Claude Code und Codex.
 
-- **Aufträge harness-neutral.** Die Aufträge liegen als harness-neutrale
-  Dokumente unter `docs/process/`: `improvement-weekly.md`,
-  `improvement-monthly.md` und der Prüfauftrag. Die Harness-Adapter
-  (`.claude/commands/`, `AGENTS.md`) verweisen nur darauf, wie bei den
-  übrigen Prozessbefehlen. Ergebnisse sind Dateien und Register-Befehle, keine
-  harness-spezifischen Werkzeuge.
-- **Unabhängigkeit über die Sitzung.** Eine unabhängige Prüfsitzung ist eine
-  andere Sitzung als die vorschlagende, ohne deren Gesprächsverlauf. Sie
-  bekommt nur Register, Berichte und Belege. Welches Modell und welcher
-  Harness prüfen, ist Projektkonfiguration im Mandat (`reviewers`), nicht Teil
-  des Prozesses. Eine andere Modellfamilie als der Vorschlagende ist empfohlen,
-  wo verfügbar, aber nicht vorgeschrieben.
-- **Akteur im Log.** Das Register-Log hält Harness und Modell jedes Akteurs
-  fest. So kann die Meta-Schleife Prognose-Trefferquoten je Ausführer
-  vergleichen, wenn das Projekt mehrere nutzt.
+- **Harness-neutrale Aufträge.** Die Aufträge liegen unter `docs/process/`.
+  Die Harness-Adapter (`.claude/commands/`, `AGENTS.md`) verweisen nur darauf.
+  Ergebnisse sind Dateien und Register-Befehle.
+- **Unabhängige Prüfsitzung.** Sie ist mehr als eine frische Sitzung
+  (R2-Frage 8):
+  - Sie implementiert nicht selbst.
+  - Sie liest Belege nur an der exakten Revision, ohne Schreibrecht.
+  - Sie hat die geltenden Regeln.
+  - Sie erbt keinen Gesprächsverlauf.
+  - Ihre Prüfungen sind reproduzierbar.
+  - Sie hat eigene Autorität.
+- **Protokoll und Modellfamilie.** Modellfamilie, Rolle und Herkunft jedes
+  Akteurs stehen im Log. Wo die Tier-Regeln eine Prüfung durch eine andere
+  Modellfamilie verlangen, gilt das weiter, sofern verfügbar. Sonst wird die
+  Einschränkung ausdrücklich vermerkt. §7.4 ersetzt die Tier-Regeln nicht.
 
-## 7. Rechte
+### 7.5 Schleifen-Register und Sättigung
+
+Startbestand in v2.68: **zwei geplante Schleifen** (wöchentlich, monatlich)
+plus Wächter. Folgefehler, Abdeckung, Kosten und Ergebnis sind Abschnitte des
+Wochenberichts, keine eigenen Taktgeber.
+
+Eine weitere Schleife mit eigenem Takt entsteht nur, wenn zwei Bedingungen
+erfüllt sind:
+
+1. Ein Verlust oder eine Frage ist nachweislich unabgedeckt.
+2. Der Wochenbericht kann sie nicht abdecken.
+
+Die Obergrenze aktiver Schleifen ist ein Rahmenwert. Gemessen wird
+Stabilisierung, nicht Aktivität:
+
+- übersehene Ereignisse in Störungstests;
+- Reaktionszeit;
+- Richtungswechsel von Parametern;
+- Kosten.
+
+## 8. Rechte
 
 | Änderung | Steward allein | Owner |
 |---|---|---|
-| Experiment vorschlagen, stoppen | ✓ | — |
-| Übernahme nach `pass` | nur wenn `steward_may` es erlaubt und der Evaluator gebunden ist (§8.2) | sonst |
-| Signal oder Regel innerhalb der Rahmen-Spannen | ✓, mit Prognose und `review_by`; umkehrbar | sieht es im Monatsbericht |
-| Feld/Label Eskalationsstufe 1–3 | ✓ | — |
-| Rahmen (Spannen, R5, Evaluator, diese Tabelle), Stufe 4, Gates, Tiers | — | ✓, nach unabhängiger Prüfsitzung (§6.7) |
+| Maßnahme vorschlagen, laufenden Versuch stoppen | ✓ | — |
+| Parameter aus `tunable` im Rahmen (Typ, Spanne, Schritt, Verweildauer) | ✓, mit Prognose; umkehrbar | sieht es im Monatsbericht |
+| Bedeutung, Grundgesamtheit, Nenner, Abdeckungs- und Prüfregel, Untergrenze, Recht, Budget | — | ✓, nach unabhängiger Prüfsitzung (§7.4) |
+| Neues Signal nach der Parallelperiode übernehmen | — | ✓ (die Parallelperiode ist Beobachtung, keine Freigabe) |
+| Feld-Eskalation Stufe 1–2 | ✓ | — |
+| Feld-Eskalation Stufe 3–4, Gates, Tiers | — | ✓ |
+| Übernahme eines Experiments | **v2.68: nur Owner.** Erst ab v2.69 mit vertrauenswürdigem Bewerter (§9.2) delegierbar über `steward_may` | ✓ |
 | Ablation geschützter Kontrollen (Sicherheit, Tier, Review-Unabhängigkeit, Abnahme) | — | nie per Optimierungsmandat |
 
-## 8. Experimente (Korrekturen am v2.67-Lebenszyklus)
+Die delegierte Übernahme aus v2.67 wird in v2.68 also eingeschränkt. Das ist
+eine Verhaltensänderung und deshalb Teil des Owner-Releases.
 
-### 8.1 Evidenz, die ein Projekt liefern kann
+## 9. Experimente (v2.69, Voraussetzung jeder delegierten Übernahme)
 
-Live-A/B-Tests für kleine Effekte sind auf Projektebene nicht erreichbar. Bei
-einem Variationskoeffizienten von 1 braucht ein 20-%-Effekt rund 390 Issues
-pro Arm (Codex Befund 4). Deshalb:
+### 9.1 Evidenz, die ein kleines Projekt liefern kann
 
-- **Primär Ereignisraten mit vielen Fällen**, etwa der Anteil der
-  Reviews, die in Runde 1 blockieren. Ein solcher Anteil reagiert innerhalb
-  von Wochen, weil jedes Issue eine Beobachtung liefert.
-- **Gepaarter Offline-Screen** für Mechanismen, die Agentenverhalten ändern:
-  - 8–12 Aufgaben einer Klasse;
-  - Prä-Fix-Snapshot, exportiert ohne künftige Git-Objekte, Pläne und
-    Erinnerungen;
-  - private Abnahmetests außerhalb des Schreibzugriffs;
-  - Nachweis fail-before/pass-after mit dem historischen Patch;
-  - 2–3 Durchläufe, zufällige Reihenfolge.
+Ereignisraten lösen das Stichprobenproblem nicht. Jedes Issue bleibt eine
+unabhängige Beobachtung. Der Vergleich von 50 % mit 40 % braucht rund 388
+Issues pro Arm (R2-Befund 6). Daraus folgt:
 
-  Der Screen dient dem Aussortieren, er beweist nichts (Codex Befund 6).
-- **Eine geplante Endauswertung**, keine wiederholten Blicke.
-  `inconclusive` ist ein gültiges Ergebnis und behält die Baseline.
+- **Vorab festgelegt** werden:
+  - Schätzgröße (Estimand), absoluter bzw. relativer Effekt;
+  - Analyseeinheit und Umgang mit Clustern;
+  - Stichprobenbudget;
+  - Fehlwert- und Reiferegeln;
+  - eine maschinell prüfbare Regel für `pass | fail | inconclusive`.
+- **Untergrenzen bleiben getrennt.** Weniger Fänge in Runde 1 sind kein Beleg
+  für bessere Qualität. Die Abnahme- und Folgefehler-Untergrenzen werden
+  eigens geprüft.
+- **Ehrliche Kennzeichnung.** Reicht das Budget nicht für den Nachweis, heißt
+  das Ergebnis `inconclusive`. Eine Übernahme ist dann höchstens ein
+  **umkehrbarer Versuch** mit der Kennzeichnung „diagnostische Evidenz, kein
+  nachgewiesener Effekt“. Wächter überwachen ihn weiter, Rückbau-Auslöser
+  sind festgelegt.
+- **Gepaarter Offline-Screen** (P5) bleibt ein Aussortier-Instrument.
 
-### 8.2 Evaluator-Bindung
+### 9.2 Vertrauenswürdiger Bewerter
 
-Die Kriterien stehen als strikt geparster ```` ```json ````-Block in
-`## Criteria`, eingefroren mit dem Rest. Sie enthalten:
+Bewertet wird von einem **getrennt aufgelösten Bewerter-Commit** aus (R2-Befund 2):
 
-- primäre Metrik, Richtung, Schwelle;
-- Untergrenzen;
-- Grundgesamtheit;
-- Evaluator-Version (dev-process-Tag);
-- Datensatz-Hash.
+- **Basis.** Das ist der Basis-Tag, aufgelöst auf die unveränderliche
+  Commit-ID.
+- **Eigener Baum.** Der Bewerter läuft in einem eigenen exportierten Baum,
+  mit vollständigem Code-, Import- und Abhängigkeitsabschluss und
+  eingefrorener Messkonfiguration.
+- **Kandidat ist nur Gegenstand.** Kandidaten-Code ist nie Import oder
+  ausführbare Eingabe des Bewerters.
+- **Bindung.** Das Ergebnis ist gebunden an Bewerter-Commit, Candidate-/Base-SHA,
+  Terms-Hash, Zuteilungsmanifest und Rohdaten-Manifest.
+- **Zwei Zeitpunkte.** Die vorab erklärte Erhebungs- und Kohortenspezifikation
+  steht im Freeze. Der Datensatz-Hash entsteht erst bei der Auswertung.
+- **Pfadliste nur zusätzlich.** Die Liste geschützter Pfade bleibt als
+  Ergänzung, sie ersetzt die Grenze nicht.
+- **Negativtest.** Ein Kandidat ändert einen transitiven Leser, etwa
+  `dispatch.issue_token_coverage`. Das vertrauenswürdige Urteil darf sich
+  dadurch nicht ändern.
 
-`optimize.py evaluate` schreibt das Ergebnis mit Bindung: Candidate-/Base-SHA,
-Terms-Hash, Evaluator-Version, Manifest der Rohläufe. `move … adopted` prüft
-die Bindung und rechnet neu. Ein beschreibbares `pass`-Feld genügt nicht.
-Kandidaten dürfen Messpfade nicht verändern: `process_kpis.py`, `optimize.py`,
-`check_*`, Testauswahl und deren Tests. Die Pfadliste wird aus dem
-**Basis-Tag** geladen, nicht aus der Kandidaten-Revision. Eine
-JSON-Record-Migration (früher D5) wird zurückgestellt. Sie beseitigt das
-Manipulationsrisiko nicht und kostet eine Migration.
+### 9.3 Zuteilung
 
-### 8.3 Zuteilung
+- **Vorab festgelegt.** Zulässigkeit und Zuteilung werden vor der Auswahl der
+  Arbeit persistiert, je Issue einmal.
+- **Zufälliges Salz.** Die unabhängige Prüfsitzung erzeugt das Salz zufällig
+  beim `REVIEWED`-Eintrag. So kann der Vorschlagende kein Salz suchen, das zu
+  bekannten Issue-Nummern passt.
+- **Geblockt nach Tier.**
+- **Zuteilung und Exposition getrennt.** Abbruch, Fehler und Abweichung werden
+  erfasst. Ausgewertet wird alles Zugeteilte.
+- **Protokoll.** Modell- und Umgebungswechsel sowie Wechselwirkungen werden
+  protokolliert.
 
-Die Paritätsauswahl wird ersetzt. Die Zuteilung nimmt einen Hash aus
-Issue-Nummer und einem Salz, das beim Freeze festgelegt wird, geblockt nach
-Tier. Für jedes Issue wird die Zuteilung **einmal vor Arbeitsbeginn**
-persistiert, getrennt von der tatsächlichen Exposition (Abbruch, Fehler,
-Abweichung). Ausgewertet werden alle zugeteilten Issues. Nicht zulässige
-Issues sind keine Kontrollen.
+### 9.4 Übernahme bleibt erhalten
 
-### 8.4 Übernahme bleibt erhalten
+`adopted` trägt atomar einen Eintrag in `optimization.local.json → adopted[]`
+ein (`flag`, `record`, `terms_hash`, `release`). `active()` meldet „on
+(adopted OPT-n)“, der Pilot-Sinn bleibt getrennt.
 
-`adopted` trägt einen Eintrag in `optimization.local.json → adopted[]` ein
-(`flag`, `record`, `terms_hash`). Für solche Flags meldet `active()` „on
-(adopted OPT-n)“. Der Pilot-Sinn von `active()` bleibt davon getrennt.
-Rückbau heißt: Eintrag entfernen und den Record nach `rolled-back` setzen.
-Ein Test prüft das Verhalten **nach** der Übernahme (Codex Befund 7). Eine
-globale Default-Änderung im Template bleibt eine Owner-Entscheidung.
+Weitere Regeln:
 
-## 9. Antwort auf die Codex-Befunde
+- **Rückbau:** Eintrag entfernen und den Record nach `rolled-back` setzen.
+- **Kompatibilität:** Ein Release, das die Maßnahme nicht kennt, meldet sie
+  als `unknown`, nicht als `on`.
+- **Test:** Er prüft das Verhalten nach der Übernahme.
+
+## 10. Antwort auf die Refutationsbefunde
+
+### Runde 2
 
 | # | Befund | Antwort |
 |---|---|---|
-| 1 | Experiment kann den Maßstab ändern | §8.2 Bindung und geschützte Messpfade aus dem Basis-Tag; §7 verbietet Ablation geschützter Kontrollen; R5: nicht prüfbare Untergrenze → keine Übernahme |
-| 2 | „Flag aus, verhaltensneutral“ nicht definiert | Tupel-Wahrheitswert behoben (`Activation`, 0557b2e). Autonome Releases erst nach P6: Inert-Grenze (allowlisted, lazy geladene Payload-Pfade), Policy aus dem Vortag, Negativtests (Tupel-Mutant, Import vor Guard, kein/abgelaufenes Mandat, Telemetrie aus). Die Einrichtung der Grenze ist selbst ein Owner-Release |
-| 3 | Parität ist keine Zufallszuteilung; Überlappung | Überlappung behoben (ein Live-Versuch pro Projekt, 0557b2e); §8.3 Zuteilung |
-| 4 | Pass-Regel, n, wiederholte Blicke | §8.1: Ereignisraten, eine Endauswertung, `inconclusive` legitim, keine Multimetrik-Suche |
-| 5 | `flow` meldet Unvollständiges als gemessen | Behoben in 0557b2e: Token-Abdeckung je Feld, `endpoint` deploy/merge, `deployed=false` → failed, Escape-Fenster ab Deploy. Defekte per Stichprobe abgleichen (§6.4) |
-| 6 | Worktrees isolieren nicht | §8.1: Export ohne künftige Objekte, private Tests, fail-before/pass-after; nur Screening |
-| 7 | Übernahme geht verloren | §8.4 |
-| 8 | Upstream-Kanal unzuverlässig, Exportgrenze | P7, nachrangig: konfiguriertes Ziel statt `_src_path`; Umschlag mit Allowlist nur aggregierter Zahlen; Idempotenzschlüssel `OPT-id + terms_hash`; vor dem Senden nach Marker suchen; Import nur als Daten, mit Compare-and-Swap auf die Revision |
-| 9 | Routine ohne Budget/Lease | P7: Vorab-Check ohne LLM, Lease mit Ablauf, Versuchszähler, Grabsteine für abgelehnte Signale (erneut nur bei neuer Evidenz), Kosten in §6.6 |
-| 10 | Handover-Paket unterspezifiziert | `scoped-handover` ist nicht mehr gesetzt. Kommt es aus den Daten, gilt Codex' Paketschema als Eingangsbedingung |
+| 1 | Änderungen im Rahmen verschieben, was als Erfolg oder blinder Fleck gilt | §4 äußerer Rahmen mit geschützten Bedeutungen, Grundgesamtheiten, Prüfregeln; nur `tunable` verstellbar; Prüfung auch bei Ablauf und direkter Bearbeitung; neues Signal braucht Owner-Entscheidung; Trefferquoten nur beratend (§7.2) |
+| 2 | Pfadliste isoliert den Bewerter nicht | §9.2 getrennter Bewerter-Baum am unveränderlichen Commit, Kandidat nie importiert, Negativtest mit transitivem Leser |
+| 3 | Verlustbuch mischt Verzögerung, Belegung, Zählwerte, Tokens | §5.1 vier getrennte Maße, Proxys nur diagnostisch, keine Doppelzählung; adaptives Budget R1 zurückgestellt, absolutes Owner-Budget (§4) |
+| 4 | Ein Herkunftsfeld bildet Owner-gemeldete Folgefehler nicht ab | §6 zwei Achsen, `unknown`, Konfidenz, Abdeckung und Güte getrennt; A6 um zwei Fälle erweitert |
+| 5 | Token-Abdeckung je Datei statt je Aufruf | **Behoben in 92a3e49:** Vollständigkeit je Nutzungsereignis; nicht-JSON-Zeilen decken nichts ab; Testfall aus der Refutation plus Mutationsprüfung |
+| 6 | Ereignisraten lösen das Stichprobenproblem nicht | §9.1 vorab festgelegte Schätzgröße und Regel, `inconclusive` ehrlich, umkehrbarer Versuch statt Nachweis; delegierte Übernahme erst v2.69 |
+| 7 | Rückbau stiller Schleifen und gemeinsames Budget legen die Erholung lahm | §5.3 Wächter mit reservierter Zulage; §7.3 ein Schreiber, Vorrang, „unbekannt“ statt Produktproblem, Totband, Verweildauer, Wiederanlauf, Rückbau nach Nutzen |
 
-Gestrichen bzw. zurückgestellt (Codex Frage 5):
+### Runde 1 (Stand nach Runde 2)
 
-- Fünf-Signal-Autodetektor (ersetzt durch Verlustbuch und wöchentliches LLM);
-- sequentielle und Multimetrik-Statistik;
-- universeller Neutralitätsprüfer;
-- Benchmark-Fabrik;
+| # | Befund | Stand |
+|---|---|---|
+| 1 | Experiment ändert den Maßstab | §4, §9.2 |
+| 2 | Flag-aus-Neutralität | Tupel-Wahrheitswert behoben (0557b2e); autonome Releases erst mit P6 |
+| 3 | Zuteilung, Überlappung | Überlappung behoben (0557b2e); §9.3 |
+| 4 | Pass-Regel, n | §9.1 |
+| 5 | `flow`-Vollständigkeit | behoben (0557b2e, 92a3e49) |
+| 6 | Offline-Isolation | P5, Richtung bestätigt |
+| 7 | Übernahme geht verloren | §9.4 (v2.69) |
+| 8 | Upstream-Kanal | P7 |
+| 9 | Routine-Budget, Lease | P7; Wächter-Zulage §5.3 |
+| 10 | Handover-Paket | kein vorab gewählter Mechanismus mehr |
+
+## 11. Abnahme (EARS)
+
+- **A1** When `process_kpis.py losses` runs, the system shall report occupancy
+  (agent hours), delay (issue hours), owner effort and tokens as separate
+  measures with evidence count and data quality. It shall never sum them,
+  never count a breakdown twice, and never report `missing` as zero.
+- **A2** When `process_kpis.py outcomes` runs, the system shall report per epic
+  the time to the framework's usable marker, mark administrative closure as a
+  weaker proxy, and report `unavailable` with a reason where the project has
+  no epics, no channel field or no operations data.
+- **A3** When a register entry changes through `set`, `revert`, expiry or a
+  direct file edit, `optimize.py register check` shall refuse it unless the
+  parameter is listed in `tunable` and the change respects type, range, step,
+  dwell and a log entry bound to a register revision.
+- **A4** When a change touches a meaning, population, denominator, coverage or
+  audit rule, floor, right or budget, the system shall require an owner
+  decision recorded after an independent review session.
+- **A5** When a signal definition changes, the system shall report the old and
+  new values side by side for one period. The new definition shall apply only
+  after an owner decision.
+- **A6 (Herkunft, Beispiel des Owners)**
+  - When fewer than the framework's target share of bugs in the population
+    carry the cause and channel fields, the weekly loop shall record a blind
+    spot and propose the issue-template field.
+  - When the owner reports a regression introduced by #N, the record shall
+    carry cause `regression` with `Regression-of: #N` and channel `operator`,
+    and it shall count in both the regression share and O2.
+  - While every bug carries the fields but the audited sample's agreement is
+    below target, the regression share shall stay `estimated`.
+  - Once coverage, audited agreement and window maturity all meet target,
+    `losses` shall report the regression share as `measured`.
+- **A7** When the weekly loop finds a recurring free-text pattern, it shall
+  propose a provisional question only with evidence, a named decision consumer
+  and a duplicate check. "No new question" shall be a valid result.
+- **A8** While a loop is paused, its sentinel shall keep running. When the
+  sentinel's event fires, the loop shall resume.
+- **A9** If O1 or O2 worsens while process data are `missing`, then the system
+  shall report "unknown" and propose closing the gap, and shall not lower the
+  optimization budget.
+- **A10** When a parameter changes, the system shall refuse a reverse change
+  within its dwell period and any change below the deadband or above the step
+  limit.
+- **A11** While v2.68 is installed, `optimize.py move … adopted` shall require
+  an owner decision whatever `steward_may` says.
+- **A12 (v2.69)** When a candidate changes a transitive measurement reader,
+  the trusted evaluator's verdict shall not change.
+- **A13 (v2.69)** When an experiment is adopted, `active()` shall report it on
+  outside any pilot window. A release that does not know the measure shall
+  report it unknown. A rollback shall report it off.
+
+## 12. Pakete und Reihenfolge
+
+| Release | Paket | Inhalt | Nutzen |
+|---|---|---|---|
+| v2.68 | P1 | `losses` (vier Maße, Proxys), `outcomes`, Ops-Schema; Zwei-Achsen-Herkunft (Vertrag, Template-Hinweis, Leser) | Woche 1 |
+| v2.68 | P2 | äußerer Rahmen im Mandat, `tunable`, `optimize.py register set/revert/check`, Log, Wächter | Woche 1 |
+| v2.68 | P3 | Aufträge wöchentlich (eine Maßnahme, absolutes Budget) und monatlich (beratend); Berichtsformat; Übernahme nur durch den Owner | Woche 2 |
+| v2.69 | P4 | vertrauenswürdiger Bewerter, Zuteilung, dauerhafte Aktivierung, vorab festgelegte Auswertungsregel | vor der ersten delegierten Übernahme |
+| später | P5–P7 | Offline-Screen, Inert-Grenze für autonome Flag-aus-Releases, Upstream-Kanal und Routine-Lease | wenn die Daten den Bedarf zeigen |
+
+Zurückgestellt:
+
+- adaptives Budget R1 (erst mit gemessenem Abrechnungsvertrag);
+- an Trefferquoten gekoppelte Rechte;
+- automatische Feld-Eskalation;
+- Schleifen mit eigenem Takt über die zwei geplanten hinaus;
 - JSON-Records;
 - Topologiesuche.
 
-## 10. Abnahme (EARS)
+## 13. Offen an die nächste Refutation
 
-- **A1** When `process_kpis.py losses` runs, the system shall report each loss
-  class in hours with evidence count and data quality, and shall never report
-  a `missing` class as zero.
-- **A2** When `process_kpis.py outcomes` runs on a repository with native
-  sub-issues, the system shall report per epic the closed-sub-issue rate, the
-  time to the configured usable marker, and the age of open epics.
-- **A3** When a register entry changes, the system shall append old value, new
-  value, reason, prognosis and actor to the register log, and `revert` shall
-  restore the previous version.
-- **A4** When an entry's `review_by` passes, the system shall fall back to the
-  conservative default and list it in the next report.
-- **A5** When a signal definition changes, the system shall report the old and
-  new values side by side for one period before the new one applies.
-- **A6 (Herkunft, Beispiel des Owners)**
-  - When fewer than the target share of new bugs in a period carry an origin
-    field, the weekly loop shall record a blind spot in the question register
-    and propose the issue-template field.
-  - While coverage stays below target for two periods, the monthly loop shall
-    propose the next escalation step.
-  - Once coverage reaches target, `losses` shall report the regression share
-    with quality `measured`.
-- **A7** When the weekly loop finds a recurring free-text pattern that encodes
-  a dimension no field carries, it shall add a question with a field proposal
-  and prognosis.
-- **A8** When a loop records no decision for three periods, the monthly loop
-  shall propose pausing it. The system shall reject a new loop that names no
-  uncovered loss or question.
-- **A9** When an experiment is adopted, `active()` shall report it on outside
-  any pilot window. When the adoption is rolled back, `active()` shall report
-  it off.
-- **A10** When `move … adopted` runs, the system shall recompute the result
-  from the bound evaluator version and raw-run manifest, and shall refuse if a
-  candidate changed a protected measurement path.
-- **A11** If O1 or O2 worsens for two periods without a matching process loss,
-  then the system shall set the optimization budget to its minimum and report
-  a product signal.
-- **A12** When the improvement machinery's own cost exceeds the R1 budget, the
-  routines shall run only their cheap preflight until the next period.
-
-## 11. Pakete und Reihenfolge
-
-Die Reihenfolge folgt dem schnellen Nutzen. P1 bis P3 liefern ab der ersten
-Woche Erkenntnisse, ohne dass ein Experiment läuft.
-
-| Paket | Inhalt | Nutzen ab |
-|---|---|---|
-| P1 | `losses`, `outcomes`, Ops-Schema (nur lesend) | Woche 1 |
-| P2 | Register + `optimize.py register`, Startbestand Schleifen, Regeln, Fragen; Herkunftsmerkmal als erste Frage | Woche 1 |
-| P3 | Aufträge wöchentlich und monatlich, Berichtsformat | Woche 2 |
-| P4 | Lebenszyklus: §8.2–8.4 | vor dem ersten Live-Versuch |
-| P5 | Offline-Screen (minimal, §8.1) | wenn ein Mechanismus Agentenverhalten ändert |
-| P6 | Inert-Grenze für autonome Flag-aus-Releases | danach |
-| P7 | Upstream-Kanal und Routine-Lease | wenn P1–P4 zwei bis vier Wochen gelaufen sind |
-
-v2.68 enthält P1–P4. P5–P7 folgen als eigene Releases, sobald die Daten den
-Bedarf zeigen.
-
-## 12. Offen
-
-**An die Refutation (nur der neue Teil, §4–§8):**
-
-1. **Selbstreferenz.** Kann die Meta-Schleife über Regeländerungen innerhalb
-   der Spannen ihren eigenen Maßstab verschieben? Ein Beispiel wäre, R4 so
-   anzupassen, dass Produktsignale nie greifen. Reichen die Rahmen-Spannen und
-   der Prognose-Ist-Abgleich?
-2. **Goodhart im Verlustbuch.** Lassen sich Verluststunden durch
-   Umklassifizieren oder Issue-Splitting senken, ohne dass die Lieferung
-   besser wird? Bindet O1 auf Epic-Ebene das ausreichend?
-3. **Freitext-Muster.** Ist die LLM-Suche nach Freitext-Mustern (A7) als
-   Entdecker blinder Flecken tragfähig, oder erzeugt sie Rauschen und Feldflut?
-   Reicht der Rückbau nach drei Perioden?
-4. **Sättigung.** Sind „drei leere Perioden“ und eine feste Obergrenze ein
-   sinnvoller Sättigungsmechanismus? Oder braucht es ein Maß dafür, ob eine
-   Schleife stabilisiert?
-5. **Schwankung.** Ist die Budgetformel R1 robust gegen schwankende Daten in
-   kleinen Projekten, oder braucht sie Glättung bzw. Hysterese?
+1. Ist der äußere Rahmen (§4) klein genug, damit der Owner ihn pflegt, und
+   vollständig genug, um R2-Befund 1 zu schließen?
+2. Reicht die Prüfung „Änderung ohne Log-Eintrag ist ein Fehler“ gegen direkte
+   Dateibearbeitung, oder braucht es eine Signatur bzw. eine Gate-Prüfung beim
+   Push?
+3. Sind vier getrennte Maße ohne gemeinsame Währung noch entscheidbar für
+   „größter Hebel“, oder braucht die Arbeitsschleife eine explizite,
+   owner-gesetzte Gewichtung im Rahmen?
