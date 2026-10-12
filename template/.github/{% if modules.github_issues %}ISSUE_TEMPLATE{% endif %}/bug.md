@@ -12,6 +12,7 @@ labels: type:bug
 
 - Discovered during: <the issue/story/plan being worked when this surfaced, #N — or 'standalone'>
 - Introduced by: <the issue whose merged change caused it, #N — or 'unknown'; the fix commit carries `Regression-of: #N`>
+- Origin labels (two axes, set both): cause — `cause:regression` (with the line above), `cause:preexisting` or `cause:unknown`; channel — who found it: `channel:operator`, `channel:agent`, `channel:monitor` or `channel:other`. An owner-reported regression carries `cause:regression` and `channel:operator`.
 
 <When an origin issue exists, comment on it referencing this bug so the trail
 runs both ways; keep the current change focused and fix the bug here.>

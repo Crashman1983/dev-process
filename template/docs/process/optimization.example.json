@@ -1,15 +1,47 @@
 {
-  "_comment": "The project's optimization mandate (docs/process/optimization.md, 'Decision rights'). Copy to docs/process/optimization.local.json and set the values with the owner; without that file analysis is allowed and no trial starts. Read by scripts/process/optimize.py: `max_pilot_days` (a trial's `until` may lie at most this far ahead when it starts) and `steward_may` (rights the owner delegates: `start` a trial, `roll-back`, `reject`, `adopt`; stopping is everybody's and needs no right). The other keys are the mandate's text for whoever designs and judges a trial — goals in priority order above the floors, the floors no trial may lower, the optimization budget as a share of the measured tokens and execution time over the window, and the starting points to calibrate against the baseline. Changing this file is the owner's decision (lowering a floor, widening the steward's rights, raising a budget) and is reviewed like any process configuration.",
-  "goals": ["lead time", "tokens", "follow-up defects", "owner effort", "recovery time"],
+  "_comment": "The project's optimization mandate (docs/process/optimization.md, 'Decision rights'). Copy to docs/process/optimization.local.json and set the values with the owner; without that file analysis is allowed and no trial starts. Read by scripts/process/optimize.py: `max_pilot_days` (a trial's `until` may lie at most this far ahead when it starts) and `steward_may` (rights the owner delegates: `start` a trial, `roll-back`, `reject`, `adopt`; stopping is everybody's and needs no right). The other keys are the mandate's text for whoever designs and judges a trial — goals in priority order above the floors, the floors no trial may lower, the optimization budget as a share of the measured tokens and execution time over the window, and the starting points to calibrate against the baseline. Changing this file is the owner's decision (lowering a floor, widening the steward's rights, raising a budget) and is reviewed like any process configuration. `outcomes` (read by process_kpis.py outcomes, telemetry module) says what value means here: how an epic is recognised beside native sub-issues, when it counts as usable (`epic-closed`, a proxy, or `label:<name>` / `title:<text>` naming the acceptance sub-issue), which labels mark a bug and a disruptive one, and the coverage the two bug-origin axes (cause:*, channel:*) must reach before the blind spot closes.",
+  "goals": [
+    "lead time",
+    "tokens",
+    "follow-up defects",
+    "owner effort",
+    "recovery time"
+  ],
   "floors": [
     "no gate disabled or bypassed by a trial",
     "no tier lowered and no review independence reduced",
     "acceptance criteria and the Definition of Done unchanged",
     "no change to security boundaries or data without its own Tier 3 review"
   ],
-  "budget": {"share_tokens": 0.10, "share_hours": 0.10, "window_days": 30, "setup_counted_apart": true},
+  "budget": {
+    "share_tokens": 0.1,
+    "share_hours": 0.1,
+    "window_days": 30,
+    "setup_counted_apart": true
+  },
   "baseline_issues": 25,
   "follow_up_days": 30,
   "max_pilot_days": 30,
-  "steward_may": ["start", "roll-back", "reject"]
+  "steward_may": [
+    "start",
+    "roll-back",
+    "reject"
+  ],
+  "outcomes": {
+    "epic_title_prefix": "[EPIC]",
+    "epic_labels": [
+      "type:epic",
+      "epic"
+    ],
+    "usable": "epic-closed",
+    "bug_labels": [
+      "bug",
+      "type:bug"
+    ],
+    "disruptive_labels": [
+      "priority:high",
+      "priority:critical"
+    ],
+    "coverage_target": 0.8
+  }
 }

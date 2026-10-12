@@ -23,6 +23,7 @@ change or a published release does not end an experiment.
 | Owner effort | owner `DECISION` lines per issue | `flow` (proxy — active time and rescue interventions are not measured yet) |
 | Recovery time | detection to working again | not measured until the project records incidents |
 | Value kept | the original acceptance criteria hold and the work is usable as intended | DoD (`definition-of-ready-and-done.md`) |
+| Value delivered | an epic becomes usable; a disruptive bug reported by the owner is fixed fast | `process_kpis.py outcomes` (the mandate's `outcomes` markers) |
 
 The goals are never folded into one score. Security, correctness and
 acceptance are the floor; time, tokens and owner effort are optimized above
@@ -31,6 +32,27 @@ it. Building, running and maintaining the optimization counts as cost too.
 Every number states whether it is **measured**, **estimated** or **missing**,
 and the cockpit's honest ceiling applies (telemetry module): within one
 project only, trends over absolutes, events over rates.
+
+## The process as a check graph
+
+Every step that checks or holds up work is a node: the gates of the gate
+runner, reviews and refutations, test selection, the train, tier routing.
+The loop changes the graph — adds, changes or weakens nodes — so the
+measurement starts at the node:
+
+- `process_kpis.py nodes` weighs each gate's cost against its blocks, from
+  the gate runner's event log. Raw blocks stay raw; what a block was comes
+  only from triage (`.process-work/gate-triage.jsonl`), and `unknown` is no
+  evidence for weakening anything.
+- `process_kpis.py losses` keeps four loss measures apart — occupancy, delay,
+  owner effort, tokens — and never sums them.
+- `process_kpis.py outcomes` says what the work is for: epics to usable,
+  disruptive bugs to fixed, and how well bug origin (cause × channel) is
+  labelled.
+
+In this release the loop only measures: weakening a node needs an owner
+decision line, every time. Lifecycle modes per node (shadow, sampled) and
+sentinels that roll back follow in a later release.
 
 ## Roles
 
@@ -208,8 +230,8 @@ reviewed like any change to the process configuration.
 
 Starting points, set in the mandate and calibrated against the baseline:
 about 20–30 issues for a first bottleneck analysis, 30 days of follow-up for
-escapes, one experiment per mechanism at a time (`optimize.py check` refuses
-two running records with the same mechanism or flag), and an optimization
+escapes, one live trial per project at a time (`optimize.py check` refuses a
+second piloting record, whatever its mechanism or flag), and an optimization
 budget of about 10 % of the measured tokens and execution time over 30 days,
 setup counted apart. Small samples prove nothing about rare severe defects.
 

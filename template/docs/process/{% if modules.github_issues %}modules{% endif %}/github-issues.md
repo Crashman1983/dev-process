@@ -85,6 +85,19 @@ A starting point, not enforced by any gate:
 - `type:{feature,bug,chore,finding}` (the finding template sets `type:finding`)
 - `status:in-progress` — claimed and being worked (`status:{review,handoff,blocked}`
   for finer states).
+- Bug origin, two axes (read by `process_kpis.py outcomes` when the telemetry
+  module is on):
+  - `cause:{regression,preexisting,unknown}` — a regression also names the
+    issue that introduced it (`Introduced by: #N`; the fix commit carries
+    `Regression-of: #N`).
+  - `channel:{operator,agent,monitor,other}` — who found it.
+
+  One axis cannot do both: an owner-reported regression is `cause:regression`
+  *and* `channel:operator`, and counts in the regression share and in the
+  disruptive-bug outcome. Set both where the bug is filed — the agent that
+  files a follow-up knows the cause, the steward session that takes the
+  owner's report knows the channel; `unknown` is honest, a guess is not. The
+  coverage of the two axes is itself measured (`outcomes`, "blind spot").
 
 ## Issue-before-spec
 
