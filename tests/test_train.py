@@ -2083,3 +2083,58 @@ def test_a_hung_preflight_is_killed_at_its_timeout_and_an_empty_one_runs_none(re
     assert not (logs / "suite.log").exists()
     r = _train(out, "run", "--force", "--preflight", "")
     assert r.returncode == 0 and "run" in (logs / "suite.log").read_text(), r.stdout + r.stderr
+
+
+# --- #201: false refusals on deleted plans and stacked renames -----------------------------
+
+@pytest.mark.parametrize("how", ["delete", "rename"])
+def test_a_branch_that_deletes_or_renames_an_active_plan_is_not_unreadable(render, tmp_path, how):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    plans = out / ".process-work/plans"
+    plans.mkdir(parents=True, exist_ok=True)
+    (plans / "2026-09-01-old.md").write_text("# old\n\ntier: 1\nissue: #9\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "an active plan on main")
+    _slug_branch(out, "issue-2260", "2026-10-01-2260-work-expiry.md", issue=2260, work="2260-work-expiry",
+                 files={"src/expiry.py": "x = 1\n"})
+    _git(out, "checkout", "-q", "issue-2260")
+    if how == "delete":
+        _git(out, "rm", "-q", ".process-work/plans/2026-09-01-old.md")
+    else:
+        _git(out, "mv", ".process-work/plans/2026-09-01-old.md", ".process-work/plans/2026-09-02-old.md")
+    _git(out, "commit", "-q", "-m", f"{how} the old plan")
+    _git(out, "checkout", "-q", "main")
+    c = _candidate(out, "issue-2260")
+    assert not any("could not read" in r for r in c["reasons"]), c["reasons"]
+
+
+def _stacked_rename(out):
+    _slug_branch(out, "issue-2260", "2026-10-01-2260-work-expiry.md", issue=2260, work="2260-work-expiry",
+                 files={"src/expiry.py": "x = 1\n"})
+    _git(out, "checkout", "-q", "-b", "issue-2260-redate", "issue-2260")
+    _git(out, "mv", ".process-work/plans/2026-10-01-2260-work-expiry.md",
+         ".process-work/plans/2026-10-08-2260-work-expiry.md")
+    (out / "src/part2.py").write_text("z = 1\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "re-date the plan")
+    _git(out, "checkout", "-q", "main")
+    _report(out, "issue-2260")
+
+
+def test_a_stacked_rename_of_a_shared_plan_counts_one_plan(render, tmp_path):
+    """#201: measured against the base, the re-dated plan is an add — both names
+    counted, and both branches lost the slug, though the merged tree holds one plan."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _stacked_rename(out)
+    assert _candidate(out, "issue-2260")["eligible"]
+
+
+def test_a_genuine_namesake_on_a_third_car_still_counts(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _stacked_rename(out)
+    _slug_branch(out, "issue-2300", "2026-10-05-2260-work-expiry.md", issue=2300, work="x",
+                 files={"src/other.py": "y = 1\n"})
+    assert not _candidate(out, "issue-2260")["eligible"]

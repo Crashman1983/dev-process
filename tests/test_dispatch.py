@@ -2039,3 +2039,174 @@ def test_the_review_mode_fetches_a_plan_delta_it_has_not_seen(render, tmp_path):
     _git(other, "push", "-q", "origin", "b")
     _git(out, "checkout", "-q", "main")
     assert _load_dispatch(out).plan_review_due(out, "b")
+
+
+# --- #207: plan_review_due fails closed; #204: one rule for a branch's own plans ----------
+
+def test_an_origin_that_cannot_be_asked_is_a_code_review(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _planned_branch(out, 3, plan_pass=False)
+    _git(out, "checkout", "-q", "main")
+    mod = _load_dispatch(out)
+    assert mod.plan_review_due(out, "b")  # no origin at all: the local branch decides
+    _git(out, "remote", "add", "origin", str(tmp_path / "gone.git"))
+    assert mod.plan_review_due(out, "b") is None  # unreachable: no "absent branch"
+
+
+def test_a_remote_session_is_judged_by_origin_alone(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _planned_branch(out, 3, plan_pass=True)
+    _with_origin(out, tmp_path)
+    plan = out / ".process-work/plans/2026-10-09-fetch.md"
+    plan.write_text(plan.read_text() + "- DECISION 2026-10-10: Laufzeit begrenzt.\n")
+    _git(out, "commit", "-qam", "plan delta, not pushed")
+    _git(out, "checkout", "-q", "main")
+    mod = _load_dispatch(out)
+    assert mod.plan_review_due(out, "b")  # a local worktree keeps the delta
+    assert mod.plan_review_due(out, "b", remote=True) is None  # a remote worker sees origin's passed plan
+
+
+def test_a_dry_run_fetches_nothing(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _planned_branch(out, 3, plan_pass=True)
+    bare = _with_origin(out, tmp_path)
+    other = tmp_path.parent / f"{tmp_path.name}-other"
+    subprocess.run(["git", "clone", "-q", "-b", "b", str(bare), str(other)], check=True)
+    for k, v in (("user.email", "t@t"), ("user.name", "t"), ("commit.gpgsign", "false")):
+        _git(other, "config", k, v)
+    plan = other / ".process-work/plans/2026-10-09-fetch.md"
+    plan.write_text(plan.read_text() + "- DECISION 2026-10-10: Laufzeit begrenzt.\n")
+    _git(other, "commit", "-qam", "plan delta elsewhere")
+    _git(other, "push", "-q", "origin", "b")
+    _git(out, "checkout", "-q", "main")
+    r = _dispatch(out, "start", "--issue", "7", "--phase", "review", "--branch", "b", "--dry-run")
+    assert r.returncode == 0, r.stderr
+    assert not (out / ".git/FETCH_HEAD").exists()
+    origin_tip = _git(out, "ls-remote", "origin", "refs/heads/b").stdout.split()[0]
+    assert subprocess.run(["git", "cat-file", "-e", origin_tip], cwd=out).returncode != 0
+
+
+def test_a_path_that_is_not_utf8_is_a_code_review_not_a_crash(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _planned_branch(out, 3, plan_pass=False)
+    odd = out / os.fsdecode(b".process-work/notes-\xff.md")
+    odd.parent.mkdir(parents=True, exist_ok=True)
+    odd.write_text("x\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "a name git keeps as bytes")
+    _git(out, "checkout", "-q", "main")
+    mod = _load_dispatch(out)
+    assert mod.plan_review_due(out, "b") is None
+    assert mod.start(out, issue=7, phase="review", tier=3, branch="b", title=None, dry_run=True) == 0
+
+
+def test_a_waived_plan_owes_no_plan_review(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _planned_branch(out, 3, plan_pass=False)
+    plan = out / ".process-work/plans/2026-10-09-fetch.md"
+    plan.write_text(plan.read_text() + "\nreview-waived: owner decision 2026-10-12\n")
+    _git(out, "commit", "-qam", "waive")
+    _git(out, "checkout", "-q", "main")
+    mod = _load_dispatch(out)
+    assert mod.plan_review_due(out, "b") is None
+    assert mod.plan_review_state_at(out, _git(out, "rev-parse", "b").stdout.strip()) == (3, True)
+
+
+def test_a_failed_diff_is_no_plan_only_branch(render, tmp_path, monkeypatch):
+    """Mutant #207: the diff's return code ignored read an empty list as "plans only"."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _planned_branch(out, 3, plan_pass=False)
+    _git(out, "checkout", "-q", "main")
+    mod = _load_dispatch(out)
+    real = mod._git
+    monkeypatch.setattr(mod, "_git", lambda root, *a: subprocess.CompletedProcess(a, 128, "", "boom")
+                        if a[:1] == ("diff",) else real(root, *a))
+    assert mod.plan_review_due(out, "b") is None
+
+
+def test_code_moved_into_bookkeeping_is_code_to_review(render, tmp_path):
+    """Mutant #207: without --no-renames a source file moved under .process-work/
+    showed only its new path, and the branch looked like plans only."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    (out / "src").mkdir(exist_ok=True)
+    (out / "src/fetch.py").write_text("x = 1\n" * 20)
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "code on main")
+    _git(out, "checkout", "-q", "-b", "b")
+    plans = out / ".process-work/plans"
+    plans.mkdir(parents=True, exist_ok=True)
+    (plans / "2026-10-09-fetch.md").write_text("# fetch\n\ntier: 3\nissue: #7\n\n## Decisions\n")
+    _git(out, "mv", "src/fetch.py", ".process-work/fetch.py")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "plan, and code moved")
+    _git(out, "checkout", "-q", "main")
+    assert _load_dispatch(out).plan_review_due(out, "b") is None
+
+
+def test_only_a_review_start_asks_for_a_plan_review(render, tmp_path, monkeypatch):
+    """Mutant #207: the phase guard dropped made an execute start a plan review."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _planned_branch(out, 3, plan_pass=False)
+    _git(out, "checkout", "-q", "main")
+    mod = _load_dispatch(out)
+    seen = []
+    real = mod.prompt_for
+    monkeypatch.setattr(mod, "prompt_for", lambda *a, **kw: seen.append(kw.get("plan_review")) or real(*a, **kw))
+    for forced in (False, True):
+        assert mod.start(out, issue=7, phase="execute", tier=3, branch="b", title=None, dry_run=True,
+                         plan_review=forced) == 0
+    assert seen == [False, False]
+
+
+def _epic_on_main(out: Path, *, issue: int, passed: bool) -> str:
+    """A Tier 3 plan already on main; a branch `<issue>-slice` changes only it."""
+    _repo(out)
+    plans = out / ".process-work/plans"
+    plans.mkdir(parents=True, exist_ok=True)
+    rel = ".process-work/plans/2026-10-01-epic.md"
+    (out / rel).write_text("# epic\n\ntier: 3\nissue: #70\n\n## Decisions\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "epic plan on main")
+    _git(out, "checkout", "-q", "-b", f"{issue}-slice")
+    (out / rel).write_text((out / rel).read_text() + "- DECISION 2026-10-12: slice first.\n")
+    _git(out, "commit", "-qam", "change the epic plan")
+    if passed:
+        _plan_pass(out, 3, work="2026-10-01-epic")
+    return rel
+
+
+def test_a_branch_changing_its_plan_on_main_gets_a_plan_review(render, tmp_path):
+    """#204: dispatch counted only added plans; the train also counts a plan on the
+    base that declares one of the branch's issues — now one rule."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    rel = _epic_on_main(out, issue=70, passed=False)
+    _git(out, "checkout", "-q", "main")
+    mod = _load_dispatch(out)
+    due = mod.plan_review_due_plans(out, "70-slice")
+    assert due and due[1] == [rel], due
+    assert f"`{rel}`" in mod.prompt_for("review", 70, 3, "70-slice", "m", plan_review=True, plan_paths=due[1])
+    # a plan on main for another issue is not this branch's own
+    out2 = render(tmp_path / "other", {"project_name": "d", "modules": {}})
+    _epic_on_main(out2, issue=71, passed=False)
+    _git(out2, "checkout", "-q", "main")
+    assert _load_dispatch(out2).plan_review_due(out2, "71-slice") is None
+
+
+def test_the_plan_pass_of_a_changed_main_plan_lets_the_chain_go_on(render, tmp_path):
+    """Plan review #204, MAJOR-4: the chain asks with the branch, or it waits forever."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _epic_on_main(out, issue=70, passed=True)
+    mod = _load_dispatch(out)
+    assert mod.plan_review_state(out, out, "70-slice") == (3, True)
+    assert mod.plan_review_state(out, out) == (None, False)  # without the branch: no own plan
+
+
+def test_completion_and_tier_ask_only_the_branchs_added_plans(render, tmp_path):
+    """Plan review #204, MAJOR-1: an epic's plan a package changes is not the package's to finish."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    rel = _epic_on_main(out, issue=70, passed=False)
+    mod = _load_dispatch(out)
+    head = _git(out, "rev-parse", "HEAD").stdout.strip()
+    assert mod.own_plans_at(out, head, "70-slice") == []
+    assert mod.own_plans_at(out, head, "70-slice", include_base=True) == [rel]

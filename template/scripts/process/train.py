@@ -62,6 +62,7 @@ process already cleared. Sibling imports; stdlib only."""
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 import contextlib
 import datetime as _dt
 import json
@@ -185,14 +186,9 @@ def _branch_work_ids(branch: str) -> set[str]:
 
 
 def _branch_issues(root: Path, branch: str) -> set[str]:
-    """The issues a branch belongs to: the number its name leads with, and
-    every issue dispatch placed on it (`dispatch.issues_of`, the owner of
-    that map). Boarding, the plans counted as the branch's own and the
-    issues its merge closes all ask this one question (refutation: the
-    train boarded a package branch on its issue, then closed the epic's)."""
+    """`dispatch.branch_issues` — the one owner (#204)."""
     import dispatch as _dispatch  # lazily, as tower does
-    issue = _review.branch_issue(branch)
-    return ({issue} if issue else set()) | {str(i) for i in _dispatch.issues_of(root, branch)}
+    return _dispatch.branch_issues(root, branch)
 
 
 def _names_branch(branch: str, ids: set[str], issues: set[str]) -> bool:
@@ -208,6 +204,51 @@ def _names_branch(branch: str, ids: set[str], issues: set[str]) -> bool:
         elif len(i) >= 3 and (i in leaf or (len(leaf) >= 8 and leaf in i)):
             return True
     return False
+
+
+def _stacked_renames(root: Path, branches: list[str], new_by: dict[str, set[str]],
+                     unreadable: list[str]) -> dict[str, str]:
+    """One plan under two names (#201): a candidate stacked on another renames a
+    plan the other adds — measured from their own fork, as git's merge of the
+    two pairs them. As {path: representative}; only renames (R) between two
+    candidates' new paths, never the base's or the archive's own names. A
+    rewrite git no longer calls a rename stays two plans (fail closed)."""
+    parent: dict[str, str] = {}
+
+    def find(p: str) -> str:
+        while parent.get(p, p) != p:
+            p = parent[p]
+        return p
+
+    for o in branches:
+        for b in branches:
+            if o == b or not new_by.get(o) or not new_by.get(b):
+                continue
+            fork = _out(root, "merge-base", o, b)
+            if not fork:
+                continue
+            pairs = _review.name_status(_git_bytes(root, "diff", "--name-status", "-M", "-z",
+                                                   f"{fork}..{b}", "--", PLANS))
+            if pairs is None:
+                unreadable.append(f"the plan renames between {o} and {b}")
+                continue
+            for letter, source, rel in pairs:
+                if letter == "R" and source in new_by[o] and rel in new_by[b]:
+                    parent[find(source)] = find(rel)
+    return {p: find(p) for p in parent}
+
+
+def _identity_slugs(paths: set[str], same_plan: dict[str, str]) -> Counter:
+    """`check_review.slug_counts` over plans, not paths: the names of one
+    plan (`_stacked_renames`) count each of their slugs once."""
+    groups: dict[str, set[str]] = {}
+    for p in paths:
+        if p.endswith(".md"):
+            groups.setdefault(same_plan.get(p, p), set()).add(p)
+    counts: Counter = Counter()
+    for members in groups.values():
+        counts.update(_review.slug_counts(Path(m).stem for m in members).keys())
+    return counts
 
 
 def candidates(root: Path, local: str, base: str) -> list[dict]:
@@ -250,6 +291,7 @@ def candidates(root: Path, local: str, base: str) -> list[dict]:
     # car that deletes a namesake may not board, so its deletion counts for
     # nobody else (review: that read a slug as unique the gate then refused)
     gone_by: dict[str, set[str]] = {}
+    new_by: dict[str, set[str]] = {}
     merged_paths = set(listed or ())
     for b in branches:
         changes = _review.name_status(_git_bytes(root, "diff", "--name-status", "-M", "-z",
@@ -257,7 +299,9 @@ def candidates(root: Path, local: str, base: str) -> list[dict]:
         if changes is None:
             unreadable.append(f"the plan changes of {b}")
         gone_by[b] = {source or rel for letter, source, rel in changes or () if letter in ("D", "R")}
-        merged_paths |= {rel for letter, _source, rel in changes or () if letter != "D"}
+        new_by[b] = {rel for letter, _source, rel in changes or () if letter != "D"}
+        merged_paths |= new_by[b]
+    same_plan = _stacked_renames(root, branches, new_by, unreadable)
     out: list[dict] = []
     for b in sorted(branches):
         counts = _out(root, "rev-list", "--left-right", "--count", f"{base}...{b}")
@@ -317,8 +361,7 @@ def candidates(root: Path, local: str, base: str) -> list[dict]:
         own_active = _own_plans(root, base, b, read)
         if own_active is None:
             branch_unreadable.append(f"the plans of {b}")
-        merged_slugs = _review.slug_counts(Path(r).stem for r in merged_paths - gone_by.get(b, set())
-                                           if r.endswith(".md"))
+        merged_slugs = _identity_slugs(merged_paths - gone_by.get(b, set()), same_plan)
         for rel, plain in own_active or ():
             if _review.record_kind(rel) == "plan":
                 stem = Path(rel).stem
@@ -997,15 +1040,7 @@ def build_train(root: Path, base: str, aboard: list[str], stamp: str, log) -> tu
     return wt, branch, merged, dropped
 
 
-_LOCAL_ISSUE = re.compile(r"^#?(\d+)[.,;:]?$")
-
-
-def _local_issues(text: str) -> set[int]:
-    """The issues of THIS repository a plan declares (`issue: #7`, `issue: 7`).
-    `issue: other/repo#7` is another repository's #7 — a `Closes #7` in this
-    repository would close the wrong issue (refutation)."""
-    return {int(m.group(1)) for d in _review.ISSUE_DECL.finditer(text)
-            for m in [_LOCAL_ISSUE.match(d.group(1))] if m}
+_local_issues = _review.local_issue_numbers  # one owner (#204)
 
 
 STAYS_ACTIVE = re.compile(_review._LEAD + r"plan-stays-active[*_]*\s*:\s*[*_]*\s*\S",
@@ -1023,29 +1058,9 @@ def _own_plans(root: Path, base: str, branch: str, read) -> list[tuple[str, str]
     this one rule (#199: an active plan's ids counted only once archived, and
     a `work=<slug>` pass did not board). `read(rel)` gives the text, None when
     there is none; None when git cannot list the plans."""
-    entries = _review.name_status(
-        _git_bytes(root, "diff", "--name-status", "-M", "-z", f"{base}...{branch}", "--", PLANS))
-    if entries is None:
-        return None
-    issues = _branch_issues(root, branch)
-    own: list[tuple[str, str]] = []
-    for letter, source, rel in entries:
-        if letter == "D" or not rel.endswith(".md"):
-            continue
-        text = read(rel)
-        if text is None:
-            continue
-        plain = _review._unfenced(text)
-        added = letter == "A"
-        if letter == "R" and source:
-            # git pairs a deleted old plan with a new, similar one as a rename:
-            # a plan for other issues is a new plan, not the old one moved
-            fork = _out(root, "merge-base", base, branch) or base
-            old = _review._unfenced(_out(root, "show", f"{fork}:{source}"))
-            added = _local_issues(old) != _local_issues(plain)
-        if added or {str(n) for n in _local_issues(plain)} & issues:
-            own.append((rel, plain))
-    return own
+    own = _review.own_plans(root, base, branch, _branch_issues(root, branch), read, (PLANS,),
+                            lambda rel: rel.endswith(".md"))
+    return None if own is None else [(rel, plain) for rel, plain, _added in own]
 
 
 def _settle_plans(wt: Path, base: str, branch: str, log) -> tuple[list[str], set[int]]:

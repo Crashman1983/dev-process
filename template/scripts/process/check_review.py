@@ -2344,6 +2344,52 @@ def spec_dir_issue(fdir: Path) -> int | None:
     return None
 
 
+_LOCAL_ISSUE = re.compile(r"^#?(\d+)[.,;:]?$")
+
+
+def local_issue_numbers(text: str) -> set[int]:
+    """The issues of THIS repository a plan declares (`issue: #7`, `issue: 7`).
+    `issue: other/repo#7` is another repository's #7 — a `Closes #7` in this
+    repository would close the wrong issue (refutation)."""
+    return {int(m.group(1)) for d in ISSUE_DECL.finditer(text)
+            for m in [_LOCAL_ISSUE.match(d.group(1))] if m}
+
+
+def own_plans(root: Path, base: str, tip: str, issues: set[str], read, pathspec: tuple[str, ...],
+              is_plan) -> list[tuple[str, str, bool]] | None:
+    """The plans `tip` changes over `base` that are the branch's own, as
+    (path, unfenced text, added) — the one rule dispatch and the train ask
+    (#204). Own is a plan the branch adds (git's rename detection: one it only
+    renamed is new only when its issues changed), or one already on the base
+    that declares one of the branch's `issues` (`added` False); a deleted plan
+    never. `read(rel)` gives the text at the tip, None when there is none (the
+    caller records an unreadable plan); None when git cannot list the plans."""
+    entries = name_status(_git_bytes(root, "diff", "--name-status", "-M", "-z", f"{base}...{tip}",
+                                     "--", *pathspec))
+    if entries is None:
+        return None
+    own: list[tuple[str, str, bool]] = []
+    fork = None
+    for letter, source, rel in entries:
+        if letter == "D" or not is_plan(rel):
+            continue
+        text = read(rel)
+        if text is None:
+            continue
+        plain = _unfenced(text)
+        added = letter == "A"
+        if letter == "R" and source:
+            # git pairs a deleted old plan with a new, similar one as a rename:
+            # a plan for other issues is a new plan, not the old one moved
+            if fork is None:
+                fork = (_git_bytes(root, "merge-base", base, tip) or b"").decode().strip() or base
+            old = _unfenced((_git_bytes(root, "show", f"{fork}:{source}") or b"").decode("utf-8", "replace"))
+            added = local_issue_numbers(old) != local_issue_numbers(plain)
+        if added or {str(n) for n in local_issue_numbers(plain)} & issues:
+            own.append((rel, plain, added))
+    return own
+
+
 def slug_counts(stems) -> Counter:
     """How many of these plan stems share each de-dated slug — an active
     plan's slug is its work id only where it is unique among the active plans
