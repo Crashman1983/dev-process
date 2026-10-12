@@ -1198,28 +1198,63 @@ def issue_token_usage(root: Path, issue: int) -> tuple[dict[str, int], int] | No
     return None if got is None else (got[0], got[1])
 
 
-def issue_token_coverage(root: Path, issue: int) -> tuple[dict[str, int], int, dict[str, int]] | None:
-    """(totals, sessions, {field: sessions that carried it}). A field some
-    sessions lack is a partial sum — a variant whose sessions write fewer
-    input fields would look cheaper (refutation, cross-model); readers mark
-    it so. An unreadable transcript carries no field."""
+def _usage_events(line: str) -> list[dict[str, int]] | None:
+    """The usage events of one transcript line: every JSON object that carries
+    a TOKEN_FIELDS count, with the fields it carries. None for a line that names
+    token fields but is not JSON — its completeness cannot be established."""
+    try:
+        data = json.loads(line)
+    except ValueError:
+        return None
+    events: list[dict[str, int]] = []
+    stack = [data]
+    while stack:
+        node = stack.pop()
+        if isinstance(node, dict):
+            got = {k: v for k, v in node.items()
+                   if k in TOKEN_FIELDS and isinstance(v, int) and not isinstance(v, bool)}
+            if got:
+                events.append(got)
+            stack.extend(node.values())
+        elif isinstance(node, list):
+            stack.extend(node)
+    return events
+
+
+def issue_token_coverage(root: Path, issue: int) -> tuple[dict[str, int], int, dict[str, int], int] | None:
+    """(totals, sessions, {field: usage events that carried it}, usage events).
+    Completeness is counted per usage event, not per session: a call that
+    lacks a field leaves that field a partial sum, even when another call in
+    the same transcript carried it — a variant whose calls write fewer input
+    fields would look cheaper (refutation, cross-model, rounds 1 and 2).
+    Readers mark it so. A non-JSON line with token fields adds its counts but
+    covers no field; an unreadable transcript carries none."""
     files = _issue_transcripts(root, issue)
     if not files:
         return None
     totals: dict[str, int] = {}
     covered: dict[str, int] = {}
+    events = 0
     for f in sorted(files):
         try:
             text = Path(f).read_text(errors="ignore")
         except OSError:
             continue
-        seen = set()
-        for field, n in USAGE_TOKENS.findall(text):
-            totals[field] = totals.get(field, 0) + int(n)
-            seen.add(field)
-        for field in seen:
-            covered[field] = covered.get(field, 0) + 1
-    return totals, len(files), covered
+        for line in text.splitlines():
+            if not USAGE_TOKENS.search(line):
+                continue
+            parsed = _usage_events(line)
+            if parsed is None:  # opaque: its counts are real, its completeness unknown
+                events += 1
+                for field, n in USAGE_TOKENS.findall(line):
+                    totals[field] = totals.get(field, 0) + int(n)
+                continue
+            for event in parsed:
+                events += 1
+                for field, n in event.items():
+                    totals[field] = totals.get(field, 0) + n
+                    covered[field] = covered.get(field, 0) + 1
+    return totals, len(files), covered, events
 
 
 def issue_tokens(root: Path, issue: int) -> tuple[int, int] | None:

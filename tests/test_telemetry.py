@@ -590,3 +590,23 @@ def test_flow_says_which_endpoint_and_how_complete_the_tokens_are(render, tmp_pa
     [it] = m.flow_items(out, issue=12)
     assert it["tokens"]["coverage"] == {"input_tokens": 1, "output_tokens": 2}
     assert it["tokens"]["quality"] == "estimated"  # input is a partial sum over two sessions
+    # the same two calls in one transcript: the second call's input is still unknown
+    # (refutation round 2, executed) — completeness is per usage event, not per file
+    (wt / "t" / "b.jsonl").unlink()
+    (wt / "t" / "a.jsonl").write_text('{"usage": {"input_tokens": 100, "output_tokens": 10}}\n'
+                                      '{"usage": {"output_tokens": 50}}\n')
+    [it] = m.flow_items(out, issue=12)
+    assert it["tokens"]["value"] == {"input_tokens": 100, "output_tokens": 60}
+    assert it["tokens"]["coverage"] == {"input_tokens": 1, "output_tokens": 2}
+    assert it["tokens"]["events"] == 2 and it["tokens"]["sessions"] == 1
+    assert it["tokens"]["quality"] == "estimated"
+    # every call complete: measured; a non-JSON line with token fields covers nothing
+    (wt / "t" / "a.jsonl").write_text('{"usage": {"input_tokens": 100, "output_tokens": 10}}\n'
+                                      '{"usage": {"input_tokens": 7, "output_tokens": 50}}\n')
+    [it] = m.flow_items(out, issue=12)
+    assert it["tokens"]["quality"] == "measured"
+    with (wt / "t" / "a.jsonl").open("a") as fh:
+        fh.write('garbled "input_tokens": 3, "output_tokens": 4\n')
+    [it] = m.flow_items(out, issue=12)
+    assert it["tokens"]["value"] == {"input_tokens": 110, "output_tokens": 64}
+    assert it["tokens"]["quality"] == "estimated"
