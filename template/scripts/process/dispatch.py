@@ -1198,14 +1198,9 @@ def issue_token_usage(root: Path, issue: int) -> tuple[dict[str, int], int] | No
     return None if got is None else (got[0], got[1])
 
 
-def _usage_events(line: str) -> list[dict[str, int]] | None:
-    """The usage events of one transcript line: every JSON object that carries
-    a TOKEN_FIELDS count, with the fields it carries. None for a line that names
-    token fields but is not JSON — its completeness cannot be established."""
-    try:
-        data = json.loads(line)
-    except ValueError:
-        return None
+def _usage_events(data: object) -> list[dict[str, int]]:
+    """The usage events of one parsed transcript line: every JSON object that
+    carries a TOKEN_FIELDS count, with the fields it carries."""
     events: list[dict[str, int]] = []
     stack = [data]
     while stack:
@@ -1238,6 +1233,10 @@ def issue_token_coverage(root: Path, issue: int) -> tuple[dict[str, int], int, d
     totals: dict[str, int] = {}
     covered: dict[str, int] = {}
     events = unknown = 0
+    # Claude Code writes one line per content block of an API message, each
+    # repeating the message's usage: count a message once (refutation of
+    # v2.68 P1). A line without a message id counts as its own event.
+    seen_messages: set[tuple[str, object]] = set()
     for f in sorted(files):
         try:
             text = Path(f).read_text(errors="ignore")
@@ -1247,14 +1246,22 @@ def issue_token_coverage(root: Path, issue: int) -> tuple[dict[str, int], int, d
         for line in text.splitlines():
             if not USAGE_TOKENS.search(line):
                 continue
-            parsed = _usage_events(line)
-            if parsed is None:  # opaque: its counts are real, its completeness unknown
+            try:
+                data = json.loads(line)
+            except ValueError:  # opaque: its counts are real, its completeness unknown
                 events += 1
                 unknown += 1
                 for field, n in USAGE_TOKENS.findall(line):
                     totals[field] = totals.get(field, 0) + int(n)
                 continue
-            for event in parsed:
+            message = data.get("message") if isinstance(data, dict) else None
+            mid = message.get("id") if isinstance(message, dict) else None
+            if isinstance(mid, str):
+                key = (mid, data.get("requestId"))
+                if key in seen_messages:
+                    continue
+                seen_messages.add(key)
+            for event in _usage_events(data):
                 events += 1
                 for field, n in event.items():
                     totals[field] = totals.get(field, 0) + n

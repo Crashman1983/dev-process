@@ -80,6 +80,31 @@ def test_a_dirty_tree_is_recorded_as_such(render, tmp_path):
     assert {e["dirty"] for e in _events(out)} == {True}
 
 
+def test_an_untracked_file_makes_the_tree_dirty_too(render, tmp_path):
+    out = _project(render, tmp_path)
+    (out / "stray.txt").write_text("a gate may scan this\n", encoding="utf-8")
+    _run(out)
+    assert {e["dirty"] for e in _events(out)} == {True}
+
+
+def test_timeouts_and_missing_scripts_are_recorded_with_their_outcome(render, tmp_path):
+    out = _project(render, tmp_path)
+    (out / "scripts/slow_gate.py").write_text("import time; time.sleep(30)\n", encoding="utf-8")
+    (out / "docs/process/gates.local.json").write_text(json.dumps({
+        "slow": {"module": None, "command": ["scripts/slow_gate.py"]},
+        "gone": {"module": None, "command": ["scripts/gone_gate.py"]},
+    }), encoding="utf-8")
+    runner = out / "scripts/process/gate_runner.py"
+    code = ("import importlib.util, sys\n"
+            f"spec = importlib.util.spec_from_file_location('gr', {str(runner)!r})\n"
+            "m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)\n"
+            "m.GATE_TIMEOUT_S = 2\nsys.exit(m.main())\n")
+    subprocess.run([sys.executable, "-c", code], cwd=out, capture_output=True, text=True)
+    ev = {e["gate"]: e for e in _events(out)}
+    assert ev["slow"]["outcome"] == "timeout" and ev["slow"]["rc"] is None and ev["slow"]["duration_s"] >= 2
+    assert ev["gone"]["outcome"] == "missing"
+
+
 def test_an_unwritable_log_changes_no_verdict(render, tmp_path):
     out = _project(render, tmp_path)
     (out / ".git/process-gate-events.jsonl").mkdir()  # cannot be opened for append
@@ -112,11 +137,30 @@ def test_nodes_weighs_cost_against_blocks_and_keeps_inference_estimated(render, 
     assert nd["bad"]["sole_blocks"] == {"value": 1, "quality": "estimated"}  # the second commit only
     assert nd["flip"]["flips"]["value"] == 1  # passed and failed on the first commit
     assert nd["ok"]["blocks"]["inputs"] == 0 and nd["ok"]["cost_s"]["quality"] == "measured"
+    # f00 names no block of this window: it does not count
     assert nd["bad"]["triage"]["value"] == {"confirmed-defect": 1, "accepted-risk": 0,
-                                            "infra-or-flake": 0, "unknown": 1}
-    assert nd["bad"]["triage"]["of_blocked_inputs"] == 1  # f00 is no recorded block
+                                            "infra-or-flake": 0, "unknown": 0}
+    assert nd["bad"]["triage"]["of_blocked_inputs"] == 1
     assert nd["ok"]["triage"]["quality"] == "missing"
     assert len(table["triage_problems"]) == 2  # a bad category and a non-JSON line are named
+
+
+def test_nodes_reads_the_rolled_over_log_matches_short_shas_and_skips_bad_rows(render, tmp_path):
+    out = _project(render, tmp_path)
+    _run(out)
+    log = out / ".git/process-gate-events.jsonl"
+    log.rename(out / ".git/process-gate-events.jsonl.1")  # as the rollover leaves it
+    head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=out, capture_output=True,
+                          text=True, check=True).stdout.strip()
+    bad = {"ts": "2099-01-01T00:00:00+00:00", "gate": "bad", "outcome": "fail",
+           "head": ["not", "a", "sha"], "duration_s": "slow", "dirty": False}
+    log.write_text(json.dumps(bad) + "\n", encoding="utf-8")
+    (out / ".process-work").mkdir(exist_ok=True)
+    (out / ".process-work/gate-triage.jsonl").write_text(
+        json.dumps({"gate": "bad", "commit": head[:8], "category": "infra-or-flake"}) + "\n", encoding="utf-8")
+    nd = {n["gate"]: n for n in _kpis(out).nodes_table(out)["nodes"]}
+    assert nd["bad"]["runs"] == 1 and nd["bad"]["blocks"]["inputs"] == 1  # the bad row is not a run
+    assert nd["bad"]["triage"]["value"]["infra-or-flake"] == 1 and nd["bad"]["triage"]["of_blocked_inputs"] == 1
 
 
 def test_sole_blocks_count_only_commits_no_other_gate_failed_on(render, tmp_path):

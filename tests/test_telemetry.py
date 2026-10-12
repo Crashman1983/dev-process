@@ -452,7 +452,8 @@ def test_flow_says_what_is_missing_instead_of_guessing(render, tmp_path):
     [it] = m.flow_items(out, issue=12)
     assert it["merged"]["quality"] == "missing" and it["deployed"]["quality"] == "missing"
     assert it["lead_s"] == {"value": None, "quality": "missing", "endpoint": "merge"}
-    assert it["work_s"]["quality"] == "estimated"  # phases started, none reported an end
+    # phases started, none reported an end: working time unknown, not zero
+    assert it["work_s"] == {"value": None, "quality": "missing"}
     assert it["escapes"]["value"] is None
 
 
@@ -610,6 +611,13 @@ def test_flow_says_which_endpoint_and_how_complete_the_tokens_are(render, tmp_pa
     [it] = m.flow_items(out, issue=12)
     assert it["tokens"]["value"] == {"input_tokens": 110, "output_tokens": 64}
     assert it["tokens"]["quality"] == "estimated"
+    # Claude Code repeats a message's usage on each content-block line: one message counts once
+    (wt / "t" / "a.jsonl").write_text(
+        '{"message": {"id": "m1", "usage": {"input_tokens": 5, "output_tokens": 9}}, "requestId": "r1"}\n'
+        '{"message": {"id": "m1", "usage": {"input_tokens": 5, "output_tokens": 9}}, "requestId": "r1"}\n'
+        '{"message": {"id": "m2", "usage": {"input_tokens": 1, "output_tokens": 2}}, "requestId": "r2"}\n')
+    [it] = m.flow_items(out, issue=12)
+    assert it["tokens"]["value"] == {"input_tokens": 6, "output_tokens": 11} and it["tokens"]["events"] == 2
     # only opaque lines: no field coverage at all is still not complete (refutation, round 3)
     (wt / "t" / "a.jsonl").write_text('garbled "input_tokens": 3, "output_tokens": 4\n')
     [it] = m.flow_items(out, issue=12)
@@ -638,10 +646,11 @@ def test_losses_keeps_four_measures_apart_and_never_fills_in(render, tmp_path):
     assert "total" not in t and "sum" not in t  # the four are never added up
     # outside the window: nothing to report, not zeros
     assert m.losses_table(out, days=1, now=now)["issues"] == 0
-    # a phase without a reported end leaves occupancy estimated
+    # an issue in flight (no phase reported an end) is missing, never zero hours
     (out / ".git/process-tower/reports.jsonl").write_text("")
     est = m.losses_table(out, days=3650, now=now)
-    assert est["occupancy"]["quality"] == "estimated"
+    assert est["occupancy"] == {"value": None, "unit": "h", "issues": 0, "missing": 1, "quality": "missing"}
+    assert est["delay"]["value"] is None and est["delay"]["missing"] == 1
 
 
 def test_losses_cli_prints_each_measure_with_its_quality(render, tmp_path):
@@ -704,6 +713,63 @@ def test_outcomes_default_marker_is_a_proxy_and_no_gh_is_unavailable(render, tmp
     assert t["bug_origin"]["coverage"] is None and t["bug_origin"]["blind_spot"] is False
     gone = m.outcomes_table(out, now=now, fetch=lambda _root: (None, "gh is not installed"))
     assert gone == {"available": False, "reason": "gh is not installed", "days": 90}
+    # a duplicate or not-planned closure is no delivery; an epic grouped after its work is not negative
+    dropped = dict(epic, stateReason="NOT_PLANNED")
+    bug = _issue(200, "dup", "CLOSED", ["bug", "cause:unknown", "channel:operator", "priority:high"],
+                 created="2026-12-01T00:00:00Z", closed="2026-12-01T01:00:00Z")
+    bug["stateReason"] = "DUPLICATE"
+    late = _issue(101, "[EPIC] grouped later", "CLOSED", created="2026-05-01T00:00:00Z",
+                  closed="2026-04-01T00:00:00Z")
+    t = m.outcomes_table(out, days=3650, now=now, fetch=lambda _root: ([dropped, bug, late], None))
+    ep = {e["number"]: e for e in t["epics"]}
+    assert ep[100]["usable_at"] is None and ep[100]["quality"] == "open"
+    assert ep[101]["days_to_usable"] == 0.0
+    assert t["o2_disruptive_fixed"]["n"] == 0 and t["o2_disruptive_fixed"]["open"] == 1
+
+
+def test_outcomes_names_a_mistyped_mandate_instead_of_matching_letters(render, tmp_path):
+    import json
+    from datetime import datetime, timezone
+    out = _flow_repo(render, tmp_path)
+    m = _flow_module(out)
+    (out / "docs/process/optimization.local.json").write_text(json.dumps({"outcomes": {
+        "bug_labels": "bug", "epic_title_prefix": None, "coverage_target": "high", "colour": "red"}}))
+    bugs = [_issue(1, "b", labels=["b"], created="2026-12-01T00:00:00Z"),
+            _issue(2, "real", labels=["bug"], created="2026-12-01T00:00:00Z")]
+    t = m.outcomes_table(out, days=3650, now=datetime(2026, 12, 31, tzinfo=timezone.utc),
+                         fetch=lambda _root: (bugs, None))
+    assert t["bug_origin"]["bugs"] == 1  # the default `bug`, not the letters b, u, g
+    assert t["config"]["coverage_target"] == 0.8
+    assert len(t["config_problems"]) == 4 and any("colour" in p for p in t["config_problems"])
+
+
+def test_gh_issues_reads_the_graphql_answer_through_gh(render, tmp_path, monkeypatch):
+    import json
+    import os
+    out = _flow_repo(render, tmp_path)
+    m = _flow_module(out)
+    fake = tmp_path / "fakebin"
+    fake.mkdir()
+    answer = {"data": {"repository": {"issues": {"nodes": [{
+        "number": 7, "title": "[EPIC] x", "state": "CLOSED", "stateReason": "COMPLETED",
+        "createdAt": "2026-01-01T00:00:00Z", "closedAt": "2026-02-01T00:00:00Z",
+        "labels": {"nodes": [{"name": "type:epic"}]}, "subIssuesSummary": {"total": 1, "completed": 1},
+        "subIssues": {"nodes": [{"number": 8, "title": "acc", "state": "CLOSED", "stateReason": None,
+                                 "closedAt": "2026-01-20T00:00:00Z", "labels": {"nodes": []}}]}}]}}}}
+    (tmp_path / "answer.json").write_text(json.dumps(answer))
+    (fake / "gh").write_text(
+        f"#!{sys.executable}\nimport sys, pathlib\n"
+        f"pathlib.Path({str(tmp_path / 'args.txt')!r}).open('a').write(' '.join(sys.argv[1:]) + '\\n')\n"
+        "if sys.argv[1] == 'repo': print('o/2048')\n"
+        f"else: print(pathlib.Path({str(tmp_path / 'answer.json')!r}).read_text())\n")
+    (fake / "gh").chmod(0o755)
+    monkeypatch.setenv("PATH", f"{fake}{os.pathsep}{os.environ['PATH']}")
+    issues, why = m._gh_issues(out)
+    assert why is None and issues[0]["number"] == 7 and issues[0]["sub_total"] == 1
+    assert issues[0]["subs"][0]["number"] == 8 and issues[0]["labels"] == ["type:epic"]
+    args = (tmp_path / "args.txt").read_text()
+    assert "-f owner=o -f name=2048" in args  # -f: a numeric repo name stays a string
+    assert "stateReason" in args
 
 
 def test_outcomes_cli_text_names_the_blind_spot_or_says_unavailable(render, tmp_path, capsys):
