@@ -8,7 +8,7 @@
 A gate runs in one of four modes: `block` (the default: a failure stops the
 push), `shadow` (runs and records, never blocks), `sampled` (runs on a share
 of commits, never blocks) and `off`. The mode comes from one place only: the
-append-only record `.process-work/gate-changes.jsonl`. Nothing else — not
+append-only record `docs/process/gate-changes.local.jsonl`. Nothing else — not
 `gates.local.json`, not an environment variable — weakens a gate.
 
   gate_modes.py status
@@ -22,9 +22,14 @@ append-only record `.process-work/gate-changes.jsonl`. Nothing else — not
 Rules (docs/process/optimization.md, "The process as a check graph"):
 
 - Weakening needs an owner decision line (`--decision "owner …"`), every
-  time, in this release. Core gates and the mandate's protected gates cannot
-  be weakened at all: a branch that could record its own "owner" line would
-  otherwise push past the review gate.
+  time, in this release. The line is text a session can write; what backs it
+  is review: the record lives under `docs/process/`, which the review gate
+  covers like any process configuration (never `.process-work/`, which it
+  treats as bookkeeping). Core gates and the mandate's protected gates
+  cannot be weakened at all.
+- `--observe` (with `--to shadow`) is for a new gate that never blocked: the
+  sentinel does not restore it on a failure, so its false alarms can be
+  counted first. A weakened gate that used to block is never `--observe`.
 - `restore` returns a gate to `block`; with `--lock` the gate cannot be
   weakened again until `unlock` records a triage.
 - `sentinel` is deterministic and only ever restores: a `sampled` or `shadow`
@@ -47,7 +52,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-CHANGES = ".process-work/gate-changes.jsonl"
+CHANGES = "docs/process/gate-changes.local.jsonl"
 MODES = ("block", "shadow", "sampled", "off")
 WEAK = ("shadow", "sampled", "off")
 MANDATE = "docs/process/optimization.local.json"
@@ -153,7 +158,7 @@ def guardrails(root: Path) -> tuple[list[dict], list[str]]:
     for i, g in enumerate(limits if isinstance(limits, list) else [limits]):
         if (isinstance(g, dict) and isinstance(g.get("name"), str) and g.get("metric") in METRICS
                 and isinstance(g.get("max"), int) and not isinstance(g.get("max"), bool)
-                and isinstance(g.get("window_days", 30), int)):
+                and isinstance(g.get("window_days", 30), int) and not isinstance(g.get("window_days"), bool)):
             out.append({"window_days": 30, **g})
         else:
             problems.append(f"{MANDATE}: guardrails.limits[{i}] needs name, metric "
@@ -217,7 +222,8 @@ def fold(rows: list[dict], core: set[str], protected: set[str]) -> tuple[dict[st
                 problems.append(f"{where}: {gate}: {why} — the gate stays {st['mode']}")
                 continue
             st.update(mode=to, rate=rate if to == "sampled" else None, since=row.get("ts"),
-                      record=row.get("id"), guardrails=list(marks))
+                      record=row.get("id"), guardrails=list(marks),
+                      observe=to == "shadow" and row.get("observe") is True)
         elif action == "restore":
             st.update(mode="block", rate=None, since=row.get("ts"), record=row.get("id"),
                       guardrails=[], locked=bool(row.get("lock")))
@@ -335,7 +341,7 @@ def sentinel(root: Path, *, dry_run: bool = False) -> list[dict]:
     restores: list[dict] = []
     weak = {g: st for g, st in state.items() if st["mode"] in WEAK}
     for gate, st in sorted(weak.items()):
-        if st["mode"] in ("shadow", "sampled"):
+        if st["mode"] in ("shadow", "sampled") and not st.get("observe"):
             try:
                 heads = _weak_failures(root, gate, st["since"])
             except Exception as exc:  # noqa: BLE001 — the sentinel restores when it cannot see
@@ -382,6 +388,8 @@ def main(argv: list[str] | None = None) -> int:
     w.add_argument("--rate", type=float)
     w.add_argument("--decision", required=True)
     w.add_argument("--guardrail", action="append", default=[])
+    w.add_argument("--observe", action="store_true",
+                   help="a new gate that never blocked: the sentinel lets its failures stand")
     r = sub.add_parser("restore")
     r.add_argument("gate")
     r.add_argument("--reason", required=True)
@@ -412,15 +420,18 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         row = append(root, {"gate": args.gate, "action": "weaken", "to": args.to,
                             **({"rate": args.rate} if args.to == "sampled" else {}),
-                            "decision": args.decision, "guardrails": args.guardrail})
-        print(f"gate-modes: {row['id']} {args.gate} → {args.to}"
+                            "decision": args.decision, "guardrails": args.guardrail,
+                            **({"observe": True} if args.observe else {})})
+        if args.observe and args.to != "shadow":
+            print("gate-modes: note: --observe only applies to --to shadow — ignored", file=sys.stderr)
+        print(f"gate-modes: {row['id']} {args.gate} -> {args.to}"
               + (f" ({args.rate:.0%} of commits)" if args.to == "sampled" else "")
               + f" — commit {CHANGES}; `sentinel` restores it on a failure or a breached guardrail")
         return 0
     if args.cmd == "restore":
         row = append(root, {"gate": args.gate, "action": "restore", "reason": args.reason,
                             "lock": args.lock, "by": "manual"})
-        print(f"gate-modes: {row['id']} {args.gate} → block" + (" (locked until unlock)" if args.lock else ""))
+        print(f"gate-modes: {row['id']} {args.gate} -> block" + (" (locked until unlock)" if args.lock else ""))
         return 0
     if args.cmd == "unlock":
         row = append(root, {"gate": args.gate, "action": "unlock", "triage": args.triage})

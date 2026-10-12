@@ -758,6 +758,13 @@ def flow_items(root: Path, *, issue: int | None = None, branch: str | None = Non
     is measured, estimated or missing."""
     import check_review as _review  # noqa: PLC0415
 
+    # a project whose mandate says it has no deploy step ends at the merge by
+    # design, also where no train row exists (merged with finish.py)
+    try:
+        import optimize  # noqa: PLC0415 — the mandate's one reader
+        no_deploy = (optimize.load_mandate(root)[0] or {}).get("deploy") is False
+    except Exception:  # noqa: BLE001
+        no_deploy = False
     now = now or datetime.now(timezone.utc)
     common = _common_dir(root)
     integration = branch or _default_branch()
@@ -845,6 +852,8 @@ def flow_items(root: Path, *, issue: int | None = None, branch: str | None = Non
             end, endpoint = deployed, "deploy"
         else:
             end, endpoint = merged, "merge"
+        if no_deploy and deployed["quality"] == "missing":
+            deployed = {"value": None, "quality": "not configured"}
         merge_by_design = deployed["quality"] == "not configured"
         # working time is the union of phase intervals: a re-dispatched phase
         # overlaps its first attempt and must not count twice

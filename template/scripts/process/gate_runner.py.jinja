@@ -492,18 +492,22 @@ def main() -> int:
     except Exception as exc:  # noqa: BLE001
         modes, mode_problems = {}, [f"gate modes unreadable ({exc}) — every gate blocks"]
     suppressed += _emit("".join(f"gate-runner: note: {p}\n" for p in mode_problems), known, seen, show_all)
+    weakened: list[str] = []
     for name in active:
         _key, cmd = gates[name]
         spec = local.get(name, {})
         node = modes.get(name, {})
         node_mode = node.get("mode", "block")
         mode = node_mode if node_mode != "block" else ("warn" if warn else "block")
+        if node_mode != "block":
+            weakened.append(f"{name} {node_mode}")
+        # stderr: pre-commit shows a passing hook's stdout to nobody
         if node_mode == "off":
-            print(f"== {name}: off ({node.get('record')}) — not run ==")
+            print(f"== {name}: off ({node.get('record')}) — not run ==", file=sys.stderr)
             _record_event(events, context, name, mode=mode, outcome="off", rc=None, duration_s=0.0)
             continue
         if node_mode == "sampled" and not gate_modes.sampled_in(name, context.get("head"), node["rate"]):
-            print(f"== {name}: sampled at {node['rate']:.0%} — not this commit ==")
+            print(f"== {name}: sampled at {node['rate']:.0%} — not this commit ==", file=sys.stderr)
             _record_event(events, context, name, mode=mode, outcome="unsampled", rc=None, duration_s=0.0)
             continue
         if spec.get("paths") and _untouched(root, spec["paths"], in_flight):
@@ -591,7 +595,11 @@ def main() -> int:
                   "and the finding behind it stops being true or false. Fix it, or "
                   "waive it with a named owner, today.")
         return 1
-    print(f"all {len(active)} active gate(s) passed")
+    print(f"all {len(active)} active gate(s) passed"
+          + (f" — {len(weakened)} not blocking: {', '.join(weakened)}" if weakened else ""))
+    if weakened:
+        print(f"gate-runner: {len(weakened)} gate(s) not blocking by record: {', '.join(weakened)}",
+              file=sys.stderr)
     return 0
 
 

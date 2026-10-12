@@ -51,7 +51,7 @@ measurement starts at the node:
   labelled.
 
 A node changes through `scripts/process/gate_modes.py`, and only there: the
-append-only record `.process-work/gate-changes.jsonl` sets each gate's mode
+append-only record `docs/process/gate-changes.local.jsonl` sets each gate's mode
 — `block` (default), `shadow` (runs and records, never blocks), `sampled`
 (runs on a stable share of commits, never blocks) or `off`.
 
@@ -70,7 +70,15 @@ append-only record `.process-work/gate-changes.jsonl` sets each gate's mode
   clean commit, and every still-active weakening that touches a breached
   guardrail (`guardrails.limits` in the mandate), newest first. Newest
   first is containment, not a claim about the cause. A restored gate is
-  locked until `unlock` records a triage.
+  locked until `unlock` records a triage. It reads the gate event log of
+  the checkout it runs in: runs on other hosts, in CI (whose log ends with
+  the runner) or on a dirty tree are not seen — run it where the gates run.
+- **A new gate** can be observed first: `weaken GATE --to shadow --observe`
+  (owner line as always) lets its failures stand, so false alarms are
+  counted before it blocks. Never for a gate that used to block.
+- **The record** lives in `docs/process/gate-changes.local.jsonl`, under review
+  like any process configuration; the owner line in it is text, and review
+  is what backs it.
 - **A new check** is new executable behaviour: it comes in through the
   project's normal code review. Setting a reviewed check's mode is
   configuration. Running a check without blocking does not make it

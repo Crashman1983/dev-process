@@ -68,7 +68,7 @@ def _events(out: Path) -> list[dict]:
 
 def _changes(out: Path, *rows: dict) -> None:
     (out / ".process-work").mkdir(exist_ok=True)
-    (out / ".process-work/gate-changes.jsonl").write_text(
+    (out / "docs/process/gate-changes.local.jsonl").write_text(
         "".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
 
 
@@ -108,7 +108,7 @@ def test_weakening_needs_an_owner_line_and_never_touches_a_core_gate(render, tmp
         json.dumps({"guardrails": {"protected": ["bad"]}}), encoding="utf-8")
     r = _modes(out, "weaken", "bad", "--to", "off", "--decision", "owner: x")
     assert r.returncode == 1 and "protected" in r.stderr
-    assert not (out / ".process-work/gate-changes.jsonl").exists()
+    assert not (out / "docs/process/gate-changes.local.jsonl").exists()
 
 
 def test_a_hand_written_record_that_breaks_a_rule_leaves_the_gate_blocking(render, tmp_path):
@@ -122,7 +122,7 @@ def test_a_hand_written_record_that_breaks_a_rule_leaves_the_gate_blocking(rende
              {"gate": "ok", "action": "weaken", "to": "shadow", "decision": "owner: x", "ts": ts,
               "guardrails": 3},
              {"gate": "bad", "action": "unlock"})
-    with (out / ".process-work/gate-changes.jsonl").open("a") as fh:
+    with (out / "docs/process/gate-changes.local.jsonl").open("a") as fh:
         fh.write("garbage\n")
     _land(out)
     g = _gates(out)
@@ -198,7 +198,7 @@ def test_a_breached_guardrail_rolls_back_every_active_weakening_newest_first(ren
     restored = [ln for ln in r.stdout.splitlines() if ln.startswith("gate-modes: restored")]
     assert [ln.split()[2] for ln in restored] == ["bad", "ok"]  # newest first
     assert all("guardrail escapes" in ln for ln in restored)
-    rows = [json.loads(ln) for ln in (out / ".process-work/gate-changes.jsonl").read_text().splitlines()]
+    rows = [json.loads(ln) for ln in (out / "docs/process/gate-changes.local.jsonl").read_text().splitlines()]
     assert all(r["lock"] for r in rows if r["action"] == "restore")
 
 
@@ -254,7 +254,30 @@ def test_a_broken_gate_modes_leaves_every_gate_blocking(render, tmp_path):
 def test_an_unreadable_record_file_is_named_and_the_sentinel_survives(render, tmp_path):
     out = _project(render, tmp_path)
     (out / ".process-work").mkdir(exist_ok=True)
-    (out / ".process-work/gate-changes.jsonl").write_bytes(b"\xff\xfe not utf-8\n")
+    (out / "docs/process/gate-changes.local.jsonl").write_bytes(b"\xff\xfe not utf-8\n")
     assert "unreadable" in _modes(out, "status").stdout
     assert _modes(out, "sentinel").returncode == 0
     assert _gates(out).returncode == 1
+
+
+def test_the_record_lives_where_review_looks_not_in_bookkeeping(render, tmp_path):
+    out = _project(render, tmp_path, remote=False)
+    import importlib.util
+    sys.path.insert(0, str(out / "scripts/process"))
+    for name in ("gate_modes", "check_review"):
+        spec = importlib.util.spec_from_file_location(f"{name}_rec", out / f"scripts/process/{name}.py")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        globals()[f"_{name}"] = mod
+    assert not _gate_modes.CHANGES.startswith(_check_review.BOOKKEEPING)  # noqa: F821
+
+
+def test_an_observed_new_gate_keeps_its_failures_and_weakened_gates_are_named(render, tmp_path):
+    out = _project(render, tmp_path)
+    r = _modes(out, "weaken", "bad", "--to", "shadow", "--observe", "--decision", "owner: new check, count it first")
+    assert r.returncode == 0, r.stderr
+    _land(out, "observe bad")
+    g = _gates(out)
+    assert g.returncode == 0
+    assert "1 not blocking: bad shadow" in g.stdout and "not blocking by record" in g.stderr
+    assert "nothing to restore" in _modes(out, "sentinel", "--dry-run").stdout
