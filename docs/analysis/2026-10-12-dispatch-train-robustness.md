@@ -75,3 +75,16 @@ Ergebnis: „go with changes“, 4 MAJOR und 5 MINOR. Wo diese Punkte den Entsch
 - **P7 Callback (MINOR-7).** `own_plans` behält den `read`-Callback. Der Zug liest damit den gemergten Baum und meldet unlesbare Pläne.
 - **P8 Prompt (MINOR-9).** Der Prompt einer Plan-Review nennt die fälligen Pläne mit Pfad. Ein Epic-Plan, den ein Paket ändert, ist nicht der Plan der Paket-Issue.
 - **P9 Zug (zu D4.2).** Gruppiert werden nur Umbenennungen (R) zwischen den neuen Pfaden zweier Kandidaten, nie die eigenen Namen der Basis oder des Archivs. Ein Diff, den git nicht liefert, gilt als unlesbar. Ein Umschreiben unter 50 % Ähnlichkeit bleibt zwei Pläne, also fail closed. Ein Negativtest prüft, dass ein echter Namensvetter auf einem dritten Kandidaten weiter zählt.
+
+## Refute Runde 1 — Änderungen
+
+Ergebnis: Block. Der Lauf fand einen BLOCKER, einen MAJOR und zwei MINOR, alle behoben.
+
+- **R1 Rückfallregel (BLOCKER).** Ein Paket-Branch eines Epics, der den Epic-Plan auf main abhakt, zählte diesen als eigenen Plan. Die Chain wartete daraufhin für immer auf einen Epic-Pass, den die Plan-Review des Pakets nie liefert. Jetzt gilt in Dispatch: Ein Branch, der einen eigenen Plan hinzufügt, wird nach diesem beurteilt. Nur ein Branch ohne eigenen Plan wird nach den main-Plänen seiner Issues beurteilt, die er ändert. Damit bleibt der Fall aus #204 gedeckt.
+- **R2 Verdrahtung (MAJOR).** Die Verdrahtung hat jetzt Tests:
+  - Die Chain reicht den Branch beim Pass-Check weiter.
+  - Die Chain reicht den Branch auch beim Schritt planned→execute weiter.
+  - `start` übergibt die Plan-Pfade an den Prompt, auch bei `--plan-review` und in der Chain.
+  - `start` reicht `remote` weiter.
+- **R3 Fällige Pläne (MINOR).** Prompt und Wartemeldung nennen nur Pläne ab Tier 2 ohne Pass (`uncleared_plans`), nicht jeden eigenen Plan.
+- **R4 Kosten (MINOR).** `_stacked_renames` überspringt Kandidatenpaare, die über der Basis keinen gemeinsamen Commit haben.

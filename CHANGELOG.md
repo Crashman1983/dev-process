@@ -1167,20 +1167,27 @@ Wer v2.27.1 oder v2.28.0 installiert hat und am Push scheitert: auf v2.28.1
 aktualisieren, `v2.28.1`.
 
 **v2.66.0 — Dispatch und Zug: eine Regel für eigene Pläne, Plan-Review fail-closed (#207, #204, #201).** Vom Owner am 2026-10-12 als ein Release freigegeben. Tier 3, weil Gate-Code betroffen ist.
-- **Eine Regel für „eigene Pläne“ (#204).** `check_review.own_plans` ist der eine Eigentümer. Eigen ist ein Plan, den der Branch hinzufügt, oder ein Plan auf der Basis, der eine Issue des Branches deklariert. Ein nur umbenannter Plan ist neu, wenn sich seine Issues ändern; ein gelöschter Plan ist nie eigen. Bisher zählte Dispatch nur hinzugefügte Pläne. Ändert ein Branch seinen Plan auf main, startet jetzt eine Plan-Review, und deren Pass gibt die Chain frei. Abschluss und Tier der nächsten Phase fragen weiter nur hinzugefügte Pläne: Ein Epic-Plan, den ein Paket abhakt, blockiert das Paket nicht. Die Issues eines Branches liefert `dispatch.branch_issues`, den Issue-Parser `check_review.local_issue_numbers`. Der Prompt einer Plan-Review nennt die fälligen Pläne mit Pfad.
+- **Eine Regel für „eigene Pläne“ (#204).** `check_review.own_plans` ist der eine Eigentümer. Eigen ist ein Plan, den der Branch hinzufügt, oder ein Plan auf der Basis, der eine Issue des Branches deklariert. Ein nur umbenannter Plan ist neu, wenn sich seine Issues ändern; ein gelöschter Plan ist nie eigen.
+  - **Dispatch** zählte bisher nur hinzugefügte Pläne. Fügt ein Branch keinen eigenen Plan hinzu, wird er jetzt nach den main-Plänen seiner Issues beurteilt, die er ändert. Ändert er seinen Plan auf main, startet eine Plan-Review, und deren Pass gibt die Chain frei.
+  - **Ein Branch mit eigenem Plan** wird nach diesem beurteilt. Ein Paket, das den Plan seines Epics auf main abhakt, wartet also nicht auf einen Epic-Pass (Refute: die Chain hätte dort für immer gewartet).
+  - **Abschluss und Tier der nächsten Phase** fragen weiter nur hinzugefügte Pläne.
+  - **Eigentümer:** Die Issues eines Branches liefert `dispatch.branch_issues`, den Issue-Parser `check_review.local_issue_numbers`.
+  - **Prompt und Wartemeldung** einer Plan-Review nennen die fälligen Pläne mit Pfad, auch bei `--plan-review` und in der Chain.
 - **`plan_review_due` scheitert sicher (#207).** In jedem Zweifelsfall wählt dispatch die Code-Review, und die Session sagt selbst, wenn kein Code da ist. Das gilt für:
   - origin ist nicht erreichbar; das gilt nicht mehr als „Branch fehlt“;
   - eine Remote-Session; sie wird nur nach origin beurteilt, nie nach einem lokalen Vorsprung;
   - `--dry-run`; es holt nichts mehr;
   - git-Ausgabe, die nicht UTF-8 ist; `start` stürzt daran nicht mehr ab, gelesen wird mit `surrogateescape`, und kein Leser bekommt eine leere Antwort.
 
-  Ein Plan mit `review-waived:` schuldet keine Plan-Review, das ist die Regel des Gates. Vier Mutanten aus #207 haben jetzt einen Test, der sie fängt: Diff-Returncode ignoriert, `--no-renames` entfernt, Phasen-Guard entfernt, nicht lesbare Pfade. Der Mutant „Fetch-Fehler ignoriert“ ist äquivalent: Ein fehlendes Objekt macht jeden folgenden Schritt zur Code-Review.
-- **Zug (#201).** Ein Branch, der einen aktiven Plan löscht, gilt nicht mehr als „unlesbar“. Benennt ein Kandidat einen Plan um, den ein anderer Kandidat hinzufügt, zählen beide Namen als ein Plan, gemessen ab ihrem gemeinsamen Fork. Die Eindeutigkeit des Slugs geht daran nicht mehr verloren. Ein echter Namensvetter auf einem dritten Kandidaten zählt weiter.
+  Ein Plan mit `review-waived:` schuldet keine Plan-Review, das ist die Regel des Gates. Vier Mutanten aus #207 haben jetzt einen Test, der sie fängt: Diff-Returncode ignoriert, `--no-renames` entfernt, Phasen-Guard entfernt, nicht lesbare Pfade. Zwei sind äquivalent. „Fetch-Fehler ignoriert“: Ein fehlendes Objekt macht jeden folgenden Schritt zur Code-Review. „`not base` ignoriert“: Der Returncode des Diffs fängt es. Nicht-UTF-8-Text in einem Plan lässt `start` nicht mehr abstürzen. Eine Plan-Review kann er trotzdem auslösen, denn nur nicht lesbare Pfade gelten als Code.
+- **Zug (#201).** Ein Branch, der einen aktiven Plan löscht, gilt nicht mehr als „unlesbar“. Benennt ein Kandidat einen Plan um, den ein anderer Kandidat hinzufügt, zählen beide Namen als ein Plan, gemessen ab ihrem gemeinsamen Fork. Die Eindeutigkeit des Slugs geht daran nicht mehr verloren. Ein echter Namensvetter auf einem dritten Kandidaten zählt weiter. Kandidaten ohne gemeinsamen Commit über der Basis kosten keinen Diff.
 - **Offen in #207:**
   - `make_review_bundle --plan <issue>` sucht per Teilstring im Dateinamen.
   - Die Spec-Kit-Identität (`tasks.md` gegenüber `plan.md`) ist nicht vereinheitlicht.
   - Ein veraltetes `origin/main` neben einem frischen `main` führt weiter zur Code-Review, also in die sichere Richtung.
-- **Für Kenni:** Keine Migration. Die Änderung kommt mit dem Template-Update. Eine Chain, die auf einen `-plan`-Pass für einen geänderten main-Plan gewartet hätte, läuft jetzt weiter.
+- **Für Kenni:** Keine Migration, die Änderung kommt mit dem Template-Update. Zwei Verhaltensänderungen gibt es:
+  - Ein Branch ohne eigenen Plan, der einen main-Plan seiner Issue ändert, ging bisher direkt nach execute. Jetzt braucht er vorher einen `-plan`-Pass.
+  - Eine `start --phase review` für einen solchen Branch wird zur Plan-Review statt zur Code-Review ohne Code.
 
 **v2.65.0 — Umgebungs-Preflight vor jedem Testlauf (#209).** Aus Kenni auf v2.64 (#2521), vom Owner am 2026-10-10 freigegeben. Tier 3, weil Gate-Code betroffen ist. In v2.64 hatte nur der Zug ein `--preflight`. In Kenni kam ein kaputtes Worktree-venv an einem Tag dreimal als rote certify- und Operator-Tests an.
 - **`preflight` in `testing.local.json`** ist ein argv ohne Shell, dazu optional `preflight_timeout` (Default 600 s). `test_select.run` führt ihn einmal aus, unter derselben Lane-Haltung und vor dem ersten Testbefehl. Damit gilt er für den pre-push-Rahmen, für `run --certify` und für Läufe von Hand. Ein Zertifikatstreffer oder „nichts zu testen“ braucht ihn nicht.

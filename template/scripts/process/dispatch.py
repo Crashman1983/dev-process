@@ -1582,6 +1582,11 @@ def start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str |
         if due:
             print(f"dispatch: plan review — {due[0]} (code review: add code first)")
             plan_review, plan_paths = True, due[1]
+    elif plan_review:
+        # a forced or chained plan review names its plans too: the due one may
+        # be another than the issue's own (#204)
+        tip = _out(root, "rev-parse", "--verify", "-q", f"{branch}^{{commit}}") or _remote_head(root, branch)
+        plan_paths = uncleared_plans(root, tip, branch) if tip else []
     prompt = prompt_for(phase, issue, tier, branch, model, remote=remote, channel=channel, effort=effort,
                         attests=not other_harness, plan_review=plan_review, plan_paths=plan_paths)
     argv = build_argv(policy, model, prompt, branch, issue, phase, effort, cell.command)
@@ -2152,11 +2157,14 @@ def _own_plans_on_origin(root: Path, branch: str, local: bool = False) -> tuple[
 def own_plans_at(root: Path, tip: str, branch: str = "", *, include_base: bool = False) -> list[str]:
     """The active plans and Spec Kit tasks of the commit `tip` that are its
     own (`check_review.own_plans`, the rule the train asks too): the ones it
-    adds; with `include_base` and the `branch`, also a plan already on the
-    base that declares one of the branch's issues (#204: a branch changing
-    its plan on main is a plan to review). Completion and the next phase's
-    tier ask without it: an epic's plan a package ticks is not the
-    package's to finish. Another work's plan it only touched is never its own."""
+    adds. With `include_base` and the `branch`, a branch that adds none is
+    judged by the plans on the base it changes that declare one of its issues
+    (#204: a branch changing its plan on main is a plan to review). A branch
+    with a plan of its own is judged by that one: a package ticking its
+    epic's plan on main is not the epic's plan review (refute: the chain
+    waited for an epic pass the package's review never gives). Completion
+    and the next phase's tier ask without `include_base`. Another work's
+    plan it only touched is never its own."""
     base = _integration_base(root, tip)
     if not base:
         return []
@@ -2172,7 +2180,8 @@ def own_plans_at(root: Path, tip: str, branch: str = "", *, include_base: bool =
     # without the branch's issues no plan on the base can be its own
     issues = branch_issues(root, branch) if include_base and branch else set()
     own = _review.own_plans(root, base, tip, issues, read, (".process-work/plans", "specs"), is_plan) or []
-    return [rel for rel, _plain, _added in own]
+    added = [rel for rel, _plain, was_added in own if was_added]
+    return added or [rel for rel, _plain, _was_added in own]
 
 
 def work_complete_on_origin(root: Path, branch: str, local: bool = False) -> bool | None:
@@ -2245,11 +2254,26 @@ def plan_review_state(root: Path, wt: Path, branch: str = "") -> tuple[int | Non
 
 
 def plan_review_state_at(root: Path, head: str, branch: str = "") -> tuple[int | None, bool]:
-    """`plan_review_state` for the commit `head`; with the `branch`, a plan on
-    the base that declares one of its issues counts too (#204)."""
+    """`plan_review_state` for the commit `head`; with the `branch`, a branch
+    adding no plan is judged by the plans on the base it changes that declare
+    one of its issues (#204, `own_plans_at`)."""
+    states = _plan_states(root, head, branch)
+    if not states:
+        return None, False
+    return max(t for t, _rel, _ok in states), all(ok for t, _rel, ok in states if t >= 2)
+
+
+def uncleared_plans(root: Path, head: str, branch: str = "") -> list[str]:
+    """The own Tier 2+ plans at `head` no plan pass covers — what a plan
+    review must read, and what a chain waiting for one waits on."""
+    return [rel for t, rel, ok in _plan_states(root, head, branch) if t >= 2 and not ok]
+
+
+def _plan_states(root: Path, head: str, branch: str = "") -> list[tuple[int, str, bool]]:
+    """(tier, path, cleared) of each own plan with a tier at `head`."""
     import check_review as _review  # noqa: PLC0415
     if not head:
-        return None, False
+        return []
     plans = []
     for rel in own_plans_at(root, head, branch, include_base=bool(branch)):
         if rel.endswith("/tasks.md"):  # a Spec Kit plan: its tier and ids live in plan.md
@@ -2260,7 +2284,7 @@ def plan_review_state_at(root: Path, head: str, branch: str = "") -> tuple[int |
             plans.append((tier, rel, _review._plan_work_ids(_review.plan_stem(rel), text, include_dedated=True),
                           _review.review_waived(text)))
     if not plans:
-        return None, False
+        return []
     journal = _review.JOURNAL_DIR
     names = [n for n in _out(root, "ls-tree", "-r", "--name-only", head, "--", journal).splitlines()
              if n.endswith(".md")]
@@ -2275,10 +2299,9 @@ def plan_review_state_at(root: Path, head: str, branch: str = "") -> tuple[int |
             r.get("work") in {f"{i}-plan" for i in ids} and str(r.get("tier", "")).isdigit()
             and int(r["tier"]) >= tier and r.get("head")
             and _out(root, "rev-parse", f"{r['head']}:{rel}") == now for r in passes)
-    top = max(t for t, _rel, _ids, _waived in plans)
     # a waived plan owes no plan review — the review gate's rule (#207); its
     # tier still names the model of the next phase
-    return top, all(waived or cleared(t, rel, ids) for t, rel, ids, waived in plans if t >= 2)
+    return [(t, rel, waived or cleared(t, rel, ids)) for t, rel, ids, waived in plans]
 
 def _has_surrogate(text: str) -> bool:
     return any("\udc80" <= ch <= "\udcff" for ch in text)
@@ -2328,12 +2351,13 @@ def plan_review_due_plans(root: Path, branch: str, *, remote: bool = False,
         return None  # a path this reader cannot name is no "only plans" (#207)
     if any(not (p.startswith(BOOKKEEPING) or p.startswith(_review.SPECS_DIR + "/")) for p in changed):
         return None  # code to review
-    tier, cleared = plan_review_state_at(root, tip, branch)
-    if tier is None or tier < 2 or cleared:
+    states = _plan_states(root, tip, branch)
+    due = [(t, rel) for t, rel, ok in states if t >= 2 and not ok]
+    if not due:
         return None
-    plans = own_plans_at(root, tip, branch, include_base=True)
-    return (f"{branch} changes only plans and bookkeeping, and its Tier {tier} plan has no pass for its "
-            f"current text ({', '.join(plans)})", plans)
+    plans = [rel for _t, rel in due]
+    return (f"{branch} changes only plans and bookkeeping, and its Tier {max(t for t, _rel in due)} plan has "
+            f"no pass for its current text ({', '.join(plans)})", plans)
 
 
 PLAN_GATES_TIMEOUT = 900  # the gate runner's own per-gate cap is 600 s
@@ -2410,8 +2434,9 @@ def _chain(root: Path, *, dry_run: bool = False) -> int:
             nxt = "review"
         elif state == "review-pass" and phase == "review" and rec.get("plan_review"):
             if wt_rec is None or not plan_review_state(root, wt_rec, branch)[1]:
+                waiting = uncleared_plans(root, _out(wt_rec, "rev-parse", "HEAD"), branch) if wt_rec else []
                 print(f"dispatch: {branch} passed its plan review — waiting for the `-plan` pass on its "
-                      "worktree")
+                      f"worktree" + (f" for {', '.join(waiting)}" if waiting else ""))
                 continue
             nxt = "execute"
         elif state == "review-pass" and phase == "review":

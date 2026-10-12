@@ -1826,14 +1826,14 @@ def _planned_branch(out: Path, tier: int, plan_pass: bool):
         _plan_pass(out, tier)
 
 
-def _chain_planned(mod, out, monkeypatch, *, phase="plan", plan_review=False, state="planned"):
-    rec = {"branch": "b", "issue": 7, "tier": None, "phase": phase, "started": 1, "worktree": str(out),
+def _chain_planned(mod, out, monkeypatch, *, phase="plan", plan_review=False, state="planned", branch="b"):
+    rec = {"branch": branch, "issue": 7, "tier": None, "phase": phase, "started": 1, "worktree": str(out),
            "plan_review": plan_review}
     queued = []
     monkeypatch.setattr(mod, "records", lambda root: [rec])
     monkeypatch.setattr(mod, "_load_record", lambda root, b: (None, rec))
     monkeypatch.setattr(mod._report, "read_reports",
-                        lambda root, **_kw: [{"worker": "b", "state": state, "epoch": 1}])
+                        lambda root, **_kw: [{"worker": branch, "state": state, "epoch": 1}])
     monkeypatch.setattr(mod, "plan_gates", lambda wt: None)
     monkeypatch.setattr(mod, "stop", lambda root, b, **kw: 0)
     monkeypatch.setattr(mod, "plan_tier_on_origin", lambda root, b: None)
@@ -2210,3 +2210,65 @@ def test_completion_and_tier_ask_only_the_branchs_added_plans(render, tmp_path):
     head = _git(out, "rev-parse", "HEAD").stdout.strip()
     assert mod.own_plans_at(out, head, "70-slice") == []
     assert mod.own_plans_at(out, head, "70-slice", include_base=True) == [rel]
+
+
+
+def test_a_package_ticking_its_epics_plan_is_judged_by_its_own_plan(render, tmp_path):
+    """Refute v2.66 BLOCKER: the epic's plan on main counted as the package's own,
+    and the chain waited for an epic pass the package's plan review never gives."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _epic_on_main(out, issue=70, passed=False)  # 70-slice changes the epic plan
+    plans = out / ".process-work/plans"
+    (plans / "2026-10-12-pkg.md").write_text("# pkg\n\ntier: 2\nissue: #72\n\n## Decisions\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "the package's own plan")
+    _plan_pass(out, 2, work="2026-10-12-pkg")
+    mod = _load_dispatch(out)
+    assert mod.plan_review_state(out, out, "70-slice") == (2, True)
+    _git(out, "checkout", "-q", "main")
+    assert mod.plan_review_due(out, "70-slice") is None
+
+
+def test_the_chain_passes_the_branch_to_the_plan_pass_it_waits_for(render, tmp_path, monkeypatch):
+    """Review v2.66: the chain asked without the branch and waited forever on a main plan's pass."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _epic_on_main(out, issue=70, passed=True)
+    mod = _load_dispatch(out)
+    assert _chain_planned(mod, out, monkeypatch, phase="review", plan_review=True, state="review-pass",
+                          branch="70-slice") == [("execute", False)]
+
+
+@pytest.mark.parametrize("forced", [False, True])
+def test_a_plan_review_start_names_the_due_plans(render, tmp_path, monkeypatch, forced):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    rel = _epic_on_main(out, issue=70, passed=False)
+    _git(out, "checkout", "-q", "main")
+    mod = _load_dispatch(out)
+    seen = []
+    real = mod.prompt_for
+    monkeypatch.setattr(mod, "prompt_for", lambda *a, **kw: seen.append(kw.get("plan_paths")) or real(*a, **kw))
+    assert mod.start(out, issue=70, phase="review", tier=3, branch="70-slice", title=None, dry_run=True,
+                     plan_review=forced) == 0
+    assert seen == [[rel]], seen
+
+
+def test_a_remote_review_start_asks_with_origin_alone(render, tmp_path, monkeypatch):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _planned_branch(out, 3, plan_pass=False)
+    _git(out, "checkout", "-q", "main")
+    mod = _load_dispatch(out)
+    real_pp = mod.phase_policy
+    monkeypatch.setattr(mod, "phase_policy", lambda policy, phase: {**real_pp(policy, phase), "remote": True})
+    asked = []
+    monkeypatch.setattr(mod, "plan_review_due_plans", lambda root, b, **kw: asked.append(kw) or None)
+    mod.start(out, issue=7, phase="review", tier=3, branch="b", title=None, dry_run=True)
+    assert asked and asked[0].get("remote") is True and asked[0].get("fetch") is False, asked
+
+
+@pytest.mark.parametrize("passed,queued", [(False, [("review", True)]), (True, [("execute", False)])])
+def test_a_planned_branch_changing_its_main_plan_gets_its_plan_review_first(render, tmp_path, monkeypatch,
+                                                                             passed, queued):
+    """#204 on the chain: without the branch the main plan was no plan, and execute ran unreviewed."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _epic_on_main(out, issue=70, passed=passed)
+    assert _chain_planned(_load_dispatch(out), out, monkeypatch, branch="70-slice") == queued
