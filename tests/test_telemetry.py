@@ -360,3 +360,110 @@ def test_rounds_names_a_missing_dependency_of_an_installed_finding_reader(render
     assert "blockers: not read (check_issues needs yaml" in capsys.readouterr().out
     head = (out / "scripts/process/process_kpis.py").read_text(encoding="utf-8").split('"""', 1)[0]
     assert "# /// script" in head and "pyyaml" in head
+
+
+# --- flow: one issue from planning to deploy and follow-up (optimization.md) ----
+
+def _flow_repo(render, tmp_path):
+    import json
+    out = _render(render, tmp_path)
+    ans = out / ".copier-answers.yml"
+    ans.write_text("_commit: v9.9.9\n" + ans.read_text())
+
+    def git(*a, env=None):
+        import os
+        return subprocess.run(["git", *a], cwd=out, capture_output=True, text=True, check=True,
+                              env={**os.environ, **(env or {})})
+    git("init", "-q", "-b", "main")
+    git("config", "user.email", "t@t")
+    git("config", "user.name", "t")
+    plans = out / ".process-work/plans/archive"
+    plans.mkdir(parents=True, exist_ok=True)
+    (plans / "2026-10-01-faster.md").write_text(
+        "# Plan\n\nissue: #12\ntier: 2\n\n## Decisions\n\n"
+        "- DECISION 2026-10-01 owner: keep the old API — because clients\n"
+        "- DECISION 2026-10-01 steward: run it first — because ready\n", encoding="utf-8")
+    git("add", "-A")
+    git("commit", "-q", "-m", "base", env={"GIT_COMMITTER_DATE": "2026-09-30T00:00:00+00:00",
+                                         "GIT_AUTHOR_DATE": "2026-09-30T00:00:00+00:00"})
+    # a later fix that names its origin, and one outside the follow-up window
+    for day, body in (("2026-10-05", "fix: crash\n\nRegression-of: #12"),
+                      ("2026-12-30", "fix: late\n\nRegression-of: #12")):
+        (out / f"src-{day}.txt").write_text("x\n")
+        git("add", "-A")
+        git("commit", "-q", "-m", body, env={"GIT_COMMITTER_DATE": f"{day}T12:00:00+00:00",
+                                             "GIT_AUTHOR_DATE": f"{day}T12:00:00+00:00"})
+    common = out / ".git"
+    d = common / "process-dispatch"
+    d.mkdir()
+    for phase, stamp in (("plan", "20261001-100000"), ("execute", "20261001-120000"),
+                         ("review", "20261001-160000")):
+        (d / f"12-faster-{phase}-{stamp}.log").write_text("")
+    tower = common / "process-tower"
+    tower.mkdir()
+    reports = [("2026-10-01T11:00:00", "planned"), ("2026-10-01T15:00:00", "pushed"),
+               ("2026-10-01T17:00:00", "review-pass"), ("2026-10-02T09:00:00", "done")]
+    import time
+    off = time.strftime("%z")
+    (tower / "reports.jsonl").write_text("".join(
+        json.dumps({"ts": ts + off, "host": "h", "worker": "12-faster", "branch": "12-faster",
+                    "issue": 12, "state": st, "note": "", "cwd": ""}) + "\n" for ts, st in reports))
+    train = common / "process-train"
+    train.mkdir()
+    import datetime as dt
+    ended = dt.datetime(2026, 10, 2, 9, 30).astimezone().isoformat()
+    (train / "phases.jsonl").write_text(json.dumps(
+        {"stamp": "s", "result": "green", "aboard": 1, "branches": ["12-faster"], "deployed": True,
+         "ended": ended}) + "\n")
+    return out
+
+
+def _flow_module(out):
+    import importlib.util
+    sys.dont_write_bytecode = True
+    sys.path.insert(0, str(out / "scripts/process"))
+    spec = importlib.util.spec_from_file_location("kpis_flow_under_test", out / "scripts/process/process_kpis.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_flow_traces_one_issue_from_planning_to_deploy_and_follow_up(render, tmp_path):
+    from datetime import datetime, timezone
+    out = _flow_repo(render, tmp_path)
+    m = _flow_module(out)
+    [it] = m.flow_items(out, issue=12, now=datetime(2026, 12, 31, tzinfo=timezone.utc))
+    assert it["start"]["quality"] == "measured" and it["deployed"]["quality"] == "measured"
+    # 10:00 first phase → 09:30 next day deploy
+    assert it["lead_s"] == {"value": 23.5 * 3600, "quality": "measured"}
+    # work: plan 1 h + execute 3 h + review 1 h; the rest waited
+    assert it["work_s"]["value"] == 5 * 3600 and it["wait_s"]["value"] == 18.5 * 3600
+    assert it["owner_decisions"]["value"] == 1  # the steward's line is no owner effort
+    assert it["escapes"]["value"] == 1 and it["escapes"]["window_open"] is False  # the late fix is outside 30 d
+    assert it["process_version"]["value"] == "v9.9.9"
+    assert it["tokens"]["quality"] == "missing"  # no transcripts glob: never a zero
+
+
+def test_flow_says_what_is_missing_instead_of_guessing(render, tmp_path):
+    out = _flow_repo(render, tmp_path)
+    (out / ".git/process-train/phases.jsonl").unlink()
+    (out / ".git/process-tower/reports.jsonl").write_text("")
+    m = _flow_module(out)
+    [it] = m.flow_items(out, issue=12)
+    assert it["merged"]["quality"] == "missing" and it["deployed"]["quality"] == "missing"
+    assert it["lead_s"] == {"value": None, "quality": "missing"}
+    assert it["work_s"]["quality"] == "estimated"  # phases started, none reported an end
+    assert it["escapes"]["value"] is None
+
+
+def test_flow_cli_prints_the_issue_and_the_honest_ceiling(render, tmp_path):
+    out = _flow_repo(render, tmp_path)
+    r = subprocess.run([sys.executable, str(out / "scripts/process/process_kpis.py"), "flow"],
+                       cwd=out, capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    assert "#12: lead 23.5 h [measured] (work 5.0 h, wait 18.5 h)" in r.stdout, r.stdout
+    assert "recovery time: not measured" in r.stdout and "confidence: low" in r.stdout
+    j = subprocess.run([sys.executable, str(out / "scripts/process/process_kpis.py"), "flow", "--json",
+                        "--issue", "12"], cwd=out, capture_output=True, text=True)
+    import json
+    assert json.loads(j.stdout)[0]["issue"] == 12

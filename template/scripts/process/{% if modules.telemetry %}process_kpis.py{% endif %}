@@ -30,6 +30,9 @@ difference. See "honest ceiling" in the module doc.
   process_kpis.py rounds                        # per work item: rounds to pass, blockers by origin
   process_kpis.py share         [--weeks N]     # process vs product, week by week
   process_kpis.py train-phases  [--runs N]      # where the merge train's time goes, phase by phase
+  process_kpis.py flow          [--issue N] [--json] [--follow-up-days D]
+                                                # one issue, first phase to deploy: work, wait,
+                                                # tokens, owner decisions, escapes, process version
   process_kpis.py report                        # all families
 
 Lean pass: the error rate at the gate is read from the review records
@@ -50,7 +53,7 @@ import statistics
 import subprocess
 import sys
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -617,6 +620,287 @@ def train_phases(runs: int = 20) -> int:
     return 0
 
 
+# --- flow: one issue from its first dispatched phase to deploy ---------------
+# What ties the traces together (docs/process/optimization.md, "Goals"): the
+# dispatch logs (a phase's start, named <branch>-<phase>-<stamp>.log), the
+# worker reports (a phase's end), the train's phases.jsonl (who landed,
+# whether the deploy ran green, when), git (Regression-of trailers, the
+# process version at merge) and the plans (owner decisions). Every field
+# says whether it is measured, estimated or missing; nothing is filled in.
+_FOLLOW_UP_DAYS = 30  # escapes count this long after the merge (mandate: follow_up_days)
+_PHASE_LOG = re.compile(r"^(?P<branch>.+)-(?P<phase>brainstorm|plan|execute|review)-(?P<ts>\d{8}-\d{6})\.log$")
+_PHASE_ENDS = {"brainstorm": {"planned", "blocked", "idle"}, "plan": {"planned", "blocked"},
+               "execute": {"pushed", "blocked"}, "review": {"review-pass", "blocked"}}
+_REGRESSION_OF = re.compile(r"^\s*Regression-of:\s*(.+)$", re.IGNORECASE | re.MULTILINE)
+_ANSWERS_COMMIT = re.compile(r"^_commit:\s*['\"]?([^'\"\s]+)", re.MULTILINE)
+
+
+def _common_dir(root: Path) -> Path | None:
+    r = subprocess.run(["git", "-C", str(root), "rev-parse", "--git-common-dir"],
+                       capture_output=True, text=True)
+    if r.returncode != 0 or not r.stdout.strip():
+        return None
+    common = Path(r.stdout.strip())
+    return common if common.is_absolute() else root / common
+
+
+def _aware(value) -> datetime | None:
+    """An ISO timestamp as an aware datetime; a naive one is this host's local time."""
+    if not value:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        try:
+            dt = datetime.strptime(str(value), "%Y-%m-%dT%H:%M:%S%z")
+        except ValueError:
+            return None
+    return dt if dt.tzinfo else dt.astimezone()
+
+
+def _phase_starts(common: Path | None) -> list[dict]:
+    """[{branch, phase, ts}] from the dispatch logs' names (one per started phase)."""
+    out: list[dict] = []
+    d = common / "process-dispatch" if common else None
+    if d is None or not d.is_dir():
+        return out
+    for f in d.glob("*.log"):
+        m = _PHASE_LOG.match(f.name)
+        if m:
+            ts = datetime.strptime(m.group("ts"), "%Y%m%d-%H%M%S").astimezone()
+            out.append({"branch": m.group("branch").replace("__", "/"), "phase": m.group("phase"), "ts": ts})
+    return out
+
+
+def _train_rows(common: Path | None) -> list[dict]:
+    import json  # noqa: PLC0415
+
+    rows: list[dict] = []
+    try:
+        for line in (common / "process-train" / "phases.jsonl").read_text(encoding="utf-8").splitlines():
+            try:
+                row = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(row, dict):
+                rows.append(row)
+    except (OSError, TypeError):
+        pass
+    return rows
+
+
+def _regressions(root: Path, branch: str) -> dict[int, list[datetime]]:
+    """issue → commit times of the fixes that name it in a `Regression-of:` trailer."""
+    import check_review as _review  # noqa: PLC0415 — the issue-ref parser's owner
+
+    r = subprocess.run(["git", "-C", str(root), "log", branch, "-z", "--format=%ct%x01%B"],
+                       capture_output=True)
+    out: dict[int, list[datetime]] = defaultdict(list)
+    if r.returncode != 0:
+        return out
+    for entry in r.stdout.decode("utf-8", "surrogateescape").split("\0"):
+        ct, sep, body = entry.strip("\n").partition("\x01")
+        if not sep or not ct.isdigit():
+            continue
+        when = datetime.fromtimestamp(int(ct), tz=timezone.utc)
+        for m in _REGRESSION_OF.finditer(body):
+            for tok in re.split(r"[,\s]+", m.group(1).strip()):
+                if tok.lstrip("#").isdigit():
+                    out[int(tok.lstrip("#"))].append(when)
+                else:
+                    parsed = _review.parse_issue_ref(tok) if tok else None
+                    if parsed is not None:
+                        out[parsed[1]].append(when)
+    return out
+
+
+def _owner_decisions(root: Path) -> dict[int, int]:
+    """issue → `DECISION <date> owner:` lines in the plans that declare it (proxy for owner effort)."""
+    import check_review as _review  # noqa: PLC0415
+    from process_context import DECISION  # noqa: PLC0415 — the ledger line's owner
+
+    out: dict[int, int] = defaultdict(int)
+    for _rel, text in _review.record_texts(root, ("plan", "plan-archive", "spec-plan")) or []:
+        owners = sum(1 for m in DECISION.finditer(text) if m.group(2).strip().lower() == "owner")
+        for n in set(_review.declared_issue_numbers(text)):
+            out[n] += owners
+    return out
+
+
+def _process_version(root: Path, branch: str, when: datetime | None) -> str | None:
+    """`_commit` of .copier-answers.yml on the integration branch at `when`."""
+    if when is None:
+        return None
+    r = subprocess.run(["git", "-C", str(root), "log", "-1", f"--before={when.isoformat()}",
+                        "--format=%H", branch], capture_output=True, text=True)
+    sha = r.stdout.strip()
+    if r.returncode != 0 or not sha:
+        return None
+    r = subprocess.run(["git", "-C", str(root), "show", f"{sha}:.copier-answers.yml"],
+                       capture_output=True, text=True)
+    m = _ANSWERS_COMMIT.search(r.stdout) if r.returncode == 0 else None
+    return m.group(1) if m else None
+
+
+def _percentile(values: list[float], q: float) -> float:
+    """Nearest-rank percentile: honest for small n (P90 of 3 values is the largest)."""
+    ordered = sorted(values)
+    k = max(0, min(len(ordered) - 1, -(-int(q * 100) * len(ordered) // 100) - 1))
+    return ordered[k]
+
+
+def flow_items(root: Path, *, issue: int | None = None, branch: str | None = None,
+               follow_up_days: int = _FOLLOW_UP_DAYS, now: datetime | None = None) -> list[dict]:
+    """One timeline per issue; every value is {"value", "quality"} where quality
+    is measured, estimated or missing."""
+    import check_review as _review  # noqa: PLC0415
+
+    now = now or datetime.now(timezone.utc)
+    common = _common_dir(root)
+    integration = branch or _default_branch()
+    starts = _phase_starts(common)
+    reports = [r for recs in _reports_by_worker(root).values() for r in recs]
+    rows = _train_rows(common)
+    # which branches carried which issue: the reports say it, else the branch name
+    branches_of: dict[int, set[str]] = defaultdict(set)
+    for rep in reports:
+        b = rep.get("worker") or rep.get("branch")
+        if b and str(rep.get("issue") or "").isdigit():
+            branches_of[int(rep["issue"])].add(b)
+    for st in starts:
+        n = _review.branch_issue(st["branch"])
+        if n and str(n).isdigit():
+            branches_of[int(n)].add(st["branch"])
+    wanted = [issue] if issue is not None else sorted(branches_of)
+    regressions = _regressions(root, integration)
+    decisions = _owner_decisions(root)
+    try:
+        import dispatch as _dispatch  # noqa: PLC0415 — one reader of transcripts
+    except ImportError:  # pragma: no cover — dispatch is core
+        _dispatch = None
+    items = []
+    for n in wanted:
+        bs = branches_of.get(n, set())
+        own_starts = sorted((s for s in starts if s["branch"] in bs), key=lambda s: s["ts"])
+        own_reports = sorted(((r, t) for r in reports
+                              if (r.get("worker") in bs or r.get("branch") in bs
+                                  or str(r.get("issue")) == str(n))
+                              and (t := _aware(r.get("ts"))) is not None), key=lambda rt: rt[1])
+        start = {"value": own_starts[0]["ts"], "quality": "measured"} if own_starts else (
+            {"value": own_reports[0][1], "quality": "estimated"} if own_reports else
+            {"value": None, "quality": "missing"})
+        done = [t for r, t in own_reports if r.get("state") == "done"]
+        merged = {"value": done[-1], "quality": "measured"} if done else {"value": None, "quality": "missing"}
+        deployed = {"value": None, "quality": "missing"}
+        for row in rows:
+            if bs & set(row.get("branches") or []):
+                ended = _aware(row.get("ended"))
+                if row.get("deployed") is True and ended:
+                    deployed = {"value": ended, "quality": "measured"}
+                elif row.get("deployed") is None and deployed["value"] is None:
+                    deployed = {"value": None, "quality": "not configured"}
+        end = deployed if deployed["value"] else merged
+        work = 0.0
+        unended = 0
+        for s in own_starts:
+            fin = next((t for r, t in own_reports if t >= s["ts"]
+                        and (r.get("worker") == s["branch"] or r.get("branch") == s["branch"])
+                        and r.get("state") in _PHASE_ENDS[s["phase"]]), None)
+            if fin is None:
+                unended += 1
+            else:
+                work += (fin - s["ts"]).total_seconds()
+        lead = wait = None
+        if start["value"] and end["value"]:
+            lead = (end["value"] - start["value"]).total_seconds()
+            wait = max(0.0, lead - work)
+        quality = ("missing" if lead is None else
+                   "measured" if start["quality"] == end["quality"] == "measured" and not unended
+                   else "estimated")
+        escapes = None
+        if merged["value"]:
+            horizon = merged["value"] + timedelta(days=follow_up_days)
+            escapes = sum(1 for t in regressions.get(n, []) if merged["value"] <= t <= horizon)
+            window_open = now < horizon
+        else:
+            window_open = None
+        tokens = _dispatch.issue_token_usage(root, n) if _dispatch else None
+        items.append({
+            "issue": n, "branches": sorted(bs),
+            "start": start, "merged": merged, "deployed": deployed,
+            "lead_s": {"value": lead, "quality": quality},
+            "work_s": {"value": work if own_starts else None,
+                       "quality": "missing" if not own_starts else ("estimated" if unended else "measured")},
+            "wait_s": {"value": wait, "quality": quality},
+            "tokens": {"value": tokens[0] if tokens else None, "sessions": tokens[1] if tokens else 0,
+                       "quality": "measured" if tokens else "missing"},
+            "owner_decisions": {"value": decisions.get(n, 0), "quality": "proxy"},
+            "escapes": {"value": escapes, "quality": "measured" if escapes is not None else "missing",
+                        "window_open": window_open, "days": follow_up_days},
+            "process_version": {"value": _process_version(root, integration, merged["value"]),
+                                "quality": "measured" if merged["value"] else "missing"},
+        })
+    return items
+
+
+def _hours(seconds: float | None) -> str:
+    return "—" if seconds is None else f"{seconds / 3600:.1f} h"
+
+
+def _token_text(tok: dict) -> str:
+    if tok["value"] is None:
+        return "tokens not measured"
+    v = tok["value"]
+    names = (("output_tokens", "out"), ("input_tokens", "in"),
+             ("cache_read_input_tokens", "cache read"), ("cache_creation_input_tokens", "cache write"))
+    parts = [f"{label} {v[k]:,}" for k, label in names if k in v]
+    return f"tokens {' / '.join(parts) or 'none recorded'} ({tok['sessions']} session(s))"
+
+
+def flow(root: Path | None = None, *, issue: int | None = None, as_json: bool = False,
+         follow_up_days: int = _FOLLOW_UP_DAYS) -> int:
+    import json  # noqa: PLC0415
+
+    root = root or Path.cwd()
+    items = flow_items(root, issue=issue, follow_up_days=follow_up_days)
+    if as_json:
+        def _plain(o):
+            return o.isoformat() if isinstance(o, datetime) else str(o)
+        print(json.dumps(items, indent=2, default=_plain))
+        return 0
+    print("[flow] per issue — first dispatched phase to deploy (else merge); "
+          "measured / estimated / missing per field")
+    if not items:
+        print("  no dispatched issue found (dispatch logs, worker reports) — flow skipped")
+        return 0
+    for it in items:
+        esc = it["escapes"]
+        esc_text = ("escapes not measurable (no merge)" if esc["value"] is None else
+                    f"escapes {esc['value']} in {esc['days']} d" + (" (window still open)" if esc["window_open"] else ""))
+        print(f"  #{it['issue']}: lead {_hours(it['lead_s']['value'])} [{it['lead_s']['quality']}] "
+              f"(work {_hours(it['work_s']['value'])}, wait {_hours(it['wait_s']['value'])}) · "
+              f"start {it['start']['quality']} · merge {it['merged']['quality']} · "
+              f"deploy {it['deployed']['quality']} · {_token_text(it['tokens'])} · "
+              f"owner decisions {it['owner_decisions']['value']} (proxy) · {esc_text} · "
+              f"process {it['process_version']['value'] or 'unknown'}")
+    leads = [it["lead_s"]["value"] for it in items if it["lead_s"]["value"] is not None]
+    measured = [it for it in items if it["lead_s"]["quality"] == "measured"]
+    if leads:
+        works = [it["work_s"]["value"] for it in items if it["lead_s"]["value"] is not None
+                 and it["work_s"]["value"] is not None]
+        waits = [it["wait_s"]["value"] for it in items if it["wait_s"]["value"] is not None]
+        print(f"  lead median {_hours(statistics.median(leads))}, P90 {_hours(_percentile(leads, 0.9))} "
+              f"over n={len(leads)} ({len(measured)} fully measured)"
+              + (f"; work median {_hours(statistics.median(works))}" if works else "")
+              + (f", wait median {_hours(statistics.median(waits))}" if waits else ""))
+    n = len(measured)
+    level = _level(n, False, len(measured) < len(items), _N_THRESHOLD)
+    print(f"  {confidence(n, sample_biased=len(measured) < len(items))} · "
+          f"{action(level, 'the larger of work and wait is the lever: wait → steward hand-offs, questions, the train; work → rounds (`rounds`) and context', thin='let more issues run through dispatch, reports and the train before acting on a duration')}")
+    print("  recovery time: not measured (no incident records)")
+    return 0
+
+
 def report() -> int:
     print("=== process KPI cockpit (read-only) ===\n")
     cost(None)
@@ -626,6 +910,8 @@ def report() -> int:
     clusters(None)
     print()
     share()
+    print()
+    flow()
     return 0
 
 
@@ -650,6 +936,11 @@ def main() -> int:
     sh.add_argument("--weeks", type=int, default=4)
     tp = sub.add_parser("train-phases")
     tp.add_argument("--runs", type=int, default=20)
+    fl = sub.add_parser("flow")
+    fl.add_argument("--issue", type=int)
+    fl.add_argument("--json", action="store_true")
+    fl.add_argument("--follow-up-days", type=int, default=_FOLLOW_UP_DAYS,
+                    help="how long after the merge an escape counts (default 30)")
     sub.add_parser("report")
     args = p.parse_args()
 
@@ -661,6 +952,8 @@ def main() -> int:
         return share(args.weeks)
     if args.cmd == "train-phases":
         return train_phases(args.runs)
+    if args.cmd == "flow":
+        return flow(issue=args.issue, as_json=args.json, follow_up_days=args.follow_up_days)
 
     if args.cmd == "cost" and args.issue is not None:
         import dispatch  # one reader of dispatch records, policy and transcripts

@@ -53,8 +53,10 @@ pushes it, merged branches are deleted (unless `--keep-branches`), each
 worker gets a `done` report, and `--deploy` runs once. The combination
 is new — that is why the batch, not the branch, earns the full run
 (`docs/process/testing.md`). Each run logs its phase times (preflight,
-gates, suite, retry, bisect, push, deploy) and appends them to
-`<git-common-dir>/process-train/phases.jsonl` (`process_kpis.py train-phases`).
+gates, suite, retry, bisect, push, deploy) and appends them, with the
+branches that landed, whether the deploy ran green and when the run ended,
+to `<git-common-dir>/process-train/phases.jsonl` (`process_kpis.py
+train-phases`, `flow`).
 
 Run from the root worktree on the integration branch with a clean tree.
 The train never reviews, never certifies by itself: it merges what the
@@ -1140,14 +1142,21 @@ class EnvironmentRed(Exception):
 
 
 def _record_phases(root: Path, stamp: str, phases: dict[str, float], result: str, aboard: list[str],
-                   log) -> None:
+                   log, outcome: dict | None = None) -> None:
     """One log line and one JSON line per run: where the train's time went.
-    `result`: green, red or environment (a red preflight — no red train)."""
+    `result`: green, red or environment (a red preflight — no red train).
+    `branches` are the ones that landed, `deployed` whether the deploy ran
+    green (null: no deploy ran), `ended` when the run finished (UTC) — what
+    ties a deploy to an issue for `process_kpis.py flow`."""
     spent = {k: round(phases.get(k, 0.0), 1) for k in PHASES}
     log(f"phases ({result}): " + ", ".join(f"{k} {v:.0f} s" for k, v in spent.items() if v))
+    outcome = outcome or {}
+    row = {"stamp": stamp, "result": result, "aboard": len(aboard), **spent,
+           "branches": list(outcome.get("branches") or []), "deployed": outcome.get("deployed"),
+           "ended": _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds")}
     try:
         with (_train_dir(root) / PHASES_FILE).open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps({"stamp": stamp, "result": result, "aboard": len(aboard), **spent}) + "\n")
+            fh.write(json.dumps(row) + "\n")
     except OSError:
         pass  # a lost timing line costs a KPI, never the merge
 
@@ -1219,12 +1228,14 @@ def run(root: Path, *, suite: str | None, deploy: str | None, push: bool, min_ca
         print("train: dry run — no merge, no suite")
         return 0
     phases: dict[str, float] = {}
+    outcome: dict = {}
     rc = 1
     result = "red"
     try:
         rc = _run_batch(root, local, p, aboard, stamp, logfile, suite=suite, deploy=deploy, push=push,
                         keep_branches=keep_branches, retry=retry, preflight=preflight, phases=phases,
-                        certificate_env=certificate_env or [], preflight_timeout=preflight_timeout)
+                        certificate_env=certificate_env or [], preflight_timeout=preflight_timeout,
+                        outcome=outcome)
         result = "green" if rc == 0 else "red"
         return rc
     except EnvironmentRed as env_red:
@@ -1244,14 +1255,14 @@ def run(root: Path, *, suite: str | None, deploy: str | None, push: bool, min_ca
         def _log(line: str) -> None:
             with logfile.open("a", encoding="utf-8") as fh:
                 fh.write(f"{_dt.datetime.now().isoformat(timespec='seconds')} {line}\n")
-        _record_phases(root, stamp, phases, result, aboard, _log)
+        _record_phases(root, stamp, phases, result, aboard, _log, outcome)
 
 
 def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, logfile: Path, *,
                suite: str | None, deploy: str | None, push: bool, keep_branches: bool,
                retry: str | None = None, preflight: str | None = None,
                phases: dict[str, float] | None = None, certificate_env: list[str] | None = None,
-               preflight_timeout: float | None = None) -> int:
+               preflight_timeout: float | None = None, outcome: dict | None = None) -> int:
     def log(line: str) -> None:
         with logfile.open("a", encoding="utf-8") as fh:
             fh.write(f"{_dt.datetime.now().isoformat(timespec='seconds')} {line}\n")
@@ -1499,6 +1510,8 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
             return 1
         log(f"pushed {branch} as origin/{local}")
     _git(root, "merge", "--ff-only", branch, check=True)
+    if outcome is not None:
+        outcome["branches"] = list(aboard)
     log(f"{local} fast-forwarded to {branch} ({_out(root, 'rev-parse', '--short', 'HEAD')})")
     print(f"train: {local} → {_out(root, 'rev-parse', '--short', 'HEAD')} with {', '.join(aboard)}"
           + (" (pushed)" if push else ""))
@@ -1548,7 +1561,10 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
     _cleanup(root, stamp)
     _report_dropped()
     if deploy:
-        if timed("deploy", _sh, root, deploy, log) != "green":
+        deployed = timed("deploy", _sh, root, deploy, log) == "green"
+        if outcome is not None:
+            outcome["deployed"] = deployed
+        if not deployed:
             print("train: deploy failed — the merge stands, the deploy does not; see " + str(logfile), file=sys.stderr)
             return 1
     return 0

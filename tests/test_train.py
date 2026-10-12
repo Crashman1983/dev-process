@@ -173,6 +173,8 @@ def test_run_merges_the_batch_behind_one_suite_and_drops_the_offender(render, tm
     # the offender search is filed under bisect, not under the suite
     row = [json.loads(line) for line in (out / ".git/process-train/phases.jsonl").read_text().splitlines()][-1]
     assert row["result"] == "green" and row["bisect"] > 0
+    # what ties a deploy to its issues (process_kpis.py flow): who landed, deployed, when
+    assert sorted(row["branches"]) == ["alpha", "beta"] and row["deployed"] is True and row["ended"]
     branches = _git(out, "branch", "--list", "--format=%(refname:short)").stdout.split()
     assert "alpha" not in branches and "beta" not in branches and "bad" in branches
     assert not [b for b in branches if b.startswith("train/")]

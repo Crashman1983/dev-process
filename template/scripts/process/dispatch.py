@@ -1167,12 +1167,15 @@ def _write_record(root: Path, branch: str, rec: dict) -> None:
 
 # the transcript shape is harness-specific; this is the one reader of it
 OUTPUT_TOKENS = re.compile(r'"output_tokens":\s*(\d+)')
+# the usage fields beside it (Claude Code's JSONL; another harness may carry
+# none of them — then they read as not measured, never as zero)
+TOKEN_FIELDS = ("output_tokens", "input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")
+USAGE_TOKENS = re.compile(r'"(' + "|".join(TOKEN_FIELDS) + r')":\s*(\d+)')
 
 
-def issue_tokens(root: Path, issue: int) -> tuple[int, int] | None:
-    """(output tokens, sessions) of the issue's dispatched worktrees — None
-    when not measured: no `transcripts` glob in the policy (`{worktree}` is
-    substituted; default none), no dispatch record, or no transcript."""
+def _issue_transcripts(root: Path, issue: int) -> set[str] | None:
+    """The transcript files of the issue's dispatched worktrees; None without
+    a `transcripts` glob in the policy (`{worktree}` is substituted; default none)."""
     pattern = transcripts_pattern(root)
     if pattern is None:
         return None
@@ -1184,13 +1187,35 @@ def issue_tokens(root: Path, issue: int) -> tuple[int, int] | None:
             continue
         if isinstance(rec, dict) and str(rec.get("issue")) == str(issue):
             files |= _transcript_files(pattern, rec)
-    total = 0
+    return files
+
+
+def issue_token_usage(root: Path, issue: int) -> tuple[dict[str, int], int] | None:
+    """({field: tokens} for each TOKEN_FIELDS field the transcripts carry,
+    sessions) — a field the harness does not write is absent, not 0; None
+    when not measured (no glob, no dispatch record, or no transcript)."""
+    files = _issue_transcripts(root, issue)
+    if not files:
+        return None
+    totals: dict[str, int] = {}
     for f in sorted(files):
         try:
-            total += sum(int(m) for m in OUTPUT_TOKENS.findall(Path(f).read_text(errors="ignore")))
+            text = Path(f).read_text(errors="ignore")
         except OSError:
             continue
-    return (total, len(files)) if files else None
+        for field, n in USAGE_TOKENS.findall(text):
+            totals[field] = totals.get(field, 0) + int(n)
+    return totals, len(files)
+
+
+def issue_tokens(root: Path, issue: int) -> tuple[int, int] | None:
+    """(output tokens, sessions) of the issue's dispatched worktrees — None
+    when not measured: no `transcripts` glob in the policy (`{worktree}` is
+    substituted; default none), no dispatch record, or no transcript."""
+    got = issue_token_usage(root, issue)
+    if got is None:
+        return None
+    return got[0].get("output_tokens", 0), got[1]
 
 
 def transcripts_pattern(root: Path) -> str | None:

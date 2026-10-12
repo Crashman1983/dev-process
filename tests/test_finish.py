@@ -341,6 +341,16 @@ def test_issue_tokens_sum_the_policy_transcripts_of_its_worktrees(render, tmp_pa
     (out / "docs/process/model-policy.local.json").write_text(json.dumps({"transcripts": "{worktree}/t/*.jsonl"}))
     assert finish.usage(out, "7-widget") == (7, "tokens: 142 output over 2 sessions")
     assert finish.usage(out, "feature") == (None, "tokens: not measured")
+    # the same reader gives input and cache shares apart; a field the harness never
+    # wrote stays absent (not measured), never a zero
+    (wt / "t" / "a.jsonl").write_text('{"usage": {"input_tokens": 5, "cache_read_input_tokens": 900, '
+                                      '"cache_creation": {"ephemeral_5m_input_tokens": 77}, '
+                                      '"output_tokens": 40}}\n')
+    import dispatch
+    totals, sessions = dispatch.issue_token_usage(out, 7)
+    assert sessions == 2
+    assert totals == {"input_tokens": 5, "cache_read_input_tokens": 900, "output_tokens": 140}
+    assert dispatch.issue_token_usage(out, 9) is None
 
 
 def test_apply_red_suite_does_not_merge(render, tmp_path):
