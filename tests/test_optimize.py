@@ -62,7 +62,8 @@ def _fill(path: Path, sections=FILL, header=HEADER) -> None:
     for key, value in header.items():
         text = re.sub(rf"(?m)^- {re.escape(key)}: .*$", f"- {key}: {value}", text, count=1)
     for name, body in sections.items():
-        text = re.sub(rf"(?ms)^## {name}\n<!--.*?-->", f"## {name}\n{body}", text, count=1)
+        # the skeleton's TODO body, up to the next heading
+        text = re.sub(rf"(?ms)^## {name}\nTODO.*?(?=\n\n## )", f"## {name}\n{body}", text, count=1)
     path.write_text(text, encoding="utf-8")
 
 
@@ -350,12 +351,12 @@ def test_hidden_text_counts_for_nothing(opt):
     for hidden in (f"<!--\n{line}-->\n", f"```\n{line}```\n", f"- note:\n    ```\n    {line}    ```\n"):
         path.write_text(base + hidden)
         why = m.move(out, path, "piloting", "steward", "go", today=TODAY)
-        assert why and "the Log holds plain" in why, why  # a Log with hidden parts is broken, not read around
-    # a heading is a heading wherever it stands (fail closed), and the Log takes no comment
+        assert why and "plain Markdown" in why, why  # nothing hidden: the record is plain Markdown
+    # no fence, no comment anywhere; and the Log takes machine-written lines only
     path.write_text(base.replace("## Generality", "```\n## Criteria\nnothing\n```\n## Generality"))
-    assert "## Criteria appears twice" in _probs(out, m, path)
-    path.write_text(base + "<!-- note -->\n")
-    assert "the Log holds plain" in _probs(out, m, path)
+    assert "no code fence" in _probs(out, m, path)
+    path.write_text(base + "- a note in the Log\n")
+    assert "the Log holds machine-written lines only" in _probs(out, m, path)
 
 
 def test_the_implementer_is_named_and_compared_without_case(opt):
@@ -364,7 +365,7 @@ def test_the_implementer_is_named_and_compared_without_case(opt):
     path = _designed(out, m)
     assert "someone else's" in m.review(path, "  Maintainer ", "pass", "ok", today=TODAY)
     path.write_text(path.read_text().replace("- implementer: maintainer",
-                                             "- implementer: <who builds the change>"))
+                                             "- implementer: TODO who builds the change"))
     assert "name the implementer first" in m.review(path, "reviewer", "pass", "ok", today=TODAY)
     assert "implementer: missing" in _probs(out, m, path)
 
@@ -424,18 +425,13 @@ def test_a_freeze_prepared_in_an_earlier_commit_anchors_nothing(opt):
     _mandate(out)
     path = _designed(out, m)
     weak = path.read_text().replace("down by 20 %", "down by 1 %")
-    weak_terms = m.terms_hash(m.parse(weak))
-    path.write_text(weak.replace("## Hypothesis", f"<!--\n- FROZEN 2026-10-01 steward: terms={weak_terms}\n-->\n\n## Hypothesis"))
+    # a FROZEN line before any start is a problem at once, and taking it out again breaks the Log
+    path.write_text(weak + f"- FROZEN 2026-10-01 steward: terms={m.terms_hash(weak)}\n")
+    assert "FROZEN line in a record that never ran" in _probs(out, m, path)
     _git(out, "add", "-A")
     _git(out, "commit", "-q", "-m", "proposal")
-    path.write_text(path.read_text().replace("down by 1 %", "down by 20 %"))
-    m.review(path, "reviewer", "pass", "ok", today=TODAY)
-    assert m.move(out, path, "piloting", "steward", "go", today=TODAY) is None
-    _git(out, "commit", "-qam", "start")
-    strong = m.parse(path.read_text())["frozen"][0]["terms"]
-    path.write_text(path.read_text().replace("down by 20 %", "down by 1 %").replace(strong, weak_terms))
-    assert "frozen in commit" in _probs(out, m, path, history=True)
-
+    path.write_text(weak)
+    assert "the Log is append-only" in _probs(out, m, path, history=True)
 
 def test_stopping_is_never_blocked(opt):
     out, m = opt
@@ -479,7 +475,8 @@ def test_below_result_only_result_decision_and_log_are_headings(opt):
     text = path.read_text()
     for variant in HEADING_VARIANTS[:4]:
         path.write_text(text.replace("## Decision", f"{variant}\nMedian down by 1 %.\n\n## Decision"))
-        assert f"below {m.RESULT_LINE} only Result, Decision and Log are headings" in _probs(out, m, path), variant
+        probs = _probs(out, m, path)
+        assert f"below {m.RESULT_LINE} only Result, Decision and Log" in probs or "no HTML" in probs, variant
         assert _on(out, m) is None, variant
 
 
@@ -495,7 +492,7 @@ def test_a_committed_block_cannot_be_erased_before_the_start(opt):
                             if "REVIEWED" not in line))
     m.review(path, "alice", "pass", "fine", today=TODAY)
     why = m.move(out, path, "piloting", "steward", "go", today=TODAY)
-    assert why and "REVIEWED block by carol" in why and "is gone" in why, why
+    assert why and "the Log is append-only" in why, why
 
 
 def test_a_start_is_not_dated_ahead(opt):
@@ -584,3 +581,107 @@ def test_a_review_after_the_freeze_counts_for_nothing(opt):
     path.write_text(no_review + f"- REVIEWED 2026-10-12 alice: pass terms={terms} — late\n")
     assert "before the freeze" in _probs(out, m, path)  # … and neither does a late pass
     assert m.active(out, "", issue=7)[0] is None
+
+
+# --- refute round 3: plain Markdown, append-only Log, valid mutable fields ------
+
+def test_a_block_moved_below_the_freeze_breaks_the_log(opt):
+    out, m = opt
+    _repo(out)
+    _mandate(out)
+    path = _designed(out, m)
+    m.review(path, "alice", "pass", "ok", today=TODAY)
+    m.review(path, "bob", "block", "n too small", today=TODAY)
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "reviews")
+    lines = path.read_text().splitlines(keepends=True)
+    block = next(x for x in lines if "REVIEWED 2026-10-12 bob: block" in x)
+    _hand_start(m, path, "steward", lambda t: t.replace(block, ""))
+    path.write_text(path.read_text() + block)
+    assert "the Log is append-only" in _probs(out, m, path, history=True)
+    assert _on(out, m) is None
+
+
+def test_the_frozen_boundary_cannot_hide_in_html(opt):
+    out, m = opt
+    path = _designed(out, m)
+    text = path.read_text().replace("## Generality", "<!-- note\n## Result\n-->\nSuccess: n >= 8.\n\n## Generality")
+    path.write_text(text)
+    assert "no HTML, no comment" in _probs(out, m, path)
+    path.write_text(path.read_text().replace("<!-- note", "Note").replace("-->", "end"))
+    assert "## Result appears twice" in _probs(out, m, path) or "below" in _probs(out, m, path)
+
+
+def test_an_edited_mandate_snapshot_breaks_the_log(opt):
+    out, m = opt
+    _repo(out)
+    path = _piloting(out, m)
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "start")
+    path.write_text(path.read_text().replace("steward_may=start,roll-back,reject",
+                                             "steward_may=start,roll-back,reject,adopt"))
+    assert "the Log is append-only" in _probs(out, m, path, history=True)
+
+
+def test_a_record_cannot_be_un_run_or_replaced_under_its_number(opt):
+    out, m = opt
+    _repo(out)
+    path = _piloting(out, m)
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "start")
+    ran = path.read_text()
+    unrun = "".join(x for x in ran.splitlines(keepends=True)
+                    if "piloting —" not in x and "FROZEN" not in x).replace("state: piloting", "state: designed")
+    path.write_text(unrun.replace("down by 20 %", "down by 1 %"))
+    assert "the Log is append-only" in _probs(out, m, path, history=True)
+    path.unlink()
+    fresh = m.new(out, "Something else", "other", responsible="steward", implementer="x",
+                  issues="", who="s", because="b")
+    fresh.rename(fresh.with_name("OPT-0001-something-else.md"))
+    assert "the Log is append-only" in " ".join(m.check_all(out)[0]["OPT-0001-something-else.md"])
+
+
+def test_plain_markdown_and_valid_mutable_fields(opt):
+    out, m = opt
+    path = _piloting(out, m)
+    text = path.read_text()
+    path.write_text(text.replace("- issues:", "- spent-tokens: 0 — AMENDED: median down by 1 %\n- issues:"))
+    assert "spent-tokens:" in _probs(out, m, path) and "not a valid value" in _probs(out, m, path)
+    path.write_text(text.replace("\n\n## Criteria\n", "\n ## Criteria "))
+    assert "only \\n or \\r\\n break a line" in _probs(out, m, path)
+    path.write_text(text.replace("## Decision", "Pending.\n<!-- draft\n\n## Decision"))
+    assert "no HTML, no comment" in _probs(out, m, path)
+    for variant in ("> ## Criteria (amended)", "1. ## Trial (amended)", "<h2\n>Limits</h2>"):
+        path.write_text(text.replace("## Decision", f"{variant}\n\n## Decision"))
+        probs = _probs(out, m, path)
+        assert "only Result, Decision and Log" in probs or "no HTML" in probs, variant
+    path.write_text(text + "- ## Criteria (owner): n >= 1 suffices\n")
+    assert "only Result, Decision and Log" in _probs(out, m, path)  # a heading even as a Log bullet
+
+
+def test_lists_and_rules_in_the_result_are_no_headings(opt):
+    out, m = opt
+    path = _piloting(out, m)
+    text = path.read_text()
+    for body in ("* item\n---", "1. one\n===", "> quote\n---", "| a | b |\n|---|---|\n| 1 | 2 |"):
+        path.write_text(text.replace("## Decision", f"{body}\n\n## Decision"))
+        assert _probs(out, m, path) == "", (body, _probs(out, m, path))
+
+
+def test_an_honest_crlf_record_runs_the_whole_loop(opt):
+    out, m = opt
+    _repo(out)
+    _mandate(out)
+    path = _designed(out, m)
+    path.write_bytes(path.read_text().replace("\n", "\r\n").encode())
+    assert m.review(path, "reviewer", "pass", "ok", today=TODAY) is None
+    assert m.move(out, path, "piloting", "steward", "go", today=TODAY) is None
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "start")
+    assert _on(out, m) == path.name
+    assert m.move(out, path, "evaluating", "steward", "done", today=TODAY) is None
+    path.write_text(path.read_text().replace("Median input tokens -27 %", "Median input tokens -28 %"))
+    _git(out, "commit", "-qam", "result")
+    assert m.move(out, path, "adopted", "owner", "criteria met", today=TODAY) is None
+    _git(out, "commit", "-qam", "adopted")
+    assert m.check_all(out) == ({}, [])

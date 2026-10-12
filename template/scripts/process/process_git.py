@@ -12,6 +12,11 @@ _REF = r"(?:#\d+|[\w.-]+/[\w.-]+#\d+)"
 REGRESSION_TRAILER = re.compile(rf"(?im)^[ \t]*Regression-of:[ \t]*({_REF}(?:[ \t]*,[ \t]*{_REF})*)[ \t]*$")
 
 
+# any line that opens with the key: the train never takes what it names for an
+# issue of the branch, well-formed or not (a near miss must not misfile the merge)
+REGRESSION_LINE = re.compile(r"(?im)^[ \t]*Regression-of:.*$")
+
+
 def regression_refs(body: str) -> list[int]:
     """The issue numbers a commit message's `Regression-of:` trailers name."""
     return [int(n) for m in REGRESSION_TRAILER.finditer(body) for n in re.findall(r"#(\d+)", m.group(1))]

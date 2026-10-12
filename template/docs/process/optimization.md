@@ -88,11 +88,13 @@ for the core — then it is built locally.
 One file per improvement: `.process-work/optimizations/OPT-NNNN-<slug>.md`,
 created by `uv run scripts/process/optimize.py new --title … --mechanism …`.
 Its header carries the machine fields, its sections the substance. The
-header and the Log are machine-written plain lines — a comment, a code
-fence or an indented line there is a problem, never something to read
-around; below `## Result` only Result, Decision and Log stand as headings;
-a heading or header field that appears twice is a problem; names are
-compared without case or spacing (`Maintainer` is the `maintainer`).
+record is **plain Markdown** — no HTML, no comment, no code fence, no line
+break but `\n` — so what the tool reads is what a reader sees; placeholders
+are `TODO` paragraphs. The header holds `key: value` lines, the Log only
+the lines `optimize.py` writes, and the Log is append-only; below
+`## Result` only Result, Decision and Log stand as headings; a heading or
+header field that appears twice is a problem; names are compared without
+case or spacing (`Maintainer` is the `maintainer`).
 
 | Part | Holds |
 |---|---|
@@ -145,11 +147,12 @@ was decided alone.
 byte-exact: everything above the line `## Result` — header, Observation
 to Rollback — stays as it was, except `state`, `spent-tokens`,
 `spent-hours` and `superseded-by`. No reading of Markdown decides what is
-frozen. With git history, `optimize.py check` also indexes every committed
-version of every record by its number: each version whose Log carried
-`FROZEN` must carry today's terms, a `REVIEWED` line committed on the
-frozen terms must still be there, and a record that ran must not vanish —
-across renames, renumberings and merges. Rewritten history (amend, rebase,
+frozen; the mutable fields hold only their values. With git history,
+`optimize.py check` also indexes every committed version of every record by
+its number: every committed Log is a prefix of today's (append-only — a
+moved block, an edited `FROZEN` line, a record un-run or replaced is seen),
+each version that ran carries today's terms, and a record that ran must not
+vanish — across renames, renumberings and merges. Rewritten history (amend, rebase,
 force-push) and a shallow clone are beyond what a file check sees; names
 are self-declared, and the owner's sample is the control for that.
 New criteria mean a new record that `supersedes` this one.
