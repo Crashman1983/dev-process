@@ -20,6 +20,7 @@ CORE = [
     "design-template.md",
     "adr/README.md",
     "adr/template.md",
+    "optimization.md",
 ]
 KENNI = ["KenniNext", "Kenni", "user_id=1", "Seb", "Signal", "SvelteKit"]
 

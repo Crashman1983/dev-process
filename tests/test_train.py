@@ -2140,3 +2140,26 @@ def test_a_genuine_namesake_on_a_third_car_still_counts(render, tmp_path):
     _slug_branch(out, "issue-2300", "2026-10-05-2260-work-expiry.md", issue=2300, work="x",
                  files={"src/other.py": "y = 1\n"})
     assert not _candidate(out, "issue-2260")["eligible"]
+
+
+def test_a_regression_trailer_names_no_issue_of_the_branch(render, tmp_path):
+    """`Regression-of: #N` points at the origin of a defect: the train neither files
+    the fix's `done` under #N nor asks to close it (process_kpis.py flow attributes by it)."""
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    bare = tmp_path / "origin.git"  # the train reads issue refs from origin/main..branch
+    _git(out, "clone", "-q", "--bare", str(out), str(bare))
+    _git(out, "remote", "add", "origin", str(bare))
+    _git(out, "fetch", "-q", "origin")
+    _branch(out, "20-fix", {"src/a.py": "a\n"})
+    _git(out, "checkout", "-q", "20-fix")
+    (out / "src/a.py").write_text("fixed\n")
+    _git(out, "commit", "-qam", "fix: crash (#20)\n\nRegression-of: #12")
+    _git(out, "checkout", "-q", "main")
+    r = _train(out, "run", "--force")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "references issue(s) #20" in r.stdout and "#12" not in r.stdout, r.stdout
+    t = json.loads(subprocess.run([sys.executable, str(out / "scripts/process/tower.py"), "--json"],
+                                  cwd=out, capture_output=True, text=True).stdout)
+    done = [x for x in t["reports"] if x["worker"] == "20-fix"]
+    assert done and done[-1]["state"] == "done" and done[-1].get("issue") == 20, done

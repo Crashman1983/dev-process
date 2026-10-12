@@ -49,12 +49,12 @@ def _repo(render, tmp_path):
     _git(out, "config", "user.email", "t@t")
     _git(out, "config", "user.name", "t")
     _commit(out, {"src/a.py": "0", "src/größe.py": "0", "src/c.py": "0", "src/data.py": "0",
-                  "tests/test_a.py": "0"}, "base")
+                  "tests/test_a.py": "0", ".github/ci.yml": "0"}, "base")
     for i in range(3):  # a and größe change together; c alone
         _commit(out, {"src/a.py": f"{i + 1}", "src/größe.py": f"{i + 1}"}, f"feat: step {i}")
         _commit(out, {"src/c.py": f"{i + 1}"}, f"feat: c {i}")
     _commit(out, {".process-work/plans/2026-10-01-a.md":
-                  "# Plan\n\nissue: #4\ntier: 2\n\nTouches `src/a.py` and src/c.py.\n"}, "docs: plan")
+                  "# Plan\n\nissue: #4\ntier: 2\n\nTouches `src/a.py`, `.github/ci.yml` and src/c.py.\n"}, "docs: plan")
     return out
 
 
@@ -75,6 +75,7 @@ def test_every_edge_says_where_it_comes_from(render, tmp_path):
     plan = "plan:.process-work/plans/2026-10-01-a.md"
     assert ("issue:#4", plan, "declared") in edges
     assert (plan, "file:src/a.py", "declared") in edges and (plan, "file:src/c.py", "declared") in edges
+    assert (plan, "file:.github/ci.yml", "declared") in edges  # a dotfile path is a path
     assert (plan, "file:src/data.py", "declared") not in edges  # `a.py` inside `data.py` names nothing
     co = [e for e in g["edges"] if e["kind"] == "changes-with"]
     assert [(e["from"], e["to"], e["support"]) for e in co] == [("file:src/a.py", "file:src/größe.py", 3)]
