@@ -61,3 +61,17 @@ Drei offene Lücken im Gate-Code, vom Owner am 2026-10-12 als ein Release freige
 ## Unabhängige Durchsetzung
 
 Die Review- und Merge-Gates (`check_review`, `merge_route`) bleiben die harte Grenze. D1 erweitert nur die Erkennung einer fälligen Plan-Review und die Zählung von Work-IDs. D3 wählt in jedem Zweifelsfall den sicheren Ausgang: Code-Review, und die Session sagt, wenn kein Code da ist. D4 hebt zwei Fehlablehnungen auf, ohne eine Prüfung wegzunehmen.
+
+## Plan-Review Runde 1 — Änderungen
+
+Ergebnis: „go with changes“, 4 MAJOR und 5 MINOR. Wo diese Punkte den Entscheidungen oben widersprechen, gelten sie.
+
+- **P1 Herkunft (MAJOR-1).** `own_plans` liefert zu jedem Plan, ob der Branch ihn hinzugefügt hat. Dispatch zählt Basis-Pläne nur dort, wo eine Plan-Review erkannt oder ihr Pass geprüft wird (`plan_review_state_at` mit Branch, `plan_review_due`). Abschluss (`work_complete_on_origin`) und Tier der nächsten Phase (`plan_tier_on_origin`) fragen weiter nur hinzugefügte Pläne. Sonst würde ein Epic-Plan, den ein Paket abhakt, den `pushed`-Schritt des Pakets blockieren.
+- **P2 Spec Kit (MAJOR-2).** Die Spec-Kit-Identität bleibt, wie sie ist: Dispatch erkennt `tasks.md`, und Tier und IDs kommen aus `plan.md`. Die Vereinheitlichung über das Verzeichnis kommt zu D5 (Rest in #207).
+- **P3 Dekodierung (MAJOR-3).** `dispatch._git` dekodiert UTF-8 mit `surrogateescape`. Es stürzt nie ab und liefert keine leere Antwort, die ein Aufrufer als „nichts da“ lesen würde. `plan_review_due` liefert None, sobald ein geänderter Pfad nicht als UTF-8 lesbar ist.
+- **P4 Branch durchreichen (MAJOR-4).** `plan_review_state(root, wt, branch)` und `plan_review_state_at(root, head, branch)` bekommen den Branch. Die Chain ruft beide mit dem Branch auf.
+- **P5 Integrationsbasis (MINOR-5).** D3.5 ist zurückgestellt. Eine dritte Regel für den Fork-Punkt neben der des Gates ist schlechter als die bekannte Lücke. Die Lücke steht nicht in den EARS-Kriterien von #207, und die sichere Richtung bleibt: Ein veraltetes `origin/main` führt zu einer Code-Review.
+- **P6 Parser (MINOR-6).** Der Parser heißt `check_review.local_issue_numbers`. Die Umbenennungsprüfung in Dispatch vergleicht jetzt lokale Issue-Nummern statt roher `issue:`-Tokens.
+- **P7 Callback (MINOR-7).** `own_plans` behält den `read`-Callback. Der Zug liest damit den gemergten Baum und meldet unlesbare Pläne.
+- **P8 Prompt (MINOR-9).** Der Prompt einer Plan-Review nennt die fälligen Pläne mit Pfad. Ein Epic-Plan, den ein Paket ändert, ist nicht der Plan der Paket-Issue.
+- **P9 Zug (zu D4.2).** Gruppiert werden nur Umbenennungen (R) zwischen den neuen Pfaden zweier Kandidaten, nie die eigenen Namen der Basis oder des Archivs. Ein Diff, den git nicht liefert, gilt als unlesbar. Ein Umschreiben unter 50 % Ähnlichkeit bleibt zwei Pläne, also fail closed. Ein Negativtest prüft, dass ein echter Namensvetter auf einem dritten Kandidaten weiter zählt.

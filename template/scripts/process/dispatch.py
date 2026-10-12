@@ -129,13 +129,13 @@ _ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]|\x1b[()][A-Z0-9]|\x1b[=>]|\r")
 
 def _git(root: Path, *args: str) -> subprocess.CompletedProcess:
     try:
-        return subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, timeout=120, env=git_environment())
+        # UTF-8 with surrogate escapes: a non-UTF-8 path or text is read as it is
+        # (and round-trips back to git), never a crash of `start` and never an
+        # empty answer a caller would take for "nothing there" (#207)
+        return subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True,
+                              encoding="utf-8", errors="surrogateescape", timeout=120, env=git_environment())
     except (OSError, subprocess.TimeoutExpired) as exc:
         return subprocess.CompletedProcess(args, 127, "", str(exc))
-    except UnicodeDecodeError as exc:
-        # a non-UTF-8 path or text is an answer git gave and this reader cannot
-        # take: a failed read, never a crash of `start` (downstream #2511)
-        return subprocess.CompletedProcess(args, 128, "", f"git output is not UTF-8 ({exc.reason})")
 
 
 def _out(root: Path, *args: str) -> str:
@@ -669,6 +669,16 @@ def find_branch(root: Path, issue: int) -> str | None:
     return None
 
 
+def branch_issues(root: Path, branch: str) -> set[str]:
+    """The issues a branch belongs to: the number its name leads with, and
+    every issue dispatch placed on it (`issues_of`). Boarding, the plans
+    counted as the branch's own and the issues its merge closes all ask this
+    one question (refutation: the train boarded a package branch on its
+    issue, then closed the epic's)."""
+    issue = _review.branch_issue(branch)
+    return ({issue} if issue else set()) | {str(i) for i in issues_of(root, branch)}
+
+
 def issues_of(root: Path, branch: str) -> set[int]:
     """The issues dispatch placed on `branch` — exactly those find_branch
     resolves to it (refutation: a record left from before a re-dispatch kept
@@ -1046,7 +1056,7 @@ def sync_worktree(root: Path, wt: Path, branch: str, phase: str) -> str | None:
 
 def prompt_for(phase: str, issue: int, tier: int | None, branch: str, model: str, remote: bool = False,
                channel: str | None = None, effort: str | None = None, attests: bool = True,
-               plan_review: bool = False) -> str:
+               plan_review: bool = False, plan_paths: list[str] | tuple[str, ...] = ()) -> str:
     """The start prompt. `attests=False`: a cell on another harness (a Codex
     review runs read-only) reports its verdict as text; the steward attests."""
     tier_s = f"tier {tier}" if tier is not None else "tier to be derived from the scope (risk-tiers.md)"
@@ -1096,7 +1106,10 @@ def prompt_for(phase: str, issue: int, tier: int | None, branch: str, model: str
                    "produce the verdict and findings as report text in your output; do not run attest.py or "
                    f"git — the steward attests in the branch's worktree with `--plan-review --model {model} "
                    "--commit`")
-        return (f"/review the plan of issue #{issue} on branch `{branch}` before any code exists: bundle it "
+        # the plan that is due may be an epic's a package changed, not the issue's own (#204)
+        which = (f"the plan(s) {', '.join(f'`{p}`' for p in plan_paths)}" if plan_paths
+                 else f"the plan of issue #{issue}")
+        return (f"/review {which} on branch `{branch}` before any code exists: bundle it "
                 f"with `make_review_bundle.py --plan <its slug>` and attack it with the plan brief of "
                 f"docs/process/refute.md (\"Refuting a plan\"); {verdict}; stop; never edit the plan." + tail)
     if not attests:
@@ -1563,13 +1576,14 @@ def start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str |
         print(f"dispatch: decision_channel omitted: `{word}` cell has no live channel; reports via report.py")
         channel = None
     plan_review = plan_review and phase == "review"
+    plan_paths: list[str] = []
     if phase == "review" and not plan_review:
-        due = plan_review_due(root, branch, remote=remote, fetch=not dry_run)
+        due = plan_review_due_plans(root, branch, remote=remote, fetch=not dry_run)
         if due:
-            print(f"dispatch: plan review — {due} (code review: add code first)")
-            plan_review = True
-    prompt = prompt_for(phase, issue, tier, branch, model, remote=remote,
-                        channel=channel, effort=effort, attests=not other_harness, plan_review=plan_review)
+            print(f"dispatch: plan review — {due[0]} (code review: add code first)")
+            plan_review, plan_paths = True, due[1]
+    prompt = prompt_for(phase, issue, tier, branch, model, remote=remote, channel=channel, effort=effort,
+                        attests=not other_harness, plan_review=plan_review, plan_paths=plan_paths)
     argv = build_argv(policy, model, prompt, branch, issue, phase, effort, cell.command)
     why = override_refusal(root, phase, model, argv, branch, remote)
     if why:
@@ -2087,15 +2101,11 @@ def _tip_on_origin(root: Path, branch: str, *, fetch: bool) -> str:
 
 
 def _integration_base(root: Path, tip: str) -> str:
-    """The youngest fork point of `tip` from any integration ref: a stale
-    `origin/main` beside a fresh local `main` must not move it back and turn
-    main's own commits into the branch's (#207). Diverged fork points keep the
-    first ref's, as before."""
-    bases = [b for b in (_out(root, "merge-base", tip, ref) for ref in _review.integration_refs(root)) if b]
-    for b in bases:
-        if all(o == b or _git(root, "merge-base", "--is-ancestor", o, b).returncode == 0 for o in bases):
-            return b
-    return bases[0] if bases else ""
+    for ref in _review.integration_refs(root):
+        base = _out(root, "merge-base", tip, ref)
+        if base:
+            return base
+    return ""
 
 
 def new_code_on_origin(root: Path, branch: str, *, fetch: bool = True) -> bool | None:
@@ -2139,35 +2149,30 @@ def _own_plans_on_origin(root: Path, branch: str, local: bool = False) -> tuple[
     return tip, own_plans_at(root, tip) if tip else []
 
 
-def own_plans_at(root: Path, tip: str) -> list[str]:
-    """The plans the commit `tip` adds over its integration base — active,
-    archived or Spec Kit tasks; another work's plan it only touched is not
-    its own."""
+def own_plans_at(root: Path, tip: str, branch: str = "", *, include_base: bool = False) -> list[str]:
+    """The active plans and Spec Kit tasks of the commit `tip` that are its
+    own (`check_review.own_plans`, the rule the train asks too): the ones it
+    adds; with `include_base` and the `branch`, also a plan already on the
+    base that declares one of the branch's issues (#204: a branch changing
+    its plan on main is a plan to review). Completion and the next phase's
+    tier ask without it: an epic's plan a package ticks is not the
+    package's to finish. Another work's plan it only touched is never its own."""
     base = _integration_base(root, tip)
     if not base:
         return []
-    # added by the branch, git's rename detection on: another work's plan the
-    # branch archived or moved is not its own (refutation); a rename pairing
-    # an old plan with a new one for other issues is a new plan
-    # -z through the owner (`check_review.name_status`): a plan with a
-    # non-ASCII name came back quoted and was never the branch's
-    import check_review as _review  # noqa: PLC0415
-    status = _review.name_status(_review._git_bytes(root, "diff", "--name-status", "-M", "-z",
-                                                    f"{base}...{tip}")) or []
-    added = []
-    for letter, source, path in status:
-        if letter == "A":
-            added.append(path)
-        elif letter == "R":
-            before, after = _out(root, "show", f"{base}:{source}"), _out(root, "show", f"{tip}:{path}")
-            if set(_ISSUE.findall(before)) != set(_ISSUE.findall(after)):
-                added.append(path)
-    plans = [f for f in added if (f.startswith(".process-work/plans/") and "/archive/" not in f
-                                  and f.endswith(".md")) or re.fullmatch(r"specs/[^/]+/tasks\.md", f)]
-    return plans
 
+    def read(rel: str) -> str | None:
+        shown = _git(root, "show", f"{tip}:{rel}")
+        return shown.stdout if shown.returncode == 0 else None
 
-_ISSUE = re.compile(r"^\s*(?:[-*+]\s+)?[*_]*issue[*_]*\s*:\s*(\S+)", re.IGNORECASE | re.MULTILINE)
+    def is_plan(rel: str) -> bool:
+        return bool((rel.startswith(".process-work/plans/") and "/archive/" not in rel and rel.endswith(".md"))
+                    or re.fullmatch(r"specs/[^/]+/tasks\.md", rel))
+
+    # without the branch's issues no plan on the base can be its own
+    issues = branch_issues(root, branch) if include_base and branch else set()
+    own = _review.own_plans(root, base, tip, issues, read, (".process-work/plans", "specs"), is_plan) or []
+    return [rel for rel, _plain, _added in own]
 
 
 def work_complete_on_origin(root: Path, branch: str, local: bool = False) -> bool | None:
@@ -2231,21 +2236,22 @@ def phase_over(root: Path, rec: dict, rep: dict | None, *, local: bool = False) 
 
 
 
-def plan_review_state(root: Path, wt: Path) -> tuple[int | None, bool]:
+def plan_review_state(root: Path, wt: Path, branch: str = "") -> tuple[int | None, bool]:
     """(the highest tier the branch's own plans declare on the worktree's
     HEAD, whether a clearing plan pass — `REVIEW work=<id>-plan verdict=pass`
     at that tier or higher — covers every Tier 2+ one). (None, False) when no
     plan is found: the caller cannot judge it."""
-    return plan_review_state_at(root, _out(wt, "rev-parse", "HEAD"))
+    return plan_review_state_at(root, _out(wt, "rev-parse", "HEAD"), branch)
 
 
-def plan_review_state_at(root: Path, head: str) -> tuple[int | None, bool]:
-    """`plan_review_state` for the commit `head`."""
+def plan_review_state_at(root: Path, head: str, branch: str = "") -> tuple[int | None, bool]:
+    """`plan_review_state` for the commit `head`; with the `branch`, a plan on
+    the base that declares one of its issues counts too (#204)."""
     import check_review as _review  # noqa: PLC0415
     if not head:
         return None, False
     plans = []
-    for rel in own_plans_at(root, head):
+    for rel in own_plans_at(root, head, branch, include_base=bool(branch)):
         if rel.endswith("/tasks.md"):  # a Spec Kit plan: its tier and ids live in plan.md
             rel = rel[: -len("tasks.md")] + "plan.md"
         text = _out(root, "show", f"{head}:{rel}")
@@ -2274,7 +2280,17 @@ def plan_review_state_at(root: Path, head: str) -> tuple[int | None, bool]:
     # tier still names the model of the next phase
     return top, all(waived or cleared(t, rel, ids) for t, rel, ids, waived in plans if t >= 2)
 
+def _has_surrogate(text: str) -> bool:
+    return any("\udc80" <= ch <= "\udcff" for ch in text)
+
+
 def plan_review_due(root: Path, branch: str, *, remote: bool = False, fetch: bool = True) -> str | None:
+    due = plan_review_due_plans(root, branch, remote=remote, fetch=fetch)
+    return due[0] if due else None
+
+
+def plan_review_due_plans(root: Path, branch: str, *, remote: bool = False,
+                          fetch: bool = True) -> tuple[str, list[str]] | None:
     """Why a review of `branch` is a plan review, or None for a code review
     (#203: a session started for a changed plan took it for a code review and
     stopped with "no code"). A plan review is due when the branch changes
@@ -2308,12 +2324,16 @@ def plan_review_due(root: Path, branch: str, *, remote: bool = False, fetch: boo
     if listed.returncode != 0:
         return None
     changed = [p for p in listed.stdout.split("\0") if p]
+    if any(_has_surrogate(p) for p in changed):
+        return None  # a path this reader cannot name is no "only plans" (#207)
     if any(not (p.startswith(BOOKKEEPING) or p.startswith(_review.SPECS_DIR + "/")) for p in changed):
         return None  # code to review
-    tier, cleared = plan_review_state_at(root, tip)
+    tier, cleared = plan_review_state_at(root, tip, branch)
     if tier is None or tier < 2 or cleared:
         return None
-    return f"{branch} changes only plans and bookkeeping, and its Tier {tier} plan has no pass for its current text"
+    plans = own_plans_at(root, tip, branch, include_base=True)
+    return (f"{branch} changes only plans and bookkeeping, and its Tier {tier} plan has no pass for its "
+            f"current text ({', '.join(plans)})", plans)
 
 
 PLAN_GATES_TIMEOUT = 900  # the gate runner's own per-gate cap is 600 s
@@ -2389,7 +2409,7 @@ def _chain(root: Path, *, dry_run: bool = False) -> int:
                 continue
             nxt = "review"
         elif state == "review-pass" and phase == "review" and rec.get("plan_review"):
-            if wt_rec is None or not plan_review_state(root, wt_rec)[1]:
+            if wt_rec is None or not plan_review_state(root, wt_rec, branch)[1]:
                 print(f"dispatch: {branch} passed its plan review — waiting for the `-plan` pass on its "
                       "worktree")
                 continue
@@ -2413,7 +2433,7 @@ def _chain(root: Path, *, dry_run: bool = False) -> int:
         if nxt == "execute" and wt is not None and wt.is_dir():
             # a Tier 2+ plan is read once, independently, before any code (#192) —
             # asked first: it is a few git reads, the gates below take minutes
-            tier_of_plan, plan_cleared = plan_review_state(root, wt)
+            tier_of_plan, plan_cleared = plan_review_state(root, wt, branch)
             uncleared = tier_of_plan is not None and tier_of_plan >= 2 and not plan_cleared
             if uncleared and tier_of_plan < 3:
                 print(f"dispatch: {branch} reported planned without a plan review — its Tier 2 plan "
