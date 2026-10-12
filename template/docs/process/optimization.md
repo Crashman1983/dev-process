@@ -18,9 +18,9 @@ change or a published release does not end an experiment.
 | Goal | Measure | Where it comes from |
 |---|---|---|
 | Lead time | start of planning to verified deploy; median and P90, working and waiting time apart | `process_kpis.py flow` (telemetry module) |
-| Tokens | every session of planning, execution, review and repair; cache shares apart | `flow`, `cost --issue N` (policy `transcripts`) |
+| Tokens | every dispatched session of planning, execution, review and repair; cache shares apart (sessions started outside dispatch are not counted) | `flow`, `cost --issue N` (policy `transcripts`) |
 | Follow-up defects | escapes after deploy, linked to their origin issue (`Regression-of: #N`, `commits.md`) | `flow` (measured), `cfr` (proxy) |
-| Owner effort | owner decisions per issue, rescue interventions (bypasses) | `flow` (proxy — active time is not measurable) |
+| Owner effort | owner `DECISION` lines per issue | `flow` (proxy — active time and rescue interventions are not measured yet) |
 | Recovery time | detection to working again | not measured until the project records incidents |
 | Value kept | the original acceptance criteria hold and the work is usable as intended | DoD (`definition-of-ready-and-done.md`) |
 
@@ -87,7 +87,10 @@ for the core — then it is built locally.
 
 One file per improvement: `.process-work/optimizations/OPT-NNNN-<slug>.md`,
 created by `uv run scripts/process/optimize.py new --title … --mechanism …`.
-Its header carries the machine fields, its sections the substance:
+Its header carries the machine fields, its sections the substance. Only
+what a reader sees counts: HTML comments and fenced code are ignored, a
+heading or header field that appears twice is a problem, and names are
+compared without case or spacing (`Maintainer` is the `maintainer`).
 
 | Part | Holds |
 |---|---|
@@ -126,10 +129,17 @@ owner.
 - `adopted`: Result and Decision filled; by the owner, or by the steward
   where the mandate allows it; never by the implementer.
 
+`check` and `active` re-derive every one of these rules from the record —
+who started it, who reviewed which terms, the mandate's limits measured
+from the `FROZEN` date — so a state, a log line or a freeze written by hand
+gains nothing. A `REVIEWED … block` on the frozen terms is not outvoted by
+a pass.
+
 **An experiment does not ease its own criteria.** From `FROZEN` on, Trial,
 Limits, Criteria, `select`, `until`, the budgets, `flag` and `mechanism`
 stay as they were. `optimize.py check` compares them with the frozen hash
-and, with git history, with the version the `FROZEN` line was committed in.
+and, with git history, with every committed version whose Log carries
+`FROZEN`, across renames.
 New criteria mean a new record that `supersedes` this one.
 
 ### Bounded use and rollback

@@ -52,7 +52,8 @@ its `source`, the commit it was read `at` and its `certainty` (`declared`,
 - `graph.py missed [--branch B]` — co-change partners and plan-named files
   the branch left alone: candidates for an overlooked relation, to be
   written into an improvement record when they recur.
-- `graph.py build [--json]` — every edge, for whoever wants to look.
+- `graph.py build [--json]` — every edge but the test map's (those come
+  with `context`, for the paths asked), for whoever wants to look.
 
 **A missing edge proves no independence.** git sees what changed together,
 a plan what its author named, the test map what it maps. The graph

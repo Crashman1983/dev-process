@@ -112,8 +112,9 @@ ausgerollt werden kann.
 - **R11 Selbstbewertung.** Der dev-process-Agent entwirft, implementiert und
   „verantwortet die Analyse“ seines Experiments. Das ist Selbstabnahme.
   → Der Record nennt `implementer:`. Vor dem Pilot braucht er eine
-  `REVIEWED`-Zeile, bei der Entscheidung eine `DECIDED`-Zeile, beide von
-  jemand anderem als dem Implementierer. Das Werkzeug prüft beides.
+  `REVIEWED`-Zeile von jemand anderem als dem Implementierer; die
+  Entscheidung ist die Übergangszeile im Log, und auch sie darf nicht vom
+  Implementierer stammen. Das Werkzeug prüft beides.
 - **R12 Rückbau fehlt im Pflichtfeld-Katalog.** Abschnitt 9 verlangt einen
   sicheren Rückbauweg, die Tabelle in Abschnitt 7 hat kein Feld dafür.
   → `## Rollback` ist Pflicht vor dem Pilot.
@@ -137,8 +138,8 @@ ausgerollt werden kann.
   `budget-tokens`, `budget-hours`, `issues`, `upstream`, `supersedes`),
   Abschnitte Observation, Hypothesis, Placement, Trial, Limits, Criteria,
   Generality, Rollback, Result, Decision, Log. Log-Zeilen:
-  `- <date> <who>: <state> — because …`, `- REVIEWED …`, `- FROZEN …`,
-  `- DECIDED …`.
+  `- <date> <who>: <state> — because …`, `- REVIEWED …`, `- FROZEN …`.
+  Die Entscheidung ist die Übergangszeile in einen Endzustand.
 - **D3 Zustände.** proposed → designed → piloting → (stopped →) evaluating →
   adopted | rejected | rolled-back | superseded; proposed/designed → rejected.
 - **D4 Einfrieren.** Der Übergang nach `piloting` schreibt
@@ -187,3 +188,35 @@ Die bestehenden Gates bleiben die harte Grenze; nichts hier lockert sie.
 Die Änderungen an `dispatch.py` (zusätzlicher Leser) und `train.py`
 (zusätzliche Felder in einer Telemetriezeile) ändern keine Entscheidung eines
 Gates.
+
+## Refute und Review Runde 1 — Änderungen
+
+Ergebnis: block. Ein unabhängiger Prüfer, nicht der Implementierer, fand 1 BLOCKER, 5 MAJOR und 8 MINOR. Gemeinsame Ursache: `optimize.py` setzte seine Regeln nur beim Schreiben durch `move` durch. `check` und `active` verglichen kaum mehr als ein Hash über eine lockere Markdown-Lesart.
+
+- **F1 (BLOCKER) Doppelte Überschrift:** Eine zweite `## Criteria`, auch in einem Codeblock, trug die „echten“ Bedingungen. → Ein strenger Parser liest nur, was ein Leser sieht. Kommentare und Codeblöcke werden entfernt; eine doppelte Überschrift oder ein doppeltes Kopffeld ist ein Fehler, und der Record ist dann aus.
+- **F2 Umbenennung:** `--follow --reverse` folgt keiner Umbenennung. → `versions()` liest `--follow --name-status -z` und kennt so den Pfad je Commit.
+- **F3 Vorbereitetes FROZEN:** Die Historienprüfung ließ sich an eine versteckte FROZEN-Zeile in einem früheren Commit hängen. → Gezählt werden nur FROZEN-Zeilen im Log. *Jede* committete Fassung mit FROZEN muss die heutigen Bedingungen tragen.
+- **F4 Handgeschriebener Start:** `max_pilot_days`, Startrecht und „nicht der Implementierer“ prüfte nur `move`. → `problems()` leitet alle Regeln aus dem Log neu ab: wer startete, wann eingefroren wurde, und `until` gemessen vom FROZEN-Datum. Ein nachträglich verkleinertes Mandat bindet auch laufende Versuche.
+- **F5 Selbstfreigabe:** Namen wurden exakt verglichen, und `implementer` war optional. → `norm()` ignoriert Groß- und Kleinschreibung sowie Leerraum. Ab `designed` ist ein echter `implementer` Pflicht.
+- **F6 Flow-Zuordnung:** Der `done`-Report des Zugs trägt das kleinste `#N` aus den Commits. Ein `Regression-of: #12` legte so die Reparatur unter #12 ab. → `flow` ordnet nur über eigene Worker-Reports und den Branch-Namen zu, nie über `done`. Der Zug ignoriert `Regression-of:`-Zeilen bei der Suche nach Issue-Referenzen.
+- **F7 Stopp verweigerbar:** → `stopped` und `evaluating` werden nie verweigert. `rolled-back` bleibt auch bei kaputtem Record oder Mandat offen.
+- **F8 Versteckte REVIEWED-Zeilen:** → durch den Parser aus F1 erledigt.
+- **F9 Block nach Pass:** → Ein Block auf den eingefrorenen Bedingungen steht und wird durch einen Pass nicht überstimmt.
+- **F10 `active` ignorierte Konflikte:** → `active` und `move` beachten `_conflicts`, also doppelte Nummern und zwei Versuche auf einem Mechanismus oder Flag. Der Konflikt wird an jedem beteiligten Record genannt.
+- **F11 Flow-Kleinigkeiten:**
+  - Ein neu dispatchter Phasenlauf wird als Vereinigung von Intervallen gezählt.
+  - Bei einem wiederverwendeten Branch-Namen zählt der erste Merge nach Beginn, markiert als `estimated`.
+  - Kaputte Zeilen in `phases.jsonl` werden übersprungen.
+  - Ein Transkript ohne Usage-Felder gilt als `missing`.
+- **F12 Doku-Behauptungen:**
+  - Bypass-Zählung als nicht gemessen benannt.
+  - Keine `DECIDED`-Zeile; die Entscheidung ist die Übergangszeile.
+  - Tokens nur aus dispatchten Sitzungen.
+  - Test-Kanten nur bei `context`.
+  - Dotfile-Pfade erkannt.
+- **F13 Tests:**
+  - Je ein Regressionstest zu F1–F11.
+  - Zwei Mutanten getötet: Rechteprüfung beim Start und in Endzuständen.
+  - Ein Zeitzonentest unter `America/New_York` tötet den Mutanten „naiv als UTC“.
+  - `optimization.md` steht in der Neutralitätsprüfung der Kern-Doku.
+- **F14 `graph.local.json` überdimensioniert:** Bleibt. Das Konzept verlangt austauschbare Projektanbindungen und nennt „Projektanbindungen sind getrennt“ als Abnahmekriterium von Paket C. Ohne diese Schnittstelle müsste projektspezifische Analyse in den Kern. Der Code dafür umfasst rund 40 Zeilen ohne neue Abhängigkeit.

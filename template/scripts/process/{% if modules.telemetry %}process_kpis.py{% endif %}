@@ -761,16 +761,23 @@ def flow_items(root: Path, *, issue: int | None = None, branch: str | None = Non
     starts = _phase_starts(common)
     reports = [r for recs in _reports_by_worker(root).values() for r in recs]
     rows = _train_rows(common)
-    # which branches carried which issue: the reports say it, else the branch name
+    # which branches carried which issue: a worker's own report says it (never
+    # the train's `done`, whose issue is the first #N any commit names — a
+    # `Regression-of: #12` in a fix for #20 would file the fix under #12), else
+    # the dispatch log's branch name. The integration branch carries no issue.
+    integration_names = {integration, "main", "master", "HEAD"}
     branches_of: dict[int, set[str]] = defaultdict(set)
     for rep in reports:
         b = rep.get("worker") or rep.get("branch")
-        if b and str(rep.get("issue") or "").isdigit():
+        if b and b not in integration_names and rep.get("state") != "done" \
+                and str(rep.get("issue") or "").isdigit():
             branches_of[int(rep["issue"])].add(b)
     for st in starts:
         n = _review.branch_issue(st["branch"])
-        if n and str(n).isdigit():
+        if n and str(n).isdigit() and st["branch"] not in integration_names:
             branches_of[int(n)].add(st["branch"])
+    shared = {b for b in set().union(*branches_of.values()) if sum(b in v for v in branches_of.values()) > 1} \
+        if branches_of else set()
     wanted = [issue] if issue is not None else sorted(branches_of)
     regressions = _regressions(root, integration)
     decisions = _owner_decisions(root)
@@ -781,26 +788,38 @@ def flow_items(root: Path, *, issue: int | None = None, branch: str | None = Non
     items = []
     for n in wanted:
         bs = branches_of.get(n, set())
-        own_starts = sorted((s for s in starts if s["branch"] in bs), key=lambda s: s["ts"])
-        own_reports = sorted(((r, t) for r in reports
-                              if (r.get("worker") in bs or r.get("branch") in bs
-                                  or str(r.get("issue")) == str(n))
-                              and (t := _aware(r.get("ts"))) is not None), key=lambda rt: rt[1])
+        mine = sorted(((r, t) for r in reports
+                       if (r.get("worker") in bs or r.get("branch") in bs)
+                       and (t := _aware(r.get("ts"))) is not None), key=lambda rt: rt[1])
+        all_starts = sorted((s for s in starts if s["branch"] in bs), key=lambda s: s["ts"])
+        first = all_starts[0]["ts"] if all_starts else (mine[0][1] if mine else None)
+        # the first merge after the issue began closes it: a reused branch name
+        # later carries another issue's work and merge
+        done = [t for r, t in mine if r.get("state") == "done" and (first is None or t >= first)]
+        merged = {"value": done[0], "quality": "measured"} if done else {"value": None, "quality": "missing"}
+        horizon_end = merged["value"]
+        own_starts = [s for s in all_starts if horizon_end is None or s["ts"] <= horizon_end]
+        own_reports = [(r, t) for r, t in mine if horizon_end is None or t <= horizon_end]
         start = {"value": own_starts[0]["ts"], "quality": "measured"} if own_starts else (
             {"value": own_reports[0][1], "quality": "estimated"} if own_reports else
             {"value": None, "quality": "missing"})
-        done = [t for r, t in own_reports if r.get("state") == "done"]
-        merged = {"value": done[-1], "quality": "measured"} if done else {"value": None, "quality": "missing"}
         deployed = {"value": None, "quality": "missing"}
         for row in rows:
-            if bs & set(row.get("branches") or []):
-                ended = _aware(row.get("ended"))
-                if row.get("deployed") is True and ended:
-                    deployed = {"value": ended, "quality": "measured"}
-                elif row.get("deployed") is None and deployed["value"] is None:
-                    deployed = {"value": None, "quality": "not configured"}
+            landed = row.get("branches")
+            if not isinstance(landed, list) or not bs & {b for b in landed if isinstance(b, str)}:
+                continue
+            ended = _aware(row.get("ended"))
+            if horizon_end is not None and ended is not None and ended < horizon_end:
+                continue  # an earlier train of a reused name
+            if row.get("deployed") is True and ended:
+                deployed = {"value": ended, "quality": "measured"}
+                break
+            if row.get("deployed") is None and deployed["quality"] == "missing":
+                deployed = {"value": None, "quality": "not configured"}
         end = deployed if deployed["value"] else merged
-        work = 0.0
+        # working time is the union of phase intervals: a re-dispatched phase
+        # overlaps its first attempt and must not count twice
+        spans = []
         unended = 0
         for s in own_starts:
             fin = next((t for r, t in own_reports if t >= s["ts"]
@@ -809,7 +828,16 @@ def flow_items(root: Path, *, issue: int | None = None, branch: str | None = Non
             if fin is None:
                 unended += 1
             else:
-                work += (fin - s["ts"]).total_seconds()
+                spans.append((s["ts"], fin))
+        work = 0.0
+        last_end = None
+        for a, b in sorted(spans):
+            if last_end is not None and a < last_end:
+                a = last_end
+            if b > a:
+                work += (b - a).total_seconds()
+            last_end = b if last_end is None else max(last_end, b)
+        unended += bool(bs & shared)  # a shared branch name: attribution is an estimate
         lead = wait = None
         if start["value"] and end["value"]:
             lead = (end["value"] - start["value"]).total_seconds()
@@ -832,8 +860,9 @@ def flow_items(root: Path, *, issue: int | None = None, branch: str | None = Non
             "work_s": {"value": work if own_starts else None,
                        "quality": "missing" if not own_starts else ("estimated" if unended else "measured")},
             "wait_s": {"value": wait, "quality": quality},
-            "tokens": {"value": tokens[0] if tokens else None, "sessions": tokens[1] if tokens else 0,
-                       "quality": "measured" if tokens else "missing"},
+            "tokens": {"value": tokens[0] if tokens and tokens[0] else None,
+                       "sessions": tokens[1] if tokens else 0,
+                       "quality": "measured" if tokens and tokens[0] else "missing"},
             "owner_decisions": {"value": decisions.get(n, 0), "quality": "proxy"},
             "escapes": {"value": escapes, "quality": "measured" if escapes is not None else "missing",
                         "window_open": window_open, "days": follow_up_days},

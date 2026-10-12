@@ -234,13 +234,17 @@ def test_an_expired_trial_is_off_and_status_says_evaluate(opt):
 def test_two_trials_on_one_mechanism_confound(opt):
     out, m = opt
     _mandate(out)
-    for _ in range(2):
-        path = _designed(out, m)
-        m.review(path, "reviewer", "pass", "ok", today=TODAY)
-        assert m.move(out, path, "piloting", "steward", "go", today=TODAY) is None
+    first = _designed(out, m)
+    m.review(first, "reviewer", "pass", "ok", today=TODAY)
+    assert m.move(out, first, "piloting", "steward", "go", today=TODAY) is None
+    second = _designed(out, m)
+    m.review(second, "reviewer", "pass", "ok", today=TODAY)
+    assert "one experiment per mechanism" in m.move(out, second, "piloting", "steward", "go", today=TODAY)
+    # written by hand anyway: both records are named, and the flag is off
+    _hand_start(m, second, "steward")
     per, _ = m.check_all(out, history=False)
-    assert any("one experiment per mechanism" in p for probs in per.values() for p in probs), per
-    assert "ambiguous" in m.active(out, "scoped-handover", issue=7, klass="mechanical", today=TODAY)[1]
+    assert all(any("one experiment per mechanism" in p for p in per[x.name]) for x in (first, second)), per
+    assert m.active(out, "scoped-handover", issue=7, klass="mechanical", today=TODAY)[0] is None
 
 
 def test_a_rejected_trial_keeps_its_frozen_terms(opt):
@@ -297,3 +301,156 @@ def test_cli_moves_and_refuses(opt):
     assert "OPT-0001  proposed" in r.stdout
     r = subprocess.run([*script, "active", "nothing", "--issue", "3"], capture_output=True, text=True)
     assert r.returncode == 1 and "off" in r.stdout
+
+
+# --- refute of v2.67.0 (independent review): every route to ease frozen terms --
+
+def _hand_start(m, path: Path, who: str, edit=lambda text: text) -> None:
+    """A start written by hand, self-consistent: state, log line, FROZEN on the new terms."""
+    text = edit(path.read_text().replace("- state: designed", "- state: piloting"))
+    terms = m.terms_hash(m.parse(text))
+    path.write_text(text + f"- 2026-10-12 {who}: piloting — because by hand\n"
+                           f"- FROZEN 2026-10-12 {who}: terms={terms}\n")
+
+
+def _piloting(out, m):
+    _mandate(out)
+    path = _designed(out, m)
+    m.review(path, "reviewer", "pass", "ok", today=TODAY)
+    assert m.move(out, path, "piloting", "steward", "go", today=TODAY) is None
+    return path
+
+
+def _on(out, m):
+    return m.active(out, "scoped-handover", issue=7, klass="mechanical", today=TODAY)[0]
+
+
+def _probs(out, m, path, history=False) -> str:
+    return " ".join(m.check_all(out, history=history)[0].get(path.name, []))
+
+
+def test_a_second_heading_cannot_carry_the_real_terms(opt):
+    out, m = opt
+    path = _piloting(out, m)
+    text = path.read_text()
+    path.write_text(text.replace("## Rollback", "## Criteria\nMedian down by 1 %, n >= 1.\n\n## Rollback"))
+    assert "## Criteria appears twice" in _probs(out, m, path)
+    assert _on(out, m) is None
+    path.write_text(text.replace("- issues:", "- until: 2099-01-01\n- issues:"))
+    assert "header field until: appears twice" in _probs(out, m, path)
+
+
+def test_hidden_text_counts_for_nothing(opt):
+    out, m = opt
+    _mandate(out)
+    path = _designed(out, m)
+    base = path.read_text()
+    terms = m.terms_hash(m.parse(base))
+    line = f"- REVIEWED 2026-10-12 alice: pass terms={terms} — ok\n"
+    for hidden in (f"<!--\n{line}-->\n", f"```\n{line}```\n"):
+        path.write_text(base + hidden)
+        assert "no REVIEWED pass" in m.move(out, path, "piloting", "steward", "go", today=TODAY)
+    # a heading inside a fence is no section; an unclosed comment is a problem, not a hiding place
+    path.write_text(base.replace("## Generality", "```\n## Criteria\nnothing\n```\n## Generality"))
+    assert "appears twice" not in _probs(out, m, path)
+    path.write_text(base + "\n<!-- unclosed\n")
+    assert "unclosed <!--" in _probs(out, m, path)
+
+
+def test_the_implementer_is_named_and_compared_without_case(opt):
+    out, m = opt
+    _mandate(out)
+    path = _designed(out, m)
+    assert "someone else's" in m.review(path, "  Maintainer ", "pass", "ok", today=TODAY)
+    path.write_text(path.read_text().replace("- implementer: maintainer",
+                                             "- implementer: <who builds the change>"))
+    assert "name the implementer first" in m.review(path, "reviewer", "pass", "ok", today=TODAY)
+    assert "implementer: missing" in _probs(out, m, path)
+
+
+def test_a_hand_written_start_must_keep_every_rule(opt):
+    out, m = opt
+    _mandate(out)
+    path = _designed(out, m)
+    m.review(path, "reviewer", "pass", "ok", today=TODAY)
+    _hand_start(m, path, "MAINTAINER", lambda t: t.replace("until: 2026-11-01", "until: 2099-12-31"))
+    probs = _probs(out, m, path)
+    assert "implements this change and cannot start" in probs
+    assert "beyond the mandate's max_pilot_days" in probs
+    assert "no REVIEWED pass" in probs  # the review saw other terms
+    assert _on(out, m) is None
+
+
+def test_a_mandate_shrunk_after_the_start_binds_the_running_trial(opt):
+    out, m = opt
+    path = _piloting(out, m)
+    assert _on(out, m) == path.name
+    _mandate(out, {"max_pilot_days": 5, "steward_may": ["start"]})
+    assert "max_pilot_days" in _probs(out, m, path)
+    assert _on(out, m) is None
+
+
+def test_a_block_is_not_outvoted_by_a_pass(opt):
+    out, m = opt
+    _mandate(out)
+    path = _designed(out, m)
+    m.review(path, "alice", "pass", "ok", today=TODAY)
+    m.review(path, "bob", "block", "the minimum n is too small", today=TODAY)
+    assert "REVIEWED block stands" in m.move(out, path, "piloting", "steward", "go", today=TODAY)
+
+
+def test_history_survives_a_rename(opt):
+    out, m = opt
+    _repo(out)
+    path = _piloting(out, m)
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "start trial")
+    renamed = path.with_name("OPT-0001-renamed.md")
+    _git(out, "mv", str(path), str(renamed))
+    _git(out, "commit", "-q", "-m", "rename")
+    text = renamed.read_text()
+    old = m.parse(text)["frozen"][0]["terms"]
+    eased = text.replace("down by 20 %", "down by 1 %")
+    renamed.write_text(eased.replace(old, m.terms_hash(m.parse(eased))))
+    _git(out, "commit", "-qam", "ease")
+    assert "frozen in commit" in _probs(out, m, renamed, history=True)
+    assert _on(out, m) is None
+
+
+def test_a_freeze_prepared_in_an_earlier_commit_anchors_nothing(opt):
+    out, m = opt
+    _repo(out)
+    _mandate(out)
+    path = _designed(out, m)
+    weak = path.read_text().replace("down by 20 %", "down by 1 %")
+    weak_terms = m.terms_hash(m.parse(weak))
+    path.write_text(weak + f"<!-- - FROZEN 2026-10-01 steward: terms={weak_terms} -->\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "proposal")
+    path.write_text(path.read_text().replace("down by 1 %", "down by 20 %"))
+    m.review(path, "reviewer", "pass", "ok", today=TODAY)
+    assert m.move(out, path, "piloting", "steward", "go", today=TODAY) is None
+    _git(out, "commit", "-qam", "start")
+    strong = m.parse(path.read_text())["frozen"][0]["terms"]
+    path.write_text(path.read_text().replace("down by 20 %", "down by 1 %").replace(strong, weak_terms))
+    assert "frozen in commit" in _probs(out, m, path, history=True)
+
+
+def test_stopping_is_never_blocked(opt):
+    out, m = opt
+    path = _piloting(out, m)
+    path.write_text(path.read_text().replace("down by 20 %", "down by 1 %"))  # tampered
+    (out / "docs/process/optimization.local.json").write_text("{broken")
+    assert m.move(out, path, "stopped", "anyone", "a stop condition fired", today=TODAY) is None
+    assert m.move(out, path, "rolled-back", "steward", "undo", today=TODAY) is None  # default right
+
+
+def test_a_hand_written_adoption_without_the_right_is_named(opt):
+    out, m = opt
+    path = _piloting(out, m)
+    m.move(out, path, "evaluating", "steward", "done", today=TODAY)
+    path.write_text(path.read_text().replace("- state: evaluating", "- state: adopted")
+                    + "- 2026-10-20 steward: adopted — because by hand\n")
+    assert "adopted by steward: adopted needs the owner" in _probs(out, m, path)
+    path.write_text(path.read_text().replace("steward: adopted", "Maintainer: adopted"))
+    assert "implements this change and cannot adopt" in _probs(out, m, path)

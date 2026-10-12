@@ -1524,8 +1524,10 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
         print(f"train: merged worktrees not checked — {exc}", file=sys.stderr)
         worktrees = {}
     for b in aboard:
-        refs = sorted({int(n) for n in re.findall(r"(?<![\w/])#(\d+)\b",
-                                                  _out(root, "log", "--format=%B", f"{base}..{b}"))})
+        # a `Regression-of: #N` trailer names the issue a fix repairs, not one this
+        # branch works on — it must neither file the merge under #N nor ask to close it
+        bodies = re.sub(r"(?im)^\s*Regression-of:.*$", "", _out(root, "log", "--format=%B", f"{base}..{b}"))
+        refs = sorted({int(n) for n in re.findall(r"(?<![\w/])#(\d+)\b", bodies)})
         if refs:
             print(f"train: {b} references issue(s) {', '.join('#' + str(n) for n in refs)} — "
                   "closed by GitHub where a commit says Closes; the steward closes the rest with the merge ref")

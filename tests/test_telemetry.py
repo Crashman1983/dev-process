@@ -467,3 +467,72 @@ def test_flow_cli_prints_the_issue_and_the_honest_ceiling(render, tmp_path):
                         "--issue", "12"], cwd=out, capture_output=True, text=True)
     import json
     assert json.loads(j.stdout)[0]["issue"] == 12
+
+
+# --- refute of v2.67.0: attribution, overlap, malformed rows, time zones -------
+
+def _report(out, ts, state, worker, issue):
+    import json
+    import time
+    with (out / ".git/process-tower/reports.jsonl").open("a") as fh:
+        fh.write(json.dumps({"ts": ts + time.strftime("%z"), "host": "h", "worker": worker, "branch": worker,
+                             "issue": issue, "state": state, "note": "", "cwd": ""}) + "\n")
+
+
+def test_flow_does_not_file_a_regression_fix_under_its_origin(render, tmp_path):
+    from datetime import datetime, timezone
+    out = _flow_repo(render, tmp_path)
+    (out / ".git/process-dispatch/20-fix-execute-20261004-100000.log").write_text("")
+    _report(out, "2026-10-04T11:00:00", "pushed", "20-fix", 20)
+    _report(out, "2026-10-05T12:00:00", "done", "20-fix", 12)  # the train's refs[0] of `Regression-of: #12`
+    m = _flow_module(out)
+    items = {it["issue"]: it for it in m.flow_items(out, now=datetime(2026, 12, 31, tzinfo=timezone.utc))}
+    assert items[12]["branches"] == ["12-faster"]
+    assert items[12]["lead_s"]["value"] == 23.5 * 3600 and items[12]["escapes"]["value"] == 1
+    assert items[20]["merged"]["quality"] == "measured"
+
+
+def test_flow_counts_a_re_dispatched_phase_once(render, tmp_path):
+    out = _flow_repo(render, tmp_path)
+    (out / ".git/process-dispatch/12-faster-execute-20261001-130000.log").write_text("")
+    [it] = _flow_module(out).flow_items(out, issue=12)
+    assert it["work_s"]["value"] == 5 * 3600  # 12:00–15:00 and 13:00–15:00 are one interval
+
+
+def test_flow_keeps_a_reused_branch_names_issues_apart(render, tmp_path):
+    out = _flow_repo(render, tmp_path)
+    _report(out, "2026-10-08T10:00:00", "planned", "12-faster", 30)
+    _report(out, "2026-10-09T10:00:00", "done", "12-faster", 30)
+    [it] = _flow_module(out).flow_items(out, issue=12)
+    assert it["merged"]["value"].day == 2  # the first merge after the issue began
+    assert it["lead_s"]["quality"] == "estimated"  # a shared name is an estimate, said so
+
+
+def test_flow_survives_malformed_rows_and_empty_transcripts(render, tmp_path):
+    import json
+    out = _flow_repo(render, tmp_path)
+    with (out / ".git/process-train/phases.jsonl").open("a") as fh:
+        fh.write(json.dumps({"stamp": "x", "branches": 5, "ended": "nope"}) + "\n")
+    m = _flow_module(out)
+    [it] = m.flow_items(out, issue=12)
+    assert it["deployed"]["quality"] == "measured"
+    wt = tmp_path / "wt"
+    (wt / "t").mkdir(parents=True)
+    (wt / "t" / "a.jsonl").write_text('{"type": "user"}\n')
+    (out / ".git/process-dispatch/12-faster.json").write_text(json.dumps({"issue": 12, "worktree": str(wt)}))
+    (out / "docs/process/model-policy.local.json").write_text(json.dumps({"transcripts": "{worktree}/t/*.jsonl"}))
+    [it] = m.flow_items(out, issue=12)
+    assert it["tokens"]["quality"] == "missing"  # a transcript without usage is no measurement
+
+
+def test_flow_reads_naive_dispatch_stamps_as_local_time(render, tmp_path, monkeypatch):
+    import time
+    monkeypatch.setenv("TZ", "America/New_York")
+    time.tzset()
+    try:
+        out = _flow_repo(render, tmp_path)
+        [it] = _flow_module(out).flow_items(out, issue=12)
+        assert it["lead_s"]["value"] == 23.5 * 3600 and it["work_s"]["value"] == 5 * 3600
+    finally:
+        monkeypatch.delenv("TZ")
+        time.tzset()
