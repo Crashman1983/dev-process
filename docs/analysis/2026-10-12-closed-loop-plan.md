@@ -1,6 +1,6 @@
 # Plan (Entwurf, zur Refutation): Verbesserungsregelkreis mit Ausgleich — v2.68
 
-Datum: 2026-10-12 · Status: **Entwurf, nicht umgesetzt** · Baut auf: v2.67.0
+Datum: 2026-10-12 · Status: **Entwurf, nicht umgesetzt** · Baut auf: v2.67
 (`docs/analysis/2026-10-12-self-improving-process.md`) · Tier: 3 (Messung,
 Aktivierung und Freigabe des Prozesses ändern sich selbst)
 
