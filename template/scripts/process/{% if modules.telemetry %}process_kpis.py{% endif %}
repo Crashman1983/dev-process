@@ -1326,7 +1326,7 @@ def _gate_events(common: Path | None, since: datetime) -> list[dict]:
                 row["head"] = None
             if not isinstance(row.get("duration_s"), (int, float)) or isinstance(row.get("duration_s"), bool):
                 row["duration_s"] = 0.0
-                row["outcome"] = row.get("outcome") if row.get("outcome") in ("skipped", "missing") else "unreadable"
+                row["outcome"] = row.get("outcome") if row.get("outcome") in ("skipped", "missing", "off", "unsampled") else "unreadable"
             rows.append(row)
     return rows
 

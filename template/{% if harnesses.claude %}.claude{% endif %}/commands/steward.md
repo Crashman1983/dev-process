@@ -141,12 +141,23 @@ may decide. Once a day, after housekeeping, not on every tick:
 1. `uv run scripts/process/optimize.py status` and `optimize.py check`:
    a trial past its `until` is moved to `evaluating`, a budget overrun or a
    violated stop condition is moved to `stopped` (anybody may stop — it is
-   the safe direction), a broken record goes to its responsible.
+   the safe direction), a broken record goes to its responsible. Then
+   `gate_modes.py sentinel`: a weakened gate that failed, or a breached
+   guardrail, goes back to `block` and is locked — commit the record it
+   writes; a lock is lifted only with a triage (`gate_modes.py unlock`).
 2. Notice: where did the day's issues wait, repeat a round, lose context,
    or come back as a fix? `process_kpis.py flow` (telemetry module) gives
    each issue's lead time with working and waiting time apart, tokens,
-   owner decisions and escapes (`Regression-of: #N`); `rounds` and
-   `clusters` show repetition. A recurring bottleneck tied to concrete
+   owner decisions and escapes (`Regression-of: #N`); `losses` keeps
+   occupancy, delay, owner effort and tokens apart; `nodes` weighs each
+   gate's cost against its blocks; `outcomes` says whether epics became
+   usable, disruptive bugs got fixed, and whether bug origin is labelled
+   (a blind spot is yours to close: `cause:*` and `channel:*` where the
+   owner reports a bug); `rounds` and `clusters` show repetition. Sample
+   a few untriaged gate blocks into `.process-work/gate-triage.jsonl`.
+   A gate that costs much and never blocks alone is a proposal to the
+   owner — with its triage, never on raw blocks; weakening it
+   (`gate_modes.py weaken`) needs the owner's line every time. A recurring bottleneck tied to concrete
    issues becomes a record (`optimize.py new --title … --mechanism …
    --issues "#…"`), never a chat message; one-offs stay findings.
 3. Commission: weigh the expected gain against effort and capacity. The
