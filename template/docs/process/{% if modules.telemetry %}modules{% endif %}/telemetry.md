@@ -29,11 +29,36 @@ and `share` say what the work and the process cost. `models` and `rounds` file a
 | `cfr` | DORA change failure rate: `feat:` with a corrective `fix:` ≤7 d sharing a code file (proxy) | trend over ≥3 windows only; rising despite catch>0 → tighten the test/review gate |
 | `clusters` | rule 6 across sessions: `fix:` commits (14 d) sharing a subject token — each session sees its fix as a first attempt; git sees the series | a cluster ≥3 → stop path-patching, write the invariant record (Type: invariant) with its table test (`workflow.md`, Debug) |
 | `rounds` | per work item: tier, rounds to the first pass and blocked rounds (journal `REVIEW` lines); blockers per `FINDING`, by `origin=draft\|fix\|late` where the reports carry it — read through `check_issues.py` when the `github-issues` module is installed, else "not read"; a reader that is installed but cannot import (PyYAML missing — `uv run` resolves the script's header) is named as such | proxy; within one tier over time: `fix` blockers dominate → regression tests and a re-check of the fixed class (`verification-independence.md`, "What each round judges"); `late` dominates → a more complete round 1 |
+| `flow` | per issue: first dispatched phase (dispatch logs) to deploy (the train's `phases.jsonl`: `branches`, `deployed`, `ended`) or merge (`done` report) — lead time with working time (a phase's start to its end report) and waiting time apart, tokens with input and cache shares (policy `transcripts`), owner `DECISION` lines in the issue's plans, escapes (`Regression-of: #N` within `--follow-up-days`, default 30), the process version at merge (`.copier-answers.yml`); every field `measured`, `estimated` or `missing`, recovery time named as not measured; `--json` for an improvement record | the larger of work and wait is the lever — wait: hand-offs, questions, the train; work: rounds and context; the baseline for `docs/process/optimization.md` |
 | `share` | week by week on the integration branch: commits touching only process records, mixed and product only, and the landed changes that carried product code (`tower.py` owns the classification and shows the current week as `balance`) | proxy — paths, not effort; process-only above 40% for two weeks while product changes fall → look where the rounds go (`rounds`) and batch bookkeeping one commit per round (`testing.md`) |
 
 A KPI without a trigger does not exist — the cockpit only helps if something
 runs it. With GitHub CI the `process-kpis` workflow runs `report` monthly
 (and on dispatch) into the run's step summary; read it.
+
+## The graph (observation mode)
+
+`scripts/process/graph.py` derives the process's relations from what
+already exists — plans (issue → plan → named file), the test map
+(`testing.local.json`, file → test, no project selector runs), git history
+(files that change together, with support and confidence), journal REVIEW
+lines (work → reviewed head) and, optionally, the project's own commands in
+`docs/process/graph.local.json` (one JSON edge per line). Every edge carries
+its `source`, the commit it was read `at` and its `certainty` (`declared`,
+`derived`, `inferred`). No database, no new instrumentation, no gate.
+
+- `graph.py context PATH…` — what else a change to PATH probably touches:
+  the context a hand-over should carry, the tests worth running.
+- `graph.py missed [--branch B]` — co-change partners and plan-named files
+  the branch left alone: candidates for an overlooked relation, to be
+  written into an improvement record when they recur.
+- `graph.py build [--json]` — every edge, for whoever wants to look.
+
+**A missing edge proves no independence.** git sees what changed together,
+a plan what its author named, the test map what it maps. The graph
+therefore recommends and makes overlooked dependencies visible; it never
+narrows a test selection, a review or a gate. Whether it earns more than
+observation is decided by an improvement record, not by this doc.
 
 ## What the numbers can say — and what they cannot (honest ceiling)
 
