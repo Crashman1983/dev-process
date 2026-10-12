@@ -58,8 +58,13 @@ append-only record `.process-work/gate-changes.jsonl` sets each gate's mode
 - **Weakening** needs an owner decision line, every time, in this release.
   Core gates and the mandate's `guardrails.protected` gates cannot be
   weakened at all.
-- **A weakening counts once it is on the integration branch**; a branch
-  cannot weaken a gate for its own push. A restore counts at once.
+- **A weakening counts once it is on the remote integration branch**
+  (`origin`'s default branch, never a local `main`, which at pre-push time
+  may be the very commit pushed); a branch cannot weaken a gate for its own
+  push, nor un-protect one in its copy of the mandate (the base's
+  `protected` list holds too). Without a remote, no weakening counts. A
+  restore counts at once — in the working tree that holds it; merge it
+  promptly so every other checkout blocks again too.
 - **The sentinel** (`gate_modes.py sentinel`, deterministic, run daily by
   the steward) only restores: a shadow or sampled gate that failed on a
   clean commit, and every still-active weakening that touches a breached
@@ -70,11 +75,17 @@ append-only record `.process-work/gate-changes.jsonl` sets each gate's mode
   project's normal code review. Setting a reviewed check's mode is
   configuration. Running a check without blocking does not make it
   harmless — it can still change files or call a service.
-- **Evidence for weakening** is triage, not raw blocks (`nodes`). Keep a
+- **Evidence for weakening** is triage, not raw blocks (`nodes`; failures in
+  shadow or sampled mode count apart, as what the gate would have stopped). Keep a
   residual sample (`sampled`) rather than `off`; `off` wants a replacement
   shown on known failing inputs, or the owner's explicit judgement. Never
   argue a rare, severe class (security, destructive changes) from "no
   catches in the sample".
+
+Two briefs run the loop, in any harness: `improvement-weekly.md` (the
+steward's weekly pass: last prognosis, a few triaged blocks, blind spots,
+one ranked action) and `improvement-monthly.md` (a fresh, advisory review
+of the graph, the decisions, the signals and the guardrails).
 
 ## Roles
 
