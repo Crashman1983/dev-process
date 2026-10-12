@@ -700,3 +700,26 @@ def test_inline_code_and_link_definitions_hide_nothing(opt):
     for fine in ("a < b and <https://example.org> and <ops@example.org>", "C:\\work\\x.py"):
         path.write_text(base.replace("## Generality", f"{fine}\n\n## Generality"))
         assert "plain Markdown" not in _probs(out, m, path), fine
+
+
+# --- cross-model review (Codex): shipped-API traps -----------------------------
+
+def test_an_activation_is_true_only_when_the_experiment_is_on(opt):
+    out, m = opt
+    off = m.active(out, "scoped-handover", issue=7)
+    assert not off and off.record is None and "no mandate" in off.why
+    record, why = off  # still unpacks like the pair it replaced
+    assert record is None
+    path = _piloting(out, m)
+    on = m.active(out, "scoped-handover", issue=7, klass="mechanical", today=TODAY)
+    assert on and on.record == path.name
+
+
+def test_one_live_trial_per_project_whatever_its_name(opt):
+    out, m = opt
+    _piloting(out, m)
+    other = _designed(out, m)
+    other.write_text(other.read_text().replace("mechanism: hand-over context", "mechanism: routing")
+                     .replace("flag: scoped-handover", "flag: routing"))
+    m.review(other, "reviewer", "pass", "ok", today=TODAY)
+    assert "one live trial per project" in m.move(out, other, "piloting", "steward", "go", today=TODAY)

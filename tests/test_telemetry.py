@@ -435,7 +435,7 @@ def test_flow_traces_one_issue_from_planning_to_deploy_and_follow_up(render, tmp
     [it] = m.flow_items(out, issue=12, now=datetime(2026, 12, 31, tzinfo=timezone.utc))
     assert it["start"]["quality"] == "measured" and it["deployed"]["quality"] == "measured"
     # 10:00 first phase → 09:30 next day deploy
-    assert it["lead_s"] == {"value": 23.5 * 3600, "quality": "measured"}
+    assert it["lead_s"] == {"value": 23.5 * 3600, "quality": "measured", "endpoint": "deploy"}
     # work: plan 1 h + execute 3 h + review 1 h; the rest waited
     assert it["work_s"]["value"] == 5 * 3600 and it["wait_s"]["value"] == 18.5 * 3600
     assert it["owner_decisions"]["value"] == 1  # the steward's line is no owner effort
@@ -451,7 +451,7 @@ def test_flow_says_what_is_missing_instead_of_guessing(render, tmp_path):
     m = _flow_module(out)
     [it] = m.flow_items(out, issue=12)
     assert it["merged"]["quality"] == "missing" and it["deployed"]["quality"] == "missing"
-    assert it["lead_s"] == {"value": None, "quality": "missing"}
+    assert it["lead_s"] == {"value": None, "quality": "missing", "endpoint": "merge"}
     assert it["work_s"]["quality"] == "estimated"  # phases started, none reported an end
     assert it["escapes"]["value"] is None
 
@@ -461,7 +461,7 @@ def test_flow_cli_prints_the_issue_and_the_honest_ceiling(render, tmp_path):
     r = subprocess.run([sys.executable, str(out / "scripts/process/process_kpis.py"), "flow"],
                        cwd=out, capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
-    assert "#12: lead 23.5 h [measured] (work 5.0 h, wait 18.5 h)" in r.stdout, r.stdout
+    assert "#12: lead 23.5 h to deploy [measured] (work 5.0 h, wait 18.5 h)" in r.stdout, r.stdout
     assert "recovery time: not measured" in r.stdout and "confidence: low" in r.stdout
     j = subprocess.run([sys.executable, str(out / "scripts/process/process_kpis.py"), "flow", "--json",
                         "--issue", "12"], cwd=out, capture_output=True, text=True)
@@ -567,3 +567,26 @@ def test_one_grammar_for_the_regression_trailer(render, tmp_path):
     assert pg.regression_refs("Regression-of: #12 (reported in #20)") == []  # not a trailer: counts nowhere
     # the train strips every trailer-key line, well-formed or not; only well-formed ones count as escapes
     assert pg.REGRESSION_LINE.sub("", "a #20\nRegression-of: #12.\n") == "a #20\n\n"
+
+
+def test_flow_says_which_endpoint_and_how_complete_the_tokens_are(render, tmp_path):
+    import json
+    out = _flow_repo(render, tmp_path)
+    rows = (out / ".git/process-train/phases.jsonl")
+    row = json.loads(rows.read_text())
+    row["deployed"] = False
+    rows.write_text(json.dumps(row) + "\n")
+    m = _flow_module(out)
+    [it] = m.flow_items(out, issue=12)
+    assert it["deployed"]["quality"] == "failed"
+    assert it["lead_s"]["endpoint"] == "merge" and it["lead_s"]["quality"] == "estimated"
+    assert it["escapes"]["from"] == "merge" and it["escapes"]["quality"] == "estimated"
+    wt = tmp_path / "wt"
+    (wt / "t").mkdir(parents=True)
+    (wt / "t" / "a.jsonl").write_text('{"usage": {"input_tokens": 100, "output_tokens": 10}}\n')
+    (wt / "t" / "b.jsonl").write_text('{"usage": {"output_tokens": 50}}\n')
+    (out / ".git/process-dispatch/12-faster.json").write_text(json.dumps({"issue": 12, "worktree": str(wt)}))
+    (out / "docs/process/model-policy.local.json").write_text(json.dumps({"transcripts": "{worktree}/t/*.jsonl"}))
+    [it] = m.flow_items(out, issue=12)
+    assert it["tokens"]["coverage"] == {"input_tokens": 1, "output_tokens": 2}
+    assert it["tokens"]["quality"] == "estimated"  # input is a partial sum over two sessions

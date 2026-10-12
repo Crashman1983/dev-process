@@ -825,9 +825,18 @@ def flow_items(root: Path, *, issue: int | None = None, branch: str | None = Non
             if row.get("deployed") is True and ended:
                 deployed = {"value": ended, "quality": "measured"}
                 break
-            if row.get("deployed") is None and deployed["quality"] == "missing":
+            if row.get("deployed") is False:
+                deployed = {"value": None, "quality": "failed"}  # a later train may still deploy it
+            elif row.get("deployed") is None and deployed["quality"] == "missing":
                 deployed = {"value": None, "quality": "not configured"}
-        end = deployed if deployed["value"] else merged
+        # the endpoint is said, never swapped silently: planning-to-deploy is the
+        # measure; a project without a deploy step ends at the merge by design, a
+        # missing or failed deploy makes a merge-ended lead time an estimate
+        if deployed["value"]:
+            end, endpoint = deployed, "deploy"
+        else:
+            end, endpoint = merged, "merge"
+        merge_by_design = deployed["quality"] == "not configured"
         # working time is the union of phase intervals: a re-dispatched phase
         # overlaps its first attempt and must not count twice
         spans = []
@@ -859,28 +868,39 @@ def flow_items(root: Path, *, issue: int | None = None, branch: str | None = Non
             wait = max(0.0, lead - work)
         quality = ("missing" if lead is None else
                    "measured" if start["quality"] == end["quality"] == "measured" and not unended
+                   and (endpoint == "deploy" or merge_by_design)
                    else "estimated")
+        # escapes count from the moment users had the change: the deploy, else the merge
         escapes = None
-        if merged["value"]:
-            horizon = merged["value"] + timedelta(days=follow_up_days)
-            escapes = sum(1 for t in regressions.get(n, []) if merged["value"] <= t <= horizon)
+        window_from = deployed["value"] or merged["value"]
+        if window_from:
+            horizon = window_from + timedelta(days=follow_up_days)
+            escapes = sum(1 for t in regressions.get(n, []) if window_from <= t <= horizon)
             window_open = now < horizon
         else:
             window_open = None
-        tokens = _dispatch.issue_token_usage(root, n) if _dispatch else None
+        coverage = _dispatch.issue_token_coverage(root, n) if _dispatch else None
+        tokens = coverage[:2] if coverage else None
+        # a field some sessions lack is a partial sum: estimated, never measured
+        partial = bool(coverage) and any(c < coverage[1] for c in coverage[2].values())
         items.append({
             "issue": n, "branches": sorted(bs),
             "start": start, "merged": merged, "deployed": deployed,
-            "lead_s": {"value": lead, "quality": quality},
+            "lead_s": {"value": lead, "quality": quality, "endpoint": endpoint},
             "work_s": {"value": work if own_starts else None,
                        "quality": "missing" if not own_starts else ("estimated" if unended else "measured")},
             "wait_s": {"value": wait, "quality": quality},
             "tokens": {"value": tokens[0] if tokens and tokens[0] else None,
                        "sessions": tokens[1] if tokens else 0,
-                       "quality": "measured" if tokens and tokens[0] else "missing"},
+                       "coverage": coverage[2] if coverage else {},
+                       "quality": ("missing" if not (tokens and tokens[0]) else
+                                   "estimated" if partial else "measured")},
             "owner_decisions": {"value": decisions.get(n, 0), "quality": "proxy"},
-            "escapes": {"value": escapes, "quality": "measured" if escapes is not None else "missing",
-                        "window_open": window_open, "days": follow_up_days},
+            "escapes": {"value": escapes,
+                        "quality": ("missing" if escapes is None else
+                                    "measured" if deployed["value"] or merge_by_design else "estimated"),
+                        "window_open": window_open, "days": follow_up_days,
+                        "from": "deploy" if deployed["value"] else "merge"},
             "process_version": {"value": _process_version(root, integration, merged["value"]),
                                 "quality": "measured" if merged["value"] else "missing"},
         })
@@ -921,7 +941,8 @@ def flow(root: Path | None = None, *, issue: int | None = None, as_json: bool = 
         esc = it["escapes"]
         esc_text = ("escapes not measurable (no merge)" if esc["value"] is None else
                     f"escapes {esc['value']} in {esc['days']} d" + (" (window still open)" if esc["window_open"] else ""))
-        print(f"  #{it['issue']}: lead {_hours(it['lead_s']['value'])} [{it['lead_s']['quality']}] "
+        print(f"  #{it['issue']}: lead {_hours(it['lead_s']['value'])} to {it['lead_s']['endpoint']} "
+              f"[{it['lead_s']['quality']}] "
               f"(work {_hours(it['work_s']['value'])}, wait {_hours(it['wait_s']['value'])}) · "
               f"start {it['start']['quality']} · merge {it['merged']['quality']} · "
               f"deploy {it['deployed']['quality']} · {_token_text(it['tokens'])} · "
