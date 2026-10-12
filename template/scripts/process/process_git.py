@@ -1,7 +1,20 @@
 """Environment for git readers: judge the objects the push actually carries."""
 import os
+import re
 import subprocess
 from pathlib import Path
+
+# `Regression-of: #N` (commits.md): a fix names the issue whose merged change
+# it repairs. One grammar for both readers — the train must not take #N for
+# an issue of the fix's branch, the telemetry flow counts it as an escape of
+# #N. Only a well-formed trailer line counts: refs and commas, nothing else.
+_REF = r"(?:#\d+|[\w.-]+/[\w.-]+#\d+)"
+REGRESSION_TRAILER = re.compile(rf"(?im)^[ \t]*Regression-of:[ \t]*({_REF}(?:[ \t]*,[ \t]*{_REF})*)[ \t]*$")
+
+
+def regression_refs(body: str) -> list[int]:
+    """The issue numbers a commit message's `Regression-of:` trailers name."""
+    return [int(n) for m in REGRESSION_TRAILER.finditer(body) for n in re.findall(r"#(\d+)", m.group(1))]
 
 
 def git_environment(extra=None):

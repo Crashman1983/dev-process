@@ -54,7 +54,7 @@ def _repo(render, tmp_path):
         _commit(out, {"src/a.py": f"{i + 1}", "src/größe.py": f"{i + 1}"}, f"feat: step {i}")
         _commit(out, {"src/c.py": f"{i + 1}"}, f"feat: c {i}")
     _commit(out, {".process-work/plans/2026-10-01-a.md":
-                  "# Plan\n\nissue: #4\ntier: 2\n\nTouches `src/a.py`, `.github/ci.yml` and src/c.py.\n"}, "docs: plan")
+                  "# Plan\n\nissue: #4\ntier: 2\n\nTouches ./src/a.py, `.github/ci.yml` and ...src/c.py.\n"}, "docs: plan")
     return out
 
 

@@ -536,3 +536,33 @@ def test_flow_reads_naive_dispatch_stamps_as_local_time(render, tmp_path, monkey
     finally:
         monkeypatch.delenv("TZ")
         time.tzset()
+
+
+def test_flow_gives_a_reused_name_its_own_window_and_says_it_is_estimated(render, tmp_path):
+    out = _flow_repo(render, tmp_path)
+    _report(out, "2026-10-08T10:00:00", "planned", "12-faster", 30)
+    _report(out, "2026-10-09T10:00:00", "done", "12-faster", 30)
+    items = {it["issue"]: it for it in _flow_module(out).flow_items(out)}
+    later = items[30]
+    assert later["start"]["value"].day == 8 and later["merged"]["value"].day == 9
+    assert {later[k]["quality"] for k in ("start", "merged")} == {"estimated"}
+    assert later["deployed"]["quality"] != "measured"  # issue 12's deploy is not issue 30's
+
+
+def test_flow_finds_an_issue_known_only_from_the_trains_merge(render, tmp_path):
+    out = _flow_repo(render, tmp_path)
+    _report(out, "2026-10-06T10:00:00", "done", "40-thing", None)
+    items = {it["issue"]: it for it in _flow_module(out).flow_items(out)}
+    assert items[40]["branches"] == ["40-thing"] and items[40]["merged"]["quality"] == "measured"
+
+
+def test_one_grammar_for_the_regression_trailer(render, tmp_path):
+    out = _render(render, tmp_path)
+    sys.path.insert(0, str(out / "scripts/process"))
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("pg_t", out / "scripts/process/process_git.py")
+    pg = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(pg)
+    assert pg.regression_refs("fix: x\n\nRegression-of: #12, acme/app#7\nregression-of:#3") == [12, 7, 3]
+    assert pg.regression_refs("Regression-of: #12 (reported in #20)") == []  # not a trailer: counts nowhere
+    assert pg.REGRESSION_TRAILER.sub("", "a #20\nRegression-of: #12\n") == "a #20\n\n"

@@ -631,7 +631,6 @@ _FOLLOW_UP_DAYS = 30  # escapes count this long after the merge (mandate: follow
 _PHASE_LOG = re.compile(r"^(?P<branch>.+)-(?P<phase>brainstorm|plan|execute|review)-(?P<ts>\d{8}-\d{6})\.log$")
 _PHASE_ENDS = {"brainstorm": {"planned", "blocked", "idle"}, "plan": {"planned", "blocked"},
                "execute": {"pushed", "blocked"}, "review": {"review-pass", "blocked"}}
-_REGRESSION_OF = re.compile(r"^\s*Regression-of:\s*(.+)$", re.IGNORECASE | re.MULTILINE)
 _ANSWERS_COMMIT = re.compile(r"^_commit:\s*['\"]?([^'\"\s]+)", re.MULTILINE)
 
 
@@ -690,8 +689,9 @@ def _train_rows(common: Path | None) -> list[dict]:
 
 
 def _regressions(root: Path, branch: str) -> dict[int, list[datetime]]:
-    """issue → commit times of the fixes that name it in a `Regression-of:` trailer."""
-    import check_review as _review  # noqa: PLC0415 — the issue-ref parser's owner
+    """issue → commit times of the fixes that name it in a `Regression-of:` trailer
+    (process_git owns the grammar; the train reads the same)."""
+    from process_git import regression_refs  # noqa: PLC0415
 
     r = subprocess.run(["git", "-C", str(root), "log", branch, "-z", "--format=%ct%x01%B"],
                        capture_output=True)
@@ -703,14 +703,8 @@ def _regressions(root: Path, branch: str) -> dict[int, list[datetime]]:
         if not sep or not ct.isdigit():
             continue
         when = datetime.fromtimestamp(int(ct), tz=timezone.utc)
-        for m in _REGRESSION_OF.finditer(body):
-            for tok in re.split(r"[,\s]+", m.group(1).strip()):
-                if tok.lstrip("#").isdigit():
-                    out[int(tok.lstrip("#"))].append(when)
-                else:
-                    parsed = _review.parse_issue_ref(tok) if tok else None
-                    if parsed is not None:
-                        out[parsed[1]].append(when)
+        for n in regression_refs(body):
+            out[n].append(when)
     return out
 
 
@@ -766,12 +760,18 @@ def flow_items(root: Path, *, issue: int | None = None, branch: str | None = Non
     # `Regression-of: #12` in a fix for #20 would file the fix under #12), else
     # the dispatch log's branch name. The integration branch carries no issue.
     integration_names = {integration, "main", "master", "HEAD"}
+    reports = [r for r in reports if isinstance(r.get("worker") or r.get("branch"), str)]
     branches_of: dict[int, set[str]] = defaultdict(set)
     for rep in reports:
         b = rep.get("worker") or rep.get("branch")
-        if b and b not in integration_names and rep.get("state") != "done" \
-                and str(rep.get("issue") or "").isdigit():
+        if b in integration_names:
+            continue
+        if rep.get("state") != "done" and str(rep.get("issue") or "").isdigit():
             branches_of[int(rep["issue"])].add(b)
+        elif rep.get("state") == "done":
+            n = _review.branch_issue(b)  # a merge known only from the train: the name says whose
+            if n and str(n).isdigit():
+                branches_of[int(n)].add(b)
     for st in starts:
         n = _review.branch_issue(st["branch"])
         if n and str(n).isdigit() and st["branch"] not in integration_names:
@@ -792,6 +792,17 @@ def flow_items(root: Path, *, issue: int | None = None, branch: str | None = Non
                        if (r.get("worker") in bs or r.get("branch") in bs)
                        and (t := _aware(r.get("ts"))) is not None), key=lambda rt: rt[1])
         all_starts = sorted((s for s in starts if s["branch"] in bs), key=lambda s: s["ts"])
+        reused = bool(bs & shared)
+        if reused:
+            # a name that carried another issue: this issue's window opens after
+            # the last merge on that name before its own first report
+            own_first = next((t for r, t in mine if str(r.get("issue")) == str(n) and r.get("state") != "done"),
+                             None)
+            prev = max((t for r, t in mine if r.get("state") == "done" and own_first and t < own_first),
+                       default=None)
+            if prev is not None:
+                mine = [(r, t) for r, t in mine if t > prev]
+                all_starts = [st for st in all_starts if st["ts"] > prev]
         first = all_starts[0]["ts"] if all_starts else (mine[0][1] if mine else None)
         # the first merge after the issue began closes it: a reused branch name
         # later carries another issue's work and merge
@@ -837,7 +848,11 @@ def flow_items(root: Path, *, issue: int | None = None, branch: str | None = Non
             if b > a:
                 work += (b - a).total_seconds()
             last_end = b if last_end is None else max(last_end, b)
-        unended += bool(bs & shared)  # a shared branch name: attribution is an estimate
+        unended += reused  # a shared branch name: attribution is an estimate
+        if reused:
+            for field in (start, merged, deployed):
+                if field["quality"] == "measured":
+                    field["quality"] = "estimated"
         lead = wait = None
         if start["value"] and end["value"]:
             lead = (end["value"] - start["value"]).total_seconds()

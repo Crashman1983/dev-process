@@ -53,7 +53,7 @@ _MAX_FILES = 20         # a commit touching more files says little about pairs (
 _MIN_SUPPORT = 3        # times changed together before a pair is an edge
 _MIN_CONFIDENCE = 0.5   # share of the rarer file's commits that carried the partner
 _SOURCE_TIMEOUT = 120
-_PATH_TOKEN = re.compile(r"[\w.][\w./@+-]*")  # a leading dot: `.github/workflows/ci.yml`
+_PATH_TOKEN = re.compile(r"(?:\.(?=\w))?\w[\w./@+-]*")  # a leading dot only as in `.github/…`
 
 
 def _git(root: Path, *args: str) -> bytes | None:
@@ -90,7 +90,9 @@ def plan_edges(root: Path, at: str, files: set[str]) -> list[dict]:
         for n in sorted(set(_review.declared_issue_numbers(body))):
             out.append(_edge(f"issue:#{n}", f"plan:{rel}", "plans", rel, at, "declared"))
         # a path is named when it stands as a whole token — `a.py` inside `data.py` is not
-        for path in sorted({t.rstrip(".,;:") for t in _PATH_TOKEN.findall(body)} & files):
+        tokens = {t.rstrip(".,;:") for t in _PATH_TOKEN.findall(body)}
+        tokens |= {t.lstrip(".") for t in tokens}  # `...src/a.py` names `src/a.py`; `.github` stays
+        for path in sorted(tokens & files):
             out.append(_edge(f"plan:{rel}", f"file:{path}", "names", rel, at, "declared"))
     return out
 

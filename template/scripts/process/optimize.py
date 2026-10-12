@@ -25,29 +25,43 @@ rejected. `move` checks what a state needs before it writes it:
   `until` within the mandate's `max_pilot_days`, both budgets, and a
   `REVIEWED … pass` line on exactly these terms by someone other than the
   implementer (and no block on them). It writes `FROZEN <date> <who>:
-  terms=<hash>` — from then on Trial, Limits, Criteria, `select`, `until`,
-  the budgets, `flag` and `mechanism` must not change: an experiment does
-  not ease its own criteria. With git history, `check` compares every
-  committed version whose Log carries FROZEN, across renames, so a
-  rewritten hash does not help.
-- `adopted` is the owner's, or the steward's where the mandate's
-  `steward_may` names `adopt`; never the implementer's.
+  terms=<hash> max_pilot_days=<n> steward_may=<rights>`.
+- `adopted` is the owner's, or the steward's where the mandate (as frozen)
+  names `adopt` in `steward_may`; never the implementer's.
 - `stopped` and `evaluating` are never refused (the safe direction), and
   `rolled-back` stays open even when the record or the mandate is broken.
 
+**The freeze is byte-exact.** The terms are everything above the line
+`## Result` — the header, Observation, Hypothesis, Placement, Trial,
+Limits, Criteria, Generality, Rollback — except the header fields that
+must change (`state`, `spent-tokens`, `spent-hours`, `superseded-by`).
+No Markdown reading decides what is frozen: any change above `## Result`
+breaks the freeze. Below it only `## Result`, `## Decision` and `## Log`
+may stand as headings, and the Log and the header hold plain lines only
+(no comment, no fence, no indentation) — machine-written lines nothing can
+hide. An experiment does not ease its own criteria.
+
 One set of rules: `move` judges the record as it would be written with the
-same `problems()` that `check` and `active` apply afterwards, so a
-hand-written state, log line or freeze gains nothing. Only what a reader
-sees counts — HTML comments and fenced code are removed before parsing, a
-repeated heading or header field is a problem, and names are compared
-without case or spacing.
+same `problems()` that `check` and `active` apply afterwards — who started
+it, who reviewed which terms (only reviews before the freeze count; a block
+is not outvoted), the start not dated in the future, `until` within the
+frozen mandate and, while it runs, within the current one. Names are
+compared without case or spacing.
+
+**History.** With git, one pass over the records directory indexes every
+committed version by its OPT number: every version whose Log carried
+FROZEN must carry today's terms, every REVIEWED line ever committed on the
+frozen terms must still be there, and a record that ran must not vanish —
+across renames and merges. What a file check cannot see: rewritten history
+(amend, rebase, force-push) and a shallow clone; and names are self-declared
+(the owner's sample is the control for that).
 
 `active` is how a mechanism under trial asks whether to behave the new
-way: exactly one `piloting` record carries the flag, its terms are intact,
-today is not past `until`, and the work matches `select`
-(`issues=12,15 tiers=1,2 classes=mechanical parity=odd`, or `all`; a
-constraint the caller cannot answer does not match). Stopping an
-experiment is a state change; every doubt reads as inactive.
+way: exactly one `piloting` record carries the flag, nothing above is
+wrong with it or with the records' history, today is not past `until`, and
+the work matches `select` (`issues=12,15 tiers=1,2 classes=mechanical
+parity=odd`, or `all`; a constraint the caller cannot answer does not
+match). Every doubt reads as inactive.
 
 Not a gate (yet): the rule is enforced where it is used — `active` turns a
 tampered experiment off, `move` refuses. A project may register `check` in
@@ -80,9 +94,10 @@ MOVES = {
     "stopped": ("evaluating", "rolled-back"),
     "evaluating": ("adopted", "rejected", "rolled-back", "superseded"),
 }
+# turning an experiment off is never blocked — not by a broken record, not by
+# a broken mandate, not by a missing right: it is the safe direction
+SAFE_MOVES = ("stopped", "evaluating")
 PLACEMENTS = ("core", "module", "config", "project")
-SECTIONS = ("Observation", "Hypothesis", "Placement", "Trial", "Limits", "Criteria",
-            "Generality", "Rollback", "Result", "Decision", "Log")
 # what each state needs filled, cumulative along the path
 NEEDS = {
     "designed": ("Observation", "Hypothesis", "Placement"),
@@ -92,23 +107,31 @@ NEEDS = {
     "rolled-back": ("Decision",),
     "superseded": ("Decision",),
 }
-# the frozen terms: what an experiment must not change once it runs
-TERM_SECTIONS = ("Trial", "Limits", "Criteria")
-TERM_FIELDS = ("mechanism", "flag", "select", "until", "budget-tokens", "budget-hours")
+# header fields that change while the terms stay frozen
+MUTABLE_FIELDS = ("state", "spent-tokens", "spent-hours", "superseded-by")
+RESULT_LINE = "## Result"
+TAIL_HEADINGS = ("Result", "Decision", "Log")
 SELECT_KEYS = ("issues", "tiers", "classes", "parity")
+RIGHTS = ("start", "roll-back", "adopt", "reject")
 # stopping is nobody's right to withhold (the safe direction): not in steward_may
 MANDATE_DEFAULTS = {"max_pilot_days": 30, "steward_may": ["start", "roll-back"]}
 
-FIELD = re.compile(r"^\s*(?:[-*+]\s+)?([a-z][a-z-]*)\s*:\s*(.*?)\s*$")
+FIELD = re.compile(r"^(?:[-*+]\s+)?([a-z][a-z-]*)\s*:\s*(.*?)\s*$")
 HEADING = re.compile(r"^##\s+(.+?)\s*$", re.MULTILINE)
-LOG_LINE = re.compile(r"^\s*[-*+]\s+(\d{4}-\d{2}-\d{2})\s+([^:\s][^:]*?):\s*([a-z-]+)\b(.*)$")
-REVIEWED = re.compile(r"^\s*[-*+]\s+REVIEWED\s+(\d{4}-\d{2}-\d{2})\s+([^:]+?):\s*(pass|block)\s+"
-                      r"terms=([0-9a-f]{12})\b(.*)$", re.MULTILINE)
-FROZEN = re.compile(r"^\s*[-*+]\s+FROZEN\s+(\d{4}-\d{2}-\d{2})\s+([^:]+?):\s*terms=([0-9a-f]{12})\s*$",
-                    re.MULTILINE)
+# a line a Markdown reader may render as a heading: ATX (indented up to three
+# spaces, any level), an HTML heading, or a setext underline
+ATX = re.compile(r"^ {0,3}#{1,6}(?:\s|$)")
+HTML_HEADING = re.compile(r"<h[1-6][\s>]", re.IGNORECASE)
+SETEXT = re.compile(r"^ {0,3}(?:=+|-+)\s*$")
+LOG_LINE = re.compile(r"^- (\d{4}-\d{2}-\d{2}) ([^:\s][^:]*?): ([a-z-]+)\b(.*)$")
+REVIEWED = re.compile(r"^- REVIEWED (\d{4}-\d{2}-\d{2}) ([^:]+?): (pass|block) terms=([0-9a-f]{12})\b(.*)$")
+FROZEN = re.compile(r"^- FROZEN (\d{4}-\d{2}-\d{2}) ([^:]+?): terms=([0-9a-f]{12})"
+                    r"(?: max_pilot_days=(\d+))?(?: steward_may=([a-z,-]*))?\s*$")
 PLACEHOLDER = re.compile(r"^(?:todo|tbd|…|\.\.\.|<[^>]*>|-|n/a)?$", re.IGNORECASE)
 COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
+INLINE_CODE = re.compile(r"`+[^`\n]*`+")
 NAME = re.compile(r"^OPT-(\d{4})-[a-z0-9-]+\.md$")
+UNSAFE_LINE = ("<!--", "```", "~~~")
 
 
 # --- reading -------------------------------------------------------------
@@ -121,44 +144,83 @@ def record_files(root: Path) -> list[Path]:
     return sorted(p for p in d.glob("OPT-*.md") if p.is_file()) if d.is_dir() else []
 
 
-def visible(text: str) -> tuple[str, list[str]]:
-    """The text a reader sees rendered: HTML comments and fenced code blocks
-    removed, so nothing hidden counts — not a heading, a field, a REVIEWED or
-    a FROZEN line. Returns the text and what could not be closed."""
-    issues: list[str] = []
-    out: list[str] = []
-    fence = ""
+def norm(name: str) -> str:
+    """A person or role as compared: case and spacing do not make a second person."""
+    return " ".join(str(name).casefold().split())
+
+
+def _split(text: str) -> tuple[list[str], list[str] | None]:
+    """(lines above the first `## Result` line, lines from it) — None for the
+    tail when the record has no `## Result` line yet."""
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        if line.rstrip() == RESULT_LINE:
+            return lines[:i], lines[i:]
+    return lines, None
+
+
+def _header_end(lines: list[str]) -> int:
+    return next((i for i, line in enumerate(lines) if line.startswith("## ")), len(lines))
+
+
+def terms_text(text: str) -> str:
+    """What the freeze covers, byte for byte: everything above `## Result`
+    but the mutable header fields; trailing whitespace and line endings
+    normalised, nothing else."""
+    above, _tail = _split(text)
+    end = _header_end(above)
+    kept = []
+    for i, line in enumerate(above):
+        if i < end:
+            m = FIELD.match(line)
+            if m and m.group(1) in MUTABLE_FIELDS:
+                continue
+        kept.append(line.rstrip())
+    return "\n".join(kept).strip("\n")
+
+
+def terms_hash(rec_or_text) -> str:
+    text = rec_or_text["raw"] if isinstance(rec_or_text, dict) else rec_or_text
+    return hashlib.sha256(terms_text(text).encode("utf-8")).hexdigest()[:12]
+
+
+def _visible(text: str) -> str:
+    """What a reader sees of free text (for "is this section filled" only):
+    fenced blocks and comments out; inline code does not open a comment."""
+    out, fence = [], ""
     for line in text.splitlines():
-        marker = re.match(r"^ {0,3}(`{3,}|~{3,})", line)
+        marker = re.match(r"^\s*(`{3,}|~{3,})", line)
         if fence:
-            if marker and marker.group(1)[0] == fence[0] and len(marker.group(1)) >= len(fence) \
-                    and not line.strip()[len(marker.group(1)):].strip():
+            if marker and marker.group(1)[0] == fence[0] and len(marker.group(1)) >= len(fence):
                 fence = ""
             continue
         if marker:
             fence = marker.group(1)
             continue
-        out.append(line)
-    if fence:
-        issues.append("an unclosed code fence hides the rest of the record")
+        out.append(INLINE_CODE.sub("", line))
     joined = COMMENT.sub("", "\n".join(out))
-    if "<!--" in joined:
-        issues.append("an unclosed <!-- hides the rest of the record")
-        joined = joined.split("<!--", 1)[0]
-    return joined, issues
+    return joined.split("<!--", 1)[0]
+
+
+def _heading_name(line: str) -> str:
+    return norm(re.sub(r"[​-‏⁠﻿]", "", line.strip().lstrip("#").rstrip("#")))
 
 
 def parse(text: str) -> dict:
-    """{"title", "fields": {key: value}, "sections": {name: body}, "log": [...],
-    "reviews": [...], "frozen": [...], "strict": [...]} over what a reader sees
-    (`visible`). The header is every `key: value` line before the first `##`
-    heading. A repeated heading or header field is a problem (`strict`), never
-    "the last one wins": a second `## Criteria` must not carry the real terms."""
-    text, strict = visible(text)
-    head, _sep, _rest = ("\n" + text).partition("\n## ")
+    """{"raw", "title", "fields", "sections", "log", "reviews", "frozen",
+    "strict"}. The header (every line before the first `##` heading) and the
+    Log are machine-written plain lines: a comment, a fence or an indented
+    line there is a problem, never something to read around. Free-text
+    sections are judged only for being filled."""
+    strict: list[str] = []
+    above, tail = _split(text)
+    end = _header_end(above)
     title = ""
     fields: dict[str, str] = {}
-    for line in head.splitlines():
+    for line in above[:end]:
+        if any(u in line for u in UNSAFE_LINE):
+            strict.append("the header holds plain lines only — no comment, no code fence")
+            continue
         if line.startswith("# ") and not title:
             title = line[2:].strip()
             continue
@@ -168,53 +230,74 @@ def parse(text: str) -> dict:
                 strict.append(f"header field {m.group(1)}: appears twice")
             else:
                 fields[m.group(1)] = m.group(2)
+        elif line.strip() and line[:1].isspace():
+            strict.append("the header holds plain lines only — no indented line")
     sections: dict[str, str] = {}
-    marks = list(HEADING.finditer(text))
+    body_text = "\n".join(above)
+    marks = list(HEADING.finditer(body_text))
     for i, m in enumerate(marks):
-        end = marks[i + 1].start() if i + 1 < len(marks) else len(text)
-        name = m.group(1)
+        stop = marks[i + 1].start() if i + 1 < len(marks) else len(body_text)
+        name = m.group(1).strip()
         if name in sections:
             strict.append(f"## {name} appears twice")
             continue
-        sections[name] = text[m.end():end].strip("\n")
-    log_text = sections.get("Log", "")
-    log = []
-    for line in log_text.splitlines():
-        m = LOG_LINE.match(line)
-        if m and m.group(3) in STATES:
-            log.append({"date": m.group(1), "who": m.group(2).strip(), "state": m.group(3),
+        sections[name] = body_text[m.end():stop].strip("\n")
+    log_lines: list[str] = []
+    if tail is not None:
+        current = None
+        seen: set[str] = set()
+        for k, line in enumerate(tail):
+            prev = tail[k - 1] if k else ""
+            if line.startswith("## ") and line.rstrip()[3:].strip() in TAIL_HEADINGS:
+                name = line.rstrip()[3:].strip()
+                if name in seen:
+                    strict.append(f"## {name} appears twice")
+                seen.add(name)
+                current = name
+                sections.setdefault(name, "")
+                continue
+            heading_like = (ATX.match(line) or HTML_HEADING.search(line)
+                            or (SETEXT.match(line) and prev.strip() and not prev.startswith("- ")))
+            if heading_like:
+                strict.append(f"below {RESULT_LINE} only Result, Decision and Log are headings "
+                              f"(found {line.strip()[:40]!r})")
+                continue
+            if current == "Log":
+                if line.strip() and not line.startswith("- "):
+                    strict.append("the Log holds plain `- ` lines only — no indented or continued line")
+                elif any(u in line for u in UNSAFE_LINE):
+                    strict.append("the Log holds plain lines only — no comment, no code fence")
+                else:
+                    log_lines.append(line)
+            elif current:
+                sections[current] = (sections[current] + "\n" + line).strip("\n")
+    log, reviews, frozen = [], [], []
+    for pos, line in enumerate(log_lines):
+        if m := FROZEN.match(line):
+            frozen.append({"pos": pos, "date": m.group(1), "who": m.group(2).strip(), "terms": m.group(3),
+                           "max_pilot_days": int(m.group(4)) if m.group(4) else None,
+                           "steward_may": m.group(5).split(",") if m.group(5) else
+                           ([] if m.group(5) == "" else None)})
+        elif m := REVIEWED.match(line):
+            reviews.append({"pos": pos, "date": m.group(1), "who": m.group(2).strip(),
+                            "verdict": m.group(3), "terms": m.group(4)})
+        elif (m := LOG_LINE.match(line)) and m.group(3) in STATES:
+            log.append({"pos": pos, "date": m.group(1), "who": m.group(2).strip(), "state": m.group(3),
                         "rest": m.group(4).strip()})
-    reviews = [{"date": m.group(1), "who": m.group(2).strip(), "verdict": m.group(3),
-                "terms": m.group(4)} for m in REVIEWED.finditer(log_text)]
-    frozen = [{"date": m.group(1), "who": m.group(2).strip(), "terms": m.group(3)}
-              for m in FROZEN.finditer(log_text)]
-    return {"title": title, "fields": fields, "sections": sections, "log": log,
-            "reviews": reviews, "frozen": frozen, "strict": strict}
-
-
-def norm(name: str) -> str:
-    """A person or role as compared: case and spacing do not make a second person."""
-    return " ".join(str(name).casefold().split())
+    return {"raw": text, "title": title, "fields": fields, "sections": sections, "log": log,
+            "reviews": reviews, "frozen": frozen, "strict": list(dict.fromkeys(strict))}
 
 
 def filled(body: str | None) -> bool:
-    """A section counts once it says something: not empty, not only comments,
-    not only placeholders (TODO, …, <fill in>)."""
+    """A section counts once a reader sees something: not empty, not only
+    comments or fenced code, not only placeholders (TODO, …, <fill in>)."""
     if not body:
         return False
-    for line in COMMENT.sub("", body).splitlines():
+    for line in _visible(body).splitlines():
         s = line.strip().lstrip("-*+ ").strip()
         if s and not PLACEHOLDER.match(s):
             return True
     return False
-
-
-def terms_hash(rec: dict) -> str:
-    parts = [f"{k}={rec['fields'].get(k, '').strip()}" for k in TERM_FIELDS]
-    for name in TERM_SECTIONS:
-        body = rec["sections"].get(name, "")
-        parts.append(f"## {name}\n" + "\n".join(line.rstrip() for line in body.strip().splitlines()))
-    return hashlib.sha256("\n".join(parts).encode("utf-8")).hexdigest()[:12]
 
 
 def parse_select(value: str) -> dict[str, set[str]] | None:
@@ -247,10 +330,8 @@ def selects(select: dict[str, set[str]], *, issue: int | None, tier: int | None,
         return False
     if "classes" in select and (klass is None or klass not in select["classes"]):
         return False
-    if "parity" in select:
-        if issue is None or ("odd" if issue % 2 else "even") not in select["parity"]:
-            return False
-    return True
+    return not ("parity" in select and (
+        issue is None or ("odd" if issue % 2 else "even") not in select["parity"]))
 
 
 def _date(value: str) -> _dt.date | None:
@@ -288,100 +369,167 @@ def load_mandate(root: Path) -> tuple[dict | None, str | None]:
     may = out.get("steward_may")
     if not isinstance(may, list) or not all(isinstance(x, str) for x in may):
         return None, f"{MANDATE}: steward_may must be a list of strings"
-    unknown = sorted(set(may) - {"start", "roll-back", "adopt", "reject"})
+    unknown = sorted(set(may) - set(RIGHTS))
     if unknown:
         return None, f"{MANDATE}: steward_may names unknown right(s) {', '.join(unknown)}"
     return out, None
 
 
-def may_move(who: str, state: str, rec: dict, mandate: dict | None, from_state: str) -> str | None:
-    """Why `who` may not move the record to `state` (concept: decision rights);
-    None when allowed. Roles are the literal tokens `owner` and `steward`."""
+def may_move(who: str, state: str, rec: dict, steward_may: list[str], from_state: str) -> str | None:
+    """Why `who` may not move the record to `state` under the delegated
+    `steward_may` (concept: decision rights); None when allowed. Roles are
+    the literal tokens `owner` and `steward`."""
     who = norm(who)
     implementer = norm(rec["fields"].get("implementer", ""))
     if state in ("piloting", "adopted") and implementer and who == implementer:
         return f"{who} implements this change and cannot {'start' if state == 'piloting' else 'adopt'} it"
     if state in ("proposed", "designed", "stopped", "evaluating"):
         return None
-    may = (mandate or MANDATE_DEFAULTS)["steward_may"]
     right = {"piloting": "start", "adopted": "adopt", "rejected": "reject",
              "rolled-back": "roll-back", "superseded": "reject"}[state]
     if who == "owner":
         return None
     if state == "rejected" and from_state in ("proposed", "designed"):
         return None  # declining a proposal is anyone's
-    if who == "steward" and right in may:
+    if who == "steward" and right in steward_may:
         return None
     return (f"{state} needs the owner, or the steward where the mandate's steward_may names "
-            f"{right!r} (it names: {', '.join(may) or 'nothing'})")
+            f"{right!r} (it names: {', '.join(steward_may) or 'nothing'})")
 
 
-# --- judging -------------------------------------------------------------
+# --- history ---------------------------------------------------------------
 def _git(root: Path, *args: str) -> str | None:
     try:
-        r = subprocess.run(["git", "-C", str(root), *args], capture_output=True, timeout=20)
+        r = subprocess.run(["git", "-C", str(root), *args], capture_output=True, timeout=60)
     except (OSError, subprocess.TimeoutExpired):
         return None
     return r.stdout.decode("utf-8", "surrogateescape") if r.returncode == 0 else None
 
 
-def versions(root: Path, path: Path) -> list[tuple[str, str]] | None:
-    """(commit, path at that commit) for every commit that touched the record,
-    newest first, across renames; None when git cannot say (no repository,
-    an untracked file). -z: a path is read as git wrote it."""
-    try:
-        rel = path.resolve().relative_to(root.resolve()).as_posix()
-    except ValueError:
+def history_index(root: Path) -> dict[str, dict] | None:
+    """{OPT number: {"frozen": [(commit, terms, frozen date, commit date)],
+    "reviews": {(date, who, verdict, terms)}, "last": (commit, path, state)}}
+    over every committed version of every record — one pass over the
+    records directory, merges included (-m), so a rename, a renumbering or a
+    record added in a merge is seen; None when git cannot say."""
+    if _git(root, "rev-parse", "--verify", "-q", "HEAD") is None:
         return None
-    out = _git(root, "log", "--follow", "--name-status", "-z", "--format=\x01%H", "--", rel)
-    if not out:
+    out = _git(root, "log", "-m", "--name-status", "-z", "--format=\x01%H\x02%ct", "--", RECORDS)
+    if out is None:
         return None
-    found: list[tuple[str, str]] = []
+    seen: list[tuple[str, int, str]] = []  # newest first
     tokens = out.split("\0")
-    i = 0
+    i, sha, ct = 0, "", 0
     while i < len(tokens):
-        tok = tokens[i]
+        tok = tokens[i].lstrip("\n")
         if tok.startswith("\x01"):
-            sha = tok[1:]
-            status = tokens[i + 1].lstrip("\n") if i + 1 < len(tokens) else ""
-            if status[:1] in ("R", "C"):
-                found.append((sha, tokens[i + 3] if i + 3 < len(tokens) else rel))
-                i += 4
-            elif status:
-                if status[:1] != "D":
-                    found.append((sha, tokens[i + 2] if i + 2 < len(tokens) else rel))
-                i += 3
-            else:
-                i += 1
+            sha, _, stamp = tok[1:].partition("\x02")
+            ct = int(stamp) if stamp.isdigit() else 0
+            i += 1
             continue
-        i += 1
-    return found
-
-
-def history_problems(root: Path, path: Path, current: str) -> list[str]:
-    """Every committed version whose Log carries FROZEN must carry the terms the
-    record carries now — the first freeze cannot be moved, a prepared freeze
-    in an earlier commit cannot anchor the check, and a rename does not hide
-    the history. Nothing to say when git cannot tell (untracked, no repository)."""
-    out = []
-    for sha, rel in versions(root, path) or []:
-        text = _git(root, "show", f"{sha}:{rel}")
+        if not tok:
+            i += 1
+            continue
+        status = tok
+        if status[:1] in ("R", "C"):
+            path = tokens[i + 2] if i + 2 < len(tokens) else ""
+            i += 3
+        else:
+            path = tokens[i + 1] if i + 1 < len(tokens) else ""
+            i += 2
+        if status[:1] != "D" and path:
+            seen.append((sha, ct, path))
+    index: dict[str, dict] = {}
+    shown: set[tuple[str, str]] = set()
+    for sha, ct, path in seen:
+        if (sha, path) in shown:
+            continue
+        shown.add((sha, path))
+        m = NAME.match(Path(path).name)
+        if not m or not path.startswith(RECORDS + "/"):
+            continue
+        text = _git(root, "show", f"{sha}:{path}")
         if text is None:
-            out.append(f"commit {sha[:10]}: the record cannot be read back — terms not provable")
             continue
-        old = parse(text)
-        if old["frozen"] and terms_hash(old) != current:
+        rec = parse(text)
+        entry = index.setdefault(m.group(1), {"frozen": [], "reviews": set(), "last": None})
+        if entry["last"] is None:
+            entry["last"] = (sha, path, rec["fields"].get("state", ""))
+        if rec["frozen"]:
+            entry["frozen"].append((sha, terms_hash(rec), rec["frozen"][0]["date"],
+                                    _dt.datetime.fromtimestamp(ct, _dt.timezone.utc).date()))
+        entry["reviews"] |= {(r["date"], norm(r["who"]), r["verdict"], r["terms"]) for r in rec["reviews"]}
+    return index
+
+
+def history_problems(index: dict | None, path: Path, rec: dict) -> list[str]:
+    if not index:
+        return []
+    m = NAME.match(path.name)
+    entry = index.get(m.group(1)) if m else None
+    if entry is None:
+        return []
+    out = []
+    current = terms_hash(rec)
+    for sha, terms, fdate, cdate in entry["frozen"]:
+        if terms != current:
             out.append(f"terms differ from the version frozen in commit {sha[:10]} "
-                       f"(then {terms_hash(old)}, now {current}) — an experiment does not change its own criteria")
+                       f"(then {terms}, now {current}) — an experiment does not change its own criteria")
+        frozen_day = _date(fdate)
+        if frozen_day and frozen_day > cdate + _dt.timedelta(days=1):
+            out.append(f"FROZEN {fdate} was committed on {cdate} — a start is not dated ahead")
+    if rec["frozen"]:
+        terms = rec["frozen"][0]["terms"]
+        now = {(r["date"], norm(r["who"]), r["verdict"], r["terms"]) for r in rec["reviews"]}
+        gone = sorted(r for r in entry["reviews"] if r[3] == terms and r not in now)
+        for date, who, verdict, _t in gone:
+            out.append(f"the committed REVIEWED {verdict} by {who} ({date}) on the frozen terms is gone")
+    return list(dict.fromkeys(out))
+
+
+def vanished(index: dict | None, parsed: dict[Path, dict]) -> list[str]:
+    """A record that ran (a committed version carried FROZEN) must still exist."""
+    if not index:
+        return []
+    present = {NAME.match(p.name).group(1) for p in parsed if NAME.match(p.name)}
+    return [f"OPT-{num} ran (frozen in commit {entry['frozen'][-1][0][:10]}) and is gone — "
+            f"records are never deleted; every running experiment is off"
+            for num, entry in sorted(index.items()) if entry["frozen"] and num not in present]
+
+
+# --- judging -------------------------------------------------------------
+def _reached(state: str, rec: dict) -> list[str]:
+    """The states a record in `state` has passed through (for what it must carry):
+    a rejected proposal never ran; a rejected trial did, and keeps its terms."""
+    if state == "proposed":
+        return ["proposed"]
+    if state == "designed":
+        return ["proposed", "designed"]
+    if state == "rejected" and not any(e["state"] == "piloting" for e in rec["log"]):
+        return []  # the log line's reason is the decision of a proposal that never ran
+    return ["proposed", "designed", "piloting"] + ([state] if state != "piloting" else [])
+
+
+def _pilot_terms(rec: dict) -> list[str]:
+    f = rec["fields"]
+    out = []
+    if parse_select(f.get("select", "")) is None:
+        out.append("select: missing or malformed (issues=… tiers=… classes=… parity=odd|even, or all)")
+    if _date(f.get("until", "")) is None:
+        out.append("until: missing or not YYYY-MM-DD")
+    for key in ("budget-tokens", "budget-hours"):
+        if _number(f.get(key)) is None:
+            out.append(f"{key}: missing or not a positive number")
     return out
 
 
 def problems(root: Path, path: Path, rec: dict, mandate: dict | None, *,
-             history: bool = True) -> list[str]:
+             history: dict | None = None, today: _dt.date | None = None) -> list[str]:
     """Everything wrong with one record, re-derived from the record itself —
     every rule `move` checks when it writes a transition is checked again here,
     so a hand-written state, log line or freeze gains nothing."""
-    out: list[str] = list(rec.get("strict", []))
+    today = today or _dt.date.today()
+    out: list[str] = list(rec["strict"])
     f = rec["fields"]
     if not NAME.match(path.name):
         out.append("file name must be OPT-NNNN-<slug>.md")
@@ -406,72 +554,66 @@ def problems(root: Path, path: Path, rec: dict, mandate: dict | None, *,
             out.append("implementer: missing — the review and the decision must know whose change it is")
     if "piloting" not in path_states and rec["frozen"]:
         out.append("a FROZEN line in a record that never ran")
+    frozen = rec["frozen"][0] if len(rec["frozen"]) == 1 else None
     if "piloting" in path_states:
         out += _pilot_terms(rec)
+        if _split(rec["raw"])[1] is None:
+            out.append(f"a record that ran needs its {RESULT_LINE} line — it bounds the frozen terms")
         h = terms_hash(rec)
-        frozen = rec["frozen"][0] if len(rec["frozen"]) == 1 else None
         if frozen is None:
             out.append(f"a record that ran needs exactly one FROZEN line (found {len(rec['frozen'])})")
-        elif frozen["terms"] != h:
-            out.append(f"terms changed after they were frozen (frozen {frozen['terms']}, now {h}) "
-                       f"— an experiment does not change its own criteria; start a new record")
-        if history:
-            out += history_problems(root, path, h)
+        else:
+            if frozen["terms"] != h:
+                out.append(f"terms changed after they were frozen (frozen {frozen['terms']}, now {h}) "
+                           f"— an experiment does not change its own criteria; start a new record")
+            if frozen["max_pilot_days"] is None or frozen["steward_may"] is None:
+                out.append("the FROZEN line carries no mandate snapshot (max_pilot_days, steward_may)")
+            if (_date(frozen["date"]) or today) > today:
+                out.append(f"FROZEN {frozen['date']} lies in the future — a start is not dated ahead")
         terms = frozen["terms"] if frozen else h
-        on_terms = [r for r in rec["reviews"] if r["terms"] == terms and norm(r["who"]) != implementer]
+        before = frozen["pos"] if frozen else len(rec["reviews"]) + len(rec["log"]) + 1
+        on_terms = [r for r in rec["reviews"]
+                    if r["terms"] == terms and norm(r["who"]) != implementer and r["pos"] < before]
         if not any(r["verdict"] == "pass" for r in on_terms):
-            out.append("no REVIEWED pass on the frozen terms by someone other than the implementer")
+            out.append("no REVIEWED pass on the frozen terms, before the freeze, by someone other than "
+                       "the implementer")
         if any(r["verdict"] == "block" for r in on_terms):
             out.append("a REVIEWED block stands on the frozen terms — a pass does not outvote it")
         started = [e for e in rec["log"] if e["state"] == "piloting"]
+        # the rights a start and a decision are judged by: the mandate as frozen;
+        # a running trial is also bound by the mandate as it is now
+        snap_may = frozen["steward_may"] if frozen and frozen["steward_may"] is not None \
+            else MANDATE_DEFAULTS["steward_may"]
+        snap_days = frozen["max_pilot_days"] if frozen and frozen["max_pilot_days"] else \
+            MANDATE_DEFAULTS["max_pilot_days"]
         if len(started) != 1:
             out.append(f"the log needs exactly one piloting line (found {len(started)})")
         else:
-            why = may_move(started[0]["who"], "piloting", rec, mandate, "designed")
-            if why:
-                out.append(f"started by {started[0]['who']}: {why}")
+            mays = [snap_may] + ([mandate["steward_may"]] if state == "piloting" and mandate else [])
+            for may in mays:
+                why = may_move(started[0]["who"], "piloting", rec, may, "designed")
+                if why:
+                    out.append(f"started by {started[0]['who']}: {why}")
+                    break
             if frozen and frozen["date"] != started[0]["date"]:
                 out.append("the FROZEN line is not dated with the start")
         until, start = _date(f.get("until", "")), _date(frozen["date"]) if frozen else None
-        limit = (mandate or MANDATE_DEFAULTS)["max_pilot_days"]
-        if until and start and (until - start).days > limit:
+        limits = [snap_days] + ([mandate["max_pilot_days"]] if state == "piloting" and mandate else [])
+        if until and start and (until - start).days > min(limits):
             out.append(f"until {until} lies {(until - start).days} days after the start — "
-                       f"beyond the mandate's max_pilot_days ({limit})")
+                       f"beyond the mandate's max_pilot_days ({min(limits)})")
+        out += history_problems(history, path, rec)
     if state in TERMINAL and rec["log"]:
         last = rec["log"][-1]
-        before = rec["log"][-2]["state"] if len(rec["log"]) > 1 else "proposed"
-        why = may_move(last["who"], state, rec, mandate, before)
+        prior = rec["log"][-2]["state"] if len(rec["log"]) > 1 else "proposed"
+        may = (frozen["steward_may"] if frozen and frozen["steward_may"] is not None
+               else (mandate or MANDATE_DEFAULTS)["steward_may"])
+        why = may_move(last["who"], state, rec, may, prior)
         if why:
             out.append(f"{state} by {last['who']}: {why}")
     if state == "superseded" and not f.get("superseded-by"):
         out.append("superseded needs superseded-by: OPT-NNNN")
-    return out
-
-
-def _reached(state: str, rec: dict) -> list[str]:
-    """The states a record in `state` has passed through (for what it must carry):
-    a rejected proposal never ran; a rejected trial did, and keeps its terms."""
-    if state == "proposed":
-        return ["proposed"]
-    if state == "designed":
-        return ["proposed", "designed"]
-    ran = state != "rejected" or any(e["state"] == "piloting" for e in rec["log"])
-    if not ran:
-        return []  # the log line's reason is the decision of a proposal that never ran
-    return ["proposed", "designed", "piloting"] + ([state] if state != "piloting" else [])
-
-
-def _pilot_terms(rec: dict) -> list[str]:
-    f = rec["fields"]
-    out = []
-    if parse_select(f.get("select", "")) is None:
-        out.append("select: missing or malformed (issues=… tiers=… classes=… parity=odd|even, or all)")
-    if _date(f.get("until", "")) is None:
-        out.append("until: missing or not YYYY-MM-DD")
-    for key in ("budget-tokens", "budget-hours"):
-        if _number(f.get(key)) is None:
-            out.append(f"{key}: missing or not a positive number")
-    return out
+    return list(dict.fromkeys(out))
 
 
 def _conflicts(parsed: dict[Path, dict]) -> dict[Path, list[str]]:
@@ -510,15 +652,18 @@ def _parsed(root: Path) -> dict[Path, dict]:
     return {p: parse(p.read_text(encoding="utf-8", errors="replace")) for p in record_files(root)}
 
 
-def check_all(root: Path, *, history: bool = True) -> tuple[dict[str, list[str]], list[str]]:
+def check_all(root: Path, *, history: bool = True,
+              today: _dt.date | None = None) -> tuple[dict[str, list[str]], list[str]]:
     """({record: problems}, repository-wide problems)."""
     mandate, mproblem = load_mandate(root)
     general = [mproblem] if mproblem else []
     parsed = _parsed(root)
+    index = history_index(root) if history else None
+    general += vanished(index, parsed)
     conflicts = _conflicts(parsed)
     per: dict[str, list[str]] = {}
     for p, rec in parsed.items():
-        probs = problems(root, p, rec, mandate, history=history) + conflicts.get(p, [])
+        probs = problems(root, p, rec, mandate, history=index, today=today) + conflicts.get(p, [])
         if rec["fields"].get("state") == "piloting" and mandate is None:
             probs.append(mproblem or f"piloting without a mandate ({MANDATE})")
         if probs:
@@ -530,8 +675,11 @@ def active(root: Path, flag: str, *, issue: int | None = None, tier: int | None 
            klass: str | None = None, today: _dt.date | None = None) -> tuple[str | None, str]:
     """(record name, why) — the record that switches `flag` on for this work,
     or None and the reason it is off. Every doubt is off: whatever `check`
-    finds in the record, or between it and another, turns it off."""
+    finds in the record, between it and another, or in the records' history
+    turns it off."""
     today = today or _dt.date.today()
+    if not filled(norm(flag)):
+        return None, "no flag named"
     mandate, mproblem = load_mandate(root)
     if mproblem or mandate is None:
         return None, mproblem or f"no mandate ({MANDATE})"
@@ -542,8 +690,12 @@ def active(root: Path, flag: str, *, issue: int | None = None, tier: int | None 
         return None, f"no piloting record carries flag {flag!r}"
     if len(hits) > 1:
         return None, f"{len(hits)} piloting records carry flag {flag!r} — ambiguous, off"
+    index = history_index(root)
+    gone = vanished(index, parsed)
+    if gone:
+        return None, gone[0]
     p, rec = hits[0]
-    probs = problems(root, p, rec, mandate) + _conflicts(parsed).get(p, [])
+    probs = problems(root, p, rec, mandate, history=index, today=today) + _conflicts(parsed).get(p, [])
     if probs:
         return None, f"{p.name}: {probs[0]}"
     until = _date(rec["fields"]["until"])
@@ -597,7 +749,8 @@ below minimum n the result is inconclusive -->
 
 ## Rollback
 <!-- 1. stop use (state → stopped turns the flag off); 2. the safe way back for
-code or data the trial already changed -->
+code or data the trial already changed. Everything above the next line is
+frozen byte for byte when the trial starts. -->
 
 ## Result
 <!-- measured against the criteria: time, tokens, interventions, escapes, upkeep;
@@ -629,6 +782,8 @@ def new(root: Path, title: str, mechanism: str, *, responsible: str, implementer
     d = records_dir(root)
     d.mkdir(parents=True, exist_ok=True)
     taken = [int(m.group(1)) for p in d.glob("OPT-*.md") if (m := NAME.match(p.name))]
+    index = history_index(root) or {}
+    taken += [int(n) for n in index]  # a number a deleted record used is not reused
     num = f"OPT-{(max(taken) + 1) if taken else 1:04d}"
     path = d / f"{num}-{_slug(title)}.md"
     path.write_text(SKELETON.format(num=num, title=title, responsible=responsible,
@@ -644,7 +799,7 @@ def _set_state(text: str, state: str) -> str:
     for i, line in enumerate(lines):
         if line.startswith("## "):
             break
-        m = FIELD.match(line)
+        m = FIELD.match(line.rstrip("\n"))
         if m and m.group(1) == "state":
             prefix = line[:line.index("state")]
             lines[i] = f"{prefix}state: {state}\n"
@@ -659,11 +814,6 @@ def _append_log(text: str, *lines: str) -> str:
     return text.rstrip("\n") + "\n" + body
 
 
-# turning an experiment off is never blocked — not by a broken record, not by
-# a broken mandate, not by a missing right: it is the safe direction
-SAFE_MOVES = ("stopped", "evaluating")
-
-
 def move(root: Path, path: Path, state: str, who: str, because: str,
          today: _dt.date | None = None) -> str | None:
     """Write the transition, or return why it is refused (nothing written).
@@ -676,9 +826,9 @@ def move(root: Path, path: Path, state: str, who: str, because: str,
     if state not in MOVES.get(current, ()):
         return f"{current} → {state} is not a transition ({current} moves to " \
                f"{', '.join(MOVES.get(current, ())) or 'nothing — it is final'})"
-    if not because.strip():
-        return "--because is required: a transition without its reason is lost on the next restart"
-    lines = [f"- {today.isoformat()} {who}: {state} — because {because.strip()}"]
+    if not because.strip() or "\n" in because:
+        return "--because is required, on one line: a transition without its reason is lost on the next restart"
+    lines = [f"- {today.isoformat()} {who.strip()}: {state} — because {because.strip()}"]
 
     def write() -> None:
         path.write_text(_append_log(_set_state(text, state), *lines), encoding="utf-8")
@@ -687,9 +837,12 @@ def move(root: Path, path: Path, state: str, who: str, because: str,
         write()
         return None
     mandate, mproblem = load_mandate(root)
+    frozen = rec["frozen"][0] if len(rec["frozen"]) == 1 else None
     if state == "rolled-back":
         # the way back must stay open even when the record or the mandate is broken
-        why = may_move(who, state, rec, None if mproblem else mandate, current)
+        may = (frozen["steward_may"] if frozen and frozen["steward_may"] is not None
+               else (mandate if mandate and not mproblem else MANDATE_DEFAULTS)["steward_may"])
+        why = may_move(who, state, rec, may, current)
         if why:
             return why
         if not filled(rec["sections"].get("Decision")):
@@ -698,23 +851,28 @@ def move(root: Path, path: Path, state: str, who: str, because: str,
         return None
     if mproblem:
         return mproblem
-    why = may_move(who, state, rec, mandate, current)
-    if why:
-        return why
     if state == "piloting":
         if mandate is None:
             return f"no mandate ({MANDATE}) — analysis needs none, a pilot does"
         until = _date(rec["fields"].get("until", ""))
         if until is not None and until < today:
             return f"until {until} is already past"
-        lines.append(f"- FROZEN {today.isoformat()} {who}: terms={terms_hash(rec)}")
+        lines.append(f"- FROZEN {today.isoformat()} {who.strip()}: terms={terms_hash(rec)} "
+                     f"max_pilot_days={mandate['max_pilot_days']} steward_may={','.join(mandate['steward_may'])}")
+    else:
+        # a decision now is judged by the mandate now, too
+        why = may_move(who, state, rec, (mandate or MANDATE_DEFAULTS)["steward_may"], current)
+        if why:
+            return why
     if state == "superseded" and not rec["fields"].get("superseded-by"):
         return "add superseded-by: OPT-NNNN (the record that continues this one) first"
     new_text = _append_log(_set_state(text, state), *lines)
     after = parse(new_text)
     parsed = _parsed(root)
     parsed[path] = after
-    probs = problems(root, path, after, mandate) + _conflicts(parsed).get(path, [])
+    index = history_index(root)
+    probs = (problems(root, path, after, mandate, history=index, today=today)
+             + _conflicts(parsed).get(path, []))
     if probs:
         return "; ".join(probs)
     path.write_text(new_text, encoding="utf-8")
@@ -732,9 +890,11 @@ def review(path: Path, who: str, verdict: str, because: str,
         return "name the implementer first — a review must know whose change it is not"
     if norm(who) == norm(rec["fields"]["implementer"]):
         return f"{who} implements this change — the review is someone else's"
-    if not because.strip():
-        return "--because is required"
-    line = f"- REVIEWED {today.isoformat()} {who}: {verdict} terms={terms_hash(rec)} — {because.strip()}"
+    if not because.strip() or "\n" in because:
+        return "--because is required, on one line"
+    if _split(text)[1] is None:
+        return f"the record needs its {RESULT_LINE} line — it bounds the terms a review covers"
+    line = f"- REVIEWED {today.isoformat()} {who.strip()}: {verdict} terms={terms_hash(rec)} — {because.strip()}"
     path.write_text(_append_log(text, line), encoding="utf-8")
     return None
 

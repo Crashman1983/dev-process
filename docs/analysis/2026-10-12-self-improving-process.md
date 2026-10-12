@@ -220,3 +220,27 @@ Ergebnis: block. Ein unabhängiger Prüfer, nicht der Implementierer, fand 1 BLO
   - Ein Zeitzonentest unter `America/New_York` tötet den Mutanten „naiv als UTC“.
   - `optimization.md` steht in der Neutralitätsprüfung der Kern-Doku.
 - **F14 `graph.local.json` überdimensioniert:** Bleibt. Das Konzept verlangt austauschbare Projektanbindungen und nennt „Projektanbindungen sind getrennt“ als Abnahmekriterium von Paket C. Ohne diese Schnittstelle müsste projektspezifische Analyse in den Kern. Der Code dafür umfasst rund 40 Zeilen ohne neue Abhängigkeit.
+
+## Refute Runde 2 — Änderungen
+
+Ergebnis: block, 1 BLOCKER, 5 MAJOR, 5 MINOR. Gemeinsame Ursache: Ein Hash über *geparste* Markdown-Abschnitte bleibt so stark wie der Parser, und eine Zeilenheuristik ist kein Markdown-Leser. Eine Setext-Überschrift, `## Criteria #`, `<h2>` oder ein Inline-Code-`<!--` trugen weiter eine zweite „Criteria“.
+
+- **R2-1 (BLOCKER) → byte-genaues Einfrieren.** Eingefroren ist alles oberhalb der Zeile `## Result`, ohne `state`, `spent-*` und `superseded-by`. Keine Markdown-Lesart entscheidet mehr, was eingefroren ist. Unterhalb von `## Result` sind nur Result, Decision und Log Überschriften; jede andere überschriftartige Zeile (ATX bis drei Leerzeichen eingerückt, Setext, `<hN>`) ist ein Fehler.
+- **R2-2 versteckter oder gelöschter Block → Kopf und Log sind reine Zeilen.** Kommentar, Fence oder eingerückte Zeile machen den Record kaputt, statt umgangen zu werden. Jede jemals committete REVIEWED-Zeile auf den eingefrorenen Bedingungen muss noch da sein. Gezählt werden nur Reviews vor der FROZEN-Zeile.
+- **R2-3 vordatierter Start:** Liegt das FROZEN-Datum in der Zukunft oder mehr als einen Tag nach dem Commit, der es einführte, ist das ein Fehler.
+- **R2-4 Historie → ein Durchlauf über das Record-Verzeichnis.** Der Durchlauf geht mit `-m` auch über Merges und indiziert jede committete Fassung nach ihrer OPT-Nummer statt nach `--follow`. Ein Record, der lief und verschwindet, schaltet jedes laufende Experiment ab. `new` vergibt eine benutzte Nummer nicht neu.
+- **R2-5 (Regression aus F4) → Mandats-Schnappschuss in der FROZEN-Zeile** (`max_pilot_days`, `steward_may`). Abgeschlossene Versuche werden danach beurteilt, laufende zusätzlich nach dem aktuellen Mandat. Ein verkleinertes Mandat macht also nichts Entschiedenes rot und lässt `evaluating` entscheidbar.
+- **R2-6 Flow, wiederverwendeter Name:** Das Fenster eines Issues beginnt nach dem letzten Merge auf dem Namen vor seinem ersten eigenen Report. Start, Merge und Deploy heißen dann `estimated`.
+- **R2-7/8:** Durch das reine Log erledigt. Inline-Code öffnet keinen Kommentar mehr.
+- **R2-9:** Ein Issue, das nur aus dem `done` des Zugs bekannt ist, wird über den Branch-Namen gefunden.
+- **R2-10:** `process_git.REGRESSION_TRAILER` ist die eine Grammatik für Zug und Flow. Nur eine wohlgeformte Trailer-Zeile (Refs und Kommas) zählt; `Regression-of: #12 (reported in #20)` ist keine.
+- **R2-11:** Ein führender Punkt im Graph-Pfad nur vor einem Wortzeichen. `./src/a.py` und `...src/a.py` nennen `src/a.py`.
+- **Nicht blockierend, erledigt:**
+  - `active ""` ist aus.
+  - Eine REVIEWED-Zeile nach FROZEN zählt nicht.
+  - `implementer` ist eingefroren, weil er im Kopf steht.
+  - Worker-Felder, die kein String sind, werden übersprungen.
+- **Nicht blockierend, bleibt (im Vertrag benannt):**
+  - Namen sind selbst erklärt.
+  - Umgeschriebene Historie und ein flacher Klon liegen außerhalb dessen, was eine Dateiprüfung sieht.
+  - Eine triviale Änderung der Bedingungen plus ein neuer Pass umgeht einen Block. Das ist sichtbar im Log, das der Owner stichprobenartig liest.

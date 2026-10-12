@@ -87,9 +87,11 @@ for the core — then it is built locally.
 
 One file per improvement: `.process-work/optimizations/OPT-NNNN-<slug>.md`,
 created by `uv run scripts/process/optimize.py new --title … --mechanism …`.
-Its header carries the machine fields, its sections the substance. Only
-what a reader sees counts: HTML comments and fenced code are ignored, a
-heading or header field that appears twice is a problem, and names are
+Its header carries the machine fields, its sections the substance. The
+header and the Log are machine-written plain lines — a comment, a code
+fence or an indented line there is a problem, never something to read
+around; below `## Result` only Result, Decision and Log stand as headings;
+a heading or header field that appears twice is a problem; names are
 compared without case or spacing (`Maintainer` is the `maintainer`).
 
 | Part | Holds |
@@ -130,16 +132,26 @@ owner.
   where the mandate allows it; never by the implementer.
 
 `check` and `active` re-derive every one of these rules from the record —
-who started it, who reviewed which terms, the mandate's limits measured
-from the `FROZEN` date — so a state, a log line or a freeze written by hand
-gains nothing. A `REVIEWED … block` on the frozen terms is not outvoted by
-a pass.
+who started it, who reviewed which terms before the freeze, the start not
+dated ahead, the mandate's limits measured from the `FROZEN` date — so a
+state, a log line or a freeze written by hand gains nothing. A
+`REVIEWED … block` on the frozen terms is not outvoted by a pass. The
+`FROZEN` line carries the mandate as it was (`max_pilot_days`,
+`steward_may`): a finished trial is judged by it, a running one also by the
+mandate as it is now, so a narrowed mandate binds what runs and leaves what
+was decided alone.
 
-**An experiment does not ease its own criteria.** From `FROZEN` on, Trial,
-Limits, Criteria, `select`, `until`, the budgets, `flag` and `mechanism`
-stay as they were. `optimize.py check` compares them with the frozen hash
-and, with git history, with every committed version whose Log carries
-`FROZEN`, across renames.
+**An experiment does not ease its own criteria.** The freeze is
+byte-exact: everything above the line `## Result` — header, Observation
+to Rollback — stays as it was, except `state`, `spent-tokens`,
+`spent-hours` and `superseded-by`. No reading of Markdown decides what is
+frozen. With git history, `optimize.py check` also indexes every committed
+version of every record by its number: each version whose Log carried
+`FROZEN` must carry today's terms, a `REVIEWED` line committed on the
+frozen terms must still be there, and a record that ran must not vanish —
+across renames, renumberings and merges. Rewritten history (amend, rebase,
+force-push) and a shallow clone are beyond what a file check sees; names
+are self-declared, and the owner's sample is the control for that.
 New criteria mean a new record that `supersedes` this one.
 
 ### Bounded use and rollback
