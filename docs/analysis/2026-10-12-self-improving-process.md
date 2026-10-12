@@ -244,3 +244,20 @@ Ergebnis: block, 1 BLOCKER, 5 MAJOR, 5 MINOR. Gemeinsame Ursache: Ein Hash über
   - Namen sind selbst erklärt.
   - Umgeschriebene Historie und ein flacher Klon liegen außerhalb dessen, was eine Dateiprüfung sieht.
   - Eine triviale Änderung der Bedingungen plus ein neuer Pass umgeht einen Block. Das ist sichtbar im Log, das der Owner stichprobenartig liest.
+
+## Refute Runde 3 — Änderungen
+
+Ergebnis: block, 2 BLOCKER, 3 MAJOR, 4 MINOR. Gemeinsame Ursache: Ein gerendertes Markdown mit HTML, Kommentaren und Fences zeigt etwas anderes, als ein zeilenweises Werkzeug liest. Außerdem durfte das Log umgeschrieben werden.
+
+- **R3-1 Block unter FROZEN verschoben, R3-3 Snapshot nachträglich geändert, R3-4 Record „entlaufen“ oder unter seiner Nummer ersetzt → das Log ist append-only.** Das Log jeder committeten Fassung muss ein Präfix des heutigen sein. Die Regel gilt für jeden Record mit Historie, gleich in welchem Zustand.
+- **R3-2 Grenze in einem Kommentar, R3-5 offener Kommentar versteckt das Log, R3-7 HTML-Überschriften → der Record ist reines Markdown.** Er enthält kein HTML, keinen Kommentar, keinen Code-Fence, und als Zeilenumbruch gilt nur `\n` bzw. `\r\n`. Damit ist die erste Zeile `## Result` beweisbar eine Überschrift, und nichts kann versteckt werden. Platzhalter sind `TODO`-Absätze statt Kommentare. Überschriften in Zitat oder Liste zählen als Überschriften. Log-Zeilen, die kein Muster treffen, sind ein Fehler.
+- **R3-6 → geprüfte veränderliche Felder.** `state` muss ein Zustand sein, `spent-*` eine Zahl, `superseded-by` muss `OPT-NNNN` lauten. Exotische Zeilentrenner werden abgelehnt; abgeschnitten werden nur ASCII-Leerzeichen und Tabs.
+- **R3-8 Fehlalarme:** Ein Setext-Unterstrich nach einem Listen- oder Zitat-Element ist keine Überschrift.
+- **R3-9 Zug:** Er entfernt wieder jede `Regression-of:`-Zeile (`process_git.REGRESSION_LINE`). Flow zählt nur wohlgeformte Zeilen (`regression_refs`).
+- **Geprüft und hält** (laut Prüfer):
+  - Verschieben, Umnummerieren oder Hinzufügen in einem Merge;
+  - ein Block, der durch einen Merge gelöscht wurde;
+  - ein zweites `## Result` oberhalb;
+  - CRLF;
+  - doppelte veränderliche Felder;
+  - ehrlicher Lebenszyklus ohne Fehlalarm, jetzt auch als Test mit CRLF.

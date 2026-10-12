@@ -565,4 +565,5 @@ def test_one_grammar_for_the_regression_trailer(render, tmp_path):
     spec.loader.exec_module(pg)
     assert pg.regression_refs("fix: x\n\nRegression-of: #12, acme/app#7\nregression-of:#3") == [12, 7, 3]
     assert pg.regression_refs("Regression-of: #12 (reported in #20)") == []  # not a trailer: counts nowhere
-    assert pg.REGRESSION_TRAILER.sub("", "a #20\nRegression-of: #12\n") == "a #20\n\n"
+    # the train strips every trailer-key line, well-formed or not; only well-formed ones count as escapes
+    assert pg.REGRESSION_LINE.sub("", "a #20\nRegression-of: #12.\n") == "a #20\n\n"

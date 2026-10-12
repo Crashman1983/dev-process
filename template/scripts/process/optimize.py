@@ -31,15 +31,18 @@ rejected. `move` checks what a state needs before it writes it:
 - `stopped` and `evaluating` are never refused (the safe direction), and
   `rolled-back` stays open even when the record or the mandate is broken.
 
-**The freeze is byte-exact.** The terms are everything above the line
-`## Result` — the header, Observation, Hypothesis, Placement, Trial,
-Limits, Criteria, Generality, Rollback — except the header fields that
-must change (`state`, `spent-tokens`, `spent-hours`, `superseded-by`).
-No Markdown reading decides what is frozen: any change above `## Result`
-breaks the freeze. Below it only `## Result`, `## Decision` and `## Log`
-may stand as headings, and the Log and the header hold plain lines only
-(no comment, no fence, no indentation) — machine-written lines nothing can
-hide. An experiment does not ease its own criteria.
+**The record is plain Markdown** — no HTML, no comment, no code fence, no
+line break but \n — so what this tool reads is what a reader sees, and the
+first line `## Result` is a heading wherever it stands.
+
+**The freeze is byte-exact.** The terms are everything above `## Result` —
+the header, Observation, Hypothesis, Placement, Trial, Limits, Criteria,
+Generality, Rollback — except the header fields that must change (`state`,
+`spent-tokens`, `spent-hours`, `superseded-by`, each checked to hold only
+its value). Any change above `## Result` breaks the freeze. Below it only
+`## Result`, `## Decision` and `## Log` are headings (also inside a quote
+or a list), and the Log holds machine-written lines only. An experiment
+does not ease its own criteria.
 
 One set of rules: `move` judges the record as it would be written with the
 same `problems()` that `check` and `active` apply afterwards — who started
@@ -49,12 +52,13 @@ frozen mandate and, while it runs, within the current one. Names are
 compared without case or spacing.
 
 **History.** With git, one pass over the records directory indexes every
-committed version by its OPT number: every version whose Log carried
-FROZEN must carry today's terms, every REVIEWED line ever committed on the
-frozen terms must still be there, and a record that ran must not vanish —
-across renames and merges. What a file check cannot see: rewritten history
-(amend, rebase, force-push) and a shallow clone; and names are self-declared
-(the owner's sample is the control for that).
+committed version by its OPT number, merges included. The Log is
+append-only — every committed version's Log is a prefix of today's, so a
+moved block, an edited FROZEN line, a record "un-run" or replaced under its
+number is seen — every committed version that ran carries today's terms,
+and a record that ran must not vanish. What a file check cannot see:
+rewritten history (amend, rebase, force-push) and a shallow clone; and names
+are self-declared (the owner's sample is the control for that).
 
 `active` is how a mechanism under trial asks whether to behave the new
 way: exactly one `piloting` record carries the flag, nothing above is
@@ -116,22 +120,32 @@ RIGHTS = ("start", "roll-back", "adopt", "reject")
 # stopping is nobody's right to withhold (the safe direction): not in steward_may
 MANDATE_DEFAULTS = {"max_pilot_days": 30, "steward_may": ["start", "roll-back"]}
 
-FIELD = re.compile(r"^(?:[-*+]\s+)?([a-z][a-z-]*)\s*:\s*(.*?)\s*$")
-HEADING = re.compile(r"^##\s+(.+?)\s*$", re.MULTILINE)
-# a line a Markdown reader may render as a heading: ATX (indented up to three
-# spaces, any level), an HTML heading, or a setext underline
-ATX = re.compile(r"^ {0,3}#{1,6}(?:\s|$)")
-HTML_HEADING = re.compile(r"<h[1-6][\s>]", re.IGNORECASE)
-SETEXT = re.compile(r"^ {0,3}(?:=+|-+)\s*$")
+FIELD = re.compile(r"^(?:[-*+][ \t]+)?([a-z][a-z-]*)[ \t]*:[ \t]*(.*?)[ \t]*$")
+HEADING = re.compile(r"^##[ \t]+(.+?)[ \t]*$", re.MULTILINE)
+# a line a Markdown reader may render as a heading, once quote and list
+# markers are peeled off: ATX (up to three spaces in) or a setext underline
+CONTAINER = re.compile(r"^[ \t]{0,3}(?:>[ \t]?|[-*+][ \t]+|\d{1,9}[.)][ \t]+)")
+ATX = re.compile(r"^ {0,3}#{1,6}(?:[ \t]|$)")
+SETEXT = re.compile(r"^ {0,3}(?:=+|-+)[ \t]*$")
 LOG_LINE = re.compile(r"^- (\d{4}-\d{2}-\d{2}) ([^:\s][^:]*?): ([a-z-]+)\b(.*)$")
 REVIEWED = re.compile(r"^- REVIEWED (\d{4}-\d{2}-\d{2}) ([^:]+?): (pass|block) terms=([0-9a-f]{12})\b(.*)$")
 FROZEN = re.compile(r"^- FROZEN (\d{4}-\d{2}-\d{2}) ([^:]+?): terms=([0-9a-f]{12})"
-                    r"(?: max_pilot_days=(\d+))?(?: steward_may=([a-z,-]*))?\s*$")
-PLACEHOLDER = re.compile(r"^(?:todo|tbd|…|\.\.\.|<[^>]*>|-|n/a)?$", re.IGNORECASE)
-COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
+                    r"(?: max_pilot_days=(\d+))?(?: steward_may=([a-z,-]*))?[ \t]*$")
+PLACEHOLDER = re.compile(r"^(?:todo\b.*|tbd\b.*|…|\.\.\.|-|n/a)?$", re.IGNORECASE)
 INLINE_CODE = re.compile(r"`+[^`\n]*`+")
+# the record is plain Markdown: no HTML (comments, tags), no code fences —
+# nothing a renderer shows differently from the text the tool reads
+HTML = re.compile(r"<(?!(?:https?|mailto):)[A-Za-z!/?]")
+FENCE = re.compile(r"^[ \t]*(?:`{3,}|~{3,})")
+# only \n (and \r\n) break a line; anything else a reader might take for a break is refused
+ODD_BREAKS = re.compile("[\v\f\x1c\x1d\x1e\x85  ]|\r(?!\n)")
 NAME = re.compile(r"^OPT-(\d{4})-[a-z0-9-]+\.md$")
-UNSAFE_LINE = ("<!--", "```", "~~~")
+MUTABLE_VALUE = {
+    "state": lambda v: v in STATES,
+    "spent-tokens": lambda v: _number(v) is not None or v == "0",
+    "spent-hours": lambda v: _number(v) is not None or v == "0",
+    "superseded-by": lambda v: re.fullmatch(r"OPT-\d{4}", v) is not None,
+}
 
 
 # --- reading -------------------------------------------------------------
@@ -149,12 +163,17 @@ def norm(name: str) -> str:
     return " ".join(str(name).casefold().split())
 
 
+def _lines(text: str) -> list[str]:
+    return text.replace("\r\n", "\n").split("\n")
+
+
 def _split(text: str) -> tuple[list[str], list[str] | None]:
     """(lines above the first `## Result` line, lines from it) — None for the
-    tail when the record has no `## Result` line yet."""
-    lines = text.splitlines()
+    tail when the record has no `## Result` line yet. In a plain record (no
+    HTML, no fence, no odd line break) that line is a heading wherever it is."""
+    lines = _lines(text)
     for i, line in enumerate(lines):
-        if line.rstrip() == RESULT_LINE:
+        if line.rstrip(" \t") == RESULT_LINE:
             return lines[:i], lines[i:]
     return lines, None
 
@@ -165,7 +184,7 @@ def _header_end(lines: list[str]) -> int:
 
 def terms_text(text: str) -> str:
     """What the freeze covers, byte for byte: everything above `## Result`
-    but the mutable header fields; trailing whitespace and line endings
+    but the mutable header fields; trailing spaces and tabs and line endings
     normalised, nothing else."""
     above, _tail = _split(text)
     end = _header_end(above)
@@ -175,7 +194,7 @@ def terms_text(text: str) -> str:
             m = FIELD.match(line)
             if m and m.group(1) in MUTABLE_FIELDS:
                 continue
-        kept.append(line.rstrip())
+        kept.append(line.rstrip(" \t"))
     return "\n".join(kept).strip("\n")
 
 
@@ -184,43 +203,40 @@ def terms_hash(rec_or_text) -> str:
     return hashlib.sha256(terms_text(text).encode("utf-8")).hexdigest()[:12]
 
 
-def _visible(text: str) -> str:
-    """What a reader sees of free text (for "is this section filled" only):
-    fenced blocks and comments out; inline code does not open a comment."""
-    out, fence = [], ""
-    for line in text.splitlines():
-        marker = re.match(r"^\s*(`{3,}|~{3,})", line)
-        if fence:
-            if marker and marker.group(1)[0] == fence[0] and len(marker.group(1)) >= len(fence):
-                fence = ""
-            continue
-        if marker:
-            fence = marker.group(1)
-            continue
-        out.append(INLINE_CODE.sub("", line))
-    joined = COMMENT.sub("", "\n".join(out))
-    return joined.split("<!--", 1)[0]
+def _peeled(line: str) -> str:
+    while True:
+        m = CONTAINER.match(line)
+        if not m:
+            return line
+        line = line[m.end():]
 
 
-def _heading_name(line: str) -> str:
-    return norm(re.sub(r"[​-‏⁠﻿]", "", line.strip().lstrip("#").rstrip("#")))
+def _plain_problems(text: str) -> list[str]:
+    out = []
+    if ODD_BREAKS.search(text):
+        out.append("only \\n or \\r\\n break a line — a lone \\r, \\v, \\f, U+2028 and kin are refused")
+    for line in _lines(text):
+        if FENCE.match(line):
+            out.append("the record is plain Markdown — no code fence")
+            break
+    for line in _lines(text):
+        if HTML.search(INLINE_CODE.sub("", line)):
+            out.append("the record is plain Markdown — no HTML, no comment (inline code is fine)")
+            break
+    return out
 
 
 def parse(text: str) -> dict:
-    """{"raw", "title", "fields", "sections", "log", "reviews", "frozen",
-    "strict"}. The header (every line before the first `##` heading) and the
-    Log are machine-written plain lines: a comment, a fence or an indented
-    line there is a problem, never something to read around. Free-text
-    sections are judged only for being filled."""
-    strict: list[str] = []
+    """{"raw", "title", "fields", "sections", "log", "log_lines", "reviews",
+    "frozen", "strict"}. A record is plain Markdown — no HTML, no comment, no
+    code fence, no odd line break — so what the tool reads is what a reader
+    sees. The header and the Log are machine-written lines."""
+    strict: list[str] = _plain_problems(text)
     above, tail = _split(text)
     end = _header_end(above)
     title = ""
     fields: dict[str, str] = {}
     for line in above[:end]:
-        if any(u in line for u in UNSAFE_LINE):
-            strict.append("the header holds plain lines only — no comment, no code fence")
-            continue
         if line.startswith("# ") and not title:
             title = line[2:].strip()
             continue
@@ -230,12 +246,15 @@ def parse(text: str) -> dict:
                 strict.append(f"header field {m.group(1)}: appears twice")
             else:
                 fields[m.group(1)] = m.group(2)
-        elif line.strip() and line[:1].isspace():
-            strict.append("the header holds plain lines only — no indented line")
+        elif line.strip():
+            strict.append(f"the header holds `key: value` lines only (found {line.strip()[:40]!r})")
+    for key, ok in MUTABLE_VALUE.items():
+        if key in fields and not ok(fields[key].strip()):
+            strict.append(f"{key}: {fields[key][:40]!r} is not a valid value — it changes outside the freeze, "
+                          f"so it carries nothing else")
     sections: dict[str, str] = {}
     body_text = "\n".join(above)
-    marks = list(HEADING.finditer(body_text))
-    for i, m in enumerate(marks):
+    for i, m in enumerate(marks := list(HEADING.finditer(body_text))):
         stop = marks[i + 1].start() if i + 1 < len(marks) else len(body_text)
         name = m.group(1).strip()
         if name in sections:
@@ -247,55 +266,60 @@ def parse(text: str) -> dict:
         current = None
         seen: set[str] = set()
         for k, line in enumerate(tail):
-            prev = tail[k - 1] if k else ""
-            if line.startswith("## ") and line.rstrip()[3:].strip() in TAIL_HEADINGS:
-                name = line.rstrip()[3:].strip()
+            prev = _peeled(tail[k - 1]) if k else ""
+            bare = line.rstrip(" \t")
+            if bare.startswith("## ") and bare[3:].strip() in TAIL_HEADINGS and bare == f"## {bare[3:].strip()}":
+                name = bare[3:].strip()
                 if name in seen:
                     strict.append(f"## {name} appears twice")
                 seen.add(name)
                 current = name
                 sections.setdefault(name, "")
                 continue
-            heading_like = (ATX.match(line) or HTML_HEADING.search(line)
-                            or (SETEXT.match(line) and prev.strip() and not prev.startswith("- ")))
-            if heading_like:
+            peeled = _peeled(line)
+            prev_is_text = bool(prev.strip()) and not CONTAINER.match(tail[k - 1]) and not SETEXT.match(prev)
+            if ATX.match(peeled) or (SETEXT.match(line) and prev_is_text):
                 strict.append(f"below {RESULT_LINE} only Result, Decision and Log are headings "
                               f"(found {line.strip()[:40]!r})")
                 continue
             if current == "Log":
-                if line.strip() and not line.startswith("- "):
-                    strict.append("the Log holds plain `- ` lines only — no indented or continued line")
-                elif any(u in line for u in UNSAFE_LINE):
-                    strict.append("the Log holds plain lines only — no comment, no code fence")
+                if not line.strip():
+                    continue
+                if FROZEN.match(line) or REVIEWED.match(line) or (
+                        (lm := LOG_LINE.match(line)) and lm.group(3) in STATES):
+                    log_lines.append(line.rstrip(" \t"))
                 else:
-                    log_lines.append(line)
+                    strict.append(f"the Log holds machine-written lines only (found {line.strip()[:40]!r})")
             elif current:
                 sections[current] = (sections[current] + "\n" + line).strip("\n")
     log, reviews, frozen = [], [], []
     for pos, line in enumerate(log_lines):
         if m := FROZEN.match(line):
             frozen.append({"pos": pos, "date": m.group(1), "who": m.group(2).strip(), "terms": m.group(3),
+                           "line": line,
                            "max_pilot_days": int(m.group(4)) if m.group(4) else None,
                            "steward_may": m.group(5).split(",") if m.group(5) else
                            ([] if m.group(5) == "" else None)})
         elif m := REVIEWED.match(line):
             reviews.append({"pos": pos, "date": m.group(1), "who": m.group(2).strip(),
                             "verdict": m.group(3), "terms": m.group(4)})
-        elif (m := LOG_LINE.match(line)) and m.group(3) in STATES:
+        elif m := LOG_LINE.match(line):
             log.append({"pos": pos, "date": m.group(1), "who": m.group(2).strip(), "state": m.group(3),
                         "rest": m.group(4).strip()})
     return {"raw": text, "title": title, "fields": fields, "sections": sections, "log": log,
-            "reviews": reviews, "frozen": frozen, "strict": list(dict.fromkeys(strict))}
+            "log_lines": log_lines, "reviews": reviews, "frozen": frozen,
+            "strict": list(dict.fromkeys(strict))}
 
 
 def filled(body: str | None) -> bool:
-    """A section counts once a reader sees something: not empty, not only
-    comments or fenced code, not only placeholders (TODO, …, <fill in>)."""
+    """A section counts once it says something: not empty, not only
+    placeholders — a paragraph that opens with TODO or TBD is one, however
+    many lines it runs."""
     if not body:
         return False
-    for line in _visible(body).splitlines():
-        s = line.strip().lstrip("-*+ ").strip()
-        if s and not PLACEHOLDER.match(s):
+    for para in re.split(r"\n[ \t]*\n", "\n".join(_lines(body))):
+        first = para.strip().splitlines()[0].strip().lstrip("-*+ ").strip() if para.strip() else ""
+        if first and not PLACEHOLDER.match(first):
             return True
     return False
 
@@ -407,9 +431,9 @@ def _git(root: Path, *args: str) -> str | None:
 
 
 def history_index(root: Path) -> dict[str, dict] | None:
-    """{OPT number: {"frozen": [(commit, terms, frozen date, commit date)],
-    "reviews": {(date, who, verdict, terms)}, "last": (commit, path, state)}}
-    over every committed version of every record — one pass over the
+    """{OPT number: {"versions": [(commit, Log lines, terms hash or None if the
+    version had not run, FROZEN date, commit date)], "last": (commit, path,
+    state)}} over every committed version of every record — one pass over the
     records directory, merges included (-m), so a rename, a renumbering or a
     record added in a merge is seen; None when git cannot say."""
     if _git(root, "rev-parse", "--verify", "-q", "HEAD") is None:
@@ -452,17 +476,20 @@ def history_index(root: Path) -> dict[str, dict] | None:
         if text is None:
             continue
         rec = parse(text)
-        entry = index.setdefault(m.group(1), {"frozen": [], "reviews": set(), "last": None})
+        entry = index.setdefault(m.group(1), {"versions": [], "last": None})
         if entry["last"] is None:
             entry["last"] = (sha, path, rec["fields"].get("state", ""))
-        if rec["frozen"]:
-            entry["frozen"].append((sha, terms_hash(rec), rec["frozen"][0]["date"],
-                                    _dt.datetime.fromtimestamp(ct, _dt.timezone.utc).date()))
-        entry["reviews"] |= {(r["date"], norm(r["who"]), r["verdict"], r["terms"]) for r in rec["reviews"]}
+        entry["versions"].append((sha, rec["log_lines"], terms_hash(rec) if rec["frozen"] else None,
+                                  rec["frozen"][0]["date"] if rec["frozen"] else None,
+                                  _dt.datetime.fromtimestamp(ct, _dt.timezone.utc).date()))
     return index
 
 
 def history_problems(index: dict | None, path: Path, rec: dict) -> list[str]:
+    """The Log is append-only and the terms stay frozen: every committed
+    version's Log is a prefix of today's, and every committed version that
+    ran carries today's terms. A moved block, an edited FROZEN line, a record
+    "un-run" or replaced under its number — all break the prefix."""
     if not index:
         return []
     m = NAME.match(path.name)
@@ -470,20 +497,18 @@ def history_problems(index: dict | None, path: Path, rec: dict) -> list[str]:
     if entry is None:
         return []
     out = []
-    current = terms_hash(rec)
-    for sha, terms, fdate, cdate in entry["frozen"]:
-        if terms != current:
+    current_terms = terms_hash(rec)
+    now = rec["log_lines"]
+    for sha, lines, terms, fdate, cdate in entry["versions"]:
+        if now[:len(lines)] != lines:
+            out.append(f"the Log is append-only — commit {sha[:10]} has lines today's Log does not "
+                       f"start with")
+        if terms is not None and terms != current_terms:
             out.append(f"terms differ from the version frozen in commit {sha[:10]} "
-                       f"(then {terms}, now {current}) — an experiment does not change its own criteria")
-        frozen_day = _date(fdate)
+                       f"(then {terms}, now {current_terms}) — an experiment does not change its own criteria")
+        frozen_day = _date(fdate) if fdate else None
         if frozen_day and frozen_day > cdate + _dt.timedelta(days=1):
             out.append(f"FROZEN {fdate} was committed on {cdate} — a start is not dated ahead")
-    if rec["frozen"]:
-        terms = rec["frozen"][0]["terms"]
-        now = {(r["date"], norm(r["who"]), r["verdict"], r["terms"]) for r in rec["reviews"]}
-        gone = sorted(r for r in entry["reviews"] if r[3] == terms and r not in now)
-        for date, who, verdict, _t in gone:
-            out.append(f"the committed REVIEWED {verdict} by {who} ({date}) on the frozen terms is gone")
     return list(dict.fromkeys(out))
 
 
@@ -492,9 +517,13 @@ def vanished(index: dict | None, parsed: dict[Path, dict]) -> list[str]:
     if not index:
         return []
     present = {NAME.match(p.name).group(1) for p in parsed if NAME.match(p.name)}
-    return [f"OPT-{num} ran (frozen in commit {entry['frozen'][-1][0][:10]}) and is gone — "
-            f"records are never deleted; every running experiment is off"
-            for num, entry in sorted(index.items()) if entry["frozen"] and num not in present]
+    out = []
+    for num, entry in sorted(index.items()):
+        ran = [v for v in entry["versions"] if v[2] is not None]
+        if ran and num not in present:
+            out.append(f"OPT-{num} ran (frozen in commit {ran[-1][0][:10]}) and is gone — "
+                       f"records are never deleted; every running experiment is off")
+    return out
 
 
 # --- judging -------------------------------------------------------------
@@ -602,7 +631,7 @@ def problems(root: Path, path: Path, rec: dict, mandate: dict | None, *,
         if until and start and (until - start).days > min(limits):
             out.append(f"until {until} lies {(until - start).days} days after the start — "
                        f"beyond the mandate's max_pilot_days ({min(limits)})")
-        out += history_problems(history, path, rec)
+    out += history_problems(history, path, rec)
     if state in TERMINAL and rec["log"]:
         last = rec["log"][-1]
         prior = rec["log"][-2]["state"] if len(rec["log"]) > 1 else "proposed"
@@ -714,50 +743,51 @@ SKELETON = """# {num}: {title}
 - responsible: {responsible}
 - implementer: {implementer}
 - mechanism: {mechanism}
-- placement: <core | module | config | project>
-- flag: <the experiment flag the mechanism asks `optimize.py active` for, if any>
-- select: <issues=… tiers=… classes=… parity=odd|even, or all>
-- until: <YYYY-MM-DD>
-- budget-tokens: <tokens the experiment may spend>
-- budget-hours: <execution hours the experiment may spend>
+- placement: TODO core, module, config or project
+- flag: TODO the experiment flag the mechanism asks `optimize.py active` for, if any
+- select: TODO issues=… tiers=… classes=… parity=odd|even, or all
+- until: TODO YYYY-MM-DD
+- budget-tokens: TODO tokens the experiment may spend
+- budget-hours: TODO execution hours the experiment may spend
 - issues: {issues}
-- upstream: <owner/repo#N of the process change, if any>
+- upstream: TODO owner/repo#N of the process change, if any
 
 ## Observation
-<!-- affected issues, what was observed, evidence and its data quality
-(measured / estimated / missing) -->
+TODO: affected issues, what was observed, evidence and its data quality
+(measured / estimated / missing).
 
 ## Hypothesis
-<!-- the suspected cause and the mechanism by which the change should help -->
+TODO: the suspected cause and the mechanism by which the change should help.
 
 ## Placement
-<!-- core | module | config | project, and why there (docs/process/optimization.md,
-"Placement") — a change good for this project can be wrong for the process core -->
+TODO: core, module, config or project, and why there (docs/process/optimization.md,
+"Placement") — a change good for this project can be wrong for the process core.
 
 ## Trial
-<!-- baseline (issues, window), process version, which work is in, exclusions -->
+TODO: baseline (issues, window), process version, which work is in, exclusions.
 
 ## Limits
-<!-- budget, duration, quality floors that must hold, stop conditions -->
+TODO: budget, duration, quality floors that must hold, stop conditions.
 
 ## Criteria
-<!-- success criteria fixed before the trial: metric, minimum n, minimum effect;
-below minimum n the result is inconclusive -->
+TODO: success criteria fixed before the trial — metric, minimum n, minimum effect;
+below minimum n the result is inconclusive.
 
 ## Generality
-<!-- supported variants affected outside this project and the checks that prove them -->
+TODO: supported variants affected outside this project and the checks that prove them.
 
 ## Rollback
-<!-- 1. stop use (state → stopped turns the flag off); 2. the safe way back for
-code or data the trial already changed. Everything above the next line is
-frozen byte for byte when the trial starts. -->
+TODO: 1. stop use (state → stopped turns the flag off); 2. the safe way back for
+code or data the trial already changed. Everything above the next heading is
+frozen byte for byte when the trial starts; the record is plain Markdown (no
+HTML, no comment, no code fence).
 
 ## Result
-<!-- measured against the criteria: time, tokens, interventions, escapes, upkeep;
-measured, estimated and missing values apart -->
+TODO: measured against the criteria — time, tokens, interventions, escapes,
+upkeep; measured, estimated and missing values apart.
 
 ## Decision
-<!-- adopt, reject, roll back, or supersede with a new record — and why -->
+TODO: adopt, reject, roll back, or supersede with a new record — and why.
 
 ## Log
 - {date} {who}: proposed — because {because}
@@ -787,15 +817,15 @@ def new(root: Path, title: str, mechanism: str, *, responsible: str, implementer
     num = f"OPT-{(max(taken) + 1) if taken else 1:04d}"
     path = d / f"{num}-{_slug(title)}.md"
     path.write_text(SKELETON.format(num=num, title=title, responsible=responsible,
-                                    implementer=implementer or "<who builds the change>",
-                                    mechanism=mechanism, issues=issues or "<#N, …>",
+                                    implementer=implementer or "TODO who builds the change",
+                                    mechanism=mechanism, issues=issues or "TODO #N, …",
                                     date=_dt.date.today().isoformat(), who=who,
                                     because=because), encoding="utf-8")
     return path
 
 
 def _set_state(text: str, state: str) -> str:
-    lines = text.splitlines(keepends=True)
+    lines = text.replace("\r\n", "\n").splitlines(keepends=True)
     for i, line in enumerate(lines):
         if line.startswith("## "):
             break
@@ -808,6 +838,7 @@ def _set_state(text: str, state: str) -> str:
 
 
 def _append_log(text: str, *lines: str) -> str:
+    text = text.replace("\r\n", "\n")
     body = "\n".join(lines) + "\n"
     if "\n## Log" not in text:
         return text.rstrip("\n") + "\n\n## Log\n" + body
