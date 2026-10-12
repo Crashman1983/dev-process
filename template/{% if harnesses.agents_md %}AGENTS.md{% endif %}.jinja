@@ -60,5 +60,8 @@ On start or restart, notify each live, remote or unknown worker once that
 the steward is back and events go there. Without a channel, use reports only.
 The protocol is in `docs/process/tower.md`.
 The steward also steers the process's improvement trials (daily:
-`uv run scripts/process/optimize.py status`); the contract is in
-`docs/process/optimization.md`.
+`uv run scripts/process/optimize.py status`, then
+`uv run scripts/process/gate_modes.py sentinel` — commit and merge any
+restore it writes at once), runs `docs/process/improvement-weekly.md` once
+a week and has a fresh session run `docs/process/improvement-monthly.md`
+once a month; the contract is in `docs/process/optimization.md`.

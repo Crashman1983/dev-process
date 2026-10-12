@@ -618,6 +618,14 @@ def test_flow_says_which_endpoint_and_how_complete_the_tokens_are(render, tmp_pa
         '{"message": {"id": "m2", "usage": {"input_tokens": 1, "output_tokens": 2}}, "requestId": "r2"}\n')
     [it] = m.flow_items(out, issue=12)
     assert it["tokens"]["value"] == {"input_tokens": 6, "output_tokens": 11} and it["tokens"]["events"] == 2
+    # a streamed message's interim count is not its final one; a running total never adds up again
+    (wt / "t" / "a.jsonl").write_text(
+        '{"message": {"id": "m1", "usage": {"input_tokens": 5, "output_tokens": 1}}, "requestId": "r1"}\n'
+        '{"message": {"id": "m1", "usage": {"input_tokens": 5, "output_tokens": 9}}, "requestId": "r1"}\n'
+        '{"info": {"last_token_usage": {"input_tokens": 3, "output_tokens": 4}, '
+        '"total_token_usage": {"input_tokens": 300, "output_tokens": 400}}}\n')
+    [it] = m.flow_items(out, issue=12)
+    assert it["tokens"]["value"] == {"input_tokens": 8, "output_tokens": 13}
     # only opaque lines: no field coverage at all is still not complete (refutation, round 3)
     (wt / "t" / "a.jsonl").write_text('garbled "input_tokens": 3, "output_tokens": 4\n')
     [it] = m.flow_items(out, issue=12)
@@ -782,3 +790,18 @@ def test_outcomes_cli_text_names_the_blind_spot_or_says_unavailable(render, tmp_
     assert m.outcomes(out) == 0
     text = capsys.readouterr().out
     assert "1 bug(s), cause and channel on 0% (target 80%) — blind spot" in text
+
+
+def test_flow_ends_at_the_merge_by_design_when_the_mandate_has_no_deploy(render, tmp_path):
+    import json
+    out = _flow_repo(render, tmp_path)
+    (out / ".git/process-train/phases.jsonl").unlink()  # merged without the train
+    m = _flow_module(out)
+    [it] = m.flow_items(out, issue=12)
+    before = it["lead_s"]["quality"]
+    (out / "docs/process/optimization.local.json").write_text(json.dumps({"deploy": False}))
+    [it] = m.flow_items(out, issue=12)
+    assert it["deployed"]["quality"] == "not configured"
+    if it["merged"]["value"] is not None:
+        assert it["lead_s"]["endpoint"] == "merge"
+        assert before == "estimated" and it["lead_s"]["quality"] == "measured"

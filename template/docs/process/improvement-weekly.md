@@ -33,6 +33,9 @@ say what you could not see.
 
 ## Steps
 
+0. **Run the sentinel** (`uv run scripts/process/gate_modes.py sentinel`).
+   A restore it writes is committed and merged first; it is the one step
+   that makes things stricter on its own.
 1. **Check last week's prognosis.** What did the chosen action promise, what
    happened? One line, honest, including "not measurable yet".
 2. **Triage a few gate blocks.** Pick 3–5 untriaged blocks from `nodes`

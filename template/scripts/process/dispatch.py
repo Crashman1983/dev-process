@@ -1206,6 +1206,9 @@ def _usage_events(data: object) -> list[dict[str, int]]:
     while stack:
         node = stack.pop()
         if isinstance(node, dict):
+            # a running total beside the per-call usage (Codex's `total_token_usage`)
+            # would count every call again
+            node = {k: v for k, v in node.items() if k != "total_token_usage"}
             got = {k: v for k, v in node.items()
                    if k in TOKEN_FIELDS and isinstance(v, int) and not isinstance(v, bool)}
             if got:
@@ -1234,9 +1237,10 @@ def issue_token_coverage(root: Path, issue: int) -> tuple[dict[str, int], int, d
     covered: dict[str, int] = {}
     events = unknown = 0
     # Claude Code writes one line per content block of an API message, each
-    # repeating the message's usage: count a message once (refutation of
-    # v2.68 P1). A line without a message id counts as its own event.
-    seen_messages: set[tuple[str, object]] = set()
+    # repeating the message's usage: count a message once, with the largest
+    # value each field reached on any of its lines (a streamed message may
+    # carry interim counts). A line without a message id is its own event.
+    messages: dict[tuple[str, object], dict[str, int]] = {}
     for f in sorted(files):
         try:
             text = Path(f).read_text(errors="ignore")
@@ -1257,15 +1261,22 @@ def issue_token_coverage(root: Path, issue: int) -> tuple[dict[str, int], int, d
             message = data.get("message") if isinstance(data, dict) else None
             mid = message.get("id") if isinstance(message, dict) else None
             if isinstance(mid, str):
-                key = (mid, data.get("requestId"))
-                if key in seen_messages:
-                    continue
-                seen_messages.add(key)
+                merged = messages.setdefault((mid, data.get("requestId")), {})
+                for event in _usage_events(data):
+                    for field, n in event.items():
+                        merged[field] = max(merged.get(field, 0), n)
+                continue
             for event in _usage_events(data):
                 events += 1
                 for field, n in event.items():
                     totals[field] = totals.get(field, 0) + n
                     covered[field] = covered.get(field, 0) + 1
+    for merged in messages.values():
+        if merged:
+            events += 1
+            for field, n in merged.items():
+                totals[field] = totals.get(field, 0) + n
+                covered[field] = covered.get(field, 0) + 1
     return totals, len(files), covered, events, unknown
 
 
