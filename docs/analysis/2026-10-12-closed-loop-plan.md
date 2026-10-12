@@ -48,6 +48,9 @@ etabliert. Dazu gilt:
 - **DECISION 2026-10-12 owner:** Ein projektseitiges Host-Skript, das
   aggregierte Betriebsdaten liefert, ist zulässig. Es liefert nur Zählwerte je
   Ereignisklasse, keine Rohlogs.
+- **DECISION 2026-10-12 owner:** Der Plan schreibt keine festen Modelle vor.
+  Jede Schleife und jede Prüfung muss mit Claude oder Codex ausführbar sein
+  (§6.7).
 
 ## 3. Grundgedanke
 
@@ -62,7 +65,7 @@ Das System hat drei Schichten:
 |---|---|---|---|
 | Messung | laufend, deterministisch | Skripte | nichts (nur lesen und berechnen) |
 | Arbeitsschleife | wöchentlich | Steward-Sitzung (LLM) | Hebel wählen, Experiment vorschlagen bzw. stoppen; innerhalb der Regeln |
-| Meta-Schleife | monatlich | frische LLM-Sitzung, bei Rahmenänderung Cross-Model | Regeln, Signale und Schleifen vorschlagen; Anwendung nach Rechte-Tabelle §7 |
+| Meta-Schleife | monatlich | frische LLM-Sitzung, bei Rahmenänderung zusätzlich eine unabhängige Prüfsitzung (§6.7) | Regeln, Signale und Schleifen vorschlagen; Anwendung nach Rechte-Tabelle §7 |
 
 Die Schichten sind getrennt, weil eine Schleife ihren eigenen Maßstab nicht
 während der Messung verschieben darf (Codex Befund 1).
@@ -203,8 +206,8 @@ Auftrag: `docs/process/improvement-monthly.md`. Die Schleife prüft:
 - **Schleifen-Register:** siehe §6.6.
 
 Sie schreibt Vorschläge als Register-Änderungen mit Prognose. Die Anwendung
-regelt §7. Ändert ein Vorschlag den **Rahmen**, prüft ihn vor der Anwendung eine
-zweite Modellfamilie. Rahmen sind:
+regelt §7. Ändert ein Vorschlag den **Rahmen**, prüft ihn vor der Anwendung
+eine unabhängige Prüfsitzung (§6.7). Rahmen sind:
 
 - die Spannen in R1;
 - die Untergrenzen R5;
@@ -282,6 +285,27 @@ Startbestand im Schleifen-Register:
 5. Kostenschleife
 6. Ergebnisschleife (O1/O2 → R4)
 
+### 6.7 Wer die Schleifen ausführt
+
+Der Plan legt kein Modell fest. Jede Schleife muss mit jedem unterstützten
+Harness laufen, mindestens mit Claude Code und Codex.
+
+- **Aufträge harness-neutral.** Die Aufträge liegen als harness-neutrale
+  Dokumente unter `docs/process/`: `improvement-weekly.md`,
+  `improvement-monthly.md` und der Prüfauftrag. Die Harness-Adapter
+  (`.claude/commands/`, `AGENTS.md`) verweisen nur darauf, wie bei den
+  übrigen Prozessbefehlen. Ergebnisse sind Dateien und Register-Befehle, keine
+  harness-spezifischen Werkzeuge.
+- **Unabhängigkeit über die Sitzung.** Eine unabhängige Prüfsitzung ist eine
+  andere Sitzung als die vorschlagende, ohne deren Gesprächsverlauf. Sie
+  bekommt nur Register, Berichte und Belege. Welches Modell und welcher
+  Harness prüfen, ist Projektkonfiguration im Mandat (`reviewers`), nicht Teil
+  des Prozesses. Eine andere Modellfamilie als der Vorschlagende ist empfohlen,
+  wo verfügbar, aber nicht vorgeschrieben.
+- **Akteur im Log.** Das Register-Log hält Harness und Modell jedes Akteurs
+  fest. So kann die Meta-Schleife Prognose-Trefferquoten je Ausführer
+  vergleichen, wenn das Projekt mehrere nutzt.
+
 ## 7. Rechte
 
 | Änderung | Steward allein | Owner |
@@ -290,7 +314,7 @@ Startbestand im Schleifen-Register:
 | Übernahme nach `pass` | nur wenn `steward_may` es erlaubt und der Evaluator gebunden ist (§8.2) | sonst |
 | Signal oder Regel innerhalb der Rahmen-Spannen | ✓, mit Prognose und `review_by`; umkehrbar | sieht es im Monatsbericht |
 | Feld/Label Eskalationsstufe 1–3 | ✓ | — |
-| Rahmen (Spannen, R5, Evaluator, diese Tabelle), Stufe 4, Gates, Tiers | — | ✓, nach Cross-Model-Prüfung |
+| Rahmen (Spannen, R5, Evaluator, diese Tabelle), Stufe 4, Gates, Tiers | — | ✓, nach unabhängiger Prüfsitzung (§6.7) |
 | Ablation geschützter Kontrollen (Sicherheit, Tier, Review-Unabhängigkeit, Abnahme) | — | nie per Optimierungsmandat |
 
 ## 8. Experimente (Korrekturen am v2.67-Lebenszyklus)
@@ -438,11 +462,6 @@ v2.68 enthält P1–P4. P5–P7 folgen als eigene Releases, sobald die Daten den
 Bedarf zeigen.
 
 ## 12. Offen
-
-**An den Owner:** Wer macht die monatliche Meta-Prüfung? Vorschlag: monatlich
-eine frische Claude-Sitzung, Astra nur bei Rahmenänderungen (§6.3). Das hält
-die Kosten klein, und die zweite Modellfamilie bleibt dort, wo sich der
-Maßstab ändert.
 
 **An die Refutation (nur der neue Teil, §4–§8):**
 
