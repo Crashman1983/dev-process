@@ -621,3 +621,34 @@ def test_flow_says_which_endpoint_and_how_complete_the_tokens_are(render, tmp_pa
     [it] = m.flow_items(out, issue=12)
     assert it["tokens"]["sessions"] == 2 and it["tokens"]["unknown_sources"] == 1
     assert it["tokens"]["quality"] == "estimated"
+
+
+def test_losses_keeps_four_measures_apart_and_never_fills_in(render, tmp_path):
+    from datetime import datetime, timezone
+    out = _flow_repo(render, tmp_path)
+    m = _flow_module(out)
+    now = datetime(2026, 12, 31, tzinfo=timezone.utc)
+    t = m.losses_table(out, days=3650, now=now)
+    assert t["issues"] == 1
+    assert t["occupancy"] == {"value": 5.0, "unit": "h", "issues": 1, "missing": 0, "quality": "measured"}
+    assert t["delay"]["value"] == 18.5 and t["delay"]["unit"] == "issue-h"
+    assert t["owner_effort"] == {"decisions": 1, "minutes": None, "quality": "proxy"}
+    assert t["tokens"] == {"value": None, "issues": 0, "missing": 1, "quality": "missing"}  # never a zero
+    assert t["proxies"]["regression_fixes"] == 1
+    assert "total" not in t and "sum" not in t  # the four are never added up
+    # outside the window: nothing to report, not zeros
+    assert m.losses_table(out, days=1, now=now)["issues"] == 0
+    # a phase without a reported end leaves occupancy estimated
+    (out / ".git/process-tower/reports.jsonl").write_text("")
+    est = m.losses_table(out, days=3650, now=now)
+    assert est["occupancy"]["quality"] == "estimated"
+
+
+def test_losses_cli_prints_each_measure_with_its_quality(render, tmp_path):
+    out = _flow_repo(render, tmp_path)
+    cli = [sys.executable, str(out / "scripts/process/process_kpis.py"), "losses", "--days", "3650"]
+    r = subprocess.run(cli, cwd=out, capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    assert "four measures, never summed" in r.stdout
+    assert "occupancy   5.0 h [measured" in r.stdout and "delay       18.5 issue-h" in r.stdout
+    assert "tokens      not measured [missing" in r.stdout
