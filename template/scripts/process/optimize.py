@@ -132,10 +132,13 @@ REVIEWED = re.compile(r"^- REVIEWED (\d{4}-\d{2}-\d{2}) ([^:]+?): (pass|block) t
 FROZEN = re.compile(r"^- FROZEN (\d{4}-\d{2}-\d{2}) ([^:]+?): terms=([0-9a-f]{12})"
                     r"(?: max_pilot_days=(\d+))?(?: steward_may=([a-z,-]*))?[ \t]*$")
 PLACEHOLDER = re.compile(r"^(?:todo\b.*|tbd\b.*|…|\.\.\.|-|n/a)?$", re.IGNORECASE)
-INLINE_CODE = re.compile(r"`+[^`\n]*`+")
 # the record is plain Markdown: no HTML (comments, tags), no code fences —
 # nothing a renderer shows differently from the text the tool reads
-HTML = re.compile(r"<(?!(?:https?|mailto):)[A-Za-z!/?]")
+# — inline code included: a renderer's code-span rules are not a line regex's,
+# so `<` before a letter, `!`, `/` or `?` is refused wherever it stands, but
+# for a URL or an e-mail autolink; link reference definitions render as nothing
+HTML = re.compile(r"<(?!(?:https?|mailto):|[^\s<>@]+@[^\s<>]+>)[A-Za-z!/?]")
+LINK_DEFINITION = re.compile(r"^ {0,3}\[[^\]]+\]:")
 FENCE = re.compile(r"^[ \t]*(?:`{3,}|~{3,})")
 # only \n (and \r\n) break a line; anything else a reader might take for a break is refused
 ODD_BREAKS = re.compile("[\v\f\x1c\x1d\x1e\x85  ]|\r(?!\n)")
@@ -220,8 +223,13 @@ def _plain_problems(text: str) -> list[str]:
             out.append("the record is plain Markdown — no code fence")
             break
     for line in _lines(text):
-        if HTML.search(INLINE_CODE.sub("", line)):
-            out.append("the record is plain Markdown — no HTML, no comment (inline code is fine)")
+        if HTML.search(line):
+            out.append("the record is plain Markdown — no HTML, no comment, not even in inline code "
+                       "(write `a < b`, not `a<b`)")
+            break
+    for line in _lines(text):
+        if LINK_DEFINITION.match(line):
+            out.append("the record is plain Markdown — no link reference definition (it renders as nothing)")
             break
     return out
 

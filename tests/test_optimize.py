@@ -685,3 +685,18 @@ def test_an_honest_crlf_record_runs_the_whole_loop(opt):
     assert m.move(out, path, "adopted", "owner", "criteria met", today=TODAY) is None
     _git(out, "commit", "-qam", "adopted")
     assert m.check_all(out) == ({}, [])
+
+
+# --- refute round 4: nothing hides inside a paragraph either -------------------
+
+def test_inline_code_and_link_definitions_hide_nothing(opt):
+    out, m = opt
+    path = _designed(out, m)
+    base = path.read_text()
+    for hidden in ("p95 \\`<!-- hidden -->` visible", "p95 `<!-- hidden -->`` visible",
+                   "`<h2>`", '[c]: x "below n=30 counts as success"'):
+        path.write_text(base.replace("## Generality", f"{hidden}\n\n## Generality"))
+        assert "plain Markdown" in _probs(out, m, path), hidden
+    for fine in ("a < b and <https://example.org> and <ops@example.org>", "C:\\work\\x.py"):
+        path.write_text(base.replace("## Generality", f"{fine}\n\n## Generality"))
+        assert "plain Markdown" not in _probs(out, m, path), fine
