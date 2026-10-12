@@ -206,13 +206,15 @@ def _names_branch(branch: str, ids: set[str], issues: set[str]) -> bool:
     return False
 
 
-def _stacked_renames(root: Path, branches: list[str], new_by: dict[str, set[str]],
+def _stacked_renames(root: Path, base: str, branches: list[str], new_by: dict[str, set[str]],
                      unreadable: list[str]) -> dict[str, str]:
     """One plan under two names (#201): a candidate stacked on another renames a
     plan the other adds — measured from their own fork, as git's merge of the
-    two pairs them. As {path: representative}; only renames (R) between two
-    candidates' new paths, never the base's or the archive's own names. A
-    rewrite git no longer calls a rename stays two plans (fail closed)."""
+    two pairs them. As {path: representative}; only renames (R) from a path
+    one candidate brings to a path another brings, each measured against the
+    base. Two candidates that share no commit beyond the base are no stack
+    and cost no diff. A rewrite git no longer calls a rename stays two plans
+    (fail closed)."""
     parent: dict[str, str] = {}
 
     def find(p: str) -> str:
@@ -220,13 +222,14 @@ def _stacked_renames(root: Path, branches: list[str], new_by: dict[str, set[str]
             p = parent[p]
         return p
 
+    forks = {b: _out(root, "merge-base", base, b) for b in branches if new_by.get(b)}
     for o in branches:
         for b in branches:
             if o == b or not new_by.get(o) or not new_by.get(b):
                 continue
             fork = _out(root, "merge-base", o, b)
-            if not fork:
-                continue
+            if not fork or fork in (forks.get(o), forks.get(b)):
+                continue  # no commit of o's below b (or the other way round): no stack
             pairs = _review.name_status(_git_bytes(root, "diff", "--name-status", "-M", "-z",
                                                    f"{fork}..{b}", "--", PLANS))
             if pairs is None:
@@ -301,7 +304,7 @@ def candidates(root: Path, local: str, base: str) -> list[dict]:
         gone_by[b] = {source or rel for letter, source, rel in changes or () if letter in ("D", "R")}
         new_by[b] = {rel for letter, _source, rel in changes or () if letter != "D"}
         merged_paths |= new_by[b]
-    same_plan = _stacked_renames(root, branches, new_by, unreadable)
+    same_plan = _stacked_renames(root, base, branches, new_by, unreadable)
     out: list[dict] = []
     for b in sorted(branches):
         counts = _out(root, "rev-list", "--left-right", "--count", f"{base}...{b}")
