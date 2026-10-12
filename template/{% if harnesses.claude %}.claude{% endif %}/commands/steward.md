@@ -143,8 +143,11 @@ may decide. Once a day, after housekeeping, not on every tick:
    violated stop condition is moved to `stopped` (anybody may stop — it is
    the safe direction), a broken record goes to its responsible. Then
    `gate_modes.py sentinel`: a weakened gate that failed, or a breached
-   guardrail, goes back to `block` and is locked — commit the record it
-   writes; a lock is lifted only with a triage (`gate_modes.py unlock`).
+   guardrail, goes back to `block` and is locked — commit and merge the
+   record it writes at once (until then only this checkout blocks again);
+   a lock is lifted only with a triage (`gate_modes.py unlock`). Once a
+   week run `docs/process/improvement-weekly.md` (or start a session on
+   it); once a month have a fresh session run `improvement-monthly.md`.
 2. Notice: where did the day's issues wait, repeat a round, lose context,
    or come back as a fix? `process_kpis.py flow` (telemetry module) gives
    each issue's lead time with working and waiting time apart, tokens,

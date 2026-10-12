@@ -31,7 +31,11 @@ except ImportError:
 # The sibling import must not drop a __pycache__ into the tree it judges.
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling import
-import gate_modes  # noqa: E402 — the one owner of a gate's mode (block, shadow, sampled, off)
+try:  # the one owner of a gate's mode (block, shadow, sampled, off); without it every gate blocks
+    import gate_modes  # noqa: E402
+except Exception as _exc:  # noqa: BLE001
+    gate_modes = None
+    _GATE_MODES_ERROR = f"gate_modes unavailable ({_exc}) — every gate blocks"
 from gate_invoke import child_argv, hook_wiring_findings  # noqa: E402
 from process_git import path_matches, pushed_commit_problem  # noqa: E402
 
@@ -386,7 +390,7 @@ def _record_event(path: Path | None, context: dict, gate: str, *, mode: str,
     import datetime as _dt  # noqa: PLC0415
     import json  # noqa: PLC0415
 
-    row = {"ts": _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds"),
+    row = {"ts": _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="milliseconds"),
            "gate": gate, "mode": mode, "outcome": outcome, "rc": rc,
            "duration_s": round(duration_s, 3), "reason": reason, **context}
     try:
@@ -481,6 +485,8 @@ def main() -> int:
     # a gate's mode comes from the change record alone; core gates always block,
     # and anything unreadable leaves every gate blocking (gate_modes.py)
     try:
+        if gate_modes is None:
+            raise RuntimeError(_GATE_MODES_ERROR)
         modes, mode_problems = gate_modes.effective(
             root, {n for n, (key, _cmd) in GATES.items() if key is None})
     except Exception as exc:  # noqa: BLE001

@@ -1373,9 +1373,15 @@ def nodes_table(root: Path, *, days: int = _NODE_DAYS, now: datetime | None = No
     def _input(row: dict) -> str | None:
         return row.get("head") if row.get("head") and row.get("dirty") is False else None
 
+    def _failed(row: dict) -> bool:
+        return row.get("outcome") in ("fail", "timeout")
+
+    def _blocking(row: dict) -> bool:  # a shadow or sampled failure stopped nothing
+        return row.get("mode") not in ("shadow", "sampled")
+
+    # any failure on a commit says another gate saw something there (overlap)
     failed_inputs: dict[str, set[str]] = {
-        gate: {i for r in rows if r.get("outcome") in ("fail", "timeout") and (i := _input(r))}
-        for gate, rows in by_gate.items()}
+        gate: {i for r in rows if _failed(r) and (i := _input(r))} for gate, rows in by_gate.items()}
     nodes = []
     for gate in sorted(by_gate):
         rows = by_gate[gate]
@@ -1383,11 +1389,13 @@ def nodes_table(root: Path, *, days: int = _NODE_DAYS, now: datetime | None = No
         durations = [float(r.get("duration_s") or 0) for r in ran]
         inputs = {i for r in ran if (i := _input(r))}
         passed = {i for r in ran if r.get("outcome") == "pass" and (i := _input(r))}
-        blocked = failed_inputs.get(gate, set())
+        blocked = {i for r in ran if _failed(r) and _blocking(r) and (i := _input(r))}
+        would_block = {i for r in ran if _failed(r) and not _blocking(r) and (i := _input(r))}
         others = set().union(*(v for g, v in failed_inputs.items() if g != gate)) if len(failed_inputs) > 1 else set()
         # a triage row counts for a block of this window; a short sha matches by prefix
+        failed_here = blocked | would_block
         mine = [t for t in triage if t["gate"] == gate and len(t["commit"]) >= 7
-                and any(b.startswith(t["commit"]) for b in blocked)]
+                and any(b.startswith(t["commit"]) for b in failed_here)]
         nodes.append({
             "gate": gate,
             "runs": len(ran),
@@ -1398,14 +1406,17 @@ def nodes_table(root: Path, *, days: int = _NODE_DAYS, now: datetime | None = No
                        "median": round(statistics.median(durations), 2) if durations else None,
                        "p90": round(_percentile(durations, 0.9), 2) if durations else None,
                        "quality": "measured" if durations else "missing"},
-            "blocks": {"runs": sum(1 for r in ran if r.get("outcome") in ("fail", "timeout")),
+            "blocks": {"runs": sum(1 for r in ran if _failed(r) and _blocking(r)),
                        "inputs": len(blocked), "quality": "measured"},
+            # failures while shadow or sampled: what the gate would have stopped
+            "would_block": {"runs": sum(1 for r in ran if _failed(r) and not _blocking(r)),
+                            "inputs": len(would_block), "quality": "measured"},
             # another gate also failed on the same commit: not proof of the same defect
             "sole_blocks": {"value": len(blocked - others), "quality": "estimated"},
             # passed and failed on the same commit: a flake signal, or a moving environment
-            "flips": {"value": len(blocked & passed), "quality": "measured"},
+            "flips": {"value": len((blocked | would_block) & passed), "quality": "measured"},
             "triage": {"value": {c: sum(1 for t in mine if t["category"] == c) for c in TRIAGE_CATEGORIES},
-                       "of_blocked_inputs": len({b for b in blocked if any(b.startswith(t["commit"]) for t in mine)}),
+                       "of_blocked_inputs": len({b for b in failed_here if any(b.startswith(t["commit"]) for t in mine)}),
                        "quality": "estimated" if mine else "missing"},
             "modes": sorted({str(r.get("mode")) for r in rows}),
         })
@@ -1434,7 +1445,9 @@ def nodes(root: Path | None = None, *, days: int = _NODE_DAYS, as_json: bool = F
         print(f"  {nd['gate']:<20} {nd['runs']:>4} runs on {nd['inputs']['value']:>3} commits · "
               f"total {c['total']:>8.1f} s, median {c['median'] if c['median'] is not None else '—'} s · "
               f"blocked {nd['blocks']['inputs']} commits ({nd['sole_blocks']['value']} alone, estimated) · "
-              f"flips {nd['flips']['value']} · triaged {triaged}"
+              + (f"would have blocked {nd['would_block']['inputs']} (shadow/sampled) · "
+                 if nd["would_block"]["inputs"] else "")
+              + f"flips {nd['flips']['value']} · triaged {triaged}"
               + (f" ({t['confirmed-defect']} defect, {t['accepted-risk']} accepted, "
                  f"{t['infra-or-flake']} infra/flake, {t['unknown']} unknown)" if triaged else ""))
     n = sum(nd["inputs"]["value"] for nd in table["nodes"])
