@@ -211,6 +211,7 @@ onboarding confusion. Match your thing to its home:
 | The reasoning behind a choice made mid-work | the journal `.process-work/journal/…` | no |
 | Work you noticed but won't do now | one line in `.process-work/inbox.md` | no (triage later) |
 | A review/audit's prompt, verdict, findings | a report `.process-work/reviews/*.md` | github-issues |
+| A process bottleneck to improve, or a trial of a process change | a record `.process-work/optimizations/OPT-NNNN-*.md` (`optimization.md`) | no (`optimize.py check`) |
 
 Rule of thumb: a *decision* → record; a *design* → design doc; the *product's
 shape* → PRODUCT.md; a *behavior* → story; *how to build it* → plan; *why you

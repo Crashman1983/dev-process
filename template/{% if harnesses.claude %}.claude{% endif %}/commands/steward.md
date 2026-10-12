@@ -1,7 +1,8 @@
 # /steward
 
 Run the tower: steer parallel work on this clone — assign, redirect,
-stop, dispatch the merge train — and speak only on events. You never
+stop, dispatch the merge train, steer the process's improvement trials —
+and speak only on events. You never
 implement, review, attest or certify; the gates and the independent
 reviewer keep those (`docs/process/verification-independence.md`).
 
@@ -128,6 +129,48 @@ untouched open issue gets a comment naming the question. Then
 branches nobody has touched for weeks — ask the owner, then delete.
 Residue is never "later": a clean tree is the precondition for every
 table you read.
+
+## Improvement loop — the process gets measurably better
+
+Your mission has a second half: the project ships reliably *and* the
+process it ships with gets demonstrably better. The contract — loop, roles,
+record, decision rights — is `docs/process/optimization.md`; the mandate
+(`docs/process/optimization.local.json`, set by the owner) bounds what you
+may decide. Once a day, after housekeeping, not on every tick:
+
+1. `uv run scripts/process/optimize.py status` and `optimize.py check`:
+   a trial past its `until` is moved to `evaluating`, a budget overrun or a
+   violated stop condition is moved to `stopped` (anybody may stop — it is
+   the safe direction), a broken record goes to its responsible.
+2. Notice: where did the day's issues wait, repeat a round, lose context,
+   or come back as a fix? `process_kpis.py flow` (telemetry module) gives
+   each issue's lead time with working and waiting time apart, tokens,
+   owner decisions and escapes (`Regression-of: #N`); `rounds` and
+   `clusters` show repetition. A recurring bottleneck tied to concrete
+   issues becomes a record (`optimize.py new --title … --mechanism …
+   --issues "#…"`), never a chat message; one-offs stay findings.
+3. Commission: weigh the expected gain against effort and capacity. The
+   cause and the placement (core, module, config or project) are the
+   process maintainer's analysis for a process mechanism and a project
+   worker's for a local one; you assign, you do not design.
+4. Coordinate the trial within the mandate: which issues (`select`), when,
+   with what budget — after a `REVIEWED … pass` by someone other than the
+   implementer, `optimize.py move <record> piloting --who steward
+   --because …` freezes the terms. A project worker brings in the template
+   update that carries the mechanism; the flag stays off outside `select`.
+5. Follow the effect, including later repairs and the owner's
+   interventions; keep `spent-tokens`/`spent-hours` current in the record.
+   At the end, a session that did not build the change writes `## Result`
+   against the frozen Criteria — below their minimum n it is inconclusive.
+6. Decide within the mandate (adopt only where `steward_may` names it,
+   otherwise the owner decides), or roll back: `stopped` first, then the
+   written way back for code or data. Report to the owner on a result or a
+   decision that is theirs — lowering a floor, widening the mandate,
+   raising a budget are never yours.
+
+You coordinate here too: you never implement, review, attest or certify
+the change under trial, and your prioritisation concerns this project — a
+project need does not oblige the process core to take it.
 
 ## Hosts
 

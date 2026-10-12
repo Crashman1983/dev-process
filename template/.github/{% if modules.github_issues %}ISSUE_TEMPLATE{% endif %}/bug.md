@@ -11,6 +11,7 @@ labels: type:bug
 ## Origin (when discovered mid-work)
 
 - Discovered during: <the issue/story/plan being worked when this surfaced, #N — or 'standalone'>
+- Introduced by: <the issue whose merged change caused it, #N — or 'unknown'; the fix commit carries `Regression-of: #N`>
 
 <When an origin issue exists, comment on it referencing this bug so the trail
 runs both ways; keep the current change focused and fix the bug here.>

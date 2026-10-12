@@ -59,3 +59,6 @@ worker events there; the tower and reports remain the source of truth.
 On start or restart, notify each live, remote or unknown worker once that
 the steward is back and events go there. Without a channel, use reports only.
 The protocol is in `docs/process/tower.md`.
+The steward also steers the process's improvement trials (daily:
+`uv run scripts/process/optimize.py status`); the contract is in
+`docs/process/optimization.md`.
