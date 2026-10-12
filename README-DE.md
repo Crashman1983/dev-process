@@ -26,6 +26,7 @@ eigene Arbeit ab, und das Gedächtnis liegt in Dateien statt im Kontext.
 | Was auf dem Rechner und in CI gebraucht wird | [`docs/SYSTEM-REQUIREMENTS.md`](docs/SYSTEM-REQUIREMENTS.md) |
 | Abhängigkeiten dieses Repositorys (erzeugt, auch als CycloneDX) | [`docs/SBOM.md`](docs/SBOM.md) · [`docs/sbom.cdx.json`](docs/sbom.cdx.json) |
 | Warum dieser Standard-Stack (Spec-Kit-Vergleich und Entwurf) | [`docs/analysis/`](docs/analysis/) |
+| Pflege dieses Repositorys: Rolle des Prozess-Maintainers, Generik-Nachweis | [`MAINTAINING.md`](MAINTAINING.md) |
 
 ## Das Wichtigste
 
@@ -47,6 +48,11 @@ eigene Arbeit ab, und das Gedächtnis liegt in Dateien statt im Kontext.
   Phase eine Agentensitzung mit dem Modell aus der Modellpolitik, entscheidet
   die Fragen der Agenten (nur Produktgrundsätze legt er dem Owner als Auswahl
   vor) und merget fertige Branches gebündelt.
+- **Selbstlernend, in Grenzen.** Der Steward macht wiederkehrende Engpässe zu
+  Optimierungsrecords: Hypothese, vor dem Versuch eingefrorene Kriterien, ein
+  begrenzter Pilot hinter einem Flag und eine Entscheidung, die niemand über
+  seine eigene Änderung trifft (`docs/process/optimization.md` in jedem
+  eingerichteten Repository).
 - **Drei Harnesses.** Claude Code, GitHub Copilot oder eine neutrale
   `AGENTS.md`; Methodik und Gates sind in allen dieselben.
 
