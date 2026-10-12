@@ -50,9 +50,31 @@ measurement starts at the node:
   disruptive bugs to fixed, and how well bug origin (cause × channel) is
   labelled.
 
-In this release the loop only measures: weakening a node needs an owner
-decision line, every time. Lifecycle modes per node (shadow, sampled) and
-sentinels that roll back follow in a later release.
+A node changes through `scripts/process/gate_modes.py`, and only there: the
+append-only record `.process-work/gate-changes.jsonl` sets each gate's mode
+— `block` (default), `shadow` (runs and records, never blocks), `sampled`
+(runs on a stable share of commits, never blocks) or `off`.
+
+- **Weakening** needs an owner decision line, every time, in this release.
+  Core gates and the mandate's `guardrails.protected` gates cannot be
+  weakened at all.
+- **A weakening counts once it is on the integration branch**; a branch
+  cannot weaken a gate for its own push. A restore counts at once.
+- **The sentinel** (`gate_modes.py sentinel`, deterministic, run daily by
+  the steward) only restores: a shadow or sampled gate that failed on a
+  clean commit, and every still-active weakening that touches a breached
+  guardrail (`guardrails.limits` in the mandate), newest first. Newest
+  first is containment, not a claim about the cause. A restored gate is
+  locked until `unlock` records a triage.
+- **A new check** is new executable behaviour: it comes in through the
+  project's normal code review. Setting a reviewed check's mode is
+  configuration. Running a check without blocking does not make it
+  harmless — it can still change files or call a service.
+- **Evidence for weakening** is triage, not raw blocks (`nodes`). Keep a
+  residual sample (`sampled`) rather than `off`; `off` wants a replacement
+  shown on known failing inputs, or the owner's explicit judgement. Never
+  argue a rare, severe class (security, destructive changes) from "no
+  catches in the sample".
 
 ## Roles
 

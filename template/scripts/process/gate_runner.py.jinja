@@ -31,6 +31,7 @@ except ImportError:
 # The sibling import must not drop a __pycache__ into the tree it judges.
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling import
+import gate_modes  # noqa: E402 — the one owner of a gate's mode (block, shadow, sampled, off)
 from gate_invoke import child_argv, hook_wiring_findings  # noqa: E402
 from process_git import path_matches, pushed_commit_problem  # noqa: E402
 
@@ -477,10 +478,28 @@ def main() -> int:
         context = _run_context(root, pushed) if events is not None else {}
     except Exception:  # noqa: BLE001
         events, context = None, {}
-    mode = "warn" if warn else "block"
+    # a gate's mode comes from the change record alone; core gates always block,
+    # and anything unreadable leaves every gate blocking (gate_modes.py)
+    try:
+        modes, mode_problems = gate_modes.effective(
+            root, {n for n, (key, _cmd) in GATES.items() if key is None})
+    except Exception as exc:  # noqa: BLE001
+        modes, mode_problems = {}, [f"gate modes unreadable ({exc}) — every gate blocks"]
+    suppressed += _emit("".join(f"gate-runner: note: {p}\n" for p in mode_problems), known, seen, show_all)
     for name in active:
         _key, cmd = gates[name]
         spec = local.get(name, {})
+        node = modes.get(name, {})
+        node_mode = node.get("mode", "block")
+        mode = node_mode if node_mode != "block" else ("warn" if warn else "block")
+        if node_mode == "off":
+            print(f"== {name}: off ({node.get('record')}) — not run ==")
+            _record_event(events, context, name, mode=mode, outcome="off", rc=None, duration_s=0.0)
+            continue
+        if node_mode == "sampled" and not gate_modes.sampled_in(name, context.get("head"), node["rate"]):
+            print(f"== {name}: sampled at {node['rate']:.0%} — not this commit ==")
+            _record_event(events, context, name, mode=mode, outcome="unsampled", rc=None, duration_s=0.0)
+            continue
         if spec.get("paths") and _untouched(root, spec["paths"], in_flight):
             print(f"== {name}: no path in flight matches {', '.join(spec['paths'])} — not run ==")
             _record_event(events, context, name, mode=mode, outcome="skipped", rc=None, duration_s=0.0)
@@ -535,7 +554,10 @@ def main() -> int:
         else:
             _record_event(events, context, name, mode=mode, outcome="pass" if rc == 0 else "fail",
                           rc=rc, duration_s=time.monotonic() - started)
-        if rc != 0:
+        if rc != 0 and node_mode in ("shadow", "sampled"):
+            print(f"gate-runner: {name} failed in {node_mode} mode ({node.get('record')}) — recorded, "
+                  f"not blocking; `gate_modes.py sentinel` returns it to block", file=sys.stderr)
+        elif rc != 0:
             failed.append(name)
     _write_ledger(ledger, seen)
     if suppressed:
