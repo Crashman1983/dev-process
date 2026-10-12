@@ -1,7 +1,7 @@
 # Refute brief — closed improvement loop (for an independent second-family reviewer)
 
 > **Deutsch, kurz:** Auftrag an Codex Astra, den Plan
-> `docs/analysis/2026-10-12-closed-loop-plan.md` und das in v2.67.0
+> `docs/analysis/2026-10-12-closed-loop-plan.md` und das in v2.67
 > ausgelieferte Gerüst vor der Umsetzung zu widerlegen. Die Literatur zu Graph
 > und Loop Engineering ist unten zusammengefasst, mit Quellen.
 
@@ -21,7 +21,7 @@ on.
    offline eval suite, noise-aware evaluation, ablation flags, first mechanism
    `scoped-handover`, autonomous flag-off releases). It ends with five open
    questions; answer them.
-2. **What v2.67.0 already shipped** (on `main`), only as far as the plan builds
+2. **What v2.67 already shipped** (on `main`), only as far as the plan builds
    on it:
    - `template/docs/process/optimization.md`: the contract.
    - `template/scripts/process/optimize.py`: records, freeze, append-only log,
