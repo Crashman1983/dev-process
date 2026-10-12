@@ -33,6 +33,9 @@ difference. See "honest ceiling" in the module doc.
   process_kpis.py flow          [--issue N] [--json] [--follow-up-days D]
                                                 # one issue, first phase to deploy: work, wait,
                                                 # tokens, owner decisions, escapes, process version
+  process_kpis.py nodes         [--days D] [--json]
+                                                # per gate: cost, blocks, distinct inputs,
+                                                # sole blocks, flips, triaged blocks
   process_kpis.py report                        # all families
 
 Lean pass: the error rate at the gate is read from the review records
@@ -970,6 +973,153 @@ def flow(root: Path | None = None, *, issue: int | None = None, as_json: bool = 
     return 0
 
 
+# --- nodes: every gate as a node of the check graph -------------------------
+# The gate runner leaves one line per gate run in the common git dir
+# (`process-gate-events.jsonl`). A node's cost is measured directly; what it
+# catches is not: a block followed by a fix proves nothing (the fix may mend
+# something else), and two gates failing on one commit may have found two
+# different defects. So raw blocks stay raw, co-failures stay `estimated`, and
+# only triaged blocks (`.process-work/gate-triage.jsonl`) say what a block was
+# (refutation, round 3). An `unknown` triage never counts as evidence for
+# weakening a gate.
+_EVENTS = "process-gate-events.jsonl"
+TRIAGE_FILE = ".process-work/gate-triage.jsonl"
+TRIAGE_CATEGORIES = ("confirmed-defect", "accepted-risk", "infra-or-flake", "unknown")
+_NODE_DAYS = 30
+
+
+def _gate_events(common: Path | None, since: datetime) -> list[dict]:
+    import json  # noqa: PLC0415
+
+    rows: list[dict] = []
+    if common is None:
+        return rows
+    for name in (_EVENTS + ".1", _EVENTS):  # the rolled-over generation first
+        try:
+            lines = (common / name).read_text(encoding="utf-8").splitlines()
+        except OSError:
+            continue
+        for line in lines:
+            try:
+                row = json.loads(line)
+            except ValueError:
+                continue
+            when = _aware(row.get("ts")) if isinstance(row, dict) else None
+            if when is not None and when >= since and isinstance(row.get("gate"), str):
+                rows.append(row)
+    return rows
+
+
+def gate_triage(root: Path) -> tuple[list[dict], list[str]]:
+    """(valid triage rows, problems). A row is one reviewed block:
+    {"gate", "commit", "category", "class"?, "fix"?, "note"?}."""
+    import json  # noqa: PLC0415
+
+    rows: list[dict] = []
+    problems: list[str] = []
+    try:
+        lines = (root / TRIAGE_FILE).read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return rows, problems
+    for n, line in enumerate(lines, 1):
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+        except ValueError:
+            problems.append(f"{TRIAGE_FILE}:{n}: not JSON")
+            continue
+        if not (isinstance(row, dict) and isinstance(row.get("gate"), str)
+                and isinstance(row.get("commit"), str) and row.get("category") in TRIAGE_CATEGORIES):
+            problems.append(f"{TRIAGE_FILE}:{n}: needs gate, commit and a category of "
+                            f"{', '.join(TRIAGE_CATEGORIES)}")
+            continue
+        rows.append(row)
+    return rows, problems
+
+
+def nodes_table(root: Path, *, days: int = _NODE_DAYS, now: datetime | None = None) -> dict:
+    """{"nodes": [per gate], "triage_problems": [...], "days": d}. Inputs are
+    distinct commits checked on a clean tree; a run on a dirty tree checked
+    something no commit names and counts apart (`unidentified_runs`)."""
+    now = now or datetime.now(timezone.utc)
+    events = _gate_events(_common_dir(root), now - timedelta(days=days))
+    triage, problems = gate_triage(root)
+    by_gate: dict[str, list[dict]] = defaultdict(list)
+    for row in events:
+        by_gate[row["gate"]].append(row)
+
+    def _input(row: dict) -> str | None:
+        return row.get("head") if row.get("head") and row.get("dirty") is False else None
+
+    failed_inputs: dict[str, set[str]] = {
+        gate: {i for r in rows if r.get("outcome") in ("fail", "timeout") and (i := _input(r))}
+        for gate, rows in by_gate.items()}
+    nodes = []
+    for gate in sorted(by_gate):
+        rows = by_gate[gate]
+        ran = [r for r in rows if r.get("outcome") in ("pass", "fail", "timeout")]
+        durations = [float(r.get("duration_s") or 0) for r in ran]
+        inputs = {i for r in ran if (i := _input(r))}
+        passed = {i for r in ran if r.get("outcome") == "pass" and (i := _input(r))}
+        blocked = failed_inputs.get(gate, set())
+        others = set().union(*(v for g, v in failed_inputs.items() if g != gate)) if len(failed_inputs) > 1 else set()
+        mine = [t for t in triage if t["gate"] == gate]
+        nodes.append({
+            "gate": gate,
+            "runs": len(ran),
+            "skipped": sum(1 for r in rows if r.get("outcome") == "skipped"),
+            "inputs": {"value": len(inputs), "quality": "measured"},
+            "unidentified_runs": sum(1 for r in ran if not _input(r)),
+            "cost_s": {"total": round(sum(durations), 1),
+                       "median": round(statistics.median(durations), 2) if durations else None,
+                       "p90": round(_percentile(durations, 0.9), 2) if durations else None,
+                       "quality": "measured" if durations else "missing"},
+            "blocks": {"runs": sum(1 for r in ran if r.get("outcome") in ("fail", "timeout")),
+                       "inputs": len(blocked), "quality": "measured"},
+            # another gate also failed on the same commit: not proof of the same defect
+            "sole_blocks": {"value": len(blocked - others), "quality": "estimated"},
+            # passed and failed on the same commit: a flake signal, or a moving environment
+            "flips": {"value": len(blocked & passed), "quality": "measured"},
+            "triage": {"value": {c: sum(1 for t in mine if t["category"] == c) for c in TRIAGE_CATEGORIES},
+                       "of_blocked_inputs": len({t["commit"] for t in mine} & blocked),
+                       "quality": "estimated" if mine else "missing"},
+            "modes": sorted({str(r.get("mode")) for r in rows}),
+        })
+    return {"nodes": nodes, "triage_problems": problems, "days": days}
+
+
+def nodes(root: Path | None = None, *, days: int = _NODE_DAYS, as_json: bool = False) -> int:
+    import json  # noqa: PLC0415
+
+    root = root or Path.cwd()
+    table = nodes_table(root, days=days)
+    if as_json:
+        print(json.dumps(table, indent=2))
+        return 0
+    print(f"[nodes] each gate's cost against its blocks, last {days} days "
+          "(blocks are raw; only triage says what a block was)")
+    for problem in table["triage_problems"]:
+        print(f"  triage: {problem}")
+    if not table["nodes"]:
+        print("  no gate run recorded yet (the gate runner writes process-gate-events.jsonl) — nodes skipped")
+        return 0
+    for nd in table["nodes"]:
+        c = nd["cost_s"]
+        t = nd["triage"]["value"]
+        triaged = sum(t.values())
+        print(f"  {nd['gate']:<20} {nd['runs']:>4} runs on {nd['inputs']['value']:>3} commits · "
+              f"total {c['total']:>8.1f} s, median {c['median'] if c['median'] is not None else '—'} s · "
+              f"blocked {nd['blocks']['inputs']} commits ({nd['sole_blocks']['value']} alone, estimated) · "
+              f"flips {nd['flips']['value']} · triaged {triaged}"
+              + (f" ({t['confirmed-defect']} defect, {t['accepted-risk']} accepted, "
+                 f"{t['infra-or-flake']} infra/flake, {t['unknown']} unknown)" if triaged else ""))
+    n = sum(nd["inputs"]["value"] for nd in table["nodes"])
+    level = _level(n, False, False, _N_THRESHOLD)
+    print(f"  {confidence(n)} · {action(level, 'a gate that costs much and never blocks alone is a candidate to weaken — after triage, never on raw blocks; a gate that flips is a flake to fix first', thin='let more gate runs accumulate before weighing a gate')}")
+    return 0
+
+
 def report() -> int:
     print("=== process KPI cockpit (read-only) ===\n")
     cost(None)
@@ -981,6 +1131,8 @@ def report() -> int:
     share()
     print()
     flow()
+    print()
+    nodes()
     return 0
 
 
@@ -1010,6 +1162,9 @@ def main() -> int:
     fl.add_argument("--json", action="store_true")
     fl.add_argument("--follow-up-days", type=int, default=_FOLLOW_UP_DAYS,
                     help="how long after the merge an escape counts (default 30)")
+    nd = sub.add_parser("nodes")
+    nd.add_argument("--days", type=int, default=_NODE_DAYS)
+    nd.add_argument("--json", action="store_true")
     sub.add_parser("report")
     args = p.parse_args()
 
@@ -1023,6 +1178,8 @@ def main() -> int:
         return train_phases(args.runs)
     if args.cmd == "flow":
         return flow(issue=args.issue, as_json=args.json, follow_up_days=args.follow_up_days)
+    if args.cmd == "nodes":
+        return nodes(days=args.days, as_json=args.json)
 
     if args.cmd == "cost" and args.issue is not None:
         import dispatch  # one reader of dispatch records, policy and transcripts
