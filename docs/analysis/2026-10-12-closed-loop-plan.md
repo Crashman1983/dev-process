@@ -4,12 +4,18 @@ Datum: 2026-10-12 · Status: **Entwurf, nicht umgesetzt** · Baut auf: v2.67
 (`docs/analysis/2026-10-12-self-improving-process.md`) · Tier: 3 (Messung,
 Aktivierung und Freigabe des Prozesses ändern sich selbst)
 
-Revision 4. Ausgangspunkt sind zwei Refutationsrunden auf PR #216, beide mit
-Verdict `block` (Runde 1: zehn Befunde, Runde 2: sieben) und eine Neuausrichtung
-durch den Owner (§1). Revision 3 hatte jeden Befund mit zusätzlicher Regelung
-beantwortet und war dadurch zu schwer geworden. Revision 4 hält die
-Sicherheitsgrenzen der Refutation und setzt den Prüfmaßstab neu auf
-**Verhältnismäßigkeit** (§3). Wie jeder Befund beantwortet ist, steht in §11.
+Revision 5. Vorgeschichte auf PR #216:
+
+- Runde 1 und 2: Verdict `block` (zehn bzw. sieben Befunde).
+- Neuausrichtung durch den Owner (§1). Revision 3 hatte jeden Befund mit
+  zusätzlicher Regelung beantwortet und war zu schwer geworden. Revision 4
+  setzte den Prüfmaßstab auf **Verhältnismäßigkeit** (§3).
+- Runde 3 (verhältnismäßig): Verdict `revise`, kein Blocker. Der vereinfachte
+  Ansatz und alle vier Lockerungen sind akzeptiert, fünf begrenzte Korrekturen
+  verlangt.
+
+Revision 5 arbeitet diese fünf ein. Wie jeder Befund beantwortet ist, steht in
+§11.
 
 ## 1. Anforderung
 
@@ -54,10 +60,14 @@ Die Refutation hat für jede Änderung den Nachweis einer Verbesserung verlangt.
 Das ist der Maßstab einer Studie. Für dieses Ziel ist er falsch angesetzt, weil
 die beiden Seiten der Rechnung verschieden sicher sind:
 
-- **Die Einsparung ist direkt messbar.** Laufzeit, Tokens und Wartezeit eines
-  Gates sind bei jedem Lauf exakt bekannt. Sie brauchen keinen statistischen
-  Nachweis.
-- **Unsicher ist nur die Qualitätsseite.** Dort ist die Frage nicht „wird es
+- **Die Bruttokosten sind direkt messbar.** Die Laufzeit eines Gates ist bei
+  jedem Lauf bekannt und braucht keinen statistischen Nachweis. Die
+  Nettoersparnis ist es nicht ganz: Liegt ein Gate nicht auf dem kritischen
+  Pfad, spart sein Wegfall Rechenzeit, aber keine Durchlaufzeit; Stichprobe,
+  Sichtung und Pflege kosten selbst etwas. Bruttokosten und beobachtete
+  Nettokosten werden getrennt ausgewiesen, zugeordnete Tokens und verursachte
+  Wartezeit als `estimated`.
+- **Unsicher ist vor allem die Qualitätsseite.** Dort ist die Frage nicht „wird es
   besser?“, sondern „wird es nicht schlechter?“. Das beantwortet der Betrieb
   über Schattenläufe, Stichproben und schnellen Rückbau (§6), nicht über
   Studien.
@@ -81,7 +91,13 @@ Abschnitt `guardrails` fest:
   Fenster, Schwelle.
 - **Geschützte Knoten.** Knoten, die die Schleife nicht selbst abschwächen darf.
   Voreinstellung: Sicherheitsprüfungen, Secrets, Review-Unabhängigkeit,
-  Abnahme, die Wächter selbst, der Bewerter. Der Owner kann die Liste ändern.
+  Abnahme, die Wächter selbst, der Bewerter. Geschützt ist die **wirksame
+  Durchsetzung**, nicht nur der Name: Auch Abhängigkeitsauswahl, Routing,
+  Reihenfolge und die Konfigurationshoheit dürfen einen geschützten Knoten
+  nicht mittelbar umgehen. Projektspezifische Ergänzungen, etwa Prüfungen für
+  destruktive Datenänderungen oder Migrationen, stehen in der
+  Projektkonfiguration, damit dev-process generisch bleibt. Nicht jedes
+  Kern-Gate ist automatisch geschützt (Format, Doku, Performance nicht).
 - **Budget.** Absolute Agentenstunden und Owner-Minuten pro Woche für
   Prozessarbeit.
 - **Rechte** des Stewards (§8).
@@ -100,15 +116,15 @@ Refutationen, Testauswahl, der Zug, Tier-Routing. Für jeden Knoten misst
 | Maß | Quelle | Qualität |
 |---|---|---|
 | **Kosten:** Laufzeit, Tokens, verursachte Wartezeit | neues Gate-Ereignisprotokoll (§5.1), `flow`, Token-Abdeckung je Nutzungsereignis | measured |
-| **Blockaden** | Gate-Ereignisse, REVIEW-Zeilen im Journal | measured |
-| **Echte Fänge:** Blockade, auf die ein Fix-Commit auf dem Branch folgte (statt Waiver oder Override) | Gate-Ereignisse + Branch-Historie | measured / estimated |
-| **Eindeutige Fänge:** echte Fänge, die kein anderer Knoten findet | Überlappungsstichprobe (§5.2) | estimated, mit Stichprobengröße |
-| **Fehlalarme:** Blockade, die per Waiver oder ohne Code-Änderung aufgehoben wurde | Gate-Ereignisse, Waiver | measured |
+| **Blockaden** (Rohzahl) | Gate-Ereignisse, REVIEW-Zeilen im Journal | measured |
+| **Gesichtete Blockaden** (§5.2): bestätigter Defekt / akzeptiertes Risiko / Infrastruktur oder Flake / unbekannt | Sichtung einer Stichprobe | estimated, mit Stichprobengröße |
+| **Eindeutige Fänge:** bestätigte Defekte, die kein anderer Knoten findet | vorhandene Urteile anderer Knoten auf demselben Stand, Wiederholung bekannter Fehlerfälle (§5.2) | estimated, mit Stichprobengröße |
 | **Durchrutscher:** Folgefehler, deren Klasse der Knoten hätte fangen sollen | Bug-Herkunft (§10.3), LLM-Zuordnung an Stichprobe | estimated |
 
-Jede Prüfung ist eine Beobachtung. Ein Projekt mit hundert Merges im Monat
-liefert pro Gate Hunderte Ereignisse. Das Stichprobenproblem der Refutation
-betrifft Vergleiche auf Issue-Ebene, nicht diese Knotendaten.
+Knotendaten machen sichtbar, was ein Gate kostet und wie oft es anschlägt.
+Wiederholte Läufe auf denselben Eingaben sind aber keine neuen
+Fehlergelegenheiten. Für Entscheidungen zählen deshalb **verschiedene
+zulässige Eingaben** (Kandidaten-Revisionen), nicht Läufe.
 
 ### 5.1 Gate-Ereignisprotokoll
 
@@ -117,12 +133,25 @@ Der Gate-Runner schreibt je Lauf und Gate eine Zeile nach
 Ergebnis, Dauer, Grund. Das ergänzt die bestehende Rot-Ledger; es ist eine
 Beobachtung, keine neue Pflicht.
 
-### 5.2 Überlappungsstichprobe
+### 5.2 Sichtung und Ersatznachweis
 
-Blockiert ein Knoten, laufen die nachgelagerten Knoten normalerweise nicht.
-Auf einer Zufallsstichprobe der Blockaden laufen sie trotzdem, nicht
-blockierend, und protokollieren ihr Urteil. Daraus ergibt sich, welche Fänge
-eindeutig sind und welche ein anderer Knoten ohnehin gemacht hätte.
+Ein folgender Fix-Commit beweist keinen Fang: Er kann einen anderen Fehler
+beheben, und ein Waiver kann einen echten Defekt bewusst hinnehmen.
+Stattdessen:
+
+- **Sichtung.** Die Wochenschleife sichtet eine kleine Stichprobe von
+  Blockaden und hält je Fall fest: Kategorie (bestätigter Defekt, akzeptiertes
+  Risiko, Infrastruktur/Flake, unbekannt), Fehlerklasse, geprüfte Revision,
+  Fix-Verweis. Ein Klassifikator ist nicht nötig. **Unbekannte Fälle
+  begründen keinen Rückbau.**
+- **Überlappung.** Der Gate-Runner läuft bereits nach einem Fehlschlag weiter
+  und liefert die Urteile aller Gates auf demselben Kandidaten. Diese werden
+  wiederverwendet. Zusätzliche Läufe gibt es nur für Ketten, die tatsächlich
+  früh abbrechen (Reviews, Phasen).
+- **Ersatznachweis.** Wer behauptet, Knoten B ersetze Knoten A, spielt die
+  bekannten, von A gesichteten Fehlerfälle durch B. Gleichzeitiges
+  Fehlschlagen beider auf derselben Revision reicht nicht, denn B kann einen
+  anderen Fehler fangen.
 
 ## 6. Lebenszyklus einer Graph-Änderung
 
@@ -131,25 +160,60 @@ der entsprechenden Konfiguration): `block`, `warn`, `shadow`, `sampled`, `off`.
 
 | Änderung | Weg | Weiter, wenn |
 |---|---|---|
-| **Neuer Knoten** | `shadow` → `warn` → `block` | im Record genannte Mindestzahl Läufe; Fänge und Fehlalarme im Rahmen; Kosten bekannt |
-| **Knoten abschwächen** | `block` → `sampled` (läuft nachträglich auf z. B. 10 % der Merges, nicht blockierend) → nach einer Bewährungszeit `off` oder dauerhaft `sampled` | Stichprobe findet keinen echten Fang; Leitplanken halten |
+| **Neuer Knoten** | Beobachtung (`shadow`, wahlweise `warn`) → `block`; eine Bewährungsstufe genügt | im Record genannte Mindestzahl verschiedener Eingaben; gesichtete Fänge und Fehlalarme im Rahmen; Kosten bekannt |
+| **Ungeschützten, leicht umkehrbaren Knoten abschwächen** | `block` → `sampled` → dauerhaft `sampled` mit kleiner Reststichprobe; `off` nur mit Ersatznachweis (§5.2) oder ausdrücklichem Owner-Urteil | §6.1 |
 | **Knoten ändern** | alt und neu parallel, das neue im `shadow` | Urteile stimmen überein oder das neue fängt mehr bei vertretbaren Kosten |
 | **Routing, Reihenfolge, Modell je Phase** | über `active()`-Flags als begrenzter Versuch (v2.67) | Kosten direkt gemessen; Leitplanken halten |
 
-Dazu gelten wenige feste Regeln:
+### 6.1 Stichprobe abgeschwächter Knoten
 
-- **Automatischer Rückbau.** Findet die Stichprobe eines abgeschwächten Knotens
-  einen echten Fang, kehrt er sofort auf `block` zurück. Reißt eine Leitplanke,
-  werden die Änderungen im betroffenen Fenster in umgekehrter Reihenfolge
-  zurückgenommen, die jüngste zuerst. Das schreibt ein Wächter, kein LLM.
-- **Ein Abschwächen gleichzeitig je Leitplanke.** So bleibt zuordenbar, welche
-  Änderung eine Leitplanke bewegt.
-- **Freiraum beim Hinzufügen.** `shadow` und `warn` kosten nur Laufzeit und
-  ändern keine Entscheidung. Die Schleife darf sie im Budget frei setzen.
-- **Ehrliche Kennzeichnung.** Eine Bewährungszeit ohne Fang ist kein Beweis,
-  dass nichts durchrutscht, sondern ein beobachteter Wert mit seiner
-  Stichprobengröße. Für seltene, schwere Fehlerklassen reicht das nicht; dafür
-  gibt es die geschützten Knoten.
+- **Nur für ungeschützte, leicht umkehrbare Prüfungen.** Sicherheit,
+  destruktive Änderungen und andere seltene, schwere Klassen werden nie mit
+  „keine Fänge in der Stichprobe“ begründet abgeschwächt.
+- **Startwerte** für etwa 100 Merges im Monat: 25–50 % Stichprobe über 4–6
+  Wochen, verlängert, bis 30–50 verschiedene zulässige Eingaben vorliegen.
+  Bei teuren Prüfungen ist eine kleinere Rate zulässig, mit entsprechend
+  schwächerem Beleg. Das sind Beobachtungsvorgaben, keine Garantie, dass nichts
+  durchrutscht.
+- **Originale Eingaben.** Die Stichprobe prüft die ursprüngliche
+  Kandidaten-Revision mit ihren Eingaben, die dafür aufbewahrt werden. Ein
+  späteres, inzwischen repariertes `main` würde den verpassten Fang verbergen.
+- **Sofortige Rückkehr.** Schlägt die Stichprobe unerwartet und handlungsrelevant
+  an, kehrt der Knoten sofort auf `block` zurück, bis die Sichtung den Fall
+  einordnet. Er wartet nicht auf einen Fix-Commit.
+
+### 6.2 Rückbau bei Leitplankenbruch
+
+- **Aktive Änderungen, nicht nur das Fenster.** Jede Abschwächung hat einen
+  Record mit der vorherigen Konfiguration und den Leitplanken, die sie
+  berührt. Reißt eine Leitplanke, nimmt der Wächter **alle noch aktiven**
+  Änderungen zurück, die diese Leitplanke berühren, auch ältere, die jüngste
+  zuerst, und stellt die aufgezeichnete vorherige Konfiguration her.
+- **Eindämmung, keine Ursachenzuordnung.** Die Reihenfolge „jüngste zuerst“
+  ist eine praktische Rückbauregel. Sie behauptet nicht, die Ursache gefunden
+  zu haben.
+- **Sperre.** Eine zurückgebaute Änderung ist für eine erneute Aktivierung
+  gesperrt, bis sie gesichtet ist. So wendet die Wochenschleife dieselbe
+  scheinbare Ersparnis nicht gleich wieder an.
+- **Ein Abschwächen gleichzeitig je Leitplanke** bleibt als einfache Grenze.
+- **Der Wächter hat Vorrang.** Deterministischer Rückbau gilt vor jedem
+  LLM-Vorschlag.
+
+### 6.3 Ausführungsvertrag
+
+Nicht blockierend heißt nicht folgenlos: Ein Schattenbefehl kann trotzdem den
+Kandidaten verändern, gemeinsamen Zustand schreiben oder eine Integration
+aufrufen. Deshalb:
+
+- **Frei** ist nur die Konfiguration bereits geprüfter, beobachtender Knoten:
+  Modus, Stichprobenrate, Reihenfolge im Rahmen.
+- **Neues ausführbares Verhalten**, etwa ein neuer Prüfbefehl, durchläuft die
+  normale Code-Review des Projekts. Alternativ läuft eine neue Sonde gegen
+  Wegwerf-Eingaben, mit eingeschränkten Rechten (keine Zugangsdaten, kein
+  Netz, wo möglich) und einer Zeitgrenze. Ein Wegwerf-Arbeitsverzeichnis
+  allein beschränkt weder Zugangsdaten noch externe Wirkungen.
+- **Routing und Reihenfolge** dürfen geschützte Knoten nicht mittelbar
+  umgehen (§4).
 
 ## 7. Schleifen
 
@@ -176,7 +240,8 @@ andere Modellfamilie verlangen, gilt das weiter, sofern verfügbar.
 | Änderung | Steward | Owner |
 |---|---|---|
 | Vorschlag jeder Art | ✓ | — |
-| Neuer Knoten in `shadow`/`warn` | ✓ | — |
+| Bereits geprüften Knoten in `shadow`/`warn` setzen | ✓ | — |
+| Neuen ausführbaren Knoten einführen | über normale Code-Review oder als eingeschränkte Sonde (§6.3) | — |
 | Neuer Knoten auf `block` | ✓ nach Lebenszyklus | sieht es im Bericht |
 | Ungeschützten Knoten abschwächen (`block` → `sampled` → `off`) | **v2.68:** Owner bestätigt jeden Schritt mit einer Zeile. **v2.69:** Steward allein, sobald der Bewerter (§9) steht | ✓ |
 | Geschützten Knoten abschwächen | Vorschlag mit Beleg | ✓ |
@@ -236,7 +301,7 @@ läuft durch denselben Lebenszyklus: Das Gate beginnt im `shadow`.
 
 ### Was bleibt (die Refutation hatte recht)
 
-| Befund | In Revision 4 |
+| Befund | In Revision 4 und 5 |
 |---|---|
 | R1-1, R2-1: Schleife verschiebt ihren Maßstab | Leitplanken und geschützte Knoten nur durch den Owner (§4) |
 | R1-1, R2-2: Bewerter nicht isoliert | §9; bis dahin Owner-Bestätigung jedes Abschwächens |
@@ -248,7 +313,22 @@ läuft durch denselben Lebenszyklus: Das Gate beginnt im `shadow`.
 | R1-7: Übernahme geht verloren | der Modus steht in `gates.local.json` bzw. `adopted[]`; er bleibt, bis ihn jemand ändert |
 | R2-7: Wächter dürfen nicht pausieren | §7 Wächter immer an, eigenes Budget, entscheiden nur über Rückbau |
 
-### Was bewusst anders gelöst wird (Verhältnismäßigkeit)
+### Runde 3 (verhältnismäßig, Verdict `revise`)
+
+| # | Befund | In Revision 5 |
+|---|---|---|
+| 1 | Fix-Commit beweist keinen echten oder eindeutigen Fang | §5.2 Sichtung mit vier Kategorien; Unbekanntes begründet keinen Rückbau; Ersatznachweis durch Wiederholung bekannter Fehlerfälle; vorhandene Urteile des Gate-Runners statt Zusatzläufen |
+| 2 | Nicht blockierend ist keine Rechtegrenze | §6.3 Ausführungsvertrag; §8 neue Befehle über Code-Review oder eingeschränkte Sonde |
+| 3 | Null Fänge in 10 % Stichprobe reicht nicht zum Abschalten | §6.1 nur ungeschützt und umkehrbar; 25–50 % über 4–6 Wochen bis 30–50 verschiedene Eingaben; originale Eingaben; Reststichprobe statt `off` |
+| 4 | Fenster-Rückbau braucht Records aktiver Änderungen und eine Sperre | §6.2 |
+| 5 | Unbekannte Token-Quellen als gemessen gemeldet | **Behoben in d6567c9**; Tests für reine Opak-Zeilen und unlesbare Transkripte, Mutationsprüfung |
+
+Antwort auf Frage 1 (Asymmetrie) in §3 eingearbeitet; Frage 5 (geschützte
+Knoten: wirksame Durchsetzung, projektspezifische Ergänzungen) in §4; Frage 7
+(nicht beide Bewährungsstufen erzwingen, keine Zusatzläufe, wo Urteile
+vorliegen) in §5.2 und §6.
+
+### Was bewusst anders gelöst wird (Verhältnismäßigkeit, in Runde 3 akzeptiert)
 
 | Befund | Statt | Begründung |
 |---|---|---|
@@ -262,16 +342,24 @@ läuft durch denselben Lebenszyklus: Das Gate beginnt im `shadow`.
 - **A1** When a gate runs, the gate runner shall append gate, mode, commit,
   branch or issue, result, duration and reason to the gate event log.
 - **A2** When `process_kpis.py nodes` runs, the system shall report per node its
-  cost, blocks, true catches, false alarms and unique catches, each with
-  evidence count and data quality, and shall report unique catches as
-  estimated with their sample size.
+  gross cost, raw blocks, triaged blocks by category and unique catches, each
+  with the number of distinct inputs and data quality, and shall report
+  triaged and unique figures as estimated with their sample size.
 - **A3** When a node is in `shadow` or `sampled` mode, it shall run and record
   its verdict without blocking.
-- **A4** When a `sampled` node records a true catch, the sentinel shall set the
-  node back to `block` and record why.
-- **A5** If a guardrail crosses its threshold, then the sentinel shall roll back
-  the node changes in its window, newest first, and report the breach to the
-  owner.
+- **A4** When a `sampled` node records an actionable unexpected failure on the
+  original candidate revision, the sentinel shall set the node back to `block`
+  pending triage and record why.
+- **A5** If a guardrail crosses its threshold, then the sentinel shall restore
+  the recorded previous configuration of every still-active change that
+  touches the guardrail, newest first, mark each as locked against
+  reactivation until triaged, and report the breach to the owner.
+- **A5b** When a node is weakened to `off`, the system shall refuse unless a
+  replacement proof or an owner decision line is recorded. A triage category
+  `unknown` shall not count as evidence for weakening.
+- **A5c** When the steward introduces a new executable check, the system shall
+  require it to come through code review or to run as a restricted probe
+  against disposable inputs with a timeout.
 - **A6** When the steward weakens a protected node or changes a guardrail,
   `optimize.py check` shall refuse the change unless an owner decision line
   covers it.
@@ -292,8 +380,8 @@ läuft durch denselben Lebenszyklus: Das Gate beginnt im `shadow`.
 
 | Release | Paket | Inhalt |
 |---|---|---|
-| v2.68 | P1 Messen | Gate-Ereignisprotokoll; `nodes`; Überlappungsstichprobe; `losses` (vier Maße); `outcomes`; Herkunft auf zwei Achsen |
-| v2.68 | P2 Modi und Wächter | `block/warn/shadow/sampled/off` je Knoten; Leitplanken im Mandat; Wächter mit automatischem Rückbau; Owner-Bestätigung für jedes Abschwächen |
+| v2.68 | P1 Messen | Gate-Ereignisprotokoll; `nodes` mit Sichtung und Ersatznachweis; `losses` (vier Maße); `outcomes`; Herkunft auf zwei Achsen |
+| v2.68 | P2 Modi und Wächter | `block/warn/shadow/sampled/off` je Knoten; Records aktiver Änderungen mit vorheriger Konfiguration; Leitplanken im Mandat; Wächter mit Rückbau und Sperre; Ausführungsvertrag; Owner-Bestätigung für jedes Abschwächen |
 | v2.68 | P3 Schleifen | Aufträge wöchentlich und monatlich, harness-neutral; Berichtsformat |
 | v2.69 | P4 Bewerter | vertrauenswürdiger Bewerter; danach darf der Steward ungeschützte Knoten selbst abschwächen |
 | später | P5–P7 | Offline-Screen, Inert-Grenze für autonome Releases, Upstream-Kanal und Routine-Lease |
@@ -304,12 +392,10 @@ Optimierungsgrundlage, noch bevor die Schleife etwas verändert.
 
 ## 14. Offen an die nächste Prüfung
 
-1. Ist „echter Fang = Blockade mit folgendem Fix-Commit“ ein tragfähiges Maß,
-   oder lässt es sich durch triviale Fix-Commits aufblähen?
-2. Reicht die Überlappungsstichprobe, um eindeutige Fänge zu schätzen, wenn
-   nachgelagerte Knoten auf einem blockierten Stand anders reagieren als auf
-   einem korrigierten?
-3. Ist eine Stichprobe von 10 % für abgeschwächte Knoten genug, und wie lang
-   muss die Bewährungszeit mindestens sein?
-4. Sind die voreingestellten geschützten Knoten richtig gewählt — zu viele
-   (Optimierung blockiert) oder zu wenige?
+Runde 3 hat die Fragen von Revision 4 beantwortet. Offen bleibt, was erst die
+Umsetzung zeigt:
+
+1. Wie viel Sichtungsaufwand pro Woche fällt real an, und trägt er sich gegen
+   die Ersparnis?
+2. Welche Prüfungen eines Projekts sind tatsächlich leicht umkehrbar und
+   damit für die Stichprobe geeignet?
