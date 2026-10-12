@@ -27,6 +27,7 @@ window.
 | What the machine and CI need (German) | [`docs/SYSTEM-REQUIREMENTS.md`](docs/SYSTEM-REQUIREMENTS.md) |
 | This repository's dependencies (generated, also as CycloneDX) | [`docs/SBOM.md`](docs/SBOM.md) · [`docs/sbom.cdx.json`](docs/sbom.cdx.json) |
 | Why the standard stack (Spec Kit comparison and design, German) | [`docs/analysis/`](docs/analysis/) |
+| Maintaining this repository: the process maintainer's role, generality proof (German) | [`MAINTAINING.md`](MAINTAINING.md) |
 
 ## The essentials
 
@@ -46,6 +47,10 @@ window.
   session per phase with the model from the model policy, decides the
   agents' questions (only product principles go to the owner as a choice),
   and merges finished branches as a batch.
+- **Self-improving, within limits.** The steward turns recurring bottlenecks
+  into improvement records: a hypothesis, criteria frozen before the trial, a
+  bounded pilot behind a flag, and a decision nobody makes about their own
+  change (`docs/process/optimization.md` in every set-up repository).
 - **Three harnesses.** Claude Code, GitHub Copilot or a neutral `AGENTS.md`;
   methodology and gates are the same in all of them.
 
