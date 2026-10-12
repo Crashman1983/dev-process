@@ -338,6 +338,67 @@ def _write_ledger(path: Path | None, notes: set[str]) -> None:
         pass  # a ledger that cannot be written just means notes print again
 
 
+# Every gate run leaves one line in the common git dir (shared by all
+# worktrees, never the tree): what it cost and what it found. `process_kpis.py
+# nodes` reads it to weigh each gate's cost against its catches
+# (docs/process/optimization.md, "The process as a check graph"). An
+# observation, not a duty: a log that cannot be written changes no verdict.
+EVENTS_NAME = "process-gate-events.jsonl"
+_EVENTS_MAX_BYTES = 5_000_000  # then the log rolls over to .1 (one generation kept)
+
+
+def _git_out(root: Path, *args: str) -> str | None:
+    try:
+        proc = subprocess.run(["git", "-C", str(root), *args],
+                              capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return proc.stdout.strip() if proc.returncode == 0 else None
+
+
+def _events_path(root: Path) -> Path | None:
+    common = _git_out(root, "rev-parse", "--git-common-dir")
+    if not common:
+        return None
+    path = Path(common)
+    return (path if path.is_absolute() else root / path) / EVENTS_NAME
+
+
+def _run_context(root: Path, pushed: str) -> dict:
+    """What this run checked: the commit, whether the tree held more than it
+    (the gates read the working tree), the branch, and where it ran."""
+    head = _git_out(root, "rev-parse", "HEAD")
+    try:
+        dirty = subprocess.run(["git", "-C", str(root), "diff", "--quiet", "HEAD", "--"],
+                               capture_output=True, timeout=30).returncode == 1
+    except (OSError, subprocess.TimeoutExpired):
+        dirty = None
+    branch = _git_out(root, "rev-parse", "--abbrev-ref", "HEAD")
+    return {"head": head, "dirty": dirty, "pushed": pushed or None,
+            "branch": None if branch in (None, "HEAD") else branch,
+            "ci": bool(os.environ.get("CI"))}
+
+
+def _record_event(path: Path | None, context: dict, gate: str, *, mode: str,
+                  outcome: str, rc: int | None, duration_s: float,
+                  reason: str | None = None) -> None:
+    if path is None:
+        return
+    import datetime as _dt  # noqa: PLC0415
+    import json  # noqa: PLC0415
+
+    row = {"ts": _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds"),
+           "gate": gate, "mode": mode, "outcome": outcome, "rc": rc,
+           "duration_s": round(duration_s, 3), "reason": reason, **context}
+    try:
+        if path.is_file() and path.stat().st_size > _EVENTS_MAX_BYTES:
+            os.replace(path, path.with_name(path.name + ".1"))
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(row) + "\n")
+    except OSError:
+        pass  # an unwritable log loses an observation, never a verdict
+
+
 def _emit(output: str, known: set[str], seen: set[str], show_all: bool) -> int:
     """Print a gate's output, holding back notes already in the ledger.
     Returns the number of suppressed notes."""
@@ -413,11 +474,15 @@ def main() -> int:
         # stderr: pre-commit shows a passing hook's stdout to nobody
         print(f"gate-runner: {LOCAL_GATES} replaces the template's {name} gate", file=sys.stderr)
     in_flight: dict = {}
+    events = _events_path(root)
+    context = _run_context(root, pushed) if events is not None else {}
+    mode = "warn" if warn else "block"
     for name in active:
         _key, cmd = gates[name]
         spec = local.get(name, {})
         if spec.get("paths") and _untouched(root, spec["paths"], in_flight):
             print(f"== {name}: no path in flight matches {', '.join(spec['paths'])} — not run ==")
+            _record_event(events, context, name, mode=mode, outcome="skipped", rc=None, duration_s=0.0)
             continue
         # an `exec` argv runs as given: the project owns what it names
         script = None if spec.get("exec") else root / cmd[1]
@@ -425,6 +490,7 @@ def main() -> int:
             print(f"gate-runner: {name} is named in {LOCAL_GATES} but {cmd[1]} is missing",
                   file=sys.stderr)
             failed.append(name)
+            _record_event(events, context, name, mode=mode, outcome="missing", rc=None, duration_s=0.0)
             continue
         if script is not None and not script.is_file():
             # a module enabled in the manifest whose gate script is missing is
@@ -435,8 +501,10 @@ def main() -> int:
                   f"hand, revert it and enable the module via `copier update "
                   f"--data` instead (see BOOTSTRAP 'Later')", file=sys.stderr)
             failed.append(name)
+            _record_event(events, context, name, mode=mode, outcome="missing", rc=None, duration_s=0.0)
             continue
         print(f"== running {name} ==")
+        started = time.monotonic()
         try:
             # a child that declares its own dependencies (PEP 723) runs through
             # the launcher that resolves them, not this runner's interpreter.
@@ -461,6 +529,11 @@ def main() -> int:
                 print(f"gate-runner: {name}: {why}", file=sys.stderr)
                 reasons[name] = f"exceeded {GATE_TIMEOUT_S}s: {why}"
             rc = 1
+            _record_event(events, context, name, mode=mode, outcome="timeout", rc=None,
+                          duration_s=killed_at - started, reason=reasons.get(name))
+        else:
+            _record_event(events, context, name, mode=mode, outcome="pass" if rc == 0 else "fail",
+                          rc=rc, duration_s=time.monotonic() - started)
         if rc != 0:
             failed.append(name)
     _write_ledger(ledger, seen)
