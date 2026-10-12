@@ -8,10 +8,12 @@ process.
 - `plans/` stores active implementation plans and archived plans.
 - `state/` stores branch-scoped context and next steps.
 - `inbox.md` collects work you noticed but will not do now (triage later).
+- `optimizations/` holds the process-improvement records, one per experiment
+  (`docs/process/optimization.md`); they are never pruned.
 - `reviews/` holds review/audit reports (prompt, verdict, findings); with the
   `github-issues` module they are published as issues.
 
-`inbox.md` and `reviews/` are created on first use — they are not seeded.
+`inbox.md`, `reviews/` and `optimizations/` are created on first use — they are not seeded.
 
 Keep entries short, factual, dated, and in English. Git records what changed;
 these files record reasoning and handoff state.
