@@ -1168,11 +1168,11 @@ aktualisieren, `v2.28.1`.
 
 **v2.66.0 — Dispatch und Zug: eine Regel für eigene Pläne, Plan-Review fail-closed (#207, #204, #201).** Vom Owner am 2026-10-12 als ein Release freigegeben. Tier 3, weil Gate-Code betroffen ist.
 - **Eine Regel für „eigene Pläne“ (#204).** `check_review.own_plans` ist der eine Eigentümer. Eigen ist ein Plan, den der Branch hinzufügt, oder ein Plan auf der Basis, der eine Issue des Branches deklariert. Ein nur umbenannter Plan ist neu, wenn sich seine Issues ändern; ein gelöschter Plan ist nie eigen.
-  - **Dispatch** zählte bisher nur hinzugefügte Pläne. Fügt ein Branch keinen eigenen Plan hinzu, wird er jetzt nach den main-Plänen seiner Issues beurteilt, die er ändert. Ändert er seinen Plan auf main, startet eine Plan-Review, und deren Pass gibt die Chain frei.
-  - **Ein Branch mit eigenem Plan** wird nach diesem beurteilt. Ein Paket, das den Plan seines Epics auf main abhakt, wartet also nicht auf einen Epic-Pass (Refute: die Chain hätte dort für immer gewartet).
+  - **Dispatch** zählte bisher nur hinzugefügte Pläne. Jetzt zählen auch die main-Pläne, die der Branch für eine Issue ändert, für die er dispatcht wurde (`dispatch.review_issues`; ohne Dispatch-Eintrag die führende Zahl im Branch-Namen). Ändert ein Branch seinen Plan auf main, startet eine Plan-Review, und deren Pass gibt die Chain frei.
+  - **Ein Paket, das für #72 auf `70-pkg-…` dispatcht wurde,** prüft den Plan seines Epics #70 nicht, auch wenn es ihn abhakt. Die Chain wartet deshalb nicht auf einen Epic-Pass. Refute: Mit allen Issues des Branches hätte sie dort für immer gewartet. Mit „ein eigener Plan schließt main-Pläne aus“ wäre ein Delta-Plan an der Review des geänderten Tier-3-Plans derselben Issue vorbeigegangen.
   - **Abschluss und Tier der nächsten Phase** fragen weiter nur hinzugefügte Pläne.
   - **Eigentümer:** Die Issues eines Branches liefert `dispatch.branch_issues`, den Issue-Parser `check_review.local_issue_numbers`.
-  - **Prompt und Wartemeldung** einer Plan-Review nennen die fälligen Pläne mit Pfad, auch bei `--plan-review` und in der Chain.
+  - **Prompt und Wartemeldung** einer Plan-Review nennen die fälligen Pläne mit Pfad, auch bei `--plan-review` und in der Chain. Eine Remote-Session liest sie von origin. Der Prompt verlangt einen Pass je Plan.
 - **`plan_review_due` scheitert sicher (#207).** In jedem Zweifelsfall wählt dispatch die Code-Review, und die Session sagt selbst, wenn kein Code da ist. Das gilt für:
   - origin ist nicht erreichbar; das gilt nicht mehr als „Branch fehlt“;
   - eine Remote-Session; sie wird nur nach origin beurteilt, nie nach einem lokalen Vorsprung;
@@ -1186,7 +1186,7 @@ aktualisieren, `v2.28.1`.
   - Die Spec-Kit-Identität (`tasks.md` gegenüber `plan.md`) ist nicht vereinheitlicht.
   - Ein veraltetes `origin/main` neben einem frischen `main` führt weiter zur Code-Review, also in die sichere Richtung.
 - **Für Kenni:** Keine Migration, die Änderung kommt mit dem Template-Update. Zwei Verhaltensänderungen gibt es:
-  - Ein Branch ohne eigenen Plan, der einen main-Plan seiner Issue ändert, ging bisher direkt nach execute. Jetzt braucht er vorher einen `-plan`-Pass.
+  - Ein Branch, der einen main-Plan der Issue ändert, für die er dispatcht wurde, ging bisher direkt nach execute. Jetzt braucht er vorher einen `-plan`-Pass für diesen Plan.
   - Eine `start --phase review` für einen solchen Branch wird zur Plan-Review statt zur Code-Review ohne Code.
 
 **v2.65.0 — Umgebungs-Preflight vor jedem Testlauf (#209).** Aus Kenni auf v2.64 (#2521), vom Owner am 2026-10-10 freigegeben. Tier 3, weil Gate-Code betroffen ist. In v2.64 hatte nur der Zug ein `--preflight`. In Kenni kam ein kaputtes Worktree-venv an einem Tag dreimal als rote certify- und Operator-Tests an.
