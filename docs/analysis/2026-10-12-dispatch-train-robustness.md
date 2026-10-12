@@ -88,3 +88,11 @@ Ergebnis: Block. Der Lauf fand einen BLOCKER, einen MAJOR und zwei MINOR, alle b
   - `start` reicht `remote` weiter.
 - **R3 Fällige Pläne (MINOR).** Prompt und Wartemeldung nennen nur Pläne ab Tier 2 ohne Pass (`uncleared_plans`), nicht jeden eigenen Plan.
 - **R4 Kosten (MINOR).** `_stacked_renames` überspringt Kandidatenpaare, die über der Basis keinen gemeinsamen Commit haben.
+
+## Refute Runde 2 — Änderungen
+
+Ergebnis: pass mit einem MAJOR. Der MAJOR und zwei MINOR sind behoben.
+
+- **R5 Unterscheidung nach dispatchter Issue (MAJOR).** Die Rückfallregel aus R1 ließ einen Fall durch: Ein Branch fügt einen Delta-Plan hinzu und ändert dabei den Tier-3-Plan derselben Issue auf main. Dieser Plan bekam dann keine Plan-Review, was #204 widerspricht. Neue Regel: Basis-Pläne zählen für die Issues, für die der Branch dispatcht wurde (`review_issues`). Ohne Dispatch-Eintrag zählt die führende Zahl des Branch-Namens. Ein Paket, das für #72 dispatcht wurde, liest den Epic-Plan von #70 nicht. Ein Branch für #70 liest den main-Plan von #70, ob er einen eigenen Plan hinzufügt oder nicht.
+- **R6 Remote (MINOR).** Eine erzwungene oder verkettete Plan-Review einer Remote-Session nennt die Pläne nach dem Stand auf origin.
+- **R7 Mehrere Pläne (NIT).** Der Prompt verlangt einen Pass je Plan. Die Wartemeldung der Chain nennt die offenen Pläne, und ein Test prüft das.

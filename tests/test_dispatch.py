@@ -2224,9 +2224,30 @@ def test_a_package_ticking_its_epics_plan_is_judged_by_its_own_plan(render, tmp_
     _git(out, "commit", "-q", "-m", "the package's own plan")
     _plan_pass(out, 2, work="2026-10-12-pkg")
     mod = _load_dispatch(out)
+    mod._remember_issue(out, 72, "70-slice")  # dispatched for the package's issue, not the epic's
     assert mod.plan_review_state(out, out, "70-slice") == (2, True)
     _git(out, "checkout", "-q", "main")
     assert mod.plan_review_due(out, "70-slice") is None
+
+
+def test_a_branch_adding_a_delta_plan_still_owes_its_main_plan_a_review(render, tmp_path, capsys,
+                                                                       monkeypatch):
+    """Refute v2.66 round 2: deciding by "adds a plan" skipped the amended Tier 3
+    plan of the very issue the branch was dispatched for."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    rel = _epic_on_main(out, issue=70, passed=False)  # 70-slice amends #70's plan on main
+    (out / ".process-work/plans/2026-10-12-delta.md").write_text("# delta\n\ntier: 2\nissue: #70\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "a delta plan")
+    _plan_pass(out, 2, work="2026-10-12-delta")
+    mod = _load_dispatch(out)
+    mod._remember_issue(out, 70, "70-slice")
+    assert mod.plan_review_state(out, out, "70-slice") == (3, False)
+    assert mod.uncleared_plans(out, _git(out, "rev-parse", "HEAD").stdout.strip(), "70-slice") == [rel]
+    # the chain says which pass it waits for
+    _chain_planned(mod, out, monkeypatch, phase="review", plan_review=True, state="review-pass",
+                   branch="70-slice")
+    assert f"waiting for the `-plan` pass on its worktree for {rel}" in capsys.readouterr().out
 
 
 def test_the_chain_passes_the_branch_to_the_plan_pass_it_waits_for(render, tmp_path, monkeypatch):

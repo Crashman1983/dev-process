@@ -679,6 +679,19 @@ def branch_issues(root: Path, branch: str) -> set[str]:
     return ({issue} if issue else set()) | {str(i) for i in issues_of(root, branch)}
 
 
+def review_issues(root: Path, branch: str) -> set[str]:
+    """The issues whose plans on the base a review of `branch` must read: the
+    ones dispatch placed on it, else the number its name leads with (#204).
+    Not `branch_issues`: a package dispatched for #72 onto `70-pkg-…` is not
+    #70's plan review — ticking its epic's plan on main reviews nothing of
+    the epic (refute v2.66: the chain waited for an epic pass forever)."""
+    placed = issues_of(root, branch)
+    if placed:
+        return {str(i) for i in placed}
+    issue = _review.branch_issue(branch)
+    return {issue} if issue else set()
+
+
 def issues_of(root: Path, branch: str) -> set[int]:
     """The issues dispatch placed on `branch` — exactly those find_branch
     resolves to it (refutation: a record left from before a re-dispatch kept
@@ -1101,7 +1114,7 @@ def prompt_for(phase: str, issue: int, tier: int | None, branch: str, model: str
                 f"blocking review round the plan carries `ROOT-CAUSE work=<id> round=<r>: <cause> — <test that "
                 f"failed before the fix>` and `attest.py --dry-run` names no missing root cause before you report." + tail)
     if plan_review:
-        verdict = ("attest the pass with `attest.py --plan-review` and report `review-pass`, or report "
+        verdict = ("attest each plan's pass with `attest.py --plan-review` and report `review-pass`, or report "
                    "`blocked` with the findings" if attests else
                    "produce the verdict and findings as report text in your output; do not run attest.py or "
                    f"git — the steward attests in the branch's worktree with `--plan-review --model {model} "
@@ -1109,7 +1122,7 @@ def prompt_for(phase: str, issue: int, tier: int | None, branch: str, model: str
         # the plan that is due may be an epic's a package changed, not the issue's own (#204)
         which = (f"the plan(s) {', '.join(f'`{p}`' for p in plan_paths)}" if plan_paths
                  else f"the plan of issue #{issue}")
-        return (f"/review {which} on branch `{branch}` before any code exists: bundle it "
+        return (f"/review {which} on branch `{branch}` before any code exists: bundle each "
                 f"with `make_review_bundle.py --plan <its slug>` and attack it with the plan brief of "
                 f"docs/process/refute.md (\"Refuting a plan\"); {verdict}; stop; never edit the plan." + tail)
     if not attests:
@@ -1585,7 +1598,8 @@ def start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str |
     elif plan_review:
         # a forced or chained plan review names its plans too: the due one may
         # be another than the issue's own (#204)
-        tip = _out(root, "rev-parse", "--verify", "-q", f"{branch}^{{commit}}") or _remote_head(root, branch)
+        tip = _remote_head(root, branch) if remote else (
+            _out(root, "rev-parse", "--verify", "-q", f"{branch}^{{commit}}") or _remote_head(root, branch))
         plan_paths = uncleared_plans(root, tip, branch) if tip else []
     prompt = prompt_for(phase, issue, tier, branch, model, remote=remote, channel=channel, effort=effort,
                         attests=not other_harness, plan_review=plan_review, plan_paths=plan_paths)
@@ -2157,14 +2171,12 @@ def _own_plans_on_origin(root: Path, branch: str, local: bool = False) -> tuple[
 def own_plans_at(root: Path, tip: str, branch: str = "", *, include_base: bool = False) -> list[str]:
     """The active plans and Spec Kit tasks of the commit `tip` that are its
     own (`check_review.own_plans`, the rule the train asks too): the ones it
-    adds. With `include_base` and the `branch`, a branch that adds none is
-    judged by the plans on the base it changes that declare one of its issues
-    (#204: a branch changing its plan on main is a plan to review). A branch
-    with a plan of its own is judged by that one: a package ticking its
-    epic's plan on main is not the epic's plan review (refute: the chain
-    waited for an epic pass the package's review never gives). Completion
-    and the next phase's tier ask without `include_base`. Another work's
-    plan it only touched is never its own."""
+    adds; with `include_base` and the `branch`, also the plans on the base it
+    changes that declare an issue the branch was dispatched for
+    (`review_issues`; #204: a branch changing its plan on main is a plan to
+    review). Completion and the next phase's tier ask without it: an epic's
+    plan a package ticks is not the package's to finish. Another work's plan
+    it only touched is never its own."""
     base = _integration_base(root, tip)
     if not base:
         return []
@@ -2178,10 +2190,9 @@ def own_plans_at(root: Path, tip: str, branch: str = "", *, include_base: bool =
                     or re.fullmatch(r"specs/[^/]+/tasks\.md", rel))
 
     # without the branch's issues no plan on the base can be its own
-    issues = branch_issues(root, branch) if include_base and branch else set()
+    issues = review_issues(root, branch) if include_base and branch else set()
     own = _review.own_plans(root, base, tip, issues, read, (".process-work/plans", "specs"), is_plan) or []
-    added = [rel for rel, _plain, was_added in own if was_added]
-    return added or [rel for rel, _plain, _was_added in own]
+    return [rel for rel, _plain, _added in own]
 
 
 def work_complete_on_origin(root: Path, branch: str, local: bool = False) -> bool | None:
@@ -2254,9 +2265,9 @@ def plan_review_state(root: Path, wt: Path, branch: str = "") -> tuple[int | Non
 
 
 def plan_review_state_at(root: Path, head: str, branch: str = "") -> tuple[int | None, bool]:
-    """`plan_review_state` for the commit `head`; with the `branch`, a branch
-    adding no plan is judged by the plans on the base it changes that declare
-    one of its issues (#204, `own_plans_at`)."""
+    """`plan_review_state` for the commit `head`; with the `branch`, the plans
+    on the base it changes for an issue it was dispatched for count too (#204,
+    `own_plans_at`)."""
     states = _plan_states(root, head, branch)
     if not states:
         return None, False
