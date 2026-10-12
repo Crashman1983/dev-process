@@ -88,9 +88,10 @@ for the core — then it is built locally.
 One file per improvement: `.process-work/optimizations/OPT-NNNN-<slug>.md`,
 created by `uv run scripts/process/optimize.py new --title … --mechanism …`.
 Its header carries the machine fields, its sections the substance. The
-record is **plain Markdown** — no HTML, no comment, no code fence, no line
-break but `\n` — so what the tool reads is what a reader sees; placeholders
-are `TODO` paragraphs. The header holds `key: value` lines, the Log only
+record is **plain Markdown** — no HTML or comment (not even in inline code:
+write `a < b`), no code fence, no link reference definition, no line break
+but `\n` — so what the tool reads is what a reader sees; placeholders are
+`TODO` paragraphs. The header holds `key: value` lines, the Log only
 the lines `optimize.py` writes, and the Log is append-only; below
 `## Result` only Result, Decision and Log stand as headings; a heading or
 header field that appears twice is a problem; names are compared without

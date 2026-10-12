@@ -261,3 +261,13 @@ Ergebnis: block, 2 BLOCKER, 3 MAJOR, 4 MINOR. Gemeinsame Ursache: Ein gerenderte
   - CRLF;
   - doppelte veränderliche Felder;
   - ehrlicher Lebenszyklus ohne Fehlalarm, jetzt auch als Test mit CRLF.
+
+## Refute Runde 4 — Änderungen
+
+Ergebnis: block, 2 MAJOR, 1 MINOR. Keiner betraf noch Einfrieren, Log, Rechte oder die `## Result`-Grenze; diese Teile prüfte der Prüfer am Code ohne Fund. Beide MAJOR versteckten Text *innerhalb* eines Absatzes, und zwar vor dem Einfrieren, also vor dem Reviewer: Die Ausnahme für Inline-Code folgte nicht den Code-Span-Regeln von CommonMark, und Link-Referenzdefinitionen rendern als nichts.
+
+- **R4-1:** Die Inline-Code-Ausnahme entfällt. `<` vor einem Buchstaben, `!`, `/` oder `?` ist überall abgelehnt, auch in Backticks. Ausgenommen sind URL- und E-Mail-Autolinks.
+- **R4-2:** Link-Referenzdefinitionen sind abgelehnt.
+- **R4-3:** E-Mail-Autolinks sind erlaubt. `x<y` bleibt abgelehnt; das ist eine bewusste Einschränkung, man schreibt `x < y`.
+
+Damit endet die Refute-Folge: Die Funde sanken von „Bedingungen nachträglich lockern“ (Runden 1–3) auf „vor dem Review unsichtbarer Text“ (Runde 4). Die bekannten Grenzen stehen im Vertrag: selbst erklärte Namen, umgeschriebene Historie, flache Klone.
