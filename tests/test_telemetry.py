@@ -652,3 +652,67 @@ def test_losses_cli_prints_each_measure_with_its_quality(render, tmp_path):
     assert "four measures, never summed" in r.stdout
     assert "occupancy   5.0 h [measured" in r.stdout and "delay       18.5 issue-h" in r.stdout
     assert "tokens      not measured [missing" in r.stdout
+
+
+def _issue(n, title, state="OPEN", labels=(), created="2026-01-05T10:00:00Z", closed=None, subs=()):
+    return {"number": n, "title": title, "state": state, "createdAt": created, "closedAt": closed,
+            "labels": list(labels), "sub_total": len(subs),
+            "sub_done": sum(1 for c in subs if c["state"] == "CLOSED"), "subs": list(subs)}
+
+
+def test_outcomes_measures_epics_to_usable_and_bug_origin_on_two_axes(render, tmp_path):
+    import json
+    from datetime import datetime, timezone
+    out = _flow_repo(render, tmp_path)
+    m = _flow_module(out)
+    now = datetime(2026, 12, 31, tzinfo=timezone.utc)
+    accept = _issue(12, "Acceptance run", "CLOSED", ["acceptance"], closed="2026-11-30T00:00:00Z")
+    issues = [
+        _issue(100, "[EPIC] Documents", subs=[accept, _issue(13, "part", "CLOSED", closed="2026-02-01T00:00:00Z")]),
+        _issue(101, "Feature with children", subs=[_issue(14, "part")]),
+        _issue(102, "[EPIC] Later", subs=[_issue(15, "Acceptance", labels=["acceptance"])]),
+        _issue(200, "crash after #12", "CLOSED", ["bug", "cause:regression", "channel:operator", "priority:high"],
+               created="2026-12-01T00:00:00Z", closed="2026-12-03T00:00:00Z"),
+        _issue(201, "old flaw", labels=["bug", "cause:preexisting", "channel:agent"], created="2026-12-02T00:00:00Z"),
+        _issue(202, "no origin", labels=["bug"], created="2026-12-02T00:00:00Z"),
+    ]
+    (out / "docs/process/optimization.local.json").write_text(
+        json.dumps({"outcomes": {"usable": "label:acceptance"}}), encoding="utf-8")
+    t = m.outcomes_table(out, days=3650, now=now, fetch=lambda _root: (issues, None))
+    ep = {e["number"]: e for e in t["epics"]}
+    assert set(ep) == {100, 101, 102}  # native sub-issues or the title prefix
+    assert ep[100]["quality"] == "measured" and ep[100]["usable_at"] is not None  # #12 deployed in the flow
+    assert ep[101]["quality"] == "missing"  # no acceptance sub-issue: the marker says nothing
+    assert ep[102]["quality"] == "open" and ep[102]["usable_at"] is None
+    assert t["o1_epic_usable"]["n"] == 1 and t["o1_epic_usable"]["quality"] == "measured"
+    bo = t["bug_origin"]
+    assert bo["bugs"] == 3 and bo["with_cause"] == 2 and bo["with_channel"] == 2
+    assert bo["coverage"] == 0.67 and bo["blind_spot"] is True
+    # the owner-reported regression counts in the regression share and in O2
+    assert bo["regression_share"] == 0.5 and bo["quality"] == "estimated"
+    assert t["o2_disruptive_fixed"] == {"median_days": 2.0, "n": 1, "quality": "proxy", "open": 0}
+
+
+def test_outcomes_default_marker_is_a_proxy_and_no_gh_is_unavailable(render, tmp_path):
+    from datetime import datetime, timezone
+    out = _flow_repo(render, tmp_path)
+    m = _flow_module(out)
+    now = datetime(2026, 12, 31, tzinfo=timezone.utc)
+    epic = _issue(100, "[EPIC] Done", "CLOSED", closed="2026-03-01T00:00:00Z")
+    t = m.outcomes_table(out, days=3650, now=now, fetch=lambda _root: ([epic], None))
+    assert t["epics"][0]["quality"] == "proxy" and t["epics"][0]["days_to_usable"] == 54.58
+    assert t["bug_origin"]["coverage"] is None and t["bug_origin"]["blind_spot"] is False
+    gone = m.outcomes_table(out, now=now, fetch=lambda _root: (None, "gh is not installed"))
+    assert gone == {"available": False, "reason": "gh is not installed", "days": 90}
+
+
+def test_outcomes_cli_text_names_the_blind_spot_or_says_unavailable(render, tmp_path, capsys):
+    out = _flow_repo(render, tmp_path)
+    m = _flow_module(out)
+    m._gh_issues = lambda _root: (None, "gh is not installed")
+    assert m.outcomes(out) == 0
+    assert "unavailable: gh is not installed — outcomes skipped (not zero)" in capsys.readouterr().out
+    m._gh_issues = lambda _root: ([_issue(202, "no origin", labels=["bug"], created="2099-01-01T00:00:00Z")], None)
+    assert m.outcomes(out) == 0
+    text = capsys.readouterr().out
+    assert "1 bug(s), cause and channel on 0% (target 80%) — blind spot" in text
