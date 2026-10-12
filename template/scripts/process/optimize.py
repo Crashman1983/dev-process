@@ -676,6 +676,15 @@ def _conflicts(parsed: dict[Path, dict]) -> dict[Path, list[str]]:
                 others = ", ".join(o.name for o in ps if o != p)
                 out[p].append(f"{others} pilots the same {key} {value!r} — one experiment per "
                               f"{key} at a time, or the results confound each other")
+    # overlapping selections confound as surely as a shared name: two trials on
+    # one class of work both claim the same saving (refutation, cross-model) —
+    # until assignment is recorded per unit of work, one live trial per project
+    live = [p for p, rec in parsed.items() if rec["fields"].get("state") == "piloting"]
+    if len(live) > 1:
+        for p in live:
+            others = ", ".join(o.name for o in live if o != p)
+            out[p].append(f"{others} pilots too — one live trial per project, or their effects "
+                          f"cannot be told apart")
     names = {p.name[:8] for p in parsed}
     for p, rec in parsed.items():
         for key in ("supersedes", "superseded-by"):
@@ -708,40 +717,61 @@ def check_all(root: Path, *, history: bool = True,
     return per, general
 
 
+class Activation(tuple):
+    """(record, why) that is truthy only when an experiment is on. A bare
+    tuple is always true — `if optimize.active(...)` would have switched a
+    mechanism on for every project without a mandate (refutation, cross-model).
+    Unpacks like the pair it replaces: `record, why = active(...)`."""
+
+    def __new__(cls, record: str | None, why: str):
+        return super().__new__(cls, (record, why))
+
+    def __bool__(self) -> bool:
+        return self[0] is not None
+
+    @property
+    def record(self) -> str | None:
+        return self[0]
+
+    @property
+    def why(self) -> str:
+        return self[1]
+
+
 def active(root: Path, flag: str, *, issue: int | None = None, tier: int | None = None,
-           klass: str | None = None, today: _dt.date | None = None) -> tuple[str | None, str]:
-    """(record name, why) — the record that switches `flag` on for this work,
-    or None and the reason it is off. Every doubt is off: whatever `check`
-    finds in the record, between it and another, or in the records' history
-    turns it off."""
+           klass: str | None = None, today: _dt.date | None = None) -> Activation:
+    """Activation(record, why): the record that switches `flag` on for this
+    work, or None and the reason it is off. Every doubt is off: whatever
+    `check` finds in the record, between it and another, or in the records'
+    history turns it off. `if active(...)` is true only when it is on."""
     today = today or _dt.date.today()
     if not filled(norm(flag)):
-        return None, "no flag named"
+        return Activation(None, "no flag named")
     mandate, mproblem = load_mandate(root)
     if mproblem or mandate is None:
-        return None, mproblem or f"no mandate ({MANDATE})"
+        return Activation(None, mproblem or f"no mandate ({MANDATE})")
     parsed = _parsed(root)
     hits = [(p, rec) for p, rec in parsed.items()
             if norm(rec["fields"].get("flag", "")) == norm(flag) and rec["fields"].get("state") == "piloting"]
     if not hits:
-        return None, f"no piloting record carries flag {flag!r}"
+        return Activation(None, f"no piloting record carries flag {flag!r}")
     if len(hits) > 1:
-        return None, f"{len(hits)} piloting records carry flag {flag!r} — ambiguous, off"
+        return Activation(None, f"{len(hits)} piloting records carry flag {flag!r} — ambiguous, off")
     index = history_index(root)
     gone = vanished(index, parsed)
     if gone:
-        return None, gone[0]
+        return Activation(None, gone[0])
     p, rec = hits[0]
     probs = problems(root, p, rec, mandate, history=index, today=today) + _conflicts(parsed).get(p, [])
     if probs:
-        return None, f"{p.name}: {probs[0]}"
+        return Activation(None, f"{p.name}: {probs[0]}")
     until = _date(rec["fields"]["until"])
     if until is None or today > until:
-        return None, f"{p.name}: past until {rec['fields'].get('until')} — evaluate it"
+        return Activation(None, f"{p.name}: past until {rec['fields'].get('until')} — evaluate it")
     select = parse_select(rec["fields"]["select"]) or {}
     if not selects(select, issue=issue, tier=tier, klass=klass):
-        return None, f"{p.name}: this work is outside select ({rec['fields']['select']})"
-    return p.name, "piloting"
+        return Activation(None, f"{p.name}: this work is outside select ({rec['fields']['select']})")
+    return Activation(p.name, "piloting")
 
 
 # --- writing -------------------------------------------------------------

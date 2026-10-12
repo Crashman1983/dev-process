@@ -1194,18 +1194,32 @@ def issue_token_usage(root: Path, issue: int) -> tuple[dict[str, int], int] | No
     """({field: tokens} for each TOKEN_FIELDS field the transcripts carry,
     sessions) — a field the harness does not write is absent, not 0; None
     when not measured (no glob, no dispatch record, or no transcript)."""
+    got = issue_token_coverage(root, issue)
+    return None if got is None else (got[0], got[1])
+
+
+def issue_token_coverage(root: Path, issue: int) -> tuple[dict[str, int], int, dict[str, int]] | None:
+    """(totals, sessions, {field: sessions that carried it}). A field some
+    sessions lack is a partial sum — a variant whose sessions write fewer
+    input fields would look cheaper (refutation, cross-model); readers mark
+    it so. An unreadable transcript carries no field."""
     files = _issue_transcripts(root, issue)
     if not files:
         return None
     totals: dict[str, int] = {}
+    covered: dict[str, int] = {}
     for f in sorted(files):
         try:
             text = Path(f).read_text(errors="ignore")
         except OSError:
             continue
+        seen = set()
         for field, n in USAGE_TOKENS.findall(text):
             totals[field] = totals.get(field, 0) + int(n)
-    return totals, len(files)
+            seen.add(field)
+        for field in seen:
+            covered[field] = covered.get(field, 0) + 1
+    return totals, len(files), covered
 
 
 def issue_tokens(root: Path, issue: int) -> tuple[int, int] | None:
