@@ -9,6 +9,14 @@ Mention the plan slug or issue ref (subject or body) when the commit implements
 planned work — that mention is what lets `git log --grep` correlate commits
 with the story/plan/review chain.
 
+**A fix for a defect that escaped earlier work names its origin** in a
+trailer: `Regression-of: #N` (the issue whose merged change introduced it;
+several trailers for several origins). It is the one link from a follow-up
+defect back to the work and the process version that produced it — the
+telemetry module's `process_kpis.py flow` counts it as an escape of `#N`,
+measured instead of guessed from file overlap (`docs/process/optimization.md`).
+Name the origin only when it is known; a guess is worse than none.
+
 ## Atomicity
 
 One logical change per commit. No multi-feature commits. A commit that touches tests

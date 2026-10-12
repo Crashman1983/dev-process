@@ -82,6 +82,20 @@ record, not an accident.
    Use `template-update: true` on the update's plan.
    Archive it before merging; finish and the merge train use the same proof.
 
+**Piloting a process change.** A process mechanism under trial arrives in
+an ordinary release behind a flag that is off by default, so every project
+that does not run the trial keeps today's behaviour. The project pilots it
+through an improvement record (`optimization.md`): the template update is a
+normal update as above; the trial starts when the record moves to
+`piloting`, applies only to the work its `select` names, and ends at its
+`until`. Rollback has two steps — move the record to `stopped` (the flag is
+off at once, no update needed), then take the record's written way back for
+anything the trial changed. A version pin is not a rollback: the template
+update that removes or changes the mechanism is its own update, reviewed
+like any other. A positive pilot does not adopt the mechanism into the
+process core; the process maintainer does that through the process
+repository's own review and release.
+
 **When to update.** On a schedule, not per release: every two to four weeks,
 or sooner when a release fixes a defect that blocks you or names a security
 fix. Each update is a branch, an acknowledgment and a train run; taking every
