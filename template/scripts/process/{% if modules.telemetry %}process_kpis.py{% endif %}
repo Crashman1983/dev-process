@@ -36,6 +36,9 @@ difference. See "honest ceiling" in the module doc.
   process_kpis.py losses        [--days D] [--json]
                                                 # four separate loss measures over flow:
                                                 # occupancy, delay, owner effort, tokens
+  process_kpis.py outcomes      [--days D] [--json]
+                                                # value: epics to usable, disruptive bugs to
+                                                # fixed; bug origin coverage (cause × channel)
   process_kpis.py nodes         [--days D] [--json]
                                                 # per gate: cost, blocks, distinct inputs,
                                                 # sole blocks, flips, triaged blocks
@@ -1054,6 +1057,205 @@ def losses(root: Path | None = None, *, days: int = _LOSS_DAYS, as_json: bool = 
     return 0
 
 
+# --- outcomes: what the work is for ------------------------------------------
+# Value (docs/process/optimization.md, "Outcomes"): an epic becomes usable, a
+# disruptive bug is fixed fast. An epic is an issue with native sub-issues (or
+# the mandate's title prefix / label); "usable" is the mandate's marker —
+# `epic-closed` (a proxy) or an acceptance sub-issue by label or title. Where
+# the flow shows the deploy (or merge) of that issue, the time is measured
+# (estimated); a bare closure stays a proxy. Bug origin has two axes, as
+# labels: cause:regression|preexisting|unknown and
+# channel:operator|agent|monitor|other — an owner-reported regression carries
+# both and counts in both (refutation, round 2). Coverage says how many bugs
+# carry them; until a triaged sample says the labels are right, the
+# regression share stays estimated. Needs `gh`; without it: unavailable.
+_OUTCOME_DAYS = 90
+OUTCOME_DEFAULTS = {"epic_title_prefix": "[EPIC]", "epic_labels": ["type:epic", "epic"],
+                    "usable": "epic-closed", "bug_labels": ["bug", "type:bug"],
+                    "disruptive_labels": ["priority:high", "priority:critical"],
+                    "coverage_target": 0.8}
+_QUALITY_ORDER = ("measured", "estimated", "proxy")
+CAUSES = ("regression", "preexisting", "unknown")
+CHANNELS = ("operator", "agent", "monitor", "other")
+_ISSUES_QUERY = """query($owner:String!,$name:String!){repository(owner:$owner,name:$name){
+issues(first:100,orderBy:{field:UPDATED_AT,direction:DESC}){nodes{number title state createdAt closedAt
+labels(first:30){nodes{name}} subIssuesSummary{total completed}
+subIssues(first:50){nodes{number title state closedAt labels(first:30){nodes{name}}}}}}}}"""
+
+
+def _gh_issues(root: Path) -> tuple[list[dict] | None, str | None]:
+    """The 100 most recently updated issues with their sub-issues, flattened;
+    (None, why) when gh or the repository cannot be read."""
+    import json  # noqa: PLC0415
+    import shutil  # noqa: PLC0415
+
+    gh = shutil.which("gh")
+    if not gh:
+        return None, "gh is not installed"
+    try:
+        repo = subprocess.run([gh, "repo", "view", "--json", "owner,name", "-q", '.owner.login + "/" + .name'],
+                              capture_output=True, text=True, timeout=60, cwd=str(root))
+        if repo.returncode != 0 or "/" not in repo.stdout:
+            return None, "gh cannot name this repository"
+        owner, name = repo.stdout.strip().split("/", 1)
+        r = subprocess.run([gh, "api", "graphql", "-H", "GraphQL-Features: sub_issues",
+                            "-f", f"query={_ISSUES_QUERY}", "-F", f"owner={owner}", "-F", f"name={name}"],
+                           capture_output=True, text=True, timeout=120, cwd=str(root))
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return None, f"gh failed ({exc})"
+    if r.returncode != 0:
+        return None, f"gh api graphql failed: {r.stderr.strip()[:200]}"
+    try:
+        nodes = json.loads(r.stdout)["data"]["repository"]["issues"]["nodes"]
+    except (ValueError, KeyError, TypeError):
+        return None, "gh returned an unreadable answer"
+
+    def _flat(n: dict) -> dict:
+        return {"number": n.get("number"), "title": n.get("title") or "", "state": n.get("state"),
+                "createdAt": n.get("createdAt"), "closedAt": n.get("closedAt"),
+                "labels": [lb.get("name") for lb in ((n.get("labels") or {}).get("nodes") or [])]}
+    out = []
+    for n in nodes:
+        item = _flat(n)
+        item["sub_total"] = (n.get("subIssuesSummary") or {}).get("total") or 0
+        item["sub_done"] = (n.get("subIssuesSummary") or {}).get("completed") or 0
+        item["subs"] = [_flat(c) for c in ((n.get("subIssues") or {}).get("nodes") or [])]
+        out.append(item)
+    return out, None
+
+
+def _outcome_config(root: Path) -> dict:
+    try:
+        import optimize  # noqa: PLC0415 — the mandate's one reader
+        mandate, _why = optimize.load_mandate(root)
+    except Exception:  # noqa: BLE001 — a broken mandate falls back to the defaults, named below
+        mandate = None
+    given = (mandate or {}).get("outcomes")
+    return {**OUTCOME_DEFAULTS, **(given if isinstance(given, dict) else {})}
+
+
+def _days(a: datetime | None, b: datetime | None) -> float | None:
+    return None if a is None or b is None else round((b - a).total_seconds() / 86400, 2)
+
+
+def outcomes_table(root: Path, *, days: int = _OUTCOME_DAYS, now: datetime | None = None,
+                   fetch=None) -> dict:
+    now = now or datetime.now(timezone.utc)
+    since = now - timedelta(days=days)
+    cfg = _outcome_config(root)
+    issues, why = (fetch or _gh_issues)(root)
+    if issues is None:
+        return {"available": False, "reason": why, "days": days}
+    delivered: dict[int, tuple[datetime | None, str]] = {}
+    for it in flow_items(root, now=now):
+        if it["deployed"]["value"]:
+            delivered[it["issue"]] = (it["deployed"]["value"], "measured")
+        elif it["merged"]["value"]:
+            delivered[it["issue"]] = (it["merged"]["value"], "estimated")
+
+    def _done(issue: dict) -> tuple[datetime | None, str]:
+        if issue.get("number") in delivered:
+            return delivered[issue["number"]]
+        closed = _aware(issue.get("closedAt")) if issue.get("state") == "CLOSED" else None
+        return closed, "proxy" if closed else "missing"
+
+    usable = cfg["usable"]
+    epics = []
+    for it in issues:
+        is_epic = (it.get("sub_total", 0) > 0 or it["title"].startswith(cfg["epic_title_prefix"])
+                   or bool(set(it["labels"]) & set(cfg["epic_labels"])))
+        if not is_epic:
+            continue
+        created = _aware(it.get("createdAt"))
+        if usable == "epic-closed":
+            at = _aware(it.get("closedAt")) if it.get("state") == "CLOSED" else None
+            quality = "proxy" if at else "open"
+        else:
+            kind, _, marker = str(usable).partition(":")
+            accept = [c for c in it.get("subs", [])
+                      if (kind == "label" and marker in c["labels"]) or (kind == "title" and marker in c["title"])]
+            done = [_done(c) for c in accept]
+            if not accept:  # the marker names no sub-issue of this epic
+                at, quality = None, "missing"
+            elif all(when for when, _q in done):  # usable once every acceptance issue is delivered
+                at = max(when for when, _q in done)
+                quality = max((q for _w, q in done), key=_QUALITY_ORDER.index)  # the weakest evidence
+            else:
+                at, quality = None, "open"
+        epics.append({"number": it["number"], "title": it["title"], "created": created,
+                      "usable_at": at, "quality": quality,
+                      "days_to_usable": _days(created, at),
+                      "sub_issues": {"total": it.get("sub_total", 0), "done": it.get("sub_done", 0)}})
+    reached = [e for e in epics if e["usable_at"] and e["usable_at"] >= since]
+    bugs = [it for it in issues if set(it["labels"]) & set(cfg["bug_labels"])
+            and (_aware(it.get("createdAt")) or now) >= since]
+
+    def _axis(it: dict, prefix: str, values: tuple[str, ...]) -> str | None:
+        got = [lb.split(":", 1)[1] for lb in it["labels"] if lb.startswith(prefix) and lb.split(":", 1)[1] in values]
+        return got[0] if len(got) == 1 else None
+    with_cause = [it for it in bugs if _axis(it, "cause:", CAUSES)]
+    with_channel = [it for it in bugs if _axis(it, "channel:", CHANNELS)]
+    known_cause = [it for it in with_cause if _axis(it, "cause:", CAUSES) != "unknown"]
+    regressions = [it for it in known_cause if _axis(it, "cause:", CAUSES) == "regression"]
+    coverage = (min(len(with_cause), len(with_channel)) / len(bugs)) if bugs else None
+    disruptive = [it for it in bugs if _axis(it, "channel:", CHANNELS) == "operator"
+                  and set(it["labels"]) & set(cfg["disruptive_labels"])]
+    fixes = []
+    for it in disruptive:
+        at, quality = _done(it)
+        if at:
+            fixes.append((_days(_aware(it.get("createdAt")), at), quality))
+
+    def _median_block(values: list[tuple[float | None, str]]) -> dict:
+        vals = [v for v, _q in values if v is not None]
+        qs = {q for _v, q in values}
+        return {"median_days": round(statistics.median(vals), 2) if vals else None, "n": len(vals),
+                "quality": ("missing" if not vals else "measured" if qs == {"measured"} else
+                            "estimated" if qs <= {"measured", "estimated"} else "proxy")}
+    return {
+        "available": True, "days": days, "sample": "the 100 most recently updated issues",
+        "config": cfg,
+        "epics": epics,
+        "o1_epic_usable": _median_block([(e["days_to_usable"], e["quality"]) for e in reached]),
+        "o2_disruptive_fixed": {**_median_block(fixes), "open": len(disruptive) - len(fixes)},
+        "bug_origin": {
+            "bugs": len(bugs), "with_cause": len(with_cause), "with_channel": len(with_channel),
+            "coverage": round(coverage, 2) if coverage is not None else None,
+            "coverage_target": cfg["coverage_target"],
+            "blind_spot": bool(bugs) and (coverage or 0) < cfg["coverage_target"],
+            "regression_share": round(len(regressions) / len(known_cause), 2) if known_cause else None,
+            # no triaged sample checks the labels yet: never measured (round 2, A8)
+            "quality": "missing" if not known_cause else "estimated",
+        },
+    }
+
+
+def outcomes(root: Path | None = None, *, days: int = _OUTCOME_DAYS, as_json: bool = False) -> int:
+    import json  # noqa: PLC0415
+
+    root = root or Path.cwd()
+    t = outcomes_table(root, days=days)
+    if as_json:
+        print(json.dumps(t, indent=2, default=lambda o: o.isoformat() if isinstance(o, datetime) else str(o)))
+        return 0
+    print(f"[outcomes] value over the last {days} days — epics to usable, disruptive bugs to fixed")
+    if not t["available"]:
+        print(f"  unavailable: {t['reason']} — outcomes skipped (not zero)")
+        return 0
+    o1, o2, bo = t["o1_epic_usable"], t["o2_disruptive_fixed"], t["bug_origin"]
+    print(f"  epics       {len(t['epics'])} seen; usable in the window: n={o1['n']}, median "
+          f"{o1['median_days'] if o1['median_days'] is not None else '—'} d [{o1['quality']}] "
+          f"(marker: {t['config']['usable']})")
+    print(f"  disruptive  operator-reported bugs fixed: n={o2['n']}, median "
+          f"{o2['median_days'] if o2['median_days'] is not None else '—'} d [{o2['quality']}], {o2['open']} open")
+    cov = "—" if bo["coverage"] is None else f"{bo['coverage']:.0%}"
+    print(f"  bug origin  {bo['bugs']} bug(s), cause and channel on {cov} (target {bo['coverage_target']:.0%})"
+          + (" — blind spot: label cause:* and channel:* where the bug is filed" if bo["blind_spot"] else "")
+          + (f"; regression share {bo['regression_share']:.0%} [{bo['quality']}]" if bo["regression_share"] is not None else ""))
+    print(f"  ({t['sample']}; a bare closure is a proxy, a deploy in the flow is measured)")
+    return 0
+
+
 # --- nodes: every gate as a node of the check graph -------------------------
 # The gate runner leaves one line per gate run in the common git dir
 # (`process-gate-events.jsonl`). A node's cost is measured directly; what it
@@ -1248,6 +1450,9 @@ def main() -> int:
     ls = sub.add_parser("losses")
     ls.add_argument("--days", type=int, default=_LOSS_DAYS)
     ls.add_argument("--json", action="store_true")
+    oc = sub.add_parser("outcomes")
+    oc.add_argument("--days", type=int, default=_OUTCOME_DAYS)
+    oc.add_argument("--json", action="store_true")
     nd = sub.add_parser("nodes")
     nd.add_argument("--days", type=int, default=_NODE_DAYS)
     nd.add_argument("--json", action="store_true")
@@ -1266,6 +1471,8 @@ def main() -> int:
         return flow(issue=args.issue, as_json=args.json, follow_up_days=args.follow_up_days)
     if args.cmd == "losses":
         return losses(days=args.days, as_json=args.json)
+    if args.cmd == "outcomes":
+        return outcomes(days=args.days, as_json=args.json)
     if args.cmd == "nodes":
         return nodes(days=args.days, as_json=args.json)
 
