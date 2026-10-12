@@ -33,6 +33,9 @@ difference. See "honest ceiling" in the module doc.
   process_kpis.py flow          [--issue N] [--json] [--follow-up-days D]
                                                 # one issue, first phase to deploy: work, wait,
                                                 # tokens, owner decisions, escapes, process version
+  process_kpis.py losses        [--days D] [--json]
+                                                # four separate loss measures over flow:
+                                                # occupancy, delay, owner effort, tokens
   process_kpis.py nodes         [--days D] [--json]
                                                 # per gate: cost, blocks, distinct inputs,
                                                 # sole blocks, flips, triaged blocks
@@ -973,6 +976,84 @@ def flow(root: Path | None = None, *, issue: int | None = None, as_json: bool = 
     return 0
 
 
+# --- losses: four measures that are never summed ----------------------------
+# Occupancy (agent hours actually spent), delay (hours an issue waited),
+# owner effort and tokens have different units and different owners; twenty
+# issues waiting one hour on the same outage are twenty issue-hours of delay,
+# not twenty agent-hours (refutation, round 2). A breakdown (rework, a
+# regression fix) is part of occupancy, never added on top. An issue without
+# a value counts as missing, never as zero.
+_LOSS_DAYS = 28
+
+
+def _sum_measure(items: list[dict], key: str) -> dict:
+    present = [it[key] for it in items if it[key]["value"] is not None]
+    qualities = {m["quality"] for m in present}
+    return {"value": round(sum(m["value"] for m in present) / 3600, 2) if present else None,
+            "unit": "h", "issues": len(present), "missing": len(items) - len(present),
+            "quality": ("missing" if not present else
+                        "measured" if qualities == {"measured"} and len(present) == len(items) else "estimated")}
+
+
+def losses_table(root: Path, *, days: int = _LOSS_DAYS, now: datetime | None = None) -> dict:
+    now = now or datetime.now(timezone.utc)
+    since = now - timedelta(days=days)
+    items = [it for it in flow_items(root, now=now)
+             if (it["start"]["value"] or it["merged"]["value"] or now) >= since]
+    tokens: dict[str, int] = {}
+    with_tokens = [it["tokens"] for it in items if it["tokens"]["value"]]
+    for tok in with_tokens:
+        for field, n in tok["value"].items():
+            tokens[field] = tokens.get(field, 0) + n
+    escapes = [it["escapes"]["value"] for it in items if it["escapes"]["value"] is not None]
+    return {
+        "days": days, "issues": len(items),
+        "occupancy": _sum_measure(items, "work_s"),
+        "delay": {**_sum_measure(items, "wait_s"), "unit": "issue-h"},
+        "owner_effort": {"decisions": sum(it["owner_decisions"]["value"] for it in items),
+                         "minutes": None, "quality": "proxy"},
+        "tokens": {"value": tokens or None, "issues": len(with_tokens),
+                   "missing": len(items) - len(with_tokens),
+                   "quality": ("missing" if not with_tokens else
+                               "measured" if len(with_tokens) == len(items)
+                               and all(t["quality"] == "measured" for t in with_tokens) else "estimated")},
+        # diagnostic only: where to look, never an input to a budget
+        "proxies": {"regression_fixes": sum(escapes) if escapes else None,
+                    "regression_issues_observed": len(escapes)},
+    }
+
+
+def losses(root: Path | None = None, *, days: int = _LOSS_DAYS, as_json: bool = False) -> int:
+    import json  # noqa: PLC0415
+
+    root = root or Path.cwd()
+    t = losses_table(root, days=days)
+    if as_json:
+        print(json.dumps(t, indent=2))
+        return 0
+    print(f"[losses] last {days} days over {t['issues']} dispatched issue(s) — four measures, never summed")
+    if not t["issues"]:
+        print("  no dispatched issue in the window (dispatch logs, worker reports) — losses skipped")
+        return 0
+
+    def _m(m: dict) -> str:
+        v = "—" if m["value"] is None else f"{m['value']:.1f} {m['unit']}"
+        return f"{v} [{m['quality']}; {m['issues']} with a value, {m['missing']} missing]"
+    print(f"  occupancy   {_m(t['occupancy'])}")
+    print(f"  delay       {_m(t['delay'])}")
+    print(f"  owner       {t['owner_effort']['decisions']} decision(s) [proxy; minutes not measured]")
+    tok = t["tokens"]
+    tok_text = ("not measured" if not tok["value"] else
+                " / ".join(f"{k} {v:,}" for k, v in sorted(tok["value"].items())))
+    print(f"  tokens      {tok_text} [{tok['quality']}; {tok['issues']} with a value, {tok['missing']} missing]")
+    p = t["proxies"]
+    print(f"  proxy       regression fixes {p['regression_fixes'] if p['regression_fixes'] is not None else '—'} "
+          f"over {p['regression_issues_observed']} merged issue(s) (diagnostic, not a loss in hours)")
+    n = t["issues"]
+    print(f"  {confidence(n)} · {action(_level(n, False, False, _N_THRESHOLD), 'compare each measure with its own past, never with the others: delay → hand-offs and the train, occupancy → rounds and context, tokens → model and context per phase', thin='let more issues run through dispatch before reading a trend')}")
+    return 0
+
+
 # --- nodes: every gate as a node of the check graph -------------------------
 # The gate runner leaves one line per gate run in the common git dir
 # (`process-gate-events.jsonl`). A node's cost is measured directly; what it
@@ -1132,6 +1213,8 @@ def report() -> int:
     print()
     flow()
     print()
+    losses()
+    print()
     nodes()
     return 0
 
@@ -1162,6 +1245,9 @@ def main() -> int:
     fl.add_argument("--json", action="store_true")
     fl.add_argument("--follow-up-days", type=int, default=_FOLLOW_UP_DAYS,
                     help="how long after the merge an escape counts (default 30)")
+    ls = sub.add_parser("losses")
+    ls.add_argument("--days", type=int, default=_LOSS_DAYS)
+    ls.add_argument("--json", action="store_true")
     nd = sub.add_parser("nodes")
     nd.add_argument("--days", type=int, default=_NODE_DAYS)
     nd.add_argument("--json", action="store_true")
@@ -1178,6 +1264,8 @@ def main() -> int:
         return train_phases(args.runs)
     if args.cmd == "flow":
         return flow(issue=args.issue, as_json=args.json, follow_up_days=args.follow_up_days)
+    if args.cmd == "losses":
+        return losses(days=args.days, as_json=args.json)
     if args.cmd == "nodes":
         return nodes(days=args.days, as_json=args.json)
 
