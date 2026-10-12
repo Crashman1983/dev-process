@@ -89,7 +89,7 @@ from gate_invoke import gate_runner_argv, not_runnable_reason  # noqa: E402
 import report as _report  # noqa: E402
 import tower as _tower  # noqa: E402
 
-from process_git import git_environment  # noqa: E402
+from process_git import REGRESSION_TRAILER, git_environment  # noqa: E402
 
 ARCHIVE = ".process-work/plans/archive"
 PLANS = ".process-work/plans"
@@ -1526,7 +1526,7 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
     for b in aboard:
         # a `Regression-of: #N` trailer names the issue a fix repairs, not one this
         # branch works on — it must neither file the merge under #N nor ask to close it
-        bodies = re.sub(r"(?im)^\s*Regression-of:.*$", "", _out(root, "log", "--format=%B", f"{base}..{b}"))
+        bodies = REGRESSION_TRAILER.sub("", _out(root, "log", "--format=%B", f"{base}..{b}"))
         refs = sorted({int(n) for n in re.findall(r"(?<![\w/])#(\d+)\b", bodies)})
         if refs:
             print(f"train: {b} references issue(s) {', '.join('#' + str(n) for n in refs)} — "
