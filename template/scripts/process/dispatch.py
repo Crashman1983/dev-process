@@ -132,6 +132,10 @@ def _git(root: Path, *args: str) -> subprocess.CompletedProcess:
         return subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, timeout=120, env=git_environment())
     except (OSError, subprocess.TimeoutExpired) as exc:
         return subprocess.CompletedProcess(args, 127, "", str(exc))
+    except UnicodeDecodeError as exc:
+        # a non-UTF-8 path or text is an answer git gave and this reader cannot
+        # take: a failed read, never a crash of `start` (downstream #2511)
+        return subprocess.CompletedProcess(args, 128, "", f"git output is not UTF-8 ({exc.reason})")
 
 
 def _out(root: Path, *args: str) -> str:
@@ -261,9 +265,20 @@ def phase_base(root: Path, branch: str) -> str:
 
 
 def _remote_head(root: Path, branch: str) -> str:
-    """origin's commit of exactly this branch ('' if none) — `ls-remote --heads
-    origin x` also lists `feat/x`."""
-    for line in _out(root, "ls-remote", "origin", f"refs/heads/{branch}").splitlines():
+    """origin's commit of exactly this branch ('' if none, or origin cannot be
+    asked) — `ls-remote --heads origin x` also lists `feat/x`."""
+    return _remote_head_or_none(root, branch) or ""
+
+
+def _remote_head_or_none(root: Path, branch: str) -> str | None:
+    """`_remote_head`, but None when origin cannot be asked: an unreachable
+    origin is no "origin lacks the branch" (#207)."""
+    if _git(root, "remote", "get-url", "origin").returncode != 0:
+        return ""  # no origin at all: nothing there to hold the branch
+    r = _git(root, "ls-remote", "origin", f"refs/heads/{branch}")
+    if r.returncode != 0:
+        return None
+    for line in r.stdout.splitlines():
         sha, _, ref = line.partition("\t")
         if ref.strip() == f"refs/heads/{branch}":
             return sha.strip()
@@ -1549,7 +1564,7 @@ def start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str |
         channel = None
     plan_review = plan_review and phase == "review"
     if phase == "review" and not plan_review:
-        due = plan_review_due(root, branch)
+        due = plan_review_due(root, branch, remote=remote, fetch=not dry_run)
         if due:
             print(f"dispatch: plan review — {due} (code review: add code first)")
             plan_review = True
@@ -2072,11 +2087,15 @@ def _tip_on_origin(root: Path, branch: str, *, fetch: bool) -> str:
 
 
 def _integration_base(root: Path, tip: str) -> str:
-    for ref in _review.integration_refs(root):
-        base = _out(root, "merge-base", tip, ref)
-        if base:
-            return base
-    return ""
+    """The youngest fork point of `tip` from any integration ref: a stale
+    `origin/main` beside a fresh local `main` must not move it back and turn
+    main's own commits into the branch's (#207). Diverged fork points keep the
+    first ref's, as before."""
+    bases = [b for b in (_out(root, "merge-base", tip, ref) for ref in _review.integration_refs(root)) if b]
+    for b in bases:
+        if all(o == b or _git(root, "merge-base", "--is-ancestor", o, b).returncode == 0 for o in bases):
+            return b
+    return bases[0] if bases else ""
 
 
 def new_code_on_origin(root: Path, branch: str, *, fetch: bool = True) -> bool | None:
@@ -2232,7 +2251,8 @@ def plan_review_state_at(root: Path, head: str) -> tuple[int | None, bool]:
         text = _out(root, "show", f"{head}:{rel}")
         tier = _review.plan_tier(text)
         if tier is not None:
-            plans.append((tier, rel, _review._plan_work_ids(_review.plan_stem(rel), text, include_dedated=True)))
+            plans.append((tier, rel, _review._plan_work_ids(_review.plan_stem(rel), text, include_dedated=True),
+                          _review.review_waived(text)))
     if not plans:
         return None, False
     journal = _review.JOURNAL_DIR
@@ -2249,10 +2269,12 @@ def plan_review_state_at(root: Path, head: str) -> tuple[int | None, bool]:
             r.get("work") in {f"{i}-plan" for i in ids} and str(r.get("tier", "")).isdigit()
             and int(r["tier"]) >= tier and r.get("head")
             and _out(root, "rev-parse", f"{r['head']}:{rel}") == now for r in passes)
-    top = max(t for t, _rel, _ids in plans)
-    return top, all(cleared(t, rel, ids) for t, rel, ids in plans if t >= 2)
+    top = max(t for t, _rel, _ids, _waived in plans)
+    # a waived plan owes no plan review — the review gate's rule (#207); its
+    # tier still names the model of the next phase
+    return top, all(waived or cleared(t, rel, ids) for t, rel, ids, waived in plans if t >= 2)
 
-def plan_review_due(root: Path, branch: str) -> str | None:
+def plan_review_due(root: Path, branch: str, *, remote: bool = False, fetch: bool = True) -> str | None:
     """Why a review of `branch` is a plan review, or None for a code review
     (#203: a session started for a changed plan took it for a code review and
     stopped with "no code"). A plan review is due when the branch changes
@@ -2266,14 +2288,19 @@ def plan_review_due(root: Path, branch: str) -> str | None:
     (`sync_worktree` leaves an ahead worktree as it is) or origin lacks the
     branch. What git cannot tell is a code review, as
     before — the session says when there is no code; `--plan-review` forces
-    the plan review."""
-    tip = _remote_head(root, branch)
-    if tip and _git(root, "cat-file", "-e", f"{tip}^{{commit}}").returncode != 0 \
-            and _git(root, "fetch", "-q", "origin", f"refs/heads/{branch}").returncode != 0:
+    the plan review. #207: an origin that cannot be asked is no absent branch;
+    a `remote` session sees origin only, never a local lead; without `fetch`
+    (`--dry-run`) nothing is fetched and an unseen tip is a code review."""
+    tip = _remote_head_or_none(root, branch)
+    if tip is None:
         return None
-    local = _out(root, "rev-parse", "--verify", "-q", f"{branch}^{{commit}}")
-    if not tip or (local and _git(root, "merge-base", "--is-ancestor", tip, local).returncode == 0):
-        tip = local
+    if tip and _git(root, "cat-file", "-e", f"{tip}^{{commit}}").returncode != 0 \
+            and (not fetch or _git(root, "fetch", "-q", "origin", f"refs/heads/{branch}").returncode != 0):
+        return None
+    if not remote:
+        local = _out(root, "rev-parse", "--verify", "-q", f"{branch}^{{commit}}")
+        if not tip or (local and _git(root, "merge-base", "--is-ancestor", tip, local).returncode == 0):
+            tip = local
     base = _integration_base(root, tip) if tip else ""
     if not tip or not base:
         return None
