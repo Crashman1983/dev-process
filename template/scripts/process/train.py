@@ -329,7 +329,10 @@ def candidates(root: Path, local: str, base: str) -> list[dict]:
             c["housekeeping"] = housekeeping
         # a question the owner never answered rides no train: the branch
         # was built on an assumption — answer it (DECISION line) first
-        active = _paths(root, "diff", "--name-only", "-z", f"{base}...{b}", "--", _tower.PLANS_ACTIVE, _tower.SPECS_DIR)
+        # a plan the branch deletes holds no question and cannot be read at its
+        # tip (#201: it refused the branch as unreadable)
+        active = _paths(root, "diff", "--name-only", "-z", "--diff-filter=d", f"{base}...{b}", "--",
+                        _tower.PLANS_ACTIVE, _tower.SPECS_DIR)
         if active is None:
             branch_unreadable.append(f"the active plans of {b}")
         open_q = []
