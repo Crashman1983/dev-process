@@ -170,6 +170,9 @@ def load_policy(root: Path) -> dict:
     if not isinstance(data.get("command"), str) or "{prompt}" not in data["command"]:
         raise SystemExit(f"dispatch: {POLICY} needs a `command` template containing {{prompt}}")
     _check_env(data.get("env"), "env")
+    quiet = data.get("stale_minutes")
+    if quiet is not None and (isinstance(quiet, bool) or not isinstance(quiet, int) or quiet <= 0):
+        raise SystemExit(f"dispatch: {POLICY} `stale_minutes` must be a positive integer, got {quiet!r}")
     for ph, row in (data.get("phases") or {}).items():
         if isinstance(row, dict):
             _check_env(row.get("env"), f"phases.{ph}.env")
@@ -530,6 +533,17 @@ def override_refusal(root: Path, phase: str, model: str, argv: list[str], branch
         return (f"one owner for the model: {rel} declares {' and '.join(k + ':' for k in keys)}, which "
                 f"overrides the dispatched {model}; remove it (model-policy*.json owns this)")
     return None
+
+
+def stale_minutes(root: Path) -> int | None:
+    """The policy's `stale_minutes`: how long a worker may neither commit nor
+    report before the tower calls it stale (`tower.py --wait` wakes the
+    steward on it). None without a policy or the key — the tower's default
+    then applies; an invalid value is refused by `load_policy`."""
+    try:
+        return load_policy(root).get("stale_minutes")
+    except SystemExit:
+        return None
 
 
 def max_workers(policy: dict) -> int:

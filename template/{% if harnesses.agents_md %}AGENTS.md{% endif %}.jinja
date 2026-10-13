@@ -58,6 +58,10 @@ When acting as steward, read the resolved `decision_channel` using
 worker events there; the tower and reports remain the source of truth.
 On start or restart, notify each live, remote or unknown worker once that
 the steward is back and events go there. Without a channel, use reports only.
+Watch with `uv run scripts/process/tower.py --wait --states
+planned,pushed,blocked,review-pass,done,stale` in the background; a `stale`
+record is a live worker silent past the policy's `stale_minutes` — read
+`dispatch.py log <branch>`, then nudge it or stop it.
 The protocol is in `docs/process/tower.md`.
 The steward also steers the process's improvement trials (daily:
 `uv run scripts/process/optimize.py status`, then

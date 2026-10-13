@@ -24,12 +24,19 @@ on each monitoring tick. Without a channel, keep the reports-only workflow.
 
 Two wakes, both armed by you. The **watch**: on every wake, first thing,
 run `uv run scripts/process/tower.py --wait --timeout 1800 --states
-planned,pushed,blocked,review-pass,done` as a background command; its
+planned,pushed,blocked,review-pass,done,stale` as a background command; its
 exit is the wake — a report line the moment it is written (exit 0, the
-record on stdout), or thirty quiet minutes (exit 3). Re-arm it on every
-wake. The **tick**: `/loop 30m /steward`, the owner sets it
-once; it catches what no file shows (a stale worker, a train ready to
-depart, a watch that was not re-armed). Neither replaces the other: a
+record on stdout), a `stale` record for a live session that neither
+reported nor committed for the policy's `stale_minutes` (default 60; once
+per silence), or thirty quiet minutes (exit 3). Re-arm it on every
+wake. On `stale`: read the record (last report, last commit, last printed
+line), then `dispatch.py log <branch>` — then nudge it with one line
+(`dispatch.py say <branch> "…"`, or the configured channel) when it is
+waiting or lost, or stop it (`dispatch.py stop <branch>`, after its plan and
+decisions are committed) when it loops. The **tick**: `/loop 30m /steward`,
+the owner sets it once; it catches what no file shows (a stale branch
+without a live session, a train ready to depart, a watch that was not
+re-armed). Neither replaces the other: a
 `DECISION NEEDED` without a `blocked` report is seen only by the tick's
 tower run. Owner messages are a third wake. On each wake:
 
