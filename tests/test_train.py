@@ -1429,6 +1429,52 @@ def test_an_issue_on_another_branch_opens_no_pass(render, tmp_path):
     assert not _candidate(out, "70-p2-slice")["eligible"]
 
 
+def _spec_split_branch(out, branch, reviews):
+    """#218 (downstream): one issue split into two stacked Spec Kit plans on
+    one branch, each with its own code. `reviews` are (work, the plan whose
+    commit the review saw up to) — full rounds from the fork point (#160),
+    attested after the last plan."""
+    _git(out, "checkout", "-q", "-b", branch, "main")
+    heads = {}
+    for slug, src in (("2334-a-split", "src/a.py"), ("2334-b-split", "src/b.py")):
+        d = out / "specs" / slug
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "plan.md").write_text(f"# {slug}\n\ntier: 2\nissue: #2334\n\n## Decisions\n")
+        (out / src).parent.mkdir(exist_ok=True)
+        (out / src).write_text("x = 1\n")
+        _git(out, "add", "-A")
+        _git(out, "commit", "-q", "-m", f"feat: {slug}")
+        heads[slug] = _git(out, "rev-parse", "HEAD").stdout.strip()
+    j = out / ".process-work/journal"
+    j.mkdir(parents=True, exist_ok=True)
+    (j / f"2026-10-12-{branch}.md").write_text("".join(
+        _head_pass(out, work, heads[head]) for work, head in reviews))
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "attest")
+    _git(out, "checkout", "-q", "main")
+
+
+@pytest.mark.parametrize("reviews, missing", [
+    ([("2334-a-split", "2334-a-split"), ("2334-b-split", "2334-b-split")], None),
+    ([("2334-b-split", "2334-b-split")], "2334-a-split"),
+    ([("2334-a-split", "2334-b-split")], "2334-b-split"),
+], ids=["each-plan-reviewed", "b-review-saw-both", "a-review-saw-both"])
+def test_each_spec_plan_of_a_split_issue_needs_its_own_review(render, tmp_path, reviews, missing):
+    """#218: a Spec Kit plan's slug is the branch's own work id (AC-1), and each
+    plan with code needs a clearing REVIEW of its own — one plan's review does
+    not clear the other, even where its range saw both (AC-2)."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _spec_split_branch(out, "issue-2334", reviews)
+    _report(out, "issue-2334")
+    c = _candidate(out, "issue-2334")
+    if missing is None:
+        assert c["eligible"] and "worker report review-pass" in c["by"], c["reasons"]
+    else:
+        assert not c["eligible"], c
+        assert f"specs/{missing}/plan.md" in c["reasons"][0] and "its own" in c["reasons"][0], c
+
+
 def _base_plan(out, stem, issue):
     p = out / ".process-work/plans"
     p.mkdir(parents=True, exist_ok=True)
