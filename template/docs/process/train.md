@@ -49,6 +49,14 @@ A local branch boards when it is ahead of the integration branch and
 - changes the gates' code (`scripts/process/`, `.githooks/`) only with a
   **REVIEW pass for its own work**, whatever its tier — no Tier 0-1 plan,
   waiver or report lets unreviewed gate code onto main;
+- has each of its own **Spec Kit plans** (`specs/<slug>/plan.md`, own by
+  the same rule) at Tier 2+ cleared by a REVIEW pass for **that plan's**
+  work (`work=<slug>` or an issue it declares) covering the head, or
+  waived. The slug and issues count as the branch's own work like an
+  active plan's stem. One issue split into two spec plans on one branch is
+  two works: a pass for the one never clears the other, even where its
+  range saw both (downstream, the train refused such a branch outright,
+  and the workaround review merged the two);
 
 (The clone's red ledger naming no red gate is a *departure* condition for
 the whole train, not a per-candidate reason.)

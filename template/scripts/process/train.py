@@ -32,6 +32,10 @@ branch, is ahead of it, and
     clears nothing;
   * changes the gates' code (`scripts/process/`, `.githooks/`) only with a
     REVIEW pass for its own work, whatever the tier;
+  * its own Spec Kit plans (`specs/<slug>/plan.md`) name its work (slug and
+    issues), and each one at Tier 2+ is cleared by a REVIEW pass for that
+    plan's work covering the head — one plan's pass never clears another
+    plan of the same issue (#218);
 
 Departure: at least `--min-candidates` aboard, or the oldest candidate
 has waited longer than `--max-wait-hours`; no lane but `scoped` is held
@@ -363,15 +367,28 @@ def candidates(root: Path, local: str, base: str) -> list[dict]:
                 branch_unreadable.append(f"{rel} on {b}")
                 return None
             return shown.stdout
-        own_active = _own_plans(root, base, b, read)
+        own_active = _own_plans(root, base, b, read, specs=True)
         if own_active is None:
             branch_unreadable.append(f"the plans of {b}")
         merged_slugs = _identity_slugs(merged_paths - gone_by.get(b, set()), same_plan)
+        # a Spec Kit plan's slug and issues are its work too (#218), and each
+        # one at Tier 2+ needs a clearing REVIEW of its own: one issue split
+        # into two spec plans on one branch is two works — a pass for the one
+        # does not clear the other, even where its range saw both
+        spec_uncleared: list[tuple[str, set[str]]] = []
         for rel, plain in own_active or ():
-            if _review.record_kind(rel) == "plan":
+            kind = _review.record_kind(rel)
+            if kind == "plan":
                 stem = Path(rel).stem
                 unique = merged_slugs[_review.DATE_PREFIX.sub("", stem)] == 1
                 own_ids |= _review._plan_work_ids(stem, plain, include_dedated=unique)
+            elif kind == "spec-plan":
+                ids = _review._plan_work_ids(_review.plan_stem(rel), plain, include_dedated=False)
+                own_ids |= ids
+                tier = _review.plan_tier(plain) or 0
+                if tier >= 2 and not _review.review_waived(plain) \
+                        and not _covers(root, passes, ids, tier, b, branch_passes):
+                    spec_uncleared.append((rel, ids))
         deviations, held = _deviations(root, base, b)  # what rides into its merge commit
         c["deviations"] = len(deviations)
         c["keeps_open"] = sorted(held)
@@ -415,6 +432,12 @@ def candidates(root: Path, local: str, base: str) -> list[dict]:
             c["reasons"].append(f"changes the gates' code ({touches_process[0]}{more}) without a REVIEW pass "
                                 f"at tier 2 or higher for its own work (work= one of {', '.join(sorted(own_ids))}) "
                                 f"— gate code needs it whatever the plan's tier")
+        elif spec_uncleared:
+            rel, ids = spec_uncleared[0]
+            more = f" (and {len(spec_uncleared) - 1} more spec plan(s))" if len(spec_uncleared) > 1 else ""
+            c["reasons"].append(f"{rel}{more}: Tier 2+ spec plan without a clearing REVIEW pass of its own "
+                                f"covering the branch head (work= one of {', '.join(sorted(ids))}) — "
+                                f"another plan's review does not clear it (review it, then attest)")
         elif archived and cleared_all:
             needs_review = [p for p in c["plans"] if p["tier"] is not None and p["tier"] >= 2 and not p["waived"]]
             c["by"] = ("archived plan + verified template render"
@@ -1065,8 +1088,10 @@ STAYS_ACTIVE = re.compile(_review._LEAD + r"plan-stays-active[*_]*\s*:\s*[*_]*\s
 _OPEN_TASK = re.compile(r"^\s*[-*+] \[ \]", re.MULTILINE)
 
 
-def _own_plans(root: Path, base: str, branch: str, read) -> list[tuple[str, str]] | None:
-    """The plans under PLANS that are `branch`'s own, as (path, unfenced text):
+def _own_plans(root: Path, base: str, branch: str, read, *,
+               specs: bool = False) -> list[tuple[str, str]] | None:
+    """The plans under PLANS — with `specs`, also the Spec Kit plans
+    (`specs/<slug>/plan.md`, #218) — that are `branch`'s own, as (path, unfenced text):
     added by the branch (git's rename detection: a plan the branch only
     renamed or moved is not new), or already on the base with one of the
     branch's issues among its issues — another work's plan the branch
@@ -1075,8 +1100,10 @@ def _own_plans(root: Path, base: str, branch: str, read) -> list[tuple[str, str]
     this one rule (#199: an active plan's ids counted only once archived, and
     a `work=<slug>` pass did not board). `read(rel)` gives the text, None when
     there is none; None when git cannot list the plans."""
-    own = _review.own_plans(root, base, branch, _branch_issues(root, branch), read, (PLANS,),
-                            lambda rel: rel.endswith(".md"))
+    pathspec = (PLANS, _review.SPECS_DIR) if specs else (PLANS,)
+    own = _review.own_plans(root, base, branch, _branch_issues(root, branch), read, pathspec,
+                            lambda rel: rel.endswith(".md") and (rel.startswith(PLANS + "/")
+                                                                 or _review.record_kind(rel) == "spec-plan"))
     return None if own is None else [(rel, plain) for rel, plain, _added in own]
 
 
