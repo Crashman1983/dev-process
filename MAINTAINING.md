@@ -99,6 +99,15 @@ Der bestehende Weg, unverändert:
 4. `uv run ruff check .` und `uv run pytest -n 4 --dist loadfile`.
 5. CHANGELOG-Eintrag (deutsch) mit „Für <Projekt>“-Migrationshinweisen;
    `python3 tools/release.py vX.Y.Z` nach Freigabe durch den Owner.
+   Jedes Release ist entweder ein **reines Update** (kein Projektschritt über
+   `template_update.py` hinaus, `template_verify` meldet `migration: false`)
+   oder ein **Migrations-Release** mit eigenem Abschnitt `Migration`: die
+   Projektschritte in Reihenfolge, je mit der Prüfung, die zeigt, dass er
+   erledigt ist. Braucht eine Arbeit beides, geht das reine Update zuerst als
+   eigenes Release (`template/docs/process/releases.md`). Eine Prüfung in
+   `tools/release.py` gibt es dafür bewusst nicht: die Einordnung ist ein
+   Urteil über den Inhalt, und die Regel ist neu — erst zählen, ob sie
+   gebrochen wird.
 
 ## Generik-Nachweis
 

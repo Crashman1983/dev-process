@@ -52,6 +52,16 @@ reading the input its own way (mandatory rule 4).
   version of git, make or the interpreter, a missing optional tool — and the
   conditions the change creates itself (`testing.md`,
   "Test under the conditions the change creates").
+- **Fresh worktree:** a step that leans on what only a warm tree has —
+  `.venv`, `node_modules`, build output, a prepared agent workspace — or a
+  consumer that probes a path with `is_file()` / `exists()` and returns
+  empty once the path is gone, instead of failing (downstream: two of three
+  plan-review rounds of one migration). *Test:* run the steps in a fresh
+  `git worktree` without caches; for a deleted or replaced path, search its
+  consumers including the probes and test each with the path absent.
+  *Owner:* the plan's `## Fresh-worktree dry run` (`design-template.md`);
+  the bootstrap contract is `testing.md`, "Gates must survive a fresh
+  checkout".
 - **Forged environment variables:** a variable the code trusts that a caller
   can set — to add a target, skip a check or claim a context. *Test:* set it
   by hand and check it can widen nothing it should not. *Owner:*

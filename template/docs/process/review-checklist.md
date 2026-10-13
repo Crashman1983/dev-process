@@ -53,6 +53,11 @@ tag, a pinned version, a port, a path a test or doc spells out), every reader
   old value yourself** and quote it (command and hits) — any hit left outside
   the intended ones is a finding; a blast radius asserted without a search is
   not evidence.
+- A plan that migrates or deletes or replaces a gate, hook or lane script:
+  does it carry `## Fresh-worktree dry run` (`design-template.md`) with real
+  commands and exit codes from a fresh worktree without caches, and a
+  consumer search of every removed path that includes existence probes? A
+  missing or intent-only section blocks the plan review.
 - Are **all execution paths** handled: the happy path, the error path, the retry
   path, and any async/deferred path?
 - Does every **changed critical contract** have **fitting evidence of its
