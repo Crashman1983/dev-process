@@ -107,7 +107,14 @@ unless it is a BLOCKER for this change; then it goes into the verdict marked
 "pre-existing, found in round N". Its `DELTA_TOUCHES` line lists the files
 the delta changes. If the fix changed a contract, the architecture or the
 risk scope, the reviewer says so and asks for a full bundle instead of
-judging the delta. (Until v2.53 a Tier 3 delta needed an anchoring full
+judging the delta. Each blocker carries its `kind=` on the FINDING line
+(`knowledge-gap` when the author did not know something that already
+existed; `requirement`, `implementation`, `test-gap`, `process`,
+`environment` otherwise) — the count shows which part of the process the
+blocks come from, and a `knowledge-gap` fix also writes the missing fact to
+where it belongs (an inventory note, a registry story, a decision record,
+the architecture doc), so the next author finds it. A plan review's report
+carries `phase: plan` in its header. (Until v2.53 a Tier 3 delta needed an anchoring full
 round and a containment check of its files; both are gone — the verdict
 binds the whole branch either way, and the machinery that judged a delta's
 reach was a source of defects of its own.)

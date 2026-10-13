@@ -41,9 +41,14 @@ enforced, the change is Tier 3.
 
 **Plan decides:** for every acceptance criterion by its id, the task that
 delivers it and the named test that proves it; where each new value ends up;
-for a rename, removal, move, or a changed version, path or constant (an image
-tag, a pinned version, a port, a path a test or doc spells out), every reader
-— found by a search the plan quotes, not by recall.
+for a rename, removal, move, or a changed version, path, constant, default,
+timeout (also across a process or client boundary), file format or ledger
+line, file layout, environment variable or assumption about which process
+something runs in, every reader and writer — found by a search the plan
+quotes in `## Consumers` (command and hits), not by recall; the inventory
+rows of the touched files (`inventory.py for-plan`, where the project keeps
+inventories) in the tasks that touch them; and for a change a user notices,
+the task that writes its news fragment (`news.md`).
 
 - Does every new field, value, or side-effect reach its **terminal state**
   (persisted, emitted, displayed, or deliberately dropped)? Trace it from where
@@ -53,6 +58,10 @@ tag, a pinned version, a port, a path a test or doc spells out), every reader
   old value yourself** and quote it (command and hits) — any hit left outside
   the intended ones is a finding; a blast radius asserted without a search is
   not evidence.
+- In a plan review: a change to something others read with no
+  `## Consumers`, or one that names intent instead of a search and its hits,
+  is a finding. A user-visible change without its news fragment, or a
+  fragment a non-technical reader cannot follow, is a finding (minor).
 - A plan that migrates or deletes or replaces a gate, hook or lane script:
   does it carry `## Fresh-worktree dry run` (`design-template.md`) with real
   commands and exit codes from a fresh worktree without caches, and a

@@ -5,6 +5,17 @@ im Detail zu kennen. Je Version ein paar Sätze: was sich für ein Projekt
 ändert, das die Vorlage nutzt, und was es davon hat. Die vollständigen
 technischen Einzelheiten stehen im [CHANGELOG](CHANGELOG.md).
 
+## v2.70.0 — Wissen, das schon da ist, wird gefunden
+
+Viele Prüfrunden scheitern, weil ein Agent etwas Bestehendes nicht kannte:
+eine Einstellung, einen Hintergrunddienst, eine Stelle, die dieselben Daten
+liest. Projekte können solche Dinge jetzt automatisch aus ihrem Code
+auflisten lassen, und jeder Plan bekommt die Einträge, die ihn betreffen,
+gleich mitgeliefert. Wer etwas ändert, das andere lesen, muss nachweisen,
+dass er alle Leser gesucht hat. Und es gibt ein Protokoll wie dieses hier
+auch für Projekte: Jede Änderung, die ein Nutzer bemerkt, bekommt ein paar
+verständliche Sätze, gesammelt in einer Datei „Was ist neu“.
+
 ## v2.69.0 — Veraltete Pläne fallen auf
 
 Bevor ein Agent mit der Umsetzung beginnt, prüft der Prozess jetzt, wie alt

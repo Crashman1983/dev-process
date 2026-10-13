@@ -157,7 +157,9 @@ may decide. Once a day, after housekeeping, not on every tick:
    record it writes at once (until then only this checkout blocks again);
    a lock is lifted only with a triage (`gate_modes.py unlock`). Once a
    week run `docs/process/improvement-weekly.md` (or start a session on
-   it); once a month have a fresh session run `improvement-monthly.md`.
+   it) — it ends with rendering `NEWS.md` from the week's news fragments
+   (`docs/process/news.md`); once a month have a fresh session run
+   `improvement-monthly.md`.
 2. Notice: where did the day's issues wait, repeat a round, lose context,
    or come back as a fix? `process_kpis.py flow` (telemetry module) gives
    each issue's lead time with working and waiting time apart, tokens,

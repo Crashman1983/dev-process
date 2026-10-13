@@ -6,6 +6,7 @@ file. This command carries the operative steps — you need not read the whole
 them only if a point below is unclear). Before editing: state goal, touched
 files, and risk; add a test for Tier 1. Before finishing, take the light pass
 `workflow.md` (Quick) names — the two checklist questions most likely to bite
-a small change. Escalate to `/plan` the moment persistence, auth, contracts,
+a small change. A change a user notices brings its news fragment
+(`scripts/process/news.py new`, `docs/process/news.md`). Escalate to `/plan` the moment persistence, auth, contracts,
 external integrations, or anything another component depends on come into
 scope.
