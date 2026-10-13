@@ -30,7 +30,7 @@ def test_every_place_the_repository_names_its_version_is_a_location():
     not a release location: bumped by the release, it would claim a check nobody did."""
     out = subprocess.run(["git", "grep", "-n", "-F", CURRENT, "--", ".",
                           ":!CHANGELOG.md", ":!docs/sbom.cdx.json", ":!docs/SBOM.md", ":!tests/",
-                          ":!docs/OVERVIEW.md", ":!docs/UEBERBLICK.md"],
+                          ":!docs/OVERVIEW.md", ":!docs/UEBERBLICK.md", ":!NEWS.md"],
                          cwd=REPO, capture_output=True, text=True).stdout
     files = {line.split(":", 1)[0] for line in out.splitlines()}
     assert files == {path for path, _ in rel.LOCATIONS}, files
@@ -40,10 +40,14 @@ def test_check_is_clean_at_the_current_version():
     assert rel.mismatches(REPO, CURRENT) == []
 
 
+NEWS_999 = "# News\n\n## v9.9.9 — t\n\nWhat changes, in plain words.\n"
+
+
 def _copy(tmp_path: Path) -> Path:
     for path, _ in rel.LOCATIONS:
         (tmp_path / path).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy(REPO / path, tmp_path / path)
+    (tmp_path / "NEWS.md").write_text(NEWS_999, encoding="utf-8")
     return tmp_path
 
 
@@ -204,3 +208,34 @@ def test_a_rename_is_named_by_its_new_path(tmp_path):
     with pytest.raises(SystemExit) as refused:
         rel.release(root, "v9.9.9", suite=False)
     assert "README-OLD.md" in str(refused.value) and "DME.md" not in str(refused.value), refused.value
+
+
+def test_release_refuses_without_a_plain_language_news_section(tmp_path):
+    """#223: NEWS.md says in a few sentences what a release brings, for readers of no CHANGELOG."""
+    root = _copy(tmp_path)
+    (root / "CHANGELOG.md").write_text("**v9.9.9 — t.** body\n", encoding="utf-8")
+    (root / "NEWS.md").write_text("# News\n\n## v9.9.9 — t\n\n## v9.9.8 — older\n\nText.\n", encoding="utf-8")
+
+    with pytest.raises(SystemExit, match="NEWS.md has no section for v9.9.9"):
+        rel.release(root, "v9.9.9")  # a heading without sentences is no section
+    assert rel.mismatches(root, CURRENT) == []  # nothing bumped
+
+
+def test_check_names_a_missing_news_section(tmp_path, monkeypatch):
+    root = _copy(tmp_path)
+    (root / "CHANGELOG.md").write_text("**v9.9.9 — t.** body\n", encoding="utf-8")
+    (root / "NEWS.md").unlink()
+    monkeypatch.setattr(rel.subprocess, "run", lambda argv, **kw: subprocess.CompletedProcess(argv, 0))
+
+    assert any(line.startswith("NEWS.md: no section for v9.9.9") for line in rel.check(root, "v9.9.9"))
+
+
+def test_the_news_reader_takes_one_section_and_stops_at_the_next():
+    text = "# News\n\n## v2.0.0 — Big\n\nOne.\nTwo.\n\n## v1.9.0 — Small\n\nOld.\n"
+    assert rel.news(text, "v2.0.0") == ("Big", "One.\nTwo.\n")
+    assert rel.news(text, "v1.9.0") == ("Small", "Old.\n")
+    assert rel.news(text, "v3.0.0") is None
+
+
+def test_the_repository_news_has_a_section_for_the_current_version():
+    assert rel.news((REPO / "NEWS.md").read_text(encoding="utf-8"), f"v{CURRENT}") is not None

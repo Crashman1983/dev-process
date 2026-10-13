@@ -10,7 +10,8 @@ still naming the old version, a tag on a SHA without its CHANGELOG entry. The
 steps, in order, stopping at the first failure:
 
 1. the CHANGELOG has an entry for the version (`release_notes.notes`, the
-   same reader the publish workflow uses — no entry, no release);
+   same reader the publish workflow uses — no entry, no release), and NEWS.md
+   a plain-language section for it (`release_notes.news`);
 2. every version location carries it (`LOCATIONS`);
 3. the SBOM is regenerated (`tools/gen_sbom.py`);
 4. `ruff check .` and the full suite pass;
@@ -42,7 +43,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
-from release_notes import notes  # noqa: E402
+from release_notes import news, notes  # noqa: E402
 
 VERSION = re.compile(r"^v(\d+\.\d+\.\d+)$")
 
@@ -83,7 +84,7 @@ def bump(root: Path, number: str) -> None:
 
 
 # what the release commit carries: a tree dirty anywhere else would ride along
-RELEASE_FILES = ("CHANGELOG.md", *(rel for rel, _ in LOCATIONS), "docs/sbom.cdx.json", "docs/SBOM.md")
+RELEASE_FILES = ("CHANGELOG.md", "NEWS.md", *(rel for rel, _ in LOCATIONS), "docs/sbom.cdx.json", "docs/SBOM.md")
 
 
 def _current(root: Path) -> tuple[int, ...]:
@@ -96,6 +97,11 @@ def _current(root: Path) -> tuple[int, ...]:
     return tuple(int(x) for x in found[0].split(".")) if found else (0,)
 
 
+def _news_missing(root: Path, tag: str) -> bool:
+    path = root / "NEWS.md"
+    return not path.is_file() or news(path.read_text(encoding="utf-8"), tag) is None
+
+
 def check(root: Path, tag: str) -> list[str]:
     """What is not at `tag` yet: the locations, the CHANGELOG entry and the SBOM (its own
     `--check`; the SBOM names the version too, and `--check` said OK while it was stale)."""
@@ -105,6 +111,8 @@ def check(root: Path, tag: str) -> list[str]:
     left = mismatches(root, m.group(1))
     if notes((root / "CHANGELOG.md").read_text(encoding="utf-8"), tag) is None:
         left.append(f"CHANGELOG.md: no entry for {tag}")
+    if _news_missing(root, tag):
+        left.append(f"NEWS.md: no section for {tag} (`## {tag} — <title>` and a few plain sentences)")
     sbom = subprocess.run([sys.executable, "tools/gen_sbom.py", "--check"], cwd=root, capture_output=True)
     if sbom.returncode != 0:
         left.append("docs/sbom.cdx.json / docs/SBOM.md: stale (tools/gen_sbom.py --check)")
@@ -134,6 +142,10 @@ def release(root: Path, tag: str, *, suite: bool = True) -> None:
     if notes((root / "CHANGELOG.md").read_text(encoding="utf-8"), tag) is None:
         raise SystemExit(f"release: CHANGELOG.md has no entry for {tag} — write it first "
                          f"(`**{tag} — <title>.**`); a release without notes is not published")
+    if _news_missing(root, tag):
+        raise SystemExit(f"release: NEWS.md has no section for {tag} — write it first "
+                         f"(`## {tag} — <title>` and a few sentences for readers who do not "
+                         f"read the CHANGELOG)")
     status = subprocess.run(["git", "-C", str(root), "status", "--porcelain", "-z"],
                             capture_output=True, text=True)
     if status.returncode != 0:

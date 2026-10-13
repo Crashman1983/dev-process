@@ -97,7 +97,9 @@ Der bestehende Weg, unverändert:
 3. Plan-Review in frischer Sitzung, bei Gate-Code Refute, Umsetzung mit Tests,
    die gegen die Vorfassung fallen.
 4. `uv run ruff check .` und `uv run pytest -n 4 --dist loadfile`.
-5. CHANGELOG-Eintrag (deutsch) mit „Für <Projekt>“-Migrationshinweisen;
+5. CHANGELOG-Eintrag (deutsch) mit „Für <Projekt>“-Migrationshinweisen und
+   ein Abschnitt in `NEWS.md` (`## vX.Y.Z — <Titel>`, drei bis sechs Sätze ohne
+   Fachbegriffe: was ändert sich für ein Projekt, was bringt es);
    `python3 tools/release.py vX.Y.Z` nach Freigabe durch den Owner.
    Jedes Release ist entweder ein **reines Update** (kein Projektschritt über
    `template_update.py` hinaus, `template_verify` meldet `migration: false`)

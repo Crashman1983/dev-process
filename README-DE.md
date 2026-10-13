@@ -21,6 +21,7 @@ eigene Arbeit ab, und das Gedächtnis liegt in Dateien statt im Kontext.
 
 | Wofür | Dokument |
 |---|---|
+| Was ist neu, in wenigen Sätzen je Version | **[`NEWS.md`](NEWS.md)** |
 | Was der Prozess ist, warum er so ist, was offen ist | **[Überblick](docs/UEBERBLICK.md)** · [Overview (English)](docs/OVERVIEW.md) · [PDF](docs/Entwicklungsprozess-mit-KI-Agenten.pdf) |
 | Einrichten, headless oder im Dialog, und aktualisieren | [`BOOTSTRAP.md`](BOOTSTRAP.md) |
 | Was auf dem Rechner und in CI gebraucht wird | [`docs/SYSTEM-REQUIREMENTS.md`](docs/SYSTEM-REQUIREMENTS.md) |
