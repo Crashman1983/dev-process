@@ -82,6 +82,21 @@ record, not an accident.
    Use `template-update: true` on the update's plan.
    Archive it before merging; finish and the merge train use the same proof.
 
+**Two kinds of template release.** Each release of the process template is
+one of two kinds, and its changelog entry says which:
+
+- A **pure update** needs no project step beyond `template_update.py`:
+  `template_verify` reports `migration: false` and no owned file has to
+  change. Take it on the next scheduled update.
+- A **migration release** needs project steps (a new local config, an owned
+  hook to cut down, a retired script, a changed command). Its entry carries a
+  `Migration` section listing the steps in order, each with the check that
+  shows it is done. Plan it as its own work, with the fresh-worktree dry run
+  (`design-template.md`).
+
+Work that needs both ships as two releases, the pure update first, so a
+project can take the update quickly and schedule the migration separately.
+
 **Piloting a process change.** A process mechanism under trial arrives in
 an ordinary release behind a flag that is off by default, so every project
 that does not run the trial keeps today's behaviour. The project pilots it

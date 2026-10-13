@@ -81,6 +81,18 @@ no such section.
 | State | Event | Result |
 |---|---|---|
 | … | … | … / forbidden |
+
+## Fresh-worktree dry run (migrations; deleted or replaced gate, hook or lane scripts)
+Required before the first plan review when the plan migrates (a template
+update with `migration: true` from `template_verify`) or deletes or replaces
+a gate, hook or lane script. Two parts, as evidence, not intent:
+1. The plan's steps — or the checks that prove them — run once in a fresh
+   `git worktree` without `.venv`, `node_modules` or other caches: each
+   command with its exit code.
+2. For every path the plan deletes or replaces, a search for its consumers,
+   including existence probes (`is_file()`, `exists()`, `test -f`) that would
+   go quiet instead of failing: the command and its hits.
+Other work omits this section.
 ```
 
 ## Why a template and not a gate

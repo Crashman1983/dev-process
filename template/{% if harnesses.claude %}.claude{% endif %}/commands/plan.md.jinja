@@ -70,6 +70,16 @@ that owner — a second reader left behind judges the next input differently
 (`docs/process/failure-catalog.md`). `/execute` compares the final diff against
 this inventory before `pushed`; it does not build a second one.
 
+**A migration shows its fresh worktree first.** A plan that migrates
+(`template_verify` reports `migration: true`) or deletes or replaces a gate,
+hook or lane script carries `## Fresh-worktree dry run`
+(`docs/process/design-template.md`) before its first plan review: its steps
+or their checks run once in a fresh `git worktree` without `.venv` or
+`node_modules`, with commands and exit codes, and a consumer search of every
+removed path, existence probes included (`docs/process/failure-catalog.md`,
+"Fresh worktree"). Assumptions about a warm tree are what the plan review
+otherwise finds, one round at a time.
+
 **The tier carries its reason.** Name the boundary the change touches and
 the guard that enforces it independently of this diff (`file:line`); when the
 changed code is the only place a boundary is enforced, the change is Tier 3
