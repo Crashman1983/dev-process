@@ -91,7 +91,11 @@ a day downstream, with five reviewed candidates waiting.
    reviewed changes on it; it now names such a plan as residue instead. A
    plan that must outlive the merge says `plan-stays-active: <why>`; it
    stays, and its issue stays open. Another work's plan the passenger only
-   touched is left alone.
+   touched is left alone. The `DoD-deviation:` lines of its own plans and
+   spec plans ride into the merge body between the subject and the
+   `Closes` lines (rule 7); one that leaves an AC open or the work
+   continuing turns that issue's `Closes #N` into `Refs #N`
+   (`definition-of-ready-and-done.md`, Bindingness).
 3. The process gates, then the full suite, run **once** on the combined
    tree. Red: the **same tree runs once more** — red then green on
    identical code is a flaky test, reported as FLAKY and merged, never

@@ -372,6 +372,9 @@ def candidates(root: Path, local: str, base: str) -> list[dict]:
                 stem = Path(rel).stem
                 unique = merged_slugs[_review.DATE_PREFIX.sub("", stem)] == 1
                 own_ids |= _review._plan_work_ids(stem, plain, include_dedated=unique)
+        deviations, held = _deviations(root, base, b)  # what rides into its merge commit
+        c["deviations"] = len(deviations)
+        c["keeps_open"] = sorted(held)
         cleared_all = bool(archived) and all(p["cleared"] for p in c["plans"])
         if housekeeping:
             c["housekeeping"] = housekeeping
@@ -1027,10 +1030,19 @@ def build_train(root: Path, base: str, aboard: list[str], stamp: str, log) -> tu
             log(f"merged {b} — already contained")
             continue
         if r.returncode == 0:
+            # read before settling: settling moves plans the deviations live in
+            deviations, held = _deviations(wt, base, b)
             archived, issues = _settle_plans(wt, base, b, log)
+            kept = issues & held
+            issues -= held
             message = f"train: merge {b}"
-            if issues:
-                message += "\n\n" + "\n".join(f"Closes #{n}" for n in sorted(issues))
+            if deviations:
+                message += "\n\n" + "\n".join(deviations)
+            refs = [f"Closes #{n}" for n in sorted(issues)] + [f"Refs #{n}" for n in sorted(kept)]
+            if refs:
+                message += "\n\n" + "\n".join(refs)
+            for n in sorted(kept):
+                log(f"{b}: issue #{n} stays open — a DoD-deviation leaves an AC open or the work continuing")
             # --no-verify: the old auto-commit of `git merge` ran no pre-commit
             # hook; a broken hook install must not empty the train (refutation)
             r = _git(wt, "commit", "-q", "--no-verify", "-m", message)
@@ -1066,6 +1078,43 @@ def _own_plans(root: Path, base: str, branch: str, read) -> list[tuple[str, str]
     own = _review.own_plans(root, base, branch, _branch_issues(root, branch), read, (PLANS,),
                             lambda rel: rel.endswith(".md"))
     return None if own is None else [(rel, plain) for rel, plain, _added in own]
+
+
+# Mandatory rule 7: a DoD deviation belongs in the merge-commit body. The train
+# writes that body, so it carries the branch's own deviation lines
+# (`definition-of-ready-and-done.md`, Bindingness, owns the grammar).
+DOD_DEVIATION = re.compile(_review._LEAD + r"DoD-deviation[*_]*\s*:(.*)$", re.IGNORECASE | re.MULTILINE)
+# `open AC-3 [of #N]` or `continues [#N]` right after the marker: the issue stays open
+_HOLDS = re.compile(r"\s*[*_]*\s*(?:open\s+AC-[\w.]+(?:\s*,\s*AC-[\w.]+)*(?:\s+of)?|continues)"
+                    r"(?P<refs>(?:[\s,]*#\d+)*)(?![\w-])", re.IGNORECASE)
+
+
+def _deviations(root: Path, base: str, branch: str) -> tuple[list[str], set[int]]:
+    """The `DoD-deviation:` lines of `branch`'s own plans and spec plans
+    (`check_review.own_plans`, the one rule), each stripped but otherwise
+    verbatim, in order and without repeats — and the issues they keep open:
+    a line that names an open AC (`open AC-3`) or continuing work
+    (`continues`) holds the issues it names after that (`of #N`, `#N`), else
+    its plan's own issues. A fenced example is no declaration."""
+    def read(rel: str) -> str | None:
+        shown = _git(root, "show", f"{branch}:{rel}")
+        return shown.stdout if shown.returncode == 0 else None
+
+    own = _review.own_plans(root, base, branch, _branch_issues(root, branch), read,
+                            (PLANS, _review.SPECS_DIR),
+                            lambda rel: _review.record_kind(rel) in ("plan", "plan-archive", "spec-plan"))
+    lines: list[str] = []
+    held: set[int] = set()
+    for _rel, plain, _added in own or ():
+        for m in DOD_DEVIATION.finditer(plain):
+            line = m.group(0).strip()
+            if line not in lines:
+                lines.append(line)
+            hold = _HOLDS.match(m.group(1))
+            if hold:
+                named = {int(n) for n in re.findall(r"#(\d+)", hold.group("refs"))}
+                held |= named or _local_issues(plain)
+    return lines, held
 
 
 def _settle_plans(wt: Path, base: str, branch: str, log) -> tuple[list[str], set[int]]:
@@ -1591,8 +1640,10 @@ def render_plan(p: dict) -> str:
     for c in p["candidates"]:
         mark = "✓" if c["eligible"] else "·"
         extra = f" — {c['by']}" if c.get("by") and c["eligible"] else ""
+        held = c.get("keeps_open") or []
+        keeps = f", keeps {', '.join(f'#{n}' for n in held)} open" if held else ""
         lines.append(f"  {mark} {c['branch']} (+{c['ahead']}/-{c['behind']}, {c.get('files', 0)} file(s), "
-                     f"{c.get('hours_waiting', '?')} h){extra}")
+                     f"{c.get('hours_waiting', '?')} h, {c.get('deviations', 0)} DoD deviation(s){keeps}){extra}")
         for r in c["reasons"]:
             lines.append(f"      - {r}")
     return "\n".join(lines)

@@ -34,7 +34,22 @@ reviewer can trace:
 - a **DoR** deviation is recorded on the issue — a `## Deviations` heading in the
   issue **body**, where a reviewer finds it next to the acceptance criteria;
 - a **DoD** deviation is named in the merging commit body / PR, per mandatory
-  rule 8 (a skipped gate or dropped scope is documented there).
+  rule 8 (a skipped gate or dropped scope is documented there). Write it in
+  the plan (or spec plan) as one line per deviation, so the merge train can
+  carry it — the train writes its merge commits itself and copies each line
+  verbatim below the subject (`train.py plan` shows how many ride along):
+
+  ```
+  DoD-deviation: <item> — <why>                 the issue closes as usual
+  DoD-deviation: open AC-3 — <why>              the plan's issue stays open
+  DoD-deviation: open AC-3, AC-4 of #42 — <why> #42 stays open
+  DoD-deviation: continues #42 — <why>          #42 stays open (more merges follow)
+  ```
+
+  Only `open AC-<id>` or `continues` directly after the marker keeps an issue
+  open: the train then writes `Refs #N` instead of `Closes #N` for the issues
+  named right after it (`of #N` / `#N`), or the plan's own issues when none
+  is named. An issue mentioned later in the `<why>` is not held.
 
 Silent skipping is not allowed. This mirrors how the process already treats a
 plan's `Applicable constraints` (satisfied or explicitly not-applicable) and
