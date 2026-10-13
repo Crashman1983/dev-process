@@ -567,11 +567,14 @@ def rounds(root: Path | None = None) -> int:
         print(f"  all blockers: {_origin_text(totals)}")
     if not isinstance(blockers, str):
         # plan reviews (report header `phase: plan`) apart from code reviews;
-        # "-" = a blocker without kind=
+        # "-" = a blocker without kind=; the same work items as the table above,
+        # so the kind and origin totals count the same reports
+        listed = {w.lstrip("#") for w in rnds}
         by_phase = {}
         for ph in ("plan", "code"):
             counts: dict[str, int] = {}
-            for cell in _blockers_by_work(root, "kind", ph).values():
+            by_work = _blockers_by_work(root, "kind", ph)
+            for cell in (c for w, c in by_work.items() if w in listed):
                 for k, n in cell.items():
                     counts[k] = counts.get(k, 0) + n
             by_phase[ph] = counts

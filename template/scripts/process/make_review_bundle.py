@@ -27,12 +27,15 @@ Sources that cannot be read are named in place, never silently skipped.
 
 Usage:
     make_review_bundle.py [--skip-preflight] [--base REF] [--plan SLUG]
-        [--tier N] [--since REF] [-o FILE]
+        [--plan-review] [--tier N] [--since REF] [-o FILE]
 
 The plans under review are the plans the branch touches (`BASE...HEAD`):
 active, archived or `specs/<dir>/plan.md` — never every plan in the repo.
 --plan names them explicitly instead: every plan whose file name (a Spec Kit
 plan: its path) contains SLUG, archived ones included; no match is an error.
+--plan-review marks the bundle as a plan review (the report header then
+carries `phase: plan`); --plan alone also serves a code review whose plans
+detection misses.
 
 --tier asserts the caller's tier — a floor, never a discount: where a bundled
 plan declares a higher one, that one wins. --since shows the reviewer only
@@ -643,7 +646,7 @@ def _regression_pin_note(touches: list[str]) -> str | None:
 
 def build(root: Path, base: str | None, plan_filter: str | None = None,
           since: str | None = None, plans: list[Path] | None = None,
-          declared_tier: int | None = None) -> str:
+          declared_tier: int | None = None, plan_review: bool = False) -> str:
     out: list[str] = []
     add = out.append
     resolved = _resolve_base(root, base)
@@ -870,7 +873,7 @@ def build(root: Path, base: str | None, plan_filter: str | None = None,
     add(_ui_evidence(root, resolved, plans) + "\n")
 
     add("## Required output grammar\n")
-    add(_grammar_section(plan_review=bool(plan_filter)) + "\n")
+    add(_grammar_section(plan_review=plan_review) + "\n")
     return "\n".join(out)
 
 
@@ -1042,6 +1045,8 @@ def main(argv: list[str]) -> int:
     if tier_opt is not None and not (tier_opt.isascii() and tier_opt.isdigit()):
         raise SystemExit(f"{USAGE} — --tier needs an integer, got {tier_opt!r}")
     declared_tier = int(tier_opt) if tier_opt is not None else None
+    plan_review = "--plan-review" in argv
+    argv = [a for a in argv if a != "--plan-review"]
     # an unknown flag must be a hard error, not silently ignored — a typo'd
     # --base would hand the reviewer a bundle diffed against the wrong ref
     known = {"--base", "-o", "--plan", "--since", "--tier"}
@@ -1057,7 +1062,7 @@ def main(argv: list[str]) -> int:
             print(detail, file=sys.stderr)
             return status
     included = _plans_under_review(root, _resolve_base(root, base), plan_filter)
-    text = build(root, base, plan_filter, since, included, declared_tier)
+    text = build(root, base, plan_filter, since, included, declared_tier, plan_review)
     for warn in (ln for ln in text.splitlines() if ln.startswith(("**SIZE WARNING:**", "**REFUTE WARNING:**", "DELTA_TOUCHES "))):
         print("make_review_bundle: " + warn.replace("**", ""), file=sys.stderr)
     # an over-wide bundle was invisible until a reviewer read it (downstream:

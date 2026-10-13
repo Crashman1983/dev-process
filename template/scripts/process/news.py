@@ -148,6 +148,9 @@ def _first_added(root: Path) -> dict[str, str]:
          "--diff-filter=A", "--reverse", "--format=%x01%cs", "--name-only", base, "--", f"{NEWS_DIR}/"],
         capture_output=True, text=True, encoding="utf-8", errors="replace", env=git_environment())
     if proc.returncode != 0:
+        # every fragment then reads as unreleased: say why instead of passing it off as the truth
+        print(f"news: git log on {base} failed ({proc.stderr.strip()[:200] or proc.returncode}) — "
+              "every fragment counts as unreleased", file=sys.stderr)
         return {}
     prefix = f"{NEWS_DIR}/"
     found: dict[str, str] = {}

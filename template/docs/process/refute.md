@@ -135,6 +135,8 @@ attack is on the plan's claims and gaps, each answered from the repository:
        run the search for its readers and writers: `## Consumers` quotes it,
        and every hit is in a task. Rows of `inventory.py for-plan` for the
        touched files belong in the tasks that touch them.
+    Mark each blocking FINDING with its `kind=` (`knowledge-gap` when the
+    plan misses something that already exists).
     3. FAIL-OPEN — for each thing the plan relies on (a call, a tool, a
        file, a time limit): what happens when it fails or hangs? Does the
        plan decide fail closed, with a bound and a deadline?

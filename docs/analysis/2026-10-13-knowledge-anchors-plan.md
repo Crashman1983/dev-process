@@ -52,6 +52,14 @@ eine Konstante oder ein Timeout noch verwendet). Dort setzt der Plan an.
   heute steht nirgends lesbar, was neu oder besser ist (Kenni hat kein
   Changelog, dev-process nur ein sehr technisches).
 
+- DECISION 2026-10-13 steward: `process_kpis.py rounds` bekommt kein
+  `--json` — because der Unterbefehl hat bisher keine Optionen, und die
+  Wochen-Anleitung liest die Textzeile; eine JSON-Ausgabe käme mit dem ersten
+  Leser, der sie braucht (Release-Review, Befund 3).
+- DECISION 2026-10-13 steward: `make_review_bundle.py --plan-review` markiert
+  ein Plan-Review; `--plan` allein benennt auch die Pläne eines Code-Reviews
+  (Release-Review, Befund 2).
+
 ## 3. Umfang
 
 **Drin:**

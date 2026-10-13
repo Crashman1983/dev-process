@@ -66,8 +66,8 @@ To make it a gate, register it in `docs/process/gates.local.json`:
 {"inventory": {"module": null, "command": ["scripts/process/check_inventory.py", "."]}}
 ```
 
-The gate entry fails when the configuration is missing — whoever registered
-it expected lists. Start it observing, like any new node
+The gate entry fails when the configuration is missing or lists nothing —
+whoever registered it expected lists. Start it observing, like any new node
 (`docs/process/optimization.md`, "The process as a check graph"): either
 generate the lists green and then register the gate, or first merge the
 owner's line `uv run scripts/process/gate_modes.py weaken inventory --to shadow

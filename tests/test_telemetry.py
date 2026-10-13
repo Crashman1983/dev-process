@@ -355,6 +355,11 @@ def test_rounds_counts_blockers_by_kind_plan_reviews_apart_from_code_reviews(ren
                             "code reviews: implementation 1, knowledge-gap 1"), line
     # the origin split is unchanged: all six blockers, none carries origin=
     assert "all blockers: 6" in text
+    # a report of a work item without REVIEW lines counts in neither total
+    (reviews / "2026-07-06-stray.md").write_text(
+        "work: 999\n\nFINDING sev=blocker action=fix issue=- gate=judgement kind=process stray\n",
+        encoding="utf-8")
+    assert next(ln for ln in _rounds(out).splitlines() if "blockers by kind" in ln) == line
 
 
 def test_rounds_by_kind_without_any_kind_reads_zero(render, tmp_path):

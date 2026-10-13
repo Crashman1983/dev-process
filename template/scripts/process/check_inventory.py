@@ -31,9 +31,9 @@ def main(argv: list[str] | None = None) -> int:
     except inventory_config.ConfigError as exc:
         print(f"inventory: FAILED: {exc}")
         return 1
-    if conf is None:
-        print(f"inventory: FAILED: registered but no {inventory_config.CONFIG} — configure the "
-              "inventories or take the gate out of docs/process/gates.local.json")
+    if not conf:  # missing, or `{"inventories": {}}`: a registered gate expected lists
+        print(f"inventory: FAILED: registered but no inventory in {inventory_config.CONFIG} — "
+              "configure the inventories or take the gate out of docs/process/gates.local.json")
         return 1
     try:
         errors, said = inventory.check(root, conf)
