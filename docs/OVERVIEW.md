@@ -6,7 +6,7 @@
 
 Principles, mechanics and the path to broad rollout
 
-Process template dev-process v2.43.1 · tested in a real repository in production use (reference project)
+Process template dev-process v2.69.0 · tested in a real repository in production use (reference project)
 
 Template published on GitHub: [github.com/Crashman1983/dev-process](https://github.com/Crashman1983/dev-process)
 
@@ -25,17 +25,18 @@ The process was built and improved over many iterations in live operation; it ha
 |---|---|---|
 | No long-term memory: after a break or an automatic shortening of the conversation, rules and agreements are gone. | The agent breaks agreements made an hour ago and reopens decisions already taken, possibly deciding differently. | The key rules are in the startup file that every agent reads first; decisions are a list in the plan. After every shortening, a program automatically feeds both back in. |
 | Asserting instead of checking: statements about existing code come from memory. | The agent builds on a function that does not exist – or misses an existing one and writes it a second time. The result is duplicate code and dangling references. | Rule 1: every statement needs evidence or is marked as an assumption. For documentation, a Gate (an automatic check before the Merge) also verifies that it only references files that exist. |
-| Patching symptoms: a fault is fixed where it becomes visible. | The cause stays; its symptom is patched separately in five places, and the fault rate rises. | Rule 6: after at most two attempts at the symptom, look for the cause. A Gate asks at the second fix on the same file whether to rebuild instead of patching again (rule 4), and names the third as a missing cause; the metrics show where the same spot is corrected again and again. |
+| Patching symptoms: a fault is fixed where it becomes visible. | The cause stays; its symptom is patched separately in five places, and the fault rate rises. | Rule 6: after at most two attempts at the symptom, look for the cause. The review Bundle asks at the second fix on the same file whether to rebuild instead of patching again (rule 4), and names the third as a missing cause; the metrics show where the same spot is corrected again and again. |
 | Self-acceptance: the agent that built something also judges whether it is good. | Review becomes a formality; defects only surface in production. | Independent review by an uninvolved instance; the result is recorded as an attestation (a written review record in the journal, the running work log in the repository) and required by the Gate. |
 | Parallel work without coordination: several agents change the same files. | The last change overwrites the one before; work is lost. | An overview of all running work items (the situation table) shows overlaps; two efforts on the same problem are coordinated instead of worked on in parallel. It also reports a worker that is waiting, and a question nobody reads. |
 
-### The essentials in five sentences
+### The essentials in six sentences
 
 1. **A program checks the rules, so nobody has to keep them in mind.** Twelve automatic checks (“Gates”) run before every Merge; whatever fails is not merged.
-1. **Risk sets the effort.** Four risk tiers – Tier 0 to 3 – decide whether a change may be merged directly or needs a plan, a refutation review (targeted search for faults) and independent review; at Tier 3 a refutation runs before the first review round, and a fix of gate code is refuted again.
-1. **Review independence scales with risk.** Tier 0–1 use a self-check; from Tier 2 on, an uninvolved instance (a separate agent session) reviews, and its verdict applies only to exactly the code it reviewed. Verified pure template updates use the provenance check described in chapter 9.
+1. **Risk sets the effort.** Four risk tiers – Tier 0 to 3 – decide whether a change may be merged directly or needs a plan reviewed before code, a refutation review (targeted search for faults) and independent review; at Tier 3 a refutation runs before the first review round, and a fix of gate code is refuted again.
+1. **Review independence scales with risk.** Tier 0–1 use a self-check; from Tier 2 on, an uninvolved instance (a separate agent session) reviews, and its verdict applies only to exactly the code it reviewed. Verified pure template updates use the provenance check described in chapter 10.
 1. **All knowledge lives in files.** Plans, decisions and journals are in the repository and are automatically shown to every agent again as soon as its memory has been shortened.
 1. **The human decides, the agents work.** A coordinator agent hands out work to worker agents; the human prioritises, decides, approves designs and reviews a sample every week.
+1. **The process measures itself.** Every check is a node with measured cost and catches. A check is weakened only on evidence and with a line from the Owner; a sentinel takes a weakening back as soon as it does harm.
 
 ## 2. How the process is structured
 
@@ -44,7 +45,7 @@ The process was built and improved over many iterations in live operation; it ha
 | Layer | What happens there |
 |---|---|
 | **Human (Owner)** | prioritises, decides, approves designs, reviews a sample every week, evolves the rules |
-| **Coordinator** | gets the overview, assigns work items, starts and stops workers, decides workers' questions or passes them on, triggers the Merge – writes and reviews no code itself |
+| **Coordinator** | gets the overview, assigns work items, starts and stops workers, decides workers' questions or passes them on, triggers the Merge, runs the improvement cycle (chapter 5) – writes and reviews no code itself |
 | **Workers, refuters and reviewers** | a separate session on its own Branch for each work item and phase; at Tier 2 the reviewer attacks the change with the refuter's brief, at Tier 3 and for gate code a separate refuter does, its only job finding faults; the reviewer is always a different instance from the worker |
 | **Gates** | twelve check programs before every Merge: rules intact, decisions taken, attestation present and matching the code, design contracts kept, every listed capability backed by a test, licences allowed, documentation valid |
 | **Repository** | rule kernel, plans with decision lists, journal with attestations, situation table, contracts, metrics – the single source every layer reads from |
@@ -70,7 +71,7 @@ The process ships as a template (dev-process). From it you get a fully set-up re
 | Tier 0 | Tier 1 | Tier 2 | Tier 3 |
 |---|---|---|---|
 | No change in behaviour, or local and reversible | Small, self-contained change | Something others depend on: interface, schema | Access control, data storage, security boundary |
-| merge directly | Short procedure (goal, files and risk in one sentence, no written plan) plus one test; refutation as needed | Plan, implementation, independent review with the refutation brief (a separate refutation for gate code, data loss, concurrency) | in addition: approved design, threat question, a refutation before the first round, second model (where available) |
+| merge directly | Short procedure (goal, files and risk in one sentence, no written plan) plus one test; refutation as needed | Plan with an independent plan review, implementation, independent review with the refutation brief (a separate refutation for gate code, data loss, concurrency) | in addition: approved design, threat question, a refutation before the first round, second model (where available) |
 
 **Refutation review** means: before the independent review starts, a fresh instance attacks the change; its only job is to find faults. At Tier 2 the independent review itself answers the refuter's questions (one run; a separate refutation only for data loss or concurrency); at Tier 3, and for the Gates' own code at any tier, a separate refutation runs before the first review round; a fix round is refuted again only when it changes gate code — other fixes get regression tests and the delta review. At the end it names the cause its findings share, so that a fix round closes the cause instead of one more symptom. **Second model** means: a model from a different vendor, where one is available; if none is available, the attestation says so explicitly. The Gate does not require the second model, but it does require that its absence is stated openly.
 
@@ -78,20 +79,34 @@ The process ships as a template (dev-process). From it you get a fully set-up re
 
 > A review verdict only counts if it was reached independently and is bound to exactly the code that was reviewed. What agents need to know – decisions, goals, metrics – is in files and is shown to them again after every shortening.
 
-**Review.** From Tier 2 on, an uninvolved instance receives a read-only Bundle – changes, plan, tests, images – and not the conversation in which the work was done. Its attestation in the journal names the work item, tier, reviewer, model, independence markers, verdict, round and the checksums of the code. The Gate checks whether an attestation exists, whether its markers fit the tier and whether it belongs to the merged code. Images that prove nothing (identical before and after, an empty loading state) are marked void in the Bundle. Before each round after a block, a ROOT-CAUSE line names the cause; a tool measures the test that was red before and is green now. What it cannot check: whether the reviewer really was a different instance. That rests on the reviewer's own statement – hence the weekly sample by the human.
+**Review.** From Tier 2 on, an uninvolved instance receives a read-only Bundle – changes, plan, tests, images – and not the conversation in which the work was done. Its attestation in the journal names the work item, tier, reviewer, model, independence markers, verdict, round and the reviewed range (base and head commit). The Gate checks whether an attestation exists, whether its markers fit the tier and whether the pushed content matches what was reviewed: a rebase without conflicts keeps the verdict valid, every conflict resolution needs a new round. Images that prove nothing (identical before and after, an empty loading state) are marked void in the Bundle. Before each round after a block, a ROOT-CAUSE line names the cause; a tool measures the test that was red before and is green now. What it cannot check: whether the reviewer really was a different instance. That rests on the reviewer's own statement – hence the weekly sample by the human.
 
-**Memory.** The plan with its decision list, the journal and the task list are in the repository. A single command pulls from them what is in progress, what comes next, which decisions apply and which question is open. After every shortening of a session, a program automatically feeds the nine rules back in word for word, together with the last twelve decisions. This came from an observation in operation: the plain instruction to reread the rules after a shortening was itself shortened away.
+**Memory.** The plan with its decision list, the journal and the task list are in the repository. A single command pulls from them what is in progress, what comes next, which decisions apply and which question is open. After every shortening of a session, a program automatically feeds the nine rules back in word for word, together with the plan, decisions and open questions of the current work; all other plans appear only as a short index. This came from an observation in operation: the plain instruction to reread the rules after a shortening was itself shortened away.
 
 **Goals.** A work item only starts once its type is set and its acceptance criteria exist as testable sentences (“When <trigger>, the system shall <response>”, including negative, edge and permission cases). It is only accepted once every criterion has a passing test, all Gates are green and the documentation is updated. Both conditions are lists in the repository (start checklist and acceptance checklist) and keep growing: if a human says “at the end, X must hold”, X is added.
 
-**Measurement.** A cockpit (an analysis script in the repository) reads the journal, the Git history and reports; every number states how much weight it carries. Four metrics matter:
+**Measurement.** A cockpit (an analysis script in the repository) reads the journal, the Git history, reports and the log of Gate runs; every number states how much weight it carries (measured, estimated or missing – a missing value is never zero). It follows each work item from its first start to the deploy, with working and waiting time, tokens, Owner decisions and follow-up faults; what it shows about the checks themselves is in chapter 5. For review, four metrics matter:
 
 - **Review rounds to approval.** Target: at most two for 90 % of work items. A program counts the round, not the reviewer. Only a real fault blocks, wording never does. If the same spot blocks twice, the fixing session decides between patching and rebuilding; after the third blocking round the Owner decides once: merge with named leftovers, cut scope, or rebuild.
 - **Correction rate.** Share of features that had to be corrected within seven days; only the trend counts.
 - **Correction hotspots.** Spots that are corrected again and again – Rule 6 in numbers.
 - **Review rounds per model.** Shows which model works well in which phase.
 
-## 5. Architecture requirements: hard and soft
+## 5. The process improves itself
+
+> Every check costs time and tokens. The process measures what it costs and what it catches, and changes on evidence – never at the expense of quality or security, and the Owner decides every weakening.
+
+**The process as a check graph.** Every Gate, review and phase is a node. Every Gate run leaves a line with outcome, duration and commit; from it the cockpit shows each node's cost, blocks and flips (passed and failed on the same state). What a block was – a real fault, an accepted risk, an infrastructure problem – only a triage says; a later fix commit proves no catch. Next to that stand four loss measures that are never added up (occupancy, delay, Owner effort, tokens), and the value of the work: epics until usable, disruptive bugs until fixed, the origin of faults by cause and channel.
+
+**Gates change their mode.** A Gate blocks, runs in shadow (checks and records, never blocks), on a sample, or not at all. Every weakening needs a line from the Owner and counts only once it is on the main branch; core Gates and the Gates the mandate protects cannot be weakened at all. A sentinel runs daily and only makes things stricter: it restores a shadow or sampled Gate that would have found a fault, and every weakening whose guardrail breaks (too many follow-up faults, for example), and locks it until triage. A new Gate can start in shadow, so its false alarms are counted before it blocks.
+
+**Improvements as trials.** A recurring bottleneck becomes a record: a hypothesis, criteria frozen before the trial, a bounded pilot behind a flag with an expiry date, and a decision not taken by whoever built the change. The Owner's mandate sets goals, floors, budget and guardrails.
+
+**The rhythm.** Every week the coordinator checks last week's prognosis, triages a few blocks, looks for blind spots and chooses exactly one action; every month a fresh session reviews the graph, the decisions and the guardrails in an advisory role. Both are briefs any harness can run, whatever the model.
+
+**A new node as an example.** In the reference project, the implementation of a plan more than 1,000 commits old was started. Since v2.69.0, the start of every implementation measures how far the main branch has moved since the plan and how many of those commits change files the plan names. The node starts in shadow; only when the data supports the limits does the Owner decide whether it warns or blocks.
+
+## 6. Architecture requirements: hard and soft
 
 > Requirements do not hold because someone knows them, but because a Gate checks them (“hard”). Where only a reviewer judges (“soft”), the table says so explicitly.
 
@@ -108,37 +123,42 @@ The process ships as a template (dev-process). From it you get a fully set-up re
 
 **Life cycle of a requirement:** A new requirement starts with a decision document. Whatever can be checked by machine becomes a forbidden dependency in the architecture linter or a test covering all known cases; the rest becomes a question in the review checklist. Existing violations go into a Baseline that may only shrink. A new violation makes the Gate fail; an exception exists only as a decision document with an expiry date. New non-functional goals take the same path and also get an item in the acceptance checklist.
 
-## 6. The role of the human
+## 7. The role of the human
 
-> The human does not write code and does not read every change. What remains is judgement – in five places that no agent may take over.
+> The human does not write code and does not read every change. What remains is judgement – in six places that no agent may take over.
 
-**Five tasks of the Owner**
+**Six tasks of the Owner**
 
 - **Prioritise.** The Owner decides what is released next. If an agent creates dozens of work items, work only starts once the Owner has sorted them.
 - **Decide.** Every question on product principles or destructive steps arrives as a choice with options and a recommendation; the answer becomes a decision line in the plan.
 - **Approve designs.** At Tier 3, nothing is built before the design is approved. The Merge itself does not need the Owner's approval; Gates and attestation take care of that.
 - **Review a sample.** Once a week, read one already merged work item thoroughly; the calendar week determines which one. No agent knows in advance which one will be drawn.
 - **Evolve the rules.** The start and acceptance checklists are extended continuously: a requirement from the Owner becomes a permanent part of the process, not a one-off.
+- **Steer the process.** The Owner sets the mandate (goals, floors, budget, protected Gates, guardrails) and approves every weakening of a check; only the sentinel may make things stricter on its own (chapter 5).
 
 The Owner works through the interface of their Harness: on GitHub, for example, through Issues, Pull Requests and the Owner-Digest that a workflow produces; in the reference project, through a chat app, including on mobile. What the Owner no longer does: remind anyone of rules, ask about progress, merge, start sessions (in the reference project; open on GitHub), clean up.
 
-## 7. A work item from start to finish
+## 8. A work item from start to finish
 
 > Each phase runs in its own session with the model that the model policy (a configuration file) sets for the tier and phase. The phases follow one another without waiting; the only waiting is for the human's decisions.
 
 | Ready | Plan | Implementation | Review | Merge | Deploy |
 |---|---|---|---|---|---|
-| Owner releases | Plan + decisions | Test first, one commit per task | uninvolved instance with refutation brief (separate refute at Tier 3 and for gate code), attestation | Merge Queue: Gates and tests once | one deploy per queue run |
+| Owner releases | Plan + decisions, independent plan review | Test first, one commit per task | uninvolved instance with refutation brief (separate refute at Tier 3 and for gate code), attestation | Merge Queue: Gates and tests once | one deploy per queue run |
+
+**Plan reviewed before code.** From Tier 2 on, an uninvolved instance reads the plan before any code is written, at Tier 3 a session of a second model family; implementation starts only after its pass. Because the decisions are taken in the plan, as many tasks as possible are mechanical and run on a small model; only tasks that need judgement run on the large one. Before the start, the coordinator measures how far the main branch has moved past the plan (chapter 5).
+
+**Tests.** Which tests a change needs follows from a file that maps paths to tests; push and Merge Train use the same selection. Heavy runs share lanes, a certificate saves the second run on an identical state, and before each run a preflight checks the environment: a broken machine reports as environment, not as a red test.
 
 **Questions.** If the worker cannot answer a question from the plan, the Issue or the rules, it enters the question with options and a recommendation in the plan and reports “blocked” – never as a question in the chat. The coordinator decides it itself; only product principles and destructive steps go to the Owner as a choice. The answer is recorded as a decision in the plan, and the worker continues.
 
-**Merge.** Approved Branches are collected in a Merge Queue, run together through the Gates and the test suite once, and merged one after the other. A Tier 2+ Branch boards only if a Review covers its current state, or it is a verified pure template update with the Owner’s acknowledgment (chapter 9). If the joint run is red, it runs a second time; only then is the Branch that caused it identified, taken out of the queue and reported back to its worker. The Merge archives finished plans and closes their Issues.
+**Merge.** Approved Branches are collected in a Merge Queue, run together through the Gates and the test suite once, and merged one after the other. A Tier 2+ Branch boards only if a Review covers its current state, or it is a verified pure template update with the Owner’s acknowledgment (chapter 10). If the joint run is red, it cheaply repeats what failed or did not run; only then is the Branch that caused it identified, taken out of the queue and reported back to its worker. The Merge archives finished plans and closes their Issues; a documented deviation from the acceptance checklist goes into the merge commit, and an open criterion keeps the Issue open.
 
 **Coordinator failure.** Nothing is lost: the state is in Git; workers stop when they need a decision; a new coordinator has read in the current state within a minute.
 
 **Example from the reference project:** a Tier 2 work item – plan at 21:18, two questions to the Owner during implementation, Review in three rounds (round 1 Block), Merge at 04:24. Seven hours, two human decisions, no other manual step.
 
-## 8. One option: GitHub with Copilot
+## 9. One option: GitHub with Copilot
 
 > Rules, Gates, journal and metrics are files and scripts based on Git. That is why the process can be carried over to a platform like GitHub: it could run the Gates, track work items as Issues and collect Merges in the Merge Queue; Copilot would read the rules like any other Harness.
 
@@ -154,23 +174,23 @@ The following table shows how the building blocks could be mapped and which of t
 | Review | Uninvolved reviewer with review prompt and Bundle, attestation in the journal; Copilot code review as an additional voice. Since Copilot offers models from several vendors, the second model would only be a configuration entry. | prompt and Gate in the template |
 | Merge Queue | The Merge Queue could collect approved Pull Requests, check them together and merge them one after the other. | GitHub feature; not tested (the template ships its own Merge Train) |
 | Overview and cleanup | Owner-Digest and metrics run as Actions workflows; a script (tidy) cleans up finished Branches, specs and journals. | in the template |
-| Coordinator | Overview and status reports can run as Actions. It is open who starts and stops the sessions on GitHub. | open (chapter 11) |
+| Coordinator | Overview and status reports can run as Actions. It is open who starts and stops the sessions on GitHub. | open (chapter 12) |
 
 **What this would change:** in the reference project the Gates run on a single server; on GitHub they would run in the organisation. With Branch Protection, only an administrator could still bypass the Gates. And for the second model at Tier 3, nobody would have to switch Harness any more. A pilot is meant to show whether this holds up in practice.
 
-## 9. Scaling to an organisation
+## 10. Scaling to an organisation
 
 > The unit of the process is the repository. Machines scale along with it; the limit is the number of decisions an Owner can make.
 
 **What scales along:** every repository gets the template with its own Gates, its own model policy and its own situation table. The template is versioned centrally and contains organisation-wide rules such as layering rules or the allowed licences; an update arrives as a Pull Request in every repository. Gates run centrally, for example in GitHub Actions, and grow with the organisation. Workers are sessions of the Harness, for example one per Issue, and besides the models the model policy also sets how many of them run at the same time, at what priority, and whether a phase – the review, for example – runs on another machine or in the cloud.
 
-**Template updates.** Since v2.43.0, verification re-renders both pinned releases with the recorded project answers and compares the project against both. A pure update needs passing Gates and project tests plus an Owner or steward acknowledgment of the release behavior notes; it needs no new Review of release-identical files. Local customizations, owned files, hooks, Makefiles and edited or deleted tests remain project delta and need one independent Tier 2 Review. The project's own changes to process scripts or enforcement configuration retain Tier 3; process scripts exactly as released are covered by the upstream review and the acknowledgment (since v2.52.0). Projects update on a schedule, every two to four weeks, not per release. Failed provenance grants no exemption. Project extensions have dedicated local files for Gates, model policy and review dimensions. Setup and the exact update sequence are in [`BOOTSTRAP.md`](../BOOTSTRAP.md) and [`releases.md`](../template/docs/process/releases.md).
+**Template updates.** Since v2.43.0, verification re-renders both pinned releases with the recorded project answers and compares the project against both. A pure update needs passing Gates and project tests plus an Owner or steward acknowledgment of the release behavior notes; it needs no new Review of release-identical files. Local customizations, owned files, hooks, Makefiles and edited or deleted tests remain project delta and need one independent Tier 2 Review. The project's own changes to process scripts or enforcement configuration retain Tier 3; process scripts exactly as released are covered by the upstream review and the acknowledgment (since v2.52.0). Projects update on a schedule, every two to four weeks, not per release. Since v2.69.0 every release is either a pure update with no project step or a migration release with numbered steps; when work needs both, the pure update comes first. A migration plan shows a trial run in a fresh worktree without a prepared environment before its first review. Failed provenance grants no exemption. Project extensions have dedicated local files for Gates, model policy and review dimensions. Setup and the exact update sequence are in [`BOOTSTRAP.md`](../BOOTSTRAP.md) and [`releases.md`](../template/docs/process/releases.md).
 
 **What does not scale by itself:** every repository needs an Owner, and every work item needs on average one or two of that Owner's decisions. How many parallel work items one Owner can carry is the real capacity limit – and it is not measured today. It is also open where the coordinator runs in a larger environment and whether one coordinator can run several repositories.
 
-**What changes for developers:** they take on the Owner role for a repository, review samples, and write acceptance criteria, contracts and decisions. Role profile, training and cover still need to be described (chapter 11).
+**What changes for developers:** they take on the Owner role for a repository, review samples, and write acceptance criteria, contracts and decisions. Role profile, training and cover still need to be described (chapter 12).
 
-## 10. Risks and status
+## 11. Risks and status
 
 > A process that wants evidence for every statement names its own limits. The numbers are a Baseline, not a verdict.
 
@@ -180,11 +200,12 @@ The following table shows how the building blocks could be mapped and which of t
 | Attestation is self-reported | The Gate cannot verify whether the reviewer was a different instance. | Review sessions are started by a program, not by a human by hand; the attestation is bound to the code; the Owner draws samples. |
 | One model family | In the reference project, two thirds of Tier 3 reviews ran without a second model; in that case the Gate only requires an explicit statement. | The refutation review remains; platforms like Copilot offer models from several vendors; whether the Gate should require the second model is open. |
 | Model policy is code | The file also contains the start command for the sessions; whoever changes it can run commands on the machine that starts them. | Treated like the configuration of the check environment: every change goes through review. |
-| Vendor lock-in | The coordination layer (situation table, coordinator, Merge Train) has so far only been tested with Claude Code. | The process files are vendor-neutral; the template ships adaptations for Copilot, Claude Code and AGENTS.md. |
+| Vendor lock-in | The coordination layer (situation table, coordinator, Merge Train) has mostly been tested with Claude Code; single phases also run with Codex. | The process files are vendor-neutral; the template ships adaptations for Copilot, Claude Code and AGENTS.md. |
+| Self-optimisation weakens protection | A check that rarely fires gets weakened although it catches a rare, severe fault. | Core and protected Gates cannot be weakened; every weakening needs an Owner line and triaged blocks as evidence; a residual sample beats "off"; the sentinel restores on a broken guardrail and locks until triage. |
 | A single human | If the Owner is unavailable, decisions are not made. | All knowledge is in files; cover is not yet arranged. |
 | Young coordination layer | The situation table, coordinator and Merge Train (the reference project's own Merge Queue) are new and were reworked often in quick succession. | Every change to gate, train and hook code is refuted before review and after every fix round; each finding gets a test that is red against the version before. |
 
-The following reference-project figures are the historical baseline from the v2.38.0 overview, not a new measurement for v2.43.0. Current template maintenance measurements and their limits are recorded in [the maintenance report](maintenance-2026-10-02.md).
+The following reference-project figures are the historical baseline from the v2.38.0 overview, not a new measurement for v2.69.0. Current template maintenance measurements and their limits are recorded in [the maintenance report](maintenance-2026-10-02.md).
 
 | Measure (reference project) | Value | Interpretation |
 |---|---|---|
@@ -196,7 +217,7 @@ The following reference-project figures are the historical baseline from the v2.
 
 The core – Gates, review, rule kernel, journal, design contracts – is stable; what did not carry weight in the reference project has been removed. The coordination layer is the youngest part. Its many rapid reworks lead to a rule: changes to the coordination layer go through the same tiers as product code, and its code is refuted in every fix round.
 
-## 11. Open questions and outlook
+## 12. Open questions and outlook
 
 > Whatever is not answered today is listed here as a question with the next step.
 
@@ -210,7 +231,9 @@ The core – Gates, review, rule kernel, journal, design contracts – is stable
 | Architecture | Is the dependency direction checked by machine? Is there a minimum security standard? How is performance secured? | Set up an architecture linter; create a security rule set; define performance target values as a test and as an item in the acceptance checklist. |
 | Architecture | How are exceptions and Legacy handled? | Track every exception as a decision document with an expiry date, with a Gate reporting expired ones; create a Baseline per repository that may only shrink. |
 | Process | Does the process hold up on another platform, such as GitHub with Copilot? | Test workers per Issue and the Merge Queue in a pilot repository and compare with the reference project. |
-| Process | What kinds of faults occur? | Give every Block verdict a tag, so the cockpit counts kinds of faults, not just quantities. |
+| Process | What kinds of faults occur? | Triaged Gate blocks (category and failure class) and the origin of faults by cause and channel are collected; open is the coverage from which they can carry decisions. |
+| Process | Which checks pay off, which do not? | Keep the node table for weeks and triage blocks; the first weakening only with triage evidence and an Owner line, with a residual sample instead of "off". |
+| Process | Who judges an improvement without having been part of it? | An independent evaluator for improvement trials is the next package. |
 
 What this document does not claim: that the process is finished. What it does claim: that every rule is either checked by a program or explicitly marked as a judgement, that every number states how much weight it carries, and that the open questions are known. That is the point from which a pilot can start.
 
