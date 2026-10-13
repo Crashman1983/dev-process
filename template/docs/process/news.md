@@ -40,9 +40,10 @@ Completeness). `news.py check` tells whether all fragments are well formed.
 
 `uv run scripts/process/news.py render` writes `NEWS.md` from all fragments:
 by month, newest first; within a month new, improved, fixed. An entry's date
-is the day its fragment reached the integration branch, so work from a long
-branch lands in the month it shipped; fragments not merged yet stand under
-"Unreleased". A malformed fragment stops the render and names the file.
+is the day its fragment reached the integration branch (the merge commit's
+date; after a fast-forward, the commit's own committer date, which a rebase
+before the merge refreshes), so work from a long branch lands in the month it
+shipped; fragments not merged yet stand under "Unreleased". A malformed fragment stops the render and names the file.
 Fragments stay where they are; every render rebuilds the whole file.
 
 The steward renders weekly (`improvement-weekly.md`) and merges the result
