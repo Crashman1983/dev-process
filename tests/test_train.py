@@ -1066,6 +1066,73 @@ def test_a_train_merge_archives_the_cleared_plan_and_closes_its_issue(render, tm
         _git(out, "worktree", "remove", "--force", str(wt))
 
 
+def test_a_train_merge_carries_dod_deviations_and_keeps_open_issues_open(render, tmp_path):
+    # #217 AC-1/AC-2: rule 7 puts a DoD deviation in the merge-commit body —
+    # the train writes that body, so the plan's lines ride along verbatim; a
+    # line that leaves an AC open or the work continuing turns Closes into Refs
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _active_plan_branch(out, "50-gap", issue=50, extra=(
+        "- DoD-deviation: D3 docs follow in the README pass — owner asked to split\n"
+        "```\nDoD-deviation: an example in a fence — not a declaration\n```\n"))
+    _active_plan_branch(out, "51-open", issue=51, extra=(
+        "**DoD-deviation**: open AC-3 — the export waits for #60\n"))
+    _active_plan_branch(out, "52-more", issue=52, extra=(
+        "DoD-deviation: continues #52 — the second merge adds the CLI\n"))
+    _active_plan_branch(out, "53-named", issue=53, extra=(
+        "DoD-deviation: open AC-2 of #54 — tracked on the sibling issue\n"))
+    logged = []
+    train = _load_train(out)
+    wt, _b, merged, _d = train.build_train(out, "main", ["50-gap", "51-open", "52-more", "53-named"], "t9",
+                                           logged.append)
+    try:
+        assert merged == ["50-gap", "51-open", "52-more", "53-named"]
+        msgs = {m.strip().split("\n", 1)[0]: m.strip() for m in
+                _git(wt, "log", "--first-parent", "--format=%B%x00", "main..HEAD").stdout.split("\x00") if m.strip()}
+        assert msgs["train: merge 50-gap"] == (
+            "train: merge 50-gap\n\n"
+            "- DoD-deviation: D3 docs follow in the README pass — owner asked to split\n\n"
+            "Closes #50")
+        assert msgs["train: merge 51-open"] == (
+            "train: merge 51-open\n\n**DoD-deviation**: open AC-3 — the export waits for #60\n\nRefs #51")
+        assert msgs["train: merge 52-more"].endswith("the second merge adds the CLI\n\nRefs #52")
+        # the AC is open on #54, not on the plan's own issue: #53 closes
+        assert msgs["train: merge 53-named"].endswith("sibling issue\n\nCloses #53")
+        assert "Closes #51" not in "".join(msgs.values()) and "Closes #52" not in "".join(msgs.values())
+        assert any("#51 stays open" in line for line in logged), logged
+        assert any("#52 stays open" in line for line in logged), logged
+    finally:
+        _git(out, "worktree", "remove", "--force", str(wt))
+
+
+def test_a_spec_plans_dod_deviation_rides_along_and_plan_shows_the_count(render, tmp_path):
+    # #217 AC-1 (spec plan) and AC-3: `train.py plan` says how many lines ride
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _active_plan_branch(out, "55-dev", issue=55, extra="DoD-deviation: open AC-1 — a\nDoD-deviation: D8 — b\n")
+    _git(out, "checkout", "-q", "-b", "56-spec", "main")
+    spec = out / "specs/56-export/plan.md"
+    spec.parent.mkdir(parents=True)
+    spec.write_text("# export\n\ntier: 1\nissue: #56\n\nDoD-deviation: D7 evidence on the issue — no browser\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "feat: export spec")
+    _git(out, "checkout", "-q", "main")
+    shown = _train(out, "plan")
+    assert shown.returncode == 0, shown.stderr
+    line = {ln.split()[1]: ln for ln in shown.stdout.splitlines() if ln.startswith("  ")
+            and ln.split()[1] in ("55-dev", "56-spec")}
+    assert "2 DoD deviation(s), keeps #55 open" in line["55-dev"], shown.stdout
+    assert "1 DoD deviation(s))" in line["56-spec"], shown.stdout
+    train = _load_train(out)
+    wt, _b, merged, _d = train.build_train(out, "main", ["56-spec"], "t10", lambda _m: None)
+    try:
+        assert merged == ["56-spec"]
+        body = _git(wt, "log", "-1", "--format=%B").stdout
+        assert body.startswith("train: merge 56-spec\n\nDoD-deviation: D7 evidence on the issue — no browser"), body
+    finally:
+        _git(out, "worktree", "remove", "--force", str(wt))
+
+
 def test_a_train_merge_leaves_another_works_plan_alone(render, tmp_path):
     out = render(tmp_path, {"project_name": "d", "modules": {}})
     _repo(out)
