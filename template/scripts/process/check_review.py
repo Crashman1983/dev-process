@@ -700,7 +700,7 @@ GATE_PATHS = ("scripts/process/", ".githooks/", ".github/workflows/")
 GATE_FILES = ("Makefile", ".pre-commit-config.yaml",
               "docs/process/gates.local.json", "docs/process/model-policy.local.json")
 REVIEW_REPORTS = ".process-work/reviews"
-_REPORT_KEY = re.compile(r"^\s*(?:[-*+]\s+)?[*_]*(review|audit|work)[*_]*\s*:\s*(\S+)", re.IGNORECASE)
+_REPORT_KEY = re.compile(r"^\s*(?:[-*+]\s+)?[*_]*(review|audit|work|phase)[*_]*\s*:\s*(\S+)", re.IGNORECASE)
 
 
 def is_gate_path(rel: str) -> bool:
@@ -806,9 +806,10 @@ def _slug_in_name(slug: str, stem: str) -> bool:
 
 
 def report_header(text: str) -> dict[str, list[str]]:
-    """The `review:`/`audit:`/`work:` values of a report's header block — the
-    lines from the top to the first blank one (journal-state-plans.md). The
-    report names its work there, not necessarily in its file name."""
+    """The `review:`/`audit:`/`work:`/`phase:` values of a report's header
+    block — the lines from the top to the first blank one
+    (journal-state-plans.md). The report names its work there, not necessarily
+    in its file name; `phase: plan` marks a plan review (the one reader of it)."""
     out: dict[str, list[str]] = {}
     for line in _unfenced(text).splitlines():
         if not line.strip():

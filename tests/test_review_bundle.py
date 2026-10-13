@@ -216,6 +216,24 @@ def test_finding_tokens_pinned_to_their_owning_gate(render, tmp_path):
     org_line = "[origin=<" + "|".join(sorted(gate.FINDING_ORIGINS, key="draft fix late".split().index)) + ">]"
     assert org_line in bundle_src, org_line
     assert "origin" in gate.FINDING_KEYS
+    # the optional kind (what sort of defect; `rounds` counts blockers by it)
+    kind_line = "[kind=<" + "|".join(sorted(gate.FINDING_KINDS, key="knowledge-gap requirement implementation test-gap process environment".split().index)) + ">]"
+    assert kind_line in bundle_src, kind_line
+    assert "kind" in gate.FINDING_KEYS
+
+
+def test_bundle_asks_for_kind_and_a_plan_bundle_for_the_phase_header(render, tmp_path):
+    """The reviewer sees `kind=` in the FINDING format; only a `--plan` bundle asks for the
+    `phase: plan` header line that `rounds` uses to count plan reviews apart."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    code = _bundle(out, "--base", "main").stdout
+    assert "[kind=<knowledge-gap|requirement|implementation|test-gap|process|environment>]" in code
+    assert "knowledge-gap` = the author did not know something that already existed" in " ".join(code.split())
+    assert "phase: plan" not in code
+    plan = _bundle(out, "--base", "main", "--plan", "widget").stdout
+    assert "kind=<knowledge-gap" in plan
+    assert "put the header line `phase: plan`" in plan
 
 
 def test_option_missing_value_is_usage_not_traceback(render, tmp_path):

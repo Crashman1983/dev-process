@@ -27,7 +27,7 @@ difference. See "honest ceiling" in the module doc.
   process_kpis.py clusters      [--branch B] [--window D] [--min N]
                                                 # fix clusters (rule 6 across sessions)
   process_kpis.py models                        # rounds-to-pass and blocks by phase model × tier
-  process_kpis.py rounds                        # per work item: rounds to pass, blockers by origin
+  process_kpis.py rounds                        # per work item: rounds to pass, blockers by origin; by kind
   process_kpis.py share         [--weeks N]     # process vs product, week by week
   process_kpis.py train-phases  [--runs N]      # where the merge train's time goes, phase by phase
   process_kpis.py flow          [--issue N] [--json] [--follow-up-days D]
@@ -478,9 +478,12 @@ def models(root: Path | None = None) -> int:
 _NO_FINDING_READER = "FINDING lines are read by check_issues — the github-issues module"
 
 
-def _blockers_by_work(root: Path) -> dict[str, dict[str, int]] | str:
-    """work id → {origin or "-": blocker count} over the review reports, or why
-    they were not read: the FINDING reader (check_issues, github-issues module)
+def _blockers_by_work(root: Path, key: str = "origin",
+                      phase: str | None = None) -> dict[str, dict[str, int]] | str:
+    """work id → {`key` value (default `origin`; `kind` too) or "-": blocker
+    count} over the review reports — only plan reviews (`phase="plan"`: the
+    report header says `phase: plan`) or only the others (`phase="code"`), all
+    when `phase` is None — or why they were not read: the FINDING reader (check_issues, github-issues module)
     is not installed, or it is and cannot import (a missing dependency is named,
     never read as "module not there").
     A report names its work in its `work:` header (check_review reads
@@ -506,15 +509,18 @@ def _blockers_by_work(root: Path) -> dict[str, dict[str, int]] | str:
             text = p.read_text(encoding="utf-8", errors="replace")
         except OSError:
             continue
-        works = [w.lstrip("#") for w in _review.report_header(text).get("work", [])] \
-            or ["(no work: header)"]
+        head = _review.report_header(text)
+        is_plan = "plan" in [v.lower() for v in head.get("phase", [])]
+        if phase is not None and is_plan != (phase == "plan"):
+            continue
+        works = [w.lstrip("#") for w in head.get("work", [])] or ["(no work: header)"]
         for fields, err, _line in _issues.report_findings(text):
             if err or fields["sev"] != "blocker":
                 continue
             for work in works:
                 cell = out.setdefault(work, {})
-                origin = fields.get("origin") or "-"
-                cell[origin] = cell.get(origin, 0) + 1
+                value = fields.get(key) or "-"
+                cell[value] = cell.get(value, 0) + 1
     return out
 
 
@@ -524,6 +530,11 @@ def _origin_text(counts: dict[str, int]) -> str:
     if counts.get("-") and named:
         named.append(f"unmarked {counts['-']}")
     return f"{total} ({', '.join(named)})" if named else str(total)
+
+
+def _kind_text(counts: dict[str, int]) -> str:
+    named = [f"{k} {counts[k]}" for k in sorted(counts, key=lambda k: (k == "-", k))]
+    return ", ".join(named) if named else "0"
 
 
 def rounds(root: Path | None = None) -> int:
@@ -554,6 +565,18 @@ def rounds(root: Path | None = None) -> int:
         print(f"  blockers: not read ({blockers})")
     elif totals:
         print(f"  all blockers: {_origin_text(totals)}")
+    if not isinstance(blockers, str):
+        # plan reviews (report header `phase: plan`) apart from code reviews;
+        # "-" = a blocker without kind=
+        by_phase = {}
+        for ph in ("plan", "code"):
+            counts: dict[str, int] = {}
+            for cell in _blockers_by_work(root, "kind", ph).values():
+                for k, n in cell.items():
+                    counts[k] = counts.get(k, 0) + n
+            by_phase[ph] = counts
+        print(f"  blockers by kind — plan reviews: {_kind_text(by_phase['plan'])}; "
+              f"code reviews: {_kind_text(by_phase['code'])}")
     n = len(rnds)
     lvl = _level(n, True, False, _N_THRESHOLD)
     print(f"  {confidence(n, proxy=True)} · {action(lvl, 'compare rounds to pass within one tier over time; where fix-origin blockers dominate, re-check the fixed class (verification-independence.md, What each round judges)', thin='record origin= on blocker findings; judge after ~20 work items')}")

@@ -972,6 +972,25 @@ def test_finding_origin_is_an_optional_enum(render, tmp_path):
             assert "origin='review' not in ['draft', 'fix', 'late']" in r.stdout
 
 
+def test_finding_kind_is_an_optional_enum(render, tmp_path):
+    """`kind=` says what sort of defect a finding is (`knowledge-gap` = the author did not know
+    something that existed); absent stays valid, an unknown value is a format error like origin=."""
+    cases = (("kind=knowledge-gap reinvented the note reader", True),
+             ("origin=fix kind=test-gap no regression test", True),
+             ("kind=environment CI image differs", True),
+             ("no kind given", True),
+             ("kind=cause not a kind", False))
+    for i, (rest, ok) in enumerate(cases):
+        line = f"FINDING sev=blocker action=fix issue=- {rest}\n"
+        out = _render(render, tmp_path / str(i))
+        _report(out, "2026-07-05-x.md", VALID_REPORT + line)
+        r = _run(out)
+        assert (r.returncode == 0) is ok, (line, r.stdout)
+        if not ok:
+            assert ("kind='cause' not in ['environment', 'implementation', 'knowledge-gap', "
+                    "'process', 'requirement', 'test-gap']") in r.stdout
+
+
 # --- issue-before-spec: the influence window needs a readable home -----------
 
 def test_active_spec_without_issue_ref_is_hard(render, tmp_path):

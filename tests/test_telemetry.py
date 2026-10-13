@@ -329,6 +329,41 @@ def test_rounds_counts_rounds_to_pass_and_blockers_by_origin(render, tmp_path):
     assert "| `rounds` |" in doc and "origin=draft" in doc
 
 
+PLAN_ROUND_REPORT = ("review: widget-plan\nwork: #9\nphase: plan\npublish-waived: test\n\n## Findings\n"
+                     "FINDING sev=blocker action=fix issue=- kind=knowledge-gap reinvents the note reader\n"
+                     "FINDING sev=blocker action=fix issue=- kind=knowledge-gap second one\n"
+                     "FINDING sev=blocker action=fix issue=- kind=requirement unclear AC\n"
+                     "FINDING sev=blocker action=fix issue=- no kind on a plan blocker\n")
+CODE_ROUND_REPORT = ("review: widget-code\nwork: #9\npublish-waived: test\n\n## Findings\n"
+                     "FINDING sev=blocker action=fix issue=- kind=implementation off by one\n"
+                     "FINDING sev=blocker action=fix issue=- kind=knowledge-gap used the old helper\n"
+                     "FINDING sev=major action=fix issue=- kind=test-gap not a blocker\n")
+
+
+def test_rounds_counts_blockers_by_kind_plan_reviews_apart_from_code_reviews(render, tmp_path):
+    """The weekly question is whether blockers are knowledge gaps, and whether plan reviews
+    catch them before code does: one plan report (`phase: plan`) and one code report."""
+    out = _render(render, tmp_path, github_issues=True)
+    _journal(out, ROUNDS_JOURNAL)
+    reviews = out / ".process-work/reviews"
+    reviews.mkdir(parents=True)
+    (reviews / "2026-07-04-widget-plan.md").write_text(PLAN_ROUND_REPORT, encoding="utf-8")
+    (reviews / "2026-07-05-widget-code.md").write_text(CODE_ROUND_REPORT, encoding="utf-8")
+    text = _rounds(out)
+    line = next(ln for ln in text.splitlines() if "blockers by kind" in ln)
+    assert line.strip() == ("blockers by kind — plan reviews: knowledge-gap 2, requirement 1, - 1; "
+                            "code reviews: implementation 1, knowledge-gap 1"), line
+    # the origin split is unchanged: all six blockers, none carries origin=
+    assert "all blockers: 6" in text
+
+
+def test_rounds_by_kind_without_any_kind_reads_zero(render, tmp_path):
+    out = _render(render, tmp_path, github_issues=True)
+    _journal(out, ROUNDS_JOURNAL)
+    text = _rounds(out)
+    assert "blockers by kind — plan reviews: 0; code reviews: 0" in text
+
+
 def test_rounds_without_the_finding_reader_says_blockers_not_read(render, tmp_path):
     """Without check_issues the FINDING lines are not read — the column says so instead
     of reading as zero blockers (a missing input must not read as the OK state)."""
@@ -338,6 +373,7 @@ def test_rounds_without_the_finding_reader_says_blockers_not_read(render, tmp_pa
     row = next(ln for ln in text.splitlines() if ln.split()[:1] == ["9"])
     assert row.split()[1:4] == ["2", "open", "2"] and row.endswith("not read"), row
     assert "blockers: not read (FINDING lines are read by check_issues — the github-issues module)" in text
+    assert "blockers by kind" not in text
 
 
 def test_rounds_names_a_missing_dependency_of_an_installed_finding_reader(render, tmp_path, monkeypatch,

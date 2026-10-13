@@ -353,12 +353,18 @@ def _fenced(body: str, info: str = "") -> str:
     return f"{fence}{info}\n" + body + ("" if body.endswith("\n") else "\n") + fence + "\n"
 
 
-def _grammar_section() -> str:
+def _grammar_section(plan_review: bool = False) -> str:
     # REVIEW fields/enums come from the gate that parses them (import above).
     # The FINDING line's owner is check_issues.py (github-issues module — not
     # importable here, it renders conditionally); its sev/action tokens are
     # duplicated below and pinned to that gate's enums by a template test.
     fields = " ".join(f"{k}=…" for k in sorted(_review_gate.REQUIRED))
+    # `--plan` bundles a plan, not a diff: the report says so in its header
+    # block, the one place `check_review.report_header` reads it from
+    plan_note = ("\n\nThis is a plan review: put the header line `phase: plan` in the "
+                 "report's header block (with `review:`/`work:`, before the first blank "
+                 "line), so rounds on a plan are counted apart from rounds on code."
+                 if plan_review else "")
     return f"""Record your verdict EXACTLY in this grammar — the gates parse it verbatim,
 free-form prose is invisible to them:
 
@@ -380,7 +386,7 @@ that head is unreviewed for the gate. Never invent these values.
 
 For each finding, one line:
 
-    FINDING sev=<blocker|major|minor|nit> action=<fix|accept|follow-up> issue=<ref|-> gate=<judgement|possible|name> [origin=<draft|fix|late>] <title>
+    FINDING sev=<blocker|major|minor|nit> action=<fix|accept|follow-up> issue=<ref|-> gate=<judgement|possible|name> [origin=<draft|fix|late>] [kind=<knowledge-gap|requirement|implementation|test-gap|process|environment>] <title>
 
 - `gate`: could a linter, type checker or gate rule have produced this finding?
   `judgement` = no, it needed a reader; `possible` = yes, but no rule exists
@@ -389,9 +395,12 @@ For each finding, one line:
   to rediscover until somebody writes the rule.
 - `origin` (optional): `draft` = in the change as first reviewed, `fix` =
   introduced by a fix round, `late` = in the draft but found only now.
+- `kind` (optional): what sort of defect — `knowledge-gap` = the author did not
+  know something that already existed (a note, a story, an ADR, a module);
+  `requirement`, `implementation`, `test-gap`, `process`, `environment` as named.
 
 Judge against the checklist and the rules above; cite file:line evidence; a
-`pass` with unfixed blockers is a false green — verdict `block` instead."""
+`pass` with unfixed blockers is a false green — verdict `block` instead.{plan_note}"""
 
 
 # the tier from which a plan without a REFUTE line is warned about; gate code
@@ -861,7 +870,7 @@ def build(root: Path, base: str | None, plan_filter: str | None = None,
     add(_ui_evidence(root, resolved, plans) + "\n")
 
     add("## Required output grammar\n")
-    add(_grammar_section() + "\n")
+    add(_grammar_section(plan_review=bool(plan_filter)) + "\n")
     return "\n".join(out)
 
 
