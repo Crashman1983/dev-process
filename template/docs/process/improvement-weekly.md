@@ -26,6 +26,9 @@ Read, do not change:
   number needs its issues behind it.
 - `uv run scripts/process/gate_modes.py status` and `optimize.py status` —
   what is weakened, locked or on trial.
+- `uv run scripts/process/process_kpis.py rounds` — blockers by `kind`,
+  plan review and code review apart: a growing `knowledge-gap` share in code
+  review means facts exist that plans do not reach (`inventories.md`).
 - Last week's report (`.process-work/improvement/`), for its prognosis.
 
 Not installed (telemetry module off, no `gh`) is a finding, not a zero:
@@ -61,6 +64,9 @@ say what you could not see.
      action is to close the gap;
    - nothing, when nothing pays back within about four weeks.
 5. **Write the report** (below) and commit it with the triage lines.
+6. **Render the news** (`uv run scripts/process/news.py render`, where the
+   project keeps `news/` fragments) and let `NEWS.md` ride the same branch
+   and merge as the report (`news.md`).
 
 ## Report
 

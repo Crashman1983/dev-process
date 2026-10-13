@@ -51,13 +51,18 @@ inside the task); a parallel marker needs disjoint files and a fixed shared
 contract with no shared resource (`docs/process/workflow.md`, Plan).
 {% endif %}
 **A rename, removal or move is inventoried here, before any code — and so is
-a changed version, path or constant** (an image tag, a pinned version, a
-port, a path that tests, docs or a Makefile spell out). For each, find what
-depends on it — callers, rules, IDs, unit/end-to-end/visual tests with
+every change to something others read:** a version, path or constant (an
+image tag, a pinned version, a port, a path that tests, docs or a Makefile
+spell out), a file format or ledger line, a default or timeout (also across
+a process or client boundary), a file layout, an environment variable, an
+assumption about which process something runs in. For each, find what
+depends on it — readers and writers, callers, rules, IDs, unit/end-to-end/visual tests with
 their baselines, docs, registries — and put each into the existing task
-that changes it (its file list), not into a separate table. Quote the search that found them
-(command and hits) — a grep for the identifier alone misses most of them,
-and a blast radius asserted without one is not evidence. A moved rule's task also names where
+that changes it (its file list); the tasks stay the one inventory. The
+search itself goes into `## Consumers`: per changed item the command and its
+hits (`path:line`), nothing else — a grep for the identifier alone misses
+most of them, and a blast radius asserted without one is not evidence
+(`docs/process/review-checklist.md`, Completeness). A moved rule's task also names where
 each of its duties is fulfilled afterwards (`duty: <what> → <new owner>,
 pinned by <test>`). Example — moving the "marker in a plan blocks" check
 from gate A to gate B: the task lists gate B's check and its test, gate A's
@@ -69,6 +74,19 @@ that fact, name its one owner, and give each reader's task the move to ask
 that owner — a second reader left behind judges the next input differently
 (`docs/process/failure-catalog.md`). `/execute` compares the final diff against
 this inventory before `pushed`; it does not build a second one.
+
+**Known facts come with the task.** Where the project keeps generated
+inventories (`docs/process/inventories.md`), run `uv run
+scripts/process/inventory.py for-plan <plan>` once the files are named: every
+listed row a task touches — an environment variable, a job and the process it
+runs in, a table, a tool — goes into that task with its `path:line`. The fact
+was already written down; the plan makes sure it is read.
+
+**A change a user notices brings its news line.** A task writes the fragment
+(`uv run scripts/process/news.py new --type new|improved|fixed --slug <slug>
+"<one to three plain sentences>"`, `docs/process/news.md`) — what changes for
+the user, no file names or jargon. Internal work (refactoring, tests,
+process) has none.
 
 **A migration shows its fresh worktree first.** A plan that migrates
 (`template_verify` reports `migration: true`) or deletes or replaces a gate,

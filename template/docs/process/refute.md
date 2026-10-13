@@ -130,8 +130,11 @@ attack is on the plan's claims and gaps, each answered from the repository:
        code already owns? Name the owner (file:line); the plan extends it.
     2. CLAIMS — is every signature, schema, API, existing test or behaviour
        the plan cites true in the code (file:line)? A wrong claim is the
-       cheapest finding there is. For a changed name, version, path or
-       constant, run the search for the old value: every hit is in a task.
+       cheapest finding there is. For a changed name, version, path,
+       constant, default, timeout, format, layout or environment variable,
+       run the search for its readers and writers: `## Consumers` quotes it,
+       and every hit is in a task. Rows of `inventory.py for-plan` for the
+       touched files belong in the tasks that touch them.
     3. FAIL-OPEN — for each thing the plan relies on (a call, a tool, a
        file, a time limit): what happens when it fails or hangs? Does the
        plan decide fail closed, with a bound and a deadline?

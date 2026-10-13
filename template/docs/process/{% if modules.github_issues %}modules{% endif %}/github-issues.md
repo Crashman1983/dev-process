@@ -160,7 +160,8 @@ FINDING sev=minor action=follow-up issue=#61 gate=judgement story refs resolve b
 ~~~
 
 `FINDING sev=<blocker|major|minor|nit> action=<fix|accept|follow-up>
-issue=<ref|-> gate=<judgement|possible|name> [origin=<draft|fix|late>] <title>`
+issue=<ref|-> gate=<judgement|possible|name> [origin=<draft|fix|late>]
+[kind=<knowledge-gap|requirement|implementation|test-gap|process|environment>] <title>`
 — `fix` was resolved within the reviewed change, `accept` is a conscious
 acceptance (reason in prose), `follow-up` becomes tracked work and **must**
 carry an issue ref.
@@ -192,7 +193,10 @@ The field is optional; omitting it is not a lie, it is an un-asked question. Fen
 and are ignored, as everywhere — **fence the Prompt section** when it quotes
 the grammar or header-like lines (`issue:`, `campaign:`), or the gate lints
 the quotes as claims. A title may contain `=` (`USER_ID=1 hardcoded` is fine);
-only leading `sev=`/`action=`/`issue=`/`gate=`/`origin=` tokens are parsed as fields.
+only leading `sev=`/`action=`/`issue=`/`gate=`/`origin=`/`kind=` tokens are parsed as fields.
+`kind=` says what sort of finding it is (`knowledge-gap`: the author did not
+know something that already existed); it is not the `cause:*` label of a bug
+issue, which says where a bug came from.
 
 **The publish tool** — `bash scripts/process/publish_review.sh <report.md>
 [--campaign <title>]` creates the issue with the full report as body (prompt,
