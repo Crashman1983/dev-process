@@ -65,3 +65,6 @@ The steward also steers the process's improvement trials (daily:
 restore it writes at once), runs `docs/process/improvement-weekly.md` once
 a week and has a fresh session run `docs/process/improvement-monthly.md`
 once a month; the contract is in `docs/process/optimization.md`.
+Before an execute phase, `dispatch.py start` measures the plan's drift
+against the base (`plan_drift.py`); a stale plan is refreshed by a plan
+phase first, `--stale-plan-ok` only after checking the drift misses the work.

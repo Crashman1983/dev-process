@@ -801,6 +801,17 @@ def flow_items(root: Path, *, issue: int | None = None, branch: str | None = Non
         import dispatch as _dispatch  # noqa: PLC0415 — one reader of transcripts
     except ImportError:  # pragma: no cover — dispatch is core
         _dispatch = None
+    # the plan-drift node's last word per issue (dispatch asks before execute)
+    drift: dict[int, dict] = {}
+    for ev in _gate_events(common, datetime.min.replace(tzinfo=timezone.utc)):
+        plans = ev.get("plans")
+        if (ev.get("gate") == "plan-drift" and isinstance(ev.get("issue"), int)
+                and ev.get("outcome") in ("pass", "fail") and isinstance(plans, list)):
+            nums = [(p.get("behind"), p.get("touching")) for p in plans if isinstance(p, dict)
+                    and all(isinstance(p.get(k), int) for k in ("behind", "touching"))]
+            if nums:
+                drift[ev["issue"]] = {"behind": max(b for b, _ in nums), "touching": max(t for _, t in nums),
+                                      "outcome": ev["outcome"], "mode": ev.get("mode")}
     items = []
     for n in wanted:
         bs = branches_of.get(n, set())
@@ -924,10 +935,16 @@ def flow_items(root: Path, *, issue: int | None = None, branch: str | None = Non
                                     "measured" if deployed["value"] or merge_by_design else "estimated"),
                         "window_open": window_open, "days": follow_up_days,
                         "from": "deploy" if deployed["value"] else "merge"},
+            "plan_drift": {"value": drift.get(n), "quality": "measured" if n in drift else "missing"},
             "process_version": {"value": _process_version(root, integration, merged["value"]),
                                 "quality": "measured" if merged["value"] else "missing"},
         })
     return items
+
+
+def _drift_text(d: dict | None) -> str:
+    return ("plan drift not measured" if d is None else
+            f"plan {d['behind']} behind, {d['touching']} touching" + (" (stale)" if d["outcome"] == "fail" else ""))
 
 
 def _hours(seconds: float | None) -> str:
@@ -970,6 +987,7 @@ def flow(root: Path | None = None, *, issue: int | None = None, as_json: bool = 
               f"start {it['start']['quality']} · merge {it['merged']['quality']} · "
               f"deploy {it['deployed']['quality']} · {_token_text(it['tokens'])} · "
               f"owner decisions {it['owner_decisions']['value']} (proxy) · {esc_text} · "
+              f"{_drift_text(it['plan_drift']['value'])} · "
               f"process {it['process_version']['value'] or 'unknown'}")
     leads = [it["lead_s"]["value"] for it in items if it["lead_s"]["value"] is not None]
     measured = [it for it in items if it["lead_s"]["quality"] == "measured"]

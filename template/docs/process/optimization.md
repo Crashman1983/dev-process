@@ -90,6 +90,21 @@ append-only record `docs/process/gate-changes.local.jsonl` sets each gate's mode
   argue a rare, severe class (security, destructive changes) from "no
   catches in the sample".
 
+Not every node is a gate. **Plan drift** (`scripts/process/plan_drift.py`)
+is asked by `dispatch.py start --phase execute`: for each active plan the
+issue declares, how many commits the integration branch has gained since
+the plan was last written, and how many of them change a file the plan
+names. A plan hundreds of commits old costs the worker its first hour, or
+gets built against code that is gone. The node writes a `plan-drift` line
+to the same event log, so `nodes` weighs it like a gate and `flow` shows
+each issue's last verdict. Its mode and limits are the mandate's
+(`plan_drift`: `mode` shadow | warn | block, `max_touching`, `max_behind`);
+it starts in `shadow`, whose events calibrate the limits. `warn` tells the
+steward and puts a re-check note into the worker's prompt; `block` refuses
+the start until the plan is refreshed (the plan phase), or the steward
+passes `--stale-plan-ok`, which the event records. The mandate is the
+owner's file, so the owner turns the node up — on the shadow evidence.
+
 Two briefs run the loop, in any harness: `improvement-weekly.md` (the
 steward's weekly pass: last prognosis, a few triaged blocks, blind spots,
 one ranked action) and `improvement-monthly.md` (a fresh, advisory review

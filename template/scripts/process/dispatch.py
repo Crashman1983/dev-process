@@ -2,7 +2,7 @@
 """dispatch — start, list, watch, message and stop worker sessions per
 phase, with the model the policy assigns.
 
-    uv run scripts/process/dispatch.py start --issue N --phase brainstorm|plan|execute|review [--tier T] [--branch B] [--title "..."]
+    uv run scripts/process/dispatch.py start --issue N --phase brainstorm|plan|execute|review [--tier T] [--branch B] [--title "..."] [--stale-plan-ok]
     uv run scripts/process/dispatch.py list
     uv run scripts/process/dispatch.py log <branch> [--lines N]   # what the worker shows right now
     uv run scripts/process/dispatch.py say <branch> "<text>"      # a line into an interactive worker
@@ -1623,7 +1623,8 @@ def _worker_env(extra: dict[str, str]) -> dict[str, str]:
 # --- commands ---------------------------------------------------------------------------
 
 def start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str | None, title: str | None,
-          dry_run: bool, owner_approved: bool = False, plan_review: bool = False) -> int:
+          dry_run: bool, owner_approved: bool = False, plan_review: bool = False,
+          stale_plan_ok: bool = False) -> int:
     history = _records_dir(root) / "phases" / f"{issue}.json"
     try:
         previous = json.loads(history.read_text()) if history.exists() else {}
@@ -1698,8 +1699,19 @@ def start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str |
         tip = _remote_head(root, branch) if remote else (
             _out(root, "rev-parse", "--verify", "-q", f"{branch}^{{commit}}") or _remote_head(root, branch))
         plan_paths = uncleared_plans(root, tip, branch) if tip else []
+    drift_note = None
+    if phase == "execute":
+        # a plan the base has moved far past costs the worker its first hour (plan_drift.py)
+        import plan_drift  # noqa: PLC0415
+        why, drift_note = plan_drift.check_execute(root, issue, branch, dry_run=dry_run,
+                                                   stale_plan_ok=stale_plan_ok)
+        if why:
+            print(f"dispatch: not starting — {why}", file=sys.stderr)
+            return 3
     prompt = prompt_for(phase, issue, tier, branch, model, remote=remote, channel=channel, effort=effort,
                         attests=not other_harness, plan_review=plan_review, plan_paths=plan_paths)
+    if drift_note:
+        prompt += "\n\n" + drift_note
     argv = build_argv(policy, model, prompt, branch, issue, phase, effort, cell.command)
     why = override_refusal(root, phase, model, argv, branch, remote)
     if why:
@@ -2625,6 +2637,8 @@ def main(argv: list[str]) -> int:
     s.add_argument("--dry-run", action="store_true")
     s.add_argument("--plan-review", action="store_true",
                    help="with --phase review: review the plan before execute, not the code")
+    s.add_argument("--stale-plan-ok", action="store_true",
+                   help="with --phase execute: start although plan_drift blocks (recorded as an override)")
     sub.add_parser("list")
     lg = sub.add_parser("log")
     lg.add_argument("branch")
@@ -2655,7 +2669,8 @@ def main(argv: list[str]) -> int:
     root = Path(_out(Path(a.root).resolve(), "rev-parse", "--show-toplevel") or a.root).resolve()
     if a.command == "start":
         return start(root, issue=a.issue, phase=a.phase, tier=a.tier, branch=a.branch, title=a.title,
-                     dry_run=a.dry_run, owner_approved=a.owner_approved, plan_review=a.plan_review)
+                     dry_run=a.dry_run, owner_approved=a.owner_approved, plan_review=a.plan_review,
+                     stale_plan_ok=a.stale_plan_ok)
     if a.command == "list":
         return list_sessions(root)
     if a.command == "log":
