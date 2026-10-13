@@ -15,6 +15,8 @@ import sys
 from pathlib import Path
 
 ENTRY = re.compile(r"^\*\*(v\d+\.\d+\.\d+)\s+—\s+(.+?)\*\*\s*(.*)$")
+# NEWS.md, the plain-language log: one `## vX.Y.Z — <title>` section per release
+NEWS_ENTRY = re.compile(r"^##\s+(v\d+\.\d+\.\d+)\s+—\s+(\S.*)$")
 
 
 def notes(changelog: str, tag: str) -> tuple[str, str] | None:
@@ -30,6 +32,24 @@ def notes(changelog: str, tag: str) -> tuple[str, str] | None:
                 break
             body.append(nxt)
         return title, "\n".join(body).strip() + "\n"
+    return None
+
+
+def news(news_md: str, tag: str) -> tuple[str, str] | None:
+    """The NEWS.md section of `tag` as (title, body), None without one — or with
+    an empty body: a heading alone tells a reader nothing."""
+    lines = news_md.splitlines()
+    for i, line in enumerate(lines):
+        m = NEWS_ENTRY.match(line)
+        if not m or m.group(1) != tag:
+            continue
+        body = []
+        for nxt in lines[i + 1:]:
+            if nxt.startswith("## ") or nxt.startswith("# "):
+                break
+            body.append(nxt)
+        text = "\n".join(body).strip()
+        return (m.group(2).strip(), text + "\n") if text else None
     return None
 
 
