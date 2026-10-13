@@ -758,7 +758,9 @@ def test_rename_remove_move_inventory_lives_in_plan_and_execute_only_compares(re
         assert "A rename, removal or move is inventoried here, before any code" in plan
         for sink in ("callers", "rules", "IDs", "baselines", "docs", "registries"):
             assert sink in plan, sink
-        assert "existing task" in plan and "not into a separate table" in plan
+        assert "existing task" in plan and "the tasks stay the one inventory" in plan
+        # #223: the search for readers and writers is evidence in `## Consumers`, the changes stay in tasks
+        assert "`## Consumers`: per changed item the command and its\nhits (`path:line`), nothing else" in plan
         # the moved rule's duties stay recognisable at their new owner
         assert "duty: marker in plan blocks → gate B, pinned" in plan
         execute = (out / ".claude/commands/execute.md").read_text()
@@ -830,5 +832,9 @@ def test_the_tier_is_rechecked_and_value_changes_are_inventoried(render, tmp_pat
     assert "## Does the declared tier hold?" in checklist and "only place a boundary is" in checklist
     assert "run the search for the\n  old value yourself" in checklist
     plan = (out / ".claude/commands/plan.md").read_text()
-    assert "changed version, path or constant" in plan and "The tier carries its reason" in plan
+    assert "a version, path or constant" in plan and "The tier carries its reason" in plan
+    # #223: defaults, timeouts, formats, layouts, env vars and process assumptions count too
+    for item in ("a default or timeout", "a file format or ledger line", "an environment variable",
+                 "which process something runs in"):
+        assert item in plan, item
     assert "0. TIER" in (out / "docs/process/refute.md").read_text()
