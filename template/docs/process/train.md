@@ -52,7 +52,8 @@ A local branch boards when it is ahead of the integration branch and
 - has each of its own **Spec Kit plans** (`specs/<slug>/plan.md`, own by
   the same rule) at Tier 2+ cleared by a REVIEW pass for **that plan's**
   work (`work=<slug>` or an issue it declares) covering the head, or
-  waived. The slug and issues count as the branch's own work like an
+  waived — also one with no code yet (the train cannot tell which change
+  belongs to which plan; a pass for the issue they share clears both). The slug and issues count as the branch's own work like an
   active plan's stem. One issue split into two spec plans on one branch is
   two works: a pass for the one never clears the other, even where its
   range saw both (downstream, the train refused such a branch outright,

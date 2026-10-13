@@ -1717,8 +1717,11 @@ def start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str |
     if phase == "execute":
         # a plan the base has moved far past costs the worker its first hour (plan_drift.py)
         import plan_drift  # noqa: PLC0415
+        # the branch's commit as this phase will see it: origin's for a remote one
+        tip = _remote_head(root, branch) if remote else (
+            _out(root, "rev-parse", "--verify", "-q", f"{branch}^{{commit}}") or None)
         why, drift_note = plan_drift.check_execute(root, issue, branch, dry_run=dry_run,
-                                                   stale_plan_ok=stale_plan_ok)
+                                                   stale_plan_ok=stale_plan_ok, tip=tip or None)
         if why:
             print(f"dispatch: not starting — {why}", file=sys.stderr)
             return 3

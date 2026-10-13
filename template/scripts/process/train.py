@@ -389,7 +389,10 @@ def candidates(root: Path, local: str, base: str) -> list[dict]:
                 if tier >= 2 and not _review.review_waived(plain) \
                         and not _covers(root, passes, ids, tier, b, branch_passes):
                     spec_uncleared.append((rel, ids))
-        deviations, held = _deviations(root, base, b)  # what rides into its merge commit
+        found = _deviations(root, base, b)  # what rides into its merge commit
+        if found is None:
+            branch_unreadable.append(f"the DoD deviations of {b}")  # an unread hold would close the issue
+        deviations, held = found or ([], set())
         c["deviations"] = len(deviations)
         c["keeps_open"] = sorted(held)
         cleared_all = bool(archived) and all(p["cleared"] for p in c["plans"])
@@ -1054,7 +1057,14 @@ def build_train(root: Path, base: str, aboard: list[str], stamp: str, log) -> tu
             continue
         if r.returncode == 0:
             # read before settling: settling moves plans the deviations live in
-            deviations, held = _deviations(wt, base, b)
+            found = _deviations(wt, base, b)
+            if found is None:
+                # an unread hold would close an issue the plan keeps open
+                _git(wt, "merge", "--abort")
+                dropped.append(b)
+                log(f"{b} dropped (git could not read its plans' DoD deviations)")
+                continue
+            deviations, held = found
             archived, issues = _settle_plans(wt, base, b, log)
             kept = issues & held
             issues -= held
@@ -1112,17 +1122,23 @@ def _own_plans(root: Path, base: str, branch: str, read, *,
 # (`definition-of-ready-and-done.md`, Bindingness, owns the grammar).
 DOD_DEVIATION = re.compile(_review._LEAD + r"DoD-deviation[*_]*\s*:(.*)$", re.IGNORECASE | re.MULTILINE)
 # `open AC-3 [of #N]` or `continues [#N]` right after the marker: the issue stays open
+# a closing keyword in a copied line would let GitHub close what `Refs` keeps open
+_CLOSING = re.compile(r"\b(close[sd]?|fix(?:e[sd])?|resolve[sd]?)(\s*:?\s+)([\w.-]+/[\w.-]+)?#(\d+)",
+                      re.IGNORECASE)
 _HOLDS = re.compile(r"\s*[*_]*\s*(?:open\s+AC-[\w.]+(?:\s*,\s*AC-[\w.]+)*(?:\s+of)?|continues)"
                     r"(?P<refs>(?:[\s,]*#\d+)*)(?![\w-])", re.IGNORECASE)
 
 
-def _deviations(root: Path, base: str, branch: str) -> tuple[list[str], set[int]]:
+def _deviations(root: Path, base: str, branch: str) -> tuple[list[str], set[int]] | None:
     """The `DoD-deviation:` lines of `branch`'s own plans and spec plans
     (`check_review.own_plans`, the one rule), each stripped but otherwise
     verbatim, in order and without repeats — and the issues they keep open:
     a line that names an open AC (`open AC-3`) or continuing work
     (`continues`) holds the issues it names after that (`of #N`, `#N`), else
-    its plan's own issues. A fenced example is no declaration."""
+    its plan's own issues. A fenced example is no declaration. A closing
+    keyword before an issue (`fixes #12`) is copied as `fixes issue 12`, so
+    GitHub closes nothing the train did not close. None when git cannot
+    list the plans."""
     def read(rel: str) -> str | None:
         shown = _git(root, "show", f"{branch}:{rel}")
         return shown.stdout if shown.returncode == 0 else None
@@ -1130,11 +1146,13 @@ def _deviations(root: Path, base: str, branch: str) -> tuple[list[str], set[int]
     own = _review.own_plans(root, base, branch, _branch_issues(root, branch), read,
                             (PLANS, _review.SPECS_DIR),
                             lambda rel: _review.record_kind(rel) in ("plan", "plan-archive", "spec-plan"))
+    if own is None:
+        return None
     lines: list[str] = []
     held: set[int] = set()
-    for _rel, plain, _added in own or ():
+    for _rel, plain, _added in own:
         for m in DOD_DEVIATION.finditer(plain):
-            line = m.group(0).strip()
+            line = _CLOSING.sub(r"\1\2\3issue \4", m.group(0).strip())
             if line not in lines:
                 lines.append(line)
             hold = _HOLDS.match(m.group(1))

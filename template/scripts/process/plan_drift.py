@@ -8,9 +8,10 @@ Measured per plan the issue declares (`issue: N`), at the branch's tip, else
 at the base:
 
 - behind   — commits on the base since the plan's last commit;
-- touching — of those, the ones that change a file the plan names (a path in
-  backticks that exists at either end);
-- vanished — named files the plan's commit had and the base no longer has.
+- touching — of those, the ones that change a file the plan names (a file
+  path in backticks that exists at either end; a directory is too coarse);
+- vanished — named files the base had where the plan forked from it and no
+  longer has.
 
 `dispatch.py start --phase execute` asks this before it starts a worker. The
 check is a node of the check graph (docs/process/optimization.md): it writes
@@ -119,13 +120,10 @@ def named_paths(text: str) -> list[str]:
     return seen
 
 
-def _tree(root: Path, ref: str) -> tuple[set[str], set[str]] | None:
+def _tree(root: Path, ref: str) -> set[str] | None:
+    """The files at `ref`."""
     out = _git(root, "ls-tree", "-r", "-z", "--name-only", ref)
-    if out is None:
-        return None
-    files = {f for f in out.split("\0") if f}
-    dirs = {"/".join(f.split("/")[:i]) for f in files for i in range(1, f.count("/") + 1)}
-    return files, dirs
+    return None if out is None else {f for f in out.split("\0") if f}
 
 
 def plans_for(root: Path, issue: int, ref: str) -> list[tuple[str, str]] | None:
@@ -136,13 +134,15 @@ def plans_for(root: Path, issue: int, ref: str) -> list[tuple[str, str]] | None:
     return [(rel, text) for rel, text in texts if issue in _review.local_issue_numbers(text)]
 
 
-def measure(root: Path, issue: int, branch: str | None = None) -> dict:
+def measure(root: Path, issue: int, branch: str | None = None, tip: str | None = None) -> dict:
     """One verdict for the issue: {"outcome": pass|fail|skipped|unknown,
-    "reason", "plans": [...], "base", "tip"}. Limits come from the mandate."""
+    "reason", "plans": [...], "base", "tip"}. Limits come from the mandate.
+    `tip` is the branch commit the caller resolved (dispatch: origin's for a
+    remote phase); without it, or where it is not here, the local answer."""
     conf, problems = settings(root)
     base = base_ref(root)
     base_sha = _commit(root, base) if base else None
-    tip = tip_of(root, branch) or base_sha
+    tip = (_commit(root, tip) if tip else None) or tip_of(root, branch) or base_sha
     result: dict = {"outcome": "unknown", "reason": None, "plans": [], "base": base_sha, "tip": tip,
                     "mode": conf["mode"], "limits": {k: conf[k] for k in ("max_touching", "max_behind")},
                     "problems": problems}
@@ -171,10 +171,14 @@ def measure(root: Path, issue: int, branch: str | None = None) -> dict:
         if plan_tree is None:
             result["reason"] = f"{rel}: tree at {commit[:12]} unreadable"
             return result
-        named = [p for p in named_paths(text)
-                 if p in base_tree[0] or p in base_tree[1] or p in plan_tree[0] or p in plan_tree[1]]
-        vanished = [p for p in named if (p in plan_tree[0] or p in plan_tree[1])
-                    and p not in base_tree[0] and p not in base_tree[1]]
+        fork_out = _git(root, "merge-base", commit, base_sha)
+        fork_tree = _tree(root, fork_out.split()[0]) if fork_out and fork_out.strip() else None
+        if fork_tree is None:
+            result["reason"] = f"{rel}: no common history with the base"
+            return result
+        named = [p for p in named_paths(text) if p in base_tree or p in plan_tree or p in fork_tree]
+        # gone from the base since the fork — never a file the branch made itself
+        vanished = [p for p in named if p in fork_tree and p not in base_tree]
         behind_out = _git(root, "rev-list", "--count", f"{commit}..{base_sha}")
         touching_out = (_git(root, "rev-list", "--count", f"{commit}..{base_sha}", "--", *named)
                         if named else "0")
@@ -196,12 +200,40 @@ def measure(root: Path, issue: int, branch: str | None = None) -> dict:
     return result
 
 
+def _repeats(path: Path | None, issue: int, result: dict, override: bool) -> bool:
+    """Whether the log's last plan-drift line for the issue already says this:
+    a queued execute that block mode refuses is measured again on every
+    drain, and a repeat is no new run to count."""
+    if path is None:
+        return False
+    try:
+        with path.open("rb") as fh:
+            fh.seek(max(0, fh.seek(0, 2) - 200_000))
+            lines = fh.read().decode("utf-8", "replace").splitlines()
+    except OSError:
+        return False
+    for line in reversed(lines):
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(row, dict) and row.get("gate") == GATE and row.get("issue") == issue:
+            return (row.get("head"), row.get("base"), row.get("outcome"), row.get("mode"),
+                    bool(row.get("override"))) == (result["tip"], result["base"], result["outcome"],
+                                                   result["mode"], override)
+    return False
+
+
 def record(root: Path, issue: int, branch: str | None, result: dict, duration_s: float,
            *, override: bool = False) -> None:
-    gate_events.append(gate_events.events_path(root), {
+    path = gate_events.events_path(root)
+    if _repeats(path, issue, result, override):
+        return
+    # measured on committed refs: the input is the tip, never a working tree
+    gate_events.append(path, {
         "gate": GATE, "mode": result["mode"], "outcome": result["outcome"], "rc": None,
         "duration_s": round(duration_s, 3), "reason": result["reason"],
-        "head": result["tip"], "dirty": None, "pushed": None, "branch": branch, "ci": False,
+        "head": result["tip"], "dirty": False, "pushed": None, "branch": branch, "ci": False,
         "issue": issue, "base": result["base"], "override": override or None,
         "plans": [{k: p[k] for k in ("path", "commit", "behind", "touching", "named")}
                   for p in result["plans"]]})
@@ -214,13 +246,14 @@ def prompt_note(result: dict) -> str:
             "following it blind.")
 
 
-def check_execute(root: Path, issue: int, branch: str, *, dry_run: bool, stale_plan_ok: bool) -> tuple[str | None, str | None]:
+def check_execute(root: Path, issue: int, branch: str, *, dry_run: bool, stale_plan_ok: bool,
+                  tip: str | None = None) -> tuple[str | None, str | None]:
     """dispatch's question before an execute phase: (refusal, prompt note).
     The steward reads what it prints; nothing here may stop a start in shadow
     mode, and a check that cannot run blocks nothing."""
     started = time.monotonic()
     try:
-        result = measure(root, issue, branch)
+        result = measure(root, issue, branch, tip)
     except Exception as exc:  # noqa: BLE001 — an observation, never a crash of dispatch
         print(f"dispatch: plan drift not measured ({exc})", file=sys.stderr)
         return None, None

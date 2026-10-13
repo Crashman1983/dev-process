@@ -136,3 +136,39 @@ def test_dispatch_refuses_a_blocked_execute_and_starts_with_the_override(render,
     # the plan phase is not asked: refreshing the plan is the way out
     r = subprocess.run([*run[:6], "plan", *run[7:]], cwd=out, capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
+
+
+def test_a_directory_is_too_coarse_and_a_branch_made_file_never_vanished(render, tmp_path):
+    out = _project(render, tmp_path)
+    mod = _load(out)
+    _git(out, "checkout", "-q", "-b", "7-login", "HEAD~6")  # forked where the plan was written
+    _commit(out, {"src/new.py": "n = 0\n"}, "branch adds a file")
+    _commit(out, {PLAN: (out / PLAN).read_text() + "\n3. Also `src/` and `src/new.py`.\n"}, "plan names them")
+    _commit(out, {"src/new.py": None}, "branch drops it again")
+    _git(out, "checkout", "-q", "main")
+    (plan,) = mod.measure(out, 7, "7-login")["plans"]
+    assert plan["named"] == 3  # a.py, gone.py, new.py — not the directory
+    assert plan["touching"] == 4 and plan["vanished"] == ["src/gone.py"]
+
+
+def test_a_repeated_verdict_is_logged_once_and_counts_as_an_input(render, tmp_path):
+    out = _project(render, tmp_path, {"plan_drift": {"mode": "block", "max_touching": 2}})
+    mod = _load(out)
+    for _ in range(3):  # a refused queue line, drained three times
+        mod.check_execute(out, 7, "7-login", dry_run=False, stale_plan_ok=False)
+    rows = [e for e in _events(out) if e["gate"] == "plan-drift"]
+    assert len(rows) == 1 and rows[0]["dirty"] is False and rows[0]["head"]
+    mod.check_execute(out, 7, "7-login", dry_run=False, stale_plan_ok=True)  # the override is news
+    assert len([e for e in _events(out) if e["gate"] == "plan-drift"]) == 2
+
+
+def test_the_callers_tip_wins_over_a_stale_local_branch(render, tmp_path):
+    out = _project(render, tmp_path, {"plan_drift": {"max_touching": 2}})
+    mod = _load(out)
+    _git(out, "branch", "7-login")  # the local copy: the old plan
+    _git(out, "checkout", "-q", "-b", "elsewhere")
+    _commit(out, {PLAN: (out / PLAN).read_text() + "\n3. Refreshed on another host.\n"}, "refresh plan")
+    fresh = _git(out, "rev-parse", "HEAD").stdout.strip()
+    _git(out, "checkout", "-q", "main")
+    assert mod.measure(out, 7, "7-login")["outcome"] == "fail"
+    assert mod.measure(out, 7, "7-login", tip=fresh)["outcome"] == "pass"

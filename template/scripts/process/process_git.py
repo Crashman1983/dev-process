@@ -45,11 +45,18 @@ def local_env_vars() -> tuple[str, ...]:
     return names if r.returncode == 0 and names else LOCAL_ENV_VARS
 
 
+# config handed down through the environment (`git -c`, `GIT_CONFIG_COUNT`):
+# git keeps it for a child in another repository (prepare_other_repo_env), and
+# containers inject credentials, URL rewrites and safe.directory this way
+KEPT_CONFIG_VARS = ('GIT_CONFIG_PARAMETERS', 'GIT_CONFIG_COUNT')
+
+
 def drop_local_env(*envs) -> None:
     """Removes git's repo-local variables from each environment in place: the
     one owner of what a hook's children must not see (#219). A child still
-    finds the repo through its cwd."""
-    names = local_env_vars()
+    finds the repo through its cwd. Config passed by environment stays, as
+    git itself keeps it."""
+    names = [n for n in local_env_vars() if n not in KEPT_CONFIG_VARS]
     for env in envs:
         for name in names:
             env.pop(name, None)
