@@ -1235,3 +1235,16 @@ def test_without_any_integration_ref_one_finding_not_one_per_record(tmp_path, mo
     assert not any("integration ref resolves" in h and "malformed" in h for h in hard), hard
     found = [f for f in (hard if hard_side else soft) if cr.NO_INTEGRATION_REF in f]
     assert len(found) == 1, (hard, soft)
+
+
+def test_report_header_reads_phase_and_leaves_the_other_keys_alone():
+    """`phase: plan` marks a plan review; `work`/`review`/`audit` read as before, and a
+    `phase:` line below the header block (after the first blank line) is not header."""
+    cr = _cr()
+    head = cr.report_header("review: widget\nwork: #9\nphase: plan\n\nphase: code\n")
+    assert head == {"review": ["widget"], "work": ["#9"], "phase": ["plan"]}, head
+    assert cr.report_header("audit: widget\nwork: #9\n") == {"review": ["widget"], "work": ["#9"]}
+    assert "phase" not in cr.report_header("review: widget\n\n## Findings\n")
+    # a plan review's report still resolves to its work (report_of ignores phase)
+    text = "work: #9\nphase: plan\n\nbody\n"
+    assert cr.report_of([("2026-07-05-x.md", text)], [], [(None, 9)]) == ("2026-07-05-x.md", text)

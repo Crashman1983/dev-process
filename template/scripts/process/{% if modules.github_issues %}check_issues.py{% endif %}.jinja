@@ -159,7 +159,13 @@ FINDING_GATE_POSSIBLE = "possible"
 # reviewed, `fix` = introduced by a fix round, `late` = in the draft but found
 # only in a later round. `process_kpis.py rounds` counts blockers by it.
 FINDING_ORIGINS = {"draft", "fix", "late"}
-FINDING_KEYS = ("sev", "action", "issue", "gate", "origin")
+# What kind of defect a finding is, optional: `knowledge-gap` = the author did
+# not know something that already existed (a note, a story, an ADR, a module).
+# Not the `cause:*` issue labels, which say where a shipped bug came from.
+# `process_kpis.py rounds` counts blockers by it, plan reviews apart.
+FINDING_KINDS = {"knowledge-gap", "requirement", "implementation", "test-gap",
+                 "process", "environment"}
+FINDING_KEYS = ("sev", "action", "issue", "gate", "origin", "kind")
 
 
 # a FINDING may be written as a Markdown bullet — `- FINDING ...` must not
@@ -181,7 +187,7 @@ def _parse_finding(match: re.Match) -> tuple[dict | None, str | None]:
     title may itself contain `=` (e.g. 'user_id=1 hardcoded'). Requires sev=
     and action= with valid enums; issue= optional, '-' meaning none; gate=
     optional, free-form (see FINDING_GATE_*); origin= optional, one of
-    FINDING_ORIGINS."""
+    FINDING_ORIGINS; kind= optional, one of FINDING_KINDS."""
     fields: dict = {}
     tokens = match.group(1).split()
     i = 0
@@ -201,6 +207,8 @@ def _parse_finding(match: re.Match) -> tuple[dict | None, str | None]:
         return None, f"action={fields.get('action')!r} not in {sorted(FINDING_ACTIONS)}"
     if "origin" in fields and fields["origin"] not in FINDING_ORIGINS:
         return None, f"origin={fields['origin']!r} not in {sorted(FINDING_ORIGINS)}"
+    if "kind" in fields and fields["kind"] not in FINDING_KINDS:
+        return None, f"kind={fields['kind']!r} not in {sorted(FINDING_KINDS)}"
     issue = fields.get("issue", "-")
     if issue != "-" and parse_issue_ref(issue) is None:
         return None, f"issue={issue!r} is neither '-' nor a valid ref"
