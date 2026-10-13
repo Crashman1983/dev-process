@@ -95,7 +95,10 @@ tower run. Owner messages are a third wake. On each wake:
    the building one. A phase change waits for nobody: the owner is told,
    not asked (a worker parked on `planned` for an hour because you were
    busy relaying another worker's question is the failure this rule
-   exists for). The
+   exists for). Before execute, dispatch measures the plan's drift
+   against the base (`plan_drift.py`, mode from the mandate): a stale
+   plan is refreshed by a plan phase first, `--stale-plan-ok` only when
+   you have checked the drift does not touch the work. The
    dispatcher refuses when the policy's `max_workers` are live or a lane
    is held. Stop only sessions you started (`dispatch.py stop <branch>`),
    and only after the plan and its decisions are committed.

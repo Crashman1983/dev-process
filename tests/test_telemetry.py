@@ -805,3 +805,21 @@ def test_flow_ends_at_the_merge_by_design_when_the_mandate_has_no_deploy(render,
     if it["merged"]["value"] is not None:
         assert it["lead_s"]["endpoint"] == "merge"
         assert before == "estimated" and it["lead_s"]["quality"] == "measured"
+
+
+def test_flow_carries_the_last_plan_drift_verdict_per_issue(render, tmp_path):
+    import json
+    out = _flow_repo(render, tmp_path)
+    m = _flow_module(out)
+    [it] = m.flow_items(out, issue=12)
+    assert it["plan_drift"] == {"value": None, "quality": "missing"}
+    rows = [{"ts": "2026-10-01T11:59:00+00:00", "gate": "plan-drift", "mode": "shadow", "outcome": "fail",
+             "duration_s": 0.1, "issue": 12, "plans": [{"behind": 900, "touching": 40}, {"behind": 3, "touching": 1}]},
+            {"ts": "2026-10-01T12:30:00+00:00", "gate": "plan-drift", "mode": "shadow", "outcome": "skipped",
+             "duration_s": 0.1, "issue": 12, "plans": []},
+            {"ts": "2026-10-01T12:40:00+00:00", "gate": "plan-drift", "mode": "shadow", "outcome": "pass",
+             "duration_s": 0.1, "issue": 13, "plans": [{"behind": 1, "touching": 0}]}]
+    (out / ".git/process-gate-events.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+    [it] = m.flow_items(out, issue=12)
+    assert it["plan_drift"] == {"value": {"behind": 900, "touching": 40, "outcome": "fail", "mode": "shadow"},
+                                "quality": "measured"}  # a skipped run is no verdict

@@ -36,6 +36,10 @@ try:  # the one owner of a gate's mode (block, shadow, sampled, off); without it
 except Exception as _exc:  # noqa: BLE001
     gate_modes = None
     _GATE_MODES_ERROR = f"gate_modes unavailable ({_exc}) — every gate blocks"
+try:  # the event log's one writer; without it nothing is recorded, every verdict stands
+    import gate_events  # noqa: E402
+except Exception:  # noqa: BLE001
+    gate_events = None
 from gate_invoke import child_argv, hook_wiring_findings  # noqa: E402
 from process_git import path_matches, pushed_commit_problem  # noqa: E402
 
@@ -348,25 +352,12 @@ def _write_ledger(path: Path | None, notes: set[str]) -> None:
 # nodes` reads it to weigh each gate's cost against its catches
 # (docs/process/optimization.md, "The process as a check graph"). An
 # observation, not a duty: a log that cannot be written changes no verdict.
-EVENTS_NAME = "process-gate-events.jsonl"
-_EVENTS_MAX_BYTES = 5_000_000  # then the log rolls over to .1 (one generation kept)
-
-
 def _git_out(root: Path, *args: str) -> str | None:
-    try:
-        proc = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True,
-                              encoding="utf-8", errors="replace", timeout=30)
-    except (OSError, subprocess.TimeoutExpired):
-        return None
-    return proc.stdout.strip() if proc.returncode == 0 else None
+    return gate_events.git_out(root, *args) if gate_events else None
 
 
 def _events_path(root: Path) -> Path | None:
-    common = _git_out(root, "rev-parse", "--git-common-dir")
-    if not common:
-        return None
-    path = Path(common)
-    return (path if path.is_absolute() else root / path) / EVENTS_NAME
+    return gate_events.events_path(root) if gate_events else None
 
 
 def _run_context(root: Path, pushed: str) -> dict:
@@ -385,21 +376,10 @@ def _run_context(root: Path, pushed: str) -> dict:
 def _record_event(path: Path | None, context: dict, gate: str, *, mode: str,
                   outcome: str, rc: int | None, duration_s: float,
                   reason: str | None = None) -> None:
-    if path is None:
+    if gate_events is None:
         return
-    import datetime as _dt  # noqa: PLC0415
-    import json  # noqa: PLC0415
-
-    row = {"ts": _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="milliseconds"),
-           "gate": gate, "mode": mode, "outcome": outcome, "rc": rc,
-           "duration_s": round(duration_s, 3), "reason": reason, **context}
-    try:
-        if path.is_file() and path.stat().st_size > _EVENTS_MAX_BYTES:
-            os.replace(path, path.with_name(path.name + ".1"))
-        with path.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(row) + "\n")
-    except Exception:  # noqa: BLE001 — an unwritable log loses an observation, never a verdict
-        pass
+    gate_events.append(path, {"gate": gate, "mode": mode, "outcome": outcome, "rc": rc,
+                              "duration_s": round(duration_s, 3), "reason": reason, **context})
 
 
 def _emit(output: str, known: set[str], seen: set[str], show_all: bool) -> int:
