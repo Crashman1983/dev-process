@@ -25,7 +25,7 @@ conversations.
 | `sessions` | every worker `dispatch.py` started: phase, model, where (tmux window or pid), alive, last printed line and when | the look at the workers; `dispatch.py log <branch>` for more |
 | `questions` | open `DECISION NEEDED` lines in active plans | what only the owner can answer — relayed with options, answered as a `DECISION` line (a question kept in place and marked `(answered …)` before its colon counts as answered too) |
 | `findings` | deterministic, each with a *because* | the list to act on |
-| `--wait`, `--section` (flags) | `--wait [--timeout S] [--states a,b]` blocks on this host's reports file and prints each new matching line as JSON (exit 0; 3 on timeout; 2 outside a clone); `--json --section NAME` (repeatable) prints only those keys | the steward's harness-neutral watch (`/steward`); a small read instead of the whole table |
+| `--wait`, `--section` (flags) | `--wait [--timeout S] [--states a,b]` blocks on this host's reports file and prints each new matching line as JSON (exit 0; 3 on timeout; 2 outside a clone); with `stale` among the states it also ends on a live session silent too long (below); `--json --section NAME` (repeatable) prints only those keys | the steward's harness-neutral watch (`/steward`); a small read instead of the whole table |
 
 ## Findings (deterministic)
 
@@ -35,12 +35,27 @@ conversations.
 - **plan-without-decisions** — Tier 2+ plan without a `## Decisions` section
 - **plan-without-tier** — an active plan no gate can see
 - **chronic-red** — a gate red for two days or more
-- **stale-worker** — a branch with work (ahead or dirty) but no commit and no report for an hour (`--stale-minutes`); a worker whose latest report is `review-pass`, `done` or `idle` is parked, not stale
+- **stale-worker** — a branch with work (ahead or dirty) but no commit and no report for an hour (`--stale-minutes`, else `PROCESS_STALE_MINUTES`, else the policy's `stale_minutes`); a worker whose latest report is `review-pass`, `done` or `idle` is parked, not stale
 - **remote-unreachable** — `--remote` could not fetch; the table may be stale
 - **remote-residue** — unmerged branches on origin untouched for 14 days, counted not listed
 - **blocked** — a worker that reported `blocked` an hour ago and nothing since
 - **process-heavy** (low) — more than 40% of at least 20 commits in the last 7 days touch only process records: look where the rounds go and whether bookkeeping is batched
 - **far-behind** — 50+ commits behind the integration branch
+
+**A silent session wakes the watch.** A finding waits for someone to run
+the table; a worker that hangs without a report would stay unseen until
+the tick. So `--wait` with `stale` among its states looks at this host's
+live dispatched sessions once a minute and ends with a synthetic record
+`{"state": "stale", "worker": …, "last_report": …, "last_commit": …,
+"last_output": …}` for one that wrote no report of its own and made no
+commit in its worktree for the same budget (the policy's `stale_minutes`,
+default 60) while its phase is not over — the same rule as `stale-worker`
+(`quiet_too_long`, one owner), counted from the session's start at the
+earliest. `last_output` is its last printed line (`dispatch.py log`).
+Each silence is announced once (`stale-announced.json` beside the reports
+file): a re-armed watch does not wake on it again, and a session that
+commits or reports and then falls silent again is a new episode. The
+steward reads the log, then nudges or stops it (`/steward`).
 
 Brainstorm papers (`design-*` plans) and waived stale plans are listed but
 never findings: they are not work in flight. Only date-prefixed files,

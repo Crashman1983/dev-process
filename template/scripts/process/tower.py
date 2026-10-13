@@ -7,8 +7,9 @@ never narrated.
     uv run scripts/process/tower.py --stale-minutes 60
     uv run scripts/process/tower.py --remote   # other hosts: their branches on origin, their published reports
     uv run scripts/process/tower.py --json --section findings   # only these keys
-    uv run scripts/process/tower.py --wait --timeout 1800 --states pushed,blocked
-                                               # block until a report line arrives: exit 0, 3 on timeout
+    uv run scripts/process/tower.py --wait --timeout 1800 --states pushed,blocked,stale
+                                               # block until a report line arrives, or a live
+                                               # session goes stale: exit 0, 3 on timeout
 
 What it assembles (all from state the process already keeps):
   worktrees  — every `git worktree` of this clone: branch, ahead/behind the
@@ -61,6 +62,14 @@ PLAN_NAME = re.compile(r"^(\d{4}-\d{2}-\d{2}-|design-)")
 RED_AGE_DAYS = 2
 # a live worker that printed nothing for this long waits for input
 WAIT_MINUTES = 30
+# a worker with no commit and no report for this long is stale — unless
+# --stale-minutes, PROCESS_STALE_MINUTES or the policy's `stale_minutes` say otherwise
+STALE_MINUTES = 60
+PARKED = ("review-pass", "done", "idle")  # a worker reporting these waits, it does not work
+# `stale` is synthetic: never a report line, written by --wait for a silent live session
+WAIT_STATES = _report.STATES + ("stale",)
+STALE_POLL_S = 60  # how often --wait looks at the live sessions
+STALE_SEEN = "stale-announced.json"  # beside the reports: the stale episodes --wait announced
 
 
 def _git(root: Path, *args: str) -> str | None:
@@ -480,6 +489,118 @@ def remote_branches(root: Path, ref: str | None, local_branches: set[str],
     return out, old
 
 
+# --- stale: no commit, no report ------------------------------------------------------
+
+def quiet_too_long(minutes_since_commit: int | None, report_minutes_ago: int | None,
+                   report_state: str | None, stale_minutes: int) -> bool:
+    """The one owner of "stale": no commit and no report for `stale_minutes`,
+    and not parked on a waiting state (`PARKED`). No report at all is quiet;
+    an unknown commit age is not. The `stale-worker` finding asks it of a
+    worktree, `--wait` of a live session (`stale_sessions`)."""
+    if report_state in PARKED:
+        return False
+    return ((minutes_since_commit or 0) >= stale_minutes
+            and (report_minutes_ago is None or report_minutes_ago >= stale_minutes))
+
+
+def resolve_stale_minutes(root: Path, given: int | None = None) -> int:
+    """The quiet budget: `--stale-minutes`, else PROCESS_STALE_MINUTES, else
+    the policy's `stale_minutes` (dispatch owns the policy), else 60."""
+    if given is not None:
+        return given
+    env = os.environ.get("PROCESS_STALE_MINUTES", "").strip()
+    if env:
+        try:
+            return int(env)
+        except ValueError:
+            raise SystemExit(f"tower: PROCESS_STALE_MINUTES must be an integer, got {env!r}")
+    try:
+        import dispatch as _dispatch
+    except ImportError:
+        return STALE_MINUTES
+    return (_dispatch.stale_minutes(root) if hasattr(_dispatch, "stale_minutes") else None) or STALE_MINUTES
+
+
+def _epoch_iso(epoch: int | None) -> str | None:
+    return _dt.datetime.fromtimestamp(epoch).isoformat(timespec="seconds") if epoch else None
+
+
+def stale_sessions(root: Path, stale_minutes: int) -> list[dict]:
+    """Live dispatched sessions on this host that wrote no report of their own
+    and made no commit in their worktree for `stale_minutes`
+    (`quiet_too_long`) while their phase is not over (`dispatch.phase_over`)
+    — each as a synthetic `stale` record naming the last report, the last
+    commit and the last printed line. A session's quiet starts no earlier
+    than the session: the previous phase's commit is not its silence.
+    `episode` changes with every commit or report, so a session that stirs
+    and falls silent again is a new stale episode."""
+    try:
+        import dispatch as _dispatch
+    except ImportError:
+        return []
+    now = time.time()
+    reports = _report.read_reports(root)
+    out: list[dict] = []
+    for rec in _dispatch.records(root):
+        if not rec.get("alive") or rec.get("remote"):
+            continue  # gone, or on another host: its reports speak for it
+        started = int(rec.get("started") or 0)
+        wt = Path(rec["worktree"]) if rec.get("worktree") else None  # Path("") would be the cwd
+        last = _git(wt, "log", "-1", "--format=%ct") if wt and wt.is_dir() else None
+        commit = int(last.strip()) if last and last.strip().isdigit() else None
+        own = _dispatch.session_report(rec, reports)
+        own_epoch = int(own.get("epoch") or 0) if own else None
+        quiet_commit = int((now - max(commit or 0, started)) // 60)
+        quiet_report = None if own_epoch is None else int((now - own_epoch) // 60)
+        if not quiet_too_long(quiet_commit, quiet_report, (own or {}).get("state"), stale_minutes):
+            continue
+        if _dispatch.phase_over(root, rec, own, local=True) is True:
+            continue  # done with its phase, waiting to be stopped — not silent work
+        latest = None  # the branch's last word, of this session or of the phase before
+        for r in reports:
+            if r.get("worker") == rec["branch"] and (
+                    latest is None or int(r.get("epoch") or 0) >= int(latest.get("epoch") or 0)):
+                latest = r
+        line, _since = _dispatch.last_output(rec)
+        quiet = quiet_commit if quiet_report is None else min(quiet_commit, quiet_report)
+        out.append({
+            "state": "stale", "worker": rec["branch"], "issue": rec.get("issue"), "phase": rec.get("phase"),
+            "host": _report.host_name(), "epoch": int(now), "minutes_quiet": quiet,
+            "last_report": None if latest is None else {
+                "state": latest.get("state"), "at": _epoch_iso(int(latest.get("epoch") or 0)),
+                "minutes_ago": int((now - int(latest.get("epoch") or 0)) // 60),
+                "note": latest.get("note") or "", "this_session": latest is own},
+            "last_commit": _epoch_iso(commit),
+            "minutes_since_commit": None if commit is None else int((now - commit) // 60),
+            "last_output": line[-200:],
+            "episode": f"{started}:{max(commit or 0, own_epoch or 0, started)}",
+            "note": f"no report and no commit for {quiet} min — read `dispatch.py log {rec['branch']}`, "
+                    f"then nudge it (`dispatch.py say`) or stop it",
+        })
+    return out
+
+
+def announce_stale(root: Path, seen_path: Path, stale_minutes: int) -> list[dict]:
+    """The stale sessions not yet announced in their current episode. The
+    file keeps exactly the episodes stale now: a session that commits or
+    reports drops out, and its next silence is announced again — once."""
+    try:
+        seen = json.loads(seen_path.read_text(encoding="utf-8"))
+        seen = seen if isinstance(seen, dict) else {}
+    except (OSError, ValueError):
+        seen = {}
+    stale = stale_sessions(root, stale_minutes)
+    now_seen = {r["worker"]: r["episode"] for r in stale}
+    if now_seen != seen:
+        staging = seen_path.with_name(f"{seen_path.name}.{os.getpid()}.tmp")
+        try:
+            staging.write_text(json.dumps(now_seen), encoding="utf-8")
+            os.replace(staging, seen_path)
+        except OSError:
+            staging.unlink(missing_ok=True)
+    return [r for r in stale if seen.get(r["worker"]) != r["episode"]]
+
+
 # --- findings -----------------------------------------------------------------------
 
 def findings(table: dict, stale_minutes: int) -> list[dict]:
@@ -535,10 +656,9 @@ def findings(table: dict, stale_minutes: int) -> list[dict]:
         if wt.get("missing") or wt["branch"] in integration_names | {"detached"}:
             continue
         rep = reported.get(wt["branch"])
-        quiet_commit = wt.get("minutes_since_commit", 0) >= stale_minutes
-        quiet_report = rep is None or rep["minutes_ago"] >= stale_minutes
-        parked = rep is not None and rep["state"] in ("review-pass", "done", "idle")  # waiting, not working
-        if quiet_commit and quiet_report and not parked and (wt.get("ahead", 0) or wt.get("dirty", 0)):
+        if quiet_too_long(wt.get("minutes_since_commit", 0), None if rep is None else rep["minutes_ago"],
+                          None if rep is None else rep["state"], stale_minutes) \
+                and (wt.get("ahead", 0) or wt.get("dirty", 0)):
             out.append({"kind": "stale-worker", "severity": "medium",
                         "what": f"{wt['branch']}{' (another host)' if wt.get('remote') else ''}: no commit for {wt.get('minutes_since_commit', '?')} min and "
                                 f"{'no report' if rep is None else 'last report ' + str(rep['minutes_ago']) + ' min ago (' + rep['state'] + ')'}",
@@ -745,31 +865,39 @@ def render(table: dict) -> str:
     return "\n".join(lines)
 
 
-def wait(root: Path, timeout: float, states: tuple[str, ...]) -> int:
+def wait(root: Path, timeout: float, states: tuple[str, ...], stale_minutes: int = STALE_MINUTES) -> int:
     """Block until this host's reports file gains a line in `states`; print the
-    matching records as JSON lines. Exit 0 on a match, 3 on timeout, 2 when
-    `root` is not a git clone. A harness-neutral wake: the caller runs it in
-    the background and treats its exit as the event. Local file only."""
+    matching records as JSON lines. With `stale` in `states`, a live
+    dispatched session silent for `stale_minutes` (`stale_sessions`) ends the
+    wait too, as a synthetic `stale` record — once per stale episode, so a
+    re-armed watch does not wake on the same silence again. Exit 0 on a
+    match, 3 on timeout, 2 when `root` is not a git clone. A harness-neutral
+    wake: the caller runs it in the background and treats its exit as the
+    event. This host only."""
     path = _report.reports_path(root)
     if path is None:
         print("tower: not a git clone — no reports file to wait on", file=sys.stderr)
         return 2
     offset = path.stat().st_size if path.is_file() else 0
     deadline = time.monotonic() + timeout
+    next_stale = time.monotonic() if "stale" in states else None  # the first look at once
     while time.monotonic() < deadline:
         time.sleep(1)
         size = path.stat().st_size if path.is_file() else 0
         if size < offset:  # truncated or replaced: start over
             offset = 0
-        if size <= offset:
-            continue
-        with path.open("rb") as fh:
-            fh.seek(offset)
-            chunk = fh.read(size - offset)
-        complete = chunk.rfind(b"\n") + 1  # a half-written line waits for its newline
-        offset += complete
-        text = chunk[:complete].decode("utf-8", errors="replace")
-        hits = [r for r in _report._parse(text, _report.host_name()) if r["state"] in states]
+        hits: list[dict] = []
+        if size > offset:
+            with path.open("rb") as fh:
+                fh.seek(offset)
+                chunk = fh.read(size - offset)
+            complete = chunk.rfind(b"\n") + 1  # a half-written line waits for its newline
+            offset += complete
+            text = chunk[:complete].decode("utf-8", errors="replace")
+            hits = [r for r in _report._parse(text, _report.host_name()) if r["state"] in states]
+        if not hits and next_stale is not None and time.monotonic() >= next_stale:
+            next_stale = time.monotonic() + STALE_POLL_S
+            hits = announce_stale(root, path.parent / STALE_SEEN, stale_minutes)
         if hits:
             for rec in hits:
                 print(json.dumps(rec, ensure_ascii=False))
@@ -779,10 +907,10 @@ def wait(root: Path, timeout: float, states: tuple[str, ...]) -> int:
 
 def _states(value: str) -> tuple[str, ...]:
     picked = tuple(s.strip() for s in value.split(",") if s.strip())
-    bad = [s for s in picked if s not in _report.STATES]
+    bad = [s for s in picked if s not in WAIT_STATES]
     if bad or not picked:
         raise argparse.ArgumentTypeError(f"unknown state(s) {', '.join(bad) or '(none)'}; "
-                                         f"known: {', '.join(_report.STATES)}")
+                                         f"known: {', '.join(WAIT_STATES)}")
     return picked
 
 
@@ -793,7 +921,9 @@ def main(argv: list[str]) -> int:
         sys.stdout.reconfigure(errors="backslashreplace")
     p = argparse.ArgumentParser(prog="tower.py", description=__doc__.split("\n\n")[0])
     p.add_argument("--json", action="store_true")
-    p.add_argument("--stale-minutes", type=int, default=int(os.environ.get("PROCESS_STALE_MINUTES", "60")))
+    p.add_argument("--stale-minutes", type=int, default=None,
+                   help="quiet budget for a worker (default: PROCESS_STALE_MINUTES, else the policy's "
+                        "`stale_minutes`, else 60)")
     p.add_argument("--min-severity", choices=("high", "medium", "low"), default="low",
                    help="drop findings below this severity")
     p.add_argument("--remote", action="store_true", default=os.environ.get("PROCESS_TOWER_REMOTE") == "1",
@@ -801,10 +931,12 @@ def main(argv: list[str]) -> int:
     p.add_argument("--section", action="append", default=[], metavar="NAME",
                    help="with --json: print only these top-level keys (repeatable)")
     p.add_argument("--wait", action="store_true",
-                   help="block until a report line arrives; exit 0 on a match, 3 on timeout")
+                   help="block until a report line arrives (or, with `stale` in --states, a live "
+                        "session goes stale); exit 0 on a match, 3 on timeout")
     p.add_argument("--timeout", type=float, default=1800, help="--wait: seconds before exit 3")
-    p.add_argument("--states", type=_states, default=_report.STATES,
-                   help="--wait: comma-separated report states that end the wait")
+    p.add_argument("--states", type=_states, default=WAIT_STATES,
+                   help="--wait: comma-separated report states that end the wait; `stale` adds "
+                        "silent live sessions")
     p.add_argument("root", nargs="?", default=".")
     a = p.parse_args(argv)
     if a.section and not a.json:
@@ -815,9 +947,10 @@ def main(argv: list[str]) -> int:
     top = _git(root, "rev-parse", "--show-toplevel")
     if top:
         root = Path(top.strip())
+    stale_minutes = resolve_stale_minutes(root, a.stale_minutes)
     if a.wait:
-        return wait(root, a.timeout, a.states)
-    table = build(root, a.stale_minutes, remote=a.remote)
+        return wait(root, a.timeout, a.states, stale_minutes)
+    table = build(root, stale_minutes, remote=a.remote)
     keep = {"high": ("high",), "medium": ("high", "medium"), "low": ("high", "medium", "low")}[a.min_severity]
     table["findings"] = [f for f in table["findings"] if f["severity"] in keep]
     if a.section:

@@ -178,6 +178,97 @@ def test_wait_ignores_other_states_and_times_out(render, tmp_path):
         assert r.returncode == 2 and "drop --json" in r.stderr
 
 
+def _silent_session(out: Path, tmp_path: Path, minutes: int):
+    """A live dispatched session (a real process, pid + start time as dispatch
+    records them) whose worktree's last commit and whose start are `minutes`
+    old, with a log whose last line is what it printed last."""
+    import time
+    sys.dont_write_bytecode = True
+    sys.path.insert(0, str(out / "scripts/process"))
+    import importlib
+    import dispatch as d
+    importlib.reload(d)
+    then = int(time.time()) - minutes * 60
+    wt = out.parent / "wt-7-hung"
+    _git(out, "worktree", "add", "-q", "-b", "7-hung", str(wt), "main")
+    (wt / "hung.txt").write_text("x\n")
+    _git(wt, "add", "-A")
+    stamp = f"@{then} +0000"
+    subprocess.run(["git", "commit", "-q", "-m", "feat: hung"], cwd=wt, check=True,
+                   env={**os.environ, "GIT_AUTHOR_DATE": stamp, "GIT_COMMITTER_DATE": stamp})
+    worker = subprocess.Popen(["sleep", "300"])
+    log = tmp_path / "7-hung.log"
+    log.write_text("starting\nwaiting for my own wait loop to match\n")
+    records = _ledger(out).parent.parent / "process-dispatch"
+    records.mkdir(parents=True, exist_ok=True)
+    (records / "7-hung.json").write_text(json.dumps({
+        "branch": "7-hung", "issue": 7, "phase": "execute", "model": "m", "pid": worker.pid,
+        "pid_start": d._proc_start(worker.pid), "worktree": str(wt), "log": str(log), "started": then}))
+    return wt, worker, then
+
+
+def test_wait_wakes_on_a_silent_live_session(render, tmp_path):
+    """#220: a worker that hangs without a report or a commit must wake the
+    steward's watch — a synthetic `stale` record naming the last report, the
+    last commit time and the last printed line; once per stale episode, and
+    the threshold is the policy's."""
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    wt, worker, then = _silent_session(out, tmp_path, minutes=120)
+    local = out / "docs/process/model-policy.local.json"
+    try:
+        # two hours quiet under a four-hour budget from the policy: not stale
+        local.write_text(json.dumps({"stale_minutes": 240}))
+        r = _tower(out, "--wait", "--timeout", "3", "--states", "pushed,stale")
+        assert r.returncode == 3 and r.stdout == "", r.stderr
+        # the default budget (60 min): stale, at once
+        local.unlink()
+        r = _tower(out, "--wait", "--timeout", "20", "--states", "pushed,stale")
+        assert r.returncode == 0, r.stderr
+        rec = json.loads(r.stdout.splitlines()[0])
+        assert rec["state"] == "stale" and rec["worker"] == "7-hung" and rec["issue"] == 7
+        assert rec["last_report"] is None and rec["minutes_quiet"] >= 119
+        assert rec["last_commit"] and rec["minutes_since_commit"] >= 119
+        assert rec["last_output"] == "waiting for my own wait loop to match"
+        assert "dispatch.py log 7-hung" in rec["note"]
+        # the same silence wakes a re-armed watch no second time
+        r = _tower(out, "--wait", "--timeout", "3", "--states", "stale")
+        assert r.returncode == 3 and r.stdout == "", r.stderr
+        # without `stale` in --states no session is looked at
+        r = _tower(out, "--wait", "--timeout", "3", "--states", "pushed")
+        assert r.returncode == 3
+        # an old report of this session is a stir: a new episode, announced again, naming it
+        with _ledger(out).open("a") as fh:
+            fh.write(json.dumps({"epoch": then + 600, "worker": "7-hung", "issue": 7, "state": "planned",
+                                 "note": "lane held"}) + "\n")
+        r = _tower(out, "--wait", "--timeout", "20", "--states", "stale")
+        assert r.returncode == 0, r.stderr
+        rep = json.loads(r.stdout.splitlines()[0])["last_report"]
+        assert rep["state"] == "planned" and rep["note"] == "lane held" and rep["this_session"]
+        # a fresh commit: no longer stale
+        (wt / "hung.txt").write_text("y\n")
+        _git(wt, "commit", "-q", "-am", "feat: moving again")
+        r = _tower(out, "--wait", "--timeout", "3", "--states", "stale")
+        assert r.returncode == 3 and r.stdout == "", r.stderr
+    finally:
+        worker.kill()
+        worker.wait()
+    # a session that is gone is no silent worker, however old its commit
+    r = _tower(out, "--wait", "--timeout", "3", "--states", "stale")
+    assert r.returncode == 3
+
+
+def test_quiet_too_long_is_the_one_owner_of_stale(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    tower = _load_tower(out)
+    assert tower.quiet_too_long(61, None, None, 60)
+    assert not tower.quiet_too_long(59, None, None, 60)          # committed recently
+    assert not tower.quiet_too_long(61, 10, "planned", 60)      # reported recently
+    assert tower.quiet_too_long(61, 70, "planned", 60)
+    assert not tower.quiet_too_long(600, 600, "review-pass", 60)  # parked, not stale
+    assert tower.WAIT_STATES[-1] == "stale" and "stale" not in tower._report.STATES
+
+
 def test_wait_outside_a_clone_exits_2(render, tmp_path):
     """No git clone, no reports file: a distinct exit, never an endless wait."""
     out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})  # rendered, never `git init`
