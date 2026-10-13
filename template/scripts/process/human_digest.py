@@ -17,6 +17,9 @@ Sections, in reading order:
      degradation is a debt with an owner (journal-state-plans.md).
   4. FIX CLUSTERS — the rule-6-across-sessions advisory, inlined from
      process_kpis.py where the telemetry module is installed.
+  (5-8: test estate, screenshots, residue, red gates; below.)
+  9. NEW AND IMPROVED — the `news/` fragments of the window, in the words
+     news.py shows (what is new, better or fixed for a user).
 
 Read-only; never blocks; missing sources are named, never silently empty.
 Pure stdlib. Usage:
@@ -275,7 +278,31 @@ def build(root: Path, days: int) -> str:
     lines.append("")
     lines += section_red_gates(root)
     lines.append("")
+    lines.append(f"## 9 · New and improved (last {days} days)")
+    lines.append("")
+    lines += section_news(root, days)
+    lines.append("")
     return "\n".join(lines)
+
+
+def section_news(root: Path, days: int) -> list[str]:
+    """What users can notice, from the `news/` fragments (news.py owns the
+    form and the dates). Its failure is named here and never stops the digest."""
+    if not (root / "news").is_dir():
+        return ["(no news/ directory — this project keeps no change fragments yet)"]
+    since = (_dt.date.today() - _dt.timedelta(days=days)).isoformat()
+    try:
+        import news as _news  # noqa: E402  (sibling; one owner for fragments and dates)
+        cfg = _news.load_config(root)
+        entries, problems = _news.collect(root)
+        shown = _news.show_lines(entries, cfg, since)
+    except Exception as exc:  # the digest is read-only advice: report, never crash
+        return [f"(news.py failed: {type(exc).__name__}: {exc})"]
+    out = [f"- {line}" for line in shown] or [f"(no news entry in the last {days} days)"]
+    if problems:
+        out.append(f"({len(problems)} fragment(s) malformed and left out — `python scripts/process/"
+                   f"news.py check` names them: {', '.join(p.split(':')[0] for p in problems[:5])})")
+    return out
 
 
 def section_red_gates(root: Path) -> list[str]:
