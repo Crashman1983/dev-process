@@ -482,3 +482,30 @@ def test_a_red_preflight_refuses_the_push_without_a_test_or_a_stamp(project, tmp
     assert r.returncode != 0 and "environment — the preflight exited 5" in r.stderr, r.stderr
     assert _probe(tmp_path) == ["g"]  # gates ran, no test
     assert not (out / ".git/process-push-ok").exists() or not (out / ".git/process-push-ok").read_text().strip()
+
+
+# --- #219: git's repo-local variables stay out of the children ------------------------
+
+def test_a_runner_that_commits_in_its_own_repo_leaves_the_pushing_repo_alone(project, tmp_path):
+    """git hands the hook GIT_DIR and GIT_INDEX_FILE; a test that builds its
+    own repo wrote into the pushing one (downstream: commits on the branch)."""
+    out, bare, git = project
+    own = ("import os, subprocess, tempfile; d = tempfile.mkdtemp(); "
+           "open(os.environ['PROBE'], 'a').write('t\\n'); "
+           "open(os.path.join(d, 'f'), 'w').write('x'); "
+           "g = lambda *a: subprocess.run(['git', '-c', 'user.name=t', '-c', 'user.email=t@t', "
+           "'-c', 'commit.gpgsign=false', *a], cwd=d, capture_output=True); "
+           "g('init', '-q'); g('add', 'f'); g('commit', '-qm', 'runner')")
+    _write(out, "docs/process/testing.local.json",
+           json.dumps({"stacks": {"app": {**STACK, "runner": [sys.executable, "-c", own, "{paths}"]}}}))
+    git("commit", "-qam", "committing runner")
+    head = git("rev-parse", "HEAD").stdout.strip()
+    index = git("ls-files", "--stage").stdout
+    # as git sets them for a hook in a linked worktree: absolute
+    r = _push(git, "origin", "feature",
+              env={"GIT_DIR": str(out / ".git"), "GIT_INDEX_FILE": str(out / ".git/index")})
+    assert r.returncode == 0, r.stderr
+    assert _probe(tmp_path) == ["g", "t"]
+    assert git("rev-parse", "HEAD").stdout.strip() == head
+    assert git("ls-files", "--stage").stdout == index
+    assert git("log", "--format=%s", "-1").stdout.strip() == "committing runner"

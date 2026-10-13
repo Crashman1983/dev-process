@@ -48,7 +48,7 @@ import certificate  # noqa: E402
 import merge_route  # noqa: E402
 import testing_config  # noqa: E402
 from check_review import BOOKKEEPING, PUSH_TARGETS_ENV, integration_targets  # noqa: E402
-from process_git import git_environment, pushed_commit_problem  # noqa: E402
+from process_git import drop_local_env, git_environment, pushed_commit_problem  # noqa: E402
 
 STAMP = "process-push-ok"
 STAMPS_KEPT = 400
@@ -239,6 +239,10 @@ def run(root: Path, lines: list, env: dict[str, str]) -> int:
     ran = {"gates": False}
     rc = 1
     try:
+        # git hands the hook GIT_DIR, GIT_INDEX_FILE, …: a gate or test that
+        # builds its own repo would write into this one. The runners inherit
+        # this process's environment, the gates get `env`.
+        drop_local_env(env, os.environ)
         rc = _run(root, lines, env, ran)
         return rc
     except Exception as exc:  # noqa: BLE001 — a crash is a refusal, never a pass

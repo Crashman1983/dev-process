@@ -26,6 +26,35 @@ def git_environment(extra=None):
     return {**(os.environ if extra is None else extra), "GIT_NO_REPLACE_OBJECTS": "1"}
 
 
+# `git rev-parse --local-env-vars` of git 2.43, for a git that cannot answer
+LOCAL_ENV_VARS = ('GIT_ALTERNATE_OBJECT_DIRECTORIES', 'GIT_CONFIG', 'GIT_CONFIG_PARAMETERS',
+                  'GIT_CONFIG_COUNT', 'GIT_OBJECT_DIRECTORY', 'GIT_DIR', 'GIT_WORK_TREE',
+                  'GIT_IMPLICIT_WORK_TREE', 'GIT_GRAFT_FILE', 'GIT_INDEX_FILE', 'GIT_NO_REPLACE_OBJECTS',
+                  'GIT_REPLACE_REF_BASE', 'GIT_PREFIX', 'GIT_SHALLOW_FILE', 'GIT_COMMON_DIR')
+
+
+def local_env_vars() -> tuple[str, ...]:
+    """The variables that bind a git process to one repository — git sets them
+    for its hooks; a child that builds its own repo must not inherit them."""
+    try:
+        r = subprocess.run(['git', 'rev-parse', '--local-env-vars'], capture_output=True, text=True,
+                           timeout=30)
+    except (OSError, subprocess.TimeoutExpired):
+        return LOCAL_ENV_VARS
+    names = tuple(r.stdout.split())
+    return names if r.returncode == 0 and names else LOCAL_ENV_VARS
+
+
+def drop_local_env(*envs) -> None:
+    """Removes git's repo-local variables from each environment in place: the
+    one owner of what a hook's children must not see (#219). A child still
+    finds the repo through its cwd."""
+    names = local_env_vars()
+    for env in envs:
+        for name in names:
+            env.pop(name, None)
+
+
 class NoForkPoint(ValueError):
     """`base` and `tip` share no commit here (shallow clone, unrelated history)."""
 

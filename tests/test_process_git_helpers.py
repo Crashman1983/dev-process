@@ -37,3 +37,14 @@ def _pg():
 ])
 def test_one_glob_for_maps_pins_and_triggers(pattern, path, caps):
     assert _pg().path_captures(pattern, path) == caps
+
+
+def test_a_hooks_repo_local_variables_are_dropped_and_the_rest_kept(monkeypatch):
+    """#219: git's own list, its static copy when git cannot answer."""
+    pg = _pg()
+    env = {"GIT_DIR": "/r/.git", "GIT_INDEX_FILE": "/r/.git/index", "GIT_COMMON_DIR": "/r/.git",
+           "GIT_EDITOR": "vi", "PATH": "/bin"}
+    pg.drop_local_env(env)
+    assert env == {"GIT_EDITOR": "vi", "PATH": "/bin"}
+    monkeypatch.setenv("PATH", "")  # no git to ask
+    assert pg.local_env_vars() == pg.LOCAL_ENV_VARS
