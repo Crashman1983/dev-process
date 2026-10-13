@@ -1,6 +1,6 @@
 # Plan: Wissensanker — erzeugte Bestandslisten, Leser-Schritt im Plan, knowledge-gap-Befunde (v2.70)
 
-Datum: 2026-10-13 · Status: **Revision 2, nach Planprüfung (revise, kein Blocker)** · Issue: #223 ·
+Datum: 2026-10-13 · Status: **Revision 3, nach zwei Planprüfungen (je revise, kein Blocker)** · Issue: #223 ·
 Tier: 3 (neuer Prüfcode, Änderung am FINDING-Parser) · Baut auf: v2.69
 
 ## 1. Anlass
@@ -212,9 +212,15 @@ search the plan quotes“. Erweitert wird:
   — `/execute`, Fix-Runde.
 - `process_kpis.py rounds`: `_blockers_by_work` bekommt einen Parameter
   `key` (Standard `origin`), damit es ein Leser bleibt. Die Ausgabe erhält
-  eine Zeile „blockers by kind“, getrennt nach Plan-Review (Arbeits-ID endet
-  auf `-plan`, wie `attest.py --plan-review` sie schreibt) und Code-Review,
-  ungekennzeichnet als `-`; `--json` liefert dieselben Zahlen. Die
+  eine Zeile „blockers by kind“, getrennt nach Plan- und Code-Review,
+  ungekennzeichnet als `-`; `--json` liefert dieselben Zahlen.
+- **Woran ein Plan-Review-Bericht erkennbar ist:** Der Suffix `-plan` steht
+  nur in den REVIEW-Zeilen des Journals, nicht im Bericht. Deshalb bittet
+  `make_review_bundle.py --plan` den Prüfer um eine Kopfzeile `phase: plan`;
+  `check_review.report_header` (der eine Leser der Berichtskopfzeilen) liest
+  `phase` mit. Ein Bericht ohne `phase: plan` zählt als Code-Review; ältere
+  Plan-Reviews ohne die Zeile werden so falsch einsortiert, was die
+  Auswertung ab Einführung nicht stört. Die
   Wochen-Anleitung nennt sie als Eingabe.
 
 ### 4.5 Verständliches Änderungsprotokoll (`news.py`)
@@ -225,8 +231,14 @@ ist — ohne Dateinamen und Fachbegriffe, für den Owner und spätere Leser.
 **Projekte (Template):**
 
 - **Fragment je Änderung**, im selben Branch wie die Änderung:
-  `news/<YYYY-MM-DD>-<slug>.md` mit erster Zeile `kind: new | improved |
-  fixed`, optional `issue: #N`, dann ein bis drei Sätze in Alltagssprache.
+  `news/<slug>.md` mit erster Zeile `type: new | improved | fixed`
+  (nicht `kind:`, um keinen zweiten Wortschatz unter dem Namen von FINDING
+  `kind=` einzuführen), optional `issue: #N`, dann ein bis drei Sätze in
+  Alltagssprache. Fragmente bleiben liegen; `render` baut jedes Mal alles neu.
+- **Datum:** nicht im Dateinamen, sondern das Datum, an dem das Fragment auf
+  dem Integrationsbranch hinzukam (`git log --diff-filter=A` dort); ein noch
+  nicht gemergtes Fragment trägt „unreleased“. So landet ein langlebiger
+  Branch im richtigen Monat, und `show --since` verpasst nichts.
   Fragmente statt einer gemeinsamen Datei, weil parallele Branches sonst im
   Zug an derselben Stelle kollidieren; außerdem funktioniert das für jeden
   Merge-Weg (Zug und `finish.py`, der ff-only merget und keinen eigenen
@@ -240,16 +252,19 @@ ist — ohne Dateinamen und Fachbegriffe, für den Owner und spätere Leser.
   - `check` prüft die Form aller Fragmente (Kopfzeile, Art, nicht leer,
     höchstens 600 Zeichen) — als Hinweis, kein Gate;
   - `render` schreibt `NEWS.md`: nach Monat gruppiert, neueste zuerst,
-    innerhalb des Monats nach Art (neu, besser, behoben), je Eintrag Datum
-    und Text; deterministisch;
+    innerhalb des Monats nach Art (neu, besser, behoben), dann nach Datum
+    und Dateiname; je Eintrag Datum und Text; deterministisch. Ein
+    fehlerhaftes Fragment bricht `render` mit Dateiname ab, statt still
+    übersprungen zu werden;
   - `show [--since DATUM]` druckt die Einträge für Digest und Wochenbericht.
   - Überschriften und Art-Bezeichnungen kommen aus
     `docs/process/news.local.json` (`title`, `labels`), Standard englisch;
     ein deutsches Projekt setzt „Neuigkeiten“, „Neu“, „Verbessert“,
     „Behoben“.
-- **Wer rendert:** Der Steward im Wochentakt auf dem Integrationsbranch
-  (ein Schreiber, keine Konflikte); `improvement-weekly.md` und die
-  Steward-Anleitung nennen den Schritt. `human_digest.py` zeigt einen
+- **Wer rendert:** Der Steward im Wochentakt (ein Schreiber, keine
+  Konflikte), über denselben Merge-Weg wie sein Wochenbericht: Branch, dann
+  `finish.py` oder Zug — kein direkter Commit auf den Integrationsbranch.
+  `improvement-weekly.md` und die Steward-Anleitung nennen den Schritt. `human_digest.py` zeigt einen
   Abschnitt „New and improved“ aus `news.py show --since` der letzten Tage.
 - **Review:** Die Checkliste fragt bei nutzersichtbaren Änderungen nach dem
   Fragment und ob es ohne Fachwissen verständlich ist.
@@ -260,8 +275,12 @@ ist — ohne Dateinamen und Fachbegriffe, für den Owner und spätere Leser.
   Was ändert sich für ein Projekt, das die Vorlage nutzt, und was bringt es.
   Rückwirkend für v2.60 bis v2.69, damit der Anfang lesbar ist.
 - `tools/release.py` verlangt neben dem CHANGELOG-Eintrag einen
-  `NEWS.md`-Abschnitt für die Version; die README verlinkt `NEWS.md` als
-  ersten Einstieg „Was ist neu“.
+  `NEWS.md`-Abschnitt `## vX.Y.Z — <Titel>` für die Version, in `check()` und
+  in `release()`. Der Leser dafür liegt in `tools/release_notes.py` (ein
+  Owner neben dem CHANGELOG-Leser). `NEWS.md` kommt in `RELEASE_FILES`, sonst
+  verweigert das Release wegen eines unsauberen Baums; `tests/test_release_tool.py`
+  nimmt `NEWS.md` von der Prüfung auf fremde Versionsnennungen aus. Die
+  README verlinkt `NEWS.md` als ersten Einstieg „Was ist neu“.
 
 ## 5. Aufgaben
 
@@ -290,10 +309,12 @@ ist — ohne Dateinamen und Fachbegriffe, für den Owner und spätere Leser.
    `FINDING_KINDS`, Validierung; Test für gültige, ungültige und fehlende
    `kind`.
 6. `[mechanical]` `process_kpis.py` `rounds`: `_blockers_by_work(root, key=…)`,
-   Zeile „blockers by kind“ getrennt nach Plan- und Code-Review, `--json`;
-   Test mit je einem Plan- und Code-Review-Bericht.
-7. `[mechanical]` `make_review_bundle.py`: `kind=` im FINDING-Format; Test in
-   `tests/test_review_bundle.py`, dass das Bundle `kind=` nennt.
+   Zeile „blockers by kind“ getrennt nach Plan- (`phase: plan`) und
+   Code-Review, `--json`; Test mit je einem Plan- und Code-Review-Bericht.
+7. `[mechanical]` `make_review_bundle.py`: `kind=` im FINDING-Format, mit
+   `--plan` zusätzlich die Bitte um `phase: plan`; `check_review._REPORT_KEY`
+   nimmt `phase` auf. Tests in `tests/test_review_bundle.py` (Bundle nennt
+   `kind=`, Plan-Bundle nennt `phase: plan`) und für `report_header`.
 8. `[mechanical]` Doku: neue Moduldoku `docs/process/inventories.md` (Vertrag,
    Gate-Registrierung, Reihenfolge beim Schattenstart, Prosa-zu-Verweis),
    `/plan` und `workflow.md` (Auslöser, `## Consumers`, die zwei Sätze zum
@@ -304,17 +325,22 @@ ist — ohne Dateinamen und Fachbegriffe, für den Owner und spätere Leser.
 
 9. `[mechanical]` `template/scripts/process/news.py` (`new`, `check`,
    `render`, `show`, Konfiguration `news.local.json`) mit
-   `tests/test_news.py`: Fragment anlegen, Formfehler gemeldet, Rendern
-   deterministisch und nach Monat/Art geordnet, eigene Bezeichnungen, `show
-   --since`, leeres `news/` ergibt eine leere, gültige Datei.
+   `tests/test_news.py`: Fragment anlegen, Formfehler gemeldet, `render`
+   bricht bei kaputtem Fragment mit Dateiname ab, Rendern deterministisch und
+   nach Monat/Art/Datum/Name geordnet, Datum aus dem Integrationsbranch
+   (älteres Fragment auf langem Branch landet im Merge-Monat), „unreleased“
+   vor dem Merge, eigene Bezeichnungen, `show --since`, leeres `news/` ergibt
+   eine leere, gültige Datei.
 10. `[mechanical]` `human_digest.py`: Abschnitt „New and improved“; Test.
 11. `[mechanical]` Doku: `docs/process/news.md` (Zweck, Fragmentform, wann,
     wer rendert), `/plan` und `workflow.md` (Task für nutzersichtbare
     Änderungen), Kurzverfahren, `review-checklist.md`, Steward-Anleitung und
     `improvement-weekly.md` (wöchentliches Rendern), AGENTS-Abschnitt.
 12. `[mechanical]` dev-process: `NEWS.md` mit Abschnitten v2.60–v2.70,
-    `tools/release.py` prüft den Abschnitt (Test in
-    `tests/test_release_tool.py`), README/README-DE verlinken `NEWS.md`.
+    Leser in `tools/release_notes.py`, Prüfung in `release.py` `check()` und
+    `release()`, `NEWS.md` in `RELEASE_FILES`, Ausnahme in
+    `tests/test_release_tool.py`; Tests: fehlender Abschnitt verweigert,
+    vorhandener besteht; README/README-DE verlinken `NEWS.md`.
 
 ## 6. Unabhängige Durchsetzung
 
