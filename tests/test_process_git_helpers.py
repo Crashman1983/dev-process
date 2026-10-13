@@ -43,8 +43,11 @@ def test_a_hooks_repo_local_variables_are_dropped_and_the_rest_kept(monkeypatch)
     """#219: git's own list, its static copy when git cannot answer."""
     pg = _pg()
     env = {"GIT_DIR": "/r/.git", "GIT_INDEX_FILE": "/r/.git/index", "GIT_COMMON_DIR": "/r/.git",
-           "GIT_EDITOR": "vi", "PATH": "/bin"}
+           "GIT_EDITOR": "vi", "PATH": "/bin", "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "a.b",
+           "GIT_CONFIG_VALUE_0": "c", "GIT_CONFIG_PARAMETERS": "'x.y'='z'"}
     pg.drop_local_env(env)
-    assert env == {"GIT_EDITOR": "vi", "PATH": "/bin"}
+    # config passed by environment stays, as git keeps it for another repository
+    assert env == {"GIT_EDITOR": "vi", "PATH": "/bin", "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "a.b",
+                   "GIT_CONFIG_VALUE_0": "c", "GIT_CONFIG_PARAMETERS": "'x.y'='z'"}
     monkeypatch.setenv("PATH", "")  # no git to ask
     assert pg.local_env_vars() == pg.LOCAL_ENV_VARS

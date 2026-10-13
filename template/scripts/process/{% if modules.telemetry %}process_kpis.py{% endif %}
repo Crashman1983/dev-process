@@ -1403,8 +1403,8 @@ def nodes_table(root: Path, *, days: int = _NODE_DAYS, now: datetime | None = No
     def _failed(row: dict) -> bool:
         return row.get("outcome") in ("fail", "timeout")
 
-    def _blocking(row: dict) -> bool:  # a shadow or sampled failure stopped nothing
-        return row.get("mode") not in ("shadow", "sampled")
+    def _blocking(row: dict) -> bool:  # a shadow, sampled or warn failure stopped nothing
+        return row.get("mode") not in ("shadow", "sampled", "warn")
 
     # any failure on a commit says another gate saw something there (overlap)
     failed_inputs: dict[str, set[str]] = {

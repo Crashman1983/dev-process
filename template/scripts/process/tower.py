@@ -589,7 +589,11 @@ def announce_stale(root: Path, seen_path: Path, stale_minutes: int) -> list[dict
         seen = seen if isinstance(seen, dict) else {}
     except (OSError, ValueError):
         seen = {}
-    stale = stale_sessions(root, stale_minutes)
+    try:
+        stale = stale_sessions(root, stale_minutes)
+    except Exception as exc:  # noqa: BLE001 — one odd record must not end every watch at once
+        print(f"tower: stale check skipped ({type(exc).__name__}: {exc})", file=sys.stderr)
+        return []
     now_seen = {r["worker"]: r["episode"] for r in stale}
     if now_seen != seen:
         staging = seen_path.with_name(f"{seen_path.name}.{os.getpid()}.tmp")

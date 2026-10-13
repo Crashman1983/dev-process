@@ -1076,7 +1076,7 @@ def test_a_train_merge_carries_dod_deviations_and_keeps_open_issues_open(render,
         "- DoD-deviation: D3 docs follow in the README pass — owner asked to split\n"
         "```\nDoD-deviation: an example in a fence — not a declaration\n```\n"))
     _active_plan_branch(out, "51-open", issue=51, extra=(
-        "**DoD-deviation**: open AC-3 — the export waits for #60\n"))
+        "**DoD-deviation**: open AC-3 — the export waits for #60, then fixes #51\n"))
     _active_plan_branch(out, "52-more", issue=52, extra=(
         "DoD-deviation: continues #52 — the second merge adds the CLI\n"))
     _active_plan_branch(out, "53-named", issue=53, extra=(
@@ -1094,7 +1094,8 @@ def test_a_train_merge_carries_dod_deviations_and_keeps_open_issues_open(render,
             "- DoD-deviation: D3 docs follow in the README pass — owner asked to split\n\n"
             "Closes #50")
         assert msgs["train: merge 51-open"] == (
-            "train: merge 51-open\n\n**DoD-deviation**: open AC-3 — the export waits for #60\n\nRefs #51")
+            "train: merge 51-open\n\n**DoD-deviation**: open AC-3 — the export waits for #60, then fixes issue 51"
+            "\n\nRefs #51")  # a closing keyword copied as is would close #51 on GitHub
         assert msgs["train: merge 52-more"].endswith("the second merge adds the CLI\n\nRefs #52")
         # the AC is open on #54, not on the plan's own issue: #53 closes
         assert msgs["train: merge 53-named"].endswith("sibling issue\n\nCloses #53")
@@ -1461,7 +1462,7 @@ def _spec_split_branch(out, branch, reviews):
 ], ids=["each-plan-reviewed", "b-review-saw-both", "a-review-saw-both"])
 def test_each_spec_plan_of_a_split_issue_needs_its_own_review(render, tmp_path, reviews, missing):
     """#218: a Spec Kit plan's slug is the branch's own work id (AC-1), and each
-    plan with code needs a clearing REVIEW of its own — one plan's review does
+    Tier 2+ spec plan needs a clearing REVIEW of its own — one plan's review does
     not clear the other, even where its range saw both (AC-2)."""
     out = render(tmp_path, {"project_name": "d", "modules": {}})
     _repo(out)

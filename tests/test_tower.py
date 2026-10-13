@@ -725,3 +725,15 @@ def test_balance_shows_how_much_of_what_lands_is_process(render, tmp_path):
     _commit_files(out, 20, {"src/app.py": "z = "}, "feat: more")
     table = json.loads(_tower(out, "--json").stdout)
     assert not [f for f in table["findings"] if f["kind"] == "process-heavy"]
+
+
+def test_a_stale_check_that_breaks_announces_nothing_instead_of_ending_every_watch(render, tmp_path, monkeypatch, capsys):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    mod = _load_tower(out)
+
+    def broken(*_a, **_k):
+        raise KeyError("pid")
+
+    monkeypatch.setattr(mod, "stale_sessions", broken)
+    assert mod.announce_stale(out, tmp_path / "seen.json", 60) == []
+    assert "stale check skipped" in capsys.readouterr().err
