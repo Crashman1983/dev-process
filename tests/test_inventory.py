@@ -117,7 +117,10 @@ def test_without_configuration_the_tool_is_green_and_the_gate_entry_red(render, 
         assert r.returncode == 0 and "nothing configured" in r.stdout, r.stdout + r.stderr
     g = _gate_entry(out)
     assert g.returncode == 1, g.stdout
-    assert "registered but no docs/process/inventories.local.json" in g.stdout
+    assert "registered but no inventory in docs/process/inventories.local.json" in g.stdout
+    _config(out, {})  # an empty list of inventories is no configuration either
+    g = _gate_entry(out)
+    assert g.returncode == 1 and "registered but no inventory" in g.stdout, g.stdout
 
 
 def test_a_valid_configuration_gets_its_defaults(render, tmp_path):

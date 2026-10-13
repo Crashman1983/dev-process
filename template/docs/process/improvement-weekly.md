@@ -64,7 +64,7 @@ say what you could not see.
      action is to close the gap;
    - nothing, when nothing pays back within about four weeks.
 5. **Write the report** (below) and commit it with the triage lines.
-6. **Render the news** (`uv run scripts/process/news.py render`, where the
+6. **Render the news** (`git fetch`, then `uv run scripts/process/news.py render`, where the
    project keeps `news/` fragments) and let `NEWS.md` ride the same branch
    and merge as the report (`news.md`).
 

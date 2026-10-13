@@ -223,16 +223,18 @@ def test_finding_tokens_pinned_to_their_owning_gate(render, tmp_path):
 
 
 def test_bundle_asks_for_kind_and_a_plan_bundle_for_the_phase_header(render, tmp_path):
-    """The reviewer sees `kind=` in the FINDING format; only a `--plan` bundle asks for the
-    `phase: plan` header line that `rounds` uses to count plan reviews apart."""
+    """The reviewer sees `kind=` in the FINDING format; only a `--plan-review` bundle asks for
+    the `phase: plan` header line that `rounds` uses to count plan reviews apart — `--plan`
+    alone also names the plans of a code review, which must not count as a plan review."""
     out = render(tmp_path, {"project_name": "d", "modules": {}})
     _seed_repo(out)
     code = _bundle(out, "--base", "main").stdout
     assert "[kind=<knowledge-gap|requirement|implementation|test-gap|process|environment>]" in code
     assert "knowledge-gap` = the author did not know something that already existed" in " ".join(code.split())
     assert "phase: plan" not in code
-    plan = _bundle(out, "--base", "main", "--plan", "widget").stdout
-    assert "kind=<knowledge-gap" in plan
+    named = _bundle(out, "--base", "main", "--plan", "widget").stdout
+    assert "kind=<knowledge-gap" in named and "phase: plan" not in named
+    plan = _bundle(out, "--base", "main", "--plan", "widget", "--plan-review").stdout
     assert "put the header line `phase: plan`" in plan
 
 

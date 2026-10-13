@@ -1137,7 +1137,7 @@ def prompt_for(phase: str, issue: int, tier: int | None, branch: str, model: str
         which = (f"the plan(s) {', '.join(f'`{p}`' for p in plan_paths)}" if plan_paths
                  else f"the plan of issue #{issue}")
         return (f"/review {which} on branch `{branch}` before any code exists: bundle each "
-                f"with `make_review_bundle.py --plan <its slug>` and attack it with the plan brief of "
+                f"with `make_review_bundle.py --plan <its slug> --plan-review` and attack it with the plan brief of "
                 f"docs/process/refute.md (\"Refuting a plan\"); {verdict}; stop; never edit the plan." + tail)
     if not attests:
         return (f"/review branch `{branch}` for issue #{issue} as an independent reviewer: produce the verdict "
