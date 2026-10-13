@@ -50,7 +50,11 @@ window.
 - **Self-improving, within limits.** The steward turns recurring bottlenecks
   into improvement records: a hypothesis, criteria frozen before the trial, a
   bounded pilot behind a flag, and a decision nobody makes about their own
-  change (`docs/process/optimization.md` in every set-up repository).
+  change. Every gate is a node with measured cost and catches; it is weakened
+  only with the owner's line, never for core or protected gates, and a
+  sentinel restores it when a guardrail breaks. New checks such as plan drift
+  start in shadow mode (`docs/process/optimization.md` in every set-up
+  repository).
 - **Three harnesses.** Claude Code, GitHub Copilot or a neutral `AGENTS.md`;
   methodology and gates are the same in all of them.
 

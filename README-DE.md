@@ -51,8 +51,12 @@ eigene Arbeit ab, und das Gedächtnis liegt in Dateien statt im Kontext.
 - **Selbstlernend, in Grenzen.** Der Steward macht wiederkehrende Engpässe zu
   Optimierungsrecords: Hypothese, vor dem Versuch eingefrorene Kriterien, ein
   begrenzter Pilot hinter einem Flag und eine Entscheidung, die niemand über
-  seine eigene Änderung trifft (`docs/process/optimization.md` in jedem
-  eingerichteten Repository).
+  seine eigene Änderung trifft. Jedes Gate ist ein Knoten mit gemessenen
+  Kosten und Fängen; abgeschwächt wird nur mit einer Zeile des Owners, nie
+  ein Kern- oder geschütztes Gate, und ein Wächter stellt zurück, wenn eine
+  Leitplanke reißt. Neue Prüfungen wie die Plan-Drift beginnen im
+  Schattenbetrieb (`docs/process/optimization.md` in jedem eingerichteten
+  Repository).
 - **Drei Harnesses.** Claude Code, GitHub Copilot oder eine neutrale
   `AGENTS.md`; Methodik und Gates sind in allen dieselben.
 
