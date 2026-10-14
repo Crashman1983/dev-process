@@ -231,3 +231,25 @@ Die Funde 1 bis 4 und 5a waren günstig zu beheben, das ist geschehen:
   - Freitext hinter angehängten REFUTE- oder Skip-Zeilen, der unreviewt beim Executor ankommt. Executoren lesen REFUTE- und Skip-Zeilen nicht als Auftrag, nur DECISION-Zeilen binden.
 
 REFUTE-Zusammenfassung: 6 Funde, keiner blockierend. `XCTSkipUnless` und `XCTSkipIf` fehlten, Swift-Setup-Skips, Kommentare und Hilfsfunktionen gingen durch, ein `it.todo` darüber und eine fremde Basisklasse führten zu Fehlablehnungen. Die Fixes aus Runde 2 und die Kenni-Probe bestehen.
+
+## Code-Review Runde 1
+
+Ergebnis: pass, kein Fund ab 80. Geprüft wurden 513 Tests der betroffenen Dateien, 208 aus sechs weiteren Suites und 19 Mutationen.
+
+Behoben:
+
+- Eine zweite Linse derselben Runde nach `--archive` der ersten liest den Plan am Archivziel (`attest._archive_target`) und fällt nicht mehr fälschlich unter E1.
+- Die Copilot-Prompts `plan` und `review` nennen `plan-session model:`, die konkrete `--model`-ID und den Bericht mit AC-Zeilen.
+- `verification-independence.md` und `refute.md` sagen jetzt dasselbe wie der Code: Records dürfen angehängt mitfahren.
+- Die Migration nennt Spec-Kit-Projekte (`FR-`/`SC-` statt `AC-`).
+- Eine Parameter-ID mit Komma (`test_x[1, 2]`) wird nicht mehr zerteilt.
+- Tests, die vorher bei keiner Mutation rot wurden, gibt es jetzt für:
+  - den Platzhalter-Grund in Skip-Zeilen;
+  - den Alias `codex-review`;
+  - die Ablehnung bei unlesbarer oder falsch typisierter Policy;
+  - den Suffix `-plan` bei Plan-Review-Skips;
+  - den Filter auf Berichte unter `.process-work/reviews/`;
+  - E1 nur im Index;
+  - einen Pass ohne Bereich.
+
+  Jeder dieser Tests wird rot, wenn seine Regel fehlt (geprüft per Mutation).

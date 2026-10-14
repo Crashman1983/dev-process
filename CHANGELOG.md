@@ -1166,7 +1166,7 @@ ein Wächter-Test gegen doppelte Klammern ohne Leerzeichen in Python-Vorlagen.
 Wer v2.27.1 oder v2.28.0 installiert hat und am Push scheitert: auf v2.28.1
 aktualisieren, `v2.28.1`.
 
-**v2.71.0 — Nachweise vor dem Pass: Cross-Model, Gate-Code-Refute, ein Test je AC, Klasse des Plan-Reviewers (#225).** Plan: `docs/analysis/2026-10-14-review-evidence.md` nach drei Plan-Review-Runden. Tier 3, weil Gate-Code betroffen ist (`attest.py`, neues `attest_evidence.py`, `check_review.py`). Migrations-Release. Vom Owner am 2026-10-14 freigegeben. Port von Kennis lokaler Umsetzung (kenni#2602), damit Kennis Patch an der Template-Datei `attest.py` entfällt.
+**v2.71.0 — Nachweise vor dem Pass: Cross-Model, Gate-Code-Refute, ein Test je AC, Klasse des Plan-Reviewers (#225).** Plan: `docs/analysis/2026-10-14-review-evidence.md` nach drei Plan-Review-Runden. Tier 3, weil Gate-Code betroffen ist (`attest.py`, neues `attest_evidence.py`, `check_review.py`, `dispatch.py`). Migrations-Release. Vom Owner am 2026-10-14 freigegeben. Port von Kennis lokaler Umsetzung (kenni#2602), damit Kennis Patch an der Template-Datei `attest.py` entfällt.
 - **Anlass:** Kenni hat in einer Nacht sechs Tier-2-Branches gemergt, alle mit einem Pass in Review-Runde 1. Ein Audit fand danach sechs Major-Fehler, die das Review übersehen hatte. Vier davon waren Tests, die nicht rot werden können. Den Gate-Code-Refute hatten 4 von 4 Gate-Code-Branches ausgelassen, den Cross-Model-Lauf gab es ohne Hinweis nicht. Beides hat vorher nur gewarnt.
 - **`attest_evidence.py` (Kern), ein Owner:** `gather()` liest jeden Nachweis am attestierten Head, `decide()` ist eine reine Entscheidungstabelle. `attest.py` ruft die Prüfung nach `build_line` auf. Eine `--exception` nennt die übergangenen Nachweise in ihren `overrides`.
   - Jede Regel hat einen committeten, zählbaren Ausweg: `skipped <art> work=<id>: <Grund>`. Die Arten sind `cross-model` (älter `codex-review`), `refute`, `plan-review` und `ac-trace`.
@@ -1200,6 +1200,9 @@ aktualisieren, `v2.28.1`.
      - Plan-Reviews nennen mit `--model` die konkrete ID.
      - Pläne tragen `plan-session model: <id>`.
      - Ein Single-Family-Pass auf Tier 3 braucht `skipped cross-model work=<id>: <Grund>` im Plan.
+
+     - Spec-Kit-Projekte: Specs nennen oft `FR-`/`SC-`-IDs, keine `AC-<id>`. Entweder bekommen Plan oder `spec.md` AC-IDs, oder der Plan trägt `skipped ac-trace work=<id>: <Grund>`, sonst wird jeder Tier-2+-Pass verweigert.
+     - Copilot-Prompts (`plan`, `review`) sagen dasselbe wie die Claude-Befehle.
 
      Prüfung: `attest.py … --dry-run` auf einen offenen Branch nennt keine Verweigerung.
   2. **Kenni:**

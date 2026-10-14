@@ -292,8 +292,9 @@ enforces what a language-agnostic gate honestly can, and no more:
     plan-review`); a plan naming gate code is reviewed `cross-model` or with
     the reasoned `single-family`;
   - every pass: the work's plan at the reviewed head is the plan on disk —
-    plan lines (REFUTE, ROOT-CAUSE, DECISION) are committed before the
-    bundle, never with the attestation.
+    plan lines (REFUTE, ROOT-CAUSE, DECISION, skips) are committed before
+    the bundle, or appended after the plan's last line and attested with
+    `--with` the plan.
 
   The thresholds are read at the reviewed base, so a branch does not loosen
   them for its own pass. The push gate does not re-check evidence: a REVIEW

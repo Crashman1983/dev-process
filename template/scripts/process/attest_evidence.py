@@ -258,8 +258,11 @@ def _plan(root: Path, ids: set, head: str) -> tuple[str, str, str, str]:
         return "ambiguous", ", ".join(rel for rel, _t in found), "", ""
     rel, text = found[0]
     added = ""
-    for now in (_worktree_text(root, rel), _index_text(root, rel)):
-        if now is None or now == text:
+    # a plan the first lens of this round already archived (`--archive`) is read where it went
+    moved = _archived_as(root, rel)
+    for now in (_worktree_text(root, rel) or _worktree_text(root, moved),
+                _index_text(root, rel) or _index_text(root, moved)):
+        if now == text:
             continue
         if not records_only(text, now):
             return "differs", rel, text, ""
@@ -268,16 +271,24 @@ def _plan(root: Path, ids: set, head: str) -> tuple[str, str, str, str]:
     return "ok", rel, text, added
 
 
-def _worktree_text(root: Path, rel: str) -> str | None:
+def _archived_as(root: Path, rel: str) -> str:
+    """Where `attest.py --archive` moves this plan — attest owns the target."""
+    from attest import _archive_target  # late: attest imports this module
+    target = _archive_target(root, root / rel)
+    return target.relative_to(root).as_posix() if target.is_relative_to(root) else ""
+
+
+def _worktree_text(root: Path, rel: str) -> str:
+    """The file in the worktree; "" when it is not there (deleted or unreadable)."""
     try:
-        return (root / rel).read_text(encoding="utf-8", errors="replace")
+        return (root / rel).read_text(encoding="utf-8", errors="replace") if rel else ""
     except OSError:
-        return ""  # deleted or unreadable: not the plan at head
+        return ""
 
 
-def _index_text(root: Path, rel: str) -> str | None:
-    r = _git(root, "show", f":{rel}")
-    return r.stdout if r.returncode == 0 else ""
+def _index_text(root: Path, rel: str) -> str:
+    r = _git(root, "show", f":{rel}") if rel else None
+    return r.stdout if r is not None and r.returncode == 0 else ""
 
 
 def _planned_model(root: Path, issues: set[int]) -> str | None:
@@ -579,7 +590,9 @@ def claimed_tests(body: str) -> list[tuple[str, str]]:
     A parametrized id (`test_x[case]`) names its function."""
     out: list[tuple[str, str]] = []
     last = ""
-    for item in _SPLIT.split(body.strip()):
+    # a parametrized id may hold commas (`test_x[1, 2]`): split outside brackets only
+    masked = re.sub(r"\[[^\]]*\]", lambda m: m.group(0).replace(",", "\0").replace(";", "\1"), body.strip())
+    for item in (i.replace("\0", ",").replace("\1", ";") for i in _SPLIT.split(masked)):
         m = _ITEM.match(item.strip())
         if not m:
             continue

@@ -221,7 +221,7 @@ reviewed head, or appended after the plan's last line and attested with
 code review crosses the model family (`cross-model`), that reviewer may
 work through the brief above in the same run and put the `REFUTE` line in
 its review report; attested with `--with <report>`, it counts. From Tier 3
-on the separate run before round 1 stays, and only a line at head counts.
+on the separate run before round 1 stays, and only a line in the plan counts (at head, or appended and attested with `--with` the plan).
 Gate code is approximated by path — `scripts/process/`, `.githooks/`,
 `.github/workflows/`, `Makefile`, `.pre-commit-config.yaml`, the local gate
 and model policy files — so a Makefile change to a product target counts
