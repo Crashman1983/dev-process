@@ -526,3 +526,98 @@ def test_two_plans_of_one_issue_narrow_to_the_attested_slug(repo):
     _git(repo, "checkout", "-q", "-b", "7-other")
     r = _attest(repo, "--with", _report(repo), work="7")
     assert r.returncode == 1 and "several plans of work 7" in r.stderr, r.stderr
+
+
+# --- code review #225: rules no test turned red -------------------------------------
+
+def _gate_change(repo):
+    (repo / "scripts/process/extra_gate.py").write_text("X = 1\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "feat: gate")
+
+
+def test_a_placeholder_reason_is_no_skip(repo):
+    _gate_change(repo)
+    plan = repo / ".process-work/plans/2026-10-14-widget.md"
+    plan.write_text(PLAN + "\nskipped refute work=widget: <reason>\n")
+    _git(repo, "commit", "-qam", "docs: placeholder")
+    r = _attest(repo, "--with", _report(repo))
+    assert r.returncode == 1 and "has no REFUTE line" in r.stderr, r.stderr
+
+
+def test_codex_review_is_the_older_spelling_of_cross_model(repo):
+    plan = repo / ".process-work/plans/2026-10-14-widget.md"
+    plan.write_text(PLAN.replace("tier: 2", "tier: 3") + "\nREFUTE work=widget round=1: survives: none\n"
+                    "skipped codex-review work=widget: no second family on this host\n")
+    _git(repo, "commit", "-qam", "docs: reason")
+    r = _attest(repo, "--with", _report(repo), tier="3", independence="bundle,non-implementing,single-family")
+    assert r.returncode == 0, r.stderr
+
+
+@pytest.mark.parametrize("layer, says", [("{not json", "not valid JSON"),
+                                         ('{"review_evidence": {"cross_model_from_tier": "2"}}', "integer 0-4"),
+                                         ('{"review_evidence": {"ranks": ["claude"]}}', "ranks must map"),
+                                         ('{"review_evidence": {"test_files": "*"}}', "test_files must be")])
+def test_an_unreadable_policy_at_the_base_refuses(repo, layer, says):
+    _git(repo, "checkout", "-q", "main")
+    (repo / "docs/process/model-policy.local.json").write_text(layer)
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "chore: policy")
+    _git(repo, "checkout", "-q", "7-widget")
+    _git(repo, "rebase", "-q", "main")
+    r = _attest(repo, "--with", _report(repo))
+    assert r.returncode == 1 and says in r.stderr, r.stderr
+
+
+def test_a_plan_review_skip_names_the_plan_work(repo):
+    plan = repo / ".process-work/plans/2026-10-14-widget.md"
+    plan.write_text(PLAN + "\nskipped plan-review work=widget: the sonnet session wrote it\n")
+    _git(repo, "commit", "-qam", "docs: code-review id")
+    assert _attest(repo, model="claude-haiku-5", plan_review=True).returncode == 1
+    plan.write_text(PLAN + "\nskipped plan-review work=widget-plan: the sonnet session wrote it\n")
+    _git(repo, "commit", "-qam", "docs: plan-review id")
+    r = _attest(repo, model="claude-haiku-5", plan_review=True)
+    assert r.returncode == 0, r.stderr
+
+
+def test_only_a_review_report_carries_the_trace(repo):
+    notes = repo / ".process-work/notes.md"
+    notes.write_text("- AC-1: `tests/test_widget.py::test_widget`\n")
+    r = _attest(repo, "--with", ".process-work/notes.md")
+    assert r.returncode == 1 and "without its review report" in r.stderr, r.stderr
+
+
+def test_e1_a_plan_changed_only_in_the_index_is_refused(repo):
+    plan = repo / ".process-work/plans/2026-10-14-widget.md"
+    plan.write_text(PLAN.replace("## Acceptance", "Later prose.\n\n## Acceptance"))
+    _git(repo, "add", str(plan))
+    plan.write_text(PLAN)  # the worktree is the head again; the index is not
+    r = _attest(repo, "--with", _report(repo))
+    assert r.returncode == 1 and "holds more than records appended" in r.stderr, r.stderr
+
+
+def test_a_pass_without_a_range_is_refused(repo):
+    r = subprocess.run([sys.executable, str(repo / "scripts/process/attest.py"), "--work", "widget",
+                        "--tier", "2", "--model", "claude-opus-5", "--independence", "bundle,non-implementing",
+                        "--verdict", "pass", "--with", _report(repo), "."], cwd=repo, capture_output=True, text=True)
+    assert r.returncode == 1 and "reads its evidence at the reviewed range" in r.stderr, r.stderr
+
+
+def test_a_second_lens_after_the_first_archived_the_plan(repo):
+    """Code review #225: lens 1 archives with its pass; lens 2 attests the same head."""
+    base, head = _range(repo)
+    r = _attest(repo, "--with", _report(repo), "--archive", ".process-work/plans/2026-10-14-widget.md",
+                "--commit")
+    assert r.returncode == 0, r.stderr
+    r = subprocess.run([sys.executable, str(repo / "scripts/process/attest.py"), "--work", "widget",
+                        "--tier", "2", "--reviewer", "lens-2", "--model", "claude-opus-5",
+                        "--independence", "bundle,non-implementing", "--verdict", "pass", "--round", "1",
+                        "--base", base, "--head", head, "--with", _report(repo), "."],
+                       cwd=repo, capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+
+
+def test_a_parametrized_id_may_hold_commas(ev_mod):
+    mod, _out = ev_mod
+    assert mod.claimed_tests("tests/a.py::test_x[1, 2], tests/a.py::test_y") == [
+        ("tests/a.py", "test_x"), ("tests/a.py", "test_y")]

@@ -10,7 +10,10 @@ adherence against the plan or spec, working through
 where the project has one (it sharpens the checklist, never weakens it); each section's **Plan decides:** line first — does the code do what the plan decided? A plan review (`--plan-review`) reads only those lines. Record the result with the
 writer, never by hand: `python scripts/process/attest.py --work <id> --tier <n>
 --reviewer <id> --model <family> --independence … --verdict pass|block
---bundle <bundle>` takes the reviewed range (base, head) from the bundle and
+--bundle <bundle> --with .process-work/reviews/<report>.md` takes the reviewed range
+(base, head) from the bundle — a Tier 2+ pass carries its report with one line
+`AC-<id>: <path>::<test>` per criterion (`verification-independence.md`, "Evidence at
+the writer"), a plan review names its concrete `--model` id — and
 appends the `REVIEW` line the core `review` gate parses
 (`journal-state-plans.md`). A findings-producing or Tier 3 review also writes
 `FINDING sev=… action=… issue=… gate=…` lines in a `.process-work/reviews/`

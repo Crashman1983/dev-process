@@ -11,4 +11,7 @@ marker survives into a plan (the `clarification` gate blocks it).
 `docs/process/review-checklist.md` asks for (its **Plan decides:** lines) and checks every
 signature it cites against the code. Before `planned`, a Tier 2+ plan is reviewed once,
 independently (`workflow.md`, Plan): Tier 2 by a fresh subagent on its bundle, attested with
-`attest.py --plan-review`; Tier 3 by a dispatched plan-review session.
+`attest.py --plan-review`; Tier 3 by a dispatched plan-review session. The plan carries
+`plan-session model: <your concrete model id>`; the reviewer is of no lower class and
+`--model` names its concrete id (`attest.py` refuses otherwise — `verification-independence.md`,
+"Evidence at the writer").
