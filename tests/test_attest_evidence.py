@@ -184,29 +184,66 @@ PY_CASES = [
     ("TestCase of any name", "import unittest\nclass Widget(unittest.TestCase):\n    def test_a(self):\n"
      "        pass\n", "Widget::test_a", None),
     ("__test__ = False", "__test__ = False\ndef test_a():\n    pass\n", "test_a", "__test__ = False"),
+    # refute #225 round 2: a setup that skips, every case skipped, an inherited test
+    ("autouse fixture skips", "import pytest\n@pytest.fixture(autouse=True)\ndef _off():\n    pytest.skip('x')\n"
+     "def test_a():\n    pass\n", "test_a", "autouse fixture skips"),
+    ("setUp skips", "import unittest\nclass TestK(unittest.TestCase):\n    def setUp(self):\n"
+     "        self.skipTest('x')\n    def test_a(self):\n        pass\n", "TestK::test_a", "setup"),
+    ("every case skipped", "import pytest\n@pytest.mark.parametrize('x', [pytest.param(1, marks=pytest.mark.skip)])\n"
+     "def test_a(x):\n    pass\n", "test_a", "every parametrized case"),
+    ("one case skipped", "import pytest\n@pytest.mark.parametrize('x', [1, pytest.param(2, marks=pytest.mark.skip)])\n"
+     "def test_a(x):\n    pass\n", "test_a", None),
+    ("inherited test", "class BackendTests:\n    def test_insert(self):\n        pass\n"
+     "class TestSqlite(BackendTests):\n    pass\n", "TestSqlite::test_insert", None),
+    ("non-autouse fixture may skip", "import pytest\n@pytest.fixture\ndef db():\n    pytest.skip('x')\n"
+     "def test_a():\n    pass\n", "test_a", None),
 ]
 
 
 @pytest.mark.parametrize("name,text,test,expected", PY_CASES, ids=[c[0] for c in PY_CASES])
 def test_python_tests_are_read_as_pytest_collects_them(ev_mod, name, text, test, expected):
     mod, _out = ev_mod
-    got = mod._python_status(text, "tests/test_t.py", test)
+    got = mod._python_status(text, "tests/test_t.py", test, mod.DEFAULTS)
     assert (got is None) if expected is None else (got and expected in got), got
 
 
-@pytest.mark.parametrize("file,text,test,expected", [
-    ("scripts/process/attest_evidence.py", "def test_status():\n    pass\n", "test_status", "no test module"),
-    ("docs/process/refute.md", "refute", "refute", "no test file"),
-    ("web/a.spec.ts", 'it("shows the banner", () => {})\n', "shows the banner", None),
-    ("web/a.spec.ts", 'it.skip("shows the banner", () => {})\n', "shows the banner", "skip/todo"),
-    ("web/a.spec.ts", '// shows the banner\n', "shows the banner", "declares no test"),
-    ("src/lib.rs", "#[test]\n#[ignore]\nfn parses_x() {}\n", "parses_x", "no test file"),
-    ("tests/parse.rs", "#[test]\n#[ignore]\nfn parses_x() {}\n", "parses_x", "skip/todo"),
-], ids=["helper module", "markdown", "ts", "ts skip", "ts comment", "rust src", "rust ignored"])
-def test_a_named_test_must_be_one_the_runner_runs(ev_mod, file, text, test, expected):
+OTHER_CASES = [
+    ("helper module", "scripts/process/attest_evidence.py", "def test_status():\n    pass\n", "test_status",
+     "no test module"),
+    ("markdown", "docs/process/refute.md", "refute", "refute", "no test file"),
+    ("readme in tests", "tests/README.md", "Run it with make check.", "make check", "no test file"),
+    ("ts", "web/a.spec.ts", 'it("shows the banner", () => {})\n', "shows the banner", None),
+    ("ts skip", "web/a.spec.ts", 'it.skip("shows the banner", () => {})\n', "shows the banner", "skip"),
+    ("ts comment", "web/a.spec.ts", '// shows the banner\n', "shows the banner", "declares no test"),
+    ("ts substring", "web/w.test.ts", 'it("answers 42", () => {})\n', "answers 4", "declares no test"),
+    ("rust src", "src/lib.rs", "#[test]\n#[ignore]\nfn parses_x() {}\n", "parses_x", "no test file"),
+    ("rust ignored", "tests/parse.rs", "#[test]\n#[ignore]\nfn parses_x() {}\n", "parses_x", "skip"),
+    ("xcode target", "ios/KenniTests/ChatTests.swift", "func testSend() {\n  XCTAssert(true)\n}\n",
+     "testSend", None),
+    ("xcode ui sources", "KenniAppUITests/Sources/AppSnapshotTests.swift", "func testShot() {}\n",
+     "testShot", None),
+    ("xctskip in body", "KenniTests/ATests.swift", "func testA() throws {\n  throw XCTSkip(\"x\")\n}\n",
+     "testA", "skip"),
+    ("go t.Skip in body", "pkg/x_test.go", 'func TestX(t *testing.T) {\n\tt.Skip("later")\n}\n', "TestX", "skip"),
+    ("the next test's skip", "pkg/x_test.go", 'func TestX(t *testing.T) {}\nfunc TestY(t *testing.T) {\n'
+     '\tt.Skip("y")\n}\n', "TestX", None),
+]
+
+
+@pytest.mark.parametrize("name,file,text,test,expected", OTHER_CASES, ids=[c[0] for c in OTHER_CASES])
+def test_a_named_test_must_be_one_the_runner_runs(ev_mod, name, file, text, test, expected):
     mod, _out = ev_mod
-    got = mod._python_status(text, file, test) if file.endswith(".py") else mod._other_status(text, file, test)
+    rules = mod.DEFAULTS
+    got = (mod._python_status(text, file, test, rules) if file.endswith(".py")
+           else mod._other_status(text, file, test, rules))
     assert (got is None) if expected is None else (got and expected in got), got
+
+
+def test_the_project_declares_its_test_files(ev_mod):
+    mod, _out = ev_mod
+    rules = {**mod.DEFAULTS, "python_files": ["check_*.py"], "test_files": [*mod.DEFAULTS["test_files"], "src/*.rs"]}
+    assert mod._python_status("def test_a():\n    pass\n", "tests/check_x.py", "test_a", rules) is None
+    assert mod._other_status("#[test]\nfn parses_x() {}\n", "src/lib.rs", "parses_x", rules) is None
 
 
 # --- end to end through attest.py ---------------------------------------------------

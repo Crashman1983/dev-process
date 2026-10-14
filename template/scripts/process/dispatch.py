@@ -104,6 +104,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from collections import Counter
 from typing import NamedTuple
 
 sys.dont_write_bytecode = True
@@ -2430,17 +2431,23 @@ def _plan_states(root: Path, head: str, branch: str = "") -> list[tuple[int, str
 
     def reviewed(at: str, rel: str, now: str) -> bool:
         """The plan at `at` is the plan now, or the plan now is it plus records
-        appended after its last line (`check_review.records_only`) — a REFUTE or
-        skip line riding the plan-review attestation does not make it due again
-        (#225 refute: an appended `skipped cross-model` reopened every gate-code plan)."""
+        appended after its last line (`check_review.records_only`) other than a
+        DECISION — a REFUTE or skip line riding the plan-review attestation does
+        not make it due again (#225 refute: an appended `skipped cross-model`
+        reopened every gate-code plan)."""
         then = _out(root, "rev-parse", f"{at}:{rel}")
         if not then:
             return False
         if then == now:
             return True
         r_then, r_now = _git(root, "show", f"{at}:{rel}"), _git(root, "show", f"{head}:{rel}")
-        return r_then.returncode == 0 and r_now.returncode == 0 \
-            and _review.records_only(r_then.stdout, r_now.stdout)
+        if r_then.returncode or r_now.returncode or not _review.records_only(r_then.stdout, r_now.stdout):
+            return False
+        # a DECISION binds the executor — added after the pass, it is plan content the
+        # review did not see, record grammar or not (#225 refute round 2)
+        before = Counter(r_then.stdout.splitlines())
+        added = Counter(r_now.stdout.splitlines()) - before
+        return not any(_review.DECISION_LINE.match(ln) for ln in added)
 
     def cleared(tier: int, rel: str, ids: set[str]) -> bool:
         # a pass counts only for the plan text it reviewed: its head holds this
