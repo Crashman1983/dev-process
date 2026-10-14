@@ -114,3 +114,38 @@ Kenni hat alles lokal in kenni#2602 gebaut: `attest_evidence_local.py` plus ein 
 ## Unabhängige Durchsetzung
 
 Das Push- und Merge-Gate (`check_review`) bleibt unverändert die harte Grenze für Grammatik, Runden und Abdeckung. Die neuen Regeln verweigern nur beim Schreiben, und jeder Zweifel endet in einer Verweigerung mit genannter Ausnahmezeile. Keine bestehende Prüfung wird gelockert.
+
+## Plan-Review Runde 1 — Änderungen
+
+Ergebnis: Block mit drei BLOCKERn, drei MAJORs und vier MINORs. Wo diese Punkte den Entscheidungen oben widersprechen, gelten sie.
+
+- **P1 E1 folgt `records_only` (BLOCKER).** `check_review.records_only` lässt Record-Zeilen, die nach der letzten Planzeile angehängt sind, mit dem Attest-Commit mitfahren (#199). E1 verweigert deshalb nur, wenn der Plan im Arbeitsbaum oder im Index mehr als angehängte Records gegenüber dem Head enthält. Die Meldung sagt: Records ans Ende, alles andere vorher committen. Angehängte Records (REFUTE, Skip) zählen für B2 und für die Skips mit, wie für das Gate. Kennis Fall #2407 war eine Zeile mitten im Plan.
+- **P2 Bindung an die Arbeit, nicht an `--work` (BLOCKER).** `attest.py` gibt die Work-IDs von `round_ids` mit: Slug, Datumsslug, Issue des einen Plans. Der Plan wird über diese IDs gefunden. Bei mehreren Plänen wird auf den Plan eingeengt, dessen Stem zu den IDs gehört. Sonst nennt die Meldung `--work <slug>`. REFUTE- und Skip-Zeilen binden an jede dieser IDs. Ausgenommen bleibt eine ID mit Repo-Präfix. Eine Plan-Review bindet Skips an `<id>-plan`. Nach einem `--archive` (späte Linse) wird der archivierte Plan gefunden.
+- **P3 AC-Zeilen im Bundle und in den Dispatch-Prompts (BLOCKER).** Der Grammatikabschnitt des Code-Review-Bundles (`make_review_bundle`) verlangt eine AC-Zeile je Kriterium. Die Prompts für Reviewer, die nicht attestieren (`dispatch.py`), verlangen sie ebenfalls. Tests pinnen beides. `/review`: Jeder Tier-2+-Review schreibt einen Bericht.
+- **P4 D2-Erkennung (MAJOR).** Ein Gate-Pfad im Plantext zählt nicht, wenn er als `pfad:zeile` zitiert oder als Befehl aufgerufen wird (`run`, `python`, `python3` direkt davor). Normalisiert werden nur Plan-Tokens. Diff-Pfade gehen unverändert an `is_gate_path`, eine zweite Pfadregel gibt es nicht. Skip-Zeilen werden Records: Ihre Grammatik besitzt `check_review` (`SKIP_LINE`), und `_record_line` kennt sie. Damit stellt eine angehängte Skip-Zeile die Plan-Review nicht neu fällig. `/plan` sagt, wohin sie gehört.
+- **P5 D1-Reihenfolge (MAJOR).** Ein Paar aus verschiedenen Familien besteht immer, in beiden Richtungen, und wird vor der Session-Suche geprüft. Ranks vergleichen nur geranke Klassen. Ein `planned`-Report ohne gemessenes Modell fällt auf die Plan-Zeile zurück. Die Issues einer Slug-Arbeit kommen aus der `issue:`-Zeile ihres Plans. Reports werden über `report.read_reports` gelesen.
+- **P6 AC-Grammatik (MAJOR).** Eine AC-ID ist `AC-<id>` mit `[\w.]+` wie im Zug (`train._HOLDS`) oder `AC<Ziffer…>`. Ein Punkt am Ende gehört nicht zur ID.
+  - **Soll-Liste:** jede AC-ID, die der Plan am Head nennt, denn die Checkliste verlangt im Plan je AC die Task und den Test. Bei einem Spec-Kit-Plan kommen die IDs aus `spec.md` desselben Verzeichnisses dazu.
+  - **`unproven`:** wird nur außerhalb der genannten `pfad::name` erkannt.
+- **P7 Policy (MINOR).** Die Policy wird nur für einen Pass ab Tier 2 geladen, lazy, typgeprüft, am Base. Ein Fehler wird zur Verweigerung, nicht zu einem Absturz.
+- **P8** Die Diff-Pfade nutzen allein `is_gate_path` (MINOR).
+- **P9 A (MINOR).** Eine REFUTE-Zeile zählt nur aus einem Bericht unter `.process-work/reviews/`. Die Bundle-Warnung `_unrefuted` bleibt, wie sie ist. Ein Rest ist benannt: Die Fix-Runden-Regel sieht diese Zeile nicht.
+- **P10 Tests und Ränder (MINOR).**
+  - Ein Pass ohne Range wird verweigert.
+  - Der Test-Helfer committet echte Nachweise vor dem Head: AC im Plan, eine echte Testfunktion und einen Bericht. Er nutzt keine Skip-Zeilen und keine Exception.
+  - Plan-Review-Tests nennen konkrete Modelle und `plan-session model:`.
+- **P11 Doku (NIT).**
+  - `review.md`, `journal-state-plans.md`, `testing.md` und der `_comment` der Policy werden angepasst. Der `_comment` warnt jetzt: Ein kleineres Subagent-Modell wird als Plan-Reviewer verweigert.
+  - `plan-session model:` kommt in beide Zweige von `plan.md.jinja`, nicht in `design-template.md`.
+  - `attest.py`: Die Exception wird nach `build_line` gebaut.
+- **Prozess.** Code entstand vor dem Plan-Pass. Er wird nach diesen Änderungen umgebaut, und Runde 2 prüft den revidierten Plan.
+
+## Plan-Review Runde 2 — Änderungen
+
+Ergebnis: Block. N1 ist ein BLOCKER, N2 und N4 sind MAJOR, N3 ist MINOR, dazu ein NIT. Alles ist behoben.
+
+- **R1 AC-ID mit Ziffer (N1).** Eine AC-ID ist `AC-?` plus höchstens drei Buchstaben, eine Ziffer und den Rest, also `AC-1`, `AC-2.1`, `AC-B1` oder `AC1`. `AC-Zeile`, `AC-<id>` und `AC-N` sind Prosa. Die Bericht-Zeilen lesen dieselbe ID.
+- **R2 Lesebreite wie der Owner (N2, N5).** REFUTE- und Skip-Zeilen werden nur aus dem gefundenen Plan gelesen, wie `make_review_bundle._unrefuted`. Sie binden über die IDs dieses Plans als String, ohne `work_key`. Ein zweiter Plan derselben Issue, das Archiv und das Journal leihen nichts.
+- **R3 Nur, was mitfährt (N3).** Angehängte Records zählen nur, wenn der Plan in `--with` steht.
+- **R4 DoD-Abweichung (N4).** Hält eine Zeile `DoD-deviation: open AC-<id>` (`train.DOD_DEVIATION` und `_HOLDS`) eine AC offen, fällt diese aus der Soll-Liste.
+- **P3 erledigt.** Grammatik im Code-Review-Bundle und Prompt für den nicht attestierenden Reviewer sind umgesetzt, gepinnt in `test_review_bundle` und `test_dispatch`.

@@ -23,8 +23,12 @@ def _repo(render, tmp_path):
     _git(out, "commit", "-q", "-m", "base")
     _git(out, "checkout", "-q", "-b", "feature")
     (out / ".process-work/plans").mkdir(parents=True, exist_ok=True)
-    (out / ".process-work/plans/2026-09-10-widget.md").write_text("# Plan\n\ntier: 2\n\n## Decisions\n")
+    (out / ".process-work/plans/2026-09-10-widget.md").write_text(PLAN)
     (out / "widget.py").write_text("def widget():\n    return 42\n")
+    # the evidence a Tier 2 pass shows (#225): a criterion, the test that goes red for it
+    (out / "tests").mkdir(exist_ok=True)
+    (out / "tests/test_widget.py").write_text("from widget import widget\n\n\ndef test_widget():\n"
+                                              "    assert widget() == 42\n")
     _git(out, "add", "-A")
     _git(out, "commit", "-q", "-m", "feat: widget")
     base = _git(out, "merge-base", "main", "HEAD").stdout.strip()
@@ -39,11 +43,28 @@ def _load_gate(root):
     return mod
 
 
+# a criterion the plan names; plan reviews compare against the plan session's model
+PLAN = ("# Plan\n\ntier: 2\nplan-session model: claude-opus-5\n\n"
+        "AC-1: When asked, the widget answers 42.\n\n## Decisions\n")
+EVIDENCE = "AC-1: tests/test_widget.py::test_widget\n"
+
+
 def _attest(root, *extra):
+    """A pass carries its review report (#225) — the mechanics these tests pin are the
+    round, range and archive rules; tests/test_attest_evidence.py pins the evidence."""
+    verdicts = [extra[i + 1] for i, a in enumerate(extra[:-1]) if a == "--verdict"]
+    plan_review = "--plan-review" in extra
+    report = []
+    if (verdicts or ["pass"])[-1] == "pass" and not plan_review:
+        rep = root / ".process-work/reviews/evidence.md"
+        rep.parent.mkdir(parents=True, exist_ok=True)
+        rep.write_text("# Review\n\n" + EVIDENCE)
+        report = ["--with", ".process-work/reviews/evidence.md"]
     return subprocess.run([sys.executable, str(root / "scripts/process/attest.py"),
                            "--work", "widget", "--tier", "2", "--reviewer", "fresh",
-                           "--model", "cross", "--independence", "bundle,non-implementing",
-                           "--verdict", "pass", "--round", "1", *extra, "."],
+                           "--model", "claude-opus-5" if plan_review else "cross",
+                           "--independence", "bundle,non-implementing",
+                           "--verdict", "pass", "--round", "1", *report, *extra, "."],
                           cwd=root, capture_output=True, text=True)
 
 
@@ -242,10 +263,11 @@ def test_a_number_no_plan_names_is_refused_as_a_likely_pr_number(render, tmp_pat
     assert "work=26 names no plan or issue — it looks like a PR number" in r.stderr
     assert "Active plans: 2026-09-10-widget, widget" in r.stderr
     assert not (out / ".process-work/journal").exists() or "work=26" not in _journal(out)
-    r = _attest(out, "--base", base, "--head", head, "--work", "gizmo")  # a slug: a note only
+    # blocks: a planless pass is refused on its evidence (#225); the id rule is verdict-blind
+    r = _attest(out, "--base", base, "--head", head, "--work", "gizmo", "--verdict", "block")  # a slug: a note only
     assert r.returncode == 0 and "work=gizmo names no plan" in r.stderr, r.stderr
     _git(out, "checkout", "-q", "-b", "26-fix")  # the branch leads with the issue
-    r = _attest(out, "--base", base, "--head", head, "--work", "26")
+    r = _attest(out, "--base", base, "--head", head, "--work", "26", "--verdict", "block")
     assert r.returncode == 0, r.stderr
     assert "REVIEW work=26 " in _journal(out)
 
@@ -269,17 +291,17 @@ def test_rounds_of_another_plan_of_the_same_issue_do_not_count(render, tmp_path)
     _git(out, "add", "-A")
     _git(out, "commit", "-qm", "two plans of #26")
     # a claimed round 2 is written as round 1: no round of THIS work blocked
-    r = _attest(out, "--base", base, "--head", head, "--work", "26", "--round", "2", "--dry-run")
+    r = _attest(out, "--base", base, "--head", head, "--work", "26", "--round", "2", "--verdict", "block", "--dry-run")
     assert r.returncode == 0 and "written as round 1" in r.stderr and "round=1" in r.stdout, r.stdout + r.stderr
     # two ACTIVE plans of #26: the branch's slug picks one, else the literal id alone
     (plans / "2026-09-11-gizmo.md").write_text("# Plan\n\ntier: 2\nissue: #26\n")
     (out / ".process-work/journal/old.md").write_text(_BLOCK.format(w="widget"))
     _git(out, "add", "-A")
     _git(out, "commit", "-qm", "gizmo")
-    r = _attest(out, "--base", base, "--head", head, "--work", "26", "--round", "2", "--dry-run")
+    r = _attest(out, "--base", base, "--head", head, "--work", "26", "--round", "2", "--verdict", "block", "--dry-run")
     assert r.returncode == 0 and "written as round 1" in r.stderr, r.stderr  # ambiguous: literal
     _git(out, "checkout", "-q", "-b", "26-widget")
-    r = _attest(out, "--base", base, "--head", head, "--work", "26", "--round", "2", "--dry-run")
+    r = _attest(out, "--base", base, "--head", head, "--work", "26", "--round", "2", "--verdict", "block", "--dry-run")
     assert r.returncode == 0 and "written as round" not in r.stderr, r.stderr
     assert "no root cause for the fix of blocking round(s) 1" in r.stderr and "round=2" in r.stdout, r.stderr
 
@@ -302,6 +324,7 @@ def test_a_decorated_issue_line_is_a_work_id(render, tmp_path, decl):
     plan = out / ".process-work/plans/2026-09-10-widget.md"
     plan.write_text(plan.read_text().replace("tier: 2\n", f"tier: 2\nissue: {decl}\n"))
     _git(out, "commit", "-qam", "issue line")
+    head = _git(out, "rev-parse", "HEAD").stdout.strip()  # the plan as reviewed (#225 E1)
     r = _attest(out, "--base", base, "--head", head, "--work", "42")
     assert r.returncode == 0, r.stderr
     assert "42" in _load_gate(out)._plan_work_ids("2026-09-10-widget", plan.read_text(), include_dedated=True)
@@ -413,7 +436,8 @@ def test_a_quoted_or_placeholder_root_cause_is_no_cause(render, tmp_path):
                    "ROOT-CAUSE work=<id> round=1: the cache key — test_x\n",
                    "    " + real):
         plan.write_text(original + "\n" + quoted)
-        r = _attest(out, *ab, "--round", "2", "--dry-run")
+        # a block: a quoted line is plan content, which a pass would have to commit first (#225 E1)
+        r = _attest(out, *ab, "--round", "2", "--verdict", "block", "--dry-run")
         assert r.returncode == 0 and "no root cause" in r.stderr, quoted
     plan.write_text(original + "\n- " + real)
     r = _attest(out, *ab, "--round", "2", "--dry-run")
@@ -616,14 +640,17 @@ def test_later_reviewed_work_is_not_blamed_on_a_merged_plan(render, tmp_path):
     # the later work carries its own plan and review: the merged plan left
     # active is named as residue, the later code is covered by its review
     out = _merged_widget_then_later(render, tmp_path)
-    (out / ".process-work/plans/2026-09-11-later.md").write_text("# Later\n\ntier: 2\n\n## Decisions\n")
+    (out / ".process-work/plans/2026-09-11-later.md").write_text("# Later\n\ntier: 2\n\nAC-1: still 42.\n\n## Decisions\n")
+    (out / ".process-work/reviews").mkdir(parents=True, exist_ok=True)
+    (out / ".process-work/reviews/later.md").write_text("# Review\n\n" + EVIDENCE)
     _git(out, "add", "-A")
     _git(out, "commit", "-q", "-m", "later plan")
     later_base = _git(out, "merge-base", "main", "HEAD").stdout.strip()
     later_head = _git(out, "rev-parse", "HEAD").stdout.strip()
     r = subprocess.run([sys.executable, str(out / "scripts/process/attest.py"), "--work", "later", "--tier", "2",
                         "--reviewer", "fresh", "--model", "cross", "--independence", "bundle,non-implementing",
-                        "--verdict", "pass", "--round", "1", "--base", later_base, "--head", later_head, "."],
+                        "--verdict", "pass", "--round", "1", "--base", later_base, "--head", later_head,
+                        "--with", ".process-work/reviews/later.md", "."],
                        cwd=out, capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
     _git(out, "add", "-A")
@@ -656,7 +683,7 @@ def test_a_commented_block_in_a_plan_is_no_round(render, tmp_path):
             "verdict=block round=1")
     plan = out / ".process-work/plans/2026-09-10-widget.md"
     plan.write_text(plan.read_text() + f"\n<!-- example:\n{line}\n-->\n")
-    r = _attest(out, "--base", base, "--head", head, "--round", "2", "--dry-run")
+    r = _attest(out, "--base", base, "--head", head, "--round", "2", "--verdict", "block", "--dry-run")
     assert r.returncode == 0 and "written as round 1" in r.stderr, r.stderr
 
 
@@ -746,14 +773,18 @@ def test_a_spec_kit_plan_is_archived_under_its_feature_name(render, tmp_path):
     out, base, head = _repo(render, tmp_path)
     spec = out / "specs/003-login/plan.md"
     spec.parent.mkdir(parents=True)
-    spec.write_text("# Plan\n\ntier: 2\n")
+    spec.write_text("# Plan\n\ntier: 2\n\nAC-1: still 42.\n")
     _git(out, "add", "-A")
     _git(out, "commit", "-q", "-m", "spec")
+    head = _git(out, "rev-parse", "HEAD").stdout.strip()
+    (out / ".process-work/reviews").mkdir(parents=True, exist_ok=True)
+    (out / ".process-work/reviews/login.md").write_text("# Review\n\n" + EVIDENCE)
 
     r = subprocess.run([sys.executable, str(out / "scripts/process/attest.py"),
                         "--work", "003-login", "--tier", "2", "--model", "cross",
                         "--independence", "bundle,non-implementing", "--verdict", "pass",
-                        "--base", base, "--head", head, "--archive", "specs/003-login/plan.md", "."],
+                        "--base", base, "--head", head, "--archive", "specs/003-login/plan.md",
+                        "--with", ".process-work/reviews/login.md", "."],
                        cwd=out, capture_output=True, text=True)
 
     assert r.returncode == 0, r.stderr
@@ -764,7 +795,8 @@ def test_a_spec_kit_plan_is_archived_under_its_feature_name(render, tmp_path):
 def test_without_archive_or_commit_nothing_is_staged(render, tmp_path):
     out, base, head = _repo(render, tmp_path)
 
-    assert _attest(out, "--base", base, "--head", head).returncode == 0
+    # a block: a pass rides its report with `--with`, which stages (#225)
+    assert _attest(out, "--base", base, "--head", head, "--verdict", "block").returncode == 0
     assert _git(out, "diff", "--cached", "--name-only").stdout == ""
 
 

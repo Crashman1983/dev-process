@@ -1141,9 +1141,10 @@ def prompt_for(phase: str, issue: int, tier: int | None, branch: str, model: str
                 f"docs/process/refute.md (\"Refuting a plan\"); {verdict}; stop; never edit the plan." + tail)
     if not attests:
         return (f"/review branch `{branch}` for issue #{issue} as an independent reviewer: produce the verdict "
-                f"and findings as report text in your output; do not run attest.py or git — the steward "
-                f"attests with `--model {model}` from your output (`dispatch.py log`); stop; never fix code."
-                + tail)
+                f"and findings as report text in your output, with one line `AC-<id>: <path>::<test>` (or "
+                f"`AC-<id>: unproven`) per acceptance criterion the plan names; do not run attest.py or git — "
+                f"the steward writes your output as the review report and attests with `--model {model}` "
+                f"from it (`dispatch.py log`); stop; never fix code." + tail)
     return f"/review branch `{branch}` for issue #{issue} as an independent reviewer: attest the REVIEW line with attest.py, report `review-pass` or `blocked` with the findings, stop; never fix code." + tail
 
 

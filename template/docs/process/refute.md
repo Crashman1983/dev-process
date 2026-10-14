@@ -203,17 +203,30 @@ is not asked for a new round in every later delta. `--plan <name>` bundles
 what it names either way (a Spec Kit plan by its directory or its label).
 
 The review bundle warns when a bundled plan declares Tier 3, or a diff
-touches gate code at any tier, and a plan carries no such line (a warning,
-not a block: the rule is observed before it gates). A Tier 2 plan that names
+touches gate code at any tier, and a plan carries no such line. A Tier 2 plan that names
 data loss or concurrency is not detected — the reviewer checks its line. A
 Tier 2 bundle carries the brief's questions for the reviewer to answer. A
 delta re-review asks for a new line only when the delta touches gate code —
-the table's fix-round run; a Tier 3 fix round outside gate code asks none.
-It approximates gate code by path — `scripts/process/`, `.githooks/`,
-`.github/workflows/`, `Makefile`, `.pre-commit-config.yaml` — so a Makefile
-change to a product target warns too; say so in the plan (the warning stays,
-the reviewer weighs it) instead of refuting
-it. A line quoted as an example (in a code block, a comment, or with the
+the table's fix-round run (a warning: the fix round's line is not enforced);
+a Tier 3 fix round outside gate code asks none.
+
+**Gate code is enforced, not only warned about** (#225: downstream, the
+refute was skipped on 4 of 4 gate-code branches while the bundle warned).
+`attest.py` refuses a Tier 2+ code-review pass whose reviewed range touches
+gate code unless the work's plan carries a `REFUTE work=<id> round=<r>: …`
+line of its own (the same rule as the warning above: a second plan of the
+issue lends none) or a line `skipped refute work=<id>: <reason>` — at the
+reviewed head, or appended after the plan's last line and attested with
+`--with` the plan. **One run at Tier 2:** where the
+code review crosses the model family (`cross-model`), that reviewer may
+work through the brief above in the same run and put the `REFUTE` line in
+its review report; attested with `--with <report>`, it counts. From Tier 3
+on the separate run before round 1 stays, and only a line at head counts.
+Gate code is approximated by path — `scripts/process/`, `.githooks/`,
+`.github/workflows/`, `Makefile`, `.pre-commit-config.yaml`, the local gate
+and model policy files — so a Makefile change to a product target counts
+too; write the `skipped refute` line with that reason instead of refuting
+it (countable, and the reviewer weighs it). A line quoted as an example (in a code block, a comment, or with the
 brief's `<id>` placeholder, or wrapped in backticks) does not count. Comments
 are read as Markdown renders them: `<!--` at the start of a line hides
 everything up to `-->` (the rest of the file when it never closes); inside

@@ -43,6 +43,13 @@ Usage:
             [--exception TEXT] [--journal-dir DIR] [--dry-run]
             [--archive PLAN] [--commit] [--with PATH ...]
 
+A Tier 2+ pass shows its evidence first (`attest_evidence.py`, #225): its
+review report with one test per acceptance criterion, a refute for gate code,
+cross-model or a reasoned single-family from the project's tier, a plan
+reviewer of no lower class than the plan session. Plan lines (REFUTE,
+ROOT-CAUSE, DECISION, skips) are committed before the bundle is built, or
+appended after the plan's last line and ridden here with `--with` the plan.
+
 `--archive PLAN` (a pass only) moves the plan into the archive with the line;
 `--with PATH` adds the round's other records — its review report, plan lines —
 so the round is one commit and one push (each bookkeeping push paid the
@@ -63,6 +70,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling import
 from process_git import git_environment  # noqa: E402
 from check_fix_streak import notes as fix_streak_notes  # noqa: E402
+from attest_evidence import evidence_problems  # noqa: E402  (the evidence rules' one owner)
 from check_review import (  # noqa: E402  (one owner for grammar, digest, record homes)
     BOOKKEEPING,
     JOURNAL_DIR,
@@ -367,20 +375,31 @@ def main() -> int:
         args.work += "-plan"
     counted, round_notes, round_issues = round_problems(args, root, journal_dir)
     round_issues += work_problems(args, root)  # an owner exception overrides it too
+    args.round_ = counted
+    line, problems = build_line(args, root, journal_dir)
+    # the evidence a Tier 2+ pass must show (attest_evidence.py), read at the
+    # range the line names — known only once build_line has it
+    record = next((f for _ln, f in parse_review_lines(line)[0]), {})
+    plain = args.work.removesuffix("-plan") if args.plan_review else args.work
+    evidence = evidence_problems(
+        root, work=args.work, ids=round_ids(argparse.Namespace(work=plain), root),
+        tier=int(args.tier) if args.tier.isascii() and args.tier.isdigit() else 0,
+        verdict=args.verdict, independence=args.independence, base=record.get("base"),
+        head=record.get("head"), plan_review=args.plan_review, model=args.model,
+        reports=[root / rel for rel in args.with_ or [] if (root / rel).is_file()])
     exception_note = ""
     if args.exception:
         # always written: an owner exception that trips no rule here (a round
         # beyond the cap) must be countable too, never lost in silence
-        named = round_issues + round_notes
+        named = round_issues + round_notes + evidence
         overrides = "; ".join(named) if named else "no attest rule tripped"
         exception_note = (f"REVIEW-EXCEPTION work={args.work} round={counted}: "
                           f"{args.exception} (overrides: {overrides})")
-        round_issues = round_notes = []
+        round_issues = round_notes = evidence = []
     for note in round_notes:
         print(f"attest: note — {note}", file=sys.stderr)
-    args.round_ = counted
-    line, problems = build_line(args, root, journal_dir)
-    problems = round_issues + problems + archive_problems(args, root) + with_problems(args, root)
+    problems = (round_issues + problems + evidence + archive_problems(args, root)
+                + with_problems(args, root))
     if args.note and any(ln.lstrip().startswith("REVIEW") for ln in args.note.splitlines()):
         problems.append("the note carries REVIEW-looking lines — the validated line is the "
                         "only REVIEW writer")

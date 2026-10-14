@@ -190,7 +190,10 @@ A REVIEW names the range it reviewed with `base` and `head`. **Write the
 line with `scripts/process/attest.py`** (`--bundle <bundle file>` or
 `--base/--head`): it checks both commits exist and that a full round's base
 is the head's fork point, validates the grammar and appends to the branch's
-shard of today. Never type the SHAs (observed on one deployment: 15 of 16
+shard of today. A Tier 2+ pass also shows its evidence there — the review
+report with one test per acceptance criterion, the gate-code refute, the
+cross-model run or its reason (`verification-independence.md`, "Evidence at
+the writer"). Never type the SHAs (observed on one deployment: 15 of 16
 typed integrity values matched no commit):
 
 ```
@@ -202,7 +205,7 @@ REVIEW work=42 tier=2 reviewer=fresh-agent model=same independence=bundle,non-im
 | `work` | attribution: the issue number, or the archived plan's slug it reviews |
 | `tier` | the reviewed change's tier (0–3) |
 | `reviewer` | an id for the reviewing process (presence gated; truthfulness attested) |
-| `model` | reviewing model-family slug, or `same` if the producer's family |
+| `model` | reviewing model-family slug, or `same` if the producer's family; a plan-review pass names the concrete model id (`attest.py` compares its class with the plan session's, `verification-independence.md`) |
 | `independence` | comma set ⊆ `bundle,non-implementing,cross-model,single-family` |
 | `verdict` | `pass` \| `block` |
 | `round` | 1 + the distinct blocked rounds already recorded for this `work` (further reviewers of the round that just blocked attest that round) — counted by `attest.py`, not claimed: a re-check after a pass or a rebase keeps the round; plan reviews count apart as `work=<id>-plan` |

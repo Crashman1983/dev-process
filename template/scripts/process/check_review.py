@@ -331,13 +331,23 @@ ROOT_CAUSE_LINE = re.compile(
     re.MULTILINE)
 # a dated answer to the owner's question (an open `DECISION NEEDED` is none)
 DECISION_LINE = re.compile(_RECORD_LEAD + r"[*_]*DECISION[*_]*[ \t]+\d{4}-\d{2}-\d{2}\b\S*[ \t]*\S")
+# a reasoned way past one evidence rule of attest.py (#225, attest_evidence.py):
+# `skipped <kind> work=<id>: <reason>` — a record like REFUTE, so one appended
+# after the plan rides the attestation as REFUTE lines do (`records_only`);
+# `codex-review` is the older spelling of `cross-model`
+SKIP_KINDS = ("cross-model", "codex-review", "refute", "plan-review", "ac-trace")
+SKIP_LINE = re.compile(
+    _RECORD_LEAD + r"skipped[ \t]+(?P<kind>" + "|".join(SKIP_KINDS) + r")[ \t]+"
+    r"work=(?P<work>(?!<)(?!TODO\b)[^\s:]+):[ \t]*(?P<reason>(?!<|TODO\b|…|\.\.\.)\S.*?)[ \t]*$",
+    re.MULTILINE)
 
 
 def _record_line(line: str) -> bool:
     """Is this one line a record — REFUTE, ROOT-CAUSE, a well-formed REVIEW
-    line or a dated DECISION — at most three spaces in (more, or a tab, is a
+    line, a dated DECISION or an evidence skip — at most three spaces in (more, or a tab, is a
     code block, refute #199)?"""
-    if REFUTE_LINE.match(line) or ROOT_CAUSE_LINE.match(line) or DECISION_LINE.match(line):
+    if REFUTE_LINE.match(line) or ROOT_CAUSE_LINE.match(line) or DECISION_LINE.match(line) \
+            or SKIP_LINE.match(line):
         return True
     if not re.match(r" {0,3}\S", line):
         return False
@@ -369,7 +379,8 @@ def _answer_in_place(question: str, answer: str) -> bool:
 
 def records_only(before: str, after: str) -> bool:
     """Is `after` the plan `before` plus records, and nothing else? Two shapes
-    count (#199): record lines — REFUTE, ROOT-CAUSE, REVIEW, a dated DECISION —
+    count (#199): record lines — REFUTE, ROOT-CAUSE, REVIEW, a dated DECISION,
+    an evidence skip (#225) —
     appended after the plan's last line, blank lines between them; and an open
     `DECISION NEEDED` line answered in place (`_answer_in_place`). Such lines
     ride the attestation commit after the reviewed head (`attest --with`,

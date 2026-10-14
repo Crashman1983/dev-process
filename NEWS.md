@@ -5,6 +5,18 @@ im Detail zu kennen. Je Version ein paar Sätze: was sich für ein Projekt
 ändert, das die Vorlage nutzt, und was es davon hat. Die vollständigen
 technischen Einzelheiten stehen im [CHANGELOG](CHANGELOG.md).
 
+## v2.71.0 — Eine Prüfung zählt nur mit Beleg
+
+Eine Prüfung gilt jetzt erst als bestanden, wenn ihre Belege vorliegen. Zu
+jeder Anforderung muss ein Test genannt sein, der fehlschlagen würde, wenn
+das Verhalten kaputtgeht. Änderungen an den Prüfwerkzeugen selbst müssen
+vorher gezielt angegriffen worden sein. Wo ein zweites KI-Modell als
+Gegenleser vorgesehen ist, muss es gelaufen sein. Einen Plan prüft kein
+kleineres Modell als das, das ihn geschrieben hat. Wer bewusst
+darauf verzichtet, schreibt einen Satz mit Grund dazu; so bleibt sichtbar
+und zählbar, wo abgekürzt wurde. Anlass war eine Nacht, in der sechs
+Änderungen glatt durchgingen und eine Nachprüfung sechs schwere Fehler fand.
+
 ## v2.70.0 — Wissen, das schon da ist, wird gefunden
 
 Viele Prüfrunden scheitern, weil ein Agent etwas Bestehendes nicht kannte:

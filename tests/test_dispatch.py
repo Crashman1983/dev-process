@@ -1075,6 +1075,8 @@ def test_a_codex_cell_gets_no_live_channel_and_reports_instead_of_attesting(rend
     prompt = seen[-1]
     assert "SendMessage" not in prompt
     assert "do not run attest.py or git" in prompt and "--model gpt-x" in prompt and "attest the REVIEW line" not in prompt
+    # #225: the steward's attest refuses a report without one line per criterion
+    assert "`AC-<id>: <path>::<test>`" in prompt and "`AC-<id>: unproven`" in prompt
     assert "decision_channel omitted: `codex` cell has no live channel" in capsys.readouterr().out
     # the Claude cell keeps both
     assert mod.start(out, issue=7, phase="review", tier=2, branch="7-work", title=None, dry_run=True) == 0

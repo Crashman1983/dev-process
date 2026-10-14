@@ -236,6 +236,8 @@ def test_bundle_asks_for_kind_and_a_plan_bundle_for_the_phase_header(render, tmp
     assert "kind=<knowledge-gap" in named and "phase: plan" not in named
     plan = _bundle(out, "--base", "main", "--plan", "widget", "--plan-review").stdout
     assert "put the header line `phase: plan`" in plan
+    # #225: a code review traces each criterion to the test that goes red; a plan review has none
+    assert "AC-<id>: <path>::<test>" in code and "AC-<id>: <path>::<test>" not in plan
 
 
 def test_option_missing_value_is_usage_not_traceback(render, tmp_path):

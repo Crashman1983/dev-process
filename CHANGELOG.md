@@ -1166,6 +1166,53 @@ ein Wächter-Test gegen doppelte Klammern ohne Leerzeichen in Python-Vorlagen.
 Wer v2.27.1 oder v2.28.0 installiert hat und am Push scheitert: auf v2.28.1
 aktualisieren, `v2.28.1`.
 
+**v2.71.0 — Nachweise vor dem Pass: Cross-Model, Gate-Code-Refute, ein Test je AC, Klasse des Plan-Reviewers (#225).** Plan: `docs/analysis/2026-10-14-review-evidence.md` nach drei Plan-Review-Runden. Tier 3, weil Gate-Code betroffen ist (`attest.py`, neues `attest_evidence.py`, `check_review.py`). Migrations-Release. Vom Owner am 2026-10-14 freigegeben. Port von Kennis lokaler Umsetzung (kenni#2602), damit Kennis Patch an der Template-Datei `attest.py` entfällt.
+- **Anlass:** Kenni hat in einer Nacht sechs Tier-2-Branches gemergt, alle mit einem Pass in Review-Runde 1. Ein Audit fand danach sechs Major-Fehler, die das Review übersehen hatte. Vier davon waren Tests, die nicht rot werden können. Den Gate-Code-Refute hatten 4 von 4 Gate-Code-Branches ausgelassen, den Cross-Model-Lauf gab es ohne Hinweis nicht. Beides hat vorher nur gewarnt.
+- **`attest_evidence.py` (Kern), ein Owner:** `gather()` liest jeden Nachweis am attestierten Head, `decide()` ist eine reine Entscheidungstabelle. `attest.py` ruft die Prüfung nach `build_line` auf. Eine `--exception` nennt die übergangenen Nachweise in ihren `overrides`.
+  - Jede Regel hat einen committeten, zählbaren Ausweg: `skipped <art> work=<id>: <Grund>`. Die Arten sind `cross-model` (älter `codex-review`), `refute`, `plan-review` und `ac-trace`.
+  - Die Grammatik dieser Zeile besitzt `check_review.SKIP_LINE`. Die Zeile ist ein Record und darf wie eine REFUTE-Zeile nach dem Plan angehängt mitfahren (`records_only`).
+  - Eine Zeile mit `owner/repo#N` zählt nicht.
+- **Cross-Model:** Ab `review_evidence.cross_model_from_tier` trägt ein Code-Review-Pass `cross-model` oder `single-family` mit `skipped cross-model`. Die Schwelle steht in `model-policy.json`, Standard 3. **Verhaltensänderung:** Ein Single-Family-Pass auf Tier 3 braucht jetzt einen Grund.
+- **Gate-Code-Refute:** Berührt der attestierte Bereich Gate-Code (`is_gate_path`), braucht ein Code-Review-Pass ab Tier 2 eine REFUTE-Zeile im eigenen Plan der Arbeit oder `skipped refute`. Gelesen wird wie in der Bundle-Warnung: Ein zweiter Plan derselben Issue leiht nichts.
+  - **Ein Lauf auf Tier 2:** Ein Cross-Model-Reviewer arbeitet den Refute-Auftrag ab und schreibt die REFUTE-Zeile in seinen Bericht. Mit `--with` zählt sie.
+  - Ab Tier 3 bleibt der getrennte Lauf vor Runde 1.
+  - Kann git den Diff nicht liefern, wird verweigert.
+- **Ein Test je AC:** Ein Code-Review-Pass ab Tier 2 braucht seinen Bericht (`--with .process-work/reviews/<bericht>.md`) mit einer Zeile `AC-<id>: <pfad>::<test>` je AC, die der Plan nennt. Bei Spec Kit kommt `spec.md` dazu.
+  - **AC-ID:** Sie braucht eine Ziffer (`AC-1`, `AC-2.1`, `AC-B1`, `AC1`).
+  - **Offen gehaltene AC:** Eine AC, die `DoD-deviation: open AC-<id>` offen hält, braucht keinen Test.
+  - **`unproven`:** verweigert den Pass.
+  - **Python-Test:** Er muss am Head als Testfunktion stehen, auch als Klassenmethode. Abgeschaltet zählt nicht: kein skip, skipif oder xfail per Dekorator, Alias oder `pytestmark`, kein `importorskip`, kein `pytest.skip` im Körper. Bei doppelter `def` zählt die letzte.
+  - **Andere Sprachen:** Der Name muss in der Datei stehen, und keine seiner Zeilen darf als skip oder todo markiert sein.
+  - Bundle-Grammatik und Dispatch-Prompt des nicht attestierenden Reviewers verlangen die Zeilen.
+- **Klasse des Plan-Reviewers:** Ein Plan-Review-Pass ab Tier 2 nennt die konkrete Modell-ID. Ihr Rang (`review_evidence.ranks`) darf nicht unter dem der Plan-Session liegen.
+  - **Quelle für die Plan-Session:** der neueste `planned`-Report mit gemessenem Modell, sonst die Planzeile `plan-session model: <id>`.
+  - **Familien:** Eine andere Familie (`families`, Standard `gpt-`) ist nie kleiner. Eine unbekannte ID wird verweigert.
+  - **Gate-Code im Plan:** Ein Plan, der Gate-Code zum Ändern nennt, wird `cross-model` geprüft oder mit Grund single-family. Ein Zitat `pfad:zeile` oder ein Befehlsaufruf zählt nicht als Nennung.
+- **Plan-Zeilen vor dem Attest:** Der Plan der Arbeit im Arbeitsbaum und im Index darf gegenüber dem Head nur angehängte Records enthalten (`records_only`). Sonst wird verweigert, und die Meldung nennt die Commit-Reihenfolge. Angehängte Records zählen nur, wenn der Plan per `--with` mitfährt.
+- **Schwellen am Base gelesen:** Ein Branch lockert die Regeln nicht für den eigenen Pass. Ein Pass ab Tier 2 ohne Bereich (`--bundle` oder `--base/--head`) wird verweigert.
+- **Rest (benannt):** Eine von Hand geschriebene REVIEW-Zeile umgeht die Prüfung, weil das Push-Gate sie nicht wiederholt. Ob ein genannter Test seine AC prüft, beurteilt der Reviewer. Für einen neuen Refute nach einer Fix-Runde mit Gate-Code bleibt es bei der Warnung des Bundles.
+- **Doku:** `verification-independence.md` („Evidence at the writer“), `refute.md` („Gate code is enforced“), `/review` (eine Zeile je AC, ein Lauf auf Tier 2), `/plan` (Klasse, `plan-session model:`, Gate-Code-Pläne), `review-checklist.md`, `journal-state-plans.md`, `model-policy.json` (`review_evidence`).
+- **Migration** (in dieser Reihenfolge):
+  1. **Alle Projekte:**
+     - Tier-2+-Reviews schreiben einen Bericht mit einer AC-Zeile je AC und attestieren mit `--with` den Bericht.
+     - Plan-Reviews nennen mit `--model` die konkrete ID.
+     - Pläne tragen `plan-session model: <id>`.
+     - Ein Single-Family-Pass auf Tier 3 braucht `skipped cross-model work=<id>: <Grund>` im Plan.
+
+     Prüfung: `attest.py … --dry-run` auf einen offenen Branch nennt keine Verweigerung.
+  2. **Kenni:**
+     - `scripts/process/attest_evidence_local.py`, seine Tests und den Import in `attest.py` entfernen. Das Update bringt den Haken mit.
+     - In `docs/process/model-policy.local.json` die Schwelle setzen: `{"review_evidence": {"cross_model_from_tier": 2}}`.
+     - Eigene GPT-Modelle stehen über `families` (`gpt-`) schon drin.
+     - Bestehende `skipped codex-review`-Zeilen gelten weiter.
+
+     Kennis lokale Regeln weichen in drei Punkten ab:
+     - Die Plan-Zeile gilt auch für Slug-Arbeiten.
+     - Bei Tests ist nur skip/xfail verboten, nicht jeder unbekannte Dekorator.
+     - Ein Paar verschiedener Familien besteht in beiden Richtungen.
+
+     Prüfung: `pytest` auf Kennis Attest-Tests, dazu ein `--dry-run` auf einen offenen Branch.
+
 **v2.70.0 — Wissensanker: erzeugte Bestandslisten, Leser-Suche im Plan, Befundart `kind=`, verständliche Neuigkeiten (#223).** Plan: `docs/analysis/2026-10-13-knowledge-anchors-plan.md`, Revision 3, nach zwei Planprüfungen (je `revise`, kein Blocker) und einer Nachprüfung (`pass`). Tier 3, weil Prüfcode und der FINDING-Parser betroffen sind. Reines Update ohne Projektschritt. Vom Owner am 2026-10-13 freigegeben.
 - **Anlass:** Rund 200 blockierende Review-Befunde eines Projekts nach Ursache sortiert: Implementierungsfehler ~47 %, Test- oder Evidenzlücken ~14 %, fehlendes Wissen über Bestehendes ~10–16 %, unklare Anforderung ~11 %. Eine volle Ist-Spezifikation wurde nach Refutation verworfen; die Wissenslücken lagen auf Code-Ebene und entstanden beim Lesen und bei unbekannten Lesern.
 - **Erzeugte Bestandslisten (im Template, kein Kern-Gate; ohne Konfiguration inaktiv):** Das Projekt liefert Extraktoren in `docs/process/inventories.local.json` (Umgebungsvariablen, Jobs mit ihrem Prozess, Tabellen, Tools). `inventory.py update` schreibt `docs/inventory/<name>.md`, sortiert, ohne Zeilennummern, mit optionalen Notizen. `inventory.py check` und der Gate-Einstieg `check_inventory.py` vergleichen bytegenau und scheitern an kaputten Extraktoren, fehlenden und verwaisten Dateien. Das Projekt registriert den Check in `gates.local.json` und startet ihn im Schattenbetrieb.
