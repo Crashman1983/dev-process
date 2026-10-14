@@ -227,6 +227,22 @@ OTHER_CASES = [
     ("go t.Skip in body", "pkg/x_test.go", 'func TestX(t *testing.T) {\n\tt.Skip("later")\n}\n', "TestX", "skip"),
     ("the next test's skip", "pkg/x_test.go", 'func TestX(t *testing.T) {}\nfunc TestY(t *testing.T) {\n'
      '\tt.Skip("y")\n}\n', "TestX", None),
+    # refute #225 round 3
+    ("XCTSkipUnless", "KenniTests/PerfTests.swift", 'func testA() throws {\n  try XCTSkipUnless(false, "perf")\n}\n',
+     "testA", "skip"),
+    ("swift setUp skips", "KenniTests/MTests.swift",
+     'override func setUpWithError() throws { throw XCTSkip("phone") }\nfunc testSend() { XCTFail() }\n',
+     "testSend", "a setup"),
+    ("a comment does not end the body", "pkg/x_test.go",
+     'func TestX(t *testing.T) {\n\t// it is flaky on CI\n\tt.Skip("flaky")\n}\n', "TestX", "skip"),
+    ("swift helper", "ios/AppTests/Support/Fixture.swift", "func makeWidget() -> Widget { Widget() }\n",
+     "makeWidget", "declares no test"),
+    ("ts helper", "web/tests/helpers.ts", "export function renderWidget(): void {}\n", "renderWidget",
+     "declares no test"),
+    ("a todo above is another test", "web/a.test.ts", "it.todo('logs later')\nit('answers 42', () => {})\n",
+     "answers 42", None),
+    ("kotlin @Test", "app/src/test/kotlin/WidgetTest.kt", "@Test\nfun answers() {}\n", "answers", None),
+    ("rust #[test]", "tests/parse.rs", "#[test]\nfn parses_x() {}\n", "parses_x", None),
 ]
 
 

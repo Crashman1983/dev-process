@@ -203,3 +203,31 @@ Ergebnis: Block mit einem BLOCKER. Alle Fixes aus Runde 1 halten. Es ist der zwe
 - **Dispatch:** Eine angehängte DECISION öffnet die Plan-Review wieder, denn sie bindet den Executor. REFUTE- und Skip-Zeilen öffnen sie nicht. Test in `test_dispatch`.
 - **Rest (benannt):** Ein Skip-Alias, der aus einem eigenen Hilfsmodul importiert wird, ist nicht aufgelöst. Sammelregeln eines Läufers jenseits der deklarierten Muster sind nicht modelliert.
 - REFUTE-Zusammenfassung: 5 Funde, einer blockierend. Xcode-Ziele vom Typ `*Tests.swift` galten als keine Testdatei (116 Dateien bei Kenni). Eine angehängte DECISION gab eine Planänderung in Dispatch frei. Autouse-, setUp- und param-Skips, Prosa, Teilstrings und Go-`t.Skip` gingen durch.
+
+## Refute Runde 3
+
+Ergebnis: pass mit Resten, kein Fund ab 80. Alle Fixes aus Runde 2 halten. Gegen Kennis Dateiliste geprüft:
+
+- Swift: 117 von 117 UI- und Snapshot-Tests werden angenommen, 150 von 150 übrige.
+- Frontend-Spec- und Testdateien: 611 von 611 werden angenommen.
+- Backend: Abgelehnt werden nur Hilfsmodule.
+
+Die Funde 1 bis 4 und 5a waren günstig zu beheben, das ist geschehen:
+
+- **`XCTSkipIf`/`XCTSkipUnless`** werden erkannt. Kennis Perf-Test, der standardmäßig skippt, belegt keine AC mehr.
+- **Setup:** Ein `setUp*`, `beforeEach`/`beforeAll` oder `TestMain` der Datei, das skippt, schaltet ihre Tests ab.
+- **Kommentarzeilen** zählen weder als Deklaration noch als Körper. Ein Kommentar beendet die Körpersuche also nicht mehr.
+- **Testform des Läufers:**
+  - JS-artig `it(`/`test(` mit dem Namen als Titel;
+  - `func/fun/fn/def test…` (XCTest, Go `Test…`);
+  - eine Funktion unter `@Test`, `#[test]` oder `[Test]`/`[Fact]`.
+
+  Eine Hilfsfunktion in einer Testdatei belegt nichts.
+- **Zeilen über dem Test:** Nur Attributzeilen direkt darüber zählen zum Test, nicht der vorige Test (`it.todo`).
+- **Reste (benannt):**
+  - eine Basisklasse aus einem anderen Modul;
+  - ein Skip-Alias aus einem eigenen Hilfsmodul;
+  - Setup-Bereiche pro Klasse in anderen Sprachen (geprüft wird pro Datei);
+  - Freitext hinter angehängten REFUTE- oder Skip-Zeilen, der unreviewt beim Executor ankommt. Executoren lesen REFUTE- und Skip-Zeilen nicht als Auftrag, nur DECISION-Zeilen binden.
+
+REFUTE-Zusammenfassung: 6 Funde, keiner blockierend. `XCTSkipUnless` und `XCTSkipIf` fehlten, Swift-Setup-Skips, Kommentare und Hilfsfunktionen gingen durch, ein `it.todo` darüber und eine fremde Basisklasse führten zu Fehlablehnungen. Die Fixes aus Runde 2 und die Kenni-Probe bestehen.
