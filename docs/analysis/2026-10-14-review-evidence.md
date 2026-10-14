@@ -158,3 +158,26 @@ Ergebnis: pass, mit drei MINOR- bzw. NIT-Resten. Alle sind behoben oder benannt.
 - **M2:** Die Schreibweise `AC 1` mit Leerzeichen vor einer Ziffer wird wieder erkannt.
 - **M3 (Rest, benannt):** Eine Zeile `DoD-deviation: open AC-<id>` nimmt die AC aus der Testpflicht. Sie bleibt sichtbar, weil der Zug `Refs` statt `Closes` schreibt, wird aber nicht mit den Skip-Zeilen gezählt.
 - **Doku:** Skip-Zeilen gehören in den Plan, vor dem Bundle committet oder angehängt und mit `--with` mitgefahren. `/plan` und `/review` sagen das.
+
+## Refute Runde 1 — Änderungen
+
+Ergebnis: Block mit zwei Funden ab 80 und fünf weiteren. Die Ursache der ersten drei ist dieselbe: Ob ein Test läuft, wurde an Wörtern im Quelltext abgelesen statt an dem, was der Testläufer sammelt.
+
+- **F1/F2/F3 Umbau des Test-Prüfers.** `test_status` urteilt jetzt wie pytest.
+  - **Testmodul:** `test_*.py` oder `*_test.py`, ohne `__test__ = False`.
+  - **Klasse:** `Test*` ohne `__init__`, oder eine TestCase-Unterklasse.
+  - **Funktion:** beginnt mit `test`. Die letzte Bindung des Namens zählt, und das muss die `def` sein, keine spätere Neubindung.
+  - **Skip-Erkennung:** Namen werden über Importe und Modulzuweisungen aufgelöst (`_Names`). Als Abschaltung zählen `pytest.mark.skip/skipif/xfail`, `unittest.skip*/expectedFailure` sowie Aliase dieser Marken. Im Körper zählen `pytest.skip/xfail/importorskip`, `self.skipTest` und `raise SkipTest`. Daten wie `'--skip'` und Aufrufe wie `R().skip()` zählen nicht.
+  - **Andere Sprachen:** Die Datei muss eine Testdatei sein (`tests/` oder `spec/` im Pfad, `test`/`spec` im Namen). Eine deklarierende Zeile (`it(`, `test(`, `func`, `fn`, `@Test`, `#[test]`) muss den Namen tragen. Eine Skip-Marke auf ihr oder der Zeile darüber zählt (`.skip`, `xit`, `@Disabled`, `#[ignore]`).
+  - **Rest:** Sammelregeln eines Läufers, die über diese hinausgehen, sind nicht modelliert.
+- **F4 Dispatch.** `_plan_states.cleared` erkennt einen Plan als gleich, wenn derselbe Blob vorliegt oder `records_only` gilt. Eine angehängte Skip- oder REFUTE-Zeile macht die Plan-Review nicht neu fällig. Test in `test_dispatch`.
+- **F5 Backticks.** Ausgenommen ist nur ein Code-Span, der wie eine Beispielzeile aussieht (er enthält `::` oder `<`). Eine AC-ID allein in Backticks zählt.
+- **F6 (Rest, benannt).** Ein Gate-Pfad im Plan, der als `pfad:zeile` zitiert ist, oder ein nackter Dateiname zählt nicht als Gate-Code-Plan. B2 fängt den Diff im Code-Review.
+- **F7.** Eine Überschrift oder Prosazeile einer AC im Bericht ist kein Beleg. Es genügt, wenn eine Zeile der AC einen Test nennt.
+- **Regeln ohne roten Test** haben jetzt Tests:
+  - ACs aus `spec.md`;
+  - der Rückfall eines ungemessenen Reports auf die Plan-Zeile;
+  - die Einengung zweier Pläne über den Slug.
+
+  Den `ImportFrom`-Zweig ersetzt `_Names`, mit Tabellenzeilen dazu.
+- REFUTE-Zusammenfassung: 7 Funde, 2 blockierend. Daten mit „skip“ führten zu Fehlablehnungen, und eine Nicht-Testdatei konnte eine AC belegen. `self.skipTest` wurde übersehen. Eine angehängte Skip-Zeile machte die Plan-Review in Dispatch neu fällig. Vier Regeln hatten keinen roten Test.

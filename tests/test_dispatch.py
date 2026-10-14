@@ -1902,6 +1902,10 @@ def test_a_plan_pass_counts_for_the_plan_text_it_reviewed(render, tmp_path, monk
     assert mod.plan_review_state(out, out) == (2, False)
     _plan_pass(out, 2, work="7")  # attested by issue id, on a head holding both texts
     assert mod.plan_review_state(out, out) == (2, True)
+    # #225: a skip line appended after the plan rides the attestation, as REFUTE lines do
+    plan.write_text(plan.read_text() + "\nskipped cross-model work=7-plan: no second family on this host\n")
+    _git(out, "commit", "-q", "-am", "docs: the plan review's reason")
+    assert mod.plan_review_state(out, out) == (2, True)
 
 
 @pytest.mark.parametrize("case, due", [

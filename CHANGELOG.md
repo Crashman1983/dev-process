@@ -1181,13 +1181,14 @@ aktualisieren, `v2.28.1`.
   - **AC-ID:** Sie braucht eine Ziffer (`AC-1`, `AC-2.1`, `AC-B1`, `AC1`).
   - **Offen gehaltene AC:** Eine AC, die `DoD-deviation: open AC-<id>` offen hält, braucht keinen Test.
   - **`unproven`:** verweigert den Pass.
-  - **Python-Test:** Er muss am Head als Testfunktion stehen, auch als Klassenmethode. Abgeschaltet zählt nicht: kein skip, skipif oder xfail per Dekorator, Alias oder `pytestmark`, kein `importorskip`, kein `pytest.skip` im Körper. Bei doppelter `def` zählt die letzte.
-  - **Andere Sprachen:** Der Name muss in der Datei stehen, und keine seiner Zeilen darf als skip oder todo markiert sein.
+  - **Python-Test:** Er muss am Head so stehen, wie pytest ihn sammelt: ein Testmodul `test_*.py` oder `*_test.py`, ohne `__test__ = False`, eine Klasse `Test*` oder eine TestCase-Unterklasse, die letzte Bindung als `def`. Abgeschaltet zählt nicht, aufgelöst über Importe und Aliase: kein `pytest.mark.skip`, `skipif` oder `xfail`, kein `unittest.skip*`, kein `pytestmark`, kein `pytest.skip`, `importorskip` oder `self.skipTest` und kein `raise SkipTest`. Das Wort „skip“ in Daten stört nicht.
+  - **Andere Sprachen:** Die Datei muss eine Testdatei sein, und eine Testdeklaration muss den Namen tragen, ohne Skip-Marke (`.skip`, `xit`, `@Disabled`, `#[ignore]`).
   - Bundle-Grammatik und Dispatch-Prompt des nicht attestierenden Reviewers verlangen die Zeilen.
 - **Klasse des Plan-Reviewers:** Ein Plan-Review-Pass ab Tier 2 nennt die konkrete Modell-ID. Ihr Rang (`review_evidence.ranks`) darf nicht unter dem der Plan-Session liegen.
   - **Quelle für die Plan-Session:** der neueste `planned`-Report mit gemessenem Modell, sonst die Planzeile `plan-session model: <id>`.
   - **Familien:** Eine andere Familie (`families`, Standard `gpt-`) ist nie kleiner. Eine unbekannte ID wird verweigert.
   - **Gate-Code im Plan:** Ein Plan, der Gate-Code zum Ändern nennt, wird `cross-model` geprüft oder mit Grund single-family. Ein Zitat `pfad:zeile` oder ein Befehlsaufruf zählt nicht als Nennung.
+- **Dispatch:** Ein Plan mit angehängten Records (`records_only`) gilt als derselbe Plan wie bei seinem Pass. Eine angehängte Skip- oder REFUTE-Zeile macht die Plan-Review nicht neu fällig.
 - **Plan-Zeilen vor dem Attest:** Der Plan der Arbeit im Arbeitsbaum und im Index darf gegenüber dem Head nur angehängte Records enthalten (`records_only`). Sonst wird verweigert, und die Meldung nennt die Commit-Reihenfolge. Angehängte Records zählen nur, wenn der Plan per `--with` mitfährt.
 - **Schwellen am Base gelesen:** Ein Branch lockert die Regeln nicht für den eigenen Pass. Ein Pass ab Tier 2 ohne Bereich (`--bundle` oder `--base/--head`) wird verweigert.
 - **Rest (benannt):** Eine von Hand geschriebene REVIEW-Zeile umgeht die Prüfung, weil das Push-Gate sie nicht wiederholt. Ob ein genannter Test seine AC prüft, beurteilt der Reviewer. Für einen neuen Refute nach einer Fix-Runde mit Gate-Code bleibt es bei der Warnung des Bundles.

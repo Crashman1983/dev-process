@@ -2428,15 +2428,29 @@ def _plan_states(root: Path, head: str, branch: str = "") -> list[tuple[int, str
              if n.endswith(".md")]
     passes = _review.review_passes(root, (_out(root, "show", f"{head}:{n}") for n in names), head)
 
+    def reviewed(at: str, rel: str, now: str) -> bool:
+        """The plan at `at` is the plan now, or the plan now is it plus records
+        appended after its last line (`check_review.records_only`) — a REFUTE or
+        skip line riding the plan-review attestation does not make it due again
+        (#225 refute: an appended `skipped cross-model` reopened every gate-code plan)."""
+        then = _out(root, "rev-parse", f"{at}:{rel}")
+        if not then:
+            return False
+        if then == now:
+            return True
+        r_then, r_now = _git(root, "show", f"{at}:{rel}"), _git(root, "show", f"{head}:{rel}")
+        return r_then.returncode == 0 and r_now.returncode == 0 \
+            and _review.records_only(r_then.stdout, r_now.stdout)
+
     def cleared(tier: int, rel: str, ids: set[str]) -> bool:
-        # a pass counts only for the plan text it reviewed: its head holds the
-        # same blob of this plan as HEAD — not another plan of the same issue,
-        # not an earlier draft (refutation: an issue id shared by two plans)
+        # a pass counts only for the plan text it reviewed: its head holds this
+        # plan as HEAD does, records appended aside — not another plan of the
+        # same issue, not an earlier draft (refutation: an issue id shared by two plans)
         now = _out(root, "rev-parse", f"{head}:{rel}")
         return bool(now) and any(
             r.get("work") in {f"{i}-plan" for i in ids} and str(r.get("tier", "")).isdigit()
             and int(r["tier"]) >= tier and r.get("head")
-            and _out(root, "rev-parse", f"{r['head']}:{rel}") == now for r in passes)
+            and reviewed(r["head"], rel, now) for r in passes)
     # a waived plan owes no plan review — the review gate's rule (#207); its
     # tier still names the model of the next phase
     return [(t, rel, waived or cleared(t, rel, ids)) for t, rel, ids, waived in plans]
