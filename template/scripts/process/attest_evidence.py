@@ -47,7 +47,6 @@ from check_review import (
     REFUTE_LINE,
     REVIEW_REPORTS,
     SKIP_LINE,
-    SPEC_PLAN,
     _plan_work_ids,
     _unfenced,
     is_gate_path,
@@ -72,7 +71,9 @@ DEFAULTS = {
 }
 # an acceptance criterion's id: `AC-1`, `AC-2.1`, `AC-B1`, `AC1` — a digit in it, so
 # prose (`AC-Zeile`, `AC-<id>`) names none; a sentence's final dot is no part of it
-_AC = r"AC-?(?P<id>[A-Za-z]{0,3}\d(?:[\w.]*\w)?)"
+_AC = r"AC(?:-|[ \t](?=\d))?(?P<id>[A-Za-z]{0,3}\d(?:[\w.]*\w)?)"
+# a plan quoting an id in backticks (`AC-1`) gives an example, not a criterion
+_CODE_SPAN = re.compile(r"`[^`\n]*`")
 AC_ID = re.compile(r"\b" + _AC + r"(?![\w-])")
 # a report's line for one: `AC-1: <path>::<test>`, listed, boxed, bold or as a heading
 AC_LINE = re.compile(
@@ -484,7 +485,8 @@ def gather(root: Path, *, work: str, ids: set[str], tier: int, verdict: str, ind
         skips=_skips([own], skip_ids), refute=_refuted([own], plan_ids),
         report_refute=_refuted(report_texts, plan_ids),
         plan_state=state, plan_rel=rel, plan_gate_code=plan_names_gate_code(plan_read),
-        plan_acs=frozenset(ac_key(m) for m in AC_ID.finditer(plan_read + "\n" + readable(spec)))
+        plan_acs=frozenset(ac_key(m) for m in AC_ID.finditer(
+            _CODE_SPAN.sub(" ", plan_read + "\n" + readable(spec))))
         - held_open(plan_read),
         plan_session=session, plan_session_source=source,
         has_reports=bool(reports), claims=claims, test_status=status)

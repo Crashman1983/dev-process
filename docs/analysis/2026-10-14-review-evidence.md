@@ -149,3 +149,12 @@ Ergebnis: Block. N1 ist ein BLOCKER, N2 und N4 sind MAJOR, N3 ist MINOR, dazu ei
 - **R3 Nur, was mitfährt (N3).** Angehängte Records zählen nur, wenn der Plan in `--with` steht.
 - **R4 DoD-Abweichung (N4).** Hält eine Zeile `DoD-deviation: open AC-<id>` (`train.DOD_DEVIATION` und `_HOLDS`) eine AC offen, fällt diese aus der Soll-Liste.
 - **P3 erledigt.** Grammatik im Code-Review-Bundle und Prompt für den nicht attestierenden Reviewer sind umgesetzt, gepinnt in `test_review_bundle` und `test_dispatch`.
+
+## Plan-Review Runde 3
+
+Ergebnis: pass, mit drei MINOR- bzw. NIT-Resten. Alle sind behoben oder benannt.
+
+- **M1:** Eine AC-ID in einem Code-Span (Backticks) im Plan ist ein Beispiel und keine AC. Sie zählt nicht zur Soll-Liste.
+- **M2:** Die Schreibweise `AC 1` mit Leerzeichen vor einer Ziffer wird wieder erkannt.
+- **M3 (Rest, benannt):** Eine Zeile `DoD-deviation: open AC-<id>` nimmt die AC aus der Testpflicht. Sie bleibt sichtbar, weil der Zug `Refs` statt `Closes` schreibt, wird aber nicht mit den Skip-Zeilen gezählt.
+- **Doku:** Skip-Zeilen gehören in den Plan, vor dem Bundle committet oder angehängt und mit `--with` mitgefahren. `/plan` und `/review` sagen das.

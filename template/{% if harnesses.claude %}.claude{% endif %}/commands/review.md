@@ -60,8 +60,9 @@ family (`cross-model`) and the range touches gate code, give that reviewer
 the refuter's brief (`docs/process/refute.md`) instead of a plain review
 prompt; its report carries the `REFUTE work=<id> round=<r>: …` line next to
 its findings, and that line counts as the refute. A single-family review of
-gate code needs the refute line committed before the bundle, or `skipped
-refute work=<id>: <reason>`.
+gate code needs the refute line in the work's plan, or `skipped refute
+work=<id>: <reason>` there — committed before the bundle, or appended after
+the plan's last line and attested with `--with` the plan.
 
 After a clearing pass is attested, `uv run scripts/process/report.py review-pass --issue N` — the branch may now board the merge train (`docs/process/train.md`).
 

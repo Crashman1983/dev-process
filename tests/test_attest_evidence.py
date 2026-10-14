@@ -2,7 +2,6 @@
 cross-model or a reasoned single-family, a refute for gate code, one test per
 acceptance criterion, a plan reviewer not below the plan session's class, and
 the plan's own lines committed before the attested head."""
-import dataclasses
 import importlib
 import json
 import subprocess
@@ -129,6 +128,7 @@ def test_gate_code_in_plan_prose_and_criterion_ids(ev_mod):
     assert [mod.ac_key(m) for m in mod.AC_ID.finditer("AC-1, AC2. AC-B1 AC-2.1. ACCESS")] == ["1", "2", "B1", "2.1"]
     # prose names no criterion (plan review #225 N1): a German compound, a placeholder
     assert not list(mod.AC_ID.finditer("eine AC-Zeile je AC, AC-<id>, AC-N"))
+    assert [mod.ac_key(m) for m in mod.AC_ID.finditer("AC 1: x; AC 2026 ok")] == ["1", "2026"]
     assert mod.held_open("DoD-deviation: open AC-3, AC-4 of #12 — next release") == {"3", "4"}
 
 
@@ -317,6 +317,13 @@ def test_an_archived_plan_still_answers_a_late_lens(repo):
     assert r.returncode == 0, r.stderr
 
 
+def test_a_criterion_quoted_in_backticks_is_an_example(repo):
+    plan = repo / ".process-work/plans/2026-10-14-widget.md"
+    plan.write_text(PLAN + "\nA report line reads `AC-9: <path>::<test>`.\n")
+    _git(repo, "commit", "-qam", "docs: example")
+    assert _attest(repo, "--with", _report(repo)).returncode == 0
+
+
 def test_a_criterion_the_plan_names_anywhere_needs_its_line(repo):
     plan = repo / ".process-work/plans/2026-10-14-widget.md"
     plan.write_text(PLAN + "\n## Tasks\n\n1. Deliver AC-2.1 with test_widget.\n")
@@ -380,13 +387,8 @@ def test_an_owner_exception_names_the_evidence_it_overrides(repo):
 
 
 def test_d1_the_planned_report_names_the_plan_session(repo):
-    common = repo / _git(repo, "rev-parse", "--git-common-dir")
-    (common / "process-reports").mkdir(exist_ok=True)
-    reports = sys.modules.get("report")  # noqa: F841 — the path is report.py's, asked below
-    path = subprocess.run([sys.executable, "-c", "import sys; sys.path.insert(0, 'scripts/process'); "
-                           "import report; print(report.reports_path(__import__('pathlib').Path('.')))"],
-                          cwd=repo, capture_output=True, text=True, check=True).stdout.strip()
-    with open(repo / path if not path.startswith("/") else path, "a") as fh:
-        fh.write(json.dumps({"issue": 7, "state": "planned", "model": "claude-fable-5-1", "epoch": 1}) + "\n")
+    """The plan session's own `planned` report outranks the plan's self-declared line."""
+    subprocess.run([sys.executable, "scripts/process/report.py", "planned", "--issue", "7",
+                    "--model", "claude-fable-5-1"], cwd=repo, capture_output=True, text=True, check=True)
     r = _attest(repo, plan_review=True)
     assert r.returncode == 1 and "smaller class" in r.stderr and "(report)" in r.stderr, r.stderr

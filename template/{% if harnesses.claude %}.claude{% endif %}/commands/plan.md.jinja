@@ -142,7 +142,9 @@ subagent check the fixes; then attest the pass on that bundle and commit it:
 id, and a gate-code plan reviewed by one family without the line
 `skipped cross-model work=<id>-plan: <reason>` (and `single-family` in the
 independence); `skipped plan-review work=<id>-plan: <reason>` is the
-countable way past the class rule. A pass counts for the plan text it reviewed — edit the plan after
+countable way past the class rule. A skip line belongs in the plan — committed
+before the bundle, or appended after the plan's last line and attested with
+`--with` the plan; anywhere else it counts for nothing. A pass counts for the plan text it reviewed — edit the plan after
 it, and it is due again. **Tier 3:** report `planned` without it — dispatch
 queues a plan-review session on a second model family, and execute only
 after its pass. Where the review phase runs on another host, push the branch
