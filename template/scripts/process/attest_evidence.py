@@ -72,8 +72,9 @@ DEFAULTS = {
 # an acceptance criterion's id: `AC-1`, `AC-2.1`, `AC-B1`, `AC1` — a digit in it, so
 # prose (`AC-Zeile`, `AC-<id>`) names none; a sentence's final dot is no part of it
 _AC = r"AC(?:-|[ \t](?=\d))?(?P<id>[A-Za-z]{0,3}\d(?:[\w.]*\w)?)"
-# a plan quoting an id in backticks (`AC-1`) gives an example, not a criterion
-_CODE_SPAN = re.compile(r"`[^`\n]*`")
+# a plan quoting a report line in backticks (`AC-1: <path>::<test>`) gives an example,
+# not a criterion; a backticked id alone (`AC-2`: When …) still names one (#225 refute)
+_EXAMPLE_SPAN = re.compile(r"`[^`\n]*(?:::|<)[^`\n]*`")
 AC_ID = re.compile(r"\b" + _AC + r"(?![\w-])")
 # a report's line for one: `AC-1: <path>::<test>`, listed, boxed, bold or as a heading
 AC_LINE = re.compile(
@@ -83,8 +84,6 @@ AC_LINE = re.compile(
 PLAN_SESSION = re.compile(
     r"^[ \t]*(?:[-*+][ \t]+)?[*_]*plan-session[ \t]+model[*_]*:[*_]*[ \t]*`?(?P<model>[^\s`*]+)`?",
     re.MULTILINE | re.IGNORECASE)
-_SKIP_WORD = re.compile(r"\b(?:skip|skipif|xfail|importorskip)\b")
-_OTHER_SKIP = re.compile(r"\b(?:skip|xit|xtest|xdescribe|todo)\b")
 # a path-like token in plan prose; one cited as `path:line` or run as a command is
 # read, not changed (a plan cites the guard's file:line and runs the gates)
 _PATH_TOKEN = re.compile(r"(?<![\w./\\-])(?P<path>[\w.\\/-]*[\\/][\w.\\/-]*\w|Makefile|\.pre-commit-config\.yaml)"
@@ -305,68 +304,121 @@ def _claims(texts: list[str]) -> dict[str, list[str]]:
     return out
 
 
-_OFF_CALLS = ("skip", "xfail", "importorskip")
+# --- does the named test run? -----------------------------------------------------
+# Judged by what pytest collects and which names resolve to a skip — never by
+# words in the source (#225 refute: a parametrize value "--skip" refused a test;
+# a helper, a Markdown file and an uncollected class proved criteria).
+
+_PYTEST_OFF = {"skip", "skipif", "xfail"}  # pytest.mark.<these>
+_PYTEST_CALLS = {"skip", "xfail", "importorskip"}  # pytest.<these>() skip at run time
+_UNITTEST_OFF = {"skip", "skipIf", "skipUnless", "expectedFailure"}
+_PY_TEST_FILE = re.compile(r"(?:^|/)(?:test_[^/]*|[^/]*_test)\.py$")
 
 
-def _call_name(call: ast.Call) -> str:
-    f = call.func
-    return f.attr if isinstance(f, ast.Attribute) else f.id if isinstance(f, ast.Name) else ""
+class _Names:
+    """What the module's top-level imports and assignments make of a name:
+    `pytest`, `pytest.mark`, `unittest`, a unittest decorator, `SkipTest` — or a
+    value that is a skip mark (an alias decorator)."""
+
+    def __init__(self, tree: ast.Module):
+        self.kind: dict[str, str] = {}
+        for node in tree.body:
+            if isinstance(node, ast.Import):
+                for a in node.names:
+                    if a.name in ("pytest", "unittest"):
+                        self.kind[a.asname or a.name] = a.name
+            elif isinstance(node, ast.ImportFrom) and node.module in ("pytest", "unittest", "_pytest.mark"):
+                for a in node.names:
+                    if node.module == "pytest" and a.name == "mark":
+                        self.kind[a.asname or a.name] = "pytest.mark"
+                    elif node.module == "pytest" and a.name in _PYTEST_CALLS:
+                        self.kind[a.asname or a.name] = f"pytest.{a.name}"
+                    elif node.module == "unittest" and a.name in (*_UNITTEST_OFF, "SkipTest"):
+                        self.kind[a.asname or a.name] = f"unittest.{a.name}"
+        for node in tree.body:  # an alias bound to a mark: `off = pytest.mark.skip(...)`
+            value = node.value if isinstance(node, (ast.Assign, ast.AnnAssign)) else None
+            targets = node.targets if isinstance(node, ast.Assign) else [getattr(node, "target", None)]
+            if value is not None and self.off(value):
+                for t in targets:
+                    if isinstance(t, ast.Name):
+                        self.kind[t.id] = "off"
+
+    def path(self, expr: ast.expr) -> str:
+        """`pytest.mark.skip` for `pt.mark.skip`, `mark.skip`, `pytest.mark.skip(...)`."""
+        if isinstance(expr, ast.Call):
+            return self.path(expr.func)
+        if isinstance(expr, ast.Attribute):
+            head = self.path(expr.value)
+            return f"{head}.{expr.attr}" if head else ""
+        if isinstance(expr, ast.Name):
+            return self.kind.get(expr.id, "")
+        return ""
+
+    def off(self, expr: ast.expr | None) -> bool:
+        """A mark (or list of marks) that skips or expects failure."""
+        if expr is None:
+            return False
+        if isinstance(expr, (ast.List, ast.Tuple)):
+            return any(self.off(e) for e in expr.elts)
+        p = self.path(expr)
+        return p == "off" or p in {f"pytest.mark.{m}" for m in _PYTEST_OFF} \
+            or p in {f"unittest.{m}" for m in _UNITTEST_OFF}
+
+    def skips(self, node: ast.AST) -> bool:
+        """A statement that skips when it runs: `pytest.skip()`, `importorskip`,
+        `self.skipTest()`, `raise SkipTest`."""
+        for n in ast.walk(node):
+            if isinstance(n, ast.Call):
+                p = self.path(n)
+                if p in {f"pytest.{c}" for c in _PYTEST_CALLS}:
+                    return True
+                if isinstance(n.func, ast.Attribute) and n.func.attr == "skipTest":
+                    return True
+            if isinstance(n, ast.Raise) and n.exc is not None:
+                p = self.path(n.exc)
+                if p in ("unittest.SkipTest", "unittest.case.SkipTest") or p.endswith("skip.Exception"):
+                    return True
+        return False
 
 
-def _is_mark(call: ast.Call) -> bool:
-    f = call.func
-    return isinstance(f, ast.Attribute) and (
-        (isinstance(f.value, ast.Attribute) and f.value.attr == "mark")
-        or (isinstance(f.value, ast.Name) and f.value.id == "mark"))
-
-
-def _skip_bound(tree: ast.Module) -> set[str]:
-    """Names the module binds to a skip/xfail expression — an alias decorator
-    (`off = pytest.mark.skip`, `@off`) is a skip too."""
-    out = set()
-    for node in tree.body:
-        value = node.value if isinstance(node, (ast.Assign, ast.AnnAssign)) else None
-        targets = node.targets if isinstance(node, ast.Assign) else [getattr(node, "target", None)]
-        if value is not None and _SKIP_WORD.search(ast.unparse(value)):
-            out |= {t.id for t in targets if isinstance(t, ast.Name)}
-        if isinstance(node, ast.ImportFrom):
-            out |= {a.asname or a.name for a in node.names if _SKIP_WORD.search(a.name)}
-    return out
-
-
-def _names(expr: ast.expr) -> set[str]:
-    return {n.id for n in ast.walk(expr) if isinstance(n, ast.Name)}
-
-
-def _marks_off(expr: ast.expr | None, aliases: set[str]) -> bool:
-    return expr is not None and bool(_SKIP_WORD.search(ast.unparse(expr)) or _names(expr) & aliases)
-
-
-def _pytestmark_off(body: list[ast.stmt], aliases: set[str]) -> bool:
+def _marked_off(body: list[ast.stmt], names: _Names) -> bool:
+    """A `pytestmark` in this scope that skips."""
     for node in body:
         targets = (node.targets if isinstance(node, ast.Assign)
                    else [node.target] if isinstance(node, ast.AnnAssign) else [])
-        if any(isinstance(t, ast.Name) and t.id == "pytestmark" for t in targets) \
-                and _marks_off(node.value, aliases):
+        if any(isinstance(t, ast.Name) and t.id == "pytestmark" for t in targets) and names.off(node.value):
             return True
     return False
 
 
+def _collected_class(node: ast.ClassDef) -> bool:
+    """pytest collects `Test*` classes without `__init__`, and every TestCase subclass."""
+    if any(ast.unparse(b).split(".")[-1].endswith("TestCase") for b in node.bases):
+        return True
+    return node.name.startswith("Test") and not any(
+        isinstance(n, ast.FunctionDef) and n.name == "__init__" for n in node.body)
+
+
+def _not_collected(body: list[ast.stmt]) -> bool:
+    """`__test__ = False` in a module or class."""
+    return any(isinstance(n, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "__test__" for t in n.targets)
+               and isinstance(n.value, ast.Constant) and n.value.value is False for n in body)
+
+
 def _python_status(text: str, file: str, name: str) -> str | None:
+    if not _PY_TEST_FILE.search(file):
+        return f"{file} is no test module pytest collects (test_*.py or *_test.py)"
     try:
         tree = ast.parse(text)
     except SyntaxError:
         return f"{file} does not parse at head"
-    aliases = _skip_bound(tree)
-    if _pytestmark_off(tree.body, aliases):
-        return f"{file} carries a module pytestmark with skip/xfail"
+    names = _Names(tree)
+    if _not_collected(tree.body):
+        return f"{file} sets __test__ = False"
+    if _marked_off(tree.body, names):
+        return f"{file} carries a module pytestmark that skips"
     for node in tree.body:
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            continue
-        # `pytest.skip(..., allow_module_level=True)`, `importorskip` — a mark built here
-        # (`pytest.mark.skip(...)`) skips nothing by itself; its alias is caught where used
-        if any(isinstance(c, ast.Call) and _call_name(c) in ("skip", "importorskip") and not _is_mark(c)
-               for c in ast.walk(node)):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and names.skips(node):
             return f"{file} skips at module level"
     parts = name.split("::")
     scope: list[ast.stmt] = tree.body
@@ -375,22 +427,48 @@ def _python_status(text: str, file: str, name: str) -> str | None:
         hits = [n for n in scope if isinstance(n, ast.ClassDef) and n.name == cls]
         if not hits:
             return f"{file} has no class {cls} at head"
-        if _pytestmark_off(hits[-1].body, aliases):
-            return f"{file}::{cls} carries a pytestmark with skip/xfail"
+        if not _collected_class(hits[-1]) or _not_collected(hits[-1].body):
+            return f"{file}::{cls} is no class pytest collects (Test*, no __init__, or a TestCase)"
+        if _marked_off(hits[-1].body, names):
+            return f"{file}::{cls} carries a pytestmark that skips"
         decorators += hits[-1].decorator_list
         scope = hits[-1].body
     fn = parts[-1]
     if not fn.startswith("test"):
         return f"{file}::{name} is no test function (a helper proves no criterion)"
-    # Python binds the name to its last definition — the one pytest collects
-    defs = [n for n in scope if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == fn]
-    if not defs:
+    # the last binding of the name is what pytest collects — a later `test_x = mark(test_x)` too
+    bound = [n for n in scope if (isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == fn)
+             or (isinstance(n, (ast.Assign, ast.AnnAssign)) and any(
+                 isinstance(t, ast.Name) and t.id == fn
+                 for t in (n.targets if isinstance(n, ast.Assign) else [n.target])))]
+    if not bound:
         return f"{file} has no test {name} at head"
-    if any(_marks_off(d, aliases) for d in decorators + defs[-1].decorator_list):
-        return f"{file}::{name} is marked skip/xfail"
-    for call in ast.walk(defs[-1]):
-        if isinstance(call, ast.Call) and _call_name(call) in _OFF_CALLS:
-            return f"{file}::{name} calls {_call_name(call)} in its body"
+    last = bound[-1]
+    if not isinstance(last, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        return f"{file}::{name} is rebound after its definition — not the function the plan's test names"
+    if any(names.off(d) for d in decorators + last.decorator_list):
+        return f"{file}::{name} is marked to skip or to fail"
+    if names.skips(last):
+        return f"{file}::{name} skips in its body"
+    return None
+
+
+# any other language: a test file, a test declaration naming the test, no skip marker on it
+_OTHER_TEST_FILE = re.compile(r"(?i)(?:^|/)(?:tests?|__tests__|spec)/|(?:^|[/._-])(?:test|spec)s?[._-]|[._-](?:test|spec)s?\.\w+$")
+_DECLARES = re.compile(r"\b(?:it|test|describe|context|func|fn|fun|void|def)\b|@Test\b|#\[test\]")
+_OTHER_SKIP = re.compile(r"\.(?:skip|todo)\b|\b(?:xit|xtest|xdescribe|t\.Skip)\b|@Disabled\b|@Ignore\b|#\[ignore\]")
+
+
+def _other_status(text: str, file: str, name: str) -> str | None:
+    if not _OTHER_TEST_FILE.search(file):
+        return f"{file} is no test file (a tests/ or spec/ folder, or test/spec in its name)"
+    lines = text.splitlines()
+    decl = [i for i, ln in enumerate(lines) if name in ln and _DECLARES.search(ln)]
+    if not decl:
+        return f"{file} declares no test {name!r} at head"
+    # a marker on the declaring line or the attribute line above it (`#[ignore]`, `@Disabled`)
+    if all(_OTHER_SKIP.search(lines[i]) or (i and _OTHER_SKIP.search(lines[i - 1])) for i in decl):
+        return f"{file}: {name!r} is marked skip/todo at head"
     return None
 
 
@@ -424,19 +502,14 @@ def claimed_tests(body: str) -> list[tuple[str, str]]:
 
 
 def test_status(root: Path, head: str, file: str, name: str) -> str | None:
-    """None: the named test stands at head and is not switched off; else why not.
-    Python by its syntax tree; any other language by the name and its line."""
+    """None: the named test stands at head where the runner collects it and is not
+    switched off; else why not. Python as pytest collects it; any other language
+    by its test file and the line declaring the test (a named residual: a runner's
+    own collection rules beyond these are not modelled)."""
     text = _show(root, head, file)
     if text is None:
         return f"{file} does not exist at head"
-    if file.endswith(".py"):
-        return _python_status(text, file, name)
-    lines = [ln for ln in text.splitlines() if name in ln]
-    if not lines:
-        return f"{file} does not name {name!r} at head"
-    if all(_OTHER_SKIP.search(ln) for ln in lines):
-        return f"{file}: {name!r} is marked skip/todo at head"
-    return None
+    return _python_status(text, file, name) if file.endswith(".py") else _other_status(text, file, name)
 
 
 def gather(root: Path, *, work: str, ids: set[str], tier: int, verdict: str, independence: str,
@@ -486,7 +559,7 @@ def gather(root: Path, *, work: str, ids: set[str], tier: int, verdict: str, ind
         report_refute=_refuted(report_texts, plan_ids),
         plan_state=state, plan_rel=rel, plan_gate_code=plan_names_gate_code(plan_read),
         plan_acs=frozenset(ac_key(m) for m in AC_ID.finditer(
-            _CODE_SPAN.sub(" ", plan_read + "\n" + readable(spec))))
+            _EXAMPLE_SPAN.sub(" ", plan_read + "\n" + readable(spec))))
         - held_open(plan_read),
         plan_session=session, plan_session_source=source,
         has_reports=bool(reports), claims=claims, test_status=status)
@@ -579,18 +652,18 @@ def _decide_code(ev: Evidence) -> list[str]:
         if not bodies:
             out.append(f"AC-{n} has no line in the report — name the test that goes red when it "
                        f"breaks (`AC-{n}: <path>::<test>`) or `AC-{n}: unproven`")
-        for body in bodies:
-            named = claimed_tests(body)
-            rest = _ITEM_ANY.sub(" ", body)
-            if re.search(r"\bunproven\b", rest, re.IGNORECASE):
-                out.append(f"AC-{n} is unproven — no test goes red when it breaks")
-                continue
-            if not named:
-                out.append(f"AC-{n}: `{body}` names no `<path>::<test>`")
-            for key in named:
-                why = ev.test_status.get(key, "not checked at head")
-                if why:
-                    out.append(f"AC-{n}: {why}")
+        # a heading or a prose line of the criterion is no claim; one naming a test is
+        unproven = [b for b in bodies if re.search(r"\bunproven\b", _ITEM_ANY.sub(" ", b), re.IGNORECASE)]
+        if unproven:
+            out.append(f"AC-{n} is unproven — no test goes red when it breaks")
+            continue
+        named = [key for b in bodies for key in claimed_tests(b)]
+        if bodies and not named:
+            out.append(f"AC-{n}: `{bodies[0]}` names no `<path>::<test>`")
+        for key in named:
+            why = ev.test_status.get(key, "not checked at head")
+            if why:
+                out.append(f"AC-{n}: {why}")
     return out
 
 

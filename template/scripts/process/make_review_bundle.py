@@ -367,14 +367,15 @@ def _grammar_section(plan_review: bool = False) -> str:
     plan_note = ("\n\nThis is a plan review: put the header line `phase: plan` in the "
                  "report's header block (with `review:`/`work:`, before the first blank "
                  "line), so rounds on a plan are counted apart from rounds on code."
-                 if plan_review else
-                 # #225: attest.py refuses a Tier 2+ pass whose report misses this
-                 "\n\nOne line per acceptance criterion the plan names — the test that goes red "
-                 "when that behaviour breaks, or `unproven`:\n\n"
-                 "    AC-<id>: <path>::<test>\n    AC-<id>: unproven\n\n"
-                 "Ask of each named test: would it fail if the behaviour were deleted, or does it "
-                 "pass on a stub, a mocked-away call, state outside its temp dir? An `unproven` "
-                 "criterion is a `kind=test-gap` finding and refuses a pass.")
+                 if plan_review else "")
+    # #225: attest.py refuses a Tier 2+ code-review pass whose report misses this
+    ac_note = ("" if plan_review else
+               "One line per acceptance criterion the plan names — the test that goes red "
+               "when that behaviour breaks, or `unproven`:\n\n"
+               "    AC-<id>: <path>::<test>\n    AC-<id>: unproven\n\n"
+               "Ask of each named test: would it fail if the behaviour were deleted, or does it "
+               "pass on a stub, a mocked-away call, state outside its temp dir? An `unproven` "
+               "criterion is a `kind=test-gap` finding and refuses a pass.\n\n")
     return f"""Record your verdict EXACTLY in this grammar — the gates parse it verbatim,
 free-form prose is invisible to them:
 
@@ -409,7 +410,7 @@ For each finding, one line:
   know something that already existed (a note, a story, an ADR, a module);
   `requirement`, `implementation`, `test-gap`, `process`, `environment` as named.
 
-Judge against the checklist and the rules above; cite file:line evidence; a
+{ac_note}Judge against the checklist and the rules above; cite file:line evidence; a
 `pass` with unfixed blockers is a false green — verdict `block` instead.{plan_note}"""
 
 
