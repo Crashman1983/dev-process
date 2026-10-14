@@ -1181,14 +1181,15 @@ aktualisieren, `v2.28.1`.
   - **AC-ID:** Sie braucht eine Ziffer (`AC-1`, `AC-2.1`, `AC-B1`, `AC1`).
   - **Offen gehaltene AC:** Eine AC, die `DoD-deviation: open AC-<id>` offen hält, braucht keinen Test.
   - **`unproven`:** verweigert den Pass.
-  - **Python-Test:** Er muss am Head so stehen, wie pytest ihn sammelt: ein Testmodul `test_*.py` oder `*_test.py`, ohne `__test__ = False`, eine Klasse `Test*` oder eine TestCase-Unterklasse, die letzte Bindung als `def`. Abgeschaltet zählt nicht, aufgelöst über Importe und Aliase: kein `pytest.mark.skip`, `skipif` oder `xfail`, kein `unittest.skip*`, kein `pytestmark`, kein `pytest.skip`, `importorskip` oder `self.skipTest` und kein `raise SkipTest`. Das Wort „skip“ in Daten stört nicht.
-  - **Andere Sprachen:** Die Datei muss eine Testdatei sein, und eine Testdeklaration muss den Namen tragen, ohne Skip-Marke (`.skip`, `xit`, `@Disabled`, `#[ignore]`).
+  - **Testdateien deklariert das Projekt:** `review_evidence.python_files`, `python_classes` und `test_files` (fnmatch auf den Repo-Pfad). Die Vorgaben decken pytest, `*Tests/*`, `*Tests.*` (Xcode), `*.spec.*`, `*.test.*`, `*_test.*` und `tests/` ab. Eine Text- oder Datendatei ist nie ein Test.
+  - **Python-Test:** Er muss am Head so stehen, wie pytest ihn sammelt: ein Testmodul nach `python_files`, ohne `__test__ = False`, eine Klasse nach `python_classes` oder eine TestCase-Unterklasse (auch geerbt aus Basisklassen desselben Moduls), die letzte Bindung als `def`. Ein autouse-Fixture oder ein `setUp` mit Skip schaltet ab, ebenso ein `parametrize`, dessen Fälle alle abgeschaltet sind. Abgeschaltet zählt nicht, aufgelöst über Importe und Aliase: kein `pytest.mark.skip`, `skipif` oder `xfail`, kein `unittest.skip*`, kein `pytestmark`, kein `pytest.skip`, `importorskip` oder `self.skipTest` und kein `raise SkipTest`. Das Wort „skip“ in Daten stört nicht.
+  - **Andere Sprachen:** Eine deklarierende Zeile muss den Namen als ganzes Literal oder als ganzen Bezeichner tragen. Auf der Zeile davor, der Zeile selbst und im Körper darf keine Skip-Marke stehen (`.skip`, `xit`, `t.Skip`, `XCTSkip`, `@Disabled`, `#[ignore]`).
   - Bundle-Grammatik und Dispatch-Prompt des nicht attestierenden Reviewers verlangen die Zeilen.
 - **Klasse des Plan-Reviewers:** Ein Plan-Review-Pass ab Tier 2 nennt die konkrete Modell-ID. Ihr Rang (`review_evidence.ranks`) darf nicht unter dem der Plan-Session liegen.
   - **Quelle für die Plan-Session:** der neueste `planned`-Report mit gemessenem Modell, sonst die Planzeile `plan-session model: <id>`.
   - **Familien:** Eine andere Familie (`families`, Standard `gpt-`) ist nie kleiner. Eine unbekannte ID wird verweigert.
   - **Gate-Code im Plan:** Ein Plan, der Gate-Code zum Ändern nennt, wird `cross-model` geprüft oder mit Grund single-family. Ein Zitat `pfad:zeile` oder ein Befehlsaufruf zählt nicht als Nennung.
-- **Dispatch:** Ein Plan mit angehängten Records (`records_only`) gilt als derselbe Plan wie bei seinem Pass. Eine angehängte Skip- oder REFUTE-Zeile macht die Plan-Review nicht neu fällig.
+- **Dispatch:** Ein Plan mit angehängten Records (`records_only`) gilt als derselbe Plan wie bei seinem Pass. Eine angehängte Skip- oder REFUTE-Zeile macht die Plan-Review nicht neu fällig. Eine angehängte DECISION dagegen schon, weil sie den Executor bindet.
 - **Plan-Zeilen vor dem Attest:** Der Plan der Arbeit im Arbeitsbaum und im Index darf gegenüber dem Head nur angehängte Records enthalten (`records_only`). Sonst wird verweigert, und die Meldung nennt die Commit-Reihenfolge. Angehängte Records zählen nur, wenn der Plan per `--with` mitfährt.
 - **Schwellen am Base gelesen:** Ein Branch lockert die Regeln nicht für den eigenen Pass. Ein Pass ab Tier 2 ohne Bereich (`--bundle` oder `--base/--head`) wird verweigert.
 - **Rest (benannt):** Eine von Hand geschriebene REVIEW-Zeile umgeht die Prüfung, weil das Push-Gate sie nicht wiederholt. Ob ein genannter Test seine AC prüft, beurteilt der Reviewer. Für einen neuen Refute nach einer Fix-Runde mit Gate-Code bleibt es bei der Warnung des Bundles.
@@ -1204,12 +1205,13 @@ aktualisieren, `v2.28.1`.
   2. **Kenni:**
      - `scripts/process/attest_evidence_local.py`, seine Tests und den Import in `attest.py` entfernen. Das Update bringt den Haken mit.
      - In `docs/process/model-policy.local.json` die Schwelle setzen: `{"review_evidence": {"cross_model_from_tier": 2}}`.
+     - Die Testdateien prüfen. Die Vorgaben decken `backend/tests/**/test_*.py`, die Xcode-Ziele (`*Tests/*`, `*Tests.*`) und `frontend-react/**/*.spec.ts`/`*.test.ts` ab. Abweichende Muster gehören nach `test_files`.
      - Eigene GPT-Modelle stehen über `families` (`gpt-`) schon drin.
      - Bestehende `skipped codex-review`-Zeilen gelten weiter.
 
      Kennis lokale Regeln weichen in drei Punkten ab:
      - Die Plan-Zeile gilt auch für Slug-Arbeiten.
-     - Bei Tests ist nur skip/xfail verboten, nicht jeder unbekannte Dekorator.
+     - Bei Tests wird ein Skip über Importe und Aliase aufgelöst; ein unbekannter Dekorator wird nicht abgelehnt.
      - Ein Paar verschiedener Familien besteht in beiden Richtungen.
 
      Prüfung: `pytest` auf Kennis Attest-Tests, dazu ein `--dry-run` auf einen offenen Branch.

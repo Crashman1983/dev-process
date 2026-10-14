@@ -1906,6 +1906,10 @@ def test_a_plan_pass_counts_for_the_plan_text_it_reviewed(render, tmp_path, monk
     plan.write_text(plan.read_text() + "\nskipped cross-model work=7-plan: no second family on this host\n")
     _git(out, "commit", "-q", "-am", "docs: the plan review's reason")
     assert mod.plan_review_state(out, out) == (2, True)
+    # ... but a DECISION binds the executor: added after the pass, the plan is due again
+    plan.write_text(plan.read_text() + "\nDECISION 2026-10-14 owner: task 2 also rewrites the gate\n")
+    _git(out, "commit", "-q", "-am", "docs: a decision after the review")
+    assert mod.plan_review_state(out, out) == (2, False)
 
 
 @pytest.mark.parametrize("case, due", [

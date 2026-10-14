@@ -36,6 +36,7 @@ a named test tests its criterion is the reviewer's judgment; the
 from __future__ import annotations
 
 import ast
+import fnmatch
 import json
 import re
 import subprocess
@@ -68,6 +69,12 @@ DEFAULTS = {
     "cross_model_from_tier": 3,
     "ranks": {"claude-haiku": 0, "claude-sonnet": 1, "claude-opus": 2, "claude-fable": 3},
     "families": ["gpt-"],
+    # pytest's own defaults; a project with other `python_files`/`python_classes` names them
+    "python_files": ["test_*.py", "*_test.py"],
+    "python_classes": ["Test"],
+    # test files of other languages (fnmatch on the repository path, `*` spans folders)
+    "test_files": ["*tests/*", "*Tests/*", "*__tests__/*", "spec/*", "*/spec/*", "*Test.*", "*Tests.*",
+                   "*Spec.*", "*.test.*", "*.spec.*", "*_test.*", "*_spec.*", "*/test_*", "test_*"],
 }
 # an acceptance criterion's id: `AC-1`, `AC-2.1`, `AC-B1`, `AC1` — a digit in it, so
 # prose (`AC-Zeile`, `AC-<id>`) names none; a sentence's final dot is no part of it
@@ -197,6 +204,9 @@ def review_policy(root: Path, ref: str) -> tuple[dict, str]:
         return {}, f"{POLICY_KEY}.ranks must map model-id prefixes to integer ranks"
     if not (isinstance(fams, list) and all(isinstance(f, str) and f for f in fams)):
         return {}, f"{POLICY_KEY}.families must be a list of model-id prefixes"
+    for key in ("python_files", "python_classes", "test_files"):
+        if not (isinstance(got.get(key), list) and all(isinstance(g, str) and g for g in got[key])):
+            return {}, f"{POLICY_KEY}.{key} must be a list of patterns"
     return got, ""
 
 
@@ -312,7 +322,6 @@ def _claims(texts: list[str]) -> dict[str, list[str]]:
 _PYTEST_OFF = {"skip", "skipif", "xfail"}  # pytest.mark.<these>
 _PYTEST_CALLS = {"skip", "xfail", "importorskip"}  # pytest.<these>() skip at run time
 _UNITTEST_OFF = {"skip", "skipIf", "skipUnless", "expectedFailure"}
-_PY_TEST_FILE = re.compile(r"(?:^|/)(?:test_[^/]*|[^/]*_test)\.py$")
 
 
 class _Names:
@@ -391,11 +400,13 @@ def _marked_off(body: list[ast.stmt], names: _Names) -> bool:
     return False
 
 
-def _collected_class(node: ast.ClassDef) -> bool:
-    """pytest collects `Test*` classes without `__init__`, and every TestCase subclass."""
+def _collected_class(node: ast.ClassDef, classes: list[str]) -> bool:
+    """pytest collects classes named by `python_classes` (default `Test*`) without
+    `__init__`, and every TestCase subclass."""
     if any(ast.unparse(b).split(".")[-1].endswith("TestCase") for b in node.bases):
         return True
-    return node.name.startswith("Test") and not any(
+    return any(fnmatch.fnmatchcase(node.name, c if any(ch in c for ch in "*?[") else c + "*")
+               for c in classes) and not any(
         isinstance(n, ast.FunctionDef) and n.name == "__init__" for n in node.body)
 
 
@@ -405,9 +416,40 @@ def _not_collected(body: list[ast.stmt]) -> bool:
                and isinstance(n.value, ast.Constant) and n.value.value is False for n in body)
 
 
-def _python_status(text: str, file: str, name: str) -> str | None:
-    if not _PY_TEST_FILE.search(file):
-        return f"{file} is no test module pytest collects (test_*.py or *_test.py)"
+_SETUPS = {"setUp", "setUpClass", "setup_method", "setup_class", "setup_function", "setup_module", "setup"}
+
+
+def _is_autouse(node: ast.stmt, names: _Names) -> bool:
+    if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        return False
+    return any(isinstance(d, ast.Call) and names.path(d).endswith("fixture")
+               and any(k.arg == "autouse" and isinstance(k.value, ast.Constant) and k.value.value is True
+                       for k in d.keywords) for d in node.decorator_list)
+
+
+def _setup_skips(body: list[ast.stmt], names: _Names) -> bool:
+    """An autouse fixture or a setUp/setup_* of this scope that skips — it runs before
+    every test there (#225 refute round 2)."""
+    return any(isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+               and (n.name in _SETUPS or _is_autouse(n, names)) and names.skips(n) for n in body)
+
+
+def _all_params_off(decorator: ast.expr, names: _Names) -> bool:
+    """`parametrize(…, [pytest.param(…, marks=skip), …])` with every case switched off."""
+    if not (isinstance(decorator, ast.Call) and names.path(decorator).endswith("mark.parametrize")
+            and len(decorator.args) >= 2 and isinstance(decorator.args[1], (ast.List, ast.Tuple))):
+        return False
+    cases = decorator.args[1].elts
+    return bool(cases) and all(
+        isinstance(c, ast.Call) and names.path(c).endswith("param")
+        and any(k.arg == "marks" and names.off(k.value) for k in c.keywords) for c in cases)
+
+
+def _python_status(text: str, file: str, name: str, rules: dict) -> str | None:
+    base = file.rsplit("/", 1)[-1]
+    if not any(fnmatch.fnmatchcase(base, g) for g in rules["python_files"]):
+        return (f"{file} is no test module pytest collects (python_files: "
+                f"{', '.join(rules['python_files'])} — review_evidence in model-policy.json)")
     try:
         tree = ast.parse(text)
     except SyntaxError:
@@ -420,19 +462,33 @@ def _python_status(text: str, file: str, name: str) -> str | None:
     for node in tree.body:
         if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and names.skips(node):
             return f"{file} skips at module level"
+    if _setup_skips(tree.body, names):
+        return f"{file}: a module setup or autouse fixture skips"
+    classes = {n.name: n for n in tree.body if isinstance(n, ast.ClassDef)}
     parts = name.split("::")
     scope: list[ast.stmt] = tree.body
     decorators: list[ast.expr] = []
     for cls in parts[:-1]:
-        hits = [n for n in scope if isinstance(n, ast.ClassDef) and n.name == cls]
-        if not hits:
+        hit = classes.get(cls) if scope is tree.body else next(
+            (n for n in reversed(scope) if isinstance(n, ast.ClassDef) and n.name == cls), None)
+        if hit is None:
             return f"{file} has no class {cls} at head"
-        if not _collected_class(hits[-1]) or _not_collected(hits[-1].body):
-            return f"{file}::{cls} is no class pytest collects (Test*, no __init__, or a TestCase)"
-        if _marked_off(hits[-1].body, names):
-            return f"{file}::{cls} carries a pytestmark that skips"
-        decorators += hits[-1].decorator_list
-        scope = hits[-1].body
+        if not _collected_class(hit, rules["python_classes"]) or _not_collected(hit.body):
+            return f"{file}::{cls} is no class pytest collects (python_classes, no __init__, or a TestCase)"
+        # the class and the bases this module defines lend their tests, marks and setups
+        chain, seen = [hit], {cls}
+        for c in chain:
+            for b in c.bases:
+                if isinstance(b, ast.Name) and b.id in classes and b.id not in seen:
+                    seen.add(b.id)
+                    chain.append(classes[b.id])
+        for c in chain:
+            if _marked_off(c.body, names):
+                return f"{file}::{cls} carries a pytestmark that skips"
+            if _setup_skips(c.body, names):
+                return f"{file}::{cls}: its setup or an autouse fixture skips"
+            decorators += c.decorator_list
+        scope = [n for c in reversed(chain) for n in c.body]  # the subclass's own bindings last
     fn = parts[-1]
     if not fn.startswith("test"):
         return f"{file}::{name} is no test function (a helper proves no criterion)"
@@ -448,27 +504,44 @@ def _python_status(text: str, file: str, name: str) -> str | None:
         return f"{file}::{name} is rebound after its definition — not the function the plan's test names"
     if any(names.off(d) for d in decorators + last.decorator_list):
         return f"{file}::{name} is marked to skip or to fail"
+    if any(_all_params_off(d, names) for d in last.decorator_list):
+        return f"{file}::{name}: every parametrized case is marked to skip"
     if names.skips(last):
         return f"{file}::{name} skips in its body"
     return None
 
 
-# any other language: a test file, a test declaration naming the test, no skip marker on it
-_OTHER_TEST_FILE = re.compile(r"(?i)(?:^|/)(?:tests?|__tests__|spec)/|(?:^|[/._-])(?:test|spec)s?[._-]|[._-](?:test|spec)s?\.\w+$")
-_DECLARES = re.compile(r"\b(?:it|test|describe|context|func|fn|fun|void|def)\b|@Test\b|#\[test\]")
-_OTHER_SKIP = re.compile(r"\.(?:skip|todo)\b|\b(?:xit|xtest|xdescribe|t\.Skip)\b|@Disabled\b|@Ignore\b|#\[ignore\]")
+# any other language: a file the project declares a test file (`review_evidence.test_files`),
+# a declaring line that names the test whole, no skip marker on it or in its body
+_NOT_CODE = (".md", ".txt", ".rst", ".json", ".yaml", ".yml", ".toml", ".csv", ".lock", ".ini", ".cfg")
+_DECLARES = re.compile(r"\b(?:it|test|describe|context|func|fn|fun|void|def|should)\b|@Test\b|#\[test\]")
+_OTHER_SKIP = re.compile(r"\.(?:skip|todo)\b|\b(?:xit|xtest|xdescribe|xcontext)\b|\bt\.Skip(?:Now|f)?\b|"
+                         r"\bXCTSkip\b|@Disabled\b|@Ignore\b|#\[ignore\]|\bthis\.skip\(")
 
 
-def _other_status(text: str, file: str, name: str) -> str | None:
-    if not _OTHER_TEST_FILE.search(file):
-        return f"{file} is no test file (a tests/ or spec/ folder, or test/spec in its name)"
+def _names_whole(line: str, name: str) -> bool:
+    """The name as a whole string literal or a whole identifier — never a substring."""
+    quoted = any(f"{q}{name}{q}" in line for q in ('"', "'", "`"))
+    return quoted or bool(re.search(rf"(?<![\w$]){re.escape(name)}(?![\w$])", line)) and name.isidentifier()
+
+
+def _other_status(text: str, file: str, name: str, rules: dict) -> str | None:
+    if file.lower().endswith(_NOT_CODE) or not any(fnmatch.fnmatchcase(file, g) for g in rules["test_files"]):
+        return (f"{file} is no test file this project declares (test_files: review_evidence in "
+                f"model-policy.json)")
     lines = text.splitlines()
-    decl = [i for i, ln in enumerate(lines) if name in ln and _DECLARES.search(ln)]
-    if not decl:
+    decls = [i for i, ln in enumerate(lines) if _DECLARES.search(ln)]
+    mine = [i for i in decls if _names_whole(lines[i], name)]
+    if not mine:
         return f"{file} declares no test {name!r} at head"
-    # a marker on the declaring line or the attribute line above it (`#[ignore]`, `@Disabled`)
-    if all(_OTHER_SKIP.search(lines[i]) or (i and _OTHER_SKIP.search(lines[i - 1])) for i in decl):
-        return f"{file}: {name!r} is marked skip/todo at head"
+
+    def off(i: int) -> bool:
+        # the declaring line, the attribute line above it, and the body up to the next declaration
+        nxt = next((d for d in decls if d > i), len(lines))
+        span = lines[max(i - 1, 0):nxt]
+        return any(_OTHER_SKIP.search(ln) for ln in span)
+    if all(off(i) for i in mine):
+        return f"{file}: {name!r} is marked or made to skip at head"
     return None
 
 
@@ -501,15 +574,19 @@ def claimed_tests(body: str) -> list[tuple[str, str]]:
 
 
 
-def test_status(root: Path, head: str, file: str, name: str) -> str | None:
+def test_status(root: Path, head: str, file: str, name: str, rules: dict) -> str | None:
     """None: the named test stands at head where the runner collects it and is not
-    switched off; else why not. Python as pytest collects it; any other language
-    by its test file and the line declaring the test (a named residual: a runner's
-    own collection rules beyond these are not modelled)."""
+    switched off; else why not. Which files are tests is the project's declaration
+    (`review_evidence`: `python_files`, `python_classes`, `test_files`) — never a
+    guess from names (#225 refute: Xcode's `FooTests/…Tests.swift` read as no test).
+    Python as pytest collects it; any other language by the declaring line and its
+    body (a named residual: a runner's own rules beyond these are not modelled)."""
     text = _show(root, head, file)
     if text is None:
         return f"{file} does not exist at head"
-    return _python_status(text, file, name) if file.endswith(".py") else _other_status(text, file, name)
+    if file.endswith(".py"):
+        return _python_status(text, file, name, rules)
+    return _other_status(text, file, name, rules)
 
 
 def gather(root: Path, *, work: str, ids: set[str], tier: int, verdict: str, independence: str,
@@ -546,7 +623,7 @@ def gather(root: Path, *, work: str, ids: set[str], tier: int, verdict: str, ind
         for body in bodies:
             for key in claimed_tests(body):
                 if key not in status:
-                    status[key] = test_status(root, head, *key)
+                    status[key] = test_status(root, head, *key, policy)
     tokens = set(independence.split(","))
     skip_ids = {f"{i}-plan" for i in plan_ids} if plan_review else plan_ids
     return Evidence(

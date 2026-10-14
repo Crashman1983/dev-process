@@ -181,3 +181,25 @@ Ergebnis: Block mit zwei Funden ab 80 und fünf weiteren. Die Ursache der ersten
 
   Den `ImportFrom`-Zweig ersetzt `_Names`, mit Tabellenzeilen dazu.
 - REFUTE-Zusammenfassung: 7 Funde, 2 blockierend. Daten mit „skip“ führten zu Fehlablehnungen, und eine Nicht-Testdatei konnte eine AC belegen. `self.skipTest` wurde übersehen. Eine angehängte Skip-Zeile machte die Plan-Review in Dispatch neu fällig. Vier Regeln hatten keinen roten Test.
+
+## Refute Runde 2 — Änderungen
+
+Ergebnis: Block mit einem BLOCKER. Alle Fixes aus Runde 1 halten. Es ist der zweite Block am selben Element, dem Test-Prüfer, deshalb ein Umbau statt eines weiteren Flickens. Die gemeinsame Ursache der Funde 1, 4 und 5: Welche Datei ein Test ist, wurde aus festen Namensmustern geraten, statt aus der Konfiguration des Projekts gelesen.
+
+- **Umbau: Das Projekt deklariert seine Testdateien.** `review_evidence` erhält drei Schlüssel:
+  - `python_files`: pytests Vorgabe `test_*.py`, `*_test.py`;
+  - `python_classes`: Vorgabe `Test`;
+  - `test_files`: fnmatch auf den Repo-Pfad, wobei `*` auch Ordner überspannt. Die breiten Vorgaben decken `*Tests/*`, `*Tests.*`, `*.spec.*`, `*_test.*` und `tests/` ab.
+
+  Kennis Xcode-Ziele (`*Tests.swift`, `*UITests/Sources/*`) sind damit gedeckt. Ein Projekt ergänzt sein eigenes Layout, etwa Rust-Tests in `src/*.rs`. Eine Text- oder Datendatei (`.md`, `.json`, …) ist nie ein Test.
+- **Andere Sprachen:**
+  - Der Name muss als ganzes String-Literal oder ganzer Bezeichner auf einer deklarierenden Zeile stehen, nie als Teilstring.
+  - Eine Skip-Marke zählt auf der Zeile davor, auf der Zeile selbst und im Körper bis zur nächsten Deklaration. Erkannt werden `t.Skip`, `XCTSkip`, `this.skip(`, `.skip` und `xit`.
+- **Python:**
+  - Ein autouse-Fixture oder `setUp`/`setup_*` des Moduls oder der Klasse, das skippt, schaltet ab.
+  - Sind alle Fälle eines `parametrize` per `pytest.param(marks=skip)` abgeschaltet, zählt der Test als abgeschaltet.
+  - Geerbte Testmethoden aus Basisklassen desselben Moduls werden gefunden.
+  - `python_files` und `python_classes` kommen aus der Policy.
+- **Dispatch:** Eine angehängte DECISION öffnet die Plan-Review wieder, denn sie bindet den Executor. REFUTE- und Skip-Zeilen öffnen sie nicht. Test in `test_dispatch`.
+- **Rest (benannt):** Ein Skip-Alias, der aus einem eigenen Hilfsmodul importiert wird, ist nicht aufgelöst. Sammelregeln eines Läufers jenseits der deklarierten Muster sind nicht modelliert.
+- REFUTE-Zusammenfassung: 5 Funde, einer blockierend. Xcode-Ziele vom Typ `*Tests.swift` galten als keine Testdatei (116 Dateien bei Kenni). Eine angehängte DECISION gab eine Planänderung in Dispatch frei. Autouse-, setUp- und param-Skips, Prosa, Teilstrings und Go-`t.Skip` gingen durch.
