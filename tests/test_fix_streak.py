@@ -164,7 +164,9 @@ def test_a_block_attestation_prints_the_streak_note(render, tmp_path):
     attest = [sys.executable, str(out / "scripts/process/attest.py"), "--work", "thing", "--tier", "2",
               "--reviewer", "fresh", "--model", "cross", "--independence", "bundle,non-implementing",
               "--round", "1"]
-    r = subprocess.run([*attest, "--verdict", "pass", "--dry-run", "."], cwd=out, capture_output=True, text=True)
+    # tier 1: a Tier 2 pass would first ask for its evidence (#225); the note is the point here
+    r = subprocess.run([*attest, "--verdict", "pass", "--tier", "1", "--dry-run", "."], cwd=out,
+                       capture_output=True, text=True)
     assert r.returncode == 0 and "fix-streak" not in r.stderr, r.stderr  # a pass stacks no patch
     for extra in (["--verdict", "block", "--dry-run"], ["--verdict", "block"]):
         r = subprocess.run([*attest, *extra, "."], cwd=out, capture_output=True, text=True)

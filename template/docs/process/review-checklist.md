@@ -50,6 +50,13 @@ rows of the touched files (`inventory.py for-plan`, where the project keeps
 inventories) in the tasks that touch them; and for a change a user notices,
 the task that writes its news fragment (`news.md`).
 
+- **One test per criterion, and it can go red.** For each `AC-<id>` the plan
+  names, the report carries `AC-<id>: <path>::<test>` — the test that fails
+  when that behaviour is deleted — or `AC-<id>: unproven`, a `kind=test-gap`
+  finding (`attest.py` refuses a Tier 2+ pass with either missing). Check the
+  named test, not its name: does it pass on a stub, a mocked-away call, or
+  state outside its temp dir? Downstream, four of six missed majors in one
+  night were tests that could not go red (#225).
 - Does every new field, value, or side-effect reach its **terminal state**
   (persisted, emitted, displayed, or deliberately dropped)? Trace it from where
   it is created to where it is used — a value that is produced and never read is

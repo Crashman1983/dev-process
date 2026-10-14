@@ -36,13 +36,32 @@ Record the result with the writer, never by hand:
 It takes the reviewed range (base, head) from the bundle, checks that a full
 round's base is the head's fork point, validates the grammar and appends the
 `REVIEW` line to today's journal shard of the branch (`journal-state-plans.md`).
-For a
-findings-producing or Tier 3 review — `FINDING sev=… action=… issue=…` lines
-in a `.process-work/reviews/` report (gate-linted where the `github-issues`
+Every Tier 2+ review writes a `.process-work/reviews/` report — findings as
+`FINDING sev=… action=… issue=…` lines (gate-linted where the `github-issues`
 module is installed; the report grammar either way). A `block` verdict always
-has findings, so it always writes the report: the next delta bundle reads the
-open findings from it. Report and line are one commit — `attest.py … --commit
---with .process-work/reviews/<report>.md` — and one push.
+has findings: the next delta bundle reads the open findings from it. Report
+and line are one commit — `attest.py … --commit --with
+.process-work/reviews/<report>.md` — and one push.
+
+**One line per acceptance criterion** (Tier 2+ code review): for each
+`AC-<n>` of the plan, the test that goes red when that behaviour breaks —
+`AC-3: tests/test_x.py::test_refuses_y` — or `AC-3: unproven`. Ask of each
+named test: would it fail if the behaviour were deleted, or does it pass on
+a stub, a mocked-away call, real state outside its temp dir? A criterion no
+test can turn red is a finding (`kind=test-gap`), and `unproven` refuses the
+pass. `attest.py` refuses a pass whose report misses a criterion, or names a
+test that does not stand at the reviewed head or is skipped there
+(`docs/process/verification-independence.md`, "Evidence at the writer", for
+this and the other evidence rules: cross-model from the project's tier,
+the gate-code refute, the plan's lines before the head).
+
+**Gate code at Tier 2, one run:** where the review runs on a second model
+family (`cross-model`) and the range touches gate code, give that reviewer
+the refuter's brief (`docs/process/refute.md`) instead of a plain review
+prompt; its report carries the `REFUTE work=<id> round=<r>: …` line next to
+its findings, and that line counts as the refute. A single-family review of
+gate code needs the refute line committed before the bundle, or `skipped
+refute work=<id>: <reason>`.
 
 After a clearing pass is attested, `uv run scripts/process/report.py review-pass --issue N` — the branch may now board the merge train (`docs/process/train.md`).
 

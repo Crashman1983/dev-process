@@ -269,6 +269,34 @@ enforces what a language-agnostic gate honestly can, and no more:
   (`bundle` absent) cannot clear Tier 2+, and a Tier 3 pass must carry
   `cross-model` or the explicit `single-family` acknowledgment. This is the
   independence expectation above, turned from prose into a check.
+- **Evidence at the writer** (#225, `attest_evidence.py`). `attest.py`
+  refuses a Tier 2+ pass that does not show its evidence at the reviewed
+  head; each rule has a committed way out, `skipped <kind> work=<id>:
+  <reason>`, countable by grep:
+  - from `review_evidence.cross_model_from_tier` (`model-policy.json`,
+    default 3; a project may lower it) a code-review pass carries
+    `cross-model`, or `single-family` plus `skipped cross-model` — the
+    declaration names why the second family did not run;
+  - a reviewed range that touches gate code needs a `REFUTE` line of the
+    work (`refute.md`, "Gate code is enforced") or `skipped refute`;
+  - the review report (`--with .process-work/reviews/<report>.md`) has one
+    line per acceptance criterion of the plan — `AC-<n>: <path>::<test>`,
+    the test that goes red when that behaviour breaks — and the named test
+    stands at head, not skipped (`skipped ac-trace` where the criteria live
+    outside the plan); `AC-<n>: unproven` refuses the pass;
+  - a plan-review pass names its concrete model, of no lower class
+    (`review_evidence.ranks`) than the plan session's — the newest `planned`
+    report, else the plan's `plan-session model: <id>` line (`skipped
+    plan-review`); a plan naming gate code is reviewed `cross-model` or with
+    the reasoned `single-family`;
+  - every pass: the work's plan at the reviewed head is the plan on disk —
+    plan lines (REFUTE, ROOT-CAUSE, DECISION) are committed before the
+    bundle, never with the attestation.
+
+  The thresholds are read at the reviewed base, so a branch does not loosen
+  them for its own pass. The push gate does not re-check evidence: a REVIEW
+  line typed by hand bypasses it (a named residual; the writer is the one
+  documented path).
 - **Presence.** Archived plans declaring `tier: N` with N ≥ 2 need a clearing
   `verdict=pass` `REVIEW` matching their work and tier, or an explicit
   `review-waived: <reason>` line. The gate also checks active Tier 2+ plans
