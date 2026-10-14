@@ -512,17 +512,31 @@ def _python_status(text: str, file: str, name: str, rules: dict) -> str | None:
 
 
 # any other language: a file the project declares a test file (`review_evidence.test_files`),
-# a declaring line that names the test whole, no skip marker on it or in its body
+# a declaration in the runner's own form naming the test whole, no skip marker on it, on its
+# attribute lines, in its body or in a setup of the file
 _NOT_CODE = (".md", ".txt", ".rst", ".json", ".yaml", ".yml", ".toml", ".csv", ".lock", ".ini", ".cfg")
-_DECLARES = re.compile(r"\b(?:it|test|describe|context|func|fn|fun|void|def|should)\b|@Test\b|#\[test\]")
+_COMMENT = re.compile(r"^\s*(?://|#(?!\[)|--|/\*|\*)")
+_DECLARES = re.compile(r"\b(?:it|test|describe|context|func|fn|fun|def|should)\b\s*[\w.]*\s*[(\w`'\"]|@Test\b|#\[test\]")
+_ATTRIBUTE = re.compile(r"^\s*(?:@\w+|#\[\w+|\[\w+)")
+_TEST_ATTR = re.compile(r"^\s*(?:@Test\b|@ParameterizedTest\b|#\[(?:tokio::)?test\b|\[(?:Test|Fact|Theory)\b)")
+_SETUP = re.compile(r"\b(?:setUp\w*|beforeEach|beforeAll|TestMain|setup)\b\s*[(\w]")
 _OTHER_SKIP = re.compile(r"\.(?:skip|todo)\b|\b(?:xit|xtest|xdescribe|xcontext)\b|\bt\.Skip(?:Now|f)?\b|"
-                         r"\bXCTSkip\b|@Disabled\b|@Ignore\b|#\[ignore\]|\bthis\.skip\(")
+                         r"\bXCTSkip(?:If|Unless)?\b|@Disabled\b|@Ignore\b|#\[ignore\]|\bthis\.skip\(")
 
 
-def _names_whole(line: str, name: str) -> bool:
-    """The name as a whole string literal or a whole identifier — never a substring."""
-    quoted = any(f"{q}{name}{q}" in line for q in ('"', "'", "`"))
-    return quoted or bool(re.search(rf"(?<![\w$]){re.escape(name)}(?![\w$])", line)) and name.isidentifier()
+def _declares_test(lines: list[str], i: int, name: str) -> bool:
+    """Line `i` declares the test `name` the way its runner collects tests: a JS-style
+    `it(`/`test(` with the name as its title, `func test…`/`func Test…` (XCTest, Go),
+    `fun`/`fn`/`def test…`, or any function the line above marks `@Test`/`#[test]`."""
+    ln = lines[i]
+    if any(f"{q}{name}{q}" in ln for q in ('"', "'", "`")) and re.search(r"\b(?:it|test|specify|should)\b", ln):
+        return True
+    if not (name.isidentifier() and re.search(rf"(?<![\w$]){re.escape(name)}(?![\w$])", ln)):
+        return False
+    if re.search(rf"\b(?:func|fun|fn|def|void)\s+{re.escape(name)}\b", ln) and re.match(r"(?i)test", name):
+        return True
+    above = [lines[j] for j in range(i - 1, -1, -1) if lines[j].strip()][:3]
+    return any(_TEST_ATTR.match(a) for a in above)
 
 
 def _other_status(text: str, file: str, name: str, rules: dict) -> str | None:
@@ -530,17 +544,25 @@ def _other_status(text: str, file: str, name: str, rules: dict) -> str | None:
         return (f"{file} is no test file this project declares (test_files: review_evidence in "
                 f"model-policy.json)")
     lines = text.splitlines()
-    decls = [i for i, ln in enumerate(lines) if _DECLARES.search(ln)]
-    mine = [i for i in decls if _names_whole(lines[i], name)]
+    code = [i for i, ln in enumerate(lines) if ln.strip() and not _COMMENT.match(ln)]
+    decls = [i for i in code if _DECLARES.search(lines[i]) or _SETUP.search(lines[i])]
+    mine = [i for i in code if _declares_test(lines, i, name)]
     if not mine:
-        return f"{file} declares no test {name!r} at head"
+        return (f"{file} declares no test {name!r} at head (a runner's test form: `it(\"{name}\"`, "
+                f"`func test…`, or an `@Test`/`#[test]` function)")
 
-    def off(i: int) -> bool:
-        # the declaring line, the attribute line above it, and the body up to the next declaration
+    def span(i: int) -> list[str]:
+        # the attribute lines right above, the declaring line, the body up to the next declaration
+        top = i
+        while top - 1 >= 0 and _ATTRIBUTE.match(lines[top - 1]):
+            top -= 1
         nxt = next((d for d in decls if d > i), len(lines))
-        span = lines[max(i - 1, 0):nxt]
-        return any(_OTHER_SKIP.search(ln) for ln in span)
-    if all(off(i) for i in mine):
+        return [ln for j, ln in enumerate(lines[top:nxt], top) if j == i or not _COMMENT.match(ln)]
+
+    # a setup of the file (setUp*, beforeEach/All, TestMain) that skips runs before each test
+    if any(_OTHER_SKIP.search(ln) for d in decls if _SETUP.search(lines[d]) for ln in span(d)):
+        return f"{file}: a setup (setUp/beforeEach/TestMain) skips at head"
+    if all(any(_OTHER_SKIP.search(ln) for ln in span(i)) for i in mine):
         return f"{file}: {name!r} is marked or made to skip at head"
     return None
 
