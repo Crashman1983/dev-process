@@ -4,7 +4,8 @@ Was sich je Release geändert hat, warum und wozu es führt — neueste Version 
 Jeder Eintrag hat dieselben Teile: **Warum** (das beobachtete Problem), **Was sich
 ändert** (aus Sicht eines Projekts, das die Vorlage nutzt), **Wirkung**, **Update**
 (Schritte für bestehende Projekte) und **Details** (der Plan mit den technischen
-Einzelheiten, die Issues). In wenigen Sätzen je Version: [NEWS-DE.md](NEWS-DE.md).
+Einzelheiten, die Issues); ein kleines Fix-Release kann die Wirkung weglassen, und
+ein Eintrag ohne Plan oder Issue hat keine Details-Zeile. In wenigen Sätzen je Version: [NEWS-DE.md](NEWS-DE.md).
 English version: [CHANGELOG.md](CHANGELOG.md). Die Geschichte vor v2.28.2
 (Sub-Projekte): [docs/changelog-archive.md](docs/changelog-archive.md).
 
@@ -23,9 +24,10 @@ English version: [CHANGELOG.md](CHANGELOG.md). Die Geschichte vor v2.28.2
 **Wirkung.** Codex wird vollwertiger Reviewer und hinterlässt eine Spur, wenn er ausfällt. Eigene Regeln brechen bei Template-Änderungen nicht mehr unbemerkt, kosten aber bei jeder Änderung eines verankerten Abschnitts eine Sichtung; Kenni braucht keinen Gate-Code mehr in `.process-owned`.
 
 **Update.**
-1. Wer `ci.github: manual` will, setzt die Antwort in `.copier-answers.yml` vor dem Update.
-2. Eigene Notizen in Template-Docs und -Befehlen nach dem Update in Overlays verschieben, verankern und mit `--stamp` stempeln.
-3. Für Kenni: die Schritte stehen im Abschnitt Migration des [Plans](docs/analysis/2026-10-15-kenni-backport-2.md).
+1. Wer `ci.github: manual` will, setzt die Antwort in `.copier-answers.yml` vor dem Update. Erlaubt sind `true`, `false` und `manual`; der String `"true"` wird verweigert.
+2. Eigene Notizen in Template-Docs und -Befehlen nach dem Update in Overlays verschieben, verankern und mit `--stamp` stempeln. Der Kernel nimmt kein Overlay.
+3. Für Kenni, vor dem Update: `ci: {github: manual}` setzen und `legacy_preflight` aus `scripts/process/_dispatch_codex.py` in eine eigene Datei außerhalb von `scripts/process/` verschieben — das Template ersetzt die Datei.
+4. Für Kenni, danach: Codex-Werte nach `model-policy.codex.local.json`, eigene Regeln in Overlays, `.process-owned` leeren, die Tests zum beratenden Codex-Handoff anpassen oder streichen.
 
 **Geänderte Abschnitte.** `commits.md` (Merging), `start-here.md` (The standard setup, Anchors: what goes where…, Definition of ready), `tower.md` (Dispatch and the model policy), `verification-independence.md` (The review bundle…), `workflow.md` (Plan), Module `arch-onboarding`, `doc-drift-gate`, `feature-registry`, `git-hooks` (Honest ceiling), `sbom` (The gate), alle Befehle und Copilot-Prompts (neue Overlay-Zeile unter dem Titel)
 
@@ -860,7 +862,7 @@ Details: #124
 - Im Stale-Check gilt Code als geprüft, den ein anderes Code-Review in seinem Bereich `base..head` gesehen hat; Plan-Reviews decken keinen Code.
 - `dispatch`: `say` prüft die Zustellung, `chain` schiebt Phasen aus Berichten weiter, die Warteschlange ist gesperrt und dedupliziert, Worker laufen unter `nice` (`worker_nice`).
 
-**Wirkung.** attest, Bündel und Gate werten Belege einheitlich aus, und ein Zug-Merge hinterlässt keine fertigen Pläne und offenen Issues. Jeder Fund ist mit einem Test belegt, der gegen die Vorfassung fällt.
+**Wirkung.** attest, Bündel und Gate werten Belege einheitlich aus, und ein Zug-Merge hinterlässt keine fertigen Pläne und offenen Issues. Jeder Fund ist mit einem Test belegt, der gegen die Vorfassung fällt, oder als bekannte Grenze dokumentiert.
 
 **Update.** Keine Schritte.
 

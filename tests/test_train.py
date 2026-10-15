@@ -2282,3 +2282,18 @@ def test_a_regression_trailer_names_no_issue_of_the_branch(render, tmp_path):
                                   cwd=out, capture_output=True, text=True).stdout)
     done = [x for x in t["reports"] if x["worker"] == "20-fix"]
     assert done and done[-1]["state"] == "done" and done[-1].get("issue") == 20, done
+
+
+def test_a_tree_dirty_before_the_suite_names_its_files(render, tmp_path):
+    """Code review v2.74 (downstream #2542): a gate that leaves a file keeps the run from
+    its certificate — the log says which file, so it can be ignored or cleaned."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    (out / "scripts/litter.py").write_text("open('litter.txt', 'w').close()\nprint('litter: OK')\n")
+    (out / "docs/process/gates.local.json").write_text(json.dumps(
+        {"litter": {"module": None, "command": ["scripts/litter.py"]}}))
+    _repo(out)
+    _branch(out, "alpha", {"src/a.py": "a\n"})
+    r = _train(out, "run", "--force", "--suite", "true")
+    assert r.returncode == 0, r.stdout + r.stderr
+    text = sorted((out / ".git/process-train").glob("*.log"))[-1].read_text()
+    assert "not clean (litter.txt) before the suite" in text, text[-2000:]
