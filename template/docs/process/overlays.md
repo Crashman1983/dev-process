@@ -40,8 +40,18 @@ replaces: "### Lanes" @new
   <overlay>` writes the hash of each section as it reads now. Stamp only after
   reading the section and the overlay side by side.
 
-Sessions read the overlay with its file: the session context
-(`rehydrate.py`) lists every overlay next to its template file.
+Sessions read the overlay with its file: every command opens by sending the
+session to its own overlay (`docs/process/commands/<name>.local.md`) and to
+the overlays beside the docs it names, and the session context after a
+compaction or resume (`rehydrate.py`) lists every overlay next to its template
+file. The kernel (`docs/process/kernel.md`) takes no overlay: it is copied
+byte for byte into the anchors, so a project that must change it keeps its
+own copy (`.process-owned`) and the gate refuses an overlay of it.
+
+Anchor the narrowest heading that holds what the overlay builds on: a
+section's hash covers its subsections, so an anchor on a top-level heading
+turns red on every edit anywhere below it — and a gate that is always red
+gets stamped without reading.
 
 ## The check: does a central change still fit?
 
@@ -64,6 +74,7 @@ re-check, by someone who reads both.
 
 ## On the template side
 
-A release that changes, renames or removes a section projects anchor to names
-it in the CHANGELOG, so an adopter knows before the update which overlays will
-need a re-check.
+A release that changes, renames or removes a section of a template doc or
+command names it in its CHANGELOG entry (the template's release tool lists
+them against the previous release and refuses an entry that does not), so an
+adopter knows before the update which overlays will need a re-check.

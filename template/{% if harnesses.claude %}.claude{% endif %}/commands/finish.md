@@ -1,5 +1,11 @@
 # /finish
 
+**Project overlay:** if `docs/process/commands/finish.local.md` exists, read it
+before you start — the project's own rules for this command, binding over
+this file where it says so; a template doc this command sends you to may
+have one beside it (`<doc>.local.md`), read with the doc
+(`docs/process/overlays.md`).
+
 Where a steward runs the merge train (`docs/process/train.md`), stop after the archive step (`finish.py --apply` without `--tests`), push, and `report.py review-pass` — the train merges the batch behind one full suite. Without a train, this command is the merge tail:
 
 Close a feature branch cleanly — the merge tail as one verdict instead of a

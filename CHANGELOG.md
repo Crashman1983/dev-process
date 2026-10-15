@@ -1197,7 +1197,12 @@ aktualisieren, `v2.28.1`.
   - **Ablage:** Projektnotizen zu Template-Docs und -Befehlen stehen in `docs/process/<doc>.local.md` (Befehle: `docs/process/commands/<name>.local.md`), nicht mehr im Template-Doc selbst. Kopf: `overlay-of:`. Anker: `extends`/`replaces: "<Überschrift>" @<hash>`.
   - **Prüfschritt:** Das neue Kern-Gate `overlays` (`check_overlays.py`) wird rot, wenn ein verankerter Abschnitt verschwindet oder sich ändert. Das gilt als möglicher Breaking Change, bis jemand Overlay und Abschnitt gelesen und mit `--stamp` neu gestempelt hat.
   - **Beim Update:** `template_update.py` meldet die zu prüfenden Overlays direkt nach dem Update.
-  - **In der Session:** `rehydrate` listet die Overlays.
+  - **In der Session:** Jeder Befehl schickt die Session zuerst zu seinem Overlay (`docs/process/commands/<name>.local.md`) und zu den Overlays neben den Docs, die er nennt. Das gilt auch für frische und Headless-Sessions. Nach Kompaktierung oder Resume listet `rehydrate` die Overlays zusätzlich.
+  - **Grenzen:**
+    - `docs/process/kernel.md` nimmt kein Overlay; das Gate verweigert es. Der Kernel wird Byte für Byte in die Anker kopiert, ein Overlay käme dort nie an. Ein Projekt, das ihn ändern muss, behält seine eigene Fassung (`.process-owned`).
+    - Kopf- und Ankerzeilen in Codeblöcken eines Overlays sind Beispiele und zählen nicht.
+    - Ein Anker deckt seine Unterabschnitte mit ab. Deshalb die engste passende Überschrift verankern.
+  - **Auf Template-Seite:** Ein Release nennt die Abschnitte von Template-Docs und -Befehlen, die es ändert oder entfernt. `tools/release.py` listet sie gegen den letzten Release-Tag und verweigert einen Eintrag ohne die Zeile `Geänderte Abschnitte:`.
   - **Doku:** `docs/process/overlays.md`.
   - Bestehende `*.local.md` ohne `overlay-of:` (etwa `review.local.md`) sind keine Overlays und bleiben ungeprüft.
 - **Verhaltensänderung:** Eine bestehende `codex`-Zelle in `model-policy.local.json` läuft weiter auf dem einfachen Runner. Nur `--harness codex` nutzt den Supervisor.
@@ -1210,16 +1215,26 @@ aktualisieren, `v2.28.1`.
      - Die Befehle, sofern Kennis Abweichung überholt ist.
      - `setup_branch_protection.sh` entfällt.
   3. **Kennis eigene Regeln in Overlays verschieben**, statt sie in Template-Docs zu behalten, jeweils verankert und mit `--stamp`:
-     - Sprachregel (ADR-0063), Qualität/Tempo (ADR-0065), Owner-Notizen in `risk-tiers.md`, `feature-registry.md`, `github-issues.md`.
+     - Qualität/Tempo (ADR-0065), Owner-Notizen in `risk-tiers.md`, `feature-registry.md`, `github-issues.md`.
+     - Die Sprachregel (ADR-0063) steht im Kernel. Sie kann kein Overlay sein; `docs/process/kernel.md` bleibt deshalb in `.process-owned`, bis die Sprache eine Copier-Antwort ist (E3).
+     - `docs/process/review.local.md` bekommt die Kopfzeile `overlay-of: docs/process/review-checklist.md` und Anker auf die Abschnitte, die es ergänzt. `make_review_bundle` liest die Datei weiter ganz.
      - Quick-Eskalation und Governance-only-Weg.
      - Runner-Details aus `testing.md`.
   4. **Codex-Werte** (Modellnamen, Zeitlimits, `context_sources` mit Kennis Skill und `docs/dev/codex-model-policy.md`) nach `docs/process/model-policy.codex.local.json` übertragen. Die Template-Datei bleibt unverändert.
-  5. **`.process-owned` leeren.** Kennis Gate-Code gleicht dann dem Release, und weitere Updates sind keine Tier-3-Migration.
+  5. **`.process-owned` leeren, bis auf `docs/process/kernel.md`.** Kennis Gate-Code gleicht dann dem Release, und weitere Updates sind keine Tier-3-Migration.
   6. **Kenni-Tests anpassen oder streichen:**
      - `backend/tests/scripts/test_dispatch_codex.py`: beratender Handoff.
      - `test_legacy_codex_policy.py`: neuer Pfad von `legacy_preflight`.
      - `test_dispatch_v2_70_port.py`: `TOWER_DEFAULT_STALE_MINUTES`.
 - **Später:** die Sprachwahl als Copier-Antwort (E3) und die Pflicht-Deklaration im Design-Contract-Gate (E5).
+- **Geänderte Abschnitte** (für Overlays; `#`-Titel ändern sich mit jedem Unterabschnitt):
+  - `commits.md`: Merging.
+  - `start-here.md`: The standard setup, Anchors: what goes where…, Definition of ready.
+  - `tower.md`: Dispatch and the model policy.
+  - `verification-independence.md`: The review bundle….
+  - `workflow.md`: Plan.
+  - Module `arch-onboarding`, `doc-drift-gate`, `feature-registry`, `git-hooks` (Honest ceiling), `sbom` (The gate).
+  - Alle Befehle: die neue Overlay-Zeile unter dem Titel.
 
 **v2.72.0 — Kenni-Rückport I: Merge-Scope im Zertifikat, Stufenzeiten, Plan-Anker, gestrichene ACs, Betriebslehren (#226, #234, #235, #221).** Plan: `docs/analysis/2026-10-15-kenni-backport.md`. Tier 3, weil Gate-Code betroffen ist. Reines Update; für Kenni gibt es einen optionalen Aufräumschritt. Vom Owner am 2026-10-15 freigegeben.
 

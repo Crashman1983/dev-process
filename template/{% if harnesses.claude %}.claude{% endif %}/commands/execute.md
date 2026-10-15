@@ -1,5 +1,11 @@
 # /execute
 
+**Project overlay:** if `docs/process/commands/execute.local.md` exists, read it
+before you start — the project's own rules for this command, binding over
+this file where it says so; a template doc this command sends you to may
+have one beside it (`<doc>.local.md`), read with the doc
+(`docs/process/overlays.md`).
+
 At the first push of the branch, `uv run scripts/process/report.py pushed --issue N` (`/report`); when you cannot proceed, `report.py blocked --note "<why>"` the moment it happens — that line is what gets you unblocked. A question only the owner can answer is not a chat message: write it into the plan's `## Decisions` as `DECISION NEEDED <date> <you>: <question> — options: A …, B …; recommendation: …`, commit, report `blocked` with the same text, and carry on with tasks the answer does not touch (or stop). The steward is your decision partner: it decides, or brings a question that touches a product principle or is destructive to the owner, and writes the answer back as a `DECISION` line, marking the question `(answered <date>)` before its colon (an unmarked question stays open, and the train refuses the branch); read the plan again before the task that depends on it.
 
 **Before you report `pushed`:**

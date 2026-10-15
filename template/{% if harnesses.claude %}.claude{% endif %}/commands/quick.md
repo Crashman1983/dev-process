@@ -1,5 +1,11 @@
 # /quick
 
+**Project overlay:** if `docs/process/commands/quick.local.md` exists, read it
+before you start — the project's own rules for this command, binding over
+this file where it says so; a template doc this command sends you to may
+have one beside it (`<doc>.local.md`), read with the doc
+(`docs/process/overlays.md`).
+
 Use the Tier 0/1 shortcut for small, isolated changes without a separate plan
 file. This command carries the operative steps — you need not read the whole
 `docs/process/workflow.md` or `review-checklist.md` for a quick change (open

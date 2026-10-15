@@ -188,29 +188,29 @@ def load_policy(root: Path, harness: str | None = None) -> dict:
     _check_env(data.get("env"), "env")
     quiet = data.get("stale_minutes")
     if quiet is not None and (isinstance(quiet, bool) or not isinstance(quiet, int) or quiet <= 0):
-        raise SystemExit(f"dispatch: {POLICY} `stale_minutes` must be a positive integer, got {quiet!r}")
+        raise SystemExit(f"dispatch: {name} `stale_minutes` must be a positive integer, got {quiet!r}")
     for key in ("phases", "tiers", "default"):
         if not isinstance(data.get(key) or {}, dict):
-            raise SystemExit(f"dispatch: {POLICY} `{key}` must be an object")
+            raise SystemExit(f"dispatch: {name} `{key}` must be an object")
     if not all(isinstance(row or {}, dict) for row in (data.get("tiers") or {}).values()):
-        raise SystemExit(f"dispatch: {POLICY} `tiers` must map each tier to {{phase: model}}")
+        raise SystemExit(f"dispatch: {name} `tiers` must map each tier to {{phase: model}}")
     for ph, row in (data.get("phases") or {}).items():
         if isinstance(row, dict):
             _check_env(row.get("env"), f"phases.{ph}.env")
         if ph not in PHASES or not isinstance(row, dict):
-            raise SystemExit(f"dispatch: {POLICY} `phases` keys must be brainstorm|plan|execute|review with an object each")
+            raise SystemExit(f"dispatch: {name} `phases` keys must be brainstorm|plan|execute|review with an object each")
         if "command" in row and (not isinstance(row["command"], str) or "{prompt}" not in row["command"]):
-            raise SystemExit(f"dispatch: {POLICY} phases.{ph}.command must contain {{prompt}}")
+            raise SystemExit(f"dispatch: {name} phases.{ph}.command must contain {{prompt}}")
         if "handover_id" in row:
             try:
                 re.compile(str(row["handover_id"]))
             except re.error as exc:
-                raise SystemExit(f"dispatch: {POLICY} phases.{ph}.handover_id is not a regex: {exc}")
+                raise SystemExit(f"dispatch: {name} phases.{ph}.handover_id is not a regex: {exc}")
     classes = data.get("classes")
     if classes is not None and not (
             isinstance(classes, dict) and all(
                 isinstance(row, dict) and all(ph in PHASES for ph in row) for row in classes.values())):
-        raise SystemExit(f"dispatch: {POLICY} `classes` must map each task class to "
+        raise SystemExit(f"dispatch: {name} `classes` must map each task class to "
                          f"{{phase: model}} with phases brainstorm|plan|execute|review")
     rows = [("default", data.get("default")),
             *((f"tiers.{t}", row) for t, row in (data.get("tiers") or {}).items()),
@@ -1819,7 +1819,8 @@ def start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str |
                 codex_run.probe(codex_binary, root, git_environment(_codex_env(worker_vars)), model, effort)
         except ValueError as exc:
             row = None if dry_run else codex_run.record_unavailable(
-                _records_dir(root), issue=issue, phase=phase, model=model, branch=branch, reason=str(exc))
+                _records_dir(root), issue=issue, phase=phase, model=model, branch=branch, reason=str(exc),
+                head=_out(root, "rev-parse", "--verify", "-q", f"{branch}^{{commit}}") or None)
             print(f"dispatch: not starting — {exc}\n" + codex_run.fallback_hint(issue, phase, plan_review, row, tier),
                   file=sys.stderr)
             return 3

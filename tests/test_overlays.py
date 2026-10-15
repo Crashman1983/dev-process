@@ -150,16 +150,80 @@ def test_stamp_refuses_what_the_gate_does_not_check(render, tmp_path):
     assert r.returncode == 0, r.stderr
 
 
-def test_an_overlay_of_the_kernel_reaches_the_session_whole(render, tmp_path):
+def test_an_overlay_of_the_rules_reaches_the_session_whole(render, tmp_path):
     out = render(tmp_path, {"project_name": "d"})
     subprocess.run(["git", "init", "-q", "-b", "main"], cwd=out, check=True)
-    kernel = (out / "docs/process/kernel.md").read_text()
-    heading = next(ln for ln in kernel.splitlines() if ln.startswith("#"))
-    (out / "docs/process/kernel.local.md").write_text(
-        f'overlay-of: docs/process/kernel.md\nreplaces: "{heading}" @new\n\nProse follows the operator.\n')
+    rules = (out / "docs/process/mandatory-rules.md").read_text()
+    heading = next(ln for ln in rules.splitlines() if ln.startswith("#"))
+    (out / "docs/process/mandatory-rules.local.md").write_text(
+        f'overlay-of: docs/process/mandatory-rules.md\nextends: "{heading}" @new\n\nProse follows the operator.\n')
     ctx = subprocess.run([sys.executable, str(out / "scripts/process/rehydrate.py")], cwd=out,
                          capture_output=True, text=True, check=True).stdout
     assert "Prose follows the operator." in ctx
     codex = subprocess.run([sys.executable, str(out / "scripts/process/rehydrate.py"), "--codex"], cwd=out,
                            capture_output=True, text=True, check=True).stdout
     assert "Prose follows the operator." in codex
+
+
+def test_the_kernel_takes_no_overlay(render, tmp_path):
+    """Code review round 2 (M2): the kernel is copied byte for byte into the anchors — an
+    overlay of it would never reach the always-on block; the project keeps its own copy."""
+    out = render(tmp_path, {"project_name": "d"})
+    kernel = (out / "docs/process/kernel.md").read_text()
+    heading = next(ln for ln in kernel.splitlines() if ln.startswith("#"))
+    (out / "docs/process/kernel.local.md").write_text(
+        f'overlay-of: docs/process/kernel.md\nreplaces: "{heading}" @new\n\nProse follows the operator.\n')
+    r = _run(out)
+    assert r.returncode == 1 and "takes no overlay" in r.stdout and ".process-owned" in r.stdout
+
+
+def test_every_command_sends_the_session_to_its_overlay(render, tmp_path):
+    """Code review round 2 (M1): the context hook runs only after a compaction or resume —
+    a fresh or headless session learns of a command's overlay from the command itself."""
+    out = render(tmp_path, {"project_name": "d"})
+    commands = sorted((out / ".claude/commands").glob("*.md"))
+    assert commands
+    for cmd in commands:
+        text = cmd.read_text()
+        assert f"`docs/process/commands/{cmd.stem}.local.md`" in text, cmd.name
+        assert "docs/process/overlays.md" in text, cmd.name
+
+
+def test_an_example_inside_a_fence_is_no_head_or_anchor(render, tmp_path):
+    """Code review round 2 (m7): an overlay that shows an anchor in a code block claims nothing."""
+    out = render(tmp_path, {"project_name": "d"})
+    heading = _heading(out)
+    ov = out / "docs/process/testing.local.md"
+    example = '```\nreplaces: "## Z" @new\noverlay-of: docs/process/gone.md\n```\n'
+    ov.write_text(OVERLAY.format(heading=heading) + "\nFor example:\n\n" + example)
+    assert _run(out, "--stamp", str(ov)).returncode == 0
+    assert example in ov.read_text()  # the stamp leaves the example as written
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+    # an overlay that only shows a head in a fence is no overlay at all
+    (out / "docs/process/notes.local.md").write_text("# notes\n\n" + example)
+    assert _run(out).returncode == 0
+
+
+def test_template_update_names_the_overlays_to_re_check(render, tmp_path, monkeypatch, capsys):
+    out = render(tmp_path, {"project_name": "d"})
+    (out / "docs/process/testing.local.md").write_text(OVERLAY.format(heading=_heading(out)))
+    for args in (["init", "-q", "-b", "main"], ["add", "-A"],
+                 ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "base"]):
+        subprocess.run(["git", *args], cwd=out, check=True)
+    sys.path.insert(0, str(out / "scripts/process"))
+    try:
+        import importlib
+        sys.modules.pop("template_update", None)
+        tu = importlib.import_module("template_update")
+        monkeypatch.setattr(tu, "answers", lambda *a, **k: ("gh:x/dev-process", "v1.0.0", {}))
+        monkeypatch.setattr(tu, "_copier", lambda *a, **k: subprocess.CompletedProcess(a, 0, "", ""))
+        monkeypatch.setattr(tu, "render", lambda *a, **k: True)
+        monkeypatch.setattr(tu, "write_deltas", lambda *a, **k: [])
+        assert tu.main([str(out), "--ref", "v1.0.1"]) == 0
+    finally:
+        sys.path.remove(str(out / "scripts/process"))
+        for name in ("template_update", "check_overlays", "template_verify"):
+            sys.modules.pop(name, None)
+    printed = capsys.readouterr().out
+    assert "re-check an overlay" in printed and "testing.local.md" in printed

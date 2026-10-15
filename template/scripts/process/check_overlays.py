@@ -42,11 +42,39 @@ ANCHOR_INTENT = re.compile(r"^[ \t]*(?:extends?|replaces?|replace)[ \t]*:", re.M
 # ATX heading; a closing `#` run counts only after whitespace (`## C#` is the heading "C#")
 _HEADING = re.compile(r"^ {0,3}(#{1,6})[ \t]+(.*?)(?:[ \t]+#+)?[ \t]*$")
 _FENCE_OPEN = re.compile(r"^ {0,3}(?P<fence>`{3,}|~{3,})(?P<info>.*)$")
+# copied byte for byte into the anchors (check_kernel.py): an overlay would never reach them
+UNOVERLAYABLE = frozenset({"docs/process/kernel.md"})
 
 
 def _norm(heading: str) -> str:
     m = _HEADING.match(heading.strip())
     return f"{m.group(1)} {m.group(2).strip()}" if m else heading.strip()
+
+
+def fenced(lines: list[str]) -> list[bool]:
+    """Per line: is it fenced code (the fences included)? CommonMark: a fence closes
+    with the same character, at least as long, indented at most three spaces."""
+    out, fence = [], ""
+    for line in lines:
+        if fence:
+            stripped = line.strip()
+            indent = len(line) - len(line.lstrip(" "))
+            if stripped and set(stripped) == {fence[0]} and len(stripped) >= len(fence) and indent <= 3:
+                fence = ""
+            out.append(True)
+            continue
+        f = _FENCE_OPEN.match(line)
+        if f and not (f.group("fence")[0] == "`" and "`" in f.group("info")):
+            fence = f.group("fence")
+        out.append(bool(fence))
+    return out
+
+
+def unfenced(text: str) -> str:
+    """The overlay's text with fenced lines blanked (line count kept): an example
+    head or anchor inside a code block is prose, not a claim."""
+    lines = text.splitlines(keepends=True)
+    return "".join("\n" if code else ln for ln, code in zip(lines, fenced(lines)))
 
 
 def sections(text: str) -> dict[str, str]:
@@ -55,19 +83,8 @@ def sections(text: str) -> dict[str, str]:
     occurs twice keeps its first section (an anchor names the first)."""
     lines = text.splitlines()
     heads: list[tuple[int, int, str]] = []
-    fence = ""  # the open fence (CommonMark: closed by the same character, at least as long)
-    for i, line in enumerate(lines):
-        if fence:
-            stripped = line.strip()
-            indent = len(line) - len(line.lstrip(" "))
-            if stripped and set(stripped) == {fence[0]} and len(stripped) >= len(fence) and indent <= 3:
-                fence = ""
-            continue
-        f = _FENCE_OPEN.match(line)
-        if f and not (f.group("fence")[0] == "`" and "`" in f.group("info")):
-            fence = f.group("fence")
-            continue
-        m = _HEADING.match(line)
+    for i, (line, code) in enumerate(zip(lines, fenced(lines))):
+        m = None if code else _HEADING.match(line)
         if m:
             heads.append((i, len(m.group(1)), _norm(line)))
     out: dict[str, str] = {}
@@ -88,7 +105,7 @@ def overlays(root: Path) -> list[Path]:
     found = []
     for p in sorted(root.glob(OVERLAY_GLOB)):
         try:
-            if HEAD_INTENT.search(p.read_text(encoding="utf-8")):
+            if HEAD_INTENT.search(unfenced(p.read_text(encoding="utf-8"))):
                 found.append(p)
         except (OSError, UnicodeDecodeError):
             found.append(p)  # unreadable: check() names it
@@ -108,13 +125,16 @@ def target_of(root: Path, rel: str) -> Path | None:
 def check_one(root: Path, overlay: Path) -> list[str]:
     rel = overlay.relative_to(root).as_posix()
     try:
-        text = overlay.read_text(encoding="utf-8")
+        text = unfenced(overlay.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError) as exc:
         return [f"{rel}: unreadable ({exc})"]
     head = HEAD.search(text.lstrip("\ufeff"))
     if head is None:
         return [f"{rel}: its `overlay-of:` line does not parse — write `overlay-of: <template path>` alone on "
                 f"its line"]
+    if head.group("path") in UNOVERLAYABLE:
+        return [f"{rel}: {head.group('path')} takes no overlay — it is copied byte for byte into the anchors; "
+                f"a project that must change it keeps its own copy (`.process-owned`)"]
     target = target_of(root, head.group("path"))
     if target is None:
         return [f"{rel}: its template file {head.group('path')} is gone or outside the repository — the template "
@@ -162,7 +182,8 @@ def stamp(root: Path, overlay: Path) -> list[str]:
                 if "changed this section" not in p and "not stamped yet" not in p]
     if problems:
         return problems
-    text = overlay.read_text(encoding="utf-8")
+    raw = overlay.read_text(encoding="utf-8")
+    text = unfenced(raw)
     head = HEAD.search(text.lstrip("\ufeff"))
     doc = sections(target_of(root, head.group("path")).read_text(encoding="utf-8"))
     missing = [_norm(a.group("heading")) for a in ANCHOR.finditer(text) if _norm(a.group("heading")) not in doc]
@@ -173,7 +194,9 @@ def stamp(root: Path, overlay: Path) -> list[str]:
     def fresh(a: re.Match) -> str:
         return f'{a.group("kind")}: "{a.group("heading")}" @{section_hash(doc[_norm(a.group("heading"))])}'
 
-    overlay.write_text(ANCHOR.sub(fresh, text), encoding="utf-8")
+    lines = raw.splitlines(keepends=True)
+    overlay.write_text("".join(ln if code else ANCHOR.sub(fresh, ln)
+                               for ln, code in zip(lines, fenced(lines))), encoding="utf-8")
     return []
 
 
