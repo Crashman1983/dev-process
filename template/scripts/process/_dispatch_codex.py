@@ -18,6 +18,7 @@ import datetime as _dt
 import hashlib
 import json
 import os
+import re
 import selectors
 import shutil
 import signal
@@ -40,6 +41,11 @@ UNAVAILABLE = "unavailable.jsonl"  # in the dispatch records' codex folder: why 
 HANDOFF = "handoff.json"  # in a run's evidence folder: what handoff did, so a second one does nothing
 REVIEWS = ".process-work/reviews"
 _OWNED: dict[str, subprocess.Popen] = {}
+
+
+class CodexUnavailable(ValueError):
+    """The run gave no usable review — failed, interrupted, or no valid result: the
+    recorded way out applies (`record_unavailable`), unlike a stale or tampered one."""
 
 
 # --- the CLI and its provider ------------------------------------------------------
@@ -200,12 +206,13 @@ def unavailable_ids(records: Path) -> set[str]:
     return out
 
 
-def fallback_hint(issue: int, phase: str, plan_review: bool, row: str | None) -> str:
+def fallback_hint(issue: int, phase: str, plan_review: bool, row: str | None, tier: int | None = None) -> str:
     if phase != "review":
         return "dispatch: start it with --harness claude, or fix the Codex CLI on this host"
     work = f"{issue}-plan" if plan_review else str(issue)
     return ("dispatch: without Codex the review still runs — the recorded way out (docs/process/tower.md):\n"
             f"  1. dispatch.py start --issue {issue} --phase review"
+            + (f" --tier {tier}" if tier is not None else "")
             + (" --plan-review" if plan_review else "") + " --harness claude\n"
             f"  2. commit `skipped cross-model work={work}: codex unavailable {row or '<row-id>'} — <reason>`\n"
             "  3. attest that pass `single-family`")
@@ -254,8 +261,9 @@ def binding(cwd: Path, bundle: Path) -> dict:
 
 
 def dirty(cwd: Path) -> list[str]:
-    """Paths `git status` reports changed or untracked in the worktree."""
-    return [ln[3:].strip().strip('"') for ln in _git(cwd, "status", "--porcelain").decode().splitlines() if ln.strip()]
+    """Paths `git status` reports changed or untracked in the worktree (an untracked
+    folder as one entry ending in `/`)."""
+    return [ln[3:].strip('"') for ln in _git(cwd, "status", "--porcelain").decode().splitlines() if ln.strip()]
 
 
 def _records_appended(cwd: Path, rel: str) -> bool:
@@ -446,7 +454,7 @@ def _schema(*, plan_review: bool, gate: bool) -> dict:
                               "action": {"type": "string", "enum": ["fix", "accept", "follow-up"]},
                               "kind": {"type": "string", "enum": ["knowledge-gap", "requirement", "implementation",
                                                                   "test-gap", "process", "environment"]},
-                              "issue": {"type": "string"},
+                              "issue": {"type": "string", "pattern": "^(-|#[0-9]+|[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[0-9]+)$"},
                               "title": {"type": "string"}},
                "required": ["sev", "action", "kind", "issue", "title"]}
     lines = {"type": "array", "items": {"type": "string"}}
@@ -520,7 +528,7 @@ def _validated(result: object, rec: dict) -> dict | None:
             return None
         if any("enum" in spec and f[k] not in spec["enum"] for k, spec in fields.items()):
             return None
-        if not all(_one_line(f[k]) for k in fields):
+        if not all(_one_line(f[k]) for k in fields) or not _ISSUE_REF.fullmatch(f["issue"]):
             return None
     for key in ("criteria", "refute"):
         if not (isinstance(result[key], list) and all(_one_line(x) for x in result[key])):
@@ -530,6 +538,9 @@ def _validated(result: object, rec: dict) -> dict | None:
     if schema.get("x-gate-code") and not result["refute"]:
         return None
     return result
+
+
+_ISSUE_REF = re.compile(r"-|#\d+|[\w.-]+/[\w.-]+#\d+|https://github\.com/[\w.-]+/[\w.-]+/issues/\d+")
 
 
 def _one_line(value: object) -> bool:
@@ -596,16 +607,16 @@ def _report_text(rec: dict, result: dict, *, work: str, plan_review: bool, refut
     return "\n".join(lines) + "\n"
 
 
-def _attested_already(wt: Path, work: str, model: str, head: str, plan_review: bool) -> bool:
-    """A REVIEW line of this work, model and head in the journal: a handoff that
-    crashed after its commit must not attest the run twice."""
+def _attested_already(wt: Path, work: str, model: str, head: str, plan_review: bool) -> dict | None:
+    """The REVIEW line of this work, model and head in the journal, if there is one: a
+    handoff that stopped after its commit finishes from it and never attests twice."""
     from check_review import JOURNAL_DIR, parse_review_lines  # noqa: PLC0415
     want = f"{work}-plan" if plan_review else work
     for f in (wt / JOURNAL_DIR).glob("**/*.md"):
         for _ln, r in parse_review_lines(f.read_text(encoding="utf-8", errors="replace"))[0]:
             if r.get("work") == want and r.get("model") == model and r.get("head") == head:
-                return True
-    return False
+                return r
+    return None
 
 
 def handoff(root: Path, rec: dict, *, implementer: str | None = None) -> dict:
@@ -630,13 +641,20 @@ def handoff(root: Path, rec: dict, *, implementer: str | None = None) -> dict:
     work = str(rec["issue"])
     wt = Path(rec["worktree"])
     b = rec["binding"]
-    if _attested_already(wt, work, rec["model"], b["head"], plan_review):
+    line = _attested_already(wt, work, rec["model"], b["head"], plan_review)
+    if line:
         # a handoff that stopped after its attest commit: finish it, never attest again
         return _finish(rec, wt, done, {"invocation": rec["invocation"], "artifact": b, "state": "attested",
+                                       "verdict": line.get("verdict"), "report": "(from the journal)",
                                        "note": "the journal already holds this run's REVIEW line"})
     try:
-        if rec.get("phase") != "review" or outcome(rec, _same_process(rec)) != "completed":
-            raise ValueError("the review has no verified successful exit receipt")
+        if rec.get("phase") != "review":
+            raise ValueError("not a review run")
+        ended = outcome(rec, _same_process(rec))
+        if ended == "running":
+            raise ValueError("the review is still running — hand it off when it ends")
+        if ended != "completed":
+            raise CodexUnavailable(f"the review run ended {ended}, with no usable result")
         row = terminal(rec)
         if binding(wt, Path(b["bundle"])) != b:
             raise ValueError("the bundle or the Git artifact changed since the review ran")
@@ -647,9 +665,12 @@ def handoff(root: Path, rec: dict, *, implementer: str | None = None) -> dict:
         rec["result_sha256"] = hashlib.sha256(raw).hexdigest()
         if row.get("result_sha256") != rec["result_sha256"] or row.get("stdout_sha256") != digest(evidence / "stdout.log"):
             raise ValueError("the review output changed after its exit receipt")
-        result = _validated(json.loads(raw), rec)
+        try:
+            result = _validated(json.loads(raw), rec)
+        except (json.JSONDecodeError, RecursionError) as exc:
+            raise CodexUnavailable(f"the review result is no JSON ({exc})") from exc
         if result is None:
-            raise ValueError("the review result does not match its schema")
+            raise CodexUnavailable("the review result does not match its schema")
         follow = [f["title"] for f in result["findings"] if f["action"] == "follow-up" and f["issue"] in ("", "-")]
         if follow:
             raise ValueError(f"a follow-up finding names no issue: {follow[0]!r}")
@@ -678,6 +699,7 @@ def handoff(root: Path, rec: dict, *, implementer: str | None = None) -> dict:
     report.write_text(_report_text(rec, result, work=work, plan_review=plan_review, refute_round=refute_round),
                       encoding="utf-8")
     plans = [p for p in dirty(wt) if _records_appended(wt, p)]  # records appended after a refusal ride the attest
+    before = set(dirty(wt))
     cmd = [sys.executable, str(Path(attest.__file__).resolve()), "--work", work, "--tier", str(tier),
            "--reviewer", "codex", "--model", rec["model"], "--independence", f"bundle,non-implementing,{token}",
            "--verdict", result["verdict"], "--base", b["base"], "--head", b["head"], "--with", rel,
@@ -687,6 +709,8 @@ def handoff(root: Path, rec: dict, *, implementer: str | None = None) -> dict:
         r = subprocess.run([*cmd, flag, str(wt)], cwd=wt, capture_output=True, text=True, env=git_environment(),
                            timeout=300, check=False)
         if r.returncode != 0:
+            if flag == "--commit":  # attest may have written and staged its line before the commit failed
+                _restore(wt, before)
             report.unlink(missing_ok=True)  # the worktree stays as the review found it
             for d in made:  # deepest first: the folders this handoff made
                 with contextlib.suppress(OSError):
@@ -696,6 +720,26 @@ def handoff(root: Path, rec: dict, *, implementer: str | None = None) -> dict:
             return record
     record["state"] = "attested"
     return _finish(rec, wt, done, record)
+
+
+def _restore(wt: Path, before: set[str]) -> None:
+    """Undo what a failed attest commit left: unstage everything, put tracked files back
+    to HEAD unless they were changed before this handoff (an appended plan record),
+    and remove untracked files it created."""
+    with contextlib.suppress(ValueError):
+        _git(wt, "reset", "-q")
+    for rel in dirty(wt):
+        if rel in before:
+            continue
+        path = wt / rel
+        if rel.endswith("/"):  # an untracked folder the attest created (git shows it whole)
+            shutil.rmtree(path, ignore_errors=True)
+            continue
+        try:
+            _git(wt, "checkout", "-q", "HEAD", "--", rel)
+        except ValueError:  # not in HEAD: a file the attest created
+            with contextlib.suppress(OSError):
+                path.unlink()
 
 
 def _finish(rec: dict, wt: Path, done: Path, record: dict) -> dict:

@@ -184,7 +184,7 @@ def load_policy(root: Path, harness: str | None = None) -> dict:
     if harness == "codex":
         _check_codex_variant(data)
     if not isinstance(data.get("command"), str) or "{prompt}" not in data["command"]:
-        raise SystemExit(f"dispatch: {POLICY} needs a `command` template containing {{prompt}}")
+        raise SystemExit(f"dispatch: {name} needs a `command` template containing {{prompt}}")
     _check_env(data.get("env"), "env")
     quiet = data.get("stale_minutes")
     if quiet is not None and (isinstance(quiet, bool) or not isinstance(quiet, int) or quiet <= 0):
@@ -1820,7 +1820,7 @@ def start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str |
         except ValueError as exc:
             row = None if dry_run else codex_run.record_unavailable(
                 _records_dir(root), issue=issue, phase=phase, model=model, branch=branch, reason=str(exc))
-            print(f"dispatch: not starting — {exc}\n" + codex_run.fallback_hint(issue, phase, plan_review, row),
+            print(f"dispatch: not starting — {exc}\n" + codex_run.fallback_hint(issue, phase, plan_review, row, tier),
                   file=sys.stderr)
             return 3
         argv[0] = codex_binary
@@ -1959,6 +1959,15 @@ def handoff(root: Path, branch: str, implementer: str | None = None) -> int:
     rec = found[1]
     try:
         done = codex_run.handoff(root, rec, implementer=implementer)
+    except codex_run.CodexUnavailable as exc:
+        # no usable review from this run: the recorded way out, with its row id
+        row = codex_run.record_unavailable(
+            _records_dir(root), issue=rec.get("issue"), phase="review", model=rec.get("model", ""),
+            branch=branch, reason=str(exc), head=(rec.get("binding") or {}).get("head"))
+        print(f"dispatch: handoff refused — {exc}\n"
+              + codex_run.fallback_hint(rec.get("issue"), "review", bool(rec.get("plan_review")), row,
+                                        rec.get("tier")), file=sys.stderr)
+        return 3
     except ValueError as exc:
         print(f"dispatch: handoff refused — {exc}", file=sys.stderr)
         return 3
@@ -2845,8 +2854,12 @@ def _chain(root: Path, *, dry_run: bool = False) -> int:
         if nxt:
             tier = rec.get("tier") if rec.get("tier") is not None else plan_tier_on_origin(root, branch)
             try:
+                # a harness travels with the work, never across a review: a Codex review's fix
+                # round on Codex, or a Codex execute reviewed by Codex, leaves the review
+                # single-family — the other side of the review takes the default harness
+                carried = rec.get("harness") if "review" not in (rec.get("phase"), nxt) else None
                 queue_add(root, issue=issue, phase=nxt, tier=tier, branch=branch, plan_review=plan_review,
-                          harness=rec.get("harness"))
+                          harness=carried)
             except OSError as exc:
                 print(f"dispatch: {branch} stopped, but {nxt} could not be queued ({exc}) — queue it by hand: "
                       f"dispatch.py queue add --issue {issue} --phase {nxt}"

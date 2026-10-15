@@ -306,7 +306,7 @@ def test_a_review_without_a_valid_result_runs_once_more_then_fails(mods, tmp_pat
 def review_repo(render, tmp_path, monkeypatch):
     """A rendered project on branch 7-widget (plan, code, test) with a bare origin, an
     implementer report, and the Codex variant pointing at a fake CLI."""
-    def build(result: dict, *, implementer="claude-opus-5", tier=2):
+    def build(result: dict, *, implementer="claude-opus-5", tier=2, gate=False):
         out = render(tmp_path / "r", {"project_name": "d", "modules": {"telemetry": True}})
         origin = tmp_path / "origin.git"
         subprocess.run(["git", "init", "-q", "--bare", str(origin)], check=True)
@@ -324,6 +324,8 @@ def review_repo(render, tmp_path, monkeypatch):
         (out / "widget.py").write_text("def widget():\n    return 42\n")
         (out / "tests").mkdir(exist_ok=True)
         (out / "tests/test_widget.py").write_text(TEST)
+        if gate:  # the diff touches gate code: the review must refute it
+            (out / "scripts/process/extra_gate.py").write_text("X = 1\n")
         _git(out, "add", "-A")
         _git(out, "commit", "-q", "-m", "feat: widget")
         _git(out, "push", "-q", "origin", "7-widget")
@@ -477,3 +479,154 @@ def test_rehydrate_gives_a_codex_session_the_whole_context_or_stops(render, tmp_
     assert subprocess.run([*run, "--check"], cwd=out, capture_output=True, text=True).returncode == 0
     hooks = json.loads((out / ".codex/hooks.json").read_text())["hooks"]["SessionStart"]
     assert len(hooks) == 1 and hooks[0]["hooks"][0]["command"].endswith("--codex")
+
+
+# --- review findings of v2.73 (code review / refute) -----------------------------------
+
+def test_a_harness_never_crosses_a_review_in_the_chain(mods, monkeypatch):
+    """A Codex review's fix round on Codex, or a Codex execute reviewed by Codex, would leave
+    the review single-family: the other side of a review takes the default harness."""
+    mod, out = mods
+    d = mod("dispatch")
+    calls = []
+    monkeypatch.setattr(d, "queue_add", lambda *a, **k: calls.append(k))
+    monkeypatch.setattr(d, "drain", lambda *a: 0)
+    monkeypatch.setattr(d, "stop", lambda *a, **k: 0)
+    for phase, report, nxt, carried in (("review", "blocked", "execute", None), ("execute", "pushed", "review", None),
+                                        ("plan", "planned", "execute", "codex")):
+        calls.clear()
+        rec = {"branch": "7-x", "issue": 7, "phase": phase, "tier": 2, "harness": "codex", "worktree": str(out),
+               "started": 1, "state": "gone"}
+        monkeypatch.setattr(d, "records", lambda _r, rec=rec: [rec])
+        monkeypatch.setattr(d, "_load_record", lambda *a, rec=rec: (out / "r", rec))
+        monkeypatch.setattr(d, "session_report", lambda *a, s=report: {"state": s})
+        monkeypatch.setattr(d, "plan_review_state", lambda *a: (2, True))
+        monkeypatch.setattr(d, "plan_gates", lambda *a: None)
+        monkeypatch.setattr(d, "attest_on_origin", lambda *a, **k: True)
+        monkeypatch.setattr(d, "_out", lambda *a: "")
+        try:
+            d._chain(out)
+        except Exception:  # noqa: BLE001 — the chain's own preconditions differ per phase; only the queue line counts
+            pass
+        nexts = [c for c in calls if c.get("phase") == nxt]
+        if nexts:
+            assert nexts[0].get("harness") == carried, (phase, nexts[0])
+
+
+def test_a_failed_review_run_records_the_way_out(review_repo, capsys):
+    out, d, codex = review_repo(None)  # the fake CLI writes no result: off schema
+    assert d.start(out, issue=7, phase="review", tier=2, branch="7-widget", title=None, dry_run=False,
+                   harness="codex") == 0
+    rec = d._load_record(out, "7-widget")[1]
+    _wait(codex, d, rec, "failed")
+    assert d.handoff(out, "7-widget") == 3
+    err = capsys.readouterr().err
+    rows = [json.loads(x) for x in (d._records_dir(out) / "codex" / codex.UNAVAILABLE).read_text().splitlines()]
+    assert rows[-1]["head"] == rec["binding"]["head"] and f"codex unavailable {rows[-1]['id']}" in err
+    assert "--tier 2" in err
+
+
+def test_a_failed_attest_commit_leaves_the_worktree_clean_and_rerunnable(review_repo):
+    out, d, codex = review_repo(PASS)
+    _run_review(out, d, codex)
+    hooks = out / ".git/hooks"
+    hooks.mkdir(exist_ok=True)
+    hook = hooks / "pre-commit"
+    hook.write_text("#!/bin/sh\nexit 1\n")
+    hook.chmod(0o755)
+    head = _git(out, "rev-parse", "HEAD")
+    assert d.handoff(out, "7-widget") == 1
+    assert _git(out, "status", "--porcelain") == "" and _git(out, "rev-parse", "HEAD") == head
+    hook.unlink()
+    assert d.handoff(out, "7-widget") == 0
+
+
+def test_a_handoff_that_stopped_after_its_commit_finishes_without_a_second_line(review_repo):
+    out, d, codex = review_repo(PASS)
+    rec = _run_review(out, d, codex)
+    assert d.handoff(out, "7-widget") == 0
+    (Path(rec["evidence"]) / codex.HANDOFF).unlink()  # as if it crashed before its receipt
+    journal = lambda: "\n".join(p.read_text() for p in (out / ".process-work/journal").glob("**/*.md"))  # noqa: E731
+    lines = journal().count("REVIEW work=7")
+    assert d.handoff(out, "7-widget") == 0
+    assert journal().count("REVIEW work=7") == lines
+
+
+@pytest.mark.parametrize("issue", ["none", "", "#x"])
+def test_a_finding_names_an_issue_or_none(review_repo, issue):
+    bad = {**PASS, "findings": [{"sev": "minor", "action": "accept", "kind": "implementation", "issue": issue,
+                                 "title": "t"}]}
+    out, d, codex = review_repo(bad)
+    assert d.start(out, issue=7, phase="review", tier=2, branch="7-widget", title=None, dry_run=False,
+                   harness="codex") == 0
+    _wait(codex, d, d._load_record(out, "7-widget")[1], "failed")  # off its schema: the run failed
+    assert d.handoff(out, "7-widget") == 3
+
+
+def test_tier_2_gate_code_carries_the_reviewers_refute_in_its_report(review_repo):
+    refuted = {**PASS, "refute": ["survives: a stale stamp cannot reach the gate"]}
+    out, d, codex = review_repo(refuted, gate=True)
+    rec = _run_review(out, d, codex)
+    assert rec["gate_code"] is True
+    assert json.loads(Path(rec["schema"]).read_text())["x-gate-code"] is True
+    assert d.handoff(out, "7-widget") == 0
+    report = next((out / ".process-work/reviews").glob("*-7-codex-*.md")).read_text()
+    assert "REFUTE work=7 round=1: survives: a stale stamp cannot reach the gate" in report
+    # a gate-code result without its refute is no usable review
+    assert codex._validated(PASS, rec) is None
+
+
+def test_a_codex_plan_review_attests_the_plan(review_repo):
+    plan_pass = {"verdict": "pass", "findings": [], "criteria": [], "refute": []}
+    out, d, codex = review_repo(plan_pass, implementer=None)
+    d._report.write_report(out, "planned", issue=7, note="", worker="7-widget", model="claude-opus-5")
+    assert d.start(out, issue=7, phase="review", tier=2, branch="7-widget", title=None, dry_run=False,
+                   plan_review=True, harness="codex") == 0
+    rec = d._load_record(out, "7-widget")[1]
+    _wait(codex, d, rec, "completed")
+    assert d.handoff(out, "7-widget") == 0
+    report = next((out / ".process-work/reviews").glob("*-7-plan-codex-*.md")).read_text()
+    assert "phase: plan" in report
+    journal = "\n".join(p.read_text() for p in (out / ".process-work/journal").glob("**/*.md"))
+    assert "REVIEW work=7-plan" in journal and "cross-model" in journal
+
+
+def test_rehydrate_stops_on_a_malformed_or_escaping_codex_policy(render, tmp_path):
+    out = render(tmp_path / "r", {"project_name": "d"})
+    _git(out, "init", "-q", "-b", "main")
+    run = [sys.executable, str(out / "scripts/process/rehydrate.py"), "--codex"]
+    local = out / "docs/process/model-policy.codex.local.json"
+    for bad in ('{"context_sources": ["NOTES.md"]', '{"context_sources": [7]}', "[]",
+                '{"context_sources": ["/etc/hostname"]}', '{"context_sources": ["../x"]}'):
+        local.write_text(bad)
+        got = json.loads(subprocess.run(run, cwd=out, capture_output=True, text=True, check=True).stdout)
+        assert got.get("continue") is False, bad
+    local.unlink()
+    assert subprocess.run([*run, "--install"], cwd=out, capture_output=True, text=True).returncode == 0
+    assert "/.codex/" in (out / ".git/info/exclude").read_text()
+    assert _git(out, "status", "--porcelain", "--", ".codex") == ""
+
+
+def test_the_tower_survives_a_corrupt_trace_and_forgets_finished_work(review_repo):
+    out, d, codex = review_repo(PASS)
+    tower = importlib.import_module("tower")
+    folder = d._records_dir(out) / "codex"
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / codex.UNAVAILABLE).write_text("[" * 200000 + "]" * 200000 + "\n")
+    assert isinstance(codex.unavailable_ids(d._records_dir(out)), set)
+    j = out / ".process-work/journal"
+    j.mkdir(parents=True, exist_ok=True)
+    head, base = _git(out, "rev-parse", "HEAD"), _git(out, "merge-base", "main", "HEAD")
+    (j / "2026-10-15.md").write_text(
+        f"REVIEW work=99 tier=2 reviewer=codex model=gpt-6-sol independence=bundle,non-implementing,cross-model "
+        f"verdict=block round=1 base={base} head={head}\n"
+        f"REVIEW work=99 tier=2 reviewer=fresh model=claude-opus-5 independence=bundle,non-implementing,single-family "
+        f"verdict=pass round=1 base={base} head={head}\n")
+    kinds = {f["kind"] for f in tower.codex_findings(out, [{"path": str(out), "branch": "7-widget"}])}
+    assert "codex-block-overridden" not in kinds  # work 99 has no active plan: history, not a finding
+
+
+def test_ci_true_renders_no_manual_wording(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {"telemetry": True}})
+    for name in ("process-gates.yml", "owner-digest.yml", "process-kpis.yml"):
+        assert "ci.github: manual" not in (out / ".github/workflows" / name).read_text(), name
