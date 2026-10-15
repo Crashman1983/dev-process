@@ -114,7 +114,13 @@ completeness runs near the merge.** The ladder:
 - **Per push**: the scoped set again — with **honest fallbacks to full**:
   a changed file the map cannot place, and the categories whose effects do
   not travel through imports (config, tokens/theme, global styles, schema/
-  migrations, DI registration, fixtures) always run full.
+  migrations, DI registration, fixtures) always run full. With `unmapped:
+  skip`, a branch push names what fell outside the map and leaves the full
+  run to the merge boundary: a fault only a full run finds then surfaces in
+  the train and sends a batch back instead of one branch — bounded, because
+  the train bisects, against a full run paid on every branch push
+  (downstream: ten minutes per attempt). A push to the integration branch
+  always keeps the full fallback.
 - **Per merge boundary** (the batch): the FULL suite, exactly once for the
   whole batch of changes a branch or stage carries — this is where several
   changes share one full run and the economics work. `finish.py` names the
@@ -176,9 +182,17 @@ at the same time do not finish faster; they crawl together (observed: load
 6 on four agents), and a crawling gate is the one that gets bypassed. Two
 answers, neither a bypass: the certificate transfer above — a tree the
 boundary run already certified needs no scoped run at push — and a
-**test lane**: one lock per host (`flock`, where available) around every
-test-running arm, so parallel worktrees wait their turn. The sum of work is
-the same; every single run is fast, and nobody reaches for `--no-verify`.
+**test lane** — two per host (`lane.py`): `full` for the long runs (the
+boundary suite, coverage; run them under `nice`), `scoped` for the short ones
+(a push's selected tests, `--certify`). A scoped run never queues behind a
+full run; runs within one lane wait their turn. The sum of work is the same;
+every single run is fast, and nobody reaches for `--no-verify`.
+**A push never waits for tests inside an agent's tool call** (downstream: a
+tool call died at 40 minutes with the tests at 96 %, five times in a row): the
+lane wait is bounded (the lane's `wait`), and past it the push stops with exit
+75 naming the holder. The way out is `test_select.py run --certify` started in
+the background; the push then reads its certificate. Never retry the push in a
+loop.
 A merge commit of already-verified branches is not exempt by itself — the
 combination is new — but it is exactly what the boundary run certifies
 once, for every later gate to read.
@@ -195,6 +209,8 @@ code. A project supplies data; the template owns the sequence:
   a full suite), an optional local `select` command for what a map cannot
   express (NUL-separated paths on stdin, targets on stdout), a `timeout`.
   Beside the stacks: `merge_suite` (the train's default `--suite`),
+  `merge_scope` (an argv whose stdout names the stages `merge_suite` will
+  run, for a suite that selects its stages — "Stages" below),
   `preflight` (an argv checking the environment — interpreter, venv, disk,
   logins — once before any test of a push, a `--certify` or the train;
   `preflight_timeout`, default 600 s, for the train's too; on a push the
@@ -239,13 +255,38 @@ code. A project supplies data; the template owns the sequence:
 What the data must get right, from downstream measurements: map to the
 **closest test package** (a top-level mapping selected 61 % of all test
 files for a one-file change); let the runner run **parallel, bounded**
-(pytest-xdist `-n`, the runner's own pool); and **measure** — lane hold
+(pytest-xdist `-n`, the runner's own pool — set in the stack's `runner` argv,
+never in the runner's shared config (`addopts`), where it reaches the merge
+suite and collides with a CI run's `-p no:xdist`); give each parallel worker
+its own port range and temp directory (the runner names the worker:
+`PYTEST_XDIST_WORKER`); and **measure** — lane hold
 time per push, and the train's phases (`process_kpis.py train-phases`) —
 before and after changing a selection. Limits: a server-side PR merge
 passes no push hook; a clone without any integration ref (single-branch)
 bounds a branch push by the remote's side of the update, so code that
 reached the remote branch past the hook is not selected again; whether `merge_suite` covers every stack is the
 project's duty; a file git ignores is invisible to the clean-tree check.
+
+**Stages.** A merge suite that runs in stages (a backend and a frontend
+stage, say) and may select them leaves two things in the git directory of
+the checkout it ran in — `git rev-parse --absolute-git-dir` from the suite's
+working directory, the worktree's own, never the common directory —
+`<git-dir>/merge-suite/`: `stages`, the names of the stages this run chose
+(space-separated), and per stage that ran `<stage>.time` with `<start> <end>
+<exit code>` (epoch seconds). Each run deletes `stages` and every `*.time`
+before it selects, then writes `stages` before its first stage, so a file
+left by an earlier run never names this one. `merge_scope` must give the same
+answer for one tree wherever it runs (the train's worktree, the merge push):
+a selector that answers differently makes every certificate miss — safe, but
+the suite runs twice. The train
+folds the times into `phases.jsonl` (`stages`: seconds, runs, green, red or
+skipped; `process_kpis.py train-phases` shows them per stage), and with
+`merge_scope` configured the merge certificate names the stages: the
+certificate's evidence is the suite plus `scope=<stages>`, so a run that
+skipped a stage never satisfies a merge push whose selector wants it, and a
+run whose `stages` file is missing or empty certifies nothing — the scope is
+read from the run, never recomputed after it (`certificate.run_evidence`). A
+suite without stages writes neither file; nothing changes for it.
 
 ## Ratchets — a threshold that only ever tightens
 
@@ -285,6 +326,17 @@ that cannot start apart from a runner that ran red.
 
 - A **flaky test is a defect**, not weather: fix it or quarantine it the same
   day with an issue (or an inbox entry, tracker-less) — a suite people retry is a suite people ignore.
+  Where a project quarantines (the template ships none), the quarantine is
+  data, not a skip marker: one entry per test with its issue
+  and an expiry at most 14 days out. Only the branch-push runner honours it;
+  the merge boundary always runs the test, and the switch that enables the
+  quarantine must not be inheritable by the merge suite. An entry without
+  issue or date, dated too far out, past its date, or whose issue is closed
+  skips nothing and says why. The owner or the steward adds an entry, never
+  the author of the branch it would unblock.
+- A **viewport or device matrix multiplies the whole E2E run**: every extra
+  width runs every spec again. Keep the per-push run on the widths the change
+  needs (one desktop, one mobile) and run the full matrix nightly.
 - **Stability proofs run scoped × N, full × 1.** Proving a fix is not flaky
   means repeating the *affected files* N times plus one full run — never N
   consecutive full runs; five full suites for one stability claim is the

@@ -411,10 +411,16 @@ def candidates(root: Path, local: str, base: str) -> list[dict]:
             shown = _git(root, "show", f"{b}:{rel}")
             if shown.returncode != 0:
                 branch_unreadable.append(f"{rel} on {b}")  # an unread plan hides its open question
-            elif _review.open_questions(shown.stdout):
-                open_q.append(rel)
+            elif questions := _review.open_questions(shown.stdout):
+                open_q.append((rel, " ".join(questions[0].group(0).split())[:160]))
         if open_q:
-            c["reasons"].append(f"open DECISION NEEDED in {open_q[0]} — answer it as a DECISION line before merging")
+            # the line and the answer forms (downstream: questions answered in content but
+            # left unmarked held branches for a day, ten marking commits after the fact)
+            rel, line = open_q[0]
+            c["reasons"].append(
+                f"open DECISION NEEDED in {rel}: `{line}` — answer it before merging: a dated "
+                f"`DECISION <date> <who>: …` line in place of it, or mark the question "
+                f"`(answered <date>)` before its colon")
         if branch_unreadable:
             c["reasons"].append(f"git could not read {', '.join(branch_unreadable)} — an unread name or plan "
                                 f"is no Tier 0 plan; repair the clone (`git fsck`, fetch) and run the train again")

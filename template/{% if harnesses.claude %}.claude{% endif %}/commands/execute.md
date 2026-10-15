@@ -1,6 +1,6 @@
 # /execute
 
-At the first push of the branch, `uv run scripts/process/report.py pushed --issue N` (`/report`); when you cannot proceed, `report.py blocked --note "<why>"` the moment it happens — that line is what gets you unblocked. A question only the owner can answer is not a chat message: write it into the plan's `## Decisions` as `DECISION NEEDED <date> <you>: <question> — options: A …, B …; recommendation: …`, commit, report `blocked` with the same text, and carry on with tasks the answer does not touch (or stop). The steward is your decision partner: it decides, or brings a question that touches a product principle or is destructive to the owner, and writes the answer back as a `DECISION` line; read the plan again before the task that depends on it.
+At the first push of the branch, `uv run scripts/process/report.py pushed --issue N` (`/report`); when you cannot proceed, `report.py blocked --note "<why>"` the moment it happens — that line is what gets you unblocked. A question only the owner can answer is not a chat message: write it into the plan's `## Decisions` as `DECISION NEEDED <date> <you>: <question> — options: A …, B …; recommendation: …`, commit, report `blocked` with the same text, and carry on with tasks the answer does not touch (or stop). The steward is your decision partner: it decides, or brings a question that touches a product principle or is destructive to the owner, and writes the answer back as a `DECISION` line, marking the question `(answered <date>)` before its colon (an unmarked question stays open, and the train refuses the branch); read the plan again before the task that depends on it.
 
 **Before you report `pushed`:**
 1. **A contradiction is a question, not a note.** When what you observe contradicts an acceptance criterion or the contract (the criterion says "no visual change" and your change drops an animation), write a `DECISION NEEDED`, not a journal line, and do not report `pushed` while it is open.
@@ -31,7 +31,11 @@ write the failing test (its edge cases: the classes of
 the task closes when its behaviour is green. Test and implementation land in
 one or two conventional commits (`commits.md`, Atomicity); tick the task's
 checkbox in `tasks.md` in the last of them (the checkboxes are the canonical
-progress state). Keep tasks isolated so each is independently reviewable. A decision
+progress state). Keep tasks isolated so each is independently reviewable.
+Spend turns on edits, not on finding: start from the task's anchors, read a
+file once (the whole function or file) instead of repeated slices, and run the
+task's named command once red and once green — broader suites at the end of a
+packet, not after every edit. A decision
 taken with the owner in dialogue is written to the plan's `## Decisions`
 ledger before the next tool call — `process_context.py` prints the ledger
 back after every compaction; the conversation it came from is gone by then.

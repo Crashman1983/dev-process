@@ -31,7 +31,8 @@ Record the result with the writer, never by hand:
 
     python scripts/process/attest.py --work <id> --tier <n> --reviewer <id> \
       --model <family> --independence bundle,non-implementing[,cross-model] \
-      --verdict pass|block --bundle /tmp/bundle.md   # [--plan-review]
+      --verdict pass|block --bundle /tmp/bundle.md \
+      --commit --with .process-work/reviews/<report>.md   # [--plan-review]
 
 It takes the reviewed range (base, head) from the bundle, checks that a full
 round's base is the head's fork point, validates the grammar and appends the

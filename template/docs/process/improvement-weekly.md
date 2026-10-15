@@ -66,7 +66,18 @@ say what you could not see.
 5. **Write the report** (below) and commit it with the triage lines.
 6. **Render the news** (`git fetch`, then `uv run scripts/process/news.py render`, where the
    project keeps `news/` fragments) and let `NEWS.md` ride the same branch
-   and merge as the report (`news.md`).
+   and merge as the report (`news.md`). Where the project schedules this run
+   (a timer), the scheduled run renders from a freshly fetched integration
+   branch in a worktree of its own and hands a change over as a
+   `chore/news-render-<date>` branch the steward takes like any train
+   candidate; render by hand only when the scheduled run did not happen. An
+   unattended run keeps three rules (downstream, each was learned once):
+   **one at a time** — a lock (`flock -n` on a file in the git common dir), a
+   second start exits quietly; **a deadline** — a oneshot service without
+   `TimeoutStartSec` hung and silently skipped the following weeks; **only
+   its own branches** — it deletes a local branch only when every commit on
+   it carries the run's own trailer or is already merged (unmerged hand work
+   was deleted with `-D`), and an open branch of its own suppresses a new one.
 
 ## Report
 

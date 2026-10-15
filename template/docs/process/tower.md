@@ -159,7 +159,10 @@ cannot carry (no `{effort}`) refuses the start and is flagged by
 `command`; runner and host stay the phase's. Another family for the Tier 3
 review is a local cell, e.g. `{"model": "<codex model>", "effort": "xhigh",
 "command": "codex exec --model {model} -c model_reasoning_effort={effort}
---sandbox read-only {prompt}"}` — the review attestation is then
+--sandbox read-only {prompt}"}` (a cell is an argv, no shell: dispatch's
+detached runner closes the worker's stdin itself; a tmux cell that starts
+`codex exec` needs a wrapper script that redirects stdin from `/dev/null`,
+or Codex waits for input — downstream, two hours) — the review attestation is then
 `cross-model`; the default Opus review is `single-family`
 (`verification-independence.md`). The model has one owner: `start`
 refuses while the phase's command file declares `model:` or `effort:` in

@@ -48,7 +48,7 @@ Fragments stay where they are; every render rebuilds the whole file.
 
 The steward fetches the integration branch first (the dates come from it;
 without a fetch, freshly merged fragments read as unreleased), renders weekly
-(`improvement-weekly.md`) and merges the result
+(`improvement-weekly.md`, step 6 — also for a scheduled, unattended run) and merges the result
 the normal way — a branch, then `finish.py` or the train, never a direct
 commit to the integration branch. The owner digest shows the last days'
 entries (`human_digest.py`); `news.py show --since <date>` prints them

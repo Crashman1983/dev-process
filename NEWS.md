@@ -5,6 +5,17 @@ im Detail zu kennen. Je Version ein paar Sätze: was sich für ein Projekt
 ändert, das die Vorlage nutzt, und was es davon hat. Die vollständigen
 technischen Einzelheiten stehen im [CHANGELOG](CHANGELOG.md).
 
+## v2.72.0 — Was ein Projekt gelernt hat, kommt zurück in die Vorlage
+
+Kenni, das erste Projekt auf dieser Vorlage, hatte in den letzten Wochen
+einiges selbst verbessert. Vieles davon steckt jetzt in der Vorlage, damit
+das Projekt nicht davonläuft und andere Projekte es auch haben. Dazu gehört
+eine Bestätigung, dass Tests gelaufen sind, die nun genau sagt, welche
+Testgruppen liefen; dazu Zeitmessungen je Testgruppe, Pläne, die jeder
+Aufgabe die genaue Fundstelle mitgeben, sodass ein kleines Modell weniger
+sucht (gemessen: rund ein Drittel der Schritte), und Lehren aus dem Betrieb.
+Zwei größere Teile warten noch auf eine Entscheidung des Owners.
+
 ## v2.71.0 — Eine Prüfung zählt nur mit Beleg
 
 Eine Prüfung gilt jetzt erst als bestanden, wenn ihre Belege vorliegen. Zu

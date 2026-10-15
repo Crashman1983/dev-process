@@ -106,7 +106,9 @@ a day downstream, with five reviewed candidates waiting.
    continuing turns that issue's `Closes #N` into `Refs #N`
    (`definition-of-ready-and-done.md`, Bindingness).
 3. The process gates, then the full suite, run **once** on the combined
-   tree. Red: the **same tree runs once more** — red then green on
+   tree. The gate runner starts the way the pre-push hook starts it
+   (`gate_invoke`); a runner that cannot start is a tooling error (exit 2,
+   before any worktree), never "main is red". Red: the **same tree runs once more** — red then green on
    identical code is a flaky test, reported as FLAKY and merged, never
    bisected (bisecting a flake blames whoever sits in the prefix). How
    much runs again is one rule (`retry_plan`): red gates re-run the gates
