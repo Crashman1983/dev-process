@@ -781,3 +781,19 @@ def test_a_bad_codex_policy_names_its_own_file(mods):
     (out / "docs/process/model-policy.codex.local.json").write_text(json.dumps({"stale_minutes": 0}))
     with pytest.raises(SystemExit, match="model-policy.codex.json"):
         d.load_policy(out, "codex")
+
+
+def test_a_handoff_reads_the_families_at_the_base(review_repo):
+    """F1 through the call site (delta review round 3): the branch under review adds its
+    implementer as a family of its own; the attested review stays single-family."""
+    out, d, codex = review_repo(PASS, implementer="gpt-6-luna")
+    policy = out / "docs/process/model-policy.json"
+    data = json.loads(policy.read_text())
+    data["review_evidence"]["families"] = [*data["review_evidence"]["families"], "gpt-6-luna"]
+    policy.write_text(json.dumps(data))
+    _git(out, "commit", "-qam", "chore: luna is its own family")
+    _git(out, "push", "-q", "origin", "7-widget")
+    _run_review(out, d, codex)
+    assert d.handoff(out, "7-widget") == 0
+    journal = "\n".join(p.read_text() for p in (out / ".process-work/journal").glob("**/*.md"))
+    assert "single-family" in journal and "cross-model" not in journal

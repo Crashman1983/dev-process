@@ -175,17 +175,26 @@ def test_the_kernel_takes_no_overlay(render, tmp_path):
         f'overlay-of: docs/process/kernel.md\nreplaces: "{heading}" @new\n\nProse follows the operator.\n')
     r = _run(out)
     assert r.returncode == 1 and "takes no overlay" in r.stdout and ".process-owned" in r.stdout
+    # the same file under another spelling of its path (delta review round 3)
+    (out / "docs/process/kernel.local.md").write_text(
+        f'overlay-of: ./docs/process/kernel.md\nreplaces: "{heading}" @new\n')
+    r = _run(out)
+    assert r.returncode == 1 and "takes no overlay" in r.stdout
+    assert _run(out, "--stamp", str(out / "docs/process/kernel.local.md")).returncode == 1
 
 
 def test_every_command_sends_the_session_to_its_overlay(render, tmp_path):
     """Code review round 2 (M1): the context hook runs only after a compaction or resume —
     a fresh or headless session learns of a command's overlay from the command itself."""
     out = render(tmp_path, {"project_name": "d"})
+    out = render(tmp_path / "all", {"project_name": "d", "harnesses": {"claude": True, "copilot": True}})
     commands = sorted((out / ".claude/commands").glob("*.md"))
-    assert commands
-    for cmd in commands:
+    prompts = sorted((out / ".github/prompts").glob("*.prompt.md"))  # Copilot runs these headless
+    assert commands and prompts
+    for cmd in commands + prompts:
         text = cmd.read_text()
-        assert f"`docs/process/commands/{cmd.stem}.local.md`" in text, cmd.name
+        name = cmd.name.split(".")[0]
+        assert f"`docs/process/commands/{name}.local.md`" in text, cmd.name
         assert "docs/process/overlays.md" in text, cmd.name
 
 
@@ -203,6 +212,10 @@ def test_an_example_inside_a_fence_is_no_head_or_anchor(render, tmp_path):
     # an overlay that only shows a head in a fence is no overlay at all
     (out / "docs/process/notes.local.md").write_text("# notes\n\n" + example)
     assert _run(out).returncode == 0
+    # a fence never closed would swallow the anchors after it: red, never a silent skip
+    ov.write_text(OVERLAY.format(heading=heading) + '\n```\nforgot to close\n\nreplaces: "## Z" @new\n')
+    r = _run(out)
+    assert r.returncode == 1 and "never closed" in r.stdout
 
 
 def test_template_update_names_the_overlays_to_re_check(render, tmp_path, monkeypatch, capsys):

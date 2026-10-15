@@ -108,7 +108,8 @@ def _news_missing(root: Path, tag: str) -> bool:
 # what a project's overlay can anchor to (template/docs/process/overlays.md): the
 # template's process docs and commands; a release that changes or removes one of
 # their sections names it in its CHANGELOG entry, under this marker
-ANCHORABLE = ("template/docs/process/", "template/{% if harnesses.claude %}.claude{% endif %}/commands/")
+ANCHORABLE = ("template/docs/process/", "template/{% if harnesses.claude %}.claude{% endif %}/commands/",
+              "template/.github/{% if harnesses.copilot %}prompts{% endif %}/")
 SECTIONS_MARKER = "Geänderte Abschnitte"
 
 

@@ -29,6 +29,7 @@ project's `.gitignore`). Stdlib only."""
 from __future__ import annotations
 
 import json
+import os
 import shlex
 import subprocess
 import sys
@@ -86,7 +87,8 @@ def _overlay_pairs(root: Path) -> list[tuple[str, str]]:
     out = []
     for p in co.overlays(root):
         m = co.HEAD.search(co.unfenced(_read(p)).lstrip("\ufeff"))
-        out.append((m.group("path") if m else "(unparsed overlay-of)", p.relative_to(root).as_posix()))
+        out.append((os.path.normpath(m.group("path")) if m else "(unparsed overlay-of)",
+                    p.relative_to(root).as_posix()))
     return out
 
 

@@ -51,11 +51,12 @@ def _norm(heading: str) -> str:
     return f"{m.group(1)} {m.group(2).strip()}" if m else heading.strip()
 
 
-def fenced(lines: list[str]) -> list[bool]:
-    """Per line: is it fenced code (the fences included)? CommonMark: a fence closes
-    with the same character, at least as long, indented at most three spaces."""
-    out, fence = [], ""
-    for line in lines:
+def _scan(lines: list[str]) -> tuple[list[bool], int | None]:
+    """Per line: is it fenced code (the fences included)? And the index of a fence still
+    open at the end. CommonMark: a fence closes with the same character, at least as
+    long, indented at most three spaces."""
+    out, fence, opened = [], "", None
+    for i, line in enumerate(lines):
         if fence:
             stripped = line.strip()
             indent = len(line) - len(line.lstrip(" "))
@@ -65,9 +66,20 @@ def fenced(lines: list[str]) -> list[bool]:
             continue
         f = _FENCE_OPEN.match(line)
         if f and not (f.group("fence")[0] == "`" and "`" in f.group("info")):
-            fence = f.group("fence")
+            fence, opened = f.group("fence"), i
         out.append(bool(fence))
-    return out
+    return out, (opened if fence else None)
+
+
+def fenced(lines: list[str]) -> list[bool]:
+    return _scan(lines)[0]
+
+
+def unclosed_fence(text: str) -> int | None:
+    """The 1-based line of a fence still open at the end of `text`, else None. CommonMark
+    lets it run to the end; in an overlay that would silently swallow the anchors after it."""
+    opened = _scan(text.splitlines())[1]
+    return None if opened is None else opened + 1
 
 
 def unfenced(text: str) -> str:
@@ -125,20 +137,24 @@ def target_of(root: Path, rel: str) -> Path | None:
 def check_one(root: Path, overlay: Path) -> list[str]:
     rel = overlay.relative_to(root).as_posix()
     try:
-        text = unfenced(overlay.read_text(encoding="utf-8"))
+        raw = overlay.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as exc:
         return [f"{rel}: unreadable ({exc})"]
+    text = unfenced(raw)
     head = HEAD.search(text.lstrip("\ufeff"))
     if head is None:
         return [f"{rel}: its `overlay-of:` line does not parse — write `overlay-of: <template path>` alone on "
                 f"its line"]
-    if head.group("path") in UNOVERLAYABLE:
-        return [f"{rel}: {head.group('path')} takes no overlay — it is copied byte for byte into the anchors; "
-                f"a project that must change it keeps its own copy (`.process-owned`)"]
     target = target_of(root, head.group("path"))
     if target is None:
         return [f"{rel}: its template file {head.group('path')} is gone or outside the repository — the template "
                 f"moved or removed it; re-home the overlay or delete it (breaking change)"]
+    if target in {(root / u).resolve() for u in UNOVERLAYABLE}:
+        return [f"{rel}: {head.group('path')} takes no overlay — it is copied byte for byte into the anchors; "
+                f"a project that must change it keeps its own copy (`.process-owned`)"]
+    if opened := unclosed_fence(raw):
+        return [f"{rel}: the code fence opened on line {opened} is never closed — everything after it would be "
+                f"an example, and an anchor there would go unchecked; close the fence"]
     try:
         doc = sections(target.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError) as exc:

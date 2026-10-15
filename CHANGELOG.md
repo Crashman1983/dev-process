@@ -1197,10 +1197,10 @@ aktualisieren, `v2.28.1`.
   - **Ablage:** Projektnotizen zu Template-Docs und -Befehlen stehen in `docs/process/<doc>.local.md` (Befehle: `docs/process/commands/<name>.local.md`), nicht mehr im Template-Doc selbst. Kopf: `overlay-of:`. Anker: `extends`/`replaces: "<Überschrift>" @<hash>`.
   - **Prüfschritt:** Das neue Kern-Gate `overlays` (`check_overlays.py`) wird rot, wenn ein verankerter Abschnitt verschwindet oder sich ändert. Das gilt als möglicher Breaking Change, bis jemand Overlay und Abschnitt gelesen und mit `--stamp` neu gestempelt hat.
   - **Beim Update:** `template_update.py` meldet die zu prüfenden Overlays direkt nach dem Update.
-  - **In der Session:** Jeder Befehl schickt die Session zuerst zu seinem Overlay (`docs/process/commands/<name>.local.md`) und zu den Overlays neben den Docs, die er nennt. Das gilt auch für frische und Headless-Sessions. Nach Kompaktierung oder Resume listet `rehydrate` die Overlays zusätzlich.
+  - **In der Session:** Jeder Befehl (auch jeder Copilot-Prompt) schickt die Session zuerst zu seinem Overlay (`docs/process/commands/<name>.local.md`) und zu den Overlays neben den Docs, die er nennt. Das gilt auch für frische und Headless-Sessions. Nach Kompaktierung oder Resume listet `rehydrate` die Overlays zusätzlich.
   - **Grenzen:**
     - `docs/process/kernel.md` nimmt kein Overlay; das Gate verweigert es. Der Kernel wird Byte für Byte in die Anker kopiert, ein Overlay käme dort nie an. Ein Projekt, das ihn ändern muss, behält seine eigene Fassung (`.process-owned`).
-    - Kopf- und Ankerzeilen in Codeblöcken eines Overlays sind Beispiele und zählen nicht.
+    - Kopf- und Ankerzeilen in Codeblöcken eines Overlays sind Beispiele und zählen nicht. Ein nie geschlossener Codeblock ist rot, weil er die Anker danach verschlucken würde.
     - Ein Anker deckt seine Unterabschnitte mit ab. Deshalb die engste passende Überschrift verankern.
   - **Auf Template-Seite:** Ein Release nennt die Abschnitte von Template-Docs und -Befehlen, die es ändert oder entfernt. `tools/release.py` listet sie gegen den letzten Release-Tag und verweigert einen Eintrag ohne die Zeile `Geänderte Abschnitte:`.
   - **Doku:** `docs/process/overlays.md`.
@@ -1234,7 +1234,7 @@ aktualisieren, `v2.28.1`.
   - `verification-independence.md`: The review bundle….
   - `workflow.md`: Plan.
   - Module `arch-onboarding`, `doc-drift-gate`, `feature-registry`, `git-hooks` (Honest ceiling), `sbom` (The gate).
-  - Alle Befehle: die neue Overlay-Zeile unter dem Titel.
+  - Alle Befehle und Copilot-Prompts: die neue Overlay-Zeile unter dem Titel.
 
 **v2.72.0 — Kenni-Rückport I: Merge-Scope im Zertifikat, Stufenzeiten, Plan-Anker, gestrichene ACs, Betriebslehren (#226, #234, #235, #221).** Plan: `docs/analysis/2026-10-15-kenni-backport.md`. Tier 3, weil Gate-Code betroffen ist. Reines Update; für Kenni gibt es einen optionalen Aufräumschritt. Vom Owner am 2026-10-15 freigegeben.
 

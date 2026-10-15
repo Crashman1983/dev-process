@@ -1,5 +1,11 @@
 # execute
 
+**Project overlay:** if `docs/process/commands/execute.local.md` exists, read it
+before you start — the project's own rules for this command, binding over
+this file where it says so; a template doc this command sends you to may
+have one beside it (`<doc>.local.md`), read with the doc
+(`docs/process/overlays.md`).
+
 Execute the plan task by task, test-driven. Re-read the kernel
 (`docs/process/kernel.md`) and `docs/process/mandatory-rules.md` first — a long
 build compacts, and the rules bind every task. Run

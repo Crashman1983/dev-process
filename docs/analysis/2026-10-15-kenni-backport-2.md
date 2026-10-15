@@ -204,3 +204,13 @@ Code-Review Runde 2 (Delta): Block, vier Majors und sieben Minors. Die Mutations
 - **m10:** Ein verweigerter Katalog schreibt den Head des Branches in die Zeile.
 - **m11:** `overlays.md` sagt: die engste Überschrift verankern. Eine eigene Anker-Art nur für den Text ohne Unterabschnitte gibt es nicht, solange Daten nicht zeigen, dass das Stempeln ohne Lesen zum Problem wird.
 - **Testlauf:** `test_a_failed_review_run_records_the_way_out` fiel einmal in der vollen Suite mit vier Workern. Isoliert und unter achtfacher paralleler Last war er grün; der zweite volle Lauf auch. Die Fehlermeldung des ersten Laufs ist nicht gesichert. Wahrscheinlichste Ursache: Der Test wartet auf zwei Supervisor-Läufe (Retry), unbelastet etwa 2,3 s, gegen ein Budget von 15 s. Das Budget ist jetzt 60 s. Bestätigt ist die Ursache nicht; fällt der Test noch einmal, wird die Meldung gesichert und neu untersucht.
+
+## Delta-Review Runde 3 — Änderungen
+
+Verdikt pass, drei Minors, zwei Lows. Eingearbeitet:
+
+- **Kernel-Overlay unter anderem Pfad:** `./docs/process/kernel.md` kam am Gate vorbei. Das Gate vergleicht jetzt das aufgelöste Ziel, `rehydrate` normalisiert den Pfad.
+- **Nie geschlossener Codeblock:** Er verschluckte spätere Anker still. Jetzt ist er rot und nennt die Zeile.
+- **F1 an der Aufrufstelle:** Ein Test führt den Handoff auf einem Branch aus, der sich selbst als Familie einträgt, und erwartet `single-family`.
+- **Copilot-Prompts:** Sie laufen headless (`PHASE_FILES`) und tragen jetzt dieselbe Overlay-Zeile. Der Test deckt beide Harnesses ab. `release.py` listet ihre Abschnitte mit.
+- **Bleibt so:** Die Release-Prüfung sucht die Markierung `Geänderte Abschnitte` irgendwo im Eintrag. Das entspricht der beschriebenen Regel.
