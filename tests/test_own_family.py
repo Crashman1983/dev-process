@@ -234,3 +234,25 @@ def test_renaming_inside_the_archive_reopens_nothing(render, tmp_path):
         f"verdict=pass round=1 base={r.base} head={_git(r.root, 'rev-parse', 'HEAD')}\n", encoding="utf-8")
     out = r.gate()
     assert "55-older.md" not in out.stdout, out.stdout
+
+
+def test_an_archived_plan_rewritten_under_a_rename_needs_the_own_family(render, tmp_path):
+    """Delta round 3: an old archived plan renamed onto new work (git: R073) skipped the rule."""
+    r = Repo(render, tmp_path, claim="")
+    _git(r.root, "checkout", "-q", "main")
+    old = r.root / ".process-work/plans/archive/2026-01-01-55-old.md"
+    old.parent.mkdir(parents=True, exist_ok=True)
+    old.write_text("# Plan\n\ntier: 3\nissue: #55\n\n## Decisions\n\nOld text that stays.\n", encoding="utf-8")
+    _git(r.root, "add", "-A")
+    _git(r.root, "commit", "-q", "-m", "an old archived plan")
+    _git(r.root, "checkout", "-q", "feature")
+    _git(r.root, "merge", "-q", "--no-edit", "main")
+    _git(r.root, "rm", "-q", ".process-work/plans/2026-10-15-77-widget.md")
+    _git(r.root, "mv", ".process-work/plans/archive/2026-01-01-55-old.md",
+         ".process-work/plans/archive/2026-10-15-77-widget.md")
+    moved = r.root / ".process-work/plans/archive/2026-10-15-77-widget.md"
+    moved.write_text(moved.read_text().replace("#55", "#77"), encoding="utf-8")
+    _git(r.root, "commit", "-qam", "chore: archive")
+    r.passes((CODEX, r.neu))
+    out = r.gate()
+    assert out.returncode == 1 and "cleared only by passes outside" in out.stdout, out.stdout

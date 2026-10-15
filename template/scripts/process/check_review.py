@@ -287,9 +287,7 @@ def _unfenced(text: str) -> str:
         if marker and fence is None:
             fence = marker
             continue
-        # a closing fence carries no info string: ```python inside a fence opens nothing
-        # and closes nothing (CommonMark)
-        if marker and fence is not None and _fence_closes(fence, marker) and line.strip() == marker:
+        if marker and fence is not None and _fence_closes(fence, marker):
             fence = None
             continue
         if fence is None:
@@ -2296,11 +2294,11 @@ def applies_own_family(tier: int, own_from: int) -> bool:
 
 
 def plans_moved_in(root: Path, base: str) -> dict[str, str | None]:
-    """The plan files this push brings to their path, with where each came from —
-    `{path: base path or None}`, rename-aware (`git diff -M` from the fork point).
-    An added file has no source; one renamed keeps its base path (a caller decides
-    whether a rename is news — a plan renamed inside the archive is not); one whose
-    content replaced another's (`git mv -f`) counts as added."""
+    """The plan files this push brings to their path — `{path: where it stood at the
+    fork point}` from `git diff -M` (plans and specs, Markdown only). Only a pure
+    rename (R100) keeps its base path; a file added, or renamed with its content
+    changed, is new (None); one changed in place stays itself. A caller judging
+    "new or not" therefore errs toward new — stricter, never a hiding place."""
     out = _git_bytes(root, "diff", "-M", "--name-status", "-z", base, "HEAD", "--",
                      PLANS_ACTIVE, SPECS_DIR)
     moved: dict[str, str | None] = {}
@@ -2313,22 +2311,13 @@ def plans_moved_in(root: Path, base: str) -> dict[str, str | None]:
         if status[:1] in ("R", "C"):
             src, dst = parts[i + 1], parts[i + 2]
             i += 3
-            moved[dst] = src
+            if dst.endswith(".md"):
+                moved[dst] = src if status == "R100" else None
         else:
             path = parts[i + 1]
             i += 2
-            if status[:1] == "A":
-                moved[path] = None
-            elif status[:1] in ("M", "T"):
-                # content replaced: the same plan edited keeps its ids, another's file does not
-                before, now = _show(root, base, path), (root / path)
-                if before is not None and now.is_file():
-                    stem = plan_stem(path)
-                    old_ids = _plan_work_ids(stem, _unfenced(before), include_dedated=True)
-                    new_ids = _plan_work_ids(stem, _unfenced(now.read_text(encoding="utf-8", errors="replace")),
-                                             include_dedated=True)
-                    if old_ids != new_ids:
-                        moved[path] = None
+            if path.endswith(".md") and status[:1] in ("A", "M", "T"):
+                moved[path] = None if status[:1] == "A" else path
     return moved
 
 
@@ -2748,8 +2737,10 @@ def check(root: Path) -> tuple[list[str], list[str]]:
     tiered_plans: list[tuple[str, str, int, set[str]]] = []
     # archived by this push (from the active folder, or onto another plan's file):
     # its merge is now, so the own-family rule holds for it (#241)
+    # (anything the push adds or changes there, except a pure rename inside the archive)
     archived_now = ({rel for rel, src in plans_moved_in(root, scope_base).items()
-                     if rel.startswith(PLANS_ARCHIVE + "/") and (src is None or not src.startswith(PLANS_ARCHIVE + "/"))}
+                     if rel.startswith(PLANS_ARCHIVE + "/")
+                     and (src is None or src == rel or not src.startswith(PLANS_ARCHIVE + "/"))}
                     if scope_base and own_from < 4 else set())
     if adir.is_dir():
         plans = [p for p in sorted(adir.glob("*.md")) if not p.name.startswith("design-")]
