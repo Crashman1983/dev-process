@@ -197,6 +197,13 @@ A subagent spawn names its model from `dispatch.py policy [--tier T]
 strength never follow the class: they follow the tier
 (`verification-independence.md`).
 
+**Handoff is separate from model selection.** `/plan` owns each packet's
+`delegate | retain-context` choice and its context-cost criteria; `/execute`
+owns the evidence, the serial integration and any escalation. A class names
+the model a delegated packet runs on — a role, not a claim of equal
+capability across families. Retaining the current context never changes the
+session's model; a larger model for a handoff needs a specific reason.
+
 A worker's decision partner is the steward: its start prompt says so, and
 names the live channel when the policy sets one (`decision_channel`). A
 question goes into the plan as `DECISION NEEDED` with a `blocked` report;

@@ -94,8 +94,11 @@ def _env_effort() -> str:
     return e
 
 
+EXECUTION = ("delegate", "retain-context")  # a packet's mode (`/plan`, `/execute`); process_kpis.py cuts by it
+
+
 def write_report(root: Path, state: str, *, issue: int | None, note: str, worker: str | None,
-                 model: str | None = None, effort: str | None = None) -> dict:
+                 model: str | None = None, effort: str | None = None, execution: str | None = None) -> dict:
     # never empty: an empty model was indistinguishable from a lost field downstream
     model = (model or os.environ.get("PROCESS_MODEL") or "").strip()
     if not model:
@@ -115,6 +118,7 @@ def write_report(root: Path, state: str, *, issue: int | None, note: str, worker
         "phase": os.environ.get("PROCESS_PHASE") or "",
         "note": note.strip()[:1000],
         "cwd": str(root),
+        **({"execution": execution} if execution else {}),
     }
     p = reports_path(root)
     if p is None:
@@ -212,6 +216,8 @@ def main(argv: list[str]) -> int:
     p.add_argument("--worker", help="name (default: PROCESS_WORKER or the branch)")
     p.add_argument("--model", help="the model doing this phase (default: PROCESS_MODEL) — what the KPIs cut by")
     p.add_argument("--effort", help="the reasoning effort of this phase's cell (default: PROCESS_EFFORT)")
+    p.add_argument("--execution", choices=EXECUTION,
+                   help="the packet's mode — delegated to a subagent or kept in this session (`/execute`)")
     p.add_argument("--root", default=".")
     p.add_argument("--force", action="store_true",
                    help="record `pushed` without the origin check (marked unverified)")
@@ -230,7 +236,8 @@ def main(argv: list[str]) -> int:
             return 2
         if why:
             note = f"[unverified: {why}] {note}".strip()
-    rec = write_report(root, a.state, issue=a.issue, note=note, worker=a.worker, model=a.model, effort=a.effort)
+    rec = write_report(root, a.state, issue=a.issue, note=note, worker=a.worker, model=a.model, effort=a.effort,
+                       execution=a.execution)
     print(f"report: {rec['worker']}@{rec['host']} → {rec['state']}"
           + (f" #{rec['issue']}" if rec["issue"] else "") + (f" — {rec['note']}" if rec["note"] else ""))
     if a.sync or os.environ.get("PROCESS_REPORT_SYNC") == "1":

@@ -866,3 +866,17 @@ def test_the_gates_workflow_cancels_superseded_runs_never_on_main(render, tmp_pa
     wf = yaml.safe_load((out / ".github/workflows/process-gates.yml").read_text())
     assert wf["concurrency"] == {"group": "${{ github.workflow }}-${{ github.ref }}",
                                  "cancel-in-progress": "${{ github.ref != 'refs/heads/main' }}"}
+
+
+def test_each_packet_says_who_executes_it(render, tmp_path):
+    # Kenni backport II (E2): the plan decides delegate | retain-context per packet,
+    # /execute follows it and reports the mode; the tower keeps handoff apart from the model
+    out = render(tmp_path, {"project_name": "demo", "harnesses": {"claude": True}})
+    commands = out / ".claude/commands"
+    assert "`Execution: delegate | retain-context`" in (commands / "plan.md").read_text()
+    execute = (commands / "execute.md").read_text()
+    assert "Decide handoff versus retaining context per coherent packet" in execute
+    assert "it never commits" in execute and "--execution delegate|retain-context" in execute
+    assert "Offload reading, never the change" not in execute
+    assert "**Handoff is separate from model selection.**" in (out / "docs/process/tower.md").read_text()
+    assert "Execution: delegate | retain-context" in (out / "docs/process/workflow.md").read_text()

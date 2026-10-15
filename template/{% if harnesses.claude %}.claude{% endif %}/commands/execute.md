@@ -49,15 +49,20 @@ test-first order stands, commits stay atomic, and the Tier-2+ **merge review
 remains the independent, attested review** (`/review`) — a per-task reviewer
 loop reduces defects but does not replace the attestation.
 
-**Offload reading, never the change.** A subagent has its own context and
-returns a summary — worth it for work that reads much and returns little:
-a search across the codebase, a diagnosis distilled from a long test run,
-a library's docs checked against a call. It is not worth it for the change
-itself: the subagent knows neither the kernel nor the plan's `## Decisions`,
-and you sign the commit you did not watch being made (mandatory rule 1).
-So: research and diagnosis may go to a subagent; edits, tests and commits
-stay in this session — except under the `[P]` protocol below, which gives
-each subagent its file packet and keeps every commit here.
+**Decide handoff versus retaining context per coherent packet.** Follow
+the plan's `Execution:` choice; for a packet without one, record the choice
+and one sentence of rationale before starting it (the criteria are in
+`/plan`). Keeping the current context is valid, also on a larger model.
+A delegated packet goes to a subagent with its file packet, the plan's
+`## Decisions` and the kernel rules it touches, on the smallest suitable
+model (`dispatch.py policy --class C`); a larger model needs a named
+unresolved judgment, never a silent fallback. The subagent edits and tests,
+it never commits: you read its diff, run the proving command and commit —
+you sign what you checked (mandatory rule 1). Research and diagnosis may
+always go to a subagent. At the end of the packet report its mode
+(`report.py … --execution delegate|retain-context`), so
+`process_kpis.py execution` can tell whether delegating pays. Reconsider on
+a material scope or context change, not before every tool call.
 
 **[P] groups run as "parallel edit, serial commit".** When `tasks.md` marks
 tasks `[P]`, dispatch them as concurrent subagents in the SAME worktree —
