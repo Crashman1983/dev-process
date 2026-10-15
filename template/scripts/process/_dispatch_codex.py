@@ -13,6 +13,7 @@ refuses and the fallback is recorded (`record_unavailable`, `fallback_hint`).
 from __future__ import annotations
 
 import argparse
+import contextlib
 import datetime as _dt
 import hashlib
 import json
@@ -194,7 +195,7 @@ def unavailable_ids(records: Path) -> set[str]:
     for ln in lines:
         try:
             out.add(str(json.loads(ln)["id"]))
-        except (ValueError, KeyError, TypeError):
+        except (ValueError, KeyError, TypeError, RecursionError):
             continue
     return out
 
@@ -237,8 +238,10 @@ def binding(cwd: Path, bundle: Path) -> dict:
     import check_review  # noqa: PLC0415
     from process_git import fork_point  # noqa: PLC0415
 
-    if [path for path in dirty(cwd) if not _is_plan(path)]:
-        raise ValueError("a review needs a clean worktree (only a plan may carry appended records)")
+    stray = [path for path in dirty(cwd) if not _records_appended(cwd, path)]
+    if stray:
+        raise ValueError(f"a review needs a clean worktree — only a tracked plan may carry appended "
+                         f"records, not {stray[0]}")
     matches = list(attest.ARTIFACT_LINE.finditer(bundle.read_text(encoding="utf-8")))
     if len(matches) != 1:
         raise ValueError("the bundle names no single reviewed artifact")
@@ -253,6 +256,20 @@ def binding(cwd: Path, bundle: Path) -> dict:
 def dirty(cwd: Path) -> list[str]:
     """Paths `git status` reports changed or untracked in the worktree."""
     return [ln[3:].strip().strip('"') for ln in _git(cwd, "status", "--porcelain").decode().splitlines() if ln.strip()]
+
+
+def _records_appended(cwd: Path, rel: str) -> bool:
+    """A tracked plan whose worktree text is its committed text plus records — what
+    attest lets ride a pass (`check_review.records_only`); anything else is content."""
+    from check_review import records_only  # noqa: PLC0415
+    if not _is_plan(rel):
+        return False
+    try:
+        before = _git(cwd, "show", f"HEAD:{rel}").decode("utf-8")
+        after = (cwd / rel).read_text(encoding="utf-8")
+    except (ValueError, OSError, UnicodeDecodeError):
+        return False  # untracked, deleted or unreadable: not an appended record
+    return records_only(before, after)
 
 
 def _is_plan(rel: str) -> bool:
@@ -503,11 +520,10 @@ def _validated(result: object, rec: dict) -> dict | None:
             return None
         if any("enum" in spec and f[k] not in spec["enum"] for k, spec in fields.items()):
             return None
-        if not all(isinstance(f[k], str) and f[k].strip() for k in fields) or "\n" in f["title"]:
+        if not all(_one_line(f[k]) for k in fields):
             return None
     for key in ("criteria", "refute"):
-        if not (isinstance(result[key], list) and all(isinstance(x, str) and x.strip() and "\n" not in x
-                                                      for x in result[key])):
+        if not (isinstance(result[key], list) and all(_one_line(x) for x in result[key])):
             return None
     if result["verdict"] == "block" and not result["findings"]:
         return None
@@ -516,17 +532,24 @@ def _validated(result: object, rec: dict) -> dict | None:
     return result
 
 
-def implementer_model(root: Path, issue: int, branch: str, plan_review: bool) -> str | None:
-    """The model that wrote what is reviewed: the newest `pushed` report of the issue on
-    this branch (the plan session's `planned` one for a plan review), other hosts'
-    reports included; None when none names a measured model."""
+def _one_line(value: object) -> bool:
+    """A non-empty string that renders as exactly one report line (no \\r, \\n or other separator)."""
+    return isinstance(value, str) and bool(value.strip()) and len(value.splitlines()) == 1
+
+
+def implementer_models(root: Path, issue: int, branch: str, plan_review: bool) -> list[str] | None:
+    """Every model that wrote what is reviewed: each `pushed` report of the issue on this
+    branch (the plan session's `planned` ones for a plan review), other hosts' reports
+    included. None when there is none, or one of them measured no model — then nobody
+    can say all of it came from another family."""
     from report import UNMEASURED, read_reports  # noqa: PLC0415
     state = "planned" if plan_review else "pushed"
     rows = [r for r in read_reports(root, remote=True)
             if r.get("issue") == issue and r.get("state") == state and r.get("branch") in (branch, None, "")]
-    rows.sort(key=lambda r: r.get("epoch") if isinstance(r.get("epoch"), int) else 0)
-    model = str(rows[-1].get("model") or "") if rows else ""
-    return None if model in ("", UNMEASURED) else model
+    models = [str(r.get("model") or "") for r in rows]
+    if not models or any(m in ("", UNMEASURED) for m in models):
+        return None
+    return sorted(set(models))
 
 
 def family(model: str, ranks: dict, families) -> str | None:
@@ -539,16 +562,19 @@ def family(model: str, ranks: dict, families) -> str | None:
     return "ranked" if cls[1] is not None else cls[0]
 
 
-def independence(root: Path, reviewer: str, implementer: str | None) -> str:
-    """`cross-model` only when the implementer is measured, of a known family, and of
-    another family than the reviewer's; anything less is `single-family` — attest.py
-    then asks for the skip line where its rules need one."""
+def independence(root: Path, base: str, reviewer: str, implementers: list[str] | None) -> str:
+    """`cross-model` only when every implementing model is measured, of a known family,
+    and of another family than the reviewer's; anything less is `single-family` —
+    attest.py then asks for the skip line where its rules need one. The families are
+    read at the reviewed base, as attest reads them: the branch under review does not
+    draw its own family lines."""
     from attest_evidence import review_policy  # noqa: PLC0415
-    rules, _problem = review_policy(root, "HEAD")
+    rules, _problem = review_policy(root, base)
     ranks, fams = rules.get("ranks") or {}, rules.get("families") or []
     mine = family(reviewer, ranks, fams)
-    theirs = family(implementer, ranks, fams) if implementer else None
-    return "cross-model" if mine and theirs and mine != theirs else "single-family"
+    theirs = [family(m, ranks, fams) for m in implementers or []]
+    other = bool(theirs) and all(f is not None and f != mine for f in theirs)
+    return "cross-model" if mine and other else "single-family"
 
 
 def _report_text(rec: dict, result: dict, *, work: str, plan_review: bool, refute_round: int | None) -> str:
@@ -600,12 +626,19 @@ def handoff(root: Path, rec: dict, *, implementer: str | None = None) -> dict:
         previous = json.loads(done.read_text())
         if previous.get("state") == "attested":
             return previous
+    plan_review = bool(rec.get("plan_review"))
+    work = str(rec["issue"])
+    wt = Path(rec["worktree"])
+    b = rec["binding"]
+    if _attested_already(wt, work, rec["model"], b["head"], plan_review):
+        # a handoff that stopped after its attest commit: finish it, never attest again
+        return _finish(rec, wt, done, {"invocation": rec["invocation"], "artifact": b, "state": "attested",
+                                       "note": "the journal already holds this run's REVIEW line"})
     try:
         if rec.get("phase") != "review" or outcome(rec, _same_process(rec)) != "completed":
             raise ValueError("the review has no verified successful exit receipt")
         row = terminal(rec)
-        wt = Path(rec["worktree"])
-        if binding(wt, Path(rec["binding"]["bundle"])) != rec["binding"]:
+        if binding(wt, Path(b["bundle"])) != b:
             raise ValueError("the bundle or the Git artifact changed since the review ran")
         result_path = Path(rec["result"])
         if result_path.stat().st_size > MAX_RESULT_BYTES:
@@ -622,20 +655,17 @@ def handoff(root: Path, rec: dict, *, implementer: str | None = None) -> dict:
             raise ValueError(f"a follow-up finding names no issue: {follow[0]!r}")
     except (OSError, KeyError, TypeError, RecursionError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ValueError(f"handoff refused: {exc}") from exc
-    plan_review = bool(rec.get("plan_review"))
-    work = str(rec["issue"])
     tier = rec.get("tier")
     if tier is None:
         raise ValueError("the run records no tier — start the review with --tier")
-    b = rec["binding"]
-    implementer = implementer or implementer_model(root, int(rec["issue"]), rec["branch"], plan_review)
-    token = independence(wt, rec["model"], implementer)
+    measured = implementer_models(root, int(rec["issue"]), rec["branch"], plan_review)
+    if implementer and measured and measured != [implementer]:
+        raise ValueError(f"--implementer {implementer} contradicts the reports ({', '.join(measured)}) — "
+                         f"the measured models decide")
+    implementers = measured or ([implementer] if implementer else None)
+    token = independence(wt, b["base"], rec["model"], implementers)
     record = {"invocation": rec["invocation"], "artifact": b, "result_sha256": rec["result_sha256"],
-              "verdict": result["verdict"], "independence": token, "implementer": implementer}
-    if _attested_already(wt, work, rec["model"], b["head"], plan_review):
-        record.update(state="attested", pushed=None, note="the journal already holds this run's REVIEW line")
-        atomic_json(done, record)
-        return record
+              "verdict": result["verdict"], "independence": token, "implementers": implementers}
     # Tier 2: the reviewer's own refute counts from its report (cross-model, tier < 3);
     # Tier 3 needs a separate run's REFUTE line in the plan — never this reviewer's (refute.md)
     refute_round = None
@@ -643,10 +673,11 @@ def handoff(root: Path, rec: dict, *, implementer: str | None = None) -> dict:
         refute_round = attest.round_problems(argparse.Namespace(work=work, round_=None), wt, wt / JOURNAL_DIR)[0]
     rel = f"{REVIEWS}/{_dt.date.today().isoformat()}-{work}{'-plan' if plan_review else ''}-codex-{rec['invocation'][:8]}.md"
     report = wt / rel
+    made = [d for d in (report.parent, *report.parent.parents) if d != wt and wt in d.parents and not d.exists()]
     report.parent.mkdir(parents=True, exist_ok=True)
     report.write_text(_report_text(rec, result, work=work, plan_review=plan_review, refute_round=refute_round),
                       encoding="utf-8")
-    plans = [p for p in dirty(wt) if _is_plan(p)]  # records appended after a refusal ride the attest
+    plans = [p for p in dirty(wt) if _records_appended(wt, p)]  # records appended after a refusal ride the attest
     cmd = [sys.executable, str(Path(attest.__file__).resolve()), "--work", work, "--tier", str(tier),
            "--reviewer", "codex", "--model", rec["model"], "--independence", f"bundle,non-implementing,{token}",
            "--verdict", result["verdict"], "--base", b["base"], "--head", b["head"], "--with", rel,
@@ -657,12 +688,21 @@ def handoff(root: Path, rec: dict, *, implementer: str | None = None) -> dict:
                            timeout=300, check=False)
         if r.returncode != 0:
             report.unlink(missing_ok=True)  # the worktree stays as the review found it
+            for d in made:  # deepest first: the folders this handoff made
+                with contextlib.suppress(OSError):
+                    d.rmdir()
             record.update(state="refused", reasons=(r.stderr or r.stdout).strip()[-2000:])
             atomic_json(done, record)
             return record
+    record["state"] = "attested"
+    return _finish(rec, wt, done, record)
+
+
+def _finish(rec: dict, wt: Path, done: Path, record: dict) -> dict:
+    """Push the attest commit through the pre-push hook and record what happened."""
     push = subprocess.run(["git", "-C", str(wt), "push", "origin", f"HEAD:refs/heads/{rec['branch']}"],
                           capture_output=True, text=True, env=git_environment(), timeout=600, check=False)
-    record.update(state="attested", pushed=push.returncode == 0,
+    record.update(pushed=push.returncode == 0,
                   push_error=None if push.returncode == 0 else (
                       (push.stderr or push.stdout).strip()[-1000:]
                       + " — if origin moved during the review, its new head needs a new review"))
