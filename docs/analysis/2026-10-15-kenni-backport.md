@@ -137,3 +137,15 @@ Ergebnis: Block mit drei Majors. P1–P11 sind gebaut, D1–D7 decken sich mit d
   - Das Memo des Zugs gilt nur, wenn der gelaufene Scope (`run_evidence`) dem vorhergesagten entspricht.
 - **P14** D1, D4 und D7 sind an P7, P10 und P1 angeglichen.
 - **P15** Der CHANGELOG nennt die beiden Pflichten einer gestuften Suite: vor der Auswahl löschen, und `merge_scope` gibt für einen Baum überall dieselbe Antwort.
+
+## Refute Runde 1 — Änderungen
+
+Ergebnis: widerlegt mit einem Major und fünf Minors. Ohne `merge_scope` blieb alles verhaltensgleich, die Evidenz hat einen Owner, und ein engerer Scope trifft nie einen volleren.
+
+- **R1 (Major, gleich P13):** Das Memo des Zugs nannte den vorhergesagten Scope statt des gelaufenen. Gefixt mit P13.
+- **R2:** Ein `.time`-Marker außerhalb des Zeitbereichs ließ den Zug nach grüner Suite abstürzen. Jetzt gilt ein solcher Marker als `skipped`, ebenso ein Ende vor dem Start.
+- **R3:** Eine Scope-Ausgabe oder `stages`-Datei, die kein UTF-8 ist, ließ Hook und Zug abstürzen. Jetzt ist der Scope dann unbekannt.
+- **R4 (gleich P13):** Ein übrig gebliebener `stages`-Stand. Gefixt mit `clear_run`.
+- **R5:** Eine Policy als JSON-Array oder mit `phases` als Liste ließ den Tower abstürzen. `load_policy` lehnt beides jetzt mit `SystemExit` ab. Ohne Policy-Datei gibt `stale_minutes` still None zurück.
+- **R6:** Ein Satzzeichen galt als Grund einer Streichung. Der Grund braucht jetzt ein Wort.
+- **Hinnahme:** `_suite_key` hasht jetzt `suite.strip()`. Ein Zug mit `--suite` von der Kommandozeile, deren String Leerzeichen am Rand hat, findet sein altes Memo einmal nicht. Das steht im CHANGELOG.
