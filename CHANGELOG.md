@@ -1216,12 +1216,12 @@ aktualisieren, `v2.28.1`.
      - `setup_branch_protection.sh` entfällt.
   3. **Kennis eigene Regeln in Overlays verschieben**, statt sie in Template-Docs zu behalten, jeweils verankert und mit `--stamp`:
      - Qualität/Tempo (ADR-0065), Owner-Notizen in `risk-tiers.md`, `feature-registry.md`, `github-issues.md`.
-     - Die Sprachregel (ADR-0063) steht im Kernel. Sie kann kein Overlay sein; `docs/process/kernel.md` bleibt deshalb in `.process-owned`, bis die Sprache eine Copier-Antwort ist (E3).
+     - Die Sprachregel (ADR-0063) steht im Kernel und kann kein Overlay sein. Sie bleibt in Kennis `docs/process/kernel.md`: v2.73 ändert den Kernel nicht, Copier übernimmt die Kenni-Fassung also beim Update. Ändert ein Release den Kernel, bevor die Sprache eine Copier-Antwort ist (E3), kommt `kernel.md` vorher in `.process-owned`.
      - `docs/process/review.local.md` bekommt die Kopfzeile `overlay-of: docs/process/review-checklist.md` und Anker auf die Abschnitte, die es ergänzt. `make_review_bundle` liest die Datei weiter ganz.
      - Quick-Eskalation und Governance-only-Weg.
      - Runner-Details aus `testing.md`.
   4. **Codex-Werte** (Modellnamen, Zeitlimits, `context_sources` mit Kennis Skill und `docs/dev/codex-model-policy.md`) nach `docs/process/model-policy.codex.local.json` übertragen. Die Template-Datei bleibt unverändert.
-  5. **`.process-owned` leeren, bis auf `docs/process/kernel.md`.** Kennis Gate-Code gleicht dann dem Release, und weitere Updates sind keine Tier-3-Migration.
+  5. **`.process-owned` leeren.** Kennis Gate-Code gleicht dann dem Release, und weitere Updates sind keine Tier-3-Migration.
   6. **Kenni-Tests anpassen oder streichen:**
      - `backend/tests/scripts/test_dispatch_codex.py`: beratender Handoff.
      - `test_legacy_codex_policy.py`: neuer Pfad von `legacy_preflight`.
