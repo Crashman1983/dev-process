@@ -685,3 +685,23 @@ def test_an_ambiguous_fork_point_does_not_crash_a_project_without_the_duty(rende
     _git(out, "merge", "-q", "--no-edit", "main~1")
     r = _gate(out)
     assert "Traceback" not in r.stderr and r.returncode == 0, r.stderr + r.stdout
+
+
+def test_a_renamed_old_plan_keeps_its_age(render, tmp_path):
+    """Delta review v2.74: a plan from before the day, renamed on the branch, became bound."""
+    out = _declared_repo(render, tmp_path, {"from": "2026-10-01"})
+    _git(out, "checkout", "-q", "main")
+    _plan(out, "", rel=".process-work/plans/2026-09-01-old.md", commit_day="2026-09-02")
+    _git(out, "checkout", "-q", "feature")
+    _git(out, "merge", "-q", "--no-edit", "main")
+    _git(out, "mv", ".process-work/plans/2026-09-01-old.md", ".process-work/plans/2026-09-01-old-renamed.md")
+    _git(out, "commit", "-q", "-m", "rename")
+    r = _gate(out)
+    assert r.returncode == 0 and "predate the declaration duty" in r.stdout, r.stdout
+
+
+def test_an_info_string_fence_line_closes_nothing(render, tmp_path):
+    """Delta review v2.74: ```python inside a fence closed it (CommonMark: a closing fence has no info)."""
+    out = _declared_repo(render, tmp_path, {"from": "2026-10-01"})
+    _plan(out, "```text\n```python\n```\n\ndesign-contract: n/a — no screen\n")
+    assert _gate(out).returncode == 0, _gate(out).stdout

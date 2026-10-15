@@ -452,6 +452,7 @@ def declaration_check(root: Path, plans: dict[str, str], contracts: set[str]
     if rule is None:
         return [], []
     hard, older = [], []
+    moved = _review.plans_moved_in(root, base) if base else {}
     for rel, text in plans.items():
         if Path(rel).name.startswith("design-"):
             continue
@@ -461,13 +462,15 @@ def declaration_check(root: Path, plans: dict[str, str], contracts: set[str]
         problems = declaration_problems(text, contracts)
         if not problems:
             continue
-        if base and _review._show(root, base, rel) is None:
+        # where the plan stood at the fork point: a rename keeps its age, a new file has none
+        origin = moved.get(rel, rel) if base else rel
+        if base and (origin is None or _review._show(root, base, origin) is None):
             bound = True  # new on this branch: no date of its own can grandfather it
-        elif rel.startswith(SPECS_DIR + "/"):
-            m = _SPEC_NUMBER.match(Path(rel).parent.name)
+        elif origin.startswith(SPECS_DIR + "/"):
+            m = _SPEC_NUMBER.match(Path(origin).parent.name)
             bound = rule.get("spec_above") is None or m is None or int(m.group(1)) > rule["spec_above"]
         else:
-            added = _first_added(root, rel)
+            added = _first_added(root, origin)
             bound = added is None or added >= rule["from"]
         if bound:
             hard += [f"{rel}: {p}" for p in problems]

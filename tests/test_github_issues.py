@@ -548,6 +548,9 @@ def test_a_finding_names_its_reviewer_anywhere_among_its_keys(render, tmp_path):
     # a title that starts with `by=…` but names no family stays a title: older reports stay valid
     (fields, err, _line), = gate.report_findings("FINDING sev=minor action=accept issue=- by=Reference: aliasing\n")
     assert err is None and "by" not in fields and fields["title"] == "by=Reference: aliasing"
+    # but a bad `by=` with keys after it is an error, never a hiding place for them
+    (fields, err, _line), = gate.report_findings("FINDING sev=major action=fix issue=- by=Codex kind=bogus Title\n")
+    assert fields is None and "no reviewer family" in err
     _report(out, "2026-07-05-x.md", VALID_REPORT +
             "FINDING sev=minor action=fix issue=- by=codex by=claude twice\n")
     r = _run(out)

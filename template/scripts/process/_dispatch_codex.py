@@ -658,6 +658,11 @@ def handoff(root: Path, rec: dict, *, implementer: str | None = None) -> dict:
             # that very commit, never one amended or added after it
             if previous.get("pushed") is False and previous.get("attest_commit") == _head(wt):
                 return _finish(rec, wt, done, previous)
+            if previous.get("pushed") is False and "attest_commit" not in previous:
+                # a receipt from before the commit was recorded: name the way, push nothing unseen
+                previous["push_error"] = ((previous.get("push_error") or "").rstrip()
+                                          + f" — push the attest commit by hand once checked: "
+                                            f"git -C {wt} push origin HEAD:refs/heads/{rec['branch']}")
             return previous
     plan_review = bool(rec.get("plan_review"))
     work = str(rec["issue"])
