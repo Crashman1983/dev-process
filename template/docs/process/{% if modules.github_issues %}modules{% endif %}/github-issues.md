@@ -195,7 +195,8 @@ and are ignored, as everywhere — **fence the Prompt section** when it quotes
 the grammar or header-like lines (`issue:`, `campaign:`), or the gate lints
 the quotes as claims. A title may contain `=` (`USER_ID=1 hardcoded` is fine);
 only leading `sev=`/`action=`/`issue=`/`gate=`/`origin=`/`kind=`/`by=` tokens are parsed as fields.
-`by=` names the reviewer family that raised the finding (`claude`, `codex`, …).
+`by=` names the reviewer family that raised the finding, as one lower-case
+word (`claude`, `codex`, …); anything else after `by=` reads as the title.
 It matters where one pass carries several reviewers' findings — a Claude gate
 that ran Codex as its second opinion: without it the second reviewer's share
 can only be reconstructed, never counted (`process_kpis.py rounds` counts

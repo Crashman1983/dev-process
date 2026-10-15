@@ -538,7 +538,7 @@ def test_a_notes_sidecar_is_read_with_the_entry_and_merges_by_union(render, tmp_
 
 # --- declaring the contract (#248, downstream Kenni #1914): opt-in duty ----------
 
-DECL = "docs/process/design-contract-declaration.json"
+DECL = "docs/process/design-contract-declaration.local.json"
 PLAN = ".process-work/plans/2026-10-15-77-widget.md"
 
 
@@ -599,13 +599,40 @@ def test_without_the_duty_nothing_changes(render, tmp_path):
 
 def test_a_plan_from_before_the_day_is_a_note_and_a_backdated_name_proves_nothing(render, tmp_path):
     out = _declared_repo(render, tmp_path, {"from": "2026-10-01"})
+    _git(out, "checkout", "-q", "main")
     _plan(out, "", rel=".process-work/plans/2026-09-01-old.md", commit_day="2026-09-02")
+    _git(out, "checkout", "-q", "feature")
+    _git(out, "merge", "-q", "--no-edit", "main")
     r = _gate(out)
     assert r.returncode == 0 and "predate the declaration duty" in r.stdout, r.stdout
     # a plan named for an old day but added now is bound
     _plan(out, "", rel=".process-work/plans/2026-08-01-backdated.md")
     r = _gate(out)
     assert r.returncode == 1 and "2026-08-01-backdated.md: no `design-contract:` line" in r.stdout, r.stdout
+
+
+def test_a_backdated_commit_on_the_branch_is_still_bound(render, tmp_path):
+    """Refute v2.74: an author date before the day grandfathered a plan this branch adds."""
+    out = _declared_repo(render, tmp_path, {"from": "2026-10-01"})
+    _plan(out, "", rel=".process-work/plans/2026-01-01-sneaky.md", commit_day="2026-01-01")
+    r = _gate(out)
+    assert r.returncode == 1 and "sneaky.md: no `design-contract:` line" in r.stdout, r.stdout
+
+
+@pytest.mark.parametrize("body,ok", [
+    ("design-contract: `web`\n\n## Design Contract Trace\n\nS01.\n", True),
+    ("design-contract: Web\n\n## Design Contract Trace\n\nS01.\n", True),
+    ("design-contract: n/a:\n", False),
+    ("- step\n\n  ```\n  design-contract: n/a — example only\n  ```\n", False),
+    ("    ```\n    design-contract: n/a — indented example\n    ```\n", False),
+    ("````\nx\n`````\n\ndesign-contract: n/a — real one after a longer close\n", True),
+])
+def test_the_declaration_is_read_as_binding_and_fences_are(render, tmp_path, body, ok):
+    """Refute v2.74: one reader for the line (as `bound_to`), fences as the review gate reads them."""
+    out = _declared_repo(render, tmp_path, {"from": "2026-10-01"})
+    _plan(out, body)
+    r = _gate(out)
+    assert (r.returncode == 0) is ok, r.stdout
 
 
 def test_spec_plans_bind_above_the_spec_number(render, tmp_path):
@@ -638,3 +665,23 @@ def test_the_duty_file_is_no_registry_entry(render, tmp_path):
     _write(out, DECL, json.dumps({"from": "2026-10-01"}))
     r = _gate(out)
     assert r.returncode == 0 and "no design contracts yet" in r.stdout, r.stdout
+
+
+def test_an_ambiguous_fork_point_does_not_crash_a_project_without_the_duty(render, tmp_path):
+    """Refute v2.74: `merge_base` raised before the opt-in file was even read."""
+    out = _declared_repo(render, tmp_path)
+    _write(out, "f0.txt", "x\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "feature work")
+    _git(out, "checkout", "-q", "main")
+    _write(out, "m.txt", "m\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "main moves")
+    _git(out, "merge", "-q", "--no-edit", "feature")
+    _git(out, "checkout", "-q", "feature")
+    _write(out, "f.txt", "f\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "feature moves")
+    _git(out, "merge", "-q", "--no-edit", "main~1")
+    r = _gate(out)
+    assert "Traceback" not in r.stderr and r.returncode == 0, r.stderr + r.stdout

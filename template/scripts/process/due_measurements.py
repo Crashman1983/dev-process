@@ -90,6 +90,8 @@ def load_milestones(root: Path) -> tuple[Milestone, ...]:
     MilestoneFileError when the file is there but malformed."""
     path = root / MILESTONES_FILE
     if not path.is_file():
+        if path.exists() or path.is_symlink():  # a directory, a dangling link: broken, not absent
+            raise MilestoneFileError(f"{MILESTONES_FILE}: not a readable file")
         return ()
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -115,7 +117,7 @@ def recorded_ids(root: Path) -> set[str]:
     ids: set[str] = set()
     for path in sources:
         if path.is_file():
-            ids.update(_MILESTONE_LINE.findall(path.read_text(encoding="utf-8")))
+            ids.update(_MILESTONE_LINE.findall(path.read_text(encoding="utf-8", errors="replace")))
     return ids
 
 

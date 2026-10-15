@@ -4,8 +4,10 @@ milestones.local.json, due once their date passed without a record carrying
 on a rendered tree, because that is where a project meets them."""
 import importlib.util
 import json
+import shutil
 import subprocess
 import sys
+import tempfile
 from datetime import date
 from pathlib import Path
 
@@ -28,11 +30,24 @@ MILESTONES = {"milestones": [
 
 
 def _module():
-    sys.path.insert(0, str(SCRIPT.parent))  # the sibling `optimize` import
-    spec = importlib.util.spec_from_file_location("due_measurements_t", SCRIPT)
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = mod  # the dataclass looks its module up by name
-    spec.loader.exec_module(mod)
+    """The script, loaded from a copy of the template's scripts: importing from the
+    template tree itself would write a __pycache__ there that every render then
+    carries, and leave its siblings in sys.modules for other tests."""
+    copy = Path(tempfile.mkdtemp(prefix="due-measurements-")) / "process"
+    shutil.copytree(SCRIPT.parent, copy, ignore=shutil.ignore_patterns("__pycache__", "*.jinja"))
+    before, keep = set(sys.modules), sys.dont_write_bytecode
+    sys.path.insert(0, str(copy))  # the sibling `optimize` import
+    sys.dont_write_bytecode = True
+    try:
+        spec = importlib.util.spec_from_file_location("due_measurements_t", copy / SCRIPT.name)
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = mod  # the dataclass looks its module up by name
+        spec.loader.exec_module(mod)
+    finally:
+        sys.path.remove(str(copy))
+        sys.dont_write_bytecode = keep
+        for name in set(sys.modules) - before - {"due_measurements_t"}:
+            del sys.modules[name]
     return mod
 
 
@@ -230,3 +245,26 @@ def test_cli_invalid_today_exits_2(project, bad):
 
 def _due_ids(stdout: str) -> list[str]:
     return [line.split()[1] for line in stdout.splitlines()]
+
+
+@pytest.mark.parametrize("broken", ["directory", "dangling-link"])
+def test_a_milestone_file_that_is_no_file_is_broken_not_absent(render, tmp_path, broken):
+    """Refute v2.74: a directory or a dangling link read as "nothing due"."""
+    root = render(tmp_path, {"project_name": "d"})
+    path = root / "docs" / "process" / "milestones.local.json"
+    if broken == "directory":
+        path.mkdir(parents=True)
+    else:
+        path.symlink_to(root / "gone.json")
+    r = _run(root, "--today", "2026-12-01")
+    assert r.returncode == 2 and "milestones.local.json" in r.stderr, (r.stdout, r.stderr)
+
+
+def test_a_record_that_is_not_utf8_is_still_read(render, tmp_path):
+    root = render(tmp_path, {"project_name": "d"})
+    _write_milestones(root, MILESTONES)
+    path = root / ".process-work" / "improvement" / "2026-10-28.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"caf\xe9\nmilestone: " + PLAN_DRIFT.encode() + b"\n")
+    r = _run(root, "--today", "2026-10-28")
+    assert r.returncode == 0 and PLAN_DRIFT not in r.stdout, (r.stdout, r.stderr)

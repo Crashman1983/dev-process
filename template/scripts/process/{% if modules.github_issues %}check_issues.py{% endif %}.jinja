@@ -199,6 +199,8 @@ def _parse_finding(match: re.Match) -> tuple[dict | None, str | None]:
         k, eq, v = tok.partition("=")
         if not eq or k not in FINDING_KEYS:
             break  # title starts here
+        if k == "by" and not FINDING_BY.match(v):
+            break  # `by=` that names no family is the title's first word (an older report's)
         if k in fields:
             return None, f"duplicate key {k!r}"
         fields[k] = v
@@ -213,8 +215,6 @@ def _parse_finding(match: re.Match) -> tuple[dict | None, str | None]:
         return None, f"origin={fields['origin']!r} not in {sorted(FINDING_ORIGINS)}"
     if "kind" in fields and fields["kind"] not in FINDING_KINDS:
         return None, f"kind={fields['kind']!r} not in {sorted(FINDING_KINDS)}"
-    if "by" in fields and not FINDING_BY.match(fields["by"]):
-        return None, f"by={fields['by']!r} is no reviewer family (a lower-case word: claude, codex, …)"
     issue = fields.get("issue", "-")
     if issue != "-" and parse_issue_ref(issue) is None:
         return None, f"issue={issue!r} is neither '-' nor a valid ref"

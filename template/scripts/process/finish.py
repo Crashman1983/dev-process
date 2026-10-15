@@ -75,6 +75,8 @@ from check_review import (  # noqa: E402  (one owner for grammar + arithmetic)
     GitReadError,
     branch_issue,
     clearing_passes,
+    own_family_missing,
+    own_family_rule,
     integration_ref,
     issue_refs_in_range,
     merge_base,
@@ -214,6 +216,9 @@ def check(root: Path) -> tuple[list[str], list[str]]:
                     blockers.append(f"{PLANS_ACTIVE}/{p.name}: {stale}")
                 else:
                     to_archive.append(p.name)
+            elif _cleared(passes, ids, tier):  # cleared, but only by another model family (#241)
+                blockers.append(own_family_missing(f"{PLANS_ACTIVE}/{p.name}", tier,
+                                                   own_family_rule(root)[0]))
             else:
                 blockers.append(no_clearing_review(f"{PLANS_ACTIVE}/{p.name}", tier, ids)
                                 + " — run /review before /finish")

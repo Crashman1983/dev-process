@@ -145,6 +145,16 @@ def test_release_notes_come_from_the_changelog_entry_of_the_tag(tmp_path):
     r = subprocess.run([*tool, "v1.2.0", str(log)], capture_output=True, text=True)
     assert r.returncode == 0 and r.stdout.splitlines()[0] == "neu" and "Punkt" in r.stdout and "Alt" not in r.stdout
     assert subprocess.run([*tool, "v9.9.9", str(log)], capture_output=True, text=True).returncode == 1
+    # an older tag carries the bold form in its own CHANGELOG — still publishable
+    old = tmp_path / "OLD.md"
+    old.write_text("# Changelog\n\n**v1.0.0 — alt.** Text.\n- Punkt\n\n**v0.9.0 — älter.** X.\n", encoding="utf-8")
+    r = subprocess.run([*tool, "v1.0.0", str(old)], capture_output=True, text=True)
+    assert r.returncode == 0 and r.stdout.splitlines()[0] == "alt" and "Punkt" in r.stdout and "X." not in r.stdout
+    # a heading without a body is no entry
+    empty = tmp_path / "EMPTY.md"
+    empty.write_text("# Changelog\n\n## v1.3.0 — leer · 2026-10-15\n\n## v1.2.0 — x · 2026-10-01\n\nX.\n",
+                     encoding="utf-8")
+    assert subprocess.run([*tool, "v1.3.0", str(empty)], capture_output=True, text=True).returncode == 1
     wf = (root / ".github/workflows/release-publish.yml").read_text(encoding="utf-8")
     assert "tools/release_notes.py" in wf and "--verify-tag" in wf
 

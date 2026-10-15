@@ -23,7 +23,7 @@ plan cites a contract ID (DoR R5); a plan citing IDs without naming the
 contract it means. A plan is bound to a contract by naming its path or a
 `design-contract: <surface>` line — ID families are shared across surfaces,
 so only a bound plan is judged against a contract. A project may make the
-line a duty (docs/process/design-contract-declaration.json): from its day on,
+line a duty (docs/process/design-contract-declaration.local.json): from its day on,
 every active Tier 2+ plan states `design-contract: <surface> | n/a — <reason>`
 and a declared contract carries a non-empty `## Design Contract Trace`; naming
 the path alone no longer suffices there. Judging the design itself is never
@@ -56,11 +56,10 @@ _FENCE = re.compile(r"^(`{3,}|~{3,}).*?^\1[ \t]*$", re.MULTILINE | re.DOTALL)
 
 
 def _unfenced(text: str) -> str:
-    """Fenced blocks are quotations, never declarations (same rule as the
-    review gate); an unterminated fence quotes the rest of the file."""
-    text = _FENCE.sub("", text)
-    m = re.search(r"^(`{3,}|~{3,})", text, re.MULTILINE)
-    return text[:m.start()] if m else text
+    """Fenced blocks are quotations, never declarations — read as the review gate
+    reads them (indented and list-item fences, a longer closing fence): one owner."""
+    from check_review import _unfenced as owner  # noqa: PLC0415
+    return owner(text)
 
 
 def _registry_files(root: Path) -> list[Path]:
@@ -91,7 +90,20 @@ def id_pattern(prefixes: list[str]) -> re.Pattern[str]:
     return re.compile(rf"(?<![\w-])(?:{alts})\d+[a-z]?(?![\w-])")
 
 
-_BIND = re.compile(r"^\s*(?:[-*+]\s+)?[*_]*design-contract[*_]*\s*:\s*(\S+)", re.IGNORECASE | re.MULTILINE)
+# the one reader of a `design-contract:` line: binding (`bound_to`) and the
+# declaration duty (`declaration_problems`) ask here
+_DECLARED = re.compile(r"^\s*(?:[-*+]\s+)?[*_]*design-contract[*_]*[ \t]*:[ \t]*[*_]*[ \t]*(.*)$",
+                       re.IGNORECASE | re.MULTILINE)
+
+
+def declarations(text: str) -> list[str]:
+    """The values of a plan's `design-contract:` lines, emphasis stripped, in order."""
+    return [m.group(1).strip().strip("*_").strip() for m in _DECLARED.finditer(text)]
+
+
+def declared_surface(value: str) -> str:
+    """The surface a declaration names: its first word, quotes and backticks off, lower case."""
+    return value.split()[0].strip("`'\"").lower() if value else ""
 
 
 def bound_to(text: str, surface: str, contract_rel: str) -> bool:
@@ -101,7 +113,7 @@ def bound_to(text: str, surface: str, contract_rel: str) -> bool:
     would be judged against the web contract and vice versa."""
     if contract_rel in text:
         return True
-    return any(m.group(1).strip("`'\"").lower() == surface.lower() for m in _BIND.finditer(text))
+    return any(declared_surface(v) == surface.lower() for v in declarations(text))
 
 
 def canonical(ident: str, ids: re.Pattern[str]) -> str:
@@ -346,42 +358,47 @@ def _check_one(root: Path, path: Path, plans: dict[str, str], in_flight: set[str
 # A project that wants every Tier 2+ plan to state its contract writes
 # DECLARATION: {"from": "YYYY-MM-DD", "spec_above": N}. Read at the fork point,
 # like the review evidence rules: a branch cannot lift the duty for itself.
-DECLARATION = "docs/process/design-contract-declaration.json"
+DECLARATION = "docs/process/design-contract-declaration.local.json"
 TRACE_HEADING = "## Design Contract Trace"
-_DECLARED = re.compile(r"^\s*(?:[-*+]\s+)?[*_]*design-contract[*_]*[ \t]*:[ \t]*[*_]*[ \t]*(.*)$",
-                       re.IGNORECASE | re.MULTILINE)
-_NA = re.compile(r"^n/?a\b\s*(?:[—–-]+\s*)?(.*)$", re.IGNORECASE)
+# `n/a`, then a reason: a dash or colon alone is none
+_NA = re.compile(r"^n/?a\b[\s—–:-]*(.*)$", re.IGNORECASE)
 _SPEC_NUMBER = re.compile(r"^(\d+)-")
 _ISO_DAY = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
-def declaration_rule(root: Path) -> tuple[dict | None, str | None]:
-    """(rule, problem): the project's declaration duty as its fork point has it —
-    None when the project has none (nothing changes for it)."""
+def declaration_rule(root: Path) -> tuple[dict | None, str | None, str | None]:
+    """(rule, problem, fork point): the project's declaration duty as its fork point
+    has it — no rule when the project has none (nothing changes for it). Without a
+    readable fork point (none yet, or an ambiguous one the review gate reports) the
+    working tree is all there is."""
     import check_review as _review  # noqa: PLC0415  (the owner of the fork point)
-    base = _review.merge_base(root)
+    try:
+        base = _review.merge_base(root)
+    except _review.GitReadError:
+        base = None
     if base:
         text = _review._show(root, base, DECLARATION)
-    else:  # no integration branch yet: the working tree is all there is
+    else:
         path = root / DECLARATION
         text = _read(path) if path.is_file() else None
     if text is None:
-        return None, None
+        return None, None, base
     try:
         data = json.loads(text)
     except ValueError as exc:
-        return None, f"{DECLARATION}: not valid JSON ({exc})"
+        return None, f"{DECLARATION}: not valid JSON ({exc})", base
     if not isinstance(data, dict) or not _ISO_DAY.match(str(data.get("from", ""))):
-        return None, f'{DECLARATION}: needs "from": "YYYY-MM-DD" (the day the duty starts)'
+        return None, f'{DECLARATION}: needs "from": "YYYY-MM-DD" (the day the duty starts)', base
     above = data.get("spec_above")
     if above is not None and (isinstance(above, bool) or not isinstance(above, int) or above < 0):
-        return None, f'{DECLARATION}: "spec_above" must be a whole number (the highest spec before the duty)'
-    return data, None
+        return None, f'{DECLARATION}: "spec_above" must be a whole number (the highest spec before the duty)', base
+    return data, None, base
 
 
 def _first_added(root: Path, rel: str) -> str | None:
-    """The author day of the commit that first added `rel` — a backdated file
-    name proves nothing; None: not committed yet."""
+    """The day of the commit that first added `rel`; None: not committed yet. Asked
+    only for a plan the fork point already has — a plan this branch adds is bound
+    whatever its dates say."""
     import subprocess  # noqa: PLC0415
     r = subprocess.run(["git", "-C", str(root), "log", "--diff-filter=A", "--format=%as", "--", rel],
                        capture_output=True, text=True)
@@ -407,29 +424,29 @@ def declaration_problems(text: str, contracts: set[str]) -> list[str]:
     """Why a plan does not state its contract as the duty asks — [] when it does."""
     plain = _unfenced(text)
     named = ", ".join(sorted(contracts)) or "(no contract registered yet)"
-    decl = _DECLARED.search(plain)
-    if decl is None:
+    found = declarations(plain)
+    if not found:
         return [f"no `design-contract:` line — declare one of {named} or `n/a — <reason>`"]
-    value = decl.group(1).strip().strip("*_").strip()
-    na = _NA.match(value)
+    na = _NA.match(found[0])
     if na is not None:
-        return [] if na.group(1).strip() else ["`design-contract: n/a` without a reason — name why "
-                                               "no visual surface is touched"]
-    contract = value.split()[0] if value else ""
-    if contract not in contracts:
-        return [f"unknown design contract `{contract}` — expected one of {named} or `n/a — <reason>`"]
+        return [] if re.search(r"\w", na.group(1)) else ["`design-contract: n/a` without a reason — "
+                                                          "name why no visual surface is touched"]
+    surface = declared_surface(found[0])
+    if surface not in {c.lower() for c in contracts}:
+        return [f"unknown design contract `{surface}` — expected one of {named} or `n/a — <reason>`"]
     if not _trace_body(plain):
-        return [f"declares `{contract}` but its `{TRACE_HEADING}` is missing or empty — name the "
+        return [f"declares `{surface}` but its `{TRACE_HEADING}` is missing or empty — name the "
                 f"contract sections, screen IDs and briefs the work follows, and every deviation"]
     return []
 
 
 def declaration_check(root: Path, plans: dict[str, str], contracts: set[str]
                       ) -> tuple[list[str], list[str]]:
-    """The declaration duty over the active Tier 2+ plans: hard from the day the
-    project set, one summary note for the plans from before it."""
-    from check_review import plan_tier  # noqa: PLC0415  (one owner of the tier grammar)
-    rule, problem = declaration_rule(root)
+    """The declaration duty over the active Tier 2+ plans: every plan this branch
+    adds is bound; a plan the fork point already has is bound from the project's
+    day on (spec plans: above its number) — older ones get one summary note."""
+    import check_review as _review  # noqa: PLC0415  (one owner of the tier grammar)
+    rule, problem, base = declaration_rule(root)
     if problem:
         return [problem], []
     if rule is None:
@@ -438,13 +455,15 @@ def declaration_check(root: Path, plans: dict[str, str], contracts: set[str]
     for rel, text in plans.items():
         if Path(rel).name.startswith("design-"):
             continue
-        tier = plan_tier(_unfenced(text))
+        tier = _review.plan_tier(_unfenced(text))
         if tier is None or tier < 2:
             continue
         problems = declaration_problems(text, contracts)
         if not problems:
             continue
-        if rel.startswith(SPECS_DIR + "/"):
+        if base and _review._show(root, base, rel) is None:
+            bound = True  # new on this branch: no date of its own can grandfather it
+        elif rel.startswith(SPECS_DIR + "/"):
             m = _SPEC_NUMBER.match(Path(rel).parent.name)
             bound = rule.get("spec_above") is None or m is None or int(m.group(1)) > rule["spec_above"]
         else:

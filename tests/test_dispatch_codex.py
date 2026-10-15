@@ -614,6 +614,24 @@ def test_an_attested_handoff_never_pushes_commits_made_after_it(review_repo):
     assert json.loads((Path(rec["evidence"]) / codex.HANDOFF).read_text())["pushed"] is False
 
 
+def test_an_amended_attest_commit_is_never_pushed_again(review_repo):
+    """Refute v2.74: an attest commit amended with unreviewed code passed `_committed_attest`."""
+    out, d, codex = review_repo(PASS)
+    _run_review(out, d, codex)
+    hook = out / ".git/hooks/pre-push"
+    hook.parent.mkdir(exist_ok=True)
+    hook.write_text("#!/bin/sh\nexit 1\n")
+    hook.chmod(0o755)
+    assert d.handoff(out, "7-widget") == 1
+    hook.unlink()
+    (out / "evil.py").write_text("X = 1\n")
+    _git(out, "add", "evil.py")
+    _git(out, "commit", "-q", "--amend", "--no-edit")
+    remote = _git(out, "ls-remote", "origin", "refs/heads/7-widget").split()[0]
+    assert d.handoff(out, "7-widget") == 1
+    assert _git(out, "ls-remote", "origin", "refs/heads/7-widget").split()[0] == remote
+
+
 @pytest.mark.parametrize("issue", ["none", "", "#x"])
 def test_a_finding_names_an_issue_or_none(review_repo, issue):
     bad = {**PASS, "findings": [{"sev": "minor", "action": "accept", "kind": "implementation", "issue": issue,

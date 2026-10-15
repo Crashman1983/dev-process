@@ -2259,7 +2259,10 @@ def own_family_rule(root: Path, ref: str | None = None) -> tuple[int, dict, str]
     the base (`ref`, else the integration ref), so a branch cannot lift the rule for
     itself (#241). 4: never. Kept per commit: a ref that moves is read anew."""
     from attest_evidence import review_policy  # noqa: PLC0415  (it imports this module)
-    ref = ref or integration_ref(root) or "HEAD"
+    try:
+        ref = ref or integration_ref(root) or "HEAD"
+    except GitReadError as exc:  # an ambiguous fork point: the gate reports it as such
+        return 4, {}, str(exc)
     key = (str(root), _commit_id(root, ref) or ref)
     if key not in _OWN_FAMILY_RULES:
         rules, problem = review_policy(root, ref)
@@ -2281,13 +2284,19 @@ def clearing_passes(root: Path, passes: list[dict], tier: int, ref: str | None =
     only the own family's; below it, all. An unreadable policy applies no rule (attest,
     which reads the same policy, refuses every pass then)."""
     own_from, rules, _problem = own_family_rule(root, ref)
-    return own_family(passes, rules) if tier >= own_from else passes
+    return own_family(passes, rules) if applies_own_family(tier, own_from) else passes
+
+
+def applies_own_family(tier: int, own_from: int) -> bool:
+    """4 means never — also for a plan on an extended downstream scale (tier 4/5),
+    which clears at the gated ceiling of 3 like everywhere else (`_cleared`)."""
+    return own_from < 4 and min(tier, 3) >= own_from
 
 
 def own_family_missing(rel: str, tier: int, own_from: int) -> str:
-    return (f"{rel}: tier {tier} plan is cleared only by another model family — from tier {own_from} "
-            f"a pass by this project's own family (`review_evidence.ranks`) must clear it and cover "
-            f"the current code (`review_evidence.own_family_from_tier`, model-policy.json)")
+    return (f"{rel}: tier {tier} plan is cleared only by passes outside this project's own model "
+            f"family — from tier {own_from} a pass by a model `review_evidence.ranks` places must clear "
+            f"it and cover the current code (`review_evidence.own_family_from_tier`, model-policy.json)")
 
 
 def no_clearing_review(rel: str, tier: int, ids) -> str:
@@ -2660,7 +2669,7 @@ def check(root: Path) -> tuple[list[str], list[str]]:
     known_work = _known_work(root)
     # from `own_family_from_tier` on, the push-anchored arms below clear and judge
     # coverage with the own family's passes alone (#241)
-    own_from, _rules, rules_problem = own_family_rule(root, scope_base)
+    own_from, _rules, rules_problem = own_family_rule(root, scope_base) if base_error is None else (4, {}, "")
     if rules_problem:
         soft.append(f"review_evidence not read ({rules_problem}) — own_family_from_tier not applied")
 
@@ -2733,6 +2742,11 @@ def check(root: Path) -> tuple[list[str], list[str]]:
             tiered_plans.append((f"{PLANS_ARCHIVE}/{p.name}", text, tier, ids))
             if not _cleared(passes, ids, tier):
                 hard.append(no_clearing_review(f"{PLANS_ARCHIVE}/{p.name}", tier, ids))
+            elif (scope_base and applies_own_family(tier, own_from)
+                  and _show(root, scope_base, f"{PLANS_ARCHIVE}/{p.name}") is None
+                  and not _cleared(clearing_passes(root, passes, tier, scope_base), ids, tier)):
+                # archived in this push: its merge is now — the own-family rule holds (#241)
+                hard.append(own_family_missing(f"{PLANS_ARCHIVE}/{p.name}", tier, own_from))
 
     # the speckit path's plans: the decisions ledger is a note there too
     for rel, plan in record_files(root, ("spec-plan",)):

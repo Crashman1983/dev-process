@@ -545,12 +545,13 @@ def test_a_finding_names_its_reviewer_anywhere_among_its_keys(render, tmp_path):
                                 "FINDING sev=minor action=fix issue=- no reviewer\n")
     assert [(f["by"] if "by" in f else None, f["title"]) for f, _e, _l in rows] == [
         ("codex", "guard read twice"), ("claude", "late note"), (None, "no reviewer")]
+    # a title that starts with `by=…` but names no family stays a title: older reports stay valid
+    (fields, err, _line), = gate.report_findings("FINDING sev=minor action=accept issue=- by=Reference: aliasing\n")
+    assert err is None and "by" not in fields and fields["title"] == "by=Reference: aliasing"
     _report(out, "2026-07-05-x.md", VALID_REPORT +
-            "FINDING sev=minor action=fix issue=- by=Codex! shouting\n"
             "FINDING sev=minor action=fix issue=- by=codex by=claude twice\n")
     r = _run(out)
-    assert r.returncode == 1
-    assert "no reviewer family" in r.stdout and "duplicate key 'by'" in r.stdout
+    assert r.returncode == 1 and "duplicate key 'by'" in r.stdout
 
 
 def test_prose_starting_with_finding_ignored(render, tmp_path):

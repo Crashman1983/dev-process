@@ -654,10 +654,9 @@ def handoff(root: Path, rec: dict, *, implementer: str | None = None) -> dict:
         previous = json.loads(done.read_text())
         if previous.get("state") == "attested":
             wt = Path(rec["worktree"])
-            # the attest commit stood but its push failed: push it again — only while that
-            # commit is still HEAD, never commits that came after it
-            if previous.get("pushed") is False and _committed_attest(wt, rec, str(rec["issue"]),
-                                                                   bool(rec.get("plan_review"))):
+            # the attest commit stood but its push failed: push it again — only while HEAD is
+            # that very commit, never one amended or added after it
+            if previous.get("pushed") is False and previous.get("attest_commit") == _head(wt):
                 return _finish(rec, wt, done, previous)
             return previous
     plan_review = bool(rec.get("plan_review"))
@@ -772,8 +771,17 @@ def _restore(wt: Path, before: set[str]) -> None:
                 path.unlink()
 
 
+def _head(wt: Path) -> str | None:
+    try:
+        return _git(wt, "rev-parse", "HEAD").decode().strip()
+    except ValueError:
+        return None
+
+
 def _finish(rec: dict, wt: Path, done: Path, record: dict) -> dict:
-    """Push the attest commit through the pre-push hook and record what happened."""
+    """Push the attest commit through the pre-push hook and record what happened —
+    with the commit itself, so a later handoff pushes again only that commit."""
+    record.setdefault("attest_commit", _head(wt))
     push = subprocess.run(["git", "-C", str(wt), "push", "origin", f"HEAD:refs/heads/{rec['branch']}"],
                           capture_output=True, text=True, env=git_environment(), timeout=600, check=False)
     record.update(pushed=push.returncode == 0,
