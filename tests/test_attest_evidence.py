@@ -623,6 +623,15 @@ def test_a_parametrized_id_may_hold_commas(ev_mod):
         ("tests/a.py", "test_x"), ("tests/a.py", "test_y")]
 
 
+def test_a_test_title_may_hold_commas_and_semicolons(ev_mod):
+    """#237 (Kenni #2607): a vitest title written as a sentence was cut at its comma."""
+    mod, _out = ev_mod
+    title = "markiert den Lauf als unvollständig und siegelt nicht, wenn eine Aufzeichnung scheitert"
+    assert mod.claimed_tests(f"web/run.test.ts::{title}") == [("web/run.test.ts", title)]
+    assert mod.claimed_tests("`web/a.test.ts::a; b`, web/b.test.ts::c; ::d") == [
+        ("web/a.test.ts", "a; b"), ("web/b.test.ts", "c"), ("web/b.test.ts", "d")]
+
+
 def test_a_criterion_struck_with_a_reason_needs_no_test(ev_mod):
     """#234 (Kenni #2606): a struck or prose-only criterion still demanded a test."""
     mod, _out = ev_mod
