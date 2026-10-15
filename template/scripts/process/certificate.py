@@ -155,11 +155,43 @@ def clean_tree_problem(root: Path) -> str | None:
     return None
 
 
+# make flags that change which recipes run, or override the Makefile's pins: a run
+# under them proves nothing about the suite (downstream #2149). One letter each in
+# the dashless cluster make exports first (`make -i -s` → `MAKEFLAGS=is`) or as `-x`
+_MAKE_ALTERING = set("iknqteoE")
+# short flags whose value follows in the same word (`-j4`, `-Otarget`): the rest is no flag
+_MAKE_VALUED = set("jlIWCOf")
+_MAKE_ALTERING_LONG = {"--eval", "--old-file", "--assume-old", "--ignore-errors", "--keep-going",
+                       "--just-print", "--dry-run", "--recon", "--question", "--touch",
+                       "--environment-overrides"}
+
+
+def _makeflags_problem(flags: str) -> str | None:
+    words = flags.split()
+    for i, word in enumerate(words):
+        if word == "--":  # what follows are variable assignments
+            return "MAKEFLAGS carries a variable assignment — it overrides the Makefile's pins"
+        if "=" in word and not word.startswith("-"):
+            return "MAKEFLAGS carries a variable assignment — it overrides the Makefile's pins"
+        if word.startswith("--"):
+            if word.split("=", 1)[0] in _MAKE_ALTERING_LONG:
+                return f"MAKEFLAGS carries `{word.split('=', 1)[0]}` — it changes what the suite runs"
+            continue
+        if not (word.startswith("-") or i == 0):
+            continue  # a value of the flag before it
+        for letter in word.lstrip("-"):
+            if letter in _MAKE_ALTERING:
+                return f"MAKEFLAGS carries `-{letter}` — it changes what the suite runs"
+            if letter in _MAKE_VALUED:
+                break
+    return None
+
+
 def env_problem(names: list[str] | tuple[str, ...] = ()) -> str | None:
     """Why the environment may have changed what ran, or None."""
-    flags = os.environ.get("MAKEFLAGS", "")
-    if any("=" in word and not word.startswith("-") for word in flags.split()):
-        return "MAKEFLAGS carries a variable assignment — it overrides the Makefile's pins"
+    problem = _makeflags_problem(os.environ.get("MAKEFLAGS", ""))
+    if problem:
+        return problem
     for name in names:
         if os.environ.get(name):
             return f"{name} is set — it changes what the tests run"

@@ -1309,7 +1309,9 @@ def _certify_merge(wt: Path, suite: str, before: str | None, env_names: list[str
     if not before:
         return
     if _changed_by_run(wt):
-        log("suite green, but the run changed the worktree — no merge certificate")
+        # name what the run left, so it can be ignored or cleaned (downstream #2542)
+        log(f"suite green, but the run changed the worktree — no merge certificate"
+            f" ({certificate.clean_tree_problem(wt) or 'the tree differs from before the run'})")
         return
     # the hook builds the same evidence (`certificate.merge_evidence`): the same string, or no
     # hit. The scope is the run's `stages` file; missing with `merge_scope` configured = unknown,
@@ -1435,8 +1437,10 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
 
     def full_suite(wt: Path, key: str) -> str:
         """The suite on `wt`, remembered and — on a tree it left as found — certified."""
-        clean = certificate.clean_tree_problem(wt) is None
-        before = certificate.evidence_tree(wt) if clean else None
+        dirty = certificate.clean_tree_problem(wt)
+        if dirty:
+            log(f"no merge certificate for this run: {dirty} before the suite")
+        before = certificate.evidence_tree(wt) if dirty is None else None
         certificate.clear_run(wt)  # the `stages` file the certificate reads is this run's
         state = timed("suite", _sh, wt, suite, log)
         _collect_stage_times(wt, stages, stage_seen, log)
