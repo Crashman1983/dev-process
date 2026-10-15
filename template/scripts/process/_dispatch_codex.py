@@ -597,7 +597,8 @@ def _report_text(rec: dict, result: dict, *, work: str, plan_review: bool, refut
              f"artifact: base={b['base']} head={b['head']} diff_sha256={b['diff_sha256']}",
              f"codex-result: {rec['result_sha256']}", f"verdict: {result['verdict']}", ""]
     for f in result["findings"]:
-        lines.append(f"FINDING sev={f['sev']} action={f['action']} kind={f['kind']} issue={f['issue']} {f['title']}")
+        lines.append(f"FINDING sev={f['sev']} action={f['action']} kind={f['kind']} issue={f['issue']} by=codex "
+                     f"{f['title']}")
     if result["criteria"]:
         lines += ["", *result["criteria"]]
     if refute_round is not None:

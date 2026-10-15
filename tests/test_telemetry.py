@@ -362,6 +362,23 @@ def test_rounds_counts_blockers_by_kind_plan_reviews_apart_from_code_reviews(ren
     assert next(ln for ln in _rounds(out).splitlines() if "blockers by kind" in ln) == line
 
 
+def test_rounds_counts_blockers_by_reviewer(render, tmp_path):
+    """#247: which reviewer raised the blockers — the second opinion's share, counted."""
+    out = _render(render, tmp_path, github_issues=True)
+    _journal(out, ROUNDS_JOURNAL)
+    reviews = out / ".process-work/reviews"
+    reviews.mkdir(parents=True)
+    (reviews / "2026-07-05-widget-code.md").write_text(
+        "review: widget-code\nwork: #9\npublish-waived: test\n\n## Findings\n"
+        "FINDING sev=blocker action=fix issue=- by=codex guard read twice\n"
+        "FINDING sev=blocker action=fix issue=- by=codex owner bypassed\n"
+        "FINDING sev=blocker action=fix issue=- by=claude missing test\n"
+        "FINDING sev=blocker action=fix issue=- unattributed\n"
+        "FINDING sev=major action=fix issue=- by=claude not a blocker\n", encoding="utf-8")
+    line = next(ln for ln in _rounds(out).splitlines() if "blockers by reviewer" in ln)
+    assert line.strip() == "blockers by reviewer: claude 1, codex 2, - 1", line
+
+
 def test_rounds_by_kind_without_any_kind_reads_zero(render, tmp_path):
     out = _render(render, tmp_path, github_issues=True)
     _journal(out, ROUNDS_JOURNAL)

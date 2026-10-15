@@ -723,6 +723,18 @@ def test_a_review_without_receipt_is_no_way_out(review_repo, capsys):
     assert not (d._records_dir(out) / "codex" / codex.UNAVAILABLE).exists()
 
 
+def test_a_codex_finding_names_its_reviewer(review_repo):
+    """#247: the handoff's findings carry `by=codex`, so a later count can tell them apart."""
+    block = {"verdict": "block", "findings": [{"sev": "major", "action": "fix", "kind": "implementation",
+                                               "issue": "-", "title": "wrong"}],
+             "criteria": ["AC-1: tests/test_widget.py::test_widget"], "refute": []}
+    out, d, codex = review_repo(block)
+    _run_review(out, d, codex)
+    d.handoff(out, "7-widget")
+    report = next((out / ".process-work/reviews").glob("*-7-codex-*.md")).read_text()
+    assert "FINDING sev=major action=fix kind=implementation issue=- by=codex wrong" in report
+
+
 def test_the_implementer_flag_never_overrides_a_measured_model(review_repo):
     out, d, codex = review_repo(PASS, implementer="gpt-6-luna")
     d._report.write_report(out, "pushed", issue=7, note="", worker="7-widget", model=None)  # not measured

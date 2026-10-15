@@ -397,7 +397,7 @@ that head is unreviewed for the gate. Never invent these values.
 
 For each finding, one line:
 
-    FINDING sev=<blocker|major|minor|nit> action=<fix|accept|follow-up> issue=<ref|-> gate=<judgement|possible|name> [origin=<draft|fix|late>] [kind=<knowledge-gap|requirement|implementation|test-gap|process|environment>] <title>
+    FINDING sev=<blocker|major|minor|nit> action=<fix|accept|follow-up> issue=<ref|-> gate=<judgement|possible|name> [origin=<draft|fix|late>] [kind=<knowledge-gap|requirement|implementation|test-gap|process|environment>] [by=<your family: claude|codex|…>] <title>
 
 - `gate`: could a linter, type checker or gate rule have produced this finding?
   `judgement` = no, it needed a reader; `possible` = yes, but no rule exists

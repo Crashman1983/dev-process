@@ -616,6 +616,12 @@ def rounds(root: Path | None = None) -> int:
             by_phase[ph] = counts
         print(f"  blockers by kind — plan reviews: {_kind_text(by_phase['plan'])}; "
               f"code reviews: {_kind_text(by_phase['code'])}")
+        # who raised them (`by=`, #247): "-" = a blocker without by=
+        by_reviewer: dict[str, int] = {}
+        for cell in (c for w, c in _blockers_by_work(root, "by").items() if w in listed):
+            for k, n in cell.items():
+                by_reviewer[k] = by_reviewer.get(k, 0) + n
+        print(f"  blockers by reviewer: {_kind_text(by_reviewer)}")
     n = len(rnds)
     lvl = _level(n, True, False, _N_THRESHOLD)
     print(f"  {confidence(n, proxy=True)} · {action(lvl, 'compare rounds to pass within one tier over time; where fix-origin blockers dominate, re-check the fixed class (verification-independence.md, What each round judges)', thin='record origin= on blocker findings; judge after ~20 work items')}")
