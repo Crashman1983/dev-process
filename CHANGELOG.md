@@ -1187,7 +1187,7 @@ Anlass: Der Owner will Kennis Änderungen so weit wie möglich zurück im Templa
   - **Auswertung:** `process_kpis.py train-phases` zeigt je Stufe den letzten Zug, Median, Maximum, Übersprünge und rote Läufe.
   - **Pflichten einer gestuften Suite:** Vor der Auswahl löscht sie `stages` und alle `*.time`. `merge_scope` gibt für einen Baum überall dieselbe Antwort, im Hook wie im Zug.
   - Ein kaputter Marker kostet eine Kennzahl, nie den Zug.
-  - Ohne Stufen-Dateien ändert sich nichts.
+  - Ohne Stufen-Dateien ändert sich für Gate und Zertifikat nichts. `phases.jsonl` trägt dann `"stages": {}`, und `train-phases` meldet, dass noch keine Stufenzeiten vorliegen.
 - **Kleine Ports:**
   - **`stale_minutes`:** Ein ungültiger Wert wird gemeldet statt still verworfen. Eine Policy, die kein Objekt ist oder deren `phases` kein Objekt ist, lehnt `load_policy` ab, statt abzustürzen.
   - **Design-Contract-Notizen (Kenni #2588):** Sie gehen in `<surface>.notes.md`, mit `merge=union`.

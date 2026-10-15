@@ -56,7 +56,7 @@ Die Einordnung jedes Hunks (Port, verallgemeinert, lokal, überholt) ist in der 
   - `/steward`: Die Suite kommt standardmäßig aus `merge_suite`.
   - `/review`: Das Attest-Beispiel nennt `--with <report>`.
   - Quick (Befehl und `workflow.md`): eine beobachtbare Satz-Beschreibung, der Endzustand der Daten, und eskaliert wird bei einer Designwahl oder bei parallelen Subagenten.
-- **D6 #234:** Gestrichene ACs. `~~AC-<id>~~` und `AC-<id>: struck — <Grund>` (auch `dropped`) nehmen eine AC aus der Testpflicht. Ohne Grund bleibt sie Pflicht.
+- **D6 #234:** Gestrichene ACs. `AC-<id>: struck — <Grund>` (auch `dropped`) nimmt eine AC aus der Testpflicht. Ohne Grund bleibt sie Pflicht, ein bloßes `~~AC-<id>~~` streicht nichts, und der Bericht bestätigt die Streichung (P2, P12).
 - **D7 #235:**
   - Das Shell-Beispiel für `codex exec` schließt stdin (`< /dev/null`) und begrenzt die Laufzeit (`timeout 1800`); argv-Zellen siehe P1.
   - Die Zug-Meldung zu DECISION NEEDED zitiert die Zeile und nennt die Antwortform.
@@ -158,3 +158,14 @@ Ergebnis: widerlegt mit zwei Minors und einer Regression, die fail-closed bleibt
 - **R8:** `tiers` als Liste ließ den Tower abstürzen. `load_policy` prüft jetzt `phases` und `tiers` auf ihre Form.
 - **R9:** `AC-3: struck -- <Grund>` galt nicht mehr als Streichung. `--` trennt jetzt wie `-`.
 - **Hinnahme** (bestand schon vorher, fail-closed): Eine Überschrift oder nummerierte Zeile streicht nichts. Das gilt auch für `**struck**`. Platzhalter wie `TBD` gelten als Grund.
+
+## Code-Review Runde 1 — Änderungen
+
+Ergebnis: Block mit einem Major. Ohne `merge_scope` ändert sich nur das Dokumentierte, und das Workflow-Jinja rendert zu gültigem YAML.
+
+- **C1 (Major):** `clear_run` im Zug hatte keinen Test. Der Memo-Test deckt jetzt auch einen übrig gebliebenen breiten `stages`-Stand ab, wenn die Suite keinen schreibt: kein Memo, kein Zertifikat.
+- **C2:** Doc-Pins für die Lehren aus Kenni (Lanes, Stufen, Worker-Zahl, CI-Adapter, geplanter Lauf, Inbox, Plan-Anker, Turns für Edits, Quick, `--commit --with`) und ein Render-Test für `concurrency`.
+- **C3:** Der CHANGELOG sagt genauer, was sich ohne Stufen-Dateien ändert.
+- **C4:** D6 ist an P2 und P12 angeglichen.
+- **C5:** Der Docstring von `run_stages` setzt kein Makefile mehr voraus.
+- **C6:** Die NEWS nennen den Scope nur für Projekte mit Testgruppen und den einmaligen Neu-Lauf.

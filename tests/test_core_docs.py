@@ -838,3 +838,31 @@ def test_the_tier_is_rechecked_and_value_changes_are_inventoried(render, tmp_pat
                  "which process something runs in"):
         assert item in plan, item
     assert "0. TIER" in (out / "docs/process/refute.md").read_text()
+
+
+def test_the_kenni_backport_lessons_are_pinned(render, tmp_path):
+    # v2.72 (#221, #226, #235): what a downstream project learned stays in the docs
+    out = render(tmp_path, {"project_name": "demo", "harnesses": {"claude": True}})
+    docs = out / "docs/process"
+    testing = (docs / "testing.md").read_text()
+    for piece in ("Test lanes are a shared resource", "**Stages", "(`addopts`)", "PYTEST_XDIST_WORKER",
+                  "75 a lane stayed busy"):
+        assert piece in testing, piece
+    assert "Test lanes are a shared resource" in (out / "scripts/process/lane.py").read_text()
+    assert "Without a CI adapter neither route carries a hosted job" in (docs / "commits.md").read_text()
+    assert "flock -n" in (docs / "improvement-weekly.md").read_text()
+    assert "the inbox file with `merge=union`" in (docs / "journal-state-plans.md").read_text()
+    commands = out / ".claude/commands"
+    assert "carries its anchors" in (commands / "plan.md").read_text()
+    assert "carries its anchors" in (docs / "workflow.md").read_text()
+    assert "Spend turns on edits, not on finding" in (commands / "execute.md").read_text()
+    assert "observable sentence" in (commands / "quick.md").read_text()
+    assert "--commit --with" in (commands / "review.md").read_text()
+
+
+def test_the_gates_workflow_cancels_superseded_runs_never_on_main(render, tmp_path):
+    import yaml
+    out = render(tmp_path, {"project_name": "demo"})
+    wf = yaml.safe_load((out / ".github/workflows/process-gates.yml").read_text())
+    assert wf["concurrency"] == {"group": "${{ github.workflow }}-${{ github.ref }}",
+                                 "cancel-in-progress": "${{ github.ref != 'refs/heads/main' }}"}
