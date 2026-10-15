@@ -287,7 +287,9 @@ def _unfenced(text: str) -> str:
         if marker and fence is None:
             fence = marker
             continue
-        if marker and fence is not None and _fence_closes(fence, marker):
+        # a closing fence carries no info string: ```python inside a fence opens nothing
+        # and closes nothing (CommonMark)
+        if marker and fence is not None and _fence_closes(fence, marker) and line.strip() == marker:
             fence = None
             continue
         if fence is None:
@@ -2293,6 +2295,43 @@ def applies_own_family(tier: int, own_from: int) -> bool:
     return own_from < 4 and min(tier, 3) >= own_from
 
 
+def plans_moved_in(root: Path, base: str) -> dict[str, str | None]:
+    """The plan files this push brings to their path, with where each came from —
+    `{path: base path or None}`, rename-aware (`git diff -M` from the fork point).
+    An added file has no source; one renamed keeps its base path (a caller decides
+    whether a rename is news — a plan renamed inside the archive is not); one whose
+    content replaced another's (`git mv -f`) counts as added."""
+    out = _git_bytes(root, "diff", "-M", "--name-status", "-z", base, "HEAD", "--",
+                     PLANS_ACTIVE, SPECS_DIR)
+    moved: dict[str, str | None] = {}
+    if out is None:
+        return moved
+    parts = out.decode("utf-8", "surrogateescape").split("\0")
+    i = 0
+    while i < len(parts) - 1:
+        status = parts[i]
+        if status[:1] in ("R", "C"):
+            src, dst = parts[i + 1], parts[i + 2]
+            i += 3
+            moved[dst] = src
+        else:
+            path = parts[i + 1]
+            i += 2
+            if status[:1] == "A":
+                moved[path] = None
+            elif status[:1] in ("M", "T"):
+                # content replaced: the same plan edited keeps its ids, another's file does not
+                before, now = _show(root, base, path), (root / path)
+                if before is not None and now.is_file():
+                    stem = plan_stem(path)
+                    old_ids = _plan_work_ids(stem, _unfenced(before), include_dedated=True)
+                    new_ids = _plan_work_ids(stem, _unfenced(now.read_text(encoding="utf-8", errors="replace")),
+                                             include_dedated=True)
+                    if old_ids != new_ids:
+                        moved[path] = None
+    return moved
+
+
 def own_family_missing(rel: str, tier: int, own_from: int) -> str:
     return (f"{rel}: tier {tier} plan is cleared only by passes outside this project's own model "
             f"family — from tier {own_from} a pass by a model `review_evidence.ranks` places must clear "
@@ -2707,6 +2746,11 @@ def check(root: Path) -> tuple[list[str], list[str]]:
     # (rel, text, tier, work ids) of every tiered plan — the join the
     # commit-anchored arm below needs
     tiered_plans: list[tuple[str, str, int, set[str]]] = []
+    # archived by this push (from the active folder, or onto another plan's file):
+    # its merge is now, so the own-family rule holds for it (#241)
+    archived_now = ({rel for rel, src in plans_moved_in(root, scope_base).items()
+                     if rel.startswith(PLANS_ARCHIVE + "/") and (src is None or not src.startswith(PLANS_ARCHIVE + "/"))}
+                    if scope_base and own_from < 4 else set())
     if adir.is_dir():
         plans = [p for p in sorted(adir.glob("*.md")) if not p.name.startswith("design-")]
         for p in plans:
@@ -2743,7 +2787,7 @@ def check(root: Path) -> tuple[list[str], list[str]]:
             if not _cleared(passes, ids, tier):
                 hard.append(no_clearing_review(f"{PLANS_ARCHIVE}/{p.name}", tier, ids))
             elif (scope_base and applies_own_family(tier, own_from)
-                  and _show(root, scope_base, f"{PLANS_ARCHIVE}/{p.name}") is None
+                  and f"{PLANS_ARCHIVE}/{p.name}" in archived_now
                   and not _cleared(clearing_passes(root, passes, tier, scope_base), ids, tier)):
                 # archived in this push: its merge is now — the own-family rule holds (#241)
                 hard.append(own_family_missing(f"{PLANS_ARCHIVE}/{p.name}", tier, own_from))

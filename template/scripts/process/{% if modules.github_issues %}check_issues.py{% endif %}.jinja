@@ -200,7 +200,9 @@ def _parse_finding(match: re.Match) -> tuple[dict | None, str | None]:
         if not eq or k not in FINDING_KEYS:
             break  # title starts here
         if k == "by" and not FINDING_BY.match(v):
-            break  # `by=` that names no family is the title's first word (an older report's)
+            if any(t.partition("=")[0] in FINDING_KEYS and t.partition("=")[1] for t in tokens[i + 1:]):
+                return None, f"by={v!r} is no reviewer family (a lower-case word: claude, codex, …)"
+            break  # `by=` that names no family and no key after it: an older report's title
         if k in fields:
             return None, f"duplicate key {k!r}"
         fields[k] = v

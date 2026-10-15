@@ -191,3 +191,46 @@ def test_the_train_asks_the_same_owner(render, tmp_path):
     train, review = _process_modules(r.root)
     journal = [p.read_text() for p in (r.root / ".process-work/journal").glob("*.md")]
     assert train._covers(r.root, review.review_passes(r.root, journal), {"77"}, 3, "HEAD")
+
+
+def test_archiving_onto_another_plans_file_still_needs_the_own_family(render, tmp_path):
+    """Delta review v2.74: `git mv -f` onto a file name the base has skipped the archive arm."""
+    r = Repo(render, tmp_path, claim="")
+    _git(r.root, "checkout", "-q", "main")
+    old = r.root / ".process-work/plans/archive/2026-01-01-old.md"
+    old.parent.mkdir(parents=True, exist_ok=True)
+    old.write_text("# Old\n\ntier: 1\nissue: #5\n", encoding="utf-8")
+    _git(r.root, "add", "-A")
+    _git(r.root, "commit", "-q", "-m", "an old archived plan")
+    _git(r.root, "checkout", "-q", "feature")
+    _git(r.root, "merge", "-q", "--no-edit", "main")
+    _git(r.root, "mv", "-f", ".process-work/plans/2026-10-15-77-widget.md", ".process-work/plans/archive/2026-01-01-old.md")
+    _git(r.root, "commit", "-q", "-m", "chore: archive")
+    r.passes((CODEX, r.neu))
+    out = r.gate()
+    assert out.returncode == 1 and "cleared only by passes outside" in out.stdout, out.stdout
+
+
+def test_renaming_inside_the_archive_reopens_nothing(render, tmp_path):
+    """Delta review v2.74: an old codex-cleared archived plan, renamed, is no new merge."""
+    r = Repo(render, tmp_path, claim="")
+    _git(r.root, "checkout", "-q", "main")
+    old = r.root / ".process-work/plans/archive/2026-01-01-55-old.md"
+    old.parent.mkdir(parents=True, exist_ok=True)
+    old.write_text("# Old\n\ntier: 3\nissue: #55\n", encoding="utf-8")
+    _git(r.root, "add", "-A")
+    _git(r.root, "commit", "-q", "-m", "an old archived plan")
+    _git(r.root, "checkout", "-q", "feature")
+    _git(r.root, "merge", "-q", "--no-edit", "main")
+    _git(r.root, "mv", ".process-work/plans/archive/2026-01-01-55-old.md",
+         ".process-work/plans/archive/2026-01-01-55-older.md")
+    _git(r.root, "commit", "-q", "-m", "chore: rename")
+    folder = r.root / ".process-work/journal"
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "2026-10-15.md").write_text(
+        f"REVIEW work=55 tier=3 reviewer=r model={CODEX} independence=bundle,non-implementing,cross-model "
+        f"verdict=pass round=1\n"
+        f"REVIEW work=77 tier=3 reviewer=r model={CLAUDE} independence=bundle,non-implementing,cross-model "
+        f"verdict=pass round=1 base={r.base} head={_git(r.root, 'rev-parse', 'HEAD')}\n", encoding="utf-8")
+    out = r.gate()
+    assert "55-older.md" not in out.stdout, out.stdout
