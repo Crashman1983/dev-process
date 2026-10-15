@@ -256,3 +256,49 @@ def test_an_archived_plan_rewritten_under_a_rename_needs_the_own_family(render, 
     r.passes((CODEX, r.neu))
     out = r.gate()
     assert out.returncode == 1 and "cleared only by passes outside" in out.stdout, out.stdout
+
+
+def test_a_typo_fix_in_an_old_archived_plan_reopens_nothing(render, tmp_path):
+    """Delta round 4: a link or wording sweep through the archive must not need a new review."""
+    r = Repo(render, tmp_path, claim="")
+    _git(r.root, "checkout", "-q", "main")
+    old = r.root / ".process-work/plans/archive/2026-01-01-55-old.md"
+    old.parent.mkdir(parents=True, exist_ok=True)
+    old.write_text("# Plan\n\ntier: 3\nissue: #55\n\nteh text\n", encoding="utf-8")
+    _git(r.root, "add", "-A")
+    _git(r.root, "commit", "-q", "-m", "an old archived plan")
+    _git(r.root, "checkout", "-q", "feature")
+    _git(r.root, "merge", "-q", "--no-edit", "main")
+    old.write_text(old.read_text().replace("teh", "the"), encoding="utf-8")
+    _git(r.root, "commit", "-qam", "docs: typo")
+    folder = r.root / ".process-work/journal"
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "2026-10-15.md").write_text(
+        f"REVIEW work=55 tier=3 reviewer=r model={CODEX} independence=bundle,non-implementing,cross-model "
+        f"verdict=pass round=1\n"
+        f"REVIEW work=77 tier=3 reviewer=r model={CLAUDE} independence=bundle,non-implementing,cross-model "
+        f"verdict=pass round=1 base={r.base} head={_git(r.root, 'rev-parse', 'HEAD')}\n", encoding="utf-8")
+    out = r.gate()
+    assert "55-old.md" not in out.stdout, out.stdout
+
+
+def test_a_rename_that_reorders_lines_is_no_pure_rename(render, tmp_path):
+    """Delta round 4: git reports R100 for reordered lines; only an equal blob keeps the base path."""
+    r = Repo(render, tmp_path, claim="")
+    _git(r.root, "checkout", "-q", "main")
+    old = r.root / ".process-work/plans/archive/2026-01-01-55-old.md"
+    old.parent.mkdir(parents=True, exist_ok=True)
+    old.write_text("# Plan\n\ntier: 3\nissue: #55\n\n```\nissue: #77\n```\n", encoding="utf-8")
+    _git(r.root, "add", "-A")
+    _git(r.root, "commit", "-q", "-m", "an old archived plan")
+    _git(r.root, "checkout", "-q", "feature")
+    _git(r.root, "merge", "-q", "--no-edit", "main")
+    _git(r.root, "rm", "-q", ".process-work/plans/2026-10-15-77-widget.md")
+    _git(r.root, "mv", ".process-work/plans/archive/2026-01-01-55-old.md",
+         ".process-work/plans/archive/2026-10-15-77-widget.md")
+    moved = r.root / ".process-work/plans/archive/2026-10-15-77-widget.md"
+    moved.write_text("# Plan\n\ntier: 3\nissue: #77\n\n```\nissue: #55\n```\n", encoding="utf-8")
+    _git(r.root, "commit", "-qam", "chore: archive")
+    r.passes((CODEX, r.neu))
+    out = r.gate()
+    assert out.returncode == 1 and "cleared only by passes outside" in out.stdout, out.stdout

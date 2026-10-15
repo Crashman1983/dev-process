@@ -2295,30 +2295,46 @@ def applies_own_family(tier: int, own_from: int) -> bool:
 
 def plans_moved_in(root: Path, base: str) -> dict[str, str | None]:
     """The plan files this push brings to their path — `{path: where it stood at the
-    fork point}` from `git diff -M` (plans and specs, Markdown only). Only a pure
-    rename (R100) keeps its base path; a file added, or renamed with its content
-    changed, is new (None); one changed in place stays itself. A caller judging
-    "new or not" therefore errs toward new — stricter, never a hiding place."""
-    out = _git_bytes(root, "diff", "-M", "--name-status", "-z", base, "HEAD", "--",
-                     PLANS_ACTIVE, SPECS_DIR)
+    fork point}` from `git diff --raw -M` (plans and specs, Markdown only). Only a
+    rename with the same blob keeps its base path; a file added, or renamed with any
+    change to its content, is new (None); one changed in place stays itself. A known
+    limit: a plan rewritten in place keeps its path, and with it its age."""
+    out = _git_bytes(root, "diff", "--raw", "-M", "-z", base, "HEAD", "--", PLANS_ACTIVE, SPECS_DIR)
     moved: dict[str, str | None] = {}
     if out is None:
         return moved
     parts = out.decode("utf-8", "surrogateescape").split("\0")
     i = 0
     while i < len(parts) - 1:
-        status = parts[i]
+        meta = parts[i].split()  # ':<mode> <mode> <blob> <blob> <status>'
+        if len(meta) < 5:
+            break
+        old_blob, new_blob, status = meta[2], meta[3], meta[4]
         if status[:1] in ("R", "C"):
             src, dst = parts[i + 1], parts[i + 2]
             i += 3
             if dst.endswith(".md"):
-                moved[dst] = src if status == "R100" else None
+                moved[dst] = src if status[:1] == "R" and old_blob == new_blob else None
         else:
             path = parts[i + 1]
             i += 2
             if path.endswith(".md") and status[:1] in ("A", "M", "T"):
                 moved[path] = None if status[:1] == "A" else path
     return moved
+
+
+def plan_changed_meaning(root: Path, base: str, rel: str) -> bool:
+    """Did an edit change what a plan is — its tier or the work it names — against
+    the fork point? A typo fix or a link sweep does not."""
+    before = _show(root, base, rel)
+    path = root / rel
+    if before is None or not path.is_file():
+        return True
+    now = path.read_text(encoding="utf-8", errors="replace")
+    stem = plan_stem(rel)
+    return (plan_tier(_unfenced(before)) != plan_tier(_unfenced(now))
+            or _plan_work_ids(stem, _unfenced(before), include_dedated=True)
+            != _plan_work_ids(stem, _unfenced(now), include_dedated=True))
 
 
 def own_family_missing(rel: str, tier: int, own_from: int) -> str:
@@ -2737,10 +2753,12 @@ def check(root: Path) -> tuple[list[str], list[str]]:
     tiered_plans: list[tuple[str, str, int, set[str]]] = []
     # archived by this push (from the active folder, or onto another plan's file):
     # its merge is now, so the own-family rule holds for it (#241)
-    # (anything the push adds or changes there, except a pure rename inside the archive)
+    # (added there, moved in from outside, renamed with a changed content, or edited
+    # so that its tier or work changed — a typo fix in an old plan reopens nothing)
     archived_now = ({rel for rel, src in plans_moved_in(root, scope_base).items()
                      if rel.startswith(PLANS_ARCHIVE + "/")
-                     and (src is None or src == rel or not src.startswith(PLANS_ARCHIVE + "/"))}
+                     and (src is None or not src.startswith(PLANS_ARCHIVE + "/")
+                          or (src == rel and plan_changed_meaning(root, scope_base, rel)))}
                     if scope_base and own_from < 4 else set())
     if adir.is_dir():
         plans = [p for p in sorted(adir.glob("*.md")) if not p.name.startswith("design-")]
