@@ -652,6 +652,12 @@ def handoff(root: Path, rec: dict, *, implementer: str | None = None) -> dict:
     if done.exists():
         previous = json.loads(done.read_text())
         if previous.get("state") == "attested":
+            wt = Path(rec["worktree"])
+            # the attest commit stood but its push failed: push it again — only while that
+            # commit is still HEAD, never commits that came after it
+            if previous.get("pushed") is False and _committed_attest(wt, rec, str(rec["issue"]),
+                                                                   bool(rec.get("plan_review"))):
+                return _finish(rec, wt, done, previous)
             return previous
     plan_review = bool(rec.get("plan_review"))
     work = str(rec["issue"])

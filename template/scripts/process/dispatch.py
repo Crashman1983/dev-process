@@ -1813,17 +1813,21 @@ def start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str |
     codex_binary = None
     if codex:
         import _dispatch_codex as codex_run  # noqa: PLC0415  (the one owner of Codex runs)
-        try:
-            codex_binary = codex_run.executable(argv, model, phase, effort, preview=dry_run)
-            if not dry_run:
-                codex_run.probe(codex_binary, root, git_environment(_codex_env(worker_vars)), model, effort)
-        except ValueError as exc:
+
+        def codex_refused(exc: ValueError) -> int:
             row = None if dry_run else codex_run.record_unavailable(
                 _records_dir(root), issue=issue, phase=phase, model=model, branch=branch, reason=str(exc),
                 head=_out(root, "rev-parse", "--verify", "-q", f"{branch}^{{commit}}") or None)
             print(f"dispatch: not starting — {exc}\n" + codex_run.fallback_hint(issue, phase, plan_review, row, tier),
                   file=sys.stderr)
             return 3
+
+        try:
+            codex_binary = codex_run.executable(argv, model, phase, effort, preview=dry_run)
+            if remote and not dry_run:  # no worktree on this host: the main checkout is all there is to ask
+                codex_run.probe(codex_binary, root, git_environment(_codex_env(worker_vars)), model, effort)
+        except ValueError as exc:
+            return codex_refused(exc)
         argv[0] = codex_binary
     if not remote:
         why = runnable(argv)
@@ -1895,6 +1899,13 @@ def start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str |
     if refusal:
         print(f"dispatch: {refusal}", file=sys.stderr)
         return 3
+    if codex:
+        # Codex reads project configuration from its working directory: ask the
+        # catalog in the worktree the worker will run in, not in the main checkout
+        try:
+            codex_run.probe(codex_binary, wt, git_environment(_codex_env(worker_vars)), model, effort)
+        except ValueError as exc:
+            return codex_refused(exc)
     log = _records_dir(root) / f"{branch.replace('/', '__')}-{phase}-{_dt.datetime.now():%Y%m%d-%H%M%S}.log"
     extra = {**worker_vars, "PROCESS_PHASE_BASE": phase_base(root, branch)}
     rec = {"branch": branch, "issue": issue, "phase": phase, "tier": tier, "model": model, "effort": effort,
