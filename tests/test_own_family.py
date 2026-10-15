@@ -22,7 +22,8 @@ def _git(root: Path, *args: str) -> str:
 class Repo:
     """main (with the project's policy) → feature: plan + code (`alt`), more code (`neu`)."""
 
-    def __init__(self, render, tmp_path: Path, *, own_from: int | None = 3, tier: int = 3) -> None:
+    def __init__(self, render, tmp_path: Path, *, own_from: int | None = 3, tier: int = 3,
+                 claim: str = " (#77)") -> None:
         self.root = out = render(tmp_path / "r", {"project_name": "demo"})
         _git(out, "init", "-q", "-b", "main")
         if own_from is not None:
@@ -36,10 +37,10 @@ class Repo:
             f"# Plan\n\ntier: {tier}\nissue: #77\n\n## Decisions\n", encoding="utf-8")
         (out / "widget.py").write_text("X = 1\n", encoding="utf-8")
         _git(out, "add", "-A")
-        _git(out, "commit", "-q", "-m", "feat: widget (#77)")
+        _git(out, "commit", "-q", "-m", f"feat: widget{claim}")
         self.alt = _git(out, "rev-parse", "HEAD")
         (out / "widget.py").write_text("X = 2\n", encoding="utf-8")
-        _git(out, "commit", "-q", "-am", "fix: widget (#77)")
+        _git(out, "commit", "-q", "-am", f"fix: widget{claim}")
         self.neu = _git(out, "rev-parse", "HEAD")
 
     def policy(self, data: dict) -> None:
@@ -62,7 +63,7 @@ def test_another_family_alone_never_clears_from_the_tier(render, tmp_path):
     r = Repo(render, tmp_path)
     r.passes((CODEX, r.neu))
     out = r.gate()
-    assert out.returncode == 1 and "cleared only by another model family" in out.stdout, out.stdout
+    assert out.returncode == 1 and "cleared only by passes outside" in out.stdout, out.stdout
 
 
 def test_an_own_family_pass_on_an_older_head_does_not_cover_the_code(render, tmp_path):
@@ -87,7 +88,7 @@ def test_an_unknown_model_is_no_own_family(render, tmp_path):
     r = Repo(render, tmp_path)
     r.passes(("gemini-x", r.neu))
     out = r.gate()
-    assert out.returncode == 1 and "cleared only by another model family" in out.stdout, out.stdout
+    assert out.returncode == 1 and "cleared only by passes outside" in out.stdout, out.stdout
 
 
 @pytest.mark.parametrize("own_from,tier", [(None, 3), (4, 3), (3, 2)])
@@ -104,4 +105,89 @@ def test_a_branch_cannot_lift_the_rule_for_itself(render, tmp_path):
     _git(r.root, "commit", "-q", "-am", "chore: lift the rule")
     r.passes((CODEX, _git(r.root, "rev-parse", "HEAD")))
     out = r.gate()
-    assert out.returncode == 1 and "cleared only by another model family" in out.stdout, out.stdout
+    assert out.returncode == 1 and "cleared only by passes outside" in out.stdout, out.stdout
+
+
+def test_never_means_never_also_on_an_extended_scale(render, tmp_path):
+    """Refute v2.74: with the default 4 a tier-4 plan fell under the rule and went red on update."""
+    r = Repo(render, tmp_path, own_from=None, tier=4)
+    r.passes((CODEX, r.neu))
+    out = r.gate()
+    assert out.returncode == 0, out.stdout
+
+
+def test_a_plan_archived_in_this_push_still_needs_the_own_family(render, tmp_path):
+    """Refute v2.74: `git mv` into the archive (no `(#77)` subject) skipped the rule."""
+    r = Repo(render, tmp_path, claim="")
+    _git(r.root, "mv", ".process-work/plans/2026-10-15-77-widget.md",
+         ".process-work/plans/archive/2026-10-15-77-widget.md")
+    _git(r.root, "commit", "-q", "-m", "chore: archive the plan")
+    r.passes((CODEX, r.neu))
+    out = r.gate()
+    assert out.returncode == 1 and "cleared only by passes outside" in out.stdout, out.stdout
+
+
+def test_an_ambiguous_fork_point_is_a_finding_not_a_crash(render, tmp_path):
+    """Refute v2.74: the policy read raised GitReadError past the gate's own handling."""
+    r = Repo(render, tmp_path)
+    root = r.root
+    _git(root, "checkout", "-q", "main")
+    (root / "m.txt").write_text("m\n")
+    _git(root, "add", "m.txt")
+    _git(root, "commit", "-q", "-m", "main moves")
+    _git(root, "merge", "-q", "--no-edit", "feature")  # main ← feature
+    _git(root, "checkout", "-q", "feature")
+    (root / "f.txt").write_text("f\n")
+    _git(root, "add", "f.txt")
+    _git(root, "commit", "-q", "-m", "feature moves")
+    _git(root, "merge", "-q", "--no-edit", "main~1")  # feature ← old main: criss-cross
+    out = r.gate()
+    assert "Traceback" not in out.stderr + out.stdout, out.stderr
+    assert out.returncode == 1, out.stdout
+
+
+def _process_modules(root: Path):
+    """train and check_review as the rendered project has them — loaded without
+    bytecode and taken out of sys.modules again, so no other test sees them."""
+    import importlib
+    before, keep = set(sys.modules), sys.dont_write_bytecode
+    sys.path.insert(0, str(root / "scripts/process"))
+    sys.dont_write_bytecode = True
+    try:
+        for name in ("train", "check_review", "attest_evidence", "dispatch"):
+            sys.modules.pop(name, None)
+        return importlib.import_module("train"), importlib.import_module("check_review")
+    finally:
+        sys.path.remove(str(root / "scripts/process"))
+        sys.dont_write_bytecode = keep
+        for name in set(sys.modules) - before:
+            del sys.modules[name]
+
+
+def test_finish_asks_the_same_owner(render, tmp_path):
+    """Code review v2.74: only the gate was tested; finish.py must refuse the same plan."""
+    r = Repo(render, tmp_path)
+    r.passes((CODEX, r.neu))
+    out = subprocess.run([sys.executable, str(r.root / "scripts/process/finish.py"), "."],
+                         cwd=r.root, capture_output=True, text=True)
+    assert out.returncode != 0 and "cleared only by passes outside" in out.stdout + out.stderr, out.stdout
+    r.passes((CLAUDE, r.neu), (CODEX, r.neu))
+    out = subprocess.run([sys.executable, str(r.root / "scripts/process/finish.py"), "."],
+                         cwd=r.root, capture_output=True, text=True)
+    assert "cleared only by passes outside" not in out.stdout + out.stderr, out.stdout
+
+
+def test_the_train_asks_the_same_owner(render, tmp_path):
+    """Code review v2.74: the train neither boards nor archives what the gate refuses."""
+    r = Repo(render, tmp_path)
+    r.passes((CODEX, r.neu))
+    train, review = _process_modules(r.root)
+    journal = [p.read_text() for p in (r.root / ".process-work/journal").glob("*.md")]
+    codex_only = review.review_passes(r.root, journal)
+    assert not train._covers(r.root, codex_only, {"77"}, 3, "HEAD")
+    archived, _issues = train._settle_plans(r.root, r.base, "feature", lambda _line: None)
+    assert archived == [], archived
+    r.passes((CLAUDE, r.neu))
+    train, review = _process_modules(r.root)
+    journal = [p.read_text() for p in (r.root / ".process-work/journal").glob("*.md")]
+    assert train._covers(r.root, review.review_passes(r.root, journal), {"77"}, 3, "HEAD")

@@ -81,12 +81,13 @@ families, or register only the families the contract really owns.
 ## Declaring the contract
 
 Optional, per project. A project that wants every visual change to name its
-norm writes `docs/process/design-contract-declaration.json`:
+norm writes `docs/process/design-contract-declaration.local.json`:
 `{"from": "YYYY-MM-DD", "spec_above": N}`. From then on every active Tier 2+
 plan states `design-contract: <surface> | n/a — <reason>`, and a declared
 contract carries a non-empty `## Design Contract Trace` (the contract
 sections, screen IDs and briefs the work follows, and every deviation).
-Naming the contract's path alone no longer binds such a plan. Red: no line,
+Naming the contract's path still binds the plan to its contract, but no
+longer satisfies the declaration. Red: no line,
 an unregistered surface, `n/a` without a reason, a missing or empty trace.
 
 - **Which plans:** a plan under `.process-work/plans/` whose first commit is

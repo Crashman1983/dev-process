@@ -506,8 +506,8 @@ def _covers(root: Path, passes: list[dict], ids: set[str], tier: int, tip: str,
     main was written for earlier work and cannot vouch for new commits
     (downstream refutation)."""
     req = min(tier, 3)
-    passes = _review.clearing_passes(root, passes, tier)  # the gate's answer which passes count (#241)
-    clearing = [r for r in passes if r["work"] in ids and int(r["tier"]) >= req]
+    deciding = _review.clearing_passes(root, passes, tier)  # the gate's answer which passes count (#241)
+    clearing = [r for r in deciding if r["work"] in ids and int(r["tier"]) >= req]
     with_head = [r for r in clearing if r.get("head")]
     if not with_head:
         if any(r.get("head") for r in passes if r["work"] in ids):
@@ -516,7 +516,7 @@ def _covers(root: Path, passes: list[dict], ids: set[str], tier: int, tip: str,
         return any(id(r) in own_ids for r in clearing)
     for r in with_head:
         late = _review._unreviewed_paths(root, r["head"], tip,
-                                          _review._reviewed_heads(passes, tier, _review._known_work(root, ref=tip)),
+                                          _review._reviewed_heads(deciding, tier, _review._known_work(root, ref=tip)),
                                           r.get("base") or "")
         if late is not None and not late:
             return True

@@ -161,9 +161,14 @@ def clean_tree_problem(root: Path) -> str | None:
 _MAKE_ALTERING = set("iknqteoE")
 # short flags whose value follows in the same word (`-j4`, `-Otarget`): the rest is no flag
 _MAKE_VALUED = set("jlIWCOf")
-_MAKE_ALTERING_LONG = {"--eval", "--old-file", "--assume-old", "--ignore-errors", "--keep-going",
-                       "--just-print", "--dry-run", "--recon", "--question", "--touch",
-                       "--environment-overrides"}
+# long options a run may carry and still be the suite: they shape output, jobs or
+# the directory, never which recipes run. Anything else is refused — make accepts
+# any unambiguous abbreviation (`--keep-go`, `--env`), so a deny list cannot hold
+_MAKE_SHAPING_LONG = {"--no-print-directory", "--print-directory", "--jobserver-auth", "--jobserver-fds",
+                      "--jobs", "--load-average", "--max-load", "--output-sync", "--debug", "--trace",
+                      "--include-dir", "--directory", "--silent", "--quiet", "--no-silent",
+                      "--warn-undefined-variables", "--no-builtin-rules", "--no-builtin-variables",
+                      "--no-keep-going", "--stop"}
 
 
 def _makeflags_problem(flags: str) -> str | None:
@@ -174,8 +179,9 @@ def _makeflags_problem(flags: str) -> str | None:
         if "=" in word and not word.startswith("-"):
             return "MAKEFLAGS carries a variable assignment — it overrides the Makefile's pins"
         if word.startswith("--"):
-            if word.split("=", 1)[0] in _MAKE_ALTERING_LONG:
-                return f"MAKEFLAGS carries `{word.split('=', 1)[0]}` — it changes what the suite runs"
+            if word.split("=", 1)[0] not in _MAKE_SHAPING_LONG:
+                return (f"MAKEFLAGS carries `{word.split('=', 1)[0]}` — not an option known to leave "
+                        f"the suite's run unchanged")
             continue
         if not (word.startswith("-") or i == 0):
             continue  # a value of the flag before it

@@ -16,6 +16,9 @@ from pathlib import Path
 
 # CHANGELOG.md: one `## vX.Y.Z — <title> · <date>` section per release (MAINTAINING.md)
 ENTRY = re.compile(r"^##\s+(v\d+\.\d+\.\d+)\s+—\s+(.+?)(?:\s+·\s+\d{4}-\d{2}-\d{2})?\s*$")
+# before the heading form an entry was a bold paragraph, `**vX.Y.Z — <title>.** body`: a tag's own
+# CHANGELOG still reads that way, and the publish workflow reads the tag's file
+OLD_ENTRY = re.compile(r"^\*\*(v\d+\.\d+\.\d+)\s+—\s+(.+?)\*\*\s*(.*)$")
 # NEWS.md, the plain-language log: one `## vX.Y.Z — <title>` section per release
 NEWS_ENTRY = re.compile(r"^##\s+(v\d+\.\d+\.\d+)\s+—\s+(\S.*)$")
 
@@ -32,7 +35,18 @@ def notes(changelog: str, tag: str) -> tuple[str, str] | None:
             if nxt.startswith("## ") or nxt.startswith("# "):
                 break
             body.append(nxt)
-        return title, "\n".join(body).strip() + "\n"
+        text = "\n".join(body).strip()
+        return (title, text + "\n") if text else None  # a heading alone tells a reader nothing
+    for i, line in enumerate(lines):
+        m = OLD_ENTRY.match(line)
+        if not m or m.group(1) != tag:
+            continue
+        body = [m.group(3)] if m.group(3) else []
+        for nxt in lines[i + 1:]:
+            if OLD_ENTRY.match(nxt) or nxt.startswith("#"):
+                break
+            body.append(nxt)
+        return m.group(2).rstrip("."), "\n".join(body).strip() + "\n"
     return None
 
 
