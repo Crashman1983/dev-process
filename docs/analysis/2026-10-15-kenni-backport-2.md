@@ -153,3 +153,15 @@ Ergebnis: Block mit einem Blocker und fünf Majors. Die Mechanik von P1 trägt: 
 - **R2-F10:** Die Tower-Befunde sind begrenzt; `codex-block-overridden` kommt aus dem Journal.
 - **R2-F11:** Benannt: `start` prüft am Arbeitsbaum, attest an der Basis.
 - **Umfang:** D5 (`rehydrate --codex`) bleibt drin. Kenni hat `rehydrate.py` gepatcht, ohne es als Eigen-Datei zu führen; das erzeugt sonst bei jedem Update Konflikte.
+
+## Plan-Review Runde 3 — Änderungen
+
+Ergebnis: Block mit zwei Majors und fünf Minors. Die Mechanik aus Runde 2 hält. Präzisiert wird:
+
+- **R3-1 Keine Sackgasse nach Verweigerung:** Ein verweigerter `handoff` behält das geprüfte Codex-Ergebnis und steht auf `refused`, nicht auf erledigt. Wer danach eine Skip-Zeile oder einen REFUTE an den Plan anhängt (uncommittet im Worktree), ruft `handoff` erneut auf. Die Bindung lässt dann Änderungen nur an Plan-Dateien zu. Diese Pläne fahren `--with` mit, und attest prüft per `records_only`, dass dort nur Records angehängt sind.
+- **R3-2 Familie definiert:** Alle `ranks`-Präfixe sind eine Familie, jedes `families`-Präfix eine eigene. `cross-model` gilt nur, wenn das implementierende Modell gemessen ist, eine bekannte Familie hat und diese sich von der des Reviewers unterscheidet. Gelesen wird der neueste Bericht des Issues auf diesem Branch (`pushed` beim Code-Review, `planned` beim Plan-Review), einschließlich der Berichte anderer Hosts über origin. Sonst gilt `single-family`. `--implementer <modell>` benennt das Modell von Hand.
+- **R3-3 Ein Owner für die Skip-Pflicht:** `handoff` reicht nur das Token weiter. Ob eine Skip-Zeile nötig ist, entscheidet `attest --dry-run`.
+- **R3-4 Benannt:** Gate-Code bei Tier 2, single-family geprüft, braucht einen REFUTE im Plan oder `skipped refute`. Der eigene Refute des Reviewers im Bericht zählt dann nicht.
+- **R3-5 Kopf des Berichts:** `phase: plan` beim Plan-Review. `work:` trägt die Work-Id, und REFUTE-Zeilen nennen genau sie.
+- **R3-6 Kein doppelter Attest:** Vor dem Attest sucht `handoff` im Journal eine REVIEW-Zeile mit derselben Work, demselben Modell und demselben Head. Findet es eine, gilt der Lauf als erledigt.
+- **R3-7 Push verweigert:** `blocked` mit dem Hinweis, dass origin sich bewegt hat und der neue Head ein neues Review braucht.
