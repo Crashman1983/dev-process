@@ -7,6 +7,18 @@ details are in the [CHANGELOG](CHANGELOG.md).
 
 Deutsche Fassung: [NEWS-DE.md](NEWS-DE.md).
 
+## v2.74.0 — A project adapts the template through answers instead of its own files
+
+A project can now choose at setup whether its plans, journals and notes are
+written in English or in the conversation language. Other wishes a project
+could only meet with its own versions of template files are now settings:
+that from a risk tier on a reviewer of its own model family must agree, that
+every plan names its design rules, and which measurements fall due on which
+day. Handing work to helper models now says clearly what goes along and what
+comes back. Several faults found in use are fixed. The CHANGELOG explains for
+each version why something changed and what it leads to, in English and
+German.
+
 ## v2.73.0 — A second model helps with reviews, and projects without paid CI are supported
 
 If the Codex CLI is installed on the machine, the template can now hand work

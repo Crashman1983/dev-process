@@ -7,6 +7,18 @@ technischen Einzelheiten stehen im [CHANGELOG](CHANGELOG-DE.md).
 
 English version: [NEWS.md](NEWS.md).
 
+## v2.74.0 — Ein Projekt passt die Vorlage über Antworten an statt über eigene Dateien
+
+Ein Projekt kann jetzt bei der Einrichtung wählen, ob seine Pläne, Journale und
+Notizen Englisch oder in der Gesprächssprache geschrieben werden. Weitere
+Wünsche, die ein Projekt bisher nur mit eigenen Fassungen von Vorlagedateien
+umsetzen konnte, sind jetzt Einstellungen: dass ab einer Risikostufe ein Prüfer
+der eigenen Modellfamilie zustimmen muss, dass jeder Plan sein Design-Regelwerk
+nennt, und welche Messungen zu welchem Datum fällig sind. Bei der Übergabe an
+Hilfsmodelle ist klarer geregelt, was mitgeht und was zurückkommt. Mehrere
+Fehler aus dem Betrieb sind behoben. Der CHANGELOG erklärt je Version, warum
+sich etwas geändert hat und wozu es führt, auf Deutsch und Englisch.
+
 ## v2.73.0 — Ein zweites Modell prüft mit, und Projekte ohne bezahltes CI sind vorgesehen
 
 Ist auf dem Rechner die Codex CLI installiert, kann die Vorlage Arbeit und
