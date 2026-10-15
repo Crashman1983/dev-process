@@ -68,8 +68,22 @@ def run_stages(root: Path) -> list[str] | None:
         return None
     try:
         return (Path(r.stdout.decode().strip()).joinpath(*RUN_STAGES)).read_text(encoding="utf-8").split()
-    except OSError:
+    except (OSError, ValueError):  # not there, or not text: unknown
         return None
+
+
+def clear_run(root: Path) -> None:
+    """Removes what an earlier merge-suite run in `root` left — the `stages` file and
+    the `<stage>.time` markers — before a writer starts the suite, so the `stages` file
+    `run_evidence` trusts is this run's: a leftover wider one would otherwise certify a
+    narrower run (plan review). Nothing there: nothing to do."""
+    r = _git(root, "rev-parse", "--absolute-git-dir")
+    if r.returncode != 0:
+        return
+    folder = Path(r.stdout.decode().strip()).joinpath(*RUN_STAGES[:-1])
+    for f in [folder / RUN_STAGES[-1], *folder.glob("*.time")]:
+        with contextlib.suppress(OSError):
+            f.unlink()
 
 
 def merge_evidence(root: Path, suite: str, scope_argv: list[str] | None, *,
@@ -89,7 +103,7 @@ def merge_evidence(root: Path, suite: str, scope_argv: list[str] | None, *,
         try:
             done = subprocess.run(scope_argv, cwd=str(root), capture_output=True, text=True,
                                   timeout=MERGE_SCOPE_TIMEOUT_S, env=git_environment())
-        except (OSError, subprocess.TimeoutExpired):
+        except (OSError, ValueError, subprocess.TimeoutExpired):  # ValueError: output not UTF-8
             return None
         if done.returncode != 0:
             return None

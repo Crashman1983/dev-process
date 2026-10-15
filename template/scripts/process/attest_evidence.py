@@ -128,6 +128,7 @@ class Evidence:
     plan_rel: str = ""
     plan_gate_code: bool = False
     plan_acs: frozenset = frozenset()
+    plan_struck: frozenset = frozenset()  # struck with a reason: the report confirms each
     plan_session: str | None = None  # None: no source names it
     plan_session_source: str = "none"  # report | plan-line | none
     has_reports: bool = False
@@ -307,11 +308,12 @@ def _planned_model(root: Path, issues: set[int]) -> str | None:
 
 # a criterion struck on purpose, with its reason (#234): `AC-3: struck — <reason>`
 # or `dropped`; listed, boxed or bold like a criterion line; a bare strike-through
-# (`~~AC-3~~`) names no reason and strikes nothing
+# (`~~AC-3~~`) names no reason and strikes nothing. A hyphen separates only with
+# spaces around it: `AC-3: Dropped-connection retry: …` is a criterion (plan review)
 STRUCK_LINE = re.compile(
     r"^[ \t]*(?:[-*+][ \t]+)?(?:\[[ xX]\][ \t]+)?(?:\*\*)?" + _AC
-    + r"(?:\*\*)?[ \t]*:(?:\*\*)?[ \t]*(?:struck|dropped)\b[ \t]*[—–:-][ \t]*"
-    r"(?!<|TODO\b|…|\.\.\.)\S",
+    + r"(?:\*\*)?[ \t]*:(?:\*\*)?[ \t]*(?:struck|dropped)(?:[ \t]*[—–:]|[ \t]+-[ \t])[ \t]*"
+    r"(?!<|TODO\b|…|\.\.\.)\S*\w",
     re.MULTILINE | re.IGNORECASE)
 
 
@@ -326,10 +328,23 @@ def required_criteria(plan: str, spec: str) -> frozenset[str]:
     A plan strikes only its own criteria: one the spec still names stays required
     unless the spec strikes it (#234 plan review: a plan line must not quietly drop
     a spec criterion)."""
+    return _criteria(plan, spec)[0]
+
+
+def struck_criteria(plan: str, spec: str) -> frozenset[str]:
+    """The criteria struck with a reason — no test, but the code review's report
+    confirms each (`AC-<id>: struck`), so a strike added after the plan review is
+    seen by an independent reviewer (plan review)."""
+    return _criteria(plan, spec)[1]
+
+
+def _criteria(plan: str, spec: str) -> tuple[frozenset[str], frozenset[str]]:
     plan, spec = _EXAMPLE_SPAN.sub(" ", plan), _EXAMPLE_SPAN.sub(" ", spec)
     in_spec = {ac_key(m) for m in AC_ID.finditer(spec)}
     named = {ac_key(m) for m in AC_ID.finditer(plan)} | in_spec
-    return frozenset(named - held_open(plan) - struck(spec) - (struck(plan) - in_spec))
+    open_ = held_open(plan)
+    gone = (struck(spec) | (struck(plan) - in_spec)) - open_
+    return frozenset(named - open_ - gone), frozenset(gone & named)
 
 
 def held_open(plan: str) -> set[str]:
@@ -698,6 +713,7 @@ def gather(root: Path, *, work: str, ids: set[str], tier: int, verdict: str, ind
         report_refute=_refuted(report_texts, plan_ids),
         plan_state=state, plan_rel=rel, plan_gate_code=plan_names_gate_code(plan_read),
         plan_acs=required_criteria(plan_read, readable(spec)),
+        plan_struck=struck_criteria(plan_read, readable(spec)),
         plan_session=session, plan_session_source=source,
         has_reports=bool(reports), claims=claims, test_status=status)
 
@@ -781,7 +797,12 @@ def _decide_code(ev: Evidence) -> list[str]:
         return out
     if ev.plan_state != "ok":
         return out
-    if not ev.plan_acs:
+    for n in sorted(ev.plan_struck):
+        if not any(re.match(r"(?:struck|dropped)\b", b.strip(), re.IGNORECASE)
+                   for b in ev.claims.get(n, [])):
+            out.append(f"AC-{n} is struck in {ev.plan_rel} or its spec — the report confirms the "
+                       f"strike with a line `AC-{n}: struck`")
+    if not ev.plan_acs and not ev.plan_struck:
         out.append(f"{ev.plan_rel} names no acceptance criterion (`AC-<id>`) — nothing to trace a "
                    f"test to; name them in the plan, or commit {_skip('ac-trace', ev)}")
     for n in sorted(ev.plan_acs):

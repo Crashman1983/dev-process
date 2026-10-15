@@ -1259,7 +1259,11 @@ def _collect_stage_times(wt: Path, stages: dict[str, dict], seen: set[tuple[str,
     for name in names:
         try:
             t0, t1, verdict = (int(x) for x in (folder / f"{name}.time").read_text(encoding="utf-8").split())
-        except (OSError, ValueError):
+            if t1 < t0:
+                raise ValueError("ends before it starts")
+            start = _dt.datetime.fromtimestamp(t0).isoformat(timespec="seconds")
+            end = _dt.datetime.fromtimestamp(t1).isoformat(timespec="seconds")
+        except (OSError, ValueError, OverflowError):  # a bad marker costs a KPI, never the train
             if name not in stages:
                 stages[name] = {"seconds": 0, "runs": 0, "state": "skipped", "start": None, "end": None}
                 log(f"stage {name}: skipped")
@@ -1269,8 +1273,6 @@ def _collect_stage_times(wt: Path, stages: dict[str, dict], seen: set[tuple[str,
         seen.add((name, t0, t1))
         entry = stages.setdefault(name, {"seconds": 0, "runs": 0})
         state = "green" if verdict == 0 else "red"
-        start = _dt.datetime.fromtimestamp(t0).isoformat(timespec="seconds")
-        end = _dt.datetime.fromtimestamp(t1).isoformat(timespec="seconds")
         entry.update(seconds=entry["seconds"] + t1 - t0, runs=entry["runs"] + 1, state=state,
                      start=start, end=end)
         log(f"stage {name}: {state} {t1 - t0} s ({start} → {end})")
@@ -1433,9 +1435,14 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
         """The suite on `wt`, remembered and — on a tree it left as found — certified."""
         clean = certificate.clean_tree_problem(wt) is None
         before = certificate.evidence_tree(wt) if clean else None
+        certificate.clear_run(wt)  # the `stages` file the certificate reads is this run's
         state = timed("suite", _sh, wt, suite, log)
         _collect_stage_times(wt, stages, stage_seen, log)
-        if state == "green" and key:
+        # the memo names what ran: a run whose scope differs from the predicted one
+        # (the key's) is no green of that key (plan review)
+        ran = certificate.run_evidence(wt, suite, merge_scope) if state == "green" else None
+        if state == "green" and key and ran is not None \
+                and key.rsplit(" ", 1)[-1] == certificate.evidence_hash(ran):
             _remember_green_suite(root, key)
             green_here.add(key)
         if state == "green":
