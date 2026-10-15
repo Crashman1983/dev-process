@@ -2271,11 +2271,20 @@ def own_family_rule(root: Path, ref: str | None = None) -> tuple[int, dict, str]
 
 
 def own_family(passes: list[dict], rules: dict) -> list[dict]:
-    """The passes by a ranked model — the project's own family (`review_evidence.ranks`);
-    another family's (`families`) and an unknown model's are left out."""
+    """The passes by the project's own family (`review_evidence.ranks`): a ranked model,
+    or the bare family name `/review` records (`--model <family>`: `claude` for
+    `claude-opus`). Another family's (`families`) and an unknown model's are left out.
+    A bare name stays classless — a plan review still needs the concrete id (attest)."""
     from attest_evidence import model_class  # noqa: PLC0415
-    return [r for r in passes
-            if (cls := model_class(r.get("model") or "", rules["ranks"], rules["families"])) and cls[1] is not None]
+    ranks = rules["ranks"]
+
+    def own(model: str) -> bool:
+        cls = model_class(model, ranks, rules["families"])
+        if cls is not None:
+            return cls[1] is not None
+        return bool(model) and any(prefix.startswith(model + "-") for prefix in ranks)
+
+    return [r for r in passes if own(r.get("model") or "")]
 
 
 def clearing_passes(root: Path, passes: list[dict], tier: int, ref: str | None = None) -> list[dict]:

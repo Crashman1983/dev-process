@@ -288,8 +288,8 @@ enforces what a language-agnostic gate honestly can, and no more:
     `cross-model`, or `single-family` plus `skipped cross-model` — the
     declaration names why the second family did not run;
   - from `review_evidence.own_family_from_tier` (default 4, never) only a
-    pass by the project's own family — a model `ranks` places — clears a
-    plan and proves its code current (`check_review`, `finish.py`, the
+    pass by the project's own family — a model `ranks` places, or the bare
+    family name `/review` records (`claude`) — clears a plan and proves its code current (`check_review`, `finish.py`, the
     train); another family's pass stays a valid line but clears nothing
     alone. A project whose second family attests (`dispatch.py handoff`)
     but must not decide alone sets 3. Read at the base, like every rule

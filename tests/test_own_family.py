@@ -91,6 +91,28 @@ def test_an_unknown_model_is_no_own_family(render, tmp_path):
     assert out.returncode == 1 and "cleared only by passes outside" in out.stdout, out.stdout
 
 
+def test_the_bare_family_name_review_records_is_the_own_family(render, tmp_path):
+    """`/review` records `--model <family>`: `claude` is the family of the ranked `claude-*`
+    classes and clears; a bare name of another family, or a non-name, does not."""
+    r = Repo(render, tmp_path)
+    r.passes(("claude", r.neu))
+    out = r.gate()
+    assert out.returncode == 0, out.stdout
+    for other in ("codex", "gpt", "opus", "claude-op"):
+        r.passes((other, r.neu))
+        out = r.gate()
+        assert out.returncode == 1 and "cleared only by passes outside" in out.stdout, (other, out.stdout)
+
+
+def test_a_bare_family_name_stays_classless_for_a_plan_review():
+    """Counting as the own family ranks nothing: a plan review by `claude` is still refused
+    as an unknown class (attest), so the bare name cannot pass a smaller model off."""
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "template/scripts/process"))
+    from attest_evidence import model_class
+    ranks = {"claude-haiku": 0, "claude-opus": 2}
+    assert model_class("claude", ranks, ["gpt-"]) is None
+
+
 @pytest.mark.parametrize("own_from,tier", [(None, 3), (4, 3), (3, 2)])
 def test_without_the_rule_or_below_its_tier_nothing_changes(render, tmp_path, own_from, tier):
     r = Repo(render, tmp_path, own_from=own_from, tier=tier)
