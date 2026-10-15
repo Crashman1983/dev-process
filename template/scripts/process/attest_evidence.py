@@ -629,7 +629,9 @@ def _other_status(text: str, file: str, name: str, rules: dict) -> str | None:
 # a named test anywhere in a line — what is left is the line's own words (`unproven`)
 _ITEM_ANY = re.compile(r"`[^`]*::[^`]*`|[\w./-]*::[\w:\[\].-]+")
 _ITEM = re.compile(r"^`?(?P<file>[\w./-]+\.\w+)?::(?P<name>[^`]+?)`?(?:[ \t]+\(.*\))?$")
-_SPLIT = re.compile(r"[ \t]*[,;][ \t]*|[ \t]+(?:und|and)[ \t]+(?=`?[\w./-]*::)")
+# a separator starts a new reference only where one follows (`<path.ext>::` or `::`): a
+# test title may hold commas and semicolons of its own (downstream #2607)
+_SPLIT = re.compile(r"[ \t]*[,;][ \t]*(?=`?(?:[\w./-]+\.\w+)?::)|[ \t]+(?:und|and)[ \t]+(?=`?[\w./-]*::)")
 
 
 def claimed_tests(body: str) -> list[tuple[str, str]]:

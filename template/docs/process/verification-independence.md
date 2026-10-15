@@ -291,7 +291,9 @@ enforces what a language-agnostic gate honestly can, and no more:
     work (`refute.md`, "Gate code is enforced") or `skipped refute`;
   - the review report (`--with .process-work/reviews/<report>.md`) has one
     line per acceptance criterion of the plan — `AC-<n>: <path>::<test>`,
-    the test that goes red when that behaviour breaks — and the named test
+    the test that goes red when that behaviour breaks; several tests on one
+    line are separated by `,` or `;` before the next `<path>::` (or `::`),
+    so a title may hold commas of its own — and the named test
     stands at head where its runner collects it, not switched off (the
     project declares its test files: `review_evidence.python_files`,
     `python_classes`, `test_files`; `skipped ac-trace` where the criteria live
