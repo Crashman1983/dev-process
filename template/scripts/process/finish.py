@@ -345,8 +345,8 @@ def tests_argv(cmd: str) -> tuple[list[str], dict[str, str]] | str:
     return argv, assigned
 
 
-def _certifiable_tree(root: Path, tests: str) -> tuple[str, str, list[str]] | None:
-    """(evidence tree, merge_suite, certificate_env) when a green `--tests`
+def _certifiable_tree(root: Path, tests: str) -> tuple[str, str, list[str], list[str] | None] | None:
+    """(evidence tree, merge_suite, certificate_env, merge_scope) when a green `--tests`
     run may certify this tree for the merge push: the command is the
     project's `merge_suite` and the worktree is clean. `--tests-passed` is a
     claim, not evidence — it never certifies; the push then runs the suite."""
@@ -359,7 +359,7 @@ def _certifiable_tree(root: Path, tests: str) -> tuple[str, str, list[str]] | No
     if certificate.clean_tree_problem(root) or certificate.env_problem(cfg["certificate_env"]):
         return None
     tree = certificate.evidence_tree(root)
-    return (tree, cfg["merge_suite"], cfg["certificate_env"]) if tree else None
+    return (tree, cfg["merge_suite"], cfg["certificate_env"], cfg["merge_scope"]) if tree else None
 
 
 def apply(root: Path, *, tests: str | None, tests_passed: bool) -> int:
@@ -442,8 +442,13 @@ def apply(root: Path, *, tests: str | None, tests_passed: bool) -> int:
             print("finish: full suite red — not merging")
             return 1
         if before:
-            ok, why = certificate.write(root, "merge", before[1], before_tree=before[0],
-                                        writer="finish --tests", env_names=before[2])
+            # a configured scope with no `stages` file is an unknown scope — never recomputed here
+            evidence = certificate.run_evidence(root, before[1], before[3])
+            if evidence is None:
+                ok, why = False, "the scope of the run is unknown"
+            else:
+                ok, why = certificate.write(root, "merge", evidence, before_tree=before[0],
+                                            writer="finish --tests", env_names=before[2])
             print(f"finish: merge certificate {'written — the push runs no suite again' if ok else 'not written — ' + why}")
     elif not tests_passed:
         print("finish: applied archive + rebase; stopped before the merge — "

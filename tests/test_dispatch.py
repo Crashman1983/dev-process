@@ -2303,3 +2303,13 @@ def test_a_planned_branch_changing_its_main_plan_gets_its_plan_review_first(rend
     out = render(tmp_path, {"project_name": "d", "modules": {}})
     _epic_on_main(out, issue=70, passed=passed)
     assert _chain_planned(_load_dispatch(out), out, monkeypatch, branch="70-slice") == queued
+
+
+def test_an_invalid_stale_threshold_is_said_not_swallowed(render, tmp_path, capsys):
+    """Kenni #2564: a typo in `stale_minutes` silently fell back to the tower's default."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    mod = _load_dispatch(out)
+    (out / "docs/process/model-policy.local.json").write_text(json.dumps({"stale_minutes": "sixty"}))
+    assert mod.stale_minutes(out) is None
+    err = capsys.readouterr().err
+    assert "ignoring the policy for the stale threshold" in err and "stale_minutes" in err

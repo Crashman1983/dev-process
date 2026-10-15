@@ -614,6 +614,33 @@ def share(weeks: int = 4) -> int:
 _TRAIN_PHASES = ("preflight", "gates", "suite", "retry", "bisect", "push", "deploy")
 
 
+def _stage_lines(rows: list[dict]) -> list[str]:
+    """The merge-suite stages (`stages` of a phases line, testing.md "Stages"): the last train that
+    recorded them, then median and maximum minutes per stage over the window, where a
+    stage ran, with its skipped and red counts. A stage that did not run still
+    stands in the last train's line."""
+    staged = [row["stages"] for row in rows if isinstance(row.get("stages"), dict) and row["stages"]]
+    if not staged:
+        return ["  no stage times recorded yet"]
+    lines = []
+    for name, last in staged[-1].items():
+        if last.get("state") == "skipped":
+            lines.append(f"  stage {name:<14} skipped")
+            continue
+        runs = last.get("runs", 0)
+        lines.append(f"  stage {name:<14} {last.get('seconds', 0) / 60:.1f} min {last.get('state')} "
+                     f"({runs} run{'' if runs == 1 else 's'})")
+    for name in staged[-1]:
+        entries = [s[name] for s in staged if isinstance(s.get(name), dict)]
+        ran = [e.get("seconds", 0) / 60 for e in entries if e.get("runs")]
+        if ran:
+            skipped = sum(e.get("state") == "skipped" for e in entries)
+            red = sum(e.get("state") == "red" for e in entries)
+            lines.append(f"  {name:<14} median {statistics.median(ran):.1f} min, max {max(ran):.1f} min "
+                         f"(in {len(ran)}/{len(entries)} trains); {skipped} skipped, {red} red")
+    return lines
+
+
 def train_phases(runs: int = 20) -> int:
     """Median and maximum seconds per phase over the last `runs` trains
     (`process-train/phases.jsonl`, written by train.py): a slow merge is
@@ -647,6 +674,8 @@ def train_phases(runs: int = 20) -> int:
         if ran:
             print(f"  {phase:<9} median {statistics.median(values):>6.0f} s, max {max(values):>6.0f} s "
                   f"(in {len(ran)}/{len(rows)} runs)")
+    for line in _stage_lines(rows):
+        print(line)
     results = [row.get("result") for row in rows]
     print(f"  {results.count('red')}/{len(rows)} runs ended red, "
           f"{results.count('environment')} stopped by the preflight (the host, not a passenger)")

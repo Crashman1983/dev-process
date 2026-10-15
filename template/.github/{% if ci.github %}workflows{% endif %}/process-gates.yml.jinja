@@ -8,6 +8,11 @@ on:
 # least privilege: the gate job only reads the working tree and exits.
 permissions:
   contents: read
+# a newer push supersedes a running check on a branch; the integration branch's
+# runs always finish (each is the record of what landed)
+concurrency:
+  group: {% raw %}${{ github.workflow }}-${{ github.ref }}{% endraw %}
+  cancel-in-progress: {% raw %}${{ github.ref != 'refs/heads/main' }}{% endraw %}
 jobs:
   # job id = the required-status-check context; must match what the docs tell
   # adopters to require (and what setup_branch_protection.sh sets): process-gates

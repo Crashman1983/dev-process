@@ -55,6 +55,60 @@ def _git(root: Path, *args: str, env: dict | None = None) -> subprocess.Complete
         return subprocess.CompletedProcess(args, 127, b"", str(exc).encode())
 
 
+MERGE_SCOPE_TIMEOUT_S = 60
+RUN_STAGES = ("merge-suite", "stages")  # in the git dir: the stages the merge suite ran (testing.md)
+
+
+def run_stages(root: Path) -> list[str] | None:
+    """The stages the last merge-suite run in `root` ran — the `stages` file its
+    Makefile wrote — or None when it cannot be read. The one reader: the train's
+    stage times and the certificate's scope both ask here, so what ran is one fact."""
+    r = _git(root, "rev-parse", "--absolute-git-dir")
+    if r.returncode != 0:
+        return None
+    try:
+        return (Path(r.stdout.decode().strip()).joinpath(*RUN_STAGES)).read_text(encoding="utf-8").split()
+    except OSError:
+        return None
+
+
+def merge_evidence(root: Path, suite: str, scope_argv: list[str] | None, *,
+                   ran_stages: list[str] | None = None) -> str | None:
+    """What a `merge` certificate must have run: the suite command, plus — when the
+    project configures `merge_scope` — the stages that were selected for it. A narrower
+    run is thereby a different evidence string and never satisfies a fuller one.
+
+    The one owner: the writers (`train.py`, `finish.py`) pass `ran_stages`, read from the
+    run itself; a reader (the hook) passes none and gets the scope its own selector
+    would choose now. None means "scope unknown" — no certificate is written and none
+    is looked up, so two sides that both failed to find out can never agree on it."""
+    suite = suite.strip()
+    if not scope_argv:
+        return suite
+    if ran_stages is None:
+        try:
+            done = subprocess.run(scope_argv, cwd=str(root), capture_output=True, text=True,
+                                  timeout=MERGE_SCOPE_TIMEOUT_S, env=git_environment())
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+        if done.returncode != 0:
+            return None
+        ran_stages = done.stdout.split()
+    scope = " ".join(sorted(set(ran_stages)))
+    return f"{suite}\nscope={scope}" if scope else None
+
+
+def run_evidence(root: Path, suite: str, scope_argv: list[str] | None) -> str | None:
+    """The evidence a writer certifies: the suite plus the scope the run itself wrote
+    (`run_stages`). With `merge_scope` configured and no `stages` file the scope is
+    unknown — None, never recomputed (downstream: a recomputed scope
+    certified a run the selector had narrowed after it ran). Readers keep `merge_evidence`."""
+    ran = run_stages(root)
+    if scope_argv and ran is None:
+        return None
+    return merge_evidence(root, suite, scope_argv, ran_stages=ran)
+
+
 def evidence_hash(evidence: str) -> str:
     """16 hex digits naming what ran — the train's suite memo uses the same."""
     return hashlib.sha256(evidence.encode("utf-8", "surrogateescape")).hexdigest()[:16]
