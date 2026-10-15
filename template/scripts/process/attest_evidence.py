@@ -315,8 +315,10 @@ _STRUCK_MARK = r"(?:struck|dropped)(?:[ \t]*[—–:]|[ \t]+--?[ \t])"
 STRUCK_LINE = re.compile(
     r"^[ \t]*(?:[-*+][ \t]+)?(?:\[[ xX]\][ \t]+)?(?:\*\*)?" + _AC
     + r"(?:\*\*)?[ \t]*:(?:\*\*)?[ \t]*" + _STRUCK_MARK + r"[ \t]*"
-    r"(?!<|TODO\b|…|\.\.\.)\S*\w",
+    r"(?!<|(?i:todo)\b|…|\.\.\.)\S*\w",
     re.MULTILINE)
+# a test a line names: a file with its extension, then `::` (prose like `std::vector` is none)
+_NAMES_A_TEST = re.compile(r"[\w./-]+\.\w+::\w")
 # the report's confirmation of a strike: the same mark, the reason optional
 _STRUCK_CONFIRMED = re.compile(r"(?:struck|dropped)(?:[ \t]*[—–:]|[ \t]+--?[ \t]|[ \t]*$)")
 
@@ -808,7 +810,7 @@ def _decide_code(ev: Evidence) -> list[str]:
                        f"strike with a line `AC-{n}: struck`")
         # struck and proven at once is one claim too many: a criterion misread as
         # struck must not ride on a test nobody checks (refute)
-        if any(_ITEM_ANY.search(b) for b in bodies):
+        if any(_NAMES_A_TEST.search(b) for b in bodies):
             out.append(f"AC-{n} is struck, yet its report line names a test — strike it "
                        f"(`AC-{n}: struck`) or prove it (unstrike it in the plan)")
     if not ev.plan_acs and not ev.plan_struck:

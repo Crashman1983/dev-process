@@ -1189,7 +1189,7 @@ Anlass: Der Owner will Kennis Änderungen so weit wie möglich zurück im Templa
   - Ein kaputter Marker kostet eine Kennzahl, nie den Zug.
   - Ohne Stufen-Dateien ändert sich für Gate und Zertifikat nichts. `phases.jsonl` trägt dann `"stages": {}`, und `train-phases` meldet, dass noch keine Stufenzeiten vorliegen.
 - **Kleine Ports:**
-  - **`stale_minutes`:** Ein ungültiger Wert wird gemeldet statt still verworfen. Eine Policy, die kein Objekt ist oder deren `phases` kein Objekt ist, lehnt `load_policy` ab, statt abzustürzen.
+  - **`stale_minutes`:** Ein ungültiger Wert wird gemeldet statt still verworfen. Eine Policy, die kein Objekt ist oder deren `phases`, `tiers`, `default` oder Tier-Zeilen kein Objekt sind, lehnt `load_policy` ab, statt abzustürzen.
   - **Design-Contract-Notizen (Kenni #2588):** Sie gehen in `<surface>.notes.md`, mit `merge=union`.
   - **Inbox:** `.process-work/inbox.md` wird mit `merge=union` gemergt.
   - **CI-Workflow:** Er bricht ältere Läufe auf Branches ab, nie auf `main`.

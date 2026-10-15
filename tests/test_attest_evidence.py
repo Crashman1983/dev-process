@@ -645,6 +645,7 @@ def test_a_criterion_struck_with_a_reason_needs_no_test(ev_mod):
     assert req("- AC-3: Dropped: When the socket drops, the client shall retry.\n", "") == {"3"}
     assert req("- AC-3: Struck — When text is struck, it renders as deleted.\n", "") == {"3"}
     assert req("AC-1 AC-7\nAC-7: struck -- the owner cut it\n", "") == {"1"}
+    assert req("AC-1 AC-8\nAC-8: struck — todo\n", "") == {"1", "8"}
 
 
 def test_a_struck_criterion_end_to_end(repo):
@@ -660,3 +661,9 @@ def test_a_struck_criterion_end_to_end(repo):
     claimed = confirmed.replace("seen, logging is #8", "`tests/test_widget.py::test_missing`")
     r = _attest(repo, "--with", _report(repo, claimed))
     assert r.returncode == 1 and "AC-2 is struck, yet its report line names a test" in r.stderr
+    # a capitalised or glued mark confirms nothing; prose with `::` names no test (code review)
+    for line in ("- AC-2: Struck-through text\n", "- AC-2: Struck\n"):
+        r = _attest(repo, "--with", _report(repo, confirmed.splitlines(True)[0] + line))
+        assert r.returncode == 1 and "the report confirms the strike" in r.stderr, line
+    prose = confirmed.replace("seen, logging is #8", "replaced by std::vector use")
+    assert _attest(repo, "--with", _report(repo, prose)).returncode == 0
