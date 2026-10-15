@@ -104,13 +104,15 @@ def test_the_bare_family_name_review_records_is_the_own_family(render, tmp_path)
         assert out.returncode == 1 and "cleared only by passes outside" in out.stdout, (other, out.stdout)
 
 
-def test_a_bare_family_name_stays_classless_for_a_plan_review():
+def test_a_bare_family_name_stays_classless_for_a_plan_review(render, tmp_path):
     """Counting as the own family ranks nothing: a plan review by `claude` is still refused
     as an unknown class (attest), so the bare name cannot pass a smaller model off."""
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "template/scripts/process"))
-    from attest_evidence import model_class
-    ranks = {"claude-haiku": 0, "claude-opus": 2}
-    assert model_class("claude", ranks, ["gpt-"]) is None
+    out = render(tmp_path / "r", {"project_name": "demo"})
+    probe = ("import sys; sys.dont_write_bytecode = True; sys.path.insert(0, 'scripts/process'); "
+             "from attest_evidence import model_class; "
+             "print(model_class('claude', {'claude-haiku': 0, 'claude-opus': 2}, ['gpt-']))")
+    got = subprocess.run([sys.executable, "-c", probe], cwd=out, capture_output=True, text=True)
+    assert got.stdout.strip() == "None", got.stdout + got.stderr
 
 
 @pytest.mark.parametrize("own_from,tier", [(None, 3), (4, 3), (3, 2)])
