@@ -513,3 +513,21 @@ def test_notes_only_cite_the_current_seal_or_explicit_history(render, tmp_path):
     assert _gate(out).returncode == 0
     _entry(out, reference=ROUND, notes='historical manifest.sha256 = ' + 'f' * 64)
     assert _gate(out).returncode == 0
+
+
+def test_a_notes_sidecar_is_read_with_the_entry_and_merges_by_union(render, tmp_path):
+    """Kenni #2588: amendments go into `<surface>.notes.md` as whole lines — two
+    branches appending to it merge without a conflict; the gate reads both texts."""
+    out = _render(render, tmp_path)
+    _entry(out)
+    _write(out, ROUND + '/board.svg', '<svg/>\n')
+    assert _seal(out, '--seal', ROUND, '--dep', CONTRACT).returncode == 0
+    _entry(out, reference=ROUND, notes='Plain prose.')
+    assert _gate(out).returncode == 0  # no sidecar: no finding
+    _write(out, f"{REG}/web.notes.md", "2026-10-15: amended, manifest.sha256 = " + "f" * 64 + "\n")
+    r = _gate(out)
+    assert r.returncode == 1 and 'notes' in r.stdout and 'historical' in r.stdout
+    _write(out, f"{REG}/web.notes.md", "2026-10-15: historical manifest.sha256 = " + "f" * 64 + "\n")
+    assert _gate(out).returncode == 0
+    assert "*.notes.md merge=union" in (out / REG / ".gitattributes").read_text()
+    assert "/inbox.md merge=union" in (out / ".process-work/.gitattributes").read_text()

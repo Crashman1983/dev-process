@@ -273,12 +273,18 @@ def _report(steps: list[dict]) -> None:
             print(f"test_select: {s['name']}: pinned target {pin} does not exist (`test_select.py check`)")
 
 
+def merge_certificate_evidence(root: Path, cfg: dict) -> str | None:
+    """The evidence a merge certificate of this configuration must carry now."""
+    return certificate.merge_evidence(root, cfg["merge_suite"], cfg.get("merge_scope"))
+
+
 def run(root: Path, cfg: dict, changed: set[str], klass: str, *, certify: bool) -> int:
     import lane  # noqa: PLC0415 — fcntl only where tests run
 
     evidence = {"push": push_evidence(cfg)}
-    if cfg["merge_suite"]:
-        evidence["merge"] = cfg["merge_suite"]
+    wanted = merge_certificate_evidence(root, cfg) if cfg["merge_suite"] else None
+    if wanted:  # an unknown scope names no evidence: no hit is possible
+        evidence["merge"] = wanted
     kinds = ("merge",) if klass == "merge" else ("push", "merge")
     hit = certificate.find(root, kinds, evidence)
     if hit:

@@ -49,7 +49,7 @@ On by default in the standard set; inert until the first registry entry exists.
 | `review` | accepted | the independent review carrying `Decision: GO` and the seal hash |
 | `reference` | no | the sealed round folder the reviewer judges AFTER pictures against |
 | `paths` | no | globs of the surface's code; a change there must cite an ID in its plan |
-| `notes` | no | prose, ignored |
+| `notes` | no | prose; amendments go into `<surface>.notes.md` next to the entry, whole lines appended (`merge=union`), read with `notes` — a note citing an older seal must say it is historical |
 
 ## Hard vs. best-effort (no false-green)
 

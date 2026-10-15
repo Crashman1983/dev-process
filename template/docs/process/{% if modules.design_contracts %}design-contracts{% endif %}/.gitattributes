@@ -1,0 +1,4 @@
+# Amendments to a registry entry go into `<surface>.notes.md` as whole lines:
+# two branches that append to it merge by keeping both sides, never conflict
+# (downstream: parallel design branches collided on the JSON `notes` string).
+*.notes.md merge=union

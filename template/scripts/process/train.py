@@ -988,11 +988,14 @@ GREEN_SUITES = "green-suites"
 GREEN_SUITES_KEPT = 200
 
 
-def _suite_key(wt: Path, suite: str) -> str:
-    """`<tree> <suite digest>`, or "" when the tree cannot be read (no memo)."""
+def _suite_key(wt: Path, suite: str, scope_argv: list[str] | None = None) -> str:
+    """`<tree> <evidence digest>`, or "" when the tree or the scope cannot be read (no
+    memo). The digest is the merge certificate's evidence, scope included: a green that
+    covered a narrowed run is never the memo of the full one."""
     tree = _out(wt, "rev-parse", "HEAD^{tree}")
+    evidence = certificate.merge_evidence(wt, suite, scope_argv)
     # the digest is certificate's: memo and merge certificate name a suite alike (S6)
-    return f"{tree} {certificate.evidence_hash(suite)}" if tree else ""
+    return f"{tree} {certificate.evidence_hash(evidence)}" if tree and evidence else ""
 
 
 def _suite_seen_green(root: Path, key: str) -> bool:
@@ -1235,17 +1238,51 @@ class EnvironmentRed(Exception):
     """`--preflight` failed: the host cannot run the suite — nobody aboard is to blame."""
 
 
+def _collect_stage_times(wt: Path, stages: dict[str, dict], seen: set[tuple[str, int, int]],
+                         log) -> None:
+    """Folds the `<stage>.time` markers the merge suite left in the merge-suite
+    folder of `wt` into `stages` (`docs/process/testing.md`, "Stages"). A stage without a readable marker is
+    `skipped`, and a skip never overwrites what an earlier run of that stage said.
+    `seen` keeps a run that is collected twice (suite, then retry) from counting twice;
+    the state is the one of the last run, the seconds add up over all of them."""
+    gitdir = _out(wt, "rev-parse", "--absolute-git-dir")
+    names = certificate.run_stages(wt)
+    if not gitdir or names is None:
+        return
+    folder = Path(gitdir) / "merge-suite"
+    for name in names:
+        try:
+            t0, t1, verdict = (int(x) for x in (folder / f"{name}.time").read_text(encoding="utf-8").split())
+        except (OSError, ValueError):
+            if name not in stages:
+                stages[name] = {"seconds": 0, "runs": 0, "state": "skipped", "start": None, "end": None}
+                log(f"stage {name}: skipped")
+            continue
+        if (name, t0, t1) in seen:
+            continue
+        seen.add((name, t0, t1))
+        entry = stages.setdefault(name, {"seconds": 0, "runs": 0})
+        state = "green" if verdict == 0 else "red"
+        start = _dt.datetime.fromtimestamp(t0).isoformat(timespec="seconds")
+        end = _dt.datetime.fromtimestamp(t1).isoformat(timespec="seconds")
+        entry.update(seconds=entry["seconds"] + t1 - t0, runs=entry["runs"] + 1, state=state,
+                     start=start, end=end)
+        log(f"stage {name}: {state} {t1 - t0} s ({start} → {end})")
+
+
 def _record_phases(root: Path, stamp: str, phases: dict[str, float], result: str, aboard: list[str],
-                   log, outcome: dict | None = None) -> None:
+                   log, outcome: dict | None = None, stages: dict | None = None) -> None:
     """One log line and one JSON line per run: where the train's time went.
     `result`: green, red or environment (a red preflight — no red train).
     `branches` are the ones that landed, `deployed` whether the deploy ran
     green (null: no deploy ran), `ended` when the run finished (UTC) — what
-    ties a deploy to an issue for `process_kpis.py flow`."""
+    ties a deploy to an issue for `process_kpis.py flow`. `stages`: the merge-suite
+    stage times (`_collect_stage_times`), `{}` when none were collected."""
     spent = {k: round(phases.get(k, 0.0), 1) for k in PHASES}
     log(f"phases ({result}): " + ", ".join(f"{k} {v:.0f} s" for k, v in spent.items() if v))
     outcome = outcome or {}
     row = {"stamp": stamp, "result": result, "aboard": len(aboard), **spent,
+           "stages": stages or {},
            "branches": list(outcome.get("branches") or []), "deployed": outcome.get("deployed"),
            "ended": _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds")}
     try:
@@ -1255,7 +1292,8 @@ def _record_phases(root: Path, stamp: str, phases: dict[str, float], result: str
         pass  # a lost timing line costs a KPI, never the merge
 
 
-def _certify_merge(wt: Path, suite: str, before: str | None, env_names: list[str], log) -> None:
+def _certify_merge(wt: Path, suite: str, before: str | None, env_names: list[str], log,
+                   scope_argv: list[str] | None = None) -> None:
     """The `merge` certificate of the tree the suite just ran green on — only
     when the run left the worktree as it found it (S6)."""
     if not before:
@@ -1263,8 +1301,14 @@ def _certify_merge(wt: Path, suite: str, before: str | None, env_names: list[str
     if _changed_by_run(wt):
         log("suite green, but the run changed the worktree — no merge certificate")
         return
-    # the hook reads `merge_suite` stripped: the same string, or no hit
-    ok, why = certificate.write(wt, "merge", suite.strip(), before_tree=before, writer="train",
+    # the hook builds the same evidence (`certificate.merge_evidence`): the same string, or no
+    # hit. The scope is the run's `stages` file; missing with `merge_scope` configured = unknown,
+    # never recomputed
+    evidence = certificate.run_evidence(wt, suite, scope_argv)
+    if evidence is None:
+        log("suite green, but the scope of the run is unknown — no merge certificate")
+        return
+    ok, why = certificate.write(wt, "merge", evidence, before_tree=before, writer="train",
                                 env_names=env_names)
     log(f"merge certificate {'written' if ok else 'not written — ' + why}")
 
@@ -1287,7 +1331,8 @@ def retry_plan(red_in: str, retry: str | None) -> tuple[str, str]:
 def run(root: Path, *, suite: str | None, deploy: str | None, push: bool, min_candidates: int,
         max_wait_hours: float, force: bool, keep_branches: bool, dry_run: bool,
         retry: str | None = None, preflight: str | None = None,
-        certificate_env: list[str] | None = None, preflight_timeout: float | None = None) -> int:
+        certificate_env: list[str] | None = None, preflight_timeout: float | None = None,
+        merge_scope: list[str] | None = None) -> int:
     local = local_integration(root)
     if local is None:
         print("train: no local main/master branch", file=sys.stderr)
@@ -1323,13 +1368,14 @@ def run(root: Path, *, suite: str | None, deploy: str | None, push: bool, min_ca
         return 0
     phases: dict[str, float] = {}
     outcome: dict = {}
+    stages: dict[str, dict] = {}
     rc = 1
     result = "red"
     try:
         rc = _run_batch(root, local, p, aboard, stamp, logfile, suite=suite, deploy=deploy, push=push,
                         keep_branches=keep_branches, retry=retry, preflight=preflight, phases=phases,
                         certificate_env=certificate_env or [], preflight_timeout=preflight_timeout,
-                        outcome=outcome)
+                        outcome=outcome, stages=stages, merge_scope=merge_scope)
         result = "green" if rc == 0 else "red"
         return rc
     except EnvironmentRed as env_red:
@@ -1349,19 +1395,22 @@ def run(root: Path, *, suite: str | None, deploy: str | None, push: bool, min_ca
         def _log(line: str) -> None:
             with logfile.open("a", encoding="utf-8") as fh:
                 fh.write(f"{_dt.datetime.now().isoformat(timespec='seconds')} {line}\n")
-        _record_phases(root, stamp, phases, result, aboard, _log, outcome)
+        _record_phases(root, stamp, phases, result, aboard, _log, outcome, stages)
 
 
 def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, logfile: Path, *,
                suite: str | None, deploy: str | None, push: bool, keep_branches: bool,
                retry: str | None = None, preflight: str | None = None,
                phases: dict[str, float] | None = None, certificate_env: list[str] | None = None,
-               preflight_timeout: float | None = None, outcome: dict | None = None) -> int:
+               preflight_timeout: float | None = None, outcome: dict | None = None,
+               stages: dict | None = None, merge_scope: list[str] | None = None) -> int:
     def log(line: str) -> None:
         with logfile.open("a", encoding="utf-8") as fh:
             fh.write(f"{_dt.datetime.now().isoformat(timespec='seconds')} {line}\n")
 
     phases = {} if phases is None else phases
+    stages = {} if stages is None else stages
+    stage_seen: set[tuple[str, int, int]] = set()
     searching = ""  # "retry" or "bisect": a judged tree's time counts there
 
     def timed(phase: str, fn, *args):
@@ -1379,11 +1428,12 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
         clean = certificate.clean_tree_problem(wt) is None
         before = certificate.evidence_tree(wt) if clean else None
         state = timed("suite", _sh, wt, suite, log)
+        _collect_stage_times(wt, stages, stage_seen, log)
         if state == "green" and key:
             _remember_green_suite(root, key)
             green_here.add(key)
         if state == "green":
-            _certify_merge(wt, suite, before, certificate_env or [], log)
+            _certify_merge(wt, suite, before, certificate_env or [], log, merge_scope)
         return state
 
     base = p["base"]
@@ -1415,7 +1465,7 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
         red_in = "suite"
         if not suite:
             return "green"
-        key = _suite_key(wt, suite)
+        key = _suite_key(wt, suite, merge_scope)
         if key and key in green_here:
             # a bisection probe went green on this very tree minutes ago; the
             # rebuild after the drop is the same tree (downstream: ~25 minutes
@@ -1508,9 +1558,10 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
                 if state == "green" and suite:
                     red_in = "suite"
                     # the suite never ran behind the red gates
-                    state = full_suite(last_wt, _suite_key(last_wt, suite))
+                    state = full_suite(last_wt, _suite_key(last_wt, suite, merge_scope))
             elif how == "failed" and last_wt is not None:
                 state = timed("retry", _sh, last_wt, retry, log)
+                _collect_stage_times(last_wt, stages, stage_seen, log)
                 if state == "undefined":  # no such command on this tree: the whole suite, as before
                     log("the --retry command does not exist on this tree — rebuilding for the whole suite")
                     state, merged, branch = attempt(aboard)
@@ -1742,6 +1793,7 @@ def main(argv: list[str]) -> int:
                max_wait_hours=a.max_wait_hours, force=a.force, keep_branches=a.keep_branches,
                dry_run=a.dry_run, retry=a.retry, preflight=preflight,
                certificate_env=cfg["certificate_env"] if cfg else [],
+               merge_scope=cfg["merge_scope"] if cfg else None,
                preflight_timeout=cfg["preflight_timeout"] if cfg else testing_config.DEFAULT_PREFLIGHT_TIMEOUT)
 
 

@@ -540,10 +540,13 @@ def stale_minutes(root: Path) -> int | None:
     """The policy's `stale_minutes`: how long a worker may neither commit nor
     report before the tower calls it stale (`tower.py --wait` wakes the
     steward on it). None without a policy or the key — the tower's default
-    then applies; an invalid value is refused by `load_policy`."""
+    then applies; an invalid value is refused by `load_policy` — and said, never
+    swallowed (downstream: a typo in the value silently fell back to the default)."""
     try:
         return load_policy(root).get("stale_minutes")
-    except SystemExit:
+    except SystemExit as err:
+        print(f"dispatch: ignoring the policy for the stale threshold ({err}); the tower's "
+              f"default applies", file=sys.stderr)
         return None
 
 

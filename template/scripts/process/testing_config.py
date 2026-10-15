@@ -127,8 +127,8 @@ def parse(data) -> dict:
     """The validated configuration from the decoded JSON."""
     if not isinstance(data, dict):
         raise ConfigError("the configuration must be a JSON object")
-    known = {"lane_dir", "lanes", "certificate_env", "merge_suite", "preflight", "preflight_timeout",
-             "stacks"}
+    known = {"lane_dir", "lanes", "certificate_env", "merge_suite", "merge_scope", "preflight",
+             "preflight_timeout", "stacks"}
     unknown = sorted(set(data) - known)
     if unknown:
         raise ConfigError(f"unknown key(s): {', '.join(unknown)} (known: {', '.join(sorted(known))})")
@@ -152,6 +152,9 @@ def parse(data) -> dict:
         "lanes": _lanes(data.get("lanes")),
         "certificate_env": _strings(data.get("certificate_env", []), "certificate_env"),
         "merge_suite": suite.strip() if suite else None,
+        # argv whose stdout names the stages the merge suite will run; it joins the merge
+        # certificate's evidence (`certificate.merge_evidence`, #226)
+        "merge_scope": _argv(data.get("merge_scope"), "merge_scope", required=False),
         # the environment check before any test runs: red is the host's, never a test's
         "preflight": _argv(data.get("preflight"), "preflight", required=False),
         "preflight_timeout": float(preflight_timeout),

@@ -55,7 +55,8 @@ def context(root: Path) -> dict:
     if not ctx_py.is_file():
         return {}
     try:
-        r = subprocess.run([sys.executable, str(ctx_py), str(root)], capture_output=True, text=True, timeout=30)
+        r = subprocess.run([sys.executable, str(ctx_py), str(root)], capture_output=True, text=True, timeout=30,
+                           check=False)
         return json.loads(r.stdout) if r.returncode == 0 else {}
     except (OSError, subprocess.TimeoutExpired, ValueError):
         return {}
@@ -150,7 +151,7 @@ def check(root: Path) -> int:
 
 def main(argv: list[str]) -> int:
     root = Path.cwd()
-    top = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True)
+    top = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True, check=False)
     if top.returncode == 0 and top.stdout.strip():
         root = Path(top.stdout.strip())
     if "--install" in argv:

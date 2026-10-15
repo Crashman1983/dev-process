@@ -1,0 +1,4 @@
+# The inbox only grows by whole lines (journal-state-plans.md, "Discovered
+# work"): two branches that each append an item merge by keeping both, never
+# conflict. Scoped to this directory; the journal has its own rule.
+/inbox.md merge=union

@@ -154,6 +154,20 @@ def _paths_in_flight(root: Path) -> set[str]:
         return set()
 
 
+def _notes_text(path: Path, data: dict) -> str:
+    """The JSON `notes` plus the amendment lines of `<surface>.notes.md`.
+
+    The sidecar takes new amendments as whole lines, so two branches appending
+    to it merge without a conflict (`merge=union`); a missing sidecar is empty.
+    """
+    base = data.get("notes", "")
+    base = base if isinstance(base, str) else ""
+    sidecar = path.with_name(f"{path.stem}.notes.md")
+    if not sidecar.is_file():
+        return base
+    return f"{base}\n{_read(sidecar)}"
+
+
 def load(root: Path, path: Path) -> tuple[dict | None, list[str]]:
     rel = path.relative_to(root)
     try:
@@ -297,8 +311,8 @@ def _check_one(root: Path, path: Path, plans: dict[str, str], in_flight: set[str
                     "against the contract text alone")
 
     # Notes may cite older seals only when their sentence says historical.
-    notes = data.get("notes", "")
-    if isinstance(notes, str):
+    notes = _notes_text(path, data)
+    if notes:
         current = ""
         seal_path = _inside(root, ref + "/manifest.sha256") if ref else None
         if seal_path and seal_path.is_file():
