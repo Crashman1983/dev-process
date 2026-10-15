@@ -15,13 +15,13 @@ Repositories. Er ändert nicht die Agenten, sondern ihre Arbeitsbedingungen:
 Regeln prüft ein Programm, der Aufwand folgt dem Risiko, niemand nimmt die
 eigene Arbeit ab, und das Gedächtnis liegt in Dateien statt im Kontext.
 
-> **Status:** `v2.73.0` — Sub-Projekte SP1–SP75. Historie: [`CHANGELOG.md`](CHANGELOG.md); Releases entstehen mit `tools/release.py` (`--check` nennt, was nicht auf der Version steht).
+> **Status:** `v2.73.0` — Sub-Projekte SP1–SP75. Historie: [`CHANGELOG-DE.md`](CHANGELOG-DE.md); Releases entstehen mit `tools/release.py` (`--check` nennt, was nicht auf der Version steht).
 
 ## Einstieg
 
 | Wofür | Dokument |
 |---|---|
-| Was ist neu, in wenigen Sätzen je Version | **[`NEWS.md`](NEWS.md)** |
+| Was ist neu, in wenigen Sätzen je Version | **[`NEWS-DE.md`](NEWS-DE.md)** |
 | Was der Prozess ist, warum er so ist, was offen ist | **[Überblick](docs/UEBERBLICK.md)** · [Overview (English)](docs/OVERVIEW.md) · [PDF](docs/Entwicklungsprozess-mit-KI-Agenten.pdf) |
 | Einrichten, headless oder im Dialog, und aktualisieren | [`BOOTSTRAP.md`](BOOTSTRAP.md) |
 | Was auf dem Rechner und in CI gebraucht wird | [`docs/SYSTEM-REQUIREMENTS.md`](docs/SYSTEM-REQUIREMENTS.md) |
@@ -99,7 +99,7 @@ Arbeit in einer einzigen Sitzung ist der Aufwand größer als der Nutzen.
 
 Der Prozess ist in vielen Iterationen in einem privaten, produktiv genutzten
 Repository entstanden (in den Dokumenten „Referenzprojekt“). Die Geschichte
-dieser Entwicklung steht im [`CHANGELOG.md`](CHANGELOG.md) und im Git-Log;
+dieser Entwicklung steht im [`CHANGELOG-DE.md`](CHANGELOG-DE.md) und im Git-Log;
 alles, was das Template ausliefert, ist von diesem Projekt unabhängig und
 neutral.
 

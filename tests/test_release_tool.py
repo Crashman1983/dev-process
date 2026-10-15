@@ -29,8 +29,8 @@ def test_every_place_the_repository_names_its_version_is_a_location():
     The overviews name the version they were last checked against — a review stamp,
     not a release location: bumped by the release, it would claim a check nobody did."""
     out = subprocess.run(["git", "grep", "-n", "-F", CURRENT, "--", ".",
-                          ":!CHANGELOG.md", ":!docs/sbom.cdx.json", ":!docs/SBOM.md", ":!tests/",
-                          ":!docs/OVERVIEW.md", ":!docs/UEBERBLICK.md", ":!NEWS.md"],
+                          ":!CHANGELOG.md", ":!CHANGELOG-DE.md", ":!docs/changelog-archive.md", ":!docs/sbom.cdx.json", ":!docs/SBOM.md", ":!tests/",
+                          ":!docs/OVERVIEW.md", ":!docs/UEBERBLICK.md", ":!NEWS.md", ":!NEWS-DE.md", ":!docs/analysis/"],
                          cwd=REPO, capture_output=True, text=True).stdout
     files = {line.split(":", 1)[0] for line in out.splitlines()}
     assert files == {path for path, _ in rel.LOCATIONS}, files
@@ -43,11 +43,19 @@ def test_check_is_clean_at_the_current_version():
 NEWS_999 = "# News\n\n## v9.9.9 — t\n\nWhat changes, in plain words.\n"
 
 
+def _changelogs(root: Path, body: str = "body\n", sections: bool = False) -> None:
+    """Both languages of the v9.9.9 entry (MAINTAINING.md: `## vX.Y.Z — <title> · <date>`)."""
+    for name, marker in (("CHANGELOG.md", "Changed sections"), ("CHANGELOG-DE.md", "Geänderte Abschnitte")):
+        tail = f"\n**{marker}.** `x.md` B, C (gone).\n" if sections else ""
+        (root / name).write_text(f"## v9.9.9 — t · 2026-10-15\n\n{body}{tail}", encoding="utf-8")
+
+
 def _copy(tmp_path: Path) -> Path:
     for path, _ in rel.LOCATIONS:
         (tmp_path / path).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy(REPO / path, tmp_path / path)
-    (tmp_path / "NEWS.md").write_text(NEWS_999, encoding="utf-8")
+    for name in ("NEWS.md", "NEWS-DE.md"):
+        (tmp_path / name).write_text(NEWS_999, encoding="utf-8")
     return tmp_path
 
 
@@ -88,7 +96,7 @@ def test_release_refuses_what_is_no_version(tmp_path, tag):
 
 def test_a_failing_step_stops_before_the_commit(tmp_path, monkeypatch):
     root = _copy(tmp_path)
-    (root / "CHANGELOG.md").write_text("**v9.9.9 — t.** body\n", encoding="utf-8")
+    _changelogs(root)
     calls = []
 
     def fake_run(argv, **kw):
@@ -106,7 +114,7 @@ def test_a_failing_step_stops_before_the_commit(tmp_path, monkeypatch):
 def test_suite_runs_on_four_workers_only_with_xdist(tmp_path, monkeypatch, xdist):
     """serial the suite took ~5 min; loadfile because the render caches are per worker"""
     root = _copy(tmp_path)
-    (root / "CHANGELOG.md").write_text("**v9.9.9 — t.** body\n", encoding="utf-8")
+    _changelogs(root)
     calls = []
 
     def fake_run(argv, **kw):
@@ -132,7 +140,7 @@ def test_cli_check_reports_ok_at_the_current_version():
 
 def _git_repo(tmp_path: Path) -> Path:
     root = _copy(tmp_path)
-    (root / "CHANGELOG.md").write_text("**v9.9.9 — t.** body\n", encoding="utf-8")
+    _changelogs(root)
     for args in (["init", "-q", "-b", "main"], ["config", "user.email", "t@t"],
                  ["config", "user.name", "t"], ["add", "-A"], ["commit", "-q", "-m", "base"]):
         subprocess.run(["git", *args], cwd=root, check=True, capture_output=True)
@@ -213,17 +221,17 @@ def test_a_rename_is_named_by_its_new_path(tmp_path):
 def test_release_refuses_without_a_plain_language_news_section(tmp_path):
     """#223: NEWS.md says in a few sentences what a release brings, for readers of no CHANGELOG."""
     root = _copy(tmp_path)
-    (root / "CHANGELOG.md").write_text("**v9.9.9 — t.** body\n", encoding="utf-8")
+    _changelogs(root)
     (root / "NEWS.md").write_text("# News\n\n## v9.9.9 — t\n\n## v9.9.8 — older\n\nText.\n", encoding="utf-8")
 
-    with pytest.raises(SystemExit, match="NEWS.md has no section for v9.9.9"):
+    with pytest.raises(SystemExit, match="NEWS.md: no section for v9.9.9"):
         rel.release(root, "v9.9.9")  # a heading without sentences is no section
     assert rel.mismatches(root, CURRENT) == []  # nothing bumped
 
 
 def test_check_names_a_missing_news_section(tmp_path, monkeypatch):
     root = _copy(tmp_path)
-    (root / "CHANGELOG.md").write_text("**v9.9.9 — t.** body\n", encoding="utf-8")
+    _changelogs(root)
     (root / "NEWS.md").unlink()
     monkeypatch.setattr(rel.subprocess, "run", lambda argv, **kw: subprocess.CompletedProcess(argv, 0))
 
@@ -238,7 +246,21 @@ def test_the_news_reader_takes_one_section_and_stops_at_the_next():
 
 
 def test_the_repository_news_has_a_section_for_the_current_version():
-    assert rel.news((REPO / "NEWS.md").read_text(encoding="utf-8"), f"v{CURRENT}") is not None
+    for name in ("NEWS.md", "NEWS-DE.md"):
+        assert rel.news((REPO / name).read_text(encoding="utf-8"), f"v{CURRENT}") is not None, name
+    for name in ("CHANGELOG.md", "CHANGELOG-DE.md"):
+        assert rel.notes((REPO / name).read_text(encoding="utf-8"), f"v{CURRENT}") is not None, name
+
+
+@pytest.mark.parametrize("gone", ["CHANGELOG-DE.md", "NEWS-DE.md", "CHANGELOG.md", "NEWS.md"])
+def test_a_release_needs_its_notes_in_both_languages(tmp_path, gone):
+    """v2.74 (owner): the release notes exist in English and German; one missing refuses."""
+    root = _copy(tmp_path)
+    _changelogs(root)
+    (root / gone).unlink()
+    with pytest.raises(SystemExit, match=f"{gone}: no (entry|section) for v9.9.9"):
+        rel.release(root, "v9.9.9")
+    assert rel.mismatches(root, CURRENT) == []
 
 
 def test_a_release_names_the_template_sections_it_changed(tmp_path):
@@ -258,9 +280,23 @@ def test_a_release_names_the_template_sections_it_changed(tmp_path):
     assert rel.changed_sections(root) == ["template/docs/process/x.md: # X — changed",
                                           "template/docs/process/x.md: ## B — changed",
                                           "template/docs/process/x.md: ## C — gone"]
-    with pytest.raises(SystemExit, match="Geänderte Abschnitte: …` naming them:\n  template/docs/process/x.md: # X"):
+    with pytest.raises(SystemExit, match="naming them:\n  template/docs/process/x.md: # X"):
         rel.release(root, "v9.9.9", suite=False)
-    (root / "CHANGELOG.md").write_text("**v9.9.9 — t.** body\n\nGeänderte Abschnitte: `x.md` B, C (entfällt).\n",
-                                       encoding="utf-8")
+    _changelogs(root, sections=True)
     with pytest.raises(SystemExit, match="not clean"):  # past the section check: the next one speaks
         rel.release(root, "v9.9.9", suite=False)
+
+
+def test_a_doc_that_became_a_template_keeps_its_sections(tmp_path):
+    """v2.74: `start-here.md` → `start-here.md.jinja` is no section gone (plan review)."""
+    root = _git_repo(tmp_path)
+    doc = root / "template/docs/process/x.md"
+    doc.parent.mkdir(parents=True)
+    doc.write_text("# X\n\n## A\n\na\n", encoding="utf-8")
+    gate = root / "template/scripts/process/check_overlays.py"
+    gate.parent.mkdir(parents=True)
+    shutil.copy(REPO / "template/scripts/process/check_overlays.py", gate)
+    for args in (["add", "-A"], ["commit", "-q", "-m", "docs"], ["tag", f"v{CURRENT}"]):
+        subprocess.run(["git", *args], cwd=root, check=True, capture_output=True)
+    doc.rename(doc.with_name("x.md.jinja"))
+    assert rel.changed_sections(root) == []

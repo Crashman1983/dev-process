@@ -87,7 +87,11 @@ def bump(root: Path, number: str) -> None:
 
 
 # what the release commit carries: a tree dirty anywhere else would ride along
-RELEASE_FILES = ("CHANGELOG.md", "NEWS.md", *(rel for rel, _ in LOCATIONS), "docs/sbom.cdx.json", "docs/SBOM.md")
+# both languages of the release notes (README.md / README-DE.md convention): the
+# CHANGELOG (what changed, why, what it leads to) and NEWS (a few plain sentences)
+CHANGELOGS = ("CHANGELOG.md", "CHANGELOG-DE.md")
+NEWS_FILES = ("NEWS.md", "NEWS-DE.md")
+RELEASE_FILES = (*CHANGELOGS, *NEWS_FILES, *(rel for rel, _ in LOCATIONS), "docs/sbom.cdx.json", "docs/SBOM.md")
 
 
 def _current(root: Path) -> tuple[int, ...]:
@@ -100,9 +104,18 @@ def _current(root: Path) -> tuple[int, ...]:
     return tuple(int(x) for x in found[0].split(".")) if found else (0,)
 
 
-def _news_missing(root: Path, tag: str) -> bool:
-    path = root / "NEWS.md"
-    return not path.is_file() or news(path.read_text(encoding="utf-8"), tag) is None
+def _notes_missing(root: Path, tag: str) -> list[str]:
+    """Every release-notes file without its section for `tag`, with what it needs."""
+    missing = []
+    for rel in CHANGELOGS:
+        path = root / rel
+        if not path.is_file() or notes(path.read_text(encoding="utf-8"), tag) is None:
+            missing.append(f"{rel}: no entry for {tag} (`## {tag} — <title> · <date>`, MAINTAINING.md)")
+    for rel in NEWS_FILES:
+        path = root / rel
+        if not path.is_file() or news(path.read_text(encoding="utf-8"), tag) is None:
+            missing.append(f"{rel}: no section for {tag} (`## {tag} — <title>` and a few plain sentences)")
+    return missing
 
 
 # what a project's overlay can anchor to (template/docs/process/overlays.md): the
@@ -111,6 +124,7 @@ def _news_missing(root: Path, tag: str) -> bool:
 ANCHORABLE = ("template/docs/process/", "template/{% if harnesses.claude %}.claude{% endif %}/commands/",
               "template/.github/{% if harnesses.copilot %}prompts{% endif %}/")
 SECTIONS_MARKER = "Geänderte Abschnitte"
+SECTIONS_MARKERS = {"CHANGELOG.md": "Changed sections", "CHANGELOG-DE.md": SECTIONS_MARKER}
 
 
 def _sections_reader(root: Path):
@@ -143,6 +157,8 @@ def changed_sections(root: Path) -> list[str] | None:
             continue
         sections = sections or _sections_reader(root)
         path = root / rel
+        if not path.is_file() and (root / f"{rel}.jinja").is_file():  # became a template: not gone
+            path = root / f"{rel}.jinja"
         now = sections(path.read_text(encoding="utf-8")) if path.is_file() else {}
         for heading, body in sections(old.stdout).items():
             if heading not in now:
@@ -158,9 +174,15 @@ def _sections_unnamed(root: Path, tag: str) -> list[str]:
     m = VERSION.match(tag)
     if not m or tuple(int(x) for x in m.group(1).split(".")) <= _current(root):
         return []
-    entry = "\n".join(notes((root / "CHANGELOG.md").read_text(encoding="utf-8"), tag) or ())
     found = changed_sections(root)
-    return [] if not found or SECTIONS_MARKER.lower() in entry.lower() else found
+    if not found:
+        return []
+    for rel, marker in SECTIONS_MARKERS.items():
+        path = root / rel
+        entry = "\n".join(notes(path.read_text(encoding="utf-8"), tag) or ()) if path.is_file() else ""
+        if marker.lower() not in entry.lower():
+            return found
+    return []
 
 
 def check(root: Path, tag: str) -> list[str]:
@@ -170,11 +192,9 @@ def check(root: Path, tag: str) -> list[str]:
     if not m:
         return [f"{tag!r} is no version (expected vX.Y.Z)"]
     left = mismatches(root, m.group(1))
-    if notes((root / "CHANGELOG.md").read_text(encoding="utf-8"), tag) is None:
-        left.append(f"CHANGELOG.md: no entry for {tag}")
-    if _news_missing(root, tag):
-        left.append(f"NEWS.md: no section for {tag} (`## {tag} — <title>` and a few plain sentences)")
-    left += [f"CHANGELOG.md: {SECTIONS_MARKER} not named — {s}" for s in _sections_unnamed(root, tag)]
+    left += _notes_missing(root, tag)
+    left += [f"CHANGELOG: `Changed sections` / `{SECTIONS_MARKER}` not named — {s}"
+             for s in _sections_unnamed(root, tag)]
     sbom = subprocess.run([sys.executable, "tools/gen_sbom.py", "--check"], cwd=root, capture_output=True)
     if sbom.returncode != 0:
         left.append("docs/sbom.cdx.json / docs/SBOM.md: stale (tools/gen_sbom.py --check)")
@@ -201,13 +221,10 @@ def release(root: Path, tag: str, *, suite: bool = True) -> None:
     if tuple(int(x) for x in number.split(".")) <= _current(root):
         raise SystemExit(f"release: {tag} is not above the current version "
                          f"{'.'.join(map(str, _current(root)))}")
-    if notes((root / "CHANGELOG.md").read_text(encoding="utf-8"), tag) is None:
-        raise SystemExit(f"release: CHANGELOG.md has no entry for {tag} — write it first "
-                         f"(`**{tag} — <title>.**`); a release without notes is not published")
-    if _news_missing(root, tag):
-        raise SystemExit(f"release: NEWS.md has no section for {tag} — write it first "
-                         f"(`## {tag} — <title>` and a few sentences for readers who do not "
-                         f"read the CHANGELOG)")
+    missing = _notes_missing(root, tag)
+    if missing:
+        raise SystemExit("release: write the release notes first — a release without them is not "
+                         "published:\n  " + "\n  ".join(missing))
     if changed_sections(root) is None:
         print("release: the last release's tag is not here — `git fetch --tags` to list the changed "
               "sections overlays may anchor to", flush=True)
@@ -215,7 +232,7 @@ def release(root: Path, tag: str, *, suite: bool = True) -> None:
     if unnamed:
         raise SystemExit(f"release: the {tag} entry does not name the template sections it changed — "
                          f"projects re-check their overlays against them (docs/process/overlays.md). Add "
-                         f"a line `{SECTIONS_MARKER}: …` naming them:\n  " + "\n  ".join(unnamed))
+                         f"`Changed sections.` (CHANGELOG.md) and `{SECTIONS_MARKER}: …` (CHANGELOG-DE.md) naming them:\n  " + "\n  ".join(unnamed))
     status = subprocess.run(["git", "-C", str(root), "status", "--porcelain", "-z"],
                             capture_output=True, text=True)
     if status.returncode != 0:
