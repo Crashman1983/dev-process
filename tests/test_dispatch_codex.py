@@ -241,7 +241,9 @@ def test_a_model_attest_cannot_place_is_refused_before_the_run(mods, tmp_path, m
 # --- the supervisor ----------------------------------------------------------------------
 
 def _wait(codex, d, rec, wanted=None):
-    until = time.monotonic() + 15
+    # a failed review runs twice (one retry); ~2.3 s unloaded — the full suite on four
+    # workers stretched it past an earlier 15 s budget once (2026-10-15)
+    until = time.monotonic() + 60
     while time.monotonic() < until:
         got = codex.outcome(rec, d._same_process(rec))
         if got in ("completed", "failed", "interrupted"):
