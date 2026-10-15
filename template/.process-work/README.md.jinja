@@ -15,5 +15,9 @@ process.
 
 `inbox.md`, `reviews/` and `optimizations/` are created on first use — they are not seeded.
 
+{% if artifact_language == "conversation" -%}
+Keep entries short, factual and dated, in the conversation language. Git records what changed;
+{%- else -%}
 Keep entries short, factual, dated, and in English. Git records what changed;
+{%- endif %}
 these files record reasoning and handoff state.

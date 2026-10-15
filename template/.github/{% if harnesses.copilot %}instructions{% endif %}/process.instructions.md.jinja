@@ -5,5 +5,12 @@ Follow the development process in `docs/process/`. If this repository has just
 been initialized, start with `docs/process/start-here.md` and guide the user
 through Greenfield or Brownfield as a dialogue. Before substantive work, read
 `mandatory-rules.md` and derive the tier from `risk-tiers.md`. Tier 2+
-requires a written plan under `.process-work/plans/` before code. Converse
+requires a written plan under `.process-work/plans/` before code. {% if artifact_language == "conversation" -%}
+Converse
+with the user in the user's language; write code, commits, issues and
+contract docs in English, and the operator's prose (ADRs, journal, plans, code
+comments, test titles) in the conversation language.
+{%- else -%}
+Converse
 with the user in the user's language; write all artifacts in English.
+{%- endif %}

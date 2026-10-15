@@ -7,8 +7,16 @@ baseline, not an automatically onboarded product project. Setup is meant to be
 guided by an LLM: the LLM asks step by step, documents the answers, and only
 then creates the project-specific artifacts.
 
+{% if artifact_language == "conversation" -%}
+Converse with the user in the user's language. Write in English what an
+outside reader or a second toolchain has to read: code identifiers, commits,
+issues, and the shared contract docs. Prose the operator writes for
+themselves — ADRs, journal, plans, code comments, test titles — follows the
+conversation language.
+{%- else -%}
 Converse with the user in the user's language; write all artifacts (docs,
 code, commits, ADRs, journal) in English.
+{%- endif %}
 
 **When this process is not worth it:** for throwaway prototypes, one-off
 scripts, and single-session work the overhead is a net loss — install nothing.
@@ -125,7 +133,12 @@ question or assumption; do not invent it.
 ### Dialogue rules
 
 - Always name the mode: Greenfield or Brownfield.
+{% if artifact_language == "conversation" -%}
+- Converse in the user's language; write code, commits, issues and contract
+  docs in English, operator prose in the conversation language.
+{%- else -%}
 - Converse in the user's language; write artifacts in English.
+{%- endif %}
 - Ask at most three questions at a time.
 - After each answer, briefly summarize what was understood.
 - Mark assumptions and get confirmation before writing files.

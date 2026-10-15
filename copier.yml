@@ -18,6 +18,18 @@ harness:
     - agents_md
   default: claude
 
+artifact_language:
+  type: str
+  help: >-
+    The language of written artifacts. english: everything in English.
+    conversation: code identifiers, commits, issues and the shared contract
+    docs in English; the prose the operator writes for themselves (ADRs,
+    journal, plans, code comments, test titles) in the conversation language.
+  choices:
+    - english
+    - conversation
+  default: english
+
 # derived from `harness` — kept as a mapping because every template condition
 # and the gate runner key on harnesses.<name>; not asked.
 harnesses:
