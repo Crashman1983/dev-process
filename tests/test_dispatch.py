@@ -2318,7 +2318,9 @@ def test_an_invalid_stale_threshold_is_said_not_swallowed(render, tmp_path, caps
     (out / "docs/process/model-policy.local.json").unlink()
     good = policy.read_text()
     for bad in ("[1]", json.dumps({**json.loads(good), "phases": [1]}),
-                json.dumps({**json.loads(good), "tiers": [1]})):
+                json.dumps({**json.loads(good), "tiers": [1]}),
+                json.dumps({**json.loads(good), "tiers": {"2": [1]}}),
+                json.dumps({**json.loads(good), "default": [1]})):
         policy.write_text(bad)
         assert mod.stale_minutes(out) is None
         assert "ignoring the policy" in capsys.readouterr().err

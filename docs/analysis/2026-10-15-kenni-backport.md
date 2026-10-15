@@ -169,3 +169,12 @@ Ergebnis: Block mit einem Major. Ohne `merge_scope` ändert sich nur das Dokumen
 - **C4:** D6 ist an P2 und P12 angeglichen.
 - **C5:** Der Docstring von `run_stages` setzt kein Makefile mehr voraus.
 - **C6:** Die NEWS nennen den Scope nur für Projekte mit Testgruppen und den einmaligen Neu-Lauf.
+
+## Code-Review Runde 2
+
+Ergebnis: pass. Fünf kleine Funde sind eingearbeitet:
+- Die Bestätigung einer Streichung hat jetzt einen Test: `Struck-through` und `Struck` bestätigen nichts.
+- Prosa mit `::` (`std::vector`) gilt nicht als Test. Ein Test braucht eine Datei mit Endung.
+- `todo` ist als Grund unabhängig von der Schreibweise ungültig.
+- `load_policy` prüft zusätzlich `default` und die Tier-Zeilen auf ihre Form.
+- Der CHANGELOG nennt diese Formprüfung vollständig.
