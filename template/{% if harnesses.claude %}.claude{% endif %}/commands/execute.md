@@ -59,12 +59,17 @@ loop reduces defects but does not replace the attestation.
 the plan's `Execution:` choice; for a packet without one, record the choice
 and one sentence of rationale before starting it (the criteria are in
 `/plan`). Keeping the current context is valid, also on a larger model.
-A delegated packet goes to a subagent with its file packet, the plan's
+A delegated packet — a single one as much as a parallel one — goes to a
+subagent with its file packet, the paths it must not touch, the acceptance
+criteria it serves with the narrow command that proves them, the plan's
 `## Decisions` and the kernel rules it touches, on the smallest suitable
 model (`dispatch.py policy --class C`); a larger model needs a named
-unresolved judgment, never a silent fallback. The subagent edits and tests,
-it never commits: you read its diff, run the proving command and commit —
-you sign what you checked (mandatory rule 1). Research and diagnosis may
+unresolved judgment — neither the parent plan's tier nor an infrastructure
+failure is one — never a silent fallback. The subagent edits and tests,
+it never commits, and returns that command's output red before its change
+and green after it: you read its diff, run the proving command and commit — you
+sign what you checked (mandatory rule 1). A packet that escalated its model
+says which and why in its result. Research and diagnosis may
 always go to a subagent. At the end of the packet report its mode
 (`report.py … --execution delegate|retain-context`), so
 `process_kpis.py execution` can tell whether delegating pays. Reconsider on

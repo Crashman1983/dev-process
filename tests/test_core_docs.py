@@ -878,6 +878,16 @@ def test_each_packet_says_who_executes_it(render, tmp_path):
     assert "Decide handoff versus retaining context per coherent packet" in execute
     assert "it never commits" in execute and "--execution delegate|retain-context" in execute
     assert "Offload reading, never the change" not in execute
+    # #246: what every handoff carries and returns, and what a larger model needs
+    flat = " ".join(execute.split())
+    for part in ("a single one as much as a parallel one", "the paths it must not touch",
+                 "the narrow command that proves them", "red before its change and green after it",
+                 "neither the parent plan's tier nor an infrastructure failure is one"):
+        assert part in flat, part
+    prompt = " ".join(render(tmp_path / "copilot", {"project_name": "demo", "harnesses": {"copilot": True}})
+                      .joinpath(".github/prompts/execute.prompt.md").read_text().split())
+    assert "the paths it must not touch" in prompt and "red before and green after" in prompt
+    assert "infrastructure failure is one" in " ".join((out / "docs/process/tower.md").read_text().split())
     assert "**Handoff is separate from model selection.**" in (out / "docs/process/tower.md").read_text()
     assert "Execution: delegate | retain-context" in (out / "docs/process/workflow.md").read_text()
 
