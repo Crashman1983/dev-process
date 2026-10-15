@@ -9,7 +9,10 @@ first: read `PRODUCT.md` and the decision records for the touched area; a
 spec that violates a non-goal or an Accepted decision says so and does not
 proceed silently. Mark anything underspecified as
 `[NEEDS CLARIFICATION: question]` instead of guessing — the clarification
-gate blocks unresolved markers from reaching plan.md/tasks.md.)*
+gate blocks unresolved markers from reaching plan.md/tasks.md. Acceptance
+criteria are numbered `AC-<n>` — the only form the AC trace reads (review
+reports name one test per `AC-<n>`); `AK-`, `FR-` or `SC-` ids are not read,
+so a criterion written that way has no test line and the pass is refused.)*
 
 ## Owner brief — plain language *(mandatory, first)*
 

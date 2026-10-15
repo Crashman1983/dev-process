@@ -469,3 +469,24 @@ def test_a_reference_to_the_archived_plan_is_no_reference_to_the_spec_dir(render
     subprocess.run(["git", "commit", "-qm", "referrer"], cwd=out, check=True)
     r = prune()
     assert (r.returncode == 1) is refused, r.stdout + r.stderr
+
+
+def test_the_spec_template_writes_criteria_the_ac_trace_reads(render, tmp_path):
+    """#231 (Kenni #2606): `AK-01` criteria fell out of the trace without a hint."""
+    import importlib.util
+    out = _render(render, tmp_path)
+    spec = importlib.util.spec_from_file_location("ae_231", out / "scripts/process/attest_evidence.py")
+    import sys
+    sys.path.insert(0, str(out / "scripts/process"))
+    try:
+        ae = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = ae  # its dataclasses read their module from sys.modules
+        spec.loader.exec_module(ae)
+    finally:
+        sys.path.remove(str(out / "scripts/process"))
+    text = (out / OVR / "spec-template.md").read_text()
+    ears = [ln for ln in text.splitlines() if ln.lstrip().startswith("- AC-")]
+    assert ears and all(ae.AC_LINE.match(ln) for ln in ears), ears
+    assert [ae.ac_key(m) for m in ae.AC_ID.finditer("\n".join(ears))] == ["1", "2"]
+    assert not ae.AC_ID.search("- AK-01: When x, the system shall y.")
+    assert "`AC-<n>`" in text and "`AK-`" in text
