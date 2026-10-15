@@ -7,6 +7,13 @@ details are in the [CHANGELOG](CHANGELOG.md).
 
 Deutsche Fassung: [NEWS-DE.md](NEWS-DE.md).
 
+## v2.74.1 — A review recorded with the family name counts again
+
+A project that lets only its own model family approve from a certain tier on
+now also accepts reviews recorded with just the family name, as the review
+command tells reviewers to write it. Before, such reviews were silently left
+out and blocked the merge.
+
 ## v2.74.0 — A project adapts the template through answers instead of its own files
 
 A project can now choose at setup whether its plans, journals and notes are

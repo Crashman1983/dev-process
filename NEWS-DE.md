@@ -7,6 +7,13 @@ technischen Einzelheiten stehen im [CHANGELOG](CHANGELOG-DE.md).
 
 English version: [NEWS.md](NEWS.md).
 
+## v2.74.1 — Ein Review mit dem Familiennamen zählt wieder
+
+Ein Projekt, das ab einer bestimmten Stufe nur die eigene Modellfamilie
+freigeben lässt, nimmt jetzt auch Reviews an, die nur den Familiennamen
+tragen. So schreibt es der Review-Befehl vor. Bisher fielen solche Reviews
+stillschweigend heraus und hielten den Merge auf.
+
 ## v2.74.0 — Ein Projekt passt die Vorlage über Antworten an statt über eigene Dateien
 
 Ein Projekt kann jetzt bei der Einrichtung wählen, ob seine Pläne, Journale und
