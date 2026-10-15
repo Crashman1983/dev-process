@@ -66,7 +66,10 @@ for line in sys.stdin:
     if m == 'initialize':
         out = {{}}
     elif m == 'config/read':
-        out = {{'config': {{'model_provider': 'custom' if MODE == 'custom' else None}}}}
+        # project configuration lives in the asked directory (`.codex/config.toml`)
+        here = pathlib.Path(r['params'].get('cwd') or '.') / '.codex/config.toml'
+        custom = MODE == 'custom' or (here.exists() and 'model_provider' in here.read_text())
+        out = {{'config': {{'model_provider': 'custom' if custom else None}}}}
         if MODE in ('base_url', 'catalog', 'profile'):
             out['config'][{{'base_url': 'openai_base_url', 'catalog': 'model_catalog_json', 'profile': 'profile'}}[MODE]] = 'x'
     elif m == 'account/read':
@@ -209,7 +212,10 @@ def test_a_refused_catalog_starts_nothing_and_records_the_way_out(mods, tmp_path
     d, codex = mod("dispatch"), mod("_dispatch_codex")
     _variant(out, fake_codex(tmp_path / "bin", "auth"))
     _start_env(d, out, monkeypatch, tmp_path)
-    monkeypatch.setattr(d, "ensure_worktree", lambda *a: pytest.fail("a worktree before the catalog check"))
+    wt = tmp_path / "wt"
+    monkeypatch.setattr(d, "ensure_worktree", lambda *a: wt.mkdir(exist_ok=True) or wt)
+    monkeypatch.setattr(d, "sync_worktree", lambda *a: None)
+    monkeypatch.setattr(codex, "launch", lambda *a, **k: pytest.fail("a worker after a refused catalog"))
     rc = d.start(out, issue=7, phase="review", tier=2, branch="7-x", title=None, dry_run=False, harness="codex")
     err = capsys.readouterr().err
     assert rc == 3 and "no logged-in account" in err
@@ -217,6 +223,24 @@ def test_a_refused_catalog_starts_nothing_and_records_the_way_out(mods, tmp_path
     row = json.loads(rows[-1])
     assert row["issue"] == 7 and row["phase"] == "review" and row["id"] in codex.unavailable_ids(tmp_path / "records")
     assert f"skipped cross-model work=7: codex unavailable {row['id']}" in err and "--harness claude" in err
+
+
+def test_the_catalog_is_asked_in_the_worktree_the_worker_runs_in(mods, tmp_path, monkeypatch, capsys):
+    """Downstream #240: Codex reads project configuration from its working directory —
+    a provider only the worktree configures is refused, though the main checkout has none."""
+    mod, out = mods
+    d, codex = mod("dispatch"), mod("_dispatch_codex")
+    _variant(out, fake_codex(tmp_path / "bin"))
+    _start_env(d, out, monkeypatch, tmp_path)
+    wt = tmp_path / "wt"
+    (wt / ".codex").mkdir(parents=True)
+    (wt / ".codex/config.toml").write_text('model_provider = "custom"\n')
+    monkeypatch.setattr(d, "ensure_worktree", lambda *a: wt)
+    monkeypatch.setattr(d, "sync_worktree", lambda *a: None)
+    monkeypatch.setattr(codex, "launch", lambda *a, **k: pytest.fail("a worker the catalog check would refuse"))
+    rc = d.start(out, issue=7, phase="review", tier=2, branch="7-x", title=None, dry_run=False, harness="codex")
+    assert rc == 3 and "provider" in capsys.readouterr().err
+    assert (tmp_path / "records/codex" / codex.UNAVAILABLE).exists()
 
 
 def test_a_dry_run_is_unverified_and_asks_no_catalog(mods, tmp_path, monkeypatch, capsys):
@@ -551,6 +575,43 @@ def test_a_handoff_that_stopped_after_its_commit_finishes_without_a_second_line(
     lines = journal().count("REVIEW work=7")
     assert d.handoff(out, "7-widget") == 0
     assert journal().count("REVIEW work=7") == lines
+
+
+def test_an_attested_handoff_whose_push_failed_pushes_again(review_repo):
+    """Downstream #239: a failed push left `pushed=false` and every later handoff
+    returned the old receipt — the attest commit never reached origin."""
+    out, d, codex = review_repo(PASS)
+    rec = _run_review(out, d, codex)
+    hook = out / ".git/hooks/pre-push"
+    hook.parent.mkdir(exist_ok=True)
+    hook.write_text("#!/bin/sh\nexit 1\n")
+    hook.chmod(0o755)
+    assert d.handoff(out, "7-widget") == 1
+    assert json.loads((Path(rec["evidence"]) / codex.HANDOFF).read_text())["pushed"] is False
+    journal = lambda: "\n".join(p.read_text() for p in (out / ".process-work/journal").glob("**/*.md"))  # noqa: E731
+    lines = journal().count("REVIEW work=7")
+    hook.unlink()
+    assert d.handoff(out, "7-widget") == 0
+    assert _git(out, "ls-remote", "origin", "refs/heads/7-widget").split()[0] == _git(out, "rev-parse", "HEAD")
+    assert journal().count("REVIEW work=7") == lines
+
+
+def test_an_attested_handoff_never_pushes_commits_made_after_it(review_repo):
+    out, d, codex = review_repo(PASS)
+    rec = _run_review(out, d, codex)
+    hook = out / ".git/hooks/pre-push"
+    hook.parent.mkdir(exist_ok=True)
+    hook.write_text("#!/bin/sh\nexit 1\n")
+    hook.chmod(0o755)
+    assert d.handoff(out, "7-widget") == 1
+    hook.unlink()
+    (out / "later.txt").write_text("x\n")
+    _git(out, "add", "later.txt")
+    _git(out, "commit", "-q", "-m", "later")
+    remote = _git(out, "ls-remote", "origin", "refs/heads/7-widget").split()[0]
+    assert d.handoff(out, "7-widget") == 1  # the old receipt: not pushed, and nothing pushed now
+    assert _git(out, "ls-remote", "origin", "refs/heads/7-widget").split()[0] == remote
+    assert json.loads((Path(rec["evidence"]) / codex.HANDOFF).read_text())["pushed"] is False
 
 
 @pytest.mark.parametrize("issue", ["none", "", "#x"])
