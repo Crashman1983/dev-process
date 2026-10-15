@@ -67,6 +67,9 @@ POLICY_KEY = "review_evidence"
 # apply where the policy at the reviewed base predates the key
 DEFAULTS = {
     "cross_model_from_tier": 3,
+    # from this tier on only a pass of the ranked (own) family clears a plan and proves
+    # its code current — check_review; 4: never (#241)
+    "own_family_from_tier": 4,
     "ranks": {"claude-haiku": 0, "claude-sonnet": 1, "claude-opus": 2, "claude-fable": 3},
     "families": ["gpt-"],
     # pytest's own defaults; a project with other `python_files`/`python_classes` names them
@@ -197,9 +200,11 @@ def review_policy(root: Path, ref: str) -> tuple[dict, str]:
     if not isinstance(rules, dict):
         return {}, f"{POLICY_KEY} must be an object"
     got = _merged(dict(DEFAULTS), rules)
-    tier, ranks, fams = got.get("cross_model_from_tier"), got.get("ranks"), got.get("families")
-    if isinstance(tier, bool) or not isinstance(tier, int) or not 0 <= tier <= 4:
-        return {}, f"{POLICY_KEY}.cross_model_from_tier must be an integer 0-4 (4: never), got {tier!r}"
+    ranks, fams = got.get("ranks"), got.get("families")
+    for key in ("cross_model_from_tier", "own_family_from_tier"):
+        tier = got.get(key)
+        if isinstance(tier, bool) or not isinstance(tier, int) or not 0 <= tier <= 4:
+            return {}, f"{POLICY_KEY}.{key} must be an integer 0-4 (4: never), got {tier!r}"
     if not (isinstance(ranks, dict) and all(isinstance(k, str) and k and isinstance(v, int)
                                             and not isinstance(v, bool) for k, v in ranks.items())):
         return {}, f"{POLICY_KEY}.ranks must map model-id prefixes to integer ranks"

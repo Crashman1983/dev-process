@@ -74,6 +74,7 @@ from check_review import (  # noqa: E402  (one owner for grammar + arithmetic)
     _unfenced,
     GitReadError,
     branch_issue,
+    clearing_passes,
     integration_ref,
     issue_refs_in_range,
     merge_base,
@@ -206,8 +207,9 @@ def check(root: Path) -> tuple[list[str], list[str]]:
                 to_archive.append(p.name)
                 continue
             ids = _plan_work_ids(p.stem, text, include_dedated=True)
-            if _cleared(passes, ids, tier):
-                stale = stale_review(root, passes, ids, tier, in_flight or set())
+            own = clearing_passes(root, passes, tier)  # the gate's answer which passes count (#241)
+            if _cleared(own, ids, tier):
+                stale = stale_review(root, own, ids, tier, in_flight or set())
                 if stale:
                     blockers.append(f"{PLANS_ACTIVE}/{p.name}: {stale}")
                 else:

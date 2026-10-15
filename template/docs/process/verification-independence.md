@@ -287,6 +287,13 @@ enforces what a language-agnostic gate honestly can, and no more:
     default 3; a project may lower it) a code-review pass carries
     `cross-model`, or `single-family` plus `skipped cross-model` — the
     declaration names why the second family did not run;
+  - from `review_evidence.own_family_from_tier` (default 4, never) only a
+    pass by the project's own family — a model `ranks` places — clears a
+    plan and proves its code current (`check_review`, `finish.py`, the
+    train); another family's pass stays a valid line but clears nothing
+    alone. A project whose second family attests (`dispatch.py handoff`)
+    but must not decide alone sets 3. Read at the base, like every rule
+    here;
   - a reviewed range that touches gate code needs a `REFUTE` line of the
     work (`refute.md`, "Gate code is enforced") or `skipped refute`;
   - the review report (`--with .process-work/reviews/<report>.md`) has one
