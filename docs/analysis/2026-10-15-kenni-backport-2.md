@@ -18,39 +18,50 @@ Bestandsaufnahme (Subagenten, Stichproben geprüft): Kennis `_dispatch_codex.py`
 
 ### E1 — Codex als attestierbarer Reviewer
 
-- **D1 Ein Owner für Codex-Läufe.** `scripts/process/_dispatch_codex.py` kommt aus Kenni, ohne `legacy_preflight` und ohne Kenni-Namen (Client-Name `dev-process-dispatch`). Es gilt für jede lokale Zelle, deren Befehlswort `codex` ist:
-  - in der Codex-Variante (`--harness codex`);
-  - in einer Codex-Zelle der normalen Policy, etwa dem Tier-3-Review aus dem `model-policy.json`-Kommentar.
-
-  So gibt es einen Weg, wie Codex läuft, nicht zwei. Für eine Codex-Zelle gilt: Die CLI-Form wird geprüft (`executable`), der Katalog wird abgefragt (`probe`: Login, Provider, Modell, Effort), es gibt kein stilles Ersatzmodell, und der Lauf ist detached mit Supervisor, Zeitlimit und Belegen.
-- **D2 `--harness codex` und die Variante.**
+- **D1 Ein Owner für Codex-Worker (P6).** `scripts/process/_dispatch_codex.py` kommt aus Kenni, ohne `legacy_preflight` und ohne Kenni-Namen (Client-Name `dev-process-dispatch`).
+  - **Wann es gilt:** wenn ein Lauf mit `--harness codex` startet. Für einen solchen Lauf wird die CLI-Form geprüft (`executable`) und der Katalog abgefragt (`probe`: Login, Provider, Modell, Effort). Es gibt kein stilles Ersatzmodell. Der Lauf ist detached mit Supervisor, Zeitlimit und Belegen.
+  - **Was nicht angefasst wird:** Eine `codex`-Zelle in der normalen Policy, etwa das Tier-3-Review aus dem `model-policy.json`-Kommentar, bleibt beim heutigen einfachen Runner. Der Steward attestiert sie wie heute aus dem Log. `tower.md` empfiehlt dafür die Variante. So bricht keine bestehende Zelle.
+  - **Voraussetzungen der CLI:** `codex exec` mit `--output-schema` und `-o`, `codex app-server --stdio`, der OpenAI-Provider ohne Profil und ohne eigenen Endpunkt. Getestet mit CLI 0.154.0. Fehlt etwas davon, verweigert der Probe mit Grund, und es gilt D4.
+- **D2 `--harness codex` und die Variante (P5, P12).**
   - `start`, `queue add` und `policy` nehmen `--harness claude|codex`.
-  - Die Variante liegt in `docs/process/model-policy.codex.json`. Sie ist vollständig, `detached`, hat keinen `decision_channel` und erbt kein `CLAUDE*`-env. Die lokale Claude-Überlagerung gilt für sie nicht.
+  - Die Variante liegt in `docs/process/model-policy.codex.json` (Template-Datei). Projektwerte stehen in `docs/process/model-policy.codex.local.json`, das wie die Claude-Überlagerung Mapping für Mapping darübergelegt wird: Modellnamen, Zeitlimits, `context_sources`. Die Claude-Überlagerung gilt für die Variante nicht.
+  - Geprüft wird nach dem Zusammenlegen:
+    - Die Variante ist vollständig, `detached`, ohne `decision_channel` und ohne `CLAUDE*`-env.
+    - Jedes Modell der Variante hat eine Klasse in `review_evidence` (`families` oder `ranks`), sonst verweigert `start`. So scheitert ein Plan-Review nicht erst beim Attest.
   - Die Wahl reist durch Queue und Kette.
-  - Das Template liefert die Variante mit Kennis Modellnamen als Vorgabe (`gpt-6-luna|sol|astra`). Der Katalog-Probe verweigert ein Modell, das die CLI nicht kennt, und nennt dabei die verfügbaren.
-- **D3 Vom Rat zum Bericht (Umkehr von Kennis Design).**
-  - **Schema:** `handoff <branch>` prüft wie bei Kenni Exit-Beleg, Schema, Invocation, Base/Head/Diff und die Digests von Bundle und Ausgabe. Das Schema bekommt `criteria`, ein Array von Zeilen `AC-<id>: <path>::<test>`, `AC-<id>: unproven` oder `AC-<id>: struck`. Beim Plan-Review ist das Array leer.
-  - **Bericht:** Statt `advisory.json` schreibt `handoff` einen Review-Bericht nach `.process-work/reviews/<datum>-<work>-codex.md`. Er enthält eine Kopfzeile mit Modell, Invocation, Base/Head und Digests, je Fund eine `FINDING`-Zeile und die `AC`-Zeilen. Dazu gibt `handoff` den genauen attest-Befehl aus:
-    - `--model <modell> --independence bundle,non-implementing,cross-model --base … --head … --with <bericht> --commit`;
-    - beim Plan-Review zusätzlich `--plan-review`.
-  - **Attest:** Der Steward führt den Befehl aus. attest.py bleibt der einzige Schreiber von REVIEW-Zeilen, und die Nachweisregeln aus v2.71 gelten unverändert. Der Codex-Prompt verbietet weiter attest.py, git und REVIEW-Zeilen, sagt aber nicht mehr „advisory“.
-  - **Kette:** Ein Codex-Review wartet in der Kette, bis `handoff` gelaufen ist und der Steward `review-pass` oder `blocked` berichtet hat. Er wird nicht mehr übersprungen.
-- **D4 Ausweg ohne Codex.**
-  - Verweigert der Probe den Start oder endet der Lauf `failed`, `interrupted` oder ohne gültiges Schema, schreibt dispatch eine Zeile nach `<common-dir>/dispatch/codex/unavailable.jsonl`. Sie enthält Zeit, Issue, Phase, Modell und Grund.
-  - Die Meldung nennt den Ausweg wörtlich:
-    1. Den Review mit `--harness claude` starten, und zwar auf dem stärksten Claude-Modell.
-    2. `skipped cross-model work=<id>: codex unavailable <datum> — <grund>` committen.
+  - Das Template liefert Kennis Modellnamen als Vorgabe (`gpt-6-luna|sol|astra`). Der Probe verweigert ein unbekanntes Modell und nennt die verfügbaren.
+  - Zeitlimits sind Policy-Schlüssel: `review_timeout_minutes` (Vorgabe 15) und `timeout_minutes` (Vorgabe 120).
+- **D3 Vom Rat zum Attest in einem Schritt (Umkehr von Kennis Design; P1–P4).**
+  - **Schema (P2, P3):** `verdict` (pass|block). `findings` als Objekte `{sev, action, kind, title}` in der Grammatik von `check_issues`. `criteria` als Zeilen `AC-<id>: <path>::<test>`, `unproven` oder `struck`. `refute` als Zeilen `survives: …` oder als Befund. `criteria` und `refute` sind beim Plan-Review leer. `refute` ist Pflicht, wenn das Bundle Gate-Code enthält.
+  - **Prompt:** Er verlangt bei Gate-Code den Angriff nach `refute.md`. attest.py, git und REVIEW-Zeilen bleiben verboten.
+  - **Plan-Review-Bundle (P4):** `prepare_review` übergibt die Plan-Slugs, die `prompt_for` schon auflöst, dazu `--plan-review`. Epic-Pläne (#204) gehen nicht verloren.
+  - **`dispatch.py handoff <branch>` (P1)** prüft wie bei Kenni Exit-Beleg, Schema, Invocation, Base/Head/Diff und Digests. Danach attestiert es im selben Schritt, im Worktree des Workers (`rec["worktree"]`):
+    1. Es schreibt den Bericht `.process-work/reviews/<datum>-<work>-codex.md`, mit Kopf (`review:`, `issue:`, Modell, Invocation, Base/Head, `codex-result: <sha256>`), `FINDING`-Zeilen in der Grammatik von `check_issues` und den `AC`-Zeilen.
+    2. Bei Gate-Code hängt es `REFUTE work=<id> round=<r>: …` an den Plan an.
+    3. Es ruft `attest.py --work <id> --tier <t> --model <modell> --independence bundle,non-implementing,cross-model --verdict <verdict aus dem Schema> --base … --head … --with <bericht> [--with <plan>] [--plan-review] --commit` auf.
+
+    attest.py bleibt der einzige Schreiber von REVIEW-Zeilen, und alle Nachweisregeln aus v2.71 gelten. Zwischen Prüfung und Attest gibt es keine Lücke, in der jemand Bericht oder Urteil ändert. Ein zweiter `handoff` erkennt den eigenen Attest-Commit am Beleg (`handoff.json`) und tut nichts.
+  - **Restgrenze (benannt):** Wer attest.py von Hand mit einem selbst geschriebenen Bericht aufruft, umgeht `handoff`. Das ist das Bedrohungsmodell des ganzen Prozesses (Versehen, kein Angreifer), und `verification-independence.md` sagt es.
+  - **Kette:** Nach erfolgreichem `handoff` berichtet dispatch `review-pass` oder `blocked` für den Worker. Danach geht die Kette weiter wie bei Claude-Reviews. Ein terminaler Codex-Lauf hält keinen `max_workers`-Platz (P10).
+- **D4 Ausweg ohne Codex (P7, P10).**
+  - **Wann:** wenn der Probe verweigert oder der Lauf `failed`, `interrupted` oder ohne gültiges Schema endet. Eine leere oder ungültige Ausgabe wiederholt der Supervisor einmal selbst.
+  - **Aufzeichnung:** dispatch schreibt eine Zeile mit eigener Id nach `<common-dir>/dispatch/codex/unavailable.jsonl`, mit Zeit, Issue, Phase, Modell, Head und Grund.
+  - **Die Meldung nennt den Ausweg wörtlich:**
+    1. Den Review mit `--harness claude` auf der Review-Zelle des Tiers starten.
+    2. `skipped cross-model work=<id>: codex unavailable <row-id> — <grund>` committen.
     3. Mit `single-family` attestieren.
 
-    Das ist der bestehende Weg aus v2.71. Er bekommt jetzt den aufgezeichneten Grund dazu.
+    Das ist der Weg aus v2.71, jetzt mit dem aufgezeichneten Grund.
+  - **Tower-Befunde:**
+    - `codex-skip-unmatched`: Eine Skip-Zeile nennt eine Row-Id, die auf diesem Host nicht aufgezeichnet ist.
+    - `codex-block-overridden`: Ein Claude-Pass attestiert einen Head, auf dem ein Codex-Lauf `block` ergab.
   - Bei Kenni (Cross-Model ab Tier 2) gilt das ab Tier 2.
-  - Ein Leeroutput wird einmal wiederholt und gilt dann als nicht verfügbar. Das stammt aus Kennis `review.local.md` §4.
 - **D5 `rehydrate --codex`.**
   - Port mit `--install` und `--check` für `.codex/hooks.json`, einer Obergrenze von 128 KB und vollem Kontext oder einem sichtbaren Abbruch, nie mit Teilkontext.
   - Quellen: Kernel, Pflichtregeln und die Codex-Policy. Dazu `AGENTS.md` oder `CLAUDE.md`, wenn vorhanden, und die Liste `context_sources` aus `model-policy.codex.json`; darüber nimmt Kenni sein Skill auf.
   - `.codex/` kommt in die `.gitignore` des Templates.
 - **D6 Docs.**
-  - `tower.md`: Abschnitt „Codex worker“ mit Auswahl, Probe, Supervisor, `list`/`stop`/`handoff`, Zeitlimits (Review 15 Minuten, sonst 2 Stunden) und dem Ausweg.
+  - `tower.md`: Abschnitt „Codex worker“ mit Auswahl, Probe, Supervisor, `list`/`stop`/`handoff`, Zeitlimits aus der Policy (Vorgabe: Review 15 Minuten, sonst 2 Stunden) und dem Ausweg.
   - `verification-independence.md`: Ein Codex-Review attestiert per `handoff` plus Steward. Der Satz „the end-to-end path with an attestation is Codex as a tool inside a Claude review“ entfällt.
   - `model-policy.json`-Kommentar: Verweis auf die Variante.
   - **Voraussetzung (Owner, 2026-10-15):** Eine installierte und eingeloggte Codex CLI auf dem Entwicklungshost ist Voraussetzung für Codex-Worker und Codex-Reviews. Sie steht in `docs/SYSTEM-REQUIREMENTS.md` (Upstream) und in `tower.md`, mit der Prüfung `dispatch.py start … --harness codex --dry-run` und dem Katalog-Probe. Ohne CLI gilt der Ausweg D4.
@@ -62,11 +73,7 @@ Bestandsaufnahme (Subagenten, Stichproben geprüft): Kennis `_dispatch_codex.py`
   - `/execute`: „Offload reading, never the change“ wird ersetzt durch „Decide handoff versus retaining context per coherent packet“. Bei `delegate` schreibt ein Subagent auf dem kleinsten passenden Modell auch Code. Er committet nie, die Session integriert und committet seriell. Ein größeres Modell braucht einen benannten Grund.
   - Das `[P]`-Protokoll bleibt.
   - `tower.md`: „Handoff is separate from model selection“, ohne Kenni-Modellnamen.
-- **D8 Messung je Paket.**
-  - `report.py` nimmt optional `--packet <id> --execution delegate|retain-context`, dazu `--questions N --rework N` und `--escalated <grund>`.
-  - `process_kpis.py execution` zeigt je Modus die Zahl der Pakete, Median und Summe der Rückfragen und der Nacharbeit, die Eskalationen sowie die Review-Runden der zugehörigen Issues.
-  - Ohne solche Berichte sagt der Befehl, dass noch nichts gemessen ist.
-  - Kein Gate liest die `Execution:`-Zeile. Sie ist Planinhalt, den das Plan-Review prüft.
+- **D8 Messung je Paket (P9).** `report.py` nimmt optional `--execution delegate|retain-context`. `process_kpis.py execution` gruppiert die schon gemessenen Review-Runden und Fix-Streaks nach Modus. Ohne solche Berichte sagt es, dass noch nichts gemessen ist. Kein Gate liest die `Execution:`-Zeile; sie ist Planinhalt, den das Plan-Review prüft.
 
 ### E4 — `ci.github: manual`
 
@@ -105,4 +112,22 @@ Ohne Codex CLI und ohne `--harness codex` ändert sich am Dispatch-Verhalten nic
    - `dispatch.py` und `tower.md`: den neuen Render übernehmen. Kennis Modellnamen leben in `model-policy.codex.json`.
 3. `scripts/process/dispatch.py` und `docs/process/tower.md` aus `.process-owned` streichen.
 4. Kennis Advisory-Test (`test_codex_review_pass_darf_keine_chain_oder_train_freigabe_sein`) entfällt, weil der Owner anders entschieden hat. Die übrigen Codex-Tests sind Template-Tests. Die Legacy-Wrapper (`scripts/codex-*.sh`, `legacy_preflight`) bleiben bei Kenni.
-5. `context_sources` in `model-policy.codex.json` nimmt Kennis Skill auf.
+5. Kennis Modellnamen, Zeitlimits und `context_sources` (mit Kennis Skill) kommen nach `model-policy.codex.local.json`.
+
+## Plan-Review Runde 1 — Änderungen
+
+Ergebnis: Block mit einem Blocker, sechs Majors und fünf Minors. Die Änderungen stehen oben in D1–D4 und D8:
+
+- **P1 (Blocker):** Bindung und Attest kommen in einen Schritt (`handoff` attestiert im Worktree des Workers). Vorher hätte der Steward nach der Prüfung den Bericht oder das Urteil ändern können, und attest hätte die Bindung nie gesehen.
+- **P2:** Für Gate-Code liefert das Schema `refute`. `handoff` hängt die REFUTE-Zeile an den Plan, und sie fährt `--with` mit.
+- **P3:** Befunde sind Objekte in der Grammatik von `check_issues`, damit Report-Gate und `process_kpis rounds` sie lesen.
+- **P4:** Das Plan-Review-Bundle bekommt die Plan-Slugs und `--plan-review`, statt nach der Issue-Nummer zu suchen.
+- **P5:** `model-policy.codex.local.json` hält die Projektwerte, sonst wäre die Template-Datei wieder eine Eigen-Datei.
+- **P6:** Der Harness gilt nur für `--harness codex`. Bestehende `codex`-Zellen der normalen Policy bleiben, wie sie sind. Mindestanforderungen der CLI sind genannt.
+- **P7:** Ein Ausweg hinterlässt eine Row-Id. Zwei Tower-Befunde machen Skips ohne Aufzeichnung und übergangene Codex-Blocks sichtbar. „Stärkstes Claude-Modell“ ist ersetzt durch „Review-Zelle des Tiers“.
+- **P8:** Die angebliche Warnung des Gate-Runners ist gestrichen, weil es sie nicht gibt. Restgrenzen bei `manual` sind `--no-verify` und der Merge-Button; `commits.md` und `start-here.md` nennen sie.
+- **P9:** Die Messung ist auf `--execution` reduziert und nutzt vorhandene Kennzahlen.
+- **P10:** Ein terminaler Lauf gibt seinen Platz frei. Die Wiederholung macht der Supervisor. Die Zeitlimits sind Policy-Schlüssel.
+- **P11:** Tests ergänzt: Update von v2.72 mit `true` rendert byte-gleich, und ein String `"true"` wird verweigert. Letzteres steht im CHANGELOG.
+- **P12:** `start --harness codex` verweigert ein Modell ohne Klasse in `review_evidence`.
+- **Ablauf:** Paket E wurde vor dem Plan-Review begonnen (Commit ee80d88). Das Review fand daran nichts. Paket E bleibt, wie es ist, und wird mit P11 ergänzt.
