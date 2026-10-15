@@ -5,7 +5,6 @@ import json
 import os
 import signal
 import subprocess
-import sys
 from pathlib import Path
 
 from test_dispatch import _fake_command, _load_dispatch
