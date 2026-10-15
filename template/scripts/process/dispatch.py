@@ -119,6 +119,8 @@ POLICY = "docs/process/model-policy.json"
 # the project's own choices over the template's policy, mapping by mapping — so a
 # release that edits model-policy.json reaches the project and its own ids stay
 LOCAL_POLICY = "docs/process/model-policy.local.json"
+CODEX_POLICY = "docs/process/model-policy.codex.json"  # the Codex variant (`--harness codex`)
+CODEX_LOCAL_POLICY = "docs/process/model-policy.codex.local.json"  # the project's values laid over it
 DISPATCH_DIR = "process-dispatch"
 ISSUES_FILE = "issues.json"
 QUEUE_FILE = "queue.json"
@@ -151,25 +153,36 @@ def common_dir(root: Path) -> Path:
 
 # --- policy -------------------------------------------------------------------------
 
-def load_policy(root: Path) -> dict:
-    p = root / POLICY
+HARNESSES = ("claude", "codex")
+
+
+def load_policy(root: Path, harness: str | None = None) -> dict:
+    """The policy, the project's local file laid over it. `harness="codex"` reads the
+    Codex variant and its own local file instead — never the Claude overlay, whose
+    cells and env belong to another CLI (`docs/process/tower.md`, "Codex workers")."""
+    if harness not in (None, *HARNESSES):
+        raise SystemExit(f"dispatch: unknown harness {harness!r} (known: {', '.join(HARNESSES)})")
+    name, local_name = (CODEX_POLICY, CODEX_LOCAL_POLICY) if harness == "codex" else (POLICY, LOCAL_POLICY)
+    p = root / name
     if not p.is_file():
-        raise SystemExit(f"dispatch: {POLICY} missing — the policy is the one place that names models")
+        raise SystemExit(f"dispatch: {name} missing — the policy is the one place that names models")
     try:
         data = json.loads(p.read_text(encoding="utf-8"))
     except ValueError as exc:
-        raise SystemExit(f"dispatch: {POLICY} is not valid JSON: {exc}")
+        raise SystemExit(f"dispatch: {name} is not valid JSON: {exc}")
     if not isinstance(data, dict):
-        raise SystemExit(f"dispatch: {POLICY} must be an object")
-    local = root / LOCAL_POLICY
+        raise SystemExit(f"dispatch: {name} must be an object")
+    local = root / local_name
     if local.is_file():
         try:
             over = json.loads(local.read_text(encoding="utf-8"))
         except ValueError as exc:
-            raise SystemExit(f"dispatch: {LOCAL_POLICY} is not valid JSON: {exc}")
+            raise SystemExit(f"dispatch: {local_name} is not valid JSON: {exc}")
         if not isinstance(over, dict):
-            raise SystemExit(f"dispatch: {LOCAL_POLICY} must be an object laid over {POLICY}")
+            raise SystemExit(f"dispatch: {local_name} must be an object laid over {name}")
         data = _merged(data, over)
+    if harness == "codex":
+        _check_codex_variant(data)
     if not isinstance(data.get("command"), str) or "{prompt}" not in data["command"]:
         raise SystemExit(f"dispatch: {POLICY} needs a `command` template containing {{prompt}}")
     _check_env(data.get("env"), "env")
@@ -207,6 +220,38 @@ def load_policy(root: Path) -> dict:
             if ph in PHASES:
                 _cell(cell, f"{where}.{ph}")
     return data
+
+
+def _check_codex_variant(data: dict) -> None:
+    """The Codex variant runs every phase itself: a full matrix, detached under the
+    supervisor, no live channel, no Claude environment, a time limit per run."""
+    for key in ("tiers", "phases"):
+        if not isinstance(data.get(key) or {}, dict):
+            raise SystemExit(f"dispatch: {CODEX_POLICY} `{key}` must be an object")
+    for name, row in [("default", data.get("default")),
+                      *((f"tiers.{t}", (data.get("tiers") or {}).get(str(t))) for t in range(4))]:
+        if not isinstance(row, dict) or not all(row.get(ph) for ph in PHASES):
+            raise SystemExit(f"dispatch: {CODEX_POLICY} {name} must name a model for every phase "
+                             f"({'|'.join(PHASES)}) — the variant runs all of them")
+    if data.get("runner") != "detached" or data.get("decision_channel"):
+        raise SystemExit(f"dispatch: {CODEX_POLICY} needs `runner: detached` and no `decision_channel` — "
+                         f"a Codex worker runs under the supervisor and reports via report.py")
+    for key, default in (("review_timeout_minutes", 15), ("timeout_minutes", 120)):
+        v = data.get(key, default)
+        if isinstance(v, bool) or not isinstance(v, int) or v <= 0:
+            raise SystemExit(f"dispatch: {CODEX_POLICY} `{key}` must be a positive integer, got {v!r}")
+    sources = data.get("context_sources", [])
+    if not (isinstance(sources, list) and all(isinstance(s, str) and s for s in sources)):
+        raise SystemExit(f"dispatch: {CODEX_POLICY} `context_sources` must be a list of repository paths")
+    for ph in PHASES:
+        row = (data.get("phases") or {}).get(ph) or {}
+        if not isinstance(row, dict):
+            continue  # the common check below names it
+        env = {**(data.get("env") or {}), **(row.get("env") or {})} if isinstance(row.get("env") or {}, dict) else {}
+        if any(str(k).startswith("CLAUDE") for k in env):
+            raise SystemExit(f"dispatch: {CODEX_POLICY} must not set CLAUDE* environment (phase {ph})")
+        if row.get("remote") or row.get("runner", "detached") != "detached":
+            raise SystemExit(f"dispatch: {CODEX_POLICY} runs local detached phases only (phase {ph})")
 
 
 class Cell(NamedTuple):
@@ -1558,6 +1603,8 @@ def records(root: Path) -> list[dict]:
             rec["state"] = _pane_state(rec["tmux_window"])
         else:
             rec["state"] = "live" if _same_process(rec) else "gone"
+        if rec.get("harness") == "codex" and rec["state"] != "unknown":
+            _codex_state(rec)
         rec["alive"] = rec["state"] == "live"
         out.append(rec)
     return out
@@ -1652,7 +1699,7 @@ def _worker_env(extra: dict[str, str]) -> dict[str, str]:
 
 def start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str | None, title: str | None,
           dry_run: bool, owner_approved: bool = False, plan_review: bool = False,
-          stale_plan_ok: bool = False) -> int:
+          stale_plan_ok: bool = False, harness: str | None = None) -> int:
     history = _records_dir(root) / "phases" / f"{issue}.json"
     try:
         previous = json.loads(history.read_text()) if history.exists() else {}
@@ -1666,13 +1713,19 @@ def start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str |
         if phase == "execute" or not owner_approved:
             print("dispatch: brainstorm awaits owner approval — start plan with --owner-approved; never jump to execute", file=sys.stderr)
             return 3
-    policy = load_policy(root)
+    codex = harness == "codex"
+    policy = load_policy(root, harness=harness)
     cell = cell_for(policy, tier, phase)
     model, effort = cell.model, cell.effort
     why = effort_refusal(policy, phase, cell)
     if why:
         print(f"dispatch: not starting — {why}", file=sys.stderr)
         return 3
+    if codex:
+        why = _codex_model_unclassed(root, model)
+        if why:
+            print(f"dispatch: not starting — {why}", file=sys.stderr)
+            return 3
     label = labelled(model, effort)
     branch = branch or find_branch(root, issue) or default_branch(issue, title)
     all_records = records(root)
@@ -1727,6 +1780,12 @@ def start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str |
         tip = _remote_head(root, branch) if remote else (
             _out(root, "rev-parse", "--verify", "-q", f"{branch}^{{commit}}") or _remote_head(root, branch))
         plan_paths = uncleared_plans(root, tip, branch) if tip else []
+    if codex and plan_review and len(plan_paths) > 1:
+        # one schema verdict attests one plan (`_dispatch_codex.handoff`)
+        print(f"dispatch: not starting — {len(plan_paths)} plans are due ({', '.join(plan_paths)}); a Codex plan "
+              f"review attests one plan per run — review them one by one, or with --harness claude",
+              file=sys.stderr)
+        return 3
     drift_note = None
     if phase == "execute":
         # a plan the base has moved far past costs the worker its first hour (plan_drift.py)
@@ -1751,13 +1810,31 @@ def start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str |
     # PROCESS_EFFORT always set, empty without an effort: a stale one from the steward's env must not leak
     worker_vars = {**pp["env"], "PROCESS_WORKER": branch, "PROCESS_PHASE": phase, "PROCESS_MODEL": model,
                    "PROCESS_EFFORT": effort or "", "PROCESS_ISSUE": str(issue)}
+    codex_binary = None
+    if codex:
+        import _dispatch_codex as codex_run  # noqa: PLC0415  (the one owner of Codex runs)
+        try:
+            codex_binary = codex_run.executable(argv, model, phase, effort, preview=dry_run)
+            if not dry_run:
+                codex_run.probe(codex_binary, root, git_environment(_codex_env(worker_vars)), model, effort)
+        except ValueError as exc:
+            row = None if dry_run else codex_run.record_unavailable(
+                _records_dir(root), issue=issue, phase=phase, model=model, branch=branch, reason=str(exc))
+            print(f"dispatch: not starting — {exc}\n" + codex_run.fallback_hint(issue, phase, plan_review, row),
+                  file=sys.stderr)
+            return 3
+        argv[0] = codex_binary
     if not remote:
         why = runnable(argv)
         if why and not dry_run:
-            print(f"dispatch: cannot start: {why} — fix `command` in {POLICY}", file=sys.stderr)
+            print(f"dispatch: cannot start: {why} — fix `command` in {CODEX_POLICY if codex else POLICY}",
+                  file=sys.stderr)
             return 1
-        argv = niced(policy, argv)
+        if not codex:  # the supervisor owns a Codex run's process group
+            argv = niced(policy, argv)
     if dry_run:
+        if codex:
+            print("dispatch: UNVERIFIED Codex argv preview — the provider catalog was not asked, no worker started")
         held = sorted(held_lanes(root)) if not remote else []
         print(f"dispatch: lane rule allowed — held: {', '.join(held) or 'none'}, phase {phase}"
               + (" (remote: local lanes do not apply)" if remote else ""))
@@ -1822,6 +1899,29 @@ def start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str |
     rec = {"branch": branch, "issue": issue, "phase": phase, "tier": tier, "model": model, "effort": effort,
            "worktree": str(wt), "log": str(log), "started": int(time.time()),
            "ts": _dt.datetime.now().isoformat(timespec="seconds"), "runner": runner, "plan_review": plan_review}
+    if codex:
+        rec["harness"] = "codex"
+        try:
+            if phase == "review":
+                review = codex_run.prepare_review(wt, _records_dir(root) / "codex", tier=tier,
+                                                  plan_review=plan_review, plan_paths=plan_paths)
+                rec.update(review)
+                argv = [*argv[:-1], "--output-schema", review["schema"], "-o", review["result"],
+                        codex_run.review_prompt(review)]
+            minutes = policy.get("review_timeout_minutes", 15) if phase == "review" else policy.get("timeout_minutes", 120)
+            rec.update(codex_run.launch(_records_dir(root) / "codex", argv, wt,
+                                        git_environment(_codex_env(extra)), rec, deadline_s=60 * int(minutes)))
+            rec["log"] = str(Path(rec["evidence"]) / "stdout.log")
+            _write_record(root, branch, rec)
+            _remember_issue(root, issue, branch)
+            codex_run.activate(rec)
+        except (ValueError, OSError, subprocess.TimeoutExpired) as exc:
+            print(f"dispatch: Codex launch refused — {exc}", file=sys.stderr)
+            return 3
+        print(f"dispatch: started {phase} for #{issue} on {branch} with {label} under the Codex supervisor "
+              f"(pid {rec['pid']}, invocation {rec['invocation']})"
+              + (f" — when it ends: dispatch.py handoff {branch}" if phase == "review" else ""))
+        return 0
     if runner == "tmux":
         session = str(policy.get("tmux_session") or "workers")
         window = branch.replace("/", "-").replace(".", "-")[:40]
@@ -1845,6 +1945,51 @@ def start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str |
     _remember_issue(root, issue, branch)
     print(f"dispatch: started {phase} for #{issue} on {branch} with {label} ({where}, log {log.name})")
     return 0
+
+
+def handoff(root: Path, branch: str, implementer: str | None = None) -> int:
+    """A finished Codex review: verified, attested and pushed by `_dispatch_codex.handoff`,
+    then reported for the worker — `review-pass`, or `blocked` with the findings or the
+    reasons attest refused — so the chain moves on as after any review."""
+    import _dispatch_codex as codex_run  # noqa: PLC0415
+    found = _load_record(root, branch)
+    if found is None or found[1].get("harness") != "codex" or found[1].get("phase") != "review":
+        print(f"dispatch: {branch} has no Codex review run to hand off", file=sys.stderr)
+        return 3
+    rec = found[1]
+    try:
+        done = codex_run.handoff(root, rec, implementer=implementer)
+    except ValueError as exc:
+        print(f"dispatch: handoff refused — {exc}", file=sys.stderr)
+        return 3
+    attested = done.get("state") == "attested"
+    state = "review-pass" if attested and done.get("verdict") == "pass" else "blocked"
+    note = (f"Codex {done.get('verdict')} attested ({done.get('report')})" if attested
+            else f"Codex review not attested: {done.get('reasons', '')[-600:]}")
+    if attested and not done.get("pushed"):
+        note += f"; the attest commit is NOT pushed: {done.get('push_error')}"
+        state = "blocked"
+    os.environ["PROCESS_PHASE"] = "review"
+    _report.write_report(root, state, issue=rec.get("issue"), note=note, worker=branch, model=rec.get("model"))
+    print(f"dispatch: handoff {branch}: {state} — {note}")
+    return 0 if state == "review-pass" or (attested and done.get("verdict") == "block") else 1
+
+
+def _codex_env(extra: dict[str, str]) -> dict[str, str]:
+    """A Codex worker's environment: the worker env without anything Claude Code reads."""
+    return {k: v for k, v in _worker_env(extra).items() if not k.startswith("CLAUDE")}
+
+
+def _codex_model_unclassed(root: Path, model: str) -> str | None:
+    """Why a Codex model cannot attest here: attest.py ranks a reviewer by
+    `review_evidence` (`ranks`, `families`) — a model it cannot place would only be
+    refused after the run (checked at the working tree; attest reads the base)."""
+    from attest_evidence import model_class  # noqa: PLC0415
+    rules = load_policy(root).get("review_evidence") or {}
+    if model_class(model, rules.get("ranks") or {}, rules.get("families") or []) is None:
+        return (f"{model!r} has no class in {POLICY} `review_evidence` (ranks, families) — attest.py would "
+                f"refuse its review; add its prefix to `families` in {LOCAL_POLICY}")
+    return None
 
 
 def list_sessions(root: Path) -> int:
@@ -1871,7 +2016,7 @@ def list_sessions(root: Path) -> int:
                  f"{r.get('tmux_session')}:{r.get('tmux_name')}" if r.get("tmux_window") else f"pid {r.get('pid')}")
         sid = handover_session(r)
         print(f"- {r['branch']}: {r['phase']} #{r.get('issue')} {r.get('model')} {where} "
-              f"{r['state'].upper()} ({mins} min)" + (f" · session: {sid}" if sid else "")
+              f"{r.get('outcome', r['state']).upper()} ({mins} min)" + (f" · session: {sid}" if sid else "")
               + (f" · {since} min ago: {last[-120:]}" if last else ""))
     return 0
 
@@ -1887,7 +2032,17 @@ def _load_record(root: Path, branch: str) -> tuple[Path, dict] | None:
     defect = record_anchor_defect(rec)
     if defect:
         rec["state"], rec["defect"] = "unknown", defect
+    elif rec.get("harness") == "codex":
+        _codex_state(rec)
     return p, rec
+
+
+def _codex_state(rec: dict) -> None:
+    """A Codex run's state from its supervisor's receipts (`_dispatch_codex.outcome`):
+    a run that ended holds no slot; one that vanished without a receipt is unknown."""
+    import _dispatch_codex as codex_run  # noqa: PLC0415
+    rec["outcome"] = codex_run.outcome(rec, rec["state"] == "live")
+    rec["state"] = {"running": "live", "unknown": "unknown"}.get(rec["outcome"], "gone")
 
 
 def show_log(root: Path, branch: str, lines: int) -> int:
@@ -2029,6 +2184,23 @@ def stop(root: Path, branch: str, *, force: bool, keep_report: bool = False) -> 
         print(f"dispatch: {branch} was not started by this tool — stop only what you started", file=sys.stderr)
         return 2
     p, rec = found
+    if rec.get("harness") == "codex":
+        import _dispatch_codex as codex_run  # noqa: PLC0415
+        wt = Path(rec["worktree"]) if rec.get("worktree") else None
+        if wt and wt.is_dir() and _out(wt, "status", "--porcelain") and not force:
+            print("dispatch: the worker has uncommitted work — commit it or use --force", file=sys.stderr)
+            return 3
+        try:
+            stopped = codex_run.stop_owned(rec, _same_process)
+        except (OSError, ValueError) as exc:
+            print(f"dispatch: cannot stop the Codex supervisor — {exc}", file=sys.stderr)
+            return 3
+        if not stopped:
+            print("dispatch: the Codex run's outcome or owner is unknown — record and evidence kept", file=sys.stderr)
+            return 3
+        p.unlink()
+        print(f"dispatch: stopped {branch}; the run's receipts stay in {rec['evidence']}")
+        return 0
     if rec["state"] == "remote":
         print(f"dispatch: {branch} runs on another host — stop it there; record removed here")
         p.unlink()
@@ -2154,6 +2326,10 @@ def _valid_entry(e: object) -> dict | None:
     if branch is not None and not isinstance(branch, str):
         return None
     entry = {"issue": issue, "phase": e["phase"], "tier": tier, "branch": branch}
+    if e.get("harness") is not None:
+        if e["harness"] not in HARNESSES:
+            return None
+        entry["harness"] = e["harness"]
     if e.get("plan_review") is True:
         entry["plan_review"] = True
     return entry
@@ -2195,10 +2371,14 @@ def _same_line(a: dict, b: dict) -> bool:
 
 
 def queue_add(root: Path, *, issue: int, phase: str, tier: int | None, branch: str | None,
-              plan_review: bool = False) -> None:
+              plan_review: bool = False, harness: str | None = None) -> None:
+    if harness is not None:
+        load_policy(root, harness=harness)  # a line that cannot start is refused now, not at drain
     with _QueueLock(root):
         entries = queue_load(root)
         entry = {"issue": int(issue), "phase": phase, "tier": tier, "branch": branch}
+        if harness is not None:
+            entry["harness"] = harness
         if plan_review:
             entry["plan_review"] = True
         if not any(_same_line(entry, e) for e in entries):  # one line per issue and phase
@@ -2217,7 +2397,7 @@ def drain(root: Path) -> int:
             try:
                 rc = start(root, issue=e["issue"], phase=e["phase"], tier=e.get("tier"),
                            branch=e.get("branch"), title=None, dry_run=False,
-                           plan_review=bool(e.get("plan_review")))
+                           plan_review=bool(e.get("plan_review")), harness=e.get("harness"))
             except SystemExit as exc:
                 print(f"dispatch: queued #{e['issue']} {e['phase']} could not start: {exc}", file=sys.stderr)
                 rc = 1
@@ -2665,7 +2845,8 @@ def _chain(root: Path, *, dry_run: bool = False) -> int:
         if nxt:
             tier = rec.get("tier") if rec.get("tier") is not None else plan_tier_on_origin(root, branch)
             try:
-                queue_add(root, issue=issue, phase=nxt, tier=tier, branch=branch, plan_review=plan_review)
+                queue_add(root, issue=issue, phase=nxt, tier=tier, branch=branch, plan_review=plan_review,
+                          harness=rec.get("harness"))
             except OSError as exc:
                 print(f"dispatch: {branch} stopped, but {nxt} could not be queued ({exc}) — queue it by hand: "
                       f"dispatch.py queue add --issue {issue} --phase {nxt}"
@@ -2685,12 +2866,17 @@ def main(argv: list[str]) -> int:
     s.add_argument("--tier", type=int)
     s.add_argument("--branch")
     s.add_argument("--title", help="slug source for a new branch name")
+    s.add_argument("--harness", choices=HARNESSES,
+                   help="codex: the Codex variant (model-policy.codex.json) under the supervisor")
     s.add_argument("--dry-run", action="store_true")
     s.add_argument("--plan-review", action="store_true",
                    help="with --phase review: review the plan before execute, not the code")
     s.add_argument("--stale-plan-ok", action="store_true",
                    help="with --phase execute: start although plan_drift blocks (recorded as an override)")
     sub.add_parser("list")
+    ho = sub.add_parser("handoff", help="verify a finished Codex review, attest it and push")
+    ho.add_argument("branch")
+    ho.add_argument("--implementer", help="the model that wrote what was reviewed, when no report names it")
     lg = sub.add_parser("log")
     lg.add_argument("branch")
     lg.add_argument("--lines", type=int, default=30)
@@ -2707,12 +2893,14 @@ def main(argv: list[str]) -> int:
     qa = qsub.add_parser("add")
     qa.add_argument("--issue", type=int, required=True)
     qa.add_argument("--phase", choices=PHASES, required=True)
+    qa.add_argument("--harness", choices=HARNESSES)
     qa.add_argument("--tier", type=int)
     qa.add_argument("--branch")
     qa.add_argument("--plan-review", action="store_true", help="with --phase review: a plan review")
     qsub.add_parser("list")
     sub.add_parser("drain")
     po = sub.add_parser("policy")
+    po.add_argument("--harness", choices=HARNESSES)
     po.add_argument("--tier", type=int)
     po.add_argument("--class", dest="cls", metavar="CLASS",
                     help="task class (mechanical, design, …): its row wins over the tier")
@@ -2721,7 +2909,9 @@ def main(argv: list[str]) -> int:
     if a.command == "start":
         return start(root, issue=a.issue, phase=a.phase, tier=a.tier, branch=a.branch, title=a.title,
                      dry_run=a.dry_run, owner_approved=a.owner_approved, plan_review=a.plan_review,
-                     stale_plan_ok=a.stale_plan_ok)
+                     stale_plan_ok=a.stale_plan_ok, harness=a.harness)
+    if a.command == "handoff":
+        return handoff(root, a.branch, a.implementer)
     if a.command == "list":
         return list_sessions(root)
     if a.command == "log":
@@ -2735,14 +2925,14 @@ def main(argv: list[str]) -> int:
     if a.command == "queue":
         if a.queue_command == "add":
             queue_add(root, issue=a.issue, phase=a.phase, tier=a.tier, branch=a.branch,
-                      plan_review=a.plan_review and a.phase == "review")
+                      plan_review=a.plan_review and a.phase == "review", harness=a.harness)
         for e in queue_load(root):
             print(f"#{e['issue']} {e['phase']}" + (f" tier {e['tier']}" if e.get("tier") is not None else "")
                   + (f" on {e['branch']}" if e.get("branch") else ""))
         return 0
     if a.command == "drain":
         return drain(root)
-    policy = load_policy(root)
+    policy = load_policy(root, harness=a.harness)
     for ph in PHASES:
         cell = cell_for(policy, a.tier, ph, a.cls)
         why = effort_refusal(policy, ph, cell)

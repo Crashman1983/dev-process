@@ -944,7 +944,7 @@ def test_say_finds_a_long_wrapped_input_and_a_pasted_placeholder(render, tmp_pat
 
 def test_a_say_prompt_without_a_group_falls_back(render, tmp_path, monkeypatch):
     out, mod, _pane = _say_setup(render, tmp_path, monkeypatch, ["> \n"])
-    monkeypatch.setattr(mod, "load_policy", lambda root: {"say_prompt": "^>"})
+    monkeypatch.setattr(mod, "load_policy", lambda root, **_k: {"say_prompt": "^>"})
     assert mod.say(out, "w1", "hello") == 0
 
 
@@ -1083,7 +1083,7 @@ def test_the_policy_decision_channel_reaches_the_prompt(render, tmp_path, monkey
     for channel, expected in (("SendMessage to 'steward'", "SendMessage to 'steward'"), ("  ", None), (7, None)):
         policy = json.loads((out / "docs/process/model-policy.json").read_text())
         policy["decision_channel"] = channel
-        monkeypatch.setattr(mod, "load_policy", lambda _root, p=policy: p)
+        monkeypatch.setattr(mod, "load_policy", lambda _root, p=policy, **_k: p)
         mod.start(out, issue=7, phase="plan", tier=2, branch="7-work", title=None, dry_run=True)
         assert seen[-1] == expected, channel
 
@@ -1096,7 +1096,7 @@ def test_a_codex_cell_gets_no_live_channel_and_reports_instead_of_attesting(rend
     policy = json.loads((out / "docs/process/model-policy.json").read_text())
     policy["decision_channel"] = "SendMessage to 'steward'"
     policy["tiers"]["3"]["review"] = {"model": "gpt-x", "command": "codex exec --model {model} --sandbox read-only {prompt}"}
-    monkeypatch.setattr(mod, "load_policy", lambda _root: policy)
+    monkeypatch.setattr(mod, "load_policy", lambda _root, **_k: policy)
     monkeypatch.setattr(mod, "runnable", lambda _argv: None)
     seen = []
     real = mod.build_argv

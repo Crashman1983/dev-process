@@ -880,3 +880,18 @@ def test_each_packet_says_who_executes_it(render, tmp_path):
     assert "Offload reading, never the change" not in execute
     assert "**Handoff is separate from model selection.**" in (out / "docs/process/tower.md").read_text()
     assert "Execution: delegate | retain-context" in (out / "docs/process/workflow.md").read_text()
+
+
+def test_codex_workers_name_their_prerequisite_and_the_way_out(render, tmp_path):
+    # Kenni backport II (E1, owner 2026-10-15): an installed, logged-in Codex CLI on the
+    # host is a prerequisite; a Codex review attests through handoff; without Codex the
+    # recorded way out holds
+    out = render(tmp_path, {"project_name": "demo"})
+    tower = (out / "docs/process/tower.md").read_text()
+    assert "**Codex workers (`--harness codex`).** Prerequisite: an installed, logged-in" in tower
+    assert "`dispatch.py handoff <branch>`" in tower and "**Without Codex.**" in tower
+    assert "codex unavailable <row-id>" in tower
+    independence = (out / "docs/process/verification-independence.md").read_text()
+    assert "attests end to end" in independence and "Codex as a tool inside a Claude review" not in independence
+    assert (out / "docs/process/model-policy.codex.json").is_file()
+    assert (out / "scripts/process/_dispatch_codex.py").is_file()

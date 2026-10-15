@@ -5,6 +5,20 @@ im Detail zu kennen. Je Version ein paar Sätze: was sich für ein Projekt
 ändert, das die Vorlage nutzt, und was es davon hat. Die vollständigen
 technischen Einzelheiten stehen im [CHANGELOG](CHANGELOG.md).
 
+## v2.73.0 — Ein zweites Modell prüft mit, und Projekte ohne bezahltes CI sind vorgesehen
+
+Ist auf dem Rechner die Codex CLI installiert, kann die Vorlage Arbeit und
+Prüfungen jetzt auch an Codex-Modelle geben. Eine solche Prüfung zählt
+vollwertig: Sie wird gegen den geprüften Stand abgeglichen und erst dann
+festgehalten. Ein Modell einer anderen Familie gilt nur dann als
+unabhängiger Prüfer, wenn feststeht, dass es nicht auch den Code geschrieben
+hat. Ist Codex einmal nicht erreichbar, nennt die Vorlage den Ausweg und
+hält fest, warum er nötig war. Pläne sagen außerdem je Arbeitspaket, ob ein
+kleineres Hilfsmodell es übernimmt, und die Vorlage misst, ob sich das
+lohnt. Projekte ohne bezahltes GitHub-CI wählen jetzt `manual`: Die
+Prüfschritte bleiben als Knopf zum Selbststarten, und verlässlich prüft der
+Push.
+
 ## v2.72.0 — Was ein Projekt gelernt hat, kommt zurück in die Vorlage
 
 Kenni, das erste Projekt auf dieser Vorlage, hatte in den letzten Wochen

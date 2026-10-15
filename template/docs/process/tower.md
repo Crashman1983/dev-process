@@ -175,14 +175,63 @@ carries model/effort in any form but a plain top-level `key: value` line
 reports `model-drift` when a dispatched session's own assistant messages
 show another model than the dispatched one.
 
-A local cell whose command is not `claude` (a Codex review cell) has no
-live channel and no attest step: `start` omits `decision_channel` from its
-prompt and says so, and a review prompt asks for the verdict and findings
-as report text in the output — no attest.py, no git; the steward attests
-with `--model <cell model>` from that output (`dispatch.py log`). Such a
-cell runs read-only and reports only; the end-to-end path with an
-attestation is Codex as a tool inside a Claude review
-(`verification-independence.md`).
+A local cell whose command is not `claude` (a Codex cell in this policy) has
+no live channel and no attest step: `start` omits `decision_channel` from its
+prompt and says so, and a review prompt asks for the verdict and findings as
+report text in the output — no attest.py, no git; the steward attests with
+`--model <cell model>` from that output (`dispatch.py log`). Such a cell runs
+on the plain runner, unsupervised; for a Codex review that attests end to
+end, use the Codex variant below.
+
+**Codex workers (`--harness codex`).** Prerequisite: an installed, logged-in
+Codex CLI on the host (the template's system requirements: `codex exec`
+with `--output-schema` and `-o`, `codex app-server --stdio`, the OpenAI
+provider without profile or own endpoint). `start`, `queue add` and
+`policy` take `--harness codex`; the choice travels through the queue and
+the chain. The variant is `docs/process/model-policy.codex.json`, the
+project's values (model ids, time limits, `context_sources`) are
+`model-policy.codex.local.json` laid over it — never the Claude overlay. It
+is complete (every phase at every tier), detached, without channel or
+`CLAUDE*` environment, and every model in it needs a class in
+`review_evidence`. Before every start the CLI's model catalog is asked
+(login, provider, model, effort); a model it does not list is refused with
+the ones it does — never substituted. `--dry-run` is an unverified preview.
+
+A run belongs to a supervisor (`scripts/process/_dispatch_codex.py`): stdin
+closed, its own process group, a deadline (`review_timeout_minutes`, default
+15; `timeout_minutes`, default 120) that interrupts and reaps it, and
+receipts in the dispatch records — `list` shows running, completed, failed,
+interrupted or unknown (gone without a receipt); an ended run holds no
+slot; `stop` signals only the verified supervisor and keeps the receipts.
+A review gets a fresh bundle (a plan review: the due plan by name; more
+than one due plan is refused — one run per plan), a JSON schema (verdict,
+findings in the FINDING grammar, a line per acceptance criterion, and —
+where the diff touches gate code — the refute attempts) and runs read-only.
+An empty or off-schema result runs once more, then the run failed.
+
+`dispatch.py handoff <branch>` then does in one step what a Claude reviewer
+does itself: it checks the receipts, the schema and the digests against the
+bundle and the worktree's HEAD, derives the independence (`cross-model` only
+when the implementer's measured model is of another family, else
+`single-family`; `--implementer <model>` names it when no report does),
+writes the review report, runs `attest.py --dry-run` and then the attest
+commit — attest.py from this checkout, with the worktree as its root — and
+pushes the branch through the pre-push hook. At Tier 2 the reviewer's refute
+rides its report; at Tier 3 gate code needs a separate run's REFUTE line in
+the plan first (`refute.md`). A refused dry run leaves the worktree as it
+was, reports `blocked` with attest's reasons and stays re-runnable: append
+what attest asked for to the plan (uncommitted) and hand off again — the
+plan then rides the attest. An attested run is never attested twice.
+
+**Without Codex.** When the catalog check refuses, or a run fails or
+returns no valid result, dispatch records a line with an id in
+`<records>/codex/unavailable.jsonl` and prints the way out: start the
+review with `--harness claude` on the tier's review cell, commit `skipped
+cross-model work=<id>: codex unavailable <row-id> — <reason>` (a plan
+review: `work=<id>-plan`), and attest that pass `single-family`. The tower
+reports `codex-skip-unmatched` for such a skip whose row this host never
+recorded, and `codex-block-overridden` when one family's block on a head is
+followed by another family's pass on the same head.
 
 **Model by task class.** A task line may carry a class as a bracket token
 after its id, beside `[P]` and `[US1]`: `[mechanical]` (zero-context, exact
