@@ -24,8 +24,16 @@ Tier 0 -> direct commit if no behavior change, else quick flow (no review; branc
 Tier 2+ -> plan -> execute -> review.
 Scope, not diff size, sets the tier.
 
+{% if artifact_language == "conversation" -%}
+**Language:** converse with the user in the user's language. Write in English
+what an outside reader or a second toolchain has to read: code identifiers,
+commits, issues, and the shared contract docs. Prose the operator writes for
+themselves — ADRs, journal, plans, code comments, test titles — follows the
+conversation language.
+{%- else -%}
 **Language:** converse with the user in the user's language; write all artifacts
 (docs, code, commits, ADRs, journal) in English.
+{%- endif %}
 <!-- KERNEL:END -->
 {%- set _mod_slugs = {"speckit": ["speckit"], "doc_drift_gate": ["doc-drift-gate"], "arch_onboarding": ["arch-onboarding"], "feature_registry": ["feature-registry"], "github_issues": ["github-issues"], "git_hooks": ["git-hooks"], "sbom": ["sbom"], "telemetry": ["telemetry"], "design_contracts": ["design-contracts"]} %}
 {%- set _active = [] %}
