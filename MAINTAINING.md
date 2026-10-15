@@ -104,7 +104,8 @@ Der bestehende Weg, unverändert:
    **Was sich ändert.** (zwei bis sechs Punkte aus Sicht eines Projekts, keine
    Dateilisten), **Wirkung.** (wozu es führt), **Update.** (Schritte oder
    „Keine Schritte.“, „Für <Projekt>“ wo nötig), bei geänderten Template-Docs
-   **Geänderte Abschnitte.**, zuletzt `Details:` mit Plan-Link und Issues.
+   **Geänderte Abschnitte.**, zuletzt `Details:` mit Plan-Link und Issues (ohne beides entfällt die Zeile;
+   ein kleines Fix-Release darf die Wirkung weglassen).
    Höchstens rund 20 Zeilen; die technischen Einzelheiten stehen im Plan,
    nicht im CHANGELOG. Dazu je ein Abschnitt in `NEWS.md` und `NEWS-DE.md` (`## vX.Y.Z — <Titel>`, drei bis sechs Sätze ohne
    Fachbegriffe: was ändert sich für ein Projekt, was bringt es);

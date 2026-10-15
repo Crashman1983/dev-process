@@ -3,7 +3,9 @@
 What changed in each release, why, and what it leads to — newest first. Each entry
 has the same parts: **Why** (the problem that was observed), **What changes** (as a
 project using the template sees it), **Effect**, **Update** (steps for existing
-projects), and **Details** (the plan with the technical particulars, the issues).
+projects), and **Details** (the plan with the technical particulars, the issues);
+a small fix release may leave out Effect, and an entry without a plan or issue has
+no Details line.
 A few plain sentences per release: [NEWS.md](NEWS.md). Deutsche Fassung:
 [CHANGELOG-DE.md](CHANGELOG-DE.md). History before v2.28.2 (sub-projects, German):
 [docs/changelog-archive.md](docs/changelog-archive.md).
@@ -23,9 +25,10 @@ A few plain sentences per release: [NEWS.md](NEWS.md). Deutsche Fassung:
 **Effect.** Codex becomes a full reviewer and leaves a trace when it fails. Own rules no longer break unnoticed on template changes, but every change to an anchored section costs a review; Kenni no longer needs gate code in `.process-owned`.
 
 **Update.**
-1. Anyone who wants `ci.github: manual` sets the answer in `.copier-answers.yml` before the update.
-2. After the update, move your own notes in template docs and commands into overlays, anchor them and stamp them with `--stamp`.
-3. For Kenni: the steps are in the Migration section of the [plan](docs/analysis/2026-10-15-kenni-backport-2.md).
+1. Anyone who wants `ci.github: manual` sets the answer in `.copier-answers.yml` before the update. Allowed are `true`, `false` and `manual`; the string `"true"` is refused.
+2. After the update, move your own notes in template docs and commands into overlays, anchor them and stamp them with `--stamp`. The kernel takes no overlay.
+3. For Kenni, before the update: set `ci: {github: manual}` and move `legacy_preflight` out of `scripts/process/_dispatch_codex.py` into a file of its own outside `scripts/process/` — the template replaces that file.
+4. For Kenni, afterwards: Codex values into `model-policy.codex.local.json`, own rules into overlays, empty `.process-owned`, adapt or drop the tests of the advisory Codex handoff.
 
 **Changed sections.** `commits.md` (Merging), `start-here.md` (The standard setup, Anchors: what goes where…, Definition of ready), `tower.md` (Dispatch and the model policy), `verification-independence.md` (The review bundle…), `workflow.md` (Plan), modules `arch-onboarding`, `doc-drift-gate`, `feature-registry`, `git-hooks` (Honest ceiling), `sbom` (The gate), all commands and Copilot prompts (new overlay line under the title)
 
@@ -860,7 +863,7 @@ Details: #124
 - In the stale check, code counts as reviewed if another code review saw it within its `base..head` range; plan reviews cover no code.
 - `dispatch`: `say` checks delivery, `chain` advances phases from reports, the queue is locked and deduplicated, and workers run under `nice` (`worker_nice`).
 
-**Effect.** attest, bundle and gate evaluate evidence consistently, and a train merge leaves no finished plans or open issues behind. Every finding is backed by a test that fails against the previous version.
+**Effect.** attest, bundle and gate evaluate evidence consistently, and a train merge leaves no finished plans or open issues behind. Every finding is backed by a test that fails against the previous version, or documented as a known limit.
 
 **Update.** No steps.
 

@@ -9,12 +9,13 @@ The ritual was a dozen hand steps, and a missed one showed late: a README
 still naming the old version, a tag on a SHA without its CHANGELOG entry. The
 steps, in order, stopping at the first failure:
 
-1. the CHANGELOG has an entry for the version (`release_notes.notes`, the
-   same reader the publish workflow uses — no entry, no release), and NEWS.md
-   a plain-language section for it (`release_notes.news`);
-   The entry names the template sections it changed or removed (`Geänderte
-   Abschnitte:`) when there are any — a project's overlays anchor to them
-   (`changed_sections`, against the last release's tag);
+1. both languages of the release notes have their section for the version:
+   CHANGELOG.md and CHANGELOG-DE.md an entry (`release_notes.notes`, the same
+   reader the publish workflow uses — no entry, no release), NEWS.md and
+   NEWS-DE.md a plain-language section (`release_notes.news`). The entry names
+   the template sections it changed or removed (**Changed sections.** /
+   **Geänderte Abschnitte.**) when there are any — a project's overlays anchor
+   to them (`changed_sections`, against the last release's tag);
 2. every version location carries it (`LOCATIONS`);
 3. the SBOM is regenerated (`tools/gen_sbom.py`);
 4. `ruff check .` and the full suite pass;
@@ -232,7 +233,8 @@ def release(root: Path, tag: str, *, suite: bool = True) -> None:
     if unnamed:
         raise SystemExit(f"release: the {tag} entry does not name the template sections it changed — "
                          f"projects re-check their overlays against them (docs/process/overlays.md). Add "
-                         f"`Changed sections.` (CHANGELOG.md) and `{SECTIONS_MARKER}: …` (CHANGELOG-DE.md) naming them:\n  " + "\n  ".join(unnamed))
+                         f"a line `**Changed sections.** …` (CHANGELOG.md) and `**{SECTIONS_MARKER}.** …` "
+                         f"(CHANGELOG-DE.md) naming them:\n  " + "\n  ".join(unnamed))
     status = subprocess.run(["git", "-C", str(root), "status", "--porcelain", "-z"],
                             capture_output=True, text=True)
     if status.returncode != 0:
