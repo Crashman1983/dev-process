@@ -254,7 +254,8 @@ strength never follow the class: they follow the tier
 owns the evidence, the serial integration and any escalation. A class names
 the model a delegated packet runs on — a role, not a claim of equal
 capability across families. Retaining the current context never changes the
-session's model; a larger model for a handoff needs a specific reason.
+session's model; a larger model for a handoff needs a specific reason —
+neither the parent plan's tier nor an infrastructure failure is one.
 
 A worker's decision partner is the steward: its start prompt says so, and
 names the live channel when the policy sets one (`decision_channel`). A

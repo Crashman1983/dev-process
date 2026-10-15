@@ -15,4 +15,8 @@ for the next unchecked task. Then read
 the minimum, see green, commit atomically. Name an acceptance criterion by
 its id, never restate its text; where the feature inventory is installed,
 the last task before review writes its entry from the spec's final `AC-n`
-lines (feature-registry module, "One owner per criterion").
+lines (feature-registry module, "One owner per criterion"). A packet handed
+to a helper carries its files, the paths it must not touch, its acceptance
+criteria and the narrow command that proves them, and comes back with that
+command red before and green after; a larger model needs a named reason —
+neither the plan's tier nor an infrastructure failure is one.
