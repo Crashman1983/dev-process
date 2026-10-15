@@ -474,6 +474,42 @@ def models(root: Path | None = None) -> int:
     return 0
 
 
+def execution(root: Path | None = None) -> int:
+    """Per execution mode (`report.py … --execution`, `/execute`): issues, review
+    rounds to the clearing pass and blocked rounds — does delegating a packet to a
+    subagent cost review rounds the saved context does not pay for? An issue whose
+    packets ran both ways counts as `mixed`. Proxy: the mode is what the session
+    reported, the rounds are the reviewer's count."""
+    root = root or Path.cwd()
+    print("[execution] ~proxy — the reported packet mode × the journal's review rounds")
+    modes: dict[str, set] = {}
+    for recs in _reports_by_worker(root).values():
+        for r in recs:
+            if r.get("issue") and r.get("execution"):
+                modes.setdefault(str(r["issue"]), set()).add(r["execution"])
+    if not modes:
+        print("  nothing measured yet — `/execute` reports each packet's mode "
+              "(report.py … --execution delegate|retain-context)")
+        return 0
+    rounds = _review_rounds(root)
+    cells: dict[str, dict] = {}
+    for issue, seen in modes.items():
+        mode = next(iter(seen)) if len(seen) == 1 else "mixed"
+        cell = cells.setdefault(mode, {"issues": 0, "rounds": [], "blocked": 0})
+        cell["issues"] += 1
+        if issue in rounds:
+            cell["rounds"].append(rounds[issue]["pass_round"] or rounds[issue]["max_round"])
+            cell["blocked"] += len(rounds[issue]["blocked"])
+    print(f"  {'mode':<15} {'issues':>6} {'rounds→pass':>12} {'blocked rounds':>15}")
+    for mode, c in sorted(cells.items()):
+        avg = f"{sum(c['rounds']) / len(c['rounds']):.1f}" if c["rounds"] else "—"
+        print(f"  {mode:<15} {c['issues']:>6} {avg:>12} {c['blocked']:>15}")
+    n = sum(c["issues"] for c in cells.values())
+    lvl = _level(n, True, False, _N_THRESHOLD)
+    print(f"  {confidence(n, proxy=True)} · {action(lvl, 'delegate where it costs no extra rounds; retain context where it does', thin='keep recording the mode; judge after ~20 issues per mode')}")
+    return 0
+
+
 # --- rounds: how many review rounds a work item took, and where its blockers came from
 _NO_FINDING_READER = "FINDING lines are read by check_issues — the github-issues module"
 
@@ -1572,6 +1608,7 @@ def main() -> int:
     cl.add_argument("--min", type=int, default=_CLUSTER_MIN, dest="min_cluster",
                     help="minimum fixes to call it a cluster (default 3)")
     sub.add_parser("models")
+    sub.add_parser("execution")
     sub.add_parser("rounds")
     sh = sub.add_parser("share")
     sh.add_argument("--weeks", type=int, default=4)
@@ -1596,6 +1633,8 @@ def main() -> int:
 
     if args.cmd == "models":
         return models()
+    if args.cmd == "execution":
+        return execution()
     if args.cmd == "rounds":
         return rounds()
     if args.cmd == "share":

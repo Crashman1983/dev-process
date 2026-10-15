@@ -426,6 +426,36 @@ def test_report_carries_model_and_kpis_cut_by_it(render, tmp_path):
     assert "claude-opus-5 (xhigh)" in r.stdout, r.stdout
 
 
+def test_the_execution_mode_is_reported_and_kpis_cut_by_it(render, tmp_path):
+    """Kenni backport II (E2): a packet's mode — delegated to a subagent or kept in the
+    session — is measured, so delegating can be judged by the review rounds it costs."""
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {"telemetry": True}})
+    _repo(out)
+    kpis = [sys.executable, str(out / "scripts/process/process_kpis.py"), "execution"]
+    r = subprocess.run(kpis, cwd=out, capture_output=True, text=True)
+    assert r.returncode == 0 and "nothing measured yet" in r.stdout
+
+    def rep(issue, mode):
+        return subprocess.run([sys.executable, str(out / "scripts/process/report.py"), "done", "--issue", str(issue),
+                               "--worker", f"w{issue}", "--model", "claude-sonnet-5", "--execution", mode],
+                              cwd=out, capture_output=True, text=True)
+    assert rep(5, "delegate").returncode == 0
+    assert rep(6, "retain-context").returncode == 0 and rep(6, "delegate").returncode == 0
+    assert rep(7, "sometimes").returncode == 2  # only the two modes
+    j = out / ".process-work/journal"
+    j.mkdir(parents=True, exist_ok=True)
+    (j / "2026-10-15.md").write_text(
+        "REVIEW work=5 tier=2 reviewer=fresh model=cross independence=bundle,non-implementing verdict=block round=1\n"
+        "REVIEW work=5 tier=2 reviewer=fresh model=cross independence=bundle,non-implementing verdict=pass round=2\n")
+    r = subprocess.run(kpis, cwd=out, capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    rows = {ln.split()[0]: ln.split() for ln in r.stdout.splitlines() if ln.startswith("  ") and ln.split()[0] in
+            ("delegate", "retain-context", "mixed")}
+    assert rows["delegate"][1:4] == ["1", "2.0", "1"] and rows["mixed"][1] == "1", r.stdout
+    recs = [json.loads(x) for x in (out / ".git/process-tower/reports.jsonl").read_text().splitlines()]
+    assert recs[0]["execution"] == "delegate"
+
+
 @pytest.mark.skipif(shutil.which("tmux") is None, reason="tmux not installed")
 def test_stop_keeps_the_final_report_of_a_finished_phase(render, tmp_path):
     """Downstream: `dispatch stop` wrote `idle` over a review's `review-pass`, and
