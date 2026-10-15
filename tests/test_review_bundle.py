@@ -220,6 +220,8 @@ def test_finding_tokens_pinned_to_their_owning_gate(render, tmp_path):
     kind_line = "[kind=<" + "|".join(sorted(gate.FINDING_KINDS, key="knowledge-gap requirement implementation test-gap process environment".split().index)) + ">]"
     assert kind_line in bundle_src, kind_line
     assert "kind" in gate.FINDING_KEYS
+    # the optional reviewer family (#247): a merged pass keeps each finding's origin
+    assert "[by=<" in bundle_src and "by" in gate.FINDING_KEYS
 
 
 def test_bundle_asks_for_kind_and_a_plan_bundle_for_the_phase_header(render, tmp_path):

@@ -532,6 +532,27 @@ def test_finding_without_title_hard(render, tmp_path):
     assert "no title" in r.stdout
 
 
+def test_a_finding_names_its_reviewer_anywhere_among_its_keys(render, tmp_path):
+    """#247: `by=` is a key like the others — parsed wherever it stands among them,
+    never swallowed into the title, refused when it is no family word."""
+    import importlib.util
+    out = _render(render, tmp_path)
+    spec = importlib.util.spec_from_file_location("ci_by", out / "scripts/process/check_issues.py")
+    gate = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(gate)
+    rows = gate.report_findings("FINDING by=codex sev=major action=fix issue=- guard read twice\n"
+                                "FINDING sev=minor action=fix issue=- kind=process by=claude late note\n"
+                                "FINDING sev=minor action=fix issue=- no reviewer\n")
+    assert [(f["by"] if "by" in f else None, f["title"]) for f, _e, _l in rows] == [
+        ("codex", "guard read twice"), ("claude", "late note"), (None, "no reviewer")]
+    _report(out, "2026-07-05-x.md", VALID_REPORT +
+            "FINDING sev=minor action=fix issue=- by=Codex! shouting\n"
+            "FINDING sev=minor action=fix issue=- by=codex by=claude twice\n")
+    r = _run(out)
+    assert r.returncode == 1
+    assert "no reviewer family" in r.stdout and "duplicate key 'by'" in r.stdout
+
+
 def test_prose_starting_with_finding_ignored(render, tmp_path):
     # prose is not linted: the first token after FINDING must be
     # key=value, else it is prose

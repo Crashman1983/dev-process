@@ -165,7 +165,10 @@ FINDING_ORIGINS = {"draft", "fix", "late"}
 # `process_kpis.py rounds` counts blockers by it, plan reviews apart.
 FINDING_KINDS = {"knowledge-gap", "requirement", "implementation", "test-gap",
                  "process", "environment"}
-FINDING_KEYS = ("sev", "action", "issue", "gate", "origin", "kind")
+# Who raised a finding, optional: the reviewer's family (`claude`, `codex`, …), so
+# a pass that merges two reviewers keeps each finding's origin (#247).
+FINDING_BY = re.compile(r"^[a-z][a-z0-9.-]*$")
+FINDING_KEYS = ("sev", "action", "issue", "gate", "origin", "kind", "by")
 
 
 # a FINDING may be written as a Markdown bullet — `- FINDING ...` must not
@@ -187,7 +190,8 @@ def _parse_finding(match: re.Match) -> tuple[dict | None, str | None]:
     title may itself contain `=` (e.g. 'user_id=1 hardcoded'). Requires sev=
     and action= with valid enums; issue= optional, '-' meaning none; gate=
     optional, free-form (see FINDING_GATE_*); origin= optional, one of
-    FINDING_ORIGINS; kind= optional, one of FINDING_KINDS."""
+    FINDING_ORIGINS; kind= optional, one of FINDING_KINDS; by= optional, the
+    reviewer's family as a lower-case word (FINDING_BY)."""
     fields: dict = {}
     tokens = match.group(1).split()
     i = 0
@@ -209,6 +213,8 @@ def _parse_finding(match: re.Match) -> tuple[dict | None, str | None]:
         return None, f"origin={fields['origin']!r} not in {sorted(FINDING_ORIGINS)}"
     if "kind" in fields and fields["kind"] not in FINDING_KINDS:
         return None, f"kind={fields['kind']!r} not in {sorted(FINDING_KINDS)}"
+    if "by" in fields and not FINDING_BY.match(fields["by"]):
+        return None, f"by={fields['by']!r} is no reviewer family (a lower-case word: claude, codex, …)"
     issue = fields.get("issue", "-")
     if issue != "-" and parse_issue_ref(issue) is None:
         return None, f"issue={issue!r} is neither '-' nor a valid ref"
