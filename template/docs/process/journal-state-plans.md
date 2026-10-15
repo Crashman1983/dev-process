@@ -45,7 +45,7 @@ origin issue so the trail runs both ways (module doc, "Discovered work keeps
 the form and the trail"). This is discipline, not a gate — "did you capture
 everything you noticed" is not mechanically decidable, so nothing checks it;
 the value is that scope stays clean and nothing is silently lost. Parallel branches append without conflict: `.process-work/.gitattributes` merges
-`/inbox.md` with `merge=union`, so each item stays one whole line (a union merge can
+the inbox file with `merge=union`, so each item stays one whole line (a union merge can
 bring back a line triage removed on the other side — triage after the merge).
 
 ## Plans
