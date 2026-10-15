@@ -754,11 +754,13 @@ def codex_findings(root: Path, wts: list[dict]) -> list[dict]:
     ranks, fams = rules.get("ranks") or {}, rules.get("families") or []
     seen_skips: set[tuple[str, str]] = set()
     lines: dict[tuple[str, str], list[tuple[str, str]]] = {}
+    active: set[str] = set()  # work ids of active plans: a block answered and merged is history
     for wt in wts or [{"path": str(root)}]:
         wroot = Path(wt["path"])
         if wt.get("missing") or not wroot.is_dir():
             continue
         for rel, text in _review.record_texts(wroot, _review.PLAN_KINDS) or []:
+            active |= {str(w) for w in _review._plan_work_ids(_review.plan_stem(rel), text, include_dedated=True)}
             for m in _review.SKIP_LINE.finditer(text):
                 reason = m.group("reason").split()
                 if reason[:2] == ["codex", "unavailable"] and len(reason) > 2 and reason[2] not in known:
@@ -777,6 +779,8 @@ def codex_findings(root: Path, wts: list[dict]) -> list[dict]:
                                "(dispatch records/codex/unavailable.jsonl) — another host may hold it; if none "
                                "does, the skip was never tried"})
     for (work, head), entries in sorted(lines.items()):
+        if work.removesuffix("-plan") not in active:
+            continue
         fam = {m: codex_run.family(m, ranks, fams) for m, _v in entries}
         blocks = {fam[m] for m, v in entries if v == "block" and fam[m] not in (None, "ranked")}
         passes = [m for m, v in entries if v == "pass" and fam[m] not in blocks]
@@ -858,7 +862,7 @@ def build(root: Path, stale_minutes: int = 60, *, remote: bool = False) -> dict:
     table["findings"] = findings(table, stale_minutes) + local_findings(root)
     try:
         table["findings"] += codex_findings(root, wts)
-    except (OSError, ValueError, SystemExit) as exc:  # a trace that cannot be read costs a finding, never the table
+    except Exception as exc:  # noqa: BLE001 — a trace that cannot be read costs a finding, never the table
         table["findings"].append({"kind": "local-findings-error", "severity": "low", "what": "codex traces",
                                   "because": str(exc)})
     if remote and not fetch_ok:

@@ -163,16 +163,26 @@ def check(root: Path) -> int:
 
 
 def codex_sources(root: Path) -> list[str]:
-    """What a Codex session must read: the kernel, the rules, the Codex policy, the
-    harness anchor that exists, and the policy's own `context_sources` (its local file's too)."""
+    """What a Codex session must read: the kernel, the rules, the Codex policy and its
+    local file when there is one, the harness anchor that exists, and the policies'
+    `context_sources`. A malformed policy or a source outside the repository raises —
+    the session then stops instead of starting on part of the context."""
     sources = [KERNEL, RULES, CODEX_POLICY]
-    sources += [a for a in ("AGENTS.md", "CLAUDE.md") if (root / a).is_file()][:1]
+    if (root / CODEX_LOCAL_POLICY).exists():
+        sources.append(CODEX_LOCAL_POLICY)
+    sources += [a for a in ("AGENTS.md", "CLAUDE.md") if (root / a).is_file()]  # each anchor the project has
     for name in (CODEX_POLICY, CODEX_LOCAL_POLICY):
-        try:
-            extra = json.loads((root / name).read_text(encoding="utf-8")).get("context_sources") or []
-        except (OSError, ValueError, AttributeError):
+        if not (root / name).exists():
             continue
-        sources += [s for s in extra if isinstance(s, str) and s and s not in sources]
+        data = json.loads((root / name).read_text(encoding="utf-8"))
+        extra = data.get("context_sources", []) if isinstance(data, dict) else None
+        if not isinstance(extra, list) or not all(isinstance(s, str) and s for s in extra):
+            raise ValueError(f"{name}: `context_sources` must be a list of repository paths")
+        for s in extra:
+            if Path(s).is_absolute() or ".." in Path(s).parts:
+                raise ValueError(f"{name}: context source {s!r} is outside the repository")
+            if s not in sources:
+                sources.append(s)
     return sources
 
 
@@ -191,7 +201,7 @@ def codex_output(root: Path) -> dict:
         text = "# Codex session context\n\n" + "\n\n".join(sections)
         if len(text.encode("utf-8")) > CODEX_CONTEXT_MAX_BYTES:
             raise ValueError(f"the context exceeds {CODEX_CONTEXT_MAX_BYTES} bytes")
-    except (OSError, UnicodeError, ValueError) as exc:
+    except (OSError, UnicodeError, ValueError, RecursionError) as exc:
         reason = f"the process context was not loaded: {exc}"
         return {"continue": False, "stopReason": reason, "systemMessage": reason}
     return {"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": text}}
@@ -204,6 +214,23 @@ def codex_hook_entry() -> dict:
     return {"matcher": CODEX_MATCHER, "hooks": [{
         "type": "command", "command": command, "timeout": 45, "statusMessage": "Loading the process context",
         "additionalContextLimit": 0}]}  # the script bounds the size itself
+
+
+def _exclude_codex(root: Path) -> None:
+    """`.codex/` holds a host-local hook: keep it out of `git status` via the clone's
+    own exclude file (an untracked file would read as a dirty worktree to dispatch)."""
+    r = subprocess.run(["git", "rev-parse", "--git-path", "info/exclude"], cwd=root, capture_output=True,
+                       text=True, check=False)
+    if r.returncode != 0:
+        return
+    exclude = (root / r.stdout.strip()) if not Path(r.stdout.strip()).is_absolute() else Path(r.stdout.strip())
+    try:
+        lines = exclude.read_text(encoding="utf-8").splitlines() if exclude.exists() else []
+        if "/.codex/" not in lines:
+            exclude.parent.mkdir(parents=True, exist_ok=True)
+            exclude.write_text("\n".join([*lines, "/.codex/"]) + "\n", encoding="utf-8")
+    except OSError:
+        pass  # a missed exclude costs a dirty status line, never the hook
 
 
 def codex_config(root: Path, *, installing: bool) -> int:
@@ -246,6 +273,7 @@ def codex_config(root: Path, *, installing: bool) -> int:
         groups.append(entry)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(config, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    _exclude_codex(root)
     print(f"rehydrate: Codex SessionStart hook added to {CODEX_SETTINGS}; review and approve it in /hooks")
     return 0
 

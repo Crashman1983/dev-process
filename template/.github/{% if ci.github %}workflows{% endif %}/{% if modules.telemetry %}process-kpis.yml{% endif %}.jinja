@@ -6,7 +6,7 @@ on:{% if ci.github != 'manual' %}
   schedule:
     - cron: "17 6 1 * *"  # monthly, 1st, 06:17 UTC (odd minute: cron-storm etiquette)
 {%- endif %}
-  workflow_dispatch:  # by hand; ci.github: manual drops the schedule (no hosted minutes)
+  workflow_dispatch:{% if ci.github == 'manual' %}  # ci.github: manual — by hand only, no schedule{% endif %}
 permissions:
   contents: read
 jobs:
