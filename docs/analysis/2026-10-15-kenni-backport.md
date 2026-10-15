@@ -6,7 +6,7 @@ Datum: 2026-10-15 · Issues: #226, #234, #235, #221 (Anker), Teile von #232 · T
 
 Der Owner hat am 2026-10-15 entschieden: Kennis Änderungen sollen so weit wie möglich zurück ins Template, damit Kenni dem Template nicht davonläuft.
 
-Ein Render des Templates (v2.71.0) mit Kennis Antworten, verglichen mit Kennis `origin/main`, ergab 27 abweichende Template-Dateien. Sieben davon trägt Kenni in `.process-owned`:
+Ein Render des Templates (Stand vor diesem Release) mit Kennis Antworten, verglichen mit Kennis `origin/main`, ergab 27 abweichende Template-Dateien. Sieben davon trägt Kenni in `.process-owned`:
 - die fünf Dateien der `merge_scope`-Naht;
 - `dispatch.py` und `tower.md` mit dem Codex-Harness.
 
@@ -25,7 +25,7 @@ Die Einordnung jedes Hunks (Port, verallgemeinert, lokal, überholt) ist in der 
   - **Leser:** `test_select.run` nutzt `merge_evidence` über `merge_certificate_evidence`.
   - **Schreiber:**
     - `train._certify_merge` und `finish --tests` schreiben über `run_evidence`.
-    - `train._suite_key` hasht dieselbe Evidenz. Ein grüner Lauf mit engerem Scope ist nie das Memo des vollen Laufs.
+    - `train._suite_key` hasht die Evidenz mit dem vorhergesagten Scope (P7). Ein grüner Lauf mit engerem Scope ist nie das Memo des vollen Laufs (P13).
   - **#226-AC zur Abweichung:** Das Issue nannte `scope=unknown` als Evidenz. Gebaut wird Kennis strengere Form: Ein unbekannter Scope ergibt kein Zertifikat, und es wird keins gefunden.
 - **D2 Stufen-Vertrag.**
   - `testing.md` beschreibt, was eine stufenweise Merge-Suite hinterlässt: `<git-dir>/merge-suite/stages` (Stufennamen, durch Leerzeichen getrennt) und je Stufe `<git-dir>/merge-suite/<stufe>.time` mit `t0 t1 exit`.
@@ -34,7 +34,7 @@ Die Einordnung jedes Hunks (Port, verallgemeinert, lokal, überholt) ist in der 
   - `train._collect_stage_times` sammelt die Marker nach Suite und Retry in `stages` der `phases.jsonl`-Zeile. Fehlt ein Marker, gilt die Stufe als `skipped`. Ein doppelt gesammelter Lauf zählt einmal.
   - `process_kpis.py train-phases` zeigt je Stufe den letzten Zug, Median, Maximum sowie die Zahl der übersprungenen und roten Läufe. Das deckt #232 AC-5 teilweise ab.
 - **D4 Kleine Ports.**
-  - Ein ungültiges `stale_minutes` wird gemeldet statt still verworfen. Owner ist `tower.resolve_stale_minutes`.
+  - Ein ungültiges `stale_minutes` wird gemeldet statt still verworfen. Owner ist `dispatch.stale_minutes` (P10).
   - Design-Contract-Notizen kommen in `<surface>.notes.md` mit `merge=union` (Kenni #2588).
   - Der CI-Workflow erhält `concurrency`.
   - `rehydrate.py` bekommt `check=False` an zwei Stellen.
@@ -58,7 +58,7 @@ Die Einordnung jedes Hunks (Port, verallgemeinert, lokal, überholt) ist in der 
   - Quick (Befehl und `workflow.md`): eine beobachtbare Satz-Beschreibung, der Endzustand der Daten, und eskaliert wird bei einer Designwahl oder bei parallelen Subagenten.
 - **D6 #234:** Gestrichene ACs. `~~AC-<id>~~` und `AC-<id>: struck — <Grund>` (auch `dropped`) nehmen eine AC aus der Testpflicht. Ohne Grund bleibt sie Pflicht.
 - **D7 #235:**
-  - Die Template-Beispiele für `codex exec` schließen stdin (`< /dev/null`) und begrenzen die Laufzeit (`timeout 1800`).
+  - Das Shell-Beispiel für `codex exec` schließt stdin (`< /dev/null`) und begrenzt die Laufzeit (`timeout 1800`); argv-Zellen siehe P1.
   - Die Zug-Meldung zu DECISION NEEDED zitiert die Zeile und nennt die Antwortform.
   - `/plan` und `/execute` sagen: Wer eine Frage beantwortet, setzt die Marke.
 - **D8 Nicht in diesem Release:**
@@ -124,3 +124,16 @@ Ergebnis: Block mit einem Fund ab 80, dazu vier Majors und weitere Minors. Die N
   - `.gitattributes` liegt je Verzeichnis: `.process-work/` für `/inbox.md` und `design-contracts/` für `*.notes.md`.
   - Die Doku zur Inbox sagt: Ein Union-Merge kann eine schon triagierte Zeile zurückbringen. Wer triagiert, löscht die Zeile nach dem Merge erneut.
   - `concurrency` bricht auf `main` nie ab.
+
+## Plan-Review Runde 2 — Änderungen
+
+Ergebnis: Block mit drei Majors. P1–P11 sind gebaut, D1–D7 decken sich mit dem Diff, und ohne `merge_scope` bleibt alles verhaltensgleich.
+
+- **P12 Gestrichene ACs.**
+  - Das Trennzeichen nach `struck`/`dropped` ist `—`, `–` oder `:`, ein `-` nur mit Leerzeichen davor und danach. `AC-3: Dropped-connection retry: …` ist eine echte AC und bleibt Pflicht.
+  - Eine Streichung braucht eine Spur beim Code-Review. Der Bericht bestätigt jede gestrichene AC mit `AC-<id>: struck` (oder `dropped`), sonst verweigert attest. So sieht ein unabhängiger Reviewer jede Streichung, auch eine, die nach dem Plan-Review dazukam.
+- **P13 Ein übrig gebliebener `stages`-Stand zertifiziert nichts.**
+  - Bevor ein Schreiber (Zug, `finish --tests`) die Suite startet, löscht `certificate.clear_run` die `stages`-Datei und alle `*.time`. Was danach dort steht, hat dieser Lauf geschrieben.
+  - Das Memo des Zugs gilt nur, wenn der gelaufene Scope (`run_evidence`) dem vorhergesagten entspricht.
+- **P14** D1, D4 und D7 sind an P7, P10 und P1 angeglichen.
+- **P15** Der CHANGELOG nennt die beiden Pflichten einer gestuften Suite: vor der Auswahl löschen, und `merge_scope` gibt für einen Baum überall dieselbe Antwort.

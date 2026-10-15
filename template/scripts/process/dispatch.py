@@ -159,6 +159,8 @@ def load_policy(root: Path) -> dict:
         data = json.loads(p.read_text(encoding="utf-8"))
     except ValueError as exc:
         raise SystemExit(f"dispatch: {POLICY} is not valid JSON: {exc}")
+    if not isinstance(data, dict):
+        raise SystemExit(f"dispatch: {POLICY} must be an object")
     local = root / LOCAL_POLICY
     if local.is_file():
         try:
@@ -174,6 +176,8 @@ def load_policy(root: Path) -> dict:
     quiet = data.get("stale_minutes")
     if quiet is not None and (isinstance(quiet, bool) or not isinstance(quiet, int) or quiet <= 0):
         raise SystemExit(f"dispatch: {POLICY} `stale_minutes` must be a positive integer, got {quiet!r}")
+    if not isinstance(data.get("phases") or {}, dict):
+        raise SystemExit(f"dispatch: {POLICY} `phases` must be an object")
     for ph, row in (data.get("phases") or {}).items():
         if isinstance(row, dict):
             _check_env(row.get("env"), f"phases.{ph}.env")
@@ -542,6 +546,8 @@ def stale_minutes(root: Path) -> int | None:
     steward on it). None without a policy or the key — the tower's default
     then applies; an invalid value is refused by `load_policy` — and said, never
     swallowed (downstream: a typo in the value silently fell back to the default)."""
+    if not (root / POLICY).is_file():
+        return None  # no policy is no error: the default is meant
     try:
         return load_policy(root).get("stale_minutes")
     except SystemExit as err:

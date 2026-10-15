@@ -2313,3 +2313,14 @@ def test_an_invalid_stale_threshold_is_said_not_swallowed(render, tmp_path, caps
     assert mod.stale_minutes(out) is None
     err = capsys.readouterr().err
     assert "ignoring the policy for the stale threshold" in err and "stale_minutes" in err
+    # a policy of the wrong shape is said too, never a crash of the tower (refute)
+    policy = out / "docs/process/model-policy.json"
+    (out / "docs/process/model-policy.local.json").unlink()
+    good = policy.read_text()
+    for bad in ("[1]", json.dumps({**json.loads(good), "phases": [1]})):
+        policy.write_text(bad)
+        assert mod.stale_minutes(out) is None
+        assert "ignoring the policy" in capsys.readouterr().err
+    # no policy at all: the default is meant, nothing to say
+    policy.unlink()
+    assert mod.stale_minutes(out) is None and capsys.readouterr().err == ""

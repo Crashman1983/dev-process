@@ -249,6 +249,75 @@ def test_stage_times_last_state_wins_and_seconds_add_up(process, repo):
     assert stages["test-boundary"] == {**stages["test-boundary"], "state": "green", "seconds": 400, "runs": 2}
 
 
+def test_a_bad_marker_costs_a_kpi_never_the_train(process, repo):
+    """Refute: a marker past the platform's time range raised after a green suite."""
+    mod, _out = process
+    train = mod("train")
+    folder = _stage_dir(repo)
+    (folder / "stages").write_text("a b\n")
+    (folder / "a.time").write_text("99999999999999999 99999999999999999 0\n")
+    (folder / "b.time").write_text("1500 1000 0\n")  # ends before it starts
+    stages = {}
+    train._collect_stage_times(repo, stages, set(), lambda _l: None)
+    assert stages["a"]["state"] == stages["b"]["state"] == "skipped"
+
+
+def test_undecodable_scope_output_is_an_unknown_scope(process, repo):
+    mod, _out = process
+    certificate = mod("certificate")
+    garbage = [sys.executable, "-c", "import sys; sys.stdout.buffer.write(b'\\xff\\xfe')"]
+    assert certificate.merge_evidence(repo, "s", garbage) is None
+    (_stage_dir(repo) / "stages").write_bytes(b"\xff\xfe\n")
+    assert certificate.run_stages(repo) is None
+    assert certificate.run_evidence(repo, "s", SCOPE_ALL) is None
+
+
+def test_a_leftover_stages_file_certifies_nothing(process, repo, monkeypatch):
+    """Plan review / refute: a wider `stages` an earlier run left certified a run that
+    wrote none — the writers clear it before the suite starts."""
+    mod, _out = process
+    certificate, finish = mod("certificate"), mod("finish")
+    folder = _stage_dir(repo)
+    (folder / "x.time").write_text("1 2 0\n")
+    _stages_file(repo, "test-boundary test-frontend")
+    certificate.clear_run(repo)
+    assert not (folder / "stages").exists() and not (folder / "x.time").exists()
+    certificate.clear_run(repo)  # nothing there: nothing to do
+    (repo / "docs/process").mkdir(parents=True)
+    (repo / "docs/process/testing.local.json").write_text(
+        json.dumps({"merge_suite": "true", "merge_scope": SCOPE_ALL, "stacks": {}}))
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "cfg")
+    _stages_file(repo, "test-boundary test-frontend")
+    monkeypatch.setattr(finish, "ROOT", repo)
+    monkeypatch.setattr(finish, "check", lambda _root: ([], []))
+    monkeypatch.delenv("PROCESS_MERGE_ROUTE", raising=False)
+    finish.apply(repo, tests="true", tests_passed=False)  # `true` writes no stages
+    assert certificate.find(repo, ("merge",), {"merge": "true\nscope=test-boundary test-frontend"}) is None
+
+
+def test_the_memo_names_the_scope_that_ran(process, repo, monkeypatch, tmp_path):
+    """Plan review / refute: a run the suite narrowed was remembered as a green of the
+    predicted, fuller scope."""
+    mod, _out = process
+    train = mod("train")
+    remembered = []
+    monkeypatch.setattr(train, "_remember_green_suite", lambda _root, key: remembered.append(key))
+    monkeypatch.setattr(train, "_run_gates", lambda w, log: True)
+    monkeypatch.setattr(train, "_cleanup", lambda *a: None)
+    monkeypatch.setattr(train, "_write", lambda *a, **k: None)
+    monkeypatch.setattr(train, "build_train", lambda root, base, subset, stamp, log:
+                        (repo, "train/x", list(subset), []))
+    for ran, kept in (("test-boundary", False), ("test-frontend test-boundary", True)):
+        remembered.clear()
+        monkeypatch.setattr(train, "_sh", lambda cwd, cmd, log, *a, ran=ran: _stages_file(repo, ran) or "green")
+        p = {"base": "main", "candidates": [{"branch": "b1", "hours_waiting": 1}]}
+        with pytest.raises(SystemExit):  # the stub train/x cannot be fast-forwarded; the judging is done
+            train._run_batch(repo, "main", p, ["b1"], "x", tmp_path / "t.log", suite="s", deploy=None,
+                             push=False, keep_branches=True, merge_scope=SCOPE_ALL)
+        assert bool(remembered) is kept, (ran, remembered)
+
+
 def test_without_a_stages_file_nothing_is_collected(process, repo):
     mod, _out = process
     stages = {}

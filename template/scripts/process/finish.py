@@ -431,6 +431,7 @@ def apply(root: Path, *, tests: str | None, tests_passed: bool) -> int:
         argv, assigned = run_tests
         shown = shlex.join([*(f"{k}={v}" for k, v in assigned.items()), *argv])
         before = _certifiable_tree(root, tests)
+        certificate.clear_run(root)  # the `stages` file the certificate reads is this run's
         print(f"finish: $ {shown}   # the FULL suite, once per batch")
         try:
             green = subprocess.run(argv, cwd=str(root),

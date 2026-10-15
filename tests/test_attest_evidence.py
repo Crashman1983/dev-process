@@ -636,10 +636,19 @@ def test_a_criterion_struck_with_a_reason_needs_no_test(ev_mod):
     # a plan line cannot quietly drop a criterion its spec still names; the spec can
     assert req("AC-4: struck — not needed\n", "- AC-4: answers\n") == {"4"}
     assert req("", "- AC-5: logs\nAC-5: struck — owner decided on 2026-10-15\n") == set()
+    # a hyphen glued to the word is prose, not a strike (plan review)
+    assert req("- AC-3: Dropped-connection retry: When the socket drops, retry.\n", "") == {"3"}
+    assert req("- AC-4: Struck-through text renders as deleted.\n", "") == {"4"}
+    assert req("AC-1 AC-6\nAC-6: dropped - the owner cut it\n", "") == {"1"}
+    assert mod.struck_criteria("AC-1 AC-2\nAC-2: struck — merged into AC-1\n", "") == {"2"}
 
 
 def test_a_struck_criterion_end_to_end(repo):
     plan = repo / ".process-work/plans/2026-10-14-widget.md"
     plan.write_text(PLAN + "- AC-2: When y, the widget shall log.\n\nAC-2: struck — logging moved to #8\n")
     _git(repo, "commit", "-qam", "docs: strike AC-2")
-    assert _attest(repo, "--with", _report(repo)).returncode == 0
+    # the strike leaves a trace: the code review's report confirms it (plan review)
+    r = _attest(repo, "--with", _report(repo))
+    assert r.returncode == 1 and "AC-2 is struck" in r.stderr and "`AC-2: struck`" in r.stderr
+    confirmed = "- AC-1: `tests/test_widget.py::test_widget`\n- AC-2: struck — seen, logging is #8\n"
+    assert _attest(repo, "--with", _report(repo, confirmed)).returncode == 0
