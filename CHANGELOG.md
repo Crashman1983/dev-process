@@ -1166,7 +1166,7 @@ ein Wächter-Test gegen doppelte Klammern ohne Leerzeichen in Python-Vorlagen.
 Wer v2.27.1 oder v2.28.0 installiert hat und am Push scheitert: auf v2.28.1
 aktualisieren, `v2.28.1`.
 
-**v2.73.0 — Kenni-Rückport II: Codex-Worker mit attestierbarem Review, Übergabe je Paket, `ci.github: manual`.** Plan: `docs/analysis/2026-10-15-kenni-backport-2.md` nach drei Plan-Review-Runden. Tier 3, weil Gate-Code betroffen ist (`dispatch.py`, neues `_dispatch_codex.py`, `rehydrate.py`, `report.py`, `tower.py`, `check_review.py`, `process_kpis.py`, CI-Adapter, Copier-Frage). Update; wer `ci.github: manual` will, setzt die Antwort vor dem Update. Vom Owner am 2026-10-15 entschieden (E1, E2, E4).
+**v2.73.0 — Kenni-Rückport II: Codex-Worker mit attestierbarem Review, Übergabe je Paket, `ci.github: manual`, Overlays mit Bruchprüfung.** Plan: `docs/analysis/2026-10-15-kenni-backport-2.md` nach drei Plan-Review-Runden. Tier 3, weil Gate-Code betroffen ist (`dispatch.py`, neues `_dispatch_codex.py`, `rehydrate.py`, `report.py`, `tower.py`, `check_review.py`, `process_kpis.py`, CI-Adapter, Copier-Frage). Update; wer `ci.github: manual` will, setzt die Antwort vor dem Update. Vom Owner am 2026-10-15 entschieden (E1, E2, E4).
 
 - **Codex-Worker (`--harness codex`, Port aus Kenni #2357):**
   - **Voraussetzung:** eine installierte und eingeloggte Codex CLI auf dem Host (`SYSTEM-REQUIREMENTS.md`).
@@ -1179,24 +1179,46 @@ aktualisieren, `v2.28.1`.
   - Danach schreibt es den Review-Bericht (FINDING-Grammatik, AC-Zeilen, bei Tier 2 der Refute für Gate-Code), führt `attest.py --dry-run` aus, dann den Attest-Commit, und pusht.
   - Ein verweigerter Probe-Lauf hinterlässt einen sauberen Worktree und den Bericht `blocked`. Er lässt sich nach einem angehängten Record wiederholen. Kein Lauf wird zweimal attestiert.
   - Codex-Plan-Reviews für Epics mit mehreren fälligen Plänen werden verweigert (einer je Lauf).
-- **Ohne Codex:** Der Lauf schreibt eine Zeile mit Id nach `codex/unavailable.jsonl`, und die Meldung nennt den Ausweg: `--harness claude`, `skipped cross-model work=<id>: codex unavailable <row-id> — <Grund>`, `single-family`. Der Tower meldet `codex-skip-unmatched` und `codex-block-overridden`.
-- **`rehydrate --codex`:** voller Pflichtkontext oder ein sichtbarer Abbruch, `--install`/`--check` für `.codex/hooks.json`, dazu `context_sources` aus der Variante.
+  - Die Familien liest `handoff` an der Basis, nicht am geprüften Branch. Es zählen alle Implementierer-Modelle des Branches.
+  - Ein Lauf, der nach dem Attest-Commit stehen blieb, wird aus der REVIEW-Zeile fertiggestellt. Ein Commit-Fehler stellt den Worktree wieder her.
+  - In der Kette geht der Harness nie über einen Review: Die Fix-Runde nach einem Codex-Review und der Review eines Codex-Execute laufen auf dem Standard-Harness.
+- **Ohne Codex:** Ein verweigerter Katalog oder ein Lauf, der scheitert, abbricht oder kein gültiges Ergebnis liefert, schreibt eine Zeile mit Id und Head nach `codex/unavailable.jsonl`, und die Meldung nennt den Ausweg: `--harness claude`, `skipped cross-model work=<id>: codex unavailable <row-id> — <Grund>`, `single-family`. Der Tower meldet `codex-skip-unmatched` und `codex-block-overridden`.
+- **`rehydrate --codex`:** voller Pflichtkontext oder ein sichtbarer Abbruch. Das gilt auch bei kaputter lokaler Policy oder Pfaden außerhalb des Repos. Geladen werden alle vorhandenen Anker (`AGENTS.md` und `CLAUDE.md`) und die `context_sources` der Variante. `--install`/`--check` für `.codex/hooks.json`; `--install` trägt `.codex/` in `.git/info/exclude` ein.
 - **Übergabe je Paket (E2, aus Kenni):**
   - `/plan` verlangt je größerem Paket `Execution: delegate | retain-context` mit Begründung.
   - `/execute` folgt dieser Wahl. Ein delegiertes Paket schreibt ein Subagent auf dem kleinsten passenden Modell; er committet nie, die Session prüft und committet. Das ersetzt „Offload reading, never the change“.
-  - `report.py --execution` und `process_kpis.py execution` messen, ob Delegieren Review-Runden kostet.
+  - `report.py --execution` und `process_kpis.py execution` messen, ob Delegieren Review-Runden kostet: Review-Runden und blockierte Runden je Modus, zugeordnet über die Issue-Nummer.
 - **`ci.github: manual` (E4):**
   - **Was gerendert wird:** Die Workflows laufen nur noch per Hand (`workflow_dispatch`, auch ohne Zeitplan). Das Schutz-Skript wird nicht gerendert.
   - **Durchsetzung:** Sie liegt beim pre-push-Hook eines Klons.
   - **Werte:** Ein Validator lässt nur `true`, `false` und `manual` zu. Ein String `"true"` wird jetzt verweigert.
-  - **Bestehende Projekte:** Bei `true` und `false` bleibt alles, wie es war; die Workflow-Dateien sind nun Jinja-Vorlagen und rendern bei `true` gleich.
+  - **Bestehende Projekte:** Bei `true` und `false` bleiben Trigger und Schritte, wie sie waren. Die Workflow-Dateien sind nun Jinja-Vorlagen.
+- **Overlays für Projektnotizen, mit Bruchprüfung (Owner, 2026-10-15):**
+  - **Ablage:** Projektnotizen zu Template-Docs und -Befehlen stehen in `docs/process/<doc>.local.md` (Befehle: `docs/process/commands/<name>.local.md`), nicht mehr im Template-Doc selbst. Kopf: `overlay-of:`. Anker: `extends`/`replaces: "<Überschrift>" @<hash>`.
+  - **Prüfschritt:** Das neue Kern-Gate `overlays` (`check_overlays.py`) wird rot, wenn ein verankerter Abschnitt verschwindet oder sich ändert. Das gilt als möglicher Breaking Change, bis jemand Overlay und Abschnitt gelesen und mit `--stamp` neu gestempelt hat.
+  - **Beim Update:** `template_update.py` meldet die zu prüfenden Overlays direkt nach dem Update.
+  - **In der Session:** `rehydrate` listet die Overlays.
+  - **Doku:** `docs/process/overlays.md`.
+  - Bestehende `*.local.md` ohne `overlay-of:` (etwa `review.local.md`) sind keine Overlays und bleiben ungeprüft.
 - **Verhaltensänderung:** Eine bestehende `codex`-Zelle in `model-policy.local.json` läuft weiter auf dem einfachen Runner. Nur `--harness codex` nutzt den Supervisor.
 - **Für Kenni (in dieser Reihenfolge):**
-  1. `ci: {github: manual}` in `.copier-answers.yml` setzen.
-  2. Update auf v2.73.0. Bei Konflikten die Template-Fassung von `.github/workflows/process-gates.yml`, `scripts/process/dispatch.py`, `docs/process/tower.md` und `scripts/process/rehydrate.py` übernehmen. `setup_branch_protection.sh` entfällt.
-  3. Kennis Modellnamen, Zeitlimits und `context_sources` (mit Kennis Skill) nach `model-policy.codex.local.json` übertragen. Danach `docs/process/model-policy.codex.json` auf die Template-Fassung zurücksetzen.
-  4. `scripts/process/dispatch.py` und `docs/process/tower.md` aus `.process-owned` streichen.
-  5. Kennis Codex-Tests sind jetzt Template-Tests (`tests/test_dispatch_codex.py`). Der Advisory-Test entfällt nach der Owner-Entscheidung. Die Legacy-Wrapper (`scripts/codex-*.sh`) bleiben lokal; sie rufen `legacy_preflight`, das im Template fehlt. Kenni behält es bis zum Umbau der Wrapper in einer eigenen Datei.
+  1. **Vor dem Update:**
+     - `ci: {github: manual}` in `.copier-answers.yml` setzen.
+     - `legacy_preflight` aus `scripts/process/_dispatch_codex.py` in eine Kenni-eigene Datei außerhalb von `scripts/process/` verschieben und `scripts/codex-*.sh` darauf umstellen. Das Template ersetzt `_dispatch_codex.py`.
+  2. **Update auf v2.73.0.** Bei Konflikten die Template-Fassung übernehmen:
+     - `scripts/process/` (Naht-Dateien, `dispatch.py`, `_dispatch_codex.py`, `rehydrate.py`), `docs/process/tower.md`, `.github/workflows/process-gates.yml`.
+     - Die Befehle, sofern Kennis Abweichung überholt ist.
+     - `setup_branch_protection.sh` entfällt.
+  3. **Kennis eigene Regeln in Overlays verschieben**, statt sie in Template-Docs zu behalten, jeweils verankert und mit `--stamp`:
+     - Sprachregel (ADR-0063), Qualität/Tempo (ADR-0065), Owner-Notizen in `risk-tiers.md`, `feature-registry.md`, `github-issues.md`.
+     - Quick-Eskalation und Governance-only-Weg.
+     - Runner-Details aus `testing.md`.
+  4. **Codex-Werte** (Modellnamen, Zeitlimits, `context_sources` mit Kennis Skill und `docs/dev/codex-model-policy.md`) nach `docs/process/model-policy.codex.local.json` übertragen. Die Template-Datei bleibt unverändert.
+  5. **`.process-owned` leeren.** Kennis Gate-Code gleicht dann dem Release, und weitere Updates sind keine Tier-3-Migration.
+  6. **Kenni-Tests anpassen oder streichen:**
+     - `backend/tests/scripts/test_dispatch_codex.py`: beratender Handoff.
+     - `test_legacy_codex_policy.py`: neuer Pfad von `legacy_preflight`.
+     - `test_dispatch_v2_70_port.py`: `TOWER_DEFAULT_STALE_MINUTES`.
 - **Später:** die Sprachwahl als Copier-Antwort (E3) und die Pflicht-Deklaration im Design-Contract-Gate (E5).
 
 **v2.72.0 — Kenni-Rückport I: Merge-Scope im Zertifikat, Stufenzeiten, Plan-Anker, gestrichene ACs, Betriebslehren (#226, #234, #235, #221).** Plan: `docs/analysis/2026-10-15-kenni-backport.md`. Tier 3, weil Gate-Code betroffen ist. Reines Update; für Kenni gibt es einen optionalen Aufräumschritt. Vom Owner am 2026-10-15 freigegeben.

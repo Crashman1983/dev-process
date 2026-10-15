@@ -223,6 +223,16 @@ carry the work id.
 
 ## Anchors: what goes where, and how to scale them
 
+**Project notes on a template doc go into an overlay, never into the doc.** A
+template-owned doc or command (`docs/process/*.md`, `.claude/commands/*.md`)
+is replaced by every template update; a project's own rule, specialisation or
+note lives in an overlay beside it — `docs/process/<doc>.local.md`, or
+`docs/process/commands/<command>.local.md` for a command — anchored to the
+sections it extends or replaces. The `overlays` gate re-checks every anchor
+against the template, so a central change that touches what an overlay builds
+on surfaces as a red gate, not as a silent contradiction
+(`docs/process/overlays.md`).
+
 The anchor files (`CLAUDE.md`, `AGENTS.md`, and any harness equivalent) are thin
 by design: the authoritative process lives in `docs/process/`. Keep them thin as
 the project grows.

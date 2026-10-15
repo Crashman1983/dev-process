@@ -18,6 +18,10 @@ kleineres Hilfsmodell es übernimmt, und die Vorlage misst, ob sich das
 lohnt. Projekte ohne bezahltes GitHub-CI wählen jetzt `manual`: Die
 Prüfschritte bleiben als Knopf zum Selbststarten, und verlässlich prüft der
 Push.
+Eigene Regeln eines Projekts zu den Prozess-Dokumenten stehen jetzt in
+eigenen Ergänzungsdateien statt in den Dokumenten der Vorlage. Ändert eine
+neue Version eine Stelle, auf die so eine Ergänzung aufbaut, meldet die
+Prüfung das, bis jemand nachgesehen hat, ob beides noch zusammenpasst.
 
 ## v2.72.0 — Was ein Projekt gelernt hat, kommt zurück in die Vorlage
 

@@ -165,3 +165,27 @@ Ergebnis: Block mit zwei Majors und fünf Minors. Die Mechanik aus Runde 2 hält
 - **R3-5 Kopf des Berichts:** `phase: plan` beim Plan-Review. `work:` trägt die Work-Id, und REFUTE-Zeilen nennen genau sie.
 - **R3-6 Kein doppelter Attest:** Vor dem Attest sucht `handoff` im Journal eine REVIEW-Zeile mit derselben Work, demselben Modell und demselben Head. Findet es eine, gilt der Lauf als erledigt.
 - **R3-7 Push verweigert:** `blocked` mit dem Hinweis, dass origin sich bewegt hat und der neue Head ein neues Review braucht.
+
+## Refute Runde 1 und Code-Review Runde 1 — Änderungen
+
+Refute: widerlegt (F1–F8). Code-Review: Block (5 Majors, 7 Minors). Owner am 2026-10-15: „Befunde genau prüfen, ob sie unseren Zielen widersprechen“. Keiner stellt ein Ziel infrage, mehrere zeigen Stellen, an denen der Code ein Ziel verfehlt. Alle sind eingearbeitet:
+
+- **Unabhängigkeit (F1, F2):** Die Familien werden an der Basis gelesen, nicht am Branch. Alle Implementierer-Modelle zählen. `--implementer` gilt nur, wenn nichts gemessen ist; ein Widerspruch zu den Berichten wird verweigert.
+- **Kette (CR1):** Der Harness geht nie über einen Review hinweg. Sonst schreibt Codex die Fix-Runde und der nächste Review ist `single-family`.
+- **Ausweg (CR2):** Ein Lauf, der scheitert, abbricht oder kein gültiges Ergebnis liefert, schreibt die Row-Id mit Head; der Hinweis nennt `--tier`.
+- **Wiederholbarkeit:** Ein Absturz nach dem Commit wird aus der REVIEW-Zeile fertiggestellt (CR4, F6). Ein Commit-Fehler stellt den Worktree wieder her, angelegte Ordner eingeschlossen (CR3, F7).
+- **Eingaben:** Nur getrackte Pläne mit angehängten Records fahren mit (F5). Befunde tragen eine gültige Issue-Referenz oder `-` (CR8). Zeilenumbrüche aller Art werden abgelehnt (F8).
+- **rehydrate (F3):** Eine kaputte lokale Policy und Pfade außerhalb des Repos stoppen die Session sichtbar. Alle vorhandenen Anker (`AGENTS.md` und `CLAUDE.md`) werden geladen. `--install` trägt `.codex/` in `.git/info/exclude` ein (CR6).
+- **Tower (F4, CR12):** Kaputte Spuren kosten einen Befund, nie die Tabelle. `codex-block-overridden` gilt nur für Arbeiten aktiver Pläne.
+- **CI (CR10):** Der Kommentar steht nur im `manual`-Zweig. Bei `true` steht im Workflow kein Wort über `manual`.
+- **D8 (CR11), benannte Reduktion:** Die Messung gruppiert Review-Runden und blockierte Runden nach Modus. Fix-Streaks und Slugs bleiben draußen, bis Daten zeigen, dass sie fehlen.
+- **Tests (CR9):** Tier-2-Gate-Code mit Refute im Bericht, Plan-Review-Handoff, Fertigstellen nach Absturz, Rückbau nach Commit-Fehler, Kette.
+
+## D12 — Overlays und der Prüfschritt (Owner, 2026-10-15)
+
+„dev-process ist führend, praktische Erkenntnisse aus Kenni fließen ein“, und: „Passen zentrale Änderungen noch zu vorhandenen lokalen Overlays, oder gibt es einen Breaking Change?“
+
+- **Ablage:** Projektnotizen zu Template-Docs und -Befehlen stehen in `docs/process/<doc>.local.md` (Befehle: `docs/process/commands/<name>.local.md`). Kopf: `overlay-of:`. Anker: `extends`/`replaces: "<Überschrift>" @<hash>`.
+- **Prüfschritt:** Das Kern-Gate `overlays` (`check_overlays.py`) wird rot, wenn ein verankerter Abschnitt verschwindet oder sich ändert. Es bleibt rot, bis jemand Overlay und Abschnitt gelesen und mit `--stamp` neu gestempelt hat. `template_update.py` meldet solche Overlays direkt nach dem Update.
+- **Sichtbarkeit:** `rehydrate` listet die Overlays im Session-Kontext.
+- **Doku:** `docs/process/overlays.md`. Ein Release, das verankerte Abschnitte ändert, nennt sie im CHANGELOG.

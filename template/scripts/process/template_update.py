@@ -332,6 +332,12 @@ def main(argv: list[str] | None = None) -> int:
     for rel in leftover_conflicts(root, owned):
         print(f"template-update: conflict markers left in {rel} — resolve before "
               f"committing")
+    # the project's overlays against the template it now has: a changed or removed
+    # section an overlay builds on is a possible breaking change (docs/process/overlays.md)
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from check_overlays import check as overlay_problems  # noqa: PLC0415
+    for problem in overlay_problems(root):
+        print(f"template-update: re-check an overlay — {problem}")
     print(f"template-update: {DELTA_DIR}/ is working memory — delete it once "
           f"ported (it is not meant to be committed)")
     return 0
