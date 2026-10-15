@@ -53,6 +53,7 @@ Bestandsaufnahme (Subagenten, Stichproben geprüft): Kennis `_dispatch_codex.py`
   - `tower.md`: Abschnitt „Codex worker“ mit Auswahl, Probe, Supervisor, `list`/`stop`/`handoff`, Zeitlimits (Review 15 Minuten, sonst 2 Stunden) und dem Ausweg.
   - `verification-independence.md`: Ein Codex-Review attestiert per `handoff` plus Steward. Der Satz „the end-to-end path with an attestation is Codex as a tool inside a Claude review“ entfällt.
   - `model-policy.json`-Kommentar: Verweis auf die Variante.
+  - **Voraussetzung (Owner, 2026-10-15):** Eine installierte und eingeloggte Codex CLI auf dem Entwicklungshost ist Voraussetzung für Codex-Worker und Codex-Reviews. Sie steht in `docs/SYSTEM-REQUIREMENTS.md` (Upstream) und in `tower.md`, mit der Prüfung `dispatch.py start … --harness codex --dry-run` und dem Katalog-Probe. Ohne CLI gilt der Ausweg D4.
 
 ### E2 — Übergabe oder Kontext je Paket
 
@@ -78,7 +79,6 @@ Bestandsaufnahme (Subagenten, Stichproben geprüft): Kennis `_dispatch_codex.py`
   - Die Pfad-Guards prüfen `ci.github` (Workflows bei `true` und `manual`) und `ci.github is sameas true` (Schutz-Skript).
 - **D11 Docs.**
   - `start-here.md`, `commits.md`, `git-hooks.md` und die Modul-Docs („in CI when a CI adapter is installed“) unterscheiden: Bei `manual` ist die Durchsetzung der pre-push-Hook eines Klons, und kein Dokument darf sich auf ein Workflow-Ergebnis berufen.
-  - Ohne `git_hooks` bei `manual` warnt der Gate-Runner wie bei `false`.
 
 ## Aufgaben
 

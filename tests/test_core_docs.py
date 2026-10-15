@@ -849,7 +849,7 @@ def test_the_kenni_backport_lessons_are_pinned(render, tmp_path):
                   "75 a lane stayed busy"):
         assert piece in testing, piece
     assert "Test lanes are a shared resource" in (out / "scripts/process/lane.py").read_text()
-    assert "Without a CI adapter neither route carries a hosted job" in (docs / "commits.md").read_text()
+    assert "neither route carries a hosted job" in (docs / "commits.md").read_text()
     assert "flock -n" in (docs / "improvement-weekly.md").read_text()
     assert "the inbox file with `merge=union`" in (docs / "journal-state-plans.md").read_text()
     commands = out / ".claude/commands"

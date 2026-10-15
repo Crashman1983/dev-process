@@ -2,10 +2,11 @@ name: process-kpis
 # A KPI without a trigger does not exist: the cockpit sat unread while a
 # 20% fix rate accumulated (SP62). Monthly cron + manual dispatch; the report
 # lands in the run's step summary. Read-only, never blocks anything.
-on:
+on:{% if ci.github != 'manual' %}
   schedule:
     - cron: "17 6 1 * *"  # monthly, 1st, 06:17 UTC (odd minute: cron-storm etiquette)
-  workflow_dispatch:
+{%- endif %}
+  workflow_dispatch:  # by hand; ci.github: manual drops the schedule (no hosted minutes)
 permissions:
   contents: read
 jobs:

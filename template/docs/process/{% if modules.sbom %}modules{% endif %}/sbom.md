@@ -38,7 +38,7 @@ Copy the shipped `sbom-policy.example.json` to a policy file named
 
 ## The gate
 
-`scripts/process/check_sbom.py` runs via `process-gates` (in CI when a CI adapter is installed) and the pre-push hook.
+`scripts/process/check_sbom.py` runs via `process-gates` (in hosted CI with `ci.github: true`) and the pre-push hook.
 It degrades like the other gates — advisory when data is absent, hard on a real
 violation:
 

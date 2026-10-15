@@ -1,10 +1,18 @@
 name: process-gates
+{% if ci.github == 'manual' -%}
+# ci.github: manual — no hosted trigger: the pre-push hook of a clone is the
+# gate (docs/process/start-here.md); this workflow is a by-hand run of the same
+# checks and nothing may rely on its result.
+on:
+  workflow_dispatch:
+{% else -%}
 # push only on main: PR branches already run via pull_request; [push, pull_request]
 # would run every PR push twice.
 on:
   push:
     branches: [main]
   pull_request:
+{% endif -%}
 # least privilege: the gate job only reads the working tree and exits.
 permissions:
   contents: read
