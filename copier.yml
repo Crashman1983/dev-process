@@ -38,9 +38,15 @@ ci:
   type: yaml
   help: >-
     CI adapter rendering the process-gates job (github: Actions workflow).
-    With it off, enforcement degrades to the local git-hooks module only.
+    github: true runs it on push and pull request (branch protection can
+    require it); manual renders the workflows for by-hand runs only — no
+    hosted trigger, the pre-push hook of a clone is the gate; false renders
+    none. Without hosted CI, enforcement is the local git-hooks module.
   default:
     github: true
+  validator: >-
+    {% if ci is not mapping or ci.github is not defined
+          or not (ci.github is sameas true or ci.github is sameas false or ci.github == 'manual') %}ci.github must be true, false or manual{% endif %}
 
 github_repo:
   type: str

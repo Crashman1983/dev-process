@@ -2,10 +2,11 @@ name: owner-digest
 # The owner's inbound edges as one page, delivered on a schedule — an
 # influence window nobody is told about is not a window. Weekly cron +
 # manual dispatch; the digest lands in the run's step summary. Read-only.
-on:
+on:{% if ci.github != 'manual' %}
   schedule:
     - cron: "23 5 * * 1"  # Mondays 05:23 UTC (odd minute: cron-storm etiquette)
-  workflow_dispatch:
+{%- endif %}
+  workflow_dispatch:  # by hand; ci.github: manual drops the schedule (no hosted minutes)
 permissions:
   contents: read
 jobs:

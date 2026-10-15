@@ -102,6 +102,6 @@ the lane is free or the certificate exists; it does not loop on the push.
 ## Honest ceiling
 
 Hooks are client-side: a clone that never installs them enforces nothing
-locally. CI (the `ci.github` adapter plus branch protection) remains the
+locally. CI (the `ci.github: true` adapter plus branch protection) remains the
 enforcement authority; this module is the fast local mirror of it, and — in
-a no-CI setup — the only pillar (`start-here.md`, enforcement wiring).
+a no-CI or `ci.github: manual` setup — the only pillar (`start-here.md`, enforcement wiring).
