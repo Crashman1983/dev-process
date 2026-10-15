@@ -9,6 +9,20 @@ ein Eintrag ohne Plan oder Issue hat keine Details-Zeile. In wenigen Sätzen je 
 English version: [CHANGELOG.md](CHANGELOG.md). Die Geschichte vor v2.28.2
 (Sub-Projekte): [docs/changelog-archive.md](docs/changelog-archive.md).
 
+## v2.74.1 — Der Familienname aus /review gibt ab own_family_from_tier wieder frei · 2026-10-15
+
+**Warum.** `/review` hält einen Pass mit `--model <family>` fest, zum Beispiel `claude`. Ab `own_family_from_tier` zählte v2.74.0 nur Modelle, deren Klasse die Ränge kennen (`claude-opus`). Ein Pass, der so festgehalten wurde, wie es dokumentiert ist, gab deshalb weder im Gate noch in `finish.py` noch im Zug frei. Kenni fand das im Review seines v2.74-Updates; dort hätte es laufende Tier-3-Pässe abgelehnt.
+
+**Was sich ändert.**
+- Ein bloßer Familienname zählt als eigene Familie, wenn eine gerankte Klasse zu ihm gehört (`claude` für `claude-*`). Der Name einer anderen Familie (`codex`, `gpt`), ein angefangenes Präfix (`claude-op`) und ein Nicht-Name (`opus`) zählen nicht.
+- Der bloße Name bleibt ohne Klasse: Eine Plan-Review braucht weiter die konkrete Modell-ID.
+
+**Update.** Nichts zu tun. Nur Projekte, die `own_family_from_tier` setzen, merken es.
+
+**Geänderte Abschnitte.** `verification-independence.md` (Enforcement)
+
+Details: #260
+
 ## v2.74.0 — Weniger Projektabweichung, Codex-Handoff repariert, lesbarer CHANGELOG · 2026-10-15
 
 **Warum.** Kenni hielt nach v2.73 noch eine eigene Kernel-Fassung, zwei eigene Gate-Skripte im Template-Verzeichnis und mehrere Overlays nur dafür, dass dem Template eine Option fehlte. Der neue Codex-Handoff ließ einen fehlgeschlagenen Push liegen und prüfte den Katalog im falschen Verzeichnis. Der CHANGELOG war ein Commit-Protokoll ohne Gliederung.

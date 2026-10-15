@@ -10,6 +10,20 @@ A few plain sentences per release: [NEWS.md](NEWS.md). Deutsche Fassung:
 [CHANGELOG-DE.md](CHANGELOG-DE.md). History before v2.28.2 (sub-projects, German):
 [docs/changelog-archive.md](docs/changelog-archive.md).
 
+## v2.74.1 — The family name /review records clears again from own_family_from_tier · 2026-10-15
+
+**Why.** `/review` records a pass with `--model <family>`, for example `claude`. From `own_family_from_tier` on, v2.74.0 counted only models whose class the ranks know (`claude-opus`), so a pass recorded the documented way cleared nothing in the gate, in `finish.py` and in the train. Kenni found it in the review of its v2.74 update, where it would have refused current Tier 3 passes.
+
+**What changes.**
+- A bare family name counts as the project's own family when a ranked class belongs to it (`claude` for `claude-*`). Another family's name (`codex`, `gpt`), a partial prefix (`claude-op`) or a non-name (`opus`) does not.
+- The bare name stays classless: a plan review still needs the concrete model id.
+
+**Update.** Nothing to do; only projects that set `own_family_from_tier` notice it.
+
+**Changed sections.** `verification-independence.md` (Enforcement)
+
+Details: #260
+
 ## v2.74.0 — Fewer project deviations, Codex handoff fixed, readable CHANGELOG · 2026-10-15
 
 **Why.** After v2.73 Kenni still kept its own kernel text, two gate scripts of its own in the template directory and several overlays, only because the template lacked an option. The new Codex handoff left a failed push behind and asked the catalog in the wrong directory. The CHANGELOG was a commit log without structure.
