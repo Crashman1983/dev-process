@@ -78,6 +78,27 @@ is not identity: `C8` and `C08` are the same element. Keep labels that are
 *not* contract IDs (finding numbers, brief items) out of the registered
 families, or register only the families the contract really owns.
 
+## Declaring the contract
+
+Optional, per project. A project that wants every visual change to name its
+norm writes `docs/process/design-contract-declaration.json`:
+`{"from": "YYYY-MM-DD", "spec_above": N}`. From then on every active Tier 2+
+plan states `design-contract: <surface> | n/a — <reason>`, and a declared
+contract carries a non-empty `## Design Contract Trace` (the contract
+sections, screen IDs and briefs the work follows, and every deviation).
+Naming the contract's path alone no longer binds such a plan. Red: no line,
+an unregistered surface, `n/a` without a reason, a missing or empty trace.
+
+- **Which plans:** a plan under `.process-work/plans/` whose first commit is
+  on or after `from` (the author day — a backdated file name proves nothing;
+  an uncommitted plan is bound), and a Spec Kit plan numbered above
+  `spec_above` (all of them without it). Older plans get one summary note.
+- **Read at the fork point**, like the review evidence rules: a branch
+  cannot lift the duty for itself. The file lives beside the registry
+  folder, not in it — it is no surface.
+- Without the file nothing changes. Whether the trace matches the contract
+  is the review's call, never the gate's.
+
 ## Precedence — what wins when norms disagree
 
 1. the functional contract (API, capability, behaviour spec)

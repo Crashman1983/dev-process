@@ -1,8 +1,11 @@
 import hashlib
+import os
 import json
 import subprocess
 import sys
 from pathlib import Path
+
+import pytest
 
 REG = "docs/process/design-contracts"
 CONTRACT = "docs/design/web-contract.md"
@@ -531,3 +534,107 @@ def test_a_notes_sidecar_is_read_with_the_entry_and_merges_by_union(render, tmp_
     assert _gate(out).returncode == 0
     assert "*.notes.md merge=union" in (out / REG / ".gitattributes").read_text()
     assert "/inbox.md merge=union" in (out / ".process-work/.gitattributes").read_text()
+
+
+# --- declaring the contract (#248, downstream Kenni #1914): opt-in duty ----------
+
+DECL = "docs/process/design-contract-declaration.json"
+PLAN = ".process-work/plans/2026-10-15-77-widget.md"
+
+
+def _git(out: Path, *args: str) -> str:
+    return subprocess.run(["git", "-C", str(out), "-c", "user.email=t@t", "-c", "user.name=t", *args],
+                          capture_output=True, text=True, check=True).stdout.strip()
+
+
+def _declared_repo(render, tmp_path, rule: dict | None = None) -> Path:
+    """main carries the duty (or none) and a draft `web` contract; work goes on `feature`."""
+    out = _render(render, tmp_path)
+    _entry(out)
+    if rule is not None:
+        _write(out, DECL, json.dumps(rule))
+    _git(out, "init", "-q", "-b", "main")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "base")
+    _git(out, "checkout", "-q", "-b", "feature")
+    return out
+
+
+def _plan(out: Path, body: str, rel: str = PLAN, *, commit_day: str | None = None) -> None:
+    _write(out, rel, "# Plan\n\ntier: 2\nissue: #77\n\n" + body)
+    if commit_day:
+        _git(out, "add", "-A")
+        env = {**os.environ, "GIT_AUTHOR_DATE": f"{commit_day}T12:00:00", "GIT_COMMITTER_DATE": f"{commit_day}T12:00:00"}
+        subprocess.run(["git", "-C", str(out), "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q",
+                        "-m", "plan"], env=env, check=True)
+
+
+@pytest.mark.parametrize("body,needle", [
+    ("", "no `design-contract:` line"),
+    ("design-contract: n/a\n", "without a reason"),
+    ("design-contract: mobile\n", "unknown design contract `mobile`"),
+    ("design-contract: web\n", "`## Design Contract Trace` is missing or empty"),
+    ("design-contract: web\n\n## Design Contract Trace\n\n## Next\n", "missing or empty"),
+])
+def test_under_the_duty_a_plan_states_its_contract(render, tmp_path, body, needle):
+    out = _declared_repo(render, tmp_path, {"from": "2026-10-01"})
+    _plan(out, body)
+    r = _gate(out)
+    assert r.returncode == 1 and needle in r.stdout, r.stdout
+
+
+@pytest.mark.parametrize("body", ["design-contract: n/a — no screen changes\n",
+                                  "design-contract: web\n\n## Design Contract Trace\n\nS01 header, C02 pill.\n"])
+def test_a_stated_contract_satisfies_the_duty(render, tmp_path, body):
+    out = _declared_repo(render, tmp_path, {"from": "2026-10-01"})
+    _plan(out, body)
+    assert _gate(out).returncode == 0, _gate(out).stdout
+
+
+def test_without_the_duty_nothing_changes(render, tmp_path):
+    out = _declared_repo(render, tmp_path)
+    _plan(out, "")  # no line at all: fine, as before
+    assert _gate(out).returncode == 0
+
+
+def test_a_plan_from_before_the_day_is_a_note_and_a_backdated_name_proves_nothing(render, tmp_path):
+    out = _declared_repo(render, tmp_path, {"from": "2026-10-01"})
+    _plan(out, "", rel=".process-work/plans/2026-09-01-old.md", commit_day="2026-09-02")
+    r = _gate(out)
+    assert r.returncode == 0 and "predate the declaration duty" in r.stdout, r.stdout
+    # a plan named for an old day but added now is bound
+    _plan(out, "", rel=".process-work/plans/2026-08-01-backdated.md")
+    r = _gate(out)
+    assert r.returncode == 1 and "2026-08-01-backdated.md: no `design-contract:` line" in r.stdout, r.stdout
+
+
+def test_spec_plans_bind_above_the_spec_number(render, tmp_path):
+    out = _declared_repo(render, tmp_path, {"from": "2026-10-01", "spec_above": 5})
+    _plan(out, "", rel="specs/0005-old/plan.md")
+    assert _gate(out).returncode == 0
+    _plan(out, "", rel="specs/0006-new/plan.md")
+    r = _gate(out)
+    assert r.returncode == 1 and "specs/0006-new/plan.md" in r.stdout, r.stdout
+
+
+def test_a_branch_cannot_lift_the_duty_for_itself(render, tmp_path):
+    out = _declared_repo(render, tmp_path, {"from": "2026-10-01"})
+    _git(out, "rm", "-q", DECL)
+    _git(out, "commit", "-q", "-m", "chore: drop the duty")
+    _plan(out, "")
+    r = _gate(out)
+    assert r.returncode == 1 and "no `design-contract:` line" in r.stdout, r.stdout  # the fork point has it
+
+
+def test_a_malformed_duty_is_named(render, tmp_path):
+    out = _declared_repo(render, tmp_path, {"from": "October"})
+    r = _gate(out)
+    assert r.returncode == 1 and 'needs "from": "YYYY-MM-DD"' in r.stdout, r.stdout
+
+
+def test_the_duty_file_is_no_registry_entry(render, tmp_path):
+    """Plan review v2.74: inside the registry folder it would be read as a broken surface."""
+    out = _render(render, tmp_path)
+    _write(out, DECL, json.dumps({"from": "2026-10-01"}))
+    r = _gate(out)
+    assert r.returncode == 0 and "no design contracts yet" in r.stdout, r.stdout
