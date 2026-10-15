@@ -9,6 +9,30 @@ ein Eintrag ohne Plan oder Issue hat keine Details-Zeile. In wenigen Sätzen je 
 English version: [CHANGELOG.md](CHANGELOG.md). Die Geschichte vor v2.28.2
 (Sub-Projekte): [docs/changelog-archive.md](docs/changelog-archive.md).
 
+## v2.74.0 — Weniger Projektabweichung, Codex-Handoff repariert, lesbarer CHANGELOG · 2026-10-15
+
+**Warum.** Kenni hielt nach v2.73 noch eine eigene Kernel-Fassung, zwei eigene Gate-Skripte im Template-Verzeichnis und mehrere Overlays nur dafür, dass dem Template eine Option fehlte. Der neue Codex-Handoff ließ einen fehlgeschlagenen Push liegen und prüfte den Katalog im falschen Verzeichnis. Der CHANGELOG war ein Commit-Protokoll ohne Gliederung.
+
+**Was sich ändert.**
+- Die Sprache der Artefakte ist eine Copier-Antwort: `artifact_language: english` (wie bisher) oder `conversation` (Code, Commits, Issues und Contract-Docs englisch, Prosa des Operators in der Gesprächssprache).
+- `review_evidence.own_family_from_tier` lässt ab einem Tier nur Pässe der eigenen Modellfamilie freigeben; Gate, `finish.py` und Train fragen denselben Owner.
+- Das Modul `design_contracts` kennt eine Opt-in-Pflicht: Mit `design-contract-declaration.local.json` erklärt jeder Tier-2+-Plan seinen Contract oder `n/a — <Grund>`.
+- `due_measurements.py` meldet fällige Messmeilensteine aus `milestones.local.json`, bis ein Bericht `milestone: <id>` trägt.
+- `/execute` verlangt für jede Übergabe verbotene Pfade, ACs und engen Prüfbefehl, zurück kommt Rot vor und Grün nach der Änderung; ein größeres Modell braucht einen benannten Grund.
+- Weitere Korrekturen: Ein fehlgeschlagener Attest-Push wird wiederholt, der Codex-Katalog wird im Worktree gefragt, Testtitel dürfen Kommas tragen, FINDING-Zeilen nennen mit `by=` ihren Reviewer, und MAKEFLAGS, die verändern, was läuft (`-i`, `--eval`, Abkürzungen), zertifizieren nichts.
+
+**Wirkung.** Ein Projekt drückt seine Eigenheiten über Antworten und lokale Dateien aus statt über eigene Fassungen von Template-Dateien; Updates laufen ohne Konflikte im Kernel und ohne eigene Gate-Skripte. Der CHANGELOG sagt je Release, warum es sich geändert hat und wozu es führt, auf Englisch und Deutsch.
+
+**Update.**
+1. Wer die Prosa in der Gesprächssprache schreibt, setzt vor dem Update `artifact_language: conversation` in `.copier-answers.yml`; eine handgepflegte Sprachzeile im Kernel entfällt dann.
+2. Wer die neuen Optionen will: `own_family_from_tier` in `model-policy.local.json`, `milestones.local.json`, `design-contract-declaration.local.json`. Ohne sie ändert sich nichts.
+3. Strenger als bisher: eine AC-Zeile mit Komma im Text, die keine zweite Referenz meint, ist jetzt eine Referenz; MAKEFLAGS mit unbekannter Langoption zertifiziert nichts.
+4. Für Kenni: die Schritte stehen im Abschnitt Migration des [Plans](docs/analysis/2026-10-15-v2.74.md); das alte Gate `check_tier3_claude_pass.py` entfällt erst in einem Folge-Commit nach dem Merge.
+
+**Geänderte Abschnitte.** `kernel.md` (Always-on kernel, nur bei `conversation`), `start-here.md` (Purpose, Dialogue rules, nur bei `conversation`), `improvement-weekly.md` (Inputs, Steps), `optimization.md` (The record), `tower.md` (Dispatch and the model policy), `train.md` (The run), `verification-independence.md` (Enforcement), Modul `github-issues` (Review and audit visibility), Modul `design-contracts`, `/execute` und sein Copilot-Prompt
+
+Details: [Plan](docs/analysis/2026-10-15-v2.74.md) #231 #237 #239 #240 #241 #242 #243 #244 #245 #246 #247 #248
+
 ## v2.73.0 — Codex-Review attestiert, Overlays für Projektnotizen, manuelles CI · 2026-10-15
 
 **Warum.** Kenni führte Codex-Worker, die Übergabe-Regel je Paket und den Verzicht auf gehostetes CI als eigene Fassungen; das Template nimmt sie auf, damit Kenni nicht davonläuft. Projektnotizen in Template-Docs hatten keine Prüfung, ob eine Template-Änderung sie bricht.

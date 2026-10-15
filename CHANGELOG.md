@@ -10,6 +10,30 @@ A few plain sentences per release: [NEWS.md](NEWS.md). Deutsche Fassung:
 [CHANGELOG-DE.md](CHANGELOG-DE.md). History before v2.28.2 (sub-projects, German):
 [docs/changelog-archive.md](docs/changelog-archive.md).
 
+## v2.74.0 — Fewer project deviations, Codex handoff fixed, readable CHANGELOG · 2026-10-15
+
+**Why.** After v2.73 Kenni still kept its own kernel text, two gate scripts of its own in the template directory and several overlays, only because the template lacked an option. The new Codex handoff left a failed push behind and asked the catalog in the wrong directory. The CHANGELOG was a commit log without structure.
+
+**What changes.**
+- The language of artifacts is a copier answer: `artifact_language: english` (as before) or `conversation` (code, commits, issues and contract docs in English, the operator's prose in the conversation language).
+- `review_evidence.own_family_from_tier` lets only passes of the project's own model family clear a plan from that tier on; the gate, `finish.py` and the train ask the same owner.
+- The `design_contracts` module has an opt-in duty: with `design-contract-declaration.local.json` every Tier 2+ plan declares its contract or `n/a — <reason>`.
+- `due_measurements.py` reports due measurement milestones from `milestones.local.json` until a report carries `milestone: <id>`.
+- `/execute` requires every handoff to carry forbidden paths, its ACs and the narrow proving command, and to return red before and green after the change; a larger model needs a named reason.
+- Further fixes: a failed attest push is retried, the Codex catalog is asked in the worktree, test titles may hold commas, FINDING lines name their reviewer with `by=`, and MAKEFLAGS that change what runs (`-i`, `--eval`, abbreviations) certify nothing.
+
+**Effect.** A project expresses its specifics through answers and local files instead of its own versions of template files; updates run without kernel conflicts and without gate scripts of its own. The CHANGELOG says per release why something changed and what it leads to, in English and German.
+
+**Update.**
+1. A project that writes its prose in the conversation language sets `artifact_language: conversation` in `.copier-answers.yml` before the update; a hand-kept language line in the kernel then goes away.
+2. To use the new options: `own_family_from_tier` in `model-policy.local.json`, `milestones.local.json`, `design-contract-declaration.local.json`. Without them nothing changes.
+3. Stricter than before: an AC line with a comma in its text that names no second reference is now one reference; MAKEFLAGS with an unknown long option certifies nothing.
+4. For Kenni: the steps are in the Migration section of the [plan](docs/analysis/2026-10-15-v2.74.md); the old gate `check_tier3_claude_pass.py` goes only in a follow-up commit after the merge.
+
+**Changed sections.** `kernel.md` (Always-on kernel, only with `conversation`), `start-here.md` (Purpose, Dialogue rules, only with `conversation`), `improvement-weekly.md` (Inputs, Steps), `optimization.md` (The record), `tower.md` (Dispatch and the model policy), `train.md` (The run), `verification-independence.md` (Enforcement), module `github-issues` (Review and audit visibility), module `design-contracts`, `/execute` and its Copilot prompt
+
+Details: [Plan](docs/analysis/2026-10-15-v2.74.md) #231 #237 #239 #240 #241 #242 #243 #244 #245 #246 #247 #248
+
 ## v2.73.0 — Codex review attested, overlays for project notes, manual CI · 2026-10-15
 
 **Why.** Kenni ran Codex workers, the per-package handoff rule and the opt-out of hosted CI as its own variants; the template adopts them so Kenni does not drift away. Project notes in template docs had no check for whether a template change breaks them.
