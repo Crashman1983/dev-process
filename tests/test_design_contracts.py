@@ -700,8 +700,30 @@ def test_a_renamed_old_plan_keeps_its_age(render, tmp_path):
     assert r.returncode == 0 and "predate the declaration duty" in r.stdout, r.stdout
 
 
-def test_an_info_string_fence_line_closes_nothing(render, tmp_path):
-    """Delta review v2.74: ```python inside a fence closed it (CommonMark: a closing fence has no info)."""
+def test_a_renamed_and_rewritten_old_plan_is_new(render, tmp_path):
+    """Delta round 3: an old plan renamed and given another issue lent its age to new work."""
     out = _declared_repo(render, tmp_path, {"from": "2026-10-01"})
-    _plan(out, "```text\n```python\n```\n\ndesign-contract: n/a — no screen\n")
-    assert _gate(out).returncode == 0, _gate(out).stdout
+    _git(out, "checkout", "-q", "main")
+    _plan(out, "", rel=".process-work/plans/2026-09-01-old.md", commit_day="2026-09-02")
+    _git(out, "checkout", "-q", "feature")
+    _git(out, "merge", "-q", "--no-edit", "main")
+    _git(out, "mv", ".process-work/plans/2026-09-01-old.md", ".process-work/plans/2026-10-15-new.md")
+    path = out / ".process-work/plans/2026-10-15-new.md"
+    path.write_text(path.read_text().replace("#77", "#99"))
+    _git(out, "commit", "-qam", "new work in an old file")
+    r = _gate(out)
+    assert r.returncode == 1 and "2026-10-15-new.md: no `design-contract:` line" in r.stdout, r.stdout
+
+
+def test_an_old_plan_edited_in_place_keeps_its_age(render, tmp_path):
+    """Delta round 3: editing an old plan's issue line made it bound."""
+    out = _declared_repo(render, tmp_path, {"from": "2026-10-01"})
+    _git(out, "checkout", "-q", "main")
+    _plan(out, "", rel=".process-work/plans/2026-09-01-old.md", commit_day="2026-09-02")
+    _git(out, "checkout", "-q", "feature")
+    _git(out, "merge", "-q", "--no-edit", "main")
+    path = out / ".process-work/plans/2026-09-01-old.md"
+    path.write_text(path.read_text().replace("#77", "#78"))
+    _git(out, "commit", "-qam", "edit")
+    r = _gate(out)
+    assert r.returncode == 0 and "predate the declaration duty" in r.stdout, r.stdout

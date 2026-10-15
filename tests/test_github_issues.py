@@ -551,6 +551,10 @@ def test_a_finding_names_its_reviewer_anywhere_among_its_keys(render, tmp_path):
     # but a bad `by=` with keys after it is an error, never a hiding place for them
     (fields, err, _line), = gate.report_findings("FINDING sev=major action=fix issue=- by=Codex kind=bogus Title\n")
     assert fields is None and "no reviewer family" in err
+    # only the token right after `by=` decides: a key later in the title is title text
+    (fields, err, _line), = gate.report_findings(
+        "FINDING sev=minor action=accept issue=- by=Reference: aliasing of issue=42 in the guard\n")
+    assert err is None and fields["title"].startswith("by=Reference:")
     _report(out, "2026-07-05-x.md", VALID_REPORT +
             "FINDING sev=minor action=fix issue=- by=codex by=claude twice\n")
     r = _run(out)
