@@ -709,7 +709,8 @@ def _arithmetic_violations(rel: str, records: list[tuple[int, dict]]) -> list[st
 # and the local gate configuration: which gates run, which models review
 GATE_PATHS = ("scripts/process/", ".githooks/", ".github/workflows/")
 GATE_FILES = ("Makefile", ".pre-commit-config.yaml",
-              "docs/process/gates.local.json", "docs/process/model-policy.local.json")
+              "docs/process/gates.local.json", "docs/process/model-policy.local.json",
+              "docs/process/model-policy.codex.json", "docs/process/model-policy.codex.local.json")
 REVIEW_REPORTS = ".process-work/reviews"
 _REPORT_KEY = re.compile(r"^\s*(?:[-*+]\s+)?[*_]*(review|audit|work|phase)[*_]*\s*:\s*(\S+)", re.IGNORECASE)
 

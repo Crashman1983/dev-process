@@ -4,6 +4,8 @@
     python3 scripts/process/rehydrate.py              # print the context (a SessionStart hook)
     python3 scripts/process/rehydrate.py --install    # add the hook to .claude/settings.json (idempotent)
     python3 scripts/process/rehydrate.py --check      # exit 1 when the hook is missing
+    python3 scripts/process/rehydrate.py --codex      # the same for a Codex session: SessionStart JSON
+    python3 scripts/process/rehydrate.py --codex --install|--check   # its local .codex/hooks.json
 
 The rules say "after a compaction re-read the kernel, the mandatory rules
 and the plan's Decisions ledger" — but a sentence that has to survive the
@@ -18,10 +20,16 @@ every other plan and spec dir as one capped index line).
 
 `--install` merges one hook entry into `.claude/settings.json` (matcher
 `compact|resume`) without touching anything else there; the file stays
-the project's. Stdlib only."""
+the project's. `--codex` gives a Codex session the same context as Codex's
+SessionStart JSON — the kernel, the rules, the Codex policy, `AGENTS.md` or
+`CLAUDE.md` and the policy's `context_sources` — whole or not at all: a
+missing source stops the session visibly, never a partial context. Its hook
+lives in the local, ignored `.codex/hooks.json` (add `.codex/` to the
+project's `.gitignore`). Stdlib only."""
 from __future__ import annotations
 
 import json
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -34,6 +42,11 @@ MATCHER = "compact|resume"
 START, END = "<!-- KERNEL:START -->", "<!-- KERNEL:END -->"
 MAX_DECISIONS = 12  # the latest ones; older decisions are in the plan, which the session reads on demand
 MAX_INDEX = 10  # other work, one line; the full index is a process_context.py call away
+CODEX_SETTINGS = ".codex/hooks.json"
+CODEX_MATCHER = "^(startup|resume|clear|compact)$"
+CODEX_CONTEXT_MAX_BYTES = 128_000
+CODEX_POLICY = "docs/process/model-policy.codex.json"
+CODEX_LOCAL_POLICY = "docs/process/model-policy.codex.local.json"
 
 
 def _read(p: Path) -> str:
@@ -149,11 +162,104 @@ def check(root: Path) -> int:
     return 1
 
 
+def codex_sources(root: Path) -> list[str]:
+    """What a Codex session must read: the kernel, the rules, the Codex policy, the
+    harness anchor that exists, and the policy's own `context_sources` (its local file's too)."""
+    sources = [KERNEL, RULES, CODEX_POLICY]
+    sources += [a for a in ("AGENTS.md", "CLAUDE.md") if (root / a).is_file()][:1]
+    for name in (CODEX_POLICY, CODEX_LOCAL_POLICY):
+        try:
+            extra = json.loads((root / name).read_text(encoding="utf-8")).get("context_sources") or []
+        except (OSError, ValueError, AttributeError):
+            continue
+        sources += [s for s in extra if isinstance(s, str) and s and s not in sources]
+    return sources
+
+
+def codex_output(root: Path) -> dict:
+    """The whole context, or a visible stop — never part of it."""
+    try:
+        sections = []
+        for source in codex_sources(root):
+            content = (root / source).read_text(encoding="utf-8")
+            if not content.strip():
+                raise ValueError(f"{source} is empty")
+            if source.endswith(".json") and not isinstance(json.loads(content), dict):
+                raise ValueError(f"{source} must be a JSON object")
+            sections.append(f"## Source: {source}\n\n{content}")
+        sections.append(render(root))
+        text = "# Codex session context\n\n" + "\n\n".join(sections)
+        if len(text.encode("utf-8")) > CODEX_CONTEXT_MAX_BYTES:
+            raise ValueError(f"the context exceeds {CODEX_CONTEXT_MAX_BYTES} bytes")
+    except (OSError, UnicodeError, ValueError) as exc:
+        reason = f"the process context was not loaded: {exc}"
+        return {"continue": False, "stopReason": reason, "systemMessage": reason}
+    return {"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": text}}
+
+
+def codex_hook_entry() -> dict:
+    # the absolute script path lives only in the local, ignored hook file; the
+    # session's cwd stays its own, so the same renderer reads each clone's root
+    command = f"{shlex.quote(sys.executable)} {shlex.quote(str(Path(__file__).resolve()))} --codex"
+    return {"matcher": CODEX_MATCHER, "hooks": [{
+        "type": "command", "command": command, "timeout": 45, "statusMessage": "Loading the process context",
+        "additionalContextLimit": 0}]}  # the script bounds the size itself
+
+
+def codex_config(root: Path, *, installing: bool) -> int:
+    """Install or check the hook's definition — never its runtime approval (`/hooks`)."""
+    path = root / CODEX_SETTINGS
+    try:
+        config = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+        if not isinstance(config, dict):
+            raise TypeError("expected a JSON object")
+        hooks = config.setdefault("hooks", {})
+        if not isinstance(hooks, dict):
+            raise TypeError("hooks must be an object")
+        groups = hooks.setdefault("SessionStart", [])
+        if not isinstance(groups, list):
+            raise TypeError("SessionStart must be an array")
+    except (OSError, UnicodeError, ValueError, TypeError) as exc:
+        print(f"rehydrate: {CODEX_SETTINGS}: {exc}", file=sys.stderr)
+        return 1
+    entry = codex_hook_entry()
+    if entry in groups:
+        print(f"rehydrate: the Codex SessionStart hook is in {CODEX_SETTINGS}; approve it in /hooks")
+        return 0
+    if not installing:
+        print("rehydrate: the Codex SessionStart hook is missing or changed — run "
+              "`python3 scripts/process/rehydrate.py --codex --install`", file=sys.stderr)
+        return 1
+    # from another checkout: replace only our own handler, never another event or handler
+    for index, group in enumerate(groups):
+        handlers = group.get("hooks", []) if isinstance(group, dict) else []
+        if not isinstance(handlers, list) or len(handlers) != 1 or not isinstance(handlers[0], dict):
+            continue
+        try:
+            args = shlex.split(handlers[0].get("command", ""))
+        except (ValueError, TypeError):
+            continue
+        if len(args) == 3 and Path(args[1]).name == "rehydrate.py" and args[2] == "--codex":
+            groups[index] = entry
+            break
+    else:
+        groups.append(entry)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(config, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    print(f"rehydrate: Codex SessionStart hook added to {CODEX_SETTINGS}; review and approve it in /hooks")
+    return 0
+
+
 def main(argv: list[str]) -> int:
     root = Path.cwd()
     top = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True, check=False)
     if top.returncode == 0 and top.stdout.strip():
         root = Path(top.stdout.strip())
+    if "--codex" in argv:
+        if "--install" in argv or "--check" in argv:
+            return codex_config(root, installing="--install" in argv)
+        sys.stdout.write(json.dumps(codex_output(root), ensure_ascii=False) + "\n")
+        return 0
     if "--install" in argv:
         return install(root)
     if "--check" in argv:

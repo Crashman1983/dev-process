@@ -80,6 +80,7 @@ gerenderten Repo), braucht zusätzlich:
 | Python `>=3.11` auf `PATH` | die Koordinationsskripte (`tower.py`, `dispatch.py`, `train.py`, `report.py`, `rehydrate.py`) laufen mit der Stdlib |
 | die CLI der Harness | `dispatch.py` startet Sitzungen mit dem Befehl aus `docs/process/model-policy.json`, im Standard `claude` (Claude Code) |
 | `tmux` | nur für `"runner": "tmux"`: jeder Worker wird ein sichtbares, ansprechbares Fenster |
+| Codex CLI, installiert und eingeloggt (`codex login`) | nur für Codex-Worker und Codex-Reviews (`dispatch.py … --harness codex`): `codex exec` mit `--output-schema` und `-o`, `codex app-server --stdio`, der OpenAI-Provider ohne Profil und ohne eigenen Endpunkt; getestet mit 0.154.0. Prüfen: `dispatch.py start --issue N --phase review --harness codex --dry-run` zeigt den Befehl, ein echter Start fragt den Modellkatalog. Ohne CLI gilt der aufgezeichnete Ausweg (`tower.md`, „Codex workers“) |
 | Push-Zugriff auf `origin` | nur für Phasen auf einem anderen Host (`"remote": true`) und für Meldungen mit `report.py --sync` |
 
 ## Modulbezogene Hinweise
@@ -108,5 +109,8 @@ Gerenderte Zielrepos erhalten mit `ci.github` (Default) einen
 `uv run scripts/process/gate_runner.py`. `scripts/process/setup_branch_protection.sh`
 hinterlegt ihn als Required Status Check.
 
-Ist `ci.github` aus, erzwingt remote nichts die Gates — dann ist das
-`git-hooks`-Modul die einzige Enforcement-Saeule.
+Mit `ci.github: manual` werden die Workflows gerendert, laufen aber nur per
+Hand (`workflow_dispatch`, auch ohne Zeitplan), und das Schutz-Skript entfällt:
+für Projekte ohne gehostetes CI. Ist `ci.github` aus oder `manual`, erzwingt
+remote nichts die Gates — dann ist der pre-push-Hook eines Klons (das
+`git-hooks`-Modul) die einzige Enforcement-Saeule.

@@ -1,0 +1,55 @@
+{
+  "_comment": "The Codex variant (`dispatch.py … --harness codex`, docs/process/tower.md \"Codex workers\"): every phase on a Codex model, run under the supervisor in _dispatch_codex.py. Prerequisite: an installed, logged-in Codex CLI on the host (docs/SYSTEM-REQUIREMENTS.md). Before every start the CLI's model catalog is asked; a model it does not list is refused, never substituted. The variant is complete (default and tiers 0-3 name every phase), detached, without decision_channel or CLAUDE* environment; the Claude overlay model-policy.local.json does not apply. PROJECT CHOICES (model ids, time limits, context_sources) go into docs/process/model-policy.codex.local.json, laid over this file mapping by mapping. review_timeout_minutes / timeout_minutes: the supervisor's deadline per run. context_sources: extra repository files `rehydrate.py --codex` loads into a Codex session's context. Every model named here needs a class in model-policy.json `review_evidence` (ranks or families), or start refuses: attest.py ranks a reviewer by it.",
+  "runner": "detached",
+  "command": "codex exec --model {model} --sandbox workspace-write {prompt}",
+  "max_workers": 4,
+  "review_timeout_minutes": 15,
+  "timeout_minutes": 120,
+  "context_sources": [],
+  "default": {
+    "brainstorm": "gpt-6-sol",
+    "plan": "gpt-6-sol",
+    "execute": "gpt-6-sol",
+    "review": "gpt-6-sol"
+  },
+  "tiers": {
+    "0": {
+      "brainstorm": "gpt-6-luna",
+      "plan": "gpt-6-luna",
+      "execute": "gpt-6-luna",
+      "review": "gpt-6-luna"
+    },
+    "1": {
+      "brainstorm": "gpt-6-luna",
+      "plan": "gpt-6-luna",
+      "execute": "gpt-6-luna",
+      "review": "gpt-6-luna"
+    },
+    "2": {
+      "brainstorm": "gpt-6-sol",
+      "plan": "gpt-6-sol",
+      "execute": "gpt-6-sol",
+      "review": "gpt-6-sol"
+    },
+    "3": {
+      "brainstorm": "gpt-6-astra",
+      "plan": "gpt-6-astra",
+      "execute": "gpt-6-sol",
+      "review": "gpt-6-astra"
+    }
+  },
+  "phases": {
+    "review": {
+      "command": "codex exec --model {model} --sandbox read-only {prompt}",
+      "runner": "detached"
+    }
+  },
+  "classes": {
+    "mechanical": {
+      "execute": "gpt-6-luna"
+    },
+    "design": {
+      "execute": "gpt-6-sol"
+    }
+  }
+}

@@ -741,6 +741,54 @@ def findings(table: dict, stale_minutes: int) -> list[dict]:
     return sorted(out, key=lambda f: order[f["severity"]])
 
 
+def codex_findings(root: Path, wts: list[dict]) -> list[dict]:
+    """Two traces of the Codex way out (`tower.md`, "Codex workers"): a `codex
+    unavailable <row-id>` skip in an active plan whose row this host never recorded,
+    and a block by one model family passed on the same head by another family."""
+    import _dispatch_codex as codex_run  # noqa: PLC0415
+    from attest_evidence import review_policy  # noqa: PLC0415
+    import dispatch as _dispatch  # noqa: PLC0415
+    out: list[dict] = []
+    known = codex_run.unavailable_ids(_dispatch._records_dir(root))
+    rules, _problem = review_policy(root, "HEAD")
+    ranks, fams = rules.get("ranks") or {}, rules.get("families") or []
+    seen_skips: set[tuple[str, str]] = set()
+    lines: dict[tuple[str, str], list[tuple[str, str]]] = {}
+    for wt in wts or [{"path": str(root)}]:
+        wroot = Path(wt["path"])
+        if wt.get("missing") or not wroot.is_dir():
+            continue
+        for rel, text in _review.record_texts(wroot, _review.PLAN_KINDS) or []:
+            for m in _review.SKIP_LINE.finditer(text):
+                reason = m.group("reason").split()
+                if reason[:2] == ["codex", "unavailable"] and len(reason) > 2 and reason[2] not in known:
+                    seen_skips.add((rel, reason[2]))
+        for f in (wroot / _review.JOURNAL_DIR).glob("**/*.md"):
+            for _ln, r in _review.parse_review_lines(f.read_text(encoding="utf-8", errors="replace"))[0]:
+                if r.get("head") and r.get("verdict") in ("pass", "block"):
+                    entry = (r.get("model") or "", r["verdict"])
+                    bucket = lines.setdefault((r["work"], r["head"]), [])
+                    if entry not in bucket:
+                        bucket.append(entry)
+    for rel, row in sorted(seen_skips):
+        out.append({"kind": "codex-skip-unmatched", "severity": "low",
+                    "what": f"{rel}: `codex unavailable {row}` names no attempt recorded on this host",
+                    "because": "a cross-model skip should point at a recorded Codex refusal "
+                               "(dispatch records/codex/unavailable.jsonl) — another host may hold it; if none "
+                               "does, the skip was never tried"})
+    for (work, head), entries in sorted(lines.items()):
+        fam = {m: codex_run.family(m, ranks, fams) for m, _v in entries}
+        blocks = {fam[m] for m, v in entries if v == "block" and fam[m] not in (None, "ranked")}
+        passes = [m for m, v in entries if v == "pass" and fam[m] not in blocks]
+        if blocks and passes:
+            out.append({"kind": "codex-block-overridden", "severity": "high",
+                        "what": f"work={work} head {head[:12]}: blocked by {', '.join(sorted(blocks))}, "
+                                f"passed by {', '.join(passes)} on the same head",
+                        "because": "a second family's block was answered by another family's pass instead of "
+                                   "a fix — read the block's findings before the merge"})
+    return out
+
+
 def local_findings(root: Path) -> list[dict]:
     """Additive project checks. Like local gates, these commands are reviewed code."""
     path = root / "docs/process/tower.local.json"
@@ -808,6 +856,11 @@ def build(root: Path, stale_minutes: int = 60, *, remote: bool = False) -> dict:
         "remote_fetched": fetch_ok if remote else None,
     }
     table["findings"] = findings(table, stale_minutes) + local_findings(root)
+    try:
+        table["findings"] += codex_findings(root, wts)
+    except (OSError, ValueError, SystemExit) as exc:  # a trace that cannot be read costs a finding, never the table
+        table["findings"].append({"kind": "local-findings-error", "severity": "low", "what": "codex traces",
+                                  "because": str(exc)})
     if remote and not fetch_ok:
         table["findings"].insert(0, {"kind": "remote-unreachable", "severity": "high",
                                      "what": "fetch from origin failed or timed out — `elsewhere` and "

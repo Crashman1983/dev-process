@@ -77,9 +77,16 @@ Dispatching is harness-plumbing around that artifact — pick what exists:
   sessions hung about two hours each; the bound is `gtimeout` on macOS, or the
   harness's own deadline) — this is the cross-model
   path when the implementer was a Claude, and vice versa. A dispatched Codex
-  cell runs read-only and reports only (no channel, no attest.py — the
-  steward attests from its output); the end-to-end path with attestation is
-  Codex as a tool inside a Claude review.
+  review (`dispatch.py … --harness codex`, an installed and logged-in Codex
+  CLI on the host) attests end to end: `dispatch.py handoff <branch>`
+  verifies its result against the bundle and the Git artifact, writes the
+  review report and runs attest.py in one step — `cross-model` only when the
+  implementer's model is measured and of another family (`tower.md`, "Codex
+  workers"). Its residual: whoever runs attest.py by hand with a report of
+  their own bypasses handoff — the process's threat model is accidents, not
+  an attacker. Gate code reviewed `single-family` at Tier 2 needs a REFUTE in
+  the plan (or `skipped refute`): the reviewer's own refute counts only
+  cross-model.
 - **Any chat model:** paste the bundle as the whole prompt.
 
 The reviewer's independence flags follow from the dispatch, not from wishful

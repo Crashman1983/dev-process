@@ -1,0 +1,476 @@
+"""Kenni backport II (E1): Codex workers under dispatch — the variant, the catalog
+check before every start, the supervisor's receipts, and a Codex review that
+`handoff` verifies and attests in one step (ported from Kenni #2357, whose
+harness kept Codex reviews advisory; the owner decided they attest)."""
+import importlib
+import json
+import os
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+import pytest
+
+sys.dont_write_bytecode = True
+
+MODULES = ("dispatch", "_dispatch_codex", "attest", "attest_evidence", "check_review", "report", "process_git",
+           "tower", "lane", "gate_invoke", "merge_route", "check_fix_streak", "plan_drift")
+PLAN = ("# Plan\n\nissue: #7\ntier: 2\nplan-session model: claude-opus-5\n\n## Decisions\n\n"
+        "## Acceptance criteria\n\n- AC-1: When x, the widget shall answer 42.\n")
+TEST = "from widget import widget\n\ndef test_widget():\n    assert widget() == 42\n"
+
+
+def _git(root, *args):
+    return subprocess.run(["git", *args], cwd=root, capture_output=True, text=True, check=True).stdout.strip()
+
+
+@pytest.fixture
+def mods(render, tmp_path):
+    out = render(tmp_path / "t", {"project_name": "d", "modules": {"telemetry": True}})
+    path = str(out / "scripts/process")
+    sys.path.insert(0, path)
+    for name in MODULES:
+        sys.modules.pop(name, None)
+    try:
+        yield (lambda name: importlib.import_module(name)), out
+    finally:
+        sys.path.remove(path)
+        for name in MODULES:
+            sys.modules.pop(name, None)
+
+
+def fake_codex(where: Path, mode: str = "ok", result: dict | None = None, models=("gpt-6-sol",)) -> Path:
+    """A `codex` on PATH: `app-server --stdio` answers the catalog, `exec` writes
+    `result` to its `-o` path (a review) and exits 0."""
+    where.mkdir(parents=True, exist_ok=True)
+    binary = where / "codex"
+    rows = [{"id": m, "model": m, "supportedReasoningEfforts": [{"reasoningEffort": "medium"}]} for m in models]
+    binary.write_text(f"#!{sys.executable}\n" + f"""import json, pathlib, sys, time
+MODE, RESULT, ROWS = {mode!r}, {json.dumps(json.dumps(result))}, {rows!r}
+if len(sys.argv) > 1 and sys.argv[1] == 'exec':
+    assert sys.stdin.read() == ''
+    if '-o' in sys.argv and json.loads(RESULT) is not None:
+        pathlib.Path(sys.argv[sys.argv.index('-o') + 1]).write_text(RESULT)
+    print('reviewer stdout', flush=True)
+    raise SystemExit(0)
+for line in sys.stdin:
+    r = json.loads(line)
+    if 'id' not in r:
+        continue
+    m = r['method']
+    if MODE == 'timeout':
+        time.sleep(10)
+    if MODE == 'eof':
+        break
+    if m == 'initialize':
+        out = {{}}
+    elif m == 'config/read':
+        out = {{'config': {{'model_provider': 'custom' if MODE == 'custom' else None}}}}
+        if MODE in ('base_url', 'catalog', 'profile'):
+            out['config'][{{'base_url': 'openai_base_url', 'catalog': 'model_catalog_json', 'profile': 'profile'}}[MODE]] = 'x'
+    elif m == 'account/read':
+        out = {{'account': None if MODE == 'auth' else {{'type': 'chatgpt'}}}}
+    elif m == 'model/list':
+        if r['params'].get('cursor'):
+            out = {{'data': ROWS, 'nextCursor': None}}
+        else:
+            out = {{'data': [{{'id': 'other', 'model': 'other'}}], 'nextCursor': 'page2'}}
+    if MODE == 'error':
+        print(json.dumps({{'id': r['id'], 'error': {{'message': 'failed'}}}}), flush=True)
+    else:
+        print(json.dumps({{'id': r['id'], 'result': out}}), flush=True)
+""")
+    binary.chmod(0o755)
+    return binary
+
+
+def _variant(out: Path, binary: Path, model: str = "gpt-6-sol") -> None:
+    p = out / "docs/process/model-policy.codex.json"
+    v = json.loads(p.read_text())
+    for row in [v["default"], *v["tiers"].values(), *v["classes"].values()]:
+        for ph in row:
+            row[ph] = model
+    v["command"] = f"{binary} exec --model {{model}} --sandbox workspace-write {{prompt}}"
+    v["phases"]["review"]["command"] = f"{binary} exec --model {{model}} --sandbox read-only {{prompt}}"
+    p.write_text(json.dumps(v))
+
+
+# --- the variant -----------------------------------------------------------------------
+
+def test_the_variant_is_whole_and_never_takes_the_claude_overlay(mods):
+    mod, out = mods
+    d = mod("dispatch")
+    (out / d.LOCAL_POLICY).write_text(json.dumps({"env": {"CLAUDE_CODE_SUBAGENT_MODEL": "sonnet"}}))
+    v = d.load_policy(out, harness="codex")
+    assert v["runner"] == "detached" and not v.get("env") and not v.get("decision_channel")
+    assert d.model_for(v, 3, "review") == "gpt-6-astra"
+    assert d.load_policy(out, harness="claude") == d.load_policy(out)
+    # the project's values live in its own local file, laid over the variant
+    (out / d.CODEX_LOCAL_POLICY).write_text(json.dumps({"tiers": {"3": {"review": "gpt-6-sol"}},
+                                                        "context_sources": ["AGENTS.md"]}))
+    v = d.load_policy(out, harness="codex")
+    assert d.model_for(v, 3, "review") == "gpt-6-sol" and v["context_sources"] == ["AGENTS.md"]
+
+
+@pytest.mark.parametrize("bad", ["unknown", "missing", "malformed", "incomplete", "tmux", "claude-env", "timeout"])
+def test_an_unknown_or_incomplete_variant_is_refused(mods, bad):
+    mod, out = mods
+    d = mod("dispatch")
+    p = out / d.CODEX_POLICY
+    v = json.loads(p.read_text())
+    if bad == "missing":
+        p.unlink()
+    elif bad == "malformed":
+        p.write_text("[]")
+    elif bad == "incomplete":
+        del v["tiers"]["2"]["brainstorm"]
+    elif bad == "tmux":
+        v["runner"] = "tmux"
+    elif bad == "claude-env":
+        v["env"] = {"CLAUDE_CODE_X": "1"}
+    elif bad == "timeout":
+        v["review_timeout_minutes"] = 0
+    if bad not in ("missing", "malformed"):
+        p.write_text(json.dumps(v))
+    with pytest.raises(SystemExit):
+        d.load_policy(out, harness="unknown" if bad == "unknown" else "codex")
+
+
+def test_the_variant_files_are_gate_files(mods):
+    mod, _out = mods
+    cr = mod("check_review")
+    assert cr.is_gate_path("docs/process/model-policy.codex.json")
+    assert cr.is_gate_path("docs/process/model-policy.codex.local.json")
+
+
+def test_the_harness_travels_through_queue_and_drain(mods, monkeypatch):
+    mod, out = mods
+    d = mod("dispatch")
+    base = {"issue": 7, "phase": "execute", "tier": 3, "branch": "7-x"}
+    assert d._valid_entry({**base, "harness": "codex"}) == {**base, "harness": "codex"}
+    assert d._valid_entry({**base, "harness": "other"}) is None
+    calls = []
+    monkeypatch.setattr(d, "start", lambda *a, **kw: calls.append(kw) or 0)
+    d.queue_add(out, issue=7, phase="execute", tier=3, branch="7-x", harness="codex")
+    assert d.queue_load(out)[0]["harness"] == "codex"
+    assert d.drain(out) == 0 and calls[0]["harness"] == "codex" and d.queue_load(out) == []
+
+
+def test_policy_prints_every_phase_of_the_variant(mods, capsys):
+    mod, out = mods
+    d = mod("dispatch")
+    assert d.main(["--root", str(out), "policy", "--harness", "codex", "--tier", "3"]) == 0
+    text = capsys.readouterr().out
+    assert all(f"{ph}:" in text for ph in d.PHASES) and "gpt-6-astra" in text
+
+
+# --- the catalog check -----------------------------------------------------------------
+
+def test_the_catalog_check_pages_to_the_exact_model(mods, tmp_path):
+    mod, _out = mods
+    got = mod("_dispatch_codex").probe(str(fake_codex(tmp_path / "bin")), tmp_path, os.environ.copy(),
+                                       "gpt-6-sol", "medium")
+    assert got["model"] == "gpt-6-sol" and got["provider"] == "openai"
+
+
+@pytest.mark.parametrize("mode, model, effort", [
+    ("ok", "missing", None), ("auth", "gpt-6-sol", None), ("custom", "gpt-6-sol", None),
+    ("base_url", "gpt-6-sol", None), ("catalog", "gpt-6-sol", None), ("profile", "gpt-6-sol", None),
+    ("eof", "gpt-6-sol", None), ("error", "gpt-6-sol", None), ("timeout", "gpt-6-sol", None),
+    ("ok", "gpt-6-sol", "high")])
+def test_every_catalog_refusal_is_a_real_process_path(mods, tmp_path, mode, model, effort):
+    mod, _out = mods
+    with pytest.raises(ValueError):
+        mod("_dispatch_codex").probe(str(fake_codex(tmp_path / "bin", mode)), tmp_path, os.environ.copy(),
+                                     model, effort, timeout=0.5)
+
+
+@pytest.mark.parametrize("argv", [
+    ["codex", "exec", "--model", "m", "--sandbox", "workspace-write", "--json", "p"],
+    ["codex", "exec", "--model", "m", "--sandbox", "read-only", "p"],
+    ["wrapper", "exec", "--model", "m", "--sandbox", "workspace-write", "p"]])
+def test_only_the_verified_cli_shape_runs(mods, argv):
+    mod, _out = mods
+    with pytest.raises(ValueError):
+        mod("_dispatch_codex").executable(argv, "m", "execute", None, preview=True)
+
+
+def _start_env(d, out, monkeypatch, tmp_path):
+    monkeypatch.setattr(d, "_records_dir", lambda _: tmp_path / "records")
+    (tmp_path / "records").mkdir(exist_ok=True)
+    monkeypatch.setattr(d, "held_lanes", lambda _: set())
+    monkeypatch.setattr(d, "disk_refusal", lambda _: None)
+    monkeypatch.setattr(d, "override_refusal", lambda *a: None)
+
+
+def test_a_refused_catalog_starts_nothing_and_records_the_way_out(mods, tmp_path, monkeypatch, capsys):
+    mod, out = mods
+    d, codex = mod("dispatch"), mod("_dispatch_codex")
+    _variant(out, fake_codex(tmp_path / "bin", "auth"))
+    _start_env(d, out, monkeypatch, tmp_path)
+    monkeypatch.setattr(d, "ensure_worktree", lambda *a: pytest.fail("a worktree before the catalog check"))
+    rc = d.start(out, issue=7, phase="review", tier=2, branch="7-x", title=None, dry_run=False, harness="codex")
+    err = capsys.readouterr().err
+    assert rc == 3 and "no logged-in account" in err
+    rows = (tmp_path / "records/codex" / codex.UNAVAILABLE).read_text().splitlines()
+    row = json.loads(rows[-1])
+    assert row["issue"] == 7 and row["phase"] == "review" and row["id"] in codex.unavailable_ids(tmp_path / "records")
+    assert f"skipped cross-model work=7: codex unavailable {row['id']}" in err and "--harness claude" in err
+
+
+def test_a_dry_run_is_unverified_and_asks_no_catalog(mods, tmp_path, monkeypatch, capsys):
+    mod, out = mods
+    d, codex = mod("dispatch"), mod("_dispatch_codex")
+    _start_env(d, out, monkeypatch, tmp_path)
+    monkeypatch.setattr(codex, "probe", lambda *a: pytest.fail("a dry run asked the catalog"))
+    assert d.start(out, issue=7, phase="execute", tier=2, branch="7-x", title=None, dry_run=True,
+                   harness="codex") == 0
+    assert "UNVERIFIED" in capsys.readouterr().out
+
+
+def test_a_model_attest_cannot_place_is_refused_before_the_run(mods, tmp_path, monkeypatch, capsys):
+    mod, out = mods
+    d = mod("dispatch")
+    _variant(out, fake_codex(tmp_path / "bin"), model="o9-mystery")
+    _start_env(d, out, monkeypatch, tmp_path)
+    rc = d.start(out, issue=7, phase="review", tier=2, branch="7-x", title=None, dry_run=True, harness="codex")
+    assert rc == 3 and "no class" in capsys.readouterr().err
+
+
+# --- the supervisor ----------------------------------------------------------------------
+
+def _wait(codex, d, rec, wanted=None):
+    until = time.monotonic() + 15
+    while time.monotonic() < until:
+        got = codex.outcome(rec, d._same_process(rec))
+        if got in ("completed", "failed", "interrupted"):
+            if wanted:
+                assert got == wanted
+            return got
+        time.sleep(0.03)
+    pytest.fail("no terminal receipt")
+
+
+@pytest.mark.parametrize("code, expected", [(0, "completed"), (7, "failed")])
+def test_the_supervisor_writes_the_real_exit(mods, tmp_path, code, expected):
+    mod, _out = mods
+    d, codex = mod("dispatch"), mod("_dispatch_codex")
+    rec = codex.launch(tmp_path / "ev", [sys.executable, "-c", f"print('out');raise SystemExit({code})"], tmp_path,
+                       os.environ.copy(), {"phase": "execute", "model": "m"}, deadline_s=60)
+    codex.activate(rec)
+    _wait(codex, d, rec, expected)
+    assert "out" in (Path(rec["evidence"]) / "stdout.log").read_text()
+    terminal = json.loads((Path(rec["evidence"]) / "terminal.json").read_text())
+    assert terminal["exit_code"] == code
+    terminal["invocation"] = "another"
+    (Path(rec["evidence"]) / "terminal.json").write_text(json.dumps(terminal))
+    assert codex.outcome(rec, False) == "unknown"
+
+
+def test_the_deadline_interrupts_and_stop_reaps(mods, tmp_path):
+    mod, _out = mods
+    d, codex = mod("dispatch"), mod("_dispatch_codex")
+    rec = codex.launch(tmp_path / "ev", [sys.executable, "-c", "import time;time.sleep(60)"], tmp_path,
+                       os.environ.copy(), {"phase": "execute", "model": "m"}, deadline_s=1)
+    codex.activate(rec)
+    _wait(codex, d, rec, "interrupted")
+    rec = codex.launch(tmp_path / "ev2", [sys.executable, "-c", "import time;time.sleep(60)"], tmp_path,
+                       os.environ.copy(), {"phase": "execute", "model": "m"}, deadline_s=60)
+    codex.activate(rec)
+    until = time.monotonic() + 5
+    while not (Path(rec["evidence"]) / "started.json").exists() and time.monotonic() < until:
+        time.sleep(0.03)
+    assert codex.stop_owned(rec, d._same_process) is True
+
+
+def test_a_review_without_a_valid_result_runs_once_more_then_fails(mods, tmp_path):
+    mod, _out = mods
+    d, codex = mod("dispatch"), mod("_dispatch_codex")
+    schema = tmp_path / "schema.json"
+    schema.write_text(json.dumps(codex._schema(plan_review=False, gate=False)))
+    counter = tmp_path / "runs"
+    argv = [sys.executable, "-c", f"import pathlib;p=pathlib.Path({str(counter)!r});"
+                                  "p.write_text(p.read_text()+'x' if p.exists() else 'x')"]
+    rec = codex.launch(tmp_path / "ev", argv, tmp_path, os.environ.copy(),
+                       {"phase": "review", "model": "m", "schema": str(schema), "result": str(tmp_path / "r.json")},
+                       deadline_s=60)
+    codex.activate(rec)
+    _wait(codex, d, rec, "failed")
+    assert counter.read_text() == "xx"
+
+
+# --- handoff: verified, attested, pushed -------------------------------------------------
+
+@pytest.fixture
+def review_repo(render, tmp_path, monkeypatch):
+    """A rendered project on branch 7-widget (plan, code, test) with a bare origin, an
+    implementer report, and the Codex variant pointing at a fake CLI."""
+    def build(result: dict, *, implementer="claude-opus-5", tier=2):
+        out = render(tmp_path / "r", {"project_name": "d", "modules": {"telemetry": True}})
+        origin = tmp_path / "origin.git"
+        subprocess.run(["git", "init", "-q", "--bare", str(origin)], check=True)
+        _git(out, "init", "-q", "-b", "main")
+        _git(out, "config", "user.email", "t@t")
+        _git(out, "config", "user.name", "t")
+        _git(out, "remote", "add", "origin", str(origin))
+        _variant(out, fake_codex(tmp_path / "bin", result=result))
+        _git(out, "add", "-A")
+        _git(out, "commit", "-q", "-m", "base")
+        _git(out, "push", "-q", "origin", "main")
+        _git(out, "checkout", "-q", "-b", "7-widget")
+        (out / ".process-work/plans").mkdir(parents=True, exist_ok=True)
+        (out / ".process-work/plans/2026-10-15-widget.md").write_text(PLAN.replace("tier: 2", f"tier: {tier}"))
+        (out / "widget.py").write_text("def widget():\n    return 42\n")
+        (out / "tests").mkdir(exist_ok=True)
+        (out / "tests/test_widget.py").write_text(TEST)
+        _git(out, "add", "-A")
+        _git(out, "commit", "-q", "-m", "feat: widget")
+        _git(out, "push", "-q", "origin", "7-widget")
+        path = str(out / "scripts/process")
+        sys.path.insert(0, path)
+        for name in MODULES:
+            sys.modules.pop(name, None)
+        d = importlib.import_module("dispatch")
+        codex = importlib.import_module("_dispatch_codex")
+        monkeypatch.setattr(d, "ensure_worktree", lambda *a: out)
+        monkeypatch.setattr(d, "sync_worktree", lambda *a: None)
+        monkeypatch.setattr(d, "held_lanes", lambda _: set())
+        monkeypatch.setattr(d, "disk_refusal", lambda _: None)
+        monkeypatch.setattr(d, "override_refusal", lambda *a: None)
+        monkeypatch.setattr(d, "plan_review_due_plans", lambda *a, **k: None)
+        monkeypatch.setenv("PROCESS_PHASE", "execute")
+        if implementer:
+            d._report.write_report(out, "pushed", issue=7, note="", worker="7-widget", model=implementer)
+        return out, d, codex
+    yield build
+    for name in MODULES:
+        sys.modules.pop(name, None)
+    sys.path[:] = [p for p in sys.path if not p.endswith("/r/scripts/process")]
+
+
+PASS = {"verdict": "pass", "findings": [], "criteria": ["AC-1: tests/test_widget.py::test_widget"], "refute": []}
+
+
+def _run_review(out, d, codex, tier=2):
+    assert d.start(out, issue=7, phase="review", tier=tier, branch="7-widget", title=None, dry_run=False,
+                   harness="codex") == 0
+    rec = d._load_record(out, "7-widget")[1]
+    _wait(codex, d, rec, "completed")
+    return rec
+
+
+def test_a_codex_review_is_verified_attested_and_pushed_in_one_step(review_repo):
+    out, d, codex = review_repo(PASS)
+    rec = _run_review(out, d, codex)
+    assert d.handoff(out, "7-widget") == 0
+    journal = "\n".join(p.read_text() for p in (out / ".process-work/journal").glob("**/*.md"))
+    assert "REVIEW work=7 tier=2" in journal and "model=gpt-6-sol" in journal and "verdict=pass" in journal
+    assert "cross-model" in journal  # the implementer is a Claude, the reviewer another family
+    report = next((out / ".process-work/reviews").glob("*-7-codex-*.md")).read_text()
+    assert "work: 7" in report and "publish-waived:" in report and "AC-1: tests/test_widget.py::test_widget" in report
+    assert _git(out, "status", "--porcelain") == ""
+    assert _git(out, "rev-parse", "HEAD") == _git(out, "ls-remote", "origin", "refs/heads/7-widget").split()[0]
+    reports = [r for r in d._report.read_reports(out) if r.get("state") == "review-pass"]
+    assert reports and reports[-1]["worker"] == "7-widget" and reports[-1]["model"] == "gpt-6-sol"
+    # never attested twice
+    lines = journal.count("REVIEW work=7")
+    assert d.handoff(out, "7-widget") == 0
+    again = "\n".join(p.read_text() for p in (out / ".process-work/journal").glob("**/*.md"))
+    assert again.count("REVIEW work=7") == lines
+    assert json.loads((Path(rec["evidence"]) / codex.HANDOFF).read_text())["state"] == "attested"
+
+
+def test_a_refused_attest_leaves_the_worktree_clean_and_can_be_handed_off_again(review_repo):
+    unproven = {**PASS, "criteria": []}  # no line for AC-1: attest refuses the pass
+    out, d, codex = review_repo(unproven)
+    rec = _run_review(out, d, codex)
+    head = _git(out, "rev-parse", "HEAD")
+    assert d.handoff(out, "7-widget") == 1
+    assert _git(out, "status", "--porcelain") == "" and _git(out, "rev-parse", "HEAD") == head
+    done = json.loads((Path(rec["evidence"]) / codex.HANDOFF).read_text())
+    assert done["state"] == "refused" and "AC-1" in done["reasons"]
+    assert [r for r in d._report.read_reports(out) if r.get("state") == "blocked"]
+    # a record appended to the plan afterwards rides the next handoff
+    plan = out / ".process-work/plans/2026-10-15-widget.md"
+    plan.write_text(plan.read_text() + "\nskipped ac-trace work=7: the criterion is checked by hand\n")
+    assert d.handoff(out, "7-widget") == 0
+    assert "skipped ac-trace" in _git(out, "show", "HEAD:.process-work/plans/2026-10-15-widget.md")
+
+
+def test_the_same_family_is_never_claimed_cross_model(review_repo):
+    out, d, codex = review_repo(PASS, implementer="gpt-6-luna")
+    _run_review(out, d, codex)
+    assert d.handoff(out, "7-widget") == 0
+    journal = "\n".join(p.read_text() for p in (out / ".process-work/journal").glob("**/*.md"))
+    assert "single-family" in journal and "cross-model" not in journal
+    # an unmeasured implementer is no other family either
+    assert codex.independence(out, "gpt-6-sol", None) == "single-family"
+    assert codex.independence(out, "gpt-6-sol", "claude-sonnet-5") == "cross-model"
+    assert codex.independence(out, "claude-opus-5", "claude-sonnet-5") == "single-family"
+
+
+def test_a_tampered_or_stale_review_is_never_handed_off(review_repo):
+    out, d, codex = review_repo(PASS)
+    rec = _run_review(out, d, codex)
+    Path(rec["result"]).write_text(json.dumps({**PASS, "verdict": "block", "findings": []}))
+    assert d.handoff(out, "7-widget") == 3
+    assert not list((out / ".process-work/reviews").glob("*-codex-*.md")) if (out / ".process-work/reviews").exists() else True
+    assert "REVIEW work=7" not in "\n".join(p.read_text() for p in (out / ".process-work/journal").glob("**/*.md"))
+
+
+def test_a_follow_up_without_an_issue_is_refused(review_repo):
+    bad = {**PASS, "findings": [{"sev": "minor", "action": "follow-up", "kind": "implementation", "issue": "-",
+                                 "title": "later"}]}
+    out, d, codex = review_repo(bad)
+    _run_review(out, d, codex)
+    assert d.handoff(out, "7-widget") == 3
+
+
+# --- the tower's traces ------------------------------------------------------------------
+
+def test_the_tower_names_an_unrecorded_skip_and_an_overridden_block(review_repo):
+    out, d, codex = review_repo(PASS)
+    tower = importlib.import_module("tower")
+    plan = out / ".process-work/plans/2026-10-15-widget.md"
+    plan.write_text(plan.read_text() + "\nskipped cross-model work=7: codex unavailable deadbeef0000 — no login\n")
+    j = out / ".process-work/journal"
+    j.mkdir(parents=True, exist_ok=True)
+    head = _git(out, "rev-parse", "HEAD")
+    base = _git(out, "merge-base", "main", "HEAD")
+    (j / "2026-10-15.md").write_text(
+        f"REVIEW work=7 tier=2 reviewer=codex model=gpt-6-sol independence=bundle,non-implementing,cross-model "
+        f"verdict=block round=1 base={base} head={head}\n"
+        f"REVIEW work=7 tier=2 reviewer=fresh model=claude-opus-5 independence=bundle,non-implementing,single-family "
+        f"verdict=pass round=1 base={base} head={head}\n")
+    kinds = {f["kind"]: f for f in tower.codex_findings(out, [{"path": str(out), "branch": "7-widget"}])}
+    assert "deadbeef0000" in kinds["codex-skip-unmatched"]["what"]
+    assert "gpt-" in kinds["codex-block-overridden"]["what"]
+    row = codex.record_unavailable(d._records_dir(out), issue=7, phase="review", model="gpt-6-sol",
+                                   branch="7-widget", reason="no login")
+    plan.write_text(plan.read_text().replace("deadbeef0000", row))
+    kinds = {f["kind"] for f in tower.codex_findings(out, [{"path": str(out), "branch": "7-widget"}])}
+    assert "codex-skip-unmatched" not in kinds
+
+
+# --- rehydrate --codex ---------------------------------------------------------------------
+
+def test_rehydrate_gives_a_codex_session_the_whole_context_or_stops(render, tmp_path):
+    out = render(tmp_path / "r", {"project_name": "d"})
+    _git(out, "init", "-q", "-b", "main")
+    run = [sys.executable, str(out / "scripts/process/rehydrate.py"), "--codex"]
+    got = json.loads(subprocess.run(run, cwd=out, capture_output=True, text=True, check=True).stdout)
+    text = got["hookSpecificOutput"]["additionalContext"]
+    assert "## Source: docs/process/kernel.md" in text and "## Source: docs/process/model-policy.codex.json" in text
+    (out / "docs/process/model-policy.codex.local.json").write_text(json.dumps({"context_sources": ["NOTES.md"]}))
+    got = json.loads(subprocess.run(run, cwd=out, capture_output=True, text=True, check=True).stdout)
+    assert got["continue"] is False and "NOTES.md" in got["stopReason"]  # a missing source: no partial context
+    (out / "NOTES.md").write_text("project notes\n")
+    got = json.loads(subprocess.run(run, cwd=out, capture_output=True, text=True, check=True).stdout)
+    assert "project notes" in got["hookSpecificOutput"]["additionalContext"]
+    check = subprocess.run([*run, "--check"], cwd=out, capture_output=True, text=True)
+    assert check.returncode == 1
+    assert subprocess.run([*run, "--install"], cwd=out, capture_output=True, text=True).returncode == 0
+    assert subprocess.run([*run, "--check"], cwd=out, capture_output=True, text=True).returncode == 0
+    hooks = json.loads((out / ".codex/hooks.json").read_text())["hooks"]["SessionStart"]
+    assert len(hooks) == 1 and hooks[0]["hooks"][0]["command"].endswith("--codex")

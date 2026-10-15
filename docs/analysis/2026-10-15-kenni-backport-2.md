@@ -112,7 +112,7 @@ Ohne `--harness codex` ändert sich am Dispatch-Verhalten nichts, auch nicht fü
 ## Migration für Kenni
 
 1. Vor dem Update `ci: {github: manual}` in `.copier-answers.yml` setzen.
-2. Update auf v2.73.0. Konflikte so lösen:
+2. Update auf das Release dieses Plans. Konflikte so lösen:
    - `.github/workflows/process-gates.yml`: die Template-Fassung übernehmen.
    - `dispatch.py` und `tower.md`: den neuen Render übernehmen. Kennis Modellnamen leben in `model-policy.codex.json`.
 3. `scripts/process/dispatch.py` und `docs/process/tower.md` aus `.process-owned` streichen.
