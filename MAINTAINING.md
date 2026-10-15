@@ -97,8 +97,16 @@ Der bestehende Weg, unverändert:
 3. Plan-Review in frischer Sitzung, bei Gate-Code Refute, Umsetzung mit Tests,
    die gegen die Vorfassung fallen.
 4. `uv run ruff check .` und `uv run pytest -n 4 --dist loadfile`.
-5. CHANGELOG-Eintrag (deutsch) mit „Für <Projekt>“-Migrationshinweisen und
-   ein Abschnitt in `NEWS.md` (`## vX.Y.Z — <Titel>`, drei bis sechs Sätze ohne
+5. CHANGELOG-Eintrag auf Englisch (`CHANGELOG.md`) und Deutsch (`CHANGELOG-DE.md`),
+   oben eingefügt, in fester Form (englisch: Why, What changes, Effect, Update,
+   Changed sections):
+   `## vX.Y.Z — <Titel> · <Datum>`, dann **Warum.** (das beobachtete Problem),
+   **Was sich ändert.** (zwei bis sechs Punkte aus Sicht eines Projekts, keine
+   Dateilisten), **Wirkung.** (wozu es führt), **Update.** (Schritte oder
+   „Keine Schritte.“, „Für <Projekt>“ wo nötig), bei geänderten Template-Docs
+   **Geänderte Abschnitte.**, zuletzt `Details:` mit Plan-Link und Issues.
+   Höchstens rund 20 Zeilen; die technischen Einzelheiten stehen im Plan,
+   nicht im CHANGELOG. Dazu je ein Abschnitt in `NEWS.md` und `NEWS-DE.md` (`## vX.Y.Z — <Titel>`, drei bis sechs Sätze ohne
    Fachbegriffe: was ändert sich für ein Projekt, was bringt es);
    `python3 tools/release.py vX.Y.Z` nach Freigabe durch den Owner.
    Jedes Release ist entweder ein **reines Update** (kein Projektschritt über

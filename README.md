@@ -16,13 +16,13 @@ work under: a program checks the rules, the effort follows the risk, nobody
 signs off their own work, and memory lives in files instead of the context
 window.
 
-> **Status:** `v2.73.0` — sub-projects SP1–SP75. History (German): [`CHANGELOG.md`](CHANGELOG.md); releases are cut with `tools/release.py` (`--check` lists what is not at the version).
+> **Status:** `v2.73.0` — sub-projects SP1–SP75. History: [`CHANGELOG.md`](CHANGELOG.md) (German: [`CHANGELOG-DE.md`](CHANGELOG-DE.md)); releases are cut with `tools/release.py` (`--check` lists what is not at the version).
 
 ## Where to start
 
 | For | Document |
 |---|---|
-| What is new, a few plain sentences per release (German) | **[`NEWS.md`](NEWS.md)** |
+| What is new, a few plain sentences per release | **[`NEWS.md`](NEWS.md)** |
 | What the process is, why it works this way, what is still open | **[Overview](docs/OVERVIEW.md)** · [Überblick (German)](docs/UEBERBLICK.md) · [PDF (German)](docs/Entwicklungsprozess-mit-KI-Agenten.pdf) |
 | Setting it up, headless or in a dialogue, and updating it | [`BOOTSTRAP.md`](BOOTSTRAP.md) |
 | What the machine and CI need (German) | [`docs/SYSTEM-REQUIREMENTS.md`](docs/SYSTEM-REQUIREMENTS.md) |

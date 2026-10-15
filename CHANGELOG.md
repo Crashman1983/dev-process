@@ -1,2074 +1,1046 @@
 # Changelog — dev-process
 
-Die vollständige Sub-Projekt-Historie, aus dem README hierher ausgelagert
-(das README orientiert, dieses Dokument archiviert). Neue Releases nennen im
-README nur die aktuelle Version und schreiben die Historie hier fort.
-
-## Status-Narrativ (chronologisch)
-
-SP1 (Foundation) + SP2 (Architektur-Onboarding) + SP3
-(feature-registry, github-issues, contracts-drift) + SP4 (git-hooks,
-contract-first, parity, security-floor) + Capstone (command-adapters,
-`v1.0.0` — das volle Command-Set des Referenzprojekts, harness-nativ) + SP7 (ci-adapters:
-GitLab CI + Install-Fallbacks) + SP8 (english-canon + ehrliche Ökonomie) +
-SP9 (audit-fixes: False-Greens geschlossen, Failure-Modes sprechen) +
-SP10 (telemetry: GRADE-Trace + KPI-Cockpit, Effizienz messbar) +
-SP11 (Re-Audit + Public-Readiness) + SP12 (verification-independence:
-Verifikation unabhängig, tier-gestaffelt) + SP13 (anchor-guidance) +
-SP14 (junior-legibility: Review-Checkliste, Tier-Erkennung) +
-SP15 (arch-docs: arc42/C4-lite Architektur-Doku-Modul) +
-SP16 (review-breadth: Performance/Observability-Dimensionen) +
-SP17 (parallel-friction: Journal-Sharding, Parallel-efforts-Doku) +
-SP18 (decision-records: getyptes Decision Record + Core-Integritäts-Gate) +
-SP19 (review-enforcement: Review-Unabhängigkeit als gegatete Attestierung) +
-SP20 (issue-centricity: Issue-before-code für Tier 3+, geschärfte Claim-Disziplin) +
-SP21 (dependency-sequencing: `blocked_by` + Zyklus-Gate + ready-order-Tool) +
-SP22 (github-master: Issues als SSOT über hermetischen Snapshot-Gate + Sync) +
-SP23 (sub-issues: `parent`-Dekomposition + Zyklus/Drift-Gate + Hierarchie-View) +
-SP24 (project-board: hermetischer Spalten-Konsistenz-Gate + Board-Automation) +
-SP25 (github-master honesty-pass: Freshness-Disclosure + ehrliche Doc-Fixes) +
-SP26 (Rule-5-Konsolidierung: increment-vs-rewrite-Entscheidung + Gate-Refactor) +
-SP27 (story-lifecycle-closure: done-braucht-Issue hart, DoR/DoD-View, Discovered-work-Inbox) +
-SP28 (audit-hardening: sechs Persona-Audits über zwei Modelle — zwei Live-Bugs
-gefixt, Konsens-Findings ausgeräumt, verifizierte Zweige regressionsgesichert) +
-SP29 (tier-model: Skala von 0–4 auf zero-based **0–3** kollabiert — das unter
-PR/Merge-Pflicht faktisch fiktive Tier 0 „direct commit" in Tier 1 gefaltet;
-jede verbleibende Grenze trägt Gewicht; Gate-Schwellen + Anchor/Doku remapped) +
-SP30 (decision-flow-wiring: Decision Records in die Phasen eingehängt —
-Brainstorm liest sie als Constraints, Plan nennt seinen Decision-Kontext,
-Execute stoppt bei entdeckter Grundsatzentscheidung, Review-Checkliste fragt
-nach fehlendem/widersprochenem/still-obsoletem Record) +
-SP31 (product-frame: `PRODUCT.md` als **Core**-Artefakt — Produktrahmen mit
-Goals/Non-Goals/Constraints, im Init-Dialog erstellt, von allen Phasen als
-Richtungs-Constraint gelesen, immer aktives Gate: fehlend hart,
-not-onboarded ehrliche Note, Platzhalter-nach-Onboarding + tote Refs hart) +
-SP32 (review-visibility: Audits/Reviews samt Prompt, Verdikt und Findings als
-Report-Artefakt + GitHub-Issue — `FINDING`-Grammatik, `publish_review.sh` mit
-Kampagnen-Bündelung unter Parent-Issue, hermetische Bindung: unpubliziert
-ohne Waiver hart, Follow-up-Finding ohne Issue hart, gesplittete Kampagne hart;
-entdeckte Arbeit in korrekter Form: `finding`-/`bug`-Templates mit EARS-AKs +
-Origin-Sektion, Rückverlinkung + Kommentar am Ausgangsitem als Konvention) +
-SP33 (gate-hardening aus 4-Session-Audit: 8 reproduzierte Gate-Defekte
-geschlossen — Tier-Range-Validierung, Report-Header-Split auf jeder Ebene,
-geteilte Fence/Bullet-Disziplin für REVIEW/GRADE, Decisions-Sektionsparser,
-github-master fail-clean, Kampagnen-Ref-Normalisierung, Symbol-Wortgrenze,
-code_roots-Skalar; `v1.20.1` Patch aus dem SP33-Review: Unicode-Ziffer-Crash
-im Tier-Check, Header-Split auf jeden Überschriften-Stil, ehrliche Symbol-Grenze) +
-SP34 (flow-closure: Plan-Archivierung als benannter Merge-Schritt,
-Baseline-Commit-Bypass, tracker-lose Waiver für done-Story + Follow-up-Finding,
-neutrale `kernel.md`, Reviewer-Grammatik im /review, Tier-1/2-Grenze geschärft +
-Tier-0-1 als Self-Check-Band) + SP35 (economics/discoverability: Anchor listet
-aktive Modul-Docs, /quick trägt eigene Schritte, /prime liest inbox,
-Which-artifact-when-Router, Multi-Agent-SSOT-Ehrlichkeit, Mid-Size-Trap benannt)
-ausgeliefert, `v1.21.0`.
-
-SP36 (Backport-Batch 1 aus dem parallelen
-Prozess-Zweig: pre-push prüft die **gepushten Commits** statt des
-Working Tree (Wegwerf-Worktree), neues opt-in **`sbom`**-Modul mit
-CycloneDX-Lizenz-Attestierung, feature-registry-Advisory für unter-granulare
-Akzeptanz) ausgeliefert, `v1.22.0`. SP37 (Backport-Batch 2, Issue #22:
-read-only Koordinations-Dashboards `who_is_working.py` (Nebenläufigkeits-
-Preflight) und `attention.py` (wo ein Mensch hinschauen sollte — inkl.
-Issue-Hygiene) unter `github-issues`, Parallel-agents-Workflow-Abschnitt; die
-label-mutierenden Lifecycle-Tools und `status:hold`/`awaiting-ack`-Overlays
-bewusst ausgelassen) ausgeliefert, `v1.23.0`. SP38 (bindende **Definition of
-Ready & Done** als Core-Doc `definition-of-ready-and-done.md` — pro Arbeitseinheit,
-Enforcement an bestehende Mechanismen delegiert, lebende Checklisten; Namens-Kollision
-mit der Projekt-Onboarding-Reife in `start-here.md` aufgelöst; in Brainstorm/Review,
-Regel 7 und Review-Checkliste eingehängt; Konsolidierung von Backport-Patch 0013)
-ausgeliefert, `v1.24.0`.
-
-SP39 (4-Perspektiven-Funktionsaudit: sbom-Gate
-gehärtet — SPDX-`OR`/`AND`-Auswertung, nur Root-Komponente exempt,
-Multi-License-Konjunktion, exakte Coverage-Namen, kein doc-drift-Rotlauf beim
-frischen Render; `attention` zählt nur existierende Tests; DoR/DoD- und
-Tier-Routen-Kohärenz; `ARCHITECTURE-OVERVIEW.md` `.jinja`; BOOTSTRAP-
-`github_master`-Key; interne Sprint-Refs aus Adopter-Code entfernt)
-ausgeliefert, `v1.25.0`. SP40 (Kernel-Integrität als viertes **Core-Gate**
-`check_kernel.py`: der immer-geladene Regel-Block muss in jedem vorhandenen
-Anker byte-identisch zu `kernel.md` sein — eine still gelöschte/geänderte
-Regel blockt den Merge; schließt die „Regeln vergessen weil ungegatet"-Lücke,
-die ein abgeleiteter Prozess sichtbar machte) ausgeliefert, `v1.26.0`.
-SP41 (Kernel überlebt Compaction: selbst-heilende Direktive *im* Kernel-Block
-— bei Resume/Compaction Kernel+Regeln neu lesen, byte-identisch in allen vier
-Kopien und damit vom Kernel-Gate unentfernbar; Phasen-Re-Hydration in
-/execute, /review, /prime; ehrliche Grenze + Pro-Harness-Realität in
-start-here dokumentiert — ein Gate sieht den Live-Kontext nicht) ausgeliefert,
-`v1.27.0`. SP42 (Meta-Review „Reichweite vor Tiefe" für Solo-Devs/kleine
-Teams: **Profile** statt 13 Modul-Booleans — eine `profile`-Frage
-(minimal/solo/team/custom) leitet den Modul-Default ab, explizites `modules`
-überschreibt weiter; dazu der **Härtungs-Ratchet** in start-here: Modul
-einschalten, wenn sein Trigger eintritt — erste Persistenz → security_floor,
-zweite Surface → parity usw.; Lockern ist eine dokumentierte
-Prozessentscheidung) ausgeliefert, `v1.28.0`.
-
-SP43 (Quick Wins „verlässlich + lesbar": `setup_branch_protection.sh` — der
-eine Schritt, der aus „Gate läuft" „Gate blockt" macht, als idempotenter
-Einzeiler (nicht-destruktiv, ehrliche Fehlermodi für Private-Repo/Free-Plan);
-Actions-Job-Id von `gates` auf `process-gates` angeglichen, damit der
-dokumentierte Required-Check-Kontext überhaupt erfüllbar ist; SP-Historie aus
-dem README in dieses CHANGELOG ausgelagert) ausgeliefert, `v1.29.0`.
-
-SP44 (Nachvollziehbarkeit als Werkzeug: `trace.py` — die ganze Geschichte
-eines Arbeitsstücks in einem Kommando: Story, Issue (Snapshot offline zuerst,
-dann `gh`, sonst nur Ref), aktive/archivierte Pläne, Commits, geparste
-`REVIEW work=`-Attestierungen, Reports samt FINDINGs; read-only, Core,
-unerreichbare Quellen werden benannt statt still übersprungen) ausgeliefert,
-`v1.30.0`.
-
-`v1.30.1` (Merge-Gate-Review über den v1.26–v1.30-Bogen, zwei unabhängige
-Reviewer: Blocker im Branch-Protection-Skript geschlossen — bestehende Regel
-wird nie mehr überschrieben (GET-404-Ambiguität); Kernel-Gate erzwingt exakt
-einen Block und lehnt leeren Kanon ab; trace-Präzision (kein Bare-Number-Grep,
-leere Query verweigert); Ratchet als einziger Owner mit allen 13 Modulen;
-README/Update-Semantik-Kohärenz).
-
-SP45 (Tiefe I — DoR als Gate: `gh_sync` leitet die Ready-Fakten aus dem
-Live-Issue ab (typed/EARS/`## Deviations`-Body-Note als benannter Escape) und
-legt sie als `dor`-Slot in den Snapshot; das hermetische github-master-Gate
-failt hart, wenn eine in-progress-Story ein nicht-Ready-Issue ohne Deviation
-verlinkt — proposed noch nicht gestartet, done Sache des Review-Gates; alter
-Snapshot degradiert ehrlich zur Re-sync-Note) ausgeliefert, `v1.31.0`.
-
-SP46 (Tiefe II — Architektur-Grenzen als Floor-Regeln: kein 14. Modul,
-sondern der bestehende Owner — security-floor kann per `applies_to` gescopte
-Regeln schon; neu: optionales `adr`-Feld je Regel (hängende Links hart),
-Arch-Beispielregel, Moduldoc-Sektion mit ehrlicher Decke (Regex-Floor, kein
-Architektur-Review), Ratchet-Trigger + arch-onboarding-Querverweis) + SP47
-(Tiefe III — Review-Bundle als portables Reviewer-Interface:
-`make_review_bundle.py` (Core) baut das eine self-contained Dokument — Kernel,
-Checkliste, Produktrahmen, Pläne, Diff, REVIEW-Grammatik direkt aus
-check_review importiert; FINDING-Tokens per Template-Test an check_issues gepinnt; Dispatch-Rezepte je Harness in
-verification-independence, /review zeigt aufs Tool) ausgeliefert, `v1.32.0`.
-
-`v1.32.1` (Arc-Review über den Tiefe-Bogen, zwei unabhängige Reviewer: vier
-ausführbare Defekte im Bundle-Tool geschlossen — Fence-Korruption bei
-Markdown-Diffs, Non-UTF-8-Crash, IndexError bei fehlendem Options-Wert,
-Subdir-Aufruf verlor Root-Quellen; Grammatik-Claim ehrlich auf die
-REVIEW-Hälfte begrenzt + FINDING-Tokens per Template-Test an check_issues
-gepinnt; adr-Auflösung sieht rohe Regeln, Deviation nur als echte Überschrift,
-dor-Slot mit exaktem Key-Set; Doku-Kohärenz: bedingter arch-onboarding-Verweis,
-Hard-Path-Klausel in github-issues).
-
-SP48 (Telemetry-Ehrlichkeit — die Individualität von Projekten als bindende
-Decke dokumentiert: Zahlen gelten nur projektintern gegen die eigene Baseline
-(Trends, Verhältnisse, Catch/Escape-Ereignisse als robusteste Klasse), kein
-projektübergreifendes Benchmarking, Cockpit-Schwellen sind Startwerte zur
-Rekalibrierung, Goodhart/Self-Grading-Vorbehalt; Moduldoc-Sektion „honest
-ceiling" + Cockpit-Docstring + README; Moduldoc + Cockpit per
-Template-Test gepinnt)
-ausgeliefert, `v1.33.0`.
-
-SP49 (KISS-Cleanup — ein Owner je Verhalten, aus drei parallelen
-Tiefen-Sweeps (Dead Code, Duplikate, Doku-vs-Code): check_review besitzt die
-Plan-Feld-Grammatik und _unfenced (check_issues/trace importieren; Issue-Regex
-vereinheitlicht, Cross-Repo-Refs clearen jetzt auch das Review-Gate),
-check_decisions besitzt adr_exists (3 divergente Kopien ersetzt), das
-Review-Bundle importiert die Kernel-Block-Extraktion (Zweitblock → ehrlich
-unavailable statt still der erste), gh_json ein Owner im github-issues-Modul;
-nicht-importierbare Zwillinge (sbom/security-floor-Git-Helfer,
-EARS/Epic-Heuristik) per Template-Test gepinnt. Funktional: sbom-Beispiel-Policy
-no-opte auf Root-Manifesten (bare+**/-Paare), tote Manifest-Globs ohne Parser
-entfernt, `sbom` fehlte in allen drei Adapter-Modullisten (Test pinnt auf
-copier.yml), gh_board --push-No-op-Stub entfernt, github-master meldet leeren
-Mirror advisory statt still OK, trace-FINDING-Matcher verlangt key=value; dazu
-12 Doku-Kohärenz-Fixes ("one tier weaker" gestrichen, DoR/DoD-Abweichungskanäle
-getrennt, Copilot-Review-Prompt trägt die Grammatik, u. a.)) ausgeliefert,
-`v1.34.0`.
-
-SP50 (Tiefenaudit über den bereinigten Stand, vier unabhängige Blickwinkel
-mit Ausführungsmandat — adversarial, Kohärenz, Fresh-Adopter, Robustheit:
-1 Blocker geschlossen (Fence-Tracking längenbewusst — gequotete Waiver in
-verschachtelten Fences clearten Review-/Issue-Gate), SP49-Regression gefixt
-(nur echte Issue-Refs zählen als clearende work-ids; Ref-Grammatik nach
-check_review verschoben, ein Owner), OSError-Diagnosen statt Tracebacks,
-security-floor mit Regex-Backtracking-Budget + Zero-in-Scope-Note,
-gate_runner mit Gate-Timeout + bytecode-frei, letzte adr_exists/_unfenced-
-Kopien konsolidiert, gh_board-Argument-Hygiene, BOOTSTRAP-Update-Rezept für
-HEAD-Installs, start-here-Reihenfolge + `git init -b main`,
-Commit-Traceability-Konvention; Adopter-Verdict: Solo-Dev erreicht grünen
-Gate-Lauf + ersten reviewten Change ohne Hilfe; Report
-`.process-work/reviews/2026-07-10-sp50-deep-audit.md`) ausgeliefert,
-`v1.34.1`.
-
-SP51 (State-of-the-art-Abgleich geschlossen — sechs Lücken aus der Recherche
-(DORA, Diátaxis/arc42, Supply-Chain, Diagrams-as-Code, KI-Guardrails):
-`testing.md` als Core-Doc (Suite-Form als Pyramiden-Heuristik, Property-based,
-Regression-Pins, Mutation-Testing auf kritischer Logik, ehrliche
-Coverage-Decke — Trend statt Schwellen-Gate; via Regel 5 +
-Review-Checkliste verdrahtet), `releases.md` als Core-Doc (SemVer,
-kuratiertes Changelog, Tag-Ritual mit Versions-Dreiklang-Invariante;
-via commits.md verdrahtet), Threat-Frage für Tier 3 in Brainstorm +
-Review-Checkliste („Was könnte ein Angreifer mit dieser Änderung?" —
-Assets/Inputs/Trust-Boundaries), Diagrams-as-Code-Konvention (Mermaid im
-Markdown, diffbar im PR; Gate parst weiterhin keine Diagramme) in
-arch-docs-Moduldoc + Overview-Scaffold, Plattform-Hygiene im
-Onboarding-DoR (Secret Scanning + Push Protection, Dependabot/Renovate —
-ehrlich als Netz-Dienste gerahmt, kein hermetisches Gate),
-Branch-Lebensdauer „Tage, nicht Wochen" in commits.md (Small-Batch-Befund
-hinter Trunk-based)) ausgeliefert, `v1.35.0`.
-
-SP52 (Divers-Audit über v1.35.0 — vier bewusst neue Blickwinkel: Pragmatiker/
-Ökonomie (Verdict „Prozess mit ungewöhnlich wenig Theater": ~5.4k Token
-Lese-Steuer/Session, Gates 0.2–0.8s, Over-Engineering-Kandidaten
-freigesprochen), Multi-Harness-Degradation (9 Render-Kombos), Lebenszyklus
-(Upgrades v1.13.0→HEAD konfliktfrei byte-identisch; 10x-Wachstum <0.9s) und
-Technical Writer über die SP48–51-Prosa. Gefixt: Copilot-Anker erhält die
-Route zu workflow/commits, BOOTSTRAP-„Later" ohne --skip (stale Kernel nach
-Upgrade reproduziert) + Hooks-Neuinstallations-Hinweis, trace ohne
-Bare-Digit-Rauschen (#7 matchte 68/68 Pläne), Bundle mit --plan-Filter und
-hartem Unknown-Flag-Fehler, Soft-Note für nicht archivierte Tier-2+-Pläne,
-doc-drift scannt die Copilot-instructions-Datei, gate_runner benennt die
-Hand-Edit-Ursache, No-CI-DoR erfüllbar (Hooks als Authority), Quick-Fragen
-mit einem Owner in workflow.md, Retention-Ehrlichkeit, R2 besitzt die vier
-Akzeptanz-Fälle, ~15 Writer-Präzisionsfixes; Report
-`.process-work/reviews/2026-07-10-sp52-diverse-audit.md`) ausgeliefert,
-`v1.35.1`.
-
-SP53 (Methodik-Eignungsprüfung geschlossen — die zwei Lücken aus dem
-Prinzipien-Check der Kette Brainstorm→EARS→Plan: der **EARS-Musterkatalog**
-in der DoR-Doc (alle fünf Formen — ubiquitous/event/state/unwanted/optional —
-mit Unwanted-behaviour als natürlicher Form der von R2 geforderten
-Negativ-Fälle) und der **Spike-Pfad** in workflow.md für ergebnisoffene
-Arbeit (timeboxed, Output ist Wissen — Journal/Design/Decision Record —,
-nie Produkt-Code; Folge-Feature läuft durch den normalen Zyklus statt den
-Prototyp zu befördern; Timebox-Stopp ist Erfolg)) ausgeliefert, `v1.36.0`.
-
-SP54 (Cross-Platform-Haertung: `git` + `uv` als einheitlicher Runtime-Vertrag
-auf Linux, macOS und Windows; PEP-723-Gate-Runner ohne systemweites Python oder
-PyYAML; portable Python-Implementierungen fuer Hook-Installation, Hook-Logik
-und Issue-Body-Erzeugung bei kompatiblen Shell-Launchern; Claude, Copilot und
-AGENTS.md unabhaengig kombinierbar; OS-Smoke-Matrix; Manifestwerte fail-closed
-validiert; Release-Tag muss zur Projektversion passen) ausgeliefert, `v1.37.0`.
-
-SP55 (spec-deepening: Spezifikationsphase vertieft — Anleihen aus GitHub
-Spec Kit, schema-erhaltend (Analyse: `docs/analysis/2026-08-06-speckit-comparison.md`).
-`[NEEDS CLARIFICATION: …]`-Marker-Konvention im Brainstorm statt stiller
-Annahmen; `design-template.md` als Core-Doc-Scaffold (Intent, Constraints,
-Touchpoints, nummerierte EARS-ACs, Alternativen, offene Fragen, Tier-3-
-Threat-Frage); Review-Checkliste um „Specification quality" erweitert
-(testbare Kriterien, ehrlich aufgelöste Fragen, Was/Wie-Trennung, DoR-R2-
-Twins). Fünftes **Core-Gate** (`check_clarification.py`): unaufgelöster
-Marker in einem *aktiven Plan* hart (Plan setzt genehmigtes Design voraus),
-im aktiven Design nur Note (mid-flight bleibt grün), Archiv ist Historie;
-Fenced-Block = Zitat wie beim Review-Gate) ausgeliefert.
-
-SP56 (lean-standard: das große Refactoring auf den Standard-Stack
-GitHub + Spec Kit + pre-commit + dev-process-Kernel, nach unabhängigem
-Design-Review (Report: `.process-work/reviews/2026-08-06-speckit-hybrid-design-review.md`).
-**Abgebaut:** GitLab-CI-Adapter, parity, attention.py/who_is_working.py
-(GitHub-UI übernimmt), story_order + Arbeits-Log-Achse der Registry,
-eigener Hook-Installer, artifact-v1-Zertifikatsritual, Telemetrie auf die
-drei Ziel-KPIs (Konvergenz, Kosten, CFR), Profile/Toggles auf das
-Standard-Setup mit einzigem `regulated`-Schalter, contract-first +
-contracts-drift zu `contracts` verschmolzen. **Umgebaut:** feature-registry
-zum Feature-Inventar (Capability → Akzeptanz → Test, hermetisch), Hooks auf
-das pre-commit-Framework, github-master registry-frei (Snapshot nach
-Issue-Nummer, DoR-at-rest, Board-Konsistenz), Review auf eine
-Attestierung mit opt-in Diff-Digest (verifiziert statt Ritual).
-**Gebaut:** `speckit`-Modul als Standard-Spezifikationsweg —
-Constitution-Pointer mit Gate-Guard, EARS-/Test-Pflicht-Overrides,
-Command-Wrapper mit Kernel-Pflichten, clarification-Gate über `specs/`,
-publish_and_prune-Merge-Ritual mit verifiziertem Publish + SC-Accounting
-und Flow-Forward-Degradation. Produktrahmen-Wechsel im README dokumentiert,
-Exit-Szenario (Pin einfrieren) festgehalten. Dazu der Token-Lean-Pass
-(process_context.py, Prime-Diät, analyze/converge nur noch Tier 3) und der
-Windows-Pfad-Fix (kein `|` mehr in Template-Pfaden — die OS-Smoke-Matrix ist
-wieder grün)) ausgeliefert, `v2.0.0` — **Breaking**: Modul-Keys und
-Install-Dialog geändert; Migration bestehender Adopter über `copier update`
-mit explizitem `modules`-Dict (BOOTSTRAP, "Later").
-
-SP57 (reference-backflow: die vier Prozess-Lektionen aus dem Live-Betrieb des Referenzprojekts,
-die dem generischen Kern nach der Adoption nachweislich noch fehlten —
-Regel 1 geschärft (Sub-Agent-Summaries sind `[assumption]` bis zur
-Stichprobe; Stop-Wort „source?" ⇒ Tool-Beweis oder Rückzug),
-Review-Runden-Cap im Workflow (nach zwei erfolglosen Review→Fix-Runden
-zurück in die Planung — das Review-Pendant zur Zwei-Versuche-Regel 6),
-Bookkeeping-Disziplin in `commits.md` (Journal/Plan/State fahren im
-Arbeits-Commit, keine `record`-Ketten; SSOT-lose Evidence ins
-Issue-Kommentar) und der Anchor-Budget-Check im doc-drift-gate
-(Anchor > 200 Zeilen ⇒ Note, nie Fail — der mechanische Wächter für den
-„driftet es beim Refactor?"-Diskriminator). Dazu zwei Brownfield-Fixes am
-Decision-Records-Gate, die ADR-Korpus-Übernahme im Referenzprojekt aufgedeckt hat:
-Status-Enum um `Rejected` (Vorschlag, der nie galt) und `Deprecated`
-(galt einmal, jetzt abgeraten) erweitert — sonst bliebe ein toter
-Vorschlag ewig `proposed` —, und der Seed-Record von `adr-0001` auf
-`adr-0000` umnummeriert, damit ein bestehender Korpus, der bei 0001
-beginnt, kollisionsfrei einziehen kann. Ausgeliefert als `v2.1.0`.
-
-Lizenzwechsel (2026-08-07, nach v2.1.0): von der Prosperity Public
-License 3.0.0 (nicht-kommerziell) zu **Apache-2.0** — der Kern ist bewusst
-offen (Open-Core-Strategie: künftige kommerzielle Zusatzkomponenten bleiben
-separate Werke). Zugleich die MIT-Attribution für die zwei von GitHub
-Spec Kit abgeleiteten Templates nachgezogen (`THIRD-PARTY-NOTICES.md`,
-auch gerendert in Adopter-Repos; Provenienz-Kommentare in den Dateien).
-
-SP58 (skill-bypass-closure: Beobachtung im Referenzprojekt, dass topic-getriggerte
-Dritt-Skills (Superpowers-Brainstorming/-Planning) mit eigenen Datei-
-Konventionen die artefakt-präsenz-abhängigen Pflichten lautlos umgehen
-können — ein Plan, der nie in `.process-work/plans/` landet, löst weder
-Clarification- noch Review-Präsenz aus. Antwort auf beiden Ebenen:
-`journal-state-plans.md` schreibt „Plans have exactly one home" fest
-(Skills helfen *in* Phasen, das Artefakt hat genau ein Zuhause), und das
-Review-Gate bekommt den **Unhomed-Plan-Detector** — eine `tier: 2+`-
-Deklaration außerhalb der sanktionierten Homes (`.process-work/`,
-`specs/`, `docs/process/`, Harness-Verzeichnisse; Archive sind Historie)
-ist hart; Tier 0/1 und gefencte Zitate bleiben außen vor. Dazu
-**spec-before-plan** im Speckit-Gate: ein aktiver Tier-2+-Plan
-referenziert sein `specs/`-Verzeichnis oder trägt eine begründete
-`spec-waived:`-Zeile — die Spec-Kit-Interrogation zu überspringen ist
-eine dokumentierte Entscheidung, nie ein stilles Verhalten) ausgeliefert,
-`v2.2.0` (enthält auch den Apache-2.0-Lizenzwechsel unten).
-
-SP59 (downstream-backflow: die vier generalisierbaren Beiträge aus dem
-privaten DATEV-Fork, per Patch-Handoff übernommen (der Fork darf keine
-PRs stellen) — Copier-Render-Cache in den Tests (jedes Answer-Set
-rendert einmal pro Session, jeder Test bekommt seine Kopie; volle Suite
-von ~4,5 min auf ~1,5 min), Gate-Preflight vor dem Review-Bundle (rote
-Gates ergeben kein review-fertiges Bundle; `--skip-preflight` als
-bewusster Ausweg), begrenzte Delta-Re-Reviews (`--since` mit
-Voll-Artefakt-Bindung, mitgeführten Vorbefunden und Tier-3-Ablehnung)
-und der advisory Finding-Ratchet (`gate=judgement|possible|<rule>` an
-FINDING-Zeilen — `possible` markiert Automatisierungskandidaten als
-Note, nie blockierend). Bewusst NICHT übernommen: Model-Routing,
-CODEOWNERS-Härtung, Pflicht-SBOM, Plattform-Fixierung (Fork-lokal,
-deckungsgleich mit dem Lean-Pass) und das decision-adoption-Modul
-(geparkt bis Nutzungsevidenz vorliegt — die Intent-Achse trägt die
-leichte Version bereits)) ausgeliefert, `v2.3.0`.
-
-SP60 (engine-freiheit + hygiene, aus dem Live-Betrieb des Referenzprojekts der
-SpecKit/Superpowers-Kombination: „The execute engine is free, the
-artifacts are not" — Subagent-per-Task-Engines sind im Execute
-sanktioniert, solange die Artefakt-Invarianten halten und die
-Merge-Review die attestierte bleibt; der **Prose-Tier-Detector** im
-Review-Gate macht den Drittskill-Fehlermodus laut (Plan erwähnt „Tier
-N", deklariert aber keine `tier:`-Zeile ⇒ alle tier-gekeyten Gates
-unbewaffnet — live auf #651 gefunden); dazu **„Merge leaves no
-residue"** in commits.md (Branch löschen, `git worktree
-remove`/`prune`) und der dispatchbare **cleanup-branches-Workflow**
-(patch-identitäts-basiert, Dry-Run-Default, Open-PR-Schutz) im Repo
-und im Template) ausgeliefert, `v2.4.0`.
-
-SP61 (sichtbarkeits-paket, aus dem Lebenszyklus-Review des Maintainers: **Issue bei
-der Idee statt beim Plan** — das Einflussfenster des Menschen ist die
-Spec-/Design-Phase, also entsteht das Tracking-Issue beim Brainstorm-
-Eintritt und eine aktive `specs/*/spec.md` ohne `issue:`-Zeile ist hart
-(issue-before-spec im Issues-Gate); **Stage-Publishing** —
-`publish_and_prune --stage` postet die fertige Spec (und Design) als
-datierten Read-only-Snapshot-Kommentar ans Issue, prunt nichts, und
-neue Issue-Kommentare sind Clarify-Input vor `/plan`; **Review-
-Ökonomie für Subagent-Engines** — Task-Reviews nur für Owner-/
-Integrations-Tasks (Mechanik im Sammel-Checkpoint), Runde 2+ als
-`--since`-Delta, und die finale Whole-Branch-Review des Engines IST
-die attestierte Merge-Review — ein Deep-Review auf dem stärksten
-Modell statt zwei (~5 statt ~9 Läufe pro #651-großem Paket))
-ausgeliefert, `v2.5.0`.
-
-Modell-Routing als Harness-Default (`model:`-Frontmatter auf den
-Phase-Commands: `/brainstorm` und `/plan` auf dem stärksten Modell
-(Urteilsdichte — ein Spec-/Plan-Fehler kostet sein Vielfaches
-stromabwärts), `/review` auf `opus`, Execution erbt das
-Sitzungs-Arbeitsmodell; die `/speckit-*`-Commands bleiben unberührt, da
-ein Spec-Kit-Update sie überschreibt — Routing lebt in den
-Wrapper-Commands; Doku im speckit-Modul aktualisiert; kein neues Gate,
-keine Config-Achse — Routing bleibt Engine-/Harness-Verhalten),
-`v2.5.1`.
-
-Runden-Ökonomie der Review-Schleife dokumentiert (aus dem Maintainer-Befund „bei
-jeder Abweichung läuft die gesamte Kette": das `--since`-Delta-Bundle
-existierte seit v2.3.0, aber kein Dokument und kein Command lehrte es —
-`/review`, workflow.md (Review) und verification-independence.md
-beschreiben jetzt die drei Preisregeln: Findings einer Runde bündeln,
-ein Fix-Pass, ein Push (jeder zusätzliche Head-Commit bezahlt die
-Push-Gates/Tests erneut); Runde 2+ als Delta-Bundle über `--since`
-(Volldiff bleibt digest-gebunden, Tier 3 liest immer voll); einmal
-rebasen, vor der ersten Runde — jede spätere Rebase entwertet die
-Digests), `v2.5.2`.
-
-SP62 (längsschnitt, aus dem Befund im Referenzprojekt „53 fix-Commits in 5 Tagen, ein
-Scope-Cluster mit 13 Fixes, jeder einzeln durch alle Gates": der Prozess
-regierte das einzelne Paket, hatte aber kein Organ für Muster ZWISCHEN
-Paketen — **fix-Cluster-Advisory** (`process_kpis clusters`: Rule 6
-sessionübergreifend, der Zähler lebt in git; Debug-Command, workflow.md
-und Review-Checkliste tragen die Stopp-Regel „dritter Fix am selben
-Verhalten = fehlende Spezifikation"); **Invarianten-Heimat** (Decision-
-Record-Typ `invariant` für featureübergreifende Verhaltensregeln,
-`## Test`-Pflicht als Enforcement-Zwilling ab Accepted, decisions-Gate
-prüft); **Degradations-Schulden** (`review-waived:`/`spec-waived:` ohne
-Issue-Ref → Note „a debt with an owner"); **KPI-Trigger** (monatlicher
-process-kpis-Workflow — ein KPI ohne Trigger existiert nicht);
-**`/finish`** (`finish.py`: der Merge-Schwanz als EIN Verdikt — clearing
-pass, grüne Gates, sauberer Tree, dann der Rest-Ritus in Reihenfolge;
-read-only, gegen die beobachteten Tail-Ausfälle #652/#653/#660))
-ausgeliefert, `v2.6.0`.
-
-Slice-Ökonomie nachgeschärft (aus dem #688-Befund „50 Tasks, extrem
-lang": **Task-Korn** — ein Task = ein Verhalten, Test UND Implementierung;
-TDD-Reihenfolge lebt IM Task, nie als Task-Paar (der Task ist die Einheit
-von Planung, Checkbox, Gate-Lauf und Bericht — 50 Tasks, die 30 sein
-könnten, zahlen das Ritual zwanzigmal umsonst); **Tier pro Stage** — bei
-Stage-Merges trägt jede Stage ihren eigenen Tier, eine verhaltensneutrale
-Extraktions-Stage mit mechanischem Beweis ist Tier 2, auch wenn die
-verhaltensändernde Stage Tier 3 ist (risk-tiers.md); **Mechanik vor
-Urteil** — alle mechanischen Detektoren laufen VOR dem Review-Bundle und
-ihre Ergebnisse wandern hinein, der Modell-Reviewer verifiziert die
-Mechanik-Schicht statt sie zu entdecken (ein grep-barer Befund kostet
-mechanisch Cents, per Review eine Runde)), `v2.6.1`.
-
-[P]-Gruppen wirklich nutzen („parallel edit, serial commit": [P]-Tasks
-laufen als gleichzeitige Subagents im selben Worktree — Subagents
-editieren ihr disjunktes Datei-Paket und liefern Test-Evidenz, committen
-nie; der Orchestrator serialisiert den Schwanz jedes Tasks — atomarer
-Commit, Checkbox, Gate — in Abhängigkeitsreihenfolge; /plan schärft
-[P] auf „kein geteilter Berührungspunkt", inkl. Barrel-Exports,
-Manifeste, generierte Indizes — ein falscher Marker wäre eine
-Working-Tree-Kollision), `v2.6.2`.
-
-SP63 (owner-loop, aus dem Maintainer-Befund „ich reviewe die Slices kaum — und
-verstehe die Specs oft nicht": der Mensch wird ein echter Knoten des
-Loop-Graphen, mit definierten Eingangs-Kanten statt Polling —
-**Owner brief** (Pflicht-Vorspann jeder Spec: fünf Klartext-Sätze ohne
-Jargon/Dateinamen — Was/Warum/sichtbare Änderung/Risiko/„Your call";
-führt den staged Issue-Kommentar an, macht das Einflussfenster
-benutzbar); **`human_digest.py`** (die Eingangs-Kanten als EINE Seite:
-wartende Specs samt Brief + offenen Fragen, Merges der letzten N Tage,
-stehende Waiver-Schulden, Fix-Cluster; read-only, fehlende Quellen
-benannt statt still leer); **Sampling-Audit** (ein gemergtes Paket pro
-Woche, deterministisch per ISO-Woche gewählt — kein Re-Rollen; Review
-by exception statt Diff-Konkurrenz zum Modell-Reviewer,
-verification-independence.md); **owner-digest-Workflow** (wöchentlich
-Mo + Dispatch, Digest in die Step-Summary)) ausgeliefert, `v2.7.0`.
-
-SP64 (speckit-presence, aus dem Befund im Referenzprojekt „Slices 009–016 liefen am
-stärksten Gate vorbei": die Spec-Kit-Pläne leben in `specs/<dir>/plan.md`
-und werden nie archiviert — das Review-Presence-Gate scannte nur
-`.process-work/plans/archive/` und konnte den Standardweg nicht sehen —
-**Speckit-Presence** (`speckit_unreviewed` in check_review: voll
-abgehaktes tasks.md + Tier-2+-Plan ohne Waiver braucht den clearing
-pass; `finish.py` blockt hart am Merge-Ritus, das Review-Gate meldet
-als Note — hart am Push würde jeden Push zwischen letztem Tick und
-Review röten; commits.md benennt die Speckit-Variante des
-Archiv-Schritts: publish_and_prune statt Archiv-Move, finish druckt
-die fertigen Verzeichnisse einzeln); **Owner-Brief-Note** (speckit-Gate:
-spec.md ohne Owner-brief-Sektion → Note — 2 von 6 neuen Specs im Referenzprojekt
-hatten den Brief vergessen); **Waiver-Ehrlichkeit** (ein Plan mit
-`issue:`-Anker besitzt seine Waiver dort — nur trackerlose Waiver
-werden geflaggt; Digest gleichgezogen); **ADR-Rauschen** (Intent-Note
-entfällt für rejected/superseded — historische Records haben keine
-Endorsement-Achse)) ausgeliefert, `v2.7.1`.
-
-Zwei Gate-Defekte aus dem frischen Klon des Referenzprojekts (der erste kalte
-Prüfstand nach Wochen warmer Sessions): **Digest-Bindung ehrlich
-degradiert** — nach Rebase-Merge + Branch-Löschung existieren die
-Pre-Merge-SHAs in keinem frischen Klon; nicht auflösbare
-Artifact-Commits sind jetzt Note („unverifiable here") statt hartem
-Rot, das rückwirkend jeden Klon für jede korrekt gebundene historische
-Review röten würde; ein Digest-MISMATCH bleibt hart. **Tier-Deckel in
-der Presence-Arithmetik** — die REVIEW-Grammatik deckelt tier bei 3;
-ein Plan auf erweiterter Downstream-Skala (`tier: 4/5`) cleart an der
-gegateten Decke (min(tier,3)) statt an einer unerfüllbaren Latte,
-Archiv- und Speckit-Pfad gleichermaßen, `v2.7.2`.
-
-Test-Ökonomie als generisches Muster (aus der Maintainer-Frage „voller Testlauf
-bei jeder Änderung?": **Selektion nah am Edit, Vollständigkeit nah am
-Merge** — testing.md trägt die Staffel: pro Task/Push die gescopte
-Menge (Modul-Graph/`vitest related` oder auditierbare Modul-Karte) mit
-ehrlichen Voll-Lauf-Triggern für alles, was nicht über Imports wirkt
-(Config, Tokens, globale Styles, Schema, DI, Fixtures); am
-Merge-Boundary die VOLLE Suite genau einmal für das ganze Batch —
-mehrere Änderungen teilen sich einen Voll-Lauf, Selektion ist nie das
-letzte Netz; finish.py druckt den Voll-Suite-Schritt vor dem Merge),
-`v2.7.3`.
-
-Push- und Zertifikats-Ökonomie (aus dem Maintainer-Befund „Deploy 20 min, Push-Gate
-ähnlich": **Push an Kohärenzpunkten, nicht pro Commit** — die Push-Gates
-bepreisen die gepushte Spanne, fünf zusammengehörige Commits in einem
-Push kosten einen Gate-Lauf; Grenzen: vor Bundle-Bau, vor Session-Ende,
-oft genug für die Parallel-Sichtbarkeit (commits.md). **Bezahlte
-Vollständigkeit ist übertragbar** — der Boundary-Volllauf schreibt die
-Zertifikate, auf die spätere Gates memoisieren (Coverage-Tree-Cert), in
-der zertifizierenden Konfiguration verdient, nie behauptet; ein Deploy-
-Gate auf demselben Baum wird zum Memo-Hit statt zur Doppelzahlung
-(testing.md)), `v2.7.4`.
-
-Zertifikats-Transfer auch bergab (aus einem Live-Befund des Maintainers „Push-Gate zieht
-die volle Suite, gleich danach der Boundary-Lauf nochmal, ohne
-Änderung dazwischen": **stärkere Evidenz ersetzt schwächere** — ein
-Voll-Lauf-Trigger am Push darf auf ein Zertifikat memoisieren, das
-denselben Baum in einer Obermengen-Konfiguration deckt (Coverage-Lauf
-⊇ einfacher Lauf); die Reihenfolge am Kohärenzpunkt ist damit
-Boundary-Lauf → Push → Review → Merge — ein Voll-Lauf pro Batch, alle
-späteren Gates lesen das Zertifikat statt es neu zu verdienen;
-Klarstellung: der Review-Preflight fährt nur die Prozess-Gates, nie
-die Suite), `v2.7.5`.
-
-Suite als gemanagtes Asset (aus dem Maintainer-Befund „immer noch extrem viel
-Zeit für Tests" — gemessen: die Vitest-Suite wuchs in zwei Wochen um
-43 %, 69 E2E-Specs × 2 Plattformen, und Stabilitätsbeweise liefen als
-5× Voll-Suite: **E2E-Budget pro Feature = 1, Floor UND Ceiling** — ein
-wachsendes Feature ersetzt seinen E2E-Beweis, Plattform-Varianten nur
-bei abweichendem Verhalten, Konsolidierungs-Pässe sind Wartung, jeder
-pensionierte Test braucht einen benannten billigeren Ersatz;
-**Stabilitätsbeweise scoped × N, voll × 1** (testing.md); **Test-
-Estate-Trend im Owner-Digest** — Unit-/E2E-Dateizahlen jetzt vs. vor
-14 Tagen, git-basiert, read-only — Wachstum wird sichtbar, bevor es
-sich wieder wie heute anfühlt), `v2.7.6`.
-
-Vier-Zustands-Pflicht für UI-Stories (aus der Härtungswellen-Analyse:
-~¼ der Fixes im Referenzprojekt waren Kalt-/Leer-/Offline-Zustände — „unknown stock
-als leer gerendert", Scope-Fallback beim Laden; das Spec-Template
-verlangt jetzt pro berührter Oberfläche die Tabelle loading / empty /
-error / **unknown** mit je einem erwarteten Verhalten — die DoR-R2-
-Zwillinge, für UI konkretisiert; „unknown" ist der Zustand, der
-unbenannt kaputt ausgeliefert wird: not-yet-resolved ist weder leer
-noch Fehler), `v2.7.7`.
-
-Records sind Leitplanken, kein Beton (auf Wunsch des Maintainers festgehalten:
-ADRs und Contracts DÜRFEN geändert werden, wenn die Lösung dadurch
-dauerhaft tragfähiger, technisch besser oder klarer wird — das allein
-ist hinreichender Grund; die zwei Ehrlichkeitspflichten sind die ganze
-Latte: benennen, was besser wird und warum es langfristig hält (nicht
-bloß „gerade bequemer"), und die Änderung im selben Aufwand wie der
-Code, der sie voraussetzt (Rule 4) — Supersession bzw. versionierter
-Contract-Wechsel mit allen Konsumenten, nie stille Drift; adr/README
-und contract-first.md tragen den Grundsatz), `v2.7.8`.
-
-SP65 (reference-upstreaming: vier Prozess-Erfindungen aus dem Referenzprojekt, die generisch
-tragen, in den Kern gehoben. **Launch-Owner** (`gate_invoke.py`, reines
-stdlib: die eine Stelle, die entscheidet, womit ein PEP-723-deklarierendes
-Skript gestartet wird — Kinder des Runners, `finish.py` und das
-Review-Bundle laufen darüber; „nicht startbar" wird getrennt von „rot"
-gemeldet, denn ein Runner, der nicht anläuft, ist ein Launch-Problem mit
-anderem Owner als eine Regression). **Hook-Doktor** (dasselbe Modul:
-`.pre-commit-config.yaml` neben gesetztem `core.hooksPath` heißt, jede
-Registrierung ist stumm — im Referenzprojekt 25 Tage lang unbemerkt; gate_runner
-und finish blocken hart, ein nie installierter Hook ist eine Note bzw.
-ein finish-Blocker: ein fehlender Check ist ein Blocker, nie ein Skip).
-**Push-verankerte Presence** (check_review: ein aktiver Tier-3-Plan, den
-DIESER Push trägt — Datei im gepushten Bereich oder Issue per
-Closing-Trailer/`(#N)`-Subject beansprucht — braucht den clearing pass
-hart auf dem Push nach main/master, als Note sonst; das Ziel liest das
-Gate aus `PRE_COMMIT_REMOTE_BRANCH` des pre-commit-Frameworks oder
-`PROCESS_PUSH_TARGETS` eines eigenen Hooks; bekannte Grenze: ein
-serverseitig gemergter PR pusht main nie lokal — dort bleibt finish.py
-der Stop). **finish auf Branch-Besitz gescoped** (nur Pläne, die der
-Branch trägt oder beansprucht, sind seine Review-Schuld und
-Archivierungspflicht — ein fremdes Entscheidungspapier im Baum blockte
-im Referenzprojekt einen unbeteiligten Branch). **UI-Wiederverwendungspflicht**
-(DoR R5 / DoD D7: Reuse-Map vor Implementierung, Konsumenten-Nachweis
-danach; review-checklist „Surfaces": nichts geclippt, 24-px-Ziele nach
-WCAG 2.5.8, zugänglicher Name auf jedem Button/Link, nichts verdeckt,
-vier Zustände, beide Themes — Stack-Guides schärfen, senken nie).
-**Ratchet-Muster** (testing.md: Baseline pinnt Legacy, neue Befunde und
-verwaiste Ausnahmen scheitern; die Baseline kann nur schrumpfen) und
-**„Unmessbar ist nicht rot"** (Mess-Gates verweigern auf belastetem Host
-mit eigenem Exit-Code, EX_TEMPFAIL, statt zu scheitern)) ausgeliefert,
-`v2.8.0`.
-
-Zwei Token- und Zeitsparer, auf die Maintainer-Frage „was lässt sich noch per
-Skript automatisieren": **Note-Ledger im gate_runner** (jede Gate-Note
-landet im Kontext des Agenten, und die Notes sind konstruktionsbedingt
-stabil — Pre-Adoption-Zustände, Platzhalter, Freshness-Hinweise — also
-kostete jeder Push dieselben Zeilen und begrub die eine, die sich
-geändert hat; der Runner merkt sich die Notes des letzten Laufs in
-`.git/`, druckt nur Neues, zählt das Unterdrückte, `--all-notes` zeigt
-alles; ein frischer Checkout hat kein Ledger und druckt alles — CI erbt
-kein lokales Schweigen) und **`finish.py --apply`** (der Tail-Checker
-führt den deterministischen Teil selbst aus statt ihn zum Abtippen zu
-drucken: Archiv-Commit und Rebase immer, Merge/Push/Branch-Löschen nur
-hinter der vollen Suite des Pakets — `--tests CMD` läuft sie, `--tests-
-passed` behauptet sie; jeder Schritt druckt sein Kommando, der erste
-Fehler stoppt in einem Zustand, den git erklärt), `v2.8.1`.
-
-SP66 (token-savers, die restlichen drei Kandidaten aus derselben Frage:
-**Kontextkosten messen** (`process_context.py --cost`: was ein Session-Start
-lädt, gruppiert nach Anker, Commands, Prozessdokus, Produktrahmen, aktive
-Pläne, State/Journal, alle Journal-Shards, Spec-Verzeichnisse, mit
-Session-Start-Schätzung und den zehn größten Dateien — chars/4, also
-vergleichbar untereinander, nicht mit der Rechnung; erst messen, dann
-kürzen), **Journal-Kompaktion** (`compact_journal.py`: Shards älter als N
-Wochen werden in ein Monatsarchiv gefaltet, das exakt die maschinell
-gelesenen Records — REVIEW, GRADE — wörtlich behält und die Prosa an git
-abgibt; Gates und trace globben das Archiv wie jeden Shard, gefenzte
-Zitate fallen mit der Prosa weg; Dry-Run per Default) und
-**Template-Update mit Owner-Liste** (`template_update.py` + `.process-owned`:
-copier update wie gehabt, die Owner-Dateien bleiben wie committet, und das
-Template-eigene Delta je Owner-Datei — alter Release-Render gegen neuen —
-landet als Diff unter `.process-work/template-delta/<ref>/`; aus der
-Stunde Hand-Konfliktlösung pro Release, gemessen am Referenzprojekt mit
-fünf Skripten, einem Doc und einem Command, wird ein mechanischer Port))
-ausgeliefert, `v2.9.0`.
-
-Erster echter Lauf von `template_update.py` am Referenzprojekt deckte einen
-Copier-Fallstrick auf: `modules` und `harnesses` sind abgeleitete
-(`when: false`) Antworten, die copier bei jedem Update aus dem Default
-neu berechnet — die aufgezeichnete Antwort gewinnt NICHT, ein abgeschaltetes
-Modul kommt still zurück (beobachtet: git-hooks samt Anker-Konflikt). Der
-Helfer setzt jetzt jede aufgezeichnete Antwort als `--data` neu; BOOTSTRAP
-korrigiert die frühere Behauptung „recorded modules dict wins", `v2.9.1`.
-
-Zertifikate sind nach dem verschlüsselt, was sie bezeugen (Befund im Referenzprojekt:
-parallele Worktrees zerhauten sich mit einer Slot-Datei „der zertifizierte
-Baum" gegenseitig die Zertifizierung — ein Eintrag je Tree-Hash, nie ein
-einzelner Slot; Zwischendateien pro Lauf per mktemp, nie ein fester
-geteilter Pfad; testing.md), `v2.9.2`.
-
-Drei Befunde einer Worker-Session generisch geschlossen (Hook-Doktor prüft auch
-das andere Manager-Modell: ein befülltes `.githooks/` ohne passendes
-`core.hooksPath` ist hart — auf einem Worker-Host lief monatelang eine Juni-Kopie
-aus `.git/hooks`; REST-Fallback in `publish_and_prune`, wenn `gh issue
-comment` am GraphQL-Sekundärlimit scheitert; `.publish-denylist` — Regexes,
-die beide Publish-Skripte prüfen, bevor etwas das Repo verlässt), `v2.9.3`.
-
-Test-Lanes sind eine geteilte Ressource (Befund im Referenzprojekt: vier Agenten in vier
-Worktrees ließen ihre gescopten Suiten gleichzeitig laufen, Load 6, alles
-kroch — und ein kriechendes Gate wird umgangen; testing.md: Zertifikats-
-Transfer am Push und eine flock-Spur je Host — anstellen statt drosseln,
-kein Bypass), `v2.9.4`.
-
-SP67 (ui-evidence, auf die Maintainer-Frage „sind Screenshots zum Abgleich und zur
-Erfolgskontrolle hinterlegt?" — sie waren Beweis an der Untergrenze, aber
-kein Abgleich mit der Absicht und für den Owner unsichtbar: **DoD D8**
-(Vorher-Nachher-Paar je Viewport, Theme und Zustand unter
-`.process-work/reviews/<slug>/`, aus dem Review-Report verlinkt; das
-Nachher-Bild wird gegen die Absicht beurteilt, nicht nur gegen die
-Untergrenze); **Review-Bundle „UI evidence"** (listet das Paar und jedes
-Bild, das der Diff berührt — fehlendes Paar ist Befund, kein Skip; /review
-und Checkliste verlangen das Urteil „entspricht der Absicht"); **Digest
-Sektion 6** (was sich auf dem Bildschirm geändert hat: Evidenzpaare und
-geänderte Pixel-Baselines als Pfade zum Öffnen);
-**check_baseline_duplicates.py** (byte-identische Screenshots unter
-verschiedenen Namen sind Beweis für nichts — Ratchet mit Baseline-Pin;
-erster Lauf am Referenzprojekt: 16 Gruppen, darunter „Fehler" identisch mit
-„teilweise geladen")) ausgeliefert, `v2.10.0`. Patch: das Evidenz-Verzeichnis
-eines Spec-Kit-Plans (`specs/NNN-x/plan.md`) wird über das Verzeichnis
-gefunden, nicht über den Dateinamen `plan`, `v2.10.1`.
-
-SP68 (residue, auf die Maintainer-Frage „räumt der Prozess ausreichend auf?" — gemessen
-am Referenzprojekt: 353 von 457 Remote-Branches bereits gemergt, 9 von 35 Spec-
-Verzeichnissen fertig, 5 aktive Pläne älter als zwei Wochen, alles ohne
-Rhythmus; nur die Plan-Archiv-Retention funktionierte, weil sie hart im Hook
-sitzt und der Fix ein Kommando ist: **`tidy.py`** (ein Report je Altlast mit
-dem Kommando, `--apply` erledigt den sicheren Teil — gemergte Remote-
-Branches, fertige Spec-Verzeichnisse via publish_and_prune, Journal falten,
-alte Archive, template-delta; alte aktive Pläne und stille Issues nur
-gelistet: Owner-Entscheidung) und **Digest Sektion 7** (dieselben Zahlen
-jede Woche vor dem Owner)) ausgeliefert, `v2.11.0`.
-
-SP69 (dialogue-decisions, Maintainer-Befund aus einem zweiten Prozess-Einsatz:
-Entscheidungen im Dialog landen nicht im Plan und gehen beim Kompaktieren
-verloren — der Kernel schützt sich selbst, Entscheidungen nicht: **`##
-Decisions`-Ledger im Plan** (eine `DECISION <Datum> <wer>: <was> — because
-<warum>`-Zeile je Entscheidung, geschrieben vor dem nächsten Schritt;
-Plan-, Execute- und Prime-Command sowie workflow.md tragen die Pflicht),
-**Re-Hydration liest sie** (process_context.py gibt das Ledger je aktivem
-Plan aus — /prime, /execute, /review sehen es nach jeder Kompaktierung
-wieder; die Kernel-Direktive nennt den Abschnitt, byte-identisch in allen
-vier Kopien) und **sichtbare Lücke** (Review-Gate-Note für Tier-2+-Pläne
-ohne den Abschnitt, auch specs/*/plan.md — das Gate kennt keine fehlende
-Entscheidung, aber ein Reviewer fragt bei leerem Ledger nach)) ausgeliefert,
-`v2.12.0`.
-
-SP70 (computed-evidence, Maintainer-Befund aus einem zweiten Einsatz: 15 von 16
-Review-Digests wurden nie berechnet — plausibles Hex, das kein Byte-Strom
-irgendeines Commits erzeugt; das Gate meldete es bei jedem Lauf, bis es
-als Dauerrot niemand mehr las. Zwei Antworten: **Evidenz wird berechnet,
-nie getippt** (`attest.py` schreibt die REVIEW-Zeile: Digest aus base/head
-mit der Formel des Gates neu gerechnet, veraltetes Bundle verweigert,
-Grammatik geprüft, an den Tagesshard angehängt; die Formel ist EIN Owner
-in check_review — `CANONICAL_DIFF` pinnt jede git-Config-Stellschraube
-(algorithm, renames, prefix, abbrev, ext-diff, textconv), damit ein Digest
-auf jedem Klon gleich verifiziert; Legacy-Digests bleiben gültig; ein Wert,
-den keine Formel erzeugt, heißt im Gate jetzt FABRICATED und zählt als
-fehlendes Review) und **Dauerrot bekommt ein Alter** (gate_runner merkt sich
-je Gate den ersten roten Tag in `.git/` und druckt das Alter mit jedem
-Fehlschlag; Digest Sektion 8 zeigt es dem Owner); dazu **Abschalten durch
-Weglassen geschlossen** (dritter Maintainer-Befund: zwei Pläne ohne `tier:`-Zeile
-waren für jedes Gate unsichtbar, bis sie eine bekamen und sofort zwei
-Pflichten scharf wurden — ein aktiver Plan und ein specs/*/plan.md ohne
-Tier sind jetzt hart, archivierte bleiben Note)) ausgeliefert, `v2.13.0`.
-
-Drei Befunde einer Worker-Session generisch geschlossen:
-**Hook-Doktor für `.githooks/`** (ein getracktes Hook-Verzeichnis ohne
-passendes `core.hooksPath` liest git nie — im Referenzprojekt lief monatelang
-eine Juni-Kopie von pre-push aus `.git/hooks`, und ein geleaktes GIT_DIR
-schaltete darüber das echte Repo auf `core.bare=true`; hart im gate_runner
-und in finish), **REST-Fallback beim Posten** (`gh issue comment` läuft
-über GraphQL, dessen Sekundärlimit stundenlang blockte, während das
-REST-Budget unberührt war — publish_and_prune fällt auf
-`gh api …/comments` zurück, Verifikation liest zuerst per REST) und
-**Deny-Liste vor dem Veröffentlichen** (`.publish-denylist`, projekteigene
-Regexes; ein Treffer verweigert den Post und nennt die Zeile —
-publish_and_prune und publish_review.sh; Anlass: projektinterne Bezeichner
-in einem Spec-Snapshot), `v2.9.3`.
-
-SP71 (design-contracts, generalisiert aus der Praxis im Referenzprojekt für Web
-und App: UI-Arbeit scheiterte wiederholt daran, dass jeder Agent etwas
-Plausibles rendert und niemand sagen kann, welches Bild *richtig* war —
-im Referenzprojekt geheilt durch je Surface einen Designvertrag mit stabilen IDs,
-gesiegelte Render-Runden als Referenz, unabhängiges Review mit GO und
-Amend-before-Code. Der Template macht daraus ein Modul im Standard-Set,
-inert bis zum ersten Registry-Eintrag: **Registry** (`docs/process/
-design-contracts/<surface>.json`: Vertrag, Status draft/accepted,
-sha256-Pin, ID-Familien, ADR, Review, gesiegelte Referenz, Code-Pfade),
-**Gate** (`check_design_contracts.py` — hart: Pin-Drift ohne Re-Pin,
-doppelt definierte ID, accepted ohne ADR oder ohne Review mit
-`Decision: GO`, Review mit anderem Siegel als die Referenz, Referenz mit
-gebrochenem Siegel, aktiver Plan zitiert eine ID, die der Vertrag nicht
-kennt; Note: opaker Pin, Draft, Boards aus älterem Vertrag, Surface-Push
-ohne zitierte ID), **`seal.py`** (Manifest + sha256 über Rundenordner und
-deklarierte Abhängigkeiten, `--verify` schlägt auf editierte, fehlende
-und undeklarierte Dateien fehl, Drift einer Abhängigkeit ist Exit 2),
-**Vorlagen** (Vertragsgerüst mit §-Blöcken und Amendment-Log,
-Review-Vorlage mit Rubrik/GO/Siegel-Hash, Runden-README mit Ablauf)
-und **Bindung ohne neue Kettenglieder** (R5 nennt jetzt auch die
-Vertrags-IDs, D8 beurteilt das AFTER-Bild gegen das gesiegelte Board
-der zitierten IDs, Review-Checkliste Surfaces und Regel 3 entsprechend;
-das Review-Bundle nennt den regierenden Vertrag und die zitierten IDs).
-Die Gestaltung selbst bleibt Menschen- und Reviewer-Urteil gegen die
-Boards; Render-Kit, Export-QA und Token-Lints bleiben projektspezifisch,
-das Modul beschreibt nur das Muster) ausgeliefert, `v2.14.0`.
-
-**Siegel-Interop** (`seal.py --verify` und das design-contracts-Gate lesen
-auch das Manifest eines projekteigenen Render-Kit-Freezers: `files` als
-Liste `{path, sha256}`, Abhängigkeiten als `externalDependencies` mit
-ordnerrelativen `../..`-Pfaden, `manifest.sha256` in sha256sum-Form
-`<hex>  manifest.json` — dieselbe Formel, ein Verifizierer; Anlass: drei
-bereits gesiegelte Runden im Referenzprojekt), `v2.14.1`.
-
-**Plan-Bindung** (erster Lauf im Referenzprojekt: ID-Familien sind
-surface-übergreifend — E1 ist auf Web wie in der App eine Ebene —, ein App-Plan
-wurde gegen den Web-Vertrag geprüft und `C8` galt nicht als `C08`. Ein
-Plan wird nur gegen den Vertrag geprüft, den er nennt (Pfad oder
-`design-contract: <surface>`-Zeile); ein Plan mit Familien-IDs ohne
-Nennung bekommt genau eine Note; Nullen sind keine Identität), `v2.14.2`.
-
-**Integritäts-Ledger im Review-Gate** (Befund im Referenzprojekt: 628
-digest-gebundene REVIEW-Zeilen, je Zeile mehrere git-diffs, eine
-kanonische Diff großer Spannen ~3 s — der pre-push-Gate wurde nie
-fertig. Die Eingaben einer Verifikation sind im Klon unveränderlich,
-also auch ihr Ergebnis: ein einmal geprüfter Record wird in
-`.git/process-review-integrity` gemerkt — „ok" wie Mismatch, ein
-erfundener Digest bleibt bei jedem Lauf rot, ohne neu gerechnet zu
-werden; Shards, die der Push selbst ändert, werden immer frisch
-geprüft; fehlende Commits werden jedes Mal neu gesucht.
-`--full`/`PROCESS_REVIEW_INTEGRITY=all` prüft alles, `=in-flight` nur
-die geänderten Shards (CI-Schalter für riesige Journale)), `v2.14.3`.
-
-**Kein Push wartet blind** (Befund 2026-09-18 im Referenzprojekt: der
-pre-push-Hook stand hinter einem Volllauf an, der Tool-Call des Agenten
-starb nach 40 Minuten bei 96 % der Scoped-Tests, fünfmal hintereinander.
-Regel in git-hooks.md und /finish: ein Hook, der Minuten laufen kann,
-wartet begrenzt und bricht mit Halter und Ausweg ab; die Evidenz entsteht
-entkoppelt im Hintergrund (Certify-Schritt, Baum-Zertifikat), der Push
-liest sie. Werkzeug bleibt projektspezifisch — im Referenzprojekt
-ein Lane-Skript mit zwei Lanes und ein Certify-Ziel),
-`v2.14.4`.
-
-SP72 (tower — der deterministische Kern eines Steuermanns für parallele
-Arbeit: die Idee des Maintainers eines Agenten, der viele Worker koordiniert, mit ihm
-spricht, Probleme findet und Ressourcen steuert. Bevor ein Agent urteilt,
-braucht er eine Lage, die nicht erzählt, sondern berechnet ist:
-**`tower.py`** (eine Tabelle aus Zustand, den der Prozess schon führt —
-alle Worktrees des Klons mit Vorsprung/Rückstand, Pfaden in Flug, Dirty-
-Zahl und Minuten seit dem letzten Commit; **Überlappungen** zweier
-Worktrees auf derselben Datei (hoch) oder demselben Verzeichnis (niedrig);
-aktive Pläne mit Tier, Issue, Decisions-Zahl, design-contract-Bindung;
-Reviews des Tages; rote Gates mit Alter; Lanes, wo es sie gibt; Worker-
-Meldungen) und **deterministische Befunde mit Begründung** (Überlappung,
-Tier-2+-Plan ohne Issue, Plan ohne Decisions-Ledger, Plan ohne Tier,
-chronisch rotes Gate, stiller Worker ohne Commit und Meldung seit einer
-Stunde, blockierter Worker, Branch weit hinter main; `--json`,
-`--min-severity`, `--stale-minutes`); **Worker-Protokoll** (`/report`,
-`report.py`: planned/pushed/review-pass/blocked/done/idle, eine Zeile je
-Zustandswechsel in das gemeinsame Git-Common-Dir des Klons, nie
-committed). Der Tower entscheidet nichts und redet mit niemandem — er ist
-die Eingabe des Steuermanns, damit dessen Tokens in Urteil fließen
-(zuteilen, umlenken, beenden) und nicht in Nachfragen bei dreizehn
-Workern; Doku `docs/process/tower.md`) ausgeliefert, `v2.15.0`.
-
-SP73 (train + steward — Maintainer-Wunsch: Aufträge sammeln und zu einem
-günstigen Zeitpunkt effizient mergen und deployen, statt dass dreizehn
-Agenten dreizehn Volläufe und Deploys zahlen. **Merge-Zug** (`train.py`:
-`plan` zeigt, wer einsteigen darf und warum nicht — berechnet, nie
-behauptet: archivierter Plan auf dem Branch mit klärendem REVIEW-Pass
-oder Waiver, Worker-Meldung nur als Zeiger, nie als Ersatz für einen
-fehlenden Pass; keine Datei-Überlappung mit einem bereits eingestiegenen
-Branch; kein rotes Gate; Abfahrt bei `--min-candidates` oder
-`--max-wait-hours`, nur bei freien Lanes, `--force` fährt sofort. `run`:
-Staging-Branch aus main im eigenen Worktree, Kandidaten in
-Wartereihenfolge gemerged (Konflikt = aussteigen), Prozess-Gates und die
-volle Suite EINMAL auf dem kombinierten Baum; bei Rot findet eine
-Präfix-Bisektion den ersten Verursacher, er steigt aus und wird
-`blocked` gemeldet; bei Grün Fast-forward von main, `--push`, Branches
-gelöscht, `done` je Worker, `--deploy` einmal) und **Steward-Rolle**
-(`/steward`: Tower lesen statt Sessions befragen, Befunde nach Schwere
-abarbeiten, zuteilen, umlenken, nur eigene Kinder stoppen und nur nach
-committed Plan und Decisions, Zug abfertigen, dem Owner nur bei
-Ereignis schreiben; nie implementieren, reviewen, zertifizieren;
-Modellwahl nach Tier, Budget je Issue); Doku `docs/process/train.md`)
-ausgeliefert, `v2.16.0`.
-
-**Zugplan ohne Reste** (erster Lauf im Referenzprojekt: 350 bereits
-gemergte Branches erschienen als „nothing ahead" — Rückstände sind
-Sache von `tidy.py`, keine Kandidaten; der Plan zeigt nur Branches mit
-Vorsprung), `v2.16.1`.
-
-**Tower über Hosts hinweg** (Maintainer-Anforderung: der Prozess bleibt
-host-agnostisch — im Referenzprojekt läuft die Steuerung auf einem
-Host, ein abgesetzter Worker auf einem zweiten. Der einzige Kanal, den jeder
-Host schon hat, ist git, also ist er der Transport: `report.py --sync`
-(oder `PROCESS_REPORT_SYNC=1`) veröffentlicht die Meldungen eines Hosts
-als Blob unter `refs/process/reports/<host>` auf origin — kein ssh,
-nichts auf einem Branch committed; `tower.py --remote` (oder
-`PROCESS_TOWER_REMOTE=1`) holt origin und diese Refs: Branches anderer
-Hosts erscheinen als `elsewhere` mit Vorsprung, Pfaden in Flug und Alter,
-nehmen an der Überlappungsprüfung teil und können stale sein wie ein
-lokaler Worker; die Meldungen aller Hosts werden zusammengeführt, je
-Worker gewinnt die jüngste. Starten und Stoppen auf dem anderen Host
-bleibt dessen Mechanismus; die Steward-Regel ändert sich nicht), `v2.17.0`.
-
-**Rückstand ist kein Flug** (erster Remote-Lauf im Referenzprojekt:
-Juli-Branches, tausende Commits hinter main, erschienen als „anderswo in
-Flug". Ein Branch ohne Commit seit 14 Tagen wird gezählt statt gelistet
-und als ein Befund `remote-residue` gemeldet), `v2.17.1`.
-
-**Anleitung verdrahtet** (Maintainer-Frage „ist die Anleitung angepasst?" —
-nein, war sie nicht: Tower, Report, Zug und Steward standen nur in ihren
-eigenen Docs. Jetzt: workflow.md „Parallel agents" erklärt die vier und
-sagt ausdrücklich, dass ohne Steward jede Session autonom bleibt — Gates
-und /finish tragen weiter, der Tower macht nur sichtbar, der Zug nur
-billiger; /plan, /execute, /review und /finish nennen ihren
-`/report`-Zustandswechsel und der Zug den Weg am /finish-Merge vorbei;
-README-Commands-Liste), **Steward hält das Repo sauber und die Issues
-geschlossen** (Housekeeping-Abschnitt: täglich `tidy.py --apply` für
-den sicheren Teil, Owner-Frage für das, was tidy nur listet,
-`remote-residue` aus dem Tower; Issues-Abschnitt: Worker besitzen ihre
-Claims und Closes, der Steward schließt Nachzügler mit dem Merge-Ref,
-macht Befunde zu getypten Issues, gibt tote Claims nach zwei Stunden
-frei; der Zug druckt je gemergtem Branch die referenzierten Issues),
-`v2.17.2`.
-
-**Unabhängiges Review von Tower, Zug, Report, Designvertrag und Ledger**
-(Maintainer: „check nochmal alles durch, ohne Bias" — ein frischer Reviewer ohne
-Kontext fand 26 Befunde, sechs davon hoch; alle mit Repro. Behoben:
-Zug — Tier aus dem Roh-Text las eingezäunte Beispiele als Deklaration
-(jetzt `_unfenced` wie im Review-Gate), ein de-datierter Slug ließ einen
-Januar-Pass einen September-Plan gleichen Namens klären (jetzt die
-Eindeutigkeitsregel des Gates), Push nach origin ohne Vorfahren-Prüfung
-konnte ein main ohne lokale Commits veröffentlichen (jetzt Abbruch),
-ein gescheitertes lokales `branch -d` löschte trotzdem auf origin (jetzt
-gekoppelt und gemeldet), die Bisektion beschuldigte bei rotem main den
-ersten Kandidaten (jetzt Basis-Check: rotes main beschuldigt niemanden),
-Konflikt-Aussteiger blieben stumm (jetzt `blocked`-Meldung); Tower — main
-und `.process-work/` erzeugten Überlappungs-Befunde, ein README zählte als
-Plan, ein lokal anders benannter Branch überlappte mit sich selbst auf
-origin, ein fehlgeschlagener Fetch war unsichtbar (jetzt Befund
-`remote-unreachable`, kein `--prune`); Report — Hostnamen wurden am
-ersten Punkt gekappt (`build.eu`/`build.us` teilten einen Ref), Timeouts
-ungefangen; Designvertrag — `Decision: GO/NO-GO meeting` galt als GO,
-eingezäunte Beispiele zählten, jede 64-Hex-Zahl im Review galt als
-Siegel (jetzt nur eine benannte `manifest.sha256:`-Zeile), eine
-Unterüberschrift mit ID zählte als zweite Definition; Siegel — ein
-verschachteltes `manifest.json` war vom Siegel ausgenommen; Ledger —
-`--full` prüfte neu, schrieb aber nicht zurück, ein vergifteter Eintrag
-überlebte (jetzt baut `--full` den Ledger neu). Doku an den Code
-angeglichen, Bedrohungsmodell des Towers ehrlich benannt), `v2.17.3`.
-
-SP74 (dispatch + Modell-Policy — Maintainer-Frage „startet das System die
-Sessions selbst?" (nein, bis jetzt) und „je Phase ein anderes LLM?" (ja,
-weil die Phasen über Artefakte getrennt sind: Plan und Decisions-Ledger,
-dann das Bundle). **`docs/process/model-policy.json`** ist die eine
-Stelle, an der man dreht: Tier × Phase → Modell, dazu der projekteigene
-Startbefehl als Vorlage (`{model}`, `{prompt}` — der Prompt ist EIN
-Argument, nie durch eine Shell) und `max_workers`; projekteigen, gehört
-in `.process-owned`. **`dispatch.py`** startet je Phase eine abgesetzte
-Session im Worktree des Branches (`start --issue N --phase
-plan|execute|review`, findet den Branch des Issues wieder), führt Buch in
-`.git/process-dispatch/`, zeigt Liveness (`list`), stoppt nur eigene
-Kinder und nur bei committetem Baum (`stop`, `--force`), weigert sich
-bei erreichtem `max_workers` oder gehaltener Lane. **Messen statt
-Bauchgefühl:** `report.py --model` (oder `PROCESS_MODEL`/`PROCESS_PHASE`
-aus dispatch) hält fest, welches Modell welche Phase fuhr;
-`process_kpis.py models` (Telemetrie) schneidet Review-Runden bis zum
-Pass und Blocks nach Tier × Phase × Modell — ehrlich als Proxy mit
-Konfidenz, die Zahl, an der die Policy gemessen wird. `/steward` teilt
-über dispatch zu und ändert Modelle nur über die Policy-Datei)
-ausgeliefert, `v2.18.0`.
-
-SP75 (sichtbare Worker und ein Frageprotokoll — Maintainer-Erfahrung mit dem
-ersten Steward: „ich sehe zu wenig, Fragen kommen spät und ohne Kontext".
-Zwei Entwurfslücken, geschlossen: **Worker als tmux-Fenster** (Policy
-`runner: tmux`, `tmux_session`; `dispatch.py` öffnet je Worker ein
-Fenster einer tmux-Session — interaktiv, vom Menschen zu öffnen, Ausgabe
-per pipe-pane ins Log, Start als Shell → Pipe → send-keys, damit die
-erste Sekunde nicht verloren geht und die TUI ihr tty behält;
-`dispatch.py log <branch>`; der Tower führt `sessions` mit letzter
-Ausgabezeile und Alter je Worker), **Frageprotokoll** (eine Frage an den
-Owner ist eine Zeile im Plan: `DECISION NEEDED <Datum> <Worker>: <Frage>
-— options: …; recommendation: …` plus `blocked`; der Tower führt
-`questions` und meldet sie als hohen Befund; die Antwort wird als
-`DECISION`-Zeile zurückgeschrieben, der Worker liest den Plan; Notizen
-bis 1000 Zeichen) und **Steward wacht statt zu ticken** (Dateiwache auf
-Meldungen und Pläne, Takt nur als Rückfallebene; Fragen werden
-vollständig und sofort durchgereicht — Issue, Branch, Frage, Optionen,
-Empfehlung, Lage), `v2.19.0`.
-
-**Zweites unabhängiges Review (v2.18/v2.19) — 19 Befunde eingearbeitet.**
-Ein frischer Reviewer las Dispatch, Tower, Train, Steward und
-Modellpolitik ohne Vorwissen. Die harten Befunde: tmux-Worker galten
-ewig als lebendig (die Shell-PID war nicht der Worker); `stop` konnte
-fremde Prozesse treffen (recycelte PID, PID 0 = eigene Gruppe); ein
-fremdes Verzeichnis am Worktree-Pfad wurde als Worktree akzeptiert;
-Fragen im Worktree eines Workers sah der Tower nicht (er las nur den
-eigenen); die Modell-KPIs zählten Runden je Meldung statt je Issue; der
-Prompt lief trotz Doku durch eine interaktive Shell; der Steward hatte
-Anweisungen ohne Mechanismus („Dateiwache", „Nachricht ins Fenster").
-Geschlossen: `dispatch.py` neu — Lebendigkeit ist der Pane-Zustand
-(`pane_dead`, `remain-on-exit`), nie eine Shell-PID; Records tragen PID
-plus Startzeit, `stop` beendet nur den aufgezeichneten Prozess; das
-Fenster läuft eine nicht-interaktive `sh` mit exakter POSIX-Quotierung
-und `exec`; `{model}`/`{prompt}` werden auch innerhalb eines Tokens
-ersetzt; `CLAUDECODE`/`CLAUDE_CODE_*` werden für beide Runner entfernt;
-`issues.json` findet den Branch eines Issues auch nach einem Stop; der
-Prompt beginnt mit dem Slash-Befehl und trägt das Frageprotokoll; neu
-`dispatch.py say <branch> "<Text>"` tippt eine Zeile in einen
-tmux-Worker; `log` zeigt bei tmux den Bildschirm (ein TUI-Log ist
-Escape-Codes), sonst den Log-Schwanz ohne ANSI; die Dirty-Prüfung zählt
-Untracked mit. Tower: `questions` liest jeden Worktree dieses Klons und
-per `git show` die Branches anderer Hosts (`--remote`); die Fragezeile
-verträgt Fettdruck und fehlendes „wer"; `sessions` zeigt den Zustand
-(live/dead/gone/unknown). Train: ein offener `DECISION NEEDED` hält den
-Branch vom Zug. `process_context.py` führt `open_questions` je Plan
-(/prime sieht, worauf gewartet wird). KPI `models`: ein Issue ist eine
-Einheit, das zuletzt gemeldete Modell je Phase besitzt sie, Runden einmal
-je Issue. Steward-Anleitung ohne Erfindungen: Takt per `/loop`, keine
-Dateiwache im Prozess; Antworten per `say` an den fragenden Worker, nie
-zwei Schreiber auf einem Plan; Trust-Grenze der Policy (`command` läuft
-auf dem Steward-Host — wie CI-Konfiguration zu prüfen) in `tower.md` und
-der Policy selbst; Hinweis auf Berechtigungen (`-p` braucht eine
-Freigabe, interaktiv ggf. Trust-Dialog), `v2.19.1`.
-
-**Fragen als Menü.** Der Steward reicht eine Worker-Frage nicht mehr als
-Absatz durch, sondern als Auswahl: wo die Harness ein Frage-Werkzeug hat
-(Claude Code: `AskUserQuestion`), eine Frage je Worker mit den Optionen
-des Workers als anklickbare Antworten, die Empfehlung zuerst und als
-„(Recommended)" markiert, Issue/Branch/Lage im Fragetext; ohne Werkzeug
-eine nummerierte Liste; bis zu vier offene Fragen in einem Aufruf,
-älteste zuerst. Funktioniert in der App und per Remote Control,
-`v2.19.2`.
-
-**Re-Hydrierung als Mechanismus, nicht als Satz.** Bisher stand nur im
-Kernel „nach einer Kompaktierung lies Kernel, Regeln und Ledger neu" —
-ein Satz, der die Kompaktierung überleben muss, vor der er warnt; dem
-Owner fiel auf, dass Worker das nicht tun. Neu `scripts/process/rehydrate.py`:
-druckt, was `/prime` liest, und nichts mehr (Kernel-Block, Pflichtregeln,
-aktive Pläne mit Tier/Issue, DECISION-Ledger, offene DECISION-NEEDED-Fragen
-mit dem Hinweis „nicht selbst entscheiden", nächste Aufgabe, State-File,
-Journal-Shard) — als Claude-Code-`SessionStart`-Hook für `compact|resume`.
-`rehydrate.py --install` trägt den Hook idempotent in `.claude/settings.json`
-ein, ohne den Rest der Datei anzufassen (sie bleibt Projekteigentum);
-`--check` sagt, ob er da ist. `/prime` bleibt für die Fälle, die der Hook
-nicht abdeckt; `start-here.md` beschreibt den Mechanismus. Dazu ersetzt
-`dispatch.py` im `command` der Policy auch `{branch}` und `{issue}`, damit
-eine Harness die Sitzung benennen kann — Claude Code: `--remote-control={branch}`
-macht jeden Worker in der Claude-App sichtbar (die `=`-Form, sonst frisst
-der optionale Name des Flags den Prompt), `v2.20.0`.
-
-**Subagenten im Worker: Lesen auslagern, nie die Änderung.** `/execute`
-sagt jetzt, wofür ein Worker Subagenten nutzt — Suche über die Codebasis,
-Diagnose aus langen Testläufen, Doku-Abgleich: viel lesen, wenig
-zurückgeben — und wofür nicht: die Änderung selbst, weil der Subagent
-weder Kernel noch Ledger kennt und der Worker einen Commit signiert, den
-er nicht gesehen hat (Regel 1); Ausnahme bleibt das `[P]`-Protokoll.
-Dazu `rehydrate.py --install` behält die Escapes der Settings-Datei bei,
-`v2.20.1`.
-
-**Aus dem ersten Steward-Tag.** Zwei Befunde des Owners, beide aus dem
-Betrieb: (1) Der Steward ließ einen Worker eine Stunde auf `planned`
-warten, weil er nur alle 30 Minuten tickte und gerade eine Frage
-durchreichte. Die Anleitung kannte keine Wache — Claude Code hat aber
-eine: `Monitor` auf `tail -f` der Reports-Datei weckt beim nächsten
-`planned`/`pushed`/`blocked`/`review-pass`/`done` sofort; sie lebt maximal
-30 Minuten und wird bei jedem Wecken neu gestellt, der `/loop`-Takt bleibt
-Rückfallebene (ein `DECISION NEEDED` ohne `blocked` sieht nur der Tower).
-Phasenwechsel warten auf niemanden: nach `planned` sofort `execute`, nach
-`pushed` sofort `review`; der Owner wird informiert, nicht gefragt.
-(2) Ein Gate war im Zug rot, im Root nicht reproduzierbar: der
-Staging-Worktree lag unter `.git/process-train/`, und ein Dateilister,
-der jeden Pfad mit `.git`-Segment überspringt, sah einen leeren Baum.
-Der Staging-Worktree liegt jetzt als Geschwister neben dem Root
-(`<root>-train`, wie die Dispatch-Worktrees), nur Logs bleiben im git
-common dir, `v2.21.0`.
-
-**Phasen auf einem anderen Host.** Der Steward im Referenzprojekt stellte fest: der
-Engpass ist die CPU des Steuer-Hosts, nicht die Zahl der Plätze; Reviews binden
-viel davon und brauchen nur git. Die Policy kennt jetzt `phases.<phase>`
-mit `command`, `runner` und `remote: true`: ein Remote-Phase-Start legt
-keinen Worktree an, der Befehl ist die Übergabe (Cloud-Sitzung, ssh),
-der Branch muss auf origin liegen, der Prompt weist den Worker an, mit
-`--sync` unter eigenem `PROCESS_HOST` zu melden; `list` zeigt REMOTE,
-`stop` vergisst nur den Record, `tower.py --remote` sieht die Meldungen.
-`tower.md` sagt, warum Reviews zuerst wandern (git-only, CPU-schwer, und
-ein frischer Klon auf einem anderen Host ist Unabhängigkeit) und dass ein
-Push von dort keinen lokalen Pre-Push-Hook durchläuft. Dazu:
-`rehydrate.py` druckt nur die letzten zwölf Entscheidungen eines Plans
-(ein Plan mit 113 DECISION-Zeilen ist ein Log, jede Kompaktierung zahlte
-ihn), `v2.22.0`.
-
-`dispatch.py` wertet die Lane-Sperre jetzt nach Lane und Phase aus statt
-pauschal: `lane.py status` wird zeilenweise gelesen, ein gehaltenes `full`
-sperrt nur `execute` (Plan und Review laufen unter dem Zug), ein
-gehaltenes `scoped` oder eine unbekannte Lane sperrt alles. Eine
-Remote-Phase sieht weder `max_workers` noch Lane, denn ihre Last liegt auf
-dem anderen Host. `--dry-run` nennt die Regel, die erlaubt oder verweigert
-hat, und behält bei Verweigerung Exit 3; `tower.md` und der Docstring
-sagen dasselbe, `v2.23.0`.
-
-**Dokumentation als Einstieg, ohne Template-Änderung.** `docs/UEBERBLICK.md`
-(und inhaltsgleich als PDF) erklärt den Prozess in elf Kapiteln und ist der
-neue Einstieg aus dem README. BOOTSTRAP nennt die fünf tatsächlichen Fragen,
-empfiehlt für Updates `template_update.py` statt eines Beispiel-Dictionaries,
-das Module abgeschaltet hätte, und erklärt parallele Agenten (Modellpolitik,
-`rehydrate.py --install`, Steward, Dispatch, Zug); beides an einem frischen
-Headless-Render nachgeprüft. SYSTEM-REQUIREMENTS ohne GitLab und `parity`,
-mit tmux und den Koordinationsskripten. Das öffentliche Repo nennt das
-Ursprungsprojekt nur noch als Referenzprojekt und enthält keine Betriebsdetails,
-Klientenbezüge oder Vornamen mehr; die Neutralitätslisten der Tests bleiben.
-
-**Lizenztext im gerenderten Repo, SBOM erzeugt statt gepflegt.** Jedes
-eingerichtete Repository erhält `docs/process/LICENSE` (Apache 2.0, identisch
-mit dem Repo-`LICENSE`, ein Test hält beide gleich) und `docs/process/NOTICE.md`:
-Die Lizenz gilt für die gerenderten Prozessdateien, nicht für Code und Inhalt
-des Projekts; geänderte Prozessdateien tragen einen Änderungshinweis. Bisher
-lieferte das Template den Lizenztext nicht mit, obwohl Apache 2.0 ihn bei
-Weitergabe verlangt. Die Repo-SBOM war von Hand gepflegt und stand auf
-v1.37.0; `tools/gen_sbom.py` erzeugt jetzt `docs/SBOM.md` und
-`docs/sbom.cdx.json` (CycloneDX 1.5, mit Hashes und Abhängigkeitsgraph,
-deterministisch) aus `pyproject.toml` und `uv.lock`, und `test_sbom.py` lässt
-CI rot werden, sobald eine der beiden Dateien veraltet.
-
-**`pushed` wird geprüft, nicht geglaubt.** Im Referenzprojekt meldeten
-Worker an einem Tag dreimal `pushed`, bevor die Arbeit auf origin lag; der
-Steward startete daraufhin die nächste Phase auf einem Branch ohne diese
-Arbeit. `report.py pushed` verweigert jetzt, solange der Branch nicht mit dem
-HEAD des Worktrees auf origin liegt oder origin seit Phasenstart keinen neuen
-Commit hat; `dispatch.py` gibt den Startpunkt als `PROCESS_PHASE_BASE` mit.
-`--force` bleibt für ein unerreichbares origin und markiert die Meldung als
-unverifiziert.
-
-**Greenfield-Prüfung durch einen unabhängigen Agenten** (leeres Repo, alle
-Harnesses, `regulated`, Hooks, Spec Kit, ein Tier-2-Durchlauf): kein Blocker,
-behoben wurde: `template_update.py` verdoppelte bei jedem Lauf die Quotes
-leerer String-Antworten (`github_repo: ''`) und erkennt jetzt eine
-HEAD-Installation vor dem Lauf statt an copiers Downgrade-Fehler;
-`scripts/process/.gitignore` und `.process-work/.gitignore` halten
-`__pycache__/` und die Update-Deltas aus dem Worktree; das Spec-Kit-Setup
-entfernt die drei Skills auch unter `.github/skills` (Copilot);
-`start-here.md` nennt `speckit` und `design-contracts` im Standard-Setup;
-`workflow.md` sagt, dass `/report`, `/steward` und `/finish` Claude-Code-
-Commands sind und andere Harnesses die Skripte direkt aufrufen;
-`rehydrate.py --check` bestätigt Erfolg, `train.py plan` ohne Commits hält
-statt zu scheitern, `finish.py` nennt `publish_and_prune` nur für Änderungen
-mit Spec. Dazu: README neu und schlank mit Verweis auf den Überblick, der jetzt
-auch englisch vorliegt (`docs/OVERVIEW.md`), `v2.24.0`.
-
-**Remote-Übergabe aus einem Terminal.** Im Referenzprojekt scheiterte die
-Übergabe eines Reviews an eine Cloud-Sitzung: der Startbefehl lief nicht
-ohne Terminal, und `dispatch.py` startete ihn ohne. Eine Remote-Phase mit
-`"runner": "tmux"` startet den Übergabebefehl jetzt in einem tmux-Fenster;
-`log` und `say` erreichen dieses Fenster, und `list` zeigt
-`HAND-OVER FAILED (exit N)`, wenn es mit Fehler endete, statt die Phase als
-laufend auszugeben, `v2.25.0`.
-
-**Die Sitzung auf dem anderen Host hat einen Namen.** Im Piloten des
-Referenzprojekts gab der Cloud-Start im Terminal nur Text aus, kein JSON;
-die Sitzungskennung stand nur darin, und der Steward sah nicht, welche
-Sitzung er prüfen musste. `dispatch.py` liest sie jetzt aus der Ausgabe der
-Übergabe (Stdout oder Log des tmux-Fensters): per `phases.<phase>.handover_id`
-(Regex, Gruppe 1) oder als erste URL. `list`, `log` und der Tower zeigen sie,
-`v2.26.0`.
-
-**Logo.** `docs/assets/` enthält das Zeichen (`mark.svg`), die Wortmarke für
-helle und dunkle Flächen und ein Social-Preview-Bild (1280×640). Drei Agenten
-laufen auf eigenen Spuren in ein Gate aus je vier Tiers, dessen Öffnung nur
-eine Linie breit ist, und verlassen es als eine geprüfte Linie: ein Häkchen,
-das in einem Merge-Punkt endet.
-
-**Aufgeräumt.** Die Arbeitsdokumente seit Juli sind aus dem Baum entfernt:
-`docs/design/` und `docs/plans/` (67 Entwürfe und Pläne, die meisten aus der
-Zeit vor dem Lean-Pass), `docs/pilots/`, die Audit-Berichte unter
-`.process-work/reviews/` und `docs/CAPABILITIES.md`, das der Überblick
-ersetzt. Sie bleiben in der Git-Historie; dieser CHANGELOG erzählt die
-Entwicklung. Der geltende Spec-Kit-Entwurf liegt jetzt bei der Analyse unter
-`docs/analysis/`.
-
-**KISS-Pass, gemessen statt geschätzt.** Ein unabhängiger Audit hat am
-Referenzprojekt gemessen, was trägt: Welche Gates je etwas gefunden haben,
-welche Module Artefakte haben, welche Skripte genutzt werden. Gestrichen ist,
-was dort leer oder ungenutzt war: die Module `contracts` (`contract-first`,
-`contracts-drift`), `arch_docs`, `github_master` (mit `gh_sync`/`gh_board`)
-und `security_floor`, dazu `trace.py`, `new_issue.*` und der Workflow
-`cleanup-branches` (ersetzt durch `tidy`). Die Frage `regulated` entfällt;
-`sbom` bleibt und gehört jetzt zum Standard-Setup, weil eine SBOM für den
-produktiven Einsatz zählt. Ein älteres Manifest, das gestrichene Module nennt,
-läuft weiter; `template_update.py` entfernt ihre Dateien. Zurückgeholt aus
-dem Referenzprojekt, wo es sich bewährt hat: das Gate `fix-streak` (der dritte
-Fix an einer Datei im Branch wird benannt, Regel 6), das Gate `ac-text-drift`
-(ein Akzeptanzkriterium lautet in Spec und Inventar gleich), die Prüfung, dass
-ein Pre-Push den geprüften Stand pusht (`PRE_COMMIT_TO_REF` gegen HEAD), das
-Attest immer in den Journal-Ordner des Branches (parallele Reviews kollidieren
-nicht mehr in einer Tagesdatei), im Zug der Gate-Start über `gate_invoke`,
-ein zweiter Lauf bei rotem Basisstand und der Push aus dem Staging-Worktree,
-im Delta-Bundle nur die Befunde DIESES Vorgangs und nie ein veraltetes Bundle
-nach einem gescheiterten Lauf, sowie eine Anleitung für den Einrichtungs-Hook
-von Cloud-Sitzungen (`tower.md`). 15 Gates statt 16/18, `v2.27.0`.
-
-**Befunde einer unabhängigen Funktionsprüfung von v2.27.0 behoben.** Drei
-brachen dokumentierte Wege: `no-commit-to-branch` lief auch beim Pre-Push und
-blockierte den Merge-Push von `finish` und dem Zug (jetzt nur beim Commit);
-die Prüfung des gepushten Stands verglich bei einem annotierten Tag das
-Tag-Objekt statt des Commits; mit `ci.github=false` war doc-drift ab dem
-ersten Lauf rot (start-here nannte ein Skript, das nur mit CI gerendert
-wird). Dazu: `template_update.py` hebt eine ältere Standardinstallation auf
-`sbom: true` (dort war `sbom: false` nur aus `regulated: false` abgeleitet),
-`check_issues` liest eine durch alte Update-Helfer vervielfachte leere
-Antwort als leer, BOOTSTRAP nennt alle Dateien, die im Brownfield ein
-`--skip` und danach einen Merge brauchen, und den Weg für Installationen
-unter v2.24.0; die Lagetabelle liest Pläne aus allen Worktrees (ein
-Worker-Plan ohne Issue wird jetzt gefunden); das Review-Gate meldet ein
-beanspruchtes Issue nicht mehr als planlos, wenn ein Plan unter Tier 2 es
-nennt; veraltete Texte zu gestrichenen Modulen bereinigt, `fix-streak` meldet
-OK, `make_review_bundle.py` und `tidy.py` kennen `--help`. Aus der Prüfung des Referenzprojekts: in der CI meldet die Hook-Verdrahtung nichts (dort ist der Job die Durchsetzung, lokale Hooks braucht er nicht), und ein nicht berechenbarer Review-Digest in einem flachen Klon (Standard einer Cloud-Sitzung) ist ein Hinweis statt rot, `v2.27.1`.
-
-**Review-Durchsetzung ohne CI geschärft.** Eine Prüfung des Referenzprojekts
-zeigte drei Lücken, alle ohne CI unentdeckt: Ein Tier-2-Plan ließ sich ohne
-Review auf main mergen (die Pflicht griff erst beim Archivieren), Code nach
-dem Prüfvermerk blieb grün, und ein übersprungener Hook oder ein Merge über
-den Plattform-Button fiel niemandem auf. Jetzt verlangt der Push auf main ab
-Tier 2 den klärenden Pass; ein Pass gilt nur für den `head`, den er nennt —
-später geänderter Code in den Pfaden des Pushs macht ihn beim Merge-Push und
-in `finish.py` ungültig (Journal und Pläne ausgenommen); ein Tier-3-Plan, der
-noch aktiv ist, während Commits auf main sein Issue beanspruchen, macht das
-Gate ohne Pass oder `review-waived:` auf jedem Lauf rot. Aktive Pläne werden
-wie archivierte auch über den Kurznamen ohne Datum erkannt. Das Rezept für
-Cloud-Sitzungen installiert die Git-Hooks, denn auch dort wird gepusht,
-`v2.28.0`.
-
-**Dringende Korrektur: jeder Push mit Historie wurde abgelehnt.** Die in
-v2.27.1 eingeführte Auflösung annotierter Tags schrieb im Gate-Runner
-`^{{commit}}` — in einer Jinja-Vorlage ist das Jinja-Syntax und rendert zu
-`^`, also zum Eltern-Commit. Mit dem `git-hooks`-Modul lehnte die Prüfung des
-gepushten Stands damit jeden Push ab, dessen Commit einen Vorgänger hat. Der
-Test lief mit einem Repo aus einem einzigen Commit und sah es nicht. Jetzt
-`^0` (ohne Klammern), ein Test mit echter Historie und annotiertem Tag, und
-ein Wächter-Test gegen doppelte Klammern ohne Leerzeichen in Python-Vorlagen.
-Wer v2.27.1 oder v2.28.0 installiert hat und am Push scheitert: auf v2.28.1
-aktualisieren, `v2.28.1`.
-
-**v2.73.0 — Kenni-Rückport II: Codex-Worker mit attestierbarem Review, Übergabe je Paket, `ci.github: manual`, Overlays mit Bruchprüfung.** Plan: `docs/analysis/2026-10-15-kenni-backport-2.md` nach drei Plan-Review-Runden. Tier 3, weil Gate-Code betroffen ist (`dispatch.py`, neues `_dispatch_codex.py`, `rehydrate.py`, `report.py`, `tower.py`, `check_review.py`, `process_kpis.py`, CI-Adapter, Copier-Frage). Update; wer `ci.github: manual` will, setzt die Antwort vor dem Update. Vom Owner am 2026-10-15 entschieden (E1, E2, E4).
-
-- **Codex-Worker (`--harness codex`, Port aus Kenni #2357):**
-  - **Voraussetzung:** eine installierte und eingeloggte Codex CLI auf dem Host (`SYSTEM-REQUIREMENTS.md`).
-  - **Variante:** `start`, `queue add` und `policy` nehmen `--harness codex`. Die Variante `docs/process/model-policy.codex.json` gehört dem Template; Projektwerte stehen in `model-policy.codex.local.json`. Beide sind Gate-Dateien.
-  - **Vor jedem Start:** Die CLI-Form wird geprüft und der Modellkatalog abgefragt. Es gibt kein Ersatzmodell, und jedes Modell braucht eine Klasse in `review_evidence`.
-  - **Lauf:** detached unter einem Supervisor, mit Zeitlimit (Review 15 Minuten, sonst 120, Policy-Schlüssel) und Belegen. `list` und `stop` lesen sie. Ein beendeter Lauf hält keinen Platz.
-- **Ein Codex-Review attestiert (Umkehr von Kennis „beratend“):**
-  - `dispatch.py handoff <branch>` prüft Belege, Schema und Digests gegen Bundle und Head.
-  - Es leitet die Unabhängigkeit aus der Familie des Implementierers ab: `cross-model` nur, wenn dessen Modell gemessen ist und zu einer anderen Familie gehört.
-  - Danach schreibt es den Review-Bericht (FINDING-Grammatik, AC-Zeilen, bei Tier 2 der Refute für Gate-Code), führt `attest.py --dry-run` aus, dann den Attest-Commit, und pusht.
-  - Ein verweigerter Probe-Lauf hinterlässt einen sauberen Worktree und den Bericht `blocked`. Er lässt sich nach einem angehängten Record wiederholen. Kein Lauf wird zweimal attestiert.
-  - Codex-Plan-Reviews für Epics mit mehreren fälligen Plänen werden verweigert (einer je Lauf).
-  - Die Familien liest `handoff` an der Basis, nicht am geprüften Branch. Es zählen alle Implementierer-Modelle des Branches.
-  - Ein Lauf, der nach dem Attest-Commit stehen blieb, wird aus der REVIEW-Zeile fertiggestellt. Ein Commit-Fehler stellt den Worktree wieder her.
-  - In der Kette geht der Harness nie über einen Review: Die Fix-Runde nach einem Codex-Review und der Review eines Codex-Execute laufen auf dem Standard-Harness.
-- **Ohne Codex:** Ein verweigerter Katalog oder ein Lauf, der scheitert, abbricht oder kein gültiges Ergebnis liefert, schreibt eine Zeile mit Id und Head nach `codex/unavailable.jsonl`, und die Meldung nennt den Ausweg: `--harness claude`, `skipped cross-model work=<id>: codex unavailable <row-id> — <Grund>`, `single-family`. Der Tower meldet `codex-skip-unmatched` und `codex-block-overridden`.
-- **`rehydrate --codex`:** voller Pflichtkontext oder ein sichtbarer Abbruch. Das gilt auch bei kaputter lokaler Policy oder Pfaden außerhalb des Repos. Geladen werden alle vorhandenen Anker (`AGENTS.md` und `CLAUDE.md`) und die `context_sources` der Variante. `--install`/`--check` für `.codex/hooks.json`; `--install` trägt `.codex/` in `.git/info/exclude` ein.
-- **Übergabe je Paket (E2, aus Kenni):**
-  - `/plan` verlangt je größerem Paket `Execution: delegate | retain-context` mit Begründung.
-  - `/execute` folgt dieser Wahl. Ein delegiertes Paket schreibt ein Subagent auf dem kleinsten passenden Modell; er committet nie, die Session prüft und committet. Das ersetzt „Offload reading, never the change“.
-  - `report.py --execution` und `process_kpis.py execution` messen, ob Delegieren Review-Runden kostet: Review-Runden und blockierte Runden je Modus, zugeordnet über die Issue-Nummer.
-- **`ci.github: manual` (E4):**
-  - **Was gerendert wird:** Die Workflows laufen nur noch per Hand (`workflow_dispatch`, auch ohne Zeitplan). Das Schutz-Skript wird nicht gerendert.
-  - **Durchsetzung:** Sie liegt beim pre-push-Hook eines Klons.
-  - **Werte:** Ein Validator lässt nur `true`, `false` und `manual` zu. Ein String `"true"` wird jetzt verweigert.
-  - **Bestehende Projekte:** Bei `true` und `false` bleiben Trigger und Schritte, wie sie waren. Die Workflow-Dateien sind nun Jinja-Vorlagen.
-- **Overlays für Projektnotizen, mit Bruchprüfung (Owner, 2026-10-15):**
-  - **Ablage:** Projektnotizen zu Template-Docs und -Befehlen stehen in `docs/process/<doc>.local.md` (Befehle: `docs/process/commands/<name>.local.md`), nicht mehr im Template-Doc selbst. Kopf: `overlay-of:`. Anker: `extends`/`replaces: "<Überschrift>" @<hash>`.
-  - **Prüfschritt:** Das neue Kern-Gate `overlays` (`check_overlays.py`) wird rot, wenn ein verankerter Abschnitt verschwindet oder sich ändert. Das gilt als möglicher Breaking Change, bis jemand Overlay und Abschnitt gelesen und mit `--stamp` neu gestempelt hat.
-  - **Beim Update:** `template_update.py` meldet die zu prüfenden Overlays direkt nach dem Update.
-  - **In der Session:** Jeder Befehl (auch jeder Copilot-Prompt) schickt die Session zuerst zu seinem Overlay (`docs/process/commands/<name>.local.md`) und zu den Overlays neben den Docs, die er nennt. Das gilt auch für frische und Headless-Sessions. Nach Kompaktierung oder Resume listet `rehydrate` die Overlays zusätzlich.
-  - **Grenzen:**
-    - `docs/process/kernel.md` nimmt kein Overlay; das Gate verweigert es. Der Kernel wird Byte für Byte in die Anker kopiert, ein Overlay käme dort nie an. Ein Projekt, das ihn ändern muss, behält seine eigene Fassung (`.process-owned`).
-    - Kopf- und Ankerzeilen in Codeblöcken eines Overlays sind Beispiele und zählen nicht. Ein nie geschlossener Codeblock ist rot, weil er die Anker danach verschlucken würde.
-    - Ein Anker deckt seine Unterabschnitte mit ab. Deshalb die engste passende Überschrift verankern.
-  - **Auf Template-Seite:** Ein Release nennt die Abschnitte von Template-Docs und -Befehlen, die es ändert oder entfernt. `tools/release.py` listet sie gegen den letzten Release-Tag und verweigert einen Eintrag ohne die Zeile `Geänderte Abschnitte:`.
-  - **Doku:** `docs/process/overlays.md`.
-  - Bestehende `*.local.md` ohne `overlay-of:` (etwa `review.local.md`) sind keine Overlays und bleiben ungeprüft.
-- **Verhaltensänderung:** Eine bestehende `codex`-Zelle in `model-policy.local.json` läuft weiter auf dem einfachen Runner. Nur `--harness codex` nutzt den Supervisor.
-- **Für Kenni (in dieser Reihenfolge):**
-  1. **Vor dem Update:**
-     - `ci: {github: manual}` in `.copier-answers.yml` setzen.
-     - `legacy_preflight` aus `scripts/process/_dispatch_codex.py` in eine Kenni-eigene Datei außerhalb von `scripts/process/` verschieben und `scripts/codex-*.sh` darauf umstellen. Das Template ersetzt `_dispatch_codex.py`.
-  2. **Update auf v2.73.0.** Bei Konflikten die Template-Fassung übernehmen:
-     - `scripts/process/` (Naht-Dateien, `dispatch.py`, `_dispatch_codex.py`, `rehydrate.py`), `docs/process/tower.md`, `.github/workflows/process-gates.yml`.
-     - Die Befehle, sofern Kennis Abweichung überholt ist.
-     - `setup_branch_protection.sh` entfällt.
-  3. **Kennis eigene Regeln in Overlays verschieben**, statt sie in Template-Docs zu behalten, jeweils verankert und mit `--stamp`:
-     - Qualität/Tempo (ADR-0065), Owner-Notizen in `risk-tiers.md`, `feature-registry.md`, `github-issues.md`.
-     - Die Sprachregel (ADR-0063) steht im Kernel und kann kein Overlay sein. Sie bleibt in Kennis `docs/process/kernel.md`: v2.73 ändert den Kernel nicht, Copier übernimmt die Kenni-Fassung also beim Update. Ändert ein Release den Kernel, bevor die Sprache eine Copier-Antwort ist (E3), kommt `kernel.md` vorher in `.process-owned`.
-     - `docs/process/review.local.md` bekommt die Kopfzeile `overlay-of: docs/process/review-checklist.md` und Anker auf die Abschnitte, die es ergänzt. `make_review_bundle` liest die Datei weiter ganz.
-     - Quick-Eskalation und Governance-only-Weg.
-     - Runner-Details aus `testing.md`.
-  4. **Codex-Werte** (Modellnamen, Zeitlimits, `context_sources` mit Kennis Skill und `docs/dev/codex-model-policy.md`) nach `docs/process/model-policy.codex.local.json` übertragen. Die Template-Datei bleibt unverändert.
-  5. **`.process-owned` leeren.** Kennis Gate-Code gleicht dann dem Release, und weitere Updates sind keine Tier-3-Migration.
-  6. **Kenni-Tests anpassen oder streichen:**
-     - `backend/tests/scripts/test_dispatch_codex.py`: beratender Handoff.
-     - `test_legacy_codex_policy.py`: neuer Pfad von `legacy_preflight`.
-     - `test_dispatch_v2_70_port.py`: `TOWER_DEFAULT_STALE_MINUTES`.
-- **Später:** die Sprachwahl als Copier-Antwort (E3) und die Pflicht-Deklaration im Design-Contract-Gate (E5).
-- **Geänderte Abschnitte** (für Overlays; `#`-Titel ändern sich mit jedem Unterabschnitt):
-  - `commits.md`: Merging.
-  - `start-here.md`: The standard setup, Anchors: what goes where…, Definition of ready.
-  - `tower.md`: Dispatch and the model policy.
-  - `verification-independence.md`: The review bundle….
-  - `workflow.md`: Plan.
-  - Module `arch-onboarding`, `doc-drift-gate`, `feature-registry`, `git-hooks` (Honest ceiling), `sbom` (The gate).
-  - Alle Befehle und Copilot-Prompts: die neue Overlay-Zeile unter dem Titel.
-
-**v2.72.0 — Kenni-Rückport I: Merge-Scope im Zertifikat, Stufenzeiten, Plan-Anker, gestrichene ACs, Betriebslehren (#226, #234, #235, #221).** Plan: `docs/analysis/2026-10-15-kenni-backport.md`. Tier 3, weil Gate-Code betroffen ist. Reines Update; für Kenni gibt es einen optionalen Aufräumschritt. Vom Owner am 2026-10-15 freigegeben.
-
-Anlass: Der Owner will Kennis Änderungen so weit wie möglich zurück im Template, damit Kenni nicht davonläuft. Ein Render des Templates mit Kennis Antworten fand 27 abweichende Template-Dateien. Sieben davon trug Kenni als eigenen Gate-Code in `.process-owned`, und das machte jedes Template-Update zu Tier 3. Dieses Release holt alles zurück, was keine Owner-Entscheidung braucht.
-
-- **Merge-Scope im Zertifikat (#226, aus Kenni #2587, #2603, #2604):**
-  - **Konfiguration:** `testing.local.json` kennt `merge_scope`, ein argv, dessen stdout die Stufen nennt, die `merge_suite` laufen lässt.
-  - **Ein Owner:** `certificate` ist der einzige Owner der Merge-Evidenz. Sie besteht aus der Suite plus `scope=<Stufen>`.
-    - Ein engerer Lauf erfüllt nie einen volleren Push.
-    - Ein unbekannter Scope zertifiziert nichts.
-    - Schreiber (`train`, `finish --tests`) lesen den Scope aus dem Lauf (`run_evidence`) und rechnen nie neu.
-    - Der Leser (`test_select`, Push) fragt den Selektor.
-  - **Memo:** Das Memo des Zugs trägt den Scope. Es gilt nur, wenn der gelaufene Scope dem vorhergesagten entspricht.
-  - **Kein Rest-Stand:** Vor der Suite löschen Zug und `finish --tests` die `stages`-Datei und alle `*.time` (`certificate.clear_run`). Ein früherer, breiterer Lauf zertifiziert so keinen engeren.
-  - Eine Scope-Ausgabe oder `stages`-Datei, die kein UTF-8 ist, gilt als unbekannter Scope und bringt keinen Absturz.
-  - **Ohne `merge_scope`** ist die Evidenz wie bisher die Suite allein, und vorhandene Zertifikate gelten weiter.
-- **Stufen-Vertrag und Stufenzeiten (Kenni #2586):**
-  - **Vertrag:** Eine stufenweise Merge-Suite hinterlässt in `<git-dir>/merge-suite/` die Datei `stages` und je Stufe `<stufe>.time` mit `t0 t1 exit` (`testing.md`, „Stages“).
-  - **Zug:** Er sammelt die Zeiten in `phases.jsonl` (`stages`: grün, rot, übersprungen).
-  - **Auswertung:** `process_kpis.py train-phases` zeigt je Stufe den letzten Zug, Median, Maximum, Übersprünge und rote Läufe.
-  - **Pflichten einer gestuften Suite:** Vor der Auswahl löscht sie `stages` und alle `*.time`. `merge_scope` gibt für einen Baum überall dieselbe Antwort, im Hook wie im Zug.
-  - Ein kaputter Marker kostet eine Kennzahl, nie den Zug.
-  - Ohne Stufen-Dateien ändert sich für Gate und Zertifikat nichts. `phases.jsonl` trägt dann `"stages": {}`, und `train-phases` meldet, dass noch keine Stufenzeiten vorliegen.
-- **Kleine Ports:**
-  - **`stale_minutes`:** Ein ungültiger Wert wird gemeldet statt still verworfen. Eine Policy, die kein Objekt ist oder deren `phases`, `tiers`, `default` oder Tier-Zeilen kein Objekt sind, lehnt `load_policy` ab, statt abzustürzen.
-  - **Design-Contract-Notizen (Kenni #2588):** Sie gehen in `<surface>.notes.md`, mit `merge=union`.
-  - **Inbox:** `.process-work/inbox.md` wird mit `merge=union` gemergt.
-  - **CI-Workflow:** Er bricht ältere Läufe auf Branches ab, nie auf `main`.
-  - **`rehydrate`:** `check=False` an zwei Stellen.
-- **Docs und Befehle aus Kenni:**
-  - **Test-Lanes:** zwei Lanes und begrenztes Push-Warten mit Exit 75. Das ersetzt den veralteten Satz „one lock per host“. Der Verweis in `lane.py` stimmt wieder.
-  - **Weitere Test-Regeln:** die Kosten von `unmapped: skip`; die Worker-Zahl gehört in den argv des Runners, nie in `addopts`; Port und Temp-Verzeichnis je Worker; die Quarantäne als Daten; die Geräte-Matrix läuft nachts.
-  - **`train.md`:** Der Gate-Runner startet über `gate_invoke`.
-  - **`commits.md`:** Ohne CI-Adapter gibt es keinen gehosteten Job.
-  - **Geplanter Wochenlauf:** Sperre, Deadline und nur eigene Branches.
-  - **`/plan` und `workflow.md` (#221):** kohärente Pakete und Anker je Task. Die Messung dort: Median 53 statt 183 Turns, 25 % statt 42 % Suche.
-  - **`/execute`:** Turns für Edits.
-  - **`/finish`:** `--tests` mit genau dem String aus `merge_suite`; `--tests-passed` zertifiziert nichts.
-  - **`/steward`:** Die Suite kommt aus `merge_suite`.
-  - **`/review`:** `--with <report>` im Attest-Beispiel.
-  - **Quick:** eine beobachtbare Satz-Beschreibung, der Endzustand der Daten, Eskalation bei einer Designwahl und bei parallelen Subagenten.
-- **Gestrichene ACs (#234, Kenni #2606):** `AC-<id>: struck — <Grund>` oder `dropped` nimmt eine AC aus der Testpflicht. Ein bloßes Durchstreichen ohne Grund streicht nichts. Ein Plan streicht nur eigene ACs, keine aus der Spec. Die Marke ist kleingeschrieben, ein `-` trennt nur mit Leerzeichen davor und danach, und der Grund braucht ein Wort: `AC-3: Dropped: When the socket drops …` bleibt eine AC. Der Bericht des Code-Reviews bestätigt jede Streichung mit `AC-<id>: struck` und nennt dabei keinen Test, sonst verweigert attest. So sieht ein unabhängiger Reviewer jede Streichung.
-- **Betriebslehren (#235):**
-  - **Codex:** Das Shell-Beispiel schließt stdin und hat ein Zeitlimit. Eine Policy-Zelle ist ein argv ohne Shell: Der detached-Runner schließt stdin selbst, eine tmux-Zelle braucht ein Wrapper-Skript.
-  - **DECISION NEEDED:** Die Ablehnung im Zug zitiert die Zeile und nennt beide Antwortformen. `/plan` und `/execute` sagen: Wer antwortet, setzt die Marke.
-- **Verhaltensänderung:** Der Push-Stempel trifft nach dem Update einmal nicht, weil die Konfiguration jetzt `merge_scope` trägt. Ein Push läuft dann einmal neu. Ein Zug mit `--suite` von der Kommandozeile, deren String Leerzeichen am Rand hat, findet sein altes Memo einmal nicht.
-- **Nicht enthalten, wartet auf Owner-Entscheidungen:**
-  - der Codex-Harness aus Kennis `dispatch.py` (#175): Ist ein Codex-Review beratend oder attestierbar?
-  - Kennis `/execute`-Regel „Übergabe oder Kontext behalten“: Sie kehrt die Template-Regel um.
-- **Später:**
-  - die Pflicht-Deklaration im Design-Contract-Gate;
-  - `due_measurements` mit lokalen Daten;
-  - `ci.github: manual`;
-  - die Sprachwahl als Copier-Antwort;
-  - Kennis Stufenwahl (#232, braucht die gemessene Leser-Karte).
-- **Für Kenni (optional, in dieser Reihenfolge):**
-  1. Update auf v2.72.0, noch mit den Einträgen in `.process-owned`.
-  2. `certificate.py`, `testing_config.py`, `test_select.py`, `train.py` und `finish.py` durch den neuen Render ersetzen. Sie enthalten den Kenni-Port ohne dessen Kommentare, dazu die Fixes aus Review und Refute (kein Rest-Stand, Memo nach gelaufenem Scope, robuste Marker). `process_kpis.py` kommt mit dem Update.
-  3. Die fünf Zeilen aus `.process-owned` streichen.
-
-  Für `dispatch.py` sollte Kenni das Delta der stale-Warnung und die Formprüfung in `load_policy` übernehmen. `dispatch.py` und `tower.md` bleiben bis zum Codex-Port Eigen-Dateien. Kennis Selektor- und Nightly-Tests bleiben lokal, die Naht-Tests sind jetzt Template-Tests (`tests/test_merge_scope.py`).
-
-**v2.71.0 — Nachweise vor dem Pass: Cross-Model, Gate-Code-Refute, ein Test je AC, Klasse des Plan-Reviewers (#225).** Plan: `docs/analysis/2026-10-14-review-evidence.md` nach drei Plan-Review-Runden. Tier 3, weil Gate-Code betroffen ist (`attest.py`, neues `attest_evidence.py`, `check_review.py`, `dispatch.py`). Migrations-Release. Vom Owner am 2026-10-14 freigegeben. Port von Kennis lokaler Umsetzung (kenni#2602), damit Kennis Patch an der Template-Datei `attest.py` entfällt.
-- **Anlass:** Kenni hat in einer Nacht sechs Tier-2-Branches gemergt, alle mit einem Pass in Review-Runde 1. Ein Audit fand danach sechs Major-Fehler, die das Review übersehen hatte. Vier davon waren Tests, die nicht rot werden können. Den Gate-Code-Refute hatten 4 von 4 Gate-Code-Branches ausgelassen, den Cross-Model-Lauf gab es ohne Hinweis nicht. Beides hat vorher nur gewarnt.
-- **`attest_evidence.py` (Kern), ein Owner:** `gather()` liest jeden Nachweis am attestierten Head, `decide()` ist eine reine Entscheidungstabelle. `attest.py` ruft die Prüfung nach `build_line` auf. Eine `--exception` nennt die übergangenen Nachweise in ihren `overrides`.
-  - Jede Regel hat einen committeten, zählbaren Ausweg: `skipped <art> work=<id>: <Grund>`. Die Arten sind `cross-model` (älter `codex-review`), `refute`, `plan-review` und `ac-trace`.
-  - Die Grammatik dieser Zeile besitzt `check_review.SKIP_LINE`. Die Zeile ist ein Record und darf wie eine REFUTE-Zeile nach dem Plan angehängt mitfahren (`records_only`).
-  - Eine Zeile mit `owner/repo#N` zählt nicht.
-- **Cross-Model:** Ab `review_evidence.cross_model_from_tier` trägt ein Code-Review-Pass `cross-model` oder `single-family` mit `skipped cross-model`. Die Schwelle steht in `model-policy.json`, Standard 3. **Verhaltensänderung:** Ein Single-Family-Pass auf Tier 3 braucht jetzt einen Grund.
-- **Gate-Code-Refute:** Berührt der attestierte Bereich Gate-Code (`is_gate_path`), braucht ein Code-Review-Pass ab Tier 2 eine REFUTE-Zeile im eigenen Plan der Arbeit oder `skipped refute`. Gelesen wird wie in der Bundle-Warnung: Ein zweiter Plan derselben Issue leiht nichts.
-  - **Ein Lauf auf Tier 2:** Ein Cross-Model-Reviewer arbeitet den Refute-Auftrag ab und schreibt die REFUTE-Zeile in seinen Bericht. Mit `--with` zählt sie.
-  - Ab Tier 3 bleibt der getrennte Lauf vor Runde 1.
-  - Kann git den Diff nicht liefern, wird verweigert.
-- **Ein Test je AC:** Ein Code-Review-Pass ab Tier 2 braucht seinen Bericht (`--with .process-work/reviews/<bericht>.md`) mit einer Zeile `AC-<id>: <pfad>::<test>` je AC, die der Plan nennt. Bei Spec Kit kommt `spec.md` dazu.
-  - **AC-ID:** Sie braucht eine Ziffer (`AC-1`, `AC-2.1`, `AC-B1`, `AC1`).
-  - **Offen gehaltene AC:** Eine AC, die `DoD-deviation: open AC-<id>` offen hält, braucht keinen Test.
-  - **`unproven`:** verweigert den Pass.
-  - **Testdateien deklariert das Projekt:** `review_evidence.python_files`, `python_classes` und `test_files` (fnmatch auf den Repo-Pfad). Die Vorgaben decken pytest, `*Tests/*`, `*Tests.*` (Xcode), `*.spec.*`, `*.test.*`, `*_test.*` und `tests/` ab. Eine Text- oder Datendatei ist nie ein Test.
-  - **Python-Test:** Er muss am Head so stehen, wie pytest ihn sammelt: ein Testmodul nach `python_files`, ohne `__test__ = False`, eine Klasse nach `python_classes` oder eine TestCase-Unterklasse (auch geerbt aus Basisklassen desselben Moduls), die letzte Bindung als `def`. Ein autouse-Fixture oder ein `setUp` mit Skip schaltet ab, ebenso ein `parametrize`, dessen Fälle alle abgeschaltet sind. Abgeschaltet zählt nicht, aufgelöst über Importe und Aliase: kein `pytest.mark.skip`, `skipif` oder `xfail`, kein `unittest.skip*`, kein `pytestmark`, kein `pytest.skip`, `importorskip` oder `self.skipTest` und kein `raise SkipTest`. Das Wort „skip“ in Daten stört nicht.
-  - **Andere Sprachen:** Der Test muss in der Form seines Läufers deklariert sein: `it(`/`test(` mit dem Namen als Titel, `func test…`/`func Test…` (XCTest, Go) oder eine Funktion unter `@Test`/`#[test]`. Eine Hilfsfunktion belegt nichts. Auf den Attributzeilen darüber, der Zeile selbst und im Körper darf keine Skip-Marke stehen (`.skip`, `xit`, `t.Skip`, `XCTSkip`/`XCTSkipIf`/`XCTSkipUnless`, `@Disabled`, `#[ignore]`), auch nicht in einem Setup der Datei (`setUp*`, `beforeEach`, `TestMain`).
-  - Bundle-Grammatik und Dispatch-Prompt des nicht attestierenden Reviewers verlangen die Zeilen.
-- **Klasse des Plan-Reviewers:** Ein Plan-Review-Pass ab Tier 2 nennt die konkrete Modell-ID. Ihr Rang (`review_evidence.ranks`) darf nicht unter dem der Plan-Session liegen.
-  - **Quelle für die Plan-Session:** der neueste `planned`-Report mit gemessenem Modell, sonst die Planzeile `plan-session model: <id>`.
-  - **Familien:** Eine andere Familie (`families`, Standard `gpt-`) ist nie kleiner. Eine unbekannte ID wird verweigert.
-  - **Gate-Code im Plan:** Ein Plan, der Gate-Code zum Ändern nennt, wird `cross-model` geprüft oder mit Grund single-family. Ein Zitat `pfad:zeile` oder ein Befehlsaufruf zählt nicht als Nennung.
-- **Dispatch:** Ein Plan mit angehängten Records (`records_only`) gilt als derselbe Plan wie bei seinem Pass. Eine angehängte Skip- oder REFUTE-Zeile macht die Plan-Review nicht neu fällig. Eine angehängte DECISION dagegen schon, weil sie den Executor bindet.
-- **Plan-Zeilen vor dem Attest:** Der Plan der Arbeit im Arbeitsbaum und im Index darf gegenüber dem Head nur angehängte Records enthalten (`records_only`). Sonst wird verweigert, und die Meldung nennt die Commit-Reihenfolge. Angehängte Records zählen nur, wenn der Plan per `--with` mitfährt.
-- **Schwellen am Base gelesen:** Ein Branch lockert die Regeln nicht für den eigenen Pass. Ein Pass ab Tier 2 ohne Bereich (`--bundle` oder `--base/--head`) wird verweigert.
-- **Rest (benannt):** Eine von Hand geschriebene REVIEW-Zeile umgeht die Prüfung, weil das Push-Gate sie nicht wiederholt. Nicht aufgelöst werden ein Skip-Alias aus einem eigenen Hilfsmodul, eine Basisklasse aus einem anderen Modul und Setup-Bereiche pro Klasse in anderen Sprachen. Ob ein genannter Test seine AC prüft, beurteilt der Reviewer. Für einen neuen Refute nach einer Fix-Runde mit Gate-Code bleibt es bei der Warnung des Bundles.
-- **Doku:** `verification-independence.md` („Evidence at the writer“), `refute.md` („Gate code is enforced“), `/review` (eine Zeile je AC, ein Lauf auf Tier 2), `/plan` (Klasse, `plan-session model:`, Gate-Code-Pläne), `review-checklist.md`, `journal-state-plans.md`, `model-policy.json` (`review_evidence`).
-- **Migration** (in dieser Reihenfolge):
-  1. **Alle Projekte:**
-     - Tier-2+-Reviews schreiben einen Bericht mit einer AC-Zeile je AC und attestieren mit `--with` den Bericht.
-     - Plan-Reviews nennen mit `--model` die konkrete ID.
-     - Pläne tragen `plan-session model: <id>`.
-     - Ein Single-Family-Pass auf Tier 3 braucht `skipped cross-model work=<id>: <Grund>` im Plan.
-
-     - Spec-Kit-Projekte: Specs nennen oft `FR-`/`SC-`-IDs, keine `AC-<id>`. Entweder bekommen Plan oder `spec.md` AC-IDs, oder der Plan trägt `skipped ac-trace work=<id>: <Grund>`, sonst wird jeder Tier-2+-Pass verweigert.
-     - Copilot-Prompts (`plan`, `review`) sagen dasselbe wie die Claude-Befehle.
-
-     Prüfung: `attest.py … --dry-run` auf einen offenen Branch nennt keine Verweigerung.
-  2. **Kenni:**
-     - `scripts/process/attest_evidence_local.py`, seine Tests und den Import in `attest.py` entfernen. Das Update bringt den Haken mit.
-     - In `docs/process/model-policy.local.json` die Schwelle setzen: `{"review_evidence": {"cross_model_from_tier": 2}}`.
-     - Die Testdateien prüfen. Die Vorgaben decken `backend/tests/**/test_*.py`, die Xcode-Ziele (`*Tests/*`, `*Tests.*`) und `frontend-react/**/*.spec.ts`/`*.test.ts` ab. Abweichende Muster gehören nach `test_files`.
-     - Eigene GPT-Modelle stehen über `families` (`gpt-`) schon drin.
-     - Bestehende `skipped codex-review`-Zeilen gelten weiter.
-
-     Kennis lokale Regeln weichen in drei Punkten ab:
-     - Die Plan-Zeile gilt auch für Slug-Arbeiten.
-     - Bei Tests wird ein Skip über Importe und Aliase aufgelöst; ein unbekannter Dekorator wird nicht abgelehnt.
-     - Ein Paar verschiedener Familien besteht in beiden Richtungen.
-
-     Prüfung: `pytest` auf Kennis Attest-Tests, dazu ein `--dry-run` auf einen offenen Branch.
-
-**v2.70.0 — Wissensanker: erzeugte Bestandslisten, Leser-Suche im Plan, Befundart `kind=`, verständliche Neuigkeiten (#223).** Plan: `docs/analysis/2026-10-13-knowledge-anchors-plan.md`, Revision 3, nach zwei Planprüfungen (je `revise`, kein Blocker) und einer Nachprüfung (`pass`). Tier 3, weil Prüfcode und der FINDING-Parser betroffen sind. Reines Update ohne Projektschritt. Vom Owner am 2026-10-13 freigegeben.
-- **Anlass:** Rund 200 blockierende Review-Befunde eines Projekts nach Ursache sortiert: Implementierungsfehler ~47 %, Test- oder Evidenzlücken ~14 %, fehlendes Wissen über Bestehendes ~10–16 %, unklare Anforderung ~11 %. Eine volle Ist-Spezifikation wurde nach Refutation verworfen; die Wissenslücken lagen auf Code-Ebene und entstanden beim Lesen und bei unbekannten Lesern.
-- **Erzeugte Bestandslisten (im Template, kein Kern-Gate; ohne Konfiguration inaktiv):** Das Projekt liefert Extraktoren in `docs/process/inventories.local.json` (Umgebungsvariablen, Jobs mit ihrem Prozess, Tabellen, Tools). `inventory.py update` schreibt `docs/inventory/<name>.md`, sortiert, ohne Zeilennummern, mit optionalen Notizen. `inventory.py check` und der Gate-Einstieg `check_inventory.py` vergleichen bytegenau und scheitern an kaputten Extraktoren, fehlenden und verwaisten Dateien. Das Projekt registriert den Check in `gates.local.json` und startet ihn im Schattenbetrieb.
-- **Mechanischer Auslöser:** `inventory.py for-plan <plan>` nennt die Bestandszeilen der Dateien, die ein Plan berührt, mit `pfad:zeile`; `/plan` übernimmt sie in die Tasks.
-- **`## Consumers` im Plan:** Wer eine Konstante, einen Standardwert, ein Timeout, ein Format, ein Layout, eine Umgebungsvariable oder eine Prozessannahme ändert, belegt die Suche nach Lesern und Schreibern (Befehl und Treffer). Die Änderungen bleiben in den Tasks. Review-Checkliste und Plan-Brief fragen danach.
-- **`kind=` an FINDING-Zeilen (optional):** `knowledge-gap | requirement | implementation | test-gap | process | environment`. Ein `knowledge-gap`-Fix schreibt die fehlende Tatsache an ihren Ort. Plan-Review-Berichte tragen `phase: plan`. `process_kpis.py rounds` zählt Blocker nach `kind`, Plan- und Code-Review getrennt. `kind=` ist nicht das Bug-Label `cause:*`.
-- **Neuigkeiten für Nicht-Techies:** Jede nutzersichtbare Änderung bringt ein Fragment `news/<slug>.md` mit (`news.py new`), ein bis drei Sätze ohne Fachbegriffe. Der Steward rendert wöchentlich `NEWS.md` (`news.py render`, nach Monat und Art, Datum des Merges), Titel und Bezeichnungen aus `news.local.json`. Der Owner-Digest zeigt die Einträge der letzten Tage.
-- **dev-process selbst:** neues `NEWS.md` mit einem Abschnitt je Release ab v2.60; `tools/release.py` verweigert ein Release ohne Abschnitt, `--check` nennt ihn.
-- **Nicht enthalten:** der Text aus #221 (Anker in Tasks) — er bleibt unter seinem Messprotokoll.
-- **Für Kenni:** Keine Migration. Zum Einstieg: 1. Extraktoren für Umgebungsvariablen (einschließlich Makefile und Test-Harness) und Jobs (mit Prozess) schreiben, `inventory.py update`, dann den Check in `gates.local.json` registrieren und im Schatten beobachten. 2. Die Job- und Variablen-Prosa in `ARCHITECTURE.md` durch Verweise ersetzen. 3. `news.local.json` mit deutschen Bezeichnungen anlegen.
-
-**v2.69.0 — Plan-Drift vor dem Execute, frische Worktrees für Migrationen, zwei Release-Arten (#213, #214, #217, #218, #219, #220).** Reines Update ohne Projektschritt (`releases.md`, neu in diesem Release). Tier 3, weil Gate-Code betroffen ist (`dispatch.py`, `gate_runner.py`, `train.py`, `pre_push.py`). Vom Owner am 2026-10-13 freigegeben.
-- **Plan-Drift (Kern, neuer Knoten im Beobachtungsbetrieb):** `dispatch.py start --phase execute` misst vor dem Start für jeden aktiven Plan des Issues, wie viele Commits die Basis seit dem letzten Plan-Commit gewonnen hat, wie viele davon eine im Plan genannte Datei ändern (Verzeichnisse zählen nicht, sie wären zu grob) und welche genannten Dateien die Basis seit der Abzweigung verloren hat (`scripts/process/plan_drift.py`). Anlass: ein Plan, der über 1000 Commits alt war. Das Ergebnis geht als Knoten `plan-drift` ins Gate-Ereignisprotokoll, je Branch-Stand als Eingabe; ein unverändertes Urteil (eine verweigerte Queue-Zeile bei jedem `drain`) wird nur einmal geschrieben. `nodes` führt ihn wie ein Gate, `flow` zeigt je Issue das letzte Urteil. Bei einer entfernten Phase misst er den Stand auf origin. Modus und Grenzen stehen im Mandat (`plan_drift`: `mode` shadow | warn | block, `max_touching` 10, `max_behind` 500 als erste Schätzung). Standard ist `shadow`: nur protokollieren. `warn` sagt es dem Steward und gibt dem Worker einen Prüfhinweis in den Prompt; `block` verweigert den Start, bis der Plan erneuert ist oder der Steward `--stale-plan-ok` übergibt, was das Ereignis festhält. Ein Trockenlauf protokolliert nichts.
-- **`nodes`:** Fehlschläge im Modus `warn` (Gate-Runner mit `--warn`, Plan-Drift auf `warn`) zählen nicht mehr als Blockaden; sie haben nichts aufgehalten.
-- **`gate_events.py` (Kern):** einziger Schreiber des Gate-Ereignisprotokolls, vom Gate-Runner und von Plan-Drift genutzt; das Zeilenformat ist unverändert.
-- **Frischer Worktree vor dem ersten Plan-Review (#214, weiche Form):** Ein Plan, der migriert oder ein Gate-, Hook- oder Lane-Skript löscht oder ersetzt, trägt `## Fresh-worktree dry run`: seine Schritte einmal in einem frischen `git worktree` ohne `.venv` und `node_modules`, mit Befehlen und Exit-Codes, und eine Suche nach allen Lesern jedes entfernten Pfads samt `is_file()`/`exists()`-Proben (`design-template.md`, `/plan`, `workflow.md`). Die Review-Checkliste fragt danach, `failure-catalog.md` führt die Klasse „Fresh worktree“. Ein Gate folgt erst, wenn die nächste Migration zeigt, dass der Abschnitt übersprungen wird.
-- **Zwei Release-Arten (#213):** reines Update (kein Projektschritt über `template_update.py` hinaus) oder Migrations-Release mit eigenem Abschnitt `Migration`, die Schritte in Reihenfolge mit ihrer Prüfung. Braucht eine Arbeit beides, geht das reine Update zuerst (`releases.md`, `MAINTAINING.md`). `tools/release.py` prüft das bewusst nicht.
-- **`tower.py --wait` weckt bei stillen Workern (#220):** Ist `stale` in `--states` (Standard), prüft die Wache die lebenden Sitzungen dieses Hosts sofort und dann minütlich: kein eigener Bericht und kein Commit für die Schwelle (`--stale-minutes`, `PROCESS_STALE_MINUTES`, Policy `stale_minutes`, sonst 60). Der Datensatz nennt letzten Bericht, letzten Commit und die letzte Ausgabe. Ein Fehler beim Prüfen eines Datensatzes überspringt die Prüfung mit Hinweis, statt jede Wache sofort zu beenden. Je Funkstille genau einmal; ein neuer Commit oder Bericht beginnt eine neue. Dieselbe Regel speist den Befund `stale-worker`.
-- **pre-push hält git-Variablen des Repos von Kindprozessen fern (#219, Verhaltensänderung):** Der Rahmen entfernt vor Gates, Testläufern, Merge-Suite und Preflight die Variablen aus `git rev-parse --local-env-vars` (`GIT_DIR`, `GIT_INDEX_FILE`, …). Ein Test, der in einem eigenen Temp-Repo committet, traf vorher das pushende Repo. Konfiguration aus der Umgebung (`GIT_CONFIG_COUNT`, `GIT_CONFIG_PARAMETERS`, also `git -c` und von Containern injizierte Einstellungen) bleibt, wie git sie selbst für ein anderes Repository behält.
-- **DoD-Abweichungen im Merge-Commit des Zugs (#217):** Zeilen `DoD-deviation: <Punkt> — <Grund>` aus den eigenen Plänen des Branches gehen wörtlich in den Merge-Commit. `DoD-deviation: open AC-3 — …` oder `continues #42 — …` hält das Issue offen: der Zug schreibt `Refs #N` statt `Closes #N` und sagt es im Log. Ein Schließwort vor einer Issue-Nummer in der Zeile (`fixes #12`) wird als `fixes issue 12` übernommen, damit GitHub nichts schließt, was der Zug offen hält. Kann git die Pläne nicht lesen, bleibt der Branch draußen, statt seine Issues zu schließen. `train.py plan` zählt die Abweichungen je Kandidat. Grammatik in `definition-of-ready-and-done.md`.
-- **Zug: Spec-Kit-Pläne sind eigene Arbeit (#218):** Slug und Issues eines eigenen `specs/<slug>/plan.md` zählen zu den Work-IDs des Branches. Jeder eigene Spec-Plan ab Tier 2 braucht einen eigenen klärenden REVIEW-Pass, auch einer ohne Code (der Zug kann Änderungen keinem Plan zuordnen); ein Pass für Plan A klärt Plan B nicht, auch wenn sein Bereich beide sah. Ein Pass mit `work=<Issue>` klärt weiter beide, wie im Review-Gate.
-- **Überblick, PDF, README:** `docs/UEBERBLICK.md`, `docs/OVERVIEW.md` und das PDF standen auf v2.43.1. Nachgezogen auf v2.69: neues Kapitel 5 „Der Prozess verbessert sich selbst“ (Prüfgraph, Gate-Modi mit Wächter, Verbesserungsversuche, Takt, Plan-Drift), Planprüfung vor Code, Testpfad, sechste Owner-Aufgabe (Prozess steuern), Release-Arten, ein neues Risiko und drei offene Fragen; überholte Stellen (Prüfsummen im Attest, Fix-Streak als Gate, die letzten zwölf Entscheidungen) korrigiert.
-- **Für Kenni:** Keine Migration. Plan-Drift läuft im Beobachtungsbetrieb; nach zwei bis vier Wochen zeigen `nodes` und `flow`, ob die Grenzen passen, dann entscheidet der Owner über `warn` oder `block` im Mandat.
-
-**v2.68.0 — Der Prozess als Prüfgraph: messen (P1), Gate-Modi mit Wächter (P2), Schleifen (P3).** Plan: `docs/analysis/2026-10-12-closed-loop-plan.md`, Revision 5, nach drei Prüfrunden (zuletzt verhältnismäßig: `revise`, kein Blocker). Tier 3, weil Gate-Code betroffen ist (`gate_runner.py`, `dispatch.py`). Vom Owner am 2026-10-13 freigegeben.
-- **Gate-Ereignisprotokoll (Kern):** Der Gate-Runner schreibt je Gate-Lauf eine Zeile nach `process-gate-events.jsonl` im gemeinsamen git-Verzeichnis: Ergebnis, Dauer, Commit, ob der Arbeitsbaum mehr enthielt, Branch, Modus, CI. Ein nicht schreibbares Protokoll ändert kein Urteil.
-- **`process_kpis.py nodes` (telemetry):** jedes Gate als Knoten. Kosten (Summe, Median, P90), Läufe über verschiedene Commits, rohe Blockaden, alleinige Blockaden als Schätzung, Flips (bestanden und gescheitert auf demselben Commit) gemessen, dazu gesichtete Blockaden aus `.process-work/gate-triage.jsonl` (`confirmed-defect`, `accepted-risk`, `infra-or-flake`, `unknown`). Ein folgender Fix-Commit beweist keinen Fang; `unknown` ist kein Beleg zum Abschwächen.
-- **`process_kpis.py losses` (telemetry):** vier Verlustmaße, nie summiert: Belegung (Agentenstunden), Verzögerung (Issue-Stunden), Owner-Entscheidungen (Proxy), Tokens. Jedes mit Zahl der Issues mit Wert und ohne; ein fehlender Wert ist nie null.
-- **`process_kpis.py outcomes` (telemetry):** Wert. Epics (native Sub-Issues, Titelpräfix oder Label aus dem Mandat) bis zum Nutzbar-Marker (`epic-closed` als Proxy oder ein Abnahme-Sub-Issue per `label:`/`title:`), gemessen, wo der Flow den Deploy zeigt. Vom Owner gemeldete störende Bugs bis zum ausgelieferten Fix. Bug-Herkunft auf zwei Label-Achsen (`cause:*`, `channel:*`) mit Abdeckung gegen das Ziel im Mandat („blinder Fleck“) und Folgefehleranteil, geschätzt, bis eine gesichtete Stichprobe die Labels prüft. Liest `gh`; ohne `gh` „nicht verfügbar“, nie Nullen.
-- **`optimize.py` (Verhaltensänderung):** `active()` liefert eine `Activation`, deren Wahrheitswert an/aus ist. In v2.67 war `if active(...)` immer wahr (ein Tupel); wer den Rückgabewert so geprüft hat, schaltete den Mechanismus überall an. Zwei laufende Versuche schalten sich jetzt gegenseitig ab, und `check` meldet den zweiten (ein Live-Versuch pro Projekt), unabhängig von Mechanismus und Flag.
-- **`flow` (Verhaltensänderung):** Endpunkt ist der Deploy, sonst der Merge, und das Feld sagt welcher. Ein gescheiterter Deploy heißt `failed`. Folgefehler zählen ab dem Deploy. Ohne Zugzeile (Merge mit `finish.py`) bleibt eine Merge-Durchlaufzeit `estimated`, außer das Mandat sagt `"deploy": false`; dann ist der Merge der Endpunkt by design.
-- **Token-Zählung:** Vollständigkeit je Nutzungsereignis statt je Datei; eine nicht lesbare Quelle oder eine Zeile ohne JSON macht die Summe `estimated` (Prüfrunden 2 und 3). Claude Code wiederholt die Nutzung einer API-Nachricht auf jeder Zeile eines Inhaltsblocks; sie zählt jetzt einmal je Nachricht (`message.id`, `requestId`), mit dem größten Wert je Feld; vorher waren die Summen überhöht. Laufende Gesamtsummen neben der Nutzung je Aufruf (Codex: `total_token_usage`) zählen nicht mit.
-- **`flow`:** Ein Issue, dessen Phasen noch kein Ende gemeldet haben, hat unbekannte Arbeits- und Wartezeit statt null Stunden Arbeit.
-- **Gate-Modi (Kern, P2):** `scripts/process/gate_modes.py` ist der einzige Ort, an dem ein Gate seinen Modus ändert. Das append-only Protokoll `docs/process/gate-changes.local.jsonl` (unter Review wie jede Prozesskonfiguration, nicht unter `.process-work/`) setzt `block` (Standard), `shadow` (läuft, protokolliert, blockiert nie), `sampled` (läuft auf einem stabilen Anteil der Commits) oder `off`.
-  - Abschwächen braucht in diesem Release jedes Mal eine Owner-Zeile. Kern-Gates und die im Mandat geschützten Gates lassen sich gar nicht abschwächen.
-  - Eine Abschwächung gilt erst, wenn sie auf dem entfernten Integrationsbranch steht (Default-Branch des Remotes, nie ein lokales `main`); ohne Remote gilt keine. Ein Branch kann kein Gate für den eigenen Push abschwächen und keines in seiner Kopie des Mandats entschützen. Ein Rückbau gilt sofort in dem Arbeitsbaum, der ihn enthält, für alle anderen nach dem Merge.
-  - `sentinel` baut nur zurück: ein Schatten- oder Stichproben-Gate, das auf einem sauberen Commit scheiterte, und bei einer gerissenen Leitplanke (`guardrails.limits`, Metrik `regressions`) jede noch aktive Abschwächung, die sie berührt, die jüngste zuerst. Zurückgebaute Gates sind gesperrt, bis `unlock` eine Sichtung festhält.
-  - `weaken --to shadow --observe` (mit Owner-Zeile) beobachtet ein neues Gate, das nie blockierte: Der Wächter lässt seine Fehlschläge stehen, damit Fehlalarme gezählt werden, bevor es blockiert. Der Wächter sieht nur das Ereignisprotokoll des Checkouts, in dem er läuft.
-  - Der Gate-Runner liest die Modi und nennt nicht blockierende Gates auf stderr und in der Zusammenfassung. Fehlt `gate_modes` oder scheitert es, blockiert jedes Gate; unlesbare oder regelwidrige Einträge werden genannt und übergangen, und der Wächter läuft trotzdem durch. In `nodes` zählen Fehlschläge im Schatten- oder Stichprobenmodus getrennt („would have blocked“).
-- **Schleifen (P3):** `docs/process/improvement-weekly.md` (wöchentlich: letzte Prognose, einige Blockaden sichten, blinde Flecken, genau eine Maßnahme) und `improvement-monthly.md` (frische, beratende Sitzung über Graph, Entscheidungen, Signale und Leitplanken). Beide harness-neutral, für Claude, Codex oder andere.
-- **Steward (Claude-Befehl und AGENTS.md):** täglich `gate_modes.py sentinel`; `losses`, `nodes` und `outcomes` gehören zum Bemerken; Gate-Blockaden stichprobenweise sichten; Abschwächen nur als Vorschlag an den Owner.
-- **Doku:** Optimierungsvertrag („The process as a check graph“, Wertzeile, ein Live-Versuch pro Projekt), Telemetrie-Modul (drei Familien, Triage-Format), Issue-Modul und Bug-Template (zwei Herkunftsachsen), Mandatsbeispiel (`outcomes`).
-- **Für Kenni:** Keine Migration. Ab dem Update füllt jeder Gate-Lauf die Knotentabelle. Bugs ab jetzt mit `cause:*` und `channel:*` labeln (der Steward bei Owner-Meldungen, Agenten bei Folgefehlern); `outcomes` zeigt die Abdeckung. Für Epics im Mandat `outcomes.usable` auf das Abnahme-Sub-Issue setzen, etwa `label:acceptance`.
-
-**v2.67.0 — Selbstlernender Prozess: Optimierungsvertrag, Records mit eingefrorenen Kriterien, Ende-zu-Ende-Messung, Graph im Beobachtungsbetrieb.** Aus dem Konzept des Owners vom 2026-10-12 („Steward + dev-process-Agent“), vor der Umsetzung reviewt; Review, Entscheidungen und Abweichungen vom Konzept stehen in `docs/analysis/2026-10-12-self-improving-process.md`. Tier 3, weil Gate-Code betroffen ist (`dispatch.py`, `train.py`). Release-Freigabe durch den Owner steht aus.
-- **Vertrag (Kern):** `docs/process/optimization.md` beschreibt Regelkreis, Ziele und ihre Messung, die Rollen Steward und Prozess-Maintainer, die Platzierung (Kern, Modul, Konfiguration, Projekt), den Record, die Zustände, die Entscheidungsrechte und die Messregeln. Neutral formuliert, damit jedes Projekt ihn nutzen kann.
-- **`optimize.py` (Kern):** ein Record je Verbesserung unter `.process-work/optimizations/OPT-NNNN-*.md`. `move` prüft, was ein Zustand braucht. Vor `piloting` braucht es ein Mandat (`docs/process/optimization.local.json`, Beispiel `optimization.example.json`), Budgets, `select`, `until` innerhalb von `max_pilot_days` und eine `REVIEWED`-Zeile auf genau diese Bedingungen, nicht vom Implementierer. Der Übergang schreibt `FROZEN … terms=<hash>`. Danach ändern sich Versuch, Grenzen, Kriterien, Auswahl, Laufzeit und Budget nicht mehr; `check` vergleicht auch mit dem Stand des Commits, der die FROZEN-Zeile einführte. Übernehmen darf der Owner, der Steward nur mit `adopt` im Mandat, der Implementierer nie. Stoppen darf jeder.
-- **Begrenzter Einsatz:** Ein Mechanismus im Versuch fragt `optimize.py active <flag> --issue/--tier/--class`. Ja heißt: genau ein laufender Record mit dem Flag, unveränderte Bedingungen, `until` nicht überschritten, die Arbeit passt zu `select` (`parity=odd|even` für eine gleichzeitige Kontrollgruppe). Jeder Zweifel heißt aus. Kein neues Gate: Die Regel greift dort, wo sie verwendet wird; ein Projekt kann `check` in `gates.local.json` eintragen.
-- **Steward:** neuer Abschnitt „Improvement loop“ (täglich, nicht pro Tick): `status`/`check`, Engpässe als Records, Pilot koordinieren, Wirkung verfolgen, im Mandat entscheiden. Er implementiert, prüft und attestiert weiter nichts. AGENTS.md und Copilot verweisen auf den Vertrag.
-- **Messung (telemetry):** `process_kpis.py flow [--issue N] [--json]` verfolgt ein Issue von der ersten dispatchten Phase bis zum Deploy, sonst bis zum Merge. Ausgewiesen werden Arbeits- und Wartezeit getrennt, Tokens mit Input- und Cache-Anteilen, Owner-Entscheidungen (Proxy), Folgefehler über den neuen Commit-Trailer `Regression-of: #N` und die Prozessversion beim Merge. Jedes Feld ist `measured`, `estimated` oder `missing`; die Wiederherstellungszeit heißt ehrlich „nicht gemessen“. `dispatch.issue_token_usage` liest die zusätzlichen Token-Felder (der eine Transkript-Leser). Der Zug schreibt in `phases.jsonl` jetzt `branches`, `deployed` und `ended`, damit ein Deploy einem Issue zuzuordnen ist.
-- **Graph (telemetry, Beobachtungsbetrieb):** `graph.py build|context|missed` leitet Kanten aus Plänen, Testkarte, git-Co-Change, REVIEW-Zeilen und optionalen Projektquellen (`graph.local.json`) ab. Jede Kante trägt Quelle, Commit und Gewissheit. Er empfiehlt nur und engt nie eine Testauswahl, ein Review oder ein Gate ein: Eine fehlende Kante beweist keine Unabhängigkeit.
-- **Weitere Doku:** `commits.md` (`Regression-of:`), Bug-Template („Introduced by“), `releases.md` (Pilot und Rückbau), Router in `start-here.md`, `.process-work/README.md`.
-- **Maintainer-Rolle:** `MAINTAINING.md` (nicht ausgeliefert) beschreibt den dev-process-Agenten: Auftrag, Grenzen, Zusammenarbeit mit dem Steward, Weg einer Änderung und Generik-Nachweis.
-- **Vor dem Release widerlegt und nachgebaut:** Ein unabhängiger Prüfer fand vier Wege, eingefrorene Kriterien unbemerkt zu lockern: eine zweite `## Criteria`, auch in einem Codeblock; eine Umbenennung, die die Historienprüfung blind machte; eine in einem früheren Commit vorbereitete FROZEN-Zeile; einen von Hand geschriebenen Start über das Mandat hinaus. Dazu kamen Selbstfreigabe über Groß- und Kleinschreibung und eine Regressions-Reparatur, die `flow` dem Ursprungsissue zurechnete. Jetzt zählt nur, was ein Leser sieht. `check` und `active` leiten jede Regel neu aus dem Log ab. Jede committete Fassung mit FROZEN muss dieselben Bedingungen tragen, auch über Umbenennungen. Ein Stopp wird nie verweigert. Der Zug liest `Regression-of:` nicht mehr als Issue-Referenz. Jeder Fund hat einen Test, der gegen die Vorfassung fällt (`docs/analysis/2026-10-12-self-improving-process.md`, „Refute und Review Runde 1“). Die zweite Runde zeigte, dass ein Hash über geparste Markdown-Abschnitte so schwach bleibt wie der Parser: Eine Setext-Überschrift, `<h2>` oder `## Criteria #` trugen weiter zweite Kriterien. Deshalb ist das Einfrieren jetzt byte-genau über alles oberhalb von `## Result`. Kopf und Log enthalten nur reine Zeilen. Die Historie wird in einem Durchlauf über das Record-Verzeichnis nach OPT-Nummer indiziert, Merges eingeschlossen. Ein Record, der lief und verschwindet, schaltet ab. Die FROZEN-Zeile trägt den Mandats-Schnappschuss, sodass ein verkleinertes Mandat abgeschlossene Versuche nicht rot macht. `process_git.REGRESSION_TRAILER` ist die eine Grammatik des Trailers („Refute Runde 2“). Die dritte Runde verschob einen Block unter FROZEN, legte die Grenze in einen HTML-Kommentar und änderte den Mandats-Schnappschuss. Deshalb ist der Record jetzt reines Markdown (kein HTML, kein Kommentar, kein Fence) und das Log append-only. Jedes committete Log muss ein Präfix des heutigen sein. Die veränderlichen Felder dürfen nur ihren Wert tragen („Refute Runde 3“). Die vierte Runde fand keinen Weg mehr an Einfrieren, Log oder Rechten vorbei, nur Text, der innerhalb eines Absatzes versteckt war. Deshalb ist HTML jetzt auch in Inline-Code abgelehnt, ebenso Link-Referenzdefinitionen („Refute Runde 4“).
-- **Nicht in diesem Release:** Das erste Experiment (Paket D) und das Kenni-Mandat sind Betrieb in Kenni. Incident-Records für die Wiederherstellungszeit bleiben offen. Ob `optimize.py check` ein Kern-Gate wird, entscheidet sich nach den ersten echten Records.
-- **Für Kenni:** Keine Migration nötig; ohne Mandat und Records ändert sich nichts. Zum Einstieg: 1. `docs/process/optimization.local.json` aus dem Beispiel mit dem Owner festlegen (Ziele, Untergrenzen, Budget, `steward_may`). 2. `process_kpis.py flow` über 20–30 Issues als Baseline laufen lassen; der Zug liefert Deploy-Zuordnungen erst für Läufe ab dieser Version. 3. Reparaturen bekannter Herkunft mit `Regression-of: #N` committen. 4. Erster Kandidat laut Konzept: gezieltere Kontextzusammenstellung bei Übergaben für `[mechanical]`-Tasks, als Record `OPT-0001`.
-
-**v2.66.0 — Dispatch und Zug: eine Regel für eigene Pläne, Plan-Review fail-closed (#207, #204, #201).** Vom Owner am 2026-10-12 als ein Release freigegeben. Tier 3, weil Gate-Code betroffen ist.
-- **Eine Regel für „eigene Pläne“ (#204).** `check_review.own_plans` ist der eine Eigentümer. Eigen ist ein Plan, den der Branch hinzufügt, oder ein Plan auf der Basis, der eine Issue des Branches deklariert. Ein nur umbenannter Plan ist neu, wenn sich seine Issues ändern; ein gelöschter Plan ist nie eigen.
-  - **Dispatch** zählte bisher nur hinzugefügte Pläne. Jetzt zählen auch die main-Pläne, die der Branch für eine Issue ändert, für die er dispatcht wurde (`dispatch.review_issues`; ohne Dispatch-Eintrag die führende Zahl im Branch-Namen). Ändert ein Branch seinen Plan auf main, startet eine Plan-Review, und deren Pass gibt die Chain frei.
-  - **Ein Paket, das für #72 auf `70-pkg-…` dispatcht wurde,** prüft den Plan seines Epics #70 nicht, auch wenn es ihn abhakt. Die Chain wartet deshalb nicht auf einen Epic-Pass. Refute: Mit allen Issues des Branches hätte sie dort für immer gewartet. Mit „ein eigener Plan schließt main-Pläne aus“ wäre ein Delta-Plan an der Review des geänderten Tier-3-Plans derselben Issue vorbeigegangen.
-  - **Abschluss und Tier der nächsten Phase** fragen weiter nur hinzugefügte Pläne.
-  - **Eigentümer:** Die Issues eines Branches liefert `dispatch.branch_issues`, den Issue-Parser `check_review.local_issue_numbers`.
-  - **Prompt und Wartemeldung** einer Plan-Review nennen die fälligen Pläne mit Pfad, auch bei `--plan-review` und in der Chain. Eine Remote-Session liest sie von origin. Der Prompt verlangt einen Pass je Plan.
-- **`plan_review_due` scheitert sicher (#207).** In jedem Zweifelsfall wählt dispatch die Code-Review, und die Session sagt selbst, wenn kein Code da ist. Das gilt für:
-  - origin ist nicht erreichbar; das gilt nicht mehr als „Branch fehlt“;
-  - eine Remote-Session; sie wird nur nach origin beurteilt, nie nach einem lokalen Vorsprung;
-  - `--dry-run`; es holt nichts mehr;
-  - git-Ausgabe, die nicht UTF-8 ist; `start` stürzt daran nicht mehr ab, gelesen wird mit `surrogateescape`, und kein Leser bekommt eine leere Antwort.
-
-  Ein Plan mit `review-waived:` schuldet keine Plan-Review, das ist die Regel des Gates. Vier Mutanten aus #207 haben jetzt einen Test, der sie fängt: Diff-Returncode ignoriert, `--no-renames` entfernt, Phasen-Guard entfernt, nicht lesbare Pfade. Zwei sind äquivalent. „Fetch-Fehler ignoriert“: Ein fehlendes Objekt macht jeden folgenden Schritt zur Code-Review. „`not base` ignoriert“: Der Returncode des Diffs fängt es. Nicht-UTF-8-Text in einem Plan lässt `start` nicht mehr abstürzen. Eine Plan-Review kann er trotzdem auslösen, denn nur nicht lesbare Pfade gelten als Code.
-- **Zug (#201).** Ein Branch, der einen aktiven Plan löscht, gilt nicht mehr als „unlesbar“. Benennt ein Kandidat einen Plan um, den ein anderer Kandidat hinzufügt, zählen beide Namen als ein Plan, gemessen ab ihrem gemeinsamen Fork. Die Eindeutigkeit des Slugs geht daran nicht mehr verloren. Ein echter Namensvetter auf einem dritten Kandidaten zählt weiter. Kandidaten ohne gemeinsamen Commit über der Basis kosten keinen Diff.
-- **Offen in #207:**
-  - `make_review_bundle --plan <issue>` sucht per Teilstring im Dateinamen.
-  - Die Spec-Kit-Identität (`tasks.md` gegenüber `plan.md`) ist nicht vereinheitlicht.
-  - Ein veraltetes `origin/main` neben einem frischen `main` führt weiter zur Code-Review, also in die sichere Richtung.
-- **Für Kenni:** Keine Migration, die Änderung kommt mit dem Template-Update. Zwei Verhaltensänderungen gibt es:
-  - Ein Branch, der einen main-Plan der Issue ändert, für die er dispatcht wurde, ging bisher direkt nach execute. Jetzt braucht er vorher einen `-plan`-Pass für diesen Plan.
-  - Eine `start --phase review` für einen solchen Branch wird zur Plan-Review statt zur Code-Review ohne Code.
-
-**v2.65.0 — Umgebungs-Preflight vor jedem Testlauf (#209).** Aus Kenni auf v2.64 (#2521), vom Owner am 2026-10-10 freigegeben. Tier 3, weil Gate-Code betroffen ist. In v2.64 hatte nur der Zug ein `--preflight`. In Kenni kam ein kaputtes Worktree-venv an einem Tag dreimal als rote certify- und Operator-Tests an.
-- **`preflight` in `testing.local.json`** ist ein argv ohne Shell, dazu optional `preflight_timeout` (Default 600 s). `test_select.run` führt ihn einmal aus, unter derselben Lane-Haltung und vor dem ersten Testbefehl. Damit gilt er für den pre-push-Rahmen, für `run --certify` und für Läufe von Hand. Ein Zertifikatstreffer oder „nichts zu testen“ braucht ihn nicht.
-- **Rot ist Umgebung:** Kein Test läuft, es gibt keinen Stempel und kein Zertifikat, und der Lauf endet mit Exit 2 und der Meldung „environment — the preflight exited N“. Der Fehler ist der des Hosts, kein roter Test.
-- **Der Zug** nimmt ihn als Default für `--preflight`, mit demselben `preflight_timeout` (ohne Angabe 600 s, auch für einen expliziten `--preflight`). Ein hängender Preflight wird samt Prozessgruppe beendet. Ein expliziter `--preflight` gewinnt, `--preflight ""` läuft für diesen Zug ohne.
-- **Beim Push laufen die Prozess-Gates vor dem Preflight.** Ein Host, der schon ein Gate bricht, wird als dieses Gate abgelehnt.
-- **Im Prüflauf gefunden und behoben:** Der Zug kannte kein Zeitlimit für den Preflight, und `--preflight ""` fiel auf die Konfiguration zurück. `preflight_timeout` ohne `preflight` und `NaN` gingen durchs Schema. Drei Eigenschaften waren ohne Test: läuft unter der Lane-Haltung, läuft einmal pro Lauf, ein Preflight, der nicht startet, ist Umgebung und kein Absturz. Jede hat jetzt einen Test, der ihren Mutanten fängt.
-- **Für Kenni:** Den Preflight aus #2521 Schritt 7 (venv-Interpreter #2292, Disk/Inodes, Lane- und Data-Dir-Guards) als `preflight` eintragen, statt ihn nur im Zug zu führen. Das lokale venv-Gate aus der v2.64-Übergangslösung entfällt dann.
-
-**v2.64.0 — Ein Testpfad: Auswahl aus Daten, Lanes, Baum-Zertifikate, ein pre-push-Rahmen (#206).** Aus dem Codex-Feedback zu Kenni und der Inventur des Kenni-Stewards, vom Owner am 2026-10-10 als ein Release freigegeben. Tier 3, weil Gate-Code betroffen ist. `testing.md` beschrieb vier Regeln für Auswahl und Lanes, die jedes Projekt selbst bauen musste; Kenni hatte sie mit eigenem `lane.py`, eigenem pre-push und eigenen Selektoren gebaut, und `certify` ließ dort für eine Ein-Datei-Änderung die volle Suite laufen. Jetzt liefert das Template den Pfad, das Projekt liefert Daten.
-- **`docs/process/testing.local.json`** beschreibt je Stack Pfade, Runner (`{paths}`), `full`, Test-Globs, eine Map mit Fallback-Kette, Pins (auch für gelöschte Pfade), `unmapped` (Default `full`), einen optionalen lokalen `select`-Befehl und ein Zeitlimit; dazu `merge_suite`, Lanes und `certificate_env`. Fehlt die Datei, laufen Gates und keine Tests. Ist sie kaputt, wird der Push verweigert.
-- **`test_select.py plan|run|check`** ist die eine Auswahlregel für Hook, `certify` und Handlauf. Eine geänderte Testdatei wählt sich selbst. `check` meldet veraltete Pins und Map-Ziele.
-- **`lane.py`** hält die Lanes `scoped` und `full` per `flock`, dateikompatibel mit Kennis `lane.py`, mit Wiedereintritt. Alle Stacks eines Pushs laufen unter einer Haltung. Bleibt die Lane belegt, endet der Lauf mit 75 und kein Test lief.
-- **`certificate.py`**: Zertifikate `push` und `merge`, Schlüssel ist der Baum ohne `.process-work/` plus das, was lief. Geschrieben nur auf sauberem, unverändertem Baum ohne `MAKEFLAGS`-Zuweisung. Ein Branch-Push nimmt beide Arten, ein Merge-Push nur `merge`. Ohne Zertifikat läuft beim Merge-Push `merge_suite`, sonst je Stack `full`, sonst wird verweigert.
-- **`pre_push.py`** ist die eine Abfolge jedes Pushs: Guard, nur Branch-Updates, gepushter Commit = HEAD, Klasse und Umfang, Stempel, Gates, Tests, Stempel. Jeder installierte Guard erreicht ihn über `merge_route.py --stdin`, ohne Neuinstallation. `PROCESS_SKIP=gates|tests` ist der Notausgang des Owners: geloggt, aus einer dispatchten Session verweigert, ohne Stempel und Zertifikat.
-- **`gate_runner.py`**: `--unless-frame-ran` (der pre-commit-Eintrag `process-gates`, damit die Gates nicht zweimal laufen), und lokale Gates mit `exec` (argv wie angegeben) und `paths` (läuft nur bei passendem Pfad, ohne bestimmbare Pfade immer).
-- **Train:** `--preflight CMD` prüft die Umgebung vor den Gates; rot bricht ab, ohne Schuld, Retry oder Bisektion. `--suite` hat `merge_suite` als Default. Eine grüne Suite, die den Baum unverändert ließ, schreibt das Merge-Zertifikat; der Push auf main lässt die Suite dann nicht noch einmal laufen. Phasenzeiten stehen im Log und in `process-train/phases.jsonl`, `process_kpis.py train-phases` liest Median und Maximum je Phase.
-- **`finish.py --tests CMD`** schreibt das Merge-Zertifikat, wenn `CMD` gleich `merge_suite` ist und der Baum sauber ist. **Vertragsänderung:** `--tests-passed` ist eine Behauptung und schreibt keins; mit Testkonfiguration lässt der Push dann die Suite selbst laufen.
-- **Vor dem Release widerlegt und nachgebaut:** Der Rahmen startete `gate_runner` zuerst mit dem eigenen Interpreter (ohne PyYAML wäre jeder Push verweigert worden) und gab den Gates das Push-Ziel nicht mit (ein Merge-Push mit unreviewtem Tier-3-Plan ging durch). Ein `merge_suite` ohne Stacks lief beim Merge-Push nicht, eine gelöschte Quelldatei wählte keine Tests, und der Stempel prüfte weniger als das Zertifikat (Umgebung, während des Laufs bewegter HEAD, ungetrackte Config). Alles behoben und mit einem Test belegt. Dazu kamen: `hook_check` nennt das Verdikt des Rahmens; ohne Basis begrenzt die Remote-Seite des Updates die Änderung; ein roter Preflight zählt in `train-phases` als `environment`, nicht als roter Zug.
-- **`publish_and_prune.py`** hält einen Verweis auf den archivierten Plan nicht mehr für einen Verweis auf das Spec-Verzeichnis.
-- **Doku:** `testing.md` („One test path“ ersetzt die vier Projektregeln), `train.md`, `failure-catalog.md` (Ressourcen-Lecks, feste Wartezeiten), BOOTSTRAP.
-- **Für Kenni (Migration):** 1. `testing.local.json` mit den Stacks schreiben, `unmapped: "skip"` setzen (jeder Merge läuft durch Train oder `finish --tests`), `merge_suite` auf das Merge-Target. 2. Das eigene `.githooks/pre-push` auf `exec uv run scripts/process/pre_push.py "$@"` reduzieren; Selektoren, die eine Map nicht ausdrückt, als `select`-Befehl einhängen. 3. Solange `scripts/lane.py` existiert, hält der Rahmen keine Lane (die Kenni-Befehle tun es selbst); erst nach dem Umstieg `scripts/lane.py` löschen. Beide Fassungen teilen dieselbe Sperre. 4. `finish --tests-passed` durch `finish --tests <merge_suite>` ersetzen, sonst läuft die Suite im Push. 5. Eigene Gates mit `paths`/`exec` in `gates.local.json`.
-
-**v2.63.0 — Plan-Review-Erkennung und Score-Schwelle für Blocks einer zweiten Modellfamilie (#203).** Aus Kenni auf v2.62, vom Owner am 2026-10-10 entschieden. Der dritte Punkt aus #203, die Ablösung bei gleicher Rundennummer, kam schon mit v2.62.1.
-- **`dispatch.py start --phase review` erkennt ein fälliges Plan-Review selbst.** In Kenni (#2480, #2483) wurde ein Plan nach seinem Plan-Pass geändert, und die Review-Session startete ohne `--plan-review`. Sie hielt das für ein Code-Review und brach mit „kein Code“ ab. Jetzt startet ein Plan-Review, wenn zwei Bedingungen gelten: Der Branch ändert seit seinem Fork nur Pläne und Bookkeeping (`.process-work/`, `specs/`), und ein eigener Plan ab Tier 2 hat keinen Pass für seinen aktuellen Text (`plan_review_due`). `dispatch.py` sagt dann, warum. Geprüft wird der Stand, den die Session prüft: der auf origin, denn dorthin bringt `sync_worktree` die Session, oder der lokale, wenn er vor origin liegt oder origin den Branch nicht hat. Ein veralteter lokaler Branch entscheidet nicht mehr (Refute). Sonst bleibt es ein Code-Review, auch wenn git die Frage nicht beantworten kann. Ist ein Plan, der schon auf main liegt, auf dem Branch geändert, braucht es weiter `--plan-review` (#204). `--plan-review` erzwingt das Plan-Review weiterhin.
-- **Ein Block einer zweiten Modellfamilie zählt erst ab Score 80.** In Kenni verhinderte eine Projektregel den Plan-Pass, sobald Codex blockte. Der Fall: Die unabhängige Bewertung lag bei 75 und darunter, nach „What blocks“ ein Residuum. `verification-independence.md` sagt jetzt ausdrücklich: Die Bewertung gilt für Plan-Reviews und für Urteile einer zweiten Modellfamilie gleichermaßen. Ein `review.local.md` darf die Rundenzahl verschärfen, nicht die Schwelle. Kenni passt dafür seine Regel an.
-
-**v2.62.1 — Eine gültige Runde mit derselben Nummer löst die alte Zeile ab (#199, Nachtrag).** In v2.62.0 musste die ablösende Vollrunde eine höhere Rundennummer tragen. `attest.py` zählt aber Runde = 1 + blockierende Runden. Die Runde nach einem Pass behält also dessen Nummer. In Kenni #2396 hob deshalb eine gültige Runde 6 die alte formwidrige Delta-Zeile mit Runde 6 nicht auf, und jeder Push blieb verweigert. Jetzt löst eine Vollrunde die alte Zeile auch bei gleicher Nummer ab, wenn sie ein Pass ist. Ein Block mit gleicher Nummer löst nicht ab, ebenso wenig eine Runde, deren Head nicht vom alten abstammt. Mein Test in v2.62.0 hatte eine unrealistische Folge (Runde 3 nach Runde 2) und sah den Fall nicht.
-
-**v2.62.0 — Vier Gate-Lücken aus dem Kenni-Betrieb auf v2.61 (#199).** Vom Kenni-Steward gemeldet, jede am Template nachgestellt; der Owner hat alle vier freigegeben. Tier 3, weil Gate-Code betroffen ist.
-- **Eine überholte Zeile ohne Fork-Basis blockiert nicht mehr jeden Push.** Seit v2.53 gilt jede REVIEW-Zeile mit Range als Vollrunde. Eine Delta-Zeile mit base=Vorgänger-Head war also nie gültig. Der Fehler: Auch eine spätere gültige Vollrunde hob den harten Befund nicht auf. In Kenni (#2240, #2396) hingen deshalb zwei Tier-3-Branches nach ihrem Merge von main fest, egal welche Runde folgte. Jetzt gilt: Folgt eine gültige Vollrunde derselben Arbeit mit höherer Runde, deren Head vom alten abstammt, ist die alte Zeile nur noch eine Notiz (`superseded_records`). Sie gibt weiterhin nichts frei, ein Block bleibt ein Block. Fehlt eine solche Runde, ist sie selbst ungültig, gehört zu einer anderen Arbeit oder hat eine niedrigere Nummer, bleibt der Befund hart.
-- **Der Zug zählt den aktiven Plan des Branches als dessen Arbeit.** Bisher bekam ein Branch die IDs eines Plans erst, wenn er ihn archiviert hatte. Ein Branch mit aktivem Plan und `work=<slug>` wurde abgewiesen („work= one of 2260, issue-2260“), obwohl `attest.py` die ID annahm. Welche Pläne einem Branch gehören, entscheidet jetzt eine Regel (`_own_plans`): vom Branch hinzugefügt, oder schon auf der Basis und mit einer Issue des Branches. Das Boarding fragt sie, und ebenso das Archivieren beim Merge. Der Plan einer fremden Issue, den der Branch nur anfasst, gibt ihm keine ID. Ein Slug zählt nur, wenn kein anderer Plan, den der gemergte Baum enthalten kann, ihn teilt: weder ein aktiver oder archivierter Plan der Basis noch ein neuer Plan eines anderen Kandidaten. Gezählt wird nach Pfad: die Pläne der Basis und die neuen Namen aller Kandidaten. Abgezogen werden nur die Löschungen und Umbenennungen des geprüften Branches selbst, denn ein anderer Kandidat, der einen Namensvetter löscht, fährt vielleicht nicht mit. So zählt derselbe Plan auf gestapelten Branches einmal, und ein nur umbenannter Plan ebenso. Nur dann nimmt das Gate ihn auch nach dem Archivieren beim Merge. Der volle Stem zählt immer.
-- **Ein Spec-Kit-Plan wird durch den Attest-Commit nicht mehr stale.** `attest --with` hängt REFUTE- und DECISION-Zeilen nach dem attestierten Head an. Unter `.process-work/` ist das Bookkeeping, unter `specs/<dir>/plan.md` nicht. So machte die eigene Attestierung das Review ungültig. Dasselbe passierte beim `--archive` eines Spec-Kit-Plans. Jetzt zählen zwei Formen nicht als Planänderung (`records_only`). Erstens Record-Zeilen, also REFUTE, ROOT-CAUSE, REVIEW und eine datierte DECISION, die hinter der letzten Zeile des Plans als eigener Absatz angehängt werden, also immer mit einer Leerzeile davor. Zweitens eine offene `DECISION NEEDED`, die an Ort und Stelle beantwortet wird: dieselbe Zeile mit demselben Präfix und Listenmarker, jetzt eine datierte DECISION ohne Inline-HTML, Tabellenzelle oder offenen Code-Span. Antwort und angehängter Record dürfen im selben Commit kommen. Dazu kommt die Verschiebung ins Archiv mit nichts weiter. Alles andere bleibt Planinhalt, auch eine Entscheidung oder ein Record mitten im Plan. Zuerst ließ die Regel Records überall zu und prüfte die Nachbarzeilen. Vier Refute-Runden fanden jedes Mal einen neuen Weg, wie ein eingefügter Record das Markdown um sich herum umgruppiert und geprüften Text versteckt. Deshalb ist die Regel neu gebaut: Hinter dem Ende des Plans steht nichts mehr, was ein Record umdeuten könnte. Die Muster der Record-Zeilen haben jetzt einen Eigentümer (`check_review`), von dem Bundle und Attest lesen.
-- **`finish.py --tests` läuft ohne Shell.** Bisher lief der Befehl mit `shell=True` auf argv-Text, und die Security-Scanner der Consumer schlugen an. Jetzt zerlegt `shlex` den Befehl. Führende Zuweisungen (`FOO=1 make test`) gelten weiter als Umgebung. `finish.py` prüft den Befehl vor dem ersten Schritt und lehnt ihn ab, wenn er einen Shell-Operator (`&&`, Pipe, `;`, Umleitung, Zeilenumbruch) oder offene Anführungszeichen enthält oder nach den Zuweisungen kein Befehl mehr kommt. Ein Befehl, der sich nicht starten lässt, endet mit „cannot run“ statt mit einem Traceback. Mehrere Stufen gehören in ein make-Target oder ein Skript.
-- **Für Kenni:** Der Scanner im eigenen `.githooks/pre-commit`, der Merge-Commits gegen den ersten Parent prüft, liegt bei Kenni (Kenni-Issue). Das Template liefert keinen aus.
-
-**v2.61.0 — Das Tier wird nachgerechnet, ein geänderter Wert gesucht; `template_update.py --help` aktualisiert nicht mehr (#197).** Aus Kenni, vom Owner zur Bewertung freigegeben.
-- **Hält das Tier?** In Kenni #2454 war ein Plan als Tier 2 eingestuft, schrieb aber den Redirect-Pfad um, an dem der einzige SSRF-Guard hing. Niemand rechnete das Tier nach, und die Bedrohungsfrage stellt die Checkliste erst ab Tier 3. Jetzt fragt `review-checklist.md` ab Tier 2 zuerst, ob das Tier hält. Der Plan nennt die berührte Grenze und den Guard, der sie unabhängig vom Diff durchsetzt (`file:line`). Ist der geänderte Code die einzige Durchsetzung, ist die Änderung Tier 3. Hält das Tier nicht, stoppt das Review, und die Arbeit wird neu eingestuft. Gefragt wird auch in `/plan` und im Plan-Brief von `refute.md`.
-- **Ein geänderter Wert wird gesucht.** In Kenni #2456 stand ein Image-Tag in Makefile, Tests und Doku; Plan und Review sahen nur die Paketliste, und der Zug lief rot. `/plan` inventarisiert jetzt auch geänderte Versionen, Pfade und Konstanten wie eine Umbenennung und zitiert die Suche, die die Leser fand. Das Code-Review sucht den alten Wert selbst noch einmal und zitiert das Ergebnis. Ein behaupteter Wirkungsradius ohne Suche gilt nicht als Beleg.
-- **`template_update.py` liest seine Argumente mit argparse.** Bisher fiel `--help` durch und startete `copier update` im aktuellen Checkout. Das ist vermutlich die Ursache von Kenni #2463, Copier-Ausgabe in fremden Checkouts. Jetzt zeigt `--help` die Hilfe und ändert nichts, ein unbekanntes Argument wird abgelehnt, und ein Verzeichnis ohne `.copier-answers.yml` wird abgelehnt, bevor copier läuft. Eine zusätzliche Bestätigung habe ich nicht eingebaut: Sie würde jeden dokumentierten Aufruf ändern, und die Ursache ist mit argparse behoben.
-
-**v2.60.0 — Mechanische Tasks laufen auf Haiku (Owner-Entscheidung).** In `model-policy.json` zeigt `classes.mechanical.execute` jetzt auf `claude-haiku-5`, bisher war es Sonnet. Seit v2.58.0 schneidet `/plan` die Tasks so, dass ein kleines Modell sie ohne eigene Entscheidung ausführen kann: exakte Dateien, Contract, Test, Befehl. Was ein Urteil braucht, bleibt `[design]` auf Opus. Unmarkierte Tasks laufen weiter auf der Zelle ihres Tiers. Review und Refute folgen nie der Klasse, sondern dem Tier.
-- **Für Kenni.** Mit dem Update laufen `[mechanical]`-Tasks auf Haiku. Wer bei Sonnet bleiben will, setzt die Klasse in `model-policy.local.json`: `{"classes": {"mechanical": {"execute": "claude-sonnet-5"}}}`.
-
-**v2.59.1 — Der Zug lässt einen Baum, den er im selben Lauf grün gesehen hat, nicht noch einmal laufen.** Beobachtet im Kenni-Zug 20261009-0935: Die Bisektion prüfte main+#2445 und sah den Baum grün. Danach wurde #2456 abgeworfen, und der Neubau, also derselbe Baum, lief noch einmal 25 min durch die Suite. Insgesamt hielt ein reiner Doku-Branch die Lane fast zwei Stunden. `judge` merkt sich jetzt die grünen Bäume des laufenden Zugs und überspringt deren Suite; die Gates laufen weiter. Das gilt nur für Urteile aus diesem Lauf: Das Grün eines früheren Zugs auf dem Baum eines Passagiers reicht nicht für einen Merge.
-
-**v2.59.0 — Der Zug wiederholt einen roten Lauf günstig (#193).** Bisher baute der Zug einen roten kombinierten Baum immer neu und ließ die ganze Suite noch einmal laufen, bevor er jemanden beschuldigte, auch bei deterministischem Rot. In Kenni dauert ein grüner `test-merge` im Median 25 min; ein deterministisches Rot kostete so einen zweiten 24-Minuten-Lauf vor dem Drop. Tier 2, Review durch einen frischen Prozess; dessen blockierender Befund ist behoben (Rückstände des ersten Laufs).
-- **Eine Regel, `retry_plan`, mit Tabellentest; das Log nennt Entscheidung und Grund.** Rote Gates: Die Gates laufen noch einmal auf demselben Worktree, bei Grün dann die Suite. Rote Suite mit `--retry`: Der Befehl des Projekts läuft auf demselben Worktree, Caches wie `.pytest_cache` bleiben erhalten. Ohne `--retry` oder wenn der Befehl auf dem Baum fehlt: neu bauen und die ganze Suite, wie bisher.
-- **Der Vertrag von `--retry`:** Er wiederholt, was fehlschlug, *und was nicht lief*. Eine Suite, die an ihrer ersten roten Stufe stoppt, hat die späteren nie erreicht. Ein Retry nur der Fehlschläge würde sie ungetestet mergen.
-- **Rückstände des ersten Laufs.** Hat der Lauf etwas im Worktree hinterlassen, das git sieht, etwa eine erzeugte Snapshot-Baseline oder eine umgeschriebene Lockfile, wird der Baum neu gebaut. Der Retry würde sonst auf diesem Rückstand grün. Die eigene Ausgabe der Suite gehört deshalb in die gitignore.
-- **Bewertet und nicht übernommen:** das Rot nach Fehlerart, Last oder Dauer zu klassifizieren. Das hieße, pytest- und vitest-Meldungen im stack-neutralen Template zu parsen, und eine Fehlklassifikation beschuldigt einen Unschuldigen. Ein billiger Retry behält den Schutz vor Flakes, ohne zu raten.
-- **Für Kenni:** Die Suite als `make -k test-merge` laufen lassen, damit jede Stufe einmal läuft. `--retry "make test-merge-retry"` je Stufe: `pytest --lf`, das ohne Fehlschlag alles läuft, und für vitest die fehlgeschlagenen Dateien aus seinem JSON-Report, sonst das ganze Frontend. Übergabe über `TRAIN_ARGS` oder das `train`-Target.
-
-**v2.58.0 — Ein Plan wird geprüft, bevor Code entsteht (#192).** Bisher las zwischen Plan und execute niemand den Plan unabhängig; der erste unabhängige Blick kam mit dem Code-Review nach execute. In Kenni (#2454) deckte ein Tier-2-Plan alle acht ACs ab und hatte trotzdem zwei Lücken: Er begrenzte Bytes, aber nicht die Laufzeit, und er zitierte eine unvollständige Signatur. Beides wäre erst nach einer vollen Execute-Runde aufgefallen. Entscheidung des Owners: Tier 2 prüft per Subagent, Tier 3 in einer eigenen Session. Tier 2, Review durch einen frischen Prozess: kein Block; sein Fail-Open-Befund ist behoben.
-- **Eine Checkliste, zwei Hälften.** Jeder Abschnitt von `review-checklist.md` beginnt mit „Plan decides:“: Grenzen und eine Frist für die ganze Operation, Fehler- und Rückgabeform jeder neuen Schnittstelle, wo untrusted input validiert wird, Gegenmaßnahme und Test je Spec-Risiko, ein Test je AC-ID, zitierte Signaturen am Code geprüft. Der Plan benennt das für die Dimensionen, die er berührt, ohne „n/a“-Zeilen. Das Code-Review prüft zuerst, ob der Code tut, was der Plan entschieden hat; eine Abweichung ist selbst ein Befund.
-- **Plan-Review vor `planned`.** Tier 2: Ein frischer Subagent prüft das Plan-Bundle (`make_review_bundle.py --plan`) mit dem neuen Plan-Brief in `refute.md` („Refuting a plan“): Gibt es schon einen Eigentümer? Stimmen die zitierten Behauptungen? Was passiert, wenn eine Abhängigkeit scheitert? Dazu Randfälle, offene Plan-Entscheidungen, Ausführbarkeit und bei Gate-Code Umgehungen. Der Planer arbeitet die Befunde ein und attestiert mit `attest.py --plan-review --commit`. Tier 3: `chain` stellt eine Plan-Review-Session ein (`review` mit `plan_review`, zweite Modellfamilie); deren Pass stellt execute ein.
-- **Durchgesetzt in `dispatch.py chain`.** Execute kommt erst in die Warteschlange, wenn jeder eigene Tier-2+-Plan auf dem Worktree einen bestandenen `REVIEW work=<id>-plan` trägt. Ein Pass zählt nur für den Plantext, den er geprüft hat: Wird der Plan danach geändert, ist er wieder fällig. Ein Pass für einen anderen Plan derselben Issue gibt ihn nicht frei. Ein Plan-Pass gibt nie Code frei und steigt nie in den Zug.
-- **Tasks für das kleinste Modell.** Weil die Entscheidungen im Plan fallen, sollen möglichst viele Tasks `[mechanical]` sein: exakte Dateien, Contract, Test und was ihn rot macht, Befehl. Sie laufen auf der mechanischen Modell-Zelle. Was noch ein Urteil braucht, wird `[design]` und nennt dieses Urteil.
-- **Doku.** `/plan`, `/review`, `workflow.md` (Plan), DoR R3, `tower.md`, `refute.md` und die Copilot-Prompts sind nachgezogen.
-- **Bekannte Grenzen.** `chain` handelt nur auf lokalen Sessions: Nach einem Plan-Review auf einem anderen Host stellt der Steward execute selbst ein. Ein Plan, der schon auf main liegt und vom Branch nur geändert wird, zählt nicht als eigener Plan.
-- **Buchhaltungs-Prüfungen sind Gates** (`testing.md`). Eine Prüfung, die `.process-work/` liest, ist ein Gate und kein Test hinter dem Baum-Stempel. Ein Stempel, der unter einem Bypass geschrieben wurde, belegt nichts.
-- **Für Kenni.** Laufende Tier-2+-Pläne brauchen vor execute einen Plan-Pass. Eine Arbeit, deren execute schon läuft, ist nicht betroffen. Die mechanische Zelle in Kennis `model-policy.json` kann auf ein kleineres Modell zeigen.
-
-**v2.57.1 — Eine gemeinsame Datei hält keinen geprüften Branch mehr zurück.** Bisher stieg ein Kandidat nicht ein, wenn er eine Datei mit einem Branch an Bord teilte. In Kenni wartete so gleich ein ganzer Zuglauf auf drei geprüfte Branches, nur wegen eines gemeinsamen Tests, eines Contract-Dokuments oder einer Registry-Datei. Tier 2, Review durch einen frischen Prozess: kein Block.
-- **Neu.** Git führt den Batch in Einstiegsreihenfolge zusammen. Ein echter Konflikt wirft den späteren Kandidaten mit einer `blocked`-Meldung hinaus, er rebased dann. Die volle Suite läuft auf dem kombinierten Baum. Seit v2.55 liest das Review-Gate die konfliktfreie Zusammenführung geprüfter Arbeiten als geprüft. Ein neuer Test stellt das für zwei Passagiere sicher, die verschiedene Stellen derselben Datei ändern.
-- **Bekannte Grenze.** Kollidiert C nur mit B, und B wird danach als Verursacher entfernt, verpasst C diesen Zug trotzdem und bekommt „rebase“ gemeldet. Ein Kandidat, der sicher kollidiert, zählt außerdem bei `--min-candidates` mit.
-
-**v2.57.0 — Pipeline-Stau: Zug und Sessions warten nicht mehr auf Pre-Pushes.** Aus Kennis Stau vom 08.10.: Serielle Pre-Pushes hielten die `scoped`-Lane den ganzen Vormittag. Ein execute-Start wurde stundenlang abgewiesen, und es fuhr nur ein Zug, während fünf Kandidaten mit bestandenem Review warteten. Tier 2, Review durch einen frischen Prozess; dessen blockierender Befund ist behoben (Punkt 5).
-- **Der Zug fährt neben Pre-Pushes.** `departure` wartet nicht mehr auf eine belegte `scoped`-Lane: Die Suite läuft auf `full`, mit `nice`, neben den kurzen Läufen. Eine belegte `full`- oder unbekannte Lane hält den Zug weiter.
-- **Ein Session-Start wartet auf keine Test-Lane.** Eine belegte `full`- oder `scoped`-Lane weist keinen Start mehr ab, auch execute nicht. Die Testläufe einer Session warten an der Lane, die Session selbst nicht. Eine unbekannte belegte Lane blockiert weiter jede Phase; die Worker-Obergrenze gilt weiter.
-- **Die Gates sehen den Plan vor execute.** Eine Plan-Session hört vor dem Push auf, deshalb sahen die Gates den Plan bisher erst beim Push von execute. In Kenni scheiterte dieser Push dreißigmal pro Branch an einer fehlenden `design-contract:`-Zeile. Jetzt laufen die Gates im Plan-Prompt und in `/plan` vor `planned`. `chain` stellt kein execute in die Warteschlange, solange sie auf dem Worktree des Plans rot sind, und nennt den Grund bei jedem Tick. Gespeichert wird nur ein echtes Urteil des Runners; ein Timeout wird beim nächsten Tick neu geprüft.
-- **Eine Session startet auf dem Stand von origin.** Ein Worktree, der hinter seinem gepushten Branch liegt, wird vorgespult. Ein abweichender Worktree, oder ein zurückliegender mit lokalen Änderungen, wird abgewiesen. Ein Review weist einen Worktree ab, der vor origin liegt. In Kenni prüfte ein Review den Plan-Commit, während die execute-Commits auf origin lagen.
-- **Der Zug spart den Lauf auf dem nackten main.** Nach einem roten Batch wird die Basis geprüft. Hat der Zug genau diesen Baum mit derselben Suite schon grün gesehen, entfällt die Suite (`green-suites`); die Gates laufen weiter. Das gilt nur vorläufig: Bevor der erste Passagier beschuldigt würde, läuft die Basis doch. Main kann auch außerhalb des Baums rot werden, und ohne diesen Lauf würde jeder Passagier der Reihe nach fallen. Das fand der Review.
-- **Für Kenni.** Mit dem Update fährt der Zug ohne `--force` neben den Pre-Pushes, und execute-Starts warten nicht mehr. Kennis lokale Schritte in `run_issue.sh` lassen sich danach zurückbauen: `gate_runner` vor dem dsh-Lauf und das Nachziehen des Worktrees auf origin. Faire Lane-Warteschlange und eine Lane-Haltung pro Push bleiben Kenni-Code (#2441, #2446).
-
-**v2.56.1 — Review-Bundle bricht das Issues-Gate nicht mehr (#186); Lane-Vertrag (#184).**
-- **Issues-Gate.** Das Gate las jede `.md` in `.process-work/reviews/` als Report, auch das gitignorte Review-Bundle (`*.bundle.md`). Das Bundle hat keinen `review:`-Kopf, also scheiterte der Push; in Kenni zweimal an einem Tag. Dateien, die git ignoriert, sind jetzt keine Reports. Außerhalb eines Repos oder bei einem git-Fehler liest das Gate wie bisher alles. Eine Datei ohne Kopf, die git sieht, scheitert weiter.
-- **Lane-Vertrag.** `testing.md` nennt die Form, der Testauswahl und Lane-Skript eines Projekts folgen: ein geändertes File wählt das nächste passende Test-Paket statt des obersten, mit benanntem Fallback; Läufe parallel mit begrenzter Worker-Zahl; ein Push hält die Lane einmal über alle Teststufen; Haltezeit pro Push wird vorher und nachher gemessen. Plan, Review und Brainstorm starten schon seit v2.52.0 trotz belegter `scoped`-Lane.
-- **Für Kenni.** Auswahl (`Makefile`) und `scripts/lane.py` sind Kennis Code: Test-Unterpaket statt Top-Level-Paket, `-n` im Pre-Push-Arm, eine Lane-Haltung für pytest und vitest. Haltezeit vorher und nachher in #184 festhalten.
-
-**v2.56.0 — Methoden aus Pococks Skills und Claudes Review-Plugin.** Übernommen nach einem Vergleich ohne Bias mit Matt Pococks `skills` v1.3.1 und Claude Codes `code-review`-Plugin. Übernommen wurde nur, was unserem Prozess fehlte; keine neuen Gates, keine neuen Artefakte.
-- **Debug hat eine Methode.** `workflow.md` (Debug) nennt die Reihenfolge, angepasst aus Pococks `diagnosing-bugs`: zuerst eine Schleife, die bei genau diesem Bug rot wird, dann reproduzieren und minimieren, drei bis fünf falsifizierbare Hypothesen, je Probe eine Variable mit markierten `[DEBUG-…]`-Logs, der Regressionstest an der Naht, an der der Bug entsteht, und ein Commit, der die bestätigte Hypothese nennt. Der Fix-Zähler aus git bleibt davor. `/debug` und der Copilot-Prompt verweisen auf die Methode, statt sie zu wiederholen.
-- **Brainstorm klärt in Runden.** Fragen kommen gebündelt, je mit einer Empfehlung, statt einzeln nacheinander (angepasst aus Pococks `grilling`). Mit Spec Kit hält `/speckit-clarify` die Antworten fest.
-- **Ein Block wird geprüft, bevor er zählt.** Ein blockierender Befund nennt sein Fehlerszenario: Eingabe oder Zustand, Weg durch den geänderten Code, falsches Ergebnis. Ein Defekt, dessen Weg nicht durch die Änderung führt, ist vorbestehend, also ein Issue und kein Block. Ein frischer Prozess bewertet jeden Block auf 0/25/50/75/100; unter 80 wird er zum Rest-Befund. Was Linter, Typprüfer oder Testsuite fangen, blockiert nie. Angepasst aus dem `code-review`-Plugin; steht in `verification-independence.md` („What blocks“), im Bundle-Prompt und in `/review`.
-- **Kurze Linsen, Merge-Gefahr.** Jede Linse berichtet in höchstens etwa 400 Wörtern, das Schwerste zuerst, und jeder Befund belegt sich mit Regel, Plan- oder Spec-Zeile oder Fehlerszenario. Der Review-Bericht endet mit „Merge danger“: Einbahn- oder Zweibahntür und Wirkungsradius.
-- **Stille Fehler.** `review-checklist.md` hat den Abschnitt „Silent failures“: Catch-Blöcke, Fallbacks und Defaults, fail open gegenüber fail closed, Aufräumen im Fehlerpfad, die Fehlermeldung. Angepasst aus `silent-failure-hunter`.
-- **Tests, die nichts beweisen.** `testing.md` nennt tautologische Tests und Tests, die an Interna hängen; gemockt wird nur an der Systemgrenze (angepasst aus Pococks `tdd`).
-- **Lizenzen.** `THIRD-PARTY-NOTICES.md` führt Pococks `skills` (MIT) und Anthropics Claude-Code-Plugins (Apache 2.0).
-- **Für Kenni.** Die Review-Session lässt jeden Block von einem frischen Subagenten bewerten, bevor sie ihn attestiert; ein günstiges Modell genügt. Ein Befund unter 80 ist ein Rest-Befund und hält den Merge nicht auf. Kennis eigenes Refute-Panel kann damit schmaler werden (Steward-Brief, Punkt 2).
-
-**v2.55.0 — Review-Gate prüft Inhalt statt Historie (Schritt B).** Schritt B der Entscheidungsvorlage `docs/analysis/2026-10-07-review-gate-teardown.md`, umgesetzt nach Schattenbetrieb gegen Kennis Historie und einem Refute (Nachtrag 2 dort). Tier 3.
-- **Die Regel.** Eine Datei am gepushten Tip gilt als geprüft, wenn ihr Inhalt git's eigenem Merge entspricht: aus dem Integrationszweig dort, wo der Tip ihn zuletzt traf, mit dem geprüften Head und mit jedem weiteren klärenden Review, dessen Head der Tip enthält. Ein Pfad, der in diesem Merge kollidiert, gilt nie als geprüft. Ein Review zählt ganz, wenn der Tip seinen Head enthält, seine Basis auf `main` liegt oder seine Basis selbst geprüfter Inhalt ist; sonst bürgt es nur für die Dateien seines eigenen Bereichs.
-- **Was dadurch geht.** Ein Rebase oder Merge von `main` ohne Konflikt lässt ein Review mit Fork-Point-Basis gültig (#158). Mehrere geprüfte Arbeiten, die git sauber zusammen mergt, gelten zusammen als geprüft, auch Zug-Passagiere auf derselben Datei. In Kenni lagen drei Arbeiten auf einem Branch, die alle die Feature-Registry änderten.
-- **Was strenger wird.** Jede Konfliktauflösung braucht eine neue Runde, auf welche Seite auch immer. Bisher ging die Auflösung auf die eigene Seite durch, auch wenn sie `main`s Änderung verwarf; im Schattenlauf traf das eine Screenshot-Baseline. Ein späterer Commit, der eine geprüfte Datei auf `main`s Stand zurücksetzt, ist ungeprüft. Ein Zug mit zwei Trägern derselben Arbeit wird an jedem Träger geprüft.
-- **Fail closed.** Jeder git-Fehler bedeutet „veraltet“. Den schwächeren `--cc`-Ersatz nach einem gescheiterten `merge-tree` gibt es nicht mehr (Kenni #2439).
-- **Schattenbetrieb.** Über 500 Urteile aus Kennis Historie stimmen 494 mit der alten Tabelle überein. Die 6 Abweichungen sind einzeln erklärt: 2 Mal lag die Tabelle falsch; 4 Mal stützte sich die alte Freigabe auf eine Delta-Zeile, die das Gate seit v2.53 vorab zurückweist. Median 0,05 s pro Urteil statt 25 s.
-- **Entfallen** sind `_dropped_by_merge`, `_merge_own`, die Historientabelle, `work_bases` und das Feld `dropped`. Insgesamt sind es rund 400 Zeilen Gate-Code und 28 Tests, an ihre Stelle treten rund 15 Tests der neuen Regel.
-- **Voraussetzung** ist git 2.38 oder neuer (`merge-tree --write-tree`). `SYSTEM-REQUIREMENTS.md` nennt die Version.
-- **Doku.** `verification-independence.md` hat den neuen Absatz „What counts as reviewed is content, not history“. `/review` sagt jetzt: Rebase oder Merge von `main` vor Runde 1; eine spätere konfliktfreie Integration behält das Review.
-- **Für Kenni.** Branches, die bei einem Konflikt `main`s Seite oder die eigene genommen haben, brauchen jetzt eine neue Runde, wo bisher keine verlangt wurde. Ein Rebase ohne Konflikt braucht keine mehr.
-
-**v2.54.2 — Review-Gate ohne Timeout auf großer Historie (#182).** In Kenni lief das Review-Gate 936 s und wurde vom Gate-Runner nach 600 s abgebrochen; der Zug stand mit vier fertigen Kandidaten stundenlang. Übernommen aus Kennis lokalem Patch (Kenni #2436), angepasst an den Stand nach v2.53 und um die Leser des Red-Ledgers ergänzt.
-- **Die Stale-Prüfung fragt git jede Tatsache nur einmal.** `_history` stellte für jeden klärenden Pass und jeden Plan dieselben Fragen pro Merge neu, jede mit mehreren git-Aufrufen. Ein Speicher pro Lauf hält Antworten, die durch volle Objekt-IDs festgelegt sind: Eltern eines Merges, git's eigener Merge, Blobs, Diffs, Merge-Basen. Eine fehlgeschlagene Abfrage wird nie gespeichert, „git weiß es nicht“ bleibt „veraltet“. Ebenso wenig die schwächere Antwort über den kombinierten Diff, die nach einem gescheiterten `merge-tree` greift. Das fand der Refute: Ein einziger vorübergehender Fehler hätte sonst für den ganzen Lauf einen Merge durchgelassen, der main's Änderung still zurücknimmt. Ob ein Elternteil den geprüften Head trägt, beantwortet ein `rev-list --ancestry-path` pro Pass statt eine Abfrage pro Merge. In der Test-Fixture: Bei doppelt so vielen Merges und Pässen wachsen die git-Aufrufe auf das 2,2-Fache statt auf das 4,1-Fache; ein zweiter Plan über dieselben Merges kostet 54 statt 204 Aufrufe. Kenni maß mit dem Patch auf einem gepushten Bereich von 900 Commits 92 s statt 172 s, die Stale-Prüfung 7,5 s statt 39 s; gut 50 s davon war die Digest-Prüfung, die seit v2.53 entfällt. Die Prüflogik ist unverändert, alle bestehenden Stale-Tests bleiben grün.
-- **Ein abgebrochenes Gate nennt seine langsame Phase.** `check_review.py` meldet auf stderr, welche Phase läuft. Bricht der Gate-Runner ein Gate ab, nennt er die laufende und die längste fertige Phase, in der Ausgabe, in der Zeile `FAILED gates:` und als dritten Eintrag im Red-Ledger. Ein Timeout liest sich damit als Leistungsproblem; das Gate kam zu keinem Urteil, und es bleibt rot. Bei einem normalen Lauf erscheinen die Phasenzeilen nicht.
-- **Ein Leser für den Red-Ledger.** Tower, Zug und Owner-Digest lasen die Datei jeweils selbst und hätten mit dem dritten Feld das Datum falsch gelesen (Alter 0). Jetzt liest nur `tower.red_gates`, gibt den Grund mit aus, und Zug und Digest nutzen es. Alte Zeilen mit zwei Feldern lesen sich wie bisher. Kennis Patch hatte diese Leser nicht angepasst.
-- **Für Kenni.** Den lokalen Patch aus #2436 an `check_review.py` und `gate_runner.py` mit dem Update fallen lassen. Er ist dann im Template, und eine eigene Änderung an Gate-Code wäre sonst eine Tier-3-Migration.
-
-**v2.54.1 — Commands nachgezogen.** Prüfung der Commands gegen v2.52 bis v2.54.
-- **`/execute` nennt die Regel „ein Owner pro Akzeptanzkriterium“.** Ein Kriterium wird über seine ID genannt, sein Text nicht wiederholt. Wo das Inventar installiert ist, schreibt der letzte Task vor dem Review-Bundle den Inventareintrag aus den finalen `AC-n`-Zeilen der Spec. Bisher stand das nur in der Modul-Doku und in der Review-Checkliste, und das Review fand es erst eine Runde später. Der Copilot-Execute-Prompt trägt denselben Satz.
-- **Copilot-Review-Prompt und `AGENTS.md` schreiben die `REVIEW`-Zeile mit `attest.py`.** Bisher ließen sie die Zeile von Hand schreiben, ohne `base` und `head` aus dem Bundle. Eine solche Zeile zählt nur, solange kein Pass mit Head existiert. `attest.py` ist seit v2.40 der einzige Schreiber, die Claude-Commands sagten das bereits.
-
-**v2.54.0 — Zwei Gates weniger: GRADE-Telemetrie und `ac-text-drift`.** Auf Wunsch des Owners, nach der Frage, ob ein ganzes Gate fallen kann.
-- **Das GRADE-Gate entfällt.** `check_telemetry.py` und sein Eintrag im Gate-Runner sind gelöscht, ebenso `process_kpis.py convergence` und die Rework-Zählung in `cost`. In Kenni standen in einem Monat 12 `GRADE`-Zeilen gegen 126 `REVIEW`-Zeilen. Was die Zeilen messen sollten (Runden bis zum Pass, Blocker und ihre Herkunft), lesen `rounds` und `models` bereits aus den Review-Records. Das Modul `telemetry` bleibt als Cockpit: `cost` (Tokens), `cfr`, `clusters`, `models`, `rounds`, `share`, `report`. Alte `GRADE`-Zeilen bleiben als Historie im Journal; `compact_journal` behält sie, nichts liest sie. `workflow.md`, die Spec-Kit-Tasks-Vorlage und `speckit.md` verlangen keine `GRADE`-Zeilen mehr. Ein Manifest mit `telemetry: true` bleibt gültig.
-- **Ein Owner pro Akzeptanzkriterium statt `ac-text-drift`.** Das Gate verglich den Text eines Kriteriums in Spec und Inventar, weil beide ihn trugen. Jetzt hat der Text zu jeder Zeit einen Ort: Während die Arbeit läuft, gehört er der Spec (oder dem Issue, wo keine Spec geschrieben wird). Die Änderung, die die Fähigkeit liefert, schreibt den Inventareintrag aus den finalen `AC-n`-Zeilen der Spec, als letzten Schritt vor dem Review-Bundle. Ab dem Merge gehört der Text dem Inventar, die Spec wird abgeräumt oder ist Historie. Pläne, Tasks, Tests und Berichte nennen ein Kriterium nur über seine ID. Ob der Eintrag zur Spec passt, prüft das Review, das beide im selben Diff sieht (`review-checklist.md`, neue Frage). `check_ac_text_drift.py`, sein Gate-Eintrag und die Tests sind gelöscht (`modules/feature-registry.md`, „One owner per criterion“).
-- **Überblick, README und PDF nachgezogen.** Sie nennen zwölf statt fünfzehn Gates und beschreiben den Rundendeckel aus v2.52.0. Vorher stand dort noch: nach zwei Runden zurück in den Plan. `SYSTEM-REQUIREMENTS.md` nennt für `telemetry` kein Gate mehr.
-- **Für Kenni.** Kenni fährt `ac-text-drift` über ein eigenes Skript in `gates.local.json`; das Update bricht daran nichts. Zwei Kenni-Tests (`test_process_kpis_process.py`, `test_human_digest_process.py`) erwarten `check_telemetry.py` und die `convergence`-Ausgabe und müssen mit dem Update angepasst werden. Ob Kenni sein lokales Gate behält und wie `feature-inventory.md` mit der Registry zusammengeht, entscheidet der Steward-Plan.
-
-**v2.53.0 — Review-Gate verschlankt: Digest, Delta-Ankerkette und Integritäts-Ledger entfallen.** Umsetzung der vom Owner freigegebenen Entscheidungen A, C, D, E und F aus `docs/analysis/2026-10-07-review-gate-teardown.md` (Position 8 der Abbauliste vom August). `check_review.py` sinkt von 3.080 auf 2.683 Zeilen; mit Bundle, `attest` und Tests fallen insgesamt rund 1.450 Zeilen weg.
-- **A — kein Diff-Digest mehr.** `diff=<sha256>` war `sha256(git diff base head)`, also eine Funktion der beiden SHAs, die die Zeile ohnehin trägt. Es entfallen die Digest-Formel, das Nachrechnen alter Zeilen über `core.abbrev` 4–16, das Integritäts-Ledger samt Cache und Fetch-Stempel sowie `PROCESS_REVIEW_INTEGRITY`/`--full`. `attest.py` schreibt `base` und `head`, prüft, dass beide Commits existieren, und dass die Basis einer vollen Runde der Fork-Point ist (C).
-- **D — Delta-Bundles sind eine Lesehilfe.** `--since` zeigt weiter nur den Fix, die Funde der Vorrunde und die Dateiliste des Branches, auf jedem Tier und ohne deklariertes Tier. Die `REVIEW_ARTIFACT`-Zeile nennt aber immer den ganzen Branch (Fork-Point bis Head), damit bindet das Verdict den ganzen Branch. Es entfallen `mode=delta`, die Tier-3-Ankerkette, die Prüfung auf Scope-Wachstum und `REVIEW_SCOPE`. `attest` verweigert ein älteres Delta-Bundle, weil dessen Basis die letzte Runde war.
-- **E — ein stehender Block wird am Tip gelesen.** `range_records` vergleicht `base` und Tip und liest nicht mehr jeden Commit dazwischen. Ein Block-Eintrag, den der Bereich wieder löscht, steht damit nicht mehr; das Löschen ist ein sichtbarer Diff im Journal.
-- **F — Altdaten bleiben gültig.** Zeilen mit `diff=` und `mode=` werden gelesen, die Felder ignoriert, und ein falscher Digest färbt das Gate nicht mehr rot. Jede Zeile mit `base`/`head` gilt dabei als volle Runde, auch mit `mode=delta`. Eine ungemergte Delta-Zeile aus einer früheren Runde räumt deshalb nichts mehr ab: Ein Branch, der beim Update mitten in den Runden steckt, braucht ein Review vom Fork-Point. Gemergte Zeilen bleiben, wie `main` sie beurteilt hat. Gefunden hat das das unabhängige Review: Ohne diese Regel hätte eine von Hand geschriebene Delta-Zeile einen Plan mit einem Teil-Review freigegeben.
-- **Leeres Delta:** Ein `--since`-Bundle zeigt immer die Dateiliste des ganzen Branches. Ein leeres Delta wird als solches benannt, und ein `--since`, das auf keinen Commit zeigt, wird verweigert. Vorher sah der Prüfer bei `--since HEAD` keinen Code und bürgte trotzdem für den Branch.
-- **B ist noch offen.** Der Ersatz der Stale-Logik durch einen Inhaltsvergleich braucht den Auto-Merge von Head und `main` als dritten erlaubten Stand und einen Schattenbetrieb gegen Kennis Historie; er kommt als eigenes Paket.
-- **Doku:** `verification-independence.md` („Bind the verdict to the reviewed range“, „What each round judges“), `journal-state-plans.md` (Feldtabelle), `/review`, `workflow.md` (Rundendeckel wie in v2.52.0 statt „nach zwei Runden zurück zum Plan“).
-
-**v2.52.0 — Weniger Prozess-Mechanik: Buchhaltung blockiert nicht mehr, nur echte Fehler blocken, Template-Updates ohne Tier-3-Pflicht.** Auf Wunsch des Owners nach einem Erfahrungsbericht des Kenni-Stewards und einer Messung in Kenni: Die Zahl abgeschlossener Arbeiten mit Review fiel von 70 (26.08.–08.09.) über 40 auf 18 (23.09.–07.10.), der Anteil blockender Reviews stieg von 5 % auf 33 %; in 14 Tagen berührten 47 % der Commits nur Prozessdateien und 19 % nur Produktcode. Der Steward schätzt seine Zeit zu über 90 % als Prozessarbeit; am 07.10. blockierte sich der Prozess mindestens sechsmal selbst. Was nachweislich Fehler fängt, bleibt: Cross-Model-Review bei Tier 3, Refute vor der ersten Runde, der Zug mit voller Suite.
-- **Template-Updates: freigegebener Gate-Code ist keine Migration.** `template_verify` hat jedes Update als Enforcement-Migration (Tier 3) gewertet, sobald ein Release etwas unter `scripts/process/` änderte, auch wenn die Projektdatei exakt dem Release entsprach. Damit war jedes Kenni-Update ein Tier-3-Review von Code, den das Projekt nicht angefasst hatte (v2.51.1: drei Runden). Jetzt gilt Gate-Code wie jede andere release-identische Datei: Gates, Projekttests und die Bestätigung der Verhaltenshinweise reichen. Eigene Änderungen des Projekts an Gate-Code bleiben Tier 3. `releases.md` empfiehlt Updates im Takt von zwei bis vier Wochen statt bei jedem Release.
-- **`attest.py` verweigert keine Buchhaltung mehr.** Eine `--round` über der Zählung wird als gezählte Runde geschrieben, mit Hinweis. Eine `--round` unter der letzten blockierten Runde wird weiter verweigert, sonst würde ein später Pass einer alten Runde die Blocks danach überstimmen. Eine fehlende oder falsch nummerierte `ROOT-CAUSE`-Zeile ist ein Hinweis statt einer Verweigerung. Anlass: Kenni #2396, Runde 6. Zwei Modellfamilien hatten `pass` gegeben, der Fix war zu, und `attest` verweigerte, weil `round=6` statt `round=5` in der Zeile stand; das kostete eine Fix-Session und eine Nachprüfung. Die Pflicht bleibt beim Fixer: `/execute` verlangt, dass `attest.py --dry-run` keine fehlende Ursache nennt.
-- **Beantwortete Fragen halten den Zug nicht an.** Eine `DECISION NEEDED`-Zeile, die vor ihrem Doppelpunkt `(answered …)` oder `(beantwortet …)` trägt oder durchgestrichen ist, gilt als beantwortet. Bisher hing das von der Stelle des Markers ab und hätte drei fertige Branches still aus dem Zug genommen. Die Zeile und ihre Auslegung haben jetzt einen Owner (`check_review.open_questions`) für Zug, Tower und Sitzungskontext.
-- **Eine Runde, ein Commit; Buchhaltung ohne Suite.** `attest.py --with <Bericht>` committet den Review-Bericht und Planzeilen zusammen mit der REVIEW-Zeile und verweigert Code. Die `ROOT-CAUSE`-Zeile kommt in den Fix-Commit. `testing.md`: Ein Push, der nur Prozessdatensätze ändert, fährt die Prozess-Gates und keine Suite; Zertifikate hängen am Baum ohne diese Pfade. Ein Kenni-Push, der nur Doku enthielt, belegte die scoped-Lane 15 Minuten.
-- **Prozessquote im Tower.** Der Tower hat eine neue Zeile `balance` mit den letzten 7 Tagen auf dem Integrationszweig: Commits nur mit Prozessdateien, gemischt, nur Produkt, dazu die gelandeten Änderungen mit Produktcode. Liegt der reine Prozessanteil über 40 % bei mindestens 20 Commits, meldet er den Fund `process-heavy` (low). `process_kpis.py share` zeigt den Wochenverlauf aus derselben Klassifizierung. Auf Kenni gemessen: 53 % reiner Prozess in der letzten Woche.
-- **Test-Lanes (#177).** Plan-, Review- und Brainstorm-Sessions starten auch, während die `scoped`-Lane belegt ist, nur Execute wartet. Eine unbekannte belegte Lane sperrt weiter alles.
-- **`dispatch stop` behält den Schlussbericht.** Hat die Session ihre Phase mit eigenem Bericht beendet (`review-pass`, `planned`, `done` …), schreibt `stop` kein `idle` mehr darüber.
-- **Was blockt, und wann die Runden enden** (`verification-independence.md`, neuer Absatz; Bundle, `/review` und Copilot-Prompt tragen ihn):
-  - Blocken darf nur ein Fehler, auf den jemand stößt: im Code, in Tests, im Contract, in der Sicherheit oder in der zugesagten Akzeptanz.
-  - Formulierungen in Plan, Bericht, Zählungen oder PR-Text sind `nit`. Ein Verdict nur mit minor- oder nit-Funden ist ein `pass` mit Restpunkten, ohne neue Runde. Anlass: Kenni #2416, Runde 2 blockte mit zwei Majors, die nur Plantext betrafen.
-  - Ab dem zweiten Block am selben Element entscheidet die frische Fix-Session über Inkrement oder Umbau als `DECISION`, ohne Owner-Frage.
-  - Nach dem dritten blockenden Durchgang entscheidet der Owner einmal, und diese Entscheidung gilt für den Rest der Arbeit. Anlass: Kenni #2397, acht Runden mit sechs Owner-Entscheidungen.
-- **Refute bei Tier 3 vor der ersten Runde.** Eine Fix-Runde bekommt Regressionstests und die Delta-Prüfung. Erneut refutiert wird nur ein Fix an Gate-Code. Das Bundle warnt bei einem Tier-3-Delta ohne Gate-Code nicht mehr.
-- **Tier-Kalibrierung.** „When in doubt, tier up“ entfällt. Im Zweifel entscheiden die vier Fragen; Größe oder Wichtigkeit heben das Tier nicht an, eine große Änderung wird geteilt.
-- **Für Kenni.** `review.local.md` §11 schickt bisher jede Runde nach der zweiten zum Owner. Für die Ersparnis sollte der Abschnitt die eine Owner-Entscheidung pro Deckel übernehmen. Ein lokaler Deckel darf strenger sein als das Template, verlangt aber keine Entscheidung je Runde.
-
-**v2.51.1 — Strikter Override-Guard, Spec-Pläne im Commit-Arm, Hook-Wiring in Worktrees, `say` und Slots, Fix-Streak beim Block.** Fix-Release aus dev-process #170, #173/#174, #175 (minimal) und Kenni #2399, #2405, #2411 (1–3), #2412, #2414 (Slots). Plan vorab von einem unabhängigen Modell geprüft; Guard-, Gate- und Hook-Code refutiert (Funde behoben). Kenni kann seine lokale Abweichung aus #2393 damit fallen lassen.
-- **Override-Guard (#173/#174):** `dispatch` liest das Frontmatter der Phase-Datei mit einem strikten Parser ohne PyYAML: entscheidet nach dem Wert (`model: inherit # Kommentar` erlaubt, `{model: haiku}`, verschachtelte oder doppelte Schlüssel, Fortsetzungszeilen verweigert), bestimmt den Bereich wie Claude Code selbst und verweigert, wenn das abweicht (z. B. `--- end`, `----`, NBSP/BOM im Öffner). Geprüft wird die Datei, die der Worker liest: im bestehenden Worktree die Arbeitskopie, sonst der Branch, bei Remote `origin`. Unlesbar ist eine Verweigerung, nur nachweislich fehlend zählt als „kein Override“. Die Meldung sagt, was nicht entscheidbar war.
-- **Template-Prüfung ohne PyYAML (#170):** Scheitert die Template-Prüfung, nennen Gate, `/finish` und Train nur diesen Fehler, nicht zusätzlich „ack fehlt“. `finish.py` und `train.py` deklarieren PyYAML (keine Push-Gates); `check_review` bleibt ohne.
-- **Spec-Pläne im Commit-Arm (Kenni #2399):** Pläne unter `specs/*/plan.md` zählen im Commit-Arm wie Pläne unter `.process-work/plans/`; „no plan declares“ nennt beide Orte. Ein späterer Commit mit `Closes #N` eines Spec-Issues braucht damit wie bei archivierten Plänen ein aktuelles Review.
-- **Hook-Wiring in Worktrees (Kenni #2412):** Ein absolutes `core.hooksPath` auf den `.githooks`-Ordner des Haupt-Checkouts gilt als verdrahtet, wenn dort alle getrackten Hooks ausführbar liegen (sonst hart); abweichender Inhalt ist ein Hinweis. Kein Worker schreibt die geteilte Config.
-- **`dispatch.py say` (Kenni #2405):** kurze Pause zwischen Text und Enter; ist die Eingabezeile nicht lesbar, endet `say` mit 6 statt Erfolg zu melden.
-- **Slots (Kenni #2414):** Eine Session, deren Phase vorbei ist, zählt nicht gegen `max_workers`; unklare zählen weiter.
-- **Fix-Streak beim Block (Kenni #2411):** `attest.py` gibt bei `verdict=block` den Fix-Streak aus – vor dem Fix-Commit. Regel 4: ab dem zweiten Fund an derselben Stelle gehört „die zuständige Schicht umbauen“ zu den Optionen der DECISION NEEDED; ein Element wird nach seiner Ursache benannt, nicht nach seiner Datei.
-- **Nicht-Claude-Zellen (#175, minimal):** Eine lokale Zelle mit anderem Harness (z. B. Codex) bekommt keinen Live-Kanal angeboten; ihr Review-Prompt verlangt Befund und Verdict als Text, der Steward attestiert. Der vollständige Weg mit Attestierung ist Codex als Werkzeug im Claude-Review. Live-Kanal und Schreibrechte im Codex-Sandbox folgen später.
-
-**v2.51.0 — Effort pro Policy-Zelle, Tier-3-Review auf Opus xhigh, ein Owner für das Worker-Modell.** Auf Wunsch des Owners vor dem nächsten Kenni-Upgrade; dazu Kenni #2317/#2299/#2244/#2247. `dispatch` ist refutiert (nichts Ausnutzbares; fünf Mängel behoben).
-- **Effort pro Zelle:** Eine Zelle in `model-policy.json` (`default`, `tiers`, `classes`) ist ein Modellname oder `{"model": …, "effort": …, "command": …}`. Stufen: `minimal`, `low`, `medium`, `high`, `xhigh`, `max`; ungültige Werte werden mit Zellpfad abgewiesen. Vorrang wie bisher Klasse > Tier > Default; die gewinnende Zelle gilt ganz, und `model-policy.local.json` ersetzt eine Zelle ganz (sonst hätte ein lokales `{"model": …}` still das Template-Effort behalten).
-- **`{effort}` im Startbefehl:** Default `claude -p --model {model} --effort={effort} …`. Ohne Effort fällt das Argument weg (bei einem reinen Wert auch das Flag davor, z. B. Codex `-c model_reasoning_effort={effort}`), es gilt der Harness-Standard. **Verhaltensänderung:** Setzt eine Zelle einen Effort, aber der Befehl hat kein `{effort}`, verweigert `dispatch start` (und `policy` warnt) – ein Effort wird nie still ignoriert. Betrifft Projekte mit eigenem `command` in der lokalen Policy, die die Tier-3-Review-Zelle des Templates übernehmen: `--effort={effort}` ergänzen oder die Zelle lokal setzen.
-- **Startbefehl pro Zelle:** Zellen-`command` > `phases.<phase>.command` > `command`; damit kann ein Projekt z. B. nur das Tier-3-Review auf einem anderen Harness (Codex) laufen lassen. Eine andere Modellfamilie macht die Tier-3-Attestierung `cross-model`; der Template-Default (Opus) ist `single-family`.
-- **Tier-3-Review:** `claude-fable-5-1` → `{"model": "claude-opus-5", "effort": "xhigh"}`.
-- **Sichtbarkeit:** Worker bekommen `PROCESS_EFFORT`; Start-, Probelauf- und `policy`-Ausgaben zeigen `Modell (Effort)`; `report.py --effort` (geprüft), `process_kpis models` mit eigener Zeile je Modell und Effort.
-- **Ein Owner für das Worker-Modell (Kenni #2317, #2299):** `dispatch start` verweigert, wenn die Command-Datei der Phase (für den genutzten Harness, gelesen vom Branch des Workers) `model:` oder `effort:` im Frontmatter setzt (`inherit` ausgenommen) – dieser Override hatte downstream Pläne wochenlang still auf ein anderes Modell gesetzt. Ein Template-Test hält alle gerenderten Command-, Prompt- und Skill-Dateien frei davon.
-- **Modell-Drift sichtbar:** Mit `transcripts` in der Policy meldet der Tower eine Session, deren Antworten von einem anderen als dem dispatchten Modell stammen (Aliase, Datums- und `[…]`-Suffixe gelten als gleich; Subagenten ausgenommen; bei einem Alias niedrige, sonst hohe Schwere). Ohne `transcripts` keine Meldung.
-
-**v2.50.1 — Quelle vor Copier geprüft, Spec-Bereinigung löscht nichts Referenziertes, ein Owner für Delta-Schlüssel, Ablehnungen sagen, was zu tun ist.** Fix-Release aus #166, #167, #168, #169 und Kenni #2382. Plan vorab von einem unabhängigen Modell geprüft; Gate- und Lösch-Code refutiert (Funde behoben, darunter eine durch #168 neu entstandene Umgehung der Rundenzählung).
-- **Template-Quelle vor jedem Copier-Aufruf (#167):** `template_update` prüft `_src_path` gegen die Allowlist, bevor `git` oder `copier update` laufen. Bisher erreichte eine ungeprüfte Quelle Copier (mit `GIT_ALLOW_PROTOCOL=ext` ausführbar).
-- **Spec-Bereinigung (Kenni #2382):** `publish_and_prune` löscht keinen Spec-Ordner mehr, auf den getrackter Code, Tests, Makefile oder Hooks noch verweisen – per Pfad, Modulname, Ordnername, zusammengesetztem Pfad oder Glob unter `specs/` – und nennt die Fundstelle; Verweise in Markdown zählen nicht. Geänderte oder ungetrackte Inhalte werden nicht mehr per `rmtree` gelöscht, sondern verweigert; alles wird vor dem Veröffentlichen geprüft. `tidy` zeigt denselben Grund. Ebenso behält `tidy` einen archivierten Plan, den `git rm` nicht entfernen kann, statt ihn zu löschen.
-- **Ein Owner für die Zuordnung beim Tier-3-Delta (#168):** `check_review.expand_work` leitet aus einer Arbeits-ID alle Namen ab (Plan-Slug, Issue); Bundle, `attest`, Gate und die Rundenzählung samt ROOT-CAUSE-Pflicht nutzen sie gleich. `#26`, `26` und der Slug sind dieselbe Arbeit.
-- **Ablehnungen, die sagen, was zu tun ist (#166):** `attest --work 26` ohne passenden Plan erkennt eine PR-Nummer und nennt die aktiven Plan-IDs (planlose Issue-Arbeit per `--exception`). `/finish` auf main nennt Worktree oder Branch zum Auschecken. Ein Plan ohne klärendes Review nennt beide Auswege (Review mit `attest.py …` oder `review-waived: <Grund> #<Issue>`). Ein Tier-3-Delta ohne Anker nennt die vorhandenen vollen Runden oder sagt, dass keine existiert.
-- **Review-Bundle im Worktree (#166):** `*.bundle.md` ist unter `.process-work/` ignoriert; ein ungetracktes Bundle im Worktree bekommt einen Hinweis statt den Push zu stören.
-- **`process_kpis rounds` (#169):** nennt eine fehlende Abhängigkeit (PyYAML) statt „Modul fehlt“ und deklariert sie (kein Gate).
-- **Doku:** Rundennummer und `--exception` mit Beispiel (`/review`); Klassen-Sweep vor dem Push (`/execute`, verweist auf den Fehlerkatalog); gestapelte PRs vor dem Löschen ihrer Basis umhängen (`commits.md`, `/finish`).
-
-**v2.50.0 — Basis einer vollen Review-Runde im Gate, Prüfung des committeten Stands, zwei beratende Hinweise.** Aus #163 (mit #160, #161 Punkt 4 und Rückmeldungen eines zweiten Projekts). Plan vorab von einem unabhängigen Modell geprüft; der Gate-Code ging durch zwei Refute-Runden mit Simulation gegen Kennis echtes Journal (1079 Einträge: auf main kein neuer harter Fehler). **Migrationshinweis** unten.
-- **Volle Runde gegen den Fork-Point (#160, Gate-Seite):** Ein `mode=full`-REVIEW-Eintrag zählt nur noch, wenn seine Basis der Fork-Point von Kopf und Integrationszweig ist – geprüft wird er aber nur, solange sein Kopf im gepushten Bereich liegt und noch nicht gemergt ist. Ein falscher Eintrag ist eine fehlerhafte Zeile, sein Pass fällt weg, ein Block bleibt. Gilt im Gate, in der Standing-Block-Prüfung, im Train (Branch als Spitze) und für den Anker eines Tier-3-Deltas. Der Bereich wird nur durch Integrations-Refs begrenzt, die den Stand nicht schon enthalten – durch Remote-Tracking-Refs; lokale Namen nur, wenn gar keine Remote-Tracking-Integrations-Ref existiert. Ein lokal vorgespultes oder gefälschtes `main`/`master` blendet die Prüfung nicht aus, auch nicht beim Merge-Push über `/finish`; enthalten alle Remote-Refs den Stand schon, ist er integriert und nichts wird geprüft – ein veraltetes lokales `main` öffnet die Historie nicht wieder. Ohne jede Integrations-Ref gibt es eine einzige Meldung (Hinweis, beim Integrations-Push hart) statt einer je Eintrag.
-- **Migration:** Gemergte Alt-Einträge und Einträge außerhalb des gepushten Bereichs werden nicht geprüft; letztere nennt eine einzige zusammengefasste Notiz. Eine Notiz je gemergtem Alt-Eintrag (wie #163 sie skizzierte) entfällt: nach dem Merge ist der Fork-Point nicht mehr entscheidbar, die Notizen wären Rauschen. Gemessen an Kenni: 0 neue harte Fehler auf main, auf einem Feature-Branch eine zusätzliche Notiz (5 Alt-Einträge alter Branches).
-- **Committeter Stand statt Arbeitsbaum (#161 Punkt 4):** Das Gate prüft das Template immer am committeten Stand. `template_verify --ack` arbeitet weiter am Arbeitsbaum; ein Ack zählt im Gate, sobald er committet ist.
-- **macOS:** Git-Befehle auf dem gemeinsamen Bare-Clone der Template-Prüfung nennen ihn per `--git-dir`; `safe.bareRepository=explicit` blockiert sie nicht mehr.
-- **Hinweis „Übergangstabelle fehlt“ (beratend):** Das Bundle meldet, wenn ein Plan mindestens zwei Wörter aus `state, event, transition, replay, projection, append, expire, revoke` nutzt und keinen Abschnitt `## Transitions` hat. Eigene Wörter per Zeile `transitions-vocabulary: …` in `review.local.md`. Nur Plantext, nicht Code – dort wären `state` und `append` Dauerrauschen.
-- **Hinweis „Regression-Pin fehlt“ (beratend):** Ein Delta-Bundle meldet, wenn die Fix-Runde Code ändert, aber keine Testdatei (sprachneutrale Erkennung von Testpfaden). Der Fix-Streak-Abschnitt erscheint auch in Delta-Bundles (Test).
-- Wirkung noch nicht gemessen.
-
-**v2.49.1 — Kenni-Fixes aus #2352 übernommen, eine Merge-Basis oder keine, Template-Quelle abgesichert.** Fix-Release. Plan vorab von einem unabhängigen Modell geprüft; der Gate-Code ging durch zwei Refute-Runden (Runde 1: eine neue Blockade auf main und zwei Lücken, behoben). Die downstream in Kenni #2352 lokal gemachten Fixes sind auf den aktuellen Code übertragen (nicht kopiert, seit v2.45 hat sich viel geändert); Kenni ersetzt damit sein lokales Delta per regulärem Update (#2383).
-- **Ein Owner für die Merge-Basis:** `process_git.fork_point` nimmt `merge-base --all`; keine oder mehrere Basen sind ein Fehler, nie eine still gewählte (Kenni #2381). `template_verify` bindet die Template-Basis an den Fork-Point, Aufrufer übergeben die Integrations-Ref statt einer SHA. Eine mehrdeutige Basis blockiert in Gate, `/finish`, Train, Template-Ausnahme, Standing-Block-Prüfung und Tower – nie still bestanden. Enthält eine Haupt-Integrationsref den Stand schon, gibt es keine Basis zu prüfen; Fallback-Refs können main nicht mehr rot machen.
-- **Fail-open geschlossen:** `template_review_findings` meldet Prüffehler auch ohne ausstehendes Update.
-- **Pfade und Quelle der Template-Prüfung:** `_file` weist absolute, `..`-, Laufwerks- und Root-Pfade ab; Symlinks werden nur unterhalb des Projekts geprüft (ein verlinktes Temp-Verzeichnis ist erlaubt). Neu: die Template-Quelle aus der Copier-Antwortdatei muss einem erlaubten Muster folgen (`gh:`, `https://`, `ssh://`, `git@host:…`, absoluter Pfad; Beginn mit Wortzeichen, kein `::`); vor der Quelle steht in Git- und Copier-Aufrufen `--`. Eine Quelle wie `--upload-pack=…` erreichte vorher einen Git-Aufruf.
-- **Integrationsspitze ohne Push (dev-process #161):** Eine fehlende Integrationsbasis ist auf einem Nicht-Integrations-Lauf ein Hinweis, beim Push auf den Integrationszweig weiter hart – wie `verification-independence.md` es beschreibt.
-- **Laufzeit-Abhängigkeiten (#161):** Fehlen Copier und `uvx`, sagt die Prüfung das; fehlt PyYAML, nennt die Meldung das Werkzeug. `releases.md` beschreibt, was die Template-Prüfung braucht, und dass nach jedem Rebase neu quittiert wird.
-- **Tower (#161):** Ein regulär beendeter Headless-Worker ist kein toter Worker mehr.
-- **Volle Review-Runde nur gegen den Fork-Point (#160, Schreib-Seite):** `attest.py` und das Bundle schreiben bzw. bauen eine volle Runde nur, wenn ihre Basis der Fork-Point von Kopf und Integrationszweig ist (Audits bereits gemergter Stände ausgenommen). Bestehende Journal-Einträge prüft das Gate unverändert; die Gate-Regel folgt mit Übergangsregel in v2.50 (#163).
-
-**v2.49.0 — Warten ohne Abfragen, Review-Berichte aufräumen, Modell pro Aufgabenklasse.** Aus #157. Plan vorab von einem unabhängigen Modell geprüft; drei Refute-Runden, davon zwei mit echten Datenverlust-Funden in der Aufräumregel (alle behoben, die Regel ist jetzt im Zweifel bewahrend). Keine neue Phase, kein neues Formular, kein Gate gelockert.
-- **`tower.py --wait`:** blockiert ohne Modell-Turns, bis ein neuer Report mit einem der `--states` kommt, gibt ihn als JSON aus und endet mit 0 (Timeout 3, kein Git-Klon 2). `/steward` wartet damit als Hintergrundbefehl statt auf einen harness-eigenen Monitor; jede Rückkehr ist der Weckruf. `--json --section NAME` gibt nur die genannten Teile des Lagebilds aus.
-- **Aufbewahrung der Review-Berichte (`tidy.py`, Owner der Regel; `journal-state-plans.md` verweist):** Entfernt wird ein Bericht unter `.process-work/reviews/` nur, wenn seine Kopfzeile (`work:` oder `review:`) genau eine Arbeit nennt, diese Arbeit abgeschlossen ist (letztes Urteil `pass`, kein aktiver Plan oder Spec-Plan verweist auf sie; Issue-Nummern unabhängig von der Repo-Schreibweise, bei Spec-Plänen auch das Issue aus `spec.md`), er nicht der neueste dieser Arbeit ist, älter als `--days`, kein Kampagnen-Bericht und von keinem Plan oder Journal genannt. Berichte ohne Kopfzeile, Belegordner und Bilder bleiben immer. Entfernt wird nur per `git rm` und nur, was getrackt und inhaltsgleich mit HEAD ist; alles andere wird genannt und `--apply` endet mit 1. Ohne `--apply` nur Auflistung mit Größen (Markdown vs. Belege). Beleg: Kenni hält 58 MB in 983 Berichtsdateien; das Gate liest bei jedem Lauf alle Berichte der obersten Ebene.
-- **Modell pro Aufgabenklasse:** Eine Aufgabe kann direkt nach ihrer ID ein Klassen-Token tragen (`[mechanical]`, `[design]` oder jede in der Policy definierte Klasse). `model-policy.json` hat `classes`; `dispatch.py policy --class C` nennt das Modell; die Klasse geht vor Tier und Phase, auch bei Tier 3 (bewusst: mechanische Teilaufgaben auf das günstigere Modell). `process_context.py` nennt zur nächsten Aufgabe Klasse und Modell. Regel an einer Stelle (`tower.md`): Jeder Subagent-Aufruf nennt sein Modell, der Harness-Standard ist keine Wahl; Review und Refute folgen dem Tier, nicht der Klasse. Die bisherige Empfehlung in `speckit.md` verweist darauf.
-- Wirkung der Modellklassen ist pro Klasse noch nicht messbar (kein harness-neutraler Weg, das Modell je Subagent zu erfassen); die Token-Summe pro Issue aus v2.48 zeigt nur die Gesamtwirkung.
-
-**v2.48.0 — Tier-3-Folgerunden als Delta, Verbrauch sichtbar, Template-Prüfung ohne wiederholte Klone.** Aus #155 (Punkte 1, 2, 5) und Kenni #2375. Plan vorab von einem unabhängigen Modell geprüft; der Gate-Code ging durch drei Refute-Runden (Runde 1: zwei Major-Lücken, Runde 2: eine mittlere, alle behoben). Beleg: ein Tier-3-Paket downstream brauchte 5 Runden × 3 Prüflinsen auf vollen Bundles von 10.400–13.100 Zeilen, weil Tier 3 bisher kein Delta kannte. Keine neue Phase, kein neues Formular, die Cross-Model-Attestierung bei Tier 3 unverändert.
-- **Tier-3-Delta nur verankert:** Eine Folgerunde bei Tier 3 darf ein Delta-Bundle nutzen, wenn sie auf einer vollen Tier-3-Runde genau für diesen Stand aufsetzt (oder einer lückenlosen Delta-Kette dorthin). Anker und jedes Kettenglied müssen `non-implementing` und `cross-model` oder `single-family` tragen; ein Block darf Anker sein. Ein Owner (`check_review.tier3_delta_problem`) für Gate, `attest`, Bundle, `/finish`, Train und Standing-Block-Prüfung; ein unverankertes Delta ist eine fehlerhafte Zeile und zählt nirgends als Pass.
-- **Volles Bundle mechanisch erzwungen, nicht per Selbstauskunft:** Das Delta wird abgelehnt, wenn es Gate-Code, Vertragspfade, die Entscheidungen oder das Tier des Plans ändert oder eine Datei berührt, die der Bericht der Anker-Runde nicht als ganzen Pfad nennt. Zählt nur ein Bericht, der zum geprüften Stand committet war oder vor jedem Fix-Code in einem reinen `.process-work/`-Commit kam; kein lesbarer Bericht heißt volles Bundle. Tier-3-Arbeit an Gate-Code bekommt damit immer volle Runden. Jede Tier-3-Fix-Runde verlangt weiter einen eigenen Refute. Das Bundle zeigt `DELTA_TOUCHES files=…`; eine Prüflinse läuft in der Folgerunde nur erneut, wenn sie offene Funde hat oder eine berührte Datei nennt (`/review`).
-- **Vorbedingungen vor dem Review:** `/execute` prüft vor dem Push auch Host-Fähigkeiten, Zugangsdaten und Integrations-Fixtures, die der Plan nennt; was sich nicht prüfen lässt, ist `DECISION NEEDED` (Erweiterung eines bestehenden Punkts, kein neuer).
-- **Verbrauch sichtbar:** Jeder Report trägt ein Modell, ohne Angabe ausdrücklich `not measured`. `/finish` nennt die Output-Tokens der Sessions des Issues (Policy-Schlüssel `transcripts`) oder `not measured` und schreibt den `done`-Report direkt nach dem Merge-Push; der manuelle `done`-Schritt des Workers entfällt. `process_kpis.py cost --issue N` zeigt dasselbe.
-- **`template_verify` (Kenni #2375):** ein gefilterter Klon pro Prozess statt zwei `ls-remote` plus vollem Klon je Prüfung; innerhalb eines Laufs ein Memo über alles, was die Prüfung gelesen hat; kein Cache über Läufe. Offline scheitert die Prüfung weiter hart und nennt Quelle und Ref. Die beiden Copier-Renders holen das Template weiterhin selbst.
-- Wirkung noch nicht gemessen; Vergleich mit `process_kpis.py rounds` und den neuen Token-Zahlen auf der nächsten Tier-3-Arbeit. Bekannt und eigenes Ticket: die Basis einer vollen Runde wird nicht gegen die Merge-Basis geprüft (bestand schon vorher).
-
-**v2.47.0 — Weniger Review-Runden: Fehlerkatalog, Fragen im Vorfeld, Runden nach Risikoklasse.** Zweites Paket aus #140, zusammen mit #149. Plan vorab von einem unabhängigen Modell geprüft, Code-Teile refutiert (zwei Funde behoben). Belege: Kenni 386 Review-Einträge in drei Wochen, 38 % Blocks, Tier-3-Features 3–7 Runden; ein zweites Projekt 10 Blocker nach Ursprung erster Entwurf 6 / durch Fix 2 / spät gefunden 2. Keine neue Phase, kein neues Pflichtformular, kein Gate gelockert.
-- **Fehlerkatalog:** `docs/process/failure-catalog.md` ist der eine Ort der Fehlerklassen: die sechs bisherigen aus `refute.md` plus elf neue (Git-Refs und Namen, Symlinks und verschachtelte Repos, gefälschte Umgebungsvariablen, geratenes Tool-Verhalten, zweiter Leser derselben Tatsache, fehlende Eingabe liest sich wie „in Ordnung“, veraltete Zuordnung ohne Ablauf, Replay-Parität, Event-Reihenfolge, Vertraulichkeit in Ausgaben). Je Klasse Eingabeform, Test und, wo vorhanden, der zuständige Helfer. Refute-Auftrag, Review-Checkliste, Design-Vorlage, `/execute`, `/review` und Bundle verweisen nur darauf.
-- **Fragen im Vorfeld statt im Review:** Die Bedrohungsfrage der Design-Vorlage heißt jetzt „Threat and failure question“ und gilt bei Tier 3 sowie bei Tier 2 für Gate-Code, Datenverlust, Autorisierung, Migration und Nebenläufigkeit; sie fragt auch, wie eine fehlende oder unaufgelöste Eingabe gelesen wird. Neuer bedingter Abschnitt „Transitions“ (Zustand × Ereignis → Ergebnis, mit verbotenen Übergängen und Ablauf) nur für Zustandsautomaten und event-getriebene Arbeit, dort statt Invarianten in Prosa. `/plan` inventarisiert bei geänderter Berechnung einer Tatsache jeden Leser und den einen Owner. `testing.md`: Property- oder Modelltest für Replay-fähige Logik (Append = Replay, ein Refresh = zwei). `code-craft.md`: erst projizieren, dann entscheiden; illegale Zustände unrepräsentierbar. Eine Annahme über externes Tool-Verhalten nennt die Probe, die sie bestätigt hat.
-- **`/execute` vor dem Push:** Wo der Plan eine Übergangstabelle hat, hat jede Zeilenklasse einen Test und jeder verbotene Übergang einen Negativtest. Kein allgemeiner Self-Refute-Schritt.
-- **Was jede Runde prüft** (Owner: `verification-independence.md`, Bundle trägt den Text): Runde 1 nennt alle Blocker, nicht den ersten. Eine Folgerunde prüft den Fix, die offenen Funde und die behobene Fehlerklasse überall, wo sie wiederkehren kann; ändert der Fix Vertrag, Architektur oder Risikoumfang, verlangt sie ein volles Bundle. Ein `block` schreibt immer seinen Bericht.
-- **Review-Tiefe nach Risikoklasse:** Bei Tier 2 beantwortet das unabhängige Review selbst die Fragen des Refuters (Owner und zweiter Leser, Fail-open, Grenzfälle aus dem Katalog, Belege); ein eigener Refute-Lauf nur bei Datenverlust oder Nebenläufigkeit. Ab Tier 3 und für Gate-Code in jedem Tier bleibt der eigene Refute; die Gate-Code-Warnung im Bundle feuert unverändert. Ohne Basis-Ref sagt ein Tier-2-Bundle jetzt, dass Gate-Code nicht erkannt werden konnte. `check_review` und die Attestierung sind unverändert.
-- **Messung ohne neues Formular:** `process_kpis.py rounds` zeigt je Arbeit Tier, Runden bis zum Bestehen, Block-Runden und Blocker nach Ursprung. FINDING-Zeilen haben das optionale Feld `origin=draft|fix|late`; unbekannte Werte werden abgelehnt. `models` und `rounds` ordnen eine Arbeit dem höchsten erklärten Tier ihrer Runden zu.
-- `docs/OVERVIEW.md` und `docs/UEBERBLICK.md` an die Tier-2-Regel angepasst; die PDF ist nicht neu erzeugt.
-- Wirkung noch nicht gemessen; Vergleich mit `rounds` auf den nächsten vergleichbaren Lieferungen.
-
-**v2.46.0 — Kontext pro Session auf die aktuelle Arbeit begrenzt.** Erstes Paket aus der Messung in #140, Plan vorab von einem unabhängigen Modell geprüft, danach refutiert (ein Fund behoben). Keine neue Phase, kein neues Formular, kein Gate entfernt.
-- **`process_context.py` zeigt standardmäßig nur die aktuelle Arbeit:** Plan, Spec, Entscheidungen, offene Fragen und nächste Aufgabe des aktuellen Issues (`--issue N`, sonst Spec-Ordner = Branch-Name, sonst Issue im Branch-Namen). Alle anderen Pläne und Specs stehen als kompakter Index (`other_plans`, `other_specs`) daneben, fertige, nicht aufgeräumte Spec-Ordner als `done`; nichts fällt still weg. Ohne Zuordnung nur der Index plus Hinweis auf `--issue N`. `--all` liefert die bisherige Ausgabe unverändert. `--cost` misst weiter über alles und trennt Pflichtlektüre (`mandatory`) von verfügbarem Material (`available`).
-- **`rehydrate.py` nach Kompaktierung ebenso:** aktuelle Arbeit vollständig, der Rest als Indexzeilen (höchstens 10, dann „+K more“).
-- **Gemessen an Kenni** (template v2.40.1, 43 aktive Pläne, 91 Spec-Ordner): `process_context` 428.644 → etwa 19.000 Zeichen (−96 %), `rehydrate` 84.359 → 6.973 Zeichen (−92 %). Tokens nicht gemessen (keine Token-Telemetrie), Zeichen/4 als Näherung: etwa 107k → 5k Tokens beim Start.
-- **Ein Owner für die Issue-Zuordnung eines Spec-Ordners:** `check_review.spec_dir_issue` (spec.md vor plan.md; die erste `issue:`-Zeile einer Datei entscheidet, unlesbar heißt verweigern). `publish_and_prune --stage` nutzt sie statt eigener Parse-Logik; `GH-12` und ähnliche Formen werden dort jetzt verweigert statt geraten.
-- **Warm Plan → Execute geklärt (nur Doku):** `verification-independence.md` sagt jetzt, was der Code tut: Eine interaktive Session darf vom Plan in Execute weiterlaufen; die Dispatch-Kette übergibt über den committeten Plan an eine frische Session; Review ist nie warm. `workflow.md` und `risk-tiers.md` verweisen darauf. Warmes Weiterlaufen in der Dispatch-Kette braucht Session-Resume pro Harness und ist ein eigenes Issue.
-- **Release-Suite parallel:** `tools/release.py` startet die volle Suite mit `-n 4 --dist loadfile`, wenn pytest-xdist installiert ist (sonst seriell). Gemessen: 465 s statt geschätzt 8–10 min seriell. Die Suite läuft weiter vollständig.
-- **doc-drift:** Ein Verweis auf eine fehlende optionale `*.local.*`-Datei ist keine Drift mehr (gleiche Regel wie `template_verify`); eine vorhandene wird weiter geprüft, auch `::symbol`-Zeiger.
-
-**v2.45.0 — Doppelte Prüfungen abgebaut, Tag und Release an CI gebunden.** Auftrag des Owners, Plan vorab von einem unabhängigen Modell geprüft, Release- und Bundle-Code danach refutiert. Review, Refutation und die volle Integrationssuite bleiben; keine neue Phase, kein neues Formular, kein Gate herabgestuft.
-- **Linux-Smoke entfällt:** `portable-smoke` läuft nur noch auf macOS und Windows. Linux deckt Job `test` ab (volle Suite inkl. `test_cross_platform_runtime.py`; `--dist loadfile` hält die Datei auf einem Worker). Ein Test pinnt Matrix, `ubuntu-latest`, `testpaths` und dass der Suite-Aufruf nichts herausfiltert. Verloren geht nur die `::error::`-Annotation für Linux-Fehler. Ist `portable-smoke (ubuntu-latest)` ein Required Check, muss er aus der Branch-Protection.
-- **CI-Beweis vor Tag und Release:** `tools/ci_evidence.py` verlangt einen abgeschlossenen, erfolgreichen `push`-Lauf von `ci.yml` auf `main` für exakt den Ziel-Commit, mit `test`, `portable-smoke (macos-latest)` und `portable-smoke (windows-latest)` jeweils `success`. PR-Läufe (synthetischer Merge), andere Commits, fehlende, laufende, fehlgeschlagene, abgebrochene oder übersprungene Läufe zählen nicht; bei mehreren Läufen entscheidet der neueste, eine abgeschnittene Liste verweigert. `release-tag.yml` prüft vor dem Taggen (auch beim `replace`), `release-publish.yml` prüft den Commit des Tags erneut. Beide laufen nur noch von `main`, eine nicht-hexadezimale `sha` bricht ab statt still HEAD zu taggen. Ein Drift-Test leitet die Pflicht-Jobs aus `ci.yml` ab.
-- **Kein Volllauf ist wirklich doppelt:** Der lokale Lauf in `tools/release.py` testet den Stand nach Versionssprung und SBOM vor dem Commit (sonst landet ein kaputter Release-Commit auf main und die Version gilt als verbraucht), der PR-Lauf den Merge-Stand, der main-Lauf den exakten Commit. Gewonnen ist, dass Tag und Release CI nicht mehr umgehen können; bisher lief dort keine Suite. `--no-suite` bleibt Opt-in, die ausgegebenen Remote-Schritte nennen das Warten auf CI auf main.
-- **`fix-streak` ist kein Gate mehr:** raus aus `GATES`, nicht mehr bei jedem Gate-Lauf neu berechnet. `make_review_bundle.py` ruft `check_fix_streak.py` einmal pro Review-Runde auf und schreibt den Hinweis als Abschnitt „Fix streak“ ins Bundle (nur wenn es einen gibt; ein Absturz blockiert das Bundle nicht). Die Regeln 4 und 6 (Ursachenanalyse, Patch vs. Strukturänderung) bleiben.
-- Zeitersparnis: Linux-Smoke etwa 16 s Runner-Zeit plus Einrichtung pro CI-Lauf (letzter Lauf), Wartezeit praktisch unverändert; die Fix-Streak-Ersparnis pro Gate-Lauf ist nicht gemessen.
-
-**v2.44.1 — Ein Owner für Aufgaben-Zuschnitt und `[P]`, der Commit-Widerspruch aufgelöst.** Nachtrag zu v2.44.0 auf Wunsch des Owners, vorab von einem unabhängigen Modell kritisch geprüft. Nur Doku und Vorlagen; kein neues Gate, keine neue Phase, kein Feld, keine Commit-Regel.
-- **Commit-Widerspruch aufgelöst:** `/execute`, `workflow.md`, die Tasks-Vorlage und die Speckit-Moduldoku sagten „ein atomarer Commit pro Task“, `/plan` und `commits.md` „zwei Commits sind okay“. Jetzt gilt überall: Eine Aufgabe ist fertig, wenn ihr Verhalten grün ist; Test und Umsetzung landen in einem oder zwei Commits.
-- **Tasks-Vorlage:** ein Ablehnungsfall als Beispiel (`test_expired_invite_is_refused`).
-- **`testing.md`:** Bei Freigabe, Trust, Löschen und Nebenläufigkeit deckt der erste Verhaltenstest den kritischen Grenzfall auf dem Weg ab, den echte Aufrufer nehmen, auf der günstigsten Ebene, die ihn erreicht. Das ist eine Risiko-, keine Ebenen-Vorgabe.
-- **`/execute`:** Rot zählt nur, wenn der Test seine Prüfung ausgeführt hat (`red_evidence.py` verweigert den Rest). Die ROOT-CAUSE-Zeile nennt die verletzte Erwartung und ihre Ursache.
-- **`[P]` hat einen Owner, `/plan`:**
-  - Disjunkte Dateien sind notwendig, nicht hinreichend.
-  - Producer und Consumer laufen erst parallel, wenn ihr gemeinsamer Vertrag (Schema, Fehlerverhalten, Timing) feststeht.
-  - Gemeinsame Ressourcen zählen mit: Datenbankzustand, Ports, Fixtures, generierte Dateien, Lockfiles.
-  - Beide Beispiele stehen dabei, und die integrierte Kombination wird weiter geprüft.
-  - `/execute`, `workflow.md` und die Tasks-Vorlage verweisen nur noch auf `/plan`; auch der Plan-Zweig ohne Speckit hat jetzt den Verweis.
-- Vermiedene Pflichtarbeit ist benannt, nicht gemessen.
-
-**v2.44.0 — Fehler früher vermeiden, ohne neue Pflichtschritte.** Fünf Änderungen auf Wunsch des Owners, alle in vorhandenen Prozessschritten; keine neuen Pflichtabschnitte, Gates oder Review-Runden.
-- **Spec Kit: eine Aufgabe pro Verhalten.** Test schreiben, Rot sehen, implementieren, Grün sehen in einem Task, wie `/plan` es schon verlangt. Die Tasks-Vorlage, die Gate-Meldung, die Workflow-Doku und die Constitution sagen jetzt dasselbe. Getrennte Test- und Umsetzungsaufgaben in bestehenden Plänen bestehen das Gate weiter; eine Story ohne Testbezug fällt weiter durch.
-- **Inventur für Umbenennen, Entfernen, Verschieben im Plan statt vor dem Push:** Aufrufer, Regeln, IDs, Tests, Baselines, Doku und Registries kommen in die vorhandenen Aufgaben, verschobene Regeln mit ihrem neuen Ort. `/execute` gleicht vor dem Push nur noch den Diff mit dem Plan ab.
-- **`/execute` liest gezielt** den bestehenden Owner, seine Aufrufer und Tests, bevor es eine Regel, einen Parser oder Helfer anlegt oder ändert, statt nur die Dateien des Tasks. `specs/` wird nicht rekursiv geladen.
-- **Clarification-Gate auf tragende Dateien begrenzt.** Offene Marker in `plan.md` und `tasks.md` blockieren weiter, auch bei anderer Schreibweise des Dateinamens; Lesefehler auch. Marker in `research.md` und anderen Begleitdateien eines Spec-Ordners sind Hinweise mit Datei und Zeile. Ein solcher Hinweis erlaubt keine offene tragende Entscheidung.
-- **E2E nach Risiko statt Stückzahl.** „One per feature — floor AND ceiling“ entfällt. Geänderte kritische Verträge brauchen einen passenden Nachweis ihrer Wirkung; vorhandene Tests dürfen mehrere Features abdecken; neue Tests auf der günstigsten ausreichenden Ebene. Bestehende Tests bleiben.
-- **Aufgelöste Widersprüche:**
-  - die Leseregel von `/execute` gegen „Check existing code first“;
-  - die Tasks-Vorlage gegen `/plan`;
-  - `testing.md` gegen sich selbst (Untergrenze und Obergrenze);
-  - die Speckit-Doku gegen das Gate, das jede Begleitdatei hart scheitern ließ.
-- Die Einsparungen sind erwartet, nicht gemessen.
-
-**v2.43.2 — Safe automatic template verification and cleanup revalidation.**
-
-- Classify actual project changes to process enforcement as Tier 3 migrations,
-  including local additions during documentation-only template upgrades.
-- Skip tasks during automatic provenance rendering and isolate Copier settings
-  without trust, preventing locally trusted Jinja extensions from executing
-  before review. Explicit updates retain their operator-approved contract.
-- Revalidate the full worktree keep policy immediately before removal using
-  fresh worktree/session records and the integration base from tidy or train.
-  Preserve ignored work created after initial cleanup clearance.
-- Add nine real Git/Copier regressions and document independent Codex review.
-  External writes during inspection and Git deletion remain non-atomic;
-  a required downstream Claude review is still outstanding.
-
-**v2.43.1 — Documentation aligned with verified template updates.**
-
-- Refresh the English and German overviews and rebuild the German PDF for
-  the current template. Explain owner acknowledgment, pure update provenance,
-  project-delta review and enforcement migrations.
-- Correct review enforcement guidance: active plans and commit-claimed issues
-  need review before integration; pure verified updates use computed provenance.
-  Keep the applicable Done checks, gates and project tests explicit.
-- Use the dependency-declaring standalone verification command in tier guidance.
-  Label reference-project figures as the historical baseline from v2.38.0.
-- Documentation only; no runtime behavior changes.
-
-**v2.43.0 — Verified template updates and faster maintenance checks.**
-
-- Re-render both pinned template releases against the integration baseline's
-  trusted source. Compare project files with both renders, including executable
-  bits and symlink targets, so lost local customizations remain project delta.
-- Let pure, owner-acknowledged template updates pass without re-reviewing released
-  template files. Require a fresh, digest-bound Tier-2 review for project delta;
-  gate scripts, helpers and configuration changes conservatively retain Tier 3.
-  The review gate, finish and the merge train share the computed verification.
-- Keep owned/local files, hooks, Makefiles and edited or deleted tests under
-  project review. Failed provenance or forged saved reports grant no exemption.
-  Show only the pinned changelog changes as behavior notes and bind the owner
-  acknowledgment to the baseline and resolved release SHA.
-- Run CI tests with two workers grouped by test file: measured runtime drops
-  from 322 to 183 seconds. Add a repeatable gate benchmark and record its scope
-  and limitations in the maintenance report.
-- Complete the audit remnants: prime reads inbox content in all three harness
-  adapters, language checks cover every current module, and the gate workflow
-  names its required check explicitly. Pin complete three-plan review coverage
-  against late unreviewed commits and fabricated digests.
-- **Update guidance:** verification requires reachable release tags or full Git
-  SHAs in the recorded baseline and target. Unpinned HEAD/describe references
-  fail closed. Follow the template-update sequence in `docs/process/releases.md`,
-  include the computed delta and behavior notes, and commit the acknowledgment.
-
-**v2.42.0 — Downstream process fixes and worker channels.**
-
-- Fix the downstream residuals tracked in #142: fail-closed integration ranges,
-  pooled review coverage, replacement-resistant Git reads, guarded non-fast-forward
-  pushes, consistent tier parsing, and delta artifacts that exclude imported main
-  changes while binding merge resolutions.
-- Add an owner-approved brainstorm-to-plan transition, diagnose contradictory worker
-  anchors and dead workers, and support additive project-local tower findings.
-- Make finish safe across worktrees and archive batches; resolve explicit-root journals,
-  verify Python symbol pointers and current design-note seals, and let model policy own
-  phase selection.
-- Allow long pre-push gates with a configurable 30-minute train push timeout (#83),
-  and document worker channel events plus steward restart feedback (#139).
-
-- Make gate subprocesses emit UTF-8, matching the runner's decoder even when
-  Windows redirects the parent's output using CP1252.
-- Write the portable release-note test fixture as UTF-8 on every platform,
-  matching the release-note reader rather than the Windows locale.
-- **Update guidance:** update the bundle producer, attestation writer and review gate together;
-  new delta attestations carry `mode=delta`. Existing full-review records remain valid.
-  Fetch the remote default branch before a guarded push; non-fast-forward integration
-  pushes require a named owner override and cannot discard a remote standing block.
-
-**v2.41.0 — Gemergte Worktrees werden entfernt, aber nie Arbeit (#136).** Anlass war das Referenzprojekt: 111 nie entfernte Dispatch-Worktrees, jeder mit eigenem venv und `node_modules`, belegten etwa 57 GB. Die Platte lief voll, und alle Sitzungen standen still. Refutiert in drei Runden mit echten Worktrees; jede Runde fand einen weiteren Weg, Arbeit zu verlieren, und jeder ist mit einem Test belegt, der gegen die Vorfassung rot ist.
-- **Der Zug entfernt die Worktrees der Branches, die er gemergt hat**, aber erst nach dem erfolgreichen Push. Jeden behaltenen Worktree nennt er mit Grund; ein Fehler beim Entfernen ist nur ein Hinweis. **`tidy.py`** listet gemergte Worktrees mit Größe, `--apply` entfernt sie.
-- **Ein Worktree bleibt stehen, wenn er Arbeit tragen könnte:**
-  - uncommittete oder unversionierte Dateien;
-  - ignorierte Dateien außerhalb einer festen Liste regenerierbarer Umgebungen und Caches (venv, node_modules, `__pycache__` …; `build/`, `dist/` und `.cache` bewusst nicht);
-  - ein verschachtelter Worktree oder ein verschachteltes Repository;
-  - per `assume-unchanged` oder `skip-worktree` versteckte Änderungen, oder Submodule;
-  - ein Commit, der nur in der HEAD-Historie des Worktrees steht;
-  - ein Branch ohne eigenen Commit;
-  - eine laufende Sitzung, ein gesperrter, losgelöster, der Haupt- oder der aktuelle Worktree.
-- **`dispatch.py start` verweigert ab 90 % Plattenbelegung** und nennt den Aufräumbefehl (`PROCESS_DISK_LIMIT_PCT`; ein ungültiger Wert verweigert statt still abzuschalten).
-
-**v2.40.1 — Hinweise und Doku nennen den Hook-Installer, den das Projekt wirklich hat.** Ein Review im Referenzprojekt fand Hinweise, die dort nicht stimmten. Das Projekt verwaltet seine Hooks in `.githooks/`, ohne das git-hooks-Modul. Der Hook-Doktor und die Doku schickten es trotzdem zu `scripts/process/install_hooks.py`, das nur dieses Modul mitbringt. Und `tower.md` riet noch, `model-policy.json` ins `.process-owned` zu nehmen, was seit v2.39.0 überholt ist. Die Urteile des Doktors waren richtig, nur die Hinweise nicht (#134).
-- **Der Reparatur-Hinweis nennt den Installer des Projekts:** `scripts/install_hooks.sh`, ein `make hooks`-Ziel, sonst `git config core.hooksPath .githooks`. `install_hooks.py` steht nur dort in pre-commits Installationszeile, wo das Modul es mitbringt.
-- **`tower.md` verweist auf `model-policy.local.json`.** `start-here.md` nennt den Weg für eigene Hooks.
-
-**v2.40.0 — Was das Referenzprojekt in nicht-eigenen Dateien noch anders hatte, ist geprüft übernommen.** Nach dem Port auf v2.39.0 hatte das Referenzprojekt keine eigenen Dateien mehr. Vier Dateien trugen aber noch eigene Änderungen, die ein künftiges Update überschrieben hätte. Jede wurde geprüft, bevor sie ins Template kam; jede hat einen Test, der gegen die Vorfassung rot ist.
-- **doc-drift prüft Symbol-Zeiger:** In `` `pfad/datei.py::symbol` `` wurde der Pfad bisher nie geprüft, weil die Endung nicht direkt vor dem Backtick steht. Ein veralteter Zeiger fällt jetzt auf. Wer solche Zeiger in den geprüften Dokumenten hat, kann nach dem Update tote finden.
-- **Der Owner-Digest nennt jeden Waiver:** jede `<gate>-waived:`-Zeile, nicht nur `review-waived` und `spec-waived`. Damit steht auch der Waiver eines projekteigenen Gates (`gates.local.json`) als offene Schuld auf der Seite.
-- **`check_architecture` und `check_issues` deklarieren PyYAML (PEP 723):** Allein gestartet liefen sie bisher nur, wo PyYAML zufällig installiert war.
-- **Nicht übernommen:** die Markierung `doc-drift-base` des Referenzprojekts. Sie ist dort ungenutzt und wurde im Review schon einmal als Umgehung entfernt.
-
-**v2.39.0 — Ein Projekt braucht keine eigenen Prozessdateien mehr: Erweiterungen haben einen Ort, und der Wächter vor main kommt aus dem Template.** Anlass war das Referenzprojekt: 14 Dateien standen in `.process-owned`, jede ein Handport bei jedem Release. Eine Inventur sortierte jede Abweichung ein (Stil, Template neuer, Upstream-Kandidat, Projektkonfiguration, veraltet). Das Template übernimmt die Upstream-Kandidaten und bietet für den Rest drei lokale Dateien; danach kann die Liste leer sein. Refutiert in zwei Runden (24 und etwa 40 echte Pushes durch pre-commit, 11 und 4 Funde, alle behoben); jeder Fund ist mit einem Test belegt, der gegen die Vorfassung rot ist.
-- **Drei lokale Dateien statt eigener Kopien:**
-  - `docs/process/gates.local.json`: eigene Gates (`{name: {module, command}}`). Ein Modul-Gate darf gleichnamig ersetzt werden und wird auf stderr genannt; ein Kern-Gate (review, kernel …) nicht. Eine kaputte Datei lässt den Lauf scheitern.
-  - `docs/process/model-policy.local.json`: über `model-policy.json` gelegt, Mapping für Mapping; das Ergebnis wird wie bisher geprüft. Die Worker-Umgebung darf `SKIP`, `GIT_*`, `PRE_COMMIT*`, `HOME`, `PATH`, `XDG_*`, `LD_*` nicht setzen.
-  - `review.local.md` in `docs/process/`: eigene Review-Dimensionen; der Review-Befehl liest sie nach der Checkliste, das Review-Bundle trägt sie mit. Schärft, schwächt nie. Die DoR/DoD nennt den Ort für Stack-Guides.
-- **Wer nach main pusht (`merge_route.py`):**
-  - Ein Push nach main braucht den Weg des Zugs oder von `finish.py` (`PROCESS_MERGE_ROUTE`) oder eine benannte Owner-Ausnahme mit Grund, die im Protokoll landet. Plan- und Review-Sitzungen pushen nie nach main; ist die Phase nicht feststellbar, wird verweigert.
-  - Der Wächter liest alle Ref-Zeilen, die git übergibt, und läuft vor pre-commits „nothing to push“. `install_hooks.py` installiert ihn nach `pre-commit install`; ohne ihn verweigert `--hook-check` den Push nach main.
-  - Ein `block` im gepushten Bereich hält den Merge-Push auf, bis ein späterer `pass` für dieselbe Arbeit vorliegt (Standing Block), gemessen gegen den Stand des Remotes, nicht gegen lokales main.
-- **attest:** `--archive` verschiebt mit dem `pass` den eigenen, versionierten Plan ins Archiv (ein Spec-Kit-Plan unter seinem Feature-Namen), `--commit` macht daraus einen Commit nur dieser Pfade. `--note` darf keine REVIEW-Zeilen enthalten. Ein Branch mit Issue-Nummer schreibt `issue-<N>/`; welche Nummer ein Branch trägt, beantwortet ein Owner (`check_review.branch_issue`) für attest, Zug und dispatch.
-- **Review-Bundle:** Unter Review stehen die Pläne, die der Branch berührt, jede Datei eines Spec-Ordners zählt, und die Pläne, deren Issue ein Commit im Bereich nennt, wie beim Gate. Dazu kommen `--plan` auch im Archiv, `--tier` als Untergrenze, `--since` nur mit Tier, Binärdateien als Statistik und eine Dateiliste. Alte Review-Digests werden unter jedem `core.abbrev` geprüft; ignorierte Pfade zählen nicht als heimatloser Plan.
-- **Refute, Muster in beiden Runden:** Runde 1: Die Push-Wächter lernten Ziel und Basis aus Umgebungsvariablen, die nur die erste Ref-Zeile oder nichts tragen, statt aus gits Ref-Zeilen. Runde 2: Ein Fix schloss die Regel beim neuen Owner und ließ einen älteren zweiten Leser stehen. Jetzt beantwortet je ein Owner eine Frage: die Ziele eines Pushs und die Issue-Nummer eines Branches.
-
-**v2.38.0 — Kürzere Wege von der Fix-Runde zum Release: die Umbau-Frage kommt früher, Belege werden gemessen statt getippt, das Release-Ritual ist ein Skript.** Anlass war eine Retrospektive im Referenzprojekt: Ein Wächter brauchte vier Review-Runden, obwohl alle Befunde ab Runde 2 dieselbe Ursache hatten. Dazu kamen Rot-Belege und ROOT-CAUSE-Zeilen, von Hand geschrieben, mit Fehlern, und ein Release-Ritual aus einem Dutzend Handschritten. Alle drei Teile wurden refutiert, jede Fix-Runde erneut (vier Durchgänge, 61 Szenarien, 17 Funde, alle behoben); jeder Fund ist mit einem Test belegt, der gegen die Vorfassung rot ist. Die neue MUSTER-Zeile wirkte gleich: Nach der dritten Runde am selben Owner war die gemeinsame Ursache benannt („rät pytests Fakten“), und `red_evidence` wurde umgebaut statt ein viertes Mal geflickt.
-- **Die Umbau-Frage beim zweiten Treffer (Regel 4):**
-  - `check_fix_streak` meldet schon den zweiten `fix`-Commit auf derselben Datei: eine DECISION „Inkrement oder Umbau“ vor dem nächsten Flicken. Ab dem dritten bleibt es bei Regel 6 (Ursache fehlt).
-  - Eine Markdown-Datei (CHANGELOG, Doku), die zwei Fixes nur mitberühren, zählt beim zweiten Treffer nicht.
-  - `fix!:` zählt jetzt als Fix.
-- **Der Refuter nennt das Muster:** Nach den Befunden kommt eine Zeile MUSTER. Sie nennt die gemeinsame Ursache und den einen Owner, der alle Befunde schließt, oder „no common cause“. Der erste Einsatz in diesem Release zeigte gleich drei Befunde mit einer Ursache.
-- **`red_evidence.py` misst den Rot-Beleg:**
-  - Es fährt eine pytest-Auswahl gegen den alten Stand, in einem temporären Worktree mit den neuen Testdateien, und gegen den Arbeitsbaum. Ein kleines Probe-Plugin meldet pytests eigene Node-IDs und was Setup und Aufruf je Test taten; nur ein im Aufruf gescheiterter Test zählt als „rot vorher“.
-  - Es schreibt den Journal-Block und mit `--cause` die ROOT-CAUSE-Zeile; die Testnamen kommen als pytest-Node-ID aus dem Lauf.
-  - Es verweigert, wenn kein Test vorher gelaufen und rot war, wenn der alte Stand nicht sammelt, oder wenn danach noch etwas rot ist.
-  - `/execute` und die Journal-Doku verweisen darauf.
-- **`tools/release.py`:**
-  - Der lokale Teil eines Template-Releases in einem Lauf: CHANGELOG-Prüfung über denselben Leser wie der Publish-Workflow, Versionssprung an allen Stellen, SBOM, ruff, Suite, Commit.
-  - Es verweigert einen schmutzigen Baum außerhalb seiner eigenen Dateien und eine Version, die nicht über der aktuellen liegt.
-  - `--check` meldet jede Stelle, die nicht auf der Version steht, samt SBOM; ein Test schlägt an, wenn die Version im Repo irgendwo sonst steht.
-- **Bekannt, nicht umgesetzt:** Die REFUTE-Zeile wird noch nicht aus dem Refute-Bericht erzeugt (#124, AC-3); dafür fehlt ein festes Berichtsformat.
-
-**v2.37.0 — Jedes Prozess-Werkzeug liest Pfadnamen mit `-z`; eine Liste, die git nicht liefern kann, ist keine leere Liste.** Anlass war das Referenzprojekt: Ohne `-z` setzt git einen Namen mit Umlaut, Zeilenumbruch oder Tab in Anführungszeichen, und der zitierte Name trifft keine Datei. Der Zug las so einen archivierten Tier-2-Plan unter dem zitierten Namen; `git show` lieferte nichts, das Tier las sich als 0, und der Branch stieg ohne Review ein. Jeder Fund ist mit einem Test belegt, der gegen die Vorfassung rot ist.
-- **Ein Owner für Namen:** `check_review._names` (Namenslisten) und neu `check_review.name_status` (`--name-status -z`, mit Quelle bei Umbenennung und Kopie). `_renames`, der Zug, das Review-Bündel und `dispatch` lesen `--name-status` darüber, statt die Felder selbst zu zerlegen.
-- **Umgestellt auf `-z`:**
-  - der Zug: archivierte Pläne, Pläne der Basis, Dateien des Branches, offene Fragen, Journal-Leser, `ls-files` beim Archivieren;
-  - tower: die aktiven Pläne und Specs eines Refs;
-  - das Review-Bündel: geänderte Bilder;
-  - `dispatch`: die Dateien eines Commits und die eigenen Pläne eines Branches;
-  - Digest: Testdateien und Screenshots;
-  - `check_fix_streak`, das KPI-Cockpit (`telemetry`);
-  - `template_update`: das Zurücksetzen eigener Dateien und die Suche nach Konfliktmarkern. Vorher überschrieb ein Update eine eigene Datei mit Umlaut im Namen, und Konfliktmarker in so einer Datei blieben unbemerkt.
-- **Kann git nicht lesen, entscheidet nichts „leer“:**
-  - `paths_in_flight` gibt `None` zurück, wenn es eine Basis gibt, der Diff aber scheitert. Das Review-Gate zählt dann jeden aktiven Plan als Teil des Pushs und sagt warum. Der Journal-Cache wird dann nicht genutzt. `finish` blockiert mit Begründung.
-  - Der Zug lässt einen Branch nicht einsteigen, dessen Dateien, Pläne oder Plantexte git nicht lesen kann. Ein ungelesener Plan ist kein Tier-0-Plan.
-  - Der Zug lässt auch einen Branch nicht einsteigen, dessen Plan mit offener Frage git nicht lesen kann.
-  - tower meldet einen Branch, dessen Dateien git nicht auflisten kann (`paths-unknown`, im Text „files unknown"), statt eine Überschneidung stillschweigend auszuschließen.
-  - `dispatch._commit_touches` gibt bei einem git-Fehler `None` zurück, ebenso eine scheiternde Commit-Liste; `new_code_on_origin` antwortet dann „nicht zu sagen" statt „nur Attestierung".
-  - Beim Archivieren gilt kein de-datierter Slug als eindeutig, wenn `ls-files` scheitert.
-- **Außerdem aus dem Refute:** `review_size` liest `--numstat -z` (eine Lock-Datei unter einem Umlaut-Pfad zählte mit); `leftover_conflicts` erkennt eine Umbenennung auch in der Worktree-Spalte; ein Zeilenumbruch im Bildnamen erscheint im Bündel maskiert.
-- **Bekannt, nicht behoben:**
-  - `git worktree list --porcelain` liest Worktree-Pfade weiterhin zeilenweise (Pfade außerhalb des Repos, nicht Dateinamen darin).
-  - `dispatch._own_plans_on_origin` und `tower._plan_paths_in_ref` lesen einen git-Fehler weiter als „keine Pläne". Folge: die nächste Phase läuft mit dem Standardmodell statt dem Modell ihres Tiers, und tower zeigt keine Pläne. Beides entscheidet keinen Merge.
-  - `review_size` liest einen scheiternden `git diff` als Größe 0; das Bündel nennt dann keine Größe. Es entscheidet keinen Merge.
-
-**v2.36.0 — Worker wissen, wen sie fragen; der tower sieht eine Frage, die niemand liest; Plannamen mit Umlaut.** Anlass war das Referenzprojekt: Eine Frage eines Workers an den Owner stand sechs Stunden unbeantwortet im Chat, und mehrere Fix-Runden kosteten je eine Schleife extra. Beide Pakete wurden refutiert, die Fix-Runden ebenso; jeder neue Fund ist mit einem Test belegt, der gegen die Vorfassung rot ist.
-- **Der Steward ist der Entscheidungspartner:** Der Startprompt von `dispatch` sagt das; den Owner fragt der Worker nur bei Produktgrundsätzen oder destruktiven Schritten. Eine Frage kommt als `DECISION NEEDED` in den Plan, mit `blocked`, nie in den Chat. Den Live-Kanal nennt die Policy (`decision_channel`).
-- **`/execute`, vier Pflichten vor `pushed`:**
-  - Ein Widerspruch zu einem Kriterium wird eine Frage, keine Notiz.
-  - Eine entfernte oder umbenannte Fähigkeit wird an jeder Stelle gesucht, an der sie vorkommt; dazu wird die Test-Untergrenze gemessen.
-  - Gate-, Zug-, finish- und Hook-Code läuft einmal unter den Bedingungen, die er selbst erzeugt.
-  - Nach einer blockierten Runde steht eine wohlgeformte `ROOT-CAUSE`-Zeile, geprüft mit `attest.py --dry-run`.
-- **„Test unter den Bedingungen der Änderung“** hat einen Ort, `testing.md`; die Klasse *Umgebung* im Refute-Katalog verweist dorthin.
-- **tower:** Ein lebender Worker, der seit 30 Minuten nichts ausgibt und dessen Phase nicht vorbei ist, ist `waiting-for-input`, wenn seine Frage geleitet ist, sonst `question-unrouted`. Kann das Phasenende nicht gelesen werden, bleibt der Fund, mit mittlerer Schwere.
-  - Welcher Bericht zu einer Session gehört und wann ihre Phase vorbei ist, entscheiden `dispatch.session_report` und `dispatch.phase_over`. `chain` fragt dieselben.
-  - Die Aufgaben liest tower am zuletzt geholten Stand von origin, ohne Netz.
-- **Plannamen, die git in Anführungszeichen setzt:** `paths_in_flight` liest die Pfade NUL-getrennt. Vorher meldete `finish` einen Tier-2-Plan mit Umlaut im Namen ohne Review als fertig, und das Review-Gate ließ den Merge-Push eines Tier-3-Plans ohne Nachweis durch. tower liest die Pfade entfernter Branches ebenso und gibt Namen, die kein UTF-8 sind, maskiert aus.
-- **Bekannt, nicht behoben (dokumentiert):**
-  - Andere Werkzeuge lesen Pfade noch ohne `-z` (Zug, Bündel, dispatch, Digest). Das ist ein eigenes Issue im Referenzprojekt.
-  - Scheitert `git diff`, liest `paths_in_flight` „nichts in Arbeit“.
-  - Ein Worker auf einem anderen Host zeigt hier keinen Bildschirm.
-
-**v2.35.0 — der Zug kennt die Issue eines Paket-Branches.** Ein Branch, der nach einem größeren Issue benannt ist (`<epic>-<paket>-…`), aber unter dem Issue seines Pakets geprüft wurde, stieg nie in den Zug ein. Sein Name trägt nur die Nummer des Epics. Fünf Refute-Runden; jeder neue Fund ist mit einem Test belegt, der gegen die Vorfassung rot ist, oder als Grenze dokumentiert.
-- **Ein Owner für „zu welcher Issue gehört der Branch“:** `dispatch.issues_of`, die genaue Umkehrung von `find_branch`, aus dem Issue-Map und den dispatch-Records (`_placed`). Der Zug fragt es an allen drei Stellen, über `_branch_issues`:
-  - beim Einsteigen;
-  - bei der Frage, welche Pläne dem Branch gehören;
-  - beim `Closes #N` des Merges.
-
-  Vorher stieg ein Paket-Branch über seine Issue ein, und sein Merge schloss nichts. Eine selbst gemeldete Issue aus dem Worker-Bericht zählt nicht; maßgeblich ist, was `dispatch` eingetragen hat.
-- **Ein gemergter Branch wird vergessen:** Nach dem Merge entfernt der Zug seine Einträge und die toten Records seiner Issues (`forget_branch`). Die Issue steht dann als erledigt im Map, und ein erneutes `dispatch` überschreibt das.
-  - Ein wiederverwendeter Branch-Name erbt keine alten Issues mehr.
-  - Ein alter Record bringt die Issue nicht an einen verlassenen Branch zurück, auch nicht der Record eines Workers auf einem anderen Host.
-  - Ein Fehler dabei bricht einen gelandeten Zug nie ab.
-- **Lesen ohne Nebenwirkung:** Wer das Map und die Records liest, legt kein Verzeichnis an, fragt keinen Worker ab und überspringt kaputte Einträge. Die Issue eines Records liest eine Stelle (`_record_issue`: nur positive ganze Zahlen).
-- **Bekannt, nicht behoben (dokumentiert):**
-  - Ein Branch, der außerhalb des Zugs gemergt wurde, behält seine Einträge, bis seine Issue neu vergeben wird.
-  - Ein zweiter, noch laufender Versuch auf einem anderen Branch verliert seine Zuordnung, sobald die Issue gemergt ist.
-
-**v2.34.0 — ein Refuter ab Tier 2: zuerst der Owner-Check, dann Grenzfälle aus einem Katalog.** Refute war bisher nur für Gate-Code Pflicht. Er hat sich aber auch darüber hinaus bewährt: Beim Stale-Check fand jede Runde echte Fehler, etwa die Hälfte davon aus der vorherigen Fix-Runde. Die teuersten Blocker im Referenzprojekt kamen von einem zweiten Owner einer Regel.
-- **Staffel nach Tier** (`refute.md`, `risk-tiers.md`):
-  - Tier 0: kein Refute.
-  - Tier 1: optional, lohnt bei Parsern und Nebenläufigkeit; die Zeile steht dann im Journal.
-  - Tier 2: ein Lauf vor der ersten Review-Runde; eine Fix-Runde bekommt Regressionstests, keinen neuen Lauf.
-  - Tier 3 und Gate-Code auf jedem Tier: jede Fix-Runde erneut.
-- **Was der Refuter prüft, in dieser Reihenfolge:**
-  1. Gibt es schon einen Owner? Belegt wird das mit einem Differenztest, einer Eingabe, bei der neuer Code und Owner verschieden urteilen.
-  2. Wird ein Fehler als Erfolg gelesen?
-  3. Grenzfälle aus einem Katalog, der mit jeder neuen Klasse wächst.
-  4. Stichprobe: Hält der Beleg?
-
-  Jeder Fund ist entweder bestätigt (mit rotem Test, als NEU oder VORBESTEHEND markiert) oder er hält. Vorbestehende Funde werden Issues, nicht Teil der Fix-Runde.
-- **Ein zweiter Owner sperrt auf jedem Tier**, außer eine `DECISION` im Plan nennt den Grund (Review-Kommando, Checkliste).
-- **Das Review-Bündel warnt**, wenn ein gebündelter Plan Tier 2 oder höher angibt und keine eigene REFUTE-Zeile trägt, auch ohne Basis. Ein Delta verlangt deswegen keine neue Zeile.
-- **Ein Owner für den Tier eines Plans:** `check_review.plan_tier` und `review_waived`. Das Bündel liest Tier und Verzicht jetzt wie das Gate. Vorher warnte es bei einem Beispiel im Codeblock oder einer zweiten `tier:`-Zeile und verweigerte bei einem Tier 3 im Codeblock das Delta. Diesen Owner fand der Refuter selbst: Er war im ersten Lauf nach dem neuen Auftrag gleich der erste Fund.
-- **Bekannt, nicht behoben (Issue):** Die Delta-Verweigerung zählt Design-Dokumente und Pläne mit Review-Verzicht noch mit. `dispatch` und Teile der Werkzeuge lesen den Tier noch mit eigener Logik.
-
-**v2.33.1 — Verwerfen im Stale-Check, auch im Bereich eines anderen Reviews.** Anlass war ein Review im Referenzprojekt. Danach griffen sechs Refute-Runden jede Fix-Runde erneut an. Jeder Fund ist mit einem Test belegt, der gegen die Vorfassung fällt, oder als Grenze dokumentiert.
-- **Merges im Bereich eines anderen Reviews:** Ein Merge im Bereich `base..head` eines anderen Reviews wird wieder auf Verwerfen geprüft. Der Bereich entschuldigt nur Inhalt, den das andere Review gesehen hat. Er entschuldigt nicht, dass ein Merge den geprüften Code dieser Arbeit zur anderen Seite auflöst.
-- **Verwerfen kann nur, was diese Arbeit geändert hat:** Jedes Review der Arbeit bringt seinen Bereich `base..head` ein (`work_bases`). Bringt es keine Basis unter dem Kopf oder keinen Kopf mit, oder liegt sein Kopf nicht mehr in der Historie, zählt alles seit der Abzweigung (fail closed).
-  - Ein gestapelter Branch verwirft nichts, wenn er die Squash-Fassung des Branches darunter von main übernimmt.
-  - Ein Import ohne gemeinsame Historie verwirft nichts, wenn er seine eigene Datei nimmt.
-  - Die Basis einer Delta-Runde versteckt den Code der ersten Runde nicht.
-  - Eine Seite, die den geprüften Kopf schon enthält, verwirft nichts.
-  - Der Zug urteilt beim Einsteigen über dieselben Bereiche.
-- **Umbenennungen, verschobene Dateien, Modi:**
-  - Eine Datei, die diese Arbeit umbenannt hat, wird mit der Datei der anderen Seite unter ihrem alten Namen verglichen, oder unter dem neuen Namen, wenn die andere Seite sie auch umbenannt hat.
-  - Eine Datei, die die andere Seite umbenannt hat, gehört dieser Arbeit unter ihrem neuen Namen.
-  - Eine Datei, die git's eigener Merge verschoben hat (in ein umbenanntes Verzeichnis, auch auf eine Datei von main), wird dort beurteilt, wo git sie hingelegt hat.
-  - Löscht der Merge eine Datei dieser Arbeit, die git's eigener Merge behalten hat, ist sie verworfen.
-  - Ein Konflikt nur um Namen (auf beiden Seiten umbenannt), der git's gemergten Inhalt behält, ist kein Verwerfen. Über Runden hinweg bleibt jeder frühere Name einer Datei bekannt.
-  - Der Modus wird getrennt vom Inhalt beurteilt. Nimmt ein Merge das Ausführungsrecht gegen git's eigenen Merge zurück, ist das ein Verwerfen, egal was aus dem Inhalt wurde. Übernimmt der Merge den Modus von main so, wie git ihn mergt, ist das kein eigener Code des Merges.
-- **Ein nachträglich geänderter Kopf gilt nie als geprüft:** Liegt der geprüfte Kopf nicht mehr in der Historie, meldet `_unreviewed_paths` „nicht beurteilbar“ statt „nichts ungeprüft“.
-- **Releases:** Ein Tag wird als GitHub-Release veröffentlicht, mit seinem CHANGELOG-Eintrag als Text (`release-publish.yml`, `tools/release_notes.py`).
-- **Bekannt, nicht behoben (dokumentiert):**
-  - Im Bereich eines anderen Reviews gilt ein dritter Wert (keine Seite, nicht git's Merge) als Urteil dieses Reviews.
-  - Nach einer Umbenennung auf beiden Seiten braucht ein Merge, der nur den Namen von main behält, ein Review des Merges.
-  - Zwei inhaltsgleiche Dateien kann git's Umbenennungs-Erkennung vertauschen.
-  - Legt diese Arbeit eine Datei an, wo main ein Verzeichnis anlegt, zählt es nicht als Verwerfen, wenn der Merge die Kopie löscht, die git dafür anlegt.
-  - Hat eine Runde keine Basis oder keinen Kopf, oder liegt ihr Kopf nach einem Rebase nicht mehr in der Historie, zählt alles seit der Abzweigung. Auf einem gestapelten Branch kann dann ein Merge, der für eine Datei, die main geändert hat, die Seite eines anderen Branches nimmt, als Verwerfen gelesen werden.
-
-**v2.33.0 — fünf Prozess-Baustellen in einem Zug, jede refutiert.** Fünf Pakete kommen aus Befunden des Referenzprojekts. Jedes ist vor dem Release von einem frischen Agenten angegriffen worden, die Fix-Runden ebenso; die letzte, kleine Fix-Runde ist mit Regressionstests belegt, aber nicht noch einmal refutiert. Jeder Fund ist behoben und mit einem Test belegt, der gegen die Vorfassung fällt, oder als bekannte Grenze dokumentiert.
-- **Wo Prozess-Belege liegen, legt eine Stelle fest:** `check_review` bestimmt, wo REVIEW-, ROOT-CAUSE- und REFUTE-Zeilen stehen: Journal, aktive und archivierte Pläne, Spec-Kit-Pläne. attest, das Review-Bündel und das Gate lesen alle über diese eine Stelle.
-  - attest zählt Block-Runden roh wie das Gate. ROOT-CAUSE-Zeilen liest es so, wie sie gerendert werden: ein Beispiel im Codeblock, eine auskommentierte Zeile oder ein Platzhalter zählt nicht.
-  - Ein Spec-Kit-Plan ist nur unter Review, solange an ihm gearbeitet wird.
-  - Eine neue REFUTE-Runde wird an ihrer Identität erkannt (Runde und Text), nicht an git's Umbenennungs-Erkennung. Umbenennen, Archivieren, Kopieren oder Zusammenführen macht eine alte Runde nicht neu.
-  - Der Bericht der Vorrunde wird über seinen Kopf gefunden (`work:`, genauer Wert).
-  - Kommentare werden gelesen, wie CommonMark sie rendert, in linearer Zeit.
-- **Zug, Urteil über die Suite:** `read_facts` liest die Fakten, `decide` urteilt nach einer Tabelle; jeder entfernte Zweig macht Tabellenzeilen rot.
-  - Ein roter make-Aufruf bleibt rot, auch wenn ein späterer „No rule“ meldet oder die Fehlerzeile an Ausgabe klebt.
-  - „Nicht vorhanden“ gilt nur für die eigene Datei oder das eigene Ziel der Suite, auch hinter `sh`, `python`, `uv run`, `timeout`, `nice` oder `env`.
-  - Hat die Basis die Suite und der kombinierte Baum nicht, hat ein Passagier sie entfernt: Das ist rot und wird ihm angelastet.
-- **Ein Zug-Merge schließt die Arbeit ab:** Eigene fertige Pläne (Tier angegeben, keine offene Aufgabe, geklärt) werden im Merge-Commit archiviert. Die Merge-Nachricht schließt die Issues dieses Repositorys (`Closes #N`).
-  - `plan-stays-active:` hält einen Plan offen.
-  - Den Plan einer anderen Arbeit fasst der Zug nicht an.
-- **Stale-Check und gemergte Pläne:** Code, den ein anderes Code-Review in seinem Bereich `base..head` gesehen hat, zählt als geprüft. Code, den kein Review gesehen hat, bleibt veraltet, unter welchem Plan auch immer.
-  - Ein aktiv gebliebener Plan einer gemergten Arbeit wird nur als Rest benannt.
-  - Plan-Reviews und Pässe ohne Plan decken keinen Code.
-- **dispatch:**
-  - `say` prüft, ob der Text die Eingabezeile verlassen hat, und drückt sonst erneut Enter. In einen offenen Dialog tippt es nie.
-  - `chain` schiebt Phasen aus den Berichten weiter: `pushed` erst, wenn die Aufgaben des eigenen Plans auf origin abgehakt sind und Code über das letzte Attest hinaus liegt.
-  - Die Warteschlange ist gesperrt und dedupliziert, eine abgelehnte Zeile blockiert die folgenden nicht.
-  - Worker laufen unter `nice` (`worker_nice`), damit der Zug seine CPU behält.
-- **Bekannt, nicht behoben (dokumentiert):**
-  - Einzelne CommonMark-Sonderfälle.
-  - `--journal-dir` ersetzt das Journal, statt es zu ergänzen.
-  - Eine übersetzte make-Ausgabe.
-  - Ein Ziel, das die Shell zusammensetzt.
-  - Ein Pipe, der den Exit-Code verdeckt.
-  - Der Dialog eines Harness, den `say` nicht erkennt.
-
-**v2.32.5 — der Stale-Check als Entscheidungstabelle.** Nach der dritten Flickung sammelt `_history` jetzt die Fakten aus git, und `decide` urteilt nach einer Tabelle, die Zeile für Zeile gepinnt ist. Jeder entfernte Zweig macht eine Zeile rot. Anlass war, dass Züge im Referenzprojekt täglich abgelehnt wurden. Ein Refute des Umbaus lief über 126 Szenarien; alle Funde sind behoben, jeweils mit einem Test, der gegen die Vorfassung fällt:
-- **Saubere Merges:** Ein Merge zählt nur mit dem, was er über git's eigenen Merge (`merge-tree`) hinaus hinzufügt. Ändern beide Seiten verschiedene Stellen derselben Datei, ist das kein ungeprüfter Code mehr; `--cc --name-only` hatte solche Dateien genannt. Eine Konfliktauflösung, die keiner Seite entspricht, und eine böse Stelle im Merge bleiben ungeprüft.
-- **Mitpassagiere:** Fügt der Zug-Merge eines anderen Passagiers eigenen Code hinzu, blockiert das weiter, heißt aber so und wird nicht dieser Arbeit angelastet.
-- **Flacher Klon:** Fehlt dort der geprüfte Kopf, ist das Review veraltet und nicht mehr aktuell (fail-closed).
-- **Dateinamen:** Alle Pfade werden mit `-z` gelesen, und Namen, die kein UTF-8 sind, gehen byte-genau an git zurück. Eine gescheiterte Abfrage liest sich nicht mehr als „Datei fehlt auf beiden Seiten“; so ließen sich sonst eine böse Auflösung und ein verworfener Review durchschmuggeln. Ein Name aus Leerzeichen ist ein Name.
-- **Versteckte Änderungen:** Submodul-Sprünge zählen auch mit `ignore = all` (`--ignore-submodules=none`), Wurzel-Commits auch mit `log.showRoot=false`, und ein Merge fremder Geschichte wird beurteilt statt abgelehnt.
-- **Integrations-Ref:** Der Remote-Ref gilt. Ein lokales main zählt darüber hinaus nur mit Merges auf seiner Hauptkette, also mit einem Zug, der gemergt, aber noch nicht gepusht hat. Ein versehentlich auf main gemachter Commit oder ein auf ungeprüfte Arbeit gesetztes `master` versteckt nichts mehr.
-- **Bekannt, nicht behoben:** Jeder kann einen Branch `train/…` nennen, und die Passagier-Ausnahme gilt dann für ihn. Was auf main landet, entscheiden Zug und Push-Regeln. Ohne Remote-Ref gilt ein lokales main weiter als Basis.
-
-**v2.32.4 — Review-Befunde zum Refute-Port, samt Refute des Fixes.** Ein Review des Ports im Referenzprojekt blockierte. Danach griff ein frischer Agent den Fix mit rund 165 Szenarien an und fand keinen Blocker, aber drei Majors. Alles unten ist behoben, jeweils mit einem Test, der gegen die Vorfassung fällt:
-- **REFUTE-Zeile ist ein Beleg, keine Erwähnung:** Sie braucht `round=<n>:` und Inhalt. Nicht mehr zählen ein nacktes `REFUTE work=…`, eine Zeile in Backticks, ein offenes `- [ ]`, Platzhalter-Inhalt (`TODO`, `…`) und alles hinter einem nicht geschlossenen `<!--`.
-- **Jeder Plan belegt seinen eigenen Refute:** Die Zeile muss die work-id ihres Plans nennen. Die Zeile eines gestapelten Plans deckt keinen anderen, die Warnung nennt die Pläne ohne Zeile.
-- **Delta-Review (`--since`):** Ändert der Delta Gate-Code, braucht jeder Plan eine Runde, die keine frühere Fassung von ihm schon hatte. Eine umformatierte alte Zeile oder ein umbenannter Plan zählt nicht als neuer Refute. Ohne auflösbare Basis prüft `--since` trotzdem.
-- **Zug, „Suite nicht vorhanden“:** Das gilt nur für ein Ziel, das das Suite-Kommando selbst nennt (auch in `(cd x && make test)`, `make test;`, `gmake -C x …`). Ein fehlendes include ist ein roter Baum; das erkennt der Zug an make's eigener Zeile `Makefile:N: <name>: No such file or directory`.
-- **Bekannt, nicht behoben:** Die folgenden Fälle sind im Code dokumentiert:
-  - Verschachtelte Listen mit vier Leerzeichen zählen nicht (Fehlalarm).
-  - `**issue:**` wird nicht erkannt; das kommt aus der Issue-Erkennung des Review-Gates.
-  - Druckt ein Test genau make's Zeile, oder löscht ein verschachteltes make `MAKELEVEL`, liest sich der Baum als „nicht vorhanden“. Das bricht ab und merged nichts.
-
-**v2.32.3 — der Zug nimmt nur mit, was ein Review am Branch-Kopf deckt.** Ein Branch, den ein Zug schon gemergt hatte, bekam danach neue Commits und stand im nächsten Zug als einstiegsbereit da: Der alte Bericht `done` und der alte REVIEW-Pass galten weiter. Ein Refute vor dem Review fand dazu einen Blocker, zwei Majors und einen Minor. Alles ist behoben, jeweils mit einem Test, der gegen die alte Fassung fällt:
-- **Deckung am Kopf:** Ein REVIEW-Pass boardet einen Branch nur, wenn sein geprüfter Kopf im Branch liegt und dahinter kein ungeprüfter Code steht. Die Regel ist dieselbe wie im Stale-Check des Review-Gates.
-- **`done` boardet nichts:** `done` schreibt der Zug nach dem Merge. Für Commits danach braucht es einen eigenen REVIEW-Pass.
-- **Nur Merges ist kein Zug:** Die Passagier-Ausnahme gilt nur auf dem Staging-Branch des Zugs (`train/<stamp>`). Ein Arbeits-Branch, der nur aus Merges besteht, versteckte sonst einen hineingemergten Seiten-Branch.
-- **Kopflose Pässe:** Ein älterer Pass ohne Kopf zählt nur, solange kein Pass der Arbeit einen Kopf trägt, egal welcher Tier. Im Zug zählt er außerdem nur aus dem eigenen Journal des Branches: Ein kopfloser Pass auf main bürgt nicht für neue Commits.
-- **Lokales main vor origin/main:** Als Basis gilt die am weitesten fortgeschrittene Integrationsreferenz. Was ein Zug lokal schon gemergt, aber noch nicht gepusht hat, zählt so nicht als ungeprüfter Code der Arbeit.
-
-**v2.32.2 — Refute der Restbefund-Fixes (v2.31.6/7).** Ein frischer Agent prüfte 27 Szenarien, davon fielen 8 durch. Behoben ist alles, was im Rahmen der Änderung lag, jeweils mit Test gegen die alte Fassung:
-- **Merge zur anderen Seite:** Eine Konfliktauflösung auf die Seite eines Umbenenners wird jetzt erkannt (`--no-renames`). Ob ein Merge etwas verworfen hat, misst sich an git's eigenem Merge (`merge-tree`). Ein sauberer Merge ist dadurch kein Fund mehr, auch wenn main die geprüfte Änderung schon trägt (Squash, Cherry-Pick).
-- **Suite nicht vorhanden:** Eine fehlende Vorbedingung (`…, needed by …`) heißt rot, nicht „nicht vorhanden“. Erkannt werden jetzt auch make 3.81 (Backtick-Quote), `gmake` und `make -k` (ohne „Stop.“).
-- **Zug-Bericht:** Ein aus dem Zug geworfener Branch bekommt seinen Bericht auch dann, wenn der Rest danach nicht laufen kann.
-- **tidy:** Ein Pruner, der beim Import `sys.exit` ruft, lässt den Bericht nicht mehr abstürzen.
-- **Bekannt, nicht behoben:** Eine übersetzte make-Ausgabe (nicht-englische Locale) wird nicht erkannt und heißt rot; sie ist im Code dokumentiert. Ein Flake in einem Bisektions-Präfix kann weiter einen Unbeteiligten beschuldigen; das lag außerhalb dieser Änderung.
-
-**v2.32.1 — der erste Refute-Lauf, gegen die eigene Warnung.** Die Regel aus v2.32.0 wurde gleich auf ihre eigene Umsetzung angewandt: Ein frischer Agent fand an der REFUTE-Warnung drei Majors und drei Minors, alle behoben und je mit einem Test belegt, der gegen v2.32.0 fällt.
-- **Umbenennung aus dem Gate-Pfad:** Eine aus dem Gate-Pfad wegbewegte Datei warnt jetzt (`--no-renames`).
-- **REFUTE-Zeile als Beispiel:** Eine Zeile im Codeblock, im HTML-Kommentar, eingerückt oder mit Platzhalter (`<id>`, `TODO`) zählt nicht mehr.
-- **Gate-Pfade:** Umfassen jetzt auch `Makefile`, `.github/workflows/` und `.pre-commit-config.yaml`.
-- **Dateinamen:** Nicht-ASCII-Namen werden erkannt (`-z`).
-- **Listenformen:** `- [x]`, `+`, `1.` und Backticks werden erkannt.
-- **Flacher Klon oder keine Merge-Basis:** Das Bündel sagt, dass die Prüfung nicht lief.
-
-**v2.32.0 — Refute vor dem ersten Review für Gate-Code.** Ändert ein Diff `scripts/process/`, `.githooks/` oder die Gate-Konfiguration, greift ihn ein frischer Agent an, bevor der Review ihn sieht. Im Referenzprojekt brauchten Gate-Änderungen vier und mehr Runden; ein Refute-Durchlauf fand in zwei Läufen mehr als drei Review-Runden zuvor.
-- **`docs/process/refute.md` (neu):** Wann, wer, der Auftrag zum Kopieren und der Umgang mit Funden. Die Szenario-Klassen sind Umgehungen, Fehlalarme, stilles Durchlassen und die Umgebungsmatrix (make-Ebene, Hook, `gh` fehlt, flacher Klon, nur lokales main). Jeder Fund wird ein Regressionstest oder eine DECISION.
-- **Ergebniszeile:** `REFUTE work=<id> round=<r>: …` im Plan.
-- **Warnung im Review-Bündel:** Bei Gate-Code ohne REFUTE-Zeile warnt das Bündel. Das sperrt nicht: Die Regel wird erst beobachtet.
-- **Einbindung:** `review.md` und `verification-independence.md` verweisen auf die neue Regel.
-- **Neutrale Tests:** Die Template-Tests sind inhaltlich neutral, ohne Bezüge auf Issues, Züge oder Namen aus dem Referenzprojekt.
-
-**v2.31.7 — Suite nicht vorhanden, auf jeder MAKELEVEL.** v2.31.6 erkannte nur die Zeile `make:`. Läuft der Zug selbst unter make (`make train`, MAKELEVEL 1), meldet das make der Suite sich als `make[1]:`. Das hätte den Fall „der Passagier bringt das Ziel erst mit“ wieder rot gemacht. Aufgefallen ist das beim pre-push-Hook im Referenzprojekt, der pytest selbst unter make startet. Jetzt zählt die Ebene direkt unter der des Zugs. Tiefere Ebenen, etwa ein Test, der make aufruft, bleiben rot.
-
-**v2.31.6 — vier Restbefunde aus demselben Review.**
-- **Zug, „nicht vorhanden“:** Als „Suite nicht vorhanden“ gilt nur noch Exit 127 oder die eigene „No rule“-Stoppzeile des obersten `make`. Ein „command not found“ aus einem Test heißt rot.
-- **Zug, nach einem Abwurf:** Die verbleibende Kombination bekommt wieder ihre eigene Flake-Wiederholung.
-- **tidy:** Ein unlesbares `plan.md` oder `spec.md` und ein älterer Pruner ohne die Hilfsfunktionen lassen den Bericht nicht mehr abstürzen.
-- **`stale_review`:** Erkennt einen Merge, der einen Konflikt vollständig zugunsten der anderen Seite aufgelöst und damit die geprüfte Änderung verworfen hat. Das kombinierte Diff ist dafür blind.
-
-Je ein Test schlägt an, wenn die jeweilige Behandlung fehlt.
-
-**v2.31.5 — `stale_review` fasst die Regel statt des Symptoms.** Befund aus Runde 3 des Reviews im Referenzprojekt: Nach `commit --amend` oder Rebase liegt der geprüfte Stand nicht mehr in der Vorgeschichte, und die Prüfung ließ es durch.
-- **Stand nicht in der Vorgeschichte:** Das Review ist dann ungültig.
-- **Sonst:** Ungeprüft ist alles, was HEAD trägt und weder der geprüfte Stand noch main trägt. Damit fallen auch ein eingemergter Nebenbranch, ein Amend neben dem geprüften Stand und ein Merge mit `-s ours` auf; Merges zählen über ihren kombinierten Diff.
-- **Zug:** Bei der Merge-Kette eines Zugs zählt vom geprüften Werk nur der Stand, der den geprüften Stand trägt, plus der kombinierte Diff aller Merges der Kette. Mitpassagiere zählen nicht, eingeschmuggelter Inhalt in einem ihrer Merges aber schon.
-- **Fail-closed:** Git-Fehler führen zur Ablehnung. Eine Integrations-Ref, die HEAD schon enthält, gilt nicht als Basis. Ein Pass ohne `head` hebt keinen veralteten Pass mehr auf. `in_flight` engt nicht mehr ein; ein leeres Set hieß vorher „nichts zu prüfen“.
-- **Geprüft:** Ein unabhängiger Refute-Agent hat den Fix in zwei Runden angegriffen, mit 27 und 38 Szenarien. Seine Funde sind als Regressionstests abgelegt (`tests/test_stale_review.py`), und jeder schlägt gegen die jeweils vorige Fassung an.
-- **Bewusst nicht erfasst:** ein Mitpassagier ohne Plan oder unter Tier 2, der die Einstiegsregeln des Zugs umgeht. Eine Konfliktauflösung zugunsten der anderen Seite folgt separat.
-
-**v2.31.4 — Journal-Zeilen zweier Branches mergen ohne Konflikt.** `.process-work/journal/.gitattributes` setzt `*.md merge=union`: Hängen zwei Branches an dieselbe Tagesdatei an, behält der Merge beide Zeilen. Im Referenzprojekt blockierten sich zwei geprüfte Branches im Zug über angehängte REVIEW-Zeilen. Die Regel gilt nur für das Journal-Verzeichnis, eine eigene Root-`.gitattributes` des Projekts bleibt unberührt. Ein Test merged zwei Branches mit angehängten Zeilen.
-
-**v2.31.3 — gleiche Prüfer über alle Runden.** `review.md` ergänzt die Rundenökonomie:
-- **Ein Prüfer-Set pro Arbeit:** Runde 1 fährt das volle Set, das der Tier verlangt. Folgerunden nutzen dasselbe Set, ohne neue Linsen und ohne Wechsel der Modellfamilie. Fällt ein Prüfer aus, wird der Ersatz im Journal vermerkt.
-- **Folgerunden prüfen den Fix und sein Umfeld:** Ein älterer Befund außerhalb davon wird ein eigenes Issue, außer er blockiert diese Änderung.
-
-Anlass war die Analyse im Referenzprojekt: Ein neuer Prüfer in einer späteren Runde fand Altbefunde, und jeder davon wurde zu einer eigenen Runde.
-
-**v2.31.2 — Konfliktauflösungen in Merge-Commits zählen als ungeprüfter Code.** Befund aus Runde 2 des Reviews im Referenzprojekt: Der Fix aus v2.31.0 (`--no-merges`) übersah eine nach dem Review in einem Merge-Commit von Hand aufgelöste Konfliktstelle. `stale_review` liest Merges jetzt über ihren kombinierten Diff (`--cc`). Ein sauberer Merge trägt nichts bei; ein Ergebnis, das von allen Eltern abweicht (Konfliktauflösung, „evil merge“), zählt als Code der Arbeit. Je ein Test für beide Richtungen schlägt an, wenn die jeweilige Behandlung fehlt.
-
-**v2.31.1 — Befunde aus dem ersten Review des Rundenzählers.**
-- **Eindeutige Runden:** `attest.py` zählt eindeutige blockierte Runden statt Block-Zeilen. Mehrere Prüfer-Linsen einer Runde sind eine Runde (im Referenzprojekt hätten 21 doppelte Block-Zeilen überzählt). Weitere Prüfer der gerade blockierten Runde attestieren diese Runde mit `--round`.
-- **Ausnahmen immer erfasst:** `--exception` schreibt die `REVIEW-EXCEPTION`-Zeile auch dann, wenn keine attest-Regel greift, etwa bei einer Runde über die Kappe hinaus.
-- **Klarere Begründung im Zug:** Die Ablehnung eines Branches mit Gate-Code nennt jetzt die geforderte Stufe (REVIEW-Pass ab Tier 2).
-
-**v2.31.0 — der Zug unterscheidet Flake, fehlende Suite und fremde Passagiere; tidy wählt nur, was der Pruner annimmt.** Befunde aus dem Referenzprojekt (Zug 31 und 34).
-- **Flake:** Ist der kombinierte Baum rot, läuft derselbe Baum ein zweites Mal, bevor jemand beschuldigt wird. Ist er dann grün, meldet der Zug FLAKY und merged; eine Bisektion über einen Flake beschuldigt sonst, wer gerade im Präfix sitzt.
-- **Fehlende Suite:** Gibt es die Suite auf einem Baum nicht (`No rule to make target`, Exit 127, weil ein Passagier das Make-Ziel erst mitbringt), ist dieser Baum nicht vergleichbar statt rot. main gilt dann nicht als rot, und kein Präfix wird beschuldigt.
-- **Last:** Jedes Rot-Urteil protokolliert die Systemlast.
-- **Abgelehnter Push:** Die Meldung sagt, ob origin oder der lokale pre-push-Hook abgelehnt hat, und zitiert die Gründe.
-- **Review-Gate:** „Code nach dem geprüften Stand geändert“ zählt nur noch Nicht-Merge-Commits, die vom geprüften Stand abstammen. Bisher lehnte der Merge-Push jeden Zug mit mehreren Passagieren ab, weil er die Dateien eines Mitpassagiers als ungeprüften Code des anderen las.
-- **tidy:** `tidy.py` trennt fertige Spec-Verzeichnisse, die `publish_and_prune` annehmen würde, von denen, die es ablehnen würde (kein `plan.md`, keine `issue:`-Zeile, nicht verbuchte Success Criteria). Die zweite Gruppe wird mit dem fehlenden Teil als Owner-Entscheidung gelistet, und `--apply` übergibt sie nicht mehr.
-
-**v2.30.0 — weniger Review-Runden: gezählt statt behauptet, erst die Ursache, dann der Fix.** Die Analyse im Referenzprojekt ergab: Arbeiten mit drei oder mehr Runden stiegen von 11 % (1.–15.09.) auf 23 % (16.–24.09.). Die größte Ursache waren Fixes, die den nächsten Blocker selbst erzeugten; dazu kamen ein aufgeblähter Zähler (Nachprüfungen als Runden, fehlende Block-Zeilen, Plan- und Code-Runden auf einem Zähler) und Arbeiten mit 3.000–5.500 Zeilen.
-- **Gezählte Runde:** `attest.py` zählt die Runde selbst, als 1 plus die für die Arbeit schon erfassten Blocks. Eine behauptete, abweichende Runde wird abgelehnt. Nachprüfungen nach einem Pass und Rebases bleiben in derselben Runde. Plan-Reviews zählen getrennt (`--plan-review` schreibt `work=<id>-plan`).
-- **Ursache vor dem Fix:** Vor jeder Runde nach einem Block verlangt `attest.py` pro Block eine Zeile `ROOT-CAUSE work=<id> round=<r>: …` im Journal oder im Plan.
-- **Ausnahmen:** `--exception` hebt beide Regeln auf und schreibt dafür eine zählbare `REVIEW-EXCEPTION`-Zeile.
-- **Größenwarnung:** Das Review-Bündel warnt ab 30 Dateien oder 1.500 Zeilen (`PROCESS_REVIEW_MAX_FILES`/`_LINES`); Lock-Dateien und `.process-work/` zählen nicht mit.
-- **`review.md`:** Blockiert dieselbe Stelle zweimal, übernimmt eine frische Sitzung den Fix.
-
-**v2.29.0 — nur die eigene Arbeit gibt einen Branch frei; leere Belege, Worker-Umgebung, Rückweg aus der Cloud.**
-- **Zug (`train.py`):** Ein archivierter Plan gibt einen Branch nur frei, wenn es der eigene ist. Eigen heißt: Der Branch-Name trägt die Issue-Nummer oder den Slug des Plans, oder die Basis kannte den Plan nicht. Wer nur fremde, längst freigegebene Pläne archiviert, räumt auf und wird dadurch nicht freigegeben. Im Referenzprojekt war ein Template-Update-Branch so eingestiegen, während sein eigenes Review noch lief. Ein Branch, der `scripts/process/` oder `.githooks/` ändert, steigt nur mit einem REVIEW-Pass für die eigene Arbeit ein, unabhängig vom Tier. Regressionstests spielen genau diesen Fall nach.
-- **Review-Bündel:** `make_review_bundle.py` markiert ungültige Belege als VOID: byte-identische Vorher/Nachher-Paare, identische Bilder unter verschiedenen Namen und Bilder, die einem bekannten Leerzustand unter `docs/process/void-evidence/` gleichen (etwa dem Ladezustand).
-- **Worker-Umgebung:** `model-policy.json` kennt `env` global und pro Phase. Die Variablen gelten nur für Worker-Sitzungen, etwa `CLAUDE_CODE_SUBAGENT_MODEL`. Der tmux-Runner entfernt Policy-Variablen nicht mehr zusammen mit den `CLAUDE_CODE_*`-Variablen des Stewards.
-- **Cloud-Rückweg:** `tower.md` nennt den einen unterstützten Weg für ein Urteil aus der Cloud: den attest-Commit auf dem Arbeitsbranch. Der Remote-Prompt sagt, dass ein abgelehnter Report-Push nichts verliert.
-
-**v2.28.2 — die Merge-Suite ist die volle Suite jedes Stacks.** Im Referenzprojekt fuhr der Zug nur die Backend-Suite; eine CSS-Änderung brach einen Frontend-Pin, und nichts vor dem Merge startete ihn. `train.md` und `testing.md` sagen jetzt, dass `--suite` die volle Suite *jedes* Stacks ist (ein Make-Ziel dahinter, z. B. `make test-merge`), weil ein ausgelassener Stack ohne CI beim Merge ungetestet bleibt. `train.py run` ohne `--suite` sagt das auf stderr: Dann laufen nur die Prozess-Gates. Ein Test deckt den Hinweis ab.
-
-## Sub-Projekt-Tabelle (SP1–SP24)
-
-Die Tabelle wurde bis SP24 gepflegt; ab SP25 trägt das Narrativ oben die
-Historie allein.
-
-| Sub-Projekt | Inhalt | Status |
-|---|---|---|
-| **SP1** Foundation | Kern + Adapter + copier-Init + additiver Brownfield-Drop-in | ✅ ausgeliefert |
-| **SP2** Architektur-Onboarding | Architektur-Interview + Verifikation gegen echten Code | ✅ ausgeliefert |
-| **SP3** Prozess-Vervollständigung (Multi-Repo/-Mensch) | feature-registry · github-issues · contracts-drift | ✅ Slices 1–3 |
-| **SP4** Prozess-Vervollständigung II | git-hooks (lokale Enforcement-Säule) · contract-first (Interface-declared-first-Gate) · parity (Capability×Surface-Matrix, Gap→Issue) · security-floor (Pattern-Floor über git-getrackte Dateien) | ✅ ausgeliefert |
-| **Capstone** command-adapters | Harness-native Slash-Commands (Claude / Copilot / AGENTS.md), dünn auf `docs/process/` zeigend, vom doc-drift-gate mitgeprüft — schließt das „vollständig wie das Referenzprojekt"-Programm bei `v1.0.0` | ✅ ausgeliefert |
-| **SP7** ci-adapters | GitLab CI als zweiter Enforcement-Transport (`ci`-Namespace, includable Job + Root-Shim) · dokumentierte No-CI-Degradation · Install-Fallbacks ohne `uv` (pipx / venv+pip / lokaler Clone) | ✅ ausgeliefert |
-| **SP8** english-canon | Alle Artefakte englisch (halbiert die Doku-Token je Session) · Kernel-Regel „Dialog in Nutzersprache" · „Wann lohnt es nicht"-Ehrlichkeit · Journal-Pflicht erst ab Tier 2 | ✅ ausgeliefert |
-| **SP9** audit-fixes | Drei-Achsen-Audit: alle bestätigten False-Greens geschlossen (Manifest load-bearing, arch-Fence, unborn-main-Hook, hooksPath-Guard) · Failure-Modes mit Diagnose statt Traceback · doc-drift versteht dokument-relative Links · Doku-Drift bereinigt | ✅ ausgeliefert |
-| **SP10** telemetry | Effizienz messbar (Audit-Finding, aus dem Referenzprojekt generalisiert): `GRADE`-Trace-Konvention im Journal · Gate lintet das Trace-Format (kein stiller Telemetrie-Verlust) · read-only KPI-Cockpit (`process_kpis.py`: effectiveness/convergence/suite/tempo/cost/cfr) · Grader-Kalibrier-Suite mit den drei Vertrauens-Schwellen (≥20/≥5 · 0 False-PASS · ≥90 % ≤2 Runden) | ✅ ausgeliefert |
-| **SP11** reaudit + public | Adversariales Re-Audit der Telemetry-Slice: False-Greens geschlossen (Suite-Shape-Alignment in Gefahr-Richtung, Filter=Grammatik, Unicode-round, Typo-Root) · Failure-Modes sprechen statt Tracebacks · persönliche Daten aus dem Tree, englischer README-Einstieg, `uv.lock` committed, CI least-privilege | ✅ ausgeliefert |
-| **SP12** verification-independence | Kontext-Unabhängigkeit der Verifikation als Kern-Methodik (die Lücke nach dem Telemetry-Slice): Produktion warm (Kohärenz), Verifikation unabhängig, tier-gestaffelt (0–1 Selbstcheck · 2 frischer Bundle-Review · 3 cross-model + adversarial-refute) · Review attestiert seine Unabhängigkeit, sonst zählt sie einen Tier schwächer | ✅ ausgeliefert |
-| **SP13** anchor-guidance | Zwei portable Lücken geschlossen (aus dem Vergleich mit einem reifen Adopter): der „Anker trägt Pointer, nicht driftendes Detail"-Diskriminator ist jetzt in `start-here.md` ausgesprochen (*driftet es beim Refactor? → nicht in den Anker*), plus wie man Anker für große Multi-Stack-Repos skaliert (nested per-Subtree-Anker) — hält den dünnen Kernel dünn | ✅ ausgeliefert |
-| **SP14** junior-legibility | Drei Lücken aus einer Junior-Simulation geschlossen: eine stack-neutrale `review-checklist.md` (was ein Review wirklich prüft — Vollständigkeit, Korrektheit, **Security** untrusted-input→sink, Design/ein-Owner, Tests), eine „Wie erkenne ich meinen Tier?"-Heuristik in `risk-tiers.md`, und ein ehrlicher „Muster-Floor, nicht deine Security-Review"-Satz im security-floor-Modul | ✅ ausgeliefert |
-| **SP15** arch-docs | Neues opt-in Modul: stakeholder-gerichtete Architektur-Doku (arc42/C4-lite) als `ARCHITECTURE-OVERVIEW.md`-Scaffold — Kontext, Qualitätsziele, Runtime, Deployment, Risiken/Tech-Debt, Glossar; Building-Blocks→arch-Block und Decisions→ADRs *verlinkt* statt dupliziert (ein Owner); Gate prüft nur mechanisch Ehrliches (tote ADR-Refs hart, Platzhalter als Note), täuscht nie „dokumentiert" vor | ✅ ausgeliefert |
-| **SP16** review-breadth | `review-checklist.md` aus der Web-Lastigkeit gelöst: zwei stack-neutrale Dimensionen ergänzt — **Performance & Effizienz** (N+1, unbounded Fan-out, heiße Pfade) und **Observability & Betreibbarkeit** (fail-fast statt stiller Degradation, deploy-abhängige Fragen konditional formuliert); untrusted-input→sink breiter gefasst | ✅ ausgeliefert |
-| **SP17** parallel-friction | Reibung für parallele Agenten auf einem Repo reduziert: das eine geteilte Tages-Journal wird per Branch shardbar (`.process-work/journal/<branch-slug>/YYYY-MM-DD.md` — Gate und Cockpit lesen rekursiv, beide Layouts funktionieren); neue „## Parallel efforts"-Sektion nennt den Trade-off ehrlich (Ausführung parallel+sharded, Integration serialisiert durch ff-only, nie zwei Efforts auf einem Owner) | ✅ ausgeliefert |
-| **SP18** decision-records | ADR zum getypten **Decision Record** generalisiert (`Type: architecture \| product \| process`) — signifikante Produkt-/Prozessentscheidungen haben endlich ein Zuhause; Intent bleibt *ein* Wert pro Record (Atomaritäts-Forcing-Function). Erstes **Core-Gate** (`check_decisions.py`, immer aktiv, da `adr/` Core ist): Listing-Drift + ungültige Enums + inkohärente Status×Intent-Paare (`Superseded`+`keep`) hart, unausgefüllte Menüs/fehlender Type soft. Rule 4 verankert „signifikante Entscheidung → Decision Record" + Patch-Count-Gate (dritter Patch default-falsch) | ✅ ausgeliefert |
-| **SP19** review-enforcement | Review-Unabhängigkeit von Prosa zu gegatetem Artefakt: strukturierte `REVIEW`-Attestierung im Journal, zweites **Core-Gate** (`check_review.py`). **Arithmetik** hart — ein `pass` darf keinen Tier klären, den seine Independence-Flags nicht tragen (Selbst-Review/warm klärt kein Tier 2+; Tier 3 braucht `cross-model` oder ehrliches `single-family`). **Presence** hart — ein gemergter (archivierter) Tier-3+-Plan ohne klärende Attestierung fällt durch, außer benannte `review-waived:`-Ausnahme. Identität/Modell-Wahrheit bleibt attestiert (Gate sieht die Review-Runtime nicht) — ehrliche Grenze, kein False-Green | ✅ ausgeliefert |
-| **SP20** issue-centricity | GitHub-Issues stärker in den Fluss gezogen: **Issue-before-code** als Gate im `github-issues`-Modul — ein *aktiver* Tier-3+-Plan ohne `issue:`-Link (oder benanntes `issue-waived:`) fällt durch. Spiegelbild zum Review-Gate: Issues bei aktiven Plänen (Start), Reviews bei archivierten (Ende), kein Overlap. Claim/Heartbeat-Disziplin geschärft (Claim-Felder + Kadenz) — bewusst *nicht* gegatet (Social/Wall-clock nicht maschinenprüfbar), ehrlich so benannt. Alles opt-in unter dem Modul (Portabilität) | ✅ ausgeliefert |
-| **SP21** dependency-sequencing | Stories können Abhängigkeiten deklarieren (`blocked_by: [STORY-NNNN]`, Sequenzierung, nicht Dekomposition). Feature-registry-Gate (Owner erweitert, kein Parallel-Gate) prüft hart: dangling Ref, Selbst-Referenz, **Dependency-Zyklus** (DFS, mit Pfad); soft: `done`-Story mit unfertigem Blocker. Read-only `story_order.py` berechnet ready-to-start-Set + topologische Reihenfolge. „Blocked by #N"-Rendering ins Issue bleibt optionale Projektion (Registry = SSOT) | ✅ ausgeliefert |
-| **SP22** github-master | Opt-in Adapter, der die Wahrheitsrichtung dreht: **GitHub Issues = SSOT**, Datei-Registry wird Spiegel — ohne Netz in CI. Zwei Schichten strikt getrennt: **Sync** (`gh_sync.py`, zieht Issues → committeter `.process-work/github-snapshot.json`, Netz) vs. **Gate** (`check_github_master.py`, hermetisch offline über den Snapshot). Harte Master-Invarianten: jede lebende Story hat Issue-Ref + Snapshot-Eintrag (beidseitig vollständig), Drift auf title/status↔state; `null`-Slots für blocked_by/parent/board (spätere Slices). Portabler registry-master-Default bleibt unangetastet | ✅ ausgeliefert |
-| **SP23** sub-issues | Dekomposition: `parent: STORY-NNNN` (Baum, orthogonal zu `blocked_by`). Feature-registry-Gate erweitert (geteilte Zyklus-DFS, ein Owner): parent dangling/self/**Zyklus** hart; soft: parent-done-vor-Kind, wörtliche Child↔Parent-Dopplung. Epic-Test-Regel gelöst: ein Parent darf `done` ohne eigenen Test nur wenn **alle Kinder done** (Kinder-Tests decken ab), ein Leaf nie. github-master driftprüft `parent` (Sub-Issues = Master); `story_order.py` zeigt Epic→Kinder-Hierarchie. Anti-Dup ehrlich nur bei wörtlicher Gleichheit prüfbar | ✅ ausgeliefert |
-| **SP24** project-board | GitHub Project Board (Backlog→Ready→In-progress→Review→Done) — **automatisiert *und* gegatet**, ohne Hermetik zu brechen: `gh_board.py` (Netz) füllt den `board_status`-Slot im Snapshot, der **Gate prüft offline** die Konsistenz Spalte↔Story-Status↔Issue-State (unbekannte Spalte / Widerspruch hart; `deprecated` exempt). Kartenbewegung (`--push`) ist ein expliziter Extension-Point (GitHub-Write, best-effort, nie Gate). Eine kanonische Mapping-Tabelle | ✅ ausgeliefert |
+What changed in each release, why, and what it leads to — newest first. Each entry
+has the same parts: **Why** (the problem that was observed), **What changes** (as a
+project using the template sees it), **Effect**, **Update** (steps for existing
+projects), and **Details** (the plan with the technical particulars, the issues).
+A few plain sentences per release: [NEWS.md](NEWS.md). Deutsche Fassung:
+[CHANGELOG-DE.md](CHANGELOG-DE.md). History before v2.28.2 (sub-projects, German):
+[docs/changelog-archive.md](docs/changelog-archive.md).
+
+## v2.73.0 — Codex review attested, overlays for project notes, manual CI · 2026-10-15
+
+**Why.** Kenni ran Codex workers, the per-package handoff rule and the opt-out of hosted CI as its own variants; the template adopts them so Kenni does not drift away. Project notes in template docs had no check for whether a template change breaks them.
+
+**What changes.**
+- `--harness codex` for `start`, `queue add` and `policy` starts a Codex worker under a supervisor with a time limit; it requires a logged-in Codex CLI.
+- `dispatch.py handoff <branch>` checks evidence, attests and pushes; if Codex is unavailable, a trace remains, with the way out `--harness claude` or `skipped cross-model`.
+- `/plan` requires `Execution: delegate | retain-context` with a rationale per larger package; `report.py --execution` and `process_kpis.py execution` show whether delegating costs review rounds.
+- `ci.github: manual` renders workflows only via `workflow_dispatch` and without a guard script; it is enforced in the pre-push hook, allowed values are `true`, `false`, `manual`.
+- Project notes on template docs and commands live in `docs/process/<doc>.local.md` or `docs/process/commands/<name>.local.md`, anchored with `extends`/`replaces: "<heading>" @<hash>`.
+- The `overlays` gate turns red when an anchored section changes, until it is re-stamped with `--stamp`; `template_update.py` lists affected overlays.
+
+**Effect.** Codex becomes a full reviewer and leaves a trace when it fails. Own rules no longer break unnoticed on template changes, but every change to an anchored section costs a review; Kenni no longer needs gate code in `.process-owned`.
+
+**Update.**
+1. Anyone who wants `ci.github: manual` sets the answer in `.copier-answers.yml` before the update.
+2. After the update, move your own notes in template docs and commands into overlays, anchor them and stamp them with `--stamp`.
+3. For Kenni: the steps are in the Migration section of the [plan](docs/analysis/2026-10-15-kenni-backport-2.md).
+
+**Changed sections.** `commits.md` (Merging), `start-here.md` (The standard setup, Anchors: what goes where…, Definition of ready), `tower.md` (Dispatch and the model policy), `verification-independence.md` (The review bundle…), `workflow.md` (Plan), modules `arch-onboarding`, `doc-drift-gate`, `feature-registry`, `git-hooks` (Honest ceiling), `sbom` (The gate), all commands and Copilot prompts (new overlay line under the title)
+
+Details: [Plan](docs/analysis/2026-10-15-kenni-backport-2.md)
+
+## v2.72.0 — Merge scope in the certificate, stage timings, struck ACs · 2026-10-15
+
+**Why.** Kenni's changes should live in the template as far as possible. A render with Kenni's answers found 27 differing template files, seven of which Kenni carried as its own gate code in `.process-owned`; that made every template update there a migration.
+
+**What changes.**
+- `testing.local.json` knows `merge_scope`, an argv that names the stages of `merge_suite`; a narrower run never certifies a fuller push.
+- The train and `finish --tests` delete old stage and timing files before the suite, and the train's memo applies only at the same scope.
+- A staged merge suite leaves `stages` and one `<stage>.time` per stage in `<git-dir>/merge-suite/`; `process_kpis.py train-phases` shows median, maximum and skips per stage.
+- `AC-<id>: struck — <reason>` or `dropped` removes an own AC from the test requirement; the review report must confirm every strike, otherwise attest refuses.
+- Smaller changes: invalid `stale_minutes` and a wrong policy shape are reported, design-contract notes and `.process-work/inbox.md` merge with `merge=union`, CI cancels older runs on branches, never on `main`.
+- Docs and commands from Kenni: two test lanes with bounded push waiting, coherent packages in `/plan` (median 53 instead of 183 turns), `/finish --tests` with the `merge_suite` string.
+
+**Effect.** A narrower run can no longer release a fuller push, and the train shows which stage costs time. The first push after the update runs once more, because the configuration now carries `merge_scope`.
+
+**Update.** No steps. Optional for Kenni, in this order:
+1. Update to v2.72.0 with the entries in `.process-owned`.
+2. Replace `certificate.py`, `testing_config.py`, `test_select.py`, `train.py` and `finish.py` with the new render.
+3. Remove the five lines from `.process-owned`.
+
+Details: [Plan](docs/analysis/2026-10-15-kenni-backport.md) #226 #234 #235 #221
+
+## v2.71.0 — Evidence before the pass: cross-model, refute, one test per AC · 2026-10-14
+
+**Why.** In one night Kenni merged six tier-2 branches, each with a pass in review round 1; an audit then found six major defects, four of them tests that cannot turn red. 4 of 4 gate-code branches skipped the refute, and the cross-model run was missing without notice, since both had only warned so far.
+
+**What changes.**
+- A code-review pass from tier 2 needs a report (`--with`) with one line `AC-<id>: <path>::<test>` per AC; `unproven` refuses the pass.
+- The project declares its test files in `review_evidence` (`python_files`, `python_classes`, `test_files`); the test must really run, not be disabled.
+- If the scope touches gate code, a pass from tier 2 needs a REFUTE line in its own plan or `skipped refute work=<id>: <reason>`.
+- From `review_evidence.cross_model_from_tier` (default 3), the pass carries `cross-model` or `single-family` with `skipped cross-model`.
+- A plan-review pass from tier 2 names, via `--model`, the model ID whose rank is not below the plan session's; plans carry `plan-session model: <id>`.
+- Every rule has a committed way out `skipped <kind> work=<id>: <reason>` (`cross-model`, `refute`, `plan-review`, `ac-trace`).
+
+**Effect.** A pass proves what it claims, and missing evidence is countable instead of silent. This costs more mandatory lines; a hand-written REVIEW line still bypasses the check, and whether a test actually checks its AC is for the reviewer to judge.
+
+**Update.**
+1. Tier 2+ reviews: write a report with one AC line per AC and attest with `--with`; plan reviews pass `--model`.
+2. Plans carry `plan-session model: <id>`; a single-family pass on tier 3 needs `skipped cross-model work=<id>: <reason>`.
+3. Spec Kit projects give the plan or `spec.md` AC IDs or put `skipped ac-trace work=<id>: <reason>` in the plan, otherwise every tier 2+ pass is refused.
+4. For Kenni: the steps are in the Migration section of the [plan](docs/analysis/2026-10-14-review-evidence.md).
+
+Details: [Plan](docs/analysis/2026-10-14-review-evidence.md) #225
+
+## v2.70.0 — Generated inventories, reader search in the plan, news · 2026-10-13
+
+**Why.** Around 200 blocking review findings from one project, sorted by cause, showed ~47% implementation errors and 10–16% missing knowledge of existing code. The knowledge gaps arose when reading code and from unknown readers, not from a missing overall specification.
+
+**What changes.**
+- `inventory.py update` generates inventories (environment variables, jobs, tables, tools) into `docs/inventory/<name>.md` from extractors in `docs/process/inventories.local.json`.
+- `inventory.py check` compares byte for byte and is inactive without configuration; the project registers the check in `gates.local.json`.
+- `inventory.py for-plan <plan>` lists the inventory lines of the files touched, and `/plan` carries them into the tasks.
+- A plan that changes a constant, a default, a timeout, a format or an environment variable documents the search for readers and writers in `## Consumers`.
+- FINDING lines optionally carry `kind=` (`knowledge-gap`, `requirement`, `implementation`, `test-gap`, `process`, `environment`), and `process_kpis.py rounds` counts blockers by it.
+- Every user-visible change brings a fragment `news/<slug>.md` (`news.py new`); the steward renders `NEWS.md` weekly, with title and labels from `news.local.json`.
+
+**Effect.** Planners and reviewers see inventory and readers before changing anything, and blockers can be analyzed by cause; non-technical readers see what is new. Each project has to write its extractors itself.
+
+**Update.** No steps.
+
+Details: [Plan](docs/analysis/2026-10-13-knowledge-anchors-plan.md) #223
+
+## v2.69.0 — Plan drift measurement, fresh-worktree dry run, two release kinds · 2026-10-13
+
+**Why.** A plan was over 1000 commits old when its execute started, and migrations that delete or replace scripts had no prescribed dry run in a fresh worktree. A test that committed in its own temp repo hit the pushing repo on push.
+
+**What changes.**
+- `dispatch.py start --phase execute` measures plan drift; mandate `plan_drift`: `mode` `shadow` (default, log only), `warn` or `block` (overridable with `--stale-plan-ok`).
+- A migrating plan, or one that deletes or replaces a gate, hook or lane script, carries a `## Fresh-worktree dry run` with exit codes from a fresh `git worktree`.
+- A release is either a plain update or a migration release with its own `Migration` section (`releases.md`).
+- `tower.py --wait` wakes on silent workers with no report and no commit since the threshold (`--stale-minutes`, `PROCESS_STALE_MINUTES`, policy `stale_minutes`, otherwise 60), once per silence.
+- pre-push removes the repo's git variables (`GIT_DIR`, `GIT_INDEX_FILE`, …) from child processes of gates, test runners and the merge suite.
+- `DoD-deviation: …` lines of own plans go into the merge commit; `open AC-3 — …` or `continues #42 — …` keeps the issue open (`Refs #N`).
+
+**Effect.** Stale plans are noticed before work builds on them, silent workers wake the steward, and tests can no longer modify the pushing repo. An issue does not close early when the plan names a deviation from the definition of done.
+
+**Update.** No steps. Plan drift initially only logs; after two to four weeks `nodes` and `flow` show whether the thresholds fit, then the owner decides on `warn` or `block`.
+
+Details: #213 #214 #217 #218 #219 #220
+
+## v2.68.0 — Process as a verification graph: node measurement, gate modes, weekly loop · 2026-10-13
+
+**Why.** The process should deliver more output at the same quality and therefore be able to weaken or remove gates. What was missing was a measurement of what a gate costs and catches, and a safe way to weaken it.
+
+**What changes.**
+- The gate runner writes one line per gate run (result, duration, commit, mode) to `process-gate-events.jsonl` in the shared git directory.
+- `process_kpis.py nodes` shows cost, blocks and flips per gate, `losses` four loss measures, `outcomes` epics and bugs through to the delivered result.
+- `gate_modes.py` sets a gate's mode (`block`, `shadow`, `sampled`, `off`) in the log `docs/process/gate-changes.local.jsonl`; weakening needs an owner line, core gates are exempt.
+- The steward calls `gate_modes.py sentinel` daily (rollback when a guardrail breaks); `improvement-weekly.md` and `improvement-monthly.md` describe the loops.
+- Token totals count an API message once instead of per line (previously inflated); `flow` ends at deploy, otherwise at merge, and says which.
+- Behavior change: `optimize.py` `active()` returns an `Activation` whose truth value is on/off (in v2.67 `if active(...)` was always true), and two running trials switch each other off.
+
+**Effect.** A project sees per gate what it costs and whether it catches anything, can observe a new gate in shadow before it blocks, and roll back automatically when a guardrail breaks. Price: every gate run writes a line, and every weakening costs an owner line.
+
+**Update.** No steps. Optional: label bugs with `cause:*` and `channel:*` and set `outcomes.usable` in the mandate for epics (e.g. `label:acceptance`) so `outcomes` shows coverage.
+
+Details: [Plan](docs/analysis/2026-10-12-closed-loop-plan.md)
+
+## v2.67.0 — Optimization contract with frozen criteria and flow measurement · 2026-10-12
+
+**Why.** The owner wanted a process that improves itself: observe, find the cause, review the improvement independently, deploy it in a bounded way, assess the effect. This lacked a contract that fixes criteria before the trial, and a measurement from the first phase to deploy.
+
+**What changes.**
+- `docs/process/optimization.md` describes the control loop; `optimize.py` keeps one record per improvement under `.process-work/optimizations/`.
+- Before `piloting` it needs a mandate (`docs/process/optimization.local.json`), budgets and an independent `REVIEWED` line; afterwards criteria, limits, duration and budget are frozen byte for byte.
+- A mechanism under trial asks `optimize.py active <flag>` (doubt means off); the owner may adopt, the steward only with `adopt` in the mandate, never the implementer.
+- `process_kpis.py flow [--issue N]` follows an issue to deploy or merge: work and wait time, tokens, owner decisions and follow-up defects via the commit trailer `Regression-of: #N`.
+- `graph.py build|context|missed` derives edges from plans, test map, git co-change and REVIEW lines and only recommends, never narrowing a gate.
+- The steward gets the section "Improvement loop" (daily, not per tick).
+
+**Effect.** A project can run process changes as a bounded trial without anyone loosening the criteria afterwards, and sees where an issue loses time and tokens. Without a mandate and records, nothing changes.
+
+**Update.** No steps.
+
+Details: [Concept and review](docs/analysis/2026-10-12-self-improving-process.md)
+
+## v2.66.0 — One rule for own plans, plan review fail-closed · 2026-10-12
+
+**Why.** Dispatch counted only added plans: a branch that changed the main plan of its issue went straight to execute without a plan review. In addition, `plan_review_due` misjudged or crashed on an unreachable origin or non-UTF-8 git output.
+
+**What changes.**
+- Own means a plan added by the branch or a base plan that declares an issue of the branch; dispatch and the train use the same rule.
+- If a branch changes the main plan of an issue it was dispatched for, a plan review starts, and its pass releases the chain.
+- A package for #72 on `70-pkg-…` does not review the plan of its epic #70.
+- The prompt and wait message of a plan review name the due plans with their path and require one pass per plan.
+- When in doubt, dispatch chooses the code review: on an unreachable origin, in a remote session, with `--dry-run` and with non-UTF-8 git output.
+- In the train, a branch that deletes an active plan no longer counts as "unreadable", and a renamed plan counts only once.
+
+**Effect.** A changed plan no longer bypasses the plan review, and an unclear situation resolves in the safe direction. A branch that changes a main plan needs a `-plan` pass beforehand, and `start --phase review` becomes a plan review for it.
+
+**Update.** No steps.
+
+Details: #207 #204 #201
+
+## v2.65.0 — Environment preflight before every test run · 2026-10-10
+
+**Why.** In Kenni a broken worktree venv showed up three times in one day as red certify and operator tests; in v2.64 only the train had a `--preflight`.
+
+**What changes.**
+- `testing.local.json` knows `preflight` (argv without shell) and `preflight_timeout` (default 600 s).
+- It runs once before the first test command, in the pre-push frame, on `run --certify` and on manual runs; a certificate hit does not need it.
+- If it is red, no test runs, no stamp and no certificate is produced, and the run ends with exit 2.
+- The train uses it as the default for `--preflight` with the same time limit; a hanging preflight is killed along with its process group, `--preflight ""` runs without.
+- On push, the process gates run before the preflight.
+
+**Effect.** A broken host shows up as an environment error instead of a red test and uses up no test runs.
+
+**Update.** No steps.
+
+Details: #209
+
+## v2.64.0 — One test path: selection, lanes and certificates from data · 2026-10-10
+
+**Why.** `testing.md` described four rules for test selection and lanes that every project had to build itself. Kenni built `lane.py`, pre-push and selectors on its own, and `certify` ran the full suite there for a one-file change.
+
+**What changes.**
+- `docs/process/testing.local.json` describes per stack the runner, test globs, map, `select`, `merge_suite`, lanes and `certificate_env`; if it is missing only gates run, if it is broken the push is refused.
+- `test_select.py plan|run|check` is the single selection rule for hook, `certify` and manual runs; `check` reports stale pins and map targets.
+- `lane.py` holds the lanes `scoped` and `full` jointly for all stacks of a push; if the lane stays busy, no test runs.
+- Certificates `push` and `merge` apply to an unchanged tree; a merge push without a certificate runs `merge_suite`, otherwise `full` per stack.
+- `pre_push.py` is the single sequence of every push; `PROCESS_SKIP=gates|tests` is the logged owner escape hatch, and `gates.local.json` knows `exec` and `paths`.
+- The train gains `--preflight CMD` and writes the merge certificate after a green suite; `finish.py --tests CMD` with `merge_suite` does the same. **Contract change:** `--tests-passed` writes none.
+
+**Effect.** A project supplies data instead of its own scripts, a one-file change selects only its tests, and a green merge suite is not run again in the push.
+
+**Update.** For Kenni:
+1. Write `testing.local.json` with the stacks, set `unmapped: "skip"` and `merge_suite` to the merge target; reduce `.githooks/pre-push` to `exec uv run scripts/process/pre_push.py "$@"`.
+2. Replace `finish --tests-passed` with `finish --tests <merge_suite>`, otherwise the suite runs in the push.
+
+**Changed sections.** `testing.md` ("One test path"), `train.md`, `failure-catalog.md`, BOOTSTRAP
+
+Details: #206
+
+## v2.63.0 — Plan review is detected, Codex block counts only from score 80 · 2026-10-10
+
+**Why.** In Kenni (#2480, #2483) a plan was changed after its plan pass, the review session started without `--plan-review` and aborted with "no code". Also, a project rule prevented the plan pass as soon as Codex blocked, although the independent score was 75 and only a residual remained.
+
+**What changes.**
+- `dispatch.py start --phase review` starts a plan review itself when the branch changes only plans and bookkeeping and an own tier 2+ plan has no pass for its current text.
+- The state the session reviews is authoritative; if git cannot answer the question, it stays a code review.
+- `--plan-review` still forces the plan review and is needed when a plan already on main is changed on the branch (#204).
+- A block from a second model family counts only from score 80, as with plan reviews (`verification-independence.md`).
+- A `review.local.md` may tighten the round count, not the threshold.
+
+**Effect.** A changed plan is reviewed as a plan instead of aborting as a code review, and a residual below the threshold no longer prevents the plan pass.
+
+**Update.** For Kenni: adjust the own rule that tightens the score threshold.
+
+Details: #203
+
+## v2.62.1 — A valid round with the same number supersedes the old line · 2026-10-10
+
+**Why.** `attest.py` counts round = 1 + blocking rounds, so the round after a pass keeps its number; v2.62.0 nevertheless required a higher one for the superseding full round. In Kenni #2396 an old malformed delta line therefore stayed in place and every push remained refused.
+
+**What changes.** A full round supersedes the old line even with the same number, provided it is a pass and its head descends from the old one.
+
+**Update.** No steps.
+
+Details: #199
+
+## v2.62.0 — Four gate gaps from Kenni operations closed · 2026-10-10
+
+**Why.** The Kenni steward reported four gaps on v2.61: stuck branches after merging main (#2240, #2396), a branch with an active plan rejected by the train, a Spec Kit plan made stale by `attest --with`, and `finish.py --tests` with `shell=True`. The last one triggered the consumers' security scanners.
+
+**What changes.**
+- A superseded REVIEW line no longer blocks when a valid full round of the same work follows with a higher round and a descending head; it becomes a note.
+- The train counts a branch's active plan as its work when the branch adds it or it carries an issue of the branch.
+- A Spec Kit plan no longer goes stale through appended records (REFUTE, ROOT-CAUSE, REVIEW, dated DECISION), an answered `DECISION NEEDED` or archiving.
+- `finish.py --tests` runs without a shell: leading assignments (`FOO=1 make test`) count as environment, and shell operators are rejected before the first step.
+
+**Effect.** Branches no longer get stuck after the merge, the own attestation no longer invalidates a review, and the scanners no longer fire. Multiple test stages therefore belong in a make target or script.
+
+**Update.**
+1. `finish.py --tests` with multiple stages or shell operators: move them into a make target or script.
+2. For Kenni: Kenni maintains the scanner for merge commits in its own `.githooks/pre-commit` itself; the template ships none.
+
+Details: #199
+
+## v2.61.0 — Tier is recomputed, changed values are searched · 2026-10-09
+
+**Why.** In Kenni #2454 a tier 2 plan rewrote the redirect path on which the only SSRF guard depended, without the tier being recomputed; in #2456 plan and review saw only the package list for an image tag, not Makefile, tests and docs, and the train ran red. Also, `template_update.py --help` started a `copier update` in the current checkout, presumably the cause of Kenni #2463.
+
+**What changes.**
+- From tier 2 the plan names the touched boundary and its independent guard (`file:line`); if the changed code is the only enforcement, it is tier 3.
+- `review-checklist.md`, `/plan` and the plan brief in `refute.md` ask this question; if the tier does not hold, the review stops and the work is re-tiered.
+- `/plan` inventories changed versions, paths and constants like a rename and cites the search; the code review searches for the old value itself once more.
+- `template_update.py` reads arguments with argparse: `--help` changes nothing, unknown arguments and a directory without `.copier-answers.yml` are rejected before copier runs.
+
+**Effect.** A change to the only enforcement of a guard is reviewed as tier 3, a value that appears in several places is found before the train, and `--help` is harmless again.
+
+**Update.** No steps.
+
+Details: #197
+
+## v2.60.0 — Mechanical tasks run on Haiku · 2026-10-09
+
+**Why.** Since v2.58.0 `/plan` cuts tasks so that a small model can execute them without a decision of its own; the `mechanical` class nevertheless ran on Sonnet.
+
+**What changes.** In `model-policy.json`, `classes.mechanical.execute` now points to `claude-haiku-5`; `[design]` tasks stay on Opus, review and refute still follow the tier.
+
+**Effect.** `[mechanical]` tasks run on the smaller model with the update.
+
+**Update.** To stay on Sonnet, set in `model-policy.local.json`: `{"classes": {"mechanical": {"execute": "claude-sonnet-5"}}}`.
+
+## v2.59.1 — The train does not retest an already green tree · 2026-10-09
+
+**Why.** In Kenni train 20261009-0935 the bisection saw main+#2445 green; after #2456 was dropped, the rebuild, i.e. the same tree, ran through the suite for another 25 min. A docs-only branch thus held the lane for almost two hours.
+
+**What changes.** `judge` skips the suite for trees that were already green in the same train; the gates still run.
+
+**Update.** No steps.
+
+## v2.59.0 — The train retries a red run cheaply · 2026-10-09
+
+**Why.** The train used to always rebuild a red combined tree and run the whole suite again, even for a deterministic red. In Kenni this cost a second 24-minute run before the drop on a 25-minute `test-merge`.
+
+**What changes.**
+- Red gates run once more on the same worktree, and on green the suite follows; the log states decision and reason.
+- On a red suite, `--retry` runs the project command on the same worktree; without `--retry` it rebuilds as before.
+- `--retry` repeats what failed and what did not run, so stages behind the first red one are not merged untested.
+- If the first run left something git sees, it rebuilds; the suite's own output therefore belongs in the gitignore.
+
+**Effect.** A deterministic red now costs only the retry run of the failures, and the flake protection remains.
+
+**Update.** For Kenni:
+1. Run the suite as `make -k test-merge` so every stage runs once.
+2. Pass `--retry "make test-merge-retry"` via `TRAIN_ARGS` or the `train` target; each stage runs only its failed tests.
+
+Details: #193
+
+## v2.58.0 — A plan is independently reviewed before code is written · 2026-10-09
+
+**Why.** Between plan and execute nobody read the plan independently; the first independent look came with the code review. In Kenni #2454 a tier 2 plan covered all eight ACs and still had two gaps that would only have surfaced after a full execute round.
+
+**What changes.**
+- `review-checklist.md` begins every section with "Plan decides:"; the plan decides there for the touched dimensions, and the code review checks the code against it.
+- Tier 2: A fresh subagent reviews the plan with the plan brief in `refute.md`, and the planner attests with `attest.py --plan-review --commit`.
+- Tier 3: A dedicated plan-review session with a second model family reviews the plan.
+- `dispatch.py chain` queues execute only once every own tier 2+ plan carries a passing plan review for its current text.
+- `/plan` cuts tasks as `[mechanical]` where possible (exact files, contract, test, command); what needs judgment becomes `[design]`.
+- Checks that read `.process-work/` are gates rather than tests behind the tree stamp.
+
+**Effect.** Gaps in the plan surface before the code, and more tasks run on the smallest model. Limit: `chain` acts only on local sessions; after a plan review on another host the steward queues execute itself.
+
+**Update.** For Kenni: Running tier 2+ plans need a plan pass before execute; work whose execute is already running is not affected. The mechanical cell in Kenni's `model-policy.json` can point to a smaller model.
+
+**Changed sections.** `/plan`, `/review`, `workflow.md` (Plan), DoR R3, `tower.md`, `refute.md`, Copilot prompts
+
+Details: #192
+
+## v2.57.1 — Shared files no longer hold up reviewed branches · 2026-10-08
+
+**Why.** A candidate did not board the train if it shared a file with a branch already on board. In Kenni, a whole train run waited on three reviewed branches just because of a shared test, contract document or registry file.
+
+**What changes.** Git merges the batch in boarding order and the full suite runs on the combined tree; only on a real conflict is the later candidate kicked off with `blocked` and rebases.
+
+**Effect.** Branches that change different parts of the same file now ride together. Known limit: if B is removed as the culprit after colliding with C, C still misses the train; candidates that certainly collide still count toward `--min-candidates`.
+
+**Update.** No steps.
+
+## v2.57.0 — Train and sessions no longer wait for pre-pushes · 2026-10-08
+
+**Why.** On 08.10., serial pre-pushes in Kenni held the `scoped` lane all morning. An execute start was rejected for hours, and only one train ran while five candidates with a passed review waited.
+
+**What changes.**
+- The train (`departure`) no longer waits for a busy `scoped` lane; it runs the suite with `nice` on `full`, alongside the short runs.
+- A session start, including execute, is no longer rejected when the `full` or `scoped` lane is busy; only the session's test runs wait at the lane.
+- The gates already run before `planned` in the plan prompt and in `/plan`; `chain` starts no execute while the plan worktree is red and names the reason.
+- A session starts at the origin state: lagging worktrees are fast-forwarded, diverging ones rejected; a review rejects a worktree ahead of origin.
+- After a red batch, the suite on bare main is skipped if the train already saw that tree green (`green-suites`), except before blaming a passenger.
+
+**Effect.** The train runs alongside the pre-pushes, execute starts no longer wait, and plan errors surface before execute. In Kenni, the push failed thirty times per branch on a missing `design-contract:` line.
+
+**Update.** No steps. For Kenni: remove the local steps in `run_issue.sh` (`gate_runner`, pulling up to origin); the train runs without `--force`.
+
+Details: Kenni #2441, #2446
+
+## v2.56.1 — Review bundle no longer breaks the issues gate · 2026-10-08
+
+**Why.** The issues gate read every `.md` in `.process-work/reviews/` as a report, including the gitignored review bundle (`*.bundle.md`), and the push failed because it lacks the `review:` header. In Kenni this happened twice in one day.
+
+**What changes.** Files ignored by git no longer count as reports, and `testing.md` describes what test selection and the lane script should look like.
+
+**Update.** No steps. For Kenni: selection (`Makefile`) and `scripts/lane.py` remain Kenni's code, with test subpackages and one lane hold per push; record the hold time before and after in #184.
+
+Details: #186, #184
+
+## v2.56.0 — Debug method, brainstorming in rounds, verified review blocks · 2026-10-08
+
+**Why.** An unbiased comparison with Matt Pocock's `skills` v1.3.1 and Claude Code's `code-review` plugin showed methods the process lacked. Only those were adopted; no new gates, no new artifacts.
+
+**What changes.**
+- Debugging follows a fixed order (`workflow.md`): red loop, reproduce, falsifiable hypotheses, regression test at the seam, commit naming the confirmed hypothesis.
+- Brainstorm asks questions bundled in rounds, each with a recommendation; with Spec Kit, `/speckit-clarify` records the answers.
+- A blocking finding names its failure scenario; a defect whose path does not run through the change is pre-existing and becomes an issue instead of a block.
+- A fresh process scores every block (0/25/50/75/100); below 80 it becomes a residual finding, and anything linters, type checkers or tests catch never blocks.
+- Each review lens reports in at most about 400 words, most severe first, and ends with "Merge danger".
+- `review-checklist.md` gains "Silent failures", `testing.md` names tautological and internals-bound tests, and `THIRD-PARTY-NOTICES.md` lists the adopted sources.
+
+**Effect.** Debug sessions and reviews follow a fixed method; a block is evidenced rather than assumed, and weak findings no longer hold up the merge.
+
+**Update.** No steps. For Kenni: the review session has a fresh subagent score every block before attesting it (a cheap model suffices); Kenni's own refute panel can become narrower (steward brief, point 2).
+
+## v2.55.0 — Review gate checks content instead of history · 2026-10-08
+
+**Why.** The gate inferred from commit history whether a review still applies, and left reviewed work looking unreviewed after an integration; in Kenni, three works changing the registry sat on one branch. Also, a conflict resolution passed on its own side even when it discarded `main`'s change.
+
+**What changes.**
+- A file at the pushed tip counts as reviewed if its content matches git's merge of the integration branch and the reviewed heads; colliding paths never count as reviewed.
+- A conflict-free rebase or merge of `main` keeps a review with a fork-point base valid (#158), and reviewed works that merge cleanly count as reviewed together.
+- Stricter: every conflict resolution needs a new round, and a commit that resets a reviewed file to `main`'s state is unreviewed.
+- Any git error means "stale" (fail closed); the weaker `--cc` fallback after a failed `merge-tree` is gone.
+- `/review` now says: rebase or merge `main` before round 1; a later conflict-free integration keeps the review.
+
+**Effect.** Only real conflicts now cost a new review round. A verdict takes a median of 0.05 s instead of 25 s, and about 400 lines of gate code plus 28 tests are gone.
+
+**Update.** Requires git 2.38 or newer (`merge-tree --write-tree`). For Kenni: branches with a conflict resolution need a new round; a conflict-free rebase no longer does.
+
+Details: [Plan](docs/analysis/2026-10-07-review-gate-teardown.md) #158, Kenni #2439
+
+## v2.54.2 — Review gate without timeout on large history · 2026-10-08
+
+**Why.** In Kenni, the review gate ran 936 s and was aborted by the gate runner after 600 s; the train stood for hours with four finished candidates.
+
+**What changes.** The stale check asks git each fact only once per run, and an aborted gate names the running and the longest finished phase.
+
+**Effect.** In Kenni, the run on a pushed range of 900 commits dropped from 172 s to 92 s, the stale check from 39 s to 7.5 s. A timeout now reads as a performance problem with a named phase instead of a verdict.
+
+**Update.** No steps. For Kenni: drop the local patch from #2436 to `check_review.py` and `gate_runner.py` with the update (own gate-code changes would otherwise be a tier-3 migration).
+
+Details: #182, Kenni #2436
+
+## v2.54.1 — Commands and prompts state the inventory and REVIEW rule · 2026-10-07
+
+**Why.** The rule "one owner per acceptance criterion" was only in the module docs and the review checklist, so review found violations a round later. The Copilot review prompt and `AGENTS.md` had the `REVIEW` line written by hand, without `base` and `head` from the bundle.
+
+**What changes.** `/execute` and the Copilot execute prompt state the owner rule, and the Copilot review prompt and `AGENTS.md` write the `REVIEW` line with `attest.py`.
+
+**Update.** No steps.
+
+## v2.54.0 — Two fewer gates, one owner per acceptance criterion · 2026-10-07
+
+**Why.** In Kenni, one month had 12 `GRADE` lines against 126 `REVIEW` lines, and what they were meant to measure is already read from the review records by `rounds` and `models`. The `ac-text-drift` gate compared a criterion's text in spec and inventory because both carried it.
+
+**What changes.**
+- The GRADE gate is removed along with `process_kpis.py convergence` and the rework count in `cost`; `workflow.md`, the tasks template and `speckit.md` no longer require `GRADE` lines.
+- The `telemetry` module stays as a cockpit, old lines stay as history, and a manifest with `telemetry: true` stays valid.
+- An acceptance criterion's text has one place: spec or issue until merge, the inventory afterwards; everywhere else only the ID appears.
+- The delivering change writes the inventory entry from the final `AC-n` lines as the last step before the review bundle.
+- `ac-text-drift` is removed; the review checks whether entry and spec match (new question in `review-checklist.md`).
+
+**Effect.** Two fewer gates, and no text lives in two places that can drift apart.
+
+**Update.** No steps. For Kenni: `test_process_kpis_process.py` and `test_human_digest_process.py` expect `check_telemetry.py` and the `convergence` output and must be adjusted; Kenni's own `ac-text-drift` script in `gates.local.json` is untouched.
+
+## v2.53.0 — Leaner review gate: digest and anchor chain removed · 2026-10-07
+
+**Why.** `diff=<sha256>` was `sha256(git diff base head)`, a function of the two SHAs already in the line, and required recomputation, an integrity ledger, a cache and a fetch stamp. The delta anchor chain at tier 3 also gave the gate more code than checking value.
+
+**What changes.**
+- The diff digest, integrity ledger and `PROCESS_REVIEW_INTEGRITY`/`--full` are removed; `attest.py` writes only `base` and `head` and checks the fork point.
+- Delta bundles (`--since`) are a reading aid on every tier, and the verdict always binds the whole branch; `mode=delta` and the tier-3 anchor chain are removed.
+- An empty delta is named as such, a `--since` pointing at no commit and an older delta bundle are refused.
+- A standing block is read at the tip; a block entry that the range deletes no longer stands.
+- Legacy data stays valid: lines with `diff=` and `mode=` are read and the fields ignored, and any line with `base`/`head` counts as a full round.
+
+**Effect.** `check_review.py` shrinks from 3,080 to 2,683 lines; with bundle, `attest` and tests, about 1,450 lines are gone. With an empty delta, the reviewer no longer sees no code while still vouching for the branch.
+
+**Update.**
+1. A branch that is mid review rounds at update time needs a review from the fork point; merged lines stay valid.
+
+Details: [Plan](docs/analysis/2026-10-07-review-gate-teardown.md)
+
+## v2.52.0 — Less process mechanics: only real errors block · 2026-10-07
+
+**Why.** Measured in Kenni, completed works with review fell from 70 (26.08.–08.09.) to 18 (23.09.–07.10.), and the share of blocking reviews rose from 5% to 33%. On 07.10. the process blocked itself at least six times, for instance when `attest` refused two `pass` entries because the line said `round=6` instead of `round=5` (Kenni #2396).
+
+**What changes.**
+- Template updates with release-identical gate code are no longer a tier-3 migration (own changes stay tier 3); `releases.md` recommends updating every two to four weeks.
+- `attest.py` no longer refuses bookkeeping: a too-high `--round` and wrongly numbered `ROOT-CAUSE` lines are only hints, and `--with <report>` commits report and plan lines together with the REVIEW line.
+- Only an error someone will hit may block; wording issues are `nit`, and minor or nit findings yield a `pass` with residual points.
+- From the second block on the same element, the fix session decides between increment and rebuild; after the third, the owner decides once and for good.
+- Answered or struck-through `DECISION NEEDED` lines no longer stop the train, and plan, review and brainstorm sessions also start with a busy `scoped` lane (#177).
+- A push with only process records runs the process gates without a suite; the tower shows `balance` and reports `process-heavy` above 40% process share.
+
+**Effect.** Fewer self-blocks from bookkeeping and wording, and a template update no longer costs tier-3 rounds (v2.51.1 needed three). Cross-model review at tier 3, refute before the first round and the train with the full suite remain.
+
+**Update.** No steps. For Kenni: `review.local.md` §11 currently sends every round after the second to the owner and should instead adopt the single owner decision per cap.
+
+Details: #177, Kenni #2396, #2397, #2416
+
+## v2.51.1 — Strict override guard and worktree fixes · 2026-10-07
+
+**Why.** The guard against `model:`/`effort:` overrides in phase files had to read frontmatter the way Claude Code itself does (#173/#174), and several bugs appeared in Kenni in worktrees, with `say`, in slot counting and with spec plans.
+
+**What changes.** `dispatch` reads phase frontmatter strictly without PyYAML and refuses ambiguous overrides; fixes for worktrees, `say`, slot counting and spec plans come with it.
+
+**Update.** No steps. For Kenni: drop the local deviation from #2393 with the update.
+
+Details: #170, #173, #174, #175, Kenni #2399, #2405, #2411, #2412, #2414
+
+## v2.51.0 — Effort per policy cell, tier-3 review on Opus xhigh · 2026-10-05
+
+**Why.** A cell in `model-policy.json` was just a model name, with no effort and no start command of its own. Also, in Kenni a `model:` override in a command file's frontmatter silently put plans on another model for weeks (#2317, #2299).
+
+**What changes.**
+- A cell in `model-policy.json` is a model name or `{"model": …, "effort": …, "command": …}`; `model-policy.local.json` replaces it entirely.
+- Effort levels are `minimal`, `low`, `medium`, `high`, `xhigh`, `max`.
+- The start command knows `{effort}` and can be set per cell (cell > `phases.<phase>.command` > `command`), for example to run only the tier-3 review on Codex.
+- The tier-3 review runs on `{"model": "claude-opus-5", "effort": "xhigh"}` instead of `claude-fable-5-1`, so the attestation is `single-family`.
+- `dispatch start` refuses if the command file sets `model:` or `effort:` in its frontmatter (`inherit` excepted); a template test keeps all files free of them.
+- Workers get `PROCESS_EFFORT`, reports show the effort, and with `transcripts` in the policy the tower reports model drift.
+
+**Effect.** Model, effort and start command are selectable per task class, tier or phase, a silent model override is no longer possible, and model drift becomes visible.
+
+**Update.**
+1. Projects with their own `command` in the local policy add `--effort={effort}` or set the tier-3 review cell locally; otherwise `dispatch start` refuses.
+2. Clean up command files that set `model:` or `effort:` in the frontmatter.
+
+Details: Kenni #2317, #2299, #2244, #2247
+
+## v2.50.1 — Safe template source, spec tidy without data loss · 2026-10-05
+
+**Why.** `template_update` passed an unchecked source on to Copier (executable with `GIT_ALLOW_PROTOCOL=ext`), and the spec tidy could delete spec folders that code still references (Kenni #2382). The process's rejections also did not say what to do.
+
+**What changes.** `template_update` checks the source against the allowlist, the spec tidy no longer deletes spec folders that are still referenced, and rejections name the way out.
+
+**Update.** No steps.
+
+Details: #166, #167, #168, #169, Kenni #2382
+
+## v2.50.0 — Gate checks the base of a full review round · 2026-10-05
+
+**Why.** Since v2.49.1, `attest.py` and the bundle write a full round only against the fork point, but the gate did not check the base of existing entries (#160). It also checked the template in the working tree instead of the committed state (#161).
+
+**What changes.**
+- A `mode=full` REVIEW entry counts only if its base is the fork point of head and integration branch; a wrong entry is a malformed line.
+- A locally fast-forwarded or forged `main`/`master` does not bypass the check; without an integration ref there is a single message (hard on the integration push).
+- The gate always checks the template at the committed state; `template_verify --ack` works on the working tree, and an ack counts only after it is committed.
+- On macOS, git commands of the template check name the shared bare clone via `--git-dir`, so `safe.bareRepository=explicit` no longer blocks them.
+- The bundle gives an advisory warning "transition table missing": a plan uses state vocabulary without a `## Transitions` section; add own words via `transitions-vocabulary: …` in `review.local.md`.
+- A second hint, "regression pin missing", appears when a delta bundle changes code but no test file.
+
+**Effect.** A forged base no longer counts as a full round; against Kenni's journal (1079 entries), no new hard error arises on main. The effect of the two hints is not yet measured.
+
+**Update.** No steps. Merged legacy entries are not checked; entries outside the pushed range are named in a single summary note.
+
+Details: #160, #161, #163
+
+## v2.49.1 — One merge base or none, template source hardened · 2026-10-05
+
+**Why.** With several merge bases, one was silently chosen (Kenni #2381), and a template source like `--upload-pack=…` reached a git call. Kenni had made local fixes for this in #2352, which are now ported to the current code.
+
+**What changes.** No merge base or several merge bases is now an error, and the template check rejects invalid paths and disallowed sources.
+
+**Update.** No steps. For Kenni: replace the local delta from #2352 with the update (#2383).
+
+Details: #160, #161, Kenni #2352, #2381, #2383
+
+## v2.49.0 — Waiting without polling, tidying reports, model per class · 2026-10-05
+
+**Why.** Kenni holds 58 MB in 983 report files under `.process-work/reviews/`, which the gate reads on every run. `/steward` waited for new reports through a harness-owned monitor, and mechanical subtasks could not be put on a cheaper model selectively (#157).
+
+**What changes.**
+- `tower.py --wait` blocks without model turns until a report with one of the `--states` arrives and prints it as JSON; `/steward` uses it.
+- `--json --section NAME` prints only the named parts of the situation picture.
+- `tidy.py` removes only reports of completed work (last verdict `pass`) that are older than `--days`, not the newest, and not named by any plan or journal.
+- `tidy.py` deletes only via `git rm` reports that are tracked and identical to HEAD; without `--apply` it only lists them with sizes.
+- After its ID, a task carries a class token (`[mechanical]`, `[design]`, or your own from `classes`) that applies before tier and phase; `dispatch.py policy --class C` names the model.
+- Every subagent call names its model, the harness default is not a choice (`tower.md`); review and refute still follow the tier.
+
+**Effect.** Waiting costs no model turns, report folders do not grow without bound, and mechanical subtasks run on the cheaper model. The effect of classes is not yet measurable per class; the per-issue token sum from v2.48 shows only the overall effect.
+
+**Update.** No steps.
+
+Details: #157
+
+## v2.48.0 — Tier-3 follow-up rounds as delta, usage visible · 2026-10-05
+
+**Why.** A tier-3 package downstream needed 5 rounds with 3 review lenses each on full bundles of 10,400–13,100 lines, because tier 3 had no delta (#155). The template check also cloned anew on every run (Kenni #2375).
+
+**What changes.**
+- A tier-3 follow-up round may use a delta bundle if it builds on a full round for exactly this state or a gapless delta chain; otherwise it never counts as a pass.
+- A full bundle is enforced if the delta changes gate code, contract paths, decisions or the tier, or touches a file the anchor report does not name.
+- A review lens reruns in the follow-up round only if it has open findings or names a touched file.
+- `/execute` also checks host capabilities, credentials and integration fixtures named in the plan before the push; whatever cannot be checked is `DECISION NEEDED`.
+- Every report carries a model; `/finish` names the issue's output tokens (policy key `transcripts`) and writes the `done` report itself, and `process_kpis.py cost --issue N` shows them too.
+- The template check uses one filtered clone per process instead of two `ls-remote` calls plus a full clone; offline it still fails hard.
+
+**Effect.** Tier-3 follow-up rounds review the fix instead of over 10,000 lines, per-issue usage is visible, and the template check clones less often. The effect is not yet measured; compare via `process_kpis.py rounds` and the new token numbers on the next tier-3 work.
+
+**Update.** No steps.
+
+Details: #155, Kenni #2375
+
+## v2.47.0 — Fewer review rounds: failure catalog and upfront questions · 2026-10-05
+
+**Why.** Kenni had 386 review entries in three weeks, 38% of them blocks, and tier-3 features needed 3–7 rounds. A second project had 10 blockers: 6 from the first draft, 2 introduced by a fix and 2 found late.
+
+**What changes.**
+- `docs/process/failure-catalog.md` is the single place for failure classes: the six previous ones from `refute.md` plus eleven new ones, each with input shape, test and helper.
+- The design template's threat question applies at tier 3 and at high-risk tier 2 (gate code, data loss, authorization, migration, concurrency).
+- New is the "Transitions" section for state machines, with tests per row class and negative tests (`/execute`); when a fact's computation changes, `/plan` inventories every reader.
+- Round 1 names all blockers; a follow-up round checks the fix, open findings and the fixed failure class everywhere, and requires a full bundle if contract or risk scope changes.
+- At tier 2, the review answers the refuter's questions itself, with a separate refute run only for data loss or concurrency; from tier 3 and for gate code it remains.
+- `process_kpis.py rounds` shows tier, rounds and blockers by origin per work; FINDING lines have the optional field `origin=draft|fix|late`.
+
+**Effect.** Failure classes are asked about in the plan instead of found in the third round, and tier 2 saves its own refute run. The effect is not yet measured; compare via `rounds` on the next comparable deliveries.
+
+**Update.** No steps.
+
+## v2.46.0 — Session context limited to current work · 2026-10-05
+
+**Why.** At startup `process_context.py` read in all plans and specs, including unrelated ones; in the reference project (43 active plans, 91 spec folders) that was most of the context, and the same applied to `rehydrate.py` after compaction.
+
+**What changes.**
+- `process_context.py` shows only the current work in full (via `--issue N`, branch name or issue in the branch) and all other plans and specs as an index; without a match it shows only the index with a hint to `--issue N`.
+- `--all` gives the previous output; `--cost` still measures everything and separates `mandatory` from `available`.
+- After compaction `rehydrate.py` likewise shows only the current work in full, with the rest as at most 10 index lines.
+- `publish_and_prune --stage` refuses forms like `GH-12` instead of guessing the issue.
+- `tools/release.py` runs the full suite in parallel when pytest-xdist is installed (measured 465 s); otherwise it runs serially.
+- doc-drift no longer reports a reference to a missing optional `*.local.*` file as drift.
+
+**Effect.** In the reference project `process_context` drops from 428,644 to about 19,000 characters (−96 %) and `rehydrate` from 84,359 to 6,973 (−92 %). Nothing is silently dropped; the rest stays in the index.
+
+**Update.** No steps.
+
+Details: #140
+
+## v2.45.0 — Tag and release only after green CI, fewer duplicate checks · 2026-10-03
+
+**Why.** Tag and release ran without any suite and could bypass CI. The process also checked some things twice: Linux ran as `portable-smoke` next to the `test` job, and `fix-streak` was recomputed on every gate run.
+
+**What changes.**
+- `portable-smoke` now runs only on macOS and Windows; the `test` job covers Linux.
+- Before tag and release, `tools/ci_evidence.py` requires a successful `push` run of `ci.yml` on `main` for exactly the target commit.
+- `release-tag.yml` (also on `replace`) and `release-publish.yml` check this and now run only from `main`.
+- A non-hexadecimal `sha` aborts instead of silently tagging HEAD.
+- `fix-streak` is no longer a gate; the review bundle carries the hint once per round as a "Fix streak" section, and rules 4 and 6 remain.
+- `tools/release.py` keeps its local run, `--no-suite` stays opt-in, and the remote steps name waiting for CI on `main`.
+
+**Effect.** Tag and release can no longer bypass CI. Dropping the Linux smoke saves about 16 s of runner time plus setup per CI run; only the `::error::` annotation for Linux failures is lost.
+
+**Update.**
+1. If `portable-smoke (ubuntu-latest)` is a required check, remove it from branch protection.
+
+## v2.44.1 — One owner for task sizing and `[P]` · 2026-10-03
+
+**Why.** The docs contradicted each other: `/execute`, `workflow.md`, the tasks template and the Speckit module docs required "one atomic commit per task", while `/plan` and `commits.md` allowed two commits.
+
+**What changes.** Everywhere the rule is now: a task is done when its behavior is green (one or two commits), and `/plan` is the sole owner of `[P]`.
+
+**Effect.** The commit contradiction and the scattered `[P]` rules are gone; there is no new gate and no new phase.
+
+**Update.** No steps.
+
+## v2.44.0 — Avoid errors earlier, without new mandatory steps · 2026-10-03
+
+**Why.** Existing process steps contradicted each other: `/execute` forbade what "Check existing code first" required, the tasks template conflicted with `/plan`, `testing.md` contradicted itself, and the Speckit docs conflicted with a gate that hard-failed on any companion file.
+
+**What changes.**
+- Spec Kit has one task per behavior (test, red, implementation, green); template, gate message, docs and constitution say the same.
+- Existing plans with separate test and implementation tasks still pass the gate, and a story without a test reference still fails.
+- The inventory for rename, remove and move belongs in the plan's tasks; `/execute` only compares the diff against the plan before the push.
+- Before creating or changing a rule, parser or helper, `/execute` reads the existing owner with its callers and tests.
+- The clarification gate blocks only on open markers in `plan.md` and `tasks.md` and on read errors; markers in companion files such as `research.md` are only hints with file and line.
+- E2E by risk instead of count: "One per feature — floor AND ceiling" is removed, and changed critical contracts need a matching proof.
+
+**Effect.** Errors surface in the plan instead of shortly before the push, and companion files no longer block; no mandatory sections, gates or review rounds are added. The savings are expected, not measured.
+
+**Update.** No steps.
+
+## v2.43.2 — Safe automatic template check, verified cleanup · 2026-10-02
+
+**Why.** During automatic provenance rendering, Jinja extensions marked as trusted locally could run before review, and worktree cleanup could remove ignored work created only after the first approval.
+
+**What changes.** Automatic rendering skips tasks and runs without trust, and before a worktree is removed the keep policy is re-checked with fresh records.
+
+**Effect.** Locally trusted extensions no longer run before review, and ignored work created later is preserved. External writes during the check and the git deletion remain non-atomic.
+
+**Update.** No steps.
+
+## v2.43.1 — Docs on verified template updates refreshed · 2026-10-02
+
+**Why.** Overviews and review hints no longer matched the current template.
+
+**What changes.** The English and German overviews (including the German PDF) and the review and tier hints now describe owner confirmation, update provenance, review of the project delta and enforcement migrations.
+
+**Effect.** Docs only, no change to runtime behavior.
+
+**Update.** No steps.
+
+## v2.43.0 — Verified template updates, faster CI · 2026-10-02
+
+**Why.** A template update would otherwise have had to go through review again, including approved template files, although only the project delta is new. CI tests also took 322 seconds.
+
+**What changes.**
+- Both pinned template releases are re-rendered against the trusted source and compared with the project files; lost local customizations remain project delta.
+- A pure, owner-confirmed template update passes without re-reviewing the template files.
+- The project delta needs a fresh, digest-bound Tier 2 review; gate scripts, helpers and configuration remain Tier 3.
+- Own and local files, hooks, Makefiles and changed or deleted tests stay in the project review; forged provenance grants no exception.
+- CI tests run with two workers, grouped by test file.
+- Audit leftovers: `prime` reads inbox content in all three harness adapters, the language checks cover every module, and the gate workflow names its required check.
+
+**Effect.** The review effort of an update is limited to the project delta; CI time drops from a measured 322 to 183 seconds.
+
+**Update.**
+1. Enter baseline and target as release tags or full git SHAs; unpinned values are refused.
+2. Follow the update order from `docs/process/releases.md` and attach the computed delta and behavior notes.
+3. Commit the owner confirmation.
+
+## v2.42.0 — Downstream fixes in the integration path, worker channels · 2026-10-02
+
+**Why.** After earlier releases, residual defects remained in integration and review in the reference project (#142). On Windows, the output encoding of gate subprocesses could also differ from the runner's.
+
+**What changes.**
+- Integration and review are hardened: integration ranges fail closed, review coverage is pooled, and non-fast-forward pushes are protected.
+- New: an owner-approved transition from brainstorm to plan, diagnosis of conflicting or dead workers, and additive project-local tower findings.
+- `finish` works safely across worktrees and archive batches, and the model policy determines phase selection.
+- The train's push timeout is configurable (default 30 minutes), so long pre-push gates are possible (#83).
+- Worker channel events and the steward restart feedback are documented (#139).
+- Gate subprocesses emit UTF-8.
+
+**Effect.** Integration aborts on an unreadable state instead of guessing, and long gates no longer fail on the push timeout.
+
+**Update.**
+1. Update bundle producer, attestation writer and review gate together; new delta attestations carry `mode=delta`, existing full-review records stay valid.
+2. Fetch the remote default branch before a protected push; non-fast-forward integration pushes need a named owner exception.
+
+Details: #142, #83, #139
+
+## v2.41.0 — Merged worktrees are removed, never work · 2026-10-01
+
+**Why.** In the reference project, 111 dispatch worktrees stayed behind after merge, each with its own venv and `node_modules`, about 57 GB in total. The disk filled up and all sessions stalled.
+
+**What changes.**
+- The train removes the worktrees of branches it merged after a successful push and names every worktree it keeps, with the reason.
+- `tidy.py` lists merged worktrees with their size, and `tidy.py --apply` removes them.
+- A worktree is kept if it might carry work, for example through uncommitted, untracked or non-regenerable ignored files, or a running session.
+- `dispatch.py start` refuses at 90 % disk usage and names the cleanup command (`PROCESS_DISK_LIMIT_PCT`).
+
+**Effect.** Leftovers no longer fill the disk, and no unsaved work is lost.
+
+**Update.** No steps.
+
+Details: #136
+
+## v2.40.1 — Hints name the project's hook installer · 2026-10-01
+
+**Why.** The reference project manages its hooks in `.githooks/` without the git-hooks module, yet the hook doctor and docs sent it to `scripts/process/install_hooks.py`; `tower.md` also still advised putting `model-policy.json` in `.process-owned`, which has been obsolete since v2.39.0.
+
+**What changes.** The repair hint names the project's own installer (`scripts/install_hooks.sh`, a `make hooks` target, otherwise `git config core.hooksPath .githooks`), and `tower.md` points to `model-policy.local.json`.
+
+**Update.** No steps.
+
+Details: #134
+
+## v2.40.0 — Last project deviations reviewed and adopted into the template · 2026-10-01
+
+**Why.** After porting to v2.39.0 the reference project had no owned files left, but four non-owned files still carried local changes that a future update would have overwritten.
+
+**What changes.**
+- doc-drift now checks the path in `` `path/file.py::symbol` `` pointers, so stale pointers show up.
+- The owner digest lists every `<gate>-waived:` line, including the waiver of a project-own gate (`gates.local.json`).
+- `check_architecture` and `check_issues` declare PyYAML (PEP 723).
+- The reference project's `doc-drift-base` marker was not adopted because it is unused there and was already removed once in review as a bypass.
+
+**Effect.** The reference project no longer has to carry local changes to these files. Both scripts also run standalone without PyYAML installed.
+
+**Update.** No steps. If you have symbol pointers in checked documents, you may find dead ones after the update.
+
+## v2.39.0 — Local extension points and a guard before main · 2026-09-30
+
+**Why.** In the reference project 14 files sat in `.process-owned`, each one a manual port on every release. An inventory sorted every deviation.
+
+**What changes.**
+- `docs/process/gates.local.json` holds own gates (`{name: {module, command}}`); a module gate may be replaced by one of the same name, a core gate may not.
+- `docs/process/model-policy.local.json` is layered over `model-policy.json` mapping by mapping.
+- `docs/process/review.local.md` carries own review dimensions that only sharpen the review, never weaken it.
+- A push to `main` needs the route of the train or `finish.py` (`PROCESS_MERGE_ROUTE`) or a named, logged owner exception.
+- A `block` in the pushed range holds up the merge push until a later `pass` for the same work exists (standing block).
+- `attest.py --archive` moves the own plan to the archive together with the `pass`, and `--commit` turns that into a commit of only those paths.
+
+**Effect.** The template adopts the upstream candidates and offers three local files for the rest; afterwards `.process-owned` can be empty. A push to `main` now only works via a named route.
+
+**Update.** No steps.
+
+## v2.38.0 — Earlier rebuild question, measured evidence, release as a script · 2026-09-30
+
+**Why.** A retrospective in the reference project showed: a guard needed four review rounds although all findings from round 2 on shared one cause. Red evidence and ROOT-CAUSE lines were written by hand, with errors, and the release consisted of a dozen manual steps.
+
+**What changes.**
+- The fix-streak check flags the second `fix` commit on the same file and requires a DECISION "increment or rebuild" before the next patch.
+- After the findings, the refuter writes a PATTERN line with the common cause and the one owner that closes all findings, or "no common cause".
+- `red_evidence.py` runs a pytest selection against the old state and the working tree; only a test that failed in the run counts as "red before".
+- `red_evidence.py` writes the journal block and, with `--cause`, the ROOT-CAUSE line, and refuses if no test was red before or anything is red afterwards.
+- `tools/release.py` does the local part of a template release in one run; `--check` reports every place not on the version.
+- Known, not implemented: the REFUTE line is not yet generated from the refute report (#124).
+
+**Effect.** The rebuild question comes after the second hit instead of the fourth, evidence is measured instead of typed, and a release is one script call.
+
+**Update.** No steps.
+
+Details: #124
+
+## v2.37.0 — Path names read with `-z`, "unreadable" is not "empty" · 2026-09-29
+
+**Why.** Without `-z`, git quotes names containing umlauts, newlines or tabs, and the quoted name matches no file. In the reference project the train read an archived Tier 2 plan this way as Tier 0, and the branch entered without review.
+
+**What changes.**
+- All process tools (train, tower, review bundle, `dispatch`, `template_update` and others) read path names with `-z`.
+- `template_update` now sets own files and searches conflict markers name-safely; before, an update overwrote own files with an umlaut in the name.
+- If git cannot deliver a list, it no longer counts as empty.
+- The review gate then counts every active plan, `finish` blocks, and the train does not let the branch enter.
+- tower reports a branch with an unreadable file list as `paths-unknown`, and `dispatch` then answers "cannot say".
+- Known, not fixed: some places still read a git error as "no plans" or size 0, but none decides a merge.
+
+**Effect.** No branch enters without review because a plan under a special-character name was unreadable. An update no longer overwrites own files with an umlaut in the name.
+
+**Update.** No steps.
+
+## v2.36.0 — Workers ask the steward, tower sees unanswered questions · 2026-09-29
+
+**Why.** In the reference project a worker's question to the owner sat unanswered in chat for six hours. Also, git quotes plan names with umlauts, so `finish` reported a Tier 2 plan as done without review and the review gate let the merge push of a Tier 3 plan through without evidence.
+
+**What changes.**
+- The steward is the decision partner; the worker asks the owner only about product principles or destructive steps.
+- A question goes into the plan as `DECISION NEEDED` with `blocked`, never into chat; the policy names the live channel (`decision_channel`).
+- Before `pushed`, `/execute` has four new duties, including a `ROOT-CAUSE` line checked with `attest.py --dry-run` after a blocked round.
+- tower reports a live worker that has printed nothing for 30 minutes as `waiting-for-input` (question routed) or `question-unrouted`.
+- tower reads paths NUL-separated and prints names that are not UTF-8 masked.
+- Known, not fixed: other tools still read paths without `-z` (follow-up in v2.37.0), and a worker on another host shows no screen here.
+
+**Effect.** Questions land where someone reads them, and tower shows an unanswered one immediately. Plans with umlauts in the name no longer bypass review.
+
+**Update.** No steps.
+
+## v2.35.0 — The train knows the issue of a package branch · 2026-09-29
+
+**Why.** A branch named after a larger issue (`<epic>-<package>-…`) but reviewed under its package's issue never entered the train, because its name carries only the epic's number.
+
+**What changes.**
+- One place answers "which issue does the branch belong to", and the train asks it on entry, for the branch's plans and for the merge's `Closes #N`.
+- An issue reported in the worker report itself does not count.
+- After the merge, the train removes the entries and dead records of the branch's issues; a reused branch name inherits no old issues.
+- Code that reads the issue map and records creates no directory, queries no worker and skips broken entries.
+- Known, not fixed: a branch merged outside the train keeps its entries until its issue is reassigned.
+- Known, not fixed: a second, still running attempt on another branch loses its assignment once the issue is merged.
+
+**Effect.** Package branches enter the train and their merge closes the right issue; before, such a branch entered but closed nothing.
+
+**Update.** No steps.
+
+## v2.34.0 — One refuter from Tier 2: owner check first, then edge cases · 2026-09-28
+
+**Why.** Refute was mandatory only for gate code but has proven itself beyond that: in the stale check every round found real errors, about half of them from the previous fix round. The costliest blockers in the reference project came from a second owner of a rule.
+
+**What changes.**
+- Refute is graded by tier: Tier 0 none, Tier 1 optional, Tier 2 one run before the first review round (fix round: regression tests), Tier 3 and gate code again after every fix round.
+- The refuter checks in fixed order: owner check, error read as success, edge cases and a sample of the evidence; pre-existing findings become issues.
+- A second owner blocks on every tier unless a `DECISION` in the plan gives the reason.
+- The review bundle warns when a plan at Tier 2 or higher carries no REFUTE line of its own.
+- Only one owner now reads a plan's tier and waiver, the same for bundle and gate.
+
+**Effect.** Errors surface before rather than in the fix round, and duplicate owners are looked for first; the price is one extra refute run at Tier 2. Known, not fixed: the delta refusal still counts design documents and plans with a review waiver, and `dispatch` still reads the tier with its own logic.
+
+**Update.** No steps.
+
+## v2.33.1 — Discard detection in the stale check, also within other reviews' range · 2026-09-27
+
+**Why.** A review in the reference project showed that another review's `base..head` range excused more than the content this review had seen, so a merge there could discard reviewed code unnoticed.
+
+**What changes.** The stale check again tests merges within another review's range for discards; if base or head is missing, everything since the branch point counts.
+
+**Effect.** Discarded reviewed code is caught even within another review's range; five edge cases remain open and are documented.
+
+**Update.** No steps.
+
+## v2.33.0 — Evidence, train verdict and dispatch hardened · 2026-09-27
+
+**Why.** Five process gaps came from reference-project findings: evidence lines were read inconsistently, the train's suite verdict and stale check had gaps, a train merge did not close out the work, and `dispatch` was weakly guarded.
+
+**What changes.**
+- One place defines where REVIEW, ROOT-CAUSE and REFUTE lines live; examples, comments and placeholders do not count.
+- A red make call stays red, and "not present" applies only to the suite's own file or target.
+- If the suite is missing only in the combined tree, that is blamed on the passenger who removed it.
+- A train merge archives its own finished plans and closes this repository's issues via `Closes #N`; `plan-stays-active:` keeps a plan open.
+- In the stale check, code counts as reviewed if another code review saw it within its `base..head` range; plan reviews cover no code.
+- `dispatch`: `say` checks delivery, `chain` advances phases from reports, the queue is locked and deduplicated, and workers run under `nice` (`worker_nice`).
+
+**Effect.** attest, bundle and gate evaluate evidence consistently, and a train merge leaves no finished plans or open issues behind. Every finding is backed by a test that fails against the previous version.
+
+**Update.** No steps.
+
+## v2.32.5 — Stale check judges by a pinned table · 2026-09-26
+
+**Why.** After the third patch to the stale check, trains were rejected daily in the reference project; the check now gathers facts from git and judges by a pinned table.
+
+**What changes.** For clean merges, the stale check counts only what goes beyond git's own merge, and stays fail-closed on missing data or hidden changes.
+
+**Effect.** Clean merges no longer reject the train, and malicious resolutions and discarded reviews do not slip through.
+
+**Update.** No steps.
+
+## v2.32.4 — REFUTE line as evidence, more precise suite detection · 2026-09-25
+
+**Why.** A review of the refute port in the reference project blocked, and a fresh agent then found three majors with about 165 scenarios.
+
+**What changes.** A REFUTE line needs `round=<n>:`, content and its plan's work id, and the train's "suite not present" detection is narrower.
+
+**Effect.** Only genuine REFUTE evidence counts, and a stacked plan's line covers no other plan.
+
+**Update.** No steps.
+
+## v2.32.3 — The train takes only branches reviewed at their head · 2026-09-25
+
+**Why.** A branch a train had already merged showed up as ready to board the next train after new commits, because the old `done` report and the old REVIEW pass still applied.
+
+**What changes.** A branch boards the train only if its REVIEW pass covers the branch head and no unreviewed code follows it.
+
+**Effect.** New commits after a train merge do not reach the next train without a new review.
+
+**Update.** No steps.
+
+## v2.32.2 — Refute of the residual-finding fixes from v2.31.6/7 · 2026-09-25
+
+**Why.** A fresh agent tested the fixes from v2.31.6/7 with 27 scenarios; 8 failed.
+
+**What changes.** The train's stale check and suite detection are corrected for renames, clean merges, missing prerequisites and further make variants.
+
+**Effect.** False alarms on clean merges disappear, and the train report stays complete.
+
+**Update.** No steps.
+
+## v2.32.1 — The REFUTE warning withstands its own refute · 2026-09-25
+
+**Why.** The rule from v2.32.0 was applied to its own implementation right away: a fresh agent found three majors and three minors in the REFUTE warning.
+
+**What changes.** The REFUTE warning now also detects files moved away, more gate paths (incl. `Makefile`, `.github/workflows/`) and non-ASCII names, and ignores example lines.
+
+**Effect.** The warning can be bypassed neither by renames nor by example lines.
+
+**Update.** No steps.
+
+## v2.32.0 — Refute before the first review for gate code · 2026-09-25
+
+**Why.** Gate changes needed four or more review rounds in the reference project; a refute pass found more in two runs than three review rounds before.
+
+**What changes.**
+- If a diff changes `scripts/process/`, `.githooks/` or the gate configuration, a fresh agent attacks it before the review sees it.
+- `docs/process/refute.md` (new) describes timing, role, a copyable brief and how to handle findings.
+- The result is recorded as a line `REFUTE work=<id> round=<r>: …` in the plan.
+- The review bundle warns on gate code without a REFUTE line, but does not block.
+- `review.md` and `verification-independence.md` point to the new rule.
+
+**Effect.** Gate code is attacked before review; every finding becomes a regression test or a DECISION. For now the warning is only a hint.
+
+**Update.** No steps.
+
+## v2.31.7 — "Suite not present" under `make train` too · 2026-09-25
+
+**Why.** v2.31.6 detected "suite not present" only under `make:`; under `make train` the suite's make reports as `make[1]:`, and the case would have been red again.
+
+**What changes.** The make level directly below the train's now counts; deeper levels stay red.
+
+**Update.** No steps.
+
+## v2.31.6 — Four residual findings in the train, tidy and the stale check · 2026-09-25
+
+**Why.** The review of v2.31.5 left four residual findings open.
+
+**What changes.** The train detects "suite not present" more narrowly and retries flakes after a drop, `tidy` survives unreadable files, and the stale check detects discarded conflict resolutions.
+
+**Effect.** A failing test no longer looks like a missing suite, and a discarded review does not slip through.
+
+**Update.** No steps.
+
+## v2.31.5 — `stale_review` checks the rule instead of the symptom · 2026-09-25
+
+**Why.** Round 3 of the review in the reference project showed: after `commit --amend` or a rebase, the reviewed state is no longer in the history, and the check let that through.
+
+**What changes.** The stale check verifies the rule instead of the symptom: a reviewed state outside the history is invalid, everything unreviewed counts, and git errors lead to rejection.
+
+**Effect.** A merged-in side branch, an amend next to the reviewed state and a merge with `-s ours` are now caught. The findings of an independent refute agent are in place as regression tests.
+
+**Update.** No steps.
+
+## v2.31.4 — Journal lines from two branches merge without conflict · 2026-09-25
+
+**Why.** In the reference project, two reviewed branches blocked each other in the train over REVIEW lines appended to the same daily file.
+
+**What changes.** `.process-work/journal/.gitattributes` sets `*.md merge=union`, so the merge keeps both lines; a project's own root `.gitattributes` is untouched.
+
+**Update.** No steps.
+
+## v2.31.3 — One reviewer set across all review rounds · 2026-09-25
+
+**Why.** A new reviewer in a later round found old findings, and each of them became its own round.
+
+**What changes.** `review.md` requires a fixed reviewer set per piece of work and lets follow-up rounds check only the fix and its surroundings; older findings become their own issues.
+
+**Update.** No steps.
+
+## v2.31.2 — Conflict resolutions in merge commits count as unreviewed · 2026-09-25
+
+**Why.** Round 2 of the review in the reference project: the fix from v2.31.0 (`--no-merges`) missed a conflict hunk resolved by hand in a merge commit after the review.
+
+**What changes.** The stale check reads merges via their combined diff (`--cc`): a conflict resolution counts as the work's code, a clean merge does not.
+
+**Update.** No steps.
+
+## v2.31.1 — Round counter counts rounds instead of block lines · 2026-09-25
+
+**Why.** The first review of the round counter showed: several reviewer lenses of one round were counted multiple times.
+
+**What changes.** `attest` counts unique blocked rounds instead of block lines, and `--exception` writes the `REVIEW-EXCEPTION` line even when no rule applies.
+
+**Effect.** Several lenses of one round no longer count as several rounds, and exceptions always remain countable.
+
+**Update.** No steps.
+
+## v2.31.0 — Train distinguishes flake, missing suite and foreign passengers · 2026-09-25
+
+**Why.** Findings from the reference project (trains 31 and 34): a bisection over a flake blames an uninvolved party, a passenger bringing a new make target turned the tree red, and the merge push rejected every train with several passengers.
+
+**What changes.**
+- If the combined tree is red, it runs a second time; if it is then green, the train reports FLAKY and merges.
+- If the suite is missing on a tree, that tree is not comparable instead of red: main does not count as red, no prefix is blamed.
+- Every red verdict logs the system load, and a rejected push says whether origin or the local pre-push hook rejected it.
+- The review gate counts only non-merge commits descending from the reviewed state as "code after the review".
+- `tidy` lists spec directories the pruner would reject, with the missing part as an owner decision; `--apply` no longer hands them over.
+
+**Effect.** A flake no longer blocks the train, fellow passengers no longer cause rejection, and `tidy --apply` hands over nothing the pruner rejects.
+
+**Update.** No steps.
+
+## v2.30.0 — Fewer review rounds: count, cause first, then fix · 2026-09-24
+
+**Why.** The analysis in the reference project showed that work with three or more rounds rose from 11 % to 23 %, mainly through fixes that created the next blocker themselves and an inflated round counter. Work of 3,000–5,500 lines added to this.
+
+**What changes.**
+- `attest` counts the round itself (1 plus recorded blocks) and rejects a deviating claim; plan reviews count separately (`--plan-review`).
+- Before every round after a block, `attest` requires one line `ROOT-CAUSE work=<id> round=<r>: …` per block in the journal or plan.
+- `--exception` lifts both rules and writes a countable `REVIEW-EXCEPTION` line.
+- The review bundle warns from 30 files or 1,500 lines (`PROCESS_REVIEW_MAX_FILES`/`_LINES`).
+- Per `review.md`, a fresh session takes over the fix when the same spot blocks twice.
+
+**Effect.** A fix round starts only with a documented cause, the counter shows real rounds, and oversized work stands out early.
+
+**Update.** No steps.
+
+## v2.29.0 — Only a branch's own work releases it · 2026-09-24
+
+**Why.** In the reference project, a template-update branch boarded the train while its own review was still running, because it only archived other people's long-approved plans.
+
+**What changes.**
+- In the train, an archived plan releases a branch only if it is the branch's own.
+- A branch that changes `scripts/process/` or `.githooks/` boards, regardless of tier, only with a REVIEW pass for its own work.
+- The review bundle marks invalid evidence as VOID: identical before/after pairs, identical images and known empty states under `docs/process/void-evidence/`.
+- `model-policy.json` knows `env` globally and per phase (e.g. `CLAUDE_CODE_SUBAGENT_MODEL`), valid only for worker sessions.
+- The tmux runner no longer removes policy variables together with the steward's `CLAUDE_CODE_*` variables.
+- `tower.md` names the attest commit on the work branch as the way to deliver a verdict from the cloud.
+
+**Effect.** Tidying up other people's plans no longer releases a branch, empty evidence does not count, and policy variables reach the workers.
+
+**Update.** No steps.
+
+## v2.28.2 — The merge suite is each stack's full suite · 2026-09-24
+
+**Why.** In the reference project, the train ran only the backend suite; a CSS change broke a frontend pin, and nothing before the merge ran it.
+
+**What changes.** `--suite` is now the full suite of every stack (`train.md`, `testing.md`), and `train.py run` without `--suite` warns on stderr that only the process gates run.
+
+**Update.** No steps.

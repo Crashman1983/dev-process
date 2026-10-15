@@ -1,134 +1,135 @@
-# Was ist neu in dev-process
+# What is new in dev-process
 
-Für alle, die wissen wollen, was eine neue Version bringt, ohne die Technik
-im Detail zu kennen. Je Version ein paar Sätze: was sich für ein Projekt
-ändert, das die Vorlage nutzt, und was es davon hat. Die vollständigen
-technischen Einzelheiten stehen im [CHANGELOG](CHANGELOG.md).
+For anyone who wants to know what a new version brings without knowing the
+technical details. A few sentences per version: what changes for a project
+that uses the template, and what it gains from that. The full technical
+details are in the [CHANGELOG](CHANGELOG.md).
 
-## v2.73.0 — Ein zweites Modell prüft mit, und Projekte ohne bezahltes CI sind vorgesehen
+Deutsche Fassung: [NEWS-DE.md](NEWS-DE.md).
 
-Ist auf dem Rechner die Codex CLI installiert, kann die Vorlage Arbeit und
-Prüfungen jetzt auch an Codex-Modelle geben. Eine solche Prüfung zählt
-vollwertig: Sie wird gegen den geprüften Stand abgeglichen und erst dann
-festgehalten. Ein Modell einer anderen Familie gilt nur dann als
-unabhängiger Prüfer, wenn feststeht, dass es nicht auch den Code geschrieben
-hat. Ist Codex einmal nicht erreichbar, nennt die Vorlage den Ausweg und
-hält fest, warum er nötig war. Pläne sagen außerdem je Arbeitspaket, ob ein
-kleineres Hilfsmodell es übernimmt, und die Vorlage misst, ob sich das
-lohnt. Projekte ohne bezahltes GitHub-CI wählen jetzt `manual`: Die
-Prüfschritte bleiben als Knopf zum Selbststarten, und verlässlich prüft der
-Push.
-Eigene Regeln eines Projekts zu den Prozess-Dokumenten stehen jetzt in
-eigenen Ergänzungsdateien statt in den Dokumenten der Vorlage. Ändert eine
-neue Version eine Stelle, auf die so eine Ergänzung aufbaut, meldet die
-Prüfung das, bis jemand nachgesehen hat, ob beides noch zusammenpasst.
+## v2.73.0 — A second model helps with reviews, and projects without paid CI are supported
 
-## v2.72.0 — Was ein Projekt gelernt hat, kommt zurück in die Vorlage
+If the Codex CLI is installed on the machine, the template can now hand work
+and reviews to Codex models as well. Such a review counts in full: it is
+checked against the state that was reviewed and only then recorded. A model
+from another family counts as an independent reviewer only if it is certain
+that it did not also write the code. If Codex cannot be reached, the template
+names a way out and records why it was needed. Plans now also say, for each
+work package, whether a smaller helper model takes it on, and the template
+measures whether that pays off. Projects without paid GitHub CI now choose
+`manual`: the checks stay available as a button you start yourself, and the
+push is what reliably checks.
+A project's own rules for the process documents now live in separate
+addition files instead of in the template's documents. If a new version
+changes a place that such an addition builds on, the check reports it until
+someone has looked at whether the two still fit together.
 
-Kenni, das erste Projekt auf dieser Vorlage, hatte in den letzten Wochen
-einiges selbst verbessert. Vieles davon steckt jetzt in der Vorlage, damit
-das Projekt nicht davonläuft und andere Projekte es auch haben. Dazu gehört
-eine Bestätigung, dass Tests gelaufen sind, die bei Projekten mit
-Testgruppen genau sagt, welche liefen; dazu Zeitmessungen je Testgruppe, Pläne, die jeder
-Aufgabe die genaue Fundstelle mitgeben, sodass ein kleines Modell weniger
-sucht (gemessen: rund ein Drittel der Schritte), und Lehren aus dem Betrieb.
-Nach dem Update laufen die Tests vor dem ersten Push einmal neu. Zwei
-größere Teile warten noch auf eine Entscheidung des Owners.
+## v2.72.0 — What a project has learned flows back into the template
 
-## v2.71.0 — Eine Prüfung zählt nur mit Beleg
+Kenni, the first project on this template, had improved a lot on its own
+over the last few weeks. Much of that is now in the template, so the project
+does not drift away and other projects get it too. This includes a
+confirmation that tests have run, which for projects with test groups says
+exactly which ones ran; timings for each test group; plans that give every
+task its exact location, so a small model has to search less (measured:
+about a third of the steps); and lessons from day-to-day operation. After
+the update, the tests run once more before the first push. Two larger parts
+are still waiting for a decision by the owner.
 
-Eine Prüfung gilt jetzt erst als bestanden, wenn ihre Belege vorliegen. Zu
-jeder Anforderung muss ein Test genannt sein, der fehlschlagen würde, wenn
-das Verhalten kaputtgeht. Änderungen an den Prüfwerkzeugen selbst müssen
-vorher gezielt angegriffen worden sein. Wo ein zweites KI-Modell als
-Gegenleser vorgesehen ist, muss es gelaufen sein. Einen Plan prüft kein
-kleineres Modell als das, das ihn geschrieben hat. Wer bewusst
-darauf verzichtet, schreibt einen Satz mit Grund dazu; so bleibt sichtbar
-und zählbar, wo abgekürzt wurde. Anlass war eine Nacht, in der sechs
-Änderungen glatt durchgingen und eine Nachprüfung sechs schwere Fehler fand.
+## v2.71.0 — A review only counts with evidence
 
-## v2.70.0 — Wissen, das schon da ist, wird gefunden
+A review now counts as passed only once its evidence is in. For every
+requirement, a test must be named that would fail if the behavior broke.
+Changes to the review tools themselves must have been attacked on purpose
+beforehand. Where a second AI model is meant to act as a counter-reader, it
+must have run. A plan is never reviewed by a smaller model than the one that
+wrote it. Anyone who skips this on purpose writes one sentence giving the
+reason; that way it stays visible and countable where corners were cut. The
+trigger was a night in which six changes went through smoothly and a
+follow-up review found six serious errors.
 
-Viele Prüfrunden scheitern, weil ein Agent etwas Bestehendes nicht kannte:
-eine Einstellung, einen Hintergrunddienst, eine Stelle, die dieselben Daten
-liest. Projekte können solche Dinge jetzt automatisch aus ihrem Code
-auflisten lassen, und jeder Plan bekommt die Einträge, die ihn betreffen,
-gleich mitgeliefert. Wer etwas ändert, das andere lesen, muss nachweisen,
-dass er alle Leser gesucht hat. Und es gibt ein Protokoll wie dieses hier
-auch für Projekte: Jede Änderung, die ein Nutzer bemerkt, bekommt ein paar
-verständliche Sätze, gesammelt in einer Datei „Was ist neu“.
+## v2.70.0 — Knowledge that already exists gets found
 
-## v2.69.0 — Veraltete Pläne fallen auf
+Many review rounds fail because an agent did not know about something that
+already existed: a setting, a background service, another place that reads
+the same data. Projects can now have such things listed automatically from
+their code, and every plan gets the entries that concern it delivered right
+along. Anyone who changes something that others read must prove that they
+searched for all the readers. And there is now a log like this one for
+projects too: every change that a user notices gets a few understandable
+sentences, collected in a "What is new" file.
 
-Bevor ein Agent mit der Umsetzung beginnt, prüft der Prozess jetzt, wie alt
-der Plan ist: Wie weit ist der Code seitdem gelaufen, und wie viele dieser
-Änderungen betreffen genau die Dateien, die der Plan nennt? Anlass war ein
-Plan, der über 1000 Änderungen alt war. Vorerst wird nur gemessen; später
-kann der Prozess warnen oder anhalten. Außerdem werden Umstellungen vorher in
-einer frischen Umgebung durchgespielt, Releases unterscheiden reine Updates
-von Umstellungen mit Projektschritten, und ein Arbeiter, der lange stumm
-bleibt, weckt den Koordinator.
+## v2.69.0 — Outdated plans stand out
 
-## v2.68.0 — Jede Prüfung wird gemessen
+Before an agent starts implementing, the process now checks how old the plan
+is: how far has the code moved on since then, and how many of those changes
+affect exactly the files the plan names? The trigger was a plan that was more
+than 1000 changes old. For now this is only measured; later the process may
+warn or stop. In addition, migrations are rehearsed beforehand in a fresh
+environment, releases distinguish plain updates from migrations that need
+project steps, and a worker that stays silent for a long time wakes the
+coordinator.
 
-Jede automatische Prüfung schreibt jetzt auf, was sie kostet und was sie
-findet. So lässt sich belegen, welche Prüfungen sich lohnen. Eine Prüfung
-kann zur Probe nur beobachten, statt zu blockieren — aber nur mit Zustimmung
-des Owners und nie bei den Kernprüfungen. Ein Wächter macht eine Lockerung
-selbständig rückgängig, sobald sie Schaden anrichtet. Dazu kommen eine
-wöchentliche und eine monatliche Auswertung.
+## v2.68.0 — Every check is measured
 
-## v2.67.0 — Der Prozess kann sich selbst verbessern
+Every automatic check now records what it costs and what it finds. This
+makes it possible to show which checks are worth it. A check can be put on
+trial so that it only observes instead of blocking, but only with the
+owner's consent and never for the core checks. A watchdog undoes such a
+relaxation on its own as soon as it causes harm. A weekly and a monthly
+report are added.
 
-Wiederkehrende Engpässe werden zu begrenzten Versuchen: eine Annahme, vorher
-festgelegte Erfolgskriterien, ein Probelauf mit Ablaufdatum und eine
-Entscheidung, die nicht trifft, wer die Änderung gebaut hat. Gleichzeitig
-misst der Prozess jede Arbeit vom Start bis zur Auslieferung: wie lange daran
-gearbeitet und wie lange gewartet wurde und was sie gekostet hat.
+## v2.67.0 — The process can improve itself
 
-## v2.66.0 — Weniger Verwechslungen bei Plänen
+Recurring bottlenecks become limited experiments: an assumption, success
+criteria set in advance, a trial run with an expiry date, and a decision
+that is not made by whoever built the change. At the same time, the process
+measures every piece of work from start to delivery: how long it was worked
+on, how long it waited, and what it cost.
 
-Koordinator und Merge-Zug erkennen jetzt nach derselben Regel, welche Pläne
-zu einer Arbeit gehören. Vorher konnte eine Arbeit an einer fremden Prüfung
-hängenbleiben oder eine nötige Prüfung übersehen. Fällt eine Planprüfung
-durch oder ist sie unklar, beginnt die Umsetzung nicht.
+## v2.66.0 — Fewer mix-ups with plans
 
-## v2.65.0 — Ein kaputter Rechner wird erkannt
+The coordinator and the merge train now use the same rule to recognize which
+plans belong to a piece of work. Before, a piece of work could get stuck on
+someone else's review or miss a review it needed. If a plan review fails or
+is unclear, implementation does not start.
 
-Vor jedem Testlauf prüft der Prozess, ob der Rechner bereit ist. Ein
-defekter Rechner meldet sich dann als solcher, statt als scheinbar
-fehlgeschlagene Tests, die niemand verursacht hat.
+## v2.65.0 — A broken machine is recognized
 
-## v2.64.0 — Ein einheitlicher Testablauf
+Before every test run, the process checks whether the machine is ready. A
+faulty machine now reports itself as such, instead of showing seemingly
+failed tests that nobody caused.
 
-Welche Tests eine Änderung braucht, folgt aus einer Zuordnung im Projekt
-statt aus Handarbeit. Schwere Testläufe kommen sich nicht mehr in die Quere,
-und ein Stand, der schon geprüft wurde, wird nicht noch einmal getestet. Das
-spart Wartezeit bei jedem Push und jedem Merge.
+## v2.64.0 — One consistent test flow
 
-## v2.63.0 — Weniger unnötige Prüfrunden
+Which tests a change needs now follows from a mapping in the project instead
+of from manual work. Heavy test runs no longer get in each other's way, and
+a state that has already been checked is not tested again. This saves
+waiting time on every push and every merge.
 
-Der Prozess erkennt selbst, wann ein Plan geprüft werden muss, statt
-versehentlich eine Codeprüfung ohne Code zu starten. Ein Einwand eines
-zweiten Modells hält die Arbeit nur noch auf, wenn er ernst genug ist.
+## v2.63.0 — Fewer unnecessary review rounds
 
-## v2.62.0 — Vier Lücken aus dem Alltag geschlossen
+The process now recognizes by itself when a plan needs to be reviewed,
+instead of accidentally starting a code review where there is no code. An
+objection from a second model only holds up the work if it is serious
+enough.
 
-Vier Fehler in den automatischen Prüfungen, die im täglichen Betrieb eines
-Projekts aufgefallen waren, sind behoben. Unter anderem blieben gültige
-Prüfungen nicht mehr wegen einer alten Zeile hängen, und Sicherheitsscanner
-schlagen beim Abschluss einer Arbeit nicht mehr an.
+## v2.62.0 — Four everyday gaps closed
 
-## v2.61.0 — Die Einstufung wird nachgerechnet
+Four errors in the automatic checks, noticed in a project's daily
+operation, are fixed. Among other things, valid checks no longer got stuck
+because of an old line, and security scanners no longer raise an alarm when
+a piece of work is finished.
 
-Die Prüfung fragt zuerst, ob eine Änderung wirklich so harmlos ist, wie
-angegeben. Wird ein Wert geändert, etwa eine Version oder ein Pfad, muss
-jede Stelle, die ihn verwendet, nachweislich gefunden werden. Die
-Update-Hilfe startet bei `--help` nicht mehr versehentlich ein Update.
+## v2.61.0 — The classification is recalculated
 
-## v2.60.0 — Einfache Aufgaben auf dem kleinen Modell
+The review first asks whether a change is really as harmless as stated. If a
+value is changed, such as a version or a path, every place that uses it must
+demonstrably be found. The update helper no longer starts an update by
+accident when run with `--help`.
 
-Genau beschriebene Aufgaben ohne eigene Entscheidung erledigt jetzt ein
-kleines, günstiges Modell. Aufgaben, die ein Urteil brauchen, bleiben beim
-großen Modell. Das senkt die Kosten, ohne die Qualität der Entscheidungen
-anzutasten.
+## v2.60.0 — Simple tasks on the small model
+
+Precisely described tasks that need no decision of their own are now handled
+by a small, cheap model. Tasks that need judgment stay with the large model.
+This lowers costs without touching the quality of the decisions.
