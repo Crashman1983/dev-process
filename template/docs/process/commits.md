@@ -62,6 +62,9 @@ equivalent routes:
   merge" or a fast-forward-only setting) is the `--ff-only` equivalent. Where the
   platform enforces squash merges, atomicity shifts up one level: one logical
   change per PR. **Archive the plan in the last commit on the branch, before merge.**
+  Without a CI adapter neither route carries a hosted job: on the PR route
+  too, the gate run is the pre-push hook on the gate host, and the platform's
+  merge button passes no hook — it is no merge route.
 
 **Archiving the plan is a merge step, not an afterthought.** The last commit on
 the feature branch (before merge) moves the plan file from `.process-work/plans/`

@@ -72,7 +72,10 @@ Dispatching is harness-plumbing around that artifact — pick what exists:
 
 - **Claude Code:** `claude -p "$(cat /tmp/bundle.md)"` (a fresh process — not
   the implementing session).
-- **Codex CLI:** `codex exec "$(cat /tmp/bundle.md)"` — this is the cross-model
+- **Codex CLI:** `timeout 1800 codex exec "$(cat /tmp/bundle.md)" < /dev/null`
+  (stdin closed: an open stdin left Codex waiting for input — downstream, two
+  sessions hung about two hours each; the bound is `gtimeout` on macOS, or the
+  harness's own deadline) — this is the cross-model
   path when the implementer was a Claude, and vice versa. A dispatched Codex
   cell runs read-only and reports only (no channel, no attest.py — the
   steward attests from its output); the end-to-end path with attestation is
@@ -285,7 +288,10 @@ enforces what a language-agnostic gate honestly can, and no more:
     stands at head where its runner collects it, not switched off (the
     project declares its test files: `review_evidence.python_files`,
     `python_classes`, `test_files`; `skipped ac-trace` where the criteria live
-    outside the plan); `AC-<n>: unproven` refuses the pass;
+    outside the plan); `AC-<n>: unproven` refuses the pass. A criterion a
+    `DoD-deviation: open AC-<id>` keeps open, or one struck with its reason
+    (`AC-<id>: struck — <reason>`, or `dropped`), needs no line — a plan
+    strikes only its own criteria, a spec's only the spec;
   - a plan-review pass names its concrete model, of no lower class
     (`review_evidence.ranks`) than the plan session's — the newest `planned`
     report, else the plan's `plan-session model: <id>` line (`skipped

@@ -104,6 +104,9 @@ def test_open_question_keeps_a_branch_off_the_train(render, tmp_path):
     _git(out, "checkout", "-q", "main")
     by = {c["branch"]: c for c in json.loads(_train(out, "plan", "--json").stdout)["candidates"]}
     assert not by["asked"]["eligible"] and "open DECISION NEEDED" in by["asked"]["reasons"][0]
+    # #235: the refusal quotes the line and names both answer forms
+    reason = by["asked"]["reasons"][0]
+    assert "drop the flag?" in reason and "`(answered <date>)`" in reason and "`DECISION <date> <who>: …`" in reason
     _git(out, "checkout", "-q", "asked")
     a.write_text(a.read_text().replace("DECISION NEEDED 2026-09-21 asked: drop", "DECISION 2026-09-21 owner: drop"))
     _git(out, "commit", "-q", "-am", "answered")

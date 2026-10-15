@@ -52,6 +52,7 @@ authorization, and invalidation/cleanup cases:
 
 - AC-1: When …, the system shall …
 - AC-2: …
+- AC-3: struck — <why it was cut> (a cut criterion keeps its id and its reason; a bare strike-through cuts nothing)
 
 ## Alternatives considered
 The paths not taken, one line each, with the reason — enough that the next

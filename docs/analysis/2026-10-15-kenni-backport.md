@@ -1,6 +1,6 @@
 # Plan: Kenni-Rückport I
 
-Datum: 2026-10-15 · Issues: #226, #234, #235, #221 (Anker), Teile von #232 · Tier: 3 (Gate-Code: `certificate.py`, `train.py`, `finish.py`, `test_select.py`, `testing_config.py`, `attest_evidence.py`, `train.py`-Meldung) · Release: reines Update
+Datum: 2026-10-15 · Issues: #226, #234, #235, #221 (Anker), Teile von #232 · Tier: 3 (Gate-Code: `certificate.py`, `train.py`, `finish.py`, `test_select.py`, `testing_config.py`, `attest_evidence.py`, `dispatch.py`, `check_design_contracts.py`, `rehydrate.py`, `process_kpis.py`, CI-Workflow) · Release: reines Update
 
 ## Anlass
 
@@ -96,3 +96,31 @@ Die Einordnung jedes Hunks (Port, verallgemeinert, lokal, überholt) ist in der 
 ## Unabhängige Durchsetzung
 
 `check_review`, `merge_route` und `pre_push` bleiben, wie sie sind. Ohne `merge_scope` ist die Naht verhaltensgleich: Die Evidenz ist die Suite allein, der Hash bleibt gleich, und vorhandene Zertifikate und Memos gelten weiter. Mit `merge_scope` wird es strenger, weil ein unbekannter Scope kein Zertifikat ergibt.
+
+## Plan-Review Runde 1 — Änderungen
+
+Ergebnis: Block mit einem Fund ab 80, dazu vier Majors und weitere Minors. Die Naht D1 hält, und vorhandene Zertifikate bleiben gültig.
+
+- **P1 Codex-Beispiele (BLOCKER).** `< /dev/null` und `timeout` kommen nur in das Shell-Beispiel (`verification-independence.md`), mit dem Hinweis auf `gtimeout` unter macOS. Eine Policy-Zelle ist ein argv ohne Shell. `tower.md` sagt deshalb: Der detached-Runner von dispatch schließt stdin selbst, und eine tmux-Zelle braucht ein Wrapper-Skript.
+- **P2 Gestrichene ACs (D6).**
+  - Gestrichen ist eine AC nur mit Grund: `AC-<id>: struck — <Grund>` oder `dropped`. Ein bloßes `~~AC-3~~` streicht nichts.
+  - Gelesen wird nur aus Plan und Spec am Head. Bericht-Zeilen zählen nicht, weil die Soll-Liste nur Plan und Spec liest.
+  - Ein Plan streicht nur ACs, die nicht in der Spec stehen. Eine Spec-AC streicht nur die Spec.
+  - Owner ist `required_criteria`.
+- **P3 Stufen-Vertrag (D2).** Gilt `--absolute-git-dir` aus dem Arbeitsverzeichnis der Suite, nie das gemeinsame Verzeichnis. Jeder Lauf löscht vor der Auswahl `stages` und alle `*.time` und schreibt `stages` vor der ersten Stufe. `merge_scope` muss für einen Baum überall dieselbe Antwort geben.
+- **P4 Migration für Kenni**, in dieser Reihenfolge:
+  1. Update mit den Einträgen in `.process-owned`.
+  2. Die fünf Naht-Dateien und `process_kpis.py` aus dem neuen Render übernehmen. Sie sind gleich dem Kenni-Port, nur ohne dessen Kommentare.
+  3. Die Zeilen aus `.process-owned` streichen.
+
+  Das ist ein optionaler Aufräumschritt. Für alle anderen Projekte bleibt das Release ein reines Update. Lokal bleiben Kennis Selektor-Tests (`merge_stage_select`, nightly).
+- **P5** `testing.md` beschreibt Quarantäne und `unmapped: skip` als Muster eines Projekts. Das Template liefert keine Quarantäne.
+- **P6** Der Push-Stempel trifft nach dem Update einmal nicht, weil die Konfiguration jetzt `merge_scope: null` trägt. Das ist sicher, nicht verhaltensgleich, und steht im CHANGELOG.
+- **P7** `_suite_key` hasht den vorhergesagten Scope. Das ist ein Leser, wie der Push: Das Memo gilt für den Baum, den der Selektor jetzt sähe. Geschrieben wird nur über `run_evidence`.
+- **P8** `workflow.md` (Plan) bekommt Pakete und Anker. Die Zeile `Execution: delegate | retain-context` bleibt bei Kenni und wartet auf D8.
+- **P9** Der Verweis in `lane.py` zeigt auf „Test lanes are a shared resource“.
+- **P10** Der Owner der stale-Warnung ist `dispatch.stale_minutes`, weil dispatch die Policy besitzt. Kenni bekommt die Änderung als Delta für das eigene `dispatch.py`.
+- **P11**
+  - `.gitattributes` liegt je Verzeichnis: `.process-work/` für `/inbox.md` und `design-contracts/` für `*.notes.md`.
+  - Die Doku zur Inbox sagt: Ein Union-Merge kann eine schon triagierte Zeile zurückbringen. Wer triagiert, löscht die Zeile nach dem Merge erneut.
+  - `concurrency` bricht auf `main` nie ab.

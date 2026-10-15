@@ -1166,6 +1166,63 @@ ein Wächter-Test gegen doppelte Klammern ohne Leerzeichen in Python-Vorlagen.
 Wer v2.27.1 oder v2.28.0 installiert hat und am Push scheitert: auf v2.28.1
 aktualisieren, `v2.28.1`.
 
+**v2.72.0 — Kenni-Rückport I: Merge-Scope im Zertifikat, Stufenzeiten, Plan-Anker, gestrichene ACs, Betriebslehren (#226, #234, #235, #221).** Plan: `docs/analysis/2026-10-15-kenni-backport.md`. Tier 3, weil Gate-Code betroffen ist. Reines Update; für Kenni gibt es einen optionalen Aufräumschritt. Vom Owner am 2026-10-15 freigegeben.
+
+Anlass: Der Owner will Kennis Änderungen so weit wie möglich zurück im Template, damit Kenni nicht davonläuft. Ein Render des Templates mit Kennis Antworten fand 27 abweichende Template-Dateien. Sieben davon trug Kenni als eigenen Gate-Code in `.process-owned`, und das machte jedes Template-Update zu Tier 3. Dieses Release holt alles zurück, was keine Owner-Entscheidung braucht.
+
+- **Merge-Scope im Zertifikat (#226, aus Kenni #2587, #2603, #2604):**
+  - **Konfiguration:** `testing.local.json` kennt `merge_scope`, ein argv, dessen stdout die Stufen nennt, die `merge_suite` laufen lässt.
+  - **Ein Owner:** `certificate` ist der einzige Owner der Merge-Evidenz. Sie besteht aus der Suite plus `scope=<Stufen>`.
+    - Ein engerer Lauf erfüllt nie einen volleren Push.
+    - Ein unbekannter Scope zertifiziert nichts.
+    - Schreiber (`train`, `finish --tests`) lesen den Scope aus dem Lauf (`run_evidence`) und rechnen nie neu.
+    - Der Leser (`test_select`, Push) fragt den Selektor.
+  - **Memo:** Das Memo des Zugs trägt den Scope.
+  - **Ohne `merge_scope`** ist die Evidenz wie bisher die Suite allein, und vorhandene Zertifikate gelten weiter.
+- **Stufen-Vertrag und Stufenzeiten (Kenni #2586):**
+  - **Vertrag:** Eine stufenweise Merge-Suite hinterlässt in `<git-dir>/merge-suite/` die Datei `stages` und je Stufe `<stufe>.time` mit `t0 t1 exit` (`testing.md`, „Stages“).
+  - **Zug:** Er sammelt die Zeiten in `phases.jsonl` (`stages`: grün, rot, übersprungen).
+  - **Auswertung:** `process_kpis.py train-phases` zeigt je Stufe den letzten Zug, Median, Maximum, Übersprünge und rote Läufe.
+  - Ohne Stufen-Dateien ändert sich nichts.
+- **Kleine Ports:**
+  - **`stale_minutes`:** Ein ungültiger Wert wird gemeldet statt still verworfen.
+  - **Design-Contract-Notizen (Kenni #2588):** Sie gehen in `<surface>.notes.md`, mit `merge=union`.
+  - **Inbox:** `.process-work/inbox.md` wird mit `merge=union` gemergt.
+  - **CI-Workflow:** Er bricht ältere Läufe auf Branches ab, nie auf `main`.
+  - **`rehydrate`:** `check=False` an zwei Stellen.
+- **Docs und Befehle aus Kenni:**
+  - **Test-Lanes:** zwei Lanes und begrenztes Push-Warten mit Exit 75. Das ersetzt den veralteten Satz „one lock per host“. Der Verweis in `lane.py` stimmt wieder.
+  - **Weitere Test-Regeln:** die Kosten von `unmapped: skip`; die Worker-Zahl gehört in den argv des Runners, nie in `addopts`; Port und Temp-Verzeichnis je Worker; die Quarantäne als Daten; die Geräte-Matrix läuft nachts.
+  - **`train.md`:** Der Gate-Runner startet über `gate_invoke`.
+  - **`commits.md`:** Ohne CI-Adapter gibt es keinen gehosteten Job.
+  - **Geplanter Wochenlauf:** Sperre, Deadline und nur eigene Branches.
+  - **`/plan` und `workflow.md` (#221):** kohärente Pakete und Anker je Task. Die Messung dort: Median 53 statt 183 Turns, 25 % statt 42 % Suche.
+  - **`/execute`:** Turns für Edits.
+  - **`/finish`:** `--tests` mit genau dem String aus `merge_suite`; `--tests-passed` zertifiziert nichts.
+  - **`/steward`:** Die Suite kommt aus `merge_suite`.
+  - **`/review`:** `--with <report>` im Attest-Beispiel.
+  - **Quick:** eine beobachtbare Satz-Beschreibung, der Endzustand der Daten, Eskalation bei einer Designwahl und bei parallelen Subagenten.
+- **Gestrichene ACs (#234, Kenni #2606):** `AC-<id>: struck — <Grund>` oder `dropped` nimmt eine AC aus der Testpflicht. Ein bloßes Durchstreichen ohne Grund streicht nichts. Ein Plan streicht nur eigene ACs, keine aus der Spec.
+- **Betriebslehren (#235):**
+  - **Codex:** Das Shell-Beispiel schließt stdin und hat ein Zeitlimit. Eine Policy-Zelle ist ein argv ohne Shell: Der detached-Runner schließt stdin selbst, eine tmux-Zelle braucht ein Wrapper-Skript.
+  - **DECISION NEEDED:** Die Ablehnung im Zug zitiert die Zeile und nennt beide Antwortformen. `/plan` und `/execute` sagen: Wer antwortet, setzt die Marke.
+- **Verhaltensänderung:** Der Push-Stempel trifft nach dem Update einmal nicht, weil die Konfiguration jetzt `merge_scope` trägt. Ein Push läuft dann einmal neu.
+- **Nicht enthalten, wartet auf Owner-Entscheidungen:**
+  - der Codex-Harness aus Kennis `dispatch.py` (#175): Ist ein Codex-Review beratend oder attestierbar?
+  - Kennis `/execute`-Regel „Übergabe oder Kontext behalten“: Sie kehrt die Template-Regel um.
+- **Später:**
+  - die Pflicht-Deklaration im Design-Contract-Gate;
+  - `due_measurements` mit lokalen Daten;
+  - `ci.github: manual`;
+  - die Sprachwahl als Copier-Antwort;
+  - Kennis Stufenwahl (#232, braucht die gemessene Leser-Karte).
+- **Für Kenni (optional, in dieser Reihenfolge):**
+  1. Update auf v2.72.0, noch mit den Einträgen in `.process-owned`.
+  2. `certificate.py`, `testing_config.py`, `test_select.py`, `train.py` und `finish.py` durch den neuen Render ersetzen. Sie entsprechen dem Kenni-Port, ohne dessen Kommentare. `process_kpis.py` kommt mit dem Update.
+  3. Die fünf Zeilen aus `.process-owned` streichen.
+
+  Für `dispatch.py` sollte Kenni das Delta der stale-Warnung übernehmen. `dispatch.py` und `tower.md` bleiben bis zum Codex-Port Eigen-Dateien. Kennis Selektor- und Nightly-Tests bleiben lokal, die Naht-Tests sind jetzt Template-Tests (`tests/test_merge_scope.py`).
+
 **v2.71.0 — Nachweise vor dem Pass: Cross-Model, Gate-Code-Refute, ein Test je AC, Klasse des Plan-Reviewers (#225).** Plan: `docs/analysis/2026-10-14-review-evidence.md` nach drei Plan-Review-Runden. Tier 3, weil Gate-Code betroffen ist (`attest.py`, neues `attest_evidence.py`, `check_review.py`, `dispatch.py`). Migrations-Release. Vom Owner am 2026-10-14 freigegeben. Port von Kennis lokaler Umsetzung (kenni#2602), damit Kennis Patch an der Template-Datei `attest.py` entfällt.
 - **Anlass:** Kenni hat in einer Nacht sechs Tier-2-Branches gemergt, alle mit einem Pass in Review-Runde 1. Ein Audit fand danach sechs Major-Fehler, die das Review übersehen hatte. Vier davon waren Tests, die nicht rot werden können. Den Gate-Code-Refute hatten 4 von 4 Gate-Code-Branches ausgelassen, den Cross-Model-Lauf gab es ohne Hinweis nicht. Beides hat vorher nur gewarnt.
 - **`attest_evidence.py` (Kern), ein Owner:** `gather()` liest jeden Nachweis am attestierten Head, `decide()` ist eine reine Entscheidungstabelle. `attest.py` ruft die Prüfung nach `build_line` auf. Eine `--exception` nennt die übergangenen Nachweise in ihren `overrides`.

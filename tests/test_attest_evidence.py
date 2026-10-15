@@ -621,3 +621,25 @@ def test_a_parametrized_id_may_hold_commas(ev_mod):
     mod, _out = ev_mod
     assert mod.claimed_tests("tests/a.py::test_x[1, 2], tests/a.py::test_y") == [
         ("tests/a.py", "test_x"), ("tests/a.py", "test_y")]
+
+
+def test_a_criterion_struck_with_a_reason_needs_no_test(ev_mod):
+    """#234 (Kenni #2606): a struck or prose-only criterion still demanded a test."""
+    mod, _out = ev_mod
+    req = mod.required_criteria
+    assert req("AC-1 AC-2\nAC-2: struck — merged into AC-1\n", "") == {"1"}
+    assert req("AC-1 AC-3\n- AC-3: dropped: the owner cut it\n", "") == {"1"}
+    # no reason, a placeholder reason, a bare strike-through: still required
+    assert req("AC-1\nAC-1: struck\n", "") == {"1"}
+    assert req("AC-1\nAC-1: struck — <reason>\n", "") == {"1"}
+    assert req("~~AC-1~~ dropped\n", "") == {"1"}
+    # a plan line cannot quietly drop a criterion its spec still names; the spec can
+    assert req("AC-4: struck — not needed\n", "- AC-4: answers\n") == {"4"}
+    assert req("", "- AC-5: logs\nAC-5: struck — owner decided on 2026-10-15\n") == set()
+
+
+def test_a_struck_criterion_end_to_end(repo):
+    plan = repo / ".process-work/plans/2026-10-14-widget.md"
+    plan.write_text(PLAN + "- AC-2: When y, the widget shall log.\n\nAC-2: struck — logging moved to #8\n")
+    _git(repo, "commit", "-qam", "docs: strike AC-2")
+    assert _attest(repo, "--with", _report(repo)).returncode == 0

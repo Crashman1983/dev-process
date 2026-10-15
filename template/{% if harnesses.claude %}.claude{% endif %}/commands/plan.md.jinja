@@ -112,14 +112,28 @@ and test for each spec risk, the test per acceptance criterion. Every
 signature, schema or API the plan cites is checked against the code
 (`file:line`), not recalled. No "n/a" rows: name only what the change touches.
 
-**Cut tasks for the smallest model.** Every decision the plan takes is one
-an executor does not have to: the best task is `[mechanical]` — exact files,
-the signature or contract to implement, the test to write with what makes it
-red, the command that proves it — and runs on the policy's mechanical cell, a
-small model (`docs/process/tower.md`, "Model by task class"). A task that
-still needs a judgment is `[design]` and names that judgment in one line;
-everything around it stays mechanical. Splitting a design task off its
-mechanical rest is cheaper than running the whole on the large model.
+**Plan coherent work packets for the smallest suitable model.** Every
+decision the plan takes is one an executor does not have to. Classify a task
+`[mechanical]` when behaviour and interfaces are decided — exact files, the
+signature or contract to implement, the test with what makes it red, the
+command that proves it — and it runs on the policy's mechanical cell, a small
+model (`docs/process/tower.md`, "Model by task class"). A `[design]` task names
+its remaining judgment in one line; separate that judgment from the
+mechanical rest where this reduces work. Choose coherent packets, not a fresh
+agent per tiny step: a packet split finer than its context costs more briefing
+than it saves.
+
+**Every task carries its anchors, so execute does not search.** A small
+execute model spends most of its turns finding code and re-running tests
+(measured downstream: 52 % of tool calls were `grep`/`sed`/`cat` slices,
+30 % test runs, 9 % edits; with anchored tasks the median run took 53 turns
+instead of 183, and the search share fell to 25 %, #221). The plan pays that
+search once, on the planning model. Each task names: the file, function and
+`file:line` range it changes, with the current excerpt quoted when the edit is
+non-trivial; the one narrow command that proves it (`pytest path::name`,
+`vitest run path`) and what is red before and green after; for a new
+interface or a tricky edit, the signature or a test skeleton. Anchors are
+measured on the plan's base (`file:line`), not recalled.
 
 **A plan is reviewed before `planned` (Tier 2+).** Commit the plan, then
 build its bundle (`uv run scripts/process/make_review_bundle.py --plan <slug> --plan-review
@@ -151,7 +165,7 @@ after its pass. Where the review phase runs on another host, push the branch
 first; the steward then queues execute after the pass. Dispatch queues no
 execute for a Tier 2+ plan without a clearing plan pass.
 
-When the plan is committed, run the gates (`uv run scripts/process/gate_runner.py`) and fix in the plan what it turns red — a plan declaration a gate misses turns every execute push red, and dispatch queues no execute while they are red. Then `uv run scripts/process/report.py planned --issue N` (`/report`) — one line to the tower. An open question for the owner goes into the plan as `DECISION NEEDED <date> <you>: <question> — options: …; recommendation: …` plus `report.py blocked`; the steward relays it and writes the answer back as a `DECISION` line.
+When the plan is committed, run the gates (`uv run scripts/process/gate_runner.py`) and fix in the plan what it turns red — a plan declaration a gate misses turns every execute push red, and dispatch queues no execute while they are red. Then `uv run scripts/process/report.py planned --issue N` (`/report`) — one line to the tower. An open question for the owner goes into the plan as `DECISION NEEDED <date> <you>: <question> — options: …; recommendation: …` plus `report.py blocked`; the steward relays it and writes the answer back as a `DECISION` line. Whoever answers marks the question too — `(answered <date>)` before its colon, or the `DECISION` line in its place: an answer below an unmarked question leaves it open, and the train refuses the branch.
 
 **Open the `## Decisions` ledger in the plan** (`journal-state-plans.md`,
 Plans): one `DECISION <date> <who>: <what> — because <why>` line per choice

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Test lanes: one visible, bounded queue per host — instead of agents in
 parallel worktrees thrashing one CPU, or one agent sitting blind in an hour's
-wait (`docs/process/testing.md`, "A lane is held briefly, and once").
+wait (`docs/process/testing.md`, "Test lanes are a shared resource").
 
     lane.py run [--lane NAME] [--wait SECONDS] [--label TEXT] [--no-nice] -- CMD...
     lane.py wait [--lane NAME] [--wait SECONDS] [--quiet]   # until free, run nothing

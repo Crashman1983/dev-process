@@ -305,6 +305,33 @@ def _planned_model(root: Path, issues: set[int]) -> str | None:
     return None if model in ("", UNMEASURED) else model
 
 
+# a criterion struck on purpose, with its reason (#234): `AC-3: struck — <reason>`
+# or `dropped`; listed, boxed or bold like a criterion line; a bare strike-through
+# (`~~AC-3~~`) names no reason and strikes nothing
+STRUCK_LINE = re.compile(
+    r"^[ \t]*(?:[-*+][ \t]+)?(?:\[[ xX]\][ \t]+)?(?:\*\*)?" + _AC
+    + r"(?:\*\*)?[ \t]*:(?:\*\*)?[ \t]*(?:struck|dropped)\b[ \t]*[—–:-][ \t]*"
+    r"(?!<|TODO\b|…|\.\.\.)\S",
+    re.MULTILINE | re.IGNORECASE)
+
+
+def struck(text: str) -> set[str]:
+    """The criteria a text strikes, each with a reason."""
+    return {ac_key(m) for m in STRUCK_LINE.finditer(text)}
+
+
+def required_criteria(plan: str, spec: str) -> frozenset[str]:
+    """The criteria a code-review pass traces: every id the plan or its spec names,
+    less those a `DoD-deviation: open` keeps open and those struck with a reason.
+    A plan strikes only its own criteria: one the spec still names stays required
+    unless the spec strikes it (#234 plan review: a plan line must not quietly drop
+    a spec criterion)."""
+    plan, spec = _EXAMPLE_SPAN.sub(" ", plan), _EXAMPLE_SPAN.sub(" ", spec)
+    in_spec = {ac_key(m) for m in AC_ID.finditer(spec)}
+    named = {ac_key(m) for m in AC_ID.finditer(plan)} | in_spec
+    return frozenset(named - held_open(plan) - struck(spec) - (struck(plan) - in_spec))
+
+
 def held_open(plan: str) -> set[str]:
     """Criteria a `DoD-deviation: open AC-<id>` line keeps open on purpose — the
     train's grammar (`train.DOD_DEVIATION`, `_HOLDS`); they have no test to name."""
@@ -670,9 +697,7 @@ def gather(root: Path, *, work: str, ids: set[str], tier: int, verdict: str, ind
         skips=_skips([own], skip_ids), refute=_refuted([own], plan_ids),
         report_refute=_refuted(report_texts, plan_ids),
         plan_state=state, plan_rel=rel, plan_gate_code=plan_names_gate_code(plan_read),
-        plan_acs=frozenset(ac_key(m) for m in AC_ID.finditer(
-            _EXAMPLE_SPAN.sub(" ", plan_read + "\n" + readable(spec))))
-        - held_open(plan_read),
+        plan_acs=required_criteria(plan_read, readable(spec)),
         plan_session=session, plan_session_source=source,
         has_reports=bool(reports), claims=claims, test_status=status)
 
