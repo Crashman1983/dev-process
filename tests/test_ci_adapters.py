@@ -40,11 +40,14 @@ def test_github_manual_renders_the_workflows_for_by_hand_runs_only(render, tmp_p
     for name in ("process-gates.yml", "owner-digest.yml", "process-kpis.yml"):
         assert _triggers(out, name) == ["workflow_dispatch"], name
     assert not (out / "scripts/process/setup_branch_protection.sh").exists()
+    # and no workflow names the script it does not render (#242)
+    assert "setup_branch_protection" not in (out / ".github/workflows/process-gates.yml").read_text()
 
 
 def test_github_true_keeps_its_hosted_triggers(render, tmp_path):
     out = render(tmp_path, {"project_name": "d", "modules": {"telemetry": True}})
     assert _triggers(out, "process-gates.yml") == ["pull_request", "push"]
+    assert "setup_branch_protection.sh sets" in (out / ".github/workflows/process-gates.yml").read_text()
     for name in ("owner-digest.yml", "process-kpis.yml"):
         assert _triggers(out, name) == ["schedule", "workflow_dispatch"], name
 

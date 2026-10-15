@@ -23,7 +23,7 @@ concurrency:
   cancel-in-progress: {% raw %}${{ github.ref != 'refs/heads/main' }}{% endraw %}
 jobs:
   # job id = the required-status-check context; must match what the docs tell
-  # adopters to require (and what setup_branch_protection.sh sets): process-gates
+  # adopters to require{% if ci.github is sameas true %} (and what setup_branch_protection.sh sets){% endif %}: process-gates
   process-gates:
     name: process-gates
     runs-on: ubuntu-latest

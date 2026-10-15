@@ -2133,7 +2133,9 @@ def test_a_suite_that_writes_into_the_tree_certifies_nothing(render, tmp_path):
     assert r.returncode == 0, r.stdout + r.stderr
     assert _find_merge_certificate(out, "touch generated.txt") is None
     logs = sorted((out / ".git/process-train").glob("*.log"))
-    assert "the run changed the worktree — no merge certificate" in logs[-1].read_text()
+    text = logs[-1].read_text()
+    assert "the run changed the worktree — no merge certificate" in text
+    assert "not clean (generated.txt)" in text  # named, so it can be ignored or cleaned (downstream #2542)
 
 
 def test_the_suite_defaults_to_the_configured_merge_suite(render, tmp_path, tmp_path_factory):
