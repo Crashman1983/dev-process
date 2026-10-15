@@ -290,10 +290,10 @@ enforces what a language-agnostic gate honestly can, and no more:
     `python_classes`, `test_files`; `skipped ac-trace` where the criteria live
     outside the plan); `AC-<n>: unproven` refuses the pass. A criterion a
     `DoD-deviation: open AC-<id>` keeps open needs no line. One struck with
-    its reason (`AC-<id>: struck — <reason>`, or `dropped`) needs no test,
-    but the report confirms the strike (`AC-<id>: struck`), so a strike
-    added after the plan review is one the reviewer saw — a plan strikes
-    only its own criteria, a spec's only the spec;
+    its reason (`AC-<id>: struck — <reason>`, or `dropped`, lower case) needs
+    no test, but the report confirms the strike (`AC-<id>: struck`, naming no
+    test), so a strike added after the plan review is one the reviewer saw —
+    a plan strikes only its own criteria, a spec's only the spec;
   - a plan-review pass names its concrete model, of no lower class
     (`review_evidence.ranks`) than the plan session's — the newest `planned`
     report, else the plan's `plan-session model: <id>` line (`skipped

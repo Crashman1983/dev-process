@@ -176,8 +176,9 @@ def load_policy(root: Path) -> dict:
     quiet = data.get("stale_minutes")
     if quiet is not None and (isinstance(quiet, bool) or not isinstance(quiet, int) or quiet <= 0):
         raise SystemExit(f"dispatch: {POLICY} `stale_minutes` must be a positive integer, got {quiet!r}")
-    if not isinstance(data.get("phases") or {}, dict):
-        raise SystemExit(f"dispatch: {POLICY} `phases` must be an object")
+    for key in ("phases", "tiers"):
+        if not isinstance(data.get(key) or {}, dict):
+            raise SystemExit(f"dispatch: {POLICY} `{key}` must be an object")
     for ph, row in (data.get("phases") or {}).items():
         if isinstance(row, dict):
             _check_env(row.get("env"), f"phases.{ph}.env")

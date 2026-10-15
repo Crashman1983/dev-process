@@ -149,3 +149,12 @@ Ergebnis: widerlegt mit einem Major und fünf Minors. Ohne `merge_scope` blieb a
 - **R5:** Eine Policy als JSON-Array oder mit `phases` als Liste ließ den Tower abstürzen. `load_policy` lehnt beides jetzt mit `SystemExit` ab. Ohne Policy-Datei gibt `stale_minutes` still None zurück.
 - **R6:** Ein Satzzeichen galt als Grund einer Streichung. Der Grund braucht jetzt ein Wort.
 - **Hinnahme:** `_suite_key` hasht jetzt `suite.strip()`. Ein Zug mit `--suite` von der Kommandozeile, deren String Leerzeichen am Rand hat, findet sein altes Memo einmal nicht. Das steht im CHANGELOG.
+
+## Refute Runde 2 — Änderungen
+
+Ergebnis: widerlegt mit zwei Minors und einer Regression, die fail-closed bleibt. P13 und das Memo halten, `clear_run` löscht nur im Git-Verzeichnis des Worktrees.
+
+- **R7:** `AC-3: Dropped: When the socket drops …` galt als gestrichen, und eine Bestätigungszeile mit einem nicht existierenden Test ging durch. Jetzt ist die Marke kleingeschrieben. Eine Bestätigung trägt dieselbe Trennregel. Nennt die Zeile einer gestrichenen AC einen Test, verweigert attest: Entweder ist die AC gestrichen oder bewiesen.
+- **R8:** `tiers` als Liste ließ den Tower abstürzen. `load_policy` prüft jetzt `phases` und `tiers` auf ihre Form.
+- **R9:** `AC-3: struck -- <Grund>` galt nicht mehr als Streichung. `--` trennt jetzt wie `-`.
+- **Hinnahme** (bestand schon vorher, fail-closed): Eine Überschrift oder nummerierte Zeile streicht nichts. Das gilt auch für `**struck**`. Platzhalter wie `TBD` gelten als Grund.
