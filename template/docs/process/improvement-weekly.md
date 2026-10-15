@@ -30,6 +30,10 @@ Read, do not change:
   plan review and code review apart: a growing `knowledge-gap` share in code
   review means facts exist that plans do not reach (`inventories.md`).
 - Last week's report (`.process-work/improvement/`), for its prognosis.
+- `uv run scripts/process/due_measurements.py` — measurement milestones
+  whose date has passed without a record carrying their `milestone:` line.
+  It prints them and changes nothing; the project lists its milestones in
+  `docs/process/milestones.local.json`.
 
 Not installed (telemetry module off, no `gh`) is a finding, not a zero:
 say what you could not see.
@@ -63,7 +67,8 @@ say what you could not see.
      process loss explains it — missing data means "unknown", then the
      action is to close the gap;
    - nothing, when nothing pays back within about four weeks.
-5. **Write the report** (below) and commit it with the triage lines.
+5. **Write the report** (below) and commit it with the triage lines. A
+   report that answers a milestone carries the line `milestone: <id>`.
 6. **Render the news** (`git fetch`, then `uv run scripts/process/news.py render`, where the
    project keeps `news/` fragments) and let `NEWS.md` ride the same branch
    and merge as the report (`news.md`). Where the project schedules this run
