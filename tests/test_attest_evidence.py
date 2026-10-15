@@ -641,6 +641,10 @@ def test_a_criterion_struck_with_a_reason_needs_no_test(ev_mod):
     assert req("- AC-4: Struck-through text renders as deleted.\n", "") == {"4"}
     assert req("AC-1 AC-6\nAC-6: dropped - the owner cut it\n", "") == {"1"}
     assert mod.struck_criteria("AC-1 AC-2\nAC-2: struck — merged into AC-1\n", "") == {"2"}
+    # a capitalised title is a criterion, `--` separates like `-` (refute)
+    assert req("- AC-3: Dropped: When the socket drops, the client shall retry.\n", "") == {"3"}
+    assert req("- AC-3: Struck — When text is struck, it renders as deleted.\n", "") == {"3"}
+    assert req("AC-1 AC-7\nAC-7: struck -- the owner cut it\n", "") == {"1"}
 
 
 def test_a_struck_criterion_end_to_end(repo):
@@ -652,3 +656,7 @@ def test_a_struck_criterion_end_to_end(repo):
     assert r.returncode == 1 and "AC-2 is struck" in r.stderr and "`AC-2: struck`" in r.stderr
     confirmed = "- AC-1: `tests/test_widget.py::test_widget`\n- AC-2: struck — seen, logging is #8\n"
     assert _attest(repo, "--with", _report(repo, confirmed)).returncode == 0
+    # a confirming line that names a test anyway: the test must stand (refute)
+    claimed = confirmed.replace("seen, logging is #8", "`tests/test_widget.py::test_missing`")
+    r = _attest(repo, "--with", _report(repo, claimed))
+    assert r.returncode == 1 and "AC-2 is struck, yet its report line names a test" in r.stderr

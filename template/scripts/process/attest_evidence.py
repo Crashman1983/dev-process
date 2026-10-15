@@ -308,13 +308,17 @@ def _planned_model(root: Path, issues: set[int]) -> str | None:
 
 # a criterion struck on purpose, with its reason (#234): `AC-3: struck — <reason>`
 # or `dropped`; listed, boxed or bold like a criterion line; a bare strike-through
-# (`~~AC-3~~`) names no reason and strikes nothing. A hyphen separates only with
-# spaces around it: `AC-3: Dropped-connection retry: …` is a criterion (plan review)
+# (`~~AC-3~~`) names no reason and strikes nothing. The mark is lower case and a
+# hyphen separates only with spaces around it: `AC-3: Dropped: When the socket
+# drops …` and `AC-3: Dropped-connection retry` are criteria (plan review, refute)
+_STRUCK_MARK = r"(?:struck|dropped)(?:[ \t]*[—–:]|[ \t]+--?[ \t])"
 STRUCK_LINE = re.compile(
     r"^[ \t]*(?:[-*+][ \t]+)?(?:\[[ xX]\][ \t]+)?(?:\*\*)?" + _AC
-    + r"(?:\*\*)?[ \t]*:(?:\*\*)?[ \t]*(?:struck|dropped)(?:[ \t]*[—–:]|[ \t]+-[ \t])[ \t]*"
+    + r"(?:\*\*)?[ \t]*:(?:\*\*)?[ \t]*" + _STRUCK_MARK + r"[ \t]*"
     r"(?!<|TODO\b|…|\.\.\.)\S*\w",
-    re.MULTILINE | re.IGNORECASE)
+    re.MULTILINE)
+# the report's confirmation of a strike: the same mark, the reason optional
+_STRUCK_CONFIRMED = re.compile(r"(?:struck|dropped)(?:[ \t]*[—–:]|[ \t]+--?[ \t]|[ \t]*$)")
 
 
 def struck(text: str) -> set[str]:
@@ -798,10 +802,15 @@ def _decide_code(ev: Evidence) -> list[str]:
     if ev.plan_state != "ok":
         return out
     for n in sorted(ev.plan_struck):
-        if not any(re.match(r"(?:struck|dropped)\b", b.strip(), re.IGNORECASE)
-                   for b in ev.claims.get(n, [])):
+        bodies = ev.claims.get(n, [])
+        if not any(_STRUCK_CONFIRMED.match(b.strip()) for b in bodies):
             out.append(f"AC-{n} is struck in {ev.plan_rel} or its spec — the report confirms the "
                        f"strike with a line `AC-{n}: struck`")
+        # struck and proven at once is one claim too many: a criterion misread as
+        # struck must not ride on a test nobody checks (refute)
+        if any(_ITEM_ANY.search(b) for b in bodies):
+            out.append(f"AC-{n} is struck, yet its report line names a test — strike it "
+                       f"(`AC-{n}: struck`) or prove it (unstrike it in the plan)")
     if not ev.plan_acs and not ev.plan_struck:
         out.append(f"{ev.plan_rel} names no acceptance criterion (`AC-<id>`) — nothing to trace a "
                    f"test to; name them in the plan, or commit {_skip('ac-trace', ev)}")
