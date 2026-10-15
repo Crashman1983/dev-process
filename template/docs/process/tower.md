@@ -188,7 +188,10 @@ Codex CLI on the host (the template's system requirements: `codex exec`
 with `--output-schema` and `-o`, `codex app-server --stdio`, the OpenAI
 provider without profile or own endpoint). `start`, `queue add` and
 `policy` take `--harness codex`; the choice travels through the queue and
-the chain. The variant is `docs/process/model-policy.codex.json`, the
+the chain — never across a review: the phase on the other side of a review
+(the fix round after a Codex review, the review of a Codex execute) takes
+the default harness, so reviewer and implementer stay apart. Queue it with
+`--harness codex` by hand where both sides should be Codex. The variant is `docs/process/model-policy.codex.json`, the
 project's values (model ids, time limits, `context_sources`) are
 `model-policy.codex.local.json` laid over it — never the Claude overlay. It
 is complete (every phase at every tier), detached, without channel or

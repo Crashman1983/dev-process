@@ -75,9 +75,24 @@ def context(root: Path) -> dict:
         return {}
 
 
+def _overlay_pairs(root: Path) -> list[tuple[str, str]]:
+    """(template file, overlay) for each project overlay (`check_overlays.overlays`)."""
+    import re  # noqa: PLC0415
+    out = []
+    for p in sorted(root.glob("docs/process/**/*.local.md")):
+        m = re.search(r"^overlay-of:[ \t]*(\S+)", _read(p), re.MULTILINE)
+        if m:
+            out.append((m.group(1), p.relative_to(root).as_posix()))
+    return out
+
+
 def render(root: Path) -> str:
     out = ["# Rehydrated process context (SessionStart hook — the compaction dropped this; it binds every turn)",
            "", kernel_block(root), "", "## Mandatory rules (full text)", "", _read(root / RULES).strip(), ""]
+    pairs = _overlay_pairs(root)
+    if pairs:
+        out += ["## Project overlays — read each with its template file (docs/process/overlays.md)", "",
+                *(f"- `{doc}` → `{ov}`" for doc, ov in pairs), ""]
     ctx = context(root)
     if ctx:
         out.append(f"## Working memory of branch `{ctx.get('branch')}`")

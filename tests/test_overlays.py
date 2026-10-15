@@ -1,0 +1,84 @@
+"""Overlays (Kenni backport II, owner 2026-10-15): a project's notes on a template doc
+live in an anchored `*.local.md`; the core `overlays` gate turns red when a central
+change removes or changes a section an overlay builds on — a possible breaking change
+until someone re-read both and re-stamped the overlay."""
+import subprocess
+import sys
+
+OVERLAY = ('overlay-of: docs/process/testing.md\n'
+           'extends: "{heading}" @new\n\n## Our notes\n\nThe project runs its merge suite in stages.\n')
+
+
+def _run(out, *args):
+    return subprocess.run([sys.executable, str(out / "scripts/process/check_overlays.py"), *args], cwd=out,
+                          capture_output=True, text=True)
+
+
+def _heading(out):
+    text = (out / "docs/process/testing.md").read_text()
+    return next(ln for ln in text.splitlines() if ln.startswith("## "))
+
+
+def test_an_overlay_is_checked_stamped_and_breaks_on_a_central_change(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d"})
+    assert _run(out).returncode == 0  # no overlay: nothing to fit
+    heading = _heading(out)
+    ov = out / "docs/process/testing.local.md"
+    ov.write_text(OVERLAY.format(heading=heading))
+    r = _run(out)
+    assert r.returncode == 1 and "not stamped yet" in r.stdout
+    assert _run(out, "--stamp", str(ov)).returncode == 0
+    assert "@new" not in ov.read_text()
+    r = _run(out)
+    assert r.returncode == 0 and "1 overlay fit" in r.stdout
+    # the template changes the anchored section: a possible breaking change
+    doc = out / "docs/process/testing.md"
+    doc.write_text(doc.read_text().replace(heading, heading + "\n\nA new central rule.", 1))
+    r = _run(out)
+    assert r.returncode == 1 and "changed this section" in r.stdout and "testing.local.md" in r.stdout
+    assert _run(out, "--stamp", str(ov)).returncode == 0 and _run(out).returncode == 0
+    # the template renames the section: breaking, and stamping cannot paper over it
+    doc.write_text(doc.read_text().replace(heading, heading + " (renamed)", 1))
+    r = _run(out)
+    assert r.returncode == 1 and "section is gone" in r.stdout
+    assert _run(out, "--stamp", str(ov)).returncode == 1
+
+
+def test_an_overlay_without_anchor_or_template_file_is_refused(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d"})
+    ov = out / "docs/process/commands/quick.local.md"
+    ov.parent.mkdir(parents=True)
+    ov.write_text("overlay-of: .claude/commands/quick.md\n\nproject escalation rules\n")
+    r = _run(out)
+    assert r.returncode == 1 and "no anchor line" in r.stdout
+    ov.write_text('overlay-of: docs/process/gone.md\nextends: "## X" @new\n')
+    r = _run(out)
+    assert r.returncode == 1 and "is gone" in r.stdout
+    # a local note that names no template file is no overlay (review.local.md and the like)
+    ov.unlink()
+    (out / "docs/process/review.local.md").write_text("# project review notes\n")
+    assert _run(out).returncode == 0
+
+
+def test_a_heading_inside_a_code_fence_is_no_section(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d"})
+    sys.path.insert(0, str(out / "scripts/process"))
+    try:
+        import check_overlays
+        secs = check_overlays.sections("## A\ntext\n```\n## B\n```\nmore\n## C\nc\n")
+        assert list(secs) == ["## A", "## C"] and "## B" in secs["## A"]
+    finally:
+        sys.path.remove(str(out / "scripts/process"))
+        sys.modules.pop("check_overlays", None)
+
+
+def test_the_gate_runs_in_core_and_sessions_see_the_overlays(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    runner = (out / "scripts/process/gate_runner.py").read_text()
+    assert '"overlays": (None,' in runner
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=out, check=True)
+    (out / "docs/process/testing.local.md").write_text(OVERLAY.format(heading=_heading(out)))
+    ctx = subprocess.run([sys.executable, str(out / "scripts/process/rehydrate.py")], cwd=out,
+                         capture_output=True, text=True, check=True).stdout
+    assert "`docs/process/testing.md` → `docs/process/testing.local.md`" in ctx
+    assert "docs/process/overlays.md" in (out / "docs/process/start-here.md").read_text()
