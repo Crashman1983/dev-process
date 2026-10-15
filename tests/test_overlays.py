@@ -82,3 +82,84 @@ def test_the_gate_runs_in_core_and_sessions_see_the_overlays(render, tmp_path):
                          capture_output=True, text=True, check=True).stdout
     assert "`docs/process/testing.md` → `docs/process/testing.local.md`" in ctx
     assert "docs/process/overlays.md" in (out / "docs/process/start-here.md").read_text()
+
+
+def _mod(out):
+    sys.path.insert(0, str(out / "scripts/process"))
+    import importlib
+    sys.modules.pop("check_overlays", None)
+    return importlib.import_module("check_overlays")
+
+
+def test_no_false_green_from_lines_that_do_not_parse(render, tmp_path):
+    """Refute round 2: a malformed anchor or head was skipped, so a changed section stayed green."""
+    out = render(tmp_path, {"project_name": "d"})
+    heading = _heading(out)
+    ov = out / "docs/process/testing.local.md"
+    for bad in (f'overlay-of: docs/process/testing.md\nreplaces: "{heading}" @NEW\n',
+                f"overlay-of: docs/process/testing.md\nextends: '{heading}' @new\n",
+                f'overlay-of: docs/process/testing.md\nreplace: "{heading}" @new\n',
+                f'overlay-of: docs/process/testing.md  # note\nextends: "{heading}" @new\n',
+                f'﻿overlay-of: docs/process/testing.md # x\nextends: "{heading}" @new\n'):
+        ov.write_text(bad, encoding="utf-8")
+        r = _run(out)
+        assert r.returncode == 1 and "does not parse" in r.stdout, bad
+
+
+def test_fences_and_closing_hashes_follow_commonmark(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d"})
+    co = _mod(out)
+    try:
+        secs = co.sections("## A\n```bash\n## setup\n```\nall tests run\n## B\nb\n")
+        assert "all tests run" in secs["## A"] and "## setup" not in secs
+        secs = co.sections("## A\n````\n```\n## x\n````\ntail\n")  # a shorter fence does not close
+        assert "tail" in secs["## A"] and "## x" not in secs
+        secs = co.sections("## C#\nsharp\n## C\nplain\n")
+        assert secs["## C#"] == "## C#\nsharp" and secs["## C"] == "## C\nplain"
+        assert co._norm("## Title ##") == "## Title"
+    finally:
+        sys.path.remove(str(out / "scripts/process"))
+        sys.modules.pop("check_overlays", None)
+
+
+def test_an_overlay_names_a_file_of_this_repository_only(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d"})
+    ov = out / "docs/process/x.local.md"
+    for target in ("/dev/zero", "/etc/hostname", "../../../../etc/passwd", "docs/process"):
+        ov.write_text(f'overlay-of: {target}\nextends: "## A" @new\n')
+        r = subprocess.run([sys.executable, str(out / "scripts/process/check_overlays.py")], cwd=out,
+                           capture_output=True, text=True, timeout=30)
+        assert r.returncode == 1 and "outside the repository" in r.stdout, target
+
+
+def test_stamp_refuses_what_the_gate_does_not_check(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d"})
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=out, check=True)
+    stray = out / "notes/x.local.md"
+    stray.parent.mkdir()
+    stray.write_text(OVERLAY.format(heading=_heading(out)))
+    r = _run(out, "--stamp", str(stray))
+    assert r.returncode == 1 and "not an overlay the gate checks" in r.stderr
+    r = _run(out, "--stamp", str(out / "docs/process/missing.local.md"))
+    assert r.returncode == 1 and "Traceback" not in r.stderr
+    # from a subdirectory: the repository root is git's, not the cwd
+    ov = out / "docs/process/testing.local.md"
+    ov.write_text(OVERLAY.format(heading=_heading(out)))
+    r = subprocess.run([sys.executable, str(out / "scripts/process/check_overlays.py"), "--stamp", str(ov)],
+                       cwd=out / "docs", capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+
+
+def test_an_overlay_of_the_kernel_reaches_the_session_whole(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d"})
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=out, check=True)
+    kernel = (out / "docs/process/kernel.md").read_text()
+    heading = next(ln for ln in kernel.splitlines() if ln.startswith("#"))
+    (out / "docs/process/kernel.local.md").write_text(
+        f'overlay-of: docs/process/kernel.md\nreplaces: "{heading}" @new\n\nProse follows the operator.\n')
+    ctx = subprocess.run([sys.executable, str(out / "scripts/process/rehydrate.py")], cwd=out,
+                         capture_output=True, text=True, check=True).stdout
+    assert "Prose follows the operator." in ctx
+    codex = subprocess.run([sys.executable, str(out / "scripts/process/rehydrate.py"), "--codex"], cwd=out,
+                           capture_output=True, text=True, check=True).stdout
+    assert "Prose follows the operator." in codex

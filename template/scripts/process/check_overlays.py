@@ -33,11 +33,15 @@ import sys
 from pathlib import Path
 
 OVERLAY_GLOB = "docs/process/**/*.local.md"
-HEAD = re.compile(r"^overlay-of:[ \t]*(?P<path>\S+)[ \t]*$", re.MULTILINE)
+HEAD = re.compile(r"^overlay-of:[ \t]*(?P<path>[^\s#]+)[ \t]*$", re.MULTILINE)
+# anything that means to be a head or an anchor: a line that does not parse is red, never skipped
+HEAD_INTENT = re.compile(r"^\ufeff?[ \t]*overlay-of[ \t]*:", re.MULTILINE | re.IGNORECASE)
 ANCHOR = re.compile(r'^(?P<kind>extends|replaces):[ \t]*"(?P<heading>#{1,6}[ \t]+[^"\n]+?)"[ \t]*'
                     r"@(?P<hash>[0-9a-f]{12}|new)[ \t]*$", re.MULTILINE)
-_HEADING = re.compile(r"^(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*$")
-_FENCE = re.compile(r"^[ \t]*(```|~~~)")
+ANCHOR_INTENT = re.compile(r"^[ \t]*(?:extends?|replaces?|replace)[ \t]*:", re.MULTILINE | re.IGNORECASE)
+# ATX heading; a closing `#` run counts only after whitespace (`## C#` is the heading "C#")
+_HEADING = re.compile(r"^ {0,3}(#{1,6})[ \t]+(.*?)(?:[ \t]+#+)?[ \t]*$")
+_FENCE_OPEN = re.compile(r"^ {0,3}(?P<fence>`{3,}|~{3,})(?P<info>.*)$")
 
 
 def _norm(heading: str) -> str:
@@ -51,12 +55,19 @@ def sections(text: str) -> dict[str, str]:
     occurs twice keeps its first section (an anchor names the first)."""
     lines = text.splitlines()
     heads: list[tuple[int, int, str]] = []
-    fenced = False
+    fence = ""  # the open fence (CommonMark: closed by the same character, at least as long)
     for i, line in enumerate(lines):
-        if _FENCE.match(line):
-            fenced = not fenced
+        if fence:
+            stripped = line.strip()
+            indent = len(line) - len(line.lstrip(" "))
+            if stripped and set(stripped) == {fence[0]} and len(stripped) >= len(fence) and indent <= 3:
+                fence = ""
             continue
-        m = None if fenced else _HEADING.match(line)
+        f = _FENCE_OPEN.match(line)
+        if f and not (f.group("fence")[0] == "`" and "`" in f.group("info")):
+            fence = f.group("fence")
+            continue
+        m = _HEADING.match(line)
         if m:
             heads.append((i, len(m.group(1)), _norm(line)))
     out: dict[str, str] = {}
@@ -71,16 +82,27 @@ def section_hash(text: str) -> str:
 
 
 def overlays(root: Path) -> list[Path]:
-    """The project's overlays: `*.local.md` under docs/process/ that name their
-    template file (`overlay-of:`); other local notes are not overlays."""
+    """The project's overlays: `*.local.md` under docs/process/ that mean to name
+    their template file (`overlay-of:` in any spelling — check_one says when it does
+    not parse); other local notes are not overlays. rehydrate.py lists these."""
     found = []
     for p in sorted(root.glob(OVERLAY_GLOB)):
         try:
-            if HEAD.search(p.read_text(encoding="utf-8")):
+            if HEAD_INTENT.search(p.read_text(encoding="utf-8")):
                 found.append(p)
         except (OSError, UnicodeDecodeError):
             found.append(p)  # unreadable: check() names it
     return found
+
+
+def target_of(root: Path, rel: str) -> Path | None:
+    """The template file an overlay names, or None when it is not a regular file inside
+    the repository (absolute, `..`, a device): an overlay overlays this project only."""
+    p = Path(rel)
+    if p.is_absolute() or ".." in p.parts:
+        return None
+    full = (root / p).resolve()
+    return full if full.is_relative_to(root.resolve()) and full.is_file() else None
 
 
 def check_one(root: Path, overlay: Path) -> list[str]:
@@ -89,15 +111,23 @@ def check_one(root: Path, overlay: Path) -> list[str]:
         text = overlay.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as exc:
         return [f"{rel}: unreadable ({exc})"]
-    head = HEAD.search(text)
+    head = HEAD.search(text.lstrip("\ufeff"))
     if head is None:
-        return [f"{rel}: no `overlay-of: <template path>` line"]
-    target = root / head.group("path")
+        return [f"{rel}: its `overlay-of:` line does not parse — write `overlay-of: <template path>` alone on "
+                f"its line"]
+    target = target_of(root, head.group("path"))
+    if target is None:
+        return [f"{rel}: its template file {head.group('path')} is gone or outside the repository — the template "
+                f"moved or removed it; re-home the overlay or delete it (breaking change)"]
     try:
         doc = sections(target.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError):
-        return [f"{rel}: its template file {head.group('path')} is gone — the template moved or removed it; "
-                f"re-home the overlay or delete it (breaking change)"]
+    except (OSError, UnicodeDecodeError) as exc:
+        return [f"{rel}: its template file {head.group('path')} is unreadable ({exc})"]
+    bad = [m.group(0).strip() for m in ANCHOR_INTENT.finditer(text)
+           if not ANCHOR.match(text, m.start())]
+    if bad:
+        return [f"{rel}: anchor line does not parse: {b!r} — write "
+                f"`extends|replaces: \"<heading>\" @<12 hex>|@new`" for b in bad]
     anchors = list(ANCHOR.finditer(text))
     if not anchors:
         return [f"{rel}: no anchor line (`extends:`/`replaces:` \"<heading>\" @<hash>) — an overlay that names no "
@@ -124,12 +154,17 @@ def check(root: Path) -> list[str]:
 
 def stamp(root: Path, overlay: Path) -> list[str]:
     """Writes the current hash into every anchor line — the record that someone
-    checked the overlay against the sections as they read now."""
+    checked the overlay against the sections as they read now. Only an overlay the
+    gate checks, whose lines all parse, is stamped."""
+    if overlay.resolve() not in {p.resolve() for p in overlays(root)}:
+        return [f"{overlay}: not an overlay the gate checks (docs/process/**/*.local.md with `overlay-of:`)"]
+    problems = [p for p in check_one(root, overlay)
+                if "changed this section" not in p and "not stamped yet" not in p]
+    if problems:
+        return problems
     text = overlay.read_text(encoding="utf-8")
-    head = HEAD.search(text)
-    if head is None:
-        return [f"{overlay}: no `overlay-of:` line"]
-    doc = sections((root / head.group("path")).read_text(encoding="utf-8"))
+    head = HEAD.search(text.lstrip("\ufeff"))
+    doc = sections(target_of(root, head.group("path")).read_text(encoding="utf-8"))
     missing = [_norm(a.group("heading")) for a in ANCHOR.finditer(text) if _norm(a.group("heading")) not in doc]
     if missing:
         return [f"{overlay}: section {m!r} is not in {head.group('path')} — re-home the anchor first"
@@ -148,8 +183,14 @@ def main(argv: list[str]) -> int:
             print("usage: check_overlays.py --stamp <overlay>", file=sys.stderr)
             return 2
         path = Path(argv[1]).resolve()
-        root = Path.cwd().resolve()
-        problems = stamp(root, path)
+        import subprocess  # noqa: PLC0415
+        top = subprocess.run(["git", "-C", str(path.parent if path.parent.is_dir() else Path.cwd()),
+                              "rev-parse", "--show-toplevel"], capture_output=True, text=True, check=False)
+        root = Path(top.stdout.strip()).resolve() if top.returncode == 0 and top.stdout.strip() else Path.cwd().resolve()
+        try:
+            problems = stamp(root, path)
+        except (OSError, UnicodeDecodeError) as exc:
+            problems = [f"{path}: {exc}"]
         for p in problems:
             print(f"overlays: {p}", file=sys.stderr)
         if not problems:
