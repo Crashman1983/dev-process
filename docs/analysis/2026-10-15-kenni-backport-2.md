@@ -189,3 +189,17 @@ Refute: widerlegt (F1–F8). Code-Review: Block (5 Majors, 7 Minors). Owner am 2
 - **Prüfschritt:** Das Kern-Gate `overlays` (`check_overlays.py`) wird rot, wenn ein verankerter Abschnitt verschwindet oder sich ändert. Es bleibt rot, bis jemand Overlay und Abschnitt gelesen und mit `--stamp` neu gestempelt hat. `template_update.py` meldet solche Overlays direkt nach dem Update.
 - **Sichtbarkeit:** `rehydrate` listet die Overlays im Session-Kontext.
 - **Doku:** `docs/process/overlays.md`. Ein Release, das verankerte Abschnitte ändert, nennt sie im CHANGELOG.
+
+## Refute Runde 2 und Code-Review Runde 2 — Änderungen
+
+Code-Review Runde 2 (Delta): Block, vier Majors und sieben Minors. Die Mutationsprobe ergab: 13 von 27 entfernten Fixes fielen keinem Test auf. M3 (`--implementer` über Gemessenes) und Teile von m7 sind schon mit dem Refute-Runde-2-Commit erledigt. Der Rest:
+
+- **M1, Overlays erreichen jede Session:** Der Kontext-Hook läuft nur nach Kompaktierung oder Resume. Darum schickt jeder Befehl die Session gleich unter dem Titel zu seinem Overlay und zu den Overlays neben den Docs, die er nennt. Gewählt wurde das statt einer Kernel-Zeile: Eine Kernel-Änderung hätte jeden Anker jedes Projekts rot gemacht, Kennis eigene Kernel-Fassung eingeschlossen. Ein Test prüft die Zeile in jedem gerenderten Befehl.
+- **M2, kein Overlay für den Kernel:** Das Gate verweigert `overlay-of: docs/process/kernel.md` (`UNOVERLAYABLE`). Kenni behält die Sprachregel in seiner eigenen Kernel-Fassung, bis E3 kommt. `rehydrate` setzt nur noch Overlays der Regeln vollständig ein.
+- **M4, ein roter Test je Fix:** Der Ketten-Test prüft jetzt den Queue-Eintrag. Dazu kommen Tests für F1, F2, F3, F4, F5, F7, F8, CR2, den Policy-Namen und die Overlay-Liste von `template_update`. Jeder ist mit seiner Mutation rot.
+- **m5:** Es sind sechs Kern-Gates.
+- **m6, Abschnitte im Release:** `tools/release.py` listet geänderte und entfernte Abschnitte von Template-Docs und -Befehlen gegen den letzten Release-Tag. Ein Eintrag ohne `Geänderte Abschnitte:` wird verweigert. MAINTAINING und `overlays.md` nennen die Regel.
+- **m7:** Kopf- und Ankerzeilen in Codeblöcken eines Overlays zählen nicht. `--stamp` lässt sie unverändert.
+- **m9:** Der Kenni-Schritt für `review.local.md` steht im CHANGELOG: `overlay-of: docs/process/review-checklist.md` plus Anker.
+- **m10:** Ein verweigerter Katalog schreibt den Head des Branches in die Zeile.
+- **m11:** `overlays.md` sagt: die engste Überschrift verankern. Eine eigene Anker-Art nur für den Text ohne Unterabschnitte gibt es nicht, solange Daten nicht zeigen, dass das Stempeln ohne Lesen zum Problem wird.

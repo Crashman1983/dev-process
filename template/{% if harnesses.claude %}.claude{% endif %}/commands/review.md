@@ -3,6 +3,12 @@
 
 # /review
 
+**Project overlay:** if `docs/process/commands/review.local.md` exists, read it
+before you start — the project's own rules for this command, binding over
+this file where it says so; a template doc this command sends you to may
+have one beside it (`<doc>.local.md`), read with the doc
+(`docs/process/overlays.md`).
+
 Run the gate before merging to the main branch. Re-read the kernel
 (`docs/process/kernel.md`) and `docs/process/mandatory-rules.md` first — the
 review judges the change against those rules, and a long session may have

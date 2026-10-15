@@ -1,5 +1,11 @@
 # /report
 
+**Project overlay:** if `docs/process/commands/report.local.md` exists, read it
+before you start — the project's own rules for this command, binding over
+this file where it says so; a template doc this command sends you to may
+have one beside it (`<doc>.local.md`), read with the doc
+(`docs/process/overlays.md`).
+
 Tell the tower where this worker stands — one line, only when the state
 changes. Never a running commentary: five or six reports per issue is the
 whole budget.

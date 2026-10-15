@@ -12,6 +12,9 @@ steps, in order, stopping at the first failure:
 1. the CHANGELOG has an entry for the version (`release_notes.notes`, the
    same reader the publish workflow uses — no entry, no release), and NEWS.md
    a plain-language section for it (`release_notes.news`);
+   The entry names the template sections it changed or removed (`Geänderte
+   Abschnitte:`) when there are any — a project's overlays anchor to them
+   (`changed_sections`, against the last release's tag);
 2. every version location carries it (`LOCATIONS`);
 3. the SBOM is regenerated (`tools/gen_sbom.py`);
 4. `ruff check .` and the full suite pass;
@@ -92,7 +95,7 @@ def _current(root: Path) -> tuple[int, ...]:
     read from them the rerun it asks for was refused as "not above" (refute of #123)."""
     shown = subprocess.run(["git", "-C", str(root), "show", f"HEAD:{LOCATIONS[0][0]}"],
                            capture_output=True, text=True)
-    text = shown.stdout if shown.returncode == 0 else (root / LOCATIONS[0][0]).read_text(encoding="utf-8")
+    text = shown.stdout if shown.returncode == 0 and shown.stdout else (root / LOCATIONS[0][0]).read_text(encoding="utf-8")
     found = LOCATIONS[0][1].findall(text)
     return tuple(int(x) for x in found[0].split(".")) if found else (0,)
 
@@ -100,6 +103,63 @@ def _current(root: Path) -> tuple[int, ...]:
 def _news_missing(root: Path, tag: str) -> bool:
     path = root / "NEWS.md"
     return not path.is_file() or news(path.read_text(encoding="utf-8"), tag) is None
+
+
+# what a project's overlay can anchor to (template/docs/process/overlays.md): the
+# template's process docs and commands; a release that changes or removes one of
+# their sections names it in its CHANGELOG entry, under this marker
+ANCHORABLE = ("template/docs/process/", "template/{% if harnesses.claude %}.claude{% endif %}/commands/")
+SECTIONS_MARKER = "Geänderte Abschnitte"
+
+
+def _sections_reader(root: Path):
+    spec = importlib.util.spec_from_file_location(
+        "release_check_overlays", root / "template/scripts/process/check_overlays.py")
+    mod = importlib.util.module_from_spec(spec)
+    keep, sys.dont_write_bytecode = sys.dont_write_bytecode, True  # no __pycache__ in the template
+    try:
+        spec.loader.exec_module(mod)
+    finally:
+        sys.dont_write_bytecode = keep
+    return mod.sections
+
+
+def changed_sections(root: Path) -> list[str] | None:
+    """`path: heading — changed|gone` for every section of an anchorable doc that
+    differs from the last release (the tag of the committed version); None when that
+    tag is not here (`git fetch --tags`). New sections are no break for an overlay."""
+    base = "v" + ".".join(map(str, _current(root)))
+    listed = subprocess.run(["git", "-C", str(root), "ls-tree", "-r", "--name-only", base, "--", *ANCHORABLE],
+                            capture_output=True, text=True)
+    if listed.returncode != 0:
+        return None
+    sections, out = None, []
+    for rel in sorted((listed.stdout or "").splitlines()):
+        if not rel.endswith((".md", ".md.jinja")) or rel.endswith(".local.md"):
+            continue
+        old = subprocess.run(["git", "-C", str(root), "show", f"{base}:{rel}"], capture_output=True, text=True)
+        if old.returncode != 0:
+            continue
+        sections = sections or _sections_reader(root)
+        path = root / rel
+        now = sections(path.read_text(encoding="utf-8")) if path.is_file() else {}
+        for heading, body in sections(old.stdout).items():
+            if heading not in now:
+                out.append(f"{rel}: {heading} — gone")
+            elif now[heading] != body:
+                out.append(f"{rel}: {heading} — changed")
+    return out
+
+
+def _sections_unnamed(root: Path, tag: str) -> list[str]:
+    """The changed sections, when the CHANGELOG entry of a new release does not name
+    them yet (the released version itself has nothing to compare against)."""
+    m = VERSION.match(tag)
+    if not m or tuple(int(x) for x in m.group(1).split(".")) <= _current(root):
+        return []
+    entry = "\n".join(notes((root / "CHANGELOG.md").read_text(encoding="utf-8"), tag) or ())
+    found = changed_sections(root)
+    return [] if not found or SECTIONS_MARKER.lower() in entry.lower() else found
 
 
 def check(root: Path, tag: str) -> list[str]:
@@ -113,6 +173,7 @@ def check(root: Path, tag: str) -> list[str]:
         left.append(f"CHANGELOG.md: no entry for {tag}")
     if _news_missing(root, tag):
         left.append(f"NEWS.md: no section for {tag} (`## {tag} — <title>` and a few plain sentences)")
+    left += [f"CHANGELOG.md: {SECTIONS_MARKER} not named — {s}" for s in _sections_unnamed(root, tag)]
     sbom = subprocess.run([sys.executable, "tools/gen_sbom.py", "--check"], cwd=root, capture_output=True)
     if sbom.returncode != 0:
         left.append("docs/sbom.cdx.json / docs/SBOM.md: stale (tools/gen_sbom.py --check)")
@@ -146,6 +207,14 @@ def release(root: Path, tag: str, *, suite: bool = True) -> None:
         raise SystemExit(f"release: NEWS.md has no section for {tag} — write it first "
                          f"(`## {tag} — <title>` and a few sentences for readers who do not "
                          f"read the CHANGELOG)")
+    if changed_sections(root) is None:
+        print("release: the last release's tag is not here — `git fetch --tags` to list the changed "
+              "sections overlays may anchor to", flush=True)
+    unnamed = _sections_unnamed(root, tag)
+    if unnamed:
+        raise SystemExit(f"release: the {tag} entry does not name the template sections it changed — "
+                         f"projects re-check their overlays against them (docs/process/overlays.md). Add "
+                         f"a line `{SECTIONS_MARKER}: …` naming them:\n  " + "\n  ".join(unnamed))
     status = subprocess.run(["git", "-C", str(root), "status", "--porcelain", "-z"],
                             capture_output=True, text=True)
     if status.returncode != 0:

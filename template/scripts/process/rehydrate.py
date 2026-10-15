@@ -85,13 +85,13 @@ def _overlay_pairs(root: Path) -> list[tuple[str, str]]:
         return []
     out = []
     for p in co.overlays(root):
-        m = co.HEAD.search(_read(p).lstrip("\ufeff"))
+        m = co.HEAD.search(co.unfenced(_read(p)).lstrip("\ufeff"))
         out.append((m.group("path") if m else "(unparsed overlay-of)", p.relative_to(root).as_posix()))
     return out
 
 
 def _inline_overlays(root: Path, docs: tuple[str, ...]) -> list[str]:
-    """The overlays of docs whose full text is in the context (kernel, rules): a pointer
+    """The overlays of docs whose full text is in the context (the rules): a pointer
     beside a full template rule would lose to it — the overlay goes in whole."""
     return [f"## Project overlay `{ov}` (of `{doc}` — it binds in this project)\n\n{_read(root / ov).strip()}"
             for doc, ov in _overlay_pairs(root) if doc in docs]
@@ -100,7 +100,8 @@ def _inline_overlays(root: Path, docs: tuple[str, ...]) -> list[str]:
 def render(root: Path) -> str:
     out = ["# Rehydrated process context (SessionStart hook — the compaction dropped this; it binds every turn)",
            "", kernel_block(root), "", "## Mandatory rules (full text)", "", _read(root / RULES).strip(), ""]
-    out += [*_inline_overlays(root, (KERNEL, RULES)), ""] if _inline_overlays(root, (KERNEL, RULES)) else []
+    inline = _inline_overlays(root, (RULES,))  # the kernel takes no overlay (check_overlays.UNOVERLAYABLE)
+    out += [*inline, ""] if inline else []
     pairs = _overlay_pairs(root)
     if pairs:
         out += ["## Project overlays — read each with its template file (docs/process/overlays.md)", "",

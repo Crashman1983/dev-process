@@ -492,25 +492,24 @@ def test_a_harness_never_crosses_a_review_in_the_chain(mods, monkeypatch):
     monkeypatch.setattr(d, "queue_add", lambda *a, **k: calls.append(k))
     monkeypatch.setattr(d, "drain", lambda *a: 0)
     monkeypatch.setattr(d, "stop", lambda *a, **k: 0)
-    for phase, report, nxt, carried in (("review", "blocked", "execute", None), ("execute", "pushed", "review", None),
-                                        ("plan", "planned", "execute", "codex")):
+    monkeypatch.setattr(d, "plan_review_state", lambda *a: (2, True))
+    monkeypatch.setattr(d, "plan_gates", lambda *a: None)
+    monkeypatch.setattr(d, "work_complete_on_origin", lambda *a: True)
+    monkeypatch.setattr(d, "new_code_on_origin", lambda *a: True)
+    monkeypatch.setattr(d, "_out", lambda *a: "")
+    # a passed Codex plan review queues execute; a Codex execute queues its review; a Codex plan its execute
+    for phase, report, plan_review, nxt, carried in (("review", "review-pass", True, "execute", None),
+                                                     ("execute", "pushed", False, "review", None),
+                                                     ("plan", "planned", False, "execute", "codex")):
         calls.clear()
         rec = {"branch": "7-x", "issue": 7, "phase": phase, "tier": 2, "harness": "codex", "worktree": str(out),
-               "started": 1, "state": "gone"}
+               "started": 1, "state": "gone", "plan_review": plan_review}
         monkeypatch.setattr(d, "records", lambda _r, rec=rec: [rec])
         monkeypatch.setattr(d, "_load_record", lambda *a, rec=rec: (out / "r", rec))
         monkeypatch.setattr(d, "session_report", lambda *a, s=report: {"state": s})
-        monkeypatch.setattr(d, "plan_review_state", lambda *a: (2, True))
-        monkeypatch.setattr(d, "plan_gates", lambda *a: None)
-        monkeypatch.setattr(d, "attest_on_origin", lambda *a, **k: True)
-        monkeypatch.setattr(d, "_out", lambda *a: "")
-        try:
-            d._chain(out)
-        except Exception:  # noqa: BLE001 — the chain's own preconditions differ per phase; only the queue line counts
-            pass
-        nexts = [c for c in calls if c.get("phase") == nxt]
-        if nexts:
-            assert nexts[0].get("harness") == carried, (phase, nexts[0])
+        assert d._chain(out) == 0
+        assert [c.get("phase") for c in calls] == [nxt], (phase, calls)
+        assert calls[0].get("harness") == carried, (phase, calls[0])
 
 
 def test_a_failed_review_run_records_the_way_out(review_repo, capsys):
@@ -668,3 +667,115 @@ def test_the_implementer_flag_never_overrides_a_measured_model(review_repo):
     assert d.handoff(out, "7-widget", implementer="claude-opus-5") == 0
     journal = "\n".join(p.read_text() for p in (out / ".process-work/journal").glob("**/*.md"))
     assert "single-family" in journal and "cross-model" not in journal
+
+
+# --- code review round 2: a red test for every round-1 fix ---------------------------------
+
+def test_the_families_are_read_at_the_base_not_the_reviewed_branch(review_repo):
+    """F1: a branch that draws its own family lines does not make its review cross-model."""
+    out, d, codex = review_repo(PASS, implementer="gpt-6-luna")
+    policy = out / "docs/process/model-policy.json"
+    data = json.loads(policy.read_text())
+    data["review_evidence"]["families"] = [*data["review_evidence"]["families"], "gpt-6-luna"]
+    policy.write_text(json.dumps(data))
+    _git(out, "commit", "-qam", "chore: luna is its own family")
+    base, head = _git(out, "merge-base", "main", "HEAD"), _git(out, "rev-parse", "HEAD")
+    assert codex.independence(out, head, "gpt-6-sol", ["gpt-6-luna"]) == "cross-model"  # the branch's own lines
+    assert codex.independence(out, base, "gpt-6-sol", ["gpt-6-luna"]) == "single-family"
+
+
+def test_the_implementer_flag_is_refused_when_every_model_is_measured(review_repo, capsys):
+    """F2: `--implementer` stands in only for what no report measured."""
+    out, d, codex = review_repo(PASS, implementer="gpt-6-luna")
+    _run_review(out, d, codex)
+    assert d.handoff(out, "7-widget", implementer="claude-opus-5") == 3
+    assert "measured every implementing model" in capsys.readouterr().err
+    assert "REVIEW work=7" not in "\n".join(p.read_text() for p in (out / ".process-work/journal").glob("**/*.md"))
+
+
+def test_a_codex_session_reads_every_anchor_and_the_local_policy(render, tmp_path):
+    """F3: AGENTS.md and CLAUDE.md both bind a Codex session; so do the project's Codex values."""
+    out = render(tmp_path / "r", {"project_name": "d"})
+    _git(out, "init", "-q", "-b", "main")
+    (out / "AGENTS.md").write_text("agents anchor marker\n")
+    (out / "CLAUDE.md").write_text("claude anchor marker\n")
+    (out / "docs/process/model-policy.codex.local.json").write_text(json.dumps({"stale_minutes": 30}))
+    run = [sys.executable, str(out / "scripts/process/rehydrate.py"), "--codex"]
+    text = json.loads(subprocess.run(run, cwd=out, capture_output=True, text=True, check=True).stdout)[
+        "hookSpecificOutput"]["additionalContext"]
+    assert "agents anchor marker" in text and "claude anchor marker" in text
+    assert "## Source: docs/process/model-policy.codex.local.json" in text
+
+
+def test_a_codex_trace_that_cannot_be_read_costs_a_finding_not_the_table(review_repo, monkeypatch):
+    """F4: any error in the Codex traces is a finding; the tower table still renders."""
+    out, d, codex = review_repo(PASS)
+    tower = importlib.import_module("tower")
+
+    def broken(*_a):
+        raise RuntimeError("trace unreadable")
+
+    monkeypatch.setattr(tower, "codex_findings", broken)
+    table = tower.build(out)
+    assert any(f["kind"] == "local-findings-error" and "trace unreadable" in f["because"] for f in table["findings"])
+
+
+def test_only_a_tracked_plan_with_appended_records_rides_a_review(review_repo):
+    """F5: an untracked plan or a plan whose text changed is content, not a record."""
+    out, d, codex = review_repo(PASS)
+    plan = out / ".process-work/plans/2026-10-15-widget.md"
+    committed = plan.read_text()
+    plan.write_text(committed + "\nskipped ac-trace work=7: checked by hand\n")
+    assert codex._records_appended(out, ".process-work/plans/2026-10-15-widget.md")
+    plan.write_text(committed.replace("answer 42", "answer 43"))
+    assert not codex._records_appended(out, ".process-work/plans/2026-10-15-widget.md")
+    with pytest.raises(ValueError, match="clean worktree"):
+        codex.binding(out, out / "no-bundle")
+    plan.write_text(committed)
+    (out / ".process-work/plans/2026-10-16-other.md").write_text(PLAN)
+    assert not codex._records_appended(out, ".process-work/plans/2026-10-16-other.md")
+    with pytest.raises(ValueError, match="clean worktree"):
+        codex.binding(out, out / "no-bundle")
+
+
+def test_a_refused_handoff_leaves_no_folder_it_made(review_repo):
+    """F7: git status hides an empty folder; the handoff removes the ones it created."""
+    unproven = {**PASS, "criteria": []}
+    out, d, codex = review_repo(unproven)
+    reviews = out / ".process-work/reviews"
+    if reviews.exists():
+        _git(out, "rm", "-rq", ".process-work/reviews")
+        _git(out, "commit", "-qm", "chore: no reviews yet")
+        _git(out, "push", "-q", "origin", "7-widget")
+    _run_review(out, d, codex)
+    assert d.handoff(out, "7-widget") == 1
+    assert not reviews.exists()
+
+
+@pytest.mark.parametrize("title", ["a\rb", "a b", "a\x0bb", "a\nb"])
+def test_a_finding_renders_as_one_report_line(review_repo, title):
+    """F8: every line separator splitlines knows would forge a second report line."""
+    out, d, codex = review_repo(PASS)
+    rec = _run_review(out, d, codex)
+    bad = {**PASS, "findings": [{"sev": "minor", "action": "accept", "kind": "implementation", "issue": "-",
+                                 "title": title}]}
+    assert codex._validated(bad, rec) is None
+    assert codex._validated({**PASS, "criteria": [f"AC-1: {title}"]}, rec) is None
+
+
+def test_a_result_off_its_schema_at_handoff_is_the_way_out(review_repo, monkeypatch, capsys):
+    """CR2: a completed run whose result the handoff cannot use records the way out."""
+    out, d, codex = review_repo(PASS)
+    _run_review(out, d, codex)
+    monkeypatch.setattr(codex, "_validated", lambda *_a: None)
+    assert d.handoff(out, "7-widget") == 3
+    assert "codex unavailable" in capsys.readouterr().err
+    assert (d._records_dir(out) / "codex" / codex.UNAVAILABLE).is_file()
+
+
+def test_a_bad_codex_policy_names_its_own_file(mods):
+    mod, out = mods
+    d = mod("dispatch")
+    (out / "docs/process/model-policy.codex.local.json").write_text(json.dumps({"stale_minutes": 0}))
+    with pytest.raises(SystemExit, match="model-policy.codex.json"):
+        d.load_policy(out, "codex")

@@ -1,5 +1,11 @@
 # /prime
 
+**Project overlay:** if `docs/process/commands/prime.local.md` exists, read it
+before you start — the project's own rules for this command, binding over
+this file where it says so; a template doc this command sends you to may
+have one beside it (`<doc>.local.md`), read with the doc
+(`docs/process/overlays.md`).
+
 Restore working context after a break — cheaply. (After a compaction or a
 resume the `SessionStart` hook `scripts/process/rehydrate.py` already
 printed the kernel, the rules and the ledger into this session —

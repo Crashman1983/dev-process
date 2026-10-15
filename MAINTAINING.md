@@ -110,6 +110,11 @@ Der bestehende Weg, unverändert:
    `tools/release.py` gibt es dafür bewusst nicht: die Einordnung ist ein
    Urteil über den Inhalt, und die Regel ist neu — erst zählen, ob sie
    gebrochen wird.
+   Ändert oder entfernt das Release Abschnitte der Template-Docs oder
+   -Befehle, nennt der Eintrag sie in einer Zeile `Geänderte Abschnitte: …` —
+   Projekt-Overlays verankern sich daran (`template/docs/process/overlays.md`).
+   `tools/release.py` listet sie gegen den Tag des letzten Releases und
+   verweigert den Eintrag ohne diese Zeile.
 
 ## Generik-Nachweis
 

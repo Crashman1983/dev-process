@@ -239,3 +239,28 @@ def test_the_news_reader_takes_one_section_and_stops_at_the_next():
 
 def test_the_repository_news_has_a_section_for_the_current_version():
     assert rel.news((REPO / "NEWS.md").read_text(encoding="utf-8"), f"v{CURRENT}") is not None
+
+
+def test_a_release_names_the_template_sections_it_changed(tmp_path):
+    """v2.73 overlays: a project's overlay anchors to a template section; the release that
+    changes or removes one says so before the update (template/docs/process/overlays.md)."""
+    root = _git_repo(tmp_path)
+    doc = root / "template/docs/process/x.md"
+    doc.parent.mkdir(parents=True)
+    doc.write_text("# X\n\n## A\n\na\n\n## B\n\nb\n\n## C\n\nc\n", encoding="utf-8")
+    gate = root / "template/scripts/process/check_overlays.py"
+    gate.parent.mkdir(parents=True)
+    shutil.copy(REPO / "template/scripts/process/check_overlays.py", gate)
+    for args in (["add", "-A"], ["commit", "-q", "-m", "docs"], ["tag", f"v{CURRENT}"]):
+        subprocess.run(["git", *args], cwd=root, check=True, capture_output=True)
+    doc.write_text("# X\n\n## A\n\na\n\n## B\n\nb, sharper\n\n## D\n\nnew\n", encoding="utf-8")
+
+    assert rel.changed_sections(root) == ["template/docs/process/x.md: # X — changed",
+                                          "template/docs/process/x.md: ## B — changed",
+                                          "template/docs/process/x.md: ## C — gone"]
+    with pytest.raises(SystemExit, match="Geänderte Abschnitte: …` naming them:\n  template/docs/process/x.md: # X"):
+        rel.release(root, "v9.9.9", suite=False)
+    (root / "CHANGELOG.md").write_text("**v9.9.9 — t.** body\n\nGeänderte Abschnitte: `x.md` B, C (entfällt).\n",
+                                       encoding="utf-8")
+    with pytest.raises(SystemExit, match="not clean"):  # past the section check: the next one speaks
+        rel.release(root, "v9.9.9", suite=False)
