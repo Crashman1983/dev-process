@@ -506,6 +506,7 @@ def _covers(root: Path, passes: list[dict], ids: set[str], tier: int, tip: str,
     main was written for earlier work and cannot vouch for new commits
     (downstream refutation)."""
     req = min(tier, 3)
+    passes = _review.clearing_passes(root, passes, tier)  # the gate's answer which passes count (#241)
     clearing = [r for r in passes if r["work"] in ids and int(r["tier"]) >= req]
     with_head = [r for r in clearing if r.get("head")]
     if not with_head:
@@ -1214,7 +1215,8 @@ def _settle_plans(wt: Path, base: str, branch: str, log) -> tuple[list[str], set
         if tier is None or _OPEN_TASK.search(plain):
             continue  # no tier (the gate's finding) or tasks still open: not finished
         if _review.record_kind(rel) == "plan":
-            if not (tier < 2 or _review.review_waived(plain) or _review._cleared(passes, ids, tier)):
+            if not (tier < 2 or _review.review_waived(plain)
+                    or _review._cleared(_review.clearing_passes(wt, passes, tier), ids, tier)):
                 continue  # not cleared: it stays active, and its issue open
             dest = f"{ARCHIVE}/{Path(rel).name}"
             if (wt / dest).exists():

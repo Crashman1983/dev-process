@@ -1081,6 +1081,7 @@ _PURE: dict[tuple, object] = {}
 def clear_memo() -> None:
     """Forget every memoized git fact (a long-lived caller after a fetch)."""
     _PURE.clear()
+    _OWN_FAMILY_RULES.clear()
 
 
 def _addressed(root: Path, revs: tuple[str, ...]) -> tuple | None:
@@ -2249,6 +2250,46 @@ def _known_work(root: Path, *, ref: str | None = None) -> set[str]:
     return known
 
 
+_OWN_FAMILY_RULES: dict[tuple[str, str], tuple[int, dict, str]] = {}
+
+
+def own_family_rule(root: Path, ref: str | None = None) -> tuple[int, dict, str]:
+    """(tier from which only the project's own family clears, the evidence rules,
+    problem) — `review_evidence.own_family_from_tier`, read where attest reads it: at
+    the base (`ref`, else the integration ref), so a branch cannot lift the rule for
+    itself (#241). 4: never. Kept per commit: a ref that moves is read anew."""
+    from attest_evidence import review_policy  # noqa: PLC0415  (it imports this module)
+    ref = ref or integration_ref(root) or "HEAD"
+    key = (str(root), _commit_id(root, ref) or ref)
+    if key not in _OWN_FAMILY_RULES:
+        rules, problem = review_policy(root, ref)
+        _OWN_FAMILY_RULES[key] = (4, {}, problem) if problem else (int(rules["own_family_from_tier"]), rules, "")
+    return _OWN_FAMILY_RULES[key]
+
+
+def own_family(passes: list[dict], rules: dict) -> list[dict]:
+    """The passes by a ranked model — the project's own family (`review_evidence.ranks`);
+    another family's (`families`) and an unknown model's are left out."""
+    from attest_evidence import model_class  # noqa: PLC0415
+    return [r for r in passes
+            if (cls := model_class(r.get("model") or "", rules["ranks"], rules["families"])) and cls[1] is not None]
+
+
+def clearing_passes(root: Path, passes: list[dict], tier: int, ref: str | None = None) -> list[dict]:
+    """The passes that may clear a plan of this tier and prove its code current — the one
+    answer for the gate, finish.py and the train (#241): from `own_family_from_tier` on
+    only the own family's; below it, all. An unreadable policy applies no rule (attest,
+    which reads the same policy, refuses every pass then)."""
+    own_from, rules, _problem = own_family_rule(root, ref)
+    return own_family(passes, rules) if tier >= own_from else passes
+
+
+def own_family_missing(rel: str, tier: int, own_from: int) -> str:
+    return (f"{rel}: tier {tier} plan is cleared only by another model family — from tier {own_from} "
+            f"a pass by this project's own family (`review_evidence.ranks`) must clear it and cover "
+            f"the current code (`review_evidence.own_family_from_tier`, model-policy.json)")
+
+
 def no_clearing_review(rel: str, tier: int, ids) -> str:
     """The one wording of "this plan's review is missing" — with both ways out,
     so no site names only one (the gate and finish.py ask here)."""
@@ -2617,6 +2658,11 @@ def check(root: Path) -> tuple[list[str], list[str]]:
 
     passes = [f for _ln, f in all_records if f["verdict"] == "pass"]
     known_work = _known_work(root)
+    # from `own_family_from_tier` on, the push-anchored arms below clear and judge
+    # coverage with the own family's passes alone (#241)
+    own_from, _rules, rules_problem = own_family_rule(root, scope_base)
+    if rules_problem:
+        soft.append(f"review_evidence not read ({rules_problem}) — own_family_from_tier not applied")
 
     # A report is presentation, never authority. Recompute from the trusted
     # integration baseline and release renders; template loss is project delta.
@@ -2802,9 +2848,13 @@ def check(root: Path) -> tuple[list[str], list[str]]:
                 presence(no_clearing_review(rel, min(tier, 3), ids)
                          + " — from Tier 2 on the proof is due before the merge")
                 continue
+            own = clearing_passes(root, passes, tier, scope_base)
+            if not _cleared(own, ids, tier):
+                presence(own_family_missing(rel, tier, own_from))
+                continue
             if merged_work(root, rel, passes, ids, tier):
                 soft.append(_residue(rel))
-            stale = stale_review(root, passes, ids, tier, in_flight, _reviewed_heads(passes, tier, known_work))
+            stale = stale_review(root, own, ids, tier, in_flight, _reviewed_heads(own, tier, known_work))
             if stale:
                 presence(f"{rel}: {stale}")
         if active_tier2:
@@ -2836,7 +2886,12 @@ def check(root: Path) -> tuple[list[str], list[str]]:
                 presence(f"a commit in the pushed range claims #{number} — "
                          + no_clearing_review(rel, min(tier, 3), ids))
                 continue
-            stale = stale_review(root, passes, ids, tier, in_flight, _reviewed_heads(passes, tier, known_work))
+            own = clearing_passes(root, passes, tier, scope_base)
+            if not _cleared(own, ids, tier):
+                presence(f"a commit in the pushed range claims #{number} — "
+                         + own_family_missing(rel, tier, own_from))
+                continue
+            stale = stale_review(root, own, ids, tier, in_flight, _reviewed_heads(own, tier, known_work))
             if stale:
                 presence(f"#{number} ({rel}): {stale}")
 
