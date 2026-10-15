@@ -22,7 +22,11 @@ new round); a change in flight under the surface's paths while no active
 plan cites a contract ID (DoR R5); a plan citing IDs without naming the
 contract it means. A plan is bound to a contract by naming its path or a
 `design-contract: <surface>` line — ID families are shared across surfaces,
-so only a bound plan is judged against a contract. Judging the design itself is never
+so only a bound plan is judged against a contract. A project may make the
+line a duty (docs/process/design-contract-declaration.json): from its day on,
+every active Tier 2+ plan states `design-contract: <surface> | n/a — <reason>`
+and a declared contract carries a non-empty `## Design Contract Trace`; naming
+the path alone no longer suffices there. Judging the design itself is never
 machine work — that is what the sealed boards and the reviewer are for.
 Python stdlib only."""
 from __future__ import annotations
@@ -338,14 +342,137 @@ def _check_one(root: Path, path: Path, plans: dict[str, str], in_flight: set[str
     return hard, soft
 
 
+# --- declaring the contract (#248): opt-in per project -------------------------
+# A project that wants every Tier 2+ plan to state its contract writes
+# DECLARATION: {"from": "YYYY-MM-DD", "spec_above": N}. Read at the fork point,
+# like the review evidence rules: a branch cannot lift the duty for itself.
+DECLARATION = "docs/process/design-contract-declaration.json"
+TRACE_HEADING = "## Design Contract Trace"
+_DECLARED = re.compile(r"^\s*(?:[-*+]\s+)?[*_]*design-contract[*_]*[ \t]*:[ \t]*[*_]*[ \t]*(.*)$",
+                       re.IGNORECASE | re.MULTILINE)
+_NA = re.compile(r"^n/?a\b\s*(?:[—–-]+\s*)?(.*)$", re.IGNORECASE)
+_SPEC_NUMBER = re.compile(r"^(\d+)-")
+_ISO_DAY = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def declaration_rule(root: Path) -> tuple[dict | None, str | None]:
+    """(rule, problem): the project's declaration duty as its fork point has it —
+    None when the project has none (nothing changes for it)."""
+    import check_review as _review  # noqa: PLC0415  (the owner of the fork point)
+    base = _review.merge_base(root)
+    if base:
+        text = _review._show(root, base, DECLARATION)
+    else:  # no integration branch yet: the working tree is all there is
+        path = root / DECLARATION
+        text = _read(path) if path.is_file() else None
+    if text is None:
+        return None, None
+    try:
+        data = json.loads(text)
+    except ValueError as exc:
+        return None, f"{DECLARATION}: not valid JSON ({exc})"
+    if not isinstance(data, dict) or not _ISO_DAY.match(str(data.get("from", ""))):
+        return None, f'{DECLARATION}: needs "from": "YYYY-MM-DD" (the day the duty starts)'
+    above = data.get("spec_above")
+    if above is not None and (isinstance(above, bool) or not isinstance(above, int) or above < 0):
+        return None, f'{DECLARATION}: "spec_above" must be a whole number (the highest spec before the duty)'
+    return data, None
+
+
+def _first_added(root: Path, rel: str) -> str | None:
+    """The author day of the commit that first added `rel` — a backdated file
+    name proves nothing; None: not committed yet."""
+    import subprocess  # noqa: PLC0415
+    r = subprocess.run(["git", "-C", str(root), "log", "--diff-filter=A", "--format=%as", "--", rel],
+                       capture_output=True, text=True)
+    days = r.stdout.split() if r.returncode == 0 else []
+    return days[-1] if days else None
+
+
+def _trace_body(text: str) -> str | None:
+    """What stands under the trace heading up to the next `## ` heading; None without one."""
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        if line.strip() == TRACE_HEADING:
+            body = []
+            for nxt in lines[i + 1:]:
+                if nxt.startswith("## "):
+                    break
+                body.append(nxt)
+            return "\n".join(body).strip()
+    return None
+
+
+def declaration_problems(text: str, contracts: set[str]) -> list[str]:
+    """Why a plan does not state its contract as the duty asks — [] when it does."""
+    plain = _unfenced(text)
+    named = ", ".join(sorted(contracts)) or "(no contract registered yet)"
+    decl = _DECLARED.search(plain)
+    if decl is None:
+        return [f"no `design-contract:` line — declare one of {named} or `n/a — <reason>`"]
+    value = decl.group(1).strip().strip("*_").strip()
+    na = _NA.match(value)
+    if na is not None:
+        return [] if na.group(1).strip() else ["`design-contract: n/a` without a reason — name why "
+                                               "no visual surface is touched"]
+    contract = value.split()[0] if value else ""
+    if contract not in contracts:
+        return [f"unknown design contract `{contract}` — expected one of {named} or `n/a — <reason>`"]
+    if not _trace_body(plain):
+        return [f"declares `{contract}` but its `{TRACE_HEADING}` is missing or empty — name the "
+                f"contract sections, screen IDs and briefs the work follows, and every deviation"]
+    return []
+
+
+def declaration_check(root: Path, plans: dict[str, str], contracts: set[str]
+                      ) -> tuple[list[str], list[str]]:
+    """The declaration duty over the active Tier 2+ plans: hard from the day the
+    project set, one summary note for the plans from before it."""
+    from check_review import plan_tier  # noqa: PLC0415  (one owner of the tier grammar)
+    rule, problem = declaration_rule(root)
+    if problem:
+        return [problem], []
+    if rule is None:
+        return [], []
+    hard, older = [], []
+    for rel, text in plans.items():
+        if Path(rel).name.startswith("design-"):
+            continue
+        tier = plan_tier(_unfenced(text))
+        if tier is None or tier < 2:
+            continue
+        problems = declaration_problems(text, contracts)
+        if not problems:
+            continue
+        if rel.startswith(SPECS_DIR + "/"):
+            m = _SPEC_NUMBER.match(Path(rel).parent.name)
+            bound = rule.get("spec_above") is None or m is None or int(m.group(1)) > rule["spec_above"]
+        else:
+            added = _first_added(root, rel)
+            bound = added is None or added >= rule["from"]
+        if bound:
+            hard += [f"{rel}: {p}" for p in problems]
+        else:
+            older.append(rel)
+    soft = [f"{len(older)} Tier 2+ plan(s) predate the declaration duty and state no valid "
+            f"`design-contract:` line (not enforced): {', '.join(older)}"] if older else []
+    return hard, soft
+
+
 def check(root: Path) -> tuple[list[str], list[str]]:
     files = _registry_files(root)
-    if not files:
-        return [], ["no design contracts yet (dir empty or absent)"]
     plans = active_plan_texts(root)
+    contracts = set()
+    for path in files:
+        data, _errs = load(root, path)
+        if data is not None:
+            contracts.add(data["surface"].strip())
+    decl_hard, decl_soft = declaration_check(root, plans, contracts)
+    if not files:
+        return decl_hard, ["no design contracts yet (dir empty or absent)", *decl_soft]
     in_flight = _paths_in_flight(root)
-    hard: list[str] = []
-    soft: list[str] = []
+    hard: list[str] = list(decl_hard)
+    soft: list[str] = list(decl_soft)
     entries = []
     for path in files:
         h, s = _check_one(root, path, plans, in_flight)
