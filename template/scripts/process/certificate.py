@@ -61,7 +61,7 @@ RUN_STAGES = ("merge-suite", "stages")  # in the git dir: the stages the merge s
 
 def run_stages(root: Path) -> list[str] | None:
     """The stages the last merge-suite run in `root` ran — the `stages` file its
-    Makefile wrote — or None when it cannot be read. The one reader: the train's
+    merge suite wrote — or None when it cannot be read. The one reader: the train's
     stage times and the certificate's scope both ask here, so what ran is one fact."""
     r = _git(root, "rev-parse", "--absolute-git-dir")
     if r.returncode != 0:

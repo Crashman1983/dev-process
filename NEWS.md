@@ -10,11 +10,12 @@ technischen Einzelheiten stehen im [CHANGELOG](CHANGELOG.md).
 Kenni, das erste Projekt auf dieser Vorlage, hatte in den letzten Wochen
 einiges selbst verbessert. Vieles davon steckt jetzt in der Vorlage, damit
 das Projekt nicht davonläuft und andere Projekte es auch haben. Dazu gehört
-eine Bestätigung, dass Tests gelaufen sind, die nun genau sagt, welche
-Testgruppen liefen; dazu Zeitmessungen je Testgruppe, Pläne, die jeder
+eine Bestätigung, dass Tests gelaufen sind, die bei Projekten mit
+Testgruppen genau sagt, welche liefen; dazu Zeitmessungen je Testgruppe, Pläne, die jeder
 Aufgabe die genaue Fundstelle mitgeben, sodass ein kleines Modell weniger
 sucht (gemessen: rund ein Drittel der Schritte), und Lehren aus dem Betrieb.
-Zwei größere Teile warten noch auf eine Entscheidung des Owners.
+Nach dem Update laufen die Tests vor dem ersten Push einmal neu. Zwei
+größere Teile warten noch auf eine Entscheidung des Owners.
 
 ## v2.71.0 — Eine Prüfung zählt nur mit Beleg
 
