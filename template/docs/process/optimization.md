@@ -196,6 +196,11 @@ project's decision in the record, the process maintainer owns the generic
 adoption in the upstream issue and release. Each decision has exactly one
 owner.
 
+A record that answers a measurement milestone (`due_measurements.py`)
+carries one line `milestone: <id>` in its free text, not in the header —
+the header holds `key: value` lines only. Without that line the milestone
+stays due: fail-loud, not silently done.
+
 ### States
 
 `proposed` → `designed` → `piloting` → (`stopped` →) `evaluating` →
