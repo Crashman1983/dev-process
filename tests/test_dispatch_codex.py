@@ -405,9 +405,12 @@ def test_the_same_family_is_never_claimed_cross_model(review_repo):
     journal = "\n".join(p.read_text() for p in (out / ".process-work/journal").glob("**/*.md"))
     assert "single-family" in journal and "cross-model" not in journal
     # an unmeasured implementer is no other family either
-    assert codex.independence(out, "gpt-6-sol", None) == "single-family"
-    assert codex.independence(out, "gpt-6-sol", "claude-sonnet-5") == "cross-model"
-    assert codex.independence(out, "claude-opus-5", "claude-sonnet-5") == "single-family"
+    base = _git(out, "merge-base", "main", "HEAD")
+    assert codex.independence(out, base, "gpt-6-sol", None) == "single-family"
+    assert codex.independence(out, base, "gpt-6-sol", ["claude-sonnet-5"]) == "cross-model"
+    assert codex.independence(out, base, "claude-opus-5", ["claude-sonnet-5"]) == "single-family"
+    # every implementing model counts: one Codex push among Claude pushes is no other family
+    assert codex.independence(out, base, "gpt-6-sol", ["claude-sonnet-5", "gpt-6-luna"]) == "single-family"
 
 
 def test_a_tampered_or_stale_review_is_never_handed_off(review_repo):
