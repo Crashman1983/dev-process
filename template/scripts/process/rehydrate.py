@@ -76,19 +76,31 @@ def context(root: Path) -> dict:
 
 
 def _overlay_pairs(root: Path) -> list[tuple[str, str]]:
-    """(template file, overlay) for each project overlay (`check_overlays.overlays`)."""
-    import re  # noqa: PLC0415
+    """(template file, overlay) for each project overlay — the gate's own reading
+    (`check_overlays`), so the session and the gate never disagree on what is one."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    try:
+        import check_overlays as co  # noqa: PLC0415
+    except ImportError:
+        return []
     out = []
-    for p in sorted(root.glob("docs/process/**/*.local.md")):
-        m = re.search(r"^overlay-of:[ \t]*(\S+)", _read(p), re.MULTILINE)
-        if m:
-            out.append((m.group(1), p.relative_to(root).as_posix()))
+    for p in co.overlays(root):
+        m = co.HEAD.search(_read(p).lstrip("\ufeff"))
+        out.append((m.group("path") if m else "(unparsed overlay-of)", p.relative_to(root).as_posix()))
     return out
+
+
+def _inline_overlays(root: Path, docs: tuple[str, ...]) -> list[str]:
+    """The overlays of docs whose full text is in the context (kernel, rules): a pointer
+    beside a full template rule would lose to it — the overlay goes in whole."""
+    return [f"## Project overlay `{ov}` (of `{doc}` — it binds in this project)\n\n{_read(root / ov).strip()}"
+            for doc, ov in _overlay_pairs(root) if doc in docs]
 
 
 def render(root: Path) -> str:
     out = ["# Rehydrated process context (SessionStart hook — the compaction dropped this; it binds every turn)",
            "", kernel_block(root), "", "## Mandatory rules (full text)", "", _read(root / RULES).strip(), ""]
+    out += [*_inline_overlays(root, (KERNEL, RULES)), ""] if _inline_overlays(root, (KERNEL, RULES)) else []
     pairs = _overlay_pairs(root)
     if pairs:
         out += ["## Project overlays — read each with its template file (docs/process/overlays.md)", "",
@@ -186,6 +198,8 @@ def codex_sources(root: Path) -> list[str]:
     if (root / CODEX_LOCAL_POLICY).exists():
         sources.append(CODEX_LOCAL_POLICY)
     sources += [a for a in ("AGENTS.md", "CLAUDE.md") if (root / a).is_file()]  # each anchor the project has
+    # the overlays of what the context carries in full go in whole beside it
+    sources += [ov for doc, ov in _overlay_pairs(root) if doc in sources and ov not in sources]
     for name in (CODEX_POLICY, CODEX_LOCAL_POLICY):
         if not (root / name).exists():
             continue

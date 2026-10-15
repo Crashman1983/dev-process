@@ -630,3 +630,41 @@ def test_ci_true_renders_no_manual_wording(render, tmp_path):
     out = render(tmp_path, {"project_name": "d", "modules": {"telemetry": True}})
     for name in ("process-gates.yml", "owner-digest.yml", "process-kpis.yml"):
         assert "ci.github: manual" not in (out / ".github/workflows" / name).read_text(), name
+
+
+# --- refute round 2 ------------------------------------------------------------------------
+
+def test_a_foreign_or_uncommitted_review_line_finishes_nothing(review_repo):
+    out, d, codex = review_repo(None)  # the run fails: no result
+    assert d.start(out, issue=7, phase="review", tier=2, branch="7-widget", title=None, dry_run=False,
+                   harness="codex") == 0
+    rec = d._load_record(out, "7-widget")[1]
+    _wait(codex, d, rec, "failed")
+    j = out / ".process-work/journal"
+    j.mkdir(parents=True, exist_ok=True)
+    (j / "2026-10-14.md").write_text(f"REVIEW work=7 tier=2 reviewer=fresh model=gpt-6-sol "
+                                     f"independence=bundle,non-implementing,cross-model verdict=pass round=1 "
+                                     f"base={rec['binding']['base']} head={rec['binding']['head']}\n")
+    assert d.handoff(out, "7-widget") == 3
+    assert not [r for r in d._report.read_reports(out) if r.get("state") == "review-pass"]
+
+
+def test_a_review_without_receipt_is_no_way_out(review_repo, capsys):
+    block = {"verdict": "block", "findings": [{"sev": "major", "action": "fix", "kind": "implementation",
+                                               "issue": "-", "title": "wrong"}], "criteria": [], "refute": []}
+    out, d, codex = review_repo(block)
+    rec = _run_review(out, d, codex)
+    (Path(rec["evidence"]) / "terminal.json").unlink()
+    assert d.handoff(out, "7-widget") == 3
+    err = capsys.readouterr().err
+    assert "receipts are unknown" in err and "codex unavailable" not in err
+    assert not (d._records_dir(out) / "codex" / codex.UNAVAILABLE).exists()
+
+
+def test_the_implementer_flag_never_overrides_a_measured_model(review_repo):
+    out, d, codex = review_repo(PASS, implementer="gpt-6-luna")
+    d._report.write_report(out, "pushed", issue=7, note="", worker="7-widget", model=None)  # not measured
+    _run_review(out, d, codex)
+    assert d.handoff(out, "7-widget", implementer="claude-opus-5") == 0
+    journal = "\n".join(p.read_text() for p in (out / ".process-work/journal").glob("**/*.md"))
+    assert "single-family" in journal and "cross-model" not in journal

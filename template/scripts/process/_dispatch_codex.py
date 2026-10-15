@@ -548,19 +548,17 @@ def _one_line(value: object) -> bool:
     return isinstance(value, str) and bool(value.strip()) and len(value.splitlines()) == 1
 
 
-def implementer_models(root: Path, issue: int, branch: str, plan_review: bool) -> list[str] | None:
-    """Every model that wrote what is reviewed: each `pushed` report of the issue on this
-    branch (the plan session's `planned` ones for a plan review), other hosts' reports
-    included. None when there is none, or one of them measured no model — then nobody
-    can say all of it came from another family."""
+def implementer_models(root: Path, issue: int, branch: str, plan_review: bool) -> tuple[list[str], int]:
+    """(the measured models, the count of reports that measured none) of what is
+    reviewed: each `pushed` report of the issue on this branch (the plan session's
+    `planned` ones for a plan review), other hosts' reports included."""
     from report import UNMEASURED, read_reports  # noqa: PLC0415
     state = "planned" if plan_review else "pushed"
     rows = [r for r in read_reports(root, remote=True)
             if r.get("issue") == issue and r.get("state") == state and r.get("branch") in (branch, None, "")]
     models = [str(r.get("model") or "") for r in rows]
-    if not models or any(m in ("", UNMEASURED) for m in models):
-        return None
-    return sorted(set(models))
+    unmeasured = sum(m in ("", UNMEASURED) for m in models)
+    return sorted({m for m in models if m not in ("", UNMEASURED)}), unmeasured
 
 
 def family(model: str, ranks: dict, families) -> str | None:
@@ -607,14 +605,32 @@ def _report_text(rec: dict, result: dict, *, work: str, plan_review: bool, refut
     return "\n".join(lines) + "\n"
 
 
-def _attested_already(wt: Path, work: str, model: str, head: str, plan_review: bool) -> dict | None:
-    """The REVIEW line of this work, model and head in the journal, if there is one: a
-    handoff that stopped after its commit finishes from it and never attests twice."""
-    from check_review import JOURNAL_DIR, parse_review_lines  # noqa: PLC0415
+def _committed_attest(wt: Path, rec: dict, work: str, plan_review: bool) -> dict | None:
+    """This run's own attest commit, if it is HEAD: a commit straight on the reviewed
+    head that adds this run's report and a `reviewer=codex` REVIEW line of this work,
+    model and head. Only then does a handoff that stopped after its commit finish —
+    an uncommitted or foreign line finishes nothing."""
+    from check_review import parse_review_lines  # noqa: PLC0415
+    b = rec["binding"]
+    try:
+        if _git(wt, "rev-parse", "HEAD^").decode().strip() != b["head"]:
+            return None
+        added = _git(wt, "diff", "--name-only", "--diff-filter=AM", "HEAD^", "HEAD").decode().splitlines()
+    except ValueError:
+        return None
+    if not any(p.startswith(f"{REVIEWS}/") and p.endswith(f"-codex-{rec['invocation'][:8]}.md") for p in added):
+        return None
     want = f"{work}-plan" if plan_review else work
-    for f in (wt / JOURNAL_DIR).glob("**/*.md"):
-        for _ln, r in parse_review_lines(f.read_text(encoding="utf-8", errors="replace"))[0]:
-            if r.get("work") == want and r.get("model") == model and r.get("head") == head:
+    for rel in added:
+        if not rel.startswith(".process-work/journal/"):
+            continue
+        try:
+            text = _git(wt, "show", f"HEAD:{rel}").decode("utf-8", errors="replace")
+        except ValueError:
+            continue
+        for _ln, r in parse_review_lines(text)[0]:
+            if (r.get("work") == want and r.get("model") == rec["model"] and r.get("head") == b["head"]
+                    and r.get("reviewer") == "codex"):
                 return r
     return None
 
@@ -641,21 +657,24 @@ def handoff(root: Path, rec: dict, *, implementer: str | None = None) -> dict:
     work = str(rec["issue"])
     wt = Path(rec["worktree"])
     b = rec["binding"]
-    line = _attested_already(wt, work, rec["model"], b["head"], plan_review)
-    if line:
-        # a handoff that stopped after its attest commit: finish it, never attest again
-        return _finish(rec, wt, done, {"invocation": rec["invocation"], "artifact": b, "state": "attested",
-                                       "verdict": line.get("verdict"), "report": "(from the journal)",
-                                       "note": "the journal already holds this run's REVIEW line"})
     try:
         if rec.get("phase") != "review":
             raise ValueError("not a review run")
         ended = outcome(rec, _same_process(rec))
         if ended == "running":
             raise ValueError("the review is still running — hand it off when it ends")
-        if ended != "completed":
+        if ended in ("failed", "interrupted"):
             raise CodexUnavailable(f"the review run ended {ended}, with no usable result")
+        if ended != "completed":  # no valid receipt: evidence lost or altered — never a way out
+            raise ValueError(f"the review run's receipts are {ended} — the evidence is kept; look at "
+                             f"{rec['evidence']} before anything else")
         row = terminal(rec)
+        line = _committed_attest(wt, rec, work, plan_review)
+        if line:
+            # a handoff that stopped after its own attest commit: finish it, never attest again
+            return _finish(rec, wt, done, {"invocation": rec["invocation"], "artifact": b, "state": "attested",
+                                           "verdict": line.get("verdict"), "report": "(committed)",
+                                           "note": "this run's attest commit is HEAD; it is pushed now"})
         if binding(wt, Path(b["bundle"])) != b:
             raise ValueError("the bundle or the Git artifact changed since the review ran")
         result_path = Path(rec["result"])
@@ -679,11 +698,15 @@ def handoff(root: Path, rec: dict, *, implementer: str | None = None) -> dict:
     tier = rec.get("tier")
     if tier is None:
         raise ValueError("the run records no tier — start the review with --tier")
-    measured = implementer_models(root, int(rec["issue"]), rec["branch"], plan_review)
-    if implementer and measured and measured != [implementer]:
-        raise ValueError(f"--implementer {implementer} contradicts the reports ({', '.join(measured)}) — "
-                         f"the measured models decide")
-    implementers = measured or ([implementer] if implementer else None)
+    measured, unmeasured = implementer_models(root, int(rec["issue"]), rec["branch"], plan_review)
+    # `--implementer` only stands in for what no report measured — never over a measured model
+    if implementer and not (unmeasured or not measured):
+        raise ValueError(f"--implementer {implementer}: the reports measured every implementing model "
+                         f"({', '.join(measured)}) — they decide")
+    if unmeasured or not measured:
+        implementers = [*measured, implementer] if implementer else None
+    else:
+        implementers = measured
     token = independence(wt, b["base"], rec["model"], implementers)
     record = {"invocation": rec["invocation"], "artifact": b, "result_sha256": rec["result_sha256"],
               "verdict": result["verdict"], "independence": token, "implementers": implementers}
