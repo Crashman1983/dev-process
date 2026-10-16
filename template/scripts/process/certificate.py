@@ -157,18 +157,22 @@ def clean_tree_problem(root: Path) -> str | None:
 
 # make flags that change which recipes run, or override the Makefile's pins: a run
 # under them proves nothing about the suite (downstream #2149). One letter each in
-# the dashless cluster make exports first (`make -i -s` → `MAKEFLAGS=is`) or as `-x`
-_MAKE_ALTERING = set("iknqteoE")
+# the dashless cluster make exports first (`make -i -s` → `MAKEFLAGS=is`) or as `-x`.
+# `-k` is not among them: keep-going runs the remaining targets after a failure and
+# still exits non-zero, so it hides nothing — `make -k test-merge` runs every stage
+# once, and a suite run that way is the suite (downstream #2631)
+_MAKE_ALTERING = set("inqteoE")
 # short flags whose value follows in the same word (`-j4`, `-Otarget`): the rest is no flag
 _MAKE_VALUED = set("jlIWCOf")
 # long options a run may carry and still be the suite: they shape output, jobs or
 # the directory, never which recipes run. Anything else is refused — make accepts
-# any unambiguous abbreviation (`--keep-go`, `--env`), so a deny list cannot hold
+# any unambiguous abbreviation (`--keep-go`, `--env`), so a deny list cannot hold;
+# only the exact names below pass
 _MAKE_SHAPING_LONG = {"--no-print-directory", "--print-directory", "--jobserver-auth", "--jobserver-fds",
                       "--jobs", "--load-average", "--max-load", "--output-sync", "--debug", "--trace",
                       "--include-dir", "--directory", "--silent", "--quiet", "--no-silent",
                       "--warn-undefined-variables", "--no-builtin-rules", "--no-builtin-variables",
-                      "--no-keep-going", "--stop"}
+                      "--keep-going", "--no-keep-going", "--stop"}
 
 
 def _makeflags_problem(flags: str) -> str | None:

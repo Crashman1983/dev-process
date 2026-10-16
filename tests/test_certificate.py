@@ -92,9 +92,9 @@ def test_no_certificate_for_a_run_that_proves_nothing(repo, monkeypatch, dirt):
 
 
 @pytest.mark.parametrize("flags,named", [
-    ("is", "-i"), ("k -j4", "-k"), ("s -- PIN=x", "assignment"), ("-n", "-n"), ("-wt", "-t"),
+    ("is", "-i"), ("ki -j4", "-i"), ("s -- PIN=x", "assignment"), ("-n", "-n"), ("-wt", "-t"),
     ("--eval=override\\ PIN:=evil", "--eval"), ("-E override\\ PIN:=evil", "-E"),
-    ("-o stale.o", "-o"), ("--assume-old=x", "--assume-old"), ("--keep-going", "--keep-going"),
+    ("-o stale.o", "-o"), ("--assume-old=x", "--assume-old"),
     ("e", "-e"), ("--ignore-err", "--ignore-err"), ("--keep-go", "--keep-go"), ("--env", "--env"),
     ("--dry", "--dry"), ("--tou", "--tou"),
 ])
@@ -108,7 +108,8 @@ def test_makeflags_that_change_what_ran_certify_nothing(repo, monkeypatch, flags
 
 @pytest.mark.parametrize("flags", ["s", "w -j4 --no-print-directory", "-j4", "-Otarget", "--jobs=4",
                                    "-l2 -j4", "-C sub", " -j4 --jobserver-auth=fifo:/tmp/x",
-                                   "--output-sync=target"])
+                                   "--output-sync=target", "k", "k -j4 --no-print-directory",
+                                   "-k", "--keep-going"])
 def test_makeflags_that_only_shape_the_run_still_certify(repo, monkeypatch, flags):
     c = _cert()
     monkeypatch.setenv("MAKEFLAGS", flags)
