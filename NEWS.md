@@ -7,6 +7,12 @@ details are in the [CHANGELOG](CHANGELOG.md).
 
 Deutsche Fassung: [NEWS-DE.md](NEWS-DE.md).
 
+## v2.74.2 — A suite that keeps going after a failure counts again
+
+A project whose test suite runs every stage even after one fails gets its
+test certificate again. Since 2.74.0 that mode blocked the merge, although
+it hides no failure.
+
 ## v2.74.1 — A review recorded with the family name counts again
 
 A project that lets only its own model family approve from a certain tier on
