@@ -9,6 +9,20 @@ ein Eintrag ohne Plan oder Issue hat keine Details-Zeile. In wenigen Sätzen je 
 English version: [CHANGELOG.md](CHANGELOG.md). Die Geschichte vor v2.28.2
 (Sub-Projekte): [docs/changelog-archive.md](docs/changelog-archive.md).
 
+## v2.74.2 — `make -k` zertifiziert wieder · 2026-10-16
+
+**Warum.** v2.74.0 verweigerte Zertifikate unter MAKEFLAGS, die verändern, was läuft, und zählte `-k` dazu. Keep-going verdeckt aber nichts: make läuft nach einem Fehler die übrigen Ziele weiter und endet trotzdem mit einem Exit ungleich 0. Der eigene Rat des Templates fährt die Suite als `make -k test-merge`, und genau so tut es Kennis Merge-Suite. Zwei Züge sind gescheitert: Unter dem geerbten `MAKEFLAGS=k` wurden die Tests rot, die Zertifikate schreiben, und der Push auf main wurde verweigert.
+
+**Was sich ändert.**
+- `-k` und `--keep-going` sperren kein Zertifikat mehr.
+- `-i`, `-n`, `-t`, `--eval` und abgekürzte Langoptionen sperren weiter.
+
+**Update.** Nichts zu tun.
+
+**Geänderte Abschnitte.** `testing.md` (Test economy — scoped inner loop, full merge boundary)
+
+Details: #263
+
 ## v2.74.1 — Der Familienname aus /review gibt ab own_family_from_tier wieder frei · 2026-10-15
 
 **Warum.** `/review` hält einen Pass mit `--model <family>` fest, zum Beispiel `claude`. Ab `own_family_from_tier` zählte v2.74.0 nur Modelle, deren Klasse die Ränge kennen (`claude-opus`). Ein Pass, der so festgehalten wurde, wie es dokumentiert ist, gab deshalb weder im Gate noch in `finish.py` noch im Zug frei. Kenni fand das im Review seines v2.74-Updates; dort hätte es laufende Tier-3-Pässe abgelehnt.

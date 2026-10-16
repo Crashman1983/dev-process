@@ -7,6 +7,12 @@ technischen Einzelheiten stehen im [CHANGELOG](CHANGELOG-DE.md).
 
 English version: [NEWS.md](NEWS.md).
 
+## v2.74.2 — Eine Suite, die nach einem Fehler weiterläuft, zählt wieder
+
+Ein Projekt, dessen Testsuite auch nach einem Fehler alle Stufen weiterfährt,
+bekommt wieder sein Testzertifikat. Seit 2.74.0 hielt diese Betriebsart den
+Merge auf, obwohl sie keinen Fehler verdeckt.
+
 ## v2.74.1 — Ein Review mit dem Familiennamen zählt wieder
 
 Ein Projekt, das ab einer bestimmten Stufe nur die eigene Modellfamilie

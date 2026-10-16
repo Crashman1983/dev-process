@@ -10,6 +10,20 @@ A few plain sentences per release: [NEWS.md](NEWS.md). Deutsche Fassung:
 [CHANGELOG-DE.md](CHANGELOG-DE.md). History before v2.28.2 (sub-projects, German):
 [docs/changelog-archive.md](docs/changelog-archive.md).
 
+## v2.74.2 — `make -k` certifies again · 2026-10-16
+
+**Why.** v2.74.0 refused certificates under MAKEFLAGS flags that change what runs, and it listed `-k` among them. Keep-going hides nothing: make runs the remaining targets after a failure and still exits non-zero. The template's own advice runs the suite as `make -k test-merge`. Kenni's merge suite does exactly that. Two trains failed: the tests that write certificates went red under the inherited `MAKEFLAGS=k`, and the main push was refused.
+
+**What changes.**
+- `-k` and `--keep-going` no longer block a certificate.
+- `-i`, `-n`, `-t`, `--eval` and abbreviated long options still do.
+
+**Update.** Nothing to do.
+
+**Changed sections.** `testing.md` (Test economy — scoped inner loop, full merge boundary)
+
+Details: #263
+
 ## v2.74.1 — The family name /review records clears again from own_family_from_tier · 2026-10-15
 
 **Why.** `/review` records a pass with `--model <family>`, for example `claude`. From `own_family_from_tier` on, v2.74.0 counted only models whose class the ranks know (`claude-opus`), so a pass recorded the documented way cleared nothing in the gate, in `finish.py` and in the train. Kenni found it in the review of its v2.74 update, where it would have refused current Tier 3 passes.
