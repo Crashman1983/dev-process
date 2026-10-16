@@ -242,7 +242,9 @@ code. A project supplies data; the template owns the sequence:
 - **`scripts/process/certificate.py`** — `push` and `merge` certificates,
   keyed by the evidence tree (without `.process-work/`) and what ran.
   Written only on a clean tree that the run left unchanged, with no
-  `MAKEFLAGS` assignment and no `certificate_env` variable set.
+  `MAKEFLAGS` assignment or flag that changes what runs (`-i`, `-n`, `-t`,
+  `--eval`, …; `-k` and `-s` pass, they hide nothing) and no
+  `certificate_env` variable set.
   `test_select.py run --certify` writes `push`; the train and `finish.py
   --tests <merge_suite>` write `merge`; `finish --tests-passed` is a claim
   and writes nothing. A branch push accepts either; a merge push only
