@@ -276,3 +276,23 @@ def test_git_failing_to_list_deleted_plans_is_a_finding(render, tmp_path):
     r = subprocess.run([sys.executable, "-c", probe], cwd=out, capture_output=True, text=True,
                        env={**os.environ, "PROCESS_PUSH_TARGETS": "refs/heads/main"})
     assert "git cannot list the plans this push deletes" in r.stdout, r.stdout + r.stderr
+
+
+def test_a_marker_in_a_nested_lists_outer_item_is_read(render, tmp_path):
+    # review v2.75 r2: a list-tracking scan dropped to column 0 after a nested item and
+    # read the outer item's paragraph as code — an open question passed silently
+    out = render(tmp_path, {"project_name": "demo"})
+    write(out, f"{PLANS}/2026-10-19-store.md",
+          "# Plan\n\ntier: 2\n\n1. Decide storage\n   - option A: postgres\n\n"
+          "    Which one? [NEEDS CLARIFICATION: postgres or sqlite]\n")
+    r = subprocess.run([sys.executable, str(out / "scripts/process/check_clarification.py"), "."],
+                       cwd=out, capture_output=True, text=True)
+    assert r.returncode == 1 and "2026-10-19-store.md:8" in r.stdout, r.stdout
+
+
+def test_a_record_in_a_nested_lists_outer_item_counts(render, tmp_path):
+    out = render(tmp_path, {"project_name": "demo"})
+    write(out, f"{ARCHIVE}/2026-07-01-auth.md", "tier: 3\n")
+    write(out, f"{JOURNAL}/2026-07-04.md", "1. Merged auth\n   - follow-ups filed\n\n    " + R() + "\n")
+    r = run(out)
+    assert r.returncode == 0, r.stdout

@@ -916,6 +916,10 @@ def test_main_touching_an_update_path_expires_the_ack_and_names_it(update, monke
     delta = dict(report, project_delta=report['project_delta'] or ['docs/process/example.md'])
     finding = review.template_review_findings(root, delta, [old], tip='HEAD')
     assert any('the REVIEW of 7' in f and 'main changed .process-owned' in f for f in finding), finding
+    # a review that never saw the update is not named as one that stopped covering it (r2)
+    unrelated = dict(work='7', tier=3, base=base, head=base, mode='full')
+    finding = review.template_review_findings(root, delta, [unrelated], tip='HEAD')
+    assert finding and not any('no longer covers' in f for f in finding), finding
 
 
 def test_a_changed_fingerprint_expires_the_ack_and_names_the_difference(update):

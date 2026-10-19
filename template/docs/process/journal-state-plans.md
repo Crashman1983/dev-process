@@ -220,11 +220,12 @@ The journal only grows, and `.process-work/journal/.gitattributes` says so to gi
 Two companion lines. `ROOT-CAUSE work=<id> round=<r>: <cause> — <the test that failed before the fix>` (journal or plan): each blocking round's fix names its cause before the next round; `attest.py` notes a missing one (the duty sits with the fixing session, which checks it with `--dry-run`), and never refuses a verdict over it. `red_evidence.py` writes it from a measured run — the test names and exit codes come from the run, the cause is the only free text; pytest is measured directly, any other runner (vitest, jest, XCTest) through the JUnit XML it writes (`--junit PATH`). `REVIEW-EXCEPTION work=<id> round=<n>: <reason> …`: written by `attest.py --exception` when the owner overrides a rule — countable, never silent.
 
 A `REVIEW` inside a ```-fenced block is a quotation and is ignored (quote
-literal examples only there). A fence opens and closes as in CommonMark (indented at most
-three columns, a list item's counted from its content): it closes on the opener's
-character, at least as long, and nothing else on the line — ` ```python `
+literal examples only there). A fence opens at any indentation (right after a list item's marker
+too) and closes on the opener's character, at least as long, nothing else on
+the line and at most three columns deeper than its opener — ` ```python `
 inside a ` ```md ` example opens a nested example and closes nothing; nest
-with a longer outer fence. A fence still open at the end of a journal shard
+with a longer outer fence. A line four columns in after a blank line that
+follows top-level prose is an indented code block; list items are not tracked. A fence still open at the end of a journal shard
 or an active plan that swallows a `tier:`, `issue:`, `review-waived:` or `REVIEW`
 line is a hard finding (a note in the archive). Grammar and the independence arithmetic the gate
 enforces on a `pass` are in `verification-independence.md`.
