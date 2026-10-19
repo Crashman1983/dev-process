@@ -359,7 +359,7 @@ def test_a_fence_closing_differently_since_250_is_asked_about_in_the_archive(ren
     out = render(tmp_path, {"project_name": "demo"})
     write(out, f"{ARCHIVE}/2026-07-10-widget.md", "# Plan\n\n" + body)
     r = run(out)
-    assert r.returncode == 1 and "closes differently since #250" in r.stdout, r.stdout
+    assert r.returncode == 1 and "a fence above it closes differently" in r.stdout, r.stdout
 
 
 def test_a_hidden_open_question_is_asked_about(render, tmp_path):
@@ -367,12 +367,12 @@ def test_a_hidden_open_question_is_asked_about(render, tmp_path):
     write(out, f"{PLANS}/2026-10-19-store.md", "# Plan\n\ntier: 2\n\n" + LI
           + "DECISION NEEDED 2026-10-19 seb: postgres or sqlite?\n\n```\nmake test\n```\n")
     r = run(out)
-    assert r.returncode == 1 and "closes differently since #250" in r.stdout, r.stdout
+    assert r.returncode == 1 and "a fence above it closes differently" in r.stdout, r.stdout
     write(out, f"{PLANS}/2026-10-19-store.md", "# Plan\n\ntier: 2\n\n" + LI
           + "[NEEDS CLARIFICATION: postgres or sqlite]\n\n```\nmake test\n```\n")
     r = subprocess.run([sys.executable, str(out / "scripts/process/check_clarification.py"), "."],
                        cwd=out, capture_output=True, text=True)
-    assert r.returncode == 1 and "closes differently since #250" in r.stdout, r.stdout
+    assert r.returncode == 1 and "a fence above it closes differently" in r.stdout, r.stdout
 
 
 def test_a_record_in_indented_code_after_an_inline_fence_is_asked_about(render, tmp_path):
@@ -381,4 +381,20 @@ def test_a_record_in_indented_code_after_an_inline_fence_is_asked_about(render, 
     write(out, f"{JOURNAL}/2026-07-04.md",
           "The record template:\n\n    ```make``` runs first, then the line\n    " + R() + "\n")
     r = run(out)
-    assert r.returncode == 1 and "closes differently since #250" in r.stdout, r.stdout
+    assert r.returncode == 1 and "a fence above it closes differently" in r.stdout, r.stdout
+
+
+@pytest.mark.parametrize("rel,body", [
+    # review v2.75 r6: a revealed `tier: 1` before the real one lowered the plan's tier
+    (f"{ARCHIVE}/2026-07-10-widget.md", "# Plan\n\n```\nx\n```python\n```\ntier: 1\n```make```\n\ntier: 3\n"),
+    # a hidden `REVIEW … verdict=block` would have let an earlier pass stand
+    (f"{JOURNAL}/2026-07-04.md", R() + "\n\n" + LI + R().replace("verdict=pass round=1", "verdict=block round=2")
+     + "\n\n```\nmake test\n```\n"),
+    # a spec's own documents feed attest too (`spec.md`'s criteria)
+    ("specs/001-x/spec.md", "# Spec\n\n" + LI + "- AC-7: the widget answers 42\n\n```\nx\n```\n"),
+])
+def test_any_line_the_two_fence_readings_disagree_on_is_asked_about(render, tmp_path, rel, body):
+    out = render(tmp_path, {"project_name": "demo"})
+    write(out, rel, body)
+    r = run(out)
+    assert r.returncode == 1 and f"{rel}: line" in r.stdout and "a fence above it closes differently" in r.stdout, r.stdout

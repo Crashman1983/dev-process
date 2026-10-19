@@ -327,25 +327,21 @@ def unclosed_fence_problem(text: str, patterns: tuple[re.Pattern[str], ...] | No
     return None
 
 
-def fence_drift_problem(text: str, patterns: tuple[re.Pattern[str], ...] | None = None
-                        ) -> str | None:
-    """A line #250's reading of fences (`check_overlays.fence_scan`) treats more
-    leniently than the reading before it did, or None: a blocking line (`patterns`; by default
-    `tier:`, `issue:`, `DECISION NEEDED`) now hidden, or a clearing one (by default a
-    REVIEW record, `review-waived:`, a REFUTE line) now read. Each refinement of the
-    reading opened a new silent case (v2.75 review rounds 2–5); where the two readings
-    disagree in the lenient direction the gate asks instead of guessing."""
-    blocking = BLOCKING_LINES if patterns is None else patterns
-    clearing = CLEARING_LINES if patterns is None else ()
+def fence_drift_problem(text: str) -> str | None:
+    """The first line #250's reading of fences (`check_overlays.fence_scan`) quotes
+    differently from the reading before it (`_legacy_quoted`), or None. Every gate reads
+    a record file through these fences — tiers, issues, records, waivers, skips, ACs,
+    comments — and each refinement of the reading opened a new silent case (v2.75 review
+    rounds 2–6), in both directions. So the readings must agree: where they do not, the
+    gate asks instead of guessing, and where they agree nothing changed."""
     lines = text.splitlines()
-    code = fence_scan(lines)[0]
-    for i, (line, quoted, was_quoted) in enumerate(zip(lines, code, _legacy_quoted(lines)), start=1):
-        if (quoted and not was_quoted and _reads(line, blocking)) or (
-                was_quoted and not quoted and clearing and _reads(line, clearing)):
-            return (f"line {i} reads as {'quoted' if quoted else 'a record'} only because a fence "
-                    f"above it closes differently since #250 (a closing fence carries no info "
-                    f"string and sits at most three columns deeper than its opener) — make each "
-                    f"fence close on a line of its own")
+    for i, (line, quoted, was_quoted) in enumerate(zip(lines, fence_scan(lines)[0],
+                                                       _legacy_quoted(lines)), start=1):
+        if quoted != was_quoted:
+            return (f"line {i} reads as {'quoted' if quoted else 'text'} since #250 but as "
+                    f"{'quoted' if was_quoted else 'text'} before — a fence above it closes "
+                    f"differently (a closing fence carries no info string and sits at most three "
+                    f"columns deeper than its opener); make each fence close on a line of its own")
     return None
 
 
@@ -379,8 +375,7 @@ REFUTE_LINE = re.compile(
     _RECORD_LEAD + r"REFUTE[ \t]+work=(?P<work>(?!<)(?!TODO\b)[\w#./-]+)"
     r"[ \t]+round=(?P<round>\d+):[ \t]*(?P<text>(?!<|TODO\b|…|\.\.\.)\S.*)$",
     re.MULTILINE)
-# the lines whose reading #250's fences must not loosen: blocking ones must not hide,
-# clearing ones must not appear (`unclosed_fence_problem`; review v2.75 r3–r5)
+# the lines an unclosed fence must not swallow unreported (`unclosed_fence_problem`)
 BLOCKING_LINES = (TIER_DECL, ISSUE_DECL, DECISION_NEEDED)
 CLEARING_LINES = (WAIVED, _REVIEW_LINE, REFUTE_LINE)
 ROOT_CAUSE_LINE = re.compile(
@@ -2819,10 +2814,20 @@ def check(root: Path) -> tuple[list[str], list[str]]:
             soft.append(f"{rel}: {problem}")
         elif problem:
             hard.append(f"{rel}: {problem}")
-        # hard in the archive too: before #250 the line read the strict way (review v2.75 r5)
+        # hard in the archive too: the readings must agree everywhere (review v2.75 r5/r6)
         drift = fence_drift_problem(text)
         if drift:
             hard.append(f"{rel}: {drift}")
+    # a spec's other documents feed attest (`spec.md`'s criteria) and dispatch (`tasks.md`)
+    for spec_doc in sorted((root / SPECS_DIR).glob("*/*.md")) if (root / SPECS_DIR).is_dir() else []:
+        if spec_doc.name == SPEC_PLAN or not spec_doc.is_file():
+            continue
+        try:
+            drift = fence_drift_problem(spec_doc.read_text(encoding="utf-8", errors="replace"))
+        except OSError:
+            continue
+        if drift:
+            hard.append(f"{spec_doc.relative_to(root).as_posix()}: {drift}")
     invalid = invalid_records(root, [f for _ln, f in all_records])
     superseded = superseded_records(root, [f for _ln, f in all_records], invalid) if invalid else {}
     for rel, lineno, f in located:
