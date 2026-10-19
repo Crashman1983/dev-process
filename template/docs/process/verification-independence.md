@@ -337,7 +337,9 @@ enforces what a language-agnostic gate honestly can, and no more:
   review is a hard failure on an integration push and a note on other branch
   pushes; archived-plan failures remain hard. An active Tier 3 plan whose
   issue is already claimed on the integration branch also fails without a
-  clearing review or waiver.
+  clearing review or waiver, and so does a Tier 2+ plan the push deletes
+  (judged by its text at the fork point; a move into the archive is judged
+  where it went).
 - **Verified template updates.** A plan marked `template-update: true` may
   replace a new REVIEW with computed provenance only for a pure,
   owner/steward-acknowledged update. Both pinned releases are re-rendered;

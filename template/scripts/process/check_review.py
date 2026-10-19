@@ -2332,6 +2332,32 @@ def plans_moved_in(root: Path, base: str) -> dict[str, str | None]:
     return moved
 
 
+def plans_deleted(root: Path, base: str) -> list[str] | None:
+    """The plans under work (`PLAN_KINDS`) the fork point has and this push deletes —
+    `git diff --raw -M` over the plan homes, so a move into the archive or a rename
+    is no deletion (the other arms judge the file where it went), while a move out of
+    the plan homes is one (#251). None when git cannot tell."""
+    out = _git_bytes(root, "diff", "--raw", "-M", "-z", base, "HEAD", "--", PLANS_ACTIVE, SPECS_DIR)
+    if out is None:
+        return None
+    parts = out.decode("utf-8", "surrogateescape").split("\0")
+    gone: list[str] = []
+    i = 0
+    while i < len(parts) - 1:
+        meta = parts[i].split()
+        if len(meta) < 5:
+            break
+        status = meta[4]
+        if status[:1] in ("R", "C"):
+            i += 3
+            continue
+        path = parts[i + 1]
+        i += 2
+        if status[:1] == "D" and record_kind(path) in PLAN_KINDS:
+            gone.append(path)
+    return sorted(gone)
+
+
 def plan_changed_meaning(root: Path, base: str, rel: str) -> bool:
     """Did an edit change what a plan is — its tier or the work it names — against
     the fork point? A typo fix or a link sweep does not."""
@@ -2946,6 +2972,28 @@ def check(root: Path) -> tuple[list[str], list[str]]:
             soft.append(f"{active_tier2} active Tier 2 plan(s) in {PLANS_ACTIVE} — "
                         f"their review is due at the merge push; archive on merge")
 
+    # --- a plan under work this push deletes (#251): its work would leave the gate
+    # with its file — no arm above sees a plan that is not there. Judged by its text
+    # at the fork point, like an active plan without its review.
+    phases.enter("plans-deleted")
+    deleted = plans_deleted(root, scope_base) if scope_base else []
+    if deleted is None:
+        presence("git cannot list the plans this push deletes — a deleted Tier 2+ plan "
+                 "would escape its review")
+        deleted = []
+    for rel in deleted:
+        text = _unfenced(_show(root, scope_base, rel) or "")
+        tier = plan_tier(text)
+        if tier is None or tier < 2 or review_waived(text):
+            continue
+        ids = _plan_work_ids(plan_stem(rel), text, include_dedated=False)
+        tiered_plans.append((rel, text, tier, ids))
+        if not _cleared(passes, ids, tier):
+            presence(f"{rel}: deleted by this push — "
+                     + no_clearing_review(rel, min(tier, 3), ids)
+                     + " — a deleted plan's work still owes its review (or a 'review-waived:' line "
+                     "before it goes)")
+
     # the commit-anchored arm: what exists at every merge is the issue plus
     # the commits that CLAIM it (a closing trailer or the `… (#N)` subject —
     # a bare mention is somebody else's business, see issue_refs_in_range).
@@ -2965,8 +3013,8 @@ def check(root: Path) -> tuple[list[str], list[str]]:
             # a plan below Tier 2 or a waived one declares it: nothing to enforce
             continue
         for rel, text, tier, ids in matching:
-            if tier < 2 or review_waived(text):
-                continue
+            if tier < 2 or review_waived(text) or rel in deleted:
+                continue  # a deleted plan has its finding above, once
             if not _cleared(passes, ids, tier):
                 presence(f"a commit in the pushed range claims #{number} — "
                          + no_clearing_review(rel, min(tier, 3), ids))
