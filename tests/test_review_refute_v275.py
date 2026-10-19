@@ -296,3 +296,23 @@ def test_a_record_in_a_nested_lists_outer_item_counts(render, tmp_path):
     write(out, f"{JOURNAL}/2026-07-04.md", "1. Merged auth\n   - follow-ups filed\n\n    " + R() + "\n")
     r = run(out)
     assert r.returncode == 0, r.stdout
+
+
+def test_a_wrapped_list_item_keeps_its_next_paragraph_prose(render, tmp_path):
+    # review v2.75 r3: an unindented wrapped line counted as top-level prose, and the item's
+    # next indented paragraph read as code — its open question passed silently
+    out = render(tmp_path, {"project_name": "demo"})
+    write(out, f"{PLANS}/2026-10-19-store.md",
+          "# Plan\n\ntier: 2\n\n1. Decide storage between postgres and sqlite, depending\n"
+          "on where it deploys.\n\n    Which one? [NEEDS CLARIFICATION: postgres or sqlite]\n")
+    r = subprocess.run([sys.executable, str(out / "scripts/process/check_clarification.py"), "."],
+                       cwd=out, capture_output=True, text=True)
+    assert r.returncode == 1 and "2026-10-19-store.md:8" in r.stdout, r.stdout
+
+
+def test_an_unclosed_fence_hiding_a_decision_needed_is_hard(render, tmp_path):
+    out = render(tmp_path, {"project_name": "demo"})
+    write(out, f"{PLANS}/2026-10-19-store.md",
+          "# Plan\n\ntier: 2\n\n- Run:\n- ```bash\n  make test\n\nDECISION NEEDED 2026-10-19 seb: postgres or sqlite?\n")
+    r = run(out)
+    assert r.returncode == 1 and "fence opened on line 6 never closes — line 9" in r.stdout, r.stdout

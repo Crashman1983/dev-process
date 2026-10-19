@@ -226,8 +226,8 @@ the line and at most three columns deeper than its opener — ` ```python `
 inside a ` ```md ` example opens a nested example and closes nothing; nest
 with a longer outer fence. A line four columns in after a blank line that
 follows top-level prose is an indented code block; list items are not tracked. A fence still open at the end of a journal shard
-or an active plan that swallows a `tier:`, `issue:`, `review-waived:` or `REVIEW`
-line is a hard finding (a note in the archive). Grammar and the independence arithmetic the gate
+or an active plan that swallows a `tier:`, `issue:`, `review-waived:`, `REVIEW` or
+`DECISION NEEDED` line is a hard finding (a note in the archive). Grammar and the independence arithmetic the gate
 enforces on a `pass` are in `verification-independence.md`.
 
 A record carries none of `base`/`head`/`diff`, or all three; partial
