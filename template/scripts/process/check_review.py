@@ -278,13 +278,11 @@ def _unfenced(text: str) -> str:
     return "\n".join(line for _i, line in fenced_lines(text)[0])
 
 
-DECLARATION_LINES = (TIER_DECL, ISSUE_DECL, WAIVED, _REVIEW_LINE)
-
-
 def unclosed_fence_problem(text: str, patterns: tuple[re.Pattern[str], ...] | None = None
                            ) -> str | None:
     """A fence still open at end of file that swallows a line a gate reads —
-    by default `tier:`, `issue:`, `review-waived:` or a REVIEW record — or
+    by default `tier:`, `issue:`, `review-waived:`, a REVIEW record or a
+    `DECISION NEEDED` question — or
     None. An unclosed fence would otherwise read the rest of the file as
     quoted and turn the gate off for it (#250)."""
     opened = fenced_lines(text)[1]
@@ -312,6 +310,8 @@ def unclosed_fence_problem(text: str, patterns: tuple[re.Pattern[str], ...] | No
 DECISION_NEEDED = re.compile(
     r"^\s*(?:[-*+]\s+)?[*_]*DECISION NEEDED[*_]*\s+(\d{4}-\d{2}-\d{2})(?:\s+([^:\n]+?))?\s*:\s*(.+?)\s*$",
     re.MULTILINE)
+# what an unclosed fence must not swallow unreported (#250; review v2.75 r3: DECISION NEEDED)
+DECLARATION_LINES = (TIER_DECL, ISSUE_DECL, WAIVED, _REVIEW_LINE, DECISION_NEEDED)
 # the marker is a status, not a phrase: `(decided by owner)` still asks (refutation)
 ANSWERED_MARK = re.compile(
     r"\((?:answered|resolved|decided|beantwortet|entschieden|erledigt)"
