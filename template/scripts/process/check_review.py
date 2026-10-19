@@ -2623,7 +2623,7 @@ def template_review_findings(root: Path, update: dict, passes: list[dict],
         covering = [r for r in passes if int(r['tier']) >= tier
                     and r.get('head') and r.get('mode', 'full') == 'full' and r['work'] in known
                     and carried_base(root, r.get('base') or '', update['base'], paths) is None
-                    and update_seen(root, r['head'], tip, paths)]
+                    and update_seen(root, r['head'], tip, update)]
         if not any(_unreviewed_paths(root, r['head'], tip, _reviewed_heads(passes, tier, known),
                                      r.get('base') or '') == set()
                    for r in covering):
