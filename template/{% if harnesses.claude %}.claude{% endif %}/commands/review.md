@@ -68,7 +68,8 @@ family (`cross-model`) and the range touches gate code, give that reviewer
 the refuter's brief (`docs/process/refute.md`) instead of a plain review
 prompt; its report carries the `REFUTE work=<id> round=<r>: …` line next to
 its findings, and that line counts as the refute. A single-family review of
-gate code needs the refute line in the work's plan, or `skipped refute
+gate code needs the refute line in the work's plan (`refute_line.py` counts
+it from the refuter's `SCENARIO` lines), or `skipped refute
 work=<id>: <reason>` there — committed before the bundle, or appended after
 the plan's last line and attested with `--with` the plan.
 
