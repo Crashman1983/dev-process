@@ -359,7 +359,7 @@ def test_a_fence_closing_differently_since_250_is_asked_about_in_the_archive(ren
     out = render(tmp_path, {"project_name": "demo"})
     write(out, f"{ARCHIVE}/2026-07-10-widget.md", "# Plan\n\n" + body)
     r = run(out)
-    assert r.returncode == 1 and "a fence above it closes differently" in r.stdout, r.stdout
+    assert r.returncode == 1 and "reads two ways" in r.stdout, r.stdout
 
 
 def test_a_hidden_open_question_is_asked_about(render, tmp_path):
@@ -367,12 +367,12 @@ def test_a_hidden_open_question_is_asked_about(render, tmp_path):
     write(out, f"{PLANS}/2026-10-19-store.md", "# Plan\n\ntier: 2\n\n" + LI
           + "DECISION NEEDED 2026-10-19 seb: postgres or sqlite?\n\n```\nmake test\n```\n")
     r = run(out)
-    assert r.returncode == 1 and "a fence above it closes differently" in r.stdout, r.stdout
+    assert r.returncode == 1 and "reads two ways" in r.stdout, r.stdout
     write(out, f"{PLANS}/2026-10-19-store.md", "# Plan\n\ntier: 2\n\n" + LI
           + "[NEEDS CLARIFICATION: postgres or sqlite]\n\n```\nmake test\n```\n")
     r = subprocess.run([sys.executable, str(out / "scripts/process/check_clarification.py"), "."],
                        cwd=out, capture_output=True, text=True)
-    assert r.returncode == 1 and "a fence above it closes differently" in r.stdout, r.stdout
+    assert r.returncode == 1 and "reads two ways" in r.stdout, r.stdout
 
 
 def test_a_record_in_indented_code_after_an_inline_fence_is_asked_about(render, tmp_path):
@@ -381,7 +381,7 @@ def test_a_record_in_indented_code_after_an_inline_fence_is_asked_about(render, 
     write(out, f"{JOURNAL}/2026-07-04.md",
           "The record template:\n\n    ```make``` runs first, then the line\n    " + R() + "\n")
     r = run(out)
-    assert r.returncode == 1 and "a fence above it closes differently" in r.stdout, r.stdout
+    assert r.returncode == 1 and "reads two ways" in r.stdout, r.stdout
 
 
 @pytest.mark.parametrize("rel,body", [
@@ -397,7 +397,7 @@ def test_any_line_the_two_fence_readings_disagree_on_is_asked_about(render, tmp_
     out = render(tmp_path, {"project_name": "demo"})
     write(out, rel, body)
     r = run(out)
-    assert r.returncode == 1 and f"{rel}: line" in r.stdout and "a fence above it closes differently" in r.stdout, r.stdout
+    assert r.returncode == 1 and f"{rel}: line" in r.stdout and "reads two ways" in r.stdout, r.stdout
 
 
 NESTED = "```md\n## Steps\n```python\nrun()\n```\n```\n"

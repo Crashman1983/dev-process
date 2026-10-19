@@ -348,8 +348,7 @@ def unclosed_fence_problem(text: str, patterns: tuple[re.Pattern[str], ...] | No
     for i, line in enumerate(lines[opened + 1:], start=opened + 2):
         if _reads(line, gated):
             return (f"fence opened on line {opened + 1} never closes — line {i} and "
-                    f"everything after it read as quoted; close the fence (a "
-                    f"closing fence carries no info string)")
+                    f"everything after it read as quoted; close the fence")
     return None
 
 
@@ -364,9 +363,10 @@ def fence_drift_problem(text: str) -> str | None:
     for i, (quoted, was_quoted) in enumerate(zip(_strict_scan(lines), _legacy_scan(lines)[0]), start=1):
         if quoted != was_quoted:
             return (f"line {i} reads as {'quoted' if was_quoted else 'text'}, but as "
-                    f"{'quoted' if quoted else 'text'} where a closing fence carries no info "
-                    f"string (#250) — a fence above it closes differently; make each fence "
-                    f"close on a line of its own")
+                    f"{'quoted' if quoted else 'text'} where a closing fence carries nothing "
+                    f"else on its line (#250) — a fence line above it (an opener with text after "
+                    f"it, or a closer with an info string) reads two ways; make each fence open "
+                    f"and close on a line of its own")
     return None
 
 
