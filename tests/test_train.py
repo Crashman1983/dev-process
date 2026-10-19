@@ -1910,7 +1910,9 @@ def test_a_red_suite_retries_only_what_failed_on_the_same_tree(render, tmp_path,
     builds, runs, log = _retry_batch(render, tmp_path, monkeypatch, retry="make retry",
                                      sh=lambda cmd, n: "red" if n == 1 else "green")
     assert runs[:2] == ["suite", "make retry"] and builds[:1] == [["b1"]] and len(builds) == 1
-    assert "flaky suite, merging" in log and "failed —" in log
+    # #263: a green retry command is no proof of a flake on the identical suite
+    assert "then green under the retry command `make retry`" in log and "failed —" in log
+    assert "flaky suite, merging" not in log
 
 
 def test_without_retry_the_whole_suite_runs_on_a_rebuilt_tree(render, tmp_path, monkeypatch):
@@ -2297,3 +2299,35 @@ def test_a_tree_dirty_before_the_suite_names_its_files(render, tmp_path):
     assert r.returncode == 0, r.stdout + r.stderr
     text = sorted((out / ".git/process-train").glob("*.log"))[-1].read_text()
     assert "not clean (litter.txt) before the suite" in text, text[-2000:]
+
+
+def test_a_retry_command_missing_on_the_tree_rebuilds_and_a_green_is_a_flake(render, tmp_path, monkeypatch):
+    """#263: the fallback runs the same suite on a rebuilt identical tree — that IS a flake."""
+    def sh(cmd, n):
+        if cmd == "make retry":
+            return "undefined"
+        return "red" if n == 1 else "green"
+    _builds, runs, log = _retry_batch(render, tmp_path, monkeypatch, retry="make retry", sh=sh)
+    assert "make retry" in runs and runs.count("suite") >= 2
+    assert "flaky suite, merging" in log and "green under the retry command" not in log
+
+
+def test_red_gates_then_green_are_a_gate_flake_not_a_flaky_suite(render, tmp_path, monkeypatch):
+    """#263: the suite never ran before the retry — a green is no word about the suite."""
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    train = _load_train(out)
+    gates = iter([False, True, True, True])
+    monkeypatch.setattr(train, "build_train", lambda root, base, subset, stamp, log: (out, "train/x", list(subset), []))
+    monkeypatch.setattr(train, "_run_gates", lambda w, log: next(gates))
+    monkeypatch.setattr(train, "_sh", lambda cwd, cmd, log: "green")
+    monkeypatch.setattr(train, "_cleanup", lambda *a: None)
+    monkeypatch.setattr(train, "_write", lambda *a, **k: None)
+    p = {"base": "main", "candidates": [{"branch": "b1", "hours_waiting": 1}]}
+    try:
+        train._run_batch(out, "main", p, ["b1"], "x", tmp_path / "t.log", suite="suite", deploy=None,
+                         push=False, keep_branches=True)
+    except SystemExit:
+        pass
+    log = (tmp_path / "t.log").read_text()
+    assert "gate flake" in log and "flaky suite" not in log, log

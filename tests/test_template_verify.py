@@ -854,3 +854,132 @@ def test_template_update_refuses_a_directory_that_is_no_rendered_project(tmp_pat
     r = subprocess.run([sys.executable, str(SCRIPTS / 'template_update.py'), str(other)],
                        capture_output=True, text=True)
     assert r.returncode == 2 and 'no .copier-answers.yml' in r.stderr
+
+
+# --- #262: ack and update REVIEW carry across main moves that leave the update alone
+
+
+def _fingerprinted_ack(root, verifier, base):
+    """The ack `--ack` writes since v2.75: release, owner and the fingerprint."""
+    report = verifier.verify(root, base)
+    ack = dict(base=report['base'], release=report['new_release'], owner='steward',
+               fingerprint=verifier.fingerprint(report))
+    write(root, verifier.ACK, json.dumps(ack))
+    commit(root)
+    return ack
+
+
+def _merge_moved_main(root, rel='unrelated/main-only.md'):
+    git(root, 'checkout', '-q', 'main')
+    write(root, rel, 'later on main\n')
+    moved = commit(root)
+    git(root, 'checkout', '-q', 'update')
+    git(root, 'merge', '-q', '--no-edit', 'main')
+    return moved
+
+
+def test_a_fingerprinted_ack_carries_when_main_moved_only_through_other_files(update):
+    """AC-N1: main moved only through product files and the branch merged it — the fork
+    point moved, the update did not; the ack still speaks for it (also in worktree mode)."""
+    root, _, base, verifier = update
+    _fingerprinted_ack(root, verifier, base)
+    moved = _merge_moved_main(root)
+    report = verifier.verify(root, 'main')
+    assert report['base'] == moved != base
+    assert report['acknowledged'] is True and report['ack_expired'] == '', report
+    assert verifier.verify(root, 'main', worktree=True)['acknowledged'] is True
+
+
+def test_an_ack_without_fingerprint_holds_only_at_its_own_base(update):
+    """AC-N3: today's ack files carry nothing — exactly the old rule."""
+    root, _, base, verifier = update
+    _merge_moved_main(root)
+    report = verifier.verify(root, 'main')
+    assert report['acknowledged'] is False
+    assert 'records no fingerprint' in report['ack_expired'], report['ack_expired']
+
+
+def test_main_touching_an_update_path_expires_the_ack_and_names_it(update):
+    """AC-N2: `.process-owned` changed on main since the ack."""
+    root, _, base, verifier = update
+    _fingerprinted_ack(root, verifier, base)
+    _merge_moved_main(root, rel='.process-owned')
+    report = verifier.verify(root, 'main')
+    assert report['acknowledged'] is False
+    assert 'main changed .process-owned' in report['ack_expired'], report['ack_expired']
+    finding = load('check_review').template_review_findings(root, report, [], tip='HEAD')
+    assert any('main changed .process-owned' in f for f in finding), finding
+
+
+def test_a_changed_fingerprint_expires_the_ack_and_names_the_difference(update):
+    root, _, base, verifier = update
+    ack = _fingerprinted_ack(root, verifier, base)
+    ack['fingerprint']['project_delta'] = ['docs/extra.md']
+    write(root, verifier.ACK, json.dumps(ack))
+    commit(root)
+    _merge_moved_main(root)
+    report = verifier.verify(root, 'main')
+    assert report['acknowledged'] is False
+    assert 'fingerprint differs: -docs/extra.md' in report['ack_expired'], report['ack_expired']
+
+
+def test_another_release_is_never_carried(update):
+    root, _, base, verifier = update
+    ack = _fingerprinted_ack(root, verifier, base)
+    ack['release'] = '0' * 40
+    write(root, verifier.ACK, json.dumps(ack))
+    commit(root)
+    report = verifier.verify(root, base)
+    assert report['acknowledged'] is False and 'not ' in report['ack_expired']
+
+
+def test_carried_base_reasons(update):
+    """AC-N2/N3 at the owner: a rename counts at its old name, a base that is no ancestor
+    or missing from the clone carries nothing."""
+    root, _, base, verifier = update
+    git(root, 'checkout', '-q', 'main')
+    write(root, 'notes/a.md', 'a\n')
+    a = commit(root)
+    git(root, 'mv', 'notes/a.md', 'notes/b.md')
+    b = commit(root)
+    assert verifier.carried_base(root, a, b, {'notes/a.md'}) == f'main changed notes/a.md since {a[:12]}'
+    assert verifier.carried_base(root, a, b, {'other.md'}) is None
+    assert 'is not an ancestor' in verifier.carried_base(root, b, a, set())
+    assert 'not in this clone (shallow?)' in verifier.carried_base(root, 'f' * 40, b, set())
+    git(root, 'checkout', '-q', 'update')
+
+
+def test_an_update_review_on_an_older_base_still_covers_while_main_left_it_alone(update, monkeypatch):
+    """AC-N4: the base binding carries; the content check stays the hurdle."""
+    root, _, base, verifier = update
+    review = load('check_review')
+    moved = _merge_moved_main(root)
+    head = git(root, 'rev-parse', 'HEAD')
+    report = dict(base=moved, head=head, update=True, identical=['.copier-answers.yml'],
+                  project_delta=['docs/process/example.md'], migration=True, errors=[],
+                  release_notes='', acknowledged=True)
+    monkeypatch.setattr(review, '_known_work', lambda *a, **k: {'7'})
+    seen = []
+    monkeypatch.setattr(review, '_unreviewed_paths', lambda *a, **k: seen.append(a) or set())
+    old = dict(work='7', tier=3, base=base, head=head, mode='full')
+    assert review.template_review_findings(root, report, [old], tip=head) == []
+    assert seen, 'the content check still ran'
+    tier2 = dict(old, tier=2)  # a migration still needs Tier 3
+    assert any('tier 3 REVIEW' in f for f in review.template_review_findings(root, report, [tier2], tip=head))
+    git(root, 'checkout', '-q', 'main')
+    write(root, 'docs/process/example.md', 'main edited the update path\n')
+    commit(root)
+    git(root, 'checkout', '-q', 'update')
+    git(root, 'merge', '-q', '--no-edit', '-X', 'ours', 'main')
+    report['base'] = git(root, 'merge-base', 'HEAD', 'main')
+    assert any('tier 3 REVIEW' in f for f in review.template_review_findings(root, report, [old], tip=head))
+
+
+def test_ack_writes_the_fingerprint_of_the_committed_update(update):
+    """n1: a stray untracked file at ack time stays out of the fingerprint."""
+    root, _, base, verifier = update
+    write(root, 'stray.txt', 'left over\n')
+    assert verifier.main([str(root), '--base', base, '--ack', 'steward']) == 0
+    ack = json.loads((root / verifier.ACK).read_text(encoding='utf-8'))
+    assert 'stray.txt' not in json.dumps(ack['fingerprint'])
+    assert ack['fingerprint'] == verifier.fingerprint(verifier.verify(root, base))

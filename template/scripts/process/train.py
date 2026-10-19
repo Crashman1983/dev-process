@@ -1572,17 +1572,23 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
                 # tree, and a retry there could pass on that residue (refutation)
                 how, why = "full", "the first run changed the worktree — rebuild and run the whole suite"
             log(f"red — retry of the same combined tree: {how} — {why} ({_load()})")
+            # what the retry really ran decides what a green may claim (#263): only the
+            # same suite on the same tree is a flake; a narrower command is a subset
+            ran = "full"
             if how == "gates" and last_wt is not None:
+                ran = "gates"
                 state = "green" if timed("gates", _run_gates, last_wt, log) else "red"
                 if state == "green" and suite:
                     red_in = "suite"
                     # the suite never ran behind the red gates
                     state = full_suite(last_wt, _suite_key(last_wt, suite, merge_scope))
             elif how == "failed" and last_wt is not None:
+                ran = "retry"
                 state = timed("retry", _sh, last_wt, retry, log)
                 _collect_stage_times(last_wt, stages, stage_seen, log)
                 if state == "undefined":  # no such command on this tree: the whole suite, as before
                     log("the --retry command does not exist on this tree — rebuilding for the whole suite")
+                    ran = "full"
                     state, merged, branch = attempt(aboard)
                     aboard = merged
             else:
@@ -1590,9 +1596,22 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
                 aboard = merged
             searching = ""
             if state == "green":
-                print("train: FLAKY — the combined tree was red, then green on the identical tree; "
-                      f"merging, but the suite has a flaky test (see {logfile}; {_load()})", file=sys.stderr)
-                log("red then green on the identical tree — flaky suite, merging")
+                if ran == "retry":
+                    print(f"train: green under the retry command `{retry}` (it re-ran only what failed), "
+                          f"red under the suite `{suite}` — flaky, or the two runs differ (flags, "
+                          f"environment); merging, the push to main runs the full suite again "
+                          f"(see {logfile}; {_load()})", file=sys.stderr)
+                    log(f"red under `{suite}`, then green under the retry command `{retry}` — flaky or "
+                        "the commands differ, merging")
+                elif ran == "gates":
+                    print("train: the gates were red, then green on the identical tree — a gate flake"
+                          + ("; the suite then ran green for the first time" if suite else "")
+                          + f"; merging (see {logfile}; {_load()})", file=sys.stderr)
+                    log("gates red then green on the identical tree — gate flake, merging")
+                else:
+                    print("train: FLAKY — the combined tree was red, then green on the identical tree; "
+                          f"merging, but the suite has a flaky test (see {logfile}; {_load()})", file=sys.stderr)
+                    log("red then green on the identical tree — flaky suite, merging")
                 break
         # before blaming anybody: is the base itself red (a broken main)?
         # Then no candidate is the offender.
