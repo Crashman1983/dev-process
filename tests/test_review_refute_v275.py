@@ -253,3 +253,26 @@ def test_an_unclosed_fence_in_a_spec_plan_hiding_a_marker_is_hard(render, tmp_pa
     r = subprocess.run([sys.executable, str(out / "scripts/process/check_clarification.py"), "."],
                        cwd=out, capture_output=True, text=True)
     assert r.returncode == 1 and "fence opened on line 5 never closes" in r.stdout, r.stdout
+
+
+def test_a_quoted_record_in_a_list_items_fence_stays_quoted(render, tmp_path):
+    # review v2.75 r1: a fence four columns in on a list item's continuation line is the
+    # item's code — read as prose, a quoted REVIEW cleared and a quoted waiver waived
+    out = render(tmp_path, {"project_name": "demo"})
+    write(out, f"{ARCHIVE}/2026-07-01-auth.md",
+          "# Plan\n\ntier: 3\n\n- Example of a record (quoted):\n\n    ```\n"
+          "    review-waived: example only\n    tier: 1\n    ```\n")
+    write(out, f"{JOURNAL}/2026-07-04.md", "- Example (quoted):\n\n    ```\n    " + R() + "\n    ```\n")
+    r = run(out)
+    assert r.returncode == 1 and "no clearing REVIEW" in r.stdout, r.stdout
+
+
+def test_git_failing_to_list_deleted_plans_is_a_finding(render, tmp_path):
+    # review v2.75 r1: the fail-closed branch had no test
+    out = base_repo(render, tmp_path)
+    probe = ("import sys; sys.dont_write_bytecode = True; sys.path.insert(0, 'scripts/process'); "
+             "import check_review as c; c.plans_deleted = lambda *a: None; "
+             "hard, _soft = c.check(c.Path('.')); print('\\n'.join(hard))")
+    r = subprocess.run([sys.executable, "-c", probe], cwd=out, capture_output=True, text=True,
+                       env={**os.environ, "PROCESS_PUSH_TARGETS": "refs/heads/main"})
+    assert "git cannot list the plans this push deletes" in r.stdout, r.stdout + r.stderr

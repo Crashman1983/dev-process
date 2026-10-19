@@ -899,16 +899,23 @@ def test_an_ack_without_fingerprint_holds_only_at_its_own_base(update):
     assert 'records no fingerprint' in report['ack_expired'], report['ack_expired']
 
 
-def test_main_touching_an_update_path_expires_the_ack_and_names_it(update):
-    """AC-N2: `.process-owned` changed on main since the ack."""
+def test_main_touching_an_update_path_expires_the_ack_and_names_it(update, monkeypatch):
+    """AC-N2: `.process-owned` changed on main since the ack — and since the review."""
     root, _, base, verifier = update
     _fingerprinted_ack(root, verifier, base)
     _merge_moved_main(root, rel='.process-owned')
     report = verifier.verify(root, 'main')
     assert report['acknowledged'] is False
     assert 'main changed .process-owned' in report['ack_expired'], report['ack_expired']
-    finding = load('check_review').template_review_findings(root, report, [], tip='HEAD')
+    review = load('check_review')
+    finding = review.template_review_findings(root, report, [], tip='HEAD')
     assert any('main changed .process-owned' in f for f in finding), finding
+    # the review the moved main left behind is named with its reason (review v2.75 r1)
+    monkeypatch.setattr(review, '_known_work', lambda *a, **k: {'7'})
+    old = dict(work='7', tier=3, base=base, head=git(root, 'rev-parse', 'HEAD'), mode='full')
+    delta = dict(report, project_delta=report['project_delta'] or ['docs/process/example.md'])
+    finding = review.template_review_findings(root, delta, [old], tip='HEAD')
+    assert any('the REVIEW of 7' in f and 'main changed .process-owned' in f for f in finding), finding
 
 
 def test_a_changed_fingerprint_expires_the_ack_and_names_the_difference(update):
@@ -946,6 +953,8 @@ def test_carried_base_reasons(update):
     assert verifier.carried_base(root, a, b, {'other.md'}) is None
     assert 'is not an ancestor' in verifier.carried_base(root, b, a, set())
     assert 'not in this clone (shallow?)' in verifier.carried_base(root, 'f' * 40, b, set())
+    # git cannot answer the ancestry (an unknown fork point): a reason, never a pass
+    assert 'git cannot tell' in verifier.carried_base(root, a, 'f' * 40, set())
     git(root, 'checkout', '-q', 'update')
 
 
