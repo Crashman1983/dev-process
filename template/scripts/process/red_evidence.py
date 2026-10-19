@@ -2,7 +2,7 @@
 """red_evidence — the red-before/green-after proof of a fix, measured instead of typed.
 
     red_evidence.py --work W --round R --before <ref> [--cause TEXT] [--copy PATH …]
-                    [--journal-dir DIR] [--dry-run] [root] -- <pytest command>
+                    [--journal-dir DIR] [--dry-run] [--junit PATH] [root] -- <test command>
 
 Every fix round writes, by hand, the command it ran, its exit code before and
 after, and the tests that went from red to green — and, after a block, a
@@ -23,7 +23,13 @@ for, the test names filled in from the run. The why is the only free text.
 
 The command after `--` is pytest's (`python3 -m pytest …`, `uv run pytest …`); a
 small probe plugin (`-p red_evidence_probe`, on PYTHONPATH) records pytest's own node
-ids and what each test's setup and call did. Stdlib only.
+ids and what each test's setup and call did. Any other runner (vitest, jest, XCTest
+through xcresult conversion) reports through JUnit XML instead: `--junit PATH` names
+the file the command writes, relative to where it runs; the probe stays out, each
+side's file is removed before its run (a file from earlier proves nothing), and a
+test is `<classname>::<name>` (#256). In that mode only files named on the command
+or by `--copy` travel into the old tree — a named directory would carry the fixed
+source of a non-Python project along. Stdlib only.
 """
 from __future__ import annotations
 
@@ -90,19 +96,54 @@ def pytest_sessionfinish(session):
 
 
 def _run(command: list[str], cwd: Path, probe_dir: Path, out: Path,
-         timeout: int) -> tuple[int, dict[str, str] | None]:
-    """(exit code, node id -> passed/failed/error) of one pytest run, reported by the probe."""
-    env = dict(os.environ, RED_EVIDENCE_OUT=str(out),
-               PYTHONPATH=os.pathsep.join(p for p in (str(probe_dir), os.environ.get("PYTHONPATH", "")) if p))
+         timeout: int, junit: str | None = None) -> tuple[int, dict[str, str] | None]:
+    """(exit code, test -> passed/failed/error) of one run — reported by the pytest probe,
+    or with `junit` read from the JUnit XML the command writes."""
+    if junit:
+        report = cwd / junit
+        report.unlink(missing_ok=True)  # an earlier file is no outcome of this run
+        env = dict(os.environ)
+        argv = list(command)
+    else:
+        env = dict(os.environ, RED_EVIDENCE_OUT=str(out),
+                   PYTHONPATH=os.pathsep.join(p for p in (str(probe_dir), os.environ.get("PYTHONPATH", "")) if p))
+        argv = [*command, "-p", "no:cacheprovider", "-p", "red_evidence_probe"]
     try:
-        proc = subprocess.run([*command, "-p", "no:cacheprovider", "-p", "red_evidence_probe"],
-                              cwd=cwd, capture_output=True, text=True, timeout=timeout, env=env)
+        proc = subprocess.run(argv, cwd=cwd, capture_output=True, text=True, timeout=timeout, env=env)
     except subprocess.TimeoutExpired:
         raise SystemExit(f"red_evidence: the run in {cwd} took longer than {timeout} s") from None
+    if junit:
+        return proc.returncode, junit_outcomes(cwd / junit)
     # no report is no outcome: the probe did not load (a command that ignores PYTHONPATH,
     # `python -I`) or pytest died — never "no test ran red" (refute of #124)
     seen = json.loads(out.read_text(encoding="utf-8")) if out.is_file() else None
     return proc.returncode, seen
+
+
+def junit_outcomes(path: Path) -> dict[str, str] | None:
+    """`<classname>::<name>` -> passed/failed/error of every testcase in a JUnit XML file;
+    None when there is none or it does not parse (no report is no outcome). A skipped case
+    is no outcome either — it neither went red nor green."""
+    import xml.etree.ElementTree as ET  # noqa: PLC0415  (stdlib; only this mode needs it)
+    if not path.is_file() or not path.stat().st_size:
+        return None
+    try:
+        tree = ET.parse(path)
+    except (ET.ParseError, OSError):
+        return None
+    seen: dict[str, str] = {}
+    for case in tree.getroot().iter("testcase"):
+        name = case.get("name") or ""
+        cls = case.get("classname") or ""
+        key = f"{cls}::{name}" if cls else name
+        if not name or case.find("skipped") is not None:
+            continue
+        state = ERROR if case.find("error") is not None else FAILED if case.find("failure") is not None else PASSED
+        # one id twice (a parametrized title): the worst outcome stands
+        if seen.get(key) in (FAILED, ERROR) and state == PASSED:
+            continue
+        seen[key] = state
+    return seen
 
 
 def _portable(command: list[str], root: Path) -> list[str]:
@@ -168,10 +209,16 @@ def _not_test_content(folder: str, names: list[str]) -> set[str]:
                 and not (Path(folder) / n).is_dir())}
 
 
-def _take_along(root: Path, tree: Path, rels: list[str]) -> None:
+def _take_along(root: Path, tree: Path, rels: list[str], *, files: bool = False) -> None:
     """Directories and test files travel into the old tree; a source file named on the command
-    (`--doctest-modules calc.py`) does not — carried along, the old run exercised the new code."""
+    (`--doctest-modules calc.py`) does not — carried along, the old run exercised the new code.
+    With `files` (JUnit mode) every named file travels: outside pytest a test file's name
+    says nothing (`calc.spec.ts`), and `measure` already left directories behind."""
     for rel in rels:
+        if files:
+            (tree / rel).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(root / rel, tree / rel)
+            continue
         src, dst = root / rel, tree / rel
         dst.parent.mkdir(parents=True, exist_ok=True)
         if src.is_dir():
@@ -182,10 +229,12 @@ def _take_along(root: Path, tree: Path, rels: list[str]) -> None:
             shutil.copy2(src, dst)
 
 
-def measure(root: Path, before: str, command: list[str], copy: list[str], timeout: int = TIMEOUT) -> dict:
+def measure(root: Path, before: str, command: list[str], copy: list[str], timeout: int = TIMEOUT,
+            junit: str | None = None) -> dict:
     command = _portable(command, root)
     carried = [r for r in test_paths(root, command, copy)
-               if (root / r).is_dir() or _is_test_file(r) or not r.endswith(".py")]
+               if (not junit and (root / r).is_dir()) or (root / r).is_file() and (
+                   _is_test_file(r) or not r.endswith(".py") or junit)]
     # a worktree a killed run left behind is registered but gone: prune it first
     subprocess.run(["git", "-C", str(root), "worktree", "prune"], capture_output=True)
     with tempfile.TemporaryDirectory(prefix="red-evidence-") as tmp:
@@ -198,26 +247,29 @@ def measure(root: Path, before: str, command: list[str], copy: list[str], timeou
         if add.returncode != 0:
             raise SystemExit(f"red_evidence: cannot check out {before}: {add.stderr.strip()}")
         try:
-            _take_along(root, tree, carried)
-            exit_before, was = _run(command, tree, probe, Path(tmp) / "before.json", timeout)
+            _take_along(root, tree, carried, files=bool(junit))
+            exit_before, was = _run(command, tree, probe, Path(tmp) / "before.json", timeout, junit)
         finally:
             subprocess.run(["git", "-C", str(root), "worktree", "remove", "--force", str(tree)],
                            capture_output=True)
-        exit_after, now = _run(command, root, probe, Path(tmp) / "after.json", timeout)
+        exit_after, now = _run(command, root, probe, Path(tmp) / "after.json", timeout, junit)
     missing = [side for side, seen in ((f"at {before}", was), ("now", now)) if seen is None]
     was, now = was or {}, now or {}
     return {"command": command, "before": before, "exit_before": exit_before, "exit_after": exit_after,
             "red_to_green": sorted(t for t, s in now.items() if s == PASSED and was.get(t) == FAILED),
             "still_red": sorted(t for t, s in now.items() if s != PASSED), "carried": carried,
-            "no_report": missing}
+            "no_report": missing, "junit": junit}
 
 
 def refusals(m: dict) -> list[str]:
     if m["no_report"]:
+        if m.get("junit"):
+            return [f"no JUnit report {m['junit']} {' and '.join(m['no_report'])} (missing, empty or "
+                    f"not XML) — the tests did not run as asked; cannot tell"]
         return [f"the probe wrote no report {' and '.join(m['no_report'])} — pytest died, or the "
                 f"command ignores PYTHONPATH (`python -I`) and the probe never loaded; cannot tell"]
     out = []
-    if m["exit_before"] in NOT_RUN:
+    if not m.get("junit") and m["exit_before"] in NOT_RUN:
         out.append(f"at {m['before']} {NOT_RUN[m['exit_before']]} (exit {m['exit_before']}) — the "
                    f"tests never ran against the old code; select tests that collect there (a new "
                    f"module belongs in its own test run)")
@@ -232,7 +284,8 @@ def refusals(m: dict) -> list[str]:
 
 def block(m: dict, work: str, round_: int, cause: str | None) -> str:
     tests = m["red_to_green"]
-    lines = [f"Red evidence work={work} round={round_} (red_evidence.py):", "", "```",
+    lines = [f"Red evidence work={work} round={round_} (red_evidence.py"
+             + (f", JUnit {m['junit']}" if m.get("junit") else "") + "):", "", "```",
              " ".join(m["command"]),
              f"at {m['before']}: exit={m['exit_before']}   now: exit={m['exit_after']}",
              f"red before, green after ({len(tests)}): " + ", ".join(tests), "```"]
@@ -257,6 +310,8 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--timeout", type=int, default=TIMEOUT, help="seconds per run")
     ap.add_argument("--journal-dir", default=None)
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--junit", metavar="PATH", help="read outcomes from the JUnit XML the command "
+                    "writes (relative to where it runs) — for runners other than pytest")
     ap.add_argument("root", nargs="?", default=str(ROOT))
     args = ap.parse_args(argv[:split])
     command = argv[split + 1:]
@@ -266,7 +321,7 @@ def main(argv: list[str]) -> int:
     root = Path(args.root).resolve()
     # a kill runs the cleanup too: the temporary worktree is removed in `measure`'s finally
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(128 + signal.SIGTERM))
-    m = measure(root, args.before, command, args.copy, args.timeout)
+    m = measure(root, args.before, command, args.copy, args.timeout, args.junit)
     problems = refusals(m)
     if problems:
         for p in problems:

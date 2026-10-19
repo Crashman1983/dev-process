@@ -306,3 +306,56 @@ def test_a_missing_probe_report_is_named(render, tmp_path):
               sys.executable, "-I", "-m", "pytest", "test_calc.py")
 
     assert r.returncode == 1 and "probe" in r.stderr, r.stderr
+
+
+RUNNER = '''import sys
+from xml.sax.saxutils import quoteattr
+sys.path.insert(0, ".")
+from calc import add
+cases = []
+for name, ok in (("adds", add(1, 2) == 3), ("zero", add(0, 0) == 0)):
+    body = "" if ok else "<failure message='wrong'/>"
+    cases.append(f"<testcase classname='calc.spec' name={quoteattr(name)}>{body}</testcase>")
+open("report.xml", "w").write("<testsuites><testsuite name='calc'>" + "".join(cases) + "</testsuite></testsuites>")
+sys.exit(0 if all(ok for _n, ok in ((1, add(1, 2) == 3), (2, add(0, 0) == 0))) else 1)
+'''
+
+
+def test_a_junit_runner_is_measured_by_its_report(render, tmp_path):
+    """#256: a runner other than pytest reports through JUnit XML; the tool reads each
+    side's fresh report and names tests `<classname>::<name>`."""
+    out, before = _repo(render, tmp_path)
+    (out / "calc.spec.py").write_text(RUNNER, encoding="utf-8")
+    r = _tool(out, "--work", "7", "--round", "1", "--before", before, "--junit", "report.xml",
+              "--copy", "calc.spec.py", "--cause", "add subtracted instead of adding", "--",
+              sys.executable, "calc.spec.py")
+    assert r.returncode == 0, r.stdout + r.stderr
+    text = _journal(out)
+    assert "JUnit report.xml" in text
+    assert "red before, green after (1): calc.spec::adds" in text
+    assert "ROOT-CAUSE work=7 round=1: add subtracted instead of adding — calc.spec::adds" in text
+
+
+def test_a_missing_junit_report_proves_nothing(render, tmp_path):
+    """#256 AC-2: no file, an empty one or a stale one is "did not run as asked"."""
+    out, before = _repo(render, tmp_path)
+    (out / "report.xml").write_text("<testsuites><testsuite><testcase classname='x' name='y'/>"
+                                    "</testsuite></testsuites>", encoding="utf-8")  # stale, from earlier
+    r = _tool(out, "--work", "7", "--round", "1", "--before", before, "--junit", "report.xml", "--",
+              sys.executable, "-c", "pass")
+    assert r.returncode == 1 and "no JUnit report report.xml" in r.stderr, r.stdout + r.stderr
+
+
+def test_junit_mode_carries_no_directory_of_source(render, tmp_path):
+    """A named directory of a non-Python project holds its fixed source — only files travel."""
+    out, before = _repo(render, tmp_path)
+    (out / "web").mkdir()
+    (out / "web/app.js").write_text("fixed\n", encoding="utf-8")
+    sys.path.insert(0, str(out / "scripts/process"))
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("red_ev_junit", out / "scripts/process/red_evidence.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    m = mod.measure(out, before, [sys.executable, "-c", "pass", "web"], [], junit="r.xml")
+    assert "web" not in m["carried"]
+    sys.path.remove(str(out / "scripts/process"))
