@@ -114,6 +114,10 @@ Copy, fill in the angle brackets, hand it over:
     branch. Report each as CONFIRMED (with the failing test, its output, and
     NEW — passes on the integration branch — or PRE-EXISTING) or HELD, with a
     severity (BLOCKER/MAJOR/MINOR) and what you could not test. No fixes.
+    End the report with one line per scenario and the PATTERN line:
+      SCENARIO <label>: HELD
+      SCENARIO <label>: CONFIRMED <BLOCKER|MAJOR|MINOR> <NEW|PRE-EXISTING> — <what broke>
+      PATTERN: <shared cause and owner, or "no common cause">
 
 ## Refuting a plan
 
@@ -178,6 +182,12 @@ commit adds it without making the plan's own review stale
 (`verification-independence.md`):
 
     REFUTE work=<id> round=<r>: <n> scenarios, <k> findings — <fixed / DECISION …>
+
+`scripts/process/refute_line.py <report> --plan <plan> --summary "<fixed /
+DECISION …>"` writes it: it counts the report's `SCENARIO` lines (findings by
+severity, pre-existing ones named), takes the next round, and appends the line.
+The summary is the only free text; it refuses a report without scenarios or a
+`PATTERN` line, and a work id or round the line could not count under.
 
 Each plan records its own — an active plan under `.process-work/plans/` or a
 Spec Kit plan `specs/<dir>/plan.md`: the line names that plan's work (its file
