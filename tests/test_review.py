@@ -1248,3 +1248,58 @@ def test_report_header_reads_phase_and_leaves_the_other_keys_alone():
     # a plan review's report still resolves to its work (report_of ignores phase)
     text = "work: #9\nphase: plan\n\nbody\n"
     assert cr.report_of([("2026-07-05-x.md", text)], [], [(None, 9)]) == ("2026-07-05-x.md", text)
+
+
+# --- #251: a deleted active Tier 2+ plan does not take its work out of the gate ---
+
+def _main_with_active_plan(render, tmp_path, body="# Plan\n\ntier: 3\nissue: #77\n"):
+    out = render(tmp_path, {"project_name": "demo"})
+    _git(out, "init", "-q", "-b", "main")
+    _git(out, "config", "user.email", "t@example.com")
+    _git(out, "config", "user.name", "Test")
+    d = out / ".process-work/plans"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "2026-09-07-widget.md").write_text(body, encoding="utf-8")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "base with a plan under work")
+    _git(out, "checkout", "-q", "-b", "feature")
+    (out / "widget.py").write_text("X = 1\n", encoding="utf-8")
+    return out
+
+
+def _merge_push(out):
+    import os
+    return _run(out, env={**os.environ, "PROCESS_PUSH_TARGETS": "refs/heads/main"})
+
+
+@pytest.mark.parametrize("subject", ["feat: drop the plan", "feat: widget (#77)"])
+def test_deleting_an_unreviewed_tier3_plan_is_refused_once(render, tmp_path, subject):
+    out = _main_with_active_plan(render, tmp_path)
+    _git(out, "rm", "-q", ".process-work/plans/2026-09-07-widget.md")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", subject)
+    r = _merge_push(out)
+    assert r.returncode == 1, r.stdout
+    assert r.stdout.count("2026-09-07-widget.md: deleted by this push") == 1, r.stdout
+    assert "claims #77 —" not in r.stdout, r.stdout
+
+
+def test_deleting_a_waived_plan_is_no_finding(render, tmp_path):
+    out = _main_with_active_plan(render, tmp_path, "# Plan\n\ntier: 3\nissue: #77\n"
+                                 "review-waived: spike, thrown away #77\n")
+    _git(out, "rm", "-q", ".process-work/plans/2026-09-07-widget.md")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "chore: drop the spike")
+    assert "deleted by this push" not in _merge_push(out).stdout
+
+
+def test_archiving_a_plan_is_judged_where_it_went_not_as_a_deletion(render, tmp_path):
+    out = _main_with_active_plan(render, tmp_path)
+    (out / ".process-work/plans/archive").mkdir(parents=True, exist_ok=True)
+    _git(out, "mv", ".process-work/plans/2026-09-07-widget.md",
+         ".process-work/plans/archive/2026-09-07-widget.md")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "chore: archive")
+    r = _merge_push(out)
+    assert "deleted by this push" not in r.stdout, r.stdout
+    assert "archive/2026-09-07-widget.md: tier 3 plan has no clearing REVIEW" in r.stdout, r.stdout
