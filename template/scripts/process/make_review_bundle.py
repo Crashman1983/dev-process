@@ -226,15 +226,17 @@ def _plans_from_filter(root: Path, plan_filter: str) -> list[Path]:
     archived — or a Spec Kit plan whose path does (its directory or its
     printed label `specs/<dir>/plan.md`); an issue (`2631`, `#2631`) also
     finds the plans that declare it (`issue: #2631`) whatever their file name
-    (#207). A filter matching nothing is an error: a bundle without the plan
+    (#207; active and Spec Kit plans). A filter matching nothing is an error: a bundle without the plan
     asked for would be reviewed as if the work had none."""
     issue = plan_filter.lstrip("#")
     by_issue = issue.isascii() and issue.isdigit()
 
     def declares(rel: str, f: Path) -> bool:
-        if not by_issue:
+        # read as the gate reads work ids: a fenced `issue:` is an example; an archived
+        # plan of a reopened issue is history, found by its name only (refute v2.75 r3)
+        if not by_issue or _review_gate.record_kind(rel) == "plan-archive":
             return False
-        text = _read_plan(f)
+        text = _review_gate._unfenced(_read_plan(f))
         return issue in _review_gate._plan_work_ids(_review_gate.plan_stem(rel), text, include_dedated=False)
 
     hits = [f for rel, f in _review_gate.record_files(root, PLAN_HOMES)
@@ -493,6 +495,9 @@ def _nested_anchors(root: Path, base_ref: str | None) -> list[tuple[str, str]]:
     for top in tops:
         for name in NESTED_ANCHORS:
             rel = f"{top}/{name}"
+            # a link out of the repository is no anchor of it (refute v2.75 r3)
+            if not (root / rel).resolve().is_relative_to(root.resolve()):
+                continue
             text = _read(root, rel)
             if text:
                 found.append((rel, text))

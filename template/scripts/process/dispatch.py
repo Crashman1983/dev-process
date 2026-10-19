@@ -1267,21 +1267,23 @@ def _issue_transcripts(root: Path, issue: int | None) -> set[str] | None:
 UNKNOWN_MODEL = "model not recorded"
 
 
-def model_token_usage(root: Path) -> dict[str, dict[str, int]] | None:
-    """{model: {field: tokens}} over every dispatched session's transcripts —
-    subagents (sidechains) included, since a step delegated to a smaller
-    model is what this measures (#125). Usage without a model on its message
-    (another harness's shape, a non-JSON line) counts under UNKNOWN_MODEL.
+def model_token_usage(root: Path) -> tuple[dict[str, dict[str, int]], int] | None:
+    """({model: {field: tokens}}, unreadable transcripts) over every dispatched
+    session's transcripts — subagents (sidechains) included, since a step
+    delegated to a smaller model is what this measures (#125). Usage without a
+    model on its message (another harness's shape, a non-JSON line) counts
+    under UNKNOWN_MODEL; an unreadable transcript makes every share partial.
     None when not measured (no glob, no dispatch record, or no transcript)."""
     files = _issue_transcripts(root, None)
     if not files:
         return None
+    events, unreadable = _transcript_usage(files)
     by_model: dict[str, dict[str, int]] = {}
-    for model, usage, _opaque in _transcript_usage(files)[0]:
+    for model, usage, _opaque in events:
         cell = by_model.setdefault(model, {})
         for field, n in usage.items():
             cell[field] = cell.get(field, 0) + n
-    return {m: u for m, u in by_model.items() if any(u.values())}
+    return {m: u for m, u in by_model.items() if any(u.values())}, unreadable
 
 
 def issue_token_usage(root: Path, issue: int) -> tuple[dict[str, int], int] | None:
@@ -1348,7 +1350,10 @@ def _transcript_usage(files: set[str]) -> tuple[list[tuple[str, dict[str, int], 
                 model = UNKNOWN_MODEL
             mid = message.get("id") if isinstance(message, dict) else None
             if isinstance(mid, str):
-                merged = messages.setdefault((mid, data.get("requestId")), (model, {}))[1]
+                key = (mid, data.get("requestId"))
+                seen, merged = messages.setdefault(key, (model, {}))
+                if seen == UNKNOWN_MODEL and model != UNKNOWN_MODEL:  # any line may name it
+                    messages[key] = (model, merged)
                 for event in _usage_events(data):
                     for field, n in event.items():
                         merged[field] = max(merged.get(field, 0), n)
@@ -2494,11 +2499,21 @@ def _tip_on_origin(root: Path, branch: str, *, fetch: bool) -> str:
 def _integration_base(root: Path, tip: str) -> str:
     """The fork point of `tip` by the gate's own rule (`check_review.merge_base`): one
     rule for "what this branch changes", here and at the push (#207). An ambiguous
-    fork point is no base — every caller then judges a code review, the safe side."""
+    fork point is no base: a caller reading the branch's change then says it cannot
+    judge, and the chain asks `fork_problem` before it skips a plan review."""
     try:
         return _review.merge_base(root, tip) or ""
     except _review.GitReadError:
         return ""
+
+
+def fork_problem(root: Path, tip: str) -> str | None:
+    """Why `tip` has no single fork point by the gate's rule, or None."""
+    try:
+        _review.merge_base(root, tip)
+    except _review.GitReadError as exc:
+        return str(exc)
+    return None
 
 
 def new_code_on_origin(root: Path, branch: str, *, fetch: bool = True) -> bool | None:
@@ -2861,6 +2876,14 @@ def _chain(root: Path, *, dry_run: bool = False) -> int:
             continue
         plan_review = False
         if nxt == "execute" and wt is not None and wt.is_dir():
+            # without one fork point its own plans cannot be told: no plan reads as no
+            # plan review due (refute v2.75 r3, a criss-cross merge) — fail closed
+            head = _out(wt, "rev-parse", "HEAD")
+            fork = fork_problem(root, head) if head else None
+            if fork:
+                print(f"dispatch: {branch} — {fork}; its own plans cannot be told, no execute queued "
+                      "(merge the integration branch into it, or the steward decides)", file=sys.stderr)
+                continue
             # a Tier 2+ plan is read once, independently, before any code (#192) —
             # asked first: it is a few git reads, the gates below take minutes
             tier_of_plan, plan_cleared = plan_review_state(root, wt, branch)
@@ -2870,7 +2893,6 @@ def _chain(root: Path, *, dry_run: bool = False) -> int:
                       "session reviews the plan with a fresh subagent (refute.md, \"Refuting a plan\") "
                       "and attests `attest.py --plan-review`; no execute queued", file=sys.stderr)
                 continue
-            head = _out(wt, "rev-parse", "HEAD")
             if head and rec.get("plan_gates_red") == head:
                 # judged red on this commit: say it again, do not re-run; a new plan commit is judged again
                 print(f"dispatch: {branch} — gates still red on its plan ({head[:12]}): "
