@@ -288,6 +288,25 @@ def _verify(root: Path, base: str, tip: str, *, worktree: bool = False,
     return result
 
 
+_FULL_SHA = re.compile(r'[0-9a-f]{40}|[0-9a-f]{64}')
+
+
+def update_seen(root: Path, head: str, tip: str, paths: set[str]) -> bool:
+    """Did a review at `head` see the update as `tip` carries it — the answers and
+    every update path the same (the ack aside, written after the review)? A review of
+    other work, or one taken before the update was applied, saw none of it; with a
+    project delta that drops a template change the tip's content check alone cannot
+    tell (refute v2.75-N, blocker). A git failure is "not seen"."""
+    if not head:
+        return False
+    try:
+        moved = {os.fsdecode(p) for p in git(root, 'diff', '--name-only', '--no-renames', '-z',
+                                              head, tip).split(b'\0') if p}
+    except (ValueError, OSError, subprocess.TimeoutExpired):
+        return False
+    return not (moved & (paths - {ACK}))
+
+
 def update_paths(update: dict) -> set[str]:
     """What an update's acknowledgment and review are about: the recorded answers, the
     ack, the owned list and every path the update touches (#262). A main commit that
@@ -312,6 +331,10 @@ def carried_base(root: Path, old_base: str, base: str, paths: set[str]) -> str |
         return None
     if not old_base:
         return 'no base recorded'
+    if not _FULL_SHA.fullmatch(old_base):
+        # a name (`main`, `<sha>~0`) floats with the repository: it would compare the
+        # fork point with itself and see nothing move (refute v2.75-N)
+        return f'base {old_base[:40]!r} is no commit id'
     known = subprocess.run(['git', '-C', str(root), 'cat-file', '-e', old_base + '^{commit}'],
                            capture_output=True, timeout=60, env=git_environment())
     if known.returncode:
@@ -346,6 +369,9 @@ def _ack_problem(root: Path, ack: dict, base: str, new_sha: str, update: dict) -
         return (f'the ack was given at base {str(ack.get("base"))[:12]}, not the fork point '
                 f'{base[:12]}, and records no fingerprint to carry it — acknowledge again')
     now = fingerprint(update)
+    if not all(isinstance(recorded.get(k), list) and all(isinstance(x, str) for x in recorded[k])
+               for k in ('identical', 'project_delta')):
+        return 'the ack\'s fingerprint is malformed — acknowledge again'
     if recorded != now:
         was = set(recorded.get('identical', [])) | set(recorded.get('project_delta', []))
         cur = set(now['identical']) | set(now['project_delta'])

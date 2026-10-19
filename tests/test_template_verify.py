@@ -983,3 +983,75 @@ def test_ack_writes_the_fingerprint_of_the_committed_update(update):
     ack = json.loads((root / verifier.ACK).read_text(encoding='utf-8'))
     assert 'stray.txt' not in json.dumps(ack['fingerprint'])
     assert ack['fingerprint'] == verifier.fingerprint(verifier.verify(root, base))
+
+
+def _dropped_gate_fix(tmp_path, monkeypatch, rel='.githooks/pre-push'):
+    """Refute v2.75-N, blocker: main holds a merged Tier 3 work W with its REVIEW; the
+    update bumps the pin but drops the release's change to `rel` (a project delta that
+    leaves the tree as it was). W's review never saw the update."""
+    source, root = tmp_path / 'source', tmp_path / 'project'
+    init(source)
+    write(source, 'copier.yml', '_subdirectory: template\nproject_name:\n  default: demo\n')
+    write(source, 'template/.copier-answers.yml.jinja', '{{ _copier_answers|to_nice_yaml }}\n')
+    write(source, 'template/' + rel, '# old enforcement\n')
+    write(source, 'CHANGELOG.md', '# Changelog\n\n## 1.0.0\n\nInitial release.\n')
+    commit(source)
+    git(source, 'tag', 'v1.0.0')
+    write(source, 'template/' + rel, '# SECURITY FIX enforcement\n')
+    write(source, 'CHANGELOG.md', '# Changelog\n\n## 1.1.0\n\nGate fix.\n\n## 1.0.0\n\nInitial release.\n')
+    new_release = commit(source)
+    git(source, 'tag', 'v1.1.0')
+    import copier
+    copier.run_copy(str(source), str(root), vcs_ref='v1.0.0', defaults=True, quiet=True)
+    init(root)
+    base0 = commit(root)
+    git(root, 'checkout', '-qb', 'w')
+    write(root, 'src/app.py', 'print(1)\n')
+    write(root, '.process-work/plans/archive/w-feature.md', '# W\n\ntier: 3\n\n## Decisions\n')
+    hw = commit(root)
+    write(root, '.process-work/journal/2026-10-01.md',
+          'REVIEW work=w-feature tier=3 reviewer=fresh model=cross '
+          'independence=bundle,non-implementing,cross-model verdict=pass round=1 '
+          f'base={base0} head={hw}\n')
+    commit(root)
+    git(root, 'checkout', '-q', 'main')
+    git(root, 'merge', '-q', '--no-ff', '--no-edit', 'w')
+    m1 = git(root, 'rev-parse', 'HEAD')
+    git(root, 'checkout', '-qb', 'update')
+    copier.run_copy(str(source), str(root), vcs_ref='v1.1.0', defaults=True, overwrite=True, quiet=True)
+    git(root, 'checkout', m1, '--', rel)  # the release's fix dropped
+    write(root, '.process-work/template-update-ack.json',
+          json.dumps(dict(base=m1, release=new_release, owner='steward')))
+    commit(root)
+    monkeypatch.setenv('PROCESS_PUSH_TARGETS', 'refs/heads/main')
+    return root
+
+
+def test_a_merged_review_of_other_work_never_covers_an_update(tmp_path, monkeypatch):
+    """Refute v2.75-N blocker: the base binding carried, so W's old review cleared the
+    update; only a review whose head carries the update covers it."""
+    root = _dropped_gate_fix(tmp_path, monkeypatch)
+    report = load('template_verify').verify(root, 'main')
+    assert report['project_delta'] == ['.githooks/pre-push'] and report['acknowledged'], report
+    hard, _ = load('check_review').check(root)
+    assert any('REVIEW of the update range required for project delta: .githooks/pre-push' in h
+               for h in hard), hard
+
+
+def test_a_malformed_fingerprint_is_a_reason_not_a_crash(update):
+    """Refute v2.75-N minor: `fingerprint: {"identical": 5}` raised a TypeError."""
+    root, _, base, verifier = update
+    ack = _fingerprinted_ack(root, verifier, base)
+    ack['fingerprint']['identical'] = 5
+    write(root, verifier.ACK, json.dumps(ack))
+    commit(root)
+    _merge_moved_main(root)
+    report = verifier.verify(root, 'main')
+    assert report['acknowledged'] is False and 'malformed' in report['ack_expired'], report
+
+
+def test_a_symbolic_base_carries_nothing(update):
+    """Refute v2.75-N minor: `main` or `<sha>~0` floated with the repository."""
+    root, _, base, verifier = update
+    assert 'no commit id' in verifier.carried_base(root, 'main', base, set())
+    assert 'no commit id' in verifier.carried_base(root, base + '~0', base, set())
