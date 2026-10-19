@@ -464,6 +464,30 @@ REFUTE_LINE = _review_gate.REFUTE_LINE
 # known limits apply here too).
 
 
+NESTED_ANCHORS = ("CLAUDE.md", "AGENTS.md")
+
+
+def _nested_anchors(root: Path, base_ref: str | None) -> list[tuple[str, str]]:
+    """(path, text) of the anchors in the top-level folders the diff touches —
+    a monorepo keeps its stack rules there, and a reviewer without tools sees
+    only the bundle (#253). Nothing without a base or a list git can give:
+    the bundle then stays as it was."""
+    if base_ref is None:
+        return []
+    out = _git(root, "diff", "--name-only", "--no-renames", "-z", f"{base_ref}...HEAD")
+    if out is None:
+        return []
+    tops = sorted({n.split("/", 1)[0] for n in out.split("\0") if "/" in n})
+    found = []
+    for top in tops:
+        for name in NESTED_ANCHORS:
+            rel = f"{top}/{name}"
+            text = _read(root, rel)
+            if text:
+                found.append((rel, text))
+    return found
+
+
 def _gate_files(root: Path, base_ref: str) -> list[str] | None:
     """Gate code the branch changes (`docs/process/refute.md`) — None when git
     cannot tell. `--no-renames`: a gate file moved out of the gate paths is a
@@ -768,6 +792,10 @@ def build(root: Path, base: str | None, plan_filter: str | None = None,
     product = _read(root, PRODUCT)
     add("## Product frame (judge direction against this)\n")
     add(product + "\n" if product else "*(unavailable: PRODUCT.md missing)*\n")
+
+    for rel, text in _nested_anchors(root, resolved):
+        add(f"## Stack anchor `{rel}` (the diff touches `{rel.split('/', 1)[0]}/`)\n")
+        add(text + "\n")
 
     add("## Plan(s) under review\n")
     if plans:

@@ -1639,3 +1639,22 @@ def test_a_project_word_from_review_local_counts(render, tmp_path):
     text = _plan_bundle(out2, body, local="# Local\n\ntransitions-vocabulary: Saga, not a word!\n")
     assert f"{TRANSITIONS_NOTE} — the plan speaks of event, saga " in text
 
+
+
+def test_the_bundle_carries_the_anchors_of_the_touched_folders(render, tmp_path):
+    """#253: a reviewer without tools sees only the bundle; a monorepo keeps its stack
+    rules in nested anchors — the touched folders' anchors ride along, others do not."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    (out / "backend").mkdir()
+    (out / "backend/CLAUDE.md").write_text("# backend rules\nLayering is directed.\n")
+    (out / "web").mkdir()
+    (out / "web/AGENTS.md").write_text("# web rules\nTokens only.\n")
+    _seed_repo(out)
+    plain = _bundle(out, "--base", "main").stdout
+    assert "Stack anchor" not in plain
+    (out / "backend/app.py").write_text("X = 1\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "backend change")
+    r = _bundle(out, "--base", "main").stdout
+    assert "## Stack anchor `backend/CLAUDE.md`" in r and "Layering is directed." in r
+    assert "web/AGENTS.md" not in r and "Tokens only." not in r
