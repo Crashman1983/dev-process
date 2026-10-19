@@ -354,7 +354,9 @@ This is the neutral floor. A project with a specific stack or risk surface
 extends it in `review.local.md` in `docs/process/` — the framework's known footguns,
 the domain's invariants, its layering rules, where its stack guides live. The
 review command and the review bundle carry that file right after this list, so
-a dispatched reviewer sees it too. It sharpens, it never *removes* a category to
+a dispatched reviewer sees it too. The bundle also carries the `CLAUDE.md` and
+`AGENTS.md` of every top-level folder the diff touches: the stack rules a
+monorepo keeps there reach a reviewer that runs without tools. It sharpens, it never *removes* a category to
 make a review pass — and the project never has to own this file or the review
 command. A line `transitions-vocabulary: saga, ledger` there adds the
 project's own state-machine words to those the bundle looks for when it notes
