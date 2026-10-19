@@ -17,10 +17,10 @@ A few plain sentences per release: [NEWS.md](NEWS.md). Deutsche Fassung:
 **What changes.**
 - Template update: the ack and the update's REVIEW carry over to a new main when the old base is an ancestor of the new one and the commits in between touch none of the update's paths; the gate names an expired ack (`ack_expired`), and an update REVIEW counts only when its head saw the update's answers, owned list and project delta.
 - The train's retry message says what ran: green under the retry command, a gate flake, or the classic FLAKY.
-- Fences: one walk (`check_review.fenced_lines`) for the REVIEW parser, the declaration reader and the clarification gate. A closing fence is the opener's character, at least as long, and nothing else on the line; a fence still open at the end of a plan or journal shard that hides `tier:`, `issue:`, `review-waived:`, a REVIEW line or a clarification marker is a hard finding (a note in the archive).
-- A Tier 2+ plan deleted by a push still owes its review.
+- Fences: one walk (`check_review.fenced_lines`) for the REVIEW parser, the declaration reader and the clarification gate. Code blocks are read as CommonMark renders them: a closing fence is the opener's character, at least as long, nothing else on the line and indented at most three columns, and an indented code block is code; a fence still open at the end of a plan or journal shard that hides `tier:`, `issue:`, `review-waived:`, a REVIEW line or a clarification marker is a hard finding (a note in the archive).
+- A Tier 2+ plan deleted by a push, or moved where no arm reads a plan (`notes.txt`, a subfolder, `archive/<dir>/`), still owes its review; the dispatch chain queues no execute while a branch has no single fork point.
 - `refute_line.py` writes the REFUTE line from the refuter's report: the brief now ends with `SCENARIO` and `PATTERN` lines, the tool counts them and takes the next round; the summary is the only free text.
-- `red_evidence.py --junit PATH` measures red-before/green-after for any runner that writes JUnit XML (vitest, jest, XCTest).
+- `red_evidence.py --junit PATH` measures red-before/green-after for any runner that writes JUnit XML (vitest, jest, XCTest); `PATH` is an untracked `.xml` file, and the old tree borrows the installed `node_modules`.
 - `process_kpis.py models` shows each model's share of the dispatched sessions' tokens, subagents included.
 - `finish.py --tests` without a command runs the configured `merge_suite`; `--tests-passed` is refused while one is set.
 - attest: the lowest ranked model class reviews no plan, an unmeasured model report is refused with a hint, and a base without `review_evidence` takes HEAD's stricter tier floors.

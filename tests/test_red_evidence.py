@@ -396,6 +396,8 @@ def test_a_junit_error_is_no_red_and_the_worst_outcome_stands_in_any_order(rende
                           "<testcase classname='c' name='s'><skipped/></testcase></testsuite></testsuites>")
         got = mod.junit_outcomes(report)
         assert got == {"c::t": "error" if "error" in first + second else "failed"}, (first, second, got)
+    report.write_text("<testsuites><testsuite><testcase classname='c' name='t'>")  # cut off mid-run
+    assert mod.junit_outcomes(report) is None
 
 
 def test_a_stale_report_on_the_fixed_side_proves_nothing(render, tmp_path):
