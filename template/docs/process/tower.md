@@ -365,7 +365,10 @@ of the policy, so a template update still reaches it. Sessions report their mode
 (`report.py … --model`, or `PROCESS_MODEL` set by dispatch), and the
 telemetry module's `process_kpis.py models` cuts rounds-to-pass and
 blocks by tier × phase × model — one issue is one unit, the last model
-reported for a phase owns it — the number the policy is judged by.
+reported for a phase owns it — the number the policy is judged by. Above
+it, each model's share of the dispatched sessions' tokens, subagents
+included (from the policy's `transcripts`): whether `[mechanical]` steps
+really moved to the smaller model.
 
 ## What the tower is not
 

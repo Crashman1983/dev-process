@@ -1246,9 +1246,10 @@ TOKEN_FIELDS = ("output_tokens", "input_tokens", "cache_read_input_tokens", "cac
 USAGE_TOKENS = re.compile(r'"(' + "|".join(TOKEN_FIELDS) + r')":\s*(\d+)')
 
 
-def _issue_transcripts(root: Path, issue: int) -> set[str] | None:
-    """The transcript files of the issue's dispatched worktrees; None without
-    a `transcripts` glob in the policy (`{worktree}` is substituted; default none)."""
+def _issue_transcripts(root: Path, issue: int | None) -> set[str] | None:
+    """The transcript files of the issue's dispatched worktrees (every
+    dispatched worktree's with `issue` None); None without a `transcripts`
+    glob in the policy (`{worktree}` is substituted; default none)."""
     pattern = transcripts_pattern(root)
     if pattern is None:
         return None
@@ -1258,9 +1259,29 @@ def _issue_transcripts(root: Path, issue: int) -> set[str] | None:
             rec = json.loads(p.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             continue
-        if isinstance(rec, dict) and str(rec.get("issue")) == str(issue):
+        if isinstance(rec, dict) and (issue is None or str(rec.get("issue")) == str(issue)):
             files |= _transcript_files(pattern, rec)
     return files
+
+
+UNKNOWN_MODEL = "model not recorded"
+
+
+def model_token_usage(root: Path) -> dict[str, dict[str, int]] | None:
+    """{model: {field: tokens}} over every dispatched session's transcripts —
+    subagents (sidechains) included, since a step delegated to a smaller
+    model is what this measures (#125). Usage without a model on its message
+    (another harness's shape, a non-JSON line) counts under UNKNOWN_MODEL.
+    None when not measured (no glob, no dispatch record, or no transcript)."""
+    files = _issue_transcripts(root, None)
+    if not files:
+        return None
+    by_model: dict[str, dict[str, int]] = {}
+    for model, usage, _opaque in _transcript_usage(files)[0]:
+        cell = by_model.setdefault(model, {})
+        for field, n in usage.items():
+            cell[field] = cell.get(field, 0) + n
+    return {m: u for m, u in by_model.items() if any(u.values())}
 
 
 def issue_token_usage(root: Path, issue: int) -> tuple[dict[str, int], int] | None:
@@ -1292,6 +1313,51 @@ def _usage_events(data: object) -> list[dict[str, int]]:
     return events
 
 
+def _transcript_usage(files: set[str]) -> tuple[list[tuple[str, dict[str, int], bool]], int]:
+    """([(model, usage, opaque)] per usage event, unreadable transcripts) —
+    the one reading of the transcripts' token counts. Claude Code writes one
+    line per content block of an API message, each repeating the message's
+    usage: a message counts once, with the largest value each field reached
+    on any of its lines (a streamed message may carry interim counts). A line
+    without a message id is its own event. A non-JSON line with token fields
+    is an opaque event: its counts are real, its completeness unknown. The
+    model is the message's (`message.model`), UNKNOWN_MODEL without one."""
+    events: list[tuple[str, dict[str, int], bool]] = []
+    unreadable = 0
+    messages: dict[tuple[str, object], tuple[str, dict[str, int]]] = {}
+    for f in sorted(files):
+        try:
+            text = Path(f).read_text(errors="ignore")
+        except OSError:
+            unreadable += 1
+            continue
+        for line in text.splitlines():
+            if not USAGE_TOKENS.search(line):
+                continue
+            try:
+                data = json.loads(line)
+            except ValueError:
+                usage: dict[str, int] = {}
+                for field, n in USAGE_TOKENS.findall(line):
+                    usage[field] = usage.get(field, 0) + int(n)
+                events.append((UNKNOWN_MODEL, usage, True))
+                continue
+            message = data.get("message") if isinstance(data, dict) else None
+            model = message.get("model") if isinstance(message, dict) else None
+            if not (isinstance(model, str) and model and not model.startswith("<")):
+                model = UNKNOWN_MODEL
+            mid = message.get("id") if isinstance(message, dict) else None
+            if isinstance(mid, str):
+                merged = messages.setdefault((mid, data.get("requestId")), (model, {}))[1]
+                for event in _usage_events(data):
+                    for field, n in event.items():
+                        merged[field] = max(merged.get(field, 0), n)
+                continue
+            events += [(model, event, False) for event in _usage_events(data)]
+    events += [(model, merged, False) for model, merged in messages.values() if merged]
+    return events, unreadable
+
+
 def issue_token_coverage(root: Path, issue: int) -> tuple[dict[str, int], int, dict[str, int], int, int] | None:
     """(totals, sessions, {field: usage events that carried it}, usage events,
     unknown sources: opaque lines plus unreadable transcripts).
@@ -1306,51 +1372,16 @@ def issue_token_coverage(root: Path, issue: int) -> tuple[dict[str, int], int, d
     files = _issue_transcripts(root, issue)
     if not files:
         return None
+    events, unknown = _transcript_usage(files)
     totals: dict[str, int] = {}
     covered: dict[str, int] = {}
-    events = unknown = 0
-    # Claude Code writes one line per content block of an API message, each
-    # repeating the message's usage: count a message once, with the largest
-    # value each field reached on any of its lines (a streamed message may
-    # carry interim counts). A line without a message id is its own event.
-    messages: dict[tuple[str, object], dict[str, int]] = {}
-    for f in sorted(files):
-        try:
-            text = Path(f).read_text(errors="ignore")
-        except OSError:
-            unknown += 1
-            continue
-        for line in text.splitlines():
-            if not USAGE_TOKENS.search(line):
-                continue
-            try:
-                data = json.loads(line)
-            except ValueError:  # opaque: its counts are real, its completeness unknown
-                events += 1
-                unknown += 1
-                for field, n in USAGE_TOKENS.findall(line):
-                    totals[field] = totals.get(field, 0) + int(n)
-                continue
-            message = data.get("message") if isinstance(data, dict) else None
-            mid = message.get("id") if isinstance(message, dict) else None
-            if isinstance(mid, str):
-                merged = messages.setdefault((mid, data.get("requestId")), {})
-                for event in _usage_events(data):
-                    for field, n in event.items():
-                        merged[field] = max(merged.get(field, 0), n)
-                continue
-            for event in _usage_events(data):
-                events += 1
-                for field, n in event.items():
-                    totals[field] = totals.get(field, 0) + n
-                    covered[field] = covered.get(field, 0) + 1
-    for merged in messages.values():
-        if merged:
-            events += 1
-            for field, n in merged.items():
-                totals[field] = totals.get(field, 0) + n
+    for _model, usage, opaque in events:
+        unknown += opaque
+        for field, n in usage.items():
+            totals[field] = totals.get(field, 0) + n
+            if not opaque:
                 covered[field] = covered.get(field, 0) + 1
-    return totals, len(files), covered, events, unknown
+    return totals, len(files), covered, len(events), unknown
 
 
 def issue_tokens(root: Path, issue: int) -> tuple[int, int] | None:
