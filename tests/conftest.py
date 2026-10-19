@@ -1,9 +1,14 @@
 import json
 import shutil
+import sys
 from pathlib import Path
 
 import copier
 import pytest
+
+# a test that loads a gate straight from template/ (test_review._cr) triggers lazy imports
+# later, outside its own guard — a __pycache__ there rides along into every render
+sys.dont_write_bytecode = True
 
 REPO = Path(__file__).resolve().parent.parent  # holds copier.yml + template/
 
