@@ -97,7 +97,7 @@ def test_markup_never_drops_a_scenario_out_of_the_count(render, tmp_path):
     out = _setup(render, tmp_path)
     (out / "report.md").write_text(
         "1. SCENARIO A: CONFIRMED BLOCKER NEW — x\n- [x] SCENARIO B: HELD\n### SCENARIO C: HELD\n"
-        "> SCENARIO D: CONFIRMED MINOR NEW — y\n\n    SCENARIO E: HELD (an indented template)\n\n"
+        "> SCENARIO D: CONFIRMED MINOR NEW — y\n\n```\nSCENARIO E: HELD (a fenced template)\n```\n\n"
         "PATTERN: no common cause\n", encoding="utf-8")
     r = _tool(out, "--summary", "fixed", "--dry-run")
     assert r.returncode == 0, r.stderr
