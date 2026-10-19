@@ -848,8 +848,8 @@ def test_the_kenni_backport_lessons_are_pinned(render, tmp_path):
     docs = out / "docs/process"
     testing = (docs / "testing.md").read_text()
     for piece in ("Test lanes are a shared resource", "**Stages", "(`addopts`)", "PYTEST_XDIST_WORKER",
-                  "75 a lane stayed busy"):
-        assert piece in testing, piece
+                  "75 a lane stayed busy", "**The net under a selection.**", "`OnFailure=`"):
+        assert piece in testing, piece  # the net under merge_scope: #232 AC-4
     assert "Test lanes are a shared resource" in (out / "scripts/process/lane.py").read_text()
     assert "neither route carries a hosted job" in (docs / "commits.md").read_text()
     assert "flock -n" in (docs / "improvement-weekly.md").read_text()
