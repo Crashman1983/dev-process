@@ -16,7 +16,8 @@ records a GO; a review that names a different seal than the reference
 carries; a reference folder whose seal no longer verifies; an active plan
 citing an ID the contract does not define.
 
-Best-effort (note, never red): an opaque pin; a draft contract; reference
+Best-effort (note, never red): an opaque pin; a draft contract; a legacy
+norm (one note: registered so plans can declare it, #257); reference
 boards rendered from an older contract (external drift — re-seal or start a
 new round); a change in flight under the surface's paths while no active
 plan cites a contract ID (DoR R5); a plan citing IDs without naming the
@@ -43,7 +44,9 @@ import seal as _seal  # noqa: E402
 REGISTRY_DIR = "docs/process/design-contracts"
 PLANS_ACTIVE = ".process-work/plans"
 SPECS_DIR = "specs"
-STATUSES = {"draft", "accepted"}
+# legacy: a norm older than the registry (no ADR made it one, no independent GO
+# exists), registered so plans can declare it — one note, no further claims (#257)
+STATUSES = {"draft", "accepted", "legacy"}
 _HASH_PIN = re.compile(r"^sha256:([0-9a-f]{64})$")
 # the seal a review verified is named, not scavenged: a review also carries the
 # review-artifact digest (64 hex) — grabbing any hex read that as "a different seal"
@@ -243,13 +246,15 @@ def _check_one(root: Path, path: Path, plans: dict[str, str], in_flight: set[str
                         f"(pin sha256:{m.group(1)[:12]}…, file sha256:{actual[:12]}…) — an "
                         "amendment is deliberate: record its provenance in the contract, then re-pin")
     else:
-        soft.append(f"{rel}: opaque pin {data['pin'].strip()!r} — drift is not machine-checked")
+        if status != "legacy":  # the legacy note says it already
+            soft.append(f"{rel}: opaque pin {data['pin'].strip()!r} — drift is not machine-checked")
 
     # --- IDs: defined once, cited from something real ------------------------
     ids = id_pattern(data["id_prefixes"])
     defined = {canonical(i, ids) for i in ids.findall(text)}
     if not defined:
-        soft.append(f"{rel}: contract defines no ID of the families {data['id_prefixes']} yet")
+        if status != "legacy":
+            soft.append(f"{rel}: contract defines no ID of the families {data['id_prefixes']} yet")
     seen: dict[str, list[str]] = {}
     for h in _HEADING.findall(text):
         lead = ids.match(h.strip().lstrip("*_`").strip())  # the ID *leads* the heading: a definition
@@ -278,6 +283,9 @@ def _check_one(root: Path, path: Path, plans: dict[str, str], in_flight: set[str
     # --- status: accepted needs a decision record and an independent GO --------
     if status == "draft":
         soft.append(f"{rel}: {surface} contract is a draft — not yet the norm for implementation")
+    elif status == "legacy":
+        soft.append(f"{rel}: {surface} is a legacy norm — registered so plans can declare it, "
+                    "not machine-checked beyond the IDs plans cite")
     else:
         for key, what in (("adr", "decision record"), ("review", "independent review")):
             val = data.get(key, "").strip() if isinstance(data.get(key), str) else ""

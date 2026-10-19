@@ -42,7 +42,7 @@ On by default in the standard set; inert until the first registry entry exists.
 | ----- | -------- | ------- |
 | `surface` | yes | slug, equals the filename stem |
 | `contract` | yes | repo-relative path to the committed contract |
-| `status` | yes | `draft` (being written, not yet the norm) or `accepted` |
+| `status` | yes | `draft` (being written, not yet the norm), `accepted`, or `legacy` (a norm older than the registry: no ADR made it one and no GO exists — registered so plans can declare it; one note, no pin or ID notes, cited IDs still checked) |
 | `pin` | yes | `sha256:<hex>` of the contract file (`sha256sum`), or an opaque marker |
 | `id_prefixes` | yes | the ID families the contract defines; an ID is `<prefix><digits>[a-z]` |
 | `adr` | accepted | the decision record that made it normative |
@@ -62,7 +62,7 @@ verifies (a board edited or added after the GO); an **active plan citing an
 ID the contract does not define** — plausible-looking IDs are the failure
 this module exists for.
 
-**Best-effort (note, never fails CI):** an opaque pin; a `draft` contract;
+**Best-effort (note, never fails CI):** an opaque pin; a `draft` contract; a `legacy` norm (one note);
 reference boards rendered from an older contract (external drift: re-seal or
 start a new round); a push touching the surface's `paths` while no active
 plan cites an ID (DoR R5); an accepted contract without a sealed reference.
