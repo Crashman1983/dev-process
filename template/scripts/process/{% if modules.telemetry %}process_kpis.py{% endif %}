@@ -26,7 +26,8 @@ difference. See "honest ceiling" in the module doc.
   process_kpis.py cfr           [--branch B]
   process_kpis.py clusters      [--branch B] [--window D] [--min N]
                                                 # fix clusters (rule 6 across sessions)
-  process_kpis.py models                        # rounds-to-pass and blocks by phase model × tier
+  process_kpis.py models                        # token share per model; rounds-to-pass and
+                                                # blocks by phase model × tier
   process_kpis.py rounds                        # per work item: rounds to pass, blockers by origin; by kind
   process_kpis.py share         [--weeks N]     # process vs product, week by week
   process_kpis.py train-phases  [--runs N]      # where the merge train's time goes, phase by phase
@@ -421,6 +422,25 @@ def _review_rounds(root: Path) -> dict[str, dict]:
     return out
 
 
+def _token_share(root: Path) -> None:
+    """Each model's share of the dispatched sessions' tokens, subagents
+    included — whether mechanical steps really moved to a smaller model (#125)."""
+    import dispatch as _dispatch  # noqa: PLC0415 — one reader of transcripts
+    usage = _dispatch.model_token_usage(root)
+    print("[models] tokens by model ~approx — the dispatched sessions' transcripts, subagents included")
+    if not usage:
+        print("  not measured (a `transcripts` glob in the model policy and dispatched sessions)")
+        return
+    total = {m: sum(u.values()) for m, u in usage.items()}
+    out = {m: u.get("output_tokens", 0) for m, u in usage.items()}
+    all_total, all_out = sum(total.values()), sum(out.values())
+    print(f"  {'model':<32} {'tokens':>13} {'share':>6} {'output':>11} {'share':>6}")
+    for m in sorted(usage, key=lambda m: -total[m]):
+        t_share = f"{total[m] / all_total:.0%}" if all_total else "—"
+        o_share = f"{out[m] / all_out:.0%}" if all_out else "—"
+        print(f"  {m:<32} {total[m]:>13,} {t_share:>6} {out[m]:>11,} {o_share:>6}")
+
+
 def models(root: Path | None = None) -> int:
     """Per (tier, phase, model): issues seen, blocked reports, review rounds
     to the clearing pass. Reads the worker reports (what model ran which
@@ -428,6 +448,7 @@ def models(root: Path | None = None) -> int:
     Proxy at best: the model is what the worker reported, the rounds are
     the reviewer's count; confidence never above medium."""
     root = root or Path.cwd()
+    _token_share(root)
     print("[models] ~proxy — the worker's reported model × the journal's review rounds")
     by = _reports_by_worker(root)
     if not by:

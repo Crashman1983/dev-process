@@ -96,6 +96,42 @@ def test_cost_per_issue_reads_the_policy_transcripts_or_says_not_measured(render
     assert "tokens: 5 output over 1 sessions" in r.stdout, r.stdout + r.stderr
 
 
+def test_models_reports_each_models_token_share_subagents_included(render, tmp_path):
+    """#125 AC-3: did the mechanical steps move to the smaller model? Read
+    from the dispatched sessions' transcripts, a subagent's messages count."""
+    import json
+    out = _render(render, tmp_path)
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=out, check=True)
+    def models():  # `models` reads the project it runs in
+        return subprocess.run([sys.executable, str(out / "scripts/process/process_kpis.py"), "models"],
+                              cwd=out, capture_output=True, text=True)
+
+    r = models()
+    assert r.returncode == 0 and "tokens by model" in r.stdout and "not measured" in r.stdout, r.stdout + r.stderr
+    for issue in (7, 8):
+        (tmp_path / f"w{issue}" / "t").mkdir(parents=True)
+    big = '{"message": {"id": "%s", "model": "claude-big-1", "usage": {"input_tokens": 600, "output_tokens": 100}}, "requestId": "r"}\n'
+    # one message, two content-block lines: counted once
+    (tmp_path / "w7" / "t" / "main.jsonl").write_text(big % "m1" + big % "m1")
+    (tmp_path / "w7" / "t" / "agent.jsonl").write_text(
+        '{"isSidechain": true, "message": {"id": "m2", "model": "claude-small-1", '
+        '"usage": {"input_tokens": 200, "output_tokens": 100}}, "requestId": "r"}\n')
+    (tmp_path / "w8" / "t" / "codex.jsonl").write_text('{"info": {"last_token_usage": {"output_tokens": 0, "input_tokens": 100}}}\n')
+    (out / ".git/process-dispatch").mkdir()
+    for issue in (7, 8):
+        (out / f".git/process-dispatch/{issue}-x.json").write_text(
+            json.dumps({"issue": issue, "worktree": str(tmp_path / f"w{issue}")}))
+    (out / "docs/process/model-policy.local.json").write_text(json.dumps({"transcripts": "{worktree}/t/*.jsonl"}))
+    r = models()
+    assert r.returncode == 0, r.stdout + r.stderr
+    rows = {line.split()[0]: line.split()[1:] for line in r.stdout.splitlines()
+            if line.strip().startswith(("claude-", "model not"))}
+    assert rows["claude-big-1"] == ["700", "64%", "100", "50%"], r.stdout
+    assert rows["claude-small-1"] == ["300", "27%", "100", "50%"], r.stdout
+    # a harness that records no model per message is named, never dropped silently
+    assert rows["model"] == ["not", "recorded", "100", "9%", "0", "0%"], r.stdout
+
+
 def test_cfr_flags_code_overlap_only(render, tmp_path):
     out = _render(render, tmp_path)
     env_git = ["git", "-C", str(out)]
