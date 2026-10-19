@@ -278,26 +278,74 @@ def _unfenced(text: str) -> str:
     return "\n".join(line for _i, line in fenced_lines(text)[0])
 
 
+def _legacy_quoted(lines: list[str]) -> list[bool]:
+    """The reading of fences before #250, kept as the yardstick: a fence opens on a line
+    starting with ``` or ~~~ after any indentation and closes on the next line
+    starting with a run of its character at least as long — an info string or any
+    indentation after it included."""
+    out: list[bool] = []
+    fence: str | None = None
+    for line in lines:
+        m = re.match(r"(`{3,}|~{3,})", line.strip())
+        if fence is None:
+            if m:
+                fence = m.group(1)
+            out.append(fence is not None)
+        else:
+            if m and m.group(1)[0] == fence[0] and len(m.group(1)) >= len(fence):
+                fence = None
+            out.append(True)
+    return out
+
+
+def _reads(line: str, patterns: tuple[re.Pattern[str], ...]) -> bool:
+    """Does a gate read `line` through one of `patterns`? An `issue:` naming no issue
+    (`issue: int` in quoted code) is none."""
+    issue = ISSUE_DECL.search(line) if ISSUE_DECL in patterns else None
+    if issue and not any(p.search(line) for p in patterns if p is not ISSUE_DECL):
+        tok = ref_token(issue.group(1))
+        return parse_issue_ref(tok) is not None or tok.isdigit()
+    return any(p.search(line) for p in patterns)
+
+
 def unclosed_fence_problem(text: str, patterns: tuple[re.Pattern[str], ...] | None = None
                            ) -> str | None:
-    """A fence still open at end of file that swallows a line a gate reads —
-    by default `tier:`, `issue:`, `review-waived:`, a REVIEW record or a
-    `DECISION NEEDED` question — or
-    None. An unclosed fence would otherwise read the rest of the file as
+    """A fence still open at end of file that swallows a line a gate reads — by default
+    a blocking (`tier:`, `issue:`, `DECISION NEEDED`) or clearing (REVIEW, `review-waived:`,
+    REFUTE) line; `patterns` names others — or None. The rest of the file would read as
     quoted and turn the gate off for it (#250)."""
-    opened = fenced_lines(text)[1]
+    lines = text.splitlines()
+    opened = fence_scan(lines)[1]
     if opened is None:
         return None
-    patterns = DECLARATION_LINES if patterns is None else patterns
-    for i, line in enumerate(text.splitlines()[opened:], start=opened + 1):
-        issue = ISSUE_DECL.search(line) if patterns is DECLARATION_LINES else None
-        if issue and parse_issue_ref(ref_token(issue.group(1))) is None \
-                and not ref_token(issue.group(1)).isdigit():
-            continue  # `issue: int` in quoted code names no issue
-        if any(p.search(line) for p in patterns):
-            return (f"fence opened on line {opened} never closes — line {i} and "
+    gated = BLOCKING_LINES + CLEARING_LINES if patterns is None else patterns
+    for i, line in enumerate(lines[opened + 1:], start=opened + 2):
+        if _reads(line, gated):
+            return (f"fence opened on line {opened + 1} never closes — line {i} and "
                     f"everything after it read as quoted; close the fence (a "
                     f"closing fence carries no info string)")
+    return None
+
+
+def fence_drift_problem(text: str, patterns: tuple[re.Pattern[str], ...] | None = None
+                        ) -> str | None:
+    """A line #250's reading of fences (`check_overlays.fence_scan`) treats more
+    leniently than the reading before it did, or None: a blocking line (`patterns`; by default
+    `tier:`, `issue:`, `DECISION NEEDED`) now hidden, or a clearing one (by default a
+    REVIEW record, `review-waived:`, a REFUTE line) now read. Each refinement of the
+    reading opened a new silent case (v2.75 review rounds 2–5); where the two readings
+    disagree in the lenient direction the gate asks instead of guessing."""
+    blocking = BLOCKING_LINES if patterns is None else patterns
+    clearing = CLEARING_LINES if patterns is None else ()
+    lines = text.splitlines()
+    code = fence_scan(lines)[0]
+    for i, (line, quoted, was_quoted) in enumerate(zip(lines, code, _legacy_quoted(lines)), start=1):
+        if (quoted and not was_quoted and _reads(line, blocking)) or (
+                was_quoted and not quoted and clearing and _reads(line, clearing)):
+            return (f"line {i} reads as {'quoted' if quoted else 'a record'} only because a fence "
+                    f"above it closes differently since #250 (a closing fence carries no info "
+                    f"string and sits at most three columns deeper than its opener) — make each "
+                    f"fence close on a line of its own")
     return None
 
 
@@ -310,8 +358,6 @@ def unclosed_fence_problem(text: str, patterns: tuple[re.Pattern[str], ...] | No
 DECISION_NEEDED = re.compile(
     r"^\s*(?:[-*+]\s+)?[*_]*DECISION NEEDED[*_]*\s+(\d{4}-\d{2}-\d{2})(?:\s+([^:\n]+?))?\s*:\s*(.+?)\s*$",
     re.MULTILINE)
-# what an unclosed fence must not swallow unreported (#250; review v2.75 r3: DECISION NEEDED)
-DECLARATION_LINES = (TIER_DECL, ISSUE_DECL, WAIVED, _REVIEW_LINE, DECISION_NEEDED)
 # the marker is a status, not a phrase: `(decided by owner)` still asks (refutation)
 ANSWERED_MARK = re.compile(
     r"\((?:answered|resolved|decided|beantwortet|entschieden|erledigt)"
@@ -333,6 +379,10 @@ REFUTE_LINE = re.compile(
     _RECORD_LEAD + r"REFUTE[ \t]+work=(?P<work>(?!<)(?!TODO\b)[\w#./-]+)"
     r"[ \t]+round=(?P<round>\d+):[ \t]*(?P<text>(?!<|TODO\b|…|\.\.\.)\S.*)$",
     re.MULTILINE)
+# the lines whose reading #250's fences must not loosen: blocking ones must not hide,
+# clearing ones must not appear (`unclosed_fence_problem`; review v2.75 r3–r5)
+BLOCKING_LINES = (TIER_DECL, ISSUE_DECL, DECISION_NEEDED)
+CLEARING_LINES = (WAIVED, _REVIEW_LINE, REFUTE_LINE)
 ROOT_CAUSE_LINE = re.compile(
     _RECORD_LEAD + r"ROOT-CAUSE[ \t]+"
     r"work=(?P<work>(?!<)(?!TODO\b)\S+)[ \t]+round=(?P<round>\d+):[ \t]*(?!<|TODO\b|…|\.\.\.)\S",
@@ -2769,6 +2819,10 @@ def check(root: Path) -> tuple[list[str], list[str]]:
             soft.append(f"{rel}: {problem}")
         elif problem:
             hard.append(f"{rel}: {problem}")
+        # hard in the archive too: before #250 the line read the strict way (review v2.75 r5)
+        drift = fence_drift_problem(text)
+        if drift:
+            hard.append(f"{rel}: {drift}")
     invalid = invalid_records(root, [f for _ln, f in all_records])
     superseded = superseded_records(root, [f for _ln, f in all_records], invalid) if invalid else {}
     for rel, lineno, f in located:

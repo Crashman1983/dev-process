@@ -41,7 +41,7 @@ PLANS_ARCHIVE_NAME = "archive"
 
 # the review gate owns fence semantics — import, don't copy (one owner)
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling import
-from check_review import fenced_lines, unclosed_fence_problem  # noqa: E402
+from check_review import fence_drift_problem, fenced_lines, unclosed_fence_problem  # noqa: E402
 
 # tolerant of case and of a colon-less bare marker — `[needs clarification]`
 # must not escape the gate on a spelling nuance (a false-green)
@@ -54,10 +54,11 @@ def _marker_lines(text: str) -> list[int]:
 
 
 def _unclosed(rel: object, text: str, hard: list[str]) -> None:
-    """A fence open at end of file hiding a marker hides an open question."""
-    problem = unclosed_fence_problem(text, (MARKER,))
-    if problem:
-        hard.append(f"{rel}: {problem}")
+    """A fence open at end of file, or one closing differently since #250, hiding a marker
+    hides an open question."""
+    for problem in (unclosed_fence_problem(text, (MARKER,)), fence_drift_problem(text, (MARKER,))):
+        if problem:
+            hard.append(f"{rel}: {problem}")
 
 
 # the artifacts execute builds from — a marker here is an open decision in
