@@ -1658,3 +1658,19 @@ def test_the_bundle_carries_the_anchors_of_the_touched_folders(render, tmp_path)
     r = _bundle(out, "--base", "main").stdout
     assert "## Stack anchor `backend/CLAUDE.md`" in r and "Layering is directed." in r
     assert "web/AGENTS.md" not in r and "Tokens only." not in r
+
+
+def test_plan_filter_by_issue_finds_a_plan_without_the_number_in_its_name(render, tmp_path):
+    """#207 6c: `--plan 77` matched file names only; a plan declaring `issue: #77` under
+    another name was reported as due and then refused."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    plans = out / ".process-work/plans"
+    (plans / "2026-10-19-widget-polish.md").write_text("# Plan\n\nissue: #77\ntier: 2\n\n## Decisions\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "plan for #77")
+    for flt in ("77", "#77"):
+        r = _bundle(out, "--base", "main", "--plan", flt).stdout
+        assert "2026-10-19-widget-polish.md" in r, flt
+    r = _run(out, "--base", "main", "--plan", "78", "--skip-preflight")
+    assert r.returncode != 0 and "matches no plan" in (r.stdout + r.stderr)

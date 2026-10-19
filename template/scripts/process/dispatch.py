@@ -2461,11 +2461,13 @@ def _tip_on_origin(root: Path, branch: str, *, fetch: bool) -> str:
 
 
 def _integration_base(root: Path, tip: str) -> str:
-    for ref in _review.integration_refs(root):
-        base = _out(root, "merge-base", tip, ref)
-        if base:
-            return base
-    return ""
+    """The fork point of `tip` by the gate's own rule (`check_review.merge_base`): one
+    rule for "what this branch changes", here and at the push (#207). An ambiguous
+    fork point is no base — every caller then judges a code review, the safe side."""
+    try:
+        return _review.merge_base(root, tip) or ""
+    except _review.GitReadError:
+        return ""
 
 
 def new_code_on_origin(root: Path, branch: str, *, fetch: bool = True) -> bool | None:

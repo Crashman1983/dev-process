@@ -2357,3 +2357,35 @@ def test_an_invalid_stale_threshold_is_said_not_swallowed(render, tmp_path, caps
     # no policy at all: the default is meant, nothing to say
     policy.unlink()
     assert mod.stale_minutes(out) is None and capsys.readouterr().err == ""
+
+
+def test_dispatch_judges_the_branch_by_the_gates_fork_point(render, tmp_path):
+    """#207 item 5: dispatch had a fork-point rule of its own — a ref that already
+    contains the tip answered with the tip itself, so nothing looked changed. One rule
+    now: `check_review.merge_base`, and no base is a code review."""
+    out = render(tmp_path, {"project_name": "d"})
+    run = lambda *a: subprocess.run(["git", *a], cwd=out, capture_output=True, text=True, check=True)  # noqa: E731
+    run("init", "-q", "-b", "main")
+    run("config", "user.email", "t@t")
+    run("config", "user.name", "t")
+    run("add", "-A")
+    run("commit", "-q", "-m", "base")
+    run("checkout", "-q", "-b", "feat")
+    (out / "x.py").write_text("X = 1\n")
+    run("add", "-A")
+    run("commit", "-q", "-m", "code")
+    probe = ("import sys; sys.dont_write_bytecode = True; sys.path.insert(0, 'scripts/process'); "
+             "import dispatch, check_review; "
+             "print(repr(dispatch._integration_base(__import__('pathlib').Path('.'), 'HEAD')), "
+             "repr(check_review.merge_base(__import__('pathlib').Path('.'), 'HEAD') or ''))")
+    got = subprocess.run([sys.executable, "-c", probe], cwd=out, capture_output=True, text=True)
+    a, b = got.stdout.split()
+    assert a == b and a != "''", got.stdout + got.stderr
+    run("checkout", "-q", "main")
+    run("merge", "-q", "--ff-only", "feat")  # main now contains the tip
+    run("checkout", "-q", "feat")
+    got = subprocess.run([sys.executable, "-c", probe], cwd=out, capture_output=True, text=True)
+    a, b = got.stdout.split()
+    assert a == b, got.stdout + got.stderr
+    tip = run("rev-parse", "HEAD").stdout.strip()
+    assert tip not in a, "a ref containing the tip is no fork point"

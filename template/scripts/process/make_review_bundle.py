@@ -224,11 +224,22 @@ def _label(root: Path, plan: Path) -> str:
 def _plans_from_filter(root: Path, plan_filter: str) -> list[Path]:
     """`--plan`: every plan whose file name contains the filter — active or
     archived — or a Spec Kit plan whose path does (its directory or its
-    printed label `specs/<dir>/plan.md`). A filter matching nothing is an
-    error: a bundle without the plan asked for would be reviewed as if the
-    work had none."""
+    printed label `specs/<dir>/plan.md`); an issue (`2631`, `#2631`) also
+    finds the plans that declare it (`issue: #2631`) whatever their file name
+    (#207). A filter matching nothing is an error: a bundle without the plan
+    asked for would be reviewed as if the work had none."""
+    issue = plan_filter.lstrip("#")
+    by_issue = issue.isascii() and issue.isdigit()
+
+    def declares(rel: str, f: Path) -> bool:
+        if not by_issue:
+            return False
+        text = _read_plan(f)
+        return issue in _review_gate._plan_work_ids(_review_gate.plan_stem(rel), text, include_dedated=False)
+
     hits = [f for rel, f in _review_gate.record_files(root, PLAN_HOMES)
-            if plan_filter in (rel if _review_gate.record_kind(rel) == "spec-plan" else f.name)]
+            if plan_filter in (rel if _review_gate.record_kind(rel) == "spec-plan" else f.name)
+            or declares(rel, f)]
     if not hits:
         raise SystemExit(
             f"make_review_bundle: --plan {plan_filter!r} matches no plan. Searched:\n"
