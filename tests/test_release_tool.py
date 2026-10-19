@@ -29,7 +29,7 @@ def test_every_place_the_repository_names_its_version_is_a_location():
     The overviews name the version they were last checked against — a review stamp,
     not a release location: bumped by the release, it would claim a check nobody did."""
     out = subprocess.run(["git", "grep", "-n", "-F", CURRENT, "--", ".",
-                          ":!CHANGELOG.md", ":!CHANGELOG-DE.md", ":!docs/changelog-archive.md", ":!docs/sbom.cdx.json", ":!docs/SBOM.md", ":!tests/",
+                          ":!CHANGELOG.md", ":!CHANGELOG-DE.md", ":!docs/changelog-archive.md", ":!docs/changelog-archive-DE.md", ":!docs/sbom.cdx.json", ":!docs/SBOM.md", ":!tests/",
                           ":!docs/OVERVIEW.md", ":!docs/UEBERBLICK.md", ":!NEWS.md", ":!NEWS-DE.md", ":!docs/analysis/"],
                          cwd=REPO, capture_output=True, text=True).stdout
     files = {line.split(":", 1)[0] for line in out.splitlines()}

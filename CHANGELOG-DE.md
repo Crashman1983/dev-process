@@ -6,8 +6,8 @@ Jeder Eintrag hat dieselben Teile: **Warum** (das beobachtete Problem), **Was si
 (Schritte für bestehende Projekte) und **Details** (der Plan mit den technischen
 Einzelheiten, die Issues); ein kleines Fix-Release kann die Wirkung weglassen, und
 ein Eintrag ohne Plan oder Issue hat keine Details-Zeile. In wenigen Sätzen je Version: [NEWS-DE.md](NEWS-DE.md).
-English version: [CHANGELOG.md](CHANGELOG.md). Die Geschichte vor v2.28.2
-(Sub-Projekte): [docs/changelog-archive.md](docs/changelog-archive.md).
+English version: [CHANGELOG.md](CHANGELOG.md). Die Releases vor v2.28.2:
+[docs/changelog-archive-DE.md](docs/changelog-archive-DE.md).
 
 ## v2.74.2 — `make -k` zertifiziert wieder · 2026-10-16
 

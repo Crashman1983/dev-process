@@ -7,7 +7,7 @@ projects), and **Details** (the plan with the technical particulars, the issues)
 a small fix release may leave out Effect, and an entry without a plan or issue has
 no Details line.
 A few plain sentences per release: [NEWS.md](NEWS.md). Deutsche Fassung:
-[CHANGELOG-DE.md](CHANGELOG-DE.md). History before v2.28.2 (sub-projects, German):
+[CHANGELOG-DE.md](CHANGELOG-DE.md). Releases before v2.28.2:
 [docs/changelog-archive.md](docs/changelog-archive.md).
 
 ## v2.74.2 — `make -k` certifies again · 2026-10-16
