@@ -80,7 +80,7 @@ def test_refuses_what_it_cannot_count(render, tmp_path):
     r = _tool(out, "--work", "someone-else", "--summary", "<fixed / DECISION …>")
     assert r.returncode == 1
     for part in ("line 1: not `SCENARIO", "scenario 'b' reported twice", "no `PATTERN: …` line",
-                 "work 'someone-else' is not this plan's", "does not read as a REFUTE record"):
+                 "work 'someone-else' binds no line to this plan", "does not read as a REFUTE record"):
         assert part in r.stderr, r.stderr
     assert "REFUTE" not in (out / PLAN).read_text(encoding="utf-8")
 
@@ -90,3 +90,29 @@ def test_a_report_of_prose_only_is_refused(render, tmp_path):
     (out / "report.md").write_text("All held, nothing found.\n", encoding="utf-8")
     r = _tool(out, "--summary", "fixed")
     assert r.returncode == 1 and "no SCENARIO line" in r.stderr
+
+
+def test_markup_never_drops_a_scenario_out_of_the_count(render, tmp_path):
+    # refute v2.75 r2: a numbered, checkbox, heading or quoted line was skipped silently
+    out = _setup(render, tmp_path)
+    (out / "report.md").write_text(
+        "1. SCENARIO A: CONFIRMED BLOCKER NEW — x\n- [x] SCENARIO B: HELD\n### SCENARIO C: HELD\n"
+        "> SCENARIO D: CONFIRMED MINOR NEW — y\n\n    SCENARIO E: HELD (an indented template)\n\n"
+        "PATTERN: no common cause\n", encoding="utf-8")
+    r = _tool(out, "--summary", "fixed", "--dry-run")
+    assert r.returncode == 0, r.stderr
+    assert "4 scenarios, 2 findings (1 blocker, 1 minor)" in r.stdout
+
+
+def test_refuses_what_the_line_could_not_count_under(render, tmp_path):
+    out = _setup(render, tmp_path, plan="# Plan\n\ntier: 3\nissue: acme/app#77\n")
+    (out / "report.md").write_text("SCENARIO A: HELD for x; CONFIRMED MAJOR NEW for y\nPATTERN: none\n",
+                                   encoding="utf-8")
+    r = _tool(out, "--work", "acme/app#77", "--round", "-1", "--summary", "fixed")
+    assert r.returncode == 1
+    for part in ("line 1: not `SCENARIO", "binds no line to this plan", "rounds count from 1"):
+        assert part in r.stderr, r.stderr
+    (out / PLAN).write_text("# Plan\n\ntier: 3\n\n```md\nexample\n", encoding="utf-8")
+    (out / "report.md").write_text("SCENARIO A: HELD\nPATTERN: none\n", encoding="utf-8")
+    r = _tool(out, "--summary", "fixed")
+    assert r.returncode == 1 and "open code fence" in r.stderr, r.stderr

@@ -460,9 +460,11 @@ def apply(root: Path, *, tests: str | None, tests_passed: bool) -> int:
                                             writer="finish --tests", env_names=before[2])
             print(f"finish: merge certificate {'written — the push runs no suite again' if ok else 'not written — ' + why}")
     elif not tests_passed:
+        suite, _broken = _configured_merge_suite(root)
         print("finish: applied archive + rebase; stopped before the merge — "
-              "run the FULL test suite now, then re-run with "
-              "`--apply --tests-passed` (or pass `--tests CMD` to run it here)")
+              + (f"re-run with `--apply --tests` (it runs `{suite}` and writes the merge certificate)"
+                 if suite else "run the FULL test suite now, then re-run with "
+                 "`--apply --tests-passed` (or pass `--tests CMD` to run it here)"))
         return 0
     # 4. A worktree must not check out main while another checkout owns it.
     route = {MERGE_ROUTE_ENV: MERGE_ROUTE}
@@ -540,14 +542,13 @@ def usage(root: Path, branch: str | None) -> tuple[int | None, str]:
         return issue, "tokens: not measured"
 
 
-def _configured_merge_suite(root: Path) -> str | None:
-    """The project's `merge_suite`; None without one (or with a broken file, which
-    the push names)."""
+def _configured_merge_suite(root: Path) -> tuple[str | None, str | None]:
+    """(the project's `merge_suite` or None, why testing.local.json cannot be read)."""
     try:
         cfg = testing_config.load(root)
-    except testing_config.ConfigError:
-        return None
-    return (cfg or {}).get("merge_suite") or None
+    except testing_config.ConfigError as exc:
+        return None, str(exc)
+    return (cfg or {}).get("merge_suite") or None, None
 
 
 def main() -> int:
@@ -557,8 +558,13 @@ def main() -> int:
     if "--tests" in args:
         i = args.index("--tests")
         value = args[i + 1] if i + 1 < len(args) else None
-        # a directory is the root argument, never a test command (`--tests .`)
-        if value is None or value.startswith("--") or Path(value).is_dir():
+        if value is not None and not value.strip():
+            print("finish: `--tests ''` names no command", file=sys.stderr)
+            return 2
+        # a path is the root argument, never a test command (`--tests .`); a bare name is a
+        # command even where a folder shares it (`--tests make`, refute v2.75 r2)
+        if value is None or value.startswith("--") or (
+                Path(value).is_dir() and (value in (".", "..") or "/" in value or os.sep in value)):
             bare_tests = True  # `--tests` alone: the project's merge_suite (#255)
             del args[i]
         else:
@@ -568,7 +574,11 @@ def main() -> int:
     do_apply = "--apply" in args
     positional = [a for a in args if not a.startswith("--")]
     root = Path(positional[0] if positional else ROOT).resolve()
-    suite = _configured_merge_suite(root)
+    suite, broken = _configured_merge_suite(root)
+    if broken and (bare_tests or tests_passed):
+        # whether a merge_suite is set cannot be told — the push refuses the file anyway
+        print(f"finish: testing.local.json cannot be read — {broken}", file=sys.stderr)
+        return 2
     if bare_tests:
         if not suite:
             print("finish: `--tests` without a command needs `merge_suite` in testing.local.json "
