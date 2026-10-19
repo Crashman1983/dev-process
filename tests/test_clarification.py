@@ -63,6 +63,23 @@ def test_fenced_marker_is_quotation(render, tmp_path):
     assert r.returncode == 0, r.stdout + r.stderr
 
 
+def test_info_string_line_inside_a_fence_keeps_the_marker_quoted(render, tmp_path):
+    # #250: ```python opens a nested example, it does not close the fence
+    out = render(tmp_path, {"project_name": "demo"})
+    _write(out, "2026-08-06-doc.md",
+           f"# Plan\n\ntier: 2\n\n```md\n```python\n{MARKER}\n```\n```\n")
+    r = _run(out)
+    assert r.returncode == 0, r.stdout + r.stderr
+
+
+def test_an_unclosed_fence_hiding_a_marker_is_hard(render, tmp_path):
+    out = render(tmp_path, {"project_name": "demo"})
+    _write(out, "2026-08-06-doc.md", f"# Plan\n\ntier: 2\n\n```\nexample\n{MARKER}\n")
+    r = _run(out)
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert "fence opened on line 5 never closes — line 7" in r.stdout
+
+
 def test_case_and_bare_form_do_not_escape(render, tmp_path):
     # [needs clarification] without colon/question must still be caught —
     # a spelling nuance must not produce a false-green
