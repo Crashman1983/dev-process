@@ -359,3 +359,78 @@ def test_junit_mode_carries_no_directory_of_source(render, tmp_path):
     m = mod.measure(out, before, [sys.executable, "-c", "pass", "web"], [], junit="r.xml")
     assert "web" not in m["carried"]
     sys.path.remove(str(out / "scripts/process"))
+
+
+def _red_evidence_module(out):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("red_ev_r2", out / "scripts/process/red_evidence.py")
+    mod = importlib.util.module_from_spec(spec)
+    sys.path.insert(0, str(out / "scripts/process"))
+    try:
+        spec.loader.exec_module(mod)
+    finally:
+        sys.path.remove(str(out / "scripts/process"))
+    return mod
+
+
+def test_junit_names_only_a_report_it_may_delete(render, tmp_path):
+    # refute v2.75 r2: `--junit calc.mjs` deleted the working tree's uncommitted fix
+    out, before = _repo(render, tmp_path)
+    for name, why in (("calc.py", "an .xml file"), ("tracked.xml", "git tracks that file")):
+        if name == "tracked.xml":
+            (out / name).write_text("<testsuites/>", encoding="utf-8")
+            _git(out, "add", name)
+        r = _tool(out, "--work", "7", "--round", "1", "--before", before, "--junit", name, "--",
+                  sys.executable, "-c", "pass")
+        assert r.returncode == 2 and why in r.stderr, r.stderr
+        assert (out / name).is_file()
+
+
+def test_a_junit_error_is_no_red_and_the_worst_outcome_stands_in_any_order(render, tmp_path):
+    out, _before = _repo(render, tmp_path)
+    mod = _red_evidence_module(out)
+    report = tmp_path / "r.xml"
+    for first, second in (("<error/>", "<failure/>"), ("<failure/>", "<error/>"), ("", "<failure/>")):
+        report.write_text(f"<testsuites><testsuite><testcase classname='c' name='t'>{first}</testcase>"
+                          f"<testcase classname='c' name='t'>{second}</testcase>"
+                          "<testcase classname='c' name='s'><skipped/></testcase></testsuite></testsuites>")
+        got = mod.junit_outcomes(report)
+        assert got == {"c::t": "error" if "error" in first + second else "failed"}, (first, second, got)
+
+
+def test_a_stale_report_on_the_fixed_side_proves_nothing(render, tmp_path):
+    out, before = _repo(render, tmp_path)
+    # the old code writes its failing report; the fixed one writes none
+    (out / "calc.spec.py").write_text(
+        "import sys\nsys.path.insert(0, '.')\nfrom calc import add\nif add(1, 2) != 3:\n"
+        "    open('report.xml', 'w').write(\"<testsuites><testsuite><testcase classname='calc.spec' "
+        "name='adds'><failure/></testcase></testsuite></testsuites>\")\n    sys.exit(1)\n", encoding="utf-8")
+    (out / "report.xml").write_text("<testsuites><testsuite><testcase classname='calc.spec' name='adds'/>"
+                                    "</testsuite></testsuites>", encoding="utf-8")  # passing, from earlier
+    r = _tool(out, "--work", "7", "--round", "1", "--before", before, "--junit", "report.xml",
+              "--copy", "calc.spec.py", "--", sys.executable, "calc.spec.py")
+    assert r.returncode == 1 and "no JUnit report report.xml now" in r.stderr, r.stdout + r.stderr
+
+
+def test_the_old_tree_borrows_the_installed_node_modules(render, tmp_path):
+    # refute v2.75 r2: a JS test importing a dependency failed in the old tree for that alone
+    out, before = _repo(render, tmp_path)
+    _git(out, "checkout", "-q", before)
+    (out / "package.json").write_text("{}\n", encoding="utf-8")
+    _git(out, "add", "package.json")
+    _git(out, "commit", "-q", "-m", "package")
+    before = _git(out, "rev-parse", "HEAD")
+    _git(out, "checkout", "-q", "-B", "7-fix")
+    (out / "calc.py").write_text("def add(a, b):\n    return a + b\n", encoding="utf-8")
+    (out / "node_modules/dep").mkdir(parents=True)
+    (out / "node_modules/dep/index.txt").write_text("installed\n", encoding="utf-8")
+    (out / "calc.spec.py").write_text(
+        "import os, sys\nsys.path.insert(0, '.')\nfrom calc import add\n"
+        "dep = os.path.exists('node_modules/dep/index.txt')\n"
+        "body = '<error/>' if not dep else ('' if add(1, 2) == 3 else '<failure/>')\n"
+        "open('report.xml', 'w').write(f\"<testsuites><testsuite><testcase classname='calc.spec' "
+        "name='adds'>{body}</testcase></testsuite></testsuites>\")\n"
+        "sys.exit(0 if dep and add(1, 2) == 3 else 1)\n", encoding="utf-8")
+    r = _tool(out, "--work", "7", "--round", "1", "--before", before, "--junit", "report.xml",
+              "--copy", "calc.spec.py", "--dry-run", "--", sys.executable, "calc.spec.py")
+    assert r.returncode == 0 and "red before, green after (1): calc.spec::adds" in r.stdout, r.stdout + r.stderr

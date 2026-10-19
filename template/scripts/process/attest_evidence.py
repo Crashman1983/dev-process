@@ -798,6 +798,8 @@ def _decide_plan_review(ev: Evidence) -> list[str]:
         # the lowest class reviews no plan, not even one of its own class (#228)
         out.append(f"plan-review pass by {ev.model}, the lowest class — a plan review runs on a "
                    f"larger model, or commit {_skip('plan-review', ev)}")
+    elif mine[1] is not None and mine[1] == max(ev.ranks.values()):
+        pass  # the top class: no plan session ranks above it (refute v2.75 r2)
     elif mine[1] is not None:  # another family is never smaller — nothing to compare
         theirs = model_class(ev.plan_session, ev.ranks, ev.families) if ev.plan_session else None
         if ev.plan_session is None and ev.plan_session_source == UNMEASURED_REPORT:

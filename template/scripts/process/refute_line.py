@@ -36,9 +36,12 @@ sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling import
 # the review gate owns the line's shape, the record reading and the plan's ids
-from check_review import REFUTE_LINE, _plan_work_ids, plan_stem, readable  # noqa: E402
+from check_review import REFUTE_LINE, _plan_work_ids, fenced_lines, plan_stem, readable  # noqa: E402
+from attest_evidence import _binds  # noqa: E402  (attest's rule for which work id a line binds)
 
-_LEAD = r"^\s*(?:[-*+]\s+)?[*_]*"
+# whatever Markdown a report wraps a line in — a quote, a heading, a numbered or checkbox
+# item, emphasis: a scenario must never drop out of the count for its markup (refute v2.75 r2)
+_LEAD = r"^[ \t]*(?:>[ \t]*)*(?:#{1,6}[ \t]+)?(?:(?:[-*+]|\d{1,9}[.)])[ \t]+(?:\[[ xX]\][ \t]+)?)?[*_]*"
 SCENARIO_START = re.compile(_LEAD + r"SCENARIO\b", re.IGNORECASE)
 SCENARIO = re.compile(
     _LEAD + r"SCENARIO[*_]*\s+(?P<label>.+?)\s*:\s*[*_]*(?:(?P<held>HELD)|CONFIRMED\s+"
@@ -57,6 +60,8 @@ def parse_report(text: str) -> tuple[list[dict], list[str]]:
         if not SCENARIO_START.match(line):
             continue
         m = SCENARIO.match(line)
+        if m and m.group("held") and re.search(r"\bCONFIRMED\b", line):
+            m = None  # `HELD for X; CONFIRMED … for Y` is two scenarios in one line
         if not m:
             problems.append(f"line {i}: not `SCENARIO <label>: HELD` or `SCENARIO <label>: "
                             f"CONFIRMED <BLOCKER|MAJOR|MINOR> <NEW|PRE-EXISTING> — …`: {line.strip()}")
@@ -116,8 +121,14 @@ def main(argv: list[str]) -> int:
     ids = _plan_work_ids(plan_stem(rel), readable(text), include_dedated=True)
     work = args.work or plan_stem(rel)
     problems = []
-    if work not in ids:
-        problems.append(f"work {work!r} is not this plan's — its ids are {', '.join(sorted(ids))}")
+    if not _binds(work, ids):
+        problems.append(f"work {work!r} binds no line to this plan — its ids are "
+                        f"{', '.join(sorted(i for i in ids if '/' not in i))}")
+    if fenced_lines(text)[1] is not None:
+        problems.append(f"{rel} ends inside an open code fence — a line appended there is quoted, "
+                        "not a record; close the fence first")
+    if args.round_ is not None and args.round_ < 1:
+        problems.append(f"round {args.round_} — rounds count from 1")
     scenarios, report_problems = parse_report(report)
     problems += report_problems
     summary = " ".join(args.summary.split())

@@ -547,3 +547,56 @@ def test_bare_tests_without_a_merge_suite_names_the_way_out(render, tmp_path):
     out, _bare = _repo_with_origin(render, tmp_path)
     r = _run_args(out, "--apply", "--tests")
     assert r.returncode == 2 and "--tests CMD" in r.stderr, r.stdout + r.stderr
+
+
+def _finish(root, *args):
+    """finish.py with exactly these arguments — no root appended."""
+    return subprocess.run([sys.executable, str(root / "scripts/process/finish.py"), *args],
+                          cwd=root, capture_output=True, text=True)
+
+
+def test_bare_tests_is_read_in_every_argument_order(render, tmp_path):
+    # refute v2.75 r2: only `--tests .` was tested; a bare `--tests`, `--tests --apply` and
+    # `--tests ''` take other branches, and a bare name is a command even beside a folder
+    import json
+    out, _bare = _repo_with_origin(render, tmp_path)
+    (out / "docs/process/testing.local.json").write_text(json.dumps({"merge_suite": "true"}))
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "test config")
+    r = _finish(out, "--tests", "")
+    assert r.returncode == 2 and "names no command" in r.stderr, r.stderr
+    r = _finish(out, "--tests", "--apply")
+    assert r.returncode == 0 and "merge certificate written" in r.stdout, r.stdout + r.stderr
+
+
+def test_a_command_named_like_a_folder_is_the_command(render, tmp_path):
+    import json
+    out, _bare = _repo_with_origin(render, tmp_path)
+    (out / "docs/process/testing.local.json").write_text(json.dumps({"merge_suite": "false"}))
+    (out / "true").mkdir()
+    (out / "true/.keep").write_text("")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "test config and a folder named true")
+    r = _finish(out, "--apply", "--tests", "true")  # runs `true`, not the red merge_suite
+    assert r.returncode == 0 and "full suite red" not in r.stdout, r.stdout + r.stderr
+
+
+def test_a_broken_testing_file_is_named_not_mistaken_for_no_suite(render, tmp_path):
+    out, _bare = _repo_with_origin(render, tmp_path)
+    (out / "docs/process/testing.local.json").write_text('{"merge_suite": "true", "bogus": 1}')
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "broken test config")
+    for flag in ("--tests", "--tests-passed"):
+        r = _run_args(out, "--apply", flag)
+        assert r.returncode == 2 and "testing.local.json cannot be read" in r.stderr, (flag, r.stderr)
+
+
+def test_the_stop_names_the_route_the_merge_suite_takes(render, tmp_path):
+    import json
+    out, _bare = _repo_with_origin(render, tmp_path)
+    (out / "docs/process/testing.local.json").write_text(json.dumps({"merge_suite": "true"}))
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "test config")
+    r = _run_args(out, "--apply")
+    assert r.returncode == 0 and "re-run with `--apply --tests`" in r.stdout, r.stdout
+    assert "--tests-passed" not in r.stdout

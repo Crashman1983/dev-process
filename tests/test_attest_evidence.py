@@ -83,6 +83,8 @@ TABLE = [
     ("D1 unmeasured report", OK_PLAN, {"plan_session": None, "plan_session_source": "unmeasured-report"},
      "measured no model"),
     ("D1 larger reviewer", OK_PLAN, {"model": "claude-fable-5-1"}, None),
+    ("D1 top class over an unmeasured report", OK_PLAN,
+     {"model": "claude-fable-5-1", "plan_session": None, "plan_session_source": "unmeasured-report"}, None),
     ("D1 other family reviews", OK_PLAN, {"model": "gpt-6.1-sol"}, None),
     ("D1 claude reviews another family's plan", OK_PLAN, {"plan_session": "gpt-6.1-sol"}, None),
     ("D1 other family needs no session", OK_PLAN, {"model": "gpt-6.1-sol", "plan_session": None}, None),
@@ -555,6 +557,12 @@ def test_a_base_older_than_the_evidence_rules_does_not_lower_the_floor(repo):
     _git(repo, "add", "-A")
     _git(repo, "commit", "-q", "-m", "chore: stricter local floor")
     r = _attest(repo, "--with", _report(repo), independence="bundle,non-implementing")
+    assert r.returncode == 1 and "without 'cross-model'" in r.stderr, r.stderr
+    # ... and a looser one never lowers the template's (refute v2.75 r2)
+    (repo / "docs/process/model-policy.local.json").write_text(
+        json.dumps({"review_evidence": {"cross_model_from_tier": 4}}))
+    _git(repo, "commit", "-qam", "chore: a looser local floor")
+    r = _attest(repo, "--with", _report(repo), tier="3", independence="bundle,non-implementing")
     assert r.returncode == 1 and "without 'cross-model'" in r.stderr, r.stderr
 
 

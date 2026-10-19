@@ -26,8 +26,9 @@ small probe plugin (`-p red_evidence_probe`, on PYTHONPATH) records pytest's own
 ids and what each test's setup and call did. Any other runner (vitest, jest, XCTest
 through xcresult conversion) reports through JUnit XML instead: `--junit PATH` names
 the file the command writes, relative to where it runs; the probe stays out, each
-side's file is removed before its run (a file from earlier proves nothing), and a
-test is `<classname>::<name>` (#256). In that mode only files named on the command
+side's file is removed before its run (a file from earlier proves nothing; so it must
+be an .xml file git does not track), a test is `<classname>::<name>` and the worst of
+its outcomes stands, and the old tree borrows the working tree's `node_modules` (#256). In that mode only files named on the command
 or by `--copy` travel into the old tree — a named directory would carry the fixed
 source of a non-Python project along. Stdlib only.
 """
@@ -120,6 +121,38 @@ def _run(command: list[str], cwd: Path, probe_dir: Path, out: Path,
     return proc.returncode, seen
 
 
+_RANK = {PASSED: 0, FAILED: 1, ERROR: 2}
+
+
+def junit_problem(root: Path, junit: str) -> str | None:
+    """Why `--junit` cannot name the report: each run deletes it first, so it must be a
+    report file of its own, never a file the project keeps (refute v2.75 r2: `--junit
+    calc.mjs` deleted the uncommitted fix)."""
+    if not junit.lower().endswith(".xml"):
+        return f"--junit {junit}: a JUnit report is an .xml file the command writes"
+    tracked = subprocess.run(["git", "-C", str(root), "ls-files", "--error-unmatch", "--", junit],
+                             capture_output=True, text=True)
+    if tracked.returncode == 0:
+        return f"--junit {junit}: git tracks that file — each run deletes the report first"
+    return None
+
+
+def _link_dependencies(root: Path, tree: Path) -> list[str]:
+    """Link the working tree's installed `node_modules` into the old tree beside each
+    `package.json` both have: the old checkout has none installed, and a test importing a
+    dependency failed there for that alone — no red a fix turned green (refute v2.75 r2)."""
+    listed = subprocess.run(["git", "-C", str(tree), "ls-files", "-z", "--", "package.json", "**/package.json"],
+                            capture_output=True, text=True)
+    linked = []
+    for rel in (p for p in listed.stdout.split("\0") if p) if listed.returncode == 0 else ():
+        folder = Path(rel).parent
+        src, dst = root / folder / "node_modules", tree / folder / "node_modules"
+        if src.is_dir() and not dst.exists():
+            dst.symlink_to(src, target_is_directory=True)
+            linked.append((folder / "node_modules").as_posix())
+    return linked
+
+
 def junit_outcomes(path: Path) -> dict[str, str] | None:
     """`<classname>::<name>` -> passed/failed/error of every testcase in a JUnit XML file;
     None when there is none or it does not parse (no report is no outcome). A skipped case
@@ -139,10 +172,10 @@ def junit_outcomes(path: Path) -> dict[str, str] | None:
         if not name or case.find("skipped") is not None:
             continue
         state = ERROR if case.find("error") is not None else FAILED if case.find("failure") is not None else PASSED
-        # one id twice (a parametrized title): the worst outcome stands
-        if seen.get(key) in (FAILED, ERROR) and state == PASSED:
-            continue
-        seen[key] = state
+        # one id twice (a parametrized title): the worst outcome stands, whatever the order —
+        # an error is worst, it is no red a fix turned green (refute v2.75 r2)
+        if _RANK[state] >= _RANK.get(seen.get(key, ""), -1):
+            seen[key] = state
     return seen
 
 
@@ -248,6 +281,8 @@ def measure(root: Path, before: str, command: list[str], copy: list[str], timeou
             raise SystemExit(f"red_evidence: cannot check out {before}: {add.stderr.strip()}")
         try:
             _take_along(root, tree, carried, files=bool(junit))
+            if junit:
+                _link_dependencies(root, tree)
             exit_before, was = _run(command, tree, probe, Path(tmp) / "before.json", timeout, junit)
         finally:
             subprocess.run(["git", "-C", str(root), "worktree", "remove", "--force", str(tree)],
@@ -319,6 +354,10 @@ def main(argv: list[str]) -> int:
         print("red_evidence: no command after `--`", file=sys.stderr)
         return 2
     root = Path(args.root).resolve()
+    problem = junit_problem(root, args.junit) if args.junit else None
+    if problem:
+        print(f"red_evidence: {problem}", file=sys.stderr)
+        return 2
     # a kill runs the cleanup too: the temporary worktree is removed in `measure`'s finally
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(128 + signal.SIGTERM))
     m = measure(root, args.before, command, args.copy, args.timeout, args.junit)
