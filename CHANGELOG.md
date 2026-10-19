@@ -10,6 +10,36 @@ A few plain sentences per release: [NEWS.md](NEWS.md). Deutsche Fassung:
 [CHANGELOG-DE.md](CHANGELOG-DE.md). Releases before v2.28.2:
 [docs/changelog-archive.md](docs/changelog-archive.md).
 
+## v2.75.0 — Template updates survive a moving main, one fence reading, bookkeeping counted from the runs · 2026-10-19
+
+**Why.** Kenni's v2.74 update needed its ack and its full Tier 3 review again after every train that moved main, although nothing in the update had changed; the train's retry message also named the wrong retry. The three readers of fenced blocks disagreed on what closes a fence, so a quoted `REVIEW … verdict=pass` or `review-waived:` could count as real. Refute and red-evidence lines were still typed by hand, a deleted plan escaped its review, and the v2.74 reviews left smaller residues in attest, finish, the design-contract gate and the review bundle.
+
+**What changes.**
+- Template update: the ack and the update's REVIEW carry over to a new main when the old base is an ancestor of the new one and the commits in between touch none of the update's paths; the gate names an expired ack (`ack_expired`), and an update REVIEW counts only when its head saw the update's answers, owned list and project delta.
+- The train's retry message says what ran: green under the retry command, a gate flake, or the classic FLAKY.
+- Fences: one walk (`check_review.fenced_lines`) for the REVIEW parser, the declaration reader and the clarification gate. A closing fence is the opener's character, at least as long, and nothing else on the line; a fence still open at the end of a plan or journal shard that hides `tier:`, `issue:`, `review-waived:`, a REVIEW line or a clarification marker is a hard finding (a note in the archive).
+- A Tier 2+ plan deleted by a push still owes its review.
+- `refute_line.py` writes the REFUTE line from the refuter's report: the brief now ends with `SCENARIO` and `PATTERN` lines, the tool counts them and takes the next round; the summary is the only free text.
+- `red_evidence.py --junit PATH` measures red-before/green-after for any runner that writes JUnit XML (vitest, jest, XCTest).
+- `process_kpis.py models` shows each model's share of the dispatched sessions' tokens, subagents included.
+- `finish.py --tests` without a command runs the configured `merge_suite`; `--tests-passed` is refused while one is set.
+- attest: the lowest ranked model class reviews no plan, an unmeasured model report is refused with a hint, and a base without `review_evidence` takes HEAD's stricter tier floors.
+- Design contracts: a shallow clone no longer dates old plans by its boundary (a note names `git fetch --unshallow`); status `legacy` registers a pre-registry norm with one note.
+- The review bundle carries the `CLAUDE.md`/`AGENTS.md` of the folders a diff touches; `dispatch.py` uses the gate's fork point, and `--plan` finds a plan by the issue it declares.
+- `testing.md`: a project whose `merge_scope` skips stages schedules a full run with an alert as the net under its selection.
+- The changelog archive before v2.28.2 is now one entry per release, in English and German.
+
+**Effect.** A template update is acknowledged and reviewed once, even when trains merge in between. A quoted example can no longer clear or waive a review, and a broken fence can no longer switch a gate off. Refute and red-evidence records come from the runs, and the token report shows whether mechanical steps really moved to the smaller model.
+
+**Update.**
+1. Nothing is required.
+2. Stricter than before: a line like ` ```python ` inside a fence no longer closes it; a fence left open that hides `tier:`, `issue:`, `review-waived:` or a REVIEW line is now hard — close the fence. `finish.py --tests-passed` is refused where `merge_suite` is set (use `--tests`). Deleting a Tier 2+ plan without its review is refused on the merge push.
+3. Optional: write refute reports in the `SCENARIO`/`PATTERN` form and append with `refute_line.py`; use `--junit` for suites other than pytest; with `merge_scope`, schedule the full run (`testing.md`).
+
+**Changed sections.** `commits.md` (Merging), `journal-state-plans.md` (Review attestations), `refute.md` (The brief, What happens with the findings), `releases.md` (Updating the process template), `review-checklist.md` (Extending this list), `risk-tiers.md` (Template updates), `testing.md` (Test economy — scoped inner loop, full merge boundary), `tower.md` (Dispatch and the model policy), `verification-independence.md` (The review bundle — the portable interface to any reviewer, Enforcement), module `design-contracts` (The registry entry, Hard vs. best-effort (no false-green), Declaring the contract), `/execute`, `/finish`, `/review`
+
+Details: [Plan](docs/analysis/2026-10-15-v2.75.md) #124 #125 #207 #228 #229 #230 #232 #250 #251 #252 #253 #254 #255 #256 #257 #262 #263
+
 ## v2.74.2 — `make -k` certifies again · 2026-10-16
 
 **Why.** v2.74.0 refused certificates under MAKEFLAGS flags that change what runs, and it listed `-k` among them. Keep-going hides nothing: make runs the remaining targets after a failure and still exits non-zero. The template's own advice runs the suite as `make -k test-merge`. Kenni's merge suite does exactly that. Two trains failed: the tests that write certificates went red under the inherited `MAKEFLAGS=k`, and the main push was refused.
