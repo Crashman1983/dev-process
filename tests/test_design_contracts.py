@@ -755,3 +755,23 @@ def test_an_old_plan_edited_in_place_keeps_its_age(render, tmp_path):
     _git(out, "commit", "-qam", "edit")
     r = _gate(out)
     assert r.returncode == 0 and "predate the declaration duty" in r.stdout, r.stdout
+
+
+def test_a_legacy_norm_is_declarable_with_one_note(render, tmp_path):
+    """#257: a norm older than the registry has no ADR and no GO. `legacy` registers it
+    without claiming either: one note instead of draft, pin and ID notes."""
+    out = _render(render, tmp_path)
+    _entry(out, status="legacy", pin="legacy-v3", id_prefixes=["DNA-"])
+    r = _gate(out)
+    assert r.returncode == 0, r.stdout
+    notes = [ln for ln in r.stdout.splitlines() if "web.json" in ln]
+    assert len(notes) == 1 and "legacy norm" in notes[0], r.stdout
+
+
+def test_a_legacy_norm_still_checks_the_ids_plans_cite(render, tmp_path):
+    out = _render(render, tmp_path)
+    _entry(out, status="legacy", pin="legacy-v3")
+    _write(out, ".process-work/plans/2026-10-19-x.md",
+           f"# Plan\n\ntier: 2\n\nFollows {CONTRACT}: S99 header.\n")
+    r = _gate(out)
+    assert r.returncode == 1 and "S99" in r.stdout, r.stdout
