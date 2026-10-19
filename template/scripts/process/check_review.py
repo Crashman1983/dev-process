@@ -66,7 +66,7 @@ from pathlib import Path
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from process_git import NoForkPoint, fork_point, git_environment  # noqa: E402
-from template_verify import carried_base, update_paths, verify  # noqa: E402
+from template_verify import carried_base, update_paths, update_seen, verify  # noqa: E402
 
 JOURNAL_DIR = ".process-work/journal"
 PLANS_ACTIVE = ".process-work/plans"
@@ -2617,9 +2617,13 @@ def template_review_findings(root: Path, update: dict, passes: list[dict],
         paths = update_paths(update)
         # a review taken before main moved still covers the update while main left
         # the update's paths alone; the content check below stays the hurdle
+        # and only a review that saw the update itself: its head carries the answers
+        # and every update path as the tip does (refute v2.75-N: a merged review of
+        # other work cleared an update whose delta dropped a template fix)
         covering = [r for r in passes if int(r['tier']) >= tier
                     and r.get('head') and r.get('mode', 'full') == 'full' and r['work'] in known
-                    and carried_base(root, r.get('base') or '', update['base'], paths) is None]
+                    and carried_base(root, r.get('base') or '', update['base'], paths) is None
+                    and update_seen(root, r['head'], tip, paths)]
         if not any(_unreviewed_paths(root, r['head'], tip, _reviewed_heads(passes, tier, known),
                                      r.get('base') or '') == set()
                    for r in covering):
