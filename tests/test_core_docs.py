@@ -487,8 +487,10 @@ def test_releases_doc_carries_the_ritual(render, tmp_path):
     assert "CHANGELOG.md" in text
     assert "Tag the commit that lands on the main branch" in text
     assert "immutable" in text  # tags never move
-    # a rebase moves the template baseline the acknowledgment binds (Kenni #2352)
-    assert "Re-acknowledge after every rebase" in text
+    # a rebase moves the template baseline the acknowledgment binds (Kenni #2352);
+    # a main that left the update alone carries it (#262)
+    assert "acknowledge again" in text and "fingerprint" in text
+    assert "A rebase onto another" in text and "holds only at its own baseline" in text
     # verification's runtime needs are named, not discovered in a failing gate (#161)
     assert "uvx" in text and "PyYAML" in text and "network" in text
     # wired from commits.md

@@ -71,11 +71,17 @@ record, not an accident.
    settings, without `--trust`; templates requiring Jinja extensions fail
    closed. The explicit update in step 2 retains its operator-approved task
    and extension contract.
-4. Read those behavior notes and acknowledge them with the same command plus
-   `--ack <owner-or-steward>`. Commit the generated acknowledgment under
-   `.process-work/`, along with the update. Its baseline and resolved release
-   SHA must match the verifier's result. Re-acknowledge after every rebase:
-   it moves the baseline, so the earlier acknowledgment no longer matches.
+4. Commit the update, then read those behavior notes and acknowledge them
+   with the same command plus `--ack <owner-or-steward>`. Commit the
+   generated acknowledgment under `.process-work/`. It records the baseline,
+   the resolved release SHA and a fingerprint of the committed update (old
+   release, identical and project-delta paths, migration). When main moves on
+   and the branch takes it in, the acknowledgment carries as long as main's
+   new commits touch none of the update's paths and the fingerprint still
+   matches; otherwise the gate names why (`main changed <path>`,
+   `fingerprint differs`) and you acknowledge again. A rebase onto another
+   base, a new release, or an acknowledgment without fingerprint (written
+   before v2.75) holds only at its own baseline.
 5. Apply the template-update tier rules in `risk-tiers.md`: pure updates need
    gates and project tests — released gate code included — project deltas need
    one Tier 2 review, the project's own changes to gate code retain Tier 3.

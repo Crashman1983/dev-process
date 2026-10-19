@@ -49,6 +49,7 @@ even when the result is identical to the new release.
 
 The owner or steward acknowledges the release behavior notes with
 `uv run --script scripts/process/template_verify.py --base <integration-base> --ack <owner>`; commit
-the generated acknowledgment. This attests a decision, not file coverage.
+the generated acknowledgment. This attests a decision, not file coverage; it
+carries across main moves that leave the update alone (`releases.md`).
 A missing render, changed source, mutable HEAD pin or mismatched file cannot
 use the exemption. `releases.md` gives the update sequence.
