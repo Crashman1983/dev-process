@@ -30,12 +30,14 @@ Then let the checker execute the deterministic part instead of retyping
 it:
 
     uv run scripts/process/finish.py --apply            # archive commit + rebase, stops before the merge
-    uv run scripts/process/finish.py --apply --tests "<merge_suite>"         # … then merge, push, delete branch
-    uv run scripts/process/finish.py --apply --tests-passed                  # a claim: certifies nothing — the merge push runs the suite again
+    uv run scripts/process/finish.py --apply --tests                         # … then merge_suite, merge, push, delete branch
+    uv run scripts/process/finish.py --apply --tests "<CMD>"                 # without a merge_suite: name the full suite
+    uv run scripts/process/finish.py --apply --tests-passed                  # without a merge_suite only: a claim, certifies nothing
 
-Pass `--tests` exactly the `merge_suite` string of `testing.local.json`: only
-that run writes the merge certificate the merge push reads; a `--certify`
-push certificate is not accepted by a merge push.
+`--tests` alone runs the `merge_suite` of `testing.local.json`; only that run
+writes the merge certificate the merge push reads, and a `--certify` push
+certificate is not accepted by a merge push. While `merge_suite` is set,
+`--tests-passed` is refused — the push would run the suite again anyway.
 
 Every step prints its command; the first failure stops the run in a state
 git explains. The merge only happens behind the batch's FULL suite (test

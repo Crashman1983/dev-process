@@ -507,12 +507,43 @@ def test_apply_with_the_merge_suite_certifies_the_merged_tree(render, tmp_path, 
         assert hit is None and "merge certificate" not in r.stdout
 
 
-def test_tests_passed_is_a_claim_and_certifies_nothing(render, tmp_path):
+def test_tests_passed_is_refused_while_a_merge_suite_is_set(render, tmp_path):
+    """#255: with a configured merge_suite the claim certifies nothing and the push would
+    run the suite again — `--tests` is the route, so the claim is refused before anything
+    is applied."""
     import json
     out, _bare = _repo_with_origin(render, tmp_path)
     (out / "docs/process/testing.local.json").write_text(json.dumps({"merge_suite": "true"}))
     _git(out, "add", "-A")
     _git(out, "commit", "-q", "-m", "test config")
+    head = _git(out, "rev-parse", "HEAD").stdout
+    r = _run_args(out, "--apply", "--tests-passed")
+    assert r.returncode == 2 and "--apply --tests" in r.stderr, r.stdout + r.stderr
+    assert _git(out, "rev-parse", "HEAD").stdout == head
+    assert _merge_certificate(out, "true") is None
+
+
+def test_tests_passed_without_a_merge_suite_stays_a_claim(render, tmp_path):
+    out, _bare = _repo_with_origin(render, tmp_path)
     r = _run_args(out, "--apply", "--tests-passed")
     assert r.returncode == 0, r.stdout + r.stderr
     assert _merge_certificate(out, "true") is None
+
+
+def test_bare_tests_runs_the_merge_suite_and_certifies(render, tmp_path):
+    """#255: `--tests` alone is the project's merge_suite."""
+    import json
+    out, _bare = _repo_with_origin(render, tmp_path)
+    (out / "docs/process/testing.local.json").write_text(json.dumps({"merge_suite": "true"}))
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "test config")
+    r = _run_args(out, "--apply", "--tests")
+    assert r.returncode == 0, r.stdout + r.stderr
+    hit = _merge_certificate(out, "true")
+    assert hit and hit["writer"] == "finish --tests", r.stdout
+
+
+def test_bare_tests_without_a_merge_suite_names_the_way_out(render, tmp_path):
+    out, _bare = _repo_with_origin(render, tmp_path)
+    r = _run_args(out, "--apply", "--tests")
+    assert r.returncode == 2 and "--tests CMD" in r.stderr, r.stdout + r.stderr
