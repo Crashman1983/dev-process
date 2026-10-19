@@ -338,7 +338,9 @@ enforces what a language-agnostic gate honestly can, and no more:
 - **Verified template updates.** A plan marked `template-update: true` may
   replace a new REVIEW with computed provenance only for a pure,
   owner/steward-acknowledged update. Both pinned releases are re-rendered;
-  local project delta still needs a fresh Tier 2 REVIEW of the update range, and
+  local project delta still needs a fresh Tier 2 REVIEW of the update range (one
+  taken before main moved on still counts while main left the update's paths
+  alone, `releases.md`), and
   the project's own changes to gate code retain Tier 3 (released gate code
   is template provenance like any other file). Failed provenance or a saved report
   cannot grant an exemption (`risk-tiers.md`, `releases.md`).
