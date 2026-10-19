@@ -905,3 +905,14 @@ def test_codex_workers_name_their_prerequisite_and_the_way_out(render, tmp_path)
     assert "attests end to end" in independence and "Codex as a tool inside a Claude review" not in independence
     assert (out / "docs/process/model-policy.codex.json").is_file()
     assert (out / "scripts/process/_dispatch_codex.py").is_file()
+
+
+def test_the_bundle_example_runs_claude_without_tools_from_stdin():
+    """#254: the `bundle` token claims the reviewer saw only the bundle — the documented
+    call must turn the tools off and read the bundle from stdin, never as argv."""
+    from pathlib import Path
+    text = (Path(__file__).resolve().parents[1] / "template/docs/process/verification-independence.md"
+            ).read_text(encoding="utf-8")
+    line = next(ln for ln in text.splitlines() if ln.startswith("- **Claude Code:**"))
+    assert '--tools ""' in line and "< /tmp/bundle.md" in line, line
+    assert '"$(cat' not in line, line

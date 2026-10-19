@@ -70,8 +70,10 @@ Dispatching is harness-plumbing around that artifact — pick what exists:
 
     python scripts/process/make_review_bundle.py -o /tmp/bundle.md
 
-- **Claude Code:** `claude -p "$(cat /tmp/bundle.md)"` (a fresh process — not
-  the implementing session).
+- **Claude Code:** `claude -p --tools "" < /tmp/bundle.md` (a fresh process —
+  not the implementing session; tools off, so the bundle is all it sees, which
+  is what `bundle` attests; stdin, because an argv bundle hits the shell's
+  argument limit).
 - **Codex CLI:** `timeout 1800 codex exec "$(cat /tmp/bundle.md)" < /dev/null`
   (stdin closed: an open stdin left Codex waiting for input — downstream, two
   sessions hung about two hours each; the bound is `gtimeout` on macOS, or the
