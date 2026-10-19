@@ -286,7 +286,8 @@ enforces what a language-agnostic gate honestly can, and no more:
   head; each rule has a committed way out, `skipped <kind> work=<id>:
   <reason>`, countable by grep:
   - from `review_evidence.cross_model_from_tier` (`model-policy.json`,
-    default 3; a project may lower it) a code-review pass carries
+    default 3; a project may lower it; a base older than these rules takes
+    the checkout's stricter floor) a code-review pass carries
     `cross-model`, or `single-family` plus `skipped cross-model` — the
     declaration names why the second family did not run;
   - from `review_evidence.own_family_from_tier` (default 4, never) only a
@@ -314,9 +315,11 @@ enforces what a language-agnostic gate honestly can, and no more:
     a plan strikes only its own criteria, a spec's only the spec;
   - a plan-review pass names its concrete model, of no lower class
     (`review_evidence.ranks`) than the plan session's — the newest `planned`
-    report, else the plan's `plan-session model: <id>` line (`skipped
-    plan-review`); a plan naming gate code is reviewed `cross-model` or with
-    the reasoned `single-family`;
+    report, else the plan's `plan-session model: <id>` line, which counts only
+    where no `planned` report exists: one that measured no model leaves the
+    class open — and never of the lowest class (`skipped plan-review`); a plan
+    naming gate code is reviewed `cross-model` or with the reasoned
+    `single-family`;
   - every pass: the work's plan at the reviewed head is the plan on disk —
     plan lines (REFUTE, ROOT-CAUSE, DECISION, skips) are committed before
     the bundle, or appended after the plan's last line and attested with

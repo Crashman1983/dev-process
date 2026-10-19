@@ -77,7 +77,11 @@ TABLE = [
     ("D1 unknown reviewer", OK_PLAN, {"model": "claude"}, "unknown model"),
     ("D1 no session source", OK_PLAN, {"plan_session": None}, "no `planned` report"),
     ("D1 unknown session", OK_PLAN, {"plan_session": "same"}, "is unknown"),
-    ("D1 smaller reviewer", OK_PLAN, {"model": "claude-haiku-5"}, "smaller class"),
+    ("D1 smaller reviewer", OK_PLAN, {"model": "claude-sonnet-5"}, "smaller class"),
+    ("D1 lowest class reviews no plan", OK_PLAN, {"model": "claude-haiku-5", "plan_session": "claude-haiku-5"},
+     "lowest class"),
+    ("D1 unmeasured report", OK_PLAN, {"plan_session": None, "plan_session_source": "unmeasured-report"},
+     "measured no model"),
     ("D1 larger reviewer", OK_PLAN, {"model": "claude-fable-5-1"}, None),
     ("D1 other family reviews", OK_PLAN, {"model": "gpt-6.1-sol"}, None),
     ("D1 claude reviews another family's plan", OK_PLAN, {"plan_session": "gpt-6.1-sol"}, None),
@@ -507,12 +511,51 @@ def test_a_spec_kit_plan_takes_its_criteria_from_spec_md(repo):
     assert r.returncode == 1 and "AC-3 has no line" in r.stderr, r.stderr
 
 
-def test_an_unmeasured_planned_report_falls_back_to_the_plan_line(repo):
+def test_an_unmeasured_planned_report_does_not_hand_the_class_to_the_plan_line(repo):
+    """#230: the plan's own line is the session's word about itself — once a `planned`
+    report exists, an unmeasured one cannot be replaced by it; the waiver is named."""
     env = {k: v for k, v in __import__("os").environ.items() if k != "PROCESS_MODEL"}
     subprocess.run([sys.executable, "scripts/process/report.py", "planned", "--issue", "7"],
                    cwd=repo, capture_output=True, text=True, check=True, env=env)
+    r = _attest(repo, model="claude-opus-5", plan_review=True)
+    assert r.returncode == 1 and "measured no model" in r.stderr, r.stderr
+    assert "skipped plan-review work=" in r.stderr and "-plan" in r.stderr, r.stderr
+
+
+def test_without_a_planned_report_the_plan_line_still_counts(repo):
+    """#230 AC-2: slug works without a report keep v2.71's plan line."""
     r = _attest(repo, model="claude-sonnet-5", plan_review=True)
     assert r.returncode == 1 and "(plan-line)" in r.stderr, r.stderr
+    assert _attest(repo, model="claude-opus-5", plan_review=True).returncode == 0
+
+
+def test_the_lowest_class_reviews_no_plan_not_even_its_own(repo):
+    """#228: haiku reviewing a haiku plan passed — the lowest class reviews no plan."""
+    plan = repo / ".process-work/plans/2026-10-14-widget.md"
+    plan.write_text(PLAN.replace("claude-opus-5", "claude-haiku-5-5"))
+    _git(repo, "commit", "-qam", "plan by haiku")
+    r = _attest(repo, model="claude-haiku-5-5", plan_review=True)
+    assert r.returncode == 1 and "lowest class" in r.stderr, r.stderr
+    assert _attest(repo, model="claude-sonnet-5", plan_review=True).returncode == 0
+
+
+def test_a_base_older_than_the_evidence_rules_does_not_lower_the_floor(repo):
+    """#229: the base's policy predates `review_evidence`; the checkout's own stricter
+    floor applies — it can only tighten, while a base that has the key still decides."""
+    _git(repo, "checkout", "-q", "main")
+    pol = repo / "docs/process/model-policy.json"
+    data = json.loads(pol.read_text())
+    data.pop("review_evidence")
+    pol.write_text(json.dumps(data))
+    _git(repo, "commit", "-qam", "an older policy")
+    _git(repo, "checkout", "-q", "7-widget")
+    _git(repo, "merge", "-q", "--no-edit", "main")
+    (repo / "docs/process/model-policy.local.json").write_text(
+        json.dumps({"review_evidence": {"cross_model_from_tier": 2}}))
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "chore: stricter local floor")
+    r = _attest(repo, "--with", _report(repo), independence="bundle,non-implementing")
+    assert r.returncode == 1 and "without 'cross-model'" in r.stderr, r.stderr
 
 
 def test_two_plans_of_one_issue_narrow_to_the_attested_slug(repo):
