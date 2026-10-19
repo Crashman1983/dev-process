@@ -41,7 +41,7 @@ PLANS_ARCHIVE_NAME = "archive"
 
 # the review gate owns fence semantics — import, don't copy (one owner)
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling import
-from check_review import _fence_closes, _fence_marker  # noqa: E402
+from check_review import fenced_lines, unclosed_fence_problem  # noqa: E402
 
 # tolerant of case and of a colon-less bare marker — `[needs clarification]`
 # must not escape the gate on a spelling nuance (a false-green)
@@ -50,19 +50,14 @@ MARKER = re.compile(r"\[NEEDS CLARIFICATION\b", re.IGNORECASE)
 
 def _marker_lines(text: str) -> list[int]:
     """1-based line numbers of unfenced marker occurrences."""
-    hits: list[int] = []
-    fence: str | None = None
-    for i, line in enumerate(text.splitlines(), start=1):
-        marker = _fence_marker(line)
-        if marker and fence is None:
-            fence = marker
-            continue
-        if marker and fence is not None and _fence_closes(fence, marker):
-            fence = None
-            continue
-        if fence is None and MARKER.search(line):
-            hits.append(i)
-    return hits
+    return [i for i, line in fenced_lines(text)[0] if MARKER.search(line)]
+
+
+def _unclosed(rel: object, text: str, hard: list[str]) -> None:
+    """A fence open at end of file hiding a marker hides an open question."""
+    problem = unclosed_fence_problem(text, (MARKER,))
+    if problem:
+        hard.append(f"{rel}: {problem}")
 
 
 # the artifacts execute builds from — a marker here is an open decision in
@@ -81,10 +76,12 @@ def _check_specs(root: Path, hard: list[str], soft: list[str]) -> None:
         except OSError as exc:
             hard.append(f"{rel}: could not read: {exc}")
             continue
+        name = p.name.lower()  # `Plan.md` is the plan on a case-sensitive filesystem too
+        if name in SPEC_DECISION_FILES:
+            _unclosed(rel, text, hard)
         lines = _marker_lines(text)
         if not lines:
             continue
-        name = p.name.lower()  # `Plan.md` is the plan on a case-sensitive filesystem too
         if name == "spec.md":
             soft.append(
                 f"{rel}: {len(lines)} unresolved [NEEDS CLARIFICATION] marker(s) "
@@ -119,6 +116,8 @@ def check(root: Path) -> tuple[list[str], list[str]]:
         except OSError as exc:  # broken symlink, directory named *.md, …
             hard.append(f"{rel}: could not read: {exc}")
             continue
+        if not p.name.startswith("design-"):
+            _unclosed(rel, text, hard)
         lines = _marker_lines(text)
         if not lines:
             continue

@@ -482,6 +482,66 @@ def test_quoted_review_line_in_nested_fence_not_malformed(render, tmp_path):
     assert r.returncode == 0, r.stdout
 
 
+# --- #250: a closing fence carries no info string; an unclosed fence is a finding
+
+
+def test_info_string_line_does_not_close_a_fence_around_a_quoted_waiver(render, tmp_path):
+    # ```python inside a ```md example opens nothing and closes nothing — the
+    # quoted waiver after it stays quoted (it used to waive the plan)
+    out = render(tmp_path, {"project_name": "demo"})
+    _archived_plan(out, "2026-07-10-widget.md",
+                   "# Plan\n\ntier: 3\n\n```md\nexample plan:\n```python\nx = 1\n"
+                   "review-waived: quoted example, not a waiver\n```\n```\n")
+    r = _run(out)
+    assert r.returncode == 1, r.stdout
+    assert "no clearing REVIEW" in r.stdout
+
+
+def test_quoted_review_after_a_nested_info_string_fence_does_not_clear(render, tmp_path):
+    out = render(tmp_path, {"project_name": "demo"})
+    _archived_plan(out, "2026-07-01-auth.md", "tier: 3\n")
+    _journal(out, "```md", "```text",
+             _review(work="auth", tier="3", independence="bundle,non-implementing,cross-model"),
+             "```", "```")
+    r = _run(out)
+    assert r.returncode == 1 and "no clearing REVIEW" in r.stdout, r.stdout
+
+
+def test_an_unclosed_fence_hiding_the_tier_line_is_hard(render, tmp_path):
+    out = render(tmp_path, {"project_name": "demo"})
+    d = out / ".process-work/plans"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "2026-09-07-widget.md").write_text(
+        "# Plan\n\n```md\nexample\n```python\nx = 1\n\ntier: 3\nissue: #77\n", encoding="utf-8")
+    r = _run(out)
+    assert r.returncode == 1, r.stdout
+    assert ("2026-09-07-widget.md: fence opened on line 3 never closes — line 8"
+            in r.stdout), r.stdout
+
+
+def test_an_unclosed_fence_in_an_archived_plan_is_a_note(render, tmp_path):
+    out = render(tmp_path, {"project_name": "demo"})
+    _archived_plan(out, "2026-07-10-old.md", "# Plan\n\n```\nexample\n\ntier: 3\n")
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+    assert "2026-07-10-old.md: fence opened on line 3 never closes" in r.stdout
+
+
+def test_a_crlf_tilde_closer_with_trailing_spaces_closes(render, tmp_path):
+    # the real REVIEW after the closer clears; were the closer missed, the
+    # fence would swallow it and the unclosed-fence finding would fire
+    out = render(tmp_path, {"project_name": "demo"})
+    _archived_plan(out, "2026-07-01-auth.md", "tier: 3\n")
+    d = out / JOURNAL
+    d.mkdir(parents=True, exist_ok=True)
+    lines = ["~~~md", "REVIEW this quoted prose would be malformed outside a fence",
+             "~~~   ", _review(work="auth", tier="3",
+                               independence="bundle,non-implementing,cross-model")]
+    (d / "2026-07-04.md").write_bytes(("\r\n".join(lines) + "\r\n").encode())
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+
+
 def test_non_issue_token_is_not_a_clearing_work_id(render, tmp_path):
     # `issue: v2.0` is not an issue ref — a REVIEW of unrelated work (work=0)
     # must not clear the plan (SP50 adversarial regression)

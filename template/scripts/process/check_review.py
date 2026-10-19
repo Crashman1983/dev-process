@@ -268,11 +268,34 @@ def _fence_marker(line: str) -> str | None:
     return m.group(1) if m else None
 
 
-def _fence_closes(fence: str, marker: str) -> bool:
+def _fence_closes(fence: str, line: str) -> bool:
     """CommonMark: a fence closes only on a run of the SAME character at least
-    as long as the opener — a ``` inside a ````-fenced example must not close
-    it early, or quoted `review-waived:`/`tier:` lines leak out (false-green)."""
-    return marker[0] == fence[0] and len(marker) >= len(fence)
+    as long as the opener and NOTHING else on the line — a ``` inside a
+    ````-fenced example, or a ```python opening a nested example, must not
+    close it early, or quoted `review-waived:`/`tier:` lines leak out
+    (false-green)."""
+    run = line.strip()
+    return (len(run) >= len(fence) and run == run[0] * len(run)
+            and run[0] == fence[0])
+
+
+def fenced_lines(text: str) -> tuple[list[tuple[int, str]], int | None]:
+    """The one fence walk every reader shares (#250): (unquoted lines as
+    (1-based lineno, line), line number of a fence still open at end of file
+    or None). Fence lines themselves are not returned."""
+    out: list[tuple[int, str]] = []
+    fence: str | None = None
+    opened = 0
+    for i, line in enumerate(text.splitlines(), start=1):
+        if fence is None:
+            marker = _fence_marker(line)
+            if marker:
+                fence, opened = marker, i
+            else:
+                out.append((i, line))
+        elif _fence_closes(fence, line):
+            fence = None
+    return out, (opened if fence is not None else None)
 
 
 def _unfenced(text: str) -> str:
@@ -280,19 +303,26 @@ def _unfenced(text: str) -> str:
     length-aware marker) removed. A `tier:`/`issue:`/`review-waived:` line
     inside a fenced example is a quotation, not a declaration — the same
     discipline the journal parser applies to REVIEW lines."""
-    out: list[str] = []
-    fence: str | None = None
-    for line in text.splitlines():
-        marker = _fence_marker(line)
-        if marker and fence is None:
-            fence = marker
-            continue
-        if marker and fence is not None and _fence_closes(fence, marker):
-            fence = None
-            continue
-        if fence is None:
-            out.append(line)
-    return "\n".join(out)
+    return "\n".join(line for _i, line in fenced_lines(text)[0])
+
+
+def unclosed_fence_problem(text: str, patterns: tuple[re.Pattern[str], ...] | None = None
+                           ) -> str | None:
+    """A fence still open at end of file that swallows a line a gate reads —
+    by default `tier:`, `issue:`, `review-waived:` or a REVIEW record — or
+    None. An unclosed fence would otherwise read the rest of the file as
+    quoted and turn the gate off for it (#250)."""
+    opened = fenced_lines(text)[1]
+    if opened is None:
+        return None
+    if patterns is None:
+        patterns = (TIER_DECL, ISSUE_DECL, WAIVED, _REVIEW_LINE)
+    for i, line in enumerate(text.splitlines()[opened:], start=opened + 1):
+        if any(p.search(line) for p in patterns):
+            return (f"fence opened on line {opened} never closes — line {i} and "
+                    f"everything after it read as quoted; close the fence (a "
+                    f"closing fence carries no info string)")
+    return None
 
 
 # A worker's open question to the owner: `DECISION NEEDED <date> <who>: …`
@@ -598,17 +628,7 @@ def parse_review_lines(text: str) -> tuple[list[tuple[int, dict]], list[tuple[in
     quotations and are ignored."""
     records: list[tuple[int, dict]] = []
     errors: list[tuple[int, str]] = []
-    fence: str | None = None
-    for i, raw in enumerate(text.splitlines(), start=1):
-        marker = _fence_marker(raw)
-        if marker and fence is None:
-            fence = marker
-            continue
-        if marker and fence is not None and _fence_closes(fence, marker):
-            fence = None
-            continue
-        if fence is not None:
-            continue
+    for i, raw in fenced_lines(text)[0]:
         rm = _REVIEW_LINE.match(raw)
         if not rm:
             continue
@@ -2735,6 +2755,14 @@ def check(root: Path) -> tuple[list[str], list[str]]:
         hard.extend(_arithmetic_violations(rel, records))
         all_records.extend(records)
         located += [(rel, lineno, f) for lineno, f in records]
+    # a fence open at end of file reads every later declaration as quoted —
+    # hard where a gate reads it now, a note on archived history (#250)
+    for rel, text in record_texts(root) or []:
+        problem = unclosed_fence_problem(text)
+        if problem and record_kind(rel) == "plan-archive":
+            soft.append(f"{rel}: {problem}")
+        elif problem:
+            hard.append(f"{rel}: {problem}")
     invalid = invalid_records(root, [f for _ln, f in all_records])
     superseded = superseded_records(root, [f for _ln, f in all_records], invalid) if invalid else {}
     for rel, lineno, f in located:
