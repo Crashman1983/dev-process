@@ -179,11 +179,8 @@ def plan_names_gate_code(text: str) -> bool:
 
 # --- policy ----------------------------------------------------------------------
 
-def review_policy(root: Path, ref: str) -> tuple[dict, str]:
-    """(`review_evidence` over the defaults, problem) as the policy reads at `ref` — the
-    reviewed base. The overlay is dispatch's (`_merged`), one rule for how the local
-    file lays over."""
-    from dispatch import _merged  # late: dispatch is large
+def _policy_layers(root: Path, ref: str, merged) -> tuple[dict, str]:
+    """The policy files at `ref`, the local one laid over the template's."""
     data: dict = {}
     for rel in (POLICY, LOCAL_POLICY):
         text = _show(root, ref, rel)
@@ -195,8 +192,28 @@ def review_policy(root: Path, ref: str) -> tuple[dict, str]:
             return {}, f"{rel} at {ref[:12]} is not valid JSON ({exc}) — the evidence rules cannot be read"
         if not isinstance(layer, dict):
             return {}, f"{rel} at {ref[:12]} is no JSON object — the evidence rules cannot be read"
-        data = _merged(data, layer)
+        data = merged(data, layer)
+    return data, ""
+
+
+def review_policy(root: Path, ref: str) -> tuple[dict, str]:
+    """(`review_evidence` over the defaults, problem) as the policy reads at `ref` — the
+    reviewed base. The overlay is dispatch's (`_merged`), one rule for how the local
+    file lays over."""
+    from dispatch import _merged  # late: dispatch is large
+    data, problem = _policy_layers(root, ref, _merged)
+    if problem:
+        return {}, problem
     rules = data.get(POLICY_KEY, {})
+    if POLICY_KEY not in data and ref != "HEAD":
+        # a base older than the evidence rules: its silence is no rule. The tier floors
+        # of the checkout's own policy apply where stricter — they can only tighten (#229)
+        head, _ = _policy_layers(root, "HEAD", _merged)
+        own = head.get(POLICY_KEY)
+        if isinstance(own, dict):
+            rules = {k: own[k] for k in ("cross_model_from_tier", "own_family_from_tier")
+                     if isinstance(own.get(k), int) and not isinstance(own.get(k), bool)
+                     and own[k] < DEFAULTS.get(k, 4)}
     if not isinstance(rules, dict):
         return {}, f"{POLICY_KEY} must be an object"
     got = _merged(dict(DEFAULTS), rules)
@@ -297,18 +314,23 @@ def _index_text(root: Path, rel: str) -> str:
     return r.stdout if r is not None and r.returncode == 0 else ""
 
 
-def _planned_model(root: Path, issues: set[int]) -> str | None:
-    """The plan session's model from the newest `planned` report of the work's
-    issues (report.py); None when there is none or it measured none."""
+UNMEASURED_REPORT = "unmeasured-report"  # plan_session_source: a report exists, without a model
+
+
+def _planned_model(root: Path, issues: set[int]) -> tuple[str | None, bool]:
+    """(the plan session's model from the newest `planned` report of the work's
+    issues, whether such a report exists) — report.py. A report that measured no
+    model still exists: the plan's own `plan-session model:` line, written by the
+    session about itself, does not stand in for it (#230)."""
     if not issues:
-        return None
+        return None, False
     from report import UNMEASURED, read_reports  # late: report imports dispatch lazily
     rows = [r for r in read_reports(root) if r.get("issue") in issues and r.get("state") == "planned"]
     if not rows:
-        return None
+        return None, False
     newest = max(rows, key=lambda r: r.get("epoch") if isinstance(r.get("epoch"), int) else 0)
     model = str(newest.get("model") or "")
-    return None if model in ("", UNMEASURED) else model
+    return (None if model in ("", UNMEASURED) else model), True
 
 
 # a criterion struck on purpose, with its reason (#234): `AC-3: struck — <reason>`
@@ -702,9 +724,9 @@ def gather(root: Path, *, work: str, ids: set[str], tier: int, verdict: str, ind
     reports = [p for p in reports if p.resolve().is_relative_to((root / REVIEW_REPORTS).resolve())]
     report_texts = [readable(p.read_text(encoding="utf-8", errors="replace")) for p in reports]
     issues = {int(i) for i in plan_ids | set(ids) if i.isascii() and i.isdigit()}
-    session = _planned_model(root, issues) if plan_review else None
-    source = "report" if session is not None else "none"
-    if plan_review and session is None and (m := PLAN_SESSION.search(plan_read)):
+    session, reported = _planned_model(root, issues) if plan_review else (None, False)
+    source = "report" if session is not None else (UNMEASURED_REPORT if reported else "none")
+    if plan_review and not reported and (m := PLAN_SESSION.search(plan_read)):
         session, source = m.group("model"), "plan-line"
     changed = _changed(root, base, head)
     claims = _claims(report_texts) if not plan_review else {}
@@ -772,9 +794,17 @@ def _decide_plan_review(ev: Evidence) -> list[str]:
         out.append(f"plan-review pass by an unknown model {ev.model!r} — name the concrete model id "
                    f"(`--model claude-opus-…`; classes: review_evidence in model-policy.json), or "
                    f"commit {_skip('plan-review', ev)}")
+    elif mine[1] is not None and ev.ranks and mine[1] == min(ev.ranks.values()):
+        # the lowest class reviews no plan, not even one of its own class (#228)
+        out.append(f"plan-review pass by {ev.model}, the lowest class — a plan review runs on a "
+                   f"larger model, or commit {_skip('plan-review', ev)}")
     elif mine[1] is not None:  # another family is never smaller — nothing to compare
         theirs = model_class(ev.plan_session, ev.ranks, ev.families) if ev.plan_session else None
-        if ev.plan_session is None:
+        if ev.plan_session is None and ev.plan_session_source == UNMEASURED_REPORT:
+            out.append("the newest `planned` report of the work measured no model — the plan "
+                       "session's class cannot be compared, and the plan's own `plan-session model:` "
+                       f"line does not stand in for a report; commit {_skip('plan-review', ev)}")
+        elif ev.plan_session is None:
             out.append("no `planned` report with a measured model and no `plan-session model: <id>` "
                        "line in the plan — the plan session's class cannot be compared; add the "
                        f"line, or commit {_skip('plan-review', ev)}")
