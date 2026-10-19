@@ -433,6 +433,19 @@ def _first_added(root: Path, rel: str) -> str | None:
     return SHALLOW if sha in _shallow_commits(root) else day
 
 
+def _on_integration(root: Path, rel: str) -> bool | None:
+    """Whether the first integration ref this clone has holds `rel`; None without one.
+    A shallow clone that cut off the fork point can still tell a plan main never had."""
+    import subprocess  # noqa: PLC0415
+    import check_review as _review  # noqa: PLC0415  (the owner of the integration refs)
+    for ref in _review.integration_refs(root):
+        r = subprocess.run(["git", "-C", str(root), "rev-parse", "--verify", "-q", f"{ref}^{{commit}}"],
+                           capture_output=True, text=True)
+        if r.returncode == 0:
+            return _review._show(root, ref, rel) is not None
+    return None
+
+
 def _trace_body(text: str) -> str | None:
     """What stands under the trace heading up to the next `## ` heading; None without one."""
     lines = text.splitlines()
@@ -498,10 +511,11 @@ def declaration_check(root: Path, plans: dict[str, str], contracts: set[str]
             bound = rule.get("spec_above") is None or m is None or int(m.group(1)) > rule["spec_above"]
         else:
             added = _first_added(root, origin)
-            if added == SHALLOW:
+            if added == SHALLOW and _on_integration(root, origin) is not False:
                 unknown.append(rel)
                 continue
-            bound = added is None or added >= rule["from"]
+            # beyond the boundary, yet not on main: this branch's own (refute v2.75 r3)
+            bound = added in (None, SHALLOW) or added >= rule["from"]
         if bound:
             hard += [f"{rel}: {p}" for p in problems]
         else:

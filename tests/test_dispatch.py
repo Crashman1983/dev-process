@@ -1890,6 +1890,33 @@ def test_chain_queues_execute_only_after_a_plan_review(render, tmp_path, monkeyp
     assert _chain_planned(_load_dispatch(out), out, monkeypatch) == queued
 
 
+def test_a_criss_cross_branch_gets_no_execute_without_its_plan_review(render, tmp_path, monkeypatch, capsys):
+    # refute v2.75 r3: with two fork points the gate's merge base is ambiguous; its own
+    # plans then read as none, and "no plan" queued execute past a Tier 3 plan review
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _git(out, "checkout", "-q", "-b", "b")
+    (out / "f1.txt").write_text("1\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "F1")
+    _git(out, "checkout", "-q", "main")
+    (out / "m1.txt").write_text("1\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "M1")
+    m1 = _git(out, "rev-parse", "HEAD").stdout.strip()
+    _git(out, "merge", "-q", "--no-ff", "-m", "M2", "b")
+    _git(out, "checkout", "-q", "b")
+    _git(out, "merge", "-q", "--no-ff", "-m", "F2", m1)
+    plans = out / ".process-work/plans"
+    plans.mkdir(parents=True, exist_ok=True)
+    (plans / "2026-10-19-big.md").write_text("# big\n\ntier: 3\nissue: #7\n\n## Decisions\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "plan")
+    _git(out, "update-ref", "refs/remotes/origin/main", "main")
+    assert _chain_planned(_load_dispatch(out), out, monkeypatch) == []
+    assert "no execute queued" in capsys.readouterr().err
+
+
 def test_a_passed_plan_review_queues_execute(render, tmp_path, monkeypatch):
     out = render(tmp_path, {"project_name": "d", "modules": {}})
     _planned_branch(out, 3, plan_pass=True)

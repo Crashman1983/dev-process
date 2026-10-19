@@ -130,6 +130,19 @@ def test_models_reports_each_models_token_share_subagents_included(render, tmp_p
     assert rows["claude-small-1"] == ["300", "27%", "100", "50%"], r.stdout
     # a harness that records no model per message is named, never dropped silently
     assert rows["model"] == ["not", "recorded", "100", "9%", "0", "0%"], r.stdout
+    assert "partial" not in r.stdout
+    # a message whose first line names no model is still its model's; an unreadable
+    # transcript marks the shares partial (refute v2.75 r3)
+    (tmp_path / "w8" / "t" / "codex.jsonl").write_text(
+        '{"message": {"id": "m3", "usage": {"input_tokens": 0, "output_tokens": 50}}, "requestId": "q"}\n'
+        '{"message": {"id": "m3", "model": "claude-small-1", "usage": {"input_tokens": 0, "output_tokens": 50}},'
+        ' "requestId": "q"}\n')
+    (tmp_path / "w8" / "t" / "broken.jsonl").mkdir()
+    r = models()
+    rows = {line.split()[0]: line.split()[1:] for line in r.stdout.splitlines()
+            if line.strip().startswith(("claude-", "model not"))}
+    assert rows["claude-small-1"][0] == "350" and "model" not in rows, r.stdout
+    assert "partial: 1 transcript(s) could not be read" in r.stdout
 
 
 def test_cfr_flags_code_overlap_only(render, tmp_path):

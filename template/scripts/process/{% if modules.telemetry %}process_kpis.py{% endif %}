@@ -426,11 +426,14 @@ def _token_share(root: Path) -> None:
     """Each model's share of the dispatched sessions' tokens, subagents
     included — whether mechanical steps really moved to a smaller model (#125)."""
     import dispatch as _dispatch  # noqa: PLC0415 — one reader of transcripts
-    usage = _dispatch.model_token_usage(root)
+    got = _dispatch.model_token_usage(root)
     print("[models] tokens by model ~approx — the dispatched sessions' transcripts, subagents included")
+    usage, unreadable = got if got else ({}, 0)
     if not usage:
         print("  not measured (a `transcripts` glob in the model policy and dispatched sessions)")
         return
+    if unreadable:
+        print(f"  partial: {unreadable} transcript(s) could not be read — every share below is of what was")
     total = {m: sum(u.values()) for m, u in usage.items()}
     out = {m: u.get("output_tokens", 0) for m, u in usage.items()}
     all_total, all_out = sum(total.values()), sum(out.values())

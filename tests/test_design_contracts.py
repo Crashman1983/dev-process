@@ -639,6 +639,25 @@ def test_a_shallow_clone_does_not_date_old_plans_by_its_boundary(render, tmp_pat
     assert "shallow" not in r.stdout
 
 
+def test_a_shallow_clone_still_binds_a_plan_main_never_had(render, tmp_path):
+    """Refute v2.75 r3: a depth-1 clone of a branch cuts off the fork point too, and the
+    branch's own new plan read as "age unknown". Main is fetched and lacks the plan:
+    it is the branch's, bound. Without any integration ref the age stays unknown (#252)."""
+    out = _declared_repo(render, tmp_path, {"from": "2026-10-01"})
+    _plan(out, "", commit_day="2026-10-10")
+    both = tmp_path / "both"
+    subprocess.run(["git", "clone", "-q", "--depth", "1", "--no-single-branch", "--branch", "feature",
+                    f"file://{out}", str(both)], check=True)
+    _git(both, "remote", "set-head", "origin", "main")  # a real remote's default branch
+    r = _gate(both)
+    assert r.returncode == 1 and "no `design-contract:` line" in r.stdout, r.stdout
+    alone = tmp_path / "alone"
+    subprocess.run(["git", "clone", "-q", "--depth", "1", "--branch", "feature", f"file://{out}", str(alone)],
+                   check=True)
+    r = _gate(alone)
+    assert r.returncode == 0 and "beyond this shallow clone's history" in r.stdout, r.stdout
+
+
 def test_a_backdated_commit_on_the_branch_is_still_bound(render, tmp_path):
     """Refute v2.74: an author date before the day grandfathered a plan this branch adds."""
     out = _declared_repo(render, tmp_path, {"from": "2026-10-01"})

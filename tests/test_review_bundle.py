@@ -1641,7 +1641,7 @@ def test_a_project_word_from_review_local_counts(render, tmp_path):
 
 
 
-def test_the_bundle_carries_the_anchors_of_the_touched_folders(render, tmp_path):
+def test_the_bundle_carries_the_anchors_of_the_touched_folders(render, tmp_path, tmp_path_factory):
     """#253: a reviewer without tools sees only the bundle; a monorepo keeps its stack
     rules in nested anchors — the touched folders' anchors ride along, others do not."""
     out = render(tmp_path, {"project_name": "d", "modules": {}})
@@ -1658,6 +1658,18 @@ def test_the_bundle_carries_the_anchors_of_the_touched_folders(render, tmp_path)
     r = _bundle(out, "--base", "main").stdout
     assert "## Stack anchor `backend/CLAUDE.md`" in r and "Layering is directed." in r
     assert "web/AGENTS.md" not in r and "Tokens only." not in r
+    # AGENTS.md is an anchor too; a link out of the repository is none (refute v2.75 r3)
+    outside = tmp_path_factory.mktemp("outside") / "secret.md"
+    outside.write_text("TOP-SECRET\n")
+    (out / "lib").mkdir()
+    (out / "lib/CLAUDE.md").symlink_to(outside)
+    (out / "web/page.ts").write_text("x\n")
+    (out / "lib/a.py").write_text("x\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "web and lib change")
+    r = _bundle(out, "--base", "main").stdout
+    assert "## Stack anchor `web/AGENTS.md`" in r and "Tokens only." in r
+    assert "TOP-SECRET" not in r and "Stack anchor `lib/CLAUDE.md`" not in r
 
 
 def test_plan_filter_by_issue_finds_a_plan_without_the_number_in_its_name(render, tmp_path):
@@ -1674,3 +1686,14 @@ def test_plan_filter_by_issue_finds_a_plan_without_the_number_in_its_name(render
         assert "2026-10-19-widget-polish.md" in r, flt
     r = _run(out, "--base", "main", "--plan", "78", "--skip-preflight")
     assert r.returncode != 0 and "matches no plan" in (r.stdout + r.stderr)
+    # read as the gate reads work ids: a fenced example and an archived plan of the
+    # reopened issue are not this issue's plans (refute v2.75 r3)
+    (plans / "2026-10-01-template-docs.md").write_text("# Plan\n\nissue: #5\ntier: 3\n\n```\nissue: #77\n```\n")
+    (plans / "archive").mkdir(exist_ok=True)
+    (plans / "archive/2026-03-01-first-try.md").write_text("# Plan\n\nissue: #77\ntier: 3\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "other plans")
+    r = _bundle(out, "--base", "main", "--plan", "77").stdout
+    bundled = [ln for ln in r.splitlines() if ln.startswith("### ")]
+    assert any("widget-polish" in ln for ln in bundled), bundled
+    assert not any("template-docs" in ln or "first-try" in ln for ln in bundled), bundled
