@@ -63,13 +63,14 @@ def test_fenced_marker_is_quotation(render, tmp_path):
     assert r.returncode == 0, r.stdout + r.stderr
 
 
-def test_info_string_line_inside_a_fence_keeps_the_marker_quoted(render, tmp_path):
-    # #250: ```python opens a nested example, it does not close the fence
+def test_a_marker_only_an_info_string_line_quotes_is_asked_about(render, tmp_path):
+    # #250: ```python inside a ``` fence closes nothing — the marker below it is quoted
+    # now, where v2.74.2 read it as open; the stricter reading asks (review v2.75 r5)
     out = render(tmp_path, {"project_name": "demo"})
     _write(out, "2026-08-06-doc.md",
            f"# Plan\n\ntier: 2\n\n```md\n```python\n{MARKER}\n```\n```\n")
     r = _run(out)
-    assert r.returncode == 0, r.stdout + r.stderr
+    assert r.returncode == 1 and "closes differently since #250" in r.stdout, r.stdout + r.stderr
 
 
 def test_an_unclosed_fence_hiding_a_marker_is_hard(render, tmp_path):

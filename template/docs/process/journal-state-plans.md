@@ -224,7 +224,11 @@ literal examples only there). A fence opens on a line that starts, after any ind
 ` ``` ` or `~~~`, and closes on a line holding nothing but the same character,
 at least as long, at most three columns deeper than its opener — ` ```python `
 inside a ` ```md ` example opens a nested example and closes nothing; nest
-with a longer outer fence. Lists and indented code blocks are not modelled. A fence still open at the end of a journal shard
+with a longer outer fence. Lists and indented code blocks are not modelled. Where a
+fence closes differently than before #250 and a gated line reads more leniently
+for it (a `tier:`, `issue:` or `DECISION NEEDED` hidden, a `REVIEW`, waiver or
+`REFUTE` line revealed), that is a hard finding too: make each fence close on a
+line of its own. A fence still open at the end of a journal shard
 or an active plan that swallows a `tier:`, `issue:`, `review-waived:`, `REVIEW` or
 `DECISION NEEDED` line is a hard finding (a note in the archive). Grammar and the independence arithmetic the gate
 enforces on a `pass` are in `verification-independence.md`.

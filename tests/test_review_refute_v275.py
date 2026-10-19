@@ -343,3 +343,42 @@ def test_a_list_marker_fence_hides_no_marker_and_clears_nothing(render, tmp_path
     write(out, f"{JOURNAL}/2026-07-04.md", "- Ran:\n- ```bash\nmake test\n```\n\n" + R() + "\n")
     r = run(out)
     assert r.returncode == 1 and "no clearing REVIEW" in r.stdout, r.stdout
+
+
+# review v2.75 r5: a fence v2.74.2 closed on an info-string line now stays open until the
+# next bare fence, and code and prose swap silently below it — where the two readings
+# disagree in the lenient direction, the gate asks (`fence_drift_problem`)
+LI = "- Example:\n  ```\n  x\n  ```python\n- done\n\n"
+
+
+@pytest.mark.parametrize("body", [
+    "tier: 2\n\n" + LI + "A waiver looks like this:\n\n```\nreview-waived: trivial\n```\n",
+    LI + "tier: 2\n\n```\nmake test\n```\n",
+])
+def test_a_fence_closing_differently_since_250_is_asked_about_in_the_archive(render, tmp_path, body):
+    out = render(tmp_path, {"project_name": "demo"})
+    write(out, f"{ARCHIVE}/2026-07-10-widget.md", "# Plan\n\n" + body)
+    r = run(out)
+    assert r.returncode == 1 and "closes differently since #250" in r.stdout, r.stdout
+
+
+def test_a_hidden_open_question_is_asked_about(render, tmp_path):
+    out = render(tmp_path, {"project_name": "demo"})
+    write(out, f"{PLANS}/2026-10-19-store.md", "# Plan\n\ntier: 2\n\n" + LI
+          + "DECISION NEEDED 2026-10-19 seb: postgres or sqlite?\n\n```\nmake test\n```\n")
+    r = run(out)
+    assert r.returncode == 1 and "closes differently since #250" in r.stdout, r.stdout
+    write(out, f"{PLANS}/2026-10-19-store.md", "# Plan\n\ntier: 2\n\n" + LI
+          + "[NEEDS CLARIFICATION: postgres or sqlite]\n\n```\nmake test\n```\n")
+    r = subprocess.run([sys.executable, str(out / "scripts/process/check_clarification.py"), "."],
+                       cwd=out, capture_output=True, text=True)
+    assert r.returncode == 1 and "closes differently since #250" in r.stdout, r.stdout
+
+
+def test_a_record_in_indented_code_after_an_inline_fence_is_asked_about(render, tmp_path):
+    out = render(tmp_path, {"project_name": "demo"})
+    write(out, f"{ARCHIVE}/2026-07-01-auth.md", "tier: 3\n")
+    write(out, f"{JOURNAL}/2026-07-04.md",
+          "The record template:\n\n    ```make``` runs first, then the line\n    " + R() + "\n")
+    r = run(out)
+    assert r.returncode == 1 and "closes differently since #250" in r.stdout, r.stdout
