@@ -94,6 +94,9 @@ an unregistered surface, `n/a` without a reason, a missing or empty trace.
   on or after `from` (the author day — a backdated file name proves nothing;
   an uncommitted plan is bound), and a Spec Kit plan numbered above
   `spec_above` (all of them without it). Older plans get one summary note.
+  In a shallow clone a plan whose first commit lies beyond the clone's
+  history has no known age: a note names it and `git fetch --unshallow`,
+  never a refusal; a full clone judges it.
 - **Read at the fork point**, like the review evidence rules: a branch
   cannot lift the duty for itself. The file lives beside the registry
   folder, not in it — it is no surface.

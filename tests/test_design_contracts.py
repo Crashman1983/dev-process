@@ -611,6 +611,34 @@ def test_a_plan_from_before_the_day_is_a_note_and_a_backdated_name_proves_nothin
     assert r.returncode == 1 and "2026-08-01-backdated.md: no `design-contract:` line" in r.stdout, r.stdout
 
 
+def test_a_shallow_clone_does_not_date_old_plans_by_its_boundary(render, tmp_path):
+    """#252: in a shallow clone the boundary commit looks like the add of every file it
+    holds — an old plan read as added on the clone's day and was refused. Its age is
+    unknown there: a note naming the remedy, never a refusal; the full clone judges."""
+    out = _declared_repo(render, tmp_path, {"from": "2026-10-01"})
+    _git(out, "checkout", "-q", "main")
+    _plan(out, "", rel=".process-work/plans/2026-09-01-old.md", commit_day="2026-09-02")
+    _write(out, "later.txt", "x\n")
+    _git(out, "add", "-A")
+    env = {**os.environ, "GIT_AUTHOR_DATE": "2026-10-05T12:00:00", "GIT_COMMITTER_DATE": "2026-10-05T12:00:00"}
+    subprocess.run(["git", "-C", str(out), "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q",
+                    "-m", "later"], env=env, check=True)
+    shallow = tmp_path / "shallow"
+    subprocess.run(["git", "clone", "-q", "--depth", "1", "--branch", "main", f"file://{out}", str(shallow)],
+                   check=True)
+    assert (shallow / ".git/shallow").is_file()
+    r = _gate(shallow)
+    assert r.returncode == 0, r.stdout
+    assert "beyond this shallow clone's history" in r.stdout and "2026-09-01-old.md" in r.stdout, r.stdout
+    assert "git fetch --unshallow" in r.stdout
+    # the full clone of the same history still dates it by its real first commit
+    full = tmp_path / "full"
+    subprocess.run(["git", "clone", "-q", "--branch", "main", f"file://{out}", str(full)], check=True)
+    r = _gate(full)
+    assert r.returncode == 0 and "predate the declaration duty" in r.stdout, r.stdout
+    assert "shallow" not in r.stdout
+
+
 def test_a_backdated_commit_on_the_branch_is_still_bound(render, tmp_path):
     """Refute v2.74: an author date before the day grandfathered a plan this branch adds."""
     out = _declared_repo(render, tmp_path, {"from": "2026-10-01"})
