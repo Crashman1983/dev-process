@@ -290,6 +290,18 @@ run whose `stages` file is missing or empty certifies nothing — the scope is
 read from the run, never recomputed after it (`certificate.run_evidence`). A
 suite without stages writes neither file; nothing changes for it.
 
+**The net under a selection.** A `merge_scope` that skips a stage trades a
+run for a guess about who reads a path; nothing in the merge path notices
+the wrong guess. A project that configures one also schedules a full run of
+every stage — each stack's `full`, never through the selector — on the
+freshly fetched integration branch, at least daily, that alerts a named
+owner when it goes red (a script's `--alert`, a systemd `OnFailure=` unit, a
+CI schedule's notification). It keeps the three rules of an unattended run
+(`improvement-weekly.md`: a lock, a deadline, only its own branches). A red
+run is a finding on the selection: the commit that broke it merged on a
+narrowed scope, and the fix adds the missed reader to what the selector
+reads, not only the code fix.
+
 ## Ratchets — a threshold that only ever tightens
 
 Some qualities cannot be gated with one universal number on day one because
