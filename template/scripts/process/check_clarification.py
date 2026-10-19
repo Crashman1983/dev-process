@@ -56,7 +56,7 @@ def _marker_lines(text: str) -> list[int]:
 def _unclosed(rel: object, text: str, hard: list[str]) -> None:
     """A fence open at end of file, or one closing differently since #250, hiding a marker
     hides an open question."""
-    for problem in (unclosed_fence_problem(text, (MARKER,)), fence_drift_problem(text, (MARKER,))):
+    for problem in (unclosed_fence_problem(text, (MARKER,)), fence_drift_problem(text)):
         if problem:
             hard.append(f"{rel}: {problem}")
 

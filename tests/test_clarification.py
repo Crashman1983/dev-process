@@ -70,7 +70,7 @@ def test_a_marker_only_an_info_string_line_quotes_is_asked_about(render, tmp_pat
     _write(out, "2026-08-06-doc.md",
            f"# Plan\n\ntier: 2\n\n```md\n```python\n{MARKER}\n```\n```\n")
     r = _run(out)
-    assert r.returncode == 1 and "closes differently since #250" in r.stdout, r.stdout + r.stderr
+    assert r.returncode == 1 and "a fence above it closes differently" in r.stdout, r.stdout + r.stderr
 
 
 def test_an_unclosed_fence_hiding_a_marker_is_hard(render, tmp_path):
