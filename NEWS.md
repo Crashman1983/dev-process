@@ -7,6 +7,15 @@ details are in the [CHANGELOG](CHANGELOG.md).
 
 Deutsche Fassung: [NEWS-DE.md](NEWS-DE.md).
 
+## v2.75.0 — A template update is reviewed once, even when other work merges in between
+
+A project updating the template acknowledges and reviews the update once;
+other work merging in the meantime no longer forces it to start over. The
+review records can no longer be fooled by an example quoted in a plan, the
+lines that summarize an attack on a change and the proof that a fix turned a
+test green are written by tools from what actually ran, and a new report
+shows how much of the work runs on which model.
+
 ## v2.74.2 — A suite that keeps going after a failure counts again
 
 A project whose test suite runs every stage even after one fails gets its

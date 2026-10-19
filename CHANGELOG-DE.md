@@ -9,6 +9,36 @@ ein Eintrag ohne Plan oder Issue hat keine Details-Zeile. In wenigen Sätzen je 
 English version: [CHANGELOG.md](CHANGELOG.md). Die Releases vor v2.28.2:
 [docs/changelog-archive-DE.md](docs/changelog-archive-DE.md).
 
+## v2.75.0 — Template-Updates überstehen ein wanderndes main, eine Lesart für Fences, Buchführung aus den Läufen · 2026-10-19
+
+**Warum.** Kennis v2.74-Update brauchte nach jedem Zug, der main bewegte, sein Ack und sein volles Tier-3-Review neu, obwohl sich am Update nichts geändert hatte; die Retry-Meldung des Zugs nannte zudem den falschen Retry. Die drei Leser von Fence-Blöcken waren sich uneins, was einen Fence schließt, sodass ein zitiertes `REVIEW … verdict=pass` oder `review-waived:` als echt zählen konnte. REFUTE- und Red-Evidence-Zeilen wurden noch von Hand getippt, ein gelöschter Plan entging seinem Review, und die v2.74-Reviews hinterließen kleinere Reste in attest, finish, dem Designvertrags-Gate und dem Review-Bundle.
+
+**Was sich ändert.**
+- Template-Update: Ack und REVIEW des Updates gehen auf ein neues main über, wenn die alte Basis ein Vorfahr der neuen ist und die Commits dazwischen keinen Pfad des Updates berühren; das Gate nennt ein abgelaufenes Ack (`ack_expired`), und ein Update-REVIEW zählt nur, wenn sein Head die Antworten, die Owned-Liste und das Projekt-Delta des Updates gesehen hat.
+- Die Retry-Meldung des Zugs sagt, was lief: grün unter dem Retry-Befehl, ein Gate-Flake oder das klassische FLAKY.
+- Fences: ein Durchlauf (`check_review.fenced_lines`) für den REVIEW-Parser, den Deklarationsleser und das Klärungs-Gate. Ein schließender Fence ist das Zeichen des Öffners, mindestens so lang, und sonst nichts auf der Zeile; ein am Ende eines Plans oder Journal-Shards noch offener Fence, der `tier:`, `issue:`, `review-waived:`, eine REVIEW-Zeile oder einen Klärungsmarker verdeckt, ist ein harter Befund (im Archiv ein Hinweis).
+- Ein Tier-2+-Plan, den ein Push löscht, schuldet weiter sein Review.
+- `refute_line.py` schreibt die REFUTE-Zeile aus dem Bericht des Refuters: Der Brief endet jetzt mit `SCENARIO`- und `PATTERN`-Zeilen, das Werkzeug zählt sie und nimmt die nächste Runde; die Zusammenfassung ist der einzige freie Text.
+- `red_evidence.py --junit PATH` misst Rot-vorher/Grün-nachher für jeden Runner, der JUnit-XML schreibt (vitest, jest, XCTest).
+- `process_kpis.py models` zeigt den Anteil jedes Modells an den Tokens der dispatchten Sitzungen, Subagenten eingeschlossen.
+- `finish.py --tests` ohne Befehl fährt die konfigurierte `merge_suite`; `--tests-passed` wird verweigert, solange eine gesetzt ist.
+- attest: Die niedrigste Modellklasse reviewt keinen Plan, ein ungemessener Modell-Report wird mit Hinweis verweigert, und eine Basis ohne `review_evidence` übernimmt die strengeren Tier-Untergrenzen von HEAD.
+- Designverträge: Ein flacher Klon datiert alte Pläne nicht mehr auf seine Grenze (ein Hinweis nennt `git fetch --unshallow`); der Status `legacy` registriert eine Norm von vor der Registry mit einem Hinweis.
+- Das Review-Bundle trägt die `CLAUDE.md`/`AGENTS.md` der Ordner, die ein Diff berührt; `dispatch.py` nutzt den Fork-Punkt des Gates, und `--plan` findet einen Plan über das Issue, das er deklariert.
+- `testing.md`: Ein Projekt, dessen `merge_scope` Stufen überspringt, plant einen vollen Lauf mit Alarm als Netz unter seiner Auswahl.
+- Das Changelog-Archiv vor v2.28.2 ist jetzt ein Eintrag je Release, deutsch und englisch.
+
+**Wirkung.** Ein Template-Update wird einmal quittiert und einmal reviewt, auch wenn dazwischen Züge mergen. Ein zitiertes Beispiel kann kein Review mehr freigeben oder erlassen, und ein kaputter Fence schaltet kein Gate mehr ab. REFUTE- und Red-Evidence-Einträge kommen aus den Läufen, und der Token-Bericht zeigt, ob mechanische Schritte wirklich beim kleineren Modell gelandet sind.
+
+**Update.**
+1. Nichts ist nötig.
+2. Strenger als bisher: Eine Zeile wie ` ```python ` in einem Fence schließt ihn nicht mehr; ein offen gelassener Fence, der `tier:`, `issue:`, `review-waived:` oder eine REVIEW-Zeile verdeckt, ist jetzt hart — den Fence schließen. `finish.py --tests-passed` wird verweigert, wo `merge_suite` gesetzt ist (`--tests` nutzen). Einen Tier-2+-Plan ohne sein Review zu löschen, verweigert der Merge-Push.
+3. Optional: Refute-Berichte in der `SCENARIO`/`PATTERN`-Form schreiben und mit `refute_line.py` anhängen; `--junit` für Suiten außer pytest; mit `merge_scope` den vollen Lauf planen (`testing.md`).
+
+**Geänderte Abschnitte.** `commits.md` (Merging), `journal-state-plans.md` (Review attestations), `refute.md` (The brief, What happens with the findings), `releases.md` (Updating the process template), `review-checklist.md` (Extending this list), `risk-tiers.md` (Template updates), `testing.md` (Test economy — scoped inner loop, full merge boundary), `tower.md` (Dispatch and the model policy), `verification-independence.md` (The review bundle — the portable interface to any reviewer, Enforcement), Modul `design-contracts` (The registry entry, Hard vs. best-effort (no false-green), Declaring the contract), `/execute`, `/finish`, `/review`
+
+Details: [Plan](docs/analysis/2026-10-15-v2.75.md) #124 #125 #207 #228 #229 #230 #232 #250 #251 #252 #253 #254 #255 #256 #257 #262 #263
+
 ## v2.74.2 — `make -k` zertifiziert wieder · 2026-10-16
 
 **Warum.** v2.74.0 verweigerte Zertifikate unter MAKEFLAGS, die verändern, was läuft, und zählte `-k` dazu. Keep-going verdeckt aber nichts: make läuft nach einem Fehler die übrigen Ziele weiter und endet trotzdem mit einem Exit ungleich 0. Der eigene Rat des Templates fährt die Suite als `make -k test-merge`, und genau so tut es Kennis Merge-Suite. Zwei Züge sind gescheitert: Unter dem geerbten `MAKEFLAGS=k` wurden die Tests rot, die Zertifikate schreiben, und der Push auf main wurde verweigert.

@@ -7,6 +7,16 @@ technischen Einzelheiten stehen im [CHANGELOG](CHANGELOG-DE.md).
 
 English version: [NEWS.md](NEWS.md).
 
+## v2.75.0 — Ein Template-Update wird einmal geprüft, auch wenn dazwischen anderes gemergt wird
+
+Ein Projekt, das die Vorlage aktualisiert, quittiert und prüft das Update
+einmal; andere Arbeit, die in der Zwischenzeit gemergt wird, zwingt es nicht
+mehr zum Neuanfang. Ein in einem Plan zitiertes Beispiel kann die
+Review-Einträge nicht mehr täuschen, die Zeilen, die einen Angriff auf eine
+Änderung zusammenfassen, und der Beweis, dass ein Fix einen Test grün gemacht
+hat, schreiben Werkzeuge aus dem, was wirklich lief, und ein neuer Bericht
+zeigt, wie viel der Arbeit auf welchem Modell läuft.
+
 ## v2.74.2 — Eine Suite, die nach einem Fehler weiterläuft, zählt wieder
 
 Ein Projekt, dessen Testsuite auch nach einem Fehler alle Stufen weiterfährt,
