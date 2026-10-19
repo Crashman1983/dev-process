@@ -51,49 +51,29 @@ def _norm(heading: str) -> str:
     return f"{m.group(1)} {m.group(2).strip()}" if m else heading.strip()
 
 
-# a list item's marker: a fence may open right after it, its content column the fence's base
-_LIST_ITEM = re.compile(r"^ {0,3}(?:[-*+]|\d{1,9}[.)])[ \t]+")
-
-
 def fence_scan(lines: list[str]) -> tuple[list[bool], int | None]:
-    """Per line: is it code (fenced, the fences included, or an indented code block)? And
-    the index of a fence still open at the end. The one reading of code blocks every gate
-    shares (#250). A fence opens at any indentation, right after a list item's marker too
-    (a backtick fence's info string holds no backtick), and closes with the same
-    character, at least as long, nothing else on the line, indented at most three columns
-    deeper than its opener — so a fence an example quotes four columns in never closes the
-    example. A line four columns in after a blank line that follows top-level prose is an
-    indented code block. Lists are not tracked: each refinement for nested items opened a
-    new case (review v2.75 r2), and a line in a list reads as prose. A tab is four columns."""
+    """Per line: is it fenced code (the fences included)? And the index of a fence still
+    open at the end. The one reading of fences every gate shares (#250). A fence opens on
+    a line that starts, after any indentation, with ``` or ~~~ (a backtick fence's info
+    string holds no backtick), and closes on a line holding nothing but the same
+    character, at least as long, indented at most three columns deeper than its opener —
+    a fence an example quotes deeper in never closes the example. Nothing else is
+    modelled: lists, indented code blocks and quotes each opened new cases in the v2.75
+    review rounds, and a fence that stays open is reported, never silent. A tab is four
+    columns."""
     out, fence, opened, col = [], "", None, 0
-    indented, after_blank, top_prose = False, True, True
     for i, raw in enumerate(lines):
         line = raw.rstrip("\r\n").expandtabs(4)
         indent = len(line) - len(line.lstrip(" "))
+        stripped = line.strip()
         if fence:
-            stripped = line.strip()
             if stripped and set(stripped) == {fence[0]} and len(stripped) >= len(fence) and indent <= col + 3:
                 fence = ""
             out.append(True)
             continue
-        if not line.strip():
-            after_blank = True
-            out.append(False)
-            continue
-        if indent >= 4 and (indented or (after_blank and top_prose)):
-            indented, after_blank = True, False
-            out.append(True)
-            continue
-        item = _LIST_ITEM.match(line)
-        # top-level prose starts after a blank line or with a block of its own (a heading, a
-        # quote); any other unindented line right after a list item continues it (review
-        # v2.75 r3: the item's next indented paragraph hid a marker)
-        top_prose = indent == 0 and not item and (after_blank or top_prose or line[:1] in "#>")
-        indented, after_blank = False, False
-        start = item.end() if item else indent
-        f = _FENCE_OPEN.match(line[start:])
+        f = _FENCE_OPEN.match(stripped)
         if f and not (f.group("fence")[0] == "`" and "`" in f.group("info")):
-            fence, opened, col = f.group("fence"), i, start
+            fence, opened, col = f.group("fence"), i, indent
         out.append(bool(fence))
     return out, (opened if fence else None)
 

@@ -58,13 +58,15 @@ def test_S3_quoted_review_after_indented_nested_fence_does_not_clear(render, tmp
     assert r.returncode == 1 and "no clearing REVIEW" in r.stdout
 
 
-def test_D_list_item_fence_in_journal_is_no_refusal(render, tmp_path):
+def test_D_a_fence_inside_a_list_item_is_reported_never_silent(render, tmp_path):
+    # lists are not modelled (v2.75 review rounds 2-4): the item's indented closer opens a
+    # fence that never closes — a loud finding, never a REVIEW read the wrong way
     out = render(tmp_path, {"project_name": "demo"})
     write(out, f"{ARCHIVE}/2026-07-01-auth.md", "tier: 3\n")
     write(out, f"{JOURNAL}/2026-07-04.md",
           R() + "\n\n- ran the suite:\n- ```bash\n  make test\n  ```\n\n" + R(work="other", tier="2") + "\n")
     r = run(out)
-    assert r.returncode == 0
+    assert r.returncode == 1 and "fence opened on line 6 never closes" in r.stdout, r.stdout
 
 
 def test_M_unclosed_last_code_block_with_issue_field_is_no_refusal(render, tmp_path):
@@ -84,13 +86,13 @@ def test_M2_unclosed_fence_in_design_doc_is_no_refusal(render, tmp_path):
     assert "design-widget.md: fence opened" not in r.stdout
 
 
-def test_B_indented_code_block_is_no_fence(render, tmp_path):
+def test_B_a_fence_in_an_indented_code_block_is_reported_never_silent(render, tmp_path):
     out = render(tmp_path, {"project_name": "demo"})
     write(out, f"{ARCHIVE}/2026-07-01-auth.md", "tier: 3\n")
     write(out, f"{JOURNAL}/2026-07-04.md",
           R() + "\n\nliteral:\n\n    ```\n    x\n\n" + R(work="other", tier="2") + "\n")
     r = run(out)
-    assert r.returncode == 0
+    assert r.returncode == 1 and "fence opened on line 5 never closes" in r.stdout, r.stdout
 
 
 
@@ -313,6 +315,31 @@ def test_a_wrapped_list_item_keeps_its_next_paragraph_prose(render, tmp_path):
 def test_an_unclosed_fence_hiding_a_decision_needed_is_hard(render, tmp_path):
     out = render(tmp_path, {"project_name": "demo"})
     write(out, f"{PLANS}/2026-10-19-store.md",
-          "# Plan\n\ntier: 2\n\n- Run:\n- ```bash\n  make test\n\nDECISION NEEDED 2026-10-19 seb: postgres or sqlite?\n")
+          "# Plan\n\ntier: 2\n\n```bash\nmake test\n\nDECISION NEEDED 2026-10-19 seb: postgres or sqlite?\n")
     r = run(out)
-    assert r.returncode == 1 and "fence opened on line 6 never closes — line 9" in r.stdout, r.stdout
+    assert r.returncode == 1 and "fence opened on line 5 never closes — line 8" in r.stdout, r.stdout
+
+
+def test_a_wrapped_line_starting_with_an_issue_ref_keeps_the_item_prose(render, tmp_path):
+    # review v2.75 r4: `#250 …` read as a heading started top-level prose and hid the marker
+    out = render(tmp_path, {"project_name": "demo"})
+    write(out, f"{PLANS}/2026-10-19-store.md",
+          "# Plan\n\ntier: 2\n\n1. Decide storage between postgres and sqlite, background in\n"
+          "#250 and the deploy notes.\n\n    Which one? [NEEDS CLARIFICATION: postgres or sqlite]\n")
+    r = subprocess.run([sys.executable, str(out / "scripts/process/check_clarification.py"), "."],
+                       cwd=out, capture_output=True, text=True)
+    assert r.returncode == 1 and "2026-10-19-store.md:8" in r.stdout, r.stdout
+
+
+def test_a_list_marker_fence_hides_no_marker_and_clears_nothing(render, tmp_path):
+    # review v2.75 r4: a fence right after a list marker is no fence here (as in v2.74.2)
+    out = render(tmp_path, {"project_name": "demo"})
+    write(out, f"{PLANS}/2026-10-19-store.md",
+          "# Plan\n\ntier: 2\n\n- ```text\n[NEEDS CLARIFICATION: postgres or sqlite]\n  ```\n")
+    r = subprocess.run([sys.executable, str(out / "scripts/process/check_clarification.py"), "."],
+                       cwd=out, capture_output=True, text=True)
+    assert r.returncode == 1 and "2026-10-19-store.md:6" in r.stdout, r.stdout
+    write(out, f"{ARCHIVE}/2026-07-01-auth.md", "tier: 3\n")
+    write(out, f"{JOURNAL}/2026-07-04.md", "- Ran:\n- ```bash\nmake test\n```\n\n" + R() + "\n")
+    r = run(out)
+    assert r.returncode == 1 and "no clearing REVIEW" in r.stdout, r.stdout
