@@ -265,10 +265,8 @@ def _verify(root: Path, base: str, tip: str, *, worktree: bool = False,
             # Acknowledgment is attested, like reviewer identity; file coverage is computed.
             ack_raw = _file(root, ACK) if worktree else _entry(root, tip, ACK)
             ack = json.loads(ack_raw[1]) if ack_raw else {}
-            result['acknowledged'] = (ack.get('base') == base
-                                      and ack.get('release') == new_sha
-                                      and isinstance(ack.get('owner'), str)
-                                      and bool(ack['owner'].strip()))
+            result['ack_expired'] = _ack_problem(root, ack, base, new_sha, result) if ack else ''
+            result['acknowledged'] = bool(ack) and not result['ack_expired']
             # Releases' behavior notes travel in the report even when the render has
             # no changelog. Read them from the shared clone at the pinned commits.
             notes = _clone(src, new_ref)
@@ -288,6 +286,72 @@ def _verify(root: Path, base: str, tip: str, *, worktree: bool = False,
         result['errors'].append(str(exc))
         result['identical'] = []  # any failure withdraws every exemption
     return result
+
+
+def update_paths(update: dict) -> set[str]:
+    """What an update's acknowledgment and review are about: the recorded answers, the
+    ack, the owned list and every path the update touches (#262). A main commit that
+    changes none of them leaves the update as the owner and the reviewer saw it."""
+    return {ANSWERS, ACK, OWNED_FILE, *update.get('identical', ()), *update.get('project_delta', ())}
+
+
+def fingerprint(update: dict) -> dict:
+    """The classification an ack acknowledges — compared, never trusted: the gate
+    recomputes every value, so a matching fingerprint is the update the owner saw."""
+    return dict(old_release=update.get('old_release'), identical=sorted(update.get('identical', ())),
+                project_delta=sorted(update.get('project_delta', ())),
+                migration=bool(update.get('migration')))
+
+
+def carried_base(root: Path, old_base: str, base: str, paths: set[str]) -> str | None:
+    """None when an ack or review taken at `old_base` still speaks for the update at
+    `base`, else why not (#262): `old_base` is `base` or an ancestor of it, and main's
+    commits between them change none of `paths`. Renames count at both names
+    (`--no-renames`); every git failure is a reason, never a pass."""
+    if old_base == base:
+        return None
+    if not old_base:
+        return 'no base recorded'
+    known = subprocess.run(['git', '-C', str(root), 'cat-file', '-e', old_base + '^{commit}'],
+                           capture_output=True, timeout=60, env=git_environment())
+    if known.returncode:
+        return f'base {old_base[:12]} is not in this clone (shallow?) — fetch it, or acknowledge again'
+    anc = subprocess.run(['git', '-C', str(root), 'merge-base', '--is-ancestor', old_base, base],
+                         capture_output=True, timeout=60, env=git_environment())
+    if anc.returncode == 1:
+        return f'base {old_base[:12]} is not an ancestor of the fork point {base[:12]}'
+    if anc.returncode:
+        return f'git cannot tell whether {old_base[:12]} precedes {base[:12]}'
+    try:
+        moved = {os.fsdecode(p) for p in git(root, 'diff', '--name-only', '--no-renames', '-z',
+                                              old_base, base).split(b'\0') if p}
+    except (ValueError, OSError, subprocess.TimeoutExpired) as exc:
+        return f'git cannot list main between {old_base[:12]} and {base[:12]}: {exc}'
+    hit = sorted(moved & paths)
+    if hit:
+        return f'main changed {hit[0]} since {old_base[:12]}' + (f' (+{len(hit) - 1} more)' if len(hit) > 1 else '')
+    return None
+
+
+def _ack_problem(root: Path, ack: dict, base: str, new_sha: str, update: dict) -> str:
+    """Why the recorded ack does not acknowledge this update ('' when it does)."""
+    if not (isinstance(ack.get('owner'), str) and ack['owner'].strip()):
+        return 'the ack names no owner'
+    if ack.get('release') != new_sha:
+        return f'the ack is for release {str(ack.get("release"))[:12]}, not {new_sha[:12]}'
+    if ack.get('base') == base:
+        return ''
+    recorded = ack.get('fingerprint')
+    if not isinstance(recorded, dict):
+        return (f'the ack was given at base {str(ack.get("base"))[:12]}, not the fork point '
+                f'{base[:12]}, and records no fingerprint to carry it — acknowledge again')
+    now = fingerprint(update)
+    if recorded != now:
+        was = set(recorded.get('identical', [])) | set(recorded.get('project_delta', []))
+        cur = set(now['identical']) | set(now['project_delta'])
+        delta = ' '.join([*(f'+{p}' for p in sorted(cur - was)), *(f'-{p}' for p in sorted(was - cur))])
+        return 'fingerprint differs' + (f': {delta}' if delta else ' (release or migration)') + ' — acknowledge again'
+    return carried_base(root, str(ack.get('base') or ''), base, update_paths(update)) or ''
 
 
 @functools.lru_cache(maxsize=16)
@@ -325,7 +389,8 @@ def verify(root: Path, base: str, tip: str = 'HEAD', *, worktree: bool = False) 
     base_sha = git(root, 'rev-parse', '--verify', base + '^{commit}').decode().strip()
     tip_sha = git(root, 'rev-parse', '--verify', tip + '^{commit}').decode().strip()
     # The baseline is the fork point, whichever integration ref the caller
-    # names: REVIEW and ack bind it, and the ref's later commits are no delta.
+    # names, and the ref's later commits are no delta. REVIEW and ack name it;
+    # an older one carries while main left the update alone (`carried_base`, #262).
     # Callers pass the ref, not a pre-picked SHA: a SHA already in tip's
     # history has one merge base with it, and a criss-cross would hide.
     base_sha = fork_point(root, base_sha, tip_sha)
@@ -352,11 +417,20 @@ def main(argv: list[str] | None = None) -> int:
     try:
         report = verify(root, args.base, worktree=True)
         if args.ack and report['update'] and not report['errors']:
+            # the fingerprint comes from the committed update, as the gate will see it —
+            # a stray untracked file in this worktree must not end up in it (#262)
+            committed = verify(root, args.base)
+            ack = dict(base=report['base'], release=report['new_release'], owner=args.ack)
+            if not committed['errors'] and committed['update'] and committed['base'] == report['base']:
+                ack['fingerprint'] = fingerprint(committed)
+            else:
+                print('template-verify: no fingerprint — commit the update first; this ack '
+                      'holds only at this exact base', file=sys.stderr)
             p = root / ACK
             p.parent.mkdir(parents=True, exist_ok=True)
-            p.write_text(json.dumps(dict(base=report['base'], release=report['new_release'],
-                                         owner=args.ack), indent=2) + '\n', encoding='utf-8')
+            p.write_text(json.dumps(ack, indent=2) + '\n', encoding='utf-8')
             report['acknowledged'] = True
+            report['ack_expired'] = ''
         print(json.dumps(report, indent=2))
         return 1 if report['errors'] else 0
     except (ValueError, OSError, subprocess.TimeoutExpired) as exc:

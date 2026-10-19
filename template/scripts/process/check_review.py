@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.11"
+# dependencies = ["pyyaml>=6,<7"]
+# ///
 """review gate (core, always-on): make the review-independence attestation a
 gated artifact instead of prose.
 
@@ -66,7 +70,7 @@ from pathlib import Path
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from process_git import NoForkPoint, fork_point, git_environment  # noqa: E402
-from template_verify import verify  # noqa: E402
+from template_verify import carried_base, update_paths, verify  # noqa: E402
 
 JOURNAL_DIR = ".process-work/journal"
 PLANS_ACTIVE = ".process-work/plans"
@@ -2607,14 +2611,19 @@ def template_review_findings(root: Path, update: dict, passes: list[dict],
     if findings or not update['update']:
         return findings
     if not update.get('acknowledged'):
+        why = update.get('ack_expired')
         findings.append('template update: owner/steward must acknowledge the behavior notes '
-                        '(template_update.py --verify --base <integration-base> --ack <owner>)')
+                        '(template_update.py --verify --base <integration-base> --ack <owner>)'
+                        + (f' — {why}' if why else ''))
     if update['project_delta'] or update['migration']:
         tier = 3 if update['migration'] else 2
         known = _known_work(root, ref=tip)
+        paths = update_paths(update)
+        # a review taken before main moved still covers the update while main left
+        # the update's paths alone; the content check below stays the hurdle
         covering = [r for r in passes if int(r['tier']) >= tier
-                    and r.get('base') == update['base'] and r.get('head')
-                    and r.get('mode', 'full') == 'full' and r['work'] in known]
+                    and r.get('head') and r.get('mode', 'full') == 'full' and r['work'] in known
+                    and carried_base(root, r.get('base') or '', update['base'], paths) is None]
         if not any(_unreviewed_paths(root, r['head'], tip, _reviewed_heads(passes, tier, known),
                                      r.get('base') or '') == set()
                    for r in covering):
