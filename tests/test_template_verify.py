@@ -1053,5 +1053,26 @@ def test_a_malformed_fingerprint_is_a_reason_not_a_crash(update):
 def test_a_symbolic_base_carries_nothing(update):
     """Refute v2.75-N minor: `main` or `<sha>~0` floated with the repository."""
     root, _, base, verifier = update
-    assert 'no commit id' in verifier.carried_base(root, 'main', base, set())
-    assert 'no commit id' in verifier.carried_base(root, base + '~0', base, set())
+    assert 'no full commit id' in verifier.carried_base(root, 'main', base, set())
+    assert f"'{base}~0'" in verifier.carried_base(root, base + '~0', base, set())
+
+
+def test_applying_a_release_file_after_the_review_keeps_the_review(update, monkeypatch):
+    """Refute v2.75-N round 2: a fix round that writes a dropped file exactly as released
+    turns it release-exact — the reviewed project delta did not change, the review stays."""
+    root, _, base, verifier = update
+    write(root, 'rule.local.md', 'project change\n')
+    git(root, 'checkout', base, '--', 'docs/process/example.md')  # dropped at first
+    head = commit(root)
+    write(root, '.process-work/journal/review.md',
+          'REVIEW work=update tier=2 reviewer=fresh model=same '
+          'independence=bundle,non-implementing verdict=pass round=1 '
+          f'base={base} head={head}\n')
+    commit(root)
+    assert check(root, monkeypatch)[0] == []
+    write(root, 'docs/process/example.md', 'new template\n')  # now exactly as released
+    commit(root)
+    report = verifier.verify(root, base)
+    assert report['project_delta'] == ['rule.local.md'], report
+    hard, _ = check(root, monkeypatch)
+    assert not any('REVIEW of the update range' in h for h in hard), hard

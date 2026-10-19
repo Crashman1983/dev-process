@@ -291,12 +291,15 @@ def _verify(root: Path, base: str, tip: str, *, worktree: bool = False,
 _FULL_SHA = re.compile(r'[0-9a-f]{40}|[0-9a-f]{64}')
 
 
-def update_seen(root: Path, head: str, tip: str, paths: set[str]) -> bool:
-    """Did a review at `head` see the update as `tip` carries it — the answers and
-    every update path the same (the ack aside, written after the review)? A review of
-    other work, or one taken before the update was applied, saw none of it; with a
-    project delta that drops a template change the tip's content check alone cannot
-    tell (refute v2.75-N, blocker). A git failure is "not seen"."""
+def update_seen(root: Path, head: str, tip: str, update: dict) -> bool:
+    """Did a review at `head` see the update as `tip` carries it — the answers, the owned
+    list and every project-delta path the same? A review of other work, or one taken
+    before the update was applied, saw none of it; with a project delta that drops a
+    template change the tip's content check alone cannot tell (refute v2.75-N,
+    blocker). Release-exact paths need no review, so applying one after the review
+    keeps it (refute round 2); the ack is written after the review. A git failure is
+    "not seen"."""
+    paths = {ANSWERS, OWNED_FILE, *update.get('project_delta', ())}
     if not head:
         return False
     try:
@@ -304,7 +307,7 @@ def update_seen(root: Path, head: str, tip: str, paths: set[str]) -> bool:
                                               head, tip).split(b'\0') if p}
     except (ValueError, OSError, subprocess.TimeoutExpired):
         return False
-    return not (moved & (paths - {ACK}))
+    return not (moved & paths)
 
 
 def update_paths(update: dict) -> set[str]:
@@ -334,7 +337,7 @@ def carried_base(root: Path, old_base: str, base: str, paths: set[str]) -> str |
     if not _FULL_SHA.fullmatch(old_base):
         # a name (`main`, `<sha>~0`) floats with the repository: it would compare the
         # fork point with itself and see nothing move (refute v2.75-N)
-        return f'base {old_base[:40]!r} is no commit id'
+        return f'base {old_base[:60]!r} is no full commit id'
     known = subprocess.run(['git', '-C', str(root), 'cat-file', '-e', old_base + '^{commit}'],
                            capture_output=True, timeout=60, env=git_environment())
     if known.returncode:
