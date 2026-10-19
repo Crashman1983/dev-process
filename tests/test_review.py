@@ -486,15 +486,16 @@ def test_quoted_review_line_in_nested_fence_not_malformed(render, tmp_path):
 
 
 def test_info_string_line_does_not_close_a_fence_around_a_quoted_waiver(render, tmp_path):
-    # ```python inside a ```md example opens nothing and closes nothing — the
-    # quoted waiver after it stays quoted (it used to waive the plan)
+    # ```python inside a ```md example closes nothing (CommonMark) — the gates' own
+    # reading would let the quoted waiver after it waive the plan; the two readings
+    # disagree, so the gate asks (v2.75 review rounds 2-7: no reading refinement)
     out = render(tmp_path, {"project_name": "demo"})
     _archived_plan(out, "2026-07-10-widget.md",
                    "# Plan\n\ntier: 3\n\n```md\nexample plan:\n```python\nx = 1\n"
                    "review-waived: quoted example, not a waiver\n```\n```\n")
     r = _run(out)
     assert r.returncode == 1, r.stdout
-    assert "no clearing REVIEW" in r.stdout
+    assert "2026-07-10-widget.md: line 8 reads as text, but as quoted" in r.stdout, r.stdout
 
 
 def test_quoted_review_after_a_nested_info_string_fence_does_not_clear(render, tmp_path):
@@ -504,7 +505,7 @@ def test_quoted_review_after_a_nested_info_string_fence_does_not_clear(render, t
              _review(work="auth", tier="3", independence="bundle,non-implementing,cross-model"),
              "```", "```")
     r = _run(out)
-    assert r.returncode == 1 and "no clearing REVIEW" in r.stdout, r.stdout
+    assert r.returncode == 1 and "2026-07-04.md: line 3 reads as text, but as quoted" in r.stdout, r.stdout
 
 
 def test_an_unclosed_fence_hiding_the_tier_line_is_hard(render, tmp_path):
@@ -512,11 +513,16 @@ def test_an_unclosed_fence_hiding_the_tier_line_is_hard(render, tmp_path):
     d = out / ".process-work/plans"
     d.mkdir(parents=True, exist_ok=True)
     (d / "2026-09-07-widget.md").write_text(
-        "# Plan\n\n```md\nexample\n```python\nx = 1\n\ntier: 3\nissue: #77\n", encoding="utf-8")
+        "# Plan\n\n```md\nexample\nx = 1\n\ntier: 3\nissue: #77\n", encoding="utf-8")
     r = _run(out)
     assert r.returncode == 1, r.stdout
-    assert ("2026-09-07-widget.md: fence opened on line 3 never closes — line 8"
+    assert ("2026-09-07-widget.md: fence opened on line 3 never closes — line 7"
             in r.stdout), r.stdout
+    # where only #250's reading leaves the fence open, the two readings disagree
+    (d / "2026-09-07-widget.md").write_text(
+        "# Plan\n\n```md\nexample\n```python\nx = 1\n\ntier: 3\nissue: #77\n", encoding="utf-8")
+    r = _run(out)
+    assert r.returncode == 1 and "2026-09-07-widget.md: line 6 reads as text, but as quoted" in r.stdout, r.stdout
 
 
 def test_an_unclosed_fence_in_an_archived_plan_is_a_note(render, tmp_path):
