@@ -2661,16 +2661,25 @@ def template_review_findings(root: Path, update: dict, passes: list[dict],
         # and only a review that saw the update itself: its head carries the answers
         # and every update path as the tip does (refute v2.75-N: a merged review of
         # other work cleared an update whose delta dropped a template fix)
-        covering = [r for r in passes if int(r['tier']) >= tier
-                    and r.get('head') and r.get('mode', 'full') == 'full' and r['work'] in known
-                    and carried_base(root, r.get('base') or '', update['base'], paths) is None
-                    and update_seen(root, r['head'], tip, update)]
+        covering, dropped = [], []
+        for r in passes:
+            if not (int(r['tier']) >= tier and r.get('head') and r.get('mode', 'full') == 'full'
+                    and r['work'] in known):
+                continue
+            why = carried_base(root, r.get('base') or '', update['base'], paths)
+            if why is None and not update_seen(root, r['head'], tip, update):
+                why = 'its head did not see this update (answers, owned list or project delta differ)'
+            if why is None:
+                covering.append(r)
+            else:  # AC-N2: the owner learns why a review stopped covering (review v2.75 r1)
+                dropped.append(f"the REVIEW of {r['work']} at {r['head'][:12]} no longer covers it: {why}")
         if not any(_unreviewed_paths(root, r['head'], tip, _reviewed_heads(passes, tier, known),
                                      r.get('base') or '') == set()
                    for r in covering):
             findings.append(f'template update: tier {tier} REVIEW of the update range required for '
                             + ('the enforcement migration' if update['migration'] else
-                               'project delta: ' + ', '.join(update['project_delta'])))
+                               'project delta: ' + ', '.join(update['project_delta']))
+                            + (f' — {dropped[-1]}' if dropped else ''))
     return findings
 
 

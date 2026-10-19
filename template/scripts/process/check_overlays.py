@@ -61,11 +61,11 @@ def fence_scan(lines: list[str]) -> tuple[list[bool], int | None]:
     shares (#250). CommonMark: a fence opens indented at most three columns — from a list
     item's content when it follows the item's marker — a backtick fence's info string
     holds no backtick, and it closes with the same character, at least as long, nothing
-    else on the line, indented at most three columns from that base. A line indented four
-    columns after a blank line is an indented code block, unless the prose before the
-    blank was a list item or indented itself (its continuation). A tab is four columns."""
+    else on the line, indented at most three columns from that base. Columns count from
+    the content of the list item a line continues; a line four columns past that after a
+    blank line is an indented code block. A tab is four columns."""
     out, fence, opened, base = [], "", None, 0
-    indented, after_blank, listish = False, True, False
+    indented, after_blank, item_col = False, True, 0
     for i, raw in enumerate(lines):
         line = raw.rstrip("\r\n").expandtabs(4)
         if fence:
@@ -80,14 +80,19 @@ def fence_scan(lines: list[str]) -> tuple[list[bool], int | None]:
             out.append(False)
             continue
         indent = len(line) - len(line.lstrip(" "))
-        if indent >= 4 and (indented or (after_blank and not listish)):
+        item = _LIST_ITEM.match(line)
+        if not item and indent < item_col:
+            item_col = 0  # less indented than the item's content: the list item ended
+        # columns count from the open list item's content (review v2.75 r1: a fence on
+        # an item's continuation line, four columns in, is the item's code)
+        if not item and indent - item_col >= 4 and (indented or after_blank):
             indented, after_blank = True, False
             out.append(True)
             continue
         indented, after_blank = False, False
-        item = _LIST_ITEM.match(line)
-        listish = bool(item) or indent > 0
-        base = item.end() if item else 0
+        if item:
+            item_col = item.end()
+        base = item_col
         f = _FENCE_OPEN.match(line[base:])
         if f and not (f.group("fence")[0] == "`" and "`" in f.group("info")):
             fence, opened = f.group("fence"), i
