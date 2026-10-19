@@ -17,8 +17,9 @@ batch's full suite, `--tests CMD` or `--tests-passed`) — every step prints
 its command and the first failure stops in a state git explains. A green
 `--tests` that is the project's `merge_suite` (`testing.local.json`) on a
 clean tree writes the `merge` certificate, so the push to main runs no suite
-again; `--tests-passed` is a claim and certifies nothing — with a test
-configuration the push runs the suite itself.
+again; `--tests` alone runs that `merge_suite`. `--tests-passed` is a claim
+and certifies nothing — it is refused while `merge_suite` is set (#255), and
+without one the push runs the suite itself.
 
 Checks, in order:
   1. on a feature branch (finishing main is meaningless)
@@ -539,17 +540,46 @@ def usage(root: Path, branch: str | None) -> tuple[int | None, str]:
         return issue, "tokens: not measured"
 
 
+def _configured_merge_suite(root: Path) -> str | None:
+    """The project's `merge_suite`; None without one (or with a broken file, which
+    the push names)."""
+    try:
+        cfg = testing_config.load(root)
+    except testing_config.ConfigError:
+        return None
+    return (cfg or {}).get("merge_suite") or None
+
+
 def main() -> int:
     args = [a for a in sys.argv[1:]]
     tests: str | None = None
+    bare_tests = False
     if "--tests" in args:
         i = args.index("--tests")
-        tests = args[i + 1] if i + 1 < len(args) else None
-        del args[i:i + 2]
+        value = args[i + 1] if i + 1 < len(args) else None
+        # a directory is the root argument, never a test command (`--tests .`)
+        if value is None or value.startswith("--") or Path(value).is_dir():
+            bare_tests = True  # `--tests` alone: the project's merge_suite (#255)
+            del args[i]
+        else:
+            tests = value
+            del args[i:i + 2]
     tests_passed = "--tests-passed" in args
     do_apply = "--apply" in args
     positional = [a for a in args if not a.startswith("--")]
     root = Path(positional[0] if positional else ROOT).resolve()
+    suite = _configured_merge_suite(root)
+    if bare_tests:
+        if not suite:
+            print("finish: `--tests` without a command needs `merge_suite` in testing.local.json "
+                  "— name the command: `--tests CMD`", file=sys.stderr)
+            return 2
+        tests = suite
+    if tests_passed and suite:
+        # a claim where evidence is configured: the push would run the suite again anyway
+        print(f"finish: `--tests-passed` certifies nothing while `merge_suite` is set — run "
+              f"`--apply --tests` (it runs `{suite}` and writes the merge certificate)", file=sys.stderr)
+        return 2
     if do_apply:
         return apply(root, tests=tests, tests_passed=tests_passed)
     blockers, tail = check(root)

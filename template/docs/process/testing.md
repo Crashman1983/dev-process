@@ -246,8 +246,8 @@ code. A project supplies data; the template owns the sequence:
   `--eval`, …; `-k` and `-s` pass, they hide nothing) and no
   `certificate_env` variable set.
   `test_select.py run --certify` writes `push`; the train and `finish.py
-  --tests <merge_suite>` write `merge`; `finish --tests-passed` is a claim
-  and writes nothing. A branch push accepts either; a merge push only
+  --tests` (its `merge_suite`) write `merge`; `finish --tests-passed` is a
+  claim, writes nothing and is refused while `merge_suite` is set. A branch push accepts either; a merge push only
   `merge` — without one it runs `merge_suite`, else every stack's `full`,
   else it is refused.
 - **Skipping** is the owner's: `PROCESS_SKIP=gates` is the guard's logged
