@@ -58,20 +58,21 @@ _LIST_ITEM = re.compile(r"^ {0,3}(?:[-*+]|\d{1,9}[.)])[ \t]+")
 def fence_scan(lines: list[str]) -> tuple[list[bool], int | None]:
     """Per line: is it code (fenced, the fences included, or an indented code block)? And
     the index of a fence still open at the end. The one reading of code blocks every gate
-    shares (#250). CommonMark: a fence opens indented at most three columns — from a list
-    item's content when it follows the item's marker — a backtick fence's info string
-    holds no backtick, and it closes with the same character, at least as long, nothing
-    else on the line, indented at most three columns from that base. Columns count from
-    the content of the list item a line continues; a line four columns past that after a
-    blank line is an indented code block. A tab is four columns."""
-    out, fence, opened, base = [], "", None, 0
-    indented, after_blank, item_col = False, True, 0
+    shares (#250). A fence opens at any indentation, right after a list item's marker too
+    (a backtick fence's info string holds no backtick), and closes with the same
+    character, at least as long, nothing else on the line, indented at most three columns
+    deeper than its opener — so a fence an example quotes four columns in never closes the
+    example. A line four columns in after a blank line that follows top-level prose is an
+    indented code block. Lists are not tracked: each refinement for nested items opened a
+    new case (review v2.75 r2), and a line in a list reads as prose. A tab is four columns."""
+    out, fence, opened, col = [], "", None, 0
+    indented, after_blank, top_prose = False, True, True
     for i, raw in enumerate(lines):
         line = raw.rstrip("\r\n").expandtabs(4)
+        indent = len(line) - len(line.lstrip(" "))
         if fence:
             stripped = line.strip()
-            indent = len(line) - len(line.lstrip(" "))
-            if stripped and set(stripped) == {fence[0]} and len(stripped) >= len(fence) and indent <= base + 3:
+            if stripped and set(stripped) == {fence[0]} and len(stripped) >= len(fence) and indent <= col + 3:
                 fence = ""
             out.append(True)
             continue
@@ -79,23 +80,16 @@ def fence_scan(lines: list[str]) -> tuple[list[bool], int | None]:
             after_blank = True
             out.append(False)
             continue
-        indent = len(line) - len(line.lstrip(" "))
-        item = _LIST_ITEM.match(line)
-        if not item and indent < item_col:
-            item_col = 0  # less indented than the item's content: the list item ended
-        # columns count from the open list item's content (review v2.75 r1: a fence on
-        # an item's continuation line, four columns in, is the item's code)
-        if not item and indent - item_col >= 4 and (indented or after_blank):
+        if indent >= 4 and (indented or (after_blank and top_prose)):
             indented, after_blank = True, False
             out.append(True)
             continue
-        indented, after_blank = False, False
-        if item:
-            item_col = item.end()
-        base = item_col
-        f = _FENCE_OPEN.match(line[base:])
+        item = _LIST_ITEM.match(line)
+        indented, after_blank, top_prose = False, False, indent == 0 and not item
+        start = item.end() if item else indent
+        f = _FENCE_OPEN.match(line[start:])
         if f and not (f.group("fence")[0] == "`" and "`" in f.group("info")):
-            fence, opened = f.group("fence"), i
+            fence, opened, col = f.group("fence"), i, start
         out.append(bool(fence))
     return out, (opened if fence else None)
 
