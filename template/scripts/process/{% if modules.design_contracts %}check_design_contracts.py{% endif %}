@@ -395,15 +395,34 @@ def declaration_rule(root: Path) -> tuple[dict | None, str | None, str | None]:
     return data, None, base
 
 
-def _first_added(root: Path, rel: str) -> str | None:
-    """The day of the commit that first added `rel`; None: not committed yet. Asked
-    only for a plan the fork point already has — a plan this branch adds is bound
-    whatever its dates say."""
+SHALLOW = "shallow"  # `_first_added`: the add lies at a shallow clone's boundary
+
+
+def _shallow_commits(root: Path) -> set[str]:
+    """The boundary commits of a shallow clone (`.git/shallow`); empty in a full one."""
     import subprocess  # noqa: PLC0415
-    r = subprocess.run(["git", "-C", str(root), "log", "--diff-filter=A", "--format=%as", "--", rel],
+    r = subprocess.run(["git", "-C", str(root), "rev-parse", "--git-path", "shallow"],
                        capture_output=True, text=True)
-    days = r.stdout.split() if r.returncode == 0 else []
-    return days[-1] if days else None
+    if r.returncode != 0:
+        return set()
+    path = Path(r.stdout.strip())
+    path = path if path.is_absolute() else root / path
+    return set(_read(path).split()) if path.is_file() else set()
+
+
+def _first_added(root: Path, rel: str) -> str | None:
+    """The day of the commit that first added `rel`; None: not committed yet; SHALLOW:
+    that commit is a shallow clone's boundary, where every file it holds looks added
+    — its day is the clone's, not the plan's (#252). Asked only for a plan the fork
+    point already has — a plan this branch adds is bound whatever its dates say."""
+    import subprocess  # noqa: PLC0415
+    r = subprocess.run(["git", "-C", str(root), "log", "--diff-filter=A", "--format=%H %as", "--", rel],
+                       capture_output=True, text=True)
+    rows = [ln.split() for ln in r.stdout.splitlines() if ln.strip()] if r.returncode == 0 else []
+    if not rows:
+        return None
+    sha, day = rows[-1][0], rows[-1][1]
+    return SHALLOW if sha in _shallow_commits(root) else day
 
 
 def _trace_body(text: str) -> str | None:
@@ -451,7 +470,7 @@ def declaration_check(root: Path, plans: dict[str, str], contracts: set[str]
         return [problem], []
     if rule is None:
         return [], []
-    hard, older = [], []
+    hard, older, unknown = [], [], []
     moved = _review.plans_moved_in(root, base) if base else {}
     for rel, text in plans.items():
         if Path(rel).name.startswith("design-"):
@@ -471,6 +490,9 @@ def declaration_check(root: Path, plans: dict[str, str], contracts: set[str]
             bound = rule.get("spec_above") is None or m is None or int(m.group(1)) > rule["spec_above"]
         else:
             added = _first_added(root, origin)
+            if added == SHALLOW:
+                unknown.append(rel)
+                continue
             bound = added is None or added >= rule["from"]
         if bound:
             hard += [f"{rel}: {p}" for p in problems]
@@ -478,6 +500,11 @@ def declaration_check(root: Path, plans: dict[str, str], contracts: set[str]
             older.append(rel)
     soft = [f"{len(older)} Tier 2+ plan(s) predate the declaration duty and state no valid "
             f"`design-contract:` line (not enforced): {', '.join(older)}"] if older else []
+    if unknown:
+        soft.append(f"{len(unknown)} Tier 2+ plan(s) without a valid `design-contract:` line were "
+                    f"first committed beyond this shallow clone's history, so their age is unknown "
+                    f"and the duty is not judged here: {', '.join(unknown)} — `git fetch --unshallow` "
+                    "judges them (a full clone, like the gate host's, always does)")
     return hard, soft
 
 
