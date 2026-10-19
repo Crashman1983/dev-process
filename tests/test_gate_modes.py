@@ -140,11 +140,15 @@ def test_off_skips_and_sampled_runs_on_a_stable_share_of_commits(render, tmp_pat
     _modes(out, "weaken", "bad", "--to", "sampled", "--rate", "0.5", "--decision", "owner: sample it")
     _land(out, "modes")
     seen = set()
-    for i in range(8):
+    # sampling follows the commit hash, which follows the clock: eight commits saw only one
+    # outcome once in 128 runs (CI on v2.75.0) — commit on until both showed, 40 at most
+    for i in range(40):
         (out / f"f{i}.txt").write_text(str(i), encoding="utf-8")
         _commit(out, f"c{i}")
         assert _gates(out).returncode == 0
         seen |= {e["outcome"] for e in _events(out) if e["gate"] == "bad"}
+        if i >= 3 and seen == {"fail", "unsampled"}:
+            break
     assert {e["outcome"] for e in _events(out) if e["gate"] == "ok"} == {"off"}
     assert seen == {"fail", "unsampled"}  # some commits sampled, some not
     import importlib.util
