@@ -51,20 +51,44 @@ def _norm(heading: str) -> str:
     return f"{m.group(1)} {m.group(2).strip()}" if m else heading.strip()
 
 
-def _scan(lines: list[str]) -> tuple[list[bool], int | None]:
-    """Per line: is it fenced code (the fences included)? And the index of a fence still
-    open at the end. CommonMark: a fence closes with the same character, at least as
-    long, indented at most three spaces."""
-    out, fence, opened = [], "", None
-    for i, line in enumerate(lines):
+# a list item's marker: a fence may open right after it, its content column the fence's base
+_LIST_ITEM = re.compile(r"^ {0,3}(?:[-*+]|\d{1,9}[.)])[ \t]+")
+
+
+def fence_scan(lines: list[str]) -> tuple[list[bool], int | None]:
+    """Per line: is it code (fenced, the fences included, or an indented code block)? And
+    the index of a fence still open at the end. The one reading of code blocks every gate
+    shares (#250). CommonMark: a fence opens indented at most three columns — from a list
+    item's content when it follows the item's marker — a backtick fence's info string
+    holds no backtick, and it closes with the same character, at least as long, nothing
+    else on the line, indented at most three columns from that base. A line indented four
+    columns after a blank line is an indented code block, unless the prose before the
+    blank was a list item or indented itself (its continuation). A tab is four columns."""
+    out, fence, opened, base = [], "", None, 0
+    indented, after_blank, listish = False, True, False
+    for i, raw in enumerate(lines):
+        line = raw.rstrip("\r\n").expandtabs(4)
         if fence:
             stripped = line.strip()
             indent = len(line) - len(line.lstrip(" "))
-            if stripped and set(stripped) == {fence[0]} and len(stripped) >= len(fence) and indent <= 3:
+            if stripped and set(stripped) == {fence[0]} and len(stripped) >= len(fence) and indent <= base + 3:
                 fence = ""
             out.append(True)
             continue
-        f = _FENCE_OPEN.match(line)
+        if not line.strip():
+            after_blank = True
+            out.append(False)
+            continue
+        indent = len(line) - len(line.lstrip(" "))
+        if indent >= 4 and (indented or (after_blank and not listish)):
+            indented, after_blank = True, False
+            out.append(True)
+            continue
+        indented, after_blank = False, False
+        item = _LIST_ITEM.match(line)
+        listish = bool(item) or indent > 0
+        base = item.end() if item else 0
+        f = _FENCE_OPEN.match(line[base:])
         if f and not (f.group("fence")[0] == "`" and "`" in f.group("info")):
             fence, opened = f.group("fence"), i
         out.append(bool(fence))
@@ -72,13 +96,13 @@ def _scan(lines: list[str]) -> tuple[list[bool], int | None]:
 
 
 def fenced(lines: list[str]) -> list[bool]:
-    return _scan(lines)[0]
+    return fence_scan(lines)[0]
 
 
 def unclosed_fence(text: str) -> int | None:
     """The 1-based line of a fence still open at the end of `text`, else None. CommonMark
     lets it run to the end; in an overlay that would silently swallow the anchors after it."""
-    opened = _scan(text.splitlines())[1]
+    opened = fence_scan(text.splitlines())[1]
     return None if opened is None else opened + 1
 
 

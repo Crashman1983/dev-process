@@ -65,6 +65,7 @@ from pathlib import Path
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from check_overlays import fence_scan  # noqa: E402  (the one reading of fences)
 from process_git import NoForkPoint, fork_point, git_environment  # noqa: E402
 from template_verify import carried_base, update_paths, update_seen, verify  # noqa: E402
 
@@ -259,43 +260,14 @@ def parse_issue_ref(ref: str) -> tuple[str | None, int] | None:
 _REVIEW_LINE = re.compile(r"^\s*(?:[-*+]\s+)?[*_]*REVIEW(\s+.*|)$")
 
 
-_FENCE_RUN = re.compile(r"^(`{3,}|~{3,})")
-
-
-def _fence_marker(line: str) -> str | None:
-    """The fence run (``` or ~~~, any length >= 3) opening this line, if any."""
-    m = _FENCE_RUN.match(line.strip())
-    return m.group(1) if m else None
-
-
-def _fence_closes(fence: str, line: str) -> bool:
-    """CommonMark: a fence closes only on a run of the SAME character at least
-    as long as the opener and NOTHING else on the line — a ``` inside a
-    ````-fenced example, or a ```python opening a nested example, must not
-    close it early, or quoted `review-waived:`/`tier:` lines leak out
-    (false-green)."""
-    run = line.strip()
-    return (len(run) >= len(fence) and run == run[0] * len(run)
-            and run[0] == fence[0])
-
-
 def fenced_lines(text: str) -> tuple[list[tuple[int, str]], int | None]:
-    """The one fence walk every reader shares (#250): (unquoted lines as
-    (1-based lineno, line), line number of a fence still open at end of file
-    or None). Fence lines themselves are not returned."""
-    out: list[tuple[int, str]] = []
-    fence: str | None = None
-    opened = 0
-    for i, line in enumerate(text.splitlines(), start=1):
-        if fence is None:
-            marker = _fence_marker(line)
-            if marker:
-                fence, opened = marker, i
-            else:
-                out.append((i, line))
-        elif _fence_closes(fence, line):
-            fence = None
-    return out, (opened if fence is not None else None)
+    """(unquoted lines as (1-based lineno, line), line number of a fence still open at
+    end of file or None) — read through `check_overlays.fence_scan`, the one reading of
+    fences (#250). Fence lines themselves are not returned."""
+    lines = text.splitlines()
+    code, opened = fence_scan(lines)
+    return ([(i, line) for i, (line, quoted) in enumerate(zip(lines, code), start=1) if not quoted],
+            None if opened is None else opened + 1)
 
 
 def _unfenced(text: str) -> str:
@@ -304,6 +276,9 @@ def _unfenced(text: str) -> str:
     inside a fenced example is a quotation, not a declaration — the same
     discipline the journal parser applies to REVIEW lines."""
     return "\n".join(line for _i, line in fenced_lines(text)[0])
+
+
+DECLARATION_LINES = (TIER_DECL, ISSUE_DECL, WAIVED, _REVIEW_LINE)
 
 
 def unclosed_fence_problem(text: str, patterns: tuple[re.Pattern[str], ...] | None = None
@@ -315,9 +290,12 @@ def unclosed_fence_problem(text: str, patterns: tuple[re.Pattern[str], ...] | No
     opened = fenced_lines(text)[1]
     if opened is None:
         return None
-    if patterns is None:
-        patterns = (TIER_DECL, ISSUE_DECL, WAIVED, _REVIEW_LINE)
+    patterns = DECLARATION_LINES if patterns is None else patterns
     for i, line in enumerate(text.splitlines()[opened:], start=opened + 1):
+        issue = ISSUE_DECL.search(line) if patterns is DECLARATION_LINES else None
+        if issue and parse_issue_ref(ref_token(issue.group(1))) is None \
+                and not ref_token(issue.group(1)).isdigit():
+            continue  # `issue: int` in quoted code names no issue
         if any(p.search(line) for p in patterns):
             return (f"fence opened on line {opened} never closes — line {i} and "
                     f"everything after it read as quoted; close the fence (a "
@@ -2352,11 +2330,25 @@ def plans_moved_in(root: Path, base: str) -> dict[str, str | None]:
     return moved
 
 
+def _judged_plan_path(rel: str) -> bool:
+    """A path where an arm of this gate judges a plan: an active plan, a plan
+    directly in the archive, or a Spec Kit plan — never a design document."""
+    if Path(rel).name.startswith("design-"):
+        return False
+    kind = record_kind(rel)
+    if kind == "plan-archive":  # the archive arm reads archive/*.md, nothing deeper
+        return rel.startswith(PLANS_ARCHIVE + "/") and "/" not in rel[len(PLANS_ARCHIVE) + 1:]
+    return kind in PLAN_KINDS
+
+
 def plans_deleted(root: Path, base: str) -> list[str] | None:
-    """The plans under work (`PLAN_KINDS`) the fork point has and this push deletes —
-    `git diff --raw -M` over the plan homes, so a move into the archive or a rename
-    is no deletion (the other arms judge the file where it went), while a move out of
-    the plan homes is one (#251). None when git cannot tell."""
+    """The plans under work (`PLAN_KINDS`, design documents aside) the fork point has
+    and this push takes out of every arm's sight — `git diff --raw -M` over the plan
+    homes: deleted, or moved where no arm judges a plan (`notes.txt`, `plans/old/`,
+    `archive/2026/`, a `design-` name). A move into the archive or a rename within the
+    plans is judged where it went; a plan deleted while the archive gains its name
+    is such a move, edited past rename detection (#251, refute v2.75 r1). None when
+    git cannot tell."""
     out = _git_bytes(root, "diff", "--raw", "-M", "-z", base, "HEAD", "--", PLANS_ACTIVE, SPECS_DIR)
     if out is None:
         return None
@@ -2367,13 +2359,16 @@ def plans_deleted(root: Path, base: str) -> list[str] | None:
         meta = parts[i].split()
         if len(meta) < 5:
             break
-        status = meta[4]
+        status, path = meta[4], parts[i + 1]
         if status[:1] in ("R", "C"):
+            target = parts[i + 2]
             i += 3
+            if status[:1] == "R" and _judged_plan_path(path) and not _judged_plan_path(target):
+                gone.append(path)
             continue
-        path = parts[i + 1]
         i += 2
-        if status[:1] == "D" and record_kind(path) in PLAN_KINDS:
+        if status[:1] == "D" and _judged_plan_path(path) and record_kind(path) in PLAN_KINDS \
+                and not (root / PLANS_ARCHIVE / Path(path).name).is_file():
             gone.append(path)
     return sorted(gone)
 
@@ -2758,6 +2753,8 @@ def check(root: Path) -> tuple[list[str], list[str]]:
     # a fence open at end of file reads every later declaration as quoted —
     # hard where a gate reads it now, a note on archived history (#250)
     for rel, text in record_texts(root) or []:
+        if Path(rel).name.startswith("design-"):
+            continue  # a design document declares nothing the gates read
         problem = unclosed_fence_problem(text)
         if problem and record_kind(rel) == "plan-archive":
             soft.append(f"{rel}: {problem}")
@@ -3010,7 +3007,12 @@ def check(root: Path) -> tuple[list[str], list[str]]:
                  "would escape its review")
         deleted = []
     for rel in deleted:
-        text = _unfenced(_show(root, scope_base, rel) or "")
+        shown = _show(root, scope_base, rel)
+        if shown is None:  # an unreadable plan is no plan without a tier (refute v2.75 r1)
+            presence(f"{rel}: deleted by this push, and git cannot read it at the fork point — "
+                     "its review duty cannot be judged")
+            continue
+        text = _unfenced(shown)
         tier = plan_tier(text)
         if tier is None or tier < 2 or review_waived(text):
             continue
@@ -3019,8 +3021,12 @@ def check(root: Path) -> tuple[list[str], list[str]]:
         if not _cleared(passes, ids, tier):
             presence(f"{rel}: deleted by this push — "
                      + no_clearing_review(rel, min(tier, 3), ids)
-                     + " — a deleted plan's work still owes its review (or a 'review-waived:' line "
-                     "before it goes)")
+                     + " — a deleted plan's work still owes its review; archive it with its review "
+                     "or a 'review-waived:' line instead of deleting it")
+        elif applies_own_family(tier, own_from) and not _cleared(
+                clearing_passes(root, passes, tier, scope_base), ids, tier):
+            # its merge is now, as for a plan archived by this push (#241)
+            presence(own_family_missing(rel, tier, own_from))
 
     # the commit-anchored arm: what exists at every merge is the issue plus
     # the commits that CLAIM it (a closing trailer or the `… (#N)` subject —
