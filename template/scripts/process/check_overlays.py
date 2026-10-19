@@ -51,41 +51,34 @@ def _norm(heading: str) -> str:
     return f"{m.group(1)} {m.group(2).strip()}" if m else heading.strip()
 
 
-def fence_scan(lines: list[str]) -> tuple[list[bool], int | None]:
+def _scan(lines: list[str]) -> tuple[list[bool], int | None]:
     """Per line: is it fenced code (the fences included)? And the index of a fence still
-    open at the end. The one reading of fences every gate shares (#250). A fence opens on
-    a line that starts, after any indentation, with ``` or ~~~ (a backtick fence's info
-    string holds no backtick), and closes on a line holding nothing but the same
-    character, at least as long, indented at most three columns deeper than its opener —
-    a fence an example quotes deeper in never closes the example. Nothing else is
-    modelled: lists, indented code blocks and quotes each opened new cases in the v2.75
-    review rounds, and a fence that stays open is reported, never silent. A tab is four
-    columns."""
-    out, fence, opened, col = [], "", None, 0
-    for i, raw in enumerate(lines):
-        line = raw.rstrip("\r\n").expandtabs(4)
-        indent = len(line) - len(line.lstrip(" "))
-        stripped = line.strip()
+    open at the end. CommonMark: a fence closes with the same character, at least as
+    long, indented at most three spaces."""
+    out, fence, opened = [], "", None
+    for i, line in enumerate(lines):
         if fence:
-            if stripped and set(stripped) == {fence[0]} and len(stripped) >= len(fence) and indent <= col + 3:
+            stripped = line.strip()
+            indent = len(line) - len(line.lstrip(" "))
+            if stripped and set(stripped) == {fence[0]} and len(stripped) >= len(fence) and indent <= 3:
                 fence = ""
             out.append(True)
             continue
-        f = _FENCE_OPEN.match(stripped)
+        f = _FENCE_OPEN.match(line)
         if f and not (f.group("fence")[0] == "`" and "`" in f.group("info")):
-            fence, opened, col = f.group("fence"), i, indent
+            fence, opened = f.group("fence"), i
         out.append(bool(fence))
     return out, (opened if fence else None)
 
 
 def fenced(lines: list[str]) -> list[bool]:
-    return fence_scan(lines)[0]
+    return _scan(lines)[0]
 
 
 def unclosed_fence(text: str) -> int | None:
     """The 1-based line of a fence still open at the end of `text`, else None. CommonMark
     lets it run to the end; in an overlay that would silently swallow the anchors after it."""
-    opened = fence_scan(text.splitlines())[1]
+    opened = _scan(text.splitlines())[1]
     return None if opened is None else opened + 1
 
 

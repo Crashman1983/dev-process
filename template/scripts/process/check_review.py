@@ -65,7 +65,6 @@ from pathlib import Path
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from check_overlays import fence_scan  # noqa: E402  (the one reading of fences)
 from process_git import NoForkPoint, fork_point, git_environment  # noqa: E402
 from template_verify import carried_base, update_paths, update_seen, verify  # noqa: E402
 
@@ -261,11 +260,12 @@ _REVIEW_LINE = re.compile(r"^\s*(?:[-*+]\s+)?[*_]*REVIEW(\s+.*|)$")
 
 
 def fenced_lines(text: str) -> tuple[list[tuple[int, str]], int | None]:
-    """(unquoted lines as (1-based lineno, line), line number of a fence still open at
-    end of file or None) — read through `check_overlays.fence_scan`, the one reading of
-    fences (#250). Fence lines themselves are not returned."""
+    """The one fence walk every record reader shares (#250): (unquoted lines as
+    (1-based lineno, line), line number of a fence still open at end of file or None).
+    Fence lines themselves are not returned. It reads as the gates always read; where
+    #250's stricter reading would quote a line differently, `fence_drift_problem` asks."""
     lines = text.splitlines()
-    code, opened = fence_scan(lines)
+    code, opened = _legacy_scan(lines)
     return ([(i, line) for i, (line, quoted) in enumerate(zip(lines, code), start=1) if not quoted],
             None if opened is None else opened + 1)
 
@@ -278,23 +278,49 @@ def _unfenced(text: str) -> str:
     return "\n".join(line for _i, line in fenced_lines(text)[0])
 
 
-def _legacy_quoted(lines: list[str]) -> list[bool]:
-    """The reading of fences before #250, kept as the yardstick: a fence opens on a line
-    starting with ``` or ~~~ after any indentation and closes on the next line
-    starting with a run of its character at least as long — an info string or any
-    indentation after it included."""
+def _legacy_scan(lines: list[str]) -> tuple[list[bool], int | None]:
+    """(per line: quoted?, index of a fence still open at the end) — the reading the
+    gates have always used: a fence opens on a line starting with ``` or ~~~ after any
+    indentation and closes on the next line starting with a run of its character at
+    least as long."""
     out: list[bool] = []
     fence: str | None = None
-    for line in lines:
+    opened = None
+    for i, line in enumerate(lines):
         m = re.match(r"(`{3,}|~{3,})", line.strip())
         if fence is None:
             if m:
-                fence = m.group(1)
+                fence, opened = m.group(1), i
             out.append(fence is not None)
         else:
             if m and m.group(1)[0] == fence[0] and len(m.group(1)) >= len(fence):
                 fence = None
             out.append(True)
+    return out, (opened if fence is not None else None)
+
+
+def _strict_scan(lines: list[str]) -> list[bool]:
+    """Per line: quoted? — #250's reading (CommonMark's closer): a fence opens on a line
+    starting with ``` or ~~~ after any indentation (a backtick fence's info string holds
+    no backtick) and closes only on a line holding nothing but its character, at least
+    as long, at most three columns deeper than its opener. Only the yardstick of
+    `fence_drift_problem`: each attempt to read records this way opened a new silent case
+    (v2.75 review rounds 2–7)."""
+    out: list[bool] = []
+    fence, col = "", 0
+    for raw in lines:
+        line = raw.rstrip("\r\n").expandtabs(4)
+        indent = len(line) - len(line.lstrip(" "))
+        stripped = line.strip()
+        if fence:
+            if stripped and set(stripped) == {fence[0]} and len(stripped) >= len(fence) and indent <= col + 3:
+                fence = ""
+            out.append(True)
+            continue
+        m = re.match(r"(`{3,}|~{3,})(.*)$", stripped)
+        if m and not (m.group(1)[0] == "`" and "`" in m.group(2)):
+            fence, col = m.group(1), indent
+        out.append(bool(fence))
     return out
 
 
@@ -315,7 +341,7 @@ def unclosed_fence_problem(text: str, patterns: tuple[re.Pattern[str], ...] | No
     REFUTE) line; `patterns` names others — or None. The rest of the file would read as
     quoted and turn the gate off for it (#250)."""
     lines = text.splitlines()
-    opened = fence_scan(lines)[1]
+    opened = _legacy_scan(lines)[1]
     if opened is None:
         return None
     gated = BLOCKING_LINES + CLEARING_LINES if patterns is None else patterns
@@ -328,20 +354,19 @@ def unclosed_fence_problem(text: str, patterns: tuple[re.Pattern[str], ...] | No
 
 
 def fence_drift_problem(text: str) -> str | None:
-    """The first line #250's reading of fences (`check_overlays.fence_scan`) quotes
-    differently from the reading before it (`_legacy_quoted`), or None. Every gate reads
-    a record file through these fences — tiers, issues, records, waivers, skips, ACs,
-    comments — and each refinement of the reading opened a new silent case (v2.75 review
-    rounds 2–6), in both directions. So the readings must agree: where they do not, the
-    gate asks instead of guessing, and where they agree nothing changed."""
+    """The first line #250's reading of fences (`_strict_scan`) quotes differently from the
+    gates' reading (`_legacy_scan`), or None. #250: a closing fence carries no info
+    string — a ```python line inside a ``` example closes nothing — yet every refinement
+    that read records that way opened a new silent case, in both directions (v2.75 review
+    rounds 2–7). So the gates keep their reading, and where the stricter one disagrees
+    on any line the gate asks instead of guessing."""
     lines = text.splitlines()
-    for i, (line, quoted, was_quoted) in enumerate(zip(lines, fence_scan(lines)[0],
-                                                       _legacy_quoted(lines)), start=1):
+    for i, (quoted, was_quoted) in enumerate(zip(_strict_scan(lines), _legacy_scan(lines)[0]), start=1):
         if quoted != was_quoted:
-            return (f"line {i} reads as {'quoted' if quoted else 'text'} since #250 but as "
-                    f"{'quoted' if was_quoted else 'text'} before — a fence above it closes "
-                    f"differently (a closing fence carries no info string and sits at most three "
-                    f"columns deeper than its opener); make each fence close on a line of its own")
+            return (f"line {i} reads as {'quoted' if was_quoted else 'text'}, but as "
+                    f"{'quoted' if quoted else 'text'} where a closing fence carries no info "
+                    f"string (#250) — a fence above it closes differently; make each fence "
+                    f"close on a line of its own")
     return None
 
 

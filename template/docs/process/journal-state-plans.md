@@ -220,16 +220,16 @@ The journal only grows, and `.process-work/journal/.gitattributes` says so to gi
 Two companion lines. `ROOT-CAUSE work=<id> round=<r>: <cause> — <the test that failed before the fix>` (journal or plan): each blocking round's fix names its cause before the next round; `attest.py` notes a missing one (the duty sits with the fixing session, which checks it with `--dry-run`), and never refuses a verdict over it. `red_evidence.py` writes it from a measured run — the test names and exit codes come from the run, the cause is the only free text; pytest is measured directly, any other runner (vitest, jest, XCTest) through the JUnit XML it writes (`--junit PATH`). `REVIEW-EXCEPTION work=<id> round=<n>: <reason> …`: written by `attest.py --exception` when the owner overrides a rule — countable, never silent.
 
 A `REVIEW` inside a ```-fenced block is a quotation and is ignored (quote
-literal examples only there). A fence opens on a line that starts, after any indentation, with
-` ``` ` or `~~~`, and closes on a line holding nothing but the same character,
-at least as long, at most three columns deeper than its opener — ` ```python `
-inside a ` ```md ` example opens a nested example and closes nothing; nest
-with a longer outer fence. Lists and indented code blocks are not modelled. Where a
-line of a record file reads differently than before #250 (a fence above it
-closes elsewhere), that is a hard finding: make each fence close on a line of
-its own. A fence still open at the end of a journal shard
-or an active plan that swallows a `tier:`, `issue:`, `review-waived:`, `REVIEW` or
-`DECISION NEEDED` line is a hard finding (a note in the archive). Grammar and the independence arithmetic the gate
+literal examples only there). A fence opens on a line that starts, after any
+indentation, with ` ``` ` or `~~~`, and closes on the next line that starts
+with a run of its character at least as long. Where CommonMark's rule — a
+closing fence carries nothing else on its line, so ` ```python ` inside a
+` ```md ` example closes nothing — would read any line of a journal shard, a
+plan or a spec document differently, that is a hard finding: make each fence
+close on a line of its own, and nest with a longer outer fence. A fence still
+open at the end of a journal shard or an active plan that swallows a `tier:`,
+`issue:`, `review-waived:`, `REVIEW` or `DECISION NEEDED` line is a hard
+finding too (a note in the archive). Grammar and the independence arithmetic the gate
 enforces on a `pass` are in `verification-independence.md`.
 
 A record carries none of `base`/`head`/`diff`, or all three; partial

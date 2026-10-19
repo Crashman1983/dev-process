@@ -398,3 +398,23 @@ def test_any_line_the_two_fence_readings_disagree_on_is_asked_about(render, tmp_
     write(out, rel, body)
     r = run(out)
     assert r.returncode == 1 and f"{rel}: line" in r.stdout and "a fence above it closes differently" in r.stdout, r.stdout
+
+
+NESTED = "```md\n## Steps\n```python\nrun()\n```\n```\n"
+
+
+def test_readers_outside_the_drift_check_read_as_before_250(render, tmp_path):
+    # review v2.75 r7: check_issues' review reports and plans outside the plan home were
+    # read through #250's fences with no drift check — every reader keeps the old reading
+    out = render(tmp_path, {"project_name": "demo", "modules": {"github_issues": True}})
+    write(out, "docs/notes/widget-plan.md", "# Widget plan\n\nExample from the brief:\n\n" + NESTED
+          + "\ntier: 2\nissue: #7\n")
+    r = run(out)
+    assert r.returncode == 1 and "declares 'tier: 2' outside the plan home" in r.stdout, r.stdout
+    (out / "docs/notes/widget-plan.md").unlink()
+    write(out, ".process-work/reviews/2026-10-19-x.md", "review: v2 round 1\nissue: #12\n\n## Result\n\n"
+          + NESTED + "\nFINDING sev=major action=follow-up issue=- gate=- origin=fix kind=implementation "
+          "the cache is never invalidated (a.py:3)\n")
+    r = subprocess.run([sys.executable, str(out / "scripts/process/check_issues.py"), "."],
+                       cwd=out, capture_output=True, text=True)
+    assert r.returncode == 1 and "follow-up" in r.stdout, r.stdout + r.stderr
