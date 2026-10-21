@@ -1743,6 +1743,57 @@ def test_no_round_header_when_the_work_cannot_be_determined(render, tmp_path):
     assert _round_note(_bundle(out2, "--base", "main", "--plan", "widget", "--plan-review").stdout) is None
 
 
+def _lines(n: int, word: str = "x") -> str:
+    return "".join(f"{word}_{i} = {i}\n" for i in range(n))
+
+
+FIX_PASS = "**FIX-PASS WARNING:**"
+
+
+def test_a_large_fix_pass_is_warned_on_the_delta_the_bundle_shows(render, tmp_path):
+    """#297 AC-3: downstream, a fix pass of ten or more findings was followed by a
+    fix-induced blocker in 86 % of rounds. The warning counts the delta the bundle shows:
+    tests, `.process-work/`, CHANGELOG and what a merge of main brings stay out."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    reviewed = _git(out, "rev-parse", "HEAD").stdout.strip()
+    (out / "tests").mkdir(exist_ok=True)
+    (out / "tests/test_widget.py").write_text(_lines(900, "t"))
+    (out / ".process-work/journal").mkdir(parents=True, exist_ok=True)
+    (out / ".process-work/journal/2026-07-10.md").write_text(_lines(400, "j"))
+    (out / "CHANGELOG.md").write_text(_lines(400, "c"))
+    (out / "widget.py").write_text(_lines(300, "w"))  # 300 added + 2 deleted: 302 lines
+    _git(out, "add", "-A", check=True)
+    _git(out, "commit", "-q", "-m", "fix: widget", check=True)
+    # main moves on; merging it brings 1,000 lines the fix pass did not write
+    _git(out, "checkout", "-q", "main", check=True)
+    (out / "vendor.py").write_text(_lines(1000, "v"))
+    _git(out, "add", "-A", check=True)
+    _git(out, "commit", "-q", "-m", "feat: vendor", check=True)
+    _git(out, "checkout", "-q", "feat", check=True)
+    _git(out, "merge", "-q", "--no-ff", "-m", "merge main", "main", check=True)
+    text = _bundle(out, "--base", "main", "--since", reviewed).stdout
+    warning = next(ln for ln in text.splitlines() if ln.startswith(FIX_PASS))
+    assert "302 lines" in warning and "sibling paths" in warning, warning
+    r = _run(out, "--base", "main", "--since", reviewed, "--skip-preflight")
+    assert "make_review_bundle: FIX-PASS WARNING:" in r.stderr
+
+
+def test_a_small_fix_pass_or_a_first_round_gets_no_warning(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    reviewed = _git(out, "rev-parse", "HEAD").stdout.strip()
+    (out / "widget.py").write_text(_lines(298, "w"))  # 298 + 2 = 300: at the limit, not above
+    (out / "tests").mkdir(exist_ok=True)
+    (out / "tests/test_widget.py").write_text(_lines(900, "t"))
+    _git(out, "add", "-A", check=True)
+    _git(out, "commit", "-q", "-m", "fix: widget", check=True)
+    assert FIX_PASS not in _bundle(out, "--base", "main", "--since", reviewed).stdout
+    (out / "widget.py").write_text(_lines(900, "w"))
+    _git(out, "commit", "-q", "-am", "feat: more", check=True)
+    assert FIX_PASS not in _bundle(out, "--base", "main").stdout  # a full round is no fix pass
+
+
 def test_a_measured_regression_scores_100_and_class_is_asked_of_blockers(render, tmp_path):
     """#297 AC-4 and #297 AC-6: the bundle tells the scorer a measured old/new difference
     is not its to lower, and the grammar makes `class=` mandatory for blockers and majors."""

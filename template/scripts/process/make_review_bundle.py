@@ -689,29 +689,78 @@ def _shown(path: str) -> str:
     return "".join(c if c.isprintable() else repr(c)[1:-1] for c in path)
 
 
-def review_size(root: Path, base_ref: str) -> tuple[int, int]:
-    """(files, changed lines) of the whole branch — process bookkeeping,
-    lock files and binaries left out."""
-    files = lines = 0
-    # -z: a quoted non-ASCII lock file escaped the filter. Each entry is
-    # "added\tdeleted\tpath"; a rename leaves the path empty and names the old
-    # and the new path in the next two fields.
-    out = _review_gate._git_bytes(root, "diff", "--numstat", "-z", f"{base_ref}...HEAD") or b""
+def _numstat(out: bytes) -> list[tuple[str, int]]:
+    """(path, changed lines) of `git diff --numstat -z` output; a binary counts 0.
+    -z: a quoted non-ASCII name escaped a path filter. Each entry is
+    "added\\tdeleted\\tpath"; a rename leaves the path empty and names the old
+    and the new path in the next two fields."""
+    entries = []
     fields = iter(out.decode(errors="surrogateescape").split("\0"))
     for field in fields:
-        parts = field.split("\t", 2)
+        parts = field.lstrip("\n").split("\t", 2)
         if len(parts) < 3:
             continue
         path = parts[2]
         if not path:
             next(fields, None)
             path = next(fields, "")
-        if SIZE_IGNORED.search(path):
-            continue
-        files += 1
-        if parts[0].isdigit() and parts[1].isdigit():
-            lines += int(parts[0]) + int(parts[1])
-    return files, lines
+        changed = int(parts[0]) + int(parts[1]) if parts[0].isdigit() and parts[1].isdigit() else 0
+        entries.append((path, changed))
+    return entries
+
+
+def review_size(root: Path, base_ref: str) -> tuple[int, int]:
+    """(files, changed lines) of the whole branch — process bookkeeping,
+    lock files and binaries left out."""
+    out = _review_gate._git_bytes(root, "diff", "--numstat", "-z", f"{base_ref}...HEAD") or b""
+    kept = [changed for path, changed in _numstat(out) if not SIZE_IGNORED.search(path)]
+    return len(kept), sum(kept)
+
+
+# above this a fix pass is no longer one fix: downstream, a fix round of six to nine
+# findings was followed by a fix-induced blocker in 46 % of rounds, ten or more in 86 %
+FIX_PASS_MAX_LINES = 300
+
+
+def _fix_pass_counted(rel: str) -> bool:
+    """A line a fix pass writes into the product: not a test, not bookkeeping, no changelog."""
+    return not (_is_test_path(rel) or rel.startswith(_review_gate.BOOKKEEPING)
+                or rel.rsplit("/", 1)[-1].upper().startswith("CHANGELOG"))
+
+
+def fix_pass_size(root: Path, since: str, head: str) -> int | None:
+    """Changed lines of the delta the bundle shows — `check_review.delta_commands`:
+    own first-parent commits and merge resolutions, never what a merge of main
+    brings — counted per `--numstat` outside tests, `.process-work/` and CHANGELOG
+    files. None when git cannot tell. Known limit: a test folder without a test
+    segment (Xcode's `FooTests/`) counts as product."""
+    commands = _review_gate.delta_commands(root, since, head, names=True)
+    if commands is None:
+        return None
+    lines = 0
+    for command in commands:
+        out = _review_gate._git_bytes(root, *("--numstat" if a == "--name-status" else a for a in command))
+        if out is None:
+            return None
+        lines += sum(changed for path, changed in _numstat(out) if _fix_pass_counted(path))
+    return lines
+
+
+def _fix_pass_warning(root: Path, since: str) -> str:
+    """The FIX-PASS WARNING of a delta round above FIX_PASS_MAX_LINES — advisory,
+    never a refusal; a size git cannot count is said, not read as small."""
+    sha = (_git(root, "rev-parse", "--verify", "--quiet", f"{since}^{{commit}}") or "").strip()
+    head = (_git(root, "rev-parse", "HEAD") or "").strip()
+    lines = fix_pass_size(root, sha, head) if sha and head else None
+    if lines is None:
+        return "*(FIX-PASS check unavailable: git could not count the delta's changed lines)*\n"
+    if lines <= FIX_PASS_MAX_LINES:
+        return ""
+    return (f"**FIX-PASS WARNING:** this fix pass changes {lines} lines outside tests and bookkeeping "
+            f"(limit {FIX_PASS_MAX_LINES}). Downstream, a fix pass this size was followed by a "
+            "fix-induced blocker in about half the rounds, and in most from ten findings on. Attack "
+            "the sibling paths of every change: each caller of a changed function, each other writer "
+            "of a changed state, each window the fix opens — not only the reported spot.\n")
 
 
 def _bundled_work(root: Path, plan_filter: str | None, plan_texts: dict[Path, str]) -> set[str]:
@@ -832,6 +881,9 @@ def build(root: Path, base: str | None, plan_filter: str | None = None,
         pin = _regression_pin_note(touches or [])
         if pin:
             add(pin)
+        fix_pass = _fix_pass_warning(root, since)
+        if fix_pass:
+            add(fix_pass)
     else:
         add(FIRST_ROUND_RULE + " " + BLOCK_RULE + "\n")
     if tier == 2:
@@ -1230,7 +1282,8 @@ def main(argv: list[str]) -> int:
             return status
     included = _plans_under_review(root, _resolve_base(root, base), plan_filter)
     text = build(root, base, plan_filter, since, included, declared_tier, plan_review)
-    for warn in (ln for ln in text.splitlines() if ln.startswith(("**SIZE WARNING:**", "**REFUTE WARNING:**", "DELTA_TOUCHES "))):
+    for warn in (ln for ln in text.splitlines() if ln.startswith(("**SIZE WARNING:**", "**REFUTE WARNING:**",
+                                                                 "**FIX-PASS WARNING:**", "DELTA_TOUCHES "))):
         print("make_review_bundle: " + warn.replace("**", ""), file=sys.stderr)
     # an over-wide bundle was invisible until a reviewer read it (downstream:
     # 14,103 lines, mostly other work's plans) — say size and plans at build time
