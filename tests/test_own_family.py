@@ -398,3 +398,73 @@ def test_an_unreadable_policy_keeps_the_waivers_owner_duty(render, tmp_path):
     _git(r.root, "commit", "-qam", "waive")
     out = r.gate()
     assert out.returncode == 1 and "without the owner's word" in out.stdout, out.stdout
+
+
+def test_finish_names_a_done_spec_plan_once(render, tmp_path):
+    """Refute of #266 (M6): the in-flight arm and the ticked-tasks arm both judge a spec
+    plan; finish names it once."""
+    r = _spec_plan_repo(render, tmp_path)
+    (r.root / "specs/77-widget/tasks.md").write_text("- [x] T1 widget\n", encoding="utf-8")
+    _git(r.root, "add", "-A")
+    _git(r.root, "commit", "-q", "-m", "tasks done")
+    out = subprocess.run([sys.executable, str(r.root / "scripts/process/finish.py")], cwd=r.root,
+                         capture_output=True, text=True)
+    named = [ln for ln in out.stdout.splitlines() if "specs/77-widget" in ln]
+    assert out.returncode == 1 and len(named) == 1, out.stdout
+
+
+def _load_gate(root):
+    import importlib
+    sys.path.insert(0, str(root / "scripts/process"))
+    try:
+        for name in ("check_review", "attest_evidence", "dispatch", "required_records"):
+            sys.modules.pop(name, None)
+        return importlib.import_module("check_review")
+    finally:
+        sys.path.remove(str(root / "scripts/process"))
+
+
+def test_an_unknown_range_carries_every_spec_plan(render, tmp_path, monkeypatch):
+    """Refute of #266 (M2): the gate handed `spec_plan_findings` the active plans as its
+    stand-in for an unknown range, so spec plans were never in flight there."""
+    r = Repo(render, tmp_path, claim="")
+    _git(r.root, "checkout", "-q", "main")
+    spec = r.root / "specs/80-other"
+    spec.mkdir(parents=True)
+    (spec / "plan.md").write_text("# Plan\n\ntier: 3\nissue: #80\n\n## Decisions\n", encoding="utf-8")
+    _git(r.root, "add", "-A")
+    _git(r.root, "commit", "-q", "-m", "spec on main")
+    _git(r.root, "checkout", "-q", "feature")
+    _git(r.root, "merge", "-q", "--no-edit", "main")
+    cr = _load_gate(r.root)
+    owed = "specs/80-other/plan.md: tier 3 plan has no clearing REVIEW"
+    try:
+        assert not any(owed in f for f in cr.spec_plan_findings(r.root, [], {"widget.py"}))
+        assert any(owed in f for f in cr.spec_plan_findings(r.root, [], None))
+        monkeypatch.setattr(cr, "paths_in_flight", lambda *a, **k: None)
+        monkeypatch.chdir(r.root)
+        hard, soft = cr.check(r.root)
+        assert any(owed in f for f in hard + soft), (hard, soft)
+    finally:
+        for name in ("check_review", "attest_evidence", "dispatch", "required_records"):
+            sys.modules.pop(name, None)
+
+
+def test_a_waiver_in_the_archive_or_a_spec_plan_owes_the_owners_word(render, tmp_path):
+    """Refute of #282: the owner's word was asked only of an active plan's waiver; one
+    written straight into the archive or into a Spec Kit plan passed."""
+    r = Repo(render, tmp_path, tier=3)
+    plan = r.root / ".process-work/plans/2026-10-15-77-widget.md"
+    archive = r.root / ".process-work/plans/archive"
+    archive.mkdir(parents=True, exist_ok=True)
+    plan.rename(archive / plan.name)
+    (archive / plan.name).write_text((archive / plan.name).read_text() + "review-waived: nah #77\n")
+    spec = r.root / "specs/78-gadget"
+    spec.mkdir(parents=True)
+    (spec / "plan.md").write_text("# Plan\n\ntier: 3\nissue: #78\n\nreview-waived: nah\n", encoding="utf-8")
+    _git(r.root, "add", "-A")
+    _git(r.root, "commit", "-q", "-m", "waive both")
+    out = r.gate()
+    named = [ln for ln in out.stdout.splitlines() if "without the owner's word" in ln]
+    assert out.returncode == 1 and any("archive/" in ln for ln in named) \
+        and any("specs/78-gadget" in ln for ln in named), out.stdout
