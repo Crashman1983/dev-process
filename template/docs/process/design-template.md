@@ -87,10 +87,10 @@ section.
 
 | State | Event | Result | Test |
 |---|---|---|---|
-| draft | submit | in review | `tests/test_order.py::test_submit_starts_review` |
-| in review | approve | approved | `tests/test_order.py::test_decision_ends_review` |
-| in review | reject | draft | `tests/test_order.py::test_decision_ends_review` |
-| approved | submit | forbidden | `tests/test_order.py::test_submit_after_approval_is_refused` |
+| draft | submit | in review | tests/test_order.py::test_submit_starts_review |
+| in review | approve | approved | tests/test_order.py::test_decision_ends_review |
+| in review | reject | draft | tests/test_order.py::test_decision_ends_review |
+| approved | submit | forbidden | tests/test_order.py::test_submit_after_approval_is_refused |
 | approved | price list changed | approval expires → draft | struck — prices are frozen at approval in this release |
 
 ## Fresh-worktree dry run (migrations; deleted or replaced gate, hook or lane scripts)
