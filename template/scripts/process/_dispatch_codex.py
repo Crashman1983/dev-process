@@ -591,14 +591,16 @@ def independence(root: Path, base: str, reviewer: str, implementers: list[str] |
 
 def _report_text(rec: dict, result: dict, *, work: str, plan_review: bool, refute_round: int | None) -> str:
     b = rec["binding"]
-    lines = [f"# Codex review — {'plan of ' if plan_review else ''}#{rec['issue']}", "",
-             f"review: codex {'plan ' if plan_review else ''}review of {rec['branch']}",
+    # the header block first: it is the run of lines up to the first blank one
+    # (journal-state-plans.md) — a title above it left the report without `review:` (#286)
+    lines = [f"review: codex {'plan ' if plan_review else ''}review of {rec['branch']}",
              *(["phase: plan"] if plan_review else []),
              f"work: {work}",
              "publish-waived: a dispatched Codex review — its verdict is the REVIEW line beside this report",
              f"model: {rec['model']}", f"invocation: {rec['invocation']}",
              f"artifact: base={b['base']} head={b['head']} diff_sha256={b['diff_sha256']}",
-             f"codex-result: {rec['result_sha256']}", f"verdict: {result['verdict']}", ""]
+             f"codex-result: {rec['result_sha256']}", f"verdict: {result['verdict']}", "",
+             f"# Codex review — {'plan of ' if plan_review else ''}#{rec['issue']}", ""]
     for f in result["findings"]:
         cls = f" class={f['class']}" if f.get("class") else ""
         rule = f" rule={f['rule']}" if f.get("rule") not in (None, "", "-") else ""

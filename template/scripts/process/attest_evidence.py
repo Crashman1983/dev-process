@@ -40,6 +40,7 @@ import fnmatch
 import json
 import re
 import subprocess
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -148,6 +149,7 @@ class Evidence:
     plan_gate_code: bool = False
     plan_acs: frozenset = frozenset()
     plan_struck: frozenset = frozenset()  # struck with a reason: the report confirms each
+    plan_foreign: frozenset = frozenset()  # named only beside another issue: not required (#287)
     plan_session: str | None = None  # None: no source names it
     plan_session_source: str = "none"  # report | plan-line | none
     has_reports: bool = False
@@ -391,6 +393,20 @@ def struck(text: str) -> set[str]:
     return {ac_key(m) for m in STRUCK_LINE.finditer(text)}
 
 
+# a sentence of plan prose: up to a sentence end followed by space, or a line end. A
+# criterion id with a dot inside (`AC-2.1`) never ends one: the dot needs a space after it
+_SENTENCE = re.compile(r"(?<=[.!?;])[ \t]+|\n")
+# an issue reference in prose: `#7`, `owner/repo#7` — not `C#` or an HTML entity `&#7`
+_ISSUE_REF = re.compile(r"(?<![\w&])(?:[\w.-]+/[\w.-]+)?#(\d+)\b")
+
+
+def foreign_criteria(plan: str, spec: str) -> frozenset[str]:
+    """The ids the plan names only beside another issue — `AC-11` in "dsh runs up to the
+    AC-11 measurement (#2659)" is that issue's criterion, not this plan's (#287). Left out
+    of the required ones and named by attest, never dropped in silence."""
+    return _criteria(plan, spec)[2]
+
+
 def required_criteria(plan: str, spec: str) -> frozenset[str]:
     """The criteria a code-review pass traces: every id the plan or its spec names,
     less those a `DoD-deviation: open` keeps open and those struck with a reason.
@@ -407,13 +423,32 @@ def struck_criteria(plan: str, spec: str) -> frozenset[str]:
     return _criteria(plan, spec)[1]
 
 
-def _criteria(plan: str, spec: str) -> tuple[frozenset[str], frozenset[str]]:
+def _foreign_only(plan: str) -> set[str]:
+    """Ids the plan names only in sentences citing an issue it does not declare; a
+    definition line (`AC-<id>: …`) always makes an id the plan's own."""
+    from check_review import declared_issue_numbers  # noqa: PLC0415
+    mine = set(declared_issue_numbers(plan))
+    own = {ac_key(m) for m in AC_LINE.finditer(plan)}
+    cited: set[str] = set()
+    for sentence in _SENTENCE.split(plan):
+        ids = {ac_key(m) for m in AC_ID.finditer(sentence)}
+        if not ids:
+            continue
+        if any(int(n) not in mine for n in _ISSUE_REF.findall(sentence)):
+            cited |= ids
+        else:
+            own |= ids
+    return cited - own
+
+
+def _criteria(plan: str, spec: str) -> tuple[frozenset[str], frozenset[str], frozenset[str]]:
     plan, spec = _EXAMPLE_SPAN.sub(" ", plan), _EXAMPLE_SPAN.sub(" ", spec)
     in_spec = {ac_key(m) for m in AC_ID.finditer(spec)}
-    named = {ac_key(m) for m in AC_ID.finditer(plan)} | in_spec
+    foreign = _foreign_only(plan) - in_spec  # a spec's criterion is the work's own
+    named = ({ac_key(m) for m in AC_ID.finditer(plan)} - foreign) | in_spec
     open_ = held_open(plan)
     gone = (struck(spec) | (struck(plan) - in_spec)) - open_
-    return frozenset(named - open_ - gone), frozenset(gone & named)
+    return frozenset(named - open_ - gone), frozenset(gone & named), frozenset(foreign)
 
 
 def held_open(plan: str) -> set[str]:
@@ -789,6 +824,7 @@ def gather(root: Path, *, work: str, ids: set[str], tier: int, verdict: str, ind
         plan_state=state, plan_rel=rel, plan_gate_code=plan_names_gate_code(plan_read),
         plan_acs=required_criteria(plan_read, readable(spec)),
         plan_struck=struck_criteria(plan_read, readable(spec)),
+        plan_foreign=foreign_criteria(plan_read, readable(spec)),
         plan_session=session, plan_session_source=source,
         has_reports=bool(reports), claims=claims, test_status=status)
 
@@ -961,6 +997,10 @@ def evidence_problems(root: Path, *, work: str, ids: set[str], tier: int, verdic
     """attest.py's one entry: gather at head, then decide — only for a Tier 2+ pass."""
     if verdict != "pass" or tier < 2:
         return []
-    return decide(gather(root, work=work, ids=ids, tier=tier, verdict=verdict,
-                         independence=independence, base=base, head=head, plan_review=plan_review,
-                         model=model, reports=reports))
+    ev = gather(root, work=work, ids=ids, tier=tier, verdict=verdict, independence=independence,
+                base=base, head=head, plan_review=plan_review, model=model, reports=reports)
+    for n in sorted(ev.plan_foreign):
+        # never dropped in silence (#287): the reader sees which id was left out and why
+        print(f"attest: note — AC-{n} not required: {ev.plan_rel} names it only beside another "
+              f"issue's #N; define it (`AC-{n}: …`) if it is this work's", file=sys.stderr)
+    return decide(ev)

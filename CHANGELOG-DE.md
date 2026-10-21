@@ -9,6 +9,18 @@ ein Eintrag ohne Plan oder Issue hat keine Details-Zeile. In wenigen Sätzen je 
 English version: [CHANGELOG.md](CHANGELOG.md). Die Releases vor v2.28.2:
 [docs/changelog-archive-DE.md](docs/changelog-archive-DE.md).
 
+## v2.76.1 — Ein dispatchter Codex-Bericht ist lesbar; das Kriterium eines anderen Issues ist keine Pflicht · 2026-10-21
+
+**Warum.** Zwei Template-Fehler sind in Kenni angekommen. Der Codex-Dispatch schrieb den Titel des Berichts über den Header-Block. Der Header ist der Block bis zur ersten Leerzeile, also las das Report-Gate des github-issues-Moduls kein `review:` und lehnte den Push ab: zweimal an einem Tag (Kenni #2683, #2691), jedes Mal von Hand behoben. Auch `check_review.report_header` las aus so einem Bericht kein `work:`. Und attest zählte jede `AC-<id>` eines Plans als Kriterium der Arbeit, auch eine, die der Plan nur aus einem anderen Issue zitiert („bis zur AC-11-Messung (#2659)“). Dann verweigerte attest einen Pass für einen Test, den dieses Kriterium nie schuldete.
+
+**Was sich ändert.**
+- Der Codex-Dispatch schreibt zuerst den Header-Block, danach den Titel (#286).
+- attest lässt eine ID weg, die der Plan nur in Sätzen nennt, die das `#N` eines anderen Issues zitieren, und nennt sie in einem Hinweis (#287). Eine Definitionszeile `AC-<id>: …`, eine Erwähnung ohne anderes Issue oder die Spec halten eine ID als Pflicht.
+
+**Update.** Nichts zu tun. Ein dispatchter Codex-Bericht von vor dem Update hat den Titel noch oben: Lehnt das Gate ihn ab, den Titel unter den Header-Block verschieben.
+
+Details: #286 #287
+
 ## v2.76.0 — Deterministische Prüfungen vor dem Review, und das Maß ihrer Wirkung · 2026-10-21
 
 **Warum.** Kennis Review-Historie (315 Berichte, 1.694 Befunde, dev-process #277 Schritt 0) zeigte: Von den 423 blockierenden oder schweren Befunden brauchten nur 85 das Urteil eines Lesers; den Rest hätte eine Regel oder ein Test gefangen. Sieben von zwanzig Befunden, bei denen eine Prüfung nie wirkte, waren Regeln, die nur eine Warnung druckten, sieben weitere standen nur als Prosa da. Ein Template-Update konnte sein eigenes Review nicht freigeben, ein Zug mit einem Update wurde abgelehnt, und ein Testlauf unter `MAKEFLAGS=-n` passierte den Push-Hook.

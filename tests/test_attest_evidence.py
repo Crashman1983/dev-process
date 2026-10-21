@@ -788,3 +788,32 @@ def test_the_owner_decision_cannot_be_skipped(ev_mod):
     rows = [{"kind": "owner-decision", "when": {"waived": True}}]
     owed, _ = required_records.owed(rows, {"waived": True}, set(), {"owner-decision"})
     assert [o.kind for o in owed] == ["owner-decision"]
+
+
+def test_an_id_named_only_beside_another_issue_is_not_required(ev_mod):
+    """#287 (Kenni #2687): "dsh runs up to the AC-11 measurement (#2659)" made attest ask
+    for AC-11 — another issue's criterion."""
+    mod, _out = ev_mod
+    req, foreign = mod.required_criteria, mod.foreign_criteria
+    plan = ("issue: #7\n\n- AC-1: When x, the widget shall answer 42.\n\n"
+            "dsh runs only up to the AC-11 measurement (#2659). The rest is AC-1's business.\n")
+    assert req(plan, "") == {"1"} and foreign(plan, "") == {"11"}
+    # its own definition line makes it this plan's, whatever issue the line cites
+    assert req(plan + "- AC-11: When y, z shall hold (as in #2659).\n", "") == {"1", "11"}
+    # a mention in a sentence without another issue keeps it required
+    assert req(plan + "AC-11 also guards the cache.\n", "") == {"1", "11"}
+    # the plan's own issue is no other one; a repository-qualified one is
+    assert req("issue: #7\nAC-3 closes the gap of #7.\n", "") == {"3"}
+    assert req("issue: #7\nAC-3 is owner/other#9's criterion.\n", "") == set()
+    # a spec's criterion is the work's own even beside another issue
+    assert req("See AC-2 of #9.\n", "- AC-2: When a, b shall c.\n") == {"2"}
+
+
+def test_attest_names_the_id_it_left_out(repo):
+    """#287 AC-3: an id left out as foreign is named, never dropped in silence."""
+    plan = repo / ".process-work/plans/2026-10-14-widget.md"
+    plan.write_text(PLAN + "\ndsh runs only up to the AC-11 measurement (#2659).\n")
+    _git(repo, "commit", "-qam", "docs: cite another issue")
+    r = _attest(repo, "--with", _report(repo))
+    assert r.returncode == 0, r.stderr
+    assert "AC-11 not required" in r.stderr and "#N" in r.stderr, r.stderr
