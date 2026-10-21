@@ -435,6 +435,7 @@ For each finding, one line:
 {ac_note}Judge against the checklist and the rules above; cite file:line evidence; a
 `pass` with unfixed blockers is a false green — verdict `block` instead.{plan_note}"""
 
+
 def _section_map(root: Path, ref: str | None) -> tuple[dict | None, str]:
     """(the project's section map, problem) — read at the base, like every rule a
     branch must not lift for itself. None without a file: every section applies."""
@@ -712,7 +713,6 @@ def _delta_files(root: Path, since: str) -> list[str] | None:
 # a project adds its own with `transitions-vocabulary: a, b` in LOCAL_CHECKLIST
 TRANSITION_VOCABULARY = ("state", "event", "transition", "replay", "projection",
                          "append", "expire", "revoke")
-_TRANSITIONS_HEADING = re.compile(r"^##+\s+Transitions\b", re.MULTILINE)
 _LOCAL_VOCABULARY = re.compile(r"^\s*transitions-vocabulary\s*:(.*)$", re.MULTILINE | re.IGNORECASE)
 _VOCABULARY_WORD = re.compile(r"[a-z][\w-]*")
 
@@ -730,7 +730,7 @@ def _transitions_note(text: str, vocabulary: tuple[str, ...]) -> str | None:
     """Advisory: a plan that speaks of states and events (two or more distinct
     vocabulary words outside fenced blocks) but has no `## Transitions` table."""
     body = _review_gate._unfenced(text)
-    if _TRANSITIONS_HEADING.search(body):
+    if _review_gate.TRANSITIONS_HEADING.search(body):  # the review gate owns the heading rule
         return None
     hits = [w for w in vocabulary if re.search(rf"\b{re.escape(w)}\b", body, re.IGNORECASE)]
     if len(hits) < 2:
