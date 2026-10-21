@@ -38,9 +38,10 @@ Switching a module *off* afterwards (`copier update --data modules=…`) is an
 expert opt-out and a process decision — record why (decision record); do not
 just drop the gate that started failing.
 
-**The mid-size caveat:** six gates are *core* and always run regardless of
+**The mid-size caveat:** seven gates are *core* and always run regardless of
 the module set — `kernel` (the always-on rule block is intact in the anchor),
-`decision-records`, `review`, `clarification`, `product-frame`, and
+`decision-records`, `review`, `clarification`, `plan-structure` (a new Tier 2+
+plan's criteria, planned tests and sections), `product-frame`, and
 `overlays` (a project's notes still fit the template sections they build
 on). The first
 Tier 2+ change (one that touches a contract, persistence, auth, or something

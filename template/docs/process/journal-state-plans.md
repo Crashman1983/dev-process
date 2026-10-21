@@ -61,6 +61,26 @@ approved, clarification-free design. The core `clarification` gate enforces
 exactly that line: a marker in an active plan is a hard failure, markers in an
 active design are a visible note, and archived files are history.
 
+**A plan's structure is checked when it is written** (core `plan-structure`
+gate, #278), for every active Tier 2+ plan the branch adds — a plan already on
+the integration branch is history:
+
+- Each acceptance criterion is one EARS line, `AC-<id>: When <trigger>,
+  <system> shall <response>`, with exactly one `shall` (a project writing in
+  another language names its word, `shall_words`) and an id used once.
+- Once execution starts (a ticked task) and at the merge push, each criterion
+  names its planned test in the review report's own grammar: `AC-<id>:
+  <path>::<test>` (the test may not exist yet), `AC-<id>: struck — <reason>`
+  or `AC-<id>: manual: <reason>`.
+- At the merge push, no task is left `- [ ]` without `struck: <reason>` or
+  `moved: #<issue>`.
+- A DECISION that still carries `[assumption]` is a note.
+
+A project adds its own duties in `docs/process/plan-structure.local.json`,
+read at the integration ref so a branch cannot lift its own: required
+`sections` (`["Anchor Delta"]`), `shall_words`, and a `story_id` pattern with
+the `registry` glob its ids must stand in.
+
 **Plans have exactly one home.** Every presence guarantee downstream (review
 attestation, archive ritual, issue-before-code) keys on `.process-work/plans/`
 — a plan written anywhere else silently escapes all of them. This matters with
