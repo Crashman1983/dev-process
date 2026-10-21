@@ -89,6 +89,7 @@ from check_review import (  # noqa: E402  (one owner for grammar + arithmetic)
     stale_review,
     verified_template_plan,
     template_review_findings,
+    waiver_owner_findings,
 )
 from gate_invoke import (  # noqa: E402  (one owner for "how to launch")
     gate_runner_argv,
@@ -208,7 +209,12 @@ def check(root: Path) -> tuple[list[str], list[str]]:
                 to_archive.append(p.name)
                 continue
             if review_waived(text):
-                to_archive.append(p.name)
+                # the owner's word is due before the archive, not first at the merge push (#282)
+                owed = waiver_owner_findings(f"{PLANS_ACTIVE}/{p.name}", text, tier, own_family_rule(root)[1])
+                if owed:
+                    blockers.extend(owed)
+                else:
+                    to_archive.append(p.name)
                 continue
             ids = _plan_work_ids(p.stem, text, include_dedated=True)
             own = clearing_passes(root, passes, tier)  # the gate's answer which passes count (#241)

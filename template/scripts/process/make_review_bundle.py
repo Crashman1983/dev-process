@@ -823,7 +823,8 @@ def build(root: Path, base: str | None, plan_filter: str | None = None,
                 "first round if the plan allows; otherwise say so in the verdict and review "
                 "it slice by slice.\n")
 
-    refute_rows, rows_problem = _refute_rows(root, resolved)
+    # read where attest reads it: at the fork point the REVIEW_ARTIFACT names, not main's tip
+    refute_rows, rows_problem = _refute_rows(root, _fork(root, resolved) if resolved else None)
     if rows_problem:
         add(f"*(required-records table not read ({rows_problem}) — the template's refute rule "
             f"applies here)*\n")

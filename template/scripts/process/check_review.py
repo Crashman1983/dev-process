@@ -3043,7 +3043,7 @@ def check(root: Path) -> tuple[list[str], list[str]]:
             if review_waived(text):
                 soft += waiver_debt_notes(f"{PLANS_ARCHIVE}/{p.name}", text,
                                           WAIVED, "review-waived")
-                if carried is not None and f"{PLANS_ARCHIVE}/{p.name}" in carried:
+                if carried is None or f"{PLANS_ARCHIVE}/{p.name}" in carried:  # unknown: carried
                     # a waiver written straight into the archive owes the owner's word too
                     for finding in waiver_owner_findings(f"{PLANS_ARCHIVE}/{p.name}", text, tier,
                                                          evidence_rules):
