@@ -163,3 +163,77 @@ def test_a_branch_cannot_lift_its_own_duty(render, tmp_path):
     (out / "docs/process/plan-structure.local.json").write_text(json.dumps({"sections": []}))
     _plan(out, GOOD)
     assert "no `## Anchor Delta` section" in _run(out).stdout
+
+
+def test_project_data_that_is_no_json_fails(render, tmp_path):
+    """M3: a broken data file is a problem, not "no project rules"."""
+    out = render(tmp_path, {"project_name": "demo"})
+    (out / "docs/process/plan-structure.local.json").write_text("{not json")
+    _repo(out)
+    _plan(out, GOOD)
+    r = _run(out)
+    assert r.returncode == 1 and "is not valid JSON" in r.stdout, r.stdout
+
+
+def test_project_data_git_cannot_read_fails_closed(render, tmp_path):
+    """Refute of #278: a failed `git show` read as "no data" and lifted every section."""
+    out = _repo(render(tmp_path, {"project_name": "demo"}), {"sections": ["Anchor Delta"]})
+    blob = subprocess.run(["git", "-C", str(out), "rev-parse", "main:docs/process/plan-structure.local.json"],
+                          capture_output=True, text=True, check=True).stdout.strip()
+    (out / ".git/objects" / blob[:2] / blob[2:]).unlink()
+    _plan(out, GOOD)
+    r = _run(out)
+    assert r.returncode == 1 and "cannot be read" in r.stdout, r.stdout
+
+
+def test_a_replaced_fork_point_does_not_unbind_a_plan(render, tmp_path):
+    """Refute of #278: `git replace` of main with a commit holding the plan made it read
+    as already merged; the gate reads git as every gate does (no replace objects)."""
+    out = _repo(render(tmp_path, {"project_name": "demo"}))
+    _plan(out, GOOD.replace("shall keep", "keeps"))
+    _git(out, "add", "-A")
+    _git(out, "commit", "-qm", "plan")
+    fake = subprocess.run(["git", "-C", str(out), "rev-parse", "HEAD"], capture_output=True, text=True,
+                          check=True).stdout.strip()
+    _git(out, "replace", "main", fake)
+    r = _run(out)
+    assert r.returncode == 1 and "AC-1 has 0" in r.stdout, r.stdout
+
+
+def test_a_tier_one_plan_is_not_bound_and_a_stub_raised_to_tier_two_is(render, tmp_path):
+    """M4 and refute of #278: below Tier 2 the gate reads nothing; a Tier 1 stub on main
+    rewritten to Tier 2 here is written here, so it is bound."""
+    out = render(tmp_path, {"project_name": "demo"})
+    _plan(out, GOOD.replace("tier: 2", "tier: 1").replace("shall keep", "keeps"))
+    _repo(out)
+    assert _run(out).returncode == 0
+    _plan(out, GOOD.replace("shall keep", "keeps"))
+    r = _run(out)
+    assert r.returncode == 1 and "AC-1 has 0" in r.stdout, r.stdout
+
+
+def test_a_finding_names_the_files_own_line_behind_a_fence(render, tmp_path):
+    """Refute of #278: line numbers were counted over the text with fences removed."""
+    out = _repo(render(tmp_path, {"project_name": "demo"}))
+    fence = "```\nexample one\nexample two\n```\n"
+    _plan(out, GOOD.replace("## Decisions\n\n", "## Decisions\n\n" + fence).replace("shall keep", "keeps"))
+    r = _run(out)
+    assert ":12: AC-1 has 0" in r.stdout, r.stdout
+
+
+def test_every_list_marker_opens_a_task_for_every_reader(render, tmp_path):
+    """Refute of #278: `* [ ]` was open for plan-structure and closed for the review gate;
+    one grammar, owned by check_review."""
+    out = _repo(render(tmp_path, {"project_name": "demo"}))
+    _plan(out, GOOD + "\n* [ ] T2 docs\n")
+    r = _run(out, merge=True)
+    assert r.returncode == 1 and "open task at the merge" in r.stdout, r.stdout
+    sys.path.insert(0, str(out / "scripts/process"))
+    try:
+        import importlib
+        sys.modules.pop("check_review", None)
+        cr = importlib.import_module("check_review")
+        assert cr.UNCHECKED.search("* [ ] T2 docs\n")
+    finally:
+        sys.path.remove(str(out / "scripts/process"))
+        sys.modules.pop("check_review", None)
