@@ -431,7 +431,8 @@ For each finding, one line:
 - `kind` (optional): what sort of defect — `knowledge-gap` = the author did not
   know something that already existed (a note, a story, an ADR, a module);
   `requirement`, `implementation`, `test-gap`, `process`, `environment` as named.
-- `class` (optional, asked for): what could have caught it — `mechanical` = a
+- `class`: required on every `blocker` and `major` finding (the report gate refuses
+  one without it), optional below — what could have caught it: `mechanical` = a
   static rule over files or the diff, `testable` = a deterministic test
   technique (property, mutation, fault injection, contract), `judgment` = only a
   reader. For `mechanical` and `testable`, `rule` names the check in one token
@@ -550,7 +551,8 @@ BLOCK_RULE = ("Block only for a defect someone would hit — a user, a caller, t
               "through the change is pre-existing — an issue, not a block. "
               "What a linter, type checker or the test suite catches never blocks. Before a block "
               "is attested, a fresh process scores each blocking finding; below 80 of 100 it is a "
-              "residual (`verification-independence.md`, \"What blocks\").")
+              "residual (`verification-independence.md`, \"What blocks\"). A measured old/new "
+              "difference scores 100: the scorer may refute the measurement, never lower the score.")
 DELTA_ROUND_RULE = ("Judge the fix diff and the open findings, and re-check the fixed failure "
                     "class everywhere it can recur, not only at the fixed spot. If the fix "
                     "changed a contract, the architecture or the risk scope, say so and ask "

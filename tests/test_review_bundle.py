@@ -1743,6 +1743,17 @@ def test_no_round_header_when_the_work_cannot_be_determined(render, tmp_path):
     assert _round_note(_bundle(out2, "--base", "main", "--plan", "widget", "--plan-review").stdout) is None
 
 
+def test_a_measured_regression_scores_100_and_class_is_asked_of_blockers(render, tmp_path):
+    """#297 AC-4 and #297 AC-6: the bundle tells the scorer a measured old/new difference
+    is not its to lower, and the grammar makes `class=` mandatory for blockers and majors."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    flat = " ".join(_bundle(out, "--base", "main").stdout.split())
+    assert "A measured old/new difference scores 100: the scorer may refute the measurement, " \
+           "never lower the score." in flat
+    assert "`class`: required on every `blocker` and `major`" in flat
+
+
 def test_the_report_header_reads_the_round(render, tmp_path):
     out = render(tmp_path, {"project_name": "d", "modules": {}})
     try:
