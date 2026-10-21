@@ -148,7 +148,12 @@ decision, never a silent one (the `speckit` gate enforces this).
 A waiver is an honest degradation — and a degradation without an owner
 becomes the new normal. `review-waived:` and `spec-waived:` lines should name
 their debt owner on the line itself (an issue ref `#N` or a URL); the gates
-report a waiver without one as a note, never a failure.
+report a waiver without one as a note, never a failure. Skipping a review is
+the owner's call, not the agent's: an active plan this push carries with a
+`review-waived:` line also needs the owner's word in its decisions ledger —
+`DECISION <date> owner: <why the review is skipped>` — or the review gate
+refuses the merge push (the required-records table, `model-policy.json`
+`review_evidence.required_records`; #282).
 
 A plan may also carry an `issue: <ref>` line linking its tracking issue (`#N`,
 `owner/repo#N`, or a URL). When the `github-issues` module is installed, an
@@ -217,7 +222,7 @@ REVIEW work=42 tier=2 reviewer=fresh-agent model=same independence=bundle,non-im
 
 The journal only grows, and `.process-work/journal/.gitattributes` says so to git (`*.md merge=union`): two branches that append to the same file merge by keeping both sides' lines — no conflict in the merge train. It is scoped to the journal directory; a project's own root `.gitattributes` is untouched.
 
-Two companion lines. `ROOT-CAUSE work=<id> round=<r>: <cause> — <the test that failed before the fix>` (journal or plan): each blocking round's fix names its cause before the next round; `attest.py` notes a missing one (the duty sits with the fixing session, which checks it with `--dry-run`), and never refuses a verdict over it. `red_evidence.py` writes it from a measured run — the test names and exit codes come from the run, the cause is the only free text; pytest is measured directly, any other runner (vitest, jest, XCTest) through the JUnit XML it writes (`--junit PATH`). `REVIEW-EXCEPTION work=<id> round=<n>: <reason> …`: written by `attest.py --exception` when the owner overrides a rule — countable, never silent.
+Two companion lines. `ROOT-CAUSE work=<id> round=<r>: <cause> — <the test that failed before the fix>` (journal or plan): each blocking round's fix names its cause before the next round; `attest.py` notes a missing one (the duty sits with the fixing session, which checks it with `--dry-run`), and never refuses a verdict over it — except where the required-records table owes one: after three fix commits on one file in the reviewed range, a pass needs a `ROOT-CAUSE` line of the work or `skipped root-cause work=<id>: <reason>` (#282). `red_evidence.py` writes it from a measured run — the test names and exit codes come from the run, the cause is the only free text; pytest is measured directly, any other runner (vitest, jest, XCTest) through the JUnit XML it writes (`--junit PATH`). `REVIEW-EXCEPTION work=<id> round=<n>: <reason> …`: written by `attest.py --exception` when the owner overrides a rule — countable, never silent.
 
 A `REVIEW` inside a ```-fenced block is a quotation and is ignored (quote
 literal examples only there). A fence opens on a line that starts, after any

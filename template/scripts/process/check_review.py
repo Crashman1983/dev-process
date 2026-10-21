@@ -410,11 +410,15 @@ ROOT_CAUSE_LINE = re.compile(
     re.MULTILINE)
 # a dated answer to the owner's question (an open `DECISION NEEDED` is none)
 DECISION_LINE = re.compile(_RECORD_LEAD + r"[*_]*DECISION[*_]*[ \t]+\d{4}-\d{2}-\d{2}\b\S*[ \t]*\S")
+# the owner's own word, as the decisions ledger records it (`DECISION <date> owner: …`)
+# — what a `review-waived:` line stands on (required_records, #282)
+OWNER_DECISION = re.compile(_RECORD_LEAD + r"[*_]*DECISION[*_]*[ \t]+\d{4}-\d{2}-\d{2}[ \t]+owner\b",
+                            re.MULTILINE)
 # a reasoned way past one evidence rule of attest.py (#225, attest_evidence.py):
 # `skipped <kind> work=<id>: <reason>` — a record like REFUTE, so one appended
 # after the plan rides the attestation as REFUTE lines do (`records_only`);
 # `codex-review` is the older spelling of `cross-model`
-SKIP_KINDS = ("cross-model", "codex-review", "refute", "plan-review", "ac-trace")
+SKIP_KINDS = ("cross-model", "codex-review", "refute", "plan-review", "ac-trace", "root-cause")
 SKIP_LINE = re.compile(
     _RECORD_LEAD + r"skipped[ \t]+(?P<kind>" + "|".join(SKIP_KINDS) + r")[ \t]+"
     r"work=(?P<work>(?!<)(?!TODO\b)[^\s:]+):[ \t]*(?P<reason>(?!<|TODO\b|…|\.\.\.)\S.*?)[ \t]*$",
@@ -2655,6 +2659,18 @@ UNCHECKED = re.compile(r"^\s*- \[ \] ", re.MULTILINE)
 DECISIONS_HEADING = re.compile(r"^#{2,4}\s+Decisions\b", re.IGNORECASE | re.MULTILINE)
 
 
+def waiver_owner_findings(rel: str, text: str, tier: int, rules: dict) -> list[str]:
+    """A `review-waived:` line stands on the owner's word: `DECISION <date> owner: …` in
+    the plan, when the required-records table asks for it (#282). Any text used to do —
+    a waiver the agent wrote for itself was a review nobody decided to skip."""
+    import required_records  # noqa: PLC0415 — only a waived plan needs it
+    rows = [r for r in required_records.table(rules or {}) if r["kind"] == "owner-decision"]
+    present = {"owner-decision"} if OWNER_DECISION.search(text) else set()
+    owed, _ = required_records.owed(rows, {"tier_from": tier, "waived": True}, present, set())
+    return [f"{rel}: `review-waived:` without the owner's word — record it in the plan as "
+            f"`DECISION <date> owner: <why the review is skipped>` (owed: {o.why})" for o in owed]
+
+
 def spec_plan_findings(root: Path, passes: list[dict], in_flight: set[str] | None,
                        ref: str | None = None) -> list[str]:
     """The presence and own-family duty of a Spec Kit plan this push carries —
@@ -2937,7 +2953,8 @@ def check(root: Path) -> tuple[list[str], list[str]]:
     known_work = _known_work(root)
     # from `own_family_from_tier` on, the push-anchored arms below clear and judge
     # coverage with the own family's passes alone (#241)
-    own_from, _rules, rules_problem = own_family_rule(root, scope_base) if base_error is None else (4, {}, "")
+    own_from, evidence_rules, rules_problem = own_family_rule(root, scope_base) if base_error is None \
+        else (4, {}, "")
     if rules_problem:
         soft.append(f"review_evidence not read ({rules_problem}) — own_family_from_tier not applied")
 
@@ -3120,6 +3137,9 @@ def check(root: Path) -> tuple[list[str], list[str]]:
             tiered_plans.append((rel, text, tier, ids))
             if review_waived(text):
                 soft += waiver_debt_notes(rel, text, WAIVED, "review-waived")
+                if rel in in_flight:
+                    for finding in waiver_owner_findings(rel, text, tier, evidence_rules):
+                        presence(finding)
                 continue
             # after the fact: a Tier 3 plan still active while commits claiming
             # its issue already sit on the integration branch was merged past

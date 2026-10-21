@@ -427,9 +427,23 @@ For each finding, one line:
 `pass` with unfixed blockers is a false green — verdict `block` instead.{plan_note}"""
 
 
-# the tier from which a plan without a REFUTE line is warned about; gate code
-# warns at any tier (`docs/process/refute.md`, the table)
+# the tier from which a plan without a REFUTE line is warned about, when the
+# required-records table cannot be read; gate code warns at any tier
 REFUTE_RUN_TIER = 3
+
+
+def _refute_rows(root: Path, ref: str | None) -> tuple[int | None, bool, str]:
+    """(the tier from which the table owes a refute, whether gate code owes one, problem)
+    — read from the required-records table at the base attest reads (#282), so the
+    warning names the duty attest enforces, not a second copy of it."""
+    import attest_evidence  # noqa: PLC0415 — the policy reader; it imports check_review
+    import required_records  # noqa: PLC0415
+    rules, problem = attest_evidence.review_policy(root, ref or "HEAD")
+    if problem:
+        return REFUTE_RUN_TIER, True, problem
+    rows = [r for r in required_records.table(rules) if r["kind"] == "refute"]
+    tier = min((r["when"]["tier_from"] for r in rows if set(r["when"]) == {"tier_from"}), default=None)
+    return tier, any(r["when"] == {"gate_code": True} for r in rows), ""
 # at Tier 2 the review itself answers the refuter's brief (`docs/process/refute.md`)
 TIER_TWO_BRIEF = (
     "**Tier 2: the review is also the attack.** Answer each in your report, with evidence: "
@@ -747,11 +761,17 @@ def build(root: Path, base: str | None, plan_filter: str | None = None,
                 "first round if the plan allows; otherwise say so in the verdict and review "
                 "it slice by slice.\n")
 
+    refute_tier, gate_refute, rows_problem = _refute_rows(root, resolved)
+    if rows_problem:
+        add(f"*(required-records table not read ({rows_problem}) — the template's refute rule "
+            f"applies here)*\n")
+
     if resolved is None and not since and plan_texts:
         # no base, so no gate-code check — the tier needs no git (refutation:
         # the tier warning vanished silently without a base)
         missing = _unrefuted(root, plan_texts)
-        by_tier = [label for label in missing if (tiers.get(label) or 0) >= REFUTE_RUN_TIER]
+        by_tier = [label for label in missing
+                   if refute_tier is not None and (tiers.get(label) or 0) >= refute_tier]
         if by_tier:
             add(_tier_warning(by_tier, tiers))
         elif missing and any((tiers.get(label) or 0) == 2 for label in missing):
@@ -771,12 +791,12 @@ def build(root: Path, base: str | None, plan_filter: str | None = None,
         # and the delta review, not another run (downstream, a refute after every
         # fix round turned each Tier 3 round into two). Tier 2 answers the brief
         # inside the review.
-        by_tier = [] if since else [label for label in missing
-                                    if (tiers.get(label) or 0) >= REFUTE_RUN_TIER]
+        by_tier = [] if since or refute_tier is None else [
+            label for label in missing if (tiers.get(label) or 0) >= refute_tier]
         if gate_files is None:
             add("*(REFUTE check unavailable: git could not list the branch's files — a shallow clone "
                 "or no merge base; check by hand whether gate code changed)*\n")
-        elif gate_files and missing:
+        elif gate_files and missing and gate_refute:
             add(f"**REFUTE WARNING:** this {'delta' if since else 'diff'} changes gate code "
                 f"({', '.join(gate_files[:3])}{', …' if len(gate_files) > 3 else ''}) and "
                 f"{', '.join(missing[:3])}{' …' if len(missing) > 3 else ''} carries no "

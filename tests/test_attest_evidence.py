@@ -48,10 +48,22 @@ TABLE = [
     ("B1 tier 3 without cross-model", OK_CODE, {"tier": 3}, "without 'cross-model'"),
     ("B1 single-family without reason", OK_CODE, {"tier": 3, "single_family": True}, "without a reason"),
     ("B1 single-family with reason", OK_CODE,
-     {"tier": 3, "single_family": True, "skips": frozenset({"cross-model"})}, None),
+     {"tier": 3, "single_family": True, "skips": frozenset({"cross-model"}), "refute": True}, None),
     ("B1 a skip line without the token", OK_CODE, {"tier": 3, "skips": frozenset({"cross-model"})},
      "without 'cross-model'"),
-    ("B1 cross-model", OK_CODE, {"tier": 3, "cross_model": True}, None),
+    ("B1 cross-model", OK_CODE, {"tier": 3, "cross_model": True, "refute": True}, None),
+    # #282: the required-records table — refute from Tier 3, root cause after a fix streak
+    ("R tier 3 unrefuted", OK_CODE, {"tier": 3, "cross_model": True}, "has no REFUTE line"),
+    ("R tier 3 skipped refute", OK_CODE, {"tier": 3, "cross_model": True, "skips": frozenset({"refute"})},
+     None),
+    ("R fix streak 3 without root cause", OK_CODE, {"fix_streak": 3}, "has no ROOT-CAUSE line"),
+    ("R fix streak 2 owes nothing", OK_CODE, {"fix_streak": 2}, None),
+    ("R fix streak 3 with root cause", OK_CODE, {"fix_streak": 3, "root_cause": True}, None),
+    ("R fix streak 3 skipped", OK_CODE, {"fix_streak": 3, "skips": frozenset({"root-cause"})}, None),
+    ("R fix streak unknown", OK_CODE, {"fix_streak": None}, "fix commits"),
+    ("R fix streak unknown, root cause there", OK_CODE, {"fix_streak": None, "root_cause": True}, None),
+    ("R a project's extra row", OK_CODE,
+     {"records": ({"kind": "refute", "when": {"tier_from": 2}},)}, "has no REFUTE line"),
     ("B1 floor 2 reaches tier 2", OK_CODE, {"cross_model_from": 2}, "without 'cross-model'"),
     ("B2 diff unknown", OK_CODE, {"gate_code": None}, "could not list"),
     ("B2 gate code unrefuted", OK_CODE, {"gate_code": True}, "has no REFUTE line"),
@@ -727,3 +739,26 @@ def test_a_struck_criterion_end_to_end(repo):
         assert r.returncode == 1 and "the report confirms the strike" in r.stderr, line
     prose = confirmed.replace("seen, logging is #8", "replaced by std::vector use")
     assert _attest(repo, "--with", _report(repo, prose)).returncode == 0
+
+
+@pytest.mark.parametrize(("rows", "problem"), [
+    ([{"kind": "refute", "when": {"tier_from": 3}}], None),
+    ({"kind": "refute"}, "list of rows"),
+    ([{"kind": "nope", "when": {"tier_from": 3}}], "kind must be one of"),
+    ([{"kind": "refute", "when": {}}], "when must name"),
+    ([{"kind": "refute", "when": {"tier": 3}}], "when must name"),
+    ([{"kind": "refute", "when": {"tier_from": True}}], "when.tier_from must be int"),
+    ([{"kind": "owner-decision", "when": {"waived": True}, "skippable": True}], "cannot be skipped"),
+])
+def test_required_records_rows_are_validated(rows, problem):
+    """#282: a malformed table is a policy problem, never a silent pass."""
+    import required_records
+    got = required_records.rows_problem(rows)
+    assert (got is None) if problem is None else (problem in got), got
+
+
+def test_the_owner_decision_cannot_be_skipped():
+    import required_records
+    rows = [{"kind": "owner-decision", "when": {"waived": True}}]
+    owed, _ = required_records.owed(rows, {"waived": True}, set(), {"owner-decision"})
+    assert [o.kind for o in owed] == ["owner-decision"]

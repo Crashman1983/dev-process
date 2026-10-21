@@ -74,6 +74,18 @@ def fix_streaks(log: str, threshold: int = THRESHOLD) -> dict[str, int]:
     return {p: n for p, n in counts.items() if n >= threshold}
 
 
+def max_streak(root: Path, base: str, head: str) -> int | None:
+    """The longest fix streak on one file in `base..head` (CHANGELOG files only
+    from ROOT_CAUSE_AT on, as `notes` counts them); None when git cannot read the
+    range — the caller must not read that as "no streak" (required_records)."""
+    log = _git(root, "log", "-z", "--no-merges", "--pretty=%x01%s", "--name-only", f"{base}..{head}")
+    if log is None:
+        return None
+    streaks = {p: n for p, n in fix_streaks(log, 1).items()
+               if n >= ROOT_CAUSE_AT or not Path(p).name.upper().startswith("CHANGELOG")}
+    return max(streaks.values(), default=0)
+
+
 def notes(root: Path) -> list[str] | None:
     """The fix-streak note lines of the branch checked out at `root`; [] for
     none, None where nothing is evaluated (the integration branch, a detached

@@ -367,3 +367,18 @@ def test_finish_asks_the_same_owner_for_a_spec_plan(render, tmp_path):
     out = subprocess.run([sys.executable, str(r.root / "scripts/process/finish.py")], cwd=r.root,
                          capture_output=True, text=True)
     assert out.returncode == 1 and "cleared only by passes outside" in out.stdout, out.stdout
+
+
+def test_a_waiver_without_the_owners_word_fails_at_the_merge(render, tmp_path):
+    """#282: `review-waived:` took any text; the owner's decision now stands behind it."""
+    r = Repo(render, tmp_path, tier=2)
+    plan = r.root / ".process-work/plans/2026-10-15-77-widget.md"
+    plan.write_text(plan.read_text() + "review-waived: trivial rename, tracked #77\n", encoding="utf-8")
+    _git(r.root, "commit", "-qam", "waive")
+    out = r.gate()
+    assert out.returncode == 1 and "without the owner's word" in out.stdout, out.stdout
+    plan.write_text(plan.read_text() + "- DECISION 2026-10-21 owner: rename only, no review\n",
+                    encoding="utf-8")
+    _git(r.root, "commit", "-qam", "owner decides")
+    out = r.gate()
+    assert "without the owner's word" not in out.stdout, out.stdout
