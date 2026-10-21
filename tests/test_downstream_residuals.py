@@ -129,8 +129,10 @@ def test_contradicting_session_anchors_are_defects(repo, monkeypatch):
            'pid_start': 'live', 'tmux_window': '@stale'}
     path = repo / 'record.json'
     path.write_text(json.dumps(rec))
-    # both callers must consult the same owner of liveness
-    owner = sys.modules['dispatch']
+    # both callers must consult the same owner of liveness — the module merge_route's
+    # lazy `import dispatch` resolves to (imported here: the test must not depend on
+    # another test having imported it first)
+    owner = importlib.import_module('dispatch')
     monkeypatch.setattr(owner, '_same_process', lambda r: True)
     monkeypatch.setattr(owner, '_pane_state', lambda w: 'gone')
     assert 'contradict' in guard._record_defect(path)
