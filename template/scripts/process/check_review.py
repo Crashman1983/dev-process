@@ -406,8 +406,32 @@ BLOCKING_LINES = (TIER_DECL, ISSUE_DECL, DECISION_NEEDED)
 CLEARING_LINES = (WAIVED, _REVIEW_LINE, REFUTE_LINE)
 ROOT_CAUSE_LINE = re.compile(
     _RECORD_LEAD + r"ROOT-CAUSE[ \t]+"
-    r"work=(?P<work>(?!<)(?!TODO\b)\S+)[ \t]+round=(?P<round>\d+):[ \t]*(?!<|TODO\b|…|\.\.\.)\S",
+    r"work=(?P<work>(?!<)(?!TODO\b)\S+)[ \t]+round=(?P<round>\d+):[ \t]*(?P<text>(?!<|TODO\b|…|\.\.\.)\S.*)$",
     re.MULTILINE)
+# mandatory rule 4 per blocked round after the first (v2.77, required_records `replan`):
+# `REPLAN work=<id> round=<r>: increment|rebuild — <why>` in the plan. The brief's
+# `increment|rebuild` is a template, not a call, and so is a placeholder reason
+REPLAN_LINE = re.compile(
+    _RECORD_LEAD + r"REPLAN[ \t]+work=(?P<work>(?!<)(?!TODO\b)[\w#./-]+)[ \t]+round=(?P<round>\d+):"
+    r"[ \t]*(?P<mode>increment|rebuild)(?![\w|/-])[ \t]*(?:—|–|--?|:)[ \t]*"
+    r"(?P<text>(?!<|TODO\b|…|\.\.\.)\S.*)$",
+    re.MULTILINE)
+# the separator of a ROOT-CAUSE line's segments: `<cause> — sites: <sites> — <tests>`
+_SEGMENT = " — "
+
+
+def root_cause_parts(text: str) -> tuple[str, str | None, str]:
+    """(cause, sites, tests) of a ROOT-CAUSE line's text (`ROOT_CAUSE_LINE`'s `text`).
+    `sites` is the first segment that starts with `sites:` — None without one (an older
+    line: `<cause> — <tests>`), `none` for a round without a code defect. `tests` is every
+    segment after it joined again, read by `attest_evidence.claimed_tests` — a test title
+    may hold ` — ` itself; after `sites: none` it is the reason."""
+    segments = text.strip().split(_SEGMENT)
+    at = next((i for i, s in enumerate(segments) if s.strip().startswith("sites:")), None)
+    if at is None or at == 0:
+        return segments[0].strip(), None, ""
+    sites = segments[at].strip()[len("sites:"):].strip()
+    return _SEGMENT.join(segments[:at]).strip(), sites, _SEGMENT.join(segments[at + 1:]).strip()
 # a dated answer to the owner's question (an open `DECISION NEEDED` is none)
 DECISION_LINE = re.compile(_RECORD_LEAD + r"[*_]*DECISION[*_]*[ \t]+\d{4}-\d{2}-\d{2}\b\S*[ \t]*\S")
 # the owner's own word, as the decisions ledger records it (`DECISION <date> owner: …`)
@@ -418,7 +442,8 @@ OWNER_DECISION = re.compile(_RECORD_LEAD + r"[*_]*DECISION[*_]*[ \t]+\d{4}-\d{2}
 # `skipped <kind> work=<id>: <reason>` — a record like REFUTE, so one appended
 # after the plan rides the attestation as REFUTE lines do (`records_only`);
 # `codex-review` is the older spelling of `cross-model`
-SKIP_KINDS = ("cross-model", "codex-review", "refute", "plan-review", "ac-trace", "root-cause")
+SKIP_KINDS = ("cross-model", "codex-review", "refute", "plan-review", "ac-trace", "root-cause",
+              "replan", "class-test")
 SKIP_LINE = re.compile(
     _RECORD_LEAD + r"skipped[ \t]+(?P<kind>" + "|".join(SKIP_KINDS) + r")[ \t]+"
     r"work=(?P<work>(?!<)(?!TODO\b)[^\s:]+):[ \t]*(?P<reason>(?!<|TODO\b|…|\.\.\.)\S.*?)[ \t]*$",
@@ -426,11 +451,11 @@ SKIP_LINE = re.compile(
 
 
 def _record_line(line: str) -> bool:
-    """Is this one line a record — REFUTE, ROOT-CAUSE, a well-formed REVIEW
+    """Is this one line a record — REFUTE, ROOT-CAUSE, REPLAN, a well-formed REVIEW
     line, a dated DECISION or an evidence skip — at most three spaces in (more, or a tab, is a
     code block, refute #199)?"""
-    if REFUTE_LINE.match(line) or ROOT_CAUSE_LINE.match(line) or DECISION_LINE.match(line) \
-            or SKIP_LINE.match(line):
+    if REFUTE_LINE.match(line) or ROOT_CAUSE_LINE.match(line) or REPLAN_LINE.match(line) \
+            or DECISION_LINE.match(line) or SKIP_LINE.match(line):
         return True
     if not re.match(r" {0,3}\S", line):
         return False
@@ -462,8 +487,8 @@ def _answer_in_place(question: str, answer: str) -> bool:
 
 def records_only(before: str, after: str) -> bool:
     """Is `after` the plan `before` plus records, and nothing else? Two shapes
-    count (#199): record lines — REFUTE, ROOT-CAUSE, REVIEW, a dated DECISION,
-    an evidence skip (#225) —
+    count (#199): record lines — REFUTE, ROOT-CAUSE, REPLAN, REVIEW, a dated
+    DECISION, an evidence skip (#225) —
     appended after the plan's last line, blank lines between them; and an open
     `DECISION NEEDED` line answered in place (`_answer_in_place`). Such lines
     ride the attestation commit after the reviewed head (`attest --with`,

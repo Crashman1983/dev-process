@@ -11,14 +11,22 @@ record, or a reasoned `skipped <kind> work=<id>: <reason>`, and nothing else
 passes. This table generalizes that one shape (#282).
 
 A row: {"kind": <record kind>, "when": {<fact>: <value>, ...}, "skippable": bool}.
-Facts, all of a row's `when` must hold:
-  tier_from  int   the work's tier is at least this
-  gate_code  bool  the reviewed diff changes gate code (check_review.is_gate_path)
-  fix_streak int   some file carries at least this many fix commits in the range
-  waived     bool  the plan carries a `review-waived:` line
+Facts, all of a row's `when` must hold — an int fact is a threshold (the work's
+value is at least the row's), a bool fact is equal; the type comes from FACTS, so
+a new int fact cannot fall back to equality and owe its record at one value only:
+  tier_from      int   the work's tier
+  gate_code      bool  the reviewed diff changes gate code (check_review.is_gate_path)
+  fix_streak     int   the fix commits on one file in the range
+  blocked_rounds int   the blocked code rounds the branch adds (attest_evidence)
+  waived         bool  the plan carries a `review-waived:` line
 Kinds and the record that satisfies them:
   refute          `REFUTE work=<id> round=<n>: …`
   root-cause      `ROOT-CAUSE work=<id> round=<n>: …`
+  replan          per blocked round after the first, `REPLAN work=<id> round=<r>:
+                  increment|rebuild — <why>` in the plan (mandatory rule 4)
+  class-test      per blocked round, `ROOT-CAUSE work=<id> round=<r>: <cause> —
+                  sites: <sites> — <tests>` naming a test that stands at head, or
+                  `sites: none — <reason>` for a round without a code defect
   owner-decision  `DECISION <date> owner: …`  (never skippable: a skip of the
                   owner's word would be the agent's word again)
 
@@ -32,9 +40,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-KINDS = ("refute", "root-cause", "owner-decision")
+KINDS = ("refute", "root-cause", "replan", "class-test", "owner-decision")
 UNSKIPPABLE = frozenset({"owner-decision"})
-FACTS = {"tier_from": int, "gate_code": bool, "fix_streak": int, "waived": bool}
+FACTS = {"tier_from": int, "gate_code": bool, "fix_streak": int, "blocked_rounds": int, "waived": bool}
 
 
 @dataclass(frozen=True)
@@ -72,14 +80,15 @@ def rows_problem(rows: object) -> str | None:
 
 
 def _holds(when: dict, facts: dict) -> bool | None:
-    """Do all of `when` hold? None: a fact it needs is unknown (git could not tell)."""
+    """Do all of `when` hold? None: a fact it needs is unknown (git could not tell).
+    An int fact of FACTS is a threshold, a bool fact equality (True >= False is no rule)."""
     unknown = False
     for key, want in when.items():
         have = facts.get(key)
         if have is None:
             unknown = True
             continue
-        if key in ("tier_from", "fix_streak"):
+        if FACTS.get(key) is int:
             if have < want:
                 return False
         elif have != want:
