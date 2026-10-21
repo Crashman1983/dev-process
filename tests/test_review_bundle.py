@@ -1,6 +1,7 @@
 import json
 import importlib.util
 import re
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -586,6 +587,17 @@ def test_tier_two_product_code_is_attacked_inside_the_review(render, tmp_path):
     assert ("**REFUTE WARNING:** 2026-07-09-widget.md (tier: 3) carries no `REFUTE work=<its id> "
             "round=<r>: …` line — from Tier 3 on") in r.stdout
     assert "Tier 2: the review is also the attack" not in r.stdout
+
+
+def test_a_project_row_of_several_facts_warns_like_attest_enforces(render, tmp_path):
+    """Refute of #282: the bundle read only one-fact refute rows; a project row naming
+    tier and gate code together owed a refute attest enforced and the bundle never named."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    (out / "docs/process/model-policy.local.json").write_text(json.dumps({"review_evidence": {
+        "required_records_extra": [{"kind": "refute", "when": {"tier_from": 2, "gate_code": False}}]}}))
+    _seed_repo(out)
+    t = _bundle(out, "--base", "main").stdout
+    assert "**REFUTE WARNING:** 2026-07-09-widget.md (tier: 2) carries no" in t, t[:2000]
 
 
 def test_a_tier_two_plan_without_a_line_is_named_next_to_a_refuted_one(render, tmp_path):
@@ -1747,6 +1759,21 @@ def test_without_a_map_or_with_a_bad_one_every_section_stays(render, tmp_path):
     _seed_with_map(out2, {"classes": {"code": ["*.py"]}, "sections": {"Surfaces": ["nope"]}})
     part = _checklist_part(_run(out2, "--skip-preflight", "--base", "main").stdout)
     assert "## Surfaces" in part and "every section kept" in part
+
+
+def test_an_empty_path_list_keeps_every_section(render, tmp_path):
+    """Refute of #281: an empty diff matched no class, so every mapped section was left out."""
+    import importlib.util
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    sys.path.insert(0, str(out / "scripts/process"))
+    try:
+        spec = importlib.util.spec_from_file_location("bundle_scope", out / "scripts/process/make_review_bundle.py")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+    finally:
+        sys.path.remove(str(out / "scripts/process"))
+    text = "# Checklist\n\n## Surfaces\n\nui\n\n## Security\n\nsec\n"
+    assert mod._scoped_checklist(text, [], SECTION_MAP) == (text, "")
 
 
 def test_a_branch_cannot_scope_its_own_review(render, tmp_path):

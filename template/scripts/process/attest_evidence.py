@@ -44,6 +44,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from check_review import (
+    OWNER_DECISION,
     PLAN_KINDS,
     REFUTE_LINE,
     REVIEW_REPORTS,
@@ -137,6 +138,7 @@ class Evidence:
     skips: frozenset = frozenset()  # kinds skipped for this work
     refute: bool = False  # a REFUTE line of the work at head (or appended after it)
     root_cause: bool = False  # a ROOT-CAUSE line of the work at head (or appended after it)
+    owner_decision: bool = False  # a `DECISION <date> owner:` line in the plan at head
     fix_streak: int | None = 0  # longest fix streak on one file in base..head; None: unknown
     # required_records rows in force at the base (gather reads them; the template's by default)
     records: tuple = tuple(DEFAULTS["required_records"])
@@ -206,6 +208,11 @@ def _policy_layers(root: Path, ref: str, merged) -> tuple[dict, str]:
             return {}, f"{rel} at {ref[:12]} is not valid JSON ({exc}) — the evidence rules cannot be read"
         if not isinstance(layer, dict):
             return {}, f"{rel} at {ref[:12]} is no JSON object — the evidence rules cannot be read"
+        if rel == LOCAL_POLICY and isinstance(layer.get(POLICY_KEY), dict) \
+                and "required_records" in layer[POLICY_KEY]:
+            # the template's rows are the floor: `[]` here would lift every duty (#282 refute)
+            return {}, (f"{rel} at {ref[:12]} sets {POLICY_KEY}.required_records — a project adds rows "
+                        f"under required_records_extra and cannot replace the template's")
         data = merged(data, layer)
     return data, ""
 
@@ -776,6 +783,7 @@ def gather(root: Path, *, work: str, ids: set[str], tier: int, verdict: str, ind
         skips=_skips([own], skip_ids), refute=_refuted([own], plan_ids),
         report_refute=_refuted(report_texts, plan_ids),
         root_cause=_root_caused([own], plan_ids),
+        owner_decision=bool(OWNER_DECISION.search(_unfenced(own))),
         fix_streak=None if plan_review else _fix_streak(root, base, head),
         records=tuple(required_records.table(policy)),
         plan_state=state, plan_rel=rel, plan_gate_code=plan_names_gate_code(plan_read),
@@ -860,6 +868,8 @@ _RECORD_ASK = {
                "commit `REFUTE work={w} round=<r>: <finding or survives: …>`"),
     "root-cause": ("work {w} has no ROOT-CAUSE line at head — find the cause the fix commits share "
                    "(mandatory rule 6) and commit `ROOT-CAUSE work={w} round=<r>: <the cause>`"),
+    "owner-decision": ("work {w} has no owner's word in its plan — the owner decides, recorded as "
+                       "`DECISION <date> owner: <what and why>`"),
 }
 # why a fact is unknown, by the fact
 _UNKNOWN = {"gate_code": "git could not list the reviewed diff — whether it touches gate code is unknown",
@@ -874,7 +884,8 @@ def _owed_records(ev: Evidence) -> list[str]:
     # a REFUTE in the review report counts for gate code below Tier 3 on a cross-model pass
     # (the refute ran inside that review; refute.md)
     refuted = ev.refute or (ev.report_refute and ev.cross_model and ev.tier < 3)
-    present = {k for k, have in (("refute", refuted), ("root-cause", ev.root_cause)) if have}
+    present = {k for k, have in (("refute", refuted), ("root-cause", ev.root_cause),
+                                 ("owner-decision", ev.owner_decision)) if have}
     owed, undecided = required_records.owed(list(ev.records), facts, present, set(ev.skips))
     unknown = [k for k in ("gate_code", "fix_streak") if facts[k] is None and any(k in u for u in undecided)]
     out = [f"{_UNKNOWN[k]}; rebuild the bundle here" for k in unknown]

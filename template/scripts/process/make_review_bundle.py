@@ -435,12 +435,6 @@ For each finding, one line:
 {ac_note}Judge against the checklist and the rules above; cite file:line evidence; a
 `pass` with unfixed blockers is a false green — verdict `block` instead.{plan_note}"""
 
-
-# the tier from which a plan without a REFUTE line is warned about, when the
-# required-records table cannot be read; gate code warns at any tier
-REFUTE_RUN_TIER = 3
-
-
 def _section_map(root: Path, ref: str | None) -> tuple[dict | None, str]:
     """(the project's section map, problem) — read at the base, like every rule a
     branch must not lift for itself. None without a file: every section applies."""
@@ -467,7 +461,7 @@ def _scoped_checklist(text: str, paths: list[str] | None, cfg: dict | None) -> t
     """(the checklist with only the sections the diff's path classes reach, the note
     naming what was left out). Fail closed: no map, no path list, or a path no class
     knows keeps every section — leaving out what a diff may touch is a silent gap."""
-    if cfg is None or paths is None:
+    if cfg is None or not paths:  # no paths: nothing tells which sections the diff reaches
         return text, ""
     unknown = [p for p in paths if not any(path_matches(g, p) for globs in cfg["classes"].values() for g in globs)]
     if unknown:
@@ -491,18 +485,27 @@ def _scoped_checklist(text: str, paths: list[str] | None, cfg: dict | None) -> t
     return "".join(kept), note
 
 
-def _refute_rows(root: Path, ref: str | None) -> tuple[int | None, bool, str]:
-    """(the tier from which the table owes a refute, whether gate code owes one, problem)
-    — read from the required-records table at the base attest reads (#282), so the
-    warning names the duty attest enforces, not a second copy of it."""
+def _refute_rows(root: Path, ref: str | None) -> tuple[list[dict], str]:
+    """(the required-records table's refute rows, problem) — read at the base attest
+    reads (#282), so the warning names the duty attest enforces, not a second copy of
+    it. Unreadable: the template's rows, said so."""
     import attest_evidence  # noqa: PLC0415 — the policy reader; it imports check_review
     import required_records  # noqa: PLC0415
     rules, problem = attest_evidence.review_policy(root, ref or "HEAD")
     if problem:
-        return REFUTE_RUN_TIER, True, problem
-    rows = [r for r in required_records.table(rules) if r["kind"] == "refute"]
-    tier = min((r["when"]["tier_from"] for r in rows if set(r["when"]) == {"tier_from"}), default=None)
-    return tier, any(r["when"] == {"gate_code": True} for r in rows), ""
+        rules = attest_evidence.DEFAULTS
+    return [r for r in required_records.table(rules) if r["kind"] == "refute"], problem
+
+
+def _refute_owed(rows: list[dict], tier: int | None, gate_code: bool | None) -> bool | None:
+    """Does one plan owe a refute by `rows`? None: a fact a row needs is unknown —
+    `required_records.owed` decides, every row and every fact alike."""
+    import required_records  # noqa: PLC0415
+    owed, undecided = required_records.owed(rows, {"tier_from": tier or 0, "gate_code": gate_code},
+                                            set(), set())
+    return True if owed else (None if undecided else False)
+
+
 # at Tier 2 the review itself answers the refuter's brief (`docs/process/refute.md`)
 TIER_TWO_BRIEF = (
     "**Tier 2: the review is also the attack.** Answer each in your report, with evidence: "
@@ -820,24 +823,26 @@ def build(root: Path, base: str | None, plan_filter: str | None = None,
                 "first round if the plan allows; otherwise say so in the verdict and review "
                 "it slice by slice.\n")
 
-    refute_tier, gate_refute, rows_problem = _refute_rows(root, resolved)
+    refute_rows, rows_problem = _refute_rows(root, resolved)
     if rows_problem:
         add(f"*(required-records table not read ({rows_problem}) — the template's refute rule "
             f"applies here)*\n")
+    # a fix round owes a refute again only where a row names gate code: outside it, regression
+    # tests and the delta review (downstream, a refute after every fix round turned each Tier 3
+    # round into two)
+    gate_rows = [r for r in refute_rows if "gate_code" in r["when"]]
 
     if resolved is None and not since and plan_texts:
         # no base, so no gate-code check — the tier needs no git (refutation:
         # the tier warning vanished silently without a base)
         missing = _unrefuted(root, plan_texts)
-        by_tier = [label for label in missing
-                   if refute_tier is not None and (tiers.get(label) or 0) >= refute_tier]
+        owes = {label: _refute_owed(refute_rows, tiers.get(label), None) for label in missing}
+        by_tier = [label for label in missing if owes[label]]
         if by_tier:
             add(_tier_warning(by_tier, tiers))
-        elif missing and any((tiers.get(label) or 0) == 2 for label in missing):
-            # refute v2.47: Tier 2 needs no refute run — unless the diff is gate
-            # code, which nobody can tell without a base; say so instead of nothing
+        elif any(v is None for v in owes.values()):
             add("*(REFUTE check unavailable: no base ref, so gate code cannot be detected — "
-                "if this Tier 2 change touches gate code, it needs a `REFUTE` line)*\n")
+                "if this change touches gate code, it needs a `REFUTE` line)*\n")
     if resolved is not None or since:
         # a delta re-review: the fix round's own gate code, refuted anew
         gate_files = _gate_files(root, since or resolved)
@@ -845,24 +850,20 @@ def build(root: Path, base: str | None, plan_filter: str | None = None,
         if since and before is None:
             gate_files = None
         missing = _unrefuted(root, plan_texts, before) if plan_texts else ["(no plan under review)"]
-        # by tier (`docs/process/refute.md`): from Tier 3 on, a refute before the
-        # first review round; a fix round outside gate code gets regression tests
-        # and the delta review, not another run (downstream, a refute after every
-        # fix round turned each Tier 3 round into two). Tier 2 answers the brief
-        # inside the review.
-        by_tier = [] if since or refute_tier is None else [
-            label for label in missing if (tiers.get(label) or 0) >= refute_tier]
+        gate_code = None if gate_files is None else bool(gate_files)
+        by_gate = [label for label in missing if gate_code and _refute_owed(gate_rows, tiers.get(label), True)]
+        by_tier = [] if since else [label for label in missing if label not in by_gate
+                                    and _refute_owed(refute_rows, tiers.get(label), gate_code)]
         if gate_files is None:
             add("*(REFUTE check unavailable: git could not list the branch's files — a shallow clone "
                 "or no merge base; check by hand whether gate code changed)*\n")
-        elif gate_files and missing and gate_refute:
+        elif by_gate:
             add(f"**REFUTE WARNING:** this {'delta' if since else 'diff'} changes gate code "
                 f"({', '.join(gate_files[:3])}{', …' if len(gate_files) > 3 else ''}) and "
-                f"{', '.join(missing[:3])}{' …' if len(missing) > 3 else ''} carries no "
+                f"{', '.join(by_gate[:3])}{' …' if len(by_gate) > 3 else ''} carries no "
                 f"{'new ' if since else ''}`REFUTE work=<its id> round=<r>: …` line — gate code is "
                 "attacked by a fresh agent before its first review round, and a fix round's gate "
                 "code again (`docs/process/refute.md`). Say in the verdict that it was not.\n")
-            by_tier = []
         if by_tier:
             add(_tier_warning(by_tier, tiers))
 

@@ -2664,11 +2664,15 @@ def waiver_owner_findings(rel: str, text: str, tier: int, rules: dict) -> list[s
     the plan, when the required-records table asks for it (#282). Any text used to do —
     a waiver the agent wrote for itself was a review nobody decided to skip."""
     import required_records  # noqa: PLC0415 — only a waived plan needs it
-    rows = [r for r in required_records.table(rules or {}) if r["kind"] == "owner-decision"]
+    from attest_evidence import DEFAULTS  # noqa: PLC0415
+    # an unreadable policy ({}) is no lifted duty: the template's rows apply (fail closed)
+    rows = [r for r in required_records.table(rules or DEFAULTS) if r["kind"] == "owner-decision"]
     present = {"owner-decision"} if OWNER_DECISION.search(text) else set()
-    owed, _ = required_records.owed(rows, {"tier_from": tier, "waived": True}, present, set())
+    owed, undecided = required_records.owed(rows, {"tier_from": tier, "waived": True}, present, set())
+    # a row a fact left undecided is owed too: no pass on what could not be told
     return [f"{rel}: `review-waived:` without the owner's word — record it in the plan as "
-            f"`DECISION <date> owner: <why the review is skipped>` (owed: {o.why})" for o in owed]
+            f"`DECISION <date> owner: <why the review is skipped>` (owed: {why})"
+            for why in [o.why for o in owed] + undecided]
 
 
 def spec_plan_findings(root: Path, passes: list[dict], in_flight: set[str] | None,
