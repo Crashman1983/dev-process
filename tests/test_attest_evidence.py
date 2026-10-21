@@ -806,9 +806,11 @@ def test_another_issues_criterion_is_cited_qualified_and_not_required(ev_mod):
     assert foreign(own + "#1918/AC-4 and AC-4 here too.\n", "") == set()  # no note for a required id
     # delta round 5: a bare hyphen compound keeps it too; the own issue is matched with its repo
     assert req(own + "#2659/AC-4 cited. Die AC-4-Messung bleibt.\n", "") == {"1", "4"}
-    assert req("issue: #7\nSee other/repo#7/AC-4.\n", "") == set()
-    assert req("issue: me/repo#7\nSee me/repo#7/AC-4.\n", "") == {"4"}
-    assert req("issue: me/repo#7\nSee #7/AC-4.\n", "") == {"4"}  # ambiguous: the plan's own
+    # the own issue by its number, in every form check_review reads: any repository, any
+    # decoration — the plan's own (fail closed; delta rounds 5–6)
+    for decl in ("#7", "me/repo#7", "[#7](https://github.com/me/repo/issues/7)", "<#7>", "**#7**", "#7,"):
+        for cite in ("#7/AC-4", "me/repo#7/AC-4", "other/repo#7/AC-4"):
+            assert req(f"issue: {decl}\nSee {cite}.\n", "") == {"4"}, (decl, cite)
     # the plan's own issue is no other one; a spec's criterion is the work's own
     assert req(own + "See #7/AC-4.\n", "") == {"1", "4"}
     assert req("issue: #7\nSee #9/AC-2.\n", "- AC-2: When a, b shall c.\n") == {"2"}
