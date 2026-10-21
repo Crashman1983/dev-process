@@ -47,6 +47,7 @@ from check_review import (
     PLAN_KINDS,
     REFUTE_LINE,
     REVIEW_REPORTS,
+    ROOT_CAUSE_LINE,
     SKIP_LINE,
     _plan_work_ids,
     _unfenced,
@@ -58,6 +59,7 @@ from check_review import (
     records_only,
     work_key,
 )
+import required_records
 from process_git import git_environment
 
 POLICY = "docs/process/model-policy.json"
@@ -78,6 +80,14 @@ DEFAULTS = {
     # test files of other languages (fnmatch on the repository path, `*` spans folders)
     "test_files": ["*tests/*", "*Tests/*", "*__tests__/*", "spec/*", "*/spec/*", "*Test.*", "*Tests.*",
                    "*Spec.*", "*.test.*", "*.spec.*", "*_test.*", "*_spec.*", "*/test_*", "test_*"],
+    # what a work owes as a record (required_records.py, #282); a project appends rows
+    # under `required_records_extra`
+    "required_records": [
+        {"kind": "refute", "when": {"gate_code": True}},
+        {"kind": "refute", "when": {"tier_from": 3}},
+        {"kind": "root-cause", "when": {"fix_streak": 3}},
+        {"kind": "owner-decision", "when": {"waived": True}},
+    ],
 }
 # an acceptance criterion's id: `AC-1`, `AC-2.1`, `AC-B1`, `AC1` — a digit in it, so
 # prose (`AC-Zeile`, `AC-<id>`) names none; a sentence's final dot is no part of it
@@ -126,6 +136,10 @@ class Evidence:
     single_family: bool = False
     skips: frozenset = frozenset()  # kinds skipped for this work
     refute: bool = False  # a REFUTE line of the work at head (or appended after it)
+    root_cause: bool = False  # a ROOT-CAUSE line of the work at head (or appended after it)
+    fix_streak: int | None = 0  # longest fix streak on one file in base..head; None: unknown
+    # required_records rows in force at the base (gather reads them; the template's by default)
+    records: tuple = tuple(DEFAULTS["required_records"])
     report_refute: bool = False  # a REFUTE line of the work in this attest's review report
     plan_state: str = "ok"  # ok | missing | ambiguous | differs | unreadable
     plan_rel: str = ""
@@ -230,6 +244,10 @@ def review_policy(root: Path, ref: str) -> tuple[dict, str]:
     for key in ("python_files", "python_classes", "test_files"):
         if not (isinstance(got.get(key), list) and all(isinstance(g, str) and g for g in got[key])):
             return {}, f"{POLICY_KEY}.{key} must be a list of patterns"
+    for key in ("required_records", "required_records_extra"):
+        problem = required_records.rows_problem(got.get(key, []))
+        if problem:
+            return {}, f"{POLICY_KEY}.{key}: {problem}"
     return got, ""
 
 
@@ -258,6 +276,17 @@ def _skips(texts: list[str], ids: set) -> frozenset:
 
 def _refuted(texts: list[str], ids: set) -> bool:
     return any(_binds(m.group("work"), ids) for t in texts for m in REFUTE_LINE.finditer(t))
+
+
+def _root_caused(texts: list[str], ids: set) -> bool:
+    return any(_binds(m.group("work"), ids) for t in texts for m in ROOT_CAUSE_LINE.finditer(t))
+
+
+def _fix_streak(root: Path, base: str | None, head: str | None) -> int | None:
+    import check_fix_streak  # noqa: PLC0415 — only a code pass needs it
+    if not (base and head):
+        return None
+    return check_fix_streak.max_streak(root, base, head)
 
 
 def _plan(root: Path, ids: set, head: str) -> tuple[str, str, str, str]:
@@ -746,6 +775,9 @@ def gather(root: Path, *, work: str, ids: set[str], tier: int, verdict: str, ind
         cross_model="cross-model" in tokens, single_family="single-family" in tokens,
         skips=_skips([own], skip_ids), refute=_refuted([own], plan_ids),
         report_refute=_refuted(report_texts, plan_ids),
+        root_cause=_root_caused([own], plan_ids),
+        fix_streak=None if plan_review else _fix_streak(root, base, head),
+        records=tuple(required_records.table(policy)),
         plan_state=state, plan_rel=rel, plan_gate_code=plan_names_gate_code(plan_read),
         plan_acs=required_criteria(plan_read, readable(spec)),
         plan_struck=struck_criteria(plan_read, readable(spec)),
@@ -822,18 +854,42 @@ def _decide_plan_review(ev: Evidence) -> list[str]:
     return out
 
 
+# what each owed kind asks for, by the record that satisfies it
+_RECORD_ASK = {
+    "refute": ("work {w} has no REFUTE line at head — refute it (`docs/process/refute.md`) and "
+               "commit `REFUTE work={w} round=<r>: <finding or survives: …>`"),
+    "root-cause": ("work {w} has no ROOT-CAUSE line at head — find the cause the fix commits share "
+                   "(mandatory rule 6) and commit `ROOT-CAUSE work={w} round=<r>: <the cause>`"),
+}
+# why a fact is unknown, by the fact
+_UNKNOWN = {"gate_code": "git could not list the reviewed diff — whether it touches gate code is unknown",
+            "fix_streak": "git could not read the fix commits of base..head"}
+
+
+def _owed_records(ev: Evidence) -> list[str]:
+    """The records the table says this work owes and does not carry (#282). A fact git
+    cannot tell (the diff, the fix streak) is no exemption: the row is refused as unknown."""
+    facts = {"tier_from": ev.tier, "gate_code": ev.gate_code, "fix_streak": ev.fix_streak,
+             "waived": False}  # a waived plan has no pass to attest; the gate asks its owner
+    # a REFUTE in the review report counts for gate code below Tier 3 on a cross-model pass
+    # (the refute ran inside that review; refute.md)
+    refuted = ev.refute or (ev.report_refute and ev.cross_model and ev.tier < 3)
+    present = {k for k, have in (("refute", refuted), ("root-cause", ev.root_cause)) if have}
+    owed, undecided = required_records.owed(list(ev.records), facts, present, set(ev.skips))
+    unknown = [k for k in ("gate_code", "fix_streak") if facts[k] is None and any(k in u for u in undecided)]
+    out = [f"{_UNKNOWN[k]}; rebuild the bundle here" for k in unknown]
+    for o in owed:
+        ask = _RECORD_ASK.get(o.kind, "work {w} has no `{kind}` record at head").format(w=ev.work, kind=o.kind)
+        skip = f", or commit {_skip(o.kind, ev)}" if o.skippable else ""
+        out.append(f"{ask}{skip} (owed: {o.why})")
+    return out
+
+
 def _decide_code(ev: Evidence) -> list[str]:
     out: list[str] = []
     if ev.tier >= ev.cross_model_from:
         out += _cross_model(ev, f"a pass at tier {ev.tier}")
-    if ev.gate_code is None:
-        out.append("git could not list the reviewed diff — whether it touches gate code is "
-                   "unknown; rebuild the bundle here")
-    elif ev.gate_code and not (ev.refute or "refute" in ev.skips
-                               or (ev.report_refute and ev.cross_model and ev.tier < 3)):
-        out.append(f"the diff changes gate code and work {ev.work} has no REFUTE line at head — "
-                   f"refute it (`docs/process/refute.md`) and commit `REFUTE work={ev.work} "
-                   f"round=<r>: <finding or survives: …>`, or commit {_skip('refute', ev)}")
+    out += _owed_records(ev)
     if "ac-trace" in ev.skips:
         return out
     if not ev.has_reports:

@@ -212,7 +212,8 @@ never archive; a finished one (or a product document at `specs/<x>/plan.md`)
 is not asked for a new round in every later delta. `--plan <name>` bundles
 what it names either way (a Spec Kit plan by its directory or its label).
 
-The review bundle warns when a bundled plan declares Tier 3, or a diff
+The review bundle warns when a bundled plan reaches the tier the
+required-records table names for a refute (Tier 3 in the template), or a diff
 touches gate code at any tier, and a plan carries no such line. A Tier 2 plan that names
 data loss or concurrency is not detected — the reviewer checks its line. A
 Tier 2 bundle carries the brief's questions for the reviewer to answer. A
@@ -220,10 +221,13 @@ delta re-review asks for a new line only when the delta touches gate code —
 the table's fix-round run (a warning: the fix round's line is not enforced);
 a Tier 3 fix round outside gate code asks none.
 
-**Gate code is enforced, not only warned about** (#225: downstream, the
-refute was skipped on 4 of 4 gate-code branches while the bundle warned).
-`attest.py` refuses a Tier 2+ code-review pass whose reviewed range touches
-gate code unless the work's plan carries a `REFUTE work=<id> round=<r>: …`
+**Gate code and Tier 3 are enforced, not only warned about** (#225: downstream,
+the refute was skipped on 4 of 4 gate-code branches while the bundle warned;
+#282: the Tier 3 warning was equally ignored). One table owns the duty —
+`review_evidence.required_records` in `model-policy.json`, evaluated by
+`scripts/process/required_records.py` for attest, the bundle and the review
+gate alike. `attest.py` refuses a Tier 2+ code-review pass whose reviewed range
+touches gate code, and any Tier 3 code-review pass, unless the work's plan carries a `REFUTE work=<id> round=<r>: …`
 line of its own (the same rule as the warning above: a second plan of the
 issue lends none) or a line `skipped refute work=<id>: <reason>` — at the
 reviewed head, or appended after the plan's last line and attested with
