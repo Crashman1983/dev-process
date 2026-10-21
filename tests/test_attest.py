@@ -43,9 +43,13 @@ def _load_gate(root):
     return mod
 
 
-# a criterion the plan names; plan reviews compare against the plan session's model
+# a criterion the plan names; plan reviews compare against the plan session's model. These
+# tests pin the round mechanics: the per-round records a pass after a block owes (v2.77) are
+# skipped with a reason here and pinned in tests/test_attest_evidence.py
 PLAN = ("# Plan\n\ntier: 2\nplan-session model: claude-opus-5\n\n"
-        "AC-1: When asked, the widget answers 42.\n\n## Decisions\n")
+        "AC-1: When asked, the widget answers 42.\n\n## Decisions\n\n"
+        "skipped class-test work=widget: round mechanics only, pinned in test_attest_evidence\n\n"
+        "skipped replan work=widget: round mechanics only, pinned in test_attest_evidence\n")
 EVIDENCE = "AC-1: tests/test_widget.py::test_widget\n"
 
 

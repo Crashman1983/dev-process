@@ -891,3 +891,216 @@ def test_attest_names_the_id_it_left_out(repo):
     _git(repo, "commit", "-qam", "docs: bare mention")
     r = _attest(repo, "--with", _report(repo))
     assert r.returncode == 1 and "write it `#<issue>/AC-11`" in r.stderr, r.stderr
+
+
+# --- v2.77: per blocked code round the branch adds, a class test; per follow-up block, a REPLAN
+
+SHARD = ".process-work/journal/issue-7/2026-10-14.md"
+PLAN_FILE = ".process-work/plans/2026-10-14-widget.md"
+CLASS_TEST = "has no class test for blocked round(s) "
+REPLAN = " without a REPLAN line"
+
+
+def _review(work, round_, verdict="block"):
+    return (f"REVIEW work={work} tier=2 reviewer=lens model=claude-opus-5 "
+            f"independence=bundle,non-implementing verdict={verdict} round={round_}")
+
+
+def _append(repo, rel, *lines, commit=None):
+    p = repo / rel
+    p.parent.mkdir(parents=True, exist_ok=True)
+    old = p.read_text() if p.is_file() else "# 2026-10-14\n"
+    p.write_text(old.rstrip("\n") + "\n\n" + "\n\n".join(lines) + "\n")
+    if commit:
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-q", "-m", commit)
+
+
+def _on_main(repo, rel, *lines):
+    """Lines main gained (an earlier work of the issue, or anything); the branch rebases."""
+    _git(repo, "checkout", "-q", "main")
+    _append(repo, rel, *lines, commit="docs: on main")
+    _git(repo, "checkout", "-q", "7-widget")
+    _git(repo, "rebase", "-q", "main")
+
+
+def _pass(repo, *extra, **kw):
+    return _attest(repo, "--with", _report(repo), "--dry-run", *extra, **kw)
+
+
+def test_a_block_already_at_the_fork_point_is_no_round_of_this_branch(repo):
+    """An earlier work of the same issue blocked round 1 on main: this branch's rounds are 2
+    and 3 — round 2 is its first (no REPLAN), and round 1 owes it no class test."""
+    _on_main(repo, ".process-work/journal/2026-01-01.md", _review("7", 1))
+    _append(repo, SHARD, _review("widget", 2), _review("widget", 3), commit="docs: two blocks")
+    r = _pass(repo)
+    assert r.returncode == 1, r.stderr
+    assert "blocked round(s) 3" + REPLAN in r.stderr, r.stderr
+    assert CLASS_TEST + "2 (no ROOT-CAUSE line), 3 (no ROOT-CAUSE line)" in r.stderr, r.stderr
+
+
+def test_a_block_of_the_branch_still_counts_after_a_rebase(repo):
+    _append(repo, SHARD, _review("widget", 1), commit="docs: block")
+    _on_main(repo, "README.md", "Moved on.")
+    r = _pass(repo)
+    assert r.returncode == 1 and CLASS_TEST + "1 (no ROOT-CAUSE line)" in r.stderr, r.stderr
+
+
+def test_an_uncommitted_block_counts_as_the_round_counter_counts_it(repo):
+    _append(repo, SHARD, _review("widget", 1))
+    r = _pass(repo)
+    assert r.returncode == 1 and CLASS_TEST + "1 (no ROOT-CAUSE line)" in r.stderr, r.stderr
+
+
+def test_lines_compact_journal_moved_on_the_branch_stay_old(repo):
+    """Compared by content, not by path: a folded shard's lines are no new blocks."""
+    _on_main(repo, ".process-work/journal/2026-01-01.md", _review("7", 1))
+    subprocess.run([sys.executable, "scripts/process/compact_journal.py", ".", "--weeks", "1", "--apply"],
+                   cwd=repo, capture_output=True, text=True, check=True)
+    assert _review("7", 1) in (repo / ".process-work/journal/archive/2026-01.md").read_text()
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "docs: compact the journal")
+    _append(repo, SHARD, _review("widget", 2))
+    r = _pass(repo)
+    assert r.returncode == 1 and CLASS_TEST + "2 (no ROOT-CAUSE line)" in r.stderr, r.stderr
+    assert REPLAN not in r.stderr, r.stderr
+
+
+def test_an_unreadable_fork_point_refuses(repo):
+    """No integration ref at all: the rounds the branch adds are unknown — refused, not 0."""
+    base, head = _range(repo)
+    _append(repo, SHARD, _review("widget", 1))
+    _git(repo, "branch", "-D", "main")
+    r = subprocess.run([sys.executable, str(repo / "scripts/process/attest.py"), "--work", "widget", "--tier", "2",
+                        "--model", "claude-opus-5", "--independence", "bundle,non-implementing",
+                        "--verdict", "pass", "--base", base, "--head", head, "--with", _report(repo),
+                        "--dry-run", "."], cwd=repo, capture_output=True, text=True)
+    assert r.returncode == 1 and "fork point of the head cannot be read" in r.stderr, r.stderr
+
+
+def test_the_fork_point_decides_in_gather(repo, monkeypatch):
+    """An ambiguous fork (`GitReadError`) is unknown; a head on the integration ref itself
+    adds no round of its own."""
+    base, head = _range(repo)
+    sys.path.insert(0, str(repo / "scripts/process"))
+    names = ("attest_evidence", "check_review", "dispatch", "report", "process_git", "required_records")
+    try:
+        for name in names:
+            sys.modules.pop(name, None)
+        mod = importlib.import_module("attest_evidence")
+        kw = dict(work="widget", ids={"widget"}, tier=2, verdict="pass", independence="bundle,non-implementing",
+                  plan_review=False, model="claude-opus-5", reports=[], blocks=[(1, _review("widget", 1))])
+        assert mod.gather(repo, base=base, head=head, **kw).blocked_rounds == 1
+        assert mod.gather(repo, base=base, head=base, **kw).blocked_rounds == 0  # main's own head
+
+        def ambiguous(*_a, **_k):
+            raise mod.GitReadError("criss-cross")
+        monkeypatch.setattr(mod, "merge_base", ambiguous)
+        ev = mod.gather(repo, base=base, head=head, **kw)
+        assert ev.blocked_rounds is None
+        assert any("fork point of the head cannot be read" in p for p in mod.decide(ev)), mod.decide(ev)
+    finally:
+        sys.path.remove(str(repo / "scripts/process"))
+        for name in names:
+            sys.modules.pop(name, None)
+
+
+@pytest.mark.parametrize("earlier", ["skipped class-test work=7: an earlier work, blocked before v2.77",
+                                     "ROOT-CAUSE work=7 round=1: an earlier cause — sites: none — refuted"])
+def test_an_earlier_works_journal_record_on_main_relieves_nothing(repo, earlier):
+    _on_main(repo, ".process-work/journal/issue-7/2026-01-01.md", earlier)
+    _append(repo, SHARD, _review("widget", 1))
+    r = _pass(repo)
+    assert r.returncode == 1 and CLASS_TEST + "1 (no ROOT-CAUSE line)" in r.stderr, r.stderr
+    # the same kind of line, new on this branch, is this work's record
+    _append(repo, SHARD, earlier.replace("earlier", "this"))
+    r = _pass(repo)
+    assert r.returncode == 0, r.stderr
+
+
+def test_replan_is_owed_per_follow_up_block_in_the_plan(repo):
+    _append(repo, PLAN_FILE, "skipped class-test work=widget: this test pins the REPLAN row", commit="docs: skip")
+    _append(repo, SHARD, _review("widget", 1))
+    r = _pass(repo)
+    assert r.returncode == 0, r.stderr  # one block: no follow-up yet
+    _append(repo, SHARD, _review("widget", 2), _review("widget", 3))
+    _append(repo, PLAN_FILE, "REPLAN work=widget round=2: increment — one owner, one more case",
+            commit="docs: replan round 2")
+    r = _pass(repo)
+    assert r.returncode == 1 and "blocked round(s) 3" + REPLAN in r.stderr, r.stderr
+    # in the journal it is no call of the plan
+    _append(repo, SHARD, "REPLAN work=widget round=3: rebuild — the guard is the wrong owner")
+    r = _pass(repo)
+    assert r.returncode == 1 and "blocked round(s) 3" + REPLAN in r.stderr, r.stderr
+    # appended after the plan's last line, riding the attestation
+    _append(repo, PLAN_FILE, "REPLAN work=widget round=3: rebuild — the guard is the wrong owner")
+    r = _pass(repo, "--with", PLAN_FILE)
+    assert r.returncode == 0, r.stderr
+    # a reasoned skip instead
+    _git(repo, "checkout", "-q", "--", PLAN_FILE)
+    _append(repo, PLAN_FILE, "skipped replan work=widget: blocked before v2.77", commit="docs: skip replan")
+    r = _pass(repo)
+    assert r.returncode == 0, r.stderr
+
+
+_T = "def test_a():\n    assert True\n"
+_RC = "ROOT-CAUSE work=widget round=1: the guard read a stale flag — "
+CLASS_CASES = [
+    ("only round 1 has one", [2], ("plan", _RC + "sites: none — refuted"), {},
+     CLASS_TEST + "2 (no ROOT-CAUSE line)"),
+    ("no sites", [], ("plan", _RC + "tests/test_widget.py::test_widget"), {},
+     "1 (its ROOT-CAUSE line names no `sites:`"),
+    ("no such test file", [], ("plan", _RC + "sites: widget.py:2 — tests/test_gone.py::test_widget"), {},
+     "tests/test_gone.py"),
+    ("sites none", [], ("plan", _RC + "sites: none — refuted, the finding misread the guard"), {}, None),
+    ("the named test", [], ("plan", _RC + "sites: widget.py:2 — tests/test_widget.py::test_widget"), {}, None),
+    ("a pytest id relative to backend/", [],
+     ("plan", _RC + "sites: backend/calc.py:2 — tests/test_calc.py::test_a"), {"backend/tests/test_calc.py": _T},
+     None),
+    ("a JUnit reference", [], ("plan", _RC + "sites: web/calc.ts:3 — tests/calc.test.ts::adds two numbers"),
+     {"tests/calc.test.ts": 'it("adds two numbers", () => {})\n'}, None),
+    ("a title holding a dash", [],
+     ("plan", _RC + "sites: web/calc.ts:3 — tests/calc.test.ts::adds — and carries"),
+     {"tests/calc.test.ts": 'it("adds — and carries", () => {})\n'}, None),
+    ("an ambiguous suffix", [], ("plan", _RC + "sites: a.py:1 — tests/test_x.py::test_a"),
+     {"a/tests/test_x.py": _T, "b/tests/test_x.py": _T}, "several tracked files"),
+    ("a line in the journal", [], ("journal", _RC + "sites: none — refuted, the finding misread the guard"), {},
+     None),
+    ("a skip in the journal", [], ("journal", "skipped class-test work=widget: blocked before v2.77"), {}, None),
+]
+
+
+@pytest.mark.parametrize("name,blocks,record,files,expected", CLASS_CASES, ids=[c[0] for c in CLASS_CASES])
+def test_a_class_test_per_blocked_round(repo, name, blocks, record, files, expected):
+    for rel, text in files.items():
+        (repo / rel).parent.mkdir(parents=True, exist_ok=True)
+        (repo / rel).write_text(text)
+    _append(repo, SHARD, *(_review("widget", r) for r in [1, *blocks]), commit="feat: tests and blocks")
+    r = _pass(repo)
+    assert r.returncode == 1 and CLASS_TEST + "1 (no ROOT-CAUSE line)" in r.stderr, r.stderr
+    where, line = record
+    _append(repo, PLAN_FILE if where == "plan" else SHARD, line, commit="docs: record" if where == "plan" else None)
+    r = _pass(repo)
+    if expected is None:
+        assert r.returncode == 0, r.stderr
+    else:
+        assert r.returncode == 1 and expected in r.stderr, r.stderr
+
+
+def test_the_root_cause_row_reads_the_works_journal(repo):
+    for i in range(3):
+        (repo / "widget.py").write_text(f"def widget():\n    return 42  # {i}\n")
+        _git(repo, "commit", "-qam", f"fix: widget {i}")
+    r = _pass(repo)
+    assert r.returncode == 1 and "has no ROOT-CAUSE line" in r.stderr, r.stderr
+    _append(repo, SHARD, "ROOT-CAUSE work=widget round=1: one owner answered for two layers")
+    r = _pass(repo)
+    assert r.returncode == 0, r.stderr
+
+
+def test_a_plan_review_pass_asks_no_code_rounds_records(repo):
+    _append(repo, SHARD, _review("widget", 1), _review("widget", 2), commit="docs: blocks")
+    r = _pass(repo)
+    assert r.returncode == 1 and CLASS_TEST in r.stderr, r.stderr  # the code pass owes them
+    r = _attest(repo, "--dry-run", plan_review=True)
+    assert r.returncode == 0, r.stderr

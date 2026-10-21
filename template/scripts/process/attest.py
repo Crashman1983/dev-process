@@ -33,6 +33,10 @@ attested the review has run, and refusing its record bought no cause — only a
 mechanical round (downstream: a pass of two families refused over a cause
 labelled round=6 instead of 5). The duty sits where the fix is made: the
 execute session's `--dry-run` must name no missing cause before it reports.
+v2.77 turns that around for a Tier 2+ pass, on purpose (the owner's class test,
+#297): per blocked code round the branch adds, a cause in the class-test form
+(`… — sites: … — <path>::<test>`), and from the second such round a `REPLAN`
+line per follow-up block in the plan (`attest_evidence`, required_records).
 `--exception TEXT` records an owner's override as `REVIEW-EXCEPTION`, where it
 can be counted.
 
@@ -250,6 +254,24 @@ def round_ids(args, root: Path) -> set[str]:
     return {work} | cands[0][1] if len(cands) == 1 else {work}
 
 
+def _block_lines(texts: list[str], mine: set) -> list[tuple[int, str]]:
+    """(round, line) of every blocking REVIEW line of the work `mine` in `texts`."""
+    out: list[tuple[int, str]] = []
+    for t in texts:
+        lines = t.splitlines()
+        out += [(int(f["round"]), lines[ln - 1]) for ln, f in parse_review_lines(t)[0]
+                if work_key(f["work"]) in mine and f["verdict"] == "block"]
+    return out
+
+
+def block_lines(args, root: Path, journal_dir: Path) -> list[tuple[int, str]]:
+    """The blocks `round_problems` counts, line by line — what attest_evidence reads for
+    the blocked code rounds a branch adds (v2.77 `replan`, `class-test`): the duty and
+    the round number read one set. Apart from `round_problems`, whose return value its
+    other caller (`_dispatch_codex`) reads as it is."""
+    return _block_lines(_texts(root, journal_dir), {work_key(w) for w in round_ids(args, root)})
+
+
 def round_problems(args, root: Path, journal_dir: Path) -> tuple[int, list[str], list[str]]:
     """(the round to write, notes, refusals). A claim above the count and a
     missing cause are bookkeeping about a review that already ran — notes, since
@@ -261,8 +283,7 @@ def round_problems(args, root: Path, journal_dir: Path) -> tuple[int, list[str],
     # distinct rounds, not lines: several reviewers (lenses) of one round each
     # write their block line — that is one round (observed downstream: 21
     # duplicated block lines would have over-counted)
-    blocks = sorted({int(f["round"]) for t in texts for _ln, f in parse_review_lines(t)[0]
-                     if work_key(f["work"]) in mine and f["verdict"] == "block"})
+    blocks = sorted({r for r, _line in _block_lines(texts, mine)})
     counted = 1 + len(blocks)
     last = blocks[-1] if blocks else None
     notes: list[str] = []
@@ -386,7 +407,9 @@ def main() -> int:
         tier=int(args.tier) if args.tier.isascii() and args.tier.isdigit() else 0,
         verdict=args.verdict, independence=args.independence, base=record.get("base"),
         head=record.get("head"), plan_review=args.plan_review, model=args.model,
-        reports=[root / rel for rel in args.with_ or [] if (root / rel).is_file()])
+        reports=[root / rel for rel in args.with_ or [] if (root / rel).is_file()],
+        # a plan review asks no code round's records
+        blocks=None if args.plan_review else block_lines(args, root, journal_dir), journal_dir=journal_dir)
     exception_note = ""
     if args.exception:
         # always written: an owner exception that trips no rule here (a round
