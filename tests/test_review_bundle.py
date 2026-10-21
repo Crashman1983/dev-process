@@ -1696,6 +1696,65 @@ def test_the_transitions_heading_has_one_owner(render, tmp_path):
         sys.path.remove(str(out / "scripts/process"))
 
 
+# --- v2.77 G1: the report names its round in its header --------------------------------
+
+def _block(work: str, rnd: int) -> str:
+    return (f"REVIEW work={work} tier=2 reviewer=r model=m independence=bundle,non-implementing "
+            f"verdict=block round={rnd}\n")
+
+
+def _round_note(text: str) -> str | None:
+    m = re.search(r"Put the header line `round: (\d+)`", text)
+    return m.group(1) if m else None
+
+
+def test_the_bundle_asks_for_the_round_attest_will_write(render, tmp_path):
+    """#293 AC-5: findings are counted per round only when the report says its round; the
+    bundle computes it as attest numbers the REVIEW line (`attest.round_problems`)."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    text = _bundle(out, "--base", "main").stdout
+    grammar = text.split("## Required output grammar", 1)[1]
+    assert _round_note(grammar) == "1" and "header block" in grammar
+    journal = out / ".process-work/journal"
+    journal.mkdir(parents=True, exist_ok=True)
+    # the slug and the issue are one work, and an uncommitted block counts, as in attest
+    (journal / "2026-07-10.md").write_text(_block("widget", 1) + _block("9", 2))
+    assert _round_note(_bundle(out, "--base", "main").stdout) == "3"
+    # a plan review counts its `-plan` rounds apart
+    plan = _bundle(out, "--base", "main", "--plan", "widget", "--plan-review").stdout
+    assert _round_note(plan) == "1" and "put the header line `phase: plan`" in plan
+
+
+def test_no_round_header_when_the_work_cannot_be_determined(render, tmp_path):
+    """Without a plan there is no work to count; ids of the bundle that count differently
+    (a plan review's ids count apart, literally) name no one round — the header is left out."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    _git(out, "rm", "-q", "-r", ".process-work/plans", check=True)
+    _git(out, "commit", "-q", "-m", "no plan", check=True)
+    text = _bundle(out, "--base", "main").stdout
+    assert _round_note(text) is None and "round: <n>" not in text
+    out2 = render(tmp_path / "split", {"project_name": "d", "modules": {}})
+    _seed_repo(out2)
+    journal = out2 / ".process-work/journal"
+    journal.mkdir(parents=True, exist_ok=True)
+    (journal / "2026-07-10.md").write_text(_block("9-plan", 1))  # widget-plan still counts 1
+    assert _round_note(_bundle(out2, "--base", "main", "--plan", "widget", "--plan-review").stdout) is None
+
+
+def test_the_report_header_reads_the_round(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    try:
+        gate = _bundle_module(out, "bundle_round_header")._review_gate
+        head = gate.report_header("review: widget\nwork: #9\nround: 3\n\nround: 4\n")
+        assert head["round"] == ["3"] and head["work"] == ["#9"]
+        assert "round" not in gate.report_header("review: widget\n\nround: 2\n")
+    finally:
+        sys.path.remove(str(out / "scripts/process"))
+
+
+
 def test_the_bundle_carries_the_anchors_of_the_touched_folders(render, tmp_path, tmp_path_factory):
     """#253: a reviewer without tools sees only the bundle; a monorepo keeps its stack
     rules in nested anchors — the touched folders' anchors ride along, others do not."""

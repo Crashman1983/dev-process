@@ -817,7 +817,7 @@ REVIEW_REPORTS = ".process-work/reviews"
 # a plan's state-transition table (`design-template.md`, Transitions) — one rule for
 # the review bundle's note and plan-structure
 TRANSITIONS_HEADING = re.compile(r"^##+\s+Transitions\b", re.MULTILINE)
-_REPORT_KEY = re.compile(r"^\s*(?:[-*+]\s+)?[*_]*(review|audit|work|phase)[*_]*\s*:\s*(\S+)", re.IGNORECASE)
+_REPORT_KEY = re.compile(r"^\s*(?:[-*+]\s+)?[*_]*(review|audit|work|phase|round)[*_]*\s*:\s*(\S+)", re.IGNORECASE)
 
 
 def is_gate_path(rel: str) -> bool:
@@ -923,10 +923,12 @@ def _slug_in_name(slug: str, stem: str) -> bool:
 
 
 def report_header(text: str) -> dict[str, list[str]]:
-    """The `review:`/`audit:`/`work:`/`phase:` values of a report's header
+    """The `review:`/`audit:`/`work:`/`phase:`/`round:` values of a report's header
     block — the lines from the top to the first blank one
     (journal-state-plans.md). The report names its work there, not necessarily
-    in its file name; `phase: plan` marks a plan review (the one reader of it)."""
+    in its file name; `phase: plan` marks a plan review (the one reader of it);
+    `round:` is the round the review bundle and the Codex handoff number as
+    attest does (#293 — `process_kpis.py baseline` counts findings by it)."""
     out: dict[str, list[str]] = {}
     for line in _unfenced(text).splitlines():
         if not line.strip():

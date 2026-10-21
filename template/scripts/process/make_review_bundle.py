@@ -372,7 +372,7 @@ def _fenced(body: str, info: str = "") -> str:
     return f"{fence}{info}\n" + body + ("" if body.endswith("\n") else "\n") + fence + "\n"
 
 
-def _grammar_section(plan_review: bool = False) -> str:
+def _grammar_section(plan_review: bool = False, review_round: int | None = None) -> str:
     # REVIEW fields/enums come from the gate that parses them (import above).
     # The FINDING line's owner is check_issues.py (github-issues module — not
     # importable here, it renders conditionally); its sev/action tokens are
@@ -384,6 +384,12 @@ def _grammar_section(plan_review: bool = False) -> str:
                  "report's header block (with `review:`/`work:`, before the first blank "
                  "line), so rounds on a plan are counted apart from rounds on code."
                  if plan_review else "")
+    # #293: findings are counted per round only when the report names its round
+    round_note = ("" if review_round is None else
+                  f"Put the header line `round: {review_round}` in the report's header block "
+                  "(with `review:`/`work:`, before the first blank line): the round this bundle "
+                  "reviews, as `attest.py` numbers its REVIEW line — findings are counted per round "
+                  "by it (`process_kpis.py baseline`).\n\n")
     # #225: attest.py refuses a Tier 2+ code-review pass whose report misses this
     ac_note = ("" if plan_review else
                "One line per acceptance criterion the plan names — the test that goes red "
@@ -432,9 +438,24 @@ For each finding, one line:
   (`rule=mutation-of-changed-lines`); a class that keeps coming back is the next
   gate to write (`process_kpis.py findings`).
 
-{ac_note}Judge against the checklist and the rules above; cite file:line evidence; a
+{round_note}{ac_note}Judge against the checklist and the rules above; cite file:line evidence; a
 `pass` with unfixed blockers is a false green — verdict `block` instead.{plan_note}"""
 
+
+def _review_round(root: Path, work: set[str], plan_review: bool) -> int | None:
+    """The round this bundle's report belongs to, numbered as attest numbers the
+    REVIEW line (`attest.round_problems`, the one counter) for each work id of the
+    bundled plans — `<id>-plan` for a plan review. None when there is no work, or
+    its ids count differently (a plan review's ids count apart, literally): the
+    report then carries no `round:` header rather than a guessed one."""
+    if not work:
+        return None
+    import argparse  # noqa: PLC0415
+    import attest  # noqa: PLC0415 — the round counter; it imports check_review
+    journal = root / _review_gate.JOURNAL_DIR
+    rounds = {attest.round_problems(argparse.Namespace(work=w + ("-plan" if plan_review else ""), round_=None),
+                                    root, journal)[0] for w in work}
+    return rounds.pop() if len(rounds) == 1 else None
 
 def _section_map(root: Path, ref: str | None) -> tuple[dict | None, str]:
     """(the project's section map, problem) — read at the base, like every rule a
@@ -1016,7 +1037,8 @@ def build(root: Path, base: str | None, plan_filter: str | None = None,
     add(_ui_evidence(root, resolved, plans) + "\n")
 
     add("## Required output grammar\n")
-    add(_grammar_section(plan_review=plan_review) + "\n")
+    review_round = _review_round(root, _bundled_work(root, plan_filter, plan_texts), plan_review)
+    add(_grammar_section(plan_review=plan_review, review_round=review_round) + "\n")
     return "\n".join(out)
 
 
