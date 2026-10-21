@@ -99,6 +99,17 @@ reading the input its own way (mandatory rule 4).
   of returning nothing — `scripts/process/check_review.py::_git_read`; an
   unparseable declaration is None, not a later line —
   `scripts/process/check_review.py::spec_dir_issue`.
+- **Decision after an await on a stale snapshot:** a value is read, the code
+  waits (an await, a thread hop, a subprocess, a lock), and then decides on
+  the value read before — while another path changed it inside the window.
+  Fix rounds opened such windows more often than any other class downstream.
+  *Test:* hold the first path at its wait point, run the other path inside
+  the window, then let the first one decide; it re-reads or refuses, never
+  acts on the old value. Per stack — Python: a snapshot taken before an
+  `await` or `asyncio.to_thread` and trusted after it; React: a stale
+  closure over state or props used after an `await` in a handler or effect;
+  Swift: actor or `@MainActor` reentrancy — state read before an `await`
+  inside the actor is not the state after it.
 - **Stale mapping and expiry:** an assignment derived from a basis (a review
   of a head, a lock of an owner, a mapping of an id) stays live after its
   basis disappeared or changed. *Test:* remove or move the basis and read the

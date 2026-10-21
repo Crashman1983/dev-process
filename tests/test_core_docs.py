@@ -919,3 +919,35 @@ def test_the_bundle_example_runs_claude_without_tools_from_stdin():
     line = next(ln for ln in text.splitlines() if ln.startswith("- **Claude Code:**"))
     assert '--tools ""' in line and "< /tmp/bundle.md" in line, line
     assert '"$(cat' not in line, line
+
+
+# --- v2.77 F: plan quality and review-fix rounds (#293, #297) ---------------------------
+
+def _flat(path) -> str:
+    return " ".join(path.read_text().split())
+
+
+def test_the_plan_brief_attacks_the_state_space_and_calibrates_severity(render, tmp_path):
+    """#293: 39 % of the blocking findings downstream were plan gaps — states, windows and
+    an open grammar handled by enumeration that the plan review never asked about."""
+    out = render(tmp_path, {"project_name": "demo"})
+    refute = (out / "docs/process/refute.md").read_text()
+    brief = " ".join(refute.split("## Refuting a plan", 1)[1].split("\n## ", 1)[0].split())
+    step = brief.split("STATE SPACE", 1)[1].split("Report each finding", 1)[0]
+    for asked in ("states and windows", "open grammar", "unmeasured premise", "stale against the base"):
+        assert asked in step, asked
+    assert brief.index("6. EXECUTABLE") < brief.index("7. STATE SPACE") < brief.index("8. the BYPASSES")
+    assert "A failure class the plan leaves undecided is at least `major`" in brief
+
+
+def test_the_catalog_names_a_decision_after_an_await_on_a_stale_snapshot(render, tmp_path):
+    """#293 AC-3: windows and races were the largest group of fix-induced blockers (15)."""
+    out = render(tmp_path, {"project_name": "demo"})
+    catalog = (out / "docs/process/failure-catalog.md").read_text()
+    facts = catalog.split("## Facts and state", 1)[1].split("\n## ", 1)[0]
+    entry = facts.split("**Decision after an await on a stale snapshot:**", 1)[1].split("\n- **", 1)[0]
+    flat = " ".join(entry.split())
+    assert "*Test:*" in flat and "run the other path inside the window" in flat
+    for stack in ("Python:", "React:", "Swift:"):
+        assert stack in flat, stack
+    assert "to_thread" in flat and "stale closure" in flat and "reentran" in flat

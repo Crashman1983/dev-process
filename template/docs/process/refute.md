@@ -152,10 +152,21 @@ attack is on the plan's claims and gaps, each answered from the repository:
     6. EXECUTABLE — could a small model run each `[mechanical]` task
        without deciding anything? A task that hides a judgment is either
        decided in the plan or marked `[design]` with that judgment named.
-    <gate code only: 7. the BYPASSES and FALSE REFUSALS above, as the test
+    7. STATE SPACE — which states and windows does the change create or
+       read that the plan does not enumerate (a value read before an await
+       and decided on after it, a second writer, a retry, a half-done
+       step)? Does it handle an open grammar (paths, refs, markup, a
+       command line) by listing cases instead of a parser or the owner's
+       reader? Does it rest on an unmeasured premise (a tool's behaviour,
+       a size, a share — asserted, not observed)? Is the plan stale
+       against the base — a cited line, owner or behaviour changed since
+       it was written?
+    <gate code only: 8. the BYPASSES and FALSE REFUSALS above, as the test
     cases the plan must name.>
     Report each finding with its failure scenario (what an executor would
     build, and how it breaks); no rewrites of the plan, no style remarks.
+    A failure class the plan leaves undecided is at least `major`: the
+    code review finds it again, at the price of an execute round.
 
 Findings are scored like any block (`verification-independence.md`, "What
 blocks"); the planner fixes the plan and attests the pass with
