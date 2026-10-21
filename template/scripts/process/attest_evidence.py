@@ -393,24 +393,15 @@ def struck(text: str) -> set[str]:
     return {ac_key(m) for m in STRUCK_LINE.finditer(text)}
 
 
-# an issue reference: `#7`, `owner/repo#7` — not `C#` or an HTML entity `&#7`
-_REF = r"(?<![\w&])(?:[\w.-]+/[\w.-]+)?#(?P<n>\d+)\b"
-# an AC id bound to an issue reference right beside it — the only form read as another
-# issue's criterion (#287): "AC-11-Messung (#2659)", "AC-11 measurement (#2659)",
-# "AC-2 of #9", "#9's AC-2". A parenthesis or a preposition binds; a verb never does
-# ("AC-5 closes #9" stays the plan's own, fail closed)
-_CITED_AFTER = re.compile(_AC + r"(?:(?:[- ][\w]+)?[ \t]*\n?[ \t]*\([ \t]*|[ \t]+(?:of|from|aus|von|in)[ \t]+)"
-                          + _REF)
-# every mention of an id, hyphen compounds included (`AC-11-Messung`): counting more mentions
-# only keeps more ids required
-_MENTION = re.compile(r"\b" + _AC + r"(?!\w)")
-_CITED_BEFORE = re.compile(_REF + r"(?:'s)?[ \t]+(?:(?:AC|criterion|Kriterium)[ \t]+)?" + _AC)
+# another issue's criterion, cited qualified: `#2659/AC-11`, `owner/repo#9/AC-2` (#287).
+# Only this form is read as a citation; a bare `AC-<id>` is always the plan's own
+_QUALIFIED = re.compile(r"(?<![\w&])(?:[\w.-]+/[\w.-]+)?#(?P<n>\d+)/" + _AC + r"(?![\w])")
 
 
 def foreign_criteria(plan: str, spec: str) -> frozenset[str]:
-    """The ids the plan names only beside another issue — `AC-11` in "dsh runs up to the
-    AC-11 measurement (#2659)" is that issue's criterion, not this plan's (#287). Left out
-    of the required ones and named by attest, never dropped in silence."""
+    """The criteria the plan cites from another issue, qualified as `#N/AC-<id>` (#287) —
+    not required, and named by attest, never dropped in silence. A bare `AC-<id>` stays
+    the plan's own: prose cannot tell a citation from an own criterion with its origin."""
     return _criteria(plan, spec)[2]
 
 
@@ -430,29 +421,27 @@ def struck_criteria(plan: str, spec: str) -> frozenset[str]:
     return _criteria(plan, spec)[1]
 
 
-def _foreign_only(plan: str) -> set[str]:
-    """Ids every mention of which is bound to an issue the plan does not declare
-    (`_CITED_AFTER`, `_CITED_BEFORE`); a definition line (`AC-<id>: …`) or one free mention
-    keeps an id the plan's own."""
+def _cited_elsewhere(plan: str) -> tuple[str, set[str]]:
+    """(the plan with its citations of other issues blanked, the ids cited that way). A
+    citation of an issue the plan declares itself is no citation: it stays a mention."""
     from check_review import declared_issue_numbers  # noqa: PLC0415
     mine = set(declared_issue_numbers(plan))
-    spans: dict[str, int] = {}
-    for rx in (_CITED_AFTER, _CITED_BEFORE):
-        for m in rx.finditer(plan):
-            if int(m.group("n")) not in mine:
-                spans[ac_key(m)] = spans.get(ac_key(m), 0) + 1
-    defined = {ac_key(m) for m in AC_LINE.finditer(plan)}
-    mentions: dict[str, int] = {}
-    for m in _MENTION.finditer(plan):
-        mentions[ac_key(m)] = mentions.get(ac_key(m), 0) + 1
-    return {k for k, n in spans.items() if k not in defined and n >= mentions.get(k, 0)}
+    cited: set[str] = set()
+
+    def blank(m: re.Match) -> str:
+        if int(m.group("n")) in mine:
+            return m.group(0)
+        cited.add(ac_key(m))
+        return " " * len(m.group(0))
+    return _QUALIFIED.sub(blank, plan), cited
 
 
 def _criteria(plan: str, spec: str) -> tuple[frozenset[str], frozenset[str], frozenset[str]]:
     plan, spec = _EXAMPLE_SPAN.sub(" ", plan), _EXAMPLE_SPAN.sub(" ", spec)
     in_spec = {ac_key(m) for m in AC_ID.finditer(spec)}
-    foreign = _foreign_only(plan) - in_spec  # a spec's criterion is the work's own
-    named = ({ac_key(m) for m in AC_ID.finditer(plan)} - foreign) | in_spec
+    plan, cited = _cited_elsewhere(plan)
+    named = {ac_key(m) for m in AC_ID.finditer(plan)} | in_spec
+    foreign = cited - named  # a bare mention or the spec keeps an id the work's own
     open_ = held_open(plan)
     gone = (struck(spec) | (struck(plan) - in_spec)) - open_
     return frozenset(named - open_ - gone), frozenset(gone & named), frozenset(foreign)
@@ -969,7 +958,8 @@ def _decide_code(ev: Evidence) -> list[str]:
         bodies = ev.claims.get(n, [])
         if not bodies:
             out.append(f"AC-{n} has no line in the report — name the test that goes red when it "
-                       f"breaks (`AC-{n}: <path>::<test>`) or `AC-{n}: unproven`")
+                       f"breaks (`AC-{n}: <path>::<test>`) or `AC-{n}: unproven`; if the plan only "
+                       f"cites another issue's AC-{n}, write it `#<issue>/AC-{n}` (#287)")
         # a heading or a prose line of the criterion is no claim; one naming a test is
         unproven = [b for b in bodies if re.search(r"\bunproven\b", _ITEM_ANY.sub(" ", b), re.IGNORECASE)]
         if unproven:
@@ -1008,6 +998,6 @@ def evidence_problems(root: Path, *, work: str, ids: set[str], tier: int, verdic
                 base=base, head=head, plan_review=plan_review, model=model, reports=reports)
     for n in sorted(ev.plan_foreign):
         # never dropped in silence (#287): the reader sees which id was left out and why
-        print(f"attest: note — AC-{n} not required: {ev.plan_rel} names it only beside another "
-              f"issue's #N; define it (`AC-{n}: …`) if it is this work's", file=sys.stderr)
+        print(f"attest: note — AC-{n} not required: {ev.plan_rel} cites it as another issue's "
+              f"(`#<issue>/AC-{n}`)", file=sys.stderr)
     return decide(ev)

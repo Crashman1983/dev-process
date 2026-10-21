@@ -15,12 +15,12 @@ English version: [CHANGELOG.md](CHANGELOG.md). Die Releases vor v2.28.2:
 
 **Was sich ändert.**
 - Der Codex-Dispatch schreibt zuerst den Header-Block, danach den Titel (#286).
-- attest lässt eine ID weg, deren jede Erwähnung direkt an ein anderes Issue gebunden ist — „AC-11-Messung (#2659)“, „AC-2 of #9“, „#9's AC-2“; ein Verb bindet nicht — und nennt sie in einem Hinweis (#287). Eine Definitionszeile `AC-<id>: …`, eine freie Erwähnung, ein Verweis auf das eigene Issue oder die Spec halten eine ID als Pflicht.
+- Ein Plan zitiert das Kriterium eines anderen Issues qualifiziert, `#2659/AC-11`: attest verlangt es nicht und nennt es in einem Hinweis (#287). Eine nackte `AC-<id>` bleibt ein eigenes Kriterium — Prosa unterscheidet kein Zitat von einem eigenen Kriterium mit Herkunftsangabe —, und ihre Ablehnung nennt jetzt die qualifizierte Form als Ausweg.
 - `verification-independence.md`: Ein lesender Reviewer über opencode braucht auch gesperrte Umleitungen, Pipes und Verkettungen — ein erlaubtes `git show*` ließ ein Review `git show … > <Datei>` schreiben.
 
-**Update.** Nichts zu tun. Ein dispatchter Codex-Bericht von vor dem Update hat den Titel noch oben: Lehnt das Gate ihn ab, den Titel unter den Header-Block verschieben.
+**Update.** Ein Plan, der das Kriterium eines anderen Issues nennt, schreibt es `#<issue>/AC-<id>`; eine nackte ID bleibt Pflicht, und attest sagt das. Ein dispatchter Codex-Bericht von vor dem Update hat den Titel noch oben: Lehnt das Gate ihn ab, den Titel unter den Header-Block verschieben.
 
-**Geänderte Abschnitte.** `verification-independence.md` (The review bundle — the portable interface to any reviewer)
+**Geänderte Abschnitte.** `journal-state-plans.md` (Plans), `verification-independence.md` (The review bundle — the portable interface to any reviewer)
 
 Details: #286 #287
 

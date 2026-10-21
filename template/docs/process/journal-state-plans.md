@@ -68,6 +68,10 @@ the integration branch is history:
 - Each acceptance criterion is one EARS line, `AC-<id>: When <trigger>,
   <system> shall <response>`, with exactly one `shall` (a project writing in
   another language names its word, `shall_words`) and an id used once.
+- Another issue's criterion is cited qualified, `#<issue>/AC-<id>`; attest
+  then does not require it and names it. A bare `AC-<id>` is always this
+  plan's own criterion — prose cannot tell a citation from an own criterion
+  with its origin (#287).
 - Once execution starts (a ticked task) and at the merge push, each criterion
   names its planned test in the review report's own grammar: `AC-<id>:
   <path>::<test>` (the test may not exist yet) or `AC-<id>: struck — <reason>`

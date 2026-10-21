@@ -10,7 +10,7 @@ English version: [NEWS.md](NEWS.md).
 ## v2.76.1 — Ein Codex-Review-Bericht besteht die Prüfung, ein zitiertes Kriterium ist keine Pflicht
 
 Ein Review des Codex-Reviewers wird beim Push nicht mehr wegen eines fehlenden
-Headers abgelehnt. Ein Plan, der das Kriterium eines anderen Issues erwähnt,
+Headers abgelehnt. Ein Plan, der das Kriterium eines anderen Issues als `#2659/AC-11` zitiert,
 muss es nicht mehr mit einem eigenen Test belegen.
 
 ## v2.76.0 — Prüfungen fangen vor dem Review, was eine Regel fangen kann
