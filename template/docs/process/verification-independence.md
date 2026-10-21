@@ -106,7 +106,10 @@ Dispatching is harness-plumbing around that artifact — pick what exists:
   answer (v2.76). Grant read access only — `read`, `grep`, `glob`, `list`
   and the reading git commands (`git diff*`, `git log*`, `git show*`,
   `git grep*`) — with `edit`, `webfetch` and every other shell command
-  denied, so the review stays `non-implementing`.
+  denied, so the review stays `non-implementing`. Deny redirects, pipes and
+  chains too (`*>*`, `*<*`, `*|*`, `*;*`, `*&*`, `*$(*`, ``*`*``): a pattern
+  matches the whole command line, so `git show*` alone let a reviewer write
+  `git show … > <file>` (v2.76.1).
 - **Any chat model:** paste the bundle as the whole prompt.
 
 **Give a reviewer the code, not only the diff, where the harness allows a
