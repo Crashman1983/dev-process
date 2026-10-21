@@ -66,6 +66,7 @@ from pathlib import Path
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from process_git import NoForkPoint, fork_point, git_environment  # noqa: E402
+from template_update import ANSWERS  # noqa: E402
 from template_verify import carried_base, update_paths, update_seen, verify  # noqa: E402
 
 JOURNAL_DIR = ".process-work/journal"
@@ -2709,6 +2710,38 @@ def verified_template_plan(root: Path, rel: str, text: str, *, tip: str = "HEAD"
     return bool(pure and rel in (paths_in_flight(root, tip, base=base) or set()))
 
 
+def _update_carrier(root: Path, ref: str) -> str:
+    """The passenger tip that carries a template update on a train staging
+    branch; "HEAD" everywhere else.
+
+    The gate judges a staging branch whole, but an update's project delta is
+    the update's own: computed over the whole train, the other passengers'
+    files counted as the update's unreviewed delta and the batch was refused
+    at push (#271). The train itself verifies per passenger (`train.py`);
+    this gives the gate the same tip. Exactly one passenger may change the
+    answers file — none, several, or an unreadable chain keep the whole range
+    (fail closed: the stricter reading)."""
+    branch = (_git_bytes(root, "symbolic-ref", "--short", "-q", "HEAD") or b"").decode(errors="replace").strip()
+    tip_id = _commit_id(root, "HEAD")
+    if not branch.startswith("train/") or not tip_id:
+        return "HEAD"
+    walk = _git_bytes(root, "rev-list", "--first-parent", "--parents", tip_id, f"^{ref}")
+    if walk is None:
+        return "HEAD"
+    chain = [ln.split() for ln in walk.decode(errors="replace").splitlines() if ln.strip()]
+    if not chain or any(len(c) != 3 for c in chain):
+        return "HEAD"  # not the train's chain of two-parent merges
+    def answers_blob(rev: str) -> bytes | None:
+        return _git_bytes(root, "rev-parse", "-q", "--verify", f"{rev}:{ANSWERS}")
+
+    base_answers = answers_blob(ref)
+    blobs = {c[2]: answers_blob(c[2]) for c in chain}
+    if base_answers is not None and None in blobs.values():
+        return "HEAD"  # a passenger without a readable answers file: no carrier is certain
+    carriers = [tip for tip, blob in blobs.items() if blob != base_answers]
+    return carriers[0] if len(carriers) == 1 else "HEAD"
+
+
 def template_review_findings(root: Path, update: dict, passes: list[dict],
                              *, tip: str = "HEAD") -> list[str]:
     """One owner for the update's review duty, used by gate, finish and train."""
@@ -2881,7 +2914,7 @@ def check(root: Path) -> tuple[list[str], list[str]]:
 
     # A report is presentation, never authority. Recompute from the trusted
     # integration baseline and release renders; template loss is project delta.
-    update = None
+    update, update_tip = None, "HEAD"
     if scope_base:
         try:
             # the ref, not scope_base: verify demands one fork point itself
@@ -2890,11 +2923,12 @@ def check(root: Path) -> tuple[list[str], list[str]]:
                 raise ValueError('the integration ref behind the merge base disappeared')
             # the gate judges what is pushed: the committed tip, never the
             # worktree (template_update refuses a dirty tree before updating)
-            update = verify(root, ref)
+            update_tip = _update_carrier(root, ref)
+            update = verify(root, ref, update_tip)
         except (GitReadError, ValueError, OSError, subprocess.TimeoutExpired) as exc:
             hard.append(f'template verification failed: {exc}')
     if update and (update['update'] or update['errors']):
-        for finding in template_review_findings(root, update, passes):
+        for finding in template_review_findings(root, update, passes, tip=update_tip):
             if finding.startswith('template verification failed:'):
                 hard.append(finding)
             else:

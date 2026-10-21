@@ -1089,3 +1089,61 @@ def test_applying_a_release_file_after_the_review_keeps_the_review(update, monke
     assert report['project_delta'] == ['rule.local.md'], report
     hard, _ = check(root, monkeypatch)
     assert not any('REVIEW of the update range' in h for h in hard), hard
+
+
+def test_the_review_report_committed_after_head_keeps_the_update_seen(update, monkeypatch):
+    """#272: the review's own report lands after the reviewed head; counted as
+    project delta it made the update unseen and its ack stale, so a template
+    update with a project delta could never clear."""
+    root, _, base, verifier = update
+    write(root, 'rule.local.md', 'project change\n')
+    head = commit(root)
+    write(root, '.process-work/journal/review.md',
+          'REVIEW work=update tier=2 reviewer=fresh model=same '
+          'independence=bundle,non-implementing verdict=pass round=1 '
+          f'base={base} head={head}\n')
+    write(root, '.process-work/reviews/update-r1.md', '# review\nverdict: pass\n')
+    commit(root)
+    report = verifier.verify(root, base)
+    assert report['project_delta'] == ['rule.local.md'], report
+    hard, _ = check(root, monkeypatch)
+    assert not any('REVIEW of the update range' in h for h in hard), hard
+
+
+def _train_with(root, base, *branches):
+    git(root, 'checkout', '-qb', 'train/x', base)
+    for b in branches:
+        git(root, 'merge', '-q', '--no-ff', '-m', f'train: merge {b}', b)
+
+
+def test_a_train_with_an_update_and_another_branch_judges_the_update_on_its_own_branch(update, monkeypatch):
+    """#271: the gate computed the update's project delta over the whole train,
+    so the other passenger's files counted as the update's unreviewed delta."""
+    root, _, base, verifier = update
+    write(root, 'rule.local.md', 'project change\n')
+    head = commit(root)
+    write(root, '.process-work/journal/review.md',
+          'REVIEW work=update tier=2 reviewer=fresh model=same '
+          'independence=bundle,non-implementing verdict=pass round=1 '
+          f'base={base} head={head}\n')
+    commit(root)
+    git(root, 'checkout', '-qb', 'other', base)
+    write(root, 'src/other.py', 'x = 1\n')
+    commit(root)
+    _train_with(root, base, 'update', 'other')
+    hard, _ = check(root, monkeypatch)
+    assert not any('REVIEW of the update range' in h for h in hard), hard
+    # the whole range would have counted the passenger's file as the update's delta
+    assert 'src/other.py' in verifier.verify(root, base)['project_delta']
+
+
+def test_two_passengers_changing_the_answers_keep_the_whole_range(update, monkeypatch):
+    """Fail closed: with no single carrier the gate keeps judging the whole train."""
+    root, _, base, _ = update
+    cr = load('check_review')
+    git(root, 'checkout', '-qb', 'second', base)
+    git(root, 'checkout', 'update', '--', '.copier-answers.yml')  # same answers: merges cleanly
+    write(root, 'src/second.py', 'y = 2\n')
+    commit(root)
+    _train_with(root, base, 'update', 'second')
+    assert cr._update_carrier(root, 'main') == 'HEAD'

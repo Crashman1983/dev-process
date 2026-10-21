@@ -238,9 +238,12 @@ def _verify(root: Path, base: str, tip: str, *, worktree: bool = False,
                 owned += [ln.strip() for ln in old_owned[1].decode().splitlines()
                           if ln.strip() and not ln.lstrip().startswith('#')]
             for rel in sorted(changed):
+                # the prefixes mirror check_review's record homes; review reports
+                # land after the reviewed head, so counting them as project delta
+                # made an update's own review unseen and its ack stale (#272)
                 if rel.startswith('.process-work/') and (rel == ACK or
                         rel.startswith(('.process-work/journal/', '.process-work/plans/',
-                                        '.process-work/state/'))):
+                                        '.process-work/state/', '.process-work/reviews/'))):
                     continue  # existing review bookkeeping, not template evidence
                 actual_old = _entry(root, base, rel)
                 if reads is not None:
