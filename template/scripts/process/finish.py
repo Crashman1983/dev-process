@@ -219,7 +219,7 @@ def check(root: Path) -> tuple[list[str], list[str]]:
                     to_archive.append(p.name)
                 continue
             ids = _plan_work_ids(p.stem, text, include_dedated=True)
-            own = clearing_passes(root, passes, tier)  # the gate's answer which passes count (#241)
+            own = clearing_passes(root, passes, tier, fork)  # the gate's answer, at its base (#241)
             if _cleared(own, ids, tier):
                 stale = stale_review(root, own, ids, tier, in_flight or set())
                 if stale:
@@ -228,7 +228,7 @@ def check(root: Path) -> tuple[list[str], list[str]]:
                     to_archive.append(p.name)
             elif _cleared(passes, ids, tier):  # cleared, but only by another model family (#241)
                 blockers.append(own_family_missing(f"{PLANS_ACTIVE}/{p.name}", tier,
-                                                   own_family_rule(root)[0]))
+                                                   own_family_rule(root, fork)[0]))
             else:
                 blockers.append(no_clearing_review(f"{PLANS_ACTIVE}/{p.name}", tier, ids)
                                 + " — run /review before /finish")
@@ -239,7 +239,7 @@ def check(root: Path) -> tuple[list[str], list[str]]:
     done_spec_dirs: list[str] = []
     sdir = root / SPECS_DIR
     if sdir.is_dir():
-        in_flight_specs = spec_plan_findings(root, passes, in_flight)  # the gate's duty (#266)
+        in_flight_specs = spec_plan_findings(root, passes, in_flight, fork)  # the gate's duty (#266), at its base
         blockers.extend(f"{f}; run /review before /finish" for f in in_flight_specs)
         for name, tier, ids in speckit_unreviewed(root, passes):
             if any(f.startswith(f"{SPECS_DIR}/{name}/") for f in in_flight_specs):

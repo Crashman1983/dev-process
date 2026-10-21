@@ -521,3 +521,37 @@ def test_an_unknown_range_asks_the_owners_word_of_an_archived_waiver(render, tmp
         for name in ("check_review", "attest_evidence", "dispatch", "required_records"):
             sys.modules.pop(name, None)
 
+
+def test_finish_reads_the_spec_plan_duty_at_the_reviewed_base(render, tmp_path):
+    """Cross-model review, delta round 4: /finish read the policy at main's tip; main lifting
+    `own_family_from_tier` after the fork let a spec plan cleared by another family pass,
+    while the gate and attest read the fork point."""
+    r = _spec_plan_repo(render, tmp_path)
+    _git(r.root, "checkout", "-q", "main")
+    r.policy({"review_evidence": {"own_family_from_tier": 4}})
+    _git(r.root, "add", "-A")
+    _git(r.root, "commit", "-q", "-m", "policy after the fork")
+    _git(r.root, "checkout", "-q", "feature")
+    r.passes((CODEX, r.neu))
+    _git(r.root, "add", "-A")
+    _git(r.root, "commit", "-q", "-m", "journal")
+    out = subprocess.run([sys.executable, str(r.root / "scripts/process/finish.py")], cwd=r.root,
+                         capture_output=True, text=True)
+    assert out.returncode == 1 and "cleared only by passes outside" in out.stdout, out.stdout
+
+
+def test_finish_judges_an_active_plan_by_the_policy_at_the_reviewed_base(render, tmp_path):
+    """The same class for an active plan: main lifting `own_family_from_tier` after the
+    fork must not let /finish archive a plan another family alone cleared."""
+    r = Repo(render, tmp_path)
+    _git(r.root, "checkout", "-q", "main")
+    r.policy({"review_evidence": {"own_family_from_tier": 4}})
+    _git(r.root, "add", "-A")
+    _git(r.root, "commit", "-q", "-m", "policy after the fork")
+    _git(r.root, "checkout", "-q", "feature")
+    r.passes((CODEX, r.neu))
+    _git(r.root, "add", "-A")
+    _git(r.root, "commit", "-q", "-m", "journal")
+    out = subprocess.run([sys.executable, str(r.root / "scripts/process/finish.py")], cwd=r.root,
+                         capture_output=True, text=True)
+    assert out.returncode == 1 and "cleared only by passes outside" in out.stdout, out.stdout
