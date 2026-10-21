@@ -1039,3 +1039,152 @@ def test_active_spec_with_issue_ref_passes(render, tmp_path):
     (d / "spec.md").write_text("# Feature\n\nissue: #7\n\nStories.\n")
     r = _run(out)
     assert r.returncode == 0, r.stdout
+
+
+# --- #297 AC-6: a blocker or major the branch adds says what could have caught it ---
+
+NO_CLASS = "without class="
+OLD = "FINDING sev=major action=fix issue=- the old cache is never invalidated\n"
+
+
+def _git(root: Path, *args: str) -> str:
+    return subprocess.run(["git", "-C", str(root), "-c", "user.email=t@t", "-c", "user.name=t",
+                           "-c", "commit.gpgsign=false", *args],
+                          check=True, capture_output=True, text=True).stdout.strip()
+
+
+def _branch(out: Path, report: str | None = None) -> Path:
+    """main holding the render (and a report, if given), a feature branch with one commit
+    off it: the range a finding is new in."""
+    if report is not None:
+        _report(out, "2026-10-20-old.md", report)
+    _git(out, "init", "-q", "-b", "main")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-qm", "base")
+    _git(out, "checkout", "-qb", "feature")
+    _git(out, "commit", "-q", "--allow-empty", "-m", "start")
+    return out
+
+
+def test_a_new_report_owes_class_on_blockers_and_majors(render, tmp_path):
+    out = _branch(_render(render, tmp_path))
+    _report(out, "2026-10-21-new.md", VALID_REPORT + "FINDING sev=major action=fix issue=- guard read twice\n")
+    r = _run(out)
+    assert r.returncode == 1 and f"2026-10-21-new.md: major finding {NO_CLASS}" in r.stdout \
+        and "'guard read twice'" in r.stdout, r.stdout
+    _report(out, "2026-10-21-new.md", VALID_REPORT + "FINDING sev=blocker action=fix issue=- lost write\n")
+    assert f"blocker finding {NO_CLASS}" in _run(out).stdout
+    for line in ("FINDING sev=major action=fix issue=- class=testable rule=mutation guard read twice\n",
+                 "FINDING sev=blocker action=fix issue=- class=judgment lost write\n",
+                 "FINDING sev=minor action=fix issue=- a minor needs no class\n"):
+        _report(out, "2026-10-21-new.md", VALID_REPORT + line)
+        r = _run(out)
+        assert r.returncode == 0 and NO_CLASS not in r.stdout, (line, r.stdout)
+
+
+def test_an_old_report_owes_class_only_on_its_new_lines(render, tmp_path):
+    out = _branch(_render(render, tmp_path), VALID_REPORT + OLD)
+    r = _run(out)
+    assert r.returncode == 0 and NO_CLASS not in r.stdout, r.stdout
+    # publishing writes `issue=#N` into the old line: still the same finding
+    _report(out, "2026-10-20-old.md", VALID_REPORT + OLD.replace("issue=-", "issue=#61"))
+    assert _run(out).returncode == 0
+    _report(out, "2026-10-20-old.md", VALID_REPORT + OLD + "- FINDING sev=major action=fix issue=- new on the branch\n")
+    r = _run(out)
+    assert r.returncode == 1 and "'new on the branch'" in r.stdout and "old cache" not in r.stdout, r.stdout
+
+
+def test_old_lines_are_judged_at_the_fork_point_not_at_mains_tip(render, tmp_path):
+    """A line main changed after the branch forked is still old on the branch."""
+    out = _branch(_render(render, tmp_path), VALID_REPORT + OLD)
+    _git(out, "checkout", "-q", "main")
+    _report(out, "2026-10-20-old.md", VALID_REPORT + OLD.replace("old cache", "stale cache"))
+    _git(out, "commit", "-qam", "main rewords the finding")
+    _git(out, "checkout", "-q", "feature")
+    r = _run(out)
+    assert r.returncode == 0 and NO_CLASS not in r.stdout, r.stdout
+
+
+def test_an_unreadable_head_or_fork_refuses(render, tmp_path):
+    report = VALID_REPORT + "FINDING sev=major action=fix issue=- guard read twice\n"
+    # unborn HEAD: no commit to fork from
+    out = _render(render, tmp_path / "unborn")
+    _git(out, "init", "-q", "-b", "main")
+    _report(out, "2026-10-21-new.md", report)
+    r = _run(out)
+    assert r.returncode == 1 and "HEAD cannot be read" in r.stdout, r.stdout
+    # HEAD names a commit git does not have
+    out = _branch(_render(render, tmp_path / "broken"))
+    _report(out, "2026-10-21-new.md", report)
+    (out / ".git/refs/heads/feature").write_text("1" * 40 + "\n")
+    r = _run(out)
+    assert r.returncode == 1 and "HEAD cannot be read" in r.stdout, r.stdout
+    # the report at the fork point cannot be read
+    out = _branch(_render(render, tmp_path / "fork"), VALID_REPORT + OLD)
+    blob = _git(out, "rev-parse", "main:.process-work/reviews/2026-10-20-old.md")
+    (out / ".git/objects" / blob[:2] / blob[2:]).unlink()
+    r = _run(out)
+    assert r.returncode == 1 and "cannot be read at the fork point" in r.stdout, r.stdout
+
+
+def test_an_ambiguous_fork_point_refuses(render, tmp_path):
+    out = _branch(_render(render, tmp_path))
+    (out / "feature.md").write_text("a1\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-qm", "a1")
+    a1 = _git(out, "rev-parse", "HEAD")
+    _git(out, "checkout", "-q", "main")
+    (out / "main.md").write_text("b1\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-qm", "b1")
+    b1 = _git(out, "rev-parse", "HEAD")
+    _git(out, "merge", "-q", "--no-ff", "-m", "main takes feature", a1)
+    _git(out, "checkout", "-q", "feature")
+    _git(out, "merge", "-q", "--no-ff", "-m", "feature takes main", b1)
+    _report(out, "2026-10-21-new.md", VALID_REPORT + "FINDING sev=major action=fix issue=- guard read twice\n")
+    r = _run(out)
+    assert r.returncode == 1 and "fork point cannot be read" in r.stdout, r.stdout
+
+
+def test_no_branch_range_is_a_note_and_binds_nothing(render, tmp_path):
+    """On the integration ref, or in a readable repo without one (a clone with only a
+    feature branch), no finding is new here: a note, as plan-structure does."""
+    report = VALID_REPORT + "FINDING sev=major action=fix issue=- guard read twice\n"
+    out = _render(render, tmp_path / "nomain")
+    _git(out, "init", "-q", "-b", "dev")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-qm", "base")
+    _report(out, "2026-10-21-new.md", report)
+    r = _run(out)
+    assert r.returncode == 0 and "no branch range against an integration ref" in r.stdout, r.stdout
+    out = _branch(_render(render, tmp_path / "onmain"))
+    _git(out, "checkout", "-q", "main")
+    _report(out, "2026-10-21-new.md", report)
+    r = _run(out)
+    assert r.returncode == 0 and "no branch range against an integration ref" in r.stdout, r.stdout
+
+
+def test_the_codex_handoff_writes_class_on_every_finding(render, tmp_path):
+    """The dispatched Codex review requires `class` in its result schema and writes it into
+    the report line, so its new blockers and majors pass this gate."""
+    import importlib
+    out = _branch(_render(render, tmp_path))
+    sys.path.insert(0, str(out / "scripts/process"))
+    try:
+        sys.modules.pop("_dispatch_codex", None)
+        codex = importlib.import_module("_dispatch_codex")
+        required = codex._schema(plan_review=False, gate=False)["properties"]["findings"]["items"]["required"]
+        assert "class" in required
+        rec = {"binding": {"base": "a" * 40, "head": "b" * 40, "diff_sha256": "c" * 64}, "branch": "7-widget",
+               "model": "gpt-6-sol", "invocation": "codex exec", "result_sha256": "d" * 64, "issue": 7}
+        result = {"verdict": "block", "criteria": [], "refute": [],
+                  "findings": [{"sev": "major", "action": "fix", "kind": "implementation", "issue": "-",
+                                "class": "testable", "rule": "mutation", "title": "guard read twice"}]}
+        text = codex._report_text(rec, result, work="7", plan_review=False, refute_round=None)
+    finally:
+        sys.path.remove(str(out / "scripts/process"))
+        sys.modules.pop("_dispatch_codex", None)
+    assert "class=testable" in text
+    _report(out, "2026-10-21-7-codex-review.md", text)
+    r = _run(out)
+    assert r.returncode == 0 and NO_CLASS not in r.stdout, r.stdout
