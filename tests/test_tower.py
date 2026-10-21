@@ -828,3 +828,22 @@ def test_the_stale_worker_finding_reads_the_status_file(render, tmp_path):
         return [f for f in tower.findings(table, 60) if f["kind"] == "stale-worker"]
     assert stale(None) and stale(75)
     assert not stale(3)
+
+
+def test_a_failed_worker_is_no_stale_worker_too(render, tmp_path):
+    """Cross-model review (A/B run): a crashed worker got the `failed` finding and a second,
+    bogus `stale-worker` one, while `phase_over` treats `failed` as over."""
+    import importlib.util
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    spec = importlib.util.spec_from_file_location("tower_failed_quiet", out / "scripts/process/tower.py")
+    sys.path.insert(0, str(out / "scripts/process"))
+    try:
+        tower = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(tower)
+    finally:
+        sys.path.remove(str(out / "scripts/process"))
+    table = {"overlaps": [], "plans": [], "gates": [], "sessions": [],
+             "worktrees": [{"branch": "w", "minutes_since_commit": 90, "ahead": 1}],
+             "reports": [{"worker": "w", "state": "failed", "minutes_ago": 80, "note": "timeout"}]}
+    kinds = [f["kind"] for f in tower.findings(table, 60)]
+    assert "failed" in kinds and "stale-worker" not in kinds, kinds

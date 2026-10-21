@@ -67,7 +67,8 @@ WAIT_MINUTES = 30
 # --stale-minutes, PROCESS_STALE_MINUTES or the policy's `stale_minutes` say otherwise
 STALE_MINUTES = 60
 CLOCK_SKEW_SECONDS = 300  # a status stamp this far ahead is a wrong clock (#270)
-PARKED = ("review-pass", "done", "idle")  # a worker reporting these waits, it does not work
+# a worker reporting these waits, it does not work; `failed` is over and has its own finding (#270)
+PARKED = ("review-pass", "done", "idle", "failed")
 # `stale` is synthetic: never a report line, written by --wait for a silent live session
 WAIT_STATES = _report.STATES + ("stale",)
 STALE_POLL_S = 60  # how often --wait looks at the live sessions
