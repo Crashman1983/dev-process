@@ -807,6 +807,12 @@ def test_an_id_named_only_beside_another_issue_is_not_required(ev_mod):
     assert req("issue: #7\nAC-3 is owner/other#9's criterion.\n", "") == set()
     # a spec's criterion is the work's own even beside another issue
     assert req("See AC-2 of #9.\n", "- AC-2: When a, b shall c.\n") == {"2"}
+    # cross-model review of the patch: a table row defines its criterion, a sentence citing
+    # the own issue too is this work's, and a citation wrapped onto the next line still counts
+    assert req("issue: #7\n\n| AC-3 | When x, y shall z | #2659 |\n", "") == {"3"}
+    assert req("issue: #7\nAC-4 closes #7 and the gap of #2659.\n", "") == {"4"}
+    assert req("issue: #7\ndsh runs only up to the AC-11 measurement\n(#2659).\n", "") == set()
+    assert req("issue: #7\n- AC-5 is listed here\n- the next item cites #2659\n", "") == {"5"}
 
 
 def test_attest_names_the_id_it_left_out(repo):
