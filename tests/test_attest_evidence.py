@@ -773,6 +773,8 @@ def test_a_struck_criterion_end_to_end(repo):
     ([{"kind": "refute", "when": {"tier": 3}}], "when must name"),
     ([{"kind": "refute", "when": {"tier_from": True}}], "when.tier_from must be int"),
     ([{"kind": "owner-decision", "when": {"waived": True}, "skippable": True}], "cannot be skipped"),
+    # cross-model review: a refute on `waived` was owed by no reader — refused, not dead
+    ([{"kind": "refute", "when": {"waived": True}}], "owner-decision only"),
 ])
 def test_required_records_rows_are_validated(ev_mod, rows, problem):
     """#282: a malformed table is a policy problem, never a silent pass."""

@@ -468,3 +468,21 @@ def test_a_waiver_in_the_archive_or_a_spec_plan_owes_the_owners_word(render, tmp
     named = [ln for ln in out.stdout.splitlines() if "without the owner's word" in ln]
     assert out.returncode == 1 and any("archive/" in ln for ln in named) \
         and any("specs/78-gadget" in ln for ln in named), out.stdout
+
+
+def test_finish_names_a_spec_plan_it_cannot_read(render, tmp_path, monkeypatch):
+    """Cross-model review: `spec_plan_findings` skipped an unreadable plan, and finish
+    reads no other scan of it."""
+    r = _spec_plan_repo(render, tmp_path)
+    plan = r.root / "specs/77-widget/plan.md"
+    cr = _load_gate(r.root)
+
+    class Broken(type(plan)):
+        def read_text(self, *a, **k):
+            raise OSError(5, "Input/output error")
+    monkeypatch.setattr(cr, "record_files", lambda root, kinds, **k: [("specs/77-widget/plan.md", Broken(plan))])
+    try:
+        assert any("specs/77-widget/plan.md: could not read" in f for f in cr.spec_plan_findings(r.root, [], None))
+    finally:
+        for name in ("check_review", "attest_evidence", "dispatch", "required_records"):
+            sys.modules.pop(name, None)

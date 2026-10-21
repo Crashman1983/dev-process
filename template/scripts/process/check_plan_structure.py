@@ -9,7 +9,7 @@ at the merge. A plan reviewer re-found them by reading. This gate reads them:
 
   HARD (an active Tier 2+ plan this branch adds):
   - a criterion line `AC-<id>: <EARS statement>` with no or several `shall`
-    (an EARS requirement has exactly one; `shall_words` names others, e.g.
+    (an EARS requirement has exactly one; `shall_words` adds others, e.g.
     German `soll`), or an id twice;
   - a criterion without its planned test once execution started (a ticked
     task) or at the merge push: `AC-<id>: <path>::<test>`, `AC-<id>: struck —
@@ -57,7 +57,7 @@ from process_git import git_environment  # noqa: E402  (one owner for how git is
 
 PLANS_ACTIVE = ".process-work/plans"
 DATA = "docs/process/plan-structure.local.json"
-_MANUAL = re.compile(r"^manual[ \t]*:[ \t]*\S")
+_MANUAL = re.compile(r"^manual[ \t]*:[ \t]*\S", re.IGNORECASE)
 _TICKED = re.compile(r"^[ \t]*[-*+][ \t]+\[[xX]\][ \t]", re.MULTILINE)
 _SETTLED = re.compile(r"\b(?:struck:[ \t]*\S|moved:[ \t]*#\d+)", re.IGNORECASE)
 _ASSUMPTION = re.compile(r"\[assumption\]", re.IGNORECASE)
@@ -173,7 +173,8 @@ def _bound(root: Path, ref: str, rel: str) -> bool:
 def _registry_ids(root: Path, pattern: str, glob: str) -> set[str]:
     rx = re.compile(pattern)
     ids: set[str] = set()
-    for dirpath, _dirs, files in os.walk(root / glob.split("*", 1)[0].rstrip("/") or root):
+    head = glob.split("*", 1)[0]  # the folder the pattern starts in: `a/b.json` walks `a`
+    for dirpath, _dirs, files in os.walk(root / head.rsplit("/", 1)[0] if "/" in head else root):
         for name in files:
             rel = os.path.relpath(os.path.join(dirpath, name), root).replace(os.sep, "/")
             if fnmatch.fnmatch(rel, glob):
@@ -202,7 +203,7 @@ def check(root: Path, env: dict[str, str] | None = None) -> tuple[list[str], lis
     if problem:
         return [problem], soft
     merge, _why = integration_push(env if env is not None else dict(os.environ), root)
-    shall_words = data.get("shall_words", ["shall"])
+    shall_words = ["shall", *data.get("shall_words", [])]  # a project's words add to `shall`
     sections = data.get("sections", [])
     registry: set[str] | None = None
     for p in sorted(pdir.glob("*.md")):

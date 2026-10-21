@@ -801,6 +801,7 @@ def test_a_fresh_status_file_keeps_a_commitless_worker_alive(render, tmp_path):
     # a stamp from the future is a wrong clock, never a fresh sign of life
     status.write_text(json.dumps({"updated_at": datetime.fromtimestamp(now + 3600, timezone.utc).isoformat()}))
     assert tower.status_age(str(status), now) is None
+    assert tower.quiet_too_long(90, None, None, 60, tower.status_age(str(status), now))  # still stale
     status.write_text(json.dumps({"updated_at": datetime.fromtimestamp(now - 150, timezone.utc).isoformat()}))
     assert not tower.quiet_too_long(90, None, None, 60, tower.status_age(str(status), now))
     assert tower.quiet_too_long(90, None, None, 60, tower.status_age(str(tmp_path / "none.json"), now))

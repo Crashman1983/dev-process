@@ -2689,8 +2689,9 @@ def spec_plan_findings(root: Path, passes: list[dict], in_flight: set[str] | Non
     for rel, plan in record_files(root, ("spec-plan",)):
         try:
             text = _unfenced(plan.read_text(encoding="utf-8", errors="replace"))
-        except OSError:
-            continue  # the spec-plan scan above reports an unreadable plan
+        except OSError as exc:  # finish.py reads no other scan: unreadable is a finding here
+            out.append(f"{rel}: could not read ({exc}) — its review duty cannot be judged")
+            continue
         tier = plan_tier(text)
         if tier is None or tier < 2:
             continue

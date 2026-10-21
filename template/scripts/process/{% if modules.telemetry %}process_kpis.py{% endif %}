@@ -493,14 +493,15 @@ def models(root: Path | None = None) -> int:
     if not cells:
         print("  reports carry no model/phase yet — start sessions via dispatch.py or set PROCESS_MODEL/PROCESS_PHASE")
         return 0
-    print(f"  {'tier':>4} {'phase':<8} {'model':<22} {'n':>3} {'blocked':>7} {'rounds→pass':>12} "
+    # a crash or timeout (`failed`, #270) counts with the blocks: both end a phase without its result
+    print(f"  {'tier':>4} {'phase':<8} {'model':<22} {'n':>3} {'blk/fail':>8} {'rounds→pass':>12} "
           f"{'tokens (stated)':>16} {'cost':>8}")
     for (tier, ph, m), c in sorted(cells.items()):
         n = len(c["issues"])
         avg = f"{sum(c['rounds']) / len(c['rounds']):.1f} ({c['passed']}/{len(c['rounds'])} pass)" if c["rounds"] else "—"
         tok = f"{c['tokens']:,} ({c['reported']})" if c["reported"] else "—"
         cost = f"${c['cost']:.2f}" if c["cost"] else "—"
-        print(f"  {tier:>4} {ph:<8} {m:<22} {n:>3} {c['blocked']:>7} {avg:>12} {tok:>16} {cost:>8}")
+        print(f"  {tier:>4} {ph:<8} {m:<22} {n:>3} {c['blocked']:>8} {avg:>12} {tok:>16} {cost:>8}")
     n = len({u for c in cells.values() for u in c["issues"]})
     lvl = _level(n, True, False, _N_THRESHOLD)
     print(f"  {confidence(n, proxy=True)} · {action(lvl, 'compare execute models within one tier: more rounds to pass is the price of the cheaper model', thin='keep dispatching with the policy; judge after ~20 issues per cell')}")
