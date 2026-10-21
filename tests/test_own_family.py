@@ -382,3 +382,19 @@ def test_a_waiver_without_the_owners_word_fails_at_the_merge(render, tmp_path):
     _git(r.root, "commit", "-qam", "owner decides")
     out = r.gate()
     assert "without the owner's word" not in out.stdout, out.stdout
+
+
+def test_an_unreadable_policy_keeps_the_waivers_owner_duty(render, tmp_path):
+    """Refute of #282: the gate read an unreadable policy as `{}` — no table, no duty."""
+    r = Repo(render, tmp_path, own_from=None, tier=2)
+    _git(r.root, "checkout", "-q", "main")
+    (r.root / "docs/process/model-policy.local.json").write_text("{not json", encoding="utf-8")
+    _git(r.root, "add", "-A")
+    _git(r.root, "commit", "-q", "-m", "broken policy")
+    _git(r.root, "checkout", "-q", "feature")
+    _git(r.root, "merge", "-q", "--no-edit", "main")
+    plan = r.root / ".process-work/plans/2026-10-15-77-widget.md"
+    plan.write_text(plan.read_text() + "review-waived: trivial rename, tracked #77\n", encoding="utf-8")
+    _git(r.root, "commit", "-qam", "waive")
+    out = r.gate()
+    assert out.returncode == 1 and "without the owner's word" in out.stdout, out.stdout

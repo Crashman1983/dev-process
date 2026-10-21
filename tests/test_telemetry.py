@@ -971,8 +971,13 @@ def test_a_bad_finding_class_is_a_malformed_line(render, tmp_path):
     spec = importlib.util.spec_from_file_location("ci_gate_cls", out / "scripts/process/check_issues.py")
     gate = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(gate)
-    (fields, err, _), = gate.report_findings("FINDING sev=minor action=fix issue=- class=maybe title\n")
+    (fields, err, _), = gate.report_findings("FINDING sev=minor action=fix issue=- class=maybe rule=x title\n")
     assert fields is None and "class='maybe'" in err
+    # refute of #276: an older report's title may start with the word — like `by=`, an
+    # invalid value with no key after it begins the title
+    for title in ("class=Foo leaks its lock", "rule=x+y is wrong"):
+        (fields, err, _), = gate.report_findings(f"FINDING sev=minor action=fix issue=- {title}\n")
+        assert err is None and fields["title"] == title, err
     (fields, err, _), = gate.report_findings("FINDING sev=minor action=fix issue=- class=mechanical "
                                              "rule=ruff:S110 swallowed\n")
     assert err is None and fields["rule"] == "ruff:S110" and fields["title"] == "swallowed"

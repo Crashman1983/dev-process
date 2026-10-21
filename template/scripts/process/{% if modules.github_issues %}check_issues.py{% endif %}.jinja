@@ -179,6 +179,14 @@ FINDING_RULE = re.compile(r"^[\w.:/-]+$")
 FINDING_KEYS = ("sev", "action", "issue", "gate", "origin", "kind", "by", "class", "rule")
 
 
+# keys added after reports existed whose titles may start with the same word (`by=`,
+# `class=`, `rule=`): an invalid value with no key after it begins the title
+_TITLE_KEYS = {
+    "by": (FINDING_BY.match, "is no reviewer family (a lower-case word: claude, codex, …)"),
+    "class": (FINDING_CLASSES.__contains__, f"not in {sorted(FINDING_CLASSES)}"),
+    "rule": (FINDING_RULE.match, "is no check name (one token: letters, digits, . : / - _)"),
+}
+
 # a FINDING may be written as a Markdown bullet — `- FINDING ...` must not
 # silently escape the lint (the same _LEAD lesson as plan tier lines)
 _FINDING_LINE = re.compile(r"^\s*(?:[-*+]\s+)?[*_]*FINDING\s+(\S+=.*)$")
@@ -208,11 +216,11 @@ def _parse_finding(match: re.Match) -> tuple[dict | None, str | None]:
         k, eq, v = tok.partition("=")
         if not eq or k not in FINDING_KEYS:
             break  # title starts here
-        if k == "by" and not FINDING_BY.match(v):
+        if k in _TITLE_KEYS and not _TITLE_KEYS[k][0](v):
             nxt = tokens[i + 1].partition("=") if i + 1 < len(tokens) else ("", "", "")
             if nxt[1] and nxt[0] in FINDING_KEYS:  # a key right after it: the line meant a field
-                return None, f"by={v!r} is no reviewer family (a lower-case word: claude, codex, …)"
-            break  # `by=` that names no family and no key after it: an older report's title
+                return None, f"{k}={v!r} {_TITLE_KEYS[k][1]}"
+            break  # an invalid value and no key after it: an older report's title ('class=Foo leaks')
         if k in fields:
             return None, f"duplicate key {k!r}"
         fields[k] = v

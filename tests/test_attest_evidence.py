@@ -17,12 +17,12 @@ def ev_mod(render, tmp_path):
     out = render(tmp_path / "t", {"project_name": "d"})
     sys.path.insert(0, str(out / "scripts/process"))
     try:
-        for name in ("attest_evidence", "check_review", "dispatch", "report", "process_git"):
+        for name in ("attest_evidence", "check_review", "dispatch", "report", "process_git", "required_records"):
             sys.modules.pop(name, None)
         yield importlib.import_module("attest_evidence"), out
     finally:
         sys.path.remove(str(out / "scripts/process"))
-        for name in ("attest_evidence", "check_review", "dispatch", "report", "process_git"):
+        for name in ("attest_evidence", "check_review", "dispatch", "report", "process_git", "required_records"):
             sys.modules.pop(name, None)
 
 
@@ -620,7 +620,12 @@ def test_codex_review_is_the_older_spelling_of_cross_model(repo):
 @pytest.mark.parametrize("layer, says", [("{not json", "not valid JSON"),
                                          ('{"review_evidence": {"cross_model_from_tier": "2"}}', "integer 0-4"),
                                          ('{"review_evidence": {"ranks": ["claude"]}}', "ranks must map"),
-                                         ('{"review_evidence": {"test_files": "*"}}', "test_files must be")])
+                                         ('{"review_evidence": {"test_files": "*"}}', "test_files must be"),
+                                         # #282 refute: `[]` would lift every duty; a malformed row is no pass
+                                         ('{"review_evidence": {"required_records": []}}',
+                                          "cannot replace the template's"),
+                                         ('{"review_evidence": {"required_records_extra": '
+                                          '[{"kind": "nope", "when": {"tier_from": 1}}]}}', "kind must be one of")])
 def test_an_unreadable_policy_at_the_base_refuses(repo, layer, says):
     _git(repo, "checkout", "-q", "main")
     (repo / "docs/process/model-policy.local.json").write_text(layer)
@@ -630,6 +635,25 @@ def test_an_unreadable_policy_at_the_base_refuses(repo, layer, says):
     _git(repo, "rebase", "-q", "main")
     r = _attest(repo, "--with", _report(repo))
     assert r.returncode == 1 and says in r.stderr, r.stderr
+
+
+def test_an_owner_decision_row_of_the_project_is_met_by_the_owners_line(repo):
+    """Refute of #282: attest never saw an owner's DECISION, so a project row owing one
+    refused every attest whatever the plan said."""
+    _git(repo, "checkout", "-q", "main")
+    (repo / "docs/process/model-policy.local.json").write_text(json.dumps({"review_evidence": {
+        "required_records_extra": [{"kind": "owner-decision", "when": {"tier_from": 2}}]}}))
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "chore: policy")
+    _git(repo, "checkout", "-q", "7-widget")
+    _git(repo, "rebase", "-q", "main")
+    r = _attest(repo, "--with", _report(repo))
+    assert r.returncode == 1 and "no owner's word" in r.stderr, r.stderr
+    plan = repo / ".process-work/plans/2026-10-14-widget.md"
+    plan.write_text(plan.read_text() + "\n- DECISION 2026-10-21 owner: ship the widget as planned\n")
+    _git(repo, "commit", "-qam", "docs: owner decides")
+    r = _attest(repo, "--with", _report(repo))
+    assert "no owner's word" not in r.stderr, r.stderr
 
 
 def test_a_plan_review_skip_names_the_plan_work(repo):
@@ -750,14 +774,14 @@ def test_a_struck_criterion_end_to_end(repo):
     ([{"kind": "refute", "when": {"tier_from": True}}], "when.tier_from must be int"),
     ([{"kind": "owner-decision", "when": {"waived": True}, "skippable": True}], "cannot be skipped"),
 ])
-def test_required_records_rows_are_validated(rows, problem):
+def test_required_records_rows_are_validated(ev_mod, rows, problem):
     """#282: a malformed table is a policy problem, never a silent pass."""
     import required_records
     got = required_records.rows_problem(rows)
     assert (got is None) if problem is None else (problem in got), got
 
 
-def test_the_owner_decision_cannot_be_skipped():
+def test_the_owner_decision_cannot_be_skipped(ev_mod):
     import required_records
     rows = [{"kind": "owner-decision", "when": {"waived": True}}]
     owed, _ = required_records.owed(rows, {"waived": True}, set(), {"owner-decision"})
