@@ -11,7 +11,8 @@ Deutsche Fassung: [NEWS-DE.md](NEWS-DE.md).
 
 A review written by the Codex reviewer no longer gets refused at the push for
 a missing header. A plan that cites another issue's criterion as `#2659/AC-11` no longer has
-to prove it with a test of its own.
+to prove it with a test of its own. A Codex review of an issue split into
+several plans now attests the plan it reviewed.
 
 ## v2.76.0 — Checks catch before the review what a rule can catch
 

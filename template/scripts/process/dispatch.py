@@ -1857,11 +1857,13 @@ def start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str |
         import _dispatch_codex as codex_run  # noqa: PLC0415  (the one owner of Codex runs)
 
         def codex_refused(exc: ValueError) -> int:
+            head = _out(root, "rev-parse", "--verify", "-q", f"{branch}^{{commit}}") or None
             row = None if dry_run else codex_run.record_unavailable(
                 _records_dir(root), issue=issue, phase=phase, model=model, branch=branch, reason=str(exc),
-                head=_out(root, "rev-parse", "--verify", "-q", f"{branch}^{{commit}}") or None)
-            print(f"dispatch: not starting — {exc}\n" + codex_run.fallback_hint(issue, phase, plan_review, row, tier),
-                  file=sys.stderr)
+                head=head)
+            work = review_work(root, head or "", branch, issue, plan_paths) if phase == "review" else None
+            print(f"dispatch: not starting — {exc}\n"
+                  + codex_run.fallback_hint(issue, phase, plan_review, row, tier, work), file=sys.stderr)
             return 3
 
         try:
@@ -1963,7 +1965,8 @@ def start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str |
                 review = codex_run.prepare_review(wt, _records_dir(root) / "codex", tier=tier,
                                                   plan_review=plan_review, plan_paths=plan_paths)
                 rec.update(review)
-                argv = [*argv[:-1], "--output-schema", review["schema"], "-o", review["result"],
+                rec["work"] = review_work(root, review["binding"]["head"], branch, issue, review["plan_paths"])
+                argv =[*argv[:-1], "--output-schema", review["schema"], "-o", review["result"],
                         codex_run.review_prompt(review)]
             minutes = policy.get("review_timeout_minutes", 15) if phase == "review" else policy.get("timeout_minutes", 120)
             rec.update(codex_run.launch(_records_dir(root) / "codex", argv, wt,
@@ -2023,7 +2026,7 @@ def handoff(root: Path, branch: str, implementer: str | None = None) -> int:
             branch=branch, reason=str(exc), head=(rec.get("binding") or {}).get("head"))
         print(f"dispatch: handoff refused — {exc}\n"
               + codex_run.fallback_hint(rec.get("issue"), "review", bool(rec.get("plan_review")), row,
-                                        rec.get("tier")), file=sys.stderr)
+                                        rec.get("tier"), rec.get("work")), file=sys.stderr)
         return 3
     except ValueError as exc:
         print(f"dispatch: handoff refused — {exc}", file=sys.stderr)
@@ -2599,6 +2602,29 @@ def own_plans_at(root: Path, tip: str, branch: str = "", *, include_base: bool =
     issues = review_issues(root, branch) if include_base and branch else set()
     own = _review.own_plans(root, base, tip, issues, read, (".process-work/plans", "specs"), is_plan) or []
     return [rel for rel, _plain, _added in own]
+
+
+def review_work(root: Path, head: str, branch: str, issue: int, plan_paths: list[str]) -> str:
+    """The work a Codex review attests (#290): the issue number — unless the issue
+    has several plans at `head`, where attest refuses the bare number; then the
+    slug of the one plan this session reviews: the plan review's plan, or the one
+    plan of the issue the branch itself carries. Several of them keep the number,
+    and attest names the way out."""
+    from attest_evidence import _plan  # noqa: PLC0415  (attest's own ambiguity rule)
+    plain = str(issue)
+    key = _review.work_key(plain)
+    if not head or _plan(root, {key}, head)[0] != "ambiguous":
+        return plain
+    mine = list(plan_paths)
+    if not mine:
+        for rel in own_plans_at(root, head, branch, include_base=True):
+            if rel.endswith("/tasks.md"):  # a Spec Kit plan: its ids live in plan.md
+                rel = rel[: -len("tasks.md")] + "plan.md"
+            ids = _review._plan_work_ids(_review.plan_stem(rel), _out(root, "show", f"{head}:{rel}"),
+                                         include_dedated=True)
+            if key in {_review.work_key(i) for i in ids}:
+                mine.append(rel)
+    return _review.plan_stem(mine[0]) if len(mine) == 1 else plain
 
 
 def work_complete_on_origin(root: Path, branch: str, local: bool = False) -> bool | None:

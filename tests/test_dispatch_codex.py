@@ -332,7 +332,7 @@ def test_a_review_without_a_valid_result_runs_once_more_then_fails(mods, tmp_pat
 def review_repo(render, tmp_path, monkeypatch):
     """A rendered project on branch 7-widget (plan, code, test) with a bare origin, an
     implementer report, and the Codex variant pointing at a fake CLI."""
-    def build(result: dict, *, implementer="claude-opus-5", tier=2, gate=False):
+    def build(result: dict, *, implementer="claude-opus-5", tier=2, gate=False, sibling=False):
         out = render(tmp_path / "r", {"project_name": "d", "modules": {"telemetry": True}})
         origin = tmp_path / "origin.git"
         subprocess.run(["git", "init", "-q", "--bare", str(origin)], check=True)
@@ -341,6 +341,9 @@ def review_repo(render, tmp_path, monkeypatch):
         _git(out, "config", "user.name", "t")
         _git(out, "remote", "add", "origin", str(origin))
         _variant(out, fake_codex(tmp_path / "bin", result=result))
+        if sibling:  # an earlier plan of the same issue, already on main
+            (out / ".process-work/plans").mkdir(parents=True, exist_ok=True)
+            (out / ".process-work/plans/2026-10-01-widget-part-1.md").write_text(PLAN)
         _git(out, "add", "-A")
         _git(out, "commit", "-q", "-m", "base")
         _git(out, "push", "-q", "origin", "main")
@@ -391,6 +394,7 @@ def _run_review(out, d, codex, tier=2):
 def test_a_codex_review_is_verified_attested_and_pushed_in_one_step(review_repo):
     out, d, codex = review_repo(PASS)
     rec = _run_review(out, d, codex)
+    assert rec["work"] == "7"  # one plan of the issue: the number stays the work (#290)
     assert d.handoff(out, "7-widget") == 0
     journal = "\n".join(p.read_text() for p in (out / ".process-work/journal").glob("**/*.md"))
     assert "REVIEW work=7 tier=2" in journal and "model=gpt-6-sol" in journal and "verdict=pass" in journal
@@ -556,6 +560,20 @@ def test_a_harness_never_crosses_a_review_in_the_chain(mods, monkeypatch):
         assert d._chain(out) == 0
         assert [c.get("phase") for c in calls] == [nxt], (phase, calls)
         assert calls[0].get("harness") == carried, (phase, calls[0])
+
+
+def test_an_issue_with_several_plans_is_attested_by_the_sessions_plan(review_repo, capsys):
+    # the issue's number names two plans at head, and attest refuses it: the
+    # review attests the plan it reviewed, by its slug (#290)
+    out, d, codex = review_repo(PASS, sibling=True)
+    rec = _run_review(out, d, codex)
+    assert rec["work"] == "2026-10-15-widget"
+    assert d.handoff(out, "7-widget") == 0
+    journal = "\n".join(p.read_text() for p in (out / ".process-work/journal").glob("**/*.md"))
+    assert "REVIEW work=2026-10-15-widget tier=2" in journal and "REVIEW work=7 " not in journal
+    hint = codex.fallback_hint(7, "review", False, "r1", 2, rec["work"])
+    assert "skipped cross-model work=2026-10-15-widget:" in hint
+    assert "work=2026-10-15-widget-plan:" in codex.fallback_hint(7, "review", True, "r1", 2, rec["work"])
 
 
 def test_a_failed_review_run_records_the_way_out(review_repo, capsys):
