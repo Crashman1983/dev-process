@@ -1,7 +1,6 @@
-import json
 import importlib.util
-import re
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path

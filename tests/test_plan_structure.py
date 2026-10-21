@@ -67,6 +67,9 @@ def test_a_project_names_its_own_shall_words(render, tmp_path):
     out = _repo(render(tmp_path, {"project_name": "demo"}), {"shall_words": ["soll"]})
     _plan(out, GOOD.replace("the editor shall keep", "der Editor soll behalten"))
     assert _run(out).returncode == 0
+    # cross-model review: the project's words add to `shall`, a bilingual plan is no false red
+    _plan(out, GOOD + "- AC-2: When the user quits, the editor shall save.\n- AC-2: Manual: checked by hand\n")
+    assert _run(out).returncode == 0, _run(out).stdout
 
 
 def test_an_id_twice_as_a_criterion_fails(render, tmp_path):
@@ -237,3 +240,13 @@ def test_every_list_marker_opens_a_task_for_every_reader(render, tmp_path):
     finally:
         sys.path.remove(str(out / "scripts/process"))
         sys.modules.pop("check_review", None)
+
+
+def test_a_registry_of_one_file_is_read(render, tmp_path):
+    """Cross-model review: a `registry` without `*` walked a file as a folder and read no id."""
+    out = _repo(render(tmp_path, {"project_name": "demo"}),
+                {"story_id": r"ED-US-\d+", "registry": "docs/stories.json"})
+    (out / "docs/stories.json").write_text('{"stories": [{"id": "ED-US-1"}]}')
+    _plan(out, GOOD + "\nStories: ED-US-1\n")
+    r = _run(out)
+    assert r.returncode == 0, r.stdout

@@ -60,6 +60,10 @@ def rows_problem(rows: object) -> str | None:
             want = FACTS[key]
             if not isinstance(value, want) or (want is int and isinstance(value, bool)):
                 return f"row {i}: when.{key} must be {want.__name__}, got {value!r}"
+        if "waived" in when and row["kind"] != "owner-decision":
+            # only the gate reads a waived plan, and it asks for the owner's word alone: any
+            # other kind on `waived` would be owed by nobody
+            return f"row {i}: when.waived is read for owner-decision only, not {row['kind']}"
         if "skippable" in row and not isinstance(row["skippable"], bool):
             return f"row {i}: skippable must be true or false"
         if row.get("skippable") and row["kind"] in UNSKIPPABLE:
