@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """red_evidence — the red-before/green-after proof of a fix, measured instead of typed.
 
-    red_evidence.py --work W --round R --before <ref> [--cause TEXT] [--copy PATH …]
+    red_evidence.py --work W --round R --before <ref> [--cause TEXT [--sites TEXT]] [--copy PATH …]
                     [--journal-dir DIR] [--dry-run] [--junit PATH] [root] -- <test command>
 
 Every fix round writes, by hand, the command it ran, its exit code before and
@@ -19,7 +19,10 @@ mistakes each time). This tool runs the command twice and writes what it saw:
 It refuses when no test went from red to green (the proof proves nothing) or
 when a test is still red after. The journal gets the block; with `--cause`
 also the `ROOT-CAUSE work=W round=R: <cause> — <tests>` line attest.py asks
-for, the test names filled in from the run. The why is the only free text.
+for, the test names filled in from the run. The why is the only free text; with
+`--sites` (the other places the same defect can live) the line takes the class-test
+form `<cause> — sites: <sites> — <tests>` that attest asks for each blocked round
+(v2.77, required_records `class-test`).
 
 The command after `--` is pytest's (`python3 -m pytest …`, `uv run pytest …`); a
 small probe plugin (`-p red_evidence_probe`, on PYTHONPATH) records pytest's own node
@@ -156,7 +159,10 @@ def _link_dependencies(root: Path, tree: Path) -> list[str]:
 def junit_outcomes(path: Path) -> dict[str, str] | None:
     """`<classname>::<name>` -> passed/failed/error of every testcase in a JUnit XML file;
     None when there is none or it does not parse (no report is no outcome). A skipped case
-    is no outcome either — it neither went red nor green."""
+    is no outcome either — it neither went red nor green. A case's `file` attribute, where
+    the runner writes one, is the file part instead: XCTest's and jest's `classname` is no
+    path (`KenniTests.FooTests`, a `describe` title), and attest finds a test by its file
+    (v2.77 class-test)."""
     import xml.etree.ElementTree as ET  # noqa: PLC0415  (stdlib; only this mode needs it)
     if not path.is_file() or not path.stat().st_size:
         return None
@@ -167,7 +173,7 @@ def junit_outcomes(path: Path) -> dict[str, str] | None:
     seen: dict[str, str] = {}
     for case in tree.getroot().iter("testcase"):
         name = case.get("name") or ""
-        cls = case.get("classname") or ""
+        cls = case.get("file") or case.get("classname") or ""
         key = f"{cls}::{name}" if cls else name
         if not name or case.find("skipped") is not None:
             continue
@@ -317,7 +323,9 @@ def refusals(m: dict) -> list[str]:
     return out
 
 
-def block(m: dict, work: str, round_: int, cause: str | None) -> str:
+def block(m: dict, work: str, round_: int, cause: str | None, sites: str | None = None) -> str:
+    """The journal block; with `cause` the ROOT-CAUSE line — with `sites` in the class-test
+    form `<cause> — sites: <sites> — <tests>` (`check_review.root_cause_parts`)."""
     tests = m["red_to_green"]
     lines = [f"Red evidence work={work} round={round_} (red_evidence.py"
              + (f", JUnit {m['junit']}" if m.get("junit") else "") + "):", "", "```",
@@ -327,7 +335,8 @@ def block(m: dict, work: str, round_: int, cause: str | None) -> str:
     if m["carried"]:
         lines.insert(-1, "test files taken into the old tree: " + ", ".join(m["carried"]))
     if cause:
-        lines += ["", f"ROOT-CAUSE work={work} round={round_}: {cause.strip()} — " + ", ".join(tests)]
+        where = f"sites: {sites.strip()} — " if sites else ""
+        lines += ["", f"ROOT-CAUSE work={work} round={round_}: {cause.strip()} — {where}" + ", ".join(tests)]
     return "\n".join(lines) + "\n"
 
 
@@ -341,6 +350,8 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--round", type=int, required=True, dest="round_")
     ap.add_argument("--before", required=True, help="the ref before the fix")
     ap.add_argument("--cause", help="the root cause, one sentence; writes the ROOT-CAUSE line")
+    ap.add_argument("--sites", help="with --cause: the other places the same defect can live "
+                    "(`file:line, …`); writes the class-test form attest asks per blocked round")
     ap.add_argument("--copy", action="append", default=[], help="another file for the old tree")
     ap.add_argument("--timeout", type=int, default=TIMEOUT, help="seconds per run")
     ap.add_argument("--journal-dir", default=None)
@@ -355,6 +366,8 @@ def main(argv: list[str]) -> int:
         return 2
     root = Path(args.root).resolve()
     problem = junit_problem(root, args.junit) if args.junit else None
+    if args.sites and not args.cause:
+        problem = "--sites goes with --cause: the sites are part of the ROOT-CAUSE line"
     if problem:
         print(f"red_evidence: {problem}", file=sys.stderr)
         return 2
@@ -366,11 +379,15 @@ def main(argv: list[str]) -> int:
         for p in problems:
             print(f"red_evidence: {p}", file=sys.stderr)
         return 1
-    text = block(m, args.work, args.round_, args.cause)
+    text = block(m, args.work, args.round_, args.cause, args.sites)
     if args.cause and not ROOT_CAUSE.search(readable(text)):
         print("red_evidence: the cause does not read as a ROOT-CAUSE line — write a real sentence",
               file=sys.stderr)
         return 1
+    if args.cause and not (args.sites or "").strip():
+        print("red_evidence: note — no --sites: the ROOT-CAUSE line names no sibling sites, so it is "
+              "no class test for a blocked round (attest's class-test row) — pass --sites \"<file:line, …>\"",
+              file=sys.stderr)
     journal_dir = Path(args.journal_dir) if args.journal_dir else root / JOURNAL_DIR
     target = _journal_target(root, journal_dir)
     print(text, end="")
