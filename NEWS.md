@@ -7,6 +7,12 @@ details are in the [CHANGELOG](CHANGELOG.md).
 
 Deutsche Fassung: [NEWS-DE.md](NEWS-DE.md).
 
+## v2.76.1 — A Codex review report passes the check, and a cited criterion is no duty
+
+A review written by the Codex reviewer no longer gets refused at the push for
+a missing header. A plan that mentions another issue's criterion no longer has
+to prove it with a test of its own.
+
 ## v2.76.0 — Checks catch before the review what a rule can catch
 
 A project's plans, reviews and test runs are checked for what a rule or a test can decide on its own: a plan's criteria are checked as they are written, warnings nobody had to follow became duties with a clear way out, and the review list shows only what the change touches. A new report shows whether that really saves review rounds and cost per piece of work, with the defects that still slip through as the guard. A reviewer from another model family now gets read access to the code, not only the change: with it, nine in ten of its findings held instead of one in six.

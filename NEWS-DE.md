@@ -7,6 +7,12 @@ technischen Einzelheiten stehen im [CHANGELOG](CHANGELOG-DE.md).
 
 English version: [NEWS.md](NEWS.md).
 
+## v2.76.1 — Ein Codex-Review-Bericht besteht die Prüfung, ein zitiertes Kriterium ist keine Pflicht
+
+Ein Review des Codex-Reviewers wird beim Push nicht mehr wegen eines fehlenden
+Headers abgelehnt. Ein Plan, der das Kriterium eines anderen Issues erwähnt,
+muss es nicht mehr mit einem eigenen Test belegen.
+
 ## v2.76.0 — Prüfungen fangen vor dem Review, was eine Regel fangen kann
 
 Pläne, Reviews und Testläufe eines Projekts werden auf das geprüft, was eine Regel oder ein Test selbst entscheiden kann: Die Kriterien eines Plans werden schon beim Schreiben geprüft, Warnungen, denen niemand folgen musste, wurden Pflichten mit einem klaren Ausweg, und die Review-Liste zeigt nur, was die Änderung berührt. Ein neuer Bericht zeigt, ob das wirklich Review-Runden und Kosten je Arbeit spart, mit den Fehlern, die trotzdem durchrutschen, als Wächter. Ein Reviewer aus einer anderen Modellfamilie bekommt jetzt Lesezugriff auf den Code, nicht nur auf die Änderung: Damit hielten neun von zehn seiner Befunde statt einem von sechs.

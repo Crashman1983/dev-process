@@ -10,6 +10,18 @@ A few plain sentences per release: [NEWS.md](NEWS.md). Deutsche Fassung:
 [CHANGELOG-DE.md](CHANGELOG-DE.md). Releases before v2.28.2:
 [docs/changelog-archive.md](docs/changelog-archive.md).
 
+## v2.76.1 — A dispatched Codex report is readable; another issue's criterion is not required · 2026-10-21
+
+**Why.** Two template defects reached Kenni. The Codex dispatch wrote the report's title above its header block. The header is the block up to the first blank line, so the github-issues report gate read no `review:` and refused the push: twice on one day (Kenni #2683, #2691), each fixed by hand. `check_review.report_header` read no `work:` from such a report either. And attest counted every `AC-<id>` in a plan as a criterion of the work, including one the plan only cited from another issue ("up to the AC-11 measurement (#2659)"). It then refused a pass for a test that criterion never owed.
+
+**What changes.**
+- The Codex dispatch writes the header block first and the title after it (#286).
+- attest leaves out an id the plan names only in sentences that cite another issue's `#N`, and names it in a note (#287). A definition line `AC-<id>: …`, a mention without another issue, or the spec keep an id required.
+
+**Update.** Nothing to do. A dispatched Codex report written before the update keeps its title on top: move it below the header block if the gate refuses it.
+
+Details: #286 #287
+
 ## v2.76.0 — Deterministic checks before review, the measure of their effect · 2026-10-21
 
 **Why.** Kenni's review history (315 reports, 1,694 findings, dev-process #277 step 0) showed that of the 423 blocking or major findings only 85 needed a reader's judgment; the rest a rule or a test could have caught. Seven of twenty findings where a check never took effect were rules that only printed a warning, seven more were rules that existed only as prose. A template update could not clear its own review, a train carrying one was refused, and a test run under `MAKEFLAGS=-n` passed the push hook.

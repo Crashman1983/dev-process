@@ -409,6 +409,26 @@ def test_a_codex_review_is_verified_attested_and_pushed_in_one_step(review_repo)
     assert json.loads((Path(rec["evidence"]) / codex.HANDOFF).read_text())["state"] == "attested"
 
 
+def test_the_written_report_opens_with_its_header_block(review_repo, render, tmp_path):
+    """#286 (Kenni #2686): the title stood above the header block, so the report gate read
+    no `review:` and refused the push, and `report_header` read no `work:`."""
+    out, d, codex = review_repo(PASS)
+    _run_review(out, d, codex)
+    assert d.handoff(out, "7-widget") == 0
+    text = next((out / ".process-work/reviews").glob("*-7-codex-*.md")).read_text()
+    review = importlib.import_module("check_review")
+    head = review.report_header(text)
+    assert head.get("work") == ["7"] and head.get("review"), head
+    # the github-issues report gate, as rendered with that module, reads the same file
+    gated = render(tmp_path / "gated", {"project_name": "g", "modules": {"github_issues": True}})
+    (gated / ".process-work/reviews").mkdir(parents=True, exist_ok=True)
+    (gated / ".process-work/reviews/2026-10-21-7-codex-review.md").write_text(text)
+    r = subprocess.run([sys.executable, "-c", "import sys; sys.path.insert(0, 'scripts/process'); "
+                        "import check_issues as g; hard, _ = g._check_reports(__import__('pathlib').Path('.'), None); "
+                        "print('\\n'.join(hard))"], cwd=gated, capture_output=True, text=True)
+    assert r.returncode == 0 and "header" not in r.stdout, r.stdout + r.stderr
+
+
 def test_a_refused_attest_leaves_the_worktree_clean_and_can_be_handed_off_again(review_repo):
     unproven = {**PASS, "criteria": []}  # no line for AC-1: attest refuses the pass
     out, d, codex = review_repo(unproven)
