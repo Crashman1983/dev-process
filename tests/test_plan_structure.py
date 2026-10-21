@@ -68,7 +68,7 @@ def test_a_project_names_its_own_shall_words(render, tmp_path):
     _plan(out, GOOD.replace("the editor shall keep", "der Editor soll behalten"))
     assert _run(out).returncode == 0
     # cross-model review: the project's words add to `shall`, a bilingual plan is no false red
-    _plan(out, GOOD + "- AC-2: When the user quits, the editor shall save.\n- AC-2: Manual: checked by hand\n")
+    _plan(out, GOOD + "- AC-2: When the user quits, the editor shall save.\n- AC-2: struck — later\n")
     assert _run(out).returncode == 0, _run(out).stdout
 
 
@@ -87,9 +87,11 @@ def test_the_planned_test_is_owed_once_execution_starts(render, tmp_path):
     _plan(out, body + "\n- [x] T1 cursor\n")
     r = _run(out)
     assert r.returncode == 1 and "AC-1 names no planned test" in r.stdout, r.stdout
-    for proof in ("- AC-1: struck — the editor is gone\n", "- AC-1: manual: checked on the device\n"):
-        _plan(out, body + "\n- [x] T1 cursor\n" + proof)
-        assert _run(out).returncode == 0, proof
+    _plan(out, body + "\n- [x] T1 cursor\n- AC-1: struck — the editor is gone\n")
+    assert _run(out).returncode == 0
+    # cross-model review: attest knows no `manual:` proof, so the plan gate offers none
+    _plan(out, body + "\n- [x] T1 cursor\n- AC-1: manual: checked on the device\n")
+    assert "AC-1 names no planned test" in _run(out).stdout
 
 
 def test_an_open_task_blocks_only_the_merge(render, tmp_path):
@@ -250,3 +252,13 @@ def test_a_registry_of_one_file_is_read(render, tmp_path):
     _plan(out, GOOD + "\nStories: ED-US-1\n")
     r = _run(out)
     assert r.returncode == 0, r.stdout
+
+
+def test_a_plan_the_branch_archived_is_read_at_the_merge(render, tmp_path):
+    """Cross-model review: /finish archives before the merge push, and only active plans
+    were read — the open-task rule never fired on the normal route."""
+    out = _repo(render(tmp_path, {"project_name": "demo"}))
+    _plan(out, GOOD + "\n- [ ] T2 docs\n", name="archive/2026-10-21-7-editor.md")
+    r = _run(out, merge=True)
+    assert r.returncode == 1 and "archive/2026-10-21-7-editor.md" in r.stdout \
+        and "open task at the merge" in r.stdout, r.stdout

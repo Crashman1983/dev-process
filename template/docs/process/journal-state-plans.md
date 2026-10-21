@@ -70,8 +70,9 @@ the integration branch is history:
   another language names its word, `shall_words`) and an id used once.
 - Once execution starts (a ticked task) and at the merge push, each criterion
   names its planned test in the review report's own grammar: `AC-<id>:
-  <path>::<test>` (the test may not exist yet), `AC-<id>: struck — <reason>`
-  or `AC-<id>: manual: <reason>`.
+  <path>::<test>` (the test may not exist yet) or `AC-<id>: struck — <reason>`
+  — attest knows no other proof. An archived plan the branch adds is read too:
+  `/finish` archives before the merge push.
 - At the merge push, no task is left `- [ ]` without `struck: <reason>` or
   `moved: #<issue>`.
 - A DECISION that still carries `[assumption]` is a note.

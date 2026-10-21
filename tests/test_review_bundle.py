@@ -599,6 +599,21 @@ def test_a_project_row_of_several_facts_warns_like_attest_enforces(render, tmp_p
     assert "**REFUTE WARNING:** 2026-07-09-widget.md (tier: 2) carries no" in t, t[:2000]
 
 
+def test_the_bundle_reads_the_table_where_attest_does(render, tmp_path):
+    """Cross-model review: the bundle read the required-records table at main's tip, attest
+    at the fork point; a row main added after the fork is no duty of this review."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    _git(out, "checkout", "-q", "main")
+    (out / "docs/process/model-policy.local.json").write_text(json.dumps({"review_evidence": {
+        "required_records_extra": [{"kind": "refute", "when": {"tier_from": 2, "gate_code": False}}]}}))
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "policy after the fork")
+    _git(out, "checkout", "-q", "feat")
+    t = _bundle(out, "--base", "main").stdout
+    assert "2026-07-09-widget.md (tier: 2) carries no" not in t, t[:1500]
+
+
 def test_a_tier_two_plan_without_a_line_is_named_next_to_a_refuted_one(render, tmp_path):
     out = render(tmp_path, {"project_name": "d", "modules": {}})
     _seed_repo(out)

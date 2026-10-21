@@ -486,3 +486,37 @@ def test_finish_names_a_spec_plan_it_cannot_read(render, tmp_path, monkeypatch):
     finally:
         for name in ("check_review", "attest_evidence", "dispatch", "required_records"):
             sys.modules.pop(name, None)
+
+
+def test_finish_keeps_a_waived_plan_without_the_owners_word(render, tmp_path):
+    """Cross-model review: finish archived an agent's waiver; the owner's word is due
+    before the archive, not first at the merge push."""
+    r = Repo(render, tmp_path, tier=2)
+    plan = r.root / ".process-work/plans/2026-10-15-77-widget.md"
+    plan.write_text(plan.read_text() + "review-waived: trivial rename, tracked #77\n", encoding="utf-8")
+    _git(r.root, "commit", "-qam", "waive")
+    out = subprocess.run([sys.executable, str(r.root / "scripts/process/finish.py")], cwd=r.root,
+                         capture_output=True, text=True)
+    assert out.returncode == 1 and "without the owner's word" in out.stdout, out.stdout
+
+
+def test_an_unknown_range_asks_the_owners_word_of_an_archived_waiver(render, tmp_path, monkeypatch):
+    """Cross-model review: the archive arm skipped its waiver check when the range was
+    unknown, while the active and spec arms treat every plan as carried."""
+    r = Repo(render, tmp_path, tier=3)
+    plan = r.root / ".process-work/plans/2026-10-15-77-widget.md"
+    archive = r.root / ".process-work/plans/archive"
+    archive.mkdir(parents=True, exist_ok=True)
+    plan.rename(archive / plan.name)
+    (archive / plan.name).write_text((archive / plan.name).read_text() + "review-waived: nah #77\n")
+    _git(r.root, "add", "-A")
+    _git(r.root, "commit", "-q", "-m", "waive in the archive")
+    cr = _load_gate(r.root)
+    try:
+        monkeypatch.setattr(cr, "paths_in_flight", lambda *a, **k: None)
+        monkeypatch.chdir(r.root)
+        hard, soft = cr.check(r.root)
+        assert any("archive/" in f and "without the owner's word" in f for f in hard + soft), (hard, soft)
+    finally:
+        for name in ("check_review", "attest_evidence", "dispatch", "required_records"):
+            sys.modules.pop(name, None)

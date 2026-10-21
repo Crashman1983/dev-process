@@ -12,8 +12,8 @@ at the merge. A plan reviewer re-found them by reading. This gate reads them:
     (an EARS requirement has exactly one; `shall_words` adds others, e.g.
     German `soll`), or an id twice;
   - a criterion without its planned test once execution started (a ticked
-    task) or at the merge push: `AC-<id>: <path>::<test>`, `AC-<id>: struck —
-    <reason>` or `AC-<id>: manual: <reason>` — the report line's own grammar,
+    task) or at the merge push: `AC-<id>: <path>::<test>` or `AC-<id>: struck —
+    <reason>` — the report line's own grammar (attest knows no other proof),
     so plan and report cannot drift apart;
   - a section the project requires (`sections`) missing;
   - a story id the plan names that the registry does not hold (`story_id`
@@ -57,7 +57,6 @@ from process_git import git_environment  # noqa: E402  (one owner for how git is
 
 PLANS_ACTIVE = ".process-work/plans"
 DATA = "docs/process/plan-structure.local.json"
-_MANUAL = re.compile(r"^manual[ \t]*:[ \t]*\S", re.IGNORECASE)
 _TICKED = re.compile(r"^[ \t]*[-*+][ \t]+\[[xX]\][ \t]", re.MULTILINE)
 _SETTLED = re.compile(r"\b(?:struck:[ \t]*\S|moved:[ \t]*#\d+)", re.IGNORECASE)
 _ASSUMPTION = re.compile(r"\[assumption\]", re.IGNORECASE)
@@ -121,7 +120,7 @@ def load_data(root: Path, ref: str) -> tuple[dict, str]:
 
 
 def _is_proof(body: str) -> bool:
-    return bool(_NAMES_A_TEST.search(body) or _MANUAL.match(body))
+    return bool(_NAMES_A_TEST.search(body))
 
 
 def criteria_findings(rel: str, text: str, shall_words: list[str], *, need_tests: bool) -> list[str]:
@@ -154,8 +153,7 @@ def criteria_findings(rel: str, text: str, shall_words: list[str], *, need_tests
         for key, line in sorted(criteria.items(), key=lambda kv: kv[1]):
             if key not in proven and key not in struck:
                 out.append(f"{rel}:{line}: AC-{key} names no planned test — add `AC-{key}: <path>::<test>` "
-                           f"(it may not exist yet), `AC-{key}: struck — <reason>` or "
-                           f"`AC-{key}: manual: <reason>`")
+                           f"(it may not exist yet) or `AC-{key}: struck — <reason>`")
     return out
 
 
@@ -206,8 +204,11 @@ def check(root: Path, env: dict[str, str] | None = None) -> tuple[list[str], lis
     shall_words = ["shall", *data.get("shall_words", [])]  # a project's words add to `shall`
     sections = data.get("sections", [])
     registry: set[str] | None = None
-    for p in sorted(pdir.glob("*.md")):
-        rel = f"{PLANS_ACTIVE}/{p.name}"
+    # an archived plan the branch adds is its plan too: /finish archives before the merge push
+    archive = pdir / "archive"
+    plans = [*sorted(pdir.glob("*.md")), *(sorted(archive.glob("*.md")) if archive.is_dir() else [])]
+    for p in plans:
+        rel = p.relative_to(root).as_posix()
         if p.name.startswith("design-"):
             continue
         try:
