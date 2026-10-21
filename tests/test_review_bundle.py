@@ -1671,6 +1671,30 @@ def test_a_project_word_from_review_local_counts(render, tmp_path):
     assert f"{TRANSITIONS_NOTE} — the plan speaks of event, saga " in text
 
 
+def _bundle_module(out: Path, name: str):
+    """make_review_bundle loaded from the rendered tree, its siblings importable."""
+    sys.dont_write_bytecode = True
+    sys.path.insert(0, str(out / "scripts/process"))
+    spec = importlib.util.spec_from_file_location(name, out / "scripts/process/make_review_bundle.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_the_transitions_heading_has_one_owner(render, tmp_path):
+    """v2.77 D1: the bundle's note and plan-structure read one rule for a `## Transitions`
+    heading — the review gate's, never a copy in the bundle."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    try:
+        mod = _bundle_module(out, "bundle_transitions")
+        rule = mod._review_gate.TRANSITIONS_HEADING
+        assert rule.search("x\n### Transitions (order)\n") and not rule.search("# Transitions\n")
+        assert not hasattr(mod, "_TRANSITIONS_HEADING")
+        src = (out / "scripts/process/make_review_bundle.py").read_text()
+        assert "_review_gate.TRANSITIONS_HEADING" in src and "Transitions\\b" not in src
+    finally:
+        sys.path.remove(str(out / "scripts/process"))
+
 
 def test_the_bundle_carries_the_anchors_of_the_touched_folders(render, tmp_path, tmp_path_factory):
     """#253: a reviewer without tools sees only the bundle; a monorepo keeps its stack

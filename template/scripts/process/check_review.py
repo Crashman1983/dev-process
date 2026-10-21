@@ -814,6 +814,9 @@ GATE_FILES = ("Makefile", ".pre-commit-config.yaml",
               "docs/process/gates.local.json", "docs/process/model-policy.local.json",
               "docs/process/model-policy.codex.json", "docs/process/model-policy.codex.local.json")
 REVIEW_REPORTS = ".process-work/reviews"
+# a plan's state-transition table (`design-template.md`, Transitions) — one rule for
+# the review bundle's note and plan-structure
+TRANSITIONS_HEADING = re.compile(r"^##+\s+Transitions\b", re.MULTILINE)
 _REPORT_KEY = re.compile(r"^\s*(?:[-*+]\s+)?[*_]*(review|audit|work|phase)[*_]*\s*:\s*(\S+)", re.IGNORECASE)
 
 
