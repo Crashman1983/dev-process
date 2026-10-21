@@ -8,12 +8,15 @@
 Issue-ref FORMAT is hard-guaranteed (CI exit 1). Issue EXISTENCE on GitHub is
 best-effort and entirely advisory (never exit 1): a definitive 404 stays a
 note, because this cannot distinguish a deleted issue from one an
-unauthenticated or cross-repo token cannot see. Stdlib + PyYAML (a gate dep,
-used to read the copier answers)."""
+unauthenticated or cross-repo token cannot see. Review reports are checked
+offline: publication, tracked follow-ups, and `class=` on every blocker and
+major finding the branch adds against the fork point (#297). Stdlib + PyYAML
+(a gate dep, used to read the copier answers)."""
 from __future__ import annotations
 
 import json
 import re
+from collections import Counter
 import shutil
 import subprocess
 import sys
@@ -33,9 +36,12 @@ REVIEWS_DIR = ".process-work/reviews"  # review/audit reports
 # issue-ref grammar and the fence-stripping discipline — import, don't copy
 # (one owner per behavior)
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling import
-from check_review import _LEAD, _unfenced, parse_issue_ref  # noqa: E402
+from check_review import _LEAD, GitReadError, _unfenced, merge_base, parse_issue_ref  # noqa: E402
 from check_review import ISSUE_DECL as _PLAN_ISSUE  # noqa: E402
 from check_review import plan_tier as _plan_tier  # noqa: E402
+# how a file is read at a ref, missing told from unreadable — one owner (plan-structure)
+from check_plan_structure import _Unreadable, _at_ref  # noqa: E402
+from check_plan_structure import _git as _git_read  # noqa: E402
 
 _PLAN_WAIVED = re.compile(_LEAD + r"issue-waived[*_]*\s*:\s*\S", re.IGNORECASE | re.MULTILINE)
 
@@ -168,13 +174,16 @@ FINDING_KINDS = {"knowledge-gap", "requirement", "implementation", "test-gap",
 # Who raised a finding, optional: the reviewer's family (`claude`, `codex`, …), so
 # a pass that merges two reviewers keeps each finding's origin (#247).
 FINDING_BY = re.compile(r"^[a-z][a-z0-9.-]*$")
-# What could have caught it, optional (#276): `mechanical` = a static rule over
-# files or the diff, `testable` = a deterministic test technique (property,
-# mutation, fault injection, contract), `judgment` = only a reader. A
-# mechanical or testable finding names the check in `rule=` (one token, e.g.
-# `rule=mutation-of-changed-lines`); `process_kpis.py findings` counts both, so
-# a class that keeps coming back is seen before a reader finds it a third time.
+# What could have caught it (#276) — not what kind of failure it is: `mechanical`
+# = a static rule over files or the diff, `testable` = a deterministic test
+# technique (property, mutation, fault injection, contract), `judgment` = only a
+# reader. A mechanical or testable finding names the check in `rule=` (one token,
+# e.g. `rule=mutation-of-changed-lines`); `process_kpis.py findings` counts both,
+# so a class that keeps coming back is seen before a reader finds it a third time.
+# Owed on every blocker and major a branch adds (#297, `_class_duty`); optional
+# on the rest and on findings that stood at the fork point.
 FINDING_CLASSES = {"mechanical", "testable", "judgment"}
+CLASS_DUE = {"blocker", "major"}
 FINDING_RULE = re.compile(r"^[\w.:/-]+$")
 FINDING_KEYS = ("sev", "action", "issue", "gate", "origin", "kind", "by", "class", "rule")
 
@@ -207,8 +216,10 @@ def _parse_finding(match: re.Match) -> tuple[dict | None, str | None]:
     and action= with valid enums; issue= optional, '-' meaning none; gate=
     optional, free-form (see FINDING_GATE_*); origin= optional, one of
     FINDING_ORIGINS; kind= optional, one of FINDING_KINDS; by= optional, the
-    reviewer's family as a lower-case word (FINDING_BY); class= optional, one of
-    FINDING_CLASSES; rule= optional, the check that would catch it."""
+    reviewer's family as a lower-case word (FINDING_BY); class= one of
+    FINDING_CLASSES, optional here (a blocker or major the branch adds owes it:
+    `_class_duty`, which knows the fork point); rule= optional, the check that
+    would catch it."""
     fields: dict = {}
     tokens = match.group(1).split()
     i = 0
@@ -293,6 +304,60 @@ def _git_ignored(root: Path, paths: list[Path]) -> set[Path]:
     return {root / rel for rel in r.stdout.split("\0") if rel}
 
 
+_NO_RANGE = ("no branch range against an integration ref (on it, or none in this repository) — "
+             "no blocker or major finding is new here, so `class=` is not checked")
+_UNKNOWN_NEW = "which blocker and major findings this branch adds is unknown"
+
+
+def _finding_identity(fields: dict) -> tuple[tuple[str, str], ...]:
+    """A finding as the branch compares it with the fork point: without `issue=`, which
+    `publish_review.sh` writes into lines that stood before — publishing makes no old
+    finding new."""
+    return tuple(sorted((k, v) for k, v in fields.items() if k != "issue"))
+
+
+def _class_duty(root: Path, due: dict[str, list[dict]]) -> tuple[list[str], list[str]]:
+    """`class=` on every blocker and major the branch adds (#297): `due` holds, per
+    report, its blocker and major findings without one. A finding that stood in the same
+    report at the fork point (merge-base with the integration ref) is old; a report absent
+    there is new as a whole. Fails closed on an unreadable or unborn HEAD, an unreadable
+    or ambiguous fork point and a report git cannot read there. On the integration ref,
+    or in a readable repository without one, no finding is new: a note."""
+    if not due:
+        return [], []
+    probe = _git_read(root, "rev-parse", "--git-dir")
+    if probe.returncode != 0:
+        if "not a git repository" in probe.stderr.lower():
+            return [], ["not in a git repository — no branch range, so `class=` is not checked"]
+        return [f"git cannot read the repository ({probe.stderr.strip()}) — {_UNKNOWN_NEW}"], []
+    head = _git_read(root, "rev-parse", "--verify", "-q", "HEAD^{commit}")
+    if head.returncode != 0 or not head.stdout.strip():
+        return [f"HEAD cannot be read (unborn or naming a missing commit) — {_UNKNOWN_NEW}; "
+                f"commit, or repair the repository"], []
+    try:
+        fork = merge_base(root)
+    except GitReadError as exc:
+        return [f"the fork point cannot be read ({exc}) — {_UNKNOWN_NEW}"], []
+    if fork is None:
+        return [], [_NO_RANGE]
+    hard: list[str] = []
+    for rel, findings in sorted(due.items()):
+        try:
+            before = _at_ref(root, fork, rel)
+        except _Unreadable as exc:
+            hard.append(f"{rel}: cannot be read at the fork point ({exc}) — {_UNKNOWN_NEW}")
+            continue
+        old = Counter(_finding_identity(f) for f, _err, _line in report_findings(before or "") if f)
+        for fields in findings:
+            key = _finding_identity(fields)
+            if old[key] > 0:
+                old[key] -= 1
+                continue
+            hard.append(f"{rel}: {fields['sev']} finding without class= — say what could have caught it "
+                        f"(`class=mechanical|testable|judgment`, a check in `rule=`): {fields['title']!r}")
+    return hard, []
+
+
 def _check_reports(root: Path, default_repo: str | None) -> tuple[list[str], list[str]]:
     """Review/audit visibility binding, offline over committed report files.
     Opt-in by artifact existence: no reports directory or files -> silent.
@@ -308,6 +373,7 @@ def _check_reports(root: Path, default_repo: str | None) -> tuple[list[str], lis
     hard: list[str] = []
     soft: list[str] = []
     campaigns: dict[str, dict[str, str]] = {}  # slug -> {report: campaign-issue}
+    unclassed: dict[str, list[dict]] = {}  # report -> its blockers and majors without class=
     candidates = sorted(rdir.glob("*.md"))
     ignored = _git_ignored(root, candidates)
     for p in candidates:
@@ -388,6 +454,8 @@ def _check_reports(root: Path, default_repo: str | None) -> tuple[list[str], lis
                             f"{fields['title']!r}")
             if fields["gate"] == FINDING_GATE_POSSIBLE:
                 ratchet.append(fields["title"])
+            if fields["sev"] in CLASS_DUE and "class" not in fields:
+                unclassed.setdefault(rel, []).append(fields)
         if ratchet:
             # Advisory on purpose: `gate=` is self-classified, and a hard rule
             # on a self-classified field buys `gate=judgement` on everything
@@ -404,7 +472,8 @@ def _check_reports(root: Path, default_repo: str | None) -> tuple[list[str], lis
             detail = ", ".join(f"{r}={v}" for r, v in sorted(members.items()))
             hard.append(f"campaign {slug!r} is split across parent issues — "
                         f"a split campaign is not bundled: {detail}")
-    return hard, soft
+    ch, cs = _class_duty(root, unclassed)
+    return hard + ch, soft + cs
 
 
 def check(root: Path) -> tuple[list[str], list[str]]:
