@@ -1009,3 +1009,13 @@ def test_the_catalog_names_a_decision_after_an_await_on_a_stale_snapshot(render,
     for stack in ("Python:", "React:", "Swift:"):
         assert stack in flat, stack
     assert "to_thread" in flat and "stale closure" in flat and "reentran" in flat
+
+
+def test_the_monthly_review_reads_the_baseline_before_tidy(render, tmp_path):
+    """tidy deletes older reports of closed works and compact_journal drops skip lines —
+    the baseline runs first and its numbers go into the report."""
+    out = render(tmp_path, {"project_name": "demo"})
+    monthly = _flat(out / "docs/process/improvement-monthly.md")
+    assert "process_kpis.py baseline" in monthly
+    assert monthly.index("process_kpis.py baseline") < monthly.index("tidy.py --apply")
+    assert "- Baseline:" in (out / "docs/process/improvement-monthly.md").read_text()

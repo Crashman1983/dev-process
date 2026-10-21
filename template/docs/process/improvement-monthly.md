@@ -14,6 +14,15 @@ before the owner; where none is available, say so.
 
 ## What you review
 
+0. **The baseline, first.** Run `process_kpis.py baseline --window
+   <last month> --window <this month>` before anything tidies the records,
+   and copy its numbers into the report: `tidy.py --apply` deletes the older
+   review reports of closed works and `compact_journal` drops skip lines, so
+   a later run counts less. Read the fix rounds per work, the share of
+   `origin=fix` blockers, rounds with and without a plan review, the
+   fix-pass buckets against the next round's fix blockers, and the skips
+   per kind — a kind skipped by more than half the works is a record to
+   loosen or drop.
 1. **The graph as a whole.** `process_kpis.py nodes --days 90`,
    `gate_modes.py status`: which gates carry the catches, which cost without
    catching, which flip. Are weakened gates still justified by their triage?
@@ -40,6 +49,7 @@ before the owner; where none is available, say so.
 ```
 # Improvement review YYYY-MM
 - Ran by: <harness>/<model family> · independent of: <the weekly sessions>
+- Baseline: <the `process_kpis.py baseline` numbers of both windows, read before tidy>
 - Graph: <what carries, what costs, what to look at>
 - Decisions: <n> weekly actions · held <n> · missed <n> · not measurable <n>
 - Signals: <still fit | what drifted and why>
