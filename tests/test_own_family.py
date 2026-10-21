@@ -326,3 +326,44 @@ def test_a_rename_that_reorders_lines_is_no_pure_rename(render, tmp_path):
     r.passes((CODEX, r.neu))
     out = r.gate()
     assert out.returncode == 1 and "cleared only by passes outside" in out.stdout, out.stdout
+
+
+def _spec_plan_repo(render, tmp_path: Path) -> Repo:
+    """A Tier 3 Spec Kit plan on the feature branch, no commit claiming its issue (#266)."""
+    r = Repo(render, tmp_path, claim="")
+    (r.root / ".process-work/plans/2026-10-15-77-widget.md").unlink()
+    spec = r.root / "specs/77-widget"
+    spec.mkdir(parents=True)
+    (spec / "plan.md").write_text("# Plan\n\ntier: 3\nissue: #77\n\n## Decisions\n", encoding="utf-8")
+    _git(r.root, "add", "-A")
+    _git(r.root, "commit", "-q", "-m", "spec: widget plan")
+    r.neu = _git(r.root, "rev-parse", "HEAD")
+    return r
+
+
+def test_an_in_flight_spec_plan_cleared_by_another_family_alone_fails(render, tmp_path):
+    """#266: only the issue-anchored arm asked for the own family; a spec plan with no
+    claiming commit passed on a Codex pass alone."""
+    r = _spec_plan_repo(render, tmp_path)
+    r.passes((CODEX, r.neu))
+    out = r.gate()
+    assert out.returncode == 1 and "specs/77-widget/plan.md" in out.stdout \
+        and "cleared only by passes outside" in out.stdout, out.stdout
+    r.passes((CLAUDE, r.neu))
+    assert r.gate().returncode == 0, r.gate().stdout
+
+
+def test_an_in_flight_spec_plan_without_any_review_fails(render, tmp_path):
+    r = _spec_plan_repo(render, tmp_path)
+    out = r.gate()
+    assert out.returncode == 1 and "specs/77-widget/plan.md" in out.stdout, out.stdout
+
+
+def test_finish_asks_the_same_owner_for_a_spec_plan(render, tmp_path):
+    r = _spec_plan_repo(render, tmp_path)
+    r.passes((CODEX, r.neu))
+    _git(r.root, "add", "-A")
+    _git(r.root, "commit", "-q", "-m", "journal")
+    out = subprocess.run([sys.executable, str(r.root / "scripts/process/finish.py")], cwd=r.root,
+                         capture_output=True, text=True)
+    assert out.returncode == 1 and "cleared only by passes outside" in out.stdout, out.stdout

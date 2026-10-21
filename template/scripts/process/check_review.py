@@ -2655,6 +2655,35 @@ UNCHECKED = re.compile(r"^\s*- \[ \] ", re.MULTILINE)
 DECISIONS_HEADING = re.compile(r"^#{2,4}\s+Decisions\b", re.IGNORECASE | re.MULTILINE)
 
 
+def spec_plan_findings(root: Path, passes: list[dict], in_flight: set[str] | None,
+                       ref: str | None = None) -> list[str]:
+    """The presence and own-family duty of a Spec Kit plan this push carries —
+    the same as an active plan's. A spec plan cleared by another family alone,
+    or by nothing, passed whenever no commit claimed its issue (#266). One
+    owner for the gate and finish.py; the train asks `clearing_passes` too.
+    `in_flight` None (unknown range) carries every spec plan (fail closed)."""
+    out: list[str] = []
+    own_from = own_family_rule(root, ref)[0]
+    for rel, plan in record_files(root, ("spec-plan",)):
+        try:
+            text = _unfenced(plan.read_text(encoding="utf-8", errors="replace"))
+        except OSError:
+            continue  # the spec-plan scan above reports an unreadable plan
+        tier = plan_tier(text)
+        if tier is None or tier < 2 or review_waived(text):
+            continue
+        spec_dir = rel.rsplit("/", 1)[0] + "/"
+        if in_flight is not None and not any(p == rel or p.startswith(spec_dir) for p in in_flight):
+            continue  # somebody else's spec, untouched by this push
+        ids = _plan_work_ids(plan_stem(rel), text, include_dedated=False)
+        if not _cleared(passes, ids, tier):
+            out.append(no_clearing_review(rel, min(tier, 3), ids)
+                       + " — from Tier 2 on the proof is due before the merge")
+        elif not _cleared(clearing_passes(root, passes, tier, ref), ids, tier):
+            out.append(own_family_missing(rel, tier, own_from))
+    return out
+
+
 def speckit_unreviewed(root: Path, passes: list[dict]) -> list[tuple[str, int, set[str]]]:
     """Spec-dir plans past the review-presence gate's blind spot: the speckit
     path keeps its plan in specs/<dir>/plan.md and never archives it, so the
@@ -3123,6 +3152,10 @@ def check(root: Path) -> tuple[list[str], list[str]]:
         if active_tier2:
             soft.append(f"{active_tier2} active Tier 2 plan(s) in {PLANS_ACTIVE} — "
                         f"their review is due at the merge push; archive on merge")
+
+    # --- Spec Kit plans this push carries: the active plan's duty (#266)
+    for finding in spec_plan_findings(root, passes, in_flight, scope_base):
+        presence(finding)
 
     # --- a plan under work this push deletes (#251): its work would leave the gate
     # with its file — no arm above sees a plan that is not there. Judged by its text
