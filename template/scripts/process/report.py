@@ -34,6 +34,7 @@ import argparse
 import json
 import os
 import socket
+import re
 import subprocess
 import sys
 import time
@@ -102,6 +103,10 @@ EXECUTION = ("delegate", "retain-context")  # a packet's mode (`/plan`, `/execut
 USAGE_KEYS = ("input", "cached", "output", "cost_usd")
 
 
+_COUNT = re.compile(r"[0-9]+")
+_DECIMAL = re.compile(r"[0-9]+(?:\.[0-9]+)?")
+
+
 def parse_usage(text: str) -> dict:
     """`input=<n>,cached=<n>,output=<n>[,cost_usd=<x>]` → a dict; ValueError names what
     is wrong. A harness without transcripts the dispatch reader knows (a remote host,
@@ -113,13 +118,10 @@ def parse_usage(text: str) -> dict:
             raise ValueError(f"{part!r} is not one of {', '.join(f'{k}=' for k in USAGE_KEYS)}")
         if key in out:
             raise ValueError(f"{key} twice")
-        try:
-            number = float(value) if key == "cost_usd" else int(value)
-        except ValueError:
-            raise ValueError(f"{key}={value!r} is no number") from None
-        if number < 0:
-            raise ValueError(f"{key}={value} is negative")
-        out[key] = number
+        # plain ASCII digits only: float() takes nan, inf and `1_0`, int() takes `١٢`
+        if not (_DECIMAL if key == "cost_usd" else _COUNT).fullmatch(value):
+            raise ValueError(f"{key}={value!r} is no non-negative number")
+        out[key] = float(value) if key == "cost_usd" else int(value)
     for key in ("input", "output"):
         if key not in out:
             raise ValueError(f"{key}= is missing")

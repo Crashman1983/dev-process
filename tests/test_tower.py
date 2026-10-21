@@ -258,6 +258,28 @@ def test_wait_wakes_on_a_silent_live_session(render, tmp_path):
     assert r.returncode == 3
 
 
+def test_a_fresh_status_file_keeps_a_silent_session_out_of_the_watch(render, tmp_path):
+    """#270 refute: the `--wait` stale check's status-file wiring was untested."""
+    import time
+    from datetime import datetime, timezone
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    _wt, worker, _then = _silent_session(out, tmp_path, minutes=120)
+    rec_path = _ledger(out).parent.parent / "process-dispatch/7-hung.json"
+    status = tmp_path / "status.json"
+    status.write_text(json.dumps({"updated_at": datetime.fromtimestamp(time.time() - 60, timezone.utc).isoformat()}))
+    rec_path.write_text(json.dumps({**json.loads(rec_path.read_text()), "status_file": str(status)}))
+    try:
+        r = _tower(out, "--wait", "--timeout", "3", "--states", "stale")
+        assert r.returncode == 3 and r.stdout == "", r.stderr  # alive by its status file
+        status.write_text(json.dumps({"updated_at": "2020-01-01T00:00:00+00:00"}))
+        r = _tower(out, "--wait", "--timeout", "20", "--states", "stale")
+        assert r.returncode == 0 and json.loads(r.stdout.splitlines()[0])["worker"] == "7-hung", r.stderr
+    finally:
+        worker.kill()
+        worker.wait()
+
+
 def test_quiet_too_long_is_the_one_owner_of_stale(render, tmp_path):
     out = render(tmp_path, {"project_name": "d", "modules": {}})
     tower = _load_tower(out)
@@ -771,9 +793,37 @@ def test_a_fresh_status_file_keeps_a_commitless_worker_alive(render, tmp_path):
         sys.path.remove(str(out / "scripts/process"))
     status = tmp_path / "status.json"
     now = _time.time()
-    status.write_text(json.dumps({"updated_at": datetime.fromtimestamp(now - 120, timezone.utc).isoformat()}))
+    status.write_text(json.dumps({"updated_at": datetime.fromtimestamp(now - 150, timezone.utc).isoformat()}))
     assert tower.status_age(str(status), now) == 2
+    # a naive stamp is local time, not UTC (refute: off by the zone offset)
+    status.write_text(json.dumps({"updated_at": datetime.fromtimestamp(now - 150).isoformat()}))
+    assert tower.status_age(str(status), now) == 2
+    # a stamp from the future is a wrong clock, never a fresh sign of life
+    status.write_text(json.dumps({"updated_at": datetime.fromtimestamp(now + 3600, timezone.utc).isoformat()}))
+    assert tower.status_age(str(status), now) is None
+    status.write_text(json.dumps({"updated_at": datetime.fromtimestamp(now - 150, timezone.utc).isoformat()}))
     assert not tower.quiet_too_long(90, None, None, 60, tower.status_age(str(status), now))
     assert tower.quiet_too_long(90, None, None, 60, tower.status_age(str(tmp_path / "none.json"), now))
     status.write_text("{not json")
     assert tower.status_age(str(status), now) is None  # unreadable: no signal, never a fresh one
+
+
+def test_the_stale_worker_finding_reads_the_status_file(render, tmp_path):
+    """Refute of #270: `--wait` read the status file, the tower's stale-worker finding did not."""
+    import importlib.util
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    spec = importlib.util.spec_from_file_location("tower_stale_status", out / "scripts/process/tower.py")
+    sys.path.insert(0, str(out / "scripts/process"))
+    try:
+        tower = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(tower)
+    finally:
+        sys.path.remove(str(out / "scripts/process"))
+    wt = {"branch": "w", "minutes_since_commit": 90, "ahead": 1}
+
+    def stale(status_minutes_ago):
+        table = {"overlaps": [], "plans": [], "gates": [], "reports": [], "worktrees": [dict(wt)],
+                 "sessions": [{"branch": "w", "status_minutes_ago": status_minutes_ago}]}
+        return [f for f in tower.findings(table, 60) if f["kind"] == "stale-worker"]
+    assert stale(None) and stale(75)
+    assert not stale(3)
