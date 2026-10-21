@@ -20,8 +20,10 @@ done.
     due_measurements.py [--today YYYY-MM-DD] [--root PATH]
 
 Prints `DUE <id> (since <date>): <command> → <record_hint>` per due
-milestone, sorted by date, and nothing otherwise. A note, not a gate: exit 0,
-also when the project lists no milestones (no file). A file that is there
+milestone, sorted by date, and nothing otherwise. A note, not a gate: exit 0.
+Without the file it says so in one line — silence there read as "nothing due"
+for a project that had milestones and lost the file (#259); a file with an
+empty list stays silent. A file that is there
 but broken — not JSON, wrong shape, a bad date, an id twice — exits 2 with
 the file and the entry named: a broken list must never read as "nothing
 due". An invalid `--today` exits 2 as well. Read-only. Stdlib only.
@@ -145,6 +147,10 @@ def main(argv: list[str] | None = None) -> int:
     args = p.parse_args(argv)
     root = args.root or Path(__file__).resolve().parents[2]
     today = args.today or date.today()
+    path = root / MILESTONES_FILE
+    if not (path.exists() or path.is_symlink()):
+        print(f"due_measurements: no {MILESTONES_FILE} — no milestones tracked")
+        return 0
     try:
         milestones = load_milestones(root)
     except MilestoneFileError as exc:
