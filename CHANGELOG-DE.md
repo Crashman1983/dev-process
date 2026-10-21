@@ -9,6 +9,40 @@ ein Eintrag ohne Plan oder Issue hat keine Details-Zeile. In wenigen Sätzen je 
 English version: [CHANGELOG.md](CHANGELOG.md). Die Releases vor v2.28.2:
 [docs/changelog-archive-DE.md](docs/changelog-archive-DE.md).
 
+## v2.76.0 — Deterministische Prüfungen vor dem Review, und das Maß ihrer Wirkung · 2026-10-21
+
+**Warum.** Kennis Review-Historie (315 Berichte, 1.694 Befunde, dev-process #277 Schritt 0) zeigte: Von den 423 blockierenden oder schweren Befunden brauchten nur 85 das Urteil eines Lesers; den Rest hätte eine Regel oder ein Test gefangen. Sieben von zwanzig Befunden, bei denen eine Prüfung nie wirkte, waren Regeln, die nur eine Warnung druckten, sieben weitere standen nur als Prosa da. Ein Template-Update konnte sein eigenes Review nicht freigeben, ein Zug mit einem Update wurde abgelehnt, und ein Testlauf unter `MAKEFLAGS=-n` passierte den Push-Hook.
+
+**Was sich ändert.**
+- Pflichtnachweise (#282): Eine Tabelle, `review_evidence.required_records` in `model-policy.json`, sagt, was eine Arbeit schuldet — einen REFUTE für Gate-Code und ab Tier 3, eine ROOT-CAUSE-Zeile nach drei Fix-Commits auf einer Datei, das Wort des Owners (`DECISION <Datum> owner:`) hinter einer `review-waived:`-Zeile. attest verweigert ohne den Nachweis oder ein begründetes `skipped <kind> work=<id>: <Grund>` (das Wort des Owners lässt sich nicht überspringen); ein Projekt ergänzt Zeilen unter `required_records_extra`. Das Bundle liest seine Refute-Warnung aus derselben Tabelle.
+- Neues Core-Gate `plan-structure` (#278): In einem Tier-2+-Plan, den der Branch neu anlegt, hat jedes `AC-<id>:`-Kriterium genau ein `shall`, eine nur einmal vergebene ID und — sobald eine Aufgabe abgehakt ist und beim Merge-Push — seinen geplanten Test (`AC-<id>: <pfad>::<test>`, `struck — <Grund>` oder `manual: <Grund>`); beim Merge-Push bleibt keine Aufgabe `- [ ]` ohne `struck:` oder `moved: #N`. Projektabschnitte, das `shall`-Wort und eine Story-Registry kommen aus `plan-structure.local.json`, gelesen an der Integrations-Ref.
+- Die Review-Checkliste lässt sich auf den Diff zuschneiden (#281): `review-sections.local.json` ordnet Abschnitte Pfadklassen zu; das Bundle lässt Abschnitte weg, die keine berührte Klasse erreicht, nennt sie und behält alle, wenn ein Pfad in keine Klasse fällt.
+- FINDING-Zeilen tragen `class=mechanical|testable|judgment` und `rule=<Prüfung>` (#276); `process_kpis.py findings` zählt sie und nennt eine Prüfung, die sich über Arbeiten wiederholt. Der Codex-Reviewer schreibt beides.
+- `process_kpis.py baseline` (#277): je gemergter Arbeit in einem oder zwei Datumsfenstern die Mediane von Tokens, Review- und Fix-Runden, Befunden und Durchlaufzeit, die je Phase angegebenen Tokens, durchgerutschte Arbeiten und der Change-Failure-Proxy. `testing.md` bekommt „Classes, not cases“; das github-issues-Modul liefert eine Vorlage für Prüfungsänderungen mit „Replaces“ und „Measure“.
+- Dispatch (#270): `start` und `queue add` nehmen `--class`, die Klasse wandert durch die Kette; `report.py` kennt den Zustand `failed` (Absturz, Timeout — der Tower listet ihn hoch) und `--usage input=…,cached=…,output=…[,cost_usd=…]`, das `models` zeigt; ein `status_file` in der Policy-Zelle ist ein Lebenszeichen. `deepseek-` ist eine eigene Modellfamilie.
+- Fixes: Der eigene Review-Bericht eines Template-Updates zählt nicht mehr als ungesehenes Projekt-Delta (#272); das Gate beurteilt ein Template-Update im Zug auf seinem eigenen Branch (#271); ein Testlauf unter `MAKEFLAGS=-n` oder einer Variable aus `certificate_env` verweigert den Push, und ein grüner Stufen-Retry schreibt das Merge-Zertifikat (#265); ein Spec-Kit-Plan im Flug schuldet Präsenz und eigene Familie im Gate und in `finish.py` (#266); `due_measurements.py` nennt eine fehlende Meilensteindatei (#259).
+
+**Wirkung.** Was eine Regel oder ein Test fangen kann, wird vor dem Review gefangen; Warnungen, denen niemand folgen musste, wurden Pflichten mit einem ausdrücklichen Ausweg, und die Grundlinie zeigt, ob weniger Fix-Runden und Tokens je Arbeit folgen — mit durchgerutschten Arbeiten als Wächter.
+
+**Update.**
+1. Für bestehende Pläne ist nichts nötig: `plan-structure` bindet nur Pläne, die ein Branch neu anlegt.
+2. Strenger als bisher:
+   - jeder Tier-3-Code-Review-Pass braucht eine REFUTE-Zeile der Arbeit oder `skipped refute work=<id>: <Grund>`;
+   - drei Fix-Commits auf einer Datei brauchen eine ROOT-CAUSE-Zeile oder einen Skip;
+   - ein `review-waived:`-Plan im Flug braucht `DECISION <Datum> owner: …`;
+   - die Kriterien eines neuen Tier-2+-Plans folgen der EARS-Zeilenform mit einem `shall` (ein Projekt, das in einer anderen Sprache schreibt, setzt `shall_words`);
+   - ein Push unter `MAKEFLAGS=-n` oder einer `certificate_env`-Variable wird verweigert;
+   - ein Spec-Kit-Plan im Flug blockiert `finish.py` ohne sein Review.
+3. Optional:
+   - `plan-structure.local.json` für Projektabschnitte und eine Story-Registry;
+   - `review-sections.local.json`, um die Checkliste zuzuschneiden;
+   - `class=`/`rule=` an Befunden;
+   - `--usage` und `status_file` für Harnesses ohne Transkripte.
+
+**Geänderte Abschnitte.** `journal-state-plans.md` (Plans, Review attestations), `mandatory-rules.md`, `refute.md` (What happens with the findings), `start-here.md` (The standard setup), `testing.md` (Classes, not cases — neu), `tower.md` (The worker protocol), `verification-independence.md` (The review bundle — the portable interface to any reviewer), Modul `telemetry` (The KPI cockpit)
+
+Details: [Plan](docs/analysis/2026-10-21-v2.76.md) #259 #265 #266 #270 #271 #272 #276 #277 #278 #281 #282
+
 ## v2.75.0 — Template-Updates überstehen ein wanderndes main, eine Lesart für Fences, Buchführung aus den Läufen · 2026-10-19
 
 **Warum.** Kennis v2.74-Update brauchte nach jedem Zug, der main bewegte, sein Ack und sein volles Tier-3-Review neu, obwohl sich am Update nichts geändert hatte; die Retry-Meldung des Zugs nannte zudem den falschen Retry. Die drei Leser von Fence-Blöcken waren sich uneins, was einen Fence schließt, sodass ein zitiertes `REVIEW … verdict=pass` oder `review-waived:` als echt zählen konnte. REFUTE- und Red-Evidence-Zeilen wurden noch von Hand getippt, ein gelöschter Plan entging seinem Review, und die v2.74-Reviews hinterließen kleinere Reste in attest, finish, dem Designvertrags-Gate und dem Review-Bundle.
