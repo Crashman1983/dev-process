@@ -790,6 +790,52 @@ def test_the_owner_decision_cannot_be_skipped(ev_mod):
     assert [o.kind for o in owed] == ["owner-decision"]
 
 
+def test_every_int_fact_is_a_threshold_and_a_bool_stays_equality(ev_mod):
+    """v2.77 B1: `blocked_rounds` 3 at a row's 2 is owed — the type comes from FACTS, so a
+    new int fact cannot fall back to equality; a bool fact is no number (True >= False)."""
+    import required_records
+    holds = required_records._holds
+    assert required_records.FACTS["blocked_rounds"] is int
+    assert {"replan", "class-test"} <= set(required_records.KINDS)
+    assert holds({"blocked_rounds": 2}, {"blocked_rounds": 3}) is True
+    assert holds({"blocked_rounds": 2}, {"blocked_rounds": 2}) is True
+    assert holds({"blocked_rounds": 2}, {"blocked_rounds": 1}) is False
+    assert holds({"blocked_rounds": 1}, {"blocked_rounds": None}) is None
+    assert holds({"gate_code": False}, {"gate_code": True}) is False
+    assert holds({"gate_code": True}, {"gate_code": True}) is True
+    assert required_records.rows_problem([{"kind": "replan", "when": {"blocked_rounds": 2}},
+                                          {"kind": "class-test", "when": {"blocked_rounds": 1}}]) is None
+
+
+def test_replan_and_root_cause_grammar(ev_mod):
+    """v2.77 B4: `REPLAN work=<id> round=<r>: increment|rebuild — <why>` is a record; a
+    ROOT-CAUSE line splits into cause, sites and the tests after them."""
+    import check_review as cr
+    line = "REPLAN work=v2.77 round=2: rebuild — fix passes over git ranges did not hold"
+    m = cr.REPLAN_LINE.search(line)
+    assert m and (m.group("work"), m.group("round"), m.group("mode")) == ("v2.77", "2", "rebuild")
+    assert cr.REPLAN_LINE.search("- REPLAN work=7 round=3: increment — one owner, one more case")
+    for bad in ("REPLAN work=<id> round=2: rebuild — x", "REPLAN work=7 round=2: increment|rebuild — x",
+                "REPLAN work=7 round=2: rewrite — x", "REPLAN work=7 round=2: rebuild — <reason>",
+                "REPLAN work=7 round=2: rebuild", "    REPLAN work=7 round=2: rebuild — code block"):
+        assert not cr.REPLAN_LINE.search(bad), bad
+    assert cr._record_line(line)
+    assert cr.records_only("# Plan\n\ntier: 2\n", f"# Plan\n\ntier: 2\n\n{line}\n")
+    for kind in ("replan", "class-test"):
+        m = cr.SKIP_LINE.search(f"skipped {kind} work=7: blocked before v2.77")
+        assert m and m.group("kind") == kind
+    parts = cr.root_cause_parts
+    assert parts("the guard read a stale flag — sites: guard.py:12, sync.py:40 — tests/t.py::test_a") == (
+        "the guard read a stale flag", "guard.py:12, sync.py:40", "tests/t.py::test_a")
+    assert parts("x — sites: a.ts — web/a.test.ts::adds — and carries") == (
+        "x", "a.ts", "web/a.test.ts::adds — and carries")
+    assert parts("refuted block — sites: none — the finding misread the guard") == (
+        "refuted block", "none", "the finding misread the guard")
+    assert parts("add subtracted — test_calc.py::test_add") == ("add subtracted", None, "")
+    m = cr.ROOT_CAUSE_LINE.search("ROOT-CAUSE work=7 round=1: cause — sites: a.py — t.py::test_a\n")
+    assert m.group("text") == "cause — sites: a.py — t.py::test_a"
+
+
 def test_another_issues_criterion_is_cited_qualified_and_not_required(ev_mod):
     """#287 (Kenni #2687): a plan citing another issue's criterion made attest ask for it.
     Only the qualified form `#N/AC-<id>` is a citation; prose cannot tell "another issue's
