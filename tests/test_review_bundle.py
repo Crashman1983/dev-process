@@ -1,3 +1,4 @@
+import json
 import importlib.util
 import re
 import subprocess
@@ -1701,3 +1702,59 @@ def test_plan_filter_by_issue_finds_a_plan_without_the_number_in_its_name(render
     bundled = [ln for ln in r.splitlines() if ln.startswith("### ")]
     assert any("widget-polish" in ln for ln in bundled), bundled
     assert not any("template-docs" in ln or "first-try" in ln for ln in bundled), bundled
+
+
+# --- #281: checklist sections scoped by the path classes a diff touches ----------
+
+SECTION_MAP = {"classes": {"code": ["*.py", "scripts/**"], "ui": ["frontend/**"],
+                           "records": [".process-work/**"]},
+               "sections": {"Surfaces": ["ui"], "Security": ["code", "ui"]}}
+
+
+def _seed_with_map(out: Path, data) -> None:
+    (out / "docs/process/review-sections.local.json").write_text(json.dumps(data))
+    _seed_repo(out)
+
+
+def _checklist_part(text: str) -> str:
+    return text.split("## What a review checks", 1)[1].split("## This project's review dimensions", 1)[0]
+
+
+def test_a_section_no_touched_class_reaches_is_left_out_and_named(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_with_map(out, SECTION_MAP)
+    part = _checklist_part(_run(out, "--skip-preflight", "--base", "main").stdout)
+    assert "## Surfaces" not in part and "## Security" in part and "## Correctness" in part, part[:400]
+    assert "omitted for this diff" in part and "Surfaces — the UI acceptance floor" in part
+
+
+def test_a_path_no_class_knows_keeps_every_section(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_with_map(out, SECTION_MAP)
+    (out / "notes.txt").write_text("x\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "notes")
+    part = _checklist_part(_run(out, "--skip-preflight", "--base", "main").stdout)
+    assert "## Surfaces" in part and "notes.txt is in no path class" in part, part[-400:]
+
+
+def test_without_a_map_or_with_a_bad_one_every_section_stays(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    part = _checklist_part(_run(out, "--skip-preflight", "--base", "main").stdout)
+    assert "## Surfaces" in part and "omitted" not in part
+    out2 = render(tmp_path / "bad", {"project_name": "d", "modules": {}})
+    _seed_with_map(out2, {"classes": {"code": ["*.py"]}, "sections": {"Surfaces": ["nope"]}})
+    part = _checklist_part(_run(out2, "--skip-preflight", "--base", "main").stdout)
+    assert "## Surfaces" in part and "every section kept" in part
+
+
+def test_a_branch_cannot_scope_its_own_review(render, tmp_path):
+    """The map is read at the base: a branch adding one leaves out nothing."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    (out / "docs/process/review-sections.local.json").write_text(json.dumps(SECTION_MAP))
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "map")
+    part = _checklist_part(_run(out, "--skip-preflight", "--base", "main").stdout)
+    assert "## Surfaces" in part and "omitted" not in part

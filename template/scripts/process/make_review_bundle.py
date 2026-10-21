@@ -52,6 +52,7 @@ CI. Stdlib only.
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import re
 import subprocess
@@ -62,7 +63,7 @@ from typing import NamedTuple
 # check_review.py owns the REVIEW grammar; check_kernel.py owns kernel-block
 # extraction — importing both keeps this tool byte-honest with the gates
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling import
-from process_git import fork_point, git_environment  # noqa: E402
+from process_git import fork_point, git_environment, path_matches  # noqa: E402
 import check_kernel as _kernel_gate  # noqa: E402
 import check_review as _review_gate  # noqa: E402
 import gate_invoke as _launch  # noqa: E402  (one owner for "how to start the runner")
@@ -70,6 +71,8 @@ import gate_invoke as _launch  # noqa: E402  (one owner for "how to start the ru
 CHECKLIST = "docs/process/review-checklist.md"
 # the project's own review dimensions (stack, domain) — owned by the project, carried here
 LOCAL_CHECKLIST = "docs/process/review.local.md"
+# checklist sections scoped by the path classes a diff touches (#281)
+REVIEW_SECTIONS = "docs/process/review-sections.local.json"
 PRODUCT = "PRODUCT.md"
 PLANS = _review_gate.PLANS_ACTIVE
 # where a plan under review may live: active, archived (the plan is archived
@@ -436,6 +439,56 @@ For each finding, one line:
 # the tier from which a plan without a REFUTE line is warned about, when the
 # required-records table cannot be read; gate code warns at any tier
 REFUTE_RUN_TIER = 3
+
+
+def _section_map(root: Path, ref: str | None) -> tuple[dict | None, str]:
+    """(the project's section map, problem) — read at the base, like every rule a
+    branch must not lift for itself. None without a file: every section applies."""
+    if ref is None:
+        return None, ""
+    raw = _review_gate._git_bytes(root, "show", f"{ref}:{REVIEW_SECTIONS}")
+    if raw is None:
+        return None, ""
+    try:
+        data = json.loads(raw.decode("utf-8", errors="replace"))
+    except ValueError as exc:
+        return None, f"{REVIEW_SECTIONS} is not valid JSON ({exc})"
+    classes, sections = (data.get("classes"), data.get("sections")) if isinstance(data, dict) else (None, None)
+    if not (isinstance(classes, dict) and all(isinstance(g, list) and g and all(isinstance(x, str) for x in g)
+                                              for g in classes.values())):
+        return None, f"{REVIEW_SECTIONS}: classes must map a name to a list of path globs"
+    if not (isinstance(sections, dict) and all(isinstance(c, list) and c and set(c) <= set(classes)
+                                               for c in sections.values())):
+        return None, f"{REVIEW_SECTIONS}: sections must map a heading to a list of known class names"
+    return {"classes": classes, "sections": sections}, ""
+
+
+def _scoped_checklist(text: str, paths: list[str] | None, cfg: dict | None) -> tuple[str, str]:
+    """(the checklist with only the sections the diff's path classes reach, the note
+    naming what was left out). Fail closed: no map, no path list, or a path no class
+    knows keeps every section — leaving out what a diff may touch is a silent gap."""
+    if cfg is None or paths is None:
+        return text, ""
+    unknown = [p for p in paths if not any(path_matches(g, p) for globs in cfg["classes"].values() for g in globs)]
+    if unknown:
+        return text, f"*(every section kept: {_shown(unknown[0])} is in no path class of {REVIEW_SECTIONS})*\n"
+    touched = {name for name, globs in cfg["classes"].items() if any(path_matches(g, p) for g in globs for p in paths)}
+    parts = re.split(r"(?m)^(?=## )", text)
+    heads = [part.splitlines()[0][3:].strip() for part in parts[1:]]
+    for key in cfg["sections"]:
+        if sum(h.startswith(key) for h in heads) != 1:
+            return text, (f"*(every section kept: `{key}` in {REVIEW_SECTIONS} names no single checklist "
+                          f"heading)*\n")
+    kept, omitted = [parts[0]], []
+    for part, head in zip(parts[1:], heads):
+        key = next((k for k in cfg["sections"] if head.startswith(k)), None)
+        if key is None or set(cfg["sections"][key]) & touched:
+            kept.append(part)
+        else:
+            omitted.append(head)
+    note = (f"*(omitted for this diff — none of their path classes is touched, {REVIEW_SECTIONS}: "
+            f"{'; '.join(omitted)})*\n") if omitted else ""
+    return "".join(kept), note
 
 
 def _refute_rows(root: Path, ref: str | None) -> tuple[int | None, bool, str]:
@@ -823,7 +876,17 @@ def build(root: Path, base: str | None, plan_filter: str | None = None,
 
     checklist = _read(root, CHECKLIST)
     add("## What a review checks\n")
-    add(checklist + "\n" if checklist else "*(unavailable: docs/process/review-checklist.md missing)*\n")
+    if checklist:
+        cfg, problem = _section_map(root, resolved)
+        if problem:
+            add(f"*(every section kept: {problem})*\n")
+        # the whole branch's paths: the verdict binds the branch, a delta round too
+        paths = _review_gate._names(_review_gate._git_bytes(
+            root, "diff", "--name-only", "--no-renames", "-z", f"{resolved}...HEAD")) if resolved else None
+        checklist, note = _scoped_checklist(checklist, paths, cfg)
+        add(checklist + "\n" + note)
+    else:
+        add("*(unavailable: docs/process/review-checklist.md missing)*\n")
     local = _read(root, LOCAL_CHECKLIST)
     if local:
         add(f"## This project's review dimensions ({LOCAL_CHECKLIST})\n")
