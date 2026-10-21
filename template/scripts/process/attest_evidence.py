@@ -73,7 +73,7 @@ DEFAULTS = {
     # its code current — check_review; 4: never (#241)
     "own_family_from_tier": 4,
     "ranks": {"claude-haiku": 0, "claude-sonnet": 1, "claude-opus": 2, "claude-fable": 3},
-    "families": ["gpt-"],
+    "families": ["gpt-", "deepseek-"],  # deepseek-: a third family, e.g. via Melious (#270)
     # pytest's own defaults; a project with other `python_files`/`python_classes` names them
     "python_files": ["test_*.py", "*_test.py"],
     "python_classes": ["Test"],

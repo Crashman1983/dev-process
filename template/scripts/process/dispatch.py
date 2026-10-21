@@ -258,6 +258,9 @@ class Cell(NamedTuple):
     model: str
     effort: str | None = None
     command: str | None = None  # the cell's own start command, over phases.<phase>.command and `command`
+    # a file the worker rewrites while it runs (`{"updated_at": "<ISO time>"}`): a liveness
+    # signal for a harness that writes events but no commits (#270); relative to the worktree
+    status_file: str | None = None
 
 
 def _cell(cell: object, where: str) -> Cell:
@@ -267,14 +270,17 @@ def _cell(cell: object, where: str) -> Cell:
     local overlay: the project's cells too)."""
     if isinstance(cell, str) and cell:
         return Cell(cell)
-    if (isinstance(cell, dict) and set(cell) <= {"model", "effort", "command"}
+    if (isinstance(cell, dict) and set(cell) <= {"model", "effort", "command", "status_file"}
             and isinstance(cell.get("model"), str) and cell["model"]):
-        effort, command = cell.get("effort"), cell.get("command")
+        effort, command, status = cell.get("effort"), cell.get("command"), cell.get("status_file")
+        if status is not None and not (isinstance(status, str) and status and not Path(status).is_absolute()
+                                       and ".." not in Path(status).parts):
+            raise SystemExit(f"dispatch: {POLICY} {where}.status_file must be a path inside the worktree")
         if effort is not None and effort not in EFFORTS:
             raise SystemExit(f"dispatch: {POLICY} {where}: effort {effort!r} is not one of {', '.join(EFFORTS)}")
         if command is not None and not (isinstance(command, str) and "{model}" in command and "{prompt}" in command):
             raise SystemExit(f"dispatch: {POLICY} {where}.command must be a string containing {{model}} and {{prompt}}")
-        return Cell(cell["model"], effort, command)
+        return Cell(cell["model"], effort, command, status)
     raise SystemExit(f"dispatch: {POLICY} {where} must be a model id or "
                      f'{{"model": "…", "effort": "{"|".join(EFFORTS)}", "command": "…"}}, got {cell!r}')
 
@@ -1735,7 +1741,7 @@ def _worker_env(extra: dict[str, str]) -> dict[str, str]:
 
 def start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str | None, title: str | None,
           dry_run: bool, owner_approved: bool = False, plan_review: bool = False,
-          stale_plan_ok: bool = False, harness: str | None = None) -> int:
+          stale_plan_ok: bool = False, harness: str | None = None, cls: str | None = None) -> int:
     history = _records_dir(root) / "phases" / f"{issue}.json"
     try:
         previous = json.loads(history.read_text()) if history.exists() else {}
@@ -1751,8 +1757,8 @@ def start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str |
             return 3
     codex = harness == "codex"
     policy = load_policy(root, harness=harness)
-    cell = cell_for(policy, tier, phase)
-    model, effort = cell.model, cell.effort
+    cell = cell_for(policy, tier, phase, cls)  # the task class picks the cell, as `policy --class` (#270)
+    model, effort, status_file = cell.model, cell.effort, cell.status_file
     why = effort_refusal(policy, phase, cell)
     if why:
         print(f"dispatch: not starting — {why}", file=sys.stderr)
@@ -1894,7 +1900,8 @@ def start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str |
         extra = {**worker_vars, "PROCESS_PHASE_BASE": phase_base(root, branch)}
         rec = {"branch": branch, "issue": issue, "phase": phase, "tier": tier, "model": model, "effort": effort, "remote": True,
                "started": int(time.time()), "ts": _dt.datetime.now().isoformat(timespec="seconds"),
-               "runner": runner, "handover_id": pp["handover_id"], "plan_review": plan_review}
+               "runner": runner, "handover_id": pp["handover_id"], "plan_review": plan_review,
+               **({"cls": cls} if cls else {})}
         if runner == "tmux":
             # some hand-over CLIs refuse to start without a terminal (observed
             # downstream: a cloud-session start exited at once when detached) —
@@ -1946,7 +1953,9 @@ def start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str |
     extra = {**worker_vars, "PROCESS_PHASE_BASE": phase_base(root, branch)}
     rec = {"branch": branch, "issue": issue, "phase": phase, "tier": tier, "model": model, "effort": effort,
            "worktree": str(wt), "log": str(log), "started": int(time.time()),
-           "ts": _dt.datetime.now().isoformat(timespec="seconds"), "runner": runner, "plan_review": plan_review}
+           "ts": _dt.datetime.now().isoformat(timespec="seconds"), "runner": runner, "plan_review": plan_review,
+           **({"cls": cls} if cls else {}),
+           **({"status_file": str(wt / status_file)} if status_file else {})}
     if codex:
         rec["harness"] = "codex"
         try:
@@ -2389,6 +2398,10 @@ def _valid_entry(e: object) -> dict | None:
         entry["harness"] = e["harness"]
     if e.get("plan_review") is True:
         entry["plan_review"] = True
+    if e.get("cls") is not None:
+        if not isinstance(e["cls"], str) or not e["cls"]:
+            return None
+        entry["cls"] = e["cls"]
     return entry
 
 
@@ -2428,9 +2441,10 @@ def _same_line(a: dict, b: dict) -> bool:
 
 
 def queue_add(root: Path, *, issue: int, phase: str, tier: int | None, branch: str | None,
-              plan_review: bool = False, harness: str | None = None) -> None:
-    if harness is not None:
-        load_policy(root, harness=harness)  # a line that cannot start is refused now, not at drain
+              plan_review: bool = False, harness: str | None = None, cls: str | None = None) -> None:
+    if harness is not None or cls is not None:
+        # a line that cannot start is refused now, not at drain: an unknown class too
+        cell_for(load_policy(root, harness=harness), tier, phase, cls)
     with _QueueLock(root):
         entries = queue_load(root)
         entry = {"issue": int(issue), "phase": phase, "tier": tier, "branch": branch}
@@ -2438,6 +2452,8 @@ def queue_add(root: Path, *, issue: int, phase: str, tier: int | None, branch: s
             entry["harness"] = harness
         if plan_review:
             entry["plan_review"] = True
+        if cls is not None:
+            entry["cls"] = cls
         if not any(_same_line(entry, e) for e in entries):  # one line per issue and phase
             entries.append(entry)
             _queue_save(root, entries)
@@ -2454,7 +2470,8 @@ def drain(root: Path) -> int:
             try:
                 rc = start(root, issue=e["issue"], phase=e["phase"], tier=e.get("tier"),
                            branch=e.get("branch"), title=None, dry_run=False,
-                           plan_review=bool(e.get("plan_review")), harness=e.get("harness"))
+                           plan_review=bool(e.get("plan_review")), harness=e.get("harness"),
+                           cls=e.get("cls"))
             except SystemExit as exc:
                 print(f"dispatch: queued #{e['issue']} {e['phase']} could not start: {exc}", file=sys.stderr)
                 rc = 1
@@ -2634,7 +2651,7 @@ def phase_over(root: Path, rec: dict, rep: dict | None, *, local: bool = False) 
     task of the branch's own plans ticked on origin (with `local`: as last
     fetched — no network). None when that cannot be told."""
     state, phase = (rep or {}).get("state"), rec.get("phase")
-    if state in ("done", "idle"):
+    if state in ("done", "idle", "failed"):  # a failed run is over, not done (#270)
         return True
     if (phase, state) in (("plan", "planned"), ("review", "review-pass"), ("review", "blocked")):
         return True
@@ -2925,8 +2942,9 @@ def _chain(root: Path, *, dry_run: bool = False) -> int:
                 # round on Codex, or a Codex execute reviewed by Codex, leaves the review
                 # single-family — the other side of the review takes the default harness
                 carried = rec.get("harness") if "review" not in (rec.get("phase"), nxt) else None
+                # the task class is the work's, so it travels to the next phase (#270)
                 queue_add(root, issue=issue, phase=nxt, tier=tier, branch=branch, plan_review=plan_review,
-                          harness=carried)
+                          harness=carried, cls=rec.get("cls"))
             except OSError as exc:
                 print(f"dispatch: {branch} stopped, but {nxt} could not be queued ({exc}) — queue it by hand: "
                       f"dispatch.py queue add --issue {issue} --phase {nxt}"
@@ -2948,6 +2966,8 @@ def main(argv: list[str]) -> int:
     s.add_argument("--title", help="slug source for a new branch name")
     s.add_argument("--harness", choices=HARNESSES,
                    help="codex: the Codex variant (model-policy.codex.json) under the supervisor")
+    s.add_argument("--class", dest="cls", metavar="CLASS",
+                   help="task class (mechanical, design, …): its cell wins over the tier's, as for `policy`")
     s.add_argument("--dry-run", action="store_true")
     s.add_argument("--plan-review", action="store_true",
                    help="with --phase review: review the plan before execute, not the code")
@@ -2977,6 +2997,7 @@ def main(argv: list[str]) -> int:
     qa.add_argument("--tier", type=int)
     qa.add_argument("--branch")
     qa.add_argument("--plan-review", action="store_true", help="with --phase review: a plan review")
+    qa.add_argument("--class", dest="cls", metavar="CLASS", help="task class, chosen once at queue time")
     qsub.add_parser("list")
     sub.add_parser("drain")
     po = sub.add_parser("policy")
@@ -2989,7 +3010,7 @@ def main(argv: list[str]) -> int:
     if a.command == "start":
         return start(root, issue=a.issue, phase=a.phase, tier=a.tier, branch=a.branch, title=a.title,
                      dry_run=a.dry_run, owner_approved=a.owner_approved, plan_review=a.plan_review,
-                     stale_plan_ok=a.stale_plan_ok, harness=a.harness)
+                     stale_plan_ok=a.stale_plan_ok, harness=a.harness, cls=a.cls)
     if a.command == "handoff":
         return handoff(root, a.branch, a.implementer)
     if a.command == "list":
@@ -3005,10 +3026,11 @@ def main(argv: list[str]) -> int:
     if a.command == "queue":
         if a.queue_command == "add":
             queue_add(root, issue=a.issue, phase=a.phase, tier=a.tier, branch=a.branch,
-                      plan_review=a.plan_review and a.phase == "review", harness=a.harness)
+                      plan_review=a.plan_review and a.phase == "review", harness=a.harness, cls=a.cls)
         for e in queue_load(root):
             print(f"#{e['issue']} {e['phase']}" + (f" tier {e['tier']}" if e.get("tier") is not None else "")
-                  + (f" on {e['branch']}" if e.get("branch") else ""))
+                  + (f" on {e['branch']}" if e.get("branch") else "")
+                  + (f" class {e['cls']}" if e.get("cls") else ""))
         return 0
     if a.command == "drain":
         return drain(root)
