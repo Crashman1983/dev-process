@@ -593,6 +593,10 @@ _BLOCK_COMMENT = re.compile(r"^ {0,3}<!--")
 _ASCII_PUNCT = set("!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~")
 
 
+# a plan's transition table (design-template.md, Transitions): `## Transitions`,
+# `### Transitions (…)` — one rule for the bundle's note and the plan-structure gate
+TRANSITIONS_HEADING = re.compile(r"^##+\s+Transitions\b", re.MULTILINE)
+
 
 # a design doc next to the plans (`design-<x>.md`) is not a plan: no tier, no review
 DESIGN_DOC_PREFIX = "design-"

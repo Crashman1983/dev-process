@@ -19,12 +19,20 @@ at the merge. A plan reviewer re-found them by reading. This gate reads them:
   - a story id the plan names that the registry does not hold (`story_id`
     and `registry`, both set);
   - at the merge push, an open `- [ ]` task without `struck: <reason>` or
-    `moved: #<issue>`.
+    `moved: #<issue>`;
+  - a `## Transitions` section (`check_review.TRANSITIONS_HEADING`, any depth)
+    without a pipe table below it, before the next heading of the same or a
+    higher level; a table without a `Test` column and two others; a row with
+    an empty cell; once execution started or at the merge push, a test cell
+    that is neither `<path>::<test>` nor `struck — <reason>` (#293). Rows of
+    one equivalence class may name the same test.
   NOTE: an `[assumption]` left in a DECISION line.
 
 Bound are only plans the branch ADDS — absent at the integration ref, or below
 Tier 2 there (a stub raised here) — so a plan merged before this gate is
-history, not a new duty. Project data,
+history, not a new duty. A Spec Kit plan (`specs/<name>/plan.md`) is bound when
+it is absent at the integration ref and Tier 2+; it answers for its Transitions
+table only, its ticks stand in `tasks.md` beside it. Project data,
 `docs/process/plan-structure.local.json`, is read at the integration ref like
 every evidence rule (a branch cannot lift its own duty):
   {"sections": ["Anchor Delta"], "shall_words": ["shall"],
@@ -43,10 +51,13 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling import
-from attest_evidence import AC_LINE, STRUCK_LINE, _NAMES_A_TEST, ac_key  # noqa: E402
+from attest_evidence import AC_LINE, STRUCK_LINE, _NAMES_A_TEST, _STRUCK_MARK, ac_key  # noqa: E402
 from check_review import (  # noqa: E402  (one owner for plan grammar and fences)
     DECISION_LINE,
     OPEN_TASK,
+    SPEC_PLAN,
+    SPECS_DIR,
+    TRANSITIONS_HEADING,
     GitReadError,
     fenced_lines,
     integration_push,
@@ -157,6 +168,98 @@ def criteria_findings(rel: str, text: str, shall_words: list[str], *, need_tests
     return out
 
 
+_HEADING = re.compile(r"^(#{1,6})(?:[ \t]|$)")
+_TABLE_ROW = re.compile(r"^[ \t]{0,3}\|")
+_DELIMITER_CELL = re.compile(r"^:?-+:?$")
+_PIPE = re.compile(r"(?<!\\)\|")
+_UNFILLED = {"", "…", "..."}
+# a row's test cell struck on purpose: the criterion strike's own mark and reason rule
+_STRUCK_CELL = re.compile(r"^" + _STRUCK_MARK + r"[ \t]*(?!<|(?i:todo)\b|…|\.\.\.)\S*\w")
+
+
+def _cells(row: str) -> list[str]:
+    """The cells of a pipe-table row: outer pipes dropped, an escaped `\\|` kept."""
+    body = row.strip()
+    body = body[1:] if body.startswith("|") else body
+    body = body[:-1] if body.endswith("|") and not body.endswith("\\|") else body
+    return [c.strip() for c in _PIPE.split(body)]
+
+
+def _bare(cell: str) -> str:
+    return cell.strip().strip("`*_").strip()
+
+
+def _sections(lines: list[str]) -> list[tuple[int, str, list[tuple[int, str]]]]:
+    """(line, heading, body lines) of every Transitions section: from its heading to the
+    next heading of the same or a higher level."""
+    out: list[tuple[int, str, list[tuple[int, str]]]] = []
+    for i, line in enumerate(lines):
+        if not TRANSITIONS_HEADING.match(line):
+            continue
+        level = len(line) - len(line.lstrip("#"))
+        body: list[tuple[int, str]] = []
+        for j in range(i + 1, len(lines)):
+            h = _HEADING.match(lines[j])
+            if h and len(h.group(1)) <= level:
+                break
+            body.append((j + 1, lines[j]))
+        out.append((i + 1, line.strip(), body))
+    return out
+
+
+def _tables(body: list[tuple[int, str]]) -> list[list[tuple[int, str]]]:
+    """The pipe tables of a section: a run of `|` rows whose second row is a delimiter."""
+    runs: list[list[tuple[int, str]]] = []
+    for n, line in body:
+        if _TABLE_ROW.match(line):
+            if runs and runs[-1][-1][0] == n - 1:
+                runs[-1].append((n, line))
+            else:
+                runs.append([(n, line)])
+    return [r for r in runs if len(r) >= 2 and all(_DELIMITER_CELL.match(c) for c in _cells(r[1][1]))]
+
+
+def transitions_findings(rel: str, text: str, *, need_tests: bool) -> list[str]:
+    """The findings on a plan's Transitions sections (unfenced text, the file's own line
+    numbers): a pipe table below each, with a `Test` column and two others, every cell of
+    every row filled; once tests are due, each test cell `<path>::<test>` or `struck —
+    <reason>`. Every table of the section is read: a second one is no way around the first."""
+    out: list[str] = []
+    for line, heading, body in _sections(text.splitlines()):
+        tables = _tables(body)
+        if not tables:
+            out.append(f"{rel}:{line}: `{heading}` has no table below it — state × event → result with a "
+                       f"`Test` column (docs/process/design-template.md, Transitions)")
+            continue
+        for table in tables:
+            (hline, hrow), *_delim = table[:2]
+            header = [_bare(c) for c in _cells(hrow)]
+            tests = [k for k, name in enumerate(header) if name.lower() == "test"]
+            if not tests:
+                out.append(f"{rel}:{hline}: the transitions table has no `Test` column — one test per row; "
+                           f"rows of one equivalence class may name the same test")
+                continue
+            if len(header) < 3:
+                out.append(f"{rel}:{hline}: the transitions table needs a `Test` column and at least two "
+                           f"others (state × event → result)")
+                continue
+            for n, row in table[2:]:
+                cells = _cells(row)
+                if len(cells) != len(header):
+                    out.append(f"{rel}:{n}: transitions row has {len(cells)} cells, the header {len(header)}")
+                    continue
+                empty = [header[k] or f"column {k + 1}" for k, c in enumerate(cells) if _bare(c) in _UNFILLED]
+                if empty:
+                    out.append(f"{rel}:{n}: transitions row leaves {', '.join(f'`{e}`' for e in empty)} "
+                               f"empty — fill every cell")
+                    continue
+                cell = cells[tests[0]]
+                if need_tests and not (_is_proof(cell) or _STRUCK_CELL.match(_bare(cell))):
+                    out.append(f"{rel}:{n}: transitions row names no test — `<path>::<test>` (it may not "
+                               f"exist yet) or `struck — <reason>`")
+    return out
+
+
 def _bound(root: Path, ref: str, rel: str) -> bool:
     """Is this plan the branch's to answer for? Added on the branch, or below Tier 2 at
     the integration ref (a stub raised to Tier 2 here is written here). An archived plan
@@ -170,6 +273,38 @@ def _bound(root: Path, ref: str, rel: str) -> bool:
     except _Unreadable:
         return True
     return before is None or (plan_tier(_quoted_blank(before)) or 0) < 2
+
+
+def _spec_plan_findings(root: Path, ref: str, plans: list[Path], *, merge: bool) -> list[str]:
+    """Spec Kit plans (`specs/<name>/plan.md`) answer for their Transitions table only —
+    the plan folder's other rules stay with the plan folder. Bound when absent at the
+    integration ref and Tier 2+ (unreadable there: bound); their ticks stand in
+    `tasks.md` beside them."""
+    out: list[str] = []
+    for p in plans:
+        rel = p.relative_to(root).as_posix()
+        try:
+            text = _quoted_blank(p.read_text(encoding="utf-8", errors="replace"))
+        except OSError as exc:
+            out.append(f"{rel}: could not read: {exc}")
+            continue
+        if (plan_tier(text) or 0) < 2:
+            continue
+        try:
+            if _at_ref(root, ref, rel) is not None:
+                continue  # stood at the ref: history, not a new duty
+        except _Unreadable:
+            pass
+        tasks = p.parent / "tasks.md"
+        try:
+            ticked = bool(_TICKED.search(text)) or (
+                tasks.is_file() and bool(_TICKED.search(_quoted_blank(tasks.read_text(encoding="utf-8",
+                                                                                      errors="replace")))))
+        except OSError as exc:
+            out.append(f"{tasks.relative_to(root).as_posix()}: could not read: {exc}")
+            continue
+        out += transitions_findings(rel, text, need_tests=merge or ticked)
+    return out
 
 
 def _registry_ids(root: Path, pattern: str, glob: str) -> set[str]:
@@ -191,7 +326,9 @@ def check(root: Path, env: dict[str, str] | None = None) -> tuple[list[str], lis
     hard: list[str] = []
     soft: list[str] = []
     pdir = root / PLANS_ACTIVE
-    if not pdir.is_dir():
+    sdir = root / SPECS_DIR
+    spec_plans = sorted(sdir.glob(f"*/{SPEC_PLAN}")) if sdir.is_dir() else []
+    if not pdir.is_dir() and not spec_plans:
         return hard, soft
     try:
         ref = integration_ref(root)
@@ -208,9 +345,11 @@ def check(root: Path, env: dict[str, str] | None = None) -> tuple[list[str], lis
     shall_words = ["shall", *data.get("shall_words", [])]  # a project's words add to `shall`
     sections = data.get("sections", [])
     registry: set[str] | None = None
+    hard += _spec_plan_findings(root, ref, spec_plans, merge=merge)
     # an archived plan the branch adds is its plan too: /finish archives before the merge push
     archive = pdir / "archive"
-    plans = [*sorted(pdir.glob("*.md")), *(sorted(archive.glob("*.md")) if archive.is_dir() else [])]
+    plans = [*sorted(pdir.glob("*.md")), *(sorted(archive.glob("*.md")) if archive.is_dir() else [])] \
+        if pdir.is_dir() else []
     for p in plans:
         rel = p.relative_to(root).as_posix()
         if p.name.startswith("design-"):
@@ -225,6 +364,7 @@ def check(root: Path, env: dict[str, str] | None = None) -> tuple[list[str], lis
             continue  # untiered plans are the review gate's finding; old plans are history
         need_tests = merge or bool(_TICKED.search(text))
         hard += criteria_findings(rel, text, shall_words, need_tests=need_tests)
+        hard += transitions_findings(rel, text, need_tests=need_tests)
         for name in sections:
             if not re.search(r"^#{2,3}[ \t]+" + re.escape(name) + r"\b", text, re.MULTILINE | re.IGNORECASE):
                 hard.append(f"{rel}: no `## {name}` section — {DATA} requires it in every Tier 2+ plan")

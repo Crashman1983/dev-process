@@ -4,6 +4,7 @@ execution starts, the project's required sections, registered story ids, and no
 open task at the merge. Only plans the branch adds are bound."""
 import json
 import os
+import shutil
 import subprocess
 import sys
 
@@ -275,3 +276,173 @@ def test_an_old_plan_finish_archives_stays_history(render, tmp_path):
     old.rename(out / PLANS / "archive" / old.name)
     r = _run(out, merge=True)
     assert r.returncode == 0, r.stdout
+
+
+# --- #293 AC-1: a declared `## Transitions` section carries its table ---------------
+
+TABLE = ("\n## Transitions\n\n"
+         "| State | Event | Result | Test |\n"
+         "|---|---|---|---|\n"
+         "| draft | submit | in review | `tests/test_order.py::test_submit_starts_review` |\n"
+         "| in review | approve | approved | `tests/test_order.py::test_decision_ends_review` |\n"
+         "| in review | reject | draft | `tests/test_order.py::test_decision_ends_review` |\n"
+         "| approved | submit | forbidden | struck — approval is final in this release |\n")
+ROWS = TABLE.split("\n\n", 1)[1]  # the table alone
+
+
+def test_a_valid_transitions_table_passes(render, tmp_path):
+    """Rows of one equivalence class may name the same test; a struck row names its reason."""
+    out = _repo(render(tmp_path, {"project_name": "demo"}))
+    _plan(out, GOOD + TABLE + "\n- [x] T1 states\n")
+    r = _run(out, merge=True)
+    assert r.returncode == 0 and "plan-structure: OK" in r.stdout, r.stdout
+
+
+def test_a_transitions_section_without_a_table_fails(render, tmp_path):
+    out = _repo(render(tmp_path, {"project_name": "demo"}))
+    _plan(out, GOOD + "\n## Transitions\n\nDraft goes to review on submit.\n\n## Next\n\n" + ROWS)
+    r = _run(out)
+    assert r.returncode == 1 and ":11: `## Transitions` has no table" in r.stdout, r.stdout
+
+
+def test_a_transitions_table_without_a_test_column_fails(render, tmp_path):
+    out = _repo(render(tmp_path, {"project_name": "demo"}))
+    _plan(out, GOOD + "\n## Transitions\n\n| State | Event | Result |\n|---|---|---|\n| a | b | c |\n")
+    r = _run(out)
+    assert r.returncode == 1 and ":13: the transitions table has no `Test` column" in r.stdout, r.stdout
+    _plan(out, GOOD + "\n## Transitions\n\n| State | Test |\n|---|---|\n| a | struck — later |\n")
+    r = _run(out)
+    assert r.returncode == 1 and ":13: the transitions table needs a `Test` column and at least two others" \
+        in r.stdout, r.stdout
+
+
+def test_a_transitions_row_with_an_empty_cell_fails(render, tmp_path):
+    out = _repo(render(tmp_path, {"project_name": "demo"}))
+    for row in ("| draft |  | review | struck — later |\n", "| draft | submit | … | struck — later |\n",
+                "| draft | submit | review |\n"):
+        _plan(out, GOOD + "\n## Transitions\n\n| State | Event | Result | Test |\n|---|---|---|---|\n" + row)
+        r = _run(out)
+        assert r.returncode == 1 and ":15: transitions row" in r.stdout, (row, r.stdout)
+
+
+def test_the_test_cell_names_a_test_once_execution_starts(render, tmp_path):
+    out = _repo(render(tmp_path, {"project_name": "demo"}))
+    table = "\n## Transitions\n\n| State | Event | Result | Test |\n|---|---|---|---|\n| a | b | c | to do |\n"
+    _plan(out, GOOD + table)
+    assert _run(out).returncode == 0  # planning: the form only
+    _plan(out, GOOD + table + "\n- [x] T1 states\n")
+    r = _run(out)
+    assert r.returncode == 1 and ":15: transitions row names no test" in r.stdout, r.stdout
+    _plan(out, GOOD + table)
+    assert "names no test" in _run(out, merge=True).stdout  # the merge push owes it too
+    for placeholder in ("struck — <reason>", "struck — …", "struck"):
+        _plan(out, GOOD + table.replace("to do", placeholder) + "\n- [x] T1 states\n")
+        assert "names no test" in _run(out).stdout, placeholder
+
+
+def test_a_deeper_transitions_heading_reads_its_own_section(render, tmp_path):
+    """`### Transitions (…)` is the same rule; its section ends at the next heading of
+    the same or a higher level, a deeper one stays inside."""
+    out = _repo(render(tmp_path, {"project_name": "demo"}))
+    _plan(out, GOOD + "\n### Transitions (order lifecycle)\n\n#### Rows\n\n" + ROWS + "\n### Next\n\nprose\n")
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+    _plan(out, GOOD + "\n### Transitions (order lifecycle)\n\nprose\n\n## Next\n\n" + ROWS)
+    assert "`### Transitions (order lifecycle)` has no table" in _run(out).stdout
+
+
+def test_a_plan_without_transitions_and_a_fenced_table_are_untouched(render, tmp_path):
+    out = _repo(render(tmp_path, {"project_name": "demo"}))
+    _plan(out, GOOD + "\n```\n## Transitions\n\n| State | Event |\n|---|---|\n| a |  |\n```\n- [x] T1\n")
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+    # a fenced table under a live heading is quotation: the section has none
+    _plan(out, GOOD + "\n## Transitions\n\n```\n" + ROWS + "```\n")
+    assert "`## Transitions` has no table" in _run(out).stdout
+
+
+def test_the_copied_design_template_passes(render, tmp_path):
+    """The template's example is what a plan copies: it must pass the gate it teaches,
+    test cells included."""
+    out = _repo(render(tmp_path, {"project_name": "demo"}))
+    design = (out / "docs/process/design-template.md").read_text()
+    section = "## Transitions" + design.split("## Transitions", 1)[1].split("\n## ", 1)[0]
+    assert "| Test |" in section and "one test per row" in section
+    assert "rows of one equivalence class may name the same test" in section
+    _plan(out, GOOD + "\n" + section + "\n- [x] T1 states\n")
+    r = _run(out, merge=True)
+    assert r.returncode == 0, r.stdout
+    # /plan asks for the section where state work is planned, with what goes beside it
+    plan = " ".join((out / ".claude/commands/plan.md").read_text().split())
+    for words in ("concurrency, a lifecycle, a state machine, a guard or a parser", "`## Transitions`",
+                  "the invariant, its one owner", "every writer and reader of the state",
+                  "rows of one equivalence class may name the same test"):
+        assert words in plan, words
+
+
+def _spec(root, body, tasks=None, name="001-orders"):
+    d = root / "specs" / name
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "plan.md").write_text(body, encoding="utf-8")
+    if tasks is not None:
+        (d / "tasks.md").write_text(tasks, encoding="utf-8")
+
+
+SPEC_BAD = "# Plan\n\ntier: 2\nissue: #7\n\n## Transitions\n\n| State | Event | Result |\n|---|---|---|\n| a | b | c |\n"
+
+
+def test_a_new_spec_kit_plan_is_bound_without_a_plan_folder(render, tmp_path):
+    out = render(tmp_path, {"project_name": "demo"})
+    shutil.rmtree(out / PLANS)
+    _repo(out)
+    _spec(out, SPEC_BAD)
+    r = _run(out)
+    assert r.returncode == 1 and "specs/001-orders/plan.md:8: the transitions table has no `Test`" \
+        in r.stdout, r.stdout
+    # its ticks stand in tasks.md beside it
+    good = SPEC_BAD.replace("| Result |\n|---|---|---|\n| a | b | c |",
+                            "| Result | Test |\n|---|---|---|---|\n| a | b | c | to do |")
+    _spec(out, good, tasks="- [ ] T1 states\n")
+    assert _run(out).returncode == 0
+    _spec(out, good, tasks="- [x] T1 states\n")
+    assert "specs/001-orders/plan.md:10: transitions row names no test" in _run(out).stdout
+    # below Tier 2 it is not bound; the plan folder's other rules stay off spec plans
+    _spec(out, SPEC_BAD.replace("tier: 2", "tier: 1"))
+    assert _run(out).returncode == 0
+    _spec(out, "# Plan\n\ntier: 2\n\n- AC-1: When x, y keeps z.\n- [ ] T1 open\n")
+    assert _run(out, merge=True).returncode == 0
+
+
+def test_a_spec_kit_plan_at_the_ref_is_history(render, tmp_path):
+    out = render(tmp_path, {"project_name": "demo"})
+    _spec(out, SPEC_BAD)
+    _repo(out)
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+
+
+def test_bundle_and_gate_read_one_transitions_heading(render, tmp_path):
+    """One owner for the heading rule (check_review): the bundle's note and the gate
+    agree on every heading form."""
+    out = render(tmp_path, {"project_name": "demo"})
+    names = ("check_review", "check_plan_structure", "make_review_bundle", "attest_evidence")
+    sys.path.insert(0, str(out / "scripts/process"))
+    try:
+        import importlib
+        for name in names:
+            sys.modules.pop(name, None)
+        cr = importlib.import_module("check_review")
+        ps = importlib.import_module("check_plan_structure")
+        mb = importlib.import_module("make_review_bundle")
+        assert ps.TRANSITIONS_HEADING is cr.TRANSITIONS_HEADING
+        words = "the state changes on each event"
+        for heading in ("## Transitions", "### Transitions (lifecycle)", "#### Transitions",
+                        "# Transitions", "## Transition table", "##Transitions", "## Transitions:"):
+            text = f"{words}\n\n{heading}\n\nprose\n"
+            owned = bool(cr.TRANSITIONS_HEADING.search(text))
+            assert (mb._transitions_note(text, mb.TRANSITION_VOCABULARY) is None) is owned, heading
+            assert bool(ps.transitions_findings("p.md", text, need_tests=False)) is owned, heading
+    finally:
+        sys.path.remove(str(out / "scripts/process"))
+        for name in names:
+            sys.modules.pop(name, None)
