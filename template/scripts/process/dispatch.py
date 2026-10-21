@@ -1188,9 +1188,15 @@ def prompt_for(phase: str, issue: int, tier: int | None, branch: str, model: str
                 + tail)
     if phase == "execute":
         return (f"/execute the committed plan for issue #{issue}: report `pushed` at the first push; stop after "
-                f"the last task is committed and pushed. The duties before `pushed` are in /execute; after a "
-                f"blocking review round the plan carries `ROOT-CAUSE work=<id> round=<r>: <cause> — <test that "
-                f"failed before the fix>` and `attest.py --dry-run` names no missing root cause before you report." + tail)
+                f"the last task is committed and pushed. The duties before `pushed` are in /execute. Fixing a "
+                f"review round: per blocker name the sibling sites and write a class test, recorded as "
+                f"`ROOT-CAUSE work=<id> round=<r>: <cause> — sites: <sites> — <tests>` (`red_evidence.py --cause "
+                f"… --sites …`; a block without a code defect: `sites: none — <reason>`); a fix to a shared "
+                f"function adds a differential test; from about 300 production lines or six findings to fix, "
+                f"work in steps by failure class; from the second blocked round write "
+                f"`REPLAN work=<id> round=<r>: increment|rebuild — <reason>` into the plan first, and a rebuild "
+                f"needs a new plan review. `attest.py --dry-run` names no missing record before you report."
+                + tail)
     if plan_review:
         verdict = ("attest each plan's pass with `attest.py --plan-review` and report `review-pass`, or report "
                    "`blocked` with the findings" if attests else

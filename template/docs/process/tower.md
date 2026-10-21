@@ -293,7 +293,11 @@ no open task (`pushed` comes at the first push) and origin carries code
 beyond the last attestation (a commit recording a REVIEW line — an
 attestation-only push reviews nothing); stops a `review-pass` review
 session once its attestation is on origin — the report is the train's
-ticket. `blocked` queues nothing: the steward decides. A report older than
+ticket. `blocked` queues nothing: the steward decides. A plan that gained
+`REPLAN … rebuild` after a blocked round goes through a new plan review
+before execute resumes (mandatory rule 4): the steward queues it by hand
+(`dispatch.py queue add … --phase review --plan-review`) — the chain does
+not check this yet. A report older than
 the session, a worker with uncommitted work, or a pane tmux cannot be
 asked about is left alone. A chained stop keeps the worker's report. `dispatch.py queue add`
 queues a phase by hand, `dispatch.py drain` starts what may start now, in

@@ -149,7 +149,10 @@ only at the fixed spot (downstream, a fifth of the blockers were introduced
 by the previous fix). An older defect found outside that is its own issue —
 unless it is a BLOCKER for this change; then it goes into the verdict marked
 "pre-existing, found in round N". Its `DELTA_TOUCHES` line lists the files
-the delta changes. If the fix changed a contract, the architecture or the
+the delta changes. A delta round over gate or security code needs a
+reviewer with tools — one that runs the changed code and its tests against
+the old and the new head, not only reads the bundle: a fix there is where a
+window or a sibling path opens unseen. If the fix changed a contract, the architecture or the
 risk scope, the reviewer says so and asks for a full bundle instead of
 judging the delta. Each blocker carries its `kind=` on the FINDING line
 (`knowledge-gap` when the author did not know something that already
@@ -158,7 +161,8 @@ existed; `requirement`, `implementation`, `test-gap`, `process`,
 blocks come from, and a `knowledge-gap` fix also writes the missing fact to
 where it belongs (an inventory note, a registry story, a decision record,
 the architecture doc), so the next author finds it. A plan review's report
-carries `phase: plan` in its header. (Until v2.53 a Tier 3 delta needed an anchoring full
+carries `phase: plan` in its header; every report carries the `round: <n>` the
+bundle names, so findings count per round. (Until v2.53 a Tier 3 delta needed an anchoring full
 round and a containment check of its files; both are gone — the verdict
 binds the whole branch either way, and the machinery that judged a delta's
 reach was a source of defects of its own.)
@@ -180,16 +184,22 @@ process that did not write the finding (a cheap model suffices) checks each
 such finding against the bundle and scores it: 0 — does not survive a
 look; 25 — unverified; 50 — real but minor or rare; 75 — verified, will be
 hit; 100 — confirmed by the evidence. Below 80 the finding is a residual or
-a follow-up issue, not a block. That holds for a plan review and for the
+a follow-up issue, not a block. A measured old/new difference scores 100:
+the scorer may refute the measurement, never lower the score. One input,
+the old code right and the new code wrong, is the evidence the scale asks
+for. That holds for a plan review and for the
 verdict of a second model family alike: its `block` is a claim the score
 decides (downstream: a project rule let a Codex block stop a plan pass whose
 findings scored 75 and below). Never a block: what a linter, type checker
 or the test suite catches, a quality wish no rule or criterion asks for, a
-change the plan intends. From the second block on
-the same element the fix session — a fresh one, on the model the policy
+change the plan intends. From the second blocked
+round of the work the fix session — a fresh one, on the model the policy
 names for the tier's plan phase — decides *increment vs. rebuild the owning
-layer* and records it as a `DECISION` before the next round (mandatory rule
-4); that is not an owner question. After the third blocking round the owner
+layer* and records it in the plan before the next round as
+`REPLAN work=<id> round=<r>: increment|rebuild — <reason>`, one line for
+every blocked round after the first (mandatory rule 4; `attest.py` asks for
+them); a `rebuild` gets a new plan review before the code changes. That is
+not an owner question. After the third blocking round the owner
 decides once — merge with named residuals, cut scope, or rebuild — and the
 decision covers the rest of the work: a later round goes back to the owner
 only when the decision's premise no longer holds (downstream: one feature,

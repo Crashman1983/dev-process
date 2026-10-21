@@ -224,6 +224,10 @@ the integrity of records that *exist*; only a review can notice one that is
   demand: the rule belongs in an invariant record (Type: invariant) with a
   table/property test pinning the whole rule (`workflow.md`, Debug) — a
   path-pin approved here invites path-fix number four.
+- From the **second blocked round** of the work: does the plan carry
+  `REPLAN work=<id> round=<r>: increment|rebuild — <reason>` for each blocked
+  round after the first (mandatory rule 4)? A `rebuild` without a new plan
+  review after it is a finding: the rebuilt layer was never read as a plan.
 
 ## Product frame — direction, not drift
 
