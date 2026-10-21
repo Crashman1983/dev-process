@@ -42,7 +42,7 @@ import shlex
 import subprocess
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 
 sys.dont_write_bytecode = True
@@ -66,6 +66,7 @@ WAIT_MINUTES = 30
 # a worker with no commit and no report for this long is stale — unless
 # --stale-minutes, PROCESS_STALE_MINUTES or the policy's `stale_minutes` say otherwise
 STALE_MINUTES = 60
+CLOCK_SKEW_SECONDS = 300  # a status stamp this far ahead is a wrong clock (#270)
 PARKED = ("review-pass", "done", "idle")  # a worker reporting these waits, it does not work
 # `stale` is synthetic: never a report line, written by --wait for a silent live session
 WAIT_STATES = _report.STATES + ("stale",)
@@ -308,6 +309,7 @@ def sessions(root: Path) -> list[dict]:
                     # answer, the one chain acts on; asked of a quiet live worker and
                     # of one that ended (a finished phase is no dead worker)
                     "report_state": (rep or {}).get("state"),
+                    "status_minutes_ago": status_age(rec.get("status_file"), time.time()),
                     "phase_over": (_dispatch.phase_over(root, rec, rep, local=True)
                                    if (not rec["alive"] or (since is not None and since >= WAIT_MINUTES))
                                    and hasattr(_dispatch, "phase_over") else None)})
@@ -518,9 +520,12 @@ def status_age(path: str | None, now: float) -> int | None:
         stamp = datetime.fromisoformat(str(data["updated_at"]).replace("Z", "+00:00"))
     except (OSError, ValueError, KeyError, TypeError):
         return None
-    if stamp.tzinfo is None:
-        stamp = stamp.replace(tzinfo=timezone.utc)
-    return max(0, int((now - stamp.timestamp()) // 60))
+    # a naive stamp is local time (`timestamp()` reads it so); a stamp from the future
+    # beyond clock skew is a wrong clock, not a fresh sign of life
+    ago = now - stamp.timestamp()
+    if ago < -CLOCK_SKEW_SECONDS:
+        return None
+    return max(0, int(ago // 60))
 
 
 def resolve_stale_minutes(root: Path, given: int | None = None) -> int:
@@ -677,12 +682,13 @@ def findings(table: dict, stale_minutes: int) -> list[dict]:
     ref = table.get("integration_ref") or table.get("integration") or ""
     integration_names.add(ref.removeprefix("origin/"))
     reported = {r["worker"]: r for r in table["reports"]}
+    status = {s["branch"]: s.get("status_minutes_ago") for s in table.get("sessions", [])}
     for wt in table["worktrees"] + table.get("elsewhere", []):
         if wt.get("missing") or wt["branch"] in integration_names | {"detached"}:
             continue
         rep = reported.get(wt["branch"])
         if quiet_too_long(wt.get("minutes_since_commit", 0), None if rep is None else rep["minutes_ago"],
-                          None if rep is None else rep["state"], stale_minutes) \
+                          None if rep is None else rep["state"], stale_minutes, status.get(wt["branch"])) \
                 and (wt.get("ahead", 0) or wt.get("dirty", 0)):
             out.append({"kind": "stale-worker", "severity": "medium",
                         "what": f"{wt['branch']}{' (another host)' if wt.get('remote') else ''}: no commit for {wt.get('minutes_since_commit', '?')} min and "

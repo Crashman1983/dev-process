@@ -992,6 +992,12 @@ def test_a_worker_states_its_usage_and_models_shows_it(render, tmp_path):
     bad = subprocess.run([sys.executable, str(rep), "failed", "--issue", "7", "--usage", "output=-1"],
                          cwd=out, capture_output=True, text=True, env=env)
     assert bad.returncode == 2 and "--usage" in bad.stderr, bad.stderr
+    # refute: float() took nan and inf, int() took `1_000` and non-ASCII digits
+    for usage in ("input=1,output=1,cost_usd=nan", "input=1,output=1,cost_usd=inf", "input=1_000,output=1",
+                  "input=\u0661\u0662,output=1", "input=+5,output=1"):
+        bad = subprocess.run([sys.executable, str(rep), "failed", "--issue", "7", "--usage", usage],
+                             cwd=out, capture_output=True, text=True, env=env)
+        assert bad.returncode == 2 and "--usage" in bad.stderr, usage
     text = subprocess.run([sys.executable, str(out / "scripts/process/process_kpis.py"), "models"],
                           cwd=out, capture_output=True, text=True).stdout
     row = next(ln for ln in text.splitlines() if "deepseek-v4.1-flash" in ln)

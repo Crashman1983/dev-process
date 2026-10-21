@@ -1858,9 +1858,10 @@ def _planned_branch(out: Path, tier: int, plan_pass: bool):
         _plan_pass(out, tier)
 
 
-def _chain_planned(mod, out, monkeypatch, *, phase="plan", plan_review=False, state="planned", branch="b"):
+def _chain_planned(mod, out, monkeypatch, *, phase="plan", plan_review=False, state="planned", branch="b",
+                   cls=None, classes=None):
     rec = {"branch": branch, "issue": 7, "tier": None, "phase": phase, "started": 1, "worktree": str(out),
-           "plan_review": plan_review}
+           "plan_review": plan_review, **({"cls": cls} if cls else {})}
     queued = []
     monkeypatch.setattr(mod, "records", lambda root: [rec])
     monkeypatch.setattr(mod, "_load_record", lambda root, b: (None, rec))
@@ -1870,7 +1871,8 @@ def _chain_planned(mod, out, monkeypatch, *, phase="plan", plan_review=False, st
     monkeypatch.setattr(mod, "stop", lambda root, b, **kw: 0)
     monkeypatch.setattr(mod, "plan_tier_on_origin", lambda root, b: None)
     monkeypatch.setattr(mod, "start", lambda root, *, issue, phase, plan_review=False, **_kw:
-                        queued.append((phase, plan_review)) or 0)
+                        queued.append((phase, plan_review)) or (classes is not None and classes.append(_kw.get("cls")))
+                        or 0)
     mod.chain(out)
     return queued
 
@@ -2438,3 +2440,38 @@ def test_start_and_queue_take_the_task_class(render, tmp_path):
     assert r.returncode == 0 and "class mechanical" in r.stdout, r.stdout + r.stderr
     r = _dispatch(out, "queue", "add", "--issue", "8", "--phase", "plan", "--class", "mechanicl")
     assert r.returncode != 0 and "mechanicl" in r.stdout + r.stderr
+
+
+def test_the_task_class_travels_through_the_queue_to_the_next_phase(render, tmp_path, monkeypatch):
+    """#270 refute: chain and drain carried the class untested."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _with_class(out)
+    _planned_branch(out, 1, plan_pass=False)
+    seen = []
+    assert _chain_planned(_load_dispatch(out), out, monkeypatch, cls="mechanical", classes=seen) \
+        == [("execute", False)]
+    assert seen == ["mechanical"]
+
+
+def test_a_class_the_policy_lost_leaves_a_hand_queue_hint(render, tmp_path, monkeypatch, capsys):
+    """Refute of #270: `queue_add` refuses an unknown class with SystemExit; chain caught
+    only OSError, so one lost class stopped the whole chain run."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _planned_branch(out, 1, plan_pass=False)
+    assert _chain_planned(_load_dispatch(out), out, monkeypatch, cls="gone") == []
+    err = capsys.readouterr().err
+    assert "could not be queued" in err and "--class gone" in err, err
+
+
+def test_an_empty_task_class_is_refused(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    r = _dispatch(out, "policy", "--class", "")
+    assert r.returncode != 0 and "task class" in r.stdout + r.stderr
+
+
+def test_a_failed_report_ends_the_phase(render, tmp_path):
+    """#270: a crash or timeout is over, so chain stops the session instead of waiting."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    mod = _load_dispatch(out)
+    for phase in ("plan", "execute", "review"):
+        assert mod.phase_over(out, {"branch": "7-work", "phase": phase}, {"state": "failed"}) is True

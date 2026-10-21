@@ -1280,6 +1280,25 @@ def _collect_stage_times(wt: Path, stages: dict[str, dict], seen: set[tuple[str,
         log(f"stage {name}: {state} {t1 - t0} s ({start} → {end})")
 
 
+def _every_stage_green(wt: Path) -> bool:
+    """Does every stage the run's `stages` file names carry a green `<stage>.time`
+    marker in `wt`'s merge-suite folder? No stage list (a suite without stages) is no:
+    then nothing tells which part a retry covered."""
+    gitdir = _out(wt, "rev-parse", "--absolute-git-dir")
+    names = certificate.run_stages(wt)
+    if not gitdir or not names:
+        return False
+    folder = Path(gitdir) / "merge-suite"
+    for name in names:
+        try:
+            _t0, _t1, verdict = (int(x) for x in (folder / f"{name}.time").read_text(encoding="utf-8").split())
+        except (OSError, ValueError):
+            return False
+        if verdict != 0:
+            return False
+    return True
+
+
 def _record_phases(root: Path, stamp: str, phases: dict[str, float], result: str, aboard: list[str],
                    log, outcome: dict | None = None, stages: dict | None = None) -> None:
     """One log line and one JSON line per run: where the train's time went.
@@ -1447,6 +1466,9 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
         certificate.clear_run(wt)  # the `stages` file the certificate reads is this run's
         state = timed("suite", _sh, wt, suite, log)
         _collect_stage_times(wt, stages, stage_seen, log)
+        if state == "green" and (noop := certificate.noop_problem()):
+            # `make -n` exits 0 having run nothing: no green to merge on (#265)
+            raise EnvironmentRed(f"the suite ran under an environment that runs no recipe ({noop})")
         # the memo names what ran: a run whose scope differs from the predicted one
         # (the key's) is no green of that key (plan review)
         ran = certificate.run_evidence(wt, suite, merge_scope) if state == "green" else None
@@ -1589,10 +1611,10 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
                 ran = "retry"
                 state = timed("retry", _sh, last_wt, retry, log)
                 _collect_stage_times(last_wt, stages, stage_seen, log)
-                env_problem = certificate.env_problem(certificate_env or [])
-                if env_problem and state == "green":
+                noop = certificate.noop_problem()
+                if noop and state == "green":
                     # `make -n` exits 0 having run nothing: no green to merge on (#265)
-                    raise EnvironmentRed(f"the retry ran under an altering environment ({env_problem})")
+                    raise EnvironmentRed(f"the retry ran under an environment that runs no recipe ({noop})")
                 if state == "undefined":  # no such command on this tree: the whole suite, as before
                     log("the --retry command does not exist on this tree — rebuilding for the whole suite")
                     ran = "full"
@@ -1605,9 +1627,14 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
             if state == "green":
                 if ran == "retry":
                     # the suite ran whole on this tree and the retry re-ran what failed, green:
-                    # the same tree passed every stage, so the push needs no second run (#265)
-                    _certify_merge(last_wt, suite, suite_before.get(last_wt), certificate_env or [], log,
-                                   merge_scope)
+                    # certified only when every stage of the scope has a green marker now — a
+                    # stage the first run never reached is no pass the retry made (#265, refute)
+                    if _every_stage_green(last_wt):
+                        _certify_merge(last_wt, suite, suite_before.get(last_wt), certificate_env or [], log,
+                                       merge_scope)
+                    else:
+                        log("retry green, but not every stage of the scope ran green on this tree — "
+                            "no merge certificate; the push runs the suite")
                     print(f"train: green under the retry command `{retry}` (it re-ran only what failed), "
                           f"red under the suite `{suite}` — flaky, or the two runs differ (flags, "
                           f"environment); merging "

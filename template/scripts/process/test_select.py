@@ -323,9 +323,10 @@ def run(root: Path, cfg: dict, changed: set[str], klass: str, *, certify: bool) 
     if not work:
         print("test_select: nothing to test for this change")
         return _certify(root, cfg, certify, before)
-    # a run under a variable that changes what runs proves nothing: `make -n`
-    # exits 0 having run no recipe, and the push was accepted on it (#265)
-    problem = certificate.env_problem(cfg["certificate_env"])
+    # a run under `make -n` proves nothing: make exits 0 having run no recipe, and the
+    # push was accepted on it (#265). Other altering flags and variables (a `make X=1`
+    # wrapper) still run the tests — they only deny the certificate, as before
+    problem = certificate.noop_problem()
     if problem:
         print(f"test_select: environment — {problem}; no test ran — unset it and push again",
               file=sys.stderr)

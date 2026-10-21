@@ -369,18 +369,34 @@ def test_a_failing_selector_cannot_judge_the_push(project, tmp_path):
     assert r.returncode == 2 and "selector failed (3)" in r.stderr and "frame failed" not in r.stderr, r.stderr
 
 
-def test_a_variable_that_narrows_the_tests_refuses_the_push(project, tmp_path):
-    """Refute M1, then #265: a run under a variable that changes what runs
-    proves nothing — the push is refused, not merely left unstamped."""
+def test_a_variable_that_narrows_the_tests_writes_no_stamp(project, tmp_path):
+    """Refute M1: the stamp follows the certificate's environment rule. A narrowed run
+    still ran — only a run under which make runs nothing is refused (#265)."""
     out, bare, git = project
     _write(out, "docs/process/testing.local.json",
            json.dumps({"certificate_env": ["NARROW"], "stacks": {"app": STACK}}))
     git("commit", "-qam", "narrow")
     r = _push(git, "origin", "feature", env={"NARROW": "1"})
-    assert r.returncode != 0 and "NARROW is set" in r.stderr and "no test ran" in r.stderr, r.stderr
+    assert r.returncode == 0 and "no stamp — NARROW is set" in r.stderr, r.stderr
     _probe(tmp_path)
     assert _push(git, "origin", "feature:refs/heads/copy").returncode == 0
     assert _probe(tmp_path) == ["g", "t app_tests"]
+
+
+def test_a_make_variable_on_the_outer_make_still_runs_the_tests(project, tmp_path):
+    """Refute of #265: `make finish ISSUE=…` exports `MAKEFLAGS= -- ISSUE=…`; that run
+    happens — it is no dry run and must not refuse the push."""
+    out, bare, git = project
+    r = _push(git, "origin", "feature", env={"MAKEFLAGS": " -- ISSUE=7"})
+    assert r.returncode == 0 and "no test ran" not in r.stderr, r.stderr
+    assert "t app_tests" in _probe(tmp_path)
+
+
+def test_gnumakeflags_dry_run_refuses_the_push_too(project, tmp_path):
+    """Refute of #265: GNU make reads GNUMAKEFLAGS like MAKEFLAGS."""
+    out, bare, git = project
+    r = _push(git, "origin", "feature", env={"GNUMAKEFLAGS": "-n"})
+    assert r.returncode != 0 and "GNUMAKEFLAGS" in r.stderr and "no test ran" in r.stderr, r.stderr
 
 
 def test_an_inherited_dry_run_makeflags_refuses_the_push(project, tmp_path):

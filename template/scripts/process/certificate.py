@@ -197,11 +197,48 @@ def _makeflags_problem(flags: str) -> str | None:
     return None
 
 
+# the flags under which make runs no recipe and still exits 0: a run under them
+# proves nothing at all (#265) — stricter than "may have changed what ran"
+_MAKE_NOOP = set("nqt")
+_MAKE_NOOP_LONG = {"--just-print", "--dry-run", "--recon", "--question", "--touch"}
+
+
+def _make_env() -> list[tuple[str, str]]:
+    """Both variables GNU make reads its flags from (GNUMAKEFLAGS first, then MAKEFLAGS)."""
+    return [(name, os.environ.get(name, "")) for name in ("GNUMAKEFLAGS", "MAKEFLAGS")]
+
+
+def noop_problem() -> str | None:
+    """Why a make run under this environment cannot have run its recipes, or None —
+    `make -n` exits 0 having run nothing; a test run under it is no run (#265). Other
+    altering flags and variables are `env_problem`'s: they deny a certificate, but the
+    run happened."""
+    for name, flags in _make_env():
+        words = flags.split()
+        for i, word in enumerate(words):
+            if word == "--":
+                break  # variable assignments follow
+            if word.startswith("--"):
+                if any(word.split("=", 1)[0] == o or (len(word) > 3 and o.startswith(word.split("=", 1)[0]))
+                       for o in _MAKE_NOOP_LONG):
+                    return f"{name} carries `{word}` — make runs no recipe under it"
+                continue
+            if not (word.startswith("-") or i == 0) or "=" in word:
+                continue
+            for letter in word.lstrip("-"):
+                if letter in _MAKE_NOOP:
+                    return f"{name} carries `-{letter}` — make runs no recipe under it"
+                if letter in _MAKE_VALUED:
+                    break
+    return None
+
+
 def env_problem(names: list[str] | tuple[str, ...] = ()) -> str | None:
     """Why the environment may have changed what ran, or None."""
-    problem = _makeflags_problem(os.environ.get("MAKEFLAGS", ""))
-    if problem:
-        return problem
+    for name, flags in _make_env():
+        problem = _makeflags_problem(flags)
+        if problem:
+            return problem.replace("MAKEFLAGS", name, 1)
     for name in names:
         if os.environ.get(name):
             return f"{name} is set — it changes what the tests run"

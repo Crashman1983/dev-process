@@ -1925,15 +1925,60 @@ def test_a_green_retry_certifies_the_tree_the_suite_started_from(render, tmp_pat
     calls = []
 
     def certify(wt, suite, before, env, log, scope=None):
-        calls.append((wt, suite))
+        calls.append((suite, before))
     monkeypatch.delenv("MAKEFLAGS", raising=False)
     out = render(tmp_path / "probe", {"project_name": "d", "modules": {}})
     train_mod = _load_train(out)
     monkeypatch.setattr(train_mod, "_certify_merge", certify)
+    monkeypatch.setattr(train_mod.certificate, "evidence_tree", lambda wt: "tree-before")
+    monkeypatch.setattr(train_mod.certificate, "clean_tree_problem", lambda wt: None)
+    monkeypatch.setattr(train_mod, "_every_stage_green", lambda wt: True)
     builds, runs, log = _retry_batch_with(train_mod, render, tmp_path, monkeypatch, retry="make retry",
                                           sh=lambda cmd, n: "red" if n == 1 else "green")
     assert runs[:2] == ["suite", "make retry"]
-    assert [c[1] for c in calls] == ["suite"], calls  # the retry's green, not the red suite
+    # the retry's green, certified for the tree the suite started from (refute: untested before)
+    assert calls == [("suite", "tree-before")], calls
+
+
+def test_a_retry_that_left_a_stage_unrun_certifies_nothing(render, tmp_path, monkeypatch):
+    """Refute of #265: the suite stopped before stage c, the retry re-ran b; the
+    certificate claimed scope a b c although c never ran."""
+    calls = []
+    monkeypatch.delenv("MAKEFLAGS", raising=False)
+    out = render(tmp_path / "probe", {"project_name": "d", "modules": {}})
+    train_mod = _load_train(out)
+    monkeypatch.setattr(train_mod, "_certify_merge", lambda *a, **k: calls.append(a))
+    monkeypatch.setattr(train_mod, "_every_stage_green", lambda wt: False)
+    builds, runs, log = _retry_batch_with(train_mod, render, tmp_path, monkeypatch, retry="make retry",
+                                          sh=lambda cmd, n: "red" if n == 1 else "green")
+    assert runs[:2] == ["suite", "make retry"] and calls == [] and "no merge certificate" in log, log
+
+
+def test_every_stage_green_reads_the_markers(render, tmp_path):
+    """The retry certificate's precondition: every listed stage has a green marker."""
+    train_mod = _load_train(render(tmp_path / "probe", {"project_name": "d", "modules": {}}))
+    root = tmp_path / "r"
+    root.mkdir()
+    subprocess.run(["git", "init", "-q", str(root)], check=True)
+    folder = root / ".git/merge-suite"
+    folder.mkdir()
+    (folder / "stages").write_text("a b c\n")
+    (folder / "a.time").write_text("1 2 0\n")
+    (folder / "b.time").write_text("1 2 0\n")
+    assert train_mod._every_stage_green(root) is False  # c never ran
+    (folder / "c.time").write_text("1 2 1\n")
+    assert train_mod._every_stage_green(root) is False  # c red
+    (folder / "c.time").write_text("1 2 0\n")
+    assert train_mod._every_stage_green(root) is True
+
+
+def test_a_primary_suite_green_under_dry_run_makeflags_merges_nothing(render, tmp_path, monkeypatch):
+    """Refute of #265: only the retry path refused `make -n`; the first suite's green merged."""
+    monkeypatch.setenv("MAKEFLAGS", "-n")
+    out = render(tmp_path / "probe", {"project_name": "d", "modules": {}})
+    train_mod = _load_train(out)
+    with pytest.raises(train_mod.EnvironmentRed, match="runs no recipe"):
+        _retry_batch_with(train_mod, render, tmp_path, monkeypatch, retry=None, sh=lambda cmd, n: "green")
 
 
 def test_a_retry_green_under_dry_run_makeflags_merges_nothing(render, tmp_path, monkeypatch):
@@ -1941,7 +1986,7 @@ def test_a_retry_green_under_dry_run_makeflags_merges_nothing(render, tmp_path, 
     monkeypatch.setenv("MAKEFLAGS", "-n")
     out = render(tmp_path / "probe", {"project_name": "d", "modules": {}})
     train_mod = _load_train(out)
-    with pytest.raises(train_mod.EnvironmentRed, match="altering environment"):
+    with pytest.raises(train_mod.EnvironmentRed, match="runs no recipe"):
         _retry_batch_with(train_mod, render, tmp_path, monkeypatch, retry="make retry",
                           sh=lambda cmd, n: "red" if n == 1 else "green")
 

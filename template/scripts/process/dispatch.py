@@ -369,7 +369,7 @@ def cell_for(policy: dict, tier: int | None, phase: str, cls: str | None = None)
     precedence. A cell wins whole: a class cell without an effort does not
     inherit the tier's."""
     classes = policy.get("classes") or {}
-    if cls and cls != "standard" and cls not in classes:
+    if cls is not None and cls != "standard" and cls not in classes:  # `--class ""` is no class
         raise SystemExit(f"dispatch: policy names no task class {cls!r} "
                          f"(known: {', '.join(['standard', *classes])})")
     by_class = (classes.get(cls) or {}).get(phase) if cls else None
@@ -2945,10 +2945,11 @@ def _chain(root: Path, *, dry_run: bool = False) -> int:
                 # the task class is the work's, so it travels to the next phase (#270)
                 queue_add(root, issue=issue, phase=nxt, tier=tier, branch=branch, plan_review=plan_review,
                           harness=carried, cls=rec.get("cls"))
-            except OSError as exc:
+            except (OSError, SystemExit) as exc:  # a policy that lost the class refuses here
                 print(f"dispatch: {branch} stopped, but {nxt} could not be queued ({exc}) — queue it by hand: "
                       f"dispatch.py queue add --issue {issue} --phase {nxt}"
                       + (" --plan-review" if plan_review else "")
+                      + (f" --class {rec['cls']}" if rec.get("cls") else "")
                       + (f" --tier {tier}" if tier is not None else "") + f" --branch {branch}", file=sys.stderr)
     return 0 if dry_run else drain(root)
 
