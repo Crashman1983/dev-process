@@ -9,7 +9,7 @@ Deutsche Fassung: [NEWS-DE.md](NEWS-DE.md).
 
 ## v2.76.0 — Checks catch before the review what a rule can catch
 
-A project's plans, reviews and test runs are checked for what a rule or a test can decide on its own: a plan's criteria are checked as they are written, warnings nobody had to follow became duties with a clear way out, and the review list shows only what the change touches. A new report shows whether that really saves review rounds and cost per piece of work, with the defects that still slip through as the guard.
+A project's plans, reviews and test runs are checked for what a rule or a test can decide on its own: a plan's criteria are checked as they are written, warnings nobody had to follow became duties with a clear way out, and the review list shows only what the change touches. A new report shows whether that really saves review rounds and cost per piece of work, with the defects that still slip through as the guard. A reviewer from another model family now gets read access to the code, not only the change: with it, nine in ten of its findings held instead of one in six.
 
 ## v2.75.0 — A template update is reviewed once, even when other work merges in between
 

@@ -98,7 +98,27 @@ Dispatching is harness-plumbing around that artifact — pick what exists:
   an attacker. Gate code reviewed `single-family` at Tier 2 needs a REFUTE in
   the plan (or `skipped refute`): the reviewer's own refute counts only
   cross-model.
+- **An OpenAI-compatible model through opencode** (e.g. DeepSeek behind a
+  hosted endpoint): `opencode run -m <provider>/<model> --variant high < /tmp/bundle.md`,
+  run in the repository. Declare the model in `opencode.json` with
+  `"reasoning": true, "tool_call": true`, or opencode treats it as a plain
+  model: no effort levels, and thinking ran to the output limit without an
+  answer (v2.76). Grant read access only — `read`, `grep`, `glob`, `list`
+  and the reading git commands (`git diff*`, `git log*`, `git show*`,
+  `git grep*`) — with `edit`, `webfetch` and every other shell command
+  denied, so the review stays `non-implementing`.
 - **Any chat model:** paste the bundle as the whole prompt.
+
+**Give a reviewer the code, not only the diff, where the harness allows a
+read-only repository.** Measured on the v2.76 cross-model review: from the
+bundle alone, about one finding in six held — the rest concerned code outside
+the diff's hunks the reviewer could not see. With read access, nine in ten
+held, each naming the lines it read. Three brief rules carried that: read the
+surrounding code before claiming anything about it; mark each finding
+`verified=yes|no`; and give each run a scope — the files of its lens, other
+files read only to check a claim, a defect met outside the scope one line
+marked `scope=out`. The run's cost is its steps: each tool call resends the
+growing context, so the scope bounds tokens and time alike.
 
 The reviewer's independence flags follow from the dispatch, not from wishful
 attestation: a fresh process over the bundle is `bundle,non-implementing`; add
