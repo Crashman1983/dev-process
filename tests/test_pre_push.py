@@ -369,17 +369,27 @@ def test_a_failing_selector_cannot_judge_the_push(project, tmp_path):
     assert r.returncode == 2 and "selector failed (3)" in r.stderr and "frame failed" not in r.stderr, r.stderr
 
 
-def test_a_variable_that_narrows_the_tests_writes_no_stamp(project, tmp_path):
-    """Refute M1: the stamp follows the certificate's environment rule."""
+def test_a_variable_that_narrows_the_tests_refuses_the_push(project, tmp_path):
+    """Refute M1, then #265: a run under a variable that changes what runs
+    proves nothing — the push is refused, not merely left unstamped."""
     out, bare, git = project
     _write(out, "docs/process/testing.local.json",
            json.dumps({"certificate_env": ["NARROW"], "stacks": {"app": STACK}}))
     git("commit", "-qam", "narrow")
     r = _push(git, "origin", "feature", env={"NARROW": "1"})
-    assert r.returncode == 0 and "no stamp — NARROW is set" in r.stderr, r.stderr
+    assert r.returncode != 0 and "NARROW is set" in r.stderr and "no test ran" in r.stderr, r.stderr
     _probe(tmp_path)
     assert _push(git, "origin", "feature:refs/heads/copy").returncode == 0
     assert _probe(tmp_path) == ["g", "t app_tests"]
+
+
+def test_an_inherited_dry_run_makeflags_refuses_the_push(project, tmp_path):
+    """#265: under `MAKEFLAGS=-n` a make recipe exits 0 having run nothing;
+    the hook accepted that as a green test run."""
+    out, bare, git = project
+    r = _push(git, "origin", "feature", env={"MAKEFLAGS": "-n"})
+    assert r.returncode != 0 and "no test ran" in r.stderr, r.stderr
+    assert "t app_tests" not in _probe(tmp_path)
 
 
 def test_a_commit_made_during_the_run_writes_no_stamp(project, tmp_path):

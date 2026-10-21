@@ -1883,9 +1883,13 @@ def test_retry_plan_is_one_rule(render, tmp_path, red_in, retry, how):
 
 
 def _retry_batch(render, tmp_path, monkeypatch, *, retry, sh):
+    return _retry_batch_with(None, render, tmp_path, monkeypatch, retry=retry, sh=sh)
+
+
+def _retry_batch_with(train, render, tmp_path, monkeypatch, *, retry, sh):
     out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
     _repo(out)
-    train = _load_train(out)
+    train = train or _load_train(out)
     builds, runs = [], []
 
     def build(root, base, subset, stamp, log):
@@ -1913,6 +1917,33 @@ def test_a_red_suite_retries_only_what_failed_on_the_same_tree(render, tmp_path,
     # #263: a green retry command is no proof of a flake on the identical suite
     assert "then green under the retry command `make retry`" in log and "failed —" in log
     assert "flaky suite, merging" not in log
+
+
+def test_a_green_retry_certifies_the_tree_the_suite_started_from(render, tmp_path, monkeypatch):
+    """#265: a green stage retry wrote no merge certificate, so the push to main ran
+    the whole suite again on a tree that had passed every stage."""
+    calls = []
+
+    def certify(wt, suite, before, env, log, scope=None):
+        calls.append((wt, suite))
+    monkeypatch.delenv("MAKEFLAGS", raising=False)
+    out = render(tmp_path / "probe", {"project_name": "d", "modules": {}})
+    train_mod = _load_train(out)
+    monkeypatch.setattr(train_mod, "_certify_merge", certify)
+    builds, runs, log = _retry_batch_with(train_mod, render, tmp_path, monkeypatch, retry="make retry",
+                                          sh=lambda cmd, n: "red" if n == 1 else "green")
+    assert runs[:2] == ["suite", "make retry"]
+    assert [c[1] for c in calls] == ["suite"], calls  # the retry's green, not the red suite
+
+
+def test_a_retry_green_under_dry_run_makeflags_merges_nothing(render, tmp_path, monkeypatch):
+    """#265 AC-3: under `MAKEFLAGS=-n` the retry exits 0 having run nothing."""
+    monkeypatch.setenv("MAKEFLAGS", "-n")
+    out = render(tmp_path / "probe", {"project_name": "d", "modules": {}})
+    train_mod = _load_train(out)
+    with pytest.raises(train_mod.EnvironmentRed, match="altering environment"):
+        _retry_batch_with(train_mod, render, tmp_path, monkeypatch, retry="make retry",
+                          sh=lambda cmd, n: "red" if n == 1 else "green")
 
 
 def test_without_retry_the_whole_suite_runs_on_a_rebuilt_tree(render, tmp_path, monkeypatch):

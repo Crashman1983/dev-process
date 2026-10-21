@@ -1392,7 +1392,7 @@ def run(root: Path, *, suite: str | None, deploy: str | None, push: bool, min_ca
         return rc
     except EnvironmentRed as env_red:
         result = "environment"
-        print(f"train: the preflight `{env_red}` is red — the environment cannot run the suite; "
+        print(f"train: {env_red} — the environment cannot run the suite; "
               f"nobody is blamed, nothing merged, no retry (see {logfile})", file=sys.stderr)
         _cleanup(root, stamp)
         return rc
@@ -1435,12 +1435,15 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
 
     preflight_done = not preflight
 
+    suite_before: dict[Path, str | None] = {}  # the tree each suite run started from
+
     def full_suite(wt: Path, key: str) -> str:
         """The suite on `wt`, remembered and — on a tree it left as found — certified."""
         dirty = certificate.clean_tree_problem(wt)
         if dirty:
             log(f"no merge certificate for this run: {dirty} before the suite")
         before = certificate.evidence_tree(wt) if dirty is None else None
+        suite_before[wt] = before
         certificate.clear_run(wt)  # the `stages` file the certificate reads is this run's
         state = timed("suite", _sh, wt, suite, log)
         _collect_stage_times(wt, stages, stage_seen, log)
@@ -1476,7 +1479,7 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
         nonlocal base_from_memo, red_in, preflight_done
         if not preflight_done:
             if timed("preflight", _sh, wt, preflight, log, preflight_timeout) != "green":
-                raise EnvironmentRed(preflight)
+                raise EnvironmentRed(f"the preflight `{preflight}` is red")
             preflight_done = True
         red_in = "gates"
         if not timed("gates", _run_gates, wt, log):
@@ -1586,6 +1589,10 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
                 ran = "retry"
                 state = timed("retry", _sh, last_wt, retry, log)
                 _collect_stage_times(last_wt, stages, stage_seen, log)
+                env_problem = certificate.env_problem(certificate_env or [])
+                if env_problem and state == "green":
+                    # `make -n` exits 0 having run nothing: no green to merge on (#265)
+                    raise EnvironmentRed(f"the retry ran under an altering environment ({env_problem})")
                 if state == "undefined":  # no such command on this tree: the whole suite, as before
                     log("the --retry command does not exist on this tree — rebuilding for the whole suite")
                     ran = "full"
@@ -1597,9 +1604,13 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
             searching = ""
             if state == "green":
                 if ran == "retry":
+                    # the suite ran whole on this tree and the retry re-ran what failed, green:
+                    # the same tree passed every stage, so the push needs no second run (#265)
+                    _certify_merge(last_wt, suite, suite_before.get(last_wt), certificate_env or [], log,
+                                   merge_scope)
                     print(f"train: green under the retry command `{retry}` (it re-ran only what failed), "
                           f"red under the suite `{suite}` — flaky, or the two runs differ (flags, "
-                          f"environment); merging, the push to main runs the full suite again "
+                          f"environment); merging "
                           f"(see {logfile}; {_load()})", file=sys.stderr)
                     log(f"red under `{suite}`, then green under the retry command `{retry}` — flaky or "
                         "the commands differ, merging")
