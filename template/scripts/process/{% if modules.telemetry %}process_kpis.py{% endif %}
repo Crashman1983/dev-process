@@ -390,16 +390,29 @@ def _model(rec: dict) -> str:
     return f"{m} ({rec['effort']})" if rec.get("effort") else m
 
 
-def _rounds_of_issue(root: Path, rounds: dict[str, dict], issue) -> dict | None:
-    """The review rounds of one issue: a REVIEW line names its work by the plan's slug as
-    often as by the number, so the work ids of every plan declaring the issue count
-    (`check_review._plan_work_ids`, the gate's own matching) — merged over those ids."""
+def _plans(root: Path) -> list[tuple[str, str]]:
+    """(path, unfenced text) of every plan, archived ones included."""
+    import check_review as _review
+    return [(rel, _review._unfenced(text))
+            for rel, text in _review.record_texts(root, _review.PLAN_KINDS + ("plan-archive",)) or []]
+
+
+def _issue_ids(issue, plans: list[tuple[str, str]]) -> set[str]:
+    """The work ids one issue goes by: a REVIEW line or a report names its work by the
+    plan's slug as often as by the number, so the ids of every plan declaring the issue
+    count (`check_review._plan_work_ids`, the gate's own matching)."""
     import check_review as _review
     ids = {str(issue), f"#{issue}"}
-    for rel, text in _review.record_texts(root, _review.PLAN_KINDS + ("plan-archive",)) or []:
-        text = _review._unfenced(text)
+    for rel, text in plans:
         if int(issue) in _review._plan_issue_numbers(text):
             ids |= _review._plan_work_ids(_review.plan_stem(rel), text, include_dedated=True)
+    return ids
+
+
+def _rounds_of_issue(root: Path, rounds: dict[str, dict], issue,
+                     plans: list[tuple[str, str]] | None = None) -> dict | None:
+    """The review rounds of one issue, merged over its work ids (`_issue_ids`)."""
+    ids = _issue_ids(issue, _plans(root) if plans is None else plans)
     hits = [rounds[i] for i in ids if i in rounds]
     if not hits:
         return None
@@ -568,11 +581,28 @@ def execution(root: Path | None = None) -> int:
 _NO_FINDING_READER = "FINDING lines are read by check_issues — the github-issues module"
 
 
-def _report_findings(root: Path, phase: str | None = None) -> list[tuple[str, dict]] | str:
-    """(work id, fields) of every well-formed FINDING line in the review reports —
-    plan reviews only (`phase="plan"`), the others (`"code"`) or all (None) — or why
-    they were not read (`_blockers_by_work` names the cases). One reader for every
-    count over findings."""
+_ROUND_IN_NAME = re.compile(r"(?:^|-)r(\d+)(?=-|$)")
+
+
+def _report_round(name: str, head: dict[str, list[str]]) -> int | None:
+    """The round a review report belongs to (#293): its `round:` header (the bundle
+    and the Codex handoff write it as attest numbers the REVIEW line), else `-r<N>` in
+    its file name, else None — unrounded, not counted. A header that names no single
+    number is unrounded too, never read past to the file name."""
+    if "round" in head:
+        values = set(head["round"])
+        value = values.pop() if len(values) == 1 else ""
+        return int(value) if value.isascii() and value.isdigit() else None
+    found = set(_ROUND_IN_NAME.findall(Path(name).stem))
+    return int(found.pop()) if len(found) == 1 else None
+
+
+def _review_reports(root: Path, phase: str | None = None) -> list[tuple[list[str], int | None, list[dict]]] | str:
+    """(work ids, round, FINDING fields) of every review report — plan reviews only
+    (`phase="plan"`), the others (`"code"`) or all (None) — or why they were not read
+    (`_blockers_by_work` names the cases). A report names its work in its `work:`
+    header (check_review reads that header); one without counts under
+    "(no work: header)". One reader for every count over reports and findings."""
     if not (Path(__file__).resolve().parent / "check_issues.py").is_file():
         return _NO_FINDING_READER
     try:
@@ -585,7 +615,7 @@ def _report_findings(root: Path, phase: str | None = None) -> list[tuple[str, di
                 f"(e.g. uv run --with pyyaml …)")
     except ImportError as exc:
         return f"check_issues does not import ({exc})"
-    out: list[tuple[str, dict]] = []
+    out: list[tuple[list[str], int | None, list[dict]]] = []
     rdir = root / _issues.REVIEWS_DIR
     if not rdir.is_dir():
         return out
@@ -599,10 +629,18 @@ def _report_findings(root: Path, phase: str | None = None) -> list[tuple[str, di
         if phase is not None and is_plan != (phase == "plan"):
             continue
         works = [w.lstrip("#") for w in head.get("work", [])] or ["(no work: header)"]
-        for fields, err, _line in _issues.report_findings(text):
-            if not err:
-                out.extend((work, fields) for work in works)
+        found = [fields for fields, err, _line in _issues.report_findings(text) if not err]
+        out.append((works, _report_round(p.name, head), found))
     return out
+
+
+def _report_findings(root: Path, phase: str | None = None) -> list[tuple[str, dict, int | None]] | str:
+    """(work id, fields, round) of every well-formed FINDING line in the review
+    reports (`_review_reports`: the phase filter, the round, the reasons not read)."""
+    reports = _review_reports(root, phase)
+    if isinstance(reports, str):
+        return reports
+    return [(work, fields, rnd) for works, rnd, found in reports for fields in found for work in works]
 
 
 def _blockers_by_work(root: Path, key: str = "origin",
@@ -619,7 +657,7 @@ def _blockers_by_work(root: Path, key: str = "origin",
     if isinstance(found, str):
         return found
     out: dict[str, dict[str, int]] = {}
-    for work, fields in found:
+    for work, fields, _round in found:
         if fields["sev"] != "blocker":
             continue
         cell = out.setdefault(work, {})
@@ -649,6 +687,76 @@ def _when(value: object) -> datetime | None:
     return got if got.tzinfo else got.replace(tzinfo=timezone.utc)
 
 
+NOT_READ = "not read"
+# action=fix findings a round's fix pass took on, bucketed (#297: the share of next rounds
+# with a fix-induced blocker grew with the size of the pass)
+FIX_BUCKETS = ((0, 2, "0-2"), (3, 5, "3-5"), (6, 9, "6-9"), (10, None, ">=10"))
+
+
+def _bucket(n: int) -> str:
+    return next(label for lo, hi, label in FIX_BUCKETS if n >= lo and (hi is None or n <= hi))
+
+
+def _round_findings(root: Path, ids: dict[object, set[str]]) -> dict:
+    """Over the code reviews of the window's works (`ids`: issue → its work ids):
+    `blockers_by_origin` — blocking findings by `origin=` ("-" without one) — and
+    `fix_findings_vs_fix_blockers`: per bucket of `action=fix` findings in round r,
+    the rounds r whose round r+1 has a report, how many of those had an `origin=fix`
+    blocker and how many such blockers. The reports of one round add up; a report
+    without a round (`_report_round`) is left out and counted as `unrounded`.
+    Without the FINDING reader both say why they were not read."""
+    reports = _review_reports(root, "code")
+    if isinstance(reports, str):
+        return {"blockers_by_origin": NOT_READ, "fix_findings_vs_fix_blockers": NOT_READ}
+    origins: dict[str, int] = {}
+    per_round: dict[tuple[object, int], dict[str, int]] = {}
+    unrounded = 0
+    for works, rnd, found in reports:
+        issue = next((i for i, own in ids.items() if own & set(works)), None)
+        if issue is None:
+            continue  # not a work of this window
+        for f in found:
+            if f["sev"] == "blocker":
+                origin = f.get("origin") or "-"
+                origins[origin] = origins.get(origin, 0) + 1
+        if rnd is None:
+            unrounded += 1
+            continue
+        cell = per_round.setdefault((issue, rnd), {"fix": 0, "fix_blockers": 0})
+        cell["fix"] += sum(f.get("action") == "fix" for f in found)
+        cell["fix_blockers"] += sum(f["sev"] == "blocker" and f.get("origin") == "fix" for f in found)
+    buckets = {label: {"rounds": 0, "with_fix_blocker": 0, "fix_blockers": 0} for _lo, _hi, label in FIX_BUCKETS}
+    for (issue, rnd), cell in per_round.items():
+        after = per_round.get((issue, rnd + 1))
+        if after is None:
+            continue  # no next round to judge the pass by
+        b = buckets[_bucket(cell["fix"])]
+        b["rounds"] += 1
+        b["with_fix_blocker"] += after["fix_blockers"] > 0
+        b["fix_blockers"] += after["fix_blockers"]
+    return {"blockers_by_origin": origins,
+            "fix_findings_vs_fix_blockers": {"buckets": buckets, "unrounded": unrounded}}
+
+
+def _skips_by_kind(root: Path, ids: dict[object, set[str]]) -> dict[str, int]:
+    """Works of the window with a reasoned skip, per kind (`skipped <kind> work=<id>:`,
+    `check_review.SKIP_LINE`, in the journal and the plans as rendered) — a skip covers
+    its whole work, so a work counts once per kind. Known limit: `compact_journal` drops
+    skip lines, so read the baseline before it runs (improvement-monthly.md)."""
+    import check_review as _review
+    seen: set[tuple[str, object]] = set()
+    for _rel, text in _review.record_texts(root) or []:
+        for m in _review.SKIP_LINE.finditer(_review.readable(text)):
+            work = m.group("work").removesuffix("-plan").lstrip("#")
+            issue = next((i for i, own in ids.items() if work in own), None)
+            if issue is not None:
+                seen.add((m.group("kind"), issue))
+    out: dict[str, int] = {}
+    for kind, _issue in seen:
+        out[kind] = out.get(kind, 0) + 1
+    return dict(sorted(out.items()))
+
+
 def baseline_numbers(root: Path, lo: datetime, hi: datetime, *, items: list[dict] | None = None,
                      commits: list[dict] | None = None) -> dict:
     """The baseline of one window, over the works merged in it: medians per work of
@@ -662,14 +770,17 @@ def baseline_numbers(root: Path, lo: datetime, hi: datetime, *, items: list[dict
     found = _report_findings(root)
     by_work: dict[str, int] = {}
     if not isinstance(found, str):
-        for work, _f in found:
+        for work, _f, _round in found:
             by_work[work] = by_work.get(work, 0) + 1
 
     def med(values: list) -> float | None:
         vals = [v for v in values if v is not None]
         return round(statistics.median(vals), 1) if vals else None
 
-    rnd = [_rounds_of_issue(root, rounds, it["issue"]) for it in merged]
+    plans = _plans(root)
+    ids = {it["issue"]: _issue_ids(it["issue"], plans) for it in merged}
+    rnd = [_rounds_of_issue(root, rounds, it["issue"], plans) for it in merged]
+    reviewed_plan = [any(f"{i}-plan" in rounds for i in ids[it["issue"]]) for it in merged]
     phases: dict[str, int] = {}
     for recs in _reports_by_worker(root).values():
         for r in recs:
@@ -688,6 +799,13 @@ def baseline_numbers(root: Path, lo: datetime, hi: datetime, *, items: list[dict
                                 for it in merged]),
         "rounds_per_work": med([r["max_round"] if r else None for r in rnd]),
         "fix_rounds_per_work": med([len(r["blocked"]) if r else None for r in rnd]),
+        # #293: does a reviewed plan buy fewer code rounds?
+        "rounds_with_plan_review": med([r["max_round"] if r else None
+                                        for r, planned in zip(rnd, reviewed_plan) if planned]),
+        "rounds_without_plan_review": med([r["max_round"] if r else None
+                                           for r, planned in zip(rnd, reviewed_plan) if not planned]),
+        **_round_findings(root, ids),
+        "skips_by_kind": _skips_by_kind(root, ids),
         "findings_per_work": None if isinstance(found, str) else med([by_work.get(str(it["issue"]), 0)
                                                                      for it in merged]),
         "lead_hours": med([it["lead_s"]["value"] / 3600 if it["lead_s"]["value"] else None for it in merged]),
@@ -718,7 +836,7 @@ def baseline(root: Path | None = None, windows: list[tuple[datetime, datetime]] 
     print("[baseline] ~proxy — per merged work, medians; compare two windows (#277)")
     print(f"  {'':<28}" + "".join(f"{x:>24}" for x in label))
     for key in ("works", "tokens_per_work", "rounds_per_work", "fix_rounds_per_work", "findings_per_work",
-                "lead_hours", "escaped_works"):
+                "rounds_with_plan_review", "rounds_without_plan_review", "lead_hours", "escaped_works"):
         print(f"  {key:<28}" + "".join(f"{'—' if g[key] is None else g[key]:>24}" for g in got))
     cfr = ["—" if not g["change_failure_proxy"] else
            f"{g['change_failure_proxy']['failed']}/{g['change_failure_proxy']['feats']} feat" for g in got]
@@ -727,6 +845,19 @@ def baseline(root: Path | None = None, windows: list[tuple[datetime, datetime]] 
         if g["stated_tokens_by_phase"]:
             print(f"  stated tokens by phase {x}: "
                   + ", ".join(f"{p} {n:,}" for p, n in sorted(g["stated_tokens_by_phase"].items())))
+        origins = g["blockers_by_origin"]
+        print(f"  blockers by origin {x}: " + (origins if isinstance(origins, str) else
+                                               ", ".join(f"{o} {n}" for o, n in sorted(origins.items())) or "none"))
+        pairs = g["fix_findings_vs_fix_blockers"]
+        if isinstance(pairs, str):
+            print(f"  fix findings → next round's fix blockers {x}: {pairs}")
+        else:
+            print(f"  fix findings → next round's fix blockers {x}: "
+                  + "; ".join(f"{b} findings: {c['with_fix_blocker']}/{c['rounds']} rounds, {c['fix_blockers']} blockers"
+                              for b, c in pairs["buckets"].items())
+                  + f"; unrounded reports {pairs['unrounded']}")
+        print(f"  skips by kind {x}: "
+              + (", ".join(f"{k} {n}" for k, n in g["skips_by_kind"].items()) or "none"))
     n = min(g["works"] for g in got)
     lvl = _level(n, True, False, _N_THRESHOLD)
     print(f"  {confidence(n, proxy=True)} · {action(lvl, 'a check that removed review work shows fewer fix rounds and tokens per work at the same or fewer escaped works', thin='keep recording; judge a change after ~20 merged works per window')}")
@@ -751,7 +882,7 @@ def findings(root: Path | None = None, *, min_works: int = 2, as_json: bool = Fa
     classes: dict[str, int] = {}
     heavy: dict[str, int] = {}
     checks: dict[str, set[str]] = {}
-    for work, f in found:
+    for work, f, _round in found:
         cls = f.get("class") or "unclassed"
         classes[cls] = classes.get(cls, 0) + 1
         if f["sev"] in _HEAVY:
