@@ -968,18 +968,18 @@ def _decide_code(ev: Evidence) -> list[str]:
                    f"test to; name them in the plan, or commit {_skip('ac-trace', ev)}")
     for n in sorted(ev.plan_acs):
         bodies = ev.claims.get(n, [])
+        cited = f"; if the plan only cites another issue's AC-{n}, write it `#<issue>/AC-{n}` (#287)"
         if not bodies:
             out.append(f"AC-{n} has no line in the report — name the test that goes red when it "
-                       f"breaks (`AC-{n}: <path>::<test>`) or `AC-{n}: unproven`; if the plan only "
-                       f"cites another issue's AC-{n}, write it `#<issue>/AC-{n}` (#287)")
+                       f"breaks (`AC-{n}: <path>::<test>`) or `AC-{n}: unproven`{cited}")
         # a heading or a prose line of the criterion is no claim; one naming a test is
         unproven = [b for b in bodies if re.search(r"\bunproven\b", _ITEM_ANY.sub(" ", b), re.IGNORECASE)]
         if unproven:
-            out.append(f"AC-{n} is unproven — no test goes red when it breaks")
+            out.append(f"AC-{n} is unproven — no test goes red when it breaks{cited}")
             continue
         named = [key for b in bodies for key in claimed_tests(b)]
         if bodies and not named:
-            out.append(f"AC-{n}: `{bodies[0]}` names no `<path>::<test>`")
+            out.append(f"AC-{n}: `{bodies[0]}` names no `<path>::<test>`{cited}")
         for key in named:
             why = ev.test_status.get(key, "not checked at head")
             if why:

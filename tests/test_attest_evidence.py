@@ -804,7 +804,7 @@ def test_another_issues_criterion_is_cited_qualified_and_not_required(ev_mod):
     assert req(own + "dsh runs only up to the AC-4 measurement (#2659).\n", "") == {"1", "4"}
     assert req(own + "#1918/AC-4 and AC-4 here too.\n", "") == {"1", "4"}
     assert foreign(own + "#1918/AC-4 and AC-4 here too.\n", "") == set()  # no note for a required id
-    # delta round 5: a bare hyphen compound keeps it too; the own issue is matched with its repo
+    # delta round 5: a bare hyphen compound keeps the id too
     assert req(own + "#2659/AC-4 cited. Die AC-4-Messung bleibt.\n", "") == {"1", "4"}
     # the own issue by its number, in every form check_review reads: any repository, any
     # decoration — the plan's own (fail closed; delta rounds 5–6)
