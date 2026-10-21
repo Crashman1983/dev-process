@@ -452,7 +452,7 @@ def test_a_tampered_or_stale_review_is_never_handed_off(review_repo):
 
 def test_a_follow_up_without_an_issue_is_refused(review_repo):
     bad = {**PASS, "findings": [{"sev": "minor", "action": "follow-up", "kind": "implementation", "issue": "-",
-                                 "title": "later"}]}
+                                 "class": "judgment", "rule": "-", "title": "later"}]}
     out, d, codex = review_repo(bad)
     _run_review(out, d, codex)
     assert d.handoff(out, "7-widget") == 3
@@ -731,7 +731,8 @@ def test_a_foreign_or_uncommitted_review_line_finishes_nothing(review_repo):
 
 def test_a_review_without_receipt_is_no_way_out(review_repo, capsys):
     block = {"verdict": "block", "findings": [{"sev": "major", "action": "fix", "kind": "implementation",
-                                               "issue": "-", "title": "wrong"}], "criteria": [], "refute": []}
+                                               "issue": "-", "class": "testable", "rule": "mutation",
+                                               "title": "wrong"}], "criteria": [], "refute": []}
     out, d, codex = review_repo(block)
     rec = _run_review(out, d, codex)
     (Path(rec["evidence"]) / "terminal.json").unlink()
@@ -744,13 +745,15 @@ def test_a_review_without_receipt_is_no_way_out(review_repo, capsys):
 def test_a_codex_finding_names_its_reviewer(review_repo):
     """#247: the handoff's findings carry `by=codex`, so a later count can tell them apart."""
     block = {"verdict": "block", "findings": [{"sev": "major", "action": "fix", "kind": "implementation",
-                                               "issue": "-", "title": "wrong"}],
+                                               "issue": "-", "class": "testable", "rule": "mutation",
+                                               "title": "wrong"}],
              "criteria": ["AC-1: tests/test_widget.py::test_widget"], "refute": []}
     out, d, codex = review_repo(block)
     _run_review(out, d, codex)
     d.handoff(out, "7-widget")
     report = next((out / ".process-work/reviews").glob("*-7-codex-*.md")).read_text()
-    assert "FINDING sev=major action=fix kind=implementation issue=- by=codex wrong" in report
+    assert "FINDING sev=major action=fix kind=implementation issue=- by=codex class=testable rule=mutation wrong" \
+        in report
 
 
 def test_the_implementer_flag_never_overrides_a_measured_model(review_repo):

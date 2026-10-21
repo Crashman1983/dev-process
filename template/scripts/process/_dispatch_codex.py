@@ -455,8 +455,11 @@ def _schema(*, plan_review: bool, gate: bool) -> dict:
                               "kind": {"type": "string", "enum": ["knowledge-gap", "requirement", "implementation",
                                                                   "test-gap", "process", "environment"]},
                               "issue": {"type": "string", "pattern": "^(-|#[0-9]+|[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[0-9]+)$"},
+                              # what could have caught it, and which check (#276); `-` for judgment
+                              "class": {"type": "string", "enum": ["mechanical", "testable", "judgment"]},
+                              "rule": {"type": "string", "pattern": "^(-|[\\w.:/-]+)$"},
                               "title": {"type": "string"}},
-               "required": ["sev", "action", "kind", "issue", "title"]}
+               "required": ["sev", "action", "kind", "issue", "class", "rule", "title"]}
     lines = {"type": "array", "items": {"type": "string"}}
     props = {"verdict": {"type": "string", "enum": ["pass", "block"]},
              "findings": {"type": "array", "items": finding}, "criteria": lines, "refute": lines}
@@ -597,8 +600,10 @@ def _report_text(rec: dict, result: dict, *, work: str, plan_review: bool, refut
              f"artifact: base={b['base']} head={b['head']} diff_sha256={b['diff_sha256']}",
              f"codex-result: {rec['result_sha256']}", f"verdict: {result['verdict']}", ""]
     for f in result["findings"]:
-        lines.append(f"FINDING sev={f['sev']} action={f['action']} kind={f['kind']} issue={f['issue']} by=codex "
-                     f"{f['title']}")
+        cls = f" class={f['class']}" if f.get("class") else ""
+        rule = f" rule={f['rule']}" if f.get("rule") not in (None, "", "-") else ""
+        lines.append(f"FINDING sev={f['sev']} action={f['action']} kind={f['kind']} issue={f['issue']} by=codex"
+                     f"{cls}{rule} {f['title']}")
     if result["criteria"]:
         lines += ["", *result["criteria"]]
     if refute_round is not None:

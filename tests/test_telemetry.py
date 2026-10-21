@@ -1,3 +1,4 @@
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -930,3 +931,47 @@ def test_flow_carries_the_last_plan_drift_verdict_per_issue(render, tmp_path):
     [it] = m.flow_items(out, issue=12)
     assert it["plan_drift"] == {"value": {"behind": 900, "touching": 40, "outcome": "fail", "mode": "shadow"},
                                 "quality": "measured"}  # a skipped run is no verdict
+
+
+FINDINGS_REPORTS = {
+    "a.md": ("review: a\nwork: #1\npublish-waived: test\n\n"
+             "FINDING sev=blocker action=fix issue=- class=testable rule=mutation weak assert\n"
+             "FINDING sev=minor action=fix issue=- class=judgment naming\n"
+             "FINDING sev=major action=fix issue=- no class yet\n"),
+    "b.md": ("review: b\nwork: #2\npublish-waived: test\n\n"
+             "FINDING sev=major action=fix issue=- class=testable rule=mutation another weak assert\n"
+             "FINDING sev=blocker action=fix issue=- class=judgment design call\n"),
+}
+
+
+def test_findings_counts_classes_and_names_a_repeating_check(render, tmp_path):
+    """#276: what could have caught each finding, counted, and a check seen in two
+    works named as the next gate to write."""
+    out = _render(render, tmp_path, github_issues=True)
+    reviews = out / ".process-work/reviews"
+    reviews.mkdir(parents=True)
+    for name, text in FINDINGS_REPORTS.items():
+        (reviews / name).write_text(text, encoding="utf-8")
+    r = subprocess.run([sys.executable, str(out / "scripts/process/process_kpis.py"), "findings", "--json"],
+                       cwd=out, capture_output=True, text=True)
+    got = json.loads(r.stdout)
+    assert got["classes"] == {"testable": 2, "judgment": 2, "unclassed": 1}, got
+    assert got["blocking"] == {"testable": 2, "judgment": 1, "unclassed": 1}, got
+    assert got["repeating"] == {"testable:mutation": ["1", "2"]}, got
+    assert got["judgment_share_of_blocking"] == 0.33, got
+    text = subprocess.run([sys.executable, str(out / "scripts/process/process_kpis.py"), "findings"],
+                          cwd=out, capture_output=True, text=True).stdout
+    assert "repeats in 2 works: testable:mutation" in text, text
+
+
+def test_a_bad_finding_class_is_a_malformed_line(render, tmp_path):
+    out = _render(render, tmp_path, github_issues=True)
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("ci_gate_cls", out / "scripts/process/check_issues.py")
+    gate = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(gate)
+    (fields, err, _), = gate.report_findings("FINDING sev=minor action=fix issue=- class=maybe title\n")
+    assert fields is None and "class='maybe'" in err
+    (fields, err, _), = gate.report_findings("FINDING sev=minor action=fix issue=- class=mechanical "
+                                             "rule=ruff:S110 swallowed\n")
+    assert err is None and fields["rule"] == "ruff:S110" and fields["title"] == "swallowed"

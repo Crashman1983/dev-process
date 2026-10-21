@@ -222,6 +222,10 @@ def test_finding_tokens_pinned_to_their_owning_gate(render, tmp_path):
     assert "kind" in gate.FINDING_KEYS
     # the optional reviewer family (#247): a merged pass keeps each finding's origin
     assert "[by=<" in bundle_src and "by" in gate.FINDING_KEYS
+    # what could have caught it (#276)
+    cls_line = "[class=<" + "|".join(sorted(gate.FINDING_CLASSES, key="mechanical testable judgment".split().index)) + ">]"
+    assert cls_line in bundle_src and "[rule=<check-name>]" in bundle_src, cls_line
+    assert {"class", "rule"} <= set(gate.FINDING_KEYS)
 
 
 def test_bundle_asks_for_kind_and_a_plan_bundle_for_the_phase_header(render, tmp_path):
