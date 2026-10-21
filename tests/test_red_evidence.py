@@ -63,6 +63,64 @@ def test_the_root_cause_line_satisfies_attest(render, tmp_path):
     assert attest.ROOT_CAUSE.search(_journal(out))
 
 
+def _grammar(out: Path):
+    """check_review's ROOT-CAUSE grammar and attest_evidence's test reader of this render."""
+    import importlib
+    names = ("check_review", "attest_evidence", "required_records", "process_git")
+    sys.path.insert(0, str(out / "scripts/process"))
+    try:
+        for name in names:
+            sys.modules.pop(name, None)
+        return importlib.import_module("check_review"), importlib.import_module("attest_evidence")
+    finally:
+        sys.path.remove(str(out / "scripts/process"))
+        for name in names:
+            sys.modules.pop(name, None)
+
+
+def _class_test(out: Path) -> tuple[str, str | None, list]:
+    cr, ev = _grammar(out)
+    m = cr.ROOT_CAUSE_LINE.search(_journal(out))
+    cause, sites, tests = cr.root_cause_parts(m.group("text"))
+    return cause, sites, ev.claimed_tests(tests)
+
+
+def test_sites_write_the_class_test_form_and_read_back_pytest(render, tmp_path):
+    """v2.77 B5: `--sites` writes `<cause> — sites: <sites> — <tests>`, and the reader
+    attest uses gets the measured node ids back."""
+    out, before = _repo(render, tmp_path)
+    r = _tool(out, "--work", "7", "--round", "1", "--before", before, "--cause", "add subtracted",
+              "--sites", "calc.py:2, calc.py:sub", "--", sys.executable, "-m", "pytest", "test_calc.py")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert ("ROOT-CAUSE work=7 round=1: add subtracted — sites: calc.py:2, calc.py:sub — "
+            "test_calc.py::test_add") in _journal(out)
+    assert _class_test(out) == ("add subtracted", "calc.py:2, calc.py:sub", [("test_calc.py", "test_add")])
+
+
+def test_without_sites_the_old_line_stays_and_a_note_says_so(render, tmp_path):
+    out, before = _repo(render, tmp_path)
+    r = _tool(out, "--work", "7", "--round", "1", "--before", before, "--cause", "add subtracted",
+              "--", sys.executable, "-m", "pytest", "test_calc.py")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "ROOT-CAUSE work=7 round=1: add subtracted — test_calc.py::test_add" in _journal(out)
+    assert "--sites" in r.stderr and "class-test" in r.stderr, r.stderr
+
+
+def test_sites_read_back_a_junit_test_by_its_file_attribute(render, tmp_path):
+    """A runner writing `file=` on its test case (vitest, jest-junit with the option) names
+    the test file itself; its `classname` is no path (a `describe` title)."""
+    out, before = _repo(render, tmp_path)
+    runner = RUNNER.replace("<testcase classname='calc.spec' name=",
+                            "<testcase classname='Calc adds' file='tests/calc.test.ts' name=")
+    (out / "calc.spec.py").write_text(runner, encoding="utf-8")
+    r = _tool(out, "--work", "7", "--round", "1", "--before", before, "--junit", "report.xml",
+              "--copy", "calc.spec.py", "--cause", "add subtracted", "--sites", "calc.py:2", "--",
+              sys.executable, "calc.spec.py")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "red before, green after (1): tests/calc.test.ts::adds" in _journal(out)
+    assert _class_test(out) == ("add subtracted", "calc.py:2", [("tests/calc.test.ts", "adds")])
+
+
 def test_refuses_when_no_test_was_red_before(render, tmp_path):
     out, before = _repo(render, tmp_path)
 
