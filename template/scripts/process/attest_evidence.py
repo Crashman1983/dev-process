@@ -423,18 +423,19 @@ def struck_criteria(plan: str, spec: str) -> frozenset[str]:
 
 def _cited_elsewhere(plan: str) -> tuple[str, set[str]]:
     """(the plan with its citations of other issues blanked, the ids cited that way). A
-    citation of an issue the plan declares itself — the same repository, or both bare — is
-    no citation: it stays a mention."""
-    from check_review import ISSUE_DECL, parse_issue_ref  # noqa: PLC0415
-    mine = {ref for m in ISSUE_DECL.finditer(plan)
-            if (ref := (parse_issue_ref(m.group(1)) or ((None, int(m.group(1))) if m.group(1).isdigit()
-                                                        else None)))}
+    citation naming the number of an issue the plan declares — in any form `check_review`
+    reads (`ref_token`), any repository — is no citation: it stays a mention (fail closed)."""
+    from check_review import ISSUE_DECL, parse_issue_ref, ref_token  # noqa: PLC0415
+    mine: set[int] = set()
+    for m in ISSUE_DECL.finditer(plan):
+        tok = ref_token(m.group(1))
+        ref = parse_issue_ref(tok) or ((None, int(tok)) if tok.isascii() and tok.isdigit() else None)
+        if ref:
+            mine.add(ref[1])
     cited: set[str] = set()
 
     def blank(m: re.Match) -> str:
-        repo, n = m.group(0).split("#", 1)[0] or None, int(m.group("n"))
-        # a bare `#N` may mean the declared `owner/repo#N`: ambiguous, so the plan's own
-        if (repo, n) in mine or (repo is None and n in {num for _r, num in mine}):
+        if int(m.group("n")) in mine:
             return m.group(0)
         cited.add(ac_key(m))
         return " " * len(m.group(0))
