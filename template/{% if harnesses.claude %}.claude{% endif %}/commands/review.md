@@ -116,6 +116,10 @@ Round economy — a failed round must not re-pay the whole chain:
   reads the fix diff plus the prior round's findings, while the verdict
   still binds the whole branch, at every tier
   (`docs/process/verification-independence.md`, "What each round judges").
+  A delta round over gate or security code needs a reviewer with tools: it
+  runs the changed code and its tests, not only reads the bundle. A
+  `FIX-PASS WARNING` in the bundle (a fix pass above 300 changed lines) asks
+  the reviewer to attack the sibling paths of every change.
 - **Rebase or merge main before the first review round.** A later rebase or
   merge of main that applies cleanly keeps the review (the gate judges
   content, not history); one that resolves a conflict is a new round.
@@ -126,11 +130,12 @@ Round economy — a failed round must not re-pay the whole chain:
   pass, a rebase or a short look is no new round. Plan reviews count apart
   (`--plan-review`).
 - **Cause before fix.** Before the next round, the fixer writes
-  `ROOT-CAUSE work=<id> round=<r>: <cause> — <the test that failed before
-  the fix>` into the journal or the plan and checks it with `attest.py
-  --dry-run`; at the attest itself a missing or mislabelled line is a note,
-  never a refusal of a verdict already reached. The test comes first and
-  fails on the old code. Downstream, the largest source of extra rounds was
+  `ROOT-CAUSE work=<id> round=<r>: <cause> — sites: <sites> — <tests>` into
+  the journal or the plan — the sibling sites of the cause and the class test
+  that failed before the fix, or `sites: none — <reason>` for a block without
+  a code defect — and checks it with `attest.py --dry-run`, which refuses a
+  pass while a blocked round lacks one (`docs/process/workflow.md`, Execute,
+  "Fixing a review round"). The test comes first and fails on the old code. Downstream, the largest source of extra rounds was
   a fix that created the next blocker — the same rule patched three times.
 - **Attack before or within round 1, by tier.** Owner check, fail-open, edge cases, evidence —
   at Tier 2 inside the review, a separate refute run where the table asks for one
@@ -163,10 +168,12 @@ Round economy — a failed round must not re-pay the whole chain:
   asks for a full bundle when the fix changed a contract, the architecture or
   the risk scope (`docs/process/verification-independence.md`, "What each
   round judges").
-- **The same spot blocks twice → a fresh session fixes it** and records
-  the increment-vs-rebuild call as a `DECISION` before the next round. The
-  implementing session has twice missed what is wrong there; it is not the
-  one to try a third time.
+- **The work blocks twice → a fresh session fixes it** and records the
+  increment-vs-rebuild call in the plan before the next round as
+  `REPLAN work=<id> round=<r>: increment|rebuild — <reason>`, one per blocked
+  round after the first; a `rebuild` gets a new plan review before the code
+  changes. The implementing session has twice missed what is wrong there; it
+  is not the one to try a third time.
 - **Only what someone would hit blocks; three blocks reach the owner
   once.** Plan text, report wording and tallies are nits; an all-minor
   verdict is a pass with residuals. After the third blocking round the

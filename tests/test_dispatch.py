@@ -1069,7 +1069,7 @@ def test_the_start_prompt_names_the_steward_and_the_execute_duties(render, tmp_p
         assert "DECISION NEEDED" in text and "report.py blocked" in text and "never a question in chat" in text
         assert "reach the steward live" not in text
     execute = mod.prompt_for("execute", 7, 2, "7-work", "m")
-    assert "ROOT-CAUSE work=<id> round=<r>: <cause> — <test that failed before the fix>" in execute
+    assert "ROOT-CAUSE work=<id> round=<r>: <cause> — sites: <sites> — <tests>" in execute
     assert "attest.py --dry-run" in execute and "The duties before `pushed` are in /execute" in execute
     live = mod.prompt_for("plan", 7, 2, "7-work", "m", channel="SendMessage to 'steward'")
     assert "reach the steward live via SendMessage to 'steward'" in live

@@ -692,7 +692,7 @@ def test_execute_names_its_duties_before_pushed_and_testing_owns_the_own_conditi
     for duty in ("A contradiction is a question, not a note", "matches its planned inventory",
                  "runs once under its own conditions", "After a blocking review round"):
         assert duty in duties, duty
-    assert "ROOT-CAUSE work=<id> round=<r>: <cause> — <test that failed before the fix>" in duties
+    assert "ROOT-CAUSE work=<id> round=<r>: <cause> — sites: <sites> — <tests>" in duties
     assert "attest.py --dry-run" in duties
     # a planned transition table is checked row class by row class — missing forbidden
     # transitions were a downstream blocker cluster; no general self-refute step is added
@@ -938,6 +938,64 @@ def test_the_plan_brief_attacks_the_state_space_and_calibrates_severity(render, 
         assert asked in step, asked
     assert brief.index("6. EXECUTABLE") < brief.index("7. STATE SPACE") < brief.index("8. the BYPASSES")
     assert "A failure class the plan leaves undecided is at least `major`" in brief
+
+
+FIX_ROUND = ("sites: none — <reason>", "differential test", "300 production lines or six findings",
+             "REPLAN work=<id> round=<r>: increment|rebuild — <reason>", "new plan review")
+
+
+def test_fixing_a_review_round_is_one_paragraph_in_every_execute_entry(render, tmp_path):
+    """#297 AC-1/2/3: a fix names its sibling sites and a class test, a shared function gets a
+    differential test, a large pass goes in steps by failure class, a second block replans."""
+    out = render(tmp_path, {"project_name": "demo"})
+    workflow = _flat(out / "docs/process/workflow.md")
+    execute = _flat(out / ".claude/commands/execute.md")
+    for text in (workflow, execute):
+        para = text.split("**Fixing a review round.**", 1)[1][:1500]
+        for phrase in FIX_ROUND + ("ROOT-CAUSE work=<id> round=<r>: <cause> — sites: <sites> — <tests>",
+                                   "red_evidence.py --cause"):
+            assert phrase in para, phrase
+    duties = execute.split("**Before you report `pushed`:**", 1)[1]
+    assert "ROOT-CAUSE work=<id> round=<r>: <cause> — sites: <sites> — <tests>" in duties
+    sys.path.insert(0, str(out / "scripts/process"))
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("dispatch_v277", out / "scripts/process/dispatch.py")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        prompt = mod.prompt_for("execute", 7, 2, "7-work", "m")
+    finally:
+        sys.path.remove(str(out / "scripts/process"))
+    assert "Fixing a review round" in prompt
+    for phrase in FIX_ROUND:
+        assert phrase in prompt, phrase
+
+
+def test_rule_4_names_replan_from_the_second_block_and_a_plan_review_after_a_rebuild(render, tmp_path):
+    out = render(tmp_path, {"project_name": "demo"})
+    line = "REPLAN work=<id> round=<r>: increment|rebuild — <reason>"
+    rules = _flat(out / "docs/process/mandatory-rules.md")
+    assert line in rules and "second blocked review round of a work" in rules
+    assert "a `rebuild` sends the plan through a new plan review" in rules
+    vi = _flat(out / "docs/process/verification-independence.md")
+    blocks = vi.split("**What blocks, and when the rounds stop.**", 1)[1]
+    assert line in blocks and "new plan review" in blocks
+    for rel in ("docs/process/review-checklist.md", "docs/process/tower.md", ".claude/commands/review.md"):
+        text = _flat(out / rel)
+        assert "REPLAN" in text and "rebuild" in text and "plan review" in text, rel
+
+
+def test_a_measured_regression_scores_100_and_gate_deltas_get_a_reviewer_with_tools(render, tmp_path):
+    """#297 AC-4: a measured old/new difference is evidence, not a claim to score down."""
+    out = render(tmp_path, {"project_name": "demo"})
+    sentence = ("A measured old/new difference scores 100: the scorer may refute the measurement, "
+                "never lower the score.")
+    vi = _flat(out / "docs/process/verification-independence.md")
+    assert sentence in vi.split("**What blocks, and when the rounds stop.**", 1)[1]
+    bundle = re.sub(r'"\s*\n\s*"', "", (out / "scripts/process/make_review_bundle.py").read_text())
+    assert sentence in " ".join(bundle.split())
+    tools = "A delta round over gate or security code needs a reviewer with tools"
+    assert tools in vi and tools in _flat(out / ".claude/commands/review.md")
 
 
 def test_the_catalog_names_a_decision_after_an_await_on_a_stale_snapshot(render, tmp_path):
