@@ -538,16 +538,11 @@ def execution(root: Path | None = None) -> int:
 _NO_FINDING_READER = "FINDING lines are read by check_issues — the github-issues module"
 
 
-def _blockers_by_work(root: Path, key: str = "origin",
-                      phase: str | None = None) -> dict[str, dict[str, int]] | str:
-    """work id → {`key` value (default `origin`; `kind` too) or "-": blocker
-    count} over the review reports — only plan reviews (`phase="plan"`: the
-    report header says `phase: plan`) or only the others (`phase="code"`), all
-    when `phase` is None — or why they were not read: the FINDING reader (check_issues, github-issues module)
-    is not installed, or it is and cannot import (a missing dependency is named,
-    never read as "module not there").
-    A report names its work in its `work:` header (check_review reads
-    that header); a report without one counts under "(no work: header)"."""
+def _report_findings(root: Path, phase: str | None = None) -> list[tuple[str, dict]] | str:
+    """(work id, fields) of every well-formed FINDING line in the review reports —
+    plan reviews only (`phase="plan"`), the others (`"code"`) or all (None) — or why
+    they were not read (`_blockers_by_work` names the cases). One reader for every
+    count over findings."""
     if not (Path(__file__).resolve().parent / "check_issues.py").is_file():
         return _NO_FINDING_READER
     try:
@@ -560,7 +555,7 @@ def _blockers_by_work(root: Path, key: str = "origin",
                 f"(e.g. uv run --with pyyaml …)")
     except ImportError as exc:
         return f"check_issues does not import ({exc})"
-    out: dict[str, dict[str, int]] = {}
+    out: list[tuple[str, dict]] = []
     rdir = root / _issues.REVIEWS_DIR
     if not rdir.is_dir():
         return out
@@ -575,13 +570,80 @@ def _blockers_by_work(root: Path, key: str = "origin",
             continue
         works = [w.lstrip("#") for w in head.get("work", [])] or ["(no work: header)"]
         for fields, err, _line in _issues.report_findings(text):
-            if err or fields["sev"] != "blocker":
-                continue
-            for work in works:
-                cell = out.setdefault(work, {})
-                value = fields.get(key) or "-"
-                cell[value] = cell.get(value, 0) + 1
+            if not err:
+                out.extend((work, fields) for work in works)
     return out
+
+
+def _blockers_by_work(root: Path, key: str = "origin",
+                      phase: str | None = None) -> dict[str, dict[str, int]] | str:
+    """work id → {`key` value (default `origin`; `kind` too) or "-": blocker
+    count} over the review reports — only plan reviews (`phase="plan"`: the
+    report header says `phase: plan`) or only the others (`phase="code"`), all
+    when `phase` is None — or why they were not read: the FINDING reader (check_issues, github-issues module)
+    is not installed, or it is and cannot import (a missing dependency is named,
+    never read as "module not there").
+    A report names its work in its `work:` header (check_review reads
+    that header); a report without one counts under "(no work: header)"."""
+    found = _report_findings(root, phase)
+    if isinstance(found, str):
+        return found
+    out: dict[str, dict[str, int]] = {}
+    for work, fields in found:
+        if fields["sev"] != "blocker":
+            continue
+        cell = out.setdefault(work, {})
+        value = fields.get(key) or "-"
+        cell[value] = cell.get(value, 0) + 1
+    return out
+
+
+# --- findings: what could have caught them (#276) --------------------------------
+_HEAVY = ("blocker", "major")
+
+
+def findings(root: Path | None = None, *, min_works: int = 2, as_json: bool = False) -> int:
+    """Findings by class (`class=`: mechanical, testable, judgment, unclassed) and,
+    for mechanical and testable ones, by the check that would catch them (`rule=`,
+    else `kind=`). A check seen in `min_works` works or more is the next gate to
+    write; the judgment share among blocking findings is what is left for a reader."""
+    import json  # noqa: PLC0415
+    root = root or Path.cwd()
+    found = _report_findings(root)
+    if isinstance(found, str):
+        print(f"[findings] not read ({found})")
+        return 0
+    classes: dict[str, int] = {}
+    heavy: dict[str, int] = {}
+    checks: dict[str, set[str]] = {}
+    for work, f in found:
+        cls = f.get("class") or "unclassed"
+        classes[cls] = classes.get(cls, 0) + 1
+        if f["sev"] in _HEAVY:
+            heavy[cls] = heavy.get(cls, 0) + 1
+        if cls in ("mechanical", "testable"):
+            checks.setdefault(f"{cls}:{f.get('rule') or f.get('kind') or '-'}", set()).add(work)
+    repeating = {k: sorted(w) for k, w in sorted(checks.items()) if len(w) >= min_works}
+    judged = sum(n for c, n in heavy.items() if c != "unclassed")
+    share = round(heavy.get("judgment", 0) / judged, 2) if judged else None
+    if as_json:
+        print(json.dumps({"classes": classes, "blocking": heavy, "repeating": repeating,
+                          "judgment_share_of_blocking": share}, sort_keys=True))
+        return 0
+    print("[findings] ~proxy — review findings by what could have caught them")
+    if not found:
+        print("  no FINDING lines in the review reports yet")
+        return 0
+    print(f"  all: {_kind_text(classes)}")
+    print(f"  blocker/major: {_kind_text(heavy)}")
+    if share is not None:
+        print(f"  judgment share of classified blocker/major findings: {share}")
+    for key, works in repeating.items():
+        print(f"  repeats in {len(works)} works: {key} ({', '.join(works[:5])}{' …' if len(works) > 5 else ''})")
+    n = len({w for w, _f in found})
+    lvl = _level(n, True, False, _N_THRESHOLD)
+    print(f"  {confidence(n, proxy=True)} · {action(lvl, 'turn a repeating mechanical or testable check into a gate or a class-level test (testing.md, classes not cases)', thin='record class= and rule= on findings; judge after ~20 work items')}")
+    return 0
 
 
 def _origin_text(counts: dict[str, int]) -> str:
@@ -1640,6 +1702,9 @@ def main() -> int:
     sub.add_parser("models")
     sub.add_parser("execution")
     sub.add_parser("rounds")
+    fi = sub.add_parser("findings")
+    fi.add_argument("--min-works", type=int, default=2)
+    fi.add_argument("--json", action="store_true")
     sh = sub.add_parser("share")
     sh.add_argument("--weeks", type=int, default=4)
     tp = sub.add_parser("train-phases")
@@ -1665,6 +1730,8 @@ def main() -> int:
         return models()
     if args.cmd == "execution":
         return execution()
+    if args.cmd == "findings":
+        return findings(min_works=args.min_works, as_json=args.json)
     if args.cmd == "rounds":
         return rounds()
     if args.cmd == "share":
