@@ -88,6 +88,10 @@ DEFAULTS = {
         {"kind": "refute", "when": {"gate_code": True}},
         {"kind": "refute", "when": {"tier_from": 3}},
         {"kind": "root-cause", "when": {"fix_streak": 3}},
+        # v2.77: per blocked code round the branch adds, a class test; per follow-up block
+        # (each but the lowest), mandatory rule 4's REPLAN call in the plan
+        {"kind": "replan", "when": {"blocked_rounds": 2}},
+        {"kind": "class-test", "when": {"blocked_rounds": 1}},
         {"kind": "owner-decision", "when": {"waived": True}},
     ],
 }
@@ -141,6 +145,11 @@ class Evidence:
     root_cause: bool = False  # a ROOT-CAUSE line of the work at head (or appended after it)
     owner_decision: bool = False  # a `DECISION <date> owner:` line in the plan at head
     fix_streak: int | None = 0  # longest fix streak on one file in base..head; None: unknown
+    # the blocked code rounds the branch adds (`_blocked_rounds`); None: unknown (the fork
+    # point cannot be read), or a plan review, which asks no code round's records
+    blocked_rounds: int | None = 0
+    replan_open: tuple = ()  # follow-up blocked rounds without a REPLAN line in the plan
+    class_test_open: tuple = ()  # "<round> (<why>)" per blocked round without a class test
     # required_records rows in force at the base (gather reads them; the template's by default)
     records: tuple = tuple(DEFAULTS["required_records"])
     report_refute: bool = False  # a REFUTE line of the work in this attest's review report
@@ -856,7 +865,7 @@ def _plan_problem(ev: Evidence) -> str | None:
         return f"several plans of work {plain} at head ({ev.plan_rel}) — attest with --work <plan slug>"
     return (f"{ev.plan_rel} holds more than records appended after its last line, compared with "
             f"the attested head — commit the plan first, then rebuild the bundle and attest at the "
-            f"new head (record lines — REFUTE, ROOT-CAUSE, DECISION, skips — may ride the "
+            f"new head (record lines — REFUTE, ROOT-CAUSE, REPLAN, DECISION, skips — may ride the "
             f"attestation only appended at the plan's end)")
 
 
@@ -914,27 +923,51 @@ _RECORD_ASK = {
                    "(mandatory rule 6) and commit `ROOT-CAUSE work={w} round=<r>: <the cause>`"),
     "owner-decision": ("work {w} has no owner's word in its plan — the owner decides, recorded as "
                        "`DECISION <date> owner: <what and why>`"),
+    "replan": ("work {w} blocked round(s) {replan} without a REPLAN line in its plan — before each "
+               "follow-up block's fix, record mandatory rule 4's call there: `REPLAN work={w} "
+               "round=<r>: increment|rebuild — <why>` (a rebuild takes a new plan review)"),
+    "class-test": ("work {w} has no class test for blocked round(s) {class_test} — per round "
+                   "`ROOT-CAUSE work={w} round=<r>: <cause> — sites: <sibling sites> — <path>::<test>` "
+                   "(`red_evidence.py --cause … --sites …`) with a test that stands at head, or "
+                   "`… — sites: none — <reason>` for a round without a code defect"),
 }
 # why a fact is unknown, by the fact
-_UNKNOWN = {"gate_code": "git could not list the reviewed diff — whether it touches gate code is unknown",
-            "fix_streak": "git could not read the fix commits of base..head"}
+_UNKNOWN = {"gate_code": ("git could not list the reviewed diff — whether it touches gate code is unknown; "
+                          "rebuild the bundle here"),
+            "fix_streak": "git could not read the fix commits of base..head; rebuild the bundle here",
+            "blocked_rounds": ("the fork point of the head cannot be read (no integration ref, or an "
+                               "ambiguous fork) — the blocked code rounds this branch adds are unknown; "
+                               "fetch the integration branch, or commit `skipped replan|class-test "
+                               "work=<id>: <reason>`")}
 
 
 def _owed_records(ev: Evidence) -> list[str]:
     """The records the table says this work owes and does not carry (#282). A fact git
-    cannot tell (the diff, the fix streak) is no exemption: the row is refused as unknown."""
+    cannot tell (the diff, the fix streak, the fork point) is no exemption: every row it
+    leaves undecided is refused as unknown — any fact, not a listed few (v2.77: a row on a
+    new fact fell away in silence)."""
     facts = {"tier_from": ev.tier, "gate_code": ev.gate_code, "fix_streak": ev.fix_streak,
+             "blocked_rounds": ev.blocked_rounds,
              "waived": False}  # a waived plan has no pass to attest; the gate asks its owner
     # a REFUTE in the review report counts for gate code below Tier 3 on a cross-model pass
     # (the refute ran inside that review; refute.md)
     refuted = ev.refute or (ev.report_refute and ev.cross_model and ev.tier < 3)
+    # per round: present only when every blocked round has its record, and the rounds are known
+    rounds_known = ev.blocked_rounds is not None
     present = {k for k, have in (("refute", refuted), ("root-cause", ev.root_cause),
+                                 ("replan", rounds_known and not ev.replan_open),
+                                 ("class-test", rounds_known and not ev.class_test_open),
                                  ("owner-decision", ev.owner_decision)) if have}
     owed, undecided = required_records.owed(list(ev.records), facts, present, set(ev.skips))
-    unknown = [k for k in ("gate_code", "fix_streak") if facts[k] is None and any(k in u for u in undecided)]
-    out = [f"{_UNKNOWN[k]}; rebuild the bundle here" for k in unknown]
+    out: list[str] = []
+    for u in undecided:
+        why = [_UNKNOWN.get(k, f"the fact {k} is unknown") for k, v in facts.items()
+               if v is None and f"{k}=" in u] or [f"{u} — a fact it needs is unknown"]
+        out += [w for w in why if w not in out]
     for o in owed:
-        ask = _RECORD_ASK.get(o.kind, "work {w} has no `{kind}` record at head").format(w=ev.work, kind=o.kind)
+        ask = _RECORD_ASK.get(o.kind, "work {w} has no `{kind}` record at head").format(
+            w=ev.work, kind=o.kind, replan=", ".join(map(str, ev.replan_open)),
+            class_test=", ".join(ev.class_test_open))
         skip = f", or commit {_skip(o.kind, ev)}" if o.skippable else ""
         out.append(f"{ask}{skip} (owed: {o.why})")
     return out
