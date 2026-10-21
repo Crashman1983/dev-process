@@ -393,29 +393,14 @@ def struck(text: str) -> set[str]:
     return {ac_key(m) for m in STRUCK_LINE.finditer(text)}
 
 
-# a sentence of plan prose: up to a sentence end followed by space. A criterion id with a
-# dot inside (`AC-2.1`) never ends one: the dot needs a space after it
-_SENTENCE = re.compile(r"(?<=[.!?;])[ \t]+")
-# a line that starts a new paragraph item rather than continuing the one above
-_ITEM_START = re.compile(r"^[ \t]*(?:[-*+][ \t]|\d+[.)][ \t]|#|\||>|$)")
-# a `key: value` declaration (`issue: #7`, `tier: 2`) is a line of its own, never prose
-_KEY_LINE = re.compile(r"^[ \t]*[\w-]+:[ \t]")
-# a table row naming the criterion in its first cell defines it, like `AC-<id>: …`
-_TABLE_DEF = re.compile(r"^[ \t]*\|[ \t]*[*_`]*" + _AC + r"[*_`]*[ \t]*\|", re.MULTILINE)
-# an issue reference in prose: `#7`, `owner/repo#7` — not `C#` or an HTML entity `&#7`
-_ISSUE_REF = re.compile(r"(?<![\w&])(?:[\w.-]+/[\w.-]+)?#(\d+)\b")
-
-
-def _paragraph_lines(text: str) -> list[str]:
-    """The plan's lines with wrapped continuations joined, so a citation broken onto the
-    next line stays in its sentence; list items, headings and table rows stay apart."""
-    out: list[str] = []
-    for line in text.splitlines():
-        if out and out[-1].strip() and not _ITEM_START.match(line) and not _KEY_LINE.match(out[-1]):
-            out[-1] += " " + line.strip()
-        else:
-            out.append(line)
-    return out
+# an issue reference: `#7`, `owner/repo#7` — not `C#` or an HTML entity `&#7`
+_REF = r"(?<![\w&])(?:[\w.-]+/[\w.-]+)?#(?P<n>\d+)\b"
+# an AC id bound to an issue reference right beside it — the only form read as another
+# issue's criterion (#287): "AC-11-Messung (#2659)", "AC-2 of #9", "#9's AC-2". One word
+# may sit between, a line break too; anything wider stays the plan's own (fail closed)
+_CITED_AFTER = re.compile(_AC + r"(?:[- ][\w]+)?[ \t]*\n?[ \t]*(?:\(|(?:of|from|aus|von|in)[ \t]+)?[ \t]*"
+                          + _REF)
+_CITED_BEFORE = re.compile(_REF + r"(?:'s)?[ \t]+(?:(?:AC|criterion|Kriterium)[ \t]+)?" + _AC)
 
 
 def foreign_criteria(plan: str, spec: str) -> frozenset[str]:
@@ -442,25 +427,21 @@ def struck_criteria(plan: str, spec: str) -> frozenset[str]:
 
 
 def _foreign_only(plan: str) -> set[str]:
-    """Ids the plan names only in sentences citing an issue it does not declare; a
-    definition line (`AC-<id>: …`) always makes an id the plan's own."""
+    """Ids every mention of which is bound to an issue the plan does not declare
+    (`_CITED_AFTER`, `_CITED_BEFORE`); a definition line (`AC-<id>: …`) or one free mention
+    keeps an id the plan's own."""
     from check_review import declared_issue_numbers  # noqa: PLC0415
     mine = set(declared_issue_numbers(plan))
-    own = {ac_key(m) for m in AC_LINE.finditer(plan)} | {ac_key(m) for m in _TABLE_DEF.finditer(plan)}
-    cited: set[str] = set()
-    for line in _paragraph_lines(plan):
-        for sentence in _SENTENCE.split(line):
-            ids = {ac_key(m) for m in AC_ID.finditer(sentence)}
-            if not ids:
-                continue
-            refs = {int(n) for n in _ISSUE_REF.findall(sentence)}
-            # foreign only where the sentence cites other issues alone: one that also names
-            # the plan's own issue is about this work (cross-model review, v2.76.1)
-            if refs and not refs & mine:
-                cited |= ids
-            else:
-                own |= ids
-    return cited - own
+    spans: dict[str, int] = {}
+    for rx in (_CITED_AFTER, _CITED_BEFORE):
+        for m in rx.finditer(plan):
+            if int(m.group("n")) not in mine:
+                spans[ac_key(m)] = spans.get(ac_key(m), 0) + 1
+    defined = {ac_key(m) for m in AC_LINE.finditer(plan)}
+    mentions: dict[str, int] = {}
+    for m in AC_ID.finditer(plan):
+        mentions[ac_key(m)] = mentions.get(ac_key(m), 0) + 1
+    return {k for k, n in spans.items() if k not in defined and n >= mentions.get(k, 0)}
 
 
 def _criteria(plan: str, spec: str) -> tuple[frozenset[str], frozenset[str], frozenset[str]]:

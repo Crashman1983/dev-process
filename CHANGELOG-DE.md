@@ -15,7 +15,7 @@ English version: [CHANGELOG.md](CHANGELOG.md). Die Releases vor v2.28.2:
 
 **Was sich ändert.**
 - Der Codex-Dispatch schreibt zuerst den Header-Block, danach den Titel (#286).
-- attest lässt eine ID weg, die der Plan nur in Sätzen nennt, die ausschließlich andere Issues zitieren, und nennt sie in einem Hinweis (#287). Eine Definitionszeile `AC-<id>: …` oder Tabellenzeile, ein Satz, der auch das eigene Issue zitiert, eine Erwähnung ohne Issue oder die Spec halten eine ID als Pflicht.
+- attest lässt eine ID weg, deren jede Erwähnung direkt an ein anderes Issue gebunden ist — „AC-11-Messung (#2659)“, „AC-2 of #9“, „#9's AC-2“ — und nennt sie in einem Hinweis (#287). Eine Definitionszeile `AC-<id>: …`, eine freie Erwähnung, ein Verweis auf das eigene Issue oder die Spec halten eine ID als Pflicht.
 - `verification-independence.md`: Ein lesender Reviewer über opencode braucht auch gesperrte Umleitungen, Pipes und Verkettungen — ein erlaubtes `git show*` ließ ein Review `git show … > <Datei>` schreiben.
 
 **Update.** Nichts zu tun. Ein dispatchter Codex-Bericht von vor dem Update hat den Titel noch oben: Lehnt das Gate ihn ab, den Titel unter den Header-Block verschieben.
