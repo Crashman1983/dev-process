@@ -1,0 +1,226 @@
+#!/usr/bin/env python3
+"""plan-structure gate (core): the structure of an active Tier 2+ plan, checked
+when the plan is written instead of by a plan-review round (#278).
+
+Seven of twenty findings where a check never took effect (dev-process #277,
+step 0 on Kenni's history) were rules about a plan's structure that existed
+only as prose: required sections, criteria nobody could test, tasks left open
+at the merge. A plan reviewer re-found them by reading. This gate reads them:
+
+  HARD (an active Tier 2+ plan this branch adds):
+  - a criterion line `AC-<id>: <EARS statement>` with no or several `shall`
+    (an EARS requirement has exactly one; `shall_words` names others, e.g.
+    German `soll`), or an id twice;
+  - a criterion without its planned test once execution started (a ticked
+    task) or at the merge push: `AC-<id>: <path>::<test>`, `AC-<id>: struck —
+    <reason>` or `AC-<id>: manual: <reason>` — the report line's own grammar,
+    so plan and report cannot drift apart;
+  - a section the project requires (`sections`) missing;
+  - a story id the plan names that the registry does not hold (`story_id`
+    and `registry`, both set);
+  - at the merge push, an open `- [ ]` task without `struck: <reason>` or
+    `moved: #<issue>`.
+  NOTE: an `[assumption]` left in a DECISION line.
+
+Bound are only plans the branch ADDS — absent at the integration ref — so a
+plan merged before this gate is history, not a new duty. Project data,
+`docs/process/plan-structure.local.json`, is read at the integration ref like
+every evidence rule (a branch cannot lift its own duty):
+  {"sections": ["Anchor Delta"], "shall_words": ["shall"],
+   "story_id": "[A-Z]+-US-\\\\d+", "registry": "docs/feature-registry/*/*.json"}
+
+Fenced text is quotation and is not read. Stdlib only.
+"""
+from __future__ import annotations
+
+import fnmatch
+import json
+import os
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling import
+from attest_evidence import AC_LINE, STRUCK_LINE, _NAMES_A_TEST, ac_key  # noqa: E402
+from check_review import (  # noqa: E402  (one owner for plan grammar and fences)
+    DECISION_LINE,
+    GitReadError,
+    _unfenced,
+    integration_push,
+    integration_ref,
+    plan_tier,
+)
+
+PLANS_ACTIVE = ".process-work/plans"
+DATA = "docs/process/plan-structure.local.json"
+_MANUAL = re.compile(r"^manual[ \t]*:[ \t]*\S")
+_TICKED = re.compile(r"^[ \t]*[-*+][ \t]+\[[xX]\][ \t]", re.MULTILINE)
+OPEN_TASK = re.compile(r"^[ \t]*[-*+][ \t]+\[ \][ \t]+(?P<task>.*)$", re.MULTILINE)
+_SETTLED = re.compile(r"\b(?:struck:[ \t]*\S|moved:[ \t]*#\d+)", re.IGNORECASE)
+_ASSUMPTION = re.compile(r"\[assumption\]", re.IGNORECASE)
+
+
+def _git(root: Path, *args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True,
+                          encoding="utf-8", errors="replace")
+
+
+def _at_ref(root: Path, ref: str, rel: str) -> str | None:
+    r = _git(root, "show", f"{ref}:{rel}")
+    return r.stdout if r.returncode == 0 else None
+
+
+def load_data(root: Path, ref: str) -> tuple[dict, str]:
+    """(project data, problem) — read at the integration ref."""
+    text = _at_ref(root, ref, DATA)
+    if text is None:
+        return {}, ""
+    try:
+        data = json.loads(text)
+    except ValueError as exc:
+        return {}, f"{DATA} is not valid JSON ({exc})"
+    if not isinstance(data, dict):
+        return {}, f"{DATA} must be a JSON object"
+    for key in ("sections", "shall_words"):
+        if key in data and not (isinstance(data[key], list) and all(isinstance(x, str) and x for x in data[key])):
+            return {}, f"{DATA}: {key} must be a list of strings"
+    for key in ("story_id", "registry"):
+        if key in data and not (isinstance(data[key], str) and data[key]):
+            return {}, f"{DATA}: {key} must be a string"
+    if "story_id" in data:
+        try:
+            re.compile(data["story_id"])
+        except re.error as exc:
+            return {}, f"{DATA}: story_id is no regular expression ({exc})"
+    return data, ""
+
+
+def _is_proof(body: str) -> bool:
+    return bool(_NAMES_A_TEST.search(body) or _MANUAL.match(body))
+
+
+def criteria_findings(rel: str, text: str, shall_words: list[str], *, need_tests: bool) -> list[str]:
+    """The criterion and planned-test findings of one plan (unfenced text)."""
+    out: list[str] = []
+    shall = re.compile(r"\b(?:" + "|".join(re.escape(w) for w in shall_words) + r")\b", re.IGNORECASE)
+    struck = {ac_key(m) for m in STRUCK_LINE.finditer(text)}
+    criteria: dict[str, int] = {}
+    proven: set[str] = set()
+    for m in AC_LINE.finditer(text):
+        key, body = ac_key(m), m.group("body").strip()
+        if key in struck and not _is_proof(body):
+            continue
+        if _is_proof(body):
+            proven.add(key)
+            continue
+        if not body:
+            continue
+        line = text.count("\n", 0, m.start()) + 1
+        if key in criteria:
+            out.append(f"{rel}:{line}: AC-{key} is named twice as a criterion — one id, one requirement")
+            continue
+        criteria[key] = line
+        n = len(shall.findall(body))
+        if n != 1:
+            words = "/".join(shall_words)
+            out.append(f"{rel}:{line}: AC-{key} has {n} × `{words}` — an EARS requirement states exactly "
+                       f"one (`When <trigger>, <system> shall <response>`); split it or name the response")
+    if need_tests:
+        for key, line in sorted(criteria.items(), key=lambda kv: kv[1]):
+            if key not in proven and key not in struck:
+                out.append(f"{rel}:{line}: AC-{key} names no planned test — add `AC-{key}: <path>::<test>` "
+                           f"(it may not exist yet), `AC-{key}: struck — <reason>` or "
+                           f"`AC-{key}: manual: <reason>`")
+    return out
+
+
+def _new_on_branch(root: Path, ref: str, rel: str) -> bool:
+    return _at_ref(root, ref, rel) is None
+
+
+def _registry_ids(root: Path, pattern: str, glob: str) -> set[str]:
+    rx = re.compile(pattern)
+    ids: set[str] = set()
+    for dirpath, _dirs, files in os.walk(root / glob.split("*", 1)[0].rstrip("/") or root):
+        for name in files:
+            rel = os.path.relpath(os.path.join(dirpath, name), root).replace(os.sep, "/")
+            if fnmatch.fnmatch(rel, glob):
+                try:
+                    ids |= set(rx.findall(Path(dirpath, name).read_text(encoding="utf-8", errors="replace")))
+                except OSError:
+                    continue
+    return ids
+
+
+def check(root: Path, env: dict[str, str] | None = None) -> tuple[list[str], list[str]]:
+    hard: list[str] = []
+    soft: list[str] = []
+    pdir = root / PLANS_ACTIVE
+    if not pdir.is_dir():
+        return hard, soft
+    try:
+        ref = integration_ref(root)
+    except GitReadError as exc:
+        return [f"cannot read the integration ref: {exc}"], soft
+    if ref is None:
+        # on the integration branch itself, or no integration ref at all: there is no
+        # branch range, so no plan is new here — old plans are history, not a new duty
+        return hard, ["no branch range against an integration ref — no plan is checked"]
+    data, problem = load_data(root, ref)
+    if problem:
+        return [problem], soft
+    merge, _why = integration_push(env if env is not None else dict(os.environ), root)
+    shall_words = data.get("shall_words", ["shall"])
+    sections = data.get("sections", [])
+    registry: set[str] | None = None
+    for p in sorted(pdir.glob("*.md")):
+        rel = f"{PLANS_ACTIVE}/{p.name}"
+        if p.name.startswith("design-"):
+            continue
+        try:
+            text = _unfenced(p.read_text(encoding="utf-8", errors="replace"))
+        except OSError as exc:
+            hard.append(f"{rel}: could not read: {exc}")
+            continue
+        tier = plan_tier(text)
+        if tier is None or tier < 2 or not _new_on_branch(root, ref, rel):
+            continue  # untiered plans are the review gate's finding; old plans are history
+        need_tests = merge or bool(_TICKED.search(text))
+        hard += criteria_findings(rel, text, shall_words, need_tests=need_tests)
+        for name in sections:
+            if not re.search(r"^#{2,3}[ \t]+" + re.escape(name) + r"\b", text, re.MULTILINE | re.IGNORECASE):
+                hard.append(f"{rel}: no `## {name}` section — {DATA} requires it in every Tier 2+ plan")
+        if data.get("story_id") and data.get("registry"):
+            if registry is None:
+                registry = _registry_ids(root, data["story_id"], data["registry"])
+            for sid in sorted(set(re.findall(data["story_id"], text)) - registry):
+                hard.append(f"{rel}: story {sid} is not in the registry ({data['registry']})")
+        if merge:
+            for m in OPEN_TASK.finditer(text):
+                if not _SETTLED.search(m.group("task")):
+                    line = text.count("\n", 0, m.start()) + 1
+                    hard.append(f"{rel}:{line}: open task at the merge — finish it, or mark it "
+                                f"`struck: <reason>` or `moved: #<issue>`")
+        for line, row in enumerate(text.splitlines(), 1):
+            if DECISION_LINE.match(row) and _ASSUMPTION.search(row):
+                soft.append(f"{rel}:{line}: a DECISION still rests on an `[assumption]` — verify it or say so")
+    return hard, soft
+
+
+def main() -> int:
+    root = Path(sys.argv[1] if len(sys.argv) > 1 else ".").resolve()
+    hard, soft = check(root)
+    for note in soft:
+        print(f"plan-structure: note: {note}")
+    if hard:
+        print("plan-structure: FAILED:")
+        for h in hard:
+            print(f"  - {h}")
+        return 1
+    print("plan-structure: OK")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
