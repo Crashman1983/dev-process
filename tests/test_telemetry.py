@@ -1026,6 +1026,93 @@ def _kpis_module(out):
     return mod
 
 
+def _finding(sev: str, action: str = "fix", origin: str | None = None) -> str:
+    return (f"FINDING sev={sev} action={action} issue=- gate=judgement"
+            + (f" origin={origin}" if origin else "") + f" {sev} {action}\n")
+
+
+def _report_file(out: Path, name: str, work: str, findings: str, *, rnd: int | None = None,
+                 phase: str | None = None) -> None:
+    reviews = out / ".process-work/reviews"
+    reviews.mkdir(parents=True, exist_ok=True)
+    head = (f"review: {name}\nwork: {work}\npublish-waived: test\n"
+            + (f"round: {rnd}\n" if rnd is not None else "") + (f"phase: {phase}\n" if phase else ""))
+    (reviews / f"{name}.md").write_text(head + "\n## Findings\n" + findings, encoding="utf-8")
+
+
+def test_baseline_counts_rounds_findings_and_skips_per_window(render, tmp_path, monkeypatch, capsys):
+    """#293 AC-5: per window, only that window's works — blockers by origin from code
+    reviews, rounds with and without a plan review, the fix pass's size against the next
+    round's fix-induced blockers (the round from the `round:` header, else `-r<N>` in the
+    file name; reports of one round add up, unrounded ones are only counted), and skips."""
+    out = _render(render, tmp_path, github_issues=True)
+    archive = out / ".process-work/plans/archive"
+    archive.mkdir(parents=True, exist_ok=True)
+    (archive / "2026-10-05-gadget.md").write_text("# Plan\n\ntier: 2\nissue: #12\n")
+    _journal(out, _review(9, 1, "block") + _review(9, 2, "block") + _review(9, 3, "pass")
+             + _review("9-plan", 1, "pass") + _review("gadget", 1, "block") + _review("gadget", 2, "pass")
+             + "skipped refute work=9: no gate code in the fix\n"
+             + "skipped refute work=gadget: no gate code\n")
+    # work 9 (window A): round 1 in two reports, 7 fixes in all → round 2 has two fix blockers
+    _report_file(out, "2026-10-02-9-a", "#9", _finding("blocker") * 3 + _finding("major") * 2, rnd=1)
+    _report_file(out, "2026-10-02-9-b", "#9", _finding("major") * 2 + _finding("minor", "accept"), rnd=1)
+    _report_file(out, "2026-10-03-9-r2-claude", "#9",
+                 _finding("blocker", origin="fix") * 2 + _finding("blocker", origin="late"))
+    _report_file(out, "2026-10-04-9-r3", "#9", _finding("nit", "accept"))
+    _report_file(out, "2026-10-04-9-late", "#9", _finding("blocker", origin="draft"))  # no round
+    # a plan review counts for neither the origins nor the pairs
+    _report_file(out, "2026-10-01-9-plan-r1", "#9", _finding("blocker", origin="fix") * 5, phase="plan")
+    # work 12 (window B), named by its plan's slug: one fix, a clean next round
+    _report_file(out, "2026-10-12-gadget-r1", "gadget", _finding("blocker", origin="draft"))
+    _report_file(out, "2026-10-13-gadget-r2", "gadget", "")
+    k = _kpis_module(out)
+    item = {"issue": 9, "merged": {"value": "2026-10-05T12:00:00+00:00"}, "lead_s": {"value": 0},
+            "tokens": {"value": {}}, "escapes": {"value": 0}}
+    other = {**item, "issue": 12, "merged": {"value": "2026-10-15T12:00:00+00:00"}}
+    a = k.baseline_numbers(out, *k._window("2026-10-01:2026-10-10"), items=[item, other], commits=[])
+    assert a["blockers_by_origin"] == {"-": 3, "draft": 1, "fix": 2, "late": 1}, a
+    pairs = a["fix_findings_vs_fix_blockers"]
+    assert pairs["unrounded"] == 1
+    assert pairs["buckets"]["6-9"] == {"rounds": 1, "with_fix_blocker": 1, "fix_blockers": 2}, pairs
+    # round 2 (3 fixes) → round 3 without a fix blocker; round 3 has no next round
+    assert pairs["buckets"]["3-5"] == {"rounds": 1, "with_fix_blocker": 0, "fix_blockers": 0}, pairs
+    assert pairs["buckets"]["0-2"]["rounds"] == 0 and pairs["buckets"][">=10"]["rounds"] == 0
+    assert (a["rounds_with_plan_review"], a["rounds_without_plan_review"]) == (3, None)
+    assert a["skips_by_kind"] == {"refute": 1}
+    b = k.baseline_numbers(out, *k._window("2026-10-10:"), items=[item, other], commits=[])
+    assert b["blockers_by_origin"] == {"draft": 1}
+    assert b["fix_findings_vs_fix_blockers"]["buckets"]["0-2"] == {"rounds": 1, "with_fix_blocker": 0,
+                                                                   "fix_blockers": 0}
+    assert (b["rounds_with_plan_review"], b["rounds_without_plan_review"]) == (None, 2)
+    assert b["skips_by_kind"] == {"refute": 1}
+    monkeypatch.setattr(k, "flow_items", lambda root: [item, other])
+    assert k.baseline(out, [k._window("2026-10-01:2026-10-10")]) == 0
+    text = capsys.readouterr().out
+    assert "6-9 findings: 1/1 rounds, 2 blockers" in text and "unrounded reports 1" in text
+    assert "skips by kind 2026-10-01–2026-10-10: refute 1" in text and "rounds_with_plan_review" in text
+
+
+def test_baseline_without_the_finding_reader_says_not_read(render, tmp_path):
+    out = _render(render, tmp_path)
+    k = _kpis_module(out)
+    item = {"issue": 9, "merged": {"value": "2026-10-05T12:00:00+00:00"}, "lead_s": {"value": 0},
+            "tokens": {"value": {}}, "escapes": {"value": 0}}
+    got = k.baseline_numbers(out, *k._window("2026-10-01:"), items=[item], commits=[])
+    assert got["blockers_by_origin"] == got["fix_findings_vs_fix_blockers"] == "not read"
+
+
+def test_a_report_round_comes_from_its_header_else_its_name(render, tmp_path):
+    out = _render(render, tmp_path)
+    k = _kpis_module(out)
+    assert k._report_round("2026-10-02-9-r2-claude.md", {"round": ["4"]}) == 4
+    assert k._report_round("2026-10-02-9-r2-claude.md", {}) == 2
+    assert k._report_round("2026-10-02-9-r10.md", {}) == 10
+    assert k._report_round("2026-10-02-r2d2.md", {}) is None  # no round part
+    assert k._report_round("2026-10-02-9-r1-r2.md", {}) is None  # two names: no one round
+    assert k._report_round("2026-10-02-9-r2.md", {"round": ["two"]}) is None  # a bad header is not read past
+    assert k._report_round("2026-10-02-9-r2.md", {"round": ["1", "2"]}) is None
+
+
 def test_baseline_takes_medians_per_merged_work_in_a_window(render, tmp_path):
     """#277: the numbers a verification change must move, per window."""
     out = _render(render, tmp_path, github_issues=True)
