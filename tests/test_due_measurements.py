@@ -130,8 +130,15 @@ def test_recorded_ids_without_directories_is_empty(tmp_path):
 
 
 # --- the milestone file -------------------------------------------------------
-def test_no_milestone_file_is_silent_exit_0(project):
+def test_no_milestone_file_says_so_and_exits_0(project):
+    """#259: silence read as "nothing due" for a project that lost its file."""
     assert not (project / "docs/process/milestones.local.json").exists()
+    done = _run(project, "--today", "2030-01-01")
+    assert done.returncode == 0 and "no docs/process/milestones.local.json" in done.stdout, done
+
+
+def test_an_empty_milestone_list_is_silent_exit_0(project):
+    _write_milestones(project, {"milestones": []})
     done = _run(project, "--today", "2030-01-01")
     assert (done.returncode, done.stdout, done.stderr) == (0, "", "")
 
