@@ -490,8 +490,8 @@ def models(root: Path | None = None) -> int:
         tier = rounds[issue].get("tier") if issue and issue in rounds else None
         for r in recs:
             m, ph = _model(r), r.get("phase") or ""
-            if not m or not ph:
-                continue
+            if not m or not ph or (last_model.get(ph) != m and not isinstance(r.get("usage"), dict)):
+                continue  # a superseded run shows only with tokens of its own
             cell = cells.setdefault((str(tier), ph, m), {"issues": set(), "blocked": 0, "rounds": [], "passed": 0,
                                                         "tokens": 0, "cost": 0.0, "reported": 0})
             if isinstance(r.get("usage"), dict):  # stated by the worker (`report.py --usage`, #270)

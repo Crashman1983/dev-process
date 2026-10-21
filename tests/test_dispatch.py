@@ -2475,3 +2475,31 @@ def test_a_failed_report_ends_the_phase(render, tmp_path):
     mod = _load_dispatch(out)
     for phase in ("plan", "execute", "review"):
         assert mod.phase_over(out, {"branch": "7-work", "phase": phase}, {"state": "failed"}) is True
+
+
+def test_a_status_file_travels_from_the_policy_cell_to_the_tower(render, tmp_path):
+    """Cross-model review: tests wrote `status_file` into the record by hand, so neither
+    `start` storing it nor the tower's `sessions()` reading it was pinned."""
+    from datetime import datetime, timezone
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    _fake_command(out, "sleep 30\n")
+    pol = out / "docs/process/model-policy.json"
+    data = json.loads(pol.read_text())
+    data["tiers"]["2"]["plan"] = {"model": "m-status", "status_file": ".harness/status.json"}
+    pol.write_text(json.dumps(data))
+    r = _dispatch(out, "start", "--issue", "7", "--phase", "plan", "--tier", "2", "--branch", "b7")
+    assert r.returncode == 0, r.stderr
+    try:
+        rec = next(x for x in _load_dispatch(out).records(out) if x["branch"] == "b7")
+        status = Path(rec["worktree"]) / ".harness/status.json"
+        assert rec["status_file"] == str(status), rec
+        status.parent.mkdir(parents=True, exist_ok=True)
+        status.write_text(json.dumps({"updated_at": datetime.now(timezone.utc).isoformat()}))
+        r = subprocess.run([sys.executable, str(out / "scripts/process/tower.py"), "--json", "--section", "sessions"],
+                           cwd=out, capture_output=True, text=True)
+        assert r.returncode == 0, r.stderr
+        row = next(s for s in json.loads(r.stdout)["sessions"] if s["branch"] == "b7")
+        assert row["status_minutes_ago"] == 0, row
+    finally:
+        _dispatch(out, "stop", "b7", "--force")

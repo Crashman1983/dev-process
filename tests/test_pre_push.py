@@ -535,3 +535,26 @@ def test_a_runner_that_commits_in_its_own_repo_leaves_the_pushing_repo_alone(pro
     assert git("rev-parse", "HEAD").stdout.strip() == head
     assert git("ls-files", "--stage").stdout == index
     assert git("log", "--format=%s", "-1").stdout.strip() == "committing runner"
+
+
+@pytest.mark.parametrize("name,flags", [("MAKEFLAGS", "-q"), ("MAKEFLAGS", "-t"), ("MAKEFLAGS", "-sn"),
+                                         ("MAKEFLAGS", "--dry-run"), ("MAKEFLAGS", "--just-print"),
+                                         ("MAKEFLAGS", "--recon"), ("MAKEFLAGS", "--question"),
+                                         ("MAKEFLAGS", "--touch"), ("GNUMAKEFLAGS", "--dry-run")])
+def test_every_no_op_make_flag_is_refused(render, tmp_path, monkeypatch, name, flags):
+    """Cross-model review: only `-n` was exercised; `-q`, `-t` and the long forms were not."""
+    import importlib
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    for var in ("MAKEFLAGS", "GNUMAKEFLAGS"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv(name, flags)
+    sys.path.insert(0, str(out / "scripts/process"))
+    try:
+        sys.modules.pop("certificate", None)
+        cert = importlib.import_module("certificate")
+        assert cert.noop_problem() and name in cert.noop_problem(), flags
+        monkeypatch.setenv(name, "-j4 --no-print-directory")
+        assert cert.noop_problem() is None
+    finally:
+        sys.path.remove(str(out / "scripts/process"))
+        sys.modules.pop("certificate", None)
