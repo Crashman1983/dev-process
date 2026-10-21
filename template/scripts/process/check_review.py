@@ -2655,7 +2655,9 @@ def _plan_work_ids(stem: str, text: str, *, include_dedated: bool) -> set[str]:
     return ids
 
 
-UNCHECKED = re.compile(r"^\s*- \[ \] ", re.MULTILINE)
+# an open task: `- [ ]`, `* [ ]` or `+ [ ]` (one grammar for the gates and plan-structure)
+OPEN_TASK = re.compile(r"^[ \t]*[-*+][ \t]+\[ \][ \t]+(?P<task>.*)$", re.MULTILINE)
+UNCHECKED = OPEN_TASK
 DECISIONS_HEADING = re.compile(r"^#{2,4}\s+Decisions\b", re.IGNORECASE | re.MULTILINE)
 
 
@@ -2683,18 +2685,21 @@ def spec_plan_findings(root: Path, passes: list[dict], in_flight: set[str] | Non
     owner for the gate and finish.py; the train asks `clearing_passes` too.
     `in_flight` None (unknown range) carries every spec plan (fail closed)."""
     out: list[str] = []
-    own_from = own_family_rule(root, ref)[0]
+    own_from, rules, _problem = own_family_rule(root, ref)
     for rel, plan in record_files(root, ("spec-plan",)):
         try:
             text = _unfenced(plan.read_text(encoding="utf-8", errors="replace"))
         except OSError:
             continue  # the spec-plan scan above reports an unreadable plan
         tier = plan_tier(text)
-        if tier is None or tier < 2 or review_waived(text):
+        if tier is None or tier < 2:
             continue
         spec_dir = rel.rsplit("/", 1)[0] + "/"
         if in_flight is not None and not any(p == rel or p.startswith(spec_dir) for p in in_flight):
             continue  # somebody else's spec, untouched by this push
+        if review_waived(text):
+            out += waiver_owner_findings(rel, text, tier, rules)  # the owner's word, as for any plan
+            continue
         ids = _plan_work_ids(plan_stem(rel), text, include_dedated=False)
         if not _cleared(passes, ids, tier):
             out.append(no_clearing_review(rel, min(tier, 3), ids)
@@ -2990,6 +2995,8 @@ def check(root: Path) -> tuple[list[str], list[str]]:
     # --- presence: archived (merged) plans that declare Tier 2+ ---
     phases.enter("plans-archive")
     adir = root / PLANS_ARCHIVE
+    # the paths this push carries; None: the range is unknown (each arm says what that costs)
+    carried = paths_in_flight(root) if base_error is None else None
     enforced_any = False
     # a de-dated slug shared by two archived plans is ambiguous — one review
     # must not clear both, so such slugs are excluded from matching
@@ -3035,6 +3042,11 @@ def check(root: Path) -> tuple[list[str], list[str]]:
             if review_waived(text):
                 soft += waiver_debt_notes(f"{PLANS_ARCHIVE}/{p.name}", text,
                                           WAIVED, "review-waived")
+                if carried is not None and f"{PLANS_ARCHIVE}/{p.name}" in carried:
+                    # a waiver written straight into the archive owes the owner's word too
+                    for finding in waiver_owner_findings(f"{PLANS_ARCHIVE}/{p.name}", text, tier,
+                                                         evidence_rules):
+                        presence(finding)
                 continue
             unique = dedated_counts[DATE_PREFIX.sub("", p.stem)] == 1
             ids = _plan_work_ids(p.stem, text, include_dedated=unique)
@@ -3078,7 +3090,7 @@ def check(root: Path) -> tuple[list[str], list[str]]:
     # "forgot to archive on merge" and that design are indistinguishable and
     # silent, so the gap is at least made visible.
     active = [p for _rel, p in record_files(root, ("plan",))]
-    in_flight = paths_in_flight(root) if base_error is None else None
+    in_flight = carried
     if in_flight is None:
         review_required = any(
             not rel.startswith(f"{PLANS_ACTIVE}/design-")
@@ -3178,7 +3190,7 @@ def check(root: Path) -> tuple[list[str], list[str]]:
                         f"their review is due at the merge push; archive on merge")
 
     # --- Spec Kit plans this push carries: the active plan's duty (#266)
-    for finding in spec_plan_findings(root, passes, in_flight, scope_base):
+    for finding in spec_plan_findings(root, passes, carried, scope_base):  # unknown stays None
         presence(finding)
 
     # --- a plan under work this push deletes (#251): its work would leave the gate

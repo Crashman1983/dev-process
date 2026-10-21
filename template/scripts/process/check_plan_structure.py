@@ -22,8 +22,9 @@ at the merge. A plan reviewer re-found them by reading. This gate reads them:
     `moved: #<issue>`.
   NOTE: an `[assumption]` left in a DECISION line.
 
-Bound are only plans the branch ADDS — absent at the integration ref — so a
-plan merged before this gate is history, not a new duty. Project data,
+Bound are only plans the branch ADDS — absent at the integration ref, or below
+Tier 2 there (a stub raised here) — so a plan merged before this gate is
+history, not a new duty. Project data,
 `docs/process/plan-structure.local.json`, is read at the integration ref like
 every evidence rule (a branch cannot lift its own duty):
   {"sections": ["Anchor Delta"], "shall_words": ["shall"],
@@ -45,35 +46,58 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling import
 from attest_evidence import AC_LINE, STRUCK_LINE, _NAMES_A_TEST, ac_key  # noqa: E402
 from check_review import (  # noqa: E402  (one owner for plan grammar and fences)
     DECISION_LINE,
+    OPEN_TASK,
     GitReadError,
-    _unfenced,
+    fenced_lines,
     integration_push,
     integration_ref,
     plan_tier,
 )
+from process_git import git_environment  # noqa: E402  (one owner for how git is read)
 
 PLANS_ACTIVE = ".process-work/plans"
 DATA = "docs/process/plan-structure.local.json"
 _MANUAL = re.compile(r"^manual[ \t]*:[ \t]*\S")
 _TICKED = re.compile(r"^[ \t]*[-*+][ \t]+\[[xX]\][ \t]", re.MULTILINE)
-OPEN_TASK = re.compile(r"^[ \t]*[-*+][ \t]+\[ \][ \t]+(?P<task>.*)$", re.MULTILINE)
 _SETTLED = re.compile(r"\b(?:struck:[ \t]*\S|moved:[ \t]*#\d+)", re.IGNORECASE)
 _ASSUMPTION = re.compile(r"\[assumption\]", re.IGNORECASE)
 
 
 def _git(root: Path, *args: str) -> subprocess.CompletedProcess:
     return subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True,
-                          encoding="utf-8", errors="replace")
+                          encoding="utf-8", errors="replace", env=git_environment())
+
+
+class _Unreadable(Exception):
+    """git could not tell whether, or what, a file is at a ref."""
 
 
 def _at_ref(root: Path, ref: str, rel: str) -> str | None:
-    r = _git(root, "show", f"{ref}:{rel}")
-    return r.stdout if r.returncode == 0 else None
+    """The file at `ref`; None: not there. A failed read is no absence: it raises."""
+    listed = _git(root, "ls-tree", "--name-only", ref, "--", rel)
+    if listed.returncode != 0:
+        raise _Unreadable(listed.stderr.strip() or f"git ls-tree exit {listed.returncode}")
+    if not listed.stdout.strip():
+        return None
+    shown = _git(root, "show", f"{ref}:{rel}")
+    if shown.returncode != 0:
+        raise _Unreadable(shown.stderr.strip() or f"git show exit {shown.returncode}")
+    return shown.stdout
+
+
+def _quoted_blank(text: str) -> str:
+    """The text with fenced lines blanked, not dropped: a finding's line number is the
+    file's own (`_unfenced` compacts the text)."""
+    kept = dict(fenced_lines(text)[0])
+    return "\n".join(kept.get(i, "") for i in range(1, len(text.splitlines()) + 1))
 
 
 def load_data(root: Path, ref: str) -> tuple[dict, str]:
     """(project data, problem) — read at the integration ref."""
-    text = _at_ref(root, ref, DATA)
+    try:
+        text = _at_ref(root, ref, DATA)
+    except _Unreadable as exc:
+        return {}, f"{DATA} at the integration ref cannot be read ({exc}) — the plan rules are unknown"
     if text is None:
         return {}, ""
     try:
@@ -135,8 +159,15 @@ def criteria_findings(rel: str, text: str, shall_words: list[str], *, need_tests
     return out
 
 
-def _new_on_branch(root: Path, ref: str, rel: str) -> bool:
-    return _at_ref(root, ref, rel) is None
+def _bound(root: Path, ref: str, rel: str) -> bool:
+    """Is this plan the branch's to answer for? Added on the branch, or below Tier 2 at
+    the integration ref (a stub raised to Tier 2 here is written here). Unreadable at the
+    ref: bound (fail closed)."""
+    try:
+        before = _at_ref(root, ref, rel)
+    except _Unreadable:
+        return True
+    return before is None or (plan_tier(_quoted_blank(before)) or 0) < 2
 
 
 def _registry_ids(root: Path, pattern: str, glob: str) -> set[str]:
@@ -179,12 +210,12 @@ def check(root: Path, env: dict[str, str] | None = None) -> tuple[list[str], lis
         if p.name.startswith("design-"):
             continue
         try:
-            text = _unfenced(p.read_text(encoding="utf-8", errors="replace"))
+            text = _quoted_blank(p.read_text(encoding="utf-8", errors="replace"))
         except OSError as exc:
             hard.append(f"{rel}: could not read: {exc}")
             continue
         tier = plan_tier(text)
-        if tier is None or tier < 2 or not _new_on_branch(root, ref, rel):
+        if tier is None or tier < 2 or not _bound(root, ref, rel):
             continue  # untiered plans are the review gate's finding; old plans are history
         need_tests = merge or bool(_TICKED.search(text))
         hard += criteria_findings(rel, text, shall_words, need_tests=need_tests)

@@ -1147,3 +1147,19 @@ def test_two_passengers_changing_the_answers_keep_the_whole_range(update, monkey
     commit(root)
     _train_with(root, base, 'update', 'second')
     assert cr._update_carrier(root, 'main') == 'HEAD'
+
+
+def test_a_passenger_that_lost_the_answers_file_is_no_certain_carrier(update, monkeypatch):
+    """Refute of #271 (M1): a passenger whose answers file cannot be read differs from the
+    base without carrying an update; the gate keeps judging the whole train."""
+    root, _, base, _ = update
+    cr = load('check_review')
+    git(root, 'checkout', '-qb', 'gone', base)
+    git(root, 'rm', '-q', '.copier-answers.yml')
+    write(root, 'src/gone.py', 'z = 3\n')
+    commit(root)
+    git(root, 'checkout', '-qb', 'plain', base)
+    write(root, 'src/plain.py', 'p = 1\n')
+    commit(root)
+    _train_with(root, base, 'gone', 'plain')
+    assert cr._update_carrier(root, 'main') == 'HEAD'
