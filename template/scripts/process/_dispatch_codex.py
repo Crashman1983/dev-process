@@ -590,13 +590,16 @@ def independence(root: Path, base: str, reviewer: str, implementers: list[str] |
     return "cross-model" if mine and other else "single-family"
 
 
-def _report_text(rec: dict, result: dict, *, work: str, plan_review: bool, refute_round: int | None) -> str:
+def _report_text(rec: dict, result: dict, *, work: str, plan_review: bool, refute_round: int | None,
+                 review_round: int | None = None) -> str:
     b = rec["binding"]
     # the header block first: it is the run of lines up to the first blank one
-    # (journal-state-plans.md) — a title above it left the report without `review:` (#286)
+    # (journal-state-plans.md) — a title above it left the report without `review:` (#286);
+    # `round:` is the round attest writes on the REVIEW line (#293, findings per round)
     lines = [f"review: codex {'plan ' if plan_review else ''}review of {rec['branch']}",
              *(["phase: plan"] if plan_review else []),
              f"work: {work}",
+             *([f"round: {review_round}"] if review_round is not None else []),
              "publish-waived: a dispatched Codex review — its verdict is the REVIEW line beside this report",
              f"model: {rec['model']}", f"invocation: {rec['invocation']}",
              f"artifact: base={b['base']} head={b['head']} diff_sha256={b['diff_sha256']}",
@@ -731,15 +734,20 @@ def handoff(root: Path, rec: dict, *, implementer: str | None = None) -> dict:
               "verdict": result["verdict"], "independence": token, "implementers": implementers}
     # Tier 2: the reviewer's own refute counts from its report (cross-model, tier < 3);
     # Tier 3 needs a separate run's REFUTE line in the plan — never this reviewer's (refute.md)
+    # the round attest is about to write (`--plan-review` counts `<work>-plan` apart): the
+    # report's `round:` header (#293), and the code round a Tier 2 refute line names
+    review_round = attest.round_problems(argparse.Namespace(work=work + ("-plan" if plan_review else ""),
+                                                            round_=None), wt, wt / JOURNAL_DIR)[0]
     refute_round = None
     if rec.get("gate_code") and int(tier) < 3:
-        refute_round = attest.round_problems(argparse.Namespace(work=work, round_=None), wt, wt / JOURNAL_DIR)[0]
+        refute_round = review_round if not plan_review else \
+            attest.round_problems(argparse.Namespace(work=work, round_=None), wt, wt / JOURNAL_DIR)[0]
     rel = f"{REVIEWS}/{_dt.date.today().isoformat()}-{work}{'-plan' if plan_review else ''}-codex-{rec['invocation'][:8]}.md"
     report = wt / rel
     made = [d for d in (report.parent, *report.parent.parents) if d != wt and wt in d.parents and not d.exists()]
     report.parent.mkdir(parents=True, exist_ok=True)
-    report.write_text(_report_text(rec, result, work=work, plan_review=plan_review, refute_round=refute_round),
-                      encoding="utf-8")
+    report.write_text(_report_text(rec, result, work=work, plan_review=plan_review, refute_round=refute_round,
+                                   review_round=review_round), encoding="utf-8")
     plans = [p for p in dirty(wt) if _records_appended(wt, p)]  # records appended after a refusal ride the attest
     before = set(dirty(wt))
     cmd = [sys.executable, str(Path(attest.__file__).resolve()), "--work", work, "--tier", str(tier),

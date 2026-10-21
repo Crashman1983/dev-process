@@ -433,6 +433,40 @@ def test_the_written_report_opens_with_its_header_block(review_repo, render, tmp
     assert r.returncode == 0 and "header" not in r.stdout, r.stdout + r.stderr
 
 
+def test_the_report_header_names_the_round_attest_writes(review_repo):
+    """#293 AC-5: findings are counted per round from the report's `round:` header — the
+    handoff writes the round its own attest puts on the REVIEW line."""
+    out, d, codex = review_repo(PASS)
+    journal = out / ".process-work/journal/2026-10-16.md"
+    journal.parent.mkdir(parents=True, exist_ok=True)
+    journal.write_text("REVIEW work=7 tier=2 reviewer=r model=claude-opus-5 independence=bundle,non-implementing "
+                       "verdict=block round=1\n"
+                       # v2.77 asks a class test of a blocked round; this fixture's block had no defect
+                       "skipped class-test work=7: a fixture round, no code defect\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "docs: attest 7 round 1")
+    _git(out, "push", "-q", "origin", "7-widget")
+    _run_review(out, d, codex)
+    assert d.handoff(out, "7-widget") == 0
+    text = next((out / ".process-work/reviews").glob("*-7-codex-*.md")).read_text()
+    head = importlib.import_module("check_review").report_header(text)
+    lines = "\n".join(p.read_text() for p in (out / ".process-work/journal").glob("**/*.md"))
+    assert head.get("round") == ["2"] and "verdict=pass round=2" in lines, (head, lines)
+    # the header block stays one block: `round:` sits before the first blank line
+    assert "round: 2" in text.split("\n\n", 1)[0]
+
+
+def test_the_report_text_carries_no_round_it_was_not_given(mods):
+    load, _out = mods
+    codex = load("_dispatch_codex")
+    rec = {"binding": {"base": "b", "head": "h", "diff_sha256": "x"}, "branch": "7-w", "model": "m",
+           "invocation": "i", "result_sha256": "r", "issue": 7}
+    result = {"verdict": "pass", "findings": [], "criteria": [], "refute": []}
+    text = codex._report_text(rec, result, work="7", plan_review=True, refute_round=None, review_round=3)
+    assert text.split("\n\n", 1)[0].splitlines()[1:4] == ["phase: plan", "work: 7", "round: 3"]
+    assert "round:" not in codex._report_text(rec, result, work="7", plan_review=False, refute_round=None)
+
+
 def test_a_refused_attest_leaves_the_worktree_clean_and_can_be_handed_off_again(review_repo):
     unproven = {**PASS, "criteria": []}  # no line for AC-1: attest refuses the pass
     out, d, codex = review_repo(unproven)
