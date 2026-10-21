@@ -228,7 +228,7 @@ def noop_problem() -> str | None:
             for letter in word.lstrip("-"):
                 if letter in _MAKE_NOOP:
                     return f"{name} carries `-{letter}` — make runs no recipe under it"
-                if letter in _MAKE_VALUED:
+                if letter in _MAKE_VALUED or letter in "oW":  # `-ofile`, `-Wfile`: the rest is a file name
                     break
     return None
 

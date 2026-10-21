@@ -555,6 +555,9 @@ def test_every_no_op_make_flag_is_refused(render, tmp_path, monkeypatch, name, f
         assert cert.noop_problem() and name in cert.noop_problem(), flags
         monkeypatch.setenv(name, "-j4 --no-print-directory")
         assert cert.noop_problem() is None
+        # cross-model review (GLM): the `n` in a file name after `-o` is no `-n`
+        monkeypatch.setenv(name, "-obuild/main.o")
+        assert cert.noop_problem() is None
     finally:
         sys.path.remove(str(out / "scripts/process"))
         sys.modules.pop("certificate", None)
