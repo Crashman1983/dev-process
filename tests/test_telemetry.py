@@ -1007,6 +1007,14 @@ def test_a_worker_states_its_usage_and_models_shows_it(render, tmp_path):
                           cwd=out, capture_output=True, text=True).stdout
     row = next(ln for ln in text.splitlines() if "deepseek-v4.1-flash" in ln)
     assert "1,500 (1)" in row and "$0.02" in row, text
+    # cross-model review: a re-dispatch on another model dropped the first model's stated tokens
+    later = {**env, "PROCESS_MODEL": "claude-opus-5"}
+    subprocess.run([sys.executable, str(rep), "blocked", "--issue", "7", "--worker", "w7"],
+                   cwd=out, capture_output=True, text=True, env=later, check=True)
+    text = subprocess.run([sys.executable, str(out / "scripts/process/process_kpis.py"), "models"],
+                          cwd=out, capture_output=True, text=True).stdout
+    row = next(ln for ln in text.splitlines() if "deepseek-v4.1-flash" in ln)
+    assert "1,500 (1)" in row, text
 
 
 def _kpis_module(out):
@@ -1026,12 +1034,26 @@ def test_baseline_takes_medians_per_merged_work_in_a_window(render, tmp_path):
                   "REVIEW work=9 tier=2 reviewer=r model=m independence=bundle,non-implementing "
                   "verdict=pass round=2\n")
     k = _kpis_module(out)
+    # `tokens.value` is the fields dict flow_items stores (cross-model review: median of dicts crashed)
     item = {"issue": 9, "merged": {"value": "2026-10-10T12:00:00+00:00"}, "lead_s": {"value": 7200},
-            "tokens": {"value": 1000}, "escapes": {"value": 0}}
+            "tokens": {"value": {"input": 600, "output": 400}}, "escapes": {"value": 0}}
     lo, hi = k._window("2026-10-01:2026-10-20")
     got = k.baseline_numbers(out, lo, hi, items=[item], commits=[])
     assert (got["works"], got["rounds_per_work"], got["fix_rounds_per_work"], got["tokens_per_work"],
             got["lead_hours"]) == (1, 2, 1, 1000, 2.0), got
+    # a REVIEW line naming its work by the plan's slug counts for the plan's issue
+    archive = out / ".process-work/plans/archive"
+    archive.mkdir(parents=True, exist_ok=True)
+    (archive / "2026-10-05-12-gadget.md").write_text("# Plan\n\ntier: 2\nissue: #12\n")
+    _journal(out, "REVIEW work=2026-10-05-12-gadget tier=2 reviewer=r model=m "
+                  "independence=bundle,non-implementing verdict=block round=1\n"
+                  "REVIEW work=2026-10-05-12-gadget tier=2 reviewer=r model=m "
+                  "independence=bundle,non-implementing verdict=block round=2\n"
+                  "REVIEW work=2026-10-05-12-gadget tier=2 reviewer=r model=m "
+                  "independence=bundle,non-implementing verdict=pass round=3\n")
+    slugged = {**item, "issue": 12}
+    got = k.baseline_numbers(out, lo, hi, items=[slugged], commits=[])
+    assert (got["rounds_per_work"], got["fix_rounds_per_work"]) == (3, 2), got
     lo, hi = k._window("2026-10-20:")
     assert k.baseline_numbers(out, lo, hi, items=[item], commits=[])["works"] == 0
     r = subprocess.run([sys.executable, str(out / "scripts/process/process_kpis.py"), "baseline",

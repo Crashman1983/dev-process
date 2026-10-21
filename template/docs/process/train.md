@@ -118,9 +118,11 @@ a day downstream, with five reviewed candidates waiting.
    red stage never reached the later ones, and a retry of the failures
    alone would merge them untested (e.g. `pytest --lf`, which runs
    everything when nothing failed, per stage, after a `make -k` suite).
-   A green `--retry` writes no merge certificate — it ran a part, not the
-   suite — so the merge push runs the suite once more; the cost of a flake
-   is that second run, never a certificate for what nobody ran.
+   A green `--retry` writes a merge certificate only when every stage of
+   the run's `stages` file carries a green marker (#265): then the suite's
+   whole scope has run green on that tree. A stage still unrun or red, or
+   no stage list at all, writes none, and the merge push runs the suite once
+   more — never a certificate for what nobody ran.
    A run that left anything git sees in the worktree (a snapshot baseline
    it generated, a rewritten lockfile) gets the rebuilt tree instead: the
    retry would pass on that residue — keep the suite's own output
