@@ -1,3 +1,4 @@
+import os
 import json
 import subprocess
 import sys
@@ -975,3 +976,54 @@ def test_a_bad_finding_class_is_a_malformed_line(render, tmp_path):
     (fields, err, _), = gate.report_findings("FINDING sev=minor action=fix issue=- class=mechanical "
                                              "rule=ruff:S110 swallowed\n")
     assert err is None and fields["rule"] == "ruff:S110" and fields["title"] == "swallowed"
+
+
+def test_a_worker_states_its_usage_and_models_shows_it(render, tmp_path):
+    """#270: a harness without transcripts the dispatch reader knows states its tokens
+    with the report; `models` puts them beside rounds and blocks."""
+    out = _render(render, tmp_path)
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=out, check=True)
+    rep = out / "scripts/process/report.py"
+    env = {**os.environ, "PROCESS_PHASE": "execute", "PROCESS_MODEL": "deepseek-v4.1-flash"}
+    r = subprocess.run([sys.executable, str(rep), "blocked", "--issue", "7", "--worker", "w7",
+                        "--usage", "input=1000,cached=200,output=300,cost_usd=0.02"],
+                       cwd=out, capture_output=True, text=True, env=env)
+    assert r.returncode == 0, r.stderr
+    bad = subprocess.run([sys.executable, str(rep), "failed", "--issue", "7", "--usage", "output=-1"],
+                         cwd=out, capture_output=True, text=True, env=env)
+    assert bad.returncode == 2 and "--usage" in bad.stderr, bad.stderr
+    text = subprocess.run([sys.executable, str(out / "scripts/process/process_kpis.py"), "models"],
+                          cwd=out, capture_output=True, text=True).stdout
+    row = next(ln for ln in text.splitlines() if "deepseek-v4.1-flash" in ln)
+    assert "1,500 (1)" in row and "$0.02" in row, text
+
+
+def _kpis_module(out):
+    import importlib.util
+    sys.path.insert(0, str(out / "scripts/process"))
+    spec = importlib.util.spec_from_file_location("kpis_baseline", out / "scripts/process/process_kpis.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_baseline_takes_medians_per_merged_work_in_a_window(render, tmp_path):
+    """#277: the numbers a verification change must move, per window."""
+    out = _render(render, tmp_path, github_issues=True)
+    _journal(out, "REVIEW work=9 tier=2 reviewer=r model=m independence=bundle,non-implementing "
+                  "verdict=block round=1\n"
+                  "REVIEW work=9 tier=2 reviewer=r model=m independence=bundle,non-implementing "
+                  "verdict=pass round=2\n")
+    k = _kpis_module(out)
+    item = {"issue": 9, "merged": {"value": "2026-10-10T12:00:00+00:00"}, "lead_s": {"value": 7200},
+            "tokens": {"value": 1000}, "escapes": {"value": 0}}
+    lo, hi = k._window("2026-10-01:2026-10-20")
+    got = k.baseline_numbers(out, lo, hi, items=[item], commits=[])
+    assert (got["works"], got["rounds_per_work"], got["fix_rounds_per_work"], got["tokens_per_work"],
+            got["lead_hours"]) == (1, 2, 1, 1000, 2.0), got
+    lo, hi = k._window("2026-10-20:")
+    assert k.baseline_numbers(out, lo, hi, items=[item], commits=[])["works"] == 0
+    r = subprocess.run([sys.executable, str(out / "scripts/process/process_kpis.py"), "baseline",
+                        "--window", "2026-10-01:2026-10-20", "--window", "2026-10-20:", "--json"],
+                       cwd=out, capture_output=True, text=True)
+    assert r.returncode == 0 and len(json.loads(r.stdout)) == 2, r.stdout + r.stderr

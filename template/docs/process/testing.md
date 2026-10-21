@@ -87,6 +87,28 @@ Two tests that pass and prove nothing (adapted from Matt Pocock's `tdd`, MIT):
   real regression. Mock only at the system's boundary — the network, the
   clock, a third-party API — and assert what a caller can observe.
 
+## Classes, not cases
+
+A structural rule or a recurring defect is caught once, as a class — never
+by one more hand-written test per special case (#277). Each new case of a
+known kind then costs a line, not a test file:
+
+- **A structural invariant goes into a declarative rule file.** Imports,
+  layers, patterns, and "only the owner calls this" belong in a lint,
+  import, pattern or owner rule with its allowlist. A test that greps or
+  parses source to enforce one rule is the shape to retire.
+- **Repeated example cases become a table or a property.** One
+  parametrized test reads the decision table from the spec. A property
+  searches the cases nobody listed: idempotence, a round trip, two readers
+  that must agree.
+- **Failure paths are injected at the owner's seam.** A single fixture
+  that makes the git runner, the file reader or the transaction fail covers
+  every caller's error path at once.
+- **A new verification tool names what it replaces.** That can be tests
+  deleted, review checklist items, refute scope, or a warn-only text. It
+  also names the baseline numbers it should move
+  (`process_kpis.py baseline`). A tool that replaces nothing only adds cost.
+
 ## Coverage numbers — the honest ceiling
 
 Line coverage measures *execution*, not *verification* — a suite can execute

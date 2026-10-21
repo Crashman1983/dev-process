@@ -475,10 +475,16 @@ def models(root: Path | None = None) -> int:
             m, ph = _model(r), r.get("phase") or ""
             if not m or not ph or last_model.get(ph) != m:
                 continue
-            cell = cells.setdefault((str(tier), ph, m), {"issues": set(), "blocked": 0, "rounds": [], "passed": 0})
+            cell = cells.setdefault((str(tier), ph, m), {"issues": set(), "blocked": 0, "rounds": [], "passed": 0,
+                                                        "tokens": 0, "cost": 0.0, "reported": 0})
             cell["issues"].add(unit)
-            if r.get("state") == "blocked":
+            if r.get("state") in ("blocked", "failed"):
                 cell["blocked"] += 1
+            if isinstance(r.get("usage"), dict):  # stated by the worker (`report.py --usage`, #270)
+                u = r["usage"]
+                cell["tokens"] += int(u.get("input", 0)) + int(u.get("cached", 0)) + int(u.get("output", 0))
+                cell["cost"] += float(u.get("cost_usd", 0) or 0)
+                cell["reported"] += 1
             key = (unit, ph, m)
             if issue and issue in rounds and ph == "execute" and key not in seen_rounds:
                 seen_rounds.add(key)
@@ -487,11 +493,14 @@ def models(root: Path | None = None) -> int:
     if not cells:
         print("  reports carry no model/phase yet — start sessions via dispatch.py or set PROCESS_MODEL/PROCESS_PHASE")
         return 0
-    print(f"  {'tier':>4} {'phase':<8} {'model':<22} {'n':>3} {'blocked':>7} {'rounds→pass':>12}")
+    print(f"  {'tier':>4} {'phase':<8} {'model':<22} {'n':>3} {'blocked':>7} {'rounds→pass':>12} "
+          f"{'tokens (stated)':>16} {'cost':>8}")
     for (tier, ph, m), c in sorted(cells.items()):
         n = len(c["issues"])
         avg = f"{sum(c['rounds']) / len(c['rounds']):.1f} ({c['passed']}/{len(c['rounds'])} pass)" if c["rounds"] else "—"
-        print(f"  {tier:>4} {ph:<8} {m:<22} {n:>3} {c['blocked']:>7} {avg:>12}")
+        tok = f"{c['tokens']:,} ({c['reported']})" if c["reported"] else "—"
+        cost = f"${c['cost']:.2f}" if c["cost"] else "—"
+        print(f"  {tier:>4} {ph:<8} {m:<22} {n:>3} {c['blocked']:>7} {avg:>12} {tok:>16} {cost:>8}")
     n = len({u for c in cells.values() for u in c["issues"]})
     lvl = _level(n, True, False, _N_THRESHOLD)
     print(f"  {confidence(n, proxy=True)} · {action(lvl, 'compare execute models within one tier: more rounds to pass is the price of the cheaper model', thin='keep dispatching with the policy; judge after ~20 issues per cell')}")
@@ -596,6 +605,109 @@ def _blockers_by_work(root: Path, key: str = "origin",
         value = fields.get(key) or "-"
         cell[value] = cell.get(value, 0) + 1
     return out
+
+
+# --- baseline: the numbers a verification change must move (#277) --------------
+def _window(text: str) -> tuple[datetime, datetime]:
+    """`SINCE:UNTIL` (dates, UNTIL exclusive; either side may be empty)."""
+    since, sep, until = text.partition(":")
+    if not sep:
+        raise argparse.ArgumentTypeError(f"window {text!r} is not SINCE:UNTIL")
+    lo = datetime.fromisoformat(since).replace(tzinfo=timezone.utc) if since else datetime.min.replace(tzinfo=timezone.utc)
+    hi = datetime.fromisoformat(until).replace(tzinfo=timezone.utc) if until else datetime.max.replace(tzinfo=timezone.utc)
+    return lo, hi
+
+
+def _when(value: object) -> datetime | None:
+    if not value:
+        return None
+    try:
+        got = value if isinstance(value, datetime) else datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return got if got.tzinfo else got.replace(tzinfo=timezone.utc)
+
+
+def baseline_numbers(root: Path, lo: datetime, hi: datetime, *, items: list[dict] | None = None,
+                     commits: list[dict] | None = None) -> dict:
+    """The baseline of one window, over the works merged in it: medians per work of
+    tokens, review rounds, blocked (fix) rounds, findings and lead time; the tokens
+    workers stated per phase (`report.py --usage`); escaped defects — the works whose
+    issue later got a `Regression-of:` fix, and the change-failure proxy (a `fix:`
+    commit on a code file a `feat:` of the window touched). Every number is a proxy."""
+    items = flow_items(root) if items is None else items
+    merged = [it for it in items if (m := _when(it["merged"]["value"])) and lo <= m < hi]
+    rounds = _review_rounds(root)
+    found = _report_findings(root)
+    by_work: dict[str, int] = {}
+    if not isinstance(found, str):
+        for work, _f in found:
+            by_work[work] = by_work.get(work, 0) + 1
+
+    def med(values: list) -> float | None:
+        vals = [v for v in values if v is not None]
+        return round(statistics.median(vals), 1) if vals else None
+
+    rnd = [rounds.get(str(it["issue"])) for it in merged]
+    phases: dict[str, int] = {}
+    for recs in _reports_by_worker(root).values():
+        for r in recs:
+            at = datetime.fromtimestamp(int(r.get("epoch") or 0), tz=timezone.utc)
+            if lo <= at < hi and isinstance(r.get("usage"), dict):
+                u = r["usage"]
+                ph = r.get("phase") or "-"
+                phases[ph] = phases.get(ph, 0) + int(u.get("input", 0)) + int(u.get("cached", 0)) \
+                    + int(u.get("output", 0))
+    in_window = [c for c in (commits or []) if lo <= c["ts"] < hi]
+    escaped = [it for it in merged if it["escapes"]["value"]]
+    return {
+        "works": len(merged),
+        "tokens_per_work": med([it["tokens"]["value"] for it in merged]),
+        "rounds_per_work": med([r["max_round"] if r else None for r in rnd]),
+        "fix_rounds_per_work": med([len(r["blocked"]) if r else None for r in rnd]),
+        "findings_per_work": None if isinstance(found, str) else med([by_work.get(str(it["issue"]), 0)
+                                                                     for it in merged]),
+        "lead_hours": med([it["lead_s"]["value"] / 3600 if it["lead_s"]["value"] else None for it in merged]),
+        "stated_tokens_by_phase": phases,
+        "escaped_works": len(escaped),
+        "change_failure_proxy": change_failure_rate(in_window) if commits is not None else None,
+    }
+
+
+def baseline(root: Path | None = None, windows: list[tuple[datetime, datetime]] | None = None,
+             *, as_json: bool = False) -> int:
+    """One or two windows side by side, so a change's effect is the difference of
+    two runs (#277). The numbers a deterministic check should move: fewer fix rounds
+    and tokens per work, with escaped defects as the guard that nothing slipped."""
+    import json  # noqa: PLC0415
+    root = root or Path.cwd()
+    windows = windows or [(datetime.min.replace(tzinfo=timezone.utc), datetime.max.replace(tzinfo=timezone.utc))]
+    items = flow_items(root)
+    try:
+        commits = _git_commits(_default_branch())
+    except (subprocess.CalledProcessError, OSError):
+        commits = None
+    got = [baseline_numbers(root, lo, hi, items=items, commits=commits) for lo, hi in windows]
+    if as_json:
+        print(json.dumps(got, default=str, sort_keys=True))
+        return 0
+    label = [f"{lo.date() if lo.year > 1 else '…'}–{hi.date() if hi.year < 9999 else '…'}" for lo, hi in windows]
+    print("[baseline] ~proxy — per merged work, medians; compare two windows (#277)")
+    print(f"  {'':<28}" + "".join(f"{x:>24}" for x in label))
+    for key in ("works", "tokens_per_work", "rounds_per_work", "fix_rounds_per_work", "findings_per_work",
+                "lead_hours", "escaped_works"):
+        print(f"  {key:<28}" + "".join(f"{'—' if g[key] is None else g[key]:>24}" for g in got))
+    cfr = ["—" if not g["change_failure_proxy"] else
+           f"{g['change_failure_proxy']['failed']}/{g['change_failure_proxy']['feats']} feat" for g in got]
+    print(f"  {'change_failure_proxy':<28}" + "".join(f"{x:>24}" for x in cfr))
+    for g, x in zip(got, label):
+        if g["stated_tokens_by_phase"]:
+            print(f"  stated tokens by phase {x}: "
+                  + ", ".join(f"{p} {n:,}" for p, n in sorted(g["stated_tokens_by_phase"].items())))
+    n = min(g["works"] for g in got)
+    lvl = _level(n, True, False, _N_THRESHOLD)
+    print(f"  {confidence(n, proxy=True)} · {action(lvl, 'a check that removed review work shows fewer fix rounds and tokens per work at the same or fewer escaped works', thin='keep recording; judge a change after ~20 merged works per window')}")
+    return 0
 
 
 # --- findings: what could have caught them (#276) --------------------------------
@@ -821,8 +933,8 @@ def train_phases(runs: int = 20) -> int:
 # says whether it is measured, estimated or missing; nothing is filled in.
 _FOLLOW_UP_DAYS = 30  # escapes count this long after the merge (mandate: follow_up_days)
 _PHASE_LOG = re.compile(r"^(?P<branch>.+)-(?P<phase>brainstorm|plan|execute|review)-(?P<ts>\d{8}-\d{6})\.log$")
-_PHASE_ENDS = {"brainstorm": {"planned", "blocked", "idle"}, "plan": {"planned", "blocked"},
-               "execute": {"pushed", "blocked"}, "review": {"review-pass", "blocked"}}
+_PHASE_ENDS = {"brainstorm": {"planned", "blocked", "failed", "idle"}, "plan": {"planned", "blocked", "failed"},
+               "execute": {"pushed", "blocked", "failed"}, "review": {"review-pass", "blocked", "failed"}}
 _ANSWERS_COMMIT = re.compile(r"^_commit:\s*['\"]?([^'\"\s]+)", re.MULTILINE)
 
 
@@ -1702,6 +1814,10 @@ def main() -> int:
     sub.add_parser("models")
     sub.add_parser("execution")
     sub.add_parser("rounds")
+    bl = sub.add_parser("baseline")
+    bl.add_argument("--window", type=_window, action="append", metavar="SINCE:UNTIL",
+                    help="a date window (UNTIL exclusive; repeat once to compare)")
+    bl.add_argument("--json", action="store_true")
     fi = sub.add_parser("findings")
     fi.add_argument("--min-works", type=int, default=2)
     fi.add_argument("--json", action="store_true")
@@ -1730,6 +1846,10 @@ def main() -> int:
         return models()
     if args.cmd == "execution":
         return execution()
+    if args.cmd == "baseline":
+        if args.window and len(args.window) > 2:
+            p.error("baseline compares at most two windows")
+        return baseline(windows=args.window, as_json=args.json)
     if args.cmd == "findings":
         return findings(min_works=args.min_works, as_json=args.json)
     if args.cmd == "rounds":
