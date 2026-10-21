@@ -1326,7 +1326,7 @@ def test_a_task_class_row_wins_over_the_tier_and_the_default(render, tmp_path):
         d = importlib.import_module("dispatch")
         policy = d.load_policy(out)
         assert d.model_for(policy, 3, "execute", "mechanical") == "small-x"
-        assert d.cell_for(policy, 3, "review", "mechanical") == ("claude-opus-5", "xhigh", None)
+        assert d.cell_for(policy, 3, "review", "mechanical")[:3] == ("claude-opus-5", "xhigh", None)
         assert d.model_for(policy, 3, "execute", "standard") == data["tiers"]["3"]["execute"]
         assert d.model_for(policy, 9, "execute") == data["default"]["execute"]
     finally:
@@ -1363,9 +1363,9 @@ def test_an_effort_cell_follows_the_one_precedence_and_wins_whole(render, tmp_pa
     policy = {"default": {"execute": {"model": "dm", "effort": "low"}},
               "tiers": {"3": {"execute": {"model": "tm", "effort": "high"}}},
               "classes": {"mechanical": {"execute": "cm"}}}
-    assert d.cell_for(policy, 3, "execute", "mechanical") == ("cm", None, None)
-    assert d.cell_for(policy, 3, "execute") == ("tm", "high", None)
-    assert d.cell_for(policy, 9, "execute") == ("dm", "low", None)
+    assert d.cell_for(policy, 3, "execute", "mechanical")[:3] == ("cm", None, None)
+    assert d.cell_for(policy, 3, "execute")[:3] == ("tm", "high", None)
+    assert d.cell_for(policy, 9, "execute")[:3] == ("dm", "low", None)
     assert d.model_for(policy, 3, "execute") == "tm"  # the thin wrapper keeps its callers
 
 
@@ -2416,3 +2416,25 @@ def test_dispatch_judges_the_branch_by_the_gates_fork_point(render, tmp_path):
     assert a == b, got.stdout + got.stderr
     tip = run("rev-parse", "HEAD").stdout.strip()
     assert tip not in a, "a ref containing the tip is no fork point"
+
+
+def _with_class(out: Path) -> None:
+    pol = out / "docs/process/model-policy.json"
+    data = json.loads(pol.read_text())
+    data["classes"] = {"mechanical": {"plan": "small-x", "execute": "small-x"}}
+    pol.write_text(json.dumps(data))
+
+
+def test_start_and_queue_take_the_task_class(render, tmp_path):
+    """#270: only `policy` knew `--class`; a start and a queued line now pick the class
+    cell, and the class is chosen once, at queue time."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _with_class(out)
+    _repo(out)
+    r = _dispatch(out, "start", "--issue", "7", "--phase", "plan", "--tier", "2", "--class", "mechanical",
+                  "--dry-run")
+    assert r.returncode == 0 and "small-x" in r.stdout, r.stdout + r.stderr
+    r = _dispatch(out, "queue", "add", "--issue", "7", "--phase", "plan", "--tier", "2", "--class", "mechanical")
+    assert r.returncode == 0 and "class mechanical" in r.stdout, r.stdout + r.stderr
+    r = _dispatch(out, "queue", "add", "--issue", "8", "--phase", "plan", "--class", "mechanicl")
+    assert r.returncode != 0 and "mechanicl" in r.stdout + r.stderr

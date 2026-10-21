@@ -42,6 +42,7 @@ import shlex
 import subprocess
 import sys
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 sys.dont_write_bytecode = True
@@ -492,15 +493,34 @@ def remote_branches(root: Path, ref: str | None, local_branches: set[str],
 # --- stale: no commit, no report ------------------------------------------------------
 
 def quiet_too_long(minutes_since_commit: int | None, report_minutes_ago: int | None,
-                   report_state: str | None, stale_minutes: int) -> bool:
-    """The one owner of "stale": no commit and no report for `stale_minutes`,
-    and not parked on a waiting state (`PARKED`). No report at all is quiet;
-    an unknown commit age is not. The `stale-worker` finding asks it of a
+                   report_state: str | None, stale_minutes: int,
+                   status_minutes_ago: int | None = None) -> bool:
+    """The one owner of "stale": no commit, no report and no status-file update
+    (a cell's `status_file`, #270) for `stale_minutes`, and not parked on a
+    waiting state (`PARKED`). No report or status file at all is quiet; an
+    unknown commit age is not. The `stale-worker` finding asks it of a
     worktree, `--wait` of a live session (`stale_sessions`)."""
     if report_state in PARKED:
         return False
     return ((minutes_since_commit or 0) >= stale_minutes
-            and (report_minutes_ago is None or report_minutes_ago >= stale_minutes))
+            and (report_minutes_ago is None or report_minutes_ago >= stale_minutes)
+            and (status_minutes_ago is None or status_minutes_ago >= stale_minutes))
+
+
+def status_age(path: str | None, now: float) -> int | None:
+    """Minutes since a worker's status file says it was `updated_at` — a harness
+    that writes events but no commits proves it is alive this way (#270). None
+    where there is no file or no readable time: no signal, never a fresh one."""
+    if not path:
+        return None
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+        stamp = datetime.fromisoformat(str(data["updated_at"]).replace("Z", "+00:00"))
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    if stamp.tzinfo is None:
+        stamp = stamp.replace(tzinfo=timezone.utc)
+    return max(0, int((now - stamp.timestamp()) // 60))
 
 
 def resolve_stale_minutes(root: Path, given: int | None = None) -> int:
@@ -552,7 +572,8 @@ def stale_sessions(root: Path, stale_minutes: int) -> list[dict]:
         own_epoch = int(own.get("epoch") or 0) if own else None
         quiet_commit = int((now - max(commit or 0, started)) // 60)
         quiet_report = None if own_epoch is None else int((now - own_epoch) // 60)
-        if not quiet_too_long(quiet_commit, quiet_report, (own or {}).get("state"), stale_minutes):
+        if not quiet_too_long(quiet_commit, quiet_report, (own or {}).get("state"), stale_minutes,
+                              status_age(rec.get("status_file"), now)):
             continue
         if _dispatch.phase_over(root, rec, own, local=True) is True:
             continue  # done with its phase, waiting to be stopped — not silent work
@@ -733,6 +754,13 @@ def findings(table: dict, stale_minutes: int) -> list[dict]:
                         "because": "a question on a worker's screen reaches nobody — have it write the question "
                                    "into the plan as DECISION NEEDED and report blocked; the steward decides"})
     for rep in table["reports"]:
+        if rep["state"] == "failed":
+            # a broken run waits for nobody's answer — every minute is lost (#270)
+            out.append({"kind": "failed", "severity": "high",
+                        "what": f"{rep['worker']} failed {rep['minutes_ago']} min ago: "
+                                f"{rep.get('note') or 'no reason given'}",
+                        "because": "the run crashed, timed out or was killed — restart it or hand the work on; "
+                                   "a failure is no question to answer"})
         if rep["state"] == "blocked" and rep["minutes_ago"] >= stale_minutes:
             out.append({"kind": "blocked", "severity": "high",
                         "what": f"{rep['worker']} blocked for {rep['minutes_ago']} min: {rep.get('note') or 'no reason given'}",

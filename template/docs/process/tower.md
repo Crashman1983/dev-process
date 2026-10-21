@@ -70,8 +70,16 @@ is evidence for a steward, not a security boundary.
 ## The worker protocol
 
 Workers report state transitions with `/report` (`scripts/process/report.py`):
-`planned`, `pushed`, `review-pass`, `blocked`, `done`, `idle`. One line per
-transition, the reason on `blocked`. `pushed` is verified, not believed:
+`planned`, `pushed`, `review-pass`, `blocked`, `failed`, `done`, `idle`. One line per
+transition, the reason on `blocked` and `failed`. `failed` is a run that broke —
+a crash, a timeout, a signal — and the tower lists it at high severity; `blocked`
+is a question or a red gate handed over (#270). A harness whose tokens no
+transcript records states them with `--usage input=<n>,cached=<n>,output=<n>[,cost_usd=<x>]`
+(`process_kpis.py models` and `baseline` read them). A policy cell's
+`status_file` (a path in the worktree the worker rewrites with `{"updated_at":
+"<ISO time>"}`) is a third liveness signal beside commits and reports, for a
+harness that writes events but no commits. `dispatch.py start` and `queue add`
+take `--class <name>` to pick a task class's cell, as `policy --class` does. `pushed` is verified, not believed:
 report.py refuses it until the branch is on origin with the worktree's HEAD
 and, for a dispatched phase, origin has moved past the commit the phase
 started from (`PROCESS_PHASE_BASE`, set by dispatch) — so a steward never

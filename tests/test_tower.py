@@ -737,3 +737,43 @@ def test_a_stale_check_that_breaks_announces_nothing_instead_of_ending_every_wat
     monkeypatch.setattr(mod, "stale_sessions", broken)
     assert mod.announce_stale(out, tmp_path / "seen.json", 60) == []
     assert "stale check skipped" in capsys.readouterr().err
+
+
+def test_a_failed_report_is_a_high_finding_apart_from_blocked(render, tmp_path):
+    """#270: a crash or timeout is `failed`, not `blocked` — nobody has a question to answer."""
+    import importlib.util
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    spec = importlib.util.spec_from_file_location("tower_failed", out / "scripts/process/tower.py")
+    sys.path.insert(0, str(out / "scripts/process"))
+    try:
+        tower = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(tower)
+    finally:
+        sys.path.remove(str(out / "scripts/process"))
+    table = {"overlaps": [], "plans": [], "gates": [], "worktrees": [], "sessions": [],
+             "reports": [{"worker": "w", "state": "failed", "minutes_ago": 1, "note": "timeout"}]}
+    found = tower.findings(table, 60)
+    assert [(f["kind"], f["severity"]) for f in found if f["kind"] in ("failed", "blocked")] == [("failed", "high")]
+
+
+def test_a_fresh_status_file_keeps_a_commitless_worker_alive(render, tmp_path):
+    """#270: a harness that writes events but no commits proves liveness by its status file."""
+    import importlib.util
+    import time as _time
+    from datetime import datetime, timezone
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    spec = importlib.util.spec_from_file_location("tower_status", out / "scripts/process/tower.py")
+    sys.path.insert(0, str(out / "scripts/process"))
+    try:
+        tower = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(tower)
+    finally:
+        sys.path.remove(str(out / "scripts/process"))
+    status = tmp_path / "status.json"
+    now = _time.time()
+    status.write_text(json.dumps({"updated_at": datetime.fromtimestamp(now - 120, timezone.utc).isoformat()}))
+    assert tower.status_age(str(status), now) == 2
+    assert not tower.quiet_too_long(90, None, None, 60, tower.status_age(str(status), now))
+    assert tower.quiet_too_long(90, None, None, 60, tower.status_age(str(tmp_path / "none.json"), now))
+    status.write_text("{not json")
+    assert tower.status_age(str(status), now) is None  # unreadable: no signal, never a fresh one

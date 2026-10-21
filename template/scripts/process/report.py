@@ -39,7 +39,9 @@ import sys
 import time
 from pathlib import Path
 
-STATES = ("planned", "pushed", "review-pass", "blocked", "done", "idle")
+# `failed`: the run itself broke (crash, timeout, signal) — not `blocked`, which is a
+# question or a red gate the worker hands over (#270)
+STATES = ("planned", "pushed", "review-pass", "blocked", "failed", "done", "idle")
 REPORTS_DIR = "process-tower"
 REPORTS_FILE = "reports.jsonl"
 REPORT_REFS = "refs/process/reports"
@@ -97,8 +99,36 @@ def _env_effort() -> str:
 EXECUTION = ("delegate", "retain-context")  # a packet's mode (`/plan`, `/execute`); process_kpis.py cuts by it
 
 
+USAGE_KEYS = ("input", "cached", "output", "cost_usd")
+
+
+def parse_usage(text: str) -> dict:
+    """`input=<n>,cached=<n>,output=<n>[,cost_usd=<x>]` → a dict; ValueError names what
+    is wrong. A harness without transcripts the dispatch reader knows (a remote host,
+    another CLI) states its usage this way (#270)."""
+    out: dict = {}
+    for part in (p.strip() for p in text.split(",") if p.strip()):
+        key, eq, value = part.partition("=")
+        if not eq or key not in USAGE_KEYS:
+            raise ValueError(f"{part!r} is not one of {', '.join(f'{k}=' for k in USAGE_KEYS)}")
+        if key in out:
+            raise ValueError(f"{key} twice")
+        try:
+            number = float(value) if key == "cost_usd" else int(value)
+        except ValueError:
+            raise ValueError(f"{key}={value!r} is no number") from None
+        if number < 0:
+            raise ValueError(f"{key}={value} is negative")
+        out[key] = number
+    for key in ("input", "output"):
+        if key not in out:
+            raise ValueError(f"{key}= is missing")
+    return out
+
+
 def write_report(root: Path, state: str, *, issue: int | None, note: str, worker: str | None,
-                 model: str | None = None, effort: str | None = None, execution: str | None = None) -> dict:
+                 model: str | None = None, effort: str | None = None, execution: str | None = None,
+                 usage: dict | None = None) -> dict:
     # never empty: an empty model was indistinguishable from a lost field downstream
     model = (model or os.environ.get("PROCESS_MODEL") or "").strip()
     if not model:
@@ -119,6 +149,7 @@ def write_report(root: Path, state: str, *, issue: int | None, note: str, worker
         "note": note.strip()[:1000],
         "cwd": str(root),
         **({"execution": execution} if execution else {}),
+        **({"usage": usage} if usage else {}),
     }
     p = reports_path(root)
     if p is None:
@@ -218,6 +249,8 @@ def main(argv: list[str]) -> int:
     p.add_argument("--effort", help="the reasoning effort of this phase's cell (default: PROCESS_EFFORT)")
     p.add_argument("--execution", choices=EXECUTION,
                    help="the packet's mode — delegated to a subagent or kept in this session (`/execute`)")
+    p.add_argument("--usage", help="this phase's tokens where no transcript records them: "
+                                    "input=<n>,cached=<n>,output=<n>[,cost_usd=<x>]")
     p.add_argument("--root", default=".")
     p.add_argument("--force", action="store_true",
                    help="record `pushed` without the origin check (marked unverified)")
@@ -228,6 +261,13 @@ def main(argv: list[str]) -> int:
     if a.effort is not None and a.effort not in efforts():
         print(f"report: --effort {a.effort!r} is not one of {', '.join(efforts())}", file=sys.stderr)
         return 2
+    usage = None
+    if a.usage:
+        try:
+            usage = parse_usage(a.usage)
+        except ValueError as exc:
+            print(f"report: --usage {exc}", file=sys.stderr)
+            return 2
     note = a.note
     if a.state == "pushed":
         why = pushed_refusal(root)
@@ -237,7 +277,7 @@ def main(argv: list[str]) -> int:
         if why:
             note = f"[unverified: {why}] {note}".strip()
     rec = write_report(root, a.state, issue=a.issue, note=note, worker=a.worker, model=a.model, effort=a.effort,
-                       execution=a.execution)
+                       execution=a.execution, usage=usage)
     print(f"report: {rec['worker']}@{rec['host']} → {rec['state']}"
           + (f" #{rec['issue']}" if rec["issue"] else "") + (f" — {rec['note']}" if rec["note"] else ""))
     if a.sync or os.environ.get("PROCESS_REPORT_SYNC") == "1":
