@@ -16,7 +16,10 @@ Two steps, one owner:
   tests a review report names, the diff `base..head`. The worktree counts
   only as the review gate counts it: records appended after the plan's last
   line ride the attestation (`check_review.records_only`) and count when the
-  plan rides `--with`; anything else must be at head.
+  plan rides `--with`; anything else must be at head. One exception (v2.77):
+  the blocked code rounds a branch adds and its journal's ROOT-CAUSE and skip
+  lines are read in the worktree, as the round counter reads them, less what
+  the fork point already holds (`_branch_records`).
 - `decide()` is a pure decision table over what was gathered.
 
 Grammar and rules stay with their owners: `check_review` (REFUTE and skip
@@ -47,18 +50,24 @@ from pathlib import Path
 from check_review import (
     OWNER_DECISION,
     PLAN_KINDS,
+    RECORD_KINDS,
     REFUTE_LINE,
+    REPLAN_LINE,
     REVIEW_REPORTS,
     ROOT_CAUSE_LINE,
     SKIP_LINE,
+    GitReadError,
     _plan_work_ids,
     _unfenced,
+    integration_refs,
     is_gate_path,
+    merge_base,
     plan_stem,
     readable,
     record_kind,
     record_texts,
     records_only,
+    root_cause_parts,
     work_key,
 )
 import required_records
@@ -305,6 +314,133 @@ def _fix_streak(root: Path, base: str | None, head: str | None) -> int | None:
     if not (base and head):
         return None
     return check_fix_streak.max_streak(root, base, head)
+
+
+# --- what the branch adds: blocked code rounds and journal records (v2.77) ---------
+# A record line is the branch's when its content is absent from every record file at the
+# fork point — compared by content, wherever the line went: `compact_journal` folding a
+# shard into `archive/` makes no old line new, a rebase keeps a line the branch's, and a
+# merge of main moves the fork along (plan review rounds 3–4). An earlier work of the same
+# issue, already on main, lends this one neither its blocks nor its skips and causes.
+
+_LIST_LEAD = re.compile(r"^\s*(?:(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s+)?)?")
+# a reason after `sites: none —`, not the brief's placeholder
+_REASON = re.compile(r"^(?!<|TODO\b|…|\.\.\.)\S")
+
+
+def _content(line: str) -> str:
+    """A record line as compared across files: no list marker, no surrounding blanks."""
+    return _LIST_LEAD.sub("", line).strip()
+
+
+def _fork(root: Path, head: str) -> str | None:
+    """The head's fork point from the integration branch (`check_review.merge_base`);
+    "" when the head is on an integration ref itself — no round of its own; None when
+    git cannot tell (no integration ref, an ambiguous fork): unknown, never "none"."""
+    try:
+        fork = merge_base(root, head)
+    except GitReadError:
+        return None
+    if fork:
+        return fork
+    # merged or missing, told apart as `check_review.full_round_base_problem` does
+    contained = any(_git(root, "rev-parse", "--verify", "-q", f"{ref}^{{commit}}").returncode == 0
+                    and _git(root, "merge-base", "--is-ancestor", head, ref).returncode == 0
+                    for ref in integration_refs(root))
+    return "" if contained else None
+
+
+def _at_fork(root: Path, fork: str) -> set[str] | None:
+    """The contents of every line of every record file at the fork point (the journal
+    with its archive, the plans); None when git cannot read them."""
+    texts = record_texts(root, RECORD_KINDS, ref=fork)
+    if texts is None:
+        return None
+    return {_content(ln) for _rel, text in texts for ln in text.splitlines() if ln.strip()}
+
+
+def _branch_records(root: Path, head: str, blocks: list[tuple[int, str]] | None,
+                    journal_dir: Path | None) -> tuple[list[int] | None, str]:
+    """(the blocked code rounds the branch adds, its journal records). The rounds are those
+    of `blocks` — `attest.block_lines`, the set the round counter counts (journal and plans
+    in the worktree, uncommitted lines too) — less the lines present at the fork point;
+    None: unknown. The journal records are the worktree journal's lines absent there, as
+    rendered (a fenced or commented line is no record)."""
+    fork = _fork(root, head)
+    if fork == "":
+        return [], ""
+    old = _at_fork(root, fork) if fork is not None else None
+    if old is None or blocks is None:
+        return None, ""
+    rounds = sorted({r for r, line in blocks if _content(line) not in old})
+    journal = record_texts(root, ("journal",), journal_dir=journal_dir) or []
+    new = [ln for _rel, text in journal for ln in readable(text).splitlines()
+           if ln.strip() and _content(ln) not in old]
+    return rounds, "\n".join(new)
+
+
+def _tracked(root: Path, head: str) -> list[str] | None:
+    r = _git(root, "ls-tree", "-r", "-z", "--name-only", head)
+    return [p for p in r.stdout.split("\0") if p] if r.returncode == 0 else None
+
+
+def _test_file(file: str, tracked: list[str] | None) -> tuple[str | None, str]:
+    """(the tracked path a reference names, why none): the path itself, or the one tracked
+    path ending in it — a pytest id relative to its rootdir (`backend/`), a JUnit
+    `classname` path. Several are none: a guess could pick another test (fail closed)."""
+    if tracked is None:
+        return None, "git cannot list the files at head"
+    file = file.removeprefix("./")
+    if file in tracked:
+        return file, ""
+    hits = [p for p in tracked if p.endswith("/" + file)]
+    if len(hits) == 1:
+        return hits[0], ""
+    if hits:
+        return None, f"{file} names several tracked files at head ({', '.join(hits[:3])}) — name the path"
+    return None, f"{file} is no tracked file at head"
+
+
+def _class_test_problem(root: Path, head: str, text: str, tracked: list[str] | None,
+                        rules: dict) -> str | None:
+    """Why one ROOT-CAUSE line's text is no class test, or None: `sites: none — <reason>`,
+    or sites and a test after them that `test_status` finds at head."""
+    _cause, sites, tests = root_cause_parts(text)
+    if sites is None:
+        return "its ROOT-CAUSE line names no `sites:`"
+    if not sites:
+        return "its `sites:` segment is empty"
+    if sites.lower() == "none":
+        return None if _REASON.match(tests) else "`sites: none` without a reason after it"
+    refs = claimed_tests(tests)
+    if not refs:
+        return "its ROOT-CAUSE line names no `<path>::<test>` after `sites:`"
+    whys = []
+    for file, name in refs:
+        path, why = _test_file(file, tracked)
+        why = why if path is None else test_status(root, head, path, name, rules)
+        if why is None:
+            return None
+        whys.append(why)
+    return "; ".join(whys)
+
+
+def _class_tests_open(root: Path, head: str, rounds: list[int], texts: list[str], ids: set,
+                      rules: dict) -> tuple[str, ...]:
+    """`<round> (<why>)` per blocked round without a class test among `texts`' ROOT-CAUSE
+    lines of the work (`ids`); one line of the round that is one suffices."""
+    causes: dict[int, list[str]] = {}
+    for t in texts:
+        for m in ROOT_CAUSE_LINE.finditer(t):
+            if _binds(m.group("work"), ids):
+                causes.setdefault(int(m.group("round")), []).append(m.group("text"))
+    tracked = _tracked(root, head) if causes else None
+    out = []
+    for r in rounds:
+        whys = [_class_test_problem(root, head, text, tracked, rules) for text in causes.get(r, [])]
+        if None not in whys:
+            out.append(f"{r} ({whys[0] if whys else 'no ROOT-CAUSE line'})")
+    return tuple(out)
 
 
 def _plan(root: Path, ids: set, head: str) -> tuple[str, str, str, str]:
@@ -791,8 +927,11 @@ def test_status(root: Path, head: str, file: str, name: str, rules: dict) -> str
 
 def gather(root: Path, *, work: str, ids: set[str], tier: int, verdict: str, independence: str,
            base: str | None, head: str | None, plan_review: bool, model: str,
-           reports: list[Path]) -> Evidence:
-    """`ids`: the work's ids (`attest.round_ids` of the plain work, no `-plan`)."""
+           reports: list[Path], blocks: list[tuple[int, str]] | None = None,
+           journal_dir: Path | None = None) -> Evidence:
+    """`ids`: the work's ids (`attest.round_ids` of the plain work, no `-plan`); `blocks`:
+    the work's blocking REVIEW lines the round counter counts (`attest.block_lines`) —
+    None on a code pass is unknown, and refused where a row asks for it."""
     if not (_resolvable(root, head) and _resolvable(root, base)):
         return Evidence(work, tier, verdict, plan_review, model, head_ok=False)
     policy, problem = review_policy(root, base)
@@ -826,17 +965,26 @@ def gather(root: Path, *, work: str, ids: set[str], tier: int, verdict: str, ind
                     status[key] = test_status(root, head, *key, policy)
     tokens = set(independence.split(","))
     skip_ids = {f"{i}-plan" for i in plan_ids} if plan_review else plan_ids
+    # a code pass: the blocked code rounds the branch adds, and its journal records (ROOT-CAUSE,
+    # skips) beside the plan's; a plan review asks no code round's records (facts None)
+    rounds, journal = (None, "") if plan_review else _branch_records(root, head, blocks, journal_dir)
+    mine = [own, journal]
+    replanned = {int(m.group("round")) for m in REPLAN_LINE.finditer(own) if _binds(m.group("work"), plan_ids)}
     return Evidence(
         work=work, tier=tier, verdict=verdict, plan_review=plan_review, model=model,
         cross_model_from=policy["cross_model_from_tier"], ranks=dict(policy["ranks"]),
         families=tuple(policy["families"]),
         gate_code=None if changed is None else any(is_gate_path(p) for p in changed),
         cross_model="cross-model" in tokens, single_family="single-family" in tokens,
-        skips=_skips([own], skip_ids), refute=_refuted([own], plan_ids),
+        skips=_skips(mine, skip_ids), refute=_refuted([own], plan_ids),
         report_refute=_refuted(report_texts, plan_ids),
-        root_cause=_root_caused([own], plan_ids),
+        root_cause=_root_caused(mine, plan_ids),
         owner_decision=bool(OWNER_DECISION.search(_unfenced(own))),
         fix_streak=None if plan_review else _fix_streak(root, base, head),
+        blocked_rounds=None if rounds is None else len(rounds),
+        # the follow-up blocks: every blocked round but the lowest
+        replan_open=tuple(r for r in (rounds or [])[1:] if r not in replanned),
+        class_test_open=_class_tests_open(root, head, rounds, mine, plan_ids, policy) if rounds else (),
         records=tuple(required_records.table(policy)),
         plan_state=state, plan_rel=rel, plan_gate_code=plan_names_gate_code(plan_read),
         plan_acs=required_criteria(plan_read, readable(spec)),
@@ -919,7 +1067,8 @@ def _decide_plan_review(ev: Evidence) -> list[str]:
 _RECORD_ASK = {
     "refute": ("work {w} has no REFUTE line at head — refute it (`docs/process/refute.md`) and "
                "commit `REFUTE work={w} round=<r>: <finding or survives: …>`"),
-    "root-cause": ("work {w} has no ROOT-CAUSE line at head — find the cause the fix commits share "
+    "root-cause": ("work {w} has no ROOT-CAUSE line (its plan at head, or new in its journal) — "
+                   "find the cause the fix commits share "
                    "(mandatory rule 6) and commit `ROOT-CAUSE work={w} round=<r>: <the cause>`"),
     "owner-decision": ("work {w} has no owner's word in its plan — the owner decides, recorded as "
                        "`DECISION <date> owner: <what and why>`"),
@@ -1035,12 +1184,14 @@ def decide(ev: Evidence) -> list[str]:
 
 def evidence_problems(root: Path, *, work: str, ids: set[str], tier: int, verdict: str,
                       independence: str, base: str | None, head: str | None, plan_review: bool,
-                      model: str, reports: list[Path]) -> list[str]:
+                      model: str, reports: list[Path], blocks: list[tuple[int, str]] | None = None,
+                      journal_dir: Path | None = None) -> list[str]:
     """attest.py's one entry: gather at head, then decide — only for a Tier 2+ pass."""
     if verdict != "pass" or tier < 2:
         return []
     ev = gather(root, work=work, ids=ids, tier=tier, verdict=verdict, independence=independence,
-                base=base, head=head, plan_review=plan_review, model=model, reports=reports)
+                base=base, head=head, plan_review=plan_review, model=model, reports=reports,
+                blocks=blocks, journal_dir=journal_dir)
     for n in sorted(ev.plan_foreign):
         # never dropped in silence (#287): the reader sees which id was left out and why
         print(f"attest: note — AC-{n} not required: {ev.plan_rel} cites it as another issue's "
