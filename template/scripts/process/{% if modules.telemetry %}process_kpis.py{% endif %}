@@ -390,6 +390,23 @@ def _model(rec: dict) -> str:
     return f"{m} ({rec['effort']})" if rec.get("effort") else m
 
 
+def _rounds_of_issue(root: Path, rounds: dict[str, dict], issue) -> dict | None:
+    """The review rounds of one issue: a REVIEW line names its work by the plan's slug as
+    often as by the number, so the work ids of every plan declaring the issue count
+    (`check_review._plan_work_ids`, the gate's own matching) — merged over those ids."""
+    import check_review as _review
+    ids = {str(issue), f"#{issue}"}
+    for rel, text in _review.record_texts(root, _review.PLAN_KINDS + ("plan-archive",)) or []:
+        text = _review._unfenced(text)
+        if int(issue) in _review._plan_issue_numbers(text):
+            ids |= _review._plan_work_ids(Path(rel).stem, text, include_dedated=True)
+    hits = [rounds[i] for i in ids if i in rounds]
+    if not hits:
+        return None
+    return {"max_round": max(h["max_round"] for h in hits), "passed": any(h["passed"] for h in hits),
+            "blocked": set().union(*(h["blocked"] for h in hits))}
+
+
 def _review_rounds(root: Path) -> dict[str, dict]:
     """work id → {max_round, passed, tier, pass_round, blocked} from every REVIEW
     line in the journal: `pass_round` is the first passing round (None before
@@ -473,18 +490,21 @@ def models(root: Path | None = None) -> int:
         tier = rounds[issue].get("tier") if issue and issue in rounds else None
         for r in recs:
             m, ph = _model(r), r.get("phase") or ""
-            if not m or not ph or last_model.get(ph) != m:
+            if not m or not ph:
                 continue
             cell = cells.setdefault((str(tier), ph, m), {"issues": set(), "blocked": 0, "rounds": [], "passed": 0,
                                                         "tokens": 0, "cost": 0.0, "reported": 0})
-            cell["issues"].add(unit)
-            if r.get("state") in ("blocked", "failed"):
-                cell["blocked"] += 1
             if isinstance(r.get("usage"), dict):  # stated by the worker (`report.py --usage`, #270)
+                # spent by the model that ran, superseded or not: its tokens are its own
                 u = r["usage"]
                 cell["tokens"] += int(u.get("input", 0)) + int(u.get("cached", 0)) + int(u.get("output", 0))
                 cell["cost"] += float(u.get("cost_usd", 0) or 0)
                 cell["reported"] += 1
+            if last_model.get(ph) != m:
+                continue  # the outcome is the last model's: a superseded run counts no issue
+            cell["issues"].add(unit)
+            if r.get("state") in ("blocked", "failed"):
+                cell["blocked"] += 1
             key = (unit, ph, m)
             if issue and issue in rounds and ph == "execute" and key not in seen_rounds:
                 seen_rounds.add(key)
@@ -649,7 +669,7 @@ def baseline_numbers(root: Path, lo: datetime, hi: datetime, *, items: list[dict
         vals = [v for v in values if v is not None]
         return round(statistics.median(vals), 1) if vals else None
 
-    rnd = [rounds.get(str(it["issue"])) for it in merged]
+    rnd = [_rounds_of_issue(root, rounds, it["issue"]) for it in merged]
     phases: dict[str, int] = {}
     for recs in _reports_by_worker(root).values():
         for r in recs:
@@ -663,7 +683,9 @@ def baseline_numbers(root: Path, lo: datetime, hi: datetime, *, items: list[dict
     escaped = [it for it in merged if it["escapes"]["value"]]
     return {
         "works": len(merged),
-        "tokens_per_work": med([it["tokens"]["value"] for it in merged]),
+        # `tokens.value` holds the fields of a work's usage (input, output, …): their sum
+        "tokens_per_work": med([sum(it["tokens"]["value"].values()) if it["tokens"]["value"] else None
+                                for it in merged]),
         "rounds_per_work": med([r["max_round"] if r else None for r in rnd]),
         "fix_rounds_per_work": med([len(r["blocked"]) if r else None for r in rnd]),
         "findings_per_work": None if isinstance(found, str) else med([by_work.get(str(it["issue"]), 0)
