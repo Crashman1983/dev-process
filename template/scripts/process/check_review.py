@@ -2656,7 +2656,7 @@ def _plan_work_ids(stem: str, text: str, *, include_dedated: bool) -> set[str]:
 
 
 # an open task: `- [ ]`, `* [ ]` or `+ [ ]` (one grammar for the gates and plan-structure)
-OPEN_TASK = re.compile(r"^[ \t]*[-*+][ \t]+\[ \][ \t]+(?P<task>.*)$", re.MULTILINE)
+OPEN_TASK = re.compile(r"^[ \t]*[-*+][ \t]+\[ \](?:[ \t]+|(?=$))(?P<task>.*)$", re.MULTILINE)  # an empty task too
 UNCHECKED = OPEN_TASK
 DECISIONS_HEADING = re.compile(r"^#{2,4}\s+Decisions\b", re.IGNORECASE | re.MULTILINE)
 

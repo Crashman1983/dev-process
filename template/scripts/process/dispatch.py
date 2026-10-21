@@ -2556,7 +2556,7 @@ def new_code_on_origin(root: Path, branch: str, *, fetch: bool = True) -> bool |
     return False
 
 
-_OPEN_TASK = re.compile(r"^\s*[-*] \[ \]", re.MULTILINE)
+_OPEN_TASK = _review.OPEN_TASK  # the one open-task grammar (`- [ ]`, `* [ ]`, `+ [ ]`)
 
 
 _FENCE = re.compile(r"^(```|~~~).*?^\1[^\n]*$", re.MULTILINE | re.DOTALL)

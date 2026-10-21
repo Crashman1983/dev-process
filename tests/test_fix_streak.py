@@ -173,3 +173,30 @@ def test_a_block_attestation_prints_the_streak_note(render, tmp_path):
         assert r.returncode == 0, r.stderr
         assert "fix-streak: note: 2 fix commits on src.py" in r.stderr, r.stderr
         assert "rebuilding the owning layer" in r.stderr
+
+
+def test_max_streak_is_what_attest_owes_a_root_cause_by(render, tmp_path):
+    """Cross-model review: attest's `fix_streak` fact was only injected in tests; the
+    reader itself — three fixes on one file, a shared CHANGELOG below three — was unpinned."""
+    import importlib
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _git(out, "init", "-q", "-b", "main")
+    _git(out, "config", "user.email", "t@t")
+    _git(out, "config", "user.name", "t")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "base")
+    _git(out, "checkout", "-q", "-b", "7-thing")
+    for subject in ("fix: a", "fix: b"):
+        _commit(out, "CHANGELOG.md", subject)
+    sys.path.insert(0, str(out / "scripts/process"))
+    try:
+        sys.modules.pop("check_fix_streak", None)
+        fs = importlib.import_module("check_fix_streak")
+        assert fs.max_streak(out, "main", "HEAD") == 0  # a shared CHANGELOG counts from three on
+        for subject in ("fix: a", "fix: b", "fix: c"):
+            _commit(out, "src.py", subject)
+        assert fs.max_streak(out, "main", "HEAD") == 3
+        assert fs.max_streak(out, "main", "no-such-ref") is None  # unreadable is no "no streak"
+    finally:
+        sys.path.remove(str(out / "scripts/process"))
+        sys.modules.pop("check_fix_streak", None)

@@ -33,7 +33,7 @@ from pathlib import Path
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from check_review import branch_issue, declared_issue_numbers, open_questions, plan_tier, spec_dir_issue  # noqa: E402
+from check_review import OPEN_TASK, branch_issue, declared_issue_numbers, open_questions, plan_tier, spec_dir_issue  # noqa: E402
 
 PLANS = ".process-work/plans"
 STATE = ".process-work/state"
@@ -41,8 +41,8 @@ INBOX = ".process-work/inbox.md"
 SPECS = "specs"
 
 ISSUE = re.compile(r"^\s*(?:[-*+]\s+)?issue\s*:\s*(\S+)", re.IGNORECASE | re.MULTILINE)
-UNCHECKED = re.compile(r"^\s*- \[ \] (.+)$", re.MULTILINE)
-CHECKED = re.compile(r"^\s*- \[[xX]\] ", re.MULTILINE)
+UNCHECKED = OPEN_TASK  # the gates' grammar; findall yields the task text
+CHECKED = re.compile(r"^[ \t]*[-*+][ \t]+\[[xX]\][ \t]", re.MULTILINE)
 MARKER = re.compile(r"\[NEEDS CLARIFICATION", re.IGNORECASE)
 # the decisions ledger (journal-state-plans.md, Plans): one line per decision
 # made in dialogue — `- DECISION 2026-09-10 owner: what — because why`. It is
