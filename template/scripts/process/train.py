@@ -1105,7 +1105,7 @@ _local_issues = _review.local_issue_numbers  # one owner (#204)
 
 STAYS_ACTIVE = re.compile(_review._LEAD + r"plan-stays-active[*_]*\s*:\s*[*_]*\s*\S",
                           re.IGNORECASE | re.MULTILINE)
-_OPEN_TASK = re.compile(r"^\s*[-*+] \[ \]", re.MULTILINE)
+_OPEN_TASK = _review.OPEN_TASK  # the one open-task grammar
 
 
 def _own_plans(root: Path, base: str, branch: str, read, *,
