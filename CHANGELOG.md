@@ -16,7 +16,7 @@ A few plain sentences per release: [NEWS.md](NEWS.md). Deutsche Fassung:
 
 **What changes.**
 - The Codex dispatch writes the header block first and the title after it (#286).
-- attest leaves out an id whose every mention is bound to another issue right beside it — "AC-11 measurement (#2659)", "AC-2 of #9", "#9's AC-2" — and names it in a note (#287). A definition line `AC-<id>: …`, one free mention, a reference to the plan's own issue, or the spec keep an id required.
+- attest leaves out an id whose every mention is bound to another issue right beside it — "AC-11 measurement (#2659)", "AC-2 of #9", "#9's AC-2"; a verb binds nothing — and names it in a note (#287). A definition line `AC-<id>: …`, one free mention, a reference to the plan's own issue, or the spec keep an id required.
 - `verification-independence.md`: a read-only reviewer through opencode also needs redirects, pipes and chains denied — an allowed `git show*` let a review write `git show … > <file>`.
 
 **Update.** Nothing to do. A dispatched Codex report written before the update keeps its title on top: move it below the header block if the gate refuses it.
