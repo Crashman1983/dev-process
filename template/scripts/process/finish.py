@@ -84,6 +84,7 @@ from check_review import (  # noqa: E402  (one owner for grammar + arithmetic)
     no_clearing_review,
     paths_in_flight,
     review_passes,
+    spec_plan_findings,
     speckit_unreviewed,
     stale_review,
     verified_template_plan,
@@ -230,7 +231,11 @@ def check(root: Path) -> tuple[list[str], list[str]]:
     done_spec_dirs: list[str] = []
     sdir = root / SPECS_DIR
     if sdir.is_dir():
+        in_flight_specs = spec_plan_findings(root, passes, in_flight)  # the gate's duty (#266)
+        blockers.extend(f"{f}; run /review before /finish" for f in in_flight_specs)
         for name, tier, ids in speckit_unreviewed(root, passes):
+            if any(f.startswith(f"{SPECS_DIR}/{name}/") for f in in_flight_specs):
+                continue  # already named above
             blockers.append(no_clearing_review(f"{SPECS_DIR}/{name}", tier, ids)
                             + " — its tasks are all ticked; run /review before /finish")
         for d in sorted(p for p in sdir.iterdir() if p.is_dir()):

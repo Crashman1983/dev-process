@@ -174,13 +174,15 @@ def test_speckit_plan_with_pass_is_ready_and_prunes(render, tmp_path):
     assert "publish_and_prune.py specs/009-widget" in r.stdout
 
 
-def test_speckit_plan_in_flight_is_not_blocked(render, tmp_path):
+def test_speckit_plan_in_flight_without_review_blocks(render, tmp_path):
+    """#266: a Spec Kit plan this branch carries owes its review at the merge, like an
+    active plan — unticked tasks no longer let it through."""
     out = _repo_on_feature(render, tmp_path)
     _spec_dir(out, "009-widget", tier=3, ticked=False)
     _git(out, "add", "-A")
     _git(out, "commit", "-q", "-m", "feat: widget in flight")
     r = _run(out)
-    assert r.returncode == 0, r.stdout + r.stderr
+    assert r.returncode == 1 and "specs/009-widget/plan.md" in r.stdout, r.stdout + r.stderr
 
 
 def test_foreign_active_plan_does_not_block_this_branch(render, tmp_path):
