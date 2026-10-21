@@ -12,18 +12,19 @@ A few plain sentences per release: [NEWS.md](NEWS.md). Deutsche Fassung:
 
 ## v2.76.1 — A dispatched Codex report is readable; another issue's criterion is not required · 2026-10-21
 
-**Why.** Two template defects reached Kenni. The Codex dispatch wrote the report's title above its header block. The header is the block up to the first blank line, so the github-issues report gate read no `review:` and refused the push: twice on one day (Kenni #2683, #2691), each fixed by hand. `check_review.report_header` read no `work:` from such a report either. And attest counted every `AC-<id>` in a plan as a criterion of the work, including one the plan only cited from another issue ("up to the AC-11 measurement (#2659)"). It then refused a pass for a test that criterion never owed.
+**Why.** Two template defects reached Kenni. The Codex dispatch wrote the report's title above its header block. The header is the block up to the first blank line, so the github-issues report gate read no `review:` and refused the push: twice on one day (Kenni #2683, #2691), each fixed by hand. `check_review.report_header` read no `work:` from such a report either. And attest counted every `AC-<id>` in a plan as a criterion of the work, including one the plan only cited from another issue ("up to the AC-11 measurement (#2659)"). It then refused a pass for a test that criterion never owed. A third came from Kenni #2338: the Codex handoff attested the issue number, and an issue split into several plans made attest refuse it, with no way to name the plan.
 
 **What changes.**
 - The Codex dispatch writes the header block first and the title after it (#286).
 - A plan cites another issue's criterion qualified, `#2659/AC-11`: attest does not require it and names it in a note (#287). A bare `AC-<id>` stays the plan's own — prose cannot tell a citation from an own criterion with its origin — and its refusal now names the qualified form as the way out.
+- A dispatched Codex review records its work: the issue number, or — when that number names several plans at the reviewed head — the slug of the plan it reviews. The handoff attests with it, and the fallback hint names it (#290).
 - `verification-independence.md`: a read-only reviewer through opencode also needs redirects, pipes and chains denied — an allowed `git show*` let a review write `git show … > <file>`.
 
 **Update.** A plan that names another issue's criterion writes it `#<issue>/AC-<id>`; a bare id stays required, and attest says so. A dispatched Codex report written before the update keeps its title on top: move it below the header block if the gate refuses it.
 
 **Changed sections.** `journal-state-plans.md` (Plans), `verification-independence.md` (The review bundle — the portable interface to any reviewer)
 
-Details: #286 #287
+Details: #286 #287 #290
 
 ## v2.76.0 — Deterministic checks before review, the measure of their effect · 2026-10-21
 

@@ -11,18 +11,19 @@ English version: [CHANGELOG.md](CHANGELOG.md). Die Releases vor v2.28.2:
 
 ## v2.76.1 — Ein dispatchter Codex-Bericht ist lesbar; das Kriterium eines anderen Issues ist keine Pflicht · 2026-10-21
 
-**Warum.** Zwei Template-Fehler sind in Kenni angekommen. Der Codex-Dispatch schrieb den Titel des Berichts über den Header-Block. Der Header ist der Block bis zur ersten Leerzeile, also las das Report-Gate des github-issues-Moduls kein `review:` und lehnte den Push ab: zweimal an einem Tag (Kenni #2683, #2691), jedes Mal von Hand behoben. Auch `check_review.report_header` las aus so einem Bericht kein `work:`. Und attest zählte jede `AC-<id>` eines Plans als Kriterium der Arbeit, auch eine, die der Plan nur aus einem anderen Issue zitiert („bis zur AC-11-Messung (#2659)“). Dann verweigerte attest einen Pass für einen Test, den dieses Kriterium nie schuldete.
+**Warum.** Zwei Template-Fehler sind in Kenni angekommen. Der Codex-Dispatch schrieb den Titel des Berichts über den Header-Block. Der Header ist der Block bis zur ersten Leerzeile, also las das Report-Gate des github-issues-Moduls kein `review:` und lehnte den Push ab: zweimal an einem Tag (Kenni #2683, #2691), jedes Mal von Hand behoben. Auch `check_review.report_header` las aus so einem Bericht kein `work:`. Und attest zählte jede `AC-<id>` eines Plans als Kriterium der Arbeit, auch eine, die der Plan nur aus einem anderen Issue zitiert („bis zur AC-11-Messung (#2659)“). Dann verweigerte attest einen Pass für einen Test, den dieses Kriterium nie schuldete. Ein dritter kam aus Kenni #2338: Der Codex-Handoff attestierte die Issue-Nummer, und ein Issue mit mehreren Plänen ließ attest sie ablehnen, ohne Weg, den Plan zu nennen.
 
 **Was sich ändert.**
 - Der Codex-Dispatch schreibt zuerst den Header-Block, danach den Titel (#286).
 - Ein Plan zitiert das Kriterium eines anderen Issues qualifiziert, `#2659/AC-11`: attest verlangt es nicht und nennt es in einem Hinweis (#287). Eine nackte `AC-<id>` bleibt ein eigenes Kriterium — Prosa unterscheidet kein Zitat von einem eigenen Kriterium mit Herkunftsangabe —, und ihre Ablehnung nennt jetzt die qualifizierte Form als Ausweg.
+- Ein dispatchtes Codex-Review hält seine Arbeit fest: die Issue-Nummer, oder — wenn sie am geprüften Head mehrere Pläne benennt — den Slug des Plans, den es prüft. Der Handoff attestiert damit, und der Fallback-Hinweis nennt sie (#290).
 - `verification-independence.md`: Ein lesender Reviewer über opencode braucht auch gesperrte Umleitungen, Pipes und Verkettungen — ein erlaubtes `git show*` ließ ein Review `git show … > <Datei>` schreiben.
 
 **Update.** Ein Plan, der das Kriterium eines anderen Issues nennt, schreibt es `#<issue>/AC-<id>`; eine nackte ID bleibt Pflicht, und attest sagt das. Ein dispatchter Codex-Bericht von vor dem Update hat den Titel noch oben: Lehnt das Gate ihn ab, den Titel unter den Header-Block verschieben.
 
 **Geänderte Abschnitte.** `journal-state-plans.md` (Plans), `verification-independence.md` (The review bundle — the portable interface to any reviewer)
 
-Details: #286 #287
+Details: #286 #287 #290
 
 ## v2.76.0 — Deterministische Prüfungen vor dem Review, und das Maß ihrer Wirkung · 2026-10-21
 

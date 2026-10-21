@@ -11,7 +11,8 @@ English version: [NEWS.md](NEWS.md).
 
 Ein Review des Codex-Reviewers wird beim Push nicht mehr wegen eines fehlenden
 Headers abgelehnt. Ein Plan, der das Kriterium eines anderen Issues als `#2659/AC-11` zitiert,
-muss es nicht mehr mit einem eigenen Test belegen.
+muss es nicht mehr mit einem eigenen Test belegen. Ein Codex-Review eines Issues mit
+mehreren Plänen attestiert jetzt den Plan, den es geprüft hat.
 
 ## v2.76.0 — Prüfungen fangen vor dem Review, was eine Regel fangen kann
 

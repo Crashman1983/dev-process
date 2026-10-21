@@ -206,10 +206,11 @@ def unavailable_ids(records: Path) -> set[str]:
     return out
 
 
-def fallback_hint(issue: int, phase: str, plan_review: bool, row: str | None, tier: int | None = None) -> str:
+def fallback_hint(issue: int, phase: str, plan_review: bool, row: str | None, tier: int | None = None,
+                  work: str | None = None) -> str:
     if phase != "review":
         return "dispatch: start it with --harness claude, or fix the Codex CLI on this host"
-    work = f"{issue}-plan" if plan_review else str(issue)
+    work = f"{work or issue}-plan" if plan_review else (work or str(issue))
     return ("dispatch: without Codex the review still runs — the recorded way out (docs/process/tower.md):\n"
             f"  1. dispatch.py start --issue {issue} --phase review"
             + (f" --tier {tier}" if tier is not None else "")
@@ -672,7 +673,7 @@ def handoff(root: Path, rec: dict, *, implementer: str | None = None) -> dict:
                                             f"git -C {wt} push origin HEAD:refs/heads/{rec['branch']}")
             return previous
     plan_review = bool(rec.get("plan_review"))
-    work = str(rec["issue"])
+    work = rec.get("work") or str(rec["issue"])  # the session's plan slug when the number is ambiguous (#290)
     wt = Path(rec["worktree"])
     b = rec["binding"]
     try:
