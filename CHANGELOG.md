@@ -16,12 +16,12 @@ A few plain sentences per release: [NEWS.md](NEWS.md). Deutsche Fassung:
 
 **What changes.**
 - The Codex dispatch writes the header block first and the title after it (#286).
-- attest leaves out an id whose every mention is bound to another issue right beside it — "AC-11 measurement (#2659)", "AC-2 of #9", "#9's AC-2"; a verb binds nothing — and names it in a note (#287). A definition line `AC-<id>: …`, one free mention, a reference to the plan's own issue, or the spec keep an id required.
+- A plan cites another issue's criterion qualified, `#2659/AC-11`: attest does not require it and names it in a note (#287). A bare `AC-<id>` stays the plan's own — prose cannot tell a citation from an own criterion with its origin — and its refusal now names the qualified form as the way out.
 - `verification-independence.md`: a read-only reviewer through opencode also needs redirects, pipes and chains denied — an allowed `git show*` let a review write `git show … > <file>`.
 
-**Update.** Nothing to do. A dispatched Codex report written before the update keeps its title on top: move it below the header block if the gate refuses it.
+**Update.** A plan that names another issue's criterion writes it `#<issue>/AC-<id>`; a bare id stays required, and attest says so. A dispatched Codex report written before the update keeps its title on top: move it below the header block if the gate refuses it.
 
-**Changed sections.** `verification-independence.md` (The review bundle — the portable interface to any reviewer)
+**Changed sections.** `journal-state-plans.md` (Plans), `verification-independence.md` (The review bundle — the portable interface to any reviewer)
 
 Details: #286 #287
 

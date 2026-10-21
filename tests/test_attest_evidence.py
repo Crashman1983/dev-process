@@ -790,48 +790,35 @@ def test_the_owner_decision_cannot_be_skipped(ev_mod):
     assert [o.kind for o in owed] == ["owner-decision"]
 
 
-def test_an_id_named_only_beside_another_issue_is_not_required(ev_mod):
-    """#287 (Kenni #2687): "dsh runs up to the AC-11 measurement (#2659)" made attest ask
-    for AC-11 — another issue's criterion."""
+def test_another_issues_criterion_is_cited_qualified_and_not_required(ev_mod):
+    """#287 (Kenni #2687): a plan citing another issue's criterion made attest ask for it.
+    Only the qualified form `#N/AC-<id>` is a citation; prose cannot tell "another issue's
+    AC-11" from an own criterion with its origin, so a bare id stays the plan's own."""
     mod, _out = ev_mod
     req, foreign = mod.required_criteria, mod.foreign_criteria
-    plan = ("issue: #7\n\n- AC-1: When x, the widget shall answer 42.\n\n"
-            "dsh runs only up to the AC-11 measurement (#2659). The rest is AC-1's business.\n")
-    assert req(plan, "") == {"1"} and foreign(plan, "") == {"11"}
-    # its own definition line makes it this plan's, whatever issue the line cites
-    assert req(plan + "- AC-11: When y, z shall hold (as in #2659).\n", "") == {"1", "11"}
-    # a mention in a sentence without another issue keeps it required
-    assert req(plan + "AC-11 also guards the cache.\n", "") == {"1", "11"}
-    # the plan's own issue is no other one; a repository-qualified one is
-    assert req("issue: #7\nAC-3 closes the gap of #7.\n", "") == {"3"}
-    assert req("issue: #7\nAC-3 of owner/other#9 is not ours.\n", "") == set()
-    # a verb binds nothing; a free mention of a hyphen compound keeps the id (delta round 3)
-    assert req("issue: #7\nAC-5 closes #2659.\n", "") == {"5"}
-    assert req("issue: #7\nAC-5 deckt #2659.\n", "") == {"5"}
-    assert req("issue: #7\ndsh läuft nur bis zur AC-11-Messung (#2659).\nAC-11 prüft die Cache-Grenze.\n",
-               "") == {"11"}
-    # a spec's criterion is the work's own even beside another issue
-    assert req("See AC-2 of #9.\n", "- AC-2: When a, b shall c.\n") == {"2"}
-    # cross-model review of the patch: only an id bound to another issue right beside it is
-    # foreign — a table row, a sentence also citing the own issue, a finished sentence before
-    # a citation on the next line, a list item beside another stay the plan's own
-    assert req("issue: #7\n\n| AC-3 | When x, y shall z | #2659 |\n", "") == {"3"}
-    assert req("issue: #7\n\n| AC-3: When x, y shall z | #2659 |\n", "") == {"3"}
-    assert req("issue: #7\nAC-4 closes #7 and the gap of #2659.\n", "") == {"4"}
-    assert req("issue: #7\n**Done: AC-4.**\nSee #2659.\n", "") == {"4"}
-    assert req('issue: #7\nThe owner said "keep AC-4."\nSee #2659.\n', "") == {"4"}
-    assert req("issue: #7\n- AC-5 is listed here\n- the next item cites #2659\n", "") == {"5"}
-    # the bound forms: suffix word, parenthesis, "of", a line break, the reference first
-    assert req("issue: #7\ndsh runs only up to the AC-11 measurement\n(#2659).\n", "") == set()
-    assert req("issue: #7\ndsh läuft nur bis zur AC-11-Messung (#2659).\n", "") == set()
-    assert req("issue: #7\nAs #2659's AC-6 says.\n", "") == set()
+    own = "issue: #7\n\n- AC-1: When x, the widget shall answer 42.\n"
+    for line in ("Die Ablehnungsmenge des iOS-Prädikats aus #1918/AC-4.",
+                 "dsh läuft nur bis zur #2659/AC-4-Messung.", "As in owner/repo#9/AC-4."):
+        assert req(own + line + "\n", "") == {"1"} and foreign(own + line + "\n", "") == {"4"}, line
+    # a bare mention keeps the id the plan's own, whatever issue stands beside it (fail closed)
+    assert req(own + "dsh runs only up to the AC-4 measurement (#2659).\n", "") == {"1", "4"}
+    assert req(own + "#1918/AC-4 and AC-4 here too.\n", "") == {"1", "4"}
+    assert foreign(own + "#1918/AC-4 and AC-4 here too.\n", "") == set()  # no note for a required id
+    # the plan's own issue is no other one; a spec's criterion is the work's own
+    assert req(own + "See #7/AC-4.\n", "") == {"1", "4"}
+    assert req("issue: #7\nSee #9/AC-2.\n", "- AC-2: When a, b shall c.\n") == {"2"}
 
 
 def test_attest_names_the_id_it_left_out(repo):
     """#287 AC-3: an id left out as foreign is named, never dropped in silence."""
     plan = repo / ".process-work/plans/2026-10-14-widget.md"
-    plan.write_text(PLAN + "\ndsh runs only up to the AC-11 measurement (#2659).\n")
+    plan.write_text(PLAN + "\ndsh runs only up to the #2659/AC-11 measurement.\n")
     _git(repo, "commit", "-qam", "docs: cite another issue")
     r = _attest(repo, "--with", _report(repo))
     assert r.returncode == 0, r.stderr
-    assert "AC-11 not required" in r.stderr and "#N" in r.stderr, r.stderr
+    assert "AC-11 not required" in r.stderr and "#<issue>/AC-11" in r.stderr, r.stderr
+    # a bare mention stays required, and the refusal names the way out
+    plan.write_text(PLAN + "\ndsh runs only up to the AC-11 measurement (#2659).\n")
+    _git(repo, "commit", "-qam", "docs: bare mention")
+    r = _attest(repo, "--with", _report(repo))
+    assert r.returncode == 1 and "write it `#<issue>/AC-11`" in r.stderr, r.stderr
