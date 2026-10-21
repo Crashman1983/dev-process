@@ -7,6 +7,10 @@ technischen Einzelheiten stehen im [CHANGELOG](CHANGELOG-DE.md).
 
 English version: [NEWS.md](NEWS.md).
 
+## v2.76.0 — Prüfungen fangen vor dem Review, was eine Regel fangen kann
+
+Pläne, Reviews und Testläufe eines Projekts werden auf das geprüft, was eine Regel oder ein Test selbst entscheiden kann: Die Kriterien eines Plans werden schon beim Schreiben geprüft, Warnungen, denen niemand folgen musste, wurden Pflichten mit einem klaren Ausweg, und die Review-Liste zeigt nur, was die Änderung berührt. Ein neuer Bericht zeigt, ob das wirklich Review-Runden und Kosten je Arbeit spart, mit den Fehlern, die trotzdem durchrutschen, als Wächter.
+
 ## v2.75.0 — Ein Template-Update wird einmal geprüft, auch wenn dazwischen anderes gemergt wird
 
 Ein Projekt, das die Vorlage aktualisiert, quittiert und prüft das Update

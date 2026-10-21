@@ -10,6 +10,40 @@ A few plain sentences per release: [NEWS.md](NEWS.md). Deutsche Fassung:
 [CHANGELOG-DE.md](CHANGELOG-DE.md). Releases before v2.28.2:
 [docs/changelog-archive.md](docs/changelog-archive.md).
 
+## v2.76.0 — Deterministic checks before review, the measure of their effect · 2026-10-21
+
+**Why.** Kenni's review history (315 reports, 1,694 findings, dev-process #277 step 0) showed that of the 423 blocking or major findings only 85 needed a reader's judgment; the rest a rule or a test could have caught. Seven of twenty findings where a check never took effect were rules that only printed a warning, seven more were rules that existed only as prose. A template update could not clear its own review, a train carrying one was refused, and a test run under `MAKEFLAGS=-n` passed the push hook.
+
+**What changes.**
+- Required records (#282): one table, `review_evidence.required_records` in `model-policy.json`, says what a work owes — a REFUTE for gate code and from Tier 3, a ROOT-CAUSE line after three fix commits on one file, the owner's `DECISION <date> owner:` behind a `review-waived:` line. attest refuses without the record or a reasoned `skipped <kind> work=<id>: <reason>` (the owner's word cannot be skipped); a project appends rows under `required_records_extra`. The bundle reads its refute warning from the same table.
+- New core gate `plan-structure` (#278): in a Tier 2+ plan the branch adds, each `AC-<id>:` criterion has exactly one `shall`, an id used once, and — once a task is ticked and at the merge push — its planned test (`AC-<id>: <path>::<test>`, `struck — <reason>` or `manual: <reason>`); at the merge push no task is left `- [ ]` without `struck:` or `moved: #N`. Project sections, the `shall` word and a story registry come from `plan-structure.local.json`, read at the integration ref.
+- The review checklist can be scoped to the diff (#281): `review-sections.local.json` maps sections to path classes; the bundle leaves out sections no touched class reaches and names them, and keeps every section when a path falls into no class.
+- FINDING lines carry `class=mechanical|testable|judgment` and `rule=<check>` (#276); `process_kpis.py findings` counts them and names a check that repeats across works. The Codex reviewer writes both.
+- `process_kpis.py baseline` (#277): per merged work in one or two date windows, the medians of tokens, review and fix rounds, findings and lead time, the tokens stated per phase, escaped works and the change-failure proxy. `testing.md` gains "Classes, not cases"; the github-issues module ships a verification-change template with "Replaces" and "Measure".
+- Dispatch (#270): `start` and `queue add` take `--class`, the class travels through the chain; `report.py` takes the state `failed` (crash, timeout — listed high by the tower) and `--usage input=…,cached=…,output=…[,cost_usd=…]`, shown by `models`; a policy cell's `status_file` is a liveness signal. `deepseek-` is a model family of its own.
+- Fixes: a template update's own review report no longer counts as unseen project delta (#272); the gate judges a template update in a train on its own branch (#271); a test run under `MAKEFLAGS=-n` or a variable from `certificate_env` refuses the push, and a green stage retry writes the merge certificate (#265); an in-flight Spec Kit plan owes presence and own family in the gate and in `finish.py` (#266); `due_measurements.py` names a missing milestone file (#259).
+
+**Effect.** Defects a rule or a test can catch are caught before the review, warnings that nobody had to follow became duties with an explicit way out, and the baseline shows whether fewer fix rounds and tokens per work follow — with escaped works as the guard.
+
+**Update.**
+1. Nothing is required for existing plans: `plan-structure` binds only plans a branch adds.
+2. Stricter than before:
+   - every Tier 3 code-review pass needs a REFUTE line of the work or `skipped refute work=<id>: <reason>`;
+   - three fix commits on one file need a ROOT-CAUSE line or a skip;
+   - a `review-waived:` plan in flight needs `DECISION <date> owner: …`;
+   - a new Tier 2+ plan's criteria follow the EARS line form with one `shall` (a project writing in another language sets `shall_words`);
+   - a push under `MAKEFLAGS=-n` or a `certificate_env` variable is refused;
+   - an in-flight Spec Kit plan blocks `finish.py` without its review.
+3. Optional:
+   - `plan-structure.local.json` for project sections and a story registry;
+   - `review-sections.local.json` to scope the checklist;
+   - `class=`/`rule=` on findings;
+   - `--usage` and `status_file` for harnesses without transcripts.
+
+**Changed sections.** `journal-state-plans.md` (Plans, Review attestations), `mandatory-rules.md`, `refute.md` (What happens with the findings), `start-here.md` (The standard setup), `testing.md` (Classes, not cases — new), `tower.md` (The worker protocol), `verification-independence.md` (The review bundle — the portable interface to any reviewer), module `telemetry` (The KPI cockpit)
+
+Details: [Plan](docs/analysis/2026-10-21-v2.76.md) #259 #265 #266 #270 #271 #272 #276 #277 #278 #281 #282
+
 ## v2.75.0 — Template updates survive a moving main, one fence reading, bookkeeping counted from the runs · 2026-10-19
 
 **Why.** Kenni's v2.74 update needed its ack and its full Tier 3 review again after every train that moved main, although nothing in the update had changed; the train's retry message also named the wrong retry. The three readers of fenced blocks disagreed on what closes a fence, so a quoted `REVIEW … verdict=pass` or `review-waived:` could count as real. Refute and red-evidence lines were still typed by hand, a deleted plan escaped its review, and the v2.74 reviews left smaller residues in attest, finish, the design-contract gate and the review bundle.

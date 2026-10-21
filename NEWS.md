@@ -7,6 +7,10 @@ details are in the [CHANGELOG](CHANGELOG.md).
 
 Deutsche Fassung: [NEWS-DE.md](NEWS-DE.md).
 
+## v2.76.0 — Checks catch before the review what a rule can catch
+
+A project's plans, reviews and test runs are checked for what a rule or a test can decide on its own: a plan's criteria are checked as they are written, warnings nobody had to follow became duties with a clear way out, and the review list shows only what the change touches. A new report shows whether that really saves review rounds and cost per piece of work, with the defects that still slip through as the guard.
+
 ## v2.75.0 — A template update is reviewed once, even when other work merges in between
 
 A project updating the template acknowledges and reviews the update once;
