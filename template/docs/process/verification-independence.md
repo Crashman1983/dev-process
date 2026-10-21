@@ -66,6 +66,15 @@ the `FINDING` line's owner is the github-issues report gate and its tokens are
 pinned to that gate by a template test. Sources it cannot read are named in
 place.
 
+The checklist can be scoped to the diff (#281):
+`docs/process/review-sections.local.json`, read at the base, maps path classes
+to globs (`{"classes": {"ui": ["frontend/**"], …}, "sections": {"Surfaces":
+["ui"], …}}`; a section key is the start of its `## ` heading). The bundle then
+leaves out a mapped section whose classes the branch's paths do not reach, and
+names what it left out. It keeps every section without the file, with a
+malformed one, or when a path falls into no class — leaving out what a diff
+may touch would be a silent gap.
+
 Dispatching is harness-plumbing around that artifact — pick what exists:
 
     python scripts/process/make_review_bundle.py -o /tmp/bundle.md
