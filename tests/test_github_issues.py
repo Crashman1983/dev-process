@@ -669,6 +669,18 @@ def test_module_doc_names_review_visibility(render, tmp_path):
     assert "campaign" in t
 
 
+def test_module_doc_makes_class_required_on_blockers_and_majors(render, tmp_path):
+    """#297 AC-6: the doc states the duty the gate enforces, and what `class=` means."""
+    out = _render(render, tmp_path)
+    t = " ".join((out / "docs/process/modules/github-issues.md").read_text().split())
+    assert "`class` is **required on every blocker and major** and says what could have caught the finding" in t
+    assert "not what kind of failure it is" in t
+    assert "[class=<mechanical|testable|judgment>] [rule=<check>]" in t
+    assert "round: 2" in t and "class=mechanical rule=placeholder-scan" in t
+    assert "A blocker or major finding the branch adds without `class=` fails" in t
+    assert "compared without its `issue=` field" in t
+
+
 def test_docs_wire_report_duty(render, tmp_path):
     out = _render(render, tmp_path)
     vi = (out / "docs/process/verification-independence.md").read_text()
