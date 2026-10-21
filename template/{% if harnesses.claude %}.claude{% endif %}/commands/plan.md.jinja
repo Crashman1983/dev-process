@@ -81,6 +81,18 @@ that owner — a second reader left behind judges the next input differently
 (`docs/process/failure-catalog.md`). `/execute` compares the final diff against
 this inventory before `pushed`; it does not build a second one.
 
+**State work gets its transition table.** A plan for concurrency, a
+lifecycle, a state machine, a guard or a parser carries `## Transitions`
+(`docs/process/design-template.md`): state × event → result, forbidden
+transitions included, with a `Test` column — one test per row; rows of one
+equivalence class may name the same test, `struck — <reason>` where none is
+due. Beside it the plan names the invariant, its one owner, and the inventory
+of every writer and reader of the state (`path:line`). Measured downstream:
+in 8 of 12 issues with four or more review rounds the remedy belonged in the
+plan — a state table, an invariant, a writer and reader inventory. The `plan-structure` gate reads the table in every Tier 2+ plan the branch
+adds, Spec Kit plans included: every cell filled, and a test in each test
+cell once the first task is ticked.
+
 **Known facts come with the task.** Where the project keeps generated
 inventories (`docs/process/inventories.md`), run `uv run
 scripts/process/inventory.py for-plan <plan>` once the files are named: every
