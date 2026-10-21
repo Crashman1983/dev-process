@@ -74,14 +74,24 @@ missing or unresolved input read as? Walk the classes of
 ## Transitions (state machines and event-driven work only)
 A table instead of prose invariants: state × event → result, including the
 forbidden transitions and when a derived assignment expires (its basis gone
-or changed). One test per equivalence class of rows, a negative test per
-forbidden transition. Other work omits this section. The review bundle notes
-a likely missing table when a plan speaks of states, events or expiry and has
-no such section.
+or changed). Concurrency, a lifecycle, a guard and a parser count as state
+work too. Name the invariant, its one owner, and every writer and reader of
+the state. The `Test` column holds one test per row;
+rows of one equivalence class may name the same test,
+and a forbidden transition has a negative test. A test cell is `<path>::<test>` (it may not exist yet) or
+`struck — <reason>`. In a Tier 2+ plan the `plan-structure` gate reads the
+table: every cell filled, and a test in every test cell once the first task
+is ticked. Other work omits this section. The review bundle notes a likely
+missing table when a plan speaks of states, events or expiry and has no such
+section.
 
-| State | Event | Result |
-|---|---|---|
-| … | … | … / forbidden |
+| State | Event | Result | Test |
+|---|---|---|---|
+| draft | submit | in review | `tests/test_order.py::test_submit_starts_review` |
+| in review | approve | approved | `tests/test_order.py::test_decision_ends_review` |
+| in review | reject | draft | `tests/test_order.py::test_decision_ends_review` |
+| approved | submit | forbidden | `tests/test_order.py::test_submit_after_approval_is_refused` |
+| approved | price list changed | approval expires → draft | struck — prices are frozen at approval in this release |
 
 ## Fresh-worktree dry run (migrations; deleted or replaced gate, hook or lane scripts)
 Required before the first plan review when the plan migrates (a template
