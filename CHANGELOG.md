@@ -15,8 +15,8 @@ A few plain sentences per release: [NEWS.md](NEWS.md). Deutsche Fassung:
 **Why.** Kenni's review history (315 reports, 1,694 findings, dev-process #277 step 0) showed that of the 423 blocking or major findings only 85 needed a reader's judgment; the rest a rule or a test could have caught. Seven of twenty findings where a check never took effect were rules that only printed a warning, seven more were rules that existed only as prose. A template update could not clear its own review, a train carrying one was refused, and a test run under `MAKEFLAGS=-n` passed the push hook.
 
 **What changes.**
-- Required records (#282): one table, `review_evidence.required_records` in `model-policy.json`, says what a work owes — a REFUTE for gate code and from Tier 3, a ROOT-CAUSE line after three fix commits on one file, the owner's `DECISION <date> owner:` behind a `review-waived:` line. attest refuses without the record or a reasoned `skipped <kind> work=<id>: <reason>` (the owner's word cannot be skipped); a project appends rows under `required_records_extra`. The bundle reads its refute warning from the same table.
-- New core gate `plan-structure` (#278): in a Tier 2+ plan the branch adds, each `AC-<id>:` criterion has exactly one `shall`, an id used once, and — once a task is ticked and at the merge push — its planned test (`AC-<id>: <path>::<test>`, `struck — <reason>` or `manual: <reason>`); at the merge push no task is left `- [ ]` without `struck:` or `moved: #N`. Project sections, the `shall` word and a story registry come from `plan-structure.local.json`, read at the integration ref.
+- Required records (#282): one table, `review_evidence.required_records` in `model-policy.json`, says what a work owes — a REFUTE for gate code and from Tier 3, a ROOT-CAUSE line after three fix commits on one file, the owner's `DECISION <date> owner:` behind a `review-waived:` line, wherever the plan lives (active, archive, Spec Kit) and already at `/finish`. attest refuses without the record or a reasoned `skipped <kind> work=<id>: <reason>` (the owner's word cannot be skipped); a project appends rows under `required_records_extra`. The bundle reads its refute warning from the same table.
+- New core gate `plan-structure` (#278): in a Tier 2+ plan the branch adds — active or already archived, or raised here from Tier 1 — each `AC-<id>:` criterion has exactly one `shall`, an id used once, and — once a task is ticked and at the merge push — its planned test (`AC-<id>: <path>::<test>` or `struck — <reason>`, the grammar attest accepts); at the merge push no task is left `- [ ]` without `struck:` or `moved: #N`. Project sections, further `shall` words and a story registry come from `plan-structure.local.json`, read at the integration ref.
 - The review checklist can be scoped to the diff (#281): `review-sections.local.json` maps sections to path classes; the bundle leaves out sections no touched class reaches and names them, and keeps every section when a path falls into no class.
 - FINDING lines carry `class=mechanical|testable|judgment` and `rule=<check>` (#276); `process_kpis.py findings` counts them and names a check that repeats across works. The Codex reviewer writes both.
 - `process_kpis.py baseline` (#277): per merged work in one or two date windows, the medians of tokens, review and fix rounds, findings and lead time, the tokens stated per phase, escaped works and the change-failure proxy. `testing.md` gains "Classes, not cases"; the github-issues module ships a verification-change template with "Replaces" and "Measure".
@@ -30,8 +30,8 @@ A few plain sentences per release: [NEWS.md](NEWS.md). Deutsche Fassung:
 2. Stricter than before:
    - every Tier 3 code-review pass needs a REFUTE line of the work or `skipped refute work=<id>: <reason>`;
    - three fix commits on one file need a ROOT-CAUSE line or a skip;
-   - a `review-waived:` plan in flight needs `DECISION <date> owner: …`;
-   - a new Tier 2+ plan's criteria follow the EARS line form with one `shall` (a project writing in another language sets `shall_words`);
+   - a `review-waived:` plan in flight needs `DECISION <date> owner: …`; `/finish` asks for it before archiving;
+   - a new Tier 2+ plan's criteria follow the EARS line form with one `shall` (a project writing in another language adds its word in `shall_words`);
    - a push under `MAKEFLAGS=-n` or a `certificate_env` variable is refused;
    - an in-flight Spec Kit plan blocks `finish.py` without its review.
 3. Optional:
@@ -40,7 +40,7 @@ A few plain sentences per release: [NEWS.md](NEWS.md). Deutsche Fassung:
    - `class=`/`rule=` on findings;
    - `--usage` and `status_file` for harnesses without transcripts.
 
-**Changed sections.** `journal-state-plans.md` (Plans, Review attestations), `mandatory-rules.md`, `refute.md` (What happens with the findings), `start-here.md` (The standard setup), `testing.md` (Classes, not cases — new), `tower.md` (The worker protocol), `verification-independence.md` (The review bundle — the portable interface to any reviewer), module `telemetry` (The KPI cockpit)
+**Changed sections.** `journal-state-plans.md` (Plans, Review attestations), `mandatory-rules.md`, `refute.md` (What happens with the findings), `start-here.md` (The standard setup), `testing.md` (Classes, not cases — new), `train.md` (The run), `tower.md` (The worker protocol), `verification-independence.md` (The review bundle — the portable interface to any reviewer), module `telemetry` (The KPI cockpit)
 
 Details: [Plan](docs/analysis/2026-10-21-v2.76.md) #259 #265 #266 #270 #271 #272 #276 #277 #278 #281 #282
 

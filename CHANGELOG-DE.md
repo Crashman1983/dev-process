@@ -14,8 +14,8 @@ English version: [CHANGELOG.md](CHANGELOG.md). Die Releases vor v2.28.2:
 **Warum.** Kennis Review-Historie (315 Berichte, 1.694 Befunde, dev-process #277 Schritt 0) zeigte: Von den 423 blockierenden oder schweren Befunden brauchten nur 85 das Urteil eines Lesers; den Rest hätte eine Regel oder ein Test gefangen. Sieben von zwanzig Befunden, bei denen eine Prüfung nie wirkte, waren Regeln, die nur eine Warnung druckten, sieben weitere standen nur als Prosa da. Ein Template-Update konnte sein eigenes Review nicht freigeben, ein Zug mit einem Update wurde abgelehnt, und ein Testlauf unter `MAKEFLAGS=-n` passierte den Push-Hook.
 
 **Was sich ändert.**
-- Pflichtnachweise (#282): Eine Tabelle, `review_evidence.required_records` in `model-policy.json`, sagt, was eine Arbeit schuldet — einen REFUTE für Gate-Code und ab Tier 3, eine ROOT-CAUSE-Zeile nach drei Fix-Commits auf einer Datei, das Wort des Owners (`DECISION <Datum> owner:`) hinter einer `review-waived:`-Zeile. attest verweigert ohne den Nachweis oder ein begründetes `skipped <kind> work=<id>: <Grund>` (das Wort des Owners lässt sich nicht überspringen); ein Projekt ergänzt Zeilen unter `required_records_extra`. Das Bundle liest seine Refute-Warnung aus derselben Tabelle.
-- Neues Core-Gate `plan-structure` (#278): In einem Tier-2+-Plan, den der Branch neu anlegt, hat jedes `AC-<id>:`-Kriterium genau ein `shall`, eine nur einmal vergebene ID und — sobald eine Aufgabe abgehakt ist und beim Merge-Push — seinen geplanten Test (`AC-<id>: <pfad>::<test>`, `struck — <Grund>` oder `manual: <Grund>`); beim Merge-Push bleibt keine Aufgabe `- [ ]` ohne `struck:` oder `moved: #N`. Projektabschnitte, das `shall`-Wort und eine Story-Registry kommen aus `plan-structure.local.json`, gelesen an der Integrations-Ref.
+- Pflichtnachweise (#282): Eine Tabelle, `review_evidence.required_records` in `model-policy.json`, sagt, was eine Arbeit schuldet — einen REFUTE für Gate-Code und ab Tier 3, eine ROOT-CAUSE-Zeile nach drei Fix-Commits auf einer Datei, das Wort des Owners (`DECISION <Datum> owner:`) hinter einer `review-waived:`-Zeile, wo immer der Plan liegt (aktiv, Archiv, Spec Kit), und schon bei `/finish`. attest verweigert ohne den Nachweis oder ein begründetes `skipped <kind> work=<id>: <Grund>` (das Wort des Owners lässt sich nicht überspringen); ein Projekt ergänzt Zeilen unter `required_records_extra`. Das Bundle liest seine Refute-Warnung aus derselben Tabelle.
+- Neues Core-Gate `plan-structure` (#278): In einem Tier-2+-Plan, den der Branch neu anlegt — aktiv oder schon archiviert, oder hier von Tier 1 hochgestuft —, hat jedes `AC-<id>:`-Kriterium genau ein `shall`, eine nur einmal vergebene ID und — sobald eine Aufgabe abgehakt ist und beim Merge-Push — seinen geplanten Test (`AC-<id>: <pfad>::<test>` oder `struck — <Grund>`, die Grammatik, die attest annimmt); beim Merge-Push bleibt keine Aufgabe `- [ ]` ohne `struck:` oder `moved: #N`. Projektabschnitte, weitere `shall`-Wörter und eine Story-Registry kommen aus `plan-structure.local.json`, gelesen an der Integrations-Ref.
 - Die Review-Checkliste lässt sich auf den Diff zuschneiden (#281): `review-sections.local.json` ordnet Abschnitte Pfadklassen zu; das Bundle lässt Abschnitte weg, die keine berührte Klasse erreicht, nennt sie und behält alle, wenn ein Pfad in keine Klasse fällt.
 - FINDING-Zeilen tragen `class=mechanical|testable|judgment` und `rule=<Prüfung>` (#276); `process_kpis.py findings` zählt sie und nennt eine Prüfung, die sich über Arbeiten wiederholt. Der Codex-Reviewer schreibt beides.
 - `process_kpis.py baseline` (#277): je gemergter Arbeit in einem oder zwei Datumsfenstern die Mediane von Tokens, Review- und Fix-Runden, Befunden und Durchlaufzeit, die je Phase angegebenen Tokens, durchgerutschte Arbeiten und der Change-Failure-Proxy. `testing.md` bekommt „Classes, not cases“; das github-issues-Modul liefert eine Vorlage für Prüfungsänderungen mit „Replaces“ und „Measure“.
@@ -29,8 +29,8 @@ English version: [CHANGELOG.md](CHANGELOG.md). Die Releases vor v2.28.2:
 2. Strenger als bisher:
    - jeder Tier-3-Code-Review-Pass braucht eine REFUTE-Zeile der Arbeit oder `skipped refute work=<id>: <Grund>`;
    - drei Fix-Commits auf einer Datei brauchen eine ROOT-CAUSE-Zeile oder einen Skip;
-   - ein `review-waived:`-Plan im Flug braucht `DECISION <Datum> owner: …`;
-   - die Kriterien eines neuen Tier-2+-Plans folgen der EARS-Zeilenform mit einem `shall` (ein Projekt, das in einer anderen Sprache schreibt, setzt `shall_words`);
+   - ein `review-waived:`-Plan im Flug braucht `DECISION <Datum> owner: …`; `/finish` fragt es vor dem Archivieren ab;
+   - die Kriterien eines neuen Tier-2+-Plans folgen der EARS-Zeilenform mit einem `shall` (ein Projekt, das in einer anderen Sprache schreibt, ergänzt sein Wort in `shall_words`);
    - ein Push unter `MAKEFLAGS=-n` oder einer `certificate_env`-Variable wird verweigert;
    - ein Spec-Kit-Plan im Flug blockiert `finish.py` ohne sein Review.
 3. Optional:
@@ -39,7 +39,7 @@ English version: [CHANGELOG.md](CHANGELOG.md). Die Releases vor v2.28.2:
    - `class=`/`rule=` an Befunden;
    - `--usage` und `status_file` für Harnesses ohne Transkripte.
 
-**Geänderte Abschnitte.** `journal-state-plans.md` (Plans, Review attestations), `mandatory-rules.md`, `refute.md` (What happens with the findings), `start-here.md` (The standard setup), `testing.md` (Classes, not cases — neu), `tower.md` (The worker protocol), `verification-independence.md` (The review bundle — the portable interface to any reviewer), Modul `telemetry` (The KPI cockpit)
+**Geänderte Abschnitte.** `journal-state-plans.md` (Plans, Review attestations), `mandatory-rules.md`, `refute.md` (What happens with the findings), `start-here.md` (The standard setup), `testing.md` (Classes, not cases — neu), `train.md` (The run), `tower.md` (The worker protocol), `verification-independence.md` (The review bundle — the portable interface to any reviewer), Modul `telemetry` (The KPI cockpit)
 
 Details: [Plan](docs/analysis/2026-10-21-v2.76.md) #259 #265 #266 #270 #271 #272 #276 #277 #278 #281 #282
 
