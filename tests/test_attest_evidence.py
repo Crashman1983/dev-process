@@ -804,6 +804,11 @@ def test_another_issues_criterion_is_cited_qualified_and_not_required(ev_mod):
     assert req(own + "dsh runs only up to the AC-4 measurement (#2659).\n", "") == {"1", "4"}
     assert req(own + "#1918/AC-4 and AC-4 here too.\n", "") == {"1", "4"}
     assert foreign(own + "#1918/AC-4 and AC-4 here too.\n", "") == set()  # no note for a required id
+    # delta round 5: a bare hyphen compound keeps it too; the own issue is matched with its repo
+    assert req(own + "#2659/AC-4 cited. Die AC-4-Messung bleibt.\n", "") == {"1", "4"}
+    assert req("issue: #7\nSee other/repo#7/AC-4.\n", "") == set()
+    assert req("issue: me/repo#7\nSee me/repo#7/AC-4.\n", "") == {"4"}
+    assert req("issue: me/repo#7\nSee #7/AC-4.\n", "") == {"4"}  # ambiguous: the plan's own
     # the plan's own issue is no other one; a spec's criterion is the work's own
     assert req(own + "See #7/AC-4.\n", "") == {"1", "4"}
     assert req("issue: #7\nSee #9/AC-2.\n", "- AC-2: When a, b shall c.\n") == {"2"}

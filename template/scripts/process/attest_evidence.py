@@ -423,24 +423,35 @@ def struck_criteria(plan: str, spec: str) -> frozenset[str]:
 
 def _cited_elsewhere(plan: str) -> tuple[str, set[str]]:
     """(the plan with its citations of other issues blanked, the ids cited that way). A
-    citation of an issue the plan declares itself is no citation: it stays a mention."""
-    from check_review import declared_issue_numbers  # noqa: PLC0415
-    mine = set(declared_issue_numbers(plan))
+    citation of an issue the plan declares itself — the same repository, or both bare — is
+    no citation: it stays a mention."""
+    from check_review import ISSUE_DECL, parse_issue_ref  # noqa: PLC0415
+    mine = {ref for m in ISSUE_DECL.finditer(plan)
+            if (ref := (parse_issue_ref(m.group(1)) or ((None, int(m.group(1))) if m.group(1).isdigit()
+                                                        else None)))}
     cited: set[str] = set()
 
     def blank(m: re.Match) -> str:
-        if int(m.group("n")) in mine:
+        repo, n = m.group(0).split("#", 1)[0] or None, int(m.group("n"))
+        # a bare `#N` may mean the declared `owner/repo#N`: ambiguous, so the plan's own
+        if (repo, n) in mine or (repo is None and n in {num for _r, num in mine}):
             return m.group(0)
         cited.add(ac_key(m))
         return " " * len(m.group(0))
     return _QUALIFIED.sub(blank, plan), cited
 
 
+# any bare mention of an id, hyphen compounds included (`AC-4-Messung`): it keeps a cited id
+# the plan's own (#287, fail closed)
+_BARE_MENTION = re.compile(r"\b" + _AC + r"(?!\w)")
+
+
 def _criteria(plan: str, spec: str) -> tuple[frozenset[str], frozenset[str], frozenset[str]]:
     plan, spec = _EXAMPLE_SPAN.sub(" ", plan), _EXAMPLE_SPAN.sub(" ", spec)
     in_spec = {ac_key(m) for m in AC_ID.finditer(spec)}
     plan, cited = _cited_elsewhere(plan)
-    named = {ac_key(m) for m in AC_ID.finditer(plan)} | in_spec
+    bare = {ac_key(m) for m in _BARE_MENTION.finditer(plan)}
+    named = {ac_key(m) for m in AC_ID.finditer(plan)} | in_spec | (cited & bare)
     foreign = cited - named  # a bare mention or the spec keeps an id the work's own
     open_ = held_open(plan)
     gone = (struck(spec) | (struck(plan) - in_spec)) - open_
