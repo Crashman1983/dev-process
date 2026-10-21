@@ -399,7 +399,7 @@ def _rounds_of_issue(root: Path, rounds: dict[str, dict], issue) -> dict | None:
     for rel, text in _review.record_texts(root, _review.PLAN_KINDS + ("plan-archive",)) or []:
         text = _review._unfenced(text)
         if int(issue) in _review._plan_issue_numbers(text):
-            ids |= _review._plan_work_ids(Path(rel).stem, text, include_dedated=True)
+            ids |= _review._plan_work_ids(_review.plan_stem(rel), text, include_dedated=True)
     hits = [rounds[i] for i in ids if i in rounds]
     if not hits:
         return None

@@ -159,10 +159,14 @@ def criteria_findings(rel: str, text: str, shall_words: list[str], *, need_tests
 
 def _bound(root: Path, ref: str, rel: str) -> bool:
     """Is this plan the branch's to answer for? Added on the branch, or below Tier 2 at
-    the integration ref (a stub raised to Tier 2 here is written here). Unreadable at the
-    ref: bound (fail closed)."""
+    the integration ref (a stub raised to Tier 2 here is written here). An archived plan
+    is judged where it lived before `/finish` moved it, too: an old plan archived here is
+    history. Unreadable at the ref: bound (fail closed)."""
+    homes = [rel]
+    if rel.startswith(f"{PLANS_ACTIVE}/archive/"):
+        homes.append(f"{PLANS_ACTIVE}/{rel.rsplit('/', 1)[1]}")
     try:
-        before = _at_ref(root, ref, rel)
+        before = next((t for t in (_at_ref(root, ref, h) for h in homes) if t is not None), None)
     except _Unreadable:
         return True
     return before is None or (plan_tier(_quoted_blank(before)) or 0) < 2

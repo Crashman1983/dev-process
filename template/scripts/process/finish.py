@@ -167,10 +167,11 @@ def check(root: Path) -> tuple[list[str], list[str]]:
     # plan counts as this branch's (fail closed), and the broken read is named
     # an ambiguous fork point is a blocker, never "no base" (downstream #2381)
     try:
-        has_base = merge_base(root) is not None
+        fork = merge_base(root)  # the reviewed base: where the gate and attest read the policy
+        has_base = fork is not None
         base_error = None
     except GitReadError as exc:
-        has_base, base_error = False, exc
+        fork, has_base, base_error = None, False, exc
         blockers.append(f"cannot bound this branch's range: {exc}")
     in_flight = paths_in_flight(root) if has_base else None
     if has_base:
@@ -210,7 +211,8 @@ def check(root: Path) -> tuple[list[str], list[str]]:
                 continue
             if review_waived(text):
                 # the owner's word is due before the archive, not first at the merge push (#282)
-                owed = waiver_owner_findings(f"{PLANS_ACTIVE}/{p.name}", text, tier, own_family_rule(root)[1])
+                owed = waiver_owner_findings(f"{PLANS_ACTIVE}/{p.name}", text, tier,
+                                             own_family_rule(root, fork)[1])
                 if owed:
                     blockers.extend(owed)
                 else:

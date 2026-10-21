@@ -262,3 +262,16 @@ def test_a_plan_the_branch_archived_is_read_at_the_merge(render, tmp_path):
     r = _run(out, merge=True)
     assert r.returncode == 1 and "archive/2026-10-21-7-editor.md" in r.stdout \
         and "open task at the merge" in r.stdout, r.stdout
+
+
+def test_an_old_plan_finish_archives_stays_history(render, tmp_path):
+    """Cross-model review, delta round: reading the archive bound an old plan as new once
+    /finish moved it there — it is judged where it lived at the integration ref."""
+    out = render(tmp_path, {"project_name": "demo"})
+    _plan(out, GOOD.replace("shall keep", "keeps") + "\n- [ ] T2 docs\n")
+    _repo(out)
+    old = out / PLANS / "2026-10-21-7-editor.md"
+    (out / PLANS / "archive").mkdir(parents=True, exist_ok=True)
+    old.rename(out / PLANS / "archive" / old.name)
+    r = _run(out, merge=True)
+    assert r.returncode == 0, r.stdout
