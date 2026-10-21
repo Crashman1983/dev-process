@@ -396,10 +396,14 @@ def struck(text: str) -> set[str]:
 # an issue reference: `#7`, `owner/repo#7` — not `C#` or an HTML entity `&#7`
 _REF = r"(?<![\w&])(?:[\w.-]+/[\w.-]+)?#(?P<n>\d+)\b"
 # an AC id bound to an issue reference right beside it — the only form read as another
-# issue's criterion (#287): "AC-11-Messung (#2659)", "AC-2 of #9", "#9's AC-2". One word
-# may sit between, a line break too; anything wider stays the plan's own (fail closed)
-_CITED_AFTER = re.compile(_AC + r"(?:[- ][\w]+)?[ \t]*\n?[ \t]*(?:\(|(?:of|from|aus|von|in)[ \t]+)?[ \t]*"
+# issue's criterion (#287): "AC-11-Messung (#2659)", "AC-11 measurement (#2659)",
+# "AC-2 of #9", "#9's AC-2". A parenthesis or a preposition binds; a verb never does
+# ("AC-5 closes #9" stays the plan's own, fail closed)
+_CITED_AFTER = re.compile(_AC + r"(?:(?:[- ][\w]+)?[ \t]*\n?[ \t]*\([ \t]*|[ \t]+(?:of|from|aus|von|in)[ \t]+)"
                           + _REF)
+# every mention of an id, hyphen compounds included (`AC-11-Messung`): counting more mentions
+# only keeps more ids required
+_MENTION = re.compile(r"\b" + _AC + r"(?!\w)")
 _CITED_BEFORE = re.compile(_REF + r"(?:'s)?[ \t]+(?:(?:AC|criterion|Kriterium)[ \t]+)?" + _AC)
 
 
@@ -439,7 +443,7 @@ def _foreign_only(plan: str) -> set[str]:
                 spans[ac_key(m)] = spans.get(ac_key(m), 0) + 1
     defined = {ac_key(m) for m in AC_LINE.finditer(plan)}
     mentions: dict[str, int] = {}
-    for m in AC_ID.finditer(plan):
+    for m in _MENTION.finditer(plan):
         mentions[ac_key(m)] = mentions.get(ac_key(m), 0) + 1
     return {k for k, n in spans.items() if k not in defined and n >= mentions.get(k, 0)}
 

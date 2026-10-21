@@ -804,7 +804,12 @@ def test_an_id_named_only_beside_another_issue_is_not_required(ev_mod):
     assert req(plan + "AC-11 also guards the cache.\n", "") == {"1", "11"}
     # the plan's own issue is no other one; a repository-qualified one is
     assert req("issue: #7\nAC-3 closes the gap of #7.\n", "") == {"3"}
-    assert req("issue: #7\nAC-3 is owner/other#9's criterion.\n", "") == set()
+    assert req("issue: #7\nAC-3 of owner/other#9 is not ours.\n", "") == set()
+    # a verb binds nothing; a free mention of a hyphen compound keeps the id (delta round 3)
+    assert req("issue: #7\nAC-5 closes #2659.\n", "") == {"5"}
+    assert req("issue: #7\nAC-5 deckt #2659.\n", "") == {"5"}
+    assert req("issue: #7\ndsh läuft nur bis zur AC-11-Messung (#2659).\nAC-11 prüft die Cache-Grenze.\n",
+               "") == {"11"}
     # a spec's criterion is the work's own even beside another issue
     assert req("See AC-2 of #9.\n", "- AC-2: When a, b shall c.\n") == {"2"}
     # cross-model review of the patch: only an id bound to another issue right beside it is
