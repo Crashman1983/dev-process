@@ -507,6 +507,19 @@ def test_an_inventory_table_beside_the_transitions_table_passes(render, tmp_path
     assert r.returncode == 1 and ":13: the transitions table has no `Test` column" in r.stdout, r.stdout
 
 
+def test_a_test_column_in_a_later_table_lends_the_first_none(render, tmp_path):
+    """The section's first table is the transitions table: a `Test` column in an inventory
+    after it is no way around a state table without one (v2.77 cross-model review)."""
+    out = _repo(render(tmp_path, {"project_name": "demo"}))
+    later = "\n### Writers and readers\n\n| Writer | Site | Test |\n|---|---|---|\n| w | src/a.py:10 | `tests/test_a.py::t` |\n"
+    _plan(out, GOOD + "\n## Transitions\n\n| State | Event | Result |\n|---|---|---|\n| a | b | c |\n" + later)
+    r = _run(out)
+    assert r.returncode == 1 and "the transitions table has no `Test` column" in r.stdout, r.stdout
+    _plan(out, GOOD + "\n## Transitions\n\n" + HDR + later)  # the first table, empty
+    r = _run(out)
+    assert r.returncode == 1 and "has no row" in r.stdout, r.stdout
+
+
 def test_the_test_column_may_be_named_tests(render, tmp_path):
     out = _repo(render(tmp_path, {"project_name": "demo"}))
     for name in ("Tests", "Test(s)", "test(s)", "TEST", "**Tests**"):
