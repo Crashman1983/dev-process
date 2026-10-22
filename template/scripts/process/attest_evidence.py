@@ -331,7 +331,7 @@ def _fix_streak(root: Path, base: str | None, head: str | None) -> int | None:
 JOURNAL_SKIPS = frozenset({"replan", "class-test"})
 _LIST_LEAD = re.compile(r"^\s*(?:(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s+)?)?")
 # a reason after `sites: none —`, not the brief's placeholder
-_REASON = re.compile(r"^(?!<|TODO\b|…|\.\.\.)\S")
+_REASON = re.compile(r"^(?!<|(?i:todo)\b|…|\.\.\.)\S")
 
 
 def _content(line: str) -> str:
@@ -1142,7 +1142,8 @@ _UNKNOWN = {"gate_code": ("git could not list the reviewed diff — whether it t
             "blocked_rounds": ("the fork point of the head cannot be read (no integration ref, or an "
                                "ambiguous fork) — the blocked code rounds this branch adds are unknown; "
                                "fetch the integration branch, or commit `skipped replan|class-test "
-                               "work=<id>: <reason>`")}
+                               "work=<id>: <reason>` in the plan (a journal line is read against the "
+                               "fork point, which is the unknown)")}
 
 
 def _owed_records(ev: Evidence) -> list[str]:
