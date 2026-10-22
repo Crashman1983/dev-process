@@ -1117,6 +1117,19 @@ def test_old_lines_are_judged_at_the_fork_point_not_at_mains_tip(render, tmp_pat
     assert r.returncode == 0 and NO_CLASS not in r.stdout, r.stdout
 
 
+def test_a_report_renamed_on_the_branch_keeps_its_old_findings(render, tmp_path):
+    """A report the branch renames (`git mv`) is judged against its old path at the fork
+    point: its old majors stay old, a major added beside them is new."""
+    out = _branch(_render(render, tmp_path), VALID_REPORT + OLD)
+    _git(out, "mv", ".process-work/reviews/2026-10-20-old.md", ".process-work/reviews/2026-10-20-7-old.md")
+    _git(out, "commit", "-qm", "rename")
+    r = _run(out)
+    assert r.returncode == 0 and NO_CLASS not in r.stdout, r.stdout
+    _report(out, "2026-10-20-7-old.md", VALID_REPORT + OLD + "FINDING sev=major action=fix issue=- new here\n")
+    r = _run(out)
+    assert r.returncode == 1 and "'new here'" in r.stdout and "old cache" not in r.stdout, r.stdout
+
+
 def test_an_unreadable_head_or_fork_refuses(render, tmp_path):
     report = VALID_REPORT + "FINDING sev=major action=fix issue=- guard read twice\n"
     # unborn HEAD: no commit to fork from

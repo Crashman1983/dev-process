@@ -316,11 +316,33 @@ def _finding_identity(fields: dict) -> tuple[tuple[str, str], ...]:
     return tuple(sorted((k, v) for k, v in fields.items() if k != "issue"))
 
 
+def _renamed_since(root: Path, fork: str) -> dict[str, str]:
+    """{path now: path at the fork point} of every report renamed since the fork point —
+    git's rename detection, the working tree against the fork, so a staged `git mv`
+    counts as well as a committed one. A failed read raises `_Unreadable`."""
+    r = _git_read(root, "diff", "-M", "--name-status", "-z", "--no-ext-diff", fork, "--", REVIEWS_DIR)
+    if r.returncode != 0:
+        raise _Unreadable(r.stderr.strip() or f"git diff exit {r.returncode}")
+    fields = r.stdout.split("\0")
+    renamed: dict[str, str] = {}
+    i = 0
+    while i < len(fields) and fields[i]:
+        status = fields[i]
+        if status.startswith(("R", "C")):
+            if status.startswith("R"):
+                renamed[fields[i + 2]] = fields[i + 1]
+            i += 3
+        else:
+            i += 2
+    return renamed
+
+
 def _class_duty(root: Path, due: dict[str, list[dict]]) -> tuple[list[str], list[str]]:
     """`class=` on every blocker and major the branch adds (#297): `due` holds, per
     report, its blocker and major findings without one. A finding that stood in the same
-    report at the fork point (merge-base with the integration ref) is old; a report absent
-    there is new as a whole. Fails closed on an unreadable or unborn HEAD, an unreadable
+    report at the fork point (merge-base with the integration ref) is old — a report the
+    branch renamed is read at its old path there; a report absent there is new as a
+    whole. Fails closed on an unreadable or unborn HEAD, an unreadable
     or ambiguous fork point and a report git cannot read there. On the integration ref,
     or in a readable repository without one, no finding is new: a note."""
     if not due:
@@ -340,10 +362,14 @@ def _class_duty(root: Path, due: dict[str, list[dict]]) -> tuple[list[str], list
         return [f"the fork point cannot be read ({exc}) — {_UNKNOWN_NEW}"], []
     if fork is None:
         return [], [_NO_RANGE]
+    try:
+        renamed = _renamed_since(root, fork)
+    except _Unreadable as exc:
+        return [f"the reports renamed since the fork point cannot be read ({exc}) — {_UNKNOWN_NEW}"], []
     hard: list[str] = []
     for rel, findings in sorted(due.items()):
         try:
-            before = _at_ref(root, fork, rel)
+            before = _at_ref(root, fork, renamed.get(rel, rel))
         except _Unreadable as exc:
             hard.append(f"{rel}: cannot be read at the fork point ({exc}) — {_UNKNOWN_NEW}")
             continue
