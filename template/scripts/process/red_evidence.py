@@ -164,8 +164,9 @@ def _junit_key(case, root: Path | None) -> str:
     writes one — XCTest's and jest's `classname` is no path (`KenniTests.FooTests`, a
     `describe` title), and attest finds a test by its file (v2.77 class-test). An absolute
     `file` counts relative to `root` (each tree is its own root, so both name one test);
-    outside it, the classname form stands. A class the classname ends in (`….TestOne`, not
-    the file's own stem) stays in the id: `TestOne::test_x` and `TestTwo::test_x` are two."""
+    outside it, the classname form stands. In a Python file a class the classname ends in
+    (`….TestOne`, not the file's own stem) stays in the id: `TestOne::test_x` and
+    `TestTwo::test_x` are two; elsewhere the classname is a `describe` title, never a class."""
     name, cls, file = case.get("name") or "", case.get("classname") or "", case.get("file") or ""
     if file and Path(file).is_absolute():
         try:
@@ -175,7 +176,7 @@ def _junit_key(case, root: Path | None) -> str:
     if not file:
         return f"{cls}::{name}" if cls else name
     last = cls.rsplit(".", 1)[-1]
-    if last.isidentifier() and last[:1].isupper() and last != Path(file).stem:
+    if file.endswith(".py") and last.isidentifier() and last[:1].isupper() and last != Path(file).stem:
         return f"{file}::{last}::{name}"
     return f"{file}::{name}"
 

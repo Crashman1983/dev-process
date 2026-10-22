@@ -531,6 +531,7 @@ def test_a_junit_file_attribute_is_made_relative_and_keeps_its_class(render, tmp
         "<testcase classname='tests.test_x' file='tests/test_x.py' name='test_y'/>"
         "<testcase classname='KenniTests.FooTests' file='KenniTests/FooTests.swift' name='testBar'/>"
         f"<testcase classname='calc.spec' file='{outside}' name='adds'/>"
+        "<testcase classname='Calc' file='web/calc.test.ts' name='adds two'/>"
         "</testsuite></testsuites>")
     assert mod.junit_outcomes(report, out) == {
         "tests/test_x.py::TestOne::test_x": "failed",
@@ -538,6 +539,8 @@ def test_a_junit_file_attribute_is_made_relative_and_keeps_its_class(render, tmp
         "tests/test_x.py::test_y": "passed",
         "KenniTests/FooTests.swift::testBar": "passed",
         "calc.spec::adds": "passed",
+        # a one-word `describe` title outside Python is no class: attest finds `adds two` in the file
+        "web/calc.test.ts::adds two": "passed",
     }
 
 
