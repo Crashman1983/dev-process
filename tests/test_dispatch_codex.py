@@ -2,6 +2,7 @@
 check before every start, the supervisor's receipts, and a Codex review that
 `handoff` verifies and attests in one step (ported from Kenni #2357, whose
 harness kept Codex reviews advisory; the owner decided they attest)."""
+import argparse
 import importlib
 import json
 import os
@@ -476,6 +477,28 @@ def test_a_second_lens_on_a_blocked_head_attests_that_round(review_repo):
     head = importlib.import_module("check_review").report_header(text)
     lines = "\n".join(p.read_text() for p in (out / ".process-work/journal").glob("**/*.md"))
     assert head.get("round") == ["1"] and "verdict=pass round=1" in lines, (head, lines)
+
+
+def test_a_plan_fix_after_a_blocked_plan_lens_is_a_new_round(review_repo):
+    """A plan review reviews the plan, which lives under `.process-work/`: a plan-only fix
+    after a blocked plan lens is the next round, never that lens's round again — else its
+    pass, written as the blocked round, could never clear the block (v2.77 cross-model
+    review, round 2). The attest commit's report and journal stay bookkeeping."""
+    out, _d, codex = review_repo(PASS)
+    reviewed, base = _git(out, "rev-parse", "HEAD"), _git(out, "rev-parse", "main")
+    journal = out / ".process-work/journal/2026-10-16.md"
+    journal.parent.mkdir(parents=True, exist_ok=True)
+    journal.write_text("REVIEW work=7-plan tier=2 reviewer=r model=claude-opus-5 "
+                       "independence=bundle,non-implementing "
+                       f"base={base} head={reviewed} verdict=block round=1\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "docs: attest 7-plan round 1, lens a")
+    plan_args = argparse.Namespace(work="7-plan", round_=None)
+    assert codex._blocked_round_at(out, plan_args, _git(out, "rev-parse", "HEAD")) == 1
+    plan = out / ".process-work/plans/2026-10-15-widget.md"
+    plan.write_text(plan.read_text() + "\nThe fix of the blocked plan round.\n")
+    _git(out, "commit", "-q", "-am", "plan: fix round 1")
+    assert codex._blocked_round_at(out, plan_args, _git(out, "rev-parse", "HEAD")) is None
 
 
 def test_the_report_text_carries_no_round_it_was_not_given(mods):
