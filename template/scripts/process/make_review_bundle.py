@@ -389,7 +389,9 @@ def _grammar_section(plan_review: bool = False, review_round: int | None = None)
                   f"Put the header line `round: {review_round}` in the report's header block "
                   "(with `review:`/`work:`, before the first blank line): the round this bundle "
                   "reviews, as `attest.py` numbers its REVIEW line — findings are counted per round "
-                  "by it (`process_kpis.py baseline`).\n\n")
+                  "by it (`process_kpis.py baseline`). A second lens of a round that already "
+                  "blocked writes that round in `round:`, as it passes `attest.py --round <that "
+                  "round>` — this number counts that block as a round of its own.\n\n")
     # #225: attest.py refuses a Tier 2+ code-review pass whose report misses this
     ac_note = ("" if plan_review else
                "One line per acceptance criterion the plan names — the test that goes red "
