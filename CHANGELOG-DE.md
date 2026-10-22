@@ -9,6 +9,28 @@ ein Eintrag ohne Plan oder Issue hat keine Details-Zeile. In wenigen Sätzen je 
 English version: [CHANGELOG.md](CHANGELOG.md). Die Releases vor v2.28.2:
 [docs/changelog-archive-DE.md](docs/changelog-archive-DE.md).
 
+## v2.77.0 — Pläne entscheiden den Zustandsraum, Fix-Runden schließen die Klasse · 2026-10-22
+
+**Warum.** In Kennis Review-Historie (510 Issues, 808 Runden) waren in den längsten Arbeiten 39 % der blockierenden Befunde Plan-Lücken und 35 % kamen aus dem Fix der Vorrunde; Review-Rauschen gab es keines. Fix-induzierte Fehler wuchsen mit der Größe des Fix-Durchgangs (6–9 Befunde: 46 % der Folgerunden blockierten erneut, ab 10: 86 %), und ein roter Test vorab senkte sie nicht (41 % gegen 40 %). Regel 4, „Inkrement oder Neubau“ ab dem zweiten Block, war Prosa; attest las ROOT-CAUSE nur im Plan, obwohl `red_evidence` es ins Journal schreibt; und eine Pflicht-Tatsache, die Git nicht bestimmen konnte, fiel bei allen außer zwei Tatsachen still weg.
+
+**Was sich ändert.**
+- Zwei Pflichtnachweise (#293, #297): Ab der zweiten blockierten Code-Runde einer Arbeit schuldet jeder weitere Block `REPLAN work=<id> round=<r>: increment|rebuild — <warum>` im Plan; jede blockierte Runde schuldet einen Klassentest — `ROOT-CAUSE … — sites: <Geschwisterstellen> — <pfad>::<test>` mit einem Test, der am Kopf steht (`red_evidence.py --sites` schreibt die Form), oder `sites: none — <Grund>` für eine Runde ohne Codefehler. Es zählen nur Runden und Records, die der Branch hinzufügt, inhaltlich gegen seinen Gabelpunkt verglichen; Ausweg ist ein begründetes `skipped replan|class-test`.
+- attest verweigert jeden Pass, den eine nicht bestimmbare Tatsache offen ließe, und liest ROOT-CAUSE-Zeilen und die neuen Skips auch im Journal.
+- `plan-structure` prüft die `## Transitions`-Tabelle eines Plans (auch in einem neuen Spec-Kit-Plan): Spalte `Test`, mindestens eine Zeile, jede Zelle gefüllt, und sobald Tests fällig sind je Zeile `<pfad>::<test>` oder `struck — <Grund>`.
+- Das Report-Gate des github-issues-Moduls verlangt `class=` an jedem Blocker und Major, den ein Branch hinzufügt.
+- Das Plan-Review bekommt den Schritt STATE SPACE und eine Kalibrierung (eine offene Fehlerklasse ist mindestens `major`); Execute bekommt „Fixing a review round“ (Geschwisterstellen, Differentialtest, Durchgänge über etwa 300 Zeilen oder sechs Befunde in Schritten, zuerst REPLAN); eine gemessene Alt/Neu-Differenz zählt als Score 100; der Fehlerkatalog bekommt „Decision after an await on a stale snapshot“; das Delta-Bundle warnt bei einem großen Fix-Durchgang.
+- Berichte tragen `round:`; `process_kpis.py baseline` zählt Blocker nach Herkunft, Runden mit und ohne Plan-Review, zu fixende Befunde gegen fix-induzierte Blocker der Folgerunde und Skips je Art.
+
+**Wirkung.** Ein zweiter Block lässt sich nicht mehr ohne die Neubau-Frage überflicken, ein Fix nennt die Klasse, die er schließt, und die Stellen, die er geprüft hat, und die Grundlinie zeigt, ob fix-induzierte Blocker und Fix-Runden sinken.
+
+**Update.**
+1. Laufende Arbeiten: Ein Pass nach zwei oder mehr blockierten Runden, die der Branch hinzugefügt hat, schuldet die REPLAN-Zeilen und die Klassentest-Ursachen — oder `skipped replan|class-test work=<id>: blocked before v2.77`; eigene neue Blocker- oder Major-Befunde ohne `class=` bekommen eines; ein laufender Plan mit `## Transitions` bekommt die Spalte `Test`.
+2. Berichte auf main und schon gemergte Pläne bleiben gültig.
+
+**Geänderte Abschnitte.** `design-template.md` (Sections), `failure-catalog.md` (Facts and state), `improvement-monthly.md` (What you review, What you produce), `journal-state-plans.md` (Review attestations), `mandatory-rules.md`, `refute.md` (Refuting a plan), `review-checklist.md` (Decisions — recorded, not embodied silently), `tower.md` (Dispatch and the model policy), `verification-independence.md` (The review bundle — the portable interface to any reviewer, Bind the verdict to the reviewed range, Enforcement), `workflow.md` (Execute, Review), Modul `github-issues` (Review and audit visibility), Modul `telemetry` (The KPI cockpit), Befehle `/execute`, `/plan`, `/review`
+
+Details: [Plan](docs/analysis/2026-10-21-v2.77.md) #293 #297
+
 ## v2.76.1 — Ein dispatchter Codex-Bericht ist lesbar; das Kriterium eines anderen Issues ist keine Pflicht · 2026-10-21
 
 **Warum.** Zwei Template-Fehler sind in Kenni angekommen. Der Codex-Dispatch schrieb den Titel des Berichts über den Header-Block. Der Header ist der Block bis zur ersten Leerzeile, also las das Report-Gate des github-issues-Moduls kein `review:` und lehnte den Push ab: zweimal an einem Tag (Kenni #2683, #2691), jedes Mal von Hand behoben. Auch `check_review.report_header` las aus so einem Bericht kein `work:`. Und attest zählte jede `AC-<id>` eines Plans als Kriterium der Arbeit, auch eine, die der Plan nur aus einem anderen Issue zitiert („bis zur AC-11-Messung (#2659)“). Dann verweigerte attest einen Pass für einen Test, den dieses Kriterium nie schuldete. Ein dritter kam aus Kenni #2338: Der Codex-Handoff attestierte die Issue-Nummer, und ein Issue mit mehreren Plänen ließ attest sie ablehnen, ohne Weg, den Plan zu nennen.
