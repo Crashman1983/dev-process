@@ -1005,6 +1005,21 @@ def test_the_record_lists_that_ride_the_attestation_name_replan(render, tmp_path
     assert "plan lines (REFUTE, ROOT-CAUSE, REPLAN, DECISION, skips)" in vi
 
 
+def test_the_fix_pass_rate_is_stated_as_measured(render, tmp_path):
+    """Refute v2.77 F: downstream, fix passes above 300 production lines drew a fix-induced
+    blocker in 67–100 % of next rounds (n=13), six to nine findings in 46 %, ten or more in
+    86 % — not "about half" tied to the 300 lines."""
+    out = render(tmp_path, {"project_name": "demo"})
+    rate = "in two of three next rounds or more"
+    workflow = _flat(out / "docs/process/workflow.md")
+    para = workflow.split("**Fixing a review round.**", 1)[1].split("## Review", 1)[0]
+    assert rate in para and "six to nine findings in about half, ten or more in most" in para
+    review = _flat(out / ".claude/commands/review.md")
+    assert rate in review.split("`FIX-PASS WARNING`", 1)[1][:400]
+    for text in (workflow, review):
+        assert "about half the rounds" not in text
+
+
 def test_a_measured_regression_scores_100_and_gate_deltas_get_a_reviewer_with_tools(render, tmp_path):
     """#297 AC-4: a measured old/new difference is evidence, not a claim to score down."""
     out = render(tmp_path, {"project_name": "demo"})
