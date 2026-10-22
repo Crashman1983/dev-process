@@ -1226,6 +1226,11 @@ def test_a_lowercase_todo_is_no_reason(repo, ev_mod):
     assert check_review.SKIP_LINE.search("skipped class-test work=7: todos left over")
     assert not check_review.REFUTE_LINE.search("REFUTE work=7 round=1: todo")
     assert not check_review.ROOT_CAUSE_LINE.search("ROOT-CAUSE work=7 round=1: todo")
+    # a word that starts with todo is prose, as before; an uppercase TODO stays a placeholder
+    assert check_review.REFUTE_LINE.search("REFUTE work=7 round=1: Todo-list order is lost")
+    assert check_review.SKIP_LINE.search("skipped class-test work=7: todo-list only")
+    assert not check_review.SKIP_LINE.search("skipped class-test work=7: TODO-later")
+    assert not check_review.SKIP_LINE.search("skipped class-test work=7: todo: later")
 
 
 def test_a_fork_line_with_list_marker_and_trailing_blanks_is_the_same_line(repo):
