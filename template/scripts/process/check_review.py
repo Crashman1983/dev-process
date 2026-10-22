@@ -397,16 +397,18 @@ ANSWERED_MARK = re.compile(
 # passed). make_review_bundle reads REFUTE lines and attest ROOT-CAUSE lines
 # through these.
 _RECORD_LEAD = r"^ {0,3}(?:(?:[-*+]|\d+[.)])[ \t]+(?:\[[xX]\][ \t]+)?)?"
+# a record's text or reason that is a template, not a call — `todo` in any case (v2.77)
+PLACEHOLDER = r"(?!<|(?i:todo)\b|…|\.\.\.)"
 REFUTE_LINE = re.compile(
     _RECORD_LEAD + r"REFUTE[ \t]+work=(?P<work>(?!<)(?!TODO\b)[\w#./-]+)"
-    r"[ \t]+round=(?P<round>\d+):[ \t]*(?P<text>(?!<|TODO\b|…|\.\.\.)\S.*)$",
+    r"[ \t]+round=(?P<round>\d+):[ \t]*(?P<text>" + PLACEHOLDER + r"\S.*)$",
     re.MULTILINE)
 # the lines an unclosed fence must not swallow unreported (`unclosed_fence_problem`)
 BLOCKING_LINES = (TIER_DECL, ISSUE_DECL, DECISION_NEEDED)
 CLEARING_LINES = (WAIVED, _REVIEW_LINE, REFUTE_LINE)
 ROOT_CAUSE_LINE = re.compile(
     _RECORD_LEAD + r"ROOT-CAUSE[ \t]+"
-    r"work=(?P<work>(?!<)(?!TODO\b)\S+)[ \t]+round=(?P<round>\d+):[ \t]*(?P<text>(?!<|TODO\b|…|\.\.\.)\S.*)$",
+    r"work=(?P<work>(?!<)(?!TODO\b)\S+)[ \t]+round=(?P<round>\d+):[ \t]*(?P<text>" + PLACEHOLDER + r"\S.*)$",
     re.MULTILINE)
 # mandatory rule 4 per blocked round after the first (v2.77, required_records `replan`):
 # `REPLAN work=<id> round=<r>: increment|rebuild — <why>` in the plan. The brief's
@@ -414,7 +416,7 @@ ROOT_CAUSE_LINE = re.compile(
 REPLAN_LINE = re.compile(
     _RECORD_LEAD + r"REPLAN[ \t]+work=(?P<work>(?!<)(?!TODO\b)[\w#./-]+)[ \t]+round=(?P<round>\d+):"
     r"[ \t]*(?P<mode>increment|rebuild)(?![\w|/-])[ \t]*(?:—|–|--?|:)[ \t]*"
-    r"(?P<text>(?!<|(?i:todo)\b|…|\.\.\.)\S.*)$",
+    r"(?P<text>" + PLACEHOLDER + r"\S.*)$",
     re.MULTILINE)
 # the separator of a ROOT-CAUSE line's segments: `<cause> — sites: <sites> — <tests>`
 _SEGMENT = " — "
@@ -447,7 +449,7 @@ SKIP_KINDS = ("cross-model", "codex-review", "refute", "plan-review", "ac-trace"
               "replan", "class-test")
 SKIP_LINE = re.compile(
     _RECORD_LEAD + r"skipped[ \t]+(?P<kind>" + "|".join(SKIP_KINDS) + r")[ \t]+"
-    r"work=(?P<work>(?!<)(?!TODO\b)[^\s:]+):[ \t]*(?P<reason>(?!<|TODO\b|…|\.\.\.)\S.*?)[ \t]*$",
+    r"work=(?P<work>(?!<)(?!TODO\b)[^\s:]+):[ \t]*(?P<reason>" + PLACEHOLDER + r"\S.*?)[ \t]*$",
     re.MULTILINE)
 
 
