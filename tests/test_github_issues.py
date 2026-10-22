@@ -1189,6 +1189,27 @@ def test_no_branch_range_is_a_note_and_binds_nothing(render, tmp_path):
     assert r.returncode == 0 and "no branch range against an integration ref" in r.stdout, r.stdout
 
 
+def test_an_integration_ref_without_a_fork_point_refuses(render, tmp_path):
+    """A shallow clone holds origin/main but not the commit the branch forked from: which
+    findings are new is unknown, so the gate fails closed instead of noting no range."""
+    src = _branch(_render(render, tmp_path / "src"), VALID_REPORT + OLD)
+    _git(src, "checkout", "-q", "main")
+    (src / "m.txt").write_text("m\n")
+    _git(src, "add", "-A")
+    _git(src, "commit", "-qm", "main moves on")
+    _git(src, "checkout", "-q", "feature")
+    _report(src, "2026-10-21-new.md", VALID_REPORT + "FINDING sev=major action=fix issue=- guard read twice\n")
+    _git(src, "add", "-A")
+    _git(src, "commit", "-qm", "new report")
+    _git(src, "checkout", "-q", "main")  # the remote's default branch is main
+    dst = tmp_path / "shallow"
+    subprocess.run(["git", "clone", "-q", "--depth", "1", "--no-single-branch", "-b", "feature",
+                    f"file://{src}", str(dst)], check=True, capture_output=True)
+    r = _run(dst)
+    assert r.returncode == 1 and "no fork point with" in r.stdout and "origin/main" in r.stdout \
+        and "no branch range" not in r.stdout, r.stdout
+
+
 def test_the_codex_handoff_writes_class_on_every_finding(render, tmp_path):
     """The dispatched Codex review requires `class` in its result schema and writes it into
     the report line, so its new blockers and majors pass this gate."""

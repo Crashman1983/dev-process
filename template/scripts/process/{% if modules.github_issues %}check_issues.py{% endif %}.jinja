@@ -10,8 +10,10 @@ best-effort and entirely advisory (never exit 1): a definitive 404 stays a
 note, because this cannot distinguish a deleted issue from one an
 unauthenticated or cross-repo token cannot see. Review reports are checked
 offline: publication, tracked follow-ups, and `class=` on every blocker and
-major finding the branch adds against the fork point (#297). Stdlib + PyYAML
-(a gate dep, used to read the copier answers)."""
+major finding the branch adds against the fork point (#297). Integration refs
+that resolve without a fork point (a shallow clone) fail that check closed; no
+integration ref at all, or HEAD on one, is a note. Stdlib + PyYAML (a gate
+dep, used to read the copier answers)."""
 from __future__ import annotations
 
 import json
@@ -36,7 +38,7 @@ REVIEWS_DIR = ".process-work/reviews"  # review/audit reports
 # issue-ref grammar and the fence-stripping discipline — import, don't copy
 # (one owner per behavior)
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling import
-from check_review import _LEAD, GitReadError, _unfenced, merge_base, parse_issue_ref  # noqa: E402
+from check_review import _LEAD, GitReadError, _unfenced, integration_refs, merge_base, parse_issue_ref  # noqa: E402
 from check_review import ISSUE_DECL as _PLAN_ISSUE  # noqa: E402
 from check_review import plan_tier as _plan_tier  # noqa: E402
 # how a file is read at a ref, missing told from unreadable — one owner (plan-structure)
@@ -316,6 +318,20 @@ def _finding_identity(fields: dict) -> tuple[tuple[str, str], ...]:
     return tuple(sorted((k, v) for k, v in fields.items() if k != "issue"))
 
 
+def _forkless_refs(root: Path) -> list[str]:
+    """The integration refs that resolve when no fork point was found — empty when none
+    does or one contains HEAD (on the integration ref: no range, a note). Otherwise each
+    of them shares no commit with HEAD here: a shallow clone, or the fork not in history."""
+    listed = _git_read(root, "for-each-ref", "--format=%(refname:short)",
+                       "refs/remotes/*/main", "refs/remotes/*/master")
+    candidates = dict.fromkeys([*integration_refs(root), *listed.stdout.split()])
+    resolved = [ref for ref in candidates
+                if _git_read(root, "rev-parse", "--verify", "-q", ref + "^{commit}").returncode == 0]
+    if any(_git_read(root, "merge-base", "--is-ancestor", "HEAD", ref).returncode == 0 for ref in resolved):
+        return []
+    return resolved
+
+
 def _renamed_since(root: Path, fork: str) -> dict[str, str]:
     """{path now: path at the fork point} of every report renamed since the fork point —
     git's rename detection, the working tree against the fork, so a staged `git mv`
@@ -343,8 +359,9 @@ def _class_duty(root: Path, due: dict[str, list[dict]]) -> tuple[list[str], list
     report at the fork point (merge-base with the integration ref) is old — a report the
     branch renamed is read at its old path there; a report absent there is new as a
     whole. Fails closed on an unreadable or unborn HEAD, an unreadable
-    or ambiguous fork point and a report git cannot read there. On the integration ref,
-    or in a readable repository without one, no finding is new: a note."""
+    or ambiguous fork point, integration refs that resolve but share no commit with HEAD
+    (a shallow clone) and a report git cannot read there. On the integration ref, or in
+    a readable repository without one, no finding is new: a note."""
     if not due:
         return [], []
     probe = _git_read(root, "rev-parse", "--git-dir")
@@ -361,6 +378,10 @@ def _class_duty(root: Path, due: dict[str, list[dict]]) -> tuple[list[str], list
     except GitReadError as exc:
         return [f"the fork point cannot be read ({exc}) — {_UNKNOWN_NEW}"], []
     if fork is None:
+        forkless = _forkless_refs(root)
+        if forkless:
+            return [f"no fork point with {', '.join(forkless)} in this history (a shallow clone, or the fork "
+                    f"not fetched) — {_UNKNOWN_NEW}; fetch the full history"], []
         return [], [_NO_RANGE]
     try:
         renamed = _renamed_since(root, fork)
