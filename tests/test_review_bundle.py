@@ -1823,6 +1823,22 @@ def test_a_fix_pass_counts_a_move_once_and_leaves_lock_files_and_fragments_out(r
     assert "301 lines" in warning, warning
 
 
+def test_the_fix_pass_warning_states_the_measured_rates(render, tmp_path):
+    """Refute v2.77 F: downstream, passes above 300 lines drew a fix-induced blocker in
+    67–100 % of next rounds (n=13); six to nine findings in 46 %, ten or more in 86 %."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    reviewed = _git(out, "rev-parse", "HEAD").stdout.strip()
+    (out / "extra.py").write_text(_lines(400, "e"))
+    _git(out, "add", "-A", check=True)
+    _git(out, "commit", "-q", "-m", "fix: extra", check=True)
+    text = _bundle(out, "--base", "main", "--since", reviewed).stdout
+    warning = " ".join(next(ln for ln in text.splitlines() if ln.startswith(FIX_PASS)).split())
+    assert "about half the rounds" not in warning
+    assert "in two of three next rounds or more" in warning, warning
+    assert "six to nine findings in about half, ten or more in most" in warning, warning
+
+
 def test_the_round_header_says_a_second_lens_writes_the_blocked_round(render, tmp_path):
     """Refute v2.77 G: a bundle cannot know it serves a second lens of a round that already
     blocked — it computes the next round, and the grammar says that lens writes its own."""

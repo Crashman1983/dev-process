@@ -719,8 +719,9 @@ def review_size(root: Path, base_ref: str) -> tuple[int, int]:
     return len(kept), sum(kept)
 
 
-# above this a fix pass is no longer one fix: downstream, a fix round of six to nine
-# findings was followed by a fix-induced blocker in 46 % of rounds, ten or more in 86 %
+# above this a fix pass is no longer one fix: downstream, passes above 300 production
+# lines were followed by a fix-induced blocker in 67–100 % of next rounds (n=13); by
+# findings, six to nine in 46 % of rounds, ten or more in 86 %
 FIX_PASS_MAX_LINES = 300
 _CHANGELOG_FRAGMENTS = re.compile(r"(^|/)changelog\.d/", re.IGNORECASE)
 
@@ -765,8 +766,9 @@ def _fix_pass_warning(root: Path, since: str) -> str:
     if lines <= FIX_PASS_MAX_LINES:
         return ""
     return (f"**FIX-PASS WARNING:** this fix pass changes {lines} lines outside tests and bookkeeping "
-            f"(limit {FIX_PASS_MAX_LINES}). Downstream, a fix pass this size was followed by a "
-            "fix-induced blocker in about half the rounds, and in most from ten findings on. Attack "
+            f"(limit {FIX_PASS_MAX_LINES}). Downstream, passes above {FIX_PASS_MAX_LINES} lines were "
+            "followed by a fix-induced blocker in two of three next rounds or more; by findings, "
+            "six to nine findings in about half, ten or more in most. Attack "
             "the sibling paths of every change: each caller of a changed function, each other writer "
             "of a changed state, each window the fix opens — not only the reported spot.\n")
 

@@ -118,8 +118,10 @@ Round economy — a failed round must not re-pay the whole chain:
   (`docs/process/verification-independence.md`, "What each round judges").
   A delta round over gate or security code needs a reviewer with tools: it
   runs the changed code and its tests, not only reads the bundle. A
-  `FIX-PASS WARNING` in the bundle (a fix pass above 300 changed lines) asks
-  the reviewer to attack the sibling paths of every change.
+  `FIX-PASS WARNING` in the bundle (a fix pass above 300 changed production
+  lines — downstream, such passes were followed by a fix-induced blocker
+  in two of three next rounds or more) asks the reviewer to attack the
+  sibling paths of every change.
 - **Rebase or merge main before the first review round.** A later rebase or
   merge of main that applies cleanly keeps the review (the gate judges
   content, not history); one that resolves a conflict is a new round.
