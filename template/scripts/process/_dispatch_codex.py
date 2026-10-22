@@ -13,6 +13,7 @@ refuses and the fallback is recorded (`record_unavailable`, `fallback_hint`).
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 import contextlib
 import datetime as _dt
 import hashlib
@@ -689,15 +690,6 @@ def _attest_commit(wt: Path, parent: str, commit: str, mine: set) -> bool:
     try:
         status = _git(wt, "diff", "--name-status", "-z", "--no-renames", parent, commit).decode().split("\0")
         changes = dict(zip(status[1::2], status[0::2]))  # path -> A|D|M|T
-
-        def lines(rev: str, rel: str) -> set[str]:
-            try:
-                return set(_git(wt, "show", f"{rev}:{rel}").decode("utf-8", errors="replace").splitlines())
-            except ValueError:
-                return set()  # not there at that side
-        # the lines the commit adds, by content: a moved plan adds none of its old lines
-        added = "\n".join(set().union(*(lines(commit, r) for r in changes))
-                          - set().union(*(lines(parent, r) for r in changes)))
         pairs = [(rel, rel) for rel, kind in changes.items() if kind == "M" and plan(rel)]
         # `attest --archive` moves the plan it appends to: the deleted plan and its archived
         # copy pair by the archive rule, never by git's rename guess (round 5)
@@ -715,6 +707,17 @@ def _attest_commit(wt: Path, parent: str, commit: str, mine: set) -> bool:
             after = _git(wt, "show", f"{commit}:{new}").decode("utf-8")
             if not records_only(before, after):
                 return False
+
+        def lines(rev: str, rel: str) -> Counter[str]:
+            try:
+                return Counter(_git(wt, "show", f"{rev}:{rel}").decode("utf-8", errors="replace").splitlines())
+            except ValueError:
+                return Counter()  # not there at that side
+        # the lines the commit adds, counted per path and per archive pair: a moved plan adds
+        # none of its old lines, a lens line equal to one already there still counts (round 6)
+        sides = pairs + [(rel, rel) for rel in changes if rel not in paired]
+        added = "\n".join((sum((lines(commit, new) - lines(parent, old) for old, new in sides), Counter()))
+                          .elements())
     except (ValueError, UnicodeDecodeError):
         return False
     return any(work_key(f["work"]) in mine for _ln, f in parse_review_lines(added)[0])
