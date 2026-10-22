@@ -161,8 +161,8 @@ existed; `requirement`, `implementation`, `test-gap`, `process`,
 blocks come from, and a `knowledge-gap` fix also writes the missing fact to
 where it belongs (an inventory note, a registry story, a decision record,
 the architecture doc), so the next author finds it. A plan review's report
-carries `phase: plan` in its header; every report carries the `round: <n>` the
-bundle names, so findings count per round. (Until v2.53 a Tier 3 delta needed an anchoring full
+carries `phase: plan` in its header; a report carries the `round: <n>` the
+bundle names, when it names one (it leaves the header out rather than guess), so findings count per round. (Until v2.53 a Tier 3 delta needed an anchoring full
 round and a containment check of its files; both are gone — the verdict
 binds the whole branch either way, and the machinery that judged a delta's
 reach was a source of defects of its own.)

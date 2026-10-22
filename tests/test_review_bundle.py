@@ -1790,7 +1790,8 @@ def test_a_small_fix_pass_or_a_first_round_gets_no_warning(render, tmp_path):
     (out / "tests/test_widget.py").write_text(_lines(900, "t"))
     _git(out, "add", "-A", check=True)
     _git(out, "commit", "-q", "-m", "fix: widget", check=True)
-    assert FIX_PASS not in _bundle(out, "--base", "main", "--since", reviewed).stdout
+    stdout = _bundle(out, "--base", "main", "--since", reviewed).stdout
+    assert FIX_PASS not in stdout and "FIX-PASS check unavailable" not in stdout  # measured, at the boundary
     (out / "widget.py").write_text(_lines(900, "w"))
     _git(out, "commit", "-q", "-am", "feat: more", check=True)
     assert FIX_PASS not in _bundle(out, "--base", "main").stdout  # a full round is no fix pass
