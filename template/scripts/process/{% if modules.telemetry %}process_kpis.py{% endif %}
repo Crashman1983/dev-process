@@ -581,20 +581,23 @@ def execution(root: Path | None = None) -> int:
 _NO_FINDING_READER = "FINDING lines are read by check_issues — the github-issues module"
 
 
-_ROUND_IN_NAME = re.compile(r"(?:^|-)r(\d+)(?=-|$)")
+_ROUND_IN_NAME = re.compile(r"(?:^|-)r([0-9]+)$")
 
 
 def _report_round(name: str, head: dict[str, list[str]]) -> int | None:
     """The round a review report belongs to (#293): its `round:` header (the bundle
-    and the Codex handoff write it as attest numbers the REVIEW line), else `-r<N>` in
-    its file name, else None — unrounded, not counted. A header that names no single
-    number is unrounded too, never read past to the file name."""
+    and the Codex handoff write it as attest numbers the REVIEW line), else `-r<N>`
+    closing its file name (`…-review-r2.md`; `…-r2-migration-review.md` names no
+    round), else None — unrounded, not counted. A header that names no single
+    number is unrounded too, never read past to the file name. Named residual: a
+    slug that itself ends in `-r<N>` (`…-cache-v2-r3.md`) reads as that round —
+    a name cannot tell the two apart; the header wins."""
     if "round" in head:
         values = set(head["round"])
         value = values.pop() if len(values) == 1 else ""
         return int(value) if value.isascii() and value.isdigit() else None
-    found = set(_ROUND_IN_NAME.findall(Path(name).stem))
-    return int(found.pop()) if len(found) == 1 else None
+    found = _ROUND_IN_NAME.search(Path(name).stem)
+    return int(found.group(1)) if found else None
 
 
 def _review_reports(root: Path, phase: str | None = None) -> list[tuple[list[str], int | None, list[dict]]] | str:
