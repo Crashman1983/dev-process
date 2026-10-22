@@ -30,8 +30,8 @@ ids and what each test's setup and call did. Any other runner (vitest, jest, XCT
 through xcresult conversion) reports through JUnit XML instead: `--junit PATH` names
 the file the command writes, relative to where it runs; the probe stays out, each
 side's file is removed before its run (a file from earlier proves nothing; so it must
-be an .xml file git does not track), a test is `<classname>::<name>` and the worst of
-its outcomes stands, and the old tree borrows the working tree's `node_modules` (#256). In that mode only files named on the command
+be an .xml file git does not track), a test is `<classname>::<name>` (or by its
+`file` attribute, `junit_outcomes`) and the worst of its outcomes stands, and the old tree borrows the working tree's `node_modules` (#256). In that mode only files named on the command
 or by `--copy` travel into the old tree — a named directory would carry the fixed
 source of a non-Python project along. Stdlib only.
 """
@@ -117,7 +117,7 @@ def _run(command: list[str], cwd: Path, probe_dir: Path, out: Path,
     except subprocess.TimeoutExpired:
         raise SystemExit(f"red_evidence: the run in {cwd} took longer than {timeout} s") from None
     if junit:
-        return proc.returncode, junit_outcomes(cwd / junit)
+        return proc.returncode, junit_outcomes(cwd / junit, cwd)
     # no report is no outcome: the probe did not load (a command that ignores PYTHONPATH,
     # `python -I`) or pytest died — never "no test ran red" (refute of #124)
     seen = json.loads(out.read_text(encoding="utf-8")) if out.is_file() else None
@@ -156,13 +156,31 @@ def _link_dependencies(root: Path, tree: Path) -> list[str]:
     return linked
 
 
-def junit_outcomes(path: Path) -> dict[str, str] | None:
-    """`<classname>::<name>` -> passed/failed/error of every testcase in a JUnit XML file;
-    None when there is none or it does not parse (no report is no outcome). A skipped case
-    is no outcome either — it neither went red nor green. A case's `file` attribute, where
-    the runner writes one, is the file part instead: XCTest's and jest's `classname` is no
-    path (`KenniTests.FooTests`, a `describe` title), and attest finds a test by its file
-    (v2.77 class-test)."""
+def _junit_key(case, root: Path | None) -> str:
+    """A testcase's id: `<classname>::<name>`, or by its `file` attribute where the runner
+    writes one — XCTest's and jest's `classname` is no path (`KenniTests.FooTests`, a
+    `describe` title), and attest finds a test by its file (v2.77 class-test). An absolute
+    `file` counts relative to `root` (each tree is its own root, so both name one test);
+    outside it, the classname form stands. A class the classname ends in (`….TestOne`, not
+    the file's own stem) stays in the id: `TestOne::test_x` and `TestTwo::test_x` are two."""
+    name, cls, file = case.get("name") or "", case.get("classname") or "", case.get("file") or ""
+    if file and Path(file).is_absolute():
+        try:
+            file = Path(file).resolve().relative_to(root.resolve()).as_posix() if root else ""
+        except ValueError:
+            file = ""
+    if not file:
+        return f"{cls}::{name}" if cls else name
+    last = cls.rsplit(".", 1)[-1]
+    if last.isidentifier() and last[:1].isupper() and last != Path(file).stem:
+        return f"{file}::{last}::{name}"
+    return f"{file}::{name}"
+
+
+def junit_outcomes(path: Path, root: Path | None = None) -> dict[str, str] | None:
+    """`<test id>` (`_junit_key`) -> passed/failed/error of every testcase in a JUnit XML
+    file; None when there is none or it does not parse (no report is no outcome). A skipped
+    case is no outcome either — it neither went red nor green. `root`: where the command ran."""
     import xml.etree.ElementTree as ET  # noqa: PLC0415  (stdlib; only this mode needs it)
     if not path.is_file() or not path.stat().st_size:
         return None
@@ -173,8 +191,7 @@ def junit_outcomes(path: Path) -> dict[str, str] | None:
     seen: dict[str, str] = {}
     for case in tree.getroot().iter("testcase"):
         name = case.get("name") or ""
-        cls = case.get("file") or case.get("classname") or ""
-        key = f"{cls}::{name}" if cls else name
+        key = _junit_key(case, root)
         if not name or case.find("skipped") is not None:
             continue
         state = ERROR if case.find("error") is not None else FAILED if case.find("failure") is not None else PASSED
