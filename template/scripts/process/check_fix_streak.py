@@ -116,8 +116,9 @@ def notes(root: Path) -> list[str] | None:
                        f"find the root cause (or record the structural decision) before the next patch")
         else:
             out.append(f"fix-streak: note: {n} fix commits on {path} in this branch — mandatory rule 4: "
-                       f"record the increment-vs-rewrite call — as `REPLAN work=<id> round=<r>` once a "
-                       f"review round blocked twice, else as a DECISION — before the next patch; its "
+                       f"record the increment-vs-rewrite call — from the second blocked round of the "
+                       f"work as `REPLAN work=<id> round=<r>: increment|rebuild — <why>` in the plan, "
+                       f"until then as a DECISION — before the next patch; its "
                        f"options include rebuilding the owning layer beside fix / merge / scope; do "
                        f"the findings share one cause that one owner would close?")
     return out
