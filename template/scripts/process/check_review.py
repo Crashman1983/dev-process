@@ -397,8 +397,9 @@ ANSWERED_MARK = re.compile(
 # passed). make_review_bundle reads REFUTE lines and attest ROOT-CAUSE lines
 # through these.
 _RECORD_LEAD = r"^ {0,3}(?:(?:[-*+]|\d+[.)])[ \t]+(?:\[[xX]\][ \t]+)?)?"
-# a record's text or reason that is a template, not a call — `todo` in any case (v2.77)
-PLACEHOLDER = r"(?!<|(?i:todo)\b|…|\.\.\.)"
+# a record's text or reason that is a template, not a call: a bare `todo` in any case, an
+# uppercase `TODO` as before — a word like `Todo-list` is prose (v2.77)
+PLACEHOLDER = r"(?!<|TODO\b|(?i:todo)(?![\w-])|…|\.\.\.)"
 REFUTE_LINE = re.compile(
     _RECORD_LEAD + r"REFUTE[ \t]+work=(?P<work>(?!<)(?!TODO\b)[\w#./-]+)"
     r"[ \t]+round=(?P<round>\d+):[ \t]*(?P<text>" + PLACEHOLDER + r"\S.*)$",
