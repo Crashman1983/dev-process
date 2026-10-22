@@ -985,6 +985,26 @@ def test_rule_4_names_replan_from_the_second_block_and_a_plan_review_after_a_reb
         assert "REPLAN" in text and "rebuild" in text and "plan review" in text, rel
 
 
+def test_the_review_section_caps_the_loop_with_the_replan_of_execute(render, tmp_path):
+    """Refute v2.77 F: the Review section named the old trigger ("the second block on one
+    element") beside Execute's REPLAN from the work's second blocked round."""
+    out = render(tmp_path, {"project_name": "demo"})
+    workflow = _flat(out / "docs/process/workflow.md")
+    review = workflow.split("## Review", 1)[1].split("\n## ", 1)[0]
+    assert "second block on one element" not in review
+    assert ("from the second blocked round of the work the fix session first records "
+            "`REPLAN work=<id> round=<r>: increment|rebuild — <reason>` in the plan") in review
+
+
+def test_the_record_lists_that_ride_the_attestation_name_replan(render, tmp_path):
+    """Refute v2.77 F: `check_review.records_only` takes a REPLAN line as a record, so the
+    lists of what may ride the attestation name it too."""
+    out = render(tmp_path, {"project_name": "demo"})
+    vi = _flat(out / "docs/process/verification-independence.md")
+    assert "REFUTE, ROOT-CAUSE, REPLAN, REVIEW and dated DECISION lines" in vi
+    assert "plan lines (REFUTE, ROOT-CAUSE, REPLAN, DECISION, skips)" in vi
+
+
 def test_a_measured_regression_scores_100_and_gate_deltas_get_a_reviewer_with_tools(render, tmp_path):
     """#297 AC-4: a measured old/new difference is evidence, not a claim to score down."""
     out = render(tmp_path, {"project_name": "demo"})
