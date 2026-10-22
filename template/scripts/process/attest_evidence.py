@@ -426,6 +426,11 @@ def _tracked(root: Path, head: str) -> list[str] | None:
     return [p for p in r.stdout.split("\0") if p] if r.returncode == 0 else None
 
 
+def _suffix_hits(file: str, tracked: list[str]) -> list[str]:
+    """The tracked paths that end in `file` below a directory (never `file` itself)."""
+    return [p for p in tracked if p.endswith("/" + file)]
+
+
 def _test_file(file: str, tracked: list[str] | None) -> tuple[str | None, str]:
     """(the tracked path a reference names, why none): the path itself, or the one tracked
     path ending in it — a pytest id relative to its rootdir (`backend/`), a JUnit
@@ -435,7 +440,7 @@ def _test_file(file: str, tracked: list[str] | None) -> tuple[str | None, str]:
     file = file.removeprefix("./")
     if file in tracked:
         return file, ""
-    hits = [p for p in tracked if p.endswith("/" + file)]
+    hits = _suffix_hits(file, tracked)
     if len(hits) == 1:
         return hits[0], ""
     if hits:
@@ -461,6 +466,12 @@ def _class_test_problem(root: Path, head: str, text: str, tracked: list[str] | N
     for file, name in refs:
         path, why = _test_file(file, tracked)
         why = why if path is None else test_status(root, head, path, name, rules)
+        if why is not None and path == file.removeprefix("./"):
+            # the exact path refuses: a pytest id relative to its rootdir (`backend/`) names
+            # the one deeper namesake that holds the test; several stay a guess
+            other = _suffix_hits(path, tracked or [])
+            if len(other) == 1 and test_status(root, head, other[0], name, rules) is None:
+                why = None
         if why is None:
             return None
         whys.append(why)

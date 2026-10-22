@@ -1185,3 +1185,20 @@ def test_sites_is_read_in_any_case(repo):
     _append(repo, PLAN_FILE, _RC + "Sites: none — refuted, the finding misread the guard", commit="docs: cause")
     r = _pass(repo)
     assert r.returncode == 0, r.stderr
+
+
+def test_an_exact_path_that_refuses_falls_back_to_the_unique_suffix(repo):
+    """pytest lief in backend/ (`tests/test_widget.py` dort); das Wurzelverzeichnis hat einen
+    Namensvetter ohne diesen Test: der eindeutige Suffix-Treffer zählt."""
+    (repo / "backend/tests").mkdir(parents=True)
+    (repo / "backend/tests/test_widget.py").write_text("def test_other():\n    assert True\n")
+    _append(repo, SHARD, _review("widget", 1), commit="feat: backend test and block")
+    _append(repo, PLAN_FILE, _RC + "sites: backend/x.py:1 — tests/test_widget.py::test_other", commit="d")
+    r = _pass(repo)
+    assert r.returncode == 0, r.stderr
+    # a test of that name nowhere: still refused, with the exact path's reason
+    _append(repo, SHARD, _review("widget", 2), commit="d")
+    _append(repo, PLAN_FILE, "REPLAN work=widget round=2: increment — one more case",
+            "ROOT-CAUSE work=widget round=2: y — sites: a:1 — tests/test_widget.py::test_nope", commit="d")
+    r = _pass(repo)
+    assert r.returncode == 1 and "tests/test_widget.py has no test test_nope" in r.stderr, r.stderr
