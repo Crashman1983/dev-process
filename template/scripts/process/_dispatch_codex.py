@@ -647,6 +647,30 @@ def _committed_attest(wt: Path, rec: dict, work: str, plan_review: bool) -> dict
     return None
 
 
+def _blocked_round_at(wt: Path, args: argparse.Namespace, head: str) -> int | None:
+    """The round of a blocking REVIEW line of the work (`attest.round_ids`) on this head —
+    another lens already blocked the round this review is a lens of — or None. "This head"
+    is the line's own head, or one that differs from it by bookkeeping only (`.process-work/`:
+    the first lens's attest commit), as a lens built after that commit sees it."""
+    import attest  # noqa: PLC0415  (the main checkout's)
+    from check_review import JOURNAL_DIR, parse_review_lines, work_key  # noqa: PLC0415
+    mine = {work_key(w) for w in attest.round_ids(args, wt)}
+
+    def same_code(other: str) -> bool:
+        if other == head:
+            return True
+        try:
+            changed = _git(wt, "diff", "--name-only", "-z", other, head).decode().split("\0")
+        except ValueError:
+            return False  # git cannot tell: a new round, as before
+        return all(p.startswith(".process-work/") for p in changed if p)
+
+    rounds = [int(f["round"]) for t in attest._texts(wt, wt / JOURNAL_DIR) for _ln, f in parse_review_lines(t)[0]
+              if f["verdict"] == "block" and f.get("head") and work_key(f["work"]) in mine
+              and same_code(f["head"])]
+    return max(rounds) if rounds else None
+
+
 def handoff(root: Path, rec: dict, *, implementer: str | None = None) -> dict:
     """A finished Codex review, verified and attested in one step, in the worker's
     worktree: receipts and digests against the bundle and the Git artifact, the result
@@ -736,8 +760,14 @@ def handoff(root: Path, rec: dict, *, implementer: str | None = None) -> dict:
     # Tier 3 needs a separate run's REFUTE line in the plan — never this reviewer's (refute.md)
     # the round attest is about to write (`--plan-review` counts `<work>-plan` apart): the
     # report's `round:` header (#293), and the code round a Tier 2 refute line names
-    review_round = attest.round_problems(argparse.Namespace(work=work + ("-plan" if plan_review else ""),
-                                                            round_=None), wt, wt / JOURNAL_DIR)[0]
+    round_args = argparse.Namespace(work=work + ("-plan" if plan_review else ""), round_=None)
+    review_round = attest.round_problems(round_args, wt, wt / JOURNAL_DIR)[0]
+    # a second lens of a round that already blocked on this very head is that round, not the
+    # next: as the bundle tells a hand-written lens (`attest.py --round <that round>`), so one
+    # review round does not become two blocked rounds and owe REPLAN and a class test (#293)
+    same_head = _blocked_round_at(wt, round_args, b["head"])
+    if same_head is not None:
+        review_round = same_head
     refute_round = None
     if rec.get("gate_code") and int(tier) < 3:
         refute_round = review_round if not plan_review else \
@@ -753,7 +783,8 @@ def handoff(root: Path, rec: dict, *, implementer: str | None = None) -> dict:
     cmd = [sys.executable, str(Path(attest.__file__).resolve()), "--work", work, "--tier", str(tier),
            "--reviewer", "codex", "--model", rec["model"], "--independence", f"bundle,non-implementing,{token}",
            "--verdict", result["verdict"], "--base", b["base"], "--head", b["head"], "--with", rel,
-           *(x for p in plans for x in ("--with", p)), *(["--plan-review"] if plan_review else [])]
+           *(x for p in plans for x in ("--with", p)), *(["--plan-review"] if plan_review else []),
+           *(["--round", str(same_head)] if same_head is not None else [])]
     record.update(report=rel, plans=plans)
     for flag in ("--dry-run", "--commit"):
         r = subprocess.run([*cmd, flag, str(wt)], cwd=wt, capture_output=True, text=True, env=git_environment(),
