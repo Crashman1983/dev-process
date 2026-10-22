@@ -1106,6 +1106,17 @@ def test_an_old_report_owes_class_only_on_its_new_lines(render, tmp_path):
     assert r.returncode == 1 and "'new on the branch'" in r.stdout and "old cache" not in r.stdout, r.stdout
 
 
+def test_a_duplicated_old_finding_owes_class_once(render, tmp_path):
+    """Old findings are counted, not a set: two identical lines at the fork stay old, a
+    third copy the branch adds is new."""
+    out = _branch(_render(render, tmp_path), VALID_REPORT + OLD + OLD)
+    r = _run(out)
+    assert r.returncode == 0 and NO_CLASS not in r.stdout, r.stdout
+    _report(out, "2026-10-20-old.md", VALID_REPORT + OLD + OLD + OLD)
+    r = _run(out)
+    assert r.returncode == 1 and r.stdout.count(NO_CLASS) == 1 and "old cache" in r.stdout, r.stdout
+
+
 def test_old_lines_are_judged_at_the_fork_point_not_at_mains_tip(render, tmp_path):
     """A line main changed after the branch forked is still old on the branch."""
     out = _branch(_render(render, tmp_path), VALID_REPORT + OLD)
