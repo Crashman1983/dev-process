@@ -283,9 +283,11 @@ def transitions_findings(rel: str, text: str, *, need_tests: bool) -> list[str]:
     pipe table below each with a `Test` column (`Tests`, `Test(s)`) and two others, at
     least one row, every cell of every row filled; once tests are due, each test cell
     `<path>::<test>` or `struck — <reason>`. The section's first table is its transitions
-    table and answers for all of it; a table after it (the writer and reader inventory) is
-    free — and no way around the first: a `Test` column there lends the first none (v2.77
-    cross-model review)."""
+    table: without a `Test` column it is refused, whatever follows — a `Test` column in a
+    later table lends it none. A later table without one (the writer and reader inventory) is
+    free; a later table with one is read like the first, so a first table with a `Test`
+    column answers for itself, not for a state table below it (v2.77 cross-model review,
+    rounds 1 and 2)."""
     out: list[str] = []
     lines = _comments_blank(text).splitlines()
     tables = _tables(lines)
@@ -305,7 +307,13 @@ def transitions_findings(rel: str, text: str, *, need_tests: bool) -> list[str]:
                        f"row; rows of one equivalence class may name the same test (the section's first "
                        f"table is its transitions table; an inventory table goes after it)")
             continue
-        for table, header, tests in ((table, header, tests),):
+        read = [(table, header, tests)]
+        for later in mine[1:]:
+            names = [_bare(c) for c in _cells(later[0][1])]
+            cols = [k for k, name in enumerate(names) if _TEST_HEADER.match(name)]
+            if cols:
+                read.append((later, names, cols))
+        for table, header, tests in read:
             hline = table[0][0]
             if len(header) < 3:
                 out.append(f"{rel}:{hline}: the transitions table needs a `Test` column and at least two "

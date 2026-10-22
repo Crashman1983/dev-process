@@ -520,6 +520,19 @@ def test_a_test_column_in_a_later_table_lends_the_first_none(render, tmp_path):
     assert r.returncode == 1 and "has no row" in r.stdout, r.stdout
 
 
+def test_a_later_table_with_a_test_column_is_read_too(render, tmp_path):
+    """A first table with a `Test` column answers for itself, not for a state table below
+    it: every table of the section with a `Test` column is read (v2.77 cross-model review,
+    round 2)."""
+    out = _repo(render(tmp_path, {"project_name": "demo"}))
+    first = "| Writer | Site | Test |\n|---|---|---|\n| w | src/a.py:10 | `tests/test_a.py::t` |\n"
+    _plan(out, GOOD + "\n## Transitions\n\n" + first + "\n" + HDR + "| draft | submit | in review |  |\n")
+    r = _run(out)
+    assert r.returncode == 1 and "transitions row leaves `Test` empty" in r.stdout, r.stdout
+    _plan(out, GOOD + "\n## Transitions\n\n" + first + "\n" + HDR + ROW + TICK)
+    assert _run(out, merge=True).returncode == 0
+
+
 def test_the_test_column_may_be_named_tests(render, tmp_path):
     out = _repo(render(tmp_path, {"project_name": "demo"}))
     for name in ("Tests", "Test(s)", "test(s)", "TEST", "**Tests**"):
