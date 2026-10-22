@@ -421,6 +421,18 @@ def test_a_spec_kit_plan_at_the_ref_is_history(render, tmp_path):
     assert r.returncode == 0, r.stdout
 
 
+def test_a_spec_kit_stub_raised_to_tier_two_is_bound(render, tmp_path):
+    """The plan folder's rule holds for Spec Kit plans: below Tier 2 at the ref and
+    raised here, the plan is the branch's to answer for."""
+    out = render(tmp_path, {"project_name": "demo"})
+    _spec(out, "# Plan\n\ntier: 1\n")
+    _repo(out)
+    _spec(out, SPEC_BAD)
+    r = _run(out)
+    assert r.returncode == 1 and "specs/001-orders/plan.md:8: the transitions table has no `Test`" \
+        in r.stdout, r.stdout
+
+
 def test_bundle_and_gate_read_one_transitions_heading(render, tmp_path):
     """One owner for the heading rule (check_review): the bundle's note and the gate
     agree on every heading form."""

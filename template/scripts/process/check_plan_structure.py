@@ -33,8 +33,8 @@ at the merge. A plan reviewer re-found them by reading. This gate reads them:
 
 Bound are only plans the branch ADDS — absent at the integration ref, or below
 Tier 2 there (a stub raised here) — so a plan merged before this gate is
-history, not a new duty. A Spec Kit plan (`specs/<name>/plan.md`) is bound when
-it is absent at the integration ref and Tier 2+; it answers for its Transitions
+history, not a new duty. A Spec Kit plan (`specs/<name>/plan.md`) is bound by
+the same rule when it is Tier 2+; it answers for its Transitions
 table only, its ticks stand in `tasks.md` beside it. Project data,
 `docs/process/plan-structure.local.json`, is read at the integration ref like
 every evidence rule (a branch cannot lift its own duty):
@@ -350,9 +350,9 @@ def _bound(root: Path, ref: str, rel: str) -> bool:
 
 def _spec_plan_findings(root: Path, ref: str, plans: list[Path], *, merge: bool) -> list[str]:
     """Spec Kit plans (`specs/<name>/plan.md`) answer for their Transitions table only —
-    the plan folder's other rules stay with the plan folder. Bound when absent at the
-    integration ref and Tier 2+ (unreadable there: bound); their ticks stand in
-    `tasks.md` beside them."""
+    the plan folder's other rules stay with the plan folder. Bound by the plan folder's
+    rule (`_bound`): Tier 2+ and absent at the integration ref or below Tier 2 there
+    (unreadable there: bound); their ticks stand in `tasks.md` beside them."""
     out: list[str] = []
     for p in plans:
         rel = p.relative_to(root).as_posix()
@@ -361,13 +361,8 @@ def _spec_plan_findings(root: Path, ref: str, plans: list[Path], *, merge: bool)
         except OSError as exc:
             out.append(f"{rel}: could not read: {exc}")
             continue
-        if (plan_tier(text) or 0) < 2:
-            continue
-        try:
-            if _at_ref(root, ref, rel) is not None:
-                continue  # stood at the ref: history, not a new duty
-        except _Unreadable:
-            pass
+        if (plan_tier(text) or 0) < 2 or not _bound(root, ref, rel):
+            continue  # stood at the ref at Tier 2+: history, not a new duty
         tasks = p.parent / "tasks.md"
         try:
             ticked = bool(_TICKED.search(text)) or (
