@@ -335,9 +335,12 @@ def test_the_test_cell_names_a_test_once_execution_starts(render, tmp_path):
     assert r.returncode == 1 and ":15: transitions row names no test" in r.stdout, r.stdout
     _plan(out, GOOD + table)
     assert "names no test" in _run(out, merge=True).stdout  # the merge push owes it too
-    for placeholder in ("struck — <reason>", "struck — …", "struck"):
+    for placeholder in ("struck — <reason>", "struck — …", "struck", "struck — todo"):
         _plan(out, GOOD + table.replace("to do", placeholder) + "\n- [x] T1 states\n")
         assert "names no test" in _run(out).stdout, placeholder
+    # one placeholder rule with the record readers (`check_review.PLACEHOLDER`): a word is prose
+    _plan(out, GOOD + table.replace("to do", "struck — Todo-Liste kommt erst später") + "\n- [x] T1 states\n")
+    assert "names no test" not in _run(out).stdout
 
 
 def test_a_deeper_transitions_heading_reads_its_own_section(render, tmp_path):

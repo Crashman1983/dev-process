@@ -58,6 +58,7 @@ from attest_evidence import AC_LINE, STRUCK_LINE, _NAMES_A_TEST, _STRUCK_MARK, a
 from check_review import (  # noqa: E402  (one owner for plan grammar and fences)
     DECISION_LINE,
     OPEN_TASK,
+    PLACEHOLDER,
     SPEC_PLAN,
     SPECS_DIR,
     TRANSITIONS_HEADING,
@@ -182,7 +183,7 @@ _TEST_HEADER = re.compile(r"^tests?(?:\(s\))?$", re.IGNORECASE)
 _UNFILLED = {"", "…", "..."}
 _LINE_MARK = re.compile(r"\x00(\d+)\x00$")
 # a row's test cell struck on purpose: the criterion strike's own mark and reason rule
-_STRUCK_CELL = re.compile(r"^" + _STRUCK_MARK + r"[ \t]*(?!<|(?i:todo)\b|…|\.\.\.)\S*\w")
+_STRUCK_CELL = re.compile(r"^" + _STRUCK_MARK + r"[ \t]*" + PLACEHOLDER + r"\S*\w")
 
 
 def _cells(row: str) -> list[str]:
