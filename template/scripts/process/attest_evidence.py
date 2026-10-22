@@ -50,6 +50,7 @@ from pathlib import Path
 
 from check_review import (
     OWNER_DECISION,
+    PLACEHOLDER,
     PLAN_KINDS,
     RECORD_KINDS,
     REFUTE_LINE,
@@ -331,7 +332,7 @@ def _fix_streak(root: Path, base: str | None, head: str | None) -> int | None:
 JOURNAL_SKIPS = frozenset({"replan", "class-test"})
 _LIST_LEAD = re.compile(r"^\s*(?:(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s+)?)?")
 # a reason after `sites: none —`, not the brief's placeholder
-_REASON = re.compile(r"^(?!<|(?i:todo)\b|…|\.\.\.)\S")
+_REASON = re.compile(r"^" + PLACEHOLDER + r"\S")
 
 
 def _content(line: str) -> str:
@@ -578,7 +579,7 @@ _STRUCK_MARK = r"(?:struck|dropped)(?:[ \t]*[—–:]|[ \t]+--?[ \t])"
 STRUCK_LINE = re.compile(
     r"^[ \t]*(?:[-*+][ \t]+)?(?:\[[ xX]\][ \t]+)?(?:\*\*)?" + _AC
     + r"(?:\*\*)?[ \t]*:(?:\*\*)?[ \t]*" + _STRUCK_MARK + r"[ \t]*"
-    r"(?!<|(?i:todo)\b|…|\.\.\.)\S*\w",
+    + PLACEHOLDER + r"\S*\w",
     re.MULTILINE)
 # a test a line names: a file with its extension, then `::` (prose like `std::vector` is none)
 _NAMES_A_TEST = re.compile(r"[\w./-]+\.\w+::\w")

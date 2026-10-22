@@ -1220,6 +1220,12 @@ def test_a_lowercase_todo_is_no_reason(repo, ev_mod):
     import check_review
     assert not check_review.REPLAN_LINE.search("REPLAN work=7 round=2: rebuild — todo")
     assert check_review.REPLAN_LINE.search("REPLAN work=7 round=2: rebuild — todos left over")
+    # the skip, refute and root-cause readers share the guard (v2.77 cross-model review, round 2)
+    assert not check_review.SKIP_LINE.search("skipped class-test work=7: todo")
+    assert not check_review.SKIP_LINE.search("skipped class-test work=7: Todo")
+    assert check_review.SKIP_LINE.search("skipped class-test work=7: todos left over")
+    assert not check_review.REFUTE_LINE.search("REFUTE work=7 round=1: todo")
+    assert not check_review.ROOT_CAUSE_LINE.search("ROOT-CAUSE work=7 round=1: todo")
 
 
 def test_a_fork_line_with_list_marker_and_trailing_blanks_is_the_same_line(repo):
