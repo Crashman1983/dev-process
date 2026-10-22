@@ -437,7 +437,8 @@ def test_bundle_and_gate_read_one_transitions_heading(render, tmp_path):
         assert ps.TRANSITIONS_HEADING is cr.TRANSITIONS_HEADING
         words = "the state changes on each event"
         for heading in ("## Transitions", "### Transitions (lifecycle)", "#### Transitions",
-                        "# Transitions", "## Transition table", "##Transitions", "## Transitions:"):
+                        "# Transitions", "## Transition table", "##Transitions", "## Transitions:",
+                        "   ## Transitions", "    ## Transitions"):
             text = f"{words}\n\n{heading}\n\nprose\n"
             owned = bool(cr.TRANSITIONS_HEADING.search(text))
             assert (mb._transitions_note(text, mb.TRANSITION_VOCABULARY) is None) is owned, heading
@@ -446,3 +447,97 @@ def test_bundle_and_gate_read_one_transitions_heading(render, tmp_path):
         sys.path.remove(str(out / "scripts/process"))
         for name in names:
             sys.modules.pop(name, None)
+
+
+# --- v2.77 refute round 1: what a reader sees is what the gate reads ------------------
+
+HDR = "| State | Event | Result | Test |\n|---|---|---|---|\n"
+ROW = "| draft | submit | in review | `tests/test_order.py::test_submit` |\n"
+TICK = "\n- [x] T1 states\n"
+
+
+def test_a_transitions_table_without_a_row_fails(render, tmp_path):
+    """Header and delimiter alone state no transition: not even at the merge do they pass."""
+    out = _repo(render(tmp_path, {"project_name": "demo"}))
+    _plan(out, GOOD + "\n## Transitions\n\n" + HDR + TICK)
+    r = _run(out, merge=True)
+    assert r.returncode == 1 and ":13: the transitions table has no row" in r.stdout, r.stdout
+    _plan(out, GOOD + "\n## Transitions\n\n" + HDR)
+    assert ":13: the transitions table has no row" in _run(out).stdout
+
+
+def test_an_html_comment_hides_a_section_and_its_table(render, tmp_path):
+    """A commented-out section is no section; a table inside a comment is no table; a
+    finding after a comment names the file's own line."""
+    out = _repo(render(tmp_path, {"project_name": "demo"}))
+    _plan(out, GOOD + "\n<!--\n## Transitions\n\n(no state work here)\n-->\n")
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+    _plan(out, GOOD + "\n## Transitions\n\nDraft goes to review.\n\n<!--\n" + HDR + ROW + "-->\n")
+    r = _run(out)
+    assert r.returncode == 1 and ":11: `## Transitions` has no table" in r.stdout, r.stdout
+    _plan(out, GOOD + "\n## Transitions <!-- states -->\n\nSee <!-- one\ncomment --> below.\n\n" + HDR
+          + "| draft |  | in review | struck — later |\n")
+    r = _run(out)
+    assert r.returncode == 1 and ":18: transitions row leaves `Event` empty" in r.stdout, r.stdout
+
+
+def test_an_inventory_table_beside_the_transitions_table_passes(render, tmp_path):
+    """The writer and reader inventory /plan asks for beside the table needs no `Test`
+    column; a section where no table has one fails."""
+    out = _repo(render(tmp_path, {"project_name": "demo"}))
+    inventory = "\n### Writers and readers\n\n| Role | Site |\n|---|---|\n| writer | src/a.py:10 |\n"
+    _plan(out, GOOD + "\n## Transitions\n\n" + HDR + ROW + inventory + TICK)
+    r = _run(out, merge=True)
+    assert r.returncode == 0, r.stdout
+    _plan(out, GOOD + "\n## Transitions\n\n| State | Event | Result |\n|---|---|---|\n| a | b | c |\n" + inventory)
+    r = _run(out)
+    assert r.returncode == 1 and ":13: the transitions table has no `Test` column" in r.stdout, r.stdout
+
+
+def test_the_test_column_may_be_named_tests(render, tmp_path):
+    out = _repo(render(tmp_path, {"project_name": "demo"}))
+    for name in ("Tests", "Test(s)", "test(s)", "TEST", "**Tests**"):
+        _plan(out, GOOD + f"\n## Transitions\n\n| State | Event | Result | {name} |\n|---|---|---|---|\n" + ROW + TICK)
+        r = _run(out, merge=True)
+        assert r.returncode == 0, (name, r.stdout)
+
+
+def test_an_indented_heading_is_a_heading(render, tmp_path):
+    """Up to three spaces in, `## Transitions` opens the section and `## Next` ends it;
+    four spaces in, it is indented code."""
+    out = _repo(render(tmp_path, {"project_name": "demo"}))
+    _plan(out, GOOD + "\n   ## Transitions\n\nprose only\n")
+    r = _run(out)
+    assert r.returncode == 1 and ":11: `## Transitions` has no table" in r.stdout, r.stdout
+    _plan(out, GOOD + "\n## Transitions\n\nprose only\n\n   ## Next\n\n" + HDR + ROW)
+    assert ":11: `## Transitions` has no table" in _run(out).stdout
+    _plan(out, GOOD + "\n    ## Transitions\n\nprose only\n")
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+
+
+def test_a_setext_heading_ends_the_section(render, tmp_path):
+    out = _repo(render(tmp_path, {"project_name": "demo"}))
+    for underline in ("-----", "====="):
+        _plan(out, GOOD + f"\n## Transitions\n\nprose only\n\nOther\n{underline}\n\n" + HDR + ROW)
+        r = _run(out)
+        assert r.returncode == 1 and ":11: `## Transitions` has no table" in r.stdout, (underline, r.stdout)
+    # a deeper section ends at a setext level-2 heading too; a thematic break ends nothing
+    _plan(out, GOOD + "\n### Transitions\n\nprose only\n\nOther\n---\n\n" + HDR + ROW)
+    assert "`### Transitions` has no table" in _run(out).stdout
+    _plan(out, GOOD + "\n## Transitions\n\nprose only\n\n---\n\n" + HDR + ROW + TICK)
+    r = _run(out, merge=True)
+    assert r.returncode == 0, r.stdout
+
+
+def test_a_table_without_outer_pipes_is_a_table(render, tmp_path):
+    out = _repo(render(tmp_path, {"project_name": "demo"}))
+    _plan(out, GOOD + "\n## Transitions\n\nState | Event | Result | Test\n---|---|---|---\n"
+          "draft | submit | review | `tests/x.py::test_submit`\n" + TICK)
+    r = _run(out, merge=True)
+    assert r.returncode == 0, r.stdout
+    _plan(out, GOOD + "\n## Transitions\n\nState | Event | Result | Test\n:--- | --- | --- | ---\n"
+          "draft |  | review | struck — later\n")
+    r = _run(out)
+    assert r.returncode == 1 and ":15: transitions row leaves `Event` empty" in r.stdout, r.stdout

@@ -595,8 +595,9 @@ _ASCII_PUNCT = set("!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~")
 
 
 # a plan's transition table (design-template.md, Transitions): `## Transitions`,
-# `### Transitions (…)` — one rule for the bundle's note and the plan-structure gate
-TRANSITIONS_HEADING = re.compile(r"^##+\s+Transitions\b", re.MULTILINE)
+# `### Transitions (…)` — one rule for the bundle's note and the plan-structure gate.
+# Up to three spaces in is still an ATX heading; four is indented code.
+TRANSITIONS_HEADING = re.compile(r"^ {0,3}##+[ \t]+Transitions\b", re.MULTILINE)
 
 
 # a design doc next to the plans (`design-<x>.md`) is not a plan: no tier, no review

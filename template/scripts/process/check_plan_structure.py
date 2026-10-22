@@ -21,11 +21,14 @@ at the merge. A plan reviewer re-found them by reading. This gate reads them:
   - at the merge push, an open `- [ ]` task without `struck: <reason>` or
     `moved: #<issue>`;
   - a `## Transitions` section (`check_review.TRANSITIONS_HEADING`, any depth)
-    without a pipe table below it, before the next heading of the same or a
-    higher level; a table without a `Test` column and two others; a row with
-    an empty cell; once execution started or at the merge push, a test cell
-    that is neither `<path>::<test>` nor `struck — <reason>` (#293). Rows of
-    one equivalence class may name the same test.
+    without a pipe table below it, before the next heading (ATX or setext) of
+    the same or a higher level; no table there with a `Test` column (`Tests`,
+    `Test(s)`) and two others — a table without one beside it, the writer
+    and reader inventory, is no finding; a test table without a row; a row
+    with an empty cell; once execution started or at the merge push, a test
+    cell that is neither `<path>::<test>` nor `struck — <reason>` (#293).
+    Rows of one equivalence class may name the same test. Read as rendered:
+    what an HTML comment hides is neither section nor table.
   NOTE: an `[assumption]` left in a DECISION line.
 
 Bound are only plans the branch ADDS — absent at the integration ref, or below
@@ -63,6 +66,7 @@ from check_review import (  # noqa: E402  (one owner for plan grammar and fences
     integration_push,
     integration_ref,
     plan_tier,
+    uncommented,
 )
 from process_git import git_environment  # noqa: E402  (one owner for how git is read)
 
@@ -168,11 +172,15 @@ def criteria_findings(rel: str, text: str, shall_words: list[str], *, need_tests
     return out
 
 
-_HEADING = re.compile(r"^(#{1,6})(?:[ \t]|$)")
-_TABLE_ROW = re.compile(r"^[ \t]{0,3}\|")
+_HEADING = re.compile(r"^ {0,3}(#{1,6})(?:[ \t]|$)")
+_SETEXT = re.compile(r"^ {0,3}(=+|-+)[ \t]*$")
+_LIST_ITEM = re.compile(r"^ {0,3}(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$)")
+_INDENTED = re.compile(r"^(?: {4}| {0,3}\t)")  # indented code: no heading, no table
 _DELIMITER_CELL = re.compile(r"^:?-+:?$")
 _PIPE = re.compile(r"(?<!\\)\|")
+_TEST_HEADER = re.compile(r"^tests?(?:\(s\))?$", re.IGNORECASE)
 _UNFILLED = {"", "…", "..."}
+_LINE_MARK = re.compile(r"\x00(\d+)\x00$")
 # a row's test cell struck on purpose: the criterion strike's own mark and reason rule
 _STRUCK_CELL = re.compile(r"^" + _STRUCK_MARK + r"[ \t]*(?!<|(?i:todo)\b|…|\.\.\.)\S*\w")
 
@@ -189,59 +197,124 @@ def _bare(cell: str) -> str:
     return cell.strip().strip("`*_").strip()
 
 
-def _sections(lines: list[str]) -> list[tuple[int, str, list[tuple[int, str]]]]:
+def _comments_blank(text: str) -> str:
+    """The text without what an HTML comment hides when rendered (`check_review.uncommented`,
+    the one reader of comments), each kept line at its own line number: a finding names
+    the file's line. Every non-blank line carries its number through the reader; a line a
+    comment ran into keeps its rest at the line the comment closed on."""
+    lines = text.replace("\x00", "").splitlines()
+    marked = "\n".join(f"{line}\x00{n}\x00" if line.strip() else line for n, line in enumerate(lines, 1))
+    kept = [""] * len(lines)
+    for piece in uncommented(marked).splitlines():
+        m = _LINE_MARK.search(piece)
+        if m:
+            kept[int(m.group(1)) - 1] = piece[:m.start()]
+    return "\n".join(kept)
+
+
+def _is_row(line: str) -> bool:
+    """A line a pipe table may hold: an unescaped `|`, not indented code."""
+    return bool(_PIPE.search(line)) and not _INDENTED.match(line) and not _HEADING.match(line)
+
+
+def _is_delimiter(line: str) -> bool:
+    return _is_row(line) and all(_DELIMITER_CELL.match(c) for c in _cells(line))
+
+
+def _tables(lines: list[str]) -> list[list[tuple[int, str]]]:
+    """The pipe tables of the text as GFM reads them, outer pipes optional: a header row,
+    a delimiter row below it, then every row up to a line without an unescaped `|`."""
+    out: list[list[tuple[int, str]]] = []
+    k = 0
+    while k + 1 < len(lines):
+        if not (_is_row(lines[k]) and _is_delimiter(lines[k + 1])):
+            k += 1
+            continue
+        table = [(k + 1, lines[k]), (k + 2, lines[k + 1])]
+        k += 2
+        while k < len(lines) and _is_row(lines[k]):
+            table.append((k + 1, lines[k]))
+            k += 1
+        out.append(table)
+    return out
+
+
+def _heading_level(lines: list[str], j: int, table_rows: set[int]) -> int | None:
+    """The level of a heading at line index `j`: ATX (`## x`, up to three spaces in) or a
+    setext underline (`===` level 1, `---` level 2) below a paragraph line — below a
+    blank, a heading, a list item or a table row `---` is a thematic break."""
+    h = _HEADING.match(lines[j])
+    if h:
+        return len(h.group(1))
+    s = _SETEXT.match(lines[j])
+    if not s or j == 0:
+        return None
+    above = lines[j - 1]
+    if (not above.strip() or _INDENTED.match(above) or _HEADING.match(above) or _LIST_ITEM.match(above)
+            or _SETEXT.match(above) or j - 1 in table_rows):
+        return None
+    return 1 if s.group(1)[0] == "=" else 2
+
+
+def _sections(lines: list[str], table_rows: set[int]) -> list[tuple[int, str, list[tuple[int, str]]]]:
     """(line, heading, body lines) of every Transitions section: from its heading to the
-    next heading of the same or a higher level."""
+    next heading of the same or a higher level, ATX or setext."""
     out: list[tuple[int, str, list[tuple[int, str]]]] = []
     for i, line in enumerate(lines):
         if not TRANSITIONS_HEADING.match(line):
             continue
-        level = len(line) - len(line.lstrip("#"))
+        marks = line.lstrip(" ")
+        level = len(marks) - len(marks.lstrip("#"))
         body: list[tuple[int, str]] = []
         for j in range(i + 1, len(lines)):
-            h = _HEADING.match(lines[j])
-            if h and len(h.group(1)) <= level:
+            found = _heading_level(lines, j, table_rows)
+            if found is not None and found <= level:
+                if not _HEADING.match(lines[j]):
+                    body.pop()  # the setext heading's own text line
                 break
             body.append((j + 1, lines[j]))
         out.append((i + 1, line.strip(), body))
     return out
 
 
-def _tables(body: list[tuple[int, str]]) -> list[list[tuple[int, str]]]:
-    """The pipe tables of a section: a run of `|` rows whose second row is a delimiter."""
-    runs: list[list[tuple[int, str]]] = []
-    for n, line in body:
-        if _TABLE_ROW.match(line):
-            if runs and runs[-1][-1][0] == n - 1:
-                runs[-1].append((n, line))
-            else:
-                runs.append([(n, line)])
-    return [r for r in runs if len(r) >= 2 and all(_DELIMITER_CELL.match(c) for c in _cells(r[1][1]))]
-
-
 def transitions_findings(rel: str, text: str, *, need_tests: bool) -> list[str]:
     """The findings on a plan's Transitions sections (unfenced text, the file's own line
-    numbers): a pipe table below each, with a `Test` column and two others, every cell of
-    every row filled; once tests are due, each test cell `<path>::<test>` or `struck —
-    <reason>`. Every table of the section is read: a second one is no way around the first."""
+    numbers), read as rendered — an HTML comment hides a heading and a table alike: a
+    pipe table below each with a `Test` column (`Tests`, `Test(s)`) and two others, at
+    least one row, every cell of every row filled; once tests are due, each test cell
+    `<path>::<test>` or `struck — <reason>`. Every table with a `Test` column is read: a
+    second one is no way around the first. A table without one beside it (the writer and
+    reader inventory) is no finding while the section has a test table."""
     out: list[str] = []
-    for line, heading, body in _sections(text.splitlines()):
-        tables = _tables(body)
-        if not tables:
+    lines = _comments_blank(text).splitlines()
+    tables = _tables(lines)
+    table_rows = {n - 1 for table in tables for n, _row in table}
+    for line, heading, body in _sections(lines, table_rows):
+        span = {n for n, _line in body}
+        mine = [t for t in tables if t[0][0] in span]
+        if not mine:
             out.append(f"{rel}:{line}: `{heading}` has no table below it — state × event → result with a "
                        f"`Test` column (docs/process/design-template.md, Transitions)")
             continue
-        for table in tables:
-            (hline, hrow), *_delim = table[:2]
-            header = [_bare(c) for c in _cells(hrow)]
-            tests = [k for k, name in enumerate(header) if name.lower() == "test"]
-            if not tests:
-                out.append(f"{rel}:{hline}: the transitions table has no `Test` column — one test per row; "
-                           f"rows of one equivalence class may name the same test")
-                continue
+        tested = []
+        for table in mine:
+            header = [_bare(c) for c in _cells(table[0][1])]
+            tests = [k for k, name in enumerate(header) if _TEST_HEADER.match(name)]
+            if tests:
+                tested.append((table, header, tests))
+        if not tested:
+            out.append(f"{rel}:{mine[0][0][0]}: the transitions table has no `Test` column — one test per "
+                       f"row; rows of one equivalence class may name the same test")
+            continue
+        for table, header, tests in tested:
+            hline = table[0][0]
             if len(header) < 3:
                 out.append(f"{rel}:{hline}: the transitions table needs a `Test` column and at least two "
                            f"others (state × event → result)")
+                continue
+            if len(table) == 2:
+                out.append(f"{rel}:{hline}: the transitions table has no row — one row per transition, "
+                           f"forbidden ones included")
                 continue
             for n, row in table[2:]:
                 cells = _cells(row)
