@@ -456,6 +456,28 @@ def test_the_report_header_names_the_round_attest_writes(review_repo):
     assert "round: 2" in text.split("\n\n", 1)[0]
 
 
+def test_a_second_lens_on_a_blocked_head_attests_that_round(review_repo):
+    """A Codex lens of a round another lens already blocked on this head (its attest commit
+    aside) is that round: one review round stays one blocked round, and owes no REPLAN and
+    no class test of a round that never ran (v2.77 cross-model review)."""
+    out, d, codex = review_repo(PASS)
+    reviewed, base = _git(out, "rev-parse", "HEAD"), _git(out, "rev-parse", "main")
+    journal = out / ".process-work/journal/2026-10-16.md"
+    journal.parent.mkdir(parents=True, exist_ok=True)
+    journal.write_text("REVIEW work=7 tier=2 reviewer=r model=claude-opus-5 independence=bundle,non-implementing "
+                       f"base={base} head={reviewed} verdict=block round=1\n"
+                       "skipped class-test work=7: a fixture round, no code defect\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "docs: attest 7 round 1, lens a")
+    _git(out, "push", "-q", "origin", "7-widget")
+    _run_review(out, d, codex)
+    assert d.handoff(out, "7-widget") == 0
+    text = next((out / ".process-work/reviews").glob("*-7-codex-*.md")).read_text()
+    head = importlib.import_module("check_review").report_header(text)
+    lines = "\n".join(p.read_text() for p in (out / ".process-work/journal").glob("**/*.md"))
+    assert head.get("round") == ["1"] and "verdict=pass round=1" in lines, (head, lines)
+
+
 def test_the_report_text_carries_no_round_it_was_not_given(mods):
     load, _out = mods
     codex = load("_dispatch_codex")
