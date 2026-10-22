@@ -91,8 +91,8 @@ of every writer and reader of the state (`path:line`). Measured downstream:
 in 8 of 12 issues with four or more review rounds the remedy belonged in the
 plan — a state table, an invariant, a writer and reader inventory. The `plan-structure` gate reads the table in every Tier 2+ plan the branch
 adds, Spec Kit plans included: at least one row, every cell filled, and a
-test in each test cell once the first task is ticked. A table beside it
-without a `Test` column, such as the inventory, is not read as one.
+test in each test cell once the first task is ticked. The section's first
+table is the state table; a table after it, such as the inventory, is not read as one.
 
 **Known facts come with the task.** Where the project keeps generated
 inventories (`docs/process/inventories.md`), run `uv run

@@ -282,9 +282,10 @@ def transitions_findings(rel: str, text: str, *, need_tests: bool) -> list[str]:
     numbers), read as rendered — an HTML comment hides a heading and a table alike: a
     pipe table below each with a `Test` column (`Tests`, `Test(s)`) and two others, at
     least one row, every cell of every row filled; once tests are due, each test cell
-    `<path>::<test>` or `struck — <reason>`. Every table with a `Test` column is read: a
-    second one is no way around the first. A table without one beside it (the writer and
-    reader inventory) is no finding while the section has a test table."""
+    `<path>::<test>` or `struck — <reason>`. The section's first table is its transitions
+    table and answers for all of it; a table after it (the writer and reader inventory) is
+    free — and no way around the first: a `Test` column there lends the first none (v2.77
+    cross-model review)."""
     out: list[str] = []
     lines = _comments_blank(text).splitlines()
     tables = _tables(lines)
@@ -296,17 +297,15 @@ def transitions_findings(rel: str, text: str, *, need_tests: bool) -> list[str]:
             out.append(f"{rel}:{line}: `{heading}` has no table below it — state × event → result with a "
                        f"`Test` column (docs/process/design-template.md, Transitions)")
             continue
-        tested = []
-        for table in mine:
-            header = [_bare(c) for c in _cells(table[0][1])]
-            tests = [k for k, name in enumerate(header) if _TEST_HEADER.match(name)]
-            if tests:
-                tested.append((table, header, tests))
-        if not tested:
-            out.append(f"{rel}:{mine[0][0][0]}: the transitions table has no `Test` column — one test per "
-                       f"row; rows of one equivalence class may name the same test")
+        table = mine[0]
+        header = [_bare(c) for c in _cells(table[0][1])]
+        tests = [k for k, name in enumerate(header) if _TEST_HEADER.match(name)]
+        if not tests:
+            out.append(f"{rel}:{table[0][0]}: the transitions table has no `Test` column — one test per "
+                       f"row; rows of one equivalence class may name the same test (the section's first "
+                       f"table is its transitions table; an inventory table goes after it)")
             continue
-        for table, header, tests in tested:
+        for table, header, tests in ((table, header, tests),):
             hline = table[0][0]
             if len(header) < 3:
                 out.append(f"{rel}:{hline}: the transitions table needs a `Test` column and at least two "
