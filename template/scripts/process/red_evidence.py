@@ -18,11 +18,14 @@ mistakes each time). This tool runs the command twice and writes what it saw:
 
 It refuses when no test went from red to green (the proof proves nothing) or
 when a test is still red after. The journal gets the block; with `--cause`
-also the `ROOT-CAUSE work=W round=R: <cause> — <tests>` line attest.py asks
-for, the test names filled in from the run. The why is the only free text; with
-`--sites` (the other places the same defect can live) the line takes the class-test
-form `<cause> — sites: <sites> — <tests>` that attest asks for each blocked round
-(v2.77, required_records `class-test`).
+also the ROOT-CAUSE line attest.py asks for, the test names filled in from the
+run. The why is the only free text. With `--sites` (the other places the same
+defect can live) it takes the class-test form attest asks for each blocked round
+(v2.77, required_records `class-test`): `ROOT-CAUSE work=W round=R: <cause> — sites:
+<sites> — <path>::<test>`, a ` — ` inside the sites written as `, ` (it separates the
+segments); without `--sites` the older `<cause> — <path>::<test>` names a cause but no
+class test. A round without a code defect has no red run: its line is written by hand,
+`<cause> — sites: none — <reason>`.
 
 The command after `--` is pytest's (`python3 -m pytest …`, `uv run pytest …`); a
 small probe plugin (`-p red_evidence_probe`, on PYTHONPATH) records pytest's own node
