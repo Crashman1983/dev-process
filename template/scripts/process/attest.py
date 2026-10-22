@@ -25,7 +25,9 @@ is corrected to the count, with a note; one below the last blocked round is
 refused — a late pass of an old round must not outrank the blocks since.
 
 Before any round after a block, each block's fix names its cause: a line
-`ROOT-CAUSE work=<id> round=<r>: <cause> — <the test that failed before the fix>`
+`ROOT-CAUSE work=<id> round=<r>: <cause> — sites: <sites> — <path>::<test>` (the
+test that failed before the fix; `sites: none — <reason>` for a round without a code
+defect; the older `<cause> — <test>` still names a cause, but is no class test)
 in the journal or the plan (a Spec Kit plan too). A fix that names no cause is a patch, and
 patches on patches were the largest source of extra rounds downstream. A
 missing cause is a note here, not a refusal: by the time a verdict is
@@ -312,9 +314,9 @@ def round_problems(args, root: Path, journal_dir: Path) -> tuple[int, list[str],
     if missing:
         notes.append(
             "no root cause for the fix of blocking round(s) " + ", ".join(map(str, missing))
-            + f" — record `ROOT-CAUSE work={args.work} round=<r>: <cause> — <the test "
-            "that failed before the fix>` in the journal or the plan (docs/process/review-checklist.md, "
-            "round economy)")
+            + f" — record `ROOT-CAUSE work={args.work} round=<r>: <cause> — sites: <sibling sites> — "
+            "<path>::<the test that failed before the fix>` (or `… — sites: none — <reason>`) in the "
+            "journal or the plan (docs/process/review-checklist.md, round economy)")
     return written, notes, refusals
 
 
