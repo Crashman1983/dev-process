@@ -479,26 +479,44 @@ def test_a_second_lens_on_a_blocked_head_attests_that_round(review_repo):
     assert head.get("round") == ["1"] and "verdict=pass round=1" in lines, (head, lines)
 
 
-def test_a_plan_fix_after_a_blocked_plan_lens_is_a_new_round(review_repo):
-    """A plan review reviews the plan, which lives under `.process-work/`: a plan-only fix
-    after a blocked plan lens is the next round, never that lens's round again — else its
-    pass, written as the blocked round, could never clear the block (v2.77 cross-model
-    review, round 2). The attest commit's report and journal stay bookkeeping."""
-    out, _d, codex = review_repo(PASS)
+def _blocked_lens(out, work: str) -> tuple[str, argparse.Namespace]:
+    """Lens A blocked `work` on the current head: its attest commit adds the REVIEW line."""
     reviewed, base = _git(out, "rev-parse", "HEAD"), _git(out, "rev-parse", "main")
     journal = out / ".process-work/journal/2026-10-16.md"
     journal.parent.mkdir(parents=True, exist_ok=True)
-    journal.write_text("REVIEW work=7-plan tier=2 reviewer=r model=claude-opus-5 "
+    journal.write_text(f"REVIEW work={work} tier=2 reviewer=r model=claude-opus-5 "
                        "independence=bundle,non-implementing "
                        f"base={base} head={reviewed} verdict=block round=1\n")
-    _git(out, "add", "-A")
-    _git(out, "commit", "-q", "-m", "docs: attest 7-plan round 1, lens a")
-    plan_args = argparse.Namespace(work="7-plan", round_=None)
-    assert codex._blocked_round_at(out, plan_args, _git(out, "rev-parse", "HEAD")) == 1
+    return reviewed, argparse.Namespace(work=work, round_=None)
+
+
+def test_only_attest_commits_keep_a_blocked_round(review_repo):
+    """Another lens of a blocked round is one whose head lies only attest commits above the
+    blocked head — each adds a REVIEW line and changes nothing but reports, journal and
+    records appended to a plan (`records_only`). A plan changed in its content, by a plan
+    or a code fix, or a commit adding no REVIEW line, is a fix: the next round (v2.77
+    cross-model review, rounds 2 and 3)."""
+    out, _d, codex = review_repo(PASS)
     plan = out / ".process-work/plans/2026-10-15-widget.md"
-    plan.write_text(plan.read_text() + "\nThe fix of the blocked plan round.\n")
-    _git(out, "commit", "-q", "-am", "plan: fix round 1")
-    assert codex._blocked_round_at(out, plan_args, _git(out, "rev-parse", "HEAD")) is None
+    for work in ("7-plan", "7"):
+        _git(out, "checkout", "-q", "-B", f"t-{work}", "7-widget")
+        _reviewed, args = _blocked_lens(out, work)
+        plan.write_text(plan.read_text() + "\nREFUTE work=7 round=1: 3 scenarios, none held\n")
+        _git(out, "add", "-A")
+        _git(out, "commit", "-q", "-m", f"docs: attest {work} round 1, lens a")
+        assert codex._blocked_round_at(out, args, _git(out, "rev-parse", "HEAD")) == 1, work
+        # the plan changed in its content: a fix, the next round
+        plan.write_text(plan.read_text().replace("tier:", "Fixed.\n\ntier:", 1))
+        _git(out, "commit", "-q", "-am", "plan: fix round 1")
+        assert codex._blocked_round_at(out, args, _git(out, "rev-parse", "HEAD")) is None, work
+    # a record appended without a REVIEW line (a decision answering the block) is no attest commit
+    _git(out, "checkout", "-q", "-B", "t-decision", "7-widget")
+    _reviewed, args = _blocked_lens(out, "7")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "docs: attest 7 round 1, lens a")
+    plan.write_text(plan.read_text() + "\n- DECISION 2026-10-16 agent: the finding stays\n")
+    _git(out, "commit", "-q", "-am", "plan: decide round 1")
+    assert codex._blocked_round_at(out, args, _git(out, "rev-parse", "HEAD")) is None
 
 
 def test_the_report_text_carries_no_round_it_was_not_given(mods):

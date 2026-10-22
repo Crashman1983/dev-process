@@ -650,31 +650,53 @@ def _committed_attest(wt: Path, rec: dict, work: str, plan_review: bool) -> dict
 def _blocked_round_at(wt: Path, args: argparse.Namespace, head: str) -> int | None:
     """The round of a blocking REVIEW line of the work (`attest.round_ids`) on this head —
     another lens already blocked the round this review is a lens of — or None. "This head"
-    is the line's own head, or one that differs from it by bookkeeping only (`.process-work/`:
-    the first lens's attest commit), as a lens built after that commit sees it. A plan review
-    reviews the plan, so a changed plan there is a fix and a new round, never bookkeeping
-    (v2.77 cross-model review, round 2)."""
+    is the line's own head, or one only attest commits lie above (`_attest_commit`), as a
+    lens built after the first lens's attest commit sees it. Rebuilt in the v2.77
+    cross-model review (round 3): a rule over paths read the reviewed plan as bookkeeping,
+    or the records an attest commit carries as content."""
     import attest  # noqa: PLC0415  (the main checkout's)
-    from check_review import JOURNAL_DIR, PLANS_ACTIVE, parse_review_lines, work_key  # noqa: PLC0415
+    from check_review import JOURNAL_DIR, parse_review_lines, work_key  # noqa: PLC0415
     mine = {work_key(w) for w in attest.round_ids(args, wt)}
-    reviewed = f"{PLANS_ACTIVE}/" if args.work.endswith("-plan") else None
-
-    def bookkeeping(path: str) -> bool:
-        return path.startswith(".process-work/") and not (reviewed and path.startswith(reviewed))
-
-    def same_code(other: str) -> bool:
-        if other == head:
-            return True
+    attests: list[str] = []  # head, then each first parent while the commit is an attest commit
+    at = head
+    while len(attests) < 100:
+        attests.append(at)
         try:
-            changed = _git(wt, "diff", "--name-only", "-z", other, head).decode().split("\0")
+            parents = _git(wt, "rev-list", "--parents", "-n", "1", at).decode().split()[1:]
         except ValueError:
-            return False  # git cannot tell: a new round, as before
-        return all(bookkeeping(p) for p in changed if p)
-
+            break  # git cannot tell: this head alone
+        if len(parents) != 1 or not _attest_commit(wt, parents[0], at, mine):
+            break
+        at = parents[0]
     rounds = [int(f["round"]) for t in attest._texts(wt, wt / JOURNAL_DIR) for _ln, f in parse_review_lines(t)[0]
-              if f["verdict"] == "block" and f.get("head") and work_key(f["work"]) in mine
-              and same_code(f["head"])]
+              if f["verdict"] == "block" and f.get("head") in attests and work_key(f["work"]) in mine]
     return max(rounds) if rounds else None
+
+
+def _attest_commit(wt: Path, parent: str, commit: str, mine: set) -> bool:
+    """Is `commit` over `parent` an attest commit of the work `mine`: it adds a REVIEW line
+    of the work and changes nothing else than reports and journal (`.process-work/`, plans
+    aside) and records appended to a plan (`check_review.records_only`, as attest `--with`
+    lets them ride)? A plan changed in its content is a fix, and so is a commit without a
+    REVIEW line — a decision answering a block included. Unreadable is no."""
+    from check_review import parse_review_lines, records_only, work_key  # noqa: PLC0415
+    try:
+        changed = [p for p in _git(wt, "diff", "--name-only", "-z", "--no-renames", parent, commit)
+                   .decode().split("\0") if p]
+        added = "\n".join(ln[1:] for ln in _git(wt, "diff", "-U0", "--no-renames", parent, commit)
+                          .decode("utf-8", errors="replace").splitlines()
+                          if ln.startswith("+") and not ln.startswith("+++"))
+        for rel in changed:
+            if _is_plan(rel):
+                before = _git(wt, "show", f"{parent}:{rel}").decode("utf-8")
+                after = _git(wt, "show", f"{commit}:{rel}").decode("utf-8")
+                if not records_only(before, after):
+                    return False
+            elif not rel.startswith(".process-work/"):
+                return False
+    except (ValueError, UnicodeDecodeError):
+        return False
+    return any(work_key(f["work"]) in mine for _ln, f in parse_review_lines(added)[0])
 
 
 def handoff(root: Path, rec: dict, *, implementer: str | None = None) -> dict:
