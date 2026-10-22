@@ -651,10 +651,16 @@ def _blocked_round_at(wt: Path, args: argparse.Namespace, head: str) -> int | No
     """The round of a blocking REVIEW line of the work (`attest.round_ids`) on this head —
     another lens already blocked the round this review is a lens of — or None. "This head"
     is the line's own head, or one that differs from it by bookkeeping only (`.process-work/`:
-    the first lens's attest commit), as a lens built after that commit sees it."""
+    the first lens's attest commit), as a lens built after that commit sees it. A plan review
+    reviews the plan, so a changed plan there is a fix and a new round, never bookkeeping
+    (v2.77 cross-model review, round 2)."""
     import attest  # noqa: PLC0415  (the main checkout's)
-    from check_review import JOURNAL_DIR, parse_review_lines, work_key  # noqa: PLC0415
+    from check_review import JOURNAL_DIR, PLANS_ACTIVE, parse_review_lines, work_key  # noqa: PLC0415
     mine = {work_key(w) for w in attest.round_ids(args, wt)}
+    reviewed = f"{PLANS_ACTIVE}/" if args.work.endswith("-plan") else None
+
+    def bookkeeping(path: str) -> bool:
+        return path.startswith(".process-work/") and not (reviewed and path.startswith(reviewed))
 
     def same_code(other: str) -> bool:
         if other == head:
@@ -663,7 +669,7 @@ def _blocked_round_at(wt: Path, args: argparse.Namespace, head: str) -> int | No
             changed = _git(wt, "diff", "--name-only", "-z", other, head).decode().split("\0")
         except ValueError:
             return False  # git cannot tell: a new round, as before
-        return all(p.startswith(".process-work/") for p in changed if p)
+        return all(bookkeeping(p) for p in changed if p)
 
     rounds = [int(f["round"]) for t in attest._texts(wt, wt / JOURNAL_DIR) for _ln, f in parse_review_lines(t)[0]
               if f["verdict"] == "block" and f.get("head") and work_key(f["work"]) in mine
