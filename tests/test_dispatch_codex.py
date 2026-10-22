@@ -537,7 +537,16 @@ def test_only_attest_commits_keep_a_blocked_round(review_repo):
                        .replace("reviewer=r", "reviewer=s"))
     _git(out, "add", "-A")
     _git(out, "commit", "-q", "-m", "docs: attest 7 round 1, lens b, archive")
-    assert "R" not in _git(out, "diff", "--name-status", "-M", "HEAD~1", "HEAD").split()[0::2]
+    assert not any(k.startswith("R") for k in _git(out, "diff", "--name-status", "-M", "HEAD~1", "HEAD").split()[0::2])
+    assert codex._blocked_round_at(out, args, _git(out, "rev-parse", "HEAD")) == 1
+    # a lens line byte-identical to one already there (same model, same head) is still added (round 6)
+    _git(out, "checkout", "-q", "-B", "t-twin", "7-widget")
+    _reviewed, args = _blocked_lens(out, "7")
+    journal.write_text(journal.read_text() + journal.read_text().replace("verdict=block", "verdict=pass"))
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "docs: attest 7 round 1, lenses a and b")
+    journal.write_text(journal.read_text() + journal.read_text().splitlines()[-1] + "\n")
+    _git(out, "commit", "-q", "-am", "docs: attest 7 round 1, lens c")
     assert codex._blocked_round_at(out, args, _git(out, "rev-parse", "HEAD")) == 1
     # a record appended without a REVIEW line (a decision answering the block) is no attest commit
     _git(out, "checkout", "-q", "-B", "t-decision", "7-widget")
