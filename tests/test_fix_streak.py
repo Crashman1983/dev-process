@@ -31,9 +31,11 @@ def test_third_fix_on_one_file_is_named_and_never_blocks(render, tmp_path):
     # two real fixes: the structural question before the third patch (rule 4)
     assert r.returncode == 0
     assert "fix-streak: note: 2 fix commits on src.py" in r.stdout and "rule 4" in r.stdout
-    # v2.77 F7: the call is a REPLAN line once a review round blocked twice, else a DECISION
-    assert ("record the increment-vs-rewrite call — as `REPLAN work=<id> round=<r>` once a review "
-            "round blocked twice, else as a DECISION") in r.stdout
+    # v2.77 F7 (refute round 1): REPLAN from the work's second blocked round, a DECISION before
+    assert ("record the increment-vs-rewrite call — from the second blocked round of the work as "
+            "`REPLAN work=<id> round=<r>: increment|rebuild — <why>` in the plan, until then as a "
+            "DECISION — before the next patch") in r.stdout
+    assert "once a review round blocked twice" not in r.stdout
     _commit(out, "src.py", "fix: c")
     r = subprocess.run(gate, cwd=out, capture_output=True, text=True)
     assert r.returncode == 0
