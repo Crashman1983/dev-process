@@ -19,7 +19,8 @@ Two steps, one owner:
   plan rides `--with`; anything else must be at head. One exception (v2.77):
   the blocked code rounds a branch adds and its journal's ROOT-CAUSE and skip
   lines are read in the worktree, as the round counter reads them, less what
-  the fork point already holds (`_branch_records`).
+  the fork point already holds (`_branch_records`); a journal skip lifts only
+  the per-round duties (`JOURNAL_SKIPS`).
 - `decide()` is a pure decision table over what was gathered.
 
 Grammar and rules stay with their owners: `check_review` (REFUTE and skip
@@ -53,6 +54,7 @@ from check_review import (
     RECORD_KINDS,
     REFUTE_LINE,
     REPLAN_LINE,
+    JOURNAL_DIR,
     REVIEW_REPORTS,
     ROOT_CAUSE_LINE,
     SKIP_LINE,
@@ -323,6 +325,10 @@ def _fix_streak(root: Path, base: str | None, head: str | None) -> int | None:
 # merge of main moves the fork along (plan review rounds 3–4). An earlier work of the same
 # issue, already on main, lends this one neither its blocks nor its skips and causes.
 
+# the skips a branch's journal may carry: the per-round duties (`replan`, `class-test`) whose
+# ROOT-CAUSE lines the journal holds too; `ac-trace`, `cross-model`, `refute` and every other
+# kind count from the plan alone, as before v2.77
+JOURNAL_SKIPS = frozenset({"replan", "class-test"})
 _LIST_LEAD = re.compile(r"^\s*(?:(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s+)?)?")
 # a reason after `sites: none —`, not the brief's placeholder
 _REASON = re.compile(r"^(?!<|TODO\b|…|\.\.\.)\S")
@@ -350,13 +356,48 @@ def _fork(root: Path, head: str) -> str | None:
     return "" if contained else None
 
 
-def _at_fork(root: Path, fork: str) -> set[str] | None:
-    """The contents of every line of every record file at the fork point (the journal
-    with its archive, the plans); None when git cannot read them."""
-    texts = record_texts(root, RECORD_KINDS, ref=fork)
-    if texts is None:
+def _journal_dir_at(root: Path, fork: str, journal_dir: Path | None) -> list[str] | None:
+    """The texts of the attested `--journal-dir`'s files at the fork point, where it lies in
+    the repository apart from the journal `record_texts` reads there anyway; None when git
+    cannot read them."""
+    if journal_dir is None:
+        return []
+    try:
+        rel = journal_dir.resolve().relative_to(root.resolve()).as_posix()
+    except ValueError:
+        return []  # outside the repository: nothing of it at the fork point
+    if rel == JOURNAL_DIR or rel.startswith(JOURNAL_DIR + "/"):
+        return []
+    r = _git(root, "ls-tree", "-r", "-z", "--name-only", fork, "--", rel)
+    if r.returncode != 0:
         return None
-    return {_content(ln) for _rel, text in texts for ln in text.splitlines() if ln.strip()}
+    out = []
+    for name in (n for n in r.stdout.split("\0") if n.endswith(".md")):
+        text = _show(root, fork, name)
+        if text is None:
+            return None
+        out.append(text)
+    return out
+
+
+def _at_fork(root: Path, fork: str, journal_dir: Path | None = None) -> tuple[set[str], set[str]] | None:
+    """The contents of every line of every record file at the fork point (the journal with
+    its archive, the attested `--journal-dir`, the plans), each read as the worktree side it
+    is compared with: (as the round counter reads blocks — a journal less its fences, a plan
+    as rendered, `attest._texts` —, as the journal records are read — `readable`). A line
+    quoted in a fence on main is no line of the fork: it hides no real line of the branch.
+    None when git cannot read them."""
+    texts = record_texts(root, RECORD_KINDS, ref=fork)
+    extra = _journal_dir_at(root, fork, journal_dir) if texts is not None else None
+    if texts is None or extra is None:
+        return None
+    journal = [text for rel, text in texts if record_kind(rel) == "journal"] + extra
+    plans = [text for rel, text in texts if record_kind(rel) != "journal"]
+
+    def contents(views: list[str]) -> set[str]:
+        return {_content(ln) for text in views for ln in text.splitlines() if ln.strip()}
+    return (contents([_unfenced(t) for t in journal] + [readable(t) for t in plans]),
+            contents([readable(t) for t in journal + plans]))
 
 
 def _branch_records(root: Path, head: str, blocks: list[tuple[int, str]] | None,
@@ -369,13 +410,14 @@ def _branch_records(root: Path, head: str, blocks: list[tuple[int, str]] | None,
     fork = _fork(root, head)
     if fork == "":
         return [], ""
-    old = _at_fork(root, fork) if fork is not None else None
+    old = _at_fork(root, fork, journal_dir) if fork is not None else None
     if old is None or blocks is None:
         return None, ""
-    rounds = sorted({r for r, line in blocks if _content(line) not in old})
+    old_blocks, old_records = old
+    rounds = sorted({r for r, line in blocks if _content(line) not in old_blocks})
     journal = record_texts(root, ("journal",), journal_dir=journal_dir) or []
     new = [ln for _rel, text in journal for ln in readable(text).splitlines()
-           if ln.strip() and _content(ln) not in old]
+           if ln.strip() and _content(ln) not in old_records]
     return rounds, "\n".join(new)
 
 
@@ -969,6 +1011,8 @@ def gather(root: Path, *, work: str, ids: set[str], tier: int, verdict: str, ind
     # skips) beside the plan's; a plan review asks no code round's records (facts None)
     rounds, journal = (None, "") if plan_review else _branch_records(root, head, blocks, journal_dir)
     mine = [own, journal]
+    # a journal skip lifts only the per-round duties; every other kind counts from the plan
+    skips = _skips([own], skip_ids) | (_skips([journal], skip_ids) & JOURNAL_SKIPS)
     replanned = {int(m.group("round")) for m in REPLAN_LINE.finditer(own) if _binds(m.group("work"), plan_ids)}
     return Evidence(
         work=work, tier=tier, verdict=verdict, plan_review=plan_review, model=model,
@@ -976,7 +1020,7 @@ def gather(root: Path, *, work: str, ids: set[str], tier: int, verdict: str, ind
         families=tuple(policy["families"]),
         gate_code=None if changed is None else any(is_gate_path(p) for p in changed),
         cross_model="cross-model" in tokens, single_family="single-family" in tokens,
-        skips=_skips(mine, skip_ids), refute=_refuted([own], plan_ids),
+        skips=skips, refute=_refuted([own], plan_ids),
         report_refute=_refuted(report_texts, plan_ids),
         root_cause=_root_caused(mine, plan_ids),
         owner_decision=bool(OWNER_DECISION.search(_unfenced(own))),
