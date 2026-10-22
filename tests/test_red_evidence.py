@@ -515,3 +515,41 @@ def test_sites_is_read_in_any_case(render, tmp_path):
     out, _before = _repo(render, tmp_path)
     cr, _ev = _grammar(out)
     assert cr.root_cause_parts("x — Sites: none — refuted") == ("x", "none", "refuted")
+
+
+def test_a_junit_file_attribute_is_made_relative_and_keeps_its_class(render, tmp_path):
+    """Ein absolutes `file=` unter der Wurzel wird relativ, eines außerhalb fällt auf die
+    classname-Form zurück; eine Klasse im classname bleibt Teil des Namens."""
+    out, _before = _repo(render, tmp_path)
+    mod = _red_evidence_module(out)
+    report = tmp_path / "r.xml"
+    inside, outside = out / "tests/test_x.py", tmp_path.parent / f"{tmp_path.name}-other/test_x.py"
+    report.write_text(
+        "<testsuites><testsuite>"
+        f"<testcase classname='tests.test_x.TestOne' file='{inside}' name='test_x'><failure/></testcase>"
+        f"<testcase classname='tests.test_x.TestTwo' file='{inside}' name='test_x'/>"
+        "<testcase classname='tests.test_x' file='tests/test_x.py' name='test_y'/>"
+        "<testcase classname='KenniTests.FooTests' file='KenniTests/FooTests.swift' name='testBar'/>"
+        f"<testcase classname='calc.spec' file='{outside}' name='adds'/>"
+        "</testsuite></testsuites>")
+    assert mod.junit_outcomes(report, out) == {
+        "tests/test_x.py::TestOne::test_x": "failed",
+        "tests/test_x.py::TestTwo::test_x": "passed",
+        "tests/test_x.py::test_y": "passed",
+        "KenniTests/FooTests.swift::testBar": "passed",
+        "calc.spec::adds": "passed",
+    }
+
+
+def test_an_absolute_junit_file_names_one_test_in_both_trees(render, tmp_path):
+    """Der Runner schreibt `file=` absolut: im alten Baum und im Arbeitsbaum ist es dieselbe
+    Datei relativ zur jeweiligen Wurzel — rot vorher, grün nachher wird gemessen."""
+    out, before = _repo(render, tmp_path)
+    runner = RUNNER.replace(
+        "<testcase classname='calc.spec' name=",
+        "<testcase classname='calc.spec' file={quoteattr(__import__('os').path.abspath('tests/calc.test.ts'))} name=")
+    (out / "calc.spec.py").write_text(runner, encoding="utf-8")
+    r = _tool(out, "--work", "7", "--round", "1", "--before", before, "--junit", "report.xml",
+              "--copy", "calc.spec.py", "--dry-run", "--", sys.executable, "calc.spec.py")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "red before, green after (1): tests/calc.test.ts::adds" in r.stdout, r.stdout
