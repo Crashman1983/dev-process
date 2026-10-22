@@ -720,26 +720,32 @@ def review_size(root: Path, base_ref: str) -> tuple[int, int]:
 # above this a fix pass is no longer one fix: downstream, a fix round of six to nine
 # findings was followed by a fix-induced blocker in 46 % of rounds, ten or more in 86 %
 FIX_PASS_MAX_LINES = 300
+_CHANGELOG_FRAGMENTS = re.compile(r"(^|/)changelog\.d/", re.IGNORECASE)
 
 
 def _fix_pass_counted(rel: str) -> bool:
-    """A line a fix pass writes into the product: not a test, not bookkeeping, no changelog."""
+    """A line a fix pass writes into the product: not a test, not what the SIZE WARNING
+    leaves out (bookkeeping, lock files), no changelog or changelog fragment."""
     return not (_is_test_path(rel) or rel.startswith(_review_gate.BOOKKEEPING)
+                or SIZE_IGNORED.search(rel) or _CHANGELOG_FRAGMENTS.search(rel)
                 or rel.rsplit("/", 1)[-1].upper().startswith("CHANGELOG"))
 
 
 def fix_pass_size(root: Path, since: str, head: str) -> int | None:
     """Changed lines of the delta the bundle shows — `check_review.delta_commands`:
     own first-parent commits and merge resolutions, never what a merge of main
-    brings — counted per `--numstat` outside tests, `.process-work/` and CHANGELOG
-    files. None when git cannot tell. Known limit: a test folder without a test
-    segment (Xcode's `FooTests/`) counts as product."""
+    brings — counted per `--numstat` outside `_fix_pass_counted`'s exclusions, with
+    renames detected, so a pure move counts its edits, not twice its size. None when
+    git cannot tell. Known limits: a test folder without a test segment (Xcode's
+    `FooTests/`) counts as product; a conflict resolution that keeps one side shows
+    in its remerge diff (a high count, never a hidden one — the warning only advises)."""
     commands = _review_gate.delta_commands(root, since, head, names=True)
     if commands is None:
         return None
+    counted = {"--name-status": "--numstat", "--no-renames": "--find-renames"}
     lines = 0
     for command in commands:
-        out = _review_gate._git_bytes(root, *("--numstat" if a == "--name-status" else a for a in command))
+        out = _review_gate._git_bytes(root, *(counted.get(a, a) for a in command))
         if out is None:
             return None
         lines += sum(changed for path, changed in _numstat(out) if _fix_pass_counted(path))
