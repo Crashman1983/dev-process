@@ -1796,6 +1796,33 @@ def test_a_small_fix_pass_or_a_first_round_gets_no_warning(render, tmp_path):
     assert FIX_PASS not in _bundle(out, "--base", "main").stdout  # a full round is no fix pass
 
 
+def test_a_fix_pass_counts_a_move_once_and_leaves_lock_files_and_fragments_out(render, tmp_path):
+    """Refute v2.77 F: a pure move is no change of twice its size, and what the SIZE WARNING
+    leaves out (lock files) plus `changelog.d/` fragments are no production lines either."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    (out / "big.py").write_text(_lines(400, "b"))
+    _git(out, "add", "-A", check=True)
+    _git(out, "commit", "-q", "-m", "feat: big", check=True)
+    reviewed = _git(out, "rev-parse", "HEAD").stdout.strip()
+    _git(out, "mv", "big.py", "moved.py", check=True)
+    (out / "uv.lock").write_text(_lines(2000, "u"))
+    (out / "web").mkdir()
+    (out / "web/package-lock.json").write_text(_lines(2000, "l"))
+    (out / "changelog.d").mkdir()
+    (out / "changelog.d/297.md").write_text(_lines(400, "c"))
+    _git(out, "add", "-A", check=True)
+    _git(out, "commit", "-q", "-m", "fix: move and lock", check=True)
+    assert FIX_PASS not in _bundle(out, "--base", "main", "--since", reviewed).stdout
+    # the count still sees what the pass writes into the product, beside a move
+    (out / "extra.py").write_text(_lines(301, "e"))
+    _git(out, "add", "-A", check=True)
+    _git(out, "commit", "-q", "-m", "fix: extra", check=True)
+    text = _bundle(out, "--base", "main", "--since", reviewed).stdout
+    warning = next(ln for ln in text.splitlines() if ln.startswith(FIX_PASS))
+    assert "301 lines" in warning, warning
+
+
 def test_a_measured_regression_scores_100_and_class_is_asked_of_blockers(render, tmp_path):
     """#297 AC-4 and #297 AC-6: the bundle tells the scorer a measured old/new difference
     is not its to lower, and the grammar makes `class=` mandatory for blockers and majors."""
