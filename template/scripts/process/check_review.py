@@ -414,7 +414,7 @@ ROOT_CAUSE_LINE = re.compile(
 REPLAN_LINE = re.compile(
     _RECORD_LEAD + r"REPLAN[ \t]+work=(?P<work>(?!<)(?!TODO\b)[\w#./-]+)[ \t]+round=(?P<round>\d+):"
     r"[ \t]*(?P<mode>increment|rebuild)(?![\w|/-])[ \t]*(?:—|–|--?|:)[ \t]*"
-    r"(?P<text>(?!<|TODO\b|…|\.\.\.)\S.*)$",
+    r"(?P<text>(?!<|(?i:todo)\b|…|\.\.\.)\S.*)$",
     re.MULTILINE)
 # the separator of a ROOT-CAUSE line's segments: `<cause> — sites: <sites> — <tests>`
 _SEGMENT = " — "

@@ -1211,6 +1211,17 @@ def test_sites_none_needs_a_reason(repo):
     assert r.returncode == 1 and "`sites: none` without a reason" in r.stderr, r.stderr
 
 
+def test_a_lowercase_todo_is_no_reason(repo, ev_mod):
+    """`todo` in any case is a placeholder, after `sites: none —` and in a REPLAN line."""
+    _append(repo, SHARD, _review("widget", 1), commit="docs: block")
+    _append(repo, PLAN_FILE, _RC + "sites: none — todo", commit="docs: cause")
+    r = _pass(repo)
+    assert r.returncode == 1 and "`sites: none` without a reason" in r.stderr, r.stderr
+    import check_review
+    assert not check_review.REPLAN_LINE.search("REPLAN work=7 round=2: rebuild — todo")
+    assert check_review.REPLAN_LINE.search("REPLAN work=7 round=2: rebuild — todos left over")
+
+
 def test_a_fork_line_with_list_marker_and_trailing_blanks_is_the_same_line(repo):
     """Verglichen wird der Inhalt: `- <Zeile>   ` auf main ist dieselbe Zeile wie die nackte
     Zeile auf dem Branch — die Skip-Zeile einer früheren Arbeit bleibt alt."""
