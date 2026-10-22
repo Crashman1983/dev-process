@@ -1202,3 +1202,19 @@ def test_an_exact_path_that_refuses_falls_back_to_the_unique_suffix(repo):
             "ROOT-CAUSE work=widget round=2: y — sites: a:1 — tests/test_widget.py::test_nope", commit="d")
     r = _pass(repo)
     assert r.returncode == 1 and "tests/test_widget.py has no test test_nope" in r.stderr, r.stderr
+
+
+def test_sites_none_needs_a_reason(repo):
+    _append(repo, SHARD, _review("widget", 1), commit="docs: block")
+    _append(repo, PLAN_FILE, _RC + "sites: none", commit="docs: cause")
+    r = _pass(repo)
+    assert r.returncode == 1 and "`sites: none` without a reason" in r.stderr, r.stderr
+
+
+def test_a_fork_line_with_list_marker_and_trailing_blanks_is_the_same_line(repo):
+    """Verglichen wird der Inhalt: `- <Zeile>   ` auf main ist dieselbe Zeile wie die nackte
+    Zeile auf dem Branch — die Skip-Zeile einer früheren Arbeit bleibt alt."""
+    _on_main(repo, ".process-work/journal/2026-01-01.md", "- skipped class-test work=7: old   ")
+    _append(repo, SHARD, _review("widget", 1), "skipped class-test work=7: old")
+    r = _pass(repo)
+    assert r.returncode == 1 and CLASS_TEST + "1 (no ROOT-CAUSE line)" in r.stderr, r.stderr
