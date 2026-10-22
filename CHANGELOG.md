@@ -10,6 +10,28 @@ A few plain sentences per release: [NEWS.md](NEWS.md). Deutsche Fassung:
 [CHANGELOG-DE.md](CHANGELOG-DE.md). Releases before v2.28.2:
 [docs/changelog-archive.md](docs/changelog-archive.md).
 
+## v2.77.0 — Plans that decide the state space, review-fix rounds that fix the class · 2026-10-22
+
+**Why.** In Kenni's review history (510 issues, 808 rounds), 39 % of the blocking findings in the longest works were plan gaps and 35 % came from the previous round's fix; review noise was none. Fix-induced defects grew with the size of a fix pass (6–9 findings: 46 % of next rounds blocked again, 10 or more: 86 %), and a red test first did not lower them (41 % against 40 %). Mandatory rule 4's "increment or rebuild" after the second block was prose, attest read a ROOT-CAUSE only in the plan while `red_evidence` writes it to the journal, and a required-records fact git could not tell fell away in silence for every fact but two.
+
+**What changes.**
+- Two required records (#293, #297): from the second blocked code round of a work, each follow-up block owes `REPLAN work=<id> round=<r>: increment|rebuild — <why>` in the plan; every blocked round owes a class test — `ROOT-CAUSE … — sites: <sibling sites> — <path>::<test>` with a test that stands at head (`red_evidence.py --sites` writes the form), or `sites: none — <reason>` for a round without a code defect. Only rounds and records the branch adds count, compared with its fork point by content; a reasoned `skipped replan|class-test` is the way out.
+- attest refuses every pass a fact it cannot tell would leave undecided, and reads ROOT-CAUSE lines and the new skips in the journal too.
+- `plan-structure` checks a plan's `## Transitions` table (also in a Spec Kit plan the branch adds): a `Test` column, at least one row, every cell filled, and once tests are due a `<path>::<test>` or `struck — <reason>` per row.
+- The github-issues report gate requires `class=` on every blocker and major finding a branch adds.
+- The plan review gains a STATE SPACE step and calibration (an undecided failure class is at least `major`); Execute gains "Fixing a review round" (sibling sites, differential test, passes above about 300 lines or six findings in steps, REPLAN first); a measured old/new differential counts as score 100; the failure catalog gains "Decision after an await on a stale snapshot"; the delta bundle warns on a large fix pass.
+- Reports carry `round:`; `process_kpis.py baseline` counts blockers by origin, rounds with and without a plan review, fix findings against the fix-induced blockers of the next round, and skips by kind.
+
+**Effect.** A second block can no longer be patched over without the rebuild question, a fix names the class it closes and the sites it checked, and the baseline shows whether fix-induced blockers and fix rounds go down.
+
+**Update.**
+1. Works already in flight: a pass after two or more blocked rounds the branch added owes the REPLAN lines and the class-test causes — or `skipped replan|class-test work=<id>: blocked before v2.77`; a new blocker or major finding of your own without `class=` gets one; a plan in flight with `## Transitions` gets a `Test` column.
+2. Reports on main and plans already merged stay valid.
+
+**Changed sections.** `design-template.md` (Sections), `failure-catalog.md` (Facts and state), `improvement-monthly.md` (What you review, What you produce), `journal-state-plans.md` (Review attestations), `mandatory-rules.md`, `refute.md` (Refuting a plan), `review-checklist.md` (Decisions — recorded, not embodied silently), `tower.md` (Dispatch and the model policy), `verification-independence.md` (The review bundle — the portable interface to any reviewer, Bind the verdict to the reviewed range, Enforcement), `workflow.md` (Execute, Review), module `github-issues` (Review and audit visibility), module `telemetry` (The KPI cockpit), commands `/execute`, `/plan`, `/review`
+
+Details: [Plan](docs/analysis/2026-10-21-v2.77.md) #293 #297
+
 ## v2.76.1 — A dispatched Codex report is readable; another issue's criterion is not required · 2026-10-21
 
 **Why.** Two template defects reached Kenni. The Codex dispatch wrote the report's title above its header block. The header is the block up to the first blank line, so the github-issues report gate read no `review:` and refused the push: twice on one day (Kenni #2683, #2691), each fixed by hand. `check_review.report_header` read no `work:` from such a report either. And attest counted every `AC-<id>` in a plan as a criterion of the work, including one the plan only cited from another issue ("up to the AC-11 measurement (#2659)"). It then refused a pass for a test that criterion never owed. A third came from Kenni #2338: the Codex handoff attested the issue number, and an issue split into several plans made attest refuse it, with no way to name the plan.

@@ -7,6 +7,10 @@ technischen Einzelheiten stehen im [CHANGELOG](CHANGELOG-DE.md).
 
 English version: [NEWS.md](NEWS.md).
 
+## v2.77.0 — Pläne entscheiden mehr vorab, Fixes schließen die ganze Klasse
+
+Die meisten zusätzlichen Review-Runden kamen aus Lücken im Plan oder aus dem vorherigen Fix. Ein Plan für Arbeit mit Zuständen, Lebenszyklen oder Parsern trägt jetzt eine Zustandstabelle mit einem Test je Zeile, und das Plan-Review fragt nach, was darin fehlt. Nach einem zweiten blockierten Durchgang hält der Plan fest, ob weiter geflickt oder neu gebaut wird, und jeder Fix nennt die Stellen, die er geprüft hat, und den Test, der sie abdeckt. Ein neuer Bericht zeigt, ob das die Runden je Arbeit senkt.
+
 ## v2.76.1 — Ein Codex-Review-Bericht besteht die Prüfung, ein zitiertes Kriterium ist keine Pflicht
 
 Ein Review des Codex-Reviewers wird beim Push nicht mehr wegen eines fehlenden

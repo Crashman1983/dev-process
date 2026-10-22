@@ -7,6 +7,10 @@ details are in the [CHANGELOG](CHANGELOG.md).
 
 Deutsche Fassung: [NEWS-DE.md](NEWS-DE.md).
 
+## v2.77.0 — Plans decide more up front, fixes close the whole class
+
+Most extra review rounds came from gaps in the plan or from the previous fix. A plan for work with states, lifecycles or parsers now carries a table of states with a test per row, and the plan review asks for what is missing there. After a second blocked round the plan records whether to patch again or rebuild, and every fix names the places it checked and the test that covers them. A new report shows whether this lowers the rounds a piece of work needs.
+
 ## v2.76.1 — A Codex review report passes the check, and a cited criterion is no duty
 
 A review written by the Codex reviewer no longer gets refused at the push for
