@@ -82,7 +82,8 @@ and a forbidden transition has a negative test. A test cell is `<path>::<test>` 
 `struck — <reason>`. In a Tier 2+ plan the `plan-structure` gate reads the
 table: at least one row, every cell filled, and a test in every test cell
 once the first task is ticked. The section's first table is the state table;
-a table after it (the writer and reader inventory) is not read as one. Other work omits this section. The review bundle notes a likely
+a table after it without a `Test` column (the writer and reader inventory) is not
+read, one with a `Test` column is read like the first. Other work omits this section. The review bundle notes a likely
 missing table when a plan speaks of states, events or expiry and has no such
 section.
 
