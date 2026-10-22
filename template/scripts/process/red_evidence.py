@@ -335,7 +335,9 @@ def block(m: dict, work: str, round_: int, cause: str | None, sites: str | None 
     if m["carried"]:
         lines.insert(-1, "test files taken into the old tree: " + ", ".join(m["carried"]))
     if cause:
-        where = f"sites: {sites.strip()} — " if sites else ""
+        # ` — ` separates the line's segments: inside the sites it would end them early, so
+        # the line would not read back as written
+        where = f"sites: {sites.strip().replace(' — ', ', ')} — " if sites else ""
         lines += ["", f"ROOT-CAUSE work={work} round={round_}: {cause.strip()} — {where}" + ", ".join(tests)]
     return "\n".join(lines) + "\n"
 

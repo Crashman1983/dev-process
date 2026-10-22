@@ -494,3 +494,24 @@ def test_the_old_tree_borrows_the_installed_node_modules(render, tmp_path):
     r = _tool(out, "--work", "7", "--round", "1", "--before", before, "--junit", "report.xml",
               "--copy", "calc.spec.py", "--dry-run", "--", sys.executable, "calc.spec.py")
     assert r.returncode == 0 and "red before, green after (1): calc.spec::adds" in r.stdout, r.stdout + r.stderr
+
+
+def test_a_dash_inside_the_sites_reads_back_as_written(render, tmp_path):
+    """` — ` trennt die Segmente der Zeile; in `--sites` wird er zum Komma, sonst endeten
+    die Sites früher und die Tests läsen nicht zurück."""
+    out, _before = _repo(render, tmp_path)
+    mod = _red_evidence_module(out)
+    m = {"command": ["pytest"], "before": "abc", "exit_before": 1, "exit_after": 0,
+         "red_to_green": ["test_calc.py::test_add"], "carried": [], "junit": None}
+    text = mod.block(m, "7", 1, "add subtracted", "a.py:1 — b.py:2")
+    cr, ev = _grammar(out)
+    found = cr.ROOT_CAUSE_LINE.search(text)
+    cause, sites, tests = cr.root_cause_parts(found.group("text"))
+    assert (cause, sites, ev.claimed_tests(tests)) == ("add subtracted", "a.py:1, b.py:2",
+                                                       [("test_calc.py", "test_add")])
+
+
+def test_sites_is_read_in_any_case(render, tmp_path):
+    out, _before = _repo(render, tmp_path)
+    cr, _ev = _grammar(out)
+    assert cr.root_cause_parts("x — Sites: none — refuted") == ("x", "none", "refuted")

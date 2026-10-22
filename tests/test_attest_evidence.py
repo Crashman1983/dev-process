@@ -1178,3 +1178,10 @@ def test_the_attested_journal_dir_is_read_at_the_fork_too(repo):
     _append(repo, "docs/journal/2026-10-14.md", _review("widget", 1), commit="docs: block")
     r = _pass(repo, "--journal-dir", "docs/journal")
     assert r.returncode == 1 and CLASS_TEST + "1 (no ROOT-CAUSE line)" in r.stderr, r.stderr
+
+
+def test_sites_is_read_in_any_case(repo):
+    _append(repo, SHARD, _review("widget", 1), commit="docs: block")
+    _append(repo, PLAN_FILE, _RC + "Sites: none — refuted, the finding misread the guard", commit="docs: cause")
+    r = _pass(repo)
+    assert r.returncode == 0, r.stderr
