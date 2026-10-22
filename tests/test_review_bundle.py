@@ -1823,6 +1823,21 @@ def test_a_fix_pass_counts_a_move_once_and_leaves_lock_files_and_fragments_out(r
     assert "301 lines" in warning, warning
 
 
+def test_the_round_header_says_a_second_lens_writes_the_blocked_round(render, tmp_path):
+    """Refute v2.77 G: a bundle cannot know it serves a second lens of a round that already
+    blocked — it computes the next round, and the grammar says that lens writes its own."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    journal = out / ".process-work/journal"
+    journal.mkdir(parents=True, exist_ok=True)
+    (journal / "2026-07-10.md").write_text(_block("9", 1))
+    text = _bundle(out, "--base", "main").stdout
+    assert _round_note(text) == "2"
+    flat = " ".join(text.split("## Required output grammar", 1)[1].split())
+    assert ("A second lens of a round that already blocked writes that round in `round:`, "
+            "as it passes `attest.py --round <that round>`") in flat
+
+
 def test_a_measured_regression_scores_100_and_class_is_asked_of_blockers(render, tmp_path):
     """#297 AC-4 and #297 AC-6: the bundle tells the scorer a measured old/new difference
     is not its to lower, and the grammar makes `class=` mandatory for blockers and majors."""
