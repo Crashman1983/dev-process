@@ -1104,3 +1104,77 @@ def test_a_plan_review_pass_asks_no_code_rounds_records(repo):
     assert r.returncode == 1 and CLASS_TEST in r.stderr, r.stderr  # the code pass owes them
     r = _attest(repo, "--dry-run", plan_review=True)
     assert r.returncode == 0, r.stderr
+
+
+# --- v2.77 refute round 1 ---------------------------------------------------------------
+
+@pytest.mark.parametrize("kind", ["ac-trace", "cross-model", "refute"])
+def test_a_journal_skip_lifts_only_the_round_duties(repo, kind):
+    """Eine Skip-Zeile im Journal hebt nur `replan` und `class-test` auf — jede andere Art
+    zählt wie vor v2.77 nur aus dem Plan (im Journal auch kommittiert nicht)."""
+    tier, independence, report = "2", "bundle,non-implementing", _report(repo)
+    if kind == "ac-trace":
+        report = _report(repo, body="nothing\n")
+    elif kind == "cross-model":
+        (repo / PLAN_FILE).write_text(PLAN.replace("tier: 2", "tier: 3") + "\nREFUTE work=widget round=1: survives: x\n")
+        tier, independence = "3", "bundle,non-implementing,single-family"
+    else:
+        (repo / "scripts/process/extra_gate.py").write_text("X = 1\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "feat: the case")
+    line = f"skipped {kind} work=widget: a reason of the journal"
+    _append(repo, SHARD, line)
+    r = _attest(repo, "--with", report, "--dry-run", tier=tier, independence=independence)
+    assert r.returncode == 1, r.stderr
+    _append(repo, SHARD, line, commit="docs: the journal's skip, committed")
+    r = _attest(repo, "--with", report, "--dry-run", tier=tier, independence=independence)
+    assert r.returncode == 1, r.stderr
+    # the plan's skip still lifts it
+    _append(repo, PLAN_FILE, line.replace("journal", "plan"), commit="docs: the plan's skip")
+    r = _attest(repo, "--with", report, "--dry-run", tier=tier, independence=independence)
+    assert r.returncode == 0, r.stderr
+
+
+def test_journal_skips_still_lift_replan_and_class_test(repo):
+    _append(repo, SHARD, _review("widget", 1), _review("widget", 2), commit="docs: blocks")
+    assert _pass(repo).returncode == 1
+    _append(repo, SHARD, "skipped replan work=widget: blocked before v2.77",
+            "skipped class-test work=widget: blocked before v2.77")
+    r = _pass(repo)
+    assert r.returncode == 0, r.stderr
+
+
+def test_a_block_quoted_in_a_fence_on_main_does_not_hide_the_branchs_block(repo):
+    """Die Fork-Seite liest wie die Arbeitsbaum-Seite: ein auf main im Fence zitierter
+    REVIEW-Block ist kein Block des Forks — der echte Block des Branches zählt."""
+    _on_main(repo, ".process-work/journal/2026-01-01.md", "```\n" + _review("widget", 1) + "\n```")
+    _append(repo, SHARD, _review("widget", 1), commit="docs: block")
+    r = _pass(repo)
+    assert r.returncode == 1 and CLASS_TEST + "1 (no ROOT-CAUSE line)" in r.stderr, r.stderr
+
+
+def test_a_skip_quoted_in_a_fence_on_main_does_not_hide_the_branchs_skip(repo):
+    line = "skipped class-test work=widget: blocked before v2.77"
+    _on_main(repo, ".process-work/journal/2026-01-01.md", "```\n" + line + "\n```")
+    _append(repo, SHARD, _review("widget", 1), line)
+    r = _pass(repo)
+    assert r.returncode == 0, r.stderr
+
+
+def test_a_commented_block_on_main_stays_a_block_of_the_fork(repo):
+    """Der Rundenzähler liest einen auskommentierten REVIEW-Block im Journal mit; die
+    Fork-Seite liest ihn genauso — er ist keine Runde dieses Branches."""
+    _on_main(repo, ".process-work/journal/2026-01-01.md", "<!--\n" + _review("7", 1) + "\n-->")
+    _append(repo, SHARD, _review("widget", 2), commit="docs: block")
+    r = _pass(repo)
+    assert r.returncode == 1, r.stderr
+    assert CLASS_TEST + "2 (no ROOT-CAUSE line)" in r.stderr and REPLAN not in r.stderr, r.stderr
+
+
+def test_the_attested_journal_dir_is_read_at_the_fork_too(repo):
+    """`--journal-dir docs/journal`: die Skip-Zeile einer früheren Arbeit, schon auf main,
+    ist alt — sie hebt die Pflicht dieses Branches nicht auf."""
+    _on_main(repo, "docs/journal/2026-01-01.md", "skipped class-test work=7: an earlier work")
+    _append(repo, "docs/journal/2026-10-14.md", _review("widget", 1), commit="docs: block")
+    r = _pass(repo, "--journal-dir", "docs/journal")
+    assert r.returncode == 1 and CLASS_TEST + "1 (no ROOT-CAUSE line)" in r.stderr, r.stderr
