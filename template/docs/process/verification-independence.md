@@ -238,9 +238,9 @@ rebase replaced needs such a base, and any other review vouches only for
 the files its own range changed.
 A Spec Kit plan (`specs/<dir>/plan.md`) is no bookkeeping, but two shapes of
 what the attestation commit adds to it are (`attest --with`, `--archive`;
-`check_review.records_only`): REFUTE, ROOT-CAUSE, REVIEW and dated DECISION
-lines appended after the plan's last line as a paragraph of their own (a
-blank line before them), and an open
+`check_review.records_only`): REFUTE, ROOT-CAUSE, REPLAN, REVIEW and dated
+DECISION lines appended after the plan's last line as a paragraph of their
+own (a blank line before them), and an open
 `DECISION NEEDED` answered in place — the same line, same prefix and list
 marker, now a dated DECISION without inline HTML, a table cell or an open
 code span; also its move to the archive with no more than that. Anything
@@ -363,8 +363,8 @@ enforces what a language-agnostic gate honestly can, and no more:
     naming gate code is reviewed `cross-model` or with the reasoned
     `single-family`;
   - every pass: the work's plan at the reviewed head is the plan on disk —
-    plan lines (REFUTE, ROOT-CAUSE, DECISION, skips) are committed before
-    the bundle, or appended after the plan's last line and attested with
+    plan lines (REFUTE, ROOT-CAUSE, REPLAN, DECISION, skips) are committed
+    before the bundle, or appended after the plan's last line and attested with
     `--with` the plan.
 
   The thresholds are read at the reviewed base, so a branch does not loosen
