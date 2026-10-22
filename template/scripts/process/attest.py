@@ -137,12 +137,21 @@ def _journal_target(root: Path, journal_dir: Path) -> Path:
 
 
 def _archive_target(root: Path, plan: Path) -> Path:
-    """Where `--archive` moves a plan. A Spec Kit plan is always `plan.md`: it takes
-    its feature directory's name, or every Spec Kit plan would collide in the archive."""
+    """Where `--archive` moves a plan (`archive_rel`)."""
     resolved = plan.resolve()
-    if resolved.name == SPEC_PLAN and resolved.parent.parent == (root / SPECS_DIR).resolve():
-        return root / PLANS_ARCHIVE / f"{resolved.parent.name}.md"
+    if resolved.is_relative_to(root.resolve()):
+        return root / archive_rel(resolved.relative_to(root.resolve()).as_posix())
     return root / PLANS_ARCHIVE / plan.name
+
+
+def archive_rel(rel: str) -> str:
+    """Where `--archive` moves the plan at the repository path `rel`. A Spec Kit plan is
+    always `plan.md`: it takes its feature directory's name, or every Spec Kit plan would
+    collide in the archive. `_dispatch_codex._attest_commit` pairs an archive move by it."""
+    parts = rel.split("/")
+    if len(parts) == 3 and parts[0] == SPECS_DIR and parts[2] == SPEC_PLAN:
+        return f"{PLANS_ARCHIVE}/{parts[1]}.md"
+    return f"{PLANS_ARCHIVE}/{parts[-1]}"
 
 
 def _shown(root: Path, p: Path) -> str:

@@ -680,32 +680,40 @@ def _attest_commit(wt: Path, parent: str, commit: str, mine: set) -> bool:
     lets them ride), the plan moved to the archive by `--archive` included? A plan changed
     in its content, added or deleted is a fix, and so is a commit without a REVIEW line — a
     decision answering a block included. Unreadable is no."""
+    from attest import archive_rel  # noqa: PLC0415  (the main checkout's)
     from check_review import PLAN_KINDS, parse_review_lines, record_kind, records_only, work_key  # noqa: PLC0415
 
     def plan(rel: str) -> bool:
         return record_kind(rel) in (*PLAN_KINDS, "plan-archive")
 
     try:
-        # renames found: `attest --archive` moves the plan it appends to
-        status = _git(wt, "diff", "--name-status", "-z", "-M", parent, commit).decode().split("\0")
-        added = "\n".join(ln[1:] for ln in _git(wt, "diff", "-U0", "-M", parent, commit)
-                          .decode("utf-8", errors="replace").splitlines()
-                          if ln.startswith("+") and not ln.startswith("+++"))
-        k = 0
-        while k < len(status) - 1:
-            kind = status[k]
-            old = new = status[k + 1]
-            if kind.startswith(("R", "C")):
-                new = status[k + 2]
-                k += 3
-            else:
-                k += 2
-            if plan(old) or plan(new):
-                before = _git(wt, "show", f"{parent}:{old}").decode("utf-8")
-                after = _git(wt, "show", f"{commit}:{new}").decode("utf-8")
-                if not (plan(old) and plan(new) and records_only(before, after)):
-                    return False
-            elif not (old.startswith(".process-work/") and new.startswith(".process-work/")):
+        status = _git(wt, "diff", "--name-status", "-z", "--no-renames", parent, commit).decode().split("\0")
+        changes = dict(zip(status[1::2], status[0::2]))  # path -> A|D|M|T
+
+        def lines(rev: str, rel: str) -> set[str]:
+            try:
+                return set(_git(wt, "show", f"{rev}:{rel}").decode("utf-8", errors="replace").splitlines())
+            except ValueError:
+                return set()  # not there at that side
+        # the lines the commit adds, by content: a moved plan adds none of its old lines
+        added = "\n".join(set().union(*(lines(commit, r) for r in changes))
+                          - set().union(*(lines(parent, r) for r in changes)))
+        pairs = [(rel, rel) for rel, kind in changes.items() if kind == "M" and plan(rel)]
+        # `attest --archive` moves the plan it appends to: the deleted plan and its archived
+        # copy pair by the archive rule, never by git's rename guess (round 5)
+        pairs += [(rel, archive_rel(rel)) for rel, kind in changes.items() if kind == "D" and plan(rel)]
+        paired = {p for pair in pairs for p in pair}
+        for rel in changes:
+            if rel in paired:
+                continue
+            if plan(rel) or not rel.startswith(".process-work/"):
+                return False  # a plan added or deleted unpaired, or a path outside bookkeeping
+        for old, new in pairs:
+            if changes.get(new) != ("M" if new == old else "A") or not plan(new):
+                return False
+            before = _git(wt, "show", f"{parent}:{old}").decode("utf-8")
+            after = _git(wt, "show", f"{commit}:{new}").decode("utf-8")
+            if not records_only(before, after):
                 return False
     except (ValueError, UnicodeDecodeError):
         return False

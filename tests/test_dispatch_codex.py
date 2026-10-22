@@ -524,6 +524,21 @@ def test_only_attest_commits_keep_a_blocked_round(review_repo):
     _git(out, "add", "-A")
     _git(out, "commit", "-q", "-m", "docs: attest 7 round 1, lens b, archive")
     assert codex._blocked_round_at(out, args, _git(out, "rev-parse", "HEAD")) == 1
+    # the move holds when git sees no rename: records that outweigh a short plan (v2.77 cross-model
+    # review, round 5) — the archive rule pairs the deleted plan with its archived copy
+    _git(out, "checkout", "-q", "-B", "t-archive-big", "7-widget")
+    _reviewed, args = _blocked_lens(out, "7")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "docs: attest 7 round 1, lens a")
+    _git(out, "mv", ".process-work/plans/2026-10-15-widget.md", ".process-work/plans/archive/2026-10-15-widget.md")
+    archived.write_text(archived.read_text() + "".join(
+        f"\nREFUTE work=7 round=1: scenario {n} of a long refute, none held\n" for n in range(80)))
+    journal.write_text(journal.read_text() + journal.read_text().replace("verdict=block", "verdict=pass")
+                       .replace("reviewer=r", "reviewer=s"))
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "docs: attest 7 round 1, lens b, archive")
+    assert "R" not in _git(out, "diff", "--name-status", "-M", "HEAD~1", "HEAD").split()[0::2]
+    assert codex._blocked_round_at(out, args, _git(out, "rev-parse", "HEAD")) == 1
     # a record appended without a REVIEW line (a decision answering the block) is no attest commit
     _git(out, "checkout", "-q", "-B", "t-decision", "7-widget")
     _reviewed, args = _blocked_lens(out, "7")
