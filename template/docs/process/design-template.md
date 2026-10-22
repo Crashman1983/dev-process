@@ -80,8 +80,9 @@ the state. The `Test` column holds one test per row;
 rows of one equivalence class may name the same test,
 and a forbidden transition has a negative test. A test cell is `<path>::<test>` (it may not exist yet) or
 `struck — <reason>`. In a Tier 2+ plan the `plan-structure` gate reads the
-table: every cell filled, and a test in every test cell once the first task
-is ticked. Other work omits this section. The review bundle notes a likely
+table: at least one row, every cell filled, and a test in every test cell
+once the first task is ticked; a table beside it without a `Test` column
+(the writer and reader inventory) is not read as one. Other work omits this section. The review bundle notes a likely
 missing table when a plan speaks of states, events or expiry and has no such
 section.
 

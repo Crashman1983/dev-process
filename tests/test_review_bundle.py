@@ -1689,6 +1689,8 @@ def test_the_transitions_heading_has_one_owner(render, tmp_path):
         mod = _bundle_module(out, "bundle_transitions")
         rule = mod._review_gate.TRANSITIONS_HEADING
         assert rule.search("x\n### Transitions (order)\n") and not rule.search("# Transitions\n")
+        # up to three spaces in an ATX heading is still one; four is indented code
+        assert rule.search("x\n   ## Transitions\n") and not rule.search("x\n    ## Transitions\n")
         assert not hasattr(mod, "_TRANSITIONS_HEADING")
         src = (out / "scripts/process/make_review_bundle.py").read_text()
         assert "_review_gate.TRANSITIONS_HEADING" in src and "Transitions\\b" not in src
