@@ -422,12 +422,13 @@ _SEGMENT = " — "
 
 def root_cause_parts(text: str) -> tuple[str, str | None, str]:
     """(cause, sites, tests) of a ROOT-CAUSE line's text (`ROOT_CAUSE_LINE`'s `text`).
-    `sites` is the first segment that starts with `sites:` — None without one (an older
-    line: `<cause> — <tests>`), `none` for a round without a code defect. `tests` is every
-    segment after it joined again, read by `attest_evidence.claimed_tests` — a test title
-    may hold ` — ` itself; after `sites: none` it is the reason."""
+    `sites` is the first segment that starts with `sites:` in any case — None without one
+    (an older line: `<cause> — <tests>`), `none` for a round without a code defect. ` — `
+    is the only separator (`red_evidence --sites` writes none inside the sites). `tests`
+    is every segment after it joined again, read by `attest_evidence.claimed_tests` — a
+    test title may hold ` — ` itself; after `sites: none` it is the reason."""
     segments = text.strip().split(_SEGMENT)
-    at = next((i for i, s in enumerate(segments) if s.strip().startswith("sites:")), None)
+    at = next((i for i, s in enumerate(segments) if s.strip().lower().startswith("sites:")), None)
     if at is None or at == 0:
         return segments[0].strip(), None, ""
     sites = segments[at].strip()[len("sites:"):].strip()
