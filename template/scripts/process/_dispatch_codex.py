@@ -677,22 +677,35 @@ def _attest_commit(wt: Path, parent: str, commit: str, mine: set) -> bool:
     """Is `commit` over `parent` an attest commit of the work `mine`: it adds a REVIEW line
     of the work and changes nothing else than reports and journal (`.process-work/`, plans
     aside) and records appended to a plan (`check_review.records_only`, as attest `--with`
-    lets them ride)? A plan changed in its content is a fix, and so is a commit without a
-    REVIEW line — a decision answering a block included. Unreadable is no."""
-    from check_review import parse_review_lines, records_only, work_key  # noqa: PLC0415
+    lets them ride), the plan moved to the archive by `--archive` included? A plan changed
+    in its content, added or deleted is a fix, and so is a commit without a REVIEW line — a
+    decision answering a block included. Unreadable is no."""
+    from check_review import PLAN_KINDS, parse_review_lines, record_kind, records_only, work_key  # noqa: PLC0415
+
+    def plan(rel: str) -> bool:
+        return record_kind(rel) in (*PLAN_KINDS, "plan-archive")
+
     try:
-        changed = [p for p in _git(wt, "diff", "--name-only", "-z", "--no-renames", parent, commit)
-                   .decode().split("\0") if p]
-        added = "\n".join(ln[1:] for ln in _git(wt, "diff", "-U0", "--no-renames", parent, commit)
+        # renames found: `attest --archive` moves the plan it appends to
+        status = _git(wt, "diff", "--name-status", "-z", "-M", parent, commit).decode().split("\0")
+        added = "\n".join(ln[1:] for ln in _git(wt, "diff", "-U0", "-M", parent, commit)
                           .decode("utf-8", errors="replace").splitlines()
                           if ln.startswith("+") and not ln.startswith("+++"))
-        for rel in changed:
-            if _is_plan(rel):
-                before = _git(wt, "show", f"{parent}:{rel}").decode("utf-8")
-                after = _git(wt, "show", f"{commit}:{rel}").decode("utf-8")
-                if not records_only(before, after):
+        k = 0
+        while k < len(status) - 1:
+            kind = status[k]
+            old = new = status[k + 1]
+            if kind.startswith(("R", "C")):
+                new = status[k + 2]
+                k += 3
+            else:
+                k += 2
+            if plan(old) or plan(new):
+                before = _git(wt, "show", f"{parent}:{old}").decode("utf-8")
+                after = _git(wt, "show", f"{commit}:{new}").decode("utf-8")
+                if not (plan(old) and plan(new) and records_only(before, after)):
                     return False
-            elif not rel.startswith(".process-work/"):
+            elif not (old.startswith(".process-work/") and new.startswith(".process-work/")):
                 return False
     except (ValueError, UnicodeDecodeError):
         return False
