@@ -3,6 +3,7 @@ cross-model or a reasoned single-family, a refute for gate code, one test per
 acceptance criterion, a plan reviewer not below the plan session's class, and
 the plan's own lines committed before the attested head."""
 import importlib
+import inspect
 import json
 import subprocess
 import sys
@@ -34,6 +35,59 @@ OK_CODE = dict(work="7", tier=2, verdict="pass", plan_review=False, model="claud
 OK_PLAN = dict(work="7-plan", tier=2, verdict="pass", plan_review=True, model="claude-opus-5",
                cross_model_from=3, ranks=RANKS, families=("gpt-",), plan_session="claude-opus-5",
                plan_session_source="plan-line", plan_rel="p.md")
+
+TS = 'it("adds", () => {})\n'
+PY_T = "def test_x():\n    assert True\n"
+RESOLVE_CASES = [
+    ("exact", "tests/c.ts::adds", ["tests/c.ts"], {"tests/c.ts": TS}, [("tests/c.ts", True)], None),
+    ("dot-slash", "./tests/c.ts::adds", ["tests/c.ts"], {"tests/c.ts": TS}, [("tests/c.ts", True)], None),
+    ("suffix", "c.ts::adds", ["tests/c.ts"], {"tests/c.ts": TS}, [("tests/c.ts", True)], None),
+    ("ambiguous-suffix", "tests/c.ts::adds", ["a/tests/c.ts", "b/tests/c.ts"],
+     {"a/tests/c.ts": TS, "b/tests/c.ts": TS}, [(None, False)], "several tracked files"),
+    ("missing", "tests/gone.ts::adds", ["tests/c.ts"], {"tests/c.ts": TS}, [(None, False)],
+     "is no tracked file"),
+    ("namesake", "tests/test_w.py::test_a",
+     ["tests/test_w.py", "backend/tests/test_w.py"],
+     {"tests/test_w.py": "def test_b():\n    assert True\n",
+      "backend/tests/test_w.py": "def test_a():\n    assert True\n"},
+     [("backend/tests/test_w.py", True)], None),
+    ("no-test", "tests/c.ts::nope", ["tests/c.ts"], {"tests/c.ts": TS}, [("tests/c.ts", False)],
+     "declares no test 'nope'"),
+    ("title", "tests/c.ts::adds (x)", ["tests/c.ts"], {"tests/c.ts": TS}, [("tests/c.ts", True)], None),
+    ("params", "tests/test_p.py::test_x[1]", ["tests/test_p.py"], {"tests/test_p.py": PY_T},
+     [("tests/test_p.py", True)], None),
+    ("no-file", "a::b::c", ["tests/c.ts"], {"tests/c.ts": TS}, [], None),
+    ("no-listing", "tests/c.ts::adds", None, {"tests/c.ts": TS}, [(None, False)],
+     "git cannot list the files"),
+    ("two", "tests/gone.ts::adds, tests/c.ts::adds", ["tests/c.ts"], {"tests/c.ts": TS},
+     [(None, False), ("tests/c.ts", True)], None),
+]
+
+
+@pytest.mark.parametrize("name,tests,files,texts,expected,why", RESOLVE_CASES,
+                         ids=[c[0] for c in RESOLVE_CASES])
+def test_resolve_tests_reads_a_reference_as_the_gate_does(ev_mod, name, tests, files, texts,
+                                                          expected, why):
+    """#303: one resolver for the gate and red_evidence — exact path, `./`, suffix,
+    namesake fallback, and a missing listing all read as `_class_test_problem` reads."""
+    ev, out = ev_mod
+    rules = ev.review_policy(out, "HEAD")[0]
+    got = ev.resolve_tests(tests, files, lambda rel: texts.get(rel), rules)
+    assert [(r.path, r.why is None) for r in got] == expected, got
+    if why is not None:
+        assert why in got[0].why, got[0].why
+    if name == "title":
+        assert got[0].name == "adds"
+    if name == "params":
+        assert got[0].name == "test_x"
+
+
+def test_reference_resolution_has_one_owner(ev_mod):
+    """#303: the gate reads references through `resolve_tests`, never a copy."""
+    ev, _out = ev_mod
+    src = inspect.getsource(ev._class_test_problem)
+    assert "resolve_tests(" in src
+    assert "_test_file(" not in src and "_suffix_hits(" not in src
 
 # (name, base, changes, expected substring — None: no refusal)
 TABLE = [
