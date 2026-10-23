@@ -1,3 +1,4 @@
+import argparse
 import importlib.util
 import json
 import re
@@ -1840,9 +1841,61 @@ def test_the_fix_pass_warning_states_the_measured_rates(render, tmp_path):
     assert "six to nine findings in about half, ten or more in most" in warning, warning
 
 
+def _round_problems(out: Path, work: str, round_: str):
+    _bundle_module(out, "bundle_round_probe")
+    attest = importlib.import_module("attest")
+    return attest.round_problems(argparse.Namespace(work=work, round_=round_), out,
+                                 out / ".process-work/journal")
+
+
+def _blocked_head(out: Path, work: str) -> tuple[str, str]:
+    head = _git(out, "rev-parse", "HEAD").stdout.strip()
+    base = _git(out, "rev-parse", "main").stdout.strip()
+    journal = out / ".process-work/journal"
+    journal.mkdir(parents=True, exist_ok=True)
+    (journal / "2026-07-10.md").write_text(
+        f"REVIEW work={work} tier=2 reviewer=r model=m independence=bundle,non-implementing "
+        f"base={base} head={head} verdict=block round=1\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", f"docs: attest {work} round 1, lens a")
+    return head, base
+
+
+def test_a_second_lens_on_a_blocked_head_is_named_that_round(render, tmp_path):
+    """#303 AC-2: a blocking review on this very head is the round another lens writes —
+    the same round `attest.py --round` accepts, not the next counter value."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    _blocked_head(out, "9")
+    text = _bundle(out, "--base", "main").stdout
+    assert _round_note(text) == "1"
+    grammar = text.split("## Required output grammar", 1)[1]
+    assert "attest.py --round 1" in grammar
+    written, _notes, refusals = _round_problems(out, "9", "1")
+    assert written == 1 and refusals == [], (written, refusals)
+    out2 = render(tmp_path / "plan", {"project_name": "d", "modules": {}})
+    _seed_repo(out2)
+    _blocked_head(out2, "9-plan")
+    plan = _bundle(out2, "--base", "main", "--plan", "widget", "--plan-review").stdout
+    assert _round_note(plan) == "1"
+    written, _notes, refusals = _round_problems(out2, "9-plan", "1")
+    assert written == 1 and refusals == [], (written, refusals)
+
+
+def test_a_fix_above_the_blocked_head_is_the_next_round(render, tmp_path):
+    """A block on an older head does not lower the counter: a fix above it is round 2."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    _blocked_head(out, "9")
+    (out / "widget.py").write_text("def widget():\n    return 43\n")
+    _git(out, "add", "widget.py")
+    _git(out, "commit", "-q", "-m", "fix: widget")
+    assert _round_note(_bundle(out, "--base", "main").stdout) == "2"
+
+
 def test_the_round_header_says_a_second_lens_writes_the_blocked_round(render, tmp_path):
-    """Refute v2.77 G: a bundle cannot know it serves a second lens of a round that already
-    blocked — it computes the next round, and the grammar says that lens writes its own."""
+    """A block line without `head=` cannot be tied to the bundle's head — it names the
+    next round, and the general sentence says what a second lens writes."""
     out = render(tmp_path, {"project_name": "d", "modules": {}})
     _seed_repo(out)
     journal = out / ".process-work/journal"
