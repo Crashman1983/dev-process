@@ -7,6 +7,10 @@ technischen Einzelheiten stehen im [CHANGELOG](CHANGELOG-DE.md).
 
 English version: [NEWS.md](NEWS.md).
 
+## v2.77.1 — Ein Fix ist erst belegt, wenn wirklich der Test grün wurde
+
+Ein Testbericht konnte einen Fix als belegt erscheinen lassen, obwohl kein einzelner Test von Fehlschlag auf Bestehen gewechselt war: Zwei Tests mit gleichem Namen in einer Datei galten als einer. Testberichte werden jetzt nach Datei, Klasse und Name getrennt, und eine Testreferenz, die auch ein anderer Test beansprucht, wird verweigert. Der Telemetrie-Bericht stürzt nicht mehr an einer Befundzeile ab, ein Review-Bundle nennt die Runde, die ein anderer Reviewer bereits blockiert hat, und die Beschreibung der Plan-Prüfung entspricht der Regel, die sie durchsetzt.
+
 ## v2.77.0 — Pläne entscheiden mehr vorab, Fixes schließen die ganze Klasse
 
 Die meisten zusätzlichen Review-Runden kamen aus Lücken im Plan oder aus dem vorherigen Fix. Ein Plan für Arbeit mit Zuständen, Lebenszyklen oder Parsern trägt jetzt eine Zustandstabelle mit einem Test je Zeile, und das Plan-Review fragt nach, was darin fehlt. Nach einem zweiten blockierten Durchgang hält der Plan fest, ob weiter geflickt oder neu gebaut wird, und jeder Fix nennt die Stellen, die er geprüft hat, und den Test, der sie abdeckt. Ein neuer Bericht zeigt, ob das die Runden je Arbeit senkt.

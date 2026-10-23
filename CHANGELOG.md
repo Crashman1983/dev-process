@@ -10,6 +10,19 @@ A few plain sentences per release: [NEWS.md](NEWS.md). Deutsche Fassung:
 [CHANGELOG-DE.md](CHANGELOG-DE.md). Releases before v2.28.2:
 [docs/changelog-archive.md](docs/changelog-archive.md).
 
+## v2.77.1 — Fixes from the v2.77.0 uptake · 2026-10-23
+
+**Why.** v2.77.0 could report a fix as proven while no single test went from red to green: two JUnit cases with the same file and name but different classes were folded into one, so a red-then-skipped case beside an always-green one looked green. Separately, `process_kpis.py findings` crashed on any FINDING line, the review bundle named the next round for a second lens on a blocked head, and the plan-structure docstring described a looser Transitions heading than the gate enforces.
+
+**What changes.**
+- `red_evidence` keeps JUnit cases apart by file, class and name and refuses a written test reference the gate reads as another case of the run, or — with `--sites` — does not read as this test; nested Python classes keep their whole chain. The reference form for other languages is unchanged.
+- `process_kpis.py findings` exits zero and counts distinct works; the bundle names the blocked round and the `--round` attest accepts; the docstring states the level-2-or-deeper Transitions rule.
+- The lens-round rule now lives in `attest.py`; the bundle and the Codex handoff share it.
+
+**Update.** No steps.
+
+Details: [Plan](docs/analysis/2026-10-23-v2.77.1.md) #303
+
 ## v2.77.0 — Plans that decide the state space, review-fix rounds that fix the class · 2026-10-22
 
 **Why.** In Kenni's review history (510 issues, 808 rounds), 39 % of the blocking findings in the longest works were plan gaps and 35 % came from the previous round's fix; review noise was none. Fix-induced defects grew with the size of a fix pass (6–9 findings: 46 % of next rounds blocked again, 10 or more: 86 %), and a red test first did not lower them (41 % against 40 %). Mandatory rule 4's "increment or rebuild" after the second block was prose, attest read a ROOT-CAUSE only in the plan while `red_evidence` writes it to the journal, and a required-records fact git could not tell fell away in silence for every fact but two.
