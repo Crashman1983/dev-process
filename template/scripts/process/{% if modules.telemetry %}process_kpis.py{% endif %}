@@ -909,7 +909,7 @@ def findings(root: Path | None = None, *, min_works: int = 2, as_json: bool = Fa
         print(f"  judgment share of classified blocker/major findings: {share}")
     for key, works in repeating.items():
         print(f"  repeats in {len(works)} works: {key} ({', '.join(works[:5])}{' …' if len(works) > 5 else ''})")
-    n = len({w for w, _f in found})
+    n = len({w for w, _f, _round in found})
     lvl = _level(n, True, False, _N_THRESHOLD)
     print(f"  {confidence(n, proxy=True)} · {action(lvl, 'turn a repeating mechanical or testable check into a gate or a class-level test (testing.md, classes not cases)', thin='record class= and rule= on findings; judge after ~20 work items')}")
     return 0

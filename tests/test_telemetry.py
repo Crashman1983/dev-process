@@ -961,8 +961,27 @@ def test_findings_counts_classes_and_names_a_repeating_check(render, tmp_path):
     assert got["repeating"] == {"testable:mutation": ["1", "2"]}, got
     assert got["judgment_share_of_blocking"] == 0.33, got
     text = subprocess.run([sys.executable, str(out / "scripts/process/process_kpis.py"), "findings"],
-                          cwd=out, capture_output=True, text=True).stdout
-    assert "repeats in 2 works: testable:mutation" in text, text
+                          cwd=out, capture_output=True, text=True)
+    assert text.returncode == 0, text.stdout + text.stderr
+    assert "repeats in 2 works: testable:mutation" in text.stdout, text.stdout
+    assert "n=2<20" in text.stdout, text.stdout
+
+
+def test_findings_text_mode_exits_zero_and_counts_works(render, tmp_path):
+    """#303: a report with a FINDING line must not crash the text mode — `findings`
+    unpacks `_report_findings`' (work, fields, round) triples."""
+    out = _render(render, tmp_path, github_issues=True)
+    reviews = out / ".process-work/reviews"
+    reviews.mkdir(parents=True)
+    (reviews / "a.md").write_text(
+        "review: a\nwork: #1\npublish-waived: test\n\n"
+        "FINDING sev=blocker action=fix issue=- class=testable rule=mutation weak assert\n",
+        encoding="utf-8")
+    r = subprocess.run([sys.executable, str(out / "scripts/process/process_kpis.py"), "findings"],
+                       cwd=out, capture_output=True, text=True)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "Traceback" not in r.stderr, r.stderr
+    assert "n=1<20" in r.stdout, r.stdout
 
 
 def test_a_bad_finding_class_is_a_malformed_line(render, tmp_path):
