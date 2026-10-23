@@ -60,7 +60,7 @@ sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling import
 from attest import ROOT_CAUSE, _journal_target  # noqa: E402  (one grammar, one journal home)
-from attest_evidence import resolve_tests, review_policy  # noqa: E402  (the gate's reading)
+from attest_evidence import identity_of, resolve_tests, review_policy  # noqa: E402  (the gate's reading)
 from check_review import JOURNAL_DIR, readable  # noqa: E402
 
 
@@ -290,7 +290,8 @@ def _reference_problem(case, universe, *, class_test: bool, resolve) -> str | No
     `why` — the gate's decision, not a second rule."""
     ref = _ref(case) if isinstance(case, Case) else case
     entries = resolve(ref)
-    mine = {(e.path, e.name) for e in entries if e.path is not None}
+    own = [(e, identity_of(e)) for e in entries]
+    mine = {identity for _entry, identity in own if identity is not None}
     if class_test:
         if isinstance(case, Case):
             file, name = case.file, _attest_name(case)
@@ -299,9 +300,9 @@ def _reference_problem(case, universe, *, class_test: bool, resolve) -> str | No
             if file.endswith(".py") and name.endswith("]") and "[" in name:
                 name = name[:name.rfind("[")]
         whys = [e.why for e in entries if e.why is not None]
-        ok = (bool(file) and bool(name) and not whys and len(entries) == 1
-              and entries[0].path is not None and entries[0].file == file
-              and entries[0].name == name)
+        identity = identity_of(entries[0]) if len(entries) == 1 else None
+        ok = (bool(file) and bool(name) and identity is not None
+              and entries[0].file == file and identity.name == name)
         if not ok:
             reads = ", ".join(_entry_text(e) for e in entries) or "no entry"
             reason = f"{'; '.join(whys)}; " if whys else ""
@@ -312,16 +313,17 @@ def _reference_problem(case, universe, *, class_test: bool, resolve) -> str | No
             if other == case:
                 continue
             other_entries = resolve(_ref(other))
-            other_ids = {(e.path, e.name) for e in other_entries if e.path is not None}
+            other_own = [(e, identity_of(e)) for e in other_entries]
+            other_ids = {identity for _entry, identity in other_own if identity is not None}
             common = mine & other_ids
             if not common:
                 continue
             # parameters of one Python function may share its identity; aliases of another
             # written file collide (DECISION 2026-10-23 Steward, Option A)
             parameters = any(
-                a.file == b.file and a.path == b.path and a.path is not None
-                and a.path.endswith(".py") and (a.path, a.name) in common
-                for a in entries for b in other_entries if a.path is not None and b.path is not None)
+                a.file == b.file and i is not None and i == j and i in common
+                and i.path.endswith(".py")
+                for a, i in own for b, j in other_own if j is not None)
             if parameters:
                 continue
             classes = []
@@ -330,7 +332,7 @@ def _reference_problem(case, universe, *, class_test: bool, resolve) -> str | No
                 if label not in classes:
                     classes.append(label)
             read = next((_entry_text(e) for e in [*entries, *other_entries]
-                         if e.path is not None and (e.path, e.name) in common), _entry_text(entries[0]))
+                         if identity_of(e) in common), _entry_text(entries[0]))
             return (f"`{ref}` names several test cases ({', '.join(classes)}; attest reads them "
                     f"as {read}) — give the tests distinct names or write the line by hand")
     return None

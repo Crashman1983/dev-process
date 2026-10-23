@@ -458,6 +458,21 @@ class Resolved(NamedTuple):
     why: str | None
 
 
+class Identity(NamedTuple):
+    path: str
+    name: str
+
+
+def identity_of(resolved: Resolved) -> Identity | None:
+    """The test identity a `Resolved` names, or None: a `why` means the gate reads no test
+    there, so the reference has no identity and collides with nothing. Every reader of an
+    identity — the `sites:` check, the collision check, the class-test row — goes through
+    this one function."""
+    if resolved.why is not None or resolved.path is None:
+        return None
+    return Identity(resolved.path, resolved.name)
+
+
 def resolve_tests(tests, files: list[str] | None, read, rules: dict) -> list[Resolved]:
     """The one reading of a test reference — the gate's (`_class_test_problem`) and
     red_evidence's (`_reference_problem`). `files` is the tracked listing (None: git
@@ -493,7 +508,7 @@ def _class_test_problem(root: Path, head: str, text: str, tracked: list[str] | N
     if not claimed_tests(tests):
         return "its ROOT-CAUSE line names no `<path>::<test>` after `sites:`"
     refs = resolve_tests(tests, tracked, lambda rel: _show(root, head, rel), rules)
-    if any(r.why is None for r in refs):
+    if any(identity_of(r) is not None for r in refs):
         return None
     return "; ".join(r.why for r in refs)
 
