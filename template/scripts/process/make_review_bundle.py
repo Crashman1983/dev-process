@@ -62,6 +62,7 @@ from typing import NamedTuple
 
 # check_review.py owns the REVIEW grammar; check_kernel.py owns kernel-block
 # extraction — importing both keeps this tool byte-honest with the gates
+sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling import
 from process_git import fork_point, git_environment, path_matches  # noqa: E402
 import check_kernel as _kernel_gate  # noqa: E402

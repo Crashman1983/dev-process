@@ -55,6 +55,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling import
 from attest_evidence import AC_LINE, STRUCK_LINE, _NAMES_A_TEST, _STRUCK_MARK, ac_key  # noqa: E402
 from check_review import (  # noqa: E402  (one owner for plan grammar and fences)
