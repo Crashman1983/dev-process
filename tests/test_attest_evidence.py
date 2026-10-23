@@ -83,11 +83,18 @@ def test_resolve_tests_reads_a_reference_as_the_gate_does(ev_mod, name, tests, f
 
 
 def test_reference_resolution_has_one_owner(ev_mod):
-    """#303: the gate reads references through `resolve_tests`, never a copy."""
-    ev, _out = ev_mod
+    """#303: the gate reads references through `resolve_tests`, never a copy; so does
+    red_evidence — no second parser or alias rule on the writing side."""
+    ev, out = ev_mod
     src = inspect.getsource(ev._class_test_problem)
     assert "resolve_tests(" in src
     assert "_test_file(" not in src and "_suffix_hits(" not in src
+    red = (out / "scripts/process/red_evidence.py").read_text(encoding="utf-8")
+    assert "resolve_tests(" in red
+    # `_is_test_file` is red_evidence's own carry-along helper, not the gate's `_test_file`
+    without_helpers = red.replace("_is_test_file(", "")
+    for copy in ("claimed_tests(", "_test_file(", "_suffix_hits(", 'removeprefix("./")'):
+        assert copy not in without_helpers, copy
 
 # (name, base, changes, expected substring — None: no refusal)
 TABLE = [
