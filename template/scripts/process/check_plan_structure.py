@@ -20,7 +20,9 @@ at the merge. A plan reviewer re-found them by reading. This gate reads them:
     and `registry`, both set);
   - at the merge push, an open `- [ ]` task without `struck: <reason>` or
     `moved: #<issue>`;
-  - a `## Transitions` section (`check_review.TRANSITIONS_HEADING`, any depth)
+  - a `## Transitions` section (`check_review.TRANSITIONS_HEADING`: an ATX heading
+    of level 2 or deeper; `# Transitions` is the plan's title level and not read;
+    a setext heading ends a section but opens none)
     without a pipe table below it, before the next heading (ATX or setext) of
     the same or a higher level; no table there with a `Test` column (`Tests`,
     `Test(s)`) and two others — a table without one beside it, the writer
