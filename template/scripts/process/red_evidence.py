@@ -208,7 +208,7 @@ def _python_chain(file: str, cls: str) -> list[str]:
 def _ref(case: Case) -> str:
     """The reference `red_evidence` writes for a case: `file::name` (a Python file with
     its full class chain), or `classname::name` where there is no file under the root —
-    the form v2.77.0 wrote and `claimed_tests` reads."""
+    the older form `claimed_tests` reads."""
     if not case.file or Path(case.file).is_absolute():
         return f"{case.classname}::{case.name}" if case.classname else case.name
     if case.file.endswith(".py"):

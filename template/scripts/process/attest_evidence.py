@@ -49,7 +49,8 @@ from dataclasses import dataclass, field
 from typing import NamedTuple
 from pathlib import Path
 
-from check_review import (
+sys.dont_write_bytecode = True
+from check_review import (  # noqa: E402  (sibling import; the guard above keeps it clean)
     OWNER_DECISION,
     PLACEHOLDER,
     PLAN_KINDS,
@@ -74,8 +75,8 @@ from check_review import (
     root_cause_parts,
     work_key,
 )
-import required_records
-from process_git import git_environment
+import required_records  # noqa: E402
+from process_git import git_environment  # noqa: E402
 
 POLICY = "docs/process/model-policy.json"
 LOCAL_POLICY = "docs/process/model-policy.local.json"
