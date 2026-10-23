@@ -49,6 +49,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from typing import NamedTuple
 
 sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[2]
@@ -67,7 +68,7 @@ _VALUED = {"-c", "-k", "-m", "-p", "-o", "-W", "--rootdir", "--confcutdir", "--b
 TIMEOUT = 1800
 
 
-PASSED, FAILED, ERROR = "passed", "failed", "error"
+PASSED, FAILED, ERROR, SKIPPED = "passed", "failed", "error", "skipped"
 
 # asked of pytest itself, not guessed from a report: its own node id (relative to its own
 # rootdir, a doctest's id, a dot in a directory name all as pytest has them) and what each
@@ -120,14 +121,14 @@ def _run(command: list[str], cwd: Path, probe_dir: Path, out: Path,
     except subprocess.TimeoutExpired:
         raise SystemExit(f"red_evidence: the run in {cwd} took longer than {timeout} s") from None
     if junit:
-        return proc.returncode, junit_outcomes(cwd / junit, cwd)
+        return proc.returncode, junit_cases(cwd / junit, cwd)
     # no report is no outcome: the probe did not load (a command that ignores PYTHONPATH,
     # `python -I`) or pytest died — never "no test ran red" (refute of #124)
     seen = json.loads(out.read_text(encoding="utf-8")) if out.is_file() else None
     return proc.returncode, seen
 
 
-_RANK = {PASSED: 0, FAILED: 1, ERROR: 2}
+_RANK = {SKIPPED: -1, PASSED: 0, FAILED: 1, ERROR: 2}
 
 
 def junit_problem(root: Path, junit: str) -> str | None:
@@ -159,32 +160,63 @@ def _link_dependencies(root: Path, tree: Path) -> list[str]:
     return linked
 
 
-def _junit_key(case, root: Path | None) -> str:
-    """A testcase's id: `<classname>::<name>`, or by its `file` attribute where the runner
-    writes one — XCTest's and jest's `classname` is no path (`KenniTests.FooTests`, a
-    `describe` title), and attest finds a test by its file (v2.77 class-test). An absolute
-    `file` counts relative to `root` (each tree is its own root, so both name one test);
-    outside it, the classname form stands. In a Python file a class the classname ends in
-    (`….TestOne`, not the file's own stem) stays in the id: `TestOne::test_x` and
-    `TestTwo::test_x` are two; elsewhere the classname is a `describe` title, never a class."""
+class Case(NamedTuple):
+    """A JUnit case's identity: file, classname, name — distinct triples are distinct
+    cases, by construction (never a concatenated key)."""
+    file: str
+    classname: str
+    name: str
+
+
+def _junit_case(case, root: Path | None) -> Case:
+    """A testcase's identity: an absolute `file` under `root` becomes relative (each tree
+    is its own root, so both name one test); outside it the value stays as written (two
+    files outside stay apart), and a relative one stays as written, `./` included."""
     name, cls, file = case.get("name") or "", case.get("classname") or "", case.get("file") or ""
     if file and Path(file).is_absolute():
         try:
-            file = Path(file).resolve().relative_to(root.resolve()).as_posix() if root else ""
+            file = Path(file).resolve().relative_to(root.resolve()).as_posix() if root else file
         except ValueError:
-            file = ""
-    if not file:
-        return f"{cls}::{name}" if cls else name
-    last = cls.rsplit(".", 1)[-1]
-    if file.endswith(".py") and last.isidentifier() and last[:1].isupper() and last != Path(file).stem:
-        return f"{file}::{last}::{name}"
-    return f"{file}::{name}"
+            file = file
+    return Case(file, cls, name)
 
 
-def junit_outcomes(path: Path, root: Path | None = None) -> dict[str, str] | None:
-    """`<test id>` (`_junit_key`) -> passed/failed/error of every testcase in a JUnit XML
-    file; None when there is none or it does not parse (no report is no outcome). A skipped
-    case is no outcome either — it neither went red nor green. `root`: where the command ran."""
+def _python_chain(file: str, cls: str) -> list[str]:
+    """The class chain pytest's node id carries: drop the module prefix up to the last
+    component equal to the file's stem; without that stem, today's heuristic (the last
+    component, capitalised, not the stem) names the class."""
+    parts = cls.split(".") if cls else []
+    stem = Path(file).stem
+    drop = 0
+    for i, part in enumerate(parts):
+        if part == stem:
+            drop = i + 1
+    chain = parts[drop:]
+    if not chain:
+        last = parts[-1] if parts else ""
+        if last.isidentifier() and last[:1].isupper() and last != stem:
+            chain = [last]
+    return chain
+
+
+def _ref(case: Case) -> str:
+    """The reference `red_evidence` writes for a case: `file::name` (a Python file with
+    its full class chain), or `classname::name` where there is no file under the root —
+    the form v2.77.0 wrote and `claimed_tests` reads."""
+    if not case.file or Path(case.file).is_absolute():
+        return f"{case.classname}::{case.name}" if case.classname else case.name
+    if case.file.endswith(".py"):
+        chain = _python_chain(case.file, case.classname)
+        if chain:
+            return f"{case.file}::{'::'.join(chain)}::{case.name}"
+    return f"{case.file}::{case.name}"
+
+
+def junit_cases(path: Path, root: Path | None = None) -> dict[Case, str] | None:
+    """`Case` -> passed/failed/error/skipped of every named testcase in a JUnit XML file;
+    None when there is none or it does not parse (no report is no outcome). A skipped
+    case is kept (its identity still checks references); only `measure` filters it out of
+    the before/after comparison. `root`: where the command ran."""
     import xml.etree.ElementTree as ET  # noqa: PLC0415  (stdlib; only this mode needs it)
     if not path.is_file() or not path.stat().st_size:
         return None
@@ -192,15 +224,16 @@ def junit_outcomes(path: Path, root: Path | None = None) -> dict[str, str] | Non
         tree = ET.parse(path)
     except (ET.ParseError, OSError):
         return None
-    seen: dict[str, str] = {}
+    seen: dict[Case, str] = {}
     for case in tree.getroot().iter("testcase"):
         name = case.get("name") or ""
-        key = _junit_key(case, root)
-        if not name or case.find("skipped") is not None:
+        if not name:
             continue
-        state = ERROR if case.find("error") is not None else FAILED if case.find("failure") is not None else PASSED
-        # one id twice (a parametrized title): the worst outcome stands, whatever the order —
-        # an error is worst, it is no red a fix turned green (refute v2.75 r2)
+        key = _junit_case(case, root)
+        state = SKIPPED if case.find("skipped") is not None else (
+            ERROR if case.find("error") is not None else FAILED if case.find("failure") is not None else PASSED)
+        # one case twice (a parametrized title): the worst outcome stands, whatever the
+        # order — an error is worst; a passed occurrence beats a skipped one (refute v2.75 r2)
         if _RANK[state] >= _RANK.get(seen.get(key, ""), -1):
             seen[key] = state
     return seen
@@ -317,10 +350,16 @@ def measure(root: Path, before: str, command: list[str], copy: list[str], timeou
         exit_after, now = _run(command, root, probe, Path(tmp) / "after.json", timeout, junit)
     missing = [side for side, seen in ((f"at {before}", was), ("now", now)) if seen is None]
     was, now = was or {}, now or {}
+    # skipped is no before/after outcome; its case stays in `cases` for the reference check
+    was_tests = {c: s for c, s in was.items() if s != SKIPPED}
+    now_tests = {c: s for c, s in now.items() if s != SKIPPED}
+    fixed = [c for c, s in now_tests.items() if s == PASSED and was_tests.get(c) == FAILED]
+    shown = (lambda c: _ref(c)) if junit else (lambda c: c)
     return {"command": command, "before": before, "exit_before": exit_before, "exit_after": exit_after,
-            "red_to_green": sorted(t for t, s in now.items() if s == PASSED and was.get(t) == FAILED),
-            "still_red": sorted(t for t, s in now.items() if s != PASSED), "carried": carried,
-            "no_report": missing, "junit": junit}
+            "red_to_green": sorted(shown(c) for c in fixed),
+            "still_red": sorted(shown(c) for c, s in now_tests.items() if s != PASSED),
+            "cases": list(dict.fromkeys([*was, *now])), "fixed": fixed,
+            "carried": carried, "no_report": missing, "junit": junit}
 
 
 def refusals(m: dict) -> list[str]:
