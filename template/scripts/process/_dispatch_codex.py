@@ -13,7 +13,6 @@ refuses and the fallback is recorded (`record_unavailable`, `fallback_hint`).
 from __future__ import annotations
 
 import argparse
-from collections import Counter
 import contextlib
 import datetime as _dt
 import hashlib
@@ -648,81 +647,6 @@ def _committed_attest(wt: Path, rec: dict, work: str, plan_review: bool) -> dict
     return None
 
 
-def _blocked_round_at(wt: Path, args: argparse.Namespace, head: str) -> int | None:
-    """The round of a blocking REVIEW line of the work (`attest.round_ids`) on this head —
-    another lens already blocked the round this review is a lens of — or None. "This head"
-    is the line's own head, or one only attest commits lie above (`_attest_commit`), as a
-    lens built after the first lens's attest commit sees it. Rebuilt in the v2.77
-    cross-model review (round 3): a rule over paths read the reviewed plan as bookkeeping,
-    or the records an attest commit carries as content."""
-    import attest  # noqa: PLC0415  (the main checkout's)
-    from check_review import JOURNAL_DIR, parse_review_lines, work_key  # noqa: PLC0415
-    mine = {work_key(w) for w in attest.round_ids(args, wt)}
-    attests: list[str] = []  # head, then each first parent while the commit is an attest commit
-    at = head
-    while len(attests) < 100:
-        attests.append(at)
-        try:
-            parents = _git(wt, "rev-list", "--parents", "-n", "1", at).decode().split()[1:]
-        except ValueError:
-            break  # git cannot tell: this head alone
-        if len(parents) != 1 or not _attest_commit(wt, parents[0], at, mine):
-            break
-        at = parents[0]
-    rounds = [int(f["round"]) for t in attest._texts(wt, wt / JOURNAL_DIR) for _ln, f in parse_review_lines(t)[0]
-              if f["verdict"] == "block" and f.get("head") in attests and work_key(f["work"]) in mine]
-    return max(rounds) if rounds else None
-
-
-def _attest_commit(wt: Path, parent: str, commit: str, mine: set) -> bool:
-    """Is `commit` over `parent` an attest commit of the work `mine`: it adds a REVIEW line
-    of the work and changes nothing else than reports and journal (`.process-work/`, plans
-    aside) and records appended to a plan (`check_review.records_only`, as attest `--with`
-    lets them ride), the plan moved to the archive by `--archive` included? A plan changed
-    in its content, added or deleted is a fix, and so is a commit without a REVIEW line — a
-    decision answering a block included. Unreadable is no."""
-    from attest import archive_rel  # noqa: PLC0415  (the main checkout's)
-    from check_review import PLAN_KINDS, parse_review_lines, record_kind, records_only, work_key  # noqa: PLC0415
-
-    def plan(rel: str) -> bool:
-        return record_kind(rel) in (*PLAN_KINDS, "plan-archive")
-
-    try:
-        status = _git(wt, "diff", "--name-status", "-z", "--no-renames", parent, commit).decode().split("\0")
-        changes = dict(zip(status[1::2], status[0::2]))  # path -> A|D|M|T
-        pairs = [(rel, rel) for rel, kind in changes.items() if kind == "M" and plan(rel)]
-        # `attest --archive` moves the plan it appends to: the deleted plan and its archived
-        # copy pair by the archive rule, never by git's rename guess (round 5)
-        pairs += [(rel, archive_rel(rel)) for rel, kind in changes.items() if kind == "D" and plan(rel)]
-        paired = {p for pair in pairs for p in pair}
-        for rel in changes:
-            if rel in paired:
-                continue
-            if plan(rel) or not rel.startswith(".process-work/"):
-                return False  # a plan added or deleted unpaired, or a path outside bookkeeping
-        for old, new in pairs:
-            if changes.get(new) != ("M" if new == old else "A") or not plan(new):
-                return False
-            before = _git(wt, "show", f"{parent}:{old}").decode("utf-8")
-            after = _git(wt, "show", f"{commit}:{new}").decode("utf-8")
-            if not records_only(before, after):
-                return False
-
-        def lines(rev: str, rel: str) -> Counter[str]:
-            try:
-                return Counter(_git(wt, "show", f"{rev}:{rel}").decode("utf-8", errors="replace").splitlines())
-            except ValueError:
-                return Counter()  # not there at that side
-        # the lines the commit adds, counted per path and per archive pair: a moved plan adds
-        # none of its old lines, a lens line equal to one already there still counts (round 6)
-        sides = pairs + [(rel, rel) for rel in changes if rel not in paired]
-        added = "\n".join((sum((lines(commit, new) - lines(parent, old) for old, new in sides), Counter()))
-                          .elements())
-    except (ValueError, UnicodeDecodeError):
-        return False
-    return any(work_key(f["work"]) in mine for _ln, f in parse_review_lines(added)[0])
-
-
 def handoff(root: Path, rec: dict, *, implementer: str | None = None) -> dict:
     """A finished Codex review, verified and attested in one step, in the worker's
     worktree: receipts and digests against the bundle and the Git artifact, the result
@@ -817,7 +741,7 @@ def handoff(root: Path, rec: dict, *, implementer: str | None = None) -> dict:
     # a second lens of a round that already blocked on this very head is that round, not the
     # next: as the bundle tells a hand-written lens (`attest.py --round <that round>`), so one
     # review round does not become two blocked rounds and owe REPLAN and a class test (#293)
-    same_head = _blocked_round_at(wt, round_args, b["head"])
+    same_head = attest.blocked_round_at(wt, round_args, b["head"])
     if same_head is not None:
         review_round = same_head
     refute_round = None

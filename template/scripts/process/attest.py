@@ -65,6 +65,7 @@ push-time gates downstream; half the commits of two weeks were bookkeeping);
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 import datetime as dt
 import re
 import subprocess
@@ -100,6 +101,7 @@ from check_review import (  # noqa: E402  (one owner for grammar, digest, record
     readable,
     record_kind,
     record_texts,
+    records_only,
 )
 
 # a ROOT-CAUSE line — the review gate owns its shape (`check_review.ROOT_CAUSE_LINE`),
@@ -115,6 +117,17 @@ ARTIFACT_LINE = re.compile(
 def _git(root: Path, *args: str) -> str | None:
     r = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, env=git_environment())
     return r.stdout.strip() if r.returncode == 0 else None
+
+
+
+def _git_out(root: Path, *args: str) -> bytes:
+    """git's stdout, or ValueError when it fails — the moved round rule keeps its
+    `except ValueError` branches word for word."""
+    r = subprocess.run(["git", "-C", str(root), *args], capture_output=True, check=False, timeout=60,
+                       env=git_environment())
+    if r.returncode:
+        raise ValueError(f"git {' '.join(args[:2])} failed: {r.stderr.decode(errors='replace').strip()[-200:]}")
+    return r.stdout
 
 
 def _journal_target(root: Path, journal_dir: Path) -> Path:
@@ -147,7 +160,7 @@ def _archive_target(root: Path, plan: Path) -> Path:
 def archive_rel(rel: str) -> str:
     """Where `--archive` moves the plan at the repository path `rel`. A Spec Kit plan is
     always `plan.md`: it takes its feature directory's name, or every Spec Kit plan would
-    collide in the archive. `_dispatch_codex._attest_commit` pairs an archive move by it."""
+    collide in the archive. `_attest_commit` pairs an archive move by it."""
     parts = rel.split("/")
     if len(parts) == 3 and parts[0] == SPECS_DIR and parts[2] == SPEC_PLAN:
         return f"{PLANS_ARCHIVE}/{parts[1]}.md"
@@ -364,6 +377,79 @@ def build_line(args, root: Path, journal_dir: Path | None = None) -> tuple[str, 
     for _ln, msg in parse_review_lines(line)[1]:
         problems.append(f"malformed: {msg}")
     return line, problems
+
+
+
+
+def blocked_round_at(root: Path, args: argparse.Namespace, head: str) -> int | None:
+    """The round of a blocking REVIEW line of the work (`round_ids`) on this head —
+    another lens already blocked the round this review is a lens of — or None. "This head"
+    is the line's own head, or one only attest commits lie above (`_attest_commit`), as a
+    lens built after the first lens's attest commit sees it. Rebuilt in the v2.77
+    cross-model review (round 3): a rule over paths read the reviewed plan as bookkeeping,
+    or the records an attest commit carries as content."""
+    mine = {work_key(w) for w in round_ids(args, root)}
+    attests: list[str] = []  # head, then each first parent while the commit is an attest commit
+    at = head
+    while len(attests) < 100:
+        attests.append(at)
+        try:
+            parents = _git_out(root, "rev-list", "--parents", "-n", "1", at).decode().split()[1:]
+        except ValueError:
+            break  # git cannot tell: this head alone
+        if len(parents) != 1 or not _attest_commit(root, parents[0], at, mine):
+            break
+        at = parents[0]
+    rounds = [int(f["round"]) for t in _texts(root, root / JOURNAL_DIR) for _ln, f in parse_review_lines(t)[0]
+              if f["verdict"] == "block" and f.get("head") in attests and work_key(f["work"]) in mine]
+    return max(rounds) if rounds else None
+
+
+def _attest_commit(root: Path, parent: str, commit: str, mine: set) -> bool:
+    """Is `commit` over `parent` an attest commit of the work `mine`: it adds a REVIEW line
+    of the work and changes nothing else than reports and journal (`.process-work/`, plans
+    aside) and records appended to a plan (`check_review.records_only`, as attest `--with`
+    lets them ride), the plan moved to the archive by `--archive` included? A plan changed
+    in its content, added or deleted is a fix, and so is a commit without a REVIEW line — a
+    decision answering a block included. Unreadable is no."""
+
+    def plan(rel: str) -> bool:
+        return record_kind(rel) in (*PLAN_KINDS, "plan-archive")
+
+    try:
+        status = _git_out(root, "diff", "--name-status", "-z", "--no-renames", parent, commit).decode().split("\0")
+        changes = dict(zip(status[1::2], status[0::2]))  # path -> A|D|M|T
+        pairs = [(rel, rel) for rel, kind in changes.items() if kind == "M" and plan(rel)]
+        # `attest --archive` moves the plan it appends to: the deleted plan and its archived
+        # copy pair by the archive rule, never by git's rename guess (round 5)
+        pairs += [(rel, archive_rel(rel)) for rel, kind in changes.items() if kind == "D" and plan(rel)]
+        paired = {p for pair in pairs for p in pair}
+        for rel in changes:
+            if rel in paired:
+                continue
+            if plan(rel) or not rel.startswith(".process-work/"):
+                return False  # a plan added or deleted unpaired, or a path outside bookkeeping
+        for old, new in pairs:
+            if changes.get(new) != ("M" if new == old else "A") or not plan(new):
+                return False
+            before = _git_out(root, "show", f"{parent}:{old}").decode("utf-8")
+            after = _git_out(root, "show", f"{commit}:{new}").decode("utf-8")
+            if not records_only(before, after):
+                return False
+
+        def lines(rev: str, rel: str) -> Counter[str]:
+            try:
+                return Counter(_git_out(root, "show", f"{rev}:{rel}").decode("utf-8", errors="replace").splitlines())
+            except ValueError:
+                return Counter()  # not there at that side
+        # the lines the commit adds, counted per path and per archive pair: a moved plan adds
+        # none of its old lines, a lens line equal to one already there still counts (round 6)
+        sides = pairs + [(rel, rel) for rel in changes if rel not in paired]
+        added = "\n".join((sum((lines(commit, new) - lines(parent, old) for old, new in sides), Counter()))
+                          .elements())
+    except (ValueError, UnicodeDecodeError):
+        return False
+    return any(work_key(f["work"]) in mine for _ln, f in parse_review_lines(added)[0])
 
 
 def main() -> int:
