@@ -740,6 +740,67 @@ def test_reference_aliases_read_as_the_gate_reads_them(render, tmp_path, kind):
         assert _class_test(out) == ("add subtracted", "calc.py:2", [("tests/c.ts", "adds")])
 
 
+_DYNAMIC_TS = ("const generated = ['adds']\n"
+               "for (const name of generated) it(name, () => {})\n")
+
+
+def test_a_dynamic_test_name_the_gate_cannot_resolve_collides_with_nothing(render, tmp_path):
+    """#303 fix r3: two JUnit cases named `adds` whose test the gate cannot find in a
+    dynamic test file have no identity, so the one going red -> green is written instead
+    of being refused as a collision. v2.77.0 wrote it; fix r2 refused it."""
+    out, before = _repo(render, tmp_path)
+    _files(out, {"tests/c.ts": _DYNAMIC_TS})
+    (out / "calc.spec.py").write_text(_junit_runner([
+        ("A", "tests/c.ts", "adds", "fail", "pass"),
+        ("B", "tests/c.ts", "adds", "pass", "pass")]), encoding="utf-8")
+    r = _tool(out, "--work", "7", "--round", "1", "--before", before, "--junit", "report.xml",
+              "--copy", "calc.spec.py", "--", sys.executable, "calc.spec.py")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "red before, green after (1): tests/c.ts::adds" in _journal(out)
+
+
+_IDENTITY_TABLE = [
+    ("resolved-unique", False, True),
+    ("resolved-colliding", False, False),
+    ("unresolved", False, True),
+    ("unresolved-sites", True, False),
+]
+
+
+@pytest.mark.parametrize("kind,sites,written", _IDENTITY_TABLE, ids=[c[0] for c in _IDENTITY_TABLE])
+def test_reference_identity_comes_only_from_a_resolved_entry(render, tmp_path, kind, sites, written):
+    """#303 fix r3 table: a resolved reference has an identity (unique stays writable,
+    colliding is refused); an unresolved one (`why`) has none — without `--sites` it is
+    written, with `--sites` the class-test check refuses it."""
+    out, before = _repo(render, tmp_path)
+    if kind.startswith("unresolved"):
+        _files(out, {"tests/c.ts": _DYNAMIC_TS})
+        cases = [("A", "tests/c.ts", "adds", "fail", "pass"),
+                 ("B", "tests/c.ts", "adds", "pass", "pass")]
+    elif kind == "resolved-unique":
+        _files(out, {"tests/c.ts": _TS + 'it("zero", () => {})\n'})
+        cases = [("A", "tests/c.ts", "adds", "fail", "pass"),
+                 ("A", "tests/c.ts", "zero", "pass", "pass")]
+    else:
+        _files(out, {"tests/c.ts": _TS})
+        cases = [("A", "tests/c.ts", "adds", "fail", "pass"),
+                 ("B", "tests/c.ts", "adds", "pass", "pass")]
+    (out / "calc.spec.py").write_text(_junit_runner(cases), encoding="utf-8")
+    args = ["--work", "7", "--round", "1", "--before", before, "--junit", "report.xml",
+            "--copy", "calc.spec.py", "--cause", "add subtracted"]
+    if sites:
+        args += ["--sites", "calc.py:2"]
+    r = _tool(out, *args, "--", sys.executable, "calc.spec.py")
+    if written:
+        assert r.returncode == 0, r.stdout + r.stderr
+        assert "red before, green after (1): tests/c.ts::adds" in _journal(out)
+    else:
+        assert r.returncode == 1, r.stdout + r.stderr
+        expected = "does not resolve" if sites else "names several test cases"
+        assert expected in r.stderr, r.stderr
+        assert "Red evidence" not in _journal(out)
+
+
 _SITES_WHY_CASES = [
     ("missing-test", {"tests/c.ts": 'it("zero", () => {})\n'}, ("A", "tests/c.ts", "adds"),
      "declares no test 'adds' at head"),
