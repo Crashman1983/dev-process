@@ -7,6 +7,10 @@ technischen Einzelheiten stehen im [CHANGELOG](CHANGELOG-DE.md).
 
 English version: [NEWS.md](NEWS.md).
 
+## v2.77.2 — Eine Klammer im Testparameter verdeckt keinen echten Fix mehr
+
+Ein pytest-Test, dessen Parameterwert Klammern enthält, etwa `test_x[a[b]]`, wurde unter dem falschen Namen gelesen; ein echter Nachweis von Fehlschlag zu Bestehen konnte deshalb verweigert werden. Das Werkzeug, das den Nachweis misst, nutzt jetzt dieselbe Testnamen-Lesart wie das Review-Gate, und ein Parameter darf Klammern, `]`, Kommas, Unicode enthalten oder leer sein.
+
 ## v2.77.1 — Ein Fix ist erst belegt, wenn wirklich der Test grün wurde
 
 Ein Testbericht konnte einen Fix als belegt erscheinen lassen, obwohl kein einzelner Test von Fehlschlag auf Bestehen gewechselt war: Zwei Tests mit gleichem Namen in einer Datei galten als einer. Testberichte werden jetzt nach Datei, Klasse und Name getrennt, und eine Testreferenz, die auch ein anderer Test beansprucht, wird verweigert. Der Telemetrie-Bericht stürzt nicht mehr an einer Befundzeile ab, ein Review-Bundle nennt die Runde, die ein anderer Reviewer bereits blockiert hat, und die Beschreibung der Plan-Prüfung entspricht der Regel, die sie durchsetzt.

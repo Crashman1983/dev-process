@@ -9,6 +9,19 @@ ein Eintrag ohne Plan oder Issue hat keine Details-Zeile. In wenigen Sätzen je 
 English version: [CHANGELOG.md](CHANGELOG.md). Die Releases vor v2.28.2:
 [docs/changelog-archive-DE.md](docs/changelog-archive-DE.md).
 
+## v2.77.2 — Ein pytest-Parameter mit Klammern behält die ganze ID · 2026-10-23
+
+**Warum.** `red_evidence` schnitt den Parameteranhang einer pytest-ID am letzten `[` ab. Eine gültige ID wie `test_x[a[b]]` wurde als `test_x[a` gelesen, während `attest_evidence` `test_x` liest; ein gültiger Rot→Grün-Nachweis wurde auf dem pytest- und dem JUnit-Pfad verweigert.
+
+**Was sich ändert.**
+- `attest_evidence` besitzt die Testnamen-Normalisierung als öffentliche Funktion `attest_name`; `red_evidence` ruft sie auf beiden Pfaden und hat keine eigene `[`-Regel mehr.
+- Ein Parameterwert darf Klammern, `]`, Kommas, Unicode oder leer sein; die Identität ist die Funktion, die attest auflöst.
+- Die geschriebene Referenzform bleibt unverändert.
+
+**Update.** Keine Schritte.
+
+Details: [Plan](docs/analysis/2026-10-23-v2.77.2.md) #306
+
 ## v2.77.1 — Fixes aus der v2.77.0-Übernahme · 2026-10-23
 
 **Warum.** v2.77.0 konnte einen Fix als belegt melden, obwohl kein einzelner Test von Rot auf Grün ging: Zwei JUnit-Fälle mit gleicher Datei und gleichem Namen, aber verschiedenen Klassen wurden zu einem verschmolzen, sodass ein rot-dann-übersprungener Fall neben einem immer grünen grün aussah. Daneben stürzte `process_kpis.py findings` an jeder FINDING-Zeile ab, das Review-Bundle nannte für eine zweite Linse auf einem blockierten Kopf die nächste Runde, und der Docstring des Plan-Gates beschrieb eine lockerere Transitions-Überschrift als das Gate erzwingt.

@@ -10,6 +10,19 @@ A few plain sentences per release: [NEWS.md](NEWS.md). Deutsche Fassung:
 [CHANGELOG-DE.md](CHANGELOG-DE.md). Releases before v2.28.2:
 [docs/changelog-archive.md](docs/changelog-archive.md).
 
+## v2.77.2 — A pytest parameter with brackets keeps the whole id · 2026-10-23
+
+**Why.** `red_evidence` cut a pytest parameter suffix at the last `[`, so a valid id such as `test_x[a[b]]` was read as `test_x[a` while `attest_evidence` reads `test_x`; a valid red-to-green proof was refused on the pytest and JUnit paths.
+
+**What changes.**
+- `attest_evidence` owns the test-name normalization as the public `attest_name`; `red_evidence` calls it on both paths and carries no own `[` rule.
+- A parameter value may contain brackets, `]`, commas, Unicode or be empty; the identity is the function attest resolves.
+- The written reference form is unchanged.
+
+**Update.** No steps.
+
+Details: [Plan](docs/analysis/2026-10-23-v2.77.2.md) #306
+
 ## v2.77.1 — Fixes from the v2.77.0 uptake · 2026-10-23
 
 **Why.** v2.77.0 could report a fix as proven while no single test went from red to green: two JUnit cases with the same file and name but different classes were folded into one, so a red-then-skipped case beside an always-green one looked green. Separately, `process_kpis.py findings` crashed on any FINDING line, the review bundle named the next round for a second lens on a blocked head, and the plan-structure docstring described a looser Transitions heading than the gate enforces.

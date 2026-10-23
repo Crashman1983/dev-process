@@ -237,6 +237,18 @@ def test_claimed_tests_reads_lists_classes_and_titles(ev_mod):
         ("web/a.spec.ts", "shows the banner")]
 
 
+def test_the_pytest_name_has_one_public_owner(ev_mod):
+    """#306: a parameter value may hold brackets (`test_x[a[b]]`); the whole suffix goes,
+    not the part after its last `[`. Other runners keep their names."""
+    mod, _out = ev_mod
+    for raw in ("test_x[a[b]]", "test_x[]]", "test_x[]", "test_x[\\xfc]",
+                "test_x[a[b], c]", "test_x[a[b,c]]"):
+        assert mod.attest_name("tests/test_x.py", raw) == "test_x", raw
+    assert mod.attest_name("tests/test_x.py", "TestK::test_z[a[b]]") == "TestK::test_z"
+    assert mod.attest_name("web/a.test.ts", "adds[weird]") == "adds[weird]"
+    assert mod.claimed_tests("tests/test_x.py::test_x[a[b]]") == [("tests/test_x.py", "test_x")]
+
+
 PY_CASES = [
     ("plain", "def test_a():\n    assert 1\n", "test_a", None),
     ("helper", "def helper():\n    pass\n", "helper", "no test function"),
