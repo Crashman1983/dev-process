@@ -33,8 +33,13 @@ ids and what each test's setup and call did. Any other runner (vitest, jest, XCT
 through xcresult conversion) reports through JUnit XML instead: `--junit PATH` names
 the file the command writes, relative to where it runs; the probe stays out, each
 side's file is removed before its run (a file from earlier proves nothing; so it must
-be an .xml file git does not track), a test is `<classname>::<name>` (or by its
-`file` attribute, `junit_outcomes`) and the worst of its outcomes stands, and the old tree borrows the working tree's `node_modules` (#256). In that mode only files named on the command
+be an .xml file git does not track), a test is a case `(file, classname, name)` — skipped
+ones included — and the worst of its outcomes stands; its reference is `file::name` (with
+the full class chain for Python) or `classname::name` outside the root. A reference the
+gate reads as the test of another case of the run, or one with `--sites` the gate does not
+read as this test, is refused — read through `attest_evidence.resolve_tests`, the gate's
+own reading. The old tree borrows the working tree's `node_modules` (#256). In that mode
+only files named on the command
 or by `--copy` travel into the old tree — a named directory would carry the fixed
 source of a non-Python project along. Stdlib only.
 """
@@ -55,6 +60,7 @@ sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling import
 from attest import ROOT_CAUSE, _journal_target  # noqa: E402  (one grammar, one journal home)
+from attest_evidence import resolve_tests, review_policy  # noqa: E402  (the gate's reading)
 from check_review import JOURNAL_DIR, readable  # noqa: E402
 
 
@@ -212,6 +218,20 @@ def _ref(case: Case) -> str:
     return f"{case.file}::{case.name}"
 
 
+def _attest_name(case: Case) -> str:
+    """The test name attest reads for a case: Python keeps the class chain and drops a
+    parameter suffix; the rest keeps the runner's own name (a `describe` title is no class)."""
+    name = case.name
+    if case.file.endswith(".py"):
+        if name.endswith("]") and "[" in name:
+            name = name[:name.rfind("[")]
+        if not Path(case.file).is_absolute():
+            chain = _python_chain(case.file, case.classname)
+            if chain:
+                return "::".join([*chain, name])
+    return name
+
+
 def junit_cases(path: Path, root: Path | None = None) -> dict[Case, str] | None:
     """`Case` -> passed/failed/error/skipped of every named testcase in a JUnit XML file;
     None when there is none or it does not parse (no report is no outcome). A skipped
@@ -237,6 +257,104 @@ def junit_cases(path: Path, root: Path | None = None) -> dict[Case, str] | None:
         if _RANK[state] >= _RANK.get(seen.get(key, ""), -1):
             seen[key] = state
     return seen
+
+
+def _worktree_files(root: Path) -> list[str] | None:
+    """The files of the working tree as the gate would find them (tracked, untracked but
+    not ignored), or None when git cannot list them — the reference check fails closed."""
+    r = subprocess.run(["git", "-C", str(root), "ls-files", "-z", "--cached", "--others",
+                        "--exclude-standard"], capture_output=True)
+    if r.returncode != 0:
+        return None
+    out = []
+    for rel in r.stdout.decode("utf-8", errors="replace").split("\0"):
+        if rel and (root / rel).is_file():
+            out.append(rel)
+    return out
+
+
+def _read_worktree(root: Path, rel: str) -> str:
+    """The working tree's text; an OSError goes to the caller (never read as missing)."""
+    return (root / rel).read_text(encoding="utf-8", errors="replace")
+
+
+def _entry_text(entry) -> str:
+    return f"{entry.path}::{entry.name}" if entry.path is not None else f"{entry.file} (no file)"
+
+
+def _reference_problem(case, universe, *, class_test: bool, resolve) -> str | None:
+    """Why the reference `red_evidence` writes for `case` is not one the gate reads as this
+    test among `universe`, or None. `resolve` is `attest_evidence.resolve_tests`, the
+    gate's own reading — never a copy here. A reference that resolves to no identity
+    collides with nothing; a `sites:` reference must resolve to this test."""
+    ref = _ref(case) if isinstance(case, Case) else case
+    entries = resolve(ref)
+    mine = {(e.path, e.name) for e in entries if e.path is not None}
+    if class_test:
+        if isinstance(case, Case):
+            file, name = case.file, _attest_name(case)
+        else:
+            file, _sep, name = ref.partition("::")
+            if file.endswith(".py") and name.endswith("]") and "[" in name:
+                name = name[:name.rfind("[")]
+        ok = (bool(file) and bool(name) and len(entries) == 1
+              and entries[0].path is not None and entries[0].file == file
+              and entries[0].name == name)
+        if not ok:
+            reads = ", ".join(_entry_text(e) for e in entries) or "no entry"
+            return (f"`{ref}` does not resolve to this test for attest (reads as {reads}) — "
+                    f"name the test file by hand in the ROOT-CAUSE line, or drop --sites")
+    if isinstance(case, Case):
+        for other in universe:
+            if other == case:
+                continue
+            other_entries = resolve(_ref(other))
+            other_ids = {(e.path, e.name) for e in other_entries if e.path is not None}
+            common = mine & other_ids
+            if not common:
+                continue
+            # parameters of one Python function may share its identity; aliases of another
+            # written file collide (DECISION 2026-10-23 Steward, Option A)
+            parameters = any(
+                a.file == b.file and a.path == b.path and a.path is not None
+                and a.path.endswith(".py") and (a.path, a.name) in common
+                for a in entries for b in other_entries if a.path is not None and b.path is not None)
+            if parameters:
+                continue
+            classes = []
+            for c in (case, other):
+                label = c.classname or "(no classname)"
+                if label not in classes:
+                    classes.append(label)
+            read = next((_entry_text(e) for e in [*entries, *other_entries]
+                         if e.path is not None and (e.path, e.name) in common), _entry_text(entries[0]))
+            return (f"`{ref}` names several test cases ({', '.join(classes)}; attest reads them "
+                    f"as {read}) — give the tests distinct names or write the line by hand")
+    return None
+
+
+def _reference_inputs(root: Path):
+    """(files, read, rules, problem) for the reference check: a missing input is a refusal,
+    never an empty set that collides with nothing."""
+    rules, problem = review_policy(root, "HEAD")
+    if problem:
+        return None, None, {}, problem
+    files = _worktree_files(root)
+    if not files:
+        why = "git cannot list it" if files is None else "it is empty"
+        return None, None, rules, (f"cannot list the working tree ({why}) — the references "
+                                   f"cannot be checked as the gate reads them")
+    errors: list[str] = []
+
+    def read(rel: str) -> str | None:
+        try:
+            return _read_worktree(root, rel)
+        except OSError as exc:
+            errors.append(f"cannot read {rel} — {exc}")
+            return None
+
+    read.errors = errors  # type: ignore[attr-defined]
+    return files, read, rules, ""
 
 
 def _portable(command: list[str], root: Path) -> list[str]:
@@ -323,7 +441,7 @@ def _take_along(root: Path, tree: Path, rels: list[str], *, files: bool = False)
 
 
 def measure(root: Path, before: str, command: list[str], copy: list[str], timeout: int = TIMEOUT,
-            junit: str | None = None) -> dict:
+            junit: str | None = None, class_test: bool = False) -> dict:
     command = _portable(command, root)
     carried = [r for r in test_paths(root, command, copy)
                if (not junit and (root / r).is_dir()) or (root / r).is_file() and (
@@ -355,11 +473,23 @@ def measure(root: Path, before: str, command: list[str], copy: list[str], timeou
     now_tests = {c: s for c, s in now.items() if s != SKIPPED}
     fixed = [c for c, s in now_tests.items() if s == PASSED and was_tests.get(c) == FAILED]
     shown = (lambda c: _ref(c)) if junit else (lambda c: c)
-    return {"command": command, "before": before, "exit_before": exit_before, "exit_after": exit_after,
-            "red_to_green": sorted(shown(c) for c in fixed),
-            "still_red": sorted(shown(c) for c, s in now_tests.items() if s != PASSED),
-            "cases": list(dict.fromkeys([*was, *now])), "fixed": fixed,
-            "carried": carried, "no_report": missing, "junit": junit}
+    m = {"command": command, "before": before, "exit_before": exit_before, "exit_after": exit_after,
+         "red_to_green": sorted(shown(c) for c in fixed),
+         "still_red": sorted(shown(c) for c, s in now_tests.items() if s != PASSED),
+         "cases": list(dict.fromkeys([*was, *now])), "fixed": fixed,
+         "carried": carried, "no_report": missing, "junit": junit, "reference_problems": []}
+    if junit or class_test:
+        files, read, rules, problem = _reference_inputs(root)
+        if problem:
+            m["reference_problems"] = [problem]
+        else:
+            resolve = lambda ref: resolve_tests(ref, files, read, rules)  # noqa: E731
+            for case in fixed:
+                why = _reference_problem(case, m["cases"], class_test=class_test, resolve=resolve)
+                if why:
+                    m["reference_problems"].append(why)
+            m["reference_problems"].extend(getattr(read, "errors", []))
+    return m
 
 
 def refusals(m: dict) -> list[str]:
@@ -369,6 +499,8 @@ def refusals(m: dict) -> list[str]:
                     f"not XML) — the tests did not run as asked; cannot tell"]
         return [f"the probe wrote no report {' and '.join(m['no_report'])} — pytest died, or the "
                 f"command ignores PYTHONPATH (`python -I`) and the probe never loaded; cannot tell"]
+    if m.get("reference_problems"):
+        return list(m["reference_problems"])
     out = []
     if not m.get("junit") and m["exit_before"] in NOT_RUN:
         out.append(f"at {m['before']} {NOT_RUN[m['exit_before']]} (exit {m['exit_before']}) — the "
@@ -435,7 +567,8 @@ def main(argv: list[str]) -> int:
         return 2
     # a kill runs the cleanup too: the temporary worktree is removed in `measure`'s finally
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(128 + signal.SIGTERM))
-    m = measure(root, args.before, command, args.copy, args.timeout, args.junit)
+    class_test = bool(args.cause and args.sites)
+    m = measure(root, args.before, command, args.copy, args.timeout, args.junit, class_test=class_test)
     problems = refusals(m)
     if problems:
         for p in problems:

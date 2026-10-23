@@ -112,6 +112,7 @@ def test_sites_read_back_a_junit_test_by_its_file_attribute(render, tmp_path):
     """A runner writing `file=` on its test case (vitest, jest-junit with the option) names
     the test file itself; its `classname` is no path (a `describe` title)."""
     out, before = _repo(render, tmp_path)
+    _files(out, {"tests/calc.test.ts": 'it("adds", () => {})\nit("zero", () => {})\n'})
     runner = RUNNER.replace("<testcase classname='calc.spec' name=",
                             "<testcase classname='Calc adds' file='tests/calc.test.ts' name=")
     (out / "calc.spec.py").write_text(runner, encoding="utf-8")
@@ -659,6 +660,129 @@ def test_junit_cases_sharing_a_reference_stay_apart_in_the_measurement(render, t
               "--copy", "calc.spec.py", "--", sys.executable, "calc.spec.py")
     assert r.returncode == 1 and "proves no fix" in r.stderr, r.stdout + r.stderr
     assert "Red evidence" not in _journal(out)
+
+
+_TS = 'it("adds", () => {})\n'
+_ALIAS_IDS = ["same-name", "title", "skipped", "dot-slash", "suffix", "ambiguous-suffix",
+              "namesake", "params", "concat", "concat-sites", "outside-root",
+              "outside-root-sites", "empty", "missing-file", "missing-file-sites",
+              "title-sites", "resolves"]
+_WRITTEN_REF = {"ambiguous-suffix": "a/tests/c.ts::adds", "params": "tests/test_p.py::test_x[1]",
+                "concat": "a::b::c", "outside-root": "calc.spec::adds", "empty": "suite A::adds",
+                "missing-file": "tests/gone.ts::adds", "resolves": "tests/c.ts::adds"}
+
+
+@pytest.mark.parametrize("kind", _ALIAS_IDS)
+def test_reference_aliases_read_as_the_gate_reads_them(render, tmp_path, kind):
+    """#303 AC-4: every alias form the gate reads as one test is refused, or — for a
+    `sites:` reference — must resolve to exactly this test. Forms the gate separates stay
+    written."""
+    out, before = _repo(render, tmp_path)
+    one = str(tmp_path.parent / f"{tmp_path.name}-one/calc.spec")
+    two = str(tmp_path.parent / f"{tmp_path.name}-two/calc.spec")
+    files = {"tests/c.ts": _TS}
+    sites = kind.endswith("-sites") or kind == "resolves"
+    if kind == "same-name":
+        x, y = ("A", "tests/c.ts", "adds", "fail", "pass"), ("B", "tests/c.ts", "adds", "pass", "pass")
+    elif kind == "title":
+        x, y = ("A", "tests/c.ts", "adds", "fail", "pass"), ("", "tests/c.ts", "adds (x)", "pass", "pass")
+    elif kind == "skipped":
+        x, y = ("A", "tests/c.ts", "adds", "fail", "pass"), ("B", "tests/c.ts", "adds", "skip", "skip")
+    elif kind == "dot-slash":
+        x, y = ("A", "tests/c.ts", "adds", "fail", "pass"), ("B", "./tests/c.ts", "adds", "pass", "pass")
+    elif kind == "suffix":
+        x, y = ("A", "tests/c.ts", "adds", "fail", "pass"), ("B", "c.ts", "adds", "pass", "pass")
+    elif kind == "ambiguous-suffix":
+        files = {"a/tests/c.ts": _TS, "b/tests/c.ts": _TS}
+        x, y = ("A", "a/tests/c.ts", "adds", "fail", "pass"), ("B", "tests/c.ts", "adds", "pass", "pass")
+    elif kind == "namesake":
+        files = {"tests/test_w.py": "def test_b():\n    assert True\n",
+                 "backend/tests/test_w.py": "def test_a():\n    assert True\n"}
+        x, y = (("backend.tests.test_w", "backend/tests/test_w.py", "test_a", "fail", "pass"),
+                ("tests.test_w", "tests/test_w.py", "test_a", "pass", "pass"))
+    elif kind == "params":
+        files = {"tests/test_p.py": "def test_x():\n    assert True\n"}
+        x, y = (("tests.test_p", "tests/test_p.py", "test_x[1]", "fail", "pass"),
+                ("tests.test_p", "tests/test_p.py", "test_x[2]", "pass", "pass"))
+    elif kind in ("concat", "concat-sites"):
+        x, y = ("a", None, "b::c", "fail", "pass"), ("a::b", None, "c", "pass", "pass")
+    elif kind in ("outside-root", "outside-root-sites"):
+        x, y = ("calc.spec", one, "adds", "fail", "pass"), ("calc.spec", two, "adds", "pass", "pass")
+    elif kind == "empty":
+        x, y = ("suite A", None, "adds", "fail", "pass"), ("suite A", None, "zero", "pass", "pass")
+    elif kind in ("missing-file", "missing-file-sites"):
+        x, y = ("A", "tests/gone.ts", "adds", "fail", "pass"), ("B", "tests/gone.ts", "adds", "pass", "pass")
+    elif kind == "title-sites":
+        x, y = ("A", "tests/c.ts", "adds (edge)", "fail", "pass"), ("A", "tests/c.ts", "zero", "pass", "pass")
+    elif kind == "resolves":
+        files = {"tests/c.ts": 'it("adds", () => {})\nit("zero", () => {})\n'}
+        x, y = ("A", "tests/c.ts", "adds", "fail", "pass"), ("A", "tests/c.ts", "zero", "pass", "pass")
+    _files(out, files)
+    (out / "calc.spec.py").write_text(_junit_runner([x, y]), encoding="utf-8")
+    args = ["--work", "7", "--round", "1", "--before", before, "--junit", "report.xml",
+            "--copy", "calc.spec.py", "--cause", "add subtracted"]
+    if sites:
+        args += ["--sites", "calc.py:2"]
+    r = _tool(out, *args, "--", sys.executable, "calc.spec.py")
+    refused = kind not in _WRITTEN_REF
+    if refused:
+        assert r.returncode == 1, r.stdout + r.stderr
+        assert "does not resolve" in r.stderr if sites else "names several test cases" in r.stderr, r.stderr
+        assert "Red evidence" not in _journal(out)
+        if kind == "same-name":
+            assert "A" in r.stderr and "B" in r.stderr and "tests/c.ts::adds" in r.stderr
+        if kind == "title":
+            assert "(no classname)" in r.stderr
+    else:
+        assert r.returncode == 0, r.stdout + r.stderr
+        assert f"red before, green after (1): {_WRITTEN_REF[kind]}" in _journal(out)
+    if kind == "resolves":
+        assert _class_test(out) == ("add subtracted", "calc.py:2", [("tests/c.ts", "adds")])
+
+
+def test_the_reference_check_fails_closed_without_its_inputs(render, tmp_path, monkeypatch):
+    """#303 R5: a missing file list, unreadable text or unreadable policy refuses even
+    when no collision was found; the intact setup refuses the collision itself."""
+    out, before = _repo(render, tmp_path)
+    mod = _red_evidence_module(out)
+    _files(out, {"tests/c.ts": _TS})
+    (out / "calc.spec.py").write_text(_junit_runner([
+        ("A", "tests/c.ts", "adds", "fail", "pass"),
+        ("B", "tests/c.ts", "adds", "pass", "pass")]), encoding="utf-8")
+
+    def measure():
+        return mod.measure(out, before, [sys.executable, "calc.spec.py"], ["calc.spec.py"],
+                           junit="report.xml", class_test=False)
+
+    original_files, original_read = mod._worktree_files, mod._read_worktree
+    for kind, expected in (("no-listing", "cannot list the working tree"),
+                           ("empty-listing", "cannot list the working tree"),
+                           ("unreadable", "cannot read tests/c.ts"),
+                           ("policy", "is not valid JSON"),
+                           ("listed", "names several test cases")):
+        monkeypatch.setattr(mod, "_worktree_files", original_files)
+        monkeypatch.setattr(mod, "_read_worktree", original_read)
+        policy = out / "docs/process/model-policy.local.json"
+        if policy.exists():
+            _git(out, "rm", "-q", str(policy.relative_to(out)))
+            _git(out, "commit", "-q", "-m", "drop bad policy")
+        if kind == "no-listing":
+            monkeypatch.setattr(mod, "_worktree_files", lambda root: None)
+        elif kind == "empty-listing":
+            monkeypatch.setattr(mod, "_worktree_files", lambda root: [])
+        elif kind == "unreadable":
+            def boom(root, rel):
+                if rel == "tests/c.ts":
+                    raise OSError("denied")
+                return (Path(root) / rel).read_text(encoding="utf-8", errors="replace")
+            monkeypatch.setattr(mod, "_read_worktree", boom)
+        elif kind == "policy":
+            policy = out / "docs/process/model-policy.local.json"
+            policy.write_text("{", encoding="utf-8")
+            _git(out, "add", str(policy.relative_to(out)))
+            _git(out, "commit", "-q", "-m", "bad policy")
+        problems = mod.refusals(measure())
+        assert any(expected in p for p in problems), (kind, problems)
 
 
 def test_nested_python_classes_keep_their_whole_chain(render, tmp_path):
