@@ -7,6 +7,7 @@ import os
 import shutil
 import subprocess
 import sys
+from pathlib import Path
 
 PLANS = ".process-work/plans"
 GOOD = ("# Plan\n\ntier: 2\nissue: #7\n\n## Decisions\n\n"
@@ -434,6 +435,36 @@ def test_a_spec_kit_stub_raised_to_tier_two_is_bound(render, tmp_path):
     r = _run(out)
     assert r.returncode == 1 and "specs/001-orders/plan.md:8: the transitions table has no `Test`" \
         in r.stdout, r.stdout
+
+
+def _plan_structure_doc(out: Path) -> str:
+    import importlib.util
+    sys.path.insert(0, str(out / "scripts/process"))
+    try:
+        spec = importlib.util.spec_from_file_location("plan_structure_doc",
+                                                      out / "scripts/process/check_plan_structure.py")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod.__doc__
+    finally:
+        sys.path.remove(str(out / "scripts/process"))
+
+
+def test_the_docstring_states_the_heading_rule(render, tmp_path):
+    """#303 AC-3: the docstring states the rule the gate enforces, not a looser one."""
+    out = render(tmp_path, {"project_name": "demo"})
+    doc = _plan_structure_doc(out)
+    assert "any depth" not in doc
+    assert "level 2 or deeper" in doc
+    assert "a setext heading ends a section but opens none" in doc
+
+
+def test_a_level_one_transitions_heading_is_not_bound(render, tmp_path):
+    """The plan title level is not a Transitions section; the gate stays green."""
+    out = _repo(render(tmp_path, {"project_name": "demo"}))
+    _plan(out, GOOD + "\n# Transitions\n\nno table\n")
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
 
 
 def test_bundle_and_gate_read_one_transitions_heading(render, tmp_path):

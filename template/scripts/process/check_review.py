@@ -597,9 +597,10 @@ _BLOCK_COMMENT = re.compile(r"^ {0,3}<!--")
 _ASCII_PUNCT = set("!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~")
 
 
-# a plan's transition table (design-template.md, Transitions): `## Transitions`,
-# `### Transitions (…)` — one rule for the bundle's note and the plan-structure gate.
-# Up to three spaces in is still an ATX heading; four is indented code.
+# a plan's transition table (design-template.md, Transitions): an ATX heading of level 2 or
+# deeper (`## Transitions`, `### Transitions (…)`) — one rule for the bundle's note and the
+# plan-structure gate. `# Transitions` is the plan's title level, not read; a setext heading
+# ends a section but opens none. Up to three spaces in is still an ATX heading; four is code.
 TRANSITIONS_HEADING = re.compile(r"^ {0,3}##+[ \t]+Transitions\b", re.MULTILINE)
 
 
