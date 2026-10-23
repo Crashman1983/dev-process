@@ -7,6 +7,10 @@ details are in the [CHANGELOG](CHANGELOG.md).
 
 Deutsche Fassung: [NEWS-DE.md](NEWS-DE.md).
 
+## v2.77.2 — A bracket in a test parameter no longer hides a real fix
+
+A pytest test whose parameter value contains brackets, such as `test_x[a[b]]`, was read under the wrong name, so a genuine failing-to-passing proof could be refused. The tool that measures the proof now uses the same test-name reading as the review gate, and a parameter may contain brackets, `]`, commas, Unicode or be empty.
+
 ## v2.77.1 — A fix is only proven by the test that actually turned green
 
 A test report could make a fix look proven when no single test had gone from failing to passing: two tests with the same name in one file were treated as one. Test reports are now kept apart by file, class and name, and a test reference that another test also claims is refused. The telemetry report no longer crashes on a finding line, a review bundle names the round another reviewer already blocked, and the plan check's description matches the rule it enforces.

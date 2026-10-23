@@ -60,7 +60,7 @@ sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling import
 from attest import ROOT_CAUSE, _journal_target  # noqa: E402  (one grammar, one journal home)
-from attest_evidence import identity_of, resolve_tests, review_policy  # noqa: E402  (the gate's reading)
+from attest_evidence import attest_name, identity_of, resolve_tests, review_policy  # noqa: E402  (the gate's reading)
 from check_review import JOURNAL_DIR, readable  # noqa: E402
 
 
@@ -220,15 +220,13 @@ def _ref(case: Case) -> str:
 
 def _attest_name(case: Case) -> str:
     """The test name attest reads for a case: Python keeps the class chain and drops a
-    parameter suffix; the rest keeps the runner's own name (a `describe` title is no class)."""
-    name = case.name
-    if case.file.endswith(".py"):
-        if name.endswith("]") and "[" in name:
-            name = name[:name.rfind("[")]
-        if not Path(case.file).is_absolute():
-            chain = _python_chain(case.file, case.classname)
-            if chain:
-                return "::".join([*chain, name])
+    parameter suffix through the owner's `attest_name`; the rest keeps the runner's own
+    name (a `describe` title is no class)."""
+    name = attest_name(case.file, case.name)
+    if case.file.endswith(".py") and not Path(case.file).is_absolute():
+        chain = _python_chain(case.file, case.classname)
+        if chain:
+            return "::".join([*chain, name])
     return name
 
 
@@ -297,8 +295,7 @@ def _reference_problem(case, universe, *, class_test: bool, resolve) -> str | No
             file, name = case.file, _attest_name(case)
         else:
             file, _sep, name = ref.partition("::")
-            if file.endswith(".py") and name.endswith("]") and "[" in name:
-                name = name[:name.rfind("[")]
+            name = attest_name(file, name)
         whys = [e.why for e in entries if e.why is not None]
         identity = identity_of(entries[0]) if len(entries) == 1 else None
         ok = (bool(file) and bool(name) and identity is not None

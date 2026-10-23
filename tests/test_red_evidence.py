@@ -930,3 +930,77 @@ def test_an_absolute_junit_file_names_one_test_in_both_trees(render, tmp_path):
               "--copy", "calc.spec.py", "--dry-run", "--", sys.executable, "calc.spec.py")
     assert r.returncode == 0, r.stdout + r.stderr
     assert "red before, green after (1): tests/calc.test.ts::adds" in r.stdout, r.stdout
+
+
+_PARAM_SOURCE = '''import pytest
+
+
+@pytest.mark.parametrize("p", ["a[b]", "]", "", "\\xfc", "a[b], c", "a[b,c]"])
+def test_param(p):
+    assert True
+
+
+class TestOuter:
+    class TestInner:
+        @pytest.mark.parametrize("p", ["a[b]"])
+        def test_nested(self, p):
+            assert True
+'''
+
+
+def test_red_evidence_and_attest_read_one_pytest_id(render, tmp_path):
+    """#306 differential: real pytest ids (nested brackets, a `]` in the value, an empty
+    value, unicode, a class chain) — the pytest path (with and without `--sites`) and the
+    JUnit path derive the same name as the owner, `attest_evidence.claimed_tests`."""
+    out, _before = _repo(render, tmp_path)
+    _files(out, {"test_param_ids.py": _PARAM_SOURCE})
+    collected = subprocess.run([sys.executable, "-m", "pytest", "--collect-only", "-q",
+                                "test_param_ids.py"], cwd=out, capture_output=True, text=True)
+    node_ids = [line for line in collected.stdout.splitlines() if "::" in line]
+    assert collected.returncode == 0 and len(node_ids) == 7, collected.stdout + collected.stderr
+    red = _red_evidence_module(out)
+    _cr, ev = _grammar(out)
+    rules = ev.review_policy(out, "HEAD")[0]
+    files = ["test_param_ids.py"]
+    resolve = lambda ref: ev.resolve_tests(  # noqa: E731
+        ref, files, lambda rel: (out / rel).read_text(encoding="utf-8"), rules)
+    for node_id in node_ids:
+        pairs = ev.claimed_tests(node_id)
+        assert len(pairs) == 1, (node_id, pairs)
+        file, owner_name = pairs[0]
+        assert red._reference_problem(node_id, [node_id], class_test=False, resolve=resolve) is None
+        assert red._reference_problem(node_id, [node_id], class_test=True, resolve=resolve) is None, node_id
+        parts = node_id.split("::")
+        classes = parts[1:-1]
+        classname = ".".join([Path(file).stem, *classes]) if classes else Path(file).stem
+        case = red.Case(file, classname, parts[-1])
+        assert red._attest_name(case) == owner_name, node_id
+        assert red._reference_problem(case, [case], class_test=False, resolve=resolve) is None
+        assert red._reference_problem(case, [case], class_test=True, resolve=resolve) is None, node_id
+
+
+def test_a_nested_parameter_id_is_accepted_as_a_sites_class_test(render, tmp_path):
+    """#306 regression: `test_x[a[b]]` is a valid pytest id, not `test_x[a`."""
+    out, before = _repo(render, tmp_path)
+    (out / "test_param.py").write_text(
+        "import pytest\nfrom calc import add\n\n\n"
+        "@pytest.mark.parametrize('p', ['a[b]'])\n"
+        "def test_param(p):\n    assert add(1, 2) == 3\n", encoding="utf-8")
+    r = _tool(out, "--work", "7", "--round", "1", "--before", before, "--cause", "add subtracted",
+              "--sites", "calc.py:2", "--", sys.executable, "-m", "pytest", "test_param.py")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "red before, green after (1): test_param.py::test_param[a[b]]" in _journal(out)
+
+
+def test_a_nested_parameter_id_is_accepted_in_a_junit_reference(render, tmp_path):
+    """#306 regression on the JUnit path: the written reference keeps the whole id."""
+    out, before = _repo(render, tmp_path)
+    _files(out, {"tests/test_p.py": "def test_x(p):\n    assert True\n"})
+    (out / "calc.spec.py").write_text(
+        _junit_runner([("tests.test_p", "tests/test_p.py", "test_x[a[b]]", "fail", "pass")]),
+        encoding="utf-8")
+    r = _tool(out, "--work", "7", "--round", "1", "--before", before, "--junit", "report.xml",
+              "--copy", "calc.spec.py", "--cause", "add subtracted", "--sites", "calc.py:2", "--",
+              sys.executable, "calc.spec.py")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "red before, green after (1): tests/test_p.py::test_x[a[b]]" in _journal(out)

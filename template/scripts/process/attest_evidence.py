@@ -973,10 +973,21 @@ _ITEM = re.compile(r"^`?(?P<file>[\w./-]+\.\w+)?::(?P<name>[^`]+?)`?(?:[ \t]+\(.
 _SPLIT = re.compile(r"[ \t]*[,;][ \t]*(?=`?(?:[\w./-]+\.\w+)?::)|[ \t]+(?:und|and)[ \t]+(?=`?[\w./-]*::)")
 
 
+_PYTEST_PARAM = re.compile(r"\[.*\]$")
+
+
+def attest_name(file: str, name: str) -> str:
+    """The test name attest reads for a runner's case: a pytest parameter suffix
+    (`test_x[a[b]]`) names the function `test_x`, so it is dropped whole; any other
+    runner's name stands. One owner for the name `red_evidence` compares against the
+    resolved test."""
+    return _PYTEST_PARAM.sub("", name) if file.endswith(".py") else name
+
+
 def claimed_tests(body: str) -> list[tuple[str, str]]:
     """(file, test) pairs an AC line names: `a.py::test_x`, `a.py::Cls::test_x`,
     `a.spec.ts::shows the banner`; an item `::test_y` takes the file before it.
-    A parametrized id (`test_x[case]`) names its function."""
+    A parametrized id (`test_x[case]`) names its function (`attest_name`)."""
     out: list[tuple[str, str]] = []
     last = ""
     # a parametrized id may hold commas (`test_x[1, 2]`): split outside brackets only
@@ -989,9 +1000,7 @@ def claimed_tests(body: str) -> list[tuple[str, str]]:
         if not file:
             continue
         last = file
-        name = m.group("name").strip()
-        if file.endswith(".py"):
-            name = re.sub(r"\[.*\]$", "", name)
+        name = attest_name(file, m.group("name").strip())
         out.append((file, name))
     return out
 
