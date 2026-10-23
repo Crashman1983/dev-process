@@ -493,12 +493,12 @@ def _blocked_lens(out, work: str) -> tuple[str, argparse.Namespace]:
 def test_the_lens_round_has_one_owner(mods):
     """#303: the lens-round rule lives in attest, not in the Codex harness."""
     load, out = mods
-    codex = load("_dispatch_codex")
     attest = load("attest")
     src = (out / "scripts/process/_dispatch_codex.py").read_text()
     assert "def _blocked_round_at" not in src and "def _attest_commit" not in src
     assert "attest.blocked_round_at(" in src
     assert callable(attest.blocked_round_at)
+    assert "attest.blocked_round_at(" in (out / "scripts/process/make_review_bundle.py").read_text()
 
 
 def test_only_attest_commits_keep_a_blocked_round(review_repo):

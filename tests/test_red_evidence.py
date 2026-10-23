@@ -397,7 +397,7 @@ for cls, file, name, before, after in cases:
         attrs += " file=" + quoteattr(file)
     out.append("<testcase " + attrs + ">" + body + "</testcase>")
 open("report.xml", "w").write("<testsuites><testsuite name='calc'>" + "".join(out) + "</testsuite></testsuites>")
-sys.exit(0 if all(s == "pass" for s in states) else 1)
+sys.exit(0 if all(s in ("pass", "skip") for s in states) else 1)
 '''
     return source.replace("CASES", repr(cases))
 
