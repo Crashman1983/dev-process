@@ -490,7 +490,19 @@ def _blocked_lens(out, work: str) -> tuple[str, argparse.Namespace]:
     return reviewed, argparse.Namespace(work=work, round_=None)
 
 
+def test_the_lens_round_has_one_owner(mods):
+    """#303: the lens-round rule lives in attest, not in the Codex harness."""
+    load, out = mods
+    codex = load("_dispatch_codex")
+    attest = load("attest")
+    src = (out / "scripts/process/_dispatch_codex.py").read_text()
+    assert "def _blocked_round_at" not in src and "def _attest_commit" not in src
+    assert "attest.blocked_round_at(" in src
+    assert callable(attest.blocked_round_at)
+
+
 def test_only_attest_commits_keep_a_blocked_round(review_repo):
+    import attest
     """Another lens of a blocked round is one whose head lies only attest commits above the
     blocked head — each adds a REVIEW line and changes nothing but reports, journal and
     records appended to a plan (`records_only`). A plan changed in its content, by a plan
@@ -504,11 +516,11 @@ def test_only_attest_commits_keep_a_blocked_round(review_repo):
         plan.write_text(plan.read_text() + "\nREFUTE work=7 round=1: 3 scenarios, none held\n")
         _git(out, "add", "-A")
         _git(out, "commit", "-q", "-m", f"docs: attest {work} round 1, lens a")
-        assert codex._blocked_round_at(out, args, _git(out, "rev-parse", "HEAD")) == 1, work
+        assert attest.blocked_round_at(out, args, _git(out, "rev-parse", "HEAD")) == 1, work
         # the plan changed in its content: a fix, the next round
         plan.write_text(plan.read_text().replace("tier:", "Fixed.\n\ntier:", 1))
         _git(out, "commit", "-q", "-am", "plan: fix round 1")
-        assert codex._blocked_round_at(out, args, _git(out, "rev-parse", "HEAD")) is None, work
+        assert attest.blocked_round_at(out, args, _git(out, "rev-parse", "HEAD")) is None, work
     # an attest commit that archives the plan (`attest --archive`, a pass of another lens) moves it
     _git(out, "checkout", "-q", "-B", "t-archive", "7-widget")
     _reviewed, args = _blocked_lens(out, "7")
@@ -523,7 +535,7 @@ def test_only_attest_commits_keep_a_blocked_round(review_repo):
                        .replace("reviewer=r", "reviewer=s"))
     _git(out, "add", "-A")
     _git(out, "commit", "-q", "-m", "docs: attest 7 round 1, lens b, archive")
-    assert codex._blocked_round_at(out, args, _git(out, "rev-parse", "HEAD")) == 1
+    assert attest.blocked_round_at(out, args, _git(out, "rev-parse", "HEAD")) == 1
     # the move holds when git sees no rename: records that outweigh a short plan (v2.77 cross-model
     # review, round 5) — the archive rule pairs the deleted plan with its archived copy
     _git(out, "checkout", "-q", "-B", "t-archive-big", "7-widget")
@@ -538,7 +550,7 @@ def test_only_attest_commits_keep_a_blocked_round(review_repo):
     _git(out, "add", "-A")
     _git(out, "commit", "-q", "-m", "docs: attest 7 round 1, lens b, archive")
     assert not any(k.startswith("R") for k in _git(out, "diff", "--name-status", "-M", "HEAD~1", "HEAD").split()[0::2])
-    assert codex._blocked_round_at(out, args, _git(out, "rev-parse", "HEAD")) == 1
+    assert attest.blocked_round_at(out, args, _git(out, "rev-parse", "HEAD")) == 1
     # a lens line byte-identical to one already there (same model, same head) is still added (round 6)
     _git(out, "checkout", "-q", "-B", "t-twin", "7-widget")
     _reviewed, args = _blocked_lens(out, "7")
@@ -547,7 +559,7 @@ def test_only_attest_commits_keep_a_blocked_round(review_repo):
     _git(out, "commit", "-q", "-m", "docs: attest 7 round 1, lenses a and b")
     journal.write_text(journal.read_text() + journal.read_text().splitlines()[-1] + "\n")
     _git(out, "commit", "-q", "-am", "docs: attest 7 round 1, lens c")
-    assert codex._blocked_round_at(out, args, _git(out, "rev-parse", "HEAD")) == 1
+    assert attest.blocked_round_at(out, args, _git(out, "rev-parse", "HEAD")) == 1
     # a record appended without a REVIEW line (a decision answering the block) is no attest commit
     _git(out, "checkout", "-q", "-B", "t-decision", "7-widget")
     _reviewed, args = _blocked_lens(out, "7")
@@ -555,7 +567,7 @@ def test_only_attest_commits_keep_a_blocked_round(review_repo):
     _git(out, "commit", "-q", "-m", "docs: attest 7 round 1, lens a")
     plan.write_text(plan.read_text() + "\n- DECISION 2026-10-16 agent: the finding stays\n")
     _git(out, "commit", "-q", "-am", "plan: decide round 1")
-    assert codex._blocked_round_at(out, args, _git(out, "rev-parse", "HEAD")) is None
+    assert attest.blocked_round_at(out, args, _git(out, "rev-parse", "HEAD")) is None
 
 
 def test_the_report_text_carries_no_round_it_was_not_given(mods):
