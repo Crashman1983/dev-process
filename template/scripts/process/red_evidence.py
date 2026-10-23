@@ -286,7 +286,8 @@ def _reference_problem(case, universe, *, class_test: bool, resolve) -> str | No
     """Why the reference `red_evidence` writes for `case` is not one the gate reads as this
     test among `universe`, or None. `resolve` is `attest_evidence.resolve_tests`, the
     gate's own reading — never a copy here. A reference that resolves to no identity
-    collides with nothing; a `sites:` reference must resolve to this test."""
+    collides with nothing; a `sites:` reference must resolve to this test without a
+    `why` — the gate's decision, not a second rule."""
     ref = _ref(case) if isinstance(case, Case) else case
     entries = resolve(ref)
     mine = {(e.path, e.name) for e in entries if e.path is not None}
@@ -297,12 +298,14 @@ def _reference_problem(case, universe, *, class_test: bool, resolve) -> str | No
             file, _sep, name = ref.partition("::")
             if file.endswith(".py") and name.endswith("]") and "[" in name:
                 name = name[:name.rfind("[")]
-        ok = (bool(file) and bool(name) and len(entries) == 1
+        whys = [e.why for e in entries if e.why is not None]
+        ok = (bool(file) and bool(name) and not whys and len(entries) == 1
               and entries[0].path is not None and entries[0].file == file
               and entries[0].name == name)
         if not ok:
             reads = ", ".join(_entry_text(e) for e in entries) or "no entry"
-            return (f"`{ref}` does not resolve to this test for attest (reads as {reads}) — "
+            reason = f"{'; '.join(whys)}; " if whys else ""
+            return (f"`{ref}` does not resolve to this test for attest ({reason}reads as {reads}) — "
                     f"name the test file by hand in the ROOT-CAUSE line, or drop --sites")
     if isinstance(case, Case):
         for other in universe:

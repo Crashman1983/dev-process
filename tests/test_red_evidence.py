@@ -740,6 +740,47 @@ def test_reference_aliases_read_as_the_gate_reads_them(render, tmp_path, kind):
         assert _class_test(out) == ("add subtracted", "calc.py:2", [("tests/c.ts", "adds")])
 
 
+_SITES_WHY_CASES = [
+    ("missing-test", {"tests/c.ts": 'it("zero", () => {})\n'}, ("A", "tests/c.ts", "adds"),
+     "declares no test 'adds' at head"),
+    ("skipped-test", {"tests/c.ts": 'it.skip("adds", () => {})\n'}, ("A", "tests/c.ts", "adds"),
+     "is marked or made to skip at head"),
+    ("not-a-test-file", {"web/src/c.ts": 'it("adds", () => {})\n'}, ("A", "web/src/c.ts", "adds"),
+     "is no test file this project declares"),
+    ("python-missing-test", {"tests/test_c.py": "def test_zero():\n    assert True\n"},
+     ("tests.test_c", "tests/test_c.py", "test_add"), "has no test test_add at head"),
+    ("python-not-a-test-module", {"tests/helper_c.py": "def test_add():\n    assert True\n"},
+     ("tests.helper_c", "tests/helper_c.py", "test_add"), "is no test module pytest collects"),
+    ("python-marked-skip",
+     {"tests/test_c.py": "import pytest\n\n@pytest.mark.skip\ndef test_add():\n    assert True\n"},
+     ("tests.test_c", "tests/test_c.py", "test_add"), "is marked to skip or to fail"),
+    ("ambiguous-file", {"a/tests/c.ts": _TS, "b/tests/c.ts": _TS}, ("A", "tests/c.ts", "adds"),
+     "names several tracked files at head"),
+    ("missing-file", {"tests/c.ts": _TS}, ("A", "tests/gone.ts", "adds"),
+     "is no tracked file at head"),
+]
+
+
+@pytest.mark.parametrize("kind,files,case,gate", _SITES_WHY_CASES, ids=[c[0] for c in _SITES_WHY_CASES])
+def test_a_sites_reference_the_resolver_rejects_is_refused(render, tmp_path, kind, files, case, gate):
+    """#303 fix r2: every `--sites` reference whose `resolve_tests` entry carries a `why`
+    is refused — the gate's decision and message, not a second rule. The cases cover each
+    why class: missing test (the review repro), skipped test, non-test file, Python test
+    module/test/skip, ambiguous path and missing file."""
+    out, before = _repo(render, tmp_path)
+    _files(out, files)
+    cls, file, name = case
+    (out / "calc.spec.py").write_text(_junit_runner([(cls, file, name, "fail", "pass")]),
+                                      encoding="utf-8")
+    r = _tool(out, "--work", "7", "--round", "1", "--before", before, "--junit", "report.xml",
+              "--copy", "calc.spec.py", "--cause", "add subtracted", "--sites", "calc.py:2", "--",
+              sys.executable, "calc.spec.py")
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert gate in r.stderr, r.stderr
+    assert "Red evidence" not in _journal(out)
+    assert "ROOT-CAUSE" not in _journal(out)
+
+
 def test_the_reference_check_fails_closed_without_its_inputs(render, tmp_path, monkeypatch):
     """#303 R5: a missing file list, unreadable text or unreadable policy refuses even
     when no collision was found; the intact setup refuses the collision itself."""
