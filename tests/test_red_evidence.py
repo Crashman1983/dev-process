@@ -3,6 +3,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 
 def _git(root: Path, *args: str) -> str:
     return subprocess.run(["git", *args], cwd=root, capture_output=True, text=True, check=True).stdout.strip()
@@ -366,6 +368,39 @@ def test_a_missing_probe_report_is_named(render, tmp_path):
     assert r.returncode == 1 and "probe" in r.stderr, r.stderr
 
 
+def _files(out: Path, files: dict[str, str]) -> None:
+    """Test files in the working tree, never committed (the reference check reads here)."""
+    for rel, text in files.items():
+        path = out / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+
+
+def _junit_runner(cases) -> str:
+    """A runner after RUNNER's pattern: `(classname, file | None, name, before, after)`,
+    states `pass`/`fail`/`skip`/`error`; it writes `after` once the fix is in."""
+    source = '''import sys
+from xml.sax.saxutils import quoteattr
+sys.path.insert(0, ".")
+from calc import add
+cases = CASES
+states = []
+out = []
+for cls, file, name, before, after in cases:
+    state = after if add(1, 2) == 3 else before
+    states.append(state)
+    body = "<skipped/>" if state == "skip" else "<failure/>" if state == "fail" else (
+        "<error/>" if state == "error" else "")
+    attrs = "classname=" + quoteattr(cls) + " name=" + quoteattr(name)
+    if file is not None:
+        attrs += " file=" + quoteattr(file)
+    out.append("<testcase " + attrs + ">" + body + "</testcase>")
+open("report.xml", "w").write("<testsuites><testsuite name='calc'>" + "".join(out) + "</testsuite></testsuites>")
+sys.exit(0 if all(s == "pass" for s in states) else 1)
+'''
+    return source.replace("CASES", repr(cases))
+
+
 RUNNER = '''import sys
 from xml.sax.saxutils import quoteattr
 sys.path.insert(0, ".")
@@ -452,10 +487,12 @@ def test_a_junit_error_is_no_red_and_the_worst_outcome_stands_in_any_order(rende
         report.write_text(f"<testsuites><testsuite><testcase classname='c' name='t'>{first}</testcase>"
                           f"<testcase classname='c' name='t'>{second}</testcase>"
                           "<testcase classname='c' name='s'><skipped/></testcase></testsuite></testsuites>")
-        got = mod.junit_outcomes(report)
-        assert got == {"c::t": "error" if "error" in first + second else "failed"}, (first, second, got)
+        got = mod.junit_cases(report)
+        assert {mod._ref(c): s for c, s in got.items()} == {
+            "c::t": "error" if "error" in first + second else "failed",
+            "c::s": "skipped"}, (first, second, got)
     report.write_text("<testsuites><testsuite><testcase classname='c' name='t'>")  # cut off mid-run
-    assert mod.junit_outcomes(report) is None
+    assert mod.junit_cases(report) is None
 
 
 def test_a_stale_report_on_the_fixed_side_proves_nothing(render, tmp_path):
@@ -533,7 +570,8 @@ def test_a_junit_file_attribute_is_made_relative_and_keeps_its_class(render, tmp
         f"<testcase classname='calc.spec' file='{outside}' name='adds'/>"
         "<testcase classname='Calc' file='web/calc.test.ts' name='adds two'/>"
         "</testsuite></testsuites>")
-    assert mod.junit_outcomes(report, out) == {
+    got = mod.junit_cases(report, out)
+    assert {mod._ref(c): s for c, s in got.items()} == {
         "tests/test_x.py::TestOne::test_x": "failed",
         "tests/test_x.py::TestTwo::test_x": "passed",
         "tests/test_x.py::test_y": "passed",
@@ -542,6 +580,116 @@ def test_a_junit_file_attribute_is_made_relative_and_keeps_its_class(render, tmp
         # a one-word `describe` title outside Python is no class: attest finds `adds two` in the file
         "web/calc.test.ts::adds two": "passed",
     }
+    # the identity keeps the two different absolute files apart, though both write calc.spec::adds
+    assert len([c for c in got if c.file == str(outside)]) == 1
+
+
+def test_distinct_junit_triples_are_distinct_cases(render, tmp_path):
+    """#303 AC-4: identity is the triple (file, classname, name), not a joined key."""
+    out, _before = _repo(render, tmp_path)
+    mod = _red_evidence_module(out)
+    outside1 = tmp_path.parent / f"{tmp_path.name}-one/calc.spec"
+    outside2 = tmp_path.parent / f"{tmp_path.name}-two/calc.spec"
+    report = tmp_path / "r.xml"
+    report.write_text(
+        "<testsuites><testsuite>"
+        "<testcase classname='suite A' file='tests/c.ts' name='adds'/>"
+        "<testcase classname='' file='tests/c.ts' name='adds (suite A)'/>"
+        "<testcase classname='a' name='b::c'/>"
+        "<testcase classname='a::b' name='c'/>"
+        "<testcase classname='x' name='t'><failure/></testcase>"
+        "<testcase classname='x' name='t'/>"
+        "<testcase classname='' name='solo'/>"
+        f"<testcase classname='calc.spec' file='{outside1}' name='adds'/>"
+        f"<testcase classname='calc.spec' file='{outside2}' name='adds'/>"
+        "<testcase classname='s' name='skip'><skipped/></testcase>"
+        "<testcase classname='B' file='./tests/c.ts' name='adds'/>"
+        "</testsuite></testsuites>")
+    got = mod.junit_cases(report, out)
+    expected = {
+        mod.Case("tests/c.ts", "suite A", "adds"),
+        mod.Case("tests/c.ts", "", "adds (suite A)"),
+        mod.Case("", "a", "b::c"),
+        mod.Case("", "a::b", "c"),
+        mod.Case("", "x", "t"),
+        mod.Case("", "", "solo"),
+        mod.Case(str(outside1), "calc.spec", "adds"),
+        mod.Case(str(outside2), "calc.spec", "adds"),
+        mod.Case("", "s", "skip"),
+        mod.Case("./tests/c.ts", "B", "adds"),
+    }
+    assert len(got) == 10 and set(got) == expected, got
+    assert got[mod.Case("", "x", "t")] == "failed"
+    assert got[mod.Case("", "s", "skip")] == "skipped"
+    assert mod.Case("./tests/c.ts", "B", "adds") in got
+    assert mod._ref(mod.Case("tests/c.ts", "suite A", "adds")) == "tests/c.ts::adds"
+    assert mod._ref(mod.Case("tests/c.ts", "", "adds (suite A)")) == "tests/c.ts::adds (suite A)"
+    assert mod._ref(mod.Case("", "a", "b::c")) == "a::b::c"
+    assert mod._ref(mod.Case("", "", "solo")) == "solo"
+    assert mod._ref(mod.Case(str(outside1), "calc.spec", "adds")) == "calc.spec::adds"
+    assert mod._ref(mod.Case("./tests/c.ts", "B", "adds")) == "./tests/c.ts::adds"
+
+
+@pytest.mark.parametrize("kind,test_file", [
+    ("issue-repro", "tests/calc.test.ts"),
+    ("bracket", "tests/calc.test.ts"),
+    ("concat", None),
+    ("outside-root", None),
+])
+def test_junit_cases_sharing_a_reference_stay_apart_in_the_measurement(render, tmp_path, kind, test_file):
+    """No false green though two cases write the same reference: only the case that went
+    red may turn green. Runs 1, 3 and 4 were green under v2.77.0; run 2 guards the bracket."""
+    out, before = _repo(render, tmp_path)
+    outside1 = str(tmp_path.parent / f"{tmp_path.name}-one/calc.spec")
+    outside2 = str(tmp_path.parent / f"{tmp_path.name}-two/calc.spec")
+    cases = {
+        "issue-repro": [("suite A", test_file, "adds", "fail", "skip"),
+                        ("suite B", test_file, "adds", "pass", "pass")],
+        "bracket": [("suite A", test_file, "adds", "fail", "skip"),
+                    ("", test_file, "adds (suite A)", "pass", "pass")],
+        "concat": [("a", None, "b::c", "fail", "skip"),
+                   ("a::b", None, "c", "pass", "pass")],
+        "outside-root": [("calc.spec", outside1, "adds", "fail", "skip"),
+                         ("calc.spec", outside2, "adds", "pass", "pass")],
+    }[kind]
+    if test_file:
+        _files(out, {test_file: 'it("adds", () => {})\n'})
+    (out / "calc.spec.py").write_text(_junit_runner(cases), encoding="utf-8")
+    r = _tool(out, "--work", "7", "--round", "1", "--before", before, "--junit", "report.xml",
+              "--copy", "calc.spec.py", "--", sys.executable, "calc.spec.py")
+    assert r.returncode == 1 and "proves no fix" in r.stderr, r.stdout + r.stderr
+    assert "Red evidence" not in _journal(out)
+
+
+def test_nested_python_classes_keep_their_whole_chain(render, tmp_path):
+    out, _before = _repo(render, tmp_path)
+    mod = _red_evidence_module(out)
+    report = tmp_path / "r.xml"
+    report.write_text(
+        "<testsuites><testsuite>"
+        "<testcase classname='tests.test_x.TestA.TestInner' file='tests/test_x.py' name='test_y'/>"
+        "<testcase classname='tests.test_x.TestB.TestInner' file='tests/test_x.py' name='test_y'/>"
+        "<testcase classname='TestOne' file='tests/test_x.py' name='test_y'/>"
+        "</testsuite></testsuites>")
+    got = mod.junit_cases(report, out)
+    assert len(got) == 3, got
+    assert mod._ref(mod.Case("tests/test_x.py", "tests.test_x.TestA.TestInner", "test_y")) == \
+        "tests/test_x.py::TestA::TestInner::test_y"
+    assert mod._ref(mod.Case("tests/test_x.py", "tests.test_x.TestB.TestInner", "test_y")) == \
+        "tests/test_x.py::TestB::TestInner::test_y"
+    assert mod._ref(mod.Case("tests/test_x.py", "TestOne", "test_y")) == \
+        "tests/test_x.py::TestOne::test_y"
+
+
+def test_a_v2770_root_cause_line_still_reads_back(render, tmp_path):
+    """The written reference form does not change for lines v2.77.0 wrote."""
+    out, _before = _repo(render, tmp_path)
+    cr, ev = _grammar(out)
+    line = ("ROOT-CAUSE work=7 round=1: add subtracted — sites: calc.py:2 — "
+            "tests/calc.test.ts::adds")
+    m = cr.ROOT_CAUSE_LINE.search(line)
+    _cause, _sites, tests = cr.root_cause_parts(m.group("text"))
+    assert ev.claimed_tests(tests) == [("tests/calc.test.ts", "adds")]
 
 
 def test_an_absolute_junit_file_names_one_test_in_both_trees(render, tmp_path):
