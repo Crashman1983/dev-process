@@ -46,6 +46,7 @@ import re
 import subprocess
 import sys
 from dataclasses import dataclass, field
+from typing import NamedTuple
 from pathlib import Path
 
 from check_review import (
@@ -449,10 +450,38 @@ def _test_file(file: str, tracked: list[str] | None) -> tuple[str | None, str]:
     return None, f"{file} is no tracked file at head"
 
 
+class Resolved(NamedTuple):
+    file: str
+    name: str
+    path: str | None
+    why: str | None
+
+
+def resolve_tests(tests, files: list[str] | None, read, rules: dict) -> list[Resolved]:
+    """The one reading of a test reference — the gate's (`_class_test_problem`) and
+    red_evidence's (`_reference_problem`). `files` is the tracked listing (None: git
+    could not list it); `read(rel)` returns the text at the reviewed side or None."""
+    out: list[Resolved] = []
+    for file, name in claimed_tests(tests):
+        path, why = _test_file(file, files)
+        if path is not None:
+            why = text_status(read(path), path, name, rules)
+        if why is not None and path == file.removeprefix("./"):
+            # the exact path refuses: a pytest id relative to its rootdir (`backend/`) names
+            # the one deeper namesake that holds the test; several stay a guess
+            other = _suffix_hits(path, files or [])
+            if len(other) == 1 and text_status(read(other[0]), other[0], name, rules) is None:
+                why = None
+                path = other[0]
+        out.append(Resolved(file, name, path, why))
+    return out
+
+
 def _class_test_problem(root: Path, head: str, text: str, tracked: list[str] | None,
                         rules: dict) -> str | None:
     """Why one ROOT-CAUSE line's text is no class test, or None: `sites: none — <reason>`,
-    or sites and a test after them that `test_status` finds at head."""
+    or sites and a test after them that `test_status` finds at head (through the one
+    resolver, `resolve_tests`)."""
     _cause, sites, tests = root_cause_parts(text)
     if sites is None:
         return "its ROOT-CAUSE line names no `sites:`"
@@ -460,23 +489,12 @@ def _class_test_problem(root: Path, head: str, text: str, tracked: list[str] | N
         return "its `sites:` segment is empty"
     if sites.lower() == "none":
         return None if _REASON.match(tests) else "`sites: none` without a reason after it"
-    refs = claimed_tests(tests)
-    if not refs:
+    if not claimed_tests(tests):
         return "its ROOT-CAUSE line names no `<path>::<test>` after `sites:`"
-    whys = []
-    for file, name in refs:
-        path, why = _test_file(file, tracked)
-        why = why if path is None else test_status(root, head, path, name, rules)
-        if why is not None and path == file.removeprefix("./"):
-            # the exact path refuses: a pytest id relative to its rootdir (`backend/`) names
-            # the one deeper namesake that holds the test; several stay a guess
-            other = _suffix_hits(path, tracked or [])
-            if len(other) == 1 and test_status(root, head, other[0], name, rules) is None:
-                why = None
-        if why is None:
-            return None
-        whys.append(why)
-    return "; ".join(whys)
+    refs = resolve_tests(tests, tracked, lambda rel: _show(root, head, rel), rules)
+    if any(r.why is None for r in refs):
+        return None
+    return "; ".join(r.why for r in refs)
 
 
 def _class_tests_open(root: Path, head: str, rounds: list[int], texts: list[str], ids: set,
@@ -964,6 +982,16 @@ def claimed_tests(body: str) -> list[tuple[str, str]]:
 
 
 
+def text_status(text: str | None, file: str, name: str, rules: dict) -> str | None:
+    """None: the named test stands in `text` where the runner collects it and is not
+    switched off; else why not. `None` text is a file that does not exist there."""
+    if text is None:
+        return f"{file} does not exist at head"
+    if file.endswith(".py"):
+        return _python_status(text, file, name, rules)
+    return _other_status(text, file, name, rules)
+
+
 def test_status(root: Path, head: str, file: str, name: str, rules: dict) -> str | None:
     """None: the named test stands at head where the runner collects it and is not
     switched off; else why not. Which files are tests is the project's declaration
@@ -971,12 +999,7 @@ def test_status(root: Path, head: str, file: str, name: str, rules: dict) -> str
     guess from names (#225 refute: Xcode's `FooTests/…Tests.swift` read as no test).
     Python as pytest collects it; any other language by the declaring line and its
     body (a named residual: a runner's own rules beyond these are not modelled)."""
-    text = _show(root, head, file)
-    if text is None:
-        return f"{file} does not exist at head"
-    if file.endswith(".py"):
-        return _python_status(text, file, name, rules)
-    return _other_status(text, file, name, rules)
+    return text_status(_show(root, head, file), file, name, rules)
 
 
 def gather(root: Path, *, work: str, ids: set[str], tier: int, verdict: str, independence: str,
