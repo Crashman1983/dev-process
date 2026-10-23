@@ -9,6 +9,19 @@ ein Eintrag ohne Plan oder Issue hat keine Details-Zeile. In wenigen Sätzen je 
 English version: [CHANGELOG.md](CHANGELOG.md). Die Releases vor v2.28.2:
 [docs/changelog-archive-DE.md](docs/changelog-archive-DE.md).
 
+## v2.77.1 — Fixes aus der v2.77.0-Übernahme · 2026-10-23
+
+**Warum.** v2.77.0 konnte einen Fix als belegt melden, obwohl kein einzelner Test von Rot auf Grün ging: Zwei JUnit-Fälle mit gleicher Datei und gleichem Namen, aber verschiedenen Klassen wurden zu einem verschmolzen, sodass ein rot-dann-übersprungener Fall neben einem immer grünen grün aussah. Daneben stürzte `process_kpis.py findings` an jeder FINDING-Zeile ab, das Review-Bundle nannte für eine zweite Linse auf einem blockierten Kopf die nächste Runde, und der Docstring des Plan-Gates beschrieb eine lockerere Transitions-Überschrift als das Gate erzwingt.
+
+**Was sich ändert.**
+- `red_evidence` hält JUnit-Fälle nach Datei, Klasse und Name getrennt und verweigert eine geschriebene Testreferenz, die das Gate wie einen anderen Fall des Laufs liest, oder — mit `--sites` — nicht als diesen Test; verschachtelte Python-Klassen behalten die ganze Kette. Die Referenzform für andere Sprachen bleibt unverändert.
+- `process_kpis.py findings` endet mit Exit 0 und zählt verschiedene Arbeiten; das Bundle nennt die blockierte Runde, die `--round` bei attest annimmt; der Docstring nennt die Transitions-Regel ab Ebene 2.
+- Die Regel der Linsen-Runde liegt jetzt in `attest.py`; Bundle und Codex-Übergabe teilen sie.
+
+**Update.** Keine Schritte.
+
+Details: [Plan](docs/analysis/2026-10-23-v2.77.1.md) #303
+
 ## v2.77.0 — Pläne entscheiden den Zustandsraum, Fix-Runden schließen die Klasse · 2026-10-22
 
 **Warum.** In Kennis Review-Historie (510 Issues, 808 Runden) waren in den längsten Arbeiten 39 % der blockierenden Befunde Plan-Lücken und 35 % kamen aus dem Fix der Vorrunde; Review-Rauschen gab es keines. Fix-induzierte Fehler wuchsen mit der Größe des Fix-Durchgangs (6–9 Befunde: 46 % der Folgerunden blockierten erneut, ab 10: 86 %), und ein roter Test vorab senkte sie nicht (41 % gegen 40 %). Regel 4, „Inkrement oder Neubau“ ab dem zweiten Block, war Prosa; attest las ROOT-CAUSE nur im Plan, obwohl `red_evidence` es ins Journal schreibt; und eine Pflicht-Tatsache, die Git nicht bestimmen konnte, fiel bei allen außer zwei Tatsachen still weg.

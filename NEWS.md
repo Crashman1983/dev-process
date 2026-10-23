@@ -7,6 +7,10 @@ details are in the [CHANGELOG](CHANGELOG.md).
 
 Deutsche Fassung: [NEWS-DE.md](NEWS-DE.md).
 
+## v2.77.1 — A fix is only proven by the test that actually turned green
+
+A test report could make a fix look proven when no single test had gone from failing to passing: two tests with the same name in one file were treated as one. Test reports are now kept apart by file, class and name, and a test reference that another test also claims is refused. The telemetry report no longer crashes on a finding line, a review bundle names the round another reviewer already blocked, and the plan check's description matches the rule it enforces.
+
 ## v2.77.0 — Plans decide more up front, fixes close the whole class
 
 Most extra review rounds came from gaps in the plan or from the previous fix. A plan for work with states, lifecycles or parsers now carries a table of states with a test per row, and the plan review asks for what is missing there. After a second blocked round the plan records whether to patch again or rebuild, and every fix names the places it checked and the test that covers them. A new report shows whether this lowers the rounds a piece of work needs.
