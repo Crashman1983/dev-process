@@ -1061,6 +1061,46 @@ def test_todays_journal_evidence_is_committed_with_the_attestation(repo):
     assert "ROOT-CAUSE work=widget round=1" in _git(repo, "show", f"HEAD:{SHARD}")
 
 
+EVIDENCE_QUOTATIONS = [
+    ("four spaces", lambda line: "    " + line),
+    ("a tab", lambda line: "\t" + line),
+    ("a fence", lambda line: "```\n" + line + "\n```"),
+    ("an HTML comment", lambda line: "<!--\n" + line + "\n-->"),
+]
+
+
+@pytest.mark.parametrize("form,quote", EVIDENCE_QUOTATIONS, ids=[c[0] for c in EVIDENCE_QUOTATIONS])
+@pytest.mark.parametrize("kind,line", [
+    ("a ROOT-CAUSE line",
+     "ROOT-CAUSE work=widget round=1: the guard read a stale flag — sites: none — "
+     "refuted, the finding misread the guard"),
+    ("a class-test skip", "skipped class-test work=widget: blocked before v2.77"),
+], ids=["root-cause", "skip"])
+def test_a_committed_quotation_is_no_origin_for_an_uncommitted_evidence_line(
+        repo, kind, line, form, quote):
+    """#308 R2: the origin reader validated nothing — it normalized the committed
+    quotation away and matched the real, uncommitted line against it. Both sides now
+    run the same evidence reader, so a quotation at head grants no origin."""
+    _append(repo, SHARD, _review("widget", 1), commit="docs: block")
+    _append(repo, OLDER_SHARD, quote(line), commit="docs: the quoted example")
+    _append(repo, OLDER_SHARD, line)  # the real line, never committed
+    r = _pass(repo)
+    assert r.returncode == 1, r.stderr
+    assert OLDER_SHARD in r.stderr and "neither at" in r.stderr, r.stderr
+
+
+@pytest.mark.parametrize("prefix", ["", "   ", "- ", "* "], ids=["raw", "three-spaces", "bullet", "star"])
+def test_a_committed_evidence_line_still_counts_in_the_forms_the_reader_accepts(repo, prefix):
+    """The same reader on the attestation's snapshot accepts a real record however it
+    is written in the journal (a list marker or up to three spaces); four spaces or a
+    tab are a quotation, not a record."""
+    _append(repo, SHARD, _review("widget", 1), commit="docs: block")
+    _append(repo, SHARD, prefix + "skipped class-test work=widget: annotated in the journal",
+            commit="docs: the journal skip")
+    r = _pass(repo)
+    assert r.returncode == 0, r.stderr
+
+
 def test_a_block_already_at_the_fork_point_is_no_round_of_this_branch(repo):
     """An earlier work of the same issue blocked round 1 on main: this branch's rounds are 2
     and 3 — round 2 is its first (no REPLAN), and round 1 owes it no class test."""

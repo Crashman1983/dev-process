@@ -17,10 +17,12 @@ Two steps, one owner:
   only as the review gate counts it: records appended after the plan's last
   line ride the attestation (`check_review.records_only`) and count when the
   plan rides `--with`; anything else must be at head. One exception (v2.77):
-  the blocked code rounds a branch adds and its journal's ROOT-CAUSE and skip
-  lines are read in the worktree, as the round counter reads them, less what
-  the fork point already holds (`_branch_records`); a journal skip lifts only
-  the per-round duties (`JOURNAL_SKIPS`).
+  the blocked code rounds a branch adds are read in the worktree, as the
+  round counter reads them, less what the fork point already holds; its
+  journal ROOT-CAUSE and skip lines are read by the same evidence readers
+  from one snapshot — head plus the files the attestation commits — less the
+  fork (`_branch_records`); a journal skip lifts only the per-round duties
+  (`JOURNAL_SKIPS`).
 - `decide()` is a pure decision table over what was gathered.
 
 Grammar and rules stay with their owners: `check_review` (REFUTE and skip
@@ -340,11 +342,14 @@ def _fix_streak(root: Path, base: str | None, head: str | None) -> int | None:
 
 
 # --- what the branch adds: blocked code rounds and journal records (v2.77) ---------
-# A record line is the branch's when its content is absent from every record file at the
-# fork point — compared by content, wherever the line went: `compact_journal` folding a
-# shard into `archive/` makes no old line new, a rebase keeps a line the branch's, and a
-# merge of main moves the fork along (plan review rounds 3–4). An earlier work of the same
-# issue, already on main, lends this one neither its blocks nor its skips and causes.
+# A blocked round is the branch's when its line's content is absent from every record file
+# at the fork point — compared by content, wherever the line went: `compact_journal` folding
+# a shard into `archive/` makes no old line new, a rebase keeps a line the branch's, and a
+# merge of main moves the fork along (plan review rounds 3–4). Journal evidence is read by
+# the evidence readers on both sides of that fork, from the snapshot the attestation writes
+# (head plus today's shard/--with), never by a second content normalization. An earlier work
+# of the same issue, already on main, lends this one neither its blocks nor its skips and
+# causes.
 
 # the skips a branch's journal may carry: the per-round duties (`replan`, `class-test`) whose
 # ROOT-CAUSE lines the journal holds too; `ac-trace`, `cross-model`, `refute` and every other
@@ -377,8 +382,8 @@ def _fork(root: Path, head: str) -> str | None:
     return "" if contained else None
 
 
-def _journal_dir_at(root: Path, fork: str, journal_dir: Path | None) -> list[str] | None:
-    """The texts of the attested `--journal-dir`'s files at the fork point, where it lies in
+def _journal_dir_at(root: Path, ref: str, journal_dir: Path | None) -> list[tuple[str, str]] | None:
+    """The (path, text) of the attested `--journal-dir`'s files at `ref`, where it lies in
     the repository apart from the journal `record_texts` reads there anyway; None when git
     cannot read them."""
     if journal_dir is None:
@@ -386,50 +391,106 @@ def _journal_dir_at(root: Path, fork: str, journal_dir: Path | None) -> list[str
     try:
         rel = journal_dir.resolve().relative_to(root.resolve()).as_posix()
     except ValueError:
-        return []  # outside the repository: nothing of it at the fork point
+        return []  # outside the repository: nothing of it at the ref
     if rel == JOURNAL_DIR or rel.startswith(JOURNAL_DIR + "/"):
         return []
-    r = _git(root, "ls-tree", "-r", "-z", "--name-only", fork, "--", rel)
+    r = _git(root, "ls-tree", "-r", "-z", "--name-only", ref, "--", rel)
     if r.returncode != 0:
         return None
     out = []
     for name in (n for n in r.stdout.split("\0") if n.endswith(".md")):
-        text = _show(root, fork, name)
+        text = _show(root, ref, name)
         if text is None:
             return None
-        out.append(text)
+        out.append((name, text))
     return out
 
 
-def _at_fork(root: Path, fork: str, journal_dir: Path | None = None) -> tuple[set[str], set[str]] | None:
-    """The contents of every line of every record file at the fork point (the journal with
-    its archive, the attested `--journal-dir`, the plans), each read as the worktree side it
-    is compared with: (as the round counter reads blocks — a journal less its fences, a plan
-    as rendered, `attest._texts` —, as the journal records are read — `readable`). A line
-    quoted in a fence on main is no line of the fork: it hides no real line of the branch.
-    None when git cannot read them."""
-    texts = record_texts(root, RECORD_KINDS, ref=fork)
-    extra = _journal_dir_at(root, fork, journal_dir) if texts is not None else None
-    if texts is None or extra is None:
-        return None
-    journal = [text for rel, text in texts if record_kind(rel) == "journal"] + extra
-    plans = [text for rel, text in texts if record_kind(rel) != "journal"]
-
-    def contents(views: list[str]) -> set[str]:
-        return {_content(ln) for text in views for ln in text.splitlines() if ln.strip()}
-    return (contents([_unfenced(t) for t in journal] + [readable(t) for t in plans]),
-            contents([readable(t) for t in journal + plans]))
-
-
-def _journal_contents(root: Path, ref: str, journal_dir: Path | None) -> set[str] | None:
-    """The contents of every journal line at `ref`, as the journal records are read —
-    the set a worktree line must be in to be committed already (#308). None: unreadable."""
+def _journal_at(root: Path, ref: str, journal_dir: Path | None) -> dict[str, str] | None:
+    """The journal record files at `ref`, by path: the repository journal and the attested
+    `--journal-dir`. None when git cannot read them."""
     texts = record_texts(root, ("journal",), ref=ref)
     extra = _journal_dir_at(root, ref, journal_dir) if texts is not None else None
     if texts is None or extra is None:
         return None
-    views = [text for _rel, text in texts] + extra
-    return {_content(ln) for text in views for ln in readable(text).splitlines() if ln.strip()}
+    return dict(texts) | dict(extra)
+
+
+def _at_fork(root: Path, fork: str, journal_dir: Path | None = None
+             ) -> tuple[set[str], list[str]] | None:
+    """(the contents of every line at the fork point as the round counter reads blocks, the
+    journal texts there for the evidence readers). The blocks are read as `attest._texts`
+    reads them — a journal less its fences, a plan as rendered; a line quoted in a fence on
+    main is no line of the fork: it hides no real line of the branch. None when git cannot
+    read them."""
+    texts = record_texts(root, RECORD_KINDS, ref=fork)
+    extra = _journal_dir_at(root, fork, journal_dir) if texts is not None else None
+    if texts is None or extra is None:
+        return None
+    journal = [text for rel, text in texts if record_kind(rel) == "journal"] + [
+        text for _rel, text in extra]
+    plans = [text for rel, text in texts if record_kind(rel) != "journal"]
+
+    def contents(views: list[str]) -> set[str]:
+        return {_content(ln) for text in views for ln in text.splitlines() if ln.strip()}
+    return (contents([_unfenced(t) for t in journal] + [readable(t) for t in plans]), journal)
+
+
+def _journal_snapshot(root: Path, head: str, journal_dir: Path | None,
+                      carried: set[Path] | None) -> list[str] | None:
+    """The journal texts this attestation writes: the journal at `head`, with every file it
+    commits (`carried`: today's shard, `--with`) read from the worktree instead. None when
+    a file it must read cannot be read."""
+    files = _journal_at(root, head, journal_dir)
+    if files is None:
+        return None
+    root = root.resolve()
+    jrel = ""
+    if journal_dir is not None:
+        try:
+            jrel = journal_dir.resolve().relative_to(root).as_posix()
+        except ValueError:
+            pass
+    for p in carried or ():
+        p = p.resolve()
+        try:
+            rel = p.relative_to(root).as_posix()
+        except ValueError:
+            continue  # outside the repository: attest does not commit it
+        if record_kind(rel) != "journal" and not (
+                jrel and (rel == jrel or rel.startswith(jrel + "/"))):
+            continue  # a plan or report: no journal evidence
+        if not p.is_file():
+            continue  # today's shard may not exist yet; attest writes it after the check
+        try:
+            files[rel] = p.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return None
+    return list(files.values())
+
+
+def _evidence_keys(line: str, plan_ids: set, skip_ids: set) -> frozenset:
+    """The evidence one rendered line carries, as the readers count it: this work's
+    ROOT-CAUSE lines and the skip kinds the journal may lift (`JOURNAL_SKIPS`). The keys
+    are the readers' own parsed fields, so a quotation the reader rejects carries none."""
+    keys = set()
+    for m in ROOT_CAUSE_LINE.finditer(line):
+        if _binds(m.group("work"), plan_ids):
+            keys.add(("root-cause", m.group("work"), int(m.group("round")),
+                      m.group("text").strip()))
+    for m in SKIP_LINE.finditer(line):
+        if _binds(m.group("work"), skip_ids):
+            kind = _skip_kind(m)
+            if kind in JOURNAL_SKIPS:
+                keys.add(("skip", kind, m.group("work"), m.group("reason").strip()))
+    return frozenset(keys)
+
+
+def _journal_keys(texts: list[str], plan_ids: set, skip_ids: set) -> set:
+    """Every evidence key the readers find in `texts`, as rendered (fences and comments
+    removed)."""
+    return {key for text in texts for line in readable(text).splitlines()
+            for key in _evidence_keys(line, plan_ids, skip_ids)}
 
 
 def _branch_records(root: Path, head: str, blocks: list[tuple[int, str]] | None,
@@ -439,24 +500,28 @@ def _branch_records(root: Path, head: str, blocks: list[tuple[int, str]] | None,
     """(the blocked code rounds the branch adds, its journal records, refusals). The rounds
     are those of `blocks` — `attest.block_lines`, the set the round counter counts (journal
     and plans in the worktree, uncommitted lines too) — less the lines present at the fork
-    point; None: unknown. The journal records are the worktree journal's lines absent there,
-    as rendered (a fenced or commented line is no record), but only those already at head or
-    in a file this attestation carries (`carried`: today's shard, `--with`); a ROOT-CAUSE or
-    skip only in another uncommitted file is refused by name, never silently counted. The
-    refusal reads the same set as `_root_caused`/`_skips`: this work's ROOT-CAUSE and the
-    skip kinds the journal counts (`JOURNAL_SKIPS`), so foreign work and kinds read only
-    from the plan stay invisible."""
+    point; None: unknown. The journal records are read by the same evidence readers from
+    the one snapshot this attestation fixes — the journal at head plus the files it commits
+    (`carried`: today's shard, `--with`) — less what the fork already holds; what that run
+    yields counts, nothing else. A worktree evidence line absent from that snapshot is
+    refused by name, never silently counted. The refusal reads the same set as
+    `_root_caused`/`_skips`: this work's ROOT-CAUSE and the skip kinds the journal counts
+    (`JOURNAL_SKIPS`), so foreign work and kinds read only from the plan stay invisible."""
     fork = _fork(root, head)
     if fork == "":
         return [], "", ()
     old = _at_fork(root, fork, journal_dir) if fork is not None else None
-    head_records = _journal_contents(root, head, journal_dir)
-    if old is None or blocks is None or head_records is None:
+    snapshot = _journal_snapshot(root, head, journal_dir, carried)
+    if old is None or blocks is None or snapshot is None:
         return None, "", ()
-    old_blocks, old_records = old
+    old_blocks, old_journal = old
     rounds = sorted({r for r, line in blocks if _content(line) not in old_blocks})
-    carried = {p.resolve() for p in carried or ()}
-    new: list[str] = []
+    fork_keys = _journal_keys(old_journal, plan_ids, skip_ids)
+    rendered = [line for text in snapshot for line in readable(text).splitlines()]
+    snapshot_keys = {key for line in rendered
+                     for key in _evidence_keys(line, plan_ids, skip_ids)}
+    new_keys = snapshot_keys - fork_keys
+    new = [line for line in rendered if _evidence_keys(line, plan_ids, skip_ids) & new_keys]
     problems: list[str] = []
     for rel, f in record_files(root, ("journal",), journal_dir=journal_dir):
         try:
@@ -464,12 +529,8 @@ def _branch_records(root: Path, head: str, blocks: list[tuple[int, str]] | None,
         except OSError:
             return None, "", ()
         for n, line in enumerate(readable(text).splitlines(), 1):
-            if not line.strip() or _content(line) in old_records:
-                continue
-            new.append(line)
-            if _content(line) in head_records or f.resolve() in carried:
-                continue
-            if _bound_root_cause(line, plan_ids) or (_bound_skips(line, skip_ids) & JOURNAL_SKIPS):
+            missing = _evidence_keys(line, plan_ids, skip_ids) - fork_keys - snapshot_keys
+            if missing:
                 problems.append(
                     f"{rel}:{n}: `{line.strip()}` is neither at {head[:12]} nor carried by this "
                     f"attestation — commit it, or pass {rel} with --with")
