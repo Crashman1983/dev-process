@@ -181,6 +181,91 @@ def test_template_file_reads_never_leave_the_root_on_any_os(tmp_path, rel):
         mod._file(root, rel)
 
 
+_WRITE_SEAM_RUNNER = '''
+import json, os, sys
+sys.path.insert(0, sys.argv[1])
+import attest
+spec = json.loads(sys.argv[2])
+fired = []
+if spec.get("no_pread") and hasattr(os, "pread"):
+    del os.pread  # the lseek + read branch, as on Windows
+if spec.get("seam") and hasattr(attest, "_write_seam"):
+    inner = attest._write_seam
+
+    def seam(stage):
+        inner(stage)
+        if stage == spec["seam"] and not fired:
+            fired.append(stage)
+            rel = spec["swap"]
+            with open(rel + ".swap", "wb") as fh:
+                fh.write(spec["bytes"].encode())
+            os.replace(rel + ".swap", rel)  # rename-over: a new file at the path, no symlink
+            print("SEAM-FIRED", stage, file=sys.stderr, flush=True)
+    attest._write_seam = seam
+sys.argv = ["attest.py", *sys.argv[3:]]
+raise SystemExit(attest.main())
+'''
+
+
+def _smoke_git(root, *args):
+    return subprocess.run(["git", *args], cwd=root, capture_output=True, text=True,
+                          check=True).stdout.strip()
+
+
+_RED = pytest.mark.xfail(strict=True, reason="#308 fix round 6: the write seam is missing before the change")
+
+
+@pytest.mark.parametrize("case", [pytest.param("swapped", marks=_RED),
+                                  pytest.param("swapped without pread", marks=_RED), "plain commit"])
+def test_attest_write_primitives_hold_on_this_os(tmp_path, case):
+    """#308 fix round 6 (I4, I11, design §8): the write phase checks today's shard through
+    the descriptor it appends with — `(st_dev, st_ino)` and the bytes (`os.pread`, else
+    `lseek` + `read`). Here in the portable smoke, without symlinks and without a render:
+    a shard renamed over at `worktree-checked` is refused and both files keep their bytes;
+    a plain `--commit` carries the line and leaves the status clean."""
+    import datetime as dt
+    import json
+    import os
+    scripts = Path(__file__).parents[1] / "template/scripts/process"
+    root = tmp_path / "repo"
+    root.mkdir()
+    _smoke_git(root, "init", "-q", "-b", "main")
+    _smoke_git(root, "config", "user.email", "t@t")
+    _smoke_git(root, "config", "user.name", "t")
+    _smoke_git(root, "config", "core.autocrlf", "false")
+    (root / "README.md").write_text("smoke\n", encoding="utf-8")
+    _smoke_git(root, "add", "-A")
+    _smoke_git(root, "commit", "-q", "-m", "base")
+    _smoke_git(root, "checkout", "-q", "-b", "7-smoke")
+    shard = f".process-work/journal/issue-7/{dt.date.today().isoformat()}.md"
+    (root / shard).parent.mkdir(parents=True)
+    (root / shard).write_bytes(b"# today\n")
+    _smoke_git(root, "add", "-A")
+    _smoke_git(root, "commit", "-q", "-m", "docs: today's shard")
+    old = _smoke_git(root, "rev-parse", "HEAD")
+    swapped = b"# today, renamed over by another process\n"
+    spec = {} if case == "plain commit" else {
+        "seam": "worktree-checked", "swap": shard, "bytes": swapped.decode(),
+        "no_pread": case == "swapped without pread"}
+    runner = tmp_path / "write_seam_runner.py"
+    runner.write_text(_WRITE_SEAM_RUNNER, encoding="utf-8")
+    r = subprocess.run([sys.executable, str(runner), str(scripts), json.dumps(spec),
+                        "--work", "smoke", "--tier", "1", "--model", "m", "--independence", "bundle",
+                        "--verdict", "pass", "--commit", str(root)],
+                       cwd=root, capture_output=True, text=True,
+                       env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
+    if case == "plain commit":
+        assert r.returncode == 0, r.stdout + r.stderr
+        assert "REVIEW work=smoke" in _smoke_git(root, "show", f"HEAD:{shard}")
+        assert _smoke_git(root, "status", "--porcelain") == ""
+        return
+    assert "SEAM-FIRED worktree-checked" in r.stderr, "seam never ran:\n" + r.stdout + r.stderr
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert (root / shard).read_bytes() == swapped
+    assert _smoke_git(root, "rev-parse", "HEAD") == old
+    assert _smoke_git(root, "show", f"HEAD:{shard}") == "# today"
+
+
 @pytest.mark.parametrize("module, script", [
     ("arch_onboarding", "check_architecture.py"), ("github_issues", "check_issues.py")])
 def test_a_gate_that_imports_yaml_declares_it(render, tmp_path, module, script):

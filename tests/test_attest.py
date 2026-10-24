@@ -868,3 +868,71 @@ def test_archive_takes_only_this_works_plan(render, tmp_path, target):
 
     assert r.returncode == 1 and "REFUSED" in r.stderr, r.stderr
     assert (out / target).is_file()
+
+
+# --- #308 fix round 6: the archive is no step of attest (design §10) ---
+# RED: red against the product code of 032f2cb (log `.process-work/tmp/red-308-r6.log`)
+RED = pytest.mark.xfail(strict=True, reason="#308 fix round 6: red before the change")
+
+
+@RED
+@pytest.mark.parametrize("kind", ["active", "spec-kit"])
+def test_archive_is_refused_and_names_the_way(render, tmp_path, kind):
+    """Every archive variant opened a loss window in the worktree; `attest` moves no plan.
+    `--archive` refuses before any read and names the way: attest, then a `git mv` commit."""
+    out, base, head = _repo(render, tmp_path)
+    plan, dest = ".process-work/plans/2026-09-10-widget.md", ".process-work/plans/archive/2026-09-10-widget.md"
+    if kind == "spec-kit":
+        plan, dest = "specs/003-login/plan.md", ".process-work/plans/archive/003-login.md"
+        (out / plan).parent.mkdir(parents=True)
+        (out / plan).write_text("# Plan\n\ntier: 2\n\nAC-1: still 42.\n")
+        _git(out, "add", "-A")
+        _git(out, "commit", "-q", "-m", "spec")
+        head = _git(out, "rev-parse", "HEAD").stdout.strip()
+    before = _git(out, "rev-parse", "HEAD").stdout, _git(out, "ls-files", "-s").stdout
+
+    r = _attest(out, "--base", base, "--head", head, "--archive", plan, "--commit")
+
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert f"git mv {plan} {dest}" in r.stderr, r.stderr
+    assert not (out / ".process-work/journal").exists() or not list((out / ".process-work/journal").rglob("*.md"))
+    assert (_git(out, "rev-parse", "HEAD").stdout, _git(out, "ls-files", "-s").stdout) == before
+    assert (out / plan).is_file() and not (out / dest).exists()
+
+
+@RED
+def test_blocked_round_at_walks_through_a_pure_archive_commit(render, tmp_path):
+    """A lens built after the plan's own archive commit still sees the round another lens
+    blocked: a commit that only moves plans (`D rel` + `A archive_rel(rel)`, the same blob)
+    is walked through like an attest commit. An archive commit that changes the plan is a
+    fix: the chain stops there."""
+    import argparse
+    import importlib
+    out, base, head = _repo(render, tmp_path)
+    plan, archived = ".process-work/plans/2026-09-10-widget.md", ".process-work/plans/archive/2026-09-10-widget.md"
+    r = _attest(out, "--base", base, "--head", head, "--verdict", "block", "--commit")
+    assert r.returncode == 0, r.stderr
+    (out / archived).parent.mkdir(parents=True, exist_ok=True)
+    _git(out, "mv", plan, archived)
+    _git(out, "commit", "-q", "-m", "docs: archive the plan")
+    tip = _git(out, "rev-parse", "HEAD").stdout.strip()
+    _git(out, "checkout", "-q", "-b", "changed", f"{tip}^")
+    _git(out, "mv", plan, archived)
+    (out / archived).write_text(PLAN + "\n- one more task\n")
+    _git(out, "commit", "-qam", "docs: archive and change the plan")
+    changed = _git(out, "rev-parse", "HEAD").stdout.strip()
+    _git(out, "checkout", "-q", "feature")
+    names = ("attest", "attest_evidence", "check_review", "check_fix_streak", "dispatch", "report",
+             "process_git", "required_records")
+    sys.path.insert(0, str(out / "scripts/process"))
+    try:
+        for name in names:
+            sys.modules.pop(name, None)
+        attest = importlib.import_module("attest")
+        ns = argparse.Namespace(work="widget")
+        assert attest.blocked_round_at(out, ns, tip) == 1
+        assert attest.blocked_round_at(out, ns, changed) is None
+    finally:
+        sys.path.remove(str(out / "scripts/process"))
+        for name in names:
+            sys.modules.pop(name, None)

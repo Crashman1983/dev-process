@@ -53,6 +53,52 @@ def test_a_symlinked_journal_shard_is_refused_before_the_run(render, tmp_path):
     assert "symlink" in r.stderr and "issue-7" in r.stderr, r.stderr
 
 
+_SWAP_DURING_MEASURE = '''
+import os, sys
+sys.path.insert(0, sys.argv[1])
+import red_evidence
+shard, outside = sys.argv[2], sys.argv[3]
+measured = red_evidence.measure
+
+
+def measure_then_swap(*a, **k):
+    out = measured(*a, **k)
+    os.symlink(outside, shard + ".lnk")
+    os.replace(shard + ".lnk", shard)
+    print("SWAPPED", file=sys.stderr, flush=True)
+    return out
+
+
+red_evidence.measure = measure_then_swap
+raise SystemExit(red_evidence.main(sys.argv[4:]))
+'''
+
+
+@pytest.mark.xfail(strict=True, reason="#308 fix round 6: red before the change (6.5b)")
+@pytest.mark.skipif(not hasattr(os, "symlink"), reason="needs symlinks")
+def test_a_shard_swapped_during_the_measurement_is_not_followed(render, tmp_path, tmp_path_factory):
+    """#308 sweep (§9): the path was checked before the measurement and opened by name after
+    it — a symlink swapped in meanwhile led the append outside the repository. The append
+    goes through the checked descriptor (`append_checked`): refused, the outside file intact."""
+    out, before = _repo(render, tmp_path)
+    shard = out / ".process-work/journal/issue-7" / f"{dt.date.today().isoformat()}.md"
+    shard.parent.mkdir(parents=True, exist_ok=True)
+    shard.write_text("# today\n", encoding="utf-8")
+    outside = tmp_path_factory.mktemp("outside") / "outside.md"
+    outside.write_text("OUTSIDE\n", encoding="utf-8")
+    runner = tmp_path_factory.mktemp("runner") / "swap_runner.py"
+    runner.write_text(_SWAP_DURING_MEASURE, encoding="utf-8")
+    r = subprocess.run([sys.executable, str(runner), str(out / "scripts/process"), str(shard), str(outside),
+                        "--work", "7", "--round", "1", "--before", before,
+                        "--cause", "add subtracted instead of adding", "--",
+                        sys.executable, "-m", "pytest", "test_calc.py"],
+                       cwd=out, capture_output=True, text=True,
+                       env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
+    assert "SWAPPED" in r.stderr, r.stdout + r.stderr
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert outside.read_text(encoding="utf-8") == "OUTSIDE\n"
+
+
 def test_writes_the_measured_block_and_the_root_cause_line(render, tmp_path):
     out, before = _repo(render, tmp_path)
 

@@ -2,12 +2,16 @@
 cross-model or a reasoned single-family, a refute for gate code, one test per
 acceptance criterion, a plan reviewer not below the plan session's class, and
 the plan's own lines committed before the attested head."""
+import argparse
+from collections import Counter
+import contextlib
 import datetime as dt
 import importlib
 import inspect
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 
@@ -1141,7 +1145,9 @@ from pathlib import Path
 sys.path.insert(0, sys.argv[1])
 import attest
 mutations = json.loads(sys.argv[2])
-taken = attest.attestation_files
+# the seam S1 (#308 fix round 6): the one snapshot; before it existed, the file set
+seam = "snapshot" if hasattr(attest, "snapshot") else "attestation_files"
+taken = getattr(attest, seam)
 
 
 def taken_then_mutated(*args, **kwargs):
@@ -1158,7 +1164,7 @@ def taken_then_mutated(*args, **kwargs):
     return out
 
 
-attest.attestation_files = taken_then_mutated
+setattr(attest, seam, taken_then_mutated)
 sys.argv = ["attest.py", *sys.argv[3:]]
 raise SystemExit(attest.main())
 '''
@@ -1764,3 +1770,860 @@ def test_a_fork_line_with_list_marker_and_trailing_blanks_is_the_same_line(repo)
     _append(repo, SHARD, _review("widget", 1), "skipped class-test work=7: old")
     r = _pass(repo)
     assert r.returncode == 1 and CLASS_TEST + "1 (no ROOT-CAUSE line)" in r.stderr, r.stderr
+
+
+# --- #308 fix round 6: the snapshot as objects, a locked write phase (design §5–§10) ------------
+#
+# One generic runner for both seams: S1 wraps the one snapshot (`attest.snapshot`; before it
+# existed, `attest.attestation_files`), S2 is `attest._write_seam(stage)`. Each test asserts its
+# seam fired (`SEAM-FIRED <stage>`), so a missing seam is red, never a silent pass.
+#
+# RED: red against the product code of 032f2cb (log `.process-work/tmp/red-308-r6.log`); each
+# later task of the plan drops the marker of the tests it turns green.
+RED = pytest.mark.xfail(strict=True, reason="#308 fix round 6: red before the change")
+
+_SEAM_RUNNER = r'''
+import json, os, shutil, subprocess, sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+import attest
+import attest_evidence
+import check_review
+spec = json.loads(sys.argv[2])
+ROOT = os.path.realpath(".")
+GIT_DIR = subprocess.run(["git", "rev-parse", "--absolute-git-dir"], capture_output=True,
+                         text=True).stdout.strip()
+real = {"open": os.open, "replace": os.replace, "rename": os.rename, "unlink": os.unlink,
+        "read_text": Path.read_text, "read_bytes": Path.read_bytes}
+
+
+def say(*words):
+    print(*words, file=sys.stderr, flush=True)
+
+
+def full(p, dir_fd=None):
+    try:
+        p = os.fsdecode(os.fspath(p))
+    except TypeError:
+        return None
+    if dir_fd is not None and not os.path.isabs(p):
+        p = os.path.join(os.readlink(f"/proc/self/fd/{dir_fd}"), p)
+    return os.path.abspath(p)
+
+
+def rel_of(p, dir_fd=None):
+    p = full(p, dir_fd)
+    if p is None:
+        return None
+    if p == ROOT:
+        return "."
+    return os.path.relpath(p, ROOT).replace(os.sep, "/") if p.startswith(ROOT + os.sep) else None
+
+
+def act(actions):
+    for op, rel, *arg in actions:
+        p = Path(rel)
+        if op in ("add", "remove", "replace"):
+            if op == "remove" and not os.path.isfile(rel):
+                continue
+            old = real["read_text"](p, encoding="utf-8") if os.path.isfile(rel) else ""
+            new = {"add": old + (arg[0] if arg else ""),
+                   "remove": "".join(ln for ln in old.splitlines(True) if arg[0] not in ln),
+                   "replace": arg[0] if arg else ""}[op]
+            p.parent.mkdir(parents=True, exist_ok=True)
+            fresh = p.with_name(p.name + ".new")
+            fresh.write_text(new, encoding="utf-8")
+            real["replace"](fresh, p)  # a new file at the path, not an edit
+        elif op == "append":  # in place: the same inode
+            with open(rel, "a", encoding="utf-8") as fh:
+                fh.write(arg[0])
+        elif op == "new":
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(arg[0], encoding="utf-8")
+        elif op == "delete":
+            if os.path.lexists(rel):
+                real["unlink"](rel)
+        elif op == "symlink":
+            os.symlink(arg[0], rel + ".lnk")
+            real["replace"](rel + ".lnk", rel)
+        elif op == "dir-symlink":
+            moved = rel.rstrip("/") + "-moved"
+            real["rename"](rel, moved)
+            os.symlink(os.path.basename(moved), rel, target_is_directory=True)
+        elif op == "swap-inode":  # the same bytes under a new inode (rename-over)
+            Path(rel + ".swap").write_bytes(real["read_bytes"](p))
+            real["replace"](rel + ".swap", rel)
+        elif op == "stage":  # another process stages other bytes, then restores the worktree
+            orig = real["read_bytes"](p)
+            with open(rel, "r+b") as fh:
+                fh.write(orig + arg[0].encode())
+                fh.truncate()
+            say("SEAM-GIT", subprocess.run(["git", "add", "--", rel], capture_output=True).returncode)
+            with open(rel, "r+b") as fh:
+                fh.write(orig)
+                fh.truncate()
+        elif op == "git":
+            say("SEAM-GIT", subprocess.run(["git", rel, *arg], capture_output=True).returncode)
+
+
+def caller():
+    f, names = sys._getframe(2), []
+    while f is not None and len(names) < 5:
+        names.append(f.f_code.co_name)
+        f = f.f_back
+    return "<-".join(names)
+
+
+ALLOWED = set(spec.get("allowed_readers", []))
+
+
+def allowed():
+    f = sys._getframe(2)
+    while f is not None:
+        if f.f_code.co_name in ALLOWED:
+            return True
+        f = f.f_back
+    return False
+
+
+def forbid_reads():
+    """I1: after the snapshot no decision reader reads a record home of the worktree."""
+    for meth in ("read_text", "read_bytes"):
+        def checked(self, *a, _orig=getattr(Path, meth), _meth=meth, **k):
+            rel = rel_of(self)
+            if rel and rel.split("/")[0] in (".process-work", "specs") and not allowed():
+                say("WORKTREE-READ", _meth, rel, caller())
+            return _orig(self, *a, **k)
+        setattr(Path, meth, checked)
+    for fn in ("record_texts", "record_files"):
+        orig = getattr(check_review, fn)
+
+        def checked(*a, _orig=orig, _fn=fn, **k):
+            if k.get("ref") is None and not allowed():
+                say("WORKTREE-READ", _fn, caller())
+            return _orig(*a, **k)
+        for mod in list(sys.modules.values()):
+            if getattr(mod, fn, None) is orig:
+                setattr(mod, fn, checked)
+
+
+PATH_CALLS = ("read_bytes", "resolve", "exists", "is_file", "is_symlink")
+path_real = {m: getattr(Path, m) for m in PATH_CALLS}
+
+
+def path_calls(on):
+    """I4: inside the snapshot no path-level read below the root (the bytes come from the fd)."""
+    for meth in PATH_CALLS:
+        def checked(self, *a, _orig=path_real[meth], _meth=meth, **k):
+            if rel_of(self) is not None:
+                say("PATH-CALL", _meth, rel_of(self))
+            return _orig(self, *a, **k)
+        setattr(Path, meth, checked if on else path_real[meth])
+
+
+fired = []
+
+
+def fire(stage):
+    if stage == spec.get("seam") and stage not in fired:
+        fired.append(stage)
+        act(spec.get("actions", []))
+        say("SEAM-FIRED", stage)
+        if spec.get("forbid_worktree_reads"):
+            forbid_reads()
+
+
+name = "snapshot" if hasattr(attest, "snapshot") else "attestation_files"
+taken = getattr(attest, name)
+
+
+def taken_then_seam(*a, **k):
+    path_calls(bool(spec.get("forbid_path_calls_in_snapshot")))
+    try:
+        out = taken(*a, **k)
+    finally:
+        path_calls(False)
+    fire("S1")
+    return out
+
+
+setattr(attest, name, taken_then_seam)
+if hasattr(attest, "_write_seam"):
+    inner = attest._write_seam
+
+    def write_seam(stage):
+        inner(stage)
+        fire(stage)
+    attest._write_seam = write_seam
+
+if spec.get("swap_on_open"):
+    swapped = []
+
+    def opening(path, flags, mode=0o777, *, dir_fd=None):
+        if not swapped and rel_of(path, dir_fd) == spec["swap_on_open"]:
+            swapped.append(path)
+            act([["swap-inode", spec["swap_on_open"]]])
+            say("SWAPPED-ON-OPEN", spec["swap_on_open"])
+        return real["open"](path, flags, mode, dir_fd=dir_fd)
+    os.open = opening
+
+if spec.get("count_records_at") and hasattr(attest_evidence, "_records_at"):
+    reader = attest_evidence._records_at
+
+    def counted(root, ref, *a, **k):
+        say("RECORDS-AT", ref)
+        return reader(root, ref, *a, **k)
+    for mod in list(sys.modules.values()):
+        if getattr(mod, "_records_at", None) is reader:
+            setattr(mod, "_records_at", counted)
+
+if spec.get("forbid_unlink"):
+    LOCK, INDEX = os.path.join(GIT_DIR, "index.lock"), os.path.join(GIT_DIR, "index")
+
+    def inside(p):
+        return p is not None and (p == ROOT or p.startswith(ROOT + os.sep))
+
+    def removing(fn, orig):
+        def guarded(path, *a, dir_fd=None, **k):
+            p = full(path, dir_fd)
+            if inside(p) and p != LOCK:
+                say("REMOVES", fn, rel_of(p))
+            return orig(path, *a, dir_fd=dir_fd, **k) if dir_fd is not None else orig(path, *a, **k)
+        return guarded
+
+    def moving(fn, orig):
+        def guarded(src, dst, *, src_dir_fd=None, dst_dir_fd=None):
+            s, d = full(src, src_dir_fd), full(dst, dst_dir_fd)
+            if (inside(s) or inside(d)) and (s, d) != (LOCK, INDEX):
+                say("REMOVES", fn, rel_of(s), "->", rel_of(d))
+            return orig(src, dst, src_dir_fd=src_dir_fd, dst_dir_fd=dst_dir_fd)
+        return guarded
+
+    tree = shutil.rmtree
+
+    def rmtree(path, *a, **k):
+        if inside(full(path)):
+            say("REMOVES", "rmtree", rel_of(path))
+        return tree(path, *a, **k)
+    for fn in ("unlink", "remove", "rmdir"):
+        setattr(os, fn, removing(fn, getattr(os, fn)))
+    for fn in ("rename", "replace"):
+        setattr(os, fn, moving(fn, getattr(os, fn)))
+    shutil.rmtree = rmtree
+
+if spec.get("no_pread") and hasattr(os, "pread"):
+    del os.pread
+
+sys.argv = ["attest.py", *sys.argv[3:]]
+raise SystemExit(attest.main())
+'''
+
+
+def _seam(repo, tmp_path, spec, *extra, base=None, head=None, work="widget"):
+    """attest.py with `spec` at one seam: S1 right after the snapshot, or a stage of the write
+    phase. Prints `SEAM-FIRED <stage>` when the seam ran."""
+    runner = tmp_path / "seam_runner.py"
+    runner.write_text(_SEAM_RUNNER, encoding="utf-8")
+    b, h = _range(repo)
+    cmd = [sys.executable, str(runner), str(repo / "scripts/process"), json.dumps(spec),
+           "--work", work, "--tier", "2", "--model", "claude-opus-5",
+           "--independence", "bundle,non-implementing", "--verdict", "pass",
+           "--base", base or b, "--head", head or h, *extra, "."]
+    return subprocess.run(cmd, cwd=repo, capture_output=True, text=True,
+                          env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
+
+
+def _fired(r, stage):
+    assert f"SEAM-FIRED {stage}" in r.stderr, f"seam {stage} never ran:\n" + r.stdout + r.stderr
+
+
+def _head(repo):
+    return _git(repo, "rev-parse", "HEAD")
+
+
+def _hash(repo, data: bytes) -> str:
+    return subprocess.run(["git", "hash-object", "--stdin"], cwd=repo, input=data,
+                          capture_output=True, check=True).stdout.decode().strip()
+
+
+def _mode(repo, rel, ref="HEAD"):
+    return _git(repo, "ls-tree", ref, "--", rel).split()[0]
+
+
+_CAUSED = _RC + "sites: none — refuted, the finding misread the guard"
+
+
+def _blocked_and_caused(repo):
+    """Round 1 blocked and committed; its ROOT-CAUSE uncommitted in today's shard (carried)."""
+    _append(repo, SHARD, _review("widget", 1), commit="docs: block")
+    _append(repo, SHARD, _CAUSED)
+
+
+@contextlib.contextmanager
+def _scripts(repo):
+    """attest and attest_evidence imported from the rendered repo, unloaded afterwards."""
+    path = str(repo / "scripts/process")
+
+    def unload():
+        for name in [n for n, m in list(sys.modules.items())
+                     if (getattr(m, "__file__", "") or "").startswith(path)]:
+            sys.modules.pop(name)
+        for name in ("attest", "attest_evidence", "check_review", "check_fix_streak", "dispatch",
+                     "report", "process_git", "required_records"):
+            sys.modules.pop(name, None)
+    sys.path.insert(0, path)
+    unload()
+    try:
+        yield importlib.import_module("attest"), importlib.import_module("attest_evidence")
+    finally:
+        sys.path.remove(path)
+        unload()
+
+
+# I1 — the refusal readers of design §5 I5 may read the worktree; no other reader may
+I1_REFUSAL_READERS = ["_foreign_shard_problems", "_worktree_text", "_index_text", "uncommitted_blocks",
+                      "with_problems", "_fix_streak_notes"]
+
+
+@RED
+def test_no_decision_reader_reads_the_worktree_after_the_snapshot(repo, tmp_path):
+    """I1: every value that decides a pass, a duty or the round comes from head, base, E or
+    T0. After the snapshot only a refusal reader may read a record in the worktree."""
+    _blocked_and_caused(repo)
+    _append(repo, OLDER_SHARD, "skipped class-test work=unrelated: another work", commit="docs: older")
+    _append(repo, PLAN_FILE, "DECISION 2026-10-24 agent: rides with the pass")
+    r = _seam(repo, tmp_path, {"seam": "S1", "forbid_worktree_reads": True,
+                               "allowed_readers": I1_REFUSAL_READERS},
+              "--with", _report(repo), "--with", PLAN_FILE, "--commit")
+    _fired(r, "S1")
+    assert "WORKTREE-READ" not in r.stderr, r.stderr
+    assert r.returncode == 0, r.stderr
+
+
+def test_the_published_tree_is_the_checked_tree_plus_the_line(repo):
+    """I2: the commit's parent is `old`, and it differs from `old` only by the snapshot's
+    records — the `--with` ones byte for byte, today's shard by the appended line."""
+    _append(repo, SHARD, _review("widget", 1), commit="docs: block")
+    _append(repo, SHARD, "skipped replan work=widget: one block, no follow-up yet")
+    _append(repo, OLDER_SHARD, _CAUSED)
+    report = _report(repo)
+    old = _head(repo)
+    before = {rel: (repo / rel).read_bytes() for rel in (SHARD, OLDER_SHARD, report)}
+    r = _attest(repo, "--with", report, "--with", OLDER_SHARD, "--commit")
+    assert r.returncode == 0, r.stderr
+    assert _git(repo, "rev-parse", "HEAD^") == old
+    changed = _git(repo, "diff-tree", "-r", "--no-renames", "--name-only", old, "HEAD").splitlines()
+    assert sorted(changed) == sorted([SHARD, OLDER_SHARD, report]), changed
+    for rel in (OLDER_SHARD, report):
+        assert _git(repo, "rev-parse", f"HEAD:{rel}") == _hash(repo, before[rel]), rel
+    shard = subprocess.run(["git", "show", f"HEAD:{SHARD}"], cwd=repo, capture_output=True,
+                           check=True).stdout
+    assert shard.startswith(before[SHARD])
+    added = [ln for ln in shard[len(before[SHARD]):].decode().splitlines() if ln.strip()]
+    assert added == [r.stdout.splitlines()[0]], added
+
+
+@RED
+def test_commit_between_validation_and_commit(repo, tmp_path):
+    """I3, R6 repro: a commit of another process after the snapshot. `_commit_bytes` read
+    `old` only then and wrote the older shard over the foreign record. The CAS starts at
+    the snapshot: refused, and the foreign commit stays HEAD with its line."""
+    _blocked_and_caused(repo)
+    old = _head(repo)
+    actions = [["append", SHARD, "\nFOREIGN-COMMITTED-RECORD\n"], ["git", "add", "--", SHARD],
+               ["git", "commit", "-qm", "docs: a foreign record"]]
+    r = _seam(repo, tmp_path, {"seam": "S1", "actions": actions}, "--with", _report(repo), "--commit")
+    _fired(r, "S1")
+    assert r.stderr.count("SEAM-GIT 0") == 2, r.stderr
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert _git(repo, "rev-parse", "HEAD^") == old
+    assert _git(repo, "log", "-1", "--format=%s") == "docs: a foreign record"
+    assert "FOREIGN-COMMITTED-RECORD" in _git(repo, "show", f"HEAD:{SHARD}")
+
+
+@RED
+@pytest.mark.skipif(not hasattr(os, "symlink"), reason="needs symlinks")
+def test_regular_shard_replacing_tracked_symlink(repo):
+    """I4, R6 repro: the mode came from `ls-tree HEAD`, so a regular shard replacing a
+    tracked symlink was committed as 120000 — the journal text as a link target."""
+    _append(repo, OLDER_SHARD, _review("widget", 1), commit="docs: block")
+    (repo / SHARD).symlink_to(Path(OLDER_SHARD).name)
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "docs: a linked shard")
+    (repo / SHARD).unlink()
+    (repo / SHARD).write_text("# today\n\n" + _CAUSED + "\n")
+    r = _attest(repo, "--with", _report(repo), "--commit")
+    assert r.returncode == 0, r.stderr
+    assert _mode(repo, SHARD) == "100644"
+    assert _git(repo, "status", "--porcelain", "--", SHARD) == ""
+
+
+@RED
+def test_a_tracked_executable_record_keeps_100755(repo):
+    """I4: the mode is 100644 unless `old` holds the path as 100755 — never the worktree's
+    bit (an untracked executable report stays 100644), never 120000 or 160000."""
+    _append(repo, SHARD, _review("widget", 1), commit="docs: block")
+    _append(repo, OLDER_SHARD, "skipped class-test work=unrelated: another work")
+    os.chmod(repo / OLDER_SHARD, 0o755)
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "docs: an executable shard")
+    assert _mode(repo, OLDER_SHARD) == "100755"
+    _append(repo, OLDER_SHARD, _CAUSED)
+    report = _report(repo)
+    os.chmod(repo / report, 0o755)
+    r = _attest(repo, "--with", report, "--with", OLDER_SHARD, "--commit")
+    assert r.returncode == 0, r.stderr
+    assert _mode(repo, OLDER_SHARD) == "100755"
+    assert _mode(repo, report) == "100644"
+
+
+@RED
+def test_a_shard_swapped_between_lstat_and_open_is_refused(repo, tmp_path):
+    """I4: lstat, then open, then fstat — a new inode at the path between the check and the
+    open (patched into `os.open`) is refused by name, not read."""
+    _blocked_and_caused(repo)
+    old = _head(repo)
+    r = _seam(repo, tmp_path, {"seam": "S1", "swap_on_open": SHARD}, "--with", _report(repo), "--commit")
+    assert "SWAPPED-ON-OPEN" in r.stderr, "the snapshot never opened the shard with os.open:\n" + r.stderr
+    assert r.returncode == 1 and SHARD in r.stderr, r.stdout + r.stderr
+    assert _head(repo) == old
+
+
+@RED
+def test_the_snapshot_reads_its_bytes_through_the_checked_descriptor(repo, tmp_path):
+    """I4: inside `snapshot()` no `read_bytes`/`resolve`/`exists`/`is_file`/`is_symlink` on a
+    path below the root — the bytes come from the descriptor the lstat walk checked."""
+    _blocked_and_caused(repo)
+    _append(repo, PLAN_FILE, "DECISION 2026-10-24 agent: rides with the pass")
+    r = _seam(repo, tmp_path, {"seam": "S1", "forbid_path_calls_in_snapshot": True},
+              "--with", _report(repo), "--with", PLAN_FILE, "--dry-run")
+    _fired(r, "S1")
+    assert "PATH-CALL" not in r.stderr, r.stderr
+    assert r.returncode == 0, r.stderr
+
+
+SECOND_PLAN = ".process-work/plans/2026-10-15-widget.md"
+
+
+def _issue_block_owes_its_cause(repo):
+    """R6 repro: the issue's block is committed; without a cause the pass is refused."""
+    _append(repo, SHARD, _review("7", 1), commit="docs: the issue's block")
+    r = _pass(repo)
+    assert r.returncode == 1 and CLASS_TEST + "1 (no ROOT-CAUSE line)" in r.stderr, r.stderr
+
+
+@RED
+def test_uncommitted_plan_alias_ambiguity(repo):
+    """I5/D-3, R6 repro: an uncommitted second plan of the issue made `round_ids` ambiguous,
+    the alias `7` fell away and the block owed nothing. A plan only in the worktree is
+    invisible to the counter: the duty stays."""
+    _issue_block_owes_its_cause(repo)
+    (repo / SECOND_PLAN).write_text(PLAN)
+    old = _head(repo)
+    r = _attest(repo, "--with", _report(repo), "--commit")
+    assert r.returncode == 1 and CLASS_TEST + "1 (no ROOT-CAUSE line)" in r.stderr, r.stdout + r.stderr
+    assert _head(repo) == old
+
+
+@RED
+def test_alias_added_after_snapshot(repo, tmp_path):
+    """I5, R6 repro: the same second plan added right after the snapshot."""
+    _issue_block_owes_its_cause(repo)
+    old = _head(repo)
+    r = _seam(repo, tmp_path, {"seam": "S1", "actions": [["new", SECOND_PLAN, PLAN]]},
+              "--with", _report(repo), "--commit")
+    _fired(r, "S1")
+    assert r.returncode == 1 and CLASS_TEST + "1 (no ROOT-CAUSE line)" in r.stderr, r.stdout + r.stderr
+    assert _head(repo) == old
+
+
+@RED
+def test_an_uncommitted_block_line_outside_the_snapshot_is_refused(repo):
+    """D-2: a block of the work in the worktree but not in T0 (another day's shard, neither
+    committed nor carried) is refused by name instead of silently counted."""
+    _append(repo, PLAN_FILE, _CAUSED, commit="docs: the cause")
+    _append(repo, OLDER_SHARD, _review("widget", 1))
+    r = _pass(repo)
+    assert r.returncode == 1 and OLDER_SHARD in r.stderr, r.stdout + r.stderr
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "docs: the block")
+    r = _pass(repo)
+    assert r.returncode == 0, r.stderr
+
+
+@RED
+def test_a_line_appended_to_todays_shard_after_the_snapshot_is_not_lost(repo, tmp_path):
+    """I6: a line another process appends to today's shard after the snapshot was
+    overwritten by `write_bytes(snapshot + line)`. Now refused before any write."""
+    _blocked_and_caused(repo)
+    old = _head(repo)
+    r = _seam(repo, tmp_path, {"seam": "S1", "actions": [["append", SHARD, "FOREIGN-LINE\n"]]},
+              "--with", _report(repo), "--commit")
+    _fired(r, "S1")
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert "FOREIGN-LINE" in (repo / SHARD).read_text()
+    assert _head(repo) == old
+
+
+@RED
+def test_a_shard_staged_unlike_the_worktree_before_the_snapshot_is_refused(repo):
+    """I6: an index entry that is neither `old`'s nor the snapshot's blob is foreign work —
+    refused at the snapshot, the index untouched."""
+    _append(repo, SHARD, _review("widget", 1), commit="docs: block")
+    committed = (repo / SHARD).read_text()
+    (repo / SHARD).write_text(committed + "\nFOREIGN-STAGED\n")
+    _git(repo, "add", "--", SHARD)
+    (repo / SHARD).write_text(committed + "\n" + _CAUSED + "\n")
+    staged = _git(repo, "ls-files", "-s", "--", SHARD)
+    old = _head(repo)
+    r = _attest(repo, "--with", _report(repo), "--commit")
+    assert r.returncode == 1 and SHARD in r.stderr, r.stdout + r.stderr
+    assert _git(repo, "ls-files", "-s", "--", SHARD) == staged
+    assert _head(repo) == old
+
+
+@RED
+@pytest.mark.parametrize("seam", ["S1", "before-lock", "index-checked"])
+def test_foreign_staging_of_the_target_shard_after_the_snapshot_is_not_overwritten(repo, tmp_path, seam):
+    """I11, Codex repro (plan review R1): a second process stages other bytes of today's shard
+    and restores the worktree. Before the lock: refused, the foreign blob stays staged. After
+    the index check: attest holds `index.lock`, the foreign `git add` fails, nothing is lost."""
+    _blocked_and_caused(repo)
+    snapshot = (repo / SHARD).read_bytes()
+    old = _head(repo)
+    r = _seam(repo, tmp_path, {"seam": seam, "actions": [["stage", SHARD, "FOREIGN-STAGED\n"]]},
+              "--with", _report(repo), "--commit")
+    _fired(r, seam)
+    if seam == "index-checked":
+        assert "SEAM-GIT 0" not in r.stderr, r.stderr  # the foreign add met attest's own lock
+        assert r.returncode == 0, r.stdout + r.stderr
+        committed = subprocess.run(["git", "show", f"HEAD:{SHARD}"], cwd=repo, capture_output=True,
+                                   check=True).stdout
+        assert committed.startswith(snapshot) and b"verdict=pass" in committed
+        assert b"FOREIGN-STAGED" not in committed
+        return
+    assert "SEAM-GIT 0" in r.stderr, r.stderr
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert _hash(repo, snapshot + b"FOREIGN-STAGED\n") in _git(repo, "ls-files", "-s", "--", SHARD)
+    assert _head(repo) == old
+
+
+@pytest.mark.skipif(not hasattr(os, "symlink"), reason="needs symlinks")
+@pytest.mark.parametrize("seam", ["S1", pytest.param("worktree-checked", marks=RED)])
+def test_a_symlink_swapped_in_before_the_write_is_refused(repo, tmp_path, seam):
+    """I11, Codex repro (plan review R1): today's shard replaced by a symlink to a file
+    outside the repository. `write_bytes` followed it; the fd-bound append does not. At S1
+    the foreign-shard refusal (I5) already names the link at 032f2cb: a guard there."""
+    _blocked_and_caused(repo)
+    outside = tmp_path / "outside.md"
+    outside.write_bytes(b"OUTSIDE\n")
+    old, index = _head(repo), _git(repo, "ls-files", "-s")
+    r = _seam(repo, tmp_path, {"seam": seam, "actions": [["symlink", SHARD, str(outside)]]},
+              "--with", _report(repo), "--commit")
+    _fired(r, seam)
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert outside.read_bytes() == b"OUTSIDE\n"
+    assert _head(repo) == old and _git(repo, "ls-files", "-s") == index
+
+
+# I7 — every record home × every worktree mutation after the snapshot: the same tree as the
+# run without it, or exit 1 with HEAD unchanged; never another published commit
+_ARCHIVED_PLAN = ".process-work/plans/archive/2026-09-01-widget.md"
+_NEW_SHARD = ".process-work/journal/issue-7/2026-01-02.md"
+_REPORT = ".process-work/reviews/widget.md"
+MUTATION_RECORDS = {
+    "journal today": (SHARD, ()),
+    "journal older": (OLDER_SHARD, ()),
+    "journal older --with": (OLDER_SHARD, ("--with", OLDER_SHARD)),
+    "--journal-dir": (SHARD, ("--journal-dir", ".process-work/journal")),
+    "active plan": (PLAN_FILE, ()),
+    "archived plan": (_ARCHIVED_PLAN, ()),
+    "second plan of the issue": (SECOND_PLAN, ()),
+    "report": (_REPORT, ()),
+}
+MUTATIONS = ["line added", "line removed", "file replaced", "file deleted", "file new",
+             "parent replaced by a symlink"]
+# red at 032f2cb: a second plan of the issue after the snapshot drops the alias `7`
+MUTATIONS_RED = {("refused", "active plan", "file new"), ("refused", "archived plan", "file new"),
+                 ("refused", "second plan of the issue", "file replaced"),
+                 ("refused", "second plan of the issue", "file new")}
+
+
+def _matrix_setup(repo, record, outcome):
+    # the issue's block: it binds only through the plan alias `7`, so a mutation of the alias
+    # set changes the duty and the round — the R6 class. Without its cause the run is refused,
+    # and no mutation may turn that refusal into a pass.
+    _append(repo, SHARD, _review("7", 1), commit="docs: block")
+    if outcome == "passes":
+        _append(repo, PLAN_FILE, _CAUSED, commit="docs: the cause")
+    if record == "journal older":
+        _append(repo, OLDER_SHARD, "skipped class-test work=unrelated: another work", commit="docs: older")
+    elif record == "journal older --with":
+        _append(repo, OLDER_SHARD, "skipped class-test work=unrelated: another work")
+    elif record == "archived plan":
+        (repo / _ARCHIVED_PLAN).parent.mkdir(parents=True, exist_ok=True)
+        (repo / _ARCHIVED_PLAN).write_text(PLAN)
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-q", "-m", "docs: an archived plan of the issue")
+
+
+def _mutation(rel, mutation):
+    # "line removed" drops what carries a duty: the block in a shard, the alias in a plan
+    line, mark = "\n" + _review("widget", 2) + "\n", "work=7"
+    if rel == _REPORT:
+        line, mark = "- AC-2: `tests/test_widget.py::test_widget`\n", "AC-1"
+        new = (".process-work/reviews/other.md", "# Review\n\nreview: widget\n\n- AC-1: nothing\n")
+    elif rel.startswith(".process-work/plans"):
+        mark = "issue: #7"
+        new = (SECOND_PLAN if rel != SECOND_PLAN else ".process-work/plans/2026-10-16-widget.md", PLAN)
+        if rel == SECOND_PLAN:
+            line = PLAN + line  # the file is new: a whole plan of the issue
+    else:
+        new = (_NEW_SHARD, "# 2026-01-02\n\n" + _review("widget", 2) + "\n")
+    return {"line added": [["add", rel, line]],
+            "line removed": [["remove", rel, mark]],
+            "file replaced": [["replace", rel, "# replaced after the snapshot\n"]],
+            "file deleted": [["delete", rel]],
+            "file new": [["new", *new]],
+            "parent replaced by a symlink": [["dir-symlink", rel.rsplit("/", 1)[0]]]}[mutation]
+
+
+@pytest.mark.skipif(not hasattr(os, "symlink"), reason="needs symlinks")
+@pytest.mark.parametrize("mutation", MUTATIONS)
+@pytest.mark.parametrize("record", list(MUTATION_RECORDS))
+@pytest.mark.parametrize("outcome", ["passes", "refused"])
+def test_a_worktree_mutation_after_the_snapshot_changes_nothing_or_refuses(repo, tmp_path, request,
+                                                                          outcome, record, mutation):
+    """I7 (class test): a record changed after the snapshot — a line added or removed, the
+    file replaced, deleted or new beside it, its directory swapped for a symlink — yields
+    the tree of the run without the change, or exit 1 with HEAD unchanged. A run refused
+    without the change stays refused."""
+    if (outcome, record, mutation) in MUTATIONS_RED:
+        request.applymarker(RED)
+    rel, extra = MUTATION_RECORDS[record]
+    _matrix_setup(repo, record, outcome)
+    args = ("--with", _report(repo), *extra, "--commit")
+    reference = tmp_path / "reference"
+    shutil.copytree(repo, reference, symlinks=True)
+    r = _seam(reference, tmp_path, {"seam": "S1"}, *args)
+    assert r.returncode == (0 if outcome == "passes" else 1), r.stdout + r.stderr
+    tree = _git(reference, "rev-parse", "HEAD^{tree}") if outcome == "passes" else None
+    old = _head(repo)
+    r = _seam(repo, tmp_path, {"seam": "S1", "actions": _mutation(rel, mutation)}, *args)
+    _fired(r, "S1")
+    if r.returncode == 0:
+        assert tree is not None, "a refused run became a pass:\n" + r.stdout + r.stderr
+        assert _git(repo, "rev-parse", "HEAD^{tree}") == tree, (
+            "another tree published:\n" + _git(repo, "diff", "--stat", tree, "HEAD^{tree}") + r.stderr)
+    else:
+        assert r.returncode == 1, r.stdout + r.stderr
+        assert _head(repo) == old
+
+
+# I12 — object readers read objects only: one answer per tree, no path of the worktree
+
+@RED
+def test_the_journal_dir_reader_gives_one_answer_per_tree(repo):
+    """I12, R2 repro (plan review R2): `_journal_dir_at` asked `_repo_rel` about the live
+    worktree, so one fixed tree gave 1 → 0 → 1 records while the directory was swapped for
+    a symlink and back."""
+    jdir = repo / "docs/journal"
+    jdir.mkdir(parents=True)
+    (jdir / "2026-10-01.md").write_text("# 2026-10-01\n\n" + _review("widget", 1) + "\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "docs: a journal of its own")
+    head = _head(repo)
+    with _scripts(repo) as (_at, ev):
+        def read():
+            if hasattr(ev, "_records_at"):
+                return ev._records_at(repo, head, ("journal",), "docs/journal")
+            return ev._journal_dir_at(repo, head, jdir)
+        first = read()
+        jdir.rename(repo / "docs/journal-moved")
+        jdir.symlink_to("journal-moved", target_is_directory=True)
+        second = read()
+        jdir.unlink()
+        (repo / "docs/journal-moved").rename(jdir)
+        third = read()
+    assert first == second == third and len(first) == 1, (first, second, third)
+
+
+@RED
+def test_object_readers_touch_no_worktree_path(repo, monkeypatch):
+    """I12: while `_records_at`, `_plan(snapshot=)`, `round_ids`/`_texts(records=)` and
+    `gather(snapshot=)` run, no lstat/stat/realpath and no Path query or read below the root."""
+    _append(repo, SHARD, _review("widget", 1), commit="docs: block")
+    _append(repo, PLAN_FILE, _CAUSED, commit="docs: the cause")
+    report = _report(repo)
+    base, head = _range(repo)
+    root = repo.resolve()
+    with _scripts(repo) as (at, ev):
+        jdir = root / ".process-work/journal"
+        snap = ev.snapshot(root, root / SHARD, [root / report], jdir)
+        touched = []
+
+        def guard(name, orig):
+            def checked(p, *a, **k):
+                try:
+                    inside = os.path.abspath(os.fspath(p)).startswith(str(root))
+                except TypeError:
+                    inside = False
+                if inside:
+                    touched.append((name, str(p)))
+                return orig(p, *a, **k)
+            return checked
+        for name in ("lstat", "stat"):
+            monkeypatch.setattr(os, name, guard("os." + name, getattr(os, name)))
+        monkeypatch.setattr(os.path, "realpath", guard("os.path.realpath", os.path.realpath))
+        for meth in ("exists", "is_file", "is_symlink", "resolve", "read_text", "read_bytes"):
+            monkeypatch.setattr(Path, meth, guard("Path." + meth, getattr(Path, meth)))
+        ids = {"widget", "7"}
+        assert ev._records_at(root, snap.E, ev.RECORD_KINDS, snap.jrel) is not None
+        ev._plan(root, ids, head, snapshot=snap)
+        assert at.round_ids(argparse.Namespace(work="widget"), root, records=snap.records_T0) >= ids
+        at._texts(root, jdir, records=snap.records_T0)
+        ev.gather(root, work="widget", ids=ids, tier=2, verdict="pass",
+                  independence="bundle,non-implementing", plan_review=False, model="claude-opus-5",
+                  base=base, head=head, reports=[root / report], blocks=[(1, _review("widget", 1))],
+                  snapshot=snap)
+        monkeypatch.undo()
+    assert touched == [], touched
+
+
+TREE_LINKS = {
+    # (the path committed as a symlink, the kinds asked, the journal directory)
+    "spec plan": ("specs/widget/plan.md", ("spec-plan",), ".process-work/journal"),
+    "active plan": (".process-work/plans/x.md", ("plan",), ".process-work/journal"),
+    "journal shard": (".process-work/journal/x.md", ("journal",), ".process-work/journal"),
+    "journal dir": ("docs/journal", ("journal",), "docs/journal"),
+}
+
+
+def _commit_link(repo, rel):
+    (repo / rel).parent.mkdir(parents=True, exist_ok=True)
+    (repo / rel).symlink_to(os.path.relpath(repo / "widget.py", (repo / rel).parent))
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", f"a symlink at {rel}")
+    assert _mode(repo, rel) == "120000"
+
+
+@RED
+@pytest.mark.skipif(not hasattr(os, "symlink"), reason="needs symlinks")
+@pytest.mark.parametrize("case", list(TREE_LINKS))
+def test_a_symlink_entry_in_the_tree_is_refused(repo, case):
+    """I12/§10: a 120000 entry as a record, or as the journal directory itself, is no record
+    and no empty home — the reader answers None (unknown), and attest refuses."""
+    rel, kinds, jrel = TREE_LINKS[case]
+    _commit_link(repo, rel)
+    head = _head(repo)
+    r = _pass(repo, *(("--journal-dir", jrel) if jrel != ".process-work/journal" else ()))
+    assert r.returncode == 1, r.stdout + r.stderr
+    with _scripts(repo) as (_at, ev):
+        assert ev._records_at(repo, head, kinds, jrel) is None
+
+
+@pytest.mark.skipif(not hasattr(os, "symlink"), reason="needs symlinks")
+def test_a_symlink_beside_a_plan_is_no_refusal(repo):
+    """I12-Minor (§10): a committed symlink beside a plan (`specs/other/assets`) or among the
+    reports is neither a record nor on the way to one — the same outcome as without it."""
+    (repo / "specs/other").mkdir(parents=True)
+    (repo / "specs/other/plan.md").write_text("# Other\n\ntier: 2\n")
+    (repo / "specs/other/assets").symlink_to("../../widget.py")
+    (repo / ".process-work/reviews").mkdir(parents=True, exist_ok=True)
+    (repo / ".process-work/reviews/link.md").symlink_to("../../widget.py")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "docs: links beside the records")
+    r = _attest(repo, "--with", _report(repo), "--commit")
+    assert r.returncode == 0, r.stdout + r.stderr
+
+
+@RED
+def test_counter_and_evidence_read_one_record_set(repo, tmp_path):
+    """I12/§9: the round counter and the evidence read one record set per tree — `_records_at`
+    runs once per tree, never once per reader."""
+    _blocked_and_caused(repo)
+    r = _seam(repo, tmp_path, {"seam": "S1", "count_records_at": True}, "--with", _report(repo),
+              "--dry-run")
+    assert r.returncode == 0, r.stdout + r.stderr
+    reads = Counter(ln.split()[1] for ln in r.stderr.splitlines() if ln.startswith("RECORDS-AT "))
+    assert reads and set(reads.values()) == {1}, reads
+
+
+@RED
+@pytest.mark.skipif(not Path("/proc/self/fd").is_dir(), reason="reads dir_fd paths from /proc")
+def test_attest_removes_no_name_in_the_worktree(repo, tmp_path):
+    """I13′: attest removes no name in the worktree but its own `index.lock` (or renames it
+    onto the index). The private index lived in `.process-work/tmp/` and was removed there."""
+    _blocked_and_caused(repo)
+    r = _seam(repo, tmp_path, {"seam": "S1", "forbid_unlink": True}, "--with", _report(repo), "--commit")
+    _fired(r, "S1")
+    assert "REMOVES" not in r.stderr, r.stderr
+    assert r.returncode == 0, r.stdout + r.stderr
+
+
+# Leser nach Archiv-Commit (§10): the archive is a commit of its own after the attestation
+
+def test_a_second_lens_after_a_separate_archive_commit(repo):
+    """Lens 1 attests with `--with <plan>`, the plan is moved by its own `git mv` commit,
+    lens 2 attests the same head: the archive changes no reader's decision."""
+    _append(repo, PLAN_FILE, "DECISION 2026-10-24 agent: rides with the first lens")
+    base, head = _range(repo)
+    r = _attest(repo, "--with", _report(repo), "--with", PLAN_FILE, "--commit")
+    assert r.returncode == 0, r.stderr
+    dest = ".process-work/plans/archive/2026-10-14-widget.md"
+    (repo / dest).parent.mkdir(parents=True, exist_ok=True)
+    _git(repo, "mv", PLAN_FILE, dest)
+    _git(repo, "commit", "-q", "-m", "docs: archive the plan")
+    cmd = [sys.executable, str(repo / "scripts/process/attest.py"), "--work", "widget", "--tier", "2",
+           "--reviewer", "second-lens", "--model", "claude-opus-5",
+           "--independence", "bundle,non-implementing", "--verdict", "pass", "--base", base,
+           "--head", head, "--with", _report(repo), "--commit", "."]
+    r = subprocess.run(cmd, cwd=repo, capture_output=True, text=True)
+    assert r.returncode == 0, r.stdout + r.stderr
+
+
+# Sweep (§9): the same class at the remaining path reads
+
+@RED
+@pytest.mark.skipif(not hasattr(os, "symlink"), reason="needs symlinks")
+def test_a_with_path_swapped_for_a_symlink_after_the_snapshot_is_still_checked(repo, tmp_path):
+    """`with_problems` skipped a symlink (`continue`), so a source file swapped for one after
+    the snapshot rode the commit unchecked. The check is lexical on the snapshot's paths."""
+    (repo / "src").mkdir()
+    (repo / "src/x.py").write_text("X = 1\n")
+    old = _head(repo)
+    r = _seam(repo, tmp_path, {"seam": "S1", "actions": [["symlink", "src/x.py", "../widget.py"]]},
+              "--with", _report(repo), "--with", "src/x.py", "--commit")
+    _fired(r, "S1")
+    assert r.returncode == 1 and "src/x.py" in r.stderr, r.stdout + r.stderr
+    assert _head(repo) == old
+    assert "src/x.py" not in _git(repo, "ls-tree", "-r", "--name-only", "HEAD")
+
+
+@RED
+@pytest.mark.skipif(not hasattr(os, "symlink"), reason="needs symlinks")
+def test_the_private_index_never_lies_in_the_worktree(repo, tmp_path):
+    """The private index was made under `.process-work/tmp/` — through a symlink there, in a
+    directory outside the repository. It lives in `tempfile.mkdtemp()`."""
+    outside = tmp_path / "outside-tmp"
+    outside.mkdir()
+    tmp = repo / ".process-work/tmp"
+    if tmp.exists():
+        shutil.rmtree(tmp)
+    tmp.symlink_to(outside, target_is_directory=True)
+    mtime = outside.stat().st_mtime_ns
+    r = _attest(repo, "--with", _report(repo), "--commit")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert list(outside.iterdir()) == [] and outside.stat().st_mtime_ns == mtime
+
+
+@pytest.mark.skipif(not hasattr(os, "symlink"), reason="needs symlinks")
+def test_reports_are_chosen_by_their_snapshot_path(repo, tmp_path):
+    """`gather` chose reports by `p.resolve()`: the reports directory swapped for a symlink
+    after the snapshot changed the report set. The choice is lexical on the snapshot."""
+    report = _report(repo)
+    r = _seam(repo, tmp_path, {"seam": "S1", "actions": [["dir-symlink", ".process-work/reviews"]]},
+              "--with", report, "--commit")
+    _fired(r, "S1")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert report in _git(repo, "show", "--name-only", "--format=", "HEAD")
