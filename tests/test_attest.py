@@ -864,7 +864,6 @@ def test_archive_is_refused_and_names_the_way(render, tmp_path, kind):
     assert (out / plan).is_file() and not (out / dest).exists()
 
 
-@RED
 def test_blocked_round_at_walks_through_a_pure_archive_commit(render, tmp_path):
     """A lens built after the plan's own archive commit still sees the round another lens
     blocked: a commit that only moves plans (`D rel` + `A archive_rel(rel)`, the same blob)

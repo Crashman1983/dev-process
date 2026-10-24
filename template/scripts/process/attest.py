@@ -413,8 +413,9 @@ def build_line(args, root: Path, journal_dir: Path | None = None,
 def blocked_round_at(root: Path, args: argparse.Namespace, head: str) -> int | None:
     """The round of a blocking REVIEW line of the work (`round_ids`) on this head —
     another lens already blocked the round this review is a lens of — or None. "This head"
-    is the line's own head, or one only attest commits lie above (`_attest_commit`), as a
-    lens built after the first lens's attest commit sees it. Rebuilt in the v2.77
+    is the line's own head, or one only attest commits and pure archive commits lie above
+    (`_attest_commit`, `_archive_only`), as a lens built after the first lens's attest
+    commit — or after the plan's own archive commit (#308) — sees it. Rebuilt in the v2.77
     cross-model review (round 3): a rule over paths read the reviewed plan as bookkeeping,
     or the records an attest commit carries as content."""
     mine = {work_key(w) for w in round_ids(args, root)}
@@ -426,7 +427,8 @@ def blocked_round_at(root: Path, args: argparse.Namespace, head: str) -> int | N
             parents = _git_out(root, "rev-list", "--parents", "-n", "1", at).decode().split()[1:]
         except ValueError:
             break  # git cannot tell: this head alone
-        if len(parents) != 1 or not _attest_commit(root, parents[0], at, mine):
+        if len(parents) != 1 or not (_attest_commit(root, parents[0], at, mine)
+                                     or _archive_only(root, parents[0], at)):
             break
         at = parents[0]
     rounds = [int(f["round"]) for t in _texts(root, root / JOURNAL_DIR) for _ln, f in parse_review_lines(t)[0]
@@ -449,8 +451,9 @@ def _attest_commit(root: Path, parent: str, commit: str, mine: set) -> bool:
         status = _git_out(root, "diff", "--name-status", "-z", "--no-renames", parent, commit).decode().split("\0")
         changes = dict(zip(status[1::2], status[0::2]))  # path -> A|D|M|T
         pairs = [(rel, rel) for rel, kind in changes.items() if kind == "M" and plan(rel)]
-        # `attest --archive` moves the plan it appends to: the deleted plan and its archived
-        # copy pair by the archive rule, never by git's rename guess (round 5)
+        # an older `attest --archive` (v2.77, still in history) moved the plan it appended
+        # to: the deleted plan and its archived copy pair by the archive rule, never by
+        # git's rename guess (round 5)
         pairs += [(rel, archive_rel(rel)) for rel, kind in changes.items() if kind == "D" and plan(rel)]
         paired = {p for pair in pairs for p in pair}
         for rel in changes:
@@ -479,6 +482,30 @@ def _attest_commit(root: Path, parent: str, commit: str, mine: set) -> bool:
     except (ValueError, UnicodeDecodeError):
         return False
     return any(work_key(f["work"]) in mine for _ln, f in parse_review_lines(added)[0])
+
+
+def _archive_only(root: Path, parent: str, commit: str) -> bool:
+    """Is `commit` over `parent` a pure archive commit (#308, design §10): every change a
+    pair `D rel` + `A archive_rel(rel)` of a plan with the same blob, nothing else? The
+    archive is a commit of its own after the attestation; it adds no line and changes no
+    plan, so the round another lens blocked stays this head's. A plan changed on the way
+    is a fix. Unreadable is no."""
+    try:
+        status = _git_out(root, "diff", "--name-status", "-z", "--no-renames", parent, commit).decode().split("\0")
+        changes = dict(zip(status[1::2], status[0::2]))  # path -> A|D|M|T
+        moved = [rel for rel, kind in changes.items()
+                 if kind == "D" and record_kind(rel) in PLAN_KINDS and archive_rel(rel) != rel]
+        if not moved or len(changes) != 2 * len(moved):
+            return False
+        for rel in moved:
+            dest = archive_rel(rel)
+            if changes.get(dest) != "A":
+                return False
+            if _git_out(root, "rev-parse", f"{parent}:{rel}") != _git_out(root, "rev-parse", f"{commit}:{dest}"):
+                return False
+    except ValueError:
+        return False
+    return True
 
 
 def _blob(root: Path, data: bytes) -> str | None:
