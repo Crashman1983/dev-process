@@ -7,6 +7,10 @@ details are in the [CHANGELOG](CHANGELOG.md).
 
 Deutsche Fassung: [NEWS-DE.md](NEWS-DE.md).
 
+## v2.78.0 — A review finding says where it is
+
+A blocking review finding now names its place in the code. With that, the KPI cockpit can tell how many late blocks fall on code the first review round had already seen, a sign that round 1 missed something or later rounds re-review old code. The number starts with the first review after the update.
+
 ## v2.77.2 — A bracket in a test parameter no longer hides a real fix
 
 A pytest test whose parameter value contains brackets, such as `test_x[a[b]]`, was read under the wrong name, so a genuine failing-to-passing proof could be refused. The tool that measures the proof now uses the same test-name reading as the review gate, and a parameter may contain brackets, `]`, commas, Unicode or be empty.

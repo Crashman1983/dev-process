@@ -10,6 +10,24 @@ A few plain sentences per release: [NEWS.md](NEWS.md). Deutsche Fassung:
 [CHANGELOG-DE.md](CHANGELOG-DE.md). Releases before v2.28.2:
 [docs/changelog-archive.md](docs/changelog-archive.md).
 
+## v2.78.0 — A finding names its place; blocks on old code are counted · 2026-10-24
+
+**Why.** The Claude Code team found by git blame that 59 % of repeatedly flagged code had been there since round 1 (#311). We wanted the same number for our review rounds and could not get it: in Kenni's 571 review reports only 24 % of the FINDING lines named a `file:line` at all, free in the title, and of 37 blockers in round 2 or later two could be measured.
+
+**What changes.**
+- A FINDING line has a place field, `at=<path>:<line>`, `<path>:<first>-<last>`, `<path>` or `-` (no single place). The github-issues report gate requires it on every blocker and major a branch adds, like `class=`; findings that stood at the fork point stay valid, and classifying or placing an old finding does not make it new. The review bundle and the Codex result schema ask for it; a Codex run started before the update is handed off with `at=-`.
+- `process_kpis.py rounds` and `baseline` report old-code blocks (#311): the `sev=blocker` findings of code reviews in round 2 or later whose lines stand as they did at a head of round 1, as a share of the measured ones, per round and per work, with what could not be measured named by reason. The comparison is by tree content, so a rebase between rounds changes nothing while round 1's head exists.
+
+**Effect.** From the first review after the update on, the cockpit shows how many late blocks fall on code round 1 already saw — the measure for #310 (stable finding ids, next) and for any change to the review rounds.
+
+**Update.**
+1. New blocker and major findings a branch adds carry `at=`; project-owned review prompts (briefs for other reviewers) add it to their FINDING form.
+2. Reports on main stay valid.
+
+**Changed sections.** `verification-independence.md` (The review bundle — the portable interface to any reviewer), module `github-issues` (Review and audit visibility), module `telemetry` (The KPI cockpit), command `/review`
+
+Details: [Plan](docs/analysis/2026-10-24-v2.78.md) #311
+
 ## v2.77.2 — A pytest parameter with brackets keeps the whole id · 2026-10-23
 
 **Why.** `red_evidence` cut a pytest parameter suffix at the last `[`, so a valid id such as `test_x[a[b]]` was read as `test_x[a` while `attest_evidence` reads `test_x`; a valid red-to-green proof was refused on the pytest and JUnit paths.
