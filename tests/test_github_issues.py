@@ -1397,7 +1397,8 @@ def test_the_codex_place_is_the_gates_grammar(render, tmp_path):
         sys.modules.pop("_dispatch_codex", None)
         codex = importlib.import_module("_dispatch_codex")
         odd = codex._report_text(rec, {"verdict": "block", "criteria": [], "refute": [],
-                                       "findings": [{**finding, "at": "src/a.py:3", "title": "at=boot the guard"}]},
+                                       "findings": [{**finding, "at": "src/a.py:3", "title": "at=boot the guard"},
+                                                    {**finding, "at": "src/a.py:4", "title": "  at=boot the second"}]},
                                  work="7", plan_review=False, refute_round=None)
     finally:
         sys.path.remove(str(out / "scripts/process"))

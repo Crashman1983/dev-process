@@ -1466,3 +1466,60 @@ def test_old_code_in_a_window_leaves_unreadable_reports_out(render, tmp_path):
         sys.path.remove(str(out / "scripts/process"))
         for m in ("process_kpis", "check_review", "check_issues"):
             sys.modules.pop(m, None)
+
+
+def test_old_code_sees_a_changed_binary_in_any_locale(render, tmp_path, monkeypatch):
+    """A changed binary is changed whatever language git speaks (cross-model review,
+    round 2: a German git printed no "Binary files")."""
+    out, h1, hr = _old_repo(render, tmp_path)
+    _journal(out, "".join(f"REVIEW work=9 tier=2 reviewer=r model=m independence=bundle,non-implementing "
+                          f"base={'0' * 40} head={h} verdict=block round={r}\n" for h, r in ((h1, 1), (hr, 2))))
+    reviews = out / ".process-work/reviews"
+    reviews.mkdir(parents=True)
+    (reviews / "9-r2.md").write_text(_old_report("#9", 2, _blocker("src/blob.bin:1", "binary"), head=hr))
+    (out / ".gitattributes").write_text("*.bin -diff\n")  # no hunk at all, in any language
+    _gitx(out, "add", ".gitattributes")
+    assert _measure(out)["changed"] == 1
+    monkeypatch.setenv("LC_ALL", "de_DE.UTF-8")
+    monkeypatch.setenv("LANGUAGE", "de")
+    assert _measure(out)["changed"] == 1
+
+
+def test_old_code_joins_a_slug_only_through_a_one_issue_plan(render, tmp_path):
+    """A report naming the slug of a plan with two issues takes neither issue's heads; a
+    window of #12 takes no report of #13 (cross-model review, round 2)."""
+    out, h1, hr = _old_repo(render, tmp_path)
+    plans = out / ".process-work/plans"
+    plans.mkdir(parents=True, exist_ok=True)
+    (plans / "2026-01-02-pair.md").write_text("# Plan\n\ntier: 2\nissue: #12\nissue: #13\n")
+    _journal(out, "".join(f"REVIEW work={w} tier=2 reviewer=r model=m independence=bundle,non-implementing "
+                          f"base={'0' * 40} head={h} verdict=block round={r}\n"
+                          for w, h, r in (("12", h1, 1), ("12", hr, 2), ("13", hr, 1), ("13", hr, 2))))
+    reviews = out / ".process-work/reviews"
+    reviews.mkdir(parents=True)
+    (reviews / "pair-r2.md").write_text(_old_report("pair", 2, _blocker("src/a.py:5", "changed by the fix"), head=hr))
+    assert _measure(out)["unmeasured"] == {"no-round1": 1}
+    (reviews / "pair-r2.md").unlink()
+    (reviews / "13-r2.md").write_text(_old_report("#13", 2, _blocker("src/a.py:5", "of #13"), head=hr))
+    sys.path.insert(0, str(out / "scripts/process"))
+    try:
+        for m in ("process_kpis", "check_review", "check_issues"):
+            sys.modules.pop(m, None)
+        import process_kpis  # noqa: PLC0415
+        window = process_kpis._window_works([12], process_kpis._plans(out))
+        assert "13" not in window
+        assert process_kpis._blocks_since_round1(out, window)["unchanged"] == 0
+    finally:
+        sys.path.remove(str(out / "scripts/process"))
+        for m in ("process_kpis", "check_review", "check_issues"):
+            sys.modules.pop(m, None)
+
+
+def test_old_code_survives_a_nul_in_a_place(render, tmp_path):
+    out, h1, hr = _old_repo(render, tmp_path)
+    _journal(out, "".join(f"REVIEW work=9 tier=2 reviewer=r model=m independence=bundle,non-implementing "
+                          f"base={'0' * 40} head={h} verdict=block round={r}\n" for h, r in ((h1, 1), (hr, 2))))
+    reviews = out / ".process-work/reviews"
+    reviews.mkdir(parents=True)
+    (reviews / "9-r2.md").write_text(_old_report("#9", 2, _blocker("src/a%00.py:1", "nul"), head=hr))
+    assert _measure(out)["unmeasured"] == {"git-failed": 1}
