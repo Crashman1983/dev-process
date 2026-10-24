@@ -1327,6 +1327,37 @@ def test_a_path_with_two_byte_sets_is_refused(ev_mod, monkeypatch):
     assert any(SHARD in p and "twice" in p for p in problems), problems
 
 
+def _git_dir(repo):
+    return repo / _git(repo, "rev-parse", "--git-dir")
+
+
+@pytest.mark.parametrize("lock", ["index.lock", "refs/heads/7-widget.lock"])
+def test_a_failed_index_or_ref_update_fails_and_loses_nothing(repo, lock):
+    """#308 R5: the index was reset after the ref moved and its failure ignored — exit 0,
+    then the journal and report showed as staged deletions. Now a failing step exits
+    non-zero, HEAD names a commit only when the index matches it, and nothing is lost."""
+    report = _report(repo)
+    before = _git(repo, "rev-parse", "HEAD")
+    held = _git_dir(repo) / lock
+    held.write_text("")
+    try:
+        r = _attest(repo, "--with", report, "--commit")
+    finally:
+        held.unlink()
+    assert r.returncode != 0, r.stdout + r.stderr
+    assert _git(repo, "rev-parse", "HEAD") == before
+    assert "verdict=pass" in (repo / SHARD).read_text() and (repo / report).is_file()
+    staged = _git(repo, "diff", "--cached", "--name-status")
+    assert not any(ln.startswith("D") for ln in staged.splitlines()), staged
+
+
+def test_after_a_commit_the_index_matches_head(repo):
+    """The attestation's paths are staged as committed; nothing shows as a staged change."""
+    r = _attest(repo, "--with", _report(repo), "--commit")
+    assert r.returncode == 0, r.stderr
+    assert _git(repo, "diff", "--cached", "--name-status") == ""
+
+
 @pytest.mark.skipif(not hasattr(os, "symlink"), reason="needs symlinks")
 def test_a_symlinked_override_journal_dir_is_refused(repo):
     """#308 R4: `journal_dir.resolve()` removed a symlink parent before the path owner

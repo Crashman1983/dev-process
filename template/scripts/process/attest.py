@@ -507,11 +507,18 @@ def _commit_bytes(root: Path, files: list[tuple[str, bytes | None]], removals: l
                   message: str) -> bool:
     """One commit whose tree is HEAD plus exactly these blobs (and removals), via a private
     index and a compare-and-swap update of HEAD. Foreign staged changes stay in the real
-    index; only the attestation's paths are reset to the committed state afterwards."""
+    index and out of the commit. The real index gets the attestation's bytes first: when
+    that fails (a held `index.lock`) HEAD has not moved; after HEAD moved no step is left
+    that can fail, so HEAD never names a commit the index contradicts (#308 R5)."""
     old = _git(root, "rev-parse", "--verify", "HEAD")
     if not old:
         print("attest: no HEAD to commit onto", file=sys.stderr)
         return False
+    if not _stage_bytes(root, files):
+        print("attest: the index could not take the attestation — nothing committed; the "
+              "line is written, rerun the commit when the index is free", file=sys.stderr)
+        return False
+    paths = list(dict.fromkeys([rel for rel, _data in files] + removals))
     tmp_root = root / ".process-work" / "tmp"
     try:
         tmp_root.mkdir(parents=True, exist_ok=True)
@@ -542,15 +549,14 @@ def _commit_bytes(root: Path, files: list[tuple[str, bytes | None]], removals: l
             moved = subprocess.run(["git", "-C", str(root), "update-ref", "-m", message,
                                     "HEAD", new, old], capture_output=True, text=True, env=env)
             if moved.returncode:
-                print(f"attest: git update-ref failed: {moved.stderr.strip()}", file=sys.stderr)
+                print(f"attest: git update-ref failed: {moved.stderr.strip()} — the attestation "
+                      f"is written and staged, nothing committed; finish with: git commit "
+                      f"-m \"{message}\" -- {' '.join(paths)}", file=sys.stderr)
                 return False
     except OSError as exc:
-        print(f"attest: cannot use the worktree index ({exc})", file=sys.stderr)
+        print(f"attest: cannot use the worktree index ({exc}) — the attestation is written "
+              f"and staged, nothing committed", file=sys.stderr)
         return False
-    paths = list(dict.fromkeys([rel for rel, _data in files] + removals))
-    if paths:
-        subprocess.run(["git", "-C", str(root), "reset", "-q", "--", *paths],
-                       capture_output=True, env=git_environment())
     return True
 
 
