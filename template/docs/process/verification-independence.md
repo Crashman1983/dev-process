@@ -154,7 +154,7 @@ reviewer with tools — one that runs the changed code and its tests against
 the old and the new head, not only reads the bundle: a fix there is where a
 window or a sibling path opens unseen. If the fix changed a contract, the architecture or the
 risk scope, the reviewer says so and asks for a full bundle instead of
-judging the delta. Each blocker carries its `kind=` on the FINDING line
+judging the delta. Each blocker carries its `kind=` and its place `at=` on the FINDING line
 (`knowledge-gap` when the author did not know something that already
 existed; `requirement`, `implementation`, `test-gap`, `process`,
 `environment` otherwise) — the count shows which part of the process the
