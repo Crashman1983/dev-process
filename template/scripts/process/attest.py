@@ -603,7 +603,9 @@ def main() -> int:
     # range the line names — known only once build_line has it
     record = next((f for _ln, f in parse_review_lines(line)[0]), {})
     plain = args.work.removesuffix("-plan") if args.plan_review else args.work
-    with_files = [root / rel for rel in args.with_ or []]
+    # the plan `--archive` moves rides like a `--with` record: its archived bytes are the
+    # checked ones, never a read after the check (R5)
+    with_files = [root / rel for rel in [*(args.with_ or []), *([args.archive] if args.archive else [])]]
     # the one file set this attestation fixes: what the evidence reads is what it commits
     carried, carried_problems = attestation_files(root, target, with_files, journal_dir)
     carried_paths = [root / rel for rel, _data in carried]
@@ -668,15 +670,13 @@ def main() -> int:
     if args.archive:
         dest = _archive_target(root, root / args.archive)
         dest.parent.mkdir(parents=True, exist_ok=True)
-        old_rel = os.path.normpath(args.archive).replace(os.sep, "/")
+        old_rel = Path(os.path.normpath(root / args.archive)).relative_to(root).as_posix()
         dest_rel = dest.relative_to(root).as_posix()
         archive_data = dict(files).get(old_rel)
         if archive_data is None:
-            try:
-                archive_data = (root / old_rel).read_bytes()
-            except OSError as exc:
-                print(f"attest: cannot read {args.archive} to archive it ({exc})", file=sys.stderr)
-                return 1
+            print(f"attest: {args.archive} is not in the checked file set — not archived",
+                  file=sys.stderr)
+            return 1
         if not _git_ok(root, "mv", args.archive, str(dest)):
             return 1
         print(f"attest: archived {args.archive} as {_shown(root, dest)}")

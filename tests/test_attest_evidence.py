@@ -1270,6 +1270,63 @@ def test_a_change_after_the_snapshot_never_reaches_the_pass(repo, tmp_path, read
     assert "replaced after the check" not in committed
 
 
+@pytest.mark.parametrize("duplicate", ["today's shard", "today's shard as ./path", "report twice",
+                                       "plan with --with and --archive"])
+def test_a_path_named_twice_is_carried_once(repo, duplicate):
+    """#308 R5: `--with <today's shard>` put the path twice in the file set; the second,
+    old bytes won and the commit held no new REVIEW line. A path is carried once."""
+    _append(repo, SHARD, _review("widget", 1), commit="docs: block")
+    _append(repo, SHARD, _RC + "sites: none — refuted, the finding misread the guard")
+    report = _report(repo)
+    extra = {"today's shard": ("--with", SHARD),
+             "today's shard as ./path": ("--with", "./" + SHARD),
+             "report twice": ("--with", report),
+             "plan with --with and --archive": ("--with", PLAN_FILE, "--archive", PLAN_FILE),
+             }[duplicate]
+    if duplicate.startswith("plan"):
+        _append(repo, PLAN_FILE, "DECISION 2026-10-24 agent: rides the archive")
+    r = _attest(repo, "--with", report, *extra, "--commit")
+    assert r.returncode == 0, r.stderr
+    shard = _git(repo, "show", f"HEAD:{SHARD}")
+    assert "verdict=pass" in shard and _RC in shard
+    assert report in _git(repo, "show", "--name-only", "--format=", "HEAD")
+    if duplicate.startswith("plan"):
+        archived = _git(repo, "show", "--name-status", "--no-renames", "--format=", "HEAD")
+        assert f"D\t{PLAN_FILE}" in archived, archived
+        dest = next(ln.split("\t")[1] for ln in archived.splitlines()
+                    if ln.startswith("A\t") and "archive" in ln)
+        assert "rides the archive" in _git(repo, "show", f"HEAD:{dest}")
+
+
+def test_an_archived_plans_records_come_from_the_snapshot(repo, tmp_path):
+    """#308 R5: `--archive` read the plan from the worktree after the check and committed
+    those bytes. The archived plan is part of the snapshot like any `--with` record."""
+    _append(repo, PLAN_FILE, "DECISION 2026-10-24 agent: checked before the move")
+    snapshot = (repo / PLAN_FILE).read_text(encoding="utf-8")
+    r = _attest_after_snapshot(repo, tmp_path,
+                               [(PLAN_FILE, "add", "\nDECISION 2026-10-24 agent: added after\n")],
+                               "--with", _report(repo), "--archive", PLAN_FILE, "--commit")
+    if r.returncode:
+        assert "verdict=pass" not in _git(repo, "log", "-p", "-1")
+        return
+    archived = _git(repo, "show", "--name-status", "--no-renames", "--format=", "HEAD")
+    dest = next(ln.split("\t")[1] for ln in archived.splitlines()
+                if ln.startswith("A\t") and "archive" in ln)
+    assert _git(repo, "show", f"HEAD:{dest}") == snapshot.rstrip("\n")
+
+
+def test_a_path_with_two_byte_sets_is_refused(ev_mod, monkeypatch):
+    """Two reads of one path that disagree cannot both be the snapshot: refused by name."""
+    mod, out = ev_mod
+    reads = iter([b"one\n", b"two\n"])
+    monkeypatch.setattr(mod, "_repo_file", lambda root, p, may_be_missing: (
+        Path(os.path.normpath(p)).relative_to(root.resolve()).as_posix(), next(reads)))
+    out = out.resolve()
+    files, problems = mod.attestation_files(out, out / SHARD, [out / SHARD])
+    assert files == [(SHARD, b"one\n")]
+    assert any(SHARD in p and "twice" in p for p in problems), problems
+
+
 @pytest.mark.skipif(not hasattr(os, "symlink"), reason="needs symlinks")
 def test_a_symlinked_override_journal_dir_is_refused(repo):
     """#308 R4: `journal_dir.resolve()` removed a symlink parent before the path owner

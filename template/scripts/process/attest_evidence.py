@@ -498,7 +498,8 @@ def attestation_files(root: Path, target: Path, with_files: list[Path],
     None bytes: the journal target does not exist yet (attest writes it). Every path is
     checked by `_repo_file` before it is read; a refusal names it and is returned, never
     swallowed. Only the journal target contributes journal evidence; a report or plan
-    rides the commit but is no shard."""
+    rides the commit but is no shard. A path is carried once: named twice with the same
+    bytes it is one entry, with different bytes it is refused (#308 R5)."""
     root = root.resolve()
     files: list[tuple[str, bytes | None]] = []
     problems: list[str] = []
@@ -516,6 +517,11 @@ def attestation_files(root: Path, target: Path, with_files: list[Path],
         if may_be_missing and record_kind(rel) != "journal" and not (
                 jrel and (rel == jrel or rel.startswith(jrel + "/"))):
             problems.append(f"{rel} is no journal shard — the attestation writes only its journal")
+            continue
+        seen = dict(files)
+        if rel in seen:
+            if seen[rel] != got:
+                problems.append(f"{rel} is named twice and read with different bytes — refused")
             continue
         files.append((rel, got))
     return files, problems
