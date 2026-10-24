@@ -835,6 +835,64 @@ def test_commit_carries_only_the_attestation(render, tmp_path):
     assert _git(out, "diff", "--cached", "--name-only").stdout.strip() == "widget.py"
 
 
+# --- #308 fix round 6b: the attest commit runs git commit's hooks (design §11) ---
+def _hook(out, name, body):
+    hook = out / ".git/hooks" / name
+    hook.parent.mkdir(exist_ok=True)
+    hook.write_text("#!/bin/sh\n" + body)
+    hook.chmod(0o755)
+
+
+@pytest.mark.parametrize("name", ["pre-commit", "prepare-commit-msg", "commit-msg"])
+def test_a_refusing_commit_hook_stops_the_attest_commit(render, tmp_path, name):
+    """`commit-tree` runs no hook: every attest commit went past the project's pre-commit
+    (no-commit-to-branch, among others). A hook that refuses leaves HEAD at `old`, the line
+    written and staged (I8), and names the hook."""
+    out, base, head = _repo(render, tmp_path)
+    _hook(out, name, "echo 'hook says no' >&2\nexit 1\n")
+
+    r = _attest(out, "--base", base, "--head", head, "--commit")
+
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert _git(out, "rev-parse", "HEAD").stdout.strip() == head
+    assert name in r.stderr and "hook says no" in r.stderr
+    assert ".process-work/journal/feature/" in _git(out, "diff", "--cached", "--name-only").stdout
+
+
+def test_the_commit_hooks_see_the_attestation_and_its_message(render, tmp_path):
+    """pre-commit sees the commit's own index (the snapshot's files, no foreign staging),
+    commit-msg gets the message and may edit it, as `git commit -- <paths>` would."""
+    out, base, head = _repo(render, tmp_path)
+    (out / "widget.py").write_text("def widget():\n    return 43\n")
+    _git(out, "add", "widget.py")
+    seen = tmp_path / "seen.txt"
+    _hook(out, "pre-commit", f"git diff --cached --name-only HEAD > '{seen}'\n")
+    _hook(out, "commit-msg", "grep -q '^docs: attest widget round 1' \"$1\" || exit 1\n"
+                             "printf '\\nRefs: hook\\n' >> \"$1\"\n")
+
+    r = _attest(out, "--base", base, "--head", head, "--commit")
+
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert sorted(seen.read_text().split()) == sorted(
+        _git(out, "show", "--name-only", "--format=", "HEAD").stdout.split())
+    assert "widget.py" not in seen.read_text()
+    assert _git(out, "log", "-1", "--format=%B").stdout.strip().endswith("Refs: hook")
+
+
+def test_a_hook_that_changes_the_commits_index_is_refused(render, tmp_path):
+    """The commit is `T1`, built from the snapshot (I2): a hook that stages more into the
+    commit's index would commit bytes no check saw — refused, HEAD stays `old`."""
+    out, base, head = _repo(render, tmp_path)
+    (out / "widget.py").write_text("def widget():\n    return 43\n")
+    _hook(out, "pre-commit", "git add widget.py\n")
+
+    r = _attest(out, "--base", base, "--head", head, "--commit")
+
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert _git(out, "rev-parse", "HEAD").stdout.strip() == head
+    assert "pre-commit" in r.stderr
+
+
 # --- #308 fix round 6: the archive is no step of attest (design §10) ---
 # RED: red against the product code of 032f2cb (log `.process-work/tmp/red-308-r6.log`)
 RED = pytest.mark.xfail(strict=True, reason="#308 fix round 6: red before the change")

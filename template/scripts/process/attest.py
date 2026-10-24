@@ -69,8 +69,11 @@ trees — `E` (the reviewed head plus them: the evidence) and `T0` (`old` plus t
 round counter). The worktree and the index are read after it only to refuse. The write
 phase is a compare-and-swap against the snapshot: attest holds the index's own
 `index.lock`, appends today's shard through a descriptor checked for identity and
-content, and moves HEAD by `update-ref HEAD new old`; a refusal drops the lock and
-leaves HEAD and the index as they were.
+content, runs git commit's hooks (pre-commit, prepare-commit-msg, commit-msg) on the
+commit's own index, and moves HEAD by `update-ref HEAD new old`; a refusal drops the lock
+and leaves HEAD and the index as they were. A hook that refuses stops the commit as a
+failed `update-ref` does: the line written and staged, HEAD unmoved. There is no
+`--no-verify`.
 - R-1: without `--commit` the staging is the product — `--with` stages the blobs of `T1`
   under the lock, no flags only appends the line (no index).
 - R-6: where the platform has no `dir_fd`/`O_NOFOLLOW` (Windows) the descriptor's
@@ -557,7 +560,7 @@ def _write_phase(root: Path, snap, target_rel: str, target_bytes: bytes, message
                  commit: bool, index_too: bool = True) -> bool:
     """The transactional write phase (design §8): every write is a compare-and-swap
     against the snapshot, on the object the check saw. Objects first — the target's blob,
-    `T1` (`T0` plus it) and, with `commit`, `commit-tree T1 -p old`. Then W1: attest takes
+    `T1` (`T0` plus it), with `commit`. Then W1: attest takes
     the real index's `index.lock` itself (`O_CREAT|O_EXCL`; held → refused), checks
     `HEAD == old` and that every snapshot path's index entry is the one recorded, `old`'s or
     the snapshot's blob (I6, I11), and writes the new index — built on a copy in `tempfile`
@@ -565,7 +568,8 @@ def _write_phase(root: Path, snap, target_rel: str, target_bytes: bytes, message
     content (through that descriptor) equal to the snapshot; the line appended through the
     target's descriptor (`O_APPEND`, never `O_TRUNC`), a new shard made by `O_CREAT|O_EXCL`;
     then every path's `lstat` equal to its descriptor's `fstat`. Only then the lock renamed
-    onto the index, and `update-ref HEAD new old`. A refusal before the rename removes the
+    onto the index, git commit's hooks (`_commit_hooks`), `commit-tree T1 -p old` with the
+    message they leave, and `update-ref HEAD new old`. A refusal before the rename removes the
     lock — the only name attest removes in the worktree (I13′) — HEAD stays `old`. Without
     `commit` the phase ends with the index rename (R-1); without `index_too` (no flags) it
     is W2 alone: the line appended, no index, no commit. A split index is refused (R-7)."""
@@ -623,13 +627,11 @@ def _write_phase_steps(root: Path, snap, target_rel: str, target_bytes: bytes, m
         raise _Refused("git hash-object failed — nothing written")
     written = dataclasses.replace(target, blob=blob)
     staged = [written if f.rel == target_rel else f for f in snap.files if f.blob or f.rel == target_rel]
-    new = None
+    t1 = None
     if commit:
         t1 = _tree_with(root, snap.T0, [written])
-        made = _git_run(root, "commit-tree", t1, "-p", snap.old, "-m", message) if t1 else None
-        if made is None or made.returncode:
+        if not t1:
             raise _Refused("git cannot build the attestation's commit — nothing written")
-        new = made.stdout.decode().strip()
     if (_git(root, "config", "--type=bool", "core.splitIndex") or "") == "true":
         raise _Refused("the index is split (core.splitIndex) — attest writes only a whole index "
                        "(R-7); git update-index --no-split-index, then rerun")
@@ -675,16 +677,61 @@ def _write_phase_steps(root: Path, snap, target_rel: str, target_bytes: bytes, m
                 os.unlink(lock)
             except FileNotFoundError:
                 pass
-    if new is None:
+    if t1 is None:
         return True
-    moved = _git_run(root, "update-ref", "-m", message, "HEAD", new, snap.old)
-    if moved.returncode:
-        paths = " ".join(f.rel for f in staged)
-        print(f"attest: git update-ref failed: {moved.stderr.decode(errors='replace').strip()} — the "
-              f"attestation is written and staged, nothing committed; finish with: git commit "
-              f"-m \"{message}\" -- {paths}", file=sys.stderr)
+    paths = " ".join(f.rel for f in staged)
+    final, why = _commit_hooks(root, t1, message)
+    made = _git_run(root, "commit-tree", t1, "-p", snap.old, data=final.encode()) if final else None
+    if made is not None and made.returncode:
+        why = f"git commit-tree failed: {made.stderr.decode(errors='replace').strip()}"
+    moved = None
+    if made is not None and not made.returncode:
+        moved = _git_run(root, "update-ref", "-m", final.splitlines()[0], "HEAD",
+                         made.stdout.decode().strip(), snap.old)
+        if moved.returncode:
+            why = f"git update-ref failed: {moved.stderr.decode(errors='replace').strip()}"
+    if moved is None or moved.returncode:
+        print(f"attest: {why} — the attestation is written and staged, nothing committed; finish "
+              f"with: git commit -m \"{message}\" -- {paths}", file=sys.stderr)
         return False
     return True
+
+
+COMMIT_HOOKS = ("pre-commit", "prepare-commit-msg", "commit-msg")
+
+
+def _commit_hooks(root: Path, t1: str, message: str) -> tuple[str | None, str]:
+    """git commit's hooks for the attest commit (design §11): `commit-tree` runs none, so
+    attest runs them itself by `git hook run`, as `git commit -m <message> -- <paths>` would
+    — `GIT_INDEX_FILE` is a private index of `T1` in `tempfile` (the commit's own index, no
+    foreign staging), the message a file beside it. They run after the write phase, so the
+    worktree already holds the target's line and a hook that stashes and checks out the
+    worktree (the pre-commit framework) rewrites no checked file. A hook that fails, or
+    changes the commit's index (the commit is `T1`, I2), stops the commit; the message a
+    hook leaves is the commit's. (final message, why) — the message None when stopped."""
+    with tempfile.TemporaryDirectory(prefix="attest-hooks-") as tmp:
+        index, msg = os.path.join(tmp, "index"), os.path.join(tmp, "COMMIT_EDITMSG")
+        env = {**git_environment(), "GIT_INDEX_FILE": index, "GIT_EDITOR": ":"}
+        if _git_run(root, "read-tree", t1, env=env).returncode:
+            return None, "git cannot build the commit's index for its hooks"
+        with open(msg, "w", encoding="utf-8") as fh:
+            fh.write(message + "\n")
+        args = {"pre-commit": (), "prepare-commit-msg": (msg, "message"), "commit-msg": (msg,)}
+        for hook in COMMIT_HOOKS:
+            ran = _git_run(root, "hook", "run", "--ignore-missing", hook, "--", *args[hook], env=env, data=b"")
+            said = (ran.stdout + ran.stderr).decode(errors="replace").strip()
+            if said:
+                print(said, file=sys.stderr)
+            if ran.returncode:
+                return None, f"the {hook} hook refused the commit (exit {ran.returncode}: {said[-500:]})"
+            if _git_run(root, "write-tree", env=env).stdout.decode().strip() != t1:
+                return None, (f"the {hook} hook changed the commit's index — the attest commit carries "
+                              f"only the checked snapshot (I2)")
+        with open(msg, "rb") as fh:
+            final = _git_run(root, "stripspace", data=fh.read()).stdout.decode("utf-8", "surrogateescape")
+    if not final.strip():
+        return None, "the commit hooks left an empty commit message"
+    return final, ""
 
 
 def _w1_check(root: Path, snap) -> None:
