@@ -237,13 +237,14 @@ the whole reviews below it merge to, bookkeeping aside); a head that a
 rebase replaced needs such a base, and any other review vouches only for
 the files its own range changed.
 A Spec Kit plan (`specs/<dir>/plan.md`) is no bookkeeping, but two shapes of
-what the attestation commit adds to it are (`attest --with`, `--archive`;
+what the attestation commit adds to it are (`attest --with`;
 `check_review.records_only`): REFUTE, ROOT-CAUSE, REPLAN, REVIEW and dated
 DECISION lines appended after the plan's last line as a paragraph of their
 own (a blank line before them), and an open
 `DECISION NEEDED` answered in place — the same line, same prefix and list
 marker, now a dated DECISION without inline HTML, a table cell or an open
-code span; also its move to the archive with no more than that. Anything
+code span; also its move to the archive with no more than that (a
+`git mv` commit after the attestation — `attest` itself moves no plan). Anything
 else is plan content: prose, an edited, deleted or moved line, a decision or
 a record inserted inside the plan, a record a reader does not see as one
 (inside an unclosed fence or comment, indented as code). Four refute rounds

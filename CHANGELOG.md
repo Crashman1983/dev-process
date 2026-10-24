@@ -17,10 +17,13 @@ A few plain sentences per release: [NEWS.md](NEWS.md). Deutsche Fassung:
 **What changes.**
 - The evidence owner counts a journal line only when it is committed at the reviewed head or lies in a file the same attestation commits (today's shard, `--with`). Only this work's counted evidence — its ROOT-CAUSE and the skip kinds the journal may carry — can refuse a pass; foreign work and kinds read from the plan alone stay invisible. Such a line only in another uncommitted shard is refused with its file and line, never counted silently.
 - Evidence appended to today's shard lands with the REVIEW line as before; no new record list sits beside the evidence owner.
-- `attest` reads every record once and commits exactly the bytes it checked — each path once, the plan `--archive` moves included (its appended records now count as with `--with`). A failing index or ref update exits non-zero and loses nothing.
+- `attest` reads every record once and commits exactly the bytes it checked — each path once. A failing index or ref update exits non-zero and loses nothing.
+- `attest --archive` no longer moves the plan: it refuses before reading anything and names the way to archive. Every way of moving a file after the check could lose another process's bytes; the gate recognizes a plan archived by a later `git mv` commit by its content, as it does after `/finish`.
 - `plan-structure` compares the cell counts of a table's header and delimiter row (GFM) and reports a mismatch as a finding.
 
-**Update.** No steps.
+**Update.** No steps for the template's own commands. A script or habit that runs `attest … --archive <plan>` drops the flag: attest first (with `--with <plan>` when records are appended to it), then `git mv <plan> <archive path> && git commit` — the refusal names the path.
+
+**Changed sections.** `verification-independence.md` (Bind the verdict to the reviewed range)
 
 Details: [Plan](docs/analysis/2026-10-24-v2.77.3.md) #308
 

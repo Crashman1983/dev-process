@@ -9,7 +9,7 @@ Deutsche Fassung: [NEWS-DE.md](NEWS-DE.md).
 
 ## v2.77.3 — A pass cannot rest on evidence that never reaches the repository
 
-A review pass could be authorized by a note in an uncommitted journal file from another day, so the evidence stayed outside the repository. Such a note now counts only when it is committed or travels with the attestation; otherwise the pass is refused and names the file. Only this work's counted notes can block a pass; foreign work and note kinds read from the plan alone stay invisible. The plan check also rejects a Transitions table whose header and separator row have different numbers of columns.
+A review pass could be authorized by a note in an uncommitted journal file from another day, so the evidence stayed outside the repository. Such a note now counts only when it is committed or travels with the attestation; otherwise the pass is refused and names the file. Only this work's counted notes can block a pass; foreign work and note kinds read from the plan alone stay invisible. The attestation no longer moves a finished plan into the archive, because moving a file can lose another program's edits; it says how to archive with a normal commit afterwards, as `/finish` already does. The plan check also rejects a Transitions table whose header and separator row have different numbers of columns.
 
 ## v2.77.2 — A bracket in a test parameter no longer hides a real fix
 
