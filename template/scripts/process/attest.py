@@ -79,7 +79,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling import
 from process_git import git_environment  # noqa: E402
 from check_fix_streak import notes as fix_streak_notes  # noqa: E402
-from attest_evidence import attestation_files, evidence_problems  # noqa: E402  (one file-set owner)
+from attest_evidence import evidence_problems, snapshot  # noqa: E402  (one file-set owner)
 from check_review import (  # noqa: E402  (one owner for grammar, digest, record homes)
     BOOKKEEPING,
     JOURNAL_DIR,
@@ -471,24 +471,12 @@ def _blob(root: Path, data: bytes) -> str | None:
     return r.stdout.decode().strip()
 
 
-def _mode_for(root: Path, rel: str, p: Path) -> str:
-    """The mode of `rel` from HEAD when it is tracked there, else the file's own bit."""
-    r = subprocess.run(["git", "-C", str(root), "ls-tree", "HEAD", "--", rel],
-                       capture_output=True, text=True, env=git_environment())
-    if r.returncode == 0 and r.stdout.strip():
-        return r.stdout.split()[0]
-    try:
-        return "100755" if p.stat().st_mode & 0o111 else "100644"
-    except OSError:
-        return "100644"
-
-
-def _index_entry(root: Path, env: dict, rel: str, data: bytes, p: Path) -> bool:
+def _index_entry(root: Path, env: dict, rel: str, data: bytes, mode: str) -> bool:
     blob = _blob(root, data)
     if blob is None:
         return False
     r = subprocess.run(["git", "-C", str(root), "update-index", "--add", "--cacheinfo",
-                        _mode_for(root, rel, p), blob, rel],
+                        mode, blob, rel],
                        capture_output=True, text=True, env=env)
     if r.returncode:
         print(f"attest: git update-index {rel} failed: {r.stderr.strip()}", file=sys.stderr)
@@ -496,25 +484,27 @@ def _index_entry(root: Path, env: dict, rel: str, data: bytes, p: Path) -> bool:
     return True
 
 
-def _stage_bytes(root: Path, files: list[tuple[str, bytes | None]]) -> bool:
-    """The index gets exactly the checked bytes, never a fresh read of the worktree."""
+def _stage_bytes(root: Path, files: list[tuple[str, bytes | None]], modes: dict[str, str]) -> bool:
+    """The index gets exactly the checked bytes, never a fresh read of the worktree, in
+    the snapshot's mode (I4: 100755 only where `old` holds the path so)."""
     env = git_environment()
-    return all(data is None or _index_entry(root, env, rel, data, root / rel)
+    return all(data is None or _index_entry(root, env, rel, data, modes.get(rel, "100644"))
                for rel, data in files)
 
 
 def _commit_bytes(root: Path, files: list[tuple[str, bytes | None]], removals: list[str],
-                  message: str) -> bool:
-    """One commit whose tree is HEAD plus exactly these blobs (and removals), via a private
-    index and a compare-and-swap update of HEAD. Foreign staged changes stay in the real
-    index and out of the commit. The real index gets the attestation's bytes first: when
-    that fails (a held `index.lock`) HEAD has not moved; after HEAD moved no step is left
-    that can fail, so HEAD never names a commit the index contradicts (#308 R5)."""
-    old = _git(root, "rev-parse", "--verify", "HEAD")
+                  message: str, old: str | None, modes: dict[str, str]) -> bool:
+    """One commit whose tree is `old` plus exactly these blobs (and removals), via a private
+    index and a compare-and-swap update of HEAD from `old`, the HEAD the snapshot read
+    (I3): a commit of another process since then fails the swap. Foreign staged changes
+    stay in the real index and out of the commit. The real index gets the attestation's
+    bytes first: when that fails (a held `index.lock`) HEAD has not moved; after HEAD moved
+    no step is left that can fail, so HEAD never names a commit the index contradicts
+    (#308 R5)."""
     if not old:
         print("attest: no HEAD to commit onto", file=sys.stderr)
         return False
-    if not _stage_bytes(root, files):
+    if not _stage_bytes(root, files, modes):
         print("attest: the index could not take the attestation — nothing committed; the "
               "line is written, rerun the commit when the index is free", file=sys.stderr)
         return False
@@ -532,7 +522,7 @@ def _commit_bytes(root: Path, files: list[tuple[str, bytes | None]], removals: l
                 subprocess.run(["git", "-C", str(root), "update-index", "--force-remove", "--", rel],
                                capture_output=True, env=env)
             for rel, data in files:
-                if data is not None and not _index_entry(root, env, rel, data, root / rel):
+                if data is not None and not _index_entry(root, env, rel, data, modes.get(rel, "100644")):
                     return False
             tree = subprocess.run(["git", "-C", str(root), "write-tree"],
                                   capture_output=True, text=True, env=env)
@@ -612,8 +602,11 @@ def main() -> int:
     # the plan `--archive` moves rides like a `--with` record: its archived bytes are the
     # checked ones, never a read after the check (R5)
     with_files = [root / rel for rel in [*(args.with_ or []), *([args.archive] if args.archive else [])]]
-    # the one file set this attestation fixes: what the evidence reads is what it commits
-    carried, carried_problems = attestation_files(root, target, with_files, journal_dir)
+    # the one snapshot this attestation fixes (`old` first, the file set read through
+    # checked descriptors, design §4): what the evidence reads is what it commits
+    snap = snapshot(root, target, with_files, journal_dir, head=record.get("head"))
+    carried, carried_problems = snap.carried, list(snap.problems)
+    modes = {f.rel: f.mode for f in snap.files}
     carried_paths = [root / rel for rel, _data in carried]
     evidence = evidence_problems(
         root, work=args.work, ids=round_ids(argparse.Namespace(work=plain), root),
@@ -688,15 +681,16 @@ def main() -> int:
         print(f"attest: archived {args.archive} as {_shown(root, dest)}")
         changes = [(rel, data) for rel, data in changes if rel != old_rel]
         changes.append((dest_rel, archive_data))
+        modes[dest_rel] = modes.get(old_rel, "100644")
         removals.append(old_rel)
     if args.commit:
         # only the attestation's own paths: anything else staged stays staged
         # (refutation: a staged source file rode along into this commit)
-        if not _commit_bytes(root, changes, removals, message):
+        if not _commit_bytes(root, changes, removals, message, snap.old, modes):
             return 1
         print(f"attest: committed: {message}")
     else:
-        if not _stage_bytes(root, changes):
+        if not _stage_bytes(root, changes, modes):
             return 1
         print(f'attest: staged — commit with: git commit -m "{message}"')
     return 0

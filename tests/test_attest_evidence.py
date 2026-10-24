@@ -849,6 +849,9 @@ def test_a_struck_criterion_end_to_end(repo):
     assert r.returncode == 1 and "AC-2 is struck" in r.stderr and "`AC-2: struck`" in r.stderr
     confirmed = "- AC-1: `tests/test_widget.py::test_widget`\n- AC-2: struck — seen, logging is #8\n"
     assert _attest(repo, "--with", _report(repo, confirmed)).returncode == 0
+    # that pass staged its report; a report rewritten after it is staged unlike the worktree,
+    # which the snapshot refuses (I6) — unstage it, as the owner would before a rerun
+    _git(repo, "reset", "-q")
     # a confirming line that names a test anyway: the test must stand (refute)
     claimed = confirmed.replace("seen, logging is #8", "`tests/test_widget.py::test_missing`")
     r = _attest(repo, "--with", _report(repo, claimed))
@@ -1347,7 +1350,7 @@ def test_a_path_with_two_byte_sets_is_refused(ev_mod, monkeypatch):
     mod, out = ev_mod
     reads = iter([b"one\n", b"two\n"])
     monkeypatch.setattr(mod, "_repo_file", lambda root, p, may_be_missing: (
-        Path(os.path.normpath(p)).relative_to(root.resolve()).as_posix(), next(reads)))
+        Path(os.path.normpath(p)).relative_to(root.resolve()).as_posix(), next(reads), None))
     out = out.resolve()
     files, problems = mod.attestation_files(out, out / SHARD, [out / SHARD])
     assert files == [(SHARD, b"one\n")]
@@ -2123,7 +2126,6 @@ def test_the_published_tree_is_the_checked_tree_plus_the_line(repo):
     assert added == [r.stdout.splitlines()[0]], added
 
 
-@RED
 def test_commit_between_validation_and_commit(repo, tmp_path):
     """I3, R6 repro: a commit of another process after the snapshot. `_commit_bytes` read
     `old` only then and wrote the older shard over the foreign record. The CAS starts at
@@ -2141,7 +2143,6 @@ def test_commit_between_validation_and_commit(repo, tmp_path):
     assert "FOREIGN-COMMITTED-RECORD" in _git(repo, "show", f"HEAD:{SHARD}")
 
 
-@RED
 @pytest.mark.skipif(not hasattr(os, "symlink"), reason="needs symlinks")
 def test_regular_shard_replacing_tracked_symlink(repo):
     """I4, R6 repro: the mode came from `ls-tree HEAD`, so a regular shard replacing a
@@ -2158,7 +2159,6 @@ def test_regular_shard_replacing_tracked_symlink(repo):
     assert _git(repo, "status", "--porcelain", "--", SHARD) == ""
 
 
-@RED
 def test_a_tracked_executable_record_keeps_100755(repo):
     """I4: the mode is 100644 unless `old` holds the path as 100755 — never the worktree's
     bit (an untracked executable report stays 100644), never 120000 or 160000."""
@@ -2177,7 +2177,6 @@ def test_a_tracked_executable_record_keeps_100755(repo):
     assert _mode(repo, report) == "100644"
 
 
-@RED
 def test_a_shard_swapped_between_lstat_and_open_is_refused(repo, tmp_path):
     """I4: lstat, then open, then fstat — a new inode at the path between the check and the
     open (patched into `os.open`) is refused by name, not read."""
@@ -2189,7 +2188,6 @@ def test_a_shard_swapped_between_lstat_and_open_is_refused(repo, tmp_path):
     assert _head(repo) == old
 
 
-@RED
 def test_the_snapshot_reads_its_bytes_through_the_checked_descriptor(repo, tmp_path):
     """I4: inside `snapshot()` no `read_bytes`/`resolve`/`exists`/`is_file`/`is_symlink` on a
     path below the root — the bytes come from the descriptor the lstat walk checked."""
@@ -2265,7 +2263,6 @@ def test_a_line_appended_to_todays_shard_after_the_snapshot_is_not_lost(repo, tm
     assert _head(repo) == old
 
 
-@RED
 def test_a_shard_staged_unlike_the_worktree_before_the_snapshot_is_refused(repo):
     """I6: an index entry that is neither `old`'s nor the snapshot's blob is foreign work —
     refused at the snapshot, the index untouched."""
@@ -2422,7 +2419,6 @@ def test_a_worktree_mutation_after_the_snapshot_changes_nothing_or_refuses(repo,
 
 # I12 — object readers read objects only: one answer per tree, no path of the worktree
 
-@RED
 def test_the_journal_dir_reader_gives_one_answer_per_tree(repo):
     """I12, R2 repro (plan review R2): `_journal_dir_at` asked `_repo_rel` about the live
     worktree, so one fixed tree gave 1 → 0 → 1 records while the directory was swapped for
@@ -2507,9 +2503,9 @@ def _commit_link(repo, rel):
     assert _mode(repo, rel) == "120000"
 
 
-@RED
 @pytest.mark.skipif(not hasattr(os, "symlink"), reason="needs symlinks")
-@pytest.mark.parametrize("case", list(TREE_LINKS))
+@pytest.mark.parametrize("case", [pytest.param(c, marks=RED) if c == "active plan" else c
+                                  for c in TREE_LINKS])
 def test_a_symlink_entry_in_the_tree_is_refused(repo, case):
     """I12/§10: a 120000 entry as a record, or as the journal directory itself, is no record
     and no empty home — the reader answers None (unknown), and attest refuses."""
@@ -2537,7 +2533,6 @@ def test_a_symlink_beside_a_plan_is_no_refusal(repo):
     assert r.returncode == 0, r.stdout + r.stderr
 
 
-@RED
 def test_counter_and_evidence_read_one_record_set(repo, tmp_path):
     """I12/§9: the round counter and the evidence read one record set per tree — `_records_at`
     runs once per tree, never once per reader."""

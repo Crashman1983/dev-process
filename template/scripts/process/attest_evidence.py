@@ -46,8 +46,10 @@ import fnmatch
 import json
 import os
 import re
+import stat
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass, field
 from typing import NamedTuple
 from pathlib import Path
@@ -61,9 +63,12 @@ from check_review import (  # noqa: E402  (sibling import; the guard above keeps
     REFUTE_LINE,
     REPLAN_LINE,
     JOURNAL_DIR,
+    PLANS_ACTIVE,
     REVIEW_REPORTS,
     ROOT_CAUSE_LINE,
     SKIP_LINE,
+    SPEC_PLAN,
+    SPECS_DIR,
     GitReadError,
     _plan_work_ids,
     _unfenced,
@@ -383,30 +388,52 @@ def _fork(root: Path, head: str) -> str | None:
     return "" if contained else None
 
 
-def _repo_rel(root: Path, p: Path) -> tuple[str | None, str]:
-    """(lexical repo-relative path, why) for one path the attestation may write. No
-    resolve()/realpath on `p`: every component is checked with lstat first, so a symlink
-    (the path or any parent) is refused by name before anything follows it."""
-    root = root.resolve()
-    p = Path(os.path.normpath(p if p.is_absolute() else root / p))
+def _lexical_rel(root: Path, p: Path) -> tuple[str | None, str]:
+    """(repo-relative posix path, why) of `p`, from the strings alone: no lstat, no
+    resolve — `root` is the resolved root the caller holds."""
+    p = Path(os.path.normpath(p if Path(p).is_absolute() else root / p))
     try:
         rel = p.relative_to(root).as_posix()
     except ValueError:
         return None, f"{p} is outside this repository — refused"
     if rel in ("", ".") or rel.startswith("../"):
         return None, f"{p} is outside this repository — refused"
-    cur = root
-    parts = rel.split("/")
-    for i, part in enumerate(parts):
-        cur = cur / part
-        if cur.is_symlink():
-            if i == len(parts) - 1:
-                return None, f"{rel} is a symlink — refused, not followed"
-            return None, (f"{rel} lies under the symlink {cur.relative_to(root).as_posix()} — "
-                          f"refused, not followed")
-        if not cur.exists():
-            break  # a missing component: nothing below it can be a symlink
     return rel, ""
+
+
+def _link_problem(root: Path, rel: str) -> str:
+    """Why `rel` is refused by an lstat walk of its components (a symlink as the path or a
+    parent, a parent that is no directory), or "". A missing component ends the walk:
+    nothing below it can be a link."""
+    parts = rel.split("/")
+    cur = os.fspath(root)
+    for i, part in enumerate(parts):
+        cur = os.path.join(cur, part)
+        try:
+            st = os.lstat(cur)
+        except FileNotFoundError:
+            return ""
+        except OSError as exc:
+            return f"{rel} cannot be checked ({exc}) — refused"
+        if stat.S_ISLNK(st.st_mode):
+            if i == len(parts) - 1:
+                return f"{rel} is a symlink — refused, not followed"
+            return f"{rel} lies under the symlink {'/'.join(parts[:i + 1])} — refused, not followed"
+        if i < len(parts) - 1 and not stat.S_ISDIR(st.st_mode):
+            return f"{'/'.join(parts[:i + 1])} is no directory — {rel} refused"
+    return ""
+
+
+def _repo_rel(root: Path, p: Path) -> tuple[str | None, str]:
+    """(lexical repo-relative path, why) for one path the attestation may write: the
+    strings first (`_lexical_rel`), then every component with lstat (`_link_problem`), so
+    a symlink (the path or any parent) is refused by name before anything follows it."""
+    root = Path(os.path.realpath(root))
+    rel, why = _lexical_rel(root, p)
+    if rel is None:
+        return None, why
+    why = _link_problem(root, rel)
+    return (None, why) if why else (rel, "")
 
 
 def _journal_dir_at(root: Path, ref: str, journal_dir: Path | None) -> list[tuple[str, str]] | None:
@@ -462,31 +489,75 @@ def _at_fork(root: Path, fork: str, journal_dir: Path | None = None
     return (contents([_unfenced(t) for t in journal] + [readable(t) for t in plans]), journal)
 
 
-def _repo_file(root: Path, p: Path, *, may_be_missing: bool
-               ) -> tuple[str, bytes | None] | tuple[None, str]:
-    """(repo-relative path, bytes) of one path the attestation may write, or (None, why).
-    Checked before any read: a symlink, a path below a symlink, a path that resolves
-    outside the repository, or anything that is no regular file is refused by name,
-    never followed. A journal shard not yet written is (rel, None): it is in the commit
-    set, attest creates it after the check."""
-    rel, why = _repo_rel(root, p)
-    if rel is None:
-        return None, why
-    root = root.resolve()
-    p = root / rel
-    if p.exists():
-        if not p.is_file():
-            return None, f"{rel} is not a regular file — refused"
-    elif not may_be_missing:
-        return None, f"{rel} is no file in this repository"
-    if not p.resolve().is_relative_to(root):
-        return None, f"{rel} resolves outside this repository — refused"
-    if not p.exists():
-        return rel, None
+# `dir_fd` and `O_NOFOLLOW` as the platform has them, fixed at import: a later patch of
+# `os.open` (a test) must not switch the walk (R-6: Windows has neither)
+_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
+_DIR_FD = bool(_NOFOLLOW) and os.open in os.supports_dir_fd
+
+
+def _open_in_repo(root: str, rel: str, flags: int, mode: int = 0o644) -> int:
+    """A descriptor of `rel` below `root` that follows no symlink. With `dir_fd` and
+    `O_NOFOLLOW` each directory is opened from the one above it, the file from the last
+    one; elsewhere (R-6) the joined path, the caller's identity check standing in.
+    OSError when a component is a link, missing or no directory."""
+    parts = rel.split("/")
+    if not _DIR_FD:
+        return os.open(os.path.join(root, *parts), flags | _NOFOLLOW | getattr(os, "O_BINARY", 0), mode)
+    directory = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+    dfd = os.open(root, directory)
     try:
-        return rel, p.read_bytes()
+        for part in parts[:-1]:
+            nfd = os.open(part, directory | _NOFOLLOW, dir_fd=dfd)
+            os.close(dfd)
+            dfd = nfd
+        return os.open(parts[-1], flags | _NOFOLLOW, mode, dir_fd=dfd)
+    finally:
+        os.close(dfd)
+
+
+def _read_fd(fd: int) -> bytes:
+    chunks = []
+    while chunk := os.read(fd, 1 << 16):
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+def _repo_file(root: Path, p: Path, *, may_be_missing: bool
+               ) -> tuple[str, bytes | None, tuple[int, int] | None] | tuple[None, str, None]:
+    """(repo-relative path, bytes, (st_dev, st_ino)) of one path the attestation may
+    write, or (None, why, None). Checked before any read (I4, I10): every component by
+    lstat — a symlink, a path below one or no regular file is refused by name, never
+    followed — then the file opened without following a link (`_open_in_repo`) and its
+    fstat matched against that lstat; the bytes come from that descriptor. A journal
+    shard not yet written is (rel, None, None): attest creates it after the check."""
+    root = Path(os.path.realpath(root))
+    rel, why = _lexical_rel(root, p)
+    if rel is None:
+        return None, why, None
+    why = _link_problem(root, rel)
+    if why:
+        return None, why, None
+    try:
+        before = os.lstat(os.path.join(root, *rel.split("/")))
+    except FileNotFoundError:
+        return (rel, None, None) if may_be_missing else (None, f"{rel} is no file in this repository", None)
     except OSError as exc:
-        return None, f"{rel} cannot be read ({exc}) — refused"
+        return None, f"{rel} cannot be checked ({exc}) — refused", None
+    if not stat.S_ISREG(before.st_mode):
+        return None, f"{rel} is not a regular file — refused", None
+    try:
+        fd = _open_in_repo(os.fspath(root), rel, os.O_RDONLY)
+    except OSError as exc:
+        return None, f"{rel} cannot be opened without following a link ({exc}) — refused", None
+    try:
+        now = os.fstat(fd)
+        if not stat.S_ISREG(now.st_mode) or (now.st_dev, now.st_ino) != (before.st_dev, before.st_ino):
+            return None, f"{rel} changed while it was checked (another file at the path) — refused", None
+        return rel, _read_fd(fd), (now.st_dev, now.st_ino)
+    except OSError as exc:
+        return None, f"{rel} cannot be read ({exc}) — refused", None
+    finally:
+        os.close(fd)
 
 
 def attestation_files(root: Path, target: Path, with_files: list[Path],
@@ -500,8 +571,17 @@ def attestation_files(root: Path, target: Path, with_files: list[Path],
     swallowed. Only the journal target contributes journal evidence; a report or plan
     rides the commit but is no shard. A path is carried once: named twice with the same
     bytes it is one entry, with different bytes it is refused (#308 R5)."""
-    root = root.resolve()
-    files: list[tuple[str, bytes | None]] = []
+    reads, problems, _jrel = _attestation_reads(root, target, with_files, journal_dir)
+    return [(rel, data) for rel, data, _ident in reads], problems
+
+
+def _attestation_reads(root: Path, target: Path, with_files: list[Path],
+                       journal_dir: Path | None
+                       ) -> tuple[list[tuple[str, bytes | None, tuple[int, int] | None]], list[str], str]:
+    """`attestation_files` with each file's (st_dev, st_ino), and `jrel`: the attested
+    `--journal-dir` as a repository path ("" for none, or a refused one)."""
+    root = Path(os.path.realpath(root))
+    files: list[tuple[str, bytes | None, tuple[int, int] | None]] = []
     problems: list[str] = []
     jrel = ""
     if journal_dir is not None:
@@ -510,7 +590,7 @@ def attestation_files(root: Path, target: Path, with_files: list[Path],
             problems.append(why)  # the override itself is checked before any shard below it
             jrel = ""
     for p, may_be_missing in [(target, True), *((p, False) for p in with_files)]:
-        rel, got = _repo_file(root, p, may_be_missing=may_be_missing)
+        rel, got, ident = _repo_file(root, p, may_be_missing=may_be_missing)
         if rel is None:
             problems.append(got)
             continue
@@ -518,13 +598,217 @@ def attestation_files(root: Path, target: Path, with_files: list[Path],
                 jrel and (rel == jrel or rel.startswith(jrel + "/"))):
             problems.append(f"{rel} is no journal shard — the attestation writes only its journal")
             continue
-        seen = dict(files)
+        seen = {r: d for r, d, _i in files}
         if rel in seen:
             if seen[rel] != got:
                 problems.append(f"{rel} is named twice and read with different bytes — refused")
             continue
-        files.append((rel, got))
-    return files, problems
+        files.append((rel, got, ident))
+    return files, problems, jrel
+
+
+# --- the snapshot (#308 round 6, design §4) ----------------------------------------
+
+@dataclass(frozen=True)
+class SnapFile:
+    """One file of the snapshot: the bytes read through the checked descriptor and what
+    the write phase compares against."""
+    rel: str
+    data: bytes | None  # None: today's shard, not yet written
+    ident: tuple[int, int] | None  # (st_dev, st_ino) of the descriptor the bytes came from
+    mode: str = "100644"  # 100755 only where `old` holds the path so (I4)
+    index: str | None = None  # the index entry's oid at the snapshot; None: no entry
+    blob: str | None = None  # the oid of `data`
+
+
+@dataclass(frozen=True)
+class Snapshot:
+    """What one attestation fixes before it decides (design §4): `old` (HEAD at the
+    snapshot), the files it carries, `E` (head plus them: the evidence) and `T0` (`old`
+    plus them: the round counter), and the record sets of both trees, read once (§9)."""
+    old: str | None
+    head: str | None
+    files: tuple[SnapFile, ...]
+    jrel: str = ""
+    E: str | None = None
+    T0: str | None = None
+    records_E: list[tuple[str, str]] | None = None
+    records_T0: list[tuple[str, str]] | None = None
+    problems: tuple[str, ...] = ()
+
+    @property
+    def carried(self) -> list[tuple[str, bytes | None]]:
+        return [(f.rel, f.data) for f in self.files]
+
+
+def _rev(root: Path, rev: str) -> str | None:
+    r = _git(root, "rev-parse", "--verify", "-q", rev)
+    return r.stdout.strip() if r.returncode == 0 and r.stdout.strip() else None
+
+
+def _entries(out: str) -> dict[str, tuple[str, str]]:
+    """path -> (mode, oid) of `ls-tree -z` (`<mode> <type> <oid>\\t<path>`) or `ls-files
+    -s -z` (`<mode> <oid> <stage>\\t<path>`) output; a path in conflict maps to ("", "")."""
+    out_map: dict[str, tuple[str, str]] = {}
+    for raw in out.split("\0"):
+        if not raw:
+            continue
+        meta, _tab, path = raw.partition("\t")
+        fields = meta.split()
+        if len(fields) != 3:
+            continue
+        mode, oid = fields[0], fields[2] if fields[1] in ("blob", "tree", "commit") else fields[1]
+        conflict = fields[1] not in ("blob", "tree", "commit") and fields[2] != "0"
+        out_map[path] = ("", "") if conflict or path in out_map else (mode, oid)
+    return out_map
+
+
+def _hash_blob(root: Path, data: bytes) -> str | None:
+    r = subprocess.run(["git", "-C", str(root), "hash-object", "-w", "--stdin"], input=data,
+                       capture_output=True, env=git_environment(), check=False)
+    return r.stdout.decode().strip() if r.returncode == 0 else None
+
+
+def _tree_with(root: Path, base: str | None, files: list[SnapFile]) -> str | None:
+    """The tree of `base` (none: empty) with `files`' blobs laid over it, built in a
+    private index in a temporary directory outside the worktree (I13′). None on failure."""
+    with tempfile.TemporaryDirectory(prefix="attest-index-") as tmp:
+        env = {**git_environment(), "GIT_INDEX_FILE": os.path.join(tmp, "index")}
+
+        def run(*args: str, data: bytes | None = None) -> subprocess.CompletedProcess:
+            return subprocess.run(["git", "-C", str(root), *args], input=data, capture_output=True,
+                                  env=env, check=False)
+        if run("read-tree", *([base] if base else ["--empty"])).returncode:
+            return None
+        info = b"".join(f"{f.mode} {f.blob}\t{f.rel}\0".encode("utf-8", "surrogateescape")
+                        for f in files if f.blob)
+        if info and run("update-index", "--add", "--replace", "-z", "--index-info", data=info).returncode:
+            return None
+        tree = run("write-tree")
+        return tree.stdout.decode().strip() if tree.returncode == 0 else None
+
+
+def snapshot(root: Path, target: Path, with_files: list[Path], journal_dir: Path | None,
+             head: str | None = None) -> Snapshot:
+    """The one snapshot of this attestation (design §4, D-6): `old` first, then the file
+    set (`_attestation_reads`: the path check, the bytes through the checked descriptor),
+    each file's mode from `old` (I4) and its index entry — one that is neither `old`'s
+    nor the snapshot's blob is foreign work and refused (I6) — then the blobs and the two
+    trees `E` (head + files) and `T0` (`old` + files), and their record sets, each read
+    once (`_records_at`, §9). `head` defaults to `old`. No path-level read of the
+    worktree below the root: the bytes come from the descriptors alone."""
+    root = Path(os.path.realpath(root))
+    old = _rev(root, "HEAD^{commit}")
+    head = head or old
+    reads, problems, jrel = _attestation_reads(root, target, with_files, journal_dir)
+    rels = [rel for rel, _data, _ident in reads]
+    at_old = _entries(_git(root, "--literal-pathspecs", "ls-tree", "-z", old, "--", *rels).stdout) \
+        if old and rels else {}
+    index = _entries(_git(root, "--literal-pathspecs", "ls-files", "-s", "-z", "--", *rels).stdout) \
+        if rels else {}
+    files: list[SnapFile] = []
+    for rel, data, ident in reads:
+        blob = _hash_blob(root, data) if data is not None else None
+        if data is not None and blob is None:
+            problems.append(f"{rel}: git hash-object failed — refused")
+            continue
+        was = at_old.get(rel)
+        staged = index.get(rel)
+        if staged == ("", ""):
+            problems.append(f"{rel} is in conflict in the index — resolve it first")
+        elif data is None and was is not None:
+            problems.append(f"{rel} is at HEAD but missing in the worktree — restore it, or "
+                            f"commit its removal first")
+        elif staged is None and was is not None:
+            problems.append(f"{rel} is staged as removed — foreign work in the index; commit or "
+                            f"unstage it first")
+        elif staged is not None and staged[1] not in {blob, was[1] if was else None}:
+            problems.append(f"{rel} is staged with other bytes than the worktree and HEAD hold "
+                            f"({staged[1][:12]}) — foreign work in the index; commit or unstage it "
+                            f"first")
+        files.append(SnapFile(rel, data, ident, "100755" if was and was[0] == "100755" else "100644",
+                              staged[1] if staged else None, blob))
+    t0 = _tree_with(root, old, files)
+    e = t0 if head == old else (_tree_with(root, head, files) if head else None)
+    if t0 is None or e is None:
+        problems.append("git cannot build the snapshot's trees — refused")
+    records_t0 = _records_at(root, t0, RECORD_KINDS, jrel) if t0 else None
+    records_e = records_t0 if e == t0 else (_records_at(root, e, RECORD_KINDS, jrel) if e else None)
+    return Snapshot(old, head, tuple(files), jrel, e, t0, records_e, records_t0, tuple(problems))
+
+
+_LINK_MODES = ("120000", "160000")
+
+
+def _homes(kinds: tuple[str, ...], jrel: str) -> list[str]:
+    homes = []
+    if "journal" in kinds:
+        homes += [JOURNAL_DIR, *([jrel] if jrel and jrel != JOURNAL_DIR else [])]
+    if "plan" in kinds or "plan-archive" in kinds:
+        homes.append(PLANS_ACTIVE)
+    if "spec-plan" in kinds:
+        homes.append(SPECS_DIR)
+    return homes
+
+
+def _records_at(root: Path, ref: str, kinds: tuple[str, ...], jrel: str
+                ) -> list[tuple[str, str]] | None:
+    """(path, text) of every record of `kinds` in the tree `ref` — the journal's shards
+    include the `.md` files under `jrel`, the attested `--journal-dir` — or None when the
+    tree cannot be read or holds no answer (I12, design §9): every prefix of a home or of
+    `jrel` is absent or a directory (040000); a symlink or gitlink that is a record, or on
+    the way to one, is unknown — never its link text, never an empty home (§10,
+    I12-Minor); any other such entry is no record and passed over. Git objects only: no
+    path of the worktree is touched, the pathspecs are literal, a blob is read by oid."""
+    homes = _homes(kinds, jrel)
+    if not homes:
+        return []
+    # one non-recursive listing per depth: given `a` and `a/b` at once, ls-tree shows only
+    # `a/b`, and an absent `a` would look like an absent `a/b`
+    top: dict[str, tuple[str, str]] = {}
+    for depth in range(1, max(len(h.split("/")) for h in homes) + 1):
+        level = list(dict.fromkeys("/".join(h.split("/")[:depth]) for h in homes
+                                   if len(h.split("/")) >= depth))
+        r = _git(root, "--literal-pathspecs", "ls-tree", "-z", ref, "--", *level)
+        if r.returncode:
+            return None
+        top |= _entries(r.stdout)
+    present = []
+    for h in homes:
+        parts = h.split("/")
+        for i in range(len(parts)):
+            entry = top.get("/".join(parts[:i + 1]))
+            if entry is None:
+                break  # absent: nothing below it
+            if entry[0] != "040000":
+                return None
+        else:
+            present.append(h)
+    if not present:
+        return []
+    r = _git(root, "--literal-pathspecs", "ls-tree", "-r", "-z", ref, "--", *present)
+    if r.returncode:
+        return None
+
+    def journal(rel: str) -> bool:
+        return "journal" in kinds and bool(jrel) and rel.startswith(jrel + "/")
+
+    def record(rel: str) -> bool:
+        return record_kind(rel) in kinds or (journal(rel) and rel.endswith(".md"))
+    out: list[tuple[str, str]] = []
+    for rel, (mode, oid) in _entries(r.stdout).items():
+        if mode in _LINK_MODES:
+            if record(rel) or journal(rel) or record(rel + "/x.md") or record(f"{rel}/{SPEC_PLAN}"):
+                return None
+            continue
+        if not record(rel):
+            continue
+        blob = subprocess.run(["git", "-C", str(root), "cat-file", "blob", oid], capture_output=True,
+                              env=git_environment(), check=False)
+        if blob.returncode:
+            return None
+        out.append((rel, blob.stdout.decode("utf-8", errors="replace")))
+    return out
 
 
 def _journal_snapshot(root: Path, head: str, journal_dir: Path | None,
@@ -624,7 +908,7 @@ def _branch_records(root: Path, head: str, blocks: list[tuple[int, str]] | None,
     new = [line for line in rendered if _evidence_keys(line, plan_ids, skip_ids) & new_keys]
     problems: list[str] = []
     for rel, f in record_files(root, ("journal",), journal_dir=journal_dir):
-        safe_rel, data = _repo_file(root, f, may_be_missing=False)
+        safe_rel, data, _ident = _repo_file(root, f, may_be_missing=False)
         if safe_rel is None:
             problems.append(f"{rel}: {data}")
             continue
