@@ -1180,3 +1180,208 @@ def test_baseline_takes_medians_per_merged_work_in_a_window(render, tmp_path):
                         "--window", "2026-10-01:2026-10-20", "--window", "2026-10-20:", "--json"],
                        cwd=out, capture_output=True, text=True)
     assert r.returncode == 0 and len(json.loads(r.stdout)) == 2, r.stdout + r.stderr
+
+
+# --- #311: blocks on lines unchanged since round 1 ------------------------------------------
+
+def _gitx(out: Path, *args: str) -> str:
+    return subprocess.run(["git", "-C", str(out), "-c", "user.email=t@t", "-c", "user.name=t",
+                           "-c", "commit.gpgsign=false", *args], check=True, capture_output=True,
+                          text=True).stdout.strip()
+
+
+def _old_report(work: str, rnd: int, findings: str, head: str | None = None) -> str:
+    art = f"artifact: base={'0' * 40} head={head}\n" if head else ""
+    return f"review: r\nwork: {work}\nround: {rnd}\npublish-waived: test\n{art}\n## Findings\n{findings}"
+
+
+def _old_repo(render, tmp_path):
+    """Round 1 at h1; the fix changes a.py:5, deletes a.py:10, renames b.py → c.py and
+    rewrites a binary file; round 2 at hr."""
+    out = _render(render, tmp_path, github_issues=True)
+    _gitx(out, "init", "-q", "-b", "main")
+    (out / "src").mkdir()
+    (out / "src/a.py").write_text("".join(f"line {i}\n" for i in range(1, 21)))
+    (out / "src/b.py").write_text("".join(f"b {i}\n" for i in range(1, 11)))
+    (out / "src/blob.bin").write_bytes(b"\0\1\2" * 10)
+    _gitx(out, "add", "-A")
+    _gitx(out, "commit", "-qm", "round 1")
+    h1 = _gitx(out, "rev-parse", "HEAD")
+    lines = [f"line {i}\n" for i in range(1, 21)]
+    lines[4] = "line 5 fixed\n"
+    del lines[9]
+    (out / "src/a.py").write_text("".join(lines))
+    _gitx(out, "mv", "src/b.py", "src/c.py")
+    (out / "src/blob.bin").write_bytes(b"\0\3\4" * 10)
+    _gitx(out, "add", "-A")
+    _gitx(out, "commit", "-qm", "fix round 1")
+    hr = _gitx(out, "rev-parse", "HEAD")
+    return out, h1, hr
+
+
+def _measure(out: Path) -> dict:
+    sys.path.insert(0, str(out / "scripts/process"))
+    try:
+        for m in ("process_kpis", "check_review", "check_issues"):
+            sys.modules.pop(m, None)
+        import process_kpis  # noqa: PLC0415
+        return process_kpis._blocks_since_round1(out)
+    finally:
+        sys.path.remove(str(out / "scripts/process"))
+        for m in ("process_kpis", "check_review", "check_issues"):
+            sys.modules.pop(m, None)
+
+
+def _blocker(at: str | None, title: str) -> str:
+    return f"FINDING sev=blocker action=fix issue=- class=judgment{f' at={at}' if at else ''} {title}\n"
+
+
+def test_old_code_blocks_are_judged_by_the_tree_not_by_ancestry(render, tmp_path):
+    """#311 AC-1/AC-3: a block of round 2 on a line round 1 saw is `unchanged`, one on a
+    line the fix touched is `changed`; places git cannot measure are named, never counted."""
+    out, h1, hr = _old_repo(render, tmp_path)
+    _journal(out, f"REVIEW work=9 tier=2 reviewer=r model=m independence=bundle,non-implementing "
+                  f"base={'0' * 40} head={h1} verdict=block round=1\n"
+                  f"REVIEW work=9 tier=2 reviewer=r model=m independence=bundle,non-implementing "
+                  f"base={'0' * 40} head={hr} verdict=block round=2\n")
+    reviews = out / ".process-work/reviews"
+    reviews.mkdir(parents=True)
+    (reviews / "9-r1.md").write_text(_old_report("#9", 1, _blocker("src/a.py:15", "round one, not counted")))
+    findings = "".join(_blocker(at, t) for at, t in (
+        ("src/a.py:5", "changed line"), ("src/a.py:14", "unchanged line"), ("src/a.py:4-6", "range half changed"),
+        ("src/a.py:13-15", "range unchanged"), ("src/a.py:9", "next to a deletion"), ("src/a.py:10", "after a deletion"),
+        ("src/a.py:12", "past the deletion"), ("src/c.py:3", "renamed file"), ("src/blob.bin:1", "binary changed"),
+        ("-", "no single place"), (None, "no place given"), ("src/a.py", "file only"),
+        ("src/a.py:99", "past the end"), ("src/gone.py:1", "file not there"),
+        (".process-work/plans/2026-01-01-x.md:3", "a plan line")))
+    (reviews / "9-r2.md").write_text(_old_report("#9", 2, findings + "FINDING sev=major action=fix issue=- class=judgment at=src/a.py:5 a major, not counted\n", head=hr))
+    got = _measure(out)
+    # unchanged: a.py:14, 13-15, 12 (old 13), c.py:3; changed: a.py:5, 4-6, 9, 10, blob
+    assert (got["unchanged"], got["changed"]) == (4, 5), got
+    assert got["unmeasured"] == {"no-place": 1, "no-at": 1, "no-line": 1, "outside": 2, "not-code": 1}, got
+    assert set(got["per_round"]) == {2} and got["per_work"]["9"]["unchanged"] == 4
+    text = _rounds(out)
+    assert "old-code blocks (rounds >= 2): 4/9 (44 %) unchanged since round 1; not measured: " \
+           "no-at 1, no-place 1, no-line 1, not-code 1, outside 2" in text, text
+    assert "    round 2: 4/9 (44 %)" in text
+
+
+def test_old_code_survives_a_rebase_and_names_a_missing_commit(render, tmp_path):
+    """Round 1's head off the branch's history (a rebase) still judges by content; a head
+    the repository no longer has is `missing-commit`; with two round-1 heads one suffices."""
+    out = _render(render, tmp_path, github_issues=True)
+    _gitx(out, "init", "-q", "-b", "main")
+    (out / "src").mkdir()
+    (out / "src/a.py").write_text("".join(f"line {i}\n" for i in range(1, 21)))
+    _gitx(out, "add", "-A")
+    _gitx(out, "commit", "-qm", "base")
+    _gitx(out, "checkout", "-qb", "work")
+    (out / "src/new.py").write_text("x\n")
+    _gitx(out, "add", "-A")
+    _gitx(out, "commit", "-qm", "work")
+    h1 = _gitx(out, "rev-parse", "HEAD")
+    _gitx(out, "checkout", "-q", "main")
+    (out / "README.x").write_text("main moved\n")
+    _gitx(out, "add", "-A")
+    _gitx(out, "commit", "-qm", "main moves")
+    _gitx(out, "checkout", "-qB", "work2")
+    (out / "src/new.py").write_text("x\n")
+    lines = [f"line {i}\n" for i in range(1, 21)]
+    lines[4] = "line 5 fixed\n"
+    (out / "src/a.py").write_text("".join(lines))
+    _gitx(out, "add", "-A")
+    _gitx(out, "commit", "-qm", "rebased work and fix")
+    hr = _gitx(out, "rev-parse", "HEAD")
+    gone = "e" * 40
+    _journal(out, "".join(f"REVIEW work=9 tier=2 reviewer=r model=m independence=bundle,non-implementing "
+                          f"base={'0' * 40} head={h} verdict=block round={r}\n"
+                          for h, r in ((gone, 1), (h1, 1), (hr, 2))))
+    reviews = out / ".process-work/reviews"
+    reviews.mkdir(parents=True)
+    (reviews / "9-r2.md").write_text(_old_report("#9", 2, _blocker("src/a.py:14", "old") + _blocker("src/a.py:5", "new")))
+    got = _measure(out)
+    assert (got["unchanged"], got["changed"]) == (1, 1), got  # hr from the journal: one head in round 2
+    _journal(out, "".join(f"REVIEW work=9 tier=2 reviewer=r model=m independence=bundle,non-implementing "
+                          f"base={'0' * 40} head={h} verdict=block round={r}\n"
+                          for h, r in ((gone, 1), (hr, 2))))
+    assert _measure(out)["unmeasured"] == {"missing-commit": 2}
+
+
+def test_old_code_joins_slug_and_issue_and_needs_one_head(render, tmp_path):
+    """A report naming `#12` and REVIEW lines naming the plan's slug are one work; a round
+    with two heads and no full-SHA `artifact:` head is `no-head`."""
+    out, h1, hr = _old_repo(render, tmp_path)
+    plans = out / ".process-work/plans"
+    plans.mkdir(parents=True, exist_ok=True)
+    (plans / "2026-01-02-gadget.md").write_text("# Plan\n\ntier: 2\nissue: #12\n")
+    _journal(out, "".join(f"REVIEW work=gadget tier=2 reviewer=r model=m independence=bundle,non-implementing "
+                          f"base={'0' * 40} head={h} verdict=block round={r}\n"
+                          for h, r in ((h1, 1), (hr, 2))))
+    reviews = out / ".process-work/reviews"
+    reviews.mkdir(parents=True)
+    (reviews / "12-r2.md").write_text(_old_report("#12", 2, _blocker("src/a.py:14", "old"), head=hr))
+    assert _measure(out)["unchanged"] == 1
+    # the other way round: the report names the slug, the REVIEW lines the issue
+    _journal(out, "".join(f"REVIEW work=#12 tier=2 reviewer=r model=m independence=bundle,non-implementing "
+                          f"base={'0' * 40} head={h} verdict=block round={r}\n" for h, r in ((h1, 1), (hr, 2))))
+    (reviews / "12-r2.md").write_text(_old_report("gadget", 2, _blocker("src/a.py:14", "old")))
+    assert _measure(out)["unchanged"] == 1  # head from the one REVIEW line of round 2
+    # a named head that is no commit never falls back to the journal's one head
+    (reviews / "12-r2.md").write_text(_old_report("gadget", 2, _blocker("src/a.py:14", "old"), head="HEAD"))
+    assert _measure(out)["unmeasured"] == {"no-head": 1}
+    # two heads in round 2 and none in the report: unknown
+    _journal(out, "".join(f"REVIEW work=#12 tier=2 reviewer=r model=m independence=bundle,non-implementing "
+                          f"base={'0' * 40} head={h} verdict=block round={r}\n"
+                          for h, r in ((h1, 1), (hr, 2), ("f" * 40, 2))))
+    (reviews / "12-r2.md").write_text(_old_report("gadget", 2, _blocker("src/a.py:14", "old")))
+    assert _measure(out)["unmeasured"] == {"no-head": 1}
+
+
+def test_old_code_reads_a_place_as_a_path_and_counts_an_unreadable_report(render, tmp_path):
+    """`pages/[id].tsx` is that file, not a glob over `pages/i.tsx`, `pages/d.tsx`; a report
+    that cannot be read is counted, never dropped (plan review, round 3)."""
+    out = _render(render, tmp_path, github_issues=True)
+    _gitx(out, "init", "-q", "-b", "main")
+    (out / "pages").mkdir()
+    (out / "pages/[id].tsx").write_text("".join(f"l {i}\n" for i in range(1, 6)))
+    (out / "pages/i.tsx").write_text("".join(f"i {i}\n" for i in range(1, 6)))
+    _gitx(out, "add", "-A")
+    _gitx(out, "commit", "-qm", "round 1")
+    h1 = _gitx(out, "rev-parse", "HEAD")
+    (out / "pages/i.tsx").write_text("changed\n" * 5)
+    _gitx(out, "commit", "-qam", "fix touches another file")
+    hr = _gitx(out, "rev-parse", "HEAD")
+    _journal(out, "".join(f"REVIEW work=9 tier=2 reviewer=r model=m independence=bundle,non-implementing "
+                          f"base={'0' * 40} head={h} verdict=block round={r}\n" for h, r in ((h1, 1), (hr, 2))))
+    reviews = out / ".process-work/reviews"
+    reviews.mkdir(parents=True)
+    (reviews / "9-r2.md").write_text(_old_report("#9", 2, _blocker("pages/[id].tsx:2", "dynamic route"), head=hr))
+    got = _measure(out)
+    assert (got["unchanged"], got["changed"]) == (1, 0), got
+    (reviews / "broken.md").mkdir()  # a directory named like a report: it cannot be read
+    assert _measure(out)["unmeasured"] == {"unreadable-report": 1}
+
+
+def test_old_code_without_the_finding_reader_is_not_read(render, tmp_path):
+    out = _render(render, tmp_path)
+    _journal(out, _review(9, 1, "block"))
+    assert "not_read" in _measure(out)
+    assert "old-code blocks (rounds >= 2): not read" in _rounds(out)
+
+
+def test_the_artifact_head_is_read_from_the_header_block_only(render, tmp_path):
+    out = _render(render, tmp_path, github_issues=True)
+    sys.path.insert(0, str(out / "scripts/process"))
+    try:
+        sys.modules.pop("check_review", None)
+        import check_review  # noqa: PLC0415
+        head = "a" * 40
+        assert check_review.report_artifact(f"review: r\nartifact: REVIEW_ARTIFACT base={'0' * 40} head={head} diff=x\n\n# T\n") \
+            == {"base": "0" * 40, "head": head, "diff": "x"}
+        assert check_review.report_artifact(f"review: r\n\n## Prompt\nartifact: base=1 head={head}\n") == {}
+        assert check_review.report_artifact("review: r\n\n") == {}
+    finally:
+        sys.path.remove(str(out / "scripts/process"))
+        sys.modules.pop("check_review", None)
+    doc = (out / "docs/process/modules/telemetry.md").read_text()
+    assert "**old-code blocks** (#311)" in doc and "unreadable-report" in doc
