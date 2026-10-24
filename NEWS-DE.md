@@ -7,6 +7,10 @@ technischen Einzelheiten stehen im [CHANGELOG](CHANGELOG-DE.md).
 
 English version: [NEWS.md](NEWS.md).
 
+## v2.78.0 — Ein Review-Befund sagt, wo er liegt
+
+Ein blockierender Review-Befund nennt jetzt seine Stelle im Code. Damit kann das Kennzahl-Cockpit zeigen, wie viele späte Blocks auf Code liegen, den die erste Review-Runde schon gesehen hat — ein Zeichen, dass Runde 1 etwas übersehen hat oder spätere Runden alten Code neu prüfen. Die Zahl beginnt mit dem ersten Review nach dem Update.
+
 ## v2.77.2 — Eine Klammer im Testparameter verdeckt keinen echten Fix mehr
 
 Ein pytest-Test, dessen Parameterwert Klammern enthält, etwa `test_x[a[b]]`, wurde unter dem falschen Namen gelesen; ein echter Nachweis von Fehlschlag zu Bestehen konnte deshalb verweigert werden. Das Werkzeug, das den Nachweis misst, nutzt jetzt dieselbe Testnamen-Lesart wie das Review-Gate, und ein Parameter darf Klammern, `]`, Kommas, Unicode enthalten oder leer sein.
