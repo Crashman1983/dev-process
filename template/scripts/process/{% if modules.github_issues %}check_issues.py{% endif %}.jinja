@@ -334,18 +334,34 @@ _UNKNOWN_NEW = "which blocker and major findings this branch adds is unknown"
 _BACKFILL = ("issue", "class", "rule", "at")
 
 
-def _old_match(fields: dict, old: list[dict]) -> bool:
-    """Is `fields` a finding that stood at the fork point: one of `old` (not yet matched)
-    equal in every field but `_BACKFILL`, and in those either empty there or the same —
-    so a backfilled line stays old, while a second finding with an old one's title but
-    another place is new (v2.78 plan review). The matched one is used up."""
-    core = {k: v for k, v in fields.items() if k not in _BACKFILL}
-    for i, o in enumerate(old):
-        if ({k: v for k, v in o.items() if k not in _BACKFILL} == core
-                and all(k == "issue" or k not in o or o[k] == fields.get(k) for k in _BACKFILL)):
-            del old[i]
-            return True
-    return False
+def _old_matches(findings: list[dict], old: list[dict]) -> list[bool]:
+    """Per finding of the branch: did it stand at the fork point? A finding matches one of
+    `old` equal in every field but `_BACKFILL`, and in those either empty there or the
+    same — so a backfilled line stays old, while a second finding with an old one's title
+    but another place is new (v2.78 plan review). Each old finding matches once; exact
+    copies (all but `issue=` equal) match first, so a recurrence listed above its old line
+    never takes that line's match (plan review, round 3)."""
+    left = list(old)
+    out = [False] * len(findings)
+
+    def core(f: dict) -> dict:
+        return {k: v for k, v in f.items() if k not in _BACKFILL}
+
+    def exact(f: dict, o: dict) -> bool:
+        return {k: v for k, v in f.items() if k != "issue"} == {k: v for k, v in o.items() if k != "issue"}
+
+    def compatible(f: dict, o: dict) -> bool:
+        return core(f) == core(o) and all(k == "issue" or k not in o or o[k] == f.get(k) for k in _BACKFILL)
+
+    for test in (exact, compatible):
+        for n, f in enumerate(findings):
+            if out[n]:
+                continue
+            hit = next((i for i, o in enumerate(left) if test(f, o)), None)
+            if hit is not None:
+                del left[hit]
+                out[n] = True
+    return out
 
 
 def _forkless_refs(root: Path) -> list[str]:
@@ -391,7 +407,7 @@ def _finding_duty(root: Path, due: dict[str, list[dict]]) -> tuple[list[str], li
     """`class=` (#297) and `at=` (v2.78) on every blocker and major the branch adds: `due`
     holds, per report, its blocker and major findings missing either. A finding that stood
     in the same report at the fork point (merge-base with the integration ref,
-    `_old_match`) is old — a report the branch renamed is read at its old path there; a
+    `_old_matches`) is old — a report the branch renamed is read at its old path there; a
     report absent there is new as a whole. Fails closed on an unreadable or unborn HEAD, an unreadable
     or ambiguous fork point, integration refs that resolve but share no commit with HEAD
     (a shallow clone) and a report git cannot read there. On the integration ref, or in
@@ -429,8 +445,8 @@ def _finding_duty(root: Path, due: dict[str, list[dict]]) -> tuple[list[str], li
             hard.append(f"{rel}: cannot be read at the fork point ({exc}) — {_UNKNOWN_NEW}")
             continue
         old = [f for f, _err, _line in report_findings(before or "") if f]
-        for fields in findings:
-            if _old_match(fields, old):
+        for fields, stood in zip(findings, _old_matches(findings, old)):
+            if stood:
                 continue
             missing = [k for k, owed in (("class", CLASS_DUE), ("at", AT_DUE))
                        if fields["sev"] in owed and k not in fields]

@@ -1149,6 +1149,11 @@ def test_a_same_title_recurrence_is_new(render, tmp_path):
     _report(out, "2026-10-20-old.md", VALID_REPORT + OLD + again)
     r = _run(out)
     assert r.returncode == 1 and r.stdout.count("old cache") == 1 and NO_CLASS in r.stdout, r.stdout
+    # order does not decide: the recurrence listed above the old line leaves the old one old
+    _report(out, "2026-10-20-old.md", VALID_REPORT + again + OLD)
+    r = _run(out)
+    assert r.returncode == 1 and r.stdout.count("old cache") == 1 and NO_CLASS in r.stdout \
+        and "without class= —" in r.stdout, r.stdout  # the recurrence (it has at=) owes class= only
     # an old finding with its own place: a recurrence elsewhere does not match it
     placed = OLD.replace("issue=- ", "issue=- class=judgment at=src/cache.py:12 ")
     out2 = _branch(_render(render, tmp_path / "two"), VALID_REPORT + placed)
