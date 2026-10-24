@@ -450,26 +450,6 @@ def _jrel(root: Path, journal_dir: Path | None) -> str:
     return rel or ""
 
 
-def _journal_dir_at(root: Path, ref: str, journal_dir: Path | None) -> list[tuple[str, str]] | None:
-    """The (path, text) of the attested `--journal-dir`'s files at `ref`, where it lies in
-    the repository apart from the journal `record_texts` reads there anyway; None when git
-    cannot read them. The directory is placed lexically (`_jrel`): a tree's answer does not
-    depend on the worktree (I12, the R2 repro)."""
-    rel = _jrel(root, journal_dir)
-    if not rel or rel == JOURNAL_DIR or rel.startswith(JOURNAL_DIR + "/"):
-        return []
-    r = _git(root, "--literal-pathspecs", "ls-tree", "-r", "-z", "--name-only", ref, "--", rel)
-    if r.returncode != 0:
-        return None
-    out = []
-    for name in (n for n in r.stdout.split("\0") if n.endswith(".md")):
-        text = _show(root, ref, name)
-        if text is None:
-            return None
-        out.append((name, text))
-    return out
-
-
 def _at_fork(root: Path, fork: str, journal_dir: Path | None = None, *, jrel: str | None = None
              ) -> tuple[set[str], list[str]] | None:
     """(the contents of every line at the fork point as the round counter reads blocks, the
@@ -514,10 +494,50 @@ def _open_in_repo(root: str, rel: str, flags: int, mode: int = 0o644) -> int:
         os.close(dfd)
 
 
+def _create_in_repo(root: str, rel: str, flags: int, mode: int = 0o644) -> int:
+    """A descriptor of a new file `rel` below `root` (W2, design §8): the missing
+    directories made from the one above (`mkdir(dir_fd=)`), each opened without
+    following a link, the file by `O_CREAT|O_EXCL` — an existing name is never opened
+    or overwritten (FileExistsError). Elsewhere (R-6) the joined path."""
+    parts = rel.split("/")
+    create = flags | os.O_CREAT | os.O_EXCL | _NOFOLLOW | getattr(os, "O_BINARY", 0)
+    if not _DIR_FD:
+        os.makedirs(os.path.join(root, *parts[:-1]), exist_ok=True)
+        return os.open(os.path.join(root, *parts), create, mode)
+    directory = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+    dfd = os.open(root, directory)
+    try:
+        for part in parts[:-1]:
+            try:
+                os.mkdir(part, dir_fd=dfd)
+            except FileExistsError:
+                pass
+            nfd = os.open(part, directory | _NOFOLLOW, dir_fd=dfd)
+            os.close(dfd)
+            dfd = nfd
+        return os.open(parts[-1], create, mode, dir_fd=dfd)
+    finally:
+        os.close(dfd)
+
+
 def _read_fd(fd: int) -> bytes:
     chunks = []
     while chunk := os.read(fd, 1 << 16):
         chunks.append(chunk)
+    return b"".join(chunks)
+
+
+def _read_at_start(fd: int) -> bytes:
+    """Every byte of the file behind `fd` from offset 0, through that descriptor (W2 step
+    2): `os.pread`, looked up at the call; where it is missing (Windows), `lseek` + `read`."""
+    pread = getattr(os, "pread", None)
+    if pread is None:
+        os.lseek(fd, 0, os.SEEK_SET)
+        return _read_fd(fd)
+    chunks, offset = [], 0
+    while chunk := pread(fd, 1 << 16, offset):
+        chunks.append(chunk)
+        offset += len(chunk)
     return b"".join(chunks)
 
 

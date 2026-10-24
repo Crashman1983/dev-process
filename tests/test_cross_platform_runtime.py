@@ -212,11 +212,7 @@ def _smoke_git(root, *args):
                           check=True).stdout.strip()
 
 
-_RED = pytest.mark.xfail(strict=True, reason="#308 fix round 6: the write seam is missing before the change")
-
-
-@pytest.mark.parametrize("case", [pytest.param("swapped", marks=_RED),
-                                  pytest.param("swapped without pread", marks=_RED), "plain commit"])
+@pytest.mark.parametrize("case", ["swapped", "swapped without pread", "plain commit"])
 def test_attest_write_primitives_hold_on_this_os(tmp_path, case):
     """#308 fix round 6 (I4, I11, design §8): the write phase checks today's shard through
     the descriptor it appends with — `(st_dev, st_ino)` and the bytes (`os.pread`, else

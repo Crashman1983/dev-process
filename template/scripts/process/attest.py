@@ -67,9 +67,11 @@ from __future__ import annotations
 
 import argparse
 from collections import Counter
+import dataclasses
 import datetime as dt
 import os
 import re
+import stat
 import subprocess
 import sys
 import tempfile
@@ -80,7 +82,18 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling import
 from process_git import git_environment  # noqa: E402
 from check_fix_streak import notes as fix_streak_notes  # noqa: E402
-from attest_evidence import _lexical_rel, evidence_problems, snapshot  # noqa: E402  (one file-set owner)
+from attest_evidence import (  # noqa: E402  (one file-set owner)
+    _create_in_repo,
+    _entries,
+    _hash_blob,
+    _lexical_rel,
+    _open_in_repo,
+    _read_at_start,
+    _rev,
+    _tree_with,
+    evidence_problems,
+    snapshot,
+)
 from check_review import (  # noqa: E402  (one owner for grammar, digest, record homes)
     BOOKKEEPING,
     JOURNAL_DIR,
@@ -508,94 +521,204 @@ def _archive_only(root: Path, parent: str, commit: str) -> bool:
     return True
 
 
-def _blob(root: Path, data: bytes) -> str | None:
-    """The blob id of exactly `data` — no path, no clean filter, no second read."""
-    r = subprocess.run(["git", "-C", str(root), "hash-object", "-w", "--stdin"],
-                       input=data, capture_output=True, env=git_environment())
-    if r.returncode:
-        print(f"attest: git hash-object failed: {r.stderr.decode(errors='replace').strip()}",
-              file=sys.stderr)
-        return None
-    return r.stdout.decode().strip()
+def _write_seam(stage: str) -> None:
+    """S2, the test seam of the write phase (design §8): a named no-op the phase calls at
+    `before-lock`, `index-checked` and `worktree-checked`; a test patches it to mutate there."""
 
 
-def _index_entry(root: Path, env: dict, rel: str, data: bytes, mode: str) -> bool:
-    blob = _blob(root, data)
-    if blob is None:
-        return False
-    r = subprocess.run(["git", "-C", str(root), "update-index", "--add", "--cacheinfo",
-                        mode, blob, rel],
-                       capture_output=True, text=True, env=env)
-    if r.returncode:
-        print(f"attest: git update-index {rel} failed: {r.stderr.strip()}", file=sys.stderr)
-        return False
-    return True
+class _Refused(Exception):
+    """A refusal inside the write phase: the lock is dropped, HEAD and the index unchanged."""
 
 
-def _stage_bytes(root: Path, files: list[tuple[str, bytes | None]], modes: dict[str, str]) -> bool:
-    """The index gets exactly the checked bytes, never a fresh read of the worktree, in
-    the snapshot's mode (I4: 100755 only where `old` holds the path so)."""
-    env = git_environment()
-    return all(data is None or _index_entry(root, env, rel, data, modes.get(rel, "100644"))
-               for rel, data in files)
+def _git_run(root: Path, *args: str, env: dict | None = None, data: bytes | None = None
+             ) -> subprocess.CompletedProcess:
+    return subprocess.run(["git", "-C", str(root), *args], input=data, capture_output=True,
+                          env=env or git_environment(), check=False)
 
 
-def _commit_bytes(root: Path, files: list[tuple[str, bytes | None]], removals: list[str],
-                  message: str, old: str | None, modes: dict[str, str]) -> bool:
-    """One commit whose tree is `old` plus exactly these blobs (and removals), via a private
-    index and a compare-and-swap update of HEAD from `old`, the HEAD the snapshot read
-    (I3): a commit of another process since then fails the swap. Foreign staged changes
-    stay in the real index and out of the commit. The real index gets the attestation's
-    bytes first: when that fails (a held `index.lock`) HEAD has not moved; after HEAD moved
-    no step is left that can fail, so HEAD never names a commit the index contradicts
-    (#308 R5)."""
-    if not old:
-        print("attest: no HEAD to commit onto", file=sys.stderr)
-        return False
-    if not _stage_bytes(root, files, modes):
-        print("attest: the index could not take the attestation — nothing committed; the "
-              "line is written, rerun the commit when the index is free", file=sys.stderr)
-        return False
-    paths = list(dict.fromkeys([rel for rel, _data in files] + removals))
-    tmp_root = root / ".process-work" / "tmp"
+def _write_phase(root: Path, snap, target_rel: str, target_bytes: bytes, message: str,
+                 commit: bool) -> bool:
+    """The transactional write phase (design §8): every write is a compare-and-swap
+    against the snapshot, on the object the check saw. Objects first — the target's blob,
+    `T1` (`T0` plus it) and, with `commit`, `commit-tree T1 -p old`. Then W1: attest takes
+    the real index's `index.lock` itself (`O_CREAT|O_EXCL`; held → refused), checks
+    `HEAD == old` and that every snapshot path's index entry is the one recorded, `old`'s or
+    the snapshot's blob (I6, I11), and writes the new index — built on a copy in `tempfile`
+    — into the lock. W2: each file opened without following a link, `fstat` identity and
+    content (through that descriptor) equal to the snapshot; the line appended through the
+    target's descriptor (`O_APPEND`, never `O_TRUNC`), a new shard made by `O_CREAT|O_EXCL`;
+    then every path's `lstat` equal to its descriptor's `fstat`. Only then the lock renamed
+    onto the index, and `update-ref HEAD new old`. A refusal before the rename removes the
+    lock — the only name attest removes in the worktree (I13′) — HEAD stays `old`. Without
+    `commit` the phase ends with the index rename (R-1). A split index is refused (R-7)."""
     try:
-        tmp_root.mkdir(parents=True, exist_ok=True)
-        with tempfile.TemporaryDirectory(prefix="attest-index-", dir=tmp_root) as tmp:
-            env = {**git_environment(), "GIT_INDEX_FILE": str(Path(tmp) / "index")}
-            if subprocess.run(["git", "-C", str(root), "read-tree", old],
-                              capture_output=True, env=env).returncode:
-                print("attest: git read-tree failed", file=sys.stderr)
-                return False
-            for rel in removals:
-                subprocess.run(["git", "-C", str(root), "update-index", "--force-remove", "--", rel],
-                               capture_output=True, env=env)
-            for rel, data in files:
-                if data is not None and not _index_entry(root, env, rel, data, modes.get(rel, "100644")):
-                    return False
-            tree = subprocess.run(["git", "-C", str(root), "write-tree"],
-                                  capture_output=True, text=True, env=env)
-            if tree.returncode:
-                print(f"attest: git write-tree failed: {tree.stderr.strip()}", file=sys.stderr)
-                return False
-            commit = subprocess.run(["git", "-C", str(root), "commit-tree", tree.stdout.strip(),
-                                     "-p", old, "-m", message],
-                                    capture_output=True, text=True, env=env)
-            if commit.returncode:
-                print(f"attest: git commit-tree failed: {commit.stderr.strip()}", file=sys.stderr)
-                return False
-            new = commit.stdout.strip()
-            moved = subprocess.run(["git", "-C", str(root), "update-ref", "-m", message,
-                                    "HEAD", new, old], capture_output=True, text=True, env=env)
-            if moved.returncode:
-                print(f"attest: git update-ref failed: {moved.stderr.strip()} — the attestation "
-                      f"is written and staged, nothing committed; finish with: git commit "
-                      f"-m \"{message}\" -- {' '.join(paths)}", file=sys.stderr)
-                return False
+        return _write_phase_steps(root, snap, target_rel, target_bytes, message, commit)
+    except _Refused as why:
+        print(f"attest: REFUSED — {why}", file=sys.stderr)
+        return False
+
+
+def _write_phase_steps(root: Path, snap, target_rel: str, target_bytes: bytes, message: str,
+                       commit: bool) -> bool:
+    if not snap.old:
+        raise _Refused("no HEAD to attest onto — nothing written")
+    target = next(f for f in snap.files if f.rel == target_rel)
+    blob = _hash_blob(root, target_bytes)
+    if blob is None:
+        raise _Refused("git hash-object failed — nothing written")
+    written = dataclasses.replace(target, blob=blob)
+    staged = [written if f.rel == target_rel else f for f in snap.files if f.blob or f.rel == target_rel]
+    new = None
+    if commit:
+        t1 = _tree_with(root, snap.T0, [written])
+        made = _git_run(root, "commit-tree", t1, "-p", snap.old, "-m", message) if t1 else None
+        if made is None or made.returncode:
+            raise _Refused("git cannot build the attestation's commit — nothing written")
+        new = made.stdout.decode().strip()
+    if (_git(root, "config", "--type=bool", "core.splitIndex") or "") == "true":
+        raise _Refused("the index is split (core.splitIndex) — attest writes only a whole index "
+                       "(R-7); git update-index --no-split-index, then rerun")
+    where = _git(root, "rev-parse", "--git-path", "index")
+    if not where:
+        raise _Refused("git cannot name the index — nothing written")
+    index = os.path.normpath(os.path.join(root, where))
+    if any(n.startswith("sharedindex.") for n in os.listdir(os.path.dirname(index))):
+        raise _Refused("the index is split (sharedindex.* beside it) — attest writes only a whole "
+                       "index (R-7); git update-index --no-split-index, then rerun")
+    lock = index + ".lock"
+    _write_seam("before-lock")
+    try:
+        lock_fd: int | None = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY | getattr(os, "O_BINARY", 0),
+                                      0o666)
+    except FileExistsError:
+        raise _Refused(f"{lock} is held by another git process — nothing written; rerun when it "
+                       f"is free") from None
     except OSError as exc:
-        print(f"attest: cannot use the worktree index ({exc}) — the attestation is written "
-              f"and staged, nothing committed", file=sys.stderr)
+        raise _Refused(f"cannot take {lock} ({exc}) — nothing written") from None
+    fds: dict[str, int] = {}
+    done = False
+    try:
+        _w1_check(root, snap)
+        _write_seam("index-checked")
+        data = _new_index(root, index, staged)
+        view = memoryview(data)
+        while view:
+            view = view[os.write(lock_fd, view):]
+        os.fsync(lock_fd)
+        os.close(lock_fd)
+        lock_fd = None
+        _w2_check(root, snap, target_rel, fds)
+        _write_seam("worktree-checked")
+        if target.data is None:  # today's shard, new: created only now, beside nothing
+            try:
+                fds[target_rel] = _create_in_repo(os.fspath(root), target_rel, os.O_RDWR | os.O_APPEND)
+            except FileExistsError:
+                raise _Refused(f"{target_rel} appeared after the snapshot — nothing written; rerun "
+                               f"attest") from None
+            except OSError as exc:
+                raise _Refused(f"{target_rel} cannot be made without following a link ({exc}) — "
+                               f"nothing written") from None
+        view = memoryview(target_bytes[len(target.data or b""):])
+        while view:
+            view = view[os.write(fds[target_rel], view):]
+        for rel, fd in fds.items():
+            st = os.fstat(fd)
+            try:
+                now = os.lstat(os.path.join(root, *rel.split("/")))
+            except OSError:
+                now = None
+            if now is None or (now.st_dev, now.st_ino) != (st.st_dev, st.st_ino):
+                raise _Refused(f"{rel} was replaced while attest wrote it — nothing committed, the "
+                               f"index unchanged; the file at the path is untouched")
+        os.replace(lock, index)
+        done = True
+    finally:
+        for fd in fds.values():
+            os.close(fd)
+        if lock_fd is not None:
+            os.close(lock_fd)
+        if not done:
+            try:
+                os.unlink(lock)
+            except FileNotFoundError:
+                pass
+    if new is None:
+        return True
+    moved = _git_run(root, "update-ref", "-m", message, "HEAD", new, snap.old)
+    if moved.returncode:
+        paths = " ".join(f.rel for f in staged)
+        print(f"attest: git update-ref failed: {moved.stderr.decode(errors='replace').strip()} — the "
+              f"attestation is written and staged, nothing committed; finish with: git commit "
+              f"-m \"{message}\" -- {paths}", file=sys.stderr)
         return False
     return True
+
+
+def _w1_check(root: Path, snap) -> None:
+    """W1 steps 1–2 under the lock: HEAD is still `old`, and every snapshot path's index
+    entry is the one recorded at the snapshot, `old`'s or the snapshot's blob — foreign
+    staged bytes are refused, never replaced (I6, I11)."""
+    if _rev(root, "HEAD^{commit}") != snap.old:
+        raise _Refused("HEAD moved since the snapshot (another commit) — nothing written; rerun attest")
+    rels = [f.rel for f in snap.files]
+    now = _entries(_git_run(root, "--literal-pathspecs", "ls-files", "-s", "-z", "--", *rels)
+                   .stdout.decode("utf-8", "surrogateescape"))
+    at_old = _entries(_git_run(root, "--literal-pathspecs", "ls-tree", "-z", snap.old, "--", *rels)
+                      .stdout.decode("utf-8", "surrogateescape"))
+    for f in snap.files:
+        entry = now.get(f.rel)
+        if entry is None:
+            if f.index is not None:
+                raise _Refused(f"{f.rel} was unstaged after the snapshot — foreign work in the index; "
+                               f"nothing written")
+            continue
+        allowed = {f.index, f.blob, at_old.get(f.rel, ("", None))[1]} - {None, ""}
+        if entry == ("", "") or entry[1] not in allowed:
+            raise _Refused(f"{f.rel} was staged with other bytes after the snapshot ({entry[1][:12] or 'a conflict'})"
+                           f" — foreign work in the index; nothing written, the staged bytes kept")
+
+
+def _new_index(root: Path, index: str, staged) -> bytes:
+    """W1 step 3: the real index with exactly the attestation's blobs laid over it, built on
+    a copy in `tempfile` (never in the worktree), returned as bytes for the lock."""
+    with tempfile.TemporaryDirectory(prefix="attest-index-") as tmp:
+        copy = os.path.join(tmp, "index")
+        try:
+            with open(index, "rb") as src:
+                current = src.read()
+        except FileNotFoundError:
+            current = b""
+        if current:
+            with open(copy, "wb") as dst:
+                dst.write(current)
+        env = {**git_environment(), "GIT_INDEX_FILE": copy}
+        info = b"".join(f"{f.mode} {f.blob}\t{f.rel}\0".encode("utf-8", "surrogateescape") for f in staged)
+        if _git_run(root, "update-index", "--add", "--replace", "-z", "--index-info", env=env, data=info).returncode:
+            raise _Refused("git cannot build the new index — nothing written")
+        with open(copy, "rb") as built:
+            return built.read()
+
+
+def _w2_check(root: Path, snap, target_rel: str, fds: dict[str, int]) -> None:
+    """W2 steps 1–2 for the one file the phase writes in the worktree, today's shard:
+    opened for appending without following a link (no `O_CREAT`, no `O_TRUNC`), the
+    descriptor's identity and its bytes equal to the snapshot's. The descriptor stays open
+    in `fds`. A `--with` record is not written in the worktree — the index and the commit
+    take its snapshot blob — so a later change there loses nothing and is not refused."""
+    for f in snap.files:
+        if f.data is None or f.rel != target_rel:
+            continue
+        try:
+            fds[f.rel] = fd = _open_in_repo(os.fspath(root), f.rel, os.O_RDWR | os.O_APPEND)
+        except OSError as exc:
+            raise _Refused(f"{f.rel} cannot be opened without following a link ({exc}) — nothing "
+                           f"written") from None
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode) or (st.st_dev, st.st_ino) != f.ident:
+            raise _Refused(f"{f.rel} is another file than the snapshot read — nothing written; rerun attest")
+        if _read_at_start(fd) != f.data:
+            raise _Refused(f"{f.rel} changed after the snapshot — nothing written, its bytes kept; "
+                           f"rerun attest")
 
 
 def main() -> int:
@@ -670,7 +793,6 @@ def main() -> int:
     record = next((f for _ln, f in parse_review_lines(line)[0]), {})
     plain = args.work.removesuffix("-plan") if args.plan_review else args.work
     carried, carried_problems = snap.carried, list(snap.problems)
-    modes = {f.rel: f.mode for f in snap.files}
     evidence = evidence_problems(
         root, work=args.work, ids=round_ids(argparse.Namespace(work=plain), root, records),
         tier=int(args.tier) if args.tier.isascii() and args.tier.isdigit() else 0,
@@ -718,25 +840,22 @@ def main() -> int:
         appended += args.note.rstrip() + "\n\n"
     appended += line + "\n"
     target_bytes = (target_old or b"") + appended.encode("utf-8")
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_bytes(target_bytes)
-    files = [(target_rel, target_bytes), *carried[1:]]
+    message = f"docs: attest {args.work} round {args.round_}"
+    if not (args.commit or args.with_):
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(target_bytes)
+        print(f"attest: appended to {_shown(root, target)}")
+        _fix_streak_notes(root, args.verdict)
+        return 0
+    # one locked write phase (design §8): only the attestation's own paths — anything else
+    # staged stays staged (refutation: a staged source file rode along into this commit)
+    if not _write_phase(root, snap, target_rel, target_bytes, message, commit=args.commit):
+        return 1
     print(f"attest: appended to {_shown(root, target)}")
     _fix_streak_notes(root, args.verdict)
-    if not (args.commit or args.with_):
-        return 0
-    message = f"docs: attest {args.work} round {args.round_}"
-    changes = list(files)
-    removals: list[str] = []
     if args.commit:
-        # only the attestation's own paths: anything else staged stays staged
-        # (refutation: a staged source file rode along into this commit)
-        if not _commit_bytes(root, changes, removals, message, snap.old, modes):
-            return 1
         print(f"attest: committed: {message}")
     else:
-        if not _stage_bytes(root, changes, modes):
-            return 1
         print(f'attest: staged — commit with: git commit -m "{message}"')
     return 0
 

@@ -1173,16 +1173,19 @@ def _attest_after_snapshot(repo, tmp_path, mutations, *extra):
     return subprocess.run(cmd, cwd=repo, capture_output=True, text=True)
 
 
-def test_evidence_removed_after_the_check_is_still_committed(repo, tmp_path):
+def test_evidence_removed_from_todays_shard_after_the_check_is_refused(repo, tmp_path):
     """#308 R4: validation read today's shard, then `git add`/`git commit` read the
     worktree again. A line removed after the check made the commit a pass without its
-    evidence. The commit now comes from the checked bytes."""
+    evidence. Today's shard is the file attest appends to: W2 compares its bytes through
+    the descriptor with the snapshot (design §8) — refused, the edit kept, HEAD unmoved."""
     _append(repo, SHARD, _review("widget", 1), commit="docs: block")
     _append(repo, SHARD, _RC + "sites: none — refuted, the finding misread the guard")
+    old = _head(repo)
     r = _attest_after_snapshot(repo, tmp_path, [(SHARD, "remove", "ROOT-CAUSE work=widget")],
                                "--with", _report(repo), "--commit")
-    assert r.returncode == 0, r.stderr
-    assert _RC in _git(repo, "show", f"HEAD:{SHARD}")
+    assert r.returncode == 1 and SHARD in r.stderr, r.stdout + r.stderr
+    assert _head(repo) == old
+    assert _RC not in (repo / SHARD).read_text() and "verdict=pass" not in (repo / SHARD).read_text()
 
 
 def test_with_shard_changed_after_the_check_is_still_committed(repo, tmp_path):
@@ -1255,6 +1258,13 @@ def test_a_change_after_the_snapshot_never_reaches_the_pass(repo, tmp_path, read
         # reader only; nothing of the replaced file is counted or committed
         assert r.returncode == 1 and "holds more than records appended" in r.stderr, r.stderr
         assert "verdict=pass" not in _git(repo, "log", "-p", "-1")
+        return
+    if rel == SHARD:
+        # today's shard is the file attest appends to: W2 finds other bytes than the
+        # snapshot's behind its descriptor (design §8) — refused, the change kept
+        assert r.returncode == 1 and SHARD in r.stderr, r.stdout + r.stderr
+        assert "verdict=pass" not in _git(repo, "log", "-p", "-1")
+        assert "verdict=pass" not in (repo / SHARD).read_text()
         return
     assert r.returncode == 0, r.stderr
     committed = _git(repo, "show", f"HEAD:{rel}")
@@ -1340,9 +1350,12 @@ def _git_dir(repo):
 def test_a_failed_index_or_ref_update_fails_and_loses_nothing(repo, lock):
     """#308 R5: the index was reset after the ref moved and its failure ignored — exit 0,
     then the journal and report showed as staged deletions. Now a failing step exits
-    non-zero, HEAD names a commit only when the index matches it, and nothing is lost."""
+    non-zero, HEAD names a commit only when the index matches it, and nothing is lost.
+    A held `index.lock` is met by W1 before any write (design §8): nothing written. A held
+    ref lock fails `update-ref` after the index rename: the line written and staged (R5)."""
     report = _report(repo)
     before = _git(repo, "rev-parse", "HEAD")
+    shard_before = (repo / SHARD).read_text() if (repo / SHARD).exists() else ""
     held = _git_dir(repo) / lock
     held.write_text("")
     try:
@@ -1351,7 +1364,14 @@ def test_a_failed_index_or_ref_update_fails_and_loses_nothing(repo, lock):
         held.unlink()
     assert r.returncode != 0, r.stdout + r.stderr
     assert _git(repo, "rev-parse", "HEAD") == before
-    assert "verdict=pass" in (repo / SHARD).read_text() and (repo / report).is_file()
+    assert (repo / report).is_file()
+    if lock == "index.lock":
+        assert "index.lock" in r.stderr, r.stderr
+        shard_now = (repo / SHARD).read_text() if (repo / SHARD).exists() else ""
+        assert shard_now == shard_before, shard_now
+    else:
+        assert "verdict=pass" in (repo / SHARD).read_text()
+        assert SHARD in _git(repo, "diff", "--cached", "--name-only")
     staged = _git(repo, "diff", "--cached", "--name-status")
     assert not any(ln.startswith("D") for ln in staged.splitlines()), staged
 
@@ -2220,7 +2240,6 @@ def test_an_uncommitted_block_line_outside_the_snapshot_is_refused(repo):
     assert r.returncode == 0, r.stderr
 
 
-@RED
 def test_a_line_appended_to_todays_shard_after_the_snapshot_is_not_lost(repo, tmp_path):
     """I6: a line another process appends to today's shard after the snapshot was
     overwritten by `write_bytes(snapshot + line)`. Now refused before any write."""
@@ -2250,7 +2269,6 @@ def test_a_shard_staged_unlike_the_worktree_before_the_snapshot_is_refused(repo)
     assert _head(repo) == old
 
 
-@RED
 @pytest.mark.parametrize("seam", ["S1", "before-lock", "index-checked"])
 def test_foreign_staging_of_the_target_shard_after_the_snapshot_is_not_overwritten(repo, tmp_path, seam):
     """I11, Codex repro (plan review R1): a second process stages other bytes of today's shard
@@ -2277,7 +2295,7 @@ def test_foreign_staging_of_the_target_shard_after_the_snapshot_is_not_overwritt
 
 
 @pytest.mark.skipif(not hasattr(os, "symlink"), reason="needs symlinks")
-@pytest.mark.parametrize("seam", ["S1", pytest.param("worktree-checked", marks=RED)])
+@pytest.mark.parametrize("seam", ["S1", "worktree-checked"])
 def test_a_symlink_swapped_in_before_the_write_is_refused(repo, tmp_path, seam):
     """I11, Codex repro (plan review R1): today's shard replaced by a symlink to a file
     outside the repository. `write_bytes` followed it; the fd-bound append does not. At S1
@@ -2515,7 +2533,6 @@ def test_counter_and_evidence_read_one_record_set(repo, tmp_path):
     assert reads and set(reads.values()) == {1}, reads
 
 
-@RED
 @pytest.mark.skipif(not Path("/proc/self/fd").is_dir(), reason="reads dir_fd paths from /proc")
 def test_attest_removes_no_name_in_the_worktree(repo, tmp_path):
     """I13′: attest removes no name in the worktree but its own `index.lock` (or renames it
@@ -2565,7 +2582,6 @@ def test_a_with_path_swapped_for_a_symlink_after_the_snapshot_is_still_checked(r
     assert "src/x.py" not in _git(repo, "ls-tree", "-r", "--name-only", "HEAD")
 
 
-@RED
 @pytest.mark.skipif(not hasattr(os, "symlink"), reason="needs symlinks")
 def test_the_private_index_never_lies_in_the_worktree(repo, tmp_path):
     """The private index was made under `.process-work/tmp/` — through a symlink there, in a
@@ -2583,12 +2599,15 @@ def test_the_private_index_never_lies_in_the_worktree(repo, tmp_path):
 
 
 @pytest.mark.skipif(not hasattr(os, "symlink"), reason="needs symlinks")
-def test_reports_are_chosen_by_their_snapshot_path(repo, tmp_path):
-    """`gather` chose reports by `p.resolve()`: the reports directory swapped for a symlink
-    after the snapshot changed the report set. The choice is lexical on the snapshot."""
+@pytest.mark.parametrize("swap", ["reports dir", "report file"])
+def test_reports_are_chosen_by_their_snapshot_path(repo, tmp_path, swap):
+    """`gather` chose reports by `p.resolve()`: the reports directory or the report swapped
+    for a symlink after the snapshot changed the report set (a report resolving out of the
+    reports' home was no report). The choice is lexical on the snapshot."""
     report = _report(repo)
-    r = _seam(repo, tmp_path, {"seam": "S1", "actions": [["dir-symlink", ".process-work/reviews"]]},
-              "--with", report, "--commit")
+    action = (["dir-symlink", ".process-work/reviews"] if swap == "reports dir"
+              else ["symlink", report, "../../widget.py"])
+    r = _seam(repo, tmp_path, {"seam": "S1", "actions": [action]}, "--with", report, "--commit")
     _fired(r, "S1")
     assert r.returncode == 0, r.stdout + r.stderr
     assert report in _git(repo, "show", "--name-only", "--format=", "HEAD")
