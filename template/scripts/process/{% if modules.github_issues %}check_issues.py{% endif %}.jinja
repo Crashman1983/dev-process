@@ -325,7 +325,7 @@ def _git_ignored(root: Path, paths: list[Path]) -> set[Path]:
 
 
 _NO_RANGE = ("no branch range against an integration ref (on it, or none in this repository) — "
-             "no blocker or major finding is new here, so `class=` is not checked")
+             "no blocker or major finding is new here, so `class=` and `at=` are not checked")
 _UNKNOWN_NEW = "which blocker and major findings this branch adds is unknown"
 
 
@@ -335,33 +335,47 @@ _BACKFILL = ("issue", "class", "rule", "at")
 
 
 def _old_matches(findings: list[dict], old: list[dict]) -> list[bool]:
-    """Per finding of the branch: did it stand at the fork point? A finding matches one of
-    `old` equal in every field but `_BACKFILL`, and in those either empty there or the
-    same — so a backfilled line stays old, while a second finding with an old one's title
-    but another place is new (v2.78 plan review). Each old finding matches once; exact
-    copies (all but `issue=` equal) match first, so a recurrence listed above its old line
-    never takes that line's match (plan review, round 3)."""
-    left = list(old)
-    out = [False] * len(findings)
+    """Per finding of the branch (every one of the report, complete or not): did it stand at
+    the fork point? A finding fits an old one equal in every field but `_BACKFILL`, and in
+    those either empty there or the same — so a backfilled line stays old, while a second
+    finding with an old one's title but another place is new (v2.78 plan review). Each
+    old finding stands for one branch finding: a maximum matching (augmenting paths), so
+    no order of either list decides (cross-model review, round 1). Who gets an old line
+    when several could: exact copies first, then complete findings, then those that owe
+    a field — the old line goes to a finding that owes nothing before it excuses one that
+    does (fail closed)."""
 
     def core(f: dict) -> dict:
         return {k: v for k, v in f.items() if k not in _BACKFILL}
 
+    def fits(f: dict, o: dict) -> bool:
+        return core(f) == core(o) and all(k == "issue" or k not in o or o[k] == f.get(k) for k in _BACKFILL)
+
     def exact(f: dict, o: dict) -> bool:
         return {k: v for k, v in f.items() if k != "issue"} == {k: v for k, v in o.items() if k != "issue"}
 
-    def compatible(f: dict, o: dict) -> bool:
-        return core(f) == core(o) and all(k == "issue" or k not in o or o[k] == f.get(k) for k in _BACKFILL)
+    def complete(f: dict) -> bool:
+        return not ((f["sev"] in CLASS_DUE and "class" not in f) or (f["sev"] in AT_DUE and "at" not in f))
 
-    for test in (exact, compatible):
-        for n, f in enumerate(findings):
-            if out[n]:
+    edges = [[i for i, o in enumerate(old) if fits(f, o)] for f in findings]
+    holder: dict[int, int] = {}  # old index -> branch index
+
+    def augment(n: int, seen: set[int]) -> bool:
+        for i in edges[n]:
+            if i in seen:
                 continue
-            hit = next((i for i, o in enumerate(left) if test(f, o)), None)
-            if hit is not None:
-                del left[hit]
-                out[n] = True
-    return out
+            seen.add(i)
+            if i not in holder or augment(holder[i], seen):
+                holder[i] = n
+                return True
+        return False
+
+    order = sorted(range(len(findings)), key=lambda n: (
+        not any(exact(findings[n], old[i]) for i in edges[n]), not complete(findings[n]), n))
+    for n in order:
+        augment(n, set())
+    matched = set(holder.values())
+    return [n in matched for n in range(len(findings))]
 
 
 def _forkless_refs(root: Path) -> list[str]:
@@ -403,9 +417,12 @@ _DUTY_HINT = {"class": "say what could have caught it (`class=mechanical|testabl
               "at": "say where it is (`at=<path>:<line>`, `<path>:<first>-<last>`, `<path>` or `-`)"}
 
 
-def _finding_duty(root: Path, due: dict[str, list[dict]]) -> tuple[list[str], list[str]]:
+def _finding_duty(root: Path, due: dict[str, list[dict]],
+                  found: dict[str, list[dict]] | None = None) -> tuple[list[str], list[str]]:
     """`class=` (#297) and `at=` (v2.78) on every blocker and major the branch adds: `due`
-    holds, per report, its blocker and major findings missing either. A finding that stood
+    holds, per report, its blocker and major findings missing either; `found` every finding
+    of those reports, matched against the fork point together (`_old_matches`: a complete
+    backfill takes its old line too). A finding that stood
     in the same report at the fork point (merge-base with the integration ref,
     `_old_matches`) is old — a report the branch renamed is read at its old path there; a
     report absent there is new as a whole. Fails closed on an unreadable or unborn HEAD, an unreadable
@@ -417,7 +434,7 @@ def _finding_duty(root: Path, due: dict[str, list[dict]]) -> tuple[list[str], li
     probe = _git_read(root, "rev-parse", "--git-dir")
     if probe.returncode != 0:
         if "not a git repository" in probe.stderr.lower():
-            return [], ["not in a git repository — no branch range, so `class=` is not checked"]
+            return [], ["not in a git repository — no branch range, so `class=` and `at=` are not checked"]
         return [f"git cannot read the repository ({probe.stderr.strip()}) — {_UNKNOWN_NEW}"], []
     head = _git_read(root, "rev-parse", "--verify", "-q", "HEAD^{commit}")
     if head.returncode != 0 or not head.stdout.strip():
@@ -445,8 +462,10 @@ def _finding_duty(root: Path, due: dict[str, list[dict]]) -> tuple[list[str], li
             hard.append(f"{rel}: cannot be read at the fork point ({exc}) — {_UNKNOWN_NEW}")
             continue
         old = [f for f, _err, _line in report_findings(before or "") if f]
-        for fields, stood in zip(findings, _old_matches(findings, old)):
-            if stood:
+        every = (found or {}).get(rel, findings)
+        stood = {id(f) for f, hit in zip(every, _old_matches(every, old)) if hit}
+        for fields in findings:
+            if id(fields) in stood:
                 continue
             missing = [k for k, owed in (("class", CLASS_DUE), ("at", AT_DUE))
                        if fields["sev"] in owed and k not in fields]
@@ -471,6 +490,7 @@ def _check_reports(root: Path, default_repo: str | None) -> tuple[list[str], lis
     soft: list[str] = []
     campaigns: dict[str, dict[str, str]] = {}  # slug -> {report: campaign-issue}
     incomplete: dict[str, list[dict]] = {}  # report -> its blockers and majors without class= or at=
+    found: dict[str, list[dict]] = {}  # report -> all its well-formed findings (the old-line matching)
     candidates = sorted(rdir.glob("*.md"))
     ignored = _git_ignored(root, candidates)
     for p in candidates:
@@ -551,6 +571,7 @@ def _check_reports(root: Path, default_repo: str | None) -> tuple[list[str], lis
                             f"{fields['title']!r}")
             if fields["gate"] == FINDING_GATE_POSSIBLE:
                 ratchet.append(fields["title"])
+            found.setdefault(rel, []).append(fields)
             if (fields["sev"] in CLASS_DUE and "class" not in fields) or (fields["sev"] in AT_DUE and "at" not in fields):
                 incomplete.setdefault(rel, []).append(fields)
         if ratchet:
@@ -569,7 +590,7 @@ def _check_reports(root: Path, default_repo: str | None) -> tuple[list[str], lis
             detail = ", ".join(f"{r}={v}" for r, v in sorted(members.items()))
             hard.append(f"campaign {slug!r} is split across parent issues — "
                         f"a split campaign is not bundled: {detail}")
-    ch, cs = _finding_duty(root, incomplete)
+    ch, cs = _finding_duty(root, incomplete, found)
     return hard + ch, soft + cs
 
 
