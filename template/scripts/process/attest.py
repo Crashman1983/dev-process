@@ -67,6 +67,7 @@ from __future__ import annotations
 import argparse
 from collections import Counter
 import datetime as dt
+import os
 import re
 import subprocess
 import sys
@@ -77,7 +78,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling import
 from process_git import git_environment  # noqa: E402
 from check_fix_streak import notes as fix_streak_notes  # noqa: E402
-from attest_evidence import evidence_problems  # noqa: E402  (the evidence rules' one owner)
+from attest_evidence import attestation_files, evidence_problems  # noqa: E402  (one file-set owner)
 from check_review import (  # noqa: E402  (one owner for grammar, digest, record homes)
     BOOKKEEPING,
     JOURNAL_DIR,
@@ -206,14 +207,20 @@ def archive_problems(args, root: Path) -> list[str]:
 
 def with_problems(args, root: Path) -> list[str]:
     """`--with` carries records only: a source file riding an attestation commit
-    would be code no review saw, under a commit the tools read as bookkeeping."""
+    would be code no review saw, under a commit the tools read as bookkeeping. The
+    path itself is checked by `attestation_files` (one owner); here only the record
+    home is read, lexically, so no symlink is followed."""
     out = []
+    root = root.resolve()
     for rel in args.with_ or []:
-        p = (root / rel).resolve()
-        if not p.is_relative_to(root.resolve()) or not p.is_file():
-            out.append(f"--with: {rel} is no file in this repository")
-            continue
-        r = p.relative_to(root.resolve()).as_posix()
+        p = Path(rel)
+        p = Path(os.path.normpath(p if p.is_absolute() else root / p))
+        try:
+            r = p.relative_to(root).as_posix()
+        except ValueError:
+            continue  # attestation_files names the path
+        if p.is_symlink() or not p.is_file():
+            continue  # attestation_files names the symlink or the missing file
         if not (r.startswith(BOOKKEEPING) or record_kind(r) is not None):
             out.append(f"--with: {rel} is not a process record (under {BOOKKEEPING} or a plan) — "
                        f"commit code with its own message")
@@ -500,16 +507,19 @@ def main() -> int:
     # range the line names — known only once build_line has it
     record = next((f for _ln, f in parse_review_lines(line)[0]), {})
     plain = args.work.removesuffix("-plan") if args.plan_review else args.work
-    with_files = [root / rel for rel in args.with_ or [] if (root / rel).is_file()]
+    with_files = [root / rel for rel in args.with_ or []]
+    # the one file set this attestation fixes: what the evidence reads is what it commits
+    carried, carried_problems = attestation_files(root, target, with_files, journal_dir)
+    carried_paths = [root / rel for rel, _data in carried]
     evidence = evidence_problems(
         root, work=args.work, ids=round_ids(argparse.Namespace(work=plain), root),
         tier=int(args.tier) if args.tier.isascii() and args.tier.isdigit() else 0,
         verdict=args.verdict, independence=args.independence, base=record.get("base"),
         head=record.get("head"), plan_review=args.plan_review, model=args.model,
-        reports=with_files,
+        reports=carried_paths,
         # a plan review asks no code round's records
         blocks=None if args.plan_review else block_lines(args, root, journal_dir),
-        journal_dir=journal_dir, carried=[target, *with_files])
+        journal_dir=journal_dir, carried=carried)
     exception_note = ""
     if args.exception:
         # always written: an owner exception that trips no rule here (a round
@@ -521,8 +531,8 @@ def main() -> int:
         round_issues = round_notes = evidence = []
     for note in round_notes:
         print(f"attest: note — {note}", file=sys.stderr)
-    problems = (round_issues + problems + evidence + archive_problems(args, root)
-                + with_problems(args, root))
+    problems = (round_issues + problems + evidence + carried_problems
+                + archive_problems(args, root) + with_problems(args, root))
     if args.note and any(ln.lstrip().startswith("REVIEW") for ln in args.note.splitlines()):
         problems.append("the note carries REVIEW-looking lines — the validated line is the "
                         "only REVIEW writer")
@@ -549,8 +559,7 @@ def main() -> int:
     _fix_streak_notes(root, args.verdict)
     if not (args.archive or args.commit or args.with_):
         return 0
-    staged = ([str(target)] if target.is_relative_to(root) else []) + [
-        str((root / rel).resolve()) for rel in args.with_ or []]
+    staged = [rel for rel, _data in carried]
     if args.archive:
         dest = _archive_target(root, root / args.archive)
         dest.parent.mkdir(parents=True, exist_ok=True)

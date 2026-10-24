@@ -44,6 +44,7 @@ from __future__ import annotations
 import ast
 import fnmatch
 import json
+import os
 import re
 import subprocess
 import sys
@@ -436,11 +437,81 @@ def _at_fork(root: Path, fork: str, journal_dir: Path | None = None
     return (contents([_unfenced(t) for t in journal] + [readable(t) for t in plans]), journal)
 
 
+def _repo_file(root: Path, p: Path, *, may_be_missing: bool
+               ) -> tuple[str, bytes | None] | tuple[None, str]:
+    """(repo-relative path, bytes) of one path the attestation may write, or (None, why).
+    Checked before any read: a symlink, a path below a symlink, a path that resolves
+    outside the repository, or anything that is no regular file is refused by name,
+    never followed. A journal shard not yet written is (rel, None): it is in the commit
+    set, attest creates it after the check."""
+    root = root.resolve()
+    p = Path(os.path.normpath(p if p.is_absolute() else root / p))
+    try:
+        rel = p.relative_to(root).as_posix()
+    except ValueError:
+        return None, f"{p} is outside this repository — refused"
+    if rel in ("", ".") or rel.startswith("../"):
+        return None, f"{p} is outside this repository — refused"
+    for parent in p.parents:
+        if not parent.is_relative_to(root):
+            break
+        if parent != root and parent.is_symlink():
+            return None, (f"{rel} lies under the symlink {parent.relative_to(root).as_posix()} — "
+                          f"refused, not followed")
+    if p.is_symlink():
+        return None, f"{rel} is a symlink — refused, not followed"
+    if p.exists():
+        if not p.is_file():
+            return None, f"{rel} is not a regular file — refused"
+    elif not may_be_missing:
+        return None, f"{rel} is no file in this repository"
+    if not p.resolve().is_relative_to(root):
+        return None, f"{rel} resolves outside this repository — refused"
+    if not p.exists():
+        return rel, None
+    try:
+        return rel, p.read_bytes()
+    except OSError as exc:
+        return None, f"{rel} cannot be read ({exc}) — refused"
+
+
+def attestation_files(root: Path, target: Path, with_files: list[Path],
+                      journal_dir: Path | None = None
+                      ) -> tuple[list[tuple[str, bytes | None]], list[str]]:
+    """The one file set this attestation fixes: today's journal shard plus every `--with`
+    record, as (repo-relative path, bytes). `attest.py` commits exactly these paths and
+    the evidence check reads exactly these bytes — neither derives the set itself.
+    None bytes: the journal target does not exist yet (attest writes it). Every path is
+    checked by `_repo_file` before it is read; a refusal names it and is returned, never
+    swallowed. Only the journal target contributes journal evidence; a report or plan
+    rides the commit but is no shard."""
+    root = root.resolve()
+    jrel = ""
+    if journal_dir is not None:
+        try:
+            jrel = journal_dir.resolve().relative_to(root).as_posix()
+        except ValueError:
+            pass
+    files: list[tuple[str, bytes | None]] = []
+    problems: list[str] = []
+    for p, may_be_missing in [(target, True), *((p, False) for p in with_files)]:
+        rel, got = _repo_file(root, p, may_be_missing=may_be_missing)
+        if rel is None:
+            problems.append(got)
+            continue
+        if may_be_missing and record_kind(rel) != "journal" and not (
+                jrel and (rel == jrel or rel.startswith(jrel + "/"))):
+            problems.append(f"{rel} is no journal shard — the attestation writes only its journal")
+            continue
+        files.append((rel, got))
+    return files, problems
+
+
 def _journal_snapshot(root: Path, head: str, journal_dir: Path | None,
-                      carried: set[Path] | None) -> list[str] | None:
-    """The journal texts this attestation writes: the journal at `head`, with every file it
-    commits (`carried`: today's shard, `--with`) read from the worktree instead. None when
-    a file it must read cannot be read."""
+                      carried: list[tuple[str, bytes | None]] | None) -> list[str] | None:
+    """The journal texts this attestation writes: the journal at `head`, with every file
+    it commits (`carried`: today's shard, `--with`) taken from the one file set. None
+    when a file it must read cannot be read."""
     files = _journal_at(root, head, journal_dir)
     if files is None:
         return None
@@ -451,21 +522,13 @@ def _journal_snapshot(root: Path, head: str, journal_dir: Path | None,
             jrel = journal_dir.resolve().relative_to(root).as_posix()
         except ValueError:
             pass
-    for p in carried or ():
-        p = p.resolve()
-        try:
-            rel = p.relative_to(root).as_posix()
-        except ValueError:
-            continue  # outside the repository: attest does not commit it
+    for rel, data in carried or ():
         if record_kind(rel) != "journal" and not (
                 jrel and (rel == jrel or rel.startswith(jrel + "/"))):
             continue  # a plan or report: no journal evidence
-        if not p.is_file():
+        if data is None:
             continue  # today's shard may not exist yet; attest writes it after the check
-        try:
-            files[rel] = p.read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            return None
+        files[rel] = data.decode("utf-8", errors="replace")
     return list(files.values())
 
 
@@ -495,7 +558,7 @@ def _journal_keys(texts: list[str], plan_ids: set, skip_ids: set) -> set:
 
 def _branch_records(root: Path, head: str, blocks: list[tuple[int, str]] | None,
                     journal_dir: Path | None, plan_ids: set, skip_ids: set,
-                    carried: set[Path] | None = None
+                    carried: list[tuple[str, bytes | None]] | None = None
                     ) -> tuple[list[int] | None, str, tuple[str, ...]]:
     """(the blocked code rounds the branch adds, its journal records, refusals). The rounds
     are those of `blocks` — `attest.block_lines`, the set the round counter counts (journal
@@ -524,11 +587,11 @@ def _branch_records(root: Path, head: str, blocks: list[tuple[int, str]] | None,
     new = [line for line in rendered if _evidence_keys(line, plan_ids, skip_ids) & new_keys]
     problems: list[str] = []
     for rel, f in record_files(root, ("journal",), journal_dir=journal_dir):
-        try:
-            text = f.read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            return None, "", ()
-        for n, line in enumerate(readable(text).splitlines(), 1):
+        safe_rel, data = _repo_file(root, f, may_be_missing=False)
+        if safe_rel is None:
+            problems.append(f"{rel}: {data}")
+            continue
+        for n, line in enumerate(readable(data.decode("utf-8", errors="replace")).splitlines(), 1):
             missing = _evidence_keys(line, plan_ids, skip_ids) - fork_keys - snapshot_keys
             if missing:
                 problems.append(
@@ -1143,7 +1206,8 @@ def test_status(root: Path, head: str, file: str, name: str, rules: dict) -> str
 def gather(root: Path, *, work: str, ids: set[str], tier: int, verdict: str, independence: str,
            base: str | None, head: str | None, plan_review: bool, model: str,
            reports: list[Path], blocks: list[tuple[int, str]] | None = None,
-           journal_dir: Path | None = None, carried: list[Path] | None = None) -> Evidence:
+           journal_dir: Path | None = None,
+           carried: list[tuple[str, bytes | None]] | None = None) -> Evidence:
     """`ids`: the work's ids (`attest.round_ids` of the plain work, no `-plan`); `blocks`:
     the work's blocking REVIEW lines the round counter counts (`attest.block_lines`) —
     None on a code pass is unknown, and refused where a row asks for it. `carried`: the
@@ -1407,7 +1471,8 @@ def decide(ev: Evidence) -> list[str]:
 def evidence_problems(root: Path, *, work: str, ids: set[str], tier: int, verdict: str,
                       independence: str, base: str | None, head: str | None, plan_review: bool,
                       model: str, reports: list[Path], blocks: list[tuple[int, str]] | None = None,
-                      journal_dir: Path | None = None, carried: list[Path] | None = None) -> list[str]:
+                      journal_dir: Path | None = None,
+                      carried: list[tuple[str, bytes | None]] | None = None) -> list[str]:
     """attest.py's one entry: gather at head, then decide — only for a Tier 2+ pass."""
     if verdict != "pass" or tier < 2:
         return []

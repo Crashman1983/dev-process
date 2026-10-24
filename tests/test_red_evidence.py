@@ -1,4 +1,6 @@
 """red_evidence: the red-before/green-after proof, measured instead of typed (#124)."""
+import datetime as dt
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -35,6 +37,20 @@ def _tool(out: Path, *args: str) -> subprocess.CompletedProcess:
 
 def _journal(out: Path) -> str:
     return "".join(p.read_text(encoding="utf-8") for p in (out / ".process-work/journal").rglob("*.md"))
+
+
+@pytest.mark.skipif(not hasattr(os, "symlink"), reason="needs symlinks")
+def test_a_symlinked_journal_shard_is_refused_before_the_run(render, tmp_path):
+    """The journal path is the same one attest fixes: a symlink is refused by name before
+    the measurement, so no evidence is written through the link."""
+    out, before = _repo(render, tmp_path)
+    shard = out / ".process-work/journal/issue-7" / f"{dt.date.today().isoformat()}.md"
+    shard.parent.mkdir(parents=True, exist_ok=True)
+    shard.symlink_to("../2026-01-01.md")
+    r = _tool(out, "--work", "7", "--round", "1", "--before", before,
+              "--cause", "add subtracted", "--dry-run", "--", sys.executable, "-c", "pass")
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert "symlink" in r.stderr and "issue-7" in r.stderr, r.stderr
 
 
 def test_writes_the_measured_block_and_the_root_cause_line(render, tmp_path):

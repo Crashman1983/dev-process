@@ -60,7 +60,8 @@ sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling import
 from attest import ROOT_CAUSE, _journal_target  # noqa: E402  (one grammar, one journal home)
-from attest_evidence import attest_name, identity_of, resolve_tests, review_policy  # noqa: E402  (the gate's reading)
+from attest_evidence import (  # noqa: E402  (the gate's reading, one journal-path owner)
+    attest_name, attestation_files, identity_of, resolve_tests, review_policy)
 from check_review import JOURNAL_DIR, readable  # noqa: E402
 
 
@@ -567,6 +568,17 @@ def main(argv: list[str]) -> int:
     if problem:
         print(f"red_evidence: {problem}", file=sys.stderr)
         return 2
+    journal_dir = Path(args.journal_dir) if args.journal_dir else Path(JOURNAL_DIR)
+    if not journal_dir.is_absolute():
+        journal_dir = root / journal_dir
+    target = _journal_target(root, journal_dir)
+    # the same path owner as attest: a symlink, a symlink parent, an outside path or a
+    # non-file shard is refused before anything is measured or appended
+    _carried, path_problems = attestation_files(root, target, [], journal_dir)
+    if path_problems:
+        for p in path_problems:
+            print(f"red_evidence: {p}", file=sys.stderr)
+        return 1
     # a kill runs the cleanup too: the temporary worktree is removed in `measure`'s finally
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(128 + signal.SIGTERM))
     class_test = bool(args.cause and args.sites)
@@ -585,8 +597,6 @@ def main(argv: list[str]) -> int:
         print("red_evidence: note — no --sites: the ROOT-CAUSE line names no sibling sites, so it is "
               "no class test for a blocked round (attest's class-test row) — pass --sites \"<file:line, …>\"",
               file=sys.stderr)
-    journal_dir = Path(args.journal_dir) if args.journal_dir else root / JOURNAL_DIR
-    target = _journal_target(root, journal_dir)
     print(text, end="")
     if args.dry_run:
         print(f"red_evidence: dry run — would append to {target}")

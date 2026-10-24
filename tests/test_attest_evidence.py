@@ -6,6 +6,8 @@ import datetime as dt
 import importlib
 import inspect
 import json
+import os
+from pathlib import Path
 import subprocess
 import sys
 
@@ -1059,6 +1061,78 @@ def test_todays_journal_evidence_is_committed_with_the_attestation(repo):
     r = _attest(repo, "--with", _report(repo), "--commit")
     assert r.returncode == 0, r.stderr
     assert "ROOT-CAUSE work=widget round=1" in _git(repo, "show", f"HEAD:{SHARD}")
+
+
+@pytest.mark.skipif(not hasattr(os, "symlink"), reason="needs symlinks")
+def test_a_daily_symlink_does_not_carry_its_target(repo):
+    """#308 R3: the snapshot dereferenced today's shard while the commit wrote its link
+    path. The one file-set owner now refuses the symlink by name, before any read."""
+    _append(repo, SHARD, _review("widget", 1), commit="docs: block")
+    _append(repo, OLDER_SHARD, _RC + "sites: none — refuted, the finding misread the guard")
+    target = repo / OLDER_SHARD
+    (repo / SHARD).unlink()
+    (repo / SHARD).symlink_to(Path(OLDER_SHARD).name)  # same issue shard directory
+    r = _attest(repo, "--with", _report(repo), "--commit")
+    assert r.returncode == 1, r.stderr
+    assert SHARD in r.stderr and "symlink" in r.stderr, r.stderr
+    assert not _git(repo, "diff", "--cached", "--name-only")
+    assert target.is_file() and not target.is_symlink()
+    assert OLDER_SHARD not in _git(repo, "ls-files")
+
+
+@pytest.mark.skipif(not hasattr(os, "symlink"), reason="needs symlinks")
+def test_a_daily_shard_symlinked_to_a_tracked_file_is_refused(repo):
+    """A link to a tracked shard is still a link: the evidence is in that path, not
+    behind today's name — refused, never followed."""
+    _append(repo, SHARD, _review("widget", 1), commit="docs: block")
+    tracked = ".process-work/journal/issue-7/2026-01-01.md"
+    _append(repo, tracked, "skipped class-test work=widget: an old shard",
+            commit="docs: tracked evidence")
+    (repo / SHARD).unlink()
+    (repo / SHARD).symlink_to(Path(tracked).name)
+    r = _attest(repo, "--with", _report(repo), "--commit")
+    assert r.returncode == 1, r.stderr
+    assert SHARD in r.stderr and "symlink" in r.stderr, r.stderr
+    assert _git(repo, "show", f"HEAD:{tracked}").strip() != ""
+
+
+@pytest.mark.skipif(not hasattr(os, "symlink"), reason="needs symlinks")
+def test_a_symlinked_journal_parent_is_refused(repo, tmp_path):
+    """No parent of the path may be a symlink: it could lead outside the shard home."""
+    outside = tmp_path / "outside-journal"
+    outside.mkdir()
+    (outside / f"{dt.date.today().isoformat()}.md").write_text(
+        _review("widget", 1) + "\n" + _RC + "sites: none — outside\n")
+    (repo / ".process-work/journal").mkdir(parents=True, exist_ok=True)
+    (repo / ".process-work/journal/issue-7").symlink_to(outside, target_is_directory=True)
+    r = _attest(repo, "--with", _report(repo), "--commit")
+    assert r.returncode == 1, r.stderr
+    assert SHARD in r.stderr and "symlink" in r.stderr, r.stderr
+    assert not _git(repo, "diff", "--cached", "--name-only")
+
+
+@pytest.mark.skipif(not hasattr(os, "symlink"), reason="needs symlinks")
+def test_a_symlinked_with_report_is_refused(repo):
+    """`--with` carries a record path the commit names; a symlink there is refused, not
+    silently replaced by the file it points at."""
+    real = _report(repo)
+    linked = ".process-work/reviews/widget-linked.md"
+    (repo / linked).symlink_to(Path(real).name)
+    r = _attest(repo, "--with", linked, "--commit")
+    assert r.returncode == 1, r.stderr
+    assert linked in r.stderr and "symlink" in r.stderr, r.stderr
+    assert not _git(repo, "diff", "--cached", "--name-only")
+
+
+def test_a_hardlinked_report_is_carried_by_its_own_path(repo):
+    """A hardlink is a plain file at its own path; the bytes at that path are committed
+    with the attestation, so the evidence and the commit agree."""
+    real = _report(repo)
+    linked = ".process-work/reviews/widget-linked.md"
+    os.link(repo / real, repo / linked)
+    r = _attest(repo, "--with", linked, "--commit")
+    assert r.returncode == 0, r.stderr
+    assert linked in _git(repo, "show", "--name-only", "--format=", "HEAD")
 
 
 EVIDENCE_QUOTATIONS = [
