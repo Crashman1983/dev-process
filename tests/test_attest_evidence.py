@@ -1135,50 +1135,139 @@ def test_a_hardlinked_report_is_carried_by_its_own_path(repo):
     assert linked in _git(repo, "show", "--name-only", "--format=", "HEAD")
 
 
-def _remove_cause_before_commit(repo, *rels):
-    """A hook that edits the evidence after attest validated it, just before the commit:
-    the R4 TOCTOU window. The commit must still carry the checked bytes."""
-    hook = repo / ".git/hooks/pre-commit"
-    hook.parent.mkdir(parents=True, exist_ok=True)
-    hook.write_text(
-        "#!/usr/bin/env python3\n"
-        "import pathlib\n"
-        "import subprocess\n"
-        f"for rel in {list(rels)!r}:\n"
-        "    p = pathlib.Path(rel)\n"
-        "    if not p.is_file():\n"
-        "        continue\n"
-        "    old = p.read_text(encoding='utf-8')\n"
-        "    kept = ''.join(ln for ln in old.splitlines(True) if 'ROOT-CAUSE work=widget' not in ln)\n"
-        "    if kept != old:\n"
-        "        p.write_text(kept, encoding='utf-8')\n"
-        "        subprocess.run(['git', 'add', '--', rel], check=False)\n",
-        encoding="utf-8")
-    hook.chmod(0o755)
+_AFTER_SNAPSHOT = '''\
+import json, os, sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+import attest
+mutations = json.loads(sys.argv[2])
+taken = attest.attestation_files
 
 
-def test_evidence_removed_after_the_check_is_still_committed(repo):
+def taken_then_mutated(*args, **kwargs):
+    out = taken(*args, **kwargs)
+    for rel, op, text in mutations:
+        p = Path(rel)
+        old = p.read_text(encoding="utf-8") if p.is_file() else ""
+        new = {"add": old + text,
+               "remove": "".join(ln for ln in old.splitlines(True) if text not in ln),
+               "replace": text}[op]
+        fresh = p.with_name(p.name + ".new")
+        fresh.write_text(new, encoding="utf-8")
+        os.replace(fresh, p)  # "replace" is a new file at the path, not an edit
+    return out
+
+
+attest.attestation_files = taken_then_mutated
+sys.argv = ["attest.py", *sys.argv[3:]]
+raise SystemExit(attest.main())
+'''
+
+
+def _attest_after_snapshot(repo, tmp_path, mutations, *extra):
+    """attest.py with the files changed right after `attestation_files` took the snapshot:
+    the TOCTOU window between the check and the commit (R4/R5). A hook cannot show it:
+    `commit-tree` runs none."""
+    runner = tmp_path / "after_snapshot.py"
+    runner.write_text(_AFTER_SNAPSHOT, encoding="utf-8")
+    base, head = _range(repo)
+    cmd = [sys.executable, str(runner), str(repo / "scripts/process"), json.dumps(mutations),
+           "--work", "widget", "--tier", "2", "--model", "claude-opus-5",
+           "--independence", "bundle,non-implementing", "--verdict", "pass",
+           "--base", base, "--head", head, *extra, "."]
+    return subprocess.run(cmd, cwd=repo, capture_output=True, text=True)
+
+
+def test_evidence_removed_after_the_check_is_still_committed(repo, tmp_path):
     """#308 R4: validation read today's shard, then `git add`/`git commit` read the
     worktree again. A line removed after the check made the commit a pass without its
     evidence. The commit now comes from the checked bytes."""
     _append(repo, SHARD, _review("widget", 1), commit="docs: block")
     _append(repo, SHARD, _RC + "sites: none — refuted, the finding misread the guard")
-    _remove_cause_before_commit(repo, SHARD)
-    r = _attest(repo, "--with", _report(repo), "--commit")
+    r = _attest_after_snapshot(repo, tmp_path, [(SHARD, "remove", "ROOT-CAUSE work=widget")],
+                               "--with", _report(repo), "--commit")
     assert r.returncode == 0, r.stderr
     assert _RC in _git(repo, "show", f"HEAD:{SHARD}")
 
 
-def test_with_shard_changed_after_the_check_is_still_committed(repo):
+def test_with_shard_changed_after_the_check_is_still_committed(repo, tmp_path):
     """#308 R4, the same window for an older `--with` shard: what the evidence check saw
     is what the attestation commits."""
     _append(repo, SHARD, _review("widget", 1), commit="docs: block")
     _append(repo, OLDER_SHARD, _RC + "sites: none — refuted, the finding misread the guard",
             commit="docs: the cause")
-    _remove_cause_before_commit(repo, OLDER_SHARD)
-    r = _attest(repo, "--with", _report(repo), "--with", OLDER_SHARD, "--commit")
+    r = _attest_after_snapshot(repo, tmp_path, [(OLDER_SHARD, "remove", "ROOT-CAUSE work=widget")],
+                               "--with", _report(repo), "--with", OLDER_SHARD, "--commit")
     assert r.returncode == 0, r.stderr
     assert _RC in _git(repo, "show", f"HEAD:{OLDER_SHARD}")
+
+
+AC_TRACE_SKIP = "skipped ac-trace work=widget: the widget has no criterion left to trace"
+
+
+def test_a_plan_record_appended_after_the_snapshot_does_not_count(repo, tmp_path):
+    """#308 R5: `_plan` read the plan riding `--with` from the worktree and index again.
+    A skip appended after the snapshot authorized a committed pass whose commit held
+    neither the skip nor a report. Only the checked bytes count."""
+    r = _attest_after_snapshot(repo, tmp_path, [(PLAN_FILE, "add", "\n" + AC_TRACE_SKIP + "\n")],
+                               "--with", PLAN_FILE, "--commit")
+    assert r.returncode == 1 and "without its review report" in r.stderr, r.stderr
+    assert "verdict=pass" not in _git(repo, "log", "-p", "-1")
+
+
+# (reader, path, the evidence it reads, the extra args) — each reader of the snapshot
+_CAUSE = ("ROOT-CAUSE work=widget round=1: the guard read a stale flag — sites: none — "
+          "refuted, the finding misread the guard")
+SNAPSHOT_READERS = {
+    "journal today": (SHARD, _CAUSE, ()),
+    "journal older --with": (OLDER_SHARD, _CAUSE, ("--with", OLDER_SHARD)),
+    "plan --with": (PLAN_FILE, AC_TRACE_SKIP, ("--with", PLAN_FILE)),
+    "report": (".process-work/reviews/widget.md", "- AC-1: `tests/test_widget.py::test_widget`", ()),
+}
+
+
+@pytest.mark.parametrize("mutation", ["add", "remove", "replace"])
+@pytest.mark.parametrize("reader", list(SNAPSHOT_READERS))
+def test_a_change_after_the_snapshot_never_reaches_the_pass(repo, tmp_path, reader, mutation):
+    """#308 R5: one snapshot (path -> bytes) is taken once; every reader reads it and the
+    commit writes it. A change after it — a line added, a line removed, the file replaced —
+    is either not seen (the commit holds the checked bytes) or refused; it never counts.
+    "add": the evidence appears only after the snapshot, so the pass is refused.
+    "remove"/"replace": the evidence was checked, so the commit carries it."""
+    rel, evidence, extra = SNAPSHOT_READERS[reader]
+    reader_is_journal = rel in (SHARD, OLDER_SHARD)
+    if reader_is_journal:
+        _append(repo, SHARD, _review("widget", 1), commit="docs: block")
+    reader_is_report = rel == ".process-work/reviews/widget.md"
+    report = _report(repo, "" if reader_is_report and mutation == "add" else
+                     "- AC-1: `tests/test_widget.py::test_widget`\n")
+    with_report = () if rel == PLAN_FILE else ("--with", report)
+    if mutation != "add" and not reader_is_report:
+        _append(repo, rel, evidence)
+    elif rel == OLDER_SHARD:
+        _append(repo, rel, "skipped class-test work=unrelated: another work's shard")
+    snapshot = (repo / rel).read_text(encoding="utf-8")
+    change = {"add": "\n" + evidence + "\n", "remove": evidence.split(" —")[0].split(": ")[0],
+              "replace": "# replaced after the check\n"}[mutation]
+    r = _attest_after_snapshot(repo, tmp_path, [(rel, mutation, change)],
+                               *with_report, *extra, "--commit")
+    if mutation == "add":
+        assert r.returncode == 1, r.stdout + r.stderr
+        assert "verdict=pass" not in _git(repo, "log", "-p", "-1")
+        return
+    if rel == PLAN_FILE and mutation == "replace":
+        # the plan's own lines changed in the worktree: E1 refuses (`differs`) — a refusal
+        # reader only; nothing of the replaced file is counted or committed
+        assert r.returncode == 1 and "holds more than records appended" in r.stderr, r.stderr
+        assert "verdict=pass" not in _git(repo, "log", "-p", "-1")
+        return
+    assert r.returncode == 0, r.stderr
+    committed = _git(repo, "show", f"HEAD:{rel}")
+    if rel == SHARD:
+        assert committed.startswith(snapshot.rstrip("\n")) and "verdict=pass" in committed
+    else:
+        assert committed == snapshot.rstrip("\n")
+    assert "replaced after the check" not in committed
 
 
 @pytest.mark.skipif(not hasattr(os, "symlink"), reason="needs symlinks")

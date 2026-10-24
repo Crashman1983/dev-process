@@ -716,11 +716,15 @@ def _class_tests_open(root: Path, head: str, rounds: list[int], texts: list[str]
     return tuple(out)
 
 
-def _plan(root: Path, ids: set, head: str) -> tuple[str, str, str, str]:
+def _plan(root: Path, ids: set, head: str, carried: dict[str, bytes] | None = None
+          ) -> tuple[str, str, str, str]:
     """(state, path, text at head, records appended since) of the work's plan —
     active or Spec Kit, else archived (a late lens attests after `--archive`).
-    `differs`: the worktree or index holds more than records appended after the
-    plan's last line (E1, the gate's `records_only`)."""
+    The appended records come only from the snapshot (`carried`: path -> checked bytes),
+    so they count only when the plan rides this attestation (#308 R5). `differs`: the
+    snapshot, the worktree or the index holds more than records appended after the
+    plan's last line (E1, the gate's `records_only`) — worktree and index are read for
+    that refusal only, never for what counts."""
     records = record_texts(root, PLAN_KINDS + ("plan-archive",), ref=head)
     if records is None:
         return "unreadable", "", "", ""
@@ -736,17 +740,22 @@ def _plan(root: Path, ids: set, head: str) -> tuple[str, str, str, str]:
     if len(found) > 1:
         return "ambiguous", ", ".join(rel for rel, _t in found), "", ""
     rel, text = found[0]
-    added = ""
     # a plan the first lens of this round already archived (`--archive`) is read where it went
     moved = _archived_as(root, rel)
     for now in (_worktree_text(root, rel) or _worktree_text(root, moved),
                 _index_text(root, rel) or _index_text(root, moved)):
-        if now == text:
-            continue
-        if not records_only(text, now):
+        if now != text and not records_only(text, now):
             return "differs", rel, text, ""
-        added += now[len(text):] if now.startswith(text) else "\n".join(
-            ln for ln in now.splitlines() if ln not in set(text.splitlines()))
+    riding = next((carried[p] for p in (rel, moved) if p and p in (carried or {})), None)
+    if riding is None:
+        return "ok", rel, text, ""
+    now = riding.decode("utf-8", errors="replace")
+    if now == text:
+        return "ok", rel, text, ""
+    if not records_only(text, now):
+        return "differs", rel, text, ""
+    added = now[len(text):] if now.startswith(text) else "\n".join(
+        ln for ln in now.splitlines() if ln not in set(text.splitlines()))
     return "ok", rel, text, added
 
 
@@ -1228,11 +1237,13 @@ def gather(root: Path, *, work: str, ids: set[str], tier: int, verdict: str, ind
     if problem:
         return Evidence(work, tier, verdict, plan_review, model, policy_problem=problem)
     keys = {work_key(i) for i in ids}
-    state, rel, plan_text, appended = _plan(root, keys, head)
+    # the one snapshot (path -> checked bytes): every reader below reads it, the commit
+    # writes it — nothing is read again from the worktree or index for what counts (R5)
+    carried_data = {rel: data for rel, data in carried or () if data is not None}
+    state, rel, plan_text, appended = _plan(root, keys, head, carried_data)
     # the plan's own lines, as the bundle's refute check reads them; records appended
-    # after it count only when they ride this attestation (`--with` the plan)
-    riding = {p.resolve() for p in reports}
-    own = readable(plan_text) + ("\n" + readable(appended) if rel and (root / rel).resolve() in riding else "")
+    # after it count only when they ride this attestation (`--with` the plan, `--archive`)
+    own = readable(plan_text) + ("\n" + readable(appended) if appended else "")
     plan_ids = _plan_work_ids(plan_stem(rel), _unfenced(plan_text), include_dedated=True) if rel else set()
     plan_read = readable(plan_text)
     spec = (_show(root, head, rel.rsplit("/", 1)[0] + "/spec.md") or "") \
@@ -1241,16 +1252,13 @@ def gather(root: Path, *, work: str, ids: set[str], tier: int, verdict: str, ind
     # Their text comes from the checked bytes (`carried`) when they ride this attestation,
     # so the evidence and the commit read one snapshot (R4).
     reports = [p for p in reports if p.resolve().is_relative_to((root / REVIEW_REPORTS).resolve())]
-    carried_data = {rel: data for rel, data in carried or () if data is not None}
 
     def report_text(p: Path) -> str:
         try:
             rel = p.relative_to(root).as_posix()
         except ValueError:
             rel = ""
-        if rel in carried_data:
-            return carried_data[rel].decode("utf-8", errors="replace")
-        return p.read_text(encoding="utf-8", errors="replace")
+        return carried_data[rel].decode("utf-8", errors="replace") if rel in carried_data else ""
 
     report_texts = [readable(report_text(p)) for p in reports]
     issues = {int(i) for i in plan_ids | set(ids) if i.isascii() and i.isdigit()}
