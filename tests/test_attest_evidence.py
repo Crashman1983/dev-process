@@ -786,20 +786,6 @@ def test_a_pass_without_a_range_is_refused(repo):
     assert r.returncode == 1 and "reads its evidence at the reviewed range" in r.stderr, r.stderr
 
 
-def test_a_second_lens_after_the_first_archived_the_plan(repo):
-    """Code review #225: lens 1 archives with its pass; lens 2 attests the same head."""
-    base, head = _range(repo)
-    r = _attest(repo, "--with", _report(repo), "--archive", ".process-work/plans/2026-10-14-widget.md",
-                "--commit")
-    assert r.returncode == 0, r.stderr
-    r = subprocess.run([sys.executable, str(repo / "scripts/process/attest.py"), "--work", "widget",
-                        "--tier", "2", "--reviewer", "lens-2", "--model", "claude-opus-5",
-                        "--independence", "bundle,non-implementing", "--verdict", "pass", "--round", "1",
-                        "--base", base, "--head", head, "--with", _report(repo), "."],
-                       cwd=repo, capture_output=True, text=True)
-    assert r.returncode == 0, r.stderr
-
-
 def test_a_parametrized_id_may_hold_commas(ev_mod):
     mod, _out = ev_mod
     assert mod.claimed_tests("tests/a.py::test_x[1, 2], tests/a.py::test_y") == [
@@ -1292,32 +1278,23 @@ def test_a_block_removed_after_the_snapshot_still_owes_its_root_cause(repo, tmp_
     assert "verdict=pass" not in _git(repo, "log", "-p", "-1")
 
 
-@pytest.mark.parametrize("duplicate", ["today's shard", "today's shard as ./path", "report twice",
-                                       "plan with --with and --archive"])
+@pytest.mark.parametrize("duplicate", ["today's shard", "today's shard as ./path", "report twice"])
 def test_a_path_named_twice_is_carried_once(repo, duplicate):
     """#308 R5: `--with <today's shard>` put the path twice in the file set; the second,
-    old bytes won and the commit held no new REVIEW line. A path is carried once."""
+    old bytes won and the commit held no new REVIEW line. A path is carried once. (The
+    case "plan with --with and --archive" left with the archive, fix round 6.)"""
     _append(repo, SHARD, _review("widget", 1), commit="docs: block")
     _append(repo, SHARD, _RC + "sites: none — refuted, the finding misread the guard")
     report = _report(repo)
     extra = {"today's shard": ("--with", SHARD),
              "today's shard as ./path": ("--with", "./" + SHARD),
              "report twice": ("--with", report),
-             "plan with --with and --archive": ("--with", PLAN_FILE, "--archive", PLAN_FILE),
              }[duplicate]
-    if duplicate.startswith("plan"):
-        _append(repo, PLAN_FILE, "DECISION 2026-10-24 agent: rides the archive")
     r = _attest(repo, "--with", report, *extra, "--commit")
     assert r.returncode == 0, r.stderr
     shard = _git(repo, "show", f"HEAD:{SHARD}")
     assert "verdict=pass" in shard and _RC in shard
     assert report in _git(repo, "show", "--name-only", "--format=", "HEAD")
-    if duplicate.startswith("plan"):
-        archived = _git(repo, "show", "--name-status", "--no-renames", "--format=", "HEAD")
-        assert f"D\t{PLAN_FILE}" in archived, archived
-        dest = next(ln.split("\t")[1] for ln in archived.splitlines()
-                    if ln.startswith("A\t") and "archive" in ln)
-        assert "rides the archive" in _git(repo, "show", f"HEAD:{dest}")
 
 
 def test_todays_shard_not_yet_written_cannot_ride_with(repo):
@@ -1328,21 +1305,19 @@ def test_todays_shard_not_yet_written_cannot_ride_with(repo):
     assert not (repo / SHARD).exists()
 
 
-def test_an_archived_plans_records_come_from_the_snapshot(repo, tmp_path):
+def test_a_riding_plans_records_come_from_the_snapshot(repo, tmp_path):
     """#308 R5: `--archive` read the plan from the worktree after the check and committed
-    those bytes. The archived plan is part of the snapshot like any `--with` record."""
-    _append(repo, PLAN_FILE, "DECISION 2026-10-24 agent: checked before the move")
+    those bytes. The archive left attest (fix round 6); the plan that rides `--with` is
+    part of the snapshot, and a line added after it is not committed."""
+    _append(repo, PLAN_FILE, "DECISION 2026-10-24 agent: checked before the commit")
     snapshot = (repo / PLAN_FILE).read_text(encoding="utf-8")
     r = _attest_after_snapshot(repo, tmp_path,
                                [(PLAN_FILE, "add", "\nDECISION 2026-10-24 agent: added after\n")],
-                               "--with", _report(repo), "--archive", PLAN_FILE, "--commit")
+                               "--with", _report(repo), "--with", PLAN_FILE, "--commit")
     if r.returncode:
         assert "verdict=pass" not in _git(repo, "log", "-p", "-1")
         return
-    archived = _git(repo, "show", "--name-status", "--no-renames", "--format=", "HEAD")
-    dest = next(ln.split("\t")[1] for ln in archived.splitlines()
-                if ln.startswith("A\t") and "archive" in ln)
-    assert _git(repo, "show", f"HEAD:{dest}") == snapshot.rstrip("\n")
+    assert _git(repo, "show", f"HEAD:{PLAN_FILE}") == snapshot.rstrip("\n")
 
 
 def test_a_path_with_two_byte_sets_is_refused(ev_mod, monkeypatch):
@@ -2210,7 +2185,6 @@ def _issue_block_owes_its_cause(repo):
     assert r.returncode == 1 and CLASS_TEST + "1 (no ROOT-CAUSE line)" in r.stderr, r.stderr
 
 
-@RED
 def test_uncommitted_plan_alias_ambiguity(repo):
     """I5/D-3, R6 repro: an uncommitted second plan of the issue made `round_ids` ambiguous,
     the alias `7` fell away and the block owed nothing. A plan only in the worktree is
@@ -2223,7 +2197,6 @@ def test_uncommitted_plan_alias_ambiguity(repo):
     assert _head(repo) == old
 
 
-@RED
 def test_alias_added_after_snapshot(repo, tmp_path):
     """I5, R6 repro: the same second plan added right after the snapshot."""
     _issue_block_owes_its_cause(repo)
@@ -2235,7 +2208,6 @@ def test_alias_added_after_snapshot(repo, tmp_path):
     assert _head(repo) == old
 
 
-@RED
 def test_an_uncommitted_block_line_outside_the_snapshot_is_refused(repo):
     """D-2: a block of the work in the worktree but not in T0 (another day's shard, neither
     committed nor carried) is refused by name instead of silently counted."""
@@ -2340,10 +2312,9 @@ MUTATION_RECORDS = {
 }
 MUTATIONS = ["line added", "line removed", "file replaced", "file deleted", "file new",
              "parent replaced by a symlink"]
-# red at 032f2cb: a second plan of the issue after the snapshot drops the alias `7`
-MUTATIONS_RED = {("refused", "active plan", "file new"), ("refused", "archived plan", "file new"),
-                 ("refused", "second plan of the issue", "file replaced"),
-                 ("refused", "second plan of the issue", "file new")}
+# red at 032f2cb: a second plan of the issue after the snapshot dropped the alias `7`;
+# green since the counter reads T0 (fix round 6, task 6.3)
+MUTATIONS_RED: set = set()
 
 
 def _matrix_setup(repo, record, outcome):
@@ -2504,8 +2475,7 @@ def _commit_link(repo, rel):
 
 
 @pytest.mark.skipif(not hasattr(os, "symlink"), reason="needs symlinks")
-@pytest.mark.parametrize("case", [pytest.param(c, marks=RED) if c == "active plan" else c
-                                  for c in TREE_LINKS])
+@pytest.mark.parametrize("case", list(TREE_LINKS))
 def test_a_symlink_entry_in_the_tree_is_refused(repo, case):
     """I12/§10: a 120000 entry as a record, or as the journal directory itself, is no record
     and no empty home — the reader answers None (unknown), and attest refuses."""

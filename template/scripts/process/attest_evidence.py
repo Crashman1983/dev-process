@@ -436,18 +436,24 @@ def _repo_rel(root: Path, p: Path) -> tuple[str | None, str]:
     return (None, why) if why else (rel, "")
 
 
+def _jrel(root: Path, journal_dir: Path | None) -> str:
+    """The attested `--journal-dir` as a repository path, from the strings alone (I12: an
+    object reader asks no lstat); "" when it lies outside the repository."""
+    if journal_dir is None:
+        return ""
+    rel, _why = _lexical_rel(root, journal_dir)
+    return rel or ""
+
+
 def _journal_dir_at(root: Path, ref: str, journal_dir: Path | None) -> list[tuple[str, str]] | None:
     """The (path, text) of the attested `--journal-dir`'s files at `ref`, where it lies in
     the repository apart from the journal `record_texts` reads there anyway; None when git
-    cannot read them."""
-    if journal_dir is None:
+    cannot read them. The directory is placed lexically (`_jrel`): a tree's answer does not
+    depend on the worktree (I12, the R2 repro)."""
+    rel = _jrel(root, journal_dir)
+    if not rel or rel == JOURNAL_DIR or rel.startswith(JOURNAL_DIR + "/"):
         return []
-    rel, _why = _repo_rel(root, journal_dir)
-    if rel is None:
-        return []  # outside the repository (or a symlink the owner refuses): nothing at the ref
-    if rel == JOURNAL_DIR or rel.startswith(JOURNAL_DIR + "/"):
-        return []
-    r = _git(root, "ls-tree", "-r", "-z", "--name-only", ref, "--", rel)
+    r = _git(root, "--literal-pathspecs", "ls-tree", "-r", "-z", "--name-only", ref, "--", rel)
     if r.returncode != 0:
         return None
     out = []
@@ -461,7 +467,8 @@ def _journal_dir_at(root: Path, ref: str, journal_dir: Path | None) -> list[tupl
 
 def _journal_at(root: Path, ref: str, journal_dir: Path | None) -> dict[str, str] | None:
     """The journal record files at `ref`, by path: the repository journal and the attested
-    `--journal-dir`. None when git cannot read them."""
+    `--journal-dir`. None when git cannot read them. Read at head for the evidence until it
+    reads `E` (6.4)."""
     texts = record_texts(root, ("journal",), ref=ref)
     extra = _journal_dir_at(root, ref, journal_dir) if texts is not None else None
     if texts is None or extra is None:
@@ -475,14 +482,12 @@ def _at_fork(root: Path, fork: str, journal_dir: Path | None = None
     journal texts there for the evidence readers). The blocks are read as `attest._texts`
     reads them — a journal less its fences, a plan as rendered; a line quoted in a fence on
     main is no line of the fork: it hides no real line of the branch. None when git cannot
-    read them."""
-    texts = record_texts(root, RECORD_KINDS, ref=fork)
-    extra = _journal_dir_at(root, fork, journal_dir) if texts is not None else None
-    if texts is None or extra is None:
+    read them (`_records_at`, I12)."""
+    texts = _records_at(root, fork, RECORD_KINDS, _jrel(root, journal_dir))
+    if texts is None:
         return None
-    journal = [text for rel, text in texts if record_kind(rel) == "journal"] + [
-        text for _rel, text in extra]
-    plans = [text for rel, text in texts if record_kind(rel) != "journal"]
+    journal = [text for rel, text in texts if record_kind(rel) in ("journal", None)]
+    plans = [text for rel, text in texts if record_kind(rel) not in ("journal", None)]
 
     def contents(views: list[str]) -> set[str]:
         return {_content(ln) for text in views for ln in text.splitlines() if ln.strip()}
@@ -1072,10 +1077,10 @@ def _plan(root: Path, ids: set, head: str, carried: dict[str, bytes] | None = No
 
 
 def _archived_as(root: Path, rel: str) -> str:
-    """Where `attest.py --archive` moves this plan — attest owns the target."""
-    from attest import _archive_target  # late: attest imports this module
-    target = _archive_target(root, root / rel)
-    return target.relative_to(root).as_posix() if target.is_relative_to(root) else ""
+    """Where the archive takes this plan (`attest.archive_rel`, lexical) — a plan archived
+    by its own commit after a first lens is read where it went."""
+    from attest import archive_rel  # late: attest imports this module
+    return archive_rel(rel)
 
 
 def _worktree_text(root: Path, rel: str) -> str:

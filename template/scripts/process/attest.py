@@ -56,8 +56,9 @@ reviewer of no lower class than the plan session. Plan lines (REFUTE,
 ROOT-CAUSE, DECISION, skips) are committed before the bundle is built, or
 appended after the plan's last line and ridden here with `--with` the plan.
 
-`--archive PLAN` (a pass only) moves the plan into the archive with the line;
-`--with PATH` adds the round's other records — its review report, plan lines —
+`--archive PLAN` is refused before anything is read: attest moves no plan (#308); the
+archive is a commit of its own after the attestation, `git mv <plan> <archive>`, whose
+target the refusal names. `--with PATH` adds the round's other records — its review report, plan lines —
 so the round is one commit and one push (each bookkeeping push paid the
 push-time gates downstream; half the commits of two weeks were bookkeeping);
 `--commit` makes that one commit. Every refusal comes before the first write.
@@ -79,7 +80,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling import
 from process_git import git_environment  # noqa: E402
 from check_fix_streak import notes as fix_streak_notes  # noqa: E402
-from attest_evidence import evidence_problems, snapshot  # noqa: E402  (one file-set owner)
+from attest_evidence import _lexical_rel, evidence_problems, snapshot  # noqa: E402  (one file-set owner)
 from check_review import (  # noqa: E402  (one owner for grammar, digest, record homes)
     BOOKKEEPING,
     JOURNAL_DIR,
@@ -93,7 +94,6 @@ from check_review import (  # noqa: E402  (one owner for grammar, digest, record
     _unfenced,
     branch_issue,
     plan_stem,
-    PLANS_ACTIVE,
     SPEC_PLAN,
     SPECS_DIR,
     DATE_PREFIX,
@@ -151,16 +151,8 @@ def _journal_target(root: Path, journal_dir: Path) -> Path:
     return journal_dir / f"{today}.md"
 
 
-def _archive_target(root: Path, plan: Path) -> Path:
-    """Where `--archive` moves a plan (`archive_rel`)."""
-    resolved = plan.resolve()
-    if resolved.is_relative_to(root.resolve()):
-        return root / archive_rel(resolved.relative_to(root.resolve()).as_posix())
-    return root / PLANS_ARCHIVE / plan.name
-
-
 def archive_rel(rel: str) -> str:
-    """Where `--archive` moves the plan at the repository path `rel`. A Spec Kit plan is
+    """Where the archive takes the plan at the repository path `rel`. A Spec Kit plan is
     always `plan.md`: it takes its feature directory's name, or every Spec Kit plan would
     collide in the archive. `_attest_commit` pairs an archive move by it."""
     parts = rel.split("/")
@@ -173,37 +165,19 @@ def _shown(root: Path, p: Path) -> str:
     return str(p.relative_to(root)) if p.is_relative_to(root) else str(p)
 
 
-def archive_problems(args, root: Path) -> list[str]:
-    """Checked before anything is written: a late failure left a written line, and the
-    corrected rerun doubled it (downstream)."""
+def archive_refusal(args, root: Path) -> str:
+    """Why `--archive` is refused, or "" without it. attest moves no plan (#308, design
+    §10): every way it had to move one opened a window in which the worktree could lose
+    bytes. The archive is a commit of its own after the attestation, named here with its
+    target; the gate and a second lens read the moved plan by its content. Checked before
+    anything is read, from the strings alone."""
     if not args.archive:
-        return []
-    plan = root / args.archive
-    if not plan.is_file():
-        return [f"--archive: plan not found: {args.archive}"]
-    rel = plan.resolve().relative_to(root.resolve()).as_posix() \
-        if plan.resolve().is_relative_to(root.resolve()) else ""
-    if record_kind(rel) not in ("plan", "spec-plan"):
-        return [f"--archive: {args.archive} is no active plan (a file in {PLANS_ACTIVE}/ or "
-                f"{SPECS_DIR}/<feature>/{SPEC_PLAN}) — only a plan is archived"]
-    if args.plan_review:
-        return ["--archive goes with the code review's pass, not the plan review's"]
-    ids = _plan_work_ids(plan_stem(rel), plan.read_text(encoding="utf-8", errors="replace"),
-                         include_dedated=True)
-    if args.work not in ids:
-        return [f"--archive: {args.archive} is not the plan of work={args.work} (its ids: "
-                f"{', '.join(sorted(ids))}) — archive a plan with its own work's pass"]
-    if _git(root, "ls-files", "--error-unmatch", "--", rel) is None:
-        return [f"--archive: {args.archive} is not tracked — commit it first; `git mv` would "
-                f"fail after the line is written"]
-    if args.verdict != "pass":
-        return [f"--archive only with verdict=pass — a plan is archived when its work "
-                f"merges, not during a review round (verdict={args.verdict})"]
-    target = _archive_target(root, plan)
-    if target.exists():
-        return [f"--archive: {_shown(root, target)} exists already — the move would "
-                f"overwrite another plan"]
-    return []
+        return ""
+    rel, _why = _lexical_rel(root, Path(args.archive))
+    plan = rel or args.archive
+    return (f"--archive: attest no longer archives the plan — attest without --archive, then "
+            f"archive the plan in a commit of its own: git mv {plan} {archive_rel(plan)} && "
+            f"git commit -m \"docs: archive the plan\"")
 
 
 def with_problems(args, root: Path) -> list[str]:
@@ -228,17 +202,29 @@ def with_problems(args, root: Path) -> list[str]:
     return out
 
 
-def work_problems(args, root: Path) -> list[str]:
+def _plan_records(root: Path, kinds: tuple[str, ...], records: list | None) -> list[tuple[str, str]]:
+    """The plans of `kinds`: from `records` (a tree's record set, `Snapshot.records_T0`),
+    or — `records` None, the preview callers (D-7) — from the worktree."""
+    if records is None:
+        return record_texts(root, kinds) or []
+    return [(rel, text) for rel, text in records if record_kind(rel) in kinds]
+
+
+def work_problems(args, root: Path, records: list | None = None) -> list[str]:
     """A `--work` no plan names clears nothing. A number no plan declares and the
     branch does not lead with is most likely the PR's number (observed: rounds
     attested as work=<PR>, which no gate ever matched) — refused; any other
-    unknown id is a note, since a plan may still be written."""
+    unknown id is a note, since a plan may still be written. The plans are those of
+    `records` (T0, I12), else the worktree's."""
     work = args.work[:-len("-plan")] if args.work.endswith("-plan") else args.work
-    if work in _known_work(root):
+    known = _known_work(root) if records is None else {
+        i for rel, text in _plan_records(root, PLAN_KINDS + ("plan-archive",), records)
+        for i in _plan_work_ids(plan_stem(rel), _unfenced(text), include_dedated=True)}
+    if work in known:
         return []
     branch = _git(root, "symbolic-ref", "--short", "HEAD") or ""
     if work.isascii() and work.isdigit() and branch_issue(branch) != work:
-        active = sorted({i for rel, text in record_texts(root, PLAN_KINDS) or []
+        active = sorted({i for rel, text in _plan_records(root, PLAN_KINDS, records)
                          for i in _plan_work_ids(plan_stem(rel), _unfenced(text), include_dedated=True)})
         return [f"work={work} names no plan or issue — it looks like a PR number; the work id "
                 f"is the plan slug or its issue: line. Active plans: "
@@ -249,33 +235,40 @@ def work_problems(args, root: Path) -> list[str]:
     return []
 
 
-def _texts(root: Path, journal_dir: Path) -> list[str]:
+def _texts(root: Path, journal_dir: Path, records: list | None = None) -> list[str]:
     """Every file where REVIEW and ROOT-CAUSE lines live — journal shards,
     plans (active and archived), Spec Kit plans; check_review owns the list.
     The journal raw, as the gate reads REVIEW lines there: a block the gate
     counts is a block here too, or a round slips through without its root
     cause (refutation). Plans, which the gate does not read for REVIEW
     lines, as rendered: a commented example there is no round.
-    `--journal-dir` replaces the repository's journal (it does not add to
-    it) — a known limit of the override, meant for tests and dry runs."""
+    `records` is a tree's record set (`Snapshot.records_T0`: the repository's
+    journal and the `--journal-dir` shards, which carry no record kind of their
+    own); None reads the worktree for the preview callers (D-7), where
+    `--journal-dir` replaces the repository's journal (it does not add to it) —
+    a known limit of the override, meant for tests and dry runs."""
+    if records is not None:
+        return [text if record_kind(rel) in ("journal", None) else readable(text) for rel, text in records]
     return [text if record_kind(rel) == "journal" or rel.startswith(str(journal_dir)) else readable(text)
             for rel, text in record_texts(root, journal_dir=journal_dir) or []]
 
 
-def round_ids(args, root: Path) -> set[str]:
+def round_ids(args, root: Path, records: list | None = None) -> set[str]:
     """The work ids whose rounds and root causes are this round's: a plan's slug
     and its issue are one work — switching `--work 9` to `--work widget`
     restarted the count at round 1 and skipped the root cause (refutation). But
     only within ONE plan: an issue shared by several plans would lend plan A's
     rounds to plan B (refutation). A slug names its plan (an active one first);
     an issue names the active plans declaring it, narrowed to the one whose slug
-    the branch carries when several do. No single plan: the literal id alone."""
+    the branch carries when several do. No single plan: the literal id alone. The
+    plans are those of `records` (T0: a plan only in the worktree is no alias, D-3),
+    else the worktree's (D-7)."""
     work = args.work
     if work.endswith("-plan"):  # plan reviews count apart, literally
         return {work}
     key = work_key(work)
     plans = [(rel, _plan_work_ids(plan_stem(rel), _unfenced(text), include_dedated=True))
-             for rel, text in record_texts(root, PLAN_KINDS + ("plan-archive",)) or []]
+             for rel, text in _plan_records(root, PLAN_KINDS + ("plan-archive",), records)]
     hits = [(rel, ids) for rel, ids in plans if key in {work_key(i) for i in ids}]
     active = [(rel, ids) for rel, ids in hits if record_kind(rel) != "plan-archive"]
     cands = active if (isinstance(key, tuple) or active) else hits
@@ -296,22 +289,43 @@ def _block_lines(texts: list[str], mine: set) -> list[tuple[int, str]]:
     return out
 
 
-def block_lines(args, root: Path, journal_dir: Path) -> list[tuple[int, str]]:
+def block_lines(args, root: Path, journal_dir: Path, records: list | None = None) -> list[tuple[int, str]]:
     """The blocks `round_problems` counts, line by line — what attest_evidence reads for
     the blocked code rounds a branch adds (v2.77 `replan`, `class-test`): the duty and
-    the round number read one set. Apart from `round_problems`, whose return value its
-    other caller (`_dispatch_codex`) reads as it is."""
-    return _block_lines(_texts(root, journal_dir), {work_key(w) for w in round_ids(args, root)})
+    the round number read one set (`records`, T0). Apart from `round_problems`, whose
+    return value its other caller (`_dispatch_codex`) reads as it is."""
+    return _block_lines(_texts(root, journal_dir, records),
+                        {work_key(w) for w in round_ids(args, root, records)})
 
 
-def round_problems(args, root: Path, journal_dir: Path) -> tuple[int, list[str], list[str]]:
+def uncommitted_blocks(args, root: Path, journal_dir: Path, records: list) -> list[str]:
+    """D-2: a blocking REVIEW line of the work in the worktree that T0 (`records`: the
+    committed records plus this attestation's) does not hold is refused by name — it
+    was counted silently before, from a file neither committed nor carried. A refusal
+    reader (I5): the worktree is read here, never counted."""
+    mine = {work_key(w) for w in round_ids(args, root, records)}
+    fixed = {line.strip() for _r, line in _block_lines(_texts(root, journal_dir, records), mine)}
+    out = []
+    for rel, text in record_texts(root, journal_dir=journal_dir) or []:
+        view = text if record_kind(rel) in ("journal", None) else readable(text)
+        for _r, line in _block_lines([view], mine):
+            if line.strip() not in fixed:
+                out.append(f"{rel}: `{line.strip()}` is a block of work={args.work} that is neither "
+                           f"committed nor carried by this attestation — commit it, or pass {rel} "
+                           f"with --with")
+    return out
+
+
+def round_problems(args, root: Path, journal_dir: Path, records: list | None = None
+                   ) -> tuple[int, list[str], list[str]]:
     """(the round to write, notes, refusals). A claim above the count and a
     missing cause are bookkeeping about a review that already ran — notes, since
     a refusal there cost a whole mechanical round downstream and caught nothing.
     A claim below the last blocked round is refused: written as the count, a late
-    pass of an old round would outrank the blocks recorded since (refutation)."""
-    texts = _texts(root, journal_dir)
-    mine = {work_key(w) for w in round_ids(args, root)}
+    pass of an old round would outrank the blocks recorded since (refutation).
+    The blocks are those of `records` (T0, D-1), else the worktree's (D-7)."""
+    texts = _texts(root, journal_dir, records)
+    mine = {work_key(w) for w in round_ids(args, root, records)}
     # distinct rounds, not lines: several reviewers (lenses) of one round each
     # write their block line — that is one round (observed downstream: 21
     # duplicated block lines would have over-counted)
@@ -350,12 +364,10 @@ def round_problems(args, root: Path, journal_dir: Path) -> tuple[int, list[str],
     return written, notes, refusals
 
 
-def build_line(args, root: Path, journal_dir: Path | None = None) -> tuple[str, list[str]]:
-    """(REVIEW line, problems). Base and head come from the bundle or the flags."""
+def artifact_range(args) -> tuple[str | None, str | None, list[str]]:
+    """(base, head, problems) from the bundle's `REVIEW_ARTIFACT` line or the flags — an
+    input read once, before the snapshot (D-6)."""
     problems: list[str] = []
-    fields = [f"work={args.work}", f"tier={args.tier}", f"reviewer={args.reviewer}",
-              f"model={args.model}", f"independence={args.independence}",
-              f"verdict={args.verdict}", f"round={args.round_}"]
     base = head = None
     if args.bundle:
         text = Path(args.bundle).read_text(encoding="utf-8", errors="replace")
@@ -371,6 +383,18 @@ def build_line(args, root: Path, journal_dir: Path | None = None) -> tuple[str, 
         if not (args.base and args.head):
             problems.append("--base and --head go together")
         base, head = args.base, args.head
+    return base, head, problems
+
+
+def build_line(args, root: Path, journal_dir: Path | None = None,
+               rng: tuple[str | None, str | None, list[str]] | None = None) -> tuple[str, list[str]]:
+    """(REVIEW line, problems). Base and head come from the bundle or the flags
+    (`artifact_range`, or `rng` as main read it before the snapshot)."""
+    base, head, problems = rng if rng is not None else artifact_range(args)
+    problems = list(problems)
+    fields = [f"work={args.work}", f"tier={args.tier}", f"reviewer={args.reviewer}",
+              f"model={args.model}", f"independence={args.independence}",
+              f"verdict={args.verdict}", f"round={args.round_}"]
     if base and head and not problems:
         missing = [sha for sha in (base, head) if _git(root, "cat-file", "-e", f"{sha}^{{commit}}") is None]
         if missing:
@@ -569,10 +593,11 @@ def main() -> int:
     ap.add_argument("--base")
     ap.add_argument("--head")
     ap.add_argument("--note", help="prose paragraph written above the line")
-    ap.add_argument("--archive", help="with a pass: git-mv this plan into the archive")
+    ap.add_argument("--archive", help="refused: attest archives no plan; it names the archive "
+                                      "commit to make after the attestation")
     ap.add_argument("--commit", action="store_true",
-                    help="one commit of the line (and the archived plan); default with "
-                         "--archive: staged, the commit named")
+                    help="one commit of the line and the --with records; without it they are "
+                         "staged, the commit named")
     ap.add_argument("--with", dest="with_", action="append", metavar="PATH",
                     help="another record of this round (its review report, the plan) — staged and "
                          "committed with the line")
@@ -581,42 +606,58 @@ def main() -> int:
     ap.add_argument("root", nargs="?", default=str(ROOT))
     args = ap.parse_args()
     root = Path(args.root).resolve()
+    refused = archive_refusal(args, root)
+    if refused:  # before anything is read: attest moves no plan (design §10)
+        print(f"attest: REFUSED — nothing written:\n  - {refused}", file=sys.stderr)
+        return 1
     journal_dir = Path(args.journal_dir) if args.journal_dir else Path(JOURNAL_DIR)
     if not journal_dir.is_absolute():
         journal_dir = root / journal_dir
-    # lexical on purpose: `attestation_files` checks every component before any resolve,
-    # so a symlink in `--journal-dir` (or the default) cannot be hidden by dereferencing
+    # lexical on purpose: `snapshot` checks every component before any read, so a
+    # symlink in `--journal-dir` (or the default) cannot be hidden by dereferencing
     target = _journal_target(root, journal_dir)
     if args.plan_review:
         # always: a plan whose own id ends in `-plan` would otherwise have its
         # plan review clear its code (refutation)
         args.work += "-plan"
-    counted, round_notes, round_issues = round_problems(args, root, journal_dir)
-    round_issues += work_problems(args, root)  # an owner exception overrides it too
+    # D-6: the range (an input), then the one snapshot this attestation fixes — `old`
+    # first, the file set read through checked descriptors, E and T0 (design §4) — and
+    # only then the count, the line, the evidence and the refusals, all from it
+    rng = artifact_range(args)
+    head = rng[1] if rng[1] and _git(root, "cat-file", "-e", f"{rng[1]}^{{commit}}") is not None else None
+    with_files = [root / rel for rel in args.with_ or []]
+    snap = snapshot(root, target, with_files, journal_dir, head=head)
+    records = snap.records_T0
+    if records is None or snap.records_E is None:
+        # unknown is no "no records" (design §7): a symlink or submodule as a record or
+        # as a directory records lie under, or a tree git cannot read
+        print("attest: REFUSED — nothing written:", file=sys.stderr)
+        for p in [*snap.problems, "the records of the snapshot cannot be read — a symlink or submodule "
+                  "is committed as a record or as a directory records lie under (or git cannot read "
+                  "the tree); replace it by the file or directory itself"]:
+            print(f"  - {p}", file=sys.stderr)
+        return 1
+    counted, round_notes, round_issues = round_problems(args, root, journal_dir, records)
+    round_issues += work_problems(args, root, records)  # an owner exception overrides it too
     args.round_ = counted
-    line, problems = build_line(args, root, journal_dir)
+    line, problems = build_line(args, root, journal_dir, rng)
     # the evidence a Tier 2+ pass must show (attest_evidence.py), read at the
     # range the line names — known only once build_line has it
     record = next((f for _ln, f in parse_review_lines(line)[0]), {})
     plain = args.work.removesuffix("-plan") if args.plan_review else args.work
-    # the plan `--archive` moves rides like a `--with` record: its archived bytes are the
-    # checked ones, never a read after the check (R5)
-    with_files = [root / rel for rel in [*(args.with_ or []), *([args.archive] if args.archive else [])]]
-    # the one snapshot this attestation fixes (`old` first, the file set read through
-    # checked descriptors, design §4): what the evidence reads is what it commits
-    snap = snapshot(root, target, with_files, journal_dir, head=record.get("head"))
     carried, carried_problems = snap.carried, list(snap.problems)
     modes = {f.rel: f.mode for f in snap.files}
     carried_paths = [root / rel for rel, _data in carried]
     evidence = evidence_problems(
-        root, work=args.work, ids=round_ids(argparse.Namespace(work=plain), root),
+        root, work=args.work, ids=round_ids(argparse.Namespace(work=plain), root, records),
         tier=int(args.tier) if args.tier.isascii() and args.tier.isdigit() else 0,
         verdict=args.verdict, independence=args.independence, base=record.get("base"),
         head=record.get("head"), plan_review=args.plan_review, model=args.model,
         reports=carried_paths,
         # a plan review asks no code round's records
-        blocks=None if args.plan_review else block_lines(args, root, journal_dir),
+        blocks=None if args.plan_review else block_lines(args, root, journal_dir, records),
         journal_dir=journal_dir, carried=carried)
+    round_issues += uncommitted_blocks(args, root, journal_dir, records)
     exception_note = ""
     if args.exception:
         # always written: an owner exception that trips no rule here (a round
@@ -628,8 +669,7 @@ def main() -> int:
         round_issues = round_notes = evidence = []
     for note in round_notes:
         print(f"attest: note — {note}", file=sys.stderr)
-    problems = (round_issues + problems + evidence + carried_problems
-                + archive_problems(args, root) + with_problems(args, root))
+    problems = round_issues + problems + evidence + carried_problems + with_problems(args, root)
     if args.note and any(ln.lstrip().startswith("REVIEW") for ln in args.note.splitlines()):
         problems.append("the note carries REVIEW-looking lines — the validated line is the "
                         "only REVIEW writer")
@@ -660,29 +700,11 @@ def main() -> int:
     files = [(target_rel, target_bytes), *carried[1:]]
     print(f"attest: appended to {_shown(root, target)}")
     _fix_streak_notes(root, args.verdict)
-    if not (args.archive or args.commit or args.with_):
+    if not (args.commit or args.with_):
         return 0
-    message = f"docs: attest {args.work} round {args.round_}" + (
-        " and archive the plan" if args.archive else "")
+    message = f"docs: attest {args.work} round {args.round_}"
     changes = list(files)
     removals: list[str] = []
-    if args.archive:
-        dest = _archive_target(root, root / args.archive)
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        old_rel = Path(os.path.normpath(root / args.archive)).relative_to(root).as_posix()
-        dest_rel = dest.relative_to(root).as_posix()
-        archive_data = dict(files).get(old_rel)
-        if archive_data is None:
-            print(f"attest: {args.archive} is not in the checked file set — not archived",
-                  file=sys.stderr)
-            return 1
-        if not _git_ok(root, "mv", args.archive, str(dest)):
-            return 1
-        print(f"attest: archived {args.archive} as {_shown(root, dest)}")
-        changes = [(rel, data) for rel, data in changes if rel != old_rel]
-        changes.append((dest_rel, archive_data))
-        modes[dest_rel] = modes.get(old_rel, "100644")
-        removals.append(old_rel)
     if args.commit:
         # only the attestation's own paths: anything else staged stays staged
         # (refutation: a staged source file rode along into this commit)
@@ -707,14 +729,6 @@ def _fix_streak_notes(root: Path, verdict: str) -> None:
         return
     for note in found:
         print(note, file=sys.stderr)
-
-
-def _git_ok(root: Path, *args: str) -> bool:
-    r = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, env=git_environment())
-    if r.returncode != 0:
-        print(f"attest: git {' '.join(args)} failed: {r.stderr.strip()} — the line is "
-              f"written; finish the step by hand", file=sys.stderr)
-    return r.returncode == 0
 
 
 if __name__ == "__main__":
