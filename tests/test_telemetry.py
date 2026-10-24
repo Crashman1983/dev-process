@@ -1385,3 +1385,84 @@ def test_the_artifact_head_is_read_from_the_header_block_only(render, tmp_path):
         sys.modules.pop("check_review", None)
     doc = (out / "docs/process/modules/telemetry.md").read_text()
     assert "**old-code blocks** (#311)" in doc and "unreadable-report" in doc
+
+
+def test_old_code_tells_a_git_failure_from_an_absent_file(render, tmp_path, monkeypatch):
+    """A blob git cannot read, or git that cannot run, is `git-failed` — never `changed`
+    or `missing-commit` (v2.78 refute, round 1); a directory or a line past the end by
+    git's count (a form feed is no line break) is `outside`; a user's
+    `diff.interHunkContext` merges no hunks over an unchanged line."""
+    out, h1, hr = _old_repo(render, tmp_path)
+    _journal(out, "".join(f"REVIEW work=9 tier=2 reviewer=r model=m independence=bundle,non-implementing "
+                          f"base={'0' * 40} head={h} verdict=block round={r}\n" for h, r in ((h1, 1), (hr, 2))))
+    reviews = out / ".process-work/reviews"
+    reviews.mkdir(parents=True)
+    report = reviews / "9-r2.md"
+    report.write_text(_old_report("#9", 2, _blocker("src:2", "a directory") + _blocker("src/a.py:14", "old"), head=hr))
+    assert _measure(out)["unmeasured"] == {"outside": 1}
+    _gitx(out, "config", "diff.interHunkContext", "10")
+    report.write_text(_old_report("#9", 2, _blocker("src/a.py:7", "between two hunks"), head=hr))
+    assert _measure(out)["unchanged"] == 1  # a.py:5 changed, old 10 deleted: new 7 stands as it did
+    _gitx(out, "config", "--unset", "diff.interHunkContext")
+    monkeypatch.setenv("PATH", str(tmp_path / "no-git-here"))
+    report.write_text(_old_report("#9", 2, _blocker("src/a.py:14", "old"), head=hr))
+    assert _measure(out)["unmeasured"] == {"git-failed": 1}
+    monkeypatch.undo()
+    blob = _gitx(out, "rev-parse", f"{h1}:src/a.py")
+    (out / ".git/objects" / blob[:2] / blob[2:]).unlink()
+    assert _measure(out)["unmeasured"] == {"git-failed": 1}
+
+
+def test_old_code_counts_lines_as_git_does(render, tmp_path):
+    out = _render(render, tmp_path, github_issues=True)
+    _gitx(out, "init", "-q", "-b", "main")
+    (out / "src").mkdir()
+    (out / "src/a.c").write_text("".join(f"x\f{i}\n" for i in range(1, 6)))
+    _gitx(out, "add", "-A")
+    _gitx(out, "commit", "-qm", "r1")
+    h1 = _gitx(out, "rev-parse", "HEAD")
+    _gitx(out, "commit", "-q", "--allow-empty", "-m", "r2")
+    hr = _gitx(out, "rev-parse", "HEAD")
+    _journal(out, "".join(f"REVIEW work=9 tier=2 reviewer=r model=m independence=bundle,non-implementing "
+                          f"base={'0' * 40} head={h} verdict=block round={r}\n" for h, r in ((h1, 1), (hr, 2))))
+    reviews = out / ".process-work/reviews"
+    reviews.mkdir(parents=True)
+    (reviews / "9-r2.md").write_text(_old_report("#9", 2, _blocker("src/a.c:8", "past the end") + _blocker("src/a.c:5", "last line"), head=hr))
+    got = _measure(out)
+    assert got["unmeasured"] == {"outside": 1} and got["unchanged"] == 1, got
+
+
+def test_old_code_keeps_two_issues_of_one_plan_apart(render, tmp_path):
+    """A plan declaring #12 and #13 joins neither issue's rounds to the other's (refute)."""
+    out, h1, hr = _old_repo(render, tmp_path)
+    plans = out / ".process-work/plans"
+    plans.mkdir(parents=True, exist_ok=True)
+    (plans / "2026-01-02-pair.md").write_text("# Plan\n\ntier: 2\nissue: #12\nissue: #13\n")
+    _journal(out, "".join(f"REVIEW work={w} tier=2 reviewer=r model=m independence=bundle,non-implementing "
+                          f"base={'0' * 40} head={h} verdict=block round={r}\n"
+                          for w, h, r in (("12", h1, 1), ("12", hr, 2), ("13", hr, 1))))
+    reviews = out / ".process-work/reviews"
+    reviews.mkdir(parents=True)
+    (reviews / "12-r2.md").write_text(_old_report("#12", 2, _blocker("src/a.py:5", "the fix changed it"), head=hr))
+    got = _measure(out)
+    assert (got["unchanged"], got["changed"]) == (0, 1), got
+
+
+def test_old_code_in_a_window_leaves_unreadable_reports_out(render, tmp_path):
+    """An unreadable report belongs to no known work: `rounds` counts it, a window does not."""
+    out = _render(render, tmp_path, github_issues=True)
+    _journal(out, _review(9, 1, "block"))
+    reviews = out / ".process-work/reviews"
+    reviews.mkdir(parents=True)
+    (reviews / "broken.md").mkdir()
+    sys.path.insert(0, str(out / "scripts/process"))
+    try:
+        for m in ("process_kpis", "check_review", "check_issues"):
+            sys.modules.pop(m, None)
+        import process_kpis  # noqa: PLC0415
+        assert process_kpis._blocks_since_round1(out)["unmeasured"] == {"unreadable-report": 1}
+        assert process_kpis._blocks_since_round1(out, {"9"})["unmeasured"] == {}
+    finally:
+        sys.path.remove(str(out / "scripts/process"))
+        for m in ("process_kpis", "check_review", "check_issues"):
+            sys.modules.pop(m, None)
