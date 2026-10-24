@@ -21,6 +21,7 @@ A few plain sentences per release: [NEWS.md](NEWS.md). Deutsche Fassung:
 - A blocking REVIEW line of the work that is neither committed nor carried by the attestation is refused by name instead of counted.
 - A record staged with other bytes than the worktree and HEAD hold is refused instead of overwritten; the foreign staging stays.
 - While it writes, `attest` holds the index's own `index.lock`, so a parallel `git add` fails instead of being overwritten; today's shard is appended through a descriptor checked for identity and content. A split index is refused.
+- The attest commit runs `git commit`'s hooks as before (pre-commit, prepare-commit-msg, commit-msg) on the commit's own index; a hook that refuses stops the commit with the line written and staged. A hook that stages more into that commit is refused instead of committed, and `post-commit` does not run for it.
 - A symlink or submodule committed as a record, or as a directory records lie under, is refused instead of read as an empty home.
 - `attest --archive` no longer moves the plan: it refuses before reading anything and names the way to archive. Every way of moving a file after the check could lose another process's bytes; the gate recognizes a plan archived by a later `git mv` commit by its content, as it does after `/finish`.
 - `plan-structure` compares the cell counts of a table's header and delimiter row (GFM) and reports a mismatch as a finding.
