@@ -74,7 +74,6 @@ raise SystemExit(red_evidence.main(sys.argv[4:]))
 '''
 
 
-@pytest.mark.xfail(strict=True, reason="#308 fix round 6: red before the change (6.5b)")
 @pytest.mark.skipif(not hasattr(os, "symlink"), reason="needs symlinks")
 def test_a_shard_swapped_during_the_measurement_is_not_followed(render, tmp_path, tmp_path_factory):
     """#308 sweep (§9): the path was checked before the measurement and opened by name after

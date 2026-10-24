@@ -61,7 +61,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling import
 from attest import ROOT_CAUSE, _journal_target  # noqa: E402  (one grammar, one journal home)
 from attest_evidence import (  # noqa: E402  (the gate's reading, one journal-path owner)
-    attest_name, attestation_files, identity_of, resolve_tests, review_policy)
+    _attestation_reads, append_checked, attest_name, identity_of, resolve_tests, review_policy)
 from check_review import JOURNAL_DIR, readable  # noqa: E402
 
 
@@ -574,7 +574,7 @@ def main(argv: list[str]) -> int:
     target = _journal_target(root, journal_dir)
     # the same path owner as attest: a symlink, a symlink parent, an outside path or a
     # non-file shard is refused before anything is measured or appended
-    _carried, path_problems = attestation_files(root, target, [], journal_dir)
+    reads, path_problems, _jrel = _attestation_reads(root, target, [], journal_dir)
     if path_problems:
         for p in path_problems:
             print(f"red_evidence: {p}", file=sys.stderr)
@@ -601,9 +601,13 @@ def main(argv: list[str]) -> int:
     if args.dry_run:
         print(f"red_evidence: dry run — would append to {target}")
         return 0
-    target.parent.mkdir(parents=True, exist_ok=True)
-    with target.open("a", encoding="utf-8") as fh:
-        fh.write(("\n" if target.stat().st_size else "") + text)
+    # through the descriptor the start's check saw (W2's primitive, #308 §9): the path
+    # is never opened by name again after the measurement
+    rel, _data, ident = reads[0]
+    why = append_checked(root, rel, ident, text.encode("utf-8"), separate=b"\n")
+    if why:
+        print(f"red_evidence: {why}", file=sys.stderr)
+        return 1
     print(f"red_evidence: appended to {target}")
     return 0
 

@@ -520,6 +520,37 @@ def _create_in_repo(root: str, rel: str, flags: int, mode: int = 0o644) -> int:
         os.close(dfd)
 
 
+def append_checked(root: Path, rel: str, ident: tuple[int, int] | None, data: bytes,
+                   separate: bytes = b"") -> str:
+    """Append `data` to `rel` through a checked descriptor (W2, design §8, for
+    `red_evidence`): opened without following a link and without `O_TRUNC`, its identity
+    the one the path check saw at the start (`ident`; None: the file did not exist then and
+    is made by `O_CREAT|O_EXCL`), `separate` first when the file is not empty, then the
+    path's `lstat` equal to the descriptor's `fstat`. "" when appended, else why not."""
+    root_s = os.path.realpath(root)
+    try:
+        fd = (_open_in_repo(root_s, rel, os.O_WRONLY | os.O_APPEND) if ident is not None
+              else _create_in_repo(root_s, rel, os.O_WRONLY | os.O_APPEND))
+    except OSError as exc:
+        return f"{rel} cannot be opened without following a link ({exc}) — nothing appended"
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode) or (ident is not None and (st.st_dev, st.st_ino) != ident):
+            return f"{rel} is another file than the one checked at the start — nothing appended"
+        view = memoryview((separate if st.st_size else b"") + data)
+        while view:
+            view = view[os.write(fd, view):]
+        try:
+            now = os.lstat(os.path.join(root_s, *rel.split("/")))
+        except OSError:
+            now = None
+        if now is None or (now.st_dev, now.st_ino) != (st.st_dev, st.st_ino):
+            return f"{rel} was replaced while it was appended to — the file at the path is untouched"
+        return ""
+    finally:
+        os.close(fd)
+
+
 def _read_fd(fd: int) -> bytes:
     chunks = []
     while chunk := os.read(fd, 1 << 16):
