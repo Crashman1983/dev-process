@@ -1162,6 +1162,36 @@ def test_a_same_title_recurrence_is_new(render, tmp_path):
     assert r.returncode == 0, r.stdout  # class and at both present: the new one owes nothing more
 
 
+def test_a_complete_backfill_keeps_its_old_match(render, tmp_path):
+    """A backfilled old line that is complete still takes its old match: a recurrence beside
+    it with the same title stays new (v2.78 cross-model review, round 1)."""
+    out = _branch(_render(render, tmp_path), VALID_REPORT + OLD)
+    backfilled = OLD.replace("issue=- ", "issue=- class=judgment at=src/cache.py:12 ")
+    again = OLD.replace("issue=- ", "issue=- at=src/other.py:9 ")
+    for body in (backfilled + again, again + backfilled):
+        _report(out, "2026-10-20-old.md", VALID_REPORT + body)
+        r = _run(out)
+        assert r.returncode == 1 and r.stdout.count("old cache") == 1 and "without class= —" in r.stdout, r.stdout
+
+
+def test_old_matching_is_maximal_not_greedy(render, tmp_path):
+    """Two backfills that each fit an old line pass in any order of the old lines (v2.78
+    cross-model review and refute, round 1)."""
+    t = "FINDING sev=major action=fix issue=- {}the cache is stale\n"
+    for old in (t.format("") + t.format("class=judgment "), t.format("class=judgment ") + t.format("")):
+        out = _branch(_render(render, tmp_path / str(len(old)) / old[30:40].replace(" ", "_")), VALID_REPORT + old)
+        _report(out, "2026-10-20-old.md", VALID_REPORT + t.format("class=judgment rule=r ") + t.format("class=mechanical "))
+        r = _run(out)
+        assert r.returncode == 0, (old, r.stdout)
+
+
+def test_the_no_range_note_names_both_fields(render, tmp_path):
+    out = _render(render, tmp_path)
+    _report(out, "2026-10-21-new.md", VALID_REPORT + "FINDING sev=major action=fix issue=- class=judgment guard read twice\n")
+    r = _run(out)
+    assert r.returncode == 0 and "`class=` and `at=` are not checked" in r.stdout, r.stdout
+
+
 def test_an_invalid_at_is_malformed(render, tmp_path):
     """An invalid place with a key after it is a malformed field; with none after it the
     token begins an older report's title."""
@@ -1361,6 +1391,20 @@ def test_the_codex_place_is_the_gates_grammar(render, tmp_path):
             sys.modules.pop(m, None)
     assert "at=src/a.py:3-9 guard" in good
     assert "at=- guard" in bad and "at-invalid: src/a.py:9-3" in bad
+    # a title that itself begins with a field token stays a title
+    sys.path.insert(0, str(out / "scripts/process"))
+    try:
+        sys.modules.pop("_dispatch_codex", None)
+        codex = importlib.import_module("_dispatch_codex")
+        odd = codex._report_text(rec, {"verdict": "block", "criteria": [], "refute": [],
+                                       "findings": [{**finding, "at": "src/a.py:3", "title": "at=boot the guard"}]},
+                                 work="7", plan_review=False, refute_round=None)
+    finally:
+        sys.path.remove(str(out / "scripts/process"))
+        sys.modules.pop("_dispatch_codex", None)
+    _report(out, "2026-10-21-7-codex-odd.md", odd)
+    r = _run(out)
+    assert r.returncode == 0 and "malformed" not in r.stdout and "at=boot the guard" in odd, r.stdout
     for text in (good, bad):
         _report(out, "2026-10-21-7-codex-review.md", text)
         r = _run(out)
