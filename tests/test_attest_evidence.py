@@ -1270,6 +1270,19 @@ def test_a_change_after_the_snapshot_never_reaches_the_pass(repo, tmp_path, read
     assert "replaced after the check" not in committed
 
 
+@pytest.mark.parametrize("committed", [True, False], ids=["block committed", "block uncommitted"])
+def test_a_block_removed_after_the_snapshot_still_owes_its_root_cause(repo, tmp_path, committed):
+    """#308 R5, the round counter as a reader: `block_lines` read the worktree after the
+    snapshot, so a block removed in that window owed no ROOT-CAUSE while the commit still
+    carried it. The blocks of the snapshot (and of head) count too; a later worktree read
+    can only add duties."""
+    _append(repo, SHARD, _review("widget", 1), commit="docs: block" if committed else None)
+    r = _attest_after_snapshot(repo, tmp_path, [(SHARD, "remove", "verdict=block")],
+                               "--with", _report(repo), "--commit")
+    assert r.returncode == 1 and "ROOT-CAUSE" in r.stderr, r.stdout + r.stderr
+    assert "verdict=pass" not in _git(repo, "log", "-p", "-1")
+
+
 @pytest.mark.parametrize("duplicate", ["today's shard", "today's shard as ./path", "report twice",
                                        "plan with --with and --archive"])
 def test_a_path_named_twice_is_carried_once(repo, duplicate):
@@ -1296,6 +1309,14 @@ def test_a_path_named_twice_is_carried_once(repo, duplicate):
         dest = next(ln.split("\t")[1] for ln in archived.splitlines()
                     if ln.startswith("A\t") and "archive" in ln)
         assert "rides the archive" in _git(repo, "show", f"HEAD:{dest}")
+
+
+def test_todays_shard_not_yet_written_cannot_ride_with(repo):
+    """`--with` names an existing record; today's shard before its first line is refused
+    there, and nothing is written."""
+    r = _attest(repo, "--with", _report(repo), "--with", SHARD, "--commit")
+    assert r.returncode == 1 and SHARD in r.stderr, r.stderr
+    assert not (repo / SHARD).exists()
 
 
 def test_an_archived_plans_records_come_from_the_snapshot(repo, tmp_path):

@@ -571,14 +571,34 @@ def _journal_keys(texts: list[str], plan_ids: set, skip_ids: set) -> set:
             for key in _evidence_keys(line, plan_ids, skip_ids)}
 
 
+def _snapshot_blocks(root: Path, head: str, journal_dir: Path | None,
+                     carried: list[tuple[str, bytes | None]] | None, snapshot: list[str],
+                     round_keys: set) -> list[tuple[int, str]] | None:
+    """(round, line) of the work's blocking REVIEW lines at head and in the snapshot, read
+    by the round counter's own reader (`attest._block_lines`: a journal raw, a plan as
+    rendered). None when git cannot read head."""
+    from attest import _block_lines  # late: attest imports this module
+    at_head = _journal_at(root, head, journal_dir)
+    plans = record_texts(root, PLAN_KINDS + ("plan-archive",), ref=head)
+    if at_head is None or plans is None:
+        return None
+    texts = [*at_head.values(), *snapshot, *(readable(text) for _rel, text in plans)]
+    texts += [readable(data.decode("utf-8", errors="replace")) for rel, data in carried or ()
+              if data is not None and record_kind(rel) in (*PLAN_KINDS, "plan-archive")]
+    return _block_lines(texts, round_keys)
+
+
 def _branch_records(root: Path, head: str, blocks: list[tuple[int, str]] | None,
                     journal_dir: Path | None, plan_ids: set, skip_ids: set,
-                    carried: list[tuple[str, bytes | None]] | None = None
+                    carried: list[tuple[str, bytes | None]] | None = None,
+                    round_keys: set | None = None
                     ) -> tuple[list[int] | None, str, tuple[str, ...]]:
     """(the blocked code rounds the branch adds, its journal records, refusals). The rounds
     are those of `blocks` — `attest.block_lines`, the set the round counter counts (journal
-    and plans in the worktree, uncommitted lines too) — less the lines present at the fork
-    point; None: unknown. The journal records are read by the same evidence readers from
+    and plans in the worktree, uncommitted lines too) — joined with the blocks at head and
+    in the snapshot (`_snapshot_blocks`, R5), less the lines present at the fork point; a
+    worktree change after the snapshot can add a round, never remove one. None: unknown.
+    The journal records are read by the same evidence readers from
     the one snapshot this attestation fixes — the journal at head plus the files it commits
     (`carried`: today's shard, `--with`) — less what the fork already holds; what that run
     yields counts, nothing else. A worktree evidence line absent from that snapshot is
@@ -590,10 +610,12 @@ def _branch_records(root: Path, head: str, blocks: list[tuple[int, str]] | None,
         return [], "", ()
     old = _at_fork(root, fork, journal_dir) if fork is not None else None
     snapshot = _journal_snapshot(root, head, journal_dir, carried)
-    if old is None or blocks is None or snapshot is None:
+    fixed = (_snapshot_blocks(root, head, journal_dir, carried, snapshot, round_keys or set())
+             if snapshot is not None else None)
+    if old is None or blocks is None or snapshot is None or fixed is None:
         return None, "", ()
     old_blocks, old_journal = old
-    rounds = sorted({r for r, line in blocks if _content(line) not in old_blocks})
+    rounds = sorted({r for r, line in [*blocks, *fixed] if _content(line) not in old_blocks})
     fork_keys = _journal_keys(old_journal, plan_ids, skip_ids)
     rendered = [line for text in snapshot for line in readable(text).splitlines()]
     snapshot_keys = {key for line in rendered
@@ -1285,7 +1307,7 @@ def gather(root: Path, *, work: str, ids: set[str], tier: int, verdict: str, ind
     # a code pass: the blocked code rounds the branch adds, and its journal records (ROOT-CAUSE,
     # skips) beside the plan's; a plan review asks no code round's records (facts None)
     rounds, journal, evidence_problems = (None, "", ()) if plan_review else _branch_records(
-        root, head, blocks, journal_dir, plan_ids, skip_ids, carried)
+        root, head, blocks, journal_dir, plan_ids, skip_ids, carried, keys)
     mine = [own, journal]
     # a journal skip lifts only the per-round duties; every other kind counts from the plan
     skips = _skips([own], skip_ids) | (_skips([journal], skip_ids) & JOURNAL_SKIPS)
