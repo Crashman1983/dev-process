@@ -17,6 +17,7 @@ A few plain sentences per release: [NEWS.md](NEWS.md). Deutsche Fassung:
 **What changes.**
 - The evidence owner counts a journal line only when it is committed at the reviewed head or lies in a file the same attestation commits (today's shard, `--with`). Only this work's counted evidence — its ROOT-CAUSE and the skip kinds the journal may carry — can refuse a pass; foreign work and kinds read from the plan alone stay invisible. Such a line only in another uncommitted shard is refused with its file and line, never counted silently.
 - Evidence appended to today's shard lands with the REVIEW line as before; no new record list sits beside the evidence owner.
+- `attest` reads every record once and commits exactly the bytes it checked — each path once, the plan `--archive` moves included (its appended records now count as with `--with`). A failing index or ref update exits non-zero and loses nothing.
 - `plan-structure` compares the cell counts of a table's header and delimiter row (GFM) and reports a mismatch as a finding.
 
 **Update.** No steps.
