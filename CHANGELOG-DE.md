@@ -9,6 +9,19 @@ ein Eintrag ohne Plan oder Issue hat keine Details-Zeile. In wenigen Sätzen je 
 English version: [CHANGELOG.md](CHANGELOG.md). Die Releases vor v2.28.2:
 [docs/changelog-archive-DE.md](docs/changelog-archive-DE.md).
 
+## v2.77.3 — Ein Pass stützt sich nur auf Belege, die ins Repository gelangen · 2026-10-24
+
+**Warum.** `attest` las ROOT-CAUSE- und Skip-Zeilen aus jedem Journal-Shard im Arbeitsbaum, auch aus uncommitteten, während sein Commit nur den heutigen Shard und explizite `--with`-Pfade trug. Ein Beleg im uncommitteten Shard eines anderen Tages konnte so einen committeten Pass autorisieren, ohne je im Repository zu landen. Daneben akzeptierte `plan-structure` eine `## Transitions`-Tabelle, deren Trennzeile weniger Spalten nannte als der Kopf.
+
+**Was sich ändert.**
+- Der Owner der Belege zählt eine Journal-Zeile nur, wenn sie am geprüften Head committet ist oder in einer Datei liegt, die dieselbe Attestierung committet (heutiger Shard, `--with`). Eine ROOT-CAUSE- oder Skip-Zeile nur in einem anderen uncommitteten Shard wird mit Datei und Zeile verweigert, nie still gezählt.
+- Belege im heutigen Shard landen wie bisher mit der REVIEW-Zeile im Commit; neben dem Beleg-Owner steht keine zweite Liste.
+- `plan-structure` vergleicht die Zellenzahl von Kopf- und Trennzeile einer Tabelle (GFM) und meldet eine Abweichung als Befund.
+
+**Update.** Keine Schritte.
+
+Details: [Plan](docs/analysis/2026-10-24-v2.77.3.md) #308
+
 ## v2.77.2 — Ein pytest-Parameter mit Klammern behält die ganze ID · 2026-10-23
 
 **Warum.** `red_evidence` schnitt den Parameteranhang einer pytest-ID am letzten `[` ab. Eine gültige ID wie `test_x[a[b]]` wurde als `test_x[a` gelesen, während `attest_evidence` `test_x` liest; ein gültiger Rot→Grün-Nachweis wurde auf dem pytest- und dem JUnit-Pfad verweigert.

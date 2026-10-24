@@ -7,6 +7,10 @@ technischen Einzelheiten stehen im [CHANGELOG](CHANGELOG-DE.md).
 
 English version: [NEWS.md](NEWS.md).
 
+## v2.77.3 — Ein Pass stützt sich nicht auf Belege, die nie ins Repository gelangen
+
+Ein Review-Pass konnte durch einen Eintrag in einer uncommitteten Journal-Datei eines anderen Tages autorisiert werden; der Beleg blieb damit außerhalb des Repositorys. So ein Eintrag zählt jetzt nur, wenn er committet ist oder mit der Attestierung reist; sonst wird der Pass verweigert und nennt die Datei. Die Plan-Prüfung lehnt außerdem eine Transitions-Tabelle ab, deren Kopf- und Trennzeile verschiedene Spaltenzahlen haben.
+
 ## v2.77.2 — Eine Klammer im Testparameter verdeckt keinen echten Fix mehr
 
 Ein pytest-Test, dessen Parameterwert Klammern enthält, etwa `test_x[a[b]]`, wurde unter dem falschen Namen gelesen; ein echter Nachweis von Fehlschlag zu Bestehen konnte deshalb verweigert werden. Das Werkzeug, das den Nachweis misst, nutzt jetzt dieselbe Testnamen-Lesart wie das Review-Gate, und ein Parameter darf Klammern, `]`, Kommas, Unicode enthalten oder leer sein.

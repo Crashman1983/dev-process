@@ -69,6 +69,7 @@ from check_review import (  # noqa: E402  (sibling import; the guard above keeps
     merge_base,
     plan_stem,
     readable,
+    record_files,
     record_kind,
     record_texts,
     records_only,
@@ -164,6 +165,8 @@ class Evidence:
     blocked_rounds: int | None = 0
     replan_open: tuple = ()  # follow-up blocked rounds without a REPLAN line in the plan
     class_test_open: tuple = ()  # "<round> (<why>)" per blocked round without a class test
+    # evidence in the worktree that neither head nor this attestation carries (#308)
+    evidence_problems: tuple = ()
     # required_records rows in force at the base (gather reads them; the template's by default)
     records: tuple = tuple(DEFAULTS["required_records"])
     report_refute: bool = False  # a REFUTE line of the work in this attest's review report
@@ -403,25 +406,55 @@ def _at_fork(root: Path, fork: str, journal_dir: Path | None = None) -> tuple[se
             contents([readable(t) for t in journal + plans]))
 
 
+def _journal_contents(root: Path, ref: str, journal_dir: Path | None) -> set[str] | None:
+    """The contents of every journal line at `ref`, as the journal records are read —
+    the set a worktree line must be in to be committed already (#308). None: unreadable."""
+    texts = record_texts(root, ("journal",), ref=ref)
+    extra = _journal_dir_at(root, ref, journal_dir) if texts is not None else None
+    if texts is None or extra is None:
+        return None
+    views = [text for _rel, text in texts] + extra
+    return {_content(ln) for text in views for ln in readable(text).splitlines() if ln.strip()}
+
+
 def _branch_records(root: Path, head: str, blocks: list[tuple[int, str]] | None,
-                    journal_dir: Path | None) -> tuple[list[int] | None, str]:
-    """(the blocked code rounds the branch adds, its journal records). The rounds are those
-    of `blocks` — `attest.block_lines`, the set the round counter counts (journal and plans
-    in the worktree, uncommitted lines too) — less the lines present at the fork point;
-    None: unknown. The journal records are the worktree journal's lines absent there, as
-    rendered (a fenced or commented line is no record)."""
+                    journal_dir: Path | None, carried: set[Path] | None = None
+                    ) -> tuple[list[int] | None, str, tuple[str, ...]]:
+    """(the blocked code rounds the branch adds, its journal records, refusals). The rounds
+    are those of `blocks` — `attest.block_lines`, the set the round counter counts (journal
+    and plans in the worktree, uncommitted lines too) — less the lines present at the fork
+    point; None: unknown. The journal records are the worktree journal's lines absent there,
+    as rendered (a fenced or commented line is no record), but only those already at head or
+    in a file this attestation carries (`carried`: today's shard, `--with`); a ROOT-CAUSE or
+    skip only in another uncommitted file is refused by name, never silently counted."""
     fork = _fork(root, head)
     if fork == "":
-        return [], ""
+        return [], "", ()
     old = _at_fork(root, fork, journal_dir) if fork is not None else None
-    if old is None or blocks is None:
-        return None, ""
+    head_records = _journal_contents(root, head, journal_dir)
+    if old is None or blocks is None or head_records is None:
+        return None, "", ()
     old_blocks, old_records = old
     rounds = sorted({r for r, line in blocks if _content(line) not in old_blocks})
-    journal = record_texts(root, ("journal",), journal_dir=journal_dir) or []
-    new = [ln for _rel, text in journal for ln in readable(text).splitlines()
-           if ln.strip() and _content(ln) not in old_records]
-    return rounds, "\n".join(new)
+    carried = {p.resolve() for p in carried or ()}
+    new: list[str] = []
+    problems: list[str] = []
+    for rel, f in record_files(root, ("journal",), journal_dir=journal_dir):
+        try:
+            text = f.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return None, "", ()
+        for n, line in enumerate(readable(text).splitlines(), 1):
+            if not line.strip() or _content(line) in old_records:
+                continue
+            new.append(line)
+            if _content(line) in head_records or f.resolve() in carried:
+                continue
+            if ROOT_CAUSE_LINE.search(line) or SKIP_LINE.search(line):
+                problems.append(
+                    f"{rel}:{n}: `{line.strip()}` is neither at {head[:12]} nor carried by this "
+                    f"attestation — commit it, or pass {rel} with --with")
+    return rounds, "\n".join(new), tuple(problems)
 
 
 def _tracked(root: Path, head: str) -> list[str] | None:
@@ -1030,10 +1063,12 @@ def test_status(root: Path, head: str, file: str, name: str, rules: dict) -> str
 def gather(root: Path, *, work: str, ids: set[str], tier: int, verdict: str, independence: str,
            base: str | None, head: str | None, plan_review: bool, model: str,
            reports: list[Path], blocks: list[tuple[int, str]] | None = None,
-           journal_dir: Path | None = None) -> Evidence:
+           journal_dir: Path | None = None, carried: list[Path] | None = None) -> Evidence:
     """`ids`: the work's ids (`attest.round_ids` of the plain work, no `-plan`); `blocks`:
     the work's blocking REVIEW lines the round counter counts (`attest.block_lines`) —
-    None on a code pass is unknown, and refused where a row asks for it."""
+    None on a code pass is unknown, and refused where a row asks for it. `carried`: the
+    files this attestation commits — today's journal shard and `--with`; journal evidence
+    elsewhere must already be at head (#308)."""
     if not (_resolvable(root, head) and _resolvable(root, base)):
         return Evidence(work, tier, verdict, plan_review, model, head_ok=False)
     policy, problem = review_policy(root, base)
@@ -1069,7 +1104,8 @@ def gather(root: Path, *, work: str, ids: set[str], tier: int, verdict: str, ind
     skip_ids = {f"{i}-plan" for i in plan_ids} if plan_review else plan_ids
     # a code pass: the blocked code rounds the branch adds, and its journal records (ROOT-CAUSE,
     # skips) beside the plan's; a plan review asks no code round's records (facts None)
-    rounds, journal = (None, "") if plan_review else _branch_records(root, head, blocks, journal_dir)
+    rounds, journal, evidence_problems = (None, "", ()) if plan_review else _branch_records(
+        root, head, blocks, journal_dir, carried)
     mine = [own, journal]
     # a journal skip lifts only the per-round duties; every other kind counts from the plan
     skips = _skips([own], skip_ids) | (_skips([journal], skip_ids) & JOURNAL_SKIPS)
@@ -1086,6 +1122,7 @@ def gather(root: Path, *, work: str, ids: set[str], tier: int, verdict: str, ind
         owner_decision=bool(OWNER_DECISION.search(_unfenced(own))),
         fix_streak=None if plan_review else _fix_streak(root, base, head),
         blocked_rounds=None if rounds is None else len(rounds),
+        evidence_problems=evidence_problems,
         # the follow-up blocks: every blocked round but the lowest
         replan_open=tuple(r for r in (rounds or [])[1:] if r not in replanned),
         class_test_open=_class_tests_open(root, head, rounds, mine, plan_ids, policy) if rounds else (),
@@ -1228,7 +1265,7 @@ def _owed_records(ev: Evidence) -> list[str]:
 
 
 def _decide_code(ev: Evidence) -> list[str]:
-    out: list[str] = []
+    out: list[str] = list(ev.evidence_problems)
     if ev.tier >= ev.cross_model_from:
         out += _cross_model(ev, f"a pass at tier {ev.tier}")
     out += _owed_records(ev)
@@ -1290,13 +1327,13 @@ def decide(ev: Evidence) -> list[str]:
 def evidence_problems(root: Path, *, work: str, ids: set[str], tier: int, verdict: str,
                       independence: str, base: str | None, head: str | None, plan_review: bool,
                       model: str, reports: list[Path], blocks: list[tuple[int, str]] | None = None,
-                      journal_dir: Path | None = None) -> list[str]:
+                      journal_dir: Path | None = None, carried: list[Path] | None = None) -> list[str]:
     """attest.py's one entry: gather at head, then decide — only for a Tier 2+ pass."""
     if verdict != "pass" or tier < 2:
         return []
     ev = gather(root, work=work, ids=ids, tier=tier, verdict=verdict, independence=independence,
                 base=base, head=head, plan_review=plan_review, model=model, reports=reports,
-                blocks=blocks, journal_dir=journal_dir)
+                blocks=blocks, journal_dir=journal_dir, carried=carried)
     for n in sorted(ev.plan_foreign):
         # never dropped in silence (#287): the reader sees which id was left out and why
         print(f"attest: note — AC-{n} not required: {ev.plan_rel} cites it as another issue's "

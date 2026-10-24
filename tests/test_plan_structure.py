@@ -317,6 +317,19 @@ def test_a_transitions_table_without_a_test_column_fails(render, tmp_path):
         in r.stdout, r.stdout
 
 
+def test_a_delimiter_row_shorter_than_the_header_is_a_finding(render, tmp_path):
+    """#308: GFM reads a table only when header and delimiter name the same number of
+    cells; a short delimiter must not borrow the header's width."""
+    out = _repo(render(tmp_path, {"project_name": "demo"}))
+    table = "| State | Result | Test |\n|---|---|---|\n| draft | in review | struck — later |\n"
+    _plan(out, GOOD + "\n## Transitions\n\n" + table)
+    assert _run(out).returncode == 0, _run(out).stdout
+    _plan(out, GOOD + "\n## Transitions\n\n" + table.replace("|---|---|---|", "|---|---|"))
+    r = _run(out)
+    assert r.returncode == 1 and ":13: the transitions table" in r.stdout, r.stdout
+    assert "3 header cells" in r.stdout and "2 delimiter cells" in r.stdout, r.stdout
+
+
 def test_a_transitions_row_with_an_empty_cell_fails(render, tmp_path):
     out = _repo(render(tmp_path, {"project_name": "demo"}))
     for row in ("| draft |  | review | struck — later |\n", "| draft | submit | … | struck — later |\n",

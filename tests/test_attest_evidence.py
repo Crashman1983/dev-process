@@ -2,6 +2,7 @@
 cross-model or a reasoned single-family, a refute for gate code, one test per
 acceptance criterion, a plan reviewer not below the plan session's class, and
 the plan's own lines committed before the attested head."""
+import datetime as dt
 import importlib
 import inspect
 import json
@@ -968,7 +969,8 @@ def test_attest_names_the_id_it_left_out(repo):
 
 # --- v2.77: per blocked code round the branch adds, a class test; per follow-up block, a REPLAN
 
-SHARD = ".process-work/journal/issue-7/2026-10-14.md"
+SHARD = f".process-work/journal/issue-7/{dt.date.today().isoformat()}.md"
+OLDER_SHARD = f".process-work/journal/issue-7/{(dt.date.today() - dt.timedelta(days=1)).isoformat()}.md"
 PLAN_FILE = ".process-work/plans/2026-10-14-widget.md"
 CLASS_TEST = "has no class test for blocked round(s) "
 REPLAN = " without a REPLAN line"
@@ -999,6 +1001,31 @@ def _on_main(repo, rel, *lines):
 
 def _pass(repo, *extra, **kw):
     return _attest(repo, "--with", _report(repo), "--dry-run", *extra, **kw)
+
+
+def test_an_uncommitted_older_shard_is_no_evidence(repo):
+    """#308: a record in another day's shard counts only when it is committed — the
+    attestation commits today's shard, not every shard the worktree happens to hold."""
+    _append(repo, SHARD, _review("widget", 1), commit="docs: block")
+    cause = _RC + "sites: none — refuted, the finding misread the guard"
+    _append(repo, OLDER_SHARD, cause)
+    r = _pass(repo)
+    assert r.returncode == 1 and OLDER_SHARD in r.stderr, r.stderr
+    assert "neither at" in r.stderr and "carried by this attestation" in r.stderr, r.stderr
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "docs: the cause")
+    r = _pass(repo)
+    assert r.returncode == 0, r.stderr
+
+
+def test_todays_journal_evidence_is_committed_with_the_attestation(repo):
+    """#308: the one shard the attestation writes is part of its commit — evidence
+    appended there before the pass must land in the repository with the REVIEW line."""
+    _append(repo, SHARD, _review("widget", 1), commit="docs: block")
+    _append(repo, SHARD, _RC + "sites: none — refuted, the finding misread the guard")
+    r = _attest(repo, "--with", _report(repo), "--commit")
+    assert r.returncode == 0, r.stderr
+    assert "ROOT-CAUSE work=widget round=1" in _git(repo, "show", f"HEAD:{SHARD}")
 
 
 def test_a_block_already_at_the_fork_point_is_no_round_of_this_branch(repo):

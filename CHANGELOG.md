@@ -10,6 +10,19 @@ A few plain sentences per release: [NEWS.md](NEWS.md). Deutsche Fassung:
 [CHANGELOG-DE.md](CHANGELOG-DE.md). Releases before v2.28.2:
 [docs/changelog-archive.md](docs/changelog-archive.md).
 
+## v2.77.3 — A pass rests only on evidence that reaches the repository · 2026-10-24
+
+**Why.** `attest` read ROOT-CAUSE and skip lines from every journal shard in the worktree, also uncommitted ones, while its commit carried only today's shard and explicit `--with` paths. Evidence in another day's uncommitted shard could authorize a committed pass without ever landing in the repository. Separately, `plan-structure` accepted a `## Transitions` table whose delimiter row named fewer cells than its header.
+
+**What changes.**
+- The evidence owner counts a journal line only when it is committed at the reviewed head or lies in a file the same attestation commits (today's shard, `--with`). A ROOT-CAUSE or skip only in another uncommitted shard is refused with its file and line, never counted silently.
+- Evidence appended to today's shard lands with the REVIEW line as before; no new record list sits beside the evidence owner.
+- `plan-structure` compares the cell counts of a table's header and delimiter row (GFM) and reports a mismatch as a finding.
+
+**Update.** No steps.
+
+Details: [Plan](docs/analysis/2026-10-24-v2.77.3.md) #308
+
 ## v2.77.2 — A pytest parameter with brackets keeps the whole id · 2026-10-23
 
 **Why.** `red_evidence` cut a pytest parameter suffix at the last `[`, so a valid id such as `test_x[a[b]]` was read as `test_x[a` while `attest_evidence` reads `test_x`; a valid red-to-green proof was refused on the pytest and JUnit paths.

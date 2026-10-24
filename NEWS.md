@@ -7,6 +7,10 @@ details are in the [CHANGELOG](CHANGELOG.md).
 
 Deutsche Fassung: [NEWS-DE.md](NEWS-DE.md).
 
+## v2.77.3 — A pass cannot rest on evidence that never reaches the repository
+
+A review pass could be authorized by a note in an uncommitted journal file from another day, so the evidence stayed outside the repository. Such a note now counts only when it is committed or travels with the attestation; otherwise the pass is refused and names the file. The plan check also rejects a Transitions table whose header and separator row have different numbers of columns.
+
 ## v2.77.2 — A bracket in a test parameter no longer hides a real fix
 
 A pytest test whose parameter value contains brackets, such as `test_x[a[b]]`, was read under the wrong name, so a genuine failing-to-passing proof could be refused. The tool that measures the proof now uses the same test-name reading as the review gate, and a parameter may contain brackets, `]`, commas, Unicode or be empty.

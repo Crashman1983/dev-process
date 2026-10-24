@@ -487,6 +487,7 @@ def main() -> int:
     if not journal_dir.is_absolute():
         journal_dir = root / journal_dir
     journal_dir = journal_dir.resolve()
+    target = _journal_target(root, journal_dir)
     if args.plan_review:
         # always: a plan whose own id ends in `-plan` would otherwise have its
         # plan review clear its code (refutation)
@@ -499,14 +500,16 @@ def main() -> int:
     # range the line names — known only once build_line has it
     record = next((f for _ln, f in parse_review_lines(line)[0]), {})
     plain = args.work.removesuffix("-plan") if args.plan_review else args.work
+    with_files = [root / rel for rel in args.with_ or [] if (root / rel).is_file()]
     evidence = evidence_problems(
         root, work=args.work, ids=round_ids(argparse.Namespace(work=plain), root),
         tier=int(args.tier) if args.tier.isascii() and args.tier.isdigit() else 0,
         verdict=args.verdict, independence=args.independence, base=record.get("base"),
         head=record.get("head"), plan_review=args.plan_review, model=args.model,
-        reports=[root / rel for rel in args.with_ or [] if (root / rel).is_file()],
+        reports=with_files,
         # a plan review asks no code round's records
-        blocks=None if args.plan_review else block_lines(args, root, journal_dir), journal_dir=journal_dir)
+        blocks=None if args.plan_review else block_lines(args, root, journal_dir),
+        journal_dir=journal_dir, carried=[target, *with_files])
     exception_note = ""
     if args.exception:
         # always written: an owner exception that trips no rule here (a round
@@ -528,7 +531,6 @@ def main() -> int:
         for p in problems:
             print(f"  - {p}", file=sys.stderr)
         return 1
-    target = _journal_target(root, journal_dir)
     print(line)
     if args.dry_run:
         print(f"attest: dry run — would append to {target.relative_to(root) if target.is_relative_to(root) else target}")
