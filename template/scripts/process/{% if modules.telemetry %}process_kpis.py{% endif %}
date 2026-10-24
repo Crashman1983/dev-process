@@ -772,32 +772,40 @@ OLD_REASONS = ("no-at", "no-place", "no-line", "not-code", "no-round1", "no-head
                "outside", "git-failed", "unreadable-report")
 _HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
 _PLACE = re.compile(r"^(?P<path>[^\s:]+)(?::(?P<first>[1-9][0-9]*)(?:-(?P<last>[1-9][0-9]*))?)?$")
-_DIFF = ("--no-color", "--no-ext-diff", "--no-textconv")
+_DIFF = ("--no-color", "--no-ext-diff", "--no-textconv", "--inter-hunk-context=0")
 
 
-def _git_out(root: Path, *args: str) -> str | None:
-    """git's stdout, or None when it fails or runs past 30 s — never an empty answer."""
+def _git_run(root: Path, *args: str) -> tuple[int, str] | None:
+    """(exit code, stdout) of git, or None when git cannot run or runs past 30 s — the
+    callers tell "not there" (an exit code git documents) from "git failed" (refute,
+    round 1: a missing blob read as an absent file)."""
     try:
         # a place is a path, never a glob: `pages/[id].tsx` names that file (plan review, round 3)
         r = subprocess.run(["git", "--literal-pathspecs", "-C", str(root), *args], capture_output=True, text=True,
                            timeout=30, encoding="utf-8", errors="replace")
     except (OSError, subprocess.SubprocessError):
         return None
-    return r.stdout if r.returncode == 0 else None
+    return r.returncode, r.stdout
+
+
+def _git_out(root: Path, *args: str) -> str | None:
+    """git's stdout, or None when it fails or runs past 30 s — never an empty answer."""
+    r = _git_run(root, *args)
+    return r[1] if r is not None and r[0] == 0 else None
 
 
 def _work_group(work: str, plans: list[tuple[str, str]]) -> set[str]:
     """The work ids one report's or REVIEW line's work goes by, `#` stripped: its own, and
     those of every plan that names it (`check_review._plan_work_ids` — slug and issues,
-    the matching `_issue_ids` uses). A plan with two issues joins none of their groups
-    to each other; its ids count in each."""
+    the matching `_issue_ids` uses). An issue takes the slugs of its plans, not their
+    other issues: a plan with two issues joins neither group to the other."""
     import check_review as _review
     key = work.lstrip("#")
     group = {key}
     for rel, text in plans:
         ids = {str(i).lstrip("#") for i in _review._plan_work_ids(_review.plan_stem(rel), text, include_dedated=True)}
-        if key in ids:
-            group |= ids
+        if key in ids:  # an issue takes the plan's slugs, never its other issues (refute, round 1)
+            group |= {i for i in ids if not i.isdigit()} if key.isdigit() else ids
     return group
 
 
@@ -808,9 +816,11 @@ class _Diffs:
     def __init__(self, root: Path):
         self.root, self._have, self._renames, self._hunks, self._lines = root, {}, {}, {}, {}
 
-    def has(self, sha: str) -> bool:
+    def has(self, sha: str) -> bool | None:
+        """The commit is here (True), not here (False), or git cannot tell (None)."""
         if sha not in self._have:
-            self._have[sha] = _git_out(self.root, "cat-file", "-e", f"{sha}^{{commit}}") is not None
+            r = _git_run(self.root, "rev-parse", "--verify", "-q", f"{sha}^{{commit}}")
+            self._have[sha] = None if r is None or r[0] not in (0, 1) else r[0] == 0
         return self._have[sha]
 
     def renames(self, h1: str, hr: str) -> dict[str, str] | None:
@@ -829,11 +839,23 @@ class _Diffs:
             self._renames[(h1, hr)] = got
         return self._renames[(h1, hr)]
 
-    def lines(self, sha: str, path: str) -> int | None:
-        """Line count of `path` at `sha`; None when the file is not there."""
+    def lines(self, sha: str, path: str) -> int | str | None:
+        """Line count of the file `path` at `sha`, as git counts lines (a `\\n` ends one; a
+        form feed does not); "absent" when no such file is there (a directory included);
+        None when git cannot tell."""
         if (sha, path) not in self._lines:
-            out = _git_out(self.root, "show", f"{sha}:{path}")
-            self._lines[(sha, path)] = None if out is None else len(out.splitlines())
+            got: int | str | None = None
+            listed = _git_out(self.root, "ls-tree", "-z", sha, "--", path)
+            if listed is not None:
+                entry = next((e for e in listed.split("\0") if e.endswith("\t" + path)), "")
+                meta = entry.split("\t", 1)[0].split()
+                if len(meta) != 3 or meta[1] != "blob":
+                    got = "absent"
+                else:
+                    text = _git_out(self.root, "cat-file", "blob", meta[2])
+                    if text is not None:
+                        got = text.count("\n") + (1 if text and not text.endswith("\n") else 0)
+            self._lines[(sha, path)] = got
         return self._lines[(sha, path)]
 
     def hunks(self, h1: str, hr: str, old: str, new: str) -> list[tuple[int, int]] | str | None:
@@ -862,7 +884,10 @@ def _unchanged_against(d: _Diffs, h1: str, hr: str, path: str, first: int, last:
     if renames is None:
         return None
     old = renames.get(path, path)
-    if d.lines(h1, old) is None:
+    there = d.lines(h1, old)
+    if there is None:
+        return None
+    if there == "absent":
         return False  # not there in round 1: the lines came later
     hunks = d.hunks(h1, hr, old, path)
     if hunks is None:
@@ -887,8 +912,8 @@ def _blocks_since_round1(root: Path, works: set[str] | None = None) -> dict:
     reviewed head unknown (no full-SHA `artifact:` head, and not exactly one head on the
     journal's lines of that round; an `artifact:` head that is no full SHA never falls back);
     a head not in this repository; the place not at the reviewed head; git failed or ran
-    past 30 s. A report that cannot be read counts once as `unreadable-report`: its
-    blockers are unknown."""
+    past 30 s. A report that cannot be read counts once as `unreadable-report` (its
+    blockers are unknown) when no `works` filter is given."""
     import check_review as _review
     reports = _review_reports(root, "code")
     if isinstance(reports, str):
@@ -927,11 +952,15 @@ def _blocks_since_round1(root: Path, works: set[str] | None = None) -> dict:
         hr = rep.head or (next(iter(here)) if len(here) == 1 else None)
         if hr is None:
             return "no-head"
+        if d.has(hr) is None or any(d.has(h) is None for h in h1s):
+            return "git-failed"
         h1s = {h for h in h1s if d.has(h)}
         if not d.has(hr) or not h1s:
             return "missing-commit"
         size = d.lines(hr, path)
-        if size is None or last > size:
+        if size is None:
+            return "git-failed"
+        if size == "absent" or last > size:
             return "outside"
         verdicts = [_unchanged_against(d, h1, hr, path, first, last) for h1 in sorted(h1s)]
         if any(v is True for v in verdicts):
@@ -941,8 +970,10 @@ def _blocks_since_round1(root: Path, works: set[str] | None = None) -> dict:
         return "git-failed"
 
     for rep in reports:
-        if rep.unreadable:  # its blockers are unknown: counted as a report, never dropped
-            total["unmeasured"]["unreadable-report"] = total["unmeasured"].get("unreadable-report", 0) + 1
+        if rep.unreadable:  # its blockers are unknown: counted as a report, never dropped — in the
+            # unfiltered count only; a window cannot tell whose it is (refute, round 1)
+            if works is None:
+                total["unmeasured"]["unreadable-report"] = total["unmeasured"].get("unreadable-report", 0) + 1
             continue
         if rep.round is None or rep.round < 2:
             continue
