@@ -62,6 +62,23 @@ target the refusal names. `--with PATH` adds the round's other records — its r
 so the round is one commit and one push (each bookkeeping push paid the
 push-time gates downstream; half the commits of two weeks were bookkeeping);
 `--commit` makes that one commit. Every refusal comes before the first write.
+
+What counts is read once, as git objects (#308): the snapshot fixes `old` (HEAD), the
+bytes of today's shard and every `--with` record through checked descriptors, and two
+trees — `E` (the reviewed head plus them: the evidence) and `T0` (`old` plus them: the
+round counter). The worktree and the index are read after it only to refuse. The write
+phase is a compare-and-swap against the snapshot: attest holds the index's own
+`index.lock`, appends today's shard through a descriptor checked for identity and
+content, and moves HEAD by `update-ref HEAD new old`; a refusal drops the lock and
+leaves HEAD and the index as they were.
+- R-1: without `--commit` the staging is the product — `--with` stages the blobs of `T1`
+  under the lock, no flags only appends the line (no index).
+- R-6: where the platform has no `dir_fd`/`O_NOFOLLOW` (Windows) the descriptor's
+  identity check stands in for the link-free walk.
+- R-7: a split index (`core.splitIndex`, `sharedindex.*`) is refused; attest writes only a
+  whole index.
+- The archive: attest moves no plan. After the attestation, `git mv <plan> <archive>` and
+  `git commit` — a commit of its own, which the round counter walks through.
 """
 from __future__ import annotations
 
@@ -537,7 +554,7 @@ def _git_run(root: Path, *args: str, env: dict | None = None, data: bytes | None
 
 
 def _write_phase(root: Path, snap, target_rel: str, target_bytes: bytes, message: str,
-                 commit: bool) -> bool:
+                 commit: bool, index_too: bool = True) -> bool:
     """The transactional write phase (design §8): every write is a compare-and-swap
     against the snapshot, on the object the check saw. Objects first — the target's blob,
     `T1` (`T0` plus it) and, with `commit`, `commit-tree T1 -p old`. Then W1: attest takes
@@ -550,16 +567,54 @@ def _write_phase(root: Path, snap, target_rel: str, target_bytes: bytes, message
     then every path's `lstat` equal to its descriptor's `fstat`. Only then the lock renamed
     onto the index, and `update-ref HEAD new old`. A refusal before the rename removes the
     lock — the only name attest removes in the worktree (I13′) — HEAD stays `old`. Without
-    `commit` the phase ends with the index rename (R-1). A split index is refused (R-7)."""
+    `commit` the phase ends with the index rename (R-1); without `index_too` (no flags) it
+    is W2 alone: the line appended, no index, no commit. A split index is refused (R-7)."""
     try:
-        return _write_phase_steps(root, snap, target_rel, target_bytes, message, commit)
+        return _write_phase_steps(root, snap, target_rel, target_bytes, message, commit, index_too)
     except _Refused as why:
         print(f"attest: REFUSED — {why}", file=sys.stderr)
         return False
 
 
+def _w2_append(root: Path, snap, target_rel: str, target_bytes: bytes, fds: dict[str, int]) -> None:
+    """W2: today's shard checked through its descriptor (`_w2_check`), the seam, a new shard
+    made only now, the line appended through the descriptor, then the after-identity."""
+    target = next(f for f in snap.files if f.rel == target_rel)
+    _w2_check(root, snap, target_rel, fds)
+    _write_seam("worktree-checked")
+    if target.data is None:  # today's shard, new: created only now, beside nothing
+        try:
+            fds[target_rel] = _create_in_repo(os.fspath(root), target_rel, os.O_RDWR | os.O_APPEND)
+        except FileExistsError:
+            raise _Refused(f"{target_rel} appeared after the snapshot — nothing written; rerun "
+                           f"attest") from None
+        except OSError as exc:
+            raise _Refused(f"{target_rel} cannot be made without following a link ({exc}) — "
+                           f"nothing written") from None
+    view = memoryview(target_bytes[len(target.data or b""):])
+    while view:
+        view = view[os.write(fds[target_rel], view):]
+    for rel, fd in fds.items():
+        st = os.fstat(fd)
+        try:
+            now = os.lstat(os.path.join(root, *rel.split("/")))
+        except OSError:
+            now = None
+        if now is None or (now.st_dev, now.st_ino) != (st.st_dev, st.st_ino):
+            raise _Refused(f"{rel} was replaced while attest wrote it — nothing committed, the "
+                           f"index unchanged; the file at the path is untouched")
+
+
 def _write_phase_steps(root: Path, snap, target_rel: str, target_bytes: bytes, message: str,
-                       commit: bool) -> bool:
+                       commit: bool, index_too: bool) -> bool:
+    if not index_too:  # no flags: the line only, appended by W2 — no index, no commit (R-1)
+        fds: dict[str, int] = {}
+        try:
+            _w2_append(root, snap, target_rel, target_bytes, fds)
+        finally:
+            for fd in fds.values():
+                os.close(fd)
+        return True
     if not snap.old:
         raise _Refused("no HEAD to attest onto — nothing written")
     target = next(f for f in snap.files if f.rel == target_rel)
@@ -595,7 +650,7 @@ def _write_phase_steps(root: Path, snap, target_rel: str, target_bytes: bytes, m
                        f"is free") from None
     except OSError as exc:
         raise _Refused(f"cannot take {lock} ({exc}) — nothing written") from None
-    fds: dict[str, int] = {}
+    fds = {}
     done = False
     try:
         _w1_check(root, snap)
@@ -607,29 +662,7 @@ def _write_phase_steps(root: Path, snap, target_rel: str, target_bytes: bytes, m
         os.fsync(lock_fd)
         os.close(lock_fd)
         lock_fd = None
-        _w2_check(root, snap, target_rel, fds)
-        _write_seam("worktree-checked")
-        if target.data is None:  # today's shard, new: created only now, beside nothing
-            try:
-                fds[target_rel] = _create_in_repo(os.fspath(root), target_rel, os.O_RDWR | os.O_APPEND)
-            except FileExistsError:
-                raise _Refused(f"{target_rel} appeared after the snapshot — nothing written; rerun "
-                               f"attest") from None
-            except OSError as exc:
-                raise _Refused(f"{target_rel} cannot be made without following a link ({exc}) — "
-                               f"nothing written") from None
-        view = memoryview(target_bytes[len(target.data or b""):])
-        while view:
-            view = view[os.write(fds[target_rel], view):]
-        for rel, fd in fds.items():
-            st = os.fstat(fd)
-            try:
-                now = os.lstat(os.path.join(root, *rel.split("/")))
-            except OSError:
-                now = None
-            if now is None or (now.st_dev, now.st_ino) != (st.st_dev, st.st_ino):
-                raise _Refused(f"{rel} was replaced while attest wrote it — nothing committed, the "
-                               f"index unchanged; the file at the path is untouched")
+        _w2_append(root, snap, target_rel, target_bytes, fds)
         os.replace(lock, index)
         done = True
     finally:
@@ -841,21 +874,18 @@ def main() -> int:
     appended += line + "\n"
     target_bytes = (target_old or b"") + appended.encode("utf-8")
     message = f"docs: attest {args.work} round {args.round_}"
-    if not (args.commit or args.with_):
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(target_bytes)
-        print(f"attest: appended to {_shown(root, target)}")
-        _fix_streak_notes(root, args.verdict)
-        return 0
-    # one locked write phase (design §8): only the attestation's own paths — anything else
-    # staged stays staged (refutation: a staged source file rode along into this commit)
-    if not _write_phase(root, snap, target_rel, target_bytes, message, commit=args.commit):
+    # one write phase (design §8): only the attestation's own paths — anything else staged
+    # stays staged (refutation: a staged source file rode along into this commit); without
+    # flags the line alone, through the checked descriptor (R-1)
+    staged = bool(args.commit or args.with_)
+    if not _write_phase(root, snap, target_rel, target_bytes, message, commit=args.commit,
+                        index_too=staged):
         return 1
     print(f"attest: appended to {_shown(root, target)}")
     _fix_streak_notes(root, args.verdict)
     if args.commit:
         print(f"attest: committed: {message}")
-    else:
+    elif staged:
         print(f'attest: staged — commit with: git commit -m "{message}"')
     return 0
 
