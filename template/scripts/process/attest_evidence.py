@@ -304,9 +304,24 @@ def _binds(claimed: str, ids: set) -> bool:
     return "/" not in claimed and claimed in ids
 
 
+def _skip_kind(m) -> str:
+    """A skip line's kind as the evidence rows name it (`codex-review` is `cross-model`)."""
+    return "cross-model" if m.group("kind") == "codex-review" else m.group("kind")
+
+
+def _bound_skips(line: str, ids: set) -> frozenset:
+    """The skip kinds this one line names for the work `ids`."""
+    return frozenset(_skip_kind(m) for m in SKIP_LINE.finditer(line)
+                     if _binds(m.group("work"), ids))
+
+
+def _bound_root_cause(line: str, ids: set) -> bool:
+    """Whether this one line names a ROOT-CAUSE of the work `ids`."""
+    return any(_binds(m.group("work"), ids) for m in ROOT_CAUSE_LINE.finditer(line))
+
+
 def _skips(texts: list[str], ids: set) -> frozenset:
-    return frozenset("cross-model" if m.group("kind") == "codex-review" else m.group("kind")
-                     for t in texts for m in SKIP_LINE.finditer(t) if _binds(m.group("work"), ids))
+    return frozenset().union(*(_bound_skips(t, ids) for t in texts))
 
 
 def _refuted(texts: list[str], ids: set) -> bool:
@@ -314,7 +329,7 @@ def _refuted(texts: list[str], ids: set) -> bool:
 
 
 def _root_caused(texts: list[str], ids: set) -> bool:
-    return any(_binds(m.group("work"), ids) for t in texts for m in ROOT_CAUSE_LINE.finditer(t))
+    return any(_bound_root_cause(t, ids) for t in texts)
 
 
 def _fix_streak(root: Path, base: str | None, head: str | None) -> int | None:
@@ -418,7 +433,8 @@ def _journal_contents(root: Path, ref: str, journal_dir: Path | None) -> set[str
 
 
 def _branch_records(root: Path, head: str, blocks: list[tuple[int, str]] | None,
-                    journal_dir: Path | None, carried: set[Path] | None = None
+                    journal_dir: Path | None, plan_ids: set, skip_ids: set,
+                    carried: set[Path] | None = None
                     ) -> tuple[list[int] | None, str, tuple[str, ...]]:
     """(the blocked code rounds the branch adds, its journal records, refusals). The rounds
     are those of `blocks` — `attest.block_lines`, the set the round counter counts (journal
@@ -426,7 +442,10 @@ def _branch_records(root: Path, head: str, blocks: list[tuple[int, str]] | None,
     point; None: unknown. The journal records are the worktree journal's lines absent there,
     as rendered (a fenced or commented line is no record), but only those already at head or
     in a file this attestation carries (`carried`: today's shard, `--with`); a ROOT-CAUSE or
-    skip only in another uncommitted file is refused by name, never silently counted."""
+    skip only in another uncommitted file is refused by name, never silently counted. The
+    refusal reads the same set as `_root_caused`/`_skips`: this work's ROOT-CAUSE and the
+    skip kinds the journal counts (`JOURNAL_SKIPS`), so foreign work and kinds read only
+    from the plan stay invisible."""
     fork = _fork(root, head)
     if fork == "":
         return [], "", ()
@@ -450,7 +469,7 @@ def _branch_records(root: Path, head: str, blocks: list[tuple[int, str]] | None,
             new.append(line)
             if _content(line) in head_records or f.resolve() in carried:
                 continue
-            if ROOT_CAUSE_LINE.search(line) or SKIP_LINE.search(line):
+            if _bound_root_cause(line, plan_ids) or (_bound_skips(line, skip_ids) & JOURNAL_SKIPS):
                 problems.append(
                     f"{rel}:{n}: `{line.strip()}` is neither at {head[:12]} nor carried by this "
                     f"attestation — commit it, or pass {rel} with --with")
@@ -1105,7 +1124,7 @@ def gather(root: Path, *, work: str, ids: set[str], tier: int, verdict: str, ind
     # a code pass: the blocked code rounds the branch adds, and its journal records (ROOT-CAUSE,
     # skips) beside the plan's; a plan review asks no code round's records (facts None)
     rounds, journal, evidence_problems = (None, "", ()) if plan_review else _branch_records(
-        root, head, blocks, journal_dir, carried)
+        root, head, blocks, journal_dir, plan_ids, skip_ids, carried)
     mine = [own, journal]
     # a journal skip lifts only the per-round duties; every other kind counts from the plan
     skips = _skips([own], skip_ids) | (_skips([journal], skip_ids) & JOURNAL_SKIPS)

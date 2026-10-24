@@ -15,7 +15,7 @@ A few plain sentences per release: [NEWS.md](NEWS.md). Deutsche Fassung:
 **Why.** `attest` read ROOT-CAUSE and skip lines from every journal shard in the worktree, also uncommitted ones, while its commit carried only today's shard and explicit `--with` paths. Evidence in another day's uncommitted shard could authorize a committed pass without ever landing in the repository. Separately, `plan-structure` accepted a `## Transitions` table whose delimiter row named fewer cells than its header.
 
 **What changes.**
-- The evidence owner counts a journal line only when it is committed at the reviewed head or lies in a file the same attestation commits (today's shard, `--with`). A ROOT-CAUSE or skip only in another uncommitted shard is refused with its file and line, never counted silently.
+- The evidence owner counts a journal line only when it is committed at the reviewed head or lies in a file the same attestation commits (today's shard, `--with`). Only this work's counted evidence — its ROOT-CAUSE and the skip kinds the journal may carry — can refuse a pass; foreign work and kinds read from the plan alone stay invisible. Such a line only in another uncommitted shard is refused with its file and line, never counted silently.
 - Evidence appended to today's shard lands with the REVIEW line as before; no new record list sits beside the evidence owner.
 - `plan-structure` compares the cell counts of a table's header and delimiter row (GFM) and reports a mismatch as a finding.
 

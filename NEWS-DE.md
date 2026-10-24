@@ -9,7 +9,7 @@ English version: [NEWS.md](NEWS.md).
 
 ## v2.77.3 — Ein Pass stützt sich nicht auf Belege, die nie ins Repository gelangen
 
-Ein Review-Pass konnte durch einen Eintrag in einer uncommitteten Journal-Datei eines anderen Tages autorisiert werden; der Beleg blieb damit außerhalb des Repositorys. So ein Eintrag zählt jetzt nur, wenn er committet ist oder mit der Attestierung reist; sonst wird der Pass verweigert und nennt die Datei. Die Plan-Prüfung lehnt außerdem eine Transitions-Tabelle ab, deren Kopf- und Trennzeile verschiedene Spaltenzahlen haben.
+Ein Review-Pass konnte durch einen Eintrag in einer uncommitteten Journal-Datei eines anderen Tages autorisiert werden; der Beleg blieb damit außerhalb des Repositorys. So ein Eintrag zählt jetzt nur, wenn er committet ist oder mit der Attestierung reist; sonst wird der Pass verweigert und nennt die Datei. Nur die gezählten Einträge dieser Arbeit können einen Pass blockieren; fremde Arbeit und Arten, die nur aus dem Plan zählen, bleiben unsichtbar. Die Plan-Prüfung lehnt außerdem eine Transitions-Tabelle ab, deren Kopf- und Trennzeile verschiedene Spaltenzahlen haben.
 
 ## v2.77.2 — Eine Klammer im Testparameter verdeckt keinen echten Fix mehr
 

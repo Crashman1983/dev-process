@@ -14,7 +14,7 @@ English version: [CHANGELOG.md](CHANGELOG.md). Die Releases vor v2.28.2:
 **Warum.** `attest` las ROOT-CAUSE- und Skip-Zeilen aus jedem Journal-Shard im Arbeitsbaum, auch aus uncommitteten, während sein Commit nur den heutigen Shard und explizite `--with`-Pfade trug. Ein Beleg im uncommitteten Shard eines anderen Tages konnte so einen committeten Pass autorisieren, ohne je im Repository zu landen. Daneben akzeptierte `plan-structure` eine `## Transitions`-Tabelle, deren Trennzeile weniger Spalten nannte als der Kopf.
 
 **Was sich ändert.**
-- Der Owner der Belege zählt eine Journal-Zeile nur, wenn sie am geprüften Head committet ist oder in einer Datei liegt, die dieselbe Attestierung committet (heutiger Shard, `--with`). Eine ROOT-CAUSE- oder Skip-Zeile nur in einem anderen uncommitteten Shard wird mit Datei und Zeile verweigert, nie still gezählt.
+- Der Owner der Belege zählt eine Journal-Zeile nur, wenn sie am geprüften Head committet ist oder in einer Datei liegt, die dieselbe Attestierung committet (heutiger Shard, `--with`). Nur die gezählten Belege dieser Arbeit — ihre ROOT-CAUSE und die Skip-Arten, die das Journal tragen darf — können einen Pass verweigern; fremde Arbeit und Arten, die nur aus dem Plan zählen, bleiben unsichtbar. Eine solche Zeile nur in einem anderen uncommitteten Shard wird mit Datei und Zeile verweigert, nie still gezählt.
 - Belege im heutigen Shard landen wie bisher mit der REVIEW-Zeile im Commit; neben dem Beleg-Owner steht keine zweite Liste.
 - `plan-structure` vergleicht die Zellenzahl von Kopf- und Trennzeile einer Tabelle (GFM) und meldet eine Abweichung als Befund.
 

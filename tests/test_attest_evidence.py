@@ -1018,6 +1018,39 @@ def test_an_uncommitted_older_shard_is_no_evidence(repo):
     assert r.returncode == 0, r.stderr
 
 
+JOURNAL_ORIGIN_CASES = [
+    # (name, shard, line, committed, refused) — the refusal follows the work-bound readers:
+    # this work's ROOT-CAUSE or a skip of a kind the journal counts (class-test, replan)
+    ("today's shard, own skip", SHARD,
+     "skipped class-test work=widget: blocked before v2.77", "uncommitted", False),
+    ("older shard, own skip, committed", OLDER_SHARD,
+     "skipped class-test work=widget: blocked before v2.77", "commit", False),
+    ("older shard, own skip, uncommitted", OLDER_SHARD,
+     "skipped class-test work=widget: blocked before v2.77", "uncommitted", True),
+    ("older shard, foreign skip, uncommitted", OLDER_SHARD,
+     "skipped class-test work=unrelated: older work", "uncommitted", False),
+    ("older shard, foreign root cause, uncommitted", OLDER_SHARD,
+     "ROOT-CAUSE work=unrelated round=1: another work — sites: none — refuted", "uncommitted", False),
+    ("older shard, own uncounted skip, uncommitted", OLDER_SHARD,
+     "skipped ac-trace work=widget: not a journal kind", "uncommitted", False),
+]
+
+
+@pytest.mark.parametrize("name,shard,line,committed,refused", JOURNAL_ORIGIN_CASES,
+                         ids=[c[0] for c in JOURNAL_ORIGIN_CASES])
+def test_a_journal_refusal_covers_only_this_works_counted_evidence(repo, name, shard, line,
+                                                                  committed, refused):
+    """#308 review R1: the guard reads the same set as `_root_caused`/`_skips` — this
+    work's ROOT-CAUSE and the skips the journal may count. Foreign work and kinds read
+    only from the plan stay invisible, at any origin."""
+    _append(repo, shard, line, commit="docs: evidence" if committed == "commit" else None)
+    r = _pass(repo)
+    if refused:
+        assert r.returncode == 1 and shard in r.stderr and "neither at" in r.stderr, r.stderr
+    else:
+        assert r.returncode == 0, r.stderr
+
+
 def test_todays_journal_evidence_is_committed_with_the_attestation(repo):
     """#308: the one shard the attestation writes is part of its commit — evidence
     appended there before the pass must land in the repository with the REVIEW line."""
