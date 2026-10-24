@@ -1135,6 +1135,85 @@ def test_a_hardlinked_report_is_carried_by_its_own_path(repo):
     assert linked in _git(repo, "show", "--name-only", "--format=", "HEAD")
 
 
+def _remove_cause_before_commit(repo, *rels):
+    """A hook that edits the evidence after attest validated it, just before the commit:
+    the R4 TOCTOU window. The commit must still carry the checked bytes."""
+    hook = repo / ".git/hooks/pre-commit"
+    hook.parent.mkdir(parents=True, exist_ok=True)
+    hook.write_text(
+        "#!/usr/bin/env python3\n"
+        "import pathlib\n"
+        "import subprocess\n"
+        f"for rel in {list(rels)!r}:\n"
+        "    p = pathlib.Path(rel)\n"
+        "    if not p.is_file():\n"
+        "        continue\n"
+        "    old = p.read_text(encoding='utf-8')\n"
+        "    kept = ''.join(ln for ln in old.splitlines(True) if 'ROOT-CAUSE work=widget' not in ln)\n"
+        "    if kept != old:\n"
+        "        p.write_text(kept, encoding='utf-8')\n"
+        "        subprocess.run(['git', 'add', '--', rel], check=False)\n",
+        encoding="utf-8")
+    hook.chmod(0o755)
+
+
+def test_evidence_removed_after_the_check_is_still_committed(repo):
+    """#308 R4: validation read today's shard, then `git add`/`git commit` read the
+    worktree again. A line removed after the check made the commit a pass without its
+    evidence. The commit now comes from the checked bytes."""
+    _append(repo, SHARD, _review("widget", 1), commit="docs: block")
+    _append(repo, SHARD, _RC + "sites: none — refuted, the finding misread the guard")
+    _remove_cause_before_commit(repo, SHARD)
+    r = _attest(repo, "--with", _report(repo), "--commit")
+    assert r.returncode == 0, r.stderr
+    assert _RC in _git(repo, "show", f"HEAD:{SHARD}")
+
+
+def test_with_shard_changed_after_the_check_is_still_committed(repo):
+    """#308 R4, the same window for an older `--with` shard: what the evidence check saw
+    is what the attestation commits."""
+    _append(repo, SHARD, _review("widget", 1), commit="docs: block")
+    _append(repo, OLDER_SHARD, _RC + "sites: none — refuted, the finding misread the guard",
+            commit="docs: the cause")
+    _remove_cause_before_commit(repo, OLDER_SHARD)
+    r = _attest(repo, "--with", _report(repo), "--with", OLDER_SHARD, "--commit")
+    assert r.returncode == 0, r.stderr
+    assert _RC in _git(repo, "show", f"HEAD:{OLDER_SHARD}")
+
+
+@pytest.mark.skipif(not hasattr(os, "symlink"), reason="needs symlinks")
+def test_a_symlinked_override_journal_dir_is_refused(repo):
+    """#308 R4: `journal_dir.resolve()` removed a symlink parent before the path owner
+    saw it. The lexical path is checked first, so the alias is refused by name."""
+    actual = repo / "docs/journal"
+    actual.mkdir(parents=True)
+    (repo / ".process-work/journal").mkdir(parents=True, exist_ok=True)
+    (repo / ".process-work/journal/alias").symlink_to(actual, target_is_directory=True)
+    r = _attest(repo, "--with", _report(repo), "--journal-dir",
+                ".process-work/journal/alias", "--commit")
+    assert r.returncode == 1, r.stderr
+    assert "alias" in r.stderr and "symlink" in r.stderr, r.stderr
+    assert not _git(repo, "diff", "--cached", "--name-only")
+
+
+@pytest.mark.skipif(not hasattr(os, "symlink"), reason="needs symlinks")
+def test_a_symlinked_default_journal_dir_is_refused(repo):
+    """#308 R4: the default journal directory is no exception — a link there is
+    checked as a path, not silently replaced by its target."""
+    shard_dir = repo / ".process-work/journal"
+    actual = repo / "docs/journal"
+    actual.parent.mkdir(parents=True, exist_ok=True)
+    if shard_dir.exists():
+        shard_dir.rename(actual)
+    else:
+        actual.mkdir(parents=True)
+    shard_dir.symlink_to(actual, target_is_directory=True)
+    r = _attest(repo, "--with", _report(repo), "--commit")
+    assert r.returncode == 1, r.stderr
+    assert ".process-work/journal" in r.stderr and "symlink" in r.stderr, r.stderr
+    assert not _git(repo, "diff", "--cached", "--name-only")
+
+
 EVIDENCE_QUOTATIONS = [
     ("four spaces", lambda line: "    " + line),
     ("a tab", lambda line: "\t" + line),

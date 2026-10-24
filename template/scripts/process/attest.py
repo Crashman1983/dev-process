@@ -71,6 +71,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 sys.dont_write_bytecode = True
@@ -459,6 +460,100 @@ def _attest_commit(root: Path, parent: str, commit: str, mine: set) -> bool:
     return any(work_key(f["work"]) in mine for _ln, f in parse_review_lines(added)[0])
 
 
+def _blob(root: Path, data: bytes) -> str | None:
+    """The blob id of exactly `data` — no path, no clean filter, no second read."""
+    r = subprocess.run(["git", "-C", str(root), "hash-object", "-w", "--stdin"],
+                       input=data, capture_output=True, env=git_environment())
+    if r.returncode:
+        print(f"attest: git hash-object failed: {r.stderr.decode(errors='replace').strip()}",
+              file=sys.stderr)
+        return None
+    return r.stdout.decode().strip()
+
+
+def _mode_for(root: Path, rel: str, p: Path) -> str:
+    """The mode of `rel` from HEAD when it is tracked there, else the file's own bit."""
+    r = subprocess.run(["git", "-C", str(root), "ls-tree", "HEAD", "--", rel],
+                       capture_output=True, text=True, env=git_environment())
+    if r.returncode == 0 and r.stdout.strip():
+        return r.stdout.split()[0]
+    try:
+        return "100755" if p.stat().st_mode & 0o111 else "100644"
+    except OSError:
+        return "100644"
+
+
+def _index_entry(root: Path, env: dict, rel: str, data: bytes, p: Path) -> bool:
+    blob = _blob(root, data)
+    if blob is None:
+        return False
+    r = subprocess.run(["git", "-C", str(root), "update-index", "--add", "--cacheinfo",
+                        _mode_for(root, rel, p), blob, rel],
+                       capture_output=True, text=True, env=env)
+    if r.returncode:
+        print(f"attest: git update-index {rel} failed: {r.stderr.strip()}", file=sys.stderr)
+        return False
+    return True
+
+
+def _stage_bytes(root: Path, files: list[tuple[str, bytes | None]]) -> bool:
+    """The index gets exactly the checked bytes, never a fresh read of the worktree."""
+    env = git_environment()
+    return all(data is None or _index_entry(root, env, rel, data, root / rel)
+               for rel, data in files)
+
+
+def _commit_bytes(root: Path, files: list[tuple[str, bytes | None]], removals: list[str],
+                  message: str) -> bool:
+    """One commit whose tree is HEAD plus exactly these blobs (and removals), via a private
+    index and a compare-and-swap update of HEAD. Foreign staged changes stay in the real
+    index; only the attestation's paths are reset to the committed state afterwards."""
+    old = _git(root, "rev-parse", "--verify", "HEAD")
+    if not old:
+        print("attest: no HEAD to commit onto", file=sys.stderr)
+        return False
+    tmp_root = root / ".process-work" / "tmp"
+    try:
+        tmp_root.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix="attest-index-", dir=tmp_root) as tmp:
+            env = {**git_environment(), "GIT_INDEX_FILE": str(Path(tmp) / "index")}
+            if subprocess.run(["git", "-C", str(root), "read-tree", old],
+                              capture_output=True, env=env).returncode:
+                print("attest: git read-tree failed", file=sys.stderr)
+                return False
+            for rel in removals:
+                subprocess.run(["git", "-C", str(root), "update-index", "--force-remove", "--", rel],
+                               capture_output=True, env=env)
+            for rel, data in files:
+                if data is not None and not _index_entry(root, env, rel, data, root / rel):
+                    return False
+            tree = subprocess.run(["git", "-C", str(root), "write-tree"],
+                                  capture_output=True, text=True, env=env)
+            if tree.returncode:
+                print(f"attest: git write-tree failed: {tree.stderr.strip()}", file=sys.stderr)
+                return False
+            commit = subprocess.run(["git", "-C", str(root), "commit-tree", tree.stdout.strip(),
+                                     "-p", old, "-m", message],
+                                    capture_output=True, text=True, env=env)
+            if commit.returncode:
+                print(f"attest: git commit-tree failed: {commit.stderr.strip()}", file=sys.stderr)
+                return False
+            new = commit.stdout.strip()
+            moved = subprocess.run(["git", "-C", str(root), "update-ref", "-m", message,
+                                    "HEAD", new, old], capture_output=True, text=True, env=env)
+            if moved.returncode:
+                print(f"attest: git update-ref failed: {moved.stderr.strip()}", file=sys.stderr)
+                return False
+    except OSError as exc:
+        print(f"attest: cannot use the worktree index ({exc})", file=sys.stderr)
+        return False
+    paths = list(dict.fromkeys([rel for rel, _data in files] + removals))
+    if paths:
+        subprocess.run(["git", "-C", str(root), "reset", "-q", "--", *paths],
+                       capture_output=True, env=git_environment())
+    return True
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="write a computed, validated REVIEW line")
     ap.add_argument("--work", required=True)
@@ -493,7 +588,8 @@ def main() -> int:
     journal_dir = Path(args.journal_dir) if args.journal_dir else Path(JOURNAL_DIR)
     if not journal_dir.is_absolute():
         journal_dir = root / journal_dir
-    journal_dir = journal_dir.resolve()
+    # lexical on purpose: `attestation_files` checks every component before any resolve,
+    # so a symlink in `--journal-dir` (or the default) cannot be hidden by dereferencing
     target = _journal_target(root, journal_dir)
     if args.plan_review:
         # always: a plan whose own id ends in `-plan` would otherwise have its
@@ -546,39 +642,56 @@ def main() -> int:
         print(f"attest: dry run — would append to {target.relative_to(root) if target.is_relative_to(root) else target}")
         _fix_streak_notes(root, args.verdict)
         return 0
+    # what the evidence check read is what this attestation writes: the checked bytes,
+    # never a fresh read after the validation (R4 TOCTOU)
+    target_rel, target_old = carried[0]
+    appended = ""
+    if not target_old:
+        appended += f"# {dt.date.today().isoformat()}\n\n"
+    if exception_note:
+        appended += exception_note + "\n\n"
+    if args.note:
+        appended += args.note.rstrip() + "\n\n"
+    appended += line + "\n"
+    target_bytes = (target_old or b"") + appended.encode("utf-8")
     target.parent.mkdir(parents=True, exist_ok=True)
-    with target.open("a", encoding="utf-8") as fh:
-        if target.stat().st_size == 0:
-            fh.write(f"# {dt.date.today().isoformat()}\n\n")
-        if exception_note:
-            fh.write(exception_note + "\n\n")
-        if args.note:
-            fh.write(args.note.rstrip() + "\n\n")
-        fh.write(line + "\n")
+    target.write_bytes(target_bytes)
+    files = [(target_rel, target_bytes), *carried[1:]]
     print(f"attest: appended to {_shown(root, target)}")
     _fix_streak_notes(root, args.verdict)
     if not (args.archive or args.commit or args.with_):
         return 0
-    staged = [rel for rel, _data in carried]
+    message = f"docs: attest {args.work} round {args.round_}" + (
+        " and archive the plan" if args.archive else "")
+    changes = list(files)
+    removals: list[str] = []
     if args.archive:
         dest = _archive_target(root, root / args.archive)
         dest.parent.mkdir(parents=True, exist_ok=True)
+        old_rel = os.path.normpath(args.archive).replace(os.sep, "/")
+        dest_rel = dest.relative_to(root).as_posix()
+        archive_data = dict(files).get(old_rel)
+        if archive_data is None:
+            try:
+                archive_data = (root / old_rel).read_bytes()
+            except OSError as exc:
+                print(f"attest: cannot read {args.archive} to archive it ({exc})", file=sys.stderr)
+                return 1
         if not _git_ok(root, "mv", args.archive, str(dest)):
             return 1
         print(f"attest: archived {args.archive} as {_shown(root, dest)}")
-    if staged and not _git_ok(root, "add", "--", *staged):
-        return 1
-    if args.archive:
-        staged += [str(root / args.archive), str(dest)]  # the rename, staged by git mv
-    message = f"docs: attest {args.work} round {args.round_}" + (
-        " and archive the plan" if args.archive else "")
+        changes = [(rel, data) for rel, data in changes if rel != old_rel]
+        changes.append((dest_rel, archive_data))
+        removals.append(old_rel)
     if args.commit:
         # only the attestation's own paths: anything else staged stays staged
         # (refutation: a staged source file rode along into this commit)
-        if not _git_ok(root, "commit", "-q", "-m", message, "--", *staged):
+        if not _commit_bytes(root, changes, removals, message):
             return 1
         print(f"attest: committed: {message}")
     else:
+        if not _stage_bytes(root, changes):
+            return 1
         print(f'attest: staged — commit with: git commit -m "{message}"')
     return 0
 

@@ -383,16 +383,41 @@ def _fork(root: Path, head: str) -> str | None:
     return "" if contained else None
 
 
+def _repo_rel(root: Path, p: Path) -> tuple[str | None, str]:
+    """(lexical repo-relative path, why) for one path the attestation may write. No
+    resolve()/realpath on `p`: every component is checked with lstat first, so a symlink
+    (the path or any parent) is refused by name before anything follows it."""
+    root = root.resolve()
+    p = Path(os.path.normpath(p if p.is_absolute() else root / p))
+    try:
+        rel = p.relative_to(root).as_posix()
+    except ValueError:
+        return None, f"{p} is outside this repository — refused"
+    if rel in ("", ".") or rel.startswith("../"):
+        return None, f"{p} is outside this repository — refused"
+    cur = root
+    parts = rel.split("/")
+    for i, part in enumerate(parts):
+        cur = cur / part
+        if cur.is_symlink():
+            if i == len(parts) - 1:
+                return None, f"{rel} is a symlink — refused, not followed"
+            return None, (f"{rel} lies under the symlink {cur.relative_to(root).as_posix()} — "
+                          f"refused, not followed")
+        if not cur.exists():
+            break  # a missing component: nothing below it can be a symlink
+    return rel, ""
+
+
 def _journal_dir_at(root: Path, ref: str, journal_dir: Path | None) -> list[tuple[str, str]] | None:
     """The (path, text) of the attested `--journal-dir`'s files at `ref`, where it lies in
     the repository apart from the journal `record_texts` reads there anyway; None when git
     cannot read them."""
     if journal_dir is None:
         return []
-    try:
-        rel = journal_dir.resolve().relative_to(root.resolve()).as_posix()
-    except ValueError:
-        return []  # outside the repository: nothing of it at the ref
+    rel, _why = _repo_rel(root, journal_dir)
+    if rel is None:
+        return []  # outside the repository (or a symlink the owner refuses): nothing at the ref
     if rel == JOURNAL_DIR or rel.startswith(JOURNAL_DIR + "/"):
         return []
     r = _git(root, "ls-tree", "-r", "-z", "--name-only", ref, "--", rel)
@@ -444,22 +469,11 @@ def _repo_file(root: Path, p: Path, *, may_be_missing: bool
     outside the repository, or anything that is no regular file is refused by name,
     never followed. A journal shard not yet written is (rel, None): it is in the commit
     set, attest creates it after the check."""
+    rel, why = _repo_rel(root, p)
+    if rel is None:
+        return None, why
     root = root.resolve()
-    p = Path(os.path.normpath(p if p.is_absolute() else root / p))
-    try:
-        rel = p.relative_to(root).as_posix()
-    except ValueError:
-        return None, f"{p} is outside this repository — refused"
-    if rel in ("", ".") or rel.startswith("../"):
-        return None, f"{p} is outside this repository — refused"
-    for parent in p.parents:
-        if not parent.is_relative_to(root):
-            break
-        if parent != root and parent.is_symlink():
-            return None, (f"{rel} lies under the symlink {parent.relative_to(root).as_posix()} — "
-                          f"refused, not followed")
-    if p.is_symlink():
-        return None, f"{rel} is a symlink — refused, not followed"
+    p = root / rel
     if p.exists():
         if not p.is_file():
             return None, f"{rel} is not a regular file — refused"
@@ -486,14 +500,14 @@ def attestation_files(root: Path, target: Path, with_files: list[Path],
     swallowed. Only the journal target contributes journal evidence; a report or plan
     rides the commit but is no shard."""
     root = root.resolve()
-    jrel = ""
-    if journal_dir is not None:
-        try:
-            jrel = journal_dir.resolve().relative_to(root).as_posix()
-        except ValueError:
-            pass
     files: list[tuple[str, bytes | None]] = []
     problems: list[str] = []
+    jrel = ""
+    if journal_dir is not None:
+        jrel, why = _repo_rel(root, journal_dir)
+        if jrel is None:
+            problems.append(why)  # the override itself is checked before any shard below it
+            jrel = ""
     for p, may_be_missing in [(target, True), *((p, False) for p in with_files)]:
         rel, got = _repo_file(root, p, may_be_missing=may_be_missing)
         if rel is None:
@@ -516,12 +530,7 @@ def _journal_snapshot(root: Path, head: str, journal_dir: Path | None,
     if files is None:
         return None
     root = root.resolve()
-    jrel = ""
-    if journal_dir is not None:
-        try:
-            jrel = journal_dir.resolve().relative_to(root).as_posix()
-        except ValueError:
-            pass
+    jrel = _repo_rel(root, journal_dir)[0] or "" if journal_dir is not None else ""
     for rel, data in carried or ():
         if record_kind(rel) != "journal" and not (
                 jrel and (rel == jrel or rel.startswith(jrel + "/"))):
@@ -1228,9 +1237,22 @@ def gather(root: Path, *, work: str, ids: set[str], tier: int, verdict: str, ind
     plan_read = readable(plan_text)
     spec = (_show(root, head, rel.rsplit("/", 1)[0] + "/spec.md") or "") \
         if record_kind(rel) == "spec-plan" else ""
-    # the review reports among the round's records: a plan riding `--with` is no report
+    # the review reports among the round's records: a plan riding `--with` is no report.
+    # Their text comes from the checked bytes (`carried`) when they ride this attestation,
+    # so the evidence and the commit read one snapshot (R4).
     reports = [p for p in reports if p.resolve().is_relative_to((root / REVIEW_REPORTS).resolve())]
-    report_texts = [readable(p.read_text(encoding="utf-8", errors="replace")) for p in reports]
+    carried_data = {rel: data for rel, data in carried or () if data is not None}
+
+    def report_text(p: Path) -> str:
+        try:
+            rel = p.relative_to(root).as_posix()
+        except ValueError:
+            rel = ""
+        if rel in carried_data:
+            return carried_data[rel].decode("utf-8", errors="replace")
+        return p.read_text(encoding="utf-8", errors="replace")
+
+    report_texts = [readable(report_text(p)) for p in reports]
     issues = {int(i) for i in plan_ids | set(ids) if i.isascii() and i.isdigit()}
     session, reported = _planned_model(root, issues) if plan_review else (None, False)
     source = "report" if session is not None else (UNMEASURED_REPORT if reported else "none")
