@@ -1173,11 +1173,12 @@ def _attest_after_snapshot(repo, tmp_path, mutations, *extra):
     return subprocess.run(cmd, cwd=repo, capture_output=True, text=True)
 
 
-def test_evidence_removed_from_todays_shard_after_the_check_is_refused(repo, tmp_path):
+def test_evidence_removed_after_the_check_is_still_committed(repo, tmp_path):
     """#308 R4: validation read today's shard, then `git add`/`git commit` read the
     worktree again. A line removed after the check made the commit a pass without its
     evidence. Today's shard is the file attest appends to: W2 compares its bytes through
-    the descriptor with the snapshot (design §8) — refused, the edit kept, HEAD unmoved."""
+    the descriptor with the snapshot (design §8) — refused, the edit kept, HEAD unmoved;
+    never a pass without the evidence. (The name stays: ROOT-CAUSE round=4 names it.)"""
     _append(repo, SHARD, _review("widget", 1), commit="docs: block")
     _append(repo, SHARD, _RC + "sites: none — refuted, the finding misread the guard")
     old = _head(repo)

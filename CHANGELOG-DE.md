@@ -17,6 +17,10 @@ English version: [CHANGELOG.md](CHANGELOG.md). Die Releases vor v2.28.2:
 - Der Owner der Belege zählt eine Journal-Zeile nur, wenn sie am geprüften Head committet ist oder in einer Datei liegt, die dieselbe Attestierung committet (heutiger Shard, `--with`). Nur die gezählten Belege dieser Arbeit — ihre ROOT-CAUSE und die Skip-Arten, die das Journal tragen darf — können einen Pass verweigern; fremde Arbeit und Arten, die nur aus dem Plan zählen, bleiben unsichtbar. Eine solche Zeile nur in einem anderen uncommitteten Shard wird mit Datei und Zeile verweigert, nie still gezählt.
 - Belege im heutigen Shard landen wie bisher mit der REVIEW-Zeile im Commit; neben dem Beleg-Owner steht keine zweite Liste.
 - `attest` liest jeden Record einmal und committet genau die geprüften Bytes — jeden Pfad einmal. Ein scheiterndes Index- oder Ref-Update endet mit Exit ≠ 0 und verliert nichts.
+- Eine blockierende REVIEW-Zeile der Arbeit, die weder committet ist noch mit der Attestierung reist, wird mit Namen verweigert statt gezählt.
+- Ein Record, der anders gestagt ist als im Arbeitsbaum und an HEAD, wird verweigert statt überschrieben; das fremde Staging bleibt.
+- Während des Schreibens hält `attest` selbst die `index.lock` des Index; ein paralleles `git add` scheitert daran, statt überschrieben zu werden. Der heutige Shard wird über einen auf Identität und Inhalt geprüften Deskriptor angehängt. Ein Split-Index wird verweigert.
+- Ein Symlink oder Submodul, das als Record oder als Verzeichnis, unter dem Records liegen, committet ist, wird verweigert statt als leere Heimat gelesen.
 - `attest --archive` verschiebt den Plan nicht mehr: Es verweigert, bevor es etwas liest, und nennt den Weg zum Archiv. Jede Art, eine Datei nach der Prüfung zu verschieben, konnte Bytes eines anderen Prozesses verlieren; das Gate erkennt einen Plan, den ein späterer `git mv`-Commit archiviert, an seinem Inhalt, wie nach `/finish`.
 - `plan-structure` vergleicht die Zellenzahl von Kopf- und Trennzeile einer Tabelle (GFM) und meldet eine Abweichung als Befund.
 
