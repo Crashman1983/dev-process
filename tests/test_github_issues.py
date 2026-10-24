@@ -677,8 +677,11 @@ def test_module_doc_makes_class_required_on_blockers_and_majors(render, tmp_path
     assert "not what kind of failure it is" in t
     assert "[class=<mechanical|testable|judgment>] [rule=<check>]" in t
     assert "round: 2" in t and "class=mechanical rule=placeholder-scan" in t
-    assert "A blocker or major finding the branch adds without `class=` fails" in t
-    assert "compared without its `issue=` field" in t
+    assert "A blocker or major finding the branch adds without `class=` or `at=` fails" in t
+    assert "compared without its `issue=`, `class=`, `rule=` and `at=` fields where the old line has none" in t
+    # v2.78: the place is owed like the class
+    assert "`at` is **required on every blocker and major** too" in t
+    assert "[at=<path>:<line>|<path>:<first>-<last>|<path>|->] <title>" in t and "at=docs/intro.md:12" in t
 
 
 def test_docs_wire_report_duty(render, tmp_path):
@@ -1086,12 +1089,86 @@ def test_a_new_report_owes_class_on_blockers_and_majors(render, tmp_path):
         and "'guard read twice'" in r.stdout, r.stdout
     _report(out, "2026-10-21-new.md", VALID_REPORT + "FINDING sev=blocker action=fix issue=- lost write\n")
     assert f"blocker finding {NO_CLASS}" in _run(out).stdout
-    for line in ("FINDING sev=major action=fix issue=- class=testable rule=mutation guard read twice\n",
-                 "FINDING sev=blocker action=fix issue=- class=judgment lost write\n",
+    for line in ("FINDING sev=major action=fix issue=- class=testable rule=mutation at=src/a.py:3 guard read twice\n",
+                 "FINDING sev=blocker action=fix issue=- class=judgment at=- lost write\n",
                  "FINDING sev=minor action=fix issue=- a minor needs no class\n"):
         _report(out, "2026-10-21-new.md", VALID_REPORT + line)
         r = _run(out)
         assert r.returncode == 0 and NO_CLASS not in r.stdout, (line, r.stdout)
+
+
+NO_AT = "without at="
+
+
+def test_a_new_major_owes_class_and_at(render, tmp_path):
+    """v2.78: a blocker or major the branch adds names its place (`at=`) beside its class;
+    the message names every missing field."""
+    out = _branch(_render(render, tmp_path))
+    cases = {"FINDING sev=major action=fix issue=- guard read twice\n": "without class= and at=",
+             "FINDING sev=major action=fix issue=- class=judgment guard read twice\n": NO_AT,
+             "FINDING sev=blocker action=fix issue=- at=src/a.py:3-9 lost write\n": NO_CLASS}
+    for line, want in cases.items():
+        _report(out, "2026-10-21-new.md", VALID_REPORT + line)
+        r = _run(out)
+        assert r.returncode == 1 and want in r.stdout, (line, r.stdout)
+    for place in ("-", "src/a.py", "src/a.py:3", "src/a.py:3-3", "docs/my%20file.md:2"):
+        _report(out, "2026-10-21-new.md", VALID_REPORT
+                + f"FINDING sev=major action=fix issue=- class=judgment at={place} guard read twice\n")
+        r = _run(out)
+        assert r.returncode == 0 and NO_AT not in r.stdout, (place, r.stdout)
+
+
+def test_a_minor_owes_no_at(render, tmp_path):
+    out = _branch(_render(render, tmp_path))
+    _report(out, "2026-10-21-new.md", VALID_REPORT + "FINDING sev=minor action=fix issue=- a minor needs no place\n")
+    r = _run(out)
+    assert r.returncode == 0 and NO_AT not in r.stdout, r.stdout
+
+
+def test_an_old_finding_owes_no_at(render, tmp_path):
+    out = _branch(_render(render, tmp_path), VALID_REPORT + OLD)
+    r = _run(out)
+    assert r.returncode == 0 and NO_AT not in r.stdout and NO_CLASS not in r.stdout, r.stdout
+
+
+def test_backfilling_an_old_finding_keeps_it_old(render, tmp_path):
+    """Classifying or placing an old finding on the branch does not make it new (v2.78
+    plan review): it owes nothing the fork point did not owe."""
+    out = _branch(_render(render, tmp_path), VALID_REPORT + OLD)
+    for fields in ("class=judgment ", "at=src/cache.py:12 ", "class=testable rule=ttl at=src/cache.py:12 "):
+        _report(out, "2026-10-20-old.md", VALID_REPORT + OLD.replace("issue=- ", f"issue=- {fields}"))
+        r = _run(out)
+        assert r.returncode == 0 and NO_AT not in r.stdout and NO_CLASS not in r.stdout, (fields, r.stdout)
+
+
+def test_a_same_title_recurrence_is_new(render, tmp_path):
+    """A second finding with an old one's title is new: it does not hide under the old one
+    (v2.78 plan review, round 2)."""
+    out = _branch(_render(render, tmp_path), VALID_REPORT + OLD)
+    again = OLD.replace("issue=- ", "issue=- at=src/other.py:9 ")
+    _report(out, "2026-10-20-old.md", VALID_REPORT + OLD + again)
+    r = _run(out)
+    assert r.returncode == 1 and r.stdout.count("old cache") == 1 and NO_CLASS in r.stdout, r.stdout
+    # an old finding with its own place: a recurrence elsewhere does not match it
+    placed = OLD.replace("issue=- ", "issue=- class=judgment at=src/cache.py:12 ")
+    out2 = _branch(_render(render, tmp_path / "two"), VALID_REPORT + placed)
+    _report(out2, "2026-10-20-old.md", VALID_REPORT + placed.replace("cache.py:12", "other.py:9"))
+    r = _run(out2)
+    assert r.returncode == 0, r.stdout  # class and at both present: the new one owes nothing more
+
+
+def test_an_invalid_at_is_malformed(render, tmp_path):
+    """An invalid place with a key after it is a malformed field; with none after it the
+    token begins an older report's title."""
+    out = _render(render, tmp_path)
+    for bad in ("src/a.py:0", "src/a.py:5-3", "src/a.py:x", "src/a.py:3-"):
+        _report(out, "2026-10-21-new.md", VALID_REPORT
+                + f"FINDING sev=minor action=fix issue=- at={bad} class=judgment the title\n")
+        r = _run(out)
+        assert r.returncode == 1 and "malformed FINDING line" in r.stdout and "at=" in r.stdout, (bad, r.stdout)
+        _report(out, "2026-10-21-new.md", VALID_REPORT + f"FINDING sev=minor action=fix issue=- at={bad} the title\n")
+        r = _run(out)
+        assert "malformed FINDING line" not in r.stdout, (bad, r.stdout)
 
 
 def test_an_old_report_owes_class_only_on_its_new_lines(render, tmp_path):
@@ -1241,7 +1318,45 @@ def test_the_codex_handoff_writes_class_on_every_finding(render, tmp_path):
     finally:
         sys.path.remove(str(out / "scripts/process"))
         sys.modules.pop("_dispatch_codex", None)
-    assert "class=testable" in text
+    assert "class=testable" in text and "at=-" in text  # a result without `at` (a run from before v2.78)
     _report(out, "2026-10-21-7-codex-review.md", text)
     r = _run(out)
-    assert r.returncode == 0 and NO_CLASS not in r.stdout, r.stdout
+    assert r.returncode == 0 and NO_CLASS not in r.stdout and NO_AT not in r.stdout, r.stdout
+
+
+def test_the_codex_place_is_the_gates_grammar(render, tmp_path):
+    """v2.78: the Codex schema requires `at` with the gate's pattern, the copy of `valid_at`
+    judges like the original, and a place the gate would not read is written `-` and named."""
+    import importlib
+    out = _branch(_render(render, tmp_path))
+    sys.path.insert(0, str(out / "scripts/process"))
+    try:
+        for m in ("_dispatch_codex", "check_issues"):
+            sys.modules.pop(m, None)
+        codex = importlib.import_module("_dispatch_codex")
+        gate = importlib.import_module("check_issues")
+        item = codex._schema(plan_review=False, gate=False)["properties"]["findings"]["items"]
+        assert "at" in item["required"] and item["properties"]["at"]["pattern"] == gate.FINDING_AT_PATTERN
+        for value in ("-", "p", "src/a.py", "src/a.py:3", "src/a.py:3-3", "src/a.py:3-9", "a%20b.md:1",
+                      "src/a.py:0", "src/a.py:5-3", "src/a.py:3-", "src/my file.py:5", "", "a:b:3"):
+            assert codex._valid_at(value) == gate.valid_at(value), value
+        rec = {"binding": {"base": "a" * 40, "head": "b" * 40, "diff_sha256": "c" * 64}, "branch": "7-widget",
+               "model": "gpt-6-sol", "invocation": "codex exec", "result_sha256": "d" * 64, "issue": 7}
+        finding = {"sev": "major", "action": "fix", "kind": "implementation", "issue": "-",
+                   "class": "testable", "rule": "mutation", "title": "guard read twice"}
+        good = codex._report_text(rec, {"verdict": "block", "criteria": [], "refute": [],
+                                        "findings": [{**finding, "at": "src/a.py:3-9"}]},
+                                  work="7", plan_review=False, refute_round=None)
+        bad = codex._report_text(rec, {"verdict": "block", "criteria": [], "refute": [],
+                                       "findings": [{**finding, "at": "src/a.py:9-3"}]},
+                                 work="7", plan_review=False, refute_round=None)
+    finally:
+        sys.path.remove(str(out / "scripts/process"))
+        for m in ("_dispatch_codex", "check_issues"):
+            sys.modules.pop(m, None)
+    assert "at=src/a.py:3-9 guard" in good
+    assert "at=- guard" in bad and "at-invalid: src/a.py:9-3" in bad
+    for text in (good, bad):
+        _report(out, "2026-10-21-7-codex-review.md", text)
+        r = _run(out)
+        assert r.returncode == 0 and NO_AT not in r.stdout, r.stdout
