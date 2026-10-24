@@ -2063,7 +2063,6 @@ I1_REFUSAL_READERS = ["_foreign_shard_problems", "_worktree_text", "_index_text"
                       "with_problems", "_fix_streak_notes"]
 
 
-@RED
 def test_no_decision_reader_reads_the_worktree_after_the_snapshot(repo, tmp_path):
     """I1: every value that decides a pass, a duty or the round comes from head, base, E or
     T0. After the snapshot only a refusal reader may read a record in the worktree."""
@@ -2415,7 +2414,6 @@ def test_the_journal_dir_reader_gives_one_answer_per_tree(repo):
     assert first == second == third and len(first) == 1, (first, second, third)
 
 
-@RED
 def test_object_readers_touch_no_worktree_path(repo, monkeypatch):
     """I12: while `_records_at`, `_plan(snapshot=)`, `round_ids`/`_texts(records=)` and
     `gather(snapshot=)` run, no lstat/stat/realpath and no Path query or read below the root."""
@@ -2428,11 +2426,14 @@ def test_object_readers_touch_no_worktree_path(repo, monkeypatch):
         jdir = root / ".process-work/journal"
         snap = ev.snapshot(root, root / SHARD, [root / report], jdir)
         touched = []
+        code = str(root / "scripts") + os.sep  # late imports load code there — no record
 
         def guard(name, orig):
             def checked(p, *a, **k):
                 try:
-                    inside = os.path.abspath(os.fspath(p)).startswith(str(root))
+                    at_p = os.path.abspath(os.fspath(p))
+                    inside = (at_p.startswith(str(root) + os.sep)
+                              and not (at_p + os.sep).startswith(code))
                 except TypeError:
                     inside = False
                 if inside:
@@ -2549,7 +2550,6 @@ def test_a_second_lens_after_a_separate_archive_commit(repo):
 
 # Sweep (§9): the same class at the remaining path reads
 
-@RED
 @pytest.mark.skipif(not hasattr(os, "symlink"), reason="needs symlinks")
 def test_a_with_path_swapped_for_a_symlink_after_the_snapshot_is_still_checked(repo, tmp_path):
     """`with_problems` skipped a symlink (`continue`), so a source file swapped for one after

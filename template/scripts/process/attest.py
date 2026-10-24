@@ -180,22 +180,19 @@ def archive_refusal(args, root: Path) -> str:
             f"git commit -m \"docs: archive the plan\"")
 
 
-def with_problems(args, root: Path) -> list[str]:
+def with_problems(args, root: Path, snap) -> list[str]:
     """`--with` carries records only: a source file riding an attestation commit
     would be code no review saw, under a commit the tools read as bookkeeping. The
-    path itself is checked by `attestation_files` (one owner); here only the record
-    home is read, lexically, so no symlink is followed."""
+    path itself is checked by `snapshot` (one owner); here only the record home of the
+    `--with` paths the snapshot carries is read — lexically, on its paths, no file
+    system call (design §9: a path swapped after the snapshot is still checked)."""
     out = []
-    root = root.resolve()
+    held = {f.rel for f in snap.files if f.data is not None}
+    root = Path(os.path.realpath(root))  # the root as `snapshot` holds it
     for rel in args.with_ or []:
-        p = Path(rel)
-        p = Path(os.path.normpath(p if p.is_absolute() else root / p))
-        try:
-            r = p.relative_to(root).as_posix()
-        except ValueError:
-            continue  # attestation_files names the path
-        if p.is_symlink() or not p.is_file():
-            continue  # attestation_files names the symlink or the missing file
+        r, _why = _lexical_rel(root, Path(rel))
+        if r is None or r not in held:
+            continue  # the snapshot names the path, the symlink or the missing file
         if not (r.startswith(BOOKKEEPING) or record_kind(r) is not None):
             out.append(f"--with: {rel} is not a process record (under {BOOKKEEPING} or a plan) — "
                        f"commit code with its own message")
@@ -647,16 +644,15 @@ def main() -> int:
     plain = args.work.removesuffix("-plan") if args.plan_review else args.work
     carried, carried_problems = snap.carried, list(snap.problems)
     modes = {f.rel: f.mode for f in snap.files}
-    carried_paths = [root / rel for rel, _data in carried]
     evidence = evidence_problems(
         root, work=args.work, ids=round_ids(argparse.Namespace(work=plain), root, records),
         tier=int(args.tier) if args.tier.isascii() and args.tier.isdigit() else 0,
         verdict=args.verdict, independence=args.independence, base=record.get("base"),
         head=record.get("head"), plan_review=args.plan_review, model=args.model,
-        reports=carried_paths,
+        reports=[],  # the snapshot's files under the reports' home (gather, lexical)
         # a plan review asks no code round's records
         blocks=None if args.plan_review else block_lines(args, root, journal_dir, records),
-        journal_dir=journal_dir, carried=carried)
+        journal_dir=journal_dir, snapshot=snap)
     round_issues += uncommitted_blocks(args, root, journal_dir, records)
     exception_note = ""
     if args.exception:
@@ -669,7 +665,7 @@ def main() -> int:
         round_issues = round_notes = evidence = []
     for note in round_notes:
         print(f"attest: note — {note}", file=sys.stderr)
-    problems = round_issues + problems + evidence + carried_problems + with_problems(args, root)
+    problems = round_issues + problems + evidence + carried_problems + with_problems(args, root, snap)
     if args.note and any(ln.lstrip().startswith("REVIEW") for ln in args.note.splitlines()):
         problems.append("the note carries REVIEW-looking lines — the validated line is the "
                         "only REVIEW writer")

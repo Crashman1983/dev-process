@@ -50,7 +50,7 @@ import stat
 import subprocess
 import sys
 import tempfile
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import NamedTuple
 from pathlib import Path
 
@@ -79,7 +79,6 @@ from check_review import (  # noqa: E402  (sibling import; the guard above keeps
     readable,
     record_files,
     record_kind,
-    record_texts,
     records_only,
     root_cause_parts,
     work_key,
@@ -189,6 +188,12 @@ class Evidence:
     has_reports: bool = False
     claims: dict = field(default_factory=dict)  # AC id -> [line bodies]
     test_status: dict = field(default_factory=dict)  # (file, name) -> None (ok) | why not
+    # for the refusal readers after `gather` (`evidence_problems`, I5): the plan's text at
+    # head, the ids its evidence binds, and the journal evidence keys read at the fork and in E
+    plan_text: str = ""
+    plan_ids: frozenset = frozenset()
+    skip_ids: frozenset = frozenset()
+    journal_keys: frozenset = frozenset()
 
 
 # --- git -------------------------------------------------------------------------
@@ -465,25 +470,14 @@ def _journal_dir_at(root: Path, ref: str, journal_dir: Path | None) -> list[tupl
     return out
 
 
-def _journal_at(root: Path, ref: str, journal_dir: Path | None) -> dict[str, str] | None:
-    """The journal record files at `ref`, by path: the repository journal and the attested
-    `--journal-dir`. None when git cannot read them. Read at head for the evidence until it
-    reads `E` (6.4)."""
-    texts = record_texts(root, ("journal",), ref=ref)
-    extra = _journal_dir_at(root, ref, journal_dir) if texts is not None else None
-    if texts is None or extra is None:
-        return None
-    return dict(texts) | dict(extra)
-
-
-def _at_fork(root: Path, fork: str, journal_dir: Path | None = None
+def _at_fork(root: Path, fork: str, journal_dir: Path | None = None, *, jrel: str | None = None
              ) -> tuple[set[str], list[str]] | None:
     """(the contents of every line at the fork point as the round counter reads blocks, the
     journal texts there for the evidence readers). The blocks are read as `attest._texts`
     reads them — a journal less its fences, a plan as rendered; a line quoted in a fence on
     main is no line of the fork: it hides no real line of the branch. None when git cannot
-    read them (`_records_at`, I12)."""
-    texts = _records_at(root, fork, RECORD_KINDS, _jrel(root, journal_dir))
+    read them (`_records_at`, I12). `jrel`: the `--journal-dir` as the snapshot placed it."""
+    texts = _records_at(root, fork, RECORD_KINDS, _jrel(root, journal_dir) if jrel is None else jrel)
     if texts is None:
         return None
     journal = [text for rel, text in texts if record_kind(rel) in ("journal", None)]
@@ -816,26 +810,6 @@ def _records_at(root: Path, ref: str, kinds: tuple[str, ...], jrel: str
     return out
 
 
-def _journal_snapshot(root: Path, head: str, journal_dir: Path | None,
-                      carried: list[tuple[str, bytes | None]] | None) -> list[str] | None:
-    """The journal texts this attestation writes: the journal at `head`, with every file
-    it commits (`carried`: today's shard, `--with`) taken from the one file set. None
-    when a file it must read cannot be read."""
-    files = _journal_at(root, head, journal_dir)
-    if files is None:
-        return None
-    root = root.resolve()
-    jrel = _repo_rel(root, journal_dir)[0] or "" if journal_dir is not None else ""
-    for rel, data in carried or ():
-        if record_kind(rel) != "journal" and not (
-                jrel and (rel == jrel or rel.startswith(jrel + "/"))):
-            continue  # a plan or report: no journal evidence
-        if data is None:
-            continue  # today's shard may not exist yet; attest writes it after the check
-        files[rel] = data.decode("utf-8", errors="replace")
-    return list(files.values())
-
-
 def _evidence_keys(line: str, plan_ids: set, skip_ids: set) -> frozenset:
     """The evidence one rendered line carries, as the readers count it: this work's
     ROOT-CAUSE lines and the skip kinds the journal may lift (`JOURNAL_SKIPS`). The keys
@@ -860,57 +834,56 @@ def _journal_keys(texts: list[str], plan_ids: set, skip_ids: set) -> set:
             for key in _evidence_keys(line, plan_ids, skip_ids)}
 
 
-def _snapshot_blocks(root: Path, head: str, journal_dir: Path | None,
-                     carried: list[tuple[str, bytes | None]] | None, snapshot: list[str],
-                     round_keys: set) -> list[tuple[int, str]] | None:
-    """(round, line) of the work's blocking REVIEW lines at head and in the snapshot, read
-    by the round counter's own reader (`attest._block_lines`: a journal raw, a plan as
-    rendered). None when git cannot read head."""
-    from attest import _block_lines  # late: attest imports this module
-    at_head = _journal_at(root, head, journal_dir)
-    plans = record_texts(root, PLAN_KINDS + ("plan-archive",), ref=head)
-    if at_head is None or plans is None:
+def _journal_records(root: Path, head: str, journal_dir: Path | None,
+                     snapshot: Snapshot | None) -> list[str] | None:
+    """The journal texts the evidence reads: those of `E` (head plus the files this
+    attestation carries, `Snapshot.records_E`), or at `head` without a snapshot. The
+    shards of a `--journal-dir` carry no record kind of their own. None: unknown."""
+    if snapshot is not None:
+        records = snapshot.records_E
+    else:
+        records = _records_at(root, head, ("journal",), _jrel(root, journal_dir))
+    if records is None:
         return None
-    texts = [*at_head.values(), *snapshot, *(readable(text) for _rel, text in plans)]
-    texts += [readable(data.decode("utf-8", errors="replace")) for rel, data in carried or ()
-              if data is not None and record_kind(rel) in (*PLAN_KINDS, "plan-archive")]
-    return _block_lines(texts, round_keys)
+    return [text for rel, text in records if record_kind(rel) in ("journal", None)]
 
 
 def _branch_records(root: Path, head: str, blocks: list[tuple[int, str]] | None,
                     journal_dir: Path | None, plan_ids: set, skip_ids: set,
-                    carried: list[tuple[str, bytes | None]] | None = None,
-                    round_keys: set | None = None
-                    ) -> tuple[list[int] | None, str, tuple[str, ...]]:
-    """(the blocked code rounds the branch adds, its journal records, refusals). The rounds
-    are those of `blocks` — `attest.block_lines`, the set the round counter counts (journal
-    and plans in the worktree, uncommitted lines too) — joined with the blocks at head and
-    in the snapshot (`_snapshot_blocks`, R5), less the lines present at the fork point; a
-    worktree change after the snapshot can add a round, never remove one. None: unknown.
-    The journal records are read by the same evidence readers from
-    the one snapshot this attestation fixes — the journal at head plus the files it commits
-    (`carried`: today's shard, `--with`) — less what the fork already holds; what that run
-    yields counts, nothing else. A worktree evidence line absent from that snapshot is
-    refused by name, never silently counted. The refusal reads the same set as
-    `_root_caused`/`_skips`: this work's ROOT-CAUSE and the skip kinds the journal counts
-    (`JOURNAL_SKIPS`), so foreign work and kinds read only from the plan stay invisible."""
+                    snapshot: Snapshot | None = None
+                    ) -> tuple[list[int] | None, str, frozenset]:
+    """(the blocked code rounds the branch adds, its journal records, the evidence keys the
+    readers saw at the fork and in `E`). The rounds are those of `blocks` —
+    `attest.block_lines` at T0, the set the round counter counts — less the lines present
+    at the fork point. None: unknown. The journal records are read by the same evidence
+    readers from `E` (`_journal_records`) less what the fork already holds; what that run
+    yields counts, nothing else. Objects only (I12): a worktree evidence line outside `E`
+    is refused by `_foreign_shard_problems`, never counted here."""
     fork = _fork(root, head)
     if fork == "":
-        return [], "", ()
-    old = _at_fork(root, fork, journal_dir) if fork is not None else None
-    snapshot = _journal_snapshot(root, head, journal_dir, carried)
-    fixed = (_snapshot_blocks(root, head, journal_dir, carried, snapshot, round_keys or set())
-             if snapshot is not None else None)
-    if old is None or blocks is None or snapshot is None or fixed is None:
-        return None, "", ()
+        return [], "", frozenset()
+    old = (_at_fork(root, fork, journal_dir, jrel=snapshot.jrel if snapshot is not None else None)
+           if fork is not None else None)
+    journal = _journal_records(root, head, journal_dir, snapshot)
+    if old is None or blocks is None or journal is None:
+        return None, "", frozenset()
     old_blocks, old_journal = old
-    rounds = sorted({r for r, line in [*blocks, *fixed] if _content(line) not in old_blocks})
+    rounds = sorted({r for r, line in blocks if _content(line) not in old_blocks})
     fork_keys = _journal_keys(old_journal, plan_ids, skip_ids)
-    rendered = [line for text in snapshot for line in readable(text).splitlines()]
-    snapshot_keys = {key for line in rendered
-                     for key in _evidence_keys(line, plan_ids, skip_ids)}
-    new_keys = snapshot_keys - fork_keys
+    rendered = [line for text in journal for line in readable(text).splitlines()]
+    seen = {key for line in rendered for key in _evidence_keys(line, plan_ids, skip_ids)}
+    new_keys = seen - fork_keys
     new = [line for line in rendered if _evidence_keys(line, plan_ids, skip_ids) & new_keys]
+    return rounds, "\n".join(new), frozenset(fork_keys | seen)
+
+
+def _foreign_shard_problems(root: Path, head: str, journal_dir: Path | None, plan_ids: set,
+                            skip_ids: set, known: frozenset) -> list[str]:
+    """AC-2, a refusal reader (I5): a worktree journal line whose evidence (this work's
+    ROOT-CAUSE, the skip kinds the journal counts) is neither at the fork nor in `E`
+    (`known`) is refused by name — committed or carried, it would count; only in the
+    worktree it must not count in silence. The set read is that of `_root_caused`/`_skips`,
+    so foreign work and kinds read only from the plan stay invisible."""
     problems: list[str] = []
     for rel, f in record_files(root, ("journal",), journal_dir=journal_dir):
         safe_rel, data, _ident = _repo_file(root, f, may_be_missing=False)
@@ -918,12 +891,11 @@ def _branch_records(root: Path, head: str, blocks: list[tuple[int, str]] | None,
             problems.append(f"{rel}: {data}")
             continue
         for n, line in enumerate(readable(data.decode("utf-8", errors="replace")).splitlines(), 1):
-            missing = _evidence_keys(line, plan_ids, skip_ids) - fork_keys - snapshot_keys
-            if missing:
+            if _evidence_keys(line, plan_ids, skip_ids) - known:
                 problems.append(
                     f"{rel}:{n}: `{line.strip()}` is neither at {head[:12]} nor carried by this "
                     f"attestation — commit it, or pass {rel} with --with")
-    return rounds, "\n".join(new), tuple(problems)
+    return problems
 
 
 def _tracked(root: Path, head: str) -> list[str] | None:
@@ -1033,16 +1005,17 @@ def _class_tests_open(root: Path, head: str, rounds: list[int], texts: list[str]
     return tuple(out)
 
 
-def _plan(root: Path, ids: set, head: str, carried: dict[str, bytes] | None = None
+def _plan(root: Path, ids: set, head: str, snapshot: Snapshot | None = None
           ) -> tuple[str, str, str, str]:
     """(state, path, text at head, records appended since) of the work's plan —
-    active or Spec Kit, else archived (a late lens attests after `--archive`).
-    The appended records come only from the snapshot (`carried`: path -> checked bytes),
-    so they count only when the plan rides this attestation (#308 R5). `differs`: the
-    snapshot, the worktree or the index holds more than records appended after the
-    plan's last line (E1, the gate's `records_only`) — worktree and index are read for
-    that refusal only, never for what counts."""
-    records = record_texts(root, PLAN_KINDS + ("plan-archive",), ref=head)
+    active or Spec Kit, else archived (a late lens attests after the plan's own archive
+    commit). Objects only (I12): the plans at head (`_records_at`), the appended records
+    from `E` — only when the plan rides this attestation (#308 R5), at its path or its
+    archive path. `differs`: the riding plan holds more than records appended after the
+    plan's last line (E1, the gate's `records_only`); the worktree and the index are read
+    for that refusal apart (`_plan_differs`), never for what counts. Without a snapshot
+    (`dispatch`'s preview) nothing rides."""
+    records = _records_at(root, head, PLAN_KINDS + ("plan-archive",), "")
     if records is None:
         return "unreadable", "", "", ""
     found = [(rel, text) for rel, text in records
@@ -1057,17 +1030,14 @@ def _plan(root: Path, ids: set, head: str, carried: dict[str, bytes] | None = No
     if len(found) > 1:
         return "ambiguous", ", ".join(rel for rel, _t in found), "", ""
     rel, text = found[0]
-    # a plan the first lens of this round already archived (`--archive`) is read where it went
-    moved = _archived_as(root, rel)
-    for now in (_worktree_text(root, rel) or _worktree_text(root, moved),
-                _index_text(root, rel) or _index_text(root, moved)):
-        if now != text and not records_only(text, now):
-            return "differs", rel, text, ""
-    riding = next((carried[p] for p in (rel, moved) if p and p in (carried or {})), None)
-    if riding is None:
+    if snapshot is None:
         return "ok", rel, text, ""
-    now = riding.decode("utf-8", errors="replace")
-    if now == text:
+    # a plan archived by its own commit after a first lens rides at its archive path
+    moved = _archived_as(root, rel)
+    riding_rels = {f.rel for f in snapshot.files if f.data is not None}
+    at_e = dict(snapshot.records_E or [])
+    now = next((at_e[p] for p in (rel, moved) if p in riding_rels and p in at_e), None)
+    if now is None or now == text:
         return "ok", rel, text, ""
     if not records_only(text, now):
         return "differs", rel, text, ""
@@ -1081,6 +1051,16 @@ def _archived_as(root: Path, rel: str) -> str:
     by its own commit after a first lens is read where it went."""
     from attest import archive_rel  # late: attest imports this module
     return archive_rel(rel)
+
+
+def _plan_differs(root: Path, rel: str, text: str) -> bool:
+    """A refusal reader (I5): does the worktree or the index hold more of the plan `rel`
+    than records appended after its text at head (E1)? Read for the refusal only — what
+    counts comes from `E` (`_plan`)."""
+    moved = _archived_as(root, rel)
+    return any(now and now != text and not records_only(text, now)
+               for now in (_worktree_text(root, rel) or _worktree_text(root, moved),
+                           _index_text(root, rel) or _index_text(root, moved)))
 
 
 def _worktree_text(root: Path, rel: str) -> str:
@@ -1541,43 +1521,40 @@ def test_status(root: Path, head: str, file: str, name: str, rules: dict) -> str
 def gather(root: Path, *, work: str, ids: set[str], tier: int, verdict: str, independence: str,
            base: str | None, head: str | None, plan_review: bool, model: str,
            reports: list[Path], blocks: list[tuple[int, str]] | None = None,
-           journal_dir: Path | None = None,
-           carried: list[tuple[str, bytes | None]] | None = None) -> Evidence:
+           journal_dir: Path | None = None, snapshot: Snapshot | None = None) -> Evidence:
     """`ids`: the work's ids (`attest.round_ids` of the plain work, no `-plan`); `blocks`:
     the work's blocking REVIEW lines the round counter counts (`attest.block_lines`) —
-    None on a code pass is unknown, and refused where a row asks for it. `carried`: the
-    files this attestation commits — today's journal shard and `--with`; journal evidence
-    elsewhere must already be at head (#308)."""
+    None on a code pass is unknown, and refused where a row asks for it. `snapshot`: what
+    this attestation fixes (`snapshot()`); the evidence is read at `E` — head plus today's
+    shard and `--with` — and nowhere else, git objects only (I1, I12). Without one (a
+    preview), at head, and no report is read. `reports` is kept for those callers; with a
+    snapshot the reports are its files under the reports' home, chosen by path alone."""
     if not (_resolvable(root, head) and _resolvable(root, base)):
         return Evidence(work, tier, verdict, plan_review, model, head_ok=False)
     policy, problem = review_policy(root, base)
     if problem:
         return Evidence(work, tier, verdict, plan_review, model, policy_problem=problem)
     keys = {work_key(i) for i in ids}
-    # the one snapshot (path -> checked bytes): every reader below reads it, the commit
-    # writes it — nothing is read again from the worktree or index for what counts (R5)
-    carried_data = {rel: data for rel, data in carried or () if data is not None}
-    state, rel, plan_text, appended = _plan(root, keys, head, carried_data)
+    state, rel, plan_text, appended = _plan(root, keys, head, snapshot)
     # the plan's own lines, as the bundle's refute check reads them; records appended
-    # after it count only when they ride this attestation (`--with` the plan, `--archive`)
+    # after it count only when they ride this attestation (`--with` the plan)
     own = readable(plan_text) + ("\n" + readable(appended) if appended else "")
     plan_ids = _plan_work_ids(plan_stem(rel), _unfenced(plan_text), include_dedated=True) if rel else set()
     plan_read = readable(plan_text)
     spec = (_show(root, head, rel.rsplit("/", 1)[0] + "/spec.md") or "") \
         if record_kind(rel) == "spec-plan" else ""
-    # the review reports among the round's records: a plan riding `--with` is no report.
-    # Their text comes from the checked bytes (`carried`) when they ride this attestation,
-    # so the evidence and the commit read one snapshot (R4).
-    reports = [p for p in reports if p.resolve().is_relative_to((root / REVIEW_REPORTS).resolve())]
-
-    def report_text(p: Path) -> str:
-        try:
-            rel = p.relative_to(root).as_posix()
-        except ValueError:
-            rel = ""
-        return carried_data[rel].decode("utf-8", errors="replace") if rel in carried_data else ""
-
-    report_texts = [readable(report_text(p)) for p in reports]
+    # the review reports among the round's records, chosen lexically on the snapshot's paths
+    # (a plan riding `--with` is no report; no resolve, the sweep of design §9), their text
+    # the checked bytes — E's blobs — so the evidence and the commit read one snapshot (R4)
+    if snapshot is not None:
+        report_files = [f for f in snapshot.files
+                        if f.rel.startswith(REVIEW_REPORTS + "/") and f.data is not None]
+        reports = [root / f.rel for f in report_files]
+        report_texts = [readable(f.data.decode("utf-8", errors="replace")) for f in report_files]
+    else:
+        reports = [p for p in reports
+                   if (_lexical_rel(root, p)[0] or "").startswith(REVIEW_REPORTS + "/")]
+        report_texts = ["" for _p in reports]
     issues = {int(i) for i in plan_ids | set(ids) if i.isascii() and i.isdigit()}
     session, reported = _planned_model(root, issues) if plan_review else (None, False)
     source = "report" if session is not None else (UNMEASURED_REPORT if reported else "none")
@@ -1595,8 +1572,8 @@ def gather(root: Path, *, work: str, ids: set[str], tier: int, verdict: str, ind
     skip_ids = {f"{i}-plan" for i in plan_ids} if plan_review else plan_ids
     # a code pass: the blocked code rounds the branch adds, and its journal records (ROOT-CAUSE,
     # skips) beside the plan's; a plan review asks no code round's records (facts None)
-    rounds, journal, evidence_problems = (None, "", ()) if plan_review else _branch_records(
-        root, head, blocks, journal_dir, plan_ids, skip_ids, carried, keys)
+    rounds, journal, journal_keys = (None, "", frozenset()) if plan_review else _branch_records(
+        root, head, blocks, journal_dir, plan_ids, skip_ids, snapshot)
     mine = [own, journal]
     # a journal skip lifts only the per-round duties; every other kind counts from the plan
     skips = _skips([own], skip_ids) | (_skips([journal], skip_ids) & JOURNAL_SKIPS)
@@ -1613,7 +1590,6 @@ def gather(root: Path, *, work: str, ids: set[str], tier: int, verdict: str, ind
         owner_decision=bool(OWNER_DECISION.search(_unfenced(own))),
         fix_streak=None if plan_review else _fix_streak(root, base, head),
         blocked_rounds=None if rounds is None else len(rounds),
-        evidence_problems=evidence_problems,
         # the follow-up blocks: every blocked round but the lowest
         replan_open=tuple(r for r in (rounds or [])[1:] if r not in replanned),
         class_test_open=_class_tests_open(root, head, rounds, mine, plan_ids, policy) if rounds else (),
@@ -1623,7 +1599,9 @@ def gather(root: Path, *, work: str, ids: set[str], tier: int, verdict: str, ind
         plan_struck=struck_criteria(plan_read, readable(spec)),
         plan_foreign=foreign_criteria(plan_read, readable(spec)),
         plan_session=session, plan_session_source=source,
-        has_reports=bool(reports), claims=claims, test_status=status)
+        has_reports=bool(reports), claims=claims, test_status=status,
+        plan_text=plan_text, plan_ids=frozenset(plan_ids), skip_ids=frozenset(skip_ids),
+        journal_keys=journal_keys)
 
 
 # --- the decision table ----------------------------------------------------------
@@ -1818,14 +1796,20 @@ def decide(ev: Evidence) -> list[str]:
 def evidence_problems(root: Path, *, work: str, ids: set[str], tier: int, verdict: str,
                       independence: str, base: str | None, head: str | None, plan_review: bool,
                       model: str, reports: list[Path], blocks: list[tuple[int, str]] | None = None,
-                      journal_dir: Path | None = None,
-                      carried: list[tuple[str, bytes | None]] | None = None) -> list[str]:
-    """attest.py's one entry: gather at head, then decide — only for a Tier 2+ pass."""
+                      journal_dir: Path | None = None, snapshot: Snapshot | None = None) -> list[str]:
+    """attest.py's one entry: gather at E (objects only), then the refusal readers (I5) —
+    a plan the worktree or index holds more of (`_plan_differs`), a journal line only in
+    the worktree (`_foreign_shard_problems`) — then decide; only for a Tier 2+ pass."""
     if verdict != "pass" or tier < 2:
         return []
     ev = gather(root, work=work, ids=ids, tier=tier, verdict=verdict, independence=independence,
                 base=base, head=head, plan_review=plan_review, model=model, reports=reports,
-                blocks=blocks, journal_dir=journal_dir, carried=carried)
+                blocks=blocks, journal_dir=journal_dir, snapshot=snapshot)
+    if ev.plan_state == "ok" and ev.plan_rel and _plan_differs(root, ev.plan_rel, ev.plan_text):
+        ev = replace(ev, plan_state="differs")
+    if ev.head_ok and not ev.policy_problem and not plan_review and ev.blocked_rounds is not None:
+        ev = replace(ev, evidence_problems=tuple(_foreign_shard_problems(
+            root, head, journal_dir, ev.plan_ids, ev.skip_ids, ev.journal_keys)))
     for n in sorted(ev.plan_foreign):
         # never dropped in silence (#287): the reader sees which id was left out and why
         print(f"attest: note — AC-{n} not required: {ev.plan_rel} cites it as another issue's "
