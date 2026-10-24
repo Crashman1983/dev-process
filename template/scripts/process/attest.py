@@ -681,7 +681,7 @@ def _write_phase_steps(root: Path, snap, target_rel: str, target_bytes: bytes, m
         return True
     paths = " ".join(f.rel for f in staged)
     final, why = _commit_hooks(root, t1, message)
-    made = _git_run(root, "commit-tree", t1, "-p", snap.old, data=final.encode()) if final else None
+    made = _git_run(root, "commit-tree", t1, "-p", snap.old, data=final.encode("utf-8", "surrogateescape")) if final else None
     if made is not None and made.returncode:
         why = f"git commit-tree failed: {made.stderr.decode(errors='replace').strip()}"
     moved = None
