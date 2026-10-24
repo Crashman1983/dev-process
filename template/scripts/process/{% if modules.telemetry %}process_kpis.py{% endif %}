@@ -779,11 +779,14 @@ def _git_run(root: Path, *args: str) -> tuple[int, str] | None:
     """(exit code, stdout) of git, or None when git cannot run or runs past 30 s — the
     callers tell "not there" (an exit code git documents) from "git failed" (refute,
     round 1: a missing blob read as an absent file)."""
+    import os  # noqa: PLC0415
     try:
-        # a place is a path, never a glob: `pages/[id].tsx` names that file (plan review, round 3)
+        # a place is a path, never a glob: `pages/[id].tsx` names that file (plan review, round 3);
+        # git speaks one language here (cross-model review, round 2: a translated "Binary files")
         r = subprocess.run(["git", "--literal-pathspecs", "-C", str(root), *args], capture_output=True, text=True,
-                           timeout=30, encoding="utf-8", errors="replace")
-    except (OSError, subprocess.SubprocessError):
+                           timeout=30, encoding="utf-8", errors="replace",
+                           env={**os.environ, "LC_ALL": "C", "LANGUAGE": "C"})
+    except (OSError, ValueError, subprocess.SubprocessError):  # ValueError: a NUL in a path
         return None
     return r.returncode, r.stdout
 
@@ -797,16 +800,24 @@ def _git_out(root: Path, *args: str) -> str | None:
 def _work_group(work: str, plans: list[tuple[str, str]]) -> set[str]:
     """The work ids one report's or REVIEW line's work goes by, `#` stripped: its own, and
     those of every plan that names it (`check_review._plan_work_ids` — slug and issues,
-    the matching `_issue_ids` uses). An issue takes the slugs of its plans, not their
-    other issues: a plan with two issues joins neither group to the other."""
+    the matching `_issue_ids` uses) when that plan declares exactly one issue — a plan with
+    two issues joins nothing: whose round its slug's lines are cannot be told."""
     import check_review as _review
     key = work.lstrip("#")
     group = {key}
     for rel, text in plans:
         ids = {str(i).lstrip("#") for i in _review._plan_work_ids(_review.plan_stem(rel), text, include_dedated=True)}
-        if key in ids:  # an issue takes the plan's slugs, never its other issues (refute, round 1)
-            group |= {i for i in ids if not i.isdigit()} if key.isdigit() else ids
+        # slug and issue join only through a plan with one issue: a plan with two names
+        # neither issue's rounds the other's (refute and cross-model review, round 1 and 2)
+        if key in ids and sum(i.isdigit() for i in ids) == 1:
+            group |= ids
     return group
+
+
+def _window_works(issues, plans: list[tuple[str, str]]) -> set[str]:
+    """The work ids of a window's merged issues (`_work_group` of each): the filter of
+    `_blocks_since_round1`, never another issue of a plan that declares several."""
+    return set().union(*(_work_group(str(i), plans) for i in issues)) if issues else set()
 
 
 class _Diffs:
@@ -814,7 +825,7 @@ class _Diffs:
     tree (a path filter cuts a rename off before git detects it), the hunks of one file."""
 
     def __init__(self, root: Path):
-        self.root, self._have, self._renames, self._hunks, self._lines = root, {}, {}, {}, {}
+        self.root, self._have, self._renames, self._hunks, self._lines, self._entries = root, {}, {}, {}, {}, {}
 
     def has(self, sha: str) -> bool | None:
         """The commit is here (True), not here (False), or git cannot tell (None)."""
@@ -844,19 +855,25 @@ class _Diffs:
         form feed does not); "absent" when no such file is there (a directory included);
         None when git cannot tell."""
         if (sha, path) not in self._lines:
-            got: int | str | None = None
+            got: int | str | None = self.blob(sha, path)
+            if got not in (None, "absent"):
+                text = _git_out(self.root, "cat-file", "blob", got)
+                got = None if text is None else text.count("\n") + (1 if text and not text.endswith("\n") else 0)
+            self._lines[(sha, path)] = got
+        return self._lines[(sha, path)]
+
+    def blob(self, sha: str, path: str) -> str | None:
+        """The blob id of the file `path` at `sha`; "absent" when no such file is there (a
+        directory included); None when git cannot tell."""
+        if (sha, path) not in self._entries:
+            got: str | None = None
             listed = _git_out(self.root, "ls-tree", "-z", sha, "--", path)
             if listed is not None:
                 entry = next((e for e in listed.split("\0") if e.endswith("\t" + path)), "")
                 meta = entry.split("\t", 1)[0].split()
-                if len(meta) != 3 or meta[1] != "blob":
-                    got = "absent"
-                else:
-                    text = _git_out(self.root, "cat-file", "blob", meta[2])
-                    if text is not None:
-                        got = text.count("\n") + (1 if text and not text.endswith("\n") else 0)
-            self._lines[(sha, path)] = got
-        return self._lines[(sha, path)]
+                got = meta[2] if len(meta) == 3 and meta[1] == "blob" else "absent"
+            self._entries[(sha, path)] = got
+        return self._entries[(sha, path)]
 
     def hunks(self, h1: str, hr: str, old: str, new: str) -> list[tuple[int, int]] | str | None:
         """New-side (start, count) of every hunk of `old` → `new`; "binary" when the file
@@ -892,8 +909,8 @@ def _unchanged_against(d: _Diffs, h1: str, hr: str, path: str, first: int, last:
     hunks = d.hunks(h1, hr, old, path)
     if hunks is None:
         return None
-    if hunks == "binary":
-        return False
+    if hunks == "binary" or (not hunks and d.blob(h1, old) != d.blob(hr, path)):
+        return False  # changed without a text hunk (binary, `-diff`): in any language git speaks
     for start, count in hunks:
         touched = range(start, start + count) if count else (start, start + 1)
         if any(first <= n <= last for n in touched):
@@ -1077,7 +1094,7 @@ def baseline_numbers(root: Path, lo: datetime, hi: datetime, *, items: list[dict
         **_round_findings(root, ids),
         "skips_by_kind": _skips_by_kind(root, ids),
         # #311: blocks of round >= 2 on lines round 1 saw, over the window's works
-        "blocks_on_unchanged": _blocks_since_round1(root, {i.lstrip("#") for own in ids.values() for i in own}),
+        "blocks_on_unchanged": _blocks_since_round1(root, _window_works([it["issue"] for it in merged], plans)),
         "findings_per_work": None if isinstance(found, str) else med([by_work.get(str(it["issue"]), 0)
                                                                      for it in merged]),
         "lead_hours": med([it["lead_s"]["value"] / 3600 if it["lead_s"]["value"] else None for it in merged]),

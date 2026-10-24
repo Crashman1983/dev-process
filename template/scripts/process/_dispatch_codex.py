@@ -627,7 +627,8 @@ def _report_text(rec: dict, result: dict, *, work: str, plan_review: bool, refut
         # line; a run started before v2.78 (its stored schema has no `at`) writes `-` too
         at = f.get("at")
         # a title whose first token reads like a field would be parsed as one (a duplicate `at=`)
-        title = f"— {f['title']}" if re.match(r"^\w+=", f["title"]) else f["title"]
+        title = f["title"].strip()
+        title = f"— {title}" if re.match(r"^\w+=", title) else title
         lines.append(f"FINDING sev={f['sev']} action={f['action']} kind={f['kind']} issue={f['issue']} by=codex"
                      f"{cls}{rule} at={at if _valid_at(at) else '-'} {title}")
         if at and not _valid_at(at):
