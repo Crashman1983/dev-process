@@ -1377,6 +1377,50 @@ def test_a_failed_index_or_ref_update_fails_and_loses_nothing(repo, lock):
     assert not any(ln.startswith("D") for ln in staged.splitlines()), staged
 
 
+def test_a_whole_index_beside_a_leftover_sharedindex_is_attested(repo):
+    """#308 R7: Nach `--split-index`, `core.splitIndex false` und `--no-split-index` ist der
+    Index wieder vollständig, die alte `sharedindex.*` bleibt im Git-Verzeichnis liegen.
+    Ob der Index geteilt ist, sagt der Index selbst (`git rev-parse --shared-index-path`),
+    nicht eine Nachbardatei: attestiert, nichts bleibt gestaged."""
+    _git(repo, "update-index", "--split-index")
+    _git(repo, "config", "core.splitIndex", "false")
+    _git(repo, "update-index", "--no-split-index")
+    assert _git(repo, "rev-parse", "--shared-index-path") == ""
+    assert any(p.name.startswith("sharedindex.") for p in _git_dir(repo).iterdir())
+    r = _attest(repo, "--with", _report(repo), "--commit")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert _git(repo, "diff", "--cached", "--name-status") == ""
+
+
+@pytest.mark.parametrize("split", ["update-index", "core.splitIndex"])
+def test_a_split_index_is_refused_and_the_offered_repair_works(repo, split):
+    """R-7 bleibt: Ein echt geteilter Index — per `--split-index` oder per `core.splitIndex`
+    beim nächsten `git add` — wird vor jedem Schreiben verweigert, HEAD und Shard
+    unverändert. Der Reparaturbefehl wird aus der Meldung gelesen und ausgeführt; danach
+    attestiert derselbe Aufruf."""
+    if split == "update-index":
+        _git(repo, "update-index", "--split-index")
+    else:
+        _git(repo, "config", "core.splitIndex", "true")
+        (repo / "other.txt").write_text("x\n")
+        _git(repo, "add", "other.txt")
+    assert _git(repo, "rev-parse", "--shared-index-path") != ""
+    report = _report(repo)
+    before = _git(repo, "rev-parse", "HEAD")
+    shard_before = (repo / SHARD).read_text() if (repo / SHARD).exists() else ""
+    r = _attest(repo, "--with", report, "--commit")
+    assert r.returncode != 0, r.stdout + r.stderr
+    assert "R-7" in r.stderr, r.stderr
+    assert _git(repo, "rev-parse", "HEAD") == before
+    assert ((repo / SHARD).read_text() if (repo / SHARD).exists() else "") == shard_before
+    hint = r.stderr.split("(R-7); ", 1)[1].split(", then rerun", 1)[0]
+    subprocess.run(hint, shell=True, cwd=repo, check=True, capture_output=True)
+    assert _git(repo, "rev-parse", "--shared-index-path") == ""
+    r = _attest(repo, "--with", report, "--commit")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert _git(repo, "rev-parse", "HEAD^") == before
+
+
 def test_after_a_commit_the_index_matches_head(repo):
     """The attestation's paths are staged as committed; nothing shows as a staged change."""
     r = _attest(repo, "--with", _report(repo), "--commit")

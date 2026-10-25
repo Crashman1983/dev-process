@@ -78,8 +78,9 @@ failed `update-ref` does: the line written and staged, HEAD unmoved. There is no
   under the lock, no flags only appends the line (no index).
 - R-6: where the platform has no `dir_fd`/`O_NOFOLLOW` (Windows) the descriptor's
   identity check stands in for the link-free walk.
-- R-7: a split index (`core.splitIndex`, `sharedindex.*`) is refused; attest writes only a
-  whole index.
+- R-7: a split index (`core.splitIndex`, or an index whose link extension git reports by
+  `rev-parse --shared-index-path`) is refused; attest writes only a whole index. A
+  `sharedindex.*` left beside a whole index is not a split.
 - The archive: attest moves no plan. After the attestation, `git mv <plan> <archive>` and
   `git commit` — a commit of its own, which the round counter walks through.
 """
@@ -632,16 +633,22 @@ def _write_phase_steps(root: Path, snap, target_rel: str, target_bytes: bytes, m
         t1 = _tree_with(root, snap.T0, [written])
         if not t1:
             raise _Refused("git cannot build the attestation's commit — nothing written")
+    unsplit = "git config core.splitIndex false && git update-index --no-split-index"
     if (_git(root, "config", "--type=bool", "core.splitIndex") or "") == "true":
-        raise _Refused("the index is split (core.splitIndex) — attest writes only a whole index "
-                       "(R-7); git update-index --no-split-index, then rerun")
+        raise _Refused(f"the index is split (core.splitIndex) — attest writes only a whole index "
+                       f"(R-7); {unsplit}, then rerun")
+    # Split or not is the index's own word (its link extension), not a sharedindex.* left
+    # beside it; git that cannot say is a refusal.
+    shared = _git(root, "rev-parse", "--shared-index-path")
+    if shared is None:
+        raise _Refused("git cannot say whether the index is split — nothing written")
+    if shared:
+        raise _Refused(f"the index is split (it links {shared}) — attest writes only a whole "
+                       f"index (R-7); {unsplit}, then rerun")
     where = _git(root, "rev-parse", "--git-path", "index")
     if not where:
         raise _Refused("git cannot name the index — nothing written")
     index = os.path.normpath(os.path.join(root, where))
-    if any(n.startswith("sharedindex.") for n in os.listdir(os.path.dirname(index))):
-        raise _Refused("the index is split (sharedindex.* beside it) — attest writes only a whole "
-                       "index (R-7); git update-index --no-split-index, then rerun")
     lock = index + ".lock"
     _write_seam("before-lock")
     try:
