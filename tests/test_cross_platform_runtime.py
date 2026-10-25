@@ -199,7 +199,20 @@ if spec.get("seam") and hasattr(attest, "_write_seam"):
             rel = spec["swap"]
             with open(rel + ".swap", "wb") as fh:
                 fh.write(spec["bytes"].encode())
-            os.replace(rel + ".swap", rel)  # rename-over: a new file at the path, no symlink
+            try:
+                os.replace(rel + ".swap", rel)  # rename-over, no symlink
+            except PermissionError as exc:
+                if sys.platform != "win32":
+                    raise
+                assert exc.winerror in (5, 32), exc
+                # The CRT descriptor has no FILE_SHARE_DELETE: Windows protects the
+                # checked shard itself. Prove that neither file was changed.
+                with open(rel, "rb") as fh:
+                    assert fh.read() == b"# today\\n"
+                with open(rel + ".swap", "rb") as fh:
+                    assert fh.read() == spec["bytes"].encode()
+                os.unlink(rel + ".swap")
+                print("REPLACE-REFUSED", stage, file=sys.stderr, flush=True)
             print("SEAM-FIRED", stage, file=sys.stderr, flush=True)
     attest._write_seam = seam
 sys.argv = ["attest.py", *sys.argv[3:]]
@@ -217,8 +230,9 @@ def test_attest_write_primitives_hold_on_this_os(tmp_path, case):
     """#308 fix round 6 (I4, I11, design §8): the write phase checks today's shard through
     the descriptor it appends with — `(st_dev, st_ino)` and the bytes (`os.pread`, else
     `lseek` + `read`). Here in the portable smoke, without symlinks and without a render:
-    a shard renamed over at `worktree-checked` is refused and both files keep their bytes;
-    a plain `--commit` carries the line and leaves the status clean."""
+    POSIX permits rename-over at `worktree-checked`, then attest refuses. Windows
+    denies the replacement of the open shard, then attest appends with HEAD/index
+    unchanged (no flags). A plain `--commit` carries the line and leaves status clean."""
     import datetime as dt
     import json
     import os
@@ -239,6 +253,9 @@ def test_attest_write_primitives_hold_on_this_os(tmp_path, case):
     _smoke_git(root, "add", "-A")
     _smoke_git(root, "commit", "-q", "-m", "docs: today's shard")
     old = _smoke_git(root, "rev-parse", "HEAD")
+    index = root / _smoke_git(root, "rev-parse", "--git-path", "index")
+    index_before = index.read_bytes()
+    windows_swap = sys.platform == "win32" and case != "plain commit"
     swapped = b"# today, renamed over by another process\n"
     spec = {} if case == "plain commit" else {
         "seam": "worktree-checked", "swap": shard, "bytes": swapped.decode(),
@@ -247,18 +264,34 @@ def test_attest_write_primitives_hold_on_this_os(tmp_path, case):
     runner.write_text(_WRITE_SEAM_RUNNER, encoding="utf-8")
     r = subprocess.run([sys.executable, str(runner), str(scripts), json.dumps(spec),
                         "--work", "smoke", "--tier", "1", "--model", "m", "--independence", "bundle",
-                        "--verdict", "pass", "--commit", str(root)],
+                        "--verdict", "pass", *([] if windows_swap else ["--commit"]), str(root)],
                        cwd=root, capture_output=True, text=True,
                        env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
+    assert "Traceback" not in r.stderr, r.stdout + r.stderr
     if case == "plain commit":
         assert r.returncode == 0, r.stdout + r.stderr
         assert "REVIEW work=smoke" in _smoke_git(root, "show", f"HEAD:{shard}")
         assert _smoke_git(root, "status", "--porcelain") == ""
         return
     assert "SEAM-FIRED worktree-checked" in r.stderr, "seam never ran:\n" + r.stdout + r.stderr
+    if windows_swap:
+        assert "REPLACE-REFUSED worktree-checked" in r.stderr, r.stdout + r.stderr
+        assert r.returncode == 0, r.stdout + r.stderr
+        data = (root / shard).read_bytes()
+        [line] = [ln for ln in r.stdout.splitlines() if ln.startswith("REVIEW work=smoke ")]
+        assert data == b"# today\n" + line.encode() + b"\n"
+        assert not (root / (shard + ".swap")).exists()
+        assert _smoke_git(root, "rev-parse", "HEAD") == old
+        assert index.read_bytes() == index_before
+        assert _smoke_git(root, "show", f"HEAD:{shard}") == "# today"
+        assert _smoke_git(root, "diff", "--cached", "--name-only") == ""
+        assert _smoke_git(root, "status", "--porcelain") == f"M {shard}"
+        return
+    assert "REPLACE-REFUSED" not in r.stderr, r.stdout + r.stderr
     assert r.returncode == 1, r.stdout + r.stderr
     assert (root / shard).read_bytes() == swapped
     assert _smoke_git(root, "rev-parse", "HEAD") == old
+    assert index.read_bytes() == index_before
     assert _smoke_git(root, "show", f"HEAD:{shard}") == "# today"
 
 
