@@ -30,7 +30,7 @@ A few plain sentences per release: [NEWS.md](NEWS.md). Deutsche Fassung:
 
 **Changed sections.** `verification-independence.md` (Bind the verdict to the reviewed range)
 
-Details: [Plan](docs/analysis/2026-10-24-v2.78.1.md) #308
+Details: [Plan](docs/analysis/2026-10-24-v2.77.3.md) #308
 
 ## v2.78.0 — A finding names its place; blocks on old code are counted · 2026-10-24
 

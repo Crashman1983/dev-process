@@ -29,7 +29,7 @@ English version: [CHANGELOG.md](CHANGELOG.md). Die Releases vor v2.28.2:
 
 **Geänderte Abschnitte.** `verification-independence.md` (Bind the verdict to the reviewed range)
 
-Details: [Plan](docs/analysis/2026-10-24-v2.78.1.md) #308
+Details: [Plan](docs/analysis/2026-10-24-v2.77.3.md) #308
 
 ## v2.78.0 — Ein Befund nennt seinen Ort; Blocks auf altem Code werden gezählt · 2026-10-24
 
