@@ -449,6 +449,19 @@ def supervise(evidence: Path) -> int:
 
 # --- the review: bundle, schema, prompt ---------------------------------------------
 
+# A finding's place (v2.78): a copy of `check_issues.FINDING_AT_PATTERN` and `valid_at` —
+# the Codex dispatch runs without the github-issues module too; a test keeps them equal
+_AT_PATTERN = r"^(-|[^\s:]+(:[1-9][0-9]*(-[1-9][0-9]*)?)?)$"
+
+
+def _valid_at(value: object) -> bool:
+    m = re.match(_AT_PATTERN, value) if isinstance(value, str) else None
+    if not m:
+        return False
+    first, _, last = (m.group(2) or "").lstrip(":").partition("-")
+    return not last or int(first) <= int(last)
+
+
 def _schema(*, plan_review: bool, gate: bool) -> dict:
     finding = {"type": "object", "additionalProperties": False,
                "properties": {"sev": {"type": "string", "enum": ["blocker", "major", "minor", "nit"]},
@@ -459,8 +472,10 @@ def _schema(*, plan_review: bool, gate: bool) -> dict:
                               # what could have caught it, and which check (#276); `-` for judgment
                               "class": {"type": "string", "enum": ["mechanical", "testable", "judgment"]},
                               "rule": {"type": "string", "pattern": "^(-|[\\w.:/-]+)$"},
+                              # where it is, at the reviewed head (v2.78); `-` for no single place
+                              "at": {"type": "string", "pattern": _AT_PATTERN},
                               "title": {"type": "string"}},
-               "required": ["sev", "action", "kind", "issue", "class", "rule", "title"]}
+               "required": ["sev", "action", "kind", "issue", "class", "rule", "at", "title"]}
     lines = {"type": "array", "items": {"type": "string"}}
     props = {"verdict": {"type": "string", "enum": ["pass", "block"]},
              "findings": {"type": "array", "items": finding}, "criteria": lines, "refute": lines}
@@ -608,8 +623,16 @@ def _report_text(rec: dict, result: dict, *, work: str, plan_review: bool, refut
     for f in result["findings"]:
         cls = f" class={f['class']}" if f.get("class") else ""
         rule = f" rule={f['rule']}" if f.get("rule") not in (None, "", "-") else ""
+        # handoff checks no pattern: a place the gate would not read becomes `-`, named below the
+        # line; a run started before v2.78 (its stored schema has no `at`) writes `-` too
+        at = f.get("at")
+        # a title whose first token reads like a field would be parsed as one (a duplicate `at=`)
+        title = f["title"].strip()
+        title = f"— {title}" if re.match(r"^\w+=", title) else title
         lines.append(f"FINDING sev={f['sev']} action={f['action']} kind={f['kind']} issue={f['issue']} by=codex"
-                     f"{cls}{rule} {f['title']}")
+                     f"{cls}{rule} at={at if _valid_at(at) else '-'} {title}")
+        if at and not _valid_at(at):
+            lines.append(f"at-invalid: {at}")
     if result["criteria"]:
         lines += ["", *result["criteria"]]
     if refute_round is not None:

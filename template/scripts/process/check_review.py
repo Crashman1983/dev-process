@@ -944,6 +944,23 @@ def report_header(text: str) -> dict[str, list[str]]:
     return out
 
 
+_ARTIFACT_KEY = re.compile(r"^\s*(?:[-*+]\s+)?[*_]*artifact[*_]*\s*:\s*(.*)$", re.IGNORECASE)
+
+
+def report_artifact(text: str) -> dict[str, str]:
+    """The `key=value` pairs (`base=`, `head=`, `diff_sha256=`, …) of a report's `artifact:`
+    line in its header block — the block `report_header` reads; an `artifact:` quoted in
+    the body is no header. The first such line counts; none gives {}. The values are as
+    written: a reader that needs a commit checks the shape itself (`GIT_SHA`, v2.78)."""
+    for line in _unfenced(text).splitlines():
+        if not line.strip():
+            break
+        m = _ARTIFACT_KEY.match(line)
+        if m:
+            return dict(tok.split("=", 1) for tok in m.group(1).split() if "=" in tok)
+    return {}
+
+
 def report_of(candidates: list[tuple[str, str]], slugs, issues) -> tuple[str, str] | None:
     """The previous round's report of THIS work item among (path, text)
     candidates — never another one's; the one owner of that rule.

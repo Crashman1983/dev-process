@@ -44,7 +44,8 @@ It takes the reviewed range (base, head) from the bundle, checks that a full
 round's base is the head's fork point, validates the grammar and appends the
 `REVIEW` line to today's journal shard of the branch (`journal-state-plans.md`).
 Every Tier 2+ review writes a `.process-work/reviews/` report — findings as
-`FINDING sev=… action=… issue=…` lines (gate-linted where the `github-issues`
+`FINDING sev=… action=… issue=…` lines, each blocker and major with its `class=`
+and its place `at=<path>:<line>` (gate-linted where the `github-issues`
 module is installed; the report grammar either way). A `block` verdict always
 has findings, so it always writes the report: the next delta bundle reads the
 open findings from it. Report

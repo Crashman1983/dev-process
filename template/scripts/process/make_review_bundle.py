@@ -431,7 +431,7 @@ that head is unreviewed for the gate. Never invent these values.
 
 For each finding, one line:
 
-    FINDING sev=<blocker|major|minor|nit> action=<fix|accept|follow-up> issue=<ref|-> gate=<judgement|possible|name> [origin=<draft|fix|late>] [kind=<knowledge-gap|requirement|implementation|test-gap|process|environment>] [by=<your family: claude|codex|…>] [class=<mechanical|testable|judgment>] [rule=<check-name>] <title>
+    FINDING sev=<blocker|major|minor|nit> action=<fix|accept|follow-up> issue=<ref|-> gate=<judgement|possible|name> [origin=<draft|fix|late>] [kind=<knowledge-gap|requirement|implementation|test-gap|process|environment>] [by=<your family: claude|codex|…>] [class=<mechanical|testable|judgment>] [rule=<check-name>] [at=<path>:<line>|<path>:<first>-<last>|<path>|->] <title>
 
 - `gate`: could a linter, type checker or gate rule have produced this finding?
   `judgement` = no, it needed a reader; `possible` = yes, but no rule exists
@@ -450,6 +450,11 @@ For each finding, one line:
   reader. For `mechanical` and `testable`, `rule` names the check in one token
   (`rule=mutation-of-changed-lines`); a class that keeps coming back is the next
   gate to write (`process_kpis.py findings`).
+- `at`: required on every `blocker` and `major` finding, like `class` — where the
+  defect is at the reviewed head: `<path>:<line>`, `<path>:<first>-<last>`, the file
+  `<path>`, or `-` when there is no single place (something missing, the design).
+  Lines count from 1; write a space in a path as `%20`. `process_kpis.py rounds`
+  reads it to tell a block on code round 1 already saw from one on new code.
 
 {round_note}{ac_note}Judge against the checklist and the rules above; cite file:line evidence; a
 `pass` with unfixed blockers is a false green — verdict `block` instead.{plan_note}"""

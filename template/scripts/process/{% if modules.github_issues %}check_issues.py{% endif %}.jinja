@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import json
 import re
-from collections import Counter
 import shutil
 import subprocess
 import sys
@@ -182,12 +181,28 @@ FINDING_BY = re.compile(r"^[a-z][a-z0-9.-]*$")
 # reader. A mechanical or testable finding names the check in `rule=` (one token,
 # e.g. `rule=mutation-of-changed-lines`); `process_kpis.py findings` counts both,
 # so a class that keeps coming back is seen before a reader finds it a third time.
-# Owed on every blocker and major a branch adds (#297, `_class_duty`); optional
+# Owed on every blocker and major a branch adds (#297, `_finding_duty`); optional
 # on the rest and on findings that stood at the fork point.
 FINDING_CLASSES = {"mechanical", "testable", "judgment"}
 CLASS_DUE = {"blocker", "major"}
 FINDING_RULE = re.compile(r"^[\w.:/-]+$")
-FINDING_KEYS = ("sev", "action", "issue", "gate", "origin", "kind", "by", "class", "rule")
+# Where the defect is (v2.78): `<path>:<line>`, `<path>:<first>-<last>`, `<path>` or `-`
+# (no single place). Lines count from 1 at the reviewed head; a space in a path is `%20`.
+# Owed on every blocker and major a branch adds (`AT_DUE`, `_finding_duty`) — what
+# `process_kpis.py rounds` needs to tell a block on old code from one on new code (#311).
+# The pattern is the grammar's one text; `_dispatch_codex` copies it into the Codex schema.
+FINDING_AT_PATTERN = r"^(-|[^\s:]+(:[1-9][0-9]*(-[1-9][0-9]*)?)?)$"
+AT_DUE = {"blocker", "major"}
+FINDING_KEYS = ("sev", "action", "issue", "gate", "origin", "kind", "by", "class", "rule", "at")
+
+
+def valid_at(value: str) -> bool:
+    """A place `at=` may name: the pattern, and a range that does not run backwards."""
+    m = re.match(FINDING_AT_PATTERN, value)
+    if not m:
+        return False
+    first, _, last = (m.group(2) or "").lstrip(":").partition("-")
+    return not last or int(first) <= int(last)
 
 
 # keys added after reports existed whose titles may start with the same word (`by=`,
@@ -196,6 +211,7 @@ _TITLE_KEYS = {
     "by": (FINDING_BY.match, "is no reviewer family (a lower-case word: claude, codex, …)"),
     "class": (FINDING_CLASSES.__contains__, f"not in {sorted(FINDING_CLASSES)}"),
     "rule": (FINDING_RULE.match, "is no check name (one token: letters, digits, . : / - _)"),
+    "at": (valid_at, "is no place (`<path>:<line>`, `<path>:<first>-<last>`, `<path>` or `-`; lines from 1)"),
 }
 
 # a FINDING may be written as a Markdown bullet — `- FINDING ...` must not
@@ -220,8 +236,8 @@ def _parse_finding(match: re.Match) -> tuple[dict | None, str | None]:
     FINDING_ORIGINS; kind= optional, one of FINDING_KINDS; by= optional, the
     reviewer's family as a lower-case word (FINDING_BY); class= one of
     FINDING_CLASSES, optional here (a blocker or major the branch adds owes it:
-    `_class_duty`, which knows the fork point); rule= optional, the check that
-    would catch it."""
+    `_finding_duty`, which knows the fork point); rule= optional, the check that
+    would catch it; at= optional here, the place (`valid_at`; owed like class=)."""
     fields: dict = {}
     tokens = match.group(1).split()
     i = 0
@@ -252,6 +268,8 @@ def _parse_finding(match: re.Match) -> tuple[dict | None, str | None]:
         return None, f"class={fields['class']!r} not in {sorted(FINDING_CLASSES)}"
     if "rule" in fields and not FINDING_RULE.match(fields["rule"]):
         return None, f"rule={fields['rule']!r} is no check name (one token: letters, digits, . : / - _)"
+    if "at" in fields and not valid_at(fields["at"]):
+        return None, f"at={fields['at']!r} {_TITLE_KEYS['at'][1]}"
     issue = fields.get("issue", "-")
     if issue != "-" and parse_issue_ref(issue) is None:
         return None, f"issue={issue!r} is neither '-' nor a valid ref"
@@ -307,15 +325,57 @@ def _git_ignored(root: Path, paths: list[Path]) -> set[Path]:
 
 
 _NO_RANGE = ("no branch range against an integration ref (on it, or none in this repository) — "
-             "no blocker or major finding is new here, so `class=` is not checked")
+             "no blocker or major finding is new here, so `class=` and `at=` are not checked")
 _UNKNOWN_NEW = "which blocker and major findings this branch adds is unknown"
 
 
-def _finding_identity(fields: dict) -> tuple[tuple[str, str], ...]:
-    """A finding as the branch compares it with the fork point: without `issue=`, which
-    `publish_review.sh` writes into lines that stood before — publishing makes no old
-    finding new."""
-    return tuple(sorted((k, v) for k, v in fields.items() if k != "issue"))
+# fields a finding may gain after it stood: `issue=` (`publish_review.sh` writes it), and
+# what classifies and places it — backfilling them makes no old finding new (v2.78)
+_BACKFILL = ("issue", "class", "rule", "at")
+
+
+def _old_matches(findings: list[dict], old: list[dict]) -> list[bool]:
+    """Per finding of the branch (every one of the report, complete or not): did it stand at
+    the fork point? A finding fits an old one equal in every field but `_BACKFILL`, and in
+    those either empty there or the same — so a backfilled line stays old, while a second
+    finding with an old one's title but another place is new (v2.78 plan review). Each
+    old finding stands for one branch finding: a maximum matching (augmenting paths), so
+    no order of either list decides (cross-model review, round 1). Who gets an old line
+    when several could: exact copies first, then complete findings, then those that owe
+    a field — the old line goes to a finding that owes nothing before it excuses one that
+    does (fail closed)."""
+
+    def core(f: dict) -> dict:
+        return {k: v for k, v in f.items() if k not in _BACKFILL}
+
+    def fits(f: dict, o: dict) -> bool:
+        return core(f) == core(o) and all(k == "issue" or k not in o or o[k] == f.get(k) for k in _BACKFILL)
+
+    def exact(f: dict, o: dict) -> bool:
+        return {k: v for k, v in f.items() if k != "issue"} == {k: v for k, v in o.items() if k != "issue"}
+
+    def complete(f: dict) -> bool:
+        return not ((f["sev"] in CLASS_DUE and "class" not in f) or (f["sev"] in AT_DUE and "at" not in f))
+
+    edges = [[i for i, o in enumerate(old) if fits(f, o)] for f in findings]
+    holder: dict[int, int] = {}  # old index -> branch index
+
+    def augment(n: int, seen: set[int]) -> bool:
+        for i in edges[n]:
+            if i in seen:
+                continue
+            seen.add(i)
+            if i not in holder or augment(holder[i], seen):
+                holder[i] = n
+                return True
+        return False
+
+    order = sorted(range(len(findings)), key=lambda n: (
+        not any(exact(findings[n], old[i]) for i in edges[n]), not complete(findings[n]), n))
+    for n in order:
+        augment(n, set())
+    matched = set(holder.values())
+    return [n in matched for n in range(len(findings))]
 
 
 def _forkless_refs(root: Path) -> list[str]:
@@ -353,12 +413,19 @@ def _renamed_since(root: Path, fork: str) -> dict[str, str]:
     return renamed
 
 
-def _class_duty(root: Path, due: dict[str, list[dict]]) -> tuple[list[str], list[str]]:
-    """`class=` on every blocker and major the branch adds (#297): `due` holds, per
-    report, its blocker and major findings without one. A finding that stood in the same
-    report at the fork point (merge-base with the integration ref) is old — a report the
-    branch renamed is read at its old path there; a report absent there is new as a
-    whole. Fails closed on an unreadable or unborn HEAD, an unreadable
+_DUTY_HINT = {"class": "say what could have caught it (`class=mechanical|testable|judgment`, a check in `rule=`)",
+              "at": "say where it is (`at=<path>:<line>`, `<path>:<first>-<last>`, `<path>` or `-`)"}
+
+
+def _finding_duty(root: Path, due: dict[str, list[dict]],
+                  found: dict[str, list[dict]] | None = None) -> tuple[list[str], list[str]]:
+    """`class=` (#297) and `at=` (v2.78) on every blocker and major the branch adds: `due`
+    holds, per report, its blocker and major findings missing either; `found` every finding
+    of those reports, matched against the fork point together (`_old_matches`: a complete
+    backfill takes its old line too). A finding that stood
+    in the same report at the fork point (merge-base with the integration ref,
+    `_old_matches`) is old — a report the branch renamed is read at its old path there; a
+    report absent there is new as a whole. Fails closed on an unreadable or unborn HEAD, an unreadable
     or ambiguous fork point, integration refs that resolve but share no commit with HEAD
     (a shallow clone) and a report git cannot read there. On the integration ref, or in
     a readable repository without one, no finding is new: a note."""
@@ -367,7 +434,7 @@ def _class_duty(root: Path, due: dict[str, list[dict]]) -> tuple[list[str], list
     probe = _git_read(root, "rev-parse", "--git-dir")
     if probe.returncode != 0:
         if "not a git repository" in probe.stderr.lower():
-            return [], ["not in a git repository — no branch range, so `class=` is not checked"]
+            return [], ["not in a git repository — no branch range, so `class=` and `at=` are not checked"]
         return [f"git cannot read the repository ({probe.stderr.strip()}) — {_UNKNOWN_NEW}"], []
     head = _git_read(root, "rev-parse", "--verify", "-q", "HEAD^{commit}")
     if head.returncode != 0 or not head.stdout.strip():
@@ -394,14 +461,16 @@ def _class_duty(root: Path, due: dict[str, list[dict]]) -> tuple[list[str], list
         except _Unreadable as exc:
             hard.append(f"{rel}: cannot be read at the fork point ({exc}) — {_UNKNOWN_NEW}")
             continue
-        old = Counter(_finding_identity(f) for f, _err, _line in report_findings(before or "") if f)
+        old = [f for f, _err, _line in report_findings(before or "") if f]
+        every = (found or {}).get(rel, findings)
+        stood = {id(f) for f, hit in zip(every, _old_matches(every, old)) if hit}
         for fields in findings:
-            key = _finding_identity(fields)
-            if old[key] > 0:
-                old[key] -= 1
+            if id(fields) in stood:
                 continue
-            hard.append(f"{rel}: {fields['sev']} finding without class= — say what could have caught it "
-                        f"(`class=mechanical|testable|judgment`, a check in `rule=`): {fields['title']!r}")
+            missing = [k for k, owed in (("class", CLASS_DUE), ("at", AT_DUE))
+                       if fields["sev"] in owed and k not in fields]
+            hard.append(f"{rel}: {fields['sev']} finding without {' and '.join(m + '=' for m in missing)} — "
+                        + " and ".join(_DUTY_HINT[m] for m in missing) + f": {fields['title']!r}")
     return hard, []
 
 
@@ -420,7 +489,8 @@ def _check_reports(root: Path, default_repo: str | None) -> tuple[list[str], lis
     hard: list[str] = []
     soft: list[str] = []
     campaigns: dict[str, dict[str, str]] = {}  # slug -> {report: campaign-issue}
-    unclassed: dict[str, list[dict]] = {}  # report -> its blockers and majors without class=
+    incomplete: dict[str, list[dict]] = {}  # report -> its blockers and majors without class= or at=
+    found: dict[str, list[dict]] = {}  # report -> all its well-formed findings (the old-line matching)
     candidates = sorted(rdir.glob("*.md"))
     ignored = _git_ignored(root, candidates)
     for p in candidates:
@@ -501,8 +571,9 @@ def _check_reports(root: Path, default_repo: str | None) -> tuple[list[str], lis
                             f"{fields['title']!r}")
             if fields["gate"] == FINDING_GATE_POSSIBLE:
                 ratchet.append(fields["title"])
-            if fields["sev"] in CLASS_DUE and "class" not in fields:
-                unclassed.setdefault(rel, []).append(fields)
+            found.setdefault(rel, []).append(fields)
+            if (fields["sev"] in CLASS_DUE and "class" not in fields) or (fields["sev"] in AT_DUE and "at" not in fields):
+                incomplete.setdefault(rel, []).append(fields)
         if ratchet:
             # Advisory on purpose: `gate=` is self-classified, and a hard rule
             # on a self-classified field buys `gate=judgement` on everything
@@ -519,7 +590,7 @@ def _check_reports(root: Path, default_repo: str | None) -> tuple[list[str], lis
             detail = ", ".join(f"{r}={v}" for r, v in sorted(members.items()))
             hard.append(f"campaign {slug!r} is split across parent issues — "
                         f"a split campaign is not bundled: {detail}")
-    ch, cs = _class_duty(root, unclassed)
+    ch, cs = _finding_duty(root, incomplete, found)
     return hard + ch, soft + cs
 
 

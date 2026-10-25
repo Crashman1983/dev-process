@@ -65,6 +65,8 @@ import sys
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import NamedTuple
+from urllib.parse import unquote
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.dont_write_bytecode = True
@@ -417,14 +419,19 @@ def _rounds_of_issue(root: Path, rounds: dict[str, dict], issue,
     hits = [rounds[i] for i in ids if i in rounds]
     if not hits:
         return None
+    heads: dict[int, set[str]] = {}
+    for h in hits:
+        for rnd, shas in h["heads"].items():
+            heads.setdefault(rnd, set()).update(shas)
     return {"max_round": max(h["max_round"] for h in hits), "passed": any(h["passed"] for h in hits),
-            "blocked": set().union(*(h["blocked"] for h in hits))}
+            "blocked": set().union(*(h["blocked"] for h in hits)), "heads": heads}
 
 
 def _review_rounds(root: Path) -> dict[str, dict]:
-    """work id → {max_round, passed, tier, pass_round, blocked} from every REVIEW
+    """work id → {max_round, passed, tier, pass_round, blocked, heads} from every REVIEW
     line in the journal: `pass_round` is the first passing round (None before
-    it), `blocked` the distinct rounds with a block verdict."""
+    it), `blocked` the distinct rounds with a block verdict, `heads` round → the
+    reviewed heads its lines name (full SHAs only; v2.78, `_blocks_since_round1`)."""
     import check_review as _review
     out: dict[str, dict] = {}
     jdir = root / _review.JOURNAL_DIR
@@ -434,13 +441,15 @@ def _review_rounds(root: Path) -> dict[str, dict]:
         recs, _e = _review.parse_review_lines(f.read_text(encoding="utf-8", errors="replace"))
         for _ln, r in recs:
             e = out.setdefault(r["work"], {"max_round": 0, "passed": False, "tier": r.get("tier"),
-                                           "pass_round": None, "blocked": set()})
+                                           "pass_round": None, "blocked": set(), "heads": {}})
             try:
                 rnd = int(r.get("round") or 0)
             except ValueError:
                 rnd = None
             if rnd is not None:
                 e["max_round"] = max(e["max_round"], rnd)
+                if _review.GIT_SHA.match(r.get("head") or ""):
+                    e["heads"].setdefault(rnd, set()).add(r["head"])
             tier = str(r.get("tier") or "")
             if tier.isdigit() and not (str(e["tier"] or "").isdigit() and int(e["tier"]) >= int(tier)):
                 e["tier"] = tier  # the highest tier any round declared
@@ -601,8 +610,19 @@ def _report_round(name: str, head: dict[str, list[str]]) -> int | None:
     return int(found.group(1)) if found else None
 
 
-def _review_reports(root: Path, phase: str | None = None) -> list[tuple[list[str], int | None, list[dict]]] | str:
-    """(work ids, round, FINDING fields) of every review report — plan reviews only
+class Report(NamedTuple):
+    """One review report as the counts read it (v2.78: named, so a new field never shifts
+    an unpacking — #303)."""
+    works: list[str]
+    round: int | None
+    findings: list[dict]
+    head: str | None  # the reviewed head of its `artifact:` header, a full SHA; "" when that
+    # header names a head that is no full SHA (`HEAD`, a branch); None without one
+    unreadable: bool = False  # the file could not be read: no findings known
+
+
+def _review_reports(root: Path, phase: str | None = None) -> list[Report] | str:
+    """(work ids, round, FINDING fields, reviewed head) of every review report — plan reviews only
     (`phase="plan"`), the others (`"code"`) or all (None) — or why they were not read
     (`_blockers_by_work` names the cases). A report names its work in its `work:`
     header (check_review reads that header); one without counts under
@@ -619,7 +639,7 @@ def _review_reports(root: Path, phase: str | None = None) -> list[tuple[list[str
                 f"(e.g. uv run --with pyyaml …)")
     except ImportError as exc:
         return f"check_issues does not import ({exc})"
-    out: list[tuple[list[str], int | None, list[dict]]] = []
+    out: list[Report] = []
     rdir = root / _issues.REVIEWS_DIR
     if not rdir.is_dir():
         return out
@@ -627,6 +647,7 @@ def _review_reports(root: Path, phase: str | None = None) -> list[tuple[list[str
         try:
             text = p.read_text(encoding="utf-8", errors="replace")
         except OSError:
+            out.append(Report(["(unreadable)"], None, [], None, unreadable=True))
             continue
         head = _review.report_header(text)
         is_plan = "plan" in [v.lower() for v in head.get("phase", [])]
@@ -634,7 +655,10 @@ def _review_reports(root: Path, phase: str | None = None) -> list[tuple[list[str
             continue
         works = [w.lstrip("#") for w in head.get("work", [])] or ["(no work: header)"]
         found = [fields for fields, err, _line in _issues.report_findings(text) if not err]
-        out.append((works, _report_round(p.name, head), found))
+        art = _review.report_artifact(text)
+        sha = art.get("head")
+        out.append(Report(works, _report_round(p.name, head), found,
+                          None if sha is None else (sha if _review.GIT_SHA.match(sha) else "")))
     return out
 
 
@@ -644,7 +668,7 @@ def _report_findings(root: Path, phase: str | None = None) -> list[tuple[str, di
     reports = _review_reports(root, phase)
     if isinstance(reports, str):
         return reports
-    return [(work, fields, rnd) for works, rnd, found in reports for fields in found for work in works]
+    return [(work, fields, r.round) for r in reports for fields in r.findings for work in r.works]
 
 
 def _blockers_by_work(root: Path, key: str = "origin",
@@ -715,7 +739,8 @@ def _round_findings(root: Path, ids: dict[object, set[str]]) -> dict:
     origins: dict[str, int] = {}
     per_round: dict[tuple[object, int], dict[str, int]] = {}
     unrounded = 0
-    for works, rnd, found in reports:
+    for rep in reports:
+        works, rnd, found = rep.works, rep.round, rep.findings
         issue = next((i for i, own in ids.items() if own & set(works)), None)
         if issue is None:
             continue  # not a work of this window
@@ -740,6 +765,264 @@ def _round_findings(root: Path, ids: dict[object, set[str]]) -> dict:
         b["fix_blockers"] += after["fix_blockers"]
     return {"blockers_by_origin": origins,
             "fix_findings_vs_fix_blockers": {"buckets": buckets, "unrounded": unrounded}}
+
+
+# --- blocks on old code (#311): a blocking finding of round >= 2 on lines round 1 saw --------
+OLD_REASONS = ("no-at", "no-place", "no-line", "not-code", "no-round1", "no-head", "missing-commit",
+               "outside", "git-failed", "unreadable-report")
+_HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
+_PLACE = re.compile(r"^(?P<path>[^\s:]+)(?::(?P<first>[1-9][0-9]*)(?:-(?P<last>[1-9][0-9]*))?)?$")
+_DIFF = ("--no-color", "--no-ext-diff", "--no-textconv", "--inter-hunk-context=0")
+
+
+def _git_run(root: Path, *args: str) -> tuple[int, str] | None:
+    """(exit code, stdout) of git, or None when git cannot run or runs past 30 s — the
+    callers tell "not there" (an exit code git documents) from "git failed" (refute,
+    round 1: a missing blob read as an absent file)."""
+    import os  # noqa: PLC0415
+    try:
+        # a place is a path, never a glob: `pages/[id].tsx` names that file (plan review, round 3);
+        # git speaks one language here (cross-model review, round 2: a translated "Binary files")
+        r = subprocess.run(["git", "--literal-pathspecs", "-C", str(root), *args], capture_output=True, text=True,
+                           timeout=30, encoding="utf-8", errors="replace",
+                           env={**os.environ, "LC_ALL": "C", "LANGUAGE": "C"})
+    except (OSError, ValueError, subprocess.SubprocessError):  # ValueError: a NUL in a path
+        return None
+    return r.returncode, r.stdout
+
+
+def _git_out(root: Path, *args: str) -> str | None:
+    """git's stdout, or None when it fails or runs past 30 s — never an empty answer."""
+    r = _git_run(root, *args)
+    return r[1] if r is not None and r[0] == 0 else None
+
+
+def _work_group(work: str, plans: list[tuple[str, str]]) -> set[str]:
+    """The work ids one report's or REVIEW line's work goes by, `#` stripped: its own, and
+    those of every plan that names it (`check_review._plan_work_ids` — slug and issues,
+    the matching `_issue_ids` uses) when that plan declares exactly one issue — a plan with
+    two issues joins nothing: whose round its slug's lines are cannot be told."""
+    import check_review as _review
+    key = work.lstrip("#")
+    group = {key}
+    for rel, text in plans:
+        ids = {str(i).lstrip("#") for i in _review._plan_work_ids(_review.plan_stem(rel), text, include_dedated=True)}
+        # slug and issue join only through a plan with one issue: a plan with two names
+        # neither issue's rounds the other's (refute and cross-model review, round 1 and 2)
+        if key in ids and sum(i.isdigit() for i in ids) == 1:
+            group |= ids
+    return group
+
+
+def _window_works(issues, plans: list[tuple[str, str]]) -> set[str]:
+    """The work ids of a window's merged issues (`_work_group` of each): the filter of
+    `_blocks_since_round1`, never another issue of a plan that declares several."""
+    return set().union(*(_work_group(str(i), plans) for i in issues)) if issues else set()
+
+
+class _Diffs:
+    """git answers per pair of heads, asked once: commits present, renames over the whole
+    tree (a path filter cuts a rename off before git detects it), the hunks of one file."""
+
+    def __init__(self, root: Path):
+        self.root, self._have, self._renames, self._hunks, self._lines, self._entries = root, {}, {}, {}, {}, {}
+
+    def has(self, sha: str) -> bool | None:
+        """The commit is here (True), not here (False), or git cannot tell (None)."""
+        if sha not in self._have:
+            r = _git_run(self.root, "rev-parse", "--verify", "-q", f"{sha}^{{commit}}")
+            self._have[sha] = None if r is None or r[0] not in (0, 1) else r[0] == 0
+        return self._have[sha]
+
+    def renames(self, h1: str, hr: str) -> dict[str, str] | None:
+        if (h1, hr) not in self._renames:
+            out = _git_out(self.root, "diff", "--name-status", "-z", "-M", *_DIFF, h1, hr)
+            got: dict[str, str] | None = None
+            if out is not None:
+                got, parts, i = {}, out.split("\0"), 0
+                while i < len(parts) and parts[i]:
+                    if parts[i].startswith(("R", "C")):
+                        if parts[i].startswith("R"):
+                            got[parts[i + 2]] = parts[i + 1]
+                        i += 3
+                    else:
+                        i += 2
+            self._renames[(h1, hr)] = got
+        return self._renames[(h1, hr)]
+
+    def lines(self, sha: str, path: str) -> int | str | None:
+        """Line count of the file `path` at `sha`, as git counts lines (a `\\n` ends one; a
+        form feed does not); "absent" when no such file is there (a directory included);
+        None when git cannot tell."""
+        if (sha, path) not in self._lines:
+            got: int | str | None = self.blob(sha, path)
+            if got not in (None, "absent"):
+                text = _git_out(self.root, "cat-file", "blob", got)
+                got = None if text is None else text.count("\n") + (1 if text and not text.endswith("\n") else 0)
+            self._lines[(sha, path)] = got
+        return self._lines[(sha, path)]
+
+    def blob(self, sha: str, path: str) -> str | None:
+        """The blob id of the file `path` at `sha`; "absent" when no such file is there (a
+        directory included); None when git cannot tell."""
+        if (sha, path) not in self._entries:
+            got: str | None = None
+            listed = _git_out(self.root, "ls-tree", "-z", sha, "--", path)
+            if listed is not None:
+                entry = next((e for e in listed.split("\0") if e.endswith("\t" + path)), "")
+                meta = entry.split("\t", 1)[0].split()
+                got = meta[2] if len(meta) == 3 and meta[1] == "blob" else "absent"
+            self._entries[(sha, path)] = got
+        return self._entries[(sha, path)]
+
+    def hunks(self, h1: str, hr: str, old: str, new: str) -> list[tuple[int, int]] | str | None:
+        """New-side (start, count) of every hunk of `old` → `new`; "binary" when the file
+        changed without a text hunk; None when git fails."""
+        key = (h1, hr, old, new)
+        if key not in self._hunks:
+            out = _git_out(self.root, "diff", "--unified=0", "-M", *_DIFF, h1, hr, "--", old, new)
+            if out is None:
+                got: list[tuple[int, int]] | str | None = None
+            else:
+                got = [(int(m.group(1)), 1 if m.group(2) is None else int(m.group(2)))
+                       for m in map(_HUNK.match, out.splitlines()) if m]
+                if not got and "Binary files" in out:
+                    got = "binary"
+            self._hunks[key] = got
+        return self._hunks[key]
+
+
+def _unchanged_against(d: _Diffs, h1: str, hr: str, path: str, first: int, last: int) -> bool | None:
+    """Is lines first..last of `path` at `hr` as they stood at `h1` (a tree comparison, so a
+    rebase between the rounds changes nothing)? None when git cannot tell. A hunk with new
+    lines touches the lines it covers; a pure deletion (count 0 after new line s) touches
+    s and s+1; a binary or `-diff` file that changed is changed."""
+    renames = d.renames(h1, hr)
+    if renames is None:
+        return None
+    old = renames.get(path, path)
+    there = d.lines(h1, old)
+    if there is None:
+        return None
+    if there == "absent":
+        return False  # not there in round 1: the lines came later
+    hunks = d.hunks(h1, hr, old, path)
+    if hunks is None:
+        return None
+    if hunks == "binary" or (not hunks and d.blob(h1, old) != d.blob(hr, path)):
+        return False  # changed without a text hunk (binary, `-diff`): in any language git speaks
+    for start, count in hunks:
+        touched = range(start, start + count) if count else (start, start + 1)
+        if any(first <= n <= last for n in touched):
+            return False
+    return True
+
+
+def _blocks_since_round1(root: Path, works: set[str] | None = None) -> dict:
+    """Over the code reviews: every `sev=blocker` finding of a report whose round is 2 or
+    more, as `unchanged` (its `at=` lines stood as they are since a head of round 1),
+    `changed`, or unmeasured by reason (`OLD_REASONS`) — in total, `per_round` and
+    `per_work` (the report's work). `works` limits it to reports of those works (ids,
+    `#` stripped). Without the FINDING reader: {"not_read": why}. Reasons, in order: no
+    `at=`; `at=-`; a file without a line; a place in a plan or under `.process-work/`
+    (a code review measures code); no REVIEW line of round 1 in the work's group; the
+    reviewed head unknown (no full-SHA `artifact:` head, and not exactly one head on the
+    journal's lines of that round; an `artifact:` head that is no full SHA never falls back);
+    a head not in this repository; the place not at the reviewed head; git failed or ran
+    past 30 s. A report that cannot be read counts once as `unreadable-report` (its
+    blockers are unknown) when no `works` filter is given."""
+    import check_review as _review
+    reports = _review_reports(root, "code")
+    if isinstance(reports, str):
+        return {"not_read": reports}
+    rounds, plans, d = _review_rounds(root), _plans(root), _Diffs(root)
+
+    def cell() -> dict:
+        return {"unchanged": 0, "changed": 0, "unmeasured": {}}
+
+    total, per_round, per_work = cell(), {}, {}
+
+    def heads_of(group: set[str], rnd: int) -> set[str]:
+        return set().union(*(e["heads"].get(rnd, set()) for w, e in rounds.items()
+                             if w.lstrip("#") in group and not w.endswith("-plan")))
+
+    def judge(rep: Report, group: set[str], f: dict) -> str:
+        at = f.get("at")
+        if at is None:
+            return "no-at"
+        if at == "-":
+            return "no-place"
+        m = _PLACE.match(at)
+        if not m or not m.group("first"):
+            return "no-line"
+        path = unquote(m.group("path"))
+        first = int(m.group("first"))
+        last = int(m.group("last") or first)
+        if path.startswith(".process-work/") or _review.record_kind(path) in _review.PLAN_KINDS + ("plan-archive",):
+            return "not-code"
+        h1s = heads_of(group, 1)
+        if not h1s:
+            return "no-round1"
+        if rep.head == "":
+            return "no-head"  # the report names its head, and it is no commit: never another one's
+        here = heads_of(group, rep.round)
+        hr = rep.head or (next(iter(here)) if len(here) == 1 else None)
+        if hr is None:
+            return "no-head"
+        if d.has(hr) is None or any(d.has(h) is None for h in h1s):
+            return "git-failed"
+        h1s = {h for h in h1s if d.has(h)}
+        if not d.has(hr) or not h1s:
+            return "missing-commit"
+        size = d.lines(hr, path)
+        if size is None:
+            return "git-failed"
+        if size == "absent" or last > size:
+            return "outside"
+        verdicts = [_unchanged_against(d, h1, hr, path, first, last) for h1 in sorted(h1s)]
+        if any(v is True for v in verdicts):
+            return "unchanged"
+        if any(v is False for v in verdicts):
+            return "changed"
+        return "git-failed"
+
+    for rep in reports:
+        if rep.unreadable:  # its blockers are unknown: counted as a report, never dropped — in the
+            # unfiltered count only; a window cannot tell whose it is (refute, round 1)
+            if works is None:
+                total["unmeasured"]["unreadable-report"] = total["unmeasured"].get("unreadable-report", 0) + 1
+            continue
+        if rep.round is None or rep.round < 2:
+            continue
+        keys = [w.lstrip("#") for w in rep.works]
+        if works is not None and not set(keys) & works:
+            continue
+        group = set().union(*(_work_group(w, plans) for w in keys))
+        for f in rep.findings:
+            if f["sev"] != "blocker":
+                continue
+            verdict = judge(rep, group, f)
+            for c in (total, per_round.setdefault(rep.round, cell()), per_work.setdefault(keys[0], cell())):
+                if verdict in ("unchanged", "changed"):
+                    c[verdict] += 1
+                else:
+                    c["unmeasured"][verdict] = c["unmeasured"].get(verdict, 0) + 1
+    return {**total, "per_round": per_round, "per_work": per_work}
+
+
+def _old_text(c: dict) -> str:
+    """`unchanged/measured (share)`, never a share without a measurement."""
+    measured = c["unchanged"] + c["changed"]
+    share = f" ({round(100 * c['unchanged'] / measured)} %)" if measured else ""
+    return f"{c['unchanged']}/{measured}{share}" if measured else "—"
+
+
+def _old_line(c: dict) -> str:
+    """One line of the #311 measure: the share, then what was not measured, by reason."""
+    if "not_read" in c:
+        return f"not read ({c['not_read']})"
+    gaps = ", ".join(f"{k} {c['unmeasured'][k]}" for k in OLD_REASONS if k in c["unmeasured"])
+    return f"{_old_text(c)} unchanged since round 1" + (f"; not measured: {gaps}" if gaps else "")
 
 
 def _skips_by_kind(root: Path, ids: dict[object, set[str]]) -> dict[str, int]:
@@ -810,6 +1093,8 @@ def baseline_numbers(root: Path, lo: datetime, hi: datetime, *, items: list[dict
                                            for r, planned in zip(rnd, reviewed_plan) if not planned]),
         **_round_findings(root, ids),
         "skips_by_kind": _skips_by_kind(root, ids),
+        # #311: blocks of round >= 2 on lines round 1 saw, over the window's works
+        "blocks_on_unchanged": _blocks_since_round1(root, _window_works([it["issue"] for it in merged], plans)),
         "findings_per_work": None if isinstance(found, str) else med([by_work.get(str(it["issue"]), 0)
                                                                      for it in merged]),
         "lead_hours": med([it["lead_s"]["value"] / 3600 if it["lead_s"]["value"] else None for it in merged]),
@@ -862,6 +1147,7 @@ def baseline(root: Path | None = None, windows: list[tuple[datetime, datetime]] 
                   + f"; unrounded reports {pairs['unrounded']}")
         print(f"  skips by kind {x}: "
               + (", ".join(f"{k} {n}" for k, n in g["skips_by_kind"].items()) or "none"))
+        print(f"  old-code blocks {x}: {_old_line(g['blocks_on_unchanged'])}")
     n = min(g["works"] for g in got)
     lvl = _level(n, True, False, _N_THRESHOLD)
     print(f"  {confidence(n, proxy=True)} · {action(lvl, 'a check that removed review work shows fewer fix rounds and tokens per work at the same or fewer escaped works', thin='keep recording; judge a change after ~20 merged works per window')}")
@@ -978,6 +1264,14 @@ def rounds(root: Path | None = None) -> int:
             for k, n in cell.items():
                 by_reviewer[k] = by_reviewer.get(k, 0) + n
         print(f"  blockers by reviewer: {_kind_text(by_reviewer)}")
+    # #311: blocking findings of round >= 2 on lines unchanged since round 1 (`at=`)
+    old = _blocks_since_round1(root)
+    print(f"  old-code blocks (rounds >= 2): {_old_line(old)}")
+    if "not_read" not in old:
+        for rnd, c in sorted(old["per_round"].items()):
+            print(f"    round {rnd}: {_old_line(c)}")
+        for work, c in sorted(old["per_work"].items()):
+            print(f"    {work}: {_old_line(c)}")
     n = len(rnds)
     lvl = _level(n, True, False, _N_THRESHOLD)
     print(f"  {confidence(n, proxy=True)} · {action(lvl, 'compare rounds to pass within one tier over time; where fix-origin blockers dominate, re-check the fixed class (verification-independence.md, What each round judges)', thin='record origin= on blocker findings; judge after ~20 work items')}")

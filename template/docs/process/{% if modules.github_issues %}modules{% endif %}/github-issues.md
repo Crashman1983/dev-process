@@ -156,7 +156,7 @@ campaign-issue: #50               (required when campaign: is set and published)
 ## Prompt      — the verbatim prompt the reviewer/auditor ran with
 ## Result      — verdict and summary
 ## Findings
-FINDING sev=major action=fix issue=- gate=possible class=mechanical rule=placeholder-scan placeholder scan missed the intro
+FINDING sev=major action=fix issue=- gate=possible class=mechanical rule=placeholder-scan at=docs/intro.md:12 placeholder scan missed the intro
 FINDING sev=minor action=follow-up issue=#61 gate=judgement story refs resolve by filename
 ~~~
 
@@ -164,7 +164,7 @@ FINDING sev=minor action=follow-up issue=#61 gate=judgement story refs resolve b
 issue=<ref|-> gate=<judgement|possible|name> [origin=<draft|fix|late>]
 [kind=<knowledge-gap|requirement|implementation|test-gap|process|environment>]
 [by=<reviewer family>] [class=<mechanical|testable|judgment>] [rule=<check>]
-<title>`
+[at=<path>:<line>|<path>:<first>-<last>|<path>|->] <title>`
 — `fix` was resolved within the reviewed change, `accept` is a conscious
 acceptance (reason in prose), `follow-up` becomes tracked work and **must**
 carry an issue ref.
@@ -177,6 +177,15 @@ A mechanical or testable finding names the check in `rule=` (one token, e.g.
 `rule=mutation-of-changed-lines`). `process_kpis.py findings` counts both, so
 a class that keeps coming back is seen before a reader finds it a third time.
 On minors and nits `class` stays optional.
+
+`at` is **required on every blocker and major** too and says where the defect
+is at the reviewed head: `<path>:<line>`, `<path>:<first>-<last>`, the file
+`<path>`, or `-` when there is no single place (something missing, a design
+question). Lines count from 1; a space in a path is written `%20`. An invalid
+place followed by another field is a malformed line; with no field after it,
+the token begins an older report's title. `process_kpis.py rounds` (telemetry
+module) reads it to tell a block on code round 1 already saw from one on new
+code (#311). On minors and nits `at` stays optional.
 
 `origin` is optional and says where the defect came from: `draft` — in the
 change as first reviewed; `fix` — introduced by a fix round; `late` — in the
@@ -205,7 +214,7 @@ The field is optional; omitting it is not a lie, it is an un-asked question. Fen
 and are ignored, as everywhere — **fence the Prompt section** when it quotes
 the grammar or header-like lines (`issue:`, `campaign:`), or the gate lints
 the quotes as claims. A title may contain `=` (`USER_ID=1 hardcoded` is fine);
-only leading `sev=`/`action=`/`issue=`/`gate=`/`origin=`/`kind=`/`by=`/`class=`/`rule=` tokens are parsed as fields.
+only leading `sev=`/`action=`/`issue=`/`gate=`/`origin=`/`kind=`/`by=`/`class=`/`rule=`/`at=` tokens are parsed as fields.
 `by=` names the reviewer family that raised the finding, as one lower-case
 word (`claude`, `codex`, …); anything else after `by=` reads as the title.
 It matters where one pass carries several reviewers' findings — a Claude gate
@@ -227,11 +236,13 @@ network, never a gate. Write the printed refs back into the report and commit.
 nor a named `publish-waived:` reason fails — an unpublished review is
 invisible review. A `follow-up` finding without an issue fails — a follow-up
 nobody tracks will be forgotten. Reports sharing a `campaign:` must agree on the `campaign-issue:`
-parent. A blocker or major finding the branch adds without `class=` fails: a
-finding counts as added when the same report at the fork point (the
-merge-base with the integration ref) does not hold it, compared without its
-`issue=` field — publishing makes no old finding new — and a report absent
-there is new as a whole. Reports already on the integration branch stay valid.
+parent. A blocker or major finding the branch adds without `class=` or `at=`
+fails, naming what is missing: a finding counts as added when the same report
+at the fork point (the merge-base with the integration ref) does not hold it,
+compared without its `issue=`, `class=`, `rule=` and `at=` fields where the
+old line has none (or the same) — publishing, classifying or placing makes no
+old finding new, while a second finding with an old one's title but another
+place is new — and a report absent there is new as a whole. Reports already on the integration branch stay valid.
 An unreadable or unborn HEAD, or a fork point git cannot read or cannot pick
 (a criss-cross merge), fails too; on the integration branch itself, or in a
 repository without an integration ref, nothing is new and the gate notes it.

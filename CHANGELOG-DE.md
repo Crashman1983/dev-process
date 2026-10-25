@@ -9,7 +9,7 @@ ein Eintrag ohne Plan oder Issue hat keine Details-Zeile. In wenigen Sätzen je 
 English version: [CHANGELOG.md](CHANGELOG.md). Die Releases vor v2.28.2:
 [docs/changelog-archive-DE.md](docs/changelog-archive-DE.md).
 
-## v2.77.3 — Ein Pass stützt sich nur auf Belege, die ins Repository gelangen · 2026-10-24
+## v2.78.1 — Ein Pass stützt sich nur auf Belege, die ins Repository gelangen · 2026-10-24
 
 **Warum.** `attest` las ROOT-CAUSE- und Skip-Zeilen aus jedem Journal-Shard im Arbeitsbaum, auch aus uncommitteten, während sein Commit nur den heutigen Shard und explizite `--with`-Pfade trug. Ein Beleg im uncommitteten Shard eines anderen Tages konnte so einen committeten Pass autorisieren, ohne je im Repository zu landen. Daneben akzeptierte `plan-structure` eine `## Transitions`-Tabelle, deren Trennzeile weniger Spalten nannte als der Kopf.
 
@@ -29,7 +29,25 @@ English version: [CHANGELOG.md](CHANGELOG.md). Die Releases vor v2.28.2:
 
 **Geänderte Abschnitte.** `verification-independence.md` (Bind the verdict to the reviewed range)
 
-Details: [Plan](docs/analysis/2026-10-24-v2.77.3.md) #308
+Details: [Plan](docs/analysis/2026-10-24-v2.78.1.md) #308
+
+## v2.78.0 — Ein Befund nennt seinen Ort; Blocks auf altem Code werden gezählt · 2026-10-24
+
+**Warum.** Das Claude-Code-Team fand per git blame: 59 % des wiederholt markierten Codes lag schon seit Runde 1 vor (#311). Dieselbe Zahl wollten wir für unsere Review-Runden und konnten sie nicht erheben: In Kennis 571 Review-Berichten nannten nur 24 % der FINDING-Zeilen überhaupt eine Stelle `Datei:Zeile`, frei im Titel, und von 37 Blockern ab Runde 2 waren zwei messbar.
+
+**Was sich ändert.**
+- Eine FINDING-Zeile hat ein Ortsfeld, `at=<path>:<line>`, `<path>:<first>-<last>`, `<path>` oder `-` (kein einzelner Ort). Das Bericht-Gate des Moduls github-issues verlangt es bei jedem Blocker und Major, den ein Branch hinzufügt, wie `class=`; Befunde, die am Gabelpunkt standen, bleiben gültig, und wer einen alten Befund klassifiziert oder verortet, macht ihn nicht neu. Das Review-Bundle und das Codex-Ergebnisschema fragen danach; ein Codex-Lauf von vor dem Update wird mit `at=-` übergeben.
+- `process_kpis.py rounds` und `baseline` zeigen Blocks auf altem Code (#311): die `sev=blocker`-Befunde von Code-Reviews ab Runde 2, deren Zeilen so stehen wie an einem Stand von Runde 1, als Anteil an den gemessenen, je Runde und je Arbeit, und was nicht messbar war, nach Grund. Verglichen wird der Inhalt der Bäume; ein Rebase zwischen den Runden ändert nichts, solange der Stand von Runde 1 existiert.
+
+**Wirkung.** Ab dem ersten Review nach dem Update zeigt das Cockpit, wie viele späte Blocks auf Code liegen, den Runde 1 schon gesehen hat — das Maß für #310 (feste Befund-Kennungen, als Nächstes) und für jede Änderung an den Review-Runden.
+
+**Update.**
+1. Neue Blocker- und Major-Befunde eines Branches tragen `at=`; projekteigene Review-Prompts (Briefs für andere Reviewer) nehmen es in ihre FINDING-Vorgabe auf.
+2. Berichte auf main bleiben gültig.
+
+**Geänderte Abschnitte.** `verification-independence.md` (The review bundle — the portable interface to any reviewer), Modul `github-issues` (Review and audit visibility), Modul `telemetry` (The KPI cockpit), Befehl `/review`
+
+Details: [Plan](docs/analysis/2026-10-24-v2.78.md) #311
 
 ## v2.77.2 — Ein pytest-Parameter mit Klammern behält die ganze ID · 2026-10-23
 
