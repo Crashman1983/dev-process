@@ -10,7 +10,7 @@ A few plain sentences per release: [NEWS.md](NEWS.md). Deutsche Fassung:
 [CHANGELOG-DE.md](CHANGELOG-DE.md). Releases before v2.28.2:
 [docs/changelog-archive.md](docs/changelog-archive.md).
 
-## v2.78.1 — A pass rests only on evidence that reaches the repository · 2026-10-24
+## v2.78.1 — A pass rests only on evidence that reaches the repository · 2026-10-25
 
 **Why.** `attest` read ROOT-CAUSE and skip lines from every journal shard in the worktree, also uncommitted ones, while its commit carried only today's shard and explicit `--with` paths. Evidence in another day's uncommitted shard could authorize a committed pass without ever landing in the repository. Separately, `plan-structure` accepted a `## Transitions` table whose delimiter row named fewer cells than its header.
 

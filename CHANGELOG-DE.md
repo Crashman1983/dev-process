@@ -9,7 +9,7 @@ ein Eintrag ohne Plan oder Issue hat keine Details-Zeile. In wenigen Sätzen je 
 English version: [CHANGELOG.md](CHANGELOG.md). Die Releases vor v2.28.2:
 [docs/changelog-archive-DE.md](docs/changelog-archive-DE.md).
 
-## v2.78.1 — Ein Pass stützt sich nur auf Belege, die ins Repository gelangen · 2026-10-24
+## v2.78.1 — Ein Pass stützt sich nur auf Belege, die ins Repository gelangen · 2026-10-25
 
 **Warum.** `attest` las ROOT-CAUSE- und Skip-Zeilen aus jedem Journal-Shard im Arbeitsbaum, auch aus uncommitteten, während sein Commit nur den heutigen Shard und explizite `--with`-Pfade trug. Ein Beleg im uncommitteten Shard eines anderen Tages konnte so einen committeten Pass autorisieren, ohne je im Repository zu landen. Daneben akzeptierte `plan-structure` eine `## Transitions`-Tabelle, deren Trennzeile weniger Spalten nannte als der Kopf.
 
