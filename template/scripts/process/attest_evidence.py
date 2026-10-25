@@ -17,10 +17,12 @@ Two steps, one owner:
   only as the review gate counts it: records appended after the plan's last
   line ride the attestation (`check_review.records_only`) and count when the
   plan rides `--with`; anything else must be at head. One exception (v2.77):
-  the blocked code rounds a branch adds and its journal's ROOT-CAUSE and skip
-  lines are read in the worktree, as the round counter reads them, less what
-  the fork point already holds (`_branch_records`); a journal skip lifts only
-  the per-round duties (`JOURNAL_SKIPS`).
+  the blocked code rounds a branch adds are read in the worktree, as the
+  round counter reads them, less what the fork point already holds; its
+  journal ROOT-CAUSE and skip lines are read by the same evidence readers
+  from one snapshot — head plus the files the attestation commits — less the
+  fork (`_branch_records`); a journal skip lifts only the per-round duties
+  (`JOURNAL_SKIPS`).
 - `decide()` is a pure decision table over what was gathered.
 
 Grammar and rules stay with their owners: `check_review` (REFUTE and skip
@@ -42,10 +44,13 @@ from __future__ import annotations
 import ast
 import fnmatch
 import json
+import os
 import re
+import stat
 import subprocess
 import sys
-from dataclasses import dataclass, field
+import tempfile
+from dataclasses import dataclass, field, replace
 from typing import NamedTuple
 from pathlib import Path
 
@@ -58,9 +63,12 @@ from check_review import (  # noqa: E402  (sibling import; the guard above keeps
     REFUTE_LINE,
     REPLAN_LINE,
     JOURNAL_DIR,
+    PLANS_ACTIVE,
     REVIEW_REPORTS,
     ROOT_CAUSE_LINE,
     SKIP_LINE,
+    SPEC_PLAN,
+    SPECS_DIR,
     GitReadError,
     _plan_work_ids,
     _unfenced,
@@ -69,8 +77,8 @@ from check_review import (  # noqa: E402  (sibling import; the guard above keeps
     merge_base,
     plan_stem,
     readable,
+    record_files,
     record_kind,
-    record_texts,
     records_only,
     root_cause_parts,
     work_key,
@@ -164,6 +172,8 @@ class Evidence:
     blocked_rounds: int | None = 0
     replan_open: tuple = ()  # follow-up blocked rounds without a REPLAN line in the plan
     class_test_open: tuple = ()  # "<round> (<why>)" per blocked round without a class test
+    # evidence in the worktree that neither head nor this attestation carries (#308)
+    evidence_problems: tuple = ()
     # required_records rows in force at the base (gather reads them; the template's by default)
     records: tuple = tuple(DEFAULTS["required_records"])
     report_refute: bool = False  # a REFUTE line of the work in this attest's review report
@@ -178,6 +188,12 @@ class Evidence:
     has_reports: bool = False
     claims: dict = field(default_factory=dict)  # AC id -> [line bodies]
     test_status: dict = field(default_factory=dict)  # (file, name) -> None (ok) | why not
+    # for the refusal readers after `gather` (`evidence_problems`, I5): the plan's text at
+    # head, the ids its evidence binds, and the journal evidence keys read at the fork and in E
+    plan_text: str = ""
+    plan_ids: frozenset = frozenset()
+    skip_ids: frozenset = frozenset()
+    journal_keys: frozenset = frozenset()
 
 
 # --- git -------------------------------------------------------------------------
@@ -301,9 +317,24 @@ def _binds(claimed: str, ids: set) -> bool:
     return "/" not in claimed and claimed in ids
 
 
+def _skip_kind(m) -> str:
+    """A skip line's kind as the evidence rows name it (`codex-review` is `cross-model`)."""
+    return "cross-model" if m.group("kind") == "codex-review" else m.group("kind")
+
+
+def _bound_skips(line: str, ids: set) -> frozenset:
+    """The skip kinds this one line names for the work `ids`."""
+    return frozenset(_skip_kind(m) for m in SKIP_LINE.finditer(line)
+                     if _binds(m.group("work"), ids))
+
+
+def _bound_root_cause(line: str, ids: set) -> bool:
+    """Whether this one line names a ROOT-CAUSE of the work `ids`."""
+    return any(_binds(m.group("work"), ids) for m in ROOT_CAUSE_LINE.finditer(line))
+
+
 def _skips(texts: list[str], ids: set) -> frozenset:
-    return frozenset("cross-model" if m.group("kind") == "codex-review" else m.group("kind")
-                     for t in texts for m in SKIP_LINE.finditer(t) if _binds(m.group("work"), ids))
+    return frozenset().union(*(_bound_skips(t, ids) for t in texts))
 
 
 def _refuted(texts: list[str], ids: set) -> bool:
@@ -311,7 +342,7 @@ def _refuted(texts: list[str], ids: set) -> bool:
 
 
 def _root_caused(texts: list[str], ids: set) -> bool:
-    return any(_binds(m.group("work"), ids) for t in texts for m in ROOT_CAUSE_LINE.finditer(t))
+    return any(_bound_root_cause(t, ids) for t in texts)
 
 
 def _fix_streak(root: Path, base: str | None, head: str | None) -> int | None:
@@ -322,11 +353,14 @@ def _fix_streak(root: Path, base: str | None, head: str | None) -> int | None:
 
 
 # --- what the branch adds: blocked code rounds and journal records (v2.77) ---------
-# A record line is the branch's when its content is absent from every record file at the
-# fork point — compared by content, wherever the line went: `compact_journal` folding a
-# shard into `archive/` makes no old line new, a rebase keeps a line the branch's, and a
-# merge of main moves the fork along (plan review rounds 3–4). An earlier work of the same
-# issue, already on main, lends this one neither its blocks nor its skips and causes.
+# A blocked round is the branch's when its line's content is absent from every record file
+# at the fork point — compared by content, wherever the line went: `compact_journal` folding
+# a shard into `archive/` makes no old line new, a rebase keeps a line the branch's, and a
+# merge of main moves the fork along (plan review rounds 3–4). Journal evidence is read by
+# the evidence readers on both sides of that fork, from the snapshot the attestation writes
+# (head plus today's shard/--with), never by a second content normalization. An earlier work
+# of the same issue, already on main, lends this one neither its blocks nor its skips and
+# causes.
 
 # the skips a branch's journal may carry: the per-round duties (`replan`, `class-test`) whose
 # ROOT-CAUSE lines the journal holds too; `ac-trace`, `cross-model`, `refute` and every other
@@ -359,69 +393,560 @@ def _fork(root: Path, head: str) -> str | None:
     return "" if contained else None
 
 
-def _journal_dir_at(root: Path, fork: str, journal_dir: Path | None) -> list[str] | None:
-    """The texts of the attested `--journal-dir`'s files at the fork point, where it lies in
-    the repository apart from the journal `record_texts` reads there anyway; None when git
-    cannot read them."""
-    if journal_dir is None:
-        return []
+def _lexical_rel(root: Path, p: Path) -> tuple[str | None, str]:
+    """(repo-relative posix path, why) of `p`, from the strings alone: no lstat, no
+    resolve — `root` is the resolved root the caller holds."""
+    p = Path(os.path.normpath(p if Path(p).is_absolute() else root / p))
     try:
-        rel = journal_dir.resolve().relative_to(root.resolve()).as_posix()
+        rel = p.relative_to(root).as_posix()
     except ValueError:
-        return []  # outside the repository: nothing of it at the fork point
-    if rel == JOURNAL_DIR or rel.startswith(JOURNAL_DIR + "/"):
-        return []
-    r = _git(root, "ls-tree", "-r", "-z", "--name-only", fork, "--", rel)
-    if r.returncode != 0:
-        return None
-    out = []
-    for name in (n for n in r.stdout.split("\0") if n.endswith(".md")):
-        text = _show(root, fork, name)
-        if text is None:
-            return None
-        out.append(text)
-    return out
+        return None, f"{p} is outside this repository — refused"
+    if rel in ("", ".") or rel.startswith("../"):
+        return None, f"{p} is outside this repository — refused"
+    return rel, ""
 
 
-def _at_fork(root: Path, fork: str, journal_dir: Path | None = None) -> tuple[set[str], set[str]] | None:
-    """The contents of every line of every record file at the fork point (the journal with
-    its archive, the attested `--journal-dir`, the plans), each read as the worktree side it
-    is compared with: (as the round counter reads blocks — a journal less its fences, a plan
-    as rendered, `attest._texts` —, as the journal records are read — `readable`). A line
-    quoted in a fence on main is no line of the fork: it hides no real line of the branch.
-    None when git cannot read them."""
-    texts = record_texts(root, RECORD_KINDS, ref=fork)
-    extra = _journal_dir_at(root, fork, journal_dir) if texts is not None else None
-    if texts is None or extra is None:
+def _link_problem(root: Path, rel: str) -> str:
+    """Why `rel` is refused by an lstat walk of its components (a symlink as the path or a
+    parent, a parent that is no directory), or "". A missing component ends the walk:
+    nothing below it can be a link."""
+    parts = rel.split("/")
+    cur = os.fspath(root)
+    for i, part in enumerate(parts):
+        cur = os.path.join(cur, part)
+        try:
+            st = os.lstat(cur)
+        except FileNotFoundError:
+            return ""
+        except OSError as exc:
+            return f"{rel} cannot be checked ({exc}) — refused"
+        if stat.S_ISLNK(st.st_mode):
+            if i == len(parts) - 1:
+                return f"{rel} is a symlink — refused, not followed"
+            return f"{rel} lies under the symlink {'/'.join(parts[:i + 1])} — refused, not followed"
+        if i < len(parts) - 1 and not stat.S_ISDIR(st.st_mode):
+            return f"{'/'.join(parts[:i + 1])} is no directory — {rel} refused"
+    return ""
+
+
+def _repo_rel(root: Path, p: Path) -> tuple[str | None, str]:
+    """(lexical repo-relative path, why) for one path the attestation may write: the
+    strings first (`_lexical_rel`), then every component with lstat (`_link_problem`), so
+    a symlink (the path or any parent) is refused by name before anything follows it."""
+    root = Path(os.path.realpath(root))
+    rel, why = _lexical_rel(root, p)
+    if rel is None:
+        return None, why
+    why = _link_problem(root, rel)
+    return (None, why) if why else (rel, "")
+
+
+def _jrel(root: Path, journal_dir: Path | None) -> str:
+    """The attested `--journal-dir` as a repository path, from the strings alone (I12: an
+    object reader asks no lstat); "" when it lies outside the repository."""
+    if journal_dir is None:
+        return ""
+    rel, _why = _lexical_rel(root, journal_dir)
+    return rel or ""
+
+
+def _at_fork(root: Path, fork: str, journal_dir: Path | None = None, *, jrel: str | None = None
+             ) -> tuple[set[str], list[str]] | None:
+    """(the contents of every line at the fork point as the round counter reads blocks, the
+    journal texts there for the evidence readers). The blocks are read as `attest._texts`
+    reads them — a journal less its fences, a plan as rendered; a line quoted in a fence on
+    main is no line of the fork: it hides no real line of the branch. None when git cannot
+    read them (`_records_at`, I12). `jrel`: the `--journal-dir` as the snapshot placed it."""
+    texts = _records_at(root, fork, RECORD_KINDS, _jrel(root, journal_dir) if jrel is None else jrel)
+    if texts is None:
         return None
-    journal = [text for rel, text in texts if record_kind(rel) == "journal"] + extra
-    plans = [text for rel, text in texts if record_kind(rel) != "journal"]
+    journal = [text for rel, text in texts if record_kind(rel) in ("journal", None)]
+    plans = [text for rel, text in texts if record_kind(rel) not in ("journal", None)]
 
     def contents(views: list[str]) -> set[str]:
         return {_content(ln) for text in views for ln in text.splitlines() if ln.strip()}
-    return (contents([_unfenced(t) for t in journal] + [readable(t) for t in plans]),
-            contents([readable(t) for t in journal + plans]))
+    return (contents([_unfenced(t) for t in journal] + [readable(t) for t in plans]), journal)
+
+
+# `dir_fd` and `O_NOFOLLOW` as the platform has them, fixed at import: a later patch of
+# `os.open` (a test) must not switch the walk (R-6: Windows has neither)
+_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
+_DIR_FD = bool(_NOFOLLOW) and os.open in os.supports_dir_fd
+
+
+def _open_in_repo(root: str, rel: str, flags: int, mode: int = 0o644) -> int:
+    """A descriptor of `rel` below `root` that follows no symlink. With `dir_fd` and
+    `O_NOFOLLOW` each directory is opened from the one above it, the file from the last
+    one; elsewhere (R-6) the joined path, the caller's identity check standing in.
+    OSError when a component is a link, missing or no directory."""
+    parts = rel.split("/")
+    if not _DIR_FD:
+        return os.open(os.path.join(root, *parts), flags | _NOFOLLOW | getattr(os, "O_BINARY", 0), mode)
+    directory = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+    dfd = os.open(root, directory)
+    try:
+        for part in parts[:-1]:
+            nfd = os.open(part, directory | _NOFOLLOW, dir_fd=dfd)
+            os.close(dfd)
+            dfd = nfd
+        return os.open(parts[-1], flags | _NOFOLLOW, mode, dir_fd=dfd)
+    finally:
+        os.close(dfd)
+
+
+def _create_in_repo(root: str, rel: str, flags: int, mode: int = 0o644) -> int:
+    """A descriptor of a new file `rel` below `root` (W2, design §8): the missing
+    directories made from the one above (`mkdir(dir_fd=)`), each opened without
+    following a link, the file by `O_CREAT|O_EXCL` — an existing name is never opened
+    or overwritten (FileExistsError). Elsewhere (R-6) the joined path."""
+    parts = rel.split("/")
+    create = flags | os.O_CREAT | os.O_EXCL | _NOFOLLOW | getattr(os, "O_BINARY", 0)
+    if not _DIR_FD:
+        os.makedirs(os.path.join(root, *parts[:-1]), exist_ok=True)
+        return os.open(os.path.join(root, *parts), create, mode)
+    directory = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+    dfd = os.open(root, directory)
+    try:
+        for part in parts[:-1]:
+            try:
+                os.mkdir(part, dir_fd=dfd)
+            except FileExistsError:
+                pass
+            nfd = os.open(part, directory | _NOFOLLOW, dir_fd=dfd)
+            os.close(dfd)
+            dfd = nfd
+        return os.open(parts[-1], create, mode, dir_fd=dfd)
+    finally:
+        os.close(dfd)
+
+
+def append_checked(root: Path, rel: str, ident: tuple[int, int] | None, data: bytes,
+                   separate: bytes = b"") -> str:
+    """Append `data` to `rel` through a checked descriptor (W2, design §8, for
+    `red_evidence`): opened without following a link and without `O_TRUNC`, its identity
+    the one the path check saw at the start (`ident`; None: the file did not exist then and
+    is made by `O_CREAT|O_EXCL`), `separate` first when the file is not empty, then the
+    path's `lstat` equal to the descriptor's `fstat`. "" when appended, else why not."""
+    root_s = os.path.realpath(root)
+    try:
+        fd = (_open_in_repo(root_s, rel, os.O_WRONLY | os.O_APPEND) if ident is not None
+              else _create_in_repo(root_s, rel, os.O_WRONLY | os.O_APPEND))
+    except OSError as exc:
+        return f"{rel} cannot be opened without following a link ({exc}) — nothing appended"
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode) or (ident is not None and (st.st_dev, st.st_ino) != ident):
+            return f"{rel} is another file than the one checked at the start — nothing appended"
+        view = memoryview((separate if st.st_size else b"") + data)
+        while view:
+            view = view[os.write(fd, view):]
+        try:
+            now = os.lstat(os.path.join(root_s, *rel.split("/")))
+        except OSError:
+            now = None
+        if now is None or (now.st_dev, now.st_ino) != (st.st_dev, st.st_ino):
+            return f"{rel} was replaced while it was appended to — the file at the path is untouched"
+        return ""
+    finally:
+        os.close(fd)
+
+
+def _read_fd(fd: int) -> bytes:
+    chunks = []
+    while chunk := os.read(fd, 1 << 16):
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+def _read_at_start(fd: int) -> bytes:
+    """Every byte of the file behind `fd` from offset 0, through that descriptor (W2 step
+    2): `os.pread`, looked up at the call; where it is missing (Windows), `lseek` + `read`."""
+    pread = getattr(os, "pread", None)
+    if pread is None:
+        os.lseek(fd, 0, os.SEEK_SET)
+        return _read_fd(fd)
+    chunks, offset = [], 0
+    while chunk := pread(fd, 1 << 16, offset):
+        chunks.append(chunk)
+        offset += len(chunk)
+    return b"".join(chunks)
+
+
+def _repo_file(root: Path, p: Path, *, may_be_missing: bool
+               ) -> tuple[str, bytes | None, tuple[int, int] | None] | tuple[None, str, None]:
+    """(repo-relative path, bytes, (st_dev, st_ino)) of one path the attestation may
+    write, or (None, why, None). Checked before any read (I4, I10): every component by
+    lstat — a symlink, a path below one or no regular file is refused by name, never
+    followed — then the file opened without following a link (`_open_in_repo`) and its
+    fstat matched against that lstat; the bytes come from that descriptor. A journal
+    shard not yet written is (rel, None, None): attest creates it after the check."""
+    root = Path(os.path.realpath(root))
+    rel, why = _lexical_rel(root, p)
+    if rel is None:
+        return None, why, None
+    why = _link_problem(root, rel)
+    if why:
+        return None, why, None
+    try:
+        before = os.lstat(os.path.join(root, *rel.split("/")))
+    except FileNotFoundError:
+        return (rel, None, None) if may_be_missing else (None, f"{rel} is no file in this repository", None)
+    except OSError as exc:
+        return None, f"{rel} cannot be checked ({exc}) — refused", None
+    if not stat.S_ISREG(before.st_mode):
+        return None, f"{rel} is not a regular file — refused", None
+    try:
+        fd = _open_in_repo(os.fspath(root), rel, os.O_RDONLY)
+    except OSError as exc:
+        return None, f"{rel} cannot be opened without following a link ({exc}) — refused", None
+    try:
+        now = os.fstat(fd)
+        if not stat.S_ISREG(now.st_mode) or (now.st_dev, now.st_ino) != (before.st_dev, before.st_ino):
+            return None, f"{rel} changed while it was checked (another file at the path) — refused", None
+        return rel, _read_fd(fd), (now.st_dev, now.st_ino)
+    except OSError as exc:
+        return None, f"{rel} cannot be read ({exc}) — refused", None
+    finally:
+        os.close(fd)
+
+
+def attestation_files(root: Path, target: Path, with_files: list[Path],
+                      journal_dir: Path | None = None
+                      ) -> tuple[list[tuple[str, bytes | None]], list[str]]:
+    """The one file set this attestation fixes: today's journal shard plus every `--with`
+    record, as (repo-relative path, bytes). `attest.py` commits exactly these paths and
+    the evidence check reads exactly these bytes — neither derives the set itself.
+    None bytes: the journal target does not exist yet (attest writes it). Every path is
+    checked by `_repo_file` before it is read; a refusal names it and is returned, never
+    swallowed. Only the journal target contributes journal evidence; a report or plan
+    rides the commit but is no shard. A path is carried once: named twice with the same
+    bytes it is one entry, with different bytes it is refused (#308 R5)."""
+    reads, problems, _jrel = _attestation_reads(root, target, with_files, journal_dir)
+    return [(rel, data) for rel, data, _ident in reads], problems
+
+
+def _attestation_reads(root: Path, target: Path, with_files: list[Path],
+                       journal_dir: Path | None
+                       ) -> tuple[list[tuple[str, bytes | None, tuple[int, int] | None]], list[str], str]:
+    """`attestation_files` with each file's (st_dev, st_ino), and `jrel`: the attested
+    `--journal-dir` as a repository path ("" for none, or a refused one)."""
+    root = Path(os.path.realpath(root))
+    files: list[tuple[str, bytes | None, tuple[int, int] | None]] = []
+    problems: list[str] = []
+    jrel = ""
+    if journal_dir is not None:
+        jrel, why = _repo_rel(root, journal_dir)
+        if jrel is None:
+            problems.append(why)  # the override itself is checked before any shard below it
+            jrel = ""
+    for p, may_be_missing in [(target, True), *((p, False) for p in with_files)]:
+        rel, got, ident = _repo_file(root, p, may_be_missing=may_be_missing)
+        if rel is None:
+            problems.append(got)
+            continue
+        if may_be_missing and record_kind(rel) != "journal" and not (
+                jrel and (rel == jrel or rel.startswith(jrel + "/"))):
+            problems.append(f"{rel} is no journal shard — the attestation writes only its journal")
+            continue
+        seen = {r: d for r, d, _i in files}
+        if rel in seen:
+            if seen[rel] != got:
+                problems.append(f"{rel} is named twice and read with different bytes — refused")
+            continue
+        files.append((rel, got, ident))
+    return files, problems, jrel
+
+
+# --- the snapshot (#308 round 6, design §4) ----------------------------------------
+
+@dataclass(frozen=True)
+class SnapFile:
+    """One file of the snapshot: the bytes read through the checked descriptor and what
+    the write phase compares against."""
+    rel: str
+    data: bytes | None  # None: today's shard, not yet written
+    ident: tuple[int, int] | None  # (st_dev, st_ino) of the descriptor the bytes came from
+    mode: str = "100644"  # 100755 only where `old` holds the path so (I4)
+    index: str | None = None  # the index entry's oid at the snapshot; None: no entry
+    blob: str | None = None  # the oid of `data`
+
+
+@dataclass(frozen=True)
+class Snapshot:
+    """What one attestation fixes before it decides (design §4): `old` (HEAD at the
+    snapshot), the files it carries, `E` (head plus them: the evidence) and `T0` (`old`
+    plus them: the round counter), and the record sets of both trees, read once (§9)."""
+    old: str | None
+    head: str | None
+    files: tuple[SnapFile, ...]
+    jrel: str = ""
+    E: str | None = None
+    T0: str | None = None
+    records_E: list[tuple[str, str]] | None = None
+    records_T0: list[tuple[str, str]] | None = None
+    problems: tuple[str, ...] = ()
+
+    @property
+    def carried(self) -> list[tuple[str, bytes | None]]:
+        return [(f.rel, f.data) for f in self.files]
+
+
+def _rev(root: Path, rev: str) -> str | None:
+    r = _git(root, "rev-parse", "--verify", "-q", rev)
+    return r.stdout.strip() if r.returncode == 0 and r.stdout.strip() else None
+
+
+def _entries(out: str) -> dict[str, tuple[str, str]]:
+    """path -> (mode, oid) of `ls-tree -z` (`<mode> <type> <oid>\\t<path>`) or `ls-files
+    -s -z` (`<mode> <oid> <stage>\\t<path>`) output; a path in conflict maps to ("", "")."""
+    out_map: dict[str, tuple[str, str]] = {}
+    for raw in out.split("\0"):
+        if not raw:
+            continue
+        meta, _tab, path = raw.partition("\t")
+        fields = meta.split()
+        if len(fields) != 3:
+            continue
+        mode, oid = fields[0], fields[2] if fields[1] in ("blob", "tree", "commit") else fields[1]
+        conflict = fields[1] not in ("blob", "tree", "commit") and fields[2] != "0"
+        out_map[path] = ("", "") if conflict or path in out_map else (mode, oid)
+    return out_map
+
+
+def _hash_blob(root: Path, data: bytes) -> str | None:
+    r = subprocess.run(["git", "-C", str(root), "hash-object", "-w", "--stdin"], input=data,
+                       capture_output=True, env=git_environment(), check=False)
+    return r.stdout.decode().strip() if r.returncode == 0 else None
+
+
+def _tree_with(root: Path, base: str | None, files: list[SnapFile]) -> str | None:
+    """The tree of `base` (none: empty) with `files`' blobs laid over it, built in a
+    private index in a temporary directory outside the worktree (I13′). None on failure."""
+    with tempfile.TemporaryDirectory(prefix="attest-index-") as tmp:
+        env = {**git_environment(), "GIT_INDEX_FILE": os.path.join(tmp, "index")}
+
+        def run(*args: str, data: bytes | None = None) -> subprocess.CompletedProcess:
+            return subprocess.run(["git", "-C", str(root), *args], input=data, capture_output=True,
+                                  env=env, check=False)
+        if run("read-tree", *([base] if base else ["--empty"])).returncode:
+            return None
+        info = b"".join(f"{f.mode} {f.blob}\t{f.rel}\0".encode("utf-8", "surrogateescape")
+                        for f in files if f.blob)
+        if info and run("update-index", "--add", "--replace", "-z", "--index-info", data=info).returncode:
+            return None
+        tree = run("write-tree")
+        return tree.stdout.decode().strip() if tree.returncode == 0 else None
+
+
+def snapshot(root: Path, target: Path, with_files: list[Path], journal_dir: Path | None,
+             head: str | None = None) -> Snapshot:
+    """The one snapshot of this attestation (design §4, D-6): `old` first, then the file
+    set (`_attestation_reads`: the path check, the bytes through the checked descriptor),
+    each file's mode from `old` (I4) and its index entry — one that is neither `old`'s
+    nor the snapshot's blob is foreign work and refused (I6) — then the blobs and the two
+    trees `E` (head + files) and `T0` (`old` + files), and their record sets, each read
+    once (`_records_at`, §9). `head` defaults to `old`. No path-level read of the
+    worktree below the root: the bytes come from the descriptors alone."""
+    root = Path(os.path.realpath(root))
+    old = _rev(root, "HEAD^{commit}")
+    head = head or old
+    reads, problems, jrel = _attestation_reads(root, target, with_files, journal_dir)
+    rels = [rel for rel, _data, _ident in reads]
+    at_old = _entries(_git(root, "--literal-pathspecs", "ls-tree", "-z", old, "--", *rels).stdout) \
+        if old and rels else {}
+    index = _entries(_git(root, "--literal-pathspecs", "ls-files", "-s", "-z", "--", *rels).stdout) \
+        if rels else {}
+    files: list[SnapFile] = []
+    for rel, data, ident in reads:
+        blob = _hash_blob(root, data) if data is not None else None
+        if data is not None and blob is None:
+            problems.append(f"{rel}: git hash-object failed — refused")
+            continue
+        was = at_old.get(rel)
+        staged = index.get(rel)
+        if staged == ("", ""):
+            problems.append(f"{rel} is in conflict in the index — resolve it first")
+        elif data is None and was is not None:
+            problems.append(f"{rel} is at HEAD but missing in the worktree — restore it, or "
+                            f"commit its removal first")
+        elif staged is None and was is not None:
+            problems.append(f"{rel} is staged as removed — foreign work in the index; commit or "
+                            f"unstage it first")
+        elif staged is not None and staged[1] not in {blob, was[1] if was else None}:
+            problems.append(f"{rel} is staged with other bytes than the worktree and HEAD hold "
+                            f"({staged[1][:12]}) — foreign work in the index; commit or unstage it "
+                            f"first")
+        files.append(SnapFile(rel, data, ident, "100755" if was and was[0] == "100755" else "100644",
+                              staged[1] if staged else None, blob))
+    t0 = _tree_with(root, old, files)
+    e = t0 if head == old else (_tree_with(root, head, files) if head else None)
+    if t0 is None or e is None:
+        problems.append("git cannot build the snapshot's trees — refused")
+    records_t0 = _records_at(root, t0, RECORD_KINDS, jrel) if t0 else None
+    records_e = records_t0 if e == t0 else (_records_at(root, e, RECORD_KINDS, jrel) if e else None)
+    return Snapshot(old, head, tuple(files), jrel, e, t0, records_e, records_t0, tuple(problems))
+
+
+_LINK_MODES = ("120000", "160000")
+
+
+def _homes(kinds: tuple[str, ...], jrel: str) -> list[str]:
+    homes = []
+    if "journal" in kinds:
+        homes += [JOURNAL_DIR, *([jrel] if jrel and jrel != JOURNAL_DIR else [])]
+    if "plan" in kinds or "plan-archive" in kinds:
+        homes.append(PLANS_ACTIVE)
+    if "spec-plan" in kinds:
+        homes.append(SPECS_DIR)
+    return homes
+
+
+def _records_at(root: Path, ref: str, kinds: tuple[str, ...], jrel: str
+                ) -> list[tuple[str, str]] | None:
+    """(path, text) of every record of `kinds` in the tree `ref` — the journal's shards
+    include the `.md` files under `jrel`, the attested `--journal-dir` — or None when the
+    tree cannot be read or holds no answer (I12, design §9): every prefix of a home or of
+    `jrel` is absent or a directory (040000); a symlink or gitlink that is a record, or on
+    the way to one, is unknown — never its link text, never an empty home (§10,
+    I12-Minor); any other such entry is no record and passed over. Git objects only: no
+    path of the worktree is touched, the pathspecs are literal, a blob is read by oid."""
+    homes = _homes(kinds, jrel)
+    if not homes:
+        return []
+    # one non-recursive listing per depth: given `a` and `a/b` at once, ls-tree shows only
+    # `a/b`, and an absent `a` would look like an absent `a/b`
+    top: dict[str, tuple[str, str]] = {}
+    for depth in range(1, max(len(h.split("/")) for h in homes) + 1):
+        level = list(dict.fromkeys("/".join(h.split("/")[:depth]) for h in homes
+                                   if len(h.split("/")) >= depth))
+        r = _git(root, "--literal-pathspecs", "ls-tree", "-z", ref, "--", *level)
+        if r.returncode:
+            return None
+        top |= _entries(r.stdout)
+    present = []
+    for h in homes:
+        parts = h.split("/")
+        for i in range(len(parts)):
+            entry = top.get("/".join(parts[:i + 1]))
+            if entry is None:
+                break  # absent: nothing below it
+            if entry[0] != "040000":
+                return None
+        else:
+            present.append(h)
+    if not present:
+        return []
+    r = _git(root, "--literal-pathspecs", "ls-tree", "-r", "-z", ref, "--", *present)
+    if r.returncode:
+        return None
+
+    def journal(rel: str) -> bool:
+        return "journal" in kinds and bool(jrel) and rel.startswith(jrel + "/")
+
+    def record(rel: str) -> bool:
+        return record_kind(rel) in kinds or (journal(rel) and rel.endswith(".md"))
+    out: list[tuple[str, str]] = []
+    for rel, (mode, oid) in _entries(r.stdout).items():
+        if mode in _LINK_MODES:
+            if record(rel) or journal(rel) or record(rel + "/x.md") or record(f"{rel}/{SPEC_PLAN}"):
+                return None
+            continue
+        if not record(rel):
+            continue
+        blob = subprocess.run(["git", "-C", str(root), "cat-file", "blob", oid], capture_output=True,
+                              env=git_environment(), check=False)
+        if blob.returncode:
+            return None
+        out.append((rel, blob.stdout.decode("utf-8", errors="replace")))
+    return out
+
+
+def _evidence_keys(line: str, plan_ids: set, skip_ids: set) -> frozenset:
+    """The evidence one rendered line carries, as the readers count it: this work's
+    ROOT-CAUSE lines and the skip kinds the journal may lift (`JOURNAL_SKIPS`). The keys
+    are the readers' own parsed fields, so a quotation the reader rejects carries none."""
+    keys = set()
+    for m in ROOT_CAUSE_LINE.finditer(line):
+        if _binds(m.group("work"), plan_ids):
+            keys.add(("root-cause", m.group("work"), int(m.group("round")),
+                      m.group("text").strip()))
+    for m in SKIP_LINE.finditer(line):
+        if _binds(m.group("work"), skip_ids):
+            kind = _skip_kind(m)
+            if kind in JOURNAL_SKIPS:
+                keys.add(("skip", kind, m.group("work"), m.group("reason").strip()))
+    return frozenset(keys)
+
+
+def _journal_keys(texts: list[str], plan_ids: set, skip_ids: set) -> set:
+    """Every evidence key the readers find in `texts`, as rendered (fences and comments
+    removed)."""
+    return {key for text in texts for line in readable(text).splitlines()
+            for key in _evidence_keys(line, plan_ids, skip_ids)}
+
+
+def _journal_records(root: Path, head: str, journal_dir: Path | None,
+                     snapshot: Snapshot | None) -> list[str] | None:
+    """The journal texts the evidence reads: those of `E` (head plus the files this
+    attestation carries, `Snapshot.records_E`), or at `head` without a snapshot. The
+    shards of a `--journal-dir` carry no record kind of their own. None: unknown."""
+    if snapshot is not None:
+        records = snapshot.records_E
+    else:
+        records = _records_at(root, head, ("journal",), _jrel(root, journal_dir))
+    if records is None:
+        return None
+    return [text for rel, text in records if record_kind(rel) in ("journal", None)]
 
 
 def _branch_records(root: Path, head: str, blocks: list[tuple[int, str]] | None,
-                    journal_dir: Path | None) -> tuple[list[int] | None, str]:
-    """(the blocked code rounds the branch adds, its journal records). The rounds are those
-    of `blocks` — `attest.block_lines`, the set the round counter counts (journal and plans
-    in the worktree, uncommitted lines too) — less the lines present at the fork point;
-    None: unknown. The journal records are the worktree journal's lines absent there, as
-    rendered (a fenced or commented line is no record)."""
+                    journal_dir: Path | None, plan_ids: set, skip_ids: set,
+                    snapshot: Snapshot | None = None
+                    ) -> tuple[list[int] | None, str, frozenset]:
+    """(the blocked code rounds the branch adds, its journal records, the evidence keys the
+    readers saw at the fork and in `E`). The rounds are those of `blocks` —
+    `attest.block_lines` at T0, the set the round counter counts — less the lines present
+    at the fork point. None: unknown. The journal records are read by the same evidence
+    readers from `E` (`_journal_records`) less what the fork already holds; what that run
+    yields counts, nothing else. Objects only (I12): a worktree evidence line outside `E`
+    is refused by `_foreign_shard_problems`, never counted here."""
     fork = _fork(root, head)
     if fork == "":
-        return [], ""
-    old = _at_fork(root, fork, journal_dir) if fork is not None else None
-    if old is None or blocks is None:
-        return None, ""
-    old_blocks, old_records = old
+        return [], "", frozenset()
+    old = (_at_fork(root, fork, journal_dir, jrel=snapshot.jrel if snapshot is not None else None)
+           if fork is not None else None)
+    journal = _journal_records(root, head, journal_dir, snapshot)
+    if old is None or blocks is None or journal is None:
+        return None, "", frozenset()
+    old_blocks, old_journal = old
     rounds = sorted({r for r, line in blocks if _content(line) not in old_blocks})
-    journal = record_texts(root, ("journal",), journal_dir=journal_dir) or []
-    new = [ln for _rel, text in journal for ln in readable(text).splitlines()
-           if ln.strip() and _content(ln) not in old_records]
-    return rounds, "\n".join(new)
+    fork_keys = _journal_keys(old_journal, plan_ids, skip_ids)
+    rendered = [line for text in journal for line in readable(text).splitlines()]
+    seen = {key for line in rendered for key in _evidence_keys(line, plan_ids, skip_ids)}
+    new_keys = seen - fork_keys
+    new = [line for line in rendered if _evidence_keys(line, plan_ids, skip_ids) & new_keys]
+    return rounds, "\n".join(new), frozenset(fork_keys | seen)
+
+
+def _foreign_shard_problems(root: Path, head: str, journal_dir: Path | None, plan_ids: set,
+                            skip_ids: set, known: frozenset) -> list[str]:
+    """AC-2, a refusal reader (I5): a worktree journal line whose evidence (this work's
+    ROOT-CAUSE, the skip kinds the journal counts) is neither at the fork nor in `E`
+    (`known`) is refused by name — committed or carried, it would count; only in the
+    worktree it must not count in silence. The set read is that of `_root_caused`/`_skips`,
+    so foreign work and kinds read only from the plan stay invisible."""
+    problems: list[str] = []
+    for rel, f in record_files(root, ("journal",), journal_dir=journal_dir):
+        safe_rel, data, _ident = _repo_file(root, f, may_be_missing=False)
+        if safe_rel is None:
+            problems.append(f"{rel}: {data}")
+            continue
+        for n, line in enumerate(readable(data.decode("utf-8", errors="replace")).splitlines(), 1):
+            if _evidence_keys(line, plan_ids, skip_ids) - known:
+                problems.append(
+                    f"{rel}:{n}: `{line.strip()}` is neither at {head[:12]} nor carried by this "
+                    f"attestation — commit it, or pass {rel} with --with")
+    return problems
 
 
 def _tracked(root: Path, head: str) -> list[str] | None:
@@ -531,12 +1056,17 @@ def _class_tests_open(root: Path, head: str, rounds: list[int], texts: list[str]
     return tuple(out)
 
 
-def _plan(root: Path, ids: set, head: str) -> tuple[str, str, str, str]:
+def _plan(root: Path, ids: set, head: str, snapshot: Snapshot | None = None
+          ) -> tuple[str, str, str, str]:
     """(state, path, text at head, records appended since) of the work's plan —
-    active or Spec Kit, else archived (a late lens attests after `--archive`).
-    `differs`: the worktree or index holds more than records appended after the
-    plan's last line (E1, the gate's `records_only`)."""
-    records = record_texts(root, PLAN_KINDS + ("plan-archive",), ref=head)
+    active or Spec Kit, else archived (a late lens attests after the plan's own archive
+    commit). Objects only (I12): the plans at head (`_records_at`), the appended records
+    from `E` — only when the plan rides this attestation (#308 R5), at its path or its
+    archive path. `differs`: the riding plan holds more than records appended after the
+    plan's last line (E1, the gate's `records_only`); the worktree and the index are read
+    for that refusal apart (`_plan_differs`), never for what counts. Without a snapshot
+    (`dispatch`'s preview) nothing rides."""
+    records = _records_at(root, head, PLAN_KINDS + ("plan-archive",), "")
     if records is None:
         return "unreadable", "", "", ""
     found = [(rel, text) for rel, text in records
@@ -551,25 +1081,37 @@ def _plan(root: Path, ids: set, head: str) -> tuple[str, str, str, str]:
     if len(found) > 1:
         return "ambiguous", ", ".join(rel for rel, _t in found), "", ""
     rel, text = found[0]
-    added = ""
-    # a plan the first lens of this round already archived (`--archive`) is read where it went
+    if snapshot is None:
+        return "ok", rel, text, ""
+    # a plan archived by its own commit after a first lens rides at its archive path
     moved = _archived_as(root, rel)
-    for now in (_worktree_text(root, rel) or _worktree_text(root, moved),
-                _index_text(root, rel) or _index_text(root, moved)):
-        if now == text:
-            continue
-        if not records_only(text, now):
-            return "differs", rel, text, ""
-        added += now[len(text):] if now.startswith(text) else "\n".join(
-            ln for ln in now.splitlines() if ln not in set(text.splitlines()))
+    riding_rels = {f.rel for f in snapshot.files if f.data is not None}
+    at_e = dict(snapshot.records_E or [])
+    now = next((at_e[p] for p in (rel, moved) if p in riding_rels and p in at_e), None)
+    if now is None or now == text:
+        return "ok", rel, text, ""
+    if not records_only(text, now):
+        return "differs", rel, text, ""
+    added = now[len(text):] if now.startswith(text) else "\n".join(
+        ln for ln in now.splitlines() if ln not in set(text.splitlines()))
     return "ok", rel, text, added
 
 
 def _archived_as(root: Path, rel: str) -> str:
-    """Where `attest.py --archive` moves this plan — attest owns the target."""
-    from attest import _archive_target  # late: attest imports this module
-    target = _archive_target(root, root / rel)
-    return target.relative_to(root).as_posix() if target.is_relative_to(root) else ""
+    """Where the archive takes this plan (`attest.archive_rel`, lexical) — a plan archived
+    by its own commit after a first lens is read where it went."""
+    from attest import archive_rel  # late: attest imports this module
+    return archive_rel(rel)
+
+
+def _plan_differs(root: Path, rel: str, text: str) -> bool:
+    """A refusal reader (I5): does the worktree or the index hold more of the plan `rel`
+    than records appended after its text at head (E1)? Read for the refusal only — what
+    counts comes from `E` (`_plan`)."""
+    moved = _archived_as(root, rel)
+    return any(now and now != text and not records_only(text, now)
+               for now in (_worktree_text(root, rel) or _worktree_text(root, moved),
+                           _index_text(root, rel) or _index_text(root, moved)))
 
 
 def _worktree_text(root: Path, rel: str) -> str:
@@ -1030,28 +1572,40 @@ def test_status(root: Path, head: str, file: str, name: str, rules: dict) -> str
 def gather(root: Path, *, work: str, ids: set[str], tier: int, verdict: str, independence: str,
            base: str | None, head: str | None, plan_review: bool, model: str,
            reports: list[Path], blocks: list[tuple[int, str]] | None = None,
-           journal_dir: Path | None = None) -> Evidence:
+           journal_dir: Path | None = None, snapshot: Snapshot | None = None) -> Evidence:
     """`ids`: the work's ids (`attest.round_ids` of the plain work, no `-plan`); `blocks`:
     the work's blocking REVIEW lines the round counter counts (`attest.block_lines`) —
-    None on a code pass is unknown, and refused where a row asks for it."""
+    None on a code pass is unknown, and refused where a row asks for it. `snapshot`: what
+    this attestation fixes (`snapshot()`); the evidence is read at `E` — head plus today's
+    shard and `--with` — and nowhere else, git objects only (I1, I12). Without one (a
+    preview), at head, and no report is read. `reports` is kept for those callers; with a
+    snapshot the reports are its files under the reports' home, chosen by path alone."""
     if not (_resolvable(root, head) and _resolvable(root, base)):
         return Evidence(work, tier, verdict, plan_review, model, head_ok=False)
     policy, problem = review_policy(root, base)
     if problem:
         return Evidence(work, tier, verdict, plan_review, model, policy_problem=problem)
     keys = {work_key(i) for i in ids}
-    state, rel, plan_text, appended = _plan(root, keys, head)
+    state, rel, plan_text, appended = _plan(root, keys, head, snapshot)
     # the plan's own lines, as the bundle's refute check reads them; records appended
     # after it count only when they ride this attestation (`--with` the plan)
-    riding = {p.resolve() for p in reports}
-    own = readable(plan_text) + ("\n" + readable(appended) if rel and (root / rel).resolve() in riding else "")
+    own = readable(plan_text) + ("\n" + readable(appended) if appended else "")
     plan_ids = _plan_work_ids(plan_stem(rel), _unfenced(plan_text), include_dedated=True) if rel else set()
     plan_read = readable(plan_text)
     spec = (_show(root, head, rel.rsplit("/", 1)[0] + "/spec.md") or "") \
         if record_kind(rel) == "spec-plan" else ""
-    # the review reports among the round's records: a plan riding `--with` is no report
-    reports = [p for p in reports if p.resolve().is_relative_to((root / REVIEW_REPORTS).resolve())]
-    report_texts = [readable(p.read_text(encoding="utf-8", errors="replace")) for p in reports]
+    # the review reports among the round's records, chosen lexically on the snapshot's paths
+    # (a plan riding `--with` is no report; no resolve, the sweep of design §9), their text
+    # the checked bytes — E's blobs — so the evidence and the commit read one snapshot (R4)
+    if snapshot is not None:
+        report_files = [f for f in snapshot.files
+                        if f.rel.startswith(REVIEW_REPORTS + "/") and f.data is not None]
+        reports = [root / f.rel for f in report_files]
+        report_texts = [readable(f.data.decode("utf-8", errors="replace")) for f in report_files]
+    else:
+        reports = [p for p in reports
+                   if (_lexical_rel(root, p)[0] or "").startswith(REVIEW_REPORTS + "/")]
+        report_texts = ["" for _p in reports]
     issues = {int(i) for i in plan_ids | set(ids) if i.isascii() and i.isdigit()}
     session, reported = _planned_model(root, issues) if plan_review else (None, False)
     source = "report" if session is not None else (UNMEASURED_REPORT if reported else "none")
@@ -1069,7 +1623,8 @@ def gather(root: Path, *, work: str, ids: set[str], tier: int, verdict: str, ind
     skip_ids = {f"{i}-plan" for i in plan_ids} if plan_review else plan_ids
     # a code pass: the blocked code rounds the branch adds, and its journal records (ROOT-CAUSE,
     # skips) beside the plan's; a plan review asks no code round's records (facts None)
-    rounds, journal = (None, "") if plan_review else _branch_records(root, head, blocks, journal_dir)
+    rounds, journal, journal_keys = (None, "", frozenset()) if plan_review else _branch_records(
+        root, head, blocks, journal_dir, plan_ids, skip_ids, snapshot)
     mine = [own, journal]
     # a journal skip lifts only the per-round duties; every other kind counts from the plan
     skips = _skips([own], skip_ids) | (_skips([journal], skip_ids) & JOURNAL_SKIPS)
@@ -1095,7 +1650,9 @@ def gather(root: Path, *, work: str, ids: set[str], tier: int, verdict: str, ind
         plan_struck=struck_criteria(plan_read, readable(spec)),
         plan_foreign=foreign_criteria(plan_read, readable(spec)),
         plan_session=session, plan_session_source=source,
-        has_reports=bool(reports), claims=claims, test_status=status)
+        has_reports=bool(reports), claims=claims, test_status=status,
+        plan_text=plan_text, plan_ids=frozenset(plan_ids), skip_ids=frozenset(skip_ids),
+        journal_keys=journal_keys)
 
 
 # --- the decision table ----------------------------------------------------------
@@ -1228,7 +1785,7 @@ def _owed_records(ev: Evidence) -> list[str]:
 
 
 def _decide_code(ev: Evidence) -> list[str]:
-    out: list[str] = []
+    out: list[str] = list(ev.evidence_problems)
     if ev.tier >= ev.cross_model_from:
         out += _cross_model(ev, f"a pass at tier {ev.tier}")
     out += _owed_records(ev)
@@ -1290,13 +1847,20 @@ def decide(ev: Evidence) -> list[str]:
 def evidence_problems(root: Path, *, work: str, ids: set[str], tier: int, verdict: str,
                       independence: str, base: str | None, head: str | None, plan_review: bool,
                       model: str, reports: list[Path], blocks: list[tuple[int, str]] | None = None,
-                      journal_dir: Path | None = None) -> list[str]:
-    """attest.py's one entry: gather at head, then decide — only for a Tier 2+ pass."""
+                      journal_dir: Path | None = None, snapshot: Snapshot | None = None) -> list[str]:
+    """attest.py's one entry: gather at E (objects only), then the refusal readers (I5) —
+    a plan the worktree or index holds more of (`_plan_differs`), a journal line only in
+    the worktree (`_foreign_shard_problems`) — then decide; only for a Tier 2+ pass."""
     if verdict != "pass" or tier < 2:
         return []
     ev = gather(root, work=work, ids=ids, tier=tier, verdict=verdict, independence=independence,
                 base=base, head=head, plan_review=plan_review, model=model, reports=reports,
-                blocks=blocks, journal_dir=journal_dir)
+                blocks=blocks, journal_dir=journal_dir, snapshot=snapshot)
+    if ev.plan_state == "ok" and ev.plan_rel and _plan_differs(root, ev.plan_rel, ev.plan_text):
+        ev = replace(ev, plan_state="differs")
+    if ev.head_ok and not ev.policy_problem and not plan_review and ev.blocked_rounds is not None:
+        ev = replace(ev, evidence_problems=tuple(_foreign_shard_problems(
+            root, head, journal_dir, ev.plan_ids, ev.skip_ids, ev.journal_keys)))
     for n in sorted(ev.plan_foreign):
         # never dropped in silence (#287): the reader sees which id was left out and why
         print(f"attest: note — AC-{n} not required: {ev.plan_rel} cites it as another issue's "

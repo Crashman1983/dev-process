@@ -284,7 +284,8 @@ def _sections(lines: list[str], table_rows: set[int]) -> list[tuple[int, str, li
 def transitions_findings(rel: str, text: str, *, need_tests: bool) -> list[str]:
     """The findings on a plan's Transitions sections (unfenced text, the file's own line
     numbers), read as rendered — an HTML comment hides a heading and a table alike: a
-    pipe table below each with a `Test` column (`Tests`, `Test(s)`) and two others, at
+    pipe table below each whose header and delimiter row name the same number of cells,
+    with a `Test` column (`Tests`, `Test(s)`) and two others, at
     least one row, every cell of every row filled; once tests are due, each test cell
     `<path>::<test>` or `struck — <reason>`. The section's first table is its transitions
     table: without a `Test` column it is refused, whatever follows — a `Test` column in a
@@ -319,6 +320,12 @@ def transitions_findings(rel: str, text: str, *, need_tests: bool) -> list[str]:
                 read.append((later, names, cols))
         for table, header, tests in read:
             hline = table[0][0]
+            delimiter = _cells(table[1][1])
+            if len(delimiter) != len(header):
+                out.append(f"{rel}:{hline}: the transitions table has {len(header)} header cells and "
+                           f"{len(delimiter)} delimiter cells — a GFM table's delimiter row names one "
+                           f"cell per column")
+                continue
             if len(header) < 3:
                 out.append(f"{rel}:{hline}: the transitions table needs a `Test` column and at least two "
                            f"others (state × event → result)")

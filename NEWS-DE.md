@@ -7,6 +7,10 @@ technischen Einzelheiten stehen im [CHANGELOG](CHANGELOG-DE.md).
 
 English version: [NEWS.md](NEWS.md).
 
+## v2.78.1 — Ein Pass stützt sich nicht auf Belege, die nie ins Repository gelangen
+
+Ein Review-Pass konnte durch einen Eintrag in einer uncommitteten Journal-Datei eines anderen Tages autorisiert werden; der Beleg blieb damit außerhalb des Repositorys. So ein Eintrag zählt jetzt nur, wenn er committet ist oder mit der Attestierung reist; sonst wird der Pass verweigert und nennt die Datei. Nur die gezählten Einträge dieser Arbeit können einen Pass blockieren; fremde Arbeit und Arten, die nur aus dem Plan zählen, bleiben unsichtbar. Die Attestierung verschiebt einen fertigen Plan nicht mehr selbst ins Archiv, weil das Verschieben einer Datei Änderungen eines anderen Programms verlieren kann; sie nennt stattdessen, wie man danach mit einem normalen Commit archiviert, so wie `/finish` es schon tut. Eine blockierende Review-Zeile, die nie committet wurde, wird verweigert statt gezählt, eine Datei, die jemand anders gestagt hat, wird nicht mehr überschrieben, und beim Schreiben hält die Attestierung die Index-Sperre von Git selbst, sodass ein paralleles `git add` scheitert, statt Bytes zu verlieren. Ein Symlink, der anstelle eines Records committet ist, wird verweigert. Die Plan-Prüfung lehnt außerdem eine Transitions-Tabelle ab, deren Kopf- und Trennzeile verschiedene Spaltenzahlen haben.
+
 ## v2.78.0 — Ein Review-Befund sagt, wo er liegt
 
 Ein blockierender Review-Befund nennt jetzt seine Stelle im Code. Damit kann das Kennzahl-Cockpit zeigen, wie viele späte Blocks auf Code liegen, den die erste Review-Runde schon gesehen hat — ein Zeichen, dass Runde 1 etwas übersehen hat oder spätere Runden alten Code neu prüfen. Die Zahl beginnt mit dem ersten Review nach dem Update.

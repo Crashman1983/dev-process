@@ -7,6 +7,10 @@ details are in the [CHANGELOG](CHANGELOG.md).
 
 Deutsche Fassung: [NEWS-DE.md](NEWS-DE.md).
 
+## v2.78.1 — A pass cannot rest on evidence that never reaches the repository
+
+A review pass could be authorized by a note in an uncommitted journal file from another day, so the evidence stayed outside the repository. Such a note now counts only when it is committed or travels with the attestation; otherwise the pass is refused and names the file. Only this work's counted notes can block a pass; foreign work and note kinds read from the plan alone stay invisible. The attestation no longer moves a finished plan into the archive, because moving a file can lose another program's edits; it says how to archive with a normal commit afterwards, as `/finish` already does. A blocking review line that was never committed is refused instead of counted, a file someone else staged differently is no longer overwritten, and while it writes the attestation holds git's own index lock, so a parallel `git add` fails instead of losing bytes. A symlink committed in place of a record is refused. The plan check also rejects a Transitions table whose header and separator row have different numbers of columns.
+
 ## v2.78.0 — A review finding says where it is
 
 A blocking review finding now names its place in the code. With that, the KPI cockpit can tell how many late blocks fall on code the first review round had already seen, a sign that round 1 missed something or later rounds re-review old code. The number starts with the first review after the update.

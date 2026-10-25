@@ -36,6 +36,14 @@ def _repo(render, tmp_path):
     return out, base, head
 
 
+def _commit_path(out, path):
+    """Commit one record alone: the round counter reads T0 — HEAD plus what the
+    attestation carries — never a record only in the worktree (#308 D-1/D-2)."""
+    rel = str(path.relative_to(out))
+    _git(out, "add", "--", rel)
+    _git(out, "commit", "-q", "-m", f"docs: record in {rel}", "--", rel)
+
+
 def _load_gate(root):
     spec = importlib.util.spec_from_file_location("check_review", root / "scripts/process/check_review.py")
     mod = importlib.util.module_from_spec(spec)
@@ -348,6 +356,7 @@ def test_the_round_is_counted_from_recorded_blocks_not_claimed(render, tmp_path)
     plan = out / ".process-work/plans/2026-09-10-widget.md"
     plan.write_text(plan.read_text() + "\nROOT-CAUSE work=widget round=1: the cache key ignored the tenant "
                     "— test_widget_per_tenant failed before the fix\n")
+    _commit_path(out, plan)  # the counter reads T0: a cause it counts is committed or carried (#308)
     r = _attest(out, *ab, "--round", "2")
     assert r.returncode == 0 and "note —" not in r.stderr, r.stderr
     assert "verdict=pass round=2" in _journal(out)
@@ -418,6 +427,7 @@ def test_a_root_cause_in_a_spec_kit_plan_counts(render, tmp_path):
     spec.mkdir(parents=True)
     (spec / "plan.md").write_text(f"# Plan\n\ntier: 2\n\n{block}\n\nROOT-CAUSE work=widget round=1: the "
                                   "cache key ignored the tenant — test_widget_per_tenant failed before\n")
+    _commit_path(out, spec / "plan.md")
     r = _attest(out, *ab, "--round", "2", "--dry-run")
     assert r.returncode == 0 and "note —" not in r.stderr, r.stderr
     r = _attest(out, *ab, "--round", "3", "--dry-run")
@@ -440,10 +450,12 @@ def test_a_quoted_or_placeholder_root_cause_is_no_cause(render, tmp_path):
                    "ROOT-CAUSE work=<id> round=1: the cache key — test_x\n",
                    "    " + real):
         plan.write_text(original + "\n" + quoted)
+        _commit_path(out, plan)  # committed: the counter reads T0, a line only in the worktree is none
         # a block: a quoted line is plan content, which a pass would have to commit first (#225 E1)
         r = _attest(out, *ab, "--round", "2", "--verdict", "block", "--dry-run")
         assert r.returncode == 0 and "no root cause" in r.stderr, quoted
     plan.write_text(original + "\n- " + real)
+    _commit_path(out, plan)
     r = _attest(out, *ab, "--round", "2", "--dry-run")
     assert r.returncode == 0 and "no root cause" not in r.stderr, r.stderr
 
@@ -459,6 +471,10 @@ def test_attest_counts_blocks_the_way_the_gate_does(render, tmp_path):
     j = out / ".process-work/journal"
     j.mkdir(parents=True, exist_ok=True)
     (j / "2026-09-10.md").write_text(f"<!-- reviewer notes follow\n{line}\n")
+    # uncommitted, the block is refused by name (D-2); committed, it is counted as the gate does
+    r = _attest(out, *ab, "--round", "2", "--dry-run")
+    assert r.returncode == 1 and "2026-09-10.md" in r.stderr and "neither committed nor carried" in r.stderr
+    _commit_path(out, j / "2026-09-10.md")
     r = _attest(out, *ab, "--round", "2", "--dry-run")
     assert r.returncode == 0 and "no root cause" in r.stderr, r.stderr
 
@@ -507,6 +523,7 @@ def test_several_lenses_blocking_one_round_count_once(render, tmp_path):
         assert _attest(out, *ab, "--verdict", "block", "--reviewer", reviewer).returncode == 0
     plan = out / ".process-work/plans/2026-09-10-widget.md"
     plan.write_text(plan.read_text() + "\nROOT-CAUSE work=widget round=1: x — test_x\n")
+    _commit_path(out, plan)
     r = _attest(out, *ab, "--round", "2")
     assert r.returncode == 0 and "note —" not in r.stderr, r.stderr
 
@@ -725,75 +742,49 @@ def test_a_note_must_not_carry_a_review_line(render, tmp_path):
     assert not list((out / ".process-work/journal").rglob("*.md"))
 
 
-def test_archive_moves_the_plan_with_the_pass_and_commits_once(render, tmp_path):
+def test_the_archive_is_a_commit_of_its_own_after_the_pass(render, tmp_path):
+    """#308 (design §10): attest moves no plan. The pass is one commit, the archive the
+    `git mv` commit after it; the gate reads the moved plan by its content."""
     out, base, head = _repo(render, tmp_path)
-    plan = ".process-work/plans/2026-09-10-widget.md"
+    plan, dest = ".process-work/plans/2026-09-10-widget.md", ".process-work/plans/archive/2026-09-10-widget.md"
 
-    r = _attest(out, "--base", base, "--head", head, "--archive", plan, "--commit")
-
+    r = _attest(out, "--base", base, "--head", head, "--commit")
     assert r.returncode == 0, r.stderr
-    assert not (out / plan).exists()
-    assert (out / ".process-work/plans/archive/2026-09-10-widget.md").is_file()
+    (out / dest).parent.mkdir(parents=True, exist_ok=True)
+    _git(out, "mv", plan, dest)
+    _git(out, "commit", "-q", "-m", "docs: archive the plan")
+
     assert _git(out, "status", "--porcelain").stdout == ""
-    assert _git(out, "log", "-1", "--format=%s").stdout.strip() == \
-        "docs: attest widget round 1 and archive the plan"
+    assert _git(out, "log", "-2", "--format=%s").stdout.splitlines() == [
+        "docs: archive the plan", "docs: attest widget round 1"]
     assert _gate(out).returncode == 0, _gate(out).stdout
 
 
-def test_archive_refuses_a_block(render, tmp_path):
-    """A plan is archived when its work merges, not in a review round."""
+@pytest.mark.parametrize("case", ["block", "missing", "taken", "untracked", "PRODUCT.md", "other plan"])
+def test_archive_refuses_every_variant_before_writing_anything(render, tmp_path, case):
+    """Every former `--archive` precondition (a block, a missing, taken or untracked plan,
+    a file that is no plan, another work's plan) is now one refusal before any read: no
+    line is written, nothing moves, and the way is named."""
     out, base, head = _repo(render, tmp_path)
-    r = subprocess.run([sys.executable, str(out / "scripts/process/attest.py"),
-                        "--work", "widget", "--tier", "2", "--model", "cross",
-                        "--independence", "bundle,non-implementing", "--verdict", "block",
-                        "--base", base, "--head", head,
-                        "--archive", ".process-work/plans/2026-09-10-widget.md", "."],
-                       cwd=out, capture_output=True, text=True)
-
-    assert r.returncode == 1 and "only with verdict=pass" in r.stderr, r.stderr
-    assert not list((out / ".process-work/journal").rglob("*.md"))
-
-
-@pytest.mark.parametrize("case", ["missing", "taken"])
-def test_archive_refuses_before_writing_anything(render, tmp_path, case):
-    """Every precondition before the first write: a late failure left a written line,
-    and the corrected rerun doubled it."""
-    out, base, head = _repo(render, tmp_path)
-    plan = ".process-work/plans/2026-09-10-widget.md"
-    if case == "missing":
-        plan = ".process-work/plans/nope.md"
-    else:
+    plan = {"missing": ".process-work/plans/nope.md", "untracked": ".process-work/plans/2026-09-11-widget.md",
+            "PRODUCT.md": "PRODUCT.md", "other plan": ".process-work/plans/2026-09-10-other.md"}.get(
+                case, ".process-work/plans/2026-09-10-widget.md")
+    if case == "taken":
         (out / ".process-work/plans/archive").mkdir(parents=True, exist_ok=True)
         (out / ".process-work/plans/archive/2026-09-10-widget.md").write_text("# other\n")
+    elif case in ("untracked", "other plan"):
+        (out / plan).write_text("# Plan\n\ntier: 2\n")
+    if case == "other plan":
+        _git(out, "add", "-A")
+        _git(out, "commit", "-q", "-m", "other plan")
+    before = _git(out, "rev-parse", "HEAD").stdout, _git(out, "ls-files", "-s").stdout
 
-    r = _attest(out, "--base", base, "--head", head, "--archive", plan)
+    r = _attest(out, "--base", base, "--head", head, "--archive", plan,
+                *(("--verdict", "block") if case == "block" else ()))
 
-    assert r.returncode == 1 and "REFUSED" in r.stderr, r.stderr
-    assert not list((out / ".process-work/journal").rglob("*.md"))
-
-
-def test_a_spec_kit_plan_is_archived_under_its_feature_name(render, tmp_path):
-    """Every Spec Kit plan is plan.md: named alone, they would collide in the archive."""
-    out, base, head = _repo(render, tmp_path)
-    spec = out / "specs/003-login/plan.md"
-    spec.parent.mkdir(parents=True)
-    spec.write_text("# Plan\n\ntier: 2\n\nAC-1: still 42.\n")
-    _git(out, "add", "-A")
-    _git(out, "commit", "-q", "-m", "spec")
-    head = _git(out, "rev-parse", "HEAD").stdout.strip()
-    (out / ".process-work/reviews").mkdir(parents=True, exist_ok=True)
-    (out / ".process-work/reviews/login.md").write_text("# Review\n\n" + EVIDENCE)
-
-    r = subprocess.run([sys.executable, str(out / "scripts/process/attest.py"),
-                        "--work", "003-login", "--tier", "2", "--model", "cross",
-                        "--independence", "bundle,non-implementing", "--verdict", "pass",
-                        "--base", base, "--head", head, "--archive", "specs/003-login/plan.md",
-                        "--with", ".process-work/reviews/login.md", "."],
-                       cwd=out, capture_output=True, text=True)
-
-    assert r.returncode == 0, r.stderr
-    assert (out / ".process-work/plans/archive/003-login.md").is_file()
-    assert "git commit" in r.stdout  # staged, the commit is named
+    assert r.returncode == 1 and "REFUSED" in r.stderr and f"git mv {plan} " in r.stderr, r.stderr
+    assert not (out / ".process-work/journal").exists() or not list((out / ".process-work/journal").rglob("*.md"))
+    assert (_git(out, "rev-parse", "HEAD").stdout, _git(out, "ls-files", "-s").stdout) == before
 
 
 def test_without_archive_or_commit_nothing_is_staged(render, tmp_path):
@@ -844,27 +835,125 @@ def test_commit_carries_only_the_attestation(render, tmp_path):
     assert _git(out, "diff", "--cached", "--name-only").stdout.strip() == "widget.py"
 
 
-def test_archive_refuses_an_untracked_plan_before_writing(render, tmp_path):
-    """F8: git mv failed after the line was written."""
+# --- #308 fix round 6b: the attest commit runs git commit's hooks (design §11) ---
+def _hook(out, name, body):
+    hook = out / ".git/hooks" / name
+    hook.parent.mkdir(exist_ok=True)
+    hook.write_text("#!/bin/sh\n" + body)
+    hook.chmod(0o755)
+
+
+@pytest.mark.parametrize("name", ["pre-commit", "prepare-commit-msg", "commit-msg"])
+def test_a_refusing_commit_hook_stops_the_attest_commit(render, tmp_path, name):
+    """`commit-tree` runs no hook: every attest commit went past the project's pre-commit
+    (no-commit-to-branch, among others). A hook that refuses leaves HEAD at `old`, the line
+    written and staged (I8), and names the hook."""
     out, base, head = _repo(render, tmp_path)
-    (out / ".process-work/plans/2026-09-11-widget.md").write_text("# Plan\n\ntier: 2\n")
+    _hook(out, name, "echo 'hook says no' >&2\nexit 1\n")
 
-    r = _attest(out, "--base", base, "--head", head,
-                "--archive", ".process-work/plans/2026-09-11-widget.md")
+    r = _attest(out, "--base", base, "--head", head, "--commit")
 
-    assert r.returncode == 1 and "not tracked" in r.stderr, r.stderr
-    assert not list((out / ".process-work/journal").rglob("*.md"))
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert _git(out, "rev-parse", "HEAD").stdout.strip() == head
+    assert name in r.stderr and "hook says no" in r.stderr
+    assert ".process-work/journal/feature/" in _git(out, "diff", "--cached", "--name-only").stdout
 
 
-@pytest.mark.parametrize("target", ["PRODUCT.md", ".process-work/plans/2026-09-10-other.md"])
-def test_archive_takes_only_this_works_plan(render, tmp_path, target):
-    """F9: `--archive PRODUCT.md` moved the product frame; another work's plan went too."""
+def test_the_commit_hooks_see_the_attestation_and_its_message(render, tmp_path):
+    """pre-commit sees the commit's own index (the snapshot's files, no foreign staging),
+    commit-msg gets the message and may edit it, as `git commit -- <paths>` would."""
     out, base, head = _repo(render, tmp_path)
-    (out / ".process-work/plans/2026-09-10-other.md").write_text("# Plan\n\ntier: 3\n")
-    _git(out, "add", "-A")
-    _git(out, "commit", "-q", "-m", "other plan")
+    (out / "widget.py").write_text("def widget():\n    return 43\n")
+    _git(out, "add", "widget.py")
+    seen = tmp_path / "seen.txt"
+    _hook(out, "pre-commit", f"git diff --cached --name-only HEAD > '{seen}'\n")
+    _hook(out, "commit-msg", "grep -q '^docs: attest widget round 1' \"$1\" || exit 1\n"
+                             "printf '\\nRefs: hook\\n' >> \"$1\"\n")
 
-    r = _attest(out, "--base", base, "--head", head, "--archive", target)
+    r = _attest(out, "--base", base, "--head", head, "--commit")
 
-    assert r.returncode == 1 and "REFUSED" in r.stderr, r.stderr
-    assert (out / target).is_file()
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert sorted(seen.read_text().split()) == sorted(
+        _git(out, "show", "--name-only", "--format=", "HEAD").stdout.split())
+    assert "widget.py" not in seen.read_text()
+    assert _git(out, "log", "-1", "--format=%B").stdout.strip().endswith("Refs: hook")
+
+
+def test_a_hook_that_changes_the_commits_index_is_refused(render, tmp_path):
+    """The commit is `T1`, built from the snapshot (I2): a hook that stages more into the
+    commit's index would commit bytes no check saw — refused, HEAD stays `old`."""
+    out, base, head = _repo(render, tmp_path)
+    (out / "widget.py").write_text("def widget():\n    return 43\n")
+    _hook(out, "pre-commit", "git add widget.py\n")
+
+    r = _attest(out, "--base", base, "--head", head, "--commit")
+
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert _git(out, "rev-parse", "HEAD").stdout.strip() == head
+    assert "pre-commit" in r.stderr
+
+
+# --- #308 fix round 6: the archive is no step of attest (design §10) ---
+# RED: red against the product code of 032f2cb (log `.process-work/tmp/red-308-r6.log`)
+RED = pytest.mark.xfail(strict=True, reason="#308 fix round 6: red before the change")
+
+
+@pytest.mark.parametrize("kind", ["active", "spec-kit"])
+def test_archive_is_refused_and_names_the_way(render, tmp_path, kind):
+    """Every archive variant opened a loss window in the worktree; `attest` moves no plan.
+    `--archive` refuses before any read and names the way: attest, then a `git mv` commit."""
+    out, base, head = _repo(render, tmp_path)
+    plan, dest = ".process-work/plans/2026-09-10-widget.md", ".process-work/plans/archive/2026-09-10-widget.md"
+    if kind == "spec-kit":
+        plan, dest = "specs/003-login/plan.md", ".process-work/plans/archive/003-login.md"
+        (out / plan).parent.mkdir(parents=True)
+        (out / plan).write_text("# Plan\n\ntier: 2\n\nAC-1: still 42.\n")
+        _git(out, "add", "-A")
+        _git(out, "commit", "-q", "-m", "spec")
+        head = _git(out, "rev-parse", "HEAD").stdout.strip()
+    before = _git(out, "rev-parse", "HEAD").stdout, _git(out, "ls-files", "-s").stdout
+
+    r = _attest(out, "--base", base, "--head", head, "--archive", plan, "--commit")
+
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert f"git mv {plan} {dest}" in r.stderr, r.stderr
+    assert not (out / ".process-work/journal").exists() or not list((out / ".process-work/journal").rglob("*.md"))
+    assert (_git(out, "rev-parse", "HEAD").stdout, _git(out, "ls-files", "-s").stdout) == before
+    assert (out / plan).is_file() and not (out / dest).exists()
+
+
+def test_blocked_round_at_walks_through_a_pure_archive_commit(render, tmp_path):
+    """A lens built after the plan's own archive commit still sees the round another lens
+    blocked: a commit that only moves plans (`D rel` + `A archive_rel(rel)`, the same blob)
+    is walked through like an attest commit. An archive commit that changes the plan is a
+    fix: the chain stops there."""
+    import argparse
+    import importlib
+    out, base, head = _repo(render, tmp_path)
+    plan, archived = ".process-work/plans/2026-09-10-widget.md", ".process-work/plans/archive/2026-09-10-widget.md"
+    r = _attest(out, "--base", base, "--head", head, "--verdict", "block", "--commit")
+    assert r.returncode == 0, r.stderr
+    (out / archived).parent.mkdir(parents=True, exist_ok=True)
+    _git(out, "mv", plan, archived)
+    _git(out, "commit", "-q", "-m", "docs: archive the plan")
+    tip = _git(out, "rev-parse", "HEAD").stdout.strip()
+    _git(out, "checkout", "-q", "-b", "changed", f"{tip}^")
+    _git(out, "mv", plan, archived)
+    (out / archived).write_text(PLAN + "\n- one more task\n")
+    _git(out, "commit", "-qam", "docs: archive and change the plan")
+    changed = _git(out, "rev-parse", "HEAD").stdout.strip()
+    _git(out, "checkout", "-q", "feature")
+    names = ("attest", "attest_evidence", "check_review", "check_fix_streak", "dispatch", "report",
+             "process_git", "required_records")
+    sys.path.insert(0, str(out / "scripts/process"))
+    try:
+        for name in names:
+            sys.modules.pop(name, None)
+        attest = importlib.import_module("attest")
+        ns = argparse.Namespace(work="widget")
+        assert attest.blocked_round_at(out, ns, tip) == 1
+        assert attest.blocked_round_at(out, ns, changed) is None
+    finally:
+        sys.path.remove(str(out / "scripts/process"))
+        for name in names:
+            sys.modules.pop(name, None)

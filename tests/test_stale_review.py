@@ -1112,6 +1112,23 @@ def test_a_spec_plan_archived_with_records_keeps_its_review(spec_repo):
     assert _late(root, head) == set()
 
 
+@pytest.mark.parametrize("plan, dest", [
+    (".process-work/plans/2026-10-01-widget.md", ".process-work/plans/archive/2026-10-01-widget.md"),
+    (_SPEC, ".process-work/plans/archive/7-widget.md"),
+], ids=["active", "spec-kit"])
+def test_a_plan_archived_by_its_own_commit_after_the_attestation_keeps_its_review(repo, plan, dest):
+    """#308 fix round 6 (§10): attest moves no plan. The records ride the attest commit at
+    the active path, the move is a commit of its own (`git mv`) — still no late content."""
+    root, _head = repo
+    head = _commit(root, plan, _PLAN_TEXT, "plan and work")
+    _commit(root, plan, _PLAN_TEXT + "\nREFUTE work=7-widget round=1: 3 scenarios, no findings\n",
+            "docs: attest 7-widget round 1")
+    (root / dest).parent.mkdir(parents=True, exist_ok=True)
+    _git(root, "mv", plan, dest)
+    _git(root, "commit", "-q", "-m", "docs: archive the plan")
+    assert _late(root, head) == set()
+
+
 def test_a_spec_plan_archived_with_new_content_stays_late(spec_repo):
     root, head = spec_repo
     (root / ".process-work/plans/archive").mkdir(parents=True)
