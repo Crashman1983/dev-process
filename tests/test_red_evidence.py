@@ -185,6 +185,20 @@ def test_sites_read_back_a_junit_test_by_its_file_attribute(render, tmp_path):
     assert _class_test(out) == ("add subtracted", "calc.py:2", [("tests/calc.test.ts", "adds")])
 
 
+def test_sites_read_back_an_each_test_by_its_expanded_name(render, tmp_path):
+    """v2.79 D2 (#328): the JUnit report names an `.each` case by its expanded title; the
+    gate's one reader takes it as declared by the template, so the class test resolves."""
+    out, before = _repo(render, tmp_path)
+    _files(out, {"tests/calc.test.ts": 'it.each([[1, 2, 3]])("adds %i and %i", (a, b, c) => {})\n'})
+    (out / "calc.spec.py").write_text(_junit_runner([
+        ("Calc", "tests/calc.test.ts", "adds 1 and 2", "fail", "pass")]), encoding="utf-8")
+    r = _tool(out, "--work", "7", "--round", "1", "--before", before, "--junit", "report.xml",
+              "--copy", "calc.spec.py", "--cause", "add subtracted", "--sites", "calc.py:2", "--",
+              sys.executable, "calc.spec.py")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert _class_test(out) == ("add subtracted", "calc.py:2", [("tests/calc.test.ts", "adds 1 and 2")])
+
+
 def test_refuses_when_no_test_was_red_before(render, tmp_path):
     out, before = _repo(render, tmp_path)
 

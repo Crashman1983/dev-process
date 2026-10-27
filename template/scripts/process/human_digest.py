@@ -174,7 +174,7 @@ def section_debts(root: Path) -> list[str]:
 
 TEST_FILE = re.compile(
     r"(^|/)(test_[^/]+\.py|[^/]+_test\.(go|py|rb|ts|tsx|js)"
-    r"|[^/]+\.(test|spec)\.(ts|tsx|js|jsx|mjs))$")
+    r"|[^/]+\.(test|spec|vitest)\.(ts|tsx|js|jsx|mjs))$")
 
 
 def _test_counts(root: Path, ref: str) -> tuple[int, int] | None:

@@ -1611,7 +1611,8 @@ def test_a_code_only_fix_round_notes_the_missing_regression_pin(render, tmp_path
 
 
 @pytest.mark.parametrize("test_file", ["tests/test_widget.py", "src/widget.spec.ts",
-                                       "pkg/__tests__/w.js", "conftest.py", "widget_test.go"])
+                                       "pkg/__tests__/w.js", "conftest.py", "widget_test.go",
+                                       "src/widget.vitest.ts"])  # v2.79 #300: vitest's own name
 def test_a_fix_round_with_a_test_carries_no_pin_note(render, tmp_path, test_file):
     out = render(tmp_path, {"project_name": "d", "modules": {}})
     reviewed = _fix_round(out, {"widget.py": "def widget():\n    return 43\n", test_file: "pin\n"})
