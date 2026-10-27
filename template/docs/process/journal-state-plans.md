@@ -72,11 +72,15 @@ the integration branch is history:
   then does not require it and names it. A bare `AC-<id>` is always this
   plan's own criterion — prose cannot tell a citation from an own criterion
   with its origin (#287).
-- Once execution starts (a ticked task) and at the merge push, each criterion
-  names its planned test in the review report's own grammar: `AC-<id>:
-  <path>::<test>` (the test may not exist yet) or `AC-<id>: struck — <reason>`
-  — attest knows no other proof. An archived plan the branch adds is read too:
-  `/finish` archives before the merge push.
+- From the first push, each criterion names its planned test in the review
+  report's own grammar: `AC-<id>: <path>::<test>` (the test may not exist
+  yet) or `AC-<id>: struck — <reason>` — attest knows no other proof. Owed
+  only at the merge, a missing test passed branch push and review and failed
+  at main (#327). An archived plan the branch adds is read too: `/finish`
+  archives before the merge push.
+- A `## Transitions` section (`design-template.md`) carries its table, a test
+  in every test cell from the first push, and an `Invariant: <statement> —
+  owner: <owner> — <test>` line, or `Invariant: none — <reason>`.
 - At the merge push, no task is left `- [ ]` without `struck: <reason>` or
   `moved: #<issue>`.
 - A DECISION that still carries `[assumption]` is a note.

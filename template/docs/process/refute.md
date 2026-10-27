@@ -160,7 +160,9 @@ attack is on the plan's claims and gaps, each answered from the repository:
        reader? Does it rest on an unmeasured premise (a tool's behaviour,
        a size, a share — asserted, not observed)? Is the plan stale
        against the base — a cited line, owner or behaviour changed since
-       it was written?
+       it was written? Does the `Invariant:` line hold for every
+       transition in the table, and is its owner the only writer of the
+       state?
     <gate code only: 8. the BYPASSES and FALSE REFUSALS above, as the test
     cases the plan must name.>
     Report each finding with its failure scenario (what an executor would
