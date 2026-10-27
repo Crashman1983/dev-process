@@ -9,6 +9,33 @@ ein Eintrag ohne Plan oder Issue hat keine Details-Zeile. In wenigen Sätzen je 
 English version: [CHANGELOG.md](CHANGELOG.md). Die Releases vor v2.28.2:
 [docs/changelog-archive-DE.md](docs/changelog-archive-DE.md).
 
+## v2.79.0 — Gates, die im Alltag halten, und die Invariante im Plan · 2026-10-27
+
+**Warum.** Seit v2.78 meldeten die nutzenden Projekte Gates, die im Alltag falsch entschieden. Der Merge-Train nahm einen Branch mit, den der Steward mit `report.py blocked` angehalten hatte (#326). Zwei Branches bestanden Branch-Push und Review und scheiterten erst am Push nach main, weil eine Transitions-Testzelle keinen Pfad nannte (#327). attest kannte weder Testtitel aus `it.each`-Tabellen (#328) noch `*.vitest.*`-Dateien (#300). Interaktive Worker hingen stundenlang an einer Berechtigungsfrage für eine Shell-Form, die die Allowlist nicht zuordnen kann (#323). Das erste Projekt auf einer frischen Installation (spkiam) brachte `finish.py` ohne Remote (#330), attest-Meldungen, die den nächsten Schritt offenließen (#332), und Plan-Runden, die an einer falschen Zahl blockierten (#329). Daneben brauchten drei Arbeiten je etwa sechs Code-Runden und konvergierten erst mit einer ausdrücklichen Invariante im Entwurf (#312).
+
+**Was sich ändert.**
+- Ein Branch, dessen letzter haltender Bericht `blocked` ist, fährt nicht mit, gleich was sein archivierter Plan oder seine REVIEW-Records sagen; der Grund nennt den Bericht. Frei gibt nur ein neuerer `pushed` oder `review-pass` — `idle` aus `dispatch stop`, `planned` und `done` nicht. Der Train liest die Berichte dieses Hosts und die veröffentlichten anderer Hosts (`report.py blocked --sync`); er holt sie best effort.
+- `plan-structure` verlangt Testbelege ab dem ersten Push eines gebundenen Tier-2+-Plans, nicht erst ab einer angehakten Aufgabe oder am Merge-Push: jede `AC-<id>`-Zeile und jede Transitions-Testzelle nennt `<path>::<test>` (die Datei darf noch fehlen) oder `struck — <reason>`.
+- Ein Transitions-Abschnitt trägt eine Invariante-Zeile: `Invariant: <Aussage> — owner: <Owner> — <path>::<test>` oder `Invariant: none — <Grund>`. Das Gate liest sie von rechts, die Aussage darf ` — ` enthalten, der Owner in Backticks stehen. Der Zustandsraum-Schritt des Plan-Reviews fragt, ob sie für jeden Übergang hält.
+- attest liest einen Testtitel nur als erstes Argument einer `it`/`test`-Aufrufkette (`it.only(…)`, `test.skipIf(c)(…)` eingeschlossen) und sucht außerhalb von Strings: eine Tabellenzelle mit `should` darin oder ein String mit `it('x')` deklariert nichts, ein Skip-Wort in einem String ist kein Skip. Ein `it.each`/`test.each`-Titel deklariert die Namen, die seine Vorlage deckt (`%d` und `%i` nur Zahlen, `%s`, `$name`, `${…}` beliebigen Text); `describe.each` deklariert keinen Test. Ob eine Tabellenzeile genau diesen Namen erzeugt, wird nicht geprüft.
+- `*.vitest.*` zählt als Testdatei in den Vorgaben von attest, im Review-Bundle und im Digest.
+- attest verweigert ein `--journal-dir`, das der Shard ist, den es selbst anhängt (`issue-<N>`), nennt den vollen SHA, wenn ein kurzer eindeutig auflöst, und druckt bei einem Code-Review-Block die Runde für ROOT-CAUSE und REPLAN und was der Pass brauchen wird (`AC-<id>`-Zeilen, den Aufruf von `red_evidence.py`). `red_evidence.py` verweigert denselben Shard.
+- Jeder Worker-Prompt der Claude-Policy endet mit einem Block zur Shell-Form: ein einfacher Befehl je Bash-Aufruf, keine Shell-Variablen, Expansionen, Klammergruppen, Subshells oder `eval`, Dateien mit Write/Edit, Lesen mit Read/Grep/Glob. Der Policy-Schlüssel `worker_shell_form` ersetzt ihn (`""` schaltet ihn ab); die Codex-Variante ignoriert ihn. Die Remote-Übergabe nennt `report.py … --sync` statt Umgebungsvariablen.
+- `finish.py` in einem Repository ohne jeden Remote merged lokal: es lässt die Gates laufen wie der Push nach main, rebased auf einen vorgerückten lokalen main, spult vor, löscht den gemergten Branch und schreibt kein Zertifikat. Remote-Tracking-Refs, an denen sich die Gates verankern und die ohne Remote übrig sind, werden mit dem Befehl verweigert, der sie entfernt. Ein Repository mit einem anderen Remote als `origin` bleibt auf dem heutigen Weg.
+- Eine falsche Zahl oder Liste im Plan, nach der die Arbeit handelt (die Anzahl, die ein Test prüft, die Dateien, die eine Aufgabe ändert), ist `minor` mit `action=fix`, nie blockierend, außer sie verdeckt ein unentschiedenes Verhalten; eine Zählung, nach der nichts handelt, bleibt `nit`.
+
+**Wirkung.** Ein angehaltener Branch bleibt angehalten, bis jemand sagt, dass er behoben ist; die Testbelege eines Plans sind vor dem ersten Review vollständig statt am Merge; tabellengetriebene Vitest- und Jest-Tests lassen sich zuordnen; Worker warten nicht mehr auf Rückfragen, die die Allowlist nicht beantworten kann; ein Projekt ohne Remote schließt ohne scheiternden Push ab.
+
+**Update.**
+1. Laufende Tier-2+-Pläne auf einem Branch: ab dem ersten Push nach dem Update braucht jede AC-Zeile und jede Transitions-Testzelle `<path>::<test>` oder `struck — <reason>`, jeder Transitions-Abschnitt eine `Invariant:`-Zeile. Pläne auf main und auf main archivierte Pläne sind nicht betroffen.
+2. Nach einem `blocked`-Bericht (dem eigenen oder dem des Trains nach einem Konflikt oder roten Lauf) gibt `report.py pushed` nach dem Fix oder `review-pass` den Branch frei; ein Push allein gibt ihn nicht mehr frei.
+3. Ein Projekt, das `review_evidence.test_files` in seiner Policy überschreibt, ergänzt `*.vitest.*` selbst.
+4. Ein Projekt, das eigenen Shell-Form-Text an Worker-Prompts hängt, setzt `worker_shell_form` oder lässt die eigene Kopie weg.
+
+**Geänderte Abschnitte.** `commits.md` (Merging), `design-template.md` (Sections), `journal-state-plans.md` (Plans), `refute.md` (Refuting a plan), `review-checklist.md` (Completeness), `tower.md` (Dispatch and the model policy), `train.md` (Boarding — computed, never claimed; The run), `verification-independence.md` (The review bundle — the portable interface to any reviewer), Befehle `/execute`, `/finish`, `/plan`, `/review`
+
+Details: [Plan](docs/analysis/2026-10-27-v2.79.md) #326 #327 #312 #328 #300 #332 #323 #330 #329
+
 ## v2.78.1 — Ein Pass stützt sich nur auf Belege, die ins Repository gelangen · 2026-10-25
 
 **Warum.** `attest` las ROOT-CAUSE- und Skip-Zeilen aus jedem Journal-Shard im Arbeitsbaum, auch aus uncommitteten, während sein Commit nur den heutigen Shard und explizite `--with`-Pfade trug. Ein Beleg im uncommitteten Shard eines anderen Tages konnte so einen committeten Pass autorisieren, ohne je im Repository zu landen. Daneben akzeptierte `plan-structure` eine `## Transitions`-Tabelle, deren Trennzeile weniger Spalten nannte als der Kopf.

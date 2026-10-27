@@ -7,6 +7,10 @@ details are in the [CHANGELOG](CHANGELOG.md).
 
 Deutsche Fassung: [NEWS-DE.md](NEWS-DE.md).
 
+## v2.79.0 — Gates that hold in daily work
+
+A branch the steward holds with a `blocked` report now stays off the merge train until a newer `pushed` or `review-pass` report releases it; stopping a worker session does not. A plan names the test for each acceptance criterion and each state transition from its first push, and a plan with a state table names the invariant that holds across it, with its owner and a test. The review gate recognizes table-driven `it.each` tests and `*.vitest.*` files, and no longer mistakes a word inside a string for a test or a skip. Workers started by dispatch are told to use shell commands the permission allowlist can match, so they stop waiting on prompts. `finish.py` works in a repository without a remote. A wrong count in a plan is a fix, not a block. The fix for co-passengers' code in a merge-train push (#322) comes in its own release.
+
 ## v2.78.1 — A pass cannot rest on evidence that never reaches the repository
 
 A review pass could be authorized by a note in an uncommitted journal file from another day, so the evidence stayed outside the repository. Such a note now counts only when it is committed or travels with the attestation; otherwise the pass is refused and names the file. Only this work's counted notes can block a pass; foreign work and note kinds read from the plan alone stay invisible. The attestation no longer moves a finished plan into the archive, because moving a file can lose another program's edits; it says how to archive with a normal commit afterwards, as `/finish` already does. A blocking review line that was never committed is refused instead of counted, a file someone else staged differently is no longer overwritten, and while it writes the attestation holds git's own index lock, so a parallel `git add` fails instead of losing bytes. A symlink committed in place of a record is refused. The plan check also rejects a Transitions table whose header and separator row have different numbers of columns.

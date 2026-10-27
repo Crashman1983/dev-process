@@ -10,6 +10,33 @@ A few plain sentences per release: [NEWS.md](NEWS.md). Deutsche Fassung:
 [CHANGELOG-DE.md](CHANGELOG-DE.md). Releases before v2.28.2:
 [docs/changelog-archive.md](docs/changelog-archive.md).
 
+## v2.79.0 — Gates that hold in daily work, and the invariant in the plan · 2026-10-27
+
+**Why.** Since v2.78 the consuming projects reported gates that decided wrongly in daily work. The merge train boarded a branch the steward had held with `report.py blocked` (#326). Two branches passed their branch push and review and failed only at the push to main, because a Transitions test cell named no path (#327). attest did not know test titles from `it.each` tables (#328) nor `*.vitest.*` files (#300). Interactive workers stalled for hours on a permission prompt for a shell form the allowlist cannot match (#323). The first project on a fresh install (spkiam) added `finish.py` without a remote (#330), attest messages that left the next step to guesswork (#332), and plan rounds that blocked on a wrong count (#329). Separately, three works needed about six code rounds each and converged only once their design named an explicit invariant (#312).
+
+**What changes.**
+- A branch whose latest holding report is `blocked` does not board the train, whatever its archived plan or REVIEW records say; the reason names the report. Only a newer `pushed` or `review-pass` releases it — `idle` from `dispatch stop`, `planned` and `done` do not. The train reads the reports of this host and the published ones of other hosts (`report.py blocked --sync`); it fetches them best effort.
+- `plan-structure` owes test evidence from the first push of a bound Tier 2+ plan, not only once a task is ticked or at the merge push: every `AC-<id>` line and every Transitions test cell names `<path>::<test>` (the file may not exist yet) or `struck — <reason>`.
+- A Transitions section carries an invariant line: `Invariant: <statement> — owner: <owner> — <path>::<test>`, or `Invariant: none — <reason>`. The gate reads it from the right, so the statement may contain ` — `; the owner may stand in backticks. The plan review's state-space step asks whether it holds for every transition.
+- attest reads a test title only as the first argument of an `it`/`test` call chain (`it.only(…)`, `test.skipIf(c)(…)` included), searched outside strings: a table cell that mentions `should`, or a string holding `it('x')`, declares nothing, and a skip word in a string is no skip. An `it.each`/`test.each` title declares the names its template covers (`%d` and `%i` only numbers, `%s`, `$name`, `${…}` any text); `describe.each` declares no test. Whether a table row produces exactly that name is not checked.
+- `*.vitest.*` counts as a test file in attest's defaults, the review bundle and the human digest.
+- attest refuses a `--journal-dir` that is the shard it adds itself (`issue-<N>`), names the full SHA when a short one resolves uniquely, and on a code-review block prints the round for ROOT-CAUSE and REPLAN and what the pass will need (`AC-<id>` lines, the `red_evidence.py` call). `red_evidence.py` refuses the same shard.
+- Every worker prompt of the Claude policy ends with a shell-form block: one simple command per Bash call, no shell variables, expansions, brace groups, subshells or `eval`, files written with Write/Edit, reading with Read/Grep/Glob. The policy key `worker_shell_form` replaces it (`""` turns it off); the Codex variant ignores it. The remote hand-over names `report.py … --sync` instead of environment variables.
+- `finish.py` in a repository without any remote merges locally: it runs the gates as the push to main would, rebases onto a moved local main, fast-forwards, deletes the merged branch, and writes no certificate. Remote-tracking refs the gates anchor on, left without a remote, are refused with the command that removes them. A repository with another remote than `origin` keeps today's path.
+- A wrong number or list in a plan that the work acts on (a count a test will check, the files a task changes) is `minor` with `action=fix`, never blocking unless it hides an undecided behaviour; a tally nothing acts on stays a `nit`.
+
+**Effect.** A held branch stays held until someone says it is fixed; a plan's test evidence is complete before the first review instead of at the merge; table-driven Vitest and Jest tests can be traced; workers no longer wait on prompts the allowlist cannot answer; a local-only project finishes without a failing push.
+
+**Update.**
+1. Tier 2+ plans in flight on a branch: from the first push after the update every AC line and Transitions test cell needs `<path>::<test>` or `struck — <reason>`, and every Transitions section an `Invariant:` line. Plans on main and plans archived on main are not affected.
+2. After a `blocked` report (yours or the train's, after a conflict or a red run), release the branch with `report.py pushed` after the fix, or `review-pass`; pushing alone no longer releases it.
+3. A project that overrides `review_evidence.test_files` in its policy adds `*.vitest.*` itself.
+4. A project that appends its own shell-form text to worker prompts sets `worker_shell_form`, or drops its own copy.
+
+**Changed sections.** `commits.md` (Merging), `design-template.md` (Sections), `journal-state-plans.md` (Plans), `refute.md` (Refuting a plan), `review-checklist.md` (Completeness), `tower.md` (Dispatch and the model policy), `train.md` (Boarding — computed, never claimed; The run), `verification-independence.md` (The review bundle — the portable interface to any reviewer), commands `/execute`, `/finish`, `/plan`, `/review`
+
+Details: [Plan](docs/analysis/2026-10-27-v2.79.md) #326 #327 #312 #328 #300 #332 #323 #330 #329
+
 ## v2.78.1 — A pass rests only on evidence that reaches the repository · 2026-10-25
 
 **Why.** `attest` read ROOT-CAUSE and skip lines from every journal shard in the worktree, also uncommitted ones, while its commit carried only today's shard and explicit `--with` paths. Evidence in another day's uncommitted shard could authorize a committed pass without ever landing in the repository. Separately, `plan-structure` accepted a `## Transitions` table whose delimiter row named fewer cells than its header.
