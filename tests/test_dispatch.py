@@ -205,7 +205,10 @@ def test_remote_phase_hands_over_without_a_worktree(render, tmp_path):
     seen = marker.read_text().split("|")
     assert seen[0] == "b4" and seen[1] == "claude-opus-5" and seen[3] == "review"
     assert seen[4:] == ["xhigh", "xhigh"]  # the Tier 3 review cell's effort: argv and env
-    assert "--sync" in seen[2] and "PROCESS_REPORT_SYNC=1" in seen[2] and "/review" in seen[2]
+    assert "--sync" in seen[2] and "/review" in seen[2]
+    # no environment to set by hand: the shell-form block forbids the variable a remote worker was told to set
+    assert "PROCESS_REPORT_SYNC" not in seen[2] and "PROCESS_HOST" not in seen[2]
+    assert "one simple command per Bash call" in seen[2]  # a remote Claude cell gets the block too
     assert not (out.parent / "repo-b4").exists()  # no local worktree for a remote phase
     r = _dispatch(out, "list")
     assert "b4: review #4" in r.stdout and "another host" in r.stdout and "REMOTE" in r.stdout
@@ -1113,6 +1116,84 @@ def test_a_codex_cell_gets_no_live_channel_and_reports_instead_of_attesting(rend
     assert "SendMessage to 'steward'" in seen[-1] and "attest the REVIEW line" in seen[-1]
 
 
+# --- #323: the shell-form block, so the permission allowlist can match a worker's commands ---
+
+def _started_prompts(mod, monkeypatch) -> list[str]:
+    seen: list[str] = []
+    real = mod.build_argv
+    monkeypatch.setattr(mod, "build_argv",
+                        lambda pol, model, prompt, *a, **k: seen.append(prompt) or real(pol, model, prompt, *a, **k))
+    return seen
+
+
+def test_the_shell_form_block_names_what_the_allowlist_cannot_match(render, tmp_path):
+    mod = _load_dispatch(render(tmp_path, {"project_name": "d", "modules": {}}))
+    for phrase in ("one simple command per Bash call", "shell variables", "`${…}`", "`$(…)`", "backticks",
+                   "brace groups", "subshells", "`eval`", "Write/Edit", "redirection", "`tee`", "heredoc",
+                   "Read/Grep/Glob"):
+        assert phrase in mod.SHELL_FORM, phrase
+
+
+def test_every_claude_phase_prompt_ends_with_the_shell_form_block(render, tmp_path, monkeypatch):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _planned_branch(out, 2, plan_pass=True)
+    _git(out, "checkout", "-q", "main")
+    mod = _load_dispatch(out)
+    seen = _started_prompts(mod, monkeypatch)
+    for phase in ("brainstorm", "plan", "execute", "review"):
+        assert mod.start(out, issue=7, phase=phase, tier=2, branch="b", title=None, dry_run=True) == 0, phase
+        assert seen[-1].endswith("\n\n" + mod.SHELL_FORM), phase  # after the drift note, the last word
+
+
+def test_a_claude_cell_started_through_npx_gets_the_shell_form_block(render, tmp_path, monkeypatch):
+    # the block follows the policy, not the command's first word (`npx claude …`, `env X=1 claude …`)
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    mod = _load_dispatch(out)
+    policy = json.loads((out / "docs/process/model-policy.json").read_text())
+    policy["tiers"]["2"]["plan"] = {"model": "m", "command": "npx claude --model {model} {prompt}"}
+    monkeypatch.setattr(mod, "load_policy", lambda _root, **_k: policy)
+    monkeypatch.setattr(mod, "runnable", lambda _argv: None)
+    seen = _started_prompts(mod, monkeypatch)
+    assert mod.start(out, issue=7, phase="plan", tier=2, branch="7-work", title=None, dry_run=True) == 0
+    assert mod.SHELL_FORM in seen[-1]
+
+
+@pytest.mark.parametrize("value", ["", "Own shell rules: one command per call."])
+def test_the_local_policy_replaces_or_drops_the_shell_form_block(render, tmp_path, monkeypatch, value):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    mod = _load_dispatch(out)
+    (out / mod.LOCAL_POLICY).write_text(json.dumps({"worker_shell_form": value}))
+    seen = _started_prompts(mod, monkeypatch)
+    assert mod.start(out, issue=7, phase="plan", tier=2, branch="7-work", title=None, dry_run=True) == 0
+    assert mod.SHELL_FORM not in seen[-1]
+    if value:
+        assert seen[-1].endswith("\n\n" + value)
+    else:
+        assert not seen[-1].endswith("\n\n")
+
+
+@pytest.mark.parametrize("value", [None, 7, ["one command"], {"text": "x"}, True])
+def test_a_shell_form_that_is_no_string_is_refused(render, tmp_path, value):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    mod = _load_dispatch(out)
+    (out / mod.LOCAL_POLICY).write_text(json.dumps({"worker_shell_form": value}))
+    with pytest.raises(SystemExit, match="worker_shell_form"):
+        mod.load_policy(out)
+
+
+def test_the_shell_form_block_survives_build_argv_unchanged(render, tmp_path):
+    # the substitution also runs over the inserted prompt: the block names none of its keys
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    mod = _load_dispatch(out)
+    for key in ("{model}", "{branch}", "{issue}", "{effort}", "{prompt}"):
+        assert key not in mod.SHELL_FORM, key
+    policy = mod.load_policy(out)
+    prompt = "/plan issue #7" + "\n\n" + mod.SHELL_FORM
+    argv = mod.build_argv(policy, "m", prompt, "7-work", 7, "plan", "high",
+                          "claude --model {model} --remote-control={branch} --effort {effort} {prompt}")
+    assert argv[-1] == prompt
+
+
 # --- the session's own report, and whether its phase is over: one answer for chain and tower ---
 
 def test_a_report_from_before_the_session_is_not_its_word(render, tmp_path):
@@ -1417,7 +1498,8 @@ def test_a_worker_gets_its_cells_effort(render, tmp_path):
     out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
     _repo(out)
     marker = tmp_path / "seen"
-    _fake_command(out, f'echo "$* effort=$PROCESS_EFFORT" >> {marker}\n')
+    # one line per session: the prompt spans paragraphs (the shell-form block, #323)
+    _fake_command(out, f'printf "%s effort=%s\\n" "$(echo "$*" | tr "\\n" " ")" "$PROCESS_EFFORT" >> {marker}\n')
     pol = out / "docs/process/model-policy.json"
     data = json.loads(pol.read_text())
     data["command"] = data["command"].replace("{prompt}", "--effort={effort} {prompt}")

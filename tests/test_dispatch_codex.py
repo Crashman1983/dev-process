@@ -254,6 +254,25 @@ def test_a_dry_run_is_unverified_and_asks_no_catalog(mods, tmp_path, monkeypatch
     assert "UNVERIFIED" in capsys.readouterr().out
 
 
+def test_a_codex_cell_gets_no_shell_form_block_and_ignores_the_key(mods, tmp_path, monkeypatch):
+    # #323: the block is Claude's permission matching; Codex has its own sandbox
+    mod, out = mods
+    d = mod("dispatch")
+    _start_env(d, out, monkeypatch, tmp_path)
+    (out / d.CODEX_LOCAL_POLICY).write_text(json.dumps({"worker_shell_form": "OWN SHELL RULES"}))
+    seen = []
+    real = d.build_argv
+    monkeypatch.setattr(d, "build_argv", lambda pol, model, prompt, *a, **k: seen.append(prompt)
+                        or real(pol, model, prompt, *a, **k))
+    for phase in ("plan", "execute", "review"):
+        assert d.start(out, issue=7, phase=phase, tier=2, branch="7-x", title=None, dry_run=True,
+                       harness="codex") == 0, phase
+        assert d.SHELL_FORM not in seen[-1] and "OWN SHELL RULES" not in seen[-1], phase
+    # the variant ignores the key: no type check refuses it there
+    (out / d.CODEX_LOCAL_POLICY).write_text(json.dumps({"worker_shell_form": 7}))
+    d.load_policy(out, harness="codex")
+
+
 def test_a_model_attest_cannot_place_is_refused_before_the_run(mods, tmp_path, monkeypatch, capsys):
     mod, out = mods
     d = mod("dispatch")
