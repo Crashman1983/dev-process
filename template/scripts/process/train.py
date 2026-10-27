@@ -39,6 +39,8 @@ branch, is ahead of it, and
   * its latest report among `blocked`, `pushed` and `review-pass` — this
     host's and the ones other hosts published — is not `blocked`: a newer
     `pushed` or `review-pass` releases it, `idle` and `planned` do not (#326);
+    the train's own `blocked` (a conflict, red with it aboard) describes a
+    run and holds nothing;
 
 Departure: at least `--min-candidates` aboard, or the oldest candidate
 has waited longer than `--max-wait-hours`; no lane but `scoped` is held
@@ -107,6 +109,14 @@ JOURNAL = ".process-work/journal"
 TRAIN_DIR = "process-train"
 # the report states that hold a branch (`blocked`) or release it (#326)
 HOLD_STATES = ("blocked", "pushed", "review-pass")
+# the note the train's own `blocked` starts with (a conflict, red with it aboard):
+# it describes a run, not the branch — a conflict with a passenger that never
+# landed would hold for nothing — so the hold reads past it. Writer and reader.
+TRAIN_DROP_NOTE = "dropped from train"
+
+
+def _train_written(rec: dict) -> bool:
+    return rec.get("state") == "blocked" and str(rec.get("note") or "").startswith(TRAIN_DROP_NOTE)
 
 
 # The route marker the pre-push guard reads to tell the train's push to main
@@ -272,9 +282,11 @@ def candidates(root: Path, local: str, base: str) -> list[dict]:
     # the hold (#326): a branch whose latest word among `blocked`, `pushed` and
     # `review-pass` is `blocked` does not board — this host's reports and the
     # ones other hosts published (a steward's `blocked --sync`). `idle` (what
-    # `dispatch stop` writes) and `planned` neither hold nor release; the arms
-    # below keep reading the latest report of any state
-    holds = {r["worker"]: r for r in _tower.latest_reports(root, remote=True, states=HOLD_STATES)}
+    # `dispatch stop` writes) and `planned` neither hold nor release, nor does
+    # the train's own `blocked` (TRAIN_DROP_NOTE); the arms below keep reading
+    # the latest report of any state
+    holds = {r["worker"]: r for r in _tower.latest_reports(root, remote=True, states=HOLD_STATES,
+                                                            skip=_train_written)}
     passes_root = _journal_passes_tree(root, local)
     # the review gate's rule: a de-dated slug may act as a work id only when it
     # is unique across the archive — count them over main's archive and every
@@ -1560,10 +1572,10 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
     def _report_dropped() -> None:
         for b in conflicted:
             print(f"train: {b} did not board — merge conflict with the batch; its worker rebases (report: blocked)")
-            _write(root, "blocked", f"dropped from train {stamp}: merge conflict — rebase onto {local}", b)
+            _write(root, "blocked", f"{TRAIN_DROP_NOTE} {stamp}: merge conflict — rebase onto {local}", b)
         for b in blamed:
             print(f"train: {b} was dropped as the offender — its worker owes a fix (report: blocked)")
-            _write(root, "blocked", f"dropped from train {stamp}: red with it aboard", b)
+            _write(root, "blocked", f"{TRAIN_DROP_NOTE} {stamp}: red with it aboard", b)
 
     base_state = ""  # the base's verdict, checked once ("": not yet)
     retried = told = False
