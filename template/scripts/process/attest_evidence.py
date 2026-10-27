@@ -1475,17 +1475,17 @@ _LITERAL = r"""(?P<q>['"`])(?P<title>(?:\\.|(?!(?P=q))[^\\])*)(?P=q)"""
 # a title is the literal directly after the keyword, in call form (`it("x"`, `test.only('x'`,
 # `it("x", fn).timeout(1000)`) or space form (RSpec `it "x" do`, Rails/ExUnit `test "x" do`):
 # a table cell `["should log in"],` declares nothing, its literal follows `[`
-_TITLE = re.compile(_KEYWORD + r"(?:\(\s*|[ \t]+)" + _LITERAL)
+_TITLE = re.compile(_KEYWORD + r"(?:[ \t]*\(\s*|[ \t]+)" + _LITERAL)
 # a split call: `it(` ending a line, its title literal starting the next code line
-_OPEN_CALL = re.compile(_KEYWORD + r"\(\s*$")
+_OPEN_CALL = re.compile(_KEYWORD + r"[ \t]*\(\s*$")
 _LEADING = re.compile(r"^\s*" + _LITERAL)
 # a line that declares a test in that form, whatever its title (`it(name, fn)` too)
-_DECLARING = re.compile(_KEYWORD + r"(?:\(|[ \t]+['\"`])")
+_DECLARING = re.compile(_KEYWORD + r"(?:[ \t]*\(|[ \t]+['\"`])")
 # `it.each(table)("title", …)` / ``test.only.each`table`("title", …)`` — the opener; its title
-# follows `)(`/`` `( `` on the opener line or a later one, or starts the line after one that
-# ends so. `describe.each` names a suite, not a test: the tests in it declare their own `it`
+# follows `)(`/`` `( `` on the opener line or a later one, or a `(` opening a later line
+# (`it.each(cases)` then `("title", …)`), or starts the line after one that ends so. `describe.each` names a suite, not a test: the tests in it declare their own `it`
 _EACH = re.compile(r"\b(?:it|test)(?:\.\w+)*\.each\b")
-_EACH_TITLE = re.compile(r"[)`]\(\s*" + _LITERAL)
+_EACH_TITLE = re.compile(r"(?:[)`][ \t]*|^[ \t]*)\(\s*" + _LITERAL)
 _EACH_OPEN = re.compile(r"[)`]\(\s*$")
 
 
@@ -1559,7 +1559,13 @@ def _declares_test(lines: list[str], i: int, name: str, titles: dict[int, list[s
     above = [lines[j] for j in range(i - 1, -1, -1) if lines[j].strip()][:3]
     marked = any(_TEST_ATTR.match(a) for a in (ln, *above))
     if re.search(rf"\b(?:fun|func)\s+`{re.escape(name)}`\s*\(", ln):
-        return marked or re.match(r"(?i)test", name) is not None
+        # only the attribute lines right above mark it: an `@Test` of the function before
+        # does not reach a helper below it (review round 2)
+        attrs, j = [ln], i - 1
+        while j >= 0 and _ATTRIBUTE.match(lines[j]):
+            attrs.append(lines[j])
+            j -= 1
+        return any(_TEST_ATTR.match(a) for a in attrs) or re.match(r"(?i)test", name) is not None
     if not (name.isidentifier() and re.search(rf"(?<![\w$]){re.escape(name)}(?![\w$])", ln)):
         return False
     if re.search(rf"\b(?:func|fun|fn|def|void)\s+{re.escape(name)}\b", ln) and re.match(r"(?i)test", name):

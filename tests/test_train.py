@@ -421,6 +421,21 @@ def test_a_train_written_conflict_blocked_does_not_hold(render, tmp_path):
     assert any("latest report `blocked`" in why and "steward: wait for #12" in why for why in c["reasons"]), c
 
 
+def test_a_train_written_blocked_does_not_shadow_a_review_pass(render, tmp_path):
+    """Review round 2: the boarding arms read past the train's own `blocked` too — a branch
+    that boarded on its `review-pass` boards again after a drop it did not cause."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _package_branch(out, "70-p1-slice", "71")
+    _report(out, "70-p1-slice", issue=71)
+    _dispatched(out, 71, "70-p1-slice")
+    assert _candidate(out, "70-p1-slice")["eligible"]
+    _report(out, "70-p1-slice", None, "blocked",
+            note=f"{'dropped from train'} 20261027-1000: merge conflict — rebase onto main")
+    c = _candidate(out, "70-p1-slice")
+    assert c["eligible"] and "worker report review-pass" in c["by"], c
+
+
 def test_a_flaky_suite_is_retried_on_the_same_tree_not_bisected(render, tmp_path):
     # two load-induced timeouts, then "base is red too"
     out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})

@@ -278,13 +278,14 @@ def _identity_slugs(paths: set[str], same_plan: dict[str, str]) -> Counter:
 def candidates(root: Path, local: str, base: str) -> list[dict]:
     branches = [b.strip().lstrip("* ").strip() for b in _out(root, "branch", "--list", "--format=%(refname:short)").splitlines()]
     branches = [b for b in branches if b and b not in (local,) and not b.startswith("train/")]
-    reports = {r["worker"]: r for r in _tower.latest_reports(root)}
+    # the train's own `blocked` (TRAIN_DROP_NOTE) describes a run: it neither holds nor hides
+    # the report before it from the arms (review round 2: it shadowed a `review-pass`)
+    reports = {r["worker"]: r for r in _tower.latest_reports(root, skip=_train_written)}
     # the hold (#326): a branch whose latest word among `blocked`, `pushed` and
     # `review-pass` is `blocked` does not board — this host's reports and the
     # ones other hosts published (a steward's `blocked --sync`). `idle` (what
     # `dispatch stop` writes) and `planned` neither hold nor release, nor does
-    # the train's own `blocked` (TRAIN_DROP_NOTE); the arms below keep reading
-    # the latest report of any state
+    # the train's own `blocked` (TRAIN_DROP_NOTE)
     holds = {r["worker"]: r for r in _tower.latest_reports(root, remote=True, states=HOLD_STATES,
                                                             skip=_train_written)}
     passes_root = _journal_passes_tree(root, local)
