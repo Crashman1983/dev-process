@@ -21,6 +21,13 @@ again; `--tests` alone runs that `merge_suite`. `--tests-passed` is a claim
 and certifies nothing — it is refused while `merge_suite` is set (#255), and
 without one the push runs the suite itself.
 
+A repository without any remote (`git remote` prints nothing, #330) merges
+locally: no fetch (a local `<default>` ahead of the branch is rebased in), the
+gates run with the merge target as the push to main would run them, then the
+fast-forward — no push, no route marker, no certificate — and the merged
+branch is deleted. A remote-tracking ref the gates anchor on is stale there by
+construction; it blocks until removed.
+
 Checks, in order:
   1. on a feature branch (finishing main is meaningless)
   2. worktree clean (an unfinished tree cannot be finished)
@@ -63,6 +70,7 @@ import testing_config  # noqa: E402
 from check_review import (  # noqa: E402  (one owner for grammar + arithmetic)
     JOURNAL_DIR,
     PLANS_ACTIVE,
+    PUSH_TARGETS_ENV,
     integration_targets,
     PLANS_ARCHIVE,
     SPECS_DIR,
@@ -102,6 +110,33 @@ def _git(*args: str) -> str | None:
     proc = subprocess.run(["git", *args], capture_output=True, text=True,
                           cwd=str(ROOT), env=git_environment())
     return proc.stdout.strip() if proc.returncode == 0 else None
+
+
+def _default_branch() -> str:
+    return "main" if _git("rev-parse", "--verify", "--quiet", "main") else "master"
+
+
+def _local_only() -> bool:
+    """The repository has no remote at all (#330): `git remote` prints nothing.
+    Not "no origin" — a repository with only `upstream` keeps the push path and
+    fails at the push as before — and not "no origin/<default>": a tracking ref
+    can outlive its remote. A git failure reads as "has a remote" (fail closed)."""
+    return _git("remote") == ""
+
+
+def _upstream(default: str, local_only: bool) -> str:
+    """What the branch rebases onto and is merged into: the local default without a remote."""
+    return default if local_only else f"origin/{default}"
+
+
+def _anchoring_tracking_refs(default: str) -> list[str]:
+    """The remote-tracking refs the gates anchor on (`check_review._integration_base`:
+    `<remote>/main`, `/master`, the default and `/HEAD`). Without a remote each is
+    stale by construction, and the gates would judge against it. A left-over
+    `old/feature` anchors nothing and is not named."""
+    names = dict.fromkeys(("main", "master", default, "HEAD"))
+    out = _git("for-each-ref", "--format=%(refname)", *(f"refs/remotes/*/{n}" for n in names))
+    return [ref.removeprefix("refs/remotes/") for ref in (out or "").splitlines() if ref.strip()]
 
 
 def _branches_to_finish(root: Path, default: str, limit: int = 8) -> str:
@@ -158,6 +193,13 @@ def check(root: Path) -> tuple[list[str], list[str]]:
     if dirty:
         blockers.append(f"worktree not clean ({len(dirty.splitlines())} "
                         f"entr(y/ies)) — commit or stash before finishing")
+    default = _default_branch()
+    local_only = _local_only()
+    stale_refs = _anchoring_tracking_refs(default) if local_only else []
+    if stale_refs:
+        blockers.append(f"the repository has no remote, but the gates anchor on the stale "
+                        f"tracking ref(s) {', '.join(stale_refs)} — remove them: "
+                        + " && ".join(f"git branch -r -d {ref}" for ref in stale_refs))
 
     # --- clearing pass per active tier-2+ plan (review-gate arithmetic) ---
     passes = _journal_passes(root)
@@ -278,27 +320,32 @@ def check(root: Path) -> tuple[list[str], list[str]]:
         return blockers, []
 
     # --- the remaining tail, in execution order ---
-    default = "main" if _git("rev-parse", "--verify", "--quiet", "main") \
-        else "master"
     for name in to_archive:
         tail.append(f"git mv {PLANS_ACTIVE}/{name} {PLANS_ARCHIVE}/{name} "
                     f"&& git commit  # archive the plan ON the branch (last "
                     f"commit before merge), after the clearing pass is attested — "
                     f"attest itself moves no plan")
-    behind = _git("rev-list", "--count", f"{branch}..origin/{default}")
+    behind = _git("rev-list", "--count", f"{branch}..{_upstream(default, local_only)}")
     if behind and behind != "0":
-        tail.append(f"git fetch origin {default} && git rebase origin/{default}"
-                    f"  # {behind} commit(s) behind — NOTE: a rebase voids "
+        tail.append((f"git rebase {default}" if local_only else
+                     f"git fetch origin {default} && git rebase origin/{default}")
+                    + f"  # {behind} commit(s) behind — NOTE: a rebase voids "
                     f"review-bundle digests; re-review if a bundle was built")
     tail.append("run the FULL test suite now — the whole batch pays it once "
                 "here; scoped runs during the loop were evidence, not the "
                 "verdict (docs/process/testing.md, test economy)")
-    tail.append(f"merge: PR with linear-history merge, or locally "
-                f"`git checkout {default} && git merge --ff-only {branch} "
-                f"&& git push`")
-    tail.append(f"git push origin --delete {branch}  # or let the platform "
-                f"auto-delete / `tidy.py --apply` (retarget a PR stacked on it "
-                f"first — GitHub closes a PR whose base vanishes)")
+    if local_only:
+        tail.append(f"merge: locally, the repository has no remote — `finish.py --apply`, "
+                    f"or `git checkout {default} && git merge --ff-only {branch} "
+                    f"&& git branch -d {branch}` after the gates ran with the merge target "
+                    f"(`{PUSH_TARGETS_ENV}=refs/heads/{default}`)")
+    else:
+        tail.append(f"merge: PR with linear-history merge, or locally "
+                    f"`git checkout {default} && git merge --ff-only {branch} "
+                    f"&& git push`")
+        tail.append(f"git push origin --delete {branch}  # or let the platform "
+                    f"auto-delete / `tidy.py --apply` (retarget a PR stacked on it "
+                    f"first — GitHub closes a PR whose base vanishes)")
     tail.append("git worktree remove <path> && git worktree prune  # if this "
                 "branch rode a worktree")
     if (root / "scripts/process/publish_and_prune.py").is_file():
@@ -324,7 +371,7 @@ MERGE_ROUTE = "finish"
 
 def _sh(root: Path, argv: list[str], env: dict[str, str] | None = None) -> bool:
     """Run one tail command visibly; False on failure (the caller stops)."""
-    print(f"finish: $ {' '.join(argv)}")
+    print(f"finish: $ {' '.join(argv)}", flush=True)  # before the step's own output
     # a marker inherited from an enclosing push (gates running under the hook)
     # must not mark a step that never asked for it
     inherited = {k: v for k, v in os.environ.items() if k != MERGE_ROUTE_ENV}
@@ -402,8 +449,9 @@ def apply(root: Path, *, tests: str | None, tests_passed: bool) -> int:
             print(f"  - {b}")
         return 1
     branch = _git("rev-parse", "--abbrev-ref", "HEAD")
-    default = "main" if _git("rev-parse", "--verify", "--quiet", "main") \
-        else "master"
+    default = _default_branch()
+    local_only = _local_only()
+    upstream = _upstream(default, local_only)
     # 1. archive the branch-owned plans ON the branch
     to_archive = list(getattr(check, "last_archive", []))
     if to_archive:
@@ -429,13 +477,14 @@ def apply(root: Path, *, tests: str | None, tests_passed: bool) -> int:
                 if not _sh(root, ["git", "mv", f"{PLANS_ARCHIVE}/{name}", f"{PLANS_ACTIVE}/{name}"]):
                     print(f"finish: rollback failed for {name}; restore it before retrying", file=sys.stderr)
             return 1
-    # 2. rebase onto the moved integration branch (gates re-run below)
-    if _git("rev-parse", "--verify", "--quiet", f"origin/{default}") is not None:
-        if not _sh(root, ["git", "fetch", "-q", "origin", default]):
+    # 2. rebase onto the moved integration branch (gates re-run below);
+    # without a remote there is nothing to fetch — the local default is the one that moved
+    if local_only or _git("rev-parse", "--verify", "--quiet", upstream) is not None:
+        if not local_only and not _sh(root, ["git", "fetch", "-q", "origin", default]):
             return 1
-        behind = _git("rev-list", "--count", f"{branch}..origin/{default}")
+        behind = _git("rev-list", "--count", f"{branch}..{upstream}")
         if behind and behind != "0":
-            if not _sh(root, ["git", "rebase", "-q", f"origin/{default}"]):
+            if not _sh(root, ["git", "rebase", "-q", upstream]):
                 print("finish: rebase stopped — resolve, `git rebase "
                       "--continue`, then re-run /finish --apply")
                 return 1
@@ -451,7 +500,8 @@ def apply(root: Path, *, tests: str | None, tests_passed: bool) -> int:
     if tests:
         argv, assigned = run_tests
         shown = shlex.join([*(f"{k}={v}" for k, v in assigned.items()), *argv])
-        before = _certifiable_tree(root, tests)
+        # the certificate serves the pre-push only; a local merge pushes nothing
+        before = None if local_only else _certifiable_tree(root, tests)
         certificate.clear_run(root)  # the `stages` file the certificate reads is this run's
         print(f"finish: $ {shown}   # the FULL suite, once per batch")
         try:
@@ -474,8 +524,9 @@ def apply(root: Path, *, tests: str | None, tests_passed: bool) -> int:
             print(f"finish: merge certificate {'written — the push runs no suite again' if ok else 'not written — ' + why}")
     elif not tests_passed:
         suite, _broken = _configured_merge_suite(root)
+        certifies = "" if local_only else " and writes the merge certificate"
         print("finish: applied archive + rebase; stopped before the merge — "
-              + (f"re-run with `--apply --tests` (it runs `{suite}` and writes the merge certificate)"
+              + (f"re-run with `--apply --tests` (it runs `{suite}`{certifies})"
                  if suite else "run the FULL test suite now, then re-run with "
                  "`--apply --tests-passed` (or pass `--tests CMD` to run it here)"))
         return 0
@@ -490,6 +541,8 @@ def apply(root: Path, *, tests: str | None, tests_passed: bool) -> int:
         elif field == f"branch refs/heads/{default}" and path is not None:
             integration_checkout = path
     elsewhere = integration_checkout is not None and integration_checkout.resolve() != root.resolve()
+    if local_only:
+        return _merge_locally(root, branch, default, integration_checkout if elsewhere else None)
     if elsewhere:
         if _git("merge-base", "--is-ancestor", f"origin/{default}", "HEAD") is None:
             print(f"finish: origin/{default} is not an ancestor of HEAD — rebase onto origin/{default}, re-review and retry", file=sys.stderr)
@@ -521,11 +574,49 @@ def apply(root: Path, *, tests: str | None, tests_passed: bool) -> int:
             return 1
     else:
         print(f"finish: remote branch {branch} absent or unreadable — no remote delete")
-    print(f"finish: merged {branch} into {default} and pushed. Remaining by "
-          f"hand: remove the worktree if one carried the branch "
-          f"(`git worktree remove <path> && git worktree prune`), "
-          f"publish/prune finished spec dirs, close the tracking issue with "
-          f"the merge commit ref (DoD)")
+    print(f"finish: merged {branch} into {default} and pushed. {_BY_HAND}")
+    return 0
+
+
+_BY_HAND = ("Remaining by hand: remove the worktree if one carried the branch "
+            "(`git worktree remove <path> && git worktree prune`), publish/prune finished "
+            "spec dirs, close the tracking issue with the merge commit ref (DoD)")
+
+
+def _merge_locally(root: Path, branch: str, default: str, other: Path | None) -> int:
+    """The merge of a repository without a remote (#330). Nothing is pushed, so no
+    pre-push runs the gates: they run here first, with the merge target, as the
+    push to main would run them — red merges nothing. No route marker and no
+    certificate: both have the pre-push as their only reader. `other` is the
+    checkout that holds `default` when it is not this one: the fast-forward
+    happens there, and this branch stays (it is checked out here)."""
+    argv = gate_runner_argv(root)
+    if argv is None:
+        print(f"finish: gate suite NOT RUNNABLE (not red): {not_runnable_reason(root)} — nothing merged")
+        return 1
+    if not _sh(root, argv, {PUSH_TARGETS_ENV: f"refs/heads/{default}"}):
+        print(f"finish: the gates are red for the merge into {default} — nothing merged")
+        return 1
+    if other is not None:
+        if _git("merge-base", "--is-ancestor", default, "HEAD") is None:
+            print(f"finish: {default} is not an ancestor of HEAD — rebase onto {default}, "
+                  f"re-review and retry", file=sys.stderr)
+            return 1
+        if not _sh(other, ["git", "merge", "--ff-only", branch]):
+            print(f"finish: the fast-forward in {other} failed — nothing merged", file=sys.stderr)
+            return 1
+        _done(root, branch)
+        kept = (f" {branch} stays, it is checked out here — to delete it: "
+                f"`cd {other} && git worktree remove {root} && git branch -d {branch}`.")
+    else:
+        for step in (["git", "checkout", "-q", default], ["git", "merge", "--ff-only", branch]):
+            if not _sh(root, step):
+                return 1
+        _done(root, branch)  # merged is merged: a branch that cannot be deleted changes nothing
+        kept = "" if _sh(root, ["git", "branch", "-d", branch]) else (
+            f" `git branch -d {branch}` failed — it is checked out in another worktree; "
+            f"delete it there.")
+    print(f"finish: merged {branch} into {default} locally (the repository has no remote).{kept} {_BY_HAND}")
     return 0
 
 
@@ -614,9 +705,9 @@ def main() -> int:
     print("finish: ready — remaining tail, in order:")
     for i, step in enumerate(tail, 1):
         print(f"  {i}. {step}")
-    print("finish: `--apply` executes archive + rebase (+ merge, push, branch "
-          "delete once the full suite is asserted via --tests CMD or "
-          "--tests-passed)")
+    merge = "local merge and branch delete" if _local_only() else "merge, push, branch delete"
+    print(f"finish: `--apply` executes archive + rebase (+ {merge} once the full suite is "
+          f"asserted via --tests CMD or --tests-passed)")
     print(f"finish: {usage(root, _git('rev-parse', '--abbrev-ref', 'HEAD'))[1]}")
     return 0
 

@@ -57,6 +57,10 @@ Merge only after the tier's review gate has passed (mandatory rule 7). Two
 equivalent routes:
 
 - **Local:** fetch → rebase → gate → **archive the plan** → `merge --ff-only` → push.
+  A repository without any remote has nothing to fetch or push: rebase onto the
+  local default branch, run the gates with the merge target
+  (`PROCESS_PUSH_TARGETS=refs/heads/<default>` — no pre-push runs them), merge
+  `--ff-only`, delete the branch. `finish.py --apply` does exactly that.
 - **Hosted (PR/MR):** open a pull/merge request; the review gate runs as the PR
   review plus the `process-gates` CI job, and a linear-history merge ("rebase and
   merge" or a fast-forward-only setting) is the `--ff-only` equivalent. Where the
@@ -106,7 +110,13 @@ and a registered hook that cannot run counts as a missing check, which is a
 blocker, never a skip. With `--apply` it executes the deterministic part
 itself — archive commit, rebase, and (only behind the batch's full suite,
 `--tests` — the `merge_suite` — or `--tests CMD`; `--tests-passed` only without a `merge_suite`) the ff-only merge, push and branch
-delete — so the tail is one command, not a transcript to retype. The tail failures it guards
+delete — so the tail is one command, not a transcript to retype. Without any
+remote (`git remote` prints nothing) the merge is local: the gates run with the
+merge target before the fast-forward, nothing is pushed, no merge certificate is
+written (its only reader is the pre-push), and the merged branch is deleted; a
+left-over tracking ref the gates anchor on (`origin/main`) blocks until removed
+with `git branch -r -d`. A repository with any remote, even one not named
+`origin`, keeps the push route. The tail failures it guards
 against (merge without clearing pass, plan never archived, residue left
 behind) were all observed in production; prefer the checker over improvising
 the ritual from memory.
