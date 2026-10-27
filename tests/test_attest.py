@@ -731,6 +731,68 @@ def test_a_numbered_branch_writes_its_issues_shard(render, tmp_path, name, shard
     assert [p.parent.name for p in (out / ".process-work/journal").rglob("*.md")] == [shard]
 
 
+def test_a_journal_dir_naming_the_shard_attest_adds_is_refused(render, tmp_path):
+    """v2.79 D4 (#332): `--journal-dir …/issue-7` on branch `7-login` would write
+    `issue-7/issue-7/<date>.md`; the refusal names the journal root. `…/7-login` is no
+    shard there (attest adds `issue-7`), and the default stands on branch `journal`."""
+    out, base, head = _repo(render, tmp_path)
+    _branch(out, "7-login")
+
+    r = _attest(out, "--base", base, "--head", head, "--journal-dir", ".process-work/journal/issue-7")
+
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert "is the shard attest adds itself; pass the journal root .process-work/journal" in r.stderr
+    assert not (out / ".process-work/journal/issue-7").exists()
+    r = _attest(out, "--base", base, "--head", head, "--journal-dir", ".process-work/journal/7-login",
+                "--dry-run")
+    assert r.returncode == 0, r.stderr
+    _branch(out, "journal")
+    r = _attest(out, "--base", base, "--head", head, "--dry-run")
+    assert r.returncode == 0, r.stderr
+    assert "journal/journal/" in r.stdout
+
+
+def test_the_dry_run_of_a_block_names_its_round(render, tmp_path):
+    """v2.79 D4 (#332): the round a code review's block is written as is the round its
+    ROOT-CAUSE line names; a plan review owes no ROOT-CAUSE and no REPLAN."""
+    out, base, head = _repo(render, tmp_path)
+
+    r = _attest(out, "--base", base, "--head", head, "--verdict", "block", "--dry-run")
+
+    assert r.returncode == 0, r.stderr
+    assert ("this is round 1: write ROOT-CAUSE (and REPLAN from the second block) with round=1"
+            in r.stderr), r.stderr
+    r = _attest(out, "--base", base, "--head", head, "--verdict", "block", "--dry-run", "--plan-review")
+    assert r.returncode == 0, r.stderr
+    assert "this is round" not in r.stderr, r.stderr
+
+
+def test_a_short_head_names_the_full_sha(render, tmp_path):
+    """v2.79 D4 (#332): a short SHA that resolves is refused with the full one to pass."""
+    out, base, head = _repo(render, tmp_path)
+
+    r = _attest(out, "--base", base, "--head", head[:12], "--dry-run")
+
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert f"use the full SHA {head}" in r.stderr, r.stderr
+    r = _attest(out, "--base", base, "--head", "0123456789ab", "--dry-run")
+    assert r.returncode == 1 and "use the full SHA" not in r.stderr, r.stderr
+
+
+def test_a_written_block_names_the_records_the_pass_needs(render, tmp_path):
+    """v2.79 D4 (#332): after a code review's block, what the pass will ask — one AC line
+    per criterion, the ROOT-CAUSE line measured by red_evidence.py."""
+    out, base, head = _repo(render, tmp_path)
+
+    r = _attest(out, "--base", base, "--head", head, "--verdict", "block")
+
+    assert r.returncode == 0, r.stderr
+    assert "one `AC-<id>: <path>::<test>` line per criterion" in r.stderr, r.stderr
+    assert "red_evidence.py --work widget --round 1 --before <ref>" in r.stderr, r.stderr
+    r = _attest(out, "--base", base, "--head", head, "--verdict", "block", "--plan-review")
+    assert r.returncode == 0 and "red_evidence.py" not in r.stderr, r.stderr
+
+
 def test_a_note_must_not_carry_a_review_line(render, tmp_path):
     """Only the validated line is a REVIEW writer: a note could smuggle a typed one in."""
     out, base, head = _repo(render, tmp_path)

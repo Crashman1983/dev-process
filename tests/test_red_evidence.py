@@ -199,6 +199,20 @@ def test_sites_read_back_an_each_test_by_its_expanded_name(render, tmp_path):
     assert _class_test(out) == ("add subtracted", "calc.py:2", [("tests/calc.test.ts", "adds 1 and 2")])
 
 
+def test_a_journal_dir_naming_the_shard_is_refused(render, tmp_path):
+    """v2.79 D4 (#332): the same refusal as attest's — the tool adds `issue-7` itself."""
+    out, before = _repo(render, tmp_path)
+    r = _tool(out, "--work", "7", "--round", "1", "--before", before, "--cause", "add subtracted",
+              "--journal-dir", ".process-work/journal/issue-7", "--dry-run", "--",
+              sys.executable, "-m", "pytest", "test_calc.py")
+    assert r.returncode != 0, r.stdout + r.stderr
+    assert "is the shard attest adds itself; pass the journal root .process-work/journal" in r.stderr
+    r = _tool(out, "--work", "7", "--round", "1", "--before", before, "--cause", "add subtracted",
+              "--journal-dir", ".process-work/journal/7-fix", "--dry-run", "--",
+              sys.executable, "-m", "pytest", "test_calc.py")
+    assert r.returncode == 0, r.stdout + r.stderr
+
+
 def test_refuses_when_no_test_was_red_before(render, tmp_path):
     out, before = _repo(render, tmp_path)
 

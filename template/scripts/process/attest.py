@@ -123,6 +123,7 @@ from check_review import (  # noqa: E402  (one owner for grammar, digest, record
     PLAN_KINDS,
     PLANS_ARCHIVE,
     ROOT_CAUSE_LINE,
+    _commit_id,
     _known_work,
     _plan_work_ids,
     _unfenced,
@@ -166,6 +167,18 @@ def _git_out(root: Path, *args: str) -> bytes:
     return r.stdout
 
 
+def _journal_shard(root: Path) -> str | None:
+    """The shard directory of this branch (`_journal_target`), or None for the flat file."""
+    branch = _git(root, "symbolic-ref", "--short", "HEAD") or ""
+    issue = branch_issue(branch)
+    if issue:
+        return f"issue-{issue}"
+    slug = branch.replace("/", "-")
+    if slug and f"refs/heads/{branch}" not in integration_targets(root):
+        return slug
+    return None
+
+
 def _journal_target(root: Path, journal_dir: Path) -> Path:
     """Today's shard: on a work branch always its own directory
     (journal-state-plans.md) — two parallel branches appending one shared daily
@@ -175,14 +188,20 @@ def _journal_target(root: Path, journal_dir: Path) -> Path:
     branches of one issue wrote two shards downstream). Any other branch writes
     its slug; the integration branch or a detached HEAD, the flat daily file."""
     today = dt.date.today().isoformat()
-    branch = _git(root, "symbolic-ref", "--short", "HEAD") or ""
-    issue = branch_issue(branch)
-    if issue:
-        return journal_dir / f"issue-{issue}" / f"{today}.md"
-    slug = branch.replace("/", "-")
-    if slug and f"refs/heads/{branch}" not in integration_targets(root):
-        return journal_dir / slug / f"{today}.md"
-    return journal_dir / f"{today}.md"
+    shard = _journal_shard(root)
+    return journal_dir / shard / f"{today}.md" if shard else journal_dir / f"{today}.md"
+
+
+def journal_dir_problem(root: Path, journal_dir: Path) -> str | None:
+    """Why `--journal-dir` is refused, or None: it names the very shard `_journal_target`
+    appends (`…/issue-7` on branch `7-login`), so the record would land in
+    `issue-7/issue-7/` where no reader looks (#332). The default stands on a branch named
+    like it (`journal`); `…/7-login` on `7-login` is no shard (attest adds `issue-7`)."""
+    shard = _journal_shard(root)
+    if shard is None or journal_dir.name != shard or journal_dir == root / JOURNAL_DIR:
+        return None
+    return (f"--journal-dir {_shown(root, journal_dir)} is the shard attest adds itself; pass the "
+            f"journal root {_shown(root, journal_dir.parent)}")
 
 
 def archive_rel(rel: str) -> str:
@@ -437,8 +456,12 @@ def build_line(args, root: Path, journal_dir: Path | None = None,
                 problems.append(why)
             fields += [f"base={base}", f"head={head}"]
     line = "REVIEW " + " ".join(fields)
+    # a short SHA that resolves names the one to pass (#332); an ambiguous one names none
+    full = {key: _commit_id(root, sha) for key, sha in (("base", base), ("head", head)) if sha}
     for _ln, msg in parse_review_lines(line)[1]:
-        problems.append(f"malformed: {msg}")
+        key = msg.split(" ", 1)[0]
+        hint = f" — use the full SHA {full[key]}" if full.get(key) and "SHA" in msg else ""
+        problems.append(f"malformed: {msg}{hint}")
     return line, problems
 
 
@@ -847,6 +870,10 @@ def main() -> int:
     journal_dir = Path(args.journal_dir) if args.journal_dir else Path(JOURNAL_DIR)
     if not journal_dir.is_absolute():
         journal_dir = root / journal_dir
+    refused = journal_dir_problem(root, journal_dir)
+    if refused:
+        print(f"attest: REFUSED — nothing written:\n  - {refused}", file=sys.stderr)
+        return 1
     # lexical on purpose: `snapshot` checks every component before any read, so a
     # symlink in `--journal-dir` (or the default) cannot be hidden by dereferencing
     target = _journal_target(root, journal_dir)
@@ -914,6 +941,7 @@ def main() -> int:
     if args.dry_run:
         print(f"attest: dry run — would append to {target.relative_to(root) if target.is_relative_to(root) else target}")
         _fix_streak_notes(root, args.verdict)
+        _block_notes(args, written=False)
         return 0
     # what the evidence check read is what this attestation writes: the checked bytes,
     # never a fresh read after the validation (R4 TOCTOU)
@@ -937,11 +965,28 @@ def main() -> int:
         return 1
     print(f"attest: appended to {_shown(root, target)}")
     _fix_streak_notes(root, args.verdict)
+    _block_notes(args, written=True)
     if args.commit:
         print(f"attest: committed: {message}")
     elif staged:
         print(f'attest: staged — commit with: git commit -m "{message}"')
     return 0
+
+
+def _block_notes(args, *, written: bool) -> None:
+    """What a code review's block leaves the fix to record (#332): the round the
+    ROOT-CAUSE (and from the second block the REPLAN) line names, and, once the block is
+    written, what the pass will ask. A plan review owes neither."""
+    if args.verdict != "block" or args.plan_review:
+        return
+    r = args.round_
+    if not written:
+        print(f"attest: note — this is round {r}: write ROOT-CAUSE (and REPLAN from the second "
+              f"block) with round={r}", file=sys.stderr)
+        return
+    print("attest: note — the pass needs one `AC-<id>: <path>::<test>` line per criterion in the "
+          f"report; the ROOT-CAUSE line: `red_evidence.py --work {args.work} --round {r} --before <ref> "
+          "--cause … --sites … -- <test command>`", file=sys.stderr)
 
 
 def _fix_streak_notes(root: Path, verdict: str) -> None:
