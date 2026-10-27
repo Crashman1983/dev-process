@@ -87,11 +87,15 @@ lifecycle, a state machine, a guard or a parser carries `## Transitions`
 transitions included, with a `Test` column — one test per row; rows of one
 equivalence class may name the same test, `struck — <reason>` where none is
 due. Beside it the plan names the invariant, its one owner, and the inventory
-of every writer and reader of the state (`path:line`). Measured downstream:
+of every writer and reader of the state (`path:line`); the invariant is one
+line, `Invariant: <statement> — owner: <owner> — <path>::<test>`, or
+`Invariant: none — <reason>` where the section has none. Measured downstream:
 in 8 of 12 issues with four or more review rounds the remedy belonged in the
-plan — a state table, an invariant, a writer and reader inventory. The `plan-structure` gate reads the table in every Tier 2+ plan the branch
-adds, Spec Kit plans included: at least one row, every cell filled, and a
-test in each test cell once the first task is ticked. The section's first
+plan — a state table, an invariant, a writer and reader inventory. The `plan-structure` gate reads the section in every Tier 2+ plan the branch
+adds, Spec Kit plans included: at least one row, every cell filled, a test
+in each test cell from the first push, and the invariant line; each
+criterion names its planned test from the first push too
+(`docs/process/journal-state-plans.md`). The section's first
 table is the state table; a table after it without a `Test` column, such as the
 inventory, is not read, one with a `Test` column is read like the first.
 

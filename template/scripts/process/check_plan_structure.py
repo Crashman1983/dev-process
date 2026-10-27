@@ -11,8 +11,9 @@ at the merge. A plan reviewer re-found them by reading. This gate reads them:
   - a criterion line `AC-<id>: <EARS statement>` with no or several `shall`
     (an EARS requirement has exactly one; `shall_words` adds others, e.g.
     German `soll`), or an id twice;
-  - a criterion without its planned test once execution started (a ticked
-    task) or at the merge push: `AC-<id>: <path>::<test>` or `AC-<id>: struck —
+  - a criterion without its planned test, from the first push on (#327: a
+    branch that owed it only at the merge passed branch push and review and
+    failed at main): `AC-<id>: <path>::<test>` or `AC-<id>: struck —
     <reason>` — the report line's own grammar (attest knows no other proof),
     so plan and report cannot drift apart;
   - a section the project requires (`sections`) missing;
@@ -27,17 +28,19 @@ at the merge. A plan reviewer re-found them by reading. This gate reads them:
     the same or a higher level; no table there with a `Test` column (`Tests`,
     `Test(s)`) and two others — a table without one beside it, the writer
     and reader inventory, is no finding; a test table without a row; a row
-    with an empty cell; once execution started or at the merge push, a test
-    cell that is neither `<path>::<test>` nor `struck — <reason>` (#293).
-    Rows of one equivalence class may name the same test. Read as rendered:
-    what an HTML comment hides is neither section nor table.
+    with an empty cell; a test cell that is neither `<path>::<test>` nor
+    `struck — <reason>` (#293). Rows of one equivalence class may name the
+    same test. No `Invariant:` line in the section outside its tables, or one
+    that is neither `Invariant: <statement> — owner: <owner> — <test>` (the
+    test as in a test cell) nor `Invariant: none — <reason>` (#312). Read as
+    rendered: what an HTML comment hides is neither section nor table.
   NOTE: an `[assumption]` left in a DECISION line.
 
 Bound are only plans the branch ADDS — absent at the integration ref, or below
 Tier 2 there (a stub raised here) — so a plan merged before this gate is
 history, not a new duty. A Spec Kit plan (`specs/<name>/plan.md`) is bound by
 the same rule when it is Tier 2+; it answers for its Transitions
-table only, its ticks stand in `tasks.md` beside it. Project data,
+section only. Project data,
 `docs/process/plan-structure.local.json`, is read at the integration ref like
 every evidence rule (a branch cannot lift its own duty):
   {"sections": ["Anchor Delta"], "shall_words": ["shall"],
@@ -76,7 +79,6 @@ from process_git import git_environment  # noqa: E402  (one owner for how git is
 
 PLANS_ACTIVE = ".process-work/plans"
 DATA = "docs/process/plan-structure.local.json"
-_TICKED = re.compile(r"^[ \t]*[-*+][ \t]+\[[xX]\][ \t]", re.MULTILINE)
 _SETTLED = re.compile(r"\b(?:struck:[ \t]*\S|moved:[ \t]*#\d+)", re.IGNORECASE)
 _ASSUMPTION = re.compile(r"\[assumption\]", re.IGNORECASE)
 
@@ -187,6 +189,16 @@ _UNFILLED = {"", "…", "..."}
 _LINE_MARK = re.compile(r"\x00(\d+)\x00$")
 # a row's test cell struck on purpose: the criterion strike's own mark and reason rule
 _STRUCK_CELL = re.compile(r"^" + _STRUCK_MARK + r"[ \t]*" + PLACEHOLDER + r"\S*\w")
+# the invariant beside the table (#312), read from the right: the test after the owner,
+# `owner: <owner>` after the last separator before it, the rest the statement — which may
+# hold a separator itself. Separators as for a strike, an owner in backticks or bare.
+_SEP = r"(?:[ \t]*[—–][ \t]*|[ \t]+--[ \t]+)"
+_INVARIANT = re.compile(r"^[ \t]*(?:[-*+][ \t]+)?Invariant:[ \t]*(?P<body>.*?)[ \t]*$")
+_INVARIANT_NONE = re.compile(r"^(?i:none)(?:" + _SEP + r"(?P<reason>.*))?$")
+_INVARIANT_OWNED = re.compile(r"^(?P<statement>.*)" + _SEP + r"owner:[ \t]*(?P<owner>`[^`]*`|[^\s`—–]*)"
+                              r"(?:" + _SEP + r"(?P<test>.*))?$")
+_OWNER = re.compile(r"^[\w./:-]*\w[\w./:-]*$")  # `module.function`, `path/file.py:function`
+_FILLED = re.compile(PLACEHOLDER + r"\S*\w")  # the strike's reason rule
 
 
 def _cells(row: str) -> list[str]:
@@ -281,6 +293,54 @@ def _sections(lines: list[str], table_rows: set[int]) -> list[tuple[int, str, li
     return out
 
 
+def _names_test(cell: str) -> bool:
+    """A test cell's grammar, the invariant's test too: `<path>::<test>` or `struck — <reason>`."""
+    return _is_proof(cell) or bool(_STRUCK_CELL.match(_bare(cell)))
+
+
+def _invariant_line(rel: str, n: int, body: str) -> list[str]:
+    """The findings on one `Invariant:` line, `body` the text after the colon."""
+    where = f"{rel}:{n}: the `Invariant:` line"
+    none = _INVARIANT_NONE.match(body)
+    if none:
+        if not _FILLED.match(none.group("reason") or ""):
+            return [f"{where} leaves its reason a placeholder — `Invariant: none — <why the section has none>`"]
+        return []
+    owned = _INVARIANT_OWNED.match(body)
+    owner = owned.group("owner").strip("`").strip() if owned else ""
+    if not owned or (_FILLED.match(owner) and not _OWNER.match(owner)):
+        return [f"{where} follows neither form — `Invariant: <statement> — owner: <owner> — "
+                f"<path>::<test>` (the owner `module.function` or `path/file.py:function`) or "
+                f"`Invariant: none — <reason>`"]
+    out: list[str] = []
+    for part, value in (("statement", owned.group("statement")), ("owner", owner)):
+        if not _FILLED.match(value.strip()):
+            out.append(f"{where} leaves its {part} a placeholder — name the invariant and the one "
+                       f"function that keeps it")
+    if not _names_test(owned.group("test") or ""):
+        out.append(f"{where} names no test — end it with `<path>::<test>` (it may not exist yet) or "
+                   f"`struck — <reason>`")
+    return out
+
+
+def invariant_findings(rel: str, line: int, heading: str, body: list[tuple[int, str]],
+                       table_rows: set[int]) -> list[str]:
+    """The findings on one Transitions section's invariant (#312): at least one `Invariant:`
+    line in its body outside its tables, each read on its own. The plans that converged
+    after six code rounds named their invariant; the table alone did not."""
+    out: list[str] = []
+    found = False
+    for n, text in body:
+        m = _INVARIANT.match(text)
+        if m and n - 1 not in table_rows:
+            found = True
+            out += _invariant_line(rel, n, m.group("body"))
+    if not found:
+        out.append(f"{rel}:{line}: `{heading}` has no `Invariant:` line — name the invariant, its owner "
+                   f"and its test, or `Invariant: none — <reason>`")
+    return out
+
+
 def transitions_findings(rel: str, text: str, *, need_tests: bool) -> list[str]:
     """The findings on a plan's Transitions sections (unfenced text, the file's own line
     numbers), read as rendered — an HTML comment hides a heading and a table alike: a
@@ -298,6 +358,7 @@ def transitions_findings(rel: str, text: str, *, need_tests: bool) -> list[str]:
     tables = _tables(lines)
     table_rows = {n - 1 for table in tables for n, _row in table}
     for line, heading, body in _sections(lines, table_rows):
+        out += invariant_findings(rel, line, heading, body, table_rows)
         span = {n for n, _line in body}
         mine = [t for t in tables if t[0][0] in span]
         if not mine:
@@ -345,7 +406,7 @@ def transitions_findings(rel: str, text: str, *, need_tests: bool) -> list[str]:
                                f"empty — fill every cell")
                     continue
                 cell = cells[tests[0]]
-                if need_tests and not (_is_proof(cell) or _STRUCK_CELL.match(_bare(cell))):
+                if need_tests and not _names_test(cell):
                     out.append(f"{rel}:{n}: transitions row names no test — `<path>::<test>` (it may not "
                                f"exist yet) or `struck — <reason>`")
     return out
@@ -366,11 +427,12 @@ def _bound(root: Path, ref: str, rel: str) -> bool:
     return before is None or (plan_tier(_quoted_blank(before)) or 0) < 2
 
 
-def _spec_plan_findings(root: Path, ref: str, plans: list[Path], *, merge: bool) -> list[str]:
-    """Spec Kit plans (`specs/<name>/plan.md`) answer for their Transitions table only —
-    the plan folder's other rules stay with the plan folder. Bound by the plan folder's
-    rule (`_bound`): Tier 2+ and absent at the integration ref or below Tier 2 there
-    (unreadable there: bound); their ticks stand in `tasks.md` beside them."""
+def _spec_plan_findings(root: Path, ref: str, plans: list[Path]) -> list[str]:
+    """Spec Kit plans (`specs/<name>/plan.md`) answer for their Transitions section only,
+    its test cells from the first push like a plan folder's (#327) — the plan folder's
+    other rules stay with the plan folder. Bound by the plan folder's rule (`_bound`):
+    Tier 2+ and absent at the integration ref or below Tier 2 there (unreadable there:
+    bound)."""
     out: list[str] = []
     for p in plans:
         rel = p.relative_to(root).as_posix()
@@ -381,15 +443,7 @@ def _spec_plan_findings(root: Path, ref: str, plans: list[Path], *, merge: bool)
             continue
         if (plan_tier(text) or 0) < 2 or not _bound(root, ref, rel):
             continue  # stood at the ref at Tier 2+: history, not a new duty
-        tasks = p.parent / "tasks.md"
-        try:
-            ticked = bool(_TICKED.search(text)) or (
-                tasks.is_file() and bool(_TICKED.search(_quoted_blank(tasks.read_text(encoding="utf-8",
-                                                                                      errors="replace")))))
-        except OSError as exc:
-            out.append(f"{tasks.relative_to(root).as_posix()}: could not read: {exc}")
-            continue
-        out += transitions_findings(rel, text, need_tests=merge or ticked)
+        out += transitions_findings(rel, text, need_tests=True)
     return out
 
 
@@ -431,7 +485,7 @@ def check(root: Path, env: dict[str, str] | None = None) -> tuple[list[str], lis
     shall_words = ["shall", *data.get("shall_words", [])]  # a project's words add to `shall`
     sections = data.get("sections", [])
     registry: set[str] | None = None
-    hard += _spec_plan_findings(root, ref, spec_plans, merge=merge)
+    hard += _spec_plan_findings(root, ref, spec_plans)
     # an archived plan the branch adds is its plan too: /finish archives before the merge push
     archive = pdir / "archive"
     plans = [*sorted(pdir.glob("*.md")), *(sorted(archive.glob("*.md")) if archive.is_dir() else [])] \
@@ -448,7 +502,9 @@ def check(root: Path, env: dict[str, str] | None = None) -> tuple[list[str], lis
         tier = plan_tier(text)
         if tier is None or tier < 2 or not _bound(root, ref, rel):
             continue  # untiered plans are the review gate's finding; old plans are history
-        need_tests = merge or bool(_TICKED.search(text))
+        # #327: owed from the first push, not from the first tick or the merge — a branch
+        # whose plan owed them only at the merge passed branch push and review and failed at main
+        need_tests = True
         hard += criteria_findings(rel, text, shall_words, need_tests=need_tests)
         hard += transitions_findings(rel, text, need_tests=need_tests)
         for name in sections:

@@ -72,16 +72,22 @@ missing or unresolved input read as? Walk the classes of
 `docs/process/failure-catalog.md` the change touches; name the ones that apply.
 
 ## Transitions (state machines and event-driven work only)
-A table instead of prose invariants: state × event → result, including the
+A table instead of prose transitions, and one line beside it for the
+invariant: state × event → result, including the
 forbidden transitions and when a derived assignment expires (its basis gone
 or changed). Concurrency, a lifecycle, a guard and a parser count as state
 work too. Name the invariant, its one owner, and every writer and reader of
 the state. The `Test` column holds one test per row;
 rows of one equivalence class may name the same test,
 and a forbidden transition has a negative test. A test cell is `<path>::<test>` (it may not exist yet) or
-`struck — <reason>`. In a Tier 2+ plan the `plan-structure` gate reads the
-table: at least one row, every cell filled, and a test in every test cell
-once the first task is ticked. The section's first table is the state table;
+`struck — <reason>`. The invariant is one line outside the table,
+`Invariant: <statement> — owner: <owner> — <test>`: the owner is the one
+function that keeps it (`module.function`, `path/file.py:function`), the test
+is written as in a test cell; a section without a real invariant says
+`Invariant: none — <reason>`. In a Tier 2+ plan the `plan-structure` gate
+reads the table and the line: at least one row, every cell filled, a test in
+every test cell from the first push, and an invariant line in one of the two
+forms. The section's first table is the state table;
 a table after it without a `Test` column (the writer and reader inventory) is not
 read, one with a `Test` column is read like the first. Other work omits this section. The review bundle notes a likely
 missing table when a plan speaks of states, events or expiry and has no such
@@ -94,6 +100,8 @@ section.
 | in review | reject | draft | tests/test_order.py::test_decision_ends_review |
 | approved | submit | forbidden | tests/test_order.py::test_submit_after_approval_is_refused |
 | approved | price list changed | approval expires → draft | struck — prices are frozen at approval in this release |
+
+Invariant: an order has at most one open review — owner: `orders.review:submit` — tests/test_order.py::test_one_open_review
 
 ## Fresh-worktree dry run (migrations; deleted or replaced gate, hook or lane scripts)
 Required before the first plan review when the plan migrates (a template

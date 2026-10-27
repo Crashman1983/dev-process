@@ -81,15 +81,21 @@ def test_an_id_twice_as_a_criterion_fails(render, tmp_path):
     assert r.returncode == 1 and "AC-1 is named twice" in r.stdout, r.stdout
 
 
-def test_the_planned_test_is_owed_once_execution_starts(render, tmp_path):
+def test_the_planned_test_is_owed_from_the_first_push(render, tmp_path):
+    """#327: two branches passed the branch push and the review with an untested criterion
+    and failed only at the merge push — the test is owed with no task ticked, no merge target."""
     out = _repo(render(tmp_path, {"project_name": "demo"}))
     body = GOOD.replace("- AC-1: `tests/test_editor.py::test_cursor_kept`\n", "")
     _plan(out, body)
-    assert _run(out).returncode == 0  # planning: not yet
+    r = _run(out)
+    assert r.returncode == 1 and "AC-1 names no planned test" in r.stdout, r.stdout
+    for placeholder in ("<path>::<test>", "struck — <reason>", "struck — …"):
+        _plan(out, body + f"- AC-1: {placeholder}\n")
+        assert "AC-1 names no planned test" in _run(out).stdout, placeholder
     _plan(out, body + "\n- [x] T1 cursor\n")
     r = _run(out)
     assert r.returncode == 1 and "AC-1 names no planned test" in r.stdout, r.stdout
-    _plan(out, body + "\n- [x] T1 cursor\n- AC-1: struck — the editor is gone\n")
+    _plan(out, body + "- AC-1: struck — the editor is gone\n")
     assert _run(out).returncode == 0
     # cross-model review: attest knows no `manual:` proof, so the plan gate offers none
     _plan(out, body + "\n- [x] T1 cursor\n- AC-1: manual: checked on the device\n")
@@ -289,12 +295,15 @@ TABLE = ("\n## Transitions\n\n"
          "| in review | reject | draft | `tests/test_order.py::test_decision_ends_review` |\n"
          "| approved | submit | forbidden | struck — approval is final in this release |\n")
 ROWS = TABLE.split("\n\n", 1)[1]  # the table alone
+# #312: the invariant beside the table, read from the right (a separator in the statement)
+INV = ("\nInvariant: an order in review has one open decision — never two — "
+       "owner: `orders.review:decide` — tests/test_order.py::test_one_open_decision\n")
 
 
 def test_a_valid_transitions_table_passes(render, tmp_path):
     """Rows of one equivalence class may name the same test; a struck row names its reason."""
     out = _repo(render(tmp_path, {"project_name": "demo"}))
-    _plan(out, GOOD + TABLE + "\n- [x] T1 states\n")
+    _plan(out, GOOD + TABLE + INV + "\n- [x] T1 states\n")
     r = _run(out, merge=True)
     assert r.returncode == 0 and "plan-structure: OK" in r.stdout, r.stdout
 
@@ -322,7 +331,7 @@ def test_a_delimiter_row_shorter_than_the_header_is_a_finding(render, tmp_path):
     cells; a short delimiter must not borrow the header's width."""
     out = _repo(render(tmp_path, {"project_name": "demo"}))
     table = "| State | Result | Test |\n|---|---|---|\n| draft | in review | struck — later |\n"
-    _plan(out, GOOD + "\n## Transitions\n\n" + table)
+    _plan(out, GOOD + "\n## Transitions\n\n" + table + INV)
     assert _run(out).returncode == 0, _run(out).stdout
     _plan(out, GOOD + "\n## Transitions\n\n" + table.replace("|---|---|---|", "|---|---|"))
     r = _run(out)
@@ -339,29 +348,32 @@ def test_a_transitions_row_with_an_empty_cell_fails(render, tmp_path):
         assert r.returncode == 1 and ":15: transitions row" in r.stdout, (row, r.stdout)
 
 
-def test_the_test_cell_names_a_test_once_execution_starts(render, tmp_path):
+def test_the_test_cell_names_a_test_from_the_first_push(render, tmp_path):
+    """#327: a placeholder test cell is refused while the plan is still being written — no
+    ticked task, no merge target."""
     out = _repo(render(tmp_path, {"project_name": "demo"}))
-    table = "\n## Transitions\n\n| State | Event | Result | Test |\n|---|---|---|---|\n| a | b | c | to do |\n"
+    table = ("\n## Transitions\n\n| State | Event | Result | Test |\n|---|---|---|---|\n| a | b | c | to do |\n"
+             + INV)
     _plan(out, GOOD + table)
-    assert _run(out).returncode == 0  # planning: the form only
-    _plan(out, GOOD + table + "\n- [x] T1 states\n")
     r = _run(out)
     assert r.returncode == 1 and ":15: transitions row names no test" in r.stdout, r.stdout
-    _plan(out, GOOD + table)
+    _plan(out, GOOD + table + "\n- [x] T1 states\n")
+    assert ":15: transitions row names no test" in _run(out).stdout
     assert "names no test" in _run(out, merge=True).stdout  # the merge push owes it too
-    for placeholder in ("struck — <reason>", "struck — …", "struck", "struck — todo"):
-        _plan(out, GOOD + table.replace("to do", placeholder) + "\n- [x] T1 states\n")
+    for placeholder in ("struck — <reason>", "struck — …", "struck", "struck — todo", "<path>::<test>"):
+        _plan(out, GOOD + table.replace("to do", placeholder))
         assert "names no test" in _run(out).stdout, placeholder
     # one placeholder rule with the record readers (`check_review.PLACEHOLDER`): a word is prose
-    _plan(out, GOOD + table.replace("to do", "struck — Todo-Liste kommt erst später") + "\n- [x] T1 states\n")
-    assert "names no test" not in _run(out).stdout
+    _plan(out, GOOD + table.replace("to do", "struck — Todo-Liste kommt erst später"))
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
 
 
 def test_a_deeper_transitions_heading_reads_its_own_section(render, tmp_path):
     """`### Transitions (…)` is the same rule; its section ends at the next heading of
     the same or a higher level, a deeper one stays inside."""
     out = _repo(render(tmp_path, {"project_name": "demo"}))
-    _plan(out, GOOD + "\n### Transitions (order lifecycle)\n\n#### Rows\n\n" + ROWS + "\n### Next\n\nprose\n")
+    _plan(out, GOOD + "\n### Transitions (order lifecycle)\n\n#### Rows\n\n" + ROWS + INV + "\n### Next\n\nprose\n")
     r = _run(out)
     assert r.returncode == 0, r.stdout
     _plan(out, GOOD + "\n### Transitions (order lifecycle)\n\nprose\n\n## Next\n\n" + ROWS)
@@ -386,6 +398,7 @@ def test_the_copied_design_template_passes(render, tmp_path):
     section = "## Transitions" + design.split("## Transitions", 1)[1].split("\n## ", 1)[0]
     assert "| Test |" in section and "one test per row" in section
     assert "rows of one equivalence class may name the same test" in section
+    assert "\nInvariant: " in section and "from the first push" in section  # #312, #327
     _plan(out, GOOD + "\n" + section + "\n- [x] T1 states\n")
     r = _run(out, merge=True)
     assert r.returncode == 0, r.stdout
@@ -416,13 +429,17 @@ def test_a_new_spec_kit_plan_is_bound_without_a_plan_folder(render, tmp_path):
     r = _run(out)
     assert r.returncode == 1 and "specs/001-orders/plan.md:8: the transitions table has no `Test`" \
         in r.stdout, r.stdout
-    # its ticks stand in tasks.md beside it
+    # #327: its test cells are owed from the first push, whatever tasks.md has ticked
     good = SPEC_BAD.replace("| Result |\n|---|---|---|\n| a | b | c |",
                             "| Result | Test |\n|---|---|---|---|\n| a | b | c | to do |")
-    _spec(out, good, tasks="- [ ] T1 states\n")
-    assert _run(out).returncode == 0
-    _spec(out, good, tasks="- [x] T1 states\n")
+    _spec(out, good + INV, tasks="- [ ] T1 states\n")
     assert "specs/001-orders/plan.md:10: transitions row names no test" in _run(out).stdout
+    good = good.replace("to do", "`tests/test_orders.py::test_c`")
+    _spec(out, good + INV, tasks="- [ ] T1 states\n")
+    assert _run(out).returncode == 0, _run(out).stdout
+    # #312: the invariant line holds for a Spec Kit plan's section too
+    _spec(out, good)
+    assert "specs/001-orders/plan.md:6: `## Transitions` has no `Invariant:` line" in _run(out).stdout
     # below Tier 2 it is not bound; the plan folder's other rules stay off spec plans
     _spec(out, SPEC_BAD.replace("tier: 2", "tier: 1"))
     assert _run(out).returncode == 0
@@ -546,7 +563,7 @@ def test_an_inventory_table_beside_the_transitions_table_passes(render, tmp_path
     column; a section where no table has one fails."""
     out = _repo(render(tmp_path, {"project_name": "demo"}))
     inventory = "\n### Writers and readers\n\n| Role | Site |\n|---|---|\n| writer | src/a.py:10 |\n"
-    _plan(out, GOOD + "\n## Transitions\n\n" + HDR + ROW + inventory + TICK)
+    _plan(out, GOOD + "\n## Transitions\n\n" + HDR + ROW + INV + inventory + TICK)
     r = _run(out, merge=True)
     assert r.returncode == 0, r.stdout
     _plan(out, GOOD + "\n## Transitions\n\n| State | Event | Result |\n|---|---|---|\n| a | b | c |\n" + inventory)
@@ -576,14 +593,14 @@ def test_a_later_table_with_a_test_column_is_read_too(render, tmp_path):
     _plan(out, GOOD + "\n## Transitions\n\n" + first + "\n" + HDR + "| draft | submit | in review |  |\n")
     r = _run(out)
     assert r.returncode == 1 and "transitions row leaves `Test` empty" in r.stdout, r.stdout
-    _plan(out, GOOD + "\n## Transitions\n\n" + first + "\n" + HDR + ROW + TICK)
+    _plan(out, GOOD + "\n## Transitions\n\n" + first + "\n" + HDR + ROW + INV + TICK)
     assert _run(out, merge=True).returncode == 0
 
 
 def test_the_test_column_may_be_named_tests(render, tmp_path):
     out = _repo(render(tmp_path, {"project_name": "demo"}))
     for name in ("Tests", "Test(s)", "test(s)", "TEST", "**Tests**"):
-        _plan(out, GOOD + f"\n## Transitions\n\n| State | Event | Result | {name} |\n|---|---|---|---|\n" + ROW + TICK)
+        _plan(out, GOOD + f"\n## Transitions\n\n| State | Event | Result | {name} |\n|---|---|---|---|\n" + ROW + INV + TICK)
         r = _run(out, merge=True)
         assert r.returncode == 0, (name, r.stdout)
 
@@ -611,7 +628,7 @@ def test_a_setext_heading_ends_the_section(render, tmp_path):
     # a deeper section ends at a setext level-2 heading too; a thematic break ends nothing
     _plan(out, GOOD + "\n### Transitions\n\nprose only\n\nOther\n---\n\n" + HDR + ROW)
     assert "`### Transitions` has no table" in _run(out).stdout
-    _plan(out, GOOD + "\n## Transitions\n\nprose only\n\n---\n\n" + HDR + ROW + TICK)
+    _plan(out, GOOD + "\n## Transitions\n\nprose only\n\n---\n\n" + HDR + ROW + INV + TICK)
     r = _run(out, merge=True)
     assert r.returncode == 0, r.stdout
 
@@ -619,10 +636,104 @@ def test_a_setext_heading_ends_the_section(render, tmp_path):
 def test_a_table_without_outer_pipes_is_a_table(render, tmp_path):
     out = _repo(render(tmp_path, {"project_name": "demo"}))
     _plan(out, GOOD + "\n## Transitions\n\nState | Event | Result | Test\n---|---|---|---\n"
-          "draft | submit | review | `tests/x.py::test_submit`\n" + TICK)
+          "draft | submit | review | `tests/x.py::test_submit`\n" + INV + TICK)
     r = _run(out, merge=True)
     assert r.returncode == 0, r.stdout
     _plan(out, GOOD + "\n## Transitions\n\nState | Event | Result | Test\n:--- | --- | --- | ---\n"
           "draft |  | review | struck — later\n")
     r = _run(out)
     assert r.returncode == 1 and ":15: transitions row leaves `Event` empty" in r.stdout, r.stdout
+
+
+# --- v2.79 C2 (#312): the Transitions section names its invariant ---------------------
+
+SECTION = "\n## Transitions\n\n" + HDR + ROW  # the heading at line 11, the row at line 15
+
+
+def _invariant(out, *lines):
+    """The plan with SECTION and each line after a blank one: the first at line 17."""
+    _plan(out, GOOD + SECTION + "".join(f"\n{line}\n" for line in lines))
+    return _run(out)
+
+
+def test_a_transitions_section_names_its_invariant(render, tmp_path):
+    """#312 AC-1: the plans that converged named their invariant; the table alone did not."""
+    out = _repo(render(tmp_path, {"project_name": "demo"}))
+    r = _invariant(out)
+    assert r.returncode == 1 and (":11: `## Transitions` has no `Invariant:` line — name the invariant, "
+                                  "its owner and its test, or `Invariant: none — <reason>`") in r.stdout, r.stdout
+    for line in ("Invariant: none — the order has one writer and no event order",
+                 "- Invariant: none -- a pure parser, no state",
+                 "Invariant: none – read-only view"):
+        r = _invariant(out, line)
+        assert r.returncode == 0, (line, r.stdout)
+
+
+def test_the_invariant_line_is_read_from_the_right(render, tmp_path):
+    """Plan review round 6: the statement may hold a separator, the owner may stand in
+    backticks, the test may be struck with its reason."""
+    out = _repo(render(tmp_path, {"project_name": "demo"}))
+    for line in ("Invariant: a draft — once submitted — has one review — owner: orders.submit "
+                 "— tests/test_order.py::test_one_review",
+                 "* Invariant: one review per order -- owner: `src/orders.py:submit` -- "
+                 "`tests/test_order.py::test_one_review`",
+                 "Invariant: the owner: field is set once – owner: orders.Order.assign – "
+                 "struck — the field is frozen in this release",
+                 "Invariant: one review — owner: orders.submit — struck: covered by the table"):
+        r = _invariant(out, line)
+        assert r.returncode == 0, (line, r.stdout)
+
+
+def test_an_invariant_line_with_a_placeholder_fails(render, tmp_path):
+    out = _repo(render(tmp_path, {"project_name": "demo"}))
+    for line, part in (("Invariant: <statement> — owner: orders.submit — tests/t.py::test_a", "statement"),
+                       ("Invariant: … — owner: orders.submit — tests/t.py::test_a", "statement"),
+                       ("Invariant: — owner: orders.submit — tests/t.py::test_a", "statement"),
+                       ("Invariant: one review — owner: <owner> — tests/t.py::test_a", "owner"),
+                       ("Invariant: one review — owner: `TODO` — tests/t.py::test_a", "owner"),
+                       ("Invariant: none — <reason>", "reason"),
+                       ("Invariant: none — todo", "reason"),
+                       ("Invariant: none", "reason")):
+        r = _invariant(out, line)
+        assert r.returncode == 1 and f":17: the `Invariant:` line leaves its {part} a placeholder" \
+            in r.stdout, (line, r.stdout)
+
+
+def test_an_invariant_line_without_a_test_fails(render, tmp_path):
+    out = _repo(render(tmp_path, {"project_name": "demo"}))
+    for line in ("Invariant: one review — owner: orders.submit",
+                 "Invariant: one review — owner: orders.submit — <path>::<test>",
+                 "Invariant: one review — owner: orders.submit — struck — <reason>",
+                 "Invariant: one review — owner: orders.submit — tested by hand"):
+        r = _invariant(out, line)
+        assert r.returncode == 1 and ":17: the `Invariant:` line names no test" in r.stdout, (line, r.stdout)
+
+
+def test_a_line_that_starts_like_an_invariant_follows_one_form(render, tmp_path):
+    out = _repo(render(tmp_path, {"project_name": "demo"}))
+    for line in ("Invariant:", "Invariant: one review per order",
+                 "Invariant: one review — tests/test_order.py::test_one_review",
+                 "Invariant: one review — owner: the order service — tests/t.py::test_a",
+                 "Invariant: one review — owner: orders.submit tests/t.py::test_a"):
+        r = _invariant(out, line)
+        assert r.returncode == 1 and ":17: the `Invariant:` line follows neither form" in r.stdout, \
+            (line, r.stdout)
+
+
+def test_every_invariant_line_is_read(render, tmp_path):
+    out = _repo(render(tmp_path, {"project_name": "demo"}))
+    good = "Invariant: one review — owner: orders.submit — tests/t.py::test_a"
+    r = _invariant(out, good, good.replace("one review", "one decision"))
+    assert r.returncode == 0, r.stdout
+    r = _invariant(out, good, "Invariant: one decision — owner: <owner> — tests/t.py::test_b")
+    assert r.returncode == 1 and ":19: the `Invariant:` line leaves its owner a placeholder" in r.stdout, \
+        r.stdout
+
+
+def test_an_invariant_in_a_table_or_a_fence_does_not_count(render, tmp_path):
+    out = _repo(render(tmp_path, {"project_name": "demo"}))
+    line = "Invariant: one review — owner: orders.submit — tests/t.py::test_a"
+    for aside in (f"{line} | Site\n---|---\nwriter | src/a.py:10",  # an inventory table's header row
+                  f"```\n{line}\n```"):
+        r = _invariant(out, aside)
+        assert r.returncode == 1 and "has no `Invariant:` line" in r.stdout, (aside, r.stdout)
