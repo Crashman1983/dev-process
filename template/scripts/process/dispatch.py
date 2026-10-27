@@ -182,7 +182,10 @@ def load_policy(root: Path, harness: str | None = None) -> dict:
             raise SystemExit(f"dispatch: {local_name} must be an object laid over {name}")
         data = _merged(data, over)
     if harness == "codex":
-        _check_codex_variant(data)
+        _check_codex_variant(data)  # `worker_shell_form` is Claude's: the variant ignores it
+    elif "worker_shell_form" in data and not isinstance(data["worker_shell_form"], str):
+        raise SystemExit(f"dispatch: {name} `worker_shell_form` must be a string (\"\" drops the block), "
+                         f"got {data['worker_shell_form']!r}")
     if not isinstance(data.get("command"), str) or "{prompt}" not in data["command"]:
         raise SystemExit(f"dispatch: {name} needs a `command` template containing {{prompt}}")
     _check_env(data.get("env"), "env")
@@ -1145,14 +1148,34 @@ def sync_worktree(root: Path, wt: Path, branch: str, phase: str) -> str | None:
 
 # --- the prompt: the slash command leads, the command file owns the steps -----------
 
+# The last paragraph of every Claude-policy worker's prompt (#323): Claude Code
+# cannot match a Bash command with shell expansions against the permission
+# allowlist, so an interactive worker waits on a confirmation (downstream, for
+# hours). The policy's `worker_shell_form` replaces it, "" drops it. It names
+# none of build_argv's keys ({model}, {prompt}, …): they are substituted
+# inside the prompt too.
+SHELL_FORM = ("Shell form, so the permission allowlist can match every command and no confirmation "
+              "stops you: one simple command per Bash call; no shell variables, `${…}`, `$(…)`, backticks, "
+              "brace groups, subshells or `eval`; write files with the Write/Edit tools, never via "
+              "redirection, `tee` or a heredoc; read and search with the Read/Grep/Glob tools.")
+
+
+def shell_form(policy: dict) -> str:
+    """The shell-form block of a Claude-policy prompt: the policy's own
+    (`load_policy` checks it is a string), else `SHELL_FORM`; "" is none."""
+    return policy.get("worker_shell_form", SHELL_FORM)
+
+
 def prompt_for(phase: str, issue: int, tier: int | None, branch: str, model: str, remote: bool = False,
                channel: str | None = None, effort: str | None = None, attests: bool = True,
                plan_review: bool = False, plan_paths: list[str] | tuple[str, ...] = ()) -> str:
     """The start prompt. `attests=False`: a cell on another harness (a Codex
     review runs read-only) reports its verdict as text; the steward attests."""
     tier_s = f"tier {tier}" if tier is not None else "tier to be derived from the scope (risk-tiers.md)"
-    where = ("run on another host than the steward: fetch and check out branch `{b}` from origin first, set "
-             "PROCESS_HOST to this host's name and PROCESS_REPORT_SYNC=1 so every report reaches origin "
+    # `--sync` on the report command, not environment variables to set: the
+    # shell-form block forbids them (#323); the host name defaults to the machine's
+    where = ("run on another host than the steward: fetch and check out branch `{b}` from origin first, and "
+             "report with `report.py … --sync` so every report reaches origin "
              "(`refs/process/reports/<host>`) — the steward reads it there, and a refused report push loses "
              "nothing: the record is what you commit and push on `{b}` (a review: the attest commit); push "
              "only what the phase produces"
@@ -1850,6 +1873,11 @@ def start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str |
                         attests=not other_harness, plan_review=plan_review, plan_paths=plan_paths)
     if drift_note:
         prompt += "\n\n" + drift_note
+    # every cell of the Claude policy, whatever its command's first word
+    # (`npx claude …`, `env X=1 claude …`); a Codex run has its own sandbox
+    block = "" if codex else shell_form(policy)
+    if block:
+        prompt += "\n\n" + block
     argv = build_argv(policy, model, prompt, branch, issue, phase, effort, cell.command)
     why = override_refusal(root, phase, model, argv, branch, remote)
     if why:

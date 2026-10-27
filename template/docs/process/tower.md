@@ -366,7 +366,14 @@ Permissions belong to the command, not to dispatch: a headless `claude
 allowlist for Bash, or `--permission-mode`), else it stops at the first
 gate; an interactive worker in a fresh worktree may show a trust dialog
 on first start — open the window once, or trust the worktrees' parent
-directory beforehand.
+directory beforehand. An allowlist cannot match a Bash command with
+shell variables, `${…}`, `$(…)` or brace groups, and the worker waits on
+a confirmation (downstream, for hours; #323): every prompt of the Claude
+policy ends with a shell-form block — one simple command per Bash call,
+files through Write/Edit, reading through Read/Grep/Glob. The policy key
+`worker_shell_form` replaces it with the project's own string (copy the
+template's wording to extend it), `""` drops it; the Codex variant
+ignores the key, Codex runs in its own sandbox.
 
 Trust boundary: the policy's `command` is executed on the machine that
 runs dispatch. It is a repository file — whoever can merge to it can run
