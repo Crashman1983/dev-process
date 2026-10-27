@@ -68,7 +68,9 @@ the task that writes its news fragment (`news.md`).
 - In a plan review: a change to something others read with no
   `## Consumers`, or one that names intent instead of a search and its hits,
   is a finding. A user-visible change without its news fragment, or a
-  fragment a non-technical reader cannot follow, is a finding (minor).
+  fragment a non-technical reader cannot follow, is a finding (minor). For
+  a wrong count or list in the plan, the severity is the one
+  `verification-independence.md` gives in "What blocks".
 - A plan that migrates or deletes or replaces a gate, hook or lane script:
   does it carry `## Fresh-worktree dry run` (`design-template.md`) with real
   commands and exit codes from a fresh worktree without caches, and a

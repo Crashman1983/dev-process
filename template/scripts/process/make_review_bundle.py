@@ -569,8 +569,10 @@ FIRST_ROUND_RULE = ("Name every blocker you find, not the first — a blocker he
                     "a round.")
 BLOCK_RULE = ("Block only for a defect someone would hit — a user, a caller, the merge or an "
               "attacker: in code, tests, a contract, security or the acceptance the plan claims. "
-              "Wording in the plan, a report, a tally or the PR text never blocks: record it as a "
-              "`nit`. A verdict whose findings are all minor or nit is a `pass` with residuals — "
+              "Wording in the plan, a report, a tally nothing acts on or the PR text never blocks: "
+              "record it as a `nit`. A wrong number or list in the plan that the work acts on (the "
+              "count a test will check, the files a task changes) is `minor` with `action=fix` — "
+              "never blocking, unless it hides an undecided behaviour. A verdict whose findings are all minor or nit is a `pass` with residuals — "
               "no new round. A blocking finding names its failure scenario (input or state, the "
               "path through the changed code, the wrong outcome); a defect whose path never runs "
               "through the change is pre-existing — an issue, not a block. "

@@ -1033,6 +1033,40 @@ def test_a_measured_regression_scores_100_and_gate_deltas_get_a_reviewer_with_to
     assert tools in vi and tools in _flat(out / ".claude/commands/review.md")
 
 
+TALLY = ("A wrong number or list in the plan that the work acts on (the count a test will check, "
+         "the files a task changes) is `minor` with `action=fix` — never blocking, unless it hides "
+         "an undecided behaviour.")
+
+
+def test_a_tally_the_work_acts_on_is_minor_in_every_carrier(render, tmp_path):
+    """#329: plan rounds blocked on counting errors. "What blocks" owns the rule, `/review` and
+    the bundle preamble carry it word for word; a tally nothing acts on stays a `nit` — one
+    class, one severity."""
+    out = render(tmp_path, {"project_name": "demo"})
+    vi = _flat(out / "docs/process/verification-independence.md")
+    blocks = vi.split("**What blocks, and when the rounds stop.**", 1)[1].split("**A block is verified", 1)[0]
+    review = _flat(out / ".claude/commands/review.md")
+    bundle = " ".join(re.sub(r'"\s*\n\s*"', "", (out / "scripts/process/make_review_bundle.py").read_text()).split())
+    block_rule = bundle.split("BLOCK_RULE = (", 1)[1].split("DELTA_ROUND_RULE", 1)[0]
+    for name, text in (("verification-independence", blocks), ("review", review), ("BLOCK_RULE", block_rule)):
+        assert TALLY in text, name
+        assert "a tally nothing acts on" in text, name
+    assert "a tally or the PR text" not in vi and "a tally or the PR text" not in block_rule
+    assert "tallies are nits" not in review
+    refute = _flat(out / "docs/process/refute.md")
+    brief = refute.split("## Refuting a plan", 1)[1].split("## What happens with the findings", 1)[0]
+    undecided = ("A failure class the plan leaves undecided is at least `major`: the code review finds it "
+                 "again, at the price of an execute round.")
+    assert undecided in brief
+    after = brief.split(undecided, 1)[1]
+    assert "a wrong count or list in the plan" in after and '"What blocks"' in after
+    checklist = (out / "docs/process/review-checklist.md").read_text()
+    completeness = " ".join(checklist.split("## Completeness", 1)[1].split("\n## ", 1)[0].split())
+    assert "a wrong count or list in the plan" in completeness
+    for text in (refute, completeness):
+        assert "`minor` with `action=fix`" not in text  # a reference, no second wording
+
+
 def test_the_catalog_names_a_decision_after_an_await_on_a_stale_snapshot(render, tmp_path):
     """#293 AC-3: windows and races were the largest group of fix-induced blockers (15)."""
     out = render(tmp_path, {"project_name": "demo"})
