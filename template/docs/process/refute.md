@@ -168,7 +168,9 @@ attack is on the plan's claims and gaps, each answered from the repository:
     Report each finding with its failure scenario (what an executor would
     build, and how it breaks); no rewrites of the plan, no style remarks.
     A failure class the plan leaves undecided is at least `major`: the
-    code review finds it again, at the price of an execute round.
+    code review finds it again, at the price of an execute round. For
+    a wrong count or list in the plan, the severity is the one
+    docs/process/verification-independence.md gives in "What blocks".
 
 Findings are scored like any block (`verification-independence.md`, "What
 blocks"); the planner fixes the plan and attests the pass with

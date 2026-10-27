@@ -171,7 +171,10 @@ reach was a source of defects of its own.)
 `/review` and the bundle preamble carry it. Block only for a defect someone
 would hit — a user, a caller, the merge or an attacker: in code, tests, a
 contract, security or the acceptance the plan claims. Wording in the plan, a
-report, a tally or the PR text never blocks: record it as a `nit`. A verdict
+report, a tally nothing acts on or the PR text never blocks: record it as a
+`nit`. A wrong number or list in the plan that the work acts on (the count a
+test will check, the files a task changes) is `minor` with `action=fix` —
+never blocking, unless it hides an undecided behaviour. A verdict
 whose findings are all minor or nit is a `pass` with residuals — no new
 round (downstream, a Tier 3 update's second round blocked on two majors that
 were plan text only, its code already accepted). **A block is verified

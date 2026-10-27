@@ -178,8 +178,11 @@ Round economy — a failed round must not re-pay the whole chain:
   changes. The implementing session has twice missed what is wrong there; it
   is not the one to try a third time.
 - **Only what someone would hit blocks; three blocks reach the owner
-  once.** Plan text, report wording and tallies are nits; an all-minor
-  verdict is a pass with residuals. After the third blocking round the
+  once.** Plan text, report wording and a tally nothing acts on are nits.
+  A wrong number or list in the plan that the work acts on (the count a test
+  will check, the files a task changes) is `minor` with `action=fix` — never
+  blocking, unless it hides an undecided behaviour. An all-minor verdict is a
+  pass with residuals. After the third blocking round the
   owner decides once for the rest of the work
   (`docs/process/verification-independence.md`, "What blocks, and when the
   rounds stop").
