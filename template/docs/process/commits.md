@@ -113,7 +113,8 @@ itself — archive commit, rebase, and (only behind the batch's full suite,
 delete — so the tail is one command, not a transcript to retype. Without any
 remote (`git remote` prints nothing) the merge is local: the gates run with the
 merge target before the fast-forward, nothing is pushed, no merge certificate is
-written (its only reader is the pre-push), and the merged branch is deleted; a
+written (its only reader is the pre-push), and the merged branch is deleted;
+`--tests-passed` is refused there (no pre-push runs the suite behind it); a
 left-over tracking ref the gates anchor on (`origin/main`) blocks until removed
 with `git branch -r -d`. A repository with any remote, even one not named
 `origin`, keeps the push route. The tail failures it guards
