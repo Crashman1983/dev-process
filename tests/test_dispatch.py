@@ -1132,6 +1132,25 @@ def test_the_shell_form_block_names_what_the_allowlist_cannot_match(render, tmp_
                    "brace groups", "subshells", "`eval`", "Write/Edit", "redirection", "`tee`", "heredoc",
                    "Read/Grep/Glob"):
         assert phrase in mod.SHELL_FORM, phrase
+    # fix round 1: input redirection (`<`) writes nothing — the rule is about writing files
+    assert "never write files via output redirection, `tee` or a heredoc" in mod.SHELL_FORM
+
+
+def test_a_codex_command_cell_of_the_claude_policy_gets_no_shell_form_block(render, tmp_path, monkeypatch):
+    """Fix round 1: the documented cross-model cell (`codex exec … --sandbox read-only`) runs
+    Codex in its own sandbox, even under the Claude policy — Write/Edit rules are not its tools."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    mod = _load_dispatch(out)
+    policy = json.loads((out / "docs/process/model-policy.json").read_text())
+    policy["tiers"]["3"]["review"] = {"model": "gpt-x",
+                                      "command": "codex exec --model {model} --sandbox read-only {prompt}"}
+    monkeypatch.setattr(mod, "load_policy", lambda _root, **_k: policy)
+    monkeypatch.setattr(mod, "runnable", lambda _argv: None)
+    seen = _started_prompts(mod, monkeypatch)
+    assert mod.start(out, issue=7, phase="review", tier=3, branch="7-work", title=None, dry_run=True) == 0
+    assert mod.SHELL_FORM not in seen[-1]
+    assert mod.start(out, issue=7, phase="review", tier=2, branch="7-work", title=None, dry_run=True) == 0
+    assert seen[-1].endswith("\n\n" + mod.SHELL_FORM)  # the Claude cell keeps it
 
 
 def test_every_claude_phase_prompt_ends_with_the_shell_form_block(render, tmp_path, monkeypatch):

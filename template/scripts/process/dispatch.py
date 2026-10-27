@@ -1156,8 +1156,9 @@ def sync_worktree(root: Path, wt: Path, branch: str, phase: str) -> str | None:
 # inside the prompt too.
 SHELL_FORM = ("Shell form, so the permission allowlist can match every command and no confirmation "
               "stops you: one simple command per Bash call; no shell variables, `${…}`, `$(…)`, backticks, "
-              "brace groups, subshells or `eval`; write files with the Write/Edit tools, never via "
-              "redirection, `tee` or a heredoc; read and search with the Read/Grep/Glob tools.")
+              "brace groups, subshells or `eval`; write files with the Write/Edit tools — never write "
+              "files via output redirection, `tee` or a heredoc; read and search with the Read/Grep/Glob "
+              "tools.")
 
 
 def shell_form(policy: dict) -> str:
@@ -1832,8 +1833,9 @@ def start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str |
     channel = channel if isinstance(channel, str) and channel.strip() else None
     # the live channel and attest.py are Claude Code's: a local cell on another
     # harness reaches neither (#175). Remote: the command is a hand-over, not the harness
-    word = "" if remote else os.path.basename(_command_word(
+    cell_word = os.path.basename(_command_word(
         build_argv(policy, model, "", branch, issue, phase, effort, cell.command)))
+    word = "" if remote else cell_word
     other_harness = bool(word) and word != "claude"
     if channel and other_harness:
         print(f"dispatch: decision_channel omitted: `{word}` cell has no live channel; reports via report.py")
@@ -1874,8 +1876,9 @@ def start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str |
     if drift_note:
         prompt += "\n\n" + drift_note
     # every cell of the Claude policy, whatever its command's first word
-    # (`npx claude …`, `env X=1 claude …`); a Codex run has its own sandbox
-    block = "" if codex else shell_form(policy)
+    # (`npx claude …`, `env X=1 claude …`) — except a `codex` cell (the
+    # cross-model `codex exec … --sandbox read-only`): a Codex run has its own sandbox
+    block = "" if codex or cell_word == "codex" else shell_form(policy)
     if block:
         prompt += "\n\n" + block
     argv = build_argv(policy, model, prompt, branch, issue, phase, effort, cell.command)
