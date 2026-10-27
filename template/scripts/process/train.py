@@ -36,6 +36,9 @@ branch, is ahead of it, and
     issues), and each one at Tier 2+ is cleared by a REVIEW pass for that
     plan's work covering the head — one plan's pass never clears another
     plan of the same issue (#218);
+  * its latest report among `blocked`, `pushed` and `review-pass` — this
+    host's and the ones other hosts published — is not `blocked`: a newer
+    `pushed` or `review-pass` releases it, `idle` and `planned` do not (#326);
 
 Departure: at least `--min-candidates` aboard, or the oldest candidate
 has waited longer than `--max-wait-hours`; no lane but `scoped` is held
@@ -102,6 +105,8 @@ PLANS = ".process-work/plans"
 PROCESS_PATHS = ("scripts/process/", ".githooks/")
 JOURNAL = ".process-work/journal"
 TRAIN_DIR = "process-train"
+# the report states that hold a branch (`blocked`) or release it (#326)
+HOLD_STATES = ("blocked", "pushed", "review-pass")
 
 
 # The route marker the pre-push guard reads to tell the train's push to main
@@ -264,6 +269,12 @@ def candidates(root: Path, local: str, base: str) -> list[dict]:
     branches = [b.strip().lstrip("* ").strip() for b in _out(root, "branch", "--list", "--format=%(refname:short)").splitlines()]
     branches = [b for b in branches if b and b not in (local,) and not b.startswith("train/")]
     reports = {r["worker"]: r for r in _tower.latest_reports(root)}
+    # the hold (#326): a branch whose latest word among `blocked`, `pushed` and
+    # `review-pass` is `blocked` does not board — this host's reports and the
+    # ones other hosts published (a steward's `blocked --sync`). `idle` (what
+    # `dispatch stop` writes) and `planned` neither hold nor release; the arms
+    # below keep reading the latest report of any state
+    holds = {r["worker"]: r for r in _tower.latest_reports(root, remote=True, states=HOLD_STATES)}
     passes_root = _journal_passes_tree(root, local)
     # the review gate's rule: a de-dated slug may act as a work id only when it
     # is unique across the archive — count them over main's archive and every
@@ -434,6 +445,12 @@ def candidates(root: Path, local: str, base: str) -> list[dict]:
         except (ValueError, OSError, subprocess.TimeoutExpired) as exc:
             template_blocked = True
             c["reasons"].append(f'template verification failed: {exc}')
+        hold = holds.get(b)
+        report_blocked = bool(hold) and hold["state"] == "blocked"
+        if report_blocked:
+            note = f": {hold['note']}" if hold.get("note") else ""
+            c["reasons"].append(f"latest report `blocked` ({hold['minutes_ago']} min ago{note}) — "
+                                f"`report.py pushed` after the fix, or `review-pass`, releases it")
         rep = reports.get(b)
         process_unreviewed = bool(touches_process) and not _covers(root, passes, own_ids, 2, b, branch_passes)
         if process_unreviewed:
@@ -481,7 +498,7 @@ def candidates(root: Path, local: str, base: str) -> list[dict]:
         # the gates read reviewed content as git's merge of the reviewed works
         # (v2.55) — downstream three reviewed branches waited a train for a
         # shared test, contract doc or registry file
-        if c["by"] and not open_q and not branch_unreadable and not template_blocked:
+        if c["by"] and not open_q and not branch_unreadable and not template_blocked and not report_blocked:
             c["eligible"] = True
         out.append(c)
     return out
@@ -560,6 +577,12 @@ def plan(root: Path, *, min_candidates: int, max_wait_hours: float) -> dict:
     if local is None:
         raise SystemExit("train: no local main/master branch")
     _git(root, "fetch", "--quiet", "origin", local)  # best effort; offline is fine
+    # other hosts' published reports: a steward's `blocked --sync` holds a branch
+    # here too (#326). Best effort like the fetch above — a note, never a hold
+    if not _report.fetch_reports(root):
+        print("train: could not fetch the published reports from origin (offline, or no origin) — "
+              "boarding reads the reports this clone has; another host's unfetched `blocked` holds nothing",
+              file=sys.stderr)
     base = base_ref(root, local)
     cands = candidates(root, local, base)
     ready, why = departure(cands, root, min_candidates=min_candidates, max_wait_hours=max_wait_hours)

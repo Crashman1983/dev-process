@@ -2,6 +2,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 
 import pytest
 from pathlib import Path
@@ -1314,10 +1315,11 @@ def _package_branch(out, name, work):
     _git(out, "checkout", "-q", "main")
 
 
-def _report(out, worker, issue=None, state="review-pass"):
+def _report(out, worker, issue=None, state="review-pass", *flags, note=""):
     extra = ["--issue", str(issue)] if issue is not None else []
-    subprocess.run([sys.executable, str(out / "scripts/process/report.py"), state, "--worker", worker, *extra],
-                   cwd=out, check=True, capture_output=True)
+    extra += ["--note", note] if note else []
+    subprocess.run([sys.executable, str(out / "scripts/process/report.py"), state, "--worker", worker,
+                    *extra, *flags], cwd=out, check=True, capture_output=True)
 
 
 def _dispatched(out, issue, branch):
@@ -1346,6 +1348,83 @@ def test_a_package_branch_boards_on_the_issue_dispatch_placed_on_it(render, tmp_
     _dispatched(out, 71, "70-p1-slice")
     c = _candidate(out, "70-p1-slice")
     assert c["eligible"] and "worker report review-pass" in c["by"], c
+
+
+# --- a `blocked` report holds the branch (#326) ---
+
+def test_a_blocked_report_keeps_a_cleared_branch_off_the_train(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _branch(out, "alpha", {"src/a.py": "a\n"})
+    assert _candidate(out, "alpha")["eligible"]
+    _report(out, "alpha", None, "blocked", note="steward: wait for #12")
+    c = _candidate(out, "alpha")
+    assert not c["eligible"], c
+    held = [r for r in c["reasons"] if "latest report `blocked`" in r]
+    assert held and "steward: wait for #12" in held[0] and "min ago" in held[0], c
+    assert "`report.py pushed` after the fix, or `review-pass`, releases it" in held[0]
+    assert c["by"] == "archived plan + REVIEW pass"  # the arms still run and say their part
+
+
+@pytest.mark.parametrize("release", ["review-pass", "pushed"])
+def test_a_later_pushed_or_review_pass_releases_a_blocked_branch(render, tmp_path, release):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _branch(out, "alpha", {"src/a.py": "a\n"})
+    _report(out, "alpha", None, "blocked", note="dropped from train: red with it aboard")
+    assert not _candidate(out, "alpha")["eligible"]
+    # no origin here: `pushed` is recorded unverified — the hold reads the state
+    _report(out, "alpha", None, release, *(["--force"] if release == "pushed" else []))
+    c = _candidate(out, "alpha")
+    assert c["eligible"] and not any("blocked" in r for r in c["reasons"]), c
+
+
+@pytest.mark.parametrize("later", ["idle", "planned"])
+def test_a_later_idle_or_planned_report_does_not_release_a_blocked_branch(render, tmp_path, later):
+    # `dispatch stop` writes `idle`: stopping the session must not lift the hold
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _branch(out, "alpha", {"src/a.py": "a\n"})
+    _report(out, "alpha", None, "blocked", note="steward hold")
+    _report(out, "alpha", None, later)
+    c = _candidate(out, "alpha")
+    assert not c["eligible"] and any("latest report `blocked`" in r for r in c["reasons"]), c
+
+
+def test_another_workers_blocked_report_does_not_hold_the_branch(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _branch(out, "alpha", {"src/a.py": "a\n"})
+    _report(out, "beta", None, "blocked", note="not alpha's")
+    c = _candidate(out, "alpha")
+    assert c["eligible"] and not any("blocked" in r for r in c["reasons"]), c
+
+
+def test_a_blocked_report_another_host_published_holds_the_branch(render, tmp_path):
+    # the steward on another machine ran `report.py blocked --sync`: the train's
+    # host sees it as the published ref `refs/process/reports/<host>`
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _branch(out, "alpha", {"src/a.py": "a\n"})
+    line = json.dumps({"ts": "2026-10-27T10:00:00+0000", "epoch": int(time.time()), "host": "steward-elsewhere",
+                       "worker": "alpha", "branch": "alpha", "issue": None, "state": "blocked",
+                       "note": "held on the steward's host"})
+    blob = subprocess.run(["git", "hash-object", "-w", "--stdin"], cwd=out, input=line + "\n",
+                          capture_output=True, text=True, check=True).stdout.strip()
+    _git(out, "update-ref", "refs/process/reports/steward-elsewhere", blob)
+    c = _candidate(out, "alpha")
+    assert not c["eligible"], c
+    assert any("latest report `blocked`" in r and "held on the steward's host" in r for r in c["reasons"]), c
+
+
+def test_plan_without_origin_runs_and_notes_the_failed_report_fetch(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _branch(out, "alpha", {"src/a.py": "a\n"})
+    r = _train(out, "plan", "--json")
+    assert r.returncode == 0, r.stderr
+    assert json.loads(r.stdout)["candidates"][0]["eligible"]  # best effort: nothing held for it
+    assert "could not fetch the published reports" in r.stderr, r.stderr
 
 
 def _slug_branch(out, branch, plan, *, issue, work, files, on_main=False):
