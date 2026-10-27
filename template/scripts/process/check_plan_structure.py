@@ -30,7 +30,8 @@ at the merge. A plan reviewer re-found them by reading. This gate reads them:
     and reader inventory, is no finding; a test table without a row; a row
     with an empty cell; a test cell that is neither `<path>::<test>` nor
     `struck — <reason>` (#293). Rows of one equivalence class may name the
-    same test. No `Invariant:` line in the section outside its tables, or one
+    same test. No `Invariant:` line in the section outside its tables and
+    indented code, or one
     that is neither `Invariant: <statement> — owner: <owner> — <test>` (the
     test as in a test cell) nor `Invariant: none — <reason>` (#312). Read as
     rendered: what an HTML comment hides is neither section nor table.
@@ -326,13 +327,13 @@ def _invariant_line(rel: str, n: int, body: str) -> list[str]:
 def invariant_findings(rel: str, line: int, heading: str, body: list[tuple[int, str]],
                        table_rows: set[int]) -> list[str]:
     """The findings on one Transitions section's invariant (#312): at least one `Invariant:`
-    line in its body outside its tables, each read on its own. The plans that converged
-    after six code rounds named their invariant; the table alone did not."""
+    line in its body outside its tables and indented code, each read on its own. The plans
+    that converged after six code rounds named their invariant; the table alone did not."""
     out: list[str] = []
     found = False
     for n, text in body:
         m = _INVARIANT.match(text)
-        if m and n - 1 not in table_rows:
+        if m and n - 1 not in table_rows and not _INDENTED.match(text):
             found = True
             out += _invariant_line(rel, n, m.group("body"))
     if not found:
