@@ -433,10 +433,14 @@ def lanes(root: Path) -> list[str]:
     return testing_config.lane_status(root, env=git_environment())
 
 
-def latest_reports(root: Path, *, remote: bool = False) -> list[dict]:
+def latest_reports(root: Path, *, remote: bool = False, states: tuple[str, ...] | None = None) -> list[dict]:
+    """The latest report per worker, newest first. With `states`, the latest
+    among those states only — the train's hold reads `blocked` past a later
+    `idle` or `planned` (#326)."""
     latest: dict[str, dict] = {}
     for rec in sorted(_report.read_reports(root, remote=remote), key=lambda r: r.get("epoch", 0)):
-        latest[rec["worker"]] = rec
+        if states is None or rec.get("state") in states:
+            latest[rec["worker"]] = rec
     now = time.time()
     out = []
     for rec in sorted(latest.values(), key=lambda r: r.get("epoch", 0), reverse=True):
