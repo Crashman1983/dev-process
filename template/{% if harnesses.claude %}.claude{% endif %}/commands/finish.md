@@ -39,6 +39,15 @@ writes the merge certificate the merge push reads, and a `--certify` push
 certificate is not accepted by a merge push. While `merge_suite` is set,
 `--tests-passed` is refused — the push would run the suite again anyway.
 
+A repository without any remote merges locally: no fetch (a local default
+branch ahead of yours is rebased in), the gates run with the merge target
+before the fast-forward, nothing is pushed, no certificate is written, and
+the merged branch is deleted — when the default branch is checked out in
+another worktree, that checkout is fast-forwarded and your branch stays, with
+the command to delete it. A left-over tracking ref such as `origin/main`
+without a remote is BLOCKED until you remove it (`git branch -r -d <ref>`):
+the gates would judge against it.
+
 Every step prints its command; the first failure stops the run in a state
 git explains. The merge only happens behind the batch's FULL suite (test
 economy, `docs/process/testing.md`). `--tests` runs one command without a

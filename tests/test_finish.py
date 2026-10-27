@@ -111,6 +111,7 @@ def test_ready_with_pass_prints_ordered_tail(render, tmp_path):
                   "independence=bundle,non-implementing verdict=pass round=1")
     _git(out, "add", "-A")
     _git(out, "commit", "-q", "-m", "feat: widget with pass")
+    _git(out, "remote", "add", "origin", str(tmp_path / "origin.git"))  # the push tail (#330)
     r = _run(out)
     assert r.returncode == 0, r.stdout + r.stderr
     assert "finish: ready" in r.stdout
@@ -557,6 +558,19 @@ def _finish(root, *args):
                           cwd=root, capture_output=True, text=True)
 
 
+def test_tests_write_no_certificate_without_a_remote(render, tmp_path):
+    """#330: the merge certificate serves the pre-push only, and a local merge pushes nothing."""
+    import json
+    out = _repo_without_remote(render, tmp_path)
+    (out / "docs/process/testing.local.json").write_text(json.dumps({"merge_suite": "true"}))
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "test config")
+    r = _run_args(out, "--apply", "--tests")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "merge certificate" not in r.stdout and _merge_certificate(out, "true") is None, r.stdout
+    assert "locally (the repository has no remote)" in r.stdout
+
+
 def test_bare_tests_is_read_in_every_argument_order(render, tmp_path):
     # refute v2.75 r2: only `--tests .` was tested; a bare `--tests`, `--tests --apply` and
     # `--tests ''` take other branches, and a bare name is a command even beside a folder
@@ -602,3 +616,186 @@ def test_the_stop_names_the_route_the_merge_suite_takes(render, tmp_path):
     r = _run_args(out, "--apply")
     assert r.returncode == 0 and "re-run with `--apply --tests`" in r.stdout, r.stdout
     assert "--tests-passed" not in r.stdout
+
+
+# --- #330: finish in a repository without any remote --------------------------
+
+def _repo_without_remote(render, tmp_path):
+    """`_repo_with_origin` without the origin: a tier-1 plan and a payload on `feature`."""
+    out = _repo_on_feature(render, tmp_path)
+    _active_plan(out, "2026-09-07-tiny.md", "# Plan\n\ntier: 1\n")
+    (out / "payload.txt").write_text("done\n", encoding="utf-8")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "feat: tiny")
+    return out
+
+
+def _main_checkout_with_feature_worktree(render, tmp_path):
+    """main stays checked out in the main checkout; `feature` rides a worktree."""
+    out = render(tmp_path / "main", {"project_name": "demo"})
+    _git(out, "init", "-q", "-b", "main")
+    _git(out, "config", "user.email", "t@example.com")
+    _git(out, "config", "user.name", "Test")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "base")
+    wt = tmp_path / "wt-feature"
+    _git(out, "worktree", "add", "-q", "-b", "feature", str(wt), "main")
+    return out, wt
+
+
+def _common_dir(out: Path) -> Path:
+    common = Path(_git(out, "rev-parse", "--git-common-dir").stdout.strip())
+    return common if common.is_absolute() else out / common
+
+
+def _failing_pre_push(out: Path, seen: Path) -> None:
+    hook = _common_dir(out) / "hooks/pre-push"
+    hook.write_text(f'#!/bin/sh\necho ran >> "{seen}"\nexit 1\n')
+    hook.chmod(0o755)
+
+
+def _reports(out: Path) -> list[dict]:
+    import json
+    ledger = _common_dir(out) / "process-tower/reports.jsonl"
+    return [json.loads(line) for line in ledger.read_text().splitlines()] if ledger.is_file() else []
+
+
+def _has_branch(out: Path, name: str) -> bool:
+    return subprocess.run(["git", "rev-parse", "--verify", "-q", f"refs/heads/{name}"],
+                          cwd=out, capture_output=True).returncode == 0
+
+
+def test_apply_without_a_remote_merges_locally_and_deletes_the_branch(render, tmp_path):
+    out = _repo_without_remote(render, tmp_path)
+    seen = tmp_path / "pre-push.log"
+    _failing_pre_push(out, seen)
+    # a leftover tracking ref the gates never anchor on blocks nothing
+    _git(out, "update-ref", "refs/remotes/old/feature", "HEAD")
+    r = _run_args(out, "--apply", "--tests-passed")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "merged feature into main locally (the repository has no remote)" in r.stdout, r.stdout
+    assert _git(out, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip() == "main"
+    assert "archive plan(s)" in _git(out, "log", "-1", "--format=%s", "main").stdout
+    assert not _has_branch(out, "feature")  # the merged branch is deleted
+    assert not seen.exists()  # nothing pushed: the pre-push never ran
+    assert "merge certificate" not in r.stdout and _merge_certificate(out, "true") is None
+    assert _reports(out)[-1]["state"] == "done"
+
+
+def test_check_without_a_remote_prints_the_local_tail(render, tmp_path):
+    out = _repo_without_remote(render, tmp_path)
+    _git(out, "checkout", "-q", "main")
+    (out / "other.txt").write_text("main moved\n", encoding="utf-8")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "feat: main moved")
+    _git(out, "checkout", "-q", "feature")
+    r = _run(out)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "git push" not in r.stdout and "git fetch" not in r.stdout, r.stdout
+    assert "git rebase main" in r.stdout
+    assert "git checkout main && git merge --ff-only feature && git branch -d feature" in r.stdout
+
+
+def test_a_local_main_ahead_of_the_branch_is_rebased_in(render, tmp_path):
+    out = _repo_without_remote(render, tmp_path)
+    _git(out, "checkout", "-q", "main")
+    (out / "other.txt").write_text("main moved\n", encoding="utf-8")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "feat: main moved")
+    moved = _git(out, "rev-parse", "HEAD").stdout.strip()
+    _git(out, "checkout", "-q", "feature")
+    r = _run_args(out, "--apply", "--tests-passed")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "finish: rebased" in r.stdout
+    assert subprocess.run(["git", "merge-base", "--is-ancestor", moved, "main"], cwd=out).returncode == 0
+    assert (out / "payload.txt").is_file() and (out / "other.txt").is_file()
+
+
+@pytest.mark.parametrize("elsewhere", [False, True])
+def test_a_red_merge_gate_stops_the_local_merge(render, tmp_path, elsewhere):
+    """The gates run as the push to main would run them — here no push runs them."""
+    if elsewhere:
+        _main_checkout, out = _main_checkout_with_feature_worktree(render, tmp_path)
+    else:
+        out = _repo_on_feature(render, tmp_path)
+    _active_plan(out, "2026-07-04-widget.md",
+                 "# Plan\n\ntier: 2\nissue: none\n\n- [ ] T1 the task still open\n")
+    _journal(out, "REVIEW work=widget tier=2 reviewer=fresh model=same "
+                  "independence=bundle,non-implementing verdict=pass round=1")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "feat: widget with pass")
+    main_before = _git(out, "rev-parse", "main").stdout
+    r = _run_args(out, "--apply", "--tests-passed")
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert "open task at the merge" in r.stdout, r.stdout
+    assert _git(out, "rev-parse", "main").stdout == main_before  # nothing merged
+    assert _git(out, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip() == "feature"
+    assert not [e for e in _reports(out) if e["state"] == "done"]
+
+
+def test_without_a_remote_the_checkout_holding_main_is_advanced(render, tmp_path):
+    main_checkout, wt = _main_checkout_with_feature_worktree(render, tmp_path)
+    (wt / "payload.txt").write_text("done\n", encoding="utf-8")
+    _git(wt, "add", "-A")
+    _git(wt, "commit", "-q", "-m", "feat: payload")
+    r = _run_args(wt, "--apply", "--tests-passed")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "locally (the repository has no remote)" in r.stdout
+    assert _git(main_checkout, "rev-parse", "HEAD").stdout == _git(wt, "rev-parse", "HEAD").stdout
+    assert (main_checkout / "payload.txt").is_file()  # files and ref moved together
+    assert _git(wt, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip() == "feature"  # kept
+    assert "git branch -d feature" in r.stdout, r.stdout
+    assert _reports(wt)[-1]["state"] == "done"
+
+
+def test_a_refused_fast_forward_in_the_checkout_holding_main_merges_nothing(render, tmp_path):
+    main_checkout, wt = _main_checkout_with_feature_worktree(render, tmp_path)
+    (wt / "payload.txt").write_text("done\n", encoding="utf-8")
+    _git(wt, "add", "-A")
+    _git(wt, "commit", "-q", "-m", "feat: payload")
+    (main_checkout / "payload.txt").write_text("in the way\n", encoding="utf-8")  # untracked there
+    main_before = _git(main_checkout, "rev-parse", "HEAD").stdout
+    r = _run_args(wt, "--apply", "--tests-passed")
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert _git(main_checkout, "rev-parse", "HEAD").stdout == main_before
+    assert "merged feature" not in r.stdout
+    assert not [e for e in _reports(wt) if e["state"] == "done"]
+
+
+def test_a_stale_tracking_ref_without_a_remote_is_refused(render, tmp_path):
+    """Without a remote a left-over `origin/main` would anchor the gates on a stale base."""
+    out = _repo_without_remote(render, tmp_path)
+    _git(out, "update-ref", "refs/remotes/origin/main", "main")
+    main_before = _git(out, "rev-parse", "main").stdout
+    r = _run(out)
+    assert r.returncode == 1 and "git branch -r -d origin/main" in r.stdout, r.stdout
+    r = _run_args(out, "--apply", "--tests-passed")
+    assert r.returncode == 1 and "nothing applied" in r.stdout, r.stdout
+    assert "git branch -r -d origin/main" in r.stdout
+    assert _git(out, "rev-parse", "main").stdout == main_before
+    assert _git(out, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip() == "feature"
+
+
+def test_a_refused_push_with_a_remote_keeps_the_branch(render, tmp_path):
+    out, bare = _repo_with_origin(render, tmp_path)
+    hook = bare / "hooks/pre-receive"
+    hook.write_text("#!/bin/sh\nwhile read old new ref; do\n"
+                    "  [ \"$ref\" = refs/heads/main ] && exit 1\n"
+                    "done\nexit 0\n")
+    hook.chmod(0o755)
+    r = _run_args(out, "--apply", "--tests-passed")
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert _has_branch(out, "feature")
+    assert "no remote" not in r.stdout
+
+
+def test_a_repository_with_another_remote_stays_on_the_push_path(render, tmp_path):
+    """Only `upstream`: no silent local merge — the push to origin fails as today."""
+    out = _repo_without_remote(render, tmp_path)
+    bare = tmp_path / "upstream.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(bare)], check=True)
+    _git(out, "remote", "add", "upstream", str(bare))
+    r = _run_args(out, "--apply", "--tests-passed")
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert "no remote" not in r.stdout
+    assert _has_branch(out, "feature")
