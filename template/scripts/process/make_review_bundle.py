@@ -847,7 +847,7 @@ def _transitions_note(text: str, vocabulary: tuple[str, ...]) -> str | None:
 
 
 _TEST_DIRS = frozenset({"test", "tests", "spec", "specs", "__tests__"})
-_TEST_NAME = re.compile(r"^(?:test_.+\..+|.+_test\..+|.+\.spec\..+|.+\.test\..+|conftest\.py)$")
+_TEST_NAME = re.compile(r"^(?:test_.+\..+|.+_test\..+|.+\.spec\..+|.+\.(?:vi)?test\..+|conftest\.py)$")
 _PROSE = (".md", ".rst", ".txt")
 _CONFIG = (".json", ".yaml", ".yml", ".toml", ".lock", ".ini", ".cfg", ".env")
 

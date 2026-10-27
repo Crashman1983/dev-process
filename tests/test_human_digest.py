@@ -95,6 +95,13 @@ def test_digest_counts_the_test_estate(render, tmp_path):
     assert r.returncode == 0, r.stdout + r.stderr
     assert "Test estate" in r.stdout
     assert "1 e2e" in r.stdout
+    # v2.79 #300: vitest's own file name is a test file too
+    (out / "web").mkdir()
+    (out / "web" / "a.vitest.ts").write_text("// vitest\n")
+    sp.run(["git", "add", "-A"], cwd=out, check=True)
+    sp.run(["git", "commit", "-q", "-m", "vitest"], cwd=out, check=True)
+    unit = int(r.stdout.split("test files now: ", 1)[1].split(" ", 1)[0])
+    assert f"test files now: {unit + 1} unit/integration" in _run(out).stdout
     assert "by risk, not by count" in r.stdout
     assert "floor AND ceiling" not in r.stdout
 

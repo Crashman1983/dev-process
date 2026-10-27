@@ -53,7 +53,8 @@
     "python_files": ["test_*.py", "*_test.py"],
     "python_classes": ["Test"],
     "test_files": ["*tests/*", "*Tests/*", "*__tests__/*", "spec/*", "*/spec/*", "*Test.*", "*Tests.*",
-                   "*Spec.*", "*.test.*", "*.spec.*", "*_test.*", "*_spec.*", "*/test_*", "test_*"],
+                   "*Spec.*", "*.test.*", "*.spec.*", "*.vitest.*", "*_test.*", "*_spec.*", "*/test_*",
+                   "test_*"],
     "required_records": [
       {"kind": "refute", "when": {"gate_code": true}},
       {"kind": "refute", "when": {"tier_from": 3}},
