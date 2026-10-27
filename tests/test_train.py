@@ -400,6 +400,27 @@ def test_conflicting_candidate_is_reported_blocked(render, tmp_path):
     assert "beta" in branches and not any(b.startswith("train/") for b in branches)
 
 
+def test_a_train_written_conflict_blocked_does_not_hold(render, tmp_path):
+    """Fix round 1: the train's own `blocked` describes a run — a conflict with a passenger
+    that never landed would otherwise hold the branch for nothing. A steward's still holds,
+    also under a later train-written one."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _branch(out, "beta", {"shared.txt": "beta\n"})
+    (out / "shared.txt").write_text("main moved\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "main: shared")
+    r = _train(out, "run", "--force", "--suite", "true")
+    assert r.returncode == 1 and "merge conflict with the batch" in r.stdout, r.stdout + r.stderr
+    c = _candidate(out, "beta")
+    assert not any("latest report `blocked`" in why for why in c["reasons"]), c
+    _report(out, "beta", None, "blocked", note="steward: wait for #12")
+    _report(out, "beta", None, "blocked", note="dropped from train 20261027-1000: red with it aboard")
+    c = _candidate(out, "beta")
+    assert not c["eligible"], c
+    assert any("latest report `blocked`" in why and "steward: wait for #12" in why for why in c["reasons"]), c
+
+
 def test_a_flaky_suite_is_retried_on_the_same_tree_not_bisected(render, tmp_path):
     # two load-induced timeouts, then "base is red too"
     out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
@@ -1371,7 +1392,7 @@ def test_a_later_pushed_or_review_pass_releases_a_blocked_branch(render, tmp_pat
     out = render(tmp_path, {"project_name": "d", "modules": {}})
     _repo(out)
     _branch(out, "alpha", {"src/a.py": "a\n"})
-    _report(out, "alpha", None, "blocked", note="dropped from train: red with it aboard")
+    _report(out, "alpha", None, "blocked", note="steward: red on the steward's host")
     assert not _candidate(out, "alpha")["eligible"]
     # no origin here: `pushed` is recorded unverified — the hold reads the state
     _report(out, "alpha", None, release, *(["--force"] if release == "pushed" else []))
@@ -1415,6 +1436,26 @@ def test_a_blocked_report_another_host_published_holds_the_branch(render, tmp_pa
     c = _candidate(out, "alpha")
     assert not c["eligible"], c
     assert any("latest report `blocked`" in r and "held on the steward's host" in r for r in c["reasons"]), c
+
+
+@pytest.mark.parametrize("record", [{"state": "blocked"},
+                                    {"worker": "alpha", "state": "blocked", "epoch": "x"},
+                                    {"worker": "", "state": "blocked", "epoch": 1},
+                                    {"worker": "alpha", "state": "blocked", "epoch": True}])
+def test_a_published_report_without_worker_or_numeric_epoch_is_skipped(render, tmp_path, record):
+    """Fix round 1: another host's ref is data the train reads; a record without a worker
+    or with a non-numeric epoch crashed `plan` — it is skipped like an unparsable line."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _branch(out, "alpha", {"src/a.py": "a\n"})
+    blob = subprocess.run(["git", "hash-object", "-w", "--stdin"], cwd=out,
+                          input=json.dumps(record) + "\n", capture_output=True, text=True,
+                          check=True).stdout.strip()
+    _git(out, "update-ref", "refs/process/reports/elsewhere", blob)
+    r = _train(out, "plan", "--json")
+    assert r.returncode == 0 and "Traceback" not in r.stderr, r.stderr
+    c = next(c for c in json.loads(r.stdout)["candidates"] if c["branch"] == "alpha")
+    assert c["eligible"] and not any("blocked" in why for why in c["reasons"]), c
 
 
 def test_plan_without_origin_runs_and_notes_the_failed_report_fetch(render, tmp_path):

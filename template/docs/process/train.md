@@ -60,9 +60,11 @@ A local branch boards when it is ahead of the integration branch and
   and the workaround review merged the two);
 - is not held by a **`blocked` report**: its latest report among
   `blocked`, `pushed` and `review-pass` (`report.py`, this host's and the
-  ones other hosts published with `--sync`) is not `blocked` — whoever
-  wrote it, a steward or the train itself after a conflict or a red run.
-  A newer `pushed` (after the fix or the rebase) or `review-pass` releases
+  ones other hosts published with `--sync`) is not `blocked` — a
+  steward's, say. The train's own `blocked` after a conflict or a red run
+  (its note starts `dropped from train`) describes that run and holds
+  nothing: a conflict with a passenger that never landed would hold the
+  branch for nothing, so the hold reads past it. A newer `pushed` (after the fix or the rebase) or `review-pass` releases
   it; `idle` (what `dispatch.py stop` writes) and `planned` do not
   (downstream, a branch the steward had held boarded on its records,
   #326). The train fetches the published reports first, best effort: a
@@ -74,7 +76,7 @@ the whole train, not a per-candidate reason.)
 
 A file shared with a branch aboard holds nobody back: git merges the batch
 in boarding order, a real conflict drops the later candidate with a
-`blocked` report (it rebases and reports `pushed`, which releases it), and the gates read the clean merge of
+`blocked` report (its worker's word to rebase; the report holds nothing), and the gates read the clean merge of
 reviewed works as reviewed (`verification-independence.md`). Downstream
 the former overlap rule kept three reviewed branches a whole train behind
 for one shared test, contract doc or registry file.
@@ -144,8 +146,8 @@ a day downstream, with five reviewed candidates waiting.
    and before the first passenger would be blamed it runs anyway: main can
    turn red outside the tree),
    then a bisection over boarding-order prefixes names the first
-   offender; it is dropped, gets a `blocked` report (it boards again after
-   `report.py pushed` with the fix, or `review-pass`), and the rest is
+   offender; it is dropped, gets a `blocked` report (its worker's word to
+   fix it; the train's own `blocked` holds nothing), and the rest is
    rebuilt. A suite that does not exist on a tree — a passenger introduces
    it — makes that tree *not comparable*, never red: the base is not called
    red, a prefix is not blamed. A combined tree that reads undefined has the
@@ -178,7 +180,7 @@ a day downstream, with five reviewed candidates waiting.
    code (`make test | tee log` is green when `tee` is). Every red verdict logs the load average — a timeout under
    load 10 on 6 CPUs is a different finding from a broken test. A
    candidate dropped for a merge conflict is reported `blocked` too, with
-   "rebase" as the reason; `report.py pushed` after the rebase releases it.
+   "rebase" as the reason; like the offender's, that report holds nothing.
 4. Green: a suite run that left the worktree as it found it writes the
    `merge` certificate of that tree (`certificate.py`), so the push to main
    runs no suite again; a run that wrote into the tree certifies nothing.

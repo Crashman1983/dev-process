@@ -162,13 +162,24 @@ def write_report(root: Path, state: str, *, issue: int | None, note: str, worker
 
 
 def _parse(text: str, host: str | None) -> list[dict]:
+    """The records of one file or published ref. A record its readers cannot key or
+    order — no non-empty `worker` string, an `epoch` that is no number (a bool is
+    none) — is skipped like an unparsable line: another host's ref is data. A record
+    without `epoch` stays: its readers order it first (`get("epoch", 0)`) and read
+    `ts`, as older ledgers carry it."""
     out: list[dict] = []
     for line in text.splitlines():
         try:
             rec = json.loads(line)
         except ValueError:
             continue
-        if isinstance(rec, dict) and rec.get("state") in STATES:
+        if not isinstance(rec, dict):
+            continue
+        worker, epoch = rec.get("worker"), rec.get("epoch", 0)
+        if not (isinstance(worker, str) and worker
+                and isinstance(epoch, (int, float)) and not isinstance(epoch, bool)):
+            continue
+        if rec.get("state") in STATES:
             rec.setdefault("host", host or "?")
             out.append(rec)
     return out
