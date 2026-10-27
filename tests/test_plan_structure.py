@@ -737,3 +737,15 @@ def test_an_invariant_in_a_table_or_a_fence_does_not_count(render, tmp_path):
                   f"```\n{line}\n```"):
         r = _invariant(out, aside)
         assert r.returncode == 1 and "has no `Invariant:` line" in r.stdout, (aside, r.stdout)
+
+
+def test_an_invariant_in_an_indented_code_block_does_not_count(render, tmp_path):
+    """Fix round 1: four spaces in (or a tab) is indented code, as the gate reads a table
+    row or a heading — it renders as code, not as the plan's invariant."""
+    out = _repo(render(tmp_path, {"project_name": "demo"}))
+    line = "Invariant: one review — owner: orders.submit — tests/t.py::test_a"
+    for indent in ("    ", "        ", "\t", "  \t"):
+        r = _invariant(out, indent + line)
+        assert r.returncode == 1 and "has no `Invariant:` line" in r.stdout, (repr(indent), r.stdout)
+    r = _invariant(out, "   " + line)  # three spaces in: still a paragraph
+    assert r.returncode == 0, r.stdout
