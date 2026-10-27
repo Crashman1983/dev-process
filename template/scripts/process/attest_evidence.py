@@ -1559,11 +1559,18 @@ def _declares_test(lines: list[str], i: int, name: str, titles: dict[int, list[s
     above = [lines[j] for j in range(i - 1, -1, -1) if lines[j].strip()][:3]
     marked = any(_TEST_ATTR.match(a) for a in (ln, *above))
     if re.search(rf"\b(?:fun|func)\s+`{re.escape(name)}`\s*\(", ln):
-        # only the attribute lines right above mark it: an `@Test` of the function before
-        # does not reach a helper below it (review round 2)
+        # only the attribute lines above it mark it, across blank and comment lines; a line
+        # that declares a function itself (`@Test fun `a`() = …`) ends the walk, so an
+        # `@Test` of the function before does not reach a helper below it (review rounds 2, 3)
         attrs, j = [ln], i - 1
-        while j >= 0 and _ATTRIBUTE.match(lines[j]):
-            attrs.append(lines[j])
+        while j >= 0:
+            above_ln = lines[j]
+            if not above_ln.strip() or _COMMENT.match(above_ln):
+                j -= 1
+                continue
+            if not _ATTRIBUTE.match(above_ln) or re.search(r"\b(?:fun|func)\b", above_ln):
+                break
+            attrs.append(above_ln)
             j -= 1
         return any(_TEST_ATTR.match(a) for a in attrs) or re.match(r"(?i)test", name) is not None
     if not (name.isidentifier() and re.search(rf"(?<![\w$]){re.escape(name)}(?![\w$])", ln)):
