@@ -373,7 +373,9 @@ policy ends with a shell-form block — one simple command per Bash call,
 files through Write/Edit, reading through Read/Grep/Glob. The policy key
 `worker_shell_form` replaces it with the project's own string (copy the
 template's wording to extend it), `""` drops it; the Codex variant
-ignores the key, Codex runs in its own sandbox.
+ignores the key, and a cell whose command is `codex` (the cross-model
+`codex exec … --sandbox read-only`) gets no block — Codex runs in its
+own sandbox.
 
 Trust boundary: the policy's `command` is executed on the machine that
 runs dispatch. It is a repository file — whoever can merge to it can run
