@@ -1457,7 +1457,10 @@ def _python_status(text: str, file: str, name: str, rules: dict) -> str | None:
 # attribute lines, in its body or in a setup of the file
 _NOT_CODE = (".md", ".txt", ".rst", ".json", ".yaml", ".yml", ".toml", ".csv", ".lock", ".ini", ".cfg")
 _COMMENT = re.compile(r"^\s*(?://|#(?!\[)|--|/\*|\*)")
-_DECLARES = re.compile(r"\b(?:it|test|describe|context|func|fn|fun|def|should)\b\s*[\w.]*\s*[(\w`'\"]|@Test\b|#\[test\]")
+# what else bounds a test's body: a function (`func`, `fn`, `fun`, `def`), a test attribute,
+# or a suite called or opened with a literal (`describe(`, `describe.each(`, `context "x" do`)
+_DECLARES = re.compile(r"\b(?:func|fn|fun|def)\b\s*[\w.]*\s*[(\w`'\"]|@Test\b|#\[test\]|"
+                       r"\b(?:describe|context)(?:\.\w+)*(?:\(|[ \t]+['\"`])")
 _ATTRIBUTE = re.compile(r"^\s*(?:@\w+|#\[\w+|\[\w+)")
 _TEST_ATTR = re.compile(r"^\s*(?:@Test\b|@ParameterizedTest\b|#\[(?:tokio::)?test\b|\[(?:Test|Fact|Theory)\b)")
 _SETUP = re.compile(r"\b(?:setUp\w*|beforeEach|beforeAll|TestMain|setup)\b\s*[(\w]")
@@ -1465,141 +1468,76 @@ _OTHER_SKIP = re.compile(r"\.(?:skip|todo)\b|\b(?:xit|xtest|xdescribe|xcontext)\
                          r"\bXCTSkip(?:If|Unless)?\b|@Disabled\b|@Ignore\b|#\[ignore\]|\bthis\.skip\(")
 
 
-_QUOTES = "'\"`"
-_BREAKS = "\n\r\x0b\x0c\x1c\x1d\x1e\x85  "  # what `str.splitlines` splits on
+# the keyword a JS/Ruby/Elixir-style runner declares a test with, and its modifiers: `.only`,
+# `.concurrent`, `.skipIf(c)`, `.runIf(c)`, `.if(c)` — never `.each` (its title is `_EACH_TITLE`'s)
+_KEYWORD = r"\b(?:it|test|specify|should)(?:\.(?!each\b)\w+(?:\((?:[^()]|\([^()]*\))*\))?)*"
+_LITERAL = r"""(?P<q>['"`])(?P<title>(?:\\.|(?!(?P=q))[^\\])*)(?P=q)"""
+# a title is the literal directly after the keyword, in call form (`it("x"`, `test.only('x'`,
+# `it("x", fn).timeout(1000)`) or space form (RSpec `it "x" do`, Rails/ExUnit `test "x" do`):
+# a table cell `["should log in"],` declares nothing, its literal follows `[`
+_TITLE = re.compile(_KEYWORD + r"(?:\(\s*|[ \t]+)" + _LITERAL)
+# a split call: `it(` ending a line, its title literal starting the next code line
+_OPEN_CALL = re.compile(_KEYWORD + r"\(\s*$")
+_LEADING = re.compile(r"^\s*" + _LITERAL)
+# a line that declares a test in that form, whatever its title (`it(name, fn)` too)
+_DECLARING = re.compile(_KEYWORD + r"(?:\(|[ \t]+['\"`])")
+# `it.each(table)("title", …)` / ``test.only.each`table`("title", …)`` — the opener; its title
+# follows `)(`/`` `( `` on the opener line or a later one, or starts the line after one that
+# ends so. `describe.each` names a suite, not a test: the tests in it declare their own `it`
+_EACH = re.compile(r"\b(?:it|test)(?:\.\w+)*\.each\b")
+_EACH_TITLE = re.compile(r"[)`]\(\s*" + _LITERAL)
+_EACH_OPEN = re.compile(r"[)`]\(\s*$")
 
 
-def _mask(text: str) -> str:
-    """`text` with the contents of every string literal blanked to `_` — quotes, line
-    breaks and every position kept — so a search for calls and skip markers reads code
-    only: a table cell `["it('ghost')"]` is no call, a title `"handles .skip flags"` no
-    skip. A `'`/`"` string ends at its line; a template literal may span lines; `//` and
-    `/* */` comments are left as they are (an apostrophe there opens no string)."""
-    out = list(text)
-    i, n = 0, len(text)
-    while i < n:
-        c = text[i]
-        if text.startswith("//", i) or text.startswith("/*", i):
-            end = text.find("*/", i + 2) if c == "/" and text[i + 1] == "*" else -1
-            if end >= 0:
-                i = end + 2
-                continue
-            while i < n and text[i] not in _BREAKS:
-                i += 1
-            continue
-        if c not in _QUOTES:
-            i += 1
-            continue
-        j = i + 1
-        while j < n and text[j] != c and (c == "`" or text[j] not in _BREAKS):
-            if text[j] == "\\" and j + 1 < n and text[j + 1] not in _BREAKS:
-                out[j] = "_"
-                j += 1
-            if text[j] not in _BREAKS:
-                out[j] = "_"
-            j += 1
-        i = j + 1
-    return "".join(out)
-
-
-# a call chain a JS-style runner declares a test with: `it(`, `it.only(`, `test.concurrent(`,
-# `test.skipIf(c)(`, `it.runIf(c)(` — the head, then members and calls
-_CHAIN_HEAD = re.compile(r"(?<![\w$])(?:it|test|specify|should)\b")
-_MEMBER = re.compile(r"\s*\.\s*([A-Za-z_$][\w$]*)")
-
-
-def _close(masked: str, i: int, lo: str = "(", hi: str = ")") -> int:
-    """The index of the bracket closing the one at `i` in the masked text, or -1."""
-    depth = 0
-    for j in range(i, len(masked)):
-        if masked[j] == lo:
-            depth += 1
-        elif masked[j] == hi:
-            depth -= 1
-            if not depth:
-                return j
-    return -1
-
-
-def _skip_space(masked: str, i: int) -> int:
-    while i < len(masked) and masked[i].isspace():
-        i += 1
-    return i
-
-
-def _literal_at(text: str, masked: str, i: int) -> str | None:
-    """The string literal starting at `i` (its raw contents), or None."""
-    if i >= len(masked) or masked[i] not in _QUOTES:
-        return None
-    end = masked.find(masked[i], i + 1)
-    return text[i + 1:end] if end > 0 else None
-
-
-def _call_titles(text: str, masked: str) -> list[str]:
-    """The first argument of the last call of each chain on one line that starts with
-    `it|test|specify|should` and holds no `.each` — the title a runner declares a test by.
-    Searched on the masked line: a call inside a string is no call (plan-review v2.79 R3)."""
-    titles = []
-    for m in _CHAIN_HEAD.finditer(masked):
-        i, each = m.end(), False
-        while True:
-            member = _MEMBER.match(masked, i)
-            if member:
-                each = each or member.group(1) == "each"
-                i = member.end()
-                continue
-            i = _skip_space(masked, i)
-            if i >= len(masked) or masked[i] != "(":
-                break
-            end = _close(masked, i)
-            after = _skip_space(masked, end + 1) if end >= 0 else len(masked)
-            if end < 0 or after >= len(masked) or masked[after] not in "(.":
-                title = _literal_at(text, masked, _skip_space(masked, i + 1))
-                if title is not None and not each:
-                    titles.append(title)
-                break
-            i = end + 1
-    return titles
-
-
-# `it.each(table)("title", …)` / ``test.only.each`table`("title", …)`` — the table may span
-# lines; the title follows `)(`/`` `( `` or starts the next line. `describe.each` names a
-# suite, not a test: the tests in it declare their own `it`
-_EACH = re.compile(r"(?<![\w$])(?:it|test)(?:\s*\.\s*(?!each\b)[A-Za-z_$][\w$]*)*\s*\.\s*each\b")
-
-
-def _each_titles(text: str, masked: str) -> dict[int, list[str]]:
-    """Line of each `.each` opener -> the title templates it declares."""
+def _titles(lines: list[str], code: list[int]) -> dict[int, list[str]]:
+    """Code line -> the titles it declares (`_TITLE`). A split call declares at the line of
+    its keyword, so `it.skip(` reads as skipped."""
     out: dict[int, list[str]] = {}
-    for m in _EACH.finditer(masked):
-        i = _skip_space(masked, m.end())
-        if i >= len(masked) or masked[i] not in "(`":
-            continue
-        end = _close(masked, i) if masked[i] == "(" else masked.find("`", i + 1)
-        if end < 0:
-            continue
-        i = _skip_space(masked, end + 1)
-        if i >= len(masked) or masked[i] != "(":
-            continue
-        title = _literal_at(text, masked, _skip_space(masked, i + 1))
-        if title is not None:
-            out.setdefault(masked.count("\n", 0, m.start()), []).append(title)
+    for k, i in enumerate(code):
+        found = [m.group("title") for m in _TITLE.finditer(lines[i])]
+        if _OPEN_CALL.search(lines[i]) and k + 1 < len(code) and (m := _LEADING.match(lines[code[k + 1]])):
+            found.append(m.group("title"))
+        if found:
+            out[i] = found
     return out
 
 
-# what a placeholder of an `.each` title covers: vitest/jest's printf forms, `$name`/`$a.b`
-# of an object or tagged-template row, and a template literal's `${…}`
-_EACH_PART = re.compile(r"%%|%[dif#sjoOpc]|\$\{[^}]*\}|\$[A-Za-z_]\w*(?:\.\w+)*")
-_EACH_COVERS = {"%d": r"-?\d+", "%i": r"-?\d+", "%#": r"\d+",
+def _each_titles(lines: list[str], code: list[int], decls: list[int]) -> dict[int, list[str]]:
+    """Line of each `.each` opener -> the title template it declares: the first literal
+    directly after `)(`/`` `( `` from the opener line up to the next declaration, or the
+    literal starting the line after one that ends in `)(`/`` `( ``. No bracket matching."""
+    out: dict[int, list[str]] = {}
+    stops = set(decls)
+    for k, i in enumerate(code):
+        if not _EACH.search(lines[i]):
+            continue
+        for at in range(k, len(code)):
+            j = code[at]
+            if at > k and j in stops:
+                break
+            m = _EACH_TITLE.search(lines[j])
+            if not m and _EACH_OPEN.search(lines[j]) and at + 1 < len(code):
+                m = _LEADING.match(lines[code[at + 1]])
+            if m:
+                out[i] = [m.group("title")]
+                break
+    return out
+
+
+# what a placeholder of an `.each` title covers: vitest/jest's printf forms, vitest's `%$`
+# (the 1-based row index), `$name`/`$a.b` of an object or tagged-template row, and a
+# template literal's `${…}`
+_EACH_PART = re.compile(r"%%|%\$|%[dif#sjoOpc]|\$\{[^}]*\}|\$[A-Za-z_]\w*(?:\.\w+)*")
+_EACH_COVERS = {"%d": r"-?\d+", "%i": r"-?\d+", "%#": r"\d+", "%$": r"\d+",
                 "%f": r"(?:-?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?|NaN|-?Infinity)", "%%": "%"}
 
 
 def _each_title_matches(template: str, name: str) -> bool:
     """The `.each` title `template` yields `name` whole: `%d`/`%i` cover an integer, `%f` a
-    number, `%#` a row index, `%%` a `%`; `%s %j %o %O %p %c`, `$name` and `${…}` a non-empty
-    piece. No substring hit. Whether a row of the table yields exactly this name is not read
-    (that is evaluating JavaScript — a named residual; `red_evidence.py --junit` measures
-    the name that ran)."""
+    number, `%#`/`%$` a row index, `%%` a `%`; `%s %j %o %O %p %c`, `$name` and `${…}` a
+    non-empty piece. No substring hit. Whether a row of the table yields exactly this name is
+    not read (that is evaluating JavaScript — a named residual; `red_evidence.py --junit`
+    measures the name that ran)."""
     pattern, at = "", 0
     for m in _EACH_PART.finditer(template):
         pattern += re.escape(template[at:m.start()]) + _EACH_COVERS.get(m.group(0), ".+")
@@ -1607,48 +1545,59 @@ def _each_title_matches(template: str, name: str) -> bool:
     return re.fullmatch(pattern + re.escape(template[at:]), name) is not None
 
 
-def _declares_test(lines: list[str], masked: list[str], i: int, name: str,
+def _declares_test(lines: list[str], i: int, name: str, titles: dict[int, list[str]],
                    each: dict[int, list[str]]) -> bool:
-    """Line `i` declares the test `name` the way its runner collects tests: a JS-style
-    `it(`/`test(` with the name as its title, an `it.each`/`test.each` whose title
-    template yields the name (`each`: `_each_titles`), `func test…`/`func Test…` (XCTest,
-    Go), `fun`/`fn`/`def test…`, or any function the line above marks `@Test`/`#[test]`.
-    `masked` are the lines with string contents blanked (`_mask`)."""
+    """Line `i` declares the test `name` the way its runner collects tests: a title literal
+    directly after `it`/`test`/`specify`/`should` (`titles`: `_titles`), an
+    `it.each`/`test.each` whose title template yields the name (`each`: `_each_titles`),
+    `func test…`/`func Test…` (XCTest, Go), `fun`/`fn`/`def test…`, a Kotlin-style
+    ``fun `name`(`` named `test…`, or any of these functions an `@Test`/`#[test]` attribute
+    marks (on the line or right above)."""
     ln = lines[i]
-    if name in _call_titles(ln, masked[i]) or any(_each_title_matches(t, name) for t in each.get(i, ())):
+    if name in titles.get(i, ()) or any(_each_title_matches(t, name) for t in each.get(i, ())):
         return True
+    above = [lines[j] for j in range(i - 1, -1, -1) if lines[j].strip()][:3]
+    marked = any(_TEST_ATTR.match(a) for a in (ln, *above))
+    if re.search(rf"\b(?:fun|func)\s+`{re.escape(name)}`\s*\(", ln):
+        return marked or re.match(r"(?i)test", name) is not None
     if not (name.isidentifier() and re.search(rf"(?<![\w$]){re.escape(name)}(?![\w$])", ln)):
         return False
     if re.search(rf"\b(?:func|fun|fn|def|void)\s+{re.escape(name)}\b", ln) and re.match(r"(?i)test", name):
         return True
-    above = [lines[j] for j in range(i - 1, -1, -1) if lines[j].strip()][:3]
-    return any(_TEST_ATTR.match(a) for a in above)
+    return marked
 
 
 def _other_status(text: str, file: str, name: str, rules: dict) -> str | None:
+    """None: `file` declares the test `name` (`_declares_test`) and no skip marker stands on
+    its attribute lines, its declaring line, its body up to the next declaration, or a setup
+    of the file; else why not. Raw lines, plain line rules — no JavaScript is parsed.
+    Named residuals: a string whose text is a whole test call (`"it('x')"`) declares `x`; a
+    test inside a block comment whose lines start with neither `*` nor `//` still counts; a
+    skip word inside a string counts as a skip (fail-closed); whether an `.each` row yields
+    the exact name is not checked (`_each_title_matches`)."""
     if file.lower().endswith(_NOT_CODE) or not any(fnmatch.fnmatchcase(file, g) for g in rules["test_files"]):
         return (f"{file} is no test file this project declares (test_files: review_evidence in "
                 f"model-policy.json)")
     lines = text.splitlines()
-    whole = _mask(text)
-    masked = whole.splitlines()
     code = [i for i, ln in enumerate(lines) if ln.strip() and not _COMMENT.match(ln)]
-    decls = [i for i in code if _DECLARES.search(lines[i]) or _SETUP.search(lines[i])]
-    each = _each_titles(text, whole)
-    mine = [i for i in code if _declares_test(lines, masked, i, name, each)]
+    decls = [i for i in code if _DECLARING.search(lines[i]) or _EACH.search(lines[i])
+             or _DECLARES.search(lines[i]) or _SETUP.search(lines[i])]
+    titles = _titles(lines, code)
+    each = _each_titles(lines, code, decls)
+    mine = [i for i in code if _declares_test(lines, i, name, titles, each)]
     if not mine:
         return (f"{file} declares no test {name!r} at head (a runner's test form: `it(\"{name}\"`, "
-                f"`it.each(…)(\"<template>\"`, `func test…`, or an `@Test`/`#[test]` function)")
+                f"`it \"{name}\" do`, `it.each(…)(\"<template>\"`, `func test…`, or an "
+                f"`@Test`/`#[test]` function)")
 
     def span(i: int) -> list[str]:
         # the attribute lines right above, the declaring line (an `.each` opener's line, so
-        # `it.skip.each` reads as skipped), the body up to the next declaration — with string
-        # contents masked: a cell `"state.todo"` or a title "handles .skip flags" is no skip
+        # `it.skip.each` reads as skipped), the body up to the next declaration
         top = i
         while top - 1 >= 0 and _ATTRIBUTE.match(lines[top - 1]):
             top -= 1
         nxt = next((d for d in decls if d > i), len(lines))
-        return [masked[j] for j in range(top, nxt) if j == i or not _COMMENT.match(lines[j])]
+        return [ln for j, ln in enumerate(lines[top:nxt], top) if j == i or not _COMMENT.match(ln)]
 
     # a setup of the file (setUp*, beforeEach/All, TestMain) that skips runs before each test
     if any(_OTHER_SKIP.search(ln) for d in decls if _SETUP.search(lines[d]) for ln in span(d)):
