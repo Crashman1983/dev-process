@@ -25,8 +25,10 @@ A repository without any remote (`git remote` prints nothing, #330) merges
 locally: no fetch (a local `<default>` ahead of the branch is rebased in), the
 gates run with the merge target as the push to main would run them, then the
 fast-forward — no push, no route marker, no certificate — and the merged
-branch is deleted. A remote-tracking ref the gates anchor on is stale there by
-construction; it blocks until removed.
+branch is deleted. `--tests-passed` is refused there: no pre-push runs the
+suite behind the claim, so `--tests CMD` runs it. A remote-tracking ref the
+gates anchor on is stale there by construction; it blocks until removed, and
+one git cannot list blocks too.
 
 Checks, in order:
   1. on a feature branch (finishing main is meaningless)
@@ -129,14 +131,17 @@ def _upstream(default: str, local_only: bool) -> str:
     return default if local_only else f"origin/{default}"
 
 
-def _anchoring_tracking_refs(default: str) -> list[str]:
+def _anchoring_tracking_refs(default: str) -> list[str] | None:
     """The remote-tracking refs the gates anchor on (`check_review._integration_base`:
     `<remote>/main`, `/master`, the default and `/HEAD`). Without a remote each is
     stale by construction, and the gates would judge against it. A left-over
-    `old/feature` anchors nothing and is not named."""
+    `old/feature` anchors nothing and is not named. None when git cannot list
+    them — unknown, never "none"."""
     names = dict.fromkeys(("main", "master", default, "HEAD"))
     out = _git("for-each-ref", "--format=%(refname)", *(f"refs/remotes/*/{n}" for n in names))
-    return [ref.removeprefix("refs/remotes/") for ref in (out or "").splitlines() if ref.strip()]
+    if out is None:
+        return None
+    return [ref.removeprefix("refs/remotes/") for ref in out.splitlines() if ref.strip()]
 
 
 def _branches_to_finish(root: Path, default: str, limit: int = 8) -> str:
@@ -196,7 +201,11 @@ def check(root: Path) -> tuple[list[str], list[str]]:
     default = _default_branch()
     local_only = _local_only()
     stale_refs = _anchoring_tracking_refs(default) if local_only else []
-    if stale_refs:
+    if stale_refs is None:
+        blockers.append("the repository has no remote, and git could not list remote-tracking "
+                        "refs (`git for-each-ref refs/remotes`) — a stale one would anchor the "
+                        "gates; repair the ref store (`git fsck`) and run finish again")
+    elif stale_refs:
         blockers.append(f"the repository has no remote, but the gates anchor on the stale "
                         f"tracking ref(s) {', '.join(stale_refs)} — remove them: "
                         + " && ".join(f"git branch -r -d {ref}" for ref in stale_refs))
@@ -451,6 +460,11 @@ def apply(root: Path, *, tests: str | None, tests_passed: bool) -> int:
     branch = _git("rev-parse", "--abbrev-ref", "HEAD")
     default = _default_branch()
     local_only = _local_only()
+    if local_only and tests_passed and not tests:
+        # the claim is checked by the push's pre-push only; a local merge pushes nothing
+        print("finish: `--tests-passed` is refused — without a remote no pre-push runs the "
+              "suite: pass --tests <command> (nothing applied)")
+        return 1
     upstream = _upstream(default, local_only)
     # 1. archive the branch-owned plans ON the branch
     to_archive = list(getattr(check, "last_archive", []))
@@ -527,7 +541,9 @@ def apply(root: Path, *, tests: str | None, tests_passed: bool) -> int:
         certifies = "" if local_only else " and writes the merge certificate"
         print("finish: applied archive + rebase; stopped before the merge — "
               + (f"re-run with `--apply --tests` (it runs `{suite}`{certifies})"
-                 if suite else "run the FULL test suite now, then re-run with "
+                 if suite else "re-run with `--apply --tests CMD` (it runs the FULL test "
+                 "suite here; without a remote a claim has no pre-push to check it)"
+                 if local_only else "run the FULL test suite now, then re-run with "
                  "`--apply --tests-passed` (or pass `--tests CMD` to run it here)"))
         return 0
     # 4. A worktree must not check out main while another checkout owns it.
@@ -705,9 +721,12 @@ def main() -> int:
     print("finish: ready — remaining tail, in order:")
     for i, step in enumerate(tail, 1):
         print(f"  {i}. {step}")
-    merge = "local merge and branch delete" if _local_only() else "merge, push, branch delete"
-    print(f"finish: `--apply` executes archive + rebase (+ {merge} once the full suite is "
-          f"asserted via --tests CMD or --tests-passed)")
+    if _local_only():
+        print("finish: `--apply` executes archive + rebase (+ local merge and branch delete "
+              "once --tests CMD ran the full suite; without a remote --tests-passed is refused)")
+    else:
+        print("finish: `--apply` executes archive + rebase (+ merge, push, branch delete once "
+              "the full suite is asserted via --tests CMD or --tests-passed)")
     print(f"finish: {usage(root, _git('rev-parse', '--abbrev-ref', 'HEAD'))[1]}")
     return 0
 

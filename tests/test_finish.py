@@ -671,7 +671,7 @@ def test_apply_without_a_remote_merges_locally_and_deletes_the_branch(render, tm
     _failing_pre_push(out, seen)
     # a leftover tracking ref the gates never anchor on blocks nothing
     _git(out, "update-ref", "refs/remotes/old/feature", "HEAD")
-    r = _run_args(out, "--apply", "--tests-passed")
+    r = _run_args(out, "--apply", "--tests", "true")  # without a remote a claim is refused
     assert r.returncode == 0, r.stdout + r.stderr
     assert "merged feature into main locally (the repository has no remote)" in r.stdout, r.stdout
     assert _git(out, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip() == "main"
@@ -704,7 +704,7 @@ def test_a_local_main_ahead_of_the_branch_is_rebased_in(render, tmp_path):
     _git(out, "commit", "-q", "-m", "feat: main moved")
     moved = _git(out, "rev-parse", "HEAD").stdout.strip()
     _git(out, "checkout", "-q", "feature")
-    r = _run_args(out, "--apply", "--tests-passed")
+    r = _run_args(out, "--apply", "--tests", "true")
     assert r.returncode == 0, r.stdout + r.stderr
     assert "finish: rebased" in r.stdout
     assert subprocess.run(["git", "merge-base", "--is-ancestor", moved, "main"], cwd=out).returncode == 0
@@ -725,7 +725,7 @@ def test_a_red_merge_gate_stops_the_local_merge(render, tmp_path, elsewhere):
     _git(out, "add", "-A")
     _git(out, "commit", "-q", "-m", "feat: widget with pass")
     main_before = _git(out, "rev-parse", "main").stdout
-    r = _run_args(out, "--apply", "--tests-passed")
+    r = _run_args(out, "--apply", "--tests", "true")
     assert r.returncode == 1, r.stdout + r.stderr
     assert "open task at the merge" in r.stdout, r.stdout
     assert _git(out, "rev-parse", "main").stdout == main_before  # nothing merged
@@ -738,7 +738,7 @@ def test_without_a_remote_the_checkout_holding_main_is_advanced(render, tmp_path
     (wt / "payload.txt").write_text("done\n", encoding="utf-8")
     _git(wt, "add", "-A")
     _git(wt, "commit", "-q", "-m", "feat: payload")
-    r = _run_args(wt, "--apply", "--tests-passed")
+    r = _run_args(wt, "--apply", "--tests", "true")
     assert r.returncode == 0, r.stdout + r.stderr
     assert "locally (the repository has no remote)" in r.stdout
     assert _git(main_checkout, "rev-parse", "HEAD").stdout == _git(wt, "rev-parse", "HEAD").stdout
@@ -755,7 +755,7 @@ def test_a_refused_fast_forward_in_the_checkout_holding_main_merges_nothing(rend
     _git(wt, "commit", "-q", "-m", "feat: payload")
     (main_checkout / "payload.txt").write_text("in the way\n", encoding="utf-8")  # untracked there
     main_before = _git(main_checkout, "rev-parse", "HEAD").stdout
-    r = _run_args(wt, "--apply", "--tests-passed")
+    r = _run_args(wt, "--apply", "--tests", "true")
     assert r.returncode == 1, r.stdout + r.stderr
     assert _git(main_checkout, "rev-parse", "HEAD").stdout == main_before
     assert "merged feature" not in r.stdout
@@ -799,3 +799,46 @@ def test_a_repository_with_another_remote_stays_on_the_push_path(render, tmp_pat
     assert r.returncode == 1, r.stdout + r.stderr
     assert "no remote" not in r.stdout
     assert _has_branch(out, "feature")
+
+
+def test_tests_passed_without_a_remote_is_refused_before_anything_merges(render, tmp_path):
+    """Fix round 1: without a remote no pre-push runs the suite, so the claim is never checked
+    — a stack whose full suite is red merged on `--tests-passed`. `--tests <command>` runs it."""
+    out = _repo_without_remote(render, tmp_path)
+    (out / "suite.sh").write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")  # the red full suite
+    (out / "suite.sh").chmod(0o755)
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "test: a red suite")
+    head, main_before = _git(out, "rev-parse", "HEAD").stdout, _git(out, "rev-parse", "main").stdout
+    r = _run_args(out, "--apply", "--tests-passed")
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert "without a remote no pre-push runs the suite: pass --tests <command>" in r.stdout, r.stdout
+    assert "nothing applied" in r.stdout
+    assert _git(out, "rev-parse", "HEAD").stdout == head  # not even the archive commit
+    assert _git(out, "rev-parse", "main").stdout == main_before
+    assert _git(out, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip() == "feature"
+    assert not [e for e in _reports(out) if e["state"] == "done"]
+    r = _run_args(out, "--apply", "--tests", "./suite.sh")
+    assert r.returncode == 1 and "full suite red — not merging" in r.stdout, r.stdout + r.stderr
+    assert _git(out, "rev-parse", "main").stdout == main_before
+
+
+def test_an_unreadable_tracking_ref_list_without_a_remote_is_a_blocker(render, tmp_path):
+    """Fix round 1: a failing `git for-each-ref` read as "no tracking refs" — never "none"."""
+    import shutil
+    out = _repo_without_remote(render, tmp_path / "work")
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    (bindir / "git").write_text(
+        "#!/bin/sh\ncase \"$*\" in *for-each-ref*refs/remotes/*) "
+        "echo 'fatal: bad ref store' >&2; exit 128;; esac\n"
+        f'exec "{shutil.which("git")}" "$@"\n', encoding="utf-8")
+    (bindir / "git").chmod(0o755)
+    env = {**os.environ, "PATH": f"{bindir}{os.pathsep}{os.environ['PATH']}"}
+    main_before = _git(out, "rev-parse", "main").stdout
+    for args in ((), ("--apply", "--tests", "true")):
+        r = subprocess.run([sys.executable, str(out / "scripts/process/finish.py"), *args, "."],
+                           cwd=out, capture_output=True, text=True, env=env)
+        assert r.returncode == 1, (args, r.stdout + r.stderr)
+        assert "could not list remote-tracking refs" in r.stdout, (args, r.stdout)
+    assert _git(out, "rev-parse", "main").stdout == main_before
