@@ -59,7 +59,7 @@ from typing import NamedTuple
 sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling import
-from attest import ROOT_CAUSE, _journal_target  # noqa: E402  (one grammar, one journal home)
+from attest import ROOT_CAUSE, _journal_target, journal_dir_problem  # noqa: E402  (one grammar, one journal home)
 from attest_evidence import (  # noqa: E402  (the gate's reading, one journal-path owner)
     _attestation_reads, append_checked, attest_name, identity_of, resolve_tests, review_policy)
 from check_review import JOURNAL_DIR, readable  # noqa: E402
@@ -571,6 +571,10 @@ def main(argv: list[str]) -> int:
     journal_dir = Path(args.journal_dir) if args.journal_dir else Path(JOURNAL_DIR)
     if not journal_dir.is_absolute():
         journal_dir = root / journal_dir
+    problem = journal_dir_problem(root, journal_dir)
+    if problem:
+        print(f"red_evidence: {problem}", file=sys.stderr)
+        return 2
     target = _journal_target(root, journal_dir)
     # the same path owner as attest: a symlink, a symlink parent, an outside path or a
     # non-file shard is refused before anything is measured or appended
