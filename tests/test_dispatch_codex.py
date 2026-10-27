@@ -18,7 +18,8 @@ sys.dont_write_bytecode = True
 MODULES = ("dispatch", "_dispatch_codex", "attest", "attest_evidence", "check_review", "report", "process_git",
            "tower", "lane", "gate_invoke", "merge_route", "check_fix_streak", "plan_drift")
 PLAN = ("# Plan\n\nissue: #7\ntier: 2\nplan-session model: claude-opus-5\n\n## Decisions\n\n"
-        "## Acceptance criteria\n\n- AC-1: When x, the widget shall answer 42.\n")
+        "## Acceptance criteria\n\n- AC-1: When x, the widget shall answer 42.\n\n"
+        "## Acceptance → tests\n\nAC-1: tests/test_widget.py::test_widget\n")
 TEST = "from widget import widget\n\ndef test_widget():\n    assert widget() == 42\n"
 
 
