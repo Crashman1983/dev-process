@@ -2499,7 +2499,7 @@ def load_table(root: Path, *, weeks: int = _LOAD_WEEKS, now: datetime | None = N
                      "ratio": round(proc / prod, 2) if known and prod else None,
                      "process_files_median": (statistics.median(len(e["process_files"]) for e in known)
                                               if known else None),
-                     "without_product": sum(1 for e in known if not e["files"]),
+                     "without_product": sum(1 for e in known if not e["files"]) if known else None,
                      "outside_process_lines": _outside(evs, "stray_process_lines"),
                      "outside_product_lines": _outside(evs, "stray_product_lines")})
     return {"available": True, "why": None, "weeks": rows, "shallow": got["shallow"]}
@@ -2526,7 +2526,7 @@ def load(root: Path | None = None, weeks: int = _LOAD_WEEKS, *, as_json: bool = 
         ratio = "—" if r["ratio"] is None else f"{r['ratio']:g}"
         print(f"  week {r['week']}: {r['merges']:>4} merges — product {_num(r['product_lines'])} lines, process "
               f"{_num(r['process_lines'])} lines ({ratio} per product line); process files per merge median "
-              f"{_num(r['process_files_median'])}; {r['without_product']} merges without a product file"
+              f"{_num(r['process_files_median'])}; {_num(r['without_product'])} merges without a product file"
               + (f"; {r['unknown']} with an unknown range" if r["unknown"] else "")
               + (f"; outside merge ranges: process {_num(r['outside_process_lines'])}, product "
                  f"{_num(r['outside_product_lines'])} lines"
@@ -2545,7 +2545,8 @@ _TOP_FILES = 15
 
 
 def _size_step(lines: int) -> str:
-    return "<200" if lines < 200 else "200-500" if lines <= 500 else "500-1500" if lines <= 1500 else ">1500"
+    # each boundary in one step only: 200 and 500 open the next step, 1500 closes its own
+    return "<200" if lines < 200 else "200-500" if lines < 500 else "500-1500" if lines <= 1500 else ">1500"
 
 
 def _round_cell(members: list[dict]) -> dict:
@@ -2591,6 +2592,8 @@ def size_table(root: Path, lo: datetime = _ALL_TIME[0], hi: datetime = _ALL_TIME
         moved = dict(e["renames"])
         for key, name in current.items():
             current[key] = moved.get(name, name)
+        for old, new in moved.items():  # a file first merged before the window
+            current.setdefault(old, new)
         for path, n in e["files"].items():
             current.setdefault(path, path)
             lines_on[path] = lines_on.get(path, 0) + n
@@ -2606,11 +2609,13 @@ def size_table(root: Path, lo: datetime = _ALL_TIME[0], hi: datetime = _ALL_TIME
         members = [w for w in works_ if w["lines"] is not None and _size_step(w["lines"]) == label]
         both = [w for w in members if w["rounds"] is not None]
         lines = sum(w["lines"] for w in both)
+        # n/a: the step has no product lines; None: none of its works has a review round
+        per_100 = (None if not both and any(w["lines"] for w in members) else
+                   round(100 * sum(w["rounds"] for w in both) / lines, 2) if lines else "n/a")
         with_process = [w for w in members if w["process"] is not None]
         product = sum(w["lines"] for w in with_process)
         buckets[label] = {**_round_cell(members),
-                          "rounds_per_100_lines": round(100 * sum(w["rounds"] for w in both) / lines, 2)
-                          if lines else "n/a",
+                          "rounds_per_100_lines": per_100,
                           "process_per_product_line": round(sum(w["process"] for w in with_process) / product, 2)
                           if product else "n/a"}
     stacks = _stacks(root)

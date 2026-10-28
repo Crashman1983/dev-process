@@ -41,9 +41,10 @@ suite and push), its start the earliest author time over its ranges
 (`estimated`; a dispatch start of the host wins, `measured`), its product lines
 the added plus deleted lines on product paths of each range (`git diff -M`;
 `tower.is_process_path` decides process; binary files count 0, apart). A merge
-without a marker (a hand merge, a PR squash, a commit past the hooks) falls into
-the next event's range and makes it *mixed* — so does a commit claiming another
-issue, and, since a fast-forward cannot tell a branch's commits from others, a
+without a marker (a hand merge, a PR squash, a commit past the hooks) before a
+train merge is no part of it: it counts as a commit outside a merge range (the
+header and `load` name them); before a `finish` event it falls into that range
+and makes it *mixed* — so does a commit claiming another issue, and, since a fast-forward cannot tell a branch's commits from others, a
 product commit in a `finish` range that claims nothing: a mixed range's lines
 and start are `estimated`. The first `finish` event with no event before it has
 no lower bound: its lines and start are unknown (`—`). Host traces (reports,

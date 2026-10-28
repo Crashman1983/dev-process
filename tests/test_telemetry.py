@@ -2031,6 +2031,50 @@ def test_size_counts_lines_on_vanished_files_and_follows_renames_forward(render,
     assert m.size_table(out, *m._window(":"))["vanished"] == {"lines": 20, "of": 50, "share": 0.4}
 
 
+def test_size_steps_do_not_share_a_boundary_and_unreviewed_rounds_are_unknown(render, tmp_path):
+    """A cross-model review: 500 sat in "200-500" while "500-1500" reads as starting there;
+    and a step whose works carry no REVIEW round printed rounds per 100 lines as `n/a` — the
+    mark for a step without product lines — instead of unknown."""
+    out = _merges_repo(render, tmp_path)
+    _train_merge(out, "50-a", [("feat: a (#50)", {"src/a.py": _lines(50)}, _at(2))],
+                 "train: merge 50-a\n\nCloses #50", _at(2, 12))
+    m = _flow_module(out)
+    assert [m._size_step(n) for n in (199, 200, 499, 500, 1500, 1501)] == [
+        "<200", "200-500", "200-500", "500-1500", "500-1500", ">1500"]
+    b = m.size_table(out, *m._window(":"))["buckets"]
+    assert (b["<200"]["works"], b["<200"]["rounds_per_100_lines"]) == (1, None)
+    assert b["200-500"]["rounds_per_100_lines"] == "n/a"
+
+
+def test_size_follows_a_rename_of_a_file_first_merged_before_the_window(render, tmp_path):
+    """A work's files sum over all its events; a file it added before the window and renamed
+    inside it counted twice among the hotspots (old and new name)."""
+    out = _merges_repo(render, tmp_path)
+    _train_merge(out, "60-a", [("feat: a (#60)", {"src/old.py": _lines(30)}, _at(2))],
+                 "train: merge 60-a\n\nRefs #60", _at(2, 12))
+    _g(out, "checkout", "-q", "-b", "60-b", "main")
+    _g(out, "mv", "src/old.py", "src/new.py")
+    _put(out, "refactor: rename (#60)", {"src/c.py": _lines(2)}, _at(4))
+    _g(out, "checkout", "-q", "main")
+    _g(out, "merge", "-q", "--no-ff", "-m", "train: merge 60-b\n\nCloses #60", "60-b", when=_at(4, 12))
+    m = _flow_module(out)
+    top = {f["file"] for f in m.size_table(out, *m._window("2026-03-04:"))["top_files"]}
+    assert top == {"src/new.py", "src/c.py"}, top
+
+
+def test_load_does_not_count_merges_without_a_product_file_when_no_range_is_known(render, tmp_path):
+    """Every merge of the week with an unknown range: the lines read `—`, and so must the
+    count of merges without a product file — not a measured 0."""
+    from datetime import datetime, timezone
+    out = _merges_repo(render, tmp_path)
+    _finish_merge(out, "70-a", [("feat: a (#70)", {"src/a.py": _lines(3),
+                                                   ".process-work/plans/2026-03-02-a.md": _plan_text(70)}, _at(2))],
+                  ["2026-03-02-a.md"], _at(2, 12))  # the first finish: no event before it
+    m = _flow_module(out)
+    w = m.load_table(out, weeks=1, now=datetime(2026, 3, 7, tzinfo=timezone.utc))["weeks"][0]
+    assert (w["merges"], w["unknown"], w["without_product"]) == (1, 1, None), w
+
+
 def test_report_runs_the_families_the_doc_names(render, tmp_path):
     import re
     out = _alpha_beta(render, tmp_path)
