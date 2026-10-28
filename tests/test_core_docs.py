@@ -1088,3 +1088,61 @@ def test_the_monthly_review_reads_the_baseline_before_tidy(render, tmp_path):
     assert "process_kpis.py baseline" in monthly
     assert monthly.index("process_kpis.py baseline") < monthly.index("tidy.py --apply")
     assert "- Baseline:" in (out / "docs/process/improvement-monthly.md").read_text()
+
+
+# --- v2.80 R: relief rules in the docs, advice only, no gate --------------------------
+
+def test_the_plan_advises_a_cut_by_size_and_at_the_stack_boundary(render, tmp_path):
+    """R1/R2: downstream, works above 1,500 product lines needed three or more rounds in
+    53 % (under 200: 10 %), work across stacks in 44 % (one stack: 18 %) — the plan checks
+    the cut as advice; `size` measures whether it pays, where telemetry ships."""
+    full = render(tmp_path / "full", {"project_name": "demo",
+                                      "modules": {"speckit": True, "telemetry": True}})
+    bare = render(tmp_path / "bare", {"project_name": "demo", "modules": {}})
+    for out in (full, bare):
+        plan = _flat(out / ".claude/commands/plan.md")
+        assert "split along contracts into stacked plans (*phase-of*)" in plan
+        assert ("a plan that expects clearly more than about 500 product lines checks, before "
+                "its plan review, a split into stacked plans") in plan
+        assert "advice, not a field" in plan
+        assert "plan review, review, attestation, merge" in plan
+        assert "first the contract as its own work, then each side" in plan
+        review = _flat(out / ".claude/commands/review.md")
+        assert '(`/plan`, "Cut by size and at the stack boundary")' in review
+    assert "`process_kpis.py size`" in _flat(full / ".claude/commands/plan.md")
+    assert "size`" not in _flat(bare / ".claude/commands/plan.md")  # no telemetry, no report
+
+
+def test_an_open_approach_is_a_spike_first_in_plan_and_brainstorm(render, tmp_path):
+    """R5: churn on files that no longer exist was a quarter of the product churn downstream —
+    the spike path existed (workflow.md) but nothing pointed to it when the approach was open."""
+    full = render(tmp_path / "full", {"project_name": "demo",
+                                      "modules": {"speckit": True, "telemetry": True}})
+    bare = render(tmp_path / "bare", {"project_name": "demo", "modules": {}})
+    for out in (full, bare):
+        assert "Spike code is throwaway" in _flat(out / "docs/process/workflow.md")
+        for command in ("plan.md", "brainstorm.md"):
+            text = _flat(out / ".claude/commands" / command)
+            assert 'a spike first (`docs/process/workflow.md`, "Spike")' in text, command
+            assert "no review, no merge" in text, command
+
+
+def test_the_rule_budget_asks_for_yield_and_eight_covered_weeks(render, tmp_path):
+    """R4: every rule costs in every work; removal is argued from eight covered, triaged
+    weeks of events — a thin log answers "unknown", never "candidate"."""
+    from pathlib import Path
+    out = render(tmp_path, {"project_name": "demo"})
+    opt = _flat(out / "docs/process/optimization.md")
+    budget = opt.split("**The rule budget.**", 1)[1].split(" - **", 1)[0]
+    for phrase in ("Every rule costs in every work", "names its expected yield",
+                   "never blocked alone and found no confirmed defect",
+                   "covers those eight weeks", 'the answer is "unknown", not "candidate"'):
+        assert phrase in budget, phrase
+    monthly = _flat(out / "docs/process/improvement-monthly.md")
+    assert '(`optimization.md`, "The rule budget")' in monthly
+    assert '"unknown"' in monthly
+    maintaining = " ".join((Path(__file__).resolve().parents[1] / "MAINTAINING.md").read_text().split())
+    rule = maintaining.split("**Vereinfachen.**", 1)[1].split(" - **", 1)[0]
+    for phrase in ("Jede Regel kostet in jeder Arbeit", "erwarteten Ertrag", "acht Wochen",
+                   "sonst ist die Antwort „unbekannt“, nicht „Kandidat“"):
+        assert phrase in rule, phrase

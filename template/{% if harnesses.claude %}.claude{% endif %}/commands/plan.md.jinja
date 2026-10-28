@@ -24,9 +24,7 @@ lives *inside* the task (failing test first, watched, then the code; two
 commits stay fine). The task is the unit of planning, checkboxes, gate
 runs, and reporting, and every task pays that ritual overhead once — a
 50-task list that could be 30 pays it twenty times for nothing. Split
-tasks by ownership and dependency, never by TDD phase. An expected review
-surface above the bundle size limit (`/review`, "Size") is split along
-contracts into stacked plans (*phase-of*).
+tasks by ownership and dependency, never by TDD phase.
 
 **A `[P]` marker is a no-shared-touchpoint claim, not a vibe.** Disjoint
 files are necessary, not sufficient. Mark two tasks parallel only when
@@ -56,6 +54,28 @@ change. One task = one behaviour, test and implementation (failing test first,
 inside the task); a parallel marker needs disjoint files and a fixed shared
 contract with no shared resource (`docs/process/workflow.md`, Plan).
 {% endif %}
+**Cut by size and at the stack boundary — advice, not a field.** An
+expected review surface above the bundle size limit (`/review`, "Size") is
+split along contracts into stacked plans (*phase-of*). Below that limit the
+cut is still worth a look: a plan that expects clearly more than about 500
+product lines checks, before its plan review, a split into stacked plans
+(*phase-of*) along the contracts — downstream, works above 1,500 product
+lines needed three or more review rounds in half the cases, works under 200
+lines in one of ten. Every split pays a fixed set of process (plan review,
+review, attestation, merge){% if modules.telemetry %}; whether it pays off here, `process_kpis.py size`
+shows on the project's own works (rounds, and process lines per product
+line, by size band){% else %}, so cut where each part is reviewable on its own, not at a
+line count{% endif %}. Work across several stacks checks the cut at the
+boundary: first the contract as its own work, then each side{% if modules.telemetry %} — `size`
+also shows whether work across stacks needs more rounds here{% endif %}.
+
+**An open approach is a spike first.** Where the approach itself is still
+open — whether it can be done, which library, what the interface really
+returns — run a spike first (`docs/process/workflow.md`, "Spike"):
+timeboxed, no review, no merge; what it learns becomes the plan, its code
+does not.{% if modules.telemetry %} Churn on files that no longer exist (`process_kpis.py size`) is
+a hint that approaches were tried out in product code instead.{% endif %}
+
 **A rename, removal or move is inventoried here, before any code — and so is
 every change to something others read:** a version, path or constant (an
 image tag, a pinned version, a port, a path that tests, docs or a Makefile

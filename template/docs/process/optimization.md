@@ -83,6 +83,13 @@ append-only record `docs/process/gate-changes.local.jsonl` sets each gate's mode
   project's normal code review. Setting a reviewed check's mode is
   configuration. Running a check without blocking does not make it
   harmless — it can still change files or call a service.
+- **The rule budget.** Every rule costs in every work: a check runs, a
+  record is written, a reviewer reads it. A new rule or check therefore
+  names its expected yield — the failure it stops and roughly how often.
+  A check that over eight weeks never blocked alone and found no confirmed
+  defect (`nodes`, triage) is a candidate for removal — but only when the
+  event log covers those eight weeks and its blocks are triaged; otherwise
+  the answer is "unknown", not "candidate".
 - **Evidence for weakening** is triage, not raw blocks (`nodes`; failures in
   shadow or sampled mode count apart, as what the gate would have stopped). Keep a
   residual sample (`sampled`) rather than `off`; `off` wants a replacement
