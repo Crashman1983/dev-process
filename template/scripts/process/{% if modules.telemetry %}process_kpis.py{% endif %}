@@ -1102,8 +1102,12 @@ def _population(root: Path, merged: list[dict], lo: datetime, hi: datetime,
             "train": sum(1 for e in events if e["kind"] == "train"),
             "finish": sum(1 for e in events if e["kind"] == "finish"),
             "mixed": sum(1 for e in events if e["mixed"]),
-            "unclaimed": sum(1 for e in events if not e["issues"]),
-            "strays": sum(e.get("strays", 0) for e in events),
+            "unclaimed": sum(1 for e in events if not e["issues"] and not e["plans_unread"]),
+            "plans_unread": sum(1 for e in events if e["plans_unread"]),
+            # a range git could not read (or the first finish without a lower bound) holds no
+            # count of strays or mixing: named as unknown, not summed as 0
+            "unbounded": sum(1 for e in events if not e["bounded"]),
+            "strays": sum(e.get("strays", 0) for e in events if e["bounded"]),
             "unjoined": sum(1 for it in merged if not _joined(it["issue"], plans, rounds)),
             "shallow": git["shallow"], "why": git["why"]}
 
@@ -1114,6 +1118,7 @@ def _population_text(p: dict, label: str = "") -> str:
         return head + f"host reports only {p['host_only']}; git not read ({p['why']})"
     return (head + f"git {p['git']} ({p['train']} train, {p['finish']} finish merges), host reports only "
             f"{p['host_only']}; mixed ranges {p['mixed']}; merges without an issue {p['unclaimed']}; "
+            f"merges with plans git could not read {p['plans_unread']}; ranges unknown {p['unbounded']}; "
             f"joined to no plan or REVIEW line {p['unjoined']}; commits outside a merge range {p['strays']}"
             + ("; shallow clone — history before its boundary is missing, the first range unknown"
                if p["shallow"] else ""))
@@ -1674,7 +1679,7 @@ def _regressions(root: Path, branch: str | None) -> dict[int, list[datetime]] | 
     the branch — unknown, never "no escapes"."""
     from process_git import regression_refs  # noqa: PLC0415
 
-    log = _git_out(root, "log", branch, "-z", "--format=%ct%x01%B") if branch else None
+    log = _git_out(root, "log", branch, "-z", "--format=%ct%x01%B", timeout=_HISTORY_TIMEOUT) if branch else None
     if log is None:
         return None
     out: dict[int, list[datetime]] = defaultdict(list)
@@ -1737,7 +1742,7 @@ _FINISH_ARCHIVE = re.compile(r"^docs: archive plan\(s\) on merge — (?P<names>.
 _TRAIN_REFS = re.compile(r"^Refs #(\d+)\s*$", re.MULTILINE)
 _TEMPLATE_UPDATE = re.compile(r"^template-update:\s*true\s*$", re.MULTILINE)  # as check_review reads it
 _EVENTS_READ: dict[tuple[str, str, str], dict] = {}  # (root, ref, tip) → merge_events: git asked once
-_HISTORY_TIMEOUT = 600  # s, the one whole-history read (merge_events)
+_HISTORY_TIMEOUT = 600  # s, the whole-history reads (merge_events, the Regression-of log)
 
 
 def _claims(message: str) -> set[int]:
@@ -1805,10 +1810,11 @@ def _numstat(root: Path, a: str, b: str) -> list[tuple[int | None, str, str | No
     return got
 
 
-def _branch_plan_issues(root: Path, p1: str, p2: str, branch: str) -> set[int]:
+def _branch_plan_issues(root: Path, p1: str, p2: str, branch: str) -> set[int] | None:
     """The issues of the plans a train merge's branch side owns (`check_review.own_plans`, the
     rule the train settles plans by) — for a merge whose message names none (a plan that stays
-    active, an open task: `train._settle_plans` closes nothing)."""
+    active, an open task: `train._settle_plans` closes nothing); None when git cannot read them
+    (a shallow clone without the merge base, a timeout) — not read, never "no issue"."""
     import check_review as _review  # noqa: PLC0415
     n = _review.branch_issue(branch)
     plans = _review.PLANS_ACTIVE
@@ -1818,7 +1824,9 @@ def _branch_plan_issues(root: Path, p1: str, p2: str, branch: str) -> set[int]:
     own = _review.own_plans(root, p1, p2, {n} if n else set(), read, (plans, _review.SPECS_DIR),
                             lambda rel: rel.endswith(".md") and (rel.startswith(plans + "/")
                                                                  or _review.record_kind(rel) == "spec-plan"))
-    return set().union(*(_review.local_issue_numbers(plain) for _rel, plain, _added in own)) if own else set()
+    if own is None:
+        return None
+    return set().union(*(_review.local_issue_numbers(plain) for _rel, plain, _added in own))
 
 
 def _event(root: Path, table: dict[str, dict], c: dict, prev: str | None, kind: str, m: re.Match) -> dict:
@@ -1830,7 +1838,7 @@ def _event(root: Path, table: dict[str, dict], c: dict, prev: str | None, kind: 
     ev = {"sha": sha, "kind": kind, "when": datetime.fromtimestamp(c["ct"], tz=timezone.utc),
           "branch": None, "plans": [], "issues": [], "claim": "none", "bounded": True, "mixed": False,
           "start": None, "product_lines": None, "process_lines": None, "binary": 0, "files": {},
-          "process_files": [], "renames": [], "product_subjects": [], "strays": 0,
+          "process_files": [], "renames": [], "product_subjects": [], "strays": 0, "plans_unread": 0,
           "stray_process_lines": 0, "stray_product_lines": 0}
     if kind == "train":
         p1, p2 = c["parents"]
@@ -1844,14 +1852,18 @@ def _event(root: Path, table: dict[str, dict], c: dict, prev: str | None, kind: 
         issues = _claims(message) | {int(n) for n in _TRAIN_REFS.findall(message)}
         claim = "message"
         if not issues:
-            issues, claim = _branch_plan_issues(root, p1, p2, ev["branch"]), "plans"
+            got_plans = _branch_plan_issues(root, p1, p2, ev["branch"])
+            issues, claim = got_plans or set(), "plans"
+            ev["plans_unread"] = int(got_plans is None)
     else:
         ev["plans"] = [n.strip() for n in m.group("names").split(",") if n.strip()]
         issues, claim = set(), "plans"
         for name in ev["plans"]:
             text = _git_out(root, "show", f"{sha}:{_review.PLANS_ARCHIVE}/{name}")
-            if text is not None:
-                issues |= _review.local_issue_numbers(_review._unfenced(text))
+            if text is None:
+                ev["plans_unread"] += 1  # not read: its issue is unknown, the merge not "without one"
+                continue
+            issues |= _review.local_issue_numbers(_review._unfenced(text))
         # the first finish without an event before it has no lower bound: it would swallow
         # every commit since the root (the onboarding commit) — unknown, not estimated
         own = _rev_list(root, f"{prev}..{sha}") if prev else None

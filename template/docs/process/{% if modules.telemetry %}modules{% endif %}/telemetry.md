@@ -53,7 +53,10 @@ is `—` elsewhere, never 0. Escapes count from a work's **first** merge (its
 deploy, where a train row has it), on the host and on a clone alike; a `git log`
 that fails leaves them unknown. `baseline`, `works` and `size` print a
 `population` line first: works from git and from host reports only, mixed ranges, merges no
-issue claims, works joined to no plan and no `REVIEW` line, and a shallow clone
+issue claims, merges whose plans git could not read (their issue unknown, not
+"none"), ranges unknown (git could not read them, or the first `finish` without
+a lower bound — no strays or mixing counted for them), commits outside a merge
+range, works joined to no plan and no `REVIEW` line, and a shallow clone
 (its boundary cuts the history).
 
 | family | measures | action (threshold → act) |
