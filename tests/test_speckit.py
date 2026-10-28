@@ -344,6 +344,24 @@ def test_a_rerun_does_not_post_a_part_the_issue_already_holds(render, tmp_path):
     assert log.read_text().count("issue comment 12") == 2
 
 
+def test_comments_over_several_pages_are_read_without_the_graphql_route(render, tmp_path):
+    """`gh api --paginate` prints one JSON array per page, back to back; reading only one
+    array fell back to `gh issue view` (GraphQL, the throttled route) on every issue with
+    more than one page of comments."""
+    out = _render(render, tmp_path)
+    binpath = tmp_path / "bin"
+    binpath.mkdir()
+    (binpath / "gh").write_text(f"""#!{sys.executable}
+import sys
+if sys.argv[1:3] == ["api", "--paginate"]:
+    print('[{{"body": "a"}}]\\n[{{"body": "b"}}]')
+else:
+    sys.exit(1)
+""")
+    (binpath / "gh").chmod(0o755)
+    assert _publish_module(out)._comment_bodies(str(binpath / "gh"), "12") == ["a", "b"]
+
+
 def test_the_publish_verify_needs_this_runs_parts_not_any_marker(render, tmp_path):
     """#343 AC-4: an older marker comment made a post GitHub never kept read as verified."""
     out = _render(render, tmp_path)
