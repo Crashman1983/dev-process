@@ -1523,3 +1523,453 @@ def test_old_code_survives_a_nul_in_a_place(render, tmp_path):
     reviews.mkdir(parents=True)
     (reviews / "9-r2.md").write_text(_old_report("#9", 2, _blocker("src/a%00.py:1", "nul"), head=hr))
     assert _measure(out)["unmeasured"] == {"git-failed": 1}
+
+
+# --- v2.80: merged works from git (#341), works (#314), rounds by number (#318), -------------
+# --- escapes per tier (#320), process load and size ----------------------------------------
+
+def _at(day: int, hour: int = 9) -> str:
+    return f"2026-03-{day:02d}T{hour:02d}:00:00+00:00"
+
+
+def _dt(day: int, hour: int = 9):
+    from datetime import datetime, timezone
+    return datetime(2026, 3, day, hour, tzinfo=timezone.utc)
+
+
+def _g(out: Path, *args: str, when: str | None = None, author: str | None = None) -> str:
+    env = dict(os.environ)
+    if when:
+        env.update(GIT_COMMITTER_DATE=when, GIT_AUTHOR_DATE=author or when)
+    return subprocess.run(["git", "-C", str(out), "-c", "user.email=t@t", "-c", "user.name=t",
+                           "-c", "commit.gpgsign=false", *args], check=True, capture_output=True,
+                          text=True, env=env).stdout.strip()
+
+
+def _put(out: Path, message: str, files: dict, when: str, author: str | None = None) -> None:
+    """One commit: `files` written (None removes one), committed at `when` (author date `author`)."""
+    for rel, text in files.items():
+        if text is None:
+            _g(out, "rm", "-q", rel)
+            continue
+        p = out / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(text, encoding="utf-8")
+    _g(out, "add", "-A")
+    _g(out, "commit", "-q", "--allow-empty", "-m", message, when=when, author=author)
+
+
+def _lines(n: int, tag: str = "x") -> str:
+    return "".join(f"{tag} {i}\n" for i in range(n))
+
+
+def _plan_text(issue: int, tier: int = 2, extra: str = "") -> str:
+    return f"# Plan\n\nissue: #{issue}\ntier: {tier}\n{extra}\n## Decisions\n"
+
+
+def _merges_repo(render, tmp_path, **mods) -> Path:
+    """A project on git: the rendered tree as one onboarding commit, nothing merged yet."""
+    out = _render(render, tmp_path, **mods)
+    _g(out, "init", "-q", "-b", "main")
+    _put(out, "chore: onboard the process", {}, _at(1, 0))
+    return out
+
+
+def _train_merge(out: Path, branch: str, commits: list, message: str, when: str) -> None:
+    """A train merge: `branch` off main with `commits` [(message, files, date)], merged
+    `--no-ff` with `message` (`train: merge <branch>`, then `Closes #N`/`Refs #N`)."""
+    _g(out, "checkout", "-q", "-b", branch, "main")
+    for msg, files, at in commits:
+        _put(out, msg, files, at)
+    _g(out, "checkout", "-q", "main")
+    _g(out, "merge", "-q", "--no-ff", "-m", message, branch, when=when)
+
+
+def _finish_merge(out: Path, branch: str, commits: list, plans: list, when: str) -> None:
+    """A `finish` merge: the branch's commits rebased (author date kept, commit date `when`),
+    its plans archived in `docs: archive plan(s) on merge — <names>`, main fast-forwarded."""
+    _g(out, "checkout", "-q", "-b", branch, "main")
+    for msg, files, at in commits:
+        _put(out, msg, files, when, author=at)
+    (out / ".process-work/plans/archive").mkdir(parents=True, exist_ok=True)
+    for name in plans:
+        _g(out, "mv", f".process-work/plans/{name}", f".process-work/plans/archive/{name}")
+    _put(out, f"docs: archive plan(s) on merge — {', '.join(plans)}", {}, when)
+    _g(out, "checkout", "-q", "main")
+    _g(out, "merge", "-q", "--ff-only", branch)
+
+
+def _clone(out: Path, tmp_path: Path) -> Path:
+    """A fresh clone: no `.git/process-*` — no reports, no dispatch logs, no train rows."""
+    clone = tmp_path / "clone"
+    subprocess.run(["git", "clone", "-q", str(out), str(clone)], check=True, capture_output=True)
+    assert not list((clone / ".git").glob("process-*"))
+    return clone
+
+
+def _cli(root: Path, *args: str) -> str:
+    r = subprocess.run([sys.executable, str(root / "scripts/process/process_kpis.py"), *args],
+                       cwd=root, capture_output=True, text=True)
+    assert r.returncode == 0, r.stdout + r.stderr
+    return r.stdout
+
+
+def _by_issue(m, root: Path, **kw) -> dict:
+    return {it["issue"]: it for it in m.flow_items(root, **kw)}
+
+
+def _alpha_beta(render, tmp_path, **mods) -> Path:
+    """#7 merged by the train, #8 by `finish` (rebased: its commits' commit dates are the merge's)."""
+    out = _merges_repo(render, tmp_path, **mods)
+    _train_merge(out, "7-alpha", [
+        ("docs: plan alpha", {".process-work/plans/2026-03-02-alpha.md": _plan_text(7)}, _at(2)),
+        ("feat: alpha (#7)", {"src/alpha.py": _lines(10)}, _at(3))],
+        "train: merge 7-alpha\n\nCloses #7", _at(4, 12))
+    _finish_merge(out, "8-beta", [
+        ("docs: plan beta", {".process-work/plans/2026-03-05-beta.md": _plan_text(8, 3)}, _at(5)),
+        ("fix: beta (#8)", {"src/beta.py": _lines(5)}, _at(6))],
+        ["2026-03-05-beta.md"], _at(10, 12))
+    return out
+
+
+def test_a_clone_counts_a_train_work_and_a_finish_work_from_git(render, tmp_path):
+    """#341 AC-1/AC-3/AC-5: a fresh clone holds no host trace, and `baseline` said `works 0` —
+    the merged works come from the integration branch: end from git, start from the earliest
+    author time (it survives the rebase `finish` does), product lines over the range."""
+    out = _alpha_beta(render, tmp_path)
+    clone = _clone(out, tmp_path)
+    assert json.loads(_cli(clone, "baseline", "--json"))[0]["works"] == 2
+    items = _by_issue(_flow_module(clone), clone)
+    alpha, beta = items[7], items[8]
+    assert alpha["merged"] == {"value": _dt(4, 12), "quality": "measured"}
+    assert alpha["start"] == {"value": _dt(2), "quality": "estimated"}
+    assert alpha["product_lines"] == {"value": 10, "quality": "measured"}
+    # the archive commit lies before rebase, suite and push: the end is an estimate
+    assert beta["merged"] == {"value": _dt(10, 12), "quality": "estimated"}
+    assert beta["start"] == {"value": _dt(5), "quality": "estimated"}  # not ≈ the end after the rebase
+    assert beta["product_lines"] == {"value": 5, "quality": "measured"}
+    text = _cli(clone, "baseline")
+    assert "population: 2 merged works — git 2 (1 train, 1 finish merges), host reports only 0" in text, text
+    assert "shallow clone" not in text
+    # a shallow clone cuts the history at its boundary commit: the header says so
+    shallow = tmp_path / "shallow"
+    subprocess.run(["git", "clone", "-q", "--depth", "1", f"file://{out}", str(shallow)], check=True,
+                   capture_output=True)
+    assert "shallow clone" in _cli(shallow, "baseline")
+
+
+def test_stacked_phases_are_one_work_and_a_fix_after_the_first_merge_escaped(render, tmp_path):
+    """Two merges of one issue are one work (lines summed, start from the first); a fix under
+    the same issue after the first merge is an escape — on the host and on a clone alike, and
+    a work the host also reports counts once, at git's time."""
+    from datetime import datetime, timezone
+    out = _merges_repo(render, tmp_path)
+    _train_merge(out, "9-one", [("feat: one (#9)", {"src/a.py": _lines(10)}, _at(2))],
+                 "train: merge 9-one\n\nRefs #9", _at(3, 12))
+    _train_merge(out, "9-two", [("fix: guard the edge (#9)\n\nRegression-of: #9", {"src/b.py": _lines(4)}, _at(5))],
+                 "train: merge 9-two\n\nCloses #9", _at(6, 12))
+    clone = _clone(out, tmp_path)
+    (out / ".git/process-tower").mkdir()
+    _report(out, "2026-03-03T12:05:00", "done", "9-one", 9)
+    _report(out, "2026-03-06T12:05:00", "done", "9-two", 9)
+    now = datetime(2026, 10, 1, tzinfo=timezone.utc)
+    for root in (clone, out):
+        items = [it for it in _flow_module(root).flow_items(root, now=now) if it["issue"] == 9]
+        assert len(items) == 1, items
+        [it] = items
+        assert it["product_lines"]["value"] == 14 and it["start"]["value"] == _dt(2)
+        assert it["merged"]["value"] == _dt(6, 12)  # git's time before the report's
+        assert it["escapes"]["value"] == 1 and it["escapes"]["window_open"] is False, (root, it["escapes"])
+    assert it["source"] == "both"
+
+
+def test_a_merge_of_two_issues_is_two_works_and_one_event(render, tmp_path):
+    from datetime import datetime, timezone
+    out = _merges_repo(render, tmp_path)
+    _train_merge(out, "10-pair", [("feat: pair", {"src/p.py": _lines(3)}, _at(2))],
+                 "train: merge 10-pair\n\nCloses #10\nCloses #11", _at(3, 12))
+    m = _flow_module(out)
+    items = _by_issue(m, out)
+    assert items[10]["product_lines"]["value"] == items[11]["product_lines"]["value"] == 3
+    t = m.load_table(out, weeks=1, now=datetime(2026, 3, 7, tzinfo=timezone.utc))
+    assert t["weeks"][0]["merges"] == 1
+
+
+def test_a_merge_without_a_marker_or_claim_makes_the_next_range_mixed(render, tmp_path):
+    """A planless run-up merged by hand falls into the next range; so does a commit straight
+    onto main. Both ranges are mixed: their lines and start are estimates, and counted."""
+    out = _merges_repo(render, tmp_path)
+    _train_merge(out, "1-first", [("feat: first (#1)", {"src/one.py": _lines(2)}, _at(2))],
+                 "train: merge 1-first\n\nCloses #1", _at(2, 12))
+    _g(out, "checkout", "-q", "-b", "spike", "main")
+    _put(out, "feat: spike", {"src/spike.py": _lines(7)}, _at(3))
+    _g(out, "checkout", "-q", "main")
+    _g(out, "merge", "-q", "--no-ff", "-m", "Merge branch 'spike'", "spike", when=_at(3, 12))
+    _finish_merge(out, "12-gamma", [
+        ("docs: plan gamma", {".process-work/plans/2026-03-04-gamma.md": _plan_text(12)}, _at(4)),
+        ("feat: gamma (#12)", {"src/g.py": _lines(4)}, _at(5))], ["2026-03-04-gamma.md"], _at(6, 12))
+    _put(out, "feat: straight onto main", {"src/direct.py": _lines(2)}, _at(7))
+    _train_merge(out, "13-delta", [("feat: delta (#13)", {"src/d.py": _lines(1)}, _at(8))],
+                 "train: merge 13-delta\n\nCloses #13", _at(8, 12))
+    items = _by_issue(_flow_module(out), out)
+    assert items[12]["product_lines"] == {"value": 11, "quality": "estimated"}
+    assert items[12]["start"] == {"value": _dt(3), "quality": "estimated"}
+    assert items[13]["product_lines"] == {"value": 3, "quality": "estimated"}
+    assert items[1]["product_lines"] == {"value": 2, "quality": "measured"}
+    assert "mixed ranges 2" in _cli(out, "baseline")
+
+
+def test_the_first_finish_without_a_predecessor_has_unknown_lines_and_start(render, tmp_path):
+    """Without a merge before it, the range would swallow the onboarding commit."""
+    out = _merges_repo(render, tmp_path)
+    _finish_merge(out, "14-first", [
+        ("docs: plan first", {".process-work/plans/2026-03-02-first.md": _plan_text(14)}, _at(2)),
+        ("feat: first (#14)", {"src/f.py": _lines(3)}, _at(3))], ["2026-03-02-first.md"], _at(4, 12))
+    [it] = _flow_module(out).flow_items(out)
+    assert it["issue"] == 14 and it["merged"]["quality"] == "estimated"
+    assert it["product_lines"] == {"value": None, "quality": "missing"}
+    assert it["start"] == {"value": None, "quality": "missing"}
+    text = _cli(out, "works")
+    row = next(ln for ln in text.splitlines() if ln.split()[:1] == ["#14"])
+    assert " 0 " not in f" {row} " and "—" in row, row
+
+
+def test_a_plan_that_stays_active_joins_its_first_train_merge_through_the_branch_plans(render, tmp_path):
+    """A train merge of a plan with `plan-stays-active` names no `Closes`/`Refs`: its issue
+    comes from the plans on its branch side (`merge^2`)."""
+    out = _merges_repo(render, tmp_path)
+    plan = {".process-work/plans/2026-03-02-long.md": _plan_text(15, extra="plan-stays-active: two phases\n")}
+    _train_merge(out, "15-long", [("docs: plan long", plan, _at(2)),
+                                  ("feat: long part one", {"src/l.py": _lines(6)}, _at(3))],
+                 "train: merge 15-long", _at(4, 12))
+    _train_merge(out, "15-long-two", [("feat: long part two (#15)", {"src/m.py": _lines(4)}, _at(5))],
+                 "train: merge 15-long-two\n\nCloses #15", _at(6, 12))
+    it = _by_issue(_flow_module(out), out)[15]
+    assert it["product_lines"]["value"] == 10 and it["start"]["value"] == _dt(2)
+    assert it["merged"]["value"] == _dt(6, 12) and len(it["events"]) == 2
+
+
+def test_escapes_read_the_integration_ref_and_a_failing_log_is_unknown(render, tmp_path, monkeypatch):
+    """A clone whose local main is behind origin/main still sees the escape (`integration_ref`);
+    a `git log` that fails is unknown, never "no escapes"."""
+    from datetime import datetime, timezone
+    out = _merges_repo(render, tmp_path)
+    _train_merge(out, "16-x", [("feat: x (#16)", {"src/x.py": _lines(3)}, _at(2))],
+                 "train: merge 16-x\n\nCloses #16", _at(2, 12))
+    _put(out, "fix: x again\n\nRegression-of: #16", {"src/x.py": _lines(4)}, _at(5))
+    clone = _clone(out, tmp_path)
+    _g(clone, "reset", "-q", "--hard", "HEAD~1")
+    now = datetime(2026, 10, 1, tzinfo=timezone.utc)
+    assert _by_issue(_flow_module(clone), clone, now=now)[16]["escapes"]["value"] == 1
+    host = _flow_repo(render, tmp_path / "host")
+    m = _flow_module(host)
+    import tower
+    monkeypatch.setattr(tower, "integration_ref", lambda root: "refs/heads/no-such-branch")
+    [it] = m.flow_items(host, issue=12, now=now)
+    assert it["escapes"]["value"] is None and it["escapes"]["quality"] == "missing"
+    assert m._regressions(host, "refs/heads/no-such-branch") is None
+
+
+def test_a_merge_without_an_issue_is_counted_and_regression_of_claims_nothing(render, tmp_path):
+    out = _merges_repo(render, tmp_path)
+    _train_merge(out, "misc", [("chore: tidy", {"src/t.py": _lines(1)}, _at(2))],
+                 "train: merge misc\n\nRegression-of: #3", _at(2, 12))
+    m = _flow_module(out)
+    assert 3 not in _by_issue(m, out)
+    assert m.merged_works(out)["unclaimed"] == 1
+    assert "merges without an issue 1" in _cli(out, "baseline")
+
+
+def _host_report(out: Path, ts: str, state: str, worker: str, issue: int, **extra) -> None:
+    import time
+    d = out / ".git/process-tower"
+    d.mkdir(exist_ok=True)
+    with (d / "reports.jsonl").open("a") as fh:
+        fh.write(json.dumps({"ts": ts + time.strftime("%z"), "host": "h", "worker": worker, "branch": worker,
+                             "issue": issue, "state": state, "note": "", "cwd": "", **extra}) + "\n")
+
+
+def test_works_gives_one_row_per_work_and_medians_by_tier_and_kind(render, tmp_path):
+    """#314: per work its tier, kind, plan and code rounds, lead, session time and sessions per
+    model family where the host has them (`—` elsewhere, never 0), product lines; median and
+    p90 by tier and by kind."""
+    from datetime import datetime, timezone
+    out = _alpha_beta(render, tmp_path)
+    _journal(out, _review(7, 1, "block") + _review(7, 2, "pass") + _review("7-plan", 1, "pass")
+             + _review(8, 1, "pass", tier=3))
+    (out / ".git/process-dispatch").mkdir()
+    (out / ".git/process-dispatch/7-alpha-execute-20260302-100000.log").write_text("")
+    _host_report(out, "2026-03-02T13:00:00", "pushed", "7-alpha", 7, model="claude-opus-5", phase="execute")
+    m = _flow_module(out)
+    t = m.works_table(out, *m._window("2026-03-01:2026-04-01"))
+    rows = {r["issue"]: r for r in t["rows"]}
+    assert (rows[7]["tier"], rows[7]["kind"], rows[7]["plan_rounds"], rows[7]["code_rounds"]) == ("2", "change", 1, 2)
+    assert rows[7]["work_h"] == 3.0 and rows[7]["sessions"] == {"claude": 1}
+    assert rows[7]["product_lines"] == 10
+    assert (rows[8]["tier"], rows[8]["kind"], rows[8]["plan_rounds"], rows[8]["code_rounds"]) == ("3", "fix", None, 1)
+    assert rows[8]["work_h"] is None and rows[8]["sessions"] is None
+    assert rows[8]["lead_h"] == round((datetime(2026, 3, 10, 12, tzinfo=timezone.utc)
+                                       - datetime(2026, 3, 5, 9, tzinfo=timezone.utc)).total_seconds() / 3600, 1)
+    assert t["by_tier"]["2"]["code_rounds"] == {"n": 1, "median": 2, "p90": 2}
+    assert t["by_kind"]["fix"]["product_lines"] == {"n": 1, "median": 5, "p90": 5}
+    text = _cli(out, "works", "--window", "2026-03-01:2026-04-01")
+    row8 = next(ln for ln in text.splitlines() if ln.split()[:1] == ["#8"])
+    assert row8.split()[1:3] == ["3", "fix"] and row8.count("—") >= 3, row8
+    assert "claude 1" in next(ln for ln in text.splitlines() if ln.split()[:1] == ["#7"])
+    assert "by tier" in text and "by kind" in text
+    assert json.loads(_cli(out, "works", "--json"))["rows"]
+
+
+def test_rounds_by_number_splits_code_and_plan_reviews(render, tmp_path):
+    """#318: per round 1, 2, 3, ≥4 — blockers, works still blocked, blocks on lines unchanged
+    since round 1 (plan reviews `n/a`) and the round's cost, `unknown` where none is recorded."""
+    out = _render(render, tmp_path, github_issues=True)
+    _g(out, "init", "-q", "-b", "main")
+    _journal(out, _review(9, 1, "block") + _review(9, 2, "block") + _review(9, 3, "block")
+             + _review(9, 4, "block") + _review(9, 5, "pass") + _review(10, 1, "pass")
+             + _review("9-plan", 1, "block") + _review("9-plan", 2, "pass"))
+    _report_file(out, "9-r1", "#9", _finding("blocker") * 2 + _finding("major"), rnd=1)
+    _report_file(out, "9-r2", "#9", _finding("blocker"), rnd=2)
+    _report_file(out, "9-r4", "#9", _finding("blocker") * 3, rnd=4)
+    _report_file(out, "9-r5", "#9", _finding("blocker") * 5, rnd=5)
+    _report_file(out, "9-plan-r1", "#9", _finding("blocker") * 4, rnd=1, phase="plan")
+    _host_report(out, "2026-03-02T10:00:00", "blocked", "9-x", 9, phase="review", epoch=100,
+                 usage={"input": 100, "cached": 0, "output": 50})
+    m = _flow_module(out)
+    t = m.rounds_by_number(out)
+    code, plan = t["code"], t["plan"]
+    assert code["1"]["blockers_median"] == 2 and code["1"]["blocked"] == (1, 2)
+    assert code[">=4"]["blockers_median"] == 4 and code[">=4"]["blocked"] == (1, 2)
+    assert code["3"]["blockers_median"] is None  # no report of round 3: not zero
+    assert code["1"]["cost"] == {"median": 150, "known": 1, "unknown": 1}
+    assert code["2"]["cost"] == {"median": None, "known": 0, "unknown": 1}
+    assert plan["1"]["blockers_median"] == 4 and plan["1"]["blocked"] == (1, 1)
+    assert plan["1"]["unchanged"] == "n/a" and plan["2"]["blocked"] == (0, 1)
+    text = _rounds(out)
+    assert "by round — code reviews over 2 works" in text and "by round — plan reviews over 1 works" in text
+    row = next(ln for ln in text.splitlines() if ln.split()[:1] == ["1"])
+    assert "unknown" in row and "1/2" in row, row
+    # without the FINDING reader the blocker medians are not read, never zeros
+    bare = _render(render, tmp_path / "bare")
+    _journal(bare, _review(9, 1, "block") + _review(9, 2, "pass"))
+    assert _flow_module(bare).rounds_by_number(bare)["code"]["1"]["blockers_median"] == "not read"
+
+
+def test_baseline_gives_escapes_per_tier_over_closed_windows_and_marks_thin(render, tmp_path, monkeypatch,
+                                                                            capsys):
+    """#320: per tier the merged works, the escaped ones and their rate over closed windows
+    (an open window counts beside, never in the denominator), median rounds and tokens; thin
+    under ~20 works."""
+    out = _render(render, tmp_path, github_issues=True)
+    archive = out / ".process-work/plans/archive"
+    archive.mkdir(parents=True, exist_ok=True)
+    for n, tier in ((1, 2), (2, 2), (3, 2), (4, 3), (5, 3)):
+        (archive / f"2026-03-0{n}-w{n}.md").write_text(_plan_text(n, tier))
+    _journal(out, "".join(_review(n, 1, "pass") for n in (1, 2, 3))
+             + "".join(_review(n, 1, "block") + _review(n, 2, "block") + _review(n, 3, "pass", tier=3)
+                       for n in (4, 5)))
+
+    def item(n, escapes, open_=False, tokens=None):
+        return {"issue": n, "merged": {"value": "2026-03-05T12:00:00+00:00"}, "lead_s": {"value": 0},
+                "tokens": {"value": tokens}, "escapes": {"value": escapes, "window_open": open_}}
+    items = [item(1, 1), item(2, 0), item(3, 2, open_=True), item(4, 1, tokens={"output_tokens": 900}),
+             item(5, 0, tokens={"output_tokens": 100})]
+    k = _kpis_module(out)
+    got = k.baseline_numbers(out, *k._window("2026-03-01:2026-04-01"), items=items, commits=[])
+    two, three = got["by_tier"]["2"], got["by_tier"]["3"]
+    assert (two["works"], two["escaped"], two["closed"], two["open"], two["rate"]) == (3, 1, 2, 1, 0.5)
+    assert (three["works"], three["escaped"], three["closed"], three["rate"]) == (2, 1, 2, 0.5)
+    assert (two["rounds"], three["rounds"]) == (1, 3)
+    assert (two["tokens"], three["tokens"]) == (None, 500.0)
+    assert two["thin"] and three["thin"]
+    monkeypatch.setattr(k, "flow_items", lambda root: items)
+    assert k.baseline(out, [k._window("2026-03-01:2026-04-01")]) == 0
+    text = capsys.readouterr().out
+    assert "tier 2: works 3, escaped 1/2 closed (50 %), open 1" in text and "thin" in text, text
+
+
+def test_load_counts_process_against_product_lines_per_merge_event(render, tmp_path):
+    from datetime import datetime, timezone
+    out = _merges_repo(render, tmp_path)
+    _train_merge(out, "20-docs", [("docs: plan only", {".process-work/plans/2026-03-02-d.md": _plan_text(20)},
+                                   _at(2))], "train: merge 20-docs\n\nCloses #20", _at(2, 12))
+    _train_merge(out, "21-both", [("feat: both (#21)", {"src/b.py": _lines(4),
+                                                         ".process-work/plans/2026-03-03-b.md": _plan_text(21)},
+                                   _at(3))], "train: merge 21-both\n\nCloses #21", _at(3, 12))
+    m = _flow_module(out)
+    t = m.load_table(out, weeks=2, now=datetime(2026, 3, 7, tzinfo=timezone.utc))
+    w = t["weeks"][0]
+    assert (w["merges"], w["without_product"], w["product_lines"]) == (2, 1, 4)
+    assert w["process_lines"] == 2 * len(_plan_text(20).splitlines())
+    assert w["process_files_median"] == 1
+    assert t["weeks"][1]["merges"] == 0
+    text = _cli(out, "load", "--weeks", "60")  # back to the merges of March
+    assert "[load]" in text and "merges without a product file" in text and "proxy" in text
+
+
+def _size_repo(render, tmp_path) -> Path:
+    """Four works, one per size step, with 1-4 review rounds; #31 spans two directories."""
+    out = _merges_repo(render, tmp_path)
+    for n, (day, files) in enumerate(((2, {"src/s.py": _lines(50)}),
+                                      (3, {"src/m.py": _lines(150), "web/m.ts": _lines(150)}),
+                                      (4, {"src/l.py": _lines(800)}),
+                                      (5, {"README.md": _lines(2000)})), start=30):
+        _train_merge(out, f"{n}-w", [(f"feat: w{n} (#{n})", files, _at(day))],
+                     f"train: merge {n}-w\n\nCloses #{n}", _at(day, 12))
+    passes = ((30, 1), (31, 2), (32, 3), (33, 4))
+    _journal(out, "".join(_review(n, r, "block") for n, last in passes for r in range(1, last))
+             + "".join(_review(n, last, "pass") for n, last in passes))
+    return out
+
+
+def test_size_gives_rounds_by_product_lines_and_by_stacks(render, tmp_path):
+    out = _size_repo(render, tmp_path)
+    m = _flow_module(out)
+    t = m.size_table(out, *m._window(":"))
+    b = t["buckets"]
+    assert [b[k]["works"] for k in ("<200", "200-500", "500-1500", ">1500")] == [1, 1, 1, 1]
+    assert (b["<200"]["rounds_median"], b[">1500"]["rounds_median"]) == (1, 4)
+    assert b["500-1500"]["share_3plus"] == 1.0 and b["<200"]["share_3plus"] == 0.0
+    assert b["<200"]["rounds_per_100_lines"] == 2.0  # 1 round over 50 lines
+    assert b["200-500"]["process_per_product_line"] == 0.0
+    assert t["stacks"] == "not read"  # no testing.local.json
+    (out / "docs/process/testing.local.json").write_text("{")
+    assert m.size_table(out, *m._window(":"))["stacks"] == "not read"
+    (out / "docs/process/testing.local.json").write_text(json.dumps({"stacks": {
+        "backend": {"paths": ["src/"], "runner": ["pytest", "{paths}"], "full": ["pytest"]},
+        "frontend": {"paths": ["web/"], "runner": ["vitest", "{paths}"], "full": ["vitest"]}}}))
+    got = m.size_table(out, *m._window(":"))
+    s = got["stacks"]
+    assert s["one stack"]["works"] == 2 and s["several stacks"]["works"] == 1 and s["no stack"]["works"] == 1
+    assert s["several stacks"]["rounds_median"] == 2
+    top = {f["file"]: f for f in got["top_files"]}
+    assert top["src/m.py"]["works"] == 1 and top["src/m.py"]["co_files_median"] == 1
+    text = _cli(out, "size")
+    assert "[size]" in text and "several stacks" in text and "proxy" in text
+
+
+def test_size_counts_lines_on_vanished_files_and_follows_renames_forward(render, tmp_path):
+    out = _merges_repo(render, tmp_path)
+    _train_merge(out, "40-a", [("feat: a (#40)", {"src/gone.py": _lines(10), "src/old.py": _lines(30)}, _at(2))],
+                 "train: merge 40-a\n\nCloses #40", _at(2, 12))
+    _g(out, "checkout", "-q", "-b", "41-b", "main")
+    _g(out, "mv", "src/old.py", "src/new.py")
+    _put(out, "refactor: rename (#41)", {"src/gone.py": None}, _at(3))
+    _g(out, "checkout", "-q", "main")
+    _g(out, "merge", "-q", "--no-ff", "-m", "train: merge 41-b\n\nCloses #41", "41-b", when=_at(3, 12))
+    m = _flow_module(out)
+    # gone.py: 10 lines added, 10 deleted — vanished; old.py lives on as new.py
+    assert m.size_table(out, *m._window(":"))["vanished"] == {"lines": 20, "of": 50, "share": 0.4}
+
+
+def test_report_runs_the_families_the_doc_names(render, tmp_path):
+    import re
+    out = _alpha_beta(render, tmp_path)
+    text = _cli(out, "report")
+    families = ["cost", "cfr", "clusters", "share", "flow", "losses", "nodes", "baseline", "works", "load", "size"]
+    assert set(re.findall(r"^\[([a-z-]+)\]", text, re.MULTILINE)) == set(families), text
+    doc = " ".join((out / "docs/process/modules/telemetry.md").read_text().split())
+    listed = ", ".join(f"`{f}`" for f in families[:-1]) + f" and `{families[-1]}`"
+    assert f"`report` runs {listed}" in doc
+    for family in ("works", "load", "size"):
+        assert f"| `{family}` |" in doc
