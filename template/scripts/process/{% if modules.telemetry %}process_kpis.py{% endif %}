@@ -28,7 +28,16 @@ difference. See "honest ceiling" in the module doc.
                                                 # fix clusters (rule 6 across sessions)
   process_kpis.py models                        # token share per model; rounds-to-pass and
                                                 # blocks by phase model × tier
-  process_kpis.py rounds                        # per work item: rounds to pass, blockers by origin; by kind
+  process_kpis.py rounds                        # per work item: rounds to pass, blockers by origin; by kind;
+                                                # per round number: blockers, still blocked, cost
+  process_kpis.py baseline      [--window S:U]… [--json]
+                                                # per window: medians per merged work, escapes per tier
+  process_kpis.py works         [--window S:U] [--json]
+                                                # per merged work: rounds, lead, sessions, product lines
+  process_kpis.py load          [--weeks N] [--json]
+                                                # process vs product lines per merge, week by week
+  process_kpis.py size          [--window S:U] [--json]
+                                                # rounds by size and stacks; churn on vanished files
   process_kpis.py share         [--weeks N]     # process vs product, week by week
   process_kpis.py train-phases  [--runs N]      # where the merge train's time goes, phase by phase
   process_kpis.py flow          [--issue N] [--json] [--follow-up-days D]
@@ -43,7 +52,8 @@ difference. See "honest ceiling" in the module doc.
   process_kpis.py nodes         [--days D] [--json]
                                                 # per gate: cost, blocks, distinct inputs,
                                                 # sole blocks, flips, triaged blocks
-  process_kpis.py report                        # all families
+  process_kpis.py report                        # cost, cfr, clusters, share, flow, losses, nodes,
+                                                # baseline, works, load, size
 
 Lean pass: the error rate at the gate is read from the review records
 (`rounds`, `models`), the error rate after merge from git (`cfr`,
@@ -324,14 +334,14 @@ def _default_branch() -> str:
     return "HEAD"
 
 
-def _git_commits(branch: str, limit: int = _GIT_LIMIT) -> list[dict]:
+def _git_commits(branch: str, limit: int = _GIT_LIMIT, root: Path = ROOT) -> list[dict]:
     # -z: without it git quotes a non-ASCII name, and the same file under a
     # quoted and a plain name reads as two. Fields are NUL-separated; a
     # commit's header carries its first name after a newline.
     proc = subprocess.run(
         ["git", "log", branch, "-z", "--no-merges", "-n", str(limit), "--name-only",
          "--pretty=format:\x01%ct\x01%s"],
-        capture_output=True, check=True, cwd=str(ROOT),
+        capture_output=True, check=True, cwd=str(root),
     )
     commits: list[dict] = []
     cur: dict | None = None
@@ -1044,6 +1054,70 @@ def _skips_by_kind(root: Path, ids: dict[object, set[str]]) -> dict[str, int]:
     return dict(sorted(out.items()))
 
 
+def _issue_plans(issue, plans: list[tuple[str, str]]) -> list[str]:
+    import check_review as _review
+    return [text for _rel, text in plans if int(issue) in _review._plan_issue_numbers(text)]
+
+
+def _work_tier(issue, plans: list[tuple[str, str]], rounds: dict[str, dict]) -> str | None:
+    """A work's tier: its plans' (`plan_tier`, the highest of several phases), else the highest
+    any of its REVIEW lines declared, else None — unknown, its own group, never 0."""
+    import check_review as _review
+    declared = [t for text in _issue_plans(issue, plans) if (t := _review.plan_tier(text)) is not None]
+    if declared:
+        return str(max(declared))
+    ids = _issue_ids(issue, plans)
+    seen = [int(e["tier"]) for w, e in rounds.items()
+            if w.removesuffix("-plan") in ids and str(e.get("tier") or "").isdigit()]
+    return str(max(seen)) if seen else None
+
+
+def _work_kind(issue, plans: list[tuple[str, str]], subjects: list[str]) -> str:
+    """`template-update` (a plan says `template-update: true`); `fix` when the work has a commit
+    on product paths and every such commit is a `fix:`; else `change`. Commits only on process
+    paths (an attest, a plan) do not count (`subjects` are the product commits')."""
+    if any(_TEMPLATE_UPDATE.search(text) for text in _issue_plans(issue, plans)):
+        return "template-update"
+    if subjects and all(_commit_kind(s) == "fix" for s in subjects):
+        return "fix"
+    return "change"
+
+
+def _joined(issue, plans: list[tuple[str, str]], rounds: dict[str, dict]) -> bool:
+    """Does a plan declare the work's issue, or a REVIEW line name one of its ids (#341 AC-4)?"""
+    return bool(_issue_plans(issue, plans)) or any(i in rounds or f"{i}-plan" in rounds
+                                                  for i in _issue_ids(issue, plans))
+
+
+def _population(root: Path, merged: list[dict], lo: datetime, hi: datetime,
+                plans: list[tuple[str, str]], rounds: dict[str, dict]) -> dict:
+    """Where a window's merged works come from (#341 AC-4): git's merge events and the host's
+    reports, the window's mixed ranges and merges no issue claims, the works joined to no plan
+    and no REVIEW line, and whether the clone is shallow."""
+    git = merge_events(root)
+    events = [e for e in git["events"] or [] if lo <= e["when"] < hi]
+    return {"works": len(merged),
+            "git": sum(1 for it in merged if it.get("source") in ("git", "both")),
+            "host_only": sum(1 for it in merged if it.get("source", "host") == "host"),
+            "train": sum(1 for e in events if e["kind"] == "train"),
+            "finish": sum(1 for e in events if e["kind"] == "finish"),
+            "mixed": sum(1 for e in events if e["mixed"]),
+            "unclaimed": sum(1 for e in events if not e["issues"]),
+            "unjoined": sum(1 for it in merged if not _joined(it["issue"], plans, rounds)),
+            "shallow": git["shallow"], "why": git["why"]}
+
+
+def _population_text(p: dict, label: str = "") -> str:
+    head = f"  population{label}: {p['works']} merged works — "
+    if p["why"]:
+        return head + f"host reports only {p['host_only']}; git not read ({p['why']})"
+    return (head + f"git {p['git']} ({p['train']} train, {p['finish']} finish merges), host reports only "
+            f"{p['host_only']}; mixed ranges {p['mixed']}; merges without an issue {p['unclaimed']}; "
+            f"joined to no plan or REVIEW line {p['unjoined']}"
+            + ("; shallow clone — history before its boundary is missing, the first range unknown"
+               if p["shallow"] else ""))
+
+
 def baseline_numbers(root: Path, lo: datetime, hi: datetime, *, items: list[dict] | None = None,
                      commits: list[dict] | None = None) -> dict:
     """The baseline of one window, over the works merged in it: medians per work of
@@ -1079,6 +1153,28 @@ def baseline_numbers(root: Path, lo: datetime, hi: datetime, *, items: list[dict
                     + int(u.get("output", 0))
     in_window = [c for c in (commits or []) if lo <= c["ts"] < hi]
     escaped = [it for it in merged if it["escapes"]["value"]]
+    # #320: per tier — escapes over closed follow-up windows only (an open one counts beside,
+    # never in the denominator; an unknown one apart), median rounds and tokens
+    tiers: dict[str, dict] = {}
+    for it, r in zip(merged, rnd):
+        c = tiers.setdefault(_work_tier(it["issue"], plans, rounds) or "unknown",
+                             {"works": 0, "escaped": 0, "closed": 0, "open": 0, "unknown": 0,
+                              "rounds": [], "tokens": []})
+        c["works"] += 1
+        esc = it["escapes"]
+        if esc.get("value") is None:
+            c["unknown"] += 1
+        elif esc.get("window_open"):
+            c["open"] += 1
+        else:
+            c["closed"] += 1
+            c["escaped"] += esc["value"] > 0
+        c["rounds"].append(r["max_round"] if r else None)
+        c["tokens"].append(sum(it["tokens"]["value"].values()) if it["tokens"]["value"] else None)
+    by_tier = {t: {**{k: c[k] for k in ("works", "escaped", "closed", "open", "unknown")},
+                   "rate": round(c["escaped"] / c["closed"], 2) if c["closed"] else None,
+                   "rounds": med(c["rounds"]), "tokens": med(c["tokens"]), "thin": c["works"] < _N_THRESHOLD}
+               for t, c in sorted(tiers.items())}
     return {
         "works": len(merged),
         # `tokens.value` holds the fields of a work's usage (input, output, …): their sum
@@ -1101,6 +1197,8 @@ def baseline_numbers(root: Path, lo: datetime, hi: datetime, *, items: list[dict
         "stated_tokens_by_phase": phases,
         "escaped_works": len(escaped),
         "change_failure_proxy": change_failure_rate(in_window) if commits is not None else None,
+        "by_tier": by_tier,
+        "population": _population(root, merged, lo, hi, plans, rounds),
     }
 
 
@@ -1110,11 +1208,13 @@ def baseline(root: Path | None = None, windows: list[tuple[datetime, datetime]] 
     two runs (#277). The numbers a deterministic check should move: fewer fix rounds
     and tokens per work, with escaped defects as the guard that nothing slipped."""
     import json  # noqa: PLC0415
+    import tower  # noqa: PLC0415 — the one owner of the integration branch
     root = root or Path.cwd()
     windows = windows or [(datetime.min.replace(tzinfo=timezone.utc), datetime.max.replace(tzinfo=timezone.utc))]
     items = flow_items(root)
+    ref = tower.integration_ref(root)
     try:
-        commits = _git_commits(_default_branch())
+        commits = _git_commits(ref, root=root) if ref else None
     except (subprocess.CalledProcessError, OSError):
         commits = None
     got = [baseline_numbers(root, lo, hi, items=items, commits=commits) for lo, hi in windows]
@@ -1123,6 +1223,8 @@ def baseline(root: Path | None = None, windows: list[tuple[datetime, datetime]] 
         return 0
     label = [f"{lo.date() if lo.year > 1 else '…'}–{hi.date() if hi.year < 9999 else '…'}" for lo, hi in windows]
     print("[baseline] ~proxy — per merged work, medians; compare two windows (#277)")
+    for g, x in zip(got, label):
+        print(_population_text(g["population"], f" {x}" if len(got) > 1 else ""))
     print(f"  {'':<28}" + "".join(f"{x:>24}" for x in label))
     for key in ("works", "tokens_per_work", "rounds_per_work", "fix_rounds_per_work", "findings_per_work",
                 "rounds_with_plan_review", "rounds_without_plan_review", "lead_hours", "escaped_works"):
@@ -1148,6 +1250,15 @@ def baseline(root: Path | None = None, windows: list[tuple[datetime, datetime]] 
         print(f"  skips by kind {x}: "
               + (", ".join(f"{k} {n}" for k, n in g["skips_by_kind"].items()) or "none"))
         print(f"  old-code blocks {x}: {_old_line(g['blocks_on_unchanged'])}")
+        # #320: what the review buys per tier — escapes over closed follow-up windows only
+        print(f"  by tier {x} (escapes over closed windows; rounds and tokens median):")
+        for tier, c in g["by_tier"].items():
+            rate = f" ({round(100 * c['rate'])} %)" if c["rate"] is not None else ""
+            rounds_text = "—" if c["rounds"] is None else c["rounds"]
+            tokens_text = "—" if c["tokens"] is None else f"{c['tokens']:,.0f}"
+            print(f"    tier {tier}: works {c['works']}, escaped {c['escaped']}/{c['closed']} closed{rate}, "
+                  f"open {c['open']}, unknown {c['unknown']}; rounds {rounds_text}; tokens {tokens_text}"
+                  + (f" — thin (n={c['works']}<{_N_THRESHOLD})" if c["thin"] else ""))
     n = min(g["works"] for g in got)
     lvl = _level(n, True, False, _N_THRESHOLD)
     print(f"  {confidence(n, proxy=True)} · {action(lvl, 'a check that removed review work shows fewer fix rounds and tokens per work at the same or fewer escaped works', thin='keep recording; judge a change after ~20 merged works per window')}")
@@ -1215,6 +1326,107 @@ def _kind_text(counts: dict[str, int]) -> str:
     return ", ".join(named) if named else "0"
 
 
+ROUND_STEPS = ("1", "2", "3", ">=4")
+
+
+def _round_step(rnd: int) -> str:
+    return str(rnd) if rnd < 4 else ">=4"
+
+
+def _review_costs(root: Path) -> dict[int, list[int]]:
+    """issue → the tokens of its review runs that stated their usage (`report.py --usage`, phase
+    `review`), in order: the n-th is read as round n's cost — an estimate; a round without one is
+    unknown. No trace tells a plan review's run apart, so plan rounds carry no cost."""
+    runs: dict[int, list[tuple[float, int]]] = {}
+    for recs in _reports_by_worker(root).values():
+        for r in recs:
+            u = r.get("usage")
+            if r.get("phase") == "review" and isinstance(u, dict) and str(r.get("issue") or "").isdigit():
+                tokens = int(u.get("input", 0)) + int(u.get("cached", 0)) + int(u.get("output", 0))
+                runs.setdefault(int(r["issue"]), []).append((r.get("epoch", 0), tokens))
+    return {n: [t for _e, t in sorted(v)] for n, v in runs.items()}
+
+
+def rounds_by_number(root: Path, old: dict | None = None) -> dict:
+    """#318: per round number (1, 2, 3, >=4), code reviews apart from plan reviews: the median
+    blockers per work and round (FINDING lines; "not read" without the reader, None where no
+    report of that round exists), the works whose round blocked of all works reviewed, the share
+    of blocks on lines unchanged since round 1 (`_blocks_since_round1`; plan reviews "n/a"), and
+    the round's cost where a review run stated it — a round without one is unknown, never free."""
+    rounds, plans = _review_rounds(root), _plans(root)
+    works: dict[str, dict[str, dict]] = {"code": {}, "plan": {}}
+    for w, e in rounds.items():
+        key = w.lstrip("#")
+        phase = "plan" if key.endswith("-plan") else "code"
+        cur = works[phase].setdefault(key.removesuffix("-plan"), {"max_round": 0, "blocked": set()})
+        cur["max_round"] = max(cur["max_round"], e["max_round"])
+        cur["blocked"] |= e["blocked"]
+    old = _blocks_since_round1(root) if old is None else old
+    costs = _review_costs(root)
+    out: dict[str, dict] = {}
+    for phase in ("code", "plan"):
+        mine = works[phase]
+        reports = _review_reports(root, phase)
+        found: dict[tuple[str, int], int] = {}
+        if not isinstance(reports, str):
+            for rep in reports:
+                for w in rep.works:
+                    key = w.lstrip("#").removesuffix("-plan")
+                    if rep.unreadable or rep.round is None or key not in mine:
+                        continue
+                    found[(key, rep.round)] = found.get((key, rep.round), 0) + sum(
+                        f["sev"] == "blocker" for f in rep.findings)
+        issue_of = {}
+        for key in mine:
+            nums = [i for i in _work_group(key, plans) if i.isdigit()]
+            issue_of[key] = int(nums[0]) if len(nums) == 1 else None
+        table: dict[str, dict] = {}
+        for step in ROUND_STEPS:
+            blockers = [n for (key, rnd), n in found.items() if _round_step(rnd) == step]
+            known = unknown = 0
+            spent: list[int] = []
+            for key, e in mine.items():
+                for rnd in range(1, e["max_round"] + 1):
+                    if _round_step(rnd) != step:
+                        continue
+                    runs = costs.get(issue_of[key], []) if phase == "code" and issue_of[key] is not None else []
+                    if rnd <= len(runs):
+                        known += 1
+                        spent.append(runs[rnd - 1])
+                    else:
+                        unknown += 1
+            if phase == "plan" or step == "1":
+                unchanged = "n/a"  # only code reviews have lines; round 1 has nothing before it
+            elif "not_read" in old:
+                unchanged = NOT_READ
+            else:
+                c = {"unchanged": 0, "changed": 0}
+                for rnd, cell in old["per_round"].items():
+                    if _round_step(rnd) == step:
+                        c["unchanged"] += cell["unchanged"]
+                        c["changed"] += cell["changed"]
+                unchanged = _old_text(c)
+            table[step] = {
+                "blockers_median": (NOT_READ if isinstance(reports, str) else
+                                    statistics.median(blockers) if blockers else None),
+                "blocked": (sum(1 for e in mine.values() if any(_round_step(r) == step for r in e["blocked"])),
+                            len(mine)),
+                "unchanged": unchanged,
+                "cost": {"median": statistics.median(spent) if spent else None, "known": known, "unknown": unknown},
+            }
+        out[phase] = table
+    out["works"] = {phase: len(works[phase]) for phase in works}
+    return out
+
+
+def _cost_text(c: dict) -> str:
+    if not c["known"] and not c["unknown"]:
+        return "—"
+    if not c["known"]:
+        return f"unknown ({c['unknown']})"
+    return f"{c['median']:,.0f} tokens ({c['known']})" + (f", unknown {c['unknown']}" if c["unknown"] else "")
+
+
 def rounds(root: Path | None = None) -> int:
     """Per work item: tier, rounds to the first pass, blocked rounds (journal
     REVIEW lines) and blockers per FINDING, by `origin=` where the reports
@@ -1272,6 +1484,17 @@ def rounds(root: Path | None = None) -> int:
             print(f"    round {rnd}: {_old_line(c)}")
         for work, c in sorted(old["per_work"].items()):
             print(f"    {work}: {_old_line(c)}")
+    # #318: what round 1, 2, 3 and >= 4 still find, against what they cost
+    steps = rounds_by_number(root, old)
+    for phase, name in (("code", "code reviews"), ("plan", "plan reviews")):
+        print(f"  by round — {name} over {steps['works'][phase]} works (blockers: median per work and round):")
+        print(f"    {'round':<6} {'blockers':>8} {'blocked works':>16} {'unchanged since r1':>20}  cost")
+        for step, c in steps[phase].items():
+            b = c["blockers_median"]
+            blockers = "—" if b is None else b if isinstance(b, str) else f"{b:g}"
+            hit, of = c["blocked"]
+            blocked = f"{hit}/{of}" + (f" ({round(100 * hit / of)} %)" if of else "")
+            print(f"    {step:<6} {blockers:>8} {blocked:>16} {c['unchanged']:>20}  {_cost_text(c['cost'])}")
     n = len(rnds)
     lvl = _level(n, True, False, _N_THRESHOLD)
     print(f"  {confidence(n, proxy=True)} · {action(lvl, 'compare rounds to pass within one tier over time; where fix-origin blockers dominate, re-check the fixed class (verification-independence.md, What each round judges)', thin='record origin= on blocker findings; judge after ~20 work items')}")
@@ -1444,17 +1667,17 @@ def _train_rows(common: Path | None) -> list[dict]:
     return rows
 
 
-def _regressions(root: Path, branch: str) -> dict[int, list[datetime]]:
+def _regressions(root: Path, branch: str | None) -> dict[int, list[datetime]] | None:
     """issue → commit times of the fixes that name it in a `Regression-of:` trailer
-    (process_git owns the grammar; the train reads the same)."""
+    (process_git owns the grammar; the train reads the same); None when git cannot read
+    the branch — unknown, never "no escapes"."""
     from process_git import regression_refs  # noqa: PLC0415
 
-    r = subprocess.run(["git", "-C", str(root), "log", branch, "-z", "--format=%ct%x01%B"],
-                       capture_output=True)
+    log = _git_out(root, "log", branch, "-z", "--format=%ct%x01%B") if branch else None
+    if log is None:
+        return None
     out: dict[int, list[datetime]] = defaultdict(list)
-    if r.returncode != 0:
-        return out
-    for entry in r.stdout.decode("utf-8", "surrogateescape").split("\0"):
+    for entry in log.split("\0"):
         ct, sep, body = entry.strip("\n").partition("\x01")
         if not sep or not ct.isdigit():
             continue
@@ -1477,18 +1700,15 @@ def _owner_decisions(root: Path) -> dict[int, int]:
     return out
 
 
-def _process_version(root: Path, branch: str, when: datetime | None) -> str | None:
+def _process_version(root: Path, branch: str | None, when: datetime | None) -> str | None:
     """`_commit` of .copier-answers.yml on the integration branch at `when`."""
-    if when is None:
+    if when is None or not branch:
         return None
-    r = subprocess.run(["git", "-C", str(root), "log", "-1", f"--before={when.isoformat()}",
-                        "--format=%H", branch], capture_output=True, text=True)
-    sha = r.stdout.strip()
-    if r.returncode != 0 or not sha:
+    sha = (_git_out(root, "log", "-1", f"--before={when.isoformat()}", "--format=%H", branch) or "").strip()
+    if not sha:
         return None
-    r = subprocess.run(["git", "-C", str(root), "show", f"{sha}:.copier-answers.yml"],
-                       capture_output=True, text=True)
-    m = _ANSWERS_COMMIT.search(r.stdout) if r.returncode == 0 else None
+    answers = _git_out(root, "show", f"{sha}:.copier-answers.yml")
+    m = _ANSWERS_COMMIT.search(answers) if answers is not None else None
     return m.group(1) if m else None
 
 
@@ -1499,11 +1719,264 @@ def _percentile(values: list[float], q: float) -> float:
     return ordered[k]
 
 
+# --- merged works from git (#341) ---------------------------------------------
+# The population of merged works is read from the integration branch itself, so a
+# fresh clone counts the works the host counts. Host-local traces (worker reports,
+# dispatch starts, train rows) only enrich a work; a value only they hold is
+# unknown elsewhere, never zero. A merge event lies on the first-parent chain: a
+# train merge (`train: merge <branch>`, two parents; its commits are
+# merge^1..merge^2) or a `finish` merge (`docs: archive plan(s) on merge — <names>`;
+# finish fast-forwards, so its commits are the range from the event before it to the
+# archive commit). A merge without a marker (a hand merge, a PR squash, a commit past
+# the hooks) falls into the next event's range and makes that range mixed.
+_TRAIN_MERGE = re.compile(r"^train: merge (?P<branch>\S+)\s*$")  # train.py writes it
+_FINISH_ARCHIVE = re.compile(r"^docs: archive plan\(s\) on merge — (?P<names>.+?)\s*$")  # finish.py writes it
+# the issues a train merge holds open (`Refs #N`, written by train.py beside `Closes #N`) — read
+# here from the merge's own message; the claim grammar itself stays check_review's
+_TRAIN_REFS = re.compile(r"^Refs #(\d+)\s*$", re.MULTILINE)
+_TEMPLATE_UPDATE = re.compile(r"^template-update:\s*true\s*$", re.MULTILINE)  # as check_review reads it
+_EVENTS_READ: dict[tuple[str, str, str], dict] = {}  # (root, ref, tip) → merge_events: git asked once
+
+
+def _claims(message: str) -> set[int]:
+    """The issues a commit message claims, in check_review's grammar (`_ISSUE_CLOSING`
+    anywhere, `_ISSUE_SUBJECT` on the subject), imported unchanged. `Regression-of:` is no claim."""
+    import check_review as _review  # noqa: PLC0415
+    body = message.strip()
+    if not body:
+        return set()
+    return ({int(n) for n in _review._ISSUE_CLOSING.findall(body)}
+            | {int(n) for n in _review._ISSUE_SUBJECT.findall(body.splitlines()[0])})
+
+
+def _commit_table(root: Path, ref: str) -> dict[str, dict] | None:
+    """sha → {parents, at (author time), ct (commit time), message, files} of every commit
+    `ref` reaches; a merge lists no files. None when git cannot read it."""
+    out = _git_out(root, "log", ref, "-z", "--name-only", "--format=%x01%H%x01%P%x01%at%x01%ct%x01%B")
+    if out is None:
+        return None
+    table: dict[str, dict] = {}
+    cur: dict | None = None
+    for field in out.split("\0"):
+        if field.startswith("\x01"):  # `\x01<sha>…<body>`, then its names, the first after a newline
+            _, sha, parents, at, ct, body = field.split("\x01", 5)
+            cur = table[sha] = {"sha": sha, "parents": parents.split(), "at": int(at), "ct": int(ct),
+                                "message": body, "files": set()}
+            continue
+        field = field.lstrip("\n")
+        if field and cur is not None:
+            cur["files"].add(field)
+    return table
+
+
+def _rev_list(root: Path, spec: str) -> list[str] | None:
+    out = _git_out(root, "rev-list", spec)
+    return None if out is None else out.split()
+
+
+def _numstat(root: Path, a: str, b: str) -> list[tuple[int | None, str, str | None]] | None:
+    """(added plus deleted lines — None for a binary file —, path, the old path of a rename)
+    per file of `git diff -M a b`; None when git fails."""
+    out = _git_out(root, "diff", "--numstat", "-z", "-M", "--no-color", "--no-ext-diff", "--no-textconv", a, b)
+    if out is None:
+        return None
+    parts, i, got = out.split("\0"), 0, []
+    while i < len(parts):
+        entry = parts[i]
+        if not entry:
+            i += 1
+            continue
+        added, _t, rest = entry.partition("\t")
+        deleted, _t, path = rest.partition("\t")
+        old = None
+        if not path:  # a rename: the old and the new name follow
+            if i + 2 >= len(parts):
+                break
+            old, path = parts[i + 1], parts[i + 2]
+            i += 3
+        else:
+            i += 1
+        got.append((None if "-" in (added, deleted) else int(added) + int(deleted), path, old))
+    return got
+
+
+def _branch_plan_issues(root: Path, p1: str, p2: str, branch: str) -> set[int]:
+    """The issues of the plans a train merge's branch side owns (`check_review.own_plans`, the
+    rule the train settles plans by) — for a merge whose message names none (a plan that stays
+    active, an open task: `train._settle_plans` closes nothing)."""
+    import check_review as _review  # noqa: PLC0415
+    n = _review.branch_issue(branch)
+    plans = _review.PLANS_ACTIVE
+
+    def read(rel: str) -> str | None:
+        return _git_out(root, "show", f"{p2}:{rel}")
+    own = _review.own_plans(root, p1, p2, {n} if n else set(), read, (plans, _review.SPECS_DIR),
+                            lambda rel: rel.endswith(".md") and (rel.startswith(plans + "/")
+                                                                 or _review.record_kind(rel) == "spec-plan"))
+    return set().union(*(_review.local_issue_numbers(plain) for _rel, plain, _added in own)) if own else set()
+
+
+def _event(root: Path, table: dict[str, dict], c: dict, prev: str | None, kind: str, m: re.Match) -> dict:
+    """One merge event: its issues and where they came from, its range (bounded or not, mixed
+    or not), its start (earliest author time), its product and process lines and files."""
+    import check_review as _review  # noqa: PLC0415
+    import tower  # noqa: PLC0415 — the one path classifier
+    sha, message = c["sha"], c["message"]
+    ev = {"sha": sha, "kind": kind, "when": datetime.fromtimestamp(c["ct"], tz=timezone.utc),
+          "branch": None, "plans": [], "issues": [], "claim": "none", "bounded": True, "mixed": False,
+          "start": None, "product_lines": None, "process_lines": None, "binary": 0, "files": {},
+          "process_files": [], "renames": [], "product_subjects": []}
+    if kind == "train":
+        p1, p2 = c["parents"]
+        ev["branch"] = m.group("branch")
+        own = _rev_list(root, f"{p1}..{p2}")
+        # commits between the event before and merge^1: no marker carried them — they fall in here
+        strays = _rev_list(root, f"{prev}..{p1}") if prev and prev != p1 else []
+        base = prev or p1
+        issues = _claims(message) | {int(n) for n in _TRAIN_REFS.findall(message)}
+        claim = "message"
+        if not issues:
+            issues, claim = _branch_plan_issues(root, p1, p2, ev["branch"]), "plans"
+    else:
+        ev["plans"] = [n.strip() for n in m.group("names").split(",") if n.strip()]
+        issues, claim = set(), "plans"
+        for name in ev["plans"]:
+            text = _git_out(root, "show", f"{sha}:{_review.PLANS_ARCHIVE}/{name}")
+            if text is not None:
+                issues |= _review.local_issue_numbers(_review._unfenced(text))
+        # the first finish without an event before it has no lower bound: it would swallow
+        # every commit since the root (the onboarding commit) — unknown, not estimated
+        own = _rev_list(root, f"{prev}..{sha}") if prev else None
+        strays, base = [], prev
+    ev["issues"], ev["claim"] = sorted(issues), claim if issues else "none"
+    if own is None or strays is None or base is None:
+        ev["bounded"] = False
+        return ev
+    commits = [table[s] for s in own + strays if s in table]
+
+    def product(x: dict) -> bool:
+        return any(not tower.is_process_path(f) for f in x["files"])
+    # mixed: a commit claiming another issue, a commit no marker carried (before a train
+    # merge), or — a fast-forward cannot tell the branch's commits from others — a product
+    # commit in a finish range that claims nothing
+    ev["mixed"] = (any(_claims(x["message"]) - issues for x in commits) or bool(strays)
+                   or (kind == "finish" and any(product(x) and not _claims(x["message"]) for x in commits)))
+    if commits:
+        ev["start"] = datetime.fromtimestamp(min(x["at"] for x in commits), tz=timezone.utc)
+    ev["product_subjects"] = [(x["message"].splitlines() or [""])[0] for x in commits if product(x)]
+    stat = _numstat(root, base, sha)
+    if stat is None:
+        return ev  # git failed: lines unknown
+    prod = proc = 0
+    for lines, path, old in stat:
+        if tower.is_process_path(path):
+            proc += lines or 0
+            ev["process_files"].append(path)
+            continue
+        if lines is None:
+            ev["binary"] += 1  # a binary file: 0 lines, counted apart
+        prod += lines or 0
+        ev["files"][path] = ev["files"].get(path, 0) + (lines or 0)
+        if old is not None:
+            ev["renames"].append((old, path))
+    ev["product_lines"], ev["process_lines"] = prod, proc
+    return ev
+
+
+def merge_events(root: Path, ref: str | None = None) -> dict:
+    """{"ref", "events" (oldest first; None when git cannot tell), "shallow", "why"} over the
+    first-parent chain of the integration branch (`tower.integration_ref`, the one owner)."""
+    import tower  # noqa: PLC0415
+    ref = ref or tower.integration_ref(root)
+    if not ref:
+        return {"ref": None, "events": None, "shallow": False, "why": "no integration branch"}
+    tip = _git_out(root, "rev-parse", "--verify", "-q", f"{ref}^{{commit}}")
+    if tip is None:
+        return {"ref": ref, "events": None, "shallow": False, "why": f"git cannot read {ref}"}
+    key = (str(root), ref, tip.strip())
+    if key in _EVENTS_READ:
+        return _EVENTS_READ[key]
+    table = _commit_table(root, ref)
+    chain = _git_out(root, "rev-list", "--first-parent", ref)
+    if table is None or chain is None:
+        return {"ref": ref, "events": None, "shallow": False, "why": f"git log of {ref} failed"}
+    events: list[dict] = []
+    prev = None
+    for sha in reversed(chain.split()):
+        c = table.get(sha)
+        if c is None:
+            continue
+        subject = (c["message"].splitlines() or [""])[0]
+        train = _TRAIN_MERGE.match(subject) if len(c["parents"]) == 2 else None
+        finish = None if train else _FINISH_ARCHIVE.match(subject)
+        if train or finish:
+            events.append(_event(root, table, c, prev, "train" if train else "finish", train or finish))
+            prev = sha
+    # a shallow clone's boundary commit has no parents: what lies behind it is not here
+    shallow = (_git_out(root, "rev-parse", "--is-shallow-repository") or "").strip() == "true"
+    got = {"ref": ref, "events": events, "shallow": shallow, "why": None}
+    _EVENTS_READ[key] = got
+    return got
+
+
+def merged_works(root: Path, ref: str | None = None) -> dict:
+    """merge_events plus {"works": issue → work, "unclaimed": events no issue claims, "mixed":
+    mixed ranges}. A work is an issue with its merge events (stacked phases are several events
+    of one work): its end is the last event (`measured` for a train merge, `estimated` for a
+    finish archive commit, which lies before rebase, suite and push), its start the earliest
+    author time over its ranges, its lines and files the sums over its events."""
+    got = merge_events(root, ref)
+    by_issue: dict[int, list[dict]] = {}
+    for ev in got["events"] or []:
+        for n in ev["issues"]:
+            by_issue.setdefault(n, []).append(ev)
+    works: dict[int, dict] = {}
+    for n, evs in by_issue.items():
+        known = all(e["bounded"] and e["product_lines"] is not None for e in evs)
+        mixed = any(e["mixed"] for e in evs)
+        files: dict[str, int] = {}
+        for e in evs:
+            for f, k in e["files"].items():
+                files[f] = files.get(f, 0) + k
+        starts = [e["start"] for e in evs]
+        works[n] = {
+            "issue": n, "events": evs, "first": evs[0]["when"], "end": evs[-1]["when"],
+            "end_quality": "measured" if evs[-1]["kind"] == "train" else "estimated",
+            "start": min(starts) if all(e["bounded"] for e in evs) and all(starts) else None,
+            "product_lines": sum(e["product_lines"] for e in evs) if known else None,
+            "process_lines": sum(e["process_lines"] for e in evs) if known else None,
+            "lines_quality": "missing" if not known else "estimated" if mixed else "measured",
+            "files": files, "mixed": mixed,
+            "branches": sorted({e["branch"] for e in evs if e["branch"]}),
+            "product_subjects": [s for e in evs for s in e["product_subjects"]],
+        }
+    events = got["events"] or []
+    return {**got, "works": works, "unclaimed": sum(1 for e in events if not e["issues"]),
+            "mixed": sum(1 for e in events if e["mixed"])}
+
+
+def _first_deploy(rows: list[dict], branches: set[str], when: datetime) -> datetime | None:
+    """The first train row that landed one of `branches` and deployed at or after `when`."""
+    for row in rows:
+        landed = row.get("branches")
+        if not isinstance(landed, list) or not branches & {b for b in landed if isinstance(b, str)}:
+            continue
+        ended = _aware(row.get("ended"))
+        if ended is not None and ended >= when and row.get("deployed") is True:
+            return ended
+    return None
+
+
 def flow_items(root: Path, *, issue: int | None = None, branch: str | None = None,
                follow_up_days: int = _FOLLOW_UP_DAYS, now: datetime | None = None) -> list[dict]:
     """One timeline per issue; every value is {"value", "quality"} where quality
-    is measured, estimated or missing."""
+    is measured, estimated or missing. The issues are the host's (reports, dispatch
+    logs) and the merged works git holds (`merged_works`, #341); one both know counts
+    once: git's merge time before the report's, the host's dispatch start before
+    git's earliest author time, git's start before a report's. Escapes count from the
+    work's first merge (its deploy where a train row has it) on both paths."""
     import check_review as _review  # noqa: PLC0415
+    import tower  # noqa: PLC0415 — the one owner of the integration branch
 
     # a project whose mandate says it has no deploy step ends at the merge by
     # design, also where no train row exists (merged with finish.py)
@@ -1514,7 +1987,8 @@ def flow_items(root: Path, *, issue: int | None = None, branch: str | None = Non
         no_deploy = False
     now = now or datetime.now(timezone.utc)
     common = _common_dir(root)
-    integration = branch or _default_branch()
+    integration = branch or tower.integration_ref(root)
+    gw = merged_works(root, integration)["works"]
     starts = _phase_starts(common)
     reports = [r for recs in _reports_by_worker(root).values() for r in recs]
     rows = _train_rows(common)
@@ -1541,7 +2015,7 @@ def flow_items(root: Path, *, issue: int | None = None, branch: str | None = Non
             branches_of[int(n)].add(st["branch"])
     shared = {b for b in set().union(*branches_of.values()) if sum(b in v for v in branches_of.values()) > 1} \
         if branches_of else set()
-    wanted = [issue] if issue is not None else sorted(branches_of)
+    wanted = [issue] if issue is not None else sorted(set(branches_of) | set(gw))
     regressions = _regressions(root, integration)
     decisions = _owner_decisions(root)
     try:
@@ -1581,11 +2055,15 @@ def flow_items(root: Path, *, issue: int | None = None, branch: str | None = Non
         # the first merge after the issue began closes it: a reused branch name
         # later carries another issue's work and merge
         done = [t for r, t in mine if r.get("state") == "done" and (first is None or t >= first)]
-        merged = {"value": done[0], "quality": "measured"} if done else {"value": None, "quality": "missing"}
+        g = gw.get(n)
+        # git's merge time before the report's: the last merge event ends the work
+        merged = ({"value": g["end"], "quality": g["end_quality"]} if g else
+                  {"value": done[0], "quality": "measured"} if done else {"value": None, "quality": "missing"})
         horizon_end = merged["value"]
         own_starts = [s for s in all_starts if horizon_end is None or s["ts"] <= horizon_end]
         own_reports = [(r, t) for r, t in mine if horizon_end is None or t <= horizon_end]
         start = {"value": own_starts[0]["ts"], "quality": "measured"} if own_starts else (
+            {"value": g["start"], "quality": "estimated"} if g and g["start"] else
             {"value": own_reports[0][1], "quality": "estimated"} if own_reports else
             {"value": None, "quality": "missing"})
         deployed = {"value": None, "quality": "missing"}
@@ -1635,7 +2113,8 @@ def flow_items(root: Path, *, issue: int | None = None, branch: str | None = Non
             last_end = b if last_end is None else max(last_end, b)
         unended += reused  # a shared branch name: attribution is an estimate
         if reused:
-            for field in (start, merged, deployed):
+            # git's merge time names its issue itself: no shared name blurs it
+            for field in (start, deployed) if g else (start, merged, deployed):
                 if field["quality"] == "measured":
                     field["quality"] = "estimated"
         lead = wait = None
@@ -1647,10 +2126,15 @@ def flow_items(root: Path, *, issue: int | None = None, branch: str | None = Non
                    "measured" if start["quality"] == end["quality"] == "measured" and not unended
                    and (endpoint == "deploy" or merge_by_design)
                    else "estimated")
-        # escapes count from the moment users had the change: the deploy, else the merge
+        # escapes count from the moment users had the change: the deploy, else the merge — of
+        # the work's FIRST merge, on the host and on a clone alike, so a fix under the same
+        # issue after the first merge is an escape; a git log that failed leaves them unknown
         escapes = None
-        window_from = deployed["value"] or merged["value"]
-        if window_from:
+        firsts = [t for t in (g["first"] if g else None, done[0] if done else None) if t is not None]
+        first_merge = min(firsts) if firsts else None
+        first_deploy = _first_deploy(rows, bs, first_merge) if first_merge else deployed["value"]
+        window_from = first_deploy or first_merge
+        if window_from and regressions is not None:
             horizon = window_from + timedelta(days=follow_up_days)
             escapes = sum(1 for t in regressions.get(n, []) if window_from <= t <= horizon)
             window_open = now < horizon
@@ -1679,12 +2163,22 @@ def flow_items(root: Path, *, issue: int | None = None, branch: str | None = Non
             "owner_decisions": {"value": decisions.get(n, 0), "quality": "proxy"},
             "escapes": {"value": escapes,
                         "quality": ("missing" if escapes is None else
-                                    "measured" if deployed["value"] or merge_by_design else "estimated"),
+                                    "measured" if first_deploy or merge_by_design else "estimated"),
                         "window_open": window_open, "days": follow_up_days,
-                        "from": "deploy" if deployed["value"] else "merge"},
+                        "from": "deploy" if first_deploy else "merge"},
             "plan_drift": {"value": drift.get(n), "quality": "measured" if n in drift else "missing"},
             "process_version": {"value": _process_version(root, integration, merged["value"]),
                                 "quality": "measured" if merged["value"] else "missing"},
+            # from git (#341): which traces know the work, its merge events, its lines
+            "source": "both" if g and n in branches_of else "git" if g else "host",
+            "events": [e["sha"] for e in g["events"]] if g else [],
+            "first_merge": first_merge,
+            "product_lines": ({"value": g["product_lines"], "quality": g["lines_quality"]} if g else
+                              {"value": None, "quality": "missing"}),
+            "process_lines": ({"value": g["process_lines"], "quality": g["lines_quality"]} if g else
+                              {"value": None, "quality": "missing"}),
+            "files": g["files"] if g else {},
+            "product_subjects": g["product_subjects"] if g else [],
         })
     return items
 
@@ -1829,6 +2323,336 @@ def losses(root: Path | None = None, *, days: int = _LOSS_DAYS, as_json: bool = 
           f"over {p['regression_issues_observed']} merged issue(s) (diagnostic, not a loss in hours)")
     n = t["issues"]
     print(f"  {confidence(n)} · {action(_level(n, False, False, _N_THRESHOLD), 'compare each measure with its own past, never with the others: delay → hand-offs and the train, occupancy → rounds and context, tokens → model and context per phase', thin='let more issues run through dispatch before reading a trend')}")
+    return 0
+
+
+# --- works: what one merged work cost (#314) ------------------------------------
+_ALL_TIME = (datetime.min.replace(tzinfo=timezone.utc), datetime.max.replace(tzinfo=timezone.utc))
+
+
+def _merged_in(items: list[dict], lo: datetime, hi: datetime) -> list[dict]:
+    return sorted((it for it in items if (m := _when(it["merged"]["value"])) and lo <= m < hi),
+                  key=lambda it: _when(it["merged"]["value"]))
+
+
+def _sessions_by_issue(root: Path) -> dict[int, dict[str, int]]:
+    """issue → sessions per model family (the reported model's first word: `claude-opus-5` →
+    `claude`), a session being one worker's phase on one model — only where the host has
+    worker reports with a model."""
+    seen: set[tuple] = set()
+    out: dict[int, dict[str, int]] = {}
+    for recs in _reports_by_worker(root).values():
+        for r in recs:
+            model = str(r.get("model") or "").strip()
+            issue = str(r.get("issue") or "")
+            if not model or model == "not measured" or not issue.isdigit():
+                continue
+            key = (int(issue), r.get("worker"), r.get("phase"), model)
+            if key in seen:
+                continue
+            seen.add(key)
+            family = re.split(r"[-_ .:@]", model.rsplit("/", 1)[-1].lower())[0] or model
+            cell = out.setdefault(int(issue), {})
+            cell[family] = cell.get(family, 0) + 1
+    return out
+
+
+def _spread(rows: list[dict], key: str, fields: tuple[str, ...]) -> dict[str, dict]:
+    """Per value of `key` (None → "unknown"): n, median and p90 of each field, over the rows
+    that have it — a missing value is left out, never a zero."""
+    groups: dict[str, list[dict]] = {}
+    for row in rows:
+        groups.setdefault(str(row[key] or "unknown"), []).append(row)
+    out: dict[str, dict] = {}
+    for name, members in sorted(groups.items()):
+        cell: dict = {"works": len(members)}
+        for field in fields:
+            vals = [r[field] for r in members if r[field] is not None]
+            cell[field] = {"n": len(vals), "median": statistics.median(vals) if vals else None,
+                           "p90": _percentile(vals, 0.9) if vals else None}
+        out[name] = cell
+    return out
+
+
+_WORK_FIELDS = ("lead_h", "work_h", "plan_rounds", "code_rounds", "product_lines")
+
+
+def works_table(root: Path, lo: datetime = _ALL_TIME[0], hi: datetime = _ALL_TIME[1], *,
+                items: list[dict] | None = None) -> dict:
+    """One row per work merged in the window: issue, tier, kind, plan and code review rounds,
+    lead time (start to its last merge), active session time (`work_s`) and sessions per model
+    family where the host has them, product lines; median and p90 by tier and by kind."""
+    items = flow_items(root) if items is None else items
+    merged = _merged_in(items, lo, hi)
+    plans, rounds = _plans(root), _review_rounds(root)
+    sessions = _sessions_by_issue(root)
+    rows = []
+    for it in merged:
+        n = it["issue"]
+        code = _rounds_of_issue(root, rounds, n, plans)
+        planned = [rounds[f"{i}-plan"]["max_round"] for i in _issue_ids(n, plans) if f"{i}-plan" in rounds]
+        start, end = _when(it["start"]["value"]), _when(it["merged"]["value"])
+        work = (it.get("work_s") or {}).get("value")
+        rows.append({
+            "issue": n, "tier": _work_tier(n, plans, rounds), "kind": _work_kind(n, plans, it.get("product_subjects", [])),
+            "plan_rounds": max(planned) if planned else None,
+            "code_rounds": code["max_round"] if code else None,
+            "lead_h": round((end - start).total_seconds() / 3600, 1) if start and end else None,
+            "work_h": round(work / 3600, 1) if work is not None else None,
+            "sessions": sessions.get(n) or None,
+            "product_lines": (it.get("product_lines") or {}).get("value"),
+            "source": it.get("source", "host"),
+        })
+    return {"rows": rows, "by_tier": _spread(rows, "tier", _WORK_FIELDS),
+            "by_kind": _spread(rows, "kind", _WORK_FIELDS),
+            "population": _population(root, merged, lo, hi, plans, rounds)}
+
+
+def _num(v) -> str:
+    return "—" if v is None else f"{v:g}" if isinstance(v, float) else str(v)
+
+
+def works(root: Path | None = None, window: tuple[datetime, datetime] | None = None, *,
+          as_json: bool = False) -> int:
+    import json  # noqa: PLC0415
+    root = root or Path.cwd()
+    t = works_table(root, *(window or _ALL_TIME))
+    if as_json:
+        print(json.dumps(t, default=str, sort_keys=True))
+        return 0
+    print("[works] per merged work — rounds, lead, session time, product lines (#314) ~proxy")
+    print(_population_text(t["population"]))
+    if not t["rows"]:
+        print("  no merged work in the window — works skipped")
+        return 0
+    print(f"  {'issue':<7} {'tier':<4} {'kind':<15} {'plan':>4} {'code':>4} {'lead':>9} {'work':>8}  "
+          f"{'sessions':<20} {'lines':>7}")
+    for r in t["rows"]:
+        sessions = ", ".join(f"{k} {v}" for k, v in sorted(r["sessions"].items())) if r["sessions"] else "—"
+        lead = "—" if r["lead_h"] is None else f"{r['lead_h']:.1f} h"
+        work = "—" if r["work_h"] is None else f"{r['work_h']:.1f} h"
+        print(f"  #{r['issue']:<6} {r['tier'] or '—':<4} {r['kind']:<15} {_num(r['plan_rounds']):>4} "
+              f"{_num(r['code_rounds']):>4} {lead:>9} {work:>8}  {sessions:<20} {_num(r['product_lines']):>7}")
+    for title, groups in (("by tier", t["by_tier"]), ("by kind", t["by_kind"])):
+        print(f"  {title} (median / p90 over the works that have the value):")
+        for name, c in groups.items():
+            parts = [f"{label} {_num(c[f]['median'])} / {_num(c[f]['p90'])}"
+                     for f, label in (("lead_h", "lead h"), ("work_h", "work h"), ("plan_rounds", "plan rounds"),
+                                      ("code_rounds", "code rounds"), ("product_lines", "product lines"))
+                     if c[f]["n"]]
+            print(f"    {name}: n={c['works']}" + (" · " + " · ".join(parts) if parts else ""))
+    n = len(t["rows"])
+    lvl = _level(n, True, False, _N_THRESHOLD)
+    print(f"  {confidence(n, proxy=True)} · {action(lvl, 'compare a tier or kind with its own past: a tier whose rounds and lead keep rising is where the flow costs more than it buys', thin='keep merging through the train or finish; judge after ~20 works per tier')}")
+    return 0
+
+
+# --- load: how much process each merge carries ------------------------------------
+_LOAD_WEEKS = 4
+
+
+def load_table(root: Path, *, weeks: int = _LOAD_WEEKS, now: datetime | None = None) -> dict:
+    """Week by week over the merge events (one event counts once, whatever issues it
+    carries): process and product lines and their ratio, the median process files per merge,
+    merges without a product file. An event whose range is unknown counts apart."""
+    now = now or datetime.now(timezone.utc)
+    got = merge_events(root)
+    if got["events"] is None:
+        return {"available": False, "why": got["why"], "weeks": [], "shallow": False}
+    rows = []
+    for w in range(weeks):
+        hi = now - timedelta(days=7 * w)
+        lo = hi - timedelta(days=7)
+        evs = [e for e in got["events"] if lo <= e["when"] < hi]
+        known = [e for e in evs if e["product_lines"] is not None]
+        prod = sum(e["product_lines"] for e in known)
+        proc = sum(e["process_lines"] for e in known)
+        rows.append({"week": -w, "merges": len(evs), "unknown": len(evs) - len(known),
+                     "product_lines": prod if known else None, "process_lines": proc if known else None,
+                     "ratio": round(proc / prod, 2) if known and prod else None,
+                     "process_files_median": (statistics.median(len(e["process_files"]) for e in known)
+                                              if known else None),
+                     "without_product": sum(1 for e in known if not e["files"])})
+    return {"available": True, "why": None, "weeks": rows, "shallow": got["shallow"]}
+
+
+def load(root: Path | None = None, weeks: int = _LOAD_WEEKS, *, as_json: bool = False) -> int:
+    import json  # noqa: PLC0415
+    root = root or Path.cwd()
+    t = load_table(root, weeks=weeks)
+    if as_json:
+        print(json.dumps(t, default=str, sort_keys=True))
+        return 0
+    print("[load] process against product lines per merge, week by week ~proxy — "
+          "paths classify (tower.is_process_path), not effort")
+    if not t["available"]:
+        print(f"  git not read ({t['why']}) — load skipped")
+        return 0
+    if t["shallow"]:
+        print("  shallow clone — history before its boundary is missing, the first range unknown")
+    for r in t["weeks"]:
+        if not r["merges"]:
+            print(f"  week {r['week']}:    0 merges")
+            continue
+        ratio = "—" if r["ratio"] is None else f"{r['ratio']:g}"
+        print(f"  week {r['week']}: {r['merges']:>4} merges — product {_num(r['product_lines'])} lines, process "
+              f"{_num(r['process_lines'])} lines ({ratio} per product line); process files per merge median "
+              f"{_num(r['process_files_median'])}; {r['without_product']} merges without a product file"
+              + (f"; {r['unknown']} with an unknown range" if r["unknown"] else ""))
+    trend = " → ".join("—" if r["ratio"] is None else f"{r['ratio']:g}" for r in reversed(t["weeks"]))
+    print(f"  trend, process lines per product line (oldest week first): {trend}")
+    n = sum(r["merges"] for r in t["weeks"])
+    print(f"  {confidence(n, proxy=True)} — paths classify, not effort; `share` counts the same split in commits")
+    print(f"  -> {action('low', '', thin='a rising ratio over weeks while product lines fall is the signal: look where the process lines go (plans, attests, journals) before adding a rule (optimization.md)')}")
+    return 0
+
+
+# --- size: rounds by the size and spread of a work --------------------------------
+SIZE_STEPS = ("<200", "200-500", "500-1500", ">1500")  # product lines of a work
+_TOP_FILES = 15
+
+
+def _size_step(lines: int) -> str:
+    return "<200" if lines < 200 else "200-500" if lines <= 500 else "500-1500" if lines <= 1500 else ">1500"
+
+
+def _round_cell(members: list[dict]) -> dict:
+    rounded = [w["rounds"] for w in members if w["rounds"] is not None]
+    return {"works": len(members), "rounds_median": statistics.median(rounded) if rounded else None,
+            "share_3plus": round(sum(r >= 3 for r in rounded) / len(rounded), 2) if rounded else None}
+
+
+def _stacks(root: Path) -> list[dict] | str:
+    """The stacks of `testing.local.json`; NOT_READ without one, with a broken one, or with
+    no stack in it."""
+    import testing_config  # noqa: PLC0415 — the configuration's one reader
+    try:
+        cfg = testing_config.load(root)
+    except testing_config.ConfigError:
+        return NOT_READ
+    return cfg["stacks"] if cfg and cfg["stacks"] else NOT_READ
+
+
+def _window_end(root: Path, ref: str, hi: datetime) -> str | None:
+    if hi >= _ALL_TIME[1]:
+        return ref
+    return (_git_out(root, "rev-list", "-1", "--first-parent", f"--before={hi.isoformat()}", ref) or "").strip() or None
+
+
+def size_table(root: Path, lo: datetime = _ALL_TIME[0], hi: datetime = _ALL_TIME[1], *,
+               items: list[dict] | None = None) -> dict:
+    """Over the works merged in the window: review rounds by product lines (count, median,
+    share with >= 3 rounds, rounds per 100 product lines and process lines per product line,
+    each a sum over a sum); rounds for work in one stack against several (`test_select`'s
+    stack of a path); the product files most works touched with the median of the other
+    product files touched alongside; the share of the window's product lines on files gone at
+    its end, renames followed forward over the window's merge events."""
+    items = flow_items(root) if items is None else items
+    merged = _merged_in(items, lo, hi)
+    plans, rounds = _plans(root), _review_rounds(root)
+    got = merge_events(root)
+    events = [e for e in got["events"] or [] if lo <= e["when"] < hi and e["product_lines"] is not None]
+    # forward renames over the window: a file renamed later lives on under its new name
+    current: dict[str, str] = {}
+    lines_on: dict[str, int] = {}
+    for e in events:
+        moved = dict(e["renames"])
+        for key, name in current.items():
+            current[key] = moved.get(name, name)
+        for path, n in e["files"].items():
+            current.setdefault(path, path)
+            lines_on[path] = lines_on.get(path, 0) + n
+    works_ = []
+    for it in merged:
+        r = _rounds_of_issue(root, rounds, it["issue"], plans)
+        works_.append({"issue": it["issue"], "rounds": r["max_round"] if r else None,
+                       "lines": (it.get("product_lines") or {}).get("value"),
+                       "process": (it.get("process_lines") or {}).get("value"),
+                       "files": {current.get(f, f) for f in it.get("files") or {}}})
+    buckets: dict[str, dict] = {}
+    for label in SIZE_STEPS:
+        members = [w for w in works_ if w["lines"] is not None and _size_step(w["lines"]) == label]
+        both = [w for w in members if w["rounds"] is not None]
+        lines = sum(w["lines"] for w in both)
+        with_process = [w for w in members if w["process"] is not None]
+        product = sum(w["lines"] for w in with_process)
+        buckets[label] = {**_round_cell(members),
+                          "rounds_per_100_lines": round(100 * sum(w["rounds"] for w in both) / lines, 2)
+                          if lines else "n/a",
+                          "process_per_product_line": round(sum(w["process"] for w in with_process) / product, 2)
+                          if product else "n/a"}
+    stacks = _stacks(root)
+    spread: dict | str = stacks if isinstance(stacks, str) else {}
+    if not isinstance(stacks, str):
+        import test_select  # noqa: PLC0415 — the one stack-of-a-path rule
+        groups: dict[str, list[dict]] = {"one stack": [], "several stacks": [], "no stack": []}
+        for w in works_:
+            if not w["files"]:
+                continue
+            names = {s["name"] for f in w["files"] if (s := test_select._stack_of(stacks, f))}
+            groups["no stack" if not names else "one stack" if len(names) == 1 else "several stacks"].append(w)
+        spread = {name: _round_cell(members) for name, members in groups.items()}
+    touched: dict[str, list[int]] = {}
+    for w in works_:
+        for f in w["files"]:
+            touched.setdefault(f, []).append(len(w["files"]) - 1)
+    top = [{"file": f, "works": len(co), "co_files_median": statistics.median(co)}
+           for f, co in sorted(touched.items(), key=lambda kv: (-len(kv[1]), kv[0]))[:_TOP_FILES]]
+    vanished: dict | None = None
+    end = _window_end(root, got["ref"], hi) if got["ref"] and events else None
+    listed = _git_out(root, "ls-tree", "-r", "-z", "--name-only", end) if end else None
+    if listed is not None:
+        tree = set(listed.split("\0"))
+        gone = sum(n for key, n in lines_on.items() if current[key] not in tree)
+        total = sum(lines_on.values())
+        vanished = {"lines": gone, "of": total, "share": round(gone / total, 2) if total else None}
+    return {"buckets": buckets, "unknown_lines": sum(1 for w in works_ if w["lines"] is None),
+            "stacks": spread, "top_files": top, "vanished": vanished,
+            "population": _population(root, merged, lo, hi, plans, rounds)}
+
+
+def _cell_text(c: dict) -> str:
+    share = "—" if c["share_3plus"] is None else f"{round(100 * c['share_3plus'])} %"
+    return f"n={c['works']}, rounds median {_num(c['rounds_median'])}, >=3 rounds {share}"
+
+
+def size(root: Path | None = None, window: tuple[datetime, datetime] | None = None, *,
+         as_json: bool = False) -> int:
+    import json  # noqa: PLC0415
+    root = root or Path.cwd()
+    t = size_table(root, *(window or _ALL_TIME))
+    if as_json:
+        print(json.dumps(t, default=str, sort_keys=True))
+        return 0
+    print("[size] review rounds by a work's product lines and stacks; churn on vanished files ~proxy — "
+          "paths classify (tower.is_process_path), not effort")
+    print(_population_text(t["population"]))
+    print(f"  {'product lines':<14} {'works':>5} {'rounds median':>13} {'>=3 rounds':>10} "
+          f"{'rounds/100 lines':>16} {'process lines/product line':>26}")
+    for label, c in t["buckets"].items():
+        share = "—" if c["share_3plus"] is None else f"{round(100 * c['share_3plus'])} %"
+        print(f"  {label:<14} {c['works']:>5} {_num(c['rounds_median']):>13} {share:>10} "
+              f"{_num(c['rounds_per_100_lines']):>16} {_num(c['process_per_product_line']):>26}")
+    if t["unknown_lines"]:
+        print(f"  {t['unknown_lines']} work(s) with unknown product lines (a range without a lower bound)")
+    if isinstance(t["stacks"], str):
+        print(f"  stacks: {t['stacks']} (no usable docs/process/testing.local.json)")
+    else:
+        print("  stacks: " + "; ".join(f"{name}: {_cell_text(c)}" for name, c in t["stacks"].items()))
+    if t["top_files"]:
+        print("  product files most works touched (works · median other product files alongside):")
+        for f in t["top_files"]:
+            print(f"    {f['file']} · {f['works']} · {_num(f['co_files_median'])}")
+    v = t["vanished"]
+    if v is None:
+        print("  vanished files: not measured (no merge event with known lines in the window, or git failed)")
+    else:
+        share = "—" if v["share"] is None else f"{round(100 * v['share'])} %"
+        print(f"  vanished files: {v['lines']} of {v['of']} product lines ({share}) on files gone at the "
+              "window's end (renames followed forward)")
+    n = sum(c["works"] for c in t["buckets"].values())
+    lvl = _level(n, True, False, _N_THRESHOLD)
+    print(f"  {confidence(n, proxy=True)} · {action(lvl, 'where rounds and process lines per product line climb with size, cut plans smaller along their contracts (plan.md); where several stacks cost more rounds, cut at the boundary — a cut that only spreads process is no gain', thin='keep merging; judge after ~20 works per size step')}")
     return 0
 
 
@@ -2245,6 +3069,14 @@ def report() -> int:
     losses()
     print()
     nodes()
+    print()
+    baseline()
+    print()
+    works()
+    print()
+    load()
+    print()
+    size()
     return 0
 
 
@@ -2270,6 +3102,15 @@ def main() -> int:
     bl.add_argument("--window", type=_window, action="append", metavar="SINCE:UNTIL",
                     help="a date window (UNTIL exclusive; repeat once to compare)")
     bl.add_argument("--json", action="store_true")
+    wk = sub.add_parser("works")
+    wk.add_argument("--window", type=_window, metavar="SINCE:UNTIL", help="a date window (UNTIL exclusive)")
+    wk.add_argument("--json", action="store_true")
+    ld = sub.add_parser("load")
+    ld.add_argument("--weeks", type=int, default=_LOAD_WEEKS)
+    ld.add_argument("--json", action="store_true")
+    sz = sub.add_parser("size")
+    sz.add_argument("--window", type=_window, metavar="SINCE:UNTIL", help="a date window (UNTIL exclusive)")
+    sz.add_argument("--json", action="store_true")
     fi = sub.add_parser("findings")
     fi.add_argument("--min-works", type=int, default=2)
     fi.add_argument("--json", action="store_true")
@@ -2302,6 +3143,12 @@ def main() -> int:
         if args.window and len(args.window) > 2:
             p.error("baseline compares at most two windows")
         return baseline(windows=args.window, as_json=args.json)
+    if args.cmd == "works":
+        return works(window=args.window, as_json=args.json)
+    if args.cmd == "load":
+        return load(weeks=args.weeks, as_json=args.json)
+    if args.cmd == "size":
+        return size(window=args.window, as_json=args.json)
     if args.cmd == "findings":
         return findings(min_works=args.min_works, as_json=args.json)
     if args.cmd == "rounds":
