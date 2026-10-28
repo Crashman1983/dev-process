@@ -9,6 +9,30 @@ ein Eintrag ohne Plan oder Issue hat keine Details-Zeile. In wenigen Sätzen je 
 English version: [CHANGELOG.md](CHANGELOG.md). Die Releases vor v2.28.2:
 [docs/changelog-archive-DE.md](docs/changelog-archive-DE.md).
 
+## v2.80.0 — Messen, wo der Prozess wächst, und dort schneiden, wo er kostet · 2026-10-28
+
+**Warum.** Projekte werden mit wachsender Größe langsamer: Kenni deutlich, spkiam beginnt damit. Eine Analyse von acht Wochen Kenni (9.111 Commits, 281 Train-Merges) zeigte den Anteil reiner Prozess-Commits von etwa einem Drittel auf zwei Drittel steigen, und die Review-Runden mit der Größe einer Arbeit und der Zahl ihrer Stacks. Die Analyse lief von Hand, weil das KPI-Cockpit auf jedem Klon `works 0` zählte: Es nahm seine gemergten Arbeiten nur aus Daten des Hosts (#341). Kosten je Arbeit (#314), Wert je Runde (#318) und Durchrutscher je Tier (#320) waren offene Fragen ohne Zahlen.
+
+**Was sich ändert.**
+- Das Cockpit liest gemergte Arbeiten aus Git: Jeder Train-Merge (`train: merge <branch>`) und jeder `finish`-Archiv-Commit auf dem Integrationsbranch ist ein Merge-Ereignis; seine Issues kommen aus `Closes`/`Refs`-Zeilen, sonst aus den Plänen, die er trägt. Eine Arbeit ist eine Issue mit ihren Ereignissen (gestapelte Phasen summieren sich); Start ist die früheste Autorzeit, Ende das letzte Ereignis. Die Kopfzeile jedes Berichts nennt die Quelle der Menge, gemischte Bereiche, Arbeiten ohne Plan oder REVIEW-Zeile, Commits außerhalb jedes Merge-Bereichs und einen flachen Klon. Durchrutscher, Integrationsbranch und Prozessversion kommen aus `tower.integration_ref`; ein gescheitertes Git-Lesen ist unbekannt, nie null.
+- `works` (neu, #314): je gemergter Arbeit eine Zeile — Tier, Art (`fix`, `change`, `template-update`), Plan- und Code-Runden, Durchlaufzeit, Sitzungszeit und Sitzungen je Modellfamilie, wo der Host sie hat, Produktzeilen; Median und p90 je Tier und Art.
+- `rounds` ergänzt eine Tabelle je Rundennummer (1, 2, 3, ≥4), Code- und Plan-Reviews getrennt: Median der Blocker, Anteil der Arbeiten, die noch blockieren, Anteil der Blocks auf seit Runde 1 unveränderten Zeilen, Median der Kosten, wo der Host sie hat (#318).
+- `baseline` ergänzt je Tier: gemergte Arbeiten, Durchrutscher über geschlossene Fenster (offene daneben), Median der Runden und Tokens; unter etwa 20 Arbeiten als `thin` markiert (#320).
+- `load` (neu): Woche für Woche über die Merge-Ereignisse — Prozess- und Produktzeilen und ihr Verhältnis, Median der Prozessdateien je Merge, Merges ohne Produktdatei, die Zeilen außerhalb jedes Merge-Bereichs (Records eines Stewards direkt auf dem Integrationsbranch), der Trend.
+- `size` (neu): Review-Runden nach Produktzeilen einer Arbeit (<200, 200–500, 500–1500, >1500) mit Runden je 100 Produktzeilen und Prozesszeilen je Produktzeile je Stufe; ein Stack gegen mehrere (Stacks aus `testing.local.json`); die Code-Dateien, die die meisten Arbeiten berührten; der Anteil der Produktzeilen auf Dateien, die nicht mehr existieren.
+- `report` ruft `baseline`, `works`, `load` und `size` mit auf. `load` und `size` ordnen Pfade mit `tower.is_process_path` ein und kennzeichnen sich als Proxy.
+- `/plan` empfiehlt, ohne Feld und ohne Gate: Ein Plan, der deutlich mehr als etwa 500 Produktzeilen erwartet, prüft eine Teilung in gestapelte Pläne entlang der Verträge; Arbeit über mehrere Stacks prüft, den Vertrag zuerst zu schneiden. Jede Teilung kostet einen festen Satz Prozess, und `size` zeigt im Projekt, ob sie sich lohnt. Ein offener Ansatz beginnt mit einem Wegwerf-Spike (kein Review, kein Merge; sein Ergebnis ist ein Plan). Die Größenwarnung von `/review` und `/brainstorm` verweisen darauf.
+- `.process-work/.gitignore` ignoriert erzeugte Dateien unter `reviews/` (`*.log`, `*.jsonl`, `*.json`, `*.txt`, `*.gz`, `*.patch`, `*.diff`); Berichte (`*.md`) und Bilder bleiben versioniert.
+- Ein Regel-Budget: Eine neue Prüfung nennt ihren erwarteten Ertrag; eine, die über acht triagierte Wochen nie allein blockierte und keinen bestätigten Defekt fand, ist ein Kandidat zum Entfernen — ohne acht abgedeckte, triagierte Wochen ist die Antwort „unbekannt“. Die Monatsrunde fragt danach.
+
+**Wirkung.** Das Cockpit beantwortet auf jedem Klon, wohin die Prozesslast geht, wie Größe und Stacks die Runden treiben und was eine Arbeit je Tier kostet; die Entlastungsregeln sind Empfehlungen, die das Projekt an den eigenen Zahlen prüfen kann, statt neuer Gates.
+
+**Update.** Reines Update. Ein Projekt, das erzeugte Dateien unter `.process-work/reviews/` schon versioniert, nimmt sie einmal aus dem Index (`git rm -r --cached` auf die neuen Muster); Berichte und Bilder bleiben.
+
+**Geänderte Abschnitte.** `improvement-monthly.md` (What you review), `journal-state-plans.md` (Review reports), `optimization.md` (The process as a check graph), `telemetry.md` (The KPI cockpit), Befehle `/brainstorm`, `/plan`, `/review`
+
+Details: [Plan](docs/analysis/2026-10-28-v2.80.md) #341 #314 #318 #320
+
 ## v2.79.0 — Gates, die im Alltag halten, und die Invariante im Plan · 2026-10-27
 
 **Warum.** Seit v2.78 meldeten die nutzenden Projekte Gates, die im Alltag falsch entschieden. Der Merge-Train nahm einen Branch mit, den der Steward mit `report.py blocked` angehalten hatte (#326). Zwei Branches bestanden Branch-Push und Review und scheiterten erst am Push nach main, weil eine Transitions-Testzelle keinen Pfad nannte (#327). attest kannte weder Testtitel aus `it.each`-Tabellen (#328) noch `*.vitest.*`-Dateien (#300). Interaktive Worker hingen stundenlang an einer Berechtigungsfrage für eine Shell-Form, die die Allowlist nicht zuordnen kann (#323). Das erste Projekt auf einer frischen Installation (spkiam) brachte `finish.py` ohne Remote (#330), attest-Meldungen, die den nächsten Schritt offenließen (#332), und Plan-Runden, die an einer falschen Zahl blockierten (#329). Daneben brauchten drei Arbeiten je etwa sechs Code-Runden und konvergierten erst mit einer ausdrücklichen Invariante im Entwurf (#312).

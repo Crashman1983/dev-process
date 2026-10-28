@@ -7,6 +7,10 @@ technischen Einzelheiten stehen im [CHANGELOG](CHANGELOG-DE.md).
 
 English version: [NEWS.md](NEWS.md).
 
+## v2.80.0 — Messen, wo der Prozess wächst
+
+Das KPI-Cockpit findet gemergte Arbeiten jetzt in Git und zählt damit auf jedem Klon, statt null zu zeigen. Neue Berichte zeigen, was jede Arbeit kostete, wie sich Prozess- und Produktzeilen Woche für Woche verhalten und wie die Review-Runden mit der Größe einer Arbeit und der Zahl ihrer Stacks steigen; bestehende Berichte ergänzen Zahlen je Runde und je Tier. Der Plan-Befehl empfiehlt, große oder stackübergreifende Arbeit zu teilen und eine offene Frage mit einem Wegwerf-Spike zu beginnen, und sagt, dass die eigenen Zahlen des Projekts entscheiden, ob sich eine Teilung lohnt. Erzeugte Review-Dateien werden nicht mehr versioniert, und eine neue Prüfung muss nennen, was sie fangen soll. Keine neuen Gates.
+
 ## v2.79.0 — Gates, die im Alltag halten
 
 Ein Branch, den der Steward mit einem `blocked`-Bericht anhält, bleibt jetzt aus dem Merge-Train, bis ein neuerer `pushed`- oder `review-pass`-Bericht ihn freigibt; das Stoppen einer Worker-Sitzung gibt ihn nicht frei. Ein Plan nennt den Test zu jedem Akzeptanzkriterium und jedem Zustandsübergang ab seinem ersten Push, und ein Plan mit Zustandstabelle nennt die Invariante, die über sie hält, mit Owner und Test. Das Review-Gate erkennt tabellengetriebene `it.each`-Tests und `*.vitest.*`-Dateien und hält eine Tabellenzelle nicht mehr für einen Test. Worker, die dispatch startet, werden angewiesen, Shell-Befehle zu nutzen, die die Berechtigungs-Allowlist zuordnen kann, und warten nicht mehr auf Rückfragen. `finish.py` funktioniert in einem Repository ohne Remote. Eine falsche Zahl im Plan ist ein Fix, kein Block. Die Korrektur für den Code von Mitfahrern im Train-Push (#322) kommt in einem eigenen Release.
