@@ -26,7 +26,11 @@ before the owner; where none is available, say so.
 1. **The graph as a whole.** `process_kpis.py nodes --days 90`,
    `gate_modes.py status`: which gates carry the catches, which cost without
    catching, which flip. Are weakened gates still justified by their triage?
-   Does a locked gate wait for a triage nobody does?
+   Does a locked gate wait for a triage nobody does? Which check is a
+   removal candidate under the rule budget (`optimization.md`, "The rule
+   budget") — never blocked alone, no confirmed defect in eight weeks? Where
+   the event log does not cover the eight weeks or the blocks are untriaged,
+   write "unknown" for that check, not "candidate".
 2. **The decisions of the month.** Each weekly report's prognosis against
    what happened. A pattern of hits, misses or "not measurable" says more
    than one week.

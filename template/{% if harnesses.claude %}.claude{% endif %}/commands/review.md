@@ -188,7 +188,9 @@ Round economy — a failed round must not re-pay the whole chain:
   rounds stop").
 - **Size.** The bundle warns above 30 files / 1,500 lines
   (`PROCESS_REVIEW_MAX_FILES`/`_LINES`). Split before round 1 where the plan
-  allows; works of 3,000+ lines ran five to seven rounds downstream.
+  allows; works of 3,000+ lines ran five to seven rounds downstream. The
+  plan already checks a cut from about 500 product lines (`/plan`, "Cut by
+  size and at the stack boundary").
 - **Exceptions are recorded.** Where the owner overrides a rule above,
   `attest.py --exception "<reason>"` writes a `REVIEW-EXCEPTION` line —
   also when no attest rule trips (a round beyond the cap) — countable,

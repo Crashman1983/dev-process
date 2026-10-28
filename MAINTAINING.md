@@ -47,7 +47,13 @@ CHANGELOG und die Optimierungsrecords der Projekte.
 - **Vereinfachen.** Unwirksame Änderungen und überflüssige Mechanismen wieder
   entfernen (Vorbild: `docs/analysis/2026-08-06-lean-teardown-list.md`). Ein
   Mechanismus, den kein Projekt nutzt und dessen Nutzen nicht belegt ist,
-  ist ein Kandidat zum Entfernen.
+  ist ein Kandidat zum Entfernen. Regel-Budget: Jede Regel kostet in jeder
+  Arbeit; eine neue Regel nennt ihren erwarteten Ertrag. Eine Prüfung, die
+  über acht Wochen nie allein blockierte und keinen bestätigten Defekt fand
+  (`nodes`, Triage), ist ein Kandidat zum Entfernen — nur, wenn das
+  Ereignis-Log die acht Wochen abdeckt und triagiert ist; sonst ist die
+  Antwort „unbekannt“, nicht „Kandidat“ (`template/docs/process/optimization.md`,
+  „The rule budget“).
 
 Er darf Verbesserungen anstoßen, die Wartbarkeit und Portabilität sichern,
 auch wenn kein Projekt einen Fehler meldet.
