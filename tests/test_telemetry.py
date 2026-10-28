@@ -1724,8 +1724,11 @@ def test_a_merge_of_two_issues_is_two_works_and_one_event(render, tmp_path):
 
 
 def test_a_merge_without_a_marker_or_claim_makes_the_next_range_mixed(render, tmp_path):
-    """A planless run-up merged by hand falls into the next range; so does a commit straight
-    onto main. Both ranges are mixed: their lines and start are estimates, and counted."""
+    """A planless run-up merged by hand falls into the next finish range, which is mixed: its
+    lines and start are estimates, and counted. A commit straight onto main before a train
+    merge is no part of the train's branch: it stays out of the merge's lines (a dry run on a
+    consumer clone put 200 000 lines of unmarked history into one train merge) and is counted
+    as a commit outside any merge range."""
     out = _merges_repo(render, tmp_path)
     _train_merge(out, "1-first", [("feat: first (#1)", {"src/one.py": _lines(2)}, _at(2))],
                  "train: merge 1-first\n\nCloses #1", _at(2, 12))
@@ -1742,9 +1745,11 @@ def test_a_merge_without_a_marker_or_claim_makes_the_next_range_mixed(render, tm
     items = _by_issue(_flow_module(out), out)
     assert items[12]["product_lines"] == {"value": 11, "quality": "estimated"}
     assert items[12]["start"] == {"value": _dt(3), "quality": "estimated"}
-    assert items[13]["product_lines"] == {"value": 3, "quality": "estimated"}
+    assert items[13]["product_lines"] == {"value": 1, "quality": "measured"}
+    assert items[13]["start"] == {"value": _dt(8), "quality": "estimated"}
     assert items[1]["product_lines"] == {"value": 2, "quality": "measured"}
-    assert "mixed ranges 2" in _cli(out, "baseline")
+    text = _cli(out, "baseline")
+    assert "mixed ranges 1" in text and "commits outside a merge range 1" in text, text
 
 
 def test_the_first_finish_without_a_predecessor_has_unknown_lines_and_start(render, tmp_path):
@@ -1974,6 +1979,24 @@ def test_size_gives_rounds_by_product_lines_and_by_stacks(render, tmp_path):
     assert top["src/m.py"]["works"] == 1 and top["src/m.py"]["co_files_median"] == 1
     text = _cli(out, "size")
     assert "[size]" in text and "several stacks" in text and "proxy" in text
+
+
+def test_size_lists_code_files_as_hotspots_not_shared_documents(render, tmp_path):
+    """A dry run on a consumer clone listed an inventory document, an API contract and a
+    Makefile as the files most works touched — shared bookkeeping, not code that couples. The
+    hotspot list and its "alongside" count read code files (the `_CODE_EXT` the change-failure
+    proxy already owns)."""
+    out = _merges_repo(render, tmp_path)
+    _train_merge(out, "21-a", [("feat: a (#21)", {"src/a.py": _lines(3), "docs/inventory.md": _lines(1),
+                                                  "Makefile": _lines(1)}, _at(2))],
+                 "train: merge 21-a\n\nCloses #21", _at(2, 12))
+    _train_merge(out, "22-b", [("feat: b (#22)", {"src/b.py": _lines(3), "docs/inventory.md": _lines(1, "y"),
+                                                  "Makefile": _lines(1, "y")}, _at(3))],
+                 "train: merge 22-b\n\nCloses #22", _at(3, 12))
+    m = _flow_module(out)
+    top = {f["file"]: f for f in m.size_table(out, *m._window(":"))["top_files"]}
+    assert "docs/inventory.md" not in top and "Makefile" not in top, top
+    assert top["src/a.py"]["works"] == 1 and top["src/a.py"]["co_files_median"] == 0
 
 
 def test_size_counts_lines_on_vanished_files_and_follows_renames_forward(render, tmp_path):
