@@ -416,16 +416,23 @@ def transitions_findings(rel: str, text: str, *, need_tests: bool) -> list[str]:
 def _bound(root: Path, ref: str, rel: str) -> bool:
     """Is this plan the branch's to answer for? Added on the branch, or below Tier 2 at
     the integration ref (a stub raised to Tier 2 here is written here). An archived plan
-    is judged where it lived before `/finish` moved it, or before `publish_and_prune` copied
-    a spec's plan there (`specs/<slug>/plan.md`, #343), too: an old plan archived here is
-    history. Unreadable at the ref: bound (fail closed)."""
+    is judged where it lived before `/finish` moved it, too: an old plan archived here is
+    history. A spec's plan that `publish_and_prune` copied there (`specs/<slug>/plan.md`,
+    #343) is history only as that copy — the same text: new work under an old slug is new.
+    Unreadable at the ref: bound (fail closed)."""
     homes = [rel]
+    spec_home = None
     if rel.startswith(f"{PLANS_ACTIVE}/archive/"):
         name = rel.rsplit("/", 1)[1]
-        homes += [f"{PLANS_ACTIVE}/{name}", f"{SPECS_DIR}/{name.removesuffix('.md')}/plan.md"]
+        homes.append(f"{PLANS_ACTIVE}/{name}")
+        spec_home = f"{SPECS_DIR}/{name.removesuffix('.md')}/plan.md"
     try:
         before = next((t for t in (_at_ref(root, ref, h) for h in homes) if t is not None), None)
-    except _Unreadable:
+        if before is None and spec_home:
+            spec = _at_ref(root, ref, spec_home)
+            if spec is not None and spec == (root / rel).read_text(encoding="utf-8", errors="replace"):
+                before = spec
+    except (_Unreadable, OSError):
         return True
     return before is None or (plan_tier(_quoted_blank(before)) or 0) < 2
 
