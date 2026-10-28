@@ -285,6 +285,33 @@ def test_an_old_plan_finish_archives_stays_history(render, tmp_path):
     assert r.returncode == 0, r.stdout
 
 
+def test_a_spec_plan_publish_and_prune_archives_stays_history(render, tmp_path):
+    """#343: `tidy --apply` (publish_and_prune) copies `specs/<slug>/plan.md` to
+    `archive/<slug>.md` and prunes the spec; the push failed `plan-structure` because that
+    prior home was not one the gate looked at — old plans were judged by today's rules."""
+    out = render(tmp_path, {"project_name": "demo"})
+    spec = out / "specs/2739-fail-closed/plan.md"
+    spec.parent.mkdir(parents=True)
+    spec.write_text(GOOD.replace("shall keep", "keeps") + "\n- [ ] T2 docs\n", encoding="utf-8")
+    _repo(out)
+    _plan(out, spec.read_text(encoding="utf-8"), name="archive/2739-fail-closed.md")
+    _git(out, "rm", "-r", "-q", "specs/2739-fail-closed")
+    r = _run(out, merge=True)
+    assert r.returncode == 0, r.stdout
+
+
+def test_an_archived_plan_without_a_prior_home_is_still_judged(render, tmp_path):
+    """#343 AC-2: a spec of another name at the ref does not make an archived plan history."""
+    out = render(tmp_path, {"project_name": "demo"})
+    spec = out / "specs/2740-other/plan.md"
+    spec.parent.mkdir(parents=True)
+    spec.write_text(GOOD, encoding="utf-8")
+    _repo(out)
+    _plan(out, GOOD.replace("shall keep", "keeps"), name="archive/2739-fail-closed.md")
+    r = _run(out)
+    assert r.returncode == 1 and "archive/2739-fail-closed.md" in r.stdout, r.stdout
+
+
 # --- #293 AC-1: a declared `## Transitions` section carries its table ---------------
 
 TABLE = ("\n## Transitions\n\n"

@@ -2,6 +2,7 @@
 specification path — rendered overrides, constitution pointer with gate
 guard, deterministic test-task floor, clarification on specs/, publish-and-
 prune merge ritual."""
+import json
 import subprocess
 import sys
 
@@ -287,25 +288,69 @@ def test_stage_publish_needs_issue_ref_and_prunes_nothing(render, tmp_path):
 
 # --- v2.9.3: publish goes REST when GraphQL throttles; deny-list before posting
 
-def _fake_gh(tmp_path, *, comment_fails=True):
-    """A gh stub: `issue comment` fails (GraphQL secondary limit), `api`
-    succeeds and logs; `api …/comments` returns the marker so the verify
-    step passes. Every call is appended to gh.log."""
+def _fake_gh(tmp_path, *, comment_fails=True, keeps_posts=True, seeded=()):
+    """A gh stub: `issue comment` fails (GraphQL secondary limit) or posts, `api … -f body=`
+    posts; a post lands in the issue's comments unless `keeps_posts` is off (a post GitHub
+    lost); `api --paginate …/comments` lists them, after the `seeded` bodies. Every call is
+    appended to gh.log."""
     binpath = tmp_path / "bin"
     binpath.mkdir(exist_ok=True)
     log = tmp_path / "gh.log"
+    store = tmp_path / "gh-comments.json"
+    store.write_text(json.dumps(list(seeded)))
     script = binpath / "gh"
-    script.write_text(f"""#!/bin/sh
-echo "$@" >> {log}
-case "$1 $2" in
-  "issue comment") {"echo 'GraphQL: secondary rate limit' >&2; exit 1" if comment_fails else "exit 0"} ;;
-  "api --paginate") echo '[{{"body": "<!-- publish_and_prune -->"}}]'; exit 0 ;;
-  "api "*) exit 0 ;;
-  *) exit 0 ;;
-esac
+    script.write_text(f"""#!{sys.executable}
+import json, sys
+a = sys.argv[1:]
+open({str(log)!r}, "a").write(" ".join(a) + "\\n")
+store = {str(store)!r}
+def post(body):
+    if {keeps_posts!r}:
+        bodies = json.load(open(store)); bodies.append(body); json.dump(bodies, open(store, "w"))
+if a[:2] == ["issue", "comment"]:
+    if {comment_fails!r}:
+        sys.stderr.write("GraphQL: secondary rate limit\\n"); sys.exit(1)
+    post(a[a.index("--body") + 1])
+elif a[:2] == ["api", "--paginate"]:
+    print(json.dumps([{{"body": b}} for b in json.load(open(store))]))
+elif a[:1] == ["api"] and "-f" in a:
+    post(a[a.index("-f") + 1].split("=", 1)[1])
 """)
     script.chmod(0o755)
     return binpath, log
+
+
+def _publish_module(out):
+    import importlib.util
+    sys.path.insert(0, str(out / "scripts/process"))
+    spec = importlib.util.spec_from_file_location("publish_under_test", out / "scripts/process/publish_and_prune.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_a_rerun_does_not_post_a_part_the_issue_already_holds(render, tmp_path):
+    """#343: a tidy run whose result was not pushed, then another run, posted every spec file
+    a second time. A part whose body the issue already holds is skipped and counts as
+    published."""
+    out = _render(render, tmp_path)
+    binpath, log = _fake_gh(tmp_path, comment_fails=False)
+    m = _publish_module(out)
+    gh = str(binpath / "gh")
+    assert m._post_comment(gh, "12", "004-widget/plan.md", "the plan\n")
+    assert m._post_comment(gh, "12", "004-widget/plan.md", "the plan\n")
+    assert log.read_text().count("issue comment 12") == 1
+    assert m._post_comment(gh, "12", "004-widget/spec.md", "the spec\n")  # another part posts
+    assert log.read_text().count("issue comment 12") == 2
+
+
+def test_the_publish_verify_needs_this_runs_parts_not_any_marker(render, tmp_path):
+    """#343 AC-4: an older marker comment made a post GitHub never kept read as verified."""
+    out = _render(render, tmp_path)
+    binpath, _log = _fake_gh(tmp_path, comment_fails=False, keeps_posts=False,
+                             seeded=["<!-- publish_and_prune -->\n## 003-old/plan.md\n\nold"])
+    m = _publish_module(out)
+    assert not m._post_comment(str(binpath / "gh"), "12", "004-widget/plan.md", "the plan\n")
 
 
 def test_publish_falls_back_to_rest_when_graphql_throttles(render, tmp_path):

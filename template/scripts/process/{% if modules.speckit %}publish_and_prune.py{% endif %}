@@ -288,9 +288,37 @@ def _rest_comment(gh: str, issue: str, text: str) -> subprocess.CompletedProcess
                "-f", f"body={text}")
 
 
+def _comment_bodies(gh: str, issue: str) -> list[str] | None:
+    """The issue's comment bodies (REST first — it is the route that was still open when
+    GraphQL was throttled), line ends and outer blanks normalized; None when unreadable."""
+    r = _gh(gh, "api", "--paginate", f"repos/{{owner}}/{{repo}}/issues/{issue}/comments")
+    bodies: list[str] | None = None
+    if r.returncode == 0:
+        try:
+            bodies = [item.get("body") or "" for item in json.loads(r.stdout)]
+        except (json.JSONDecodeError, AttributeError, TypeError):
+            bodies = None
+    if bodies is None:
+        r = _gh(gh, "issue", "view", issue, "--json", "comments")
+        if r.returncode != 0:
+            return None
+        try:
+            bodies = [c.get("body") or "" for c in json.loads(r.stdout).get("comments", [])]
+        except (json.JSONDecodeError, AttributeError, TypeError):
+            return None
+    return [_norm(b) for b in bodies]
+
+
+def _norm(text: str) -> str:
+    return text.replace("\r\n", "\n").strip()
+
+
 def _post_comment(gh: str, issue: str, title: str, body: str,
                   deny: list[re.Pattern[str]] | None = None) -> bool:
-    """Post (possibly split) and verify by reading the comment back."""
+    """Post (possibly split) the parts the issue does not hold yet, and verify that every
+    part is there by reading the comments back (#343: a re-run after an unpushed run posted
+    everything twice, and any older marker comment passed the verify). Comments that cannot
+    be read refuse before posting: a re-run could not tell what it already posted."""
     hits = _denied(body, deny or [])
     if hits:
         print(f"publish_and_prune: REFUSED to publish {title!r} — {DENYLIST} hit: "
@@ -298,9 +326,17 @@ def _post_comment(gh: str, issue: str, title: str, body: str,
               file=sys.stderr)
         return False
     chunks = [body[i:i + COMMENT_LIMIT] for i in range(0, len(body), COMMENT_LIMIT)] or [""]
-    for i, chunk in enumerate(chunks, 1):
-        suffix = f" (part {i}/{len(chunks)})" if len(chunks) > 1 else ""
-        text = f"<!-- publish_and_prune -->\n## {title}{suffix}\n\n{chunk}"
+    parts = [f"<!-- publish_and_prune -->\n## {title}"
+             + (f" (part {i}/{len(chunks)})" if len(chunks) > 1 else "") + f"\n\n{chunk}"
+             for i, chunk in enumerate(chunks, 1)]
+    held = _comment_bodies(gh, issue)
+    if held is None:
+        print(f"publish_and_prune: could not read the comments of issue #{issue} — nothing "
+              f"posted (a re-run could not tell what it already published)", file=sys.stderr)
+        return False
+    for text in parts:
+        if _norm(text) in held:
+            continue  # posted by an earlier run
         r = _gh(gh, "issue", "comment", issue, "--body", text)
         if r.returncode != 0:
             print(f"publish_and_prune: `gh issue comment` failed "
@@ -309,25 +345,8 @@ def _post_comment(gh: str, issue: str, title: str, body: str,
         if r.returncode != 0:
             print(f"publish_and_prune: comment failed: {r.stderr.strip()}", file=sys.stderr)
             return False
-    # verify: the marker must be present in the issue's comments (REST first —
-    # it is the route that was still open when GraphQL was throttled)
-    r = _gh(gh, "api", "--paginate", f"repos/{{owner}}/{{repo}}/issues/{issue}/comments")
-    bodies: list[str] = []
-    if r.returncode == 0:
-        try:
-            for item in json.loads(r.stdout):
-                bodies.append(item.get("body") or "")
-        except (json.JSONDecodeError, AttributeError):
-            bodies = []
-    if not bodies:
-        r = _gh(gh, "issue", "view", issue, "--json", "comments")
-        if r.returncode != 0:
-            return False
-        try:
-            bodies = [c.get("body") or "" for c in json.loads(r.stdout).get("comments", [])]
-        except json.JSONDecodeError:
-            return False
-    return any("publish_and_prune" in b for b in bodies)
+    now = _comment_bodies(gh, issue)
+    return now is not None and all(_norm(text) in now for text in parts)
 
 
 def _stage(root: Path, fdir: Path) -> int:

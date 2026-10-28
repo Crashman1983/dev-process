@@ -66,7 +66,11 @@ unchanged, forever if needed.
    waived — `sc-evidenced:`/`sc-followup:`/`sc-waived:` lines in plan.md),
    publish to the tracking issue, **verify**, only then prune
    `specs/<feature>/` (no `gh`/no verify ⇒ the directory stays —
-   flow-forward degradation). Durable yield is promoted: user stories →
+   flow-forward degradation). A re-run posts only the parts the issue does
+   not hold yet, and the verify reads back every part of this run; issue
+   comments it cannot read refuse before anything is posted. The plan's
+   archive copy is history for `plan-structure` (it stood at
+   `specs/<feature>/plan.md`). Durable yield is promoted: user stories →
    feature-inventory entries with test refs; shared contracts → the contract
    SSOT.
 

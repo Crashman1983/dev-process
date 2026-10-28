@@ -12,7 +12,7 @@ A few plain sentences per release: [NEWS.md](NEWS.md). Deutsche Fassung:
 
 ## v2.80.0 — Measure where the process grows, and cut it where it costs · 2026-10-28
 
-**Why.** Projects slow down as they grow: Kenni clearly, spkiam beginning. An eight-week analysis of Kenni (9,111 commits, 281 train merges) found the share of pure process commits rising from about a third to two thirds, and the review rounds rising with a work's size and with the number of stacks it spans. The analysis ran by hand, because the KPI cockpit counted `works 0` on every clone: it took its merged works only from host-local data (#341). Cost per work (#314), value per round (#318) and escapes per tier (#320) were open questions without numbers.
+**Why.** Projects slow down as they grow: Kenni clearly, spkiam beginning. An eight-week analysis of Kenni (9,111 commits, 281 train merges) found the share of pure process commits rising from about a third to two thirds, and the review rounds rising with a work's size and with the number of stacks it spans. The analysis ran by hand, because the KPI cockpit counted `works 0` on every clone: it took its merged works only from host-local data (#341). Cost per work (#314), value per round (#318) and escapes per tier (#320) were open questions without numbers. Separately, Kenni's `tidy.py --apply` could not push the spec directories it publishes: `plan-structure` judged their archived plans by today's rules, and a re-run of `publish_and_prune` would have posted 46 plans a second time (#343).
 
 **What changes.**
 - The cockpit reads merged works from git: every train merge (`train: merge <branch>`) and every `finish` archive commit on the integration branch is a merge event; its issues come from `Closes`/`Refs` lines, else from the plans it carries. A work is an issue with its events (stacked phases sum up); start is the earliest author time, end the last event. The header of each report names the source of its population, mixed ranges, merges whose plans git could not read, ranges unknown, works joined to no plan or REVIEW line, commits outside any merge range and a shallow clone. Escapes, the integration branch and the process version come from `tower.integration_ref`; a failed git read is unknown, never zero.
@@ -24,15 +24,17 @@ A few plain sentences per release: [NEWS.md](NEWS.md). Deutsche Fassung:
 - `report` runs `baseline`, `works`, `load` and `size` too. `load` and `size` classify paths with `tower.is_process_path` and say they are a proxy.
 - `/plan` advises, without a field or gate: a plan expecting well over about 500 product lines checks a split into stacked plans along the contracts, work across stacks checks cutting the contract first; every split costs a fixed set of process, and `size` shows in the project whether it pays. An open approach starts with a throwaway spike (no review, no merge; its result is a plan). `/review`'s size warning and `/brainstorm` point there.
 - `.process-work/.gitignore` ignores generated files under `reviews/` (`*.log`, `*.jsonl`, `*.json`, `*.txt`, `*.gz`, `*.patch`, `*.diff`); reports (`*.md`) and images stay versioned.
+- `plan-structure` treats a plan that `publish_and_prune` archived (`specs/<slug>/plan.md` → `.process-work/plans/archive/<slug>.md`) as history when it stood at the integration ref at Tier 2+, as it already did for plans `/finish` archives (#343).
+- `publish_and_prune` posts only the parts an issue does not hold yet, and its verify reads back every part of the run instead of any marker comment; issue comments it cannot read refuse before anything is posted (#343).
 - A rule budget: a new check names its expected yield; one that over eight triaged weeks never blocked alone and found no confirmed defect is a candidate for removal — without eight covered, triaged weeks the answer is unknown. The monthly review asks for it.
 
 **Effect.** The cockpit answers on any clone where the process load goes, how size and stacks drive rounds, and what a work costs per tier; the relief rules are advice the project can check against its own numbers instead of new gates.
 
-**Update.** A pure update. A project that already versions generated files under `.process-work/reviews/` removes them from the index once (`git rm -r --cached` on the new patterns); reports and images stay.
+**Update.** A pure update; a `tidy --apply` held back by #343 can run again after it — already posted parts are skipped. A project that already versions generated files under `.process-work/reviews/` removes them from the index once (`git rm -r --cached` on the new patterns); reports and images stay.
 
-**Changed sections.** `improvement-monthly.md` (What you review), `journal-state-plans.md` (Review reports), `optimization.md` (The process as a check graph), `telemetry.md` (The KPI cockpit), commands `/brainstorm`, `/plan`, `/review`
+**Changed sections.** `improvement-monthly.md` (What you review), `journal-state-plans.md` (Review reports), `optimization.md` (The process as a check graph), `telemetry.md` (The KPI cockpit), `speckit.md` (The Tier 2+ flow), commands `/brainstorm`, `/plan`, `/review`
 
-Details: [Plan](docs/analysis/2026-10-28-v2.80.md) #341 #314 #318 #320
+Details: [Plan](docs/analysis/2026-10-28-v2.80.md) #341 #314 #318 #320 #343
 
 ## v2.79.0 — Gates that hold in daily work, and the invariant in the plan · 2026-10-27
 

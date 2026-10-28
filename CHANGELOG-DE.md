@@ -11,7 +11,7 @@ English version: [CHANGELOG.md](CHANGELOG.md). Die Releases vor v2.28.2:
 
 ## v2.80.0 — Messen, wo der Prozess wächst, und dort schneiden, wo er kostet · 2026-10-28
 
-**Warum.** Projekte werden mit wachsender Größe langsamer: Kenni deutlich, spkiam beginnt damit. Eine Analyse von acht Wochen Kenni (9.111 Commits, 281 Train-Merges) zeigte den Anteil reiner Prozess-Commits von etwa einem Drittel auf zwei Drittel steigen, und die Review-Runden mit der Größe einer Arbeit und der Zahl ihrer Stacks. Die Analyse lief von Hand, weil das KPI-Cockpit auf jedem Klon `works 0` zählte: Es nahm seine gemergten Arbeiten nur aus Daten des Hosts (#341). Kosten je Arbeit (#314), Wert je Runde (#318) und Durchrutscher je Tier (#320) waren offene Fragen ohne Zahlen.
+**Warum.** Projekte werden mit wachsender Größe langsamer: Kenni deutlich, spkiam beginnt damit. Eine Analyse von acht Wochen Kenni (9.111 Commits, 281 Train-Merges) zeigte den Anteil reiner Prozess-Commits von etwa einem Drittel auf zwei Drittel steigen, und die Review-Runden mit der Größe einer Arbeit und der Zahl ihrer Stacks. Die Analyse lief von Hand, weil das KPI-Cockpit auf jedem Klon `works 0` zählte: Es nahm seine gemergten Arbeiten nur aus Daten des Hosts (#341). Kosten je Arbeit (#314), Wert je Runde (#318) und Durchrutscher je Tier (#320) waren offene Fragen ohne Zahlen. Unabhängig davon konnte Kennis `tidy.py --apply` die Spec-Verzeichnisse, die es veröffentlicht, nicht pushen: `plan-structure` prüfte ihre archivierten Pläne nach heutigen Regeln, und ein erneuter Lauf von `publish_and_prune` hätte 46 Pläne ein zweites Mal gepostet (#343).
 
 **Was sich ändert.**
 - Das Cockpit liest gemergte Arbeiten aus Git: Jeder Train-Merge (`train: merge <branch>`) und jeder `finish`-Archiv-Commit auf dem Integrationsbranch ist ein Merge-Ereignis; seine Issues kommen aus `Closes`/`Refs`-Zeilen, sonst aus den Plänen, die er trägt. Eine Arbeit ist eine Issue mit ihren Ereignissen (gestapelte Phasen summieren sich); Start ist die früheste Autorzeit, Ende das letzte Ereignis. Die Kopfzeile jedes Berichts nennt die Quelle der Menge, gemischte Bereiche, Merges mit Plänen, die Git nicht lesen konnte, unbekannte Bereiche, Arbeiten ohne Plan oder REVIEW-Zeile, Commits außerhalb jedes Merge-Bereichs und einen flachen Klon. Durchrutscher, Integrationsbranch und Prozessversion kommen aus `tower.integration_ref`; ein gescheitertes Git-Lesen ist unbekannt, nie null.
@@ -23,15 +23,17 @@ English version: [CHANGELOG.md](CHANGELOG.md). Die Releases vor v2.28.2:
 - `report` ruft `baseline`, `works`, `load` und `size` mit auf. `load` und `size` ordnen Pfade mit `tower.is_process_path` ein und kennzeichnen sich als Proxy.
 - `/plan` empfiehlt, ohne Feld und ohne Gate: Ein Plan, der deutlich mehr als etwa 500 Produktzeilen erwartet, prüft eine Teilung in gestapelte Pläne entlang der Verträge; Arbeit über mehrere Stacks prüft, den Vertrag zuerst zu schneiden. Jede Teilung kostet einen festen Satz Prozess, und `size` zeigt im Projekt, ob sie sich lohnt. Ein offener Ansatz beginnt mit einem Wegwerf-Spike (kein Review, kein Merge; sein Ergebnis ist ein Plan). Die Größenwarnung von `/review` und `/brainstorm` verweisen darauf.
 - `.process-work/.gitignore` ignoriert erzeugte Dateien unter `reviews/` (`*.log`, `*.jsonl`, `*.json`, `*.txt`, `*.gz`, `*.patch`, `*.diff`); Berichte (`*.md`) und Bilder bleiben versioniert.
+- `plan-structure` behandelt einen Plan, den `publish_and_prune` archiviert (`specs/<slug>/plan.md` → `.process-work/plans/archive/<slug>.md`), als Historie, wenn er am Integrationsstand mit Tier 2+ stand — wie schon bei Plänen, die `/finish` archiviert (#343).
+- `publish_and_prune` postet nur die Teile, die eine Issue noch nicht hat, und seine Prüfung liest jeden Teil des Laufs zurück statt irgendeines Marker-Kommentars; kann es die Kommentare der Issue nicht lesen, bricht es ab, bevor es etwas postet (#343).
 - Ein Regel-Budget: Eine neue Prüfung nennt ihren erwarteten Ertrag; eine, die über acht triagierte Wochen nie allein blockierte und keinen bestätigten Defekt fand, ist ein Kandidat zum Entfernen — ohne acht abgedeckte, triagierte Wochen ist die Antwort „unbekannt“. Die Monatsrunde fragt danach.
 
 **Wirkung.** Das Cockpit beantwortet auf jedem Klon, wohin die Prozesslast geht, wie Größe und Stacks die Runden treiben und was eine Arbeit je Tier kostet; die Entlastungsregeln sind Empfehlungen, die das Projekt an den eigenen Zahlen prüfen kann, statt neuer Gates.
 
-**Update.** Reines Update. Ein Projekt, das erzeugte Dateien unter `.process-work/reviews/` schon versioniert, nimmt sie einmal aus dem Index (`git rm -r --cached` auf die neuen Muster); Berichte und Bilder bleiben.
+**Update.** Reines Update; ein wegen #343 zurückgehaltenes `tidy --apply` kann danach erneut laufen — schon gepostete Teile werden übersprungen. Ein Projekt, das erzeugte Dateien unter `.process-work/reviews/` schon versioniert, nimmt sie einmal aus dem Index (`git rm -r --cached` auf die neuen Muster); Berichte und Bilder bleiben.
 
-**Geänderte Abschnitte.** `improvement-monthly.md` (What you review), `journal-state-plans.md` (Review reports), `optimization.md` (The process as a check graph), `telemetry.md` (The KPI cockpit), Befehle `/brainstorm`, `/plan`, `/review`
+**Geänderte Abschnitte.** `improvement-monthly.md` (What you review), `journal-state-plans.md` (Review reports), `optimization.md` (The process as a check graph), `telemetry.md` (The KPI cockpit), `speckit.md` (The Tier 2+ flow), Befehle `/brainstorm`, `/plan`, `/review`
 
-Details: [Plan](docs/analysis/2026-10-28-v2.80.md) #341 #314 #318 #320
+Details: [Plan](docs/analysis/2026-10-28-v2.80.md) #341 #314 #318 #320 #343
 
 ## v2.79.0 — Gates, die im Alltag halten, und die Invariante im Plan · 2026-10-27
 
