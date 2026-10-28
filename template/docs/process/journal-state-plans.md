@@ -211,6 +211,14 @@ and state, which the review bundle lists and the owner digest points at. Format,
 GitHub Issues, and the gate binding are in the `github-issues` module doc;
 without that module the reports are simply working memory.
 
+`reviews/` versions only reports (`*.md`) and UI evidence (images). What a
+review run generates beside them — `*.log`, `*.jsonl`, `*.json`, `*.txt`,
+`*.gz`, `*.patch`, `*.diff`, and the `*.bundle.md` input — is ignored
+(`.process-work/.gitignore`), at any depth under `reviews/`; a report or an
+image never is. A generated file committed before that rule stays tracked
+until it is taken out of the index once (`git rm -r --cached` on those
+files); the reports and images stay.
+
 ## Review attestations
 
 The `review` gate reads `REVIEW` lines from the journal — one per review, the
