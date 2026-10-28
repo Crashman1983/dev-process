@@ -10,6 +10,30 @@ A few plain sentences per release: [NEWS.md](NEWS.md). Deutsche Fassung:
 [CHANGELOG-DE.md](CHANGELOG-DE.md). Releases before v2.28.2:
 [docs/changelog-archive.md](docs/changelog-archive.md).
 
+## v2.80.0 — Measure where the process grows, and cut it where it costs · 2026-10-28
+
+**Why.** Projects slow down as they grow: Kenni clearly, spkiam beginning. An eight-week analysis of Kenni (9,111 commits, 281 train merges) found the share of pure process commits rising from about a third to two thirds, and the review rounds rising with a work's size and with the number of stacks it spans. The analysis ran by hand, because the KPI cockpit counted `works 0` on every clone: it took its merged works only from host-local data (#341). Cost per work (#314), value per round (#318) and escapes per tier (#320) were open questions without numbers.
+
+**What changes.**
+- The cockpit reads merged works from git: every train merge (`train: merge <branch>`) and every `finish` archive commit on the integration branch is a merge event; its issues come from `Closes`/`Refs` lines, else from the plans it carries. A work is an issue with its events (stacked phases sum up); start is the earliest author time, end the last event. The header of each report names the source of its population, mixed ranges, works joined to no plan or REVIEW line, commits outside any merge range and a shallow clone. Escapes, the integration branch and the process version come from `tower.integration_ref`; a failed git read is unknown, never zero.
+- `works` (new, #314): one row per merged work — tier, kind (`fix`, `change`, `template-update`), plan and code rounds, lead time, session time and sessions per model family where the host has them, product lines; median and p90 per tier and kind.
+- `rounds` adds a table per round number (1, 2, 3, ≥4), code and plan reviews apart: median blockers, share of works still blocked, share of blocks on lines unchanged since round 1, median cost where the host has it (#318).
+- `baseline` adds per tier: merged works, escapes over closed windows (open ones beside), median rounds and tokens; under about 20 works marked `thin` (#320).
+- `load` (new): week by week over merge events — process and product lines and their ratio, median process files per merge, merges without a product file, the lines committed outside any merge range (a steward's records straight on the integration branch), the trend.
+- `size` (new): review rounds by a work's product lines (<200, 200–500, 500–1500, >1500) with rounds per 100 product lines and process lines per product line per band; one stack against several (stacks from `testing.local.json`); the code files most works touched; the share of product lines on files that no longer exist.
+- `report` runs `baseline`, `works`, `load` and `size` too. `load` and `size` classify paths with `tower.is_process_path` and say they are a proxy.
+- `/plan` advises, without a field or gate: a plan expecting well over about 500 product lines checks a split into stacked plans along the contracts, work across stacks checks cutting the contract first; every split costs a fixed set of process, and `size` shows in the project whether it pays. An open approach starts with a throwaway spike (no review, no merge; its result is a plan). `/review`'s size warning and `/brainstorm` point there.
+- `.process-work/.gitignore` ignores generated files under `reviews/` (`*.log`, `*.jsonl`, `*.json`, `*.txt`, `*.gz`, `*.patch`, `*.diff`); reports (`*.md`) and images stay versioned.
+- A rule budget: a new check names its expected yield; one that over eight triaged weeks never blocked alone and found no confirmed defect is a candidate for removal — without eight covered, triaged weeks the answer is unknown. The monthly review asks for it.
+
+**Effect.** The cockpit answers on any clone where the process load goes, how size and stacks drive rounds, and what a work costs per tier; the relief rules are advice the project can check against its own numbers instead of new gates.
+
+**Update.** A pure update. A project that already versions generated files under `.process-work/reviews/` removes them from the index once (`git rm -r --cached` on the new patterns); reports and images stay.
+
+**Changed sections.** `improvement-monthly.md` (What you review), `journal-state-plans.md` (Review reports), `optimization.md` (The process as a check graph), `telemetry.md` (The KPI cockpit), commands `/brainstorm`, `/plan`, `/review`
+
+Details: [Plan](docs/analysis/2026-10-28-v2.80.md) #341 #314 #318 #320
+
 ## v2.79.0 — Gates that hold in daily work, and the invariant in the plan · 2026-10-27
 
 **Why.** Since v2.78 the consuming projects reported gates that decided wrongly in daily work. The merge train boarded a branch the steward had held with `report.py blocked` (#326). Two branches passed their branch push and review and failed only at the push to main, because a Transitions test cell named no path (#327). attest did not know test titles from `it.each` tables (#328) nor `*.vitest.*` files (#300). Interactive workers stalled for hours on a permission prompt for a shell form the allowlist cannot match (#323). The first project on a fresh install (spkiam) added `finish.py` without a remote (#330), attest messages that left the next step to guesswork (#332), and plan rounds that blocked on a wrong count (#329). Separately, three works needed about six code rounds each and converged only once their design named an explicit invariant (#312).

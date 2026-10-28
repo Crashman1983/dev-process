@@ -7,6 +7,10 @@ details are in the [CHANGELOG](CHANGELOG.md).
 
 Deutsche Fassung: [NEWS-DE.md](NEWS-DE.md).
 
+## v2.80.0 — Measure where the process grows
+
+The KPI cockpit now finds merged works in git, so it counts on any clone instead of showing zero. New reports show what each work cost, how process lines compare with product lines week by week, and how review rounds rise with a work's size and with the number of stacks it spans; existing reports add numbers per round and per tier. The plan command advises splitting large or cross-stack work and starting an open question with a throwaway spike, and says the project's own numbers decide whether a split pays. Generated review files are no longer versioned, and a new check has to name what it is expected to catch. No new gates.
+
 ## v2.79.0 — Gates that hold in daily work
 
 A branch the steward holds with a `blocked` report now stays off the merge train until a newer `pushed` or `review-pass` report releases it; stopping a worker session does not. A plan names the test for each acceptance criterion and each state transition from its first push, and a plan with a state table names the invariant that holds across it, with its owner and a test. The review gate recognizes table-driven `it.each` tests and `*.vitest.*` files, and no longer reads a table cell as a test. Workers started by dispatch are told to use shell commands the permission allowlist can match, so they stop waiting on prompts. `finish.py` works in a repository without a remote. A wrong count in a plan is a fix, not a block. The fix for co-passengers' code in a merge-train push (#322) comes in its own release.
