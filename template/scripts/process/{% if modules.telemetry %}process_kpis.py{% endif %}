@@ -1103,6 +1103,7 @@ def _population(root: Path, merged: list[dict], lo: datetime, hi: datetime,
             "finish": sum(1 for e in events if e["kind"] == "finish"),
             "mixed": sum(1 for e in events if e["mixed"]),
             "unclaimed": sum(1 for e in events if not e["issues"]),
+            "strays": sum(e.get("strays", 0) for e in events),
             "unjoined": sum(1 for it in merged if not _joined(it["issue"], plans, rounds)),
             "shallow": git["shallow"], "why": git["why"]}
 
@@ -1113,7 +1114,7 @@ def _population_text(p: dict, label: str = "") -> str:
         return head + f"host reports only {p['host_only']}; git not read ({p['why']})"
     return (head + f"git {p['git']} ({p['train']} train, {p['finish']} finish merges), host reports only "
             f"{p['host_only']}; mixed ranges {p['mixed']}; merges without an issue {p['unclaimed']}; "
-            f"joined to no plan or REVIEW line {p['unjoined']}"
+            f"joined to no plan or REVIEW line {p['unjoined']}; commits outside a merge range {p['strays']}"
             + ("; shallow clone — history before its boundary is missing, the first range unknown"
                if p["shallow"] else ""))
 
@@ -1829,14 +1830,16 @@ def _event(root: Path, table: dict[str, dict], c: dict, prev: str | None, kind: 
     ev = {"sha": sha, "kind": kind, "when": datetime.fromtimestamp(c["ct"], tz=timezone.utc),
           "branch": None, "plans": [], "issues": [], "claim": "none", "bounded": True, "mixed": False,
           "start": None, "product_lines": None, "process_lines": None, "binary": 0, "files": {},
-          "process_files": [], "renames": [], "product_subjects": []}
+          "process_files": [], "renames": [], "product_subjects": [], "strays": 0}
     if kind == "train":
         p1, p2 = c["parents"]
         ev["branch"] = m.group("branch")
         own = _rev_list(root, f"{p1}..{p2}")
-        # commits between the event before and merge^1: no marker carried them — they fall in here
+        # commits between the event before and merge^1 came onto the integration branch without
+        # a marker: they are no part of this branch — counted apart, never in its lines or start
+        # (a dry run on a consumer clone put 200 000 lines of unmarked history into one merge)
         strays = _rev_list(root, f"{prev}..{p1}") if prev and prev != p1 else []
-        base = prev or p1
+        base = p1
         issues = _claims(message) | {int(n) for n in _TRAIN_REFS.findall(message)}
         claim = "message"
         if not issues:
@@ -1856,14 +1859,14 @@ def _event(root: Path, table: dict[str, dict], c: dict, prev: str | None, kind: 
     if own is None or strays is None or base is None:
         ev["bounded"] = False
         return ev
-    commits = [table[s] for s in own + strays if s in table]
+    ev["strays"] = len(strays)
+    commits = [table[s] for s in own if s in table]
 
     def product(x: dict) -> bool:
         return any(not tower.is_process_path(f) for f in x["files"])
-    # mixed: a commit claiming another issue, a commit no marker carried (before a train
-    # merge), or — a fast-forward cannot tell the branch's commits from others — a product
-    # commit in a finish range that claims nothing
-    ev["mixed"] = (any(_claims(x["message"]) - issues for x in commits) or bool(strays)
+    # mixed: a commit claiming another issue, or — a fast-forward cannot tell the branch's
+    # commits from others — a product commit in a finish range that claims nothing
+    ev["mixed"] = (any(_claims(x["message"]) - issues for x in commits)
                    or (kind == "finish" and any(product(x) and not _claims(x["message"]) for x in commits)))
     if commits:
         ev["start"] = datetime.fromtimestamp(min(x["at"] for x in commits), tz=timezone.utc)
@@ -2600,10 +2603,13 @@ def size_table(root: Path, lo: datetime = _ALL_TIME[0], hi: datetime = _ALL_TIME
             names = {s["name"] for f in w["files"] if (s := test_select._stack_of(stacks, f))}
             groups["no stack" if not names else "one stack" if len(names) == 1 else "several stacks"].append(w)
         spread = {name: _round_cell(members) for name, members in groups.items()}
+    # code files only: shared documents, contracts and build files collect unrelated works and
+    # crowded out the code that couples (dry run on a consumer clone); `_CODE_EXT` is the owner
     touched: dict[str, list[int]] = {}
     for w in works_:
-        for f in w["files"]:
-            touched.setdefault(f, []).append(len(w["files"]) - 1)
+        code = [f for f in w["files"] if Path(f).suffix.lower() in _CODE_EXT]
+        for f in code:
+            touched.setdefault(f, []).append(len(code) - 1)
     top = [{"file": f, "works": len(co), "co_files_median": statistics.median(co)}
            for f, co in sorted(touched.items(), key=lambda kv: (-len(kv[1]), kv[0]))[:_TOP_FILES]]
     vanished: dict | None = None
@@ -2648,7 +2654,7 @@ def size(root: Path | None = None, window: tuple[datetime, datetime] | None = No
     else:
         print("  stacks: " + "; ".join(f"{name}: {_cell_text(c)}" for name, c in t["stacks"].items()))
     if t["top_files"]:
-        print("  product files most works touched (works · median other product files alongside):")
+        print("  code files most works touched (works · median other code files alongside):")
         for f in t["top_files"]:
             print(f"    {f['file']} · {f['works']} · {_num(f['co_files_median'])}")
     v = t["vanished"]
