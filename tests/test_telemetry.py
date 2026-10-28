@@ -1658,6 +1658,34 @@ def test_a_clone_counts_a_train_work_and_a_finish_work_from_git(render, tmp_path
     assert "shallow clone" in _cli(shallow, "baseline")
 
 
+def test_a_failed_history_read_is_not_read_in_every_report_of_the_run(render, tmp_path):
+    """On a cold cache the whole-history `git log` ran past its timeout: `flow_items` saw no
+    events and `baseline` printed `works 0` while its header, read a moment later, counted 64
+    train merges (dry run on a consumer clone). One run, one answer: a failed read stays
+    failed for the run and the header says git was not read, never `git 0`."""
+    out = _alpha_beta(render, tmp_path)
+    clone = _clone(out, tmp_path)
+    m = _flow_module(clone)
+    calls = {"n": 0}
+    real = m._git_out
+
+    def flaky(root, *args, **kw):
+        if args and args[0] == "log" and "--name-only" in args:
+            calls["n"] += 1
+            if calls["n"] == 1:
+                return None  # the first whole-history read fails, a later one would succeed
+        return real(root, *args, **kw)
+
+    m._git_out = flaky
+    m._EVENTS_READ.clear()
+    items = m.flow_items(clone)
+    lo, hi = m._window("2026-01-01:2027-01-01")
+    pop = m._population(clone, [it for it in items if it.get("source") in ("git", "both")], lo, hi, m._plans(clone),
+                        m._review_rounds(clone))
+    assert pop["why"], pop  # not read — and not a second, contradicting read
+    assert "git not read" in m._population_text(pop)
+
+
 def test_stacked_phases_are_one_work_and_a_fix_after_the_first_merge_escaped(render, tmp_path):
     """Two merges of one issue are one work (lines summed, start from the first); a fix under
     the same issue after the first merge is an escape — on the host and on a clone alike, and
