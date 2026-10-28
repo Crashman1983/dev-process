@@ -312,6 +312,20 @@ def test_an_archived_plan_without_a_prior_home_is_still_judged(render, tmp_path)
     assert r.returncode == 1 and "archive/2739-fail-closed.md" in r.stdout, r.stdout
 
 
+def test_new_work_under_the_slug_of_an_old_spec_plan_is_still_judged(render, tmp_path):
+    """#343 review: a spec plan of the same slug at the ref made ANY archived plan of that
+    name history — new work could pass under an old name. Only the copy publish_and_prune
+    makes (the same text) is history."""
+    out = render(tmp_path, {"project_name": "demo"})
+    spec = out / "specs/2739-fail-closed/plan.md"
+    spec.parent.mkdir(parents=True)
+    spec.write_text(GOOD, encoding="utf-8")
+    _repo(out)
+    _plan(out, GOOD.replace("shall keep", "keeps") + "\n- new work\n", name="archive/2739-fail-closed.md")
+    r = _run(out)
+    assert r.returncode == 1 and "archive/2739-fail-closed.md" in r.stdout, r.stdout
+
+
 # --- #293 AC-1: a declared `## Transitions` section carries its table ---------------
 
 TABLE = ("\n## Transitions\n\n"
