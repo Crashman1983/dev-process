@@ -1830,7 +1830,8 @@ def _event(root: Path, table: dict[str, dict], c: dict, prev: str | None, kind: 
     ev = {"sha": sha, "kind": kind, "when": datetime.fromtimestamp(c["ct"], tz=timezone.utc),
           "branch": None, "plans": [], "issues": [], "claim": "none", "bounded": True, "mixed": False,
           "start": None, "product_lines": None, "process_lines": None, "binary": 0, "files": {},
-          "process_files": [], "renames": [], "product_subjects": [], "strays": 0}
+          "process_files": [], "renames": [], "product_subjects": [], "strays": 0,
+          "stray_process_lines": 0, "stray_product_lines": 0}
     if kind == "train":
         p1, p2 = c["parents"]
         ev["branch"] = m.group("branch")
@@ -1860,6 +1861,14 @@ def _event(root: Path, table: dict[str, dict], c: dict, prev: str | None, kind: 
         ev["bounded"] = False
         return ev
     ev["strays"] = len(strays)
+    if strays:
+        # the stray commits' own lines: records committed straight onto the integration branch
+        # are process load that no merge carries (a steward's journal, a review log)
+        stray_stat = _numstat(root, prev, p1)
+        ev["stray_process_lines"] = (None if stray_stat is None else
+                                     sum(n or 0 for n, f, _o in stray_stat if tower.is_process_path(f)))
+        ev["stray_product_lines"] = (None if stray_stat is None else
+                                     sum(n or 0 for n, f, _o in stray_stat if not tower.is_process_path(f)))
     commits = [table[s] for s in own if s in table]
 
     def product(x: dict) -> bool:
@@ -2462,10 +2471,17 @@ def works(root: Path | None = None, window: tuple[datetime, datetime] | None = N
 _LOAD_WEEKS = 4
 
 
+def _outside(events: list[dict], key: str) -> int | None:
+    """Stray lines of the events; None when git could not read any of them."""
+    got = [e.get(key, 0) for e in events if e.get("strays")]
+    return None if any(n is None for n in got) else sum(got)
+
+
 def load_table(root: Path, *, weeks: int = _LOAD_WEEKS, now: datetime | None = None) -> dict:
     """Week by week over the merge events (one event counts once, whatever issues it
     carries): process and product lines and their ratio, the median process files per merge,
-    merges without a product file. An event whose range is unknown counts apart."""
+    merges without a product file, and the lines committed outside any merge range (strays,
+    counted with the event that follows them). An event whose range is unknown counts apart."""
     now = now or datetime.now(timezone.utc)
     got = merge_events(root)
     if got["events"] is None:
@@ -2483,7 +2499,9 @@ def load_table(root: Path, *, weeks: int = _LOAD_WEEKS, now: datetime | None = N
                      "ratio": round(proc / prod, 2) if known and prod else None,
                      "process_files_median": (statistics.median(len(e["process_files"]) for e in known)
                                               if known else None),
-                     "without_product": sum(1 for e in known if not e["files"])})
+                     "without_product": sum(1 for e in known if not e["files"]),
+                     "outside_process_lines": _outside(evs, "stray_process_lines"),
+                     "outside_product_lines": _outside(evs, "stray_product_lines")})
     return {"available": True, "why": None, "weeks": rows, "shallow": got["shallow"]}
 
 
@@ -2509,7 +2527,10 @@ def load(root: Path | None = None, weeks: int = _LOAD_WEEKS, *, as_json: bool = 
         print(f"  week {r['week']}: {r['merges']:>4} merges — product {_num(r['product_lines'])} lines, process "
               f"{_num(r['process_lines'])} lines ({ratio} per product line); process files per merge median "
               f"{_num(r['process_files_median'])}; {r['without_product']} merges without a product file"
-              + (f"; {r['unknown']} with an unknown range" if r["unknown"] else ""))
+              + (f"; {r['unknown']} with an unknown range" if r["unknown"] else "")
+              + (f"; outside merge ranges: process {_num(r['outside_process_lines'])}, product "
+                 f"{_num(r['outside_product_lines'])} lines"
+                 if r["outside_process_lines"] != 0 or r["outside_product_lines"] != 0 else ""))
     trend = " → ".join("—" if r["ratio"] is None else f"{r['ratio']:g}" for r in reversed(t["weeks"]))
     print(f"  trend, process lines per product line (oldest week first): {trend}")
     n = sum(r["merges"] for r in t["weeks"])

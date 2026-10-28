@@ -1940,6 +1940,24 @@ def test_load_counts_process_against_product_lines_per_merge_event(render, tmp_p
     assert "[load]" in text and "merges without a product file" in text and "proxy" in text
 
 
+def test_load_counts_the_lines_committed_outside_any_merge_range(render, tmp_path):
+    """Records committed straight onto the integration branch (a steward's journal, a review
+    log) belong to no merge, yet they are process load — a dry run on a consumer clone showed a
+    low merge ratio while most process lines lay outside the merges. `load` names them apart."""
+    from datetime import datetime, timezone
+    out = _merges_repo(render, tmp_path)
+    _train_merge(out, "23-a", [("feat: a (#23)", {"src/a.py": _lines(2)}, _at(2))],
+                 "train: merge 23-a\n\nCloses #23", _at(2, 12))
+    _put(out, "docs: steward journal", {".process-work/journal/2026-03-03.md": _lines(9)}, _at(3))
+    _put(out, "chore: straight onto main", {"src/s.py": _lines(3)}, _at(3, 10))
+    _train_merge(out, "24-b", [("feat: b (#24)", {"src/b.py": _lines(1)}, _at(4))],
+                 "train: merge 24-b\n\nCloses #24", _at(4, 12))
+    m = _flow_module(out)
+    w = m.load_table(out, weeks=1, now=datetime(2026, 3, 7, tzinfo=timezone.utc))["weeks"][0]
+    assert (w["product_lines"], w["outside_process_lines"], w["outside_product_lines"]) == (3, 9, 3), w
+    assert "outside merge ranges" in _cli(out, "load", "--weeks", "60")
+
+
 def _size_repo(render, tmp_path) -> Path:
     """Four works, one per size step, with 1-4 review rounds; #31 spans two directories."""
     out = _merges_repo(render, tmp_path)
