@@ -295,7 +295,7 @@ def _comment_bodies(gh: str, issue: str) -> list[str] | None:
     bodies: list[str] | None = None
     if r.returncode == 0:
         try:
-            bodies = [item.get("body") or "" for item in json.loads(r.stdout)]
+            bodies = [item.get("body") or "" for page in _pages(r.stdout) for item in page]
         except (json.JSONDecodeError, AttributeError, TypeError):
             bodies = None
     if bodies is None:
@@ -307,6 +307,17 @@ def _comment_bodies(gh: str, issue: str) -> list[str] | None:
         except (json.JSONDecodeError, AttributeError, TypeError):
             return None
     return [_norm(b) for b in bodies]
+
+
+def _pages(out: str) -> list[list]:
+    """`gh api --paginate` prints one JSON array per page, back to back."""
+    pages, i, dec = [], 0, json.JSONDecoder()
+    while (i := len(out) - len(out[i:].lstrip())) < len(out):
+        page, i = dec.raw_decode(out, i)
+        if not isinstance(page, list):
+            raise TypeError("a page is no array")
+        pages.append(page)
+    return pages
 
 
 def _norm(text: str) -> str:
