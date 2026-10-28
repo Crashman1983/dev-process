@@ -1782,6 +1782,52 @@ def test_a_plan_that_stays_active_joins_its_first_train_merge_through_the_branch
     assert it["merged"]["value"] == _dt(6, 12) and len(it["events"]) == 2
 
 
+def test_plans_git_could_not_read_are_named_apart_from_merges_without_an_issue(render, tmp_path, monkeypatch):
+    """Cross-model review: a train merge's branch-side plans (a shallow clone, a timeout) or a
+    finish merge's archived plan that git cannot read made the merge one "without an issue" —
+    the work fell out of the population under the wrong name. They count as not read."""
+    out = _merges_repo(render, tmp_path)
+    plan = {".process-work/plans/2026-03-02-long.md": _plan_text(15, extra="plan-stays-active: two phases\n")}
+    _train_merge(out, "15-long", [("docs: plan long", plan, _at(2)),
+                                  ("feat: long part one", {"src/l.py": _lines(6)}, _at(3))],
+                 "train: merge 15-long", _at(4, 12))
+    _finish_merge(out, "17-f", [("feat: f (#17)", {"src/f.py": _lines(2),
+                                                 ".process-work/plans/2026-03-05-f.md": _plan_text(17)}, _at(5))],
+                  ["2026-03-05-f.md"], _at(5, 12))
+    m = _flow_module(out)
+    import check_review
+    monkeypatch.setattr(check_review, "own_plans", lambda *a, **k: None)
+    real = m._git_out
+    monkeypatch.setattr(m, "_git_out", lambda root, *args, **kw: None
+                        if args[:1] == ("show",) and "/archive/" in args[1] else real(root, *args, **kw))
+    p = m.size_table(out, *m._window(":"))["population"]
+    assert (p["plans_unread"], p["unclaimed"]) == (2, 0), p
+    assert "plans git could not read 2" in m._population_text(p)
+
+
+def test_a_range_git_could_not_read_is_counted_unknown_not_zero(render, tmp_path, monkeypatch):
+    out = _merges_repo(render, tmp_path)
+    _train_merge(out, "18-a", [("feat: a (#18)", {"src/a.py": _lines(2)}, _at(2))],
+                 "train: merge 18-a\n\nCloses #18", _at(2, 12))
+    m = _flow_module(out)
+    monkeypatch.setattr(m, "_rev_list", lambda *a, **k: None)
+    p = m.size_table(out, *m._window(":"))["population"]
+    assert p["unbounded"] == 1, p
+    assert "ranges unknown 1" in m._population_text(p)
+
+
+def test_the_escape_log_reads_the_whole_history_with_the_history_timeout(render, tmp_path, monkeypatch):
+    """The whole-history read timed out at 30 s on a consumer clone (fixed for `_commit_table`
+    in this release); the `Regression-of:` log reads the same history."""
+    out = _merges_repo(render, tmp_path)
+    m = _flow_module(out)
+    seen = []
+    real = m._git_out
+    monkeypatch.setattr(m, "_git_out", lambda root, *a, **kw: seen.append(kw.get("timeout")) or real(root, *a, **kw))
+    assert m._regressions(out, "main") is not None
+    assert seen == [m._HISTORY_TIMEOUT]
+
+
 def test_escapes_read_the_integration_ref_and_a_failing_log_is_unknown(render, tmp_path, monkeypatch):
     """A clone whose local main is behind origin/main still sees the escape (`integration_ref`);
     a `git log` that fails is unknown, never "no escapes"."""
