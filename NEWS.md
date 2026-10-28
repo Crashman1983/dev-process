@@ -9,7 +9,7 @@ Deutsche Fassung: [NEWS-DE.md](NEWS-DE.md).
 
 ## v2.80.0 — Measure where the process grows
 
-The KPI cockpit now finds merged works in git, so it counts on any clone instead of showing zero. New reports show what each work cost, how process lines compare with product lines week by week, and how review rounds rise with a work's size and with the number of stacks it spans; existing reports add numbers per round and per tier. The plan command advises splitting large or cross-stack work and starting an open question with a throwaway spike, and says the project's own numbers decide whether a split pays. Generated review files are no longer versioned, and a new check has to name what it is expected to catch. No new gates.
+The KPI cockpit now finds merged works in git, so it counts on any clone instead of showing zero. New reports show what each work cost, how process lines compare with product lines week by week, and how review rounds rise with a work's size and with the number of stacks it spans; existing reports add numbers per round and per tier. The plan command advises splitting large or cross-stack work and starting an open question with a throwaway spike, and says the project's own numbers decide whether a split pays. Generated review files are no longer versioned, and a new check has to name what it is expected to catch. No new gates. `tidy --apply` can push the spec directories it publishes again, and a re-run no longer posts their plans twice.
 
 ## v2.79.0 — Gates that hold in daily work
 

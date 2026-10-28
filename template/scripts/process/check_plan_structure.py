@@ -416,11 +416,13 @@ def transitions_findings(rel: str, text: str, *, need_tests: bool) -> list[str]:
 def _bound(root: Path, ref: str, rel: str) -> bool:
     """Is this plan the branch's to answer for? Added on the branch, or below Tier 2 at
     the integration ref (a stub raised to Tier 2 here is written here). An archived plan
-    is judged where it lived before `/finish` moved it, too: an old plan archived here is
+    is judged where it lived before `/finish` moved it, or before `publish_and_prune` copied
+    a spec's plan there (`specs/<slug>/plan.md`, #343), too: an old plan archived here is
     history. Unreadable at the ref: bound (fail closed)."""
     homes = [rel]
     if rel.startswith(f"{PLANS_ACTIVE}/archive/"):
-        homes.append(f"{PLANS_ACTIVE}/{rel.rsplit('/', 1)[1]}")
+        name = rel.rsplit("/", 1)[1]
+        homes += [f"{PLANS_ACTIVE}/{name}", f"{SPECS_DIR}/{name.removesuffix('.md')}/plan.md"]
     try:
         before = next((t for t in (_at_ref(root, ref, h) for h in homes) if t is not None), None)
     except _Unreadable:
