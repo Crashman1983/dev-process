@@ -785,8 +785,8 @@ _PLACE = re.compile(r"^(?P<path>[^\s:]+)(?::(?P<first>[1-9][0-9]*)(?:-(?P<last>[
 _DIFF = ("--no-color", "--no-ext-diff", "--no-textconv", "--inter-hunk-context=0")
 
 
-def _git_run(root: Path, *args: str) -> tuple[int, str] | None:
-    """(exit code, stdout) of git, or None when git cannot run or runs past 30 s — the
+def _git_run(root: Path, *args: str, timeout: float = 30) -> tuple[int, str] | None:
+    """(exit code, stdout) of git, or None when git cannot run or runs past `timeout` — the
     callers tell "not there" (an exit code git documents) from "git failed" (refute,
     round 1: a missing blob read as an absent file)."""
     import os  # noqa: PLC0415
@@ -794,16 +794,16 @@ def _git_run(root: Path, *args: str) -> tuple[int, str] | None:
         # a place is a path, never a glob: `pages/[id].tsx` names that file (plan review, round 3);
         # git speaks one language here (cross-model review, round 2: a translated "Binary files")
         r = subprocess.run(["git", "--literal-pathspecs", "-C", str(root), *args], capture_output=True, text=True,
-                           timeout=30, encoding="utf-8", errors="replace",
+                           timeout=timeout, encoding="utf-8", errors="replace",
                            env={**os.environ, "LC_ALL": "C", "LANGUAGE": "C"})
     except (OSError, ValueError, subprocess.SubprocessError):  # ValueError: a NUL in a path
         return None
     return r.returncode, r.stdout
 
 
-def _git_out(root: Path, *args: str) -> str | None:
-    """git's stdout, or None when it fails or runs past 30 s — never an empty answer."""
-    r = _git_run(root, *args)
+def _git_out(root: Path, *args: str, timeout: float = 30) -> str | None:
+    """git's stdout, or None when it fails or runs past `timeout` — never an empty answer."""
+    r = _git_run(root, *args, timeout=timeout)
     return r[1] if r is not None and r[0] == 0 else None
 
 
@@ -1736,6 +1736,7 @@ _FINISH_ARCHIVE = re.compile(r"^docs: archive plan\(s\) on merge — (?P<names>.
 _TRAIN_REFS = re.compile(r"^Refs #(\d+)\s*$", re.MULTILINE)
 _TEMPLATE_UPDATE = re.compile(r"^template-update:\s*true\s*$", re.MULTILINE)  # as check_review reads it
 _EVENTS_READ: dict[tuple[str, str, str], dict] = {}  # (root, ref, tip) → merge_events: git asked once
+_HISTORY_TIMEOUT = 600  # s, the one whole-history read (merge_events)
 
 
 def _claims(message: str) -> set[int]:
@@ -1752,7 +1753,10 @@ def _claims(message: str) -> set[int]:
 def _commit_table(root: Path, ref: str) -> dict[str, dict] | None:
     """sha → {parents, at (author time), ct (commit time), message, files} of every commit
     `ref` reaches; a merge lists no files. None when git cannot read it."""
-    out = _git_out(root, "log", ref, "-z", "--name-only", "--format=%x01%H%x01%P%x01%at%x01%ct%x01%B")
+    # one read of the whole history: on a cold cache it ran past the 30 s other reads get
+    # (dry run on a consumer clone with ~9000 commits)
+    out = _git_out(root, "log", ref, "-z", "--name-only", "--format=%x01%H%x01%P%x01%at%x01%ct%x01%B",
+                   timeout=_HISTORY_TIMEOUT)
     if out is None:
         return None
     table: dict[str, dict] = {}
@@ -1899,7 +1903,11 @@ def merge_events(root: Path, ref: str | None = None) -> dict:
     table = _commit_table(root, ref)
     chain = _git_out(root, "rev-list", "--first-parent", ref)
     if table is None or chain is None:
-        return {"ref": ref, "events": None, "shallow": False, "why": f"git log of {ref} failed"}
+        # a failed read stays failed for the run: a later read that succeeds would give the
+        # header a different answer than the reports already printed from this one
+        failed = {"ref": ref, "events": None, "shallow": False, "why": f"git log of {ref} failed"}
+        _EVENTS_READ[key] = failed
+        return failed
     events: list[dict] = []
     prev = None
     for sha in reversed(chain.split()):
