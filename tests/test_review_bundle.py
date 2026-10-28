@@ -67,6 +67,27 @@ def test_a_bundle_under_process_work_is_ignored_and_one_elsewhere_in_the_tree_is
     assert "bundle.md" in subprocess.run(gate, cwd=out, capture_output=True, text=True).stdout
 
 
+def test_generated_review_files_are_ignored_and_reports_and_images_are_not(render, tmp_path):
+    """v2.80 R3: logs, transcripts and JSON under reviews/ went into git downstream; a report
+    must stay tracked — check_issues skips an ignored report, and other readers need them."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _git(out, "init", "-q", "-b", "main")
+    reviews = ".process-work/reviews/"
+    ignored = ["x.log", "a/b.jsonl", "lens.json", "a/b/out.txt", "t.gz", "fix.patch",
+               "r2.diff", "w/r1.bundle.md"]
+    kept = ["r.md", "a/r.md", "s/shot.png", "s/a.jpg", "s/a.jpeg", "s/a.webp", "s/a.gif"]
+    for rel in ignored:
+        assert _git(out, "check-ignore", "-q", reviews + rel).returncode == 0, rel
+    for rel in kept:
+        assert _git(out, "check-ignore", "-q", reviews + rel).returncode == 1, rel
+    # the patterns stay under reviews/: other working memory is not swept up
+    for rel in (".process-work/state/x.json", ".process-work/journal/x.log"):
+        assert _git(out, "check-ignore", "-q", rel).returncode == 1, rel
+    doc = " ".join((out / "docs/process/journal-state-plans.md").read_text().split())
+    assert "`reviews/` versions only reports (`*.md`) and UI evidence (images)" in doc
+    assert "git rm -r --cached" in doc
+
+
 def test_core_tool_present_on_minimal(render, tmp_path):
     out = render(tmp_path, {"project_name": "d", "modules": {}})
     assert (out / "scripts/process/make_review_bundle.py").is_file()

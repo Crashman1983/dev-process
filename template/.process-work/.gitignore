@@ -5,3 +5,14 @@ template-delta/
 # input, rebuilt per round — never committed (an untracked one dirties the tree
 # and reads as an unhomed plan)
 *.bundle.md
+# reviews/ versions only reports (*.md) and UI evidence (images); what a review
+# run generates beside them — logs, transcripts, raw output, diffs — is never
+# committed. Never add *.md or an image here: check_issues skips an ignored
+# report, and further readers need the tracked ones
+reviews/**/*.log
+reviews/**/*.jsonl
+reviews/**/*.json
+reviews/**/*.txt
+reviews/**/*.gz
+reviews/**/*.patch
+reviews/**/*.diff
