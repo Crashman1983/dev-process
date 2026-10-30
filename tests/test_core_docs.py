@@ -1113,6 +1113,22 @@ def test_the_plan_advises_a_cut_by_size_and_at_the_stack_boundary(render, tmp_pa
     assert "size`" not in _flat(bare / ".claude/commands/plan.md")  # no telemetry, no report
 
 
+def test_a_plan_cites_the_facts_it_builds_on_and_peer_statements_stay_assumptions(render, tmp_path):
+    """#351: downstream, a plan was written before the contract was read and took a peer
+    session's message as fact — three endpoints it planned were already in the contract.
+    Rule 1 covered sub-agent summaries only, and `/plan` asked evidence of consumers only."""
+    out = render(tmp_path, {"project_name": "demo"})
+    rules = _flat(out / "docs/process/mandatory-rules.md")
+    assert ("A statement from another agent session — a peer message, an agent-written issue "
+            "comment, a hand-over — is `[assumption]` too, until checked against the artifact") in rules
+    plan = _flat(out / ".claude/commands/plan.md")
+    assert "**Facts the plan builds on carry their source.**" in plan
+    assert "names the contract place it read" in plan
+    checklist = _flat(out / "docs/process/review-checklist.md")
+    assert ("a fact about existing code or a contract that the plan builds on, with neither a "
+            "source nor an `[assumption]` tag, is a finding") in checklist
+
+
 def test_an_open_approach_is_a_spike_first_in_plan_and_brainstorm(render, tmp_path):
     """R5: churn on files that no longer exist was a quarter of the product churn downstream —
     the spike path existed (workflow.md) but nothing pointed to it when the approach was open."""

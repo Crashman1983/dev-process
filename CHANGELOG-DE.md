@@ -9,6 +9,21 @@ ein Eintrag ohne Plan oder Issue hat keine Details-Zeile. In wenigen Sätzen je 
 English version: [CHANGELOG.md](CHANGELOG.md). Die Releases vor v2.28.2:
 [docs/changelog-archive-DE.md](docs/changelog-archive-DE.md).
 
+## v2.80.1 — Ein Plan nennt, worauf er baut · 2026-10-30
+
+**Warum.** In einem nutzenden Projekt entstand ein Plan, bevor der API-Vertrag gelesen war, und übernahm die Nachricht einer anderen Agent-Session als Tatsache. Drei Endpunkte, die er hinzufügen wollte, standen schon im Vertrag. Regel 1 behandelte die Zusammenfassung eines Subagenten als Annahme, nicht aber die Aussage einer anderen Agent-Session, und `/plan` verlangte Belege nur für die Abnehmer einer Änderung, nicht für die Fakten, auf die der Plan baut (#351).
+
+**Was sich ändert.**
+- Regel 1: Die Aussage einer anderen Agent-Session (eine Peer-Nachricht, ein von einem Agenten geschriebener Issue-Kommentar, eine Übergabe) ist `[assumption]`, bis sie am beschriebenen Artefakt geprüft ist.
+- `/plan`: Ein Tier-2+-Plan nennt, worauf er sich in bestehendem Code oder einem Vertrag stützt, mit Quelle (`path:line`, Vertragsabschnitt oder Befehl mit Ausgabe), oder markiert es als `[assumption]`; ein Plan, dessen Arbeit von einer API abhängt, nennt die gelesene Vertragsstelle. Kein neuer Abschnitt, kein Gate.
+- Plan-Review: Ein Fakt, auf den der Plan baut, ohne Quelle und ohne `[assumption]` ist ein Befund, ebenso eine `[assumption]`, auf der eine Entscheidung ruht und die ein Lesen hätte klären können.
+
+**Update.** Reines Update; keine Schritte.
+
+**Geänderte Abschnitte.** `mandatory-rules.md` (Mandatory Rules), `review-checklist.md` (Review Checklist; Completeness), Befehl `/plan`
+
+Details: #351
+
 ## v2.80.0 — Messen, wo der Prozess wächst, und dort schneiden, wo er kostet · 2026-10-28
 
 **Warum.** Projekte werden mit wachsender Größe langsamer: Kenni deutlich, spkiam beginnt damit. Eine Analyse von acht Wochen Kenni (9.111 Commits, 281 Train-Merges) zeigte den Anteil reiner Prozess-Commits von etwa einem Drittel auf zwei Drittel steigen, und die Review-Runden mit der Größe einer Arbeit und der Zahl ihrer Stacks. Die Analyse lief von Hand, weil das KPI-Cockpit auf jedem Klon `works 0` zählte: Es nahm seine gemergten Arbeiten nur aus Daten des Hosts (#341). Kosten je Arbeit (#314), Wert je Runde (#318) und Durchrutscher je Tier (#320) waren offene Fragen ohne Zahlen. Unabhängig davon konnte Kennis `tidy.py --apply` die Spec-Verzeichnisse, die es veröffentlicht, nicht pushen: `plan-structure` prüfte ihre archivierten Pläne nach heutigen Regeln, und ein erneuter Lauf von `publish_and_prune` hätte 46 Pläne ein zweites Mal gepostet (#343).

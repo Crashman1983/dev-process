@@ -69,6 +69,17 @@ line count{% endif %}. Work across several stacks checks the cut at the
 boundary: first the contract as its own work, then each side{% if modules.telemetry %} — `size`
 also shows whether work across stacks needs more rounds here{% endif %}.
 
+**Facts the plan builds on carry their source.** A Tier 2+ plan states
+what it relies on in existing code or a contract — that an endpoint, field,
+function or behaviour exists or is missing — with its source (`path:line`,
+the contract section, or the command and its output), or tags it
+`[assumption]` (`docs/process/mandatory-rules.md`, rule 1). A plan whose work
+depends on an API names the contract place it read. A peer session's
+message or an agent's issue comment is a lead, not a source: read the
+artifact it describes before the plan relies on it (downstream: a plan
+built on a peer's message, before the contract was read, planned three
+endpoints that already existed).
+
 **An open approach is a spike first.** Where the approach itself is still
 open — whether it can be done, which library, what the interface really
 returns — run a spike first (`docs/process/workflow.md`, "Spike"):

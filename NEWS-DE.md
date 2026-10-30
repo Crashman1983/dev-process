@@ -7,6 +7,10 @@ technischen Einzelheiten stehen im [CHANGELOG](CHANGELOG-DE.md).
 
 English version: [NEWS.md](NEWS.md).
 
+## v2.80.1 — Ein Plan nennt, worauf er baut
+
+Ein Plan nennt jetzt, woher jeder Fakt kommt, auf den er sich stützt — Datei und Zeile, Vertragsabschnitt, ein Befehl — oder markiert ihn als Annahme, und ein Plan, der von einer API abhängt, nennt die gelesene Stelle des Vertrags. Eine Nachricht einer anderen Agent-Session gilt als Annahme, bis jemand sie am Code oder Vertrag geprüft hat. Das Plan-Review wertet einen Fakt ohne Quelle als Befund. Anlass war ein Plan, der drei Endpunkte plante, die es schon gab. Keine neuen Gates.
+
 ## v2.80.0 — Messen, wo der Prozess wächst
 
 Das KPI-Cockpit findet gemergte Arbeiten jetzt in Git und zählt damit auf jedem Klon, statt null zu zeigen. Neue Berichte zeigen, was jede Arbeit kostete, wie sich Prozess- und Produktzeilen Woche für Woche verhalten und wie die Review-Runden mit der Größe einer Arbeit und der Zahl ihrer Stacks steigen; bestehende Berichte ergänzen Zahlen je Runde und je Tier. Der Plan-Befehl empfiehlt, große oder stackübergreifende Arbeit zu teilen und eine offene Frage mit einem Wegwerf-Spike zu beginnen, und sagt, dass die eigenen Zahlen des Projekts entscheiden, ob sich eine Teilung lohnt. Erzeugte Review-Dateien werden nicht mehr versioniert, und eine neue Prüfung muss nennen, was sie fangen soll. Keine neuen Gates. `tidy --apply` kann die Spec-Verzeichnisse, die es veröffentlicht, wieder pushen, und ein erneuter Lauf postet ihre Pläne nicht doppelt.
