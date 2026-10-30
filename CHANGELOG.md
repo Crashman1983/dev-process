@@ -10,6 +10,21 @@ A few plain sentences per release: [NEWS.md](NEWS.md). Deutsche Fassung:
 [CHANGELOG-DE.md](CHANGELOG-DE.md). Releases before v2.28.2:
 [docs/changelog-archive.md](docs/changelog-archive.md).
 
+## v2.80.1 — A plan cites what it builds on · 2026-10-30
+
+**Why.** Downstream, a plan was written before the API contract was read, and took another agent session's message as fact. Three endpoints it planned to add were already in the contract. Rule 1 treated a sub-agent's summary as an assumption, but not a statement from another agent session, and `/plan` asked for evidence only for the consumers of a change, not for the facts the plan builds on (#351).
+
+**What changes.**
+- Rule 1: a statement from another agent session (a peer message, an agent-written issue comment, a hand-over) is `[assumption]` until checked against the artifact it describes.
+- `/plan`: a Tier 2+ plan states what it relies on in existing code or a contract with its source (`path:line`, the contract section, or a command and its output) or tags it `[assumption]`; a plan whose work depends on an API names the contract place it read. No new section and no gate.
+- Plan review: a fact the plan builds on with neither a source nor an `[assumption]` tag is a finding, and so is an `[assumption]` a decision rests on that a read could have settled.
+
+**Update.** A pure update; no steps.
+
+**Changed sections.** `mandatory-rules.md` (Mandatory Rules), `review-checklist.md` (Review Checklist; Completeness), command `/plan`
+
+Details: #351
+
 ## v2.80.0 — Measure where the process grows, and cut it where it costs · 2026-10-28
 
 **Why.** Projects slow down as they grow: Kenni clearly, spkiam beginning. An eight-week analysis of Kenni (9,111 commits, 281 train merges) found the share of pure process commits rising from about a third to two thirds, and the review rounds rising with a work's size and with the number of stacks it spans. The analysis ran by hand, because the KPI cockpit counted `works 0` on every clone: it took its merged works only from host-local data (#341). Cost per work (#314), value per round (#318) and escapes per tier (#320) were open questions without numbers. Separately, Kenni's `tidy.py --apply` could not push the spec directories it publishes: `plan-structure` judged their archived plans by today's rules, and a re-run of `publish_and_prune` would have posted 46 plans a second time (#343).

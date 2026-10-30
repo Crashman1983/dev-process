@@ -65,6 +65,10 @@ the task that writes its news fragment (`news.md`).
   old value yourself** and quote it (command and hits) — any hit left outside
   the intended ones is a finding; a blast radius asserted without a search is
   not evidence.
+- In a plan review: a fact about existing code or a contract that the plan
+  builds on, with neither a source nor an `[assumption]` tag, is a finding
+  (`/plan`, "Facts the plan builds on carry their source"); so is an
+  `[assumption]` a decision rests on that a read could have settled.
 - In a plan review: a change to something others read with no
   `## Consumers`, or one that names intent instead of a search and its hits,
   is a finding. A user-visible change without its news fragment, or a

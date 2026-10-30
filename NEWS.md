@@ -7,6 +7,10 @@ details are in the [CHANGELOG](CHANGELOG.md).
 
 Deutsche Fassung: [NEWS-DE.md](NEWS-DE.md).
 
+## v2.80.1 — A plan cites what it builds on
+
+A plan now names where each fact it relies on comes from — a file and line, the contract section, a command — or marks it as an assumption, and a plan that depends on an API names the part of the contract it read. A message from another agent session counts as an assumption until someone checks it against the code or contract. The plan review treats an unsourced fact as a finding. This follows a plan that planned three endpoints that already existed. No new gates.
+
 ## v2.80.0 — Measure where the process grows
 
 The KPI cockpit now finds merged works in git, so it counts on any clone instead of showing zero. New reports show what each work cost, how process lines compare with product lines week by week, and how review rounds rise with a work's size and with the number of stacks it spans; existing reports add numbers per round and per tier. The plan command advises splitting large or cross-stack work and starting an open question with a throwaway spike, and says the project's own numbers decide whether a split pays. Generated review files are no longer versioned, and a new check has to name what it is expected to catch. No new gates. `tidy --apply` can push the spec directories it publishes again, and a re-run no longer posts their plans twice.
