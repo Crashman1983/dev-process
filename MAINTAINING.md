@@ -101,7 +101,24 @@ Der bestehende Weg, unverändert:
    Aufgaben und „Unabhängige Durchsetzung“; Tier nach
    `template/docs/process/risk-tiers.md` (Gate-Code ist Tier 3).
 3. Plan-Review in frischer Sitzung, bei Gate-Code Refute, Umsetzung mit Tests,
-   die gegen die Vorfassung fallen.
+   die gegen die Vorfassung fallen, danach Review in frischer Sitzung. Die
+   Größe einer Änderung ist keine Ausnahme: ein Satz in einer Regel, einer
+   Checkliste oder einem Befehl ändert, wie jedes Projekt arbeitet, und wird
+   geprüft wie Code (v2.80.1 ging mit einem Absatz Regeltext ohne Plan-Review
+   und Review hinaus). Ein Refute braucht nicht nur Gate-Code, sondern auch
+   reiner Regeltext, der eine Prüfung, eine Blockregel oder eine Pflicht
+   abschwächt, verengt oder entfernt.
+   **Regressions-Linse.** Jedes Review einer Template-Änderung fragt, welche
+   frühere Lücke sie wieder öffnet. Der Reviewer liest dafür die Geschichte
+   jedes berührten Abschnitts (`git log -L` auf den Abschnitt, die
+   CHANGELOG-Einträge und „downstream“-Belege, die ihn geformt haben) und
+   nennt je Vorfall, ob er geschlossen bleibt. Eine Änderung, die eine Regel
+   abschwächt, verengt oder entfernt, nennt im Plan den Vorfall, den diese
+   Regel geschlossen hat, und warum er geschlossen bleibt — sonst ist es eine
+   gesenkte Qualitätsuntergrenze, und die entscheidet der Owner („Grenzen“).
+   Ebenso fragt das Review nach Widersprüchen zu bestehenden Regeln (eine
+   neue Pflicht, die eine andere unterläuft) und danach, ob sich die neue
+   Regel pro forma erfüllen lässt.
 4. `uv run ruff check .` und `uv run pytest -n 4 --dist loadfile`.
 5. CHANGELOG-Eintrag auf Englisch (`CHANGELOG.md`) und Deutsch (`CHANGELOG-DE.md`),
    oben eingefügt, in fester Form (englisch: Why, What changes, Effect, Update,

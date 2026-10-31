@@ -1162,3 +1162,16 @@ def test_the_rule_budget_asks_for_yield_and_eight_covered_weeks(render, tmp_path
     for phrase in ("Jede Regel kostet in jeder Arbeit", "erwarteten Ertrag", "acht Wochen",
                    "sonst ist die Antwort „unbekannt“, nicht „Kandidat“"):
         assert phrase in rule, phrase
+
+
+def test_every_template_change_is_reviewed_with_a_regression_lens():
+    from pathlib import Path
+    """Owner, 2026-10-31: a change to the process template must not open an old hole while it
+    closes a new one. v2.80.1 (one paragraph of rule text) went out without plan review or
+    review — size was read as an exemption, and no step asked which earlier fix a change
+    weakens."""
+    maintaining = " ".join((Path(__file__).resolve().parents[1] / "MAINTAINING.md").read_text().split())
+    assert "Die Größe einer Änderung ist keine Ausnahme" in maintaining
+    assert "**Regressions-Linse.**" in maintaining
+    assert "welche frühere Lücke sie wieder öffnet" in maintaining
+    assert "auch reiner Regeltext" in maintaining
