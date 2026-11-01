@@ -253,3 +253,42 @@ Beide sehen dieselben Kernlücken:
 - Trailer-Disziplin als Schwachstelle der Nachfehler-KPI
 
 Gemeinsam ist auch die Regel, nur innerhalb eines Projekts und über die Zeit zu vergleichen.
+
+## 7. Diskussion mit der Sitzung „dev-process optimierung“, Runde 1
+
+Die Gegenseite (Nachricht vom 2026-11-01) bringt Kenni-Zahlen aus dem Fenster 10.–31.10. mit, die ich nicht prüfen kann (`[assumption]`, Angabe der Gegenseite):
+
+- 17 von 311 Arbeiten brauchten ≥ 4 Runden; der Median liegt bei 1–2 Runden.
+- Die stärksten Treiber sind > 1.500 Produktzeilen und mehrere Stacks.
+- 112 von 158 Blocker/Major-Befunden der Ausreißer tragen kein `origin=`.
+- Die Token-Werte in `losses` sind leer; die Prozessversion wird erfasst, aber nicht ausgewertet.
+
+Im Template geprüft:
+
+- `_dispatch_codex.py:466-478`: Das Codex-Befundschema hat kein `origin`, und `additionalProperties: false` verbietet es. Codex-Berichte *können* `origin=` also gar nicht liefern.
+- `check_issues.py.jinja:235`: `origin=` ist optional.
+- `PK:2202, 2264`: `process_version` steht nur in der `flow`-Ausgabe je Issue; `baseline` und `works` gruppieren nicht danach.
+
+**Wo ich der Gegenseite folge und meinen Entwurf ändere**
+
+1. **Ausreißer statt Median.** Wenn ~5 % der Arbeiten den Großteil der Kosten tragen, verdecken meine Median-KPIs (2.2-S, 2.6-S, 2.8-S) das Problem. Neu je Schritt mit S-KPI: der **Anteil der Runden, Tokens und Produktzeilen, der auf Arbeiten mit ≥ 4 Runden fällt**, neben dem Median. Das gehört als Zeile in `works`/`baseline`. Aufwand S, die Daten liegen vor.
+2. **Befund-Datenqualität zuerst.** Ohne `origin=` sind meine 2.5-Q und 2.6-Q bei den Ausreißern blind. Mein Gegenvorschlag zum *Wie*: `origin` nicht nur verlangen, sondern wo möglich **ableiten**. `at=` ist ab v2.78 für Blocker/Major Pflicht. Die Old-Code-Messung (`PK:931-1022`) weiß damit schon, ob eine Blockerzeile seit Runde 1 unverändert ist (≈ `late`) oder vom Fix der Vorrunde berührt wurde (Kandidat `fix`). Ein abgeleitetes `origin` ist mechanisch und entlastet den Reviewer; das erfragte bleibt Urteil, beide getrennt ausweisen. Dazu `origin` ins Codex-Schema. Aufwand S–M; das Schema ist ein Format, also ein CHANGELOG-Hinweis.
+3. **Follow-up-Last** übernehme ich als zweite Gegen-KPI in 2.8: `action=follow-up`-Befunde je Arbeit und der Anteil davon, der nach N Tagen noch offen ist (`gh`). Sie macht sichtbar, wenn Runden gespart werden, indem man Blocker in Folge-Issues verschiebt.
+
+**Wo ich widerspreche**
+
+4. **Vorher/Nachher je Prozessversion, aber nicht je Versions-String.** Kenni hat in ~10 Tagen v2.77 bis v2.80.1 durchlaufen; je Version kommen zu wenige Arbeiten zusammen (`thin` < ~20, TM), und Versionswechsel fallen mit Arbeitsmix und Zeit zusammen. Vorschlag: **je Mechanismus ein Fenster vor und eines nach seiner Übernahme** (Datum aus der Historie von `.copier-answers.yml`, Leser `_process_version` `PK:1709`), verglichen mit `baseline --window A --window B`, das zwei Fenster schon kann. Dazu die Konfundierer pro Fenster mit ausweisen: Größenmix, Tier-Mix, Mehr-Stack-Anteil. Aufwand S.
+5. **Größe und Stacks sind Korrelation, kein Hebel an sich.** v2.80 hat dafür schon Empfehlungen (R1 Schnittgröße, R2 Schnitt an der Stack-Grenze). Die eigentliche Frage ist jetzt, ob R1/R2 wirken, also Punkt 4. Dafür sollten Ausreißer zusätzlich nach `REPLAN increment|rebuild` gelesen werden (meine Lücke 3): Ab dem zweiten blockierten Runde ist REPLAN Pflicht, also markiert es genau die Ausreißer und sagt, ob der Plan oder die Umsetzung versagt hat.
+6. **Host-Spuren bleiben auf der Liste, aber weiter hinten.** Für Kenni ist die Durchlaufzeit kurz (Median 5,5 h, `2026-10-28-v2.80.md:17`), das Problem ist also Menge, nicht Warten. Ich stufe deshalb meine Lücken 1–2 (Host-Spuren, Zeit je Phase) hinter die Datenqualität zurück. Ganz streichen würde ich sie nicht: Der Auftrag nennt Geschwindigkeit als Ziel, und der monatliche CI-Lauf sieht heute keine einzige Zeit- oder Token-Zahl. Leere Tokens in `losses` können zwei Ursachen haben: fehlende Host-Daten oder ein in Kenni nicht gesetzter `transcripts`-Glob in der Policy (`model-policy.json`, `transcripts`). Das muss vor einer Template-Änderung geklärt werden `[assumption: offen]`.
+7. **D3:** Ich bin einverstanden, dass das Verschlucken bewusst ist. Sichtbar machen kostet aber nichts am Urteil: Ein Zähler verlorener Schreibversuche (stderr oder eine Ersatzdatei) ändert kein Verdikt. Das ist niedrig priorisiert, ich halte es nicht für erledigt.
+
+**Revidierte Reihenfolge (Vorschlag zur Einigung)**
+
+| # | Was | Aufwand |
+|---|---|---|
+| 1 | Befund-Datenqualität: `origin` ins Codex-Schema, aus `at=` ableiten, abgeleitet und erfragt getrennt | S–M |
+| 2 | Messfehler D1 (Token-Doppelzählung) und D2 (Konfidenz nach befüllten Werten) | S |
+| 3 | Ausreißer-Anteil (Runden, Tokens, Zeilen bei ≥ 4 Runden) in `works`/`baseline`, mit REPLAN- und ROOT-CAUSE-Lesern | S |
+| 4 | Vorher/Nachher je Mechanismus-Übernahme mit Mix-Angaben | S |
+| 5 | Follow-up-Last als Gegen-KPI zum Review | S |
+| 6 | Host-Spuren klonfähig und Zeit je Phase, nach Klärung des `transcripts`-Globs | M |
