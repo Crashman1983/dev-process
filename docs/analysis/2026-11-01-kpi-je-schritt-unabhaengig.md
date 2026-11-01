@@ -292,3 +292,36 @@ Im Template geprüft:
 | 4 | Vorher/Nachher je Mechanismus-Übernahme mit Mix-Angaben | S |
 | 5 | Follow-up-Last als Gegen-KPI zum Review | S |
 | 6 | Host-Spuren klonfähig und Zeit je Phase, nach Klärung des `transcripts`-Globs | M |
+
+## 8. Kenni-Prüfung (nachgetragen, Kenni-Zugriff ab 2026-11-01 abends)
+
+Gelesen wurde Kenni `main` @ `19b7b02` (Template v2.80.0, volle Historie, 19.924 Commits seit 2026-04-11). Ich habe nur mit `git`/`grep` und einem eigenen Lese-Skript ausgewertet. Kenni-Code lief nicht: Das Ausführen von Kennis `process_kpis.py` hat der Auto-Mode abgelehnt. Die Werte unten sind deshalb **meine Zählung**, nicht die Ausgabe des Cockpits.
+
+Fenster: Datum aus dem Dateinamen der Journal-Shards. Monatsarchive zählen ganz zum Monat.
+
+| Prüfpunkt | Befund | Folge für die KPI-Tabelle |
+|---|---|---|
+| Host-Dateien (`process-dispatch/`, `process-train/`, `process-tower/`, Gate-Log) | per Konstruktion nicht im Klon; der Steward-Rechner ist von hier nicht prüfbar | alle Host-Zellen bleiben `[assumption]` |
+| Tokens (`transcripts`) | kein `transcripts`-Schlüssel in `model-policy.local.json` oder `model-policy.codex.local.json` | **Projekt-Lücke:** Die leeren Tokens in `losses` kommen (auch) von der fehlenden Konfiguration; I1 aus #356 und meine Lücke 1 lösen das allein nicht |
+| Mandat `optimization.local.json` | fehlt | `outcomes`-Marker, `deploy`, Guardrails und `plan_drift`-Modus stehen auf Standard; ohne Mandat startet laut `optimization.md` kein Versuch |
+| `gate-triage.jsonl` | fehlt | 2.7-Q (bestätigte Fänge) ist in Kenni **nicht messbar**, das Regel-Budget bleibt „unbekannt“ |
+| `Regression-of:`-Trailer | **2** in der ganzen Historie, gegen 316 `fix:`- und 243 `feat:`-Commits seit 10.10. | 2.2-Q und 2.11-Q (Nachfehler) sind praktisch blind; nur der `cfr`-Proxy trägt. **Projekt-Lücke**, die Grammatik ist da |
+| Code-Review-Runden (eigene Zählung, `REVIEW`-Zeilen, ohne `-plan`) | 10.–31.10.: 181 Arbeiten, Median 1, P90 3, ≥ 3 Runden: 20, ≥ 4: 13; **28 % aller Runden** entfallen auf diese 13 (7 %). 1.9.–31.10.: 262 Arbeiten, ≥ 4: 23, 29 % der Runden | bestätigt die Ausreißer-These der Gegenseite. Deren 311 Arbeiten / 17 Ausreißer zählen anders (vermutlich gemergte Arbeiten aus Git); Größenordnung gleich |
+| Tier-Mix (dieselben 181) | Tier 3: 95, Tier 2: 66, Tier 1: 20 | über die Hälfte Tier 3, obwohl `risk-tiers.md` vor unnötigem Tier 3 warnt; 2.2-S/G zählen hier besonders |
+| Tier-Unterschätzung (2.2-G) | 7 von 178 Plänen mit `tier:` und Code-`REVIEW` haben ein höheres REVIEW-Tier | aus Git messbar, wie behauptet; selten. Die Richtung ist eher Über- als Untereinstufung |
+| `ROOT-CAUSE` je blockierter Code-Runde (2.6-G) | 135 von 226 (60 %) | Daten liegen vor; 40 % ohne Ursache, ein Leser lohnt sich |
+| `REPLAN` bei ≥ 2 blockierten Runden (2.4-Q) | 6 von 47 Arbeiten | Pflicht in der Doku, kaum befolgt (die Regel ist jung, `CHANGELOG.md:162`); als Ausreißer-Marker taugt REPLAN in Kenni **noch nicht**, mein Punkt 7.5 ist damit abgeschwächt |
+| `origin=` bei Blocker/Major (2.5-Q, 2.6-Q) | gesamt 399 von 662 (60 %); **Codex-Berichte 4 von 137 (3 %)**, übrige 395 von 525 (75 %) | bestätigt die Gegenseite und den Schema-Befund (`_dispatch_codex.py:466-478`): die Lücke ist fast ganz Codex, also **Template** |
+| `at=` bei FINDING-Zeilen | 877 von 3.513 | Old-Code-Messung (2.8-Q) und das vorgeschlagene abgeleitete `origin` gehen nur für etwa ein Viertel der Befunde. `at=` ist erst seit v2.78 (25.10.) Pflicht, die Basis wächst |
+| `action=follow-up` | 786 von 3.513 Befunden (22 %) | die Follow-up-Last (7.3) ist groß genug, um als Gegen-KPI zu zählen |
+| Template-Versionswechsel | 15 Updates zwischen 10.10. und 28.10. (v2.70.0 → v2.80.0) | bei rund 180 Arbeiten im Fenster etwa **12 Arbeiten je Version**, unter der `thin`-Schwelle (~20). Das stützt 7.4: Vergleich je Mechanismus über Fenster, nicht je Versions-String |
+| Messmeilensteine | `milestones.local.json` mit 2 Einträgen; `plan-drift-2026-10-27` fällig, kein `.process-work/optimizations/` | 2.12-S misst in Kenni bereits eine überfällige Messung |
+| Deploy | Kenni hat kein Mandat mit `deploy`; ob `train --deploy` genutzt wird, ist aus dem Klon nicht sicher (`Makefile` nennt `--deploy` einmal) | 2.10 bleibt `[assumption]`; #356 sagt „keine Deploy-Stufe“ |
+
+**Was sich an der Reihenfolge (7) ändert:**
+
+1. `origin` im Codex-Schema bleibt **Platz 1** und ist jetzt belegt: 3 % gegen 75 %. Aufwand S. Das abgeleitete `origin` aus `at=` stufe ich auf „später“ zurück, weil `at=` erst ein Viertel abdeckt.
+2. **Neu weit oben: Projekt-Konfiguration in Kenni** (kein Template-Code): `transcripts`-Glob setzen, `optimization.local.json` anlegen, `gate-triage.jsonl` beginnen, `Regression-of:` in `fix:`-Commits durchsetzen (das schreibt `commits.md` schon vor). Aufwand je unter einer Stunde, dazu laufende Disziplin. Ohne das bleiben Tokens, Nachfehler und Gate-Wert in Kenni leer, egal was das Template baut. Umsetzen muss das der Kenni-Steward, nicht dieser PR.
+3. D1/D2, Ausreißer-Anteil und Follow-up-Last unverändert (S).
+4. REPLAN- und ROOT-CAUSE-Leser bleiben S, sind aber als *Disziplin-KPI* zu lesen (60 % bzw. 13 % Befolgung) und noch nicht als Ausreißer-Diagnose.
+5. Host-Spuren klonfähig machen (M) bleiben hinten. Ob sie auf dem Steward-Rechner vorliegen, kann nur jemand mit Zugang zu diesem Rechner prüfen.
