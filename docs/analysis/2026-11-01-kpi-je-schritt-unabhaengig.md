@@ -136,7 +136,7 @@ Entscheidung: Linse, Reviewer-Familie und Rundenlimit wählen.
 
 | | KPI | Def. | Einh. | Ri. | Quelle | Status | Kenni |
 |---|---|---|---|---|---|---|---|
-| Q | **Ausschuss je Zug** | Anteil der Läufe mit `result=red`; Branches an Bord minus gelandete | %; n | ↓ | `phases.jsonl` (`train.py:1349-1352`) | data-only (`train-phases` zeigt nur Zeiten, `PK:1565`) | `[assumption]` Host (281 Train-Merges belegt in Git, `2026-10-28-v2.80.md:11`) |
+| Q | **Ausschuss je Zug** | Anteil der Läufe mit `result=red`; Branches an Bord minus gelandete | %; n | ↓ | `phases.jsonl` (`train.py:1349-1352`) | rote Läufe measured (`train-phases`, `PK:1600-1602`); entfernte Branches data-only | `[assumption]` Host (281 Train-Merges belegt in Git, `2026-10-28-v2.80.md:11`) |
 | S | **Zugzeit und Wartezeit aufs Boarding** | Median/P90 je Phase (preflight … push); `review-pass` → `ended` des Zugs, mit dem der Branch landete | s; h | ↓ | `train-phases` (`PK:1565`); Wartezeit aus Reports + `branches` | Zugzeit measured; Wartezeit missing | `[assumption]` Host |
 | G | **Batch-Effekt** | `retry`+`bisect`-Sekunden gegen `aboard` | s je Branch | ↓ | `phases.jsonl` | data-only | `[assumption]` Host |
 
@@ -199,7 +199,7 @@ Reihenfolge nach Hebel für die Optimierung: Was blockiert die meisten Entscheid
 4. **Test- und CI-Verschwendung sowie Fehlgriffe der Testauswahl (#317).** `test_select.py run` schreibt ein Ereignis (Lane, Dauer, Ergebnis, Timeout, Baum-ID) über `gate_events.append`. Die Train-Zeile bekommt `dropped: [branch…]`. `nodes` und `train-phases` zeigen dann Flakes, Timeouts und Auswahl-Fehlgriffe (2.7-S/G, 2.9-Q). **Aufwand: M** (≈ 2 Tage; berührt Gate-nahen Code, `train.py` ist Tier 3: Refute vor Runde 1).
 5. **Review-Ertrag je Kosten (#316) plus Kalibrierungsstichprobe.** Kosten je echtem Blocker, je Reviewer-Familie und Linse, und Leerläufe. Dazu eine kleine, periodische Stichprobe bestandener Runden, die ein unabhängiger Prüfer nachprüft: Fehlende Fänge sind sonst erst als Durchrutscher sichtbar, also 30 Tage später. **Aufwand: M** für #316 (≈ 2 Tage). Die Stichprobe kostet im Projekt ≈ 1 Review-Sitzung pro Woche, kein Template-Code außer einer Triage-Kategorie im Bericht `[assumption: Format offen]`.
 
-Klein und nützlich, aber nicht unter den Top 5: Deploy-Erfolgsquote und Ausschuss je Zug aus vorhandenen Feldern (S, ≈ 2 h). Zeit bis Durchrutscher-Fix (S, ≈ 2 h). Wartezeit bis Start über `gh` (S, ≈ 4 h, braucht Netz wie `outcomes`). Messabdeckungs-Aggregat (S, ≈ 2 h). Wiederherstellungszeit (M: braucht ein Vorfallsformat, Owner-Entscheidung, ob es das geben soll).
+Klein und nützlich, aber nicht unter den Top 5: Deploy-Erfolgsquote und entfernte Branches je Zug aus vorhandenen Feldern (S, ≈ 2 h). Zeit bis Durchrutscher-Fix (S, ≈ 2 h). Wartezeit bis Start über `gh` (S, ≈ 4 h, braucht Netz wie `outcomes`). Messabdeckungs-Aggregat (S, ≈ 2 h). Wiederherstellungszeit (M: braucht ein Vorfallsformat, Owner-Entscheidung, ob es das geben soll).
 
 **Wohin es gehört.** Alles in `PK` und `TM`, als neue Spalten oder Zeilen der vorhandenen Familien (`flow`, `works`, `rounds`, `baseline`, `nodes`, `train-phases`). Neu ist nur eine Familie `yield` (#316), sofern sie nicht in `rounds` passt. Keine neue Liste außerhalb, kein Gate. Die Tabelle in Abschnitt 2 ist eine Lesehilfe, die auf die Familien zeigt. Wird ein Teil umgesetzt, gehört die Schritt→Familie-Zuordnung als kurzer Abschnitt in `TM`, nicht in dieses Dokument.
 
@@ -218,4 +218,38 @@ git grep -c 'ROOT-CAUSE work=' ; git grep -c 'REPLAN work='
 
 ## 6. Vergleich mit Draft-PR #356
 
-Siehe Nachtrag unten; geschrieben, nachdem die Abschnitte 1–5 standen.
+Geschrieben, nachdem die Abschnitte 1–5 standen (Commit `adee759`). #356 (`4dd12cc`) liefert `docs/analysis/2026-11-01-schritt-kpis.md`, eine Registry `docs/analysis/step-kpis.json` (17 Schritte, 48 KPIs) und `tests/test_step_kpis.py`. Beim Gegenlesen von #356 fiel ein eigener Fehler auf: `train-phases` gibt rote Läufe schon aus. Ich habe 2.9-Q korrigiert.
+
+### Was #356 besser hat oder was ich übernehme
+
+- **Kenni-Audit.** #356 hatte Kenni-Zugriff. Seine Befunde (kein `process-dispatch`- und kein `process-train`-Verzeichnis, kein Gate-Log, `process-tower` ohne Berichte, 2 `Regression-of`-Trailer auf 106 Merges, keine Deploy-Stufe, `losses` mit n = 28 bei 0 befüllten Werten) beantworten viele meiner `[assumption]`-Zellen. Ich übernehme sie als *Angaben von #356, von mir nicht geprüft*.
+- **Messfehler D1–D3**, im Template gegengeprüft:
+  - **D1** stimmt: `session_output_tokens` (`PK:138-150`) summiert jeden Regex-Treffer, der Leser in `dispatch.py` (`_transcript_usage`, um `dispatch.py:1360`) zählt je Nachrichten-ID.
+  - **D2** stimmt: `losses` bildet die Konfidenz aus `t["issues"]`, nicht aus befüllten Werten (`PK:2357-2359`).
+  - **D3** stimmt: `gate_events.append` verschluckt jede Ausnahme (`SP/gate_events.py:46-47`). Das ist gewollt („loses an observation, never a verdict“), aber der Verlust bleibt unsichtbar.
+  - **D4** stimmt nur halb. Dass `report` `rounds`, `models`, `outcomes` und `train-phases` auslässt, ist dokumentiert (`TM:79-82`). Dass `cost(None)` ohne Transkripte läuft, stimmt (`PK:3111`).
+
+  Diese Defekte gehören **vor** meine Lücke 1, weil sie Zahlen zu sicher erscheinen lassen. Aufwand jeweils S.
+- **Weitere Schritte, die ich nicht hatte:** Dispatch-Modellwahl, Pre-Push-Overrides (`PROCESS_SKIP`) und Housekeeping. Override-Protokollierung (I7) halte ich für nützlich, als Gegen-KPI zu 2.7 („Gates schneller“ durch Überspringen).
+
+### Wo wir uns unterscheiden und warum ich bei meiner Sicht bleibe
+
+1. **„Fehlt in Kenni“ gegen „liegt nicht im Repository“.** #356 schließt aus fehlenden Verzeichnissen, dass Dispatch-, Zug- und Gate-Daten in Kenni „ganz fehlen“. Diese Dateien liegen aber per Konstruktion im Git-Common-Dir des ausführenden Rechners, nicht im Repository (Abschnitt 1: `report.py:12`, `train.py:67`, `gate_events.py:3`). Git belegt mindestens 281 Train-Merges in Kenni (`2026-10-28-v2.80.md:11`). Züge liefen also, ihre `phases.jsonl` liegt nur nicht im geprüften Checkout. Die richtige Folgerung ist meine Lücke 1, ein Template-Mangel: die Spuren sind nicht klonfähig. „Kenni instrumentiert nicht“ wäre der falsche Schluss. Prüfen lässt sich das auf dem Steward-Rechner mit dem `ls` aus Abschnitt 5 `[assumption: noch offen]`.
+2. **Keine zweite Wahrheit.** #356 legt eine eigene Registry mit Test unter `docs/analysis/` an und fragt, ob sie ins Template wandern soll (mit Cockpit-Befehl `steps`). Der Auftrag sagt, Owner jeder Messgröße seien `process_kpis.py` und `telemetry.md`. Eine Registry mit 48 Einträgen, eigenen Statuswerten und eigenem Test veraltet neben dem Cockpit, sobald eine Familie sich ändert. Ich schlage stattdessen vor: neue Werte als Zeilen und Spalten der bestehenden Familien und eine kurze Schritt→Familie-Zuordnung in `TM` (Abschnitt 4). Der Test in #356 prüft Form und Pfade, nicht ob die Werte stimmen. Das sagt #356 selbst.
+3. **Status „measured“ heißt hier „das Cockpit wertet es aus“.** #356 führt etwa `ROOT-CAUSE-Blöcke je Arbeit` (S7.q2) als `measured`, Quelle „ROOT-CAUSE-Blöcke im Journal“. Kein Code im Cockpit liest ROOT-CAUSE, REPLAN oder REFUTE: `grep -c` in `PK` ergibt 0. Die Daten liegen vor, gemessen wird nichts. Bei mir heißt das `missing (data-only)` und ist Lücke 3. Die Unterscheidung zählt für den optimierenden Agenten: `data-only` heißt, es fehlt ein Leser (S). `measured` würde heißen, es gibt schon Zahlen.
+4. **Sparsamkeit.** #356 hat 48 KPIs, davon nur 2 Gegenkontrollen. Ich habe 12 Schritte mit je genau Q, S und G, also 36 KPIs. Jede nennt die Entscheidung, für die sie gebraucht wird. Gegen-KPIs sind bei mir Pflicht je Schritt, weil eine einseitige Optimierung genau dort sichtbar werden muss. Bei #356 ist das nur eine Leseregel („Regeln für den optimierenden Agenten“, 1). Kosten (Tokens) führe ich unter S, nicht als vierte Dimension, weil die Optimierungsziele Qualität und Geschwindigkeit sind und Tokens in `losses` nie mit Zeit summiert werden (TM, `losses`).
+5. **Fundorte.** #356 nennt als Quelle meist Datensatznamen ohne Zeile, etwa „phases.jsonl“. Ich nenne Datei:Zeile des Schreibers und des Lesers, damit ein Agent jede Aussage prüfen kann.
+6. **Tier-Feld.** #356 schreibt (S1.q1), das Tier sei „als Text im Plan oder Issue notiert, nicht als Feld“, und schlägt ein Feld vor (I4). Pläne tragen aber eine `tier:`-Zeile, die `PK` liest (`_work_tier`, `PK:1062-1073`), und `REVIEW`-Zeilen tragen `tier=`. Die Tier-Unterschätzung lässt sich also schon heute aus Git berechnen (meine 2.2-G, Aufwand S). Ein neues Feld braucht es nicht.
+7. **REVIEW-Zeitstempel (I5).** #356 will das REVIEW-Format um Zeitstempel erweitern, das ist eine Vertragsänderung. Die Review-Latenz lässt sich ohne Formatänderung aus Commit-Zeiten der Attest-Commits und aus `pushed`/`review-pass`-Reports bilden, sobald Lücke 1 die Reports klonfähig macht. Ich würde die Vertragsänderung erst angehen, wenn das nicht reicht.
+
+### Gemeinsam
+
+Beide sehen dieselben Kernlücken:
+
+- Tokens und Zeit je Phase (#356 I1, I6; hier Lücke 2)
+- Plan-Review-Kosten
+- Deploy und Wiederherstellung
+- Owner-Zeit statt Owner-Zeilen (#319)
+- Trailer-Disziplin als Schwachstelle der Nachfehler-KPI
+
+Gemeinsam ist auch die Regel, nur innerhalb eines Projekts und über die Zeit zu vergleichen.
