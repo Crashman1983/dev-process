@@ -325,3 +325,56 @@ Fenster: Datum aus dem Dateinamen der Journal-Shards. Monatsarchive zählen ganz
 3. D1/D2, Ausreißer-Anteil und Follow-up-Last unverändert (S).
 4. REPLAN- und ROOT-CAUSE-Leser bleiben S, sind aber als *Disziplin-KPI* zu lesen (60 % bzw. 13 % Befolgung) und noch nicht als Ausreißer-Diagnose.
 5. Host-Spuren klonfähig machen (M) bleiben hinten. Ob sie auf dem Steward-Rechner vorliegen, kann nur jemand mit Zugang zu diesem Rechner prüfen.
+
+## 9. Diskussion, Runde 2
+
+Antwort auf die Nachricht der Gegenseite vom 2026-11-01 22:47 (UTC).
+
+**Einig:**
+
+- `origin` gehört ins Codex-Schema, mit Ableitung aus `at=`. Abgeleitet und genannt werden getrennt ausgewiesen; ohne `at=` bleibt `origin` unbekannt.
+- D1 und D2 werden behoben.
+- Follow-up-Last ist Gegen-KPI.
+- Größe und Stacks werden als Mix-Variable geführt, nicht als neue Regel.
+- Die Registry ist nur ein Schnappschuss; I5 entfällt; D3 hat niedrige Priorität.
+
+**Übernommen:**
+
+- **6a „Grund statt Leerwert“ auf Platz 3.** Das Cockpit unterscheidet schon `missing` und `not measured`. Neu ist, den *Grund* zu nennen (`transcripts not configured`, `no dispatch log on this checkout`, `no gate-triage file`, `no Regression-of trailer in window`). Das hätte die Fehldeutung in #356 („fehlt in Kenni“) verhindert, und es trennt Projekt- von Template-Lücken direkt in der Ausgabe. Aufwand S.
+- **Zuordnung nach Version beim ersten Review** statt nach Merge-Datum. Eine Verfeinerung schlage ich vor: Ein Mechanismus wird dem Schritt zugeordnet, auf den er wirkt.
+  - Mechanismen am Plan oder Plan-Review: Version beim ersten Commit des Plans (Plan-Datei, `git log --diff-filter=A`).
+  - Mechanismen an Review oder Fix: Version beim ersten `REVIEW`-Commit.
+  - Beides lässt sich ohne neue Erfassung aus `.copier-answers.yml` am jeweiligen Commit lesen. Die gemeinsame Hilfsfunktion gehört zu `_process_version` (`PK:1709`).
+- **„Runden nach einem Neubau“** kommt in den REPLAN-Leser.
+
+**Widerspruch bzw. offen: die REPLAN-Zählung.** Die Gegenseite meldet für 11 von 17 Ausreißern eine rechtzeitige Neubau-Entscheidung. Ich zähle in Kenni (`19b7b02`) anders:
+
+- Über die ganze Historie gibt es 28 Arbeiten mit ≥ 4 Code-Runden. Nur bei 5 davon findet sich eine `REPLAN work=`-Zeile: `2333-b2`, `2333-d`, `2423-b`, `2712`, `2717`.
+- Von 47 Arbeiten mit ≥ 2 blockierten Runden haben 6–7 eine solche Zeile.
+
+Das kann zwei Gründe haben, die vor dem Leser zu klären sind:
+
+1. **Grammatik.** In Kenni stehen Varianten wie `REPLAN 2026-10-23 issue-2333-b2 work=…`. Das Owner-Muster `REPLAN_LINE` (`template/scripts/process/check_review.py:417-421`) erkennt sie nicht. Ein Leser über `check_review` zählt nur die grammatische Form; das ist richtig so (ein Eigentümer je Grammatik). Varianten sollten als `unparsed` mitgezählt werden statt zu verschwinden.
+2. **Definition.** REPLAN ist erst seit v2.77 Pflicht (Kenni-Update am 2026-10-21). Ausreißer davor *können* keine Zeile haben. Zählt die Gegenseite auch `DECISION`-Zeilen oder Neubauten ohne REPLAN als „Neubau-Entscheidung“?
+
+Vorschlag: Der Leser gibt drei Zahlen aus — grammatische REPLAN-Zeilen, `unparsed` und „nicht geschuldet“ (vor v2.77 oder vor der zweiten blockierten Runde). Erst dann ist „rechtzeitig entschieden, trotzdem nicht konvergiert“ belastbar. Inhaltlich stimme ich der Gegenseite zu: Wenn dieser Befund hält, ist er wichtig, denn dann hilft ein früheres Neuplanen nicht, und der Hebel liegt bei Schnitt und Größe vor dem ersten Review.
+
+**Host-Spuren:** Die Gegenseite gibt an, dass Kenni Worker über eigenes Tooling startet (`start_worker.py`), nicht über `dispatch.py`. Das kann ich nicht prüfen, die Datei liegt nicht im Kenni-Repository; Kennis `.claude/commands/execute.md:9` ruft aber `report.py`. Trifft die Angabe zu, entstehen in Kenni **nie** Dispatch-Logs. Dann ist die Platz-7-Arbeit (Host-Spuren klonfähig machen) für Kenni wirkungslos, solange sein Tooling nicht `dispatch.py` nutzt oder selbst Phasenstarts schreibt. Ich bin deshalb mit Platz 7 einverstanden und würde ihn an die Bedingung „ein Projekt nutzt `dispatch.py`“ knüpfen.
+
+**Gemeinsame Reihenfolge (aus meiner Sicht geeinigt):**
+
+| # | Was | Aufwand | Ort |
+|---|---|---|---|
+| 1 | `origin` im Codex-Schema plus Ableitung aus `at=` (abgeleitet/genannt getrennt) | S–M | Template |
+| 2 | D1 und D2 | S | Template |
+| 3 | Grund statt Leerwert im Cockpit | S | Template |
+| 4 | Ausreißer-Anteil; Leser für REPLAN (inkl. `unparsed`, „nicht geschuldet“, Runden nach Neubau) und ROOT-CAUSE | S | Template |
+| 5 | Vorher/Nachher je Mechanismus, Zuordnung nach Version am Schritt des Mechanismus, mit Mix | S | Template |
+| 6 | Follow-up-Last als Gegen-KPI | S | Template |
+| 7 | Host-Spuren klonfähig und Zeit je Phase, nur wenn ein Projekt `dispatch.py` nutzt und `transcripts` setzt | M | Template, bedingt |
+| P | Kenni-Konfiguration: `transcripts`, `optimization.local.json`, `gate-triage.jsonl`, `Regression-of:` | < 1 h je Punkt plus Disziplin | Projekt (Kenni-Steward) |
+
+**Offen für Seb:**
+
+- (a) Soll Kenni überhaupt Nachfehler messen? Das verlangt `Regression-of:` als Pflicht im Fix-Commit; heute steht es 2 zu 316 `fix:`. Ohne den Trailer bleibt die Qualität nach dem Merge nur ein Proxy.
+- (b) Soll Kennis eigenes Worker-Tooling Phasenstarts im Format von `dispatch.py` schreiben? Sonst bleibt die Geschwindigkeit je Phase in Kenni unmessbar.
