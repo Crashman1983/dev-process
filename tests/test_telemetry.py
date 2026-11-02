@@ -783,6 +783,34 @@ def test_losses_cli_prints_each_measure_with_its_quality(render, tmp_path):
     assert "tokens      not measured [missing" in r.stdout
 
 
+def test_losses_confidence_counts_issues_with_a_value_not_all_issues(render, tmp_path):
+    """v2.81 D2 (#360): downstream `losses` printed "confidence: high (direct, n=93)" with no
+    value for any of the 93 issues — the confidence came from the issue count."""
+    out = _flow_repo(render, tmp_path)
+    m = _flow_module(out)
+    empty = {"value": None, "issues": 0, "missing": 93, "quality": "missing"}
+    t = {"issues": 93, "occupancy": {**empty, "unit": "h"}, "delay": {**empty, "unit": "issue-h"},
+         "tokens": dict(empty)}
+    assert m.losses_confidence(t).startswith("confidence: not measured"), m.losses_confidence(t)
+    some = {**t, "delay": {"value": 5.0, "unit": "issue-h", "issues": 30, "missing": 63, "quality": "measured"}}
+    text = m.losses_confidence(some)
+    assert "sample not representative" in text and "high" not in text, text
+
+
+def test_session_tokens_count_a_message_once_not_once_per_content_block(render, tmp_path):
+    """v2.81 D1 (#360): Claude Code writes one line per content block, each repeating the
+    message's usage; `cost` summed every line, `dispatch` counted the message once."""
+    import json
+    out = _flow_repo(render, tmp_path)
+    m = _flow_module(out)
+    d = tmp_path / "t"
+    d.mkdir()
+    line = {"message": {"id": "msg_1", "model": "m", "usage": {"input_tokens": 5, "output_tokens": 40}},
+            "requestId": "r1"}
+    (d / "s.jsonl").write_text("\n".join(json.dumps(line) for _ in range(3)) + "\n")
+    assert m.session_output_tokens(d) == {"s": 40}
+
+
 def _issue(n, title, state="OPEN", labels=(), created="2026-01-05T10:00:00Z", closed=None, subs=()):
     return {"number": n, "title": title, "state": state, "createdAt": created, "closedAt": closed,
             "labels": list(labels), "sub_total": len(subs),
