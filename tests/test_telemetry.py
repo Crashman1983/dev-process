@@ -2127,6 +2127,54 @@ def test_baseline_names_the_outliers_share_and_the_revert_rate(render, tmp_path)
     assert "1 of 3 works carry 67 % of the rounds" in _cli(out, "works")
 
 
+def _versions_repo(render, tmp_path):
+    """Three template versions in the history — v2.70.0, v2.80.0 and a bare SHA (no release
+    tag: unknown) — and a train merge reviewed at each: works 60, 61, 62."""
+    out = _merges_repo(render, tmp_path)
+    heads = {}
+    for n, day, ver in ((60, 2, "v2.70.0"), (61, 3, "v2.80.0"), (62, 4, "3f2a9c1")):
+        _put(out, f"chore: template {ver}", {".copier-answers.yml": f"_commit: {ver}\n_src_path: x\n"}, _at(day, 8))
+        heads[n] = _g(out, "rev-parse", "HEAD")
+        _train_merge(out, f"{n}-w", [(f"feat: w{n} (#{n})", {f"src/w{n}.py": _lines(3)}, _at(day, 10))],
+                     f"train: merge {n}-w\n\nCloses #{n}", _at(day, 12))
+
+    def rv(work, rnd, verdict, at=None):
+        head = heads[at or work]
+        return (f"REVIEW work={work} tier=2 reviewer=r model=m independence=bundle,non-implementing "
+                f"verdict={verdict} round={rnd} base={head} head={head}\n")
+    # 60's first round saw v2.70 (no duty yet), its later rounds the v2.80 head
+    _journal(out, rv(60, 1, "block") + rv(60, 2, "block", at=61) + rv(60, 3, "pass", at=61)
+             + rv(61, 1, "block") + rv(61, 2, "pass") + rv(62, 1, "block") + rv(62, 2, "pass")
+             + "ROOT-CAUSE work=60 round=2: owner read twice — sites: none — a test\n"
+             + "REPLAN work=60 round=2: rebuild — the owner moves\n"
+             + "REPLAN 2026-10-23 issue-61 work=61 round=2 rebuild of the parser\n")
+    return out
+
+
+def test_rounds_count_compliance_with_owed_duties_and_coverage_apart(render, tmp_path):
+    """#360 B1: how often the mandatory lines are written — only where they were owed (from the
+    version that introduced them, at the head the review saw; an unknown version is never
+    old), with variants named `unparsed`; optional fields are coverage, never a duty."""
+    out = _versions_repo(render, tmp_path)
+    c = _flow_module(out).compliance_table(out)
+    rc = c["root_cause"]  # owed for every blocked code round from v2.77
+    assert (rc["written"], rc["owed"], rc["not_owed"], rc["unknown"]) == (1, 2, 1, 1), rc
+    rp = c["replan"]  # owed for every blocked round after the first, from v2.77
+    assert (rp["written"], rp["owed"], rp["unparsed"]) == (1, 1, 1), rp
+    assert c["rounds_after_rebuild"] == {"works": 1, "rounds": 1}
+    text = _cli(out, "rounds")
+    assert "compliance" in text and "coverage" in text and "ROOT-CAUSE 1/2" in text, text
+
+
+def test_baseline_splits_works_by_the_version_their_review_saw(render, tmp_path):
+    """#360 B4: before/after a mechanism, by the process version at the head of a work's first
+    code review — never by merge date; an unparsed version is `unknown`."""
+    out = _versions_repo(render, tmp_path)
+    text = _cli(out, "baseline", "--split-version", "v2.75.0")
+    assert "before v2.75.0: 1 works" in text and "from v2.75.0: 1 works" in text, text
+    assert "unknown version: 1 works" in text, text
+
+
 def _size_repo(render, tmp_path) -> Path:
     """Four works, one per size step, with 1-4 review rounds; #31 spans two directories."""
     out = _merges_repo(render, tmp_path)
