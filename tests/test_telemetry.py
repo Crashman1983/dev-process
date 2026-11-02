@@ -2373,6 +2373,44 @@ def test_a_plain_work_keeps_its_last_event_as_the_end_under_clock_skew(render, t
     assert w["end"] == w["events"][-1]["when"], w
 
 
+def test_coverage_counts_plan_review_findings_too(render, tmp_path):
+    """v2.81 code review round 3: reading code reviews only for `kind=` compliance also dropped
+    plan-review findings from coverage, which the doc promises over all blocker/major findings."""
+    out = _versions_repo(render, tmp_path, github_issues=True)
+    m = _flow_module(out)
+    rep = out / ".process-work/reviews/61-plan.md"
+    rep.parent.mkdir(parents=True, exist_ok=True)
+    rep.write_text("review: plan\nwork: #61\nphase: plan\nround: 1\npublish-waived: test\n\n## Findings\n"
+                   "FINDING sev=blocker action=fix issue=- by=codex origin=draft a plan gap\n")
+    c = m.compliance_table(out)
+    assert c["coverage"]["origin"]["codex"] == [1, 1], c["coverage"]
+    assert c["kind_on_blockers"]["owed"] == 0  # still code reviews only
+
+
+def test_an_empty_split_group_asks_for_no_token_reason(render, tmp_path):
+    """v2.81 code review round 3: an empty group has no token median by construction; it must
+    not call the tokens missing when the groups that have works measured them."""
+    m = _flow_module(_merges_repo(render, tmp_path))
+    measured = {"works": 3, "tokens_per_work": 1200.0}
+    assert m._tokens_missing([measured, {"works": 0, "tokens_per_work": None}]) is False
+    assert m._tokens_missing([measured, {"works": 2, "tokens_per_work": None}]) is True
+
+
+def test_a_backdated_commit_after_a_revert_does_not_hide_it(render, tmp_path):
+    """v2.81 code review round 3: `git log --since` stops at the first commit older than the
+    date; a backdated commit on top of an in-window revert made the revert a measured 0."""
+    from datetime import datetime, timezone
+    out = _merges_repo(render, tmp_path)
+    _train_merge(out, "41-a", [("feat: a (#41)", {"src/a.py": _lines(4)}, _at(2))],
+                 "train: merge 41-a\n\nCloses #41", _at(2, 12))
+    _put(out, 'Revert "feat: a (#41)"', {"src/a.py": None}, _at(3))
+    _put(out, "chore: backdated", {"src/z.py": _lines(1)}, "2026-02-01T09:00:00+00:00")
+    m = _flow_module(out)
+    b = m.baseline_numbers(out, datetime(2026, 3, 1, tzinfo=timezone.utc),
+                           datetime(2026, 3, 9, tzinfo=timezone.utc), commits=[])
+    assert b["reverts"]["commits"] == 1, b["reverts"]
+
+
 def _size_repo(render, tmp_path) -> Path:
     """Four works, one per size step, with 1-4 review rounds; #31 spans two directories."""
     out = _merges_repo(render, tmp_path)

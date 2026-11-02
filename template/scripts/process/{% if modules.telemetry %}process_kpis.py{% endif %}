@@ -1213,8 +1213,11 @@ def baseline_numbers(root: Path, lo: datetime, hi: datetime, *, items: list[dict
     # the whole window, not `cfr`'s capped commit list (v2.81 code review round 2)
     import tower  # noqa: PLC0415 — the one owner of the integration branch
     ref = tower.integration_ref(root)
+    # `--since-as-filter` (git 2.37): `--since` stops at the first older commit, and one
+    # backdated commit on top of a revert hid it (code review round 3); an older git fails
+    # here, and the reverts read "not read", never 0
     subjects = _git_out(root, "log", ref, "--no-merges", "--format=%s",
-                        *([f"--since={lo.isoformat()}"] if lo.year > 1 else []),
+                        *([f"--since-as-filter={lo.isoformat()}"] if lo.year > 1 else []),
                         *([f"--until={hi.isoformat()}"] if hi.year < 9999 else []),
                         timeout=_HISTORY_TIMEOUT) if ref else None
     reverts = None if subjects is None else sum(1 for s in subjects.splitlines() if s.startswith('Revert "'))
@@ -1324,6 +1327,12 @@ def _mix(root: Path, items: list[dict]) -> str:
             + ", ".join(f"{k} {v}" for k, v in sorted(tiers.items())) + "; " + spread)
 
 
+def _tokens_missing(groups: list[dict]) -> bool:
+    """Is a token median missing in a group that has works? An empty group has none by
+    construction (code review round 3)."""
+    return any(g["works"] and g["tokens_per_work"] is None for g in groups)
+
+
 def baseline(root: Path | None = None, windows: list[tuple[datetime, datetime]] | None = None,
              *, as_json: bool = False, split_version: str | None = None) -> int:
     """One or two windows side by side, so a change's effect is the difference of
@@ -1385,7 +1394,7 @@ def baseline(root: Path | None = None, windows: list[tuple[datetime, datetime]] 
     for (lo, hi), g, x in zip(windows if whole is None else windows[:1], got, label):
         why = why_missing(root, lo, hi, ref)
         parts = []
-        if (g["tokens_per_work"] is None if whole is None else any(h["tokens_per_work"] is None for h in got)):
+        if (g["tokens_per_work"] is None if whole is None else _tokens_missing(got)):
             parts.append(f"tokens — {why['tokens']}")
         if "escapes" in why:
             parts.append(f"escapes — {why['escapes']}")
@@ -1698,9 +1707,10 @@ def compliance_table(root: Path) -> dict:
             after_rebuild["rounds"] += max(0, r["max_round"] - min(rebuilt))
     kind = bucket()
     coverage: dict[str, dict[str, list[int]]] = {}
-    found = _report_findings(root, "code")  # a plan review has no code round's head to read
-    if not isinstance(found, str):
-        for work, f, rnd in found:
+    found = _report_findings(root)  # coverage: every report, plan reviews included
+    code = _report_findings(root, "code")  # the duty: a plan review has no code round's head
+    if not isinstance(code, str):
+        for work, f, rnd in code:
             w = work.lstrip("#")
             if f["sev"] == "blocker":
                 v = version(w, rnd) if w in rounds and rnd is not None else None
@@ -1711,6 +1721,8 @@ def compliance_table(root: Path) -> dict:
                 else:
                     kind["owed"] += 1
                     kind["written"] += bool(f.get("kind"))
+    if not isinstance(found, str):
+        for _work, f, _rnd in found:
             if f["sev"] in ("blocker", "major"):
                 who = "codex" if f.get("by") == "codex" else "others"
                 for field in ("origin", "at", "class") + (("kind",) if f["sev"] == "major" else ()):
@@ -1719,7 +1731,7 @@ def compliance_table(root: Path) -> dict:
                     cell[1] += 1
     return {"root_cause": root_cause, "replan": replan, "rounds_after_rebuild": after_rebuild,
             # reports not read: neither a measured 0/0 nor coverage, the reason instead
-            "kind_on_blockers": found if isinstance(found, str) else kind,
+            "kind_on_blockers": code if isinstance(code, str) else kind,
             "coverage": found if isinstance(found, str) else coverage}
 
 
