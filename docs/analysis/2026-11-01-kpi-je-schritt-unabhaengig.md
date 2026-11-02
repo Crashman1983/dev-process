@@ -401,3 +401,34 @@ Vorschlag:
 - **Prozess:** Das Vorspulen von `main` auf einen Branch, der `main` hineingemergt hat, gehört im Pre-Push-Merge-Guard abgelehnt. Das ist Gate-Code, also Tier 3. Ob es dort schon eine Prüfung gibt, die Kenni umgangen hat, ist offen `[assumption]`.
 
 **Konsequenz für die Reihenfolge:** M1 und D2 gehören vor alles andere. Solange die Population falsch ist, sind alle Arbeits-KPIs aus Git (Abschnitt 2.2, 2.4, 2.6, 2.8, 2.11) für Kenni nicht belastbar.
+
+## 11. KPI-Lücken gegen gängige Raster (2026-11-02)
+
+Frage des Owners: Sind alle qualitativen und quantitativen KPIs der Softwareentwicklung in allen Schritten identifiziert? Antwort: nein. Der KPI-Satz deckt den Prozessfluss ab. Gegen DORA, SPACE/DevEx, Code-Gesundheit, Betrieb und Sicherheit fehlen ganze Bereiche. Ziel ist nicht „volle Telemetrie“, sondern keine blinde Entscheidung.
+
+| Bereich | Fehlende KPI | Wofür entscheidend | Stand im Template | Aufwand |
+|---|---|---|---|---|
+| Betrieb (DORA) | Wiederherstellungszeit, Vorfälle je Deploy | Gegen-KPI zu allen Geschwindigkeits-KPIs | nicht gemessen (`optimization.md:24`); kein Vorfallsformat | M: Format `incident` + Leser |
+| Betrieb | Fehler in Produktion (Sentry, Logs, SLOs) | Nachfehler ohne `Regression-of:` | fehlt; Kenni hat 2 Trailer | Projekt: Anbindung; Template: Leser-Schnittstelle |
+| DORA | Deploy-Häufigkeit | Batchgröße, Takt des Zugs | Daten in `phases.jsonl`, keine Ausgabe | S |
+| Nacharbeit | Revert-Quote, Fix-Commits je Arbeit nach dem Merge | versteckte Nachfehler | `clusters`/`cfr` nur Proxy, Reverts nicht gezählt | S (Git) |
+| Review-Genauigkeit | Fehlalarme (verworfen oder widerlegt) und Übersehenes (Stichprobe bestandener Runden) | findet mehr Review mehr oder nur Lärm? | #316 teilweise; Stichprobe nur vorgeschlagen | M |
+| Testqualität | Mutation-Score der geänderten Zeilen, Flaky-Quote, Suite-Dauer | fangen Tests Fehler oder laufen sie nur? | Mutation in `testing.md`/Review-Bundle, nicht gemessen; Flakes #317 | M |
+| Code-Gesundheit | Trend von Komplexität und statischen Warnungen auf berührten Dateien, Churn-Hotspots | Gegen-KPI zu „schneller umsetzen“ | `size` zeigt meistberührte Dateien, keine Komplexität | M; Werkzeuge je Stack beim Projekt |
+| Sicherheit | offene Schwachstellen in Abhängigkeiten, ihr Alter, Zeit bis zum Fix | Qualitätsuntergrenze | `sbom`-Modul ohne Schwachstellenprüfung | M |
+| Anforderungen | Scope-Abweichung (tatsächlicher Diff gegen die im Plan genannten Dateien), nachträglich geänderte Akzeptanzkriterien | Planqualität jenseits von REPLAN | Execute vergleicht, schreibt nichts auf; `graph.py missed` | S–M |
+| Prozess-Disziplin | Befolgungsquote der Pflichtzeilen (Kenni: REPLAN 13 %, ROOT-CAUSE 60 %, `origin=` 60 %, `at=` 25 %) | wirkt eine Regel oder ist sie nur Last? (Regel-Budget) | ermittelt, keine Familie im Cockpit | S |
+| Agenten-spezifisch | Autonomie-Quote (ohne Eingriff), Kontext-Kompaktierungen und Neueinlesen, Werkzeugfehler | wo Agenten an Kontext oder Werkzeugen scheitern | fehlt; `rehydrate.py` wird nicht gezählt | S–M (Backend/Hook) |
+| Mensch (SPACE) | Owner-Wartezeit (#319); Owner-Puls: eine Frage pro Woche („Wie belastend war der Prozess?“, 1–5) | einzige qualitative Stimme, Gegen-KPI zur Prozesslast | #319 offen, Puls fehlt | S (eine Zeile in `improvement-weekly.md`) |
+| Wert | tatsächliche Nutzung gelieferter Funktionen | wird das Richtige gebaut? | `outcomes` misst „nutzbar“, nicht „genutzt“ | Projekt |
+
+**Kandidaten für T2 (Telemetrie-Vertrag).** Ohne diese vier kann eine Optimierung Tempo gewinnen, während die Qualität unbemerkt sinkt:
+
+1. Wiederherstellung und Vorfälle: Format und Leser
+2. Review-Genauigkeit: Fehlalarme aus den Befund-Ausgängen, Übersehenes aus einer Stichprobe
+3. Testqualität: Mutation-Score und Flakes, mit #317
+4. Befolgungsquoten der Pflichtzeilen
+
+Code-Gesundheit, Sicherheit, Produktionsfehler und Nutzung bekommen im Template nur einen Platz im Vertrag und einen Leser. Die Werkzeuge stellt das Projekt.
+
+Grenzen: Die größte Lücke ist heute nicht eine fehlende KPI, sondern Daten, die vorhandene KPIs nie erreichen (Population, Tokens, Trailer, Triage). Jede neue KPI muss automatisch entstehen oder ihre Abdeckung ausweisen. Zahlen gelten nur innerhalb eines Projekts, und keine Zahl ist ein Ziel (`telemetry.md`, „honest ceiling“).
