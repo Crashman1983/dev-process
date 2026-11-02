@@ -7,6 +7,10 @@ technischen Einzelheiten stehen im [CHANGELOG](CHANGELOG-DE.md).
 
 English version: [NEWS.md](NEWS.md).
 
+## v2.81.0 — Erst richtig messen
+
+Das Prozess-Cockpit zählte in einem echten Projekt falsch: Nachdem main in einen Branch gemergt und auf ihn vorgespult worden war, fehlte der Großteil von drei Wochen Arbeit in seinen Zahlen, ohne Warnung. Es folgt dieser Historie jetzt, zählt keine Änderung doppelt und sagt, warum eine Spalte leer ist, statt einen Strich zu zeigen. Außerdem zeigt es, wie oft die vorgeschriebenen Review-Einträge tatsächlich geschrieben werden, welche wenigen Arbeiten die meisten Review-Runden tragen, und wie sich Zahlen vor und nach einer Prozessversion unterscheiden. Die Plan-Regel aus v2.80.1 erreicht jetzt jedes Agenten-Harness und blockiert nur, wenn das, worauf ein Plan baut, falsch ist. Keine neuen Gates.
+
 ## v2.80.1 — Ein Plan nennt, worauf er baut
 
 Ein Plan nennt jetzt, woher jeder Fakt kommt, auf den er sich stützt — Datei und Zeile, Vertragsabschnitt, ein Befehl — oder markiert ihn als Annahme, und ein Plan, der von einer API abhängt, nennt die gelesene Stelle des Vertrags. Eine Nachricht einer anderen Agent-Session gilt als Annahme, bis jemand sie am Code oder Vertrag geprüft hat. Das Plan-Review wertet einen Fakt ohne Quelle als Befund. Anlass war ein Plan, der drei Endpunkte plante, die es schon gab. Keine neuen Gates.

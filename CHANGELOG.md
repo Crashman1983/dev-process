@@ -10,6 +10,26 @@ A few plain sentences per release: [NEWS.md](NEWS.md). Deutsche Fassung:
 [CHANGELOG-DE.md](CHANGELOG-DE.md). Releases before v2.28.2:
 [docs/changelog-archive.md](docs/changelog-archive.md).
 
+## v2.81.0 — Measure correctly first · 2026-11-02
+
+**Why.** Two independent analyses of which KPIs the process needs per step (#356, #357) found that the cockpit miscounted in a real project. It read only the first-parent chain of main: after main was merged into a branch and fast-forwarded onto it, 109 of 168 train merges in three weeks were missing, without a warning. `losses` showed "high" confidence over 93 issues without a single value, `cost` counted a message once per content block, and Codex reviews could not say where a finding came from. Empty columns gave no reason, so a project's missing configuration read as a gap in the template. The v2.80.1 plan rule had no severity and reached only the Claude command (#351, review of v2.80.1).
+
+**What changes.**
+- The population follows the second side of a merge without a marker, and every range stops at all earlier events, so nothing is counted twice. A `finish` range sums its commits' lines. The header names the events reached that way.
+- `losses` takes its confidence from the issues with a value; `cost` counts a message once.
+- Codex findings carry `origin=` (`draft`, `fix`, `late`, or none when the reviewer cannot tell).
+- An empty token or escape value names its reason, for example "transcripts not configured" or "no Regression-of trailer in the window — unmeasured, not zero".
+- `rounds` shows compliance with the owed record lines (ROOT-CAUSE, REPLAN, `kind=` on blockers), from the version that introduced each duty at the head the review saw, and shows optional fields as coverage, apart. `baseline` and `works` show the outliers' share of rounds and lines, `baseline` the revert rate, and `baseline --split-version vX.Y.Z` compares works by the version their first review saw.
+- The plan rule from v2.80.1 now stands in `workflow.md` for every harness. An unsourced fact and an `[assumption]` get one severity: blocking only when what a decision rests on is contradicted by the code or contract, otherwise minor.
+
+**Effect.** The cockpit's numbers cover the whole history and say where they are thin; whether a rule is followed and whether it works become measurable before the next rule is added.
+
+**Update.** A pure update. A project with its own Codex review schema adds the optional `origin` field or leaves it out; no gate requires it. Numbers from `baseline`, `works`, `size` and `load` change where main was ever fast-forwarded onto a branch that merged it; compare new runs with new runs.
+
+**Changed sections.** `review-checklist.md` (Completeness), `workflow.md` (Plan), `telemetry.md` (The KPI cockpit), command `/plan`
+
+Details: [Plan](docs/analysis/2026-11-02-v2.81.md) #360 #356 #357 #351
+
 ## v2.80.1 — A plan cites what it builds on · 2026-10-30
 
 **Why.** Downstream, a plan was written before the API contract was read, and took another agent session's message as fact. Three endpoints it planned to add were already in the contract. Rule 1 treated a sub-agent's summary as an assumption, but not a statement from another agent session, and `/plan` asked for evidence only for the consumers of a change, not for the facts the plan builds on (#351).

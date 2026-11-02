@@ -9,6 +9,26 @@ ein Eintrag ohne Plan oder Issue hat keine Details-Zeile. In wenigen Sätzen je 
 English version: [CHANGELOG.md](CHANGELOG.md). Die Releases vor v2.28.2:
 [docs/changelog-archive-DE.md](docs/changelog-archive-DE.md).
 
+## v2.81.0 — Erst richtig messen · 2026-11-02
+
+**Warum.** Zwei unabhängige Analysen, welche KPIs der Prozess je Schritt braucht (#356, #357), fanden, dass das Cockpit in einem echten Projekt falsch zählte. Es las nur die First-Parent-Kette von main: Nachdem main in einen Branch gemergt und auf ihn vorgespult worden war, fehlten in drei Wochen 109 von 168 Train-Merges, ohne Warnung. `losses` zeigte „high“ Konfidenz über 93 Issues ohne einen einzigen Wert, `cost` zählte eine Nachricht je Inhaltsblock, und Codex-Reviews konnten nicht sagen, woher ein Befund stammt. Leere Spalten nannten keinen Grund, sodass fehlende Projektkonfiguration wie eine Lücke im Template aussah. Die Plan-Regel aus v2.80.1 hatte keine Schwere und erreichte nur den Claude-Befehl (#351, Prüfung von v2.80.1).
+
+**Was sich ändert.**
+- Die Population folgt der zweiten Seite eines Merges ohne Marker, und jeder Bereich endet an allen früheren Ereignissen, sodass nichts doppelt zählt. Ein `finish`-Bereich summiert die Zeilen seiner Commits. Die Kopfzeile nennt die so gefundenen Ereignisse.
+- `losses` nimmt die Konfidenz aus den Issues mit Wert; `cost` zählt eine Nachricht einmal.
+- Codex-Befunde tragen `origin=` (`draft`, `fix`, `late`, oder keines, wenn der Reviewer es nicht sagen kann).
+- Ein leerer Token- oder Nachfehlerwert nennt seinen Grund, zum Beispiel „transcripts not configured“ oder „no Regression-of trailer in the window — unmeasured, not zero“.
+- `rounds` zeigt die Befolgung der geschuldeten Zeilen (ROOT-CAUSE, REPLAN, `kind=` bei Blockern), ab der Version, die die Pflicht eingeführt hat, am vom Review gesehenen Stand, und zeigt optionale Felder getrennt als Abdeckung. `baseline` und `works` zeigen den Anteil der Ausreißer an Runden und Zeilen, `baseline` die Revert-Quote, und `baseline --split-version vX.Y.Z` vergleicht Arbeiten nach der Version, die ihr erstes Review sah.
+- Die Plan-Regel aus v2.80.1 steht jetzt in `workflow.md` für jedes Harness. Ein Fakt ohne Quelle und ein `[assumption]` bekommen eine Schwere: blockierend nur, wenn Code oder Vertrag dem widersprechen, worauf eine Entscheidung ruht, sonst minor.
+
+**Wirkung.** Die Zahlen des Cockpits decken die ganze Historie ab und sagen, wo sie dünn sind; ob eine Regel befolgt wird und ob sie wirkt, wird messbar, bevor die nächste Regel kommt.
+
+**Update.** Reines Update. Ein Projekt mit eigenem Codex-Review-Schema nimmt das optionale Feld `origin` auf oder lässt es weg; kein Gate verlangt es. Die Zahlen von `baseline`, `works`, `size` und `load` ändern sich, wo main je auf einen Branch vorgespult wurde, der main hineingemergt hatte; neue Läufe nur mit neuen vergleichen.
+
+**Geänderte Abschnitte.** `review-checklist.md` (Completeness), `workflow.md` (Plan), `telemetry.md` (The KPI cockpit), Befehl `/plan`
+
+Details: [Plan](docs/analysis/2026-11-02-v2.81.md) #360 #356 #357 #351
+
 ## v2.80.1 — Ein Plan nennt, worauf er baut · 2026-10-30
 
 **Warum.** In einem nutzenden Projekt entstand ein Plan, bevor der API-Vertrag gelesen war, und übernahm die Nachricht einer anderen Agent-Session als Tatsache. Drei Endpunkte, die er hinzufügen wollte, standen schon im Vertrag. Regel 1 behandelte die Zusammenfassung eines Subagenten als Annahme, nicht aber die Aussage einer anderen Agent-Session, und `/plan` verlangte Belege nur für die Abnehmer einer Änderung, nicht für die Fakten, auf die der Plan baut (#351).
