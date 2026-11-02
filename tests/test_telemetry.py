@@ -512,10 +512,12 @@ def _flow_repo(render, tmp_path):
     tower.mkdir()
     reports = [("2026-10-01T11:00:00", "planned"), ("2026-10-01T15:00:00", "pushed"),
                ("2026-10-01T17:00:00", "review-pass"), ("2026-10-02T09:00:00", "done")]
-    import time
-    off = time.strftime("%z")
+    # each stamp carries the local offset of its own date, not today's: on a DST change between
+    # the fixture's October dates and the day the suite runs, today's offset moved the merge an
+    # hour past the deploy (failed from 2026-11-01 under TZ=America/New_York)
+    from datetime import datetime as _dt
     (tower / "reports.jsonl").write_text("".join(
-        json.dumps({"ts": ts + off, "host": "h", "worker": "12-faster", "branch": "12-faster",
+        json.dumps({"ts": _dt.fromisoformat(ts).astimezone().isoformat(), "host": "h", "worker": "12-faster", "branch": "12-faster",
                     "issue": 12, "state": st, "note": "", "cwd": ""}) + "\n" for ts, st in reports))
     train = common / "process-train"
     train.mkdir()
@@ -583,9 +585,10 @@ def test_flow_cli_prints_the_issue_and_the_honest_ceiling(render, tmp_path):
 
 def _report(out, ts, state, worker, issue):
     import json
-    import time
+    from datetime import datetime
     with (out / ".git/process-tower/reports.jsonl").open("a") as fh:
-        fh.write(json.dumps({"ts": ts + time.strftime("%z"), "host": "h", "worker": worker, "branch": worker,
+        # the offset of the stamp's own date (DST), as `_flow_repo` writes it
+        fh.write(json.dumps({"ts": datetime.fromisoformat(ts).astimezone().isoformat(), "host": "h", "worker": worker, "branch": worker,
                              "issue": issue, "state": state, "note": "", "cwd": ""}) + "\n")
 
 
@@ -1860,11 +1863,11 @@ def test_a_merge_without_an_issue_is_counted_and_regression_of_claims_nothing(re
 
 
 def _host_report(out: Path, ts: str, state: str, worker: str, issue: int, **extra) -> None:
-    import time
+    from datetime import datetime
     d = out / ".git/process-tower"
     d.mkdir(exist_ok=True)
     with (d / "reports.jsonl").open("a") as fh:
-        fh.write(json.dumps({"ts": ts + time.strftime("%z"), "host": "h", "worker": worker, "branch": worker,
+        fh.write(json.dumps({"ts": datetime.fromisoformat(ts).astimezone().isoformat(), "host": "h", "worker": worker, "branch": worker,
                              "issue": issue, "state": state, "note": "", "cwd": "", **extra}) + "\n")
 
 
