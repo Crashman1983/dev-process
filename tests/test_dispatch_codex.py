@@ -644,7 +644,7 @@ def test_a_tampered_or_stale_review_is_never_handed_off(review_repo):
 
 def test_a_follow_up_without_an_issue_is_refused(review_repo):
     bad = {**PASS, "findings": [{"sev": "minor", "action": "follow-up", "kind": "implementation", "issue": "-",
-                                 "class": "judgment", "rule": "-", "at": "-", "title": "later"}]}
+                                 "class": "judgment", "rule": "-", "at": "-", "origin": "draft", "title": "later"}]}
     out, d, codex = review_repo(bad)
     _run_review(out, d, codex)
     assert d.handoff(out, "7-widget") == 3
@@ -938,7 +938,7 @@ def test_a_foreign_or_uncommitted_review_line_finishes_nothing(review_repo):
 def test_a_review_without_receipt_is_no_way_out(review_repo, capsys):
     block = {"verdict": "block", "findings": [{"sev": "major", "action": "fix", "kind": "implementation",
                                                "issue": "-", "class": "testable", "rule": "mutation",
-                                               "at": "src/widget.py:3", "title": "wrong"}], "criteria": [], "refute": []}
+                                               "at": "src/widget.py:3", "origin": "draft", "title": "wrong"}], "criteria": [], "refute": []}
     out, d, codex = review_repo(block)
     rec = _run_review(out, d, codex)
     (Path(rec["evidence"]) / "terminal.json").unlink()
@@ -952,14 +952,32 @@ def test_a_codex_finding_names_its_reviewer(review_repo):
     """#247: the handoff's findings carry `by=codex`, so a later count can tell them apart."""
     block = {"verdict": "block", "findings": [{"sev": "major", "action": "fix", "kind": "implementation",
                                                "issue": "-", "class": "testable", "rule": "mutation",
-                                               "at": "src/widget.py:3", "title": "wrong"}],
+                                               "at": "src/widget.py:3", "origin": "draft", "title": "wrong"}],
              "criteria": ["AC-1: tests/test_widget.py::test_widget"], "refute": []}
     out, d, codex = review_repo(block)
     _run_review(out, d, codex)
     d.handoff(out, "7-widget")
     report = next((out / ".process-work/reviews").glob("*-7-codex-*.md")).read_text()
-    assert "FINDING sev=major action=fix kind=implementation issue=- by=codex class=testable rule=mutation at=src/widget.py:3 wrong" \
-        in report
+    assert ("FINDING sev=major action=fix kind=implementation issue=- by=codex origin=draft class=testable "
+            "rule=mutation at=src/widget.py:3 wrong") in report
+
+
+def test_a_codex_finding_says_where_it_came_from(review_repo):
+    """v2.81 (#360): 4 of 137 Codex blocker/major findings downstream carried `origin=`, against
+    395 of 525 from other reviewers — the schema had no field for it. `-` is the honest
+    answer when the reviewer cannot tell, and then no `origin=` is written (it stays optional
+    in the grammar)."""
+    out, d, codex = review_repo(PASS)
+    rec = _run_review(out, d, codex)
+    spec = codex._schema(plan_review=False, gate=False)["properties"]["findings"]["items"]
+    assert "origin" in spec["required"] and spec["properties"]["origin"]["enum"] == ["draft", "fix", "late", "-"]
+    found = [{"sev": "major", "action": "fix", "kind": "implementation", "issue": "-", "class": "testable",
+              "rule": "-", "at": "src/widget.py:3", "origin": o, "title": f"t{o}"} for o in ("fix", "-")]
+    block = {"verdict": "block", "findings": found, "criteria": [], "refute": []}
+    assert codex._validated(block, rec) is not None
+    rec = {**rec, "result_sha256": "x", "invocation": "codex exec", "issue": 7}
+    text = codex._report_text(rec, block, work="7", plan_review=False, refute_round=None, review_round=2)
+    assert "origin=fix" in text and "origin=-" not in text, text
 
 
 def test_the_implementer_flag_never_overrides_a_measured_model(review_repo):
