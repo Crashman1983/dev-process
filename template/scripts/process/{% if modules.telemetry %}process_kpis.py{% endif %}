@@ -1113,6 +1113,9 @@ def _population(root: Path, merged: list[dict], lo: datetime, hi: datetime,
             # count of strays or mixing: named as unknown, not summed as 0
             "unbounded": sum(1 for e in events if not e["bounded"]),
             "strays": sum(e.get("strays", 0) for e in events if e["bounded"]),
+            "reached": sum(1 for e in events if e.get("via")),
+            "via_merges": len({e["via"] for e in events if e.get("via")}),
+            "octopus": git.get("octopus", 0),
             "unjoined": sum(1 for it in merged if not _joined(it["issue"], plans, rounds)),
             "shallow": git["shallow"], "why": git["why"]}
 
@@ -1125,6 +1128,9 @@ def _population_text(p: dict, label: str = "") -> str:
             f"{p['host_only']}; mixed ranges {p['mixed']}; merges without an issue {p['unclaimed']}; "
             f"merges with plans git could not read {p['plans_unread']}; ranges unknown {p['unbounded']}; "
             f"joined to no plan or REVIEW line {p['unjoined']}; commits outside a merge range {p['strays']}"
+            + (f"; events reached through a merge without marker {p['reached']} (merges {p['via_merges']})"
+               if p.get("reached") else "")
+            + (f"; octopus merges not walked {p['octopus']}" if p.get("octopus") else "")
             + ("; shallow clone — history before its boundary is missing, the first range unknown"
                if p["shallow"] else ""))
 
@@ -1793,8 +1799,26 @@ def _numstat(root: Path, a: str, b: str) -> list[tuple[int | None, str, str | No
     """(added plus deleted lines — None for a binary file —, path, the old path of a rename)
     per file of `git diff -M a b`; None when git fails."""
     out = _git_out(root, "diff", "--numstat", "-z", "-M", "--no-color", "--no-ext-diff", "--no-textconv", a, b)
-    if out is None:
-        return None
+    return None if out is None else _parse_numstat(out)
+
+
+def _range_numstat(root: Path, edge: str, nots: list[str]) -> list[tuple[int | None, str, str | None]] | None:
+    """The per-commit numstat of every non-merge commit `edge` reaches and none of `nots`
+    reaches, concatenated — a sum over the commits of a range, never a tree diff to a
+    predecessor: a diff across a merge of main would carry the lines of events reached
+    through it a second time (#360 M1). A file changed and changed back counts twice."""
+    out = _git_out(root, "log", "--numstat", "-z", "-M", "--no-merges", "--format=", "--no-color",
+                   "--no-ext-diff", "--no-textconv", edge, "--not", *nots, timeout=_HISTORY_TIMEOUT)
+    return None if out is None else _parse_numstat(out)
+
+
+def _range_commits(root: Path, edge: str, nots: list[str]) -> list[str] | None:
+    """`rev-list edge --not nots`: the commits of a range bounded by every earlier event."""
+    out = _git_out(root, "rev-list", edge, "--not", *nots, timeout=_HISTORY_TIMEOUT)
+    return None if out is None else out.split()
+
+
+def _parse_numstat(out: str) -> list[tuple[int | None, str, str | None]]:
     parts, i, got = out.split("\0"), 0, []
     while i < len(parts):
         entry = parts[i]
@@ -1834,9 +1858,18 @@ def _branch_plan_issues(root: Path, p1: str, p2: str, branch: str) -> set[int] |
     return set().union(*(_review.local_issue_numbers(plain) for _rel, plain, _added in own))
 
 
-def _event(root: Path, table: dict[str, dict], c: dict, prev: str | None, kind: str, m: re.Match) -> dict:
+def _reaches_root(table: dict[str, dict], commits: list[str]) -> bool:
+    """Does a range hold a root commit — no event below it, so no lower bound?"""
+    return any(s in table and not table[s]["parents"] for s in commits)
+
+
+def _event(root: Path, table: dict[str, dict], c: dict, earlier: list[str], kind: str, m: re.Match,
+           via: str | None = None) -> dict:
     """One merge event: its issues and where they came from, its range (bounded or not, mixed
-    or not), its start (earliest author time), its product and process lines and files."""
+    or not), its start (earliest author time), its product and process lines and files.
+    `earlier` are the events before it on the integration history, every path (#360 M1): a
+    range stops at all of them, so a train merge reached through a merge of main is never
+    counted again in the range or the strays of the event after it."""
     import check_review as _review  # noqa: PLC0415
     import tower  # noqa: PLC0415 — the one path classifier
     sha, message = c["sha"], c["message"]
@@ -1844,7 +1877,7 @@ def _event(root: Path, table: dict[str, dict], c: dict, prev: str | None, kind: 
           "branch": None, "plans": [], "issues": [], "claim": "none", "bounded": True, "mixed": False,
           "start": None, "product_lines": None, "process_lines": None, "binary": 0, "files": {},
           "process_files": [], "renames": [], "product_subjects": [], "strays": 0, "plans_unread": 0,
-          "stray_process_lines": 0, "stray_product_lines": 0}
+          "stray_process_lines": 0, "stray_product_lines": 0, "via": via}
     if kind == "train":
         p1, p2 = c["parents"]
         ev["branch"] = m.group("branch")
@@ -1852,7 +1885,9 @@ def _event(root: Path, table: dict[str, dict], c: dict, prev: str | None, kind: 
         # commits between the event before and merge^1 came onto the integration branch without
         # a marker: they are no part of this branch — counted apart, never in its lines or start
         # (a dry run on a consumer clone put 200 000 lines of unmarked history into one merge)
-        strays = _rev_list(root, f"{prev}..{p1}") if prev and prev != p1 else []
+        strays = _range_commits(root, p1, earlier) if earlier else []
+        if strays and _reaches_root(table, strays):
+            strays = []  # no event below: no lower bound, as before an event existed
         base = p1
         issues = _claims(message) | {int(n) for n in _TRAIN_REFS.findall(message)}
         claim = "message"
@@ -1871,8 +1906,10 @@ def _event(root: Path, table: dict[str, dict], c: dict, prev: str | None, kind: 
             issues |= _review.local_issue_numbers(_review._unfenced(text))
         # the first finish without an event before it has no lower bound: it would swallow
         # every commit since the root (the onboarding commit) — unknown, not estimated
-        own = _rev_list(root, f"{prev}..{sha}") if prev else None
-        strays, base = [], prev
+        own = _range_commits(root, sha, earlier) if earlier else None
+        if own and _reaches_root(table, own):
+            own = None  # no earlier event is an ancestor: unknown, as the first finish
+        strays, base = [], sha
     ev["issues"], ev["claim"] = sorted(issues), claim if issues else "none"
     if own is None or strays is None or base is None:
         ev["bounded"] = False
@@ -1881,7 +1918,7 @@ def _event(root: Path, table: dict[str, dict], c: dict, prev: str | None, kind: 
     if strays:
         # the stray commits' own lines: records committed straight onto the integration branch
         # are process load that no merge carries (a steward's journal, a review log)
-        stray_stat = _numstat(root, prev, p1)
+        stray_stat = _range_numstat(root, p1, earlier)
         ev["stray_process_lines"] = (None if stray_stat is None else
                                      sum(n or 0 for n, f, _o in stray_stat if tower.is_process_path(f)))
         ev["stray_product_lines"] = (None if stray_stat is None else
@@ -1897,7 +1934,9 @@ def _event(root: Path, table: dict[str, dict], c: dict, prev: str | None, kind: 
     if commits:
         ev["start"] = datetime.fromtimestamp(min(x["at"] for x in commits), tz=timezone.utc)
     ev["product_subjects"] = [(x["message"].splitlines() or [""])[0] for x in commits if product(x)]
-    stat = _numstat(root, base, sha)
+    # a train merge: the tree diff over its first parent is exactly the branch's change; a
+    # finish range has no such parent — its commits' own lines, summed (#360 M1)
+    stat = _numstat(root, base, sha) if kind == "train" else _range_numstat(root, sha, earlier)
     if stat is None:
         return ev  # git failed: lines unknown
     prod = proc = 0
@@ -1938,20 +1977,42 @@ def merge_events(root: Path, ref: str | None = None) -> dict:
         _EVENTS_READ[key] = failed
         return failed
     events: list[dict] = []
-    prev = None
-    for sha in reversed(chain.split()):
-        c = table.get(sha)
-        if c is None:
-            continue
-        subject = (c["message"].splitlines() or [""])[0]
-        train = _TRAIN_MERGE.match(subject) if len(c["parents"]) == 2 else None
-        finish = None if train else _FINISH_ARCHIVE.match(subject)
-        if train or finish:
-            events.append(_event(root, table, c, prev, "train" if train else "finish", train or finish))
-            prev = sha
+    earlier: list[str] = []
+    seen = set(chain.split())  # the first-parent chain itself is never walked twice
+    octopus: list[str] = []
+
+    def side(start: str) -> list[str]:
+        """The first-parent chain of a second side, newest first, up to history already read."""
+        got: list[str] = []
+        s: str | None = start
+        while s and s in table and s not in seen:
+            seen.add(s)
+            got.append(s)
+            s = (table[s]["parents"] or [None])[0]
+        return got
+
+    def walk(shas: list[str], via: str | None) -> None:
+        for sha in shas:  # oldest first
+            c = table.get(sha)
+            if c is None:
+                continue
+            subject = (c["message"].splitlines() or [""])[0]
+            train = _TRAIN_MERGE.match(subject) if len(c["parents"]) == 2 else None
+            finish = None if train else _FINISH_ARCHIVE.match(subject)
+            if not train and len(c["parents"]) == 2:
+                # a merge without a marker: its second side is integration history too when it
+                # carries events (main merged into a branch, main fast-forwarded onto it)
+                walk(list(reversed(side(c["parents"][1]))), via or sha)
+            elif len(c["parents"]) > 2:
+                octopus.append(sha)  # counted, not walked
+            if train or finish:
+                events.append(_event(root, table, c, list(earlier), "train" if train else "finish",
+                                     train or finish, via))
+                earlier.append(sha)
+    walk(list(reversed(chain.split())), None)
     # a shallow clone's boundary commit has no parents: what lies behind it is not here
     shallow = (_git_out(root, "rev-parse", "--is-shallow-repository") or "").strip() == "true"
-    got = {"ref": ref, "events": events, "shallow": shallow, "why": None}
+    got = {"ref": ref, "events": events, "shallow": shallow, "why": None, "octopus": len(octopus)}
     _EVENTS_READ[key] = got
     return got
 

@@ -2035,6 +2035,59 @@ def test_load_counts_the_lines_committed_outside_any_merge_range(render, tmp_pat
     assert "outside merge ranges" in _cli(out, "load", "--weeks", "60")
 
 
+def _merged_main_repo(render, tmp_path) -> Path:
+    """Kenni's shape (#360 M1): branch X forks after train merge 41; train merge 42 lands on
+    main; X merges main in (no marker) and main is fast-forwarded onto X; train merge 43
+    follows. Main's first-parent chain then runs through X, and 42 lies on the second side
+    of X's merge of main."""
+    out = _merges_repo(render, tmp_path)
+    _train_merge(out, "41-a", [("feat: a (#41)", {"src/a.py": _lines(4)}, _at(2))],
+                 "train: merge 41-a\n\nCloses #41", _at(2, 12))
+    _g(out, "checkout", "-q", "-b", "x-carrier", "main")
+    _put(out, "chore: carrier work", {"src/x.py": _lines(2)}, _at(3))
+    _g(out, "checkout", "-q", "main")
+    _train_merge(out, "42-b", [("feat: b (#42)", {"src/b.py": _lines(7)}, _at(3, 10))],
+                 "train: merge 42-b\n\nCloses #42", _at(3, 12))
+    _g(out, "checkout", "-q", "x-carrier")
+    _g(out, "merge", "-q", "--no-ff", "-m", "chore: integrate main into the carrier", "main", when=_at(4))
+    _g(out, "checkout", "-q", "main")
+    _g(out, "merge", "-q", "--ff-only", "x-carrier")
+    _train_merge(out, "43-c", [("feat: c (#43)", {"src/c.py": _lines(3)}, _at(5))],
+                 "train: merge 43-c\n\nCloses #43", _at(5, 12))
+    return out
+
+
+def test_merge_events_reach_train_merges_behind_a_merge_of_main_into_a_branch(render, tmp_path):
+    """#360 M1: downstream only 59 of 168 train merges lay on main's first-parent chain — two
+    merges of main into a branch, with main fast-forwarded onto it, hid the rest, and every
+    report counted a fraction of the work without saying so."""
+    out = _merged_main_repo(render, tmp_path)
+    m = _flow_module(out)
+    got = m.merge_events(out)
+    by = {i: e for e in got["events"] for i in e["issues"]}
+    assert set(by) == {41, 42, 43}, sorted(by)
+    assert by[42]["via"] and by[41]["via"] is None and by[43]["via"] is None
+    # 43's strays and lines hold nothing of 42 (no second count of the side event's commits)
+    assert by[43]["product_lines"] == 3 and by[43]["strays"] == 2  # the carrier commit and its merge of main
+    assert by[43]["stray_product_lines"] == 2, by[43]
+    assert [e["issues"] for e in got["events"]] == [[41], [42], [43]]  # topological, not by clock
+    text = _cli(out, "baseline")
+    assert "reached through a merge without marker 1" in text, text
+
+
+def test_a_merge_of_main_into_a_branch_that_was_never_fast_forwarded_changes_nothing(render, tmp_path):
+    out = _merges_repo(render, tmp_path)
+    _train_merge(out, "41-a", [("feat: a (#41)", {"src/a.py": _lines(4)}, _at(2))],
+                 "train: merge 41-a\n\nCloses #41", _at(2, 12))
+    _g(out, "checkout", "-q", "-b", "x-side", "main")
+    _g(out, "merge", "-q", "--no-ff", "-m", "chore: integrate main", "main", when=_at(3))
+    _g(out, "checkout", "-q", "main")
+    _train_merge(out, "43-c", [("feat: c (#43)", {"src/c.py": _lines(3)}, _at(5))],
+                 "train: merge 43-c\n\nCloses #43", _at(5, 12))
+    events = _flow_module(out).merge_events(out)["events"]
+    assert [e["issues"] for e in events] == [[41], [43]] and not any(e["via"] for e in events)
+
+
 def _size_repo(render, tmp_path) -> Path:
     """Four works, one per size step, with 1-4 review rounds; #31 spans two directories."""
     out = _merges_repo(render, tmp_path)
