@@ -378,3 +378,26 @@ Vorschlag: Der Leser gibt drei Zahlen aus — grammatische REPLAN-Zeilen, `unpar
 
 - (a) Soll Kenni überhaupt Nachfehler messen? Das verlangt `Regression-of:` als Pflicht im Fix-Commit; heute steht es 2 zu 316 `fix:`. Ohne den Trailer bleibt die Qualität nach dem Merge nur ein Proxy.
 - (b) Soll Kennis eigenes Worker-Tooling Phasenstarts im Format von `dispatch.py` schreiben? Sonst bleibt die Geschwindigkeit je Phase in Kenni unmessbar.
+
+## 10. Cockpit-Lauf in Kenni (2026-11-02)
+
+Kennis eigenes `process_kpis.py` (v2.80.0) auf einem Klon von Kenni `main` @ `6acc64314`. Das ist eine Cloud-Sitzung, nicht der Steward-Rechner, also ohne Host-Dateien.
+
+| Familie | Ausgabe (gekürzt) | Befund |
+|---|---|---|
+| `baseline --window 2026-10-10:2026-11-02` | 58 gemergte Arbeiten (63 Train-Merges), **2.345 Commits außerhalb jedes Merge-Bereichs**; Runden-Median 1, Lead 4,2 h, Tokens `—`, `escaped_works 1`, je Tier „0/0 closed“ | Population zu klein (siehe M1); Nachfehler-Fenster alle offen |
+| `load --weeks 6` / `share` | Wochen −1 und −2: **0 Merges**, laut `share` aber 1.044 bzw. 785 Commits und 72/33 gelandete Änderungen | M1 |
+| `losses` | 93 Issues, occupancy/delay/tokens je 0 mit Wert, 93 fehlend, dennoch **„confidence: high (direct, n=93)“** | D2 aus #356 live bestätigt |
+| `nodes`, `train-phases` | „no gate run / no train run recorded yet“ | erwartbar auf einem Klon; die Steward-Host-Daten sind von hier nicht prüfbar |
+| `size` | > 1.500 Zeilen: 33 % mit ≥ 3 Runden; mehrere Stacks: 45 %, ein Stack: 0 % | bestätigt die Mix-Variablen der Gegenseite, aber über nur 58 Arbeiten |
+| `findings` | 2.412 von 2.957 Befunden ohne `class=`; `testable:implementation` wiederholt sich in 14 Arbeiten, `testable:test-gap` in 13 | stärkster Hinweis auf fehlende Klassentests |
+| `rounds` | 79 Blocker gelesen (draft 40, fix 14, late 8, ohne 17); Old-Code-Messung: 0 gemessen, 40 `no-at` | im Repo stehen 139 `sev=blocker`-Zeilen in 92 Berichten, 28 dieser Berichte ohne `work:`-Kopf; Rest der Differenz `[assumption]` |
+
+**M1 — neuer Messfehler im Template (Population über die First-Parent-Kette).** In Kenni wurde `main` in Feature-Branches gemergt und `main` anschließend auf diese Branches vorgespult (z. B. `0ffca6aab chore(ios): integrate main into the completion carrier`, `b4dbb12a7 chore: integrate main for joint Apple release`). Seitdem führt die First-Parent-Kette von `main` durch die Branch-Historie. Die Train-Merges von `main` liegen auf der *zweiten* Seite dieser Merges. Allein `0ffca6aab` verdeckt 1.430 Commits und 87 Train-Merges, `b4dbb12a7` weitere 252 und 10. `merge_events` (`PK:1914`) setzt voraus, dass die First-Parent-Kette die Historie des Integrationsbranches ist; das ist hier falsch. Folge: `baseline`, `works`, `size`, `load` und `flow` sehen nur einen Bruchteil der Arbeiten, ohne Warnung (die `population`-Zeile meldet nur „commits outside a merge range“).
+
+Vorschlag:
+
+- **Cockpit:** Merges ohne Marker, deren zweite Seite Train- oder `finish`-Ereignisse enthält, durchwandern und die Ereignisse dort einsammeln. Die `population`-Zeile nennt solche „Fuchs-Merges“ mit ihrer Zahl. Aufwand S–M, nur Leser.
+- **Prozess:** Das Vorspulen von `main` auf einen Branch, der `main` hineingemergt hat, gehört im Pre-Push-Merge-Guard abgelehnt. Das ist Gate-Code, also Tier 3. Ob es dort schon eine Prüfung gibt, die Kenni umgangen hat, ist offen `[assumption]`.
+
+**Konsequenz für die Reihenfolge:** M1 und D2 gehören vor alles andere. Solange die Population falsch ist, sind alle Arbeits-KPIs aus Git (Abschnitt 2.2, 2.4, 2.6, 2.8, 2.11) für Kenni nicht belastbar.
