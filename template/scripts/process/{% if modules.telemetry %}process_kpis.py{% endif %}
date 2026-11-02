@@ -710,6 +710,13 @@ def _blockers_by_work(root: Path, key: str = "origin",
 
 
 # --- baseline: the numbers a verification change must move (#277) --------------
+def _release(text: str) -> str:
+    """`vX.Y.Z`: a release tag the version split can compare against."""
+    if not re.fullmatch(r"v?\d+\.\d+\.\d+", text):
+        raise argparse.ArgumentTypeError(f"{text!r} is no release tag vX.Y.Z")
+    return text if text.startswith("v") else f"v{text}"
+
+
 def _window(text: str) -> tuple[datetime, datetime]:
     """`SINCE:UNTIL` (dates, UNTIL exclusive; either side may be empty)."""
     since, sep, until = text.partition(":")
@@ -1262,8 +1269,42 @@ def why_missing(root: Path, lo: datetime, hi: datetime, ref: str | None) -> dict
     return reasons
 
 
+def split_by_version(root: Path, items: list[dict], at: tuple[int, int, int]) -> dict[str, list[dict]]:
+    """#360 B4: the works of `items` by the template version at the head of their first code
+    review — the rule the work ran under, never its merge date. A work without such a head
+    or with a version that is no release tag is `unknown`."""
+    rounds = _review_rounds(root)
+    plans = _plans(root)
+    first: dict[int, str | None] = {}
+    for it in items:
+        heads = [(rnd, h) for w in _issue_ids(it["issue"], plans) if w in rounds
+                 for rnd, hs in rounds[w]["heads"].items() for h in sorted(hs)]
+        first[it["issue"]] = min(heads)[1] if heads else None
+    ver = _versions_at(root, {h for h in first.values() if h})
+    groups: dict[str, list[dict]] = {"before": [], "from": [], "unknown": []}
+    for it in items:
+        v = ver.get(first[it["issue"]]) if first[it["issue"]] else None
+        groups["unknown" if v is None else "before" if v < at else "from"].append(it)
+    return groups
+
+
+def _mix(root: Path, items: list[dict]) -> str:
+    """The mix a before/after comparison must name: size steps and tier of the works."""
+    plans, rounds = _plans(root), _review_rounds(root)
+    sizes: dict[str, int] = {}
+    tiers: dict[str, int] = {}
+    for it in items:
+        lines = (it.get("product_lines") or {}).get("value")
+        step = "unknown size" if lines is None else _size_step(lines)
+        sizes[step] = sizes.get(step, 0) + 1
+        tier = f"tier {_work_tier(it['issue'], plans, rounds) or 'unknown'}"
+        tiers[tier] = tiers.get(tier, 0) + 1
+    return ", ".join(f"{k} {v}" for k, v in sorted(sizes.items())) + "; " + \
+        ", ".join(f"{k} {v}" for k, v in sorted(tiers.items()))
+
+
 def baseline(root: Path | None = None, windows: list[tuple[datetime, datetime]] | None = None,
-             *, as_json: bool = False) -> int:
+             *, as_json: bool = False, split_version: str | None = None) -> int:
     """One or two windows side by side, so a change's effect is the difference of
     two runs (#277). The numbers a deterministic check should move: fewer fix rounds
     and tokens per work, with escaped defects as the guard that nothing slipped."""
@@ -1277,12 +1318,29 @@ def baseline(root: Path | None = None, windows: list[tuple[datetime, datetime]] 
         commits = _git_commits(ref, root=root) if ref else None
     except (subprocess.CalledProcessError, OSError):
         commits = None
-    got = [baseline_numbers(root, lo, hi, items=items, commits=commits) for lo, hi in windows]
+    if split_version:
+        at = tuple(int(x) for x in split_version.lstrip("v").split("."))
+        lo, hi = windows[0]
+        inside = [it for it in items if (m := _when(it["merged"]["value"])) and lo <= m < hi]
+        groups = split_by_version(root, inside, at)  # type: ignore[arg-type]
+        names = {"before": f"before {split_version}", "from": f"from {split_version}", "unknown": "unknown version"}
+        got = [baseline_numbers(root, lo, hi, items=g, commits=commits) for g in groups.values()]
+        label = [names[k] for k in groups]
+        windows = [(lo, hi)] * len(got)
+        mixes = [(x, len(g), _mix(root, g) if g else "—") for g, x in zip(groups.values(), label)]
+    else:
+        got = [baseline_numbers(root, lo, hi, items=items, commits=commits) for lo, hi in windows]
+        label = [f"{lo.date() if lo.year > 1 else '…'}–{hi.date() if hi.year < 9999 else '…'}"
+                 for lo, hi in windows]
     if as_json:
         print(json.dumps(got, default=str, sort_keys=True))
         return 0
-    label = [f"{lo.date() if lo.year > 1 else '…'}–{hi.date() if hi.year < 9999 else '…'}" for lo, hi in windows]
-    print("[baseline] ~proxy — per merged work, medians; compare two windows (#277)")
+    if not split_version:
+        print("[baseline] ~proxy — per merged work, medians; compare two windows (#277)")
+    else:
+        print("[baseline] ~proxy — split by the template version at each work's first code review (#360)")
+        for x, n, mix in mixes:
+            print(f"  {x}: {n} works — mix: {mix}" + (" · thin" if n < _N_THRESHOLD else ""))
     for g, x in zip(got, label):
         print(_population_text(g["population"], f" {x}" if len(got) > 1 else ""))
     print(f"  {'':<28}" + "".join(f"{x:>24}" for x in label))
@@ -1507,6 +1565,136 @@ def _cost_text(c: dict) -> str:
     return f"{c['median']:,.0f} tokens ({c['known']})" + (f", unknown {c['unknown']}" if c["unknown"] else "")
 
 
+_RELEASE_TAG = re.compile(r"^_commit:[ \t]*['\"]?v?(\d+)\.(\d+)\.(\d+)['\"]?[ \t]*$", re.MULTILINE)
+_DUTY_FROM = {"root-cause": (2, 77, 0), "replan": (2, 77, 0), "kind": (2, 70, 0)}  # CHANGELOG
+
+
+def _versions_at(root: Path, shas: set[str]) -> dict[str, tuple[int, int, int] | None]:
+    """sha → the template version `.copier-answers.yml` names at that commit, read in one
+    `git cat-file --batch`. None — unknown, never "old" — when the file is missing or its
+    `_commit` is no release tag (a SHA, `vX.Y.Z.postN…`, `vX.Y.Z-N-g<sha>`)."""
+    import os  # noqa: PLC0415
+    got: dict[str, tuple[int, int, int] | None] = dict.fromkeys(shas)
+    if not shas:
+        return got
+    order = sorted(shas)
+    try:
+        r = subprocess.run(["git", "-C", str(root), "cat-file", "--batch"], capture_output=True,
+                           input="".join(f"{s}:.copier-answers.yml\n" for s in order).encode(),
+                           timeout=_HISTORY_TIMEOUT, env={**os.environ, "LC_ALL": "C"})
+    except (OSError, subprocess.SubprocessError):
+        return got
+    data, pos = r.stdout, 0
+    for sha in order:
+        nl = data.find(b"\n", pos)
+        if nl < 0:
+            break
+        head = data[pos:nl].split()
+        pos = nl + 1
+        if len(head) == 3 and head[1] == b"blob":
+            size = int(head[2])
+            body = data[pos:pos + size].decode("utf-8", "replace")
+            pos += size + 1
+            m = _RELEASE_TAG.search(body)
+            got[sha] = tuple(int(x) for x in m.groups()) if m else None
+    return got
+
+
+def compliance_table(root: Path) -> dict:
+    """#360 B1: the mandatory record lines against where they were owed — ROOT-CAUSE for
+    every blocked code round, REPLAN for every blocked round after a work's first, each from
+    v2.77 at the head the review saw; `kind=` on blockers from v2.70 (a duty of the doc no
+    gate checks). A version that cannot be read is `unknown`, never old. `sites: none` and a
+    reasoned skip fulfil a duty; a line that starts like a record but does not parse is
+    `unparsed`. Coverage of optional or gate-enforced fields is apart: never a duty here."""
+    import check_review as _review  # noqa: PLC0415 — the one owner of the record grammar
+    rounds = {w: r for w, r in _review_rounds(root).items() if not w.endswith("-plan")}
+    texts = [text for _rel, text in _plans(root)]
+    jdir = root / _review.JOURNAL_DIR
+    if jdir.is_dir():
+        texts += [_review._unfenced(f.read_text(encoding="utf-8", errors="replace")) for f in jdir.glob("**/*.md")]
+    rc = {(m.group("work"), int(m.group("round"))) for t_ in texts for m in _review.ROOT_CAUSE_LINE.finditer(t_)}
+    rp = {(m.group("work"), int(m.group("round"))): m.group("mode")
+          for t_ in texts for m in _review.REPLAN_LINE.finditer(t_)}
+    skips = {(m.group("kind"), m.group("work")) for t_ in texts for m in _review.SKIP_LINE.finditer(t_)}
+    unparsed = sum(1 for t_ in texts for line in t_.splitlines()
+                   if re.match(r"[ \t]{0,3}[*_]*REPLAN\b", line) and not _review.REPLAN_LINE.match(line))
+    heads = {h for r in rounds.values() for hs in r["heads"].values() for h in hs}
+    ver = _versions_at(root, heads)
+
+    def version(work: str, rnd: int) -> tuple[int, int, int] | None:
+        vs = [ver.get(h) for h in rounds[work]["heads"].get(rnd, set())]
+        return vs[0] if vs and None not in vs else None
+
+    def bucket() -> dict:
+        return {"written": 0, "owed": 0, "not_owed": 0, "unknown": 0}
+    root_cause, replan = bucket(), bucket()
+    replan["unparsed"] = unparsed
+    after_rebuild = {"works": 0, "rounds": 0}
+    for work, r in rounds.items():
+        for i, rnd in enumerate(sorted(r["blocked"])):
+            v = version(work, rnd)
+            duties = [("root-cause", root_cause, (work, rnd) in rc or ("root-cause", work) in skips
+                       or ("class-test", work) in skips)]
+            if i:
+                duties.append(("replan", replan, (work, rnd) in rp or ("replan", work) in skips))
+            for name, cell, written in duties:
+                if v is None:
+                    cell["unknown"] += 1
+                elif v < _DUTY_FROM[name]:
+                    cell["not_owed"] += 1
+                else:
+                    cell["owed"] += 1
+                    cell["written"] += written
+        rebuilt = [rnd for (w, rnd), mode in rp.items() if w == work and mode == "rebuild"]
+        if rebuilt:
+            after_rebuild["works"] += 1
+            after_rebuild["rounds"] += max(0, r["max_round"] - min(rebuilt))
+    kind = bucket()
+    coverage: dict[str, dict[str, list[int]]] = {}
+    found = _report_findings(root)
+    if not isinstance(found, str):
+        for work, f, rnd in found:
+            w = work.lstrip("#")
+            if f["sev"] == "blocker":
+                v = version(w, rnd) if w in rounds and rnd is not None else None
+                if v is None:
+                    kind["unknown"] += 1
+                elif v < _DUTY_FROM["kind"]:
+                    kind["not_owed"] += 1
+                else:
+                    kind["owed"] += 1
+                    kind["written"] += bool(f.get("kind"))
+            if f["sev"] in ("blocker", "major"):
+                who = "codex" if f.get("by") == "codex" else "others"
+                for field in ("origin", "at", "class") + (("kind",) if f["sev"] == "major" else ()):
+                    cell = coverage.setdefault(field, {}).setdefault(who, [0, 0])
+                    cell[0] += bool(f.get(field))
+                    cell[1] += 1
+    return {"root_cause": root_cause, "replan": replan, "rounds_after_rebuild": after_rebuild,
+            "kind_on_blockers": kind, "coverage": coverage if not isinstance(found, str) else found}
+
+
+def _compliance_text(c: dict) -> list[str]:
+    def cell(name: str, x: dict) -> str:
+        return (f"{name} {x['written']}/{x['owed']} (not owed {x['not_owed']}, version unknown {x['unknown']}"
+                + (f", unparsed {x['unparsed']}" if "unparsed" in x else "") + ")")
+    a = c["rounds_after_rebuild"]
+    lines = ["  compliance (written/owed, from the version that introduced the duty, at the reviewed head): "
+             + " · ".join([cell("ROOT-CAUSE", c["root_cause"]), cell("REPLAN", c["replan"]),
+                           cell("kind= on blockers [not gated]", c["kind_on_blockers"])])
+             + f" · rounds after a rebuild {a['rounds']} over {a['works']} work(s)"]
+    cov = c["coverage"]
+    if isinstance(cov, str):
+        lines.append(f"  coverage: not read ({cov})")
+    else:
+        lines.append("  coverage (share of blocker/major findings carrying the field — optional or gate-enforced, "
+                     "never a duty here): " + " · ".join(
+                         f"{field}= " + ", ".join(f"{who} {n}/{of}" for who, (n, of) in sorted(cells.items()))
+                         for field, cells in sorted(cov.items())))
+    return lines
+
+
 def rounds(root: Path | None = None) -> int:
     """Per work item: tier, rounds to the first pass, blocked rounds (journal
     REVIEW lines) and blockers per FINDING, by `origin=` where the reports
@@ -1577,6 +1765,8 @@ def rounds(root: Path | None = None) -> int:
             print(f"    {step:<6} {blockers:>8} {blocked:>16} {c['unchanged']:>20}  {_cost_text(c['cost'])}")
     n = len(rnds)
     lvl = _level(n, True, False, _N_THRESHOLD)
+    for line in _compliance_text(compliance_table(root)):
+        print(line)
     print(f"  {confidence(n, proxy=True)} · {action(lvl, 'compare rounds to pass within one tier over time; where fix-origin blockers dominate, re-check the fixed class (verification-independence.md, What each round judges)', thin='record origin= on blocker findings; judge after ~20 work items')}")
     return 0
 
@@ -3304,6 +3494,8 @@ def main() -> int:
     bl.add_argument("--window", type=_window, action="append", metavar="SINCE:UNTIL",
                     help="a date window (UNTIL exclusive; repeat once to compare)")
     bl.add_argument("--json", action="store_true")
+    bl.add_argument("--split-version", metavar="vX.Y.Z", type=_release,
+                    help="split the window's works by the template version at their first code review")
     wk = sub.add_parser("works")
     wk.add_argument("--window", type=_window, metavar="SINCE:UNTIL", help="a date window (UNTIL exclusive)")
     wk.add_argument("--json", action="store_true")
@@ -3344,7 +3536,9 @@ def main() -> int:
     if args.cmd == "baseline":
         if args.window and len(args.window) > 2:
             p.error("baseline compares at most two windows")
-        return baseline(windows=args.window, as_json=args.json)
+        if args.split_version and args.window and len(args.window) > 1:
+            p.error("--split-version takes one window")
+        return baseline(windows=args.window, as_json=args.json, split_version=args.split_version)
     if args.cmd == "works":
         return works(window=args.window, as_json=args.json)
     if args.cmd == "load":
