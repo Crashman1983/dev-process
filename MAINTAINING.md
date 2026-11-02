@@ -107,7 +107,9 @@ Der bestehende Weg, unverändert:
    geprüft wie Code (v2.80.1 ging mit einem Absatz Regeltext ohne Plan-Review
    und Review hinaus). Ein Refute braucht nicht nur Gate-Code, sondern auch
    reiner Regeltext, der eine Prüfung, eine Blockregel oder eine Pflicht
-   abschwächt, verengt oder entfernt.
+   abschwächt, verengt oder entfernt — diese Regel gilt für den Regeltext
+   dieses Templates, zusätzlich zu `template/docs/process/refute.md`, das die
+   Arbeit in Projekten regelt.
    **Regressions-Linse.** Jedes Review einer Template-Änderung fragt, welche
    frühere Lücke sie wieder öffnet. Der Reviewer liest dafür die Geschichte
    jedes berührten Abschnitts (`git log -L` auf den Abschnitt, die
