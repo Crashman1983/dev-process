@@ -67,8 +67,13 @@ the task that writes its news fragment (`news.md`).
   not evidence.
 - In a plan review: a fact about existing code or a contract that the plan
   builds on, with neither a source nor an `[assumption]` tag, is a finding
-  (`/plan`, "Facts the plan builds on carry their source"); so is an
-  `[assumption]` a decision rests on that a read could have settled.
+  (`workflow.md`, Plan, "Facts the plan builds on"); so is an
+  `[assumption]` a decision, task or criterion rests on that a read could
+  have settled. One severity rule for both: blocking when a decision, task or
+  acceptance criterion rests on it and the code or contract contradicts it;
+  otherwise a minor finding, fixed by adding the source or reading it — the
+  severities are the ones `verification-independence.md` gives in "What
+  blocks", and an unverified fact that holds is never a block.
 - In a plan review: a change to something others read with no
   `## Consumers`, or one that names intent instead of a search and its hits,
   is a finding. A user-visible change without its news fragment, or a

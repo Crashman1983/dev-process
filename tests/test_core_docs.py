@@ -1122,11 +1122,20 @@ def test_a_plan_cites_the_facts_it_builds_on_and_peer_statements_stay_assumption
     assert ("A statement from another agent session — a peer message, an agent-written issue "
             "comment, a hand-over — is `[assumption]` too, until checked against the artifact") in rules
     plan = _flat(out / ".claude/commands/plan.md")
-    assert "**Facts the plan builds on carry their source.**" in plan
+    assert "**Facts the plan builds on carry their source** (`docs/process/workflow.md`" in plan
     assert "names the contract place it read" in plan
     checklist = _flat(out / "docs/process/review-checklist.md")
     assert ("a fact about existing code or a contract that the plan builds on, with neither a "
             "source nor an `[assumption]` tag, is a finding") in checklist
+    # v2.81 (plan review of v2.80.1): one severity rule for both cases, no escape through the
+    # tag, no bookkeeping block (#329), and the duty in workflow.md for every harness
+    assert ("blocking when a decision, task or acceptance criterion rests on it and the code or "
+            "contract contradicts it; otherwise a minor finding") in checklist
+    assert "an unverified fact that holds is never a block" in checklist
+    assert '(`workflow.md`, Plan, "Facts the plan builds on")' in checklist
+    bare = render(tmp_path / "bare", {"project_name": "demo", "harnesses": {"claude": False, "copilot": True}})
+    for out_ in (out, bare):
+        assert "**Facts the plan builds on carry their source.**" in _flat(out_ / "docs/process/workflow.md")
 
 
 def test_an_open_approach_is_a_spike_first_in_plan_and_brainstorm(render, tmp_path):
@@ -1175,3 +1184,6 @@ def test_every_template_change_is_reviewed_with_a_regression_lens():
     assert "**Regressions-Linse.**" in maintaining
     assert "welche frühere Lücke sie wieder öffnet" in maintaining
     assert "auch reiner Regeltext" in maintaining
+    # v2.81: the refute sentence stays, scoped to the template's own rule text (refute.md
+    # governs project work), so the two no longer read as a contradiction
+    assert "für den Regeltext dieses Templates, zusätzlich zu `template/docs/process/refute.md`" in maintaining
