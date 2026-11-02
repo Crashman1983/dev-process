@@ -104,7 +104,7 @@ Der bestehende Weg, unverändert:
    die gegen die Vorfassung fallen, danach Review in frischer Sitzung. Die
    Größe einer Änderung ist keine Ausnahme: ein Satz in einer Regel, einer
    Checkliste oder einem Befehl ändert, wie jedes Projekt arbeitet, und wird
-   geprüft wie Code (v2.80.1 ging mit einem Absatz Regeltext ohne Plan-Review
+   geprüft wie Code (am 2026-10-30 ging ein Absatz Regeltext ohne Plan-Review
    und Review hinaus). Ein Refute braucht nicht nur Gate-Code, sondern auch
    reiner Regeltext, der eine Prüfung, eine Blockregel oder eine Pflicht
    abschwächt, verengt oder entfernt — diese Regel gilt für den Regeltext
