@@ -2103,6 +2103,30 @@ def test_an_empty_value_names_why_it_is_empty(render, tmp_path):
     assert "transcripts not configured" in losses or "no dispatched issue" in losses, losses
 
 
+def test_baseline_names_the_outliers_share_and_the_revert_rate(render, tmp_path):
+    """#360 B2/B3: medians hid that 7 % of the works carried 28 % of the code-review rounds
+    downstream; and a revert is an escape no trailer has to name."""
+    from datetime import datetime, timezone
+    out = _merges_repo(render, tmp_path)
+    for n, day, rounds in ((50, 2, 1), (51, 3, 1), (52, 4, 4)):
+        _train_merge(out, f"{n}-w", [(f"feat: w{n} (#{n})", {f"src/w{n}.py": _lines(10 * (1 + n % 50))}, _at(day))],
+                     f"train: merge {n}-w\n\nCloses #{n}", _at(day, 12))
+    _journal(out, "".join(_review(n, r, "block") for n, last in ((52, 4),) for r in range(1, 4))
+             + "".join(_review(n, last, "pass") for n, last in ((50, 1), (51, 1), (52, 4))))
+    _put(out, 'Revert "feat: w51 (#51)"', {"src/w51.py": None}, _at(5))
+    m = _flow_module(out)
+    b = m.baseline_numbers(out, datetime(2026, 3, 1, tzinfo=timezone.utc), datetime(2026, 3, 9, tzinfo=timezone.utc),
+                           commits=m._git_commits("main", root=out))
+    o = b["outliers"]
+    assert (o["works"], o["of"]) == (1, 3)
+    assert o["share_rounds"] == round(4 / 6, 2), o  # 4 of the 1 + 1 + 4 rounds
+    assert o["share_lines"] == round(30 / 60, 2), o  # w52: 30 of 10 + 20 + 30 lines
+    assert b["reverts"] == {"commits": 1, "per_work": round(1 / 3, 2)}, b["reverts"]
+    text = _cli(out, "baseline")
+    assert "outliers (>= 4 code-review rounds)" in text and "reverts" in text and "proxy" in text
+    assert "1 of 3 works carry 67 % of the rounds" in _cli(out, "works")
+
+
 def _size_repo(render, tmp_path) -> Path:
     """Four works, one per size step, with 1-4 review rounds; #31 spans two directories."""
     out = _merges_repo(render, tmp_path)

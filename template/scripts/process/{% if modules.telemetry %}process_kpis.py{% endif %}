@@ -1135,6 +1135,9 @@ def _population_text(p: dict, label: str = "") -> str:
                if p["shallow"] else ""))
 
 
+_OUTLIER_ROUNDS = 4  # a work with this many code-review rounds or more is an outlier (#360 B2)
+
+
 def baseline_numbers(root: Path, lo: datetime, hi: datetime, *, items: list[dict] | None = None,
                      commits: list[dict] | None = None) -> dict:
     """The baseline of one window, over the works merged in it: medians per work of
@@ -1188,6 +1191,19 @@ def baseline_numbers(root: Path, lo: datetime, hi: datetime, *, items: list[dict
             c["escaped"] += esc["value"] > 0
         c["rounds"].append(r["max_round"] if r else None)
         c["tokens"].append(sum(it["tokens"]["value"].values()) if it["tokens"]["value"] else None)
+    # #360 B2: the share the outliers (>= 4 code-review rounds) carry — a median hides them
+    rounds_of = [(r["max_round"] if r else None) for r in rnd]
+    lines_of = [(it.get("product_lines") or {}).get("value") for it in merged]
+    tokens_of = [sum(it["tokens"]["value"].values()) if it["tokens"]["value"] else None for it in merged]
+    out_idx = [i for i, r in enumerate(rounds_of) if r is not None and r >= _OUTLIER_ROUNDS]
+
+    def share(values: list) -> float | None:
+        total = sum(v for v in values if v is not None)
+        return round(sum(values[i] for i in out_idx if values[i] is not None) / total, 2) if total else None
+    outliers = {"works": len(out_idx), "of": sum(1 for r in rounds_of if r is not None),
+                "share_rounds": share(rounds_of), "share_lines": share(lines_of), "share_tokens": share(tokens_of)}
+    # #360 B3: a revert is an escape no trailer has to name — a proxy beside `cfr`
+    reverts = sum(1 for c in in_window if c["subject"].startswith('Revert "'))
     by_tier = {t: {**{k: c[k] for k in ("works", "escaped", "closed", "open", "unknown")},
                    "rate": round(c["escaped"] / c["closed"], 2) if c["closed"] else None,
                    "rounds": med(c["rounds"]), "tokens": med(c["tokens"]), "thin": c["works"] < _N_THRESHOLD}
@@ -1214,6 +1230,9 @@ def baseline_numbers(root: Path, lo: datetime, hi: datetime, *, items: list[dict
         "stated_tokens_by_phase": phases,
         "escaped_works": len(escaped),
         "change_failure_proxy": change_failure_rate(in_window) if commits is not None else None,
+        "outliers": outliers,
+        "reverts": None if commits is None else {"commits": reverts,
+                                                 "per_work": round(reverts / len(merged), 2) if merged else None},
         "by_tier": by_tier,
         "population": _population(root, merged, lo, hi, plans, rounds),
     }
@@ -1282,6 +1301,17 @@ def baseline(root: Path | None = None, windows: list[tuple[datetime, datetime]] 
     cfr = ["—" if not g["change_failure_proxy"] else
            f"{g['change_failure_proxy']['failed']}/{g['change_failure_proxy']['feats']} feat" for g in got]
     print(f"  {'change_failure_proxy':<28}" + "".join(f"{x:>24}" for x in cfr))
+    for g, x in zip(got, label):
+        o, rv = g["outliers"], g["reverts"]
+
+        def pct(v: float | None) -> str:
+            return "—" if v is None else f"{round(100 * v)} %"
+        print(f"  outliers (>= {_OUTLIER_ROUNDS} code-review rounds){' ' + x if len(got) > 1 else ''}: "
+              f"{o['works']} of {o['of']} works carry {pct(o['share_rounds'])} of the rounds, "
+              f"{pct(o['share_lines'])} of the product lines, {pct(o['share_tokens'])} of the tokens")
+        print(f"  reverts{' ' + x if len(got) > 1 else ''}: "
+              + ("not read" if rv is None else f"{rv['commits']} (per merged work {_num(rv['per_work'])}) "
+                 "~proxy — an escape no trailer has to name"))
     for g, x in zip(got, label):
         if g["stated_tokens_by_phase"]:
             print(f"  stated tokens by phase {x}: "
@@ -2584,6 +2614,15 @@ def works(root: Path | None = None, window: tuple[datetime, datetime] | None = N
                                       ("code_rounds", "code rounds"), ("product_lines", "product lines"))
                      if c[f]["n"]]
             print(f"    {name}: n={c['works']}" + (" · " + " · ".join(parts) if parts else ""))
+    # #360 B2: the same share `baseline` names, over this report's rows
+    rounds = [r["code_rounds"] for r in t["rows"] if r["code_rounds"] is not None]
+    heavy = [r for r in t["rows"] if (r["code_rounds"] or 0) >= _OUTLIER_ROUNDS]
+    if rounds:
+        lines = sum(r["product_lines"] or 0 for r in t["rows"])
+        print(f"  outliers (>= {_OUTLIER_ROUNDS} code-review rounds): {len(heavy)} of {len(rounds)} works carry "
+              f"{round(100 * sum(r['code_rounds'] for r in heavy) / sum(rounds))} % of the rounds"
+              + (f", {round(100 * sum(r['product_lines'] or 0 for r in heavy) / lines)} % of the product lines"
+                 if lines else ""))
     n = len(t["rows"])
     lvl = _level(n, True, False, _N_THRESHOLD)
     print(f"  {confidence(n, proxy=True)} · {action(lvl, 'compare a tier or kind with its own past: a tier whose rounds and lead keep rising is where the flow costs more than it buys', thin='keep merging through the train or finish; judge after ~20 works per tier')}")
