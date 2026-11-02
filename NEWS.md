@@ -7,6 +7,10 @@ details are in the [CHANGELOG](CHANGELOG.md).
 
 Deutsche Fassung: [NEWS-DE.md](NEWS-DE.md).
 
+## v2.81.0 — Measure correctly first
+
+The process cockpit counted wrongly in a real project: after main had been merged into a branch and fast-forwarded onto it, most of three weeks' work was missing from its numbers, without a warning. It now follows that history, never counts a change twice, and says why a column is empty instead of showing a dash. It also shows how often the required review records are actually written, which few works carry most review rounds, and how numbers compare before and after a process version. The plan rule from v2.80.1 now reaches every agent harness and blocks only when what a plan builds on is wrong. No new gates.
+
 ## v2.80.1 — A plan cites what it builds on
 
 A plan now names where each fact it relies on comes from — a file and line, the contract section, a command — or marks it as an assumption, and a plan that depends on an API names the part of the contract it read. A message from another agent session counts as an assumption until someone checks it against the code or contract. The plan review treats an unsourced fact as a finding. This follows a plan that planned three endpoints that already existed. No new gates.
