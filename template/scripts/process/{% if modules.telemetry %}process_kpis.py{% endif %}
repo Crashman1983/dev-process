@@ -1219,6 +1219,30 @@ def baseline_numbers(root: Path, lo: datetime, hi: datetime, *, items: list[dict
     }
 
 
+def why_missing(root: Path, lo: datetime, hi: datetime, ref: str | None) -> dict[str, str]:
+    """Why a token or escape column is empty (#360 K4): a project's missing configuration or
+    data must not read as the template's gap, and no escape without any trailer to count
+    one is unmeasured, not zero."""
+    import dispatch as _dispatch  # noqa: PLC0415 — the one reader of the policy's transcripts glob
+    reasons: dict[str, str] = {}
+    common = _common_dir(root)
+    logs = list((common / "process-dispatch").glob("*.log")) if common else []
+    if not _dispatch.transcripts_pattern(root):
+        reasons["tokens"] = "transcripts not configured (policy `transcripts`)"
+    elif not logs:
+        reasons["tokens"] = "no dispatch log on this checkout"
+    else:
+        reasons["tokens"] = "no transcript matched a dispatched session"
+    body = _git_out(root, "log", ref, f"--since={lo.isoformat()}" if lo.year > 1 else "--since=1970-01-02",
+                    f"--until={hi.isoformat()}" if hi.year < 9999 else "--until=2999-01-01",
+                    "--format=%B", timeout=_HISTORY_TIMEOUT) if ref else None
+    if body is None:
+        reasons["escapes"] = "git log not read"
+    elif not re.search(r"^Regression-of:", body, re.MULTILINE):
+        reasons["escapes"] = "no Regression-of trailer in the window — unmeasured, not zero"
+    return reasons
+
+
 def baseline(root: Path | None = None, windows: list[tuple[datetime, datetime]] | None = None,
              *, as_json: bool = False) -> int:
     """One or two windows side by side, so a change's effect is the difference of
@@ -1246,6 +1270,15 @@ def baseline(root: Path | None = None, windows: list[tuple[datetime, datetime]] 
     for key in ("works", "tokens_per_work", "rounds_per_work", "fix_rounds_per_work", "findings_per_work",
                 "rounds_with_plan_review", "rounds_without_plan_review", "lead_hours", "escaped_works"):
         print(f"  {key:<28}" + "".join(f"{'—' if g[key] is None else g[key]:>24}" for g in got))
+    for (lo, hi), g, x in zip(windows, got, label):
+        why = why_missing(root, lo, hi, ref)
+        parts = []
+        if g["tokens_per_work"] is None:
+            parts.append(f"tokens — {why['tokens']}")
+        if "escapes" in why:
+            parts.append(f"escapes — {why['escapes']}")
+        if parts:
+            print(f"  missing because{' ' + x if len(got) > 1 else ''}: " + "; ".join(parts))
     cfr = ["—" if not g["change_failure_proxy"] else
            f"{g['change_failure_proxy']['failed']}/{g['change_failure_proxy']['feats']} feat" for g in got]
     print(f"  {'change_failure_proxy':<28}" + "".join(f"{x:>24}" for x in cfr))
@@ -2424,7 +2457,10 @@ def losses(root: Path | None = None, *, days: int = _LOSS_DAYS, as_json: bool = 
     tok = t["tokens"]
     tok_text = ("not measured" if not tok["value"] else
                 " / ".join(f"{k} {v:,}" for k, v in sorted(tok["value"].items())))
-    print(f"  tokens      {tok_text} [{tok['quality']}; {tok['issues']} with a value, {tok['missing']} missing]")
+    everything = (datetime.min.replace(tzinfo=timezone.utc), datetime.max.replace(tzinfo=timezone.utc))
+    because = "" if tok["value"] else f" — {why_missing(root, *everything, None)['tokens']}"
+    print(f"  tokens      {tok_text} [{tok['quality']}; {tok['issues']} with a value, {tok['missing']} missing]"
+          f"{because}")
     p = t["proxies"]
     print(f"  proxy       regression fixes {p['regression_fixes'] if p['regression_fixes'] is not None else '—'} "
           f"over {p['regression_issues_observed']} merged issue(s) (diagnostic, not a loss in hours)")

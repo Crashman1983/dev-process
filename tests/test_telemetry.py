@@ -2088,6 +2088,21 @@ def test_a_merge_of_main_into_a_branch_that_was_never_fast_forwarded_changes_not
     assert [e["issues"] for e in events] == [[41], [43]] and not any(e["via"] for e in events)
 
 
+def test_an_empty_value_names_why_it_is_empty(render, tmp_path):
+    """#360 K4: empty token and escape columns gave no reason; an analysis read a project's
+    missing configuration (no `transcripts` glob, no `Regression-of:` trailers) as a gap in the
+    template. The reason now stands next to the dash, and a zero escape count without any
+    trailer is named unmeasured, not zero."""
+    out = _merges_repo(render, tmp_path)
+    _train_merge(out, "41-a", [("feat: a (#41)", {"src/a.py": _lines(4)}, _at(2))],
+                 "train: merge 41-a\n\nCloses #41", _at(2, 12))
+    text = _cli(out, "baseline")
+    assert "tokens — transcripts not configured" in text, text
+    assert "escapes — no Regression-of trailer in the window — unmeasured, not zero" in text, text
+    losses = _cli(out, "losses", "--days", "3650")
+    assert "transcripts not configured" in losses or "no dispatched issue" in losses, losses
+
+
 def _size_repo(render, tmp_path) -> Path:
     """Four works, one per size step, with 1-4 review rounds; #31 spans two directories."""
     out = _merges_repo(render, tmp_path)
