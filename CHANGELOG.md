@@ -18,7 +18,7 @@ A few plain sentences per release: [NEWS.md](NEWS.md). Deutsche Fassung:
 - The population follows the second side of a merge without a marker, and every range stops at all earlier events, so nothing is counted twice. A `finish` range sums its commits' lines. The header names the events reached that way.
 - `losses` takes its confidence from the issues with a value; `cost` counts a message once.
 - Codex findings carry `origin=` (`draft`, `fix`, `late`, or none when the reviewer cannot tell).
-- An empty token or escape value names its reason, for example "transcripts not configured" or "no Regression-of trailer in the window — unmeasured, not zero".
+- An empty token or escape value names its reason, for example "transcripts not configured" or "no Regression-of trailer since the window's start — unmeasured, not zero".
 - `rounds` shows compliance with the owed record lines (ROOT-CAUSE, REPLAN, `kind=` on blockers), from the version that introduced each duty at the head the review saw, and shows optional fields as coverage, apart. `baseline` and `works` show the outliers' share of rounds and lines, `baseline` the revert rate, and `baseline --split-version vX.Y.Z` compares works by the version their first review saw.
 - The plan rule from v2.80.1 now stands in `workflow.md` for every harness. An unsourced fact and an `[assumption]` get one severity: blocking only when what a decision rests on is contradicted by the code or contract, otherwise minor.
 

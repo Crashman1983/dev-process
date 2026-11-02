@@ -69,8 +69,8 @@ a lower bound — no strays or mixing counted for them), commits outside a merge
 range, works joined to no plan and no `REVIEW` line, events reached through a
 merge without marker, and a shallow clone (its boundary cuts the history). An
 empty token or escape value names its reason (`transcripts not configured`,
-`no dispatch log on this checkout`, `no Regression-of trailer in the window —
-unmeasured, not zero`): a project's missing configuration is not the
+`no dispatch log on this checkout`, `no Regression-of trailer since the window's
+start — unmeasured, not zero`): a project's missing configuration is not the
 template's gap.
 
 | family | measures | action (threshold → act) |

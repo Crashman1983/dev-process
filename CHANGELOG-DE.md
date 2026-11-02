@@ -17,7 +17,7 @@ English version: [CHANGELOG.md](CHANGELOG.md). Die Releases vor v2.28.2:
 - Die Population folgt der zweiten Seite eines Merges ohne Marker, und jeder Bereich endet an allen früheren Ereignissen, sodass nichts doppelt zählt. Ein `finish`-Bereich summiert die Zeilen seiner Commits. Die Kopfzeile nennt die so gefundenen Ereignisse.
 - `losses` nimmt die Konfidenz aus den Issues mit Wert; `cost` zählt eine Nachricht einmal.
 - Codex-Befunde tragen `origin=` (`draft`, `fix`, `late`, oder keines, wenn der Reviewer es nicht sagen kann).
-- Ein leerer Token- oder Nachfehlerwert nennt seinen Grund, zum Beispiel „transcripts not configured“ oder „no Regression-of trailer in the window — unmeasured, not zero“.
+- Ein leerer Token- oder Nachfehlerwert nennt seinen Grund, zum Beispiel „transcripts not configured“ oder „no Regression-of trailer since the window's start — unmeasured, not zero“.
 - `rounds` zeigt die Befolgung der geschuldeten Zeilen (ROOT-CAUSE, REPLAN, `kind=` bei Blockern), ab der Version, die die Pflicht eingeführt hat, am vom Review gesehenen Stand, und zeigt optionale Felder getrennt als Abdeckung. `baseline` und `works` zeigen den Anteil der Ausreißer an Runden und Zeilen, `baseline` die Revert-Quote, und `baseline --split-version vX.Y.Z` vergleicht Arbeiten nach der Version, die ihr erstes Review sah.
 - Die Plan-Regel aus v2.80.1 steht jetzt in `workflow.md` für jedes Harness. Ein Fakt ohne Quelle und ein `[assumption]` bekommen eine Schwere: blockierend nur, wenn Code oder Vertrag dem widersprechen, worauf eine Entscheidung ruht, sonst minor.
 
