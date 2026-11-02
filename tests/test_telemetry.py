@@ -2098,7 +2098,7 @@ def test_an_empty_value_names_why_it_is_empty(render, tmp_path):
                  "train: merge 41-a\n\nCloses #41", _at(2, 12))
     text = _cli(out, "baseline")
     assert "tokens — transcripts not configured" in text, text
-    assert "escapes — no Regression-of trailer in the window — unmeasured, not zero" in text, text
+    assert "escapes — no Regression-of trailer since the window's start — unmeasured, not zero" in text, text
     losses = _cli(out, "losses", "--days", "3650")
     assert "transcripts not configured" in losses or "no dispatched issue" in losses, losses
 
@@ -2297,6 +2297,80 @@ def test_an_escape_after_the_window_is_not_called_unmeasured(render, tmp_path):
     _put(out, "fix: a\n\nRegression-of: #41", {"src/a.py": _lines(4, "z")}, _at(6))
     text = _cli(out, "baseline", "--window", "2026-03-01:2026-03-05")
     assert "unmeasured, not zero" not in text, text
+
+
+def test_a_carrier_merging_main_counts_no_line_twice(render, tmp_path):
+    """v2.81 code review round 2: on a side line, a merge of main that brings no new event left
+    the net diff in place, and the next event took 42's lines a second time as strays."""
+    out = _merges_repo(render, tmp_path)
+    _g(out, "checkout", "-q", "-b", "x-carrier", "main")
+    _g(out, "checkout", "-q", "-b", "70-a", "x-carrier")
+    _put(out, "feat: a (#70)", {"src/a.py": _lines(2)}, _at(2))
+    _g(out, "checkout", "-q", "x-carrier")
+    _g(out, "merge", "-q", "--no-ff", "-m", "train: merge 70-a\n\nCloses #70", "70-a", when=_at(2, 12))
+    _g(out, "checkout", "-q", "main")
+    _train_merge(out, "42-b", [("feat: b (#42)", {"src/b.py": _lines(7)}, _at(3))],
+                 "train: merge 42-b\n\nCloses #42", _at(3, 12))
+    _g(out, "checkout", "-q", "x-carrier")
+    _g(out, "merge", "-q", "--no-ff", "-m", "chore: integrate main", "main", when=_at(4))
+    _g(out, "checkout", "-q", "-b", "71-c", "x-carrier")
+    _put(out, "feat: c (#71)", {"src/c.py": _lines(3)}, _at(5))
+    _g(out, "checkout", "-q", "x-carrier")
+    _g(out, "merge", "-q", "--no-ff", "-m", "train: merge 71-c\n\nCloses #71", "71-c", when=_at(5, 12))
+    _g(out, "checkout", "-q", "main")
+    _g(out, "merge", "-q", "--no-ff", "-m", "chore: take the carrier", "x-carrier", when=_at(6))
+    by = {i: e for e in _flow_module(out).merge_events(out)["events"] for i in e["issues"]}
+    assert set(by) == {42, 70, 71}
+    assert by[71]["stray_product_lines"] == 0, by[71]  # 42's 7 lines are 42's
+
+
+def test_split_json_keeps_window_wide_numbers_apart(render, tmp_path):
+    """v2.81 code review round 2: the JSON of a split still carried the window's reverts and
+    events under every half."""
+    import json
+    out = _versions_repo(render, tmp_path)
+    got = json.loads(_cli(out, "baseline", "--split-version", "v2.75.0", "--json"))
+    assert set(got) == {"window", "groups"} and set(got["groups"]) == {"before", "from", "unknown"}
+    for g in got["groups"].values():
+        assert "reverts" not in g and "change_failure_proxy" not in g and "stated_tokens_by_phase" not in g
+
+
+def test_reverts_are_read_over_the_whole_window(render, tmp_path):
+    """v2.81 code review round 2: reverts came from the last 300 commits `cfr` reads; an older
+    revert in the window was a measured 0."""
+    from datetime import datetime, timezone
+    out = _merges_repo(render, tmp_path)
+    _train_merge(out, "41-a", [("feat: a (#41)", {"src/a.py": _lines(4)}, _at(2))],
+                 "train: merge 41-a\n\nCloses #41", _at(2, 12))
+    _put(out, 'Revert "feat: a (#41)"', {"src/a.py": None}, _at(3))
+    m = _flow_module(out)
+    b = m.baseline_numbers(out, datetime(2026, 3, 1, tzinfo=timezone.utc),
+                           datetime(2026, 3, 9, tzinfo=timezone.utc), commits=[])  # past the cap
+    assert b["reverts"]["commits"] == 1, b["reverts"]
+
+
+def test_kind_compliance_reads_code_reviews_only(render, tmp_path):
+    """v2.81 code review round 2: plan-review blockers were judged against a code round's head."""
+    out = _versions_repo(render, tmp_path, github_issues=True)
+    m = _flow_module(out)
+    rep = out / ".process-work/reviews/61-plan.md"
+    rep.parent.mkdir(parents=True, exist_ok=True)
+    rep.write_text("review: plan\nwork: #61\nphase: plan\nround: 1\npublish-waived: test\n\n## Findings\n"
+                   "FINDING sev=blocker action=fix issue=- no kind here\n")
+    k = m.compliance_table(out)["kind_on_blockers"]
+    assert (k["owed"], k["written"]) == (0, 0), k
+
+
+def test_a_plain_work_keeps_its_last_event_as_the_end_under_clock_skew(render, tmp_path):
+    """v2.81 code review round 2: the end by time changed a plain history with a backdated
+    later merge; on one line the order stands, as in v2.80."""
+    out = _merges_repo(render, tmp_path)
+    _train_merge(out, "80-a", [("feat: a (#80)", {"src/a.py": _lines(2)}, _at(5))],
+                 "train: merge 80-a\n\nRefs #80", _at(5, 12))
+    _train_merge(out, "80-b", [("feat: b (#80)", {"src/b.py": _lines(2)}, _at(3))],
+                 "train: merge 80-b\n\nCloses #80", _at(3, 12))  # committed with an older clock
+    w = _flow_module(out).merged_works(out)["works"][80]
+    assert w["end"] == w["events"][-1]["when"], w
 
 
 def _size_repo(render, tmp_path) -> Path:
