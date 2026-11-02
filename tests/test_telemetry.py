@@ -2127,10 +2127,10 @@ def test_baseline_names_the_outliers_share_and_the_revert_rate(render, tmp_path)
     assert "1 of 3 works carry 67 % of the rounds" in _cli(out, "works")
 
 
-def _versions_repo(render, tmp_path):
+def _versions_repo(render, tmp_path, **mods):
     """Three template versions in the history — v2.70.0, v2.80.0 and a bare SHA (no release
     tag: unknown) — and a train merge reviewed at each: works 60, 61, 62."""
-    out = _merges_repo(render, tmp_path)
+    out = _merges_repo(render, tmp_path, **mods)
     heads = {}
     for n, day, ver in ((60, 2, "v2.70.0"), (61, 3, "v2.80.0"), (62, 4, "3f2a9c1")):
         _put(out, f"chore: template {ver}", {".copier-answers.yml": f"_commit: {ver}\n_src_path: x\n"}, _at(day, 8))
@@ -2173,6 +2173,130 @@ def test_baseline_splits_works_by_the_version_their_review_saw(render, tmp_path)
     text = _cli(out, "baseline", "--split-version", "v2.75.0")
     assert "before v2.75.0: 1 works" in text and "from v2.75.0: 1 works" in text, text
     assert "unknown version: 1 works" in text, text
+
+
+def test_a_plain_finish_range_keeps_its_net_lines(render, tmp_path):
+    """v2.81 code review: summing per commit changed a finish range's lines even without any
+    merge of main — a file written in one commit and rewritten in the next counted twice. A
+    range with no event reached through a marker-less merge keeps the net diff."""
+    out = _merges_repo(render, tmp_path)
+    _train_merge(out, "41-a", [("feat: a (#41)", {"src/a.py": _lines(4)}, _at(2))],
+                 "train: merge 41-a\n\nCloses #41", _at(2, 12))
+    plan = {".process-work/plans/2026-03-03-f.md": _plan_text(44)}
+    _finish_merge(out, "44-f", [("feat: f (#44)", {"src/f.py": _lines(5), **plan}, _at(3)),
+                                ("fix: f again (#44)", {"src/f.py": _lines(5, "y")}, _at(3, 10))],
+                  ["2026-03-03-f.md"], _at(3, 12))
+    ev = {i: e for e in _flow_module(out).merge_events(out)["events"] for i in e["issues"]}[44]
+    assert ev["product_lines"] == 5, ev  # the net change of src/f.py, not 5 + 10
+
+
+def test_an_unrelated_root_in_a_stray_range_keeps_the_strays(render, tmp_path):
+    """v2.81 code review: a subtree or vendor import brings a second root commit; treating any
+    root as "no lower bound" dropped the strays and reported a measured 0."""
+    out = _merges_repo(render, tmp_path)
+    _train_merge(out, "41-a", [("feat: a (#41)", {"src/a.py": _lines(4)}, _at(2))],
+                 "train: merge 41-a\n\nCloses #41", _at(2, 12))
+    _g(out, "checkout", "-q", "--orphan", "vendor")
+    _g(out, "rm", "-rfq", ".")
+    _put(out, "vendor: import", {"vendor/lib.py": _lines(6)}, _at(3))
+    _g(out, "checkout", "-q", "main")
+    _g(out, "merge", "-q", "--allow-unrelated-histories", "-m", "chore: vendor lib", "vendor", when=_at(3, 10))
+    _put(out, "chore: direct", {"src/d.py": _lines(2)}, _at(3, 11))
+    _train_merge(out, "43-c", [("feat: c (#43)", {"src/c.py": _lines(3)}, _at(5))],
+                 "train: merge 43-c\n\nCloses #43", _at(5, 12))
+    ev = {i: e for e in _flow_module(out).merge_events(out)["events"] for i in e["issues"]}[43]
+    assert ev["strays"] >= 2 and ev["stray_product_lines"] == 8, ev  # 6 vendored + 2 direct
+
+
+def test_a_work_ends_at_its_latest_event_across_two_lines(render, tmp_path):
+    """v2.81 code review: with phases on two integration lines (main and a carrier that later
+    absorbs main), the topological order put the later phase first — the work ended before it
+    started. The end is the latest event in time."""
+    from datetime import datetime, timezone
+    out = _merges_repo(render, tmp_path)
+    _g(out, "checkout", "-q", "-b", "x-carrier", "main")
+    _put(out, "chore: carrier", {"src/x.py": _lines(1)}, _at(2))
+    _g(out, "checkout", "-q", "main")
+    _train_merge(out, "70-a", [("feat: a (#70)", {"src/a.py": _lines(2)}, _at(3))],
+                 "train: merge 70-a\n\nRefs #70", _at(3, 12))
+    _g(out, "checkout", "-q", "x-carrier")
+    _g(out, "checkout", "-q", "-b", "70-b", "x-carrier")
+    _put(out, "feat: b (#70)", {"src/b.py": _lines(2)}, _at(6))
+    _g(out, "checkout", "-q", "x-carrier")
+    _g(out, "merge", "-q", "--no-ff", "-m", "train: merge 70-b\n\nCloses #70", "70-b", when=_at(6, 12))
+    _g(out, "merge", "-q", "--no-ff", "-m", "chore: integrate main", "main", when=_at(7))
+    _g(out, "checkout", "-q", "main")
+    _g(out, "merge", "-q", "--ff-only", "x-carrier")
+    w = _flow_module(out).merged_works(out)["works"][70]
+    assert w["end"] == datetime(2026, 3, 6, 12, tzinfo=timezone.utc) and w["first"] <= w["end"], w
+
+
+def test_a_version_split_prints_window_wide_numbers_once(render, tmp_path):
+    """v2.81 code review: reverts, the change-failure proxy and the population are measures of
+    the window, not of a group — printed under every half they read as each half's own."""
+    out = _versions_repo(render, tmp_path)
+    _put(out, 'Revert "feat: w61 (#61)"', {"src/w61.py": None}, _at(5))
+    text = _cli(out, "baseline", "--split-version", "v2.75.0")
+    assert text.count("reverts") == 1 and "window-wide, not split" in text, text
+    assert "stacks not read" in text or "several stacks" in text, text  # the mix names the stacks
+
+
+def test_a_version_split_reads_only_the_first_rounds_head(render, tmp_path):
+    """v2.81 code review: a first round without a full head took a later round's head — a
+    work that started before v2.78 was filed under a later version instead of unknown."""
+    out = _versions_repo(render, tmp_path)
+    m = _flow_module(out)
+    head61 = _g(out, "rev-parse", "HEAD~1")  # any full sha of the v2.80 era
+    _journal(out, "REVIEW work=63 tier=2 reviewer=r model=m independence=bundle,non-implementing "
+                  "verdict=block round=1\n"
+                  f"REVIEW work=63 tier=2 reviewer=r model=m independence=bundle,non-implementing "
+                  f"verdict=pass round=2 base={head61} head={head61}\n", name="2026-07-03.md")
+    groups = m.split_by_version(out, [{"issue": 63}], (2, 75, 0))
+    assert [it["issue"] for it in groups["unknown"]] == [63], groups
+
+
+def test_coverage_never_counts_a_dash_and_unread_reports_are_not_a_duty_count(render, tmp_path, monkeypatch):
+    """v2.81 code review: `at=-` (no place) counted as carrying `at=`; with the reports not
+    read, `kind=` on blockers read as a measured 0/0."""
+    out = _versions_repo(render, tmp_path, github_issues=True)  # the FINDING reader
+    m = _flow_module(out)
+    rep = out / ".process-work/reviews/60-r2.md"
+    rep.parent.mkdir(parents=True, exist_ok=True)
+    rep.write_text("review: x\nwork: #60\nround: 2\npublish-waived: test\n\n## Findings\n"
+                   "FINDING sev=major action=fix kind=implementation issue=- by=codex at=- no place\n")
+    cov = m.compliance_table(out)["coverage"]
+    assert cov["at"]["codex"] == [0, 1], cov
+    monkeypatch.setattr(m, "_report_findings", lambda root, phase=None: "reports not read")
+    c = m.compliance_table(out)
+    assert c["kind_on_blockers"] == "reports not read" and c["coverage"] == "reports not read"
+
+
+def test_losses_without_any_value_asks_to_measure(render, tmp_path, monkeypatch, capsys):
+    """v2.81 code review: "not measured" sat beside the ready action, because no value read
+    as an unknown count and the level came out medium."""
+    out = _flow_repo(render, tmp_path)
+    m = _flow_module(out)
+    empty = {"value": None, "issues": 0, "missing": 93, "quality": "missing"}
+    t = {"issues": 93, "days": 28, "occupancy": {**empty, "unit": "h"}, "delay": {**empty, "unit": "issue-h"},
+         "tokens": dict(empty), "owner_effort": {"decisions": 0, "minutes": None, "quality": "proxy"},
+         "proxies": {"regression_fixes": None, "regression_issues_observed": 0}}
+    monkeypatch.setattr(m, "losses_table", lambda root, days=28: t)
+    monkeypatch.setattr(m, "_reports_by_worker", lambda root: {})
+    m.losses(out)
+    printed = capsys.readouterr().out
+    assert "confidence: not measured" in printed and "let more issues run through dispatch" in printed, printed
+    assert "no worker reports (local or published)" in printed, printed  # #360 AC-5
+
+
+def test_an_escape_after_the_window_is_not_called_unmeasured(render, tmp_path):
+    """v2.81 code review: a `Regression-of:` fix after the window's end but inside the follow-up
+    horizon is a measured escape; the reason scanned only the window and called it unmeasured."""
+    out = _merges_repo(render, tmp_path)
+    _train_merge(out, "41-a", [("feat: a (#41)", {"src/a.py": _lines(4)}, _at(2))],
+                 "train: merge 41-a\n\nCloses #41", _at(2, 12))
+    _put(out, "fix: a\n\nRegression-of: #41", {"src/a.py": _lines(4, "z")}, _at(6))
+    text = _cli(out, "baseline", "--window", "2026-03-01:2026-03-05")
+    assert "unmeasured, not zero" not in text, text
 
 
 def _size_repo(render, tmp_path) -> Path:

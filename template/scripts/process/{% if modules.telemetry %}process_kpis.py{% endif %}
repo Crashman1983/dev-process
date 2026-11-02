@@ -1259,8 +1259,9 @@ def why_missing(root: Path, lo: datetime, hi: datetime, ref: str | None) -> dict
         reasons["tokens"] = "no dispatch log on this checkout"
     else:
         reasons["tokens"] = "no transcript matched a dispatched session"
+    # from the window's start with no end: a fix after the window, inside the follow-up
+    # horizon, is a measured escape of the window's works (v2.81 code review)
     body = _git_out(root, "log", ref, f"--since={lo.isoformat()}" if lo.year > 1 else "--since=1970-01-02",
-                    f"--until={hi.isoformat()}" if hi.year < 9999 else "--until=2999-01-01",
                     "--format=%B", timeout=_HISTORY_TIMEOUT) if ref else None
     if body is None:
         reasons["escapes"] = "git log not read"
@@ -1275,15 +1276,18 @@ def split_by_version(root: Path, items: list[dict], at: tuple[int, int, int]) ->
     or with a version that is no release tag is `unknown`."""
     rounds = _review_rounds(root)
     plans = _plans(root)
-    first: dict[int, str | None] = {}
+    # round 1's heads only: a round 1 without a full head is unknown, never a later round's
+    # version; a work of stacked phases takes the earliest version its phases started under
+    first: dict[int, list[str] | None] = {}
     for it in items:
-        heads = [(rnd, h) for w in _issue_ids(it["issue"], plans) if w in rounds
-                 for rnd, hs in rounds[w]["heads"].items() for h in sorted(hs)]
-        first[it["issue"]] = min(heads)[1] if heads else None
-    ver = _versions_at(root, {h for h in first.values() if h})
+        works = [w for w in _issue_ids(it["issue"], plans) if w in rounds and not w.endswith("-plan")]
+        heads = [sorted(rounds[w]["heads"].get(1, set())) for w in works]
+        first[it["issue"]] = [h for hs in heads for h in hs] if works and all(heads) else None
+    ver = _versions_at(root, {h for hs in first.values() if hs for h in hs})
     groups: dict[str, list[dict]] = {"before": [], "from": [], "unknown": []}
     for it in items:
-        v = ver.get(first[it["issue"]]) if first[it["issue"]] else None
+        vs = [ver.get(h) for h in first[it["issue"]] or []]
+        v = min(vs) if vs and None not in vs else None
         groups["unknown" if v is None else "before" if v < at else "from"].append(it)
     return groups
 
@@ -1299,8 +1303,16 @@ def _mix(root: Path, items: list[dict]) -> str:
         sizes[step] = sizes.get(step, 0) + 1
         tier = f"tier {_work_tier(it['issue'], plans, rounds) or 'unknown'}"
         tiers[tier] = tiers.get(tier, 0) + 1
-    return ", ".join(f"{k} {v}" for k, v in sorted(sizes.items())) + "; " + \
-        ", ".join(f"{k} {v}" for k, v in sorted(tiers.items()))
+    stacks = _stacks(root)
+    if isinstance(stacks, str):
+        spread = f"stacks {stacks}"
+    else:
+        import test_select  # noqa: PLC0415 — the one stack-of-a-path rule
+        several = sum(1 for it in items
+                      if len({s["name"] for f in it.get("files") or {} if (s := test_select._stack_of(stacks, f))}) > 1)
+        spread = f"several stacks {several} of {len(items)}"
+    return (", ".join(f"{k} {v}" for k, v in sorted(sizes.items())) + "; "
+            + ", ".join(f"{k} {v}" for k, v in sorted(tiers.items())) + "; " + spread)
 
 
 def baseline(root: Path | None = None, windows: list[tuple[datetime, datetime]] | None = None,
@@ -1325,10 +1337,15 @@ def baseline(root: Path | None = None, windows: list[tuple[datetime, datetime]] 
         groups = split_by_version(root, inside, at)  # type: ignore[arg-type]
         names = {"before": f"before {split_version}", "from": f"from {split_version}", "unknown": "unknown version"}
         got = [baseline_numbers(root, lo, hi, items=g, commits=commits) for g in groups.values()]
+        # window-wide measures — the population's events, reverts, the change-failure proxy and
+        # stated tokens come from the window's commits and reports, not from a group's works:
+        # printed once, never under every half (v2.81 code review)
+        whole = baseline_numbers(root, lo, hi, items=inside, commits=commits)
         label = [names[k] for k in groups]
         windows = [(lo, hi)] * len(got)
         mixes = [(x, len(g), _mix(root, g) if g else "—") for g, x in zip(groups.values(), label)]
     else:
+        whole = None
         got = [baseline_numbers(root, lo, hi, items=items, commits=commits) for lo, hi in windows]
         label = [f"{lo.date() if lo.year > 1 else '…'}–{hi.date() if hi.year < 9999 else '…'}"
                  for lo, hi in windows]
@@ -1341,13 +1358,15 @@ def baseline(root: Path | None = None, windows: list[tuple[datetime, datetime]] 
         print("[baseline] ~proxy — split by the template version at each work's first code review (#360)")
         for x, n, mix in mixes:
             print(f"  {x}: {n} works — mix: {mix}" + (" · thin" if n < _N_THRESHOLD else ""))
-    for g, x in zip(got, label):
+    if whole is not None:
+        print(_population_text(whole["population"], " (window-wide, not split)"))
+    for g, x in zip(got if whole is None else [], label):
         print(_population_text(g["population"], f" {x}" if len(got) > 1 else ""))
     print(f"  {'':<28}" + "".join(f"{x:>24}" for x in label))
     for key in ("works", "tokens_per_work", "rounds_per_work", "fix_rounds_per_work", "findings_per_work",
                 "rounds_with_plan_review", "rounds_without_plan_review", "lead_hours", "escaped_works"):
         print(f"  {key:<28}" + "".join(f"{'—' if g[key] is None else g[key]:>24}" for g in got))
-    for (lo, hi), g, x in zip(windows, got, label):
+    for (lo, hi), g, x in zip(windows if whole is None else windows[:1], got, label):
         why = why_missing(root, lo, hi, ref)
         parts = []
         if g["tokens_per_work"] is None:
@@ -1355,10 +1374,12 @@ def baseline(root: Path | None = None, windows: list[tuple[datetime, datetime]] 
         if "escapes" in why:
             parts.append(f"escapes — {why['escapes']}")
         if parts:
-            print(f"  missing because{' ' + x if len(got) > 1 else ''}: " + "; ".join(parts))
+            print(f"  missing because{' ' + x if whole is None and len(got) > 1 else ''}: " + "; ".join(parts))
     cfr = ["—" if not g["change_failure_proxy"] else
-           f"{g['change_failure_proxy']['failed']}/{g['change_failure_proxy']['feats']} feat" for g in got]
-    print(f"  {'change_failure_proxy':<28}" + "".join(f"{x:>24}" for x in cfr))
+           f"{g['change_failure_proxy']['failed']}/{g['change_failure_proxy']['feats']} feat"
+           for g in (got if whole is None else [whole])]
+    print(f"  {'change_failure_proxy':<28}" + "".join(f"{x:>24}" for x in cfr)
+          + ("  (window-wide, not split)" if whole is not None else ""))
     for g, x in zip(got, label):
         o, rv = g["outliers"], g["reverts"]
 
@@ -1367,11 +1388,20 @@ def baseline(root: Path | None = None, windows: list[tuple[datetime, datetime]] 
         print(f"  outliers (>= {_OUTLIER_ROUNDS} code-review rounds){' ' + x if len(got) > 1 else ''}: "
               f"{o['works']} of {o['of']} works carry {pct(o['share_rounds'])} of the rounds, "
               f"{pct(o['share_lines'])} of the product lines, {pct(o['share_tokens'])} of the tokens")
-        print(f"  reverts{' ' + x if len(got) > 1 else ''}: "
+        if whole is None:
+            print(f"  reverts{' ' + x if len(got) > 1 else ''}: "
+                  + ("not read" if rv is None else f"{rv['commits']} (per merged work {_num(rv['per_work'])}) "
+                     "~proxy — an escape no trailer has to name"))
+    if whole is not None:
+        rv = whole["reverts"]
+        print("  reverts (window-wide, not split): "
               + ("not read" if rv is None else f"{rv['commits']} (per merged work {_num(rv['per_work'])}) "
                  "~proxy — an escape no trailer has to name"))
+        if whole["stated_tokens_by_phase"]:
+            print("  stated tokens by phase (window-wide, not split): "
+                  + ", ".join(f"{p} {n:,}" for p, n in sorted(whole["stated_tokens_by_phase"].items())))
     for g, x in zip(got, label):
-        if g["stated_tokens_by_phase"]:
+        if g["stated_tokens_by_phase"] and whole is None:
             print(f"  stated tokens by phase {x}: "
                   + ", ".join(f"{p} {n:,}" for p, n in sorted(g["stated_tokens_by_phase"].items())))
         origins = g["blockers_by_origin"]
@@ -1669,14 +1699,18 @@ def compliance_table(root: Path) -> dict:
                 who = "codex" if f.get("by") == "codex" else "others"
                 for field in ("origin", "at", "class") + (("kind",) if f["sev"] == "major" else ()):
                     cell = coverage.setdefault(field, {}).setdefault(who, [0, 0])
-                    cell[0] += bool(f.get(field))
+                    cell[0] += f.get(field) not in (None, "", "-")  # `at=-` names no place
                     cell[1] += 1
     return {"root_cause": root_cause, "replan": replan, "rounds_after_rebuild": after_rebuild,
-            "kind_on_blockers": kind, "coverage": coverage if not isinstance(found, str) else found}
+            # reports not read: neither a measured 0/0 nor coverage, the reason instead
+            "kind_on_blockers": found if isinstance(found, str) else kind,
+            "coverage": found if isinstance(found, str) else coverage}
 
 
 def _compliance_text(c: dict) -> list[str]:
-    def cell(name: str, x: dict) -> str:
+    def cell(name: str, x: dict | str) -> str:
+        if isinstance(x, str):
+            return f"{name} not read ({x})"
         return (f"{name} {x['written']}/{x['owed']} (not owed {x['not_owed']}, version unknown {x['unknown']}"
                 + (f", unparsed {x['unparsed']}" if "unparsed" in x else "") + ")")
     a = c["rounds_after_rebuild"]
@@ -2111,18 +2145,22 @@ def _branch_plan_issues(root: Path, p1: str, p2: str, branch: str) -> set[int] |
     return set().union(*(_review.local_issue_numbers(plain) for _rel, plain, _added in own))
 
 
-def _reaches_root(table: dict[str, dict], commits: list[str]) -> bool:
-    """Does a range hold a root commit — no event below it, so no lower bound?"""
-    return any(s in table and not table[s]["parents"] for s in commits)
+def _reaches_root(commits: list[str], roots: set[str]) -> bool:
+    """Does a range hold the integration history's own root — no event below it, so no lower
+    bound? A second root an unrelated history brings in (a subtree or vendor import) is an
+    ordinary commit of the range (v2.81 code review: it dropped the strays as unbounded)."""
+    return any(s in roots for s in commits)
 
 
 def _event(root: Path, table: dict[str, dict], c: dict, earlier: list[str], kind: str, m: re.Match,
-           via: str | None = None) -> dict:
+           via: str | None = None, *, net_base: str | None = None, roots: frozenset[str] = frozenset()) -> dict:
     """One merge event: its issues and where they came from, its range (bounded or not, mixed
     or not), its start (earliest author time), its product and process lines and files.
     `earlier` are the events before it on the integration history, every path (#360 M1): a
     range stops at all of them, so a train merge reached through a merge of main is never
-    counted again in the range or the strays of the event after it."""
+    counted again in the range or the strays of the event after it. `net_base` is the event
+    before it on the same line when no marker-less merge brought events in between: its
+    lines stay the net tree diff, as before v2.81; otherwise they are summed per commit."""
     import check_review as _review  # noqa: PLC0415
     import tower  # noqa: PLC0415 — the one path classifier
     sha, message = c["sha"], c["message"]
@@ -2139,7 +2177,7 @@ def _event(root: Path, table: dict[str, dict], c: dict, earlier: list[str], kind
         # a marker: they are no part of this branch — counted apart, never in its lines or start
         # (a dry run on a consumer clone put 200 000 lines of unmarked history into one merge)
         strays = _range_commits(root, p1, earlier) if earlier else []
-        if strays and _reaches_root(table, strays):
+        if strays and _reaches_root(strays, roots):
             strays = []  # no event below: no lower bound, as before an event existed
         base = p1
         issues = _claims(message) | {int(n) for n in _TRAIN_REFS.findall(message)}
@@ -2160,7 +2198,7 @@ def _event(root: Path, table: dict[str, dict], c: dict, earlier: list[str], kind
         # the first finish without an event before it has no lower bound: it would swallow
         # every commit since the root (the onboarding commit) — unknown, not estimated
         own = _range_commits(root, sha, earlier) if earlier else None
-        if own and _reaches_root(table, own):
+        if own and _reaches_root(own, roots):
             own = None  # no earlier event is an ancestor: unknown, as the first finish
         strays, base = [], sha
     ev["issues"], ev["claim"] = sorted(issues), claim if issues else "none"
@@ -2171,7 +2209,7 @@ def _event(root: Path, table: dict[str, dict], c: dict, earlier: list[str], kind
     if strays:
         # the stray commits' own lines: records committed straight onto the integration branch
         # are process load that no merge carries (a steward's journal, a review log)
-        stray_stat = _range_numstat(root, p1, earlier)
+        stray_stat = _numstat(root, net_base, p1) if net_base else _range_numstat(root, p1, earlier)
         ev["stray_process_lines"] = (None if stray_stat is None else
                                      sum(n or 0 for n, f, _o in stray_stat if tower.is_process_path(f)))
         ev["stray_product_lines"] = (None if stray_stat is None else
@@ -2189,7 +2227,8 @@ def _event(root: Path, table: dict[str, dict], c: dict, earlier: list[str], kind
     ev["product_subjects"] = [(x["message"].splitlines() or [""])[0] for x in commits if product(x)]
     # a train merge: the tree diff over its first parent is exactly the branch's change; a
     # finish range has no such parent — its commits' own lines, summed (#360 M1)
-    stat = _numstat(root, base, sha) if kind == "train" else _range_numstat(root, sha, earlier)
+    stat = (_numstat(root, base, sha) if kind == "train" else
+            _numstat(root, net_base, sha) if net_base else _range_numstat(root, sha, earlier))
     if stat is None:
         return ev  # git failed: lines unknown
     prod = proc = 0
@@ -2244,7 +2283,11 @@ def merge_events(root: Path, ref: str | None = None) -> dict:
             s = (table[s]["parents"] or [None])[0]
         return got
 
+    roots = frozenset(s for s in chain.split() if s in table and not table[s]["parents"])
+
     def walk(shas: list[str], via: str | None) -> None:
+        last: str | None = None  # the event before, on this line
+        crossed = False  # a marker-less merge brought events in since `last`
         for sha in shas:  # oldest first
             c = table.get(sha)
             if c is None:
@@ -2255,13 +2298,16 @@ def merge_events(root: Path, ref: str | None = None) -> dict:
             if not train and len(c["parents"]) == 2:
                 # a merge without a marker: its second side is integration history too when it
                 # carries events (main merged into a branch, main fast-forwarded onto it)
+                before = len(events)
                 walk(list(reversed(side(c["parents"][1]))), via or sha)
+                crossed = crossed or len(events) > before
             elif len(c["parents"]) > 2:
                 octopus.append(sha)  # counted, not walked
             if train or finish:
                 events.append(_event(root, table, c, list(earlier), "train" if train else "finish",
-                                     train or finish, via))
+                                     train or finish, via, net_base=None if crossed else last, roots=roots))
                 earlier.append(sha)
+                last, crossed = sha, False
     walk(list(reversed(chain.split())), None)
     # a shallow clone's boundary commit has no parents: what lies behind it is not here
     shallow = (_git_out(root, "rev-parse", "--is-shallow-repository") or "").strip() == "true"
@@ -2291,8 +2337,11 @@ def merged_works(root: Path, ref: str | None = None) -> dict:
                 files[f] = files.get(f, 0) + k
         starts = [e["start"] for e in evs]
         works[n] = {
-            "issue": n, "events": evs, "first": evs[0]["when"], "end": evs[-1]["when"],
-            "end_quality": "measured" if evs[-1]["kind"] == "train" else "estimated",
+            # by time, not by order: events on two integration lines are no ancestors of each
+            # other, and the topological order put a later phase first (v2.81 code review)
+            "issue": n, "events": evs, "first": min(e["when"] for e in evs),
+            "end": max(e["when"] for e in evs),
+            "end_quality": "measured" if max(evs, key=lambda e: e["when"])["kind"] == "train" else "estimated",
             "start": min(starts) if all(e["bounded"] for e in evs) and all(starts) else None,
             "product_lines": sum(e["product_lines"] for e in evs) if known else None,
             "process_lines": sum(e["process_lines"] for e in evs) if known else None,
@@ -2671,8 +2720,11 @@ def losses(root: Path | None = None, *, days: int = _LOSS_DAYS, as_json: bool = 
     def _m(m: dict) -> str:
         v = "—" if m["value"] is None else f"{m['value']:.1f} {m['unit']}"
         return f"{v} [{m['quality']}; {m['issues']} with a value, {m['missing']} missing]"
-    print(f"  occupancy   {_m(t['occupancy'])}")
-    print(f"  delay       {_m(t['delay'])}")
+    # phase times come from worker reports: without any, local or published
+    # (`refs/process/reports/*`), the reason stands beside the dash (#360 AC-5)
+    no_reports = "" if _reports_by_worker(root) else " — no worker reports (local or published)"
+    print(f"  occupancy   {_m(t['occupancy'])}{no_reports if t['occupancy']['value'] is None else ''}")
+    print(f"  delay       {_m(t['delay'])}{no_reports if t['delay']['value'] is None else ''}")
     print(f"  owner       {t['owner_effort']['decisions']} decision(s) [proxy; minutes not measured]")
     tok = t["tokens"]
     tok_text = ("not measured" if not tok["value"] else
@@ -2685,7 +2737,7 @@ def losses(root: Path | None = None, *, days: int = _LOSS_DAYS, as_json: bool = 
     print(f"  proxy       regression fixes {p['regression_fixes'] if p['regression_fixes'] is not None else '—'} "
           f"over {p['regression_issues_observed']} merged issue(s) (diagnostic, not a loss in hours)")
     n = max((t[k]["issues"] for k in ("occupancy", "delay", "tokens")), default=0)
-    print(f"  {losses_confidence(t)} · {action(_level(n or None, False, n < t['issues'], _N_THRESHOLD), 'compare each measure with its own past, never with the others: delay → hand-offs and the train, occupancy → rounds and context, tokens → model and context per phase', thin='let more issues run through dispatch before reading a trend')}")
+    print(f"  {losses_confidence(t)} · {action(_level(n, False, n < t['issues'], _N_THRESHOLD), 'compare each measure with its own past, never with the others: delay → hand-offs and the train, occupancy → rounds and context, tokens → model and context per phase', thin='let more issues run through dispatch before reading a trend')}")
     return 0
 
 
