@@ -9,6 +9,23 @@ ein Eintrag ohne Plan oder Issue hat keine Details-Zeile. In wenigen Sätzen je 
 English version: [CHANGELOG.md](CHANGELOG.md). Die Releases vor v2.28.2:
 [docs/changelog-archive-DE.md](docs/changelog-archive-DE.md).
 
+## v2.82.0 — Die Spec-Kit-Skills erreichen jeden Klon · 2026-11-03
+
+**Warum.** `specify init` schreibt die `/speckit-*`-Skills in das Skill-Verzeichnis des Agenten. Ein Projekt, das dieses Verzeichnis als persönlichen Zustand ignorierte, hat sie nie committet, ohne Warnung (#363). Jeder frische Klon, jeder Worktree und jede Cloud-Session hatte dann keinen `/speckit-*`-Befehl und brauchte wieder das Spec-Kit-CLI, das eine Sandbox verweigern kann. Das Setup sagte nie, dass die Skills committet werden, und die naheliegende `!`-Ausnahme wirkt unter einem ignorierten Elternverzeichnis nicht.
+
+**Was sich ändert.**
+- Das Setup committet `.specify/` und die behaltenen Skills und nennt die Skills, die der Ablauf nutzt. Es zeigt die `.gitignore`-Form, die wirkt, wenn das Skill-Verzeichnis oder sein Elternverzeichnis ignoriert ist. Die drei entfernten Skills werden auch unter `.agents/skills` entfernt.
+- Das Gate `speckit` liest die Manifeste der installierten Integrationen und meldet Skills, die nie committet wurden (mit der Ignore-Regel), committete, die im Checkout fehlen, einen entfernten Skill, der zurück ist, und einen committeten Skill, den kein Manifest nennt. Sparse Checkouts werden berücksichtigt. Ohne Manifest oder Git heißt der Hinweis „ungeprüft“. Das Gate blockiert nie wegen eines Skills.
+- Upgrades entfernen Skill-Dateien, die das neue Manifest nicht mehr nennt.
+
+**Wirkung.** Ein Klon bekommt den ganzen Spec-Kit-Ablauf aus dem Repository, und ein Projekt sieht in der Gate-Ausgabe, wenn nicht.
+
+**Update.** Reines Update. Ein Projekt, dessen Skills nicht committet sind, sieht den neuen Hinweis und committet sie einmal; die `.gitignore` passt es an, wie das Setup zeigt. Kein Gate verlangt es.
+
+**Geänderte Abschnitte.** `modules/speckit.md` (Setup, What the gate enforces)
+
+Details: [Plan](docs/analysis/2026-11-03-v2.82.md) #363 #364
+
 ## v2.81.0 — Erst richtig messen · 2026-11-02
 
 **Warum.** Zwei unabhängige Analysen, welche KPIs der Prozess je Schritt braucht (#356, #357), fanden, dass das Cockpit in einem echten Projekt falsch zählte. Es las nur die First-Parent-Kette von main: Nachdem main in einen Branch gemergt und auf ihn vorgespult worden war, fehlten in drei Wochen 109 von 168 Train-Merges, ohne Warnung. `losses` zeigte „high“ Konfidenz über 93 Issues ohne einen einzigen Wert, `cost` zählte eine Nachricht je Inhaltsblock, und Codex-Reviews konnten nicht sagen, woher ein Befund stammt. Leere Spalten nannten keinen Grund, sodass fehlende Projektkonfiguration wie eine Lücke im Template aussah. Die Plan-Regel aus v2.80.1 hatte keine Schwere und erreichte nur den Claude-Befehl (#351, Prüfung von v2.80.1).

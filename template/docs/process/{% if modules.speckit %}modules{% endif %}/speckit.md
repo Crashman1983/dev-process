@@ -16,21 +16,52 @@ the network or the CLI:
     uv tool install specify-cli==0.16.0
     specify init --here --force --integration <your agent>
     # drop three skills (why: below) where the integration put them —
-    # Claude Code: .claude/skills, GitHub Copilot: .github/skills
-    for d in .claude/skills .github/skills; do
+    # Claude Code: .claude/skills, GitHub Copilot: .github/skills,
+    # AGENTS.md agents (Codex): .agents/skills
+    for d in .claude/skills .github/skills .agents/skills; do
       rm -rf "$d/speckit-constitution" "$d/speckit-implement" "$d/speckit-taskstoissues"
     done
     echo ".specify/feature.json" >> .gitignore   # per-checkout state, never committed
+    git add .specify <your skills dir>/speckit*     # the skills travel with the repo
     uv run scripts/process/gate_runner.py   # the regression net over the init
+
+**Commit the skills.** A clone gets only what is committed: a skills
+directory left out of git means every fresh clone, worktree and cloud
+session has no `/speckit-*` command and would need the CLI again — which a
+sandbox may refuse. The flow uses `speckit-specify`, `-clarify`, `-plan` and
+`-tasks`; `-analyze` and `-converge` as "The Tier 2+ flow" below says;
+`-checklist` on demand. An integration that writes command files instead
+(`speckit.implement.md`) drops the same three by name before the `git add`;
+the gate names any dropped skill that is still there.
+Keeping them per user breaks "nothing needs the CLI at runtime"; the gate's
+note stays until they are committed. If the project ignores its skills
+directory, a `!` line alone does not help — git never re-includes a path
+whose parent directory is excluded. Turn the directory rule into a
+contents rule, one level per ignored parent:
+
+<!-- gitignore-skills -->
+```gitignore
+# was: .claude/  (or .claude/skills/)
+.claude/*
+!.claude/skills/
+.claude/skills/*
+!.claude/skills/speckit*
+```
+
+(the same for `.github/skills` or `.agents/skills`; with only the skills
+directory ignored, the last two lines suffice).
 
 Three skills are deliberately not kept: `constitution` would overwrite the
 rendered pointer (a second truth — the `speckit` gate guards the marker),
 `implement` would bypass the execute flow's TDD + atomic-commit discipline,
 and `taskstoissues` duplicates the issue path (the issue templates,
 issue-before-code). **Upgrades** are a deliberate act: bump the pin, re-run
-`specify init --here --force`, diff the core templates against the overrides
+`specify init --here --force`, drop the three skills again, `git rm` the
+skill files the new manifest no longer lists (the gate names them),
+diff the core templates against the overrides
 (`.specify/templates/overrides/` survives — highest resolution priority),
-run the gates, commit as its own `chore:` commit. **Exit scenario:** if Spec
+run the gates, commit as its own `chore:` commit with the new skill files.
+**Exit scenario:** if Spec
 Kit is discontinued or turns, freeze the pin — the vendored state runs
 unchanged, forever if needed.
 
@@ -123,6 +154,12 @@ so worktrees stay independent and merges never conflict on it.
 - **Hard:** an active Tier 2+ plan with neither a `specs/` reference nor a
   `spec-waived: <reason>` line — spec-before-plan is a recorded decision.
 - **Soft:** no `.specify/` yet (pre-init), named every run.
+- **Soft:** the `/speckit-*` skills each installed integration lists in
+  `.specify/integrations/<name>.manifest.json` — never committed (with the
+  ignore rule that hides them), committed but missing from this checkout
+  (sparse checkouts excepted), one of the three dropped skills back, or a
+  committed skill no manifest lists (renamed upstream). No manifest, an
+  unreadable one or no git means "unverified", never "all committed".
 - The clarification gate additionally treats `specs/*/spec.md` markers as
   notes and `specs/*/plan.md`/`tasks.md` markers as hard (the build input).
   Markers in the other companions (`research.md`, `data-model.md`,

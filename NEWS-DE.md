@@ -7,6 +7,10 @@ technischen Einzelheiten stehen im [CHANGELOG](CHANGELOG-DE.md).
 
 English version: [NEWS.md](NEWS.md).
 
+## v2.82.0 — Die Spec-Kit-Skills erreichen jeden Klon
+
+Ein Projekt konnte die Spezifikationsbefehle auf einem Rechner haben und in jeder frischen Kopie des Repositorys verlieren, weil ihr Ordner von der Versionsverwaltung ausgeschlossen war. Eine frische Kopie brauchte dann eine zusätzliche Installation, die eine abgeschottete Umgebung verweigern kann. Das Setup sagt jetzt, dass diese Befehle ins Repository gehören, und zeigt wie, auch wenn der Ordner ausgeschlossen war. Die Prozessprüfung nennt das Problem, wenn es auftritt, und blockiert deswegen nie die Arbeit.
+
 ## v2.81.0 — Erst richtig messen
 
 Das Prozess-Cockpit zählte in einem echten Projekt falsch: Nachdem main in einen Branch gemergt und auf ihn vorgespult worden war, fehlte der Großteil von drei Wochen Arbeit in seinen Zahlen, ohne Warnung. Es folgt dieser Historie jetzt, zählt keine Änderung doppelt und sagt, warum eine Spalte leer ist, statt einen Strich zu zeigen. Außerdem zeigt es, wie oft die vorgeschriebenen Review-Einträge tatsächlich geschrieben werden, welche wenigen Arbeiten die meisten Review-Runden tragen, und wie sich Zahlen vor und nach einer Prozessversion unterscheiden. Die Plan-Regel aus v2.80.1 erreicht jetzt jedes Agenten-Harness und blockiert nur, wenn das, worauf ein Plan baut, falsch ist. Keine neuen Gates.

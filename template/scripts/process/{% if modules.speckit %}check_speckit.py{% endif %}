@@ -30,13 +30,23 @@ design review's F3/F7 conditions — prompts alone must not carry rule 5):
   - SOFT: unchecked tasks in an active specs/*/tasks.md — the deterministic
     completeness signal at review time (replaces an LLM converge pass for
     Tier 2; the reviewer judges the note, the gate never blocks mid-build).
+  - SOFT: the /speckit-* skills an active integration installed
+    (.specify/integrations/<name>.manifest.json) are not committed, are
+    missing from the checkout, or a skill Setup deliberately removes is back;
+    a committed skill no manifest lists is an orphan. A clone gets only what
+    is committed — an ignored skills directory left every fresh clone without
+    the flow and sent it to the CLI (#363). Never a block: the skills
+    directory is harness-specific, and a failed read is a note, never "all
+    committed".
 
 Unresolved [NEEDS CLARIFICATION] markers in specs/ are the clarification
 gate's job (one owner). Pure stdlib.
 """
 from __future__ import annotations
 
+import json
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -55,6 +65,18 @@ STORY_PHASE = re.compile(r"^##+\s+Phase\s+\d+.*User Story", re.IGNORECASE)
 ANY_PHASE = re.compile(r"^##+\s+(?:Phase\b|Final phase\b)", re.IGNORECASE)
 TASK_LINE = re.compile(r"^\s*- \[[ xX]\] ")
 TESTY = re.compile(r"\btest", re.IGNORECASE)
+
+INTEGRATIONS = ".specify/integrations"
+INTEGRATION_STATE = ".specify/integration.json"
+EXTENSION_REGISTRY = ".specify/extensions/.registry"  # installed Spec Kit extensions
+CORE_MANIFEST = "speckit.manifest.json"
+# Setup removes these three (speckit.md, "Setup"): constitution would replace
+# the gated pointer, implement bypasses the execute flow, taskstoissues
+# duplicates the issue path
+DROPPED_SKILLS = ("constitution", "implement", "taskstoissues")
+SKILL_PART = re.compile(r"(?:^|/)(speckit[.-]([a-z]+)[^/]*)")
+SHOWN = 3
+IGNORE_SOURCE = re.compile(r"^(.*?):(\d+):(.*)$")  # check-ignore -v: source:line:pattern
 
 
 def _story_phases_without_tests(text: str) -> list[str]:
@@ -77,6 +99,177 @@ def _story_phases_without_tests(text: str) -> list[str]:
     return missing
 
 
+def _listed(paths: list[str]) -> str:
+    shown = ", ".join(paths[:SHOWN])
+    more = len(paths) - SHOWN
+    return f"{shown}, and {more} more" if more > 0 else shown
+
+
+def _skill_part(path: str) -> tuple[str, str] | None:
+    """(skills directory, skill name) of a Spec Kit skill or command path."""
+    m = SKILL_PART.search(path)
+    if not m:
+        return None
+    return path[:m.start(1)].rstrip("/"), m.group(2).lower()
+
+
+def _manifests(root: Path, notes: list[str]) -> list[Path]:
+    integ = root / INTEGRATIONS
+    found = sorted(p for p in integ.glob("*.manifest.json")
+                   if p.name != CORE_MANIFEST) if integ.is_dir() else []
+    state = root / INTEGRATION_STATE
+    try:
+        installed = json.loads(state.read_text(encoding="utf-8"))["installed_integrations"]
+        if not isinstance(installed, list) or not installed:
+            raise TypeError
+    except FileNotFoundError:
+        return found
+    except (OSError, ValueError, KeyError, TypeError):
+        notes.append(f"{INTEGRATION_STATE}: no readable installed_integrations "
+                     f"list — every integration manifest is read for the "
+                     f"/speckit-* skill check")
+        return found
+    active = []
+    for name in sorted(str(n) for n in installed):
+        p = integ / f"{name}.manifest.json"
+        if p.is_file():
+            active.append(p)
+        else:
+            notes.append(f"{INTEGRATIONS}/{p.name}: missing for the installed "
+                         f"integration {name!r} — its /speckit-* skills are unverified")
+    return active
+
+
+def _extension_ids(root: Path) -> list[str] | None:
+    """Ids of installed Spec Kit extensions — their skills (speckit-<id>-…)
+    are listed in no integration manifest; None when the registry is unreadable."""
+    reg = root / EXTENSION_REGISTRY
+    if not reg.is_file():
+        return []
+    try:
+        exts = json.loads(reg.read_text(encoding="utf-8"))["extensions"]
+        if not isinstance(exts, dict):
+            raise TypeError
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    return sorted(str(k).lower() for k in exts)
+
+
+def _tracked(root: Path, dirs: list[str]) -> dict[str, str] | None:
+    """path -> `git ls-files -t` tag for tracked files under dirs; None when
+    git cannot answer (no repository, no git)."""
+    try:
+        r = subprocess.run(["git", "--literal-pathspecs", "ls-files", "-t", "-z",
+                            "--", *dirs], cwd=root, capture_output=True, text=True)
+    except OSError:
+        return None
+    if r.returncode != 0:
+        return None
+    out: dict[str, str] = {}
+    for entry in r.stdout.split("\0"):
+        if len(entry) > 2 and entry[1] == " ":
+            out[entry[2:]] = entry[0]
+    return out
+
+
+def _ignore_rule(root: Path, path: str) -> str:
+    try:
+        # check-ignore takes plain paths (it refuses pathspec magic) and, with
+        # --no-index, names the rule for a path that is not on disk
+        r = subprocess.run(["git", "check-ignore", "-v", "--no-index", "--", path],
+                           cwd=root,
+                           capture_output=True, text=True)
+    except OSError:
+        return ""
+    m = IGNORE_SOURCE.match(r.stdout.split("\t", 1)[0]) if r.returncode == 0 else None
+    return f" (ignored by {m[1]}:{m[2]} `{m[3]}`)" if m else ""
+
+
+def _orphan(path: str, dirs: set[str], exts: list[str]) -> bool:
+    part = _skill_part(path)
+    if part is None or (part[0] or ".") not in dirs:
+        return False
+    rest = SKILL_PART.search(path).group(1)[len("speckit."):].lower()
+    return not any(rest.startswith(e) for e in exts)
+
+
+def _skill_notes(root: Path) -> list[str]:
+    """The /speckit-* skills a clone needs, from the integration manifests
+    (#363): committed, present, none of the dropped three, no orphan."""
+    notes: list[str] = []
+    kept: list[str] = []
+    dropped: list[str] = []
+    dirs: set[str] = set()
+    manifests = _manifests(root, notes)
+    for m in manifests:
+        try:
+            files = json.loads(m.read_text(encoding="utf-8"))["files"]
+            if not isinstance(files, dict):
+                raise TypeError
+        except (OSError, ValueError, KeyError, TypeError):
+            notes.append(f"{m.relative_to(root).as_posix()}: unreadable — "
+                         f"its /speckit-* skills are unverified")
+            continue
+        for path in files:
+            part = _skill_part(str(path))
+            if part is None:
+                continue
+            dirs.add(part[0] or ".")
+            (dropped if part[1] in DROPPED_SKILLS else kept).append(str(path))
+    if not manifests:
+        notes.append(f"no Spec Kit integration manifest under {INTEGRATIONS}/ — "
+                     f"whether the /speckit-* skills are installed and committed "
+                     f"is unverified (Spec Kit setup)")
+        return notes
+    kept, dropped = sorted(set(kept)), sorted(set(dropped))
+    listed = set(kept) | set(dropped)
+    tracked = _tracked(root, sorted(dirs)) if dirs else {}
+    if tracked is None:
+        notes.append(f"git cannot list the tracked files here — whether the "
+                     f"/speckit-* skills are committed is unverified; a fresh "
+                     f"clone gets only committed ones (Spec Kit setup)")
+        gone = [p for p in kept if not (root / p).is_file()]
+        if gone:
+            notes.append(f"{len(gone)} /speckit-* skill file(s) missing from "
+                         f"this checkout: {_listed(gone)} (Spec Kit setup)")
+    else:
+        never = [p for p in kept if p not in tracked]
+        lost = [p for p in kept if p in tracked and tracked[p] != "S"
+                and not (root / p).is_file()]
+        if never:
+            here = [p for p in never if (root / p).is_file()]
+            how = ("commit them" if len(here) == len(never) else
+                   "commit them from a checkout that has them, or run the "
+                   "Spec Kit setup")
+            notes.append(f"{len(never)} /speckit-* skill file(s) never "
+                         f"committed{_ignore_rule(root, never[0])}: "
+                         f"{_listed(never)} — a fresh clone or worktree has no "
+                         f"/speckit-* skill without them; {how} (Spec Kit "
+                         f"setup: committing the skills)")
+        if lost:
+            notes.append(f"{len(lost)} committed /speckit-* skill file(s) "
+                         f"missing from this checkout: {_listed(lost)} — restore "
+                         f"with `git checkout -- <path>`")
+        exts = _extension_ids(root)
+        orphans = [] if exts is None else sorted(
+            p for p in tracked if p not in listed and _orphan(p, dirs, exts))
+        if exts is None:
+            notes.append(f"{EXTENSION_REGISTRY}: unreadable — committed "
+                         f"/speckit-* skills no manifest lists are not checked")
+        if orphans:
+            notes.append(f"{len(orphans)} committed /speckit-* skill file(s) "
+                         f"no manifest lists: {_listed(orphans)} — renamed or "
+                         f"removed upstream; `git rm` them (Spec Kit upgrades)")
+    back = [p for p in dropped
+            if (root / p).is_file() or (tracked and p in tracked)]
+    if back:
+        notes.append(f"{len(back)} deliberately removed /speckit-* skill "
+                     f"file(s) present: {_listed(back)} — Setup removes "
+                     f"constitution, implement and taskstoissues; delete them "
+                     f"(`git rm` if committed)")
+    return notes
+
+
 def check(root: Path) -> tuple[list[str], list[str]]:
     hard: list[str] = []
     soft: list[str] = []
@@ -97,6 +290,8 @@ def check(root: Path) -> tuple[list[str], list[str]]:
                     f"/speckit-constitution (or hand-editing) replaced the "
                     f"pointer with a second truth beside the gated one; "
                     f"restore the pointer file (git checkout -- {CONSTITUTION})")
+
+    soft += _skill_notes(root)
 
     sdir = root / SPECS_DIR
     if sdir.is_dir():
