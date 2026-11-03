@@ -238,7 +238,8 @@ code. A project supplies data; the template owns the sequence:
   `preflight_timeout`, default 600 s, for the train's too; on a push the
   process gates run first, so a host that breaks a gate is refused as that
   gate), `lanes`, `lane_dir`,
-  `certificate_env`. No file: the gates run, no tests.
+  `certificate_env`, and `areas` (what a change contains — "Areas" below).
+  No file: the gates run, no tests.
   A malformed file refuses the push — a typo in a map must not skip tests.
 - **`scripts/process/test_select.py plan|run|check`** — the one selection
   rule, for the hook and by hand. A changed test file selects itself; a
@@ -346,7 +347,9 @@ and a skipped count in the summary.
 The skip only ever errs towards running. If git cannot name the paths in
 flight, the gate runs. The areas count as the **union** of the integration
 branch's file and this checkout's: a branch can widen an area but never narrow
-it to skip its own gate. A branch may introduce an area and the gate that
+it to skip its own gate (if this checkout's file cannot be read, the gate runs).
+Which areas a gate names is `gates.local.json`'s — gate configuration, guarded
+like gate code, not by the areas. A branch may introduce an area and the gate that
 names it together; until the area is on the integration branch, that gate runs
 and a note says so. An area named nowhere is a broken list, not "nothing to
 check". The summary line never calls a gate that was skipped, or failed in
