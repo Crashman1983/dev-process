@@ -378,3 +378,33 @@ def test_a_busy_lane_refuses_before_the_preflight_runs(repo, tmp_path):
     finally:
         holder.kill()
         holder.wait()
+
+
+def _testing_config():
+    import importlib.util
+    from pathlib import Path
+    path = Path(__file__).resolve().parents[1] / "template/scripts/process/testing_config.py"
+    # no bytecode next to the template: a render would carry the cache along
+    before, sys.dont_write_bytecode = sys.dont_write_bytecode, True
+    try:
+        spec = importlib.util.spec_from_file_location("testing_config_areas", path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+    finally:
+        sys.dont_write_bytecode = before
+    return mod
+
+
+@pytest.mark.parametrize("bad", [{"areas": []}, {"areas": {"ui": "x/**"}},
+                                 {"areas": {"ui": ["x/**", ""]}}, {"areas": {"": ["x/**"]}}])
+def test_malformed_areas_are_a_broken_configuration(bad):
+    tc = _testing_config()
+    with pytest.raises(tc.ConfigError, match="areas"):
+        tc.parse(bad)
+
+
+def test_areas_parse_and_an_empty_area_is_valid():
+    tc = _testing_config()
+    assert tc.parse({"areas": {"ui": ["frontend/**"], "inert": []}})["areas"] == {
+        "ui": ["frontend/**"], "inert": []}
+    assert tc.parse({})["areas"] == {}

@@ -327,6 +327,34 @@ run is a finding on the selection: the commit that broke it merged on a
 narrowed scope, and the fix adds the missed reader to what the selector
 reads, not only the code fix.
 
+## Areas — gates by what a change contains
+
+A project's own gates apply to what a change contains: a UI lint has nothing to
+say to a backend-only push. `testing.local.json` names the project's **areas**
+once, as globs (`process_git`'s glob, the same matcher as everywhere):
+
+```json
+"areas": {"ui": ["frontend/src/**"], "ios": ["ios/**"], "backend": []}
+```
+
+An empty list is a statement — "this repository has no such content" — not a
+mistake. A local gate in `docs/process/gates.local.json` names the areas it is
+for (`"areas": ["ui"]`), or raw `"paths"`, or both. It runs when a path in
+flight matches, and is skipped otherwise, with its reason in the gate event
+and a skipped count in the summary.
+
+The skip only ever errs towards running. If git cannot name the paths in
+flight, the gate runs. The areas count as the **union** of the integration
+branch's file and this checkout's: a branch can widen an area but never narrow
+it to skip its own gate. A branch may introduce an area and the gate that
+names it together; until the area is on the integration branch, that gate runs
+and a note says so. An area named nowhere is a broken list, not "nothing to
+check". The summary line never calls a gate that was skipped, or failed in
+shadow, "passed".
+
+The template's own gates are process gates — plans, reviews, records, specs —
+and run on every push; areas are for the project's checks of its product.
+
 ## Ratchets — a threshold that only ever tightens
 
 Some qualities cannot be gated with one universal number on day one because

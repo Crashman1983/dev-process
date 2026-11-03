@@ -81,6 +81,8 @@ def test_a_shadow_gate_runs_and_records_but_does_not_block(render, tmp_path):
     g = _gates(out)
     assert g.returncode == 0, g.stdout + g.stderr
     assert "bad failed in shadow mode" in g.stderr
+    # the summary never calls a check that failed in shadow "passed" (#369)
+    assert "failed in shadow (bad)" in g.stdout and "all " not in g.stdout, g.stdout
     last = [e for e in _events(out) if e["gate"] == "bad"][-1]
     assert last["mode"] == "shadow" and last["outcome"] == "fail"
     # nodes counts the shadow failure as what it would have stopped, not as a block

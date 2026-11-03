@@ -74,9 +74,11 @@ RETIRED_MODULES = {"contracts", "security_floor", "arch_docs", "github_master"}
 KNOWN_HARNESSES = {"claude", "copilot", "agents_md"}
 # a project's own gates, without owning this runner: {name: {"module": key or null,
 # "command": ["path/in/repo.py", args...]} or "exec": [argv as given, e.g. "make",
-# "lint"], optional "paths": [globs]}} — added to GATES, or replacing one by name.
-# With `paths` the gate runs only when a path in flight matches (`process_git`'s
-# glob); when git cannot tell which paths are in flight, it runs.
+# "lint"], optional "paths": [globs], optional "areas": [names]}} — added to GATES,
+# or replacing one by name. With `paths` or `areas` the gate runs only when a path
+# in flight matches (`process_git`'s glob); when git cannot tell which paths are
+# in flight, it runs. `areas` name the project's areas in testing.local.json
+# (`testing.md`, "Areas").
 LOCAL_GATES = "docs/process/gates.local.json"
 
 
@@ -107,7 +109,7 @@ def with_local_gates(root: Path) -> tuple[dict, dict]:
                 or ("command" in entry) == ("exec" in entry)):
             raise _local_refused(f"{name}: needs 'module' (a module key or null) and one of "
                                  f"'command' or 'exec'")
-        unknown = sorted(set(entry) - {"module", "command", "exec", "paths"})
+        unknown = sorted(set(entry) - {"module", "command", "exec", "paths", "areas"})
         if unknown:
             raise _local_refused(f"{name}: unknown key(s) {', '.join(unknown)}")
         key, field = entry["module"], "exec" if "exec" in entry else "command"
@@ -124,6 +126,10 @@ def with_local_gates(root: Path) -> tuple[dict, dict]:
         if paths is not None and not (isinstance(paths, list) and paths
                                       and all(isinstance(g, str) and g for g in paths)):
             raise _local_refused(f"{name}: 'paths' must be a non-empty list of globs")
+        areas = entry.get("areas")
+        if areas is not None and not (isinstance(areas, list) and areas
+                                      and all(isinstance(a, str) and a for a in areas)):
+            raise _local_refused(f"{name}: 'areas' must be a non-empty list of area names")
         if name in GATES and GATES[name][0] is None:
             # a core gate guards what every project has (the review record, the
             # kernel); a branch's own file replaced `review` with a script that
@@ -131,8 +137,43 @@ def with_local_gates(root: Path) -> tuple[dict, dict]:
             raise _local_refused(f"{name} is a core gate — it cannot be replaced or moved "
                                  f"into a module; add the project's check under its own name")
         gates[name] = (key, list(cmd) if field == "exec" else [sys.executable, *cmd])
-        local[name] = {"exec": field == "exec", "paths": paths}
+        local[name] = {"exec": field == "exec", "paths": paths, "areas": areas}
     return {**GATES, **gates}, local
+
+
+def _area_globs(root: Path, name: str, areas: list[str], memo: dict) -> list[str] | None:
+    """The globs a local gate's areas stand for: the union of the areas at the
+    integration ref and in the working tree, so a branch can widen an area but
+    never narrow it to skip its own gate — and can introduce an area and the gate
+    that names it in one change. None means "run the gate": an area named only in
+    the working tree (a note says so). An area named nowhere is a broken list."""
+    import testing_config  # noqa: PLC0415
+
+    if "areas" not in memo:
+        try:
+            from check_review import integration_ref  # noqa: PLC0415
+
+            ref = integration_ref(root)
+        except Exception:  # noqa: BLE001 — no readable base: the working tree alone
+            ref = None
+        memo["areas"] = (testing_config.areas_at(root, None),
+                         testing_config.areas_at(root, ref) if ref else None)
+    tree, base = memo["areas"]
+    tree, base = tree or {}, base or {}
+    globs: list[str] = []
+    fresh: list[str] = []
+    for area in areas:
+        if area not in tree and area not in base:
+            raise _local_refused(f"{name}: area {area!r} is in no {testing_config.CONFIG} "
+                                 f"`areas` (neither here nor on the integration branch)")
+        if area not in base:
+            fresh.append(area)
+        globs += base.get(area, []) + tree.get(area, [])
+    if fresh:
+        print(f"gate-runner: note: {name}: area(s) {', '.join(fresh)} not on the integration "
+              f"branch yet — the gate runs until they are")
+        return None
+    return globs
 
 
 def _untouched(root: Path, globs: list[str], memo: dict) -> bool:
@@ -475,6 +516,8 @@ def main() -> int:
         modes, mode_problems = {}, [f"gate modes unreadable ({exc}) — every gate blocks"]
     suppressed += _emit("".join(f"gate-runner: note: {p}\n" for p in mode_problems), known, seen, show_all)
     weakened: list[str] = []
+    skipped: list[str] = []
+    shadow_failed: list[str] = []
     for name in active:
         _key, cmd = gates[name]
         spec = local.get(name, {})
@@ -492,10 +535,16 @@ def main() -> int:
             print(f"== {name}: sampled at {node['rate']:.0%} — not this commit ==", file=sys.stderr)
             _record_event(events, context, name, mode=mode, outcome="unsampled", rc=None, duration_s=0.0)
             continue
-        if spec.get("paths") and _untouched(root, spec["paths"], in_flight):
-            print(f"== {name}: no path in flight matches {', '.join(spec['paths'])} — not run ==")
-            _record_event(events, context, name, mode=mode, outcome="skipped", rc=None, duration_s=0.0)
-            continue
+        if spec.get("paths") or spec.get("areas"):
+            globs = list(spec.get("paths") or [])
+            area_globs = _area_globs(root, name, spec["areas"], in_flight) if spec.get("areas") else []
+            scope = ", ".join([*(f"areas {a}" for a in spec.get("areas") or []), *globs])
+            if area_globs is not None and _untouched(root, globs + area_globs, in_flight):
+                print(f"== {name}: no path in flight matches {scope} — not run ==")
+                _record_event(events, context, name, mode=mode, outcome="skipped", rc=None,
+                              duration_s=0.0, reason=f"no path in flight matches {scope}")
+                skipped.append(name)
+                continue
         # an `exec` argv runs as given: the project owns what it names
         script = None if spec.get("exec") else root / cmd[1]
         if script is not None and name in local and not script.is_file():
@@ -552,6 +601,7 @@ def main() -> int:
             _record_event(events, context, name, mode=mode, outcome="pass" if rc == 0 else "fail",
                           rc=rc, duration_s=time.monotonic() - started)
         if rc != 0 and node_mode in ("shadow", "sampled"):
+            shadow_failed.append(name)
             print(f"gate-runner: {name} failed in {node_mode} mode ({node.get('record')}) — recorded, "
                   f"not blocking; `gate_modes.py sentinel` returns it to block", file=sys.stderr)
         elif rc != 0:
@@ -582,8 +632,18 @@ def main() -> int:
                   "and the finding behind it stops being true or false. Fix it, or "
                   "waive it with a named owner, today.")
         return 1
-    print(f"all {len(active)} active gate(s) passed"
-          + (f" — {len(weakened)} not blocking: {', '.join(weakened)}" if weakened else ""))
+    # never claim a check that did not run, or did not pass, as passed
+    if skipped or shadow_failed:
+        passed = len(active) - len(skipped) - len(shadow_failed)
+        parts = [f"{passed} passed"]
+        if skipped:
+            parts.append(f"{len(skipped)} skipped (not in this change: {', '.join(skipped)})")
+        if shadow_failed:
+            parts.append(f"{len(shadow_failed)} failed in shadow ({', '.join(shadow_failed)})")
+        summary = f"{len(active)} active gate(s): " + ", ".join(parts)
+    else:
+        summary = f"all {len(active)} active gate(s) passed"
+    print(summary + (f" — {len(weakened)} not blocking: {', '.join(weakened)}" if weakened else ""))
     if weakened:
         print(f"gate-runner: {len(weakened)} gate(s) not blocking by record: {', '.join(weakened)}",
               file=sys.stderr)

@@ -123,12 +123,25 @@ def _stack(name: str, raw) -> dict:
     return stack
 
 
+def _areas(raw) -> dict[str, list[str]]:
+    """{area name: globs} — what a change contains (`testing.md`, "Areas"). An
+    empty list is a statement: this repository has no such content."""
+    if not isinstance(raw, dict):
+        raise ConfigError("areas must be an object of area name → list of globs")
+    out: dict[str, list[str]] = {}
+    for name, globs in raw.items():
+        if not (isinstance(name, str) and name):
+            raise ConfigError("areas: an area needs a name")
+        out[name] = _strings(globs, f"areas.{name}")
+    return out
+
+
 def parse(data) -> dict:
     """The validated configuration from the decoded JSON."""
     if not isinstance(data, dict):
         raise ConfigError("the configuration must be a JSON object")
     known = {"lane_dir", "lanes", "certificate_env", "merge_suite", "merge_scope", "preflight",
-             "preflight_timeout", "stacks"}
+             "preflight_timeout", "stacks", "areas"}
     unknown = sorted(set(data) - known)
     if unknown:
         raise ConfigError(f"unknown key(s): {', '.join(unknown)} (known: {', '.join(sorted(known))})")
@@ -159,7 +172,34 @@ def parse(data) -> dict:
         "preflight": _argv(data.get("preflight"), "preflight", required=False),
         "preflight_timeout": float(preflight_timeout),
         "stacks": [_stack(name, raw) for name, raw in stacks_raw.items()],
+        "areas": _areas(data.get("areas", {})),
     }
+
+
+def areas_at(root: Path, ref: str | None) -> dict[str, list[str]] | None:
+    """The areas as the file stands at `ref` (None: the working tree); None
+    when they cannot be read there — the caller decides what that means."""
+    if ref is None:
+        try:
+            cfg = load(root)
+        except ConfigError:
+            return None
+        return cfg["areas"] if cfg else {}
+    import subprocess  # noqa: PLC0415
+
+    try:
+        r = subprocess.run(["git", "show", f"{ref}:{CONFIG}"], cwd=root,
+                           capture_output=True, text=True, encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    if r.returncode != 0:
+        exists = subprocess.run(["git", "cat-file", "-e", f"{ref}^{{commit}}"], cwd=root,
+                                capture_output=True)
+        return {} if exists.returncode == 0 else None  # no file at a real ref: no areas
+    try:
+        return parse(json.loads(r.stdout))["areas"]
+    except (ValueError, ConfigError):
+        return None
 
 
 def load(root: Path) -> dict | None:
