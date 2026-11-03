@@ -9,6 +9,49 @@ ein Eintrag ohne Plan oder Issue hat keine Details-Zeile. In wenigen Sätzen je 
 English version: [CHANGELOG.md](CHANGELOG.md). Die Releases vor v2.28.2:
 [docs/changelog-archive-DE.md](docs/changelog-archive-DE.md).
 
+## v2.84.0 — Bilder und Notizen ohne Software-Kette; UI-Arbeit sagt, wie sie bedacht wurde · 2026-11-03
+
+**Warum.** Zwei Anliegen des Owners. Erstens ließ ein Bild, eine Aufnahme oder eine Notiz die ganze Software-Kette laufen: eine Testsuite beim Merge-Push, `--tests` in `finish`. Diese Reibung hat einmal Agenten-Werkzeug in ein eigenes Repository getrieben (#366). Zweitens soll UI-Arbeit zeigen, dass Größen, Zustände, Navigation vor und zurück und die eigenen UI-Regeln des Projekts bedacht wurden. Eine Maschine beurteilt das nicht, aber bedacht muss es sein (#368). Beides sollte nach dem Inhalt greifen, nicht über einen Schalter je Projekt.
+
+**Was sich ändert.**
+- **Ruhige Ranges.** Ein Range, dessen Pfade alle Buchhaltung (`.process-work/`) oder **inert** sind, fährt die Gates und keine Suite, auch beim Merge-Push. `finish.py --apply` merged ihn ohne `--tests`, sagt das und schreibt kein Merge-Zertifikat. Das Zertifikat selbst bleibt unverändert.
+- **Was inert ist.** Der Bereich `inert` in `testing.local.json` nennt, wo Medien und Notizen liegen. Inert ist ein Pfad nur, wenn alles gilt:
+  - sein Typ ist Bild, Audio, Video, `pdf` oder Prosa (`md rst adoc`, nicht `txt`);
+  - die Datei des Integrationsbranches nennt ihn — ein Branch erklärt sich nie selbst inert;
+  - er ist nicht geschützt (Gate-Code, `docs/process/`, `.claude/`, `.github/`, `.specify/`, Copier-Antworten);
+  - kein Stack-Glob, kein Pin-Ziel, kein `tests`-Verzeichnis und kein Map-Ziel deckt ihn.
+
+  Jeder Zweifel ist Code. Eine Build-Datei, Konfiguration oder ein Lockfile ist nie inert.
+- **`quiet.py [BASE..HEAD]`** druckt die Klasse jedes Pfads und endet nur bei einem ruhigen Range mit 0, für Projekte, deren eigener Pre-push-Hook über die Suite entscheidet.
+- **`ui-check`**, ein neues Template-Gate in jedem Projekt, ohne Modul-Schalter:
+  - Ein Tier-2+-Plan, den der Branch hinzufügt, beantwortet einen Block `ui-check:`, wenn er einen Design-Vertrag deklariert oder der Branch UI-Pfade ändert (`areas.ui` oder die `paths` einer Vertrags-Registry).
+  - Eine Zeile pro Achse: board, viewports, themes, states, navigation, interaction, content extremes, accessibility, rules. `rules` nennt die UI-Regeldateien, gegen die geprüft wurde, den Wiederverwendungsentscheid und jede Abweichung; `rule_sources` einer Registry verlangt, dass eine davon zitiert wird.
+  - Ein Plan, der UI nur mitträgt, schreibt `ui-check: n/a — <Grund>`; mit deklariertem Vertrag geht das nicht.
+  - Das Gate prüft, dass die Fragen beantwortet sind, nie die Antworten. Review-Bundle und Digest zeigen jeden Block mit Zählern und jedes `n/a`.
+- **Das Gate startet beobachtend.** Template-Gates auf der Liste `OBSERVE_FIRST` des Runners starten, als wäre ihr erster Eintrag `shadow --observe`, in `gate_modes.fold`. `gate_modes.py restore ui-check` schaltet es scharf. Ein Projekt-Gate gleichen Namens behält seinen Modus; es zu entfernen, braucht einen Eintrag (`gate-handover` ist bis dahin rot).
+- **Gate-Modi.**
+  - Der Sentinel setzt ein beobachtetes Gate bei einer gerissenen Leitplanke nicht mehr zurück; es hat nie blockiert, es gibt nichts zurückzurollen.
+  - `--observe` gilt nur noch für ein Gate, das nie blockiert hat. Nach einem `restore` oder einem früheren Eintrag zählt es als normales `shadow`, und das CLI lehnt es ab, auch für Template-Gates, die von Anfang an blockierten.
+
+**Wirkung.** Ein Bild oder eine Notiz landet mit den Gates und ohne Suite. UI-Pläne tragen eine kurze, strukturierte Auskunft, wie die UI bedacht wurde, und der Reviewer sieht jedes `n/a`.
+
+**Update.**
+- Reines Update. Ohne `areas.inert` ist die einzige Änderung in B, dass `finish` einen Range nur aus Buchhaltung ohne `--tests` merged.
+- `ui-check` läuft in jedem Projekt, beobachtend, und schweigt ohne UI. Scharf schalten mit `gate_modes.py restore ui-check --reason …`, sobald die Branches in Arbeit gemerged sind.
+- Ein Projekt mit eigenem Pre-push-Hook ruft `quiet.py` vor seiner Suite; ein `testing.local.json` nur mit `areas` genügt dafür.
+
+**Geänderte Abschnitte.**
+- `testing.md` (Inert changes — images and notes without the software chain; One test path; Areas)
+- `commits.md` (Merging)
+- `train.md` (Who pushes to main)
+- `risk-tiers.md` (Tier 0)
+- `optimization.md` (Gate-Modi: neues Gate, neues Template-Gate)
+- `review-checklist.md` (Surfaces)
+- `design-contracts.md` (UI check)
+- `/plan`
+
+Details: [Plan](docs/analysis/2026-11-03-v2.84.md) #366 #368; Folge-Issues #371 #372
+
 ## v2.83.0 — Gates nach dem Inhalt einer Änderung · 2026-11-03
 
 **Warum.** Der Grundsatz des Owners: Gates greifen nach dem Inhalt einer Änderung. Ein UI-Lint hat einem reinen Backend-Push nichts zu sagen. Bisher ließen sich nur die eigenen Gates eines Projekts auf rohe Pfad-Globs beschränken. Ein gemeinsamer Begriff davon, welche Bereiche ein Projekt hat, fehlte, und die Zusammenfassung des Runners nannte übersprungene oder abgeschaltete Gates „passed“. Unabhängig davon verlangte attest ein fremdes Kriterium, wenn die Spec es als `#N/AC-x` zitierte, und empfahl genau die Schreibweise, die schon dastand (downstream #2840).

@@ -7,6 +7,10 @@ technischen Einzelheiten stehen im [CHANGELOG](CHANGELOG-DE.md).
 
 English version: [NEWS.md](NEWS.md).
 
+## v2.84.0 — Bilder und Notizen ohne Software-Kette
+
+Ein Bild, eine Aufnahme oder eine Notiz abzulegen, startet die Testsuite des Projekts nicht mehr. Die Prozessprüfungen laufen weiter, und als solche Ablage zählen nur Dateitypen, die kein Verhalten ändern können, an Orten, die der Hauptbranch dafür vorgesehen hat; eine Build-Datei oder eine Einstellung wird immer getestet. Pläne für die Benutzeroberfläche beantworten jetzt eine kurze Liste von Fragen: Größen, hell und dunkel, Zustände, der Weg hinein und zurück, extreme Inhalte, Barrierefreiheit und welche UI-Regeln des Projekts sie befolgt haben. Die Prüfung stellt sicher, dass die Fragen beantwortet sind, nicht wie gut; das bleibt Urteil des Reviewers und des Owners. Sie beobachtet zunächst nur und blockiert, sobald der Owner sie einschaltet.
+
 ## v2.83.0 — Gates nach dem Inhalt einer Änderung
 
 Ein Projekt kann jetzt einmal festlegen, welche Teile seines Repositorys Benutzeroberfläche, iOS, Backend und so weiter sind, und seine eigenen Prüfungen daran binden. Eine Prüfung für die Oberfläche läuft dann nur, wenn eine Änderung die Oberfläche berührt, und die Ausgabe sagt klar, welche Prüfungen nicht liefen und warum, statt sie als bestanden zu melden. Ein Branch kann seine eigene Prüfung nicht abschalten, indem er diese Teile umdefiniert. Eine kleine Korrektur sorgt außerdem dafür, dass der Prozess keinen Test mehr für das Kriterium eines anderen Issues verlangt, das die Spezifikation nur zitiert.

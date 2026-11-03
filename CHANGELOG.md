@@ -10,6 +10,49 @@ A few plain sentences per release: [NEWS.md](NEWS.md). Deutsche Fassung:
 [CHANGELOG-DE.md](CHANGELOG-DE.md). Releases before v2.28.2:
 [docs/changelog-archive.md](docs/changelog-archive.md).
 
+## v2.84.0 — Images and notes without the software chain; UI work that says how it was considered · 2026-11-03
+
+**Why.** Two owner concerns. First, storing an image, a recording or a note ran the whole software chain: a test suite on the merge push, `--tests` in `finish`. The friction once pushed agent tooling into a separate repository (#366). Second, UI work should show that sizes, states, navigation forward and back and the project's own UI rules were considered — not judged by a machine, but considered (#368). Both had to stay content-driven, not a per-project switch.
+
+**What changes.**
+- **Quiet ranges.** A range whose every path is bookkeeping (`.process-work/`) or **inert** runs the gates and no suite, on the merge push too. `finish.py --apply` merges it without `--tests`, says so, and writes no merge certificate. The certificate itself is untouched.
+- **What is inert.** The area `inert` in `testing.local.json` names where media and notes live. A path is inert only when all hold:
+  - its type is an image, audio, video, `pdf` or prose (`md rst adoc`, not `txt`);
+  - the integration branch's file names it — a branch never declares itself inert;
+  - it is not protected (gate code, `docs/process/`, `.claude/`, `.github/`, `.specify/`, the copier answers);
+  - no stack glob, pin target, `tests` directory or map target covers it.
+
+  Every doubt is code. A build file, configuration or lockfile is never inert.
+- **`quiet.py [BASE..HEAD]`** prints each path's class and exits 0 only for a quiet range, for projects whose own pre-push hook decides about the suite.
+- **`ui-check`**, a new template gate in every project, no module switch:
+  - A Tier 2+ plan the branch adds answers a `ui-check:` block when it declares a design contract or the branch changes UI paths (`areas.ui`, or a design-contract registry's `paths`).
+  - One line per axis: board, viewports, themes, states, navigation, interaction, content extremes, accessibility, rules. `rules` names the UI rule files checked against, the reuse decision and every deviation; a registry's `rule_sources` makes it cite one of those.
+  - A plan that only carries UI along writes `ui-check: n/a — <reason>`; one that declares a contract cannot.
+  - The gate checks that the questions were answered, never the answers. The review bundle and the digest show each block with its counts and every `n/a`.
+- **The gate starts observing.** Template gates on the runner's `OBSERVE_FIRST` list start as if their first record were `shadow --observe`, in `gate_modes.fold`. `gate_modes.py restore ui-check` arms it. A project gate of the same name keeps its mode; dropping one needs a record (`gate-handover` is red until then).
+- **Gate modes.**
+  - The sentinel no longer restores an observed gate on a breached guardrail; it never blocked, so there is nothing to roll back to.
+  - `--observe` now applies only to a gate that never blocked. After a `restore`, or after any earlier record, it counts as plain shadow, and the CLI refuses it, also for template gates that blocked from their first run.
+
+**Effect.** An image or a note lands with the gates and without the suite. UI plans carry a short, structured account of how the UI was considered, and the reviewer sees every `n/a`.
+
+**Update.**
+- A pure update. Without `areas.inert`, the only change in B is that `finish` merges a bookkeeping-only range without `--tests`.
+- `ui-check` runs in every project, observing, and is silent without UI. Promote it with `gate_modes.py restore ui-check --reason …` once the branches in flight have merged.
+- A project with its own pre-push hook calls `quiet.py` before its suite; a `testing.local.json` with only `areas` is valid for that.
+
+**Changed sections.**
+- `testing.md` (Inert changes — images and notes without the software chain; One test path; Areas)
+- `commits.md` (Merging)
+- `train.md` (Who pushes to main)
+- `risk-tiers.md` (Tier 0)
+- `optimization.md` (gate modes: new gate, new template gate)
+- `review-checklist.md` (Surfaces)
+- `design-contracts.md` (UI check)
+- `/plan`
+
+Details: [Plan](docs/analysis/2026-11-03-v2.84.md) #366 #368; follow-ups #371 #372
+
 ## v2.83.0 — Gates by what a change contains · 2026-11-03
 
 **Why.** The owner's principle: gates apply by the content of a change. A UI lint has nothing to say to a backend-only push. Before this release, only a project's own gates could be limited to raw path globs, there was no shared notion of what the project's areas are, and the runner's summary called a skipped or disabled gate "passed". Separately, attest asked for another issue's criterion when the spec cited it as `#N/AC-x`, and recommended the very form already written (downstream #2840).

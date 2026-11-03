@@ -7,6 +7,10 @@ details are in the [CHANGELOG](CHANGELOG.md).
 
 Deutsche Fassung: [NEWS-DE.md](NEWS-DE.md).
 
+## v2.84.0 — Images and notes without the software chain
+
+Storing an image, a recording or a note no longer runs the project's test suite. The process checks still run, and only file types that cannot change behaviour, in places the main branch has marked for them, count as such; a build file or a setting is always tested. User-interface plans now answer a short list of questions: sizes, light and dark, states, the way in and back, extreme content, accessibility, and which of the project's UI rules they followed. The check makes sure the questions were answered, not how well; that stays the reviewer's and the owner's judgement. It starts by only observing and blocks once the owner switches it on.
+
 ## v2.83.0 — Gates by what a change contains
 
 A project can now say once which parts of its repository are user interface, iOS, backend and so on, and tie its own checks to them. A check for the user interface then runs only when a change touches the user interface, and the output says plainly which checks did not run and why, instead of reporting them as passed. A branch cannot switch off its own check by redefining these parts. A small fix also stops the process from demanding a test for another issue's criterion that the specification merely quotes.
