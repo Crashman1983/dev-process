@@ -1197,13 +1197,16 @@ def struck_criteria(plan: str, spec: str) -> frozenset[str]:
     return _criteria(plan, spec)[1]
 
 
-def _cited_elsewhere(plan: str) -> tuple[str, set[str]]:
-    """(the plan with its citations of other issues blanked, the ids cited that way). A
+def _cited_elsewhere(plan: str, declared_in: str | None = None) -> tuple[str, set[str]]:
+    """(the text with its citations of other issues blanked, the ids cited that way). A
     citation naming the number of an issue the plan declares — in any form `check_review`
-    reads (`ref_token`), any repository — is no citation: it stays a mention (fail closed)."""
+    reads (`ref_token`), any repository — is no citation: it stays a mention (fail closed).
+    `declared_in` is the text whose `issue:` lines say which issues are the work's own —
+    the plan's, also when the spec's citations are blanked (a spec citing `#2831/AC-6`
+    made AC-6 the work's own criterion, downstream #2840)."""
     from check_review import ISSUE_DECL, parse_issue_ref, ref_token  # noqa: PLC0415
     mine: set[int] = set()
-    for m in ISSUE_DECL.finditer(plan):
+    for m in ISSUE_DECL.finditer(plan if declared_in is None else declared_in + "\n" + plan):
         tok = ref_token(m.group(1))
         ref = parse_issue_ref(tok) or ((None, int(tok)) if tok.isascii() and tok.isdigit() else None)
         if ref:
@@ -1225,8 +1228,11 @@ _BARE_MENTION = re.compile(r"\b" + _AC + r"(?!\w)")
 
 def _criteria(plan: str, spec: str) -> tuple[frozenset[str], frozenset[str], frozenset[str]]:
     plan, spec = _EXAMPLE_SPAN.sub(" ", plan), _EXAMPLE_SPAN.sub(" ", spec)
+    # the spec cites another issue's criterion the same way the plan does
+    spec, cited_in_spec = _cited_elsewhere(spec, declared_in=plan)
     in_spec = {ac_key(m) for m in AC_ID.finditer(spec)}
     plan, cited = _cited_elsewhere(plan)
+    cited |= cited_in_spec
     bare = {ac_key(m) for m in _BARE_MENTION.finditer(plan)}
     named = {ac_key(m) for m in AC_ID.finditer(plan)} | in_spec | (cited & bare)
     foreign = cited - named  # a bare mention or the spec keeps an id the work's own
