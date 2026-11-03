@@ -147,7 +147,10 @@ def test_off_skips_and_sampled_runs_on_a_stable_share_of_commits(render, tmp_pat
     for i in range(40):
         (out / f"f{i}.txt").write_text(str(i), encoding="utf-8")
         _commit(out, f"c{i}")
-        assert _gates(out).returncode == 0
+        g = _gates(out)
+        assert g.returncode == 0
+        # a gate that did not run is never counted as passed (#369 refute)
+        assert "not run by mode (" in g.stdout and "ok" in g.stdout.split("not run by mode (")[1], g.stdout
         seen |= {e["outcome"] for e in _events(out) if e["gate"] == "bad"}
         if i >= 3 and seen == {"fail", "unsampled"}:
             break

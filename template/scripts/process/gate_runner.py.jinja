@@ -141,12 +141,13 @@ def with_local_gates(root: Path) -> tuple[dict, dict]:
     return {**GATES, **gates}, local
 
 
-def _area_globs(root: Path, name: str, areas: list[str], memo: dict) -> list[str] | None:
-    """The globs a local gate's areas stand for: the union of the areas at the
-    integration ref and in the working tree, so a branch can widen an area but
+def _area_globs(root: Path, areas: list[str], memo: dict) -> tuple[list[str] | None, str | None]:
+    """(the globs a local gate's areas stand for, a problem). The union of the areas
+    at the integration ref and in the working tree, so a branch can widen an area but
     never narrow it to skip its own gate — and can introduce an area and the gate
-    that names it in one change. None means "run the gate": an area named only in
-    the working tree (a note says so). An area named nowhere is a broken list."""
+    that names it in one change. Globs None means "run the gate": an area named only
+    in the working tree (a note says so). A problem — an area named nowhere, or a
+    testing.local.json this checkout cannot read — fails the gate with its cause."""
     import testing_config  # noqa: PLC0415
 
     if "areas" not in memo:
@@ -156,24 +157,28 @@ def _area_globs(root: Path, name: str, areas: list[str], memo: dict) -> list[str
             ref = integration_ref(root)
         except Exception:  # noqa: BLE001 — no readable base: the working tree alone
             ref = None
-        memo["areas"] = (testing_config.areas_at(root, None),
-                         testing_config.areas_at(root, ref) if ref else None)
-    tree, base = memo["areas"]
-    tree, base = tree or {}, base or {}
+        try:
+            cfg = testing_config.load(root)
+            tree, broken = (cfg["areas"] if cfg else {}), None
+        except testing_config.ConfigError as exc:
+            tree, broken = {}, str(exc)
+        memo["areas"] = (tree, broken, (testing_config.areas_at(root, ref) if ref else None) or {})
+    tree, broken, base = memo["areas"]
     globs: list[str] = []
     fresh: list[str] = []
     for area in areas:
         if area not in tree and area not in base:
-            raise _local_refused(f"{name}: area {area!r} is in no {testing_config.CONFIG} "
-                                 f"`areas` (neither here nor on the integration branch)")
+            why = (f"{testing_config.CONFIG} cannot be read here ({broken})" if broken else
+                   f"area {area!r} is in no {testing_config.CONFIG} `areas` (neither here "
+                   f"nor on the integration branch)")
+            return None, why
         if area not in base:
             fresh.append(area)
         globs += base.get(area, []) + tree.get(area, [])
     if fresh:
-        print(f"gate-runner: note: {name}: area(s) {', '.join(fresh)} not on the integration "
-              f"branch yet — the gate runs until they are")
-        return None
-    return globs
+        memo.setdefault("fresh", {})[tuple(areas)] = fresh
+        return None, None
+    return globs, None
 
 
 def _untouched(root: Path, globs: list[str], memo: dict) -> bool:
@@ -518,6 +523,7 @@ def main() -> int:
     weakened: list[str] = []
     skipped: list[str] = []
     shadow_failed: list[str] = []
+    not_run: list[str] = []  # off, or not sampled this commit
     for name in active:
         _key, cmd = gates[name]
         spec = local.get(name, {})
@@ -528,16 +534,32 @@ def main() -> int:
             weakened.append(f"{name} {node_mode}")
         # stderr: pre-commit shows a passing hook's stdout to nobody
         if node_mode == "off":
+            not_run.append(name)
             print(f"== {name}: off ({node.get('record')}) — not run ==", file=sys.stderr)
             _record_event(events, context, name, mode=mode, outcome="off", rc=None, duration_s=0.0)
             continue
         if node_mode == "sampled" and not gate_modes.sampled_in(name, context.get("head"), node["rate"]):
+            not_run.append(name)
             print(f"== {name}: sampled at {node['rate']:.0%} — not this commit ==", file=sys.stderr)
             _record_event(events, context, name, mode=mode, outcome="unsampled", rc=None, duration_s=0.0)
             continue
         if spec.get("paths") or spec.get("areas"):
             globs = list(spec.get("paths") or [])
-            area_globs = _area_globs(root, name, spec["areas"], in_flight) if spec.get("areas") else []
+            area_globs, area_problem = (_area_globs(root, spec["areas"], in_flight)
+                                        if spec.get("areas") else ([], None))
+            if area_problem:
+                # the gate cannot be scoped: it fails with the cause, the run goes on
+                print(f"gate-runner: {name}: {area_problem} — fix it; an unscopable gate "
+                      f"is red, never skipped", file=sys.stderr)
+                failed.append(name)
+                reasons[name] = "its areas cannot be resolved"
+                _record_event(events, context, name, mode=mode, outcome="missing", rc=None,
+                              duration_s=0.0, reason=area_problem)
+                continue
+            fresh = in_flight.get("fresh", {}).get(tuple(spec.get("areas") or ()))
+            if fresh:
+                print(f"gate-runner: note: {name}: area(s) {', '.join(fresh)} not on the "
+                      f"integration branch yet — the gate runs until they are")
             scope = ", ".join([*(f"areas {a}" for a in spec.get("areas") or []), *globs])
             if area_globs is not None and _untouched(root, globs + area_globs, in_flight):
                 print(f"== {name}: no path in flight matches {scope} — not run ==")
@@ -633,11 +655,13 @@ def main() -> int:
                   "waive it with a named owner, today.")
         return 1
     # never claim a check that did not run, or did not pass, as passed
-    if skipped or shadow_failed:
-        passed = len(active) - len(skipped) - len(shadow_failed)
+    if skipped or shadow_failed or not_run:
+        passed = len(active) - len(skipped) - len(shadow_failed) - len(not_run)
         parts = [f"{passed} passed"]
         if skipped:
             parts.append(f"{len(skipped)} skipped (not in this change: {', '.join(skipped)})")
+        if not_run:
+            parts.append(f"{len(not_run)} not run by mode ({', '.join(not_run)})")
         if shadow_failed:
             parts.append(f"{len(shadow_failed)} failed in shadow ({', '.join(shadow_failed)})")
         summary = f"{len(active)} active gate(s): " + ", ".join(parts)

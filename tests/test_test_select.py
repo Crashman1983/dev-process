@@ -395,11 +395,14 @@ def _testing_config():
     return mod
 
 
-@pytest.mark.parametrize("bad", [{"areas": []}, {"areas": {"ui": "x/**"}},
-                                 {"areas": {"ui": ["x/**", ""]}}, {"areas": {"": ["x/**"]}}])
-def test_malformed_areas_are_a_broken_configuration(bad):
+@pytest.mark.parametrize("bad, says", [
+    ({"areas": []}, "areas must be an object"),
+    ({"areas": {"ui": "x/**"}}, "areas.ui must be a list of non-empty strings"),
+    ({"areas": {"ui": ["x/**", ""]}}, "areas.ui must be a list of non-empty strings"),
+    ({"areas": {"": ["x/**"]}}, "an area needs a name")])
+def test_malformed_areas_are_a_broken_configuration(bad, says):
     tc = _testing_config()
-    with pytest.raises(tc.ConfigError, match="areas"):
+    with pytest.raises(tc.ConfigError, match=says):
         tc.parse(bad)
 
 
