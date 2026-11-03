@@ -841,7 +841,8 @@ def test_the_legacy_integration_state_names_the_active_integration(render, tmp_p
 
 
 @pytest.mark.parametrize("key", [r".claude/skills/speckit-plan/SKILL\u0000.md",
-                                 r".claude/sk\ud800ills/speckit-plan/SKILL.md"])  # JSON escapes
+                                 r".claude/sk\ud800ills/speckit-plan/SKILL.md",
+                                 r".claude/skills/speckit-plan\udcff/SKILL.md"])  # JSON escapes
 def test_odd_manifest_data_never_crashes_the_gate(render, tmp_path, key):
     out = _render(render, tmp_path)
     _integration(out)
@@ -850,7 +851,10 @@ def test_odd_manifest_data_never_crashes_the_gate(render, tmp_path, key):
     _repo(out)
     r = _gate(out)
     assert r.returncode == 0 and "Traceback" not in r.stderr, r.stdout + r.stderr
-    assert any("unverified" in n for n in _skill_notes(r)), r.stdout
+    if "udcff" in key:  # a lone surrogate reaches the note: printed escaped
+        assert "speckit-plan\\udcff" in r.stdout, r.stdout
+    else:
+        assert any("unverified" in n for n in _skill_notes(r)), r.stdout
 
 
 def test_a_fifo_where_a_manifest_is_read_does_not_hang_the_gate(render, tmp_path):
@@ -884,3 +888,30 @@ def test_a_manifest_without_any_skill_is_unverified(render, tmp_path):
     _repo(out)
     notes = _skill_notes(_gate(out))
     assert len(notes) == 1 and "lists no /speckit-* skill" in notes[0], notes
+
+
+def test_a_stale_legacy_integration_beside_a_default_is_not_read(render, tmp_path):
+    # Spec Kit takes `integration` only when `default_integration` is absent
+    out = _render(render, tmp_path)
+    _integration(out, name="copilot", files=[".github/skills/speckit-plan/SKILL.md"])
+    import shutil
+    shutil.rmtree(out / ".github/skills")
+    _integration(out)
+    (out / ".specify/integration.json").write_text(json.dumps(
+        {"installed_integrations": ["claude"], "default_integration": "claude",
+         "integration": "copilot"}))
+    _repo(out)
+    assert _skill_notes(_gate(out)) == []
+
+
+def test_a_symlinked_skills_directory_is_read_through_its_target(render, tmp_path):
+    # one committed copy under .agents/skills, .claude/skills links to it
+    import os
+    import shutil
+    out = _render(render, tmp_path)
+    _integration(out)
+    (out / ".agents").mkdir()
+    shutil.move(str(out / ".claude/skills"), str(out / ".agents/skills"))
+    os.symlink("../.agents/skills", out / ".claude/skills")
+    _repo(out)
+    assert _skill_notes(_gate(out)) == []

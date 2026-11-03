@@ -47,8 +47,9 @@ contents rule, one level per ignored parent:
 
 <!-- gitignore-skills -->
 ```gitignore
-# when .claude/ itself was ignored; if only .claude/skills/ was,
-# use the last two lines alone — the first two would hide new .claude/ files
+# replaces the old directory rule (.claude/ or .claude/skills/) — a `!`
+# line below a directory rule never re-includes; if only .claude/skills/ was
+# ignored, use the last two lines alone (the first two hide new .claude/ files)
 .claude/*
 !.claude/skills/
 .claude/skills/*
