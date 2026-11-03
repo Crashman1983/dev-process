@@ -61,6 +61,9 @@ equivalent routes:
   local default branch, run the gates with the merge target
   (`PROCESS_PUSH_TARGETS=refs/heads/<default>` — no pre-push runs them), merge
   `--ff-only`, delete the branch. `finish.py --apply` does exactly that.
+  A **quiet** range — bookkeeping and inert paths only, an image or a note
+  (`testing.md`, "Inert changes") — takes the same route without a test run:
+  branch, commit, `finish.py --apply`, no `--tests`, no train.
 - **Hosted (PR/MR):** open a pull/merge request; the review gate runs as the PR
   review plus the `process-gates` CI job, and a linear-history merge ("rebase and
   merge" or a fast-forward-only setting) is the `--ff-only` equivalent. Where the

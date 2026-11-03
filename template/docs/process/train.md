@@ -230,7 +230,10 @@ session reset its branch onto main and published 16 commits past a `block`.
   `dispatch.py stop <branch>` clears a record whose session has ended.
 - **The route is named.** The train and `finish.py --apply` set
   `PROCESS_MERGE_ROUTE=train|finish` for their own push to main and for
-  nothing else. Any other push to main is refused.
+  nothing else. Any other push to main is refused. `finish` merges a quiet
+  range (bookkeeping and inert paths only, `testing.md`) without a test run
+  and without a certificate; the gates and the review verdict still run on
+  its push.
 - **The owner override** — `PROCESS_OWNER_OVERRIDE="<reason>" git push …` —
   passes a push past the train. It needs a reason, is refused from a
   dispatched session, and appends one line (time, user, host, branch, head,

@@ -13,8 +13,10 @@ tail as ONE readable verdict instead of a ritual scattered over four docs.
 Read-only by default: it verifies and then PRINTS the exact remaining
 commands. With `--apply` it executes the deterministic part itself
 (archive commit, rebase; then merge, push and branch delete only behind the
-batch's full suite, `--tests CMD` or `--tests-passed`) — every step prints
-its command and the first failure stops in a state git explains. A green
+batch's full suite, `--tests CMD` or `--tests-passed`, or for a quiet range
+(bookkeeping and inert paths only, `quiet.py`) without a test run and without
+a certificate) — every step prints its command and the first failure stops in
+a state git explains. A green
 `--tests` that is the project's `merge_suite` (`testing.local.json`) on a
 clean tree writes the `merge` certificate, so the push to main runs no suite
 again; `--tests` alone runs that `merge_suite`. `--tests-passed` is a claim
@@ -510,7 +512,12 @@ def apply(root: Path, *, tests: str | None, tests_passed: bool) -> int:
                 for b in blockers:
                     print(f"  - {b}")
                 return 1
-    # 3. the batch pays completeness once, here
+    # 3. the batch pays completeness once, here — unless the range is quiet:
+    # bookkeeping and inert paths only, judged now, after the rebase (#366)
+    quiet_range = not tests and not tests_passed and _quiet_range(root)
+    if quiet_range:
+        print("finish: the range is quiet (bookkeeping and inert paths only) — merging "
+              "without a test run; no merge certificate (#255: none without a run)")
     if tests:
         argv, assigned = run_tests
         shown = shlex.join([*(f"{k}={v}" for k, v in assigned.items()), *argv])
@@ -536,7 +543,7 @@ def apply(root: Path, *, tests: str | None, tests_passed: bool) -> int:
                 ok, why = certificate.write(root, "merge", evidence, before_tree=before[0],
                                             writer="finish --tests", env_names=before[2])
             print(f"finish: merge certificate {'written — the push runs no suite again' if ok else 'not written — ' + why}")
-    elif not tests_passed:
+    elif not tests_passed and not quiet_range:
         suite, _broken = _configured_merge_suite(root)
         certifies = "" if local_only else " and writes the merge certificate"
         print("finish: applied archive + rebase; stopped before the merge — "
@@ -660,6 +667,22 @@ def usage(root: Path, branch: str | None) -> tuple[int | None, str]:
         return issue, _dispatch.tokens_line(root, issue)
     except Exception:  # noqa: BLE001 — a usage line never blocks the merge
         return issue, "tokens: not measured"
+
+
+def _quiet_range(root: Path) -> bool:
+    """The branch's change since its fork is quiet (`quiet.py`, the push's own
+    owner and path set); anything git cannot list is not quiet."""
+    import quiet  # noqa: PLC0415
+    import test_select  # noqa: PLC0415
+
+    try:
+        paths = test_select.changed_paths(root, None)
+    except test_select.Unjudgeable:
+        return False
+    classes = quiet.classify(root, paths)
+    for line in quiet.report(classes):
+        print(f"finish: {line}")
+    return quiet.is_quiet(classes)
 
 
 def _configured_merge_suite(root: Path) -> tuple[str | None, str | None]:
