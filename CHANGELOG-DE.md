@@ -9,6 +9,31 @@ ein Eintrag ohne Plan oder Issue hat keine Details-Zeile. In wenigen Sätzen je 
 English version: [CHANGELOG.md](CHANGELOG.md). Die Releases vor v2.28.2:
 [docs/changelog-archive-DE.md](docs/changelog-archive-DE.md).
 
+## v2.85.0 — Ein Host, der einen Stack nicht kann · 2026-11-03
+
+**Warum.** Downstream kann ein Mac-Agent den Backend-Stack nicht ausführen; sein Preflight fällt dort durch. Jeder Branch-Push, der den Stack wählte, wurde abgewiesen, und der einzige Weg vorbei war `PROCESS_SKIP=tests` mit dem Wort des Owners — dreimal an einem Tag (#373, Kenni #2844). Der Skip schützte nichts, weil die Merge-Suite ohnehin im Zug auf dem Gate-Host läuft, und seine Protokollzeile trug keinen Grund.
+
+**Was sich ändert.**
+- Ein Stack darf einen eigenen `preflight` tragen. Exit 3 heißt „dieser Host kann den Stack nicht“, jeder andere Code ungleich 0 „der Host ist kaputt“.
+- **Beim Branch-Push** lässt eine 3 den Stack **auf dem Gate-Host fällig**: Sein Selektor läuft nicht, die übrigen Stacks laufen, die Ausgabe nennt ihn. Nichts zählt als bestanden: kein Push-Zertifikat, kein Stempel.
+- **Aufschieben darf nur ein Host-Check, den der Integrationsbranch hat.** Der `preflight` des Stacks muss dort unverändert stehen, sein argv muss mindestens eine Repo-Datei als eigenes Argument nennen, und jede solche Datei muss Byte für Byte der des Integrationsbranches gleichen, kein Symlink. `sh -c "…"` und `-m modul` schieben nie auf. Ein Branch erklärt seinen Stack nie selbst für untauglich.
+- **Ein Merge schiebt nie auf.** Merge-Push (bevor ein Zertifikat zählt), Zug und `finish --tests` prüfen jeden Stack; jeder Code ungleich 0, auch 3, ist der Host — der Zug hält als „Umgebung“ und beschuldigt niemanden. `train.py --preflight ""` ersetzt nur den globalen Check.
+- Der Check eines Stacks läuft nur, wenn die Änderung dem Stack Arbeit gibt; `preflight_timeout` gilt auch nur mit Stack-Preflights.
+- **Jeder Skip braucht einen Grund.** `PROCESS_SKIP`, `SKIP=process-gates` von pre-commit und `--bypass NAME` eines Hooks verlangen `PROCESS_SKIP_REASON="<warum>"`; ohne wird der Push abgewiesen, mit steht er in der Protokollzeile. Eine dispatchte Sitzung wird wie bisher zuerst abgewiesen.
+
+**Wirkung.** Ein Host, der einen Stack nicht kann, pusht seine Branches ohne Owner-Skip und kann sie trotzdem nicht mergen. Jeder verbleibende Skip nennt seinen Grund.
+
+**Update.**
+- Reines Update. Ohne Stack-`preflight` ist nur der Pflichtgrund neu: `PROCESS_SKIP_REASON` neben jeden Skip setzen.
+- Zur Nutzung bekommt ein Stack einen Host-Check als committete Datei, die dort mit 3 endet, wo der Host den Stack nicht kann, etwa `"preflight": ["python3", "scripts/host_check.py"]`, und der landet zuerst auf main.
+
+**Geänderte Abschnitte.**
+- `testing.md` (One test path: A host that cannot run a stack; Skipping)
+- `train.md` (Preflight des Zugs; Skipped gates)
+- `git-hooks.md`
+
+Details: [Plan](docs/analysis/2026-11-03-v2.85.md) #373
+
 ## v2.84.0 — Bilder und Notizen ohne Software-Kette; UI-Arbeit sagt, wie sie bedacht wurde · 2026-11-03
 
 **Warum.** Zwei Anliegen des Owners. Erstens ließ ein Bild, eine Aufnahme oder eine Notiz die ganze Software-Kette laufen: eine Testsuite beim Merge-Push, `--tests` in `finish`. Diese Reibung hat einmal Agenten-Werkzeug in ein eigenes Repository getrieben (#366). Zweitens soll UI-Arbeit zeigen, dass Größen, Zustände, Navigation vor und zurück und die eigenen UI-Regeln des Projekts bedacht wurden. Eine Maschine beurteilt das nicht, aber bedacht muss es sein (#368). Beides sollte nach dem Inhalt greifen, nicht über einen Schalter je Projekt.
