@@ -10,6 +10,25 @@ A few plain sentences per release: [NEWS.md](NEWS.md). Deutsche Fassung:
 [CHANGELOG-DE.md](CHANGELOG-DE.md). Releases before v2.28.2:
 [docs/changelog-archive.md](docs/changelog-archive.md).
 
+## v2.83.0 — Gates by what a change contains · 2026-11-03
+
+**Why.** The owner's principle: gates apply by the content of a change. A UI lint has nothing to say to a backend-only push. Before this release, only a project's own gates could be limited to raw path globs, there was no shared notion of what the project's areas are, and the runner's summary called a skipped or disabled gate "passed". Separately, attest asked for another issue's criterion when the spec cited it as `#N/AC-x`, and recommended the very form already written (downstream #2840).
+
+**What changes.**
+- `testing.local.json` names the project's **areas** once, as globs: `"areas": {"ui": [...], "ios": [...]}`. An empty list means "no such content here".
+- A local gate in `gates.local.json` may name the areas it is for (`"areas": ["ui"]`). It runs when its area is in the change and is skipped otherwise, with the reason in its event.
+- Areas count as the union of the integration branch's file and the checkout's. A branch can widen an area, never narrow it to skip its own gate. A new area and the gate naming it can land together. If git cannot name the paths, or the checkout's file cannot be read, the gate runs.
+- The summary line counts gates that were skipped, failed in shadow, or not run by their mode separately. It never calls them passed. With none of these, the wording is unchanged.
+- A spec citing `#N/AC-x` no longer makes that criterion the work's own.
+
+**Effect.** A project's checks for its product run where they apply, and the output says plainly what did not run.
+
+**Update.** A pure update. Without `areas` nothing changes. Template gates are process gates and still run on every push.
+
+**Changed sections.** `testing.md` (One test path, Areas — gates by what a change contains)
+
+Details: [Plan](docs/analysis/2026-11-03-v2.83.md) #369 (in part) #366 #368 (next release)
+
 ## v2.82.0 — Works in a locked-down sandbox · 2026-11-03
 
 **Why.** In a sandbox that reaches GitHub but not the package index, the process stopped twice. `specify init` writes the `/speckit-*` skills into the agent's skills directory. A project that ignored that directory never committed them, without a warning, so every fresh clone lacked the commands and needed the Spec Kit CLI, which the sandbox refuses (#363). And every gate that declares PyYAML was started through `uv run`, even when the system Python already had it. Without PyPI, uv failed. The gate runner then said only `FAILED gates: …`, and every push was refused (#365). An experiment in a fresh repo without network access confirmed both.

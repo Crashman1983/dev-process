@@ -7,6 +7,10 @@ details are in the [CHANGELOG](CHANGELOG.md).
 
 Deutsche Fassung: [NEWS-DE.md](NEWS-DE.md).
 
+## v2.83.0 — Gates by what a change contains
+
+A project can now say once which parts of its repository are user interface, iOS, backend and so on, and tie its own checks to them. A check for the user interface then runs only when a change touches the user interface, and the output says plainly which checks did not run and why, instead of reporting them as passed. A branch cannot switch off its own check by redefining these parts. A small fix also stops the process from demanding a test for another issue's criterion that the specification merely quotes.
+
 ## v2.82.0 — Works in a locked-down sandbox
 
 In an environment that reaches GitHub but may not download packages, the process used to stop in two places. A fresh copy of the repository lost the specification commands, because their folder was excluded from version control. And the process checks tried to download a library the computer already had, failed, and blocked every upload without saying why. The setup now keeps these commands in the repository. The checks use what is already installed, and they say plainly when something is missing. A test in exactly such an environment now runs the whole way through.
