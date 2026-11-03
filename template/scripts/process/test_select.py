@@ -301,8 +301,12 @@ def _not_deferrable(root: Path, stack: dict, changed: set[str]) -> str | None:
         if arg in changed:  # lexically, before any resolving: a symlink swap is a change
             return f"this branch changes its host check ({arg})"
         here = root / arg
-        if Path(arg).is_absolute() or not (here.is_file() or here.is_symlink()):
+        if Path(arg).is_absolute():
+            if top in Path(arg).resolve().parents:
+                return f"its host check {arg} is an absolute path into the repository — name it relative"
             continue  # an interpreter or a system tool is no host check of the repository's
+        if not (here.is_file() or here.is_symlink()):
+            continue
         if here.is_symlink() or top not in here.resolve().parents:
             return f"its host check {arg} leaves the repository (a symlink)"
         shown = _git_bytes(root, "show", f"{ref}:{arg}")

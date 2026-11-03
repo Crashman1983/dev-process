@@ -100,7 +100,9 @@ def _owner_only(root: Path, env: dict[str, str], skips: set[str], targets: list[
         why = f"phase `{sorted(phases)[0]}`" if phases else problem
         return (f"PROCESS_SKIP={','.join(sorted(skips))} comes from a dispatched session ({why}) — "
                 f"skipping checks is the owner's emergency exit, not a route for the agent")
-    what = f"PROCESS_SKIP={','.join(sorted(skips))}"
+    # the label the owner used: pre-commit's `SKIP=process-gates` is its own
+    what = (f"PROCESS_SKIP={','.join(sorted(skips))}" if env.get(merge_route.PROCESS_SKIP_ENV, "").strip()
+            else merge_route._skipped_gates(env) or f"PROCESS_SKIP={','.join(sorted(skips))}")
     reason = merge_route.skip_reason(env)
     if not reason:
         return merge_route.no_reason_message(what)
