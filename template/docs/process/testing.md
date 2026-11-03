@@ -347,7 +347,9 @@ and a skipped count in the summary.
 The skip only ever errs towards running. If git cannot name the paths in
 flight, the gate runs. The areas count as the **union** of the integration
 branch's file and this checkout's: a branch can widen an area but never narrow
-it to skip its own gate (if this checkout's file cannot be read, the gate runs).
+it to skip its own gate. If this checkout's file cannot be read, a gate whose
+areas are all on the integration branch runs; one whose area is there neither is
+red with that cause.
 Which areas a gate names is `gates.local.json`'s — gate configuration, guarded
 like gate code, not by the areas. A branch may introduce an area and the gate that
 names it together; until the area is on the integration branch, that gate runs
