@@ -113,24 +113,46 @@ def _skill_part(path: str) -> tuple[str, str] | None:
     return path[:m.start(1)].rstrip("/"), m.group(2).lower()
 
 
+def _read_json(path: Path) -> object:
+    """JSON from a regular file; a FIFO or directory is unreadable, never a hang."""
+    if not path.is_file():
+        raise OSError(f"{path.name} is not a regular file")
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _installed(state: object) -> list[str]:
+    """Spec Kit's own reading of integration.json: the installed list, the
+    legacy single `integration` and the `default_integration`."""
+    if not isinstance(state, dict):
+        return []
+    names = state.get("installed_integrations")
+    names = list(names) if isinstance(names, list) else []
+    names += [state.get("integration"), state.get("default_integration")]
+    return sorted({n for n in names
+                   if isinstance(n, str) and re.fullmatch(r"[\w.-]+", n)})
+
+
 def _manifests(root: Path, notes: list[str]) -> list[Path]:
     integ = root / INTEGRATIONS
     found = sorted(p for p in integ.glob("*.manifest.json")
                    if p.name != CORE_MANIFEST) if integ.is_dir() else []
     state = root / INTEGRATION_STATE
-    try:
-        installed = json.loads(state.read_text(encoding="utf-8"))["installed_integrations"]
-        if not isinstance(installed, list) or not installed:
-            raise TypeError
-    except FileNotFoundError:
+    if not state.exists():
+        if found:
+            notes.append(f"no {INTEGRATION_STATE} — every integration manifest "
+                         f"is read for the /speckit-* skill check")
         return found
-    except (OSError, ValueError, KeyError, TypeError):
-        notes.append(f"{INTEGRATION_STATE}: no readable installed_integrations "
-                     f"list — every integration manifest is read for the "
-                     f"/speckit-* skill check")
+    try:
+        installed = _installed(_read_json(state))
+    except (OSError, ValueError):
+        installed = []
+    if not installed:
+        notes.append(f"{INTEGRATION_STATE}: names no installed integration — "
+                     f"every integration manifest is read for the /speckit-* "
+                     f"skill check")
         return found
     active = []
-    for name in sorted(str(n) for n in installed):
+    for name in installed:
         p = integ / f"{name}.manifest.json"
         if p.is_file():
             active.append(p)
@@ -144,26 +166,31 @@ def _extension_ids(root: Path) -> list[str] | None:
     """Ids of installed Spec Kit extensions — their skills (speckit-<id>-…)
     are listed in no integration manifest; None when the registry is unreadable."""
     reg = root / EXTENSION_REGISTRY
-    if not reg.is_file():
+    if not reg.exists():
         return []
     try:
-        exts = json.loads(reg.read_text(encoding="utf-8"))["extensions"]
+        exts = _read_json(reg)["extensions"]
         if not isinstance(exts, dict):
             raise TypeError
     except (OSError, ValueError, KeyError, TypeError):
         return None
-    return sorted(str(k).lower() for k in exts)
+    return sorted(str(k).lower() for k in exts if str(k))
+
+
+def _git(root: Path, *args: str) -> subprocess.CompletedProcess | None:
+    try:
+        # errors="replace": a file name that is not UTF-8 must not crash the gate
+        return subprocess.run(["git", *args], cwd=root, capture_output=True,
+                              text=True, encoding="utf-8", errors="replace")
+    except OSError:
+        return None
 
 
 def _tracked(root: Path, dirs: list[str]) -> dict[str, str] | None:
-    """path -> `git ls-files -t` tag for tracked files under dirs; None when
+    """path -> `git ls-files -t` tag for indexed files under dirs; None when
     git cannot answer (no repository, no git)."""
-    try:
-        r = subprocess.run(["git", "--literal-pathspecs", "ls-files", "-t", "-z",
-                            "--", *dirs], cwd=root, capture_output=True, text=True)
-    except OSError:
-        return None
-    if r.returncode != 0:
+    r = _git(root, "--literal-pathspecs", "ls-files", "-t", "-z", "--", *dirs)
+    if r is None or r.returncode != 0:
         return None
     out: dict[str, str] = {}
     for entry in r.stdout.split("\0"):
@@ -172,16 +199,23 @@ def _tracked(root: Path, dirs: list[str]) -> dict[str, str] | None:
     return out
 
 
+def _committed(root: Path, dirs: list[str]) -> set[str] | None:
+    """Files under dirs in HEAD — what a clone gets (a staged skill is not
+    committed yet); empty before the first commit, None when unreadable."""
+    r = _git(root, "--literal-pathspecs", "ls-tree", "-r", "-z", "--name-only",
+             "HEAD", "--", *dirs)
+    if r is not None and r.returncode == 0:
+        return {e for e in r.stdout.split("\0") if e}
+    head = _git(root, "rev-parse", "--verify", "-q", "HEAD")
+    return set() if head is not None and head.returncode == 1 else None
+
+
 def _ignore_rule(root: Path, path: str) -> str:
-    try:
-        # check-ignore takes plain paths (it refuses pathspec magic) and, with
-        # --no-index, names the rule for a path that is not on disk
-        r = subprocess.run(["git", "check-ignore", "-v", "--no-index", "--", path],
-                           cwd=root,
-                           capture_output=True, text=True)
-    except OSError:
-        return ""
-    m = IGNORE_SOURCE.match(r.stdout.split("\t", 1)[0]) if r.returncode == 0 else None
+    # check-ignore takes plain paths (it refuses pathspec magic) and, with
+    # --no-index, names the rule for a path that is not on disk
+    r = _git(root, "check-ignore", "-v", "--no-index", "--", path)
+    m = (IGNORE_SOURCE.match(r.stdout.split("\t", 1)[0])
+         if r is not None and r.returncode == 0 else None)
     return f" (ignored by {m[1]}:{m[2]} `{m[3]}`)" if m else ""
 
 
@@ -190,7 +224,8 @@ def _orphan(path: str, dirs: set[str], exts: list[str]) -> bool:
     if part is None or (part[0] or ".") not in dirs:
         return False
     rest = SKILL_PART.search(path).group(1)[len("speckit."):].lower()
-    return not any(rest.startswith(e) for e in exts)
+    return not any(rest == e or rest.startswith((e + "-", e + "."))
+                   for e in exts)
 
 
 def _skill_notes(root: Path) -> list[str]:
@@ -203,13 +238,16 @@ def _skill_notes(root: Path) -> list[str]:
     manifests = _manifests(root, notes)
     for m in manifests:
         try:
-            files = json.loads(m.read_text(encoding="utf-8"))["files"]
+            files = _read_json(m)["files"]
             if not isinstance(files, dict):
                 raise TypeError
         except (OSError, ValueError, KeyError, TypeError):
-            notes.append(f"{m.relative_to(root).as_posix()}: unreadable — "
+            notes.append(f"{INTEGRATIONS}/{m.name}: unreadable — "
                          f"its /speckit-* skills are unverified")
             continue
+        if not any(_skill_part(str(f)) for f in files):
+            notes.append(f"{INTEGRATIONS}/{m.name}: lists no /speckit-* skill "
+                         f"file — its skills are unverified")
         for path in files:
             part = _skill_part(str(path))
             if part is None:
@@ -224,7 +262,8 @@ def _skill_notes(root: Path) -> list[str]:
     kept, dropped = sorted(set(kept)), sorted(set(dropped))
     listed = set(kept) | set(dropped)
     tracked = _tracked(root, sorted(dirs)) if dirs else {}
-    if tracked is None:
+    committed = _committed(root, sorted(dirs)) if dirs else set()
+    if tracked is None or committed is None:
         notes.append(f"git cannot list the tracked files here — whether the "
                      f"/speckit-* skills are committed is unverified; a fresh "
                      f"clone gets only committed ones (Spec Kit setup)")
@@ -233,16 +272,21 @@ def _skill_notes(root: Path) -> list[str]:
             notes.append(f"{len(gone)} /speckit-* skill file(s) missing from "
                          f"this checkout: {_listed(gone)} (Spec Kit setup)")
     else:
-        never = [p for p in kept if p not in tracked]
-        lost = [p for p in kept if p in tracked and tracked[p] != "S"
+        never = [p for p in kept if p not in committed]
+        lost = [p for p in kept if p in committed and tracked.get(p) != "S"
                 and not (root / p).is_file()]
         if never:
-            here = [p for p in never if (root / p).is_file()]
-            how = ("commit them" if len(here) == len(never) else
-                   "commit them from a checkout that has them, or run the "
-                   "Spec Kit setup")
+            unstaged = [p for p in never if p not in tracked]
+            if not unstaged:
+                how = "they are staged — commit them"
+            elif all((root / p).is_file() for p in unstaged):
+                how = "add and commit them"
+            else:
+                how = ("commit them from a checkout that has them, or run the "
+                       "Spec Kit setup")
+            rule = _ignore_rule(root, unstaged[0]) if unstaged else ""
             notes.append(f"{len(never)} /speckit-* skill file(s) never "
-                         f"committed{_ignore_rule(root, never[0])}: "
+                         f"committed{rule}: "
                          f"{_listed(never)} — a fresh clone or worktree has no "
                          f"/speckit-* skill without them; {how} (Spec Kit "
                          f"setup: committing the skills)")
@@ -291,7 +335,12 @@ def check(root: Path) -> tuple[list[str], list[str]]:
                     f"pointer with a second truth beside the gated one; "
                     f"restore the pointer file (git checkout -- {CONSTITUTION})")
 
-    soft += _skill_notes(root)
+    try:
+        soft += _skill_notes(root)
+    except Exception as exc:  # noqa: BLE001 — the skill check is soft by contract
+        # (#363 AC-3): odd manifest data must never turn into a block or a crash
+        soft.append(f"/speckit-* skill check failed ({type(exc).__name__}: "
+                    f"{exc}) — whether the skills are committed is unverified")
 
     sdir = root / SPECS_DIR
     if sdir.is_dir():
