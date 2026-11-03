@@ -581,3 +581,21 @@ def test_the_modules_of_a_distribution_come_from_its_own_metadata(render, tmp_pa
     gi = _load(out)
     assert "yaml" in gi._modules_of("pyyaml")
     assert gi._modules_of("no-such-distribution-365") == frozenset()
+
+
+def test_a_requires_python_only_block_is_named_when_uv_fails(render, tmp_path):
+    out = render(tmp_path, {"project_name": "demo"})
+    gi = _load(out)
+    cmd = _declaring(out, [], python=">=3.99")
+    err = "error: No interpreter found for Python >=3.99\n  Caused by: none\n"
+    assert gi.uv_launch_failure(["uv", "run", "--script", str(out / cmd[0])], 2, "", err)
+
+
+def test_the_launch_hints_point_at_a_rendered_document(render, tmp_path):
+    out = render(tmp_path, {"project_name": "demo"})
+    doc = (out / "docs/process/testing.md").read_text(encoding="utf-8")
+    assert "### Without the package index" in doc
+    for f in ("gate_invoke.py", "pre_push.py"):
+        text = (out / "scripts/process" / f).read_text(encoding="utf-8")
+        assert "SYSTEM-REQUIREMENTS" not in text, f
+        assert 'testing.md, \\"Without the package index\\"' in text, f

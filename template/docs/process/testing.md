@@ -419,6 +419,20 @@ or bootstrap defect separately from a product failure: both block a trustworthy
 gate, but they have different owners and fixes. A command that passes only in a
 warm development tree is not a reproducible gate.
 
+### Without the package index
+
+A sandbox may reach GitHub but not PyPI. The process gates still run there:
+a gate whose PEP-723 declaration the running Python provably carries
+(Python >= 3.11, PyYAML 6, the module findable) starts with that Python;
+only otherwise does it go through `uv run --script`, which needs the
+package index or a warm uv cache (#365). So the route without the index is
+a Python >= 3.11 with PyYAML 6 (a system package will do) and the hooks
+from `python3 scripts/process/install_hooks.py` — `pre-commit` itself
+comes from PyPI, and its entries start through `uv run`. A project's own
+pre-push hook calls `python3 scripts/process/pre_push.py` (on Windows
+`py -3`). When uv cannot provide a declaration, the gate stays red and its
+section names a launch problem, not a gate finding.
+
 Review binding: the review checklist's "Tests prove acceptance" section is
 where this document is enforced — mapping per criterion, the effect evidence for changed critical contracts, and the
 negative/edge/authorization/invalidation cases are review questions, not

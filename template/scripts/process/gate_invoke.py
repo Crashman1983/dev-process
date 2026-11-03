@@ -288,17 +288,17 @@ def uv_launch_failure(argv: list[str], rc: int, stdout: str, stderr: str) -> str
     if rc == 0 or stdout.strip():
         return None
     script = next((Path(a) for a in argv[1:] if a.endswith(".py")), None)
-    declared = declared_dependencies(script) if script else []
-    if not declared:  # a script without a declaration has no launch to blame
+    if script is None or not _pep723(script):  # no declaration: no launch to blame
         return None
-    deps = ", ".join(declared)
+    declared = declared_dependencies(script)
+    deps = ", ".join(declared) or "its declared Python"
     plain = _ANSI.sub("", stderr)
     if argv[:2] == ["uv", "run"] and _UV_ERROR.search(plain):
         return (f"launched through `uv run` to provide {deps}; uv's error above "
                 f"and no output: most likely uv failed before the script ran — a "
                 f"launch problem, not a gate finding. Without access to the "
                 f"package index, Python >= 3.11 with {deps} runs the gates "
-                f"(docs/SYSTEM-REQUIREMENTS.md)")
+                f"(docs/process/testing.md, \"Without the package index\")")
     failed = _IMPORT_FAILED.search(plain)
     module = (failed.group("missing") or failed.group("source") or "").split(".")[0] if failed else ""
     owned = set().union(*(_modules_of(_REQUIREMENT.match(d).group("name"))
