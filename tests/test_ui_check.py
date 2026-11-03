@@ -318,3 +318,127 @@ def test_the_bundle_and_digest_show_the_block_and_every_opt_out(project):
     r = subprocess.run([sys.executable, "-c", code, a, b], cwd=out, capture_output=True, text=True, env=_env())
     assert "`a.md` ui-check: 9 axes, 0 n/a, 0 inherited; rules: `docs/design/rules.md`" in r.stdout, r.stdout + r.stderr
     assert "ui-check **n/a** — only the label" in r.stdout, r.stdout
+
+
+# --- refute v2.84 ------------------------------------------------------------------
+
+def test_wrapped_axis_lines_continue_the_axis(project):
+    out = project
+    wrapped = BLOCK.replace("- navigation: in from the list, back to it with the selection kept",
+                            "- navigation: in from the list,\n  back to it with the selection kept: and\n  the filter")
+    wrapped = wrapped.replace("- rules: `docs/design/rules.md` — reused the row; no deviation",
+                              "- rules: `docs/design/rules.md:12` — reused the row;\n  no deviation")
+    _plan(out, "design-contract: web\n\n" + TRACE + "\n" + wrapped)
+    _commit(out)
+    r = _check(out)
+    assert r.returncode == 0, r.stdout
+
+
+def test_a_header_then_a_blank_line_then_the_list_is_one_block(project):
+    out = project
+    _plan(out, "design-contract: web\n\n" + TRACE + "\n" + BLOCK.replace("ui-check:\n", "**ui-check:**\n\n"))
+    _commit(out)
+    assert _check(out).returncode == 0
+
+
+def test_a_header_with_no_axes_is_named_at_its_own_line(project):
+    out = project
+    rel = _plan(out, "design-contract: web\n\n" + TRACE + "\nui-check:\n\nsome prose\n")
+    _commit(out)
+    r = _check(out)
+    line = (out / rel).read_text().splitlines().index("ui-check:") + 1
+    assert f"{rel}:{line}: `ui-check:` with no axis line" in r.stdout, r.stdout
+
+
+def test_a_commented_skeleton_or_fenced_example_does_not_disturb_the_real_block(project):
+    out = project
+    for before in (f"<!--\n{BLOCK}-->\n\n", f"```\n{BLOCK}```\n\n", "<!-- inline --> note\n\n"):
+        _plan(out, "design-contract: web\n\n" + TRACE + "\n" + before + BLOCK)
+        _commit(out)
+        r = _check(out)
+        assert r.returncode == 0, (before, r.stdout)
+
+
+def test_a_block_in_indented_code_counts_for_nothing(project):
+    out = project
+    indented = "\n".join("    " + ln for ln in BLOCK.splitlines())
+    _plan(out, "design-contract: web\n\n" + TRACE + "\nAn example:\n\n" + indented + "\n")
+    _commit(out)
+    r = _check(out)
+    assert "no `ui-check:` block" in r.stdout, r.stdout
+
+
+@pytest.mark.parametrize("cite, ok", [
+    ("`docs/design/rules.md:12`", True),
+    ("`docs/design/rules.md#reuse`", True),
+    ("[UI rules](docs/design/rules.md)", True),
+    ("`/etc/hostname`", False),
+    ("`../../../../../../etc/hostname`", False),
+])
+def test_rules_accept_the_usual_citations_and_nothing_outside_the_repository(project, cite, ok):
+    out = project
+    _plan(out, "design-contract: web\n\n" + TRACE + "\n" + BLOCK.replace("`docs/design/rules.md`", cite))
+    _commit(out)
+    r = _check(out)
+    assert (r.returncode == 0) is ok, (cite, r.stdout)
+
+
+def test_one_contract_answered_in_another_surfaces_block_is_a_finding(project):
+    out = project
+    _plan(out, "design-contract: web\n\n" + TRACE + "\n" + BLOCK.replace("ui-check:", "ui-check ios:"))
+    _commit(out)
+    r = _check(out)
+    assert "declares web but has no `ui-check web:` block" in r.stdout, r.stdout
+
+
+def test_observe_is_refused_for_a_gate_that_blocked(project):
+    out = project
+    # a template gate blocked from its first run
+    r = _modes(out, "weaken", "design-contracts", "--to", "shadow",
+               "--observe", "--decision", "owner: try")
+    assert r.returncode == 1 and "never blocked" in r.stderr, r.stderr
+    # ui-check, once restored, has blocked: observing again is refused
+    assert _modes(out, "restore", "ui-check", "--reason", "armed").returncode == 0
+    r = _modes(out, "weaken", "ui-check", "--to", "shadow", "--observe", "--decision", "owner: back")
+    assert r.returncode == 1 and "never blocked" in r.stderr, r.stderr
+
+
+def test_a_local_gate_main_added_after_the_fork_is_no_handover(project):
+    out = project
+    _git(out, "checkout", "-q", "-b", "later", "main")
+    _write(out, "scripts/own.py", "import sys; sys.exit(0)\n")
+    _write(out, "docs/process/gates.local.json", json.dumps({"ui-check": {"module": None, "command": ["scripts/own.py"]}}))
+    _commit(out)
+    _git(out, "push", "-q", "origin", "HEAD:main")
+    _git(out, "checkout", "-q", "feature")
+    r = _modes(out, "check")
+    assert "handover" not in r.stdout, r.stdout
+
+
+def test_a_local_gate_only_on_the_ref_keeps_the_default_off(project):
+    out = project
+    _write(out, "scripts/own.py", "import sys; sys.exit(0)\n")
+    _write(out, "docs/process/gates.local.json", json.dumps({"ui-check": {"module": None, "command": ["scripts/own.py"]}}))
+    _commit(out)
+    _git(out, "push", "-q", "origin", "HEAD:main")
+    _write(out, "docs/process/gates.local.json", "{}")
+    _commit(out)
+    assert "template-default" not in _modes(out, "status").stdout
+
+
+def test_always_is_no_module_name(project):
+    out = project
+    code = ("import sys; sys.path.insert(0, 'scripts/process'); import gate_runner; "
+            "print('always' in gate_runner.KNOWN_MODULES)")
+    r = subprocess.run([sys.executable, "-c", code], cwd=out, capture_output=True, text=True, env=_env())
+    assert r.stdout.strip() == "False", r.stdout + r.stderr
+
+
+def test_the_bundle_keeps_the_d8_hint_beside_a_ui_check_opt_out(project):
+    out = project
+    (out / "docs/process/design-contracts/web.json").unlink()  # no contract: the bare D8 case
+    rel = _plan(out, "ui-check: n/a — only the label")
+    code = ("import sys; sys.path.insert(0, 'scripts/process'); import make_review_bundle as m; "
+            "from pathlib import Path; print(m._ui_evidence(Path('.'), None, [Path(sys.argv[1])]))")
+    r = subprocess.run([sys.executable, "-c", code, rel], cwd=out, capture_output=True, text=True, env=_env())
+    assert "no screenshots" in r.stdout and "ui-check **n/a** — only the label" in r.stdout, r.stdout + r.stderr

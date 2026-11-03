@@ -749,7 +749,8 @@ def main() -> int:
               "once --tests CMD ran the full suite; without a remote --tests-passed is refused)")
     else:
         print("finish: `--apply` executes archive + rebase (+ merge, push, branch delete once "
-              "the full suite is asserted via --tests CMD or --tests-passed)")
+              "the full suite is asserted via --tests CMD or --tests-passed — or at once for a "
+              "quiet range: bookkeeping and inert paths only, `quiet.py`)")
     print(f"finish: {usage(root, _git('rev-parse', '--abbrev-ref', 'HEAD'))[1]}")
     return 0
 

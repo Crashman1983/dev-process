@@ -301,3 +301,21 @@ def test_the_cli_exits_zero_only_for_a_quiet_range(project, tmp_path):
     r = subprocess.run([sys.executable, "scripts/process/quiet.py", "origin/main..HEAD"], cwd=out,
                        capture_output=True, text=True, env=_env(tmp_path))
     assert r.returncode == 1 and "code\tapp/code.py" in r.stdout, r.stdout + r.stderr
+
+
+# --- refute v2.84 ------------------------------------------------------------------
+
+def test_build_files_in_a_prose_suffix_are_never_inert(project, tmp_path):
+    out, bare, git = project
+    _land(git, out, _config(["**"]))
+    got = _classify(out, tmp_path, "requirements.txt", "CMakeLists.txt", "constraints.txt",
+                    "notes/a.txt", ".md", "docs/.md")
+    assert all(c == "code" for c in got.values()), got
+
+
+def test_a_fixture_beside_the_tests_and_a_pin_subject_are_test_inputs(project, tmp_path):
+    out, bare, git = project
+    git("commit", "-q", "--allow-empty", "-m", "tip")
+    got = _classify(out, tmp_path, "app_tests/fixtures/expected.png", "docs/policy.png", "app/x/y.png")
+    for rel in got:
+        assert got[rel].startswith("code — a test input of stack 'app'"), (rel, got)

@@ -221,7 +221,7 @@ def fold(rows: list[dict], core: set[str], protected: set[str],
     for row in rows:
         gate, action, where = row["gate"], row.get("action"), f"{CHANGES}:{row['_line']}"
         st = state.setdefault(gate, {"mode": "block", "rate": None, "since": None, "record": None,
-                                     "guardrails": [], "locked": False})
+                                     "guardrails": [], "locked": False, "armed": False})
         if action == "weaken":
             to, rate = row.get("to"), row.get("rate")
             decision = str(row.get("decision") or "")
@@ -240,12 +240,18 @@ def fold(rows: list[dict], core: set[str], protected: set[str],
             if why:
                 problems.append(f"{where}: {gate}: {why} — the gate stays {st['mode']}")
                 continue
+            wants = to == "shadow" and row.get("observe") is True
+            # observing is for a gate that never blocked: no earlier record but the
+            # template default, never restored — else the sentinel must keep its rollback
+            fresh = st["record"] in (None, DEFAULT_RECORD) and not st.get("armed")
+            if wants and not fresh:
+                problems.append(f"{where}: {gate}: --observe is for a gate that never blocked — "
+                                f"it counts as plain shadow, the sentinel may restore it")
             st.update(mode=to, rate=rate if to == "sampled" else None, since=row.get("ts"),
-                      record=row.get("id"), guardrails=list(marks),
-                      observe=to == "shadow" and row.get("observe") is True)
+                      record=row.get("id"), guardrails=list(marks), observe=wants and fresh)
         elif action == "restore":
             st.update(mode="block", rate=None, since=row.get("ts"), record=row.get("id"),
-                      guardrails=[], locked=bool(row.get("lock")))
+                      guardrails=[], locked=bool(row.get("lock")), observe=False, armed=True)
         elif action == "unlock":
             if not str(row.get("triage") or "").strip():
                 problems.append(f"{where}: {gate}: an unlock needs a triage — the gate stays locked")
@@ -401,7 +407,12 @@ def handover_problems(root: Path) -> list[str]:
     names = set(_observe_first())
     if not ref or not names:
         return []
-    there, here = _local_names(root, ref), _local_names(root)
+    # where this branch forked: a local gate main added later is not this branch's to drop
+    fork = subprocess.run(["git", "-C", str(root), "merge-base", "HEAD", ref],
+                          capture_output=True, text=True).stdout.strip()
+    if not fork:
+        return []
+    there, here = _local_names(root, fork), _local_names(root)
     if not there or here is None:
         return []
     rows, _problems = read_changes(root)
@@ -411,6 +422,13 @@ def handover_problems(root: Path) -> list[str]:
             f"`gate_modes.py restore {name} --reason …` keeps it blocking, an owner "
             f"`weaken {name} --to shadow --observe` lets it observe"
             for name in sorted(names & there - here - recorded)]
+
+
+def _template_gates() -> set[str]:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import gate_runner  # noqa: PLC0415
+
+    return set(gate_runner.GATES)
 
 
 def _core(root: Path) -> set[str]:
@@ -494,7 +512,13 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "weaken":
         proposal = {"gate": args.gate, "action": "weaken", "to": args.to, "rate": args.rate,
                     "decision": args.decision, "ts": _now(), "guardrails": args.guardrail,
+                    **({"observe": True} if args.observe else {}),
                     "_line": 0}  # line 0: not yet written
+        if args.observe and args.to == "shadow" and args.gate in _template_gates() \
+                and args.gate not in _observe_first():
+            print(f"gate-modes: refused — {args.gate} is a template gate that blocked from its "
+                  f"first run: --observe is for a gate that never blocked", file=sys.stderr)
+            return 1
         _state, problems = fold(read_changes(root)[0] + [proposal], _core(root),
                                 protected_gates(root, base_ref(root)))
         mine = [pr for pr in problems if pr.startswith(f"{CHANGES}:0:")]
@@ -514,7 +538,10 @@ def main(argv: list[str] | None = None) -> int:
             print("gate-modes: note: --observe only applies to --to shadow — ignored", file=sys.stderr)
         print(f"gate-modes: {row['id']} {args.gate} -> {args.to}"
               + (f" ({args.rate:.0%} of commits)" if args.to == "sampled" else "")
-              + f" — commit {CHANGES}; `sentinel` restores it on a failure or a breached guardrail")
+              + f" — commit {CHANGES}; "
+              + (f"observing: the sentinel leaves it alone, `restore {args.gate}` arms it"
+                 if args.observe and args.to == "shadow" else
+                 "`sentinel` restores it on a failure or a breached guardrail"))
         return 0
     if args.cmd == "restore":
         row = append(root, {"gate": args.gate, "action": "restore", "reason": args.reason,

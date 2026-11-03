@@ -1218,14 +1218,16 @@ def _ui_evidence(root: Path, base_ref: str | None, plans: list[Path]) -> str:
             lines.append(f"- … {len(changed) - 60} more")
     contracts = _design_contracts(root, plans)
     checks = _ui_checks(root, plans)
-    if checks:
-        lines.append("How the plans considered the UI (`ui-check`; the gate checks that each "
-                     "axis is answered, not the answers — judge them, and question every `n/a`):")
-        lines += checks
+    checks_text = ("How the plans considered the UI (`ui-check`; the gate checks that each "
+                   "axis is answered, not the answers — judge them, and question every `n/a`):\n"
+                   + "\n".join(checks)) if checks else ""
     if not lines and not contracts:
+        # the D8 hint stands whatever the plans say about their UI
         return ("*(no screenshots: no evidence directory for the plan and no image "
                 "in the diff — for a change with a UI surface this is a finding, "
-                "not a pass; DoD D8)*")
+                "not a pass; DoD D8)*") + (f"\n\n{checks_text}" if checks_text else "")
+    if checks_text:
+        lines.append(checks_text)
     if contracts:
         lines.append("Design contracts governing this change (judge the AFTER picture "
                      "against the sealed reference board of each cited ID; a plan "
