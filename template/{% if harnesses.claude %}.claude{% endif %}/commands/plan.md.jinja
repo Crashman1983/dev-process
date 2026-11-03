@@ -69,6 +69,31 @@ line count{% endif %}. Work across several stacks checks the cut at the
 boundary: first the contract as its own work, then each side{% if modules.telemetry %} — `size`
 also shows whether work across stacks needs more rounds here{% endif %}.
 
+**A plan whose branch touches UI answers the `ui-check` block** (the
+`ui-check` gate, `scripts/process/check_ui.py`): one line per axis — board,
+viewports, themes, states, navigation (the way in and the way back),
+interaction, content extremes, accessibility, rules — each the coverage, a
+pointer (`board: see Design Contract Trace`), `n/a — <reason>`, or
+`inherited` where the surface's registry names a default. `rules` names the
+UI rule files the work was checked against, the reuse decision (used,
+variant, new with a reason) and every deviation with its reason. A plan that
+only carries UI along writes `ui-check: n/a — <reason>` instead; one that
+declares a design contract cannot. The gate checks that the questions were
+answered — never the answers; those are the reviewer's and the owner's.
+
+```
+ui-check:
+- board: see Design Contract Trace
+- viewports: 320, 768, 1440
+- themes: light, dark
+- states: loading, empty, error, unknown — each rendered
+- navigation: in from the list, back to the list with the selection kept
+- interaction: keyboard, touch; no hover-only action
+- content extremes: 80-char German label, 500 rows
+- accessibility: names, focus order, 200% text
+- rules: `docs/design/<ui-rules>.md` — reused the list row; no deviation
+```
+
 **Facts the plan builds on carry their source** (`docs/process/workflow.md`,
 Plan, the rule for every harness): what the plan relies on in existing code
 or a contract has its source (`path:line`, the contract section, a command)
