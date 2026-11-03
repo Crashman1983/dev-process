@@ -7,6 +7,10 @@ technischen Einzelheiten stehen im [CHANGELOG](CHANGELOG-DE.md).
 
 English version: [NEWS.md](NEWS.md).
 
+## v2.85.0 — Ein Host, der einen Stack nicht kann
+
+Ein Rechner, der einen Teil der Tests eines Projekts nicht ausführen kann — etwa ein Mac ohne die Umgebung des Backends —, pusht seine Branches jetzt, ohne den Owner um das Abschalten der Tests zu bitten. Das Projekt hält in einer Prüfung, die schon auf dem Hauptbranch liegt, fest, welche Hosts diesen Teil nicht können; der Push nennt ihn dann als fällig und fährt den Rest, und nichts gilt als getestet, was nicht lief. Gemergt wird weiterhin nur, wo alles läuft. Jeder verbleibende Weg, eine Prüfung zu überspringen, muss jetzt seinen Grund nennen, und der steht im Protokoll.
+
 ## v2.84.0 — Bilder und Notizen ohne Software-Kette
 
 Ein Bild, eine Aufnahme oder eine Notiz abzulegen, startet die Testsuite des Projekts nicht mehr. Die Prozessprüfungen laufen weiter, und als solche Ablage zählen nur Dateitypen, die kein Verhalten ändern können, an Orten, die der Hauptbranch dafür vorgesehen hat; eine Build-Datei oder eine Einstellung wird immer getestet. Pläne für die Benutzeroberfläche beantworten jetzt eine kurze Liste von Fragen: Größen, hell und dunkel, Zustände, der Weg hinein und zurück, extreme Inhalte, Barrierefreiheit und welche UI-Regeln des Projekts sie befolgt haben. Die Prüfung stellt sicher, dass die Fragen beantwortet sind, nicht wie gut; das bleibt Urteil des Reviewers und des Owners. Sie beobachtet zunächst nur und blockiert, sobald der Owner sie einschaltet.

@@ -7,6 +7,10 @@ details are in the [CHANGELOG](CHANGELOG.md).
 
 Deutsche Fassung: [NEWS-DE.md](NEWS-DE.md).
 
+## v2.85.0 — A host that cannot run a stack
+
+A computer that cannot run one part of a project's tests — a Mac without the backend's environment, say — can now push its branches without asking the owner to switch the tests off. The project marks, in a check that already sits on the main branch, which hosts cannot run that part; the push then names it as owed and runs the rest, and nothing counts as tested that was not. Merging still runs everything on a host that can. Every remaining way to skip a check now has to say why, and that reason is kept in the log.
+
 ## v2.84.0 — Images and notes without the software chain
 
 Storing an image, a recording or a note no longer runs the project's test suite. The process checks still run, and only file types that cannot change behaviour, in places the main branch has marked for them, count as such; a build file or a setting is always tested. User-interface plans now answer a short list of questions: sizes, light and dark, states, the way in and back, extreme content, accessibility, and which of the project's UI rules they followed. The check makes sure the questions were answered, not how well; that stays the reviewer's and the owner's judgement. It starts by only observing and blocks once the owner switches it on.

@@ -10,6 +10,31 @@ A few plain sentences per release: [NEWS.md](NEWS.md). Deutsche Fassung:
 [CHANGELOG-DE.md](CHANGELOG-DE.md). Releases before v2.28.2:
 [docs/changelog-archive.md](docs/changelog-archive.md).
 
+## v2.85.0 — A host that cannot run a stack · 2026-11-03
+
+**Why.** Downstream, a Mac agent cannot run the backend stack; its preflight fails there. Every branch push that selected the stack was refused, and the only way past was `PROCESS_SKIP=tests` with the owner's word — three times in one day (#373, Kenni #2844). The skip protected nothing, since the merge suite runs on the gate host in the train anyway, and its ledger line carried no reason.
+
+**What changes.**
+- A stack may carry its own `preflight`. Exit 3 means "this host cannot run this stack"; any other non-zero "the host is broken".
+- **On a branch push** a 3 leaves the stack **owed on the gate host**: its selector does not run, the other stacks do, and the output names it. Nothing counts as passed: no push certificate, no stamp.
+- **Only a host check the integration branch has may defer.** The stack's `preflight` must stand there unchanged, its argv must name at least one repository file as its own argument, and every such file must be byte-identical to the integration branch's, no symlink. `sh -c "…"` and `-m module` never defer. A branch never declares its own stack unsuited.
+- **A merge never defers.** The merge push (before any certificate counts), the train and `finish --tests` run every stack's preflight; any non-zero exit, 3 included, is the host's — the train stops as "environment" and blames nobody. `train.py --preflight ""` replaces only the global check.
+- A stack's check runs only when the change gives the stack work; `preflight_timeout` is valid with stack preflights alone.
+- **Every skip needs a reason.** `PROCESS_SKIP`, pre-commit's `SKIP=process-gates` and a hook's `--bypass NAME` require `PROCESS_SKIP_REASON="<why>"`; without it the push is refused, with it the ledger line keeps it. A dispatched session is refused first, as before.
+
+**Effect.** A host that cannot run a stack pushes its branches without an owner skip, and still cannot merge them. Every remaining skip names its reason.
+
+**Update.**
+- A pure update. Without a stack `preflight` only the skip reason is new: set `PROCESS_SKIP_REASON` alongside any skip.
+- To use it, give a stack a host check as a committed file that exits 3 where the host cannot run the stack, e.g. `"preflight": ["python3", "scripts/host_check.py"]`, and land it on main first.
+
+**Changed sections.**
+- `testing.md` (One test path: A host that cannot run a stack; Skipping)
+- `train.md` (the train's preflight; Skipped gates)
+- `git-hooks.md`
+
+Details: [Plan](docs/analysis/2026-11-03-v2.85.md) #373
+
 ## v2.84.0 — Images and notes without the software chain; UI work that says how it was considered · 2026-11-03
 
 **Why.** Two owner concerns. First, storing an image, a recording or a note ran the whole software chain: a test suite on the merge push, `--tests` in `finish`. The friction once pushed agent tooling into a separate repository (#366). Second, UI work should show that sizes, states, navigation forward and back and the project's own UI rules were considered — not judged by a machine, but considered (#368). Both had to stay content-driven, not a per-project switch.
