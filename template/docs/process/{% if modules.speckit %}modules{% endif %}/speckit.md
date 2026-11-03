@@ -15,14 +15,20 @@ the network or the CLI:
 
     uv tool install specify-cli==0.16.0
     specify init --here --force --integration <your agent>
-    # drop three skills (why: below) where the integration put them —
+    # drop speckit-constitution, speckit-implement and speckit-taskstoissues
+    # (why: below) where the integration put them —
     # Claude Code: .claude/skills, GitHub Copilot: .github/skills,
     # AGENTS.md agents (Codex): .agents/skills
     for d in .claude/skills .github/skills .agents/skills; do
-      rm -rf "$d/speckit-constitution" "$d/speckit-implement" "$d/speckit-taskstoissues"
+      for s in constitution implement taskstoissues; do
+        rm -rf "$d/speckit-$s" "$d/speckit.$s.md"   # skill dir or command file
+      done
     done
     echo ".specify/feature.json" >> .gitignore   # per-checkout state, never committed
-    git add .specify <your skills dir>/speckit*     # the skills travel with the repo
+    # skills directory ignored? fix .gitignore first ("Commit the skills" below) —
+    # git add skips ignored paths
+    git add .gitignore .specify <your skills dir>/speckit*   # the skills travel with the repo
+    git commit -m "chore: Spec Kit <pin> setup"
     uv run scripts/process/gate_runner.py   # the regression net over the init
 
 **Commit the skills.** A clone gets only what is committed: a skills
@@ -30,9 +36,9 @@ directory left out of git means every fresh clone, worktree and cloud
 session has no `/speckit-*` command and would need the CLI again — which a
 sandbox may refuse. The flow uses `speckit-specify`, `-clarify`, `-plan` and
 `-tasks`; `-analyze` and `-converge` as "The Tier 2+ flow" below says;
-`-checklist` on demand. An integration that writes command files instead
-(`speckit.implement.md`) drops the same three by name before the `git add`;
-the gate names any dropped skill that is still there.
+`-checklist` on demand. An integration that writes its skills elsewhere
+adds its directory to the loop; the gate names any dropped skill still there
+and any skill not yet committed.
 Keeping them per user breaks "nothing needs the CLI at runtime"; the gate's
 note stays until they are committed. If the project ignores its skills
 directory, a `!` line alone does not help — git never re-includes a path
@@ -41,15 +47,15 @@ contents rule, one level per ignored parent:
 
 <!-- gitignore-skills -->
 ```gitignore
-# was: .claude/  (or .claude/skills/)
+# when .claude/ itself was ignored; if only .claude/skills/ was,
+# use the last two lines alone — the first two would hide new .claude/ files
 .claude/*
 !.claude/skills/
 .claude/skills/*
 !.claude/skills/speckit*
 ```
 
-(the same for `.github/skills` or `.agents/skills`; with only the skills
-directory ignored, the last two lines suffice).
+(the same for `.github/skills` or `.agents/skills`).
 
 Three skills are deliberately not kept: `constitution` would overwrite the
 rendered pointer (a second truth — the `speckit` gate guards the marker),

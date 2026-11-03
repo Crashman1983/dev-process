@@ -711,12 +711,12 @@ def test_the_documented_gitignore_form_makes_the_skills_committable(render, tmp_
     out = _render(render, tmp_path)
     doc = (out / SPECKIT_DOC).read_text()
     block = doc.split("<!-- gitignore-skills -->")[1].split("```")[1]
-    lines = [ln.strip() for ln in block.splitlines()
+    lines = [ln.strip() for ln in block.splitlines()[1:]  # [0] is the fence tag
              if ln.strip() and not ln.strip().startswith("#")]
-    if not parent_ignored:
-        lines = [ln for ln in lines if not ln.startswith(".claude/*")
-                 and not ln.startswith("!.claude/skills/")
-                 or ln.startswith("!.claude/skills/speckit")]
+    assert lines == [".claude/*", "!.claude/skills/", ".claude/skills/*",
+                     "!.claude/skills/speckit*"], lines
+    if not parent_ignored:  # "the last two lines suffice"
+        lines = lines[2:]
     old = ".claude/\n" if parent_ignored else ".claude/skills/\n"
     _integration(out)
     _repo(out, old)
@@ -787,5 +787,100 @@ def test_an_integration_state_without_a_list_reads_every_manifest(render, tmp_pa
     _repo(out, ".claude/skills/\n")
     r = _gate(out)
     notes = _skill_notes(r)
-    assert any("installed_integrations" in n for n in notes), r.stdout
+    assert any("names no installed integration" in n for n in notes), r.stdout
     assert any("never committed" in n for n in notes), r.stdout
+
+
+def test_a_staged_skill_is_not_yet_committed(render, tmp_path):
+    # a clone gets HEAD, not the index — staged skills still need the commit
+    out = _render(render, tmp_path)
+    _integration(out)
+    _repo(out, ".claude/skills/\n")
+    (out / ".gitignore").write_text(".claude/skills/*\n!.claude/skills/speckit*\n")
+    _git(out, "add", "-A")
+    r = _gate(out)
+    notes = _skill_notes(r)
+    assert any("never committed" in n and "staged" in n for n in notes), r.stdout
+    _git(out, "commit", "-q", "-m", "skills")
+    assert _skill_notes(_gate(out)) == []
+
+
+def test_manifests_without_integration_state_are_all_read_and_named(render, tmp_path):
+    out = _render(render, tmp_path)
+    _integration(out)
+    (out / ".specify/integration.json").unlink()
+    _repo(out)
+    notes = _skill_notes(_gate(out))
+    assert len(notes) == 1 and "integration.json" in notes[0], notes
+
+
+def test_a_file_name_that_is_not_utf8_does_not_crash_the_gate(render, tmp_path):
+    import os
+    out = _render(render, tmp_path)
+    _integration(out)
+    d = os.fsencode(out / ".claude/skills")
+    with open(os.path.join(d, b"speckit-\xff"), "wb") as fh:
+        fh.write(b"x")
+    _repo(out)
+    r = _gate(out)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "Traceback" not in r.stderr
+
+
+def test_the_legacy_integration_state_names_the_active_integration(render, tmp_path):
+    # Spec Kit itself reads {"integration": "claude"} as installed = [claude]
+    out = _render(render, tmp_path)
+    _integration(out, name="copilot", files=[".github/skills/speckit-plan/SKILL.md"])
+    import shutil
+    shutil.rmtree(out / ".github/skills")
+    _integration(out)
+    (out / ".specify/integration.json").write_text(json.dumps(
+        {"version": "0.9.0", "integration": "claude"}))
+    _repo(out)
+    assert _skill_notes(_gate(out)) == []
+
+
+@pytest.mark.parametrize("key", [r".claude/skills/speckit-plan/SKILL\u0000.md",
+                                 r".claude/sk\ud800ills/speckit-plan/SKILL.md"])  # JSON escapes
+def test_odd_manifest_data_never_crashes_the_gate(render, tmp_path, key):
+    out = _render(render, tmp_path)
+    _integration(out)
+    (out / ".specify/integrations/claude.manifest.json").write_text(
+        '{"integration": "claude", "files": {"' + key + '": "0"}}')
+    _repo(out)
+    r = _gate(out)
+    assert r.returncode == 0 and "Traceback" not in r.stderr, r.stdout + r.stderr
+    assert any("unverified" in n for n in _skill_notes(r)), r.stdout
+
+
+def test_a_fifo_where_a_manifest_is_read_does_not_hang_the_gate(render, tmp_path):
+    import os
+    out = _render(render, tmp_path)
+    _integration(out)
+    (out / ".specify/integration.json").unlink()
+    os.mkfifo(out / ".specify/integration.json")
+    r = subprocess.run([sys.executable, str(out / "scripts/process/check_speckit.py"), "."],
+                       cwd=out, capture_output=True, text=True, timeout=30)
+    assert r.returncode == 0, r.stdout + r.stderr
+
+
+def test_an_extension_id_exempts_only_its_own_skills(render, tmp_path):
+    out = _render(render, tmp_path)
+    _integration(out)
+    p = out / ".claude/skills/speckit-github-sync/SKILL.md"
+    p.parent.mkdir(parents=True)
+    p.write_text("x")
+    (out / ".specify/extensions").mkdir(parents=True)
+    (out / ".specify/extensions/.registry").write_text(json.dumps(
+        {"extensions": {"git": {}, "": {}}}))
+    _repo(out)
+    assert any("no manifest lists" in n and "speckit-github-sync" in n
+               for n in _skill_notes(_gate(out)))
+
+
+def test_a_manifest_without_any_skill_is_unverified(render, tmp_path):
+    out = _render(render, tmp_path)
+    _integration(out, files=[])
+    _repo(out)
+    notes = _skill_notes(_gate(out))
+    assert len(notes) == 1 and "lists no /speckit-* skill" in notes[0], notes
