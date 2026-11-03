@@ -195,6 +195,8 @@ def test_a_malformed_exec_or_paths_entry_is_a_hard_failure(render, tmp_path, bad
     out = _project(render, tmp_path, bad)
     r = _run(out)
     assert r.returncode == 1 and "gates.local.json" in r.stderr, r.stdout + r.stderr
+    if "areas" in bad["x"]:  # the new key's own rule, not "unknown key"
+        assert "'areas' must be a non-empty list of area names" in r.stderr, r.stderr
 
 
 def test_a_file_moved_out_of_the_trigger_paths_still_runs_the_gate(render, tmp_path):
@@ -290,3 +292,13 @@ def test_without_skips_the_summary_keeps_its_wording(render, tmp_path):
     _gate(out, "scripts/ok.py", 0, "ok: OK")
     r = _run(out)
     assert r.returncode == 0 and "active gate(s) passed" in r.stdout and "all " in r.stdout, r.stdout
+
+
+def test_an_unreadable_testing_config_fails_the_area_gate_with_its_cause_and_goes_on(render, tmp_path):
+    out = _ui_lint(render, tmp_path, areas={})  # the integration branch knows no area yet
+    (out / "docs/process/testing.local.json").write_text(
+        json.dumps({"areas": {"ui": ["frontend/**"]}, "stacks": 5}), encoding="utf-8")
+    _change(out, "backend/app.py")
+    r = _run(out)
+    assert r.returncode == 1 and "cannot be read here" in r.stderr and "stacks" in r.stderr, r.stderr
+    assert "FAILED gates: ui-lint" in r.stdout, r.stdout  # the run finished: summary printed
