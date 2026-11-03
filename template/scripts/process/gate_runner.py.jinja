@@ -48,6 +48,12 @@ from process_git import path_matches, pushed_commit_problem  # noqa: E402
 # regardless of the manifest. Core gates guard artifacts that are themselves
 # core (e.g. docs/process/adr/), so their enforcement must not hinge on an
 # optional module being enabled.
+# ALWAYS marks a template gate that runs in every project but is no core gate:
+# it decides by content (silent without it), and a record may weaken it.
+ALWAYS = "always"
+# template gates that start as `shadow --observe` (gate_modes.observe_defaults):
+# a new gate earns blocking — `gate_modes.py restore NAME` arms it
+OBSERVE_FIRST = ("ui-check",)
 GATES = {
     "kernel": (None, [sys.executable, "scripts/process/check_kernel.py", "."]),
     "decision-records": (None, [sys.executable, "scripts/process/check_decisions.py", "."]),
@@ -63,6 +69,7 @@ GATES = {
     "github-issues": ("github_issues", [sys.executable, "scripts/process/check_issues.py", "."]),
     "sbom": ("sbom", [sys.executable, "scripts/process/check_sbom.py", "."]),
     "design-contracts": ("design_contracts", [sys.executable, "scripts/process/check_design_contracts.py", "."]),
+    "ui-check": (ALWAYS, [sys.executable, "scripts/process/check_ui.py", "."]),
 }
 # modules without a gate of their own: git_hooks installs hooks, telemetry
 # ships the read-only KPI cockpit (its GRADE gate is retired)
@@ -470,8 +477,9 @@ def main() -> int:
             return 0
     mods = load_modules(root)
     gates, local = with_local_gates(root)
-    # core gates (key is None) always run; module gates run when their key is on
-    active = [name for name, (key, _cmd) in gates.items() if key is None or mods.get(key)]
+    # core and ALWAYS gates run in every project; module gates run when their key is on
+    active = [name for name, (key, _cmd) in gates.items()
+              if key is None or key == ALWAYS or mods.get(key)]
     if "--list" in sys.argv:
         for g in active:
             print(g)
@@ -526,6 +534,14 @@ def main() -> int:
     except Exception as exc:  # noqa: BLE001
         modes, mode_problems = {}, [f"gate modes unreadable ({exc}) — every gate blocks"]
     suppressed += _emit("".join(f"gate-runner: note: {p}\n" for p in mode_problems), known, seen, show_all)
+    try:  # a dropped local gate never hands its name to an observing template gate silently
+        handover = gate_modes.handover_problems(root) if gate_modes is not None else []
+    except Exception as exc:  # noqa: BLE001
+        handover = [f"the gate handover cannot be judged ({exc})"]
+    for problem in handover:
+        print(f"gate-runner: gate-handover: {problem}", file=sys.stderr)
+    if handover:
+        failed.append("gate-handover")
     weakened: list[str] = []
     skipped: list[str] = []
     shadow_failed: list[str] = []
@@ -630,8 +646,10 @@ def main() -> int:
                           rc=rc, duration_s=time.monotonic() - started)
         if rc != 0 and node_mode in ("shadow", "sampled"):
             shadow_failed.append(name)
+            arm = (f"observing a new gate — `gate_modes.py restore {name}` arms it" if node.get("observe")
+                   else "`gate_modes.py sentinel` returns it to block")
             print(f"gate-runner: {name} failed in {node_mode} mode ({node.get('record')}) — recorded, "
-                  f"not blocking; `gate_modes.py sentinel` returns it to block", file=sys.stderr)
+                  f"not blocking; {arm}", file=sys.stderr)
         elif rc != 0:
             failed.append(name)
     _write_ledger(ledger, seen)

@@ -361,7 +361,9 @@ check". The summary line never calls a gate that was skipped, or failed in
 shadow, "passed".
 
 The template's own gates are process gates — plans, reviews, records, specs —
-and run on every push; areas are for the project's checks of its product.
+and run on every push; areas are for the project's checks of its product. One
+template gate reads an area: `ui-check` (`check_ui.py`) takes `areas.ui` as
+what counts as UI, beside the design-contract registries' `paths`.
 
 ## Inert changes — images and notes without the software chain
 

@@ -8,8 +8,13 @@
 A gate runs in one of four modes: `block` (the default: a failure stops the
 push), `shadow` (runs and records, never blocks), `sampled` (runs on a share
 of commits, never blocks) and `off`. The mode comes from one place only: the
-append-only record `docs/process/gate-changes.local.jsonl`. Nothing else — not
-`gates.local.json`, not an environment variable — weakens a gate.
+append-only record `docs/process/gate-changes.local.jsonl`, read by `fold`.
+Nothing else — not `gates.local.json`, not an environment variable — weakens
+a gate. The one exception lives in `fold` too: a template gate on the
+runner's `OBSERVE_FIRST` list starts as if its first record were
+`shadow --observe` (a new gate earns blocking; `restore` arms it), unless the
+project defines a gate of that name itself, here or on the integration
+branch, or the mandate protects it.
 
   gate_modes.py status
   gate_modes.py weaken GATE --to shadow|sampled|off [--rate R] --decision "owner …"
@@ -28,8 +33,10 @@ Rules (docs/process/optimization.md, "The process as a check graph"):
   treats as bookkeeping). Core gates and the mandate's protected gates
   cannot be weakened at all.
 - `--observe` (with `--to shadow`) is for a new gate that never blocked: the
-  sentinel does not restore it on a failure, so its false alarms can be
-  counted first. A weakened gate that used to block is never `--observe`.
+  sentinel restores it neither on a failure nor on a breached guardrail — it
+  has nothing to roll back to, and arming an unproven gate would block work —
+  so its false alarms can be counted first. A weakened gate that used to block
+  is never `--observe`.
 - `restore` returns a gate to `block`; with `--lock` the gate cannot be
   weakened again until `unlock` records a triage.
 - `sentinel` is deterministic and only ever restores: a `sampled` or `shadow`
@@ -57,6 +64,8 @@ MODES = ("block", "shadow", "sampled", "off")
 WEAK = ("shadow", "sampled", "off")
 MANDATE = "docs/process/optimization.local.json"
 EVENTS = "process-gate-events.jsonl"
+LOCAL_GATES = "docs/process/gates.local.json"
+DEFAULT_RECORD = "template-default"
 
 
 def _now() -> str:
@@ -175,11 +184,12 @@ def effective(root: Path, core: set[str] = frozenset()) -> tuple[dict[str, dict]
     restore counts at once, from the working tree — stricter never waits."""
     ref = base_ref(root)
     protected = protected_gates(root, ref)
+    defaults = observe_defaults(root, ref)
     tree_rows, problems = read_changes(root)
-    tree, more = fold(tree_rows, core, protected)
+    tree, more = fold(tree_rows, core, protected, defaults)
     problems += more
     base_rows, base_problems = read_changes(root, ref) if ref else ([], [])
-    base, more = fold(base_rows, core, protected)
+    base, more = fold(base_rows, core, protected, defaults)
     problems += [f"{ref}: {p}" for p in base_problems + more if p not in problems]
     state = {}
     for gate in sorted(set(base) | set(tree)):
@@ -195,10 +205,19 @@ def effective(root: Path, core: set[str] = frozenset()) -> tuple[dict[str, dict]
     return state, problems
 
 
-def fold(rows: list[dict], core: set[str], protected: set[str]) -> tuple[dict[str, dict], list[str]]:
-    """Replay the records in order; a record that breaks a rule is named and skipped."""
+def _default_row(gate: str) -> dict:
+    return {"gate": gate, "action": "weaken", "to": "shadow", "observe": True,
+            "decision": "owner — template default: a new gate starts observing",
+            "ts": "1970-01-01T00:00:00+00:00", "id": DEFAULT_RECORD, "_line": 0}
+
+
+def fold(rows: list[dict], core: set[str], protected: set[str],
+         defaults: set[str] = frozenset()) -> tuple[dict[str, dict], list[str]]:
+    """Replay the records in order; a record that breaks a rule is named and skipped.
+    `defaults` (`observe_defaults`) start before the first record as `shadow --observe`."""
     problems: list[str] = []
     state: dict[str, dict] = {}
+    rows = [_default_row(g) for g in sorted(defaults - core - protected)] + list(rows)
     for row in rows:
         gate, action, where = row["gate"], row.get("action"), f"{CHANGES}:{row['_line']}"
         st = state.setdefault(gate, {"mode": "block", "rate": None, "since": None, "record": None,
@@ -327,6 +346,73 @@ def append(root: Path, row: dict) -> dict:
     return row
 
 
+def _local_names(root: Path, ref: str | None = None) -> set[str] | None:
+    """The gate names `gates.local.json` defines, in the working tree or at
+    `ref`; an absent file defines none, an unreadable one is None."""
+    if ref is None:
+        path = root / LOCAL_GATES
+        if not path.is_file():
+            return set()
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, ValueError):
+            return None
+    else:
+        r = subprocess.run(["git", "-C", str(root), "show", f"{ref}:{LOCAL_GATES}"],
+                           capture_output=True, text=True, encoding="utf-8", errors="replace")
+        if r.returncode != 0:
+            exists = subprocess.run(["git", "-C", str(root), "cat-file", "-e", f"{ref}^{{commit}}"],
+                                    capture_output=True)
+            return set() if exists.returncode == 0 else None
+        try:
+            data = json.loads(r.stdout)
+        except ValueError:
+            return None
+    return set(data) if isinstance(data, dict) else None
+
+
+def _observe_first() -> tuple[str, ...]:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import gate_runner  # noqa: PLC0415 — the one owner of the template's gates
+
+    return tuple(getattr(gate_runner, "OBSERVE_FIRST", ()))
+
+
+def observe_defaults(root: Path, ref: str | None) -> set[str]:
+    """The template gates that start as `shadow --observe`: on `OBSERVE_FIRST`,
+    and defined by no `gates.local.json` — not here, not on the integration
+    branch (the union: a branch never drops a local gate into observing). A file
+    that cannot be read defines everything: no default, the gate blocks."""
+    names = set(_observe_first())
+    if not names:
+        return set()
+    here = _local_names(root)
+    there = _local_names(root, ref) if ref else set()
+    if here is None or there is None:
+        return set()
+    return names - here - there
+
+
+def handover_problems(root: Path) -> list[str]:
+    """A local gate of an `OBSERVE_FIRST` name that the integration branch has
+    and this checkout dropped, with no record for the name: the template's gate
+    would start observing where the project's one blocked. A record decides it."""
+    ref = base_ref(root)
+    names = set(_observe_first())
+    if not ref or not names:
+        return []
+    there, here = _local_names(root, ref), _local_names(root)
+    if not there or here is None:
+        return []
+    rows, _problems = read_changes(root)
+    recorded = {row.get("gate") for row in rows}
+    return [f"{name}: {LOCAL_GATES} drops the project's own `{name}` gate, so the template's "
+            f"starts observing instead of blocking — record the handover: "
+            f"`gate_modes.py restore {name} --reason …` keeps it blocking, an owner "
+            f"`weaken {name} --to shadow --observe` lets it observe"
+            for name in sorted(names & there - here - recorded)]
+
+
 def _core(root: Path) -> set[str]:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     import gate_runner  # noqa: PLC0415 — the one owner of which gates are core
@@ -363,8 +449,10 @@ def sentinel(root: Path, *, dry_run: bool = False) -> list[dict]:
             continue
         # newest first by record number: containment, not attribution. A weakening that
         # names no known guardrail touches them all — a typo must not opt out
+        # an observed gate never blocked: there is nothing to roll back to
         touched = sorted(((_id_number(st["record"]), gate) for gate, st in weak.items()
-                          if not set(st["guardrails"]) & known or g["name"] in st["guardrails"]),
+                          if not st.get("observe")
+                          and (not set(st["guardrails"]) & known or g["name"] in st["guardrails"])),
                          reverse=True)
         for _record, gate in touched:
             if any(r["gate"] == gate for r in restores):
@@ -445,6 +533,7 @@ def main(argv: list[str] | None = None) -> int:
             print("gate-modes: sentinel — nothing to restore")
         return 0
     state, problems = effective(root, _core(root))
+    problems += handover_problems(root)
     for pr in problems:
         print(f"gate-modes: {pr}")
     if args.cmd == "check":

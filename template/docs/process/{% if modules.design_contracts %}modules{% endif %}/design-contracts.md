@@ -103,6 +103,24 @@ an unregistered surface, `n/a` without a reason, a missing or empty trace.
 - Without the file nothing changes. Whether the trace matches the contract
   is the review's call, never the gate's.
 
+## UI check — considered, not judged
+
+The `ui-check` gate (`scripts/process/check_ui.py`, every project, starts
+observing) asks a plan whose branch touches UI how the UI was considered:
+one `ui-check:` block with an answer per axis (`/plan`). This module feeds it:
+
+- a registry's `paths` count as UI, beside `areas.ui` in `testing.local.json`;
+- a plan that declares a contract owes the block, and one block per surface
+  where it declares several (`ui-check <surface>:`);
+- `defaults` (axis → value) lets a plan answer `inherited` on that axis —
+  the surface's standing answer, e.g. its viewports;
+- `extra_axes` adds the project's own axes;
+- `rule_sources` names the project's UI rule files: `rules` must cite one of
+  them, and `rules: n/a` is a finding.
+
+A green gate is no design verdict: it proves the questions were answered,
+not the answers. The reviewer judges them against the board.
+
 ## Precedence — what wins when norms disagree
 
 1. the functional contract (API, capability, behaviour spec)

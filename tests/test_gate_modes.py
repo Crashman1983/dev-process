@@ -288,5 +288,6 @@ def test_an_observed_new_gate_keeps_its_failures_and_weakened_gates_are_named(re
     _land(out, "observe bad")
     g = _gates(out)
     assert g.returncode == 0
-    assert "1 not blocking: bad shadow" in g.stdout and "not blocking by record" in g.stderr
+    # ui-check observes by template default (v2.84) and is named beside it
+    assert "2 not blocking: ui-check shadow, bad shadow" in g.stdout and "not blocking by record" in g.stderr
     assert "nothing to restore" in _modes(out, "sentinel", "--dry-run").stdout

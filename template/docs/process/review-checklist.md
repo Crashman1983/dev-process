@@ -297,6 +297,10 @@ never the stylesheet.
   shown as *empty*?
 - Was it checked in **both themes** and on the representative viewports the
   spec names?
+- Does the plan's **`ui-check` block** hold up against what was built — each
+  axis it claims covered visibly covered, each `n/a` and each `ui-check: n/a`
+  line a real reason, and the `rules` it names actually followed? The gate
+  only proves the questions were answered.
 - Does the **UI reuse map** (DoR R5) trace to what was actually mounted —
   the existing owner reused or extended, or a new one with its reason —
   rather than a copied style or a local override on a shared control?

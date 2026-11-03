@@ -75,7 +75,18 @@ append-only record `docs/process/gate-changes.local.jsonl` sets each gate's mode
   the runner) or on a dirty tree are not seen — run it where the gates run.
 - **A new gate** can be observed first: `weaken GATE --to shadow --observe`
   (owner line as always) lets its failures stand, so false alarms are
-  counted before it blocks. Never for a gate that used to block.
+  counted before it blocks. Never for a gate that used to block. The
+  sentinel restores an observed gate neither on its own failure nor on a
+  breached guardrail: it never blocked, there is nothing to roll back to.
+- **A new template gate starts observed.** A gate on the runner's
+  `OBSERVE_FIRST` list (today `ui-check`) begins as if its first record were
+  `shadow --observe` — the default lives in `gate_modes.fold`, the one place
+  modes come from, so `status`, the runner and the sentinel agree.
+  `gate_modes.py restore NAME --reason …` arms it. A project gate of the same
+  name in `gates.local.json` (here or on the integration branch) keeps its
+  own mode; dropping it needs a record for the name — the gate runner is red
+  (`gate-handover`) until one says whether the template's gate blocks or
+  observes.
 - **The record** lives in `docs/process/gate-changes.local.jsonl`, under review
   like any process configuration; the owner line in it is text, and review
   is what backs it.

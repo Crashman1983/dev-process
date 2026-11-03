@@ -269,6 +269,12 @@ def build(root: Path, days: int) -> str:
     lines.append("## 6 · What changed on screen (screenshots to open)")
     lines.append("")
     lines += section_ui_evidence(root, days)
+    checks = section_ui_checks(root)
+    if checks:
+        lines.append("")
+        lines.append("How the UI work in flight was considered (`ui-check`; an `n/a` is yours "
+                     "to question):")
+        lines += checks
     lines.append("")
     lines.append("## 7 · Residue (what tidy would remove)")
     lines.append("")
@@ -351,6 +357,21 @@ def section_residue(root: Path) -> list[str]:
 
 
 IMAGE_RE = re.compile(r"\.(png|jpe?g|webp|gif)$", re.IGNORECASE)
+
+
+def section_ui_checks(root: Path) -> list[str]:
+    """The active plans' `ui-check` blocks with their counts and every
+    `ui-check: n/a` line (check_ui.summary) — never stops the digest."""
+    try:
+        import check_ui  # noqa: PLC0415
+
+        texts = {}
+        for pattern in (".process-work/plans/*.md", "specs/*/plan.md"):
+            for p in sorted(root.glob(pattern)):
+                texts[p.relative_to(root).as_posix()] = p.read_text(encoding="utf-8", errors="replace")
+        return check_ui.summary(root, texts)
+    except Exception as exc:  # noqa: BLE001
+        return [f"(ui-check summary unreadable: {exc})"]
 
 
 def section_ui_evidence(root: Path, days: int) -> list[str]:

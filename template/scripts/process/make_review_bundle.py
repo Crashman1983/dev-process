@@ -1217,6 +1217,11 @@ def _ui_evidence(root: Path, base_ref: str | None, plans: list[Path]) -> str:
         if len(changed) > 60:
             lines.append(f"- … {len(changed) - 60} more")
     contracts = _design_contracts(root, plans)
+    checks = _ui_checks(root, plans)
+    if checks:
+        lines.append("How the plans considered the UI (`ui-check`; the gate checks that each "
+                     "axis is answered, not the answers — judge them, and question every `n/a`):")
+        lines += checks
     if not lines and not contracts:
         return ("*(no screenshots: no evidence directory for the plan and no image "
                 "in the diff — for a change with a UI surface this is a finding, "
@@ -1232,6 +1237,17 @@ def _ui_evidence(root: Path, base_ref: str | None, plans: list[Path]) -> str:
                  "states, not only against the acceptance floor; a baseline that "
                  "is byte-identical to another name proves nothing.")
     return "\n".join(lines)
+
+
+def _ui_checks(root: Path, plans: list[Path]) -> list[str]:
+    """The plans' `ui-check` blocks and `n/a` lines (check_ui.summary)."""
+    try:
+        import check_ui  # noqa: PLC0415 — sibling; sys.path set at import
+        texts = {str(p.relative_to(root)): p.read_text(encoding="utf-8", errors="replace")
+                 for p in plans}
+        return check_ui.summary(root, texts)
+    except Exception as exc:  # noqa: BLE001 — the bundle must not die on it
+        return [f"- (ui-check unreadable: {exc})"]
 
 
 def _design_contracts(root: Path, plans: list[Path]) -> list[str]:
