@@ -1,6 +1,8 @@
 """SP65: one owner for "how is a gate launched" and "can the registered hooks
 run at all" — a missing check is a blocker, never a skip."""
 import importlib.util
+
+import pytest
 import subprocess
 import sys
 from pathlib import Path
@@ -270,3 +272,201 @@ def test_no_hint_names_an_installer_the_project_does_not_have(render, tmp_path):
     hard, soft = _load(out).hook_wiring_findings(out)
 
     assert hard and not any("install_hooks.py" in f for f in hard + soft), (hard, soft)
+
+
+# --- #365: gates without access to the package index ----------------------
+
+def _declaring(out, deps, python=None):
+    p = out / "scripts/probe_gate.py"
+    lines = "".join(f"#   {d!r},\n" for d in deps)
+    py = f'# requires-python = "{python}"\n' if python else ""
+    p.write_text("#!/usr/bin/env python3\n# /// script\n" + py +
+                 "# dependencies = [\n" + lines + "# ]\n# ///\n"
+                 "print('probe: OK')\n", encoding="utf-8")
+    return ["scripts/probe_gate.py"]
+
+
+def test_a_shipped_gate_whose_dependencies_this_interpreter_has_runs_without_uv(render, tmp_path, monkeypatch):
+    # a sandbox that reaches GitHub but not PyPI: uv would have to fetch what
+    # the interpreter already provides (#365)
+    out = render(tmp_path, {"project_name": "demo"})
+    gi = _load(out)
+    monkeypatch.setattr(gi.shutil, "which", lambda name: "/usr/bin/uv")
+    # independent of the dev environment's PyYAML: the metadata says 6.0.3
+    real = gi.metadata.version
+    monkeypatch.setattr(gi.metadata, "version",
+                        lambda name: "6.0.3" if name.lower() == "pyyaml" else real(name))
+    cmd = [sys.executable, "scripts/process/gate_runner.py", "--list"]
+    assert gi.declared_dependencies(out / cmd[1]) == ["pyyaml>=6,<7"]
+    assert gi.child_argv(out, cmd) == cmd
+    assert gi.gate_runner_argv(out) == [sys.executable, str(out / cmd[1])]
+
+
+def test_a_multiline_declaration_is_read_as_its_requirements(render, tmp_path):
+    out = render(tmp_path, {"project_name": "demo"})
+    gi = _load(out)
+    _declaring(out, ["pyyaml>=6,<7", "no-such-distribution-365"])
+    assert gi.declared_dependencies(out / "scripts/probe_gate.py") == [
+        "pyyaml>=6,<7", "no-such-distribution-365"]
+
+
+@pytest.mark.parametrize("deps, python", [
+    (["pyyaml>=99"], None), (["no-such-distribution-365"], None),
+    (["pyyaml[extra]>=6"], None), (["pyyaml>=6; python_version>'3'"], None),
+    (["pyyaml~=6.0"], None), (["pyyaml===6.0.3"], None), (["pyyaml==6.*"], None),
+    (["pyyaml>6.0.3,<7"], None), (["pyyaml!=6.0.3"], None),
+    (["pyyaml>=6"], ">=99"),
+])
+def test_a_child_whose_declaration_this_interpreter_cannot_prove_goes_through_uv(render, tmp_path, monkeypatch, deps, python):
+    out = render(tmp_path, {"project_name": "demo"})
+    gi = _load(out)
+    monkeypatch.setattr(gi.shutil, "which", lambda name: "/usr/bin/uv")
+    cmd = [sys.executable, *_declaring(out, deps, python)]
+    assert gi.child_argv(out, cmd)[:3] == ["uv", "run", "--script"]
+
+
+def test_a_version_compare_pads_and_refuses_what_it_cannot_read(render, tmp_path):
+    out = render(tmp_path, {"project_name": "demo"})
+    gi = _load(out)
+    assert gi._meets((6, 0), "==6.0.0") and not gi._meets((6, 0), ">6")
+    assert gi._meets((6, 0, 3), ">=6,<7") and not gi._meets((7,), ">=6,<7")
+    assert not gi._meets((6, 0), "~=6.0") and not gi._meets((6, 0), "==6.*")
+    assert gi._release("6.0.3") == (6, 0, 3)
+    assert gi._release("6.0.3rc1") is None and gi._release("1!6.0") is None
+
+
+def test_a_distribution_without_a_findable_module_is_not_provided(render, tmp_path, monkeypatch):
+    out = render(tmp_path, {"project_name": "demo"})
+    gi = _load(out)
+    monkeypatch.setattr(gi, "find_spec", lambda name: None)
+    monkeypatch.setattr(gi.shutil, "which", lambda name: "/usr/bin/uv")
+    cmd = [sys.executable, "scripts/process/gate_runner.py"]
+    assert gi.child_argv(out, cmd)[:3] == ["uv", "run", "--script"]
+
+
+def test_a_child_for_another_interpreter_still_goes_through_uv(render, tmp_path, monkeypatch):
+    # gate_invoke point 1: the check is about the interpreter the child runs
+    # in; a venv python resolves to the base interpreter but has other packages
+    import os
+    out = render(tmp_path, {"project_name": "demo"})
+    gi = _load(out)
+    monkeypatch.setattr(gi.shutil, "which", lambda name: "/usr/bin/uv")
+    link = tmp_path / "python-link"
+    os.symlink(sys.executable, link)
+    for interp in ("/nonexistent/python3", str(link)):
+        cmd = [interp, "scripts/process/gate_runner.py", "--list"]
+        assert gi.child_argv(out, cmd)[:3] == ["uv", "run", "--script"], interp
+
+
+def _uv_stub(tmp_path, rc, stdout=""):
+    d = tmp_path / "bin"
+    d.mkdir(exist_ok=True)
+    stub = d / "uv"
+    stub.write_text("#!/bin/sh\n"
+                    f"printf '%s' '{stdout}'\n"
+                    "echo 'error: Failed to fetch: https://pypi.org/simple/no-such-distribution-365/' >&2\n"
+                    "echo '  Caused by: dns error' >&2\n"
+                    f"exit {rc}\n")
+    stub.chmod(0o755)
+    return d
+
+
+def _run_runner(out, bindir):
+    import os
+    env = {k: v for k, v in os.environ.items() if k not in ("CI", "PRE_COMMIT_TO_REF")}
+    env["PATH"] = f"{bindir}{os.pathsep}{env['PATH']}"
+    return subprocess.run([sys.executable, str(out / "scripts/process/gate_runner.py")],
+                          cwd=out, capture_output=True, text=True, env=env)
+
+
+def _local_probe(out, cmd):
+    import json
+    (out / "docs/process/gates.local.json").write_text(json.dumps(
+        {"probe": {"module": None, "command": cmd}}), encoding="utf-8")
+
+
+@pytest.mark.parametrize("rc", [1, 2])
+def test_a_uv_launch_failure_is_named_in_the_gate_section_and_stays_red(render, tmp_path, rc):
+    out = render(tmp_path, {"project_name": "demo"})
+    _local_probe(out, _declaring(out, ["no-such-distribution-365"]))
+    r = _run_runner(out, _uv_stub(tmp_path, rc))
+    assert r.returncode != 0
+    assert "gate-runner: probe: launched through `uv run`" in r.stdout, r.stdout
+    assert "a launch problem, not a gate finding" in r.stdout
+    assert "probe — launch failed" in r.stdout
+
+
+def test_a_gate_that_fails_with_output_is_no_launch_failure(render, tmp_path):
+    out = render(tmp_path, {"project_name": "demo"})
+    _local_probe(out, _declaring(out, ["no-such-distribution-365"]))
+    r = _run_runner(out, _uv_stub(tmp_path, 2, stdout="probe: FAILED"))
+    assert r.returncode != 0
+    assert "launched through" not in r.stdout, r.stdout
+
+
+def test_a_traceback_is_no_launch_failure(render, tmp_path):
+    out = render(tmp_path, {"project_name": "demo"})
+    gi = _load(out)
+    tb = "Traceback (most recent call last):\n  File x\nImportError: no yaml\n"
+    assert gi.uv_launch_failure(["uv", "run", "--script", "x.py"], 1, "", tb) is None
+
+
+def test_the_pre_push_frame_names_a_uv_launch_of_the_runner(render, tmp_path, monkeypatch, capsys):
+    import importlib
+    import os
+    out = render(tmp_path, {"project_name": "demo"})
+    sys.path.insert(0, str(out / "scripts/process"))
+    try:
+        for name in ("gate_invoke", "pre_push"):
+            sys.modules.pop(name, None)
+        gi = importlib.import_module("gate_invoke")
+        pp = importlib.import_module("pre_push")
+        monkeypatch.setattr(gi, "gate_runner_argv",
+                            lambda root: ["uv", "run", str(root / "scripts/process/gate_runner.py")])
+        env = {**os.environ, "PATH": f"{_uv_stub(tmp_path, 2)}{os.pathsep}{os.environ['PATH']}"}
+        assert pp._gates(out, env, []) == 1
+    finally:
+        sys.path.remove(str(out / "scripts/process"))
+        for name in ("gate_invoke", "pre_push"):
+            sys.modules.pop(name, None)
+    assert "launched through `uv run`" in capsys.readouterr().err
+
+
+def test_uvs_offline_resolution_error_is_a_launch_failure(render, tmp_path):
+    # UV_OFFLINE / "No solution found": rc 1, no `error:` line, an indented ×
+    out = render(tmp_path, {"project_name": "demo"})
+    gi = _load(out)
+    err = ("warning: offline mode\n"
+           "  × No solution found when resolving script dependencies:\n"
+           "  ╰─▶ Because pyyaml was not found in the cache and you require pyyaml>=6\n"
+           "      hint: Packages were unavailable because the network was disabled.\n")
+    assert gi.uv_launch_failure(["uv", "run", "--script", "x.py"], 1, "", err)
+
+
+def test_the_runner_itself_needs_the_same_evidence(render, tmp_path, monkeypatch):
+    # a PyYAML 5 does not satisfy the runner's pyyaml>=6,<7: uv decides
+    out = render(tmp_path, {"project_name": "demo"})
+    gi = _load(out)
+    monkeypatch.setattr(gi.shutil, "which", lambda name: "/usr/bin/uv")
+    real = gi.metadata.version
+    monkeypatch.setattr(gi.metadata, "version",
+                        lambda name: "5.4.1" if name.lower() == "pyyaml" else real(name))
+    assert gi.gate_runner_argv(out)[:2] == ["uv", "run"]
+
+
+def test_without_tomllib_the_dependencies_array_is_still_read_whole(render, tmp_path, monkeypatch):
+    out = render(tmp_path, {"project_name": "demo"})
+    gi = _load(out)
+    monkeypatch.setitem(sys.modules, "tomllib", None)  # import raises ImportError
+    assert gi.declared_dependencies(out / "scripts/process/gate_runner.py") == ["pyyaml>=6,<7"]
+
+
+def test_a_direct_launch_that_cannot_import_is_named_a_launch_problem(render, tmp_path):
+    out = render(tmp_path, {"project_name": "demo"})
+    gi = _load(out)
+    tb = ("Traceback (most recent call last):\n  File x\n"
+          "ModuleNotFoundError: No module named '_yaml_dep'\n")
+    assert gi.uv_launch_failure([sys.executable, "x.py"], 1, "", tb)
+    assert gi.uv_launch_failure([sys.executable, "x.py"], 1, "x: FAILED", tb) is None
+    other = "Traceback (most recent call last):\nValueError: bad\n"
+    assert gi.uv_launch_failure([sys.executable, "x.py"], 1, "", other) is None

@@ -10,23 +10,24 @@ A few plain sentences per release: [NEWS.md](NEWS.md). Deutsche Fassung:
 [CHANGELOG-DE.md](CHANGELOG-DE.md). Releases before v2.28.2:
 [docs/changelog-archive.md](docs/changelog-archive.md).
 
-## v2.82.0 — The Spec Kit skills reach every clone · 2026-11-03
+## v2.82.0 — Works in a locked-down sandbox · 2026-11-03
 
-**Why.** `specify init` writes the `/speckit-*` skills into the agent's skills directory. A project that ignored that directory as per-user state never committed them, without a warning (#363). Every fresh clone, worktree and cloud session then had no `/speckit-*` command and needed the Spec Kit CLI again, which a sandbox can refuse. The setup never said to commit the skills, and the `!` exception one would write does not work under an ignored parent directory.
+**Why.** In a sandbox that reaches GitHub but not the package index, the process stopped twice. `specify init` writes the `/speckit-*` skills into the agent's skills directory. A project that ignored that directory never committed them, without a warning, so every fresh clone lacked the commands and needed the Spec Kit CLI, which the sandbox refuses (#363). And every gate that declares PyYAML was started through `uv run`, even when the system Python already had it. Without PyPI, uv failed. The gate runner then said only `FAILED gates: …`, and every push was refused (#365). An experiment in a fresh repo without network access confirmed both.
 
 **What changes.**
-- Setup commits `.specify/` and the kept skills, and names the skills the flow uses. It also shows the `.gitignore` form that works when the skills directory or its parent is ignored. The three dropped skills are removed for `.agents/skills` too.
-- The `speckit` gate reads the installed integrations' manifests and notes skills that were never committed (naming the ignore rule), committed ones missing from the checkout, a dropped skill that came back, and a committed skill no manifest lists. Sparse checkouts are respected. Without a manifest or git the note says "unverified". The gate never blocks on a skill.
-- Upgrades remove skill files the new manifest no longer lists.
+- Setup commits `.specify/` and the kept skills, names the skills the flow uses, and shows the `.gitignore` form that works when the skills directory or its parent is ignored. The three dropped skills are removed for `.agents/skills` too, in skill and command form.
+- The `speckit` gate reads the installed integrations' manifests and notes skills never committed to HEAD (naming the ignore rule), committed ones missing from the checkout, a dropped skill that came back, and a committed skill no manifest lists. It never blocks on a skill; odd manifest data or no git reads "unverified".
+- A gate runs with the current Python when that Python provably carries the gate's declaration: requires-python, every requirement in an accepted version, and a findable module. Only otherwise does it go through uv. The gate runner itself is started the same way.
+- When a gate most likely never ran because uv or an import failed, its section names a launch problem, not a gate finding. The gate stays red.
+- `SYSTEM-REQUIREMENTS.md` gives the route without the package index: Python ≥ 3.11 with PyYAML 6, and hooks through `install_hooks.py`. A project's own pre-push hook calls the frame with `python3`.
 
-**Effect.** A clone gets the whole Spec Kit flow from the repository, and a project sees in its gate output when it does not.
+**Effect.** With the skills committed and a Python that has PyYAML, a sandbox clone runs the Spec Kit flow, all gates and the push without reaching PyPI.
 
-**Update.** A pure update. A project whose skills are not committed sees the new note and commits them once, adjusting its `.gitignore` as the setup shows. No gate requires it.
+**Update.** A pure update. A project whose Spec Kit skills are not committed sees the new note and commits them once, adjusting `.gitignore` as the setup shows. A project with its own pre-push hook that runs `uv run scripts/process/pre_push.py` or `uv run scripts/process/gate_runner.py` switches to `python3` where it needs to work without the package index.
 
-**Changed sections.** `modules/speckit.md` (Setup, What the gate enforces)
+**Changed sections.** `modules/speckit.md` (Setup, What the gate enforces), `testing.md` (One test path)
 
-Details: [Plan](docs/analysis/2026-11-03-v2.82.md) #363 #364
-
+Details: [Plan](docs/analysis/2026-11-03-v2.82.md) #363 #364 #365
 ## v2.81.0 — Measure correctly first · 2026-11-02
 
 **Why.** Two independent analyses of which KPIs the process needs per step (#356, #357) found that the cockpit miscounted in a real project. It read only the first-parent chain of main: after main was merged into a branch and fast-forwarded onto it, 109 of 168 train merges in three weeks were missing, without a warning. `losses` showed "high" confidence over 93 issues without a single value, `cost` counted a message once per content block, and Codex reviews could not say where a finding came from. Empty columns gave no reason, so a project's missing configuration read as a gap in the template. The v2.80.1 plan rule had no severity and reached only the Claude command (#351, review of v2.80.1).

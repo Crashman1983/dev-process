@@ -252,7 +252,9 @@ code. A project supplies data; the template owns the sequence:
   nothing outside `.process-work/`; the stamp; the process gates; the
   tests; a stamp. Every installed guard reaches it (`merge_route.py
   --stdin` hands the push over); a project with its own hook calls it
-  (`exec uv run scripts/process/pre_push.py "$@"`). Exit 0 may push, 1
+  with `python3` (`exec python3 scripts/process/pre_push.py "$@"`) — `uv
+  run` may pick its own Python without PyYAML, and a host without the
+  package index then starts no gate (#365). Exit 0 may push, 1
   refused, 2 cannot judge (a red preflight among them: the host's failure,
   no test ran, nothing stamped or certified), 75 a lane stayed busy (no
   test ran).

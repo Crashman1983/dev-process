@@ -40,7 +40,7 @@ try:  # the event log's one writer; without it nothing is recorded, every verdic
     import gate_events  # noqa: E402
 except Exception:  # noqa: BLE001
     gate_events = None
-from gate_invoke import child_argv, hook_wiring_findings  # noqa: E402
+from gate_invoke import child_argv, hook_wiring_findings, uv_launch_failure  # noqa: E402
 from process_git import path_matches, pushed_commit_problem  # noqa: E402
 
 # gate-name -> (module answer key, command relative to repo root).
@@ -532,6 +532,11 @@ def main() -> int:
                           if not ln.startswith(PHASE_MARK))
             if err:
                 print(err, end="" if err.endswith("\n") else "\n", file=sys.stderr)
+            launch = uv_launch_failure(argv, rc, proc.stdout, proc.stderr)
+            if launch:
+                # in the gate's own section: the summary alone said only "FAILED"
+                print(f"gate-runner: {name}: {launch}")
+                reasons[name] = "launch failed: the declared dependencies were not provided"
         except subprocess.TimeoutExpired as exc:
             killed_at = time.monotonic()
             print(f"gate-runner: {name} exceeded {GATE_TIMEOUT_S}s and was killed "

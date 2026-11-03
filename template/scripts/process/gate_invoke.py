@@ -32,6 +32,7 @@ import re
 import shutil
 import subprocess
 import sys
+from importlib import metadata
 from importlib.util import find_spec, module_from_spec, spec_from_file_location
 from pathlib import Path
 
@@ -71,45 +72,187 @@ def _framework_install(root: Path) -> str:
 # The PEP-723 block: `# /// script` … `# ///`, every line a comment.
 _PEP723_BLOCK = re.compile(r"^# /// script\s*$(?P<body>.*?)^# ///\s*$",
                            re.MULTILINE | re.DOTALL)
+_QUOTED = re.compile(r'"([^"]*)"|\'([^\']*)\'')
 _DEPENDENCIES = re.compile(r"^#\s*dependencies\s*=\s*\[(?P<items>[^\]]*)\]",
-                           re.MULTILINE)
+                           re.MULTILINE | re.DOTALL)
+
+
+def _pep723(path: Path) -> dict:
+    """The PEP-723 block as a mapping; {} without one. Deliberately read as
+    text, never by importing the script: an import could fail on exactly the
+    missing dependency it is meant to check. `tomllib` (3.11+) parses it; an
+    older interpreter falls back to the quoted strings of `dependencies`."""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return {}
+    block = _PEP723_BLOCK.search(text)
+    if not block:
+        return {}
+    body = "\n".join(line[2:] if line.startswith("# ") else line[1:]
+                     for line in block.group("body").splitlines() if line.startswith("#"))
+    try:
+        import tomllib  # noqa: PLC0415 — stdlib from 3.11 only
+    except ImportError:
+        deps = _DEPENDENCIES.search(block.group("body"))
+        found = [a or b for a, b in _QUOTED.findall(deps.group("items"))] if deps else []
+        return {"dependencies": found}
+    try:
+        data = tomllib.loads(body)
+    except tomllib.TOMLDecodeError:
+        return {}
+    return data if isinstance(data, dict) else {}
 
 
 def declared_dependencies(path: Path) -> list[str]:
     """The dependencies a script declares in its PEP-723 block; [] without one.
+    Each entry is one requirement: `"pyyaml>=6,<7"` carries its own comma.
+    The block itself is the truth — there is no list of declaring scripts to
+    keep in sync."""
+    deps = _pep723(path).get("dependencies", [])
+    return [d for d in deps if isinstance(d, str) and d.strip()] if isinstance(deps, list) else []
 
-    Deliberately textual: the declaration IS text in the script header, and a
-    parser that had to import the script could fail on exactly the missing
-    dependency it is meant to check. The block itself is the truth — there is
-    no list of declaring scripts to keep in sync."""
+
+def declared_python(path: Path) -> str | None:
+    """The `requires-python` of a script's PEP-723 block, if it names one."""
+    value = _pep723(path).get("requires-python")
+    return value if isinstance(value, str) else None
+
+
+_REQUIREMENT = re.compile(r"^\s*(?P<name>[A-Za-z0-9][A-Za-z0-9._-]*)\s*(?P<spec>[^\[;]*)$")
+_CLAUSE = re.compile(r"^\s*(?P<op>>=|<=|==|!=|>|<)\s*(?P<version>[0-9]+(?:\.[0-9]+)*)\s*$")
+_RELEASE = re.compile(r"^[0-9]+(?:\.[0-9]+)*$")
+
+
+def _release(version: str) -> tuple[int, ...] | None:
+    """A plain release version (`6.0.3`) as numbers; None for anything else —
+    pre/post/dev releases, epochs, local labels — which this reader does not
+    judge."""
+    return tuple(int(p) for p in version.split(".")) if _RELEASE.match(version) else None
+
+
+def _meets(have: tuple[int, ...], spec: str) -> bool:
+    """Every clause of a specifier list holds, compared zero-padded
+    (`6.0` == `6.0.0`); an operator outside >=, >, <=, <, ==, != (`~=`,
+    `===`, wildcards) is unreadable and fails."""
+    for clause in filter(None, (c.strip() for c in spec.split(","))):
+        m = _CLAUSE.match(clause)
+        if not m:
+            return False
+        want = tuple(int(p) for p in m.group("version").split("."))
+        width = max(len(have), len(want))
+        a, b = have + (0,) * (width - len(have)), want + (0,) * (width - len(want))
+        if not {">=": a >= b, "<=": a <= b, "==": a == b, "!=": a != b,
+                ">": a > b, "<": a < b}[m.group("op")]:
+            return False
+    return True
+
+
+def _module_found(dist: str) -> bool:
+    """At least one top-level module of the distribution can be found — a
+    leftover dist-info without its package is not "installed"."""
     try:
-        text = path.read_text(encoding="utf-8")
-    except OSError:
-        return []
-    block = _PEP723_BLOCK.search(text)
-    if not block:
-        return []
-    deps = _DEPENDENCIES.search(block.group("body"))
-    if not deps:
-        return []
-    return [item.strip().strip("\"'") for item in deps.group("items").split(",")
-            if item.strip()]
+        mapping = metadata.packages_distributions()
+    except Exception:  # noqa: BLE001 — unreadable metadata proves nothing
+        return False
+    wanted = re.sub(r"[-_.]+", "-", dist).lower()
+    modules = sorted(mod for mod, dists in mapping.items()
+                     if any(re.sub(r"[-_.]+", "-", d).lower() == wanted for d in dists))
+    for mod in modules:
+        try:
+            if find_spec(mod) is not None:
+                return True
+        except (ImportError, ValueError):
+            continue
+    return False
+
+
+def _satisfied(requirement: str) -> bool:
+    """True only when THIS interpreter provably provides the requirement:
+    installed, a plain release version every clause accepts, and a module
+    that can be found. Extras, markers and whatever else this small reader
+    cannot judge count as not provided — uv then decides, as before."""
+    m = _REQUIREMENT.match(requirement)
+    if not m:
+        return False
+    try:
+        have = _release(metadata.version(m.group("name")))
+    except Exception:  # noqa: BLE001 — not installed or broken metadata
+        return False
+    return have is not None and _meets(have, m.group("spec")) and _module_found(m.group("name"))
+
+
+def _python_ok(requires: str | None) -> bool:
+    if requires is None:
+        return True
+    return _meets(tuple(sys.version_info[:3]), requires)
+
+
+def provides(script: Path) -> bool:
+    """This interpreter provably carries the script's PEP-723 declaration:
+    requires-python and every requirement (`_satisfied`)."""
+    return _python_ok(declared_python(script)) and all(
+        _satisfied(d) for d in declared_dependencies(script))
 
 
 def child_argv(root: Path, cmd: list[str]) -> list[str]:
     """argv for a child command of the shape `[interpreter, script, *args]`.
 
-    A script with its own PEP-723 declaration runs through `uv run --script`;
-    every other command is returned unchanged. Without `uv` on PATH the
-    command also stays as given: that is the pre-existing behaviour — green on
-    hosts with the dependency installed globally, the plain ImportError
-    otherwise. Refusing here would disarm hosts on which the gates run today."""
+    A script with its own PEP-723 declaration runs through `uv run --script` —
+    unless the interpreter it was given is this one and provably provides the
+    child's own declaration — requires-python, every distribution in an
+    accepted version, a findable module (the incident in point 1 above was a
+    child started in an interpreter that lacked ITS declaration). Then it runs as given, with
+    no package index needed: a sandbox that reaches GitHub but not PyPI ran
+    no gate at all before (#365). Every other command is returned unchanged.
+    Without `uv` on PATH the command also stays as given: that is the
+    pre-existing behaviour — green on hosts with the dependency installed
+    globally, the plain ImportError otherwise. Refusing here would disarm
+    hosts on which the gates run today."""
     if len(cmd) < 2:
         return cmd
     script = root / cmd[1]
-    if not declared_dependencies(script) or not shutil.which("uv"):
+    deps = declared_dependencies(script)
+    if not deps or not shutil.which("uv"):
+        return cmd
+    # compared as given, not resolved: a venv's python is a symlink to the base
+    # interpreter but carries other packages
+    if cmd[0] == sys.executable and provides(script):
         return cmd
     return ["uv", "run", "--script", str(script), *cmd[2:]]
+
+
+_UV_ERROR = re.compile(r"^(?:error:|\s*Caused by:|\s*×)", re.MULTILINE)
+
+
+_IMPORT_FAILED = re.compile(r"^(?:ModuleNotFoundError|ImportError): ", re.MULTILINE)
+
+
+def uv_launch_failure(argv: list[str], rc: int, stdout: str, stderr: str) -> str | None:
+    """The diagnosis when a gate most likely never ran its check: a non-zero
+    exit, nothing on stdout, and either uv's own error form on stderr
+    (`error:`, `Caused by:`, `×`) for a launch through `uv run`, or an import
+    failure for a direct launch (a dependency installed only in part). Any
+    output, or another traceback, is the gate's own red and left alone. The
+    outcome never changes — this only names the likely cause."""
+    if rc == 0 or stdout.strip():
+        return None
+    script = next((Path(a) for a in argv[1:] if a.endswith(".py")), None)
+    deps = ", ".join(declared_dependencies(script)) if script else ""
+    deps = deps or "its declared dependencies"
+    if argv[:2] == ["uv", "run"] and _UV_ERROR.search(stderr):
+        return (f"launched through `uv run` to provide {deps}; uv's error above "
+                f"and no output: most likely uv failed before the script ran — a "
+                f"launch problem, not a gate finding. Without access to the "
+                f"package index, Python >= 3.11 with {deps} runs the gates "
+                f"(docs/SYSTEM-REQUIREMENTS.md)")
+    if argv[:1] == [sys.executable] and _IMPORT_FAILED.search(stderr):
+        return (f"started with this interpreter, which carries {deps} by its "
+                f"metadata, but an import failed (above) and there is no output: "
+                f"most likely an installation in part — a launch problem, not a "
+                f"gate finding; repair the package or remove it, and uv provides "
+                f"the declaration")
+    return None
 
 
 def gate_runner_argv(root: Path) -> list[str] | None:
@@ -119,14 +262,14 @@ def gate_runner_argv(root: Path) -> list[str] | None:
     distinctly (`not_runnable_reason`), otherwise the reader hunts the failure
     in their branch instead of in the interpreter.
 
-    Order: an interpreter that provably carries the dependency first —
-    `find_spec` asks the running interpreter, exactly the one that would be
+    Order: an interpreter that provably carries the declaration first —
+    `provides` asks the running interpreter, exactly the one that would be
     handed on as `sys.executable`, and it needs no network or cache — then
     `uv`, which resolves the declaration itself."""
     runner = root / RUNNER_REL
     if not runner.is_file():
         return None
-    if find_spec("yaml") is not None:
+    if provides(runner):
         return [sys.executable, str(runner)]
     if shutil.which("uv"):
         return ["uv", "run", str(runner)]
