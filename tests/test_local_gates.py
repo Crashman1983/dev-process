@@ -187,7 +187,10 @@ def test_an_exec_gate_runs_its_argv_as_given(render, tmp_path):
     {"x": {"module": None, "exec": ["make"], "paths": []}},           # empty trigger
     {"x": {"module": None, "exec": ["make"], "paths": "backend/"}},
     {"x": {"module": None, "exec": ["make"], "when": ["x"]}},         # unknown key
-], ids=["both", "neither", "exec-string", "paths-empty", "paths-string", "unknown-key"])
+    {"x": {"module": None, "exec": ["make"], "areas": []}},           # empty areas
+    {"x": {"module": None, "exec": ["make"], "areas": "ui"}},
+], ids=["both", "neither", "exec-string", "paths-empty", "paths-string", "unknown-key",
+        "areas-empty", "areas-string"])
 def test_a_malformed_exec_or_paths_entry_is_a_hard_failure(render, tmp_path, bad):
     out = _project(render, tmp_path, bad)
     r = _run(out)
@@ -206,3 +209,84 @@ def test_a_file_moved_out_of_the_trigger_paths_still_runs_the_gate(render, tmp_p
     subprocess.run(["git", "-c", "commit.gpgsign=false", "commit", "-qm", "move"], cwd=out, check=True)
     r = _run(out)
     assert r.returncode == 1 and "lint: FAIL" in r.stdout, r.stdout + r.stderr
+
+
+# --- #369: areas — local gates by the content of a change -------------------
+
+def _areas(out: Path, areas: dict) -> None:
+    (out / "docs/process/testing.local.json").write_text(json.dumps({"areas": areas}),
+                                                         encoding="utf-8")
+
+
+def _ui_lint(render, tmp_path, areas=None):
+    out = _project(render, tmp_path, {"ui-lint": {"module": None, "command": ["scripts/ui.py"],
+                                                  "areas": ["ui"]}})
+    _gate(out, "scripts/ui.py", 1, "ui-lint: FAIL")
+    _areas(out, areas if areas is not None else {"ui": ["frontend/**"]})
+    _committed(out)
+    return out
+
+
+def test_an_area_gate_runs_only_when_its_area_is_in_the_change(render, tmp_path):
+    out = _ui_lint(render, tmp_path)
+    _change(out, "backend/app.py")
+    r = _run(out)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "ui-lint: no path in flight matches areas ui" in r.stdout
+    assert "1 skipped (not in this change: ui-lint)" in r.stdout
+    events = [json.loads(ln) for ln in (out / ".git/process-gate-events.jsonl").read_text().splitlines()]
+    skip = [e for e in events if e["gate"] == "ui-lint"][-1]
+    assert skip["outcome"] == "skipped" and "areas ui" in skip["reason"]
+    _change(out, "frontend/page.tsx")
+    r = _run(out)
+    assert r.returncode == 1 and "ui-lint: FAIL" in r.stdout, r.stdout + r.stderr
+
+
+def test_an_area_named_nowhere_is_a_hard_failure(render, tmp_path):
+    out = _ui_lint(render, tmp_path, areas={"ios": ["ios/**"]})
+    _change(out, "backend/app.py")
+    r = _run(out)
+    assert r.returncode == 1 and "area 'ui' is in no" in r.stderr, r.stdout + r.stderr
+
+
+def test_a_branch_introduces_an_area_and_its_gate_together(render, tmp_path):
+    # the area exists only in the working tree: the gate runs and a note says why
+    out = _project(render, tmp_path, None)
+    _committed(out)
+    (out / "docs/process/gates.local.json").write_text(json.dumps(
+        {"ui-lint": {"module": None, "command": ["scripts/ui.py"], "areas": ["ui"]}}), encoding="utf-8")
+    _gate(out, "scripts/ui.py", 0, "ui-lint: OK")
+    _areas(out, {"ui": ["frontend/**"]})
+    _change(out, "backend/app.py")
+    r = _run(out)
+    assert "not on the integration branch yet" in r.stdout, r.stdout + r.stderr
+    assert "== running ui-lint ==" in r.stdout and r.returncode == 0
+
+
+def test_a_branch_cannot_narrow_an_area_to_skip_its_gate(render, tmp_path):
+    out = _ui_lint(render, tmp_path)
+    _areas(out, {"ui": ["nothing/**"]})  # the branch's own narrowing
+    _change(out, "frontend/page.tsx")
+    r = _run(out)
+    assert r.returncode == 1 and "ui-lint: FAIL" in r.stdout, r.stdout + r.stderr
+
+
+def test_an_empty_area_is_a_statement_not_an_error(render, tmp_path):
+    out = _ui_lint(render, tmp_path, areas={"ui": []})
+    _change(out, "frontend/page.tsx")
+    r = _run(out)
+    assert r.returncode == 0 and "ui-lint: no path in flight matches" in r.stdout, r.stdout + r.stderr
+
+
+def test_an_area_gate_runs_when_git_cannot_name_the_paths(render, tmp_path):
+    out = _ui_lint(render, tmp_path)
+    subprocess.run(["git", "branch", "-D", "main"], cwd=out, check=True, capture_output=True)
+    r = _run(out)
+    assert r.returncode == 1 and "ui-lint: FAIL" in r.stdout, r.stdout + r.stderr
+
+
+def test_without_skips_the_summary_keeps_its_wording(render, tmp_path):
+    out = _project(render, tmp_path, {"ok": {"module": None, "command": ["scripts/ok.py"]}})
+    _gate(out, "scripts/ok.py", 0, "ok: OK")
+    r = _run(out)
+    assert r.returncode == 0 and "active gate(s) passed" in r.stdout and "all " in r.stdout, r.stdout
