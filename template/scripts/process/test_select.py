@@ -295,19 +295,26 @@ def _not_deferrable(root: Path, stack: dict, changed: set[str]) -> str | None:
     there = next((s for s in (base or {}).get("stacks", []) if s["name"] == stack["name"]), None)
     if not there or there.get("preflight") != stack["preflight"]:
         return "its preflight is not on the integration branch as it is here"
-    if "-m" in stack["preflight"]:
-        return "it runs a module (`-m`): name the host check's file, so it can be compared"
     top = root.resolve()
+    compared = 0
     for arg in stack["preflight"]:
-        # the repository's own files only: an interpreter or a system tool is no host check
-        target = (root / arg).resolve()
-        if Path(arg).is_absolute() or top not in target.parents or not target.is_file():
-            continue
-        if arg in changed:
+        if arg in changed:  # lexically, before any resolving: a symlink swap is a change
             return f"this branch changes its host check ({arg})"
+        here = root / arg
+        if Path(arg).is_absolute() or not (here.is_file() or here.is_symlink()):
+            continue  # an interpreter or a system tool is no host check of the repository's
+        if here.is_symlink() or top not in here.resolve().parents:
+            return f"its host check {arg} leaves the repository (a symlink)"
         shown = _git_bytes(root, "show", f"{ref}:{arg}")
-        if shown is None or shown != (root / arg).read_bytes():
-            return f"its host check {arg} differs from the integration branch's"
+        if shown is None or shown != here.read_bytes():
+            return (f"its host check {arg} differs from the integration branch's — rebase onto it "
+                    f"if main changed the check")
+        compared += 1
+    if not compared:
+        # `sh -c "…"`, `-m module` or a directory: nothing to compare, so nothing proves
+        # the check is the integration branch's
+        return ("its preflight names no host-check file of the repository as its own argument "
+                "(not inside `sh -c`, not `-m`) — only a compared file may say \"not on this host\"")
     return None
 
 

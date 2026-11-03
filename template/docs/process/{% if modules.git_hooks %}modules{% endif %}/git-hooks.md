@@ -55,7 +55,9 @@ refuses a push to main the guard did not see.
   and caught by CI on push anyway.
 - `SKIP=process-gates` does not skip `merge-route`: on a push to main the
   guard still bars plan and review sessions, refuses the skip from any
-  dispatched session, and logs it in `<git-common-dir>/process-owner-overrides.log`.
+  dispatched session, needs the owner's reason (`PROCESS_SKIP_REASON="<why>"`,
+  refused without), and logs it with that reason in
+  `<git-common-dir>/process-owner-overrides.log`.
   `SKIP=merge-route` skips only the check that the guard ran; `--no-verify`
   skips the guard itself — the same class as a clone without hooks.
 

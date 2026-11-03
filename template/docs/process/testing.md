@@ -240,7 +240,8 @@ code. A project supplies data; the template owns the sequence:
   logins — once before any test of a push, a `--certify` or the train;
   `preflight_timeout`, default 600 s, for the train's too; on a push the
   process gates run first, so a host that breaks a gate is refused as that
-  gate; `preflight_timeout` holds for every preflight, a stack's too), `lanes`, `lane_dir`,
+  gate; `preflight_timeout` holds for every preflight, a stack's too — in
+  the train for all of them together, chained into one check), `lanes`, `lane_dir`,
   `certificate_env`, and `areas` (what a change contains — "Areas" below).
   No file: the gates run, no tests.
   A malformed file refuses the push — a typo in a map must not skip tests.
@@ -288,14 +289,15 @@ code. A project supplies data; the template owns the sequence:
   other stacks do, the output names it, and nothing counts as passed — no
   push certificate, no stamp. Only a host check the integration branch
   already has may say so: the stack's `preflight` must stand there as it
-  does here, and every file its argv names must be byte-identical to the
-  integration branch's — a branch never declares its own stack unsuited.
+  does here, its argv must name at least one repository file as its own
+  argument, and every such file must be byte-identical to the integration
+  branch's, no symlink — a branch never declares its own stack unsuited.
   Name the check's file (`python3 scripts/host_check.py`), not a module
-  (`-m` cannot be compared), and keep it self-contained: what it imports is
-  not compared. A stack's check runs only when the change gives it work. Otherwise a 3 refuses like any
-  other red preflight. **A merge never defers:** the merge push, the train
-  and `finish --tests` run every stack's preflight after the global one, and
-  any non-zero exit, 3 included, is the host's — the train stops as
+  (`-m`) and not inside `sh -c`: those cannot be compared and never defer.
+  Keep the file self-contained: what it imports is not compared. A stack's check runs only when the change gives it work. Otherwise a 3 refuses like any
+  other red preflight. **A merge never defers:** the merge push (before any
+  certificate counts), the train and `finish --tests` run every stack's
+  preflight, and any non-zero exit, 3 included, is the host's — the train stops as
   "environment" and blames nobody. A host that cannot run a stack cannot
   merge; the merge suite on the gate host runs it.
 - **Skipping** is the owner's: `PROCESS_SKIP=gates` is the guard's logged
