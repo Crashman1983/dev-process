@@ -467,7 +467,7 @@ def test_a_direct_launch_that_cannot_import_is_named_a_launch_problem(render, tm
     out = render(tmp_path, {"project_name": "demo"})
     gi = _load(out)
     tb = ("Traceback (most recent call last):\n  File x\n"
-          "ModuleNotFoundError: No module named '_yaml_dep'\n")
+          "ModuleNotFoundError: No module named '_yaml'\n")  # a PyYAML module
     runner = str(out / "scripts/process/gate_runner.py")  # declares pyyaml
     assert gi.uv_launch_failure([sys.executable, runner], 1, "", tb)
     assert gi.uv_launch_failure([sys.executable, runner], 1, "x: FAILED", tb) is None
@@ -482,8 +482,9 @@ def test_without_tomllib_requires_python_still_counts(render, tmp_path, monkeypa
     gi = _load(out)
     monkeypatch.setitem(sys.modules, "tomllib", None)
     monkeypatch.setattr(gi.shutil, "which", lambda name: "/usr/bin/uv")
-    cmd = [sys.executable, *_declaring(out, ["pyyaml>=6"], python=">=99")]
-    assert gi.declared_python(out / cmd[1]) == ">=99"
+    cmd = [sys.executable, *_declaring(out, ["pyyaml[libyaml]>=6", "tomli>=2"], python=">=99")]
+    assert gi.child_argv(out, cmd)[:3] == ["uv", "run", "--script"]
+    cmd = [sys.executable, "scripts/process/gate_runner.py"]  # even a provable one
     assert gi.child_argv(out, cmd)[:3] == ["uv", "run", "--script"]
 
 
@@ -547,3 +548,36 @@ def test_an_absurd_version_number_is_unreadable_not_a_crash(render, tmp_path):
     out = render(tmp_path, {"project_name": "demo"})
     gi = _load(out)
     assert gi._satisfied("pyyaml>=" + "9" * 5000) is False
+
+
+
+@pytest.mark.parametrize("text", [
+    "# /// script\n\n# dependencies = [\"pyyaml>=6\"]\n# ///\n",
+    "# /// script\n# dependencies = [\"pyyaml>=6\"]\n\n# ///\n",
+    "# /// script\n# dependencies = [\"pyyaml>=6\"]\n# ///  \n",
+    "# /// script\n# dependencies = [\"pyyaml>=6\"]\n# [tool.uv]\n"
+    "# exclude-newer = \"2020-01-01T00:00:00Z\"\n# ///\n",
+])
+def test_only_uvs_exact_block_form_is_trusted_for_a_direct_start(render, tmp_path, monkeypatch, text):
+    out = render(tmp_path, {"project_name": "demo"})
+    gi = _load(out)
+    monkeypatch.setattr(gi.shutil, "which", lambda name: "/usr/bin/uv")
+    (out / "scripts/odd_gate.py").write_text(text + "print('ok')\n", encoding="utf-8")
+    assert gi.child_argv(out, [sys.executable, "scripts/odd_gate.py"])[:3] == ["uv", "run", "--script"]
+
+
+def test_a_broken_import_in_the_branch_is_the_gates_own_red(render, tmp_path):
+    # the missing name comes from the project's own module, not from PyYAML
+    out = render(tmp_path, {"project_name": "demo"})
+    gi = _load(out)
+    runner = str(out / "scripts/process/gate_runner.py")
+    tb = ("Traceback (most recent call last):\n"
+          "ImportError: cannot import name 'integration_refs' from 'check_review'\n")
+    assert gi.uv_launch_failure([sys.executable, runner], 1, "", tb) is None
+
+
+def test_the_modules_of_a_distribution_come_from_its_own_metadata(render, tmp_path):
+    out = render(tmp_path, {"project_name": "demo"})
+    gi = _load(out)
+    assert "yaml" in gi._modules_of("pyyaml")
+    assert gi._modules_of("no-such-distribution-365") == frozenset()

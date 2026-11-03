@@ -73,9 +73,12 @@ def _framework_install(root: Path) -> str:
 # The PEP-723 block: `# /// script` … `# ///`, every line a comment.
 _PEP723_BLOCK = re.compile(r"^# /// script\s*$(?P<body>.*?)^# ///\s*$",
                            re.MULTILINE | re.DOTALL)
-INVALID = "invalid"  # a PEP-723 block uv would refuse
+INVALID = "invalid"  # a PEP-723 block uv would refuse, or one this reader cannot vouch for
+# uv's exact form: the opening line, `#` or `# …` lines, the closing line —
+# no blank line, no trailing blank on the tags
+_STRICT_BLOCK = re.compile(r"^# /// script\n(?P<body>(?:#(?: [^\n]*)?\n)*?)# ///(?:\n|\Z)",
+                           re.MULTILINE)
 _QUOTED = re.compile(r'"([^"]*)"|\'([^\']*)\'')
-_REQUIRES_PYTHON = re.compile(r"^#\s*requires-python\s*=\s*[\"']([^\"']*)[\"']", re.MULTILINE)
 _DEPENDENCIES = re.compile(r"^#\s*dependencies\s*=\s*\[(?P<items>[^\]]*)\]",
                            re.MULTILINE | re.DOTALL)
 
@@ -89,26 +92,23 @@ def _pep723(path: Path) -> dict:
         text = path.read_text(encoding="utf-8")
     except (OSError, ValueError):  # unreadable or not UTF-8: no declaration read
         return {}
-    blocks = _PEP723_BLOCK.findall(text)
     block = _PEP723_BLOCK.search(text)
     if not block:
         return {}
-    lines = block.group("body").strip("\n").splitlines()
-    # uv's own rule: one block, every line `#` or `# …` — anything else uv
-    # refuses, so it is never trusted for a direct start here either
-    if len(blocks) > 1 or not all(ln == "#" or ln.startswith("# ") for ln in lines):
+    strict = _STRICT_BLOCK.search(text)
+    # uv's own rule: one block, in its exact form — anything else uv refuses,
+    # so it is never trusted for a direct start here either
+    if len(_PEP723_BLOCK.findall(text)) > 1 or not strict or strict.start() != block.start():
         return {INVALID: True}
-    body = "\n".join(ln[2:] for ln in lines)
+    body = "\n".join(ln[2:] for ln in strict.group("body").splitlines())
     try:
         import tomllib  # noqa: PLC0415 — stdlib from 3.11 only
     except ImportError:
+        # below 3.11 nothing here vouches for a direct start: uv decides, as
+        # before; the quoted strings only name the dependencies in messages
         deps = _DEPENDENCIES.search(block.group("body"))
         found = [a or b for a, b in _QUOTED.findall(deps.group("items"))] if deps else []
-        data: dict = {"dependencies": found}
-        python = _REQUIRES_PYTHON.search(block.group("body"))
-        if python:
-            data["requires-python"] = python.group(1)
-        return data
+        return {INVALID: True, "dependencies": found}
     try:
         data = tomllib.loads(body)
     except tomllib.TOMLDecodeError:
@@ -118,6 +118,8 @@ def _pep723(path: Path) -> dict:
     if (not isinstance(deps, list) or not all(isinstance(d, str) for d in deps)
             or (python is not None and not isinstance(python, str))):
         return {INVALID: True}
+    if "tool" in data:  # [tool.uv] and the like shape uv's resolution: uv decides
+        return {INVALID: True, "dependencies": deps}
     return data
 
 
@@ -173,24 +175,34 @@ def _meets(have: tuple[int, ...], spec: str) -> bool:
     return True
 
 
-@functools.lru_cache(maxsize=1)
-def _distribution_modules() -> dict:
-    """packages_distributions(), read once per process: it scans every
-    installed distribution, and a push asks for it once per gate."""
-    return metadata.packages_distributions()
+@functools.lru_cache(maxsize=None)
+def _modules_of(dist: str) -> frozenset[str]:
+    """Top-level import names of ONE installed distribution, from its own
+    metadata (`top_level.txt`, else its file list) — never a scan of every
+    installed package."""
+    try:
+        d = metadata.distribution(dist)
+    except Exception:  # noqa: BLE001 — not installed or unreadable
+        return frozenset()
+    try:
+        top = d.read_text("top_level.txt")
+    except Exception:  # noqa: BLE001
+        top = None
+    if top:
+        return frozenset(n.strip() for n in top.splitlines() if n.strip())
+    names: set[str] = set()
+    for f in d.files or []:
+        first = f.parts[0] if f.parts else ""
+        if not first or first.endswith((".dist-info", ".egg-info", ".pth")) or first in ("..", "__pycache__"):
+            continue
+        names.add(first[:-3] if first.endswith(".py") else first)
+    return frozenset(names)
 
 
 def _module_found(dist: str) -> bool:
     """At least one top-level module of the distribution can be found — a
     leftover dist-info without its package is not "installed"."""
-    try:
-        mapping = _distribution_modules()
-    except Exception:  # noqa: BLE001 — unreadable metadata proves nothing
-        return False
-    wanted = re.sub(r"[-_.]+", "-", dist).lower()
-    modules = sorted(mod for mod, dists in mapping.items()
-                     if any(re.sub(r"[-_.]+", "-", d).lower() == wanted for d in dists))
-    for mod in modules:
+    for mod in sorted(_modules_of(dist)):
         try:
             if find_spec(mod) is not None:
                 return True
@@ -260,7 +272,9 @@ def child_argv(root: Path, cmd: list[str]) -> list[str]:
 # uv's own failure carries one of these; a gate's `error:` line alone does not
 _UV_ERROR = re.compile(r"^\s*(?:×|Caused by:)", re.MULTILINE)
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
-_IMPORT_FAILED = re.compile(r"^(?:ModuleNotFoundError|ImportError): ", re.MULTILINE)
+_IMPORT_FAILED = re.compile(
+    r"^(?:ModuleNotFoundError|ImportError): (?:No module named '(?P<missing>[\w.]+)'"
+    r"|cannot import name '\w+' from '(?P<source>[\w.]+)')", re.MULTILINE)
 
 
 def uv_launch_failure(argv: list[str], rc: int, stdout: str, stderr: str) -> str | None:
@@ -285,7 +299,11 @@ def uv_launch_failure(argv: list[str], rc: int, stdout: str, stderr: str) -> str
                 f"launch problem, not a gate finding. Without access to the "
                 f"package index, Python >= 3.11 with {deps} runs the gates "
                 f"(docs/SYSTEM-REQUIREMENTS.md)")
-    if argv[:1] == [sys.executable] and provides(script) and _IMPORT_FAILED.search(plain):
+    failed = _IMPORT_FAILED.search(plain)
+    module = (failed.group("missing") or failed.group("source") or "").split(".")[0] if failed else ""
+    owned = set().union(*(_modules_of(_REQUIREMENT.match(d).group("name"))
+                          for d in declared if _REQUIREMENT.match(d)))
+    if argv[:1] == [sys.executable] and module in owned and provides(script):
         return (f"started with this interpreter, whose metadata lists {deps}, but "
                 f"an import failed (above) and there is no output: possibly an "
                 f"installation in part — check the traceback; if it names a "
