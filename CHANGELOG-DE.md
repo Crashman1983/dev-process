@@ -33,6 +33,7 @@ English version: [CHANGELOG.md](CHANGELOG.md). Die Releases vor v2.28.2:
 **Geänderte Abschnitte.** `modules/speckit.md` (Setup, What the gate enforces), `testing.md` (One test path)
 
 Details: [Plan](docs/analysis/2026-11-03-v2.82.md) #363 #364 #365
+
 ## v2.81.0 — Erst richtig messen · 2026-11-02
 
 **Warum.** Zwei unabhängige Analysen, welche KPIs der Prozess je Schritt braucht (#356, #357), fanden, dass das Cockpit in einem echten Projekt falsch zählte. Es las nur die First-Parent-Kette von main: Nachdem main in einen Branch gemergt und auf ihn vorgespult worden war, fehlten in drei Wochen 109 von 168 Train-Merges, ohne Warnung. `losses` zeigte „high“ Konfidenz über 93 Issues ohne einen einzigen Wert, `cost` zählte eine Nachricht je Inhaltsblock, und Codex-Reviews konnten nicht sagen, woher ein Befund stammt. Leere Spalten nannten keinen Grund, sodass fehlende Projektkonfiguration wie eine Lücke im Template aussah. Die Plan-Regel aus v2.80.1 hatte keine Schwere und erreichte nur den Claude-Befehl (#351, Prüfung von v2.80.1).

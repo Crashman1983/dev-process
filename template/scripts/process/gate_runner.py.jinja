@@ -536,7 +536,7 @@ def main() -> int:
             if launch:
                 # in the gate's own section: the summary alone said only "FAILED"
                 print(f"gate-runner: {name}: {launch}")
-                reasons[name] = "launch failed: the declared dependencies were not provided"
+                reasons[name] = "likely a launch problem (see its section)"
         except subprocess.TimeoutExpired as exc:
             killed_at = time.monotonic()
             print(f"gate-runner: {name} exceeded {GATE_TIMEOUT_S}s and was killed "

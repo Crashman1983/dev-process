@@ -28,6 +28,7 @@ A few plain sentences per release: [NEWS.md](NEWS.md). Deutsche Fassung:
 **Changed sections.** `modules/speckit.md` (Setup, What the gate enforces), `testing.md` (One test path)
 
 Details: [Plan](docs/analysis/2026-11-03-v2.82.md) #363 #364 #365
+
 ## v2.81.0 — Measure correctly first · 2026-11-02
 
 **Why.** Two independent analyses of which KPIs the process needs per step (#356, #357) found that the cockpit miscounted in a real project. It read only the first-parent chain of main: after main was merged into a branch and fast-forwarded onto it, 109 of 168 train merges in three weeks were missing, without a warning. `losses` showed "high" confidence over 93 issues without a single value, `cost` counted a message once per content block, and Codex reviews could not say where a finding came from. Empty columns gave no reason, so a project's missing configuration read as a gap in the template. The v2.80.1 plan rule had no severity and reached only the Claude command (#351, review of v2.80.1).
