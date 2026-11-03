@@ -176,15 +176,16 @@ def parse(data) -> dict:
     }
 
 
-def areas_at(root: Path, ref: str | None) -> dict[str, list[str]] | None:
-    """The areas as the file stands at `ref` (None: the working tree); None
-    when they cannot be read there — the caller decides what that means."""
+def config_at(root: Path, ref: str | None) -> dict | None:
+    """The configuration as the file stands at `ref` (None: the working tree).
+    No file there is the empty configuration; None when it cannot be read
+    there — the caller decides what that means."""
     if ref is None:
         try:
             cfg = load(root)
         except ConfigError:
             return None
-        return cfg["areas"] if cfg else {}
+        return cfg if cfg else parse({})
     import subprocess  # noqa: PLC0415
 
     try:
@@ -195,11 +196,18 @@ def areas_at(root: Path, ref: str | None) -> dict[str, list[str]] | None:
     if r.returncode != 0:
         exists = subprocess.run(["git", "cat-file", "-e", f"{ref}^{{commit}}"], cwd=root,
                                 capture_output=True)
-        return {} if exists.returncode == 0 else None  # no file at a real ref: no areas
+        return parse({}) if exists.returncode == 0 else None  # no file at a real ref
     try:
-        return parse(json.loads(r.stdout))["areas"]
+        return parse(json.loads(r.stdout))
     except (ValueError, ConfigError):
         return None
+
+
+def areas_at(root: Path, ref: str | None) -> dict[str, list[str]] | None:
+    """The areas as the file stands at `ref` (None: the working tree); None
+    when they cannot be read there — the caller decides what that means."""
+    cfg = config_at(root, ref)
+    return None if cfg is None else cfg["areas"]
 
 
 def load(root: Path) -> dict | None:

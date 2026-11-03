@@ -15,7 +15,7 @@ over); a project with its own hook calls it the same way
   3. each pushed commit is this checkout's HEAD (`process_git.pushed_commit_problem`);
   4. the class — `merge` when a branch update lands on an integration
      branch — and the scope — `process-only` when the change touches nothing
-     but bookkeeping;
+     but bookkeeping and inert paths (`quiet.py`);
   5. the stamp: the same commit, class and scope passed before → done; the
      same evidence tree (a bookkeeping commit on a green tree) → gates only;
   6. the process gates (`gate_runner.py`, local gates with path triggers);
@@ -47,7 +47,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import certificate  # noqa: E402
 import merge_route  # noqa: E402
 import testing_config  # noqa: E402
-from check_review import BOOKKEEPING, PUSH_TARGETS_ENV, integration_targets  # noqa: E402
+from check_review import PUSH_TARGETS_ENV, integration_targets  # noqa: E402
+
+import quiet  # noqa: E402
 from process_git import drop_local_env, git_environment, pushed_commit_problem  # noqa: E402
 
 STAMP = "process-push-ok"
@@ -201,7 +203,12 @@ def _run(root: Path, lines: list, env: dict[str, str], ran: dict) -> int:
         if cfg and cfg["stacks"] and "tests" not in skips and klass == "branch":
             _say(f"cannot select tests: {exc}")
             return 2
-    scope = "process-only" if changed and all(p.startswith(BOOKKEEPING) for p in changed) else "code"
+    # bookkeeping and inert paths run no suite (`quiet.py`, #366); a branch push
+    # selects nothing for them anyway — the gain is the merge push
+    classes = quiet.classify(root, changed) if changed else {}
+    scope = "process-only" if quiet.is_quiet(classes) else "code"
+    for line in quiet.report(classes):
+        _say(line)
     head, tree = _fingerprint(root)
     # the configuration is part of what a stamp proves: an untracked (excluded)
     # testing.local.json changes no tree

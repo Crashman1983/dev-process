@@ -4,7 +4,7 @@ Scope — not code volume — sets the tier. A change that another component, co
 
 | Tier | Scope | Route |
 |---|---|---|
-| **Tier 0** | No behavior change (docs, formatting, comments), **or** a local, isolated, reversible change to a single file/function | No-behavior: commit directly (no plan/review cycle; the branching rules in `commits.md` still apply). Behavior: Quick flow — state goal + touched files + risk, then edit |
+| **Tier 0** | No behavior change (docs, formatting, comments), **or** a local, isolated, reversible change to a single file/function | No-behavior: commit directly (no plan/review cycle; the branching rules in `commits.md` still apply; images and notes are a quiet range, `testing.md` "Inert changes"). Behavior: Quick flow — state goal + touched files + risk, then edit |
 | **Tier 1** | Small, self-contained feature/fix: changes behavior but not a contract, persistence, auth, or another component. A new flag on an existing command, a bug fix in one function, a copy string with logic — user-*facing* but not user-*depended-upon* | Quick flow + a test |
 | **Tier 2** | Changes behavior that another component, tool, or persisted state **depends on**: an interface/contract, a schema, a cross-component effect | Plan → execute → review before merge |
 | **Tier 3** | Auth, persistence/migrations, security surface, or multi-repo contract | Plan + upfront design + review + (where configured) second-opinion review |

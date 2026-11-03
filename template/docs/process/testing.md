@@ -192,6 +192,9 @@ fifteen minutes while queued sessions waited. Fewer such pushes help too:
 a review round's report and its `REVIEW` line are one commit
 (`attest.py --commit --with <report>`), a fix's `ROOT-CAUSE` line rides
 the fix commit, and a round is pushed once.
+The same holds for **inert** paths (below, "Inert changes"): a range of
+bookkeeping and inert paths only is *quiet* — gates, no suite, on the merge
+push too.
 Two consequences keep the memo honest. A check that reads the bookkeeping
 paths (a journal scanned for client names) is a process gate, not a test:
 gates run on every push, a test behind the tree memo would not see a
@@ -359,6 +362,52 @@ shadow, "passed".
 
 The template's own gates are process gates — plans, reviews, records, specs —
 and run on every push; areas are for the project's checks of its product.
+
+## Inert changes — images and notes without the software chain
+
+An image, a recording, a PDF or a note changes no tested code. The area
+`inert` names where such files live:
+
+```json
+"areas": {"inert": ["assets/**", "notes/**", "**/*.png"]}
+```
+
+A range whose every path is bookkeeping (`.process-work/`) or inert is
+**quiet**: the push runs the gates and no suite — on the merge push too — and
+`finish.py --apply` merges it without `--tests`, says so, and writes no merge
+certificate (no run, no certificate, #255). The certificate itself is
+untouched: it stays on the whole tree, so the next code push tests again.
+`scripts/process/quiet.py` is the one owner; it prints each path's class, and
+exits 0 only for a quiet range — a project whose own pre-push hook decides
+about the suite calls it there (`quiet.py [BASE..HEAD]`). A
+`testing.local.json` with nothing but `areas` is valid for that.
+
+A path is inert only when all of these hold — every doubt is code:
+
+- **Its file type is media or prose**: images (`png jpg jpeg gif webp avif
+  svg ico bmp tif tiff heic`), audio and video (`mp3 wav ogg m4a mp4 mov
+  webm`), `pdf`, and `md txt rst adoc`. A build file, a script, a
+  configuration (`json yaml toml ini`), a lockfile or code is never inert,
+  whatever `inert` names. A list of excluded names stayed incomplete through
+  three review rounds; a list of allowed types does not. A small setting is
+  therefore code and takes the normal route.
+- **The integration branch names it.** `inert` is read as the integration
+  branch has the file — a branch never declares itself inert. No integration
+  branch, or a file there that cannot be read: nothing is inert. (Areas for
+  gates are the union of both sides because they may only widen; an
+  exception may only come from what is already merged.)
+- **It is not protected**: gate code (`scripts/process/`, hooks, CI, make,
+  pre-commit), everything under `docs/process/` (overlays, registries, the
+  local configurations), `.claude/`, `.github/`, `.specify/`,
+  `.copier-answers.yml`.
+- **It is no test input**: no glob of a stack (`paths`, `tests`, pin
+  subjects, map sources and targets) matches it, and it lies under no pin
+  target, in this checkout's configuration or the integration branch's.
+  This is the project's duty in return: **every file a test reads matches a
+  stack glob or lies under a pin target** — a snapshot read from `assets/`
+  outside every stack could otherwise become inert.
+
+Renames count on both sides: moving code into `assets/` is code.
 
 ## Ratchets — a threshold that only ever tightens
 
