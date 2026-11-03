@@ -7,10 +7,9 @@ details are in the [CHANGELOG](CHANGELOG.md).
 
 Deutsche Fassung: [NEWS-DE.md](NEWS-DE.md).
 
-## v2.82.0 — The Spec Kit skills reach every clone
+## v2.82.0 — Works in a locked-down sandbox
 
-A project could have the specification commands on one computer and lose them in every fresh copy of the repository, because the folder they live in was excluded from version control. A fresh copy then needed an extra install that a locked-down environment may refuse. The setup now says to keep these commands in the repository and shows how, even when the folder was excluded. The process check names the problem when it occurs, and it never blocks work over it.
-
+In an environment that reaches GitHub but may not download packages, the process used to stop in two places. A fresh copy of the repository lost the specification commands, because their folder was excluded from version control. And the process checks tried to download a library the computer already had, failed, and blocked every upload without saying why. The setup now keeps these commands in the repository. The checks use what is already installed, and they say plainly when something is missing. A test in exactly such an environment now runs the whole way through.
 ## v2.81.0 — Measure correctly first
 
 The process cockpit counted wrongly in a real project: after main had been merged into a branch and fast-forwarded onto it, most of three weeks' work was missing from its numbers, without a warning. It now follows that history, never counts a change twice, and says why a column is empty instead of showing a dash. It also shows how often the required review records are actually written, which few works carry most review rounds, and how numbers compare before and after a process version. The plan rule from v2.80.1 now reaches every agent harness and blocks only when what a plan builds on is wrong. No new gates.

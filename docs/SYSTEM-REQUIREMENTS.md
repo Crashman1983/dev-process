@@ -1,6 +1,6 @@
 # System Requirements
 
-Stand: 2026-09-24 (v2.27.0)
+Stand: 2026-11-03
 
 Dieses Dokument beschreibt, was auf einem System installiert sein muss, um
 `dev-process` zu nutzen, im Upstream-Repository zu entwickeln oder die gerenderten
@@ -47,9 +47,12 @@ erzeugt `python3 tools/gen_sbom.py` daraus (ein Test prüft, dass sie aktuell si
 ## Gerenderte Zielrepos
 
 Der Core-Runtime-Vertrag ist auf Linux, macOS und Windows gleich: `git` und
-`uv`. Ein system Python, eine systemweite PyYAML-Installation oder Bash ist
-nicht erforderlich. `uv` liest die PEP-723-Metadaten des Gate-Runners und
-stellt Laufzeit und Abhaengigkeiten isoliert bereit.
+`uv`. Mit Zugang zum Paket-Index (PyPI) oder einem gefuellten uv-Cache ist
+weder ein System-Python noch eine systemweite PyYAML-Installation noch Bash
+erforderlich: `uv` liest die PEP-723-Metadaten des Gate-Runners und der Gates
+und stellt Laufzeit und Abhaengigkeiten isoliert bereit. Hat der laufende
+Interpreter die deklarierten Abhaengigkeiten schon, starten Runner und Gates
+direkt mit ihm, ohne uv.
 
 | Voraussetzung | Version | Wann erforderlich |
 |---|---:|---|
@@ -67,7 +70,25 @@ python3 scripts/process/install_hooks.py
 ```
 
 Die lokalen Hooks verwaltet das Standard-Framework `pre-commit`
-(https://pre-commit.com); die Gate-Logik laeuft danach ueber `uv` in Python.
+(https://pre-commit.com); seine Eintraege starten ueber `uv run`.
+
+**Ohne Zugang zum Paket-Index** (eine Sandbox, die GitHub erreicht, PyPI aber
+nicht): `pre-commit` selbst kommt von PyPI und ist dort nicht installierbar,
+und uv kann die Gate-Abhaengigkeiten nicht holen. Dann braucht es Python 3.11
+oder neuer mit PyYAML 6 (etwa das System-Python mit dem Distributionspaket),
+und die Hooks kommen nur ueber `python3 scripts/process/install_hooks.py`.
+Dieser Weg startet Runner und Gates mit diesem Python. Scheitert uv doch, nennt
+der Gate-Runner das als Startproblem, nicht als Gate-Befund. Die CI auf GitHub
+hat Netz und ist davon nicht betroffen.
+
+- Ist `pre-commit` im Klon schon installiert (ausserhalb der Sandbox
+  vorbereitet), startet sein Eintrag `process-gates` weiter ueber `uv run`
+  und braucht PyYAML aus dem uv-Cache. Abhilfe: den uv-Cache einmal mit Netz
+  fuellen (`uv run scripts/process/gate_runner.py`), oder
+  `pre-commit uninstall -t pre-push` und danach `install_hooks.py`.
+- Ein Projekt mit eigenem Pre-push-Hook ruft den Rahmen mit `python3` auf
+  (`exec python3 scripts/process/pre_push.py "$@"`), nicht mit `uv run`:
+  uv kann ein eigenes Python ohne PyYAML waehlen.
 
 ## Parallele Agenten (optional)
 

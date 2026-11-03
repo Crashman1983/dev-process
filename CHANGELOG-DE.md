@@ -9,23 +9,30 @@ ein Eintrag ohne Plan oder Issue hat keine Details-Zeile. In wenigen Sätzen je 
 English version: [CHANGELOG.md](CHANGELOG.md). Die Releases vor v2.28.2:
 [docs/changelog-archive-DE.md](docs/changelog-archive-DE.md).
 
-## v2.82.0 — Die Spec-Kit-Skills erreichen jeden Klon · 2026-11-03
+## v2.82.0 — Läuft in einer abgeschotteten Sandbox · 2026-11-03
 
-**Warum.** `specify init` schreibt die `/speckit-*`-Skills in das Skill-Verzeichnis des Agenten. Ein Projekt, das dieses Verzeichnis als persönlichen Zustand ignorierte, hat sie nie committet, ohne Warnung (#363). Jeder frische Klon, jeder Worktree und jede Cloud-Session hatte dann keinen `/speckit-*`-Befehl und brauchte wieder das Spec-Kit-CLI, das eine Sandbox verweigern kann. Das Setup sagte nie, dass die Skills committet werden, und die naheliegende `!`-Ausnahme wirkt unter einem ignorierten Elternverzeichnis nicht.
+**Warum.** In einer Sandbox, die GitHub erreicht, aber nicht den Paket-Index, blieb der Prozess an zwei Stellen stehen. `specify init` schreibt die `/speckit-*`-Skills in das Skill-Verzeichnis des Agenten. Ein Projekt, das dieses Verzeichnis ignorierte, hat sie nie committet, ohne Warnung. Jedem frischen Klon fehlten deshalb die Befehle, und er brauchte das Spec-Kit-CLI, das die Sandbox verweigert (#363). Außerdem startete jedes Gate, das PyYAML deklariert, über `uv run`, auch wenn das System-Python es schon hatte. Ohne PyPI scheiterte uv. Der Gate-Runner sagte dann nur `FAILED gates: …`, und jeder Push wurde verweigert (#365). Ein Experiment in einem frischen Repo ohne Netz hat beides bestätigt.
 
 **Was sich ändert.**
-- Das Setup committet `.specify/` und die behaltenen Skills und nennt die Skills, die der Ablauf nutzt. Es zeigt die `.gitignore`-Form, die wirkt, wenn das Skill-Verzeichnis oder sein Elternverzeichnis ignoriert ist. Die drei entfernten Skills werden auch unter `.agents/skills` entfernt.
-- Das Gate `speckit` liest die Manifeste der installierten Integrationen und meldet Skills, die nie committet wurden (mit der Ignore-Regel), committete, die im Checkout fehlen, einen entfernten Skill, der zurück ist, und einen committeten Skill, den kein Manifest nennt. Sparse Checkouts werden berücksichtigt. Ohne Manifest oder Git heißt der Hinweis „ungeprüft“. Das Gate blockiert nie wegen eines Skills.
-- Upgrades entfernen Skill-Dateien, die das neue Manifest nicht mehr nennt.
+- Das Setup committet `.specify/` und die behaltenen Skills und nennt die Skills, die der Ablauf nutzt. Es zeigt die `.gitignore`-Form, die wirkt, wenn das Skill-Verzeichnis oder sein Elternverzeichnis ignoriert ist. Die drei entfernten Skills werden auch unter `.agents/skills` entfernt, als Skill und als Befehlsdatei.
+- Das Gate `speckit` liest die Manifeste der installierten Integrationen und meldet:
+  - Skills, die nie in HEAD committet wurden, mit der Ignore-Regel;
+  - committete Skills, die im Checkout fehlen;
+  - einen entfernten Skill, der zurück ist;
+  - einen committeten Skill, den kein Manifest nennt.
 
-**Wirkung.** Ein Klon bekommt den ganzen Spec-Kit-Ablauf aus dem Repository, und ein Projekt sieht in der Gate-Ausgabe, wenn nicht.
+  Es blockiert nie wegen eines Skills. Ungewöhnliche Manifest-Daten oder fehlendes Git ergeben „ungeprüft“.
+- Ein Gate läuft mit dem aktuellen Python, wenn dieses die Deklaration des Gates nachweislich erfüllt: requires-python, jede Anforderung in passender Version und ein auffindbares Modul. Nur sonst geht es über uv. Der Gate-Runner selbst startet genauso.
+- Ist ein Gate höchstwahrscheinlich nie gelaufen, weil uv oder ein Import scheiterte, nennt sein Abschnitt ein Startproblem statt eines Gate-Befunds. Das Gate bleibt rot.
+- `SYSTEM-REQUIREMENTS.md` nennt den Weg ohne Paket-Index: Python ≥ 3.11 mit PyYAML 6 und Hooks über `install_hooks.py`. Ein eigener Pre-push-Hook ruft den Rahmen mit `python3` auf.
 
-**Update.** Reines Update. Ein Projekt, dessen Skills nicht committet sind, sieht den neuen Hinweis und committet sie einmal; die `.gitignore` passt es an, wie das Setup zeigt. Kein Gate verlangt es.
+**Wirkung.** Mit committeten Skills und einem Python mit PyYAML laufen in einem Sandbox-Klon der Spec-Kit-Ablauf, alle Gates und der Push, ohne PyPI zu erreichen.
 
-**Geänderte Abschnitte.** `modules/speckit.md` (Setup, What the gate enforces)
+**Update.** Reines Update. Ein Projekt, dessen Spec-Kit-Skills nicht committet sind, sieht den neuen Hinweis und committet sie einmal; die `.gitignore` passt es an, wie das Setup zeigt. Ein Projekt mit eigenem Pre-push-Hook, der `uv run scripts/process/pre_push.py` oder `uv run scripts/process/gate_runner.py` ruft, stellt auf `python3` um, wo es ohne Paket-Index arbeiten muss.
 
-Details: [Plan](docs/analysis/2026-11-03-v2.82.md) #363 #364
+**Geänderte Abschnitte.** `modules/speckit.md` (Setup, What the gate enforces), `testing.md` (One test path)
 
+Details: [Plan](docs/analysis/2026-11-03-v2.82.md) #363 #364 #365
 ## v2.81.0 — Erst richtig messen · 2026-11-02
 
 **Warum.** Zwei unabhängige Analysen, welche KPIs der Prozess je Schritt braucht (#356, #357), fanden, dass das Cockpit in einem echten Projekt falsch zählte. Es las nur die First-Parent-Kette von main: Nachdem main in einen Branch gemergt und auf ihn vorgespult worden war, fehlten in drei Wochen 109 von 168 Train-Merges, ohne Warnung. `losses` zeigte „high“ Konfidenz über 93 Issues ohne einen einzigen Wert, `cost` zählte eine Nachricht je Inhaltsblock, und Codex-Reviews konnten nicht sagen, woher ein Befund stammt. Leere Spalten nannten keinen Grund, sodass fehlende Projektkonfiguration wie eine Lücke im Template aussah. Die Plan-Regel aus v2.80.1 hatte keine Schwere und erreichte nur den Claude-Befehl (#351, Prüfung von v2.80.1).

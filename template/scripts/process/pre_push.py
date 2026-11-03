@@ -6,7 +6,7 @@
 
 Every installed guard reaches it (`merge_route.py --stdin` hands the push
 over); a project with its own hook calls it the same way
-(`exec uv run scripts/process/pre_push.py "$@"`). In order:
+(`exec python3 scripts/process/pre_push.py "$@"`). In order:
 
   1. the merge guard (`merge_route.guard`): route and phase, the ref update,
      the standing block, the ledger — the whole sequence, never a part;
@@ -142,6 +142,15 @@ def _gates(root: Path, env: dict[str, str], targets: list[str]) -> int:
     except subprocess.TimeoutExpired:
         _say(f"the process gates did not finish in {GATES_TIMEOUT_S} s — refused")
         return 1
+    if r.returncode != 0 and argv[:2] == ["uv", "run"]:
+        # the runner streams to the terminal, so its stderr is not ours to
+        # read: name the launch route, so a uv error above is not taken for a
+        # finding in the branch (#365)
+        _say("the gate runner was launched through `uv run` (this interpreter "
+             "has no PyYAML); if the lines above are uv's own error (`error:`, "
+             "`Caused by:`), uv could not provide PyYAML — a launch problem, not "
+             "a gate finding. Without the package index, Python >= 3.11 with "
+             "PyYAML runs the gates (docs/SYSTEM-REQUIREMENTS.md)")
     return 0 if r.returncode == 0 else 1
 
 
