@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-UNSUITED = [sys.executable, "-c", "import sys; sys.exit(3)"]
+UNSUITED = [sys.executable, "scripts/host_check.py"]  # a compared repository file, exits 3
 PROBE_GATE = {"probe": {"module": None, "exec": [sys.executable, "-c", "pass"]}}
 
 
@@ -54,6 +54,7 @@ def project(render, tmp_path):
     _write(out, "docs/process/testing.local.json", _config())
     _write(out, "backend/tests/test_a.py", "def test_a(): pass\n")
     _write(out, "web/test_w.py", "def test_w(): pass\n")
+    _write(out, "scripts/host_check.py", "import sys; sys.exit(3)\n")
 
     def git(*a, env=None, check=True):
         return subprocess.run(["git", *a], cwd=out, capture_output=True, text=True,
@@ -91,7 +92,7 @@ def _change(git, out: Path, *paths: str, msg: str = "change") -> None:
 
 
 def _stamps(out: Path) -> str:
-    found = list((out / ".git").glob("process-push-stamps*"))
+    found = list((out / ".git").glob("process-push-ok*"))
     return "".join(p.read_text() for p in found if p.is_file())
 
 
@@ -148,7 +149,7 @@ def test_a_host_check_only_this_branch_has_cannot_defer(project, tmp_path):
 def test_a_branch_that_changes_its_host_check_script_cannot_defer(project, tmp_path):
     out, bare, git = project
     git("checkout", "-q", "main")
-    _write(out, "scripts/host_check.py", "import sys; sys.exit(3)\n")
+    _write(out, "scripts/host_check.py", "import sys; sys.exit(3)  # main's own\n")
     _write(out, "docs/process/testing.local.json", _config([sys.executable, "scripts/host_check.py"]))
     git("add", "-A")
     git("commit", "-qm", "host check script")
@@ -226,7 +227,7 @@ def test_preflight_timeout_with_only_stack_preflights_is_valid(render, tmp_path)
 def test_an_uncommitted_edit_to_the_host_check_cannot_defer(project, tmp_path):
     out, bare, git = project
     git("checkout", "-q", "main")
-    _write(out, "scripts/host_check.py", "import sys; sys.exit(3)\n")
+    _write(out, "scripts/host_check.py", "import sys; sys.exit(3)  # main's own\n")
     _write(out, "docs/process/testing.local.json", _config([sys.executable, "scripts/host_check.py"]))
     git("add", "-A")
     git("commit", "-qm", "host check script")
@@ -252,7 +253,7 @@ def test_a_module_host_check_cannot_defer(project, tmp_path):
     git("checkout", "-q", "-B", "feature", "main")
     _change(git, out, "backend/tests/test_a.py")
     r = git("push", "origin", "feature", check=False)
-    assert r.returncode != 0 and "runs a module" in r.stderr, r.stderr
+    assert r.returncode != 0 and "names no host-check file" in r.stderr, r.stderr
 
 
 def test_a_stack_without_work_runs_no_host_check(project, tmp_path):
@@ -267,3 +268,39 @@ def test_a_stack_without_work_runs_no_host_check(project, tmp_path):
     r = git("push", "origin", "feature", check=False)
     assert r.returncode == 0, r.stderr
 
+
+
+# --- refute v2.85 ------------------------------------------------------------------
+
+@pytest.mark.parametrize("argv", [["sh", "-c", "python3 scripts/host_check.py"],
+                                  [sys.executable, "-mhostcheck"]])
+def test_a_host_check_with_no_compared_file_cannot_defer(project, tmp_path, argv):
+    out, bare, git = project
+    git("checkout", "-q", "main")
+    _write(out, "hostcheck.py", "import sys; sys.exit(3)\n")
+    _write(out, "docs/process/testing.local.json", _config(argv))
+    git("add", "-A")
+    git("commit", "-qm", "host check without a file argument")
+    git("push", "-q", "--no-verify", "origin", "main")
+    git("checkout", "-q", "-B", "feature", "main")
+    _change(git, out, "backend/tests/test_a.py")
+    r = git("push", "origin", "feature", check=False)
+    assert r.returncode != 0 and "names no host-check file" in r.stderr, r.stderr
+
+
+def test_a_host_check_swapped_for_a_symlink_cannot_defer(project, tmp_path):
+    out, bare, git = project
+    outside = tmp_path / "evil.py"
+    outside.write_text("import sys; sys.exit(3)\n")
+    (out / "scripts/host_check.py").unlink()
+    (out / "scripts/host_check.py").symlink_to(outside)
+    _change(git, out, "backend/tests/test_a.py")
+    r = git("push", "origin", "feature", check=False)
+    assert r.returncode != 0 and "changes its host check" in r.stderr, r.stderr
+
+
+def test_a_green_push_writes_the_stamp_the_owed_test_looks_for(project, tmp_path):
+    out, bare, git = project
+    _change(git, out, "web/test_w.py")
+    assert git("push", "origin", "feature", check=False).returncode == 0
+    assert git("rev-parse", "HEAD").stdout.strip() in _stamps(out)  # the helper sees real stamps
