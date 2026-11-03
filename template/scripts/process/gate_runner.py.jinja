@@ -90,8 +90,8 @@ def _local_refused(why: str) -> SystemExit:
 
 def with_local_gates(root: Path) -> tuple[dict, dict]:
     """(GATES with the project's gates merged in, the local entries as
-    {name: {"exec": bool, "paths": [globs] or None}}). Load-bearing like the
-    manifest: anything malformed is a hard failure."""
+    {name: {"exec": bool, "paths": [globs] or None, "areas": [names] or None}}).
+    Load-bearing like the manifest: anything malformed is a hard failure."""
     import json
 
     f = root / LOCAL_GATES
@@ -164,6 +164,12 @@ def _area_globs(root: Path, areas: list[str], memo: dict) -> tuple[list[str] | N
             tree, broken = {}, str(exc)
         memo["areas"] = (tree, broken, (testing_config.areas_at(root, ref) if ref else None) or {})
     tree, broken, base = memo["areas"]
+    if broken and all(a in base for a in areas):
+        # the branch's own areas cannot be read, so a widening it made is unknown:
+        # run the gate rather than trust the integration branch's narrower globs
+        memo.setdefault("fresh", {})[tuple(areas)] = [f"(this checkout's {testing_config.CONFIG} "
+                                                      f"cannot be read: {broken})"]
+        return None, None
     globs: list[str] = []
     fresh: list[str] = []
     for area in areas:
@@ -559,7 +565,7 @@ def main() -> int:
             fresh = in_flight.get("fresh", {}).get(tuple(spec.get("areas") or ()))
             if fresh:
                 print(f"gate-runner: note: {name}: area(s) {', '.join(fresh)} not on the "
-                      f"integration branch yet — the gate runs until they are")
+                      f"integration branch yet, or unreadable here — the gate runs")
             scope = ", ".join([*(f"areas {a}" for a in spec.get("areas") or []), *globs])
             if area_globs is not None and _untouched(root, globs + area_globs, in_flight):
                 print(f"== {name}: no path in flight matches {scope} — not run ==")

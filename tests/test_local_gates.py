@@ -302,3 +302,12 @@ def test_an_unreadable_testing_config_fails_the_area_gate_with_its_cause_and_goe
     r = _run(out)
     assert r.returncode == 1 and "cannot be read here" in r.stderr and "stacks" in r.stderr, r.stderr
     assert "FAILED gates: ui-lint" in r.stdout, r.stdout  # the run finished: summary printed
+
+
+def test_an_unreadable_branch_config_runs_a_gate_whose_area_it_may_have_widened(render, tmp_path):
+    out = _ui_lint(render, tmp_path)  # the integration branch: ui = frontend/**
+    (out / "docs/process/testing.local.json").write_text(
+        json.dumps({"areas": {"ui": ["frontend/**", "web/**"]}, "stacks": 5}), encoding="utf-8")
+    _change(out, "web/page.tsx")
+    r = _run(out)
+    assert "== running ui-lint ==" in r.stdout and "cannot be read" in r.stdout, r.stdout + r.stderr
