@@ -17,7 +17,7 @@ English version: [CHANGELOG.md](CHANGELOG.md). Die Releases vor v2.28.2:
 - `testing.local.json` nennt die **Bereiche** des Projekts einmal, als Globs: `"areas": {"ui": [...], "ios": [...]}`. Eine leere Liste heißt „solchen Inhalt gibt es hier nicht“.
 - Ein lokales Gate in `gates.local.json` darf die Bereiche nennen, für die es da ist (`"areas": ["ui"]`). Es läuft, wenn sein Bereich in der Änderung liegt, und wird sonst übersprungen, mit dem Grund im Event.
 - Bereiche gelten als Vereinigung aus der Datei am Integrationsbranch und der im Checkout. Ein Branch kann einen Bereich erweitern, aber nie verengen, um sein eigenes Gate zu umgehen. Ein neuer Bereich und das Gate, das ihn nennt, können zusammen landen. Kann git die Pfade nicht nennen, oder ist die Datei im Checkout nicht lesbar, läuft das Gate.
-- Die Zusammenfassung zählt übersprungene, im Beobachtungsmodus gescheiterte und per Modus nicht gelaufene Gates getrennt. Sie nennt sie nie „passed“. Ohne solche Gates bleibt der Wortlaut gleich.
+- Die Zusammenfassung zählt übersprungene, ohne Blockade gescheiterte (shadow oder sampled) und per Modus nicht gelaufene Gates getrennt. Sie nennt sie nie „passed“. Ohne solche Gates bleibt der Wortlaut gleich.
 - Eine Spec, die `#N/AC-x` zitiert, macht dieses Kriterium nicht mehr zum eigenen.
 
 **Wirkung.** Die Prüfungen eines Projekts für sein Produkt laufen dort, wo sie greifen, und die Ausgabe sagt klar, was nicht lief.

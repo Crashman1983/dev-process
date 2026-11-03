@@ -669,7 +669,7 @@ def main() -> int:
         if not_run:
             parts.append(f"{len(not_run)} not run by mode ({', '.join(not_run)})")
         if shadow_failed:
-            parts.append(f"{len(shadow_failed)} failed in shadow ({', '.join(shadow_failed)})")
+            parts.append(f"{len(shadow_failed)} failed without blocking ({', '.join(shadow_failed)})")
         summary = f"{len(active)} active gate(s): " + ", ".join(parts)
     else:
         summary = f"all {len(active)} active gate(s) passed"

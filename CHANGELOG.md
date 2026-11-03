@@ -18,7 +18,7 @@ A few plain sentences per release: [NEWS.md](NEWS.md). Deutsche Fassung:
 - `testing.local.json` names the project's **areas** once, as globs: `"areas": {"ui": [...], "ios": [...]}`. An empty list means "no such content here".
 - A local gate in `gates.local.json` may name the areas it is for (`"areas": ["ui"]`). It runs when its area is in the change and is skipped otherwise, with the reason in its event.
 - Areas count as the union of the integration branch's file and the checkout's. A branch can widen an area, never narrow it to skip its own gate. A new area and the gate naming it can land together. If git cannot name the paths, or the checkout's file cannot be read, the gate runs.
-- The summary line counts gates that were skipped, failed in shadow, or not run by their mode separately. It never calls them passed. With none of these, the wording is unchanged.
+- The summary line counts gates that were skipped, failed without blocking (shadow or sampled), or not run by their mode separately. It never calls them passed. With none of these, the wording is unchanged.
 - A spec citing `#N/AC-x` no longer makes that criterion the work's own.
 
 **Effect.** A project's checks for its product run where they apply, and the output says plainly what did not run.
