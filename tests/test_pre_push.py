@@ -563,3 +563,12 @@ def test_every_no_op_make_flag_is_refused(render, tmp_path, monkeypatch, name, f
     finally:
         sys.path.remove(str(out / "scripts/process"))
         sys.modules.pop("certificate", None)
+
+
+def test_a_pre_commit_gate_skip_on_a_branch_is_logged_under_its_own_name(project, tmp_path):
+    """#373 code review: the ledger names the switch the owner used."""
+    out, bare, git = project
+    r = _push(git, "origin", "feature", env={"SKIP": "process-gates", "PROCESS_SKIP_REASON": "owner: ci down"})
+    assert r.returncode == 0, r.stderr
+    ledger = (out / ".git/process-owner-overrides.log").read_text()
+    assert "SKIP=process-gates: owner: ci down" in ledger, ledger

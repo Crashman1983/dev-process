@@ -304,3 +304,16 @@ def test_a_green_push_writes_the_stamp_the_owed_test_looks_for(project, tmp_path
     _change(git, out, "web/test_w.py")
     assert git("push", "origin", "feature", check=False).returncode == 0
     assert git("rev-parse", "HEAD").stdout.strip() in _stamps(out)  # the helper sees real stamps
+
+
+def test_an_absolute_path_into_the_repository_cannot_defer(project, tmp_path):
+    out, bare, git = project
+    git("checkout", "-q", "main")
+    _write(out, "docs/process/testing.local.json",
+           _config([sys.executable, str((out / "scripts/host_check.py").resolve())]))
+    git("commit", "-qam", "absolute host check")
+    git("push", "-q", "--no-verify", "origin", "main")
+    git("checkout", "-q", "-B", "feature", "main")
+    _change(git, out, "backend/tests/test_a.py")
+    r = git("push", "origin", "feature", check=False)
+    assert r.returncode != 0 and "absolute path into the repository" in r.stderr, r.stderr
