@@ -65,7 +65,8 @@ def test_each_gate_run_leaves_one_event_with_cost_outcome_and_input(render, tmp_
     assert ev["bad"]["outcome"] == "fail" and ev["bad"]["rc"] == 1
     for e in ev.values():
         assert e["head"] == head and e["dirty"] is False and e["branch"] == "main"
-        assert e["mode"] == "block" and e["ci"] is False
+        # ui-check observes by template default (v2.84); every other gate blocks
+        assert e["mode"] == ("shadow" if e["gate"] == "ui-check" else "block") and e["ci"] is False
         assert e["duration_s"] >= 0 and e["ts"].endswith("+00:00")
     # the runner goes on after a failing gate: the verdicts on one commit sit side by side
     assert {"kernel", "ok", "bad", "flip"} <= set(ev)

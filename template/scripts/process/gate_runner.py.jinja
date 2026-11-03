@@ -73,7 +73,7 @@ GATES = {
 }
 # modules without a gate of their own: git_hooks installs hooks, telemetry
 # ships the read-only KPI cockpit (its GRADE gate is retired)
-KNOWN_MODULES = ({key for key, _command in GATES.values() if key is not None}
+KNOWN_MODULES = ({key for key, _command in GATES.values() if key not in (None, ALWAYS)}
                  | {"git_hooks", "telemetry"})
 # modules the template no longer ships (v2.27.0 KISS pass): an older manifest
 # may still name them — accepted, never run

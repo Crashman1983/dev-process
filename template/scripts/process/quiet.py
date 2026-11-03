@@ -8,7 +8,7 @@ certificate is not touched — it stays on the full tree.
 
 A path is inert only when all four hold:
 
-  1. its file type is media or prose (`INERT_SUFFIXES`) — never a build file,
+  1. its file type is media or prose (`INERT_SUFFIXES`, no `.txt`) — never a build file,
      a script, a config or a lockfile; a list of excluded names stayed
      incomplete for three review rounds, a list of allowed types does not;
   2. the area `inert` in `testing.local.json` names it **as the integration
@@ -17,7 +17,8 @@ A path is inert only when all four hold:
   3. it is not protected (`is_protected_path`): gate code, everything under
      `docs/process/`, `.claude/`, `.github/`, `.specify/`, the copier answers;
   4. it is no test input: no glob of a stack (`paths`, `tests`, pin subjects,
-     map sources and targets) matches it and it lies under no pin target —
+     map sources and targets) matches it and it lies under no pin target and
+     no fixed directory of a `tests` glob or map target —
      in the working tree's configuration or the integration branch's.
 
   quiet.py [ROOT] [BASE..HEAD]
@@ -45,8 +46,9 @@ INERT_SUFFIXES = frozenset({
     ".heic",
     # audio and video
     ".mp3", ".wav", ".ogg", ".m4a", ".mp4", ".mov", ".webm",
-    # documents and prose
-    ".pdf", ".md", ".txt", ".rst", ".adoc",
+    # documents and prose — not `.txt`: requirements.txt, CMakeLists.txt and
+    # constraints.txt are build files in a prose suffix (refute v2.84)
+    ".pdf", ".md", ".rst", ".adoc",
 })
 PROTECTED_PATHS = ("docs/process/", ".claude/", ".github/", ".specify/")
 PROTECTED_FILES = (".copier-answers.yml",)
@@ -62,7 +64,8 @@ def is_protected_path(rel: str) -> bool:
 
 def inert_type(rel: str) -> bool:
     name = rel.rsplit("/", 1)[-1]
-    return "." in name and name[name.rindex("."):].lower() in INERT_SUFFIXES
+    stem, dot, suffix = name.rpartition(".")
+    return bool(stem) and bool(dot) and f".{suffix.lower()}" in INERT_SUFFIXES
 
 
 def _under(rel: str, target: str) -> bool:
@@ -85,6 +88,9 @@ def test_input_of(cfg: dict, rel: str) -> str | None:
     for stack in cfg["stacks"]:
         globs = [*stack["paths"], *stack["tests"], *stack["pins"], *(m["from"] for m in stack["map"])]
         if any(rel == g or path_matches(g, rel) for g in globs):
+            return stack["name"]
+        # a fixture beside the tests a `tests` glob names is their input too
+        if any(_under(rel, _fixed_prefix(g)) for g in stack["tests"]):
             return stack["name"]
         if any(_under(rel, t) for targets in stack["pins"].values() for t in targets):
             return stack["name"]

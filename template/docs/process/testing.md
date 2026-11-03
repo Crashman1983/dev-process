@@ -253,7 +253,8 @@ code. A project supplies data; the template owns the sequence:
   merge guard; branch updates only (tags and deletions end there); the
   pushed commit is this checkout's HEAD; class `merge` when a branch update
   lands on an integration branch, scope `process-only` when it changes
-  nothing outside `.process-work/`; the stamp; the process gates; the
+  nothing but bookkeeping and inert paths (`quiet.py`, "Inert changes"); the
+  stamp; the process gates; the
   tests; a stamp. Every installed guard reaches it (`merge_route.py
   --stdin` hands the push over); a project with its own hook calls it
   with the Python that has PyYAML (`exec python3 scripts/process/pre_push.py
@@ -388,7 +389,8 @@ A path is inert only when all of these hold — every doubt is code:
 
 - **Its file type is media or prose**: images (`png jpg jpeg gif webp avif
   svg ico bmp tif tiff heic`), audio and video (`mp3 wav ogg m4a mp4 mov
-  webm`), `pdf`, and `md txt rst adoc`. A build file, a script, a
+  webm`), `pdf`, and `md rst adoc` — not `txt`, which `requirements.txt` and
+  `CMakeLists.txt` share with notes. A build file, a script, a
   configuration (`json yaml toml ini`), a lockfile or code is never inert,
   whatever `inert` names. A list of excluded names stayed incomplete through
   three review rounds; a list of allowed types does not. A small setting is
@@ -404,7 +406,9 @@ A path is inert only when all of these hold — every doubt is code:
   `.copier-answers.yml`.
 - **It is no test input**: no glob of a stack (`paths`, `tests`, pin
   subjects, map sources and targets) matches it, and it lies under no pin
-  target, in this checkout's configuration or the integration branch's.
+  target and no fixed directory of a `tests` glob or map target, in this
+  checkout's configuration or the integration branch's. A symlinked
+  directory is not followed: what it points at is the project's to cover.
   This is the project's duty in return: **every file a test reads matches a
   stack glob or lies under a pin target** — a snapshot read from `assets/`
   outside every stack could otherwise become inert.

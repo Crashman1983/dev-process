@@ -55,10 +55,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from check_review import (  # noqa: E402
     GitReadError,
-    _unfenced,
+    fenced_lines,
     integration_ref,
     plan_tier,
-    uncommented,
 )
 from process_git import path_matches  # noqa: E402
 
@@ -149,24 +148,28 @@ def bound_plans(root: Path, ref: str) -> dict[str, str]:
 
 
 def _readable(text: str) -> str:
-    """What a reader sees — no fenced block, no HTML comment — with the file's own
-    line numbers: a kept line stays where it was, everything else is blank."""
-    kept = uncommented(_unfenced(text)).splitlines()
-    raw = text.splitlines()
-    out = [""] * len(raw)
-    at = 0
-    for line in kept:
-        if not line.strip():
-            continue
-        while at < len(raw) and raw[at] != line:
-            at += 1
-        if at == len(raw):
-            break  # an inline comment changed the line: the rest stays readable as kept
-        out[at] = line
-        at += 1
-    else:
-        return "\n".join(out)
-    return "\n".join(kept)
+    """What a reader sees, line for line with the file: fenced lines (the review
+    gate's fence walk) and HTML comments blank, everything else as written."""
+    kept = dict(fenced_lines(text)[0])
+    out: list[str] = []
+    in_comment = False
+    for i in range(1, len(text.splitlines()) + 1):
+        line, rest, pos = kept.get(i, ""), "", 0
+        while pos < len(line):
+            if in_comment:
+                end = line.find("-->", pos)
+                if end < 0:
+                    break
+                in_comment, pos = False, end + 3
+            else:
+                start = line.find("<!--", pos)
+                if start < 0:
+                    rest += line[pos:]
+                    break
+                rest += line[pos:start]
+                in_comment, pos = True, start + 4
+        out.append(rest if rest.strip() else "")
+    return "\n".join(out)
 
 
 def declared_contracts(text: str, regs: list[dict]) -> list[str]:
@@ -186,15 +189,18 @@ def declared_contracts(text: str, regs: list[dict]) -> list[str]:
     return out
 
 
-def parse_blocks(text: str) -> tuple[dict[str, list[tuple[int, str, str]]], list[tuple[int, str]]]:
-    """({surface or "": [(line, axis, value)]}, [(line, n/a reason)]) from the readable text."""
-    blocks: dict[str, list[tuple[int, str, str]]] = {}
+def parse_blocks(text: str) -> tuple[dict[str, tuple[int, list[tuple[int, str, str]]]],
+                                     list[tuple[int, str]]]:
+    """({surface or "": (header line, [(line, axis, value)])}, [(line, n/a reason)]) from the readable
+    text. A header indented four spaces or more is code, not a header. Blank lines may
+    follow the header; an indented line without a list marker continues the axis above."""
+    blocks: dict[str, tuple[int, list[tuple[int, str, str]]]] = {}
     opt_outs: list[tuple[int, str]] = []
     lines = text.splitlines()
     i = 0
     while i < len(lines):
         m = _HEADER.match(lines[i])
-        if not m:
+        if not m or _indent(lines[i]) >= 4:
             i += 1
             continue
         surface = (m.group("surface") or "").lower()
@@ -205,35 +211,65 @@ def parse_blocks(text: str) -> tuple[dict[str, list[tuple[int, str, str]]], list
                 opt_outs.append((i + 1, na.group(1).strip()))
             i += 1
             continue
-        entries = blocks.setdefault(surface, [])
+        entries: list[tuple[int, str, str]] = []
+        blocks.setdefault(surface, (i + 1, entries))
         j = i + 1
+        while j < len(lines) and not lines[j].strip() and not entries:
+            j += 1  # `**ui-check:**`, a blank line, then the list
         while j < len(lines) and lines[j].strip():
-            a = _AXIS.match(lines[j])
-            if not a:
+            line = lines[j]
+            a = _AXIS.match(line)
+            marker = re.match(r"^[ \t]*[-*+][ \t]", line) is not None
+            if entries and _indent(line) > 0 and not marker:
+                n, axis, value = entries[-1]
+                entries[-1] = (n, axis, f"{value} {line.strip()}".strip())
+            elif a and (marker or _indent(line) < 4):
+                entries.append((j + 1, a.group("axis").strip().lower(),
+                                a.group("value").strip().strip("*_").strip()))
+            else:
                 break
-            entries.append((j + 1, a.group("axis").strip().lower(), a.group("value").strip().strip("*_").strip()))
             j += 1
         i = j
     return blocks, opt_outs
 
 
+def _indent(line: str) -> int:
+    return len(line) - len(line.lstrip(" \t"))
+
+
+_LINK = re.compile(r"\[[^\]]*\]\(([^)\s]+)\)")
+
+
 def _cited_paths(root: Path, value: str) -> list[str]:
+    """The repository files a `rules` value cites: `path`, `path:12`, `path#anchor`,
+    `[text](path)`. Never outside the repository."""
     out = []
-    for m in _TOKEN.finditer(value):
-        token = (m.group(1) or m.group(2) or "").strip(".,;:()[]\"'")
-        if token and not token.startswith(("http://", "https://")) and (root / token).is_file():
+    top = root.resolve()
+    tokens = [m.group(1) for m in _LINK.finditer(value)]
+    tokens += [(m.group(1) or m.group(2) or "") for m in _TOKEN.finditer(_LINK.sub(" ", value))]
+    for token in tokens:
+        token = token.strip(".,;:()[]\"'")
+        token = re.sub(r"#.*$", "", token)
+        token = re.sub(r":\d+(?:-\d+)?$", "", token)
+        if not token or token.startswith(("http://", "https://", "/")):
+            continue
+        target = (root / token).resolve()
+        if top in target.parents and target.is_file() and token not in out:
             out.append(token)
     return out
 
 
-def block_findings(root: Path, rel: str, entries: list[tuple[int, str, str]], reg: dict | None,
-                   regs: list[dict]) -> list[str]:
+def block_findings(root: Path, rel: str, header: int, entries: list[tuple[int, str, str]],
+                   reg: dict | None, regs: list[dict]) -> list[str]:
     extra = reg["extra_axes"] if reg else sorted({a for r in regs for a in r["extra_axes"]})
     defaults = {k.lower() for k in (reg["defaults"] if reg else
                                    {k for r in regs for k in r["defaults"]})}
     sources = reg["rule_sources"] if reg else sorted({s for r in regs for s in r["rule_sources"]})
     wanted = [*AXES, *[a for a in extra if a not in AXES]]
     out: list[str] = []
+    if not entries:
+        return [f"{rel}:{header}: `ui-check:` with no axis line under it — one line per axis "
+                f"({', '.join(wanted)})"]
     seen: dict[str, int] = {}
     for line, axis, value in entries:
         where = f"{rel}:{line}"
@@ -268,10 +304,9 @@ def block_findings(root: Path, rel: str, entries: list[tuple[int, str, str]], re
             elif sources and not set(cited) & set(sources):
                 out.append(f"{where}: `rules` cites none of the project's rule sources "
                            f"({', '.join(sources)})")
-    first = entries[0][0] if entries else 0
     for axis in wanted:
         if axis not in seen:
-            out.append(f"{rel}:{first}: ui-check has no `{axis}` line")
+            out.append(f"{rel}:{header}: ui-check has no `{axis}` line")
     return out
 
 
@@ -330,14 +365,14 @@ def check(root: Path) -> tuple[list[str], list[str]]:
             hard.append(f"{rel}: no `ui-check:` block — {why}; answer each axis ({', '.join(AXES)}), "
                         f"or `ui-check: n/a — <reason>` if this plan only carries UI along")
             continue
-        if len(contracts) > 1:
-            for surface in contracts:
-                if surface not in blocks:
-                    hard.append(f"{rel}: declares {surface} but has no `ui-check {surface}:` block — "
-                                f"one block per surface")
-        for surface, entries in blocks.items():
+        for surface in contracts:
+            # one contract may answer in an unnamed block; several each need their own
+            if surface not in blocks and not (len(contracts) == 1 and "" in blocks):
+                hard.append(f"{rel}: declares {surface} but has no `ui-check {surface}:` block — "
+                            f"one block per surface")
+        for surface, (header, entries) in blocks.items():
             reg = by_surface.get(surface) or (by_surface.get(contracts[0]) if len(contracts) == 1 else None)
-            hard += block_findings(root, rel, entries, reg, regs)
+            hard += block_findings(root, rel, header, entries, reg, regs)
     return hard, soft
 
 
@@ -350,7 +385,7 @@ def summary(root: Path, texts: dict[str, str]) -> list[str]:
         for line, reason in opt_outs:
             out.append(f"- `{rel}:{line}` ui-check **n/a** — {reason or '(no reason)'}: is its UI "
                        f"really only carried along?")
-        for surface, entries in blocks.items():
+        for surface, (_header, entries) in blocks.items():
             na = sum(1 for _l, _a, v in entries if _NA.match(v))
             inherited = sum(1 for _l, _a, v in entries if v.lower() == "inherited")
             rules = next((v for _l, a, v in entries if a == "rules"), "")
