@@ -10,6 +10,23 @@ A few plain sentences per release: [NEWS.md](NEWS.md). Deutsche Fassung:
 [CHANGELOG-DE.md](CHANGELOG-DE.md). Releases before v2.28.2:
 [docs/changelog-archive.md](docs/changelog-archive.md).
 
+## v2.82.0 — The Spec Kit skills reach every clone · 2026-11-03
+
+**Why.** `specify init` writes the `/speckit-*` skills into the agent's skills directory. A project that ignored that directory as per-user state never committed them, without a warning (#363). Every fresh clone, worktree and cloud session then had no `/speckit-*` command and needed the Spec Kit CLI again, which a sandbox can refuse. The setup never said to commit the skills, and the `!` exception one would write does not work under an ignored parent directory.
+
+**What changes.**
+- Setup commits `.specify/` and the kept skills, and names the skills the flow uses. It also shows the `.gitignore` form that works when the skills directory or its parent is ignored. The three dropped skills are removed for `.agents/skills` too.
+- The `speckit` gate reads the installed integrations' manifests and notes skills that were never committed (naming the ignore rule), committed ones missing from the checkout, a dropped skill that came back, and a committed skill no manifest lists. Sparse checkouts are respected. Without a manifest or git the note says "unverified". The gate never blocks on a skill.
+- Upgrades remove skill files the new manifest no longer lists.
+
+**Effect.** A clone gets the whole Spec Kit flow from the repository, and a project sees in its gate output when it does not.
+
+**Update.** A pure update. A project whose skills are not committed sees the new note and commits them once, adjusting its `.gitignore` as the setup shows. No gate requires it.
+
+**Changed sections.** `modules/speckit.md` (Setup, What the gate enforces)
+
+Details: [Plan](docs/analysis/2026-11-03-v2.82.md) #363 #364
+
 ## v2.81.0 — Measure correctly first · 2026-11-02
 
 **Why.** Two independent analyses of which KPIs the process needs per step (#356, #357) found that the cockpit miscounted in a real project. It read only the first-parent chain of main: after main was merged into a branch and fast-forwarded onto it, 109 of 168 train merges in three weeks were missing, without a warning. `losses` showed "high" confidence over 93 issues without a single value, `cost` counted a message once per content block, and Codex reviews could not say where a finding came from. Empty columns gave no reason, so a project's missing configuration read as a gap in the template. The v2.80.1 plan rule had no severity and reached only the Claude command (#351, review of v2.80.1).

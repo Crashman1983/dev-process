@@ -553,3 +553,239 @@ def test_the_spec_template_writes_criteria_the_ac_trace_reads(render, tmp_path):
     assert [ae.ac_key(m) for m in ae.AC_ID.finditer("\n".join(ears))] == ["1", "2"]
     assert not ae.AC_ID.search("- AK-01: When x, the system shall y.")
     assert "`AC-<n>`" in text and "`AK-`" in text
+
+
+# --- #363: the Spec Kit skills must reach every clone ---------------------
+
+SKILLS = ("analyze", "checklist", "clarify", "constitution", "converge",
+          "implement", "plan", "specify", "tasks", "taskstoissues")
+DROPPED = ("constitution", "implement", "taskstoissues")
+SPECKIT_DOC = "docs/process/modules/speckit.md"
+
+
+def _git(out, *args, check=True):
+    return subprocess.run(["git", *args], cwd=out, check=check,
+                          capture_output=True, text=True)
+
+
+def _integration(out, name="claude", files=None, installed=None):
+    """What `specify init --integration <name>` leaves: integration.json, the
+    harness manifest, and the skill files it lists (dropped ones removed)."""
+    files = files if files is not None else [
+        f".claude/skills/speckit-{s}/SKILL.md" for s in SKILLS]
+    integ = out / ".specify/integrations"
+    integ.mkdir(parents=True, exist_ok=True)
+    (integ / "speckit.manifest.json").write_text(json.dumps(
+        {"integration": "speckit", "version": "0.16.0",
+         "files": {".specify/scripts/bash/common.sh": "0"}}))
+    (integ / f"{name}.manifest.json").write_text(json.dumps(
+        {"integration": name, "version": "0.16.0",
+         "files": {f: "0" for f in files}}))
+    (out / ".specify/integration.json").write_text(json.dumps(
+        {"version": "0.16.0", "installed_integrations": installed or [name],
+         "integration": name}))
+    for f in files:
+        if not any(f"speckit-{d}/" in f or f"speckit.{d}." in f for d in DROPPED):
+            (out / f).parent.mkdir(parents=True, exist_ok=True)
+            (out / f).write_text("---\nname: x\n---\n")
+    return files
+
+
+def _repo(out, ignore=""):
+    if ignore:
+        (out / ".gitignore").write_text(ignore)
+    for args in (("init", "-q", "-b", "main"), ("config", "user.email", "t@t"),
+                 ("config", "user.name", "t"), ("add", "-A"),
+                 ("commit", "-q", "-m", "base")):
+        _git(out, *args)
+
+
+def _skill_notes(r):
+    return [line for line in r.stdout.splitlines()
+            if "speckit: note:" in line and "skill" in line.lower()]
+
+
+def test_a_fresh_clone_without_committed_skills_is_told_they_were_never_committed(render, tmp_path):
+    # Kenni: the skills directory is ignored, so a clone has the manifest but
+    # no skill — "restore from git" would be wrong, they were never committed
+    out = _render(render, tmp_path)
+    _integration(out)
+    _repo(out, ".claude/skills/\n")
+    import shutil
+    shutil.rmtree(out / ".claude/skills")
+    r = _gate(out)
+    assert r.returncode == 0, r.stdout
+    notes = _skill_notes(r)
+    assert len(notes) == 1, r.stdout
+    assert "never committed" in notes[0] and "7 " in notes[0]
+    assert ".gitignore:1" in notes[0] and "restore" not in notes[0]
+
+
+def test_skills_on_disk_but_ignored_are_named_with_the_rule(render, tmp_path):
+    out = _render(render, tmp_path)
+    _integration(out)
+    _repo(out, ".claude/skills/\n")
+    r = _gate(out)
+    notes = _skill_notes(r)
+    assert any("never committed" in n and "commit them" in n
+               and ".gitignore:1" in n for n in notes), r.stdout
+    assert r.returncode == 0
+
+
+def test_a_tracked_skill_deleted_from_the_checkout_is_restored_from_git(render, tmp_path):
+    out = _render(render, tmp_path)
+    _integration(out)
+    _repo(out)
+    (out / ".claude/skills/speckit-plan/SKILL.md").unlink()
+    r = _gate(out)
+    notes = _skill_notes(r)
+    assert any("git checkout" in n and "speckit-plan" in n for n in notes), r.stdout
+    assert not any("never committed" in n for n in notes)
+
+
+def test_a_dropped_skill_left_in_the_checkout_is_named(render, tmp_path):
+    out = _render(render, tmp_path)
+    _integration(out)
+    p = out / ".claude/skills/speckit-implement/SKILL.md"
+    p.parent.mkdir(parents=True)
+    p.write_text("x")
+    _repo(out)
+    r = _gate(out)
+    assert any("deliberately removed" in n and "speckit-implement" in n
+               for n in _skill_notes(r)), r.stdout
+
+
+def test_a_tracked_skill_no_manifest_lists_is_an_orphan(render, tmp_path):
+    out = _render(render, tmp_path)
+    _integration(out)
+    p = out / ".claude/skills/speckit-oldname/SKILL.md"
+    p.parent.mkdir(parents=True)
+    p.write_text("x")
+    _repo(out)
+    r = _gate(out)
+    assert any("no manifest lists" in n and "speckit-oldname" in n
+               for n in _skill_notes(r)), r.stdout
+
+
+def test_no_harness_manifest_leaves_the_skills_unverified(render, tmp_path):
+    out = _render(render, tmp_path)
+    r = _gate(out)
+    assert r.returncode == 0
+    notes = _skill_notes(r)
+    assert len(notes) == 1 and "unverified" in notes[0], r.stdout
+    assert "has not run" not in notes[0]
+
+
+def test_an_unreadable_manifest_is_named(render, tmp_path):
+    out = _render(render, tmp_path)
+    _integration(out)
+    (out / ".specify/integrations/claude.manifest.json").write_text("{nope")
+    _repo(out)
+    r = _gate(out)
+    assert r.returncode == 0
+    assert any("claude.manifest.json" in n and "unreadable" in n
+               for n in _skill_notes(r)), r.stdout
+
+
+def test_outside_git_the_commit_state_is_unverified(render, tmp_path):
+    out = _render(render, tmp_path)
+    _integration(out)
+    r = _gate(out)
+    assert r.returncode == 0
+    assert any("unverified" in n and "committed" in n for n in _skill_notes(r)), r.stdout
+
+
+def test_command_file_integrations_are_checked_the_same_way(render, tmp_path):
+    out = _render(render, tmp_path)
+    files = [f".agents/commands/speckit.{s}.md" for s in SKILLS]
+    _integration(out, name="amp", files=files)
+    _repo(out, ".agents/commands/\n")
+    r = _gate(out)
+    assert any("7 /speckit-* skill file(s) never committed" in n
+               and ".agents/commands/speckit.analyze.md" in n
+               and ".gitignore:1" in n for n in _skill_notes(r)), r.stdout
+
+
+@pytest.mark.parametrize("parent_ignored", [False, True])
+def test_the_documented_gitignore_form_makes_the_skills_committable(render, tmp_path, parent_ignored):
+    out = _render(render, tmp_path)
+    doc = (out / SPECKIT_DOC).read_text()
+    block = doc.split("<!-- gitignore-skills -->")[1].split("```")[1]
+    lines = [ln.strip() for ln in block.splitlines()
+             if ln.strip() and not ln.strip().startswith("#")]
+    if not parent_ignored:
+        lines = [ln for ln in lines if not ln.startswith(".claude/*")
+                 and not ln.startswith("!.claude/skills/")
+                 or ln.startswith("!.claude/skills/speckit")]
+    old = ".claude/\n" if parent_ignored else ".claude/skills/\n"
+    _integration(out)
+    _repo(out, old)
+    assert "speckit-plan" not in _git(out, "status", "--porcelain", "-uall").stdout
+    (out / ".gitignore").write_text("\n".join(lines) + "\n")
+    st = _git(out, "status", "--porcelain", "-uall").stdout
+    assert ".claude/skills/speckit-plan/SKILL.md" in st, (lines, st)
+
+
+def test_committed_skills_give_no_skill_note(render, tmp_path):
+    out = _render(render, tmp_path)
+    _integration(out)
+    _repo(out)
+    r = _gate(out)
+    assert r.returncode == 0 and _skill_notes(r) == [], r.stdout
+
+
+def test_a_sparse_checkout_without_the_skills_is_no_finding(render, tmp_path):
+    out = _render(render, tmp_path)
+    _integration(out)
+    _repo(out)
+    for f in (out / ".claude/skills").glob("speckit-*/SKILL.md"):
+        rel = f.relative_to(out).as_posix()
+        _git(out, "update-index", "--skip-worktree", rel)
+        f.unlink()
+    r = _gate(out)
+    assert _skill_notes(r) == [], r.stdout
+
+
+def test_an_inactive_integration_manifest_is_not_read(render, tmp_path):
+    out = _render(render, tmp_path)
+    _integration(out, name="copilot", files=[
+        f".github/skills/speckit-{s}/SKILL.md" for s in SKILLS])
+    _integration(out)  # claude installed last, the only active one
+    import shutil
+    shutil.rmtree(out / ".github/skills")
+    _repo(out)
+    r = _gate(out)
+    assert _skill_notes(r) == [], r.stdout
+
+
+def test_the_skill_notes_read_the_same_on_every_run(render, tmp_path):
+    out = _render(render, tmp_path)
+    _integration(out)
+    _repo(out, ".claude/skills/\n")
+    assert _gate(out).stdout == _gate(out).stdout
+
+
+def test_an_extension_skill_is_no_orphan(render, tmp_path):
+    out = _render(render, tmp_path)
+    _integration(out)
+    p = out / ".claude/skills/speckit-git-commit/SKILL.md"
+    p.parent.mkdir(parents=True)
+    p.write_text("x")
+    (out / ".specify/extensions").mkdir(parents=True)
+    (out / ".specify/extensions/.registry").write_text(json.dumps(
+        {"schema_version": "1.0", "extensions": {"git": {"version": "1"}}}))
+    _repo(out)
+    r = _gate(out)
+    assert _skill_notes(r) == [], r.stdout
+
+
+@pytest.mark.parametrize("state", [{}, {"installed_integrations": []}])
+def test_an_integration_state_without_a_list_reads_every_manifest(render, tmp_path, state):
+    out = _render(render, tmp_path)
+    _integration(out)
+    (out / ".specify/integration.json").write_text(json.dumps(state))
+    _repo(out, ".claude/skills/\n")
+    r = _gate(out)
+    notes = _skill_notes(r)
+    assert any("installed_integrations" in n for n in notes), r.stdout
+    assert any("never committed" in n for n in notes), r.stdout
