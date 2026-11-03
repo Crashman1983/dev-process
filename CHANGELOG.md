@@ -25,7 +25,7 @@ A few plain sentences per release: [NEWS.md](NEWS.md). Deutsche Fassung:
 
 **Update.** A pure update. A project whose Spec Kit skills are not committed sees the new note and commits them once, adjusting `.gitignore` as the setup shows. A project with its own pre-push hook that runs `uv run scripts/process/pre_push.py` or `uv run scripts/process/gate_runner.py` switches to `python3` where it needs to work without the package index.
 
-**Changed sections.** `modules/speckit.md` (Setup, What the gate enforces), `testing.md` (One test path)
+**Changed sections.** `modules/speckit.md` (Setup, What the gate enforces), `testing.md` (One test path, Gates must survive a fresh checkout)
 
 Details: [Plan](docs/analysis/2026-11-03-v2.82.md) #363 #364 #365
 

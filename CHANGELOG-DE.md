@@ -30,7 +30,7 @@ English version: [CHANGELOG.md](CHANGELOG.md). Die Releases vor v2.28.2:
 
 **Update.** Reines Update. Ein Projekt, dessen Spec-Kit-Skills nicht committet sind, sieht den neuen Hinweis und committet sie einmal; die `.gitignore` passt es an, wie das Setup zeigt. Ein Projekt mit eigenem Pre-push-Hook, der `uv run scripts/process/pre_push.py` oder `uv run scripts/process/gate_runner.py` ruft, stellt auf `python3` um, wo es ohne Paket-Index arbeiten muss.
 
-**Geänderte Abschnitte.** `modules/speckit.md` (Setup, What the gate enforces), `testing.md` (One test path)
+**Geänderte Abschnitte.** `modules/speckit.md` (Setup, What the gate enforces), `testing.md` (One test path, Gates must survive a fresh checkout)
 
 Details: [Plan](docs/analysis/2026-11-03-v2.82.md) #363 #364 #365
 

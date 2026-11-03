@@ -147,10 +147,10 @@ def _gates(root: Path, env: dict[str, str], targets: list[str]) -> int:
         # read: name the launch route, so a uv error above is not taken for a
         # finding in the branch (#365)
         _say("the gate runner was launched through `uv run` (this interpreter "
-             "has no PyYAML); if the lines above are uv's own error (`error:`, "
-             "`Caused by:`), uv could not provide PyYAML — a launch problem, not "
-             "a gate finding. Without the package index, Python >= 3.11 with "
-             "PyYAML runs the gates (docs/SYSTEM-REQUIREMENTS.md)")
+             "does not provably carry its declaration: Python >= 3.11 with "
+             "PyYAML 6); if the lines above are uv's own error (`×`, `Caused "
+             "by:`), uv could not provide it — a launch problem, not a gate "
+             "finding (docs/process/testing.md, \"Without the package index\")")
     return 0 if r.returncode == 0 else 1
 
 
