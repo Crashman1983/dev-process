@@ -86,9 +86,10 @@ hat Netz und ist davon nicht betroffen.
   und braucht PyYAML aus dem uv-Cache. Abhilfe: den uv-Cache einmal mit Netz
   fuellen (`uv run scripts/process/gate_runner.py`), oder
   `pre-commit uninstall -t pre-push` und danach `install_hooks.py`.
-- Ein Projekt mit eigenem Pre-push-Hook ruft den Rahmen mit `python3` auf
-  (`exec python3 scripts/process/pre_push.py "$@"`), nicht mit `uv run`:
-  uv kann ein eigenes Python ohne PyYAML waehlen.
+- Ein Projekt mit eigenem Pre-push-Hook ruft den Rahmen mit dem Python auf,
+  das PyYAML hat (`exec python3 scripts/process/pre_push.py "$@"`, unter
+  Windows `py -3`), nicht mit `uv run`: uv kann ein eigenes Python ohne
+  PyYAML waehlen. Fehlt ein solches Python, bleibt `uv run` der Weg.
 
 ## Parallele Agenten (optional)
 

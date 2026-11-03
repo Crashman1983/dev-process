@@ -393,7 +393,7 @@ def test_a_uv_launch_failure_is_named_in_the_gate_section_and_stays_red(render, 
     assert r.returncode != 0
     assert "gate-runner: probe: launched through `uv run`" in r.stdout, r.stdout
     assert "a launch problem, not a gate finding" in r.stdout
-    assert "probe — launch failed" in r.stdout
+    assert "probe — likely a launch problem" in r.stdout
 
 
 def test_a_gate_that_fails_with_output_is_no_launch_failure(render, tmp_path):
@@ -408,7 +408,8 @@ def test_a_traceback_is_no_launch_failure(render, tmp_path):
     out = render(tmp_path, {"project_name": "demo"})
     gi = _load(out)
     tb = "Traceback (most recent call last):\n  File x\nImportError: no yaml\n"
-    assert gi.uv_launch_failure(["uv", "run", "--script", "x.py"], 1, "", tb) is None
+    runner = str(out / "scripts/process/gate_runner.py")
+    assert gi.uv_launch_failure(["uv", "run", "--script", runner], 1, "", tb) is None
 
 
 def test_the_pre_push_frame_names_a_uv_launch_of_the_runner(render, tmp_path, monkeypatch, capsys):
@@ -440,7 +441,8 @@ def test_uvs_offline_resolution_error_is_a_launch_failure(render, tmp_path):
            "  × No solution found when resolving script dependencies:\n"
            "  ╰─▶ Because pyyaml was not found in the cache and you require pyyaml>=6\n"
            "      hint: Packages were unavailable because the network was disabled.\n")
-    assert gi.uv_launch_failure(["uv", "run", "--script", "x.py"], 1, "", err)
+    runner = str(out / "scripts/process/gate_runner.py")
+    assert gi.uv_launch_failure(["uv", "run", "--script", runner], 1, "", err)
 
 
 def test_the_runner_itself_needs_the_same_evidence(render, tmp_path, monkeypatch):
@@ -466,7 +468,82 @@ def test_a_direct_launch_that_cannot_import_is_named_a_launch_problem(render, tm
     gi = _load(out)
     tb = ("Traceback (most recent call last):\n  File x\n"
           "ModuleNotFoundError: No module named '_yaml_dep'\n")
-    assert gi.uv_launch_failure([sys.executable, "x.py"], 1, "", tb)
-    assert gi.uv_launch_failure([sys.executable, "x.py"], 1, "x: FAILED", tb) is None
+    runner = str(out / "scripts/process/gate_runner.py")  # declares pyyaml
+    assert gi.uv_launch_failure([sys.executable, runner], 1, "", tb)
+    assert gi.uv_launch_failure([sys.executable, runner], 1, "x: FAILED", tb) is None
     other = "Traceback (most recent call last):\nValueError: bad\n"
-    assert gi.uv_launch_failure([sys.executable, "x.py"], 1, "", other) is None
+    assert gi.uv_launch_failure([sys.executable, runner], 1, "", other) is None
+
+
+def test_without_tomllib_requires_python_still_counts(render, tmp_path, monkeypatch):
+    # a 3.10 host has no tomllib: requires-python >= 3.11 must still send the
+    # child through uv, not start it on the wrong interpreter (point 1)
+    out = render(tmp_path, {"project_name": "demo"})
+    gi = _load(out)
+    monkeypatch.setitem(sys.modules, "tomllib", None)
+    monkeypatch.setattr(gi.shutil, "which", lambda name: "/usr/bin/uv")
+    cmd = [sys.executable, *_declaring(out, ["pyyaml>=6"], python=">=99")]
+    assert gi.declared_python(out / cmd[1]) == ">=99"
+    assert gi.child_argv(out, cmd)[:3] == ["uv", "run", "--script"]
+
+
+def test_a_block_with_only_requires_python_is_still_a_declaration(render, tmp_path, monkeypatch):
+    out = render(tmp_path, {"project_name": "demo"})
+    gi = _load(out)
+    monkeypatch.setattr(gi.shutil, "which", lambda name: "/usr/bin/uv")
+    cmd = [sys.executable, *_declaring(out, [], python=">=99")]
+    assert gi.child_argv(out, cmd)[:3] == ["uv", "run", "--script"]
+
+
+def test_an_undeclared_script_with_an_import_error_is_its_own_red(render, tmp_path):
+    out = render(tmp_path, {"project_name": "demo"})
+    gi = _load(out)
+    tb = "Traceback (most recent call last):\nModuleNotFoundError: No module named 'x'\n"
+    assert gi.uv_launch_failure([sys.executable, "scripts/process/check_review.py"], 1, "", tb) is None
+
+
+def test_a_gates_own_error_line_through_uv_is_its_own_red(render, tmp_path):
+    out = render(tmp_path, {"project_name": "demo"})
+    gi = _load(out)
+    runner = str(out / "scripts/process/gate_runner.py")
+    own = "error: story S-1 has no issue\n"
+    assert gi.uv_launch_failure(["uv", "run", "--script", runner], 1, "", own) is None
+    coloured = "\x1b[1m\x1b[31merror\x1b[39m\x1b[0m: Request failed\n  \x1b[31mCaused by\x1b[0m: dns error\n"
+    assert gi.uv_launch_failure(["uv", "run", "--script", runner], 2, "", coloured)
+
+
+def test_a_declaring_gate_started_directly_without_proof_is_not_named(render, tmp_path):
+    # no uv on PATH: the gate starts as given although nothing vouched for it
+    out = render(tmp_path, {"project_name": "demo"})
+    gi = _load(out)
+    cmd = [sys.executable, *_declaring(out, ["no-such-distribution-365"])]
+    tb = "Traceback (most recent call last):\nModuleNotFoundError: No module named 'x'\n"
+    assert gi.uv_launch_failure(cmd, 1, "", tb) is None
+
+
+def test_a_script_that_is_not_utf8_has_no_declaration_and_no_crash(render, tmp_path):
+    out = render(tmp_path, {"project_name": "demo"})
+    gi = _load(out)
+    p = out / "tools_check.py"
+    p.write_bytes(b"# -*- coding: latin-1 -*-\n# \xfc\nimport sys\nsys.exit(1)\n")
+    assert gi.declared_dependencies(p) == []
+    assert gi.uv_launch_failure([sys.executable, str(p)], 1, "", "x") is None
+
+
+@pytest.mark.parametrize("block", [
+    '#dependencies = ["pyyaml>=6"]\n', '#\tdependencies = ["pyyaml>=6"]\n',
+    '# dependencies = [1, "pyyaml>=6"]\n', '# requires-python = 3.11\n'])
+def test_a_block_uv_would_refuse_is_never_trusted_for_a_direct_start(render, tmp_path, monkeypatch, block):
+    out = render(tmp_path, {"project_name": "demo"})
+    gi = _load(out)
+    monkeypatch.setattr(gi.shutil, "which", lambda name: "/usr/bin/uv")
+    p = out / "scripts/odd_gate.py"
+    p.write_text("# /// script\n" + block + "# ///\nprint('ok')\n", encoding="utf-8")
+    cmd = [sys.executable, "scripts/odd_gate.py"]
+    assert gi.child_argv(out, cmd)[:3] == ["uv", "run", "--script"]
+
+
+def test_an_absurd_version_number_is_unreadable_not_a_crash(render, tmp_path):
+    out = render(tmp_path, {"project_name": "demo"})
+    gi = _load(out)
+    assert gi._satisfied("pyyaml>=" + "9" * 5000) is False

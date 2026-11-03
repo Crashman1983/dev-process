@@ -10,6 +10,7 @@ English version: [NEWS.md](NEWS.md).
 ## v2.82.0 — Läuft in einer abgeschotteten Sandbox
 
 In einer Umgebung, die GitHub erreicht, aber keine Pakete herunterladen darf, blieb der Prozess an zwei Stellen stehen. Eine frische Kopie des Repositorys verlor die Spezifikationsbefehle, weil ihr Ordner von der Versionsverwaltung ausgeschlossen war. Und die Prozessprüfungen wollten eine Bibliothek herunterladen, die der Rechner schon hatte, scheiterten und blockierten jeden Upload, ohne zu sagen warum. Das Setup hält diese Befehle jetzt im Repository. Die Prüfungen nutzen, was schon installiert ist, und sagen klar, wenn etwas fehlt. Ein Test in genau so einer Umgebung läuft jetzt vollständig durch.
+
 ## v2.81.0 — Erst richtig messen
 
 Das Prozess-Cockpit zählte in einem echten Projekt falsch: Nachdem main in einen Branch gemergt und auf ihn vorgespult worden war, fehlte der Großteil von drei Wochen Arbeit in seinen Zahlen, ohne Warnung. Es folgt dieser Historie jetzt, zählt keine Änderung doppelt und sagt, warum eine Spalte leer ist, statt einen Strich zu zeigen. Außerdem zeigt es, wie oft die vorgeschriebenen Review-Einträge tatsächlich geschrieben werden, welche wenigen Arbeiten die meisten Review-Runden tragen, und wie sich Zahlen vor und nach einer Prozessversion unterscheiden. Die Plan-Regel aus v2.80.1 erreicht jetzt jedes Agenten-Harness und blockiert nur, wenn das, worauf ein Plan baut, falsch ist. Keine neuen Gates.
