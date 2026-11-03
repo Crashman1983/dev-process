@@ -416,11 +416,14 @@ def handover_problems(root: Path) -> list[str]:
     if not there or here is None:
         return []
     rows, _problems = read_changes(root)
-    recorded = {row.get("gate") for row in rows}
+    # a record that decides the handover is one `fold` honours — not any line naming the gate
+    state, _more = fold(rows, _core(root), protected_gates(root, ref))
+    recorded = {gate for gate, st in state.items() if st.get("record")}
     return [f"{name}: {LOCAL_GATES} drops the project's own `{name}` gate, so the template's "
             f"starts observing instead of blocking — record the handover: "
-            f"`gate_modes.py restore {name} --reason …` keeps it blocking, an owner "
-            f"`weaken {name} --to shadow --observe` lets it observe"
+            f"`gate_modes.py restore {name} --reason …` keeps it blocking; an owner "
+            f"`weaken {name} --to shadow --observe` lets it observe once that record is on "
+            f"the integration branch (until then it blocks)"
             for name in sorted(names & there - here - recorded)]
 
 

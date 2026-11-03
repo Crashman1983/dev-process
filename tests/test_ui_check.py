@@ -452,3 +452,36 @@ def test_a_project_axis_with_a_hyphen_is_read(project):
     _commit(out)
     r = _check(out)
     assert r.returncode == 0, r.stdout
+
+
+# --- code review round 2 -------------------------------------------------------------
+
+def test_a_line_fold_does_not_honour_is_no_handover_record(project):
+    out = project
+    _write(out, "scripts/own.py", "import sys; sys.exit(0)\n")
+    _write(out, "docs/process/gates.local.json", json.dumps({"ui-check": {"module": None, "command": ["scripts/own.py"]}}))
+    _commit(out)
+    _git(out, "push", "-q", "origin", "HEAD:main")
+    _write(out, "docs/process/gates.local.json", "{}")
+    _write(out, "docs/process/gate-changes.local.jsonl",
+           json.dumps({"gate": "ui-check", "action": "weaken", "to": "shadow", "decision": "no owner"}) + "\n")
+    _commit(out)
+    r = _modes(out, "check")
+    assert "record the handover" in r.stdout, r.stdout
+
+
+def test_two_blocks_for_one_surface_count_together(project):
+    out = project
+    first, second = BLOCK.split("- states:")
+    _plan(out, "design-contract: web\n\n" + TRACE + "\n" + first + "\nprose between\n\nui-check:\n- states:" + second)
+    _commit(out)
+    r = _check(out)
+    assert r.returncode == 0, r.stdout
+
+
+def test_a_tab_indented_example_is_code(project):
+    out = project
+    tabbed = "\n".join("\t" + ln for ln in BLOCK.splitlines())
+    _plan(out, "design-contract: web\n\n" + TRACE + "\nAn example:\n\n" + tabbed + "\n")
+    _commit(out)
+    assert "no `ui-check:` block" in _check(out).stdout

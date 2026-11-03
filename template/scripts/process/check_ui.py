@@ -211,16 +211,17 @@ def parse_blocks(text: str) -> tuple[dict[str, tuple[int, list[tuple[int, str, s
                 opt_outs.append((i + 1, na.group(1).strip()))
             i += 1
             continue
-        entries: list[tuple[int, str, str]] = []
-        blocks.setdefault(surface, (i + 1, entries))
+        # a second block for the same surface continues the first: its axes count, twice is a finding
+        entries = blocks.setdefault(surface, (i + 1, []))[1]
+        start = len(entries)
         j = i + 1
-        while j < len(lines) and not lines[j].strip() and not entries:
+        while j < len(lines) and not lines[j].strip() and len(entries) == start:
             j += 1  # `**ui-check:**`, a blank line, then the list
         while j < len(lines) and lines[j].strip():
             line = lines[j]
             a = _AXIS.match(line)
             marker = re.match(r"^[ \t]*[-*+][ \t]", line) is not None
-            if entries and _indent(line) > 0 and not marker:
+            if len(entries) > start and _indent(line) > 0 and not marker:
                 n, axis, value = entries[-1]
                 entries[-1] = (n, axis, f"{value} {line.strip()}".strip())
             elif a and (marker or _indent(line) < 4):
@@ -234,7 +235,16 @@ def parse_blocks(text: str) -> tuple[dict[str, tuple[int, list[tuple[int, str, s
 
 
 def _indent(line: str) -> int:
-    return len(line) - len(line.lstrip(" \t"))
+    """Columns of leading whitespace; a tab reaches the next multiple of four (CommonMark)."""
+    col = 0
+    for ch in line:
+        if ch == " ":
+            col += 1
+        elif ch == "\t":
+            col += 4 - col % 4
+        else:
+            break
+    return col
 
 
 _LINK = re.compile(r"\[[^\]]*\]\(([^)\s]+)\)")
