@@ -1039,6 +1039,20 @@ def test_another_issues_criterion_is_cited_qualified_and_not_required(ev_mod):
     assert req("issue: #7\nSee #9/AC-2.\n", "- AC-2: When a, b shall c.\n") == {"2"}
 
 
+def test_a_spec_citing_another_issues_criterion_does_not_make_it_the_works_own(ev_mod):
+    """Downstream #2840: plan and spec both cited `#2831/AC-6`; the spec's citation was
+    read as a bare id, so attest asked for AC-6 and recommended the very form it ignored."""
+    mod, _out = ev_mod
+    req, foreign = mod.required_criteria, mod.foreign_criteria
+    plan = "issue: #2840\ntier: 2\n\nLandkarte freigegeben (#2831/AC-6)\n\n- AC-1: x\n"
+    spec = "# Spec\n(#2831/AC-6 freigegeben)\n- AC-1: When x, y shall z.\n"
+    assert req(plan, spec) == {"1"} and foreign(plan, spec) == {"6"}
+    # the plan's own issue cited in the spec stays the work's own (fail closed)
+    assert req(plan, "# Spec\nSee #2840/AC-6.\n") == {"1", "6"}
+    # a bare id in the spec still makes it required
+    assert req(plan, spec + "AC-6 matters here too.\n") == {"1", "6"}
+
+
 def test_attest_names_the_id_it_left_out(repo):
     """#287 AC-3: an id left out as foreign is named, never dropped in silence."""
     plan = repo / ".process-work/plans/2026-10-14-widget.md"
