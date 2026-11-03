@@ -121,13 +121,14 @@ def _read_json(path: Path) -> object:
 
 
 def _installed(state: object) -> list[str]:
-    """Spec Kit's own reading of integration.json: the installed list, the
-    legacy single `integration` and the `default_integration`."""
+    """Spec Kit's own reading of integration.json (normalize_integration_state,
+    0.16): the installed list plus the default, which is `default_integration`
+    or else the legacy single `integration`."""
     if not isinstance(state, dict):
         return []
     names = state.get("installed_integrations")
     names = list(names) if isinstance(names, list) else []
-    names += [state.get("integration"), state.get("default_integration")]
+    names.append(state.get("default_integration") or state.get("integration"))
     return sorted({n for n in names
                    if isinstance(n, str) and re.fullmatch(r"[\w.-]+", n)})
 
@@ -228,6 +229,17 @@ def _orphan(path: str, dirs: set[str], exts: list[str]) -> bool:
                    for e in exts)
 
 
+def _link_target(root: Path, d: str) -> str | None:
+    """The in-repo target of a symlinked skills directory, else None."""
+    p = root / d
+    if not p.is_symlink():
+        return None
+    try:
+        return p.resolve().relative_to(root.resolve()).as_posix()
+    except (OSError, ValueError):
+        return None
+
+
 def _skill_notes(root: Path) -> list[str]:
     """The /speckit-* skills a clone needs, from the integration manifests
     (#363): committed, present, none of the dropped three, no orphan."""
@@ -259,7 +271,15 @@ def _skill_notes(root: Path) -> list[str]:
                      f"whether the /speckit-* skills are installed and committed "
                      f"is unverified (Spec Kit setup)")
         return notes
-    kept, dropped = sorted(set(kept)), sorted(set(dropped))
+    # a skills directory may be a committed symlink into the repo (one copy for
+    # several harnesses): git tracks the files under the link's target
+    real = {d: _link_target(root, d) for d in dirs}
+    def through(path: str) -> str:
+        d = _skill_part(path)[0] or "."
+        return path if real[d] is None else real[d] + path[len(d):]
+    kept = sorted({through(p) for p in kept})
+    dropped = sorted({through(p) for p in dropped})
+    dirs = {real[d] or d for d in dirs}
     listed = set(kept) | set(dropped)
     tracked = _tracked(root, sorted(dirs)) if dirs else {}
     committed = _committed(root, sorted(dirs)) if dirs else set()
@@ -285,6 +305,8 @@ def _skill_notes(root: Path) -> list[str]:
                 how = ("commit them from a checkout that has them, or run the "
                        "Spec Kit setup")
             rule = _ignore_rule(root, unstaged[0]) if unstaged else ""
+            if rule:
+                how = f"fix the ignore rule first (Spec Kit setup), then {how}"
             notes.append(f"{len(never)} /speckit-* skill file(s) never "
                          f"committed{rule}: "
                          f"{_listed(never)} — a fresh clone or worktree has no "
@@ -336,11 +358,14 @@ def check(root: Path) -> tuple[list[str], list[str]]:
                     f"restore the pointer file (git checkout -- {CONSTITUTION})")
 
     try:
-        soft += _skill_notes(root)
+        skill = _skill_notes(root)
     except Exception as exc:  # noqa: BLE001 — the skill check is soft by contract
         # (#363 AC-3): odd manifest data must never turn into a block or a crash
-        soft.append(f"/speckit-* skill check failed ({type(exc).__name__}: "
-                    f"{exc}) — whether the skills are committed is unverified")
+        skill = [f"/speckit-* skill check failed ({type(exc).__name__}: "
+                 f"{exc}) — whether the skills are committed is unverified"]
+    # manifest paths may carry lone surrogates (json.dump of a non-UTF-8 name):
+    # escape them here, so printing a note can never raise
+    soft += [n.encode("utf-8", "backslashreplace").decode("utf-8") for n in skill]
 
     sdir = root / SPECS_DIR
     if sdir.is_dir():
