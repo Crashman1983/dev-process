@@ -442,3 +442,13 @@ def test_the_bundle_keeps_the_d8_hint_beside_a_ui_check_opt_out(project):
             "from pathlib import Path; print(m._ui_evidence(Path('.'), None, [Path(sys.argv[1])]))")
     r = subprocess.run([sys.executable, "-c", code, rel], cwd=out, capture_output=True, text=True, env=_env())
     assert "no screenshots" in r.stdout and "ui-check **n/a** — only the label" in r.stdout, r.stdout + r.stderr
+
+
+def test_a_project_axis_with_a_hyphen_is_read(project):
+    out = project
+    _write(out, "docs/process/design-contracts/web.json", _registry(extra_axes=["dark-mode"]))
+    _plan(out, "design-contract: web\n\n" + TRACE + "\n" + BLOCK.replace(
+        "- themes: light, dark\n", "- themes: light, dark\n- dark-mode: contrast checked\n"))
+    _commit(out)
+    r = _check(out)
+    assert r.returncode == 0, r.stdout

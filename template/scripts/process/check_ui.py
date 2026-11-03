@@ -70,7 +70,7 @@ AXES = ("board", "viewports", "themes", "states", "navigation", "interaction",
         "content extremes", "accessibility", "rules")
 _HEADER = re.compile(r"^[ \t]*(?:[-*+][ \t]+)?[*_]*ui-check(?:[ \t]+`?(?P<surface>[\w.-]+)`?)?[*_]*"
                      r"[ \t]*:[ \t]*(?P<rest>.*?)[ \t]*$", re.IGNORECASE)
-_AXIS = re.compile(r"^[ \t]*(?:[-*+][ \t]+)?[*_]*(?P<axis>[a-z][a-z ]*?)[*_]*[ \t]*:[ \t]*(?P<value>.*?)[ \t]*$",
+_AXIS = re.compile(r"^[ \t]*(?:[-*+][ \t]+)?[*_]*(?P<axis>[a-z][a-z0-9 _-]*?)[*_]*[ \t]*:[ \t]*(?P<value>.*?)[ \t]*$",
                    re.IGNORECASE)
 _NA = re.compile(r"^n/?a\b[\s—–:-]*(.*)$", re.IGNORECASE)
 _TOKEN = re.compile(r"`([^`]+)`|(\S+)")
