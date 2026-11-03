@@ -111,3 +111,7 @@ def _outside_ci(monkeypatch):
     # own CI/GITHUB_ACTIONS variables must not switch it off under them
     monkeypatch.delenv("CI", raising=False)
     monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    # dispatch refuses to start on a nearly full filesystem; a parallel suite fills
+    # the host's /tmp towards that limit, and a test about something else then fails
+    # on the host's disk. The disk-guard tests set or drop the variable themselves.
+    monkeypatch.setenv("PROCESS_DISK_LIMIT_PCT", "100")
