@@ -9,6 +9,25 @@ ein Eintrag ohne Plan oder Issue hat keine Details-Zeile. In wenigen Sätzen je 
 English version: [CHANGELOG.md](CHANGELOG.md). Die Releases vor v2.28.2:
 [docs/changelog-archive-DE.md](docs/changelog-archive-DE.md).
 
+## v2.83.0 — Gates nach dem Inhalt einer Änderung · 2026-11-03
+
+**Warum.** Der Grundsatz des Owners: Gates greifen nach dem Inhalt einer Änderung. Ein UI-Lint hat einem reinen Backend-Push nichts zu sagen. Bisher ließen sich nur die eigenen Gates eines Projekts auf rohe Pfad-Globs beschränken. Ein gemeinsamer Begriff davon, welche Bereiche ein Projekt hat, fehlte, und die Zusammenfassung des Runners nannte übersprungene oder abgeschaltete Gates „passed“. Unabhängig davon verlangte attest ein fremdes Kriterium, wenn die Spec es als `#N/AC-x` zitierte, und empfahl genau die Schreibweise, die schon dastand (downstream #2840).
+
+**Was sich ändert.**
+- `testing.local.json` nennt die **Bereiche** des Projekts einmal, als Globs: `"areas": {"ui": [...], "ios": [...]}`. Eine leere Liste heißt „solchen Inhalt gibt es hier nicht“.
+- Ein lokales Gate in `gates.local.json` darf die Bereiche nennen, für die es da ist (`"areas": ["ui"]`). Es läuft, wenn sein Bereich in der Änderung liegt, und wird sonst übersprungen, mit dem Grund im Event.
+- Bereiche gelten als Vereinigung aus der Datei am Integrationsbranch und der im Checkout. Ein Branch kann einen Bereich erweitern, aber nie verengen, um sein eigenes Gate zu umgehen. Ein neuer Bereich und das Gate, das ihn nennt, können zusammen landen. Kann git die Pfade nicht nennen, oder ist die Datei im Checkout nicht lesbar, läuft das Gate.
+- Die Zusammenfassung zählt übersprungene, im Beobachtungsmodus gescheiterte und per Modus nicht gelaufene Gates getrennt. Sie nennt sie nie „passed“. Ohne solche Gates bleibt der Wortlaut gleich.
+- Eine Spec, die `#N/AC-x` zitiert, macht dieses Kriterium nicht mehr zum eigenen.
+
+**Wirkung.** Die Prüfungen eines Projekts für sein Produkt laufen dort, wo sie greifen, und die Ausgabe sagt klar, was nicht lief.
+
+**Update.** Reines Update. Ohne `areas` ändert sich nichts. Template-Gates sind Prozess-Gates und laufen weiter bei jedem Push.
+
+**Geänderte Abschnitte.** `testing.md` (One test path, Areas — gates by what a change contains)
+
+Details: [Plan](docs/analysis/2026-11-03-v2.83.md) #369 (teilweise) #366 #368 (nächstes Release)
+
 ## v2.82.0 — Läuft in einer abgeschotteten Sandbox · 2026-11-03
 
 **Warum.** In einer Sandbox, die GitHub erreicht, aber nicht den Paket-Index, blieb der Prozess an zwei Stellen stehen. `specify init` schreibt die `/speckit-*`-Skills in das Skill-Verzeichnis des Agenten. Ein Projekt, das dieses Verzeichnis ignorierte, hat sie nie committet, ohne Warnung. Jedem frischen Klon fehlten deshalb die Befehle, und er brauchte das Spec-Kit-CLI, das die Sandbox verweigert (#363). Außerdem startete jedes Gate, das PyYAML deklariert, über `uv run`, auch wenn das System-Python es schon hatte. Ohne PyPI scheiterte uv. Der Gate-Runner sagte dann nur `FAILED gates: …`, und jeder Push wurde verweigert (#365). Ein Experiment in einem frischen Repo ohne Netz hat beides bestätigt.

@@ -7,6 +7,10 @@ technischen Einzelheiten stehen im [CHANGELOG](CHANGELOG-DE.md).
 
 English version: [NEWS.md](NEWS.md).
 
+## v2.83.0 — Gates nach dem Inhalt einer Änderung
+
+Ein Projekt kann jetzt einmal festlegen, welche Teile seines Repositorys Benutzeroberfläche, iOS, Backend und so weiter sind, und seine eigenen Prüfungen daran binden. Eine Prüfung für die Oberfläche läuft dann nur, wenn eine Änderung die Oberfläche berührt, und die Ausgabe sagt klar, welche Prüfungen nicht liefen und warum, statt sie als bestanden zu melden. Ein Branch kann seine eigene Prüfung nicht abschalten, indem er diese Teile umdefiniert. Eine kleine Korrektur sorgt außerdem dafür, dass der Prozess keinen Test mehr für das Kriterium eines anderen Issues verlangt, das die Spezifikation nur zitiert.
+
 ## v2.82.0 — Läuft in einer abgeschotteten Sandbox
 
 In einer Umgebung, die GitHub erreicht, aber keine Pakete herunterladen darf, blieb der Prozess an zwei Stellen stehen. Eine frische Kopie des Repositorys verlor die Spezifikationsbefehle, weil ihr Ordner von der Versionsverwaltung ausgeschlossen war. Und die Prozessprüfungen wollten eine Bibliothek herunterladen, die der Rechner schon hatte, scheiterten und blockierten jeden Upload, ohne zu sagen warum. Das Setup hält diese Befehle jetzt im Repository. Die Prüfungen nutzen, was schon installiert ist, und sagen klar, wenn etwas fehlt. Ein Test in genau so einer Umgebung läuft jetzt vollständig durch.
