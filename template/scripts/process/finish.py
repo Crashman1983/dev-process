@@ -521,6 +521,20 @@ def apply(root: Path, *, tests: str | None, tests_passed: bool) -> int:
     if tests:
         argv, assigned = run_tests
         shown = shlex.join([*(f"{k}={v}" for k, v in assigned.items()), *argv])
+        # the host checks first, as the train's (#373): a red one is the host's, not the suite's
+        try:
+            cfg = testing_config.load(root)
+        except testing_config.ConfigError as exc:
+            print(f"finish: {exc} — not merging")
+            return 1
+        if cfg:
+            import test_select  # noqa: PLC0415
+
+            problem = test_select.merge_environment_problem(root, cfg)
+            if problem:
+                print(f"finish: environment — {problem}; the suite did not run, not merging "
+                      f"(fix the host, or merge on the gate host)")
+                return 1
         # the certificate serves the pre-push only; a local merge pushes nothing
         before = None if local_only else _certifiable_tree(root, tests)
         certificate.clear_run(root)  # the `stages` file the certificate reads is this run's

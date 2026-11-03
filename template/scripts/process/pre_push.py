@@ -100,7 +100,11 @@ def _owner_only(root: Path, env: dict[str, str], skips: set[str], targets: list[
         why = f"phase `{sorted(phases)[0]}`" if phases else problem
         return (f"PROCESS_SKIP={','.join(sorted(skips))} comes from a dispatched session ({why}) — "
                 f"skipping checks is the owner's emergency exit, not a route for the agent")
-    merge_route.append_ledger(root, "skip", f"PROCESS_SKIP={','.join(sorted(skips))}", targets)
+    what = f"PROCESS_SKIP={','.join(sorted(skips))}"
+    reason = merge_route.skip_reason(env)
+    if not reason:
+        return merge_route.no_reason_message(what)
+    merge_route.append_ledger(root, "skip", f"{what}: {reason}", targets)
     return None
 
 
@@ -226,17 +230,21 @@ def _run(root: Path, lines: list, env: dict[str, str], ran: dict) -> int:
         if _gates(root, env, [ln.remote_ref for ln in lines]):
             return 1
     testable = bool(cfg) and bool(cfg["stacks"] or (klass == "merge" and cfg["merge_suite"]))
+    owed: list[str] = []
     if tree_hit:
         _say(f"tree {tree[:12]} passed this push before ({klass}, {scope}) — gates only")
     elif testable and scope == "code" and "tests" not in skips:
         try:
-            rc = test_select.run(root, cfg, changed or set(), klass, certify=False)
+            rc = test_select.run(root, cfg, changed or set(), klass, certify=False, owed=owed)
         except test_select.Unjudgeable as exc:
             _say(f"cannot select tests: {exc}")
             return 2
         if rc:
             return rc
-    if not skips:
+    if owed:
+        # a stack this host could not run passed nothing: no stamp, the next push asks again
+        _say(f"no stamp — owed on the gate host: {', '.join(owed)}")
+    elif not skips:
         problem = (certificate.clean_tree_problem(root)
                    or certificate.env_problem(cfg["certificate_env"] if cfg else ())
                    or ("HEAD or the tree moved during the run" if _fingerprint(root) != (head, tree) else None))

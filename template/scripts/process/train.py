@@ -13,7 +13,8 @@ full run and deploy.
                                        [--force] [--keep-branches] [--dry-run]
 
 `--suite` defaults to `merge_suite` of `docs/process/testing.local.json`,
-`--preflight` to its `preflight`.
+`--preflight` to its `preflight`; every stack's own `preflight` follows either
+way — a merge runs every stack, so any of them red is the host's.
 `--preflight` checks the environment (tools, logins, disk) on the first
 combined tree before any gate: red there is the host's, not a passenger's —
 the run stops, nobody is blamed, nothing is retried or bisected.
@@ -1899,8 +1900,14 @@ def main(argv: list[str]) -> int:
     suite = a.suite or (cfg["merge_suite"] if cfg else None)
     # the configured environment check is the train's too; an explicit one wins,
     # `--preflight ""` included (none for this run)
-    preflight = a.preflight if a.preflight is not None else (
-        shlex.join(cfg["preflight"]) if cfg and cfg["preflight"] else None)
+    # and every stack's own after it (#373) — always, `--preflight` replaces only the
+    # global one: a merge runs every stack, so any non-zero exit, 3 ("this host cannot
+    # run it") included, is the environment, never a red train
+    first = a.preflight if a.preflight is not None else (
+        shlex.join(cfg["preflight"]) if cfg and cfg["preflight"] else "")
+    checks = [first] if first.strip() else []
+    checks += [shlex.join(s["preflight"]) for s in (cfg["stacks"] if cfg else []) if s.get("preflight")]
+    preflight = " && ".join(checks) if checks else None
     return run(root, suite=suite, deploy=a.deploy, push=a.push, min_candidates=a.min_candidates,
                max_wait_hours=a.max_wait_hours, force=a.force, keep_branches=a.keep_branches,
                dry_run=a.dry_run, retry=a.retry, preflight=preflight,

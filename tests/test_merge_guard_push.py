@@ -176,7 +176,7 @@ def test_a_skipped_gate_is_logged_and_skips_the_block_check(render, tmp_path):
     out, bare = _project(render, tmp_path)
     assert _install_guard(out).returncode == 0
     _block_on_feature(out)
-    r = _push(out, "origin", "HEAD:main", env={"SKIP": "process-gates"})
+    r = _push(out, "origin", "HEAD:main", env={"SKIP": "process-gates", "PROCESS_SKIP_REASON": "owner: host down"})
     assert r.returncode == 0, r.stderr
     assert "SKIP=process-gates" in (out / ".git/process-owner-overrides.log").read_text()
 

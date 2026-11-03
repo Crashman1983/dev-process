@@ -159,10 +159,12 @@ def test_a_dirty_worktree_tests_but_writes_no_stamp(project, tmp_path):
 def test_skipping_the_tests_on_a_branch_is_logged_and_stamps_nothing(project, tmp_path):
     out, bare, git = project
     r = _push(git, "origin", "feature", env={"PROCESS_SKIP": "tests"})
+    assert r.returncode == 1 and "PROCESS_SKIP_REASON" in r.stderr, r.stderr  # #373: no reason, no skip
+    r = _push(git, "origin", "feature", env={"PROCESS_SKIP": "tests", "PROCESS_SKIP_REASON": "owner: host down"})
     assert r.returncode == 0 and "skipped by PROCESS_SKIP" in r.stderr, r.stderr
     assert _probe(tmp_path) == ["g"]
     ledger = (out / ".git/process-owner-overrides.log").read_text()
-    assert "PROCESS_SKIP=tests" in ledger
+    assert "PROCESS_SKIP=tests: owner: host down" in ledger
     assert _push(git, "origin", "feature:refs/heads/copy").returncode == 0
     assert _probe(tmp_path) == ["g", "t app_tests"]
 
@@ -309,7 +311,7 @@ def test_a_merge_suite_without_stacks_runs_on_a_merge_push(project, tmp_path):
 def test_skipping_the_gates_on_main_is_the_guards_bypass_and_holds_for_pre_commit(project, tmp_path):
     """F8: the owner's skip is not undone by pre-commit's gate entry."""
     out, bare, git = project
-    r = _push(git, "origin", "HEAD:main", env={**ROUTE, "PROCESS_SKIP": "gates"})
+    r = _push(git, "origin", "HEAD:main", env={**ROUTE, "PROCESS_SKIP": "gates", "PROCESS_SKIP_REASON": "owner: host down"})
     assert r.returncode == 0, r.stderr
     assert _probe(tmp_path) == ["m"]
     assert "PROCESS_SKIP=gates" in (out / ".git/process-owner-overrides.log").read_text()
@@ -477,7 +479,7 @@ def test_a_gate_skip_and_a_non_fast_forward_override_are_two_ledger_lines(projec
     _write(out, "app/code.py", "x = 5\n")
     git("commit", "-qam", "rewrite")
     r = _push(git, "-f", "origin", "HEAD:main",
-              env={"PROCESS_SKIP": "gates", "PROCESS_OWNER_OVERRIDE": "fix main"})
+              env={"PROCESS_SKIP": "gates", "PROCESS_OWNER_OVERRIDE": "fix main", "PROCESS_SKIP_REASON": "owner: host down"})
     assert r.returncode == 0, r.stderr
     ledger = (out / ".git/process-owner-overrides.log").read_text()
     assert "PROCESS_SKIP=gates" in ledger and "fix main" in ledger, ledger

@@ -240,7 +240,7 @@ code. A project supplies data; the template owns the sequence:
   logins — once before any test of a push, a `--certify` or the train;
   `preflight_timeout`, default 600 s, for the train's too; on a push the
   process gates run first, so a host that breaks a gate is refused as that
-  gate), `lanes`, `lane_dir`,
+  gate; `preflight_timeout` holds for every preflight, a stack's too), `lanes`, `lane_dir`,
   `certificate_env`, and `areas` (what a change contains — "Areas" below).
   No file: the gates run, no tests.
   A malformed file refuses the push — a typo in a map must not skip tests.
@@ -280,9 +280,31 @@ code. A project supplies data; the template owns the sequence:
   claim, writes nothing and is refused while `merge_suite` is set. A branch push accepts either; a merge push only
   `merge` — without one it runs `merge_suite`, else every stack's `full`,
   else it is refused.
+- **A host that cannot run a stack.** A stack may carry its own `preflight`
+  (an argv, run from the root; the command itself must exit 3 — `make`
+  folds exit codes to 2). Exit 3 means "this host cannot run this stack",
+  any other non-zero "the host is broken". On a **branch push** a 3 leaves
+  the stack **owed on the gate host**: its own selector does not run, the
+  other stacks do, the output names it, and nothing counts as passed — no
+  push certificate, no stamp. Only a host check the integration branch
+  already has may say so: the stack's `preflight` must stand there as it
+  does here, and every file its argv names must be byte-identical to the
+  integration branch's — a branch never declares its own stack unsuited.
+  Name the check's file (`python3 scripts/host_check.py`), not a module
+  (`-m` cannot be compared), and keep it self-contained: what it imports is
+  not compared. A stack's check runs only when the change gives it work. Otherwise a 3 refuses like any
+  other red preflight. **A merge never defers:** the merge push, the train
+  and `finish --tests` run every stack's preflight after the global one, and
+  any non-zero exit, 3 included, is the host's — the train stops as
+  "environment" and blames nobody. A host that cannot run a stack cannot
+  merge; the merge suite on the gate host runs it.
 - **Skipping** is the owner's: `PROCESS_SKIP=gates` is the guard's logged
   bypass, `PROCESS_SKIP=tests` keeps the standing block; both are refused
-  from a dispatched session and write no stamp and no certificate.
+  from a dispatched session and write no stamp and no certificate. Every
+  skip — these two, pre-commit's `SKIP=process-gates` and a hook's
+  `--bypass NAME` — carries the owner's sentence in
+  `PROCESS_SKIP_REASON="<why>"`; without it the push is refused, with it the
+  ledger line keeps it.
 
 What the data must get right, from downstream measurements: map to the
 **closest test package** (a top-level mapping selected 61 % of all test

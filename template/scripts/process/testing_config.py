@@ -116,6 +116,11 @@ def _stack(name: str, raw) -> dict:
         "select": _argv(raw.get("select"), f"{where}.select", required=False),
         "timeout": float(timeout),
     }
+    # the stack's own environment check (#373): exit 3 = this host cannot run the stack.
+    # Present only when set, so the evidence of a project without one stays the same
+    preflight = _argv(raw.get("preflight"), f"{where}.preflight", required=False)
+    if preflight:
+        stack["preflight"] = preflight
     if not stack["paths"]:
         raise ConfigError(f"{where}.paths names no path prefix")
     if unmapped == "full" and stack["full"] is None:
@@ -155,11 +160,12 @@ def parse(data) -> dict:
     if isinstance(preflight_timeout, bool) or not isinstance(preflight_timeout, (int, float)) \
             or not math.isfinite(preflight_timeout) or preflight_timeout <= 0:
         raise ConfigError("preflight_timeout must be finite seconds > 0")
-    if "preflight_timeout" in data and data.get("preflight") is None:
-        raise ConfigError("preflight_timeout without a preflight times nothing")
     stacks_raw = data.get("stacks", {})
     if not isinstance(stacks_raw, dict):
         raise ConfigError("stacks must be an object of stack name → stack")
+    if "preflight_timeout" in data and data.get("preflight") is None and not any(
+            isinstance(s, dict) and s.get("preflight") is not None for s in stacks_raw.values()):
+        raise ConfigError("preflight_timeout without a preflight times nothing")
     return {
         "lane_dir": lane_dir,
         "lanes": _lanes(data.get("lanes")),
